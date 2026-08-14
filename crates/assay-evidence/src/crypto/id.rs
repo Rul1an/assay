@@ -3,7 +3,7 @@
 //! This module provides cryptographic primitives for:
 //! - Content-addressed event hashing (content_hash)
 //! - Stream identity (run_id:seq)
-//! - Run integrity chain (run_root)
+//! - Deterministic run-root digest (run_root)
 //!
 //! # Security Invariants
 //!

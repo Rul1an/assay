@@ -193,9 +193,8 @@ CORRECTED_HISTORY_DIGESTS: dict[str, str] = {
 DATED_CORRECTION_BODY = (
     "Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited",
     "event content-hash strings, with a trailing newline, in event sequence order —",
-    "not a tree root, and not `event_id` bytes. References below to the historical",
-    "tree proposal describe the model used at the time and are not claims about the",
-    "shipped evidence format.",
+    "not a tree root, and not `event_id` bytes. The historical wording above describes",
+    "the model used at the time and is not a claim about the shipped evidence format.",
 )
 
 FALSE_CLAIM_RE = re.compile(
@@ -206,10 +205,6 @@ MERKLE_RE = re.compile(r"merkle", re.IGNORECASE)
 # Membership/inclusion of one event, even when the word Merkle is absent.
 RUN_ROOT_MEMBERSHIP_RE = re.compile(
     r"run_root\b.{0,160}\b(?:included|inclusion|membership)\b",
-    re.IGNORECASE,
-)
-RUN_ROOT_MEMBERSHIP_NEGATION_RE = re.compile(
-    r"\b(?:does not|cannot|is not|not a|not an)\b.{0,40}\b(?:included|inclusion|membership)\b",
     re.IGNORECASE,
 )
 
@@ -224,8 +219,8 @@ WITHDRAWN_METRIC_LABELS: tuple[str, ...] = (
 WITHDRAWN_LABEL_RES: tuple[re.Pattern[str], ...] = tuple(
     re.compile(re.escape(label), re.IGNORECASE) for label in WITHDRAWN_METRIC_LABELS
 )
-WITHDRAWN_HARNESS = "crates/assay-evidence/tests/e3_verify_cost_curve.rs"
 WITHDRAWN_EXPERIMENT_PREFIX = "docs/experiments/"
+WITHDRAWN_E3_HARNESS_PREFIX = "e3_"
 
 
 def scrub_hostile_git_env() -> None:
@@ -271,8 +266,17 @@ def is_excluded(rel: str) -> bool:
     return rel in SCAN_PATH_EXCLUDES
 
 
+def is_e3_rust_harness(rel: str) -> bool:
+    if not rel.endswith(".rs"):
+        return False
+    parts = rel.split("/")
+    if "tests" not in parts:
+        return False
+    return parts[-1].startswith(WITHDRAWN_E3_HARNESS_PREFIX)
+
+
 def is_withdrawn_surface(rel: str) -> bool:
-    if rel == WITHDRAWN_HARNESS:
+    if is_e3_rust_harness(rel):
         return True
     prefix = WITHDRAWN_EXPERIMENT_PREFIX
     return rel == prefix.rstrip("/") or rel.startswith(prefix)
@@ -294,10 +298,33 @@ def line_is_allowed(line: str, patterns: Sequence[re.Pattern[str]]) -> bool:
     return any(line_matches(line, pat) for pat in patterns)
 
 
+_CLAUSE_SPLIT_RE = re.compile(r";|, although|, though|, but\b", re.IGNORECASE)
+_MEMBERSHIP_TOKEN_RE = re.compile(r"\b(?:included|inclusion|membership)\b", re.IGNORECASE)
+_RUN_ROOT_TOKEN_RE = re.compile(r"\brun_root\b", re.IGNORECASE)
+_NEGATION_BEFORE_RE = re.compile(
+    r"\b(?:does not|cannot|is not|not a|not an|not)\b", re.IGNORECASE
+)
+
+
+def _clause_negates_membership(clause: str) -> bool:
+    token = _MEMBERSHIP_TOKEN_RE.search(clause)
+    if token is None:
+        return False
+    return _NEGATION_BEFORE_RE.search(clause, 0, token.start()) is not None
+
+
 def is_run_root_membership_claim(line: str) -> bool:
     if not RUN_ROOT_MEMBERSHIP_RE.search(line):
         return False
-    return RUN_ROOT_MEMBERSHIP_NEGATION_RE.search(line) is None
+    for clause in _CLAUSE_SPLIT_RE.split(line):
+        if _RUN_ROOT_TOKEN_RE.search(clause) is None:
+            continue
+        if _MEMBERSHIP_TOKEN_RE.search(clause) is None:
+            continue
+        if _clause_negates_membership(clause):
+            continue
+        return True
+    return False
 
 
 def normalize_correction_line(line: str) -> str:
@@ -319,16 +346,142 @@ def is_dated_correction_block(lines: Sequence[str], start: int) -> bool:
     return got == DATED_CORRECTION_BODY
 
 
-def has_adjacent_dated_correction(lines: Sequence[str], idx: int) -> bool:
+_LIST_ITEM_RE = re.compile(r"^(\s*)(?:[-*+]|\d+\.)\s")
+_HEADING_RE = re.compile(r"^#{1,6}\s")
+
+
+def _is_blank(line: str) -> bool:
+    return not line.strip()
+
+
+def _is_heading(line: str) -> bool:
+    return _HEADING_RE.match(line.lstrip()) is not None
+
+
+def _is_blockquote(line: str) -> bool:
+    return line.lstrip().startswith(">")
+
+
+def _list_item_match(line: str) -> re.Match[str] | None:
+    return _LIST_ITEM_RE.match(line)
+
+
+def _correction_span(lines: Sequence[str], idx: int) -> int:
+    """Return the number of lines occupied by a dated correction at idx, else 0."""
+    if not is_dated_correction_block(lines, idx):
+        return 0
+    return len(DATED_CORRECTION_BODY)
+
+
+def _is_list_continuation(line: str, indent: int) -> bool:
+    if _is_blank(line) or _is_heading(line) or _is_blockquote(line):
+        return False
+    marker = _list_item_match(line)
+    if marker is not None:
+        return len(marker.group(1)) > indent
+    return (len(line) - len(line.lstrip())) > indent
+
+
+def enclosing_block_span(
+    lines: Sequence[str], idx: int, rel: str = ""
+) -> tuple[int, int]:
+    """Return [start, end) of the paragraph or list item containing idx.
+
+    A dated correction sitting between a list marker and its continuation is
+    inside the item, not a clean boundary. Non-markdown surfaces stay
+    single-line so a comment correction can sit next to the exact line.
+    """
+    if not rel.endswith(".md"):
+        return idx, idx + 1
+    start = idx
+    while start > 0:
+        prev = lines[start - 1]
+        if _is_heading(prev):
+            break
+        if _list_item_match(lines[start]):
+            break
+        if _is_blank(prev) and not _is_list_continuation(
+            lines[start], 0
+        ) and _correction_span(lines, start) == 0:
+            break
+        start -= 1
+    cursor = start
+    while cursor > 0 and not _list_item_match(lines[cursor]):
+        prev = lines[cursor - 1]
+        if _is_heading(prev) or _is_blank(prev):
+            break
+        if _list_item_match(prev):
+            start = cursor - 1
+            break
+        cursor -= 1
+    marker = _list_item_match(lines[start]) if start < len(lines) else None
+    end = start + 1
+    if marker:
+        indent = len(marker.group(1))
+        while end < len(lines):
+            consumed = _correction_span(lines, end)
+            if consumed:
+                peek = end + consumed
+                while peek < len(lines) and _is_blank(lines[peek]):
+                    peek += 1
+                if peek < len(lines) and _is_list_continuation(lines[peek], indent):
+                    end = peek
+                    continue
+                break
+            nxt = lines[end]
+            if _is_blank(nxt):
+                peek = end + 1
+                while peek < len(lines) and _is_blank(lines[peek]):
+                    peek += 1
+                if peek < len(lines) and (
+                    _is_list_continuation(lines[peek], indent)
+                    or _correction_span(lines, peek)
+                ):
+                    end = peek
+                    continue
+                break
+            if _is_heading(nxt):
+                break
+            nxt_marker = _list_item_match(nxt)
+            if nxt_marker is not None and len(nxt_marker.group(1)) <= indent:
+                break
+            if _is_list_continuation(nxt, indent) or nxt_marker is not None:
+                end += 1
+                continue
+            break
+    else:
+        while end < len(lines):
+            nxt = lines[end]
+            if (
+                _is_blank(nxt)
+                or _is_heading(nxt)
+                or _is_blockquote(nxt)
+                or _list_item_match(nxt)
+            ):
+                break
+            end += 1
+    return start, end
+
+
+def blockquote_inside_span(lines: Sequence[str], start: int, end: int) -> bool:
+    return any(_is_blockquote(line) for line in lines[start:end])
+
+
+def has_adjacent_dated_correction(
+    lines: Sequence[str], idx: int, rel: str = ""
+) -> bool:
+    start, end = enclosing_block_span(lines, idx, rel)
+    if blockquote_inside_span(lines, start, end):
+        return False
     n = len(DATED_CORRECTION_BODY)
     for gap in (0, 1):
-        before = idx - n - gap
+        before = start - n - gap
         if before >= 0 and is_dated_correction_block(lines, before):
-            if gap == 0 or not lines[idx - 1].strip():
+            if gap == 0 or _is_blank(lines[start - 1]):
                 return True
-        after = idx + 1 + gap
+        after = end + gap
         if is_dated_correction_block(lines, after):
-            if gap == 0 or not lines[idx + 1].strip():
+            if gap == 0 or (end < len(lines) and _is_blank(lines[end])):
                 return True
     return False
 
@@ -353,7 +506,7 @@ def historical_line_admitted(
     sidecar = CORRECTED_HISTORY_SIDECARS.get(rel)
     if sidecar:
         return sidecar_has_exact_correction(root, sidecar)
-    return has_adjacent_dated_correction(lines, idx)
+    return has_adjacent_dated_correction(lines, idx, rel)
 
 
 def allowlist_staleness(
@@ -413,7 +566,7 @@ def corrected_history_staleness(
                     )
             else:
                 for idx in matches:
-                    if not has_adjacent_dated_correction(lines, idx):
+                    if not has_adjacent_dated_correction(lines, idx, rel):
                         messages.append(
                             f"corrected-history line without adjacent dated correction: {rel}"
                         )

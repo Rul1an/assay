@@ -78,16 +78,14 @@ The design follows the current consensus for secret hygiene and evidence sanitiz
 - Defense in depth: a value-level redaction pass at each `add_*` boundary, plus a final sweep over the
   serialized bytes before hashing, so a missed funnel still cannot ship a raw secret.
 - Determinism is non-negotiable here: assay evidence is replayable (VCR) and Merkle-hashed. Redaction
-
-> Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
-> event content-hash strings, with a trailing newline, in event sequence order —
-> not a tree root, and not `event_id` bytes. References below to the historical
-> tree proposal describe the model used at the time and are not claims about the
-> shipped evidence format.
-
   must be a pure, deterministic transform applied *before* hashing, so the bundle hash covers the
   redacted form and the raw secret never enters the hash input (you cannot brute-force a secret back out
   of the manifest).
+
+> Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
+> event content-hash strings, with a trailing newline, in event sequence order —
+> not a tree root, and not `event_id` bytes. The historical wording above describes
+> the model used at the time and is not a claim about the shipped evidence format.
 
 ## Goals
 
@@ -144,9 +142,8 @@ decided choice (see Decisions). Properties:
 
 > Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
 > event content-hash strings, with a trailing newline, in event sequence order —
-> not a tree root, and not `event_id` bytes. References below to the historical
-> tree proposal describe the model used at the time and are not claims about the
-> shipped evidence format.
+> not a tree root, and not `event_id` bytes. The historical wording above describes
+> the model used at the time and is not a claim about the shipped evidence format.
 
 - Not reversible: the raw value is keyed-hashed, never stored, never logged. The keyed hash also means a
   bundle leaked without the installation secret cannot be brute-forced back to the value by an outsider
@@ -208,13 +205,6 @@ so two bundles can be told to share a redaction domain without the key ever appe
   inserted into `CapabilitySurface` / written into an event. The raw value never lives in the in-memory
   surface.
 - Belt-and-suspenders: a final ASSERTION sweep over the assembled ndjson before the Merkle root and
-
-> Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
-> event content-hash strings, with a trailing newline, in event sequence order —
-> not a tree root, and not `event_id` bytes. References below to the historical
-> tree proposal describe the model used at the time and are not claims about the
-> shipped evidence format.
-
   manifest are computed. This sweep does NOT rewrite bytes (rewriting serialized evidence is hard to
   reason about and muddies the semantics of "what was captured"). Instead it fails closed: if the shape
   rules still match anything after the boundary pass, bundle creation aborts with an error rather than
@@ -223,6 +213,11 @@ so two bundles can be told to share a redaction domain without the key ever appe
   fail-closed backstop, not a second redactor. It applies the same rule set AND the same allowlist as
   the boundary pass, so an allowlisted-safe value does not trip a spurious failure, and an already
   redacted `<redacted:...>` placeholder no longer matches any rule.
+
+> Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
+> event content-hash strings, with a trailing newline, in event sequence order —
+> not a tree root, and not `event_id` bytes. The historical wording above describes
+> the model used at the time and is not a claim about the shipped evidence format.
 
 Redaction happens strictly before hashing/signing, so the manifest and signature cover the redacted
 content and the raw value is absent from the hash preimage. The assertion sweep likewise runs before

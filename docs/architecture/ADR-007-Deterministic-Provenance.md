@@ -60,9 +60,8 @@ This creates a lightweight **Hash Chain** (Merkle sequence) that proves the inte
 
 > Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
 > event content-hash strings, with a trailing newline, in event sequence order —
-> not a tree root, and not `event_id` bytes. References below to the historical
-> tree proposal describe the model used at the time and are not claims about the
-> shipped evidence format.
+> not a tree root, and not `event_id` bytes. The historical wording above describes
+> the model used at the time and is not a claim about the shipped evidence format.
 
 ## Consequences
 - **Verifiability**: Any third party can take the `events.ndjson`, re-compute JCS hashes, and verify they match `event_id` and `run_root`.

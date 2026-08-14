@@ -15,7 +15,7 @@ pub struct Manifest {
     pub run_id: String,
     /// Total event count
     pub event_count: usize,
-    /// Integrity chain root
+    /// Deterministic run-root digest
     pub run_root: String,
     /// Algorithm specifications
     pub algorithms: AlgorithmMeta,

@@ -8,19 +8,17 @@ Depends on ADR-034 (contract seam).
 ## Context
 
 The evidence bundle has a manifest, Merkle root, and content-addressed events, but is
-
-> Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
-> event content-hash strings, with a trailing newline, in event sequence order —
-> not a tree root, and not `event_id` bytes. References below to the historical
-> tree proposal describe the model used at the time and are not claims about the
-> shipped evidence format.
-
 not emitted as an attestation statement. DSSE signing already exists, scoped to the
 mandate subsystem (`assay-evidence/src/mandate/signing.rs`), and CI emits SLSA
 build-provenance for the binary. The bundle itself cannot be anchored or verified
 offline as a portable claim. As of 2026 the in-toto Attestation Framework (ITE-6) is
 the common envelope that Sigstore and SLSA already use, and SCITT continues through
 the IETF, synergising with RATS and WIMSE.
+
+> Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
+> event content-hash strings, with a trailing newline, in event sequence order —
+> not a tree root, and not `event_id` bytes. The historical wording above describes
+> the model used at the time and is not a claim about the shipped evidence format.
 
 ## Decision
 

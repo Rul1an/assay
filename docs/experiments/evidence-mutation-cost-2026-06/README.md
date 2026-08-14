@@ -14,28 +14,25 @@ This is a measurement, not a blanket security claim. Two things are reported:
 1. A **mutation-detection matrix** for `assay-evidence` bundles, under threat model T: a party
    *without* the signing key mutates a bundle after the fact, while the bundle's run anchor
    (`run_root`, a Merkle root over event content hashes) is bound by an external signature the
-
-> Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
-> event content-hash strings, with a trailing newline, in event sequence order —
-> not a tree root, and not `event_id` bytes. References below to the historical
-> tree proposal describe the model used at the time and are not claims about the
-> shipped evidence format.
-
    attacker cannot forge. Two layers are exercised:
    - the internal verifier (`verify_bundle_with_limits`), which catches blind tampering that breaks
      internal consistency, each with a specific error code;
    - the run anchor, which catches a *consistent rewrite* (events and manifest recomputed together)
      that the internal verifier alone would accept, because the content-addressed root changes.
-2. A **verification + signing cost curve**: verify time as a function of bundle size, compressed
-   size and gzip ratio, bytes per event, the Merkle inclusion-proof size (ceil(log2(N)) hashes), and
 
 > Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
 > event content-hash strings, with a trailing newline, in event sequence order —
-> not a tree root, and not `event_id` bytes. References below to the historical
-> tree proposal describe the model used at the time and are not claims about the
-> shipped evidence format.
+> not a tree root, and not `event_id` bytes. The historical wording above describes
+> the model used at the time and is not a claim about the shipped evidence format.
 
+2. A **verification + signing cost curve**: verify time as a function of bundle size, compressed
+   size and gzip ratio, bytes per event, the Merkle inclusion-proof size (ceil(log2(N)) hashes), and
    DSSE sign and verify time over the run anchor.
+
+> Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
+> event content-hash strings, with a trailing newline, in event sequence order —
+> not a tree root, and not `event_id` bytes. The historical wording above describes
+> the model used at the time and is not a claim about the shipped evidence format.
 
 It is tamper-evident, not tamper-proof. A host that holds both code execution and the signing key is
 out of scope: it can simply re-sign, which is why production deployments anchor externally (a

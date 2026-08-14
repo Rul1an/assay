@@ -681,6 +681,255 @@ if rc == 0 or "inclusion/membership" not in out:
 print("ok: run-root-membership")
 PY
 
+# Order-aware negation: a later "not an inclusion" clause must not wash an
+# earlier affirmative run_root membership claim.
+ORDERNEG="$TMP/membership-order"
+init_fixture "$ORDERNEG"
+printf '%s\n' \
+  'run_root gives inclusion proofs, although a flat digest is not an inclusion structure' \
+  'run_root supports membership queries; note this is not a membership tree' \
+  'The shipped run_root does not provide an inclusion proof.' \
+  'run_root is not a membership structure.' \
+  >> "$ORDERNEG/docs/lint/index.md"
+git -C "$ORDERNEG" add -A -- docs/lint/index.md
+python3 - "$CHECKER" "$ORDERNEG" <<'PY'
+import importlib.util
+import io
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0:
+    raise SystemExit("FAIL: order-blind negation must not pass:\n" + out)
+if "gives inclusion proofs" not in out:
+    raise SystemExit("FAIL: first order-aware membership claim was not flagged:\n" + out)
+if "supports membership queries" not in out:
+    raise SystemExit("FAIL: second order-aware membership claim was not flagged:\n" + out)
+if "does not provide an inclusion proof" in out:
+    raise SystemExit("FAIL: genuine run_root negation was flagged:\n" + out)
+if "is not a membership structure" in out:
+    raise SystemExit("FAIL: genuine membership negation was flagged:\n" + out)
+print("ok: membership-order-aware")
+PY
+
+# Mid-list dated correction is not a clean boundary; after the list item is.
+MIDLIST="$TMP/mid-list-correction"
+init_fixture "$MIDLIST"
+mkdir -p "$MIDLIST/docs/architecture"
+python3 - "$CHECKER" "$MIDLIST" <<'PY'
+import importlib.util
+import io
+import subprocess
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+item1_head = (
+    "- Determinism is non-negotiable here: assay evidence is replayable (VCR) "
+    "and Merkle-hashed. Redaction"
+)
+item1_tail = "  must be a pure, deterministic transform applied *before* hashing."
+item2 = (
+    "- Deterministic and replay-stable: same token, so\n"
+    "  VCR replay and Merkle hashing stay stable."
+)
+item3 = (
+    "- Belt-and-suspenders: a final ASSERTION sweep over the assembled ndjson "
+    "before the Merkle root and\n"
+    "  manifest are computed."
+)
+correction = "\n".join("> " + line for line in module.DATED_CORRECTION_BODY)
+broken = (
+    item1_head
+    + "\n\n"
+    + correction
+    + "\n\n"
+    + item1_tail
+    + "\n"
+    + item2
+    + "\n"
+    + item3
+    + "\n"
+)
+adr = root / "docs/architecture/ADR-034-Evidence-Redaction-At-Capture.md"
+adr.write_text(broken)
+subprocess.run(
+    ["git", "add", "-A", "--", "docs/architecture/ADR-034-Evidence-Redaction-At-Capture.md"],
+    cwd=root,
+    check=True,
+)
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0:
+    raise SystemExit("FAIL: mid-list dated correction must fail adjacency:\n" + out)
+clean = (
+    item1_head
+    + "\n"
+    + item1_tail
+    + "\n\n"
+    + correction
+    + "\n"
+    + item2
+    + "\n\n"
+    + correction
+    + "\n"
+    + item3
+    + "\n\n"
+    + correction
+    + "\n"
+)
+adr.write_text(clean)
+subprocess.run(
+    ["git", "add", "-A", "--", "docs/architecture/ADR-034-Evidence-Redaction-At-Capture.md"],
+    cwd=root,
+    check=True,
+)
+lines = clean.splitlines()
+idx = next(i for i, line in enumerate(lines) if "Merkle-hashed" in line)
+start, end = module.enclosing_block_span(lines, idx, adr.name)
+if module.blockquote_inside_span(lines, start, end):
+    raise SystemExit("FAIL: clean list item still contains a mid-item blockquote")
+if start + 1 >= end:
+    raise SystemExit("FAIL: enclosing list item must include the continuation line")
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+if rc != 0:
+    raise SystemExit(
+        "FAIL: correction after the full list item must pass:\n" + buf.getvalue()
+    )
+print("ok: correction-list-boundary")
+PY
+
+# Permit as a strict substring of a longer Merkle line, without run_root.
+SUBSTR="$TMP/substring-permit"
+init_fixture "$SUBSTR"
+printf '%s\n' 'The evidence digest is a Merkle tree over every recorded event.' \
+  >> "$SUBSTR/docs/lint/index.md"
+git -C "$SUBSTR" add -A -- docs/lint/index.md
+python3 - "$CHECKER" "$SUBSTR" <<'PY'
+import importlib.util
+import io
+import re
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+line = "The evidence digest is a Merkle tree over every recorded event."
+pat = re.compile(re.escape("Merkle tree"), re.IGNORECASE)
+if pat.search(line) is None:
+    raise SystemExit("FAIL: fixture line must contain the substring permit")
+if module.line_matches(line, pat):
+    raise SystemExit("FAIL: substring permit fullmatched a longer false-claim line")
+chosen = {
+    "docs/lint/index.md": (re.escape("Merkle tree"),),
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ],
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, chosen, identifiers={})
+out = buf.getvalue()
+if rc == 0 or "Merkle tree over every recorded event" not in out:
+    raise SystemExit("FAIL: substring permit must not admit a longer line:\n" + out)
+print("ok: substring-permit-fullmatch")
+PY
+
+# Renamed E3 harness sibling cannot escape the withdrawn-label scan.
+E3SIB="$TMP/e3-sibling"
+init_fixture "$E3SIB"
+mkdir -p "$E3SIB/crates/assay-evidence/tests"
+printf '%s\n' 'fn inclusion_proof_hashes(n: u64) -> u32 { n as u32 }' \
+  > "$E3SIB/crates/assay-evidence/tests/e3_verify_cost_curve_v2.rs"
+git -C "$E3SIB" add -A -- crates/assay-evidence/tests/e3_verify_cost_curve_v2.rs
+python3 - "$CHECKER" "$E3SIB" <<'PY'
+import importlib.util
+import io
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0 or "e3_verify_cost_curve_v2.rs" not in out:
+    raise SystemExit("FAIL: renamed E3 harness sibling escaped withdrawn scan:\n" + out)
+if not module.is_withdrawn_surface(
+    "crates/assay-evidence/tests/e3_verify_cost_curve_v2.rs"
+):
+    raise SystemExit("FAIL: is_withdrawn_surface must cover the E3 harness family")
+if module.is_withdrawn_surface("crates/assay-evidence/tests/writer_verifier_symmetry.rs"):
+    raise SystemExit("FAIL: non-E3 evidence tests must not be withdrawn surfaces")
+print("ok: withdrawn-e3-family")
+PY
+
+# Aggregator must render frozen 2026-06 cost.json keys.
+python3 - "$ROOT/docs/experiments/evidence-mutation-cost-2026-06/aggregate.py" \
+  "$ROOT/docs/experiments/evidence-mutation-cost-2026-06/results/cost.json" <<'PY'
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+agg_path, cost_path = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("e3_aggregate", agg_path)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+cost = json.loads(cost_path.read_text())
+if "synthetic_log2_hash_count" in json.dumps(cost):
+    raise SystemExit("FAIL: frozen cost.json must keep the historical column name")
+rendered = module.render_cost(cost)
+if "inclusion-proof hashes" not in rendered:
+    raise SystemExit("FAIL: aggregator did not render the frozen column header")
+if "| 1,000 |" not in rendered or "| 10 |" not in rendered:
+    raise SystemExit("FAIL: aggregator dropped frozen measurement rows:\n" + rendered)
+print("ok: frozen-cost-aggregate")
+PY
+
 # A new dated experiment directory still carries withdrawn labels.
 NEWEXP="$TMP/withdrawn-2026-09"
 init_fixture "$NEWEXP"
@@ -835,16 +1084,30 @@ for rel, pats in legacy.items():
         if "merkle-chain" not in pat.replace("\\", ""):
             raise SystemExit(f"FAIL: legacy identifier must be an exact merkle-chain filename: {pat!r}")
 
-allowed_src = inspect.getsource(module.line_is_allowed)
-if "fullmatch" not in inspect.getsource(module.line_matches):
-    raise SystemExit("FAIL: line_matches must use fullmatch")
-if ".search(" in inspect.getsource(module.line_matches):
-    raise SystemExit("FAIL: line_matches must not substring-search")
-if "line_matches" not in allowed_src:
+if "line_matches" not in inspect.getsource(module.line_is_allowed):
     raise SystemExit("FAIL: line_is_allowed must call line_matches")
-stale_src = inspect.getsource(module.allowlist_staleness)
-if "line_matches" not in stale_src:
+if "line_matches" not in inspect.getsource(module.allowlist_staleness):
     raise SystemExit("FAIL: staleness must use the same line_matches rule")
+if getattr(module, "WITHDRAWN_HARNESS", None) is not None:
+    raise SystemExit("FAIL: WITHDRAWN_HARNESS exact filename must not return; use the E3 family")
+if getattr(module, "RUN_ROOT_MEMBERSHIP_NEGATION_RE", None) is not None:
+    raise SystemExit("FAIL: line-global membership negation regex must not return")
+if "below" in " ".join(module.DATED_CORRECTION_BODY).lower():
+    raise SystemExit("FAIL: dated correction must not say the historical wording is below")
+for rel in (
+    "docs/architecture/ADR-034-Evidence-Redaction-At-Capture.md",
+    "docs/architecture/ADR-039-evidence-bundle-attestation.md",
+    "docs/experiments/evidence-mutation-cost-2026-06/README.md",
+):
+    lines = (root / rel).read_text().splitlines()
+    for idx, line in enumerate(lines):
+        if not module.line_is_corrected_history(rel, line):
+            continue
+        start, end = module.enclosing_block_span(lines, idx, rel)
+        if module.blockquote_inside_span(lines, start, end):
+            raise SystemExit(
+                f"FAIL: {rel} still places a dated correction inside a list item or paragraph"
+            )
 
 print("ok: imported ALLOWED_MERKLE_USES is non-vacuous on this tree")
 print("ok: scan excludes only the two guard paths")

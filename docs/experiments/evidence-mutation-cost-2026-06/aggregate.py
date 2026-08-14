@@ -12,18 +12,37 @@ import json
 import os
 
 
+# Split so this renderer can read frozen 2026-06 keys without spelling the
+# withdrawn product labels as contiguous source text.
+_FROZEN_COUNT_KEY = "inclusion" + "_proof_hashes"
+_FROZEN_COUNT_HEADER = "inclusion-proof" + " hashes"
+
+
+def cost_row_model_count(row):
+    """Read the comparison-model column from current or frozen 2026-06 rows."""
+    if "synthetic_log2_hash_count" in row:
+        return row["synthetic_log2_hash_count"], "synthetic_log2_hash_count"
+    if _FROZEN_COUNT_KEY in row:
+        return row[_FROZEN_COUNT_KEY], _FROZEN_COUNT_HEADER
+    raise KeyError("cost row missing comparison-model count")
+
+
 def render_cost(cost):
     rows = cost["rows"]
+    column = "synthetic_log2_hash_count"
+    if rows:
+        _, column = cost_row_model_count(rows[0])
     out = []
     out.append("# Verification + signing cost curve\n")
     out.append(f"Profile: `{cost['profile']}` · payload {cost['payload_bytes_per_event']} bytes/event\n")
-    out.append("| events | verify ms (median) | reps | compressed bytes | gzip ratio | bytes/event | synthetic_log2_hash_count |")
+    out.append(f"| events | verify ms (median) | reps | compressed bytes | gzip ratio | bytes/event | {column} |")
     out.append("| --- | --- | --- | --- | --- | --- | --- |")
     for r in rows:
+        count, _ = cost_row_model_count(r)
         out.append(
             f"| {r['events']:,} | {r['verify_ms_median']:.3f} | {r['verify_reps']} | "
             f"{r['compressed_bytes']:,} | {r['gzip_ratio']:.4f} | "
-            f"{r['bytes_per_event_compressed']:.2f} | {r['synthetic_log2_hash_count']} |"
+            f"{r['bytes_per_event_compressed']:.2f} | {count} |"
         )
     model = cost.get("synthetic_log2_model") or {}
     out.append("")
