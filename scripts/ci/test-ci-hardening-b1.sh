@@ -2,14 +2,15 @@
 # Wave B1 contract: single-source Assay release-tag pin, Structurizr image pin,
 # timeouts on touched jobs, and a version-independent CI infra doc header.
 #
-# Expected release tag is derived from Cargo.toml [workspace.package].version
-# (independent of the production pin reader). Digests live only in the
-# Structurizr pin file — never as test or consumer literals.
+# The install pin names the latest published release and may trail the source
+# version during release preparation. Digests live only in the Structurizr pin
+# file — never as test or consumer literals.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PIN_FILE="${ROOT}/.github/assay-release-tag"
 READER="${ROOT}/scripts/ci/read-assay-release-tag.sh"
+RELEASE_PIN_CHECK="${ROOT}/scripts/ci/check-assay-release-pin.sh"
 ASSAY_WF="${ROOT}/.github/workflows/assay.yml"
 SECURITY_WF="${ROOT}/.github/workflows/assay-security.yml"
 STRUCTURIZR_WF="${ROOT}/.github/workflows/structurizr-validate.yml"
@@ -42,25 +43,6 @@ scratch="$(mktemp -d)"
 trap 'abort_is_failure "$?"' ERR
 trap 'rm -rf "${scratch}"' EXIT
 
-# Independent of the production pin reader: the release line is v + workspace version.
-workspace_version="$(
-  awk '
-    $0 == "[workspace.package]" { in_workspace_package = 1; next }
-    /^\[/ && $0 != "[workspace.package]" { in_workspace_package = 0 }
-    in_workspace_package && $1 == "version" {
-      gsub(/"/, "", $3)
-      print $3
-      exit
-    }
-  ' "${ROOT}/Cargo.toml"
-)"
-if [[ ! "${workspace_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  fail "could not read [workspace.package].version from Cargo.toml (got '${workspace_version}')"
-  echo "ci-hardening-b1 contract: ${failures} failure(s)" >&2
-  exit 1
-fi
-EXPECTED_TAG="v${workspace_version}"
-
 job_has_timeout() {
   local wf="$1" job="$2"
   python3 - "$wf" "$job" <<'PY'
@@ -83,13 +65,13 @@ is_digest_image_ref() {
   [[ "${ref}" =~ ^structurizr/cli@sha256:[0-9a-f]{64}$ ]]
 }
 
-echo "== pin file matches workspace release line ${EXPECTED_TAG} =="
+echo "== checked-in install pin is valid and does not lead workspace =="
 if [[ -f "${PIN_FILE}" ]]; then
-  pin_raw="$(tr -d '[:space:]' <"${PIN_FILE}")"
-  if [[ "${pin_raw}" == "${EXPECTED_TAG}" ]]; then
-    ok "pin file is ${EXPECTED_TAG} (v + workspace.package.version)"
+  assay_pin="$(tr -d '[:space:]' <"${PIN_FILE}")"
+  if "${RELEASE_PIN_CHECK}" >/dev/null; then
+    ok "pin file ${assay_pin} is valid for the workspace release line"
   else
-    fail "pin file content is '${pin_raw}', expected ${EXPECTED_TAG} from Cargo.toml"
+    fail "pin file ${assay_pin} is invalid for the workspace release line"
   fi
 else
   fail "missing ${PIN_FILE#"${ROOT}"/}"
@@ -105,10 +87,10 @@ fi
 echo "== reader accepts the checked-in pin =="
 if [[ -f "${READER}" ]]; then
   got="$("${READER}" 2>/dev/null || true)"
-  if [[ "${got}" == "${EXPECTED_TAG}" ]]; then
-    ok "reader returns ${EXPECTED_TAG}"
+  if [[ "${got}" == "${assay_pin:-}" ]]; then
+    ok "reader returns checked-in pin ${got}"
   else
-    fail "reader returned '${got}', expected ${EXPECTED_TAG}"
+    fail "reader returned '${got}', expected checked-in pin '${assay_pin:-<missing>}'"
   fi
 else
   fail "cannot exercise reader; script missing"
@@ -483,22 +465,27 @@ else
   ok "contract test has no digest literal"
 fi
 
-echo "== derived release tag is not a second pin literal outside the pin file =="
-# Scan B1 production/contract paths for the derived tag. Allow the pin file and
-# Cargo.toml; ignore GitHub Actions SHA-pin version comments (# vX.Y.Z).
-if python3 - "${EXPECTED_TAG}" "${ROOT}" <<'PY'
+echo "== install and workspace tags are not second pin literals =="
+# Scan B1 production/contract paths for both release-line values. During release
+# preparation they differ; neither may become a second install-pin source.
+if python3 - "${assay_pin}" "${ROOT}" <<'PY'
 import re
 import sys
 from pathlib import Path
 
-tag = sys.argv[1]
+pin_tag = sys.argv[1]
 root = Path(sys.argv[2])
+sys.path.insert(0, str(root / "scripts" / "ci" / "lib"))
+from workspace_version import read_workspace_version
+
+tags = {pin_tag, "v" + read_workspace_version(root / "Cargo.toml")}
 allow_files = {
     root / ".github" / "assay-release-tag",
     root / "Cargo.toml",
 }
 scan = [
     root / "scripts" / "ci" / "test-ci-hardening-b1.sh",
+    root / "scripts" / "ci" / "check-assay-release-pin.sh",
     root / "scripts" / "ci" / "read-assay-release-tag.sh",
     root / "scripts" / "ci" / "test-structurizr-export-docker.sh",
     root / "scripts" / "structurizr-cli-image.sh",
@@ -508,43 +495,36 @@ scan = [
     root / ".github" / "workflows" / "assay-security.yml",
     root / ".github" / "workflows" / "structurizr-validate.yml",
 ]
-action_ver_comment = re.compile(
-    r"^\s*(?:-[^\n]*|uses:[^\n]*)#\s*" + re.escape(tag) + r"\s*$"
-)
-# Variable/name references that mention the derived value only as EXPECTED_TAG=.
-expected_assign = re.compile(r"^EXPECTED_TAG=")
 bad = []
 for path in scan:
     if not path.exists() or path in allow_files:
         continue
     for i, line in enumerate(path.read_text().splitlines(), 1):
-        if tag not in line:
-            continue
-        if action_ver_comment.match(line):
-            continue
-        if expected_assign.match(line.strip()):
-            continue
-        # Allow printing/comparing the derived variable, not a quoted literal pin.
-        if f'"{tag}"' in line or f"'{tag}'" in line or f"{tag}\\n" in line or line.strip() == tag:
-            bad.append(f"{path.relative_to(root)}:{i}:{line.strip()}")
-            continue
-        # Bare occurrence in prose/example (e.g. "e.g. <tag>") still counts.
-        if re.search(r"(?:e\.g\.|example|fixture|want|got|is)\s+" + re.escape(tag), line):
-            bad.append(f"{path.relative_to(root)}:{i}:{line.strip()}")
-            continue
-        if re.search(r"\b" + re.escape(tag) + r"\b", line):
-            # References via ${EXPECTED_TAG} are fine.
-            if "EXPECTED_TAG" in line and tag not in line.replace("${EXPECTED_TAG}", "").replace("$EXPECTED_TAG", ""):
+        for tag in tags:
+            if tag not in line:
                 continue
-            bad.append(f"{path.relative_to(root)}:{i}:{line.strip()}")
+            action_ver_comment = re.compile(
+                r"^\s*(?:-[^\n]*|uses:[^\n]*)#\s*" + re.escape(tag) + r"\s*$"
+            )
+            if action_ver_comment.match(line):
+                continue
+            if f'"{tag}"' in line or f"'{tag}'" in line or f"{tag}\\n" in line or line.strip() == tag:
+                bad.append(f"{path.relative_to(root)}:{i}:{line.strip()}")
+                continue
+            # Bare occurrence in prose/example (e.g. "e.g. <tag>") still counts.
+            if re.search(r"(?:e\.g\.|example|fixture|want|got|is)\s+" + re.escape(tag), line):
+                bad.append(f"{path.relative_to(root)}:{i}:{line.strip()}")
+                continue
+            if re.search(r"\b" + re.escape(tag) + r"\b", line):
+                bad.append(f"{path.relative_to(root)}:{i}:{line.strip()}")
 if bad:
     print("\n".join(bad), file=sys.stderr)
     sys.exit(1)
 PY
 then
-  ok "no stray ${EXPECTED_TAG} release-pin literals outside .github/assay-release-tag"
+  ok "no stray install/workspace release-pin literals outside .github/assay-release-tag"
 else
-  fail "derived tag ${EXPECTED_TAG} appears as a release-pin literal outside the pin file"
+  fail "install/workspace tag appears as a release-pin literal outside the pin file"
 fi
 
 echo "== touched jobs declare timeout-minutes =="
@@ -604,12 +584,18 @@ body = step.group("body")
 for forbidden in ("if:", "continue-on-error:"):
     if re.search(rf"(?m)^        {re.escape(forbidden)}", body):
         sys.exit(f"hardening step must not use {forbidden}")
+required_env = ("GH_TOKEN: ${{ github.token }}",)
+missing_env = [entry for entry in required_env if entry not in body]
+if missing_env:
+    sys.exit("hardening step environment missing: " + ", ".join(missing_env))
 active = [
     line.strip()
     for line in body.splitlines()
     if line.startswith("          ") and not line.lstrip().startswith("#")
 ]
 required = (
+    "bash scripts/ci/test-check-assay-release-pin.sh",
+    "bash scripts/ci/check-assay-release-pin.sh --published",
     "bash scripts/ci/test-ci-hardening-b1.sh",
     "bash scripts/ci/test-structurizr-export-docker.sh",
 )
