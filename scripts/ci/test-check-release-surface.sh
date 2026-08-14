@@ -8,18 +8,20 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-mkdir -p "$TMP/scripts/ci" "$TMP/docs/getting-started" "$TMP/docs/reference/cli" \
+mkdir -p "$TMP/scripts/ci" "$TMP/.github" "$TMP/docs/getting-started" "$TMP/docs/reference/cli" \
   "$TMP/docs/python-sdk" "$TMP/docs/use-cases" "$TMP/docs/AIcontext" "$TMP/docs/guides" \
   "$TMP/crates/assay-x" "$TMP/bin"
 cp "$ROOT/scripts/ci/check-release-surface.sh" "$TMP/scripts/ci/"
+cp "$ROOT/scripts/ci/read-assay-release-tag.sh" "$TMP/scripts/ci/"
 cp "$ROOT/.pre-commit-config.yaml" "$TMP/"
+printf '%s\n' 'v5.1.0' > "$TMP/.github/assay-release-tag"
 cat > "$TMP/Cargo.toml" <<'TOML'
 [workspace]
 members = ["crates/assay-x"]
 [workspace.package]
-version = "5.1.0"
+version = "5.2.0"
 [workspace.dependencies]
-assay-x = { version = "5.1.0", path = "crates/assay-x" }
+assay-x = { version = "5.2.0", path = "crates/assay-x" }
 TOML
 cat > "$TMP/crates/assay-x/Cargo.toml" <<'TOML'
 [package]
@@ -29,11 +31,11 @@ TOML
 cat > "$TMP/Cargo.lock" <<'LOCK'
 [[package]]
 name = "assay-x"
-version = "5.1.0"
+version = "5.2.0"
 LOCK
 cat > "$TMP/bin/assay" <<'EOF_BIN'
 #!/usr/bin/env bash
-printf 'assay 5.1.0\n'
+printf 'assay 5.2.0\n'
 EOF_BIN
 chmod +x "$TMP/bin/assay"
 cat > "$TMP/docs/getting-started/installation.md" <<'DOC'
@@ -90,7 +92,7 @@ printf '%s\n' 'Codex uses .codex/config.toml.' > "$TMP/docs/guides/editor-mcp-re
 (
   cd "$TMP"
   git init -q
-  git add -- Cargo.toml Cargo.lock crates docs scripts
+  git add -- .github/assay-release-tag Cargo.toml Cargo.lock crates docs scripts
 )
 
 run_check() {
@@ -110,13 +112,23 @@ files_lines = [line.strip().removeprefix("files: ") for line in lines[start:end]
 if len(files_lines) != 1:
     raise SystemExit("release-surface hook must have one files selector")
 pattern = re.compile(files_lines[0])
-for path in ("docs/getting-started/ci-integration.md", "docs/use-cases/air-gapped.md", "docs/use-cases/ci-gate.md"):
+for path in (
+    ".github/assay-release-tag",
+    "scripts/ci/read-assay-release-tag.sh",
+    "docs/getting-started/ci-integration.md",
+    "docs/use-cases/air-gapped.md",
+    "docs/use-cases/ci-gate.md",
+):
     if not pattern.search(path):
         raise SystemExit(f"release-surface hook omits {path}")
 PY
 }
 
-run_check >/dev/null
+if ! run_check >"$TMP/baseline.out" 2>&1; then
+  cat "$TMP/baseline.out" >&2
+  echo "FAIL: release surface must allow workspace 5.2.0 to lead published release v5.1.0" >&2
+  exit 1
+fi
 check_release_hook_selector
 
 mutation_count=0
@@ -239,15 +251,34 @@ for row in \
     'current release-pinned install command(s)'
 done
 
+mutate_and_expect_failure wrong-workspace-binary bin/assay \
+  's/assay 5.2.0/assay 5.1.0/' 'workspace is "assay 5.2.0"'
+mutate_and_expect_failure wrong-published-version-output docs/getting-started/installation.md \
+  's/assay 5.1.0/assay 5.2.0/' 'does not show "assay 5.1.0" as the published'
+
 mutate_and_expect_failure stale-release-readme README.md \
   's/releases\/tag\/v5.1.0/releases\/tag\/v5.0.0/' 'current release link drift'
 mutate_and_expect_failure stale-release-doc-index docs/index.md \
   's/releases\/tag\/v5.1.0/releases\/tag\/v5.0.0/' 'current release link drift'
+
+release_backup="$TMP/README.md.duplicate-release"
+cp "$TMP/README.md" "$release_backup"
+printf '%s\n' 'Current release: [`v5.2.0`](https://github.com/Rul1an/assay/releases/tag/v5.2.0)' \
+  >> "$TMP/README.md"
+if run_check >"$TMP/duplicate-release.out" 2>&1; then
+  echo "FAIL: mutation duplicate-release was not observed" >&2
+  exit 1
+fi
+grep -Fq 'current release link drift' "$TMP/duplicate-release.out"
+mv "$release_backup" "$TMP/README.md"
+mutation_count=$((mutation_count + 1))
+echo "PASS: duplicate-release"
+
 mutate_and_expect_failure stale-cli-version docs/reference/cli/index.md \
   's/# assay 5.1.0/# assay 5.0.0/' 'documented CLI version drift'
 
-if [ "$mutation_count" -ne 38 ]; then
-  echo "FAIL: expected 38 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 41 ]; then
+  echo "FAIL: expected 41 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

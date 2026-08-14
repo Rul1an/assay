@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Every place that must name the current version names it. #1996.
+# Source-version and published-release claims each name their own validated truth. #1996, #2366.
 #
 # A release prep touches a fixed set of files and nothing checked that it did: three of them sat a
 # release behind from v3.37.0 onward, and the internal dependency declarations had drifted as far
@@ -23,9 +23,8 @@
 #
 #   1. Internal dependency declarations. Enumerated from the root Cargo.toml itself, not from a
 #      list kept here, so a new workspace crate is covered the day it is added.
-#   2. The `assay --version` sample output in the installation guide, compared against what the
-#      binary actually prints, so the expectation comes from the program rather than from a
-#      hard-coded string.
+#   2. The source binary against the workspace version, and the installation guide against the
+#      validated published-release pin. A release-prep branch may legitimately make them differ.
 #   3. Every tracked `Cargo.lock` that pins a workspace crate. The root lock is the obvious one and
 #      `fuzz/Cargo.lock` is the one that was missed: it is a separate workspace, so a release bump
 #      that touched only the root lock left it pinning the previous version, and the fuzz job failed
@@ -50,7 +49,7 @@ fail() {
 note() { printf '%s\n' "$*"; }
 
 # ---------------------------------------------------------------------------
-# The one source of truth.
+# Source-build truth and published-release truth.
 # ---------------------------------------------------------------------------
 WORKSPACE_VERSION="$(
   awk '
@@ -69,6 +68,10 @@ if [ -z "$WORKSPACE_VERSION" ]; then
   exit 2
 fi
 note "workspace version: $WORKSPACE_VERSION"
+
+PUBLISHED_TAG="$(bash scripts/ci/read-assay-release-tag.sh)"
+PUBLISHED_VERSION="${PUBLISHED_TAG#v}"
+note "published release pin: $PUBLISHED_TAG"
 
 # ---------------------------------------------------------------------------
 # 1. Internal dependency declarations, enumerated from the manifest.
@@ -110,10 +113,11 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 2. The documented `assay --version` output.
+# 2. The source binary and documented published `assay --version` output.
 #
-# Derived from the binary rather than compared to a literal, so this cannot drift into asserting a
-# version the program does not print.
+# A release-prep branch may build the next workspace version while outward installation docs still
+# name the latest published release. Verify those facts independently rather than forcing one to
+# impersonate the other.
 # ---------------------------------------------------------------------------
 note ""
 note "workspace lockfiles:"
@@ -179,15 +183,14 @@ fi
 if [ -n "$ASSAY_BIN" ]; then
   ACTUAL="$("$ASSAY_BIN" --version | head -1 | tr -d '\r')"
   note "  binary prints: $ACTUAL"
-  if ! grep -qxF "$ACTUAL" "$INSTALL_DOC"; then
-    fail "$INSTALL_DOC does not show \"$ACTUAL\" as the expected \`assay --version\` output"
+  if [ "$ACTUAL" != "assay $WORKSPACE_VERSION" ]; then
+    fail "$ASSAY_BIN prints \"$ACTUAL\", workspace is \"assay $WORKSPACE_VERSION\""
   fi
 else
-  # No binary to ask, so fall back to the manifest. Still derived, one step further removed.
-  note "  no assay binary available; comparing against the manifest version instead"
-  if ! grep -qxF "assay $WORKSPACE_VERSION" "$INSTALL_DOC"; then
-    fail "$INSTALL_DOC does not show \"assay $WORKSPACE_VERSION\" as the expected \`assay --version\` output"
-  fi
+  note "  no assay binary available; workspace binary version not driven"
+fi
+if ! grep -qxF "assay $PUBLISHED_VERSION" "$INSTALL_DOC"; then
+  fail "$INSTALL_DOC does not show \"assay $PUBLISHED_VERSION\" as the published \`assay --version\` output"
 fi
 
 # ---------------------------------------------------------------------------
@@ -220,6 +223,20 @@ check_contains_fixed() {
   fi
 }
 
+check_current_release_link() {
+  local file="$1" expected="$2"
+  local claim_count expected_count
+  if [ ! -f "$file" ]; then
+    fail "$file: checked outward document is missing"
+    return
+  fi
+  claim_count="$(grep -Fc 'Current release:' "$file" || true)"
+  expected_count="$(grep -Fc -- "$expected" "$file" || true)"
+  if [ "$claim_count" -ne 1 ] || [ "$expected_count" -ne 1 ]; then
+    fail "$file: current release link drift"
+  fi
+}
+
 check_contains_line() {
   local file="$1" expected="$2" label="$3"
   if [ ! -f "$file" ]; then
@@ -244,7 +261,7 @@ check_action_refs_pinned() {
 
 check_install_command_count() {
   local file="$1" expected_count="$2"
-  local expected="cargo install assay-cli --version $WORKSPACE_VERSION --locked"
+  local expected="cargo install assay-cli --version $PUBLISHED_VERSION --locked"
   local all_count current_count
   all_count="$(grep -Ec 'cargo install assay-cli --version [^[:space:]]+ --locked' "$file" || true)"
   current_count="$(grep -Fc "$expected" "$file" || true)"
@@ -269,9 +286,9 @@ check_rust_cli_installs docs/reference/cli/index.md 1
 check_rust_cli_installs docs/AIcontext/user-flows.md 1
 check_rust_cli_installs docs/use-cases/ci-gate.md 1
 
-release_link="Current release: [\`v$WORKSPACE_VERSION\`](https://github.com/Rul1an/assay/releases/tag/v$WORKSPACE_VERSION)"
-check_contains_fixed README.md "$release_link" 'current release link drift'
-check_contains_fixed docs/index.md "$release_link" 'current release link drift'
+release_link="Current release: [\`$PUBLISHED_TAG\`](https://github.com/Rul1an/assay/releases/tag/$PUBLISHED_TAG)"
+check_current_release_link README.md "$release_link"
+check_current_release_link docs/index.md "$release_link"
 
 for file in \
   docs/getting-started/index.md \
@@ -290,9 +307,9 @@ check_absent_regex docs/getting-started/installation.md \
 for file in docs/getting-started/installation.md docs/getting-started/ci-integration.md docs/use-cases/air-gapped.md; do
   check_absent_regex "$file" 'ghcr\.io/.*/assay' 'unsupported GHCR image'
 done
-linux_archive="assay-v$WORKSPACE_VERSION-x86_64-unknown-linux-gnu.tar.gz"
+linux_archive="assay-$PUBLISHED_TAG-x86_64-unknown-linux-gnu.tar.gz"
 linux_archive_root="${linux_archive%.tar.gz}"
-linux_archive_url="https://github.com/Rul1an/assay/releases/download/v$WORKSPACE_VERSION/$linux_archive"
+linux_archive_url="https://github.com/Rul1an/assay/releases/download/$PUBLISHED_TAG/$linux_archive"
 check_contains_line docs/use-cases/air-gapped.md "curl -fLO $linux_archive_url" \
   'current Linux release archive URL drift'
 check_contains_line docs/use-cases/air-gapped.md "curl -fLO $linux_archive_url.sha256" \
@@ -311,7 +328,7 @@ for file in \
   check_action_refs_pinned "$file"
 done
 
-if ! grep -qxF "# assay $WORKSPACE_VERSION" docs/reference/cli/index.md; then
+if ! grep -qxF "# assay $PUBLISHED_VERSION" docs/reference/cli/index.md; then
   fail "docs/reference/cli/index.md: documented CLI version drift"
 fi
 for file in README.md docs/guides/editor-mcp-recipe.md; do
@@ -322,12 +339,12 @@ done
 # ---------------------------------------------------------------------------
 note ""
 if [ "$failures" -gt 0 ]; then
-  note "release surface: $failures disagreement(s) with [workspace.package] version"
+  note "release surface: $failures disagreement(s) with workspace or published-release truth"
   note ""
-  note "If this fired on a release prep, bump the files it names. If it fired on a line that is"
-  note "supposed to record history, that line should not be derived from the current version and"
-  note "this script should not be looking at it: fix the check, do not suppress it."
+  note "During release prep, source files may lead while outward install claims stay on the"
+  note "published pin. Move that pin only after the release assets exist; do not suppress the"
+  note "distinction or rewrite historical records."
   exit 1
 fi
 
-note "release surface: consistent at $WORKSPACE_VERSION"
+note "release surface: workspace $WORKSPACE_VERSION, published $PUBLISHED_TAG"

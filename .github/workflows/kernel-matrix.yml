@@ -24,6 +24,7 @@ on:
       - ".gitignore"
       - ".gitattributes"
       - ".pre-commit-config.yaml"
+      - ".github/assay-release-tag"
       - "docs/generated/**"
       - "docs/AIcontext/architecture-diagrams.md"
       - "docs/guides/agent-golden-path.md"

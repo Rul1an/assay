@@ -10,12 +10,9 @@ import os
 import re
 from pathlib import Path
 import subprocess
-import sys
 
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts/ci/lib"))
-from workspace_version import read_workspace_version  # noqa: E402
 
 CONTRACT_PATH = ROOT / "docs/generated/agent-golden-path.json"
 GUIDE_PATH = ROOT / "docs/guides/agent-golden-path.md"
@@ -1087,11 +1084,21 @@ def main() -> None:
         fail("unexpected golden-path contract schema")
     if contract.get("schema_version") != 1:
         fail("unexpected golden-path contract schema version")
-    version = read_workspace_version(ROOT / "Cargo.toml")
-    if contract.get("release_version") != version:
-        fail("golden-path release_version must match the workspace version")
-    if contract.get("release_tag") != f"v{version}":
-        fail("golden-path release_tag must match the workspace version")
+    release_tag_result = subprocess.run(
+        ["bash", str(ROOT / "scripts/ci/read-assay-release-tag.sh")],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if release_tag_result.returncode != 0:
+        fail("failed to read published release tag: " + release_tag_result.stderr.strip())
+    release_tag = release_tag_result.stdout.strip()
+    release_version = release_tag.removeprefix("v")
+    if contract.get("release_version") != release_version:
+        fail("golden-path release_version must match the published release pin")
+    if contract.get("release_tag") != release_tag:
+        fail("golden-path release_tag must match the published release pin")
     validate_plugin_skill(contract)
 
     payloads: list[bytes] = []
@@ -1105,8 +1112,8 @@ def main() -> None:
     guide = read_bounded_evidence(GUIDE_PATH, "guide evidence").decode("utf-8")
     release = generated_release_block(guide)
     for required in (
-        f"Assay `{version}`",
-        f"`v{version}`",
+        f"Assay `{release_version}`",
+        f"`{release_tag}`",
         "assay version",
         "Upgrade",
         "Roll back",
@@ -1236,6 +1243,7 @@ def main() -> None:
         '.gitignore',
         '.gitattributes',
         '.pre-commit-config.yaml',
+        '.github/assay-release-tag',
         'docs/generated/**',
         'docs/guides/agent-golden-path.md',
         '.github/workflows/kernel-matrix.yml',
