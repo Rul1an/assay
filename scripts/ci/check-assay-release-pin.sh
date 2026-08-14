@@ -101,10 +101,16 @@ if release.get("draft") is not False or release.get("prerelease") is not False:
 def version(value: str) -> tuple[int, int, int]:
     return tuple(map(int, value.removeprefix("v").split(".")))
 
-if version(pin) > version(latest):
-    raise SystemExit(f"install pin {pin} leads latest published release {latest}")
-if version(pin) < version(latest):
-    raise SystemExit(f"install pin {pin} trails latest published release {latest}")
+if pin != latest:
+    if version(pin) > version(latest):
+        relation = "leads"
+    elif version(pin) < version(latest):
+        relation = "trails"
+    else:
+        raise SystemExit(
+            f"install pin {pin} does not exactly match latest published release {latest}"
+        )
+    raise SystemExit(f"install pin {pin} {relation} latest published release {latest}")
 
 expected_asset = f"assay-{latest}-x86_64-unknown-linux-gnu.tar.gz"
 assets = release.get("assets")

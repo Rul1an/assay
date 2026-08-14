@@ -89,7 +89,30 @@ write_pin "v5.1.0"
 write_release "v5.2.0"
 expect_fail "install pin v5.1.0 trails latest published release v5.2.0" run_check --published
 
+echo "== published pin must match the literal release tag =="
+write_manifest "5.1.0"
+write_pin "v05.1.0"
+write_release "v5.1.0"
+expect_fail "install pin v05.1.0 does not exactly match latest published release v5.1.0" run_check --published
+
+echo "== draft release metadata fails closed =="
+write_pin "v5.1.0"
+cat >"${metadata}" <<'EOF'
+{"tag_name":"v5.1.0","draft":true,"prerelease":false,"assets":[{"name":"assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz"}]}
+EOF
+expect_fail "latest published release v5.1.0 is draft or prerelease" run_check --published
+
+echo "== invalid published tag fails closed =="
+write_release "latest" "assay-latest-x86_64-unknown-linux-gnu.tar.gz"
+expect_fail "latest published release has an invalid stable tag: 'latest'" run_check --published
+
+echo "== prerelease workspace version fails closed =="
+write_manifest "5.2.0-rc.1"
+write_pin "v5.1.0"
+expect_fail "workspace version is not stable semver: 5.2.0-rc.1" run_check
+
 echo "== missing install asset fails closed =="
+write_manifest "5.2.0"
 write_pin "v5.2.0"
 write_release "v5.2.0" "unrelated.txt"
 expect_fail "latest published release v5.2.0 lacks assay-v5.2.0-x86_64-unknown-linux-gnu.tar.gz" run_check --published
