@@ -5,7 +5,9 @@
 //!
 //! See: SPEC-PR-Gate-Outputs-v1.md for the full contract.
 
+use assay_core::errors::ConfigError;
 use serde::{Deserialize, Serialize};
+use std::io::ErrorKind;
 
 // ============================================================================
 // Exit Codes (coarse, stable)
@@ -121,6 +123,18 @@ pub enum ReasonCode {
 /// a shell string and a JSON argv disagree about what a value containing a quote or a space means.
 pub(crate) fn format_recovery_argv(args: &[&str]) -> String {
     format!("Run argv: {}", serde_json::json!(args))
+}
+
+/// Classify an explicit `--config` that `load_config_with` could not load.
+///
+/// Primary truth is the config-read I/O kind, set only at the `read_to_string`
+/// fold. `NotFound` is absence. Every other kind, and a YAML/schema failure
+/// with no kind, is unloadable. This is the one answer `run` and `doctor` share.
+pub(crate) fn reason_for_unloadable_explicit_config(err: &ConfigError) -> ReasonCode {
+    match err.io_kind() {
+        Some(ErrorKind::NotFound) => ReasonCode::EMissingConfig,
+        Some(_) | None => ReasonCode::ECfgParse,
+    }
 }
 
 /// Bind a flag to a caller-controlled path as one argv element.
@@ -406,6 +420,28 @@ impl RunOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unloadable_explicit_config_class_follows_read_io_kind() {
+        let cases = [
+            (Some(ErrorKind::NotFound), ReasonCode::EMissingConfig),
+            (Some(ErrorKind::PermissionDenied), ReasonCode::ECfgParse),
+            (Some(ErrorKind::IsADirectory), ReasonCode::ECfgParse),
+            (Some(ErrorKind::Other), ReasonCode::ECfgParse),
+            (None, ReasonCode::ECfgParse),
+        ];
+        for (kind, expected) in cases {
+            let err = match kind {
+                Some(kind) => ConfigError::from_read("failed to read config", kind),
+                None => ConfigError::new("failed to parse YAML: mapping values are not allowed"),
+            };
+            assert_eq!(
+                reason_for_unloadable_explicit_config(&err),
+                expected,
+                "kind {kind:?} must not invent a more specific class"
+            );
+        }
+    }
 
     #[test]
     fn test_exit_code_constants() {

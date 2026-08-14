@@ -1,13 +1,14 @@
 use std::path::{Path, PathBuf};
 
 use assay_core::config::{load_config, path_resolver::PathResolver};
+use assay_core::errors::ConfigError;
 
 use crate::cli::args::common::OutputFormat;
 use crate::cli::args::DoctorArgs;
 use crate::cli::helpers::decide_exit;
 use crate::diagnostics;
 use crate::diagnostics::format::format_text;
-use crate::exit_codes::{ReasonCode, RunOutcome};
+use crate::exit_codes::{reason_for_unloadable_explicit_config, RunOutcome};
 
 use super::fixes::run_doctor_fix;
 use super::parse_error::try_fix_parse_error;
@@ -22,9 +23,13 @@ use super::parse_error::try_fix_parse_error;
 /// `fixes.rs` reads it too, for the config it re-loads after applying repairs. That return was a
 /// literal `1` until independent review found it, which made the class of an unloadable config
 /// depend on whether `--fix` had already written something.
-pub(super) fn config_failure(path: &Path, message: String) -> RunOutcome {
+pub(super) fn config_failure(path: &Path, err: &ConfigError) -> RunOutcome {
     let path = path.display().to_string();
-    RunOutcome::from_reason(ReasonCode::ECfgParse, Some(message), Some(path.as_str()))
+    RunOutcome::from_reason(
+        reason_for_unloadable_explicit_config(err),
+        Some(err.to_string()),
+        Some(path.as_str()),
+    )
 }
 
 /// Why no config was read when none was requested and none was found. Rendered by both channels,
@@ -82,7 +87,7 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     let (cfg, cfg_err) = if explicit || target_path.exists() {
         match load_config(&target_path, legacy_mode, false) {
             Ok(c) => (Some(c), None),
-            Err(e) => (None, Some(e.to_string())),
+            Err(e) => (None, Some(e)),
         }
     } else {
         (None, None)
@@ -98,13 +103,14 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         let mut exit = 0;
 
         if let Some(obj) = json_out.as_object_mut() {
+            let err_text = cfg_err.as_ref().map(ToString::to_string);
             obj.insert("generated_at".to_string(), serde_json::json!(timestamp));
             obj.insert(
                 "config_check".to_string(),
-                config_check_marker(cfg.is_some(), cfg_err.as_deref()),
+                config_check_marker(cfg.is_some(), err_text.as_deref()),
             );
 
-            if let Some(err) = cfg_err {
+            if let Some(err) = &cfg_err {
                 let outcome = config_failure(&target_path, err);
                 obj.insert(
                     "reason_code".to_string(),
@@ -155,13 +161,13 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     let text_output = format_text(&report);
     println!("{}", text_output);
 
-    if let Some(e) = cfg_err {
+    if let Some(e) = &cfg_err {
         println!("\nConfig Status: FAILED");
         println!("  File:     {}", target_path.display());
         println!("  Error:    {}\n", e);
 
         if args.fix {
-            return try_fix_parse_error(&args, &target_path, &e, legacy_mode);
+            return try_fix_parse_error(&args, &target_path, &e.to_string(), legacy_mode);
         }
         return Ok(config_failure(&target_path, e).exit_code);
     }

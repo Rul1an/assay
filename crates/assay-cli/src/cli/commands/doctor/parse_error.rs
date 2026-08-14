@@ -103,7 +103,7 @@ pub(super) fn try_fix_parse_error(
             // The five returns above are a different question: no repair was applied, so they
             // report the outcome of an offer, and #2209 owns what those are worth.
             println!("Config still has issues after fix: {}", e);
-            Ok(config_failure(config_path, e.to_string()).exit_code)
+            Ok(config_failure(config_path, &e).exit_code)
         }
     }
 }

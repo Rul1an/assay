@@ -282,13 +282,41 @@ pub fn try_map_error(err: &anyhow::Error) -> Option<Diagnostic> {
 }
 
 use std::fmt::{Display, Formatter};
+use std::io;
 
+/// Config load failure. Display stays the historical `ConfigError: {message}` string.
+///
+/// `io_kind` is set only at the `read_to_string` fold. YAML, schema, and write
+/// failures leave it `None` so a parse error cannot be published as `NotFound`.
 #[derive(Debug)]
-pub struct ConfigError(pub String);
+pub struct ConfigError {
+    message: String,
+    io_kind: Option<io::ErrorKind>,
+}
+
+impl ConfigError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            io_kind: None,
+        }
+    }
+
+    pub fn from_read(message: impl Into<String>, kind: io::ErrorKind) -> Self {
+        Self {
+            message: message.into(),
+            io_kind: Some(kind),
+        }
+    }
+
+    pub fn io_kind(&self) -> Option<io::ErrorKind> {
+        self.io_kind
+    }
+}
 
 impl Display for ConfigError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ConfigError: {}", self.0)
+        write!(f, "ConfigError: {}", self.message)
     }
 }
 impl std::error::Error for ConfigError {}
@@ -371,5 +399,28 @@ mod tests {
     fn legacy_classification_is_explicitly_marked() {
         let legacy = RunError::classify_message("provider returned 429");
         assert!(legacy.legacy_classified);
+    }
+
+    #[test]
+    fn config_error_display_stays_stable_and_read_kind_is_optional() {
+        use super::ConfigError;
+        use std::io::ErrorKind;
+
+        let read = ConfigError::from_read(
+            "failed to read config eval.yaml: No such file or directory (os error 2)",
+            ErrorKind::NotFound,
+        );
+        assert_eq!(
+            read.to_string(),
+            "ConfigError: failed to read config eval.yaml: No such file or directory (os error 2)"
+        );
+        assert_eq!(read.io_kind(), Some(ErrorKind::NotFound));
+
+        let yaml = ConfigError::new("failed to parse YAML: mapping values are not allowed here");
+        assert_eq!(
+            yaml.to_string(),
+            "ConfigError: failed to parse YAML: mapping values are not allowed here"
+        );
+        assert_eq!(yaml.io_kind(), None);
     }
 }

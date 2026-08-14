@@ -62,8 +62,12 @@ pub fn load_config_with(path: &Path, opts: LoadOptions) -> Result<EvalConfig, Co
         strict_unknown_fields: strict,
         allow_ineffective_assertions,
     } = opts;
-    let raw = std::fs::read_to_string(path)
-        .map_err(|e| ConfigError(format!("failed to read config {}: {}", path.display(), e)))?;
+    let raw = std::fs::read_to_string(path).map_err(|e| {
+        ConfigError::from_read(
+            format!("failed to read config {}: {}", path.display(), e),
+            e.kind(),
+        )
+    })?;
 
     let mut ignored_keys = std::collections::HashSet::new();
     let deserializer = serde_yaml::Deserializer::from_str(&raw);
@@ -72,7 +76,7 @@ pub fn load_config_with(path: &Path, opts: LoadOptions) -> Result<EvalConfig, Co
     let mut cfg: EvalConfig = serde_ignored::deserialize(deserializer, |path| {
         ignored_keys.insert(path.to_string());
     })
-    .map_err(|e| ConfigError(format!("failed to parse YAML: {}", e)))?;
+    .map_err(|e| ConfigError::new(format!("failed to parse YAML: {}", e)))?;
 
     // Check strictness / significant unknown fields
     if strict && !ignored_keys.is_empty() {
@@ -87,7 +91,7 @@ pub fn load_config_with(path: &Path, opts: LoadOptions) -> Result<EvalConfig, Co
         } else {
             // Special helpful error for v0 'policies'
             if ignored_keys.contains("policies") {
-                return Err(ConfigError(format!(
+                return Err(ConfigError::new(format!(
                     "Top-level 'policies' is not valid in configVersion: {}. Did you mean to run assay migrate on a v0 config, or remove legacy keys? (file: {})",
                     cfg.version,
                     path.display()
@@ -95,7 +99,7 @@ pub fn load_config_with(path: &Path, opts: LoadOptions) -> Result<EvalConfig, Co
             }
 
             // Generic strict error
-            return Err(ConfigError(format!(
+            return Err(ConfigError::new(format!(
                 "Unknown fields detected in strict mode: {:?} (file: {})",
                 meaningful_unknowns,
                 path.display()
@@ -115,14 +119,14 @@ pub fn load_config_with(path: &Path, opts: LoadOptions) -> Result<EvalConfig, Co
 
     // Allow 0 or 1
     if cfg.version != 0 && cfg.version != SUPPORTED_CONFIG_VERSION {
-        return Err(ConfigError(format!(
+        return Err(ConfigError::new(format!(
             "unsupported config version {} (supported: 0, {})",
             cfg.version, SUPPORTED_CONFIG_VERSION
         )));
     }
 
     if cfg.tests.is_empty() {
-        return Err(ConfigError("config has no tests".into()));
+        return Err(ConfigError::new("config has no tests"));
     }
 
     // Fail closed before execution rather than after. An assertion that cannot fail reports a pass
@@ -152,7 +156,7 @@ pub fn load_config_with(path: &Path, opts: LoadOptions) -> Result<EvalConfig, Co
                 })
                 .collect::<Vec<_>>()
                 .join("; ");
-            return Err(ConfigError(format!(
+            return Err(ConfigError::new(format!(
                 "{} assertion(s) cannot fail and were refused ({}): {} \
                  An assertion that cannot fail reports a pass carrying no information. \
                  Fix the assertion, or pass --allow-ineffective-assertions to run anyway.",
@@ -164,7 +168,7 @@ pub fn load_config_with(path: &Path, opts: LoadOptions) -> Result<EvalConfig, Co
     }
 
     normalize_paths(&mut cfg, path)
-        .map_err(|e| ConfigError(format!("failed to normalize config paths: {}", e)))?;
+        .map_err(|e| ConfigError::new(format!("failed to normalize config paths: {}", e)))?;
 
     Ok(cfg)
 }
@@ -226,6 +230,37 @@ tests:
       must_not_contain: ["banana"]
 "#,
     )
-    .map_err(|e| ConfigError(format!("failed to write sample config: {}", e)))?;
+    .map_err(|e| ConfigError::new(format!("failed to write sample config: {}", e)))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_config_with;
+    use std::io::ErrorKind;
+    use std::path::Path;
+
+    #[test]
+    fn absent_config_read_preserves_not_found_kind() {
+        let err = load_config_with(Path::new("definitely-absent-2206.yaml"), Default::default())
+            .expect_err("absent path must fail the read");
+        assert_eq!(err.io_kind(), Some(ErrorKind::NotFound));
+        assert!(
+            err.to_string().contains("failed to read config"),
+            "Display must stay the read-failure string: {err}"
+        );
+    }
+
+    #[test]
+    fn malformed_yaml_does_not_invent_not_found() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("bad.yaml");
+        std::fs::write(&path, "version: [\n").expect("write malformed yaml");
+        let err = load_config_with(&path, Default::default()).expect_err("malformed yaml");
+        assert_eq!(
+            err.io_kind(),
+            None,
+            "YAML failures must not carry a read I/O kind: {err}"
+        );
+    }
 }

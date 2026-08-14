@@ -179,7 +179,7 @@ pub(super) async fn run_doctor_fix(
             // function earlier exits `2`, so whether an unloadable config was a config fault
             // depended on how far the command had got before it noticed.
             eprintln!("Re-validation skipped: config still invalid ({})", err);
-            return Ok(config_failure(config_path, err.to_string()).exit_code);
+            return Ok(config_failure(config_path, &err).exit_code);
         }
     };
 

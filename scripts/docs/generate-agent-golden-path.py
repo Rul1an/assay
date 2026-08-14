@@ -184,6 +184,16 @@ STEPS: list[dict[str, object]] = [
                 config_check="checked",
             ),
             outcome(
+                "missing-config",
+                "absent explicit config",
+                2,
+                stdout("json", "assay.doctor_report.v0"),
+                ["doctor", "--format", "json", "--config", "<config>"],
+                reason_code="E_MISSING_CONFIG",
+                next_step="Run: assay init to create a config file",
+                config_error_code="E_MISSING_CONFIG",
+            ),
+            outcome(
                 "invalid-config",
                 "invalid explicit config",
                 2,
@@ -206,10 +216,10 @@ STEPS: list[dict[str, object]] = [
             "`config_error.code`."
         ),
         "failure_summary": (
-            "An explicit config that will not load, absent or unreadable alike, is exit `2` "
-            "and names the failing file in a concrete JSON argv next step, the same exit "
-            "class `assay run` gives the same file. The reason code is not always the same "
-            "one, per the non-claim below."
+            "An explicit config that will not load is exit `2`, the same class "
+            "`assay run` gives the same file. A proven-absent path publishes "
+            "`E_MISSING_CONFIG` and `assay init`; an unloadable path publishes "
+            "`E_CFG_PARSE` and the fused doctor argv."
         ),
     },
     {
@@ -591,9 +601,11 @@ CONTRACT: dict[str, object] = {
         "The contract records current behavior; gap rows are not clean results.",
         "Schema identity conventions outside this narrow contract remain owned by issue #2167.",
         "A passing evidence integrity check does not prove an external side effect.",
-        "A doctor config failure does not distinguish an absent config from an unreadable "
-        "one, and its recovery step is the invocation that produced it; both are owned by "
-        "issue #2206.",
+        "An explicit config whose read returns NotFound is E_MISSING_CONFIG; "
+        "PermissionDenied, IsADirectory, Other, and YAML failures stay E_CFG_PARSE. "
+        "That class is taken from the config-read I/O kind, not from a second exists() "
+        "probe. Windows EACCES kind parity is not claimed, and the permission fixture "
+        "is skipped as root.",
         "Read config_check.status before reading data_diagnostics: only the value checked "
         "means a config was read, and on skipped the absent data_diagnostics records an "
         "unchecked config rather than a clean one.",

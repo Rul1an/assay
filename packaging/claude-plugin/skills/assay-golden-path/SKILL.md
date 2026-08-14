@@ -38,11 +38,11 @@ On failure: A missing or unstartable binary is a host spawn failure: no Assay pr
 
 Run: `assay doctor --format json --config <config>`
 
-Exit: Success `0`; no config examined `0`; config examined, error-severity diagnostic `2`; invalid explicit config `2`.
+Exit: Success `0`; no config examined `0`; config examined, error-severity diagnostic `2`; absent explicit config `2`; invalid explicit config `2`.
 
 Stdout: Parses as `assay.doctor_report.v0`. Every report carries `config_check.status`, one of `checked`, `skipped` or `failed`. Exit `0` on its own does not mean a config was examined: read `config_check.status` to tell a clean config from no config. A config that was examined and carries an error-severity `data_diagnostics[]` entry exits `2`, the class `decide_exit` gives that diagnostic for `assay validate` and `assay run` too; the text channel returns the same class for the same tree. A config failure remains JSON and carries the top-level `reason_code` and `next_step` alongside `config_error.code`.
 
-On failure: An explicit config that will not load, absent or unreadable alike, is exit `2` and names the failing file in a concrete JSON argv next step, the same exit class `assay run` gives the same file. The reason code is not always the same one, per the non-claim below.
+On failure: An explicit config that will not load is exit `2`, the same class `assay run` gives the same file. A proven-absent path publishes `E_MISSING_CONFIG` and `assay init`; an unloadable path publishes `E_CFG_PARSE` and the fused doctor argv.
 
 ### 3. Starter files
 
@@ -121,5 +121,5 @@ On failure: Malformed NDJSON fails before projection and names the invalid input
 - The contract records current behavior; gap rows are not clean results.
 - Schema identity conventions outside this narrow contract remain owned by issue #2167.
 - A passing evidence integrity check does not prove an external side effect.
-- A doctor config failure does not distinguish an absent config from an unreadable one, and its recovery step is the invocation that produced it; both are owned by issue #2206.
+- An explicit config whose read returns NotFound is E_MISSING_CONFIG; PermissionDenied, IsADirectory, Other, and YAML failures stay E_CFG_PARSE. That class is taken from the config-read I/O kind, not from a second exists() probe. Windows EACCES kind parity is not claimed, and the permission fixture is skipped as root.
 - Read config_check.status before reading data_diagnostics: only the value checked means a config was read, and on skipped the absent data_diagnostics records an unchecked config rather than a clean one.

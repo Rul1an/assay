@@ -2,7 +2,9 @@ use super::super::args::{CiArgs, JudgeArgs, RunArgs};
 use super::pipeline_error::{elapsed_ms, PipelineError};
 use super::run_output::decide_run_outcome;
 use super::runner_builder::{build_runner, ensure_parent_dir};
-use crate::exit_codes::{ExitCodeVersion, RunOutcome};
+use crate::exit_codes::{
+    reason_for_unloadable_explicit_config, ExitCodeVersion, ReasonCode, RunOutcome,
+};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -28,7 +30,6 @@ pub(crate) struct PipelineInput {
     pub allow_ineffective_assertions: bool,
     pub redact_prompts: bool,
     pub exit_codes: ExitCodeVersion,
-    pub require_config_exists: bool,
     pub ingest_trace_on_replay_strict: bool,
     pub strict_zero_reruns: bool,
 }
@@ -56,7 +57,6 @@ impl PipelineInput {
             allow_ineffective_assertions: args.allow_ineffective_assertions,
             redact_prompts: args.redact_prompts,
             exit_codes: args.exit_codes,
-            require_config_exists: false,
             ingest_trace_on_replay_strict: false,
             strict_zero_reruns: false,
         }
@@ -84,7 +84,6 @@ impl PipelineInput {
             allow_ineffective_assertions: args.allow_ineffective_assertions,
             redact_prompts: args.redact_prompts,
             exit_codes: args.exit_codes,
-            require_config_exists: true,
             ingest_trace_on_replay_strict: true,
             strict_zero_reruns: true,
         }
@@ -127,12 +126,7 @@ pub(crate) async fn execute_pipeline(
         ));
     }
 
-    let cfg = if input.require_config_exists && !input.config.exists() {
-        return Err(PipelineError::missing_cfg(
-            input.config.display().to_string(),
-            "config path does not exist",
-        ));
-    } else {
+    let cfg = {
         let config_start = Instant::now();
         match assay_core::config::load_config_with(
             &input.config,
@@ -147,11 +141,13 @@ pub(crate) async fn execute_pipeline(
                 c
             }
             Err(e) => {
+                let path = input.config.display().to_string();
                 let msg = e.to_string();
-                return Err(if !input.config.exists() {
-                    PipelineError::missing_cfg(input.config.display().to_string(), msg)
-                } else {
-                    PipelineError::cfg_parse(input.config.display().to_string(), msg)
+                return Err(match reason_for_unloadable_explicit_config(&e) {
+                    ReasonCode::EMissingConfig => PipelineError::missing_cfg(path, msg),
+                    // Unloadable, or any future arm the classifier should not
+                    // invent as a more specific absence.
+                    _ => PipelineError::cfg_parse(path, msg),
                 });
             }
         }
