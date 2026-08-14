@@ -13,11 +13,11 @@ trap 'rm -rf "$SCRATCH"' EXIT
 # the 58-case durability boundary established by PR B0.
 # CI-5C (#2196): +3 skill generator-destination omissions and +3 packaged-resource
 # destination drifts beyond the original baseline-only packaged drift case.
-EXPECTED_CASES=92
+EXPECTED_CASES=94
 # Parser-layer follow-ups stay outside the approved cumulative case chain. The
 # 22 probes are 4 workflow-key, 1 stages-key, 14 selector, 1 trigger-mode, and
 # 2 inline-parser checks; pin them so deletion cannot leave the cumulative total green.
-EXPECTED_STRUCTURAL_PROBES=22
+EXPECTED_STRUCTURAL_PROBES=23
 case_count=0
 structural_probe_count=0
 
@@ -296,6 +296,72 @@ expect_generator_failure() {
   record_case_pass "$name"
 }
 
+case_root="$SCRATCH/workspace-leads-published-release"
+seed_case "$case_root"
+CASE_ROOT="$case_root" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["CASE_ROOT"]) / "Cargo.toml"
+text = path.read_text(encoding="utf-8")
+anchor = '[workspace.package]\nversion = "5.1.0"'
+if text.count(anchor) != 1:
+    raise SystemExit("workspace package version fixture is not unique")
+path.write_text(text.replace(anchor, '[workspace.package]\nversion = "5.2.0"', 1), encoding="utf-8")
+PY
+if ! (cd "$case_root" && python3 scripts/docs/generate-agent-golden-path.py) \
+  >"$case_root/workspace-leads.log" 2>&1
+then
+  cat "$case_root/workspace-leads.log" >&2
+  echo "FAIL: golden path must remain pinned to the published release when workspace leads" >&2
+  exit 1
+fi
+CASE_ROOT="$case_root" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+root = Path(os.environ["CASE_ROOT"])
+contract = json.loads(
+    (root / "docs/generated/agent-golden-path.json").read_text(encoding="utf-8")
+)
+if contract.get("release_version") != "5.1.0" or contract.get("release_tag") != "v5.1.0":
+    raise SystemExit(
+        "golden path followed workspace 5.2.0 instead of published release v5.1.0"
+    )
+PY
+record_structural_probe_pass "workspace may lead published golden-path release"
+
+case_root="$SCRATCH/published-release-pin-drift"
+seed_case "$case_root"
+printf '%s\n' 'v5.0.0' > "$case_root/.github/assay-release-tag"
+expect_named_failure \
+  "published release pin drift" \
+  "$case_root" \
+  "golden-path release_version must match the published release pin"
+
+case_root="$SCRATCH/published-release-tag-drift"
+seed_case "$case_root"
+CASE_ROOT="$case_root" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+root = Path(os.environ["CASE_ROOT"])
+for relative in (
+    "docs/generated/agent-golden-path.json",
+    "packaging/claude-plugin/skills/assay-golden-path/references/agent-golden-path.json",
+):
+    path = root / relative
+    contract = json.loads(path.read_text(encoding="utf-8"))
+    contract["release_tag"] = "v5.0.0"
+    path.write_text(json.dumps(contract, indent=2) + "\n", encoding="utf-8")
+PY
+expect_named_failure \
+  "published release tag drift" \
+  "$case_root" \
+  "golden-path release_tag must match the published release pin"
+
 mutate_workflow() {
   local case_root="$1" mutation="$2"
   CASE_ROOT="$case_root" MUTATION="$mutation" python3 - <<'PY'
@@ -429,8 +495,9 @@ text = path.read_text(encoding="utf-8")
 mutation = os.environ["MUTATION"]
 hook_files = (
     "        files: ^(scripts/ci/(check-docs-generated-drift|"
-    "test-check-docs-generated-drift(?:-safety)?|lib/drift-tree-snapshot)\\.sh|"
-    "scripts/ci/lib/workspace_version\\.py|scripts/docs/generate-agent-golden-path\\.py|"
+    "test-check-docs-generated-drift(?:-safety)?|lib/drift-tree-snapshot|"
+    "read-assay-release-tag)\\.sh|scripts/ci/lib/workspace_version\\.py|"
+    "scripts/docs/generate-agent-golden-path\\.py|\\.github/assay-release-tag|"
     "\\.(agents|claude)/skills/"
     "assay-golden-path/SKILL\\.md|\\.claude-plugin/.*|packaging/claude-plugin/.*)$\n"
 )
@@ -1163,8 +1230,9 @@ from pathlib import Path
 path = Path(os.environ["CASE_ROOT"]) / ".pre-commit-config.yaml"
 source = (
     "        files: ^(scripts/ci/(check-docs-generated-drift|"
-    "test-check-docs-generated-drift(?:-safety)?|lib/drift-tree-snapshot)\\.sh|"
-    "scripts/ci/lib/workspace_version\\.py|scripts/docs/generate-agent-golden-path\\.py|"
+    "test-check-docs-generated-drift(?:-safety)?|lib/drift-tree-snapshot|"
+    "read-assay-release-tag)\\.sh|scripts/ci/lib/workspace_version\\.py|"
+    "scripts/docs/generate-agent-golden-path\\.py|\\.github/assay-release-tag|"
     "\\.(agents|claude)/skills/"
     "assay-golden-path/SKILL\\.md|\\.claude-plugin/.*|packaging/claude-plugin/.*)$\n"
 )

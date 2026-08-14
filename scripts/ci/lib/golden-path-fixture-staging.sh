@@ -9,6 +9,7 @@ stage_golden_path_fixtures() {
   mkdir -p \
     "$case_root/scripts/ci/lib" \
     "$case_root/scripts/docs" \
+    "$case_root/.github" \
     "$case_root/docs/generated" \
     "$case_root/examples/privileged-action-gate/policies" \
     "$case_root/.agents/skills/assay-golden-path" \
@@ -20,8 +21,10 @@ stage_golden_path_fixtures() {
 
   cp "$repo_root/scripts/ci/test-agent-golden-path-skill.py" "$case_root/scripts/ci/"
   cp "$repo_root/scripts/ci/lib/workspace_version.py" "$case_root/scripts/ci/lib/"
+  cp "$repo_root/scripts/ci/read-assay-release-tag.sh" "$case_root/scripts/ci/"
   cp "$repo_root/scripts/docs/generate-agent-golden-path.py" "$case_root/scripts/docs/"
   cp "$repo_root/Cargo.toml" "$case_root/"
+  cp "$repo_root/.github/assay-release-tag" "$case_root/.github/"
   cp "$repo_root/.gitignore" "$case_root/"
   cp "$repo_root/.gitattributes" "$case_root/"
   cp "$repo_root/.mcp.json" "$case_root/"
