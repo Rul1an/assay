@@ -284,7 +284,13 @@ mod tests {
         let diagnostic = diagnostic_for(&config, ReasonCode::ECfgParse);
         assert_eq!(
             recovery_argv(&diagnostic.fix_steps[0]),
-            ["assay", "doctor", "--config", "suites/prod.yaml"]
+            [
+                "assay",
+                "doctor",
+                "--config=suites/prod.yaml",
+                "--format",
+                "json"
+            ]
         );
         assert_eq!(
             outcome_as_written(&config, ReasonCode::ECfgParse).next_step,
@@ -311,7 +317,13 @@ mod tests {
         let diagnostic = diagnostic_for(&run_error, ReasonCode::ECfgParse);
         assert_eq!(
             recovery_argv(&diagnostic.fix_steps[0]),
-            ["assay", "doctor", "--config", "<config.yaml>"]
+            [
+                "assay",
+                "doctor",
+                "--config=<config.yaml>",
+                "--format",
+                "json"
+            ]
         );
         assert_eq!(
             outcome_as_written(&run_error, ReasonCode::ECfgParse).next_step,
@@ -460,7 +472,7 @@ mod tests {
             });
         assert_eq!(
             recovery_argv(own_recovery),
-            ["assay", "doctor", "--config", "assay.yaml"]
+            ["assay", "doctor", "--config=assay.yaml", "--format", "json"]
         );
 
         let rendered = folded.format_plain();

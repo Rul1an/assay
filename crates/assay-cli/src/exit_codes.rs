@@ -123,6 +123,15 @@ pub(crate) fn format_recovery_argv(args: &[&str]) -> String {
     format!("Run argv: {}", serde_json::json!(args))
 }
 
+/// Bind a flag to a caller-controlled path as one argv element.
+///
+/// Always `flag=value`, including when `value` does not start with `-`. A split
+/// `--flag` / value pair lets clap reread a `-prefixed` path as an option. A
+/// conditional fuse would be a second place that rule could drift.
+fn fused_option(flag: &str, value: &str) -> String {
+    format!("{flag}={value}")
+}
+
 impl ReasonCode {
     /// Get the corresponding exit code for this reason, respecting version
     pub fn exit_code_for(&self, version: ExitCodeVersion) -> i32 {
@@ -223,18 +232,21 @@ impl ReasonCode {
 
     /// Suggested next step for this error.
     ///
-    /// Executable recovery with caller-controlled values is JSON argv. Dynamic trace-path
-    /// guidance is prose rather than a command; remaining command-like steps are static strings
-    /// and therefore carry no caller-controlled argument boundary.
+    /// Executable recovery with caller-controlled values is JSON argv. Path-bearing
+    /// flags are always fused (`--config=path`) so a `-prefixed` path remains an
+    /// operand. Dynamic recoveries that produce a machine document include
+    /// `--format json` here, not at the call site: one reason has one remediation,
+    /// and a consumer that followed a JSON failure report can parse the result.
+    /// The same string is published on the text channel. Dynamic trace-path
+    /// guidance is prose rather than a command; remaining command-like steps are
+    /// static strings and therefore carry no caller-controlled argument boundary.
     pub fn next_step(&self, context: Option<&str>) -> String {
         match self {
             ReasonCode::Success => String::new(),
-            ReasonCode::ECfgParse => format_recovery_argv(&[
-                "assay",
-                "doctor",
-                "--config",
-                context.unwrap_or("<config.yaml>"),
-            ]),
+            ReasonCode::ECfgParse => {
+                let config = fused_option("--config", context.unwrap_or("<config.yaml>"));
+                format_recovery_argv(&["assay", "doctor", &config, "--format", "json"])
+            }
             ReasonCode::ETraceNotFound => {
                 format!(
                     "Check trace file exists: {}",
@@ -265,13 +277,17 @@ impl ReasonCode {
             ReasonCode::EBaselineInvalid => {
                 "Run: assay baseline record to create a new baseline".to_string()
             }
-            ReasonCode::EPolicyParse => format_recovery_argv(&[
-                "assay",
-                "policy",
-                "validate",
-                "--input",
-                context.unwrap_or("<policy.yaml>"),
-            ]),
+            ReasonCode::EPolicyParse => {
+                let input = fused_option("--input", context.unwrap_or("<policy.yaml>"));
+                format_recovery_argv(&[
+                    "assay",
+                    "policy",
+                    "validate",
+                    &input,
+                    "--format",
+                    "json",
+                ])
+            }
             ReasonCode::EReplayMissingDependency => {
                 "Replay bundle missing required offline dependency; rerun with --live or create a complete bundle".to_string()
             }
@@ -545,7 +561,7 @@ mod tests {
         let config_next_step = ReasonCode::ECfgParse.next_step(Some(config_path));
         assert_eq!(
             config_next_step,
-            r#"Run argv: ["assay","doctor","--config","cfg file;$(touch should-not-exist).yaml"]"#,
+            r#"Run argv: ["assay","doctor","--config=cfg file;$(touch should-not-exist).yaml","--format","json"]"#,
             "the shared recovery formatter must preserve the published compact representation"
         );
         let config_argv: Vec<String> = serde_json::from_str(
@@ -554,7 +570,16 @@ mod tests {
                 .expect("config recovery must publish JSON argv"),
         )
         .expect("config recovery argv must parse");
-        assert_eq!(config_argv, ["assay", "doctor", "--config", config_path]);
+        assert_eq!(
+            config_argv,
+            vec![
+                "assay".to_string(),
+                "doctor".to_string(),
+                format!("--config={config_path}"),
+                "--format".to_string(),
+                "json".to_string()
+            ]
+        );
         assert!(ReasonCode::ETraceNotFound
             .next_step(Some("traces/ci.jsonl"))
             .contains("traces/ci.jsonl"));
@@ -574,7 +599,14 @@ mod tests {
         .expect("policy recovery argv must parse");
         assert_eq!(
             argv,
-            ["assay", "policy", "validate", "--input", policy_path]
+            vec![
+                "assay".to_string(),
+                "policy".to_string(),
+                "validate".to_string(),
+                format!("--input={policy_path}"),
+                "--format".to_string(),
+                "json".to_string()
+            ]
         );
         assert!(ReasonCode::EReplayMissingDependency
             .next_step(None)
@@ -616,15 +648,35 @@ mod tests {
         let cases = [
             (
                 ReasonCode::ECfgParse,
-                vec!["assay", "doctor", "--config", path],
+                vec![
+                    "assay".into(),
+                    "doctor".into(),
+                    format!("--config={path}"),
+                    "--format".into(),
+                    "json".into(),
+                ],
             ),
             (
                 ReasonCode::EPolicyParse,
-                vec!["assay", "policy", "validate", "--input", path],
+                vec![
+                    "assay".into(),
+                    "policy".into(),
+                    "validate".into(),
+                    format!("--input={path}"),
+                    "--format".into(),
+                    "json".into(),
+                ],
             ),
             (
                 ReasonCode::EEvidenceUnreadable,
-                vec!["assay", "evidence", "show", path, "--format", "json"],
+                vec![
+                    "assay".into(),
+                    "evidence".into(),
+                    "show".into(),
+                    path.into(),
+                    "--format".into(),
+                    "json".into(),
+                ],
             ),
         ];
 
@@ -636,6 +688,51 @@ mod tests {
             let argv: Vec<String> =
                 serde_json::from_str(encoded).expect("recovery argv must remain valid JSON");
             assert_eq!(argv, expected, "{reason:?} must preserve one path argument");
+        }
+    }
+
+    #[test]
+    fn path_bearing_recovery_always_fuses_the_flag_and_includes_json_format() {
+        for path in ["-weird.yaml", "--config", "-h", "plain.yaml"] {
+            let config = ReasonCode::ECfgParse.next_step(Some(path));
+            let policy = ReasonCode::EPolicyParse.next_step(Some(path));
+            let config_argv: Vec<String> = serde_json::from_str(
+                config
+                    .strip_prefix("Run argv: ")
+                    .expect("config recovery must publish JSON argv"),
+            )
+            .expect("config recovery argv must parse");
+            let policy_argv: Vec<String> = serde_json::from_str(
+                policy
+                    .strip_prefix("Run argv: ")
+                    .expect("policy recovery must publish JSON argv"),
+            )
+            .expect("policy recovery argv must parse");
+            assert_eq!(
+                config_argv,
+                vec![
+                    "assay".to_string(),
+                    "doctor".to_string(),
+                    fused_option("--config", path),
+                    "--format".to_string(),
+                    "json".to_string()
+                ]
+            );
+            assert_eq!(
+                policy_argv,
+                vec![
+                    "assay".to_string(),
+                    "policy".to_string(),
+                    "validate".to_string(),
+                    fused_option("--input", path),
+                    "--format".to_string(),
+                    "json".to_string()
+                ]
+            );
+            assert!(
+                !config.contains('\u{0007}') && !policy.contains('\u{0007}'),
+                "recovery text must not carry raw BEL"
+            );
         }
     }
 
