@@ -498,7 +498,7 @@ owes a consumer; it is not a construct the format provides for capping.
         "name": "assay-evidence-lint",
         "version": "2.9.0",
         "semanticVersion": "2.9.0",
-        "informationUri": "https://docs.getassay.dev/lint/",
+        "informationUri": "https://github.com/Rul1an/assay/blob/v2.9.0/docs/lint/index.md",
         "properties": {
           "assayPacks": [
             {

@@ -34,7 +34,9 @@ basis caps what a review can claim rather than describing an exploitable weaknes
 
 ---
 
-## ASSAY-W001 — Subject may contain a secret {#assay-w001}
+<a id="assay-w001"></a>
+
+## ASSAY-W001 — Subject may contain a secret
 
 **Severity** warning · **security-severity** 7.0 · **Tags** `security`, `secrets`
 
@@ -53,7 +55,9 @@ afterwards changes its content hashes and invalidates the Merkle root.
 **Note.** The match is a literal substring test, not a validator. It has both false positives
 (`token=` in prose) and false negatives (a credential with no recognised prefix).
 
-## ASSAY-W002 — PII flag set with a non-empty subject {#assay-w002}
+<a id="assay-w002"></a>
+
+## ASSAY-W002 — PII flag set with a non-empty subject
 
 **Severity** warning · **security-severity** 4.0 · **Tags** `privacy`, `pii`
 
@@ -67,7 +71,9 @@ clear, and the subject is the field most widely reproduced downstream.
 of personal data, the flag is describing the payload only — that is a legitimate shape, and the
 finding is advisory.
 
-## ASSAY-W003 — Secret pattern present but `contains_secrets` is false {#assay-w003}
+<a id="assay-w003"></a>
+
+## ASSAY-W003 — Secret pattern present but `contains_secrets` is false
 
 **Severity** warning · **security-severity** 6.5 · **Tags** `security`, `secrets`
 
@@ -83,7 +89,9 @@ event as safe, so the flag being wrong is worse than the secret being present an
 **Note.** `ASSAY-W001` and `ASSAY-W003` share one pattern list, so an undeclared secret raises
 both: one for the disclosure, one for the mislabelling. They are not duplicates.
 
-## ASSAY-W004 — Refusal observation not backed by a decision record {#assay-w004}
+<a id="assay-w004"></a>
+
+## ASSAY-W004 — Refusal observation not backed by a decision record
 
 **Severity** warning · **security-severity** 4.0 · **Tags** `security`, `enforcement`,
 `attribution`
@@ -104,7 +112,9 @@ about the same digest, and that conflict is itself the finding.
 same target digest the refusal marker uses. A refusal recorded by one component and a decision
 recorded by another must agree on the digest, or they cannot be joined.
 
-## ASSAY-W005 — Approval basis declares an unreadable retained view {#assay-w005}
+<a id="assay-w005"></a>
+
+## ASSAY-W005 — Approval basis declares an unreadable retained view
 
 **Severity** warning · **Tags** `retention`, `review`, `sufficiency`
 
@@ -130,7 +140,9 @@ over it.
 genuinely must be encrypted, emit `approval_plaintext_commitment` alongside it so a later
 disclosure can be bound to what was approved at the time.
 
-## ASSAY-I001 — Source does not follow the URN convention {#assay-i001}
+<a id="assay-i001"></a>
+
+## ASSAY-I001 — Source does not follow the URN convention
 
 **Severity** note · **Tags** `convention`, `format`
 
