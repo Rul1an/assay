@@ -410,3 +410,219 @@ fn a_peer_set_from_a_different_run_cannot_refute() {
         "a mismatched run pair must refuse, not refute"
     );
 }
+
+// ------------------------------------------------- the ceiling ladder, made observable in output
+
+#[test]
+fn the_ladder_ordering_is_visible_in_the_report_and_not_only_in_the_type_system() {
+    // The gate has always computed a rung and this report used to drop it, so `asserted` and
+    // `verified` reached a consumer as a bare verdict and the ordering
+    // `producer_reported < ... < independently_confirmed` decided nothing anyone could read.
+    //
+    // This test fails two ways on purpose. It fails if the rung stops being carried, and it fails if
+    // someone flattens the ladder so an independently produced record grades no higher than the
+    // provider's own word — the mutation `rge-bench`'s liveness check kills on the same axis.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_asserted_decision(&bundle);
+    let import = import_dir(dir.path(), "audit_record_github_deploy_key.json");
+
+    let asserted = run(&bundle, None);
+    let verified = run(&bundle, Some(&import));
+
+    assert_eq!(
+        asserted["calls"][0]["occurrence_ceiling"],
+        json!("asserted"),
+        "a provider's own word caps at `asserted`, whatever else is true of the run"
+    );
+    assert_eq!(
+        verified["calls"][0]["occurrence_ceiling"],
+        json!("independently_confirmed"),
+        "a bound record from the system that would know is what the top rung is for"
+    );
+    assert_ne!(
+        asserted["calls"][0]["occurrence_ceiling"], verified["calls"][0]["occurrence_ceiling"],
+        "if these ever agree the ladder has been flattened and buys nothing"
+    );
+}
+
+/// Two asserting calls in one bundle, only one of which an imported record can bind.
+///
+/// A single-call bundle cannot tell a fold from a maximum — with one row they are the same number —
+/// so a test written against the committed one-call surface would pass under either rule and prove
+/// nothing. This builds the input that can discriminate: the second call targets a different repo,
+/// so the deploy-key record binds the first and leaves the second at the provider's own word.
+fn bundle_with_one_bindable_and_one_unbindable_call(path: &std::path::Path) {
+    let mut surface = fixture("verified.json");
+    let mut first = surface["observed_tool_decisions"][0].clone();
+    first["response"]["side_effect"] = json!({ "asserted": true, "level": "asserted" });
+    first["response"]["side_effect_verified"] = json!(false);
+
+    let mut second = first.clone();
+    second["tool"]["name"] = json!("github.add_deploy_key_other");
+    second["action"]["target"]["repo"] = json!("some-other-repo");
+
+    surface["observed_tool_decisions"] = json!([first, second]);
+
+    let mut event = EvidenceEvent::new(
+        DECISION_EVENT_TYPE,
+        "urn:assay:test:side-effects-cli",
+        "run-side-effects-two",
+        0,
+        surface,
+    );
+    event.time = Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+
+    let file = fs::File::create(path).unwrap();
+    let mut writer = BundleWriter::new(file);
+    writer.add_event(event);
+    writer.finish().unwrap();
+}
+
+#[test]
+fn the_run_level_ceiling_is_the_weakest_rung_and_never_the_strongest() {
+    // A fold, not a maximum. One corroborated call does not raise what the run as a whole supports,
+    // and a reader who takes the best row home has learnt the wrong thing.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("two.tar.gz");
+    bundle_with_one_bindable_and_one_unbindable_call(&bundle);
+    let import = import_dir(dir.path(), "audit_record_github_deploy_key.json");
+
+    let report = run(&bundle, Some(&import));
+    let rows: Vec<&Value> = report["calls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["asserted"] == json!(true))
+        .collect();
+    assert_eq!(rows.len(), 2, "the discriminating input must survive");
+
+    let strongest = rows
+        .iter()
+        .map(|c| &c["occurrence_ceiling"])
+        .max_by_key(|c| ladder_index(c))
+        .unwrap();
+    let weakest = rows
+        .iter()
+        .map(|c| &c["occurrence_ceiling"])
+        .min_by_key(|c| ladder_index(c))
+        .unwrap();
+    assert_ne!(
+        strongest, weakest,
+        "without two different rungs this test cannot tell a fold from a maximum"
+    );
+
+    assert_eq!(
+        report["weakest_occurrence_ceiling"],
+        json!({ "state": "rung", "ceiling": weakest }),
+        "the run-level rung must be the weakest of its asserting calls"
+    );
+}
+
+#[test]
+fn a_refutation_takes_the_rung_with_it_rather_than_leaving_a_strong_number_behind() {
+    // `Blocked` is not the bottom rung, it is the statement that no rung applies. Leaving
+    // `independently_confirmed` next to a blocked claim would let a consumer read the number and
+    // drop the verdict, which is precisely what the refutation exists to stop.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_asserted_decision(&bundle);
+    let import = import_dir(dir.path(), "audit_record_github_deploy_key.json");
+    let oh = health(dir.path(), "connect_only", "clean");
+
+    let report = run_with_health(&bundle, Some(&import), &oh);
+
+    assert_eq!(report["calls"][0]["occurrence_claim"], json!("blocked"));
+    assert_eq!(
+        report["calls"][0]["occurrence_ceiling"],
+        Value::Null,
+        "a blocked occurrence must not advertise a rung"
+    );
+    assert_eq!(
+        report["weakest_occurrence_ceiling"],
+        json!({ "state": "blocked" }),
+        "and one blocked asserting call collapses the run-level answer, rather than lowering it"
+    );
+}
+
+/// A bundle whose only observed call asserted no side effect.
+fn bundle_with_no_asserted_side_effect(path: &std::path::Path) {
+    let mut surface = fixture("verified.json");
+    let decision = &mut surface["observed_tool_decisions"][0];
+    decision["response"]["side_effect"] = json!({ "asserted": false, "level": "asserted" });
+    decision["response"]["side_effect_asserted"] = json!(false);
+    decision["response"]["side_effect_verified"] = json!(false);
+
+    let mut event = EvidenceEvent::new(
+        DECISION_EVENT_TYPE,
+        "urn:assay:test:side-effects-cli",
+        "run-side-effects-none",
+        0,
+        surface,
+    );
+    event.time = Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+
+    let file = fs::File::create(path).unwrap();
+    let mut writer = BundleWriter::new(file);
+    writer.add_event(event);
+    writer.finish().unwrap();
+}
+
+#[test]
+fn a_run_that_claimed_nothing_is_distinguishable_from_a_run_that_was_contradicted() {
+    // The finding an adversarial review caught, pinned so it cannot come back. The first version of
+    // the run-level field was an `Option` skipped when empty, so it was ABSENT both when a refutation
+    // collapsed the run and when no call asserted anything at all. A consumer could not tell "we
+    // watched and the evidence was contradicted" from "nothing here ever claimed an effect" — which
+    // is the occurrence-versus-absence conflation this whole command exists to prevent, reintroduced
+    // by the field meant to carry the rule.
+    let dir = tempdir().unwrap();
+
+    let quiet = dir.path().join("quiet.tar.gz");
+    bundle_with_no_asserted_side_effect(&quiet);
+    let quiet_report = run(&quiet, None);
+
+    let contradicted = dir.path().join("contradicted.tar.gz");
+    bundle_with_asserted_decision(&contradicted);
+    let import = import_dir(dir.path(), "audit_record_github_deploy_key.json");
+    let oh = health(dir.path(), "connect_only", "clean");
+    let contradicted_report = run_with_health(&contradicted, Some(&import), &oh);
+
+    assert_eq!(
+        quiet_report["weakest_occurrence_ceiling"],
+        json!({ "state": "nothing_claimed" })
+    );
+    assert_eq!(
+        contradicted_report["weakest_occurrence_ceiling"],
+        json!({ "state": "blocked" })
+    );
+    assert_ne!(
+        quiet_report["weakest_occurrence_ceiling"],
+        contradicted_report["weakest_occurrence_ceiling"],
+        "silence and contradiction must not serialize to the same thing"
+    );
+
+    // And the row-level half: a call that asserted nothing carries no rung, because a ladder
+    // position grades a claim and this call did not make one.
+    assert_eq!(quiet_report["calls"][0]["asserted"], json!(false));
+    assert_eq!(quiet_report["calls"][0]["occurrence_ceiling"], Value::Null);
+}
+
+/// Position on the published ladder, defined here rather than imported so the test does not agree
+/// with the implementation by construction. A rung the binary emits that this list does not know is
+/// a hard failure: it means the vocabulary grew and this test stopped covering it.
+///
+/// `Null` gets its own arm rather than falling into the panic. It is a legitimate value — a blocked
+/// or non-asserting row carries no rung — and reporting it as an unknown rung would misdiagnose an
+/// ordinary state as a vocabulary change.
+fn ladder_index(v: &Value) -> usize {
+    match v.as_str() {
+        Some("asserted") => 0,
+        Some("asserted_signed") => 1,
+        Some("observed_at_receiver") => 2,
+        Some("observed_in_path") => 3,
+        Some("independently_confirmed") => 4,
+        None if v.is_null() => panic!("no rung on this row; the caller must filter before ranking"),
+        other => panic!("unknown ceiling rung in report: {other:?}"),
+    }
+}
