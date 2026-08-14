@@ -56,7 +56,13 @@ An "Evidence Bundle" is the unit of export/transfer.
 **Run Root Calculation**:
 `run_root = sha256( concatenate( event_id bytes for all events in sequence ) )`
 
-This creates a lightweight **hash chain** over ordered entry hashes that proves the integrity and order of the event stream.
+This creates a lightweight **Hash Chain** (Merkle sequence) that proves the integrity and order of the event stream.
+
+> Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
+> event content-hash strings, with a trailing newline, in event sequence order —
+> not a tree root, and not `event_id` bytes. References below to the historical
+> tree proposal describe the model used at the time and are not claims about the
+> shipped evidence format.
 
 ## Consequences
 - **Verifiability**: Any third party can take the `events.ndjson`, re-compute JCS hashes, and verify they match `event_id` and `run_root`.

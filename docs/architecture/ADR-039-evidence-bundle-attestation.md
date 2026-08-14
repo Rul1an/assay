@@ -7,7 +7,14 @@ Depends on ADR-034 (contract seam).
 
 ## Context
 
-The evidence bundle has a manifest, run-root digest, and content-addressed events, but is
+The evidence bundle has a manifest, Merkle root, and content-addressed events, but is
+
+> Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
+> event content-hash strings, with a trailing newline, in event sequence order —
+> not a tree root, and not `event_id` bytes. References below to the historical
+> tree proposal describe the model used at the time and are not claims about the
+> shipped evidence format.
+
 not emitted as an attestation statement. DSSE signing already exists, scoped to the
 mandate subsystem (`assay-evidence/src/mandate/signing.rs`), and CI emits SLSA
 build-provenance for the binary. The bundle itself cannot be anchored or verified

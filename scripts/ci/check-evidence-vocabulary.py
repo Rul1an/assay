@@ -5,11 +5,17 @@ Every scanned merkle occurrence must match a path-bound allowlist pattern.
 Affirmative run_root-as-Merkle phrases fail even when the file is allowlisted.
 A vacuous allowlist entry (path exists, pattern matches 0 times) is a hard
 failure. Whole-directory exemptions are not supported.
+
+Historical ADR/RFC/experiment prose is not a genuine-use allowlist. Those
+lines stay on an exact-path corrected-history list and require an adjacent
+dated correction, or a dated sidecar for frozen generated results.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import os
 import re
 import subprocess
 import sys
@@ -17,9 +23,6 @@ from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-
-# Non-normative implementation records. Not outward product claims.
-SCAN_PREFIX_EXCLUDES = ("docs/superpowers/plans/",)
 
 # The guard necessarily spells Merkle while defining the rule. Listing those
 # self-hits in ALLOWED_MERKLE_USES is allowlist sprawl. Exclude only these two
@@ -29,15 +32,48 @@ SCAN_PATH_EXCLUDES = (
     "scripts/ci/test-evidence-vocabulary.sh",
 )
 
-# Complete-line patterns (fullmatch on the stripped line). The only `.*...*`
-# permit is generated `merkle_tree_*` identifiers in vmlinux.rs. Hand-written
+# Same names as scripts/ci/lib/clear-git-repository-env.sh. A second list that
+# drifted would re-admit hostile GIT_DIR selection.
+HOSTILE_GIT_ENV_NAMES = (
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
+)
+
+TEXTUAL_SCAN_SUFFIXES = (
+    ".md",
+    ".rs",
+    ".py",
+    ".ts",
+    ".js",
+    ".yml",
+    ".yaml",
+    ".toml",
+    ".sh",
+    ".txt",
+    ".json",
+)
+
+# Complete-line patterns (fullmatch on the stripped line). Hand-written
 # import/call lines use exact `_E` text so a comment cannot ride the token.
 # Do not restore substring or prose-capable wildcard permits.
 _E = re.escape
 ALLOWED_MERKLE_USES: dict[str, tuple[str, ...]] = {
     "docs/architecture/SPEC-Outward-Product-Truth-v1.md": (
         _E("2. evidence vocabulary and the false Merkle claim tracked by issue #2222;"),
-        _E("of entry hashes. It is not a Merkle root and it does not provide a Merkle inclusion proof."),
+        _E("It is not a Merkle root and it does not provide a Merkle inclusion proof."),
         _E("tests, demos, and fixtures that teach the public contract. Genuine Merkle references remain valid"),
         _E("when they describe a real Merkle construction, including Rekor, RFC 6962 experiments, and the"),
         _E("A scoped recurrence guard must reject new false `run_root`-as-Merkle claims while allowing named,"),
@@ -45,8 +81,13 @@ ALLOWED_MERKLE_USES: dict[str, tuple[str, ...]] = {
         _E("- issue #2222's false current `run_root` Merkle claims are removed;"),
         _E("- genuine Merkle constructions remain documented;"),
     ),
-    # Generated kernel identifiers (four `merkle_tree_*` shapes). Not prose.
-    "crates/assay-ebpf/src/vmlinux.rs": (r".*merkle_tree_.*",),
+    # Generated kernel identifiers. Exact lines only — not prose containing merkle_tree_.
+    "crates/assay-ebpf/src/vmlinux.rs": (
+        _E("pub read_merkle_tree_page: ::core::option::Option<"),
+        _E("pub write_merkle_tree_block: ::core::option::Option<"),
+        _E("pub struct merkle_tree_params {"),
+        _E("pub tree_params: merkle_tree_params,"),
+    ),
     "scripts/experiments/aee_spike_lib.py": (
         _E("fixture signature, run-binding, and RFC6962-style Merkle rules in one place so"),
         _E("def merkle_root(leaves: list[dict[str, Any]]) -> str:"),
@@ -96,15 +137,87 @@ LEGACY_IDENTIFIERS: dict[str, tuple[str, ...]] = {
     "demo/scenes/merkle-chain.tape": (_E("Output demo/scenes/merkle-chain.mp4"),),
 }
 
+# Exact original historical lines. Not ALLOWED_MERKLE_USES. Each match must
+# have an adjacent dated correction, or a sidecar for frozen results.
+CORRECTED_HISTORY: dict[str, tuple[str, ...]] = {
+    "docs/architecture/ADR-007-Deterministic-Provenance.md": (
+        _E("This creates a lightweight **Hash Chain** (Merkle sequence) that proves the integrity and order of the event stream."),
+    ),
+    "docs/architecture/ADR-034-Evidence-Redaction-At-Capture.md": (
+        _E("- Determinism is non-negotiable here: assay evidence is replayable (VCR) and Merkle-hashed. Redaction"),
+        _E("VCR replay and Merkle hashing stay stable."),
+        _E("- Belt-and-suspenders: a final ASSERTION sweep over the assembled ndjson before the Merkle root and"),
+    ),
+    "docs/architecture/ADR-039-evidence-bundle-attestation.md": (
+        _E("The evidence bundle has a manifest, Merkle root, and content-addressed events, but is"),
+    ),
+    "docs/architecture/RFC-001-dx-ux-governance.md": (
+        _E("4. **Evidence integrity chain** separating metadata from payload integrity - `assay-evidence` manifest, SHA-256, Merkle root"),
+    ),
+    "docs/experiments/evidence-mutation-cost-2026-06/README.md": (
+        _E("(`run_root`, a Merkle root over event content hashes) is bound by an external signature the"),
+        _E("size and gzip ratio, bytes per event, the Merkle inclusion-proof size (ceil(log2(N)) hashes), and"),
+    ),
+    "docs/experiments/runner-vs-otel-2026-05/workload/src/manifest-binding.ts": (
+        _E("* (see `crates/assay-evidence` Merkle infrastructure)."),
+    ),
+    "docs/experiments/evidence-mutation-cost-2026-06/results/cost.json": (
+        _E('"inclusion_proof_hashes": 10'),
+        _E('"inclusion_proof_hashes": 13'),
+        _E('"inclusion_proof_hashes": 14'),
+        _E('"inclusion_proof_hashes": 16'),
+        _E('"inclusion_proof_hashes": 17'),
+    ),
+    "docs/experiments/evidence-mutation-cost-2026-06/results/cost.md": (
+        _E("| events | verify ms (median) | reps | compressed bytes | gzip ratio | bytes/event | inclusion-proof hashes |"),
+    ),
+}
+
+CORRECTED_HISTORY_SIDECARS: dict[str, str] = {
+    "docs/experiments/evidence-mutation-cost-2026-06/results/cost.json": (
+        "docs/experiments/evidence-mutation-cost-2026-06/results/CORRECTION-2026-08-14.md"
+    ),
+    "docs/experiments/evidence-mutation-cost-2026-06/results/cost.md": (
+        "docs/experiments/evidence-mutation-cost-2026-06/results/CORRECTION-2026-08-14.md"
+    ),
+}
+
+# Frozen 2026-06 measurement bytes from origin/main. Not regenerated.
+CORRECTED_HISTORY_DIGESTS: dict[str, str] = {
+    "docs/experiments/evidence-mutation-cost-2026-06/results/cost.json": (
+        "4d3cb30137710324a844cd148f09ace0159679c849622bbcd8597bbd80b7d58e"
+    ),
+    "docs/experiments/evidence-mutation-cost-2026-06/results/cost.md": (
+        "f14b07bd862624b68b86992773da17aea7cce04ff4a4016450f849bbfd863c01"
+    ),
+}
+
+DATED_CORRECTION_BODY = (
+    "Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited",
+    "event content-hash strings, with a trailing newline, in event sequence order —",
+    "not a tree root, and not `event_id` bytes. References below to the historical",
+    "tree proposal describe the model used at the time and are not claims about the",
+    "shipped evidence format.",
+)
+
 FALSE_CLAIM_RE = re.compile(
     r"run_root\s+is\s+a\s+merkle\s+root",  # affirmative run_root-as-Merkle
     re.IGNORECASE,
 )
 MERKLE_RE = re.compile(r"merkle", re.IGNORECASE)
+# Membership/inclusion of one event, even when the word Merkle is absent.
+RUN_ROOT_MEMBERSHIP_RE = re.compile(
+    r"run_root\b.{0,160}\b(?:included|inclusion|membership)\b",
+    re.IGNORECASE,
+)
+RUN_ROOT_MEMBERSHIP_NEGATION_RE = re.compile(
+    r"\b(?:does not|cannot|is not|not a|not an)\b.{0,40}\b(?:included|inclusion|membership)\b",
+    re.IGNORECASE,
+)
 
 # Withdrawn experiment metric names. They do not contain "merkle" but still
 # teach a production inclusion proof that run_root does not have. The Rust
-# harness plus the stable experiment directory — not today's filenames.
+# harness plus every docs/experiments/ path — not one dated directory.
 # Genuine Rekor/ADR inclusion-proof text is out of scope.
 WITHDRAWN_METRIC_LABELS: tuple[str, ...] = (
     "inclusion_proof_hashes",
@@ -114,10 +227,16 @@ WITHDRAWN_LABEL_RES: tuple[re.Pattern[str], ...] = tuple(
     re.compile(re.escape(label), re.IGNORECASE) for label in WITHDRAWN_METRIC_LABELS
 )
 WITHDRAWN_HARNESS = "crates/assay-evidence/tests/e3_verify_cost_curve.rs"
-WITHDRAWN_EXPERIMENT_PREFIX = "docs/experiments/evidence-mutation-cost-2026-06/"
+WITHDRAWN_EXPERIMENT_PREFIX = "docs/experiments/"
+
+
+def scrub_hostile_git_env() -> None:
+    for name in HOSTILE_GIT_ENV_NAMES:
+        os.environ.pop(name, None)
 
 
 def git_files(root: Path) -> list[Path]:
+    scrub_hostile_git_env()
     proc = subprocess.run(
         ["git", "ls-files", "-z"],
         cwd=root,
@@ -137,14 +256,84 @@ def read_text(path: Path) -> str | None:
     return data.decode("utf-8", errors="replace")
 
 
+def sha256_hex(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def rel_posix(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
 
 
-def is_excluded(rel: str) -> bool:
+def is_textual_scan_surface(rel: str) -> bool:
+    lower = rel.lower()
+    return any(lower.endswith(suffix) for suffix in TEXTUAL_SCAN_SUFFIXES)
+
+
+def _mkdocs_pattern_to_repo_path(pat: str) -> str:
+    item = pat.strip()
+    if item.startswith("/"):
+        item = item[1:]
+    if item.endswith("**"):
+        item = item[:-2]
+    if not item.startswith("docs/"):
+        item = f"docs/{item}"
+    return item
+
+
+def publication_exclude_repo_paths(mkdocs_text: str) -> tuple[str, ...]:
+    """Map mkdocs exclude_docs (docs/-relative) to repo-relative paths."""
+    patterns: list[str] = []
+    lines = mkdocs_text.splitlines()
+    idx = 0
+    while idx < len(lines):
+        raw = lines[idx]
+        if raw.startswith("exclude_docs:"):
+            rest = raw.split(":", 1)[1].strip()
+            if rest in {"|", ">", "|-", ">-", "|+", ">+"}:
+                idx += 1
+                while idx < len(lines):
+                    nxt = lines[idx]
+                    if nxt.startswith((" ", "\t")):
+                        item = nxt.strip().split("#", 1)[0].strip()
+                        if item:
+                            patterns.append(item)
+                        idx += 1
+                        continue
+                    if nxt.strip() == "":
+                        idx += 1
+                        continue
+                    break
+                continue
+            if rest:
+                patterns.append(rest.split("#", 1)[0].strip())
+        idx += 1
+    return tuple(_mkdocs_pattern_to_repo_path(pat) for pat in patterns if pat)
+
+
+def load_publication_excludes(root: Path) -> tuple[str, ...]:
+    mkdocs = root / "mkdocs.yml"
+    if not mkdocs.is_file():
+        return ()
+    text = read_text(mkdocs)
+    if text is None:
+        return ()
+    return publication_exclude_repo_paths(text)
+
+
+def is_publication_excluded(rel: str, publication_paths: Sequence[str]) -> bool:
+    for pat in publication_paths:
+        if pat.endswith("/"):
+            if rel == pat.rstrip("/") or rel.startswith(pat):
+                return True
+        elif rel == pat:
+            return True
+    return False
+
+
+def is_excluded(rel: str, publication_paths: Sequence[str] = ()) -> bool:
     if rel in SCAN_PATH_EXCLUDES:
         return True
-    return any(rel == prefix.rstrip("/") or rel.startswith(prefix) for prefix in SCAN_PREFIX_EXCLUDES)
+    return is_publication_excluded(rel, publication_paths)
 
 
 def is_withdrawn_surface(rel: str) -> bool:
@@ -170,6 +359,68 @@ def line_is_allowed(line: str, patterns: Sequence[re.Pattern[str]]) -> bool:
     return any(line_matches(line, pat) for pat in patterns)
 
 
+def is_run_root_membership_claim(line: str) -> bool:
+    if not RUN_ROOT_MEMBERSHIP_RE.search(line):
+        return False
+    return RUN_ROOT_MEMBERSHIP_NEGATION_RE.search(line) is None
+
+
+def normalize_correction_line(line: str) -> str:
+    text = line.strip()
+    if text.startswith(">"):
+        text = text[1:].strip()
+    if text.startswith("*"):
+        text = text[1:].strip()
+    return text
+
+
+def is_dated_correction_block(lines: Sequence[str], start: int) -> bool:
+    if start < 0 or start + len(DATED_CORRECTION_BODY) > len(lines):
+        return False
+    got = tuple(
+        normalize_correction_line(lines[start + offset])
+        for offset in range(len(DATED_CORRECTION_BODY))
+    )
+    return got == DATED_CORRECTION_BODY
+
+
+def has_adjacent_dated_correction(lines: Sequence[str], idx: int) -> bool:
+    n = len(DATED_CORRECTION_BODY)
+    for gap in (0, 1):
+        before = idx - n - gap
+        if before >= 0 and is_dated_correction_block(lines, before):
+            if gap == 0 or not lines[idx - 1].strip():
+                return True
+        after = idx + 1 + gap
+        if is_dated_correction_block(lines, after):
+            if gap == 0 or not lines[idx + 1].strip():
+                return True
+    return False
+
+
+def sidecar_has_exact_correction(root: Path, sidecar_rel: str) -> bool:
+    text = read_text(root / sidecar_rel)
+    if text is None:
+        return False
+    lines = text.splitlines()
+    return any(is_dated_correction_block(lines, idx) for idx in range(len(lines)))
+
+
+def line_is_corrected_history(rel: str, line: str) -> bool:
+    return line_is_allowed(line, compiled_patterns(CORRECTED_HISTORY.get(rel, ())))
+
+
+def historical_line_admitted(
+    root: Path, rel: str, line: str, lines: Sequence[str], idx: int
+) -> bool:
+    if not line_is_corrected_history(rel, line):
+        return False
+    sidecar = CORRECTED_HISTORY_SIDECARS.get(rel)
+    if sidecar:
+        return sidecar_has_exact_correction(root, sidecar)
+    return has_adjacent_dated_correction(lines, idx)
+
+
 def allowlist_staleness(
     root: Path, allowlist: Mapping[str, Sequence[str]]
 ) -> list[str]:
@@ -192,25 +443,79 @@ def allowlist_staleness(
     return messages
 
 
+def corrected_history_staleness(
+    root: Path, history: Mapping[str, Sequence[str]] | None = None
+) -> list[str]:
+    entries = CORRECTED_HISTORY if history is None else history
+    if not any((root / rel).is_file() for rel in entries):
+        return []
+    production = (root / "docs/architecture/SPEC-Outward-Product-Truth-v1.md").is_file()
+    messages: list[str] = []
+    for rel, patterns in entries.items():
+        path = root / rel
+        if not path.is_file():
+            if production:
+                messages.append(f"stale corrected-history entry: missing path {rel}")
+            continue
+        text = read_text(path)
+        if text is None:
+            messages.append(f"stale corrected-history entry: {rel} is unreadable or binary")
+            continue
+        lines = text.splitlines()
+        compiled = compiled_patterns(patterns)
+        sidecar = CORRECTED_HISTORY_SIDECARS.get(rel)
+        for raw, cre in zip(patterns, compiled, strict=True):
+            matches = [idx for idx, line in enumerate(lines) if line_matches(line, cre)]
+            if not matches:
+                messages.append(
+                    f"vacuous corrected-history entry: {rel} / {raw!r} matched 0 times"
+                )
+                continue
+            if sidecar:
+                if not sidecar_has_exact_correction(root, sidecar):
+                    messages.append(
+                        f"corrected-history sidecar missing exact dated correction: {sidecar}"
+                    )
+            else:
+                for idx in matches:
+                    if not has_adjacent_dated_correction(lines, idx):
+                        messages.append(
+                            f"corrected-history line without adjacent dated correction: {rel}"
+                        )
+        expected = CORRECTED_HISTORY_DIGESTS.get(rel)
+        if expected and sha256_hex(path) != expected:
+            messages.append(f"corrected-history digest mismatch: {rel}")
+    return messages
+
+
 def scan_findings(
     root: Path,
     files: Iterable[Path],
     allowlist: Mapping[str, Sequence[str]],
     identifiers: Mapping[str, Sequence[str]],
+    publication_paths: Sequence[str] = (),
 ) -> list[str]:
     compiled = {rel: compiled_patterns(pats) for rel, pats in allowlist.items()}
     compiled_ids = {rel: compiled_patterns(pats) for rel, pats in identifiers.items()}
     findings: list[str] = []
     for path in files:
         rel = rel_posix(path, root)
-        if is_excluded(rel):
+        if is_excluded(rel, publication_paths):
             continue
         text = read_text(path)
         if text is None:
+            if is_textual_scan_surface(rel):
+                findings.append(f"{rel}: unreadable or NUL textual surface")
             continue
         allowed = compiled.get(rel, ())
         legacy = compiled_ids.get(rel, ())
-        for line_no, line in enumerate(text.splitlines(), start=1):
+        lines = text.splitlines()
+        for line_no, line in enumerate(lines, start=1):
+            if is_run_root_membership_claim(line):
+                findings.append(
+                    f"{rel}:{line_no}: false run_root inclusion/membership claim: {line.strip()}"
+                )
+                continue
             if not MERKLE_RE.search(line):
                 continue
             if FALSE_CLAIM_RE.search(line):
@@ -220,27 +525,42 @@ def scan_findings(
                 continue
             if line_is_allowed(line, allowed) or line_is_allowed(line, legacy):
                 continue
+            if historical_line_admitted(root, rel, line, lines, line_no - 1):
+                continue
+            if line_is_corrected_history(rel, line):
+                findings.append(
+                    f"{rel}:{line_no}: historical line without adjacent dated correction: {line.strip()}"
+                )
+                continue
             findings.append(
                 f"{rel}:{line_no}: unapproved Merkle claim: {line.strip()}"
             )
     return findings
 
 
-def scan_withdrawn_labels(root: Path, files: Iterable[Path]) -> list[str]:
+def scan_withdrawn_labels(
+    root: Path, files: Iterable[Path], publication_paths: Sequence[str] = ()
+) -> list[str]:
     findings: list[str] = []
     for path in files:
         rel = rel_posix(path, root)
-        if not is_withdrawn_surface(rel):
+        if is_excluded(rel, publication_paths) or not is_withdrawn_surface(rel):
             continue
         text = read_text(path)
         if text is None:
+            if is_textual_scan_surface(rel):
+                findings.append(f"{rel}: unreadable or NUL textual surface")
             continue
-        for line_no, line in enumerate(text.splitlines(), start=1):
+        lines = text.splitlines()
+        for line_no, line in enumerate(lines, start=1):
             for label, cre in zip(WITHDRAWN_METRIC_LABELS, WITHDRAWN_LABEL_RES, strict=True):
-                if cre.search(line):
-                    findings.append(
-                        f"{rel}:{line_no}: withdrawn metric label {label!r}: {line.strip()}"
-                    )
+                if not cre.search(line):
+                    continue
+                if historical_line_admitted(root, rel, line, lines, line_no - 1):
+                    continue
+                findings.append(
+                    f"{rel}:{line_no}: withdrawn metric label {label!r}: {line.strip()}"
+                )
     return findings
 
 
@@ -251,10 +571,19 @@ def check_tree(
 ) -> int:
     rules = ALLOWED_MERKLE_USES if allowlist is None else allowlist
     idents = LEGACY_IDENTIFIERS if identifiers is None else identifiers
-    stale = allowlist_staleness(root, rules) + allowlist_staleness(root, idents)
+    publication_paths = load_publication_excludes(root)
+    stale = (
+        allowlist_staleness(root, rules)
+        + allowlist_staleness(root, idents)
+        + corrected_history_staleness(root)
+    )
     tracked = git_files(root)
-    findings = scan_findings(root, tracked, rules, idents)
-    withdrawn = scan_withdrawn_labels(root, tracked)
+    if not tracked:
+        print("evidence-vocabulary=failed")
+        print("tracked set is empty; refuse to pass")
+        return 1
+    findings = scan_findings(root, tracked, rules, idents, publication_paths)
+    withdrawn = scan_withdrawn_labels(root, tracked, publication_paths)
     if stale or findings or withdrawn:
         print("evidence-vocabulary=failed")
         for message in stale + findings + withdrawn:

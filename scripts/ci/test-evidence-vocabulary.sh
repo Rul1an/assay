@@ -394,6 +394,327 @@ git -C "$FIXTURE" add -A -- binary.bin
 run_case binary-input pass rekor
 echo "ok: binary-input"
 
+# Hostile GIT_DIR pointing at an empty repo must not pass with zero files.
+HOSTILE="$TMP/hostile-gitdir"
+init_fixture "$HOSTILE"
+printf '%s\n' "$FALSE_INJECT" >> "$HOSTILE/docs/lint/index.md"
+git -C "$HOSTILE" add -A -- docs/lint/index.md
+EMPTY_GIT="$TMP/empty-repo"
+git init -q "$EMPTY_GIT"
+python3 - "$CHECKER" "$HOSTILE" "$EMPTY_GIT" <<'PY'
+import importlib.util
+import io
+import os
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root, empty = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+os.environ["GIT_DIR"] = str(empty / ".git")
+os.environ["GIT_WORK_TREE"] = str(empty)
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0:
+    raise SystemExit("FAIL: hostile-gitdir expected fail, checker passed:\n" + out)
+if "evidence-vocabulary=passed" in out:
+    raise SystemExit("FAIL: hostile-gitdir printed passed:\n" + out)
+print("ok: hostile-gitdir")
+PY
+
+EMPTY_TRACKED="$TMP/empty-tracked"
+git init -q "$EMPTY_TRACKED"
+python3 - "$CHECKER" "$EMPTY_TRACKED" <<'PY'
+import importlib.util
+import io
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, {}, identifiers={})
+out = buf.getvalue()
+if rc == 0 or "tracked set is empty" not in out:
+    raise SystemExit("FAIL: empty tracked set must fail closed:\n" + out)
+print("ok: empty-tracked-set")
+PY
+
+# NUL + false claim in docs/*.md must fail closed; generic binary still passes.
+NULDOC="$TMP/nul-docs"
+init_fixture "$NULDOC"
+python3 - "$CHECKER" "$NULDOC" "$FALSE_INJECT" <<'PY'
+import importlib.util
+import io
+import subprocess
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root, false_inject = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+hidden = root / "docs" / "hidden.md"
+hidden.write_bytes((false_inject + "\n").encode() + b"\x00hidden\n")
+subprocess.run(["git", "add", "-A", "--", "docs/hidden.md"], cwd=root, check=True)
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0 or "hidden.md" not in out:
+    raise SystemExit("FAIL: NUL docs/*.md must fail closed:\n" + out)
+print("ok: nul-docs-md")
+PY
+
+# vmlinux prose piggyback on merkle_tree_ must fail.
+VMLINUX="$TMP/vmlinux-piggy"
+init_fixture "$VMLINUX"
+mkdir -p "$VMLINUX/crates/assay-ebpf/src"
+python3 - "$CHECKER" "$VMLINUX" <<'PY'
+import importlib.util
+import io
+import subprocess
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+vmlinux = root / "crates/assay-ebpf/src/vmlinux.rs"
+vmlinux.write_text(
+    "\n".join(
+        [
+            "    pub read_merkle_tree_page: ::core::option::Option<",
+            "    pub write_merkle_tree_block: ::core::option::Option<",
+            "pub struct merkle_tree_params {",
+            "    pub tree_params: merkle_tree_params,",
+            "// merkle_tree_probe proves every evidence digest is a Merkle root",
+            "",
+        ]
+    )
+)
+subprocess.run(
+    ["git", "add", "-A", "--", "crates/assay-ebpf/src/vmlinux.rs"],
+    cwd=root,
+    check=True,
+)
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+chosen = {
+    "crates/assay-ebpf/src/vmlinux.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-ebpf/src/vmlinux.rs"
+    ],
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ],
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, chosen, identifiers={})
+out = buf.getvalue()
+if rc == 0 or "merkle_tree_probe" not in out:
+    raise SystemExit("FAIL: vmlinux piggyback must fail:\n" + out)
+print("ok: vmlinux-piggyback")
+PY
+
+# Plans are scanned unless mkdocs publication-excludes them.
+PLANS="$TMP/plans-published"
+init_fixture "$PLANS"
+mkdir -p "$PLANS/docs/superpowers/plans"
+printf '%s\n' "$FALSE_INJECT" > "$PLANS/docs/superpowers/plans/sneak.md"
+git -C "$PLANS" add -A -- docs/superpowers/plans/sneak.md
+python3 - "$CHECKER" "$PLANS" <<'PY'
+import importlib.util
+import io
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+if getattr(module, "SCAN_PREFIX_EXCLUDES", None):
+    raise SystemExit("FAIL: SCAN_PREFIX_EXCLUDES must not be a prefix escape hatch")
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0 or "sneak.md" not in out:
+    raise SystemExit("FAIL: unpublished-mkdocs plan with a false claim must fail:\n" + out)
+print("ok: plans-scanned-without-publication-exclude")
+PY
+
+# Corrected-history: original line without adjacent correction fails;
+# changing the correction fails; sidecar-less frozen label fails.
+HIST="$TMP/corrected-history"
+init_fixture "$HIST"
+mkdir -p "$HIST/docs/architecture"
+printf '%s\n' \
+  'This creates a lightweight **Hash Chain** (Merkle sequence) that proves the integrity and order of the event stream.' \
+  > "$HIST/docs/architecture/ADR-007-Deterministic-Provenance.md"
+git -C "$HIST" add -A -- docs/architecture/ADR-007-Deterministic-Provenance.md
+python3 - "$CHECKER" "$HIST" <<'PY'
+import importlib.util
+import io
+import subprocess
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+history = {
+    "docs/architecture/ADR-007-Deterministic-Provenance.md": module.CORRECTED_HISTORY[
+        "docs/architecture/ADR-007-Deterministic-Provenance.md"
+    ]
+}
+# Monkeypatch production history for this fixture by writing the correction after.
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0:
+    raise SystemExit("FAIL: historical line without dated correction must fail:\n" + out)
+adr = root / "docs/architecture/ADR-007-Deterministic-Provenance.md"
+correction = "\n".join("> " + line for line in module.DATED_CORRECTION_BODY)
+adr.write_text(adr.read_text() + "\n" + correction + "\n")
+subprocess.run(
+    ["git", "add", "-A", "--", "docs/architecture/ADR-007-Deterministic-Provenance.md"],
+    cwd=root,
+    check=True,
+)
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+if rc != 0:
+    raise SystemExit(
+        "FAIL: historical line with adjacent dated correction must pass:\n" + buf.getvalue()
+    )
+mutated = adr.read_text().replace("newline-delimited", "space-delimited", 1)
+adr.write_text(mutated)
+subprocess.run(
+    ["git", "add", "-A", "--", "docs/architecture/ADR-007-Deterministic-Provenance.md"],
+    cwd=root,
+    check=True,
+)
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0:
+    raise SystemExit("FAIL: changed dated correction must fail:\n" + out)
+print("ok: corrected-history-adjacent")
+PY
+
+# Membership claim without the word Merkle.
+MEMBER="$TMP/membership"
+init_fixture "$MEMBER"
+_MEMBER_PREFIX='run_root lets an auditor prove one event was included'
+_MEMBER_SUFFIX=' without reading the rest of the bundle.'
+printf '%s\n' "${_MEMBER_PREFIX}${_MEMBER_SUFFIX}" >> "$MEMBER/docs/lint/index.md"
+git -C "$MEMBER" add -A -- docs/lint/index.md
+python3 - "$CHECKER" "$MEMBER" <<'PY'
+import importlib.util
+import io
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0 or "inclusion/membership" not in out:
+    raise SystemExit("FAIL: run_root membership claim must fail even without Merkle:\n" + out)
+print("ok: run-root-membership")
+PY
+
+# A new dated experiment directory still carries withdrawn labels.
+NEWEXP="$TMP/withdrawn-2026-09"
+init_fixture "$NEWEXP"
+mkdir -p "$NEWEXP/docs/experiments/evidence-mutation-cost-2026-09/results"
+printf '%s\n' 'inclusion_proof_hashes: 4' \
+  > "$NEWEXP/docs/experiments/evidence-mutation-cost-2026-09/results/cost.json"
+git -C "$NEWEXP" add -A -- \
+  docs/experiments/evidence-mutation-cost-2026-09/results/cost.json
+python3 - "$CHECKER" "$NEWEXP" <<'PY'
+import importlib.util
+import io
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0 or "2026-09" not in out:
+    raise SystemExit("FAIL: withdrawn-2026-09 expected fail:\n" + out)
+if not module.is_withdrawn_surface(
+    "docs/experiments/evidence-mutation-cost-2026-09/results/cost.json"
+):
+    raise SystemExit("FAIL: is_withdrawn_surface must cover docs/experiments/ generally")
+print("ok: withdrawn-2026-09")
+PY
+
 python3 - "$CHECKER" "$ROOT" <<'PY'
 import importlib.util
 import inspect
@@ -427,19 +748,55 @@ if getattr(module, "SCAN_PATH_EXCLUDES", None) != guard_paths:
         f"FAIL: SCAN_PATH_EXCLUDES must be exactly {guard_paths}, "
         f"got {getattr(module, 'SCAN_PATH_EXCLUDES', None)!r}"
     )
-prefixes = getattr(module, "SCAN_PREFIX_EXCLUDES", ())
-if any(prefix == "scripts/ci/" or prefix.startswith("scripts/ci/") for prefix in prefixes):
-    raise SystemExit("FAIL: scripts/ci/ must not be a directory-wide scan exclude")
+if getattr(module, "SCAN_PREFIX_EXCLUDES", None):
+    raise SystemExit("FAIL: SCAN_PREFIX_EXCLUDES must not exist as a prefix escape hatch")
+if "docs/superpowers/plans/" not in "\n".join(module.load_publication_excludes(root)):
+    raise SystemExit("FAIL: mkdocs publication excludes must include /superpowers/plans/")
+if not module.is_publication_excluded(
+    "docs/superpowers/plans/example.md", module.load_publication_excludes(root)
+):
+    raise SystemExit("FAIL: plans must be publication-excluded on this tree")
+if module.is_publication_excluded(
+    "docs/architecture/ADR-007-Deterministic-Provenance.md",
+    module.load_publication_excludes(root),
+):
+    raise SystemExit("FAIL: accepted ADRs must remain in the scan")
+history = getattr(module, "CORRECTED_HISTORY", None)
+if not isinstance(history, dict) or not history:
+    raise SystemExit("FAIL: CORRECTED_HISTORY must be a non-empty path-bound dict")
+if set(history) & set(allow):
+    raise SystemExit("FAIL: CORRECTED_HISTORY must not mix with ALLOWED_MERKLE_USES")
+if "docs/experiments/" != getattr(module, "WITHDRAWN_EXPERIMENT_PREFIX", None):
+    raise SystemExit("FAIL: withdrawn labels must cover docs/experiments/ generally")
+if not callable(getattr(module, "is_run_root_membership_claim", None)):
+    raise SystemExit("FAIL: is_run_root_membership_claim must be the shared membership rule")
+hostile = getattr(module, "HOSTILE_GIT_ENV_NAMES", ())
+script = (root / "scripts/ci/lib/clear-git-repository-env.sh").read_text()
+script_names = {
+    token
+    for line in script.splitlines()
+    if not line.startswith("#")
+    for token in line.replace("\\", " ").split()
+    if token.startswith("GIT_")
+}
+if set(hostile) != script_names:
+    raise SystemExit(
+        f"FAIL: HOSTILE_GIT_ENV_NAMES must match clear-git-repository-env.sh: {set(hostile)!r} vs {script_names!r}"
+    )
+ci_text = (root / ".github/workflows/ci.yml").read_text()
+scope = __import__("re").search(r"(?ms)^  scope:\n(.*?)(?=^  [a-zA-Z][\w-]*:|\Z)", ci_text)
+if not scope:
+    raise SystemExit("FAIL: ci.yml scope job missing")
+if "bash scripts/ci/test-evidence-vocabulary.sh" not in scope.group(1):
+    raise SystemExit("FAIL: ci.yml scope job must invoke the evidence-vocabulary self-test")
+if "python3 scripts/ci/check-evidence-vocabulary.py" not in scope.group(1):
+    raise SystemExit("FAIL: ci.yml scope job must invoke the live evidence-vocabulary checker")
 for rel in allow:
     if rel in guard_paths:
         raise SystemExit(f"FAIL: guard path {rel} must not be in ALLOWED_MERKLE_USES")
     if "verify_side_effects.rs" in rel:
         raise SystemExit("FAIL: verify_side_effects.rs must not have an allowlist exception")
     for pat in allow[rel]:
-        if rel == "crates/assay-ebpf/src/vmlinux.rs":
-            if pat != r".*merkle_tree_.*":
-                raise SystemExit(f"FAIL: vmlinux permit must stay generated-id only, got {pat!r}")
-            continue
         if ".*" in pat:
             raise SystemExit(
                 f"FAIL: hand-written path {rel} has a prose-capable wildcard: {pat!r}"

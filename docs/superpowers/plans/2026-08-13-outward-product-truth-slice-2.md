@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- `run_root = sha256(concat(entry_hashes_in_manifest_order))` is the implemented rule.
+- `run_root` is SHA-256 over newline-delimited event content-hash strings, with a trailing newline, in event sequence order.
 - Do not call `run_root` a Merkle root, Merkle tree, Merkle sequence, or inclusion-proof root.
 - Preserve genuine Rekor and RFC 6962 Merkle constructions.
 - Historical ADRs and experiments receive dated correction notes or precise wording; their original decision context is not silently rewritten.
@@ -23,7 +23,7 @@
 
 ## Normative allowlist (path-bound, current hits)
 
-Exceptions are `path -> complete-line regular-expression patterns` (`fullmatch` on the stripped line), not substring permits or whole-file exemptions. The only `.*...*` permit is generated `merkle_tree_*` identifiers in `vmlinux.rs`. Hand-written import/call lines are exact `_E` text; `.*rfc6962_root.*` must not pass a comment. A substring such as `Merkle inclusion proof` must not pass `run_root provides a Merkle inclusion proof.` The checker is the imported dict; a vacuous entry (path exists, pattern fullmatches 0 lines) is a hard failure. An empty allowlist must not admit a genuine Rekor fixture. Allowlisting a file must not mask an injected `run_root` claim, including piggybacks that `FALSE_CLAIM_RE` does not match.
+Exceptions are `path -> complete-line regular-expression patterns` (`fullmatch` on the stripped line), not substring permits or whole-file exemptions. Generated `vmlinux.rs` identifiers are exact `_E` lines, not `.*merkle_tree_.*`. Hand-written import/call lines are exact `_E` text; `.*rfc6962_root.*` must not pass a comment. A substring such as `Merkle inclusion proof` must not pass `run_root provides a Merkle inclusion proof.` The checker is the imported dict; a vacuous entry (path exists, pattern fullmatches 0 lines) is a hard failure. An empty allowlist must not admit a genuine Rekor fixture. Allowlisting a file must not mask an injected `run_root` claim, including piggybacks that `FALSE_CLAIM_RE` does not match.
 
 ```python
 # Patterns are complete-line fullmatch. See scripts/ci/check-evidence-vocabulary.py.
@@ -31,7 +31,9 @@ ALLOWED_MERKLE_USES = {
     "docs/architecture/SPEC-Outward-Product-Truth-v1.md": (
         # eight exact SPEC lines; not the old substring permits
     ),
-    "crates/assay-ebpf/src/vmlinux.rs": (r".*merkle_tree_.*",),  # generated ids only
+    "crates/assay-ebpf/src/vmlinux.rs": (
+        # exact generated identifier lines only; not .*merkle_tree_.*
+    ),
     "scripts/experiments/aee_spike_lib.py": (
         # exact RFC6962-style prose and def lines
     ),
@@ -67,7 +69,16 @@ Exclude exactly these two guard-implementation paths from the outward-claim scan
 - `scripts/ci/check-evidence-vocabulary.py`
 - `scripts/ci/test-evidence-vocabulary.sh`
 
-Also exclude `docs/superpowers/plans/` as a non-normative implementation-record prefix.
+Do **not** keep a `SCAN_PREFIX_EXCLUDES` escape hatch. Implementation plans are
+publication-excluded only when `mkdocs.yml` `exclude_docs` lists
+`/superpowers/plans/`; the checker reads that list (one function). A published
+docs path with a false claim must still fail.
+
+Historical ADR/RFC/experiment prose is a **corrected-history** rule, not
+`ALLOWED_MERKLE_USES`: exact original line, adjacent exact dated 2026-08-14
+correction (canonical algorithm, including no `event_id` field). Frozen
+generated results keep original bytes plus a dated sidecar pinned by path and
+digest. Removing or changing the correction fails. Do not exempt whole files.
 
 The live checker stayed RED on `verify_side_effects.rs` until #2355 merged (the #2354 follow-up). Do not add an allowlist or `TEMPORARY_DEBT` exception for a false phrase. After #2355, this branch corrects that sentence and enables the live-tree pre-commit hook.
 
@@ -211,9 +222,10 @@ If Rust module-doc strings changed, run clippy on those assay-cli targets only. 
 At the first false statement in each ADR/RFC/experiment, add:
 
 ```markdown
-> Correction (2026-08-14): the shipped `run_root` is a flat SHA-256 digest over
-> ordered entry hashes, not a tree root. References below to the historical tree
-> proposal describe the model used at the time and are not claims about the
+> Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
+> event content-hash strings, with a trailing newline, in event sequence order —
+> not a tree root, and not `event_id` bytes. References below to the historical
+> tree proposal describe the model used at the time and are not claims about the
 > shipped evidence format.
 ```
 

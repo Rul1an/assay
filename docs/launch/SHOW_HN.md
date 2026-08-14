@@ -6,7 +6,7 @@
 
 Hi HN,
 
-I've been building Assay to solve a problem I kept hitting: how do you test autonomous AI agents deterministically in CI, and prove to auditors what they actually did?
+I've been building Assay to solve a problem I kept hitting: how do you test autonomous AI agents deterministically in CI, and carry a verifier-checkable evidence bundle of recorded bytes?
 
 Most "agent CI" tools today are focused on evals (LLM-as-a-judge) or observability. Assay focuses on **runtime security and auditability**.
 

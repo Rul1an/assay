@@ -8,7 +8,12 @@
  *
  * Returns the SHA-256 digest as `sha256:<hex>`, the same format used by
  * `compare/compare.py` and by the Runner archive's own per-file digests
- * (see `crates/assay-evidence` content-addressed digests).
+ * (see `crates/assay-evidence` Merkle infrastructure).
+ * Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
+ * event content-hash strings, with a trailing newline, in event sequence order —
+ * not a tree root, and not `event_id` bytes. References below to the historical
+ * tree proposal describe the model used at the time and are not claims about the
+ * shipped evidence format.
  *
  * The digest is intended to be attached as a span event attribute named
  * `assay.archive.manifest_digest` on the root experiment span, mirroring the

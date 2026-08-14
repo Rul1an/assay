@@ -5,7 +5,7 @@
 //! the matrix.
 //!
 //! Threat model T: a party WITHOUT the signing key mutates a bundle after the fact. The bundle's
-//! run anchor (`run_root`, a flat SHA-256 digest over ordered entry hashes) is bound by an external signature the attacker cannot
+//! run anchor (`run_root`, SHA-256 over newline-delimited event content-hash strings, with a trailing newline, in event sequence order) is bound by an external signature the attacker cannot
 //! forge. Two layers:
 //!   - internal verifier (`verify_bundle_with_limits`): catches blind tampering that breaks
 //!     internal consistency, with a specific ErrorCode;

@@ -24,9 +24,12 @@ use assay_evidence::types::EvidenceEvent;
 use assay_evidence::{verify_bundle_with_limits, BundleWriter, VerifyLimits};
 use chrono::{TimeZone, Utc};
 use ed25519_dalek::SigningKey;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::io::Cursor;
+use std::sync::Mutex;
 use std::time::Instant;
+
+static E3_OUT_DIR_LOCK: Mutex<()> = Mutex::new(());
 
 const ENTROPY_ALPHABET: &[u8; 64] =
     b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
@@ -181,8 +184,92 @@ fn dsse_sign_verify_ms(reps: usize) -> (f64, f64) {
     (median(sign), median(verify))
 }
 
+fn requested_e3_out_dir() -> Option<String> {
+    match std::env::var("E3_OUT_DIR") {
+        Ok(d) if !d.is_empty() => Some(d),
+        _ => None,
+    }
+}
+
+fn cost_artifact_document(
+    profile: &str,
+    payload_bytes: usize,
+    rows: Vec<Value>,
+    fit: (f64, f64, f64),
+    dsse: (f64, f64),
+) -> Value {
+    let (slope, intercept, r2) = fit;
+    let (sign_full, verify_full) = dsse;
+    json!({
+        "schema": "assay.experiment.evidence_verify_cost.v0",
+        "profile": profile,
+        "payload_bytes_per_event": payload_bytes,
+        "synthetic_log2_model": {
+            "column": "synthetic_log2_hash_count",
+            "formula": "ceil(log2(N))",
+            "consumed_by_production_verification": false,
+            "note": "Comparison model only. Production verification does not consume it; run_root is SHA-256 over newline-delimited event content-hash strings, with a trailing newline, in event sequence order.",
+        },
+        "rows": rows,
+        "fit": {
+            "slope_ms_per_event": slope,
+            "intercept_ms": intercept,
+            "ms_per_1k_events": slope * 1_000.0,
+            "r2": r2,
+        },
+        "dsse": {
+            "sign_ms_median": sign_full,
+            "verify_ms_median": verify_full,
+            "reps": 101,
+        },
+    })
+}
+
+fn write_cost_json(out_dir: &str, cost: &Value) {
+    std::fs::create_dir_all(out_dir).expect("create out dir");
+    std::fs::write(
+        format!("{out_dir}/cost.json"),
+        serde_json::to_string_pretty(cost).unwrap(),
+    )
+    .expect("write cost.json");
+}
+
+#[test]
+fn e3_out_dir_emits_synthetic_log2_not_withdrawn_label() {
+    let _guard = E3_OUT_DIR_LOCK.lock().expect("E3_OUT_DIR lock");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    std::env::set_var("E3_OUT_DIR", tmp.path());
+    let out = requested_e3_out_dir().expect("E3_OUT_DIR must be set for this producer path");
+    let rows = vec![json!({
+        "events": 2,
+        "synthetic_log2_hash_count": synthetic_log2_hash_count(2),
+    })];
+    let cost = cost_artifact_document("test", 256, rows, (0.0, 0.0, 1.0), (0.0, 0.0));
+    write_cost_json(&out, &cost);
+    let parsed: Value = serde_json::from_str(
+        &std::fs::read_to_string(format!("{out}/cost.json")).expect("read cost.json"),
+    )
+    .expect("parse cost.json");
+    assert!(
+        parsed["rows"][0].get("synthetic_log2_hash_count").is_some(),
+        "producer must emit synthetic_log2_hash_count when E3_OUT_DIR is set"
+    );
+    assert!(
+        parsed["rows"][0]
+            .get(concat!("inclusion", "_proof_hashes"))
+            .is_none(),
+        "producer must not emit the withdrawn snake_case proof-size key"
+    );
+    assert_eq!(
+        parsed["synthetic_log2_model"]["column"],
+        "synthetic_log2_hash_count"
+    );
+    std::env::remove_var("E3_OUT_DIR");
+}
+
 #[test]
 fn e3_verify_cost_curve() {
+    let _guard = E3_OUT_DIR_LOCK.lock().expect("E3_OUT_DIR lock");
     // Smoke: always exercise the cost path on a small bundle so it cannot rot.
     let smoke = build_bundle(256, 128);
     let smoke_ms = time_verify_ms(&smoke, &VerifyLimits::default(), 3);
@@ -193,9 +280,9 @@ fn e3_verify_cost_curve() {
         "DSSE timing must be non-negative"
     );
 
-    let out_dir = match std::env::var("E3_OUT_DIR") {
-        Ok(d) if !d.is_empty() => d,
-        _ => return, // CI fast path: smoke only.
+    let out_dir = match requested_e3_out_dir() {
+        Some(d) => d,
+        None => return, // CI fast path: smoke only.
     };
 
     // Full sweep: payload fixed at 256 bytes/event; reps shrink as N grows.
@@ -249,36 +336,14 @@ fn e3_verify_cost_curve() {
     } else {
         "release"
     };
-    let cost = json!({
-        "schema": "assay.experiment.evidence_verify_cost.v0",
-        "profile": profile,
-        "payload_bytes_per_event": payload_bytes,
-        "synthetic_log2_model": {
-            "column": "synthetic_log2_hash_count",
-            "formula": "ceil(log2(N))",
-            "consumed_by_production_verification": false,
-            "note": "Comparison model only. Production verification does not consume it; run_root is a flat SHA-256 digest over ordered entry hashes.",
-        },
-        "rows": rows,
-        "fit": {
-            "slope_ms_per_event": slope,
-            "intercept_ms": intercept,
-            "ms_per_1k_events": slope * 1_000.0,
-            "r2": r2,
-        },
-        "dsse": {
-            "sign_ms_median": sign_full,
-            "verify_ms_median": verify_full,
-            "reps": 101,
-        },
-    });
-
-    std::fs::create_dir_all(&out_dir).expect("create out dir");
-    std::fs::write(
-        format!("{out_dir}/cost.json"),
-        serde_json::to_string_pretty(&cost).unwrap(),
-    )
-    .expect("write cost.json");
+    let cost = cost_artifact_document(
+        profile,
+        payload_bytes,
+        rows,
+        (slope, intercept, r2),
+        (sign_full, verify_full),
+    );
+    write_cost_json(&out_dir, &cost);
 
     // Bencher Metric Format for trend tracking.
     let mut bmf = serde_json::Map::new();
