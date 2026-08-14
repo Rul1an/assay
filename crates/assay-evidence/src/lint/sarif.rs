@@ -410,7 +410,11 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
         "name": "assay-evidence-lint",
         "version": report.tool_version,
         "semanticVersion": report.tool_version,
-        "informationUri": "https://docs.getassay.dev/lint/",
+        "informationUri": concat!(
+            "https://github.com/Rul1an/assay/blob/v",
+            env!("CARGO_PKG_VERSION"),
+            "/docs/lint/index.md"
+        ),
         "rules": rules
     });
     if !driver_props.is_empty() {
