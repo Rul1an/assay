@@ -4,34 +4,45 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-08-14
+
+This release hardens the evidence verifier and makes the Linux monitor's declared observation
+surface match what it actually attempts to attach. It also consolidates CI setup and release-tool
+pinning without changing the CLI or evidence wire schemas.
+
 ### Added
-- Public docs record a one-host measured io_uring CONNECT bound (syscall
-  tracepoint blind; cgroup connect4 observed and blocked where measured).
-  Canonical cell:
-  [runtime-monitor](docs/guides/runtime-monitor.md#measured-ioring-op-connect).
-  Documentation only; no attach, schema, or runtime change.
+- The Linux monitor declares mode-aware terminal outcomes for its probe inventory and now attempts
+  the compiled `sendto` and `sendmsg` tracepoints on every supported run. Runner coverage labels
+  remain count-derived, while CLI observation health remains attach-derived (#187, #2339, #2344,
+  #2345).
+- Monitor summaries and Runner capture notes account for datagram events that carried no usable IP
+  peer, so a silent peer list is distinguishable from a parser drop (#2344, #2347).
+- Public docs record a one-host measured io_uring CONNECT bound: the syscall tracepoint was blind,
+  while cgroup `connect4` observed and blocked the operation on the measured host. This is a bounded
+  measurement, not a cross-kernel support claim (#2346).
 
 ### Changed
-- Correct the `5.1.0` packaging description: Claude Code and Cursor have
-  project-scoped MCP JSON manifests; Codex uses the equivalent TOML
-  configuration documented in the editor recipe. This is a documentation
-  correction, not a new distribution artifact.
-- Public docs now record that `assay_monitor_sendto` and `assay_monitor_sendmsg`
-  are compiled into the release ELF / program set and always attempted as
-  `sys_enter_sendto` / `sys_enter_sendmsg` tracepoints. Each attach has an
-  explicit terminal outcome; availability remains kernel-dependent. Runner
-  archives (`assay runner-spike --kernel-capture` /
-  `assay-runner-core` `network_protocol_coverage_for`) are count-derived:
-  `connect_emitted > 0` yields `connect_only` from always-attached
-  `sys_enter_connect`, with no connect4 / network-policy requirement; datagram
-  labels require `sendto_emitted` or `sendmsg_emitted` > 0. CLI
-  `assay monitor` `observation_health` is attach-derived from cgroup `connect4`
-  (network-policy path), otherwise `absent`. `connect6_hook` is
-  compiled-but-unattached **enforcement**; IPv6 connect observation remains on
-  always-attached `sys_enter_connect` (`AF_INET6` included). Userspace reads the
-  four send `no_peer` / `non_ip` counters for terminal summaries and Runner
-  capture-note suffixes. No schema change. The [3.15.0] changelog line remains
-  historical; this Unreleased note is the present-tense inventory.
+- Privileged-action evidence verification applies one shared claim-ceiling fold across the profile
+  and side-effect verifier, rejects malformed decision streams, and requires one-to-one allocation
+  between decisions and audit records. Inputs accepted only because of the previous fail-open paths
+  can now be rejected (#2352, #2355).
+- Current docs and agent context define `run_root` as SHA-256 over its canonical tuple. Rekor/RFC
+  6962 inclusion proofs remain identified separately, and a scoped vocabulary guard prevents
+  conflating the two (#2222, #2357).
+- CI uses shared Rust setup across the required, perf, fuzz, runner and kernel lanes, with centrally
+  pinned Cargo plugins in the required and split-wave lanes. The change reduces duplicated setup
+  while preserving the three required contexts and fail-closed security gates (#2224, #2287-#2335).
+- Current packaging docs distinguish the project-scoped Claude Code/Cursor MCP manifests from the
+  equivalent Codex TOML recipe; no Codex JSON manifest or additional distribution artifact is
+  claimed (#2351).
+
+### Fixed
+- The Linux monitor no longer aliases the `dedup_open_paths` setting with another CONFIG-map key,
+  renders raw connect destinations as `ip:port`, and fails closed when the loaded eBPF program set
+  drifts from the declared inventory (#2337, #2338, #2341).
+- CI invokes Cargo subcommand plugins with their required subcommand argv and isolates advisory
+  databases, hook-created Git fixtures and mutation-hook cleanup state (#2318, #2328, #2331,
+  #2353).
 
 ## [5.1.0] - 2026-08-11
 
