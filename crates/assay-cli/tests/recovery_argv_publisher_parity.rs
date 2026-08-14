@@ -13,6 +13,7 @@
 //! - from-trace recovery publishing generator-event JSONL as `--trace-file`
 //! - formatter changed to a shell join
 //! - a publisher or reason variant silently dropped from the table
+//! - a new `InitSuccess` variant with no driven `PUBLISHERS` case
 
 #[path = "../../../tests/support/bounded_process.rs"]
 #[allow(dead_code)]
@@ -329,6 +330,120 @@ fn drive_publisher(publisher: Publisher, value: &str) {
     );
     let recovered = assay(dir.path(), &recovery[1..], &format!("execute {context}"));
     assert_intended_outcome(publisher, &recovered, &format!("execute {context}"));
+}
+
+/// Scope: `InitSuccess` variants in `init_report.rs`, bound to `PUBLISHERS`.
+/// A new variant without a driven `Publisher::Init…` case fails. The succeed
+/// signature check below only repeats the type boundary; this test is the
+/// variant-set bind. Reason-code publishers stay in
+/// `exit_codes::tests::every_reason_that_publishes_argv_is_a_known_executable_recovery`.
+#[test]
+fn every_init_success_variant_is_a_driven_publisher() {
+    let source = include_str!("../src/cli/commands/init_report.rs");
+    let table = publishers_table(include_str!("recovery_argv_publisher_parity.rs"));
+    let variants = init_success_variants(source);
+    assert!(
+        !variants.is_empty(),
+        "InitSuccess must keep its variants; an empty scan is not a clean inventory"
+    );
+    for variant in variants {
+        for id in driven_ids_for_variant(&variant) {
+            assert!(
+                table.contains(&format!("Publisher::{id}")),
+                "InitSuccess::{variant} publishes Run argv but {id} is absent from PUBLISHERS"
+            );
+        }
+    }
+}
+
+fn publishers_table(harness: &str) -> &str {
+    const START: &str = "const PUBLISHERS: &[Publisher] = &[";
+    let start = harness
+        .find(START)
+        .expect("recovery harness must keep a PUBLISHERS table");
+    let body = &harness[start + START.len()..];
+    let end = body.find(']').expect("PUBLISHERS table must close");
+    &body[..end]
+}
+
+fn init_success_variants(source: &str) -> Vec<String> {
+    let start = source
+        .find("pub(crate) enum InitSuccess {")
+        .expect("InitSuccess must stay in init_report.rs");
+    let after = &source[start..];
+    let open = after.find('{').expect("InitSuccess body");
+    let mut depth = 0;
+    let mut end = open;
+    for (idx, ch) in after[open..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = open + idx;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let body = &after[open + 1..end];
+    let mut names = Vec::new();
+    let mut depth = 0;
+    let mut token = String::new();
+    for ch in body.chars() {
+        match ch {
+            '{' => {
+                depth += 1;
+                token.push(ch);
+            }
+            '}' => {
+                depth -= 1;
+                token.push(ch);
+            }
+            ',' if depth == 0 => {
+                if let Some(name) = variant_ident(&token) {
+                    names.push(name);
+                }
+                token.clear();
+            }
+            _ => token.push(ch),
+        }
+    }
+    if let Some(name) = variant_ident(&token) {
+        names.push(name);
+    }
+    names
+}
+
+fn variant_ident(piece: &str) -> Option<String> {
+    let code = piece
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim_start();
+            !trimmed.starts_with("///") && !trimmed.starts_with("//") && !trimmed.starts_with("#[")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let ident = code
+        .split_whitespace()
+        .find(|token| token.chars().next().is_some_and(|c| c.is_ascii_uppercase()))?;
+    let name = ident
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .next()?;
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+fn driven_ids_for_variant(variant: &str) -> Vec<String> {
+    match variant {
+        // One variant, three succeed sites. Other variants map to Init{Name}.
+        "Validate" => vec![
+            "InitHelloTrace".into(),
+            "InitPreset".into(),
+            "InitFromTrace".into(),
+        ],
+        other => vec![format!("Init{other}")],
+    }
 }
 
 /// Scope: `init.rs` succeed call sites and the `InitReport::succeed` signature.
