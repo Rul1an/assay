@@ -72,17 +72,17 @@ Download the binary on a connected machine:
 
 ```bash
 # On a connected x86_64 Linux machine
-curl -fLO https://github.com/Rul1an/assay/releases/download/v5.2.0/assay-v5.2.0-x86_64-unknown-linux-gnu.tar.gz
-curl -fLO https://github.com/Rul1an/assay/releases/download/v5.2.0/assay-v5.2.0-x86_64-unknown-linux-gnu.tar.gz.sha256
-sha256sum -c assay-v5.2.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+curl -fLO https://github.com/Rul1an/assay/releases/download/v5.1.0/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz
+curl -fLO https://github.com/Rul1an/assay/releases/download/v5.1.0/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+sha256sum -c assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
 ```
 
 Transfer to air-gapped environment:
 
 ```bash
 # On the air-gapped x86_64 Linux machine
-tar -xzf assay-v5.2.0-x86_64-unknown-linux-gnu.tar.gz
-sudo install -m 0755 assay-v5.2.0-x86_64-unknown-linux-gnu/assay /usr/local/bin/assay
+tar -xzf assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz
+sudo install -m 0755 assay-v5.1.0-x86_64-unknown-linux-gnu/assay /usr/local/bin/assay
 assay --version
 ```
 
@@ -229,13 +229,13 @@ curl -s https://api.github.com/repos/Rul1an/assay/releases/latest | jq -r '.tag_
 
 ```bash
 # Connected machine
-curl -fLO https://github.com/Rul1an/assay/releases/download/v5.2.0/assay-v5.2.0-x86_64-unknown-linux-gnu.tar.gz
-curl -fLO https://github.com/Rul1an/assay/releases/download/v5.2.0/assay-v5.2.0-x86_64-unknown-linux-gnu.tar.gz.sha256
-sha256sum -c assay-v5.2.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+curl -fLO https://github.com/Rul1an/assay/releases/download/v5.1.0/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz
+curl -fLO https://github.com/Rul1an/assay/releases/download/v5.1.0/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+sha256sum -c assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
 
 # Transfer and install
-scp assay-v5.2.0-x86_64-unknown-linux-gnu.tar.gz air-gapped-server:/tmp/
-ssh air-gapped-server 'cd /tmp && tar -xzf assay-v5.2.0-x86_64-unknown-linux-gnu.tar.gz && sudo install -m 0755 assay-v5.2.0-x86_64-unknown-linux-gnu/assay /usr/local/bin/assay'
+scp assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz air-gapped-server:/tmp/
+ssh air-gapped-server 'cd /tmp && tar -xzf assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz && sudo install -m 0755 assay-v5.1.0-x86_64-unknown-linux-gnu/assay /usr/local/bin/assay'
 ```
 
 ---

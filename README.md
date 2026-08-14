@@ -34,7 +34,7 @@ Agents got real tool access through MCP — and tool poisoning, rug pulls, and c
 ### Quickstart
 
 ```bash
-cargo install assay-cli --version 5.2.0 --locked
+cargo install assay-cli --version 5.1.0 --locked
 
 mkdir -p /tmp/assay-demo && echo "safe content" > /tmp/assay-demo/safe.txt
 assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
@@ -70,7 +70,7 @@ Project manifests are shipped for Claude Code and Cursor; Codex uses the equival
               └─► 📊 Trust Basis → Trust Card → SARIF / CI
 ```
 
-Current release: [`v5.2.0`](https://github.com/Rul1an/assay/releases/tag/v5.2.0). [CHANGELOG.md](CHANGELOG.md) and release notes remain the authority for released behavior; merged changes after the tag are `Unreleased`, and crates.io publication is separate from merge state.
+Current release: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0). [CHANGELOG.md](CHANGELOG.md) and release notes remain the authority for released behavior; merged changes after the tag are `Unreleased`, and crates.io publication is separate from merge state.
 
 ## Is this for me?
 
