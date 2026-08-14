@@ -67,6 +67,16 @@ ALLOWED_MERKLE_USES: dict[str, tuple[str, ...]] = {
     ),
 }
 
+# Exact filename-reference lines. These are path identifiers, not evidence
+# claims, and not genuine Merkle constructions. Not a whole-file exemption.
+LEGACY_IDENTIFIERS: dict[str, tuple[str, ...]] = {
+    "demo/produce_video.sh": (
+        r"vhs demo/scenes/merkle-chain\.tape",
+        r"cp demo/scenes/merkle-chain\.mp4",
+    ),
+    "demo/scenes/merkle-chain.tape": (r"Output demo/scenes/merkle-chain\.mp4",),
+}
+
 TEMPORARY_DEBT: tuple[str, ...] = ()
 
 FALSE_CLAIM_RE = re.compile(
@@ -139,8 +149,10 @@ def scan_findings(
     root: Path,
     files: Iterable[Path],
     allowlist: Mapping[str, Sequence[str]],
+    identifiers: Mapping[str, Sequence[str]],
 ) -> list[str]:
     compiled = {rel: compiled_patterns(pats) for rel, pats in allowlist.items()}
+    compiled_ids = {rel: compiled_patterns(pats) for rel, pats in identifiers.items()}
     findings: list[str] = []
     for path in files:
         rel = rel_posix(path, root)
@@ -150,6 +162,7 @@ def scan_findings(
         if text is None:
             continue
         allowed = compiled.get(rel, ())
+        legacy = compiled_ids.get(rel, ())
         for line_no, line in enumerate(text.splitlines(), start=1):
             if not MERKLE_RE.search(line):
                 continue
@@ -158,7 +171,7 @@ def scan_findings(
                     f"{rel}:{line_no}: false run_root-as-Merkle claim: {line.strip()}"
                 )
                 continue
-            if line_is_allowed(line, allowed):
+            if line_is_allowed(line, allowed) or line_is_allowed(line, legacy):
                 continue
             findings.append(
                 f"{rel}:{line_no}: unapproved Merkle claim: {line.strip()}"
@@ -167,17 +180,20 @@ def scan_findings(
 
 
 def check_tree(
-    root: Path, allowlist: Mapping[str, Sequence[str]] | None = None
+    root: Path,
+    allowlist: Mapping[str, Sequence[str]] | None = None,
+    identifiers: Mapping[str, Sequence[str]] | None = None,
 ) -> int:
     rules = ALLOWED_MERKLE_USES if allowlist is None else allowlist
+    idents = LEGACY_IDENTIFIERS if identifiers is None else identifiers
     if TEMPORARY_DEBT:
         print("evidence-vocabulary=failed")
         print("TEMPORARY_DEBT is non-empty; reserved false claims are not green")
         for item in TEMPORARY_DEBT:
             print(item)
         return 1
-    stale = allowlist_staleness(root, rules)
-    findings = scan_findings(root, git_files(root), rules)
+    stale = allowlist_staleness(root, rules) + allowlist_staleness(root, idents)
+    findings = scan_findings(root, git_files(root), rules, idents)
     if stale or findings:
         print("evidence-vocabulary=failed")
         for message in stale + findings:

@@ -74,7 +74,7 @@ elif mode == "missing-path":
     chosen = {**rekor, "docs/does-not-exist.md": (r"Merkle inclusion",)}
 else:
     raise SystemExit(f"unknown mode {mode}")
-raise SystemExit(module.check_tree(root, chosen))
+raise SystemExit(module.check_tree(root, chosen, identifiers={}))
 PY
   )"
   rc=$?
@@ -186,6 +186,22 @@ for rel in allow:
 if getattr(module, "TEMPORARY_DEBT", None):
     raise SystemExit("FAIL: TEMPORARY_DEBT must be empty; reserved file stays a live finding")
 
+legacy = getattr(module, "LEGACY_IDENTIFIERS", None)
+if not isinstance(legacy, dict) or not legacy:
+    raise SystemExit("FAIL: LEGACY_IDENTIFIERS must be a non-empty path-bound dict")
+if set(legacy) & set(allow):
+    raise SystemExit("FAIL: LEGACY_IDENTIFIERS must not mix with ALLOWED_MERKLE_USES")
+stale_legacy = module.allowlist_staleness(root, legacy)
+if stale_legacy:
+    print("\n".join(stale_legacy), file=sys.stderr)
+    raise SystemExit("FAIL: LEGACY_IDENTIFIERS has vacuous or missing entries")
+for rel, pats in legacy.items():
+    if not rel.startswith("demo/"):
+        raise SystemExit(f"FAIL: unexpected legacy-identifier path {rel}")
+    for pat in pats:
+        if "merkle-chain" not in pat:
+            raise SystemExit(f"FAIL: legacy identifier must be an exact merkle-chain filename: {pat!r}")
+
 print("ok: imported ALLOWED_MERKLE_USES is non-vacuous on this tree")
 print("ok: scan excludes only the two guard paths")
 
@@ -193,14 +209,16 @@ buf = io.StringIO()
 with redirect_stdout(buf):
     rc = module.check_tree(root, allow)
 out = buf.getvalue()
+findings = [line for line in out.splitlines() if ": unapproved Merkle claim:" in line or ": false run_root-as-Merkle claim:" in line]
 if rc == 0:
     raise SystemExit("FAIL: live checker must stay RED while verify_side_effects is uncorrected")
-if "verify_side_effects.rs" not in out:
+if len(findings) != 1 or "verify_side_effects.rs" not in findings[0]:
     raise SystemExit(
-        "FAIL: live checker RED for some other reason; reserved file was not reported:\n"
-        + out
+        "FAIL: live checker must have exactly one product finding "
+        "(verify_side_effects.rs); got "
+        f"{len(findings)}:\n" + out
     )
-print("ok: live checker RED on reserved verify_side_effects.rs")
+print("ok: live checker RED on reserved verify_side_effects.rs only")
 PY
 
 # Sibling under scripts/ci/ is still an outward claim. The two guard paths are not.
@@ -231,7 +249,7 @@ rekor = {
 }
 buf = io.StringIO()
 with redirect_stdout(buf):
-    rc = module.check_tree(root, rekor)
+    rc = module.check_tree(root, rekor, identifiers={})
 out = buf.getvalue()
 if rc == 0:
     raise SystemExit("FAIL: sibling product file under scripts/ci/ was not flagged")
@@ -240,6 +258,59 @@ if "sibling-product.md" not in out:
 if "check-evidence-vocabulary.py" in out or "test-evidence-vocabulary.sh" in out:
     raise SystemExit("FAIL: guard implementation paths were scanned:\n" + out)
 print("ok: sibling product file still fails; only exact guard paths are excluded")
+PY
+
+IDENT="$TMP/ident"
+init_fixture "$IDENT"
+mkdir -p "$IDENT/demo/scenes"
+printf '%s\n' 'vhs demo/scenes/merkle-chain.tape' 'cp demo/scenes/merkle-chain.mp4 dest.mp4' \
+  > "$IDENT/demo/produce_video.sh"
+printf '%s\n' 'Output demo/scenes/merkle-chain.mp4' > "$IDENT/demo/scenes/merkle-chain.tape"
+git -C "$IDENT" add -A -- demo/produce_video.sh demo/scenes/merkle-chain.tape
+python3 - "$CHECKER" "$IDENT" <<'PY'
+import importlib.util
+import io
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers=module.LEGACY_IDENTIFIERS)
+if rc != 0:
+    raise SystemExit("FAIL: exact merkle-chain filename lines must not be product findings:\n" + buf.getvalue())
+
+vacuous = {"demo/produce_video.sh": (r"this-pattern-matches-nothing-zz",)}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers=vacuous)
+if rc == 0:
+    raise SystemExit("FAIL: vacuous LEGACY_IDENTIFIERS entry must fail")
+
+(root / "demo/produce_video.sh").write_text(
+    (root / "demo/produce_video.sh").read_text() + "Merkle root in narration\n"
+)
+import subprocess
+subprocess.run(["git", "add", "-A", "--", "demo/produce_video.sh"], cwd=root, check=True)
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers=module.LEGACY_IDENTIFIERS)
+out = buf.getvalue()
+if rc == 0 or "produce_video.sh" not in out or "Merkle root in narration" not in out:
+    raise SystemExit(
+        "FAIL: filename identifiers must not mask a claim in the same file:\n" + out
+    )
+print("ok: merkle-chain filename identifiers are not claims")
 PY
 
 echo "ok: evidence-vocabulary mutations"

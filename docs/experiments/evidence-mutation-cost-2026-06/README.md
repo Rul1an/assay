@@ -11,21 +11,16 @@ no-signing-key attacker model.
 
 This is a measurement, not a blanket security claim. Two things are reported:
 
-> Correction (2026-08-14): the shipped `run_root` is a flat SHA-256 digest over
-> ordered entry hashes, not a tree root. References below to the historical tree
-> proposal describe the model used at the time and are not claims about the
-> shipped evidence format.
-
 1. A **mutation-detection matrix** for `assay-evidence` bundles, under threat model T: a party
    *without* the signing key mutates a bundle after the fact, while the bundle's run anchor
-   (`run_root`, a Merkle root over event content hashes) is bound by an external signature the
+   (`run_root`, a flat SHA-256 digest over ordered entry hashes) is bound by an external signature the
    attacker cannot forge. Two layers are exercised:
    - the internal verifier (`verify_bundle_with_limits`), which catches blind tampering that breaks
      internal consistency, each with a specific error code;
    - the run anchor, which catches a *consistent rewrite* (events and manifest recomputed together)
      that the internal verifier alone would accept, because the content-addressed root changes.
 2. A **verification + signing cost curve**: verify time as a function of bundle size, compressed
-   size and gzip ratio, bytes per event, the Merkle inclusion-proof size (ceil(log2(N)) hashes), and
+   size and gzip ratio, bytes per event, the logarithmic proof model used by this experiment (ceil(log2(N)) hashes), and
    DSSE sign and verify time over the run anchor.
 
 It is tamper-evident, not tamper-proof. A host that holds both code execution and the signing key is
