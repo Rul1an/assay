@@ -168,6 +168,16 @@ repos:
         pass_filenames: false
         files: ^(scripts/ci/test-host-capability-proof-contract\.sh|\.github/workflows/host-capability-proof\.yml|docs/reference/runner/host-capability-proof\.md|\.pre-commit-config\.yaml)$
 
+      - id: evidence-vocabulary-self-test
+        name: Evidence vocabulary guard self-test
+        entry: bash scripts/ci/test-evidence-vocabulary.sh
+        language: system
+        pass_filenames: false
+        # The checker scans every tracked text file. This hook only proves the
+        # guard still has teeth; the live-tree hook is added once current and
+        # historical false claims are removed.
+        files: ^(scripts/ci/(check-evidence-vocabulary\.py|test-evidence-vocabulary\.sh)|\.pre-commit-config\.yaml)$
+
       - id: aee-seal-producer-mutations
         name: ADR-045 seal producer mutations
         entry: bash -c 'python3 scripts/ci/test_aee_seal_producer_mutation_safety.py && python3 scripts/ci/test_aee_seal_producer_mutations.py'
