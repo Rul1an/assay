@@ -2,14 +2,14 @@ use crate::cli::args::InitArgs;
 use crate::exit_codes::{ReasonCode, RunOutcome};
 use std::path::{Path, PathBuf};
 
-use super::init_report::InitReport;
+use super::init_report::{InitReport, InitSuccess};
 
 pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
     let mut report = InitReport::new(args.format.clone());
 
     if args.list_presets {
         report.record_presets(crate::packs::list());
-        return report.succeed(&["assay", "init"], &[]);
+        return report.succeed(&InitSuccess::ListPresets, &[]);
     }
 
     // --from-trace: generate policy + config from existing trace
@@ -141,30 +141,21 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
     }
 
     report.progress("✅  Initialization complete.");
-    let config = args.config.display().to_string();
-    if args.hello_trace {
-        let hello_trace = hello_trace_path
+    let next = InitSuccess::Validate {
+        config: args.config.display().to_string(),
+        replay_trace: hello_trace_path
             .as_ref()
-            .expect("hello trace path must exist when --hello-trace is set")
-            .display()
-            .to_string();
-        let argv = [
-            "assay",
-            "validate",
-            "--config",
-            config.as_str(),
-            "--trace-file",
-            hello_trace.as_str(),
-        ];
+            .map(|path| path.display().to_string()),
+    };
+    if args.hello_trace {
         let human = [
             "   Note: hello trace uses demo prompt/response text only; treat real traces as potentially sensitive.".to_string(),
-            report.next_line(&argv),
+            report.next_line(&next),
         ];
-        report.succeed(&argv, &human)
+        report.succeed(&next, &human)
     } else {
-        let argv = ["assay", "validate"];
-        let human = [report.next_line(&argv)];
-        report.succeed(&argv, &human)
+        let human = [report.next_line(&next)];
+        report.succeed(&next, &human)
     }
 }
 
@@ -313,20 +304,14 @@ tests:
     }
 
     report.progress("\n✅  Initialization complete.");
-    let config = args.config.display().to_string();
-    let trace = trace_path.display().to_string();
-    let argv = [
-        "assay",
-        "validate",
-        "--config",
-        config.as_str(),
-        "--trace-file",
-        trace.as_str(),
-    ];
+    let next = InitSuccess::Validate {
+        config: args.config.display().to_string(),
+        replay_trace: None,
+    };
     let human = [
-        format!("\n{}", report.next_line(&argv)),
-        format!("   CI:   assay ci --config {config} --trace-file {trace}"),
+        format!("\n{}", report.next_line(&next)),
+        "   Note: a separate runtime replay trace is required; the generator-event input cannot fill that role.".to_string(),
         "\n   Tip: For EU AI Act compliance scanning, add: --pack eu-ai-act-baseline".to_string(),
     ];
-    report.succeed(&argv, &human)
+    report.succeed(&next, &human)
 }

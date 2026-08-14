@@ -254,8 +254,8 @@ STEPS: list[dict[str, object]] = [
                 # which is what `null` means for `policy-validation/valid` in this same file, and
                 # the document has carried a concrete argv all along.
                 next_step=(
-                    'Run argv: ["assay","validate","--config","eval.yaml",'
-                    '"--trace-file","traces/hello.jsonl"]'
+                    'Run argv: ["assay","validate","--config=eval.yaml",'
+                    '"--trace-file=traces/hello.jsonl","--format","json"]'
                 ),
             ),
             outcome(
@@ -270,7 +270,7 @@ STEPS: list[dict[str, object]] = [
         ],
         "stdout_summary": (
             "Default `text` is human progress; success ends with `Next: assay validate "
-            "--config eval.yaml --trace-file traces/hello.jsonl`, and a failing run "
+            "--config=eval.yaml --trace-file=traces/hello.jsonl --format json`, and a failing run "
             "writes partial progress text rather than the fatal diagnosis. `--format "
             "json` replaces that stream with one `assay.init_report.v0` document "
             "naming `reason_code`, `next_step`, and the files created and skipped."
@@ -440,7 +440,7 @@ STEPS: list[dict[str, object]] = [
                 "Valid",
                 0,
                 stdout("json"),
-                ["evidence", "show", "<bundle>", "--format", "json"],
+                ["evidence", "show", "--format", "json", "--", "<bundle>"],
             ),
             outcome(
                 "verification-disabled",
@@ -450,10 +450,11 @@ STEPS: list[dict[str, object]] = [
                 [
                     "evidence",
                     "show",
-                    "<bundle>",
                     "--format",
                     "json",
                     "--no-verify",
+                    "--",
+                    "<bundle>",
                 ],
             ),
             outcome(
@@ -461,7 +462,7 @@ STEPS: list[dict[str, object]] = [
                 "integrity failure",
                 2,
                 stdout("json", "assay.run_summary.v1"),
-                ["evidence", "show", "<bundle>", "--format", "json"],
+                ["evidence", "show", "--format", "json", "--", "<bundle>"],
                 reason_code="E_EVIDENCE_INTEGRITY",
                 next_step=(
                     "Obtain an undamaged bundle from its producer; the content this bundle "
@@ -473,11 +474,11 @@ STEPS: list[dict[str, object]] = [
                 "unreadable bundle",
                 2,
                 stdout("json", "assay.run_summary.v1"),
-                ["evidence", "show", "<bundle>", "--format", "json"],
+                ["evidence", "show", "--format", "json", "--", "<bundle>"],
                 reason_code="E_EVIDENCE_UNREADABLE",
                 next_step=(
-                    'Run argv: ["assay","evidence","show","<bundle>",'
-                    '"--format","json"]'
+                    'Run argv: ["assay","evidence","show","--format","json",'
+                    '"--","<bundle>"]'
                 ),
             ),
             outcome(
@@ -485,7 +486,7 @@ STEPS: list[dict[str, object]] = [
                 "format-contract failure",
                 2,
                 stdout("empty"),
-                ["evidence", "show", "<bundle>", "--format", "json"],
+                ["evidence", "show", "--format", "json", "--", "<bundle>"],
                 gap_issue=2219,
             ),
         ],

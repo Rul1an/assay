@@ -223,7 +223,7 @@ const CREATED_WITH_HELLO_TRACE: &str = "🏗️  Generating Assay Policy & Confi
    Created traces/hello.jsonl
 ✅  Initialization complete.
    Note: hello trace uses demo prompt/response text only; treat real traces as potentially sensitive.
-   Next: assay validate --config eval.yaml --trace-file traces/hello.jsonl
+   Next: assay validate --config=eval.yaml --trace-file=traces/hello.jsonl --format json
 ";
 
 const SKIPPED_WITH_HELLO_TRACE: &str = "🏗️  Generating Assay Policy & Config...
@@ -232,14 +232,14 @@ const SKIPPED_WITH_HELLO_TRACE: &str = "🏗️  Generating Assay Policy & Confi
    Skipped traces/hello.jsonl (exists)
 ✅  Initialization complete.
    Note: hello trace uses demo prompt/response text only; treat real traces as potentially sensitive.
-   Next: assay validate --config eval.yaml --trace-file traces/hello.jsonl
+   Next: assay validate --config=eval.yaml --trace-file=traces/hello.jsonl --format json
 ";
 
 const CREATED_WITHOUT_HELLO_TRACE: &str = "🏗️  Generating Assay Policy & Config...
    Created policy.yaml (preset: default)
    Created eval.yaml
 ✅  Initialization complete.
-   Next: assay validate
+   Next: assay validate --config=eval.yaml --format json
 ";
 
 /// The part of stdout that this run is responsible for.
@@ -278,4 +278,31 @@ fn the_default_text_stream_is_pinned_where_the_run_controls_it() {
     let plain = init(plain_dir.path(), &[]);
     assert_eq!(plain.exit_code, 0);
     assert_eq!(own_output(&plain.stdout), CREATED_WITHOUT_HELLO_TRACE);
+}
+
+/// `--from-trace` input is generator-event JSONL, not a runtime replay trace.
+/// Publishing `assay ci --config=…` without `--trace-file` exits 2 with
+/// `E_INVALID_ARGS`. The text channel must not print that failing command.
+#[test]
+fn from_trace_text_does_not_publish_a_failing_ci_command() {
+    let dir = tempfile::tempdir().expect("from-trace tempdir");
+    std::fs::write(
+        dir.path().join("events.jsonl"),
+        "{\"type\":\"file_open\",\"path\":\"/workspace/app.py\",\"pid\":1,\"timestamp\":1}\n",
+    )
+    .expect("write generator events");
+    let run = init(dir.path(), &["--from-trace", "events.jsonl"]);
+    assert_eq!(run.exit_code, 0);
+    assert!(
+        !run.stdout.contains("assay ci"),
+        "from-trace text published a CI command known to fail:\n{}",
+        run.stdout
+    );
+    assert!(
+        run.stdout.contains("runtime replay trace")
+            && run.stdout.contains("generator-event")
+            && run.stdout.contains("cannot fill that role"),
+        "from-trace text must say a separate runtime replay trace is required and the generator-event input cannot fill that role:\n{}",
+        run.stdout
+    );
 }
