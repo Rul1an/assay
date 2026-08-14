@@ -249,31 +249,21 @@ fn cost_artifact_document(
     })
 }
 
-fn write_cost_json(out_dir: &str, cost: &Value) {
-    std::fs::create_dir_all(out_dir).expect("create out dir");
-    std::fs::write(
-        format!("{out_dir}/cost.json"),
-        serde_json::to_string_pretty(cost).unwrap(),
-    )
-    .expect("write cost.json");
-}
-
 #[test]
-fn e3_out_dir_emits_synthetic_log2_not_withdrawn_label() {
+fn e3_focused_output_emits_synthetic_log2_not_withdrawn_label() {
     let _guard = E3_OUT_DIR_LOCK.lock().expect("E3_OUT_DIR lock");
     let tmp = tempfile::tempdir().expect("tempdir");
-    std::env::set_var("E3_OUT_DIR", tmp.path());
-    let out = requested_e3_out_dir().expect("E3_OUT_DIR must be set for this producer path");
+    let output_path = tmp.path().join("cost.json");
     let rows = vec![cost_row(2, 0.0, 1, 0, 0)];
     let cost = cost_artifact_document("test", 256, rows, (0.0, 0.0, 1.0), (0.0, 0.0));
-    write_cost_json(&out, &cost);
-    let parsed: Value = serde_json::from_str(
-        &std::fs::read_to_string(format!("{out}/cost.json")).expect("read cost.json"),
-    )
-    .expect("parse cost.json");
+    std::fs::write(&output_path, serde_json::to_string_pretty(&cost).unwrap())
+        .expect("write cost.json");
+    let parsed: Value =
+        serde_json::from_str(&std::fs::read_to_string(&output_path).expect("read cost.json"))
+            .expect("parse cost.json");
     assert!(
         parsed["rows"][0].get("synthetic_log2_hash_count").is_some(),
-        "producer must emit synthetic_log2_hash_count when E3_OUT_DIR is set"
+        "focused output must emit synthetic_log2_hash_count"
     );
     assert!(
         parsed["rows"][0]
@@ -285,7 +275,16 @@ fn e3_out_dir_emits_synthetic_log2_not_withdrawn_label() {
         parsed["synthetic_log2_model"]["column"],
         "synthetic_log2_hash_count"
     );
-    std::env::remove_var("E3_OUT_DIR");
+}
+
+#[test]
+fn e3_has_no_generic_user_controlled_output_path_helper() {
+    const SOURCE: &str = include_str!("e3_verify_cost_curve.rs");
+    let forbidden = concat!("fn write_cost_json", "(out_dir: &str");
+    assert!(
+        !SOURCE.contains(forbidden),
+        "keep the E3_OUT_DIR write in the full-sweep producer; a generic helper reintroduces the CodeQL tainted-path finding"
+    );
 }
 
 #[test]
@@ -350,7 +349,12 @@ fn e3_verify_cost_curve() {
         (slope, intercept, r2),
         (sign_full, verify_full),
     );
-    write_cost_json(&out_dir, &cost);
+    std::fs::create_dir_all(&out_dir).expect("create out dir");
+    std::fs::write(
+        format!("{out_dir}/cost.json"),
+        serde_json::to_string_pretty(&cost).unwrap(),
+    )
+    .expect("write cost.json");
 
     // Bencher Metric Format for trend tracking.
     let mut bmf = serde_json::Map::new();
