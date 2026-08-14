@@ -7,6 +7,10 @@
 #   curl -fsSL https://getassay.dev/install.sh | sh
 #   curl -fsSL https://getassay.dev/install.sh | ASSAY_VERSION=1.3.0 sh
 #
+# Canonical explicit input is X.Y.Z (no leading v). ASSAY_VERSION=1.3.0 and
+# ASSAY_VERSION=v1.3.0 both install the v1.3.0 release tag and archive.
+# `latest` is unchanged. Any other value is rejected before network access.
+#
 
 set -e
 
@@ -14,7 +18,13 @@ set -e
 GITHUB_REPO="Rul1an/assay"
 
 INSTALL_DIR="${ASSAY_INSTALL_DIR:-$HOME/.local/bin}"
-VERSION="${ASSAY_VERSION:-latest}"
+# Unset defaults to latest. An explicitly empty value is malformed and must
+# not be rewritten to latest (that would hit the network).
+if [ -z "${ASSAY_VERSION+x}" ]; then
+    VERSION="latest"
+else
+    VERSION="$ASSAY_VERSION"
+fi
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -29,6 +39,35 @@ log_info() { printf "${BLUE}${BOLD}[INFO]${NC} %s\n" "$1"; }
 log_success() { printf "${GREEN}${BOLD}[OK]${NC} %s\n" "$1"; }
 log_warn() { printf "${YELLOW}${BOLD}[WARN]${NC} %s\n" "$1"; }
 log_error() { printf "${RED}${BOLD}[ERROR]${NC} %s\n" "$1"; exit 1; }
+
+# One predicate for "this is a published stable software tag". The latest
+# resolver and explicit ASSAY_VERSION both use it so they cannot drift.
+is_stable_release_tag() {
+    printf '%s\n' "$1" | grep -Eq '^v[0-9]+[.][0-9]+[.][0-9]+$'
+}
+
+# latest is preserved. Exactly one optional leading v is accepted; the
+# result is the vX.Y.Z tag/archive form, or a failure before any download.
+normalize_install_version() {
+    if [ "$1" = "latest" ]; then
+        printf '%s\n' "latest"
+        return 0
+    fi
+    case "$1" in
+        ""|*[[:space:]]*|*/*|*..*)
+            return 1
+            ;;
+    esac
+    _candidate="$1"
+    case "$_candidate" in
+        v*) ;;
+        *) _candidate="v${_candidate}" ;;
+    esac
+    if ! is_stable_release_tag "$_candidate"; then
+        return 1
+    fi
+    printf '%s\n' "$_candidate"
+}
 
 # --- Main ---
 main() {
@@ -71,6 +110,8 @@ main() {
     log_info "Detected platform: $OS/$ARCH ($TARGET)"
 
     # 2. Resolve Version
+    VERSION="$(normalize_install_version "$VERSION")" || log_error "ASSAY_VERSION must be latest or a stable X.Y.Z (optional leading v)"
+
     if [ "$VERSION" = "latest" ]; then
         log_info "Resolving latest version..."
         # Fetch latest release tag from GitHub API
@@ -82,7 +123,7 @@ main() {
         if [ -z "$VERSION" ]; then
             log_error "Failed to resolve latest version."
         fi
-        if ! printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+[.][0-9]+[.][0-9]+$'; then
+        if ! is_stable_release_tag "$VERSION"; then
             log_error "latest Assay release is not a stable software tag: $VERSION"
         fi
     fi
@@ -170,4 +211,8 @@ main() {
     printf "Run %bassay --help%b to get started.\n" "${BOLD}" "${NC}"
 }
 
+# When sourced by the contract test, define helpers only.
+if [ "${ASSAY_INSTALL_SOURCE_ONLY:-}" = "1" ]; then
+    return 0 2>/dev/null || exit 0
+fi
 main "$@"
