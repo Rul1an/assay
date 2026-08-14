@@ -138,7 +138,7 @@ repos:
         entry: bash -c 'bash scripts/ci/test-agent-golden-path-skill-optimization.sh && bash scripts/ci/test-agent-golden-path-skill-hardening.sh'
         language: system
         pass_filenames: false
-        # The 96 mutation cases prove the validator has teeth, but their cost belongs
+        # The mutation cases prove the validator has teeth, but their cost belongs
         # at the publish boundary rather than in every intermediate commit.
         stages: [pre-push]
         files: ^(Cargo\.toml|scripts/docs/generate-agent-golden-path\.py|scripts/ci/(read-assay-release-tag\.sh|test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|test-golden-path-mock-bounds\.py|lib/(golden-path-fixture-staging\.sh|workspace_version\.py))|\.github/assay-release-tag|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.gitattributes|\.pre-commit-config\.yaml)$

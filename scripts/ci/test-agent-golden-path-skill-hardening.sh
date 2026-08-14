@@ -15,8 +15,9 @@ trap 'rm -rf "$SCRATCH"' EXIT
 # destination drifts beyond the original baseline-only packaged drift case.
 EXPECTED_CASES=96
 # Parser-layer follow-ups stay outside the approved cumulative case chain. The
-# 22 probes are 4 workflow-key, 1 stages-key, 14 selector, 1 trigger-mode, and
-# 2 inline-parser checks; pin them so deletion cannot leave the cumulative total green.
+# The 23 probes are 4 workflow-key, 1 stages-key, 14 selector, 1 trigger-mode,
+# 1 release-split, and 2 inline-parser checks; pin them so deletion cannot leave
+# the cumulative total green.
 EXPECTED_STRUCTURAL_PROBES=23
 case_count=0
 structural_probe_count=0

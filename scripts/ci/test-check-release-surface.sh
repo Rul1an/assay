@@ -251,6 +251,11 @@ for row in \
     'current release-pinned install command(s)'
 done
 
+mutate_and_expect_failure wrong-workspace-binary bin/assay \
+  's/assay 5.2.0/assay 5.1.0/' 'workspace is "assay 5.2.0"'
+mutate_and_expect_failure wrong-published-version-output docs/getting-started/installation.md \
+  's/assay 5.1.0/assay 5.2.0/' 'does not show "assay 5.1.0" as the published'
+
 mutate_and_expect_failure stale-release-readme README.md \
   's/releases\/tag\/v5.1.0/releases\/tag\/v5.0.0/' 'current release link drift'
 mutate_and_expect_failure stale-release-doc-index docs/index.md \
@@ -272,8 +277,8 @@ echo "PASS: duplicate-release"
 mutate_and_expect_failure stale-cli-version docs/reference/cli/index.md \
   's/# assay 5.1.0/# assay 5.0.0/' 'documented CLI version drift'
 
-if [ "$mutation_count" -ne 39 ]; then
-  echo "FAIL: expected 39 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 41 ]; then
+  echo "FAIL: expected 41 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"
