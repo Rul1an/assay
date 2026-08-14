@@ -521,7 +521,7 @@ jobs:
       - name: Test perf_pr event provenance contract
         run: |
           bash scripts/ci/test-perf-pr-event-provenance-contract.sh
-          bash scripts/ci/test-perf-pr-event-provenance-git-env.sh
+          bash scripts/ci/test-git-fixture-env-isolation.sh
       # Runs both groups: sw/* (shipped durability) and swc/* (code cost). The pragma
       # assertion in make_store() fails here if swc/* silently reverts to measuring fsync.
       - name: Criterion (store_write_heavy)
