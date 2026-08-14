@@ -120,9 +120,9 @@ pub fn compute_stream_id(run_id: &str, seq: u64) -> String {
     format!("{}:{}", run_id, seq)
 }
 
-/// Calculate the Run Root (Integrity Chain).
+/// Calculate the deterministic run-root digest.
 ///
-/// Creates a hash chain over all content hashes in sequence order.
+/// Hashes newline-delimited content-hash strings in event sequence order.
 /// This proves the integrity and ordering of the entire event stream.
 ///
 /// # Algorithm

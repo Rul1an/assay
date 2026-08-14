@@ -117,9 +117,7 @@ ALLOWED_MERKLE_USES: dict[str, tuple[str, ...]] = {
     ),
     "crates/assay-cli/tests/spec_reason_code_registry.rs": (
         _E('// leaving that line untouched. That gap re-admitted a withdrawn "Merkle root ... inclusion'),
-        _E('// `compute_run_root` is a flat sha256 over the concatenated content hashes, so "Merkle" would'),
         _E('!boundary.contains("Merkle"),'),
-        _E('"{BOUNDARY} names a Merkle structure; `run_root` is a hash chain"'),
     ),
     "docs/architecture/ADR-009-WORM-Storage.md": (
         _E("- Native Merkle tree verification"),

@@ -1,11 +1,11 @@
 An evidence bundle was opened and content that was read failed verification: a member hash, an
-event's `content_hash`, a manifest entry, or the run integrity chain (`run_root`) disagrees with
+event's `content_hash`, a manifest entry, or the run integrity digest (`run_root`) disagrees with
 what the bundle records. Establishes that the content does not verify, and nothing about how it
 came to differ, so it carries no tampering or intent claim.
 
-`run_root` is a hash chain over the content hashes in sequence order, not a tree. Naming it for the
-structure `assay-evidence` actually builds keeps this rule clear of the inclusion-proof and
-sub-range properties a tree would imply to a reader.
+`run_root` is SHA-256 over newline-delimited event content-hash strings, with a trailing newline,
+in event sequence order. It is a flat digest, not a tree, and does not provide inclusion-proof or
+sub-range properties.
 
 A bundle that could not be opened or read is deliberately **outside** this code: an I/O failure
 establishes no fact about content, and reporting one as an integrity finding would assert a fact
