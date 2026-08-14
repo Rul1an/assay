@@ -19,6 +19,13 @@ _FALSE_PREFIX='run_root is a '
 _FALSE_SUFFIX='Merkle root'
 FALSE_INJECT="${_FALSE_PREFIX}${_FALSE_SUFFIX}"
 FALSE_INJECT_LOWER="$(printf '%s' "$FALSE_INJECT" | tr '[:upper:]' '[:lower:]')"
+# Piggyback: contains an allowlisted phrase but is not FALSE_CLAIM_RE.
+_PIGGY_PREFIX='run_root provides a '
+_PIGGY_SUFFIX='Merkle inclusion proof.'
+PIGGYBACK="${_PIGGY_PREFIX}${_PIGGY_SUFFIX}"
+_REKOR_PIGGY_PREFIX='run_root provides '
+_REKOR_PIGGY_SUFFIX='Merkle inclusion for the bundle.'
+REKOR_PIGGYBACK="${_REKOR_PIGGY_PREFIX}${_REKOR_PIGGY_SUFFIX}"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -130,6 +137,80 @@ git -C "$FIXTURE" add -A -- docs/lint/index.md
 run_case allowlist-does-not-mask-claim fail mask
 echo "ok: allowlist-does-not-mask-claim"
 
+# Substring allowlist must not pass a longer false claim (the #2222 piggyback).
+SPEC_PIGGY="$TMP/spec-piggy"
+init_fixture "$SPEC_PIGGY"
+mkdir -p "$SPEC_PIGGY/docs/architecture"
+printf '%s\n' "$PIGGYBACK" > "$SPEC_PIGGY/docs/architecture/SPEC-Outward-Product-Truth-v1.md"
+git -C "$SPEC_PIGGY" add -A -- docs/architecture/SPEC-Outward-Product-Truth-v1.md
+python3 - "$CHECKER" "$SPEC_PIGGY" <<'PY'
+import importlib.util
+import io
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+chosen = {
+    "docs/architecture/SPEC-Outward-Product-Truth-v1.md": (r"Merkle inclusion proof",),
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ],
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, chosen, identifiers={})
+out = buf.getvalue()
+if rc == 0:
+    raise SystemExit(
+        "FAIL: piggyback-spec expected fail, checker passed (false-green):\n" + out
+    )
+if "SPEC-Outward-Product-Truth-v1.md" not in out:
+    raise SystemExit("FAIL: piggyback-spec did not name the SPEC path:\n" + out)
+print("ok: piggyback-spec")
+PY
+
+printf '%s\n' "$REKOR_PIGGYBACK" >> "$FIXTURE/crates/assay-registry/src/rekor.rs"
+git -C "$FIXTURE" add -A -- crates/assay-registry/src/rekor.rs
+python3 - "$CHECKER" "$FIXTURE" <<'PY'
+import importlib.util
+import io
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0:
+    raise SystemExit(
+        "FAIL: piggyback-rekor expected fail, checker passed (false-green):\n" + out
+    )
+if "rekor.rs" not in out:
+    raise SystemExit("FAIL: piggyback-rekor did not name rekor.rs:\n" + out)
+print("ok: piggyback-rekor")
+PY
+cat > "$FIXTURE/crates/assay-registry/src/rekor.rs" <<'DOC'
+    // (5) Merkle inclusion: leaf = SHA256(0x00 || canonicalizedBody); recompute the root.
+    let Some(recomputed) = rfc6962_root(leaf_hash, ip_index, checkpoint.tree_size, &proof_hashes)
+DOC
+git -C "$FIXTURE" add -A -- crates/assay-registry/src/rekor.rs
+
 reset_lint
 run_case empty-allowlist fail empty
 echo "ok: empty-allowlist"
@@ -144,6 +225,7 @@ echo "ok: binary-input"
 
 python3 - "$CHECKER" "$ROOT" <<'PY'
 import importlib.util
+import inspect
 import io
 import sys
 from contextlib import redirect_stdout
@@ -197,8 +279,19 @@ for rel, pats in legacy.items():
     if not rel.startswith("demo/"):
         raise SystemExit(f"FAIL: unexpected legacy-identifier path {rel}")
     for pat in pats:
-        if "merkle-chain" not in pat:
+        if "merkle-chain" not in pat.replace("\\", ""):
             raise SystemExit(f"FAIL: legacy identifier must be an exact merkle-chain filename: {pat!r}")
+
+allowed_src = inspect.getsource(module.line_is_allowed)
+if "fullmatch" not in inspect.getsource(module.line_matches):
+    raise SystemExit("FAIL: line_matches must use fullmatch")
+if ".search(" in inspect.getsource(module.line_matches):
+    raise SystemExit("FAIL: line_matches must not substring-search")
+if "line_matches" not in allowed_src:
+    raise SystemExit("FAIL: line_is_allowed must call line_matches")
+stale_src = inspect.getsource(module.allowlist_staleness)
+if "line_matches" not in stale_src:
+    raise SystemExit("FAIL: staleness must use the same line_matches rule")
 
 print("ok: imported ALLOWED_MERKLE_USES is non-vacuous on this tree")
 print("ok: scan excludes only the two guard paths")
@@ -258,7 +351,8 @@ PY
 IDENT="$TMP/ident"
 init_fixture "$IDENT"
 mkdir -p "$IDENT/demo/scenes"
-printf '%s\n' 'vhs demo/scenes/merkle-chain.tape' 'cp demo/scenes/merkle-chain.mp4 dest.mp4' \
+printf '%s\n' 'vhs demo/scenes/merkle-chain.tape' \
+  'cp demo/scenes/merkle-chain.mp4 "$TEMP_DIR/shot05.mp4"' \
   > "$IDENT/demo/produce_video.sh"
 printf '%s\n' 'Output demo/scenes/merkle-chain.mp4' > "$IDENT/demo/scenes/merkle-chain.tape"
 git -C "$IDENT" add -A -- demo/produce_video.sh demo/scenes/merkle-chain.tape

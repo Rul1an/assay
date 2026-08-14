@@ -23,47 +23,35 @@
 
 ## Normative allowlist (path-bound, current hits)
 
-Exceptions are `path -> exact regular-expression patterns`, not whole-file or directory exemptions. Every pattern below was measured on `origin/main` at `b34bc2f8ef5d97d2ec3d4988852cba90ff9b396f` and has **≥1 hit**. The prior draft pairs (`rekor.rs` / `RFC 6962`+`Merkle proof`, `ADR-012` / `RFC 6962`, `spec_reason_code_registry.rs` / `not a Merkle`) had **0 hits** and must not be restored.
-
-The checker imports this same dict. A vacuous entry (path exists, pattern matches 0 times) is a hard failure. An empty allowlist must not admit a genuine Rekor fixture. Allowlisting a file must not mask an injected affirmative `run_root is a Merkle root` claim.
+Exceptions are `path -> complete-line regular-expression patterns` (`fullmatch` on the stripped line), not substring permits or whole-file exemptions. `.*` is only for generated identifiers and code call shapes, never around normative prose. A substring such as `Merkle inclusion proof` must not pass `run_root provides a Merkle inclusion proof.` The checker is the imported dict; a vacuous entry (path exists, pattern fullmatches 0 lines) is a hard failure. An empty allowlist must not admit a genuine Rekor fixture. Allowlisting a file must not mask an injected `run_root` claim, including piggybacks that `FALSE_CLAIM_RE` does not match.
 
 ```python
+# Patterns are complete-line fullmatch. See scripts/ci/check-evidence-vocabulary.py.
 ALLOWED_MERKLE_USES = {
-    # SPEC §7 negation / vocabulary (and the spec's other current Merkle mentions).
     "docs/architecture/SPEC-Outward-Product-Truth-v1.md": (
-        r"not a Merkle root",
-        r"Merkle inclusion proof",
-        r"Genuine Merkle references",
-        r"real Merkle construction",
-        r"run_root`-as-Merkle",
-        r"word `Merkle`",
-        r"false Merkle claim",
-        r"run_root` Merkle claims",
-        r"genuine Merkle constructions",
+        # eight exact SPEC lines; not the old substring permits
     ),
-    # Generated kernel identifiers, not an evidence claim.
-    "crates/assay-ebpf/src/vmlinux.rs": (r"merkle_tree_",),
-    # Real RFC6962-style experiment. Lib has Merkle prose; check/emit only call merkle_root(.
+    "crates/assay-ebpf/src/vmlinux.rs": (r".*merkle_tree_.*",),
     "scripts/experiments/aee_spike_lib.py": (
-        r"RFC6962-style Merkle",
-        r"def merkle_root",
-        r"SHA-256 Merkle root",
+        # exact RFC6962-style prose lines plus def merkle_root\(.*
     ),
-    "scripts/experiments/aee_spike_check.py": (r"merkle_root\(", r"merkle_root,"),
-    "scripts/experiments/aee_spike_emit.py": (r"merkle_root\(", r"merkle_root,"),
-    # Genuine Rekor / RFC 6962 (current text, not the vacuous draft patterns).
-    "crates/assay-registry/src/rekor.rs": (r"Merkle inclusion", r"rfc6962_root"),
-    "crates/assay-registry/src/rekor/checkpoint.rs": (r"RFC 6962",),
-    "docs/architecture/ADR-012-Transparency-Log.md": (r"Merkle tree", r"Merkle proof"),
+    "scripts/experiments/aee_spike_check.py": (r".*merkle_root\(.*", r"merkle_root,"),
+    "scripts/experiments/aee_spike_emit.py": (r".*merkle_root\(.*", r"merkle_root,"),
+    "crates/assay-registry/src/rekor.rs": (
+        # exact Merkle inclusion comment plus .*rfc6962_root.*
+    ),
+    "crates/assay-registry/src/rekor/checkpoint.rs": (
+        # exact RFC 6962 doc-comment line
+    ),
+    "docs/architecture/ADR-012-Transparency-Log.md": (
+        # three exact Merkle tree/proof lines
+    ),
     "crates/assay-cli/tests/spec_reason_code_registry.rs": (
-        r"names a Merkle structure",
-        r'"Merkle root',
-        r'"Merkle"',
+        # four exact negative-assertion lines
     ),
-    # ADR-009 alternatives: QLDB native tree and a rejected custom chain. Not run_root.
     "docs/architecture/ADR-009-WORM-Storage.md": (
-        r"Native Merkle tree verification",
-        r"Custom Merkle Chain on PostgreSQL",
+        r"- Native Merkle tree verification",
+        r"### 3. Custom Merkle Chain on PostgreSQL",
     ),
 }
 ```

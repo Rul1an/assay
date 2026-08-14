@@ -29,41 +29,50 @@ SCAN_PATH_EXCLUDES = (
     "scripts/ci/test-evidence-vocabulary.sh",
 )
 
-# Genuine constructions, generated identifiers, and explicit negative
-# spec/test assertions only. Measured on origin/main at
-# b34bc2f8ef5d97d2ec3d4988852cba90ff9b396f; each pattern has ≥1 hit.
-# Do not restore the vacuous draft pairs. Do not list false product claims.
+# Complete-line patterns (fullmatch on the stripped line). `.*` is only for
+# generated identifiers and code call shapes, never around normative prose.
+# Do not restore substring permits. Do not list false product claims.
+_E = re.escape
 ALLOWED_MERKLE_USES: dict[str, tuple[str, ...]] = {
     "docs/architecture/SPEC-Outward-Product-Truth-v1.md": (
-        r"not a Merkle root",
-        r"Merkle inclusion proof",
-        r"Genuine Merkle references",
-        r"real Merkle construction",
-        r"run_root`-as-Merkle",
-        r"word `Merkle`",
-        r"false Merkle claim",
-        r"run_root` Merkle claims",
-        r"genuine Merkle constructions",
+        _E("2. evidence vocabulary and the false Merkle claim tracked by issue #2222;"),
+        _E("of entry hashes. It is not a Merkle root and it does not provide a Merkle inclusion proof."),
+        _E("tests, demos, and fixtures that teach the public contract. Genuine Merkle references remain valid"),
+        _E("when they describe a real Merkle construction, including Rekor, RFC 6962 experiments, and the"),
+        _E("A scoped recurrence guard must reject new false `run_root`-as-Merkle claims while allowing named,"),
+        _E("reviewed genuine uses. The guard must not ban the word `Merkle` repository-wide."),
+        _E("- issue #2222's false current `run_root` Merkle claims are removed;"),
+        _E("- genuine Merkle constructions remain documented;"),
     ),
-    "crates/assay-ebpf/src/vmlinux.rs": (r"merkle_tree_",),
+    "crates/assay-ebpf/src/vmlinux.rs": (r".*merkle_tree_.*",),
     "scripts/experiments/aee_spike_lib.py": (
-        r"RFC6962-style Merkle",
-        r"def merkle_root",
-        r"SHA-256 Merkle root",
+        _E("fixture signature, run-binding, and RFC6962-style Merkle rules in one place so"),
+        r"def merkle_root\(.*",
+        _E('"""RFC6962-style SHA-256 Merkle root over canonical observation records."""'),
     ),
-    "scripts/experiments/aee_spike_check.py": (r"merkle_root\(", r"merkle_root,"),
-    "scripts/experiments/aee_spike_emit.py": (r"merkle_root\(", r"merkle_root,"),
-    "crates/assay-registry/src/rekor.rs": (r"Merkle inclusion", r"rfc6962_root"),
-    "crates/assay-registry/src/rekor/checkpoint.rs": (r"RFC 6962",),
-    "docs/architecture/ADR-012-Transparency-Log.md": (r"Merkle tree", r"Merkle proof"),
+    "scripts/experiments/aee_spike_check.py": (r".*merkle_root\(.*", _E("merkle_root,")),
+    "scripts/experiments/aee_spike_emit.py": (r".*merkle_root\(.*", _E("merkle_root,")),
+    "crates/assay-registry/src/rekor.rs": (
+        _E("// (5) Merkle inclusion: leaf = SHA256(0x00 || canonicalizedBody); recompute the root."),
+        r".*rfc6962_root.*",
+    ),
+    "crates/assay-registry/src/rekor/checkpoint.rs": (
+        _E("/// RFC 6962 section 2.1.1 inclusion-proof verification. Recomputes the tree root from the leaf hash, the"),
+    ),
+    "docs/architecture/ADR-012-Transparency-Log.md": (
+        _E("│  │ 3. Verify inclusion proof (Merkle tree)                 │   │"),
+        _E("// 2. Walk Merkle proof to root"),
+        _E("- [Merkle Tree Proofs](https://transparency.dev/verifiable-data-structures/)"),
+    ),
     "crates/assay-cli/tests/spec_reason_code_registry.rs": (
-        r"names a Merkle structure",
-        r'"Merkle root',
-        r'"Merkle"',
+        _E('// leaving that line untouched. That gap re-admitted a withdrawn "Merkle root ... inclusion'),
+        _E('// `compute_run_root` is a flat sha256 over the concatenated content hashes, so "Merkle" would'),
+        _E('!boundary.contains("Merkle"),'),
+        _E('"{BOUNDARY} names a Merkle structure; `run_root` is a hash chain"'),
     ),
     "docs/architecture/ADR-009-WORM-Storage.md": (
-        r"Native Merkle tree verification",
-        r"Custom Merkle Chain on PostgreSQL",
+        _E("- Native Merkle tree verification"),
+        _E("### 3. Custom Merkle Chain on PostgreSQL"),
     ),
 }
 
@@ -71,10 +80,10 @@ ALLOWED_MERKLE_USES: dict[str, tuple[str, ...]] = {
 # claims, and not genuine Merkle constructions. Not a whole-file exemption.
 LEGACY_IDENTIFIERS: dict[str, tuple[str, ...]] = {
     "demo/produce_video.sh": (
-        r"vhs demo/scenes/merkle-chain\.tape",
-        r"cp demo/scenes/merkle-chain\.mp4",
+        _E("vhs demo/scenes/merkle-chain.tape"),
+        _E('cp demo/scenes/merkle-chain.mp4 "$TEMP_DIR/shot05.mp4"'),
     ),
-    "demo/scenes/merkle-chain.tape": (r"Output demo/scenes/merkle-chain\.mp4",),
+    "demo/scenes/merkle-chain.tape": (_E("Output demo/scenes/merkle-chain.mp4"),),
 }
 
 FALSE_CLAIM_RE = re.compile(
@@ -114,12 +123,20 @@ def is_excluded(rel: str) -> bool:
     return any(rel == prefix.rstrip("/") or rel.startswith(prefix) for prefix in SCAN_PREFIX_EXCLUDES)
 
 
+def compiled_pattern(pat: str) -> re.Pattern[str]:
+    return re.compile(pat, re.IGNORECASE)
+
+
 def compiled_patterns(patterns: Sequence[str]) -> list[re.Pattern[str]]:
-    return [re.compile(pat, re.IGNORECASE) for pat in patterns]
+    return [compiled_pattern(pat) for pat in patterns]
+
+
+def line_matches(line: str, pat: re.Pattern[str]) -> bool:
+    return pat.fullmatch(line.strip()) is not None
 
 
 def line_is_allowed(line: str, patterns: Sequence[re.Pattern[str]]) -> bool:
-    return any(pat.search(line) for pat in patterns)
+    return any(line_matches(line, pat) for pat in patterns)
 
 
 def allowlist_staleness(
@@ -135,10 +152,11 @@ def allowlist_staleness(
         if text is None:
             messages.append(f"stale allowlist entry: {rel} is unreadable or binary")
             continue
-        for pat in patterns:
-            if re.search(pat, text, re.IGNORECASE) is None:
+        compiled = compiled_patterns(patterns)
+        for raw, cre in zip(patterns, compiled, strict=True):
+            if not any(line_matches(line, cre) for line in text.splitlines()):
                 messages.append(
-                    f"vacuous allowlist entry: {rel} / {pat!r} matched 0 times"
+                    f"vacuous allowlist entry: {rel} / {raw!r} matched 0 times"
                 )
     return messages
 
