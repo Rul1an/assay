@@ -26,6 +26,10 @@ PIGGYBACK="${_PIGGY_PREFIX}${_PIGGY_SUFFIX}"
 _REKOR_PIGGY_PREFIX='run_root provides '
 _REKOR_PIGGY_SUFFIX='Merkle inclusion for the bundle.'
 REKOR_PIGGYBACK="${_REKOR_PIGGY_PREFIX}${_REKOR_PIGGY_SUFFIX}"
+# Broad .*rfc6962_root.* matches comments, not only the call.
+_WILDCARD_PREFIX='// rfc6962_root makes run_root a '
+_WILDCARD_SUFFIX='Merkle commitment.'
+WILDCARD_REKOR="${_WILDCARD_PREFIX}${_WILDCARD_SUFFIX}"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -37,6 +41,7 @@ init_fixture() {
 Changing bundle content changes its content hashes.
 DOC
   cat > "$dest/crates/assay-registry/src/rekor.rs" <<'DOC'
+use checkpoint::{b64, parse_checkpoint, rfc6962_root, sha256};
     // (5) Merkle inclusion: leaf = SHA256(0x00 || canonicalizedBody); recompute the root.
     let Some(recomputed) = rfc6962_root(leaf_hash, ip_index, checkpoint.tree_size, &proof_hashes)
 DOC
@@ -206,10 +211,45 @@ if "rekor.rs" not in out:
 print("ok: piggyback-rekor")
 PY
 cat > "$FIXTURE/crates/assay-registry/src/rekor.rs" <<'DOC'
+use checkpoint::{b64, parse_checkpoint, rfc6962_root, sha256};
     // (5) Merkle inclusion: leaf = SHA256(0x00 || canonicalizedBody); recompute the root.
     let Some(recomputed) = rfc6962_root(leaf_hash, ip_index, checkpoint.tree_size, &proof_hashes)
 DOC
 git -C "$FIXTURE" add -A -- crates/assay-registry/src/rekor.rs
+
+WILDCARD="$TMP/wildcard-rekor"
+init_fixture "$WILDCARD"
+printf '%s\n' "$WILDCARD_REKOR" >> "$WILDCARD/crates/assay-registry/src/rekor.rs"
+git -C "$WILDCARD" add -A -- crates/assay-registry/src/rekor.rs
+python3 - "$CHECKER" "$WILDCARD" <<'PY'
+import importlib.util
+import io
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0:
+    raise SystemExit(
+        "FAIL: wildcard-rekor expected fail, checker passed (false-green):\n" + out
+    )
+if "rekor.rs" not in out:
+    raise SystemExit("FAIL: wildcard-rekor did not name rekor.rs:\n" + out)
+print("ok: wildcard-rekor")
+PY
 
 reset_lint
 run_case empty-allowlist fail empty
@@ -263,6 +303,15 @@ for rel in allow:
         raise SystemExit(f"FAIL: guard path {rel} must not be in ALLOWED_MERKLE_USES")
     if "verify_side_effects.rs" in rel:
         raise SystemExit("FAIL: verify_side_effects.rs must not have an allowlist exception")
+    for pat in allow[rel]:
+        if rel == "crates/assay-ebpf/src/vmlinux.rs":
+            if pat != r".*merkle_tree_.*":
+                raise SystemExit(f"FAIL: vmlinux permit must stay generated-id only, got {pat!r}")
+            continue
+        if ".*" in pat:
+            raise SystemExit(
+                f"FAIL: hand-written path {rel} has a prose-capable wildcard: {pat!r}"
+            )
 if getattr(module, "TEMPORARY_DEBT", None):
     raise SystemExit("FAIL: TEMPORARY_DEBT must not exist; no reserved false-claim exception")
 

@@ -29,9 +29,10 @@ SCAN_PATH_EXCLUDES = (
     "scripts/ci/test-evidence-vocabulary.sh",
 )
 
-# Complete-line patterns (fullmatch on the stripped line). `.*` is only for
-# generated identifiers and code call shapes, never around normative prose.
-# Do not restore substring permits. Do not list false product claims.
+# Complete-line patterns (fullmatch on the stripped line). The only `.*...*`
+# permit is generated `merkle_tree_*` identifiers in vmlinux.rs. Hand-written
+# import/call lines use exact `_E` text so a comment cannot ride the token.
+# Do not restore substring or prose-capable wildcard permits.
 _E = re.escape
 ALLOWED_MERKLE_USES: dict[str, tuple[str, ...]] = {
     "docs/architecture/SPEC-Outward-Product-Truth-v1.md": (
@@ -44,17 +45,26 @@ ALLOWED_MERKLE_USES: dict[str, tuple[str, ...]] = {
         _E("- issue #2222's false current `run_root` Merkle claims are removed;"),
         _E("- genuine Merkle constructions remain documented;"),
     ),
+    # Generated kernel identifiers (four `merkle_tree_*` shapes). Not prose.
     "crates/assay-ebpf/src/vmlinux.rs": (r".*merkle_tree_.*",),
     "scripts/experiments/aee_spike_lib.py": (
         _E("fixture signature, run-binding, and RFC6962-style Merkle rules in one place so"),
-        r"def merkle_root\(.*",
+        _E("def merkle_root(leaves: list[dict[str, Any]]) -> str:"),
         _E('"""RFC6962-style SHA-256 Merkle root over canonical observation records."""'),
     ),
-    "scripts/experiments/aee_spike_check.py": (r".*merkle_root\(.*", _E("merkle_root,")),
-    "scripts/experiments/aee_spike_emit.py": (r".*merkle_root\(.*", _E("merkle_root,")),
+    "scripts/experiments/aee_spike_check.py": (
+        _E("merkle_root,"),
+        _E('if records and predicate.get("batchRoot") != merkle_root(records):'),
+    ),
+    "scripts/experiments/aee_spike_emit.py": (
+        _E("merkle_root,"),
+        _E('"batchRoot": merkle_root(records),'),
+        _E('predicate["batchRoot"] = merkle_root(predicate["observationRecords"])'),
+    ),
     "crates/assay-registry/src/rekor.rs": (
         _E("// (5) Merkle inclusion: leaf = SHA256(0x00 || canonicalizedBody); recompute the root."),
-        r".*rfc6962_root.*",
+        _E("use checkpoint::{b64, parse_checkpoint, rfc6962_root, sha256};"),
+        _E("let Some(recomputed) = rfc6962_root(leaf_hash, ip_index, checkpoint.tree_size, &proof_hashes)"),
     ),
     "crates/assay-registry/src/rekor/checkpoint.rs": (
         _E("/// RFC 6962 section 2.1.1 inclusion-proof verification. Recomputes the tree root from the leaf hash, the"),

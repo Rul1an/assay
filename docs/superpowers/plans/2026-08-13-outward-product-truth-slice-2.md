@@ -23,7 +23,7 @@
 
 ## Normative allowlist (path-bound, current hits)
 
-Exceptions are `path -> complete-line regular-expression patterns` (`fullmatch` on the stripped line), not substring permits or whole-file exemptions. `.*` is only for generated identifiers and code call shapes, never around normative prose. A substring such as `Merkle inclusion proof` must not pass `run_root provides a Merkle inclusion proof.` The checker is the imported dict; a vacuous entry (path exists, pattern fullmatches 0 lines) is a hard failure. An empty allowlist must not admit a genuine Rekor fixture. Allowlisting a file must not mask an injected `run_root` claim, including piggybacks that `FALSE_CLAIM_RE` does not match.
+Exceptions are `path -> complete-line regular-expression patterns` (`fullmatch` on the stripped line), not substring permits or whole-file exemptions. The only `.*...*` permit is generated `merkle_tree_*` identifiers in `vmlinux.rs`. Hand-written import/call lines are exact `_E` text; `.*rfc6962_root.*` must not pass a comment. A substring such as `Merkle inclusion proof` must not pass `run_root provides a Merkle inclusion proof.` The checker is the imported dict; a vacuous entry (path exists, pattern fullmatches 0 lines) is a hard failure. An empty allowlist must not admit a genuine Rekor fixture. Allowlisting a file must not mask an injected `run_root` claim, including piggybacks that `FALSE_CLAIM_RE` does not match.
 
 ```python
 # Patterns are complete-line fullmatch. See scripts/ci/check-evidence-vocabulary.py.
@@ -31,14 +31,18 @@ ALLOWED_MERKLE_USES = {
     "docs/architecture/SPEC-Outward-Product-Truth-v1.md": (
         # eight exact SPEC lines; not the old substring permits
     ),
-    "crates/assay-ebpf/src/vmlinux.rs": (r".*merkle_tree_.*",),
+    "crates/assay-ebpf/src/vmlinux.rs": (r".*merkle_tree_.*",),  # generated ids only
     "scripts/experiments/aee_spike_lib.py": (
-        # exact RFC6962-style prose lines plus def merkle_root\(.*
+        # exact RFC6962-style prose and def lines
     ),
-    "scripts/experiments/aee_spike_check.py": (r".*merkle_root\(.*", r"merkle_root,"),
-    "scripts/experiments/aee_spike_emit.py": (r".*merkle_root\(.*", r"merkle_root,"),
+    "scripts/experiments/aee_spike_check.py": (
+        # exact merkle_root import and call lines
+    ),
+    "scripts/experiments/aee_spike_emit.py": (
+        # exact merkle_root import and call lines
+    ),
     "crates/assay-registry/src/rekor.rs": (
-        # exact Merkle inclusion comment plus .*rfc6962_root.*
+        # exact Merkle inclusion comment plus exact rfc6962_root import/call
     ),
     "crates/assay-registry/src/rekor/checkpoint.rs": (
         # exact RFC 6962 doc-comment line
