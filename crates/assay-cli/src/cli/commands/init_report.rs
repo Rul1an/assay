@@ -24,7 +24,12 @@ pub(crate) enum InitSuccess {
 impl InitSuccess {
     fn argv(&self) -> Vec<String> {
         match self {
-            Self::ListPresets => vec!["assay".to_string(), "init".to_string()],
+            Self::ListPresets => vec![
+                "assay".to_string(),
+                "init".to_string(),
+                "--format".to_string(),
+                "json".to_string(),
+            ],
             Self::Validate {
                 config,
                 replay_trace,

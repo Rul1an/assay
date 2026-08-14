@@ -8,6 +8,7 @@
 //! - omitted positional `--`
 //! - `--` placed after the operand
 //! - omitted init `--format json`
+//! - list-presets recovery omitting `--format json`
 //! - preset/non-hello init dropping the generated `--config`
 //! - from-trace recovery publishing generator-event JSONL as `--trace-file`
 //! - formatter changed to a shell join
@@ -40,6 +41,7 @@ enum Publisher {
     InitHelloTrace,
     InitPreset,
     InitFromTrace,
+    InitListPresets,
 }
 
 const PUBLISHERS: &[Publisher] = &[
@@ -49,6 +51,7 @@ const PUBLISHERS: &[Publisher] = &[
     Publisher::InitHelloTrace,
     Publisher::InitPreset,
     Publisher::InitFromTrace,
+    Publisher::InitListPresets,
 ];
 
 /// Measured classes from #2371: dash-prefixed option lookalikes, spaces, quotes,
@@ -153,6 +156,12 @@ fn expected_argv(publisher: Publisher, value: &str) -> Vec<String> {
             "--format".into(),
             "json".into(),
         ],
+        Publisher::InitListPresets => vec![
+            "assay".into(),
+            "init".into(),
+            "--format".into(),
+            "json".into(),
+        ],
     }
 }
 
@@ -242,6 +251,15 @@ fn publish(dir: &Path, publisher: Publisher, value: &str) -> Value {
             assert_eq!(output.status.code(), Some(0), "init-from-trace {value}");
             json_document(&output, &format!("init-from-trace {value}"))
         }
+        Publisher::InitListPresets => {
+            let output = assay(
+                dir,
+                &["init", "--list-presets", "--format", "json"],
+                "init-list-presets",
+            );
+            assert_eq!(output.status.code(), Some(0), "init-list-presets");
+            json_document(&output, "init-list-presets")
+        }
     }
 }
 
@@ -279,6 +297,18 @@ fn assert_intended_outcome(publisher: Publisher, recovered: &Output, context: &s
             assert_eq!(
                 document["exit_code"], 0,
                 "{context}: init recovery must publish exit_code 0"
+            );
+        }
+        Publisher::InitListPresets => {
+            assert_eq!(
+                recovered.status.code(),
+                Some(0),
+                "{context}: list-presets recovery must exit 0; stderr:\n{}",
+                String::from_utf8_lossy(&recovered.stderr)
+            );
+            assert_eq!(
+                document["schema"], "assay.init_report.v0",
+                "{context}: list-presets recovery must keep machine output, not the text stream"
             );
         }
     }
@@ -341,6 +371,11 @@ fn init_success_publishers_bind_generated_config_and_json() {
     drive_publisher(Publisher::InitPreset, "-weird.yaml");
     drive_publisher(Publisher::InitPreset, "custom.yaml");
     drive_publisher(Publisher::InitFromTrace, "-weird.yaml");
+}
+
+#[test]
+fn init_list_presets_recovery_keeps_machine_output() {
+    drive_publisher(Publisher::InitListPresets, "unused");
 }
 
 #[test]
