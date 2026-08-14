@@ -254,8 +254,8 @@ STEPS: list[dict[str, object]] = [
                 # which is what `null` means for `policy-validation/valid` in this same file, and
                 # the document has carried a concrete argv all along.
                 next_step=(
-                    'Run argv: ["assay","validate","--config","eval.yaml",'
-                    '"--trace-file","traces/hello.jsonl"]'
+                    'Run argv: ["assay","validate","--config=eval.yaml",'
+                    '"--trace-file=traces/hello.jsonl","--format","json"]'
                 ),
             ),
             outcome(
@@ -270,7 +270,7 @@ STEPS: list[dict[str, object]] = [
         ],
         "stdout_summary": (
             "Default `text` is human progress; success ends with `Next: assay validate "
-            "--config eval.yaml --trace-file traces/hello.jsonl`, and a failing run "
+            "--config=eval.yaml --trace-file=traces/hello.jsonl --format json`, and a failing run "
             "writes partial progress text rather than the fatal diagnosis. `--format "
             "json` replaces that stream with one `assay.init_report.v0` document "
             "naming `reason_code`, `next_step`, and the files created and skipped."
@@ -476,8 +476,8 @@ STEPS: list[dict[str, object]] = [
                 ["evidence", "show", "<bundle>", "--format", "json"],
                 reason_code="E_EVIDENCE_UNREADABLE",
                 next_step=(
-                    'Run argv: ["assay","evidence","show","<bundle>",'
-                    '"--format","json"]'
+                    'Run argv: ["assay","evidence","show","--format","json",'
+                    '"--","<bundle>"]'
                 ),
             ),
             outcome(

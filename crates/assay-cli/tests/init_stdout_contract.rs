@@ -223,7 +223,7 @@ const CREATED_WITH_HELLO_TRACE: &str = "🏗️  Generating Assay Policy & Confi
    Created traces/hello.jsonl
 ✅  Initialization complete.
    Note: hello trace uses demo prompt/response text only; treat real traces as potentially sensitive.
-   Next: assay validate --config eval.yaml --trace-file traces/hello.jsonl
+   Next: assay validate --config=eval.yaml --trace-file=traces/hello.jsonl --format json
 ";
 
 const SKIPPED_WITH_HELLO_TRACE: &str = "🏗️  Generating Assay Policy & Config...
@@ -232,7 +232,7 @@ const SKIPPED_WITH_HELLO_TRACE: &str = "🏗️  Generating Assay Policy & Confi
    Skipped traces/hello.jsonl (exists)
 ✅  Initialization complete.
    Note: hello trace uses demo prompt/response text only; treat real traces as potentially sensitive.
-   Next: assay validate --config eval.yaml --trace-file traces/hello.jsonl
+   Next: assay validate --config=eval.yaml --trace-file=traces/hello.jsonl --format json
 ";
 
 const CREATED_WITHOUT_HELLO_TRACE: &str = "🏗️  Generating Assay Policy & Config...

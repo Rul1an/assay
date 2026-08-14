@@ -209,7 +209,7 @@
             "document": "assay.init_report.v0"
           },
           "reason_code": "",
-          "next_step": "Run argv: [\"assay\",\"validate\",\"--config\",\"eval.yaml\",\"--trace-file\",\"traces/hello.jsonl\"]",
+          "next_step": "Run argv: [\"assay\",\"validate\",\"--config=eval.yaml\",\"--trace-file=traces/hello.jsonl\",\"--format\",\"json\"]",
           "gap_issue": null
         },
         {
@@ -232,7 +232,7 @@
           "gap_issue": null
         }
       ],
-      "stdout_summary": "Default `text` is human progress; success ends with `Next: assay validate --config eval.yaml --trace-file traces/hello.jsonl`, and a failing run writes partial progress text rather than the fatal diagnosis. `--format json` replaces that stream with one `assay.init_report.v0` document naming `reason_code`, `next_step`, and the files created and skipped.",
+      "stdout_summary": "Default `text` is human progress; success ends with `Next: assay validate --config=eval.yaml --trace-file=traces/hello.jsonl --format json`, and a failing run writes partial progress text rather than the fatal diagnosis. `--format json` replaces that stream with one `assay.init_report.v0` document naming `reason_code`, `next_step`, and the files created and skipped.",
       "failure_summary": "Under `--format json` a rejected `--preset` publishes `E_INVALID_ARGS` and a `next_step` on stdout. Failures the reason-code registry does not name, such as a filesystem write error, still produce no document: stdout is empty and the diagnosis stays on stderr.",
       "command": "assay init --preset dev --hello-trace"
     },
@@ -480,7 +480,7 @@
             "document": "assay.run_summary.v1"
           },
           "reason_code": "E_EVIDENCE_UNREADABLE",
-          "next_step": "Run argv: [\"assay\",\"evidence\",\"show\",\"<bundle>\",\"--format\",\"json\"]",
+          "next_step": "Run argv: [\"assay\",\"evidence\",\"show\",\"--format\",\"json\",\"--\",\"<bundle>\"]",
           "gap_issue": null
         },
         {

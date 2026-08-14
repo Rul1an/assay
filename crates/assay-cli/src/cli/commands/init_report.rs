@@ -90,9 +90,10 @@ impl InitReport {
     /// Ends a successful `init`.
     ///
     /// `human_lines` are the closing text lines in the order the text channel prints them; the
-    /// machine channel ignores them and publishes `next_argv` instead. `--config` carries a
-    /// caller-controlled value, so the machine channel states the step as JSON argv rather than as
-    /// a shell string a consumer would have to re-split.
+    /// machine channel ignores them and publishes `next_argv` instead. Caller-controlled
+    /// option values are fused (`--config=path`) before they reach this function, so the
+    /// machine channel states the step as JSON argv rather than as a shell string a
+    /// consumer would have to re-split.
     pub(crate) fn succeed(self, next_argv: &[&str], human_lines: &[String]) -> anyhow::Result<i32> {
         if self.is_json() {
             // A report that could not be rendered leaves the caller with no document, so it exits

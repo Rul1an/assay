@@ -143,8 +143,21 @@ pub(crate) fn reason_for_unloadable_explicit_config(err: &ConfigLoadError) -> Re
 /// Always `flag=value`, including when `value` does not start with `-`. A split
 /// `--flag` / value pair lets clap reread a `-prefixed` path as an option. A
 /// conditional fuse would be a second place that rule could drift.
-fn fused_option(flag: &str, value: &str) -> String {
+pub(crate) fn fused_option(flag: &str, value: &str) -> String {
     format!("{flag}={value}")
+}
+
+/// Owns `prefix + ["--", operand]` ordering for a positional recovery operand.
+///
+/// Decorating the value alone is not enough: placing the operand before `--`
+/// lets clap reread a `-prefixed` path as an option, and a bundle named `--`
+/// binds the wrong operand if the separator is not the last prefix element.
+pub(crate) fn positional_operand<'a>(prefix: &'a [&'a str], operand: &'a str) -> Vec<&'a str> {
+    let mut argv = Vec::with_capacity(prefix.len() + 2);
+    argv.extend_from_slice(prefix);
+    argv.push("--");
+    argv.push(operand);
+    argv
 }
 
 impl ReasonCode {
@@ -280,14 +293,13 @@ impl ReasonCode {
                  does not match what it records"
                     .to_string()
             }
-            ReasonCode::EEvidenceUnreadable => format_recovery_argv(&[
-                "assay",
-                "evidence",
-                "show",
-                context.unwrap_or("<bundle>"),
-                "--format",
-                "json",
-            ]),
+            ReasonCode::EEvidenceUnreadable => {
+                let argv = positional_operand(
+                    &["assay", "evidence", "show", "--format", "json"],
+                    context.unwrap_or("<bundle>"),
+                );
+                format_recovery_argv(&argv)
+            }
             ReasonCode::EMissingConfig => "Run: assay init to create a config file".to_string(),
             ReasonCode::EBaselineInvalid => {
                 "Run: assay baseline record to create a new baseline".to_string()
@@ -712,9 +724,10 @@ mod tests {
                     "assay".into(),
                     "evidence".into(),
                     "show".into(),
-                    path.into(),
                     "--format".into(),
                     "json".into(),
+                    "--".into(),
+                    path.into(),
                 ],
             ),
         ];
@@ -752,7 +765,7 @@ mod tests {
                 vec![
                     "assay".to_string(),
                     "doctor".to_string(),
-                    fused_option("--config", path),
+                    format!("--config={path}"),
                     "--format".to_string(),
                     "json".to_string()
                 ]
@@ -763,7 +776,7 @@ mod tests {
                     "assay".to_string(),
                     "policy".to_string(),
                     "validate".to_string(),
-                    fused_option("--input", path),
+                    format!("--input={path}"),
                     "--format".to_string(),
                     "json".to_string()
                 ]
@@ -773,6 +786,87 @@ mod tests {
                 "recovery text must not carry raw BEL"
             );
         }
+    }
+
+    fn publishes_recovery_argv(reason: ReasonCode) -> bool {
+        match reason {
+            ReasonCode::ECfgParse | ReasonCode::EPolicyParse | ReasonCode::EEvidenceUnreadable => {
+                true
+            }
+            ReasonCode::Success
+            | ReasonCode::ETraceNotFound
+            | ReasonCode::EMissingConfig
+            | ReasonCode::EBaselineInvalid
+            | ReasonCode::EReplayMissingDependency
+            | ReasonCode::EReplayLimitExceeded
+            | ReasonCode::EEvidenceIntegrity
+            | ReasonCode::EInvalidArgs
+            | ReasonCode::EJudgeUnavailable
+            | ReasonCode::ERateLimit
+            | ReasonCode::EProvider5xx
+            | ReasonCode::ETimeout
+            | ReasonCode::ENetworkError
+            | ReasonCode::ETestFailed
+            | ReasonCode::EJudgeUncertain
+            | ReasonCode::EPolicyViolation
+            | ReasonCode::ESequenceViolation
+            | ReasonCode::EArgSchema => false,
+        }
+    }
+
+    #[test]
+    fn every_reason_that_publishes_argv_is_a_known_executable_recovery() {
+        let mut published = Vec::new();
+        for reason in [
+            ReasonCode::Success,
+            ReasonCode::ECfgParse,
+            ReasonCode::ETraceNotFound,
+            ReasonCode::EMissingConfig,
+            ReasonCode::EBaselineInvalid,
+            ReasonCode::EPolicyParse,
+            ReasonCode::EReplayMissingDependency,
+            ReasonCode::EReplayLimitExceeded,
+            ReasonCode::EEvidenceIntegrity,
+            ReasonCode::EEvidenceUnreadable,
+            ReasonCode::EInvalidArgs,
+            ReasonCode::EJudgeUnavailable,
+            ReasonCode::ERateLimit,
+            ReasonCode::EProvider5xx,
+            ReasonCode::ETimeout,
+            ReasonCode::ENetworkError,
+            ReasonCode::ETestFailed,
+            ReasonCode::EJudgeUncertain,
+            ReasonCode::EPolicyViolation,
+            ReasonCode::ESequenceViolation,
+            ReasonCode::EArgSchema,
+        ] {
+            let classified = publishes_recovery_argv(reason);
+            let emitted = reason.next_step(Some("x")).starts_with("Run argv: ");
+            assert_eq!(
+                emitted, classified,
+                "{reason:?}: classification and published next_step must agree"
+            );
+            if emitted {
+                published.push(reason);
+            }
+        }
+        assert_eq!(
+            published,
+            [
+                ReasonCode::ECfgParse,
+                ReasonCode::EPolicyParse,
+                ReasonCode::EEvidenceUnreadable,
+            ],
+            "a new argv publisher must join the cross-publisher harness; dropping one is the skipped-variant mutation"
+        );
+    }
+
+    #[test]
+    fn positional_operand_owns_separator_before_the_value() {
+        assert_eq!(
+            positional_operand(&["assay", "evidence", "show", "--format", "json"], "--"),
+            vec!["assay", "evidence", "show", "--format", "json", "--", "--"]
+        );
     }
 
     #[test]

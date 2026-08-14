@@ -624,9 +624,10 @@ fn bundle_inspection_json_publishes_typed_failures_on_stdout() {
             "assay",
             "evidence",
             "show",
-            missing.to_str().expect("UTF-8 path"),
             "--format",
             "json",
+            "--",
+            missing.to_str().expect("UTF-8 path"),
         ]
     );
 

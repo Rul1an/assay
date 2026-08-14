@@ -1,5 +1,5 @@
 use crate::cli::args::InitArgs;
-use crate::exit_codes::{ReasonCode, RunOutcome};
+use crate::exit_codes::{fused_option, ReasonCode, RunOutcome};
 use std::path::{Path, PathBuf};
 
 use super::init_report::InitReport;
@@ -141,20 +141,23 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
     }
 
     report.progress("✅  Initialization complete.");
-    let config = args.config.display().to_string();
+    let config = fused_option("--config", &args.config.display().to_string());
     if args.hello_trace {
-        let hello_trace = hello_trace_path
-            .as_ref()
-            .expect("hello trace path must exist when --hello-trace is set")
-            .display()
-            .to_string();
+        let hello_trace = fused_option(
+            "--trace-file",
+            &hello_trace_path
+                .as_ref()
+                .expect("hello trace path must exist when --hello-trace is set")
+                .display()
+                .to_string(),
+        );
         let argv = [
             "assay",
             "validate",
-            "--config",
             config.as_str(),
-            "--trace-file",
             hello_trace.as_str(),
+            "--format",
+            "json",
         ];
         let human = [
             "   Note: hello trace uses demo prompt/response text only; treat real traces as potentially sensitive.".to_string(),
@@ -313,19 +316,23 @@ tests:
     }
 
     report.progress("\n✅  Initialization complete.");
-    let config = args.config.display().to_string();
-    let trace = trace_path.display().to_string();
+    let config = fused_option("--config", &args.config.display().to_string());
+    let trace = fused_option("--trace-file", &trace_path.display().to_string());
     let argv = [
         "assay",
         "validate",
-        "--config",
         config.as_str(),
-        "--trace-file",
         trace.as_str(),
+        "--format",
+        "json",
     ];
     let human = [
         format!("\n{}", report.next_line(&argv)),
-        format!("   CI:   assay ci --config {config} --trace-file {trace}"),
+        format!(
+            "   CI:   assay ci --config {} --trace-file {}",
+            args.config.display(),
+            trace_path.display()
+        ),
         "\n   Tip: For EU AI Act compliance scanning, add: --pack eu-ai-act-baseline".to_string(),
     ];
     report.succeed(&argv, &human)
