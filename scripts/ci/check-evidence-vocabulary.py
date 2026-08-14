@@ -102,6 +102,22 @@ FALSE_CLAIM_RE = re.compile(
 )
 MERKLE_RE = re.compile(r"merkle", re.IGNORECASE)
 
+# Withdrawn experiment metric names. They do not contain "merkle" but still
+# teach a production inclusion proof that run_root does not have. Exact
+# surfaces only — genuine Rekor/ADR inclusion-proof text is out of scope.
+WITHDRAWN_METRIC_LABELS: tuple[str, ...] = (
+    "inclusion_proof_hashes",
+    "inclusion-proof hashes",
+)
+WITHDRAWN_SURFACES: frozenset[str] = frozenset(
+    {
+        "crates/assay-evidence/tests/e3_verify_cost_curve.rs",
+        "docs/experiments/evidence-mutation-cost-2026-06/aggregate.py",
+        "docs/experiments/evidence-mutation-cost-2026-06/results/cost.json",
+        "docs/experiments/evidence-mutation-cost-2026-06/results/cost.md",
+    }
+)
+
 
 def git_files(root: Path) -> list[Path]:
     proc = subprocess.run(
@@ -205,6 +221,24 @@ def scan_findings(
     return findings
 
 
+def scan_withdrawn_labels(root: Path, files: Iterable[Path]) -> list[str]:
+    findings: list[str] = []
+    for path in files:
+        rel = rel_posix(path, root)
+        if rel not in WITHDRAWN_SURFACES:
+            continue
+        text = read_text(path)
+        if text is None:
+            continue
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            for label in WITHDRAWN_METRIC_LABELS:
+                if label in line:
+                    findings.append(
+                        f"{rel}:{line_no}: withdrawn metric label {label!r}: {line.strip()}"
+                    )
+    return findings
+
+
 def check_tree(
     root: Path,
     allowlist: Mapping[str, Sequence[str]] | None = None,
@@ -213,10 +247,12 @@ def check_tree(
     rules = ALLOWED_MERKLE_USES if allowlist is None else allowlist
     idents = LEGACY_IDENTIFIERS if identifiers is None else identifiers
     stale = allowlist_staleness(root, rules) + allowlist_staleness(root, idents)
-    findings = scan_findings(root, git_files(root), rules, idents)
-    if stale or findings:
+    tracked = git_files(root)
+    findings = scan_findings(root, tracked, rules, idents)
+    withdrawn = scan_withdrawn_labels(root, tracked)
+    if stale or findings or withdrawn:
         print("evidence-vocabulary=failed")
-        for message in stale + findings:
+        for message in stale + findings + withdrawn:
             print(message)
         return 1
     print("evidence-vocabulary=passed")

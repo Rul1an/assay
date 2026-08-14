@@ -17,14 +17,28 @@ def render_cost(cost):
     out = []
     out.append("# Verification + signing cost curve\n")
     out.append(f"Profile: `{cost['profile']}` · payload {cost['payload_bytes_per_event']} bytes/event\n")
-    out.append("| events | verify ms (median) | reps | compressed bytes | gzip ratio | bytes/event | inclusion-proof hashes |")
+    out.append("| events | verify ms (median) | reps | compressed bytes | gzip ratio | bytes/event | synthetic_log2_hash_count |")
     out.append("| --- | --- | --- | --- | --- | --- | --- |")
     for r in rows:
         out.append(
             f"| {r['events']:,} | {r['verify_ms_median']:.3f} | {r['verify_reps']} | "
             f"{r['compressed_bytes']:,} | {r['gzip_ratio']:.4f} | "
-            f"{r['bytes_per_event_compressed']:.2f} | {r['inclusion_proof_hashes']} |"
+            f"{r['bytes_per_event_compressed']:.2f} | {r['synthetic_log2_hash_count']} |"
         )
+    model = cost.get("synthetic_log2_model") or {}
+    out.append("")
+    out.append("## Synthetic log2 model\n")
+    out.append(
+        f"- column: `{model.get('column', 'synthetic_log2_hash_count')}` · "
+        f"formula: `{model.get('formula', 'ceil(log2(N))')}`"
+    )
+    out.append(
+        f"- consumed by production verification: "
+        f"**{str(model.get('consumed_by_production_verification', False)).lower()}**"
+    )
+    out.append(
+        f"- {model.get('note', 'Comparison model only. Production verification does not consume it.')}"
+    )
     fit = cost["fit"]
     out.append("")
     out.append("## Linear fit (verify_ms ~ a + b·events)\n")

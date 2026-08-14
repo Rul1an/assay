@@ -4,8 +4,8 @@
 //!   - verify time (median),
 //!   - compressed bundle bytes and bytes-per-event,
 //!   - gzip ratio (compressed / uncompressed events),
-//!   - logarithmic proof model used by this experiment = ceil(log2(N)) hashes
-//!     (not consumed by production verification; `run_root` is a flat digest),
+//!   - synthetic_log2_hash_count = ceil(log2(N)) comparison model used by this
+//!     experiment (not consumed by production verification; `run_root` is a flat digest),
 //!   - DSSE sign / verify time over the run anchor.
 //!
 //! Rationale: signed/attested artifact lines are widening, but the cost of verification is rarely
@@ -109,8 +109,9 @@ fn time_verify_ms(bundle: &[u8], limits: &VerifyLimits, reps: usize) -> f64 {
     median(samples)
 }
 
-/// ceil(log2(n)) — logarithmic proof-model size used by this experiment, not by production verification.
-fn inclusion_proof_hashes(n: u64) -> u32 {
+/// ceil(log2(n)) comparison model used by this experiment.
+/// Production verification does not consume it; `run_root` is a flat digest.
+fn synthetic_log2_hash_count(n: u64) -> u32 {
     if n <= 1 {
         0
     } else {
@@ -235,7 +236,7 @@ fn e3_verify_cost_curve() {
             "events_bytes": events_bytes,
             "bytes_per_event_compressed": compressed as f64 / events as f64,
             "gzip_ratio": gzip_ratio,
-            "inclusion_proof_hashes": inclusion_proof_hashes(events as u64),
+            "synthetic_log2_hash_count": synthetic_log2_hash_count(events as u64),
         }));
         fit_points.push((events as f64, verify_ms));
     }
@@ -252,6 +253,12 @@ fn e3_verify_cost_curve() {
         "schema": "assay.experiment.evidence_verify_cost.v0",
         "profile": profile,
         "payload_bytes_per_event": payload_bytes,
+        "synthetic_log2_model": {
+            "column": "synthetic_log2_hash_count",
+            "formula": "ceil(log2(N))",
+            "consumed_by_production_verification": false,
+            "note": "Comparison model only. Production verification does not consume it; run_root is a flat SHA-256 digest over ordered entry hashes.",
+        },
         "rows": rows,
         "fit": {
             "slope_ms_per_event": slope,

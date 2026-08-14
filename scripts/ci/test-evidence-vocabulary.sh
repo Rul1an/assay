@@ -251,6 +251,53 @@ if "rekor.rs" not in out:
 print("ok: wildcard-rekor")
 PY
 
+# Withdrawn experiment metric labels are not Merkle tokens; they still teach a
+# production inclusion proof that run_root does not have.
+WITHDRAWN="$TMP/withdrawn-metric"
+init_fixture "$WITHDRAWN"
+mkdir -p "$WITHDRAWN/crates/assay-evidence/tests" \
+  "$WITHDRAWN/docs/experiments/evidence-mutation-cost-2026-06/results"
+printf '%s\n' 'fn inclusion_proof_hashes(n: u64) -> u32 { n as u32 }' \
+  > "$WITHDRAWN/crates/assay-evidence/tests/e3_verify_cost_curve.rs"
+printf '%s\n' '| events | inclusion-proof hashes |' \
+  > "$WITHDRAWN/docs/experiments/evidence-mutation-cost-2026-06/results/cost.md"
+git -C "$WITHDRAWN" add -A -- \
+  crates/assay-evidence/tests/e3_verify_cost_curve.rs \
+  docs/experiments/evidence-mutation-cost-2026-06/results/cost.md
+python3 - "$CHECKER" "$WITHDRAWN" <<'PY'
+import importlib.util
+import io
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0:
+    raise SystemExit(
+        "FAIL: withdrawn-metric expected fail, checker passed (false-green):\n" + out
+    )
+if "inclusion_proof_hashes" not in out:
+    raise SystemExit("FAIL: withdrawn-metric did not flag snake_case label:\n" + out)
+if "inclusion-proof hashes" not in out:
+    raise SystemExit("FAIL: withdrawn-metric did not flag rendered label:\n" + out)
+if "rekor.rs" in out and "withdrawn metric label" in out:
+    raise SystemExit("FAIL: genuine Rekor path was flagged as a withdrawn label:\n" + out)
+print("ok: withdrawn-metric")
+PY
+
 reset_lint
 run_case empty-allowlist fail empty
 echo "ok: empty-allowlist"
@@ -314,6 +361,18 @@ for rel in allow:
             )
 if getattr(module, "TEMPORARY_DEBT", None):
     raise SystemExit("FAIL: TEMPORARY_DEBT must not exist; no reserved false-claim exception")
+withdrawn_labels = getattr(module, "WITHDRAWN_METRIC_LABELS", None)
+if withdrawn_labels != ("inclusion_proof_hashes", "inclusion-proof hashes"):
+    raise SystemExit(f"FAIL: WITHDRAWN_METRIC_LABELS drifted: {withdrawn_labels!r}")
+withdrawn_surfaces = getattr(module, "WITHDRAWN_SURFACES", None)
+expected_surfaces = {
+    "crates/assay-evidence/tests/e3_verify_cost_curve.rs",
+    "docs/experiments/evidence-mutation-cost-2026-06/aggregate.py",
+    "docs/experiments/evidence-mutation-cost-2026-06/results/cost.json",
+    "docs/experiments/evidence-mutation-cost-2026-06/results/cost.md",
+}
+if withdrawn_surfaces != expected_surfaces:
+    raise SystemExit(f"FAIL: WITHDRAWN_SURFACES drifted: {withdrawn_surfaces!r}")
 
 legacy = getattr(module, "LEGACY_IDENTIFIERS", None)
 if not isinstance(legacy, dict) or not legacy:

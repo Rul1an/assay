@@ -2,13 +2,19 @@
 
 Profile: `release` · payload 256 bytes/event
 
-| events | verify ms (median) | reps | compressed bytes | gzip ratio | bytes/event | inclusion-proof hashes |
+| events | verify ms (median) | reps | compressed bytes | gzip ratio | bytes/event | synthetic_log2_hash_count |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1,000 | 16.193 | 11 | 260,847 | 0.3420 | 260.85 | 10 |
 | 5,000 | 80.648 | 9 | 1,301,206 | 0.3404 | 260.24 | 13 |
 | 10,000 | 160.365 | 7 | 2,601,647 | 0.3402 | 260.16 | 14 |
 | 50,000 | 801.435 | 5 | 13,005,058 | 0.3393 | 260.10 | 16 |
 | 100,000 | 1609.891 | 3 | 26,009,231 | 0.3392 | 260.09 | 17 |
+
+## Synthetic log2 model
+
+- column: `synthetic_log2_hash_count` · formula: `ceil(log2(N))`
+- consumed by production verification: **false**
+- Comparison model only. Production verification does not consume it; run_root is a flat SHA-256 digest over ordered entry hashes.
 
 ## Linear fit (verify_ms ~ a + b·events)
 

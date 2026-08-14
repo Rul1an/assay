@@ -2,6 +2,12 @@
   "schema": "assay.experiment.evidence_verify_cost.v0",
   "profile": "release",
   "payload_bytes_per_event": 256,
+  "synthetic_log2_model": {
+    "column": "synthetic_log2_hash_count",
+    "formula": "ceil(log2(N))",
+    "consumed_by_production_verification": false,
+    "note": "Comparison model only. Production verification does not consume it; run_root is a flat SHA-256 digest over ordered entry hashes."
+  },
   "rows": [
     {
       "events": 1000,
@@ -11,7 +17,7 @@
       "events_bytes": 762780,
       "bytes_per_event_compressed": 260.847,
       "gzip_ratio": 0.3419688507826634,
-      "inclusion_proof_hashes": 10
+      "synthetic_log2_hash_count": 10
     },
     {
       "events": 5000,
@@ -21,7 +27,7 @@
       "events_bytes": 3822780,
       "bytes_per_event_compressed": 260.2412,
       "gzip_ratio": 0.3403821302821507,
-      "inclusion_proof_hashes": 13
+      "synthetic_log2_hash_count": 13
     },
     {
       "events": 10000,
@@ -31,7 +37,7 @@
       "events_bytes": 7647780,
       "bytes_per_event_compressed": 260.1647,
       "gzip_ratio": 0.3401832950215618,
-      "inclusion_proof_hashes": 14
+      "synthetic_log2_hash_count": 14
     },
     {
       "events": 50000,
@@ -41,7 +47,7 @@
       "events_bytes": 38327780,
       "bytes_per_event_compressed": 260.10116,
       "gzip_ratio": 0.33931153852375484,
-      "inclusion_proof_hashes": 16
+      "synthetic_log2_hash_count": 16
     },
     {
       "events": 100000,
@@ -51,7 +57,7 @@
       "events_bytes": 76677780,
       "bytes_per_event_compressed": 260.09231,
       "gzip_ratio": 0.3392016696362362,
-      "inclusion_proof_hashes": 17
+      "synthetic_log2_hash_count": 17
     }
   ],
   "fit": {
