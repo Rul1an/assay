@@ -608,6 +608,256 @@ fn a_run_that_claimed_nothing_is_distinguishable_from_a_run_that_was_contradicte
     assert_eq!(quiet_report["calls"][0]["occurrence_ceiling"], Value::Null);
 }
 
+// ------------------------------------------------- Blocker 1: fail closed on malformed input
+
+/// A bundle carrying an event that is NOT a decision surface (wrong type).
+fn bundle_with_no_decision_events(path: &std::path::Path) {
+    let event = EvidenceEvent::new(
+        "assay.some_other_event.v0",
+        "urn:assay:test:side-effects-cli",
+        "run-no-decisions",
+        0,
+        json!({"irrelevant": true}),
+    );
+    let file = fs::File::create(path).unwrap();
+    let mut writer = BundleWriter::new(file);
+    writer.add_event(event);
+    writer.finish().unwrap();
+}
+
+#[test]
+fn a_bundle_with_no_decision_events_fails_rather_than_reporting_nothing_claimed() {
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("empty.tar.gz");
+    bundle_with_no_decision_events(&bundle);
+
+    let out = Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("verify-side-effects")
+        .arg(&bundle)
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .failure()
+        .get_output()
+        .stderr
+        .clone();
+    let stderr = String::from_utf8(out).unwrap();
+    assert!(
+        stderr.contains("no") && stderr.contains(DECISION_EVENT_TYPE),
+        "the error must name the missing event type: {stderr}"
+    );
+}
+
+/// A bundle whose decision event has `observed_tool_decisions` as a string instead of an array.
+fn bundle_with_non_array_decisions(path: &std::path::Path) {
+    let mut surface = fixture("verified.json");
+    surface["observed_tool_decisions"] = json!("not_an_array");
+
+    let mut event = EvidenceEvent::new(
+        DECISION_EVENT_TYPE,
+        "urn:assay:test:side-effects-cli",
+        "run-bad-decisions",
+        0,
+        surface,
+    );
+    event.time = chrono::Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+
+    let file = fs::File::create(path).unwrap();
+    let mut writer = BundleWriter::new(file);
+    writer.add_event(event);
+    writer.finish().unwrap();
+}
+
+#[test]
+fn a_non_array_observed_tool_decisions_fails_rather_than_silently_skipping() {
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("bad.tar.gz");
+    bundle_with_non_array_decisions(&bundle);
+
+    let out = Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("verify-side-effects")
+        .arg(&bundle)
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .failure()
+        .get_output()
+        .stderr
+        .clone();
+    let stderr = String::from_utf8(out).unwrap();
+    assert!(
+        stderr.contains("not an array"),
+        "the error must explain what went wrong: {stderr}"
+    );
+}
+
+/// A bundle where response.side_effect_asserted is a string instead of a bool.
+fn bundle_with_non_bool_asserted(path: &std::path::Path) {
+    let mut surface = fixture("verified.json");
+    let decision = &mut surface["observed_tool_decisions"][0];
+    decision["response"]["side_effect_asserted"] = json!("yes");
+
+    let mut event = EvidenceEvent::new(
+        DECISION_EVENT_TYPE,
+        "urn:assay:test:side-effects-cli",
+        "run-bad-asserted",
+        0,
+        surface,
+    );
+    event.time = chrono::Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+
+    let file = fs::File::create(path).unwrap();
+    let mut writer = BundleWriter::new(file);
+    writer.add_event(event);
+    writer.finish().unwrap();
+}
+
+#[test]
+fn a_non_bool_side_effect_asserted_fails_rather_than_defaulting_to_false() {
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("bad.tar.gz");
+    bundle_with_non_bool_asserted(&bundle);
+
+    let out = Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("verify-side-effects")
+        .arg(&bundle)
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .failure()
+        .get_output()
+        .stderr
+        .clone();
+    let stderr = String::from_utf8(out).unwrap();
+    assert!(
+        stderr.contains("not a boolean"),
+        "the error must explain what went wrong: {stderr}"
+    );
+}
+
+/// A bundle where response.side_effect_asserted is missing entirely.
+fn bundle_with_missing_asserted(path: &std::path::Path) {
+    let mut surface = fixture("verified.json");
+    let decision = &mut surface["observed_tool_decisions"][0];
+    if let Some(resp) = decision.get_mut("response").and_then(Value::as_object_mut) {
+        resp.remove("side_effect_asserted");
+    }
+
+    let mut event = EvidenceEvent::new(
+        DECISION_EVENT_TYPE,
+        "urn:assay:test:side-effects-cli",
+        "run-missing-asserted",
+        0,
+        surface,
+    );
+    event.time = chrono::Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+
+    let file = fs::File::create(path).unwrap();
+    let mut writer = BundleWriter::new(file);
+    writer.add_event(event);
+    writer.finish().unwrap();
+}
+
+#[test]
+fn a_missing_side_effect_asserted_fails_rather_than_defaulting_to_false() {
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("bad.tar.gz");
+    bundle_with_missing_asserted(&bundle);
+
+    let out = Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("verify-side-effects")
+        .arg(&bundle)
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .failure()
+        .get_output()
+        .stderr
+        .clone();
+    let stderr = String::from_utf8(out).unwrap();
+    assert!(
+        stderr.contains("side_effect_asserted"),
+        "the error must name the missing field: {stderr}"
+    );
+}
+
+// ------------------------------------------------- Blocker 2: one-to-one audit allocation
+
+/// Two identical asserting calls in one bundle (same tool, same target).
+fn bundle_with_two_identical_asserting_calls(path: &std::path::Path) {
+    let mut surface = fixture("verified.json");
+    let mut call = surface["observed_tool_decisions"][0].clone();
+    call["response"]["side_effect"] = json!({ "asserted": true, "level": "asserted" });
+    call["response"]["side_effect_verified"] = json!(false);
+    // Two identical calls targeting the same resource.
+    surface["observed_tool_decisions"] = json!([call.clone(), call]);
+
+    let mut event = EvidenceEvent::new(
+        DECISION_EVENT_TYPE,
+        "urn:assay:test:side-effects-cli",
+        "run-two-identical",
+        0,
+        surface,
+    );
+    event.time = chrono::Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+
+    let file = fs::File::create(path).unwrap();
+    let mut writer = BundleWriter::new(file);
+    writer.add_event(event);
+    writer.finish().unwrap();
+}
+
+#[test]
+fn one_audit_record_cannot_vouch_for_two_identical_calls() {
+    // Two otherwise identical asserting calls plus one audit record that binds must yield exactly
+    // one verified promotion and one that stays asserted. Reusing the record would overcount
+    // corroboration: two receipts for one piece of paper.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("two.tar.gz");
+    bundle_with_two_identical_asserting_calls(&bundle);
+    let import = import_dir(dir.path(), "audit_record_github_deploy_key.json");
+
+    let report = run(&bundle, Some(&import));
+    let calls = report["calls"].as_array().unwrap();
+    assert_eq!(calls.len(), 2, "both calls must appear");
+
+    let verified_count = calls
+        .iter()
+        .filter(|c| c["level"] == json!("verified"))
+        .count();
+    let asserted_count = calls
+        .iter()
+        .filter(|c| c["level"] == json!("asserted"))
+        .count();
+    assert_eq!(
+        verified_count, 1,
+        "exactly one call may be promoted by one record"
+    );
+    assert_eq!(
+        asserted_count, 1,
+        "the second call stays at asserted because its record was consumed"
+    );
+    assert_eq!(report["promoted"], json!(1));
+
+    // The run-level ceiling must be the weakest rung (asserted), not the strongest
+    // (independently_confirmed). One verified call does not raise the whole run.
+    assert_eq!(
+        report["weakest_occurrence_ceiling"],
+        json!({ "state": "rung", "ceiling": "asserted" }),
+        "the weakest rung governs when one record is consumed and one call is left at asserted"
+    );
+}
+
+// ------------------------------------------------- ladder helpers
+
 /// Position on the published ladder, defined here rather than imported so the test does not agree
 /// with the implementation by construction. A rung the binary emits that this list does not know is
 /// a hard failure: it means the vocabulary grew and this test stopped covering it.
