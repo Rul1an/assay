@@ -263,6 +263,14 @@ repos:
         # file that used to trigger this hook.
         files: ^(scripts/ci/test-fuzz-lane-contract\.sh|\.github/workflows/fuzz-smoke\.yml|fuzz/Cargo\.(toml|lock)|\.pre-commit-config\.yaml)$
 
+      - id: git-fixture-env-isolation
+        name: Git fixture tests isolate hook repository state
+        entry: bash scripts/ci/test-git-fixture-env-isolation.sh
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        files: ^scripts/ci/(lib/clear-git-repository-env|test-(check-release-surface|git-fixture-env-isolation|perf-pr-event-provenance-contract))\.sh$
+
       - id: release-surface
         name: Release surface names the current version
         entry: bash -c 'bash scripts/ci/test-check-release-surface.sh && bash scripts/ci/check-release-surface.sh'

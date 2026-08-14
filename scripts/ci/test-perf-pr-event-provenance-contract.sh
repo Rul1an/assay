@@ -10,6 +10,9 @@
 # shellcheck disable=SC2016
 set -euo pipefail
 
+# shellcheck source=scripts/ci/lib/clear-git-repository-env.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/clear-git-repository-env.sh"
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORKFLOW="${WORKFLOW:-${ROOT}/.github/workflows/perf_pr.yml}"
 # archive_pr_branch job body on origin/main 1137af34e9ca4f7f1655fc422ff6b0e441a3e066
