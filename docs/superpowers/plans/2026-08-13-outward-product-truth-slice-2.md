@@ -16,11 +16,10 @@
 - Historical ADRs and experiments receive dated correction notes or precise wording; their original decision context is not silently rewritten.
 - Do not change evidence wire fields, serialization, or runtime behavior.
 - Stage only the named vocabulary files and tests (`git add -A <paths>`).
-- Do not touch Claude-owned files until the user frees them:
-  - `crates/assay-cli/src/cli/commands/evidence/verify_side_effects.rs`
+- Do not touch the files that remain Claude-owned:
   - `crates/assay-cli/tests/verify_side_effects_cli.rs`
   - `crates/assay-evidence/src/coding_agent.rs`
-- The last `verify_side_effects` truth-correction waits on the Claude follow-up for merged #2352.
+- The `verify_side_effects.rs` vocabulary correction was blocked on Claude until #2355 merged. That dependency is resolved; this branch corrects the false Merkle sentence there.
 
 ## Normative allowlist (path-bound, current hits)
 
@@ -78,7 +77,7 @@ Exclude exactly these two guard-implementation paths from the outward-claim scan
 
 Also exclude `docs/superpowers/plans/` as a non-normative implementation-record prefix.
 
-Keep the live checker RED on Claude-owned `verify_side_effects.rs` until #2354 lands. Do not add an allowlist or `TEMPORARY_DEBT` exception for that false phrase. Wire the live-tree pre-commit hook only in the final integration commit.
+The live checker stayed RED on `verify_side_effects.rs` until #2355 merged (the #2354 follow-up). Do not add an allowlist or `TEMPORARY_DEBT` exception for a false phrase. After #2355, this branch corrects that sentence and enables the live-tree pre-commit hook.
 
 Public replacement phrase where a current claim is rewritten:
 
@@ -157,7 +156,7 @@ Expected: PASS. The live checker against this branch may still list current and 
 - Modify: `crates/assay-cli/src/cli/commands/evidence/verify_tool_decision_truth.rs`
 - Modify: `crates/assay-cli/src/cli/commands/project_otel.rs`
 
-Do **not** modify `verify_side_effects.rs`.
+Task 3 originally deferred `verify_side_effects.rs` while it was Claude-owned. #2355 resolved that; the final integration corrects the vocabulary sentence there. Do not touch `verify_side_effects_cli.rs` or `coding_agent.rs`.
 
 **Interfaces:**
 - Consumes: `compute_run_root` in `assay-evidence`.
@@ -251,9 +250,9 @@ bash -n demo/mocks/assay-mock.sh demo/produce_video.sh
 git diff --check
 ```
 
-Expected: all pass. Remaining `merkle` hits are allowlisted genuine uses, checker/test self-text, SPEC negation, generated `merkle_tree_*`, stable `merkle-chain.*` filenames, ADR-009 alternatives, or the `verify_side_effects` remaining-debt phrase.
+Expected: all pass. Remaining `merkle` hits are allowlisted genuine uses, checker/test self-text, SPEC negation, generated `merkle_tree_*`, stable `merkle-chain.*` filenames, or ADR-009 alternatives. The `verify_side_effects.rs` sentence is corrected after #2355; it is not remaining debt.
 
 ### Task 5: Draft PR evidence (do not merge, do not close #2222)
 
-- [ ] Record exact head SHA, verification, mutations, non-claims, and the remaining `verify_side_effects` dependency.
+- [ ] Record exact head SHA, verification, mutations, and non-claims. The `verify_side_effects` dependency was resolved by #2355; this branch includes that correction.
 - [ ] Open one draft PR linked to #2222 without closing it.
