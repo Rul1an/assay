@@ -5,13 +5,11 @@ from __future__ import annotations
 
 import json
 import stat
-import sys
+import subprocess
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts/ci/lib"))
-from workspace_version import read_workspace_version  # noqa: E402
 
 JSON_OUTPUT = ROOT / "docs/generated/agent-golden-path.json"
 MARKDOWN_OUTPUT = ROOT / "docs/guides/agent-golden-path.md"
@@ -74,8 +72,26 @@ SOURCE_REPO_CWD_RULE = (
 PYTHON_PLACEHOLDER_RULE = (
     "Replace `<python>` with `python3` on Unix-like hosts or `python` on Windows."
 )
-RELEASE_VERSION = read_workspace_version(ROOT / "Cargo.toml")
-RELEASE_TAG = f"v{RELEASE_VERSION}"
+RELEASE_TAG_READER = ROOT / "scripts/ci/read-assay-release-tag.sh"
+
+
+def read_published_release_tag() -> str:
+    completed = subprocess.run(
+        ["bash", str(RELEASE_TAG_READER)],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "failed to read published release tag: " + completed.stderr.strip()
+        )
+    return completed.stdout.strip()
+
+
+RELEASE_TAG = read_published_release_tag()
+RELEASE_VERSION = RELEASE_TAG.removeprefix("v")
 
 
 def stdout(kind: str, document: str | None = None) -> dict[str, object]:

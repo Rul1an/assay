@@ -108,7 +108,7 @@ repos:
         # Both properties this pins have failed here before: `check-aee-seal-fixture-drift.sh`
         # documents an earlier version that ran its emitter in place and destroyed the fixtures it
         # audited, and `check-linux.sh` returned 0 on every failure (#2076).
-        files: ^(scripts/ci/(check-docs-generated-drift|test-check-docs-generated-drift(?:-safety)?|lib/drift-tree-snapshot)\.sh|scripts/ci/lib/workspace_version\.py|scripts/docs/generate-agent-golden-path\.py|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*)$
+        files: ^(scripts/ci/(check-docs-generated-drift|test-check-docs-generated-drift(?:-safety)?|lib/drift-tree-snapshot|read-assay-release-tag)\.sh|scripts/ci/lib/workspace_version\.py|scripts/docs/generate-agent-golden-path\.py|\.github/assay-release-tag|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*)$
 
       - id: docs-generated-drift
         name: Generated docs match their generators
@@ -124,24 +124,24 @@ repos:
         # Caught here instead, the diagram edge lands in the pull request that added the dependency,
         # where a reviewer can see why it moved. It also makes the bot's `has_changes` false by
         # construction, so the un-mergeable PR is never created.
-        files: ^(Cargo\.toml|crates/.*/Cargo\.toml|scripts/docs/.*\.(sh|py)|scripts/ci/lib/workspace_version\.py|docs/generated/.*|docs/AIcontext/architecture-diagrams\.md|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|scripts/ci/check-docs-generated-drift\.sh|\.gitattributes|\.pre-commit-config\.yaml)$
+        files: ^(Cargo\.toml|crates/.*/Cargo\.toml|scripts/docs/.*\.(sh|py)|scripts/ci/(read-assay-release-tag\.sh|lib/workspace_version\.py)|\.github/assay-release-tag|docs/generated/.*|docs/AIcontext/architecture-diagrams\.md|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|scripts/ci/check-docs-generated-drift\.sh|\.gitattributes|\.pre-commit-config\.yaml)$
 
       - id: agent-golden-path-skill-contract
         name: Agent golden-path skill contract
         entry: bash -c 'python3 scripts/ci/test-agent-golden-path-skill.py && python3 scripts/ci/test-golden-path-mock-bounds.py'
         language: system
         pass_filenames: false
-        files: ^(Cargo\.toml|scripts/docs/generate-agent-golden-path\.py|scripts/ci/(test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|test-golden-path-mock-bounds\.py|lib/(golden-path-fixture-staging\.sh|workspace_version\.py))|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.gitattributes|\.pre-commit-config\.yaml)$
+        files: ^(Cargo\.toml|scripts/docs/generate-agent-golden-path\.py|scripts/ci/(read-assay-release-tag\.sh|test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|test-golden-path-mock-bounds\.py|lib/(golden-path-fixture-staging\.sh|workspace_version\.py))|\.github/assay-release-tag|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.gitattributes|\.pre-commit-config\.yaml)$
 
       - id: agent-golden-path-skill-mutations
         name: Agent golden-path skill mutations
         entry: bash -c 'bash scripts/ci/test-agent-golden-path-skill-optimization.sh && bash scripts/ci/test-agent-golden-path-skill-hardening.sh'
         language: system
         pass_filenames: false
-        # The 92 mutation cases prove the validator has teeth, but their cost belongs
+        # The mutation cases prove the validator has teeth, but their cost belongs
         # at the publish boundary rather than in every intermediate commit.
         stages: [pre-push]
-        files: ^(Cargo\.toml|scripts/docs/generate-agent-golden-path\.py|scripts/ci/(test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|test-golden-path-mock-bounds\.py|lib/(golden-path-fixture-staging\.sh|workspace_version\.py))|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.gitattributes|\.pre-commit-config\.yaml)$
+        files: ^(Cargo\.toml|scripts/docs/generate-agent-golden-path\.py|scripts/ci/(read-assay-release-tag\.sh|test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|test-golden-path-mock-bounds\.py|lib/(golden-path-fixture-staging\.sh|workspace_version\.py))|\.github/assay-release-tag|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.gitattributes|\.pre-commit-config\.yaml)$
 
       - id: claude-plugin-install-workflow-self-test
         name: Claude plugin install workflow self-test
@@ -289,14 +289,13 @@ repos:
         files: ^scripts/ci/(lib/clear-git-repository-env|test-(check-release-surface|git-fixture-env-isolation|perf-pr-event-provenance-contract))\.sh$
 
       - id: release-surface
-        name: Release surface names the current version
+        name: Release surface matches source and published versions
         entry: bash -c 'bash scripts/ci/test-check-release-surface.sh && bash scripts/ci/check-release-surface.sh'
         language: system
         pass_filenames: false
         # Triggers on the files it can be wrong about, plus itself. It does not need a binary: with
-        # no `target/` build it falls back to the manifest version, so a release-prep commit is
-        # checked without waiting on a compile.
-        files: ^(scripts/ci/(check|test-check)-release-surface\.sh|Cargo\.toml|README\.md|docs/(index\.md|getting-started/(index|installation|quickstart|ci-integration)\.md|reference/cli/index\.md|python-sdk/index\.md|use-cases/(air-gapped|ci-gate)\.md|AIcontext/user-flows\.md|migration-v1\.2\.md|guides/editor-mcp-recipe\.md)|\.pre-commit-config\.yaml)$
+        # no `target/` build it still verifies source and published-release truth independently.
+        files: ^(scripts/ci/((check|test-check)-release-surface|read-assay-release-tag)\.sh|\.github/assay-release-tag|Cargo\.toml|README\.md|docs/(index\.md|getting-started/(index|installation|quickstart|ci-integration)\.md|reference/cli/index\.md|python-sdk/index\.md|use-cases/(air-gapped|ci-gate)\.md|AIcontext/user-flows\.md|migration-v1\.2\.md|guides/editor-mcp-recipe\.md)|\.pre-commit-config\.yaml)$
 
       - id: ci-gate-expectations-self-test
         name: CI gate expectation contract
