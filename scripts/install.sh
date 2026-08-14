@@ -211,8 +211,4 @@ main() {
     printf "Run %bassay --help%b to get started.\n" "${BOLD}" "${NC}"
 }
 
-# When sourced by the contract test, define helpers only.
-if [ "${ASSAY_INSTALL_SOURCE_ONLY:-}" = "1" ]; then
-    return 0 2>/dev/null || exit 0
-fi
 main "$@"

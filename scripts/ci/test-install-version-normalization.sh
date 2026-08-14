@@ -152,39 +152,72 @@ expect_fail_before_network() {
   ok "$label fails closed before network (exit $rc)"
 }
 
-expect_latest_preserved() {
-  local run_dir="$SCRATCH/latest"
+expect_latest_path() {
+  local label="$1"
+  local version="$2"
+  local run_dir="$SCRATCH/latest-$label"
   local rc
-  rc="$(run_installer "latest" "$run_dir")"
+  rc="$(run_installer "$version" "$run_dir")"
   if ! grep -Fq -- "/repos/Rul1an/assay/releases/latest" "$run_dir/urls"; then
-    fail "latest: did not query the latest-release API (exit $rc)"
+    fail "$label: did not query the latest-release API (exit $rc)"
     sed 's/^/      /' "$run_dir/urls" >&2 || true
     return
   fi
   if grep -Eq -- '/download/vlatest|/download/latest/|/assay-vlatest-' "$run_dir/urls"; then
-    fail "latest: acquired a v prefix or was used as a tag"
+    fail "$label: acquired a v prefix or was used as a tag"
     sed 's/^/      /' "$run_dir/urls" >&2
     return
   fi
   if ! grep -Fq -- "/releases/download/v9.9.9/assay-v9.9.9-" "$run_dir/urls"; then
-    fail "latest: resolved tag/archive were not derived from the API tag"
+    fail "$label: resolved tag/archive were not derived from the API tag"
     sed 's/^/      /' "$run_dir/urls" >&2
     return
   fi
-  ok "latest is preserved and resolves via the API (exit $rc)"
+  ok "$label resolves via the latest API (exit $rc)"
+}
+
+expect_cmdsubst_does_not_create_sentinel() {
+  local run_dir="$SCRATCH/deny-cmdsubst"
+  local sentinel="$run_dir/PWNED"
+  local version
+  version='$(touch '"$sentinel"')'
+  local rc
+  rc="$(run_installer "$version" "$run_dir")"
+  if [[ "$rc" -eq 0 ]]; then
+    fail "cmdsubst: installer exited 0 for a command-substitution string"
+    return
+  fi
+  if [[ -s "$run_dir/urls" ]] || [[ -s "$run_dir/curl.log" ]]; then
+    fail "cmdsubst: command-substitution string reached curl"
+    sed 's/^/      /' "$run_dir/curl.log" >&2 || true
+    return
+  fi
+  if [[ -e "$sentinel" ]]; then
+    fail "cmdsubst: literal \$(touch ...) created sentinel $sentinel"
+    return
+  fi
+  ok "cmdsubst fails closed and does not create a sentinel (exit $rc)"
 }
 
 run_contract() {
   expect_same_v_tag_url "unprefixed" "5.2.0"
   expect_same_v_tag_url "prefixed" "v5.2.0"
-  expect_latest_preserved
+  expect_latest_path "literal-latest" "latest"
+  expect_latest_path "unset" "unset"
   expect_fail_before_network "empty" "empty"
   expect_fail_before_network "bare-v" "v"
   expect_fail_before_network "dotdot" ".."
   expect_fail_before_network "url" "https://example.com/v5.2.0"
-  expect_fail_before_network "spaces" "5.2.0 "
+  expect_fail_before_network "trailing-space" "5.2.0 "
+  expect_fail_before_network "leading-space" " 5.2.0"
   expect_fail_before_network "latest-foo" "latest-foo"
   expect_fail_before_network "double-v" "vv5.2.0"
+  expect_fail_before_network "two-part" "5.2"
+  expect_fail_before_network "prerelease" "5.2.0-rc.1"
+  expect_fail_before_network "percent" "5.2.0%2f"
+  expect_fail_before_network "semicolon" "5.2.0;id"
+  expect_fail_before_network "newline" $'5.2.0\nextra'
+  expect_cmdsubst_does_not_create_sentinel
 
   if [[ "$INSTALLER" == "$ROOT/scripts/install.sh" ]]; then
     if ! grep -qE '^normalize_install_version[[:space:]]*\(\)' "$INSTALLER"; then
@@ -202,21 +235,10 @@ run_contract() {
     else
       ok "stable-tag regex remains the latest-channel literal"
     fi
-    if ! (
-      export ASSAY_INSTALL_SOURCE_ONLY=1
-      # shellcheck disable=SC1090
-      . "$INSTALLER"
-      [[ "$(normalize_install_version "5.2.0")" == "v5.2.0" ]] || exit 1
-      [[ "$(normalize_install_version "v5.2.0")" == "v5.2.0" ]] || exit 1
-      [[ "$(normalize_install_version "latest")" == "latest" ]] || exit 1
-      normalize_install_version "" && exit 1
-      normalize_install_version "v" && exit 1
-      normalize_install_version "latest-foo" && exit 1
-      true
-    ); then
-      fail "sourced normalize_install_version table disagreed"
+    if grep -Fq -- "ASSAY_INSTALL_SOURCE_ONLY" "$INSTALLER"; then
+      fail "install.sh grew a test-only source/skip escape"
     else
-      ok "sourced normalize_install_version agrees for 5.2.0, v5.2.0, latest, malformed"
+      ok "install.sh has no source-only production escape"
     fi
   fi
 }
