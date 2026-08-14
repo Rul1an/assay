@@ -121,6 +121,89 @@ write_clean
 grep -v 'proxy-enforce' "$TMP/recipe.md" > "$TMP/recipe.tmp" && mv "$TMP/recipe.tmp" "$TMP/recipe.md"
 expect_fail 'deleted proxy-enforce claim rejected' 'proxy-enforce claim retained'
 
+echo '== false negatives: spelled-out and punctuation variants must be caught =='
+# The forbidden-pattern rules are prose matches, so a variant spelling is a silent hole rather
+# than a visible failure. Each case below is a real way the same claim gets written.
+write_clean
+printf 'Align the wrapped server to that OpenID Connect flow.\n' >> "$TMP/recipe.md"
+expect_fail 'spelled-out OpenID Connect rejected' 'remote OAuth/OIDC instruction'
+
+write_clean
+printf 'It renders a server UI for each tool.\n' >> "$TMP/recipe.md"
+expect_fail 'singular "server UI" rejected' 'MCP UI / sandboxed-iframe instruction'
+
+write_clean
+printf 'Rendered in a sandboxed-iframe host.\n' >> "$TMP/recipe.md"
+expect_fail 'hyphenated sandboxed-iframe rejected' 'MCP UI / sandboxed-iframe instruction'
+
+echo '== CI wiring: a recipe-only change must execute this guard =='
+# The guard is only worth its rules if a drift actually reaches it. The pre-commit hook covers
+# the local path; CI coverage depends on the one workflow that runs `pre-commit run --all-files`
+# selecting the recipe, and `scripts/**` does not help because a recipe-only drift touches no
+# script. Asserted here rather than in a workflow-wide contract so the rule that judges this
+# file also owns the wiring that reaches it.
+cases=$((cases + 1))
+if RECIPE_PATH='docs/guides/editor-mcp-recipe.md' python3 - "$ROOT" <<'PY'
+import os, re, sys
+
+root = sys.argv[1]
+recipe = os.environ["RECIPE_PATH"]
+problems = []
+
+# 1. Exactly one workflow runs the full pre-commit pass; find it rather than assuming its name.
+wf_dir = os.path.join(root, ".github", "workflows")
+runners = [
+    name
+    for name in sorted(os.listdir(wf_dir))
+    if "pre-commit run --all-files" in open(os.path.join(wf_dir, name), encoding="utf-8").read()
+]
+if len(runners) != 1:
+    problems.append(
+        f"expected exactly one workflow running `pre-commit run --all-files`, found {runners}"
+    )
+
+# 2. That workflow's pull_request.paths must select the recipe, or a recipe-only drift never
+#    reaches the guard in CI.
+for name in runners:
+    text = open(os.path.join(wf_dir, name), encoding="utf-8").read()
+    block = re.search(r"(?ms)^  pull_request:\n((?:    .+\n|\n)*)", text)
+    if not block:
+        problems.append(f"{name}: no pull_request trigger block found")
+        continue
+    listed = re.findall(r'^\s*-\s*"([^"]+)"', block.group(1), re.M)
+    if recipe not in listed:
+        problems.append(
+            f"{name}: pull_request.paths does not select {recipe}; "
+            "a recipe-only drift would not execute the guard in CI"
+        )
+
+# 3. The pre-commit hook that runs the guard must also select the recipe locally.
+cfg = open(os.path.join(root, ".pre-commit-config.yaml"), encoding="utf-8").read()
+hook = re.search(
+    r"(?ms)^      - id: editor-mcp-recipe-truth\n(.*?)(?=^      - id: |\Z)", cfg
+)
+if not hook:
+    problems.append(".pre-commit-config.yaml: hook editor-mcp-recipe-truth not found")
+else:
+    files = re.search(r"^\s*files:\s*(\S+)\s*$", hook.group(1), re.M)
+    if not files:
+        problems.append("editor-mcp-recipe-truth: no files: selector")
+    elif not re.search(files.group(1), recipe):
+        problems.append(
+            f"editor-mcp-recipe-truth: files: selector does not match {recipe}"
+        )
+
+if problems:
+    print("\n".join(problems), file=sys.stderr)
+    sys.exit(1)
+PY
+then
+  printf 'ok   a recipe-only change reaches the guard locally and in CI\n'
+else
+  failures=$((failures + 1))
+  printf 'FAIL: recipe-only change would not execute the guard\n'
+fi
+
 echo '== a missing recipe fails closed =='
 cases=$((cases + 1))
 if ASSAY_EDITOR_RECIPE="$TMP/does-not-exist.md" bash "$GUARD" >/dev/null 2>&1; then

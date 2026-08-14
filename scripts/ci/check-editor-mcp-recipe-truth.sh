@@ -89,9 +89,9 @@ forbid 'future-tense specification promise' \
 # Assay ships none of these. Naming them as something to align a wrapped server to turns an
 # unshipped design into an instruction.
 forbid 'remote OAuth/OIDC instruction in the executable path' \
-  '(OAuth|OIDC|PKCE)'
+  '(OAuth|OIDC|OpenID|PKCE)'
 forbid 'MCP UI / sandboxed-iframe instruction in the executable path' \
-  '(sandboxed iframe|server UIs|MCP UI)'
+  '(sandboxed[ -]iframe|server UIs?|MCP UIs?)'
 
 # --- Drift 4: the modern revision must not read as delivered -----------------------------
 # The revision may be named, but only as work that is tracked elsewhere and not shipped. If the
