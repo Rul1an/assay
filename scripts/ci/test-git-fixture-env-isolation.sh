@@ -2,6 +2,10 @@
 # Prove fixture tests cannot mutate the linked worktree repository that invokes them.
 set -euo pipefail
 
+# The harness itself creates a linked worktree, so it must cross the same boundary first.
+# shellcheck source=scripts/ci/lib/clear-git-repository-env.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/clear-git-repository-env.sh"
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
