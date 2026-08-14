@@ -10,6 +10,15 @@
 # shellcheck disable=SC2016
 set -euo pipefail
 
+# Git hooks export repository-local state. This test creates disposable repositories, so carrying
+# that state across the boundary can make fixture commands mutate the caller's shared .git config.
+# Keep this static rather than asking `git rev-parse --local-env-vars`: invoking Git is unsafe until
+# the inherited repository selection has been removed.
+unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT \
+  GIT_OBJECT_DIRECTORY GIT_DIR GIT_WORK_TREE GIT_IMPLICIT_WORK_TREE GIT_GRAFT_FILE \
+  GIT_INDEX_FILE GIT_NO_REPLACE_OBJECTS GIT_REPLACE_REF_BASE GIT_PREFIX GIT_SHALLOW_FILE \
+  GIT_COMMON_DIR
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORKFLOW="${WORKFLOW:-${ROOT}/.github/workflows/perf_pr.yml}"
 # archive_pr_branch job body on origin/main 1137af34e9ca4f7f1655fc422ff6b0e441a3e066

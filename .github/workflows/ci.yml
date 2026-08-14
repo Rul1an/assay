@@ -519,7 +519,9 @@ jobs:
       - name: Test perf benchmark relevance gate
         run: python3 scripts/ci/test_perf_bench_relevance.py
       - name: Test perf_pr event provenance contract
-        run: bash scripts/ci/test-perf-pr-event-provenance-contract.sh
+        run: |
+          bash scripts/ci/test-perf-pr-event-provenance-contract.sh
+          bash scripts/ci/test-perf-pr-event-provenance-git-env.sh
       # Runs both groups: sw/* (shipped durability) and swc/* (code cost). The pragma
       # assertion in make_store() fails here if swc/* silently reverts to measuring fsync.
       - name: Criterion (store_write_heavy)
