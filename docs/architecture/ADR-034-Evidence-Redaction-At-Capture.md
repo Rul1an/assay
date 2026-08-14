@@ -77,6 +77,11 @@ The design follows the current consensus for secret hygiene and evidence sanitiz
   capability changed", never a raw config or environment dump.
 - Defense in depth: a value-level redaction pass at each `add_*` boundary, plus a final sweep over the
   serialized bytes before hashing, so a missed funnel still cannot ship a raw secret.
+> Correction (2026-08-14): the shipped `run_root` is a flat SHA-256 digest over
+> ordered entry hashes, not a tree root. References below to the historical tree
+> proposal describe the model used at the time and are not claims about the
+> shipped evidence format.
+
 - Determinism is non-negotiable here: assay evidence is replayable (VCR) and Merkle-hashed. Redaction
   must be a pure, deterministic transform applied *before* hashing, so the bundle hash covers the
   redacted form and the raw secret never enters the hash input (you cannot brute-force a secret back out

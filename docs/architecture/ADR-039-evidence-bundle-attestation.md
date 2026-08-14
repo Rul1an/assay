@@ -7,6 +7,11 @@ Depends on ADR-034 (contract seam).
 
 ## Context
 
+> Correction (2026-08-14): the shipped `run_root` is a flat SHA-256 digest over
+> ordered entry hashes, not a tree root. References below to the historical tree
+> proposal describe the model used at the time and are not claims about the
+> shipped evidence format.
+
 The evidence bundle has a manifest, Merkle root, and content-addressed events, but is
 not emitted as an attestation statement. DSSE signing already exists, scoped to the
 mandate subsystem (`assay-evidence/src/mandate/signing.rs`), and CI emits SLSA

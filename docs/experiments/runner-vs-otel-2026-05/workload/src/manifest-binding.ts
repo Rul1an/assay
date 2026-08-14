@@ -8,7 +8,7 @@
  *
  * Returns the SHA-256 digest as `sha256:<hex>`, the same format used by
  * `compare/compare.py` and by the Runner archive's own per-file digests
- * (see `crates/assay-evidence` Merkle infrastructure).
+ * (see `crates/assay-evidence` content-addressed digests).
  *
  * The digest is intended to be attached as a span event attribute named
  * `assay.archive.manifest_digest` on the root experiment span, mirroring the

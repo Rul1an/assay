@@ -4,7 +4,8 @@
 //!   - verify time (median),
 //!   - compressed bundle bytes and bytes-per-event,
 //!   - gzip ratio (compressed / uncompressed events),
-//!   - Merkle inclusion-proof size = ceil(log2(N)) hashes,
+//!   - logarithmic proof model used by this experiment = ceil(log2(N)) hashes
+//!     (not consumed by production verification; `run_root` is a flat digest),
 //!   - DSSE sign / verify time over the run anchor.
 //!
 //! Rationale: signed/attested artifact lines are widening, but the cost of verification is rarely
@@ -108,7 +109,7 @@ fn time_verify_ms(bundle: &[u8], limits: &VerifyLimits, reps: usize) -> f64 {
     median(samples)
 }
 
-/// ceil(log2(n)) — number of sibling hashes in an inclusion proof for N leaves.
+/// ceil(log2(n)) — logarithmic proof-model size used by this experiment, not by production verification.
 fn inclusion_proof_hashes(n: u64) -> u32 {
     if n <= 1 {
         0

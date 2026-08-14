@@ -11,6 +11,11 @@ no-signing-key attacker model.
 
 This is a measurement, not a blanket security claim. Two things are reported:
 
+> Correction (2026-08-14): the shipped `run_root` is a flat SHA-256 digest over
+> ordered entry hashes, not a tree root. References below to the historical tree
+> proposal describe the model used at the time and are not claims about the
+> shipped evidence format.
+
 1. A **mutation-detection matrix** for `assay-evidence` bundles, under threat model T: a party
    *without* the signing key mutates a bundle after the fact, while the bundle's run anchor
    (`run_root`, a Merkle root over event content hashes) is bound by an external signature the

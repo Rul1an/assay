@@ -30,8 +30,7 @@ Regel: **als het in de terminal kan, film het in de terminal. Als het een concep
 [10.0s] Green. Deterministic. Same trace, same result, every time.
 [15.0s] Every action your agent takes becomes a signed event
         in a content-addressed evidence bundle.
-[21.0s] Merkle root, SHA-256, JCS canonicalization.
-        Cryptographic proof of what your agent actually did.
+[21.0s] SHA-256 content hashes, JCS canonicalization, deterministic run-root digest.
 [27.0s] Attack simulation tests your gates against known vectors.
         Bitflip, truncation, injection — blocked or bypassed, you'll know.
 [33.0s] One install. No signup. Runs offline.
@@ -161,7 +160,7 @@ ffmpeg -i demo/output/hero.mp4 -ss 3.5 -t 2.5 -c copy shot04_green.mp4
 | **Doel** | Visualiseer het abstracte concept: elke actie wordt een signed event |
 | **Duur** | 10.0s – 15.0s (5 seconden) |
 | **Bron** | AI B-roll |
-| **Visueel** | Abstract data visualization — events verschijnen als nodes in een chain/graph, elk met een hash, verbonden door lijnen. Merkle tree groeit van onder naar boven. |
+| **Visueel** | Abstract data visualization — events verschijnen als nodes in een chain/graph, elk met een hash, verbonden door lijnen. Ordered hash chain groeit van onder naar boven. |
 | **Voice** | "Every action your agent takes becomes a signed event in a content-addressed evidence bundle." |
 | **Caption** | `content-addressed · tamper-evident · auditable` |
 | **Camera** | Slow dolly out, onthullend de volledige chain |
@@ -171,7 +170,7 @@ ffmpeg -i demo/output/hero.mp4 -ss 3.5 -t 2.5 -c copy shot04_green.mp4
 Abstract data visualization on dark background: glowing nodes appearing
 one by one in a vertical chain structure, each node showing a short
 hexadecimal hash. Thin luminous lines connect nodes upward into a
-tree structure (Merkle tree). Nodes pulse briefly on appearance.
+ordered hash chain. Nodes pulse briefly on appearance.
 Color palette: deep navy background, cyan/teal node glow, white text.
 Camera: slow dolly out revealing the full tree structure from bottom
 to top. Style: minimal, technical, clean geometry, no text overlays
@@ -188,8 +187,8 @@ except hashes. Duration: 5 seconds. Aspect ratio: 16:9.
 | **Duur** | 15.0s – 21.0s (6 seconden) |
 | **Bron** | Terminal (evidence-lint.tape output) + text overlay |
 | **Visueel** | Terminal output van `assay validate` met bundle details, SHA-256 hashes zichtbaar |
-| **Voice** | "Merkle root, SHA-256, JCS canonicalization. Cryptographic proof of what your agent actually did." |
-| **Caption** | `SHA-256 · JCS · Merkle root` |
+| **Voice** | "SHA-256 content hashes, JCS canonicalization, deterministic run-root digest." |
+| **Caption** | `SHA-256 · JCS · run-root digest` |
 | **Camera** | Static terminal, subtle zoom op hash output |
 
 **Terminal clip:** Knip uit evidence-lint.mp4.
@@ -410,7 +409,7 @@ Je kunt de standaard terminal-simulaties vervangen door Veo-generaties. Plaats M
 3. **Motion**: Pan/Zoom specificatie (Veo controls).
 
 #### Shot 5: Evidence Chain (Text-to-Video)
-1. **Prompt**: "Glowing merkle tree nodes connecting vertically in a dark void. Cybernetic roots extending downwards. Nodes pulse with cyan light when connected. Unreal Engine 5 render style, 8k, macro lens."
+1. **Prompt**: "Glowing ordered hash-chain nodes connecting vertically in a dark void. Cybernetic roots extending downwards. Nodes pulse with cyan light when connected. Unreal Engine 5 render style, 8k, macro lens."
 2. **Style**: "Technical, Abstract, Cyberpunk but clean".
 
 #### Shot 8: Shield (Text-to-Video)
@@ -552,8 +551,7 @@ in a content-addressed evidence bundle.
 
 6
 00:00:21,000 --> 00:00:27,000
-Merkle root, SHA-256, JCS canonicalization.
-Cryptographic proof of what your agent did.
+SHA-256 content hashes, JCS canonicalization, deterministic run-root digest.
 
 7
 00:00:27,000 --> 00:00:33,000
@@ -596,8 +594,8 @@ cargo install assay
 | 3.0–5.0 | 2 | AI | "Assay catches it. Exit code one. CI blocks the deploy." | CI dashboard, rode block |
 | 5.0–7.5 | 3 | AI | "Fix the policy. Run it again." | Editor, YAML lijn rood→groen |
 | 7.5–10.0 | 4 | Terminal | "Green. Deterministic. Same trace, same result, every time." | `assay run` → groene PASS |
-| 10.0–15.0 | 5 | AI | "Every action...signed event...evidence bundle." | Merkle tree visualisatie |
-| 15.0–21.0 | 6 | Terminal | "Merkle root, SHA-256, JCS canonicalization..." | `assay validate` output |
+| 10.0–15.0 | 5 | AI | "Every action...signed event...evidence bundle." | Ordered hash-chain visualisatie |
+| 15.0–21.0 | 6 | Terminal | "SHA-256 content hashes, JCS, run-root digest..." | `assay validate` output |
 | 21.0–27.0 | 7 | Terminal | "Attack simulation...blocked or bypassed..." | Sim tabel output |
 | 27.0–30.0 | 8 | AI | — (ambient) | Shield/barrier visual |
 | 30.0–36.0 | 9 | Motion | "One install. No signup. Runs offline." | Text cards |
