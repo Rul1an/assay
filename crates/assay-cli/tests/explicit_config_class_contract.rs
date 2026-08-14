@@ -264,14 +264,10 @@ fn r_eacces_existing_file_under_inaccessible_parent_is_never_missing() {
 }
 
 #[cfg(unix)]
+#[allow(unsafe_code)]
 fn effective_uid_is_root() -> bool {
-    std::process::Command::new("id")
-        .arg("-u")
-        .output()
-        .ok()
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .and_then(|text| text.trim().parse::<u32>().ok())
-        == Some(0)
+    // SAFETY: geteuid is the POSIX effective-uid query; no other memory unsafety.
+    unsafe { libc::geteuid() == 0 }
 }
 
 #[cfg(unix)]

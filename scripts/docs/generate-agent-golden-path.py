@@ -216,8 +216,8 @@ STEPS: list[dict[str, object]] = [
             "`config_error.code`."
         ),
         "failure_summary": (
-            "An explicit config that will not load is exit `2`, the same class "
-            "`assay run` gives the same file. A proven-absent path publishes "
+            "An explicit config that will not load exits `2`. `assay run` gives "
+            "the same class for the same file. A proven-absent path publishes "
             "`E_MISSING_CONFIG` and `assay init`; an unloadable path publishes "
             "`E_CFG_PARSE` and the fused doctor argv."
         ),

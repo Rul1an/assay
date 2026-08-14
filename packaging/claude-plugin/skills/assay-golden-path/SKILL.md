@@ -42,7 +42,7 @@ Exit: Success `0`; no config examined `0`; config examined, error-severity diagn
 
 Stdout: Parses as `assay.doctor_report.v0`. Every report carries `config_check.status`, one of `checked`, `skipped` or `failed`. Exit `0` on its own does not mean a config was examined: read `config_check.status` to tell a clean config from no config. A config that was examined and carries an error-severity `data_diagnostics[]` entry exits `2`, the class `decide_exit` gives that diagnostic for `assay validate` and `assay run` too; the text channel returns the same class for the same tree. A config failure remains JSON and carries the top-level `reason_code` and `next_step` alongside `config_error.code`.
 
-On failure: An explicit config that will not load is exit `2`, the same class `assay run` gives the same file. A proven-absent path publishes `E_MISSING_CONFIG` and `assay init`; an unloadable path publishes `E_CFG_PARSE` and the fused doctor argv.
+On failure: An explicit config that will not load exits `2`. `assay run` gives the same class for the same file. A proven-absent path publishes `E_MISSING_CONFIG` and `assay init`; an unloadable path publishes `E_CFG_PARSE` and the fused doctor argv.
 
 ### 3. Starter files
 
