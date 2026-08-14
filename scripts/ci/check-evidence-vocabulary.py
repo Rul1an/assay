@@ -198,9 +198,15 @@ DATED_CORRECTION_BODY = (
 )
 
 FALSE_CLAIM_RE = re.compile(
-    r"run_root\s+is\s+a\s+merkle\s+root",  # affirmative run_root-as-Merkle
+    r"run_root\s+is\s+a\s+(?:merkle\s+root|tree\s+root)",
     re.IGNORECASE,
 )
+CANONICAL_FORMULA_SOURCE = (
+    "crates/assay-cli/src/exit_codes/evidence_integrity_boundary.md"
+)
+SPEC_OUTWARD_REL = "docs/architecture/SPEC-Outward-Product-Truth-v1.md"
+_FORMULA_START = "`run_root` is SHA-256 over"
+_FORMULA_END = " in event sequence order."
 MERKLE_RE = re.compile(r"merkle", re.IGNORECASE)
 # Membership/inclusion of one event, even when the word Merkle is absent.
 RUN_ROOT_MEMBERSHIP_RE = re.compile(
@@ -347,7 +353,12 @@ def is_dated_correction_block(lines: Sequence[str], start: int) -> bool:
 
 
 _LIST_ITEM_RE = re.compile(r"^(\s*)(?:[-*+]|\d+\.)\s")
+_OL_ITEM_RE = re.compile(r"^(\s*)\d+\.\s")
 _HEADING_RE = re.compile(r"^#{1,6}\s")
+_RUN_ROOT_CHAIN_RE = re.compile(
+    r"\b(?:hash chain|integrity chain|chain over|chain root|chain check)\b",
+    re.IGNORECASE,
+)
 
 
 def _is_blank(line: str) -> bool:
@@ -467,22 +478,149 @@ def blockquote_inside_span(lines: Sequence[str], start: int, end: int) -> bool:
     return any(_is_blockquote(line) for line in lines[start:end])
 
 
+def _ol_item_ranges(lines: Sequence[str], rel: str) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
+    i = 0
+    while i < len(lines):
+        match = _OL_ITEM_RE.match(lines[i])
+        if match and len(match.group(1)) <= 3:
+            start, end = enclosing_block_span(lines, i, rel)
+            ranges.append((start, end))
+            i = max(end, i + 1)
+        else:
+            i += 1
+    return ranges
+
+
+def _only_blank_or_correction(lines: Sequence[str], start: int, end: int) -> bool:
+    i = start
+    while i < end:
+        if _is_blank(lines[i]):
+            i += 1
+            continue
+        consumed = _correction_span(lines, i)
+        if consumed:
+            i += consumed
+            continue
+        return False
+    return True
+
+
+def authorial_ordered_list_span(
+    lines: Sequence[str], idx: int, rel: str
+) -> tuple[int, int]:
+    ranges = _ol_item_ranges(lines, rel)
+    hit = next((n for n, (start, end) in enumerate(ranges) if start <= idx < end), None)
+    if hit is None:
+        return enclosing_block_span(lines, idx, rel)
+    lo = hi = hit
+    while lo > 0 and _only_blank_or_correction(
+        lines, ranges[lo - 1][1], ranges[lo][0]
+    ):
+        lo -= 1
+    while hi + 1 < len(ranges) and _only_blank_or_correction(
+        lines, ranges[hi][1], ranges[hi + 1][0]
+    ):
+        hi += 1
+    return ranges[lo][0], ranges[hi][1]
+
+
+def enclosing_structure_span(
+    lines: Sequence[str], idx: int, rel: str = ""
+) -> tuple[int, int]:
+    start, end = enclosing_block_span(lines, idx, rel)
+    if not rel.endswith(".md"):
+        return start, end
+    if start < len(lines) and _OL_ITEM_RE.match(lines[start]):
+        return authorial_ordered_list_span(lines, idx, rel)
+    return start, end
+
+
 def has_adjacent_dated_correction(
     lines: Sequence[str], idx: int, rel: str = ""
 ) -> bool:
-    start, end = enclosing_block_span(lines, idx, rel)
+    start, end = enclosing_structure_span(lines, idx, rel)
     if blockquote_inside_span(lines, start, end):
         return False
-    n = len(DATED_CORRECTION_BODY)
     for gap in (0, 1):
-        before = start - n - gap
-        if before >= 0 and is_dated_correction_block(lines, before):
-            if gap == 0 or _is_blank(lines[start - 1]):
-                return True
         after = end + gap
         if is_dated_correction_block(lines, after):
             if gap == 0 or (end < len(lines) and _is_blank(lines[end])):
                 return True
+    return False
+
+
+def flow_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def canonical_run_root_formula(root: Path) -> str:
+    flowed = flow_whitespace(read_text(root / CANONICAL_FORMULA_SOURCE) or "")
+    start = flowed.find(_FORMULA_START)
+    if start < 0:
+        return ""
+    end = flowed.find(_FORMULA_END, start)
+    if end < 0:
+        return ""
+    return flowed[start : end + len(_FORMULA_END)]
+
+
+def spec_section_text(text: str, heading_prefix: str) -> str:
+    lines = text.splitlines()
+    start: int | None = None
+    for idx, line in enumerate(lines):
+        if line.startswith("## ") and heading_prefix in line:
+            start = idx + 1
+            break
+    if start is None:
+        return ""
+    end = len(lines)
+    for idx in range(start, len(lines)):
+        if lines[idx].startswith("## "):
+            end = idx
+            break
+    return "\n".join(lines[start:end])
+
+
+def formula_parity_findings(root: Path) -> list[str]:
+    if not (root / CANONICAL_FORMULA_SOURCE).is_file() or not (
+        root / SPEC_OUTWARD_REL
+    ).is_file():
+        return []
+    formula = canonical_run_root_formula(root)
+    if not formula:
+        return [f"{CANONICAL_FORMULA_SOURCE}: canonical run_root formula missing"]
+    for needle in ("newline-delimited", "trailing newline"):
+        if needle not in formula:
+            return [f"{CANONICAL_FORMULA_SOURCE}: canonical formula lost {needle!r}"]
+    section = spec_section_text(read_text(root / SPEC_OUTWARD_REL) or "", "7.")
+    if formula not in flow_whitespace(section):
+        return [
+            f"{SPEC_OUTWARD_REL}: §7 does not state the canonical run_root formula"
+        ]
+    if re.search(
+        r"delimiter-free|no trailing newline|without a trailing newline",
+        section,
+        re.IGNORECASE,
+    ):
+        return [
+            f"{SPEC_OUTWARD_REL}: §7 claims a delimiter-free or no-trailing-newline formula"
+        ]
+    return []
+
+
+def is_run_root_chain_claim(line: str) -> bool:
+    if _RUN_ROOT_TOKEN_RE.search(line) is None:
+        return False
+    for clause in _CLAUSE_SPLIT_RE.split(line):
+        if _RUN_ROOT_TOKEN_RE.search(clause) is None:
+            continue
+        token = _RUN_ROOT_CHAIN_RE.search(clause)
+        if token is None:
+            continue
+        if _NEGATION_BEFORE_RE.search(clause, 0, token.start()) is not None:
+            continue
+        return True
     return False
 
 
@@ -603,12 +741,17 @@ def scan_findings(
                     f"{rel}:{line_no}: false run_root inclusion/membership claim: {line.strip()}"
                 )
                 continue
-            if not MERKLE_RE.search(line):
+            if is_run_root_chain_claim(line):
+                findings.append(
+                    f"{rel}:{line_no}: false run_root chain claim: {line.strip()}"
+                )
                 continue
             if FALSE_CLAIM_RE.search(line):
                 findings.append(
                     f"{rel}:{line_no}: false run_root-as-Merkle claim: {line.strip()}"
                 )
+                continue
+            if not MERKLE_RE.search(line):
                 continue
             if line_is_allowed(line, allowed) or line_is_allowed(line, legacy):
                 continue
@@ -666,11 +809,14 @@ def check_tree(
         print("evidence-vocabulary=failed")
         print("tracked set is empty; refuse to pass")
         return 1
-    findings = scan_findings(root, tracked, rules, idents)
-    withdrawn = scan_withdrawn_labels(root, tracked)
-    if stale or findings or withdrawn:
+    findings = (
+        scan_findings(root, tracked, rules, idents)
+        + scan_withdrawn_labels(root, tracked)
+        + formula_parity_findings(root)
+    )
+    if stale or findings:
         print("evidence-vocabulary=failed")
-        for message in stale + findings + withdrawn:
+        for message in stale + findings:
             print(message)
         return 1
     print("evidence-vocabulary=passed")

@@ -203,7 +203,7 @@ themselves named, and its effect is a weaker sandbox for that same operator.
 
 Each finding was run against a control so it is not an artifact of the setup. Repacking
 `tests/fixtures/evidence/test-bundle.tar.gz` untouched verifies clean, while changing one field of
-that bundle to a value of equal byte length fails with `IntegrityManifestHash`; the integrity chain
+that bundle to a value of equal byte length fails with `IntegrityManifestHash`; the run-root digest
 does what the profile says. For the JWKS composition the two runs differ only in the URI scheme,
 which isolates the cause to the refusal path itself.
 Finding 1 was independently challenged on the grounds that the verifier streams correctly, and

@@ -66,14 +66,13 @@ These are engineering strengths that distinguish Assay. Refactors are only good 
 2. **Content-addressed replay** with typed request keys + schema versioning + cache busting - `vcr/`, `engine/runner.rs`
 3. **Typed VCR + JCS canonicalization** instead of raw HTTP matching
 4. **Evidence integrity chain** separating metadata from payload integrity - `assay-evidence` manifest, SHA-256, Merkle root
+5. **Adaptive judge (SPRT-inspired)** + seed-based blind labeling
+6. **Security hardening**: terminal sanitization state machine, sim/chaos attacks, strict JSON handling
 
 > Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
 > event content-hash strings, with a trailing newline, in event sequence order —
 > not a tree root, and not `event_id` bytes. The historical wording above describes
 > the model used at the time and is not a claim about the shipped evidence format.
-
-5. **Adaptive judge (SPRT-inspired)** + seed-based blind labeling
-6. **Security hardening**: terminal sanitization state machine, sim/chaos attacks, strict JSON handling
 
 ---
 

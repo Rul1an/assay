@@ -136,8 +136,8 @@ not imply that the server enforces proxy policy when it is started in plain stdi
 
 ## 7. Evidence vocabulary
 
-The evidence manifest's `run_root` is SHA-256 over newline-delimited event content-hash strings,
-with a trailing newline, in event sequence order.
+`run_root` is SHA-256 over newline-delimited event content-hash strings, with a trailing newline,
+in event sequence order.
 It is not a Merkle root and it does not provide a Merkle inclusion proof.
 
 Slice 2 replaces this false terminology in current product documentation, public code comments,

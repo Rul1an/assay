@@ -827,6 +827,374 @@ if rc != 0:
 print("ok: correction-list-boundary")
 PY
 
+# Self-test only: repo-pinned pymdown-extensions (MkDocs fence engine).
+# The live guard must not import markdown.
+PYMD_PIN="$(
+  python3 - "$ROOT/docs/requirements-ci.txt" <<'PY'
+from pathlib import Path
+import sys
+for line in Path(sys.argv[1]).read_text().splitlines():
+    if line.startswith("pymdown-extensions=="):
+        print(line.strip())
+        raise SystemExit(0)
+raise SystemExit("FAIL: docs/requirements-ci.txt must pin pymdown-extensions")
+PY
+)"
+RENDER_VENV="$TMP/render-venv"
+RENDER_PY="$RENDER_VENV/bin/python"
+if ! python3 -c "import markdown, pymdownx.superfences" 2>/dev/null; then
+  python3 -m venv "$RENDER_VENV"
+  "$RENDER_VENV/bin/pip" install -q "$PYMD_PIN"
+else
+  RENDER_PY="python3"
+fi
+
+# Ordered-list continuity via real Python-Markdown / superfences, plus the
+# production adjacency rule (no second renderer in the live guard).
+OLSPLIT="$TMP/ol-split"
+init_fixture "$OLSPLIT"
+mkdir -p "$OLSPLIT/docs/architecture"
+"$RENDER_PY" - "$CHECKER" "$OLSPLIT" "$ROOT" <<'PY'
+import importlib.util
+import io
+import subprocess
+import sys
+from contextlib import redirect_stdout
+from html.parser import HTMLParser
+from pathlib import Path
+
+import markdown
+
+checker, root, repo = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+src = (repo / "scripts/ci/check-evidence-vocabulary.py").read_text()
+if "_block_events" in src or "_ordered_list_runs" in src:
+    raise SystemExit("FAIL: live guard must not ship a second Markdown renderer")
+if "import markdown" in src or "pymdownx" in src:
+    raise SystemExit("FAIL: live guard must not import the MkDocs markdown stack")
+mkdocs = (repo / "mkdocs.yml").read_text()
+if "pymdownx.superfences" not in mkdocs:
+    raise SystemExit("FAIL: repo mkdocs.yml must name pymdownx.superfences")
+
+
+class _TopOl(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.ols: list[str] = []
+        self._depth = 0
+        self._parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "ol":
+            if self._depth == 0:
+                self._parts = []
+            self._depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "ol" and self._depth:
+            self._depth -= 1
+            if self._depth == 0:
+                self.ols.append("".join(self._parts))
+
+    def handle_data(self, data: str) -> None:
+        if self._depth:
+            self._parts.append(data)
+
+
+def render_ols(text: str) -> list[str]:
+    html = markdown.markdown(text, extensions=["pymdownx.superfences"])
+    parser = _TopOl()
+    parser.feed(html)
+    return parser.ols
+
+
+def one_ol_contains(text: str, needles: tuple[str, ...]) -> bool:
+    return any(all(needle in blob for needle in needles) for blob in render_ols(text))
+
+
+correction = "\n".join("> " + line for line in module.DATED_CORRECTION_BODY)
+needles = ("Wilson-lower-bound gating", "Security hardening")
+split_src = (
+    "1. Wilson-lower-bound gating\n"
+    "2. Content-addressed replay\n"
+    "3. Typed VCR\n"
+    "4. Evidence integrity chain - Merkle root\n"
+    "\n"
+    + correction
+    + "\n\n"
+    "5. Adaptive judge\n"
+    "6. Security hardening\n"
+)
+one_ol = (
+    "1. Wilson-lower-bound gating\n"
+    "2. Content-addressed replay\n"
+    "3. Typed VCR\n"
+    "4. Evidence integrity chain - Merkle root\n"
+    "5. Adaptive judge\n"
+    "6. Security hardening\n"
+    "\n"
+    + correction
+    + "\n"
+)
+fenced = (
+    "```md\n"
+    "1. Wilson-lower-bound gating\n"
+    "2. Content-addressed replay\n"
+    "\n"
+    + correction
+    + "\n\n"
+    "5. Adaptive judge\n"
+    "6. Security hardening\n"
+    "```\n"
+    "\n"
+    "1. Wilson-lower-bound gating\n"
+    "2. Content-addressed replay\n"
+    "3. Typed VCR\n"
+    "4. Evidence integrity chain - Merkle root\n"
+    "5. Adaptive judge\n"
+    "6. Security hardening\n"
+)
+if len(render_ols(split_src)) != 2 or one_ol_contains(split_src, needles):
+    raise SystemExit(
+        f"FAIL: mid-list correction must split <ol> under Python-Markdown: {render_ols(split_src)!r}"
+    )
+if len(render_ols(one_ol)) != 1 or not one_ol_contains(one_ol, needles):
+    raise SystemExit(
+        f"FAIL: after-list correction must keep one <ol>: {render_ols(one_ol)!r}"
+    )
+if len(render_ols(fenced)) != 1 or not one_ol_contains(fenced, needles):
+    raise SystemExit(
+        "FAIL: fenced split-list lookalike must not be counted as a document <ol>"
+    )
+rfc = root / "docs/architecture/RFC-001-dx-ux-governance.md"
+rfc.write_text(split_src)
+subprocess.run(
+    ["git", "add", "-A", "--", "docs/architecture/RFC-001-dx-ux-governance.md"],
+    cwd=root,
+    check=True,
+)
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+module.CORRECTED_HISTORY = {
+    "docs/architecture/RFC-001-dx-ux-governance.md": (
+        module.re.escape("4. Evidence integrity chain - Merkle root"),
+    )
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0:
+    raise SystemExit("FAIL: mid-<ol> dated correction must fail adjacency:\n" + out)
+rfc.write_text(one_ol)
+subprocess.run(
+    ["git", "add", "-A", "--", "docs/architecture/RFC-001-dx-ux-governance.md"],
+    cwd=root,
+    check=True,
+)
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+if rc != 0:
+    raise SystemExit(
+        "FAIL: correction after the full ordered list must pass:\n" + buf.getvalue()
+    )
+print("ok: correction-ordered-list-render")
+PY
+
+# Dated correction must sit below the historical wording, matching "above".
+DIRCORR="$TMP/correction-direction"
+init_fixture "$DIRCORR"
+mkdir -p "$DIRCORR/docs/architecture"
+python3 - "$CHECKER" "$DIRCORR" <<'PY'
+import importlib.util
+import io
+import subprocess
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+correction = "\n".join("> " + line for line in module.DATED_CORRECTION_BODY)
+hist = (
+    "This creates a lightweight **Hash Chain** (Merkle sequence) that proves "
+    "the integrity and order of the event stream."
+)
+adr = root / "docs/architecture/ADR-007-Deterministic-Provenance.md"
+adr.write_text(correction + "\n\n" + hist + "\n")
+subprocess.run(
+    ["git", "add", "-A", "--", "docs/architecture/ADR-007-Deterministic-Provenance.md"],
+    cwd=root,
+    check=True,
+)
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0:
+    raise SystemExit(
+        "FAIL: dated correction above the historical wording must fail:\n" + out
+    )
+print("ok: correction-directional-above")
+PY
+
+# SPEC §7 must carry the boundary formula; delimiter-free must fail.
+FORMULA="$TMP/formula-parity"
+init_fixture "$FORMULA"
+mkdir -p "$FORMULA/docs/architecture" "$FORMULA/crates/assay-cli/src/exit_codes"
+python3 - "$CHECKER" "$FORMULA" <<'PY'
+import importlib.util
+import io
+import subprocess
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+boundary_src = module.REPO_ROOT / module.CANONICAL_FORMULA_SOURCE
+spec_src = module.REPO_ROOT / module.SPEC_OUTWARD_REL
+boundary = root / module.CANONICAL_FORMULA_SOURCE
+spec_path = root / module.SPEC_OUTWARD_REL
+boundary.parent.mkdir(parents=True, exist_ok=True)
+spec_path.parent.mkdir(parents=True, exist_ok=True)
+boundary.write_text(boundary_src.read_text())
+spec_path.write_text(spec_src.read_text())
+subprocess.run(
+    ["git", "add", "-A", "--", module.CANONICAL_FORMULA_SOURCE, module.SPEC_OUTWARD_REL],
+    cwd=root,
+    check=True,
+)
+formula = module.canonical_run_root_formula(root)
+if "newline-delimited" not in formula or "trailing newline" not in formula:
+    raise SystemExit(f"FAIL: extracted formula lost required tokens: {formula!r}")
+section = module.spec_section_text(spec_path.read_text(), "7.")
+if formula not in module.flow_whitespace(section):
+    raise SystemExit("FAIL: fixture SPEC §7 must contain the extracted formula verbatim")
+control = module.formula_parity_findings(root)
+if control:
+    raise SystemExit("FAIL: formula-parity control must pass:\n" + "\n".join(control))
+mutated = spec_path.read_text().replace("newline-delimited", "delimiter-free concatenated", 1)
+mutated = mutated.replace("trailing newline", "no trailing newline", 1)
+if "delimiter-free" not in mutated or "no trailing newline" not in mutated:
+    raise SystemExit("FAIL: mutation did not land in SPEC §7")
+spec_path.write_text(mutated)
+subprocess.run(
+    ["git", "add", "-A", "--", module.SPEC_OUTWARD_REL],
+    cwd=root,
+    check=True,
+)
+findings = module.formula_parity_findings(root)
+if not findings:
+    raise SystemExit("FAIL: delimiter-free / no trailing newline in SPEC §7 must fail")
+print("ok: formula-parity-spec-section-7")
+PY
+
+# run_root + hash/integrity chain is a current-claim, not general chain prose.
+CHAIN="$TMP/run-root-chain"
+init_fixture "$CHAIN"
+printf '%s\n' \
+  'manifest.run_root, a chain over per-event content hashes' \
+  'the integrity chain does what the profile says' \
+  'The shipped run_root is not a hash chain.' \
+  'run_root is not an integrity chain.' \
+  >> "$CHAIN/docs/lint/index.md"
+git -C "$CHAIN" add -A -- docs/lint/index.md
+python3 - "$CHECKER" "$CHAIN" <<'PY'
+import importlib.util
+import io
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+if not module.is_run_root_chain_claim(
+    "manifest.run_root, a chain over per-event content hashes"
+):
+    raise SystemExit("FAIL: run_root + chain over must be a chain claim")
+if module.is_run_root_chain_claim("the integrity chain does what the profile says"):
+    raise SystemExit("FAIL: general integrity-chain prose must not be banned")
+if module.is_run_root_chain_claim("The shipped run_root is not a hash chain."):
+    raise SystemExit("FAIL: negated hash-chain sentence must pass")
+if module.is_run_root_chain_claim("run_root is not an integrity chain."):
+    raise SystemExit("FAIL: negated integrity-chain sentence must pass")
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0 or "chain over per-event" not in out:
+    raise SystemExit("FAIL: run_root chain claim must fail:\n" + out)
+if "the integrity chain does what the profile says" in out:
+    raise SystemExit("FAIL: general chain language was banned:\n" + out)
+if "is not a hash chain" in out or "is not an integrity chain" in out:
+    raise SystemExit("FAIL: negated run_root chain sentence was flagged:\n" + out)
+print("ok: run-root-chain-claim")
+PY
+
+# tree-root variant plus exact-line allowlist must not mask it.
+reset_lint
+printf '%s\n' 'tree root' 'run_root is a tree root' >> "$FIXTURE/docs/lint/index.md"
+git -C "$FIXTURE" add -A -- docs/lint/index.md
+python3 - "$CHECKER" "$FIXTURE" <<'PY'
+import importlib.util
+import io
+import re
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+line = "run_root is a tree root"
+if not module.FALSE_CLAIM_RE.search(line):
+    raise SystemExit("FAIL: FALSE_CLAIM_RE must match the tree-root variant")
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+chosen = {**rekor, "docs/lint/index.md": (re.escape("tree root"),)}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, chosen, identifiers={})
+out = buf.getvalue()
+if rc == 0 or "run_root is a tree root" not in out:
+    raise SystemExit(
+        "FAIL: exact-line allowlist must not mask run_root is a tree root:\n" + out
+    )
+print("ok: tree-root-allowlist-mask")
+PY
+
 # Permit as a strict substring of a longer Merkle line, without run_root.
 SUBSTR="$TMP/substring-permit"
 init_fixture "$SUBSTR"
@@ -968,14 +1336,17 @@ if not module.is_withdrawn_surface(
 print("ok: withdrawn-2026-09")
 PY
 
-python3 - "$CHECKER" "$ROOT" <<'PY'
+"$RENDER_PY" - "$CHECKER" "$ROOT" <<'PY'
 import importlib.util
 import inspect
 import io
 import re
 import sys
 from contextlib import redirect_stdout
+from html.parser import HTMLParser
 from pathlib import Path
+
+import markdown
 
 checker, root = Path(sys.argv[1]), Path(sys.argv[2])
 spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
@@ -1097,17 +1468,67 @@ if "below" in " ".join(module.DATED_CORRECTION_BODY).lower():
 for rel in (
     "docs/architecture/ADR-034-Evidence-Redaction-At-Capture.md",
     "docs/architecture/ADR-039-evidence-bundle-attestation.md",
+    "docs/architecture/RFC-001-dx-ux-governance.md",
     "docs/experiments/evidence-mutation-cost-2026-06/README.md",
 ):
     lines = (root / rel).read_text().splitlines()
     for idx, line in enumerate(lines):
         if not module.line_is_corrected_history(rel, line):
             continue
-        start, end = module.enclosing_block_span(lines, idx, rel)
+        start, end = module.enclosing_structure_span(lines, idx, rel)
         if module.blockquote_inside_span(lines, start, end):
             raise SystemExit(
-                f"FAIL: {rel} still places a dated correction inside a list item or paragraph"
+                f"FAIL: {rel} still places a dated correction inside a list or paragraph"
             )
+        if not module.has_adjacent_dated_correction(lines, idx, rel):
+            raise SystemExit(
+                f"FAIL: {rel} historical line is not followed by a dated correction"
+            )
+
+class _TopOl(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.ols: list[str] = []
+        self._depth = 0
+        self._parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "ol":
+            if self._depth == 0:
+                self._parts = []
+            self._depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "ol" and self._depth:
+            self._depth -= 1
+            if self._depth == 0:
+                self.ols.append("".join(self._parts))
+
+    def handle_data(self, data: str) -> None:
+        if self._depth:
+            self._parts.append(data)
+
+def _one_ol_contains(text: str, needles: tuple[str, ...]) -> bool:
+    html = markdown.markdown(text, extensions=["pymdownx.superfences"])
+    parser = _TopOl()
+    parser.feed(html)
+    return any(all(needle in blob for needle in needles) for blob in parser.ols)
+
+for rel, needles in (
+    (
+        "docs/architecture/RFC-001-dx-ux-governance.md",
+        ("Wilson-lower-bound gating", "Security hardening"),
+    ),
+    (
+        "docs/experiments/evidence-mutation-cost-2026-06/README.md",
+        ("mutation-detection matrix", "verification + signing cost curve"),
+    ),
+):
+    if not _one_ol_contains((root / rel).read_text(), needles):
+        raise SystemExit(
+            f"FAIL: {rel} does not render as one continuous <ol> under "
+            "Python-Markdown / pymdownx.superfences"
+        )
 
 print("ok: imported ALLOWED_MERKLE_USES is non-vacuous on this tree")
 print("ok: scan excludes only the two guard paths")

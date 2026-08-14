@@ -169,10 +169,10 @@ ffmpeg -i demo/output/hero.mp4 -ss 3.5 -t 2.5 -c copy shot04_green.mp4
 ```
 Abstract data visualization on dark background: glowing nodes appearing
 one by one in a vertical chain structure, each node showing a short
-hexadecimal hash. Thin luminous lines connect nodes upward into a
-ordered hash chain. Nodes pulse briefly on appearance.
+hexadecimal hash. Thin luminous lines connect nodes upward into an
+ordered run-root digest. Nodes pulse briefly on appearance.
 Color palette: deep navy background, cyan/teal node glow, white text.
-Camera: slow dolly out revealing the full tree structure from bottom
+Camera: slow dolly out revealing the stacked hashes from bottom
 to top. Style: minimal, technical, clean geometry, no text overlays
 except hashes. Duration: 5 seconds. Aspect ratio: 16:9.
 ```
