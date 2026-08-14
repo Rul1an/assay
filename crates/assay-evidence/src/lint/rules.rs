@@ -3,6 +3,43 @@ use crate::types::EvidenceEvent;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+/// The one place the shape of an emitted help pointer is defined.
+///
+/// Pinned to the release tag of the version this build already reports as `tool_version`, rather
+/// than to the docs site. The site is deployed flat by `mkdocs gh-deploy`, so
+/// `docs.getassay.dev/lint/#assay-w001` resolves against whatever the page says today and a
+/// consumer reading a six-month-old report silently gets today's prose. A tag cannot move, so the
+/// pointer now agrees with the version the report claims to be, and any drift between a working
+/// tree and that tag is drift the report already declares by calling itself that version.
+///
+/// The target is the markdown source rather than the rendered page because the rendered page has
+/// no versioned path to point at: `extra.version.provider: mike` is declared in `mkdocs.yml` but
+/// the deploy runs `mkdocs gh-deploy --force`, and `versions.json`, `/5.1.0/lint/` and
+/// `/latest/lint/` all return 404. Giving the site versioned paths would break every pointer
+/// already shipped in v5.0.0 and v5.1.0 binaries, so that is a separate decision, not a side
+/// effect of this one.
+///
+/// The fragments are `<a id="...">` elements rather than mkdocs `attr_list` (`{#assay-w001}`)
+/// because GitHub does not honour `attr_list`. Verified against the rendered page at `v5.1.0`,
+/// which shows `{#assay-w001}` as literal text in the heading and ids the section
+/// `assay-w001--subject-may-contain-a-secret-assay-w001`.
+///
+/// KNOWN GAP, bounded and self-clearing: a fragment resolves only from the first tag that carries
+/// these `<a id>` anchors onward. `v5.1.0` predates them, so a build from an untagged tree during
+/// this release cycle emits the right document at the right version with a fragment that lands at
+/// the top of the page instead of at its rule. Already-released v5.0.0 and v5.1.0 binaries are
+/// unaffected — they were built with the old unversioned pointer and nothing about them changes.
+macro_rules! lint_help_uri {
+    ($anchor:literal) => {
+        concat!(
+            "https://github.com/Rul1an/assay/blob/v",
+            env!("CARGO_PKG_VERSION"),
+            "/docs/lint/index.md#",
+            $anchor
+        )
+    };
+}
+
 type RuleCheck = for<'a> fn(&EvidenceEvent, &LintContext<'a>) -> Option<LintFinding>;
 
 /// Rule definition for the lint registry.
@@ -79,7 +116,7 @@ pub static RULES: &[RuleDefinition] = &[
         id: "ASSAY-W001",
         default_severity: Severity::Warn,
         description: "Subject may contain a secret (API key, token, password pattern)",
-        help_uri: Some("https://docs.getassay.dev/lint/#assay-w001"),
+        help_uri: Some(lint_help_uri!("assay-w001")),
         tags: &["security", "secrets"],
         security_severity: Some("7.0"),
         check: check_secret_in_subject,
@@ -88,7 +125,7 @@ pub static RULES: &[RuleDefinition] = &[
         id: "ASSAY-W002",
         default_severity: Severity::Warn,
         description: "Event flagged as containing PII but subject is non-empty",
-        help_uri: Some("https://docs.getassay.dev/lint/#assay-w002"),
+        help_uri: Some(lint_help_uri!("assay-w002")),
         tags: &["privacy", "pii"],
         security_severity: Some("4.0"),
         check: check_pii_flag_consistency,
@@ -97,7 +134,7 @@ pub static RULES: &[RuleDefinition] = &[
         id: "ASSAY-I001",
         default_severity: Severity::Info,
         description: "Source format does not follow URN convention",
-        help_uri: Some("https://docs.getassay.dev/lint/#assay-i001"),
+        help_uri: Some(lint_help_uri!("assay-i001")),
         tags: &["convention", "format"],
         security_severity: None,
         check: check_source_format,
@@ -106,7 +143,7 @@ pub static RULES: &[RuleDefinition] = &[
         id: "ASSAY-W003",
         default_severity: Severity::Warn,
         description: "Event flagged as containing secrets but secrets flag is false",
-        help_uri: Some("https://docs.getassay.dev/lint/#assay-w003"),
+        help_uri: Some(lint_help_uri!("assay-w003")),
         tags: &["security", "secrets"],
         security_severity: Some("6.5"),
         check: check_secrets_flag_consistency,
@@ -116,7 +153,7 @@ pub static RULES: &[RuleDefinition] = &[
         default_severity: Severity::Warn,
         description:
             "Observed enforcement marker is not supported by a bound enforcement decision record",
-        help_uri: Some("https://docs.getassay.dev/lint/#assay-w004"),
+        help_uri: Some(lint_help_uri!("assay-w004")),
         tags: &["security", "enforcement", "attribution"],
         security_severity: Some("4.0"),
         check: check_enforcement_attribution_binding,
@@ -127,7 +164,7 @@ pub static RULES: &[RuleDefinition] = &[
         description:
             "Approval basis declares an opaque or unknown retained view — content-review claims \
              over it cap at incomplete",
-        help_uri: Some("https://docs.getassay.dev/lint/#assay-w005"),
+        help_uri: Some(lint_help_uri!("assay-w005")),
         tags: &["retention", "review", "sufficiency"],
         security_severity: None,
         check: check_retained_view_readability,
@@ -172,7 +209,7 @@ fn check_secret_in_subject(event: &EvidenceEvent, ctx: &LintContext<'_>) -> Opti
                     }),
                     vec!["security".into(), "secrets".into()],
                 )
-                .with_help_uri("https://docs.getassay.dev/lint/#assay-w001"),
+                .with_help_uri(lint_help_uri!("assay-w001")),
             );
         }
     }
@@ -193,7 +230,7 @@ fn check_pii_flag_consistency(event: &EvidenceEvent, ctx: &LintContext<'_>) -> O
                 }),
                 vec!["privacy".into(), "pii".into()],
             )
-            .with_help_uri("https://docs.getassay.dev/lint/#assay-w002"),
+            .with_help_uri(lint_help_uri!("assay-w002")),
         );
     }
     None
@@ -217,7 +254,7 @@ fn check_source_format(event: &EvidenceEvent, ctx: &LintContext<'_>) -> Option<L
                 }),
                 vec!["convention".into(), "format".into()],
             )
-            .with_help_uri("https://docs.getassay.dev/lint/#assay-i001"),
+            .with_help_uri(lint_help_uri!("assay-i001")),
         );
     }
     None
@@ -247,7 +284,7 @@ fn check_secrets_flag_consistency(
                     }),
                     vec!["security".into(), "secrets".into()],
                 )
-                .with_help_uri("https://docs.getassay.dev/lint/#assay-w003"),
+                .with_help_uri(lint_help_uri!("assay-w003")),
             );
         }
     }
@@ -293,7 +330,7 @@ fn check_enforcement_attribution_binding(
                 "attribution".into(),
             ],
         )
-        .with_help_uri("https://docs.getassay.dev/lint/#assay-w004"),
+        .with_help_uri(lint_help_uri!("assay-w004")),
     )
 }
 
@@ -374,7 +411,7 @@ fn check_retained_view_readability(
             }),
             vec!["retention".into(), "review".into(), "sufficiency".into()],
         )
-        .with_help_uri("https://docs.getassay.dev/lint/#assay-w005"),
+        .with_help_uri(lint_help_uri!("assay-w005")),
     )
 }
 
