@@ -57,7 +57,8 @@ if [[ -n "${ASSAY_RELEASE_METADATA_FILE:-}" ]]; then
   metadata="$(cat "${ASSAY_RELEASE_METADATA_FILE}")"
 else
   repo="${GITHUB_REPOSITORY:-Rul1an/assay}"
-  if ! metadata="$(gh api "repos/${repo}/releases/latest")"; then
+  gh_bin="${ASSAY_GH_BIN:-gh}"
+  if ! metadata="$("${gh_bin}" api "repos/${repo}/releases/latest")"; then
     echo "failed to obtain latest published release metadata for ${repo}" >&2
     exit 1
   fi

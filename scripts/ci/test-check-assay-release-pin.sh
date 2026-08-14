@@ -9,6 +9,7 @@ trap 'rm -rf "${scratch}"' EXIT
 manifest="${scratch}/Cargo.toml"
 pin_file="${scratch}/assay-release-tag"
 metadata="${scratch}/release.json"
+fake_gh="${scratch}/gh"
 
 write_manifest() {
   printf '[workspace.package]\nversion = "%s"\n' "$1" >"${manifest}"
@@ -31,6 +32,14 @@ run_check() {
     ASSAY_RELEASE_TAG_FILE="${pin_file}" \
     ASSAY_RELEASE_METADATA_FILE="${metadata}" \
     "${CHECKER}" "$@"
+}
+
+run_api_check() {
+  ASSAY_WORKSPACE_MANIFEST="${manifest}" \
+    ASSAY_RELEASE_TAG_FILE="${pin_file}" \
+    ASSAY_GH_BIN="${fake_gh}" \
+    GITHUB_REPOSITORY="Rul1an/assay" \
+    "${CHECKER}" --published
 }
 
 expect_fail() {
@@ -88,5 +97,13 @@ expect_fail "latest published release v5.2.0 lacks assay-v5.2.0-x86_64-unknown-l
 echo "== unavailable release metadata fails closed =="
 rm -f "${metadata}"
 expect_fail "failed to obtain latest published release metadata" run_check --published
+
+echo "== failed GitHub API call fails closed =="
+cat >"${fake_gh}" <<'EOF'
+#!/usr/bin/env bash
+exit 71
+EOF
+chmod +x "${fake_gh}"
+expect_fail "failed to obtain latest published release metadata for Rul1an/assay" run_api_check
 
 echo "assay release pin contract: PASS"
