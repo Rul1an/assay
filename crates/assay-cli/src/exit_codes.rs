@@ -5,7 +5,7 @@
 //!
 //! See: SPEC-PR-Gate-Outputs-v1.md for the full contract.
 
-use assay_core::errors::ConfigError;
+use assay_core::errors::ConfigLoadError;
 use serde::{Deserialize, Serialize};
 use std::io::ErrorKind;
 
@@ -125,12 +125,13 @@ pub(crate) fn format_recovery_argv(args: &[&str]) -> String {
     format!("Run argv: {}", serde_json::json!(args))
 }
 
-/// Classify an explicit `--config` that `load_config_with` could not load.
+/// Classify an explicit `--config` that `load_config_with_cause` could not load.
 ///
 /// Primary truth is the config-read I/O kind, set only at the `read_to_string`
 /// fold. `NotFound` is absence. Every other kind, and a YAML/schema failure
 /// with no kind, is unloadable. This is the one answer `run` and `doctor` share.
-pub(crate) fn reason_for_unloadable_explicit_config(err: &ConfigError) -> ReasonCode {
+/// The public `ConfigError` tuple is not consulted.
+pub(crate) fn reason_for_unloadable_explicit_config(err: &ConfigLoadError) -> ReasonCode {
     match err.io_kind() {
         Some(ErrorKind::NotFound) => ReasonCode::EMissingConfig,
         Some(_) | None => ReasonCode::ECfgParse,
@@ -432,8 +433,10 @@ mod tests {
         ];
         for (kind, expected) in cases {
             let err = match kind {
-                Some(kind) => ConfigError::from_read("failed to read config", kind),
-                None => ConfigError::new("failed to parse YAML: mapping values are not allowed"),
+                Some(kind) => ConfigLoadError::from_read("failed to read config", kind),
+                None => {
+                    ConfigLoadError::new("failed to parse YAML: mapping values are not allowed")
+                }
             };
             assert_eq!(
                 reason_for_unloadable_explicit_config(&err),

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use assay_core::config::{load_config, path_resolver::PathResolver};
-use assay_core::errors::ConfigError;
+use assay_core::config::{load_config_with_cause, path_resolver::PathResolver, LoadOptions};
+use assay_core::errors::ConfigLoadError;
 
 use crate::cli::args::common::OutputFormat;
 use crate::cli::args::DoctorArgs;
@@ -23,7 +23,7 @@ use super::parse_error::try_fix_parse_error;
 /// `fixes.rs` reads it too, for the config it re-loads after applying repairs. That return was a
 /// literal `1` until independent review found it, which made the class of an unloadable config
 /// depend on whether `--fix` had already written something.
-pub(super) fn config_failure(path: &Path, err: &ConfigError) -> RunOutcome {
+pub(super) fn config_failure(path: &Path, err: &ConfigLoadError) -> RunOutcome {
     let path = path.display().to_string();
     RunOutcome::from_reason(
         reason_for_unloadable_explicit_config(err),
@@ -85,7 +85,13 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     };
 
     let (cfg, cfg_err) = if explicit || target_path.exists() {
-        match load_config(&target_path, legacy_mode, false) {
+        match load_config_with_cause(
+            &target_path,
+            LoadOptions {
+                legacy_mode,
+                ..Default::default()
+            },
+        ) {
             Ok(c) => (Some(c), None),
             Err(e) => (None, Some(e)),
         }

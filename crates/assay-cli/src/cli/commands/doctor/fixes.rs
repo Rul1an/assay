@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use assay_core::agentic::{build_suggestions, AgenticCtx, SuggestedPatch};
-use assay_core::config::{load_config, path_resolver::PathResolver};
+use assay_core::config::{load_config_with_cause, path_resolver::PathResolver, LoadOptions};
 use assay_core::errors::diagnostic::{codes, Diagnostic};
 use dialoguer::{theme::ColorfulTheme, Confirm};
 
@@ -171,7 +171,13 @@ pub(super) async fn run_doctor_fix(
         return Ok(unfixed_exit);
     }
 
-    let cfg = match load_config(config_path, legacy_mode, false) {
+    let cfg = match load_config_with_cause(
+        config_path,
+        LoadOptions {
+            legacy_mode,
+            ..Default::default()
+        },
+    ) {
         Ok(c) => c,
         Err(err) => {
             // An unloadable config is one condition with one class, decided where the non-`--fix`

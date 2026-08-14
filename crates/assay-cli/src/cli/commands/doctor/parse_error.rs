@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::Context;
-use assay_core::config::load_config;
+use assay_core::config::{load_config_with_cause, LoadOptions};
 use assay_core::errors::similarity::closest_prompt;
 use dialoguer::{theme::ColorfulTheme, Confirm};
 
@@ -92,7 +92,13 @@ pub(super) fn try_fix_parse_error(
         config_path.display()
     );
 
-    match load_config(config_path, legacy_mode, false) {
+    match load_config_with_cause(
+        config_path,
+        LoadOptions {
+            legacy_mode,
+            ..Default::default()
+        },
+    ) {
         Ok(_) => {
             println!("Config parses successfully after fix.");
             Ok(0)

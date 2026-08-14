@@ -286,25 +286,42 @@ use std::io;
 
 /// Config load failure. Display stays the historical `ConfigError: {message}` string.
 ///
-/// `io_kind` is set only at the `read_to_string` fold. YAML, schema, and write
-/// failures leave it `None` so a parse error cannot be published as `NotFound`.
+/// This is the public tuple form. Classification of a failed explicit `--config`
+/// reads [`ConfigLoadError::io_kind`], not this string.
 #[derive(Debug)]
-pub struct ConfigError {
-    message: String,
+pub struct ConfigError(pub String);
+
+impl Display for ConfigError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ConfigError: {}", self.0)
+    }
+}
+impl std::error::Error for ConfigError {}
+
+/// Typed cause for one config load. `io_kind` is set only at the
+/// `read_to_string` fold. YAML, schema, and write failures leave it `None`
+/// so a parse error cannot be published as `NotFound`.
+///
+/// Public [`crate::config::load_config`] / [`crate::config::load_config_with`]
+/// map this to [`ConfigError`] and drop the kind. Callers that must classify
+/// use the sibling that returns this type.
+#[derive(Debug)]
+pub struct ConfigLoadError {
+    error: ConfigError,
     io_kind: Option<io::ErrorKind>,
 }
 
-impl ConfigError {
+impl ConfigLoadError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
-            message: message.into(),
+            error: ConfigError(message.into()),
             io_kind: None,
         }
     }
 
     pub fn from_read(message: impl Into<String>, kind: io::ErrorKind) -> Self {
         Self {
-            message: message.into(),
+            error: ConfigError(message.into()),
             io_kind: Some(kind),
         }
     }
@@ -312,14 +329,18 @@ impl ConfigError {
     pub fn io_kind(&self) -> Option<io::ErrorKind> {
         self.io_kind
     }
-}
 
-impl Display for ConfigError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ConfigError: {}", self.message)
+    pub fn into_config_error(self) -> ConfigError {
+        self.error
     }
 }
-impl std::error::Error for ConfigError {}
+
+impl Display for ConfigLoadError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.error, f)
+    }
+}
+impl std::error::Error for ConfigLoadError {}
 
 #[cfg(test)]
 mod tests {
@@ -402,11 +423,22 @@ mod tests {
     }
 
     #[test]
-    fn config_error_display_stays_stable_and_read_kind_is_optional() {
+    fn config_error_stays_a_public_tuple_struct() {
         use super::ConfigError;
+
+        // External callers construct `ConfigError(String)`. A named-field
+        // rewrite is a major (`tuple_struct_to_plain_struct`).
+        let err = ConfigError("failed".to_string());
+        assert_eq!(err.0, "failed");
+        assert_eq!(err.to_string(), "ConfigError: failed");
+    }
+
+    #[test]
+    fn config_load_error_display_matches_config_error_and_read_kind_is_optional() {
+        use super::ConfigLoadError;
         use std::io::ErrorKind;
 
-        let read = ConfigError::from_read(
+        let read = ConfigLoadError::from_read(
             "failed to read config eval.yaml: No such file or directory (os error 2)",
             ErrorKind::NotFound,
         );
@@ -415,8 +447,18 @@ mod tests {
             "ConfigError: failed to read config eval.yaml: No such file or directory (os error 2)"
         );
         assert_eq!(read.io_kind(), Some(ErrorKind::NotFound));
+        let public = read.into_config_error();
+        assert_eq!(
+            public.0,
+            "failed to read config eval.yaml: No such file or directory (os error 2)"
+        );
+        assert_eq!(
+            public.to_string(),
+            "ConfigError: failed to read config eval.yaml: No such file or directory (os error 2)"
+        );
 
-        let yaml = ConfigError::new("failed to parse YAML: mapping values are not allowed here");
+        let yaml =
+            ConfigLoadError::new("failed to parse YAML: mapping values are not allowed here");
         assert_eq!(
             yaml.to_string(),
             "ConfigError: failed to parse YAML: mapping values are not allowed here"

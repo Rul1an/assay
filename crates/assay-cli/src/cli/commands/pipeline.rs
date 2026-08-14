@@ -128,7 +128,7 @@ pub(crate) async fn execute_pipeline(
 
     let cfg = {
         let config_start = Instant::now();
-        match assay_core::config::load_config_with(
+        match assay_core::config::load_config_with_cause(
             &input.config,
             assay_core::config::LoadOptions {
                 legacy_mode,
