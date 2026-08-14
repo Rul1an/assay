@@ -22,8 +22,9 @@ write_pin() {
 write_release() {
   local tag="$1"
   local asset="${2:-assay-${tag}-x86_64-unknown-linux-gnu.tar.gz}"
+  local checksum="${3:-${asset}.sha256}"
   cat >"${metadata}" <<EOF
-{"tag_name":"${tag}","draft":false,"prerelease":false,"assets":[{"name":"${asset}"}]}
+{"tag_name":"${tag}","draft":false,"prerelease":false,"assets":[{"name":"${asset}"},{"name":"${checksum}"}]}
 EOF
 }
 
@@ -115,6 +116,12 @@ write_manifest "5.2.0"
 write_pin "v5.2.0"
 write_release "v5.2.0" "unrelated.txt"
 expect_fail "latest published release v5.2.0 lacks assay-v5.2.0-x86_64-unknown-linux-gnu.tar.gz" run_check --published
+
+echo "== missing checksum sidecar fails closed =="
+write_release "v5.2.0" \
+  "assay-v5.2.0-x86_64-unknown-linux-gnu.tar.gz" \
+  "unrelated.txt"
+expect_fail "latest published release v5.2.0 lacks assay-v5.2.0-x86_64-unknown-linux-gnu.tar.gz.sha256" run_check --published
 
 echo "== unavailable release metadata fails closed =="
 rm -f "${metadata}"

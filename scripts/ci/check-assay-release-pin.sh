@@ -113,12 +113,14 @@ if pin != latest:
         )
     raise SystemExit(f"install pin {pin} {relation} latest published release {latest}")
 
-expected_asset = f"assay-{latest}-x86_64-unknown-linux-gnu.tar.gz"
+expected_archive = f"assay-{latest}-x86_64-unknown-linux-gnu.tar.gz"
 assets = release.get("assets")
-if not isinstance(assets, list) or expected_asset not in {
+asset_names = {
     asset.get("name") for asset in assets if isinstance(asset, dict)
-}:
-    raise SystemExit(f"latest published release {latest} lacks {expected_asset}")
+} if isinstance(assets, list) else set()
+for expected_asset in (expected_archive, f"{expected_archive}.sha256"):
+    if expected_asset not in asset_names:
+        raise SystemExit(f"latest published release {latest} lacks {expected_asset}")
 PY
 
 printf 'assay published release pin: %s (workspace %s)\n' "${pin}" "${workspace_version}"
