@@ -298,6 +298,90 @@ if "rekor.rs" in out and "withdrawn metric label" in out:
 print("ok: withdrawn-metric")
 PY
 
+NEWPATH="$TMP/withdrawn-new-path"
+init_fixture "$NEWPATH"
+mkdir -p "$NEWPATH/docs/experiments/evidence-mutation-cost-2026-06/results"
+printf '%s\n' '| events | inclusion-proof hashes |' \
+  > "$NEWPATH/docs/experiments/evidence-mutation-cost-2026-06/results/cost-v2.md"
+git -C "$NEWPATH" add -A -- \
+  docs/experiments/evidence-mutation-cost-2026-06/results/cost-v2.md
+python3 - "$CHECKER" "$NEWPATH" <<'PY'
+import importlib.util
+import io
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0:
+    raise SystemExit(
+        "FAIL: withdrawn-new-path expected fail, checker passed (false-green):\n" + out
+    )
+if "cost-v2.md" not in out or "inclusion-proof hashes" not in out:
+    raise SystemExit("FAIL: withdrawn-new-path did not flag cost-v2.md:\n" + out)
+if "rekor.rs" in out and "withdrawn metric label" in out:
+    raise SystemExit("FAIL: genuine Rekor path was flagged as a withdrawn label:\n" + out)
+if not module.is_withdrawn_surface(
+    "docs/experiments/evidence-mutation-cost-2026-06/results/cost-v2.md"
+):
+    raise SystemExit("FAIL: is_withdrawn_surface must cover an unlisted result path")
+if module.is_withdrawn_surface("crates/assay-registry/src/rekor.rs"):
+    raise SystemExit("FAIL: is_withdrawn_surface must not cover genuine Rekor")
+print("ok: withdrawn-new-path")
+PY
+
+CASEVAR="$TMP/withdrawn-case"
+init_fixture "$CASEVAR"
+mkdir -p "$CASEVAR/docs/experiments/evidence-mutation-cost-2026-06/results"
+printf '%s\n' '| events | Inclusion-Proof Hashes |' \
+  > "$CASEVAR/docs/experiments/evidence-mutation-cost-2026-06/results/cost.md"
+git -C "$CASEVAR" add -A -- \
+  docs/experiments/evidence-mutation-cost-2026-06/results/cost.md
+python3 - "$CHECKER" "$CASEVAR" <<'PY'
+import importlib.util
+import io
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor, identifiers={})
+out = buf.getvalue()
+if rc == 0:
+    raise SystemExit(
+        "FAIL: withdrawn-case expected fail, checker passed (false-green):\n" + out
+    )
+if "Inclusion-Proof Hashes" not in out and "inclusion-proof hashes" not in out:
+    raise SystemExit("FAIL: withdrawn-case did not flag case variation:\n" + out)
+if "rekor.rs" in out and "withdrawn metric label" in out:
+    raise SystemExit("FAIL: genuine Rekor path was flagged as a withdrawn label:\n" + out)
+print("ok: withdrawn-case")
+PY
+
 reset_lint
 run_case empty-allowlist fail empty
 echo "ok: empty-allowlist"
@@ -314,6 +398,7 @@ python3 - "$CHECKER" "$ROOT" <<'PY'
 import importlib.util
 import inspect
 import io
+import re
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -364,15 +449,21 @@ if getattr(module, "TEMPORARY_DEBT", None):
 withdrawn_labels = getattr(module, "WITHDRAWN_METRIC_LABELS", None)
 if withdrawn_labels != ("inclusion_proof_hashes", "inclusion-proof hashes"):
     raise SystemExit(f"FAIL: WITHDRAWN_METRIC_LABELS drifted: {withdrawn_labels!r}")
-withdrawn_surfaces = getattr(module, "WITHDRAWN_SURFACES", None)
-expected_surfaces = {
-    "crates/assay-evidence/tests/e3_verify_cost_curve.rs",
-    "docs/experiments/evidence-mutation-cost-2026-06/aggregate.py",
-    "docs/experiments/evidence-mutation-cost-2026-06/results/cost.json",
-    "docs/experiments/evidence-mutation-cost-2026-06/results/cost.md",
-}
-if withdrawn_surfaces != expected_surfaces:
-    raise SystemExit(f"FAIL: WITHDRAWN_SURFACES drifted: {withdrawn_surfaces!r}")
+if not callable(getattr(module, "is_withdrawn_surface", None)):
+    raise SystemExit("FAIL: is_withdrawn_surface must be the shared path predicate")
+if getattr(module, "WITHDRAWN_SURFACES", None) is not None:
+    raise SystemExit("FAIL: WITHDRAWN_SURFACES filename list must not return")
+if not module.is_withdrawn_surface("crates/assay-evidence/tests/e3_verify_cost_curve.rs"):
+    raise SystemExit("FAIL: is_withdrawn_surface must cover the Rust harness")
+if not module.is_withdrawn_surface(
+    "docs/experiments/evidence-mutation-cost-2026-06/results/cost-v2.md"
+):
+    raise SystemExit("FAIL: is_withdrawn_surface must cover new experiment result paths")
+if module.is_withdrawn_surface("crates/assay-registry/src/rekor.rs"):
+    raise SystemExit("FAIL: is_withdrawn_surface must not cover genuine Rekor")
+label_res = getattr(module, "WITHDRAWN_LABEL_RES", None)
+if not label_res or any(not cre.flags & re.IGNORECASE for cre in label_res):
+    raise SystemExit("FAIL: WITHDRAWN_LABEL_RES must be case-insensitive")
 
 legacy = getattr(module, "LEGACY_IDENTIFIERS", None)
 if not isinstance(legacy, dict) or not legacy:

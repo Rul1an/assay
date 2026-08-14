@@ -103,20 +103,18 @@ FALSE_CLAIM_RE = re.compile(
 MERKLE_RE = re.compile(r"merkle", re.IGNORECASE)
 
 # Withdrawn experiment metric names. They do not contain "merkle" but still
-# teach a production inclusion proof that run_root does not have. Exact
-# surfaces only — genuine Rekor/ADR inclusion-proof text is out of scope.
+# teach a production inclusion proof that run_root does not have. The Rust
+# harness plus the stable experiment directory — not today's filenames.
+# Genuine Rekor/ADR inclusion-proof text is out of scope.
 WITHDRAWN_METRIC_LABELS: tuple[str, ...] = (
     "inclusion_proof_hashes",
     "inclusion-proof hashes",
 )
-WITHDRAWN_SURFACES: frozenset[str] = frozenset(
-    {
-        "crates/assay-evidence/tests/e3_verify_cost_curve.rs",
-        "docs/experiments/evidence-mutation-cost-2026-06/aggregate.py",
-        "docs/experiments/evidence-mutation-cost-2026-06/results/cost.json",
-        "docs/experiments/evidence-mutation-cost-2026-06/results/cost.md",
-    }
+WITHDRAWN_LABEL_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(re.escape(label), re.IGNORECASE) for label in WITHDRAWN_METRIC_LABELS
 )
+WITHDRAWN_HARNESS = "crates/assay-evidence/tests/e3_verify_cost_curve.rs"
+WITHDRAWN_EXPERIMENT_PREFIX = "docs/experiments/evidence-mutation-cost-2026-06/"
 
 
 def git_files(root: Path) -> list[Path]:
@@ -147,6 +145,13 @@ def is_excluded(rel: str) -> bool:
     if rel in SCAN_PATH_EXCLUDES:
         return True
     return any(rel == prefix.rstrip("/") or rel.startswith(prefix) for prefix in SCAN_PREFIX_EXCLUDES)
+
+
+def is_withdrawn_surface(rel: str) -> bool:
+    if rel == WITHDRAWN_HARNESS:
+        return True
+    prefix = WITHDRAWN_EXPERIMENT_PREFIX
+    return rel == prefix.rstrip("/") or rel.startswith(prefix)
 
 
 def compiled_pattern(pat: str) -> re.Pattern[str]:
@@ -225,14 +230,14 @@ def scan_withdrawn_labels(root: Path, files: Iterable[Path]) -> list[str]:
     findings: list[str] = []
     for path in files:
         rel = rel_posix(path, root)
-        if rel not in WITHDRAWN_SURFACES:
+        if not is_withdrawn_surface(rel):
             continue
         text = read_text(path)
         if text is None:
             continue
         for line_no, line in enumerate(text.splitlines(), start=1):
-            for label in WITHDRAWN_METRIC_LABELS:
-                if label in line:
+            for label, cre in zip(WITHDRAWN_METRIC_LABELS, WITHDRAWN_LABEL_RES, strict=True):
+                if cre.search(line):
                     findings.append(
                         f"{rel}:{line_no}: withdrawn metric label {label!r}: {line.strip()}"
                     )
