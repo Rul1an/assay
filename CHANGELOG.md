@@ -29,9 +29,9 @@ pinning without changing the CLI or evidence wire schemas.
 - Current docs and agent context define `run_root` as SHA-256 over its canonical tuple. Rekor/RFC
   6962 inclusion proofs remain identified separately, and a scoped vocabulary guard prevents
   conflating the two (#2222, #2357).
-- CI uses shared Rust setup and centrally pinned Cargo plugins across the required, perf,
-  fuzz, runner and kernel lanes. The change reduces duplicated setup while preserving the three
-  required contexts and fail-closed security gates (#2224, #2287-#2335).
+- CI uses shared Rust setup across the required, perf, fuzz, runner and kernel lanes, with centrally
+  pinned Cargo plugins in the required and split-wave lanes. The change reduces duplicated setup
+  while preserving the three required contexts and fail-closed security gates (#2224, #2287-#2335).
 - Current packaging docs distinguish the project-scoped Claude Code/Cursor MCP manifests from the
   equivalent Codex TOML recipe; no Codex JSON manifest or additional distribution artifact is
   claimed (#2351).
