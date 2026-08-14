@@ -50,8 +50,8 @@ ALLOWED_MERKLE_USES = {
         r"def merkle_root",
         r"SHA-256 Merkle root",
     ),
-    "scripts/experiments/aee_spike_check.py": (r"merkle_root\(",),
-    "scripts/experiments/aee_spike_emit.py": (r"merkle_root\(",),
+    "scripts/experiments/aee_spike_check.py": (r"merkle_root\(", r"merkle_root,"),
+    "scripts/experiments/aee_spike_emit.py": (r"merkle_root\(", r"merkle_root,"),
     # Genuine Rekor / RFC 6962 (current text, not the vacuous draft patterns).
     "crates/assay-registry/src/rekor.rs": (r"Merkle inclusion", r"rfc6962_root"),
     "crates/assay-registry/src/rekor/checkpoint.rs": (r"RFC 6962",),
@@ -69,11 +69,16 @@ ALLOWED_MERKLE_USES = {
 }
 ```
 
-After the checker exists, add path-bound patterns that match **the checker's own source** and the mutation test (constructed so they do not spell an affirmative `run_root is a Merkle root` on one line). After demo path-stable corrections, allowlist the remaining filename strings `merkle-chain.tape` and `merkle-chain.mp4` only.
+`ALLOWED_MERKLE_USES` is only for genuine Merkle constructions, generated identifiers, and explicit negative spec/test assertions. Do not list historical false phrases, demo filenames, or `verify_side_effects.rs`.
 
-Remaining debt, not a genuine construction: `verify_side_effects.rs` currently contains `manifest hashes + Merkle root`. Carry that exact phrase as a path-bound exception until the Claude follow-up lands. Do not treat it as reviewed product truth.
+Exclude exactly these two guard-implementation paths from the outward-claim scan (they must spell Merkle to state the rule; listing those self-hits is allowlist sprawl). Do **not** exclude `scripts/ci/` as a directory — a sibling product file under that directory must still fail:
 
-Exclude `docs/superpowers/plans/` from the outward-claim scan; this file is a non-normative implementation record.
+- `scripts/ci/check-evidence-vocabulary.py`
+- `scripts/ci/test-evidence-vocabulary.sh`
+
+Also exclude `docs/superpowers/plans/` as a non-normative implementation-record prefix.
+
+Keep the live checker RED on Claude-owned `verify_side_effects.rs` until #2354 lands. Do not add an allowlist or `TEMPORARY_DEBT` exception for that false phrase. Wire the live-tree pre-commit hook only in the final integration commit.
 
 Public replacement phrase where a current claim is rewritten:
 

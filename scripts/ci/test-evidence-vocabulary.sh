@@ -144,7 +144,9 @@ echo "ok: binary-input"
 
 python3 - "$CHECKER" "$ROOT" <<'PY'
 import importlib.util
+import io
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 
 checker, root = Path(sys.argv[1]), Path(sys.argv[2])
@@ -161,7 +163,83 @@ stale = module.allowlist_staleness(root, allow)
 if stale:
     print("\n".join(stale), file=sys.stderr)
     raise SystemExit("FAIL: production allowlist has vacuous or missing entries")
+
+guard_paths = (
+    "scripts/ci/check-evidence-vocabulary.py",
+    "scripts/ci/test-evidence-vocabulary.sh",
+)
+if getattr(module, "SCAN_PATH_EXCLUDES", None) != guard_paths:
+    raise SystemExit(
+        f"FAIL: SCAN_PATH_EXCLUDES must be exactly {guard_paths}, "
+        f"got {getattr(module, 'SCAN_PATH_EXCLUDES', None)!r}"
+    )
+prefixes = getattr(module, "SCAN_PREFIX_EXCLUDES", ())
+if any(prefix == "scripts/ci/" or prefix.startswith("scripts/ci/") for prefix in prefixes):
+    raise SystemExit("FAIL: scripts/ci/ must not be a directory-wide scan exclude")
+for rel in allow:
+    if rel in guard_paths:
+        raise SystemExit(f"FAIL: guard path {rel} must not be in ALLOWED_MERKLE_USES")
+    if "verify_side_effects.rs" in rel:
+        raise SystemExit(
+            "FAIL: verify_side_effects.rs must not have an allowlist or TEMPORARY_DEBT exception"
+        )
+if getattr(module, "TEMPORARY_DEBT", None):
+    raise SystemExit("FAIL: TEMPORARY_DEBT must be empty; reserved file stays a live finding")
+
 print("ok: imported ALLOWED_MERKLE_USES is non-vacuous on this tree")
+print("ok: scan excludes only the two guard paths")
+
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, allow)
+out = buf.getvalue()
+if rc == 0:
+    raise SystemExit("FAIL: live checker must stay RED while verify_side_effects is uncorrected")
+if "verify_side_effects.rs" not in out:
+    raise SystemExit(
+        "FAIL: live checker RED for some other reason; reserved file was not reported:\n"
+        + out
+    )
+print("ok: live checker RED on reserved verify_side_effects.rs")
+PY
+
+# Sibling under scripts/ci/ is still an outward claim. The two guard paths are not.
+SIBLING="$TMP/sibling"
+init_fixture "$SIBLING"
+mkdir -p "$SIBLING/scripts/ci"
+printf '%s\n' 'Merkle inclusion' > "$SIBLING/scripts/ci/check-evidence-vocabulary.py"
+printf '%s\n' 'Merkle inclusion' > "$SIBLING/scripts/ci/test-evidence-vocabulary.sh"
+printf '%s\n' 'Merkle root in a sibling product file' > "$SIBLING/scripts/ci/sibling-product.md"
+git -C "$SIBLING" add -A -- scripts/ci/check-evidence-vocabulary.py \
+  scripts/ci/test-evidence-vocabulary.sh scripts/ci/sibling-product.md
+python3 - "$CHECKER" "$SIBLING" <<'PY'
+import importlib.util
+import io
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root = Path(sys.argv[1]), Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+rekor = {
+    "crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES[
+        "crates/assay-registry/src/rekor.rs"
+    ]
+}
+buf = io.StringIO()
+with redirect_stdout(buf):
+    rc = module.check_tree(root, rekor)
+out = buf.getvalue()
+if rc == 0:
+    raise SystemExit("FAIL: sibling product file under scripts/ci/ was not flagged")
+if "sibling-product.md" not in out:
+    raise SystemExit("FAIL: expected sibling-product.md finding, got:\n" + out)
+if "check-evidence-vocabulary.py" in out or "test-evidence-vocabulary.sh" in out:
+    raise SystemExit("FAIL: guard implementation paths were scanned:\n" + out)
+print("ok: sibling product file still fails; only exact guard paths are excluded")
 PY
 
 echo "ok: evidence-vocabulary mutations"

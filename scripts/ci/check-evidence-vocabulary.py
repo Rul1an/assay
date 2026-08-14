@@ -18,10 +18,21 @@ from typing import Iterable, Mapping, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# Non-normative implementation records. Not outward product claims.
 SCAN_PREFIX_EXCLUDES = ("docs/superpowers/plans/",)
 
-# Measured on origin/main at b34bc2f8ef5d97d2ec3d4988852cba90ff9b396f.
-# Each pattern has ≥1 current hit. Do not restore the vacuous draft pairs.
+# The guard necessarily spells Merkle while defining the rule. Listing those
+# self-hits in ALLOWED_MERKLE_USES is allowlist sprawl. Exclude only these two
+# implementation paths — never scripts/ci/ as a directory.
+SCAN_PATH_EXCLUDES = (
+    "scripts/ci/check-evidence-vocabulary.py",
+    "scripts/ci/test-evidence-vocabulary.sh",
+)
+
+# Genuine constructions, generated identifiers, and explicit negative
+# spec/test assertions only. Measured on origin/main at
+# b34bc2f8ef5d97d2ec3d4988852cba90ff9b396f; each pattern has ≥1 hit.
+# Do not restore the vacuous draft pairs. Do not list verify_side_effects.rs.
 ALLOWED_MERKLE_USES: dict[str, tuple[str, ...]] = {
     "docs/architecture/SPEC-Outward-Product-Truth-v1.md": (
         r"not a Merkle root",
@@ -40,8 +51,8 @@ ALLOWED_MERKLE_USES: dict[str, tuple[str, ...]] = {
         r"def merkle_root",
         r"SHA-256 Merkle root",
     ),
-    "scripts/experiments/aee_spike_check.py": (r"merkle_root\(",),
-    "scripts/experiments/aee_spike_emit.py": (r"merkle_root\(",),
+    "scripts/experiments/aee_spike_check.py": (r"merkle_root\(", r"merkle_root,"),
+    "scripts/experiments/aee_spike_emit.py": (r"merkle_root\(", r"merkle_root,"),
     "crates/assay-registry/src/rekor.rs": (r"Merkle inclusion", r"rfc6962_root"),
     "crates/assay-registry/src/rekor/checkpoint.rs": (r"RFC 6962",),
     "docs/architecture/ADR-012-Transparency-Log.md": (r"Merkle tree", r"Merkle proof"),
@@ -54,53 +65,12 @@ ALLOWED_MERKLE_USES: dict[str, tuple[str, ...]] = {
         r"Native Merkle tree verification",
         r"Custom Merkle Chain on PostgreSQL",
     ),
-    # Remaining debt: Claude-owned follow-up for merged #2352. Exact current phrase.
-    "crates/assay-cli/src/cli/commands/evidence/verify_side_effects.rs": (
-        r"manifest hashes \+ Merkle root",
-    ),
-    # Checker / mutation-test self-text. Patterns match this source, not product claims.
-    "scripts/ci/check-evidence-vocabulary.py": (
-        r"as-Merkle",
-        r"scanned merkle occurrence",
-        r"ALLOWED_MERKLE_USES",
-        r"not a Merkle root",
-        r"Merkle inclusion",
-        r"Genuine Merkle references",
-        r"real Merkle construction",
-        r"word `Merkle`",
-        r"false Merkle claim",
-        r"Merkle claims",
-        r"genuine Merkle constructions",
-        r"merkle_tree_",
-        r"RFC6962-style Merkle",
-        r"merkle_root",
-        r"Merkle root",
-        r"Merkle tree",
-        r"Merkle proof",
-        r"Merkle structure",
-        r'"Merkle"',
-        r"Merkle Chain",
-        r"unapproved Merkle",
-        r"MERKLE_RE",
-        r"a merkle root",
-        r"false-run-root-merkle",
-        r"genuine-rekor-merkle",
-        r"printf 'Merkle",
-    ),
-    "scripts/ci/test-evidence-vocabulary.sh": (
-        r"ALLOWED_MERKLE_USES",
-        r"_FALSE_SUFFIX",
-        r"false-run-root-merkle",
-        r"genuine-rekor-merkle",
-        r"Merkle root",
-        r"Merkle inclusion",
-        r"printf 'Merkle",
-    ),
 }
 
+TEMPORARY_DEBT: tuple[str, ...] = ()
+
 FALSE_CLAIM_RE = re.compile(
-    r"run_root\s+is\s+a\s+merkle\s+root"  # affirmative run_root-as-Merkle
-    r"|run_root[`\s,)]*,\s*a\s+merkle\s+root",  # comma-form run_root-as-Merkle
+    r"run_root\s+is\s+a\s+merkle\s+root",  # affirmative run_root-as-Merkle
     re.IGNORECASE,
 )
 MERKLE_RE = re.compile(r"merkle", re.IGNORECASE)
@@ -131,6 +101,8 @@ def rel_posix(path: Path, root: Path) -> str:
 
 
 def is_excluded(rel: str) -> bool:
+    if rel in SCAN_PATH_EXCLUDES:
+        return True
     return any(rel == prefix.rstrip("/") or rel.startswith(prefix) for prefix in SCAN_PREFIX_EXCLUDES)
 
 
@@ -198,6 +170,12 @@ def check_tree(
     root: Path, allowlist: Mapping[str, Sequence[str]] | None = None
 ) -> int:
     rules = ALLOWED_MERKLE_USES if allowlist is None else allowlist
+    if TEMPORARY_DEBT:
+        print("evidence-vocabulary=failed")
+        print("TEMPORARY_DEBT is non-empty; reserved false claims are not green")
+        for item in TEMPORARY_DEBT:
+            print(item)
+        return 1
     stale = allowlist_staleness(root, rules)
     findings = scan_findings(root, git_files(root), rules)
     if stale or findings:
