@@ -24,7 +24,7 @@ readme.workspace = true
 publish = true
 
 [dependencies]
-assay-evidence = { path = "../assay-evidence", version = "5.1.0" }
+assay-evidence = { path = "../assay-evidence", version = "5.2.0" }
 serde = { workspace = true, features = ["derive", "std"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true }
