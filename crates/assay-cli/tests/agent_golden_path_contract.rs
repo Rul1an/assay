@@ -313,37 +313,66 @@ fn doctor_json_failure_publishes_the_registered_reason_and_next_step() {
     );
 
     let missing = dir.path().join("missing.yaml");
-    let expected_failure = expected_outcome("preflight", "invalid-config");
-    let failure = assay_contract(
+    let expected_missing = expected_outcome("preflight", "missing-config");
+    let missing_run = assay_contract(
         dir.path(),
-        &expected_failure,
+        &expected_missing,
         &[("<config>", missing.to_str().expect("UTF-8 path"))],
     );
-    assert_exit(&failure, &expected_failure, "doctor failure");
-    let failure_json = stdout_json(&failure, &expected_failure, "doctor failure");
+    assert_exit(&missing_run, &expected_missing, "doctor missing-config");
+    let missing_json = stdout_json(&missing_run, &expected_missing, "doctor missing-config");
     assert_eq!(
-        failure_json["config_error"]["code"],
-        expected_failure["config_error_code"]
+        missing_json["config_error"]["code"],
+        expected_missing["config_error_code"]
     );
     // Read the contract side as a string rather than comparing two Values. Comparing Values lets a
     // coordinated regression pass: if the generator drops the field back to null and the binary
     // stops emitting it, `Null == Null` holds and the assertion is satisfied by two absences.
-    let expected_reason = expected_failure["reason_code"]
+    let expected_missing_reason = expected_missing["reason_code"]
         .as_str()
         .expect("contract reason_code string");
     assert_eq!(
-        failure_json["reason_code"], expected_reason,
-        "doctor config failure reason must match the generated contract"
+        missing_json["reason_code"], expected_missing_reason,
+        "a proven-absent explicit config must match the generated contract"
     );
-    let expected_next = expected_failure["next_step"]
-        .as_str()
-        .expect("contract next_step string")
-        .replace("<config>", missing.to_str().expect("UTF-8 path"));
-    assert_eq!(failure_json["next_step"], expected_next);
+    assert_eq!(
+        missing_json["next_step"],
+        expected_missing["next_step"]
+            .as_str()
+            .expect("contract next_step string"),
+        "absent-config recovery is assay init, not a doctor self-loop"
+    );
     assert!(
-        expected_failure["gap_issue"].is_null(),
+        expected_missing["gap_issue"].is_null(),
         "the doctor diagnosis gap is closed and must no longer carry an owning issue"
     );
+
+    let malformed = dir.path().join("bad.yaml");
+    std::fs::write(&malformed, "version: [\n").expect("wrote malformed config");
+    let expected_invalid = expected_outcome("preflight", "invalid-config");
+    let invalid = assay_contract(
+        dir.path(),
+        &expected_invalid,
+        &[("<config>", malformed.to_str().expect("UTF-8 path"))],
+    );
+    assert_exit(&invalid, &expected_invalid, "doctor invalid-config");
+    let invalid_json = stdout_json(&invalid, &expected_invalid, "doctor invalid-config");
+    assert_eq!(
+        invalid_json["config_error"]["code"],
+        expected_invalid["config_error_code"]
+    );
+    let expected_invalid_reason = expected_invalid["reason_code"]
+        .as_str()
+        .expect("contract reason_code string");
+    assert_eq!(
+        invalid_json["reason_code"], expected_invalid_reason,
+        "a present malformed config must stay E_CFG_PARSE"
+    );
+    let expected_invalid_next = expected_invalid["next_step"]
+        .as_str()
+        .expect("contract next_step string")
+        .replace("<config>", malformed.to_str().expect("UTF-8 path"));
+    assert_eq!(invalid_json["next_step"], expected_invalid_next);
 }
 
 #[test]
