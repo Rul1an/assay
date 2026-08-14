@@ -437,6 +437,13 @@ repos:
         # binaries on PATH, so it costs no network and no install.
         files: ^(scripts/ci/(install-cargo-deny|test-install-cargo-deny)\.sh|\.pre-commit-config\.yaml)$
 
+      - id: install-version-normalization-self-test
+        name: installer version normalization contract
+        entry: bash scripts/ci/test-install-version-normalization.sh
+        language: system
+        pass_filenames: false
+        files: ^(scripts/install\.sh|scripts/ci/test-install-version-normalization\.sh|\.pre-commit-config\.yaml)$
+
       - id: deps-security-toolchain-contract-self-test
         name: deps-security toolchain contract
         entry: bash scripts/ci/test-deps-security-toolchain-contract.sh
