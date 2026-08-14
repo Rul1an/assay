@@ -122,6 +122,30 @@ fn synthetic_log2_hash_count(n: u64) -> u32 {
     }
 }
 
+fn cost_row(
+    events: usize,
+    verify_ms: f64,
+    verify_reps: usize,
+    compressed_bytes: u64,
+    events_bytes: u64,
+) -> Value {
+    let gzip_ratio = if events_bytes > 0 {
+        compressed_bytes as f64 / events_bytes as f64
+    } else {
+        0.0
+    };
+    json!({
+        "events": events,
+        "verify_ms_median": verify_ms,
+        "verify_reps": verify_reps,
+        "compressed_bytes": compressed_bytes,
+        "events_bytes": events_bytes,
+        "bytes_per_event_compressed": compressed_bytes as f64 / events as f64,
+        "gzip_ratio": gzip_ratio,
+        "synthetic_log2_hash_count": synthetic_log2_hash_count(events as u64),
+    })
+}
+
 /// Ordinary least squares for verify_ms ~ a + b*events.
 fn linear_fit(points: &[(f64, f64)]) -> (f64, f64, f64) {
     let n = points.len() as f64;
@@ -240,10 +264,7 @@ fn e3_out_dir_emits_synthetic_log2_not_withdrawn_label() {
     let tmp = tempfile::tempdir().expect("tempdir");
     std::env::set_var("E3_OUT_DIR", tmp.path());
     let out = requested_e3_out_dir().expect("E3_OUT_DIR must be set for this producer path");
-    let rows = vec![json!({
-        "events": 2,
-        "synthetic_log2_hash_count": synthetic_log2_hash_count(2),
-    })];
+    let rows = vec![cost_row(2, 0.0, 1, 0, 0)];
     let cost = cost_artifact_document("test", 256, rows, (0.0, 0.0, 1.0), (0.0, 0.0));
     write_cost_json(&out, &cost);
     let parsed: Value = serde_json::from_str(
@@ -310,21 +331,7 @@ fn e3_verify_cost_curve() {
             .unwrap_or(0);
         let verify_ms = time_verify_ms(&bundle, &limits, reps);
         let compressed = bundle.len() as u64;
-        let gzip_ratio = if events_bytes > 0 {
-            compressed as f64 / events_bytes as f64
-        } else {
-            0.0
-        };
-        rows.push(json!({
-            "events": events,
-            "verify_ms_median": verify_ms,
-            "verify_reps": reps,
-            "compressed_bytes": compressed,
-            "events_bytes": events_bytes,
-            "bytes_per_event_compressed": compressed as f64 / events as f64,
-            "gzip_ratio": gzip_ratio,
-            "synthetic_log2_hash_count": synthetic_log2_hash_count(events as u64),
-        }));
+        rows.push(cost_row(events, verify_ms, reps, compressed, events_bytes));
         fit_points.push((events as f64, verify_ms));
     }
 

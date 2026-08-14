@@ -269,71 +269,8 @@ def is_textual_scan_surface(rel: str) -> bool:
     return any(lower.endswith(suffix) for suffix in TEXTUAL_SCAN_SUFFIXES)
 
 
-def _mkdocs_pattern_to_repo_path(pat: str) -> str:
-    item = pat.strip()
-    if item.startswith("/"):
-        item = item[1:]
-    if item.endswith("**"):
-        item = item[:-2]
-    if not item.startswith("docs/"):
-        item = f"docs/{item}"
-    return item
-
-
-def publication_exclude_repo_paths(mkdocs_text: str) -> tuple[str, ...]:
-    """Map mkdocs exclude_docs (docs/-relative) to repo-relative paths."""
-    patterns: list[str] = []
-    lines = mkdocs_text.splitlines()
-    idx = 0
-    while idx < len(lines):
-        raw = lines[idx]
-        if raw.startswith("exclude_docs:"):
-            rest = raw.split(":", 1)[1].strip()
-            if rest in {"|", ">", "|-", ">-", "|+", ">+"}:
-                idx += 1
-                while idx < len(lines):
-                    nxt = lines[idx]
-                    if nxt.startswith((" ", "\t")):
-                        item = nxt.strip().split("#", 1)[0].strip()
-                        if item:
-                            patterns.append(item)
-                        idx += 1
-                        continue
-                    if nxt.strip() == "":
-                        idx += 1
-                        continue
-                    break
-                continue
-            if rest:
-                patterns.append(rest.split("#", 1)[0].strip())
-        idx += 1
-    return tuple(_mkdocs_pattern_to_repo_path(pat) for pat in patterns if pat)
-
-
-def load_publication_excludes(root: Path) -> tuple[str, ...]:
-    mkdocs = root / "mkdocs.yml"
-    if not mkdocs.is_file():
-        return ()
-    text = read_text(mkdocs)
-    if text is None:
-        return ()
-    return publication_exclude_repo_paths(text)
-
-
-def is_publication_excluded(rel: str, publication_paths: Sequence[str]) -> bool:
-    for pat in publication_paths:
-        if pat.endswith("/"):
-            if rel == pat.rstrip("/") or rel.startswith(pat):
-                return True
-        elif rel == pat:
-            return True
-    return False
-
-
-def is_excluded(rel: str, publication_paths: Sequence[str] = ()) -> bool:
-    if rel in SCAN_PATH_EXCLUDES:
-        return True
-    return is_publication_excluded(rel, publication_paths)
+def is_excluded(rel: str) -> bool:
+    return rel in SCAN_PATH_EXCLUDES
 
 
 def is_withdrawn_surface(rel: str) -> bool:
@@ -493,14 +430,13 @@ def scan_findings(
     files: Iterable[Path],
     allowlist: Mapping[str, Sequence[str]],
     identifiers: Mapping[str, Sequence[str]],
-    publication_paths: Sequence[str] = (),
 ) -> list[str]:
     compiled = {rel: compiled_patterns(pats) for rel, pats in allowlist.items()}
     compiled_ids = {rel: compiled_patterns(pats) for rel, pats in identifiers.items()}
     findings: list[str] = []
     for path in files:
         rel = rel_posix(path, root)
-        if is_excluded(rel, publication_paths):
+        if is_excluded(rel):
             continue
         text = read_text(path)
         if text is None:
@@ -538,13 +474,11 @@ def scan_findings(
     return findings
 
 
-def scan_withdrawn_labels(
-    root: Path, files: Iterable[Path], publication_paths: Sequence[str] = ()
-) -> list[str]:
+def scan_withdrawn_labels(root: Path, files: Iterable[Path]) -> list[str]:
     findings: list[str] = []
     for path in files:
         rel = rel_posix(path, root)
-        if is_excluded(rel, publication_paths) or not is_withdrawn_surface(rel):
+        if is_excluded(rel) or not is_withdrawn_surface(rel):
             continue
         text = read_text(path)
         if text is None:
@@ -571,7 +505,6 @@ def check_tree(
 ) -> int:
     rules = ALLOWED_MERKLE_USES if allowlist is None else allowlist
     idents = LEGACY_IDENTIFIERS if identifiers is None else identifiers
-    publication_paths = load_publication_excludes(root)
     stale = (
         allowlist_staleness(root, rules)
         + allowlist_staleness(root, idents)
@@ -582,8 +515,8 @@ def check_tree(
         print("evidence-vocabulary=failed")
         print("tracked set is empty; refuse to pass")
         return 1
-    findings = scan_findings(root, tracked, rules, idents, publication_paths)
-    withdrawn = scan_withdrawn_labels(root, tracked, publication_paths)
+    findings = scan_findings(root, tracked, rules, idents)
+    withdrawn = scan_withdrawn_labels(root, tracked)
     if stale or findings or withdrawn:
         print("evidence-vocabulary=failed")
         for message in stale + findings + withdrawn:

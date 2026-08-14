@@ -540,12 +540,16 @@ if rc == 0 or "merkle_tree_probe" not in out:
 print("ok: vmlinux-piggyback")
 PY
 
-# Plans are scanned unless mkdocs publication-excludes them.
-PLANS="$TMP/plans-published"
+# Plans remain scanned even when MkDocs excludes them from publication.
+PLANS="$TMP/plans-publication-excluded"
 init_fixture "$PLANS"
 mkdir -p "$PLANS/docs/superpowers/plans"
+cat > "$PLANS/mkdocs.yml" <<'YAML'
+exclude_docs: |
+  /superpowers/plans/
+YAML
 printf '%s\n' "$FALSE_INJECT" > "$PLANS/docs/superpowers/plans/sneak.md"
-git -C "$PLANS" add -A -- docs/superpowers/plans/sneak.md
+git -C "$PLANS" add -A -- mkdocs.yml docs/superpowers/plans/sneak.md
 python3 - "$CHECKER" "$PLANS" <<'PY'
 import importlib.util
 import io
@@ -570,8 +574,8 @@ with redirect_stdout(buf):
     rc = module.check_tree(root, rekor, identifiers={})
 out = buf.getvalue()
 if rc == 0 or "sneak.md" not in out:
-    raise SystemExit("FAIL: unpublished-mkdocs plan with a false claim must fail:\n" + out)
-print("ok: plans-scanned-without-publication-exclude")
+    raise SystemExit("FAIL: publication-excluded plan with a false claim must fail:\n" + out)
+print("ok: plans-scanned-despite-publication-exclude")
 PY
 
 # Corrected-history: original line without adjacent correction fails;
@@ -750,17 +754,10 @@ if getattr(module, "SCAN_PATH_EXCLUDES", None) != guard_paths:
     )
 if getattr(module, "SCAN_PREFIX_EXCLUDES", None):
     raise SystemExit("FAIL: SCAN_PREFIX_EXCLUDES must not exist as a prefix escape hatch")
-if "docs/superpowers/plans/" not in "\n".join(module.load_publication_excludes(root)):
-    raise SystemExit("FAIL: mkdocs publication excludes must include /superpowers/plans/")
-if not module.is_publication_excluded(
-    "docs/superpowers/plans/example.md", module.load_publication_excludes(root)
-):
-    raise SystemExit("FAIL: plans must be publication-excluded on this tree")
-if module.is_publication_excluded(
-    "docs/architecture/ADR-007-Deterministic-Provenance.md",
-    module.load_publication_excludes(root),
-):
-    raise SystemExit("FAIL: accepted ADRs must remain in the scan")
+if module.is_excluded("docs/superpowers/plans/example.md"):
+    raise SystemExit("FAIL: publication status must not exclude repository-visible plans")
+if not module.is_excluded("scripts/ci/check-evidence-vocabulary.py"):
+    raise SystemExit("FAIL: checker self-text must remain an exact path exclusion")
 history = getattr(module, "CORRECTED_HISTORY", None)
 if not isinstance(history, dict) or not history:
     raise SystemExit("FAIL: CORRECTED_HISTORY must be a non-empty path-bound dict")
