@@ -8,6 +8,8 @@
 //! - omitted positional `--`
 //! - `--` placed after the operand
 //! - omitted init `--format json`
+//! - preset/non-hello init dropping the generated `--config`
+//! - from-trace recovery publishing generator-event JSONL as `--trace-file`
 //! - formatter changed to a shell join
 //! - a publisher or reason variant silently dropped from the table
 
@@ -36,6 +38,7 @@ enum Publisher {
     PolicyParse,
     EvidenceUnreadable,
     InitHelloTrace,
+    InitPreset,
     InitFromTrace,
 }
 
@@ -44,11 +47,23 @@ const PUBLISHERS: &[Publisher] = &[
     Publisher::PolicyParse,
     Publisher::EvidenceUnreadable,
     Publisher::InitHelloTrace,
+    Publisher::InitPreset,
     Publisher::InitFromTrace,
 ];
 
-/// Values beginning with `-` (except bare `-`) discriminate split from fused binding.
-const HOSTILE_VALUES: &[&str] = &["-x", "--format", "--"];
+/// Measured classes from #2371: dash-prefixed option lookalikes, spaces, quotes,
+/// newline, BEL, and shell metacharacters. `--` stays because it is both a
+/// separator and a legal operand.
+const HOSTILE_VALUES: &[&str] = &[
+    "-x",
+    "--format",
+    "--",
+    "file with spaces.yaml",
+    "file\"quote.yaml",
+    "file\nname.yaml",
+    "file\u{0007}.yaml",
+    "file;$(touch x).yaml",
+];
 
 fn assay<T: AsRef<OsStr>>(cwd: &Path, args: &[T], context: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_assay"));
@@ -131,11 +146,10 @@ fn expected_argv(publisher: Publisher, value: &str) -> Vec<String> {
             "--format".into(),
             "json".into(),
         ],
-        Publisher::InitFromTrace => vec![
+        Publisher::InitPreset | Publisher::InitFromTrace => vec![
             "assay".into(),
             "validate".into(),
             format!("--config={value}"),
-            format!("--trace-file={FROM_TRACE}"),
             "--format".into(),
             "json".into(),
         ],
@@ -196,6 +210,22 @@ fn publish(dir: &Path, publisher: Publisher, value: &str) -> Value {
             assert_eq!(output.status.code(), Some(0), "init-hello {value}");
             json_document(&output, &format!("init-hello {value}"))
         }
+        Publisher::InitPreset => {
+            let output = assay(
+                dir,
+                &[
+                    "init",
+                    "--preset",
+                    "dev",
+                    "--format",
+                    "json",
+                    &format!("--config={value}"),
+                ],
+                &format!("init-preset {value}"),
+            );
+            assert_eq!(output.status.code(), Some(0), "init-preset {value}");
+            json_document(&output, &format!("init-preset {value}"))
+        }
         Publisher::InitFromTrace => {
             std::fs::write(dir.join(FROM_TRACE), FROM_TRACE_EVENTS).expect("write from-trace");
             let output = assay(
@@ -231,10 +261,24 @@ fn assert_intended_outcome(publisher: Publisher, recovered: &Output, context: &s
                 "{context}"
             );
         }
-        Publisher::InitHelloTrace | Publisher::InitFromTrace => {
+        Publisher::InitHelloTrace | Publisher::InitPreset | Publisher::InitFromTrace => {
+            assert_eq!(
+                recovered.status.code(),
+                Some(0),
+                "{context}: init recovery must exit 0; stderr:\n{}",
+                String::from_utf8_lossy(&recovered.stderr)
+            );
             assert_eq!(
                 document["schema"], "assay.validate_report.v1",
                 "{context}: init recovery must reach validate JSON, not clap usage"
+            );
+            assert_eq!(
+                document["ok"], true,
+                "{context}: init recovery must succeed (ok:true), not a failed validate report"
+            );
+            assert_eq!(
+                document["exit_code"], 0,
+                "{context}: init recovery must publish exit_code 0"
             );
         }
     }
@@ -257,19 +301,33 @@ fn drive_publisher(publisher: Publisher, value: &str) {
     assert_intended_outcome(publisher, &recovered, &format!("execute {context}"));
 }
 
+/// Scope: `init.rs` succeed call sites and the `InitReport::succeed` signature.
+/// A raw argv slice at either site is unclassified. Reason-code publishers stay
+/// in `exit_codes::tests::every_reason_that_publishes_argv_is_a_known_executable_recovery`.
 #[test]
-fn every_executable_recovery_publisher_is_driven() {
-    assert_eq!(
-        PUBLISHERS,
-        &[
-            Publisher::CfgParse,
-            Publisher::PolicyParse,
-            Publisher::EvidenceUnreadable,
-            Publisher::InitHelloTrace,
-            Publisher::InitFromTrace,
-        ],
-        "dropping a publisher is the skipped-variant mutation"
+fn every_init_succeed_site_uses_the_classified_enum() {
+    let init = include_str!("../src/cli/commands/init.rs");
+    let report = include_str!("../src/cli/commands/init_report.rs");
+    assert!(
+        report.contains("fn succeed(self, next: &InitSuccess,"),
+        "InitReport::succeed must take InitSuccess so a raw argv cannot be published"
     );
+    let calls: Vec<(usize, &str)> = init
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.contains(".succeed("))
+        .map(|(idx, line)| (idx + 1, line.trim()))
+        .collect();
+    assert!(
+        !calls.is_empty(),
+        "init.rs must keep its succeed sites; an empty scan is not a clean inventory"
+    );
+    for (line_no, call) in &calls {
+        assert!(
+            !call.contains("succeed(&["),
+            "unclassified init.rs succeed on line {line_no} publishes a raw argv slice: {call}"
+        );
+    }
 }
 
 #[test]
@@ -278,8 +336,10 @@ fn dash_prefixed_evidence_positional_recovery_reaches_unreadable() {
 }
 
 #[test]
-fn both_init_success_publishers_recover_dash_prefixed_config_as_json() {
+fn init_success_publishers_bind_generated_config_and_json() {
     drive_publisher(Publisher::InitHelloTrace, "-weird.yaml");
+    drive_publisher(Publisher::InitPreset, "-weird.yaml");
+    drive_publisher(Publisher::InitPreset, "custom.yaml");
     drive_publisher(Publisher::InitFromTrace, "-weird.yaml");
 }
 

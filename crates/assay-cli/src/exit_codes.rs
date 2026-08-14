@@ -160,6 +160,26 @@ pub(crate) fn positional_operand<'a>(prefix: &'a [&'a str], operand: &'a str) ->
     argv
 }
 
+/// Bind a successful `init` recovery that validates the generated config.
+///
+/// Path-bearing flags are fused. `--format json` is always present so a consumer
+/// that followed a JSON init report receives a JSON validate report. A replay
+/// `--trace-file` is included only when that file is a runtime replay trace;
+/// generator-event JSONL is not one.
+pub(crate) fn validate_recovery_argv(config: &str, replay_trace: Option<&str>) -> Vec<String> {
+    let mut argv = vec![
+        "assay".to_string(),
+        "validate".to_string(),
+        fused_option("--config", config),
+    ];
+    if let Some(trace) = replay_trace {
+        argv.push(fused_option("--trace-file", trace));
+    }
+    argv.push("--format".to_string());
+    argv.push("json".to_string());
+    argv
+}
+
 impl ReasonCode {
     /// Get the corresponding exit code for this reason, respecting version
     pub fn exit_code_for(&self, version: ExitCodeVersion) -> i32 {
@@ -863,9 +883,53 @@ mod tests {
 
     #[test]
     fn positional_operand_owns_separator_before_the_value() {
+        let prefix = ["assay", "evidence", "show", "--format", "json"];
+        // `--` as the operand makes correct and swapped order byte-identical.
+        let operand = "-bundle.tar.gz";
+        let argv = positional_operand(&prefix, operand);
         assert_eq!(
-            positional_operand(&["assay", "evidence", "show", "--format", "json"], "--"),
-            vec!["assay", "evidence", "show", "--format", "json", "--", "--"]
+            argv,
+            vec![
+                "assay",
+                "evidence",
+                "show",
+                "--format",
+                "json",
+                "--",
+                "-bundle.tar.gz"
+            ]
+        );
+        let mut swapped = prefix.to_vec();
+        swapped.push(operand);
+        swapped.push("--");
+        assert_ne!(
+            argv, swapped,
+            "operand `--` would make this assertion tautological"
+        );
+    }
+
+    #[test]
+    fn validate_recovery_argv_fuses_config_and_omits_generator_events() {
+        assert_eq!(
+            validate_recovery_argv("-weird.yaml", None),
+            vec![
+                "assay",
+                "validate",
+                "--config=-weird.yaml",
+                "--format",
+                "json"
+            ]
+        );
+        assert_eq!(
+            validate_recovery_argv("-weird.yaml", Some("traces/hello.jsonl")),
+            vec![
+                "assay",
+                "validate",
+                "--config=-weird.yaml",
+                "--trace-file=traces/hello.jsonl",
+                "--format",
+                "json"
+            ]
         );
     }
 

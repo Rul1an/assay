@@ -9,7 +9,29 @@
 use std::path::Path;
 
 use crate::cli::args::common::OutputFormat;
-use crate::exit_codes::{format_recovery_argv, RunOutcome};
+use crate::exit_codes::{format_recovery_argv, validate_recovery_argv, RunOutcome};
+
+/// Every successful `init` next step. `succeed` takes this type so a new site
+/// cannot publish a hand-rolled argv that the recovery harness never drives.
+pub(crate) enum InitSuccess {
+    ListPresets,
+    Validate {
+        config: String,
+        replay_trace: Option<String>,
+    },
+}
+
+impl InitSuccess {
+    fn argv(&self) -> Vec<String> {
+        match self {
+            Self::ListPresets => vec!["assay".to_string(), "init".to_string()],
+            Self::Validate {
+                config,
+                replay_trace,
+            } => validate_recovery_argv(config, replay_trace.as_deref()),
+        }
+    }
+}
 
 /// Document identity for the machine channel.
 pub(crate) const INIT_REPORT_SCHEMA: &str = "assay.init_report.v0";
@@ -83,22 +105,24 @@ impl InitReport {
     /// line `init` has always printed, and [`Self::succeed`] publishes that same argv as JSON.
     /// Callers place this line themselves, because the surrounding notes differ per entry point
     /// and their order is the output users already have.
-    pub(crate) fn next_line(&self, argv: &[&str]) -> String {
-        format!("   Next: {}", argv.join(" "))
+    pub(crate) fn next_line(&self, next: &InitSuccess) -> String {
+        format!("   Next: {}", next.argv().join(" "))
     }
 
     /// Ends a successful `init`.
     ///
     /// `human_lines` are the closing text lines in the order the text channel prints them; the
-    /// machine channel ignores them and publishes `next_argv` instead. Caller-controlled
-    /// option values are fused (`--config=path`) before they reach this function, so the
-    /// machine channel states the step as JSON argv rather than as a shell string a
-    /// consumer would have to re-split.
-    pub(crate) fn succeed(self, next_argv: &[&str], human_lines: &[String]) -> anyhow::Result<i32> {
+    /// machine channel ignores them and publishes the same argv [`InitSuccess`] built.
+    /// Caller-controlled option values are fused (`--config=path`) before they reach
+    /// this function, so the machine channel states the step as JSON argv rather
+    /// than as a shell string a consumer would have to re-split.
+    pub(crate) fn succeed(self, next: &InitSuccess, human_lines: &[String]) -> anyhow::Result<i32> {
         if self.is_json() {
             // A report that could not be rendered leaves the caller with no document, so it exits
             // through the error path rather than returning the success it cannot evidence.
-            let next_step = format_recovery_argv(next_argv);
+            let argv = next.argv();
+            let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+            let next_step = format_recovery_argv(&argv_refs);
             self.emit(&RunOutcome::success(), Some(next_step))?;
             return Ok(crate::exit_codes::OK);
         }

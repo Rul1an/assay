@@ -88,7 +88,7 @@ On failure: Policy denial is not a process failure. A missing enforcement policy
 
 ### 7. Evidence inspection
 
-Run: `assay evidence show <bundle> --format json`
+Run: `assay evidence show --format json -- <bundle>`
 
 Exit: Valid `0`; Valid with verification disabled `0`; integrity failure `2`; unreadable bundle `2`; format-contract failure `2`.
 
