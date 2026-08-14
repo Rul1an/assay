@@ -114,7 +114,9 @@ expect_fail "workspace version is not stable semver: 5.2.0-rc.1" run_check
 echo "== missing install asset fails closed =="
 write_manifest "5.2.0"
 write_pin "v5.2.0"
-write_release "v5.2.0" "unrelated.txt"
+write_release "v5.2.0" \
+  "assay-v5.2.0-x86_64-unknown-linux-gnu.tar.gz.sha256" \
+  "unrelated.txt"
 expect_fail "latest published release v5.2.0 lacks assay-v5.2.0-x86_64-unknown-linux-gnu.tar.gz" run_check --published
 
 echo "== missing checksum sidecar fails closed =="
