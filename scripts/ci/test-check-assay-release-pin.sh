@@ -106,4 +106,13 @@ EOF
 chmod +x "${fake_gh}"
 expect_fail "failed to obtain latest published release metadata for Rul1an/assay" run_api_check
 
+echo "== oversized release metadata fails before parsing =="
+python3 - "${metadata}" <<'PY'
+import sys
+from pathlib import Path
+
+Path(sys.argv[1]).write_bytes(b"x" * (1048576 + 1))
+PY
+expect_fail "latest published release metadata exceeds 1048576-byte limit" run_check --published
+
 echo "assay release pin contract: PASS"

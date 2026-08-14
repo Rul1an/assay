@@ -48,31 +48,48 @@ if [[ "${MODE}" != "--published" ]]; then
   exit 0
 fi
 
-metadata=""
+metadata_path=""
+metadata_is_temporary=false
+cleanup() {
+  if [[ "${metadata_is_temporary}" == "true" ]]; then
+    rm -f "${metadata_path}"
+  fi
+}
+trap cleanup EXIT
+
 if [[ -n "${ASSAY_RELEASE_METADATA_FILE:-}" ]]; then
   if [[ ! -f "${ASSAY_RELEASE_METADATA_FILE}" ]]; then
     echo "failed to obtain latest published release metadata: ${ASSAY_RELEASE_METADATA_FILE} is missing" >&2
     exit 1
   fi
-  metadata="$(cat "${ASSAY_RELEASE_METADATA_FILE}")"
+  metadata_path="${ASSAY_RELEASE_METADATA_FILE}"
 else
   repo="${GITHUB_REPOSITORY:-Rul1an/assay}"
   gh_bin="${ASSAY_GH_BIN:-gh}"
-  if ! metadata="$("${gh_bin}" api "repos/${repo}/releases/latest")"; then
+  metadata_path="$(mktemp)"
+  metadata_is_temporary=true
+  if ! "${gh_bin}" api "repos/${repo}/releases/latest" >"${metadata_path}"; then
     echo "failed to obtain latest published release metadata for ${repo}" >&2
     exit 1
   fi
 fi
 
-python3 - "${pin}" "${metadata}" <<'PY'
+metadata_size="$(wc -c <"${metadata_path}" | tr -d '[:space:]')"
+if [[ ! "${metadata_size}" =~ ^[0-9]+$ ]] || ((metadata_size > 1048576)); then
+  echo "latest published release metadata exceeds 1048576-byte limit" >&2
+  exit 1
+fi
+
+python3 - "${pin}" "${metadata_path}" <<'PY'
 import json
 import re
 import sys
+from pathlib import Path
 
 pin = sys.argv[1]
 try:
-    release = json.loads(sys.argv[2])
-except (json.JSONDecodeError, TypeError) as error:
+    release = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+except (OSError, UnicodeError, json.JSONDecodeError, TypeError) as error:
     raise SystemExit(f"failed to obtain latest published release metadata: {error}")
 
 latest = release.get("tag_name")
