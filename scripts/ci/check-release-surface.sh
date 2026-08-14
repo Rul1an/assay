@@ -223,6 +223,20 @@ check_contains_fixed() {
   fi
 }
 
+check_current_release_link() {
+  local file="$1" expected="$2"
+  local claim_count expected_count
+  if [ ! -f "$file" ]; then
+    fail "$file: checked outward document is missing"
+    return
+  fi
+  claim_count="$(grep -Fc 'Current release:' "$file" || true)"
+  expected_count="$(grep -Fc -- "$expected" "$file" || true)"
+  if [ "$claim_count" -ne 1 ] || [ "$expected_count" -ne 1 ]; then
+    fail "$file: current release link drift"
+  fi
+}
+
 check_contains_line() {
   local file="$1" expected="$2" label="$3"
   if [ ! -f "$file" ]; then
@@ -273,8 +287,8 @@ check_rust_cli_installs docs/AIcontext/user-flows.md 1
 check_rust_cli_installs docs/use-cases/ci-gate.md 1
 
 release_link="Current release: [\`$PUBLISHED_TAG\`](https://github.com/Rul1an/assay/releases/tag/$PUBLISHED_TAG)"
-check_contains_fixed README.md "$release_link" 'current release link drift'
-check_contains_fixed docs/index.md "$release_link" 'current release link drift'
+check_current_release_link README.md "$release_link"
+check_current_release_link docs/index.md "$release_link"
 
 for file in \
   docs/getting-started/index.md \

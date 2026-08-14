@@ -255,11 +255,25 @@ mutate_and_expect_failure stale-release-readme README.md \
   's/releases\/tag\/v5.1.0/releases\/tag\/v5.0.0/' 'current release link drift'
 mutate_and_expect_failure stale-release-doc-index docs/index.md \
   's/releases\/tag\/v5.1.0/releases\/tag\/v5.0.0/' 'current release link drift'
+
+release_backup="$TMP/README.md.duplicate-release"
+cp "$TMP/README.md" "$release_backup"
+printf '%s\n' 'Current release: [`v5.2.0`](https://github.com/Rul1an/assay/releases/tag/v5.2.0)' \
+  >> "$TMP/README.md"
+if run_check >"$TMP/duplicate-release.out" 2>&1; then
+  echo "FAIL: mutation duplicate-release was not observed" >&2
+  exit 1
+fi
+grep -Fq 'current release link drift' "$TMP/duplicate-release.out"
+mv "$release_backup" "$TMP/README.md"
+mutation_count=$((mutation_count + 1))
+echo "PASS: duplicate-release"
+
 mutate_and_expect_failure stale-cli-version docs/reference/cli/index.md \
   's/# assay 5.1.0/# assay 5.0.0/' 'documented CLI version drift'
 
-if [ "$mutation_count" -ne 38 ]; then
-  echo "FAIL: expected 38 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 39 ]; then
+  echo "FAIL: expected 39 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

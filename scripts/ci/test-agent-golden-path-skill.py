@@ -1243,6 +1243,7 @@ def main() -> None:
         '.gitignore',
         '.gitattributes',
         '.pre-commit-config.yaml',
+        '.github/assay-release-tag',
         'docs/generated/**',
         'docs/guides/agent-golden-path.md',
         '.github/workflows/kernel-matrix.yml',

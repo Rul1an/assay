@@ -13,7 +13,7 @@ trap 'rm -rf "$SCRATCH"' EXIT
 # the 58-case durability boundary established by PR B0.
 # CI-5C (#2196): +3 skill generator-destination omissions and +3 packaged-resource
 # destination drifts beyond the original baseline-only packaged drift case.
-EXPECTED_CASES=94
+EXPECTED_CASES=96
 # Parser-layer follow-ups stay outside the approved cumulative case chain. The
 # 22 probes are 4 workflow-key, 1 stages-key, 14 selector, 1 trigger-mode, and
 # 2 inline-parser checks; pin them so deletion cannot leave the cumulative total green.
@@ -944,6 +944,7 @@ expect_named_success "public vocabulary novel contract evidence allow case" "$ca
 
 for workflow_path in \
   'scripts/**' \
+  '.github/assay-release-tag' \
   '.github/workflows/kernel-matrix.yml' \
   '.claude-plugin/**' \
   'packaging/claude-plugin/**'
