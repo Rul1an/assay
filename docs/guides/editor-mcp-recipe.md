@@ -161,15 +161,18 @@ In your `AGENTS.md` / Codex MCP config, register the same wrapped command as the
 server entry. Codex uses project `.codex/config.toml` or user
 `~/.codex/config.toml`; `assay mcp config-path` does not discover Codex config.
 
-## Remote servers (provisional, MCP 2026-07-28)
+## Remote servers
 
-The MCP specification finalising on 28 July 2026 aligns remote authorization with
-OAuth 2.1 / OIDC (PKCE, scoped tokens, consent), and renders server UIs in a
-sandboxed iframe with every UI action going through the same audit and consent path
-as a direct tool call. For remote MCP servers, align the wrapped server to that
-OAuth 2.1 flow and keep scopes least-privilege. This section is provisional against
-the release candidate and will be finalised once the spec is final; the local
-stdio wrap above is stable today.
+This recipe covers local stdio servers only, because that is the transport Assay
+enforces today. `assay-mcp-server` negotiates the legacy revisions `2024-11-05` and
+`2025-11-25` over stdio; a request declaring MCP revision `2026-07-28` is refused with
+JSON-RPC error `-32022` rather than accepted, and the constant naming that revision is
+deprecated and read by no dispatch path.
+
+Assay ships no remote HTTP transport for the wrapped server, so there is nothing here
+to point an editor at for a remote endpoint. The negotiated modern surface is tracked
+in [#2358](https://github.com/Rul1an/assay/issues/2358) and is not delivered; treat any
+remote-transport guidance as design work under that issue, not as a step in this recipe.
 
 ## Honest limits
 

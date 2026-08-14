@@ -297,6 +297,15 @@ repos:
         # no `target/` build it still verifies source and published-release truth independently.
         files: ^(scripts/ci/((check|test-check)-release-surface|read-assay-release-tag)\.sh|\.github/assay-release-tag|Cargo\.toml|README\.md|docs/(index\.md|getting-started/(index|installation|quickstart|ci-integration)\.md|reference/cli/index\.md|python-sdk/index\.md|use-cases/(air-gapped|ci-gate)\.md|AIcontext/user-flows\.md|migration-v1\.2\.md|guides/editor-mcp-recipe\.md)|\.pre-commit-config\.yaml)$
 
+      - id: editor-mcp-recipe-truth
+        name: Editor MCP recipe describes only the shipped transport
+        entry: bash -c 'bash scripts/ci/test-check-editor-mcp-recipe-truth.sh && bash scripts/ci/check-editor-mcp-recipe-truth.sh'
+        language: system
+        pass_filenames: false
+        # Triggers on the recipe it judges, the guard and its self-test, and itself. The self-test
+        # runs first so a guard whose rules match nothing fails here rather than passing quietly.
+        files: ^(scripts/ci/(check|test-check)-editor-mcp-recipe-truth\.sh|docs/guides/editor-mcp-recipe\.md|\.pre-commit-config\.yaml)$
+
       - id: ci-gate-expectations-self-test
         name: CI gate expectation contract
         entry: bash scripts/ci/test-ci-gate-expectations.sh
