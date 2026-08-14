@@ -109,6 +109,11 @@ struct CallRow {
     /// for a reader, which is why this stays an `Option` here while the run-level answer does not.
     #[serde(skip_serializing_if = "Option::is_none")]
     occurrence_ceiling: Option<CodingAgentClaimCeiling>,
+    /// The full occurrence decision for this call, used by the ceiling fold. Kept alongside the
+    /// serialized `occurrence_claim` and `occurrence_ceiling` so the fold consumes the decision
+    /// directly (Blocker 3: no more `Option<Ceiling>` ambiguity).
+    #[serde(skip)]
+    occurrence_decision: CodingAgentClaimDecision,
     /// What a below-harness observer could say about the claimed egress, when one was supplied.
     #[serde(skip_serializing_if = "Option::is_none")]
     egress: Option<EgressRefutation>,
@@ -200,12 +205,12 @@ fn claim_decision_for(
 /// because it did some reading. That filter is exactly why this set can be empty and why the shared
 /// fold has to distinguish empty from blocked.
 fn weakest_occurrence_ceiling(calls: &[CallRow]) -> CodingAgentWeakestCeiling {
-    coding_agent_weakest_ceiling(
-        calls
-            .iter()
-            .filter(|c| c.asserted)
-            .map(|c| c.occurrence_ceiling),
-    )
+    let asserting_decisions: Vec<&CodingAgentClaimDecision> = calls
+        .iter()
+        .filter(|c| c.asserted)
+        .map(|c| &c.occurrence_decision)
+        .collect();
+    coding_agent_weakest_ceiling(asserting_decisions)
 }
 
 /// Load `assay.provider_audit_record.v0` files from an import directory.
@@ -287,22 +292,67 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
         None => Vec::new(),
     };
 
+    // Require at least one decision surface event. A bundle with no decision events has nothing to
+    // verify, and reporting an empty NothingClaimed would mask the fact that the bundle is not a
+    // decision-surface bundle at all.
+    let decision_events: Vec<_> = events
+        .iter()
+        .filter(|e| e.type_ == DECISION_EVENT_TYPE)
+        .collect();
+    if decision_events.is_empty() {
+        anyhow::bail!(
+            "bundle contains no {DECISION_EVENT_TYPE} events: \
+             nothing to verify (supply a bundle that carries observed tool decisions)"
+        );
+    }
+
     let mut calls = Vec::new();
     let mut promoted = 0usize;
     let mut matched_records = vec![false; records.len()];
 
-    for event in events.iter().filter(|e| e.type_ == DECISION_EVENT_TYPE) {
-        let Some(decisions) = event
+    for event in &decision_events {
+        // Require observed_tool_decisions to be an array. The previous code silently continued on
+        // missing/mistyped values, which turned a malformed bundle into an empty set and then
+        // NothingClaimed — absence masquerading as clean.
+        let decisions = event
             .payload
             .get("observed_tool_decisions")
-            .and_then(Value::as_array)
-        else {
-            continue;
-        };
+            .with_context(|| {
+                format!(
+                    "{DECISION_EVENT_TYPE} event is missing observed_tool_decisions field \
+                     (event id: {})",
+                    event.id
+                )
+            })?
+            .as_array()
+            .with_context(|| {
+                format!(
+                    "{DECISION_EVENT_TYPE} event has observed_tool_decisions that is not an array \
+                     (event id: {})",
+                    event.id
+                )
+            })?;
         for decision in decisions {
-            let asserted = decision["response"]["side_effect_asserted"]
+            // Require side_effect_asserted to be a bool. The previous code defaulted to false on
+            // missing/non-bool, which made a malformed response look like a call that asserted
+            // nothing — the exact conflation this ladder exists to prevent.
+            let asserted = decision
+                .get("response")
+                .and_then(|r| r.get("side_effect_asserted"))
+                .with_context(|| {
+                    format!(
+                        "decision for tool {:?} is missing response.side_effect_asserted",
+                        decision["tool"]["name"].as_str().unwrap_or("?")
+                    )
+                })?
                 .as_bool()
-                .unwrap_or(false);
+                .with_context(|| {
+                    format!(
+                        "decision for tool {:?} has response.side_effect_asserted \
+                         that is not a boolean",
+                        decision["tool"]["name"].as_str().unwrap_or("?")
+                    )
+                })?;
             let tool = decision["tool"]["name"].as_str().unwrap_or("?").to_string();
             let action = &decision["action"];
 
@@ -315,11 +365,23 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                 occurrence_claim: CodingAgentGateDecision::Blocked,
                 bounded_negative_claim: CodingAgentGateDecision::Blocked,
                 occurrence_ceiling: None,
+                occurrence_decision: CodingAgentClaimDecision {
+                    decision: CodingAgentGateDecision::Blocked,
+                    ceiling: None,
+                    gap: None,
+                    rule: String::new(),
+                },
                 egress: None,
             };
 
             if asserted {
+                // One-to-one allocation: skip records already matched to a prior call. Two
+                // otherwise identical asserting calls each need their own audit record; letting
+                // one record vouch for both would overcount corroboration.
                 for (i, record) in records.iter().enumerate() {
+                    if matched_records[i] {
+                        continue;
+                    }
                     let binding = check_audit_record(record, action);
                     match &binding {
                         AuditBinding::Bound { subject_digest } => {
@@ -374,6 +436,15 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                 // which is the exact misreading the refutation exists to prevent.
                 row.occurrence_ceiling = None;
             }
+
+            // Carry the full decision for the ceiling fold. After a refutation override, rebuild
+            // the decision so the fold sees the blocked state rather than the pre-refutation rung.
+            row.occurrence_decision = CodingAgentClaimDecision {
+                decision: row.occurrence_claim,
+                ceiling: row.occurrence_ceiling,
+                gap: occurrence.gap,
+                rule: occurrence.rule,
+            };
             row.bounded_negative_claim =
                 claim_decision_for(row.level, CodingAgentClaimKind::BoundedNegative).decision;
             calls.push(row);

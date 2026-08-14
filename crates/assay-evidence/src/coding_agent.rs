@@ -308,8 +308,8 @@ pub enum CodingAgentWeakestCeiling {
     Rung { ceiling: CodingAgentClaimCeiling },
 }
 
-/// Fold per-item ceilings into the strongest claim the whole set supports: the **weakest** rung
-/// across its members.
+/// Fold per-decision ceilings into the strongest claim the whole set supports: the **weakest**
+/// rung across its members.
 ///
 /// A fold and never a maximum. One member at the top rung does not raise what the set as a whole
 /// supports, and a reader who takes the strongest member away has learnt the wrong thing.
@@ -317,12 +317,38 @@ pub enum CodingAgentWeakestCeiling {
 /// This is the single implementation of that rule. It used to exist twice — here over coverage
 /// dimensions and again in the CLI over side-effect calls — and the copy had already drifted at the
 /// moment it was written, because this container is never empty and that one can be.
-pub fn coding_agent_weakest_ceiling(
-    ceilings: impl IntoIterator<Item = Option<CodingAgentClaimCeiling>>,
+///
+/// Consumes `CodingAgentClaimDecision` references so `Blocked` is encoded by the decision's own
+/// verdict and `NothingClaimed` only by an empty iterator. The previous signature accepted
+/// `Option<CodingAgentClaimCeiling>`, which conflated blocked (the decision says no rung applies)
+/// with absent (the caller passed `None` for its own reasons), and a caller with both states had
+/// no way to tell them apart.
+///
+/// # The verdict decides, not the rung
+///
+/// `CodingAgentClaimDecision` derives `Deserialize`, so a decision can arrive from outside this
+/// crate carrying any combination of its fields. The two inconsistent combinations are handled
+/// explicitly rather than left to whichever field happens to be read first:
+///
+/// * `Blocked` with a rung attached is **blocked**. Reading the rung and ignoring the verdict would
+///   let a crafted or corrupted record promote itself, which is the whole failure this fold exists
+///   to prevent. The doc above says the verdict encodes the block, so the verdict is what is read.
+/// * `Allowed` or `Degraded` with no rung is **blocked**, which is the fail-closed answer. It is
+///   deliberately not `NothingClaimed`: a claim was made and cannot be graded, and reporting a
+///   non-claim would invent an absence that the input does not state. Only an empty iterator ever
+///   yields `NothingClaimed`.
+pub fn coding_agent_weakest_ceiling<'a>(
+    decisions: impl IntoIterator<Item = &'a CodingAgentClaimDecision>,
 ) -> CodingAgentWeakestCeiling {
     let mut weakest: Option<CodingAgentClaimCeiling> = None;
-    for ceiling in ceilings {
-        let Some(ceiling) = ceiling else {
+    for decision in decisions {
+        // The verdict is read before the rung. A block is not the bottom rung; it is the statement
+        // that no rung applies, and there is nothing to take a minimum with.
+        if decision.decision == CodingAgentGateDecision::Blocked {
+            return CodingAgentWeakestCeiling::Blocked;
+        }
+        // Allowed or Degraded, so this decision owes a rung. Fail closed when it does not have one.
+        let Some(ceiling) = decision.ceiling else {
             return CodingAgentWeakestCeiling::Blocked;
         };
         weakest = Some(weakest.map_or(ceiling, |w| w.min(ceiling)));
@@ -342,7 +368,8 @@ impl CodingAgentCoverageReport {
     /// always yields the four fixed dimensions. The mapping is stated rather than assumed, because
     /// it is precisely the assumption that made a copy of this fold wrong elsewhere.
     pub fn weakest_ceiling(&self) -> Option<CodingAgentClaimCeiling> {
-        match coding_agent_weakest_ceiling(self.claimed().into_iter().map(|d| d.ceiling)) {
+        let claimed = self.claimed();
+        match coding_agent_weakest_ceiling(claimed.iter()) {
             CodingAgentWeakestCeiling::Rung { ceiling } => Some(ceiling),
             CodingAgentWeakestCeiling::Blocked | CodingAgentWeakestCeiling::NothingClaimed => None,
         }
@@ -470,4 +497,154 @@ pub fn coding_agent_evidence_event(
     );
     event.content_hash = Some(compute_content_hash(&event)?);
     Ok(event)
+}
+
+#[cfg(test)]
+mod weakest_ceiling_tests {
+    use super::*;
+
+    /// Helper: build a decision carrying a rung.
+    fn allowed(ceiling: CodingAgentClaimCeiling) -> CodingAgentClaimDecision {
+        CodingAgentClaimDecision {
+            decision: CodingAgentGateDecision::Allowed,
+            ceiling: Some(ceiling),
+            gap: None,
+            rule: "test".to_string(),
+        }
+    }
+
+    /// Helper: build a blocked decision (no rung).
+    fn blocked() -> CodingAgentClaimDecision {
+        CodingAgentClaimDecision {
+            decision: CodingAgentGateDecision::Blocked,
+            ceiling: None,
+            gap: Some(CodingAgentCoverageGap::NotObserved),
+            rule: "test_blocked".to_string(),
+        }
+    }
+
+    #[test]
+    fn empty_iterator_is_nothing_claimed() {
+        let empty: [CodingAgentClaimDecision; 0] = [];
+        assert_eq!(
+            coding_agent_weakest_ceiling(empty.iter()),
+            CodingAgentWeakestCeiling::NothingClaimed,
+        );
+    }
+
+    #[test]
+    fn single_blocked_decision_is_blocked() {
+        let decisions = [blocked()];
+        assert_eq!(
+            coding_agent_weakest_ceiling(decisions.iter()),
+            CodingAgentWeakestCeiling::Blocked,
+        );
+    }
+
+    #[test]
+    fn single_rung_is_that_rung() {
+        let decisions = [allowed(CodingAgentClaimCeiling::ObservedInPath)];
+        assert_eq!(
+            coding_agent_weakest_ceiling(decisions.iter()),
+            CodingAgentWeakestCeiling::Rung {
+                ceiling: CodingAgentClaimCeiling::ObservedInPath
+            },
+        );
+    }
+
+    #[test]
+    fn fold_takes_weakest_not_strongest() {
+        let decisions = [
+            allowed(CodingAgentClaimCeiling::IndependentlyConfirmed),
+            allowed(CodingAgentClaimCeiling::Asserted),
+        ];
+        assert_eq!(
+            coding_agent_weakest_ceiling(decisions.iter()),
+            CodingAgentWeakestCeiling::Rung {
+                ceiling: CodingAgentClaimCeiling::Asserted
+            },
+        );
+    }
+
+    #[test]
+    fn blocked_among_rungs_collapses_to_blocked() {
+        let decisions = [
+            allowed(CodingAgentClaimCeiling::IndependentlyConfirmed),
+            blocked(),
+            allowed(CodingAgentClaimCeiling::Asserted),
+        ];
+        assert_eq!(
+            coding_agent_weakest_ceiling(decisions.iter()),
+            CodingAgentWeakestCeiling::Blocked,
+        );
+    }
+
+    /// A blocked verdict that still carries a rung must read as blocked.
+    ///
+    /// This combination cannot be produced by `coding_agent_claim_decision`, but the type derives
+    /// `Deserialize`, so it can arrive from outside this crate. A fold that reads the rung and
+    /// ignores the verdict lets such a record promote itself past the gate that blocked it. The
+    /// rung here is the top one on purpose: if the verdict were ignored, this test would report
+    /// `IndependentlyConfirmed`, the strongest possible answer, from the input least entitled to it.
+    #[test]
+    fn a_blocked_verdict_carrying_a_rung_is_still_blocked() {
+        let inconsistent = CodingAgentClaimDecision {
+            decision: CodingAgentGateDecision::Blocked,
+            ceiling: Some(CodingAgentClaimCeiling::IndependentlyConfirmed),
+            gap: Some(CodingAgentCoverageGap::NotObserved),
+            rule: "hostile_or_corrupted".to_string(),
+        };
+        let decisions = [inconsistent];
+        assert_eq!(
+            coding_agent_weakest_ceiling(decisions.iter()),
+            CodingAgentWeakestCeiling::Blocked,
+        );
+    }
+
+    /// The mirror inconsistency: a claim that was allowed but carries no rung to grade it.
+    ///
+    /// Fail closed to `Blocked`, and specifically not to `NothingClaimed`. The set is not empty and
+    /// a claim was made, so reporting a non-claim would invent an absence the input never stated.
+    #[test]
+    fn an_allowed_verdict_without_a_rung_fails_closed_rather_than_reading_as_nothing_claimed() {
+        for verdict in [
+            CodingAgentGateDecision::Allowed,
+            CodingAgentGateDecision::Degraded,
+        ] {
+            let rungless = CodingAgentClaimDecision {
+                decision: verdict,
+                ceiling: None,
+                gap: None,
+                rule: "hostile_or_corrupted".to_string(),
+            };
+            let decisions = [rungless];
+            assert_eq!(
+                coding_agent_weakest_ceiling(decisions.iter()),
+                CodingAgentWeakestCeiling::Blocked,
+                "{verdict:?} without a rung must fail closed",
+            );
+        }
+    }
+
+    /// A degraded verdict that does carry a rung still participates as that rung.
+    ///
+    /// The guard above must not turn "not Allowed" into "blocked": `Degraded` is the gate's way of
+    /// saying the claim survives at a reduced ceiling, and folding it away would silently discard
+    /// the case the ladder is most useful for.
+    #[test]
+    fn a_degraded_verdict_with_a_rung_still_folds_as_that_rung() {
+        let degraded = CodingAgentClaimDecision {
+            decision: CodingAgentGateDecision::Degraded,
+            ceiling: Some(CodingAgentClaimCeiling::Asserted),
+            gap: Some(CodingAgentCoverageGap::SelfReportedOnly),
+            rule: "self_reported_degrades_positive_claim".to_string(),
+        };
+        let decisions = [degraded, allowed(CodingAgentClaimCeiling::ObservedInPath)];
+        assert_eq!(
+            coding_agent_weakest_ceiling(decisions.iter()),
+            CodingAgentWeakestCeiling::Rung {
+                ceiling: CodingAgentClaimCeiling::Asserted
+            },
+        );
+    }
 }
