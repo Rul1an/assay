@@ -11,8 +11,9 @@ serialization boundary.
 **Architecture:** Keep tool failures as MCP tool results. Add one private `bound_public_message`
 function in `tools/mod.rs`, use it in both `ToolError::new` and a manual `Serialize` implementation,
 and add one policy-parse constructor that accepts only a fixed failure class plus optional numeric
-location. Migrate the four raw parser sinks; leave the already-fixed sequence diagnostic on the
-general constructor.
+location. Direct YAML consumers use one two-stage value/root/typed helper; the full-policy parser
+tags syntax, shape, and validation failures at source for `check_args`. Migrate the four raw parser
+sinks; leave the already-fixed sequence diagnostic on the general constructor.
 
 **Tech Stack:** Rust 1.96, serde/serde_json/serde_yaml, real stdio JSON-RPC tests, pre-commit,
 GitHub Actions.
@@ -43,12 +44,16 @@ GitHub Actions.
 - Modify `crates/assay-mcp-server/src/tools/check_coverage.rs`: value-free YAML parser errors.
 - Modify `crates/assay-mcp-server/src/tools/explain_trace.rs`: value-free YAML parser errors.
 - Add `crates/assay-mcp-server/tests/policy_diagnostic_safety.rs`: real-stdio hostile-input contract.
+- Modify `crates/assay-core/src/mcp/policy/mod.rs`: expose the typed full-policy failure kind.
+- Modify `crates/assay-core/src/mcp/policy/legacy.rs`: tag syntax, shape, and validation failures at source.
+- Modify `crates/assay-core/src/mcp/tests.rs`: pin full-policy error classification.
 
 ### Task 1: Freeze the public diagnostic boundary
 
 **Files:**
 - Add: `crates/assay-mcp-server/tests/policy_diagnostic_safety.rs`
 - Modify: `crates/assay-mcp-server/src/tools/mod.rs` (unit tests only in this task)
+- Modify: `crates/assay-core/src/mcp/tests.rs` (tests only in this task)
 
 - [ ] **Step 1: Add a real-stdio helper covering four raw sinks**
 
@@ -103,6 +108,7 @@ constructor, applies the rule.
 ```bash
 cargo test --locked -p assay-mcp-server --test policy_diagnostic_safety -- --nocapture
 cargo test --locked -p assay-mcp-server tools::tests -- --nocapture
+cargo test --locked -p assay-core mcp::tests::policy_error_classification -- --nocapture
 ```
 
 Expected: hostile parser values appear in responses and direct/mutated `ToolError` serialization is
@@ -113,7 +119,8 @@ unbounded. Record the exact failures in #2388.
 ```bash
 git add -- \
   crates/assay-mcp-server/tests/policy_diagnostic_safety.rs \
-  crates/assay-mcp-server/src/tools/mod.rs
+  crates/assay-mcp-server/src/tools/mod.rs \
+  crates/assay-core/src/mcp/tests.rs
 git commit -m "test(mcp): expose unbounded policy diagnostics"
 ```
 
@@ -182,6 +189,10 @@ git commit -m "fix(mcp): bound public tool error messages"
 ### Task 3: Migrate every raw policy-parse sink
 
 **Files:**
+- Modify: `crates/assay-core/src/mcp/policy/mod.rs`
+- Modify: `crates/assay-core/src/mcp/policy/legacy.rs`
+- Modify: `crates/assay-core/src/mcp/tests.rs`
+- Modify: `crates/assay-mcp-server/src/tools/mod.rs`
 - Modify: `crates/assay-mcp-server/src/tools/policy_decide.rs`
 - Modify: `crates/assay-mcp-server/src/tools/check_args.rs`
 - Modify: `crates/assay-mcp-server/src/tools/check_coverage.rs`
@@ -199,18 +210,23 @@ because it is fixed and value-free, but it must not become a second parse-policy
 
 - [ ] **Step 2: Map syntax and structure without raw text**
 
-For `serde_yaml::Error`, extract only `location().map(|loc| (loc.line(), loc.column()))` and pass it
-to `ToolError::policy_parse`. Use `YamlSyntax` where syntax decoding fails and `Structure` where a
-typed mapping has the wrong shape. In `policy_decide`, retain #2386's explicit root class.
+Add one generic direct-tool helper in `tools/mod.rs`: first decode bytes to `serde_yaml::Value`,
+then require a mapping root, then deserialize the value into the tool's typed policy. Classify the
+three stages as `YamlSyntax`, `RootNotMapping`, and `Structure`; extract only safe numeric location
+from the first-stage error. `check_coverage` and `explain_trace` must call this helper rather than
+classify `serde_yaml::Error` by its `Display` text. In `policy_decide`, retain #2386's explicit root
+and dialect checks while using the same syntax classification.
 
 - [ ] **Step 3: Handle `check_args` without widening into the reader/parser slice**
 
-Keep the existing not-found/read branches as a separate concern until #2389 centralizes them. Add
-RED core cases that distinguish malformed syntax from well-formed typed-shape and validation
-failures. Tag that distinction at the parser source with a typed error kind; `check_args` must query
-or downcast that kind rather than match `Display` text. Map syntax to `PolicyParseFailure::YamlSyntax`
-and typed-shape/validation failures to `PolicyParseFailure::Structure` without publishing
-`e.to_string()`.
+Keep the existing not-found/read branches as a separate concern until #2389 centralizes them. In
+`assay-core`, add a public non-exhaustive `McpPolicyErrorKind` and a typed error wrapper whose source
+is retained but whose kind is queryable without parsing `Display`. The existing file parser first
+decodes to `serde_yaml::Value`, then runs the current ignored-field-aware typed deserialize,
+normalization, migration, and validation sequence. Tag first-stage decode as `Syntax`, typed
+deserialize as `Structure`, and validation as `Validation`; I/O errors remain outside this wrapper.
+`check_args` downcasts this wrapper and maps `Syntax` to `PolicyParseFailure::YamlSyntax`, and
+`Structure`/`Validation` to `PolicyParseFailure::Structure`.
 
 Do not add a parallel bytes/string `McpPolicy` parser here. #2389 moves this same tagged parse rule
 behind the bytes API, preserves file/bytes parity, and removes `from_file` from the `check_args`
@@ -223,6 +239,7 @@ server-side approximation.
 cargo test --locked -p assay-mcp-server --test policy_diagnostic_safety -- --nocapture
 cargo test --locked -p assay-mcp-server --test policy_decide_blocklist -- --nocapture
 cargo test --locked -p assay-mcp-server --test stdio_edge_cases -- --nocapture
+cargo test --locked -p assay-core mcp::tests::policy_error_classification -- --nocapture
 rg -n 'E_POLICY_PARSE.*(e\.to_string|format!)|Failed to parse policy' \
   crates/assay-mcp-server/src/tools
 ```
@@ -231,14 +248,20 @@ Expected: tests pass and the grep finds no source-derived public parse sink.
 
 - [ ] **Step 5: Run discriminating mutations**
 
-In disposable copies, separately: return a raw parser string from one sink; remove the constructor
-bound; remove the serializer bound; and replace the UTF-8 boundary loop with a byte slice. Each
-mutation must fail a different sentinel, direct-struct, post-mutation, or multibyte assertion.
+In disposable copies, separately: return a raw parser string from one sink; collapse syntax and
+typed-shape to one class; make a direct YAML consumer bypass the two-stage helper; remove the
+constructor bound; remove the serializer bound; and replace the UTF-8 boundary loop with a byte
+slice. Each mutation must fail a different sentinel, classification, direct-struct, post-mutation,
+or multibyte assertion.
 
 - [ ] **Step 6: Commit migrated sinks and integration test**
 
 ```bash
 git add -- \
+  crates/assay-core/src/mcp/policy/mod.rs \
+  crates/assay-core/src/mcp/policy/legacy.rs \
+  crates/assay-core/src/mcp/tests.rs \
+  crates/assay-mcp-server/src/tools/mod.rs \
   crates/assay-mcp-server/src/tools/policy_decide.rs \
   crates/assay-mcp-server/src/tools/check_args.rs \
   crates/assay-mcp-server/src/tools/check_coverage.rs \
@@ -253,9 +276,10 @@ git commit -m "fix(mcp): normalise public policy parse diagnostics"
 
 ```bash
 cargo test --locked -p assay-mcp-server --test policy_diagnostic_safety -- --nocapture
+cargo test --locked -p assay-core mcp::tests::policy_error_classification -- --nocapture
 cargo test --locked -p assay-mcp-server
 cargo fmt --all -- --check
-cargo clippy -p assay-mcp-server --all-targets -- -D warnings
+cargo clippy -p assay-core -p assay-mcp-server --all-targets -- -D warnings
 git diff --check
 git status --short
 ```
