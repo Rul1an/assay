@@ -12,6 +12,18 @@ static RID: AtomicU64 = AtomicU64::new(1);
 const INVALID_INITIALIZE_PARAMS: &str =
     "Invalid initialize params: expected the required legacy MCP fields";
 
+fn fail_closed_tool_result(code: &'static str, message: &'static str) -> Result<Value> {
+    tools::ToolError::new(code, message).result()
+}
+
+fn classify_tool_result(result: &Value) -> (bool, bool) {
+    let has_error = result.get("error").is_some();
+    let explicit_allowed = result.get("allowed").and_then(Value::as_bool);
+    let allowed = explicit_allowed.unwrap_or(false);
+    let is_error = has_error || explicit_allowed == Some(false);
+    (allowed, is_error)
+}
+
 fn next_rid() -> String {
     let n = RID.fetch_add(1, Ordering::Relaxed);
     format!("r-{n:06}")
@@ -318,13 +330,6 @@ impl Server {
                         let default_args = serde_json::json!({});
                         let args = params.get("arguments").unwrap_or(&default_args);
 
-                        let on_error_str = args
-                            .get("on_error")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("block");
-                        let allow_on_error = on_error_str.eq_ignore_ascii_case("allow");
-
-                        let policy = args.get("policy").and_then(|v| v.as_str()).unwrap_or("");
                         let bytes_in = line.len();
                         let args_bytes = serde_json::to_vec(args).map(|b| b.len()).unwrap_or(0);
 
@@ -334,9 +339,6 @@ impl Server {
                            event="tool_call_start",
                            rid=%rid,
                            rpc_id=?req.id,
-                           tool=name,
-                           policy=policy,
-                           on_error=on_error_str,
                            bytes_in=bytes_in,
                            args_bytes=args_bytes,
                         );
@@ -348,76 +350,53 @@ impl Server {
                         let fut = tools::handle_call(&ctx, name, args);
                         let result = match timeout(Duration::from_millis(cfg.timeout_ms), fut).await
                         {
-                            Ok(res) => res, // Tool finished
+                            Ok(Ok(value)) => value,
+                            Ok(Err(_error)) => {
+                                tracing::error!(
+                                    event = "tool_execution_error",
+                                    rid = %rid,
+                                    rpc_id = ?req.id,
+                                    duration_ms = start.elapsed().as_millis() as u64,
+                                    code = "E_INTERNAL"
+                                );
+                                fail_closed_tool_result("E_INTERNAL", "Tool execution failed")?
+                            }
                             Err(_) => {
                                 let dur = start.elapsed().as_millis() as u64;
                                 tracing::warn!(
                                    event="tool_call_timeout",
                                    rid=%rid,
                                    rpc_id=?req.id,
-                                   tool=name,
-                                   policy=policy,
                                    duration_ms=dur,
-                                   code="E_TIMEOUT",
-                                   fallback=on_error_str
+                                   code="E_TIMEOUT"
                                 );
-                                // Timed out
-                                Ok(serde_json::json!({
-                                    "allowed": allow_on_error,
-                                    "error": {
-                                        "code": "E_TIMEOUT",
-                                        "message": format!("Request exceeded {}ms", cfg.timeout_ms)
-                                    }
-                                }))
+                                fail_closed_tool_result("E_TIMEOUT", "Tool execution timed out")?
                             }
                         };
 
                         let dur = start.elapsed().as_millis() as u64;
                         // Log outcome
-                        match &result {
-                            Ok(val) => {
-                                let allowed = val
-                                    .get("allowed")
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false);
-                                if let Some(err) = val.get("error") {
-                                    let code =
-                                        err.get("code").and_then(|v| v.as_str()).unwrap_or("");
-                                    tracing::info!(
-                                      event="tool_call_done",
-                                      rid=%rid,
-                                      rpc_id=?req.id,
-                                      tool=name,
-                                      policy=policy,
-                                      duration_ms=dur,
-                                      outcome="app_error",
-                                      allowed=allowed,
-                                      code=code
-                                    );
-                                } else {
-                                    tracing::info!(
-                                      event="tool_call_done",
-                                      rid=%rid,
-                                      rpc_id=?req.id,
-                                      tool=name,
-                                      policy=policy,
-                                      duration_ms=dur,
-                                      outcome="ok",
-                                      allowed=allowed
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                  event="tool_call_crash",
-                                  rid=%rid,
-                                  rpc_id=?req.id,
-                                  tool=name,
-                                  policy=policy,
-                                  duration_ms=dur,
-                                  error=%e
-                                );
-                            }
+                        let (allowed, is_error) = classify_tool_result(&result);
+                        if let Some(err) = result.get("error") {
+                            let code = err.get("code").and_then(|v| v.as_str()).unwrap_or("");
+                            tracing::info!(
+                              event="tool_call_done",
+                              rid=%rid,
+                              rpc_id=?req.id,
+                              duration_ms=dur,
+                              outcome="app_error",
+                              allowed=allowed,
+                              code=code
+                            );
+                        } else {
+                            tracing::info!(
+                              event="tool_call_done",
+                              rid=%rid,
+                              rpc_id=?req.id,
+                              duration_ms=dur,
+                              outcome="ok",
+                              allowed=allowed
+                            );
                         }
 
                         // P57b: emit the observed tool decision (assay.tool_decision_surface.v0) as
@@ -425,25 +404,16 @@ impl Server {
                         // enforced inside build_decision; this site never has SaaS-verified evidence.
                         {
                             use crate::tool_decision::{build_decision, Effect, ObservedCall};
-                            let (effect, status) = match &result {
-                                Ok(val) => {
-                                    let allowed = val
-                                        .get("allowed")
-                                        .and_then(|v| v.as_bool())
-                                        .unwrap_or(false);
-                                    if let Some(code) = val
-                                        .get("error")
-                                        .and_then(|e| e.get("code"))
-                                        .and_then(|v| v.as_str())
-                                    {
-                                        (Effect::Error, code.to_string())
-                                    } else if allowed {
-                                        (Effect::Allow, "success".to_string())
-                                    } else {
-                                        (Effect::Deny, "blocked".to_string())
-                                    }
-                                }
-                                Err(_) => (Effect::Error, "crash".to_string()),
+                            let (effect, status) = if let Some(code) = result
+                                .get("error")
+                                .and_then(|e| e.get("code"))
+                                .and_then(|v| v.as_str())
+                            {
+                                (Effect::Error, code.to_string())
+                            } else if allowed {
+                                (Effect::Allow, "success".to_string())
+                            } else {
+                                (Effect::Deny, "blocked".to_string())
                             };
                             let decision = build_decision(&ObservedCall {
                                 server_id: "mcp",
@@ -466,71 +436,18 @@ impl Server {
                             );
                         }
 
-                        match result {
-                            Ok(res) => {
-                                // MCP Compliance: Wrap result in CallToolResult structure
-                                // Spec: { content: [{ type: "text", text: "..." }], isError: bool }
-                                let is_error =
-                                    !res.get("allowed").and_then(|v| v.as_bool()).unwrap_or(true);
-                                let json_text =
-                                    serde_json::to_string_pretty(&res).unwrap_or_default();
-
-                                let mcp_result = serde_json::json!({
-                                    "content": [
-                                        {
-                                            "type": "text",
-                                            "text": json_text
-                                        }
-                                    ],
-                                    "isError": is_error
-                                });
-                                JsonRpcResponse::ok(req.id.clone(), mcp_result)
-                            }
-                            Err(e) => {
-                                // Fail-safe handling for internal errors
-                                tracing::error!(
-                                    event="tool_execution_error",
-                                    rid=%rid,
-                                    error=%e,
-                                    fallback=on_error_str
-                                );
-                                let mut safe_resp = serde_json::json!({
-                                    "allowed": allow_on_error,
-                                    "error": {
-                                        "code": "E_INTERNAL",
-                                        "message": e.to_string()
-                                    }
-                                });
-
-                                // Agent Awareness
-                                // If we fail open, warn the agent so it can self-regulate (e.g. switch to Safe Mode).
-                                if allow_on_error {
-                                    safe_resp["warning"] = serde_json::json!("FAIL-SAFE ACTIVE: Policy engine offline. Proceed with caution (Safe Mode).");
-                                }
-                                // Keep consistent wrapping even for internal fail-safe responses
-                                let json_text =
-                                    serde_json::to_string_pretty(&safe_resp).unwrap_or_default();
-                                let mcp_result = serde_json::json!({
-                                    "content": [
-                                        {
-                                            "type": "text",
-                                            "text": json_text
-                                        }
-                                    ],
-                                    "isError": !allow_on_error
-                                });
-                                JsonRpcResponse::ok(req.id.clone(), mcp_result)
-                            }
-                        }
+                        // MCP Compliance: wrap every tool outcome in CallToolResult.
+                        let json_text = serde_json::to_string_pretty(&result).unwrap_or_default();
+                        let mcp_result = serde_json::json!({
+                            "content": [{"type": "text", "text": json_text}],
+                            "isError": is_error
+                        });
+                        JsonRpcResponse::ok(req.id.clone(), mcp_result)
                     } else {
                         JsonRpcResponse::error(req.id.clone(), -32602, "Missing params".to_string())
                     }
                 }
-                _ => JsonRpcResponse::error(
-                    req.id.clone(),
-                    -32601,
-                    format!("Method not found: {}", req.method),
-                ),
+                _ => JsonRpcResponse::error(req.id.clone(), -32601, "Method not found".to_string()),
             };
 
             // Send Response
@@ -545,7 +462,24 @@ impl Server {
 
 #[cfg(test)]
 mod claims_boundary_tests {
-    use super::{initialize_result, LegacyProtocolVersion};
+    use super::{classify_tool_result, initialize_result, LegacyProtocolVersion};
+
+    #[test]
+    fn tool_result_classification_separates_decision_from_mcp_error() {
+        for (result, expected) in [
+            (serde_json::json!({"allowed": true}), (true, false)),
+            (serde_json::json!({"allowed": false}), (false, true)),
+            (
+                serde_json::json!({"allowed": false, "error": {"code": "E_INTERNAL"}}),
+                (false, true),
+            ),
+            // Report tools return data rather than a policy decision. Preserve the existing
+            // decision telemetry while keeping their successful MCP result non-error.
+            (serde_json::json!({"report": {}}), (false, false)),
+        ] {
+            assert_eq!(classify_tool_result(&result), expected, "result: {result}");
+        }
+    }
 
     /// ADR-042 stop list, ADR-043 §2. The handshake must not assert a status the server
     /// cannot substantiate. A denylist over the serialized response catches a claim

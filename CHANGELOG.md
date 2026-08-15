@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- The built-in stdio MCP policy tools now fail closed on outer dispatch errors
+  and timeouts. Caller `arguments.on_error` no longer selects fail-open;
+  responses use fixed value-free `E_INTERNAL` / `E_TIMEOUT` messages and
+  `isError: true`. Clients following the former gateway example must remove
+  that argument. Suite `settings.on_error` remains an `assay run` setting
+  (#2391). Outer dispatch failures emit `tool_execution_error`; `tool_call_*`
+  events no longer copy caller-controlled tool or policy strings. The separate
+  `tool_decision` evidence event retains its existing redaction contract.
 - The five advertised MCP policy tools now read local policy files through one
   inclusive byte ceiling (`ServerConfig.max_policy_bytes`, default 1,000,000,
   override `ASSAY_MCP_MAX_POLICY_BYTES`) before parse or cache insertion.

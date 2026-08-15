@@ -228,10 +228,7 @@ fn discovery_is_an_explicit_legacy_fallback_signal() {
     let output = run_session(&[request]);
     let response = responses(&output).pop().expect("discover response");
     assert_eq!(response["error"]["code"].as_i64(), Some(-32601));
-    assert_eq!(
-        response["error"]["message"],
-        "Method not found: server/discover"
-    );
+    assert_eq!(response["error"]["message"], "Method not found");
     assert!(response.get("result").is_none());
 }
 

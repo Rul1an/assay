@@ -1,6 +1,7 @@
 # Error Handling & Fail-Safe Configuration
 
-Assay can operate in two error-handling modes. This page explains when to use each and how to configure them.
+`assay run` can operate in two error-handling modes. The built-in stdio MCP
+server has a separate, always-fail-closed boundary.
 
 ## The Problem
 
@@ -125,35 +126,43 @@ tests:
 | Check fails | ✗ Fail | ✗ Fail |
 | Check errors | ✗ Error (blocks CI) | ⚠ Warn (CI continues) |
 
-### In Streaming Mode (`assay-mcp-server`)
+### In the stdio MCP server (`assay-mcp-server`)
 
-| Scenario | `on_error: block` | `on_error: allow` |
-|----------|-------------------|-------------------|
-| Check passes | → Allow action | → Allow action |
-| Check fails | → Block action | → Block action |
-| Check errors | → Block action | → Allow action |
+Suite, test, and assertion `on_error` settings are not MCP server settings.
+The five built-in policy tools fail closed when dispatch fails or times out:
+
+- the tool payload has `allowed: false`;
+- the MCP `CallToolResult` has `isError: true`;
+- dispatch failures use `E_INTERNAL` and a fixed message;
+- timeouts use `E_TIMEOUT` and a fixed message.
+
+Caller-supplied `arguments.on_error` has no authority and is absent from the
+advertised tool schemas. Use bounded client retry, supervised restart, and
+alerting for availability; do not convert an unavailable policy decision into
+permission.
 
 ---
 
 ## Audit Trail
 
-Regardless of mode, all errors are logged:
+`assay-mcp-server` emits structured stderr events with a request id, duration,
+outcome, and reason code. Public failure messages do not include caller values
+or raw internal errors. For example, a timeout result contains:
 
 ```json
 {
-  "event": "policy_check_error",
-  "test_id": "discount_check",
-  "error": "Schema parse failed: invalid regex",
-  "action_taken": "blocked",  // or "allowed"
-  "on_error_mode": "block",
-  "timestamp": "2025-12-28T10:30:00Z"
+  "allowed": false,
+  "error": {
+    "code": "E_TIMEOUT",
+    "message": "Tool execution timed out"
+  }
 }
 ```
 
-Use these logs to:
+Use structured results and logs to:
 1. Monitor error rates
 2. Debug configuration issues
-3. Demonstrate compliance (errors were handled correctly)
+3. Verify that the configured failure policy was applied
 
 ---
 

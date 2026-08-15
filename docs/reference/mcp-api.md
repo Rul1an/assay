@@ -1,4 +1,4 @@
-# Assay MCP API Reference (v0.5.0)
+# Assay MCP API Reference
 
 The Assay MCP Server exposes tools for agent self-verification.
 
@@ -7,17 +7,26 @@ All tools return a standardized error structure if the operation cannot be perfo
 Note: This is an **Application-Level Error**, returned within the JSON-RPC `result`. Protocol-level errors (invalid JSON) return a JSON-RPC `error`.
 
 ### Error Shape
+
+Tool results use the MCP `CallToolResult` envelope. The first text content item
+contains the Assay payload:
+
 ```json
 {
   "result": {
-    "error": {
-      "code": "E_CODE_STRING",
-      "message": "Human readable message",
-      "details": { ... } // Optional
-    }
+    "content": [{
+      "type": "text",
+      "text": "{\"allowed\":false,\"error\":{\"code\":\"E_CODE_STRING\",\"message\":\"Bounded message\"}}"
+    }],
+    "isError": true
   }
 }
 ```
+
+Outer dispatch failures use fixed, value-free messages. `E_INTERNAL` means
+`Tool execution failed`; `E_TIMEOUT` means `Tool execution timed out`. Both
+have `allowed: false` and `isError: true`. Caller `arguments.on_error` cannot
+change that behavior. Unknown JSON-RPC methods use protocol error `-32601`.
 
 ### Common Error Codes
 | Code | Description |
@@ -25,6 +34,8 @@ Note: This is an **Application-Level Error**, returned within the JSON-RPC `resu
 | `E_POLICY_NOT_FOUND` | The specified policy file does not exist. |
 | `E_POLICY_READ` | Failed to read the policy file (permissions, etc.). |
 | `E_PERMISSION_DENIED` | Access denied (e.g., policy path is outside the allowed root). |
+| `E_INTERNAL` | The outer tool dispatch failed; raw internal error details are not emitted. |
+| `E_TIMEOUT` | The outer tool dispatch exceeded the configured timeout. |
 
 ## Tools
 

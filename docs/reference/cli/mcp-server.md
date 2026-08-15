@@ -72,6 +72,22 @@ assay-mcp-server --policy-root <DIR>
 |--------|-------------|
 | `--policy-root <PATH>` | Policy root directory (default: `policies`) |
 
+### Outer failure contract
+
+Tool dispatch failures and timeouts always fail closed. The returned tool
+payload has `allowed: false`; the MCP `CallToolResult` has `isError: true`.
+Dispatch failures use `E_INTERNAL` with `Tool execution failed`, and timeouts
+use `E_TIMEOUT` with `Tool execution timed out`.
+
+`arguments.on_error` is not an operator control and is absent from the
+advertised input schemas. Remove it from clients that followed an older gateway
+example. `settings.on_error` remains available to `assay run`; it is not a
+server setting.
+
+Unknown methods remain JSON-RPC `-32601` with the fixed message `Method not
+found`. Unknown tool names currently return the fail-closed `CallToolResult`;
+this does not claim JSON-RPC `-32602` routing for unknown tools.
+
 ### Policy-file ingest ceiling
 
 The five advertised policy tools (`assay_policy_decide`, `assay_check_args`,
