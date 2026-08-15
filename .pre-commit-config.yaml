@@ -175,6 +175,13 @@ repos:
         pass_filenames: false
         files: ^(scripts/ci/(check-evidence-vocabulary\.py|test-evidence-vocabulary\.sh)|\.pre-commit-config\.yaml)$
 
+      - id: mcp-tool-error-publication-self-test
+        name: MCP ToolError publication guard self-test
+        entry: bash -c 'python3 scripts/ci/check-mcp-tool-error-publication.py && bash scripts/ci/test-check-mcp-tool-error-publication.sh'
+        language: system
+        pass_filenames: false
+        files: ^(crates/assay-mcp-server/src/tools/mod\.rs|scripts/ci/(check-mcp-tool-error-publication\.py|test-check-mcp-tool-error-publication\.sh)|\.pre-commit-config\.yaml)$
+
       - id: evidence-vocabulary
         name: Evidence vocabulary guard
         entry: python3 scripts/ci/check-evidence-vocabulary.py

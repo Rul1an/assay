@@ -22,22 +22,92 @@ impl ToolContext {
     }
 }
 
-#[derive(serde::Serialize)]
+const MAX_PUBLIC_MESSAGE_BYTES: usize = 4096;
+
+/// UTF-8-safe prefix of `message` at most `MAX_PUBLIC_MESSAGE_BYTES` bytes.
+/// Returns the full slice when it fits; truncates on a char boundary otherwise.
+/// No suffix is added beyond the ceiling.
+fn bound_public_message(message: &str) -> &str {
+    if message.len() <= MAX_PUBLIC_MESSAGE_BYTES {
+        return message;
+    }
+    let mut end = MAX_PUBLIC_MESSAGE_BYTES;
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    &message[..end]
+}
+
 pub struct ToolError {
     pub code: String,
     pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<Value>,
+}
+
+impl serde::Serialize for ToolError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        #[derive(serde::Serialize)]
+        struct BoundedView<'a> {
+            code: &'a str,
+            message: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            details: &'a Option<Value>,
+        }
+        let view = BoundedView {
+            code: &self.code,
+            message: bound_public_message(&self.message),
+            details: &self.details,
+        };
+        view.serialize(serializer)
+    }
+}
+
+/// The three approved fixed parse summaries.
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // Task-2: callers land with the parse-path wiring
+pub(crate) enum PolicyParseFailure {
+    YamlSyntax,
+    RootNotMapping,
+    Structure,
+}
+
+impl PolicyParseFailure {
+    fn summary(self) -> &'static str {
+        match self {
+            Self::YamlSyntax => "Policy YAML is invalid",
+            Self::RootNotMapping => "Policy root must be a mapping",
+            Self::Structure => "Policy structure is invalid",
+        }
+    }
 }
 
 impl ToolError {
     pub fn new(code: &str, message: &str) -> Self {
         Self {
             code: code.to_string(),
-            message: message.to_string(),
+            message: bound_public_message(message).to_owned(),
             details: None,
         }
     }
+
+    /// Construct a parse error with a fixed summary and optional numeric location.
+    #[allow(dead_code)] // Task-2: callers land with the parse-path wiring
+    pub(crate) fn policy_parse(
+        class: PolicyParseFailure,
+        location: Option<(usize, usize)>,
+    ) -> Self {
+        let details =
+            location.map(|(line, column)| serde_json::json!({"line": line, "column": column}));
+        Self {
+            code: "E_POLICY_PARSE".to_string(),
+            message: class.summary().to_string(),
+            details,
+        }
+    }
+
     pub fn result(self) -> anyhow::Result<Value> {
         Ok(serde_json::to_value(serde_json::json!({
              "allowed": false,

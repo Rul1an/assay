@@ -531,9 +531,11 @@ fn malformed_multibyte_policy_returns_valid_utf8_with_fixed_summary() {
     let root = dir.path();
     // Build a policy file containing multibyte sentinels inside a broken YAML scalar.
     // The server must return valid UTF-8 JSON with the fixed summary and no sentinel.
+    // Wire validity (UTF-8 correctness of the JSON-RPC response) is proven by the
+    // Conn read_line → serde_json::from_str path: from_str rejects invalid UTF-8.
+    // Exact 4096-byte bounding is covered by the synthetic ToolError unit tests.
     let mut content = b"version: \"\n  ".to_vec();
     content.extend(MULTIBYTE_SENTINEL.as_bytes());
-    // Pad to a decent size so truncation is exercised
     content.extend(std::iter::repeat_n(b'Y', 5000));
     write_policy(root, "multibyte.yaml", &content);
 
@@ -544,12 +546,6 @@ fn malformed_multibyte_policy_returns_valid_utf8_with_fixed_summary() {
         "assay_check_args",
         check_args_args("multibyte.yaml"),
         2,
-    );
-
-    // The full response must parse as valid UTF-8 (it's a JSON string)
-    assert!(
-        std::str::from_utf8(full.as_bytes()).is_ok(),
-        "full response must be valid UTF-8"
     );
 
     // Fixed summary
