@@ -1,8 +1,12 @@
-//! Wire-size guard for the default-feature `tools/list` surface.
+//! Wire-size and advertised-name guard for the `tools/list` surface.
 //!
 //! Drives the built `assay-mcp-server` over a real handshake and records compact
-//! JSON-RPC bytes. The only scored size bound is a 16 KiB explosion ceiling on
-//! the complete compact response; 8,120 is diagnostic, not a lock. Name-set
+//! JSON-RPC bytes. Live witness is structural (spawn `CARGO_BIN_EXE_assay-mcp-server`,
+//! initialize, then `tools/list`); a fixture cannot pass by flipping a boolean.
+//! Cardinality is checked before BTreeSet comparison so a duplicate advertised
+//! name fails. Default-feature vs `--features test-outbound` expectations are
+//! explicit. The only scored size bound is a 16 KiB explosion ceiling on the
+//! complete compact response; 8,120 is diagnostic, not a lock. Name-set
 //! ownership for install-surface launch stays in `project_install_surfaces.rs`.
 
 use serde_json::Value;
@@ -23,28 +27,56 @@ const PRODUCTION_TOOL_NAMES: [&str; 5] = [
 
 const TEST_OUTBOUND_TOOL: &str = "assay_test_outbound";
 const COMPACT_RESPONSE_CEILING: usize = 16_384;
+const EXPECTED_LEN: usize = if cfg!(feature = "test-outbound") {
+    6
+} else {
+    5
+};
 
-/// Compact `tools/list` observation. The live path tags `from_built_binary: true`.
-struct ToolsListObservation {
-    names: Vec<String>,
-    compact: Vec<u8>,
-    from_built_binary: bool,
+fn expected_names() -> Vec<String> {
+    let mut names: Vec<String> = PRODUCTION_TOOL_NAMES
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect();
+    if cfg!(feature = "test-outbound") {
+        names.push(TEST_OUTBOUND_TOOL.to_string());
+    }
+    names
 }
 
-fn assert_production_tool_names(names: &[String]) {
+fn assert_live_tool_cardinality(names: &[String]) {
+    assert_eq!(
+        names.len(),
+        EXPECTED_LEN,
+        "tools/list live response must have exactly {EXPECTED_LEN} entries before name-set comparison (got {} names: {names:?})",
+        names.len()
+    );
+}
+
+fn assert_advertised_tool_names(names: &[String]) {
+    assert_live_tool_cardinality(names);
     let actual: BTreeSet<&str> = names.iter().map(String::as_str).collect();
-    let expected: BTreeSet<&str> = PRODUCTION_TOOL_NAMES.iter().copied().collect();
+    let expected_owned = expected_names();
+    let expected: BTreeSet<&str> = expected_owned.iter().map(String::as_str).collect();
     assert_eq!(
         actual, expected,
-        "tools/list production names must be exactly the five advertised tools (got {actual:?})"
+        "tools/list advertised names must match the expected set (got {actual:?})"
     );
 }
 
-fn assert_test_outbound_absent(names: &[String]) {
-    assert!(
-        !names.iter().any(|name| name == TEST_OUTBOUND_TOOL),
-        "default-feature tools/list advertised {TEST_OUTBOUND_TOOL}"
-    );
+fn assert_test_outbound_expectation(names: &[String]) {
+    let advertised = names.iter().any(|name| name == TEST_OUTBOUND_TOOL);
+    if cfg!(feature = "test-outbound") {
+        assert!(
+            advertised,
+            "test-outbound tools/list must advertise {TEST_OUTBOUND_TOOL}"
+        );
+    } else {
+        assert!(
+            !advertised,
+            "default-feature tools/list advertised {TEST_OUTBOUND_TOOL}"
+        );
+    }
 }
 
 fn assert_compact_response_within_ceiling(compact: &[u8], ceiling: usize) {
@@ -55,11 +87,18 @@ fn assert_compact_response_within_ceiling(compact: &[u8], ceiling: usize) {
     );
 }
 
-fn assert_from_built_binary(observation: &ToolsListObservation) {
+fn assert_live_handshake(initialize: &Value, list_response: &Value) {
     assert!(
-        observation.from_built_binary,
-        "tools/list observation must come from the built assay-mcp-server binary (from_built_binary: {})",
-        observation.from_built_binary
+        initialize.get("result").is_some(),
+        "live handshake via CARGO_BIN_EXE_assay-mcp-server: initialize must have result, got {initialize:?}"
+    );
+    assert!(
+        list_response
+            .get("result")
+            .and_then(|result| result.get("tools"))
+            .and_then(Value::as_array)
+            .is_some(),
+        "live handshake via CARGO_BIN_EXE_assay-mcp-server: tools/list must have result.tools array, got {list_response:?}"
     );
 }
 
@@ -116,7 +155,7 @@ fn clean_server_command() -> Command {
     command
 }
 
-fn spawn_default_server(policy_root: &Path) -> Conn {
+fn spawn_server(policy_root: &Path) -> Conn {
     let child = clean_server_command()
         .arg("--policy-root")
         .arg(policy_root)
@@ -124,20 +163,13 @@ fn spawn_default_server(policy_root: &Path) -> Conn {
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .expect("spawn default-feature assay-mcp-server");
+        .expect("spawn CARGO_BIN_EXE_assay-mcp-server");
     Conn::attach(child)
 }
 
-fn production_names() -> Vec<String> {
-    PRODUCTION_TOOL_NAMES
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect()
-}
-
-fn observe_live_tools_list() -> (Value, ToolsListObservation) {
+fn observe_live_tools_list() -> (Vec<String>, Vec<u8>, Value) {
     let policy_root = tempfile::tempdir().expect("temp policy-root");
-    let mut conn = spawn_default_server(policy_root.path());
+    let mut conn = spawn_server(policy_root.path());
 
     conn.send(serde_json::json!({
         "jsonrpc": "2.0",
@@ -150,10 +182,6 @@ fn observe_live_tools_list() -> (Value, ToolsListObservation) {
         }
     }));
     let initialize = conn.read_response_for_id(1);
-    assert!(
-        initialize.get("result").is_some(),
-        "initialize failed: {initialize:?}"
-    );
 
     conn.send(serde_json::json!({
         "jsonrpc": "2.0",
@@ -164,60 +192,74 @@ fn observe_live_tools_list() -> (Value, ToolsListObservation) {
         "id": 2,
         "method": "tools/list"
     }));
-    let response = conn.read_response_for_id(2);
+    let list_response = conn.read_response_for_id(2);
     let _ = conn.shutdown();
 
-    let names = tool_names(&response);
-    let compact = serde_json::to_vec(&response).expect("serialize complete tools/list response");
-    let observation = ToolsListObservation {
-        names,
-        compact,
-        from_built_binary: true,
-    };
-    (response, observation)
-}
-
-fn hardcoded_fixture_observation() -> ToolsListObservation {
-    ToolsListObservation {
-        names: production_names(),
-        compact: vec![0x7b; 8_120],
-        from_built_binary: false,
-    }
+    assert_live_handshake(&initialize, &list_response);
+    let names = tool_names(&list_response);
+    let compact =
+        serde_json::to_vec(&list_response).expect("serialize complete tools/list response");
+    (names, compact, list_response)
 }
 
 #[test]
-fn default_feature_tools_list_wire_is_five_production_tools_under_16kib() {
-    let (response, observation) = observe_live_tools_list();
-    assert_from_built_binary(&observation);
-    assert_production_tool_names(&observation.names);
-    assert_test_outbound_absent(&observation.names);
-
-    eprint_wire_diagnostics(&response, &observation.compact);
-    assert_compact_response_within_ceiling(&observation.compact, COMPACT_RESPONSE_CEILING);
+fn live_tools_list_matches_feature_mode_under_16kib() {
+    let (names, compact, response) = observe_live_tools_list();
+    assert_advertised_tool_names(&names);
+    assert_test_outbound_expectation(&names);
+    eprint_wire_diagnostics(&response, &compact);
+    assert_compact_response_within_ceiling(&compact, COMPACT_RESPONSE_CEILING);
 }
 
 #[test]
-#[should_panic(expected = "tools/list production names must be exactly the five advertised tools")]
-fn mutation_renamed_production_tool_fails_names_guard() {
-    let mut names = production_names();
-    names[0] = "assay_check_args_renamed".to_string();
-    assert_production_tool_names(&names);
+#[should_panic(expected = "entries before name-set comparison")]
+fn mutation_duplicate_production_tool_fails_cardinality_guard() {
+    let mut names = expected_names();
+    names.push(names[0].clone());
+    assert_advertised_tool_names(&names);
 }
 
 #[test]
-#[should_panic(expected = "tools/list production names must be exactly the five advertised tools")]
-fn mutation_removed_production_tool_fails_names_guard() {
-    let mut names = production_names();
-    names.remove(0);
-    assert_production_tool_names(&names);
+#[should_panic(expected = "CARGO_BIN_EXE_assay-mcp-server")]
+fn mutation_fixture_initialize_fails_live_handshake_guard() {
+    assert_live_handshake(
+        &serde_json::json!({}),
+        &serde_json::json!({"result": {"tools": []}}),
+    );
 }
 
+#[cfg(not(feature = "test-outbound"))]
 #[test]
 #[should_panic(expected = "default-feature tools/list advertised assay_test_outbound")]
 fn mutation_injected_assay_test_outbound_fails_outbound_guard() {
-    let mut names = production_names();
+    let mut names = expected_names();
     names.push(TEST_OUTBOUND_TOOL.to_string());
-    assert_test_outbound_absent(&names);
+    assert_test_outbound_expectation(&names);
+}
+
+#[cfg(feature = "test-outbound")]
+#[test]
+#[should_panic(expected = "test-outbound tools/list must advertise assay_test_outbound")]
+fn mutation_dropped_assay_test_outbound_fails_outbound_guard() {
+    let mut names = expected_names();
+    names.retain(|name| name != TEST_OUTBOUND_TOOL);
+    assert_test_outbound_expectation(&names);
+}
+
+#[test]
+#[should_panic(expected = "tools/list advertised names must match the expected set")]
+fn mutation_renamed_production_tool_fails_names_guard() {
+    let mut names = expected_names();
+    names[0] = "assay_check_args_renamed".to_string();
+    assert_advertised_tool_names(&names);
+}
+
+#[test]
+#[should_panic(expected = "entries before name-set comparison")]
+fn mutation_removed_production_tool_fails_names_guard() {
+    let mut names = expected_names();
+    names.remove(0);
+    assert_advertised_tool_names(&names);
 }
 
 #[test]
@@ -228,14 +270,4 @@ fn mutation_lowered_ceiling_below_live_compact_body_fails_ceiling_guard() {
     let live_compact_copy = vec![0x7b; 8_120];
     let lowered_ceiling = live_compact_copy.len() - 1;
     assert_compact_response_within_ceiling(&live_compact_copy, lowered_ceiling);
-}
-
-#[test]
-#[should_panic(expected = "from_built_binary: false")]
-fn mutation_hardcoded_fixture_fails_built_binary_guard() {
-    let fixture = hardcoded_fixture_observation();
-    assert_production_tool_names(&fixture.names);
-    assert_test_outbound_absent(&fixture.names);
-    assert_compact_response_within_ceiling(&fixture.compact, COMPACT_RESPONSE_CEILING);
-    assert_from_built_binary(&fixture);
 }
