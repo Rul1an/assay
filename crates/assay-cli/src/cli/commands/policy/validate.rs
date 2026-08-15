@@ -30,7 +30,10 @@ pub async fn run(args: PolicyValidateArgs) -> Result<i32> {
 }
 
 fn classify_load_error(path: &Path, error: anyhow::Error) -> anyhow::Error {
-    if error.downcast_ref::<serde_yaml::Error>().is_some() {
+    if error
+        .downcast_ref::<assay_core::mcp::policy::McpPolicyError>()
+        .is_some_and(|error| error.is_parse_failure())
+    {
         return CliFailure::policy_parse(path, error).into();
     }
     error.context(format!("failed to load policy {}", path.display()))

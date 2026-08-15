@@ -3,13 +3,13 @@
 
 from __future__ import annotations
 
-import re
 import sys
 from pathlib import Path
 
 
 DEFAULT_TARGET = Path("crates/assay-mcp-server/src/tools/mod.rs")
-MAX_SOURCE_CHARS = 1_000_000
+IMPL_SIGNATURE = "impl ToolError {"
+RESULT_SIGNATURE = "    pub fn result(self) -> anyhow::Result<Value> {"
 EXPECTED_BODY = (
     'Ok(serde_json::to_value(serde_json::json!({'
     '"allowed":false,"error":self}))?)'
@@ -17,17 +17,14 @@ EXPECTED_BODY = (
 
 
 def extract_result_body(source: str) -> str | None:
-    impl_match = re.search(r"impl\s+ToolError\s*\{", source)
-    if not impl_match:
+    impl_start = source.find(IMPL_SIGNATURE)
+    if impl_start < 0:
         return None
-    result_match = re.search(
-        r"pub\s+fn\s+result\s*\(\s*self\s*\)\s*->[^{\r\n]+{",
-        source[impl_match.end() :],
-    )
-    if not result_match:
+    result_start = source.find(RESULT_SIGNATURE, impl_start + len(IMPL_SIGNATURE))
+    if result_start < 0:
         return None
 
-    start = impl_match.end() + result_match.end()
+    start = result_start + len(RESULT_SIGNATURE)
     depth = 1
     state = "code"
     block_depth = 0
@@ -148,14 +145,8 @@ def check(source: str) -> bool:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 1:
-        source = DEFAULT_TARGET.read_text()
-    elif sys.argv[1:] == ["--stdin"]:
-        source = sys.stdin.read(MAX_SOURCE_CHARS + 1)
-        if len(source) > MAX_SOURCE_CHARS:
-            print("FAIL: source exceeds guard input limit", file=sys.stderr)
-            raise SystemExit(2)
-    else:
-        print(f"usage: {Path(sys.argv[0]).name} [--stdin]", file=sys.stderr)
+    if len(sys.argv) != 1:
+        print(f"usage: {Path(sys.argv[0]).name}", file=sys.stderr)
         raise SystemExit(2)
+    source = DEFAULT_TARGET.read_text()
     raise SystemExit(0 if check(source) else 1)

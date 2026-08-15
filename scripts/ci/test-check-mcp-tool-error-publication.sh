@@ -20,50 +20,12 @@ if python3 "$GUARD" "$TARGET" 2>/dev/null; then
 fi
 echo "PASS: guard rejects positional filesystem paths"
 
-# An unterminated result signature must not trigger polynomial regex backtracking.
-python3 - "$GUARD" <<'PY'
-import subprocess
-import sys
-
-source = "impl ToolError { pub fn result(self)->" + (" " * 200_000) + "x"
-try:
-    result = subprocess.run(
-        [sys.executable, sys.argv[1], "--stdin"],
-        input=source,
-        text=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=2,
-        check=False,
-    )
-except subprocess.TimeoutExpired:
-    raise SystemExit("FAIL: guard regex exceeded adversarial-input deadline")
-if result.returncode != 1:
-    raise SystemExit(
-        f"FAIL: malformed adversarial source returned {result.returncode}, expected 1"
-    )
-PY
-echo "PASS: guard rejects adversarial source within deadline"
-
-# The mutation-only stdin interface has its own fixed resource ceiling.
-python3 - "$GUARD" <<'PY'
-import subprocess
-import sys
-
-result = subprocess.run(
-    [sys.executable, sys.argv[1], "--stdin"],
-    input="x" * 1_000_001,
-    text=True,
-    stdout=subprocess.DEVNULL,
-    stderr=subprocess.DEVNULL,
-    check=False,
-)
-if result.returncode != 2:
-    raise SystemExit(
-        f"FAIL: oversized guard source returned {result.returncode}, expected 2"
-    )
-PY
-echo "PASS: guard bounds stdin source"
+# The production guard has no caller-controlled source interface.
+if python3 "$GUARD" --stdin </dev/null 2>/dev/null; then
+    echo "FAIL: guard must reject stdin source selection" >&2
+    exit 1
+fi
+echo "PASS: guard rejects stdin source selection"
 
 # Verify the guard passes on the real file first.
 if ! python3 "$GUARD"; then
@@ -75,12 +37,59 @@ echo "PASS: guard accepts unmodified source"
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
+check_source() {
+    python3 - "$GUARD" "$1" <<'PY'
+import importlib.util
+import sys
+from pathlib import Path
+
+spec = importlib.util.spec_from_file_location("publication_guard", sys.argv[1])
+if spec is None or spec.loader is None:
+    raise SystemExit("failed to load publication guard")
+guard = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(guard)
+source = Path(sys.argv[2]).read_text()
+raise SystemExit(0 if guard.check(source) else 1)
+PY
+}
+
+# Repeated near-signatures must be handled in linear time.
+python3 - "$TMPDIR/adversarial.rs" <<'PY'
+import sys
+from pathlib import Path
+
+prefix = "pub fn result(self)->"
+Path(sys.argv[1]).write_text("impl ToolError {" + prefix * 30_000 + "x")
+PY
+python3 - "$GUARD" "$TMPDIR/adversarial.rs" <<'PY'
+import importlib.util
+import signal
+import sys
+from pathlib import Path
+
+def deadline(_signum, _frame):
+    raise SystemExit("FAIL: guard exceeded adversarial-input deadline")
+
+spec = importlib.util.spec_from_file_location("publication_guard", sys.argv[1])
+if spec is None or spec.loader is None:
+    raise SystemExit("failed to load publication guard")
+guard = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(guard)
+signal.signal(signal.SIGALRM, deadline)
+signal.alarm(2)
+accepted = guard.check(Path(sys.argv[2]).read_text())
+signal.alarm(0)
+if accepted:
+    raise SystemExit("FAIL: guard accepted repeated near-signatures")
+PY
+echo "PASS: guard rejects repeated near-signatures within deadline"
+
 # ── Mutation 1: unbounded repack ──────────────────────────────────────────
 # Replace `"error": self` with a field repack that bypasses Serialize.
 sed 's/"error": self/"error": serde_json::json!({"code": self.code, "message": self.message, "details": self.details})/' \
     "$TARGET" > "$TMPDIR/mut1.rs"
 
-if python3 "$GUARD" --stdin < "$TMPDIR/mut1.rs" 2>/dev/null; then
+if check_source "$TMPDIR/mut1.rs" 2>/dev/null; then
     echo "FAIL: guard must reject unbounded repack mutation" >&2
     exit 1
 fi
@@ -92,7 +101,7 @@ echo "PASS: guard rejects unbounded repack"
 sed 's/"error": self/"error": serde_json::json!({"code": self.code, "message": bound_public_message(\&self.message), "details": self.details})/' \
     "$TARGET" > "$TMPDIR/mut2.rs"
 
-if python3 "$GUARD" --stdin < "$TMPDIR/mut2.rs" 2>/dev/null; then
+if check_source "$TMPDIR/mut2.rs" 2>/dev/null; then
     echo "FAIL: guard must reject bounded repack mutation" >&2
     exit 1
 fi
@@ -104,7 +113,7 @@ echo "PASS: guard rejects bounded repack"
 sed 's|"error": self|// "error": self  -- decoy comment\n             "error": serde_json::json!({"code": self.code, "message": self.message})|' \
     "$TARGET" > "$TMPDIR/mut3.rs"
 
-if python3 "$GUARD" --stdin < "$TMPDIR/mut3.rs" 2>/dev/null; then
+if check_source "$TMPDIR/mut3.rs" 2>/dev/null; then
     echo "FAIL: guard must reject commented decoy mutation" >&2
     exit 1
 fi
@@ -123,7 +132,7 @@ fn _decoy_for_guard_test() {
 }
 DECOY
 
-if python3 "$GUARD" --stdin < "$TMPDIR/mut4.rs" 2>/dev/null; then
+if check_source "$TMPDIR/mut4.rs" 2>/dev/null; then
     echo "FAIL: guard must reject dead/unrelated decoy mutation" >&2
     exit 1
 fi
@@ -168,7 +177,7 @@ fn publish_repacked_error(error: ToolError) -> anyhow::Result<Value> {
 Path(sys.argv[2]).write_text(source)
 PY
 
-if python3 "$GUARD" --stdin < "$TMPDIR/mut5.rs" 2>/dev/null; then
+if check_source "$TMPDIR/mut5.rs" 2>/dev/null; then
     echo "FAIL: guard must reject unreachable-direct/helper-repack mutation" >&2
     exit 1
 fi

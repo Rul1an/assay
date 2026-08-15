@@ -35,6 +35,18 @@ pub struct McpPolicyError {
     source: anyhow::Error,
 }
 
+impl McpPolicyError {
+    /// Whether this load failure means the policy document could not be parsed.
+    pub fn is_parse_failure(&self) -> bool {
+        matches!(
+            self.kind,
+            McpPolicyErrorKind::Syntax { .. }
+                | McpPolicyErrorKind::RootNotMapping
+                | McpPolicyErrorKind::Structure
+        )
+    }
+}
+
 impl std::fmt::Display for McpPolicyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.source)
@@ -65,6 +77,30 @@ mod error_source_contract {
             "stored top layer",
             "source() must expose the stored anyhow error, not skip to its cause"
         );
+    }
+
+    #[test]
+    fn parse_failure_group_excludes_post_parse_validation() {
+        for kind in [
+            McpPolicyErrorKind::Syntax {
+                line: Some(1),
+                column: Some(2),
+            },
+            McpPolicyErrorKind::RootNotMapping,
+            McpPolicyErrorKind::Structure,
+        ] {
+            let error = McpPolicyError {
+                kind,
+                source: anyhow::anyhow!("parse failure"),
+            };
+            assert!(error.is_parse_failure());
+        }
+
+        let validation = McpPolicyError {
+            kind: McpPolicyErrorKind::Validation,
+            source: anyhow::anyhow!("validation failure"),
+        };
+        assert!(!validation.is_parse_failure());
     }
 }
 
