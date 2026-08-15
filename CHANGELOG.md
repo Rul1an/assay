@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- The five advertised MCP policy tools now read local policy files through one
+  inclusive byte ceiling (`ServerConfig.max_policy_bytes`, default 1,000,000,
+  override `ASSAY_MCP_MAX_POLICY_BYTES`) before parse or cache insertion.
+  Exactly the limit is accepted; one extra byte returns `E_LIMIT_EXCEEDED`.
+  The ceiling is independent of the JSON-RPC `ASSAY_MCP_MAX_BYTES` message
+  limit. Operators with previously accepted larger local policy files must
+  shrink the file or set an explicit bounded override. This does not bound
+  parser nesting, YAML aliases, proxy startup policy, manifests, trust
+  policy, or CLI readers (#2389).
 - `assay_policy_decide` now rejects non-mapping roots and canonical or mixed name-policy
   documents (`allow`, `deny`, `tools`, or those markers mixed with root `blocklist`) with
   `E_POLICY_PARSE` before cache insertion. Those inputs previously returned a false clean

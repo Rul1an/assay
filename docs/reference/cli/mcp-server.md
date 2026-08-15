@@ -72,6 +72,22 @@ assay-mcp-server --policy-root <DIR>
 |--------|-------------|
 | `--policy-root <PATH>` | Policy root directory (default: `policies`) |
 
+### Policy-file ingest ceiling
+
+The five advertised policy tools (`assay_policy_decide`, `assay_check_args`,
+`assay_check_sequence`, `assay_check_coverage`, `assay_explain_trace`) read
+local policy files through one inclusive byte ceiling before parse or cache
+insertion. The default is 1,000,000 bytes. Override it with
+`ASSAY_MCP_MAX_POLICY_BYTES`. Exactly the configured size is accepted; one
+extra byte returns `E_LIMIT_EXCEEDED` and is not parsed or cached.
+
+This ceiling is independent of `ASSAY_MCP_MAX_BYTES`, which bounds inbound
+JSON-RPC messages. It does not limit YAML nesting, alias expansion, proxy
+startup policy, declared manifests, trust policy, or CLI policy readers.
+
+Operators whose local policy files previously exceeded 1,000,000 bytes must
+either reduce the file or set an explicit bounded override.
+
 ---
 
 ## Agent Integration Note

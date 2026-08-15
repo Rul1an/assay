@@ -28,13 +28,6 @@ pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
         return ToolError::new("E_LIMIT_EXCEEDED", "arguments too large").result();
     }
 
-    // 2. Load Policy (Unified Engine)
-    // Secure resolve
-    let policy_path = match ctx.resolve_policy_path(policy_rel_path).await {
-        Ok(p) => p,
-        Err(e) => return e.result(),
-    };
-
     // Slow hook for timeout testing (Strict preservation for tests)
     #[cfg(debug_assertions)]
     if policy_rel_path.contains("slow") {
@@ -48,11 +41,14 @@ pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
     // Ideally, the Server struct would hold persistent PolicyState.
     let mut state = assay_core::mcp::policy::PolicyState::default();
 
-    // Load policy (handles V1->V2 migration automatically)
-    let policy = match McpPolicy::from_file(&policy_path) {
+    let policy_bytes = match ctx.read_policy_bounded(policy_rel_path).await {
+        Ok(b) => b,
+        Err(e) => return e.result(),
+    };
+
+    let policy = match McpPolicy::from_slice(&policy_bytes) {
         Ok(p) => p,
         Err(e) => {
-            // Classify by McpPolicyError kind when available.
             if let Some(typed) = e.downcast_ref::<McpPolicyError>() {
                 let (class, location) = match &typed.kind {
                     McpPolicyErrorKind::Syntax { line, column } => {
@@ -68,22 +64,6 @@ pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
                 };
                 return ToolError::policy_parse(class, location).result();
             }
-            // I/O errors: Not Found, Permission Denied, etc.
-            let msg = e.to_string();
-            if msg.to_lowercase().contains("no such file")
-                || msg.to_lowercase().contains("system cannot find")
-            {
-                return ToolError::new(
-                    "E_POLICY_NOT_FOUND",
-                    &format!("Policy not found: {}", policy_rel_path),
-                )
-                .result();
-            } else if msg.to_lowercase().contains("permission denied")
-                || msg.to_lowercase().contains("is a directory")
-            {
-                return ToolError::new("E_POLICY_READ", &msg).result();
-            }
-            // Fallback: generic parse error with bounded message.
             return ToolError::policy_parse(PolicyParseFailure::Structure, None).result();
         }
     };

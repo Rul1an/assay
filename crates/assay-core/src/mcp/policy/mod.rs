@@ -141,6 +141,20 @@ impl McpPolicy {
         legacy::from_file(path)
     }
 
+    pub fn from_slice(bytes: &[u8]) -> anyhow::Result<Self> {
+        legacy::from_slice(bytes)
+    }
+}
+
+impl std::str::FromStr for McpPolicy {
+    type Err = anyhow::Error;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        Self::from_slice(text.as_bytes())
+    }
+}
+
+impl McpPolicy {
     pub fn validate(&self) -> anyhow::Result<()> {
         legacy::validate(self)
     }

@@ -87,9 +87,9 @@ mutate_full_parser_bypass() {
 import sys
 from pathlib import Path
 p = Path(sys.argv[1]); s = p.read_text()
-old = "McpPolicy::from_file(&policy_path)"
+old = "McpPolicy::from_slice(&policy_bytes)"
 assert old in s
-p.write_text(s.replace(old, "load_policy_alternate(&policy_path)", 1))
+p.write_text(s.replace(old, "load_policy_alternate(&policy_bytes)", 1))
 PY
 }
 

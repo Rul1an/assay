@@ -33,16 +33,9 @@ pub async fn check_sequence(ctx: &ToolContext, args: &Value) -> Result<Value> {
         Err(e) => return e.result(),
     };
 
-    let policy_bytes = match tokio::fs::read(&policy_path).await {
+    let policy_bytes = match ctx.read_policy_bounded(policy_rel_path).await {
         Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return ToolError::new(
-                "E_POLICY_NOT_FOUND",
-                &format!("Policy not found: {}", policy_rel_path),
-            )
-            .result();
-        }
-        Err(e) => return ToolError::new("E_POLICY_READ", &e.to_string()).result(),
+        Err(e) => return e.result(),
     };
 
     let sha = crate::cache::sha256_hex(&policy_bytes);

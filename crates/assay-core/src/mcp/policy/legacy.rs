@@ -3,11 +3,13 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 pub(super) fn from_file(path: &Path) -> anyhow::Result<McpPolicy> {
-    // Read raw bytes so we can classify UTF-8 failure as Syntax.
     let bytes = std::fs::read(path)?;
+    McpPolicy::from_slice(&bytes)
+}
 
+pub(super) fn from_slice(bytes: &[u8]) -> anyhow::Result<McpPolicy> {
     // UTF-8 decode — failure is Syntax, not an I/O error.
-    let content = match std::str::from_utf8(&bytes) {
+    let content = match std::str::from_utf8(bytes) {
         Ok(s) => s,
         Err(e) => {
             return Err(McpPolicyError {
