@@ -97,8 +97,9 @@ impl ToolError {
         class: PolicyParseFailure,
         location: Option<(usize, usize)>,
     ) -> Self {
-        let details =
-            location.map(|(line, column)| serde_json::json!({"line": line, "column": column}));
+        let details = location
+            .filter(|(line, column)| *line > 0 && *column > 0)
+            .map(|(line, column)| serde_json::json!({"line": line, "column": column}));
         Self {
             code: "E_POLICY_PARSE".to_string(),
             message: class.summary().to_string(),
@@ -599,5 +600,22 @@ mod tests {
             "serializer must enforce the literal public 4096-byte contract"
         );
         assert_eq!(published, "B".repeat(4096));
+    }
+
+    #[test]
+    fn policy_parse_publishes_only_positive_locations() {
+        let positive = ToolError::policy_parse(PolicyParseFailure::YamlSyntax, Some((2, 3)));
+        assert_eq!(
+            positive.details,
+            Some(serde_json::json!({"line": 2, "column": 3}))
+        );
+
+        for location in [(0, 3), (2, 0), (0, 0)] {
+            let error = ToolError::policy_parse(PolicyParseFailure::YamlSyntax, Some(location));
+            assert_eq!(
+                error.details, None,
+                "non-positive location {location:?} must not be published"
+            );
+        }
     }
 }

@@ -109,9 +109,22 @@ echo "PASS: guard rejects bounded repack"
 
 # ── Mutation 3: commented decoy ───────────────────────────────────────────
 # Keep a comment containing `"error": self` but replace the real expression
-# with a field repack. A naive substring check would see the comment and pass.
-sed 's|"error": self|// "error": self  -- decoy comment\n             "error": serde_json::json!({"code": self.code, "message": self.message})|' \
-    "$TARGET" > "$TMPDIR/mut3.rs"
+# with a live field repack on the following line. Python makes the newline
+# portable across GNU and BSD sed environments.
+python3 - "$TARGET" "$TMPDIR/mut3.rs" <<'PY'
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1]).read_text()
+old = '"error": self'
+new = (
+    '// "error": self  -- decoy comment\n'
+    '             "error": serde_json::json!({"code": self.code, "message": self.message})'
+)
+if old not in source:
+    raise SystemExit("fixture drift: direct publication expression not found")
+Path(sys.argv[2]).write_text(source.replace(old, new, 1))
+PY
 
 if check_source "$TMPDIR/mut3.rs" 2>/dev/null; then
     echo "FAIL: guard must reject commented decoy mutation" >&2

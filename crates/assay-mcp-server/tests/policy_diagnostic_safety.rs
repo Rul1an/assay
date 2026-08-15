@@ -448,7 +448,7 @@ fn structure_sentinel_absent_from_policy_decide() {
 fn structure_error_exact_for_check_coverage_and_explain_trace() {
     let dir = tempfile::tempdir().expect("policy-root");
     let root = dir.path();
-    // 'tools: 42' is a well-formed mapping with a typed field-shape error
+    // A string value for `tools` is a well-formed mapping with a typed field-shape error.
     let policy = format!("version: \"2.0\"\ntools: \"{MIDDLE_SENTINEL}\"\n");
     write_policy(root, "bad-struct.yaml", policy.as_bytes());
 

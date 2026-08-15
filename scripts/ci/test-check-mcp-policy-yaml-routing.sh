@@ -22,8 +22,18 @@ mutant() {
   rm -rf "$TMPDIR/current"
   cp -R "$TMPDIR/base" "$TMPDIR/current"
   "$mutation" "$TMPDIR/current"
-  if python3 "$GUARD" "$TMPDIR/current" >/dev/null 2>&1; then
+  local output status
+  set +e
+  output=$(python3 "$GUARD" "$TMPDIR/current" 2>&1)
+  status=$?
+  set -e
+  if [ "$status" -eq 0 ]; then
     echo "FAIL: routing guard accepted mutation: $name" >&2
+    exit 1
+  fi
+  if ! printf '%s\n' "$output" | grep -q '^FAIL: '; then
+    echo "FAIL: routing guard exited $status without a FAIL reason: $name" >&2
+    printf '%s\n' "$output" >&2
     exit 1
   fi
   echo "PASS: routing guard rejects $name"
@@ -93,11 +103,22 @@ fn _alias_parser(bytes: &[u8]) {
 RS
 }
 
+mutate_absolute_alias_parser() {
+  cat >> "$1/crates/assay-mcp-server/src/tools/check_coverage.rs" <<'RS'
+#[allow(dead_code)]
+fn _absolute_alias_parser(bytes: &[u8]) {
+    use ::serde_yaml as sy;
+    let _ = sy::from_slice::<sy::Value>(bytes);
+}
+RS
+}
+
 mutant "direct consumer parser" mutate_consumer_parser
 mutant "duplicate consumer root classifier" mutate_duplicate_root
 mutant "parallel core parser" mutate_core_parallel_parser
 mutant "missing direct helper route" mutate_missing_route
 mutant "full-policy parser bypass" mutate_full_parser_bypass
 mutant "aliased parser constructor" mutate_alias_parser
+mutant "absolute aliased parser constructor" mutate_absolute_alias_parser
 
 echo "All MCP policy YAML routing mutations caught."

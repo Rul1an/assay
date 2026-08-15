@@ -134,7 +134,7 @@ def check(root: Path) -> bool:
 
     for path, source in sources.items():
         effective = code_only(source)
-        if re.search(r"\buse\s+serde_(?:yaml|ignored)\b", effective):
+        if re.search(r"\buse\s+(?:::\s*)?serde_(?:yaml|ignored)\b", effective):
             errors.append(f"{path}: aliases/imported parser constructors are not approved")
         actual = PARSER_RE.findall(effective)
         expected = allowed_parser_calls.get(path, [])
