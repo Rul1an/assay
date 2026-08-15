@@ -8,6 +8,102 @@ mod response;
 mod schema;
 mod types;
 
+/// Typed classification of full-policy parse failures.
+///
+/// Non-exhaustive so downstream match arms must use a wildcard.
+/// `check_args` maps these to the three fixed `PolicyParseFailure` summaries.
+#[non_exhaustive]
+#[derive(Debug)]
+pub enum McpPolicyErrorKind {
+    /// YAML decode or UTF-8 failure.
+    Syntax {
+        line: Option<usize>,
+        column: Option<usize>,
+    },
+    /// Parsed value is not a YAML mapping at the root.
+    RootNotMapping,
+    /// Typed deserialization (field shape, unknown field rejection) failed.
+    Structure,
+    /// Post-deserialization validation (kill-switch refs, pin hashes) failed.
+    Validation,
+}
+
+/// Wrapper that carries the typed kind alongside the anyhow error chain.
+#[derive(Debug)]
+pub struct McpPolicyError {
+    pub kind: McpPolicyErrorKind,
+    source: anyhow::Error,
+}
+
+impl McpPolicyError {
+    /// Whether this load failure means the policy document could not be parsed.
+    pub fn is_parse_failure(&self) -> bool {
+        matches!(
+            self.kind,
+            McpPolicyErrorKind::Syntax { .. }
+                | McpPolicyErrorKind::RootNotMapping
+                | McpPolicyErrorKind::Structure
+        )
+    }
+}
+
+impl std::fmt::Display for McpPolicyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.source)
+    }
+}
+
+impl std::error::Error for McpPolicyError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
+#[cfg(test)]
+mod error_source_contract {
+    use super::{McpPolicyError, McpPolicyErrorKind};
+
+    #[test]
+    fn exposes_the_stored_anyhow_top_layer_as_direct_source() {
+        let stored = anyhow::anyhow!("inner source").context("stored top layer");
+        let wrapped = McpPolicyError {
+            kind: McpPolicyErrorKind::Structure,
+            source: stored,
+        };
+
+        let direct = std::error::Error::source(&wrapped).expect("direct source");
+        assert_eq!(
+            direct.to_string(),
+            "stored top layer",
+            "source() must expose the stored anyhow error, not skip to its cause"
+        );
+    }
+
+    #[test]
+    fn parse_failure_group_excludes_post_parse_validation() {
+        for kind in [
+            McpPolicyErrorKind::Syntax {
+                line: Some(1),
+                column: Some(2),
+            },
+            McpPolicyErrorKind::RootNotMapping,
+            McpPolicyErrorKind::Structure,
+        ] {
+            let error = McpPolicyError {
+                kind,
+                source: anyhow::anyhow!("parse failure"),
+            };
+            assert!(error.is_parse_failure());
+        }
+
+        let validation = McpPolicyError {
+            kind: McpPolicyErrorKind::Validation,
+            source: anyhow::anyhow!("validation failure"),
+        };
+        assert!(!validation.is_parse_failure());
+    }
+}
+
 use super::identity::ToolIdentity;
 use super::jcs;
 use super::jsonrpc::JsonRpcRequest;

@@ -75,13 +75,10 @@ pub async fn check_coverage(ctx: &ToolContext, args: &Value) -> Result<Value> {
         Err(e) => return ToolError::new("E_POLICY_READ", &e.to_string()).result(),
     };
 
-    // Parse policy
-    let policy: assay_core::model::Policy = match serde_yaml::from_slice(&policy_bytes) {
+    // Parse policy through the shared mapping-stage helper.
+    let policy: assay_core::model::Policy = match super::parse_tool_policy(&policy_bytes) {
         Ok(p) => p,
-        Err(e) => {
-            return ToolError::new("E_POLICY_PARSE", &format!("Failed to parse policy: {}", e))
-                .result();
-        }
+        Err(e) => return e.result(),
     };
 
     // Convert input traces to internal format

@@ -1,6 +1,6 @@
-use super::{ToolContext, ToolError};
+use super::{PolicyParseFailure, ToolContext, ToolError};
 use anyhow::{Context, Result};
-use assay_core::mcp::policy::{McpPolicy, PolicyDecision};
+use assay_core::mcp::policy::{McpPolicy, McpPolicyError, McpPolicyErrorKind, PolicyDecision};
 use serde_json::Value;
 
 pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
@@ -52,8 +52,24 @@ pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
     let policy = match McpPolicy::from_file(&policy_path) {
         Ok(p) => p,
         Err(e) => {
+            // Classify by McpPolicyError kind when available.
+            if let Some(typed) = e.downcast_ref::<McpPolicyError>() {
+                let (class, location) = match &typed.kind {
+                    McpPolicyErrorKind::Syntax { line, column } => {
+                        (PolicyParseFailure::YamlSyntax, line.zip(*column))
+                    }
+                    McpPolicyErrorKind::RootNotMapping => {
+                        (PolicyParseFailure::RootNotMapping, None)
+                    }
+                    McpPolicyErrorKind::Structure | McpPolicyErrorKind::Validation => {
+                        (PolicyParseFailure::Structure, None)
+                    }
+                    _ => (PolicyParseFailure::Structure, None),
+                };
+                return ToolError::policy_parse(class, location).result();
+            }
+            // I/O errors: Not Found, Permission Denied, etc.
             let msg = e.to_string();
-            // Handle Not Found specifically if possible, otherwise generic read error
             if msg.to_lowercase().contains("no such file")
                 || msg.to_lowercase().contains("system cannot find")
             {
@@ -67,8 +83,8 @@ pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
             {
                 return ToolError::new("E_POLICY_READ", &msg).result();
             }
-            // Default to PARSE error for any other failure (likely YAML syntax or structure)
-            return ToolError::new("E_POLICY_PARSE", &msg).result();
+            // Fallback: generic parse error with bounded message.
+            return ToolError::policy_parse(PolicyParseFailure::Structure, None).result();
         }
     };
 
