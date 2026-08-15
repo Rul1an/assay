@@ -27,6 +27,52 @@ if python3 "$GUARD" --stdin </dev/null 2>/dev/null; then
 fi
 echo "PASS: guard rejects stdin source selection"
 
+# The fixed production source is still PR-controlled, so read it through a
+# bounded stream operation before decoding or materializing the full file.
+python3 - "$GUARD" <<'PY'
+import importlib.util
+import sys
+
+spec = importlib.util.spec_from_file_location("publication_guard", sys.argv[1])
+if spec is None or spec.loader is None:
+    raise SystemExit("failed to load publication guard")
+guard = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(guard)
+
+class Probe:
+    def __init__(self):
+        self.requested = None
+
+    def open(self, mode):
+        if mode != "rb":
+            raise AssertionError(f"unexpected mode: {mode}")
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self, size):
+        self.requested = size
+        return b"x" * size
+
+probe = Probe()
+try:
+    guard.read_bounded_source(probe)
+except ValueError:
+    pass
+else:
+    raise SystemExit("FAIL: bounded reader accepted oversized source")
+expected = guard.MAX_SOURCE_BYTES + 1
+if probe.requested != expected:
+    raise SystemExit(
+        f"FAIL: bounded reader requested {probe.requested}, expected {expected}"
+    )
+PY
+echo "PASS: guard bounds the fixed source before materialization"
+
 # Verify the guard passes on the real file first.
 if ! python3 "$GUARD"; then
     echo "FAIL: guard must pass on the unmodified source" >&2

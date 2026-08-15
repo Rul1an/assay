@@ -8,12 +8,21 @@ from pathlib import Path
 
 
 DEFAULT_TARGET = Path("crates/assay-mcp-server/src/tools/mod.rs")
+MAX_SOURCE_BYTES = 1_000_000
 IMPL_SIGNATURE = "impl ToolError {"
 RESULT_SIGNATURE = "    pub fn result(self) -> anyhow::Result<Value> {"
 EXPECTED_BODY = (
     'Ok(serde_json::to_value(serde_json::json!({'
     '"allowed":false,"error":self}))?)'
 )
+
+
+def read_bounded_source(path) -> str:
+    with path.open("rb") as stream:
+        data = stream.read(MAX_SOURCE_BYTES + 1)
+    if len(data) > MAX_SOURCE_BYTES:
+        raise ValueError(f"source exceeds {MAX_SOURCE_BYTES}-byte limit")
+    return data.decode("utf-8")
 
 
 def extract_result_body(source: str) -> str | None:
@@ -148,5 +157,9 @@ if __name__ == "__main__":
     if len(sys.argv) != 1:
         print(f"usage: {Path(sys.argv[0]).name}", file=sys.stderr)
         raise SystemExit(2)
-    source = DEFAULT_TARGET.read_text()
+    try:
+        source = read_bounded_source(DEFAULT_TARGET)
+    except (OSError, UnicodeError, ValueError) as error:
+        print(f"FAIL: cannot read publication source: {error}", file=sys.stderr)
+        raise SystemExit(1) from error
     raise SystemExit(0 if check(source) else 1)
