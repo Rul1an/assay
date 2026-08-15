@@ -89,6 +89,27 @@ fn assert_parse_error(
     expected_message: &str,
     policy_root: &Path,
 ) {
+    assert_parse_error_with_policy(
+        label,
+        result,
+        body,
+        full_response,
+        expected_message,
+        policy_root,
+        None,
+    );
+}
+
+/// Extended version that also checks the relative policy filename is absent from the response.
+fn assert_parse_error_with_policy(
+    label: &str,
+    result: &Value,
+    body: &Value,
+    full_response: &str,
+    expected_message: &str,
+    policy_root: &Path,
+    policy_filename: Option<&str>,
+) {
     assert_eq!(
         result.get("isError").and_then(Value::as_bool),
         Some(true),
@@ -130,6 +151,7 @@ fn assert_parse_error(
         !full_response.contains(END_SENTINEL),
         "{label}: response reflected {END_SENTINEL}"
     );
+    // (A) Exclude the raw temp root path
     let root_str = policy_root.to_str().unwrap_or("");
     if !root_str.is_empty() {
         assert!(
@@ -137,6 +159,28 @@ fn assert_parse_error(
             "{label}: response contains policy root path '{root_str}'"
         );
     }
+    // (A) Exclude the canonical temp root (macOS /var → /private/var alias)
+    if let Ok(canon) = policy_root.canonicalize() {
+        let canon_str = canon.to_str().unwrap_or("");
+        if !canon_str.is_empty() && canon_str != root_str {
+            assert!(
+                !full_response.contains(canon_str),
+                "{label}: response contains canonical policy root path '{canon_str}'"
+            );
+        }
+    }
+    // (A) Exclude the relative policy filename
+    if let Some(filename) = policy_filename {
+        assert!(
+            !full_response.contains(filename),
+            "{label}: response contains relative policy filename '{filename}'"
+        );
+    }
+    // (B) Exclude baseline UTF-8 error phrase
+    assert!(
+        !full_response.contains("stream did not contain valid UTF-8"),
+        "{label}: response contains raw UTF-8 baseline phrase"
+    );
 }
 
 /// Build a 200k-byte filler with a single sentinel at its actual beginning.
@@ -470,6 +514,89 @@ fn invalid_utf8_classifies_as_yaml_syntax_error() {
     assert!(
         !full.contains("invalid utf-8") && !full.contains("Utf8Error"),
         "response must not contain raw UTF-8 diagnostic"
+    );
+
+    let _ = conn.shutdown();
+}
+
+// ── (C) Real stdio malformed multibyte policy ──────────────────────────
+// Not a synthetic ToolError: exercises the full server path with a policy
+// containing multibyte sequences that must not appear in the response.
+
+const MULTIBYTE_SENTINEL: &str = "\u{1F512}MULTIBYTE_SECRET_2387\u{1F513}";
+
+#[test]
+fn malformed_multibyte_policy_returns_valid_utf8_with_fixed_summary() {
+    let dir = tempfile::tempdir().expect("policy-root");
+    let root = dir.path();
+    // Build a policy file containing multibyte sentinels inside a broken YAML scalar.
+    // The server must return valid UTF-8 JSON with the fixed summary and no sentinel.
+    let mut content = b"version: \"\n  ".to_vec();
+    content.extend(MULTIBYTE_SENTINEL.as_bytes());
+    // Pad to a decent size so truncation is exercised
+    content.extend(std::iter::repeat_n(b'Y', 5000));
+    write_policy(root, "multibyte.yaml", &content);
+
+    let mut conn = spawn_server(root);
+    initialize(&mut conn);
+    let (result, body, full) = call_tool(
+        &mut conn,
+        "assay_check_args",
+        check_args_args("multibyte.yaml"),
+        2,
+    );
+
+    // The full response must parse as valid UTF-8 (it's a JSON string)
+    assert!(
+        std::str::from_utf8(full.as_bytes()).is_ok(),
+        "full response must be valid UTF-8"
+    );
+
+    // Fixed summary
+    assert_parse_error_with_policy(
+        "multibyte",
+        &result,
+        &body,
+        &full,
+        YAML_INVALID,
+        root,
+        Some("multibyte.yaml"),
+    );
+
+    // The multibyte sentinel must not appear anywhere
+    assert!(
+        !full.contains(MULTIBYTE_SENTINEL),
+        "response reflected multibyte sentinel"
+    );
+
+    let _ = conn.shutdown();
+}
+
+// ── (A) Path non-reflection with canonical and filename ────────────────
+
+#[test]
+fn path_non_reflection_canonical_and_filename() {
+    let dir = tempfile::tempdir().expect("policy-root");
+    let root = dir.path();
+    write_policy(root, "audit-a.yaml", b"version: \"\nbad: [");
+
+    let mut conn = spawn_server(root);
+    initialize(&mut conn);
+    let (result, body, full) = call_tool(
+        &mut conn,
+        "assay_check_args",
+        check_args_args("audit-a.yaml"),
+        2,
+    );
+
+    assert_parse_error_with_policy(
+        "path-canonical",
+        &result,
+        &body,
+        &full,
+        YAML_INVALID,
+        root,
+        Some("audit-a.yaml"),
     );
 
     let _ = conn.shutdown();

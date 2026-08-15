@@ -19,6 +19,11 @@ fn policy_error_classification_syntax() {
         "syntax error must be Syntax kind, got: {:?}",
         typed.unwrap().kind
     );
+    // (D) McpPolicyError must not skip/drop its direct anyhow source
+    assert!(
+        std::error::Error::source(typed.unwrap()).is_some(),
+        "McpPolicyError must expose its anyhow source via Error::source"
+    );
 }
 
 #[test]
@@ -35,6 +40,11 @@ fn policy_error_classification_root_not_mapping() {
         matches!(typed.unwrap().kind, McpPolicyErrorKind::RootNotMapping),
         "root-not-mapping must be RootNotMapping kind, got: {:?}",
         typed.unwrap().kind
+    );
+    // (D) McpPolicyError must not skip/drop its direct anyhow source
+    assert!(
+        std::error::Error::source(typed.unwrap()).is_some(),
+        "McpPolicyError must expose its anyhow source via Error::source"
     );
 }
 
@@ -54,6 +64,11 @@ fn policy_error_classification_structure() {
         "structure error must be Structure kind, got: {:?}",
         typed.unwrap().kind
     );
+    // (D) McpPolicyError must not skip/drop its direct anyhow source
+    assert!(
+        std::error::Error::source(typed.unwrap()).is_some(),
+        "McpPolicyError must expose its anyhow source via Error::source"
+    );
 }
 
 #[test]
@@ -70,6 +85,11 @@ fn policy_error_classification_invalid_utf8() {
         matches!(typed.unwrap().kind, McpPolicyErrorKind::Syntax { .. }),
         "invalid UTF-8 must be Syntax kind, got: {:?}",
         typed.unwrap().kind
+    );
+    // (D) McpPolicyError must not skip/drop its direct anyhow source
+    assert!(
+        std::error::Error::source(typed.unwrap()).is_some(),
+        "McpPolicyError must expose its anyhow source via Error::source"
     );
 }
 
@@ -95,6 +115,11 @@ fn policy_error_classification_validation() {
         "validation error must be Validation kind, got: {:?}",
         typed.unwrap().kind
     );
+    // (D) McpPolicyError must not skip/drop its direct anyhow source
+    assert!(
+        std::error::Error::source(typed.unwrap()).is_some(),
+        "McpPolicyError must expose its anyhow source via Error::source"
+    );
 }
 
 // ── Scalar root classification ──────────────────────────────────────────
@@ -113,6 +138,11 @@ fn policy_error_classification_scalar_root() {
         matches!(typed.unwrap().kind, McpPolicyErrorKind::RootNotMapping),
         "scalar root must be RootNotMapping kind, got: {:?}",
         typed.unwrap().kind
+    );
+    // (D) McpPolicyError must not skip/drop its direct anyhow source
+    assert!(
+        std::error::Error::source(typed.unwrap()).is_some(),
+        "McpPolicyError must expose its anyhow source via Error::source"
     );
 }
 
