@@ -19,7 +19,7 @@ fn fail_closed_tool_result(code: &'static str, message: &'static str) -> Result<
 fn classify_tool_result(result: &Value) -> (bool, bool) {
     let has_error = result.get("error").is_some();
     let explicit_allowed = result.get("allowed").and_then(Value::as_bool);
-    let allowed = explicit_allowed.unwrap_or(!has_error);
+    let allowed = explicit_allowed.unwrap_or(false);
     let is_error = has_error || explicit_allowed == Some(false);
     (allowed, is_error)
 }
@@ -462,7 +462,24 @@ impl Server {
 
 #[cfg(test)]
 mod claims_boundary_tests {
-    use super::{initialize_result, LegacyProtocolVersion};
+    use super::{classify_tool_result, initialize_result, LegacyProtocolVersion};
+
+    #[test]
+    fn tool_result_classification_separates_decision_from_mcp_error() {
+        for (result, expected) in [
+            (serde_json::json!({"allowed": true}), (true, false)),
+            (serde_json::json!({"allowed": false}), (false, true)),
+            (
+                serde_json::json!({"allowed": false, "error": {"code": "E_INTERNAL"}}),
+                (false, true),
+            ),
+            // Report tools return data rather than a policy decision. Preserve the existing
+            // decision telemetry while keeping their successful MCP result non-error.
+            (serde_json::json!({"report": {}}), (false, false)),
+        ] {
+            assert_eq!(classify_tool_result(&result), expected, "result: {result}");
+        }
+    }
 
     /// ADR-042 stop list, ADR-043 §2. The handshake must not assert a status the server
     /// cannot substantiate. A denylist over the serialized response catches a claim

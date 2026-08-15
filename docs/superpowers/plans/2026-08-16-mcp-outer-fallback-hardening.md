@@ -122,14 +122,18 @@ let tool_result = match timeout(Duration::from_millis(cfg.timeout_ms), fut).awai
 };
 ```
 
-Do not publish or log `_error`, the caller tool name, caller policy path, or caller-selected fallback. Preserve non-sensitive timing and request-id telemetry. Feed `tool_result` through the existing outcome/evidence logic, then wrap it once:
+Do not publish `_error` or include caller-controlled values in the outer-fallback
+`tool_call_*` telemetry. The separate pre-existing `tool_decision` evidence event keeps its own
+redaction contract. Preserve non-sensitive timing and request-id telemetry. Feed `tool_result`
+through one classification function before emitting evidence and wrapping the MCP result:
 
 ```rust
-let is_error = !tool_result
-    .get("allowed")
-    .and_then(Value::as_bool)
-    .unwrap_or(false);
+let (allowed, is_error) = classify_tool_result(&tool_result);
 ```
+
+An explicit `allowed: false` is both a denial and an MCP tool error. A payload with `error` is an
+MCP tool error. Report tools without either field keep their pre-existing non-allow decision
+telemetry but return a successful MCP result.
 
 Use the fixed JSON-RPC message `"Method not found"` for the unknown-method branch. Do not add a fail-open warning because no fail-open state remains.
 
