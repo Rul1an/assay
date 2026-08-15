@@ -12,7 +12,7 @@ serialization boundary.
 function in `tools/mod.rs`, use it in both `ToolError::new` and a manual `Serialize` implementation,
 and add one policy-parse constructor that accepts only a fixed failure class plus optional numeric
 location. Direct YAML consumers use one two-stage value/root/typed helper; the full-policy parser
-tags syntax, shape, and validation failures at source for `check_args`. Migrate the four raw parser
+tags syntax, root, shape, and validation failures at source for `check_args`. Migrate the four raw parser
 sinks; leave the already-fixed sequence diagnostic on the general constructor.
 
 **Tech Stack:** Rust 1.96, serde/serde_json/serde_yaml, real stdio JSON-RPC tests, pre-commit,
@@ -45,8 +45,11 @@ GitHub Actions.
 - Modify `crates/assay-mcp-server/src/tools/explain_trace.rs`: value-free YAML parser errors.
 - Add `crates/assay-mcp-server/tests/policy_diagnostic_safety.rs`: real-stdio hostile-input contract.
 - Modify `crates/assay-core/src/mcp/policy/mod.rs`: expose the typed full-policy failure kind.
-- Modify `crates/assay-core/src/mcp/policy/legacy.rs`: tag syntax, shape, and validation failures at source.
+- Modify `crates/assay-core/src/mcp/policy/legacy.rs`: tag syntax, root, shape, and validation failures at source.
 - Modify `crates/assay-core/src/mcp/tests.rs`: pin full-policy error classification.
+- Add `scripts/ci/check-mcp-policy-yaml-routing.py`: enforce the single mapping/parser boundary.
+- Add `scripts/ci/test-check-mcp-policy-yaml-routing.sh`: mutation-test the routing guard.
+- Modify `.pre-commit-config.yaml`: run the guard for every guarded parser or consumer.
 
 ### Task 1: Freeze the public diagnostic boundary
 
@@ -87,11 +90,12 @@ assertion stand in for these three classes.
 For malformed syntax at a known line/column, assert `details.line` and `details.column` are positive
 integers when that parser supplies location. Assert the complete response excludes the canonical
 temporary root and policy path. Add a malformed multibyte input whose bounded message must remain
-valid UTF-8.
+valid UTF-8. Separately construct a long message whose byte 4,096 falls inside a multibyte code
+point; reuse that exact message in every serializer-bypass case below.
 
 - [ ] **Step 4: Pin constructor and serializer bypasses**
 
-In `tools/mod.rs` tests serialize all three forms with a message longer than 4,096 bytes:
+In `tools/mod.rs` tests serialize all three forms with that same boundary-bisecting message:
 
 ```rust
 ToolError::new("E_TEST", &message)
@@ -197,6 +201,9 @@ git commit -m "fix(mcp): bound public tool error messages"
 - Modify: `crates/assay-mcp-server/src/tools/check_args.rs`
 - Modify: `crates/assay-mcp-server/src/tools/check_coverage.rs`
 - Modify: `crates/assay-mcp-server/src/tools/explain_trace.rs`
+- Add: `scripts/ci/check-mcp-policy-yaml-routing.py`
+- Add: `scripts/ci/test-check-mcp-policy-yaml-routing.sh`
+- Modify: `.pre-commit-config.yaml`
 
 - [ ] **Step 1: Inventory and pin the baseline**
 
@@ -210,23 +217,26 @@ because it is fixed and value-free, but it must not become a second parse-policy
 
 - [ ] **Step 2: Map syntax and structure without raw text**
 
-Add one generic direct-tool helper in `tools/mod.rs`: first decode bytes to `serde_yaml::Value`,
-then require a mapping root, then deserialize the value into the tool's typed policy. Classify the
-three stages as `YamlSyntax`, `RootNotMapping`, and `Structure`; extract only safe numeric location
-from the first-stage error. `check_coverage` and `explain_trace` must call this helper rather than
-classify `serde_yaml::Error` by its `Display` text. In `policy_decide`, retain #2386's explicit root
-and dialect checks while using the same syntax classification.
+Add one generic direct-tool helper in `tools/mod.rs` around a shared mapping-stage function: decode
+bytes to `serde_yaml::Value`, require a mapping root, and return the mapping-stage value plus the
+approved syntax/root classification. The generic helper then deserializes that value into the
+tool's typed policy and classifies typed failure as `Structure`; extract only safe numeric location
+from the first-stage error. `check_coverage` and `explain_trace` must call the generic helper.
+`policy_decide` must call the same mapping-stage function before its private dialect check. No
+direct consumer may construct a YAML deserializer or duplicate the mapping-root rule.
 
 - [ ] **Step 3: Handle `check_args` without widening into the reader/parser slice**
 
 Keep the existing not-found/read branches as a separate concern until #2389 centralizes them. In
-`assay-core`, add a public non-exhaustive `McpPolicyErrorKind` and a typed error wrapper whose source
-is retained but whose kind is queryable without parsing `Display`. The existing file parser first
-decodes to `serde_yaml::Value`, then runs the current ignored-field-aware typed deserialize,
-normalization, migration, and validation sequence. Tag first-stage decode as `Syntax`, typed
-deserialize as `Structure`, and validation as `Validation`; I/O errors remain outside this wrapper.
-`check_args` downcasts this wrapper and maps `Syntax` to `PolicyParseFailure::YamlSyntax`, and
-`Structure`/`Validation` to `PolicyParseFailure::Structure`.
+`assay-core`, add a public non-exhaustive `McpPolicyErrorKind` with `Syntax`, `RootNotMapping`,
+`Structure`, and `Validation`, plus a typed error wrapper whose source is retained but whose kind is
+queryable without parsing `Display`. The existing file parser first decodes to
+`serde_yaml::Value`, checks that the root is a mapping, then runs the current ignored-field-aware
+typed deserialize, normalization, migration, and validation sequence. Tag those stages
+respectively; I/O errors remain outside this wrapper. `check_args` maps `Syntax` to
+`PolicyParseFailure::YamlSyntax`, `RootNotMapping` to `PolicyParseFailure::RootNotMapping`, and
+`Structure`/`Validation` to `PolicyParseFailure::Structure`. The core test pins all four kinds,
+including a scalar-root fixture.
 
 Do not add a parallel bytes/string `McpPolicy` parser here. #2389 moves this same tagged parse rule
 behind the bytes API, preserves file/bytes parity, and removes `from_file` from the `check_args`
@@ -240,6 +250,8 @@ cargo test --locked -p assay-mcp-server --test policy_diagnostic_safety -- --noc
 cargo test --locked -p assay-mcp-server --test policy_decide_blocklist -- --nocapture
 cargo test --locked -p assay-mcp-server --test stdio_edge_cases -- --nocapture
 cargo test --locked -p assay-core mcp::tests::policy_error_classification -- --nocapture
+python3 scripts/ci/check-mcp-policy-yaml-routing.py
+bash scripts/ci/test-check-mcp-policy-yaml-routing.sh
 rg -n 'E_POLICY_PARSE.*(e\.to_string|format!)|Failed to parse policy' \
   crates/assay-mcp-server/src/tools
 ```
@@ -248,11 +260,16 @@ Expected: tests pass and the grep finds no source-derived public parse sink.
 
 - [ ] **Step 5: Run discriminating mutations**
 
-In disposable copies, separately: return a raw parser string from one sink; collapse syntax and
-typed-shape to one class; make a direct YAML consumer bypass the two-stage helper; remove the
-constructor bound; remove the serializer bound; and replace the UTF-8 boundary loop with a byte
-slice. Each mutation must fail a different sentinel, classification, direct-struct, post-mutation,
-or multibyte assertion.
+Add and self-test a structural source guard that permits YAML parser/deserializer construction only
+inside the shared mapping/generic helpers and the `assay-core` full-policy parser, and requires
+`policy_decide`, `check_coverage`, and `explain_trace` to call the approved helper. Disposable
+fixtures must fail when a faithful duplicate two-stage parser is inserted at a consumer. Wire it to
+pre-commit for `tools/mod.rs`, the three direct consumers, the guard, and its self-test.
+
+Then, in disposable copies, separately: return a raw parser string from one sink; collapse syntax,
+root, and typed-shape classes; bypass the helper; remove the constructor bound; remove the serializer
+bound; and replace the UTF-8 boundary loop with a byte slice. Each mutation must fail a different
+structural, sentinel, classification, direct-struct, post-mutation, or multibyte assertion.
 
 - [ ] **Step 6: Commit migrated sinks and integration test**
 
@@ -266,7 +283,10 @@ git add -- \
   crates/assay-mcp-server/src/tools/check_args.rs \
   crates/assay-mcp-server/src/tools/check_coverage.rs \
   crates/assay-mcp-server/src/tools/explain_trace.rs \
-  crates/assay-mcp-server/tests/policy_diagnostic_safety.rs
+  crates/assay-mcp-server/tests/policy_diagnostic_safety.rs \
+  scripts/ci/check-mcp-policy-yaml-routing.py \
+  scripts/ci/test-check-mcp-policy-yaml-routing.sh \
+  .pre-commit-config.yaml
 git commit -m "fix(mcp): normalise public policy parse diagnostics"
 ```
 

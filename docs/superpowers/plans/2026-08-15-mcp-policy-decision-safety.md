@@ -114,10 +114,11 @@ Add a helper parameter for the proposed tool name so the literal-wildcard contro
 cargo test --locked -p assay-mcp-server --test policy_decide_blocklist -- --nocapture
 ```
 
-Expected: existing #2385 field-shape cases, including present `blocklist: null`, still pass.
-Malformed roots and canonical mappings fail RED because they currently produce clean allows. Mixed
-dialects fail RED when they deny or allow instead of returning the required structure error. Record
-the discriminating assertion names in #2388.
+Expected: every newly exact stable-message assertion for malformed `blocklist` values, including
+present `blocklist: null`, fails because the baseline publishes raw serde wording. Malformed roots
+and canonical mappings fail RED because they currently produce clean allows. Mixed dialects fail
+RED when they deny or allow instead of returning the required structure error. Existing verdict-only
+controls remain green. Record the discriminating assertion names in #2388.
 
 - [ ] **Step 6: Commit only the RED test**
 

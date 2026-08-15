@@ -35,80 +35,66 @@ stdio JSON-RPC tests, pre-commit, GitHub Actions.
 ## File Structure
 
 - Modify `crates/assay-mcp-server/src/config.rs`: independent policy-byte configuration.
+- Modify `crates/assay-mcp-server/src/main.rs`: log the configured policy ceiling from `ServerConfig`.
 - Modify `crates/assay-mcp-server/src/tools/mod.rs`: shared async bounded reader and error mapping.
 - Modify five tool files under `crates/assay-mcp-server/src/tools/`: remove unbounded reads.
 - Modify `crates/assay-core/src/mcp/policy/mod.rs` and `policy/legacy.rs`: one bytes-in parser.
-- Modify `crates/assay-core/src/mcp/tests.rs`: file/bytes/string parser parity table.
+- Modify `crates/assay-core/src/mcp/tests.rs`: file/bytes/string parser contract table.
 - Add `crates/assay-mcp-server/tests/policy_ingest_limits.rs`: real-stdio five-tool boundary table.
+- Add `scripts/ci/check-mcp-policy-reader-routing.py` and its self-test: pin `LimitReader` and all five callsites.
+- Add `scripts/ci/check-mcp-policy-parser-delegation.py` and its self-test: pin both full-policy delegation hops.
+- Modify `.pre-commit-config.yaml`: wire both routing guards to all guarded source paths.
+- Modify `CHANGELOG.md` and the MCP server/operator reference: document the default ceiling and override.
 
-### Task 1: Freeze configuration and reader boundaries
+### Task 1: Establish the behavioral RED
 
 **Files:**
-- Modify: `crates/assay-mcp-server/src/config.rs` (tests only first)
-- Modify: `crates/assay-mcp-server/src/tools/mod.rs` (tests only first)
+- Add: `crates/assay-mcp-server/tests/policy_ingest_limits.rs` (black-box RED first)
 
-- [ ] **Step 1: Add independent configuration RED tests**
+- [ ] **Step 1: Add and run one compilable black-box RED**
 
-Use one process-scoped mutex and restore every changed variable before releasing it; do not let
-parallel tests observe transient process environment. Pin:
-
-```text
-default max_policy_bytes == 1_000_000
-ASSAY_MCP_MAX_POLICY_BYTES=1234 -> max_policy_bytes == 1234
-ASSAY_MCP_MAX_BYTES=4321 changes max_msg_bytes but not max_policy_bytes
-invalid ASSAY_MCP_MAX_POLICY_BYTES leaves the default
-```
-
-- [ ] **Step 2: Add pure reader RED tests**
-
-Design the blocking primitive so tests can pass any `Read`, then cover:
-
-```text
-exactly limit bytes -> complete Vec
-limit + 1 bytes -> typed LimitExceeded(SourceBytes)
-chunked reader that crosses after multiple reads -> limit error
-reader that returns an ordinary I/O error -> read error
-```
-
-Use `LimitExceeded::from_io` for classification; never match rendered error text.
-
-- [ ] **Step 3: Add file-level RED tests**
-
-Through `ToolContext::read_policy_bounded`, cover missing file, directory read failure, an
-exact-limit regular file, and a sparse limit-plus-one file. Avoid a Unix-mode permission fixture,
-which is not portable and may pass under a privileged runner. The sparse test plus the metadata-only
-mutation in Task 4 must prove the implementation reads through the ceiling rather than trusting or
-allocating from metadata.
-
-- [ ] **Step 4: Run RED**
+Using only the existing public binary surface, start the server with a small
+`ASSAY_MCP_MAX_POLICY_BYTES`. Call every advertised tool with a limit-plus-one policy and expect
+`E_LIMIT_EXCEEDED`; the current server ignores that variable and the assertions must fail while the
+test compiles and runs. In the same test, pin the already-shipped #2387 invalid-UTF-8
+`assay_check_args` response as a GREEN regression control. Run and record the assertion failures:
 
 ```bash
-cargo test --locked -p assay-mcp-server config:: -- --nocapture
-cargo test --locked -p assay-mcp-server tools::tests::bounded_policy -- --nocapture
-```
-
-- [ ] **Step 5: Commit only RED tests**
-
-```bash
-git add -- \
-  crates/assay-mcp-server/src/config.rs \
-  crates/assay-mcp-server/src/tools/mod.rs
+cargo test --locked -p assay-mcp-server --test policy_ingest_limits -- --nocapture
+git add -- crates/assay-mcp-server/tests/policy_ingest_limits.rs
 git commit -m "test(mcp): expose unbounded policy-file ingest"
 ```
+
+This is the behavioral RED required before any production interface or reader change. Later unit
+cycles may initially fail to compile against an absent private seam, but those failures are not
+reported as the RED proof.
 
 ### Task 2: Implement configuration and shared bounded reader
 
 **Files:**
 - Modify: `crates/assay-mcp-server/src/config.rs`
+- Modify: `crates/assay-mcp-server/src/main.rs`
 - Modify: `crates/assay-mcp-server/src/tools/mod.rs`
+- Add: `scripts/ci/check-mcp-policy-reader-routing.py`
+- Add: `scripts/ci/test-check-mcp-policy-reader-routing.sh`
+- Modify: `.pre-commit-config.yaml`
 
-- [ ] **Step 1: Add the single configuration value**
+- [ ] **Step 1: Test, then add, the single configuration value**
+
+Add configuration tests immediately before the field change. Use one process-scoped mutex and
+restore every changed variable before releasing it. Pin the `1_000_000` default, the independent
+`ASSAY_MCP_MAX_POLICY_BYTES=1234` override, non-interference from `ASSAY_MCP_MAX_BYTES=4321`, and
+invalid override fallback. Then add the field and make those tests pass.
 
 Add `pub max_policy_bytes: usize` to `ServerConfig`, default it to `1_000_000`, and parse only
 `ASSAY_MCP_MAX_POLICY_BYTES` in `from_env`. Log the value alongside existing limits in `main.rs`
 without introducing a second literal.
 
-- [ ] **Step 2: Extract the blocking primitive**
+- [ ] **Step 2: Test, then extract, the blocking primitive**
+
+Before implementing the private primitive, add focused tests for exactly-limit, limit-plus-one,
+chunked crossing, and ordinary I/O failure using an arbitrary `Read`. Classify through
+`LimitExceeded::from_io`; never match rendered text. Then implement the smallest passing helper:
 
 Implement a helper using:
 
@@ -126,7 +112,10 @@ std::io::Read::read_to_end(&mut reader, &mut bytes)?;
 The helper returns bytes or a typed internal read classification. It must not preallocate from
 `metadata().len()`.
 
-- [ ] **Step 3: Add the async context entry point**
+- [ ] **Step 3: Test, then add, the async context entry point**
+
+Before adding the context method, test missing file, directory read failure, exact-limit regular
+file, and sparse limit-plus-one file. Avoid Unix-mode permission fixtures. Then implement:
 
 `ToolContext::read_policy_bounded(user_path)` first calls the existing secure
 `resolve_policy_path`, then moves the owned path and limit into `tokio::task::spawn_blocking`.
@@ -140,20 +129,34 @@ other I/O or JoinError -> E_POLICY_READ with a fixed value-free message
 
 Do not include canonical roots, OS diagnostics, or policy contents.
 
-- [ ] **Step 4: Run GREEN reader/config tests**
+- [ ] **Step 4: Add and self-test the reader-routing guard**
+
+Require the blocking primitive to construct `LimitReader` and forbid `metadata()`-based acceptance
+or direct `File::read_to_end` outside that wrapper. Require `ToolContext::read_policy_bounded` to
+call the primitive. Disposable fixtures must fail for a faithful metadata-size check followed by an
+unbounded read, and for a context method that bypasses the primitive. Wire the guard to pre-commit
+for `config.rs`, `main.rs`, `tools/mod.rs`, all five tool modules, the guard, and its self-test. This
+structural proof, not sparse-file metadata alone, discriminates the metadata-only mutation.
+
+- [ ] **Step 5: Run GREEN reader/config tests and guard**
 
 ```bash
 cargo test --locked -p assay-mcp-server config:: -- --nocapture
 cargo test --locked -p assay-mcp-server tools::tests::bounded_policy -- --nocapture
+python3 scripts/ci/check-mcp-policy-reader-routing.py
+bash scripts/ci/test-check-mcp-policy-reader-routing.sh
 ```
 
-- [ ] **Step 5: Commit the shared reader**
+- [ ] **Step 6: Commit the shared reader**
 
 ```bash
 git add -- \
   crates/assay-mcp-server/src/config.rs \
   crates/assay-mcp-server/src/main.rs \
-  crates/assay-mcp-server/src/tools/mod.rs
+  crates/assay-mcp-server/src/tools/mod.rs \
+  scripts/ci/check-mcp-policy-reader-routing.py \
+  scripts/ci/test-check-mcp-policy-reader-routing.sh \
+  .pre-commit-config.yaml
 git commit -m "feat(mcp): bound shared policy-file reads"
 ```
 
@@ -167,54 +170,78 @@ git commit -m "feat(mcp): bound shared policy-file reads"
 - Add: `scripts/ci/test-check-mcp-policy-parser-delegation.sh`
 - Modify: `.pre-commit-config.yaml`
 
-- [ ] **Step 1: Add a parser parity RED table**
+- [ ] **Step 1: Freeze current file-parser behavior before extraction**
 
-For each fixture, first pin an independent expected outcome, then compare the public bytes/string
-entry point with a temp file loaded through `McpPolicy::from_file`:
+For each fixture, pin an independent expected outcome through the existing
+`McpPolicy::from_file` API:
 
 ```text
 V2 tools/schema policy
 legacy root allow/deny
 V1 constraints and migration
 unknown field (accepted with warning)
+non-strict V1 input (accepted with the existing deprecation warning)
 strict-deprecations rejection
 malformed YAML
-non-UTF-8 bytes
 validation failure (for example invalid referenced rule)
 ```
 
 Expected outcomes must name the normalized allow/deny/schema result for V2 and legacy fixtures,
 the migrated schema produced from V1 constraints, the unknown-field warning captured with a test
-tracing subscriber, strict-mode rejection, syntax/UTF-8/validation failure kind, and whether
-validation ran. Then compare entry points. Do not assert raw parser wording; parity is additional
-evidence, not the oracle.
-
-- [ ] **Step 2: Run parser RED and commit tests only**
+tracing subscriber, the separate non-strict V1 deprecation warning, strict-mode rejection,
+syntax/validation failure kind, and whether validation ran. Run this table GREEN and commit it as a
+behavior freeze; it is not RED evidence.
 
 ```bash
-cargo test --locked -p assay-core mcp::tests::policy_from_slice_contract -- --nocapture
+cargo test --locked -p assay-core mcp::tests::policy_file_parser_contract -- --nocapture
+git add -- crates/assay-core/src/mcp/tests.rs
+git commit -m "test(mcp): freeze full-policy file parser behavior"
 ```
 
-Expected: compile failure because `McpPolicy::from_slice` does not exist. Record the failure, stage
-only `crates/assay-core/src/mcp/tests.rs`, and commit the RED test before parser production changes.
+- [ ] **Step 2: Add an interface-only stub, then run a behavioral RED**
+
+Add `McpPolicy::from_slice(&[u8])` and required `McpPolicy::from_str(&str)` methods that return one
+explicit temporary unsupported error without parsing. This is an interface seam, not a second
+parser. Then extend the fixture table to call file, bytes, and string entry points, plus non-UTF-8
+bytes for `from_slice`, and assert each independent expected outcome before asserting parity.
+
+```bash
+cargo test --locked -p assay-core mcp::tests::policy_parser_contract -- --nocapture
+```
+
+Expected: the test compiles and fails assertions because the bytes/string stub returns unsupported.
+Record that behavioral failure and commit the interface-only stub plus test before moving parser
+behavior:
+
+```bash
+git add -- \
+  crates/assay-core/src/mcp/policy/mod.rs \
+  crates/assay-core/src/mcp/policy/legacy.rs \
+  crates/assay-core/src/mcp/tests.rs
+git commit -m "test(mcp): expose missing full-policy bytes parser"
+```
 
 - [ ] **Step 3: Move the rule, do not copy it**
 
-Move deserialize-with-`serde_ignored`, unknown-field warning, strict-deprecation check, legacy
-normalization, constraint migration, and validation into one bytes-in function in `legacy.rs`.
-Expose it from `McpPolicy` as `from_slice(&[u8])` (and `from_str` only if a real caller needs it).
+Move UTF-8 decode, deserialize-with-`serde_ignored`, unknown-field warning, non-strict V1
+deprecation warning, strict-deprecation check, legacy normalization, constraint migration, and
+validation into one bytes-in function in `legacy.rs`. Make both public bytes/string methods call
+that one function; `from_str` must not duplicate its stages.
 
 - [ ] **Step 4: Make `from_file` delegate**
 
-`from_file` performs only the file read and `McpPolicy::from_slice(&bytes)`. It must not retain a
-second deserialize/normalize/validate sequence.
+The public `McpPolicy::from_file` in `policy/mod.rs` delegates only to `legacy::from_file`.
+`legacy::from_file` performs only the file read and `McpPolicy::from_slice(&bytes)`. Neither function
+may retain a deserialize/normalize/validate sequence.
 
 - [ ] **Step 5: Add and self-test the structural delegation guard**
 
-Add a source guard that identifies the `from_file` function body, requires its call to
-`McpPolicy::from_slice`, and rejects deserialize/parser construction in that body. The self-test
-uses disposable source fixtures and must fail when a faithful duplicate deserializer is inserted.
-Wire the guard into pre-commit for changes to `legacy.rs` or the guard itself.
+Add a source guard that identifies both exact delegation hops: the public `McpPolicy::from_file`
+body in `policy/mod.rs` must call `legacy::from_file`, and `legacy::from_file` must call
+`McpPolicy::from_slice`. Reject parser/deserializer construction in either body. The self-test uses
+disposable source fixtures and must fail when a faithful duplicate deserializer is inserted at
+either hop. Wire the guard into pre-commit for changes to `policy/mod.rs`, `legacy.rs`, the guard,
+or its self-test.
 
 - [ ] **Step 6: Run core GREEN and the structural guard**
 
@@ -226,9 +253,10 @@ bash scripts/ci/test-check-mcp-policy-parser-delegation.sh
 
 - [ ] **Step 7: Run semantic mutations and commit parser extraction**
 
-In disposable copies, separately skip strict-deprecation detection, legacy normalization,
-constraint migration, unknown-field reporting, and validation. Each must fail its own expected-
-outcome assertion even though `from_file` and `from_slice` still agree.
+In disposable copies, separately skip the non-strict V1 deprecation warning, strict-deprecation
+detection, legacy normalization, constraint migration, unknown-field reporting, and validation.
+Each must fail its own expected-outcome assertion even though file, bytes, and string entry points
+still agree.
 
 ```bash
 git add -- \
@@ -249,64 +277,61 @@ git commit -m "refactor(mcp): share full-policy bytes parser"
 - Modify: `crates/assay-mcp-server/src/tools/check_coverage.rs`
 - Modify: `crates/assay-mcp-server/src/tools/explain_trace.rs`
 - Modify: `crates/assay-mcp-server/src/tools/check_args.rs`
-- Add: `crates/assay-mcp-server/tests/policy_ingest_limits.rs`
+- Modify: `crates/assay-mcp-server/tests/policy_ingest_limits.rs`
 
-- [ ] **Step 1: Add a real-stdio RED matrix**
+- [ ] **Step 1: Complete the already-RED real-stdio matrix**
 
-Start the server with `ASSAY_MCP_MAX_POLICY_BYTES=<small fixture limit>`. For each advertised tool,
-call a limit-plus-one policy and assert `result.isError:true`, `allowed:false`, and
-`E_LIMIT_EXCEEDED`. Call an exactly-limit valid policy in that tool's own dialect and assert it
-reaches the normal non-limit result. Pad valid YAML with comments to the exact byte boundary; do not
-pretend one unpadded fixture can have identical valid semantics in all five dialects.
+The Task 1 test already proves limit-plus-one fails behaviorally on the unmodified server. Extend it
+with an exactly-limit valid policy in each tool's own dialect and assert it reaches the normal
+non-limit result. Pad valid YAML with comments to the exact byte boundary; do not pretend one
+unpadded fixture can have identical valid semantics in all five dialects. For
+`assay_policy_decide` and `assay_check_sequence`, call oversized input twice and assert both remain
+limit failures.
 
-Add a separate invalid-UTF-8 file for `assay_check_args`. Assert the complete real-stdio response
-has `result.isError:true`, `allowed:false`, `E_POLICY_PARSE`, and exactly
-`Policy YAML is invalid`. This is a parse-classification contract, not a size-limit case.
+Retain the invalid-UTF-8 `assay_check_args` regression control from Task 1. It must remain GREEN with
+`result.isError:true`, `allowed:false`, `E_POLICY_PARSE`, and exactly `Policy YAML is invalid`; it is
+not claimed as a new RED in this slice.
 
-- [ ] **Step 2: Run stdio RED and commit tests only**
+- [ ] **Step 2: Re-run the behavioral RED and commit the completed matrix**
 
 ```bash
 cargo test --locked -p assay-mcp-server --test policy_ingest_limits -- --nocapture
 ```
 
-Expected: limit-plus-one calls reach parsing instead of `E_LIMIT_EXCEEDED`, and the invalid-UTF-8
-case does not yet publish the stable summary. Record both failures and commit only
-`policy_ingest_limits.rs` before migrating tool reads.
+Expected: limit-plus-one assertions still fail because no tool is routed through the reader;
+exact-limit and invalid-UTF-8 controls stay green. Record the discriminating failures and commit
+only `policy_ingest_limits.rs` before migrating tool reads.
 
-- [ ] **Step 3: Pin cache-bearing repeat behavior**
-
-For `assay_policy_decide` and `assay_check_sequence`, call the oversized input twice and assert both
-remain limit failures. Capture stderr or expose test-only cache counters only if needed; prefer the
-observable repeat contract over adding production introspection.
-
-- [ ] **Step 4: Replace every direct read**
+- [ ] **Step 3: Replace every direct read**
 
 Replace the four `tokio::fs::read` blocks with `ctx.read_policy_bounded(policy_rel_path).await`.
 Keep hashing, parsing, cache lookup/insertion, and evaluation after successful bytes exactly where
 they are.
 
-- [ ] **Step 5: Remove `check_args`' file bypass**
+- [ ] **Step 4: Remove `check_args`' file bypass**
 
 Have `check_args` call the same context reader and pass returned bytes to `McpPolicy::from_slice`.
 It must not call `McpPolicy::from_file` or open the path itself.
 
-- [ ] **Step 6: Run GREEN**
+- [ ] **Step 5: Run GREEN, including the routing guard**
 
 ```bash
 cargo test --locked -p assay-mcp-server --test policy_ingest_limits -- --nocapture
 cargo test --locked -p assay-mcp-server --test policy_decide_blocklist -- --nocapture
 cargo test --locked -p assay-mcp-server --test stdio_edge_cases -- --nocapture
+python3 scripts/ci/check-mcp-policy-reader-routing.py
+bash scripts/ci/test-check-mcp-policy-reader-routing.sh
 ```
 
-- [ ] **Step 7: Run discriminating mutations**
+- [ ] **Step 6: Run discriminating mutations**
 
 In disposable copies, separately replace one tool callsite with `tokio::fs::read`; make
 `check_args` call `from_file`; map invalid UTF-8 to `E_POLICY_READ` or `E_INTERNAL`; replace the
-reader with a metadata-only check; and change the inclusive boundary to reject exactly-limit. Each
-mutation must fail a named
-matrix/classification/structural/boundary assertion.
+reader with a metadata-only check; and change the inclusive boundary to reject exactly-limit. The
+metadata-only mutation must fail the structural reader guard even when file metadata matches the
+fixture size. Each mutation must fail a named matrix/classification/structural/boundary assertion.
 
-- [ ] **Step 8: Commit all five migrations**
+- [ ] **Step 7: Commit all five migrations**
 
 ```bash
 git add -- \
@@ -319,7 +344,29 @@ git add -- \
 git commit -m "fix(mcp): route policy tools through bounded ingest"
 ```
 
-### Task 5: Verify and publish #2389
+### Task 5: Document the operator-visible ceiling
+
+**Files:**
+- Modify: `CHANGELOG.md`
+- Modify: `docs/reference/cli/mcp-server.md`
+
+- [ ] **Step 1: Record behavior and migration**
+
+Document the inclusive `1_000_000`-byte default, `ASSAY_MCP_MAX_POLICY_BYTES`, the fixed
+`E_LIMIT_EXCEEDED` result, and that operators with previously accepted larger local policy files
+must either reduce the file or set an explicit bounded override. State that the limit applies before
+parse/cache and is independent from the JSON-RPC message ceiling. Do not claim nesting-depth or
+remote-input protection.
+
+- [ ] **Step 2: Verify docs and commit**
+
+```bash
+pre-commit run --files CHANGELOG.md docs/reference/cli/mcp-server.md
+git add -- CHANGELOG.md docs/reference/cli/mcp-server.md
+git commit -m "docs(mcp): document policy ingest ceiling"
+```
+
+### Task 6: Verify and publish #2389
 
 - [ ] **Step 1: Prove no server-tool bypass remains**
 
