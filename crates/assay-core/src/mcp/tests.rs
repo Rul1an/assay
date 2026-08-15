@@ -2,6 +2,227 @@ use super::policy::*;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
+// ── Full-policy error classification tests ──────────────────────────────────
+
+#[test]
+fn policy_error_classification_syntax() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(tmp.path(), b"version: \"\n  bad: [").unwrap();
+    let err = McpPolicy::from_file(tmp.path()).unwrap_err();
+    let typed = err.downcast_ref::<McpPolicyError>();
+    assert!(
+        typed.is_some(),
+        "syntax error must be McpPolicyError, got: {err}"
+    );
+    assert!(
+        matches!(typed.unwrap().kind, McpPolicyErrorKind::Syntax { .. }),
+        "syntax error must be Syntax kind, got: {:?}",
+        typed.unwrap().kind
+    );
+}
+
+#[test]
+fn policy_error_classification_root_not_mapping() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(tmp.path(), b"- item1\n- item2\n").unwrap();
+    let err = McpPolicy::from_file(tmp.path()).unwrap_err();
+    let typed = err.downcast_ref::<McpPolicyError>();
+    assert!(
+        typed.is_some(),
+        "root-not-mapping must be McpPolicyError, got: {err}"
+    );
+    assert!(
+        matches!(typed.unwrap().kind, McpPolicyErrorKind::RootNotMapping),
+        "root-not-mapping must be RootNotMapping kind, got: {:?}",
+        typed.unwrap().kind
+    );
+}
+
+#[test]
+fn policy_error_classification_structure() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    // A mapping where 'tools' has the wrong shape (number instead of object)
+    std::fs::write(tmp.path(), b"version: \"2.0\"\ntools: 42\n").unwrap();
+    let err = McpPolicy::from_file(tmp.path()).unwrap_err();
+    let typed = err.downcast_ref::<McpPolicyError>();
+    assert!(
+        typed.is_some(),
+        "structure error must be McpPolicyError, got: {err}"
+    );
+    assert!(
+        matches!(typed.unwrap().kind, McpPolicyErrorKind::Structure),
+        "structure error must be Structure kind, got: {:?}",
+        typed.unwrap().kind
+    );
+}
+
+#[test]
+fn policy_error_classification_invalid_utf8() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(tmp.path(), [0xFF, 0xFE, b'v', b':', b' ', b'1']).unwrap();
+    let err = McpPolicy::from_file(tmp.path()).unwrap_err();
+    let typed = err.downcast_ref::<McpPolicyError>();
+    assert!(
+        typed.is_some(),
+        "invalid UTF-8 must be McpPolicyError, got: {err}"
+    );
+    assert!(
+        matches!(typed.unwrap().kind, McpPolicyErrorKind::Syntax { .. }),
+        "invalid UTF-8 must be Syntax kind, got: {:?}",
+        typed.unwrap().kind
+    );
+}
+
+// ── Validation kind (gap 4) ──────────────────────────────────────────────
+
+#[test]
+fn policy_error_classification_validation() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    // Valid YAML mapping, valid McpPolicy shape, but bad pin hash → validation error
+    std::fs::write(
+        tmp.path(),
+        b"version: \"2.0\"\ntool_pins:\n  test_tool:\n    schema_hash: \"bad\"\n    meta_hash: \"bad\"\n    server_id: s\n    tool_name: n\n",
+    )
+    .unwrap();
+    let err = McpPolicy::from_file(tmp.path()).unwrap_err();
+    let typed = err.downcast_ref::<McpPolicyError>();
+    assert!(
+        typed.is_some(),
+        "validation error must be McpPolicyError, got: {err}"
+    );
+    assert!(
+        matches!(typed.unwrap().kind, McpPolicyErrorKind::Validation),
+        "validation error must be Validation kind, got: {:?}",
+        typed.unwrap().kind
+    );
+}
+
+// ── Scalar root classification ──────────────────────────────────────────
+
+#[test]
+fn policy_error_classification_scalar_root() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(tmp.path(), b"just_a_string\n").unwrap();
+    let err = McpPolicy::from_file(tmp.path()).unwrap_err();
+    let typed = err.downcast_ref::<McpPolicyError>();
+    assert!(
+        typed.is_some(),
+        "scalar root must be McpPolicyError, got: {err}"
+    );
+    assert!(
+        matches!(typed.unwrap().kind, McpPolicyErrorKind::RootNotMapping),
+        "scalar root must be RootNotMapping kind, got: {:?}",
+        typed.unwrap().kind
+    );
+}
+
+// ── Full-policy parser contract: successful parse, warnings, V1 migration ──
+
+#[test]
+fn policy_file_parser_contract_v2_success() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(
+        tmp.path(),
+        b"version: \"2.0\"\nname: test\ntools:\n  allow:\n    - read_file\n",
+    )
+    .unwrap();
+    let policy = McpPolicy::from_file(tmp.path()).unwrap();
+    assert_eq!(policy.version, "2.0");
+    assert!(policy
+        .tools
+        .allow
+        .as_ref()
+        .unwrap()
+        .contains(&"read_file".to_string()));
+}
+
+#[test]
+#[serial_test::serial]
+#[allow(unsafe_code)]
+fn policy_file_parser_contract_v1_legacy_normalization() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(
+        tmp.path(),
+        b"version: \"1.0\"\nallow:\n  - tool_a\ndeny:\n  - tool_b\n",
+    )
+    .unwrap();
+    // Remove strict deprecations for this test
+    unsafe { std::env::remove_var("ASSAY_STRICT_DEPRECATIONS") };
+    let policy = McpPolicy::from_file(tmp.path()).unwrap();
+    // Root allow/deny must be normalized into tools.*
+    assert!(policy
+        .tools
+        .allow
+        .as_ref()
+        .unwrap()
+        .contains(&"tool_a".to_string()));
+    assert!(policy
+        .tools
+        .deny
+        .as_ref()
+        .unwrap()
+        .contains(&"tool_b".to_string()));
+    // Root-level fields consumed
+    assert!(policy.allow.is_none());
+    assert!(policy.deny.is_none());
+}
+
+#[test]
+fn policy_file_parser_contract_validation_error() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    // Bad pin hash (not 64 hex chars)
+    std::fs::write(
+        tmp.path(),
+        b"version: \"2.0\"\ntool_pins:\n  test_tool:\n    schema_hash: \"bad\"\n    meta_hash: \"bad\"\n    server_id: s\n    tool_name: n\n",
+    )
+    .unwrap();
+    let err = McpPolicy::from_file(tmp.path()).unwrap_err();
+    assert!(
+        err.to_string().contains("hexadecimal"),
+        "validation error should mention hex: {err}"
+    );
+}
+
+#[test]
+#[serial_test::serial]
+#[allow(unsafe_code)]
+fn policy_file_parser_contract_v1_constraints_migration() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(
+        tmp.path(),
+        b"version: \"1.0\"\nconstraints:\n  - tool: read_file\n    params:\n      path:\n        matches: \"^/safe/.*\"\n",
+    )
+    .unwrap();
+    unsafe { std::env::remove_var("ASSAY_STRICT_DEPRECATIONS") };
+    let policy = McpPolicy::from_file(tmp.path()).unwrap();
+    // Constraints must be auto-migrated to schemas
+    assert!(
+        policy.schemas.contains_key("read_file"),
+        "V1 constraints must auto-migrate to schemas"
+    );
+    let schema = policy.schemas.get("read_file").unwrap();
+    let pattern = schema
+        .pointer("/properties/path/pattern")
+        .and_then(|v| v.as_str());
+    assert_eq!(pattern, Some("^/safe/.*"), "migrated pattern mismatch");
+}
+
+#[test]
+#[serial_test::serial]
+#[allow(unsafe_code)]
+fn policy_file_parser_contract_strict_deprecations_rejects_v1() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(tmp.path(), b"version: \"1.0\"\nconstraints: []\n").unwrap();
+    unsafe { std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1") };
+    let err = McpPolicy::from_file(tmp.path());
+    assert!(err.is_err(), "strict deprecations must reject v1");
+    assert!(
+        err.unwrap_err().to_string().contains("Strict mode"),
+        "error must mention Strict mode"
+    );
+    unsafe { std::env::remove_var("ASSAY_STRICT_DEPRECATIONS") };
+}
+
 fn create_v2_policy(schemas: HashMap<String, Value>) -> McpPolicy {
     McpPolicy {
         version: "2.0".to_string(),

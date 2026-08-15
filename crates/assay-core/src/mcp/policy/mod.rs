@@ -8,6 +8,45 @@ mod response;
 mod schema;
 mod types;
 
+/// Typed classification of full-policy parse failures.
+///
+/// Non-exhaustive so downstream match arms must use a wildcard.
+/// `check_args` maps these to the three fixed `PolicyParseFailure` summaries.
+#[non_exhaustive]
+#[derive(Debug)]
+pub enum McpPolicyErrorKind {
+    /// YAML decode or UTF-8 failure.
+    Syntax {
+        line: Option<usize>,
+        column: Option<usize>,
+    },
+    /// Parsed value is not a YAML mapping at the root.
+    RootNotMapping,
+    /// Typed deserialization (field shape, unknown field rejection) failed.
+    Structure,
+    /// Post-deserialization validation (kill-switch refs, pin hashes) failed.
+    Validation,
+}
+
+/// Wrapper that carries the typed kind alongside the anyhow error chain.
+#[derive(Debug)]
+pub struct McpPolicyError {
+    pub kind: McpPolicyErrorKind,
+    source: anyhow::Error,
+}
+
+impl std::fmt::Display for McpPolicyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.source)
+    }
+}
+
+impl std::error::Error for McpPolicyError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source.source()
+    }
+}
+
 use super::identity::ToolIdentity;
 use super::jcs;
 use super::jsonrpc::JsonRpcRequest;

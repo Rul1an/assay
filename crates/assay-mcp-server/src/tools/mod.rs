@@ -330,3 +330,132 @@ pub async fn handle_call(ctx: &ToolContext, name: &str, args: &Value) -> anyhow:
         _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The exact UTF-8-safe prefix: 4094 ASCII `X` bytes.
+    ///
+    /// The boundary-bisecting message is 4094 `X` + 🔒 (4 bytes, F0 9F 94 92) + ASCII tail.
+    /// Byte 4096 falls inside the emoji. The UTF-8-safe prefix at 4096 bytes is the last
+    /// char boundary at-or-before 4096, which is byte 4094, so the prefix is `"X".repeat(4094)`.
+    fn expected_bounded_prefix() -> String {
+        "X".repeat(4094)
+    }
+
+    /// Build a message whose byte 4096 falls inside a 4-byte code point.
+    fn boundary_bisecting_message() -> String {
+        let prefix = "X".repeat(4094);
+        format!("{prefix}🔒tail_that_must_not_appear")
+    }
+
+    #[test]
+    fn constructor_bounds_message_to_exact_prefix() {
+        let message = boundary_bisecting_message();
+        let error = ToolError::new("E_TEST", &message);
+        let expected = expected_bounded_prefix();
+
+        assert_eq!(
+            error.message, expected,
+            "constructor must produce the exact UTF-8-safe prefix"
+        );
+        assert!(
+            error.message.len() <= 4096,
+            "constructor result exceeds 4096 bytes: {}",
+            error.message.len()
+        );
+    }
+
+    #[test]
+    fn serializer_bounds_direct_struct_to_exact_prefix() {
+        let message = boundary_bisecting_message();
+        let expected = expected_bounded_prefix();
+        let error = ToolError {
+            code: "E_TEST".into(),
+            message: message.clone(),
+            details: None,
+        };
+        let serialized = serde_json::to_value(&error).unwrap();
+        let msg = serialized["message"].as_str().unwrap();
+        assert_eq!(
+            msg, expected,
+            "serializer must produce the exact UTF-8-safe prefix for direct struct"
+        );
+    }
+
+    #[test]
+    fn serializer_bounds_post_mutation_to_exact_prefix() {
+        let message = boundary_bisecting_message();
+        let expected = expected_bounded_prefix();
+        let mut error = ToolError::new("E_TEST", "short");
+        error.message = message;
+        let serialized = serde_json::to_value(&error).unwrap();
+        let msg = serialized["message"].as_str().unwrap();
+        assert_eq!(
+            msg, expected,
+            "serializer must produce the exact UTF-8-safe prefix for post-mutation"
+        );
+    }
+
+    #[test]
+    fn result_publication_bounds_direct_struct() {
+        let message = boundary_bisecting_message();
+        let expected = expected_bounded_prefix();
+        let error = ToolError {
+            code: "E_TEST".into(),
+            message: message.clone(),
+            details: None,
+        };
+        let result = error.result().unwrap();
+        let msg = result
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .unwrap();
+        assert_eq!(
+            msg, expected,
+            "result() must produce the exact UTF-8-safe prefix for direct struct"
+        );
+    }
+
+    #[test]
+    fn result_publication_bounds_post_mutation() {
+        let message = boundary_bisecting_message();
+        let expected = expected_bounded_prefix();
+        let mut error = ToolError::new("E_TEST", "short");
+        error.message = message;
+        let result = error.result().unwrap();
+        let msg = result
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .unwrap();
+        assert_eq!(
+            msg, expected,
+            "result() must produce the exact UTF-8-safe prefix for post-mutation"
+        );
+    }
+
+    #[test]
+    fn all_three_paths_produce_same_bounded_prefix() {
+        let message = boundary_bisecting_message();
+        let expected = expected_bounded_prefix();
+
+        let via_constructor = ToolError::new("E_TEST", &message);
+        assert_eq!(via_constructor.message, expected);
+
+        let direct = ToolError {
+            code: "E_TEST".into(),
+            message: message.clone(),
+            details: None,
+        };
+        let direct_serialized = serde_json::to_value(&direct).unwrap();
+        let direct_msg = direct_serialized["message"].as_str().unwrap();
+        assert_eq!(direct_msg, expected);
+
+        let mut mutated = ToolError::new("E_TEST", "short");
+        mutated.message = message;
+        let mutated_serialized = serde_json::to_value(&mutated).unwrap();
+        let mutated_msg = mutated_serialized["message"].as_str().unwrap();
+        assert_eq!(mutated_msg, expected);
+    }
+}
