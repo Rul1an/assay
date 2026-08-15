@@ -16,6 +16,14 @@ fn fail_closed_tool_result(code: &'static str, message: &'static str) -> Result<
     tools::ToolError::new(code, message).result()
 }
 
+fn classify_tool_result(result: &Value) -> (bool, bool) {
+    let has_error = result.get("error").is_some();
+    let explicit_allowed = result.get("allowed").and_then(Value::as_bool);
+    let allowed = explicit_allowed.unwrap_or(!has_error);
+    let is_error = has_error || explicit_allowed == Some(false);
+    (allowed, is_error)
+}
+
 fn next_rid() -> String {
     let n = RID.fetch_add(1, Ordering::Relaxed);
     format!("r-{n:06}")
@@ -368,10 +376,7 @@ impl Server {
 
                         let dur = start.elapsed().as_millis() as u64;
                         // Log outcome
-                        let allowed = result
-                            .get("allowed")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
+                        let (allowed, is_error) = classify_tool_result(&result);
                         if let Some(err) = result.get("error") {
                             let code = err.get("code").and_then(|v| v.as_str()).unwrap_or("");
                             tracing::info!(
@@ -432,7 +437,6 @@ impl Server {
                         }
 
                         // MCP Compliance: wrap every tool outcome in CallToolResult.
-                        let is_error = !allowed;
                         let json_text = serde_json::to_string_pretty(&result).unwrap_or_default();
                         let mcp_result = serde_json::json!({
                             "content": [{"type": "text", "text": json_text}],

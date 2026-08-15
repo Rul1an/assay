@@ -34,7 +34,7 @@ change that behavior. Unknown JSON-RPC methods use protocol error `-32601`.
 | `E_POLICY_NOT_FOUND` | The specified policy file does not exist. |
 | `E_POLICY_READ` | Failed to read the policy file (permissions, etc.). |
 | `E_PERMISSION_DENIED` | Access denied (e.g., policy path is outside the allowed root). |
-| `E_INTERNAL` | The outer tool dispatch failed; details are retained only in operator telemetry. |
+| `E_INTERNAL` | The outer tool dispatch failed; raw internal error details are not emitted. |
 | `E_TIMEOUT` | The outer tool dispatch exceeded the configured timeout. |
 
 ## Tools

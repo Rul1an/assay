@@ -1,6 +1,7 @@
 //! Wire-level contract for failures outside an individual MCP tool implementation.
 
 use serde_json::Value;
+use std::fs;
 use std::process::{Command, Stdio};
 
 mod jsonrpc_conn;
@@ -60,6 +61,42 @@ fn assert_fixed_failure(response: &Value, code: &str, message: &str) {
     assert_eq!(payload["error"]["code"], code, "payload: {payload}");
     assert_eq!(payload["error"]["message"], message, "payload: {payload}");
     assert!(payload.get("warning").is_none(), "payload: {payload}");
+}
+
+#[test]
+fn report_tools_keep_successful_mcp_results() {
+    let (mut conn, root) = spawn_server(None);
+    fs::write(
+        root.path().join("policy.yaml"),
+        "version: \"1.1\"\nname: report-tools\ntools:\n  allow: [Search]\nsequences: []\n",
+    )
+    .expect("write report policy");
+    initialize(&mut conn);
+
+    let coverage = call_tool(
+        &mut conn,
+        "assay_check_coverage",
+        serde_json::json!({
+            "policy": "policy.yaml",
+            "traces": [{"tools": ["Search"]}]
+        }),
+        2,
+    );
+    let explanation = call_tool(
+        &mut conn,
+        "assay_explain_trace",
+        serde_json::json!({
+            "policy": "policy.yaml",
+            "trace": [{"tool": "Search"}]
+        }),
+        3,
+    );
+
+    for response in [&coverage, &explanation] {
+        assert_eq!(response["result"]["isError"], false, "response: {response}");
+        assert!(tool_payload(response).get("error").is_none());
+    }
+    assert!(conn.shutdown().success());
 }
 
 #[test]
