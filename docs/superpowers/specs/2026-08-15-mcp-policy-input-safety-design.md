@@ -137,6 +137,7 @@ The summary selection is fixed rather than inferred by each caller:
 | Failure class | Public summary |
 |---|---|
 | YAML/JSON syntax cannot be parsed | `Policy YAML is invalid` |
+| input bytes are not valid UTF-8 | `Policy YAML is invalid` |
 | parsed document root is not a mapping | `Policy root must be a mapping` |
 | mapping has a field with an invalid type or shape | `Policy structure is invalid` |
 
@@ -261,6 +262,10 @@ cover a sparse oversized file, an exact-limit file, a limit-plus-one file, and a
 growth while reading. Oversized input returns `E_LIMIT_EXCEEDED` and never reaches parsing or cache
 insertion. Core parser-parity tests must include strict V1 deprecation so the bytes API cannot omit
 the `is_v1_format` / `ASSAY_STRICT_DEPRECATIONS` branch.
+
+The `assay_check_args` real-stdio table also pins invalid UTF-8 as `allowed:false`,
+`E_POLICY_PARSE`, `isError:true`, with the stable `Policy YAML is invalid` summary. A mutation that
+maps invalid UTF-8 to a read or internal error must fail this assertion.
 
 Mutation tests must catch a metadata-only size check and a direct `tokio::fs::read` bypass. Valid
 files at or below the limit preserve current behaviour.
