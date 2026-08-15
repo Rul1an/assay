@@ -126,9 +126,13 @@ ToolError { code: "E_TEST".into(), message: message.clone(), details: None }
 let mut error = ToolError::new("E_TEST", "short"); error.message = message;
 ```
 
-Assert serialized `/message` is valid UTF-8 and at most 4,096 bytes. The direct construction and
-post-construction mutation are load-bearing: they prove the publication boundary, not only the
-constructor, applies the rule.
+For the constructor case, inspect `error.message` before serialization and assert it equals the
+exact UTF-8-safe prefix and is at most 4,096 bytes; removing the constructor bound must fail here
+even if serialization still bounds. Then serialize all three forms and assert `/message` is the
+same valid UTF-8 bounded prefix. Finally publish the direct and post-construction-mutated structs
+through `ToolError::result` and assert `/error/message` is bounded. If `result` repacks public fields
+instead of serializing `ToolError`, those tests must fail. The three paths separately prove the
+constructor, serializer, and result publication boundary.
 
 - [ ] **Step 6: Add an interface-only classifier seam**
 

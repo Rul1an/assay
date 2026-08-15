@@ -57,8 +57,9 @@ stdio JSON-RPC tests, pre-commit, GitHub Actions.
 
 Using only the existing public binary surface, start the server with a small
 `ASSAY_MCP_MAX_POLICY_BYTES`. Call every advertised tool with a limit-plus-one policy and expect
-`E_LIMIT_EXCEEDED`; the current server ignores that variable and the assertions must fail while the
-test compiles and runs. In the same test, pin the already-shipped #2387 invalid-UTF-8
+MCP `result.isError:true`, body `allowed:false`, and `E_LIMIT_EXCEEDED`; the current server ignores
+that variable and the assertions must fail while the test compiles and runs. In the same test, pin
+the already-shipped #2387 invalid-UTF-8
 `assay_check_args` response as a GREEN regression control. Run and record the assertion failures:
 
 ```bash
@@ -300,7 +301,9 @@ with an exactly-limit valid policy in each tool's own dialect and assert it reac
 non-limit result. Pad valid YAML with comments to the exact byte boundary; do not pretend one
 unpadded fixture can have identical valid semantics in all five dialects. For
 `assay_policy_decide` and `assay_check_sequence`, call oversized input twice and assert both remain
-limit failures.
+limit failures. Keep the complete per-tool oversized envelope assertions from Task 1:
+`result.isError:true`, body `allowed:false`, and `error.code == E_LIMIT_EXCEEDED`; no aggregate-only
+assertion may replace the five individual triples.
 
 Retain the invalid-UTF-8 `assay_check_args` regression control from Task 1. It must remain GREEN with
 `result.isError:true`, `allowed:false`, `E_POLICY_PARSE`, and exactly `Policy YAML is invalid`; it is
