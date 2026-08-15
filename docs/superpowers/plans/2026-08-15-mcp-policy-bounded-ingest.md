@@ -8,10 +8,11 @@
 the five advertised MCP tools materialises or parses a local policy.
 
 **Architecture:** Add `max_policy_bytes` to `ServerConfig` and one `ToolContext::read_policy_bounded`
-entry point. The entry point performs secure path resolution, then uses
-`assay_common::limits::LimitReader<std::fs::File>` inside `tokio::task::spawn_blocking`; it maps
-typed limit, not-found, and other I/O errors once. Add a bytes-in `McpPolicy` parser and make both
-`from_file` and `assay_check_args` call it, so full-policy semantics have one implementation.
+entry point. The entry point performs secure path resolution, then calls a file-opening wrapper
+inside `tokio::task::spawn_blocking`; that wrapper delegates to one generic
+`LimitReader<R: Read>` primitive. It maps typed limit, not-found, and other I/O errors once. Add a
+bytes-in `McpPolicy` parser and make file/string/check_args entry points delegate to it, so
+full-policy semantics have one implementation.
 
 **Tech Stack:** Rust 1.96, Tokio, `assay_common::limits`, serde YAML, tempfile/sparse files, real
 stdio JSON-RPC tests, pre-commit, GitHub Actions.
@@ -40,6 +41,7 @@ stdio JSON-RPC tests, pre-commit, GitHub Actions.
 - Modify five tool files under `crates/assay-mcp-server/src/tools/`: remove unbounded reads.
 - Modify `crates/assay-core/src/mcp/policy/mod.rs` and `policy/legacy.rs`: one bytes-in parser.
 - Modify `crates/assay-core/src/mcp/tests.rs`: file/bytes/string parser contract table.
+- Add `crates/assay-core/tests/mcp_policy_warning_contract.rs`: subprocess warning contract.
 - Add `crates/assay-mcp-server/tests/policy_ingest_limits.rs`: real-stdio five-tool boundary table.
 - Add `scripts/ci/check-mcp-policy-reader-routing.py` and its self-test: pin `LimitReader` and all five callsites.
 - Add `scripts/ci/check-mcp-policy-parser-delegation.py` and its self-test: pin both full-policy delegation hops.
@@ -94,14 +96,16 @@ without introducing a second literal.
 
 Before implementing the private primitive, add focused tests for exactly-limit, limit-plus-one,
 chunked crossing, and ordinary I/O failure using an arbitrary `Read`. Classify through
-`LimitExceeded::from_io`; never match rendered text. Then implement the smallest passing helper:
+`LimitExceeded::from_io`; never match rendered text. Then implement two exact layers: generic
+`read_bounded<R: Read>(reader, limit)` owns `LimitReader` and byte accumulation; file-only
+`read_file_bounded(path, limit)` opens `File` and immediately delegates to the generic primitive.
+The async context method may call only the file wrapper. The generic layer uses:
 
 Implement a helper using:
 
 ```rust
-let file = std::fs::File::open(path)?;
 let mut reader = assay_common::limits::LimitReader::new(
-    file,
+    reader,
     limit as u64,
     assay_common::limits::LimitKind::SourceBytes,
 );
@@ -109,8 +113,8 @@ let mut bytes = Vec::new();
 std::io::Read::read_to_end(&mut reader, &mut bytes)?;
 ```
 
-The helper returns bytes or a typed internal read classification. It must not preallocate from
-`metadata().len()`.
+Both layers return bytes or the same typed internal read classification. Neither may preallocate
+from `metadata().len()`.
 
 - [ ] **Step 3: Test, then add, the async context entry point**
 
@@ -131,10 +135,11 @@ Do not include canonical roots, OS diagnostics, or policy contents.
 
 - [ ] **Step 4: Add and self-test the reader-routing guard**
 
-Require the blocking primitive to construct `LimitReader` and forbid `metadata()`-based acceptance
-or direct `File::read_to_end` outside that wrapper. Require `ToolContext::read_policy_bounded` to
-call the primitive. Disposable fixtures must fail for a faithful metadata-size check followed by an
-unbounded read, and for a context method that bypasses the primitive. Wire the guard to pre-commit
+Require the generic primitive to construct `LimitReader`; require the file wrapper to open and call
+only that primitive; require `ToolContext::read_policy_bounded` to call only the file wrapper. Forbid
+`metadata()`-based acceptance and direct `File::read_to_end` elsewhere. Disposable fixtures must
+fail for a faithful metadata-size check followed by an unbounded read, a file wrapper that duplicates
+the read, and a context method that bypasses either layer. Wire the guard to pre-commit
 for `config.rs`, `main.rs`, `tools/mod.rs`, all five tool modules, the guard, and its self-test. This
 structural proof, not sparse-file metadata alone, discriminates the metadata-only mutation.
 
@@ -166,6 +171,7 @@ git commit -m "feat(mcp): bound shared policy-file reads"
 - Modify: `crates/assay-core/src/mcp/policy/mod.rs`
 - Modify: `crates/assay-core/src/mcp/policy/legacy.rs`
 - Modify: `crates/assay-core/src/mcp/tests.rs`
+- Add: `crates/assay-core/tests/mcp_policy_warning_contract.rs`
 - Add: `scripts/ci/check-mcp-policy-parser-delegation.py`
 - Add: `scripts/ci/test-check-mcp-policy-parser-delegation.sh`
 - Modify: `.pre-commit-config.yaml`
@@ -192,9 +198,19 @@ tracing subscriber, the separate non-strict V1 deprecation warning, strict-mode 
 syntax/validation failure kind, and whether validation ran. Run this table GREEN and commit it as a
 behavior freeze; it is not RED evidence.
 
+Test the process-global deprecation warning in the dedicated integration-test binary. Its parent
+test spawns `current_exe()` with an ignored exact child test and deterministic no-timestamp tracing;
+the child parses one V1 fixture with an unknown field twice. Capture stderr and assert the unknown-
+field warning precedes the deprecation warning, the deprecation text occurs exactly once, and the
+child exits successfully. A separate child process resets `OnceLock`; never reset or mutate it in
+process. Removing or reordering `emit_deprecation_warning` must fail this subprocess contract.
+
 ```bash
 cargo test --locked -p assay-core mcp::tests::policy_file_parser_contract -- --nocapture
-git add -- crates/assay-core/src/mcp/tests.rs
+cargo test --locked -p assay-core --test mcp_policy_warning_contract -- --nocapture
+git add -- \
+  crates/assay-core/src/mcp/tests.rs \
+  crates/assay-core/tests/mcp_policy_warning_contract.rs
 git commit -m "test(mcp): freeze full-policy file parser behavior"
 ```
 
@@ -236,11 +252,12 @@ may retain a deserialize/normalize/validate sequence.
 
 - [ ] **Step 5: Add and self-test the structural delegation guard**
 
-Add a source guard that identifies both exact delegation hops: the public `McpPolicy::from_file`
+Add a source guard that identifies all three exact delegation hops: the public `McpPolicy::from_file`
 body in `policy/mod.rs` must call `legacy::from_file`, and `legacy::from_file` must call
-`McpPolicy::from_slice`. Reject parser/deserializer construction in either body. The self-test uses
+`McpPolicy::from_slice`; public `McpPolicy::from_str` must call `McpPolicy::from_slice` and perform no
+parser/deserializer construction. Reject parser/deserializer construction in all three bodies. The self-test uses
 disposable source fixtures and must fail when a faithful duplicate deserializer is inserted at
-either hop. Wire the guard into pre-commit for changes to `policy/mod.rs`, `legacy.rs`, the guard,
+any hop. Wire the guard into pre-commit for changes to `policy/mod.rs`, `legacy.rs`, the guard,
 or its self-test.
 
 - [ ] **Step 6: Run core GREEN and the structural guard**
@@ -263,6 +280,7 @@ git add -- \
   crates/assay-core/src/mcp/policy/mod.rs \
   crates/assay-core/src/mcp/policy/legacy.rs \
   crates/assay-core/src/mcp/tests.rs \
+  crates/assay-core/tests/mcp_policy_warning_contract.rs \
   scripts/ci/check-mcp-policy-parser-delegation.py \
   scripts/ci/test-check-mcp-policy-parser-delegation.sh \
   .pre-commit-config.yaml

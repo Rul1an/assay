@@ -31,7 +31,9 @@ GitHub Actions.
 - Keep `ToolError` and its fields public for semver compatibility.
 - Do not absorb the outer server's separately constructed `E_INTERNAL` fallback or caller-selected
   `on_error`; #2391 owns that generic dispatch boundary.
-- Do not change verdict semantics, reason codes, JSON-RPC errors, policy readers, or cache order.
+- Do not change verdict semantics, reason codes, JSON-RPC errors, reader paths/bounds, or cache
+  order. The full-policy reader may switch from `read_to_string` to bytes only to classify invalid
+  UTF-8 as parse input while preserving ordinary file-I/O behavior.
 - Stage only named paths; never use a whole-tree staging command.
 
 ---
@@ -57,6 +59,8 @@ GitHub Actions.
 - Add: `crates/assay-mcp-server/tests/policy_diagnostic_safety.rs`
 - Modify: `crates/assay-mcp-server/src/tools/mod.rs` (unit tests only in this task)
 - Modify: `crates/assay-core/src/mcp/tests.rs` (tests only in this task)
+- Modify: `crates/assay-core/src/mcp/policy/mod.rs` (interface-only typed seam)
+- Modify: `crates/assay-core/src/mcp/policy/legacy.rs` (interface-only typed seam)
 
 - [ ] **Step 1: Add a real-stdio helper covering four raw sinks**
 
@@ -93,6 +97,10 @@ temporary root and policy path. Add a malformed multibyte input whose bounded me
 valid UTF-8. Separately construct a long message whose byte 4,096 falls inside a multibyte code
 point; reuse that exact message in every serializer-bypass case below.
 
+Add a separate policy file containing invalid UTF-8 bytes and exercise `assay_check_args`. Assert
+the public class is `E_POLICY_PARSE` with exactly `Policy YAML is invalid`, not `E_POLICY_READ`,
+`E_INTERNAL`, or an OS/UTF-8 diagnostic.
+
 - [ ] **Step 4: Pin constructor and serializer bypasses**
 
 In `tools/mod.rs` tests serialize all three forms with that same boundary-bisecting message:
@@ -107,7 +115,14 @@ Assert serialized `/message` is valid UTF-8 and at most 4,096 bytes. The direct 
 post-construction mutation are load-bearing: they prove the publication boundary, not only the
 constructor, applies the rule.
 
-- [ ] **Step 5: Run RED**
+- [ ] **Step 5: Add an interface-only classifier seam**
+
+Declare the public non-exhaustive `McpPolicyErrorKind` and typed wrapper, but do not yet make the
+parser construct it. This changes no parser result; it only lets the core classification test
+compile and downcast the existing `anyhow::Error`. The test must then fail its kind assertions rather
+than fail compilation.
+
+- [ ] **Step 6: Run behavioral RED**
 
 ```bash
 cargo test --locked -p assay-mcp-server --test policy_diagnostic_safety -- --nocapture
@@ -116,15 +131,19 @@ cargo test --locked -p assay-core mcp::tests::policy_error_classification -- --n
 ```
 
 Expected: hostile parser values appear in responses and direct/mutated `ToolError` serialization is
-unbounded. Record the exact failures in #2388.
+unbounded; typed downcasts fail because the parser does not construct the seam; invalid UTF-8 is
+still classified as a read failure. Record the exact assertion failures in #2388. A compile failure
+does not count as RED evidence.
 
-- [ ] **Step 6: Commit only RED tests**
+- [ ] **Step 7: Commit the interface seam and RED tests**
 
 ```bash
 git add -- \
   crates/assay-mcp-server/tests/policy_diagnostic_safety.rs \
   crates/assay-mcp-server/src/tools/mod.rs \
-  crates/assay-core/src/mcp/tests.rs
+  crates/assay-core/src/mcp/tests.rs \
+  crates/assay-core/src/mcp/policy/mod.rs \
+  crates/assay-core/src/mcp/policy/legacy.rs
 git commit -m "test(mcp): expose unbounded policy diagnostics"
 ```
 
@@ -227,13 +246,14 @@ direct consumer may construct a YAML deserializer or duplicate the mapping-root 
 
 - [ ] **Step 3: Handle `check_args` without widening into the reader/parser slice**
 
-Keep the existing not-found/read branches as a separate concern until #2389 centralizes them. In
-`assay-core`, add a public non-exhaustive `McpPolicyErrorKind` with `Syntax`, `RootNotMapping`,
-`Structure`, and `Validation`, plus a typed error wrapper whose source is retained but whose kind is
-queryable without parsing `Display`. The existing file parser first decodes to
-`serde_yaml::Value`, checks that the root is a mapping, then runs the current ignored-field-aware
-typed deserialize, normalization, migration, and validation sequence. Tag those stages
-respectively; I/O errors remain outside this wrapper. `check_args` maps `Syntax` to
+Keep not-found and ordinary file-I/O branches separate until #2389 centralizes their bounded read.
+Complete the interface-only wrapper from Task 1. Change `legacy::from_file` from
+`read_to_string` to `std::fs::read`: file-open/read errors remain ordinary I/O errors, while
+`std::str::from_utf8` failure is wrapped as `McpPolicyErrorKind::Syntax` before YAML decode. Then
+decode to `serde_yaml::Value`, check that the root is a mapping, and run the current
+ignored-field-aware typed deserialize, normalization, migration, and validation sequence. Tag those
+stages `Syntax`, `RootNotMapping`, `Structure`, and `Validation` respectively. Never classify by
+`Display`. `check_args` maps `Syntax` to
 `PolicyParseFailure::YamlSyntax`, `RootNotMapping` to `PolicyParseFailure::RootNotMapping`, and
 `Structure`/`Validation` to `PolicyParseFailure::Structure`. The core test pins all four kinds,
 including a scalar-root fixture.
@@ -264,7 +284,9 @@ Add and self-test a structural source guard that permits YAML parser/deserialize
 inside the shared mapping/generic helpers and the `assay-core` full-policy parser, and requires
 `policy_decide`, `check_coverage`, and `explain_trace` to call the approved helper. Disposable
 fixtures must fail when a faithful duplicate two-stage parser is inserted at a consumer. Wire it to
-pre-commit for `tools/mod.rs`, the three direct consumers, the guard, and its self-test.
+pre-commit for `tools/mod.rs`, `policy_decide.rs`, `check_args.rs`, `check_coverage.rs`,
+`explain_trace.rs`, `policy/mod.rs`, `policy/legacy.rs`, the guard, and its self-test. Self-test a
+bypass in the direct-consumer class and the full-policy-parser class.
 
 Then, in disposable copies, separately: return a raw parser string from one sink; collapse syntax,
 root, and typed-shape classes; bypass the helper; remove the constructor bound; remove the serializer
