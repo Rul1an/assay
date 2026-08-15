@@ -128,8 +128,8 @@ def compact_rust(body: str) -> str:
     return "".join(output)
 
 
-def check(path: Path) -> bool:
-    body = extract_result_body(path.read_text())
+def check(source: str) -> bool:
+    body = extract_result_body(source)
     if body is None:
         print("FAIL: ToolError::result(self) body not found", file=sys.stderr)
         return False
@@ -147,5 +147,11 @@ def check(path: Path) -> bool:
 
 
 if __name__ == "__main__":
-    target = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_TARGET
-    raise SystemExit(0 if check(target) else 1)
+    if len(sys.argv) == 1:
+        source = DEFAULT_TARGET.read_text()
+    elif sys.argv[1:] == ["--stdin"]:
+        source = sys.stdin.read()
+    else:
+        print(f"usage: {Path(sys.argv[0]).name} [--stdin]", file=sys.stderr)
+        raise SystemExit(2)
+    raise SystemExit(0 if check(source) else 1)

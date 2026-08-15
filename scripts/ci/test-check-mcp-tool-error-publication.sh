@@ -13,8 +13,15 @@ TARGET="crates/assay-mcp-server/src/tools/mod.rs"
 # Record digest before anything runs.
 DIGEST_BEFORE=$(shasum -a 256 "$TARGET" | awk '{print $1}')
 
+# The production guard must not accept caller-selected filesystem paths.
+if python3 "$GUARD" "$TARGET" 2>/dev/null; then
+    echo "FAIL: guard must reject positional filesystem paths" >&2
+    exit 1
+fi
+echo "PASS: guard rejects positional filesystem paths"
+
 # Verify the guard passes on the real file first.
-if ! python3 "$GUARD" "$TARGET"; then
+if ! python3 "$GUARD"; then
     echo "FAIL: guard must pass on the unmodified source" >&2
     exit 1
 fi
@@ -28,7 +35,7 @@ trap 'rm -rf "$TMPDIR"' EXIT
 sed 's/"error": self/"error": serde_json::json!({"code": self.code, "message": self.message, "details": self.details})/' \
     "$TARGET" > "$TMPDIR/mut1.rs"
 
-if python3 "$GUARD" "$TMPDIR/mut1.rs" 2>/dev/null; then
+if python3 "$GUARD" --stdin < "$TMPDIR/mut1.rs" 2>/dev/null; then
     echo "FAIL: guard must reject unbounded repack mutation" >&2
     exit 1
 fi
@@ -40,7 +47,7 @@ echo "PASS: guard rejects unbounded repack"
 sed 's/"error": self/"error": serde_json::json!({"code": self.code, "message": bound_public_message(\&self.message), "details": self.details})/' \
     "$TARGET" > "$TMPDIR/mut2.rs"
 
-if python3 "$GUARD" "$TMPDIR/mut2.rs" 2>/dev/null; then
+if python3 "$GUARD" --stdin < "$TMPDIR/mut2.rs" 2>/dev/null; then
     echo "FAIL: guard must reject bounded repack mutation" >&2
     exit 1
 fi
@@ -52,7 +59,7 @@ echo "PASS: guard rejects bounded repack"
 sed 's|"error": self|// "error": self  -- decoy comment\n             "error": serde_json::json!({"code": self.code, "message": self.message})|' \
     "$TARGET" > "$TMPDIR/mut3.rs"
 
-if python3 "$GUARD" "$TMPDIR/mut3.rs" 2>/dev/null; then
+if python3 "$GUARD" --stdin < "$TMPDIR/mut3.rs" 2>/dev/null; then
     echo "FAIL: guard must reject commented decoy mutation" >&2
     exit 1
 fi
@@ -71,7 +78,7 @@ fn _decoy_for_guard_test() {
 }
 DECOY
 
-if python3 "$GUARD" "$TMPDIR/mut4.rs" 2>/dev/null; then
+if python3 "$GUARD" --stdin < "$TMPDIR/mut4.rs" 2>/dev/null; then
     echo "FAIL: guard must reject dead/unrelated decoy mutation" >&2
     exit 1
 fi
@@ -116,7 +123,7 @@ fn publish_repacked_error(error: ToolError) -> anyhow::Result<Value> {
 Path(sys.argv[2]).write_text(source)
 PY
 
-if python3 "$GUARD" "$TMPDIR/mut5.rs" 2>/dev/null; then
+if python3 "$GUARD" --stdin < "$TMPDIR/mut5.rs" 2>/dev/null; then
     echo "FAIL: guard must reject unreachable-direct/helper-repack mutation" >&2
     exit 1
 fi
