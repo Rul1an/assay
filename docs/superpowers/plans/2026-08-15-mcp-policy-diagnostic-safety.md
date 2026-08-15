@@ -66,12 +66,16 @@ sentinels embedded in a 200,000-byte invalid scalar. For each tool assert:
 result.isError == true
 body.allowed == false
 body.error.code == E_POLICY_PARSE
-body.error.message is one fixed summary
+body.error.message equals the summary for the exercised failure class
 body.error.message.as_bytes().len() <= 4096
 complete response contains none of the three sentinels
 ```
 
 Use distinct files or requests so one failure cannot mask another position.
+Include malformed syntax that must return `Policy YAML is invalid`, a well-formed mapping with a
+typed field-shape error that must return `Policy structure is invalid`, and the non-mapping control
+from #2386 that must return `Policy root must be a mapping`. Do not let one generic fixed-summary
+assertion stand in for these three classes.
 
 - [ ] **Step 3: Add path and location controls**
 
@@ -201,11 +205,17 @@ typed mapping has the wrong shape. In `policy_decide`, retain #2386's explicit r
 
 - [ ] **Step 3: Handle `check_args` without widening into the reader/parser slice**
 
-Keep the existing not-found/read branches as a separate concern until #2389 centralizes them. Map
-the current fall-through parse/validation error to `PolicyParseFailure::Structure` without
-publishing `e.to_string()`. Do not add a bytes/string `McpPolicy` parser here: extracting that
-single parse rule, preserving file/bytes parity, and removing `from_file` from this callsite are the
-explicit work of #2389.
+Keep the existing not-found/read branches as a separate concern until #2389 centralizes them. Add
+RED core cases that distinguish malformed syntax from well-formed typed-shape and validation
+failures. Tag that distinction at the parser source with a typed error kind; `check_args` must query
+or downcast that kind rather than match `Display` text. Map syntax to `PolicyParseFailure::YamlSyntax`
+and typed-shape/validation failures to `PolicyParseFailure::Structure` without publishing
+`e.to_string()`.
+
+Do not add a parallel bytes/string `McpPolicy` parser here. #2389 moves this same tagged parse rule
+behind the bytes API, preserves file/bytes parity, and removes `from_file` from the `check_args`
+callsite. The diagnostic slice must therefore leave one classifier for #2389 to reuse, not a second
+server-side approximation.
 
 - [ ] **Step 4: Run GREEN and inspect public text**
 

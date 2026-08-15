@@ -219,6 +219,9 @@ git commit -m "refactor(mcp): share full-policy bytes parser"
 - Modify: `crates/assay-mcp-server/src/tools/explain_trace.rs`
 - Modify: `crates/assay-mcp-server/src/tools/check_args.rs`
 - Add: `crates/assay-mcp-server/tests/policy_ingest_limits.rs`
+- Add: `scripts/ci/check-mcp-policy-parser-delegation.py`
+- Add: `scripts/ci/test-check-mcp-policy-parser-delegation.sh`
+- Modify: `.pre-commit-config.yaml`
 
 - [ ] **Step 1: Add a real-stdio RED matrix**
 
@@ -227,6 +230,10 @@ call a limit-plus-one policy and assert `result.isError:true`, `allowed:false`, 
 `E_LIMIT_EXCEEDED`. Call an exactly-limit valid policy in that tool's own dialect and assert it
 reaches the normal non-limit result. Pad valid YAML with comments to the exact byte boundary; do not
 pretend one unpadded fixture can have identical valid semantics in all five dialects.
+
+Add a separate invalid-UTF-8 file for `assay_check_args`. Assert the complete real-stdio response
+has `result.isError:true`, `allowed:false`, `E_POLICY_PARSE`, and exactly
+`Policy YAML is invalid`. This is a parse-classification contract, not a size-limit case.
 
 - [ ] **Step 2: Pin cache-bearing repeat behavior**
 
@@ -255,10 +262,16 @@ cargo test --locked -p assay-mcp-server --test stdio_edge_cases -- --nocapture
 
 - [ ] **Step 6: Run discriminating mutations**
 
-In disposable copies, separately replace one callsite at a time with `tokio::fs::read`; make
-`check_args` call `from_file`; make `from_file` deserialize independently; replace the reader with a
-metadata-only check; and change the inclusive boundary to reject exactly-limit. Each mutation must
-fail a named matrix/parity/boundary assertion.
+Add a structural delegation guard that identifies the `from_file` function body and requires it to
+call the single bytes parser while rejecting deserialize/parser construction inside that body. Its
+self-test must mutate a disposable source fixture so a faithful duplicated deserializer fails even
+when semantic parity would remain green.
+
+In disposable copies, separately replace one tool callsite with `tokio::fs::read`; make
+`check_args` call `from_file`; map invalid UTF-8 to `E_POLICY_READ` or `E_INTERNAL`; duplicate
+deserialization inside `from_file`; replace the reader with a metadata-only check; and change the
+inclusive boundary to reject exactly-limit. Each mutation must fail a named
+matrix/classification/structural/boundary assertion.
 
 - [ ] **Step 7: Commit all five migrations**
 
@@ -269,7 +282,10 @@ git add -- \
   crates/assay-mcp-server/src/tools/check_coverage.rs \
   crates/assay-mcp-server/src/tools/explain_trace.rs \
   crates/assay-mcp-server/src/tools/check_args.rs \
-  crates/assay-mcp-server/tests/policy_ingest_limits.rs
+  crates/assay-mcp-server/tests/policy_ingest_limits.rs \
+  scripts/ci/check-mcp-policy-parser-delegation.py \
+  scripts/ci/test-check-mcp-policy-parser-delegation.sh \
+  .pre-commit-config.yaml
 git commit -m "fix(mcp): route policy tools through bounded ingest"
 ```
 

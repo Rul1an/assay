@@ -260,16 +260,14 @@ pre-commit run --files \
   docs/mcp/self-correction.md \
   docs/use-cases/self-correction.md \
   CHANGELOG.md
-rg -n "assay_policy_decide|blocklist|tools\.deny" \
-  docs/reference/mcp-api.md \
-  docs/AIcontext/entry-points.md \
-  docs/AIcontext/quick-reference.md \
-  docs/mcp/self-correction.md \
-  docs/use-cases/self-correction.md \
-  CHANGELOG.md
+rg -n --glob '*.md' \
+  "assay_policy_decide|blocklist|tools\.deny|argument-aware|full policy" \
+  README.md CHANGELOG.md docs
 ```
 
-Expected: hooks pass; every hit is consistent with the two-dialect decision.
+Expected: hooks pass; classify every repository-wide hit before fixing the final file list. Every
+remaining current-product hit must be consistent with the two-dialect decision. Historical or
+generated exclusions must be named in the PR body rather than silently omitted from the search.
 
 - [ ] **Step 5: Commit documentation**
 
