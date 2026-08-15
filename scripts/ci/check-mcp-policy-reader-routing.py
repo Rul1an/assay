@@ -117,13 +117,12 @@ def function_body(source: str, signature: str) -> str | None:
     return None
 
 
-def check(root: Path) -> bool:
+def check() -> bool:
     errors: list[str] = []
-    reader_path = root / READER
-    if not reader_path.is_file():
+    if not READER.is_file():
         print("FAIL: policy reader module not found", file=sys.stderr)
         return False
-    reader = reader_path.read_text()
+    reader = READER.read_text()
     bounded = function_body(reader, "fn read_bounded")
     async_entry = function_body(reader, "async fn read_policy_bounded")
     if bounded is None:
@@ -152,11 +151,10 @@ def check(root: Path) -> bool:
             errors.append("read_policy_bounded must not duplicate the read")
 
     for rel in TOOL_FILES:
-        path = root / rel
-        if not path.is_file():
+        if not rel.is_file():
             errors.append(f"{rel}: missing")
             continue
-        source = path.read_text()
+        source = rel.read_text()
         effective = code_only(source)
         if "read_policy_bounded(" not in compact(source):
             errors.append(f"{rel}: must call read_policy_bounded")
@@ -177,5 +175,7 @@ def check(root: Path) -> bool:
 
 
 if __name__ == "__main__":
-    repo_root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")
-    raise SystemExit(0 if check(repo_root) else 1)
+    if len(sys.argv) != 1:
+        print(f"usage: {Path(sys.argv[0]).name}", file=sys.stderr)
+        raise SystemExit(1)
+    raise SystemExit(0 if check() else 1)

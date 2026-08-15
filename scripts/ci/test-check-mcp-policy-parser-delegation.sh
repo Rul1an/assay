@@ -1,14 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GUARD="scripts/ci/check-mcp-policy-parser-delegation.py"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GUARD="$SCRIPT_DIR/check-mcp-policy-parser-delegation.py"
 FILES=(
   crates/assay-core/src/mcp/policy/mod.rs
   crates/assay-core/src/mcp/policy/legacy.rs
 )
 
-python3 "$GUARD"
-echo "PASS: parser guard accepts the production hops"
+if ! python3 "$GUARD"; then
+  echo "FAIL: parser guard must accept zero args from the allowlisted cwd" >&2
+  exit 1
+fi
+echo "PASS: parser guard accepts zero args from the allowlisted cwd"
+
+if python3 "$GUARD" extra 2>/dev/null; then
+  echo "FAIL: parser guard must reject an extra argument" >&2
+  exit 1
+fi
+echo "PASS: parser guard rejects an extra argument"
+
+if python3 "$GUARD" --stdin </dev/null 2>/dev/null; then
+  echo "FAIL: parser guard must reject --stdin" >&2
+  exit 1
+fi
+echo "PASS: parser guard rejects --stdin"
+
+if python3 "$GUARD" . 2>/dev/null; then
+  echo "FAIL: parser guard must reject a positional path" >&2
+  exit 1
+fi
+echo "PASS: parser guard rejects a positional path"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -24,7 +46,10 @@ mutant() {
   "$mutation" "$TMPDIR/current"
   local output status
   set +e
-  output=$(python3 "$GUARD" "$TMPDIR/current" 2>&1)
+  output=$(
+    cd "$TMPDIR/current"
+    python3 "$GUARD" 2>&1
+  )
   status=$?
   set -e
   if [ "$status" -eq 0 ]; then

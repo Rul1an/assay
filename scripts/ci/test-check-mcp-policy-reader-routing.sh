@@ -1,13 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GUARD="scripts/ci/check-mcp-policy-reader-routing.py"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GUARD="$SCRIPT_DIR/check-mcp-policy-reader-routing.py"
 FILES=(
   crates/assay-mcp-server/src/tools
 )
 
-python3 "$GUARD"
-echo "PASS: reader guard accepts the production routes"
+if ! python3 "$GUARD"; then
+  echo "FAIL: reader guard must accept zero args from the allowlisted cwd" >&2
+  exit 1
+fi
+echo "PASS: reader guard accepts zero args from the allowlisted cwd"
+
+if python3 "$GUARD" extra 2>/dev/null; then
+  echo "FAIL: reader guard must reject an extra argument" >&2
+  exit 1
+fi
+echo "PASS: reader guard rejects an extra argument"
+
+if python3 "$GUARD" --stdin </dev/null 2>/dev/null; then
+  echo "FAIL: reader guard must reject --stdin" >&2
+  exit 1
+fi
+echo "PASS: reader guard rejects --stdin"
+
+if python3 "$GUARD" . 2>/dev/null; then
+  echo "FAIL: reader guard must reject a positional path" >&2
+  exit 1
+fi
+echo "PASS: reader guard rejects a positional path"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -22,7 +44,10 @@ mutant() {
   "$mutation" "$TMPDIR/current"
   local output status
   set +e
-  output=$(python3 "$GUARD" "$TMPDIR/current" 2>&1)
+  output=$(
+    cd "$TMPDIR/current"
+    python3 "$GUARD" 2>&1
+  )
   status=$?
   set -e
   if [ "$status" -eq 0 ]; then

@@ -110,10 +110,10 @@ def impl_method(source: str, name: str) -> str | None:
     return None
 
 
-def check(root: Path) -> bool:
+def check() -> bool:
     errors: list[str] = []
-    mod_src = (root / MOD).read_text()
-    legacy_src = (root / LEGACY).read_text()
+    mod_src = MOD.read_text()
+    legacy_src = LEGACY.read_text()
 
     public_file = impl_method(mod_src, "from_file")
     public_slice = impl_method(mod_src, "from_slice")
@@ -150,5 +150,7 @@ def check(root: Path) -> bool:
 
 
 if __name__ == "__main__":
-    repo_root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")
-    raise SystemExit(0 if check(repo_root) else 1)
+    if len(sys.argv) != 1:
+        print(f"usage: {Path(sys.argv[0]).name}", file=sys.stderr)
+        raise SystemExit(1)
+    raise SystemExit(0 if check() else 1)

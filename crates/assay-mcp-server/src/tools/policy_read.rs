@@ -32,7 +32,7 @@ fn map_read_error(err: io::Error, rel_path: &str) -> ToolError {
 }
 
 impl ToolContext {
-    /// Resolve `user_path`, then read the file through [`read_bounded`] on a
+    /// Resolve `user_path`, then read the file through `read_bounded` on a
     /// blocking thread. The `File` is opened inside `spawn_blocking`.
     pub async fn read_policy_bounded(&self, user_path: &str) -> Result<Vec<u8>, ToolError> {
         let path = self.resolve_policy_path(user_path).await?;
