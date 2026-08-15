@@ -237,6 +237,120 @@ fn five_tools_refuse_limit_plus_one_policy_file() {
     let _ = conn.shutdown();
 }
 
+fn assert_not_limit_error(label: &str, result: &Value, body: &Value) {
+    assert_ne!(
+        body.pointer("/error/code").and_then(Value::as_str),
+        Some("E_LIMIT_EXCEEDED"),
+        "{label}: exact-limit file must not be a limit failure; result={result} body={body}"
+    );
+}
+
+#[test]
+fn five_tools_accept_exact_limit_valid_policy_files() {
+    let dir = tempfile::tempdir().expect("policy-root");
+    let root = dir.path();
+
+    write_policy(
+        root,
+        "decide-exact.yaml",
+        &pad_yaml_to("blocklist: []\n", POLICY_LIMIT),
+    );
+    write_policy(
+        root,
+        "args-exact.yaml",
+        &pad_yaml_to(
+            "version: \"2.0\"\ntools:\n  allow:\n    - read_file\n",
+            POLICY_LIMIT,
+        ),
+    );
+    write_policy(
+        root,
+        "seq-exact.yaml",
+        &pad_yaml_to("- read_file\n", POLICY_LIMIT),
+    );
+    write_policy(
+        root,
+        "cov-exact.yaml",
+        &pad_yaml_to(
+            "version: \"1.1\"\nname: t\ntools:\n  allow: [Search]\nsequences: []\n",
+            POLICY_LIMIT,
+        ),
+    );
+    write_policy(
+        root,
+        "explain-exact.yaml",
+        &pad_yaml_to("version: \"1.1\"\nname: t\nsequences: []\n", POLICY_LIMIT),
+    );
+
+    let mut conn = spawn_server(root);
+    initialize(&mut conn);
+
+    let (decide_result, decide_body) = call_tool(
+        &mut conn,
+        "assay_policy_decide",
+        policy_decide_args("decide-exact.yaml"),
+        2,
+    );
+    assert_not_limit_error("assay_policy_decide exact", &decide_result, &decide_body);
+    assert_eq!(
+        decide_body.get("allowed").and_then(Value::as_bool),
+        Some(true),
+        "assay_policy_decide exact: {decide_body}"
+    );
+
+    let (args_result, args_body) = call_tool(
+        &mut conn,
+        "assay_check_args",
+        check_args_args("args-exact.yaml"),
+        3,
+    );
+    assert_not_limit_error("assay_check_args exact", &args_result, &args_body);
+    assert_eq!(
+        args_body.get("allowed").and_then(Value::as_bool),
+        Some(true),
+        "assay_check_args exact: {args_body}"
+    );
+
+    let (seq_result, seq_body) = call_tool(
+        &mut conn,
+        "assay_check_sequence",
+        check_sequence_args("seq-exact.yaml"),
+        4,
+    );
+    assert_not_limit_error("assay_check_sequence exact", &seq_result, &seq_body);
+    assert_eq!(
+        seq_body.get("allowed").and_then(Value::as_bool),
+        Some(true),
+        "assay_check_sequence exact: {seq_body}"
+    );
+
+    let (cov_result, cov_body) = call_tool(
+        &mut conn,
+        "assay_check_coverage",
+        check_coverage_args("cov-exact.yaml"),
+        5,
+    );
+    assert_not_limit_error("assay_check_coverage exact", &cov_result, &cov_body);
+    assert!(
+        cov_body.get("overall_coverage_pct").is_some() || cov_body.get("meets_threshold").is_some(),
+        "assay_check_coverage exact must reach the coverage report; body={cov_body}"
+    );
+
+    let (explain_result, explain_body) = call_tool(
+        &mut conn,
+        "assay_explain_trace",
+        explain_trace_args("explain-exact.yaml"),
+        6,
+    );
+    assert_not_limit_error("assay_explain_trace exact", &explain_result, &explain_body);
+    assert!(
+        explain_body.get("total_steps").is_some() || explain_body.get("blocked_steps").is_some(),
+        "assay_explain_trace exact must reach the explanation; body={explain_body}"
+    );
+
+    let _ = conn.shutdown();
+}
+
 #[test]
 fn check_args_invalid_utf8_stays_policy_parse() {
     let dir = tempfile::tempdir().expect("policy-root");

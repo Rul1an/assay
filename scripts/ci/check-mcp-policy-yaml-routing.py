@@ -158,7 +158,7 @@ def check(root: Path) -> bool:
     require(errors, decide, "serde_json::from_value::<PolicyDecisionDocument>(root)", "policy_decide typed stage")
     require(errors, coverage, "super::parse_tool_policy(&policy_bytes)", "check_coverage route")
     require(errors, explain, "super::parse_tool_policy(&policy_bytes)", "explain_trace route")
-    require(errors, args, "McpPolicy::from_file(&policy_path)", "check_args full parser route")
+    require(errors, args, "McpPolicy::from_slice(&policy_bytes)", "check_args full parser route")
     require(errors, legacy, "letvalue:serde_yaml::Value=matchserde_yaml::from_str(content)", "core syntax stage")
     require(errors, legacy, "if!value.is_mapping()", "core root stage")
     require(errors, legacy, "serde_ignored::deserialize(value,|path|", "core typed stage")

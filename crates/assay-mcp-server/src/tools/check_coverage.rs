@@ -57,22 +57,9 @@ pub async fn check_coverage(ctx: &ToolContext, args: &Value) -> Result<Value> {
             .result();
     }
 
-    // Load policy
-    let policy_path = match ctx.resolve_policy_path(&input.policy).await {
-        Ok(p) => p,
-        Err(e) => return e.result(),
-    };
-
-    let policy_bytes = match tokio::fs::read(&policy_path).await {
+    let policy_bytes = match ctx.read_policy_bounded(&input.policy).await {
         Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return ToolError::new(
-                "E_POLICY_NOT_FOUND",
-                &format!("Policy not found: {}", input.policy),
-            )
-            .result();
-        }
-        Err(e) => return ToolError::new("E_POLICY_READ", &e.to_string()).result(),
+        Err(e) => return e.result(),
     };
 
     // Parse policy through the shared mapping-stage helper.

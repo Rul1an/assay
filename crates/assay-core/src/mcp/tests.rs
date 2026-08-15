@@ -1,6 +1,7 @@
 use super::policy::*;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::str::FromStr;
 
 // ── Full-policy error classification tests ──────────────────────────────────
 
@@ -525,4 +526,176 @@ fn test_strict_deprecation_env_var() {
     unsafe {
         std::env::remove_var("ASSAY_STRICT_DEPRECATIONS");
     }
+}
+
+#[derive(Debug)]
+enum ParserOutcome {
+    V2Allow(&'static str),
+    LegacyAllowDeny(&'static str, &'static str),
+    V1MigratedPattern(&'static str),
+    Accepted,
+    Syntax,
+    RootNotMapping,
+    Structure,
+    Validation,
+    StrictDeprecation,
+}
+
+fn classify_policy_err(err: anyhow::Error) -> ParserOutcome {
+    if let Some(typed) = err.downcast_ref::<McpPolicyError>() {
+        return match typed.kind {
+            McpPolicyErrorKind::Syntax { .. } => ParserOutcome::Syntax,
+            McpPolicyErrorKind::RootNotMapping => ParserOutcome::RootNotMapping,
+            McpPolicyErrorKind::Structure => ParserOutcome::Structure,
+            McpPolicyErrorKind::Validation => ParserOutcome::Validation,
+        };
+    }
+    if err.to_string().contains("Strict mode") {
+        return ParserOutcome::StrictDeprecation;
+    }
+    panic!("unclassified policy error: {err}");
+}
+
+fn outcome_from_policy(policy: McpPolicy, expected: &ParserOutcome) -> ParserOutcome {
+    match expected {
+        ParserOutcome::V2Allow(name) => {
+            assert_eq!(policy.version, "2.0");
+            assert!(policy
+                .tools
+                .allow
+                .as_ref()
+                .is_some_and(|allow| allow.iter().any(|tool| tool == name)));
+            ParserOutcome::V2Allow(name)
+        }
+        ParserOutcome::LegacyAllowDeny(allow, deny) => {
+            assert!(policy
+                .tools
+                .allow
+                .as_ref()
+                .is_some_and(|tools| tools.iter().any(|tool| tool == *allow)));
+            assert!(policy
+                .tools
+                .deny
+                .as_ref()
+                .is_some_and(|tools| tools.iter().any(|tool| tool == *deny)));
+            assert!(policy.allow.is_none());
+            assert!(policy.deny.is_none());
+            ParserOutcome::LegacyAllowDeny(allow, deny)
+        }
+        ParserOutcome::V1MigratedPattern(pattern) => {
+            let schema = policy
+                .schemas
+                .get("read_file")
+                .expect("V1 constraints must migrate");
+            assert_eq!(
+                schema
+                    .pointer("/properties/path/pattern")
+                    .and_then(Value::as_str),
+                Some(*pattern)
+            );
+            ParserOutcome::V1MigratedPattern(pattern)
+        }
+        ParserOutcome::Accepted => ParserOutcome::Accepted,
+        other => panic!("success is not a {other:?} outcome"),
+    }
+}
+
+fn parse_all_entry_points(bytes: &[u8], expected: ParserOutcome) {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(tmp.path(), bytes).unwrap();
+    let file = McpPolicy::from_file(tmp.path());
+    let slice = McpPolicy::from_slice(bytes);
+    let via_str = std::str::from_utf8(bytes).ok().map(McpPolicy::from_str);
+
+    let file_out = match file {
+        Ok(policy) => outcome_from_policy(policy, &expected),
+        Err(err) => classify_policy_err(err),
+    };
+    let slice_out = match slice {
+        Ok(policy) => outcome_from_policy(policy, &expected),
+        Err(err) => classify_policy_err(err),
+    };
+    assert!(
+        matches_outcome(&file_out, &expected),
+        "from_file={file_out:?} expected={expected:?}"
+    );
+    assert!(
+        matches_outcome(&slice_out, &expected),
+        "from_slice={slice_out:?} expected={expected:?}"
+    );
+    if let Some(via_str) = via_str {
+        let str_out = match via_str {
+            Ok(policy) => outcome_from_policy(policy, &expected),
+            Err(err) => classify_policy_err(err),
+        };
+        assert!(
+            matches_outcome(&str_out, &expected),
+            "from_str={str_out:?} expected={expected:?}"
+        );
+    } else {
+        assert!(
+            matches!(&expected, ParserOutcome::Syntax),
+            "non-UTF-8 must be a syntax failure"
+        );
+    }
+}
+
+fn matches_outcome(actual: &ParserOutcome, expected: &ParserOutcome) -> bool {
+    match (actual, expected) {
+        (ParserOutcome::V2Allow(a), ParserOutcome::V2Allow(b)) => a == b,
+        (ParserOutcome::LegacyAllowDeny(a1, d1), ParserOutcome::LegacyAllowDeny(a2, d2)) => {
+            a1 == a2 && d1 == d2
+        }
+        (ParserOutcome::V1MigratedPattern(a), ParserOutcome::V1MigratedPattern(b)) => a == b,
+        (ParserOutcome::Accepted, ParserOutcome::Accepted)
+        | (ParserOutcome::Syntax, ParserOutcome::Syntax)
+        | (ParserOutcome::RootNotMapping, ParserOutcome::RootNotMapping)
+        | (ParserOutcome::Structure, ParserOutcome::Structure)
+        | (ParserOutcome::Validation, ParserOutcome::Validation)
+        | (ParserOutcome::StrictDeprecation, ParserOutcome::StrictDeprecation) => true,
+        _ => false,
+    }
+}
+
+#[test]
+#[serial_test::serial]
+#[allow(unsafe_code)]
+fn policy_parser_contract_file_bytes_string_parity() {
+    unsafe { std::env::remove_var("ASSAY_STRICT_DEPRECATIONS") };
+
+    parse_all_entry_points(
+        b"version: \"2.0\"\nname: test\ntools:\n  allow:\n    - read_file\n",
+        ParserOutcome::V2Allow("read_file"),
+    );
+    parse_all_entry_points(
+        b"version: \"1.0\"\nallow:\n  - tool_a\ndeny:\n  - tool_b\n",
+        ParserOutcome::LegacyAllowDeny("tool_a", "tool_b"),
+    );
+    parse_all_entry_points(
+        b"version: \"1.0\"\nconstraints:\n  - tool: read_file\n    params:\n      path:\n        matches: \"^/safe/.*\"\n",
+        ParserOutcome::V1MigratedPattern("^/safe/.*"),
+    );
+    parse_all_entry_points(
+        b"version: \"2.0\"\ntools:\n  allow:\n    - read_file\n  unknown_field_xyz: true\n",
+        ParserOutcome::Accepted,
+    );
+    parse_all_entry_points(
+        b"version: \"1.0\"\nconstraints: []\n",
+        ParserOutcome::Accepted,
+    );
+    parse_all_entry_points(b"version: \"\n  bad: [", ParserOutcome::Syntax);
+    parse_all_entry_points(b"- item1\n- item2\n", ParserOutcome::RootNotMapping);
+    parse_all_entry_points(b"version: \"2.0\"\ntools: 42\n", ParserOutcome::Structure);
+    parse_all_entry_points(
+        b"version: \"2.0\"\ntool_pins:\n  test_tool:\n    schema_hash: \"bad\"\n    meta_hash: \"bad\"\n    server_id: s\n    tool_name: n\n",
+        ParserOutcome::Validation,
+    );
+    parse_all_entry_points(&[0xFF, 0xFE, b'v', b':', b' ', b'1'], ParserOutcome::Syntax);
+
+    unsafe { std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1") };
+    parse_all_entry_points(
+        b"version: \"1.0\"\nconstraints: []\n",
+        ParserOutcome::StrictDeprecation,
+    );
+    unsafe { std::env::remove_var("ASSAY_STRICT_DEPRECATIONS") };
 }

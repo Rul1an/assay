@@ -2,7 +2,7 @@
 //!
 //! Provides step-by-step explanation of trace evaluation against a policy.
 
-use crate::tools::{ToolContext, ToolError};
+use crate::tools::ToolContext;
 use anyhow::{Context, Result};
 use assay_core::explain;
 use serde_json::Value;
@@ -41,22 +41,9 @@ pub async fn explain_trace(ctx: &ToolContext, args: &Value) -> Result<Value> {
     let input: ExplainInput =
         serde_json::from_value(args.clone()).context("Invalid explain input")?;
 
-    // Load policy
-    let policy_path = match ctx.resolve_policy_path(&input.policy).await {
-        Ok(p) => p,
-        Err(e) => return e.result(),
-    };
-
-    let policy_bytes = match tokio::fs::read(&policy_path).await {
+    let policy_bytes = match ctx.read_policy_bounded(&input.policy).await {
         Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return ToolError::new(
-                "E_POLICY_NOT_FOUND",
-                &format!("Policy not found: {}", input.policy),
-            )
-            .result();
-        }
-        Err(e) => return ToolError::new("E_POLICY_READ", &e.to_string()).result(),
+        Err(e) => return e.result(),
     };
 
     let policy: assay_core::model::Policy = match super::parse_tool_policy(&policy_bytes) {
