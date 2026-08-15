@@ -41,10 +41,10 @@ stdio JSON-RPC tests, pre-commit, GitHub Actions.
 - Modify five tool files under `crates/assay-mcp-server/src/tools/`: remove unbounded reads.
 - Modify `crates/assay-core/src/mcp/policy/mod.rs` and `policy/legacy.rs`: one bytes-in parser.
 - Modify `crates/assay-core/src/mcp/tests.rs`: file/bytes/string parser contract table.
-- Add `crates/assay-core/tests/mcp_policy_warning_contract.rs`: subprocess warning contract.
+- Verify `crates/assay-core/tests/mcp_policy_warning_contract.rs`: inherited subprocess warning contract.
 - Add `crates/assay-mcp-server/tests/policy_ingest_limits.rs`: real-stdio five-tool boundary table.
 - Add `scripts/ci/check-mcp-policy-reader-routing.py` and its self-test: pin `LimitReader` and all five callsites.
-- Add `scripts/ci/check-mcp-policy-parser-delegation.py` and its self-test: pin both full-policy delegation hops.
+- Add `scripts/ci/check-mcp-policy-parser-delegation.py` and its self-test: pin all four full-policy delegation hops.
 - Modify `.pre-commit-config.yaml`: wire both routing guards to all guarded source paths.
 - Modify `CHANGELOG.md` and the MCP server/operator reference: document the default ceiling and override.
 
@@ -171,7 +171,7 @@ git commit -m "feat(mcp): bound shared policy-file reads"
 - Modify: `crates/assay-core/src/mcp/policy/mod.rs`
 - Modify: `crates/assay-core/src/mcp/policy/legacy.rs`
 - Modify: `crates/assay-core/src/mcp/tests.rs`
-- Add: `crates/assay-core/tests/mcp_policy_warning_contract.rs`
+- Verify: `crates/assay-core/tests/mcp_policy_warning_contract.rs` (landed by #2387)
 - Add: `scripts/ci/check-mcp-policy-parser-delegation.py`
 - Add: `scripts/ci/test-check-mcp-policy-parser-delegation.sh`
 - Modify: `.pre-commit-config.yaml`
@@ -198,19 +198,14 @@ tracing subscriber, the separate non-strict V1 deprecation warning, strict-mode 
 syntax/validation failure kind, and whether validation ran. Run this table GREEN and commit it as a
 behavior freeze; it is not RED evidence.
 
-Test the process-global deprecation warning in the dedicated integration-test binary. Its parent
-test spawns `current_exe()` with an ignored exact child test and deterministic no-timestamp tracing;
-the child parses one V1 fixture with an unknown field twice. Capture stderr and assert the unknown-
-field warning precedes the deprecation warning, the deprecation text occurs exactly once, and the
-child exits successfully. A separate child process resets `OnceLock`; never reset or mutate it in
-process. Removing or reordering `emit_deprecation_warning` must fail this subprocess contract.
+Re-run the inherited #2387 subprocess warning contract before extraction; do not recreate or weaken
+its `OnceLock`, ordering, or once-per-process assertions in this slice.
 
 ```bash
 cargo test --locked -p assay-core mcp::tests::policy_file_parser_contract -- --nocapture
 cargo test --locked -p assay-core --test mcp_policy_warning_contract -- --nocapture
 git add -- \
-  crates/assay-core/src/mcp/tests.rs \
-  crates/assay-core/tests/mcp_policy_warning_contract.rs
+  crates/assay-core/src/mcp/tests.rs
 git commit -m "test(mcp): freeze full-policy file parser behavior"
 ```
 
@@ -241,8 +236,8 @@ git commit -m "test(mcp): expose missing full-policy bytes parser"
 
 Move UTF-8 decode, deserialize-with-`serde_ignored`, unknown-field warning, non-strict V1
 deprecation warning, strict-deprecation check, legacy normalization, constraint migration, and
-validation into one bytes-in function in `legacy.rs`. Make both public bytes/string methods call
-that one function; `from_str` must not duplicate its stages.
+validation into one bytes-in function in `legacy.rs`. Public `McpPolicy::from_slice` must delegate
+to that legacy function; public `from_str` must delegate to public `from_slice`.
 
 - [ ] **Step 4: Make `from_file` delegate**
 
@@ -252,10 +247,11 @@ may retain a deserialize/normalize/validate sequence.
 
 - [ ] **Step 5: Add and self-test the structural delegation guard**
 
-Add a source guard that identifies all three exact delegation hops: the public `McpPolicy::from_file`
+Add a source guard that identifies all four exact delegation hops: the public `McpPolicy::from_file`
 body in `policy/mod.rs` must call `legacy::from_file`, and `legacy::from_file` must call
-`McpPolicy::from_slice`; public `McpPolicy::from_str` must call `McpPolicy::from_slice` and perform no
-parser/deserializer construction. Reject parser/deserializer construction in all three bodies. The self-test uses
+`McpPolicy::from_slice`; public `McpPolicy::from_slice` must call the single legacy bytes function;
+public `McpPolicy::from_str` must call `McpPolicy::from_slice`. Reject parser/deserializer
+construction in all four bodies. The self-test uses
 disposable source fixtures and must fail when a faithful duplicate deserializer is inserted at
 any hop. Wire the guard into pre-commit for changes to `policy/mod.rs`, `legacy.rs`, the guard,
 or its self-test.
@@ -264,6 +260,7 @@ or its self-test.
 
 ```bash
 cargo test --locked -p assay-core mcp::tests -- --nocapture
+cargo test --locked -p assay-core --test mcp_policy_warning_contract -- --nocapture
 python3 scripts/ci/check-mcp-policy-parser-delegation.py
 bash scripts/ci/test-check-mcp-policy-parser-delegation.sh
 ```
@@ -280,7 +277,6 @@ git add -- \
   crates/assay-core/src/mcp/policy/mod.rs \
   crates/assay-core/src/mcp/policy/legacy.rs \
   crates/assay-core/src/mcp/tests.rs \
-  crates/assay-core/tests/mcp_policy_warning_contract.rs \
   scripts/ci/check-mcp-policy-parser-delegation.py \
   scripts/ci/test-check-mcp-policy-parser-delegation.sh \
   .pre-commit-config.yaml
@@ -399,6 +395,7 @@ Expected: no policy-reader bypass in the five tool modules. Test fixtures may st
 
 ```bash
 cargo test --locked -p assay-core mcp::tests -- --nocapture
+cargo test --locked -p assay-core --test mcp_policy_warning_contract -- --nocapture
 cargo test --locked -p assay-mcp-server --test policy_ingest_limits -- --nocapture
 cargo test --locked -p assay-mcp-server
 cargo fmt --all -- --check

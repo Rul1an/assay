@@ -49,6 +49,7 @@ GitHub Actions.
 - Modify `crates/assay-core/src/mcp/policy/mod.rs`: expose the typed full-policy failure kind.
 - Modify `crates/assay-core/src/mcp/policy/legacy.rs`: tag syntax, root, shape, and validation failures at source.
 - Modify `crates/assay-core/src/mcp/tests.rs`: pin full-policy error classification.
+- Add `crates/assay-core/tests/mcp_policy_warning_contract.rs`: subprocess warning/ordering contract.
 - Add `scripts/ci/check-mcp-policy-yaml-routing.py`: enforce the single mapping/parser boundary.
 - Add `scripts/ci/test-check-mcp-policy-yaml-routing.sh`: mutation-test the routing guard.
 - Modify `.pre-commit-config.yaml`: run the guard for every guarded parser or consumer.
@@ -59,6 +60,7 @@ GitHub Actions.
 - Add: `crates/assay-mcp-server/tests/policy_diagnostic_safety.rs`
 - Modify: `crates/assay-mcp-server/src/tools/mod.rs` (unit tests only in this task)
 - Modify: `crates/assay-core/src/mcp/tests.rs` (tests only in this task)
+- Add: `crates/assay-core/tests/mcp_policy_warning_contract.rs`
 - Modify: `crates/assay-core/src/mcp/policy/mod.rs` (interface-only typed seam)
 - Modify: `crates/assay-core/src/mcp/policy/legacy.rs` (interface-only typed seam)
 
@@ -101,7 +103,20 @@ Add a separate policy file containing invalid UTF-8 bytes and exercise `assay_ch
 the public class is `E_POLICY_PARSE` with exactly `Policy YAML is invalid`, not `E_POLICY_READ`,
 `E_INTERNAL`, or an OS/UTF-8 diagnostic.
 
-- [ ] **Step 4: Pin constructor and serializer bypasses**
+- [ ] **Step 4: Freeze successful full-policy semantics and warnings**
+
+Before changing `legacy::from_file`, add independent controls for V2 tools/schema, legacy root
+allow/deny normalization, V1 constraint migration, validation failure, unknown-field warning,
+non-strict V1 deprecation warning, and strict-deprecations rejection. Pin normalized results and
+warning behavior, not parser strings.
+
+Test the process-global deprecation warning in a dedicated integration-test binary. A parent test
+spawns `current_exe()` with an ignored exact child and no-timestamp tracing; the child parses one V1
+fixture with an unknown field twice. Assert unknown-field warning precedes deprecation warning, the
+deprecation text occurs exactly once, and the child succeeds. A child process resets `OnceLock`;
+never mutate it in-process. Run these controls GREEN on the baseline before continuing.
+
+- [ ] **Step 5: Pin constructor and serializer bypasses**
 
 In `tools/mod.rs` tests serialize all three forms with that same boundary-bisecting message:
 
@@ -115,33 +130,37 @@ Assert serialized `/message` is valid UTF-8 and at most 4,096 bytes. The direct 
 post-construction mutation are load-bearing: they prove the publication boundary, not only the
 constructor, applies the rule.
 
-- [ ] **Step 5: Add an interface-only classifier seam**
+- [ ] **Step 6: Add an interface-only classifier seam**
 
 Declare the public non-exhaustive `McpPolicyErrorKind` and typed wrapper, but do not yet make the
 parser construct it. This changes no parser result; it only lets the core classification test
 compile and downcast the existing `anyhow::Error`. The test must then fail its kind assertions rather
 than fail compilation.
 
-- [ ] **Step 6: Run behavioral RED**
+- [ ] **Step 7: Run baseline controls and behavioral RED**
 
 ```bash
 cargo test --locked -p assay-mcp-server --test policy_diagnostic_safety -- --nocapture
 cargo test --locked -p assay-mcp-server tools::tests -- --nocapture
 cargo test --locked -p assay-core mcp::tests::policy_error_classification -- --nocapture
+cargo test --locked -p assay-core mcp::tests::policy_file_parser_contract -- --nocapture
+cargo test --locked -p assay-core --test mcp_policy_warning_contract -- --nocapture
 ```
 
 Expected: hostile parser values appear in responses and direct/mutated `ToolError` serialization is
-unbounded; typed downcasts fail because the parser does not construct the seam; invalid UTF-8 is
-still classified as a read failure. Record the exact assertion failures in #2388. A compile failure
-does not count as RED evidence.
+unbounded; typed downcasts fail because the parser does not construct the seam; invalid UTF-8 still
+publishes `E_POLICY_PARSE` but leaks the raw UTF-8 diagnostic and lacks the typed `Syntax` kind.
+Successful parser/warning controls remain green. Record the exact assertion failures in #2388. A
+compile failure does not count as RED evidence.
 
-- [ ] **Step 7: Commit the interface seam and RED tests**
+- [ ] **Step 8: Commit the interface seam, behavior freeze, and RED tests**
 
 ```bash
 git add -- \
   crates/assay-mcp-server/tests/policy_diagnostic_safety.rs \
   crates/assay-mcp-server/src/tools/mod.rs \
   crates/assay-core/src/mcp/tests.rs \
+  crates/assay-core/tests/mcp_policy_warning_contract.rs \
   crates/assay-core/src/mcp/policy/mod.rs \
   crates/assay-core/src/mcp/policy/legacy.rs
 git commit -m "test(mcp): expose unbounded policy diagnostics"
@@ -270,6 +289,8 @@ cargo test --locked -p assay-mcp-server --test policy_diagnostic_safety -- --noc
 cargo test --locked -p assay-mcp-server --test policy_decide_blocklist -- --nocapture
 cargo test --locked -p assay-mcp-server --test stdio_edge_cases -- --nocapture
 cargo test --locked -p assay-core mcp::tests::policy_error_classification -- --nocapture
+cargo test --locked -p assay-core mcp::tests::policy_file_parser_contract -- --nocapture
+cargo test --locked -p assay-core --test mcp_policy_warning_contract -- --nocapture
 python3 scripts/ci/check-mcp-policy-yaml-routing.py
 bash scripts/ci/test-check-mcp-policy-yaml-routing.sh
 rg -n 'E_POLICY_PARSE.*(e\.to_string|format!)|Failed to parse policy' \
@@ -300,6 +321,7 @@ git add -- \
   crates/assay-core/src/mcp/policy/mod.rs \
   crates/assay-core/src/mcp/policy/legacy.rs \
   crates/assay-core/src/mcp/tests.rs \
+  crates/assay-core/tests/mcp_policy_warning_contract.rs \
   crates/assay-mcp-server/src/tools/mod.rs \
   crates/assay-mcp-server/src/tools/policy_decide.rs \
   crates/assay-mcp-server/src/tools/check_args.rs \
@@ -319,6 +341,8 @@ git commit -m "fix(mcp): normalise public policy parse diagnostics"
 ```bash
 cargo test --locked -p assay-mcp-server --test policy_diagnostic_safety -- --nocapture
 cargo test --locked -p assay-core mcp::tests::policy_error_classification -- --nocapture
+cargo test --locked -p assay-core mcp::tests::policy_file_parser_contract -- --nocapture
+cargo test --locked -p assay-core --test mcp_policy_warning_contract -- --nocapture
 cargo test --locked -p assay-mcp-server
 cargo fmt --all -- --check
 cargo clippy -p assay-core -p assay-mcp-server --all-targets -- -D warnings
