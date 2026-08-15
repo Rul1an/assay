@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 DEFAULT_TARGET = Path("crates/assay-mcp-server/src/tools/mod.rs")
+MAX_SOURCE_CHARS = 1_000_000
 EXPECTED_BODY = (
     'Ok(serde_json::to_value(serde_json::json!({'
     '"allowed":false,"error":self}))?)'
@@ -20,7 +21,7 @@ def extract_result_body(source: str) -> str | None:
     if not impl_match:
         return None
     result_match = re.search(
-        r"pub\s+fn\s+result\s*\(\s*self\s*\)\s*->\s*[^\{]+\{",
+        r"pub\s+fn\s+result\s*\(\s*self\s*\)\s*->[^{\r\n]+{",
         source[impl_match.end() :],
     )
     if not result_match:
@@ -150,7 +151,10 @@ if __name__ == "__main__":
     if len(sys.argv) == 1:
         source = DEFAULT_TARGET.read_text()
     elif sys.argv[1:] == ["--stdin"]:
-        source = sys.stdin.read()
+        source = sys.stdin.read(MAX_SOURCE_CHARS + 1)
+        if len(source) > MAX_SOURCE_CHARS:
+            print("FAIL: source exceeds guard input limit", file=sys.stderr)
+            raise SystemExit(2)
     else:
         print(f"usage: {Path(sys.argv[0]).name} [--stdin]", file=sys.stderr)
         raise SystemExit(2)

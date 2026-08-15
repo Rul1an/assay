@@ -20,6 +20,51 @@ if python3 "$GUARD" "$TARGET" 2>/dev/null; then
 fi
 echo "PASS: guard rejects positional filesystem paths"
 
+# An unterminated result signature must not trigger polynomial regex backtracking.
+python3 - "$GUARD" <<'PY'
+import subprocess
+import sys
+
+source = "impl ToolError { pub fn result(self)->" + (" " * 200_000) + "x"
+try:
+    result = subprocess.run(
+        [sys.executable, sys.argv[1], "--stdin"],
+        input=source,
+        text=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=2,
+        check=False,
+    )
+except subprocess.TimeoutExpired:
+    raise SystemExit("FAIL: guard regex exceeded adversarial-input deadline")
+if result.returncode != 1:
+    raise SystemExit(
+        f"FAIL: malformed adversarial source returned {result.returncode}, expected 1"
+    )
+PY
+echo "PASS: guard rejects adversarial source within deadline"
+
+# The mutation-only stdin interface has its own fixed resource ceiling.
+python3 - "$GUARD" <<'PY'
+import subprocess
+import sys
+
+result = subprocess.run(
+    [sys.executable, sys.argv[1], "--stdin"],
+    input="x" * 1_000_001,
+    text=True,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+    check=False,
+)
+if result.returncode != 2:
+    raise SystemExit(
+        f"FAIL: oversized guard source returned {result.returncode}, expected 2"
+    )
+PY
+echo "PASS: guard bounds stdin source"
+
 # Verify the guard passes on the real file first.
 if ! python3 "$GUARD"; then
     echo "FAIL: guard must pass on the unmodified source" >&2
