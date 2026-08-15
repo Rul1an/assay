@@ -2,6 +2,34 @@ use super::{ToolContext, ToolError};
 use anyhow::{Context, Result};
 use serde_json::Value;
 
+#[derive(serde::Deserialize)]
+struct PolicyDecisionDocument {
+    #[serde(default)]
+    blocklist: Vec<String>,
+}
+
+fn parse_policy_decision_document(bytes: &[u8]) -> Result<Vec<String>, ToolError> {
+    let root: Value = serde_yaml::from_slice(bytes)
+        .map_err(|_| ToolError::new("E_POLICY_PARSE", "Policy YAML is invalid"))?;
+    let object = root
+        .as_object()
+        .ok_or_else(|| ToolError::new("E_POLICY_PARSE", "Policy root must be a mapping"))?;
+
+    if ["allow", "deny", "tools"]
+        .iter()
+        .any(|key| object.contains_key(*key))
+    {
+        return Err(ToolError::new(
+            "E_POLICY_PARSE",
+            "Policy structure is invalid",
+        ));
+    }
+
+    serde_json::from_value::<PolicyDecisionDocument>(root)
+        .map(|document| document.blocklist)
+        .map_err(|_| ToolError::new("E_POLICY_PARSE", "Policy structure is invalid"))
+}
+
 pub async fn policy_decide(ctx: &ToolContext, args: &Value) -> Result<Value> {
     // 1. Unpack args & Checks
     let tool_name = args
@@ -47,21 +75,9 @@ pub async fn policy_decide(ctx: &ToolContext, args: &Value) -> Result<Value> {
         list
     } else {
         tracing::debug!(event="cache_miss", key=%cache_key, cache="blocklist");
-        // Compile
-        let policy_yaml: Value = match serde_yaml::from_slice(&policy_bytes) {
-            Ok(v) => v,
-            Err(e) => return ToolError::new("E_POLICY_PARSE", &e.to_string()).result(),
-        };
-
-        // Extract blocklist. Absent stays empty (allow). A present value that is
-        // not a string sequence is a parse error and must not be cached.
-        let list: Vec<String> = if let Some(l) = policy_yaml.get("blocklist") {
-            match serde_json::from_value(l.clone()) {
-                Ok(list) => list,
-                Err(e) => return ToolError::new("E_POLICY_PARSE", &e.to_string()).result(),
-            }
-        } else {
-            vec![]
+        let list = match parse_policy_decision_document(&policy_bytes) {
+            Ok(list) => list,
+            Err(error) => return error.result(),
         };
 
         let arc = std::sync::Arc::new(list);
