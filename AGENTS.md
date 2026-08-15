@@ -7,8 +7,8 @@ this contract.
 ## Canonical State
 
 - Repository truth is the checked-in code and documentation.
-- The public execution ledger for the active programme is named on this line: [issue
-  #2388](https://github.com/Rul1an/assay/issues/2388). Name the new ledger here when one opens, and
+- The public execution ledger for the active programme is named on this line: [issue #2388](https://github.com/Rul1an/assay/issues/2388).
+  Name the new ledger here when one opens, and
   say so plainly here when none is active. Keep
   the number to this one line; everywhere else the contract names the role, so the next programme
   costs one edit here rather than one in every section. Nothing enforces that, so it is an
