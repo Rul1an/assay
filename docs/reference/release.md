@@ -27,6 +27,15 @@ This document outlines the canonical checklist for releasing new versions of Ass
   The Harness default is an independently proven compatibility pin and may
   intentionally lag the latest Assay release. The VM remains bound to the
   current GitHub Latest release until the new tag is published.
+- [ ] **Candidate-tree identity**: Verify the exact commit that will be tagged:
+  ```bash
+  CANDIDATE_TAG=vX.Y.Z EXPECTED_SHA="$(git rev-parse HEAD)" \
+    bash scripts/ci/check-tag-tree-outward-truth.sh
+  ```
+  This binds the workspace, changelog, and generated golden-path source identity
+  to the candidate tag and commit. The published install pin may still name the
+  previous release until the candidate assets exist; installability and source
+  identity are separate checks.
 
 ### 2. Permissions Check (Crucial)
 - [ ] **Trusted Publishing**: Ensure GitHub Actions OIDC is enabled for the release tag on every current crates.io crate:

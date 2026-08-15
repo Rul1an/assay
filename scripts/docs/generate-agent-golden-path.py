@@ -11,6 +11,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(ROOT / "scripts/ci/lib"))
+from workspace_version import read_workspace_version  # noqa: E402
 
 JSON_OUTPUT = ROOT / "docs/generated/agent-golden-path.json"
 MARKDOWN_OUTPUT = ROOT / "docs/guides/agent-golden-path.md"
@@ -93,6 +96,8 @@ def read_published_release_tag() -> str:
 
 RELEASE_TAG = read_published_release_tag()
 RELEASE_VERSION = RELEASE_TAG.removeprefix("v")
+SOURCE_VERSION = read_workspace_version(ROOT / "Cargo.toml")
+SOURCE_TAG = f"v{SOURCE_VERSION}"
 
 
 def stdout(kind: str, document: str | None = None) -> dict[str, object]:
@@ -595,6 +600,8 @@ CONTRACT: dict[str, object] = {
     "schema": "assay.agent_golden_path.v1",
     "schema_version": 1,
     "generated_by": "scripts/docs/generate-agent-golden-path.py",
+    "source_version": SOURCE_VERSION,
+    "source_tag": SOURCE_TAG,
     "release_version": RELEASE_VERSION,
     "release_tag": RELEASE_TAG,
     "source_issue": 2154,
@@ -673,6 +680,7 @@ def render_release() -> str:
         (
             "## Release-pinned start",
             "",
+            f"This source tree declares Assay `{SOURCE_VERSION}` (`{SOURCE_TAG}`).",
             f"This journey is pinned to Assay `{RELEASE_VERSION}` "
             f"([`{RELEASE_TAG}`](https://github.com/Rul1an/assay/releases/tag/{RELEASE_TAG})).",
             f"Install the CLI from a verified channel, then require `assay version` to print "

@@ -65,6 +65,13 @@ jobs:
           version="$(bash scripts/ci/resolve-release-version.sh)"
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
+      - name: Verify candidate source-tree identity
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ steps.version.outputs.version }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: bash scripts/ci/check-tag-tree-outward-truth.sh
+
       # A release gate that lives only in an issue's prose is not a gate. v3.37.0 shipped with a
       # blocker open because the only place the gate existed was one sentence, and nothing could
       # read it.
