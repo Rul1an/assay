@@ -4,7 +4,9 @@ This guide documents the reference architecture for the "Gateway Pattern" config
 
 ## 1. Architecture Overview
 
-The Gateway Pattern positions Assay as an authoritative, non-blocking "Decision Gateway" or sidecar in the runtime path.
+The Gateway Pattern positions Assay as a decision point in the runtime path.
+The client remains responsible for enforcing the returned decision before it
+invokes a target tool.
 
 ```mermaid
 graph TD
@@ -15,47 +17,53 @@ graph TD
 
         Assay -->|Policy Eval < 1ms| PolicyDB[(Ruleset)]
 
-        Assay -- "❌ BLOCK (Violation)" --> Client
-        Assay -- "✅ ALLOW" --> Backend[System of Record]
+        Assay -- "BLOCK decision" --> Client
+        Assay -- "ALLOW decision" --> Client
     end
 
-    Client -->|2. Feedback Loop| User
-    Assay -.->|3. Audit Trail| OTLP[Observability]
+    Client -->|2. Enforced allowed action| Backend[System of Record]
+    Client -->|3. Feedback Loop| User
+    Assay -.->|4. Audit Trail| OTLP[Observability]
 
     style Assay fill:#00d97e,stroke:#333,stroke-width:2px,color:white
 ```
 
 ## 2. Configuration Strategy
 
-For initial deployment, utilize a "Fail-Open with Warning" strategy to ensure business continuity while gathering telemetry.
+The built-in stdio server always fails closed when tool dispatch fails or times
+out. Availability must not silently become authorization.
 
-### Fail-Safe Mode (`on_error: allow`)
+### Failure behavior
 
-Configure the MCP server to allow operations even if the policy engine experiences failure (e.g., config corruption), but explicitly warn the client.
+Do not send `arguments.on_error`; it is not part of the advertised schemas and
+does not control server behavior. A dispatch failure returns an MCP tool error:
 
 **Client Request:**
 ```json
 {
   "method": "tools/call",
   "params": {
-    "name": "approve_transaction",
-    "arguments": {
-      "amount": 500,
-      "on_error": "allow",
-      "policy": "finance_v1"
-    }
+    "name": "assay_check_args",
+    "arguments": {"tool": "approve_transaction", "arguments": {"amount": 500}, "policy": "finance_v1.yaml"}
   }
 }
 ```
 
-**System Response (on Internal Failure):**
+**System Response (on an outer dispatch failure):**
 ```json
 {
-  "content": [],
-  "isError": false,
-  "warning": "FAIL-SAFE ACTIVE: Policy engine offline. Proceed with caution."
+  "content": [{
+    "type": "text",
+    "text": "{\"allowed\":false,\"error\":{\"code\":\"E_INTERNAL\",\"message\":\"Tool execution failed\"}}"
+  }],
+  "isError": true
 }
 ```
+
+For availability, use bounded retry for retryable transport failures,
+supervise and restart the local server, run redundant instances where the host
+supports that safely, and alert on `E_TIMEOUT` and `E_INTERNAL`. Never forward
+the protected target action merely because the policy decision is unavailable.
 
 ## 3. Telemetry & Accounting
 
@@ -73,13 +81,16 @@ Ingest these logs to calculate governance usage volume.
 }
 ```
 
-### Fail-Safe Alert
-Trigger P1 alerts on this event id.
+### Failure alert
+
+Trigger an alert from the structured completion event and its reason code. The
+server does not emit caller values or raw internal errors in this path.
 
 ```json
 {
-  "event": "assay.failsafe.triggered",
-  "error": "config_load_error",
-  "fallback": "allow"
+  "event": "tool_call_done",
+  "outcome": "app_error",
+  "allowed": false,
+  "code": "E_INTERNAL"
 }
 ```
