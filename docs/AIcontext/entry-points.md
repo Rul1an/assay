@@ -512,11 +512,16 @@ The MCP server (`assay-mcp-server`) exposes tools via JSON-RPC over stdio.
 
 ### Tool: `assay_policy_decide`
 
-**Purpose**: General policy decision endpoint
+**Purpose**: Exact-name check against a compatibility-only root `blocklist`
 
-**Request**: Tool call with arguments
+`assay_policy_decide` performs an exact-name check against its compatibility-only root `blocklist`.
+It does not parse full `McpPolicy` controls such as `tools.allow` or `tools.deny`; use
+`assay_check_args` for full, argument-aware policy evaluation. Passing canonical name-policy fields
+to `assay_policy_decide` is an error, not a clean allow.
 
-**Response**: Allow/deny decision with violations
+**Request**: `{ "tool": "string", "policy": "path.yaml" }`
+
+**Response**: Allow/deny for that exact tool name, or `E_POLICY_PARSE` for an invalid root or dialect
 
 ## Configuration Files
 
@@ -537,12 +542,15 @@ The MCP server (`assay-mcp-server`) exposes tools via JSON-RPC over stdio.
 
 **Purpose**: Policy constraints
 **Location**: Specified in `eval.yaml` or default `policy.yaml`
-**Schema**: Defined in `assay-core::policy_engine`
+**Schema**: Full argument-aware evaluation uses `McpPolicy` (`tools`, `sequences`).
+`assay_policy_decide` reads only a private root-`blocklist` dialect and rejects
+canonical name-policy fields.
 
 **Key Sections**:
-- `tools`: Tool-specific constraints
-- `sequences`: Sequence rules
-- `blocklist`: Blocked tools/patterns
+- `tools`: Tool-specific constraints for `assay_check_args` / full `McpPolicy`
+- `sequences`: Sequence rules for `assay_check_sequence`
+- Root `blocklist`: Exact-name compatibility list for `assay_policy_decide` only.
+  Do not mix it with `tools`, `allow`, or `deny` in that tool.
 
 ### Trace Files (`.jsonl`)
 

@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- `assay_policy_decide` now rejects non-mapping roots and canonical or mixed name-policy
+  documents (`allow`, `deny`, `tools`, or those markers mixed with root `blocklist`) with
+  `E_POLICY_PARSE` before cache insertion. Those inputs previously returned a false clean
+  allow or ignored the canonical fields. This is an intentional hardening change, not
+  "unsupported with no impact." Route full, argument-aware policy evaluation to
+  `assay_check_args`. Migration: keep a root-`blocklist` file for the name-only tool, and
+  move `tools.allow` / `tools.deny` documents to `assay_check_args` (#2386).
+
+  ```yaml
+  # assay_policy_decide compatibility dialect only
+  blocklist:
+    - dangerous_tool
+  ```
+
+  ```yaml
+  # full McpPolicy for assay_check_args — do not pass this to assay_policy_decide
+  tools:
+    deny:
+      - dangerous_tool
+  ```
+
 ## [5.2.0] - 2026-08-14
 
 This release hardens the evidence verifier and makes the Linux monitor's declared observation

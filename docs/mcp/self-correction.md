@@ -135,26 +135,32 @@ Validate if a tool call is allowed given prior calls.
 
 ### assay_policy_decide
 
-Combined check: arguments + sequence + blocklist.
+`assay_policy_decide` performs an exact-name check against its compatibility-only root `blocklist`.
+It does not parse full `McpPolicy` controls such as `tools.allow` or `tools.deny`; use
+`assay_check_args` for full, argument-aware policy evaluation. Passing canonical name-policy fields
+to `assay_policy_decide` is an error, not a clean allow.
 
 **Input:**
 ```json
 {
-  "target_tool": "process_refund",
-  "args": {"amount": 500, "order_id": "ord_123"},
-  "previous_calls": ["get_order", "verify_identity"]
+  "tool": "process_refund",
+  "policy": "blocklist.yaml"
 }
 ```
 
-**Output:**
+**Output (allow):**
 ```json
 {
-  "decision": "allow",
-  "checks": {
-    "args_valid": {"passed": true},
-    "sequence_valid": {"passed": true},
-    "blocklist": {"passed": true}
-  }
+  "allowed": true,
+  "reason": "Allowed by policy"
+}
+```
+
+**Output (exact-name deny):**
+```json
+{
+  "allowed": false,
+  "matches": ["Tool 'process_refund' is blocked by policy"]
 }
 ```
 

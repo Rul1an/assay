@@ -164,24 +164,22 @@ Validate if a tool is allowed given prior calls.
 
 ### assay_policy_decide
 
-Combined check (args + sequence + blocklist).
+`assay_policy_decide` performs an exact-name check against its compatibility-only root `blocklist`.
+It does not parse full `McpPolicy` controls such as `tools.allow` or `tools.deny`; use
+`assay_check_args` for full, argument-aware policy evaluation. Passing canonical name-policy fields
+to `assay_policy_decide` is an error, not a clean allow.
 
 ```json
 // Request
 {
-  "target_tool": "process_refund",
-  "args": { "amount": 100 },
-  "previous_calls": ["get_order", "verify_identity"]
+  "tool": "process_refund",
+  "policy": "blocklist.yaml"
 }
 
 // Response
 {
-  "decision": "allow",
-  "checks": {
-    "args_valid": { "passed": true },
-    "sequence_valid": { "passed": true },
-    "blocklist": { "passed": true }
-  }
+  "allowed": true,
+  "reason": "Allowed by policy"
 }
 ```
 
@@ -234,12 +232,8 @@ async def tool_with_retry(tool_name, args, max_retries=3):
 async def plan_and_execute(plan: List[ToolCall]):
     # Validate entire plan first
     for call in plan:
-        result = await assay_policy_decide(
-            call.tool,
-            call.args,
-            [c.tool for c in plan[:plan.index(call)]]
-        )
-        if result["decision"] != "allow":
+        result = await assay_check_args(call.tool, call.args)
+        if not result["allowed"]:
             return {"error": "Plan validation failed", "details": result}
 
     # Execute validated plan
