@@ -128,7 +128,7 @@ Seeds are **decimal strings or null** (no JSON number) for JS/TS precision safet
 ## Policy Quick Reference
 
 ```yaml
-# policy.yaml structure
+# Full McpPolicy for assay_check_args / assay_check_sequence
 version: "1"
 
 tools:
@@ -148,7 +148,12 @@ sequences:
   - name: auth_before_data
     pattern: [authenticate, fetch_data]
     required: true
+```
 
+```yaml
+# Name-only compatibility dialect for assay_policy_decide
+# Exact string membership; wildcard-looking names stay literal.
+# Do not add tools, allow, or deny here — that is E_POLICY_PARSE.
 blocklist:
   - "rm_rf"
   - "drop_database"
