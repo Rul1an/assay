@@ -44,7 +44,7 @@ including its explicit non-claims, or amend the decision through a new ADR.
 
 - One writer owns a branch and worktree. Other agents review the diff without editing that branch.
 - At most two ADR-042/043 implementation branches may be active at once.
-- Use `codex/`, `claude/`, or `cursor/` branch prefixes matching the writer.
+- Use `codex/`, `claude/`, `cursor/`, or `ruley/` branch prefixes matching the writer.
 - Do not implement on `main`.
 - Build in the worktree's own `target/`. Cargo creates one per worktree on first build, so
   worktrees do not share one unless told to, and `/target` is git-ignored so an in-tree build
@@ -165,6 +165,9 @@ so that display and round-trip "can never drift apart".
   plan/read-only mode.
 - Cursor may implement locally in its own worktree. Cursor Background Agents must not mutate auth
   or evidence-boundary code.
+- Ruley (GrokBot) may implement a bounded slice in its own worktree and may post issue and PR
+  updates. It must not write directly to `main` or use repository mutations as permission probes;
+  verify access through read-only API metadata and perform writes only on its owned branch.
 - Bugbot, CodeRabbit, and Copilot are optional reviewers, not authorities. Their findings require
   technical verification; their absence does not block the non-building-agent quorum above.
 - Heartbeats may monitor status only. They must not generate, edit, commit, push, or merge code.
