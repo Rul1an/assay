@@ -280,9 +280,9 @@ that slice's quorum review.
 - PR #2385 remains the correct baseline for malformed present `blocklist` values.
 - #2391 tracks the adjacent outer `tools/call` fallback and is not absorbed into these parser slices.
 
-The #2386 issue body must be amended before implementation: its existing non-claim against
-`McpPolicy` unification remains correct, but its DoD must pin the private compatibility dialect,
-present-null behaviour, value-free root diagnostic, and documentation correction above.
+The #2386 issue body has been amended for implementation. Its non-claim against `McpPolicy`
+unification remains correct, and its DoD pins the private compatibility dialect, present-null
+behaviour, value-free root diagnostic, and documentation correction above.
 
 ## Non-Claims
 
