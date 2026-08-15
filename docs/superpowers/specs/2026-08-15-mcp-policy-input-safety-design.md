@@ -1,6 +1,6 @@
 # MCP Policy-Input Safety Design
 
-**Status:** Revised after written-spec review, awaiting owner reconfirmation
+**Status:** Owner-approved for implementation (2026-08-15)
 **Programme ledger:** [#2388](https://github.com/Rul1an/assay/issues/2388)
 **Baseline:** `addfda3b3f695f11a7dba90f7c1ae24ff442b034` (`origin/main`, 2026-08-15)
 
