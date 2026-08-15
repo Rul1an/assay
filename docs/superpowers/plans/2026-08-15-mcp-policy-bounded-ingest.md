@@ -313,11 +313,13 @@ not claimed as a new RED in this slice.
 
 ```bash
 cargo test --locked -p assay-mcp-server --test policy_ingest_limits -- --nocapture
+git add -- crates/assay-mcp-server/tests/policy_ingest_limits.rs
+git commit -m "test(mcp): pin five-tool policy ingest limits"
 ```
 
 Expected: limit-plus-one assertions still fail because no tool is routed through the reader;
 exact-limit and invalid-UTF-8 controls stay green. Record the discriminating failures and commit
-only `policy_ingest_limits.rs` before migrating tool reads.
+only `policy_ingest_limits.rs` with the exact pathspec above before migrating tool reads.
 
 - [ ] **Step 3: Replace every direct read**
 

@@ -52,6 +52,7 @@ GitHub Actions.
 - Add `crates/assay-core/tests/mcp_policy_warning_contract.rs`: subprocess warning/ordering contract.
 - Add `scripts/ci/check-mcp-policy-yaml-routing.py`: enforce the single mapping/parser boundary.
 - Add `scripts/ci/test-check-mcp-policy-yaml-routing.sh`: mutation-test the routing guard.
+- Add `scripts/ci/check-mcp-tool-error-publication.py` and its self-test: bind `result` to `Serialize`.
 - Modify `.pre-commit-config.yaml`: run the guard for every guarded parser or consumer.
 
 ### Task 1: Freeze the public diagnostic boundary
@@ -174,6 +175,9 @@ git commit -m "test(mcp): expose unbounded policy diagnostics"
 
 **Files:**
 - Modify: `crates/assay-mcp-server/src/tools/mod.rs`
+- Add: `scripts/ci/check-mcp-tool-error-publication.py`
+- Add: `scripts/ci/test-check-mcp-tool-error-publication.sh`
+- Modify: `.pre-commit-config.yaml`
 
 - [ ] **Step 1: Add the UTF-8-safe bound**
 
@@ -205,7 +209,15 @@ the existing field names and `skip_serializing_if` behavior.
 `ToolError::new` stores `bound_public_message(message).to_owned()`. Keep the serializer bound too;
 public fields can bypass or mutate constructor state.
 
-- [ ] **Step 4: Add a fixed parse constructor**
+- [ ] **Step 4: Guard the result publication edge**
+
+Add a structural guard that identifies `ToolError::result`, requires it to serialize `self` through
+the `ToolError` `Serialize` implementation, and forbids rebuilding `error` from public fields or a
+second bounded view. Its disposable self-test must fail both an unbounded repack and a faithful
+bounded repack that calls `bound_public_message` but bypasses `Serialize`. Wire it to pre-commit for
+`tools/mod.rs`, the guard, and its self-test.
+
+- [ ] **Step 5: Add a fixed parse constructor**
 
 Add a private or `pub(crate)` enum with only the three approved classes and a constructor such as:
 
@@ -219,16 +231,22 @@ pub(crate) fn policy_parse(
 Map the enum to fixed summaries. Populate `details` only as `{"line": line, "column": column}`.
 Do not accept a raw parser `Display` string.
 
-- [ ] **Step 5: Run the serialization tests GREEN**
+- [ ] **Step 6: Run the serialization tests and guard GREEN**
 
 ```bash
 cargo test --locked -p assay-mcp-server tools::tests -- --nocapture
+python3 scripts/ci/check-mcp-tool-error-publication.py
+bash scripts/ci/test-check-mcp-tool-error-publication.sh
 ```
 
-- [ ] **Step 6: Commit the shared boundary**
+- [ ] **Step 7: Commit the shared boundary**
 
 ```bash
-git add -- crates/assay-mcp-server/src/tools/mod.rs
+git add -- \
+  crates/assay-mcp-server/src/tools/mod.rs \
+  scripts/ci/check-mcp-tool-error-publication.py \
+  scripts/ci/test-check-mcp-tool-error-publication.sh \
+  .pre-commit-config.yaml
 git commit -m "fix(mcp): bound public tool error messages"
 ```
 
@@ -348,6 +366,10 @@ cargo test --locked -p assay-core mcp::tests::policy_error_classification -- --n
 cargo test --locked -p assay-core mcp::tests::policy_file_parser_contract -- --nocapture
 cargo test --locked -p assay-core --test mcp_policy_warning_contract -- --nocapture
 cargo test --locked -p assay-mcp-server
+python3 scripts/ci/check-mcp-tool-error-publication.py
+bash scripts/ci/test-check-mcp-tool-error-publication.sh
+python3 scripts/ci/check-mcp-policy-yaml-routing.py
+bash scripts/ci/test-check-mcp-policy-yaml-routing.sh
 cargo fmt --all -- --check
 cargo clippy -p assay-core -p assay-mcp-server --all-targets -- -D warnings
 git diff --check
