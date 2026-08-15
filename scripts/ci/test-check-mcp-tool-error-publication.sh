@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Self-test for check-mcp-tool-error-publication.py.
 #
-# Creates four mutant copies of tools/mod.rs in a temp directory and verifies
+# Creates mutant copies of tools/mod.rs in a temp directory and verifies
 # the guard rejects each. The production file is NEVER written — only read
 # for the baseline check. A sha256 digest comparison before and after proves
 # it was not modified.
@@ -76,6 +76,51 @@ if python3 "$GUARD" "$TMPDIR/mut4.rs" 2>/dev/null; then
     exit 1
 fi
 echo "PASS: guard rejects dead/unrelated decoy"
+
+# ── Mutation 5: unreachable direct publication plus helper repack ─────────
+# A presence-only guard can be satisfied by dead code while the reachable
+# branch delegates to a repacking helper.
+python3 - "$TARGET" "$TMPDIR/mut5.rs" <<'PY'
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1]).read_text()
+old = '''    pub fn result(self) -> anyhow::Result<Value> {
+        Ok(serde_json::to_value(serde_json::json!({
+             "allowed": false,
+             "error": self
+        }))?)
+    }
+'''
+new = '''    pub fn result(self) -> anyhow::Result<Value> {
+        if std::hint::black_box(false) {
+            return Ok(serde_json::to_value(serde_json::json!({
+                "allowed": false,
+                "error": self
+            }))?);
+        }
+        publish_repacked_error(self)
+    }
+'''
+if old not in source:
+    raise SystemExit("fixture drift: ToolError::result body not found")
+source = source.replace(old, new, 1)
+source += '''
+fn publish_repacked_error(error: ToolError) -> anyhow::Result<Value> {
+    Ok(serde_json::json!({
+        "allowed": false,
+        "error": {"code": error.code, "message": error.message}
+    }))
+}
+'''
+Path(sys.argv[2]).write_text(source)
+PY
+
+if python3 "$GUARD" "$TMPDIR/mut5.rs" 2>/dev/null; then
+    echo "FAIL: guard must reject unreachable-direct/helper-repack mutation" >&2
+    exit 1
+fi
+echo "PASS: guard rejects unreachable direct publication plus helper repack"
 
 # ── Verify production file was not modified ───────────────────────────────
 DIGEST_AFTER=$(shasum -a 256 "$TARGET" | awk '{print $1}')

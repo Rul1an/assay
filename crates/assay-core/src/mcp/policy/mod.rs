@@ -43,7 +43,28 @@ impl std::fmt::Display for McpPolicyError {
 
 impl std::error::Error for McpPolicyError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.source.source()
+        Some(self.source.as_ref())
+    }
+}
+
+#[cfg(test)]
+mod error_source_contract {
+    use super::{McpPolicyError, McpPolicyErrorKind};
+
+    #[test]
+    fn exposes_the_stored_anyhow_top_layer_as_direct_source() {
+        let stored = anyhow::anyhow!("inner source").context("stored top layer");
+        let wrapped = McpPolicyError {
+            kind: McpPolicyErrorKind::Structure,
+            source: stored,
+        };
+
+        let direct = std::error::Error::source(&wrapped).expect("direct source");
+        assert_eq!(
+            direct.to_string(),
+            "stored top layer",
+            "source() must expose the stored anyhow error, not skip to its cause"
+        );
     }
 }
 

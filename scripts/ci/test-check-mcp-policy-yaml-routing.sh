@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+GUARD="scripts/ci/check-mcp-policy-yaml-routing.py"
+FILES=(
+  crates/assay-mcp-server/src/tools
+  crates/assay-core/src/mcp/policy
+)
+
+python3 "$GUARD"
+echo "PASS: guard accepts the production routes"
+
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+mkdir -p "$TMPDIR/base/crates/assay-mcp-server/src" "$TMPDIR/base/crates/assay-core/src/mcp"
+cp -R "${FILES[0]}" "$TMPDIR/base/crates/assay-mcp-server/src/"
+cp -R "${FILES[1]}" "$TMPDIR/base/crates/assay-core/src/mcp/"
+
+mutant() {
+  local name=$1
+  local mutation=$2
+  rm -rf "$TMPDIR/current"
+  cp -R "$TMPDIR/base" "$TMPDIR/current"
+  "$mutation" "$TMPDIR/current"
+  if python3 "$GUARD" "$TMPDIR/current" >/dev/null 2>&1; then
+    echo "FAIL: routing guard accepted mutation: $name" >&2
+    exit 1
+  fi
+  echo "PASS: routing guard rejects $name"
+}
+
+mutate_consumer_parser() {
+  python3 - "$1/crates/assay-mcp-server/src/tools/check_coverage.rs" <<'PY'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1]); s = p.read_text()
+old = "super::parse_tool_policy(&policy_bytes)"
+new = "serde_yaml::from_slice::<assay_core::model::Policy>(&policy_bytes)"
+assert old in s
+p.write_text(s.replace(old, new, 1))
+PY
+}
+
+mutate_duplicate_root() {
+  python3 - "$1/crates/assay-mcp-server/src/tools/policy_decide.rs" <<'PY'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1]); s = p.read_text()
+old = "let super::MappingStage(mapping) = yaml_mapping_stage(bytes)?;"
+new = old + "\n    let _duplicate = serde_yaml::Value::Mapping(mapping.clone()).is_mapping();"
+assert old in s
+p.write_text(s.replace(old, new, 1))
+PY
+}
+
+mutate_core_parallel_parser() {
+  cat >> "$1/crates/assay-core/src/mcp/policy/legacy.rs" <<'RS'
+fn _parallel_parser(bytes: &[u8]) {
+    let _ = serde_yaml::from_slice::<serde_yaml::Value>(bytes);
+}
+RS
+}
+
+mutate_missing_route() {
+  python3 - "$1/crates/assay-mcp-server/src/tools/explain_trace.rs" <<'PY'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1]); s = p.read_text()
+old = "super::parse_tool_policy(&policy_bytes)"
+assert old in s
+p.write_text(s.replace(old, "super::alternate_policy_parser(&policy_bytes)", 1))
+PY
+}
+
+mutate_full_parser_bypass() {
+  python3 - "$1/crates/assay-mcp-server/src/tools/check_args.rs" <<'PY'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1]); s = p.read_text()
+old = "McpPolicy::from_file(&policy_path)"
+assert old in s
+p.write_text(s.replace(old, "load_policy_alternate(&policy_path)", 1))
+PY
+}
+
+mutate_alias_parser() {
+  cat >> "$1/crates/assay-mcp-server/src/tools/check_coverage.rs" <<'RS'
+#[allow(dead_code)]
+fn _alias_parser(bytes: &[u8]) {
+    use serde_yaml as sy;
+    let _ = sy::from_slice::<sy::Value>(bytes);
+}
+RS
+}
+
+mutant "direct consumer parser" mutate_consumer_parser
+mutant "duplicate consumer root classifier" mutate_duplicate_root
+mutant "parallel core parser" mutate_core_parallel_parser
+mutant "missing direct helper route" mutate_missing_route
+mutant "full-policy parser bypass" mutate_full_parser_bypass
+mutant "aliased parser constructor" mutate_alias_parser
+
+echo "All MCP policy YAML routing mutations caught."

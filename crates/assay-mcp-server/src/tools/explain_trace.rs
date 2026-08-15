@@ -59,12 +59,9 @@ pub async fn explain_trace(ctx: &ToolContext, args: &Value) -> Result<Value> {
         Err(e) => return ToolError::new("E_POLICY_READ", &e.to_string()).result(),
     };
 
-    let policy: assay_core::model::Policy = match serde_yaml::from_slice(&policy_bytes) {
+    let policy: assay_core::model::Policy = match super::parse_tool_policy(&policy_bytes) {
         Ok(p) => p,
-        Err(e) => {
-            return ToolError::new("E_POLICY_PARSE", &format!("Failed to parse policy: {}", e))
-                .result();
-        }
+        Err(e) => return e.result(),
     };
 
     // Convert input to ToolCall

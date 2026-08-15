@@ -182,6 +182,13 @@ repos:
         pass_filenames: false
         files: ^(crates/assay-mcp-server/src/tools/mod\.rs|scripts/ci/(check-mcp-tool-error-publication\.py|test-check-mcp-tool-error-publication\.sh)|\.pre-commit-config\.yaml)$
 
+      - id: mcp-policy-yaml-routing-self-test
+        name: MCP policy YAML routing guard self-test
+        entry: bash -c 'python3 scripts/ci/check-mcp-policy-yaml-routing.py && bash scripts/ci/test-check-mcp-policy-yaml-routing.sh'
+        language: system
+        pass_filenames: false
+        files: ^(crates/assay-core/src/mcp/policy/.*\.rs|crates/assay-mcp-server/src/tools/.*\.rs|scripts/ci/(check-mcp-policy-yaml-routing\.py|test-check-mcp-policy-yaml-routing\.sh)|\.pre-commit-config\.yaml)$
+
       - id: evidence-vocabulary
         name: Evidence vocabulary guard
         entry: python3 scripts/ci/check-evidence-vocabulary.py

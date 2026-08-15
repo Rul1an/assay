@@ -1,19 +1,67 @@
-use super::McpPolicy;
+use super::{McpPolicy, McpPolicyError, McpPolicyErrorKind};
 use std::path::Path;
 use std::sync::OnceLock;
 
 pub(super) fn from_file(path: &Path) -> anyhow::Result<McpPolicy> {
-    let content = std::fs::read_to_string(path)?;
+    // Read raw bytes so we can classify UTF-8 failure as Syntax.
+    let bytes = std::fs::read(path)?;
 
+    // UTF-8 decode — failure is Syntax, not an I/O error.
+    let content = match std::str::from_utf8(&bytes) {
+        Ok(s) => s,
+        Err(e) => {
+            return Err(McpPolicyError {
+                kind: McpPolicyErrorKind::Syntax {
+                    line: None,
+                    column: None,
+                },
+                source: anyhow::Error::new(e),
+            }
+            .into());
+        }
+    };
+
+    // YAML decode to Value — failure is Syntax with location.
+    let value: serde_yaml::Value = match serde_yaml::from_str(content) {
+        Ok(v) => v,
+        Err(e) => {
+            let loc = e.location();
+            return Err(McpPolicyError {
+                kind: McpPolicyErrorKind::Syntax {
+                    line: loc.as_ref().map(|l| l.line()),
+                    column: loc.as_ref().map(|l| l.column()),
+                },
+                source: anyhow::Error::new(e),
+            }
+            .into());
+        }
+    };
+
+    // Root must be a mapping.
+    if !value.is_mapping() {
+        return Err(McpPolicyError {
+            kind: McpPolicyErrorKind::RootNotMapping,
+            source: anyhow::anyhow!("policy root is not a YAML mapping"),
+        }
+        .into());
+    }
+
+    // Typed deserialization with unknown-field tracking.
     let mut unknown = Vec::new();
-    let de = serde_yaml::Deserializer::from_str(&content);
-    let mut policy: McpPolicy = serde_ignored::deserialize(de, |path| {
+    let mut policy: McpPolicy = match serde_ignored::deserialize(value, |path| {
         unknown.push(path.to_string());
-    })
-    .map_err(anyhow::Error::from)?;
+    }) {
+        Ok(p) => p,
+        Err(e) => {
+            return Err(McpPolicyError {
+                kind: McpPolicyErrorKind::Structure,
+                source: anyhow::Error::new(e),
+            }
+            .into());
+        }
+    };
 
     if !unknown.is_empty() {
-        // Filter out transient/internal fields if any. For now, log all.
         tracing::warn!(?unknown, "Unknown fields in policy (ignored)");
     }
 
@@ -33,7 +81,14 @@ pub(super) fn from_file(path: &Path) -> anyhow::Result<McpPolicy> {
         policy.migrate_constraints_to_schemas();
     }
 
-    validate(&policy)?;
+    // Validation — failure is Validation kind.
+    if let Err(e) = validate(&policy) {
+        return Err(McpPolicyError {
+            kind: McpPolicyErrorKind::Validation,
+            source: e,
+        }
+        .into());
+    }
 
     Ok(policy)
 }

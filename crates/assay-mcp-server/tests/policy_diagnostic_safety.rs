@@ -88,6 +88,7 @@ fn assert_parse_error(
     full_response: &str,
     expected_message: &str,
     policy_root: &Path,
+    policy_filename: &str,
 ) {
     assert_parse_error_with_policy(
         label,
@@ -96,7 +97,7 @@ fn assert_parse_error(
         full_response,
         expected_message,
         policy_root,
-        None,
+        Some(policy_filename),
     );
 }
 
@@ -110,6 +111,18 @@ fn assert_parse_error_with_policy(
     policy_root: &Path,
     policy_filename: Option<&str>,
 ) {
+    let mut body_keys: Vec<&str> = body
+        .as_object()
+        .unwrap_or_else(|| panic!("{label}: decoded tool body must be an object; body={body}"))
+        .keys()
+        .map(String::as_str)
+        .collect();
+    body_keys.sort_unstable();
+    assert_eq!(
+        body_keys,
+        ["allowed", "error"],
+        "{label}: tool body must not carry diagnostic side channels; body={body}"
+    );
     assert_eq!(
         result.get("isError").and_then(Value::as_bool),
         Some(true),
@@ -130,6 +143,50 @@ fn assert_parse_error_with_policy(
         Some(expected_message),
         "{label}: wrong stable parse summary; body={body}"
     );
+    let error = body
+        .pointer("/error")
+        .and_then(Value::as_object)
+        .unwrap_or_else(|| panic!("{label}: error must be an object; body={body}"));
+    let mut error_keys: Vec<&str> = error.keys().map(String::as_str).collect();
+    error_keys.sort_unstable();
+    let details = error.get("details");
+    let expected_error_keys: &[&str] = if details.is_some() {
+        &["code", "details", "message"]
+    } else {
+        &["code", "message"]
+    };
+    assert_eq!(
+        error_keys, expected_error_keys,
+        "{label}: error must not carry raw parser/path fields; error={error:?}"
+    );
+    if expected_message == YAML_INVALID {
+        if let Some(details) = details {
+            let object = details.as_object().unwrap_or_else(|| {
+                panic!("{label}: syntax details must be a numeric object; details={details}")
+            });
+            let mut detail_keys: Vec<&str> = object.keys().map(String::as_str).collect();
+            detail_keys.sort_unstable();
+            assert_eq!(
+                detail_keys,
+                ["column", "line"],
+                "{label}: syntax details may contain only line/column; details={details}"
+            );
+            for key in ["line", "column"] {
+                assert!(
+                    object
+                        .get(key)
+                        .and_then(Value::as_u64)
+                        .is_some_and(|value| value > 0),
+                    "{label}: details.{key} must be a positive integer; details={details}"
+                );
+            }
+        }
+    } else {
+        assert!(
+            details.is_none(),
+            "{label}: root/structure failures must not publish details; error={error:?}"
+        );
+    }
     let msg = body
         .pointer("/error/message")
         .and_then(Value::as_str)
@@ -265,6 +322,7 @@ fn begin_sentinel_absent_from_syntax_error_all_tools() {
             &full,
             YAML_INVALID,
             root,
+            "begin.yaml",
         );
     }
     let _ = conn.shutdown();
@@ -290,6 +348,7 @@ fn middle_sentinel_absent_from_syntax_error_all_tools() {
             &full,
             YAML_INVALID,
             root,
+            "middle.yaml",
         );
     }
     let _ = conn.shutdown();
@@ -315,6 +374,7 @@ fn end_sentinel_absent_from_syntax_error_all_tools() {
             &full,
             YAML_INVALID,
             root,
+            "end.yaml",
         );
     }
     let _ = conn.shutdown();
@@ -344,6 +404,7 @@ fn root_sentinel_absent_from_non_mapping_error_all_tools() {
             &full,
             ROOT_NOT_MAPPING,
             root,
+            "root-scalar.yaml",
         );
     }
     let _ = conn.shutdown();
@@ -376,6 +437,7 @@ fn structure_sentinel_absent_from_policy_decide() {
         &full,
         STRUCTURE_INVALID,
         root,
+        "struct-sentinel.yaml",
     );
     let _ = conn.shutdown();
 }
@@ -387,7 +449,8 @@ fn structure_error_exact_for_check_coverage_and_explain_trace() {
     let dir = tempfile::tempdir().expect("policy-root");
     let root = dir.path();
     // 'tools: 42' is a well-formed mapping with a typed field-shape error
-    write_policy(root, "bad-struct.yaml", b"version: \"2.0\"\ntools: 42\n");
+    let policy = format!("version: \"2.0\"\ntools: \"{MIDDLE_SENTINEL}\"\n");
+    write_policy(root, "bad-struct.yaml", policy.as_bytes());
 
     let mut conn = spawn_server(root);
     initialize(&mut conn);
@@ -407,6 +470,7 @@ fn structure_error_exact_for_check_coverage_and_explain_trace() {
             &full,
             STRUCTURE_INVALID,
             root,
+            "bad-struct.yaml",
         );
     }
     let _ = conn.shutdown();
@@ -416,7 +480,8 @@ fn structure_error_exact_for_check_coverage_and_explain_trace() {
 fn structure_error_exact_for_check_args() {
     let dir = tempfile::tempdir().expect("policy-root");
     let root = dir.path();
-    write_policy(root, "bad-struct.yaml", b"version: \"2.0\"\ntools: 42\n");
+    let policy = format!("version: \"2.0\"\ntools: \"{MIDDLE_SENTINEL}\"\n");
+    write_policy(root, "bad-struct.yaml", policy.as_bytes());
 
     let mut conn = spawn_server(root);
     initialize(&mut conn);
@@ -433,6 +498,7 @@ fn structure_error_exact_for_check_args() {
         &full,
         STRUCTURE_INVALID,
         root,
+        "bad-struct.yaml",
     );
     let _ = conn.shutdown();
 }
@@ -458,7 +524,15 @@ fn syntax_error_requires_positive_numeric_location() {
         2,
     );
 
-    assert_parse_error("syntax-location", &result, &body, &full, YAML_INVALID, root);
+    assert_parse_error(
+        "syntax-location",
+        &result,
+        &body,
+        &full,
+        YAML_INVALID,
+        root,
+        "bad-syntax.yaml",
+    );
 
     // Require details.line and details.column as positive integers
     let details = body.pointer("/error/details");
@@ -508,7 +582,15 @@ fn invalid_utf8_classifies_as_yaml_syntax_error() {
         2,
     );
 
-    assert_parse_error("invalid-utf8", &result, &body, &full, YAML_INVALID, root);
+    assert_parse_error(
+        "invalid-utf8",
+        &result,
+        &body,
+        &full,
+        YAML_INVALID,
+        root,
+        "bad-utf8.yaml",
+    );
 
     // Must not contain raw UTF-8 error diagnostic
     assert!(
@@ -595,5 +677,41 @@ fn path_non_reflection_canonical_and_filename() {
         Some("audit-a.yaml"),
     );
 
+    let _ = conn.shutdown();
+}
+
+#[test]
+fn validation_error_maps_to_value_free_structure_failure() {
+    let dir = tempfile::tempdir().expect("policy-root");
+    let root = dir.path();
+    let policy = format!(
+        r#"version: "2.0"
+tool_pins:
+  {MIDDLE_SENTINEL}:
+    schema_hash: "bad"
+    meta_hash: "bad"
+    server_id: s
+    tool_name: n
+"#
+    );
+    write_policy(root, "bad-validation.yaml", policy.as_bytes());
+
+    let mut conn = spawn_server(root);
+    initialize(&mut conn);
+    let (result, body, full) = call_tool(
+        &mut conn,
+        "assay_check_args",
+        check_args_args("bad-validation.yaml"),
+        2,
+    );
+    assert_parse_error(
+        "check_args/validation",
+        &result,
+        &body,
+        &full,
+        STRUCTURE_INVALID,
+        root,
+        "bad-validation.yaml",
+    );
     let _ = conn.shutdown();
 }

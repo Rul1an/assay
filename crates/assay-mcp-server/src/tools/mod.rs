@@ -67,7 +67,6 @@ impl serde::Serialize for ToolError {
 
 /// The three approved fixed parse summaries.
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)] // Task-2: callers land with the parse-path wiring
 pub(crate) enum PolicyParseFailure {
     YamlSyntax,
     RootNotMapping,
@@ -94,7 +93,6 @@ impl ToolError {
     }
 
     /// Construct a parse error with a fixed summary and optional numeric location.
-    #[allow(dead_code)] // Task-2: callers land with the parse-path wiring
     pub(crate) fn policy_parse(
         class: PolicyParseFailure,
         location: Option<(usize, usize)>,
@@ -114,6 +112,49 @@ impl ToolError {
              "error": self
         }))?)
     }
+}
+
+// ── Shared mapping-stage for direct-tool consumers ────────────────────────
+//
+// The mapping stage decodes bytes to serde_yaml::Mapping, requires a mapping
+// root, and classifies syntax/root errors with preserved serde_yaml location.
+// Direct-tool consumers (check_coverage, explain_trace, policy_decide) call
+// this instead of constructing their own YAML deserializers.
+
+/// Result of the mapping stage: a validated YAML mapping.
+///
+/// Carries `serde_yaml::Mapping` — not `serde_yaml::Value` — so downstream
+/// code cannot accidentally re-check the root kind, and duplicate-root-key
+/// decisions made by serde_yaml's `Mapping` are preserved without a second
+/// parse.
+pub(crate) struct MappingStage(pub(crate) serde_yaml::Mapping);
+
+/// Decode bytes to a YAML mapping. Returns a ToolError with the approved
+/// fixed summary on syntax or root-not-mapping failure, preserving serde_yaml's
+/// location (line/column) for syntax errors.
+pub(crate) fn yaml_mapping_stage(bytes: &[u8]) -> Result<MappingStage, ToolError> {
+    let value: serde_yaml::Value = serde_yaml::from_slice(bytes).map_err(|e| {
+        let loc = e.location().map(|l| (l.line(), l.column()));
+        ToolError::policy_parse(PolicyParseFailure::YamlSyntax, loc)
+    })?;
+    match value {
+        serde_yaml::Value::Mapping(m) => Ok(MappingStage(m)),
+        _ => Err(ToolError::policy_parse(
+            PolicyParseFailure::RootNotMapping,
+            None,
+        )),
+    }
+}
+
+/// Generic tool helper: decode bytes to a YAML mapping, then deserialize the
+/// mapping into a typed policy `T` via `serde_yaml::from_value`. Classifies
+/// typed deserialization failure as `PolicyParseFailure::Structure`.
+pub(crate) fn parse_tool_policy<T: serde::de::DeserializeOwned>(
+    bytes: &[u8],
+) -> Result<T, ToolError> {
+    let MappingStage(mapping) = yaml_mapping_stage(bytes)?;
+    serde_yaml::from_value::<T>(serde_yaml::Value::Mapping(mapping))
+        .map_err(|_| ToolError::policy_parse(PolicyParseFailure::Structure, None))
 }
 
 pub mod check_args;
@@ -527,5 +568,36 @@ mod tests {
         let mutated_serialized = serde_json::to_value(&mutated).unwrap();
         let mutated_msg = mutated_serialized["message"].as_str().unwrap();
         assert_eq!(mutated_msg, expected);
+    }
+
+    #[test]
+    fn ascii_message_ceiling_is_exactly_4096_bytes() {
+        let exact = "A".repeat(4096);
+        let over = "B".repeat(4097);
+
+        let exact_error = ToolError::new("E_TEST", &exact);
+        assert_eq!(exact_error.message, exact);
+
+        let over_error = ToolError::new("E_TEST", &over);
+        assert_eq!(
+            over_error.message.len(),
+            4096,
+            "constructor must enforce the literal public 4096-byte contract"
+        );
+        assert_eq!(over_error.message, "B".repeat(4096));
+
+        let direct = ToolError {
+            code: "E_TEST".into(),
+            message: over,
+            details: None,
+        };
+        let serialized = serde_json::to_value(direct).unwrap();
+        let published = serialized["message"].as_str().unwrap();
+        assert_eq!(
+            published.len(),
+            4096,
+            "serializer must enforce the literal public 4096-byte contract"
+        );
+        assert_eq!(published, "B".repeat(4096));
     }
 }
