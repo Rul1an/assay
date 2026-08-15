@@ -50,8 +50,9 @@ therefore crosses a model-facing trust boundary. This design keeps the protocol 
 not adopt an HTTP Problem Details wire format.
 
 RFC 9457 supplies a useful field taxonomy by analogy: stable machine code, stable short summary,
-bounded occurrence detail, and optional structured context. Consumers must not parse occurrence
-text. It does not require a generic retryability field, and this design adds none.
+occurrence-specific detail, and optional structured context. It also warns against exposing
+debugging information. Assay independently bounds occurrence detail, and consumers must not parse
+that text. RFC 9457 does not require a generic retryability field, and this design adds none.
 
 MCP 2026-07-28 is a stateless, per-request protocol revision. Its `resultType`, discovery, and
 cacheable-result semantics are separate from Assay's internal parsed-policy cache. This programme
