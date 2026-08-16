@@ -21,6 +21,7 @@ pub mod fs;
 pub mod landlock_check;
 pub mod landlock_net;
 pub mod metrics;
+mod output_write;
 pub mod packs;
 pub mod policy;
 pub mod profile;

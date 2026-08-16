@@ -32,7 +32,8 @@ pub const EXIT_TEST_FAILURE: i32 = 1;
 /// Configuration or user error (config parse, trace not found, etc.)
 pub const EXIT_CONFIG_ERROR: i32 = 2;
 
-/// Infrastructure or judge unavailable (rate limit, provider 5xx, timeout)
+/// Infrastructure or judge unavailable (rate limit, provider 5xx, timeout),
+/// including a machine-document stdout or file write failure.
 pub const EXIT_INFRA_ERROR: i32 = 3;
 
 /// Would block (dry-run mode) - sandbox-specific

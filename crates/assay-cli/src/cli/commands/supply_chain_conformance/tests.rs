@@ -4,8 +4,7 @@ use assay_registry::supply_chain::{SupplyChainConformance, SCHEMA};
 use serde_json::{json, Value};
 
 use super::descriptor::{build_carrier, EmitErr, DSSE_IN_TOTO_PAYLOAD_TYPE, INPUT_SCHEMA};
-use super::map_write_result;
-use crate::exit_codes::{EXIT_CONFIG_ERROR, EXIT_INFRA_ERROR, EXIT_SUCCESS};
+use crate::exit_codes::EXIT_CONFIG_ERROR;
 
 fn descriptor(provenance: Value) -> String {
     json!({
@@ -107,28 +106,6 @@ fn dsse_without_required_fields_is_rejected() {
 #[test]
 fn deferred_sigstore_bundle_is_rejected_not_ignored() {
     assert!(bc(&descriptor(json!({ "kind": "sigstore_bundle" }))).is_err());
-}
-
-#[test]
-fn write_failure_maps_to_infra_error_for_any_target() {
-    use std::io::{Error, ErrorKind};
-
-    // A write failure is EXIT_INFRA_ERROR uniformly - stdout (broken pipe) and file alike.
-    assert_eq!(
-        map_write_result(
-            "stdout",
-            Err(Error::new(ErrorKind::BrokenPipe, "pipe closed"))
-        ),
-        EXIT_INFRA_ERROR
-    );
-    assert_eq!(
-        map_write_result(
-            "/tmp/x.json",
-            Err(Error::new(ErrorKind::PermissionDenied, "nope"))
-        ),
-        EXIT_INFRA_ERROR
-    );
-    assert_eq!(map_write_result("stdout", Ok(())), EXIT_SUCCESS);
 }
 
 #[test]

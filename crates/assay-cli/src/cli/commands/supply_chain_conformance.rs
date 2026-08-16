@@ -13,11 +13,12 @@
 //! safe descriptor-relative file resolution. The keyless `sigstore_bundle` path is modeled in the descriptor
 //! but explicitly DEFERRED: it is rejected with a clear non-zero, never silently ignored.
 
-use std::io::Write;
+use std::fs::File;
 use std::path::Path;
 
 use crate::cli::args::SupplyChainConformanceArgs;
-use crate::exit_codes::{EXIT_CONFIG_ERROR, EXIT_INFRA_ERROR, EXIT_SUCCESS};
+use crate::exit_codes::EXIT_CONFIG_ERROR;
+use crate::output_write::{map_write_result, write_document, write_stdout_json};
 
 mod descriptor;
 
@@ -56,32 +57,14 @@ pub async fn run(args: SupplyChainConformanceArgs) -> anyhow::Result<i32> {
         }
     };
 
-    let rendered = format!("{}\n", serde_json::to_string_pretty(&carrier)?);
+    let rendered = serde_json::to_string_pretty(&carrier)?;
     // Output-write failures are an infra/output problem regardless of the target: stdout and file
     // writes route through the same mapping, so a broken pipe on stdout is EXIT_INFRA_ERROR just like
     // an unwritable file path (never the generic `?` bubble).
-    let write_result = if args.out == "-" {
-        std::io::stdout().write_all(rendered.as_bytes())
-    } else {
-        std::fs::write(&args.out, &rendered)
-    };
-    let target = if args.out == "-" {
-        "stdout"
-    } else {
-        args.out.as_str()
-    };
-    Ok(map_write_result(target, write_result))
-}
-
-/// Map an output-write result to an exit code. A write failure is an infra/output problem
-/// (`EXIT_INFRA_ERROR`), applied uniformly to stdout and file targets so the exit-code contract is
-/// the same whatever `--out` points at.
-fn map_write_result(target: &str, result: std::io::Result<()>) -> i32 {
-    match result {
-        Ok(()) => EXIT_SUCCESS,
-        Err(e) => {
-            eprintln!("[infra_error] cannot write output ({target}): {e}");
-            EXIT_INFRA_ERROR
-        }
+    if args.out == "-" {
+        return Ok(write_stdout_json(&rendered));
     }
+    let write_result =
+        File::create(&args.out).and_then(|mut file| write_document(&mut file, &rendered));
+    Ok(map_write_result(args.out.as_str(), write_result))
 }

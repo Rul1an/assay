@@ -32,6 +32,11 @@ All notable changes to this project will be documented in this file.
   class (#2165).
 
 ### Changed
+- `assay doctor --format json` and `assay run --format json` return exit 3 when
+  writing the machine document to stdout fails, including `BrokenPipe`. A
+  partial or absent document is not a clean success. They no longer abort with
+  SIGABRT (134). The mapping is the existing output-write policy used by
+  `supply-chain-conformance` (#2263).
 - `assay evidence show --format json` now emits `assay.run_summary.v1` with
   `E_EVIDENCE_CONTRACT` for a typed `Contract*` format-contract failure. Classification
   comes from the shared `reason_code_for_evidence_error` classifier. The command still
