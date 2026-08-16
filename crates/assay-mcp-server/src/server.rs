@@ -228,6 +228,11 @@ impl Server {
         // Canonicalize root once
         let policy_root_canon = std::fs::canonicalize(&policy_root)
             .map_err(|e| anyhow::anyhow!("invalid --policy-root: {e}"))?;
+        anyhow::ensure!(
+            policy_root_canon.is_dir(),
+            "invalid --policy-root: not a directory: {}",
+            policy_root.display()
+        );
 
         let ctx = tools::ToolContext {
             policy_root,
