@@ -280,30 +280,52 @@ fn the_reserved_section_claims_nothing_a_variant_construction_contradicts() {
     );
 }
 
-/// Unit variants in `ErrorCode` whose name starts with `prefix`.
+/// Declared `ErrorCode` variants whose name starts with `prefix`.
 fn error_code_unit_variants_with_prefix(prefix: &str) -> BTreeSet<String> {
-    let src = read("crates/assay-evidence/src/bundle/writer_next/errors.rs");
-    let body = after(&src, "pub enum ErrorCode {");
+    error_code_unit_variants_with_prefix_from(
+        &read("crates/assay-evidence/src/bundle/writer_next/errors.rs"),
+        prefix,
+    )
+}
+
+fn error_code_unit_variants_with_prefix_from(src: &str, prefix: &str) -> BTreeSet<String> {
+    let body = after(src, "pub enum ErrorCode {");
     let body = before(body, "\n}");
     let found: BTreeSet<String> = body
         .lines()
-        .filter_map(|line| {
-            let name = line.trim().strip_suffix(',')?;
-            if name.starts_with(prefix)
-                && name.starts_with(|c: char| c.is_ascii_uppercase())
-                && name.chars().all(char::is_alphanumeric)
-            {
-                Some(name.to_string())
-            } else {
-                None
-            }
-        })
+        .filter_map(|line| declared_error_code_variant(line, prefix))
         .collect();
     assert!(
         !found.is_empty(),
         "ErrorCode parser found no {prefix}* unit variants; the enum shape moved"
     );
     found
+}
+
+/// One `ErrorCode` variant name, or none if the line is not a live declaration.
+///
+/// A trailing `//` note is dropped first so `ContractRogueCommented, // new` still counts.
+/// Payload in `Name(...)` is stripped so a tuple variant is still a declared member.
+/// A line that is only a comment is not a declaration.
+fn declared_error_code_variant(line: &str, prefix: &str) -> Option<String> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with("//") {
+        return None;
+    }
+    let code = match line.find("//") {
+        Some(at) => line[..at].trim(),
+        None => line,
+    };
+    let name = code.strip_suffix(',')?.trim();
+    let ident = name.split_once('(').map(|(head, _)| head).unwrap_or(name);
+    if ident.starts_with(prefix)
+        && ident.starts_with(|c: char| c.is_ascii_uppercase())
+        && ident.chars().all(char::is_alphanumeric)
+    {
+        Some(ident.to_string())
+    } else {
+        None
+    }
 }
 
 /// Backtick identifiers in `text` whose name starts with `prefix`.
@@ -378,6 +400,34 @@ fn the_contract_boundary_names_exactly_the_declared_contract_star_variants() {
         "CONTRACT_BOUNDARY and ErrorCode disagree on the Contract* set. A new variant is a new \
          mapping decision, not an automatic member; a rename leaves a normative MUST pointing at \
          a variant that does not exist."
+    );
+}
+
+#[test]
+fn error_code_parser_counts_a_bare_unit_variant() {
+    let src = "pub enum ErrorCode {\n    ContractRogueNew,\n}";
+    let found = error_code_unit_variants_with_prefix_from(src, "Contract");
+    assert_eq!(found, BTreeSet::from(["ContractRogueNew".to_string()]));
+}
+
+#[test]
+fn error_code_parser_counts_a_tuple_variant() {
+    let src = "pub enum ErrorCode {\n    ContractRogueSeq(u32),\n}";
+    let found = error_code_unit_variants_with_prefix_from(src, "Contract");
+    assert!(
+        found.contains("ContractRogueSeq"),
+        "a tuple variant is a declared Contract* member; dropping it lets addition stay green: \
+         {found:?}"
+    );
+}
+
+#[test]
+fn error_code_parser_counts_a_trailing_comment_variant() {
+    let src = "pub enum ErrorCode {\n    ContractRogueCommented, // new\n}";
+    let found = error_code_unit_variants_with_prefix_from(src, "Contract");
+    assert!(
+        found.contains("ContractRogueCommented"),
+        "a trailing-comment unit variant is live; dropping it lets addition stay green: {found:?}"
     );
 }
 

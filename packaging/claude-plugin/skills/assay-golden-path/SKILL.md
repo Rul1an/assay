@@ -94,7 +94,7 @@ Exit: Valid `0`; Valid with verification disabled `0`; integrity failure `2`; un
 
 Stdout: Success parses as an object containing `manifest`, `events`, and `verify_mode`; the registered values are `enabled` and `disabled`, with `--no-verify` producing `disabled`. A recorded-value mismatch parses as `assay.run_summary.v1` with `E_EVIDENCE_INTEGRITY`; an unreadable path uses `E_EVIDENCE_UNREADABLE`.
 
-On failure: Only the four verifier codes that establish a recorded-value mismatch map to `E_EVIDENCE_INTEGRITY`; I/O, gzip, and tar failures use `E_EVIDENCE_UNREADABLE`. Format-contract failures still exit `2` with empty stdout: [gap #2165](https://github.com/Rul1an/assay/issues/2165).
+On failure: Only the four verifier codes that establish a recorded-value mismatch map to `E_EVIDENCE_INTEGRITY`; I/O, gzip, and tar failures use `E_EVIDENCE_UNREADABLE`. Format-contract failures still exit `2` with empty stdout: [gap #2412](https://github.com/Rul1an/assay/issues/2412).
 
 ### 8. Offline profile verification
 

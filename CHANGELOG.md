@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 - `E_EVIDENCE_CONTRACT` is registered for a readable evidence bundle that violates its declared
   format contract (`ErrorClass::Contract` / `Contract*`). It stays distinct from recorded-value
   mismatch and from unreadable I/O or archive failures. Reserved: nothing constructs the variant
-  yet (#2219; consumers #2164, #2165).
+  yet (#2219; consumers #2412, #2165).
 
 ### Changed
 - The built-in stdio MCP policy tools now fail closed on outer dispatch errors

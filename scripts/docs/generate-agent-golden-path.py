@@ -519,7 +519,7 @@ STEPS: list[dict[str, object]] = [
                 2,
                 stdout("empty"),
                 ["evidence", "show", "--format", "json", "--", "<bundle>"],
-                gap_issue=2165,
+                gap_issue=2412,
             ),
         ],
         "stdout_summary": (
@@ -533,7 +533,7 @@ STEPS: list[dict[str, object]] = [
             "Only the four verifier codes that establish a recorded-value mismatch map to "
             "`E_EVIDENCE_INTEGRITY`; I/O, gzip, and tar failures use "
             "`E_EVIDENCE_UNREADABLE`. Format-contract failures still exit `2` with empty "
-            "stdout: [gap #2165](https://github.com/Rul1an/assay/issues/2165)."
+            "stdout: [gap #2412](https://github.com/Rul1an/assay/issues/2412)."
         ),
     },
     {
