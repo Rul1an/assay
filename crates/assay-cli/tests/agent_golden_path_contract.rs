@@ -672,17 +672,14 @@ fn evidence_inspection_contract_names_published_and_untyped_identities() {
     let failure_summary = step["failure_summary"]
         .as_str()
         .expect("evidence inspection failure summary");
-    assert!(
-        !failure_summary.contains("gap #2412"),
-        "the format-contract gap must be closed"
-    );
-    assert!(
-        failure_summary.contains("E_EVIDENCE_CONTRACT"),
-        "the shipped contract must name the format-contract reason"
-    );
-    assert!(
-        failure_summary.contains("empty stdout"),
-        "LIMIT/PATH and PROFILE must remain disclosed as empty-stdout until typed"
+    assert_eq!(
+        failure_summary,
+        "Only the four verifier codes that establish a recorded-value mismatch map to \
+         `E_EVIDENCE_INTEGRITY`; I/O, gzip, and tar failures use \
+         `E_EVIDENCE_UNREADABLE`. Typed `Contract*` failures encountered while opening \
+         the bundle publish `E_EVIDENCE_CONTRACT` with a bounded prose `next_step`. \
+         Event-line deserialization plus LIMIT/PATH and PROFILE, where they apply, \
+         remain exit `2` with empty stdout until typed on this command."
     );
     let stdout_summary = step["stdout_summary"]
         .as_str()

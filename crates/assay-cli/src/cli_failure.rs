@@ -372,4 +372,15 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn evidence_contract_constructs_for_typed_contract_invalid_json() {
+        let failure = CliFailure::evidence_contract(
+            Path::new("bundle.tar.gz"),
+            &verifier_error(ErrorClass::Contract, ErrorCode::ContractInvalidJson),
+        )
+        .expect("ContractInvalidJson must construct as E_EVIDENCE_CONTRACT");
+        assert_eq!(failure.outcome.reason_code, "E_EVIDENCE_CONTRACT");
+        assert_eq!(failure.outcome.exit_code, 2);
+    }
 }
