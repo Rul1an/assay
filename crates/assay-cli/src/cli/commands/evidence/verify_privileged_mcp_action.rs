@@ -228,6 +228,7 @@ fn stage1_fail_report(detail: String, reason: ReasonCode, bundle: &Path) -> Repo
         }],
         non_claims: REPORT_NON_CLAIMS,
         reason_code: Some(reason.as_str()),
+        // Non-UTF-8 `bundle.to_str() == None` is #2264, not this slice.
         next_step: Some(reason.next_step(bundle.to_str())),
     }
 }

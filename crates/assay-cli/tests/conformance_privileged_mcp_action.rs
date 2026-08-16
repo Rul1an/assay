@@ -525,15 +525,6 @@ fn directory_bundle_publishes_unreadable_on_the_profile_report() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let (report, exit_code) = verify(tmp.path());
     assert_unreadable_profile_report(&report, exit_code, tmp.path());
-}
-
-#[test]
-fn post_open_unreadable_bundle_detail_contains_caller_argv() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let garbage = tmp.path().join("not-a-bundle.tar.gz");
-    std::fs::write(&garbage, b"not a gzip archive").expect("write garbage bundle");
-    let (report, exit_code) = verify(&garbage);
-    assert_unreadable_profile_report(&report, exit_code, &garbage);
 
     let show = Command::cargo_bin("assay")
         .expect("assay binary")
@@ -545,6 +536,15 @@ fn post_open_unreadable_bundle_detail_contains_caller_argv() {
     let show_report: Value =
         serde_json::from_slice(&show.stdout).expect("evidence show stdout is JSON");
     assert_eq!(show_report["reason_code"], "E_EVIDENCE_UNREADABLE");
+}
+
+#[test]
+fn post_open_unreadable_bundle_detail_contains_caller_argv() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let garbage = tmp.path().join("not-a-bundle.tar.gz");
+    std::fs::write(&garbage, b"not a gzip archive").expect("write garbage bundle");
+    let (report, exit_code) = verify(&garbage);
+    assert_unreadable_profile_report(&report, exit_code, &garbage);
 }
 
 /// Guards only `crates/assay-evidence/src/bundle/writer_next/verify.rs`, the stage-1
