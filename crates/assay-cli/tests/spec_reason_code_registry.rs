@@ -505,8 +505,24 @@ fn e_evidence_contract_is_registered_and_emittable() {
         "{SPEC} §5.1 has no E_EVIDENCE_CONTRACT row"
     );
     assert!(
-        registered("5.4").contains("E_EVIDENCE_CONTRACT"),
-        "{SPEC} §5.4 must keep E_EVIDENCE_CONTRACT reserved until a production site constructs it"
+        !registered("5.4").contains("E_EVIDENCE_CONTRACT"),
+        "{SPEC} §5.4 must not keep E_EVIDENCE_CONTRACT reserved once a production site constructs it"
+    );
+}
+
+#[test]
+fn e_evidence_profile_invalid_is_registered_constructed_and_not_reserved() {
+    assert!(
+        emittable_codes().contains("E_EVIDENCE_PROFILE_INVALID"),
+        "ReasonCode::as_str does not emit E_EVIDENCE_PROFILE_INVALID"
+    );
+    assert!(
+        registered("5.1").contains("E_EVIDENCE_PROFILE_INVALID"),
+        "{SPEC} §5.1 has no E_EVIDENCE_PROFILE_INVALID row"
+    );
+    assert!(
+        !registered("5.4").contains("E_EVIDENCE_PROFILE_INVALID"),
+        "{SPEC} §5.4 must not reserve E_EVIDENCE_PROFILE_INVALID; register and construct it atomically"
     );
 }
 

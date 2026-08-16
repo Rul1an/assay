@@ -24,6 +24,91 @@ const REPORT_NON_CLAIMS: [&str; 4] = [
     "bundle integrity does not upgrade source class",
 ];
 
+const INTEGRITY_NEXT_STEP: &str = "Obtain an undamaged bundle from its producer; the content this bundle carries does not match what it records";
+const CONTRACT_NEXT_STEP: &str = "Obtain or reissue evidence that conforms to the declared bundle contract; this bundle was readable and does not satisfy that contract";
+const PROFILE_INVALID_NEXT_STEP: &str = "Obtain or reissue evidence whose records satisfy the named evidence profile; per-violation details are in findings";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExpectedDiagnosis {
+    Absent,
+    Present {
+        reason_code: &'static str,
+        next_step: &'static str,
+    },
+}
+
+/// Pin every committed vector by exact id so a new corpus member cannot inherit a class.
+fn expected_diagnosis(id: &str) -> ExpectedDiagnosis {
+    match id {
+        "ok-001-deny-bound-observation"
+        | "ok-002-deny-observation-missing"
+        | "ok-003-allow-no-outcome-observation"
+        | "ok-004-allow-with-diagnostic-establish"
+        | "ok-005-allow-contradicted-by-denial" => ExpectedDiagnosis::Absent,
+        "bad-101-tampered-bundle" => ExpectedDiagnosis::Present {
+            reason_code: "E_EVIDENCE_INTEGRITY",
+            next_step: INTEGRITY_NEXT_STEP,
+        },
+        "bad-109-bundle-id-mismatch" => ExpectedDiagnosis::Present {
+            reason_code: "E_EVIDENCE_CONTRACT",
+            next_step: CONTRACT_NEXT_STEP,
+        },
+        "bad-102-missing-target-digest"
+        | "bad-103-two-decisions"
+        | "bad-104-unknown-schema"
+        | "bad-105-observation-binding-mismatch"
+        | "bad-106-fail-closed-inconsistent"
+        | "bad-107-unknown-decision-value"
+        | "bad-108-observation-without-decision" => ExpectedDiagnosis::Present {
+            reason_code: "E_EVIDENCE_PROFILE_INVALID",
+            next_step: PROFILE_INVALID_NEXT_STEP,
+        },
+        other => panic!("unmapped privileged-mcp-action vector {other}"),
+    }
+}
+
+fn assert_diagnosis(id: &str, report: &Value, diagnosis: ExpectedDiagnosis) {
+    match diagnosis {
+        ExpectedDiagnosis::Absent => {
+            assert!(
+                report.get("reason_code").is_none(),
+                "{id}: success diagnosis must be absent, not null or empty; got {:?}",
+                report.get("reason_code")
+            );
+            assert!(
+                report.get("next_step").is_none(),
+                "{id}: success next_step must be absent, not null or empty; got {:?}",
+                report.get("next_step")
+            );
+        }
+        ExpectedDiagnosis::Present {
+            reason_code,
+            next_step,
+        } => {
+            assert_eq!(
+                report["reason_code"].as_str(),
+                Some(reason_code),
+                "{id}: reason_code"
+            );
+            let published = report["next_step"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{id}: next_step must be a non-empty string"));
+            assert_eq!(published, next_step, "{id}: next_step");
+            assert!(!published.is_empty(), "{id}: next_step must not be empty");
+            assert!(
+                !published.starts_with("Run:") && !published.starts_with("Run argv:"),
+                "{id}: next_step must stay context-invariant prose: {published}"
+            );
+            assert!(
+                !published.contains("verify-privileged-mcp-action")
+                    && !published.contains('/')
+                    && !published.contains('\\'),
+                "{id}: next_step must not interpolate a command or path: {published}"
+            );
+        }
+    }
+}
+
 fn corpus_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/privileged-mcp-action-v0")
 }
@@ -66,6 +151,7 @@ fn conformance_corpus_reproduces_all_expected_outcomes() {
             serde_json::json!(REPORT_NON_CLAIMS.to_vec()),
             "{id}: the four fixed non-claims must be present verbatim"
         );
+        assert_diagnosis(id, &report, expected_diagnosis(id));
 
         let expected_integrity = expected["bundle_integrity"].as_str().unwrap();
         assert_eq!(
@@ -136,5 +222,99 @@ fn contradiction_vector_reports_the_contradiction_finding() {
             .iter()
             .any(|f| f["id"] == "caller_visible_outcome_contradiction"),
         "refuted caller-visible outcome must carry the contradiction finding, got {findings:?}"
+    );
+    assert_diagnosis(
+        "ok-005-allow-contradicted-by-denial",
+        &report,
+        ExpectedDiagnosis::Absent,
+    );
+}
+
+fn verify_table(bundle: &Path) -> (String, i32) {
+    let output = Command::cargo_bin("assay")
+        .expect("assay binary")
+        .args(["evidence", "verify-privileged-mcp-action"])
+        .arg(bundle)
+        .args(["--format", "table"])
+        .output()
+        .expect("run verifier table");
+    (
+        String::from_utf8(output.stdout).expect("table stdout utf-8"),
+        output.status.code().expect("exit code"),
+    )
+}
+
+#[test]
+fn table_output_carries_diagnosis_only_when_present() {
+    let corpus = corpus_dir();
+    let (ok_table, ok_exit) =
+        verify_table(&corpus.join("vectors/ok-001-deny-bound-observation.bundle.tar.gz"));
+    assert_eq!(ok_exit, 0);
+    assert!(
+        !ok_table.contains("E_EVIDENCE_") && !ok_table.contains("Next step:"),
+        "success table must omit diagnosis, got:\n{ok_table}"
+    );
+
+    let cases = [
+        (
+            "vectors/bad-101-tampered-bundle.bundle.tar.gz",
+            "E_EVIDENCE_INTEGRITY",
+            INTEGRITY_NEXT_STEP,
+        ),
+        (
+            "vectors/bad-109-bundle-id-mismatch.bundle.tar.gz",
+            "E_EVIDENCE_CONTRACT",
+            CONTRACT_NEXT_STEP,
+        ),
+        (
+            "vectors/bad-102-missing-target-digest.bundle.tar.gz",
+            "E_EVIDENCE_PROFILE_INVALID",
+            PROFILE_INVALID_NEXT_STEP,
+        ),
+    ];
+    for (file, reason, next_step) in cases {
+        let (table, exit_code) = verify_table(&corpus.join(file));
+        assert_eq!(exit_code, 2, "{file}");
+        assert!(
+            table.contains(reason),
+            "{file}: table must publish {reason}, got:\n{table}"
+        );
+        assert!(
+            table.contains(next_step),
+            "{file}: table must publish next_step, got:\n{table}"
+        );
+    }
+}
+
+#[test]
+fn diagnosis_mutations_keep_the_three_facts_apart() {
+    let corpus = corpus_dir();
+    let (ok_005, _) =
+        verify(&corpus.join("vectors/ok-005-allow-contradicted-by-denial.bundle.tar.gz"));
+    assert_ne!(
+        ok_005.get("reason_code").and_then(Value::as_str),
+        Some("E_EVIDENCE_PROFILE_INVALID"),
+        "ok-005 is a valid refuted-cell report, not a profile-invalid failure"
+    );
+    assert!(ok_005.get("reason_code").is_none());
+
+    let (bad_101, _) = verify(&corpus.join("vectors/bad-101-tampered-bundle.bundle.tar.gz"));
+    assert_eq!(bad_101["reason_code"], "E_EVIDENCE_INTEGRITY");
+    assert_ne!(bad_101["reason_code"], "E_EVIDENCE_CONTRACT");
+    assert!(bad_101.get("claims").is_none());
+
+    let (bad_109, _) = verify(&corpus.join("vectors/bad-109-bundle-id-mismatch.bundle.tar.gz"));
+    assert_eq!(bad_109["reason_code"], "E_EVIDENCE_CONTRACT");
+    assert_ne!(bad_109["reason_code"], "E_EVIDENCE_INTEGRITY");
+    assert!(bad_109.get("claims").is_none());
+
+    let (bad_102, _) = verify(&corpus.join("vectors/bad-102-missing-target-digest.bundle.tar.gz"));
+    assert_eq!(bad_102["reason_code"], "E_EVIDENCE_PROFILE_INVALID");
+    assert_ne!(bad_102["reason_code"], "E_EVIDENCE_CONTRACT");
+    assert_ne!(bad_102["reason_code"], "E_EVIDENCE_INTEGRITY");
+    assert!(bad_102.get("claims").is_none());
+    assert!(
+        !bad_102["next_step"].as_str().unwrap_or("").is_empty(),
+        "profile-invalid next_step must not be empty"
     );
 }
