@@ -1,7 +1,7 @@
 use crate::errors::{ConfigError, ConfigLoadError};
 use crate::model::EvalConfig;
 use crate::render_safety::{render_safe, Sink, MAX_RENDER_FIELD};
-use std::fs::OpenOptions;
+use std::fs::{File, Metadata, OpenOptions};
 use std::io::Read;
 use std::path::Path;
 
@@ -15,7 +15,7 @@ pub const SUPPORTED_CONFIG_VERSION: u32 = 1;
 /// hostile ingest (not ADR-043); this is robustness so a 256 MiB `--config`
 /// is not fully materialized. Stated once; `doctor`, `run` and `validate`
 /// share [`load_config_with_cause`].
-pub const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
+const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 
 /// What a caller wants the loader to refuse, rather than merely parse.
 ///
@@ -270,6 +270,9 @@ fn read_config_source(path: &Path) -> Result<String, ConfigLoadError> {
         use std::os::unix::fs::OpenOptionsExt;
         opts.custom_flags(libc::O_NONBLOCK);
     }
+    // Intentional caller-selected config path, read-only, opened-file
+    // regular-type check, bounded before parse.
+    // codeql[rust/path-injection]
     let file = opts.open(path).map_err(|e| {
         ConfigLoadError::from_read(
             format!("failed to read config {}: {}", path.display(), e),
@@ -282,6 +285,13 @@ fn read_config_source(path: &Path) -> Result<String, ConfigLoadError> {
             e.kind(),
         )
     })?;
+    read_opened_config(path, file, meta)
+}
+
+/// File-type, early-len, and the load-bearing `take(MAX+1)` bound. Production
+/// passes freshly-stated metadata; tests may pass stale metadata to prove a
+/// file that grew after stat is still refused.
+fn read_opened_config(path: &Path, file: File, meta: Metadata) -> Result<String, ConfigLoadError> {
     if !meta.file_type().is_file() {
         return Err(ConfigLoadError::new(format!(
             "config {} is not a regular file",
@@ -339,8 +349,9 @@ fn render_yaml_parse_error(err: &serde_yaml::Error) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_config_with, load_config_with_cause, MAX_CONFIG_BYTES};
-    use std::io::ErrorKind;
+    use super::{load_config_with, load_config_with_cause, read_opened_config, MAX_CONFIG_BYTES};
+    use std::fs::OpenOptions;
+    use std::io::{ErrorKind, Write};
     use std::path::Path;
 
     #[test]
@@ -535,7 +546,7 @@ mod tests {
     }
 
     fn yaml_of_len(len: usize) -> String {
-        let prefix = "version: 1\n";
+        let prefix = "version: 1\nsuite: ceiling\nmodel: dummy\ntests: []\n";
         assert!(len >= prefix.len(), "fixture shorter than the YAML prefix");
         let mut yaml = String::from(prefix);
         yaml.push_str(&"#".repeat(len - prefix.len()));
@@ -618,14 +629,68 @@ mod tests {
             "exact ceiling must not be refused as oversize: {err}"
         );
         assert!(
-            err.to_string().contains("config has no tests")
-                || err.to_string().contains("failed to parse YAML"),
-            "exact ceiling must reach parse/validation, not the read rule: {err}"
+            err.to_string().contains("config has no tests"),
+            "exact-ceiling ASCII YAML is valid and must fail only as no tests: {err}"
         );
         assert_eq!(
             err.io_kind(),
             None,
             "exact-ceiling parse is not a read kind"
+        );
+    }
+
+    /// Stale metadata says the file still fits. A second handle grows it past
+    /// MAX. The helper must refuse on the read bound, not parse.
+    #[test]
+    fn config_that_grows_after_stat_is_refused_before_parse() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("grow.yaml");
+        let initial = yaml_of_len(64);
+        std::fs::write(&path, &initial).expect("write small yaml");
+        let file = OpenOptions::new()
+            .read(true)
+            .open(&path)
+            .expect("open for read");
+        let meta = file.metadata().expect("stat opened file");
+        assert!(
+            meta.len() <= MAX_CONFIG_BYTES,
+            "stale metadata must still pass the early len check"
+        );
+        assert!(meta.file_type().is_file());
+
+        let grown = yaml_of_len((MAX_CONFIG_BYTES as usize) + 1);
+        let mut writer = OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .expect("open for grow");
+        writer.write_all(grown.as_bytes()).expect("grow past MAX");
+        writer.flush().expect("flush grown file");
+        drop(writer);
+
+        let err = match read_opened_config(&path, file, meta) {
+            Err(err) => err,
+            Ok(raw) => panic!(
+                "growth after stat must be refused, helper returned Ok(len={})",
+                raw.len()
+            ),
+        };
+        assert_ne!(
+            err.io_kind(),
+            Some(ErrorKind::NotFound),
+            "grown file must not look like a missing file: {err}"
+        );
+        assert!(
+            err.to_string().contains(&MAX_CONFIG_BYTES.to_string()),
+            "growth-after-stat diagnosis must state the ceiling: {err}"
+        );
+        assert!(
+            !err.to_string().contains("failed to parse YAML"),
+            "growth after stat must be refused before YAML parse: {err}"
+        );
+        assert!(
+            !err.to_string().contains("config has no tests"),
+            "growth after stat must not reach post-parse validation: {err}"
         );
     }
 }
