@@ -1,0 +1,8 @@
+# No allowance declares github_deploy_key, so the caller-allowance gate denies: the action was never
+# declared for this caller, even though a credential is present.
+caller:
+  id: "ci-agent"
+upstream_credential:
+  alias: "gh-deploy"
+  scopes: ["repo:deploy_key:write"]
+allowances: []

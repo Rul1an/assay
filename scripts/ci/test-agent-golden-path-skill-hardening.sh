@@ -13,7 +13,7 @@ trap 'rm -rf "$SCRATCH"' EXIT
 # the 58-case durability boundary established by PR B0.
 # CI-5C (#2196): +3 skill generator-destination omissions and +3 packaged-resource
 # destination drifts beyond the original baseline-only packaged drift case.
-EXPECTED_CASES=96
+EXPECTED_CASES=100
 # Parser-layer follow-ups stay outside the approved cumulative case chain. The
 # The 23 probes are 4 workflow-key, 1 stages-key, 14 selector, 1 trigger-mode,
 # 1 release-split, and 2 inline-parser checks; pin them so deletion cannot leave
@@ -518,7 +518,7 @@ hook_files = (
     "read-assay-release-tag)\\.sh|scripts/ci/lib/workspace_version\\.py|"
     "scripts/docs/generate-agent-golden-path\\.py|\\.github/assay-release-tag|"
     "\\.(agents|claude)/skills/"
-    "assay-golden-path/SKILL\\.md|\\.claude-plugin/.*|packaging/claude-plugin/.*)$\n"
+    "assay-golden-path/SKILL\\.md|\\.claude-plugin/.*|packaging/claude-plugin/.*|packaging/agent-plugin/.*)$\n"
 )
 root_anchor = "default_install_hook_types: [pre-commit, pre-push]\n"
 
@@ -948,7 +948,8 @@ for workflow_path in \
   '.github/assay-release-tag' \
   '.github/workflows/kernel-matrix.yml' \
   '.claude-plugin/**' \
-  'packaging/claude-plugin/**'
+  'packaging/claude-plugin/**' \
+  'packaging/agent-plugin/**'
 do
   for mutation in remove comment; do
     case_root="$SCRATCH/workflow-$mutation-$(printf '%s' "$workflow_path" | tr '/.*' '---')"
@@ -989,7 +990,7 @@ end = text.find("      - id: ", start + 1)
 if end < 0:
     end = len(text)
 block = text[start:end]
-source = "|\\.claude-plugin/.*|packaging/claude-plugin/.*"
+source = "|\\.claude-plugin/.*|packaging/claude-plugin/.*|packaging/agent-plugin/.*"
 if block.count(source) != 1:
     raise SystemExit(f"hook plugin surface is not unique: {hook_id}")
 path.write_text(text[:start] + block.replace(source, "", 1) + text[end:], encoding="utf-8")
@@ -998,6 +999,34 @@ PY
     "hook omits plugin surface $hook_id" \
     "$case_root" \
     "${hook_id} does not cover .claude-plugin/marketplace.json"
+done
+
+for hook_id in docs-generated-drift agent-golden-path-skill-contract; do
+  case_root="$SCRATCH/hook-portable-plugin-surface-$hook_id"
+  seed_case "$case_root"
+  CASE_ROOT="$case_root" HOOK_ID="$hook_id" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["CASE_ROOT"]) / ".pre-commit-config.yaml"
+hook_id = os.environ["HOOK_ID"]
+text = path.read_text(encoding="utf-8")
+start = text.find(f"      - id: {hook_id}\n")
+if start < 0:
+    raise SystemExit(f"hook is not declared: {hook_id}")
+end = text.find("      - id: ", start + 1)
+if end < 0:
+    end = len(text)
+block = text[start:end]
+source = "|packaging/agent-plugin/.*"
+if block.count(source) != 1:
+    raise SystemExit(f"portable plugin surface is not unique: {hook_id}")
+path.write_text(text[:start] + block.replace(source, "", 1) + text[end:], encoding="utf-8")
+PY
+  expect_named_failure \
+    "hook omits portable plugin surface $hook_id" \
+    "$case_root" \
+    "${hook_id} does not cover packaging/agent-plugin/plugin.json"
 done
 
 for skill_path in \
@@ -1254,7 +1283,7 @@ source = (
     "read-assay-release-tag)\\.sh|scripts/ci/lib/workspace_version\\.py|"
     "scripts/docs/generate-agent-golden-path\\.py|\\.github/assay-release-tag|"
     "\\.(agents|claude)/skills/"
-    "assay-golden-path/SKILL\\.md|\\.claude-plugin/.*|packaging/claude-plugin/.*)$\n"
+    "assay-golden-path/SKILL\\.md|\\.claude-plugin/.*|packaging/claude-plugin/.*|packaging/agent-plugin/.*)$\n"
 )
 replacement = "        stages: [pre-push]\n" + source
 text = path.read_text(encoding="utf-8")

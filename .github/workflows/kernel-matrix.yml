@@ -21,6 +21,7 @@ on:
       - ".claude/**"
       - ".claude-plugin/**"
       - "packaging/claude-plugin/**"
+      - "packaging/agent-plugin/**"
       - ".gitignore"
       - ".gitattributes"
       - ".pre-commit-config.yaml"

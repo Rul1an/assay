@@ -1250,6 +1250,7 @@ def main() -> None:
         '.claude/**',
         '.claude-plugin/**',
         'packaging/claude-plugin/**',
+        'packaging/agent-plugin/**',
         '.gitignore',
         '.gitattributes',
         '.pre-commit-config.yaml',
@@ -1280,6 +1281,8 @@ def main() -> None:
         ".claude-plugin/marketplace.json",
         "packaging/claude-plugin/.mcp.json",
         "packaging/claude-plugin/skills/assay-golden-path/SKILL.md",
+        "packaging/agent-plugin/plugin.json",
+        "packaging/agent-plugin/skills/assay-golden-path/SKILL.md",
     )
     for hook_id in ("docs-generated-drift", "agent-golden-path-skill-contract"):
         contract_hook = parse_precommit_hook(precommit_text, hook_id, hook_id)

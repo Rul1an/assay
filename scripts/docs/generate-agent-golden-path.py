@@ -24,6 +24,10 @@ SKILL_OUTPUTS = (
 PLUGIN_SKILL_OUTPUTS = (
     ROOT / "packaging/claude-plugin/skills/assay-golden-path/SKILL.md",
 )
+PORTABLE_PLUGIN_ROOT = ROOT / "packaging/agent-plugin"
+PORTABLE_SKILL_OUTPUT = (
+    PORTABLE_PLUGIN_ROOT / "skills/assay-golden-path/SKILL.md"
+)
 PLUGIN_CONTRACT_OUTPUT = (
     ROOT
     / "packaging/claude-plugin/skills/assay-golden-path/references/agent-golden-path.json"
@@ -31,6 +35,7 @@ PLUGIN_CONTRACT_OUTPUT = (
 PLUGIN_ASSET_ROOT = (
     "${CLAUDE_PLUGIN_ROOT}/skills/assay-golden-path/assets/privileged-action-gate"
 )
+PORTABLE_ASSET_ROOT = "assets/privileged-action-gate"
 PLUGIN_RESOURCE_COPIES = (
     (JSON_OUTPUT, PLUGIN_CONTRACT_OUTPUT),
     (
@@ -47,6 +52,28 @@ PLUGIN_RESOURCE_COPIES = (
         ROOT / "examples/privileged-action-gate/policies/no-allowance.yaml",
         ROOT
         / "packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/no-allowance.yaml",
+    ),
+)
+PORTABLE_RESOURCE_COPIES = (
+    (
+        JSON_OUTPUT,
+        PORTABLE_PLUGIN_ROOT
+        / "skills/assay-golden-path/references/agent-golden-path.json",
+    ),
+    (
+        ROOT / "examples/privileged-action-gate/mock_github_mcp.py",
+        PORTABLE_PLUGIN_ROOT
+        / "skills/assay-golden-path/assets/privileged-action-gate/mock_github_mcp.py",
+    ),
+    (
+        ROOT / "examples/privileged-action-gate/baseline-approved.json",
+        PORTABLE_PLUGIN_ROOT
+        / "skills/assay-golden-path/assets/privileged-action-gate/baseline-approved.json",
+    ),
+    (
+        ROOT / "examples/privileged-action-gate/policies/no-allowance.yaml",
+        PORTABLE_PLUGIN_ROOT
+        / "skills/assay-golden-path/assets/privileged-action-gate/policies/no-allowance.yaml",
     ),
 )
 MAX_PLUGIN_RESOURCE_BYTES = 1024 * 1024
@@ -728,7 +755,9 @@ def render_markdown(current: str) -> str:
     )
 
 
-def render_skill(*, plugin: bool = False) -> str:
+def render_skill(*, plugin: bool = False, portable: bool = False) -> str:
+    if plugin and portable:
+        raise ValueError("a skill cannot be both Claude-specific and portable")
     lines = [
         "---",
         "name: assay-golden-path",
@@ -761,6 +790,27 @@ def render_skill(*, plugin: bool = False) -> str:
                 "",
             ]
         )
+    elif portable:
+        lines.extend(
+            [
+                "`references/agent-golden-path.json` is the authoritative machine contract bundled with this skill.",
+                "Read it when exact argv, fields, or per-outcome metadata are needed.",
+                "Resolve `references/` and `assets/` paths relative to this SKILL.md directory.",
+                "",
+                INVOCATION_CWD_RULE,
+                "Protected-action fixtures named by the contract are bundled at "
+                f"`{PORTABLE_ASSET_ROOT}`.",
+                "A present `working_directory` in the contract resolves through that mapping.",
+                PYTHON_PLACEHOLDER_RULE,
+                "",
+                f"{EMPTY_STDOUT_RULE}",
+                "Do not replace a linked gap with an inferred clean result.",
+                "",
+                "This package uses the Agent Plugins 1.0.0 portable skill layout.",
+                "Host discovery and marketplace acceptance require separate evidence.",
+                "",
+            ]
+        )
     else:
         lines.extend(
             [
@@ -788,7 +838,12 @@ def render_skill(*, plugin: bool = False) -> str:
         lines.extend([f"### {step['step']}. {step['label']}", ""])
         working_directory = step.get("working_directory")
         if working_directory is not None:
-            rendered_working_directory = PLUGIN_ASSET_ROOT if plugin else working_directory
+            if plugin:
+                rendered_working_directory = PLUGIN_ASSET_ROOT
+            elif portable:
+                rendered_working_directory = PORTABLE_ASSET_ROOT
+            else:
+                rendered_working_directory = working_directory
             lines.extend([f"Working directory: `{rendered_working_directory}`", ""])
         lines.extend(
             [
@@ -837,6 +892,7 @@ def rendered_outputs() -> list[tuple[Path, bytes]]:
     rendered_markdown = render_markdown(current)
     rendered_skill = render_skill()
     rendered_plugin_skill = render_skill(plugin=True)
+    rendered_portable_skill = render_skill(portable=True)
     rendered_contract = (json.dumps(CONTRACT, indent=2, ensure_ascii=True) + "\n").encode(
         "ascii"
     )
@@ -845,8 +901,29 @@ def rendered_outputs() -> list[tuple[Path, bytes]]:
         (MARKDOWN_OUTPUT, rendered_markdown.encode("utf-8")),
         *[(output, rendered_skill.encode("ascii")) for output in SKILL_OUTPUTS],
         *[(output, rendered_plugin_skill.encode("ascii")) for output in PLUGIN_SKILL_OUTPUTS],
+        (PORTABLE_SKILL_OUTPUT, rendered_portable_skill.encode("ascii")),
+        (
+            PORTABLE_PLUGIN_ROOT / "plugin.json",
+            (
+                json.dumps(
+                    {
+                        "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+                        "name": "assay",
+                        "version": read_workspace_version(ROOT / "Cargo.toml"),
+                        "description": "Operate Assay's install-to-evidence golden path with explicit failure boundaries.",
+                        "author": {"name": "Assay"},
+                        "homepage": "https://getassay.dev",
+                        "repository": "https://github.com/Rul1an/assay",
+                        "license": "MIT",
+                    },
+                    indent=2,
+                    ensure_ascii=True,
+                )
+                + "\n"
+            ).encode("ascii"),
+        ),
     ]
-    for source, output in PLUGIN_RESOURCE_COPIES:
+    for source, output in (*PLUGIN_RESOURCE_COPIES, *PORTABLE_RESOURCE_COPIES):
         payload = (
             rendered_contract if source == JSON_OUTPUT else read_plugin_resource(source)
         )
