@@ -128,13 +128,22 @@ structured basis. Every other value is treated as not readable, fail-closed, in 
 | declared view | reading | recovery |
 |---|---|---|
 | `encrypted` **with** `approval_plaintext_commitment` | `opaque_bindable` | a later disclosure is checkable against the commitment |
-| `encrypted` **without** the commitment | `opaque_unbindable` | key disclosure only |
+| `encrypted` **without** the commitment | `opaque_unbindable` | key disclosure, and possibly other paths — see below |
 | unknown value, empty string, or non-string | fail-closed | correct the producer |
 
 **Why it matters.** A content-review claim over an approval nobody can read is not a review. The
 rule caps such claims at *incomplete* rather than rejecting the bundle, because integrity is a
 floor and never a lift: a bundle can verify perfectly and still not support the claim being made
 over it.
+
+**Opaque to the reviewer is not confidential against others.** The recovery path for an
+`opaque_unbindable` view is not exhausted by key disclosure. Whether a ciphertext is closed is a
+property of the crypto system, not of the retained record, and for some classes a third party
+obtains the plaintext with no key holder involved. Two consequences: a named
+`approval_encryption_key_holder` bounds who can *review* the basis and says nothing about who can
+*read* it, and a bundle that lints clean may still carry third-party-recoverable content — the
+secret scan behind [`ASSAY-W001`](#assay-w001) matches plaintext patterns, so ciphertext passes it
+by construction. Treat publishability as a separate question from reviewability.
 
 **How to fix.** Emit `structured_meta_jcs` where the approval basis is structured. Where the body
 genuinely must be encrypted, emit `approval_plaintext_commitment` alongside it so a later

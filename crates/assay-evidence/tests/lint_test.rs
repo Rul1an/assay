@@ -333,6 +333,17 @@ fn test_w005_flags_encrypted_retained_view_as_opaque_unbindable() {
     assert_eq!(findings.len(), 1, "expected one ASSAY-W005 finding");
     assert!(findings[0].contains("opaque_unbindable"));
     assert!(findings[0].contains("cap at incomplete"));
+    // The recovery path must stay non-exhaustive. Whether a ciphertext is closed is a property
+    // of the crypto system, not of the retained record, so the message must not tell a reviewer
+    // that key disclosure is the only way plaintext can be obtained.
+    assert!(
+        findings[0].contains("not exhaustive"),
+        "the opaque_unbindable recovery path must be stated as non-exhaustive"
+    );
+    assert!(
+        !findings[0].contains("only by key disclosure"),
+        "the message must not claim key disclosure is the sole recovery path"
+    );
 }
 
 #[test]
