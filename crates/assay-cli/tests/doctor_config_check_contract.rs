@@ -242,6 +242,48 @@ fn a_config_that_will_not_load_is_neither_checked_nor_skipped() {
     );
 }
 
+/// Libyaml tab / unterminated-quote Displays keep context after the problem
+/// mark. Doctor must not append `location()` a second time.
+#[test]
+fn a_libyaml_context_parse_error_does_not_duplicate_the_problem_mark() {
+    for (label, yaml, context) in [
+        ("tab", "version: 1\n\tfoo: 1\n", "while scanning"),
+        (
+            "unterminated quote",
+            "version: \"hello\n",
+            "while scanning a quoted scalar",
+        ),
+    ] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = dir.path().join("bad.yaml");
+        std::fs::write(&config, yaml).expect("write yaml");
+        let (code, document) = doctor_json(
+            dir.path(),
+            &["--config", config.to_str().expect("UTF-8 path")],
+        );
+        assert_eq!(code, 2, "{label} stays the config class");
+        let message = document["config_error"]["message"]
+            .as_str()
+            .unwrap_or_else(|| {
+                panic!("{label}: config_error.message must be a string: {document}")
+            });
+        let mark = yaml_location_mark(yaml);
+        assert_eq!(
+            message.matches(&mark).count(),
+            1,
+            "{label} problem-mark must appear once: {message}"
+        );
+        assert!(
+            message.contains(context),
+            "{label} context text must be kept: {message}"
+        );
+        assert!(
+            message.contains("at line 1 column 10"),
+            "{label} context-mark must be kept: {message}"
+        );
+    }
+}
+
 /// A parse error that quotes a long secret-shaped scalar must reach doctor
 /// redacted and bounded. This is the parse-Display fold, not a read ceiling,
 /// and not a claim that every YAML error echoes input.

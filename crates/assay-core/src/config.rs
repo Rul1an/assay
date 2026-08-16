@@ -253,23 +253,27 @@ tests:
 
 /// Bound a `serde_yaml::Error` Display through `render_safe`, but keep the
 /// `location()` mark inside the same `MAX_RENDER_FIELD` budget. Truncating the
-/// whole Display would drop the trailing `at line N column M`. Short errors
-/// already carry that suffix; strip it first so the reserved mark is not
-/// duplicated. `Sink::Json` is identity today (M5); this is not a second
-/// sanitizer and does not raise the budget.
+/// whole Display would drop a trailing `at line N column M`. Reserve and
+/// reattach that mark only when it is a real suffix. Libyaml Displays put
+/// context after the problem-mark (`… at line N column M, while scanning …`);
+/// `strip_suffix` is then `None` and the full Display goes through
+/// `render_safe` once — no second append. `Sink::Json` is identity today
+/// (M5); this is not a second sanitizer and does not raise the budget.
 fn render_yaml_parse_error(err: &serde_yaml::Error) -> String {
     let display = err.to_string();
     let Some(loc) = err.location() else {
         return render_safe(Sink::Json, &display, MAX_RENDER_FIELD);
     };
     let mark = format!(" at line {} column {}", loc.line(), loc.column());
-    let diagnosis = display
-        .strip_suffix(mark.as_str())
-        .unwrap_or(display.as_str());
-    let reserved = mark.chars().count();
-    let budget = MAX_RENDER_FIELD.saturating_sub(reserved);
-    let safe = render_safe(Sink::Json, diagnosis, budget);
-    format!("{safe}{mark}")
+    match display.strip_suffix(mark.as_str()) {
+        Some(diagnosis) => {
+            let reserved = mark.chars().count();
+            let budget = MAX_RENDER_FIELD.saturating_sub(reserved);
+            let safe = render_safe(Sink::Json, diagnosis, budget);
+            format!("{safe}{mark}")
+        }
+        None => render_safe(Sink::Json, &display, MAX_RENDER_FIELD),
+    }
 }
 
 #[cfg(test)]
@@ -312,6 +316,68 @@ mod tests {
             .location()
             .expect("serde_yaml must report a location for this fixture");
         format!("at line {} column {}", loc.line(), loc.column())
+    }
+
+    fn load_parse_message(yaml: &str) -> String {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("bad.yaml");
+        std::fs::write(&path, yaml).expect("write yaml");
+        load_config_with_cause(&path, Default::default())
+            .expect_err("fixture must fail YAML parse")
+            .to_string()
+    }
+
+    /// Tab + unterminated quote are libyaml Displays: problem-mark is not a
+    /// suffix (`… at line N column M, while scanning …` and a second context
+    /// mark). The fold must not append `location()` again.
+    #[test]
+    fn yaml_parse_error_keeps_libyaml_context_without_duplicating_problem_mark() {
+        let tab = "version: 1\n\tfoo: 1\n";
+        let tab_msg = load_parse_message(tab);
+        let tab_mark = yaml_location_mark(tab);
+        assert!(
+            tab_msg.contains("failed to parse YAML"),
+            "tab input must stay diagnosed: {tab_msg}"
+        );
+        assert_eq!(
+            tab_msg.matches(&tab_mark).count(),
+            1,
+            "tab problem-mark must appear once: {tab_msg}"
+        );
+        assert!(
+            tab_msg.contains("while scanning"),
+            "tab context text must be kept: {tab_msg}"
+        );
+        assert!(
+            tab_msg.contains("at line 1 column 10"),
+            "tab context-mark must be kept: {tab_msg}"
+        );
+
+        let quote = "version: \"hello\n";
+        let quote_msg = load_parse_message(quote);
+        let quote_mark = yaml_location_mark(quote);
+        assert!(
+            quote_msg.contains("failed to parse YAML"),
+            "unterminated quote must stay diagnosed: {quote_msg}"
+        );
+        assert_eq!(
+            quote_msg.matches(&quote_mark).count(),
+            1,
+            "quote problem-mark must appear once: {quote_msg}"
+        );
+        assert!(
+            quote_msg.contains("while scanning a quoted scalar"),
+            "quote context text must be kept: {quote_msg}"
+        );
+        assert!(
+            quote_msg.contains("at line 1 column 10"),
+            "quote context-mark must be kept: {quote_msg}"
+        );
+        assert_ne!(
+            quote_mark.as_str(),
+            "at line 1 column 10",
+            "quote fixture must keep problem-mark distinct from context-mark"
+        );
     }
 
     #[test]
