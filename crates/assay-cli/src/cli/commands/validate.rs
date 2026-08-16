@@ -1,5 +1,5 @@
 use assay_core::config::{load_config, path_resolver::PathResolver};
-use assay_core::errors::diagnostic::Diagnostic;
+use assay_core::errors::diagnostic::{path_json, Diagnostic};
 use assay_core::validate::{validate, ValidateOptions, ValidateReport};
 use serde_json::json;
 
@@ -26,7 +26,7 @@ pub async fn run(args: ValidateArgs, legacy_mode: bool) -> anyhow::Result<i32> {
             )
             .with_source("config")
             .with_context(json!({
-                "file": config_path,
+                "file": path_json(config_path),
             }));
 
             let report = ValidateReport {
