@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import stat
 import subprocess
 import sys
@@ -582,10 +583,12 @@ STEPS: list[dict[str, object]] = [
         ),
         "failure_summary": (
             "A recorded-value mismatch publishes `E_EVIDENCE_INTEGRITY`. A typed "
-            "`Contract*` defect publishes `E_EVIDENCE_CONTRACT`. A stage-1 pass whose "
+            "`Contract*` defect publishes `E_EVIDENCE_CONTRACT`. Untyped I/O and "
+            "archive-read failures publish `E_EVIDENCE_UNREADABLE`. A stage-1 pass whose "
             "profile verdict is invalid publishes `E_EVIDENCE_PROFILE_INVALID`. Ceiling "
             "refusals and `SecurityPathTraversal` publish `E_EVIDENCE_LIMIT_EXCEEDED` and "
-            "`E_EVIDENCE_PATH_REJECTED`. Success omits both diagnostic fields."
+            "`E_EVIDENCE_PATH_REJECTED`. Success omits both diagnostic fields. "
+            "`findings[].detail` may retain the caller argv path; `next_step` is path-free."
         ),
     },
     {
@@ -619,6 +622,33 @@ STEPS: list[dict[str, object]] = [
         ),
     },
 ]
+
+OWNED_PROFILE_EVIDENCE_REASON_CODES = (
+    "E_EVIDENCE_INTEGRITY",
+    "E_EVIDENCE_CONTRACT",
+    "E_EVIDENCE_UNREADABLE",
+    "E_EVIDENCE_PROFILE_INVALID",
+    "E_EVIDENCE_LIMIT_EXCEEDED",
+    "E_EVIDENCE_PATH_REJECTED",
+)
+
+
+def evidence_reason_codes_in(text: str) -> tuple[str, ...]:
+    return tuple(re.findall(r"E_EVIDENCE_[A-Z0-9_]+", text))
+
+
+def require_owned_profile_failure_vocabulary() -> None:
+    step = next(item for item in STEPS if item["id"] == "offline-profile-verification")
+    found = tuple(dict.fromkeys(evidence_reason_codes_in(step["failure_summary"])))
+    if found != OWNED_PROFILE_EVIDENCE_REASON_CODES:
+        raise SystemExit(
+            "offline-profile-verification failure_summary must name exactly these "
+            f"six evidence reason codes in this order: {OWNED_PROFILE_EVIDENCE_REASON_CODES}; "
+            f"got {found}"
+        )
+
+
+require_owned_profile_failure_vocabulary()
 
 for step in STEPS:
     outcomes = require_type(step["outcomes"], list, "golden-path outcomes")

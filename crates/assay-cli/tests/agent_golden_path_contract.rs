@@ -721,6 +721,36 @@ fn offline_profile_verifier_keeps_both_outcomes_on_stdout() {
 }
 
 #[test]
+fn offline_profile_failure_summary_names_exactly_the_six_owned_evidence_codes() {
+    let contract = contract();
+    let step = contract["steps"]
+        .as_array()
+        .expect("contract steps array")
+        .iter()
+        .find(|step| step["id"] == "offline-profile-verification")
+        .expect("offline profile verification step");
+    let summary = step["failure_summary"]
+        .as_str()
+        .expect("offline profile failure summary");
+    let codes: Vec<&str> = summary
+        .split('`')
+        .filter(|token| token.starts_with("E_EVIDENCE_"))
+        .collect();
+    assert_eq!(
+        codes,
+        [
+            "E_EVIDENCE_INTEGRITY",
+            "E_EVIDENCE_CONTRACT",
+            "E_EVIDENCE_UNREADABLE",
+            "E_EVIDENCE_PROFILE_INVALID",
+            "E_EVIDENCE_LIMIT_EXCEEDED",
+            "E_EVIDENCE_PATH_REJECTED",
+        ],
+        "owned golden-path failure_summary must name exactly the six evidence codes"
+    );
+}
+
+#[test]
 fn every_cli_contract_outcome_is_executed_once() {
     runtime_coverage::assert_exact(
         &contract(),
