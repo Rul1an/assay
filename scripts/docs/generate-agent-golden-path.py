@@ -538,8 +538,10 @@ STEPS: list[dict[str, object]] = [
         "failure_summary": (
             "Only the four verifier codes that establish a recorded-value mismatch map to "
             "`E_EVIDENCE_INTEGRITY`; I/O, gzip, and tar failures use "
-            "`E_EVIDENCE_UNREADABLE`. A typed `Contract*` defect publishes "
-            "`E_EVIDENCE_CONTRACT` with a bounded prose `next_step`."
+            "`E_EVIDENCE_UNREADABLE`. Format-contract failures now publish "
+            "`E_EVIDENCE_CONTRACT` with a bounded prose `next_step`. LIMIT/PATH and "
+            "PROFILE, where they apply, remain exit `2` with empty stdout until typed "
+            "on this command."
         ),
     },
     {

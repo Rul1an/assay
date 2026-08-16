@@ -386,9 +386,9 @@ fn classify_show_error(
         Some(crate::exit_codes::ReasonCode::EEvidenceUnreadable) => {
             crate::cli_failure::CliFailure::evidence_unreadable(path, &error)
         }
-        Some(crate::exit_codes::ReasonCode::EEvidenceContract) => Some(
-            crate::cli_failure::CliFailure::evidence_contract(path, &error),
-        ),
+        Some(crate::exit_codes::ReasonCode::EEvidenceContract) => {
+            crate::cli_failure::CliFailure::evidence_contract(path, &error)
+        }
         Some(_) | None => None,
     };
     match failure {

@@ -646,7 +646,7 @@ fn bundle_inspection_json_publishes_typed_failures_on_stdout() {
         "evidence show format-contract failure",
     );
     assert_eq!(contract_json["reason_code"], "E_EVIDENCE_CONTRACT");
-    assert_ne!(contract_json["reason_code"], "E_EVIDENCE_INTEGRITY");
+    assert_eq!(contract_json["exit_code"], 2);
     let next_step = contract_json["next_step"]
         .as_str()
         .expect("format-contract next_step");
@@ -661,7 +661,7 @@ fn bundle_inspection_json_publishes_typed_failures_on_stdout() {
 }
 
 #[test]
-fn evidence_inspection_contract_closes_the_format_contract_gap() {
+fn evidence_inspection_contract_names_published_and_untyped_identities() {
     let contract = contract();
     let step = contract["steps"]
         .as_array()
@@ -677,12 +677,12 @@ fn evidence_inspection_contract_closes_the_format_contract_gap() {
         "the format-contract gap must be closed"
     );
     assert!(
-        !failure_summary.contains("empty stdout"),
-        "format-contract failure must no longer advertise empty stdout"
-    );
-    assert!(
         failure_summary.contains("E_EVIDENCE_CONTRACT"),
         "the shipped contract must name the format-contract reason"
+    );
+    assert!(
+        failure_summary.contains("empty stdout"),
+        "LIMIT/PATH and PROFILE must remain disclosed as empty-stdout until typed"
     );
     let stdout_summary = step["stdout_summary"]
         .as_str()
