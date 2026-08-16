@@ -289,7 +289,7 @@ fn the_boundary_names_error_codes_that_still_exist_in_assay_evidence() {
     // throughout `assay-evidence` only -- what a developer who has never read this spec would do --
     // fails it.
     let errors = read("crates/assay-evidence/src/bundle/writer_next/errors.rs");
-    let boundary = read(BOUNDARY);
+    let boundary = format!("{} {}", read(BOUNDARY), read(CONTRACT_BOUNDARY));
     for code in [
         "IntegrityManifestHash",
         "IntegrityEventHash",
@@ -298,6 +298,11 @@ fn the_boundary_names_error_codes_that_still_exist_in_assay_evidence() {
         "IntegrityIo",
         "IntegrityGzip",
         "IntegrityTar",
+        "ContractInvalidJson",
+        "ContractBundleIdMismatch",
+        "ContractDuplicateFile",
+        "ContractUnexpectedFile",
+        "ContractSequenceStart",
     ] {
         assert!(
             boundary.contains(code),
@@ -341,6 +346,7 @@ fn the_reserved_section_claims_nothing_that_is_live() {
 /// `ReasonCode::EEvidenceIntegrity` doc comment are transports for it, so it is the only place the
 /// rule is written.
 const BOUNDARY: &str = "crates/assay-cli/src/exit_codes/evidence_integrity_boundary.md";
+const CONTRACT_BOUNDARY: &str = "crates/assay-cli/src/exit_codes/evidence_contract_boundary.md";
 
 /// One line of flowed prose: every run of whitespace collapsed.
 ///
@@ -372,6 +378,25 @@ fn spec_description(section: &str, code: &str) -> String {
 }
 
 #[test]
+fn e_evidence_contract_is_registered_and_emittable() {
+    // #2219: a format-contract defect is a different fact from a recorded-value mismatch.
+    // These two memberships are the registry identity; a rename or a missing §5.1 row
+    // must fail here rather than leave consumers to invent a local string.
+    assert!(
+        emittable_codes().contains("E_EVIDENCE_CONTRACT"),
+        "ReasonCode::as_str does not emit E_EVIDENCE_CONTRACT; the #2219 registry gap is still open"
+    );
+    assert!(
+        registered("5.1").contains("E_EVIDENCE_CONTRACT"),
+        "{SPEC} §5.1 has no E_EVIDENCE_CONTRACT row"
+    );
+    assert!(
+        registered("5.4").contains("E_EVIDENCE_CONTRACT"),
+        "{SPEC} §5.4 must keep E_EVIDENCE_CONTRACT reserved until a production site constructs it"
+    );
+}
+
+#[test]
 fn the_evidence_integrity_boundary_reads_the_same_in_the_spec_and_the_code() {
     // One statement is normative for consumers and the other is what an author reads at the
     // definition, and they have to say the same thing. Asserting that each separately contains the
@@ -387,10 +412,37 @@ fn the_evidence_integrity_boundary_reads_the_same_in_the_spec_and_the_code() {
     );
 }
 
+#[test]
+fn the_evidence_contract_boundary_reads_the_same_in_the_spec_and_the_code() {
+    assert_eq!(
+        spec_description("5.1", "E_EVIDENCE_CONTRACT"),
+        flowed(&read(CONTRACT_BOUNDARY)),
+        "the §5.1 registry row is no longer the text of {CONTRACT_BOUNDARY}. That file is the \
+         boundary; the row and the `ReasonCode::EEvidenceContract` doc comment transport it. \
+         Edit the file and reflow it into the row rather than editing the row."
+    );
+}
+
+#[test]
+fn the_integrity_boundary_no_longer_states_the_contract_gap() {
+    let boundary = read(BOUNDARY);
+    assert!(
+        !boundary.contains("Stated gap") && !boundary.contains("#2219 tracks"),
+        "{BOUNDARY} still describes format-contract as an unregistered gap"
+    );
+    assert!(
+        boundary.contains("E_EVIDENCE_CONTRACT"),
+        "{BOUNDARY} must point Contract* defects at E_EVIDENCE_CONTRACT"
+    );
+}
+
 const REGISTRY_HEADER: &str = "pub enum ReasonCode {";
 const INTEGRITY_DECL: &str = "\n    EEvidenceIntegrity,";
+const CONTRACT_DECL: &str = "\n    EEvidenceContract,";
 const BOUNDARY_INCLUDE: &str =
     "#[doc = include_str!(\"exit_codes/evidence_integrity_boundary.md\")]";
+const CONTRACT_INCLUDE: &str =
+    "#[doc = include_str!(\"exit_codes/evidence_contract_boundary.md\")]";
 
 /// `text` with its string literals removed, and the number of brackets it leaves open.
 ///
@@ -527,6 +579,65 @@ fn declares_a_variant(line: &str) -> bool {
     name.starts_with(|c: char| c.is_ascii_uppercase()) && name.chars().all(char::is_alphanumeric)
 }
 
+fn assert_variant_documented_only_by_include(decl: &str, include: &str, boundary: &str) {
+    let src = read("crates/assay-cli/src/exit_codes.rs");
+    assert_eq!(
+        src.matches(REGISTRY_HEADER).count(),
+        1,
+        "`{REGISTRY_HEADER}` occurs more than once in crates/assay-cli/src/exit_codes.rs, so the \
+         slice read below is not necessarily the registry"
+    );
+    let body = src
+        .split_once(REGISTRY_HEADER)
+        .and_then(|(_, body)| body.split_once("\n}"))
+        .map(|(body, _)| body)
+        .expect("`pub enum ReasonCode` has no closing brace");
+    let name = decl.trim().trim_end_matches(',');
+    assert_eq!(
+        body.matches(decl).count(),
+        1,
+        "`{name},` occurs {} times in the `ReasonCode` body; the declaration this reads is then \
+         not necessarily the one it names",
+        body.matches(decl).count()
+    );
+    let head = body
+        .split_once(decl)
+        .map(|(above_decl, _)| above_decl)
+        .unwrap_or_else(|| panic!("no `{name}` variant in `ReasonCode`"));
+    let lines: Vec<&str> = head.lines().collect();
+    let units = source_units(&lines);
+    let previous_variant = units
+        .iter()
+        .rposition(|(_, unit)| !(cannot_document(unit) || unit.as_str() == include));
+    let own_text: &[&str] = match previous_variant {
+        Some(index) => {
+            let (last_line, unit) = &units[index];
+            assert!(
+                declares_a_variant(unit),
+                "`{name}`'s own text reaches back to {unit:?}, which does not declare the \
+                 previous variant. Every line between the two variants documents this one, so \
+                 anything there that is not the boundary include is a second copy of the rule, \
+                 free to contradict it while the §5.1 row stays correct. Blank lines, `//` \
+                 comments, and attributes whose path is neither `doc` nor `deprecated` — on one \
+                 line or broken across several — carry no text and are fine on either side of the \
+                 include; a `///` or `/** */` comment, a `#[doc = ...]`, a `#[deprecated]` note, \
+                 any `cfg_attr` naming either path, and any attribute whose brackets do not \
+                 balance are refused here rather than guessed at."
+            );
+            &lines[last_line + 1..]
+        }
+        None => &lines,
+    };
+    assert_eq!(
+        own_text
+            .iter()
+            .filter(|line| line.trim() == include)
+            .count(),
+        1,
+        "`{name}` is documented by {own_text:?} rather than by including {boundary} exactly once"
+    );
+}
+
 #[test]
 fn nothing_but_the_boundary_include_documents_the_integrity_variant() {
     // `include_str!` is what makes the equality above cover the doc comment too. Replace it with a
@@ -557,69 +668,12 @@ fn nothing_but_the_boundary_include_documents_the_integrity_variant() {
     // ReasonCode` itself, which documents the enum rather than this variant; the rendering step,
     // since it reads the source rustdoc is given and not rustdoc's output; and an attribute macro,
     // which expands to source this never sees.
-    let src = read("crates/assay-cli/src/exit_codes.rs");
-    assert_eq!(
-        src.matches(REGISTRY_HEADER).count(),
-        1,
-        "`{REGISTRY_HEADER}` occurs more than once in crates/assay-cli/src/exit_codes.rs, so the \
-         slice read below is not necessarily the registry"
-    );
-    let body = src
-        .split_once(REGISTRY_HEADER)
-        .and_then(|(_, body)| body.split_once("\n}"))
-        .map(|(body, _)| body)
-        .expect("`pub enum ReasonCode` has no closing brace");
-    // Scoped to the enum body and required to be unique inside it, because the first textual match
-    // in the file is not necessarily the declaration: the same line inside an earlier comment made
-    // this assertion report on a location it does not name, green, with the claim live.
-    assert_eq!(
-        body.matches(INTEGRITY_DECL).count(),
-        1,
-        "`EEvidenceIntegrity,` occurs {} times in the `ReasonCode` body; the declaration this reads \
-         is then not necessarily the one it names",
-        body.matches(INTEGRITY_DECL).count()
-    );
-    let head = body
-        .split_once(INTEGRITY_DECL)
-        .map(|(above_decl, _)| above_decl)
-        .expect("no `EEvidenceIntegrity` variant in `ReasonCode`");
-    let lines: Vec<&str> = head.lines().collect();
-    let units = source_units(&lines);
-    let previous_variant = units
-        .iter()
-        .rposition(|(_, unit)| !(cannot_document(unit) || unit.as_str() == BOUNDARY_INCLUDE));
-    let own_text: &[&str] = match previous_variant {
-        Some(index) => {
-            let (last_line, unit) = &units[index];
-            assert!(
-                declares_a_variant(unit),
-                "`EEvidenceIntegrity`'s own text reaches back to {unit:?}, which does not declare \
-                 the previous variant. Every line between the two variants documents this one, so \
-                 anything there that is not the boundary include is a second copy of the rule, \
-                 free to contradict it while the §5.1 row stays correct. Blank lines, `//` \
-                 comments, and attributes whose path is neither `doc` nor `deprecated` — on one \
-                 line or broken across several — carry no text and are fine on either side of the \
-                 include; a `///` or `/** */` comment, a `#[doc = ...]`, a `#[deprecated]` note, \
-                 any `cfg_attr` naming either path, and any attribute whose brackets do not \
-                 balance are refused here rather than guessed at."
-            );
-            &lines[last_line + 1..]
-        }
-        // Nothing above but text that cannot document the variant, so it opens the enum body and
-        // there is no previous declaration to reach back to. That is a legitimate place for it;
-        // the include count below is what decides the case, rather than a panic asserting as
-        // impossible the state the author just created.
-        None => &lines,
-    };
-    assert_eq!(
-        own_text
-            .iter()
-            .filter(|line| line.trim() == BOUNDARY_INCLUDE)
-            .count(),
-        1,
-        "`EEvidenceIntegrity` is documented by {own_text:?} rather than by including {BOUNDARY} \
-         exactly once"
-    );
+    assert_variant_documented_only_by_include(INTEGRITY_DECL, BOUNDARY_INCLUDE, BOUNDARY);
+}
+
+#[test]
+fn nothing_but_the_boundary_include_documents_the_contract_variant() {
+    assert_variant_documented_only_by_include(CONTRACT_DECL, CONTRACT_INCLUDE, CONTRACT_BOUNDARY);
 }
 
 #[test]
