@@ -48,9 +48,8 @@ const NO_CONFIG_FOUND: &str = "No config found; run inside project or use --conf
 ///
 /// The key is present in every JSON report rather than only in the skipped one, so the question
 /// "was this config read?" has an answer a consumer can key on without knowing which absences
-/// mean what. `reason` accompanies the two states that produced no diagnostics; on `failed` it
-/// restates `config_error.message` from the same value rather than deriving a second one, because
-/// the registered diagnosis stays the carrier a consumer branches on.
+/// mean what. `reason` names why a check was skipped. A failed load publishes only
+/// `status: "failed"`; the human detail lives once on `config_error.message`.
 fn config_check_skipped(reason: &str) -> serde_json::Value {
     serde_json::json!({
         "status": "skipped",
@@ -58,14 +57,11 @@ fn config_check_skipped(reason: &str) -> serde_json::Value {
     })
 }
 
-fn config_check_marker(checked: bool, error: Option<&str>) -> serde_json::Value {
-    match (checked, error) {
-        (_, Some(message)) => serde_json::json!({
-            "status": "failed",
-            "reason": message,
-        }),
-        (true, None) => serde_json::json!({ "status": "checked" }),
-        (false, None) => config_check_skipped(NO_CONFIG_FOUND),
+fn config_check_marker(checked: bool, failed: bool) -> serde_json::Value {
+    match (checked, failed) {
+        (_, true) => serde_json::json!({ "status": "failed" }),
+        (true, false) => serde_json::json!({ "status": "checked" }),
+        (false, false) => config_check_skipped(NO_CONFIG_FOUND),
     }
 }
 
@@ -172,11 +168,10 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         let mut exit = 0;
 
         if let Some(obj) = json_out.as_object_mut() {
-            let err_text = cfg_err.as_ref().map(ToString::to_string);
             obj.insert("generated_at".to_string(), serde_json::json!(timestamp));
             obj.insert(
                 "config_check".to_string(),
-                config_check_marker(cfg.is_some(), err_text.as_deref()),
+                config_check_marker(cfg.is_some(), cfg_err.is_some()),
             );
 
             if let Some(err) = &cfg_err {
