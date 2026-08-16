@@ -23,7 +23,7 @@ opening sentence lists the kinds of thing that can disagree, not an open set of 
 `Contract*`-class failures are **outside** this code as well, even though the bundle was opened and
 read. They establish that the bundle violates its own format contract, which is a different fact
 from a recorded value disagreeing with the bytes; folding the two together would make this code a
-whole-artifact verdict. Those defects are registered as `E_EVIDENCE_CONTRACT` (reserved, §5.4).
+whole-artifact verdict. Those defects are registered as `E_EVIDENCE_CONTRACT`.
 `docs/experiments/evidence-mutation-cost-2026-06/results/matrix.md` measures the size of that
 companion class: of its 496 detections, 3 have a dominant verifier code this rule admits, 9 have
 one it forbids (`IntegrityIo`), and 484 have one it does not name, 479 of them
