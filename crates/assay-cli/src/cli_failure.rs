@@ -92,6 +92,23 @@ impl CliFailure {
         })
     }
 
+    /// Typed `Contract*` format-contract failure for `evidence show`.
+    pub(crate) fn evidence_contract(path: &Path, error: &anyhow::Error) -> Self {
+        let path = path.display().to_string();
+        let message =
+            format!("evidence bundle {path} violates its declared format contract: {error:#}");
+        let outcome = RunOutcome::from_reason(
+            ReasonCode::EEvidenceContract,
+            Some(message),
+            Some(path.as_str()),
+        );
+        Self {
+            outcome,
+            source: "evidence",
+            context: serde_json::json!({ "path": path }),
+        }
+    }
+
     pub(crate) fn emit(self, machine_output_verify_enabled: Option<bool>) -> i32 {
         emit_operator_diagnostic(&self.diagnostic());
         if let Some(verify_enabled) = machine_output_verify_enabled {

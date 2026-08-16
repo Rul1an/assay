@@ -377,13 +377,24 @@ fn classify_show_error(
     error: anyhow::Error,
     fallback_context: &str,
 ) -> anyhow::Error {
-    if let Some(failure) = crate::cli_failure::CliFailure::evidence_integrity(path, &error) {
-        return failure.into();
+    // Show publishes only the three already-live identities. LIMIT / PATH /
+    // PROFILE stay on the untyped fallback; they are not this command's emit.
+    let failure = match crate::evidence_verify_reason::reason_code_for_evidence_error(&error) {
+        Some(crate::exit_codes::ReasonCode::EEvidenceIntegrity) => {
+            crate::cli_failure::CliFailure::evidence_integrity(path, &error)
+        }
+        Some(crate::exit_codes::ReasonCode::EEvidenceUnreadable) => {
+            crate::cli_failure::CliFailure::evidence_unreadable(path, &error)
+        }
+        Some(crate::exit_codes::ReasonCode::EEvidenceContract) => Some(
+            crate::cli_failure::CliFailure::evidence_contract(path, &error),
+        ),
+        Some(_) | None => None,
+    };
+    match failure {
+        Some(failure) => failure.into(),
+        None => error.context(fallback_context.to_string()),
     }
-    if let Some(failure) = crate::cli_failure::CliFailure::evidence_unreadable(path, &error) {
-        return failure.into();
-    }
-    error.context(fallback_context.to_string())
 }
 
 // TUI explore module (conditional compilation)

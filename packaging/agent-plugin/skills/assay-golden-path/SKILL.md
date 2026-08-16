@@ -94,9 +94,9 @@ Run: `assay evidence show --format json -- <bundle>`
 
 Exit: Valid `0`; Valid with verification disabled `0`; integrity failure `2`; unreadable bundle `2`; format-contract failure `2`.
 
-Stdout: Success parses as an object containing `manifest`, `events`, and `verify_mode`; the registered values are `enabled` and `disabled`, with `--no-verify` producing `disabled`. A recorded-value mismatch parses as `assay.run_summary.v1` with `E_EVIDENCE_INTEGRITY`; an unreadable path uses `E_EVIDENCE_UNREADABLE`.
+Stdout: Success parses as an object containing `manifest`, `events`, and `verify_mode`; the registered values are `enabled` and `disabled`, with `--no-verify` producing `disabled`. A recorded-value mismatch parses as `assay.run_summary.v1` with `E_EVIDENCE_INTEGRITY`; an unreadable path uses `E_EVIDENCE_UNREADABLE`; a typed `Contract*` defect uses `E_EVIDENCE_CONTRACT`.
 
-On failure: Only the four verifier codes that establish a recorded-value mismatch map to `E_EVIDENCE_INTEGRITY`; I/O, gzip, and tar failures use `E_EVIDENCE_UNREADABLE`. Format-contract failures still exit `2` with empty stdout: [gap #2412](https://github.com/Rul1an/assay/issues/2412).
+On failure: Only the four verifier codes that establish a recorded-value mismatch map to `E_EVIDENCE_INTEGRITY`; I/O, gzip, and tar failures use `E_EVIDENCE_UNREADABLE`. A typed `Contract*` defect publishes `E_EVIDENCE_CONTRACT` with a bounded prose `next_step`.
 
 ### 8. Offline profile verification
 
