@@ -116,6 +116,15 @@ fn long_secret_yaml() -> (String, String) {
     (token, yaml)
 }
 
+fn yaml_location_mark(yaml: &str) -> String {
+    let err = serde_yaml::from_str::<assay_core::model::EvalConfig>(yaml)
+        .expect_err("fixture must fail YAML parse");
+    let loc = err
+        .location()
+        .expect("serde_yaml must report a location for this fixture");
+    format!("at line {} column {}", loc.line(), loc.column())
+}
+
 fn init_project(cwd: &Path) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_assay"));
     command.current_dir(cwd).env("NO_COLOR", "1").args([
@@ -210,6 +219,16 @@ fn a_config_that_will_not_load_is_neither_checked_nor_skipped() {
         message.contains("failed to parse YAML"),
         "concise malformed YAML must stay diagnosed: {message}"
     );
+    let mark = yaml_location_mark("version: [\n");
+    assert!(
+        message.contains(&mark),
+        "short diagnosis must keep the location mark: {message}"
+    );
+    assert_eq!(
+        message.matches(&mark).count(),
+        1,
+        "short diagnosis must not duplicate the location mark: {message}"
+    );
     assert_eq!(
         document["reason_code"], "E_CFG_PARSE",
         "unloadable explicit config stays the parse class: {document}"
@@ -277,6 +296,24 @@ fn a_long_secret_parse_error_is_redacted_bounded_and_not_duplicated() {
     assert!(
         message.contains("(truncated)"),
         "truncation must be visible: {message}"
+    );
+    let mark = yaml_location_mark(&yaml);
+    assert!(
+        message.contains(&mark),
+        "location must survive the same total budget: {message}"
+    );
+    assert_eq!(
+        message.matches(&mark).count(),
+        1,
+        "location mark must appear once: {message}"
+    );
+    let trunc_at = message
+        .find("(truncated)")
+        .expect("truncation marker already asserted");
+    let mark_at = message.find(&mark).expect("location mark already asserted");
+    assert!(
+        mark_at > trunc_at,
+        "location is reserved after the bound excerpt, not swallowed by truncate: {message}"
     );
     assert!(
         message.chars().count() <= assay_core::render_safety::MAX_RENDER_FIELD + 80,

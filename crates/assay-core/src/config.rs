@@ -91,7 +91,7 @@ pub fn load_config_with_cause(
     .map_err(|e| {
         ConfigLoadError::new(format!(
             "failed to parse YAML: {}",
-            render_safe(Sink::Json, &e.to_string(), MAX_RENDER_FIELD)
+            render_yaml_parse_error(&e)
         ))
     })?;
 
@@ -251,6 +251,27 @@ tests:
     Ok(())
 }
 
+/// Bound a `serde_yaml::Error` Display through `render_safe`, but keep the
+/// `location()` mark inside the same `MAX_RENDER_FIELD` budget. Truncating the
+/// whole Display would drop the trailing `at line N column M`. Short errors
+/// already carry that suffix; strip it first so the reserved mark is not
+/// duplicated. `Sink::Json` is identity today (M5); this is not a second
+/// sanitizer and does not raise the budget.
+fn render_yaml_parse_error(err: &serde_yaml::Error) -> String {
+    let display = err.to_string();
+    let Some(loc) = err.location() else {
+        return render_safe(Sink::Json, &display, MAX_RENDER_FIELD);
+    };
+    let mark = format!(" at line {} column {}", loc.line(), loc.column());
+    let diagnosis = display
+        .strip_suffix(mark.as_str())
+        .unwrap_or(display.as_str());
+    let reserved = mark.chars().count();
+    let budget = MAX_RENDER_FIELD.saturating_sub(reserved);
+    let safe = render_safe(Sink::Json, diagnosis, budget);
+    format!("{safe}{mark}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{load_config_with, load_config_with_cause};
@@ -282,6 +303,17 @@ mod tests {
         (token, yaml)
     }
 
+    /// serde_yaml Display's trailing mark, from `Error::location()`, not from
+    /// scraping the Display string (that is what truncation drops).
+    fn yaml_location_mark(yaml: &str) -> String {
+        let err = serde_yaml::from_str::<crate::model::EvalConfig>(yaml)
+            .expect_err("fixture must fail YAML parse");
+        let loc = err
+            .location()
+            .expect("serde_yaml must report a location for this fixture");
+        format!("at line {} column {}", loc.line(), loc.column())
+    }
+
     #[test]
     fn malformed_yaml_does_not_invent_not_found() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -293,9 +325,20 @@ mod tests {
             None,
             "YAML failures must not carry a read I/O kind: {err}"
         );
+        let message = err.to_string();
         assert!(
-            err.to_string().contains("failed to parse YAML"),
-            "concise malformed YAML must stay diagnosed: {err}"
+            message.contains("failed to parse YAML"),
+            "concise malformed YAML must stay diagnosed: {message}"
+        );
+        let mark = yaml_location_mark("version: [\n");
+        assert!(
+            message.contains(&mark),
+            "short diagnosis must keep the location mark: {message}"
+        );
+        assert_eq!(
+            message.matches(&mark).count(),
+            1,
+            "short diagnosis must not duplicate the location mark: {message}"
         );
         let public = load_config_with(&path, Default::default()).expect_err("malformed yaml");
         assert_eq!(err.to_string(), public.to_string());
@@ -338,6 +381,24 @@ mod tests {
         assert!(
             message.len() < yaml.len(),
             "bounded diagnostic must be shorter than the fixture that produced it"
+        );
+        let mark = yaml_location_mark(&yaml);
+        assert!(
+            message.contains(&mark),
+            "location must survive the same total budget: {message}"
+        );
+        assert_eq!(
+            message.matches(&mark).count(),
+            1,
+            "location mark must appear once: {message}"
+        );
+        let trunc_at = message
+            .find("(truncated)")
+            .expect("truncation marker already asserted");
+        let mark_at = message.find(&mark).expect("location mark already asserted");
+        assert!(
+            mark_at > trunc_at,
+            "location is reserved after the bound excerpt, not swallowed by truncate: {message}"
         );
         assert_eq!(
             err.io_kind(),
