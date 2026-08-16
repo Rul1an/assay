@@ -204,12 +204,11 @@ fn parse_identity_version(stdout: &[u8]) -> Option<String> {
         return None;
     }
     let version = line.strip_prefix(SERVER_COMMAND)?.strip_prefix(' ')?;
-    if version.is_empty()
-        || version.contains([' ', '\t'])
-        || !version.as_bytes().first()?.is_ascii_digit()
-    {
+    if version.contains([' ', '\t']) {
         return None;
     }
+    semver::Version::parse(version).ok()?;
+    // Keep the wire token. Co-release compares this string to CARGO_PKG_VERSION.
     Some(version.to_string())
 }
 
@@ -418,6 +417,9 @@ mod tests {
             "not-a-server 1.0.0",
             "assay-mcp-server",
             "assay-mcp-server not-a-version",
+            "assay-mcp-server 1foo",
+            "assay-mcp-server 5.2",
+            "assay-mcp-server 5.2.0-",
             "LEAK_FROM_CHILD",
             trailing_junk.as_str(),
             extra_line.as_str(),
@@ -581,6 +583,18 @@ mod tests {
             parse_identity_version(format!("{}\nextra\n", matching_version_line()).as_bytes()),
             None,
             "a second line must not parse as a version"
+        );
+        for unparsable in ["1foo", "5.2", "5.2.0-"] {
+            assert_eq!(
+                parse_identity_version(format!("{SERVER_COMMAND} {unparsable}").as_bytes()),
+                None,
+                "digit-leading junk must stay unparsable: {unparsable}"
+            );
+        }
+        assert_eq!(
+            parse_identity_version(format!("{SERVER_COMMAND} 0.0.1").as_bytes()).as_deref(),
+            Some("0.0.1"),
+            "a different full SemVer must stay parseable so wrong_version remains reachable"
         );
     }
 
