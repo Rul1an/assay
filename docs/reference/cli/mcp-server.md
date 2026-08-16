@@ -94,9 +94,14 @@ the preflight JSON document.
 | `expected_version` | This CLI's `CARGO_PKG_VERSION`. |
 | `policy_root` | The path that was checked. |
 
-`actual_version` is present only after the identity probe parsed a version
-token: `wrong_version`, `invalid_root`, `startup_refused`, `startup_timeout`,
-and `ready`. It is omitted for `missing` and `unstartable`.
+`actual_version` is present exactly when the identity probe parsed a version
+token. Identity-time `missing` and `unstartable` omit it. The same phases
+reached after the second spawn retain it, as do `wrong_version`,
+`invalid_root`, `startup_refused`, `startup_timeout`, and `ready`.
+
+`ready` proves only a matching identity followed by an accepted startup
+attempt. It does not prove both resolutions selected one immutable
+executable.
 
 This is a command-local schema. It is not a `ReasonCode`, policy verdict, or
 host-discovery document.

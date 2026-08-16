@@ -120,7 +120,19 @@ fn classify(probe: &impl Probe, policy_root: &Path, expected_version: &str) -> R
             expected_version,
             Some(actual_version),
         ),
-        Ok(_) | Err(_) => finish(
+        Err(ProbeFailure::NotFound) => finish(
+            Phase::Missing,
+            policy_root,
+            expected_version,
+            Some(actual_version),
+        ),
+        Err(ProbeFailure::OtherSpawn(_)) => finish(
+            Phase::Unstartable,
+            policy_root,
+            expected_version,
+            Some(actual_version),
+        ),
+        Ok(_) => finish(
             Phase::StartupRefused,
             policy_root,
             expected_version,
@@ -823,5 +835,83 @@ mod tests {
                 .expect("startup_timeout json");
         assert_eq!(hung_doc["phase"], "startup_timeout");
         assert_eq!(hung_doc["actual_version"], expected());
+    }
+
+    #[test]
+    fn matching_identity_then_startup_not_found_is_missing_and_keeps_actual_version() {
+        let dir = dir_root();
+        let probe = FakeProbe {
+            identity: Ok(ProbeOutput {
+                exit_code: 0,
+                stdout: matching_version_line().into_bytes(),
+            }),
+            startup: Err(ProbeFailure::NotFound),
+            startups: Cell::new(0),
+        };
+        let report = classify(&probe, dir.path(), expected());
+        assert_eq!(
+            report.phase,
+            Phase::Missing,
+            "startup NotFound after a matching identity must not stay in the refused catch-all"
+        );
+        assert_eq!(probe.startups.get(), 1);
+        assert_eq!(
+            (report.message.as_str(), report.next_step.as_str()),
+            (
+                "assay-mcp-server was not found on PATH",
+                format!(
+                    "Install assay-mcp-server on PATH ({}), then re-run assay mcp preflight.",
+                    install_matching_server(expected())
+                )
+                .as_str(),
+            )
+        );
+        let document: Value =
+            serde_json::from_str(&render_json(&report)).expect("missing-after-identity json");
+        assert_eq!(document["phase"], "missing");
+        assert_eq!(
+            document["actual_version"],
+            expected(),
+            "dropping retained identity hides that --version already parsed: {document}"
+        );
+        assert_eq!(document["message"], report.message);
+        assert_eq!(document["next_step"], report.next_step);
+    }
+
+    #[test]
+    fn matching_identity_then_startup_permission_denied_is_unstartable_and_keeps_actual_version() {
+        let dir = dir_root();
+        let probe = FakeProbe {
+            identity: Ok(ProbeOutput {
+                exit_code: 0,
+                stdout: matching_version_line().into_bytes(),
+            }),
+            startup: Err(ProbeFailure::OtherSpawn(ErrorKind::PermissionDenied)),
+            startups: Cell::new(0),
+        };
+        let report = classify(&probe, dir.path(), expected());
+        assert_eq!(
+            report.phase,
+            Phase::Unstartable,
+            "startup OtherSpawn after a matching identity must not stay in the refused catch-all"
+        );
+        assert_eq!(probe.startups.get(), 1);
+        assert_eq!(
+            (report.message.as_str(), report.next_step.as_str()),
+            (
+                "assay-mcp-server on PATH could not be started or did not report a version",
+                "Replace the assay-mcp-server on PATH with a working binary from the same Assay release.",
+            )
+        );
+        let document: Value =
+            serde_json::from_str(&render_json(&report)).expect("unstartable-after-identity json");
+        assert_eq!(document["phase"], "unstartable");
+        assert_eq!(
+            document["actual_version"],
+            expected(),
+            "dropping retained identity hides that --version already parsed: {document}"
+        );
+        assert_eq!(document["message"], report.message);
+        assert_eq!(document["next_step"], report.next_step);
     }
 }
