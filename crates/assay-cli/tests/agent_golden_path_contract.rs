@@ -646,7 +646,7 @@ fn bundle_inspection_json_publishes_typed_failures_on_stdout() {
     );
     assert!(contract_failure.stdout.is_empty());
     assert!(String::from_utf8_lossy(&contract_failure.stderr).contains("ContractInvalidJson"));
-    assert_gap(&expected_contract_failure, 2219);
+    assert_gap(&expected_contract_failure, 2412);
 }
 
 #[test]
@@ -662,7 +662,7 @@ fn evidence_inspection_contract_discloses_the_deferred_format_contract_gap() {
         .as_str()
         .expect("evidence inspection failure summary");
     assert!(
-        failure_summary.contains("gap #2219"),
+        failure_summary.contains("gap #2412"),
         "the residual format-contract failure must remain disclosed"
     );
     assert!(

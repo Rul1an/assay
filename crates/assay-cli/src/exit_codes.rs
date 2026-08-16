@@ -86,6 +86,11 @@ pub enum ReasonCode {
     // one file byte for byte once flowed; a second hand-written copy here could contradict it.
     #[doc = include_str!("exit_codes/evidence_integrity_boundary.md")]
     EEvidenceIntegrity,
+    // Companion to `EEvidenceIntegrity` for typed format-contract defects. The boundary is
+    // stated once in `exit_codes/evidence_contract_boundary.md` and transported here and into
+    // the SPEC-PR-Gate-Outputs-v1 §5.1 row.
+    #[doc = include_str!("exit_codes/evidence_contract_boundary.md")]
+    EEvidenceContract,
     /// Evidence bundle could not be opened or read to completion. This establishes no content
     /// mismatch; it is the companion to `EEvidenceIntegrity` for I/O/archive-read failures.
     EEvidenceUnreadable,
@@ -207,6 +212,7 @@ impl ReasonCode {
             | ReasonCode::EReplayLimitExceeded
             | ReasonCode::EReplayMissingDependency
             | ReasonCode::EEvidenceIntegrity
+            | ReasonCode::EEvidenceContract
             | ReasonCode::EEvidenceUnreadable
             | ReasonCode::EInvalidArgs => EXIT_CONFIG_ERROR,
 
@@ -263,6 +269,7 @@ impl ReasonCode {
             ReasonCode::EReplayMissingDependency => "E_REPLAY_MISSING_DEPENDENCY",
             ReasonCode::EReplayLimitExceeded => "E_REPLAY_LIMIT_EXCEEDED",
             ReasonCode::EEvidenceIntegrity => "E_EVIDENCE_INTEGRITY",
+            ReasonCode::EEvidenceContract => "E_EVIDENCE_CONTRACT",
             ReasonCode::EEvidenceUnreadable => "E_EVIDENCE_UNREADABLE",
             ReasonCode::EInvalidArgs => "E_INVALID_ARGS",
             ReasonCode::EJudgeUnavailable => "E_JUDGE_UNAVAILABLE",
@@ -311,6 +318,13 @@ impl ReasonCode {
                 // as a remedy. Nothing this side of the producer can repair the content.
                 "Obtain an undamaged bundle from its producer; the content this bundle carries \
                  does not match what it records"
+                    .to_string()
+            }
+            ReasonCode::EEvidenceContract => {
+                // Prose, not a command. Re-verifying the same bundle only repeats the same
+                // format-contract failure. Conforming evidence has to come from the producer.
+                "Obtain or reissue evidence that conforms to the declared bundle contract; \
+                 this bundle was readable and does not satisfy that contract"
                     .to_string()
             }
             ReasonCode::EEvidenceUnreadable => {
@@ -507,6 +521,7 @@ mod tests {
             ReasonCode::EEvidenceIntegrity.exit_code(),
             EXIT_CONFIG_ERROR
         );
+        assert_eq!(ReasonCode::EEvidenceContract.exit_code(), EXIT_CONFIG_ERROR);
 
         // Infra errors map to 3
         assert_eq!(ReasonCode::EJudgeUnavailable.exit_code(), EXIT_INFRA_ERROR);
@@ -560,6 +575,33 @@ mod tests {
             ReasonCode::EEvidenceUnreadable.exit_code_for(ExitCodeVersion::V2),
             EXIT_CONFIG_ERROR
         );
+        assert_eq!(
+            ReasonCode::EEvidenceContract.exit_code_for(ExitCodeVersion::V1),
+            EXIT_CONFIG_ERROR
+        );
+        assert_eq!(
+            ReasonCode::EEvidenceContract.exit_code_for(ExitCodeVersion::V2),
+            EXIT_CONFIG_ERROR
+        );
+    }
+
+    #[test]
+    fn evidence_contract_remediation_promises_no_command() {
+        let next_step = ReasonCode::EEvidenceContract.next_step(None);
+        assert!(!next_step.is_empty(), "the remediation must not be empty");
+        assert!(
+            !next_step.starts_with("Run:") && !next_step.starts_with("Run argv:"),
+            "contract remediation must stay prose, not an executable claim: {next_step}"
+        );
+        assert!(
+            !next_step.contains("assay evidence verify"),
+            "re-verifying the same bundle repeats the same failure, so naming that command \
+             would publish a diagnostic as a remedy: {next_step}"
+        );
+        assert_eq!(
+            next_step,
+            ReasonCode::EEvidenceContract.next_step(Some("bundle; rm -rf /.tar.gz"))
+        );
     }
 
     #[test]
@@ -599,6 +641,10 @@ mod tests {
         assert_eq!(
             ReasonCode::EEvidenceIntegrity.as_str(),
             "E_EVIDENCE_INTEGRITY"
+        );
+        assert_eq!(
+            ReasonCode::EEvidenceContract.as_str(),
+            "E_EVIDENCE_CONTRACT"
         );
         assert_eq!(
             ReasonCode::EEvidenceUnreadable.as_str(),
@@ -820,6 +866,7 @@ mod tests {
             | ReasonCode::EReplayMissingDependency
             | ReasonCode::EReplayLimitExceeded
             | ReasonCode::EEvidenceIntegrity
+            | ReasonCode::EEvidenceContract
             | ReasonCode::EInvalidArgs
             | ReasonCode::EJudgeUnavailable
             | ReasonCode::ERateLimit
@@ -847,6 +894,7 @@ mod tests {
             ReasonCode::EReplayMissingDependency,
             ReasonCode::EReplayLimitExceeded,
             ReasonCode::EEvidenceIntegrity,
+            ReasonCode::EEvidenceContract,
             ReasonCode::EEvidenceUnreadable,
             ReasonCode::EInvalidArgs,
             ReasonCode::EJudgeUnavailable,
