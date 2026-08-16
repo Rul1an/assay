@@ -607,4 +607,221 @@ mod tests {
         assert!(dir.path().is_dir());
         let _ = fs::metadata(dir.path());
     }
+
+    #[test]
+    fn advertised_probe_bounds_are_two_seconds_and_eight_kib_per_stream() {
+        assert_eq!(
+            PROBE_DEADLINE,
+            Duration::from_secs(2),
+            "changing PROBE_DEADLINE unpins the advertised 2-second bound"
+        );
+        assert_eq!(
+            PROBE_OUTPUT_CAP,
+            8 * 1024,
+            "changing PROBE_OUTPUT_CAP unpins the advertised 8 KiB per-stream bound"
+        );
+    }
+
+    #[test]
+    fn recovery_strings_are_pinned_for_every_phase() {
+        let expected = expected();
+        let install = install_matching_server(expected);
+        let cases = [
+            (
+                Phase::Missing,
+                None,
+                "assay-mcp-server was not found on PATH".to_string(),
+                format!(
+                    "Install assay-mcp-server on PATH ({install}), then re-run assay mcp preflight."
+                ),
+            ),
+            (
+                Phase::Unstartable,
+                None,
+                "assay-mcp-server on PATH could not be started or did not report a version"
+                    .to_string(),
+                "Replace the assay-mcp-server on PATH with a working binary from the same Assay release."
+                    .to_string(),
+            ),
+            (
+                Phase::WrongVersion,
+                Some("0.0.1"),
+                format!("assay-mcp-server reported 0.0.1 but this CLI expects {expected}"),
+                format!("Install assay-mcp-server {expected} on PATH ({install})."),
+            ),
+            (
+                Phase::InvalidRoot,
+                Some(expected),
+                "policy root must be an existing directory".to_string(),
+                "Pass --policy-root to an existing directory.".to_string(),
+            ),
+            (
+                Phase::StartupRefused,
+                Some(expected),
+                "assay-mcp-server refused to start with this policy root".to_string(),
+                "Unset ASSAY_AUTH_* and confirm the server can start with this --policy-root."
+                    .to_string(),
+            ),
+            (
+                Phase::StartupTimeout,
+                Some(expected),
+                "assay-mcp-server did not exit before the preflight deadline".to_string(),
+                "Retry after checking that assay-mcp-server is not blocked at startup.".to_string(),
+            ),
+            (
+                Phase::Ready,
+                Some(expected),
+                "assay-mcp-server on PATH matches this CLI and accepted the policy root"
+                    .to_string(),
+                String::new(),
+            ),
+        ];
+        for (phase, actual, message, next_step) in cases {
+            assert_eq!(
+                diagnosis(phase, expected, actual),
+                (message.to_string(), next_step),
+                "recovery strings drifted for {}",
+                phase.as_str()
+            );
+        }
+    }
+
+    fn json_keys(document: &Value) -> Vec<String> {
+        document
+            .as_object()
+            .expect("object")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    fn stable_v0_keys() -> [&'static str; 6] {
+        [
+            "schema",
+            "phase",
+            "message",
+            "next_step",
+            "expected_version",
+            "policy_root",
+        ]
+    }
+
+    #[test]
+    fn json_v0_omits_actual_version_until_identity_parses() {
+        let dir = dir_root();
+        let missing = FakeProbe {
+            identity: Err(ProbeFailure::NotFound),
+            startup: Ok(ProbeOutput {
+                exit_code: 0,
+                stdout: Vec::new(),
+            }),
+            startups: Cell::new(0),
+        };
+        let missing_doc: Value =
+            serde_json::from_str(&render_json(&classify(&missing, dir.path(), expected())))
+                .expect("missing json");
+        let mut missing_keys = json_keys(&missing_doc);
+        missing_keys.sort();
+        let mut expected_missing: Vec<String> =
+            stable_v0_keys().into_iter().map(str::to_string).collect();
+        expected_missing.sort();
+        assert_eq!(
+            missing_keys, expected_missing,
+            "missing must not grow the v0 field set or add actual_version: {missing_doc}"
+        );
+        assert!(missing_doc.get("actual_version").is_none());
+
+        let unstartable = FakeProbe {
+            identity: Err(ProbeFailure::Timeout),
+            startup: Ok(ProbeOutput {
+                exit_code: 0,
+                stdout: Vec::new(),
+            }),
+            startups: Cell::new(0),
+        };
+        let unstartable_doc: Value = serde_json::from_str(&render_json(&classify(
+            &unstartable,
+            dir.path(),
+            expected(),
+        )))
+        .expect("unstartable json");
+        assert!(
+            unstartable_doc.get("actual_version").is_none(),
+            "unstartable must omit actual_version: {unstartable_doc}"
+        );
+        let mut unstartable_keys = json_keys(&unstartable_doc);
+        unstartable_keys.sort();
+        assert_eq!(unstartable_keys, expected_missing);
+    }
+
+    #[test]
+    fn json_v0_includes_actual_version_after_a_parsed_identity() {
+        let dir = dir_root();
+        let wrong = FakeProbe::identity_ok(&format!("{SERVER_COMMAND} 0.0.1"));
+        let wrong_doc: Value =
+            serde_json::from_str(&render_json(&classify(&wrong, dir.path(), expected())))
+                .expect("wrong_version json");
+        assert_eq!(wrong_doc["actual_version"], "0.0.1");
+        let mut wrong_keys = json_keys(&wrong_doc);
+        wrong_keys.sort();
+        let mut expected_with_actual: Vec<String> = stable_v0_keys()
+            .into_iter()
+            .chain(std::iter::once("actual_version"))
+            .map(str::to_string)
+            .collect();
+        expected_with_actual.sort();
+        assert_eq!(
+            wrong_keys, expected_with_actual,
+            "parsed identity must add only actual_version: {wrong_doc}"
+        );
+
+        let ready = FakeProbe::identity_ok(&matching_version_line());
+        let ready_doc: Value =
+            serde_json::from_str(&render_json(&classify(&ready, dir.path(), expected())))
+                .expect("ready json");
+        assert_eq!(ready_doc["actual_version"], expected());
+        let mut ready_keys = json_keys(&ready_doc);
+        ready_keys.sort();
+        assert_eq!(ready_keys, expected_with_actual);
+        assert_eq!(ready_doc["schema"], SCHEMA);
+
+        let file = tempfile::NamedTempFile::new().expect("file root");
+        let invalid = FakeProbe::identity_ok(&matching_version_line());
+        let invalid_doc: Value =
+            serde_json::from_str(&render_json(&classify(&invalid, file.path(), expected())))
+                .expect("invalid_root json");
+        assert_eq!(invalid_doc["phase"], "invalid_root");
+        assert_eq!(invalid_doc["actual_version"], expected());
+
+        let refused = FakeProbe {
+            identity: Ok(ProbeOutput {
+                exit_code: 0,
+                stdout: matching_version_line().into_bytes(),
+            }),
+            startup: Ok(ProbeOutput {
+                exit_code: 1,
+                stdout: Vec::new(),
+            }),
+            startups: Cell::new(0),
+        };
+        let refused_doc: Value =
+            serde_json::from_str(&render_json(&classify(&refused, dir.path(), expected())))
+                .expect("startup_refused json");
+        assert_eq!(refused_doc["phase"], "startup_refused");
+        assert_eq!(refused_doc["actual_version"], expected());
+
+        let hung = FakeProbe {
+            identity: Ok(ProbeOutput {
+                exit_code: 0,
+                stdout: matching_version_line().into_bytes(),
+            }),
+            startup: Err(ProbeFailure::Timeout),
+            startups: Cell::new(0),
+        };
+        let hung_doc: Value =
+            serde_json::from_str(&render_json(&classify(&hung, dir.path(), expected())))
+                .expect("startup_timeout json");
+        assert_eq!(hung_doc["phase"], "startup_timeout");
+        assert_eq!(hung_doc["actual_version"], expected());
+    }
 }
