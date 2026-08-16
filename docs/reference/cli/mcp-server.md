@@ -77,6 +77,30 @@ assay mcp preflight [--policy-root .] [--format terminal|json]
 
 Exit `0` only for `ready`. Every other phase exits `2`.
 
+Both child probes use a 2-second wall-clock deadline and cap each of stdout
+and stderr at 8 KiB before materialization. Child output is never copied into
+the preflight JSON document.
+
+### JSON document (`assay.mcp_preflight.v0`)
+
+`--format json` prints one object. These fields are always present:
+
+| Field | Meaning |
+|--------|---------|
+| `schema` | Always `assay.mcp_preflight.v0`. |
+| `phase` | One of `missing`, `unstartable`, `wrong_version`, `invalid_root`, `startup_refused`, `startup_timeout`, `ready`. |
+| `message` | Stable diagnosis for that phase. |
+| `next_step` | Recovery string; empty only for `ready`. |
+| `expected_version` | This CLI's `CARGO_PKG_VERSION`. |
+| `policy_root` | The path that was checked. |
+
+`actual_version` is present only after the identity probe parsed a version
+token: `wrong_version`, `invalid_root`, `startup_refused`, `startup_timeout`,
+and `ready`. It is omitted for `missing` and `unstartable`.
+
+This is a command-local schema. It is not a `ReasonCode`, policy verdict, or
+host-discovery document.
+
 ---
 
 ## 4) `assay-mcp-server` (separate binary)

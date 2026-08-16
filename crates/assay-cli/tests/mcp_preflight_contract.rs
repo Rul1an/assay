@@ -41,6 +41,39 @@ fn policy_root_dot_format_json_is_one_preflight_document() {
     assert_eq!(document["phase"], "missing");
     assert_eq!(document["expected_version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(document["policy_root"], ".");
+    assert!(
+        document.get("actual_version").is_none(),
+        "missing must omit actual_version: {document}"
+    );
+    let mut keys: Vec<_> = document
+        .as_object()
+        .expect("object")
+        .keys()
+        .cloned()
+        .collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "expected_version",
+            "message",
+            "next_step",
+            "phase",
+            "policy_root",
+            "schema",
+        ]
+    );
+    assert_eq!(
+        document["message"],
+        "assay-mcp-server was not found on PATH"
+    );
+    assert_eq!(
+        document["next_step"],
+        format!(
+            "Install assay-mcp-server on PATH (cargo install assay-mcp-server --version {} --locked), then re-run assay mcp preflight.",
+            env!("CARGO_PKG_VERSION")
+        )
+    );
 }
 
 #[test]
