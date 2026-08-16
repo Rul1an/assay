@@ -11,7 +11,9 @@
 //! The output is a claim matrix, never a score. Refuted claims still exit 0: the report is the
 //! product and consumers gate on cells; only integrity failure or an invalid verdict exits 2.
 
-use crate::evidence_verify_reason::reason_code_for_evidence_error;
+use crate::evidence_verify_reason::{
+    reason_code_for_evidence_error, PROFILE_EVIDENCE_REASON_CODES,
+};
 use crate::exit_codes::{self, ReasonCode};
 use anyhow::{Context, Result};
 use assay_evidence::bundle::BundleReader;
@@ -128,7 +130,8 @@ pub struct Report {
     /// Verifier diagnostic outside the claim lattice. Absent on success.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason_code: Option<&'static str>,
-    /// Context-invariant prose remediation. Absent on success.
+    /// Shell-free remediation. Unreadable I/O uses caller-argv JSON; other
+    /// codes stay prose. Absent on success.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_step: Option<String>,
 }
@@ -189,11 +192,12 @@ pub fn cmd_verify_privileged_mcp_action(args: VerifyPrivilegedMcpActionArgs) -> 
 /// Stage 1 + stages 2-4 over one bundle path. Open and read failures are the same
 /// stage-1 report: never a usage-error envelope. Typed `VerifyError` is
 /// authoritative; untyped I/O (including a directory path) is Unreadable.
-/// `findings.detail` may retain the caller argv path; `next_step` is path-free.
+/// `findings.detail` may retain the caller argv path. Unreadable `next_step` is
+/// shell-free caller-argv via `ReasonCode::next_step`, not a second remediation.
 pub fn verify_bundle_report(bundle: &Path) -> Report {
     match read_bundle_events(bundle) {
         Ok(events) => profile_report(&events),
-        Err(err) => integrity_fail_report(&err),
+        Err(err) => integrity_fail_report(&err, bundle),
     }
 }
 
@@ -202,11 +206,16 @@ fn read_bundle_events(bundle: &Path) -> anyhow::Result<Vec<EvidenceEvent>> {
         .with_context(|| format!("failed to open bundle {}", bundle.display()))?;
     // Stage 1: BundleReader::open runs the full shipped bundle verification
     // (verify_bundle_with_limits with default limits) before exposing any event.
-    let reader = BundleReader::open(file)?;
-    reader.events_vec()
+    // Context names the caller argv without replacing a typed VerifyError in the chain.
+    let reader = BundleReader::open(file)
+        .with_context(|| format!("failed to read bundle {}", bundle.display()))?;
+    reader
+        .events_vec()
+        .with_context(|| format!("failed to read events from bundle {}", bundle.display()))
 }
 
-fn stage1_fail_report(detail: String, reason: Option<ReasonCode>) -> Report {
+fn stage1_fail_report(detail: String, reason: ReasonCode, bundle: &Path) -> Report {
+    // Caller argv is safe to republish shell-free, unlike discovered host paths.
     Report {
         schema: REPORT_SCHEMA,
         profile: PROFILE_ID,
@@ -218,13 +227,21 @@ fn stage1_fail_report(detail: String, reason: Option<ReasonCode>) -> Report {
             detail,
         }],
         non_claims: REPORT_NON_CLAIMS,
-        reason_code: reason.map(|reason| reason.as_str()),
-        next_step: reason.map(|reason| reason.next_step(None)),
+        reason_code: Some(reason.as_str()),
+        next_step: Some(reason.next_step(bundle.to_str())),
     }
 }
 
-fn integrity_fail_report(err: &anyhow::Error) -> Report {
-    stage1_fail_report(format!("{err:#}"), reason_code_for_evidence_error(err))
+fn integrity_fail_report(err: &anyhow::Error, bundle: &Path) -> Report {
+    let reason = reason_code_for_evidence_error(err)
+        .expect("stage-1 evidence errors must map to a ReasonCode");
+    debug_assert!(
+        PROFILE_EVIDENCE_REASON_CODES
+            .iter()
+            .any(|(_, owned)| *owned == reason),
+        "stage-1 reason must be one of the binary-owned profile codes"
+    );
+    stage1_fail_report(format!("{err:#}"), reason, bundle)
 }
 
 /// Stages 2-4 over the events of a bundle that already passed stage 1.
@@ -924,7 +941,9 @@ mod tests {
             ErrorCode::LimitJsonDepth,
         ] {
             let err = anyhow::Error::new(VerifyError::new(ErrorClass::Limits, code, "ceiling"));
-            let value = serde_json::to_value(integrity_fail_report(&err)).unwrap();
+            let value =
+                serde_json::to_value(integrity_fail_report(&err, Path::new("synthetic.bundle")))
+                    .unwrap();
             assert_eq!(value["reason_code"], "E_EVIDENCE_LIMIT_EXCEEDED", "{code}");
             assert_ne!(value["reason_code"], "E_EVIDENCE_INTEGRITY", "{code}");
             assert_ne!(value["reason_code"], "E_EVIDENCE_CONTRACT", "{code}");
@@ -941,7 +960,11 @@ mod tests {
             ErrorCode::SecurityPathTraversal,
             "path",
         ));
-        let path_value = serde_json::to_value(integrity_fail_report(&path_err)).unwrap();
+        let path_value = serde_json::to_value(integrity_fail_report(
+            &path_err,
+            Path::new("synthetic.bundle"),
+        ))
+        .unwrap();
         assert_eq!(path_value["reason_code"], "E_EVIDENCE_PATH_REJECTED");
         assert_ne!(path_value["reason_code"], "E_EVIDENCE_LIMIT_EXCEEDED");
         assert!(
@@ -950,13 +973,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn missing_bundle_path_is_unreadable_stage1_report() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let missing = tmp.path().join("missing.bundle.tar.gz");
-        assert!(!missing.exists(), "the missing-bundle child must not exist");
-        let report = verify_bundle_report(&missing);
-        let value = serde_json::to_value(&report).unwrap();
+    fn assert_unreadable_stage1(report: &Report, bundle: &Path) {
+        let value = serde_json::to_value(report).unwrap();
+        let path = bundle.to_str().expect("utf-8 test path");
         assert_eq!(value["schema"], REPORT_SCHEMA);
         assert_ne!(value["schema"], "assay.run_summary.v1");
         assert_eq!(value["profile"], PROFILE_ID);
@@ -964,29 +983,47 @@ mod tests {
         assert!(value.get("verdict").is_none());
         assert!(value.get("claims").is_none());
         assert_eq!(value["reason_code"], "E_EVIDENCE_UNREADABLE");
-        let expected_next = ReasonCode::EEvidenceUnreadable.next_step(None);
+        let detail = value["findings"][0]["detail"]
+            .as_str()
+            .expect("bundle_integrity finding detail");
+        assert!(
+            detail.contains(path),
+            "findings.detail must contain the caller bundle argv: {detail}"
+        );
+        // Caller argv is safe to republish shell-free, unlike discovered host paths.
+        let expected_next = ReasonCode::EEvidenceUnreadable.next_step(Some(path));
         assert_eq!(value["next_step"].as_str(), Some(expected_next.as_str()));
+        assert!(
+            expected_next.starts_with("Run argv:"),
+            "unreadable next_step must be JSON argv, not a shell string"
+        );
+        assert!(
+            expected_next.contains(r#""--""#),
+            "unreadable next_step must keep the positional separator: {expected_next}"
+        );
         assert_eq!(value["non_claims"], json!(REPORT_NON_CLAIMS.to_vec()));
+    }
+
+    #[test]
+    fn missing_bundle_path_is_unreadable_stage1_report() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let missing = tmp.path().join("missing.bundle.tar.gz");
+        assert!(!missing.exists(), "the missing-bundle child must not exist");
+        assert_unreadable_stage1(&verify_bundle_report(&missing), &missing);
     }
 
     #[test]
     fn directory_bundle_path_is_unreadable_stage1_report() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let report = verify_bundle_report(tmp.path());
-        let value = serde_json::to_value(&report).unwrap();
-        assert_eq!(value["schema"], REPORT_SCHEMA);
-        assert_ne!(value["schema"], "assay.run_summary.v1");
-        assert_eq!(value["bundle_integrity"], "fail");
-        assert!(value.get("verdict").is_none());
-        assert!(value.get("claims").is_none());
-        assert_eq!(value["reason_code"], "E_EVIDENCE_UNREADABLE");
-        let expected_next = ReasonCode::EEvidenceUnreadable.next_step(None);
-        assert_eq!(value["next_step"].as_str(), Some(expected_next.as_str()));
-        assert!(
-            !expected_next.contains(tmp.path().to_str().unwrap_or_default()),
-            "next_step must stay path-free"
-        );
-        assert_eq!(value["non_claims"], json!(REPORT_NON_CLAIMS.to_vec()));
+        assert_unreadable_stage1(&verify_bundle_report(tmp.path()), tmp.path());
+    }
+
+    #[test]
+    fn post_open_unreadable_bundle_detail_contains_caller_argv() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let garbage = tmp.path().join("not-a-bundle.tar.gz");
+        std::fs::write(&garbage, b"not a gzip archive").expect("write garbage bundle");
+        assert_unreadable_stage1(&verify_bundle_report(&garbage), &garbage);
     }
 
     #[test]

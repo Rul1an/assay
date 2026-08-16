@@ -8,6 +8,28 @@ use assay_evidence::{ErrorClass, ErrorCode, VerifyError};
 
 use crate::exit_codes::ReasonCode;
 
+/// Binary-owned privileged-action evidence reason codes, in publication order.
+///
+/// The golden-path contract extracts these registry strings. Do not duplicate
+/// the list in tests.
+pub(crate) const PROFILE_EVIDENCE_REASON_CODES: &[(&str, ReasonCode)] = &[
+    ("E_EVIDENCE_INTEGRITY", ReasonCode::EEvidenceIntegrity),
+    ("E_EVIDENCE_CONTRACT", ReasonCode::EEvidenceContract),
+    ("E_EVIDENCE_UNREADABLE", ReasonCode::EEvidenceUnreadable),
+    (
+        "E_EVIDENCE_PROFILE_INVALID",
+        ReasonCode::EEvidenceProfileInvalid,
+    ),
+    (
+        "E_EVIDENCE_LIMIT_EXCEEDED",
+        ReasonCode::EEvidenceLimitExceeded,
+    ),
+    (
+        "E_EVIDENCE_PATH_REJECTED",
+        ReasonCode::EEvidencePathRejected,
+    ),
+];
+
 /// Map a typed verifier error to the registered evidence reason, or `None` when the
 /// class+code pair is outside the normative mapping. Reachability of a code on one
 /// command is not this function's question.
@@ -84,7 +106,9 @@ pub(crate) fn reason_code_for_evidence_error(error: &anyhow::Error) -> Option<Re
 
 #[cfg(test)]
 mod tests {
-    use super::{reason_code_for_evidence_error, reason_code_for_verify_error};
+    use super::{
+        reason_code_for_evidence_error, reason_code_for_verify_error, PROFILE_EVIDENCE_REASON_CODES,
+    };
     use crate::exit_codes::ReasonCode;
     use assay_evidence::{ErrorClass, ErrorCode, VerifyError};
 
@@ -210,6 +234,13 @@ mod tests {
                 None,
                 "{code} under Limits must not fold into PATH_REJECTED"
             );
+        }
+    }
+
+    #[test]
+    fn profile_evidence_reason_codes_match_as_str() {
+        for (code, reason) in PROFILE_EVIDENCE_REASON_CODES {
+            assert_eq!(*code, reason.as_str());
         }
     }
 

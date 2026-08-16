@@ -31,9 +31,11 @@ const CONTRACT_NEXT_STEP: &str = "Obtain or reissue evidence that conforms to th
 const PROFILE_INVALID_NEXT_STEP: &str = "Obtain or reissue evidence whose records satisfy the named evidence profile; per-violation details are in findings";
 const LIMIT_NEXT_STEP: &str = "Verification stopped at a configured ceiling and reached no verdict; obtain a smaller bundle from its producer, or raise the ceiling deliberately and repeat the inspection";
 const PATH_NEXT_STEP: &str = "An archive member path was refused as unsafe to extract; obtain a bundle whose member paths stay inside the extraction root from its producer";
-/// `ReasonCode::EEvidenceUnreadable.next_step(None)` — placeholder operand, no local path.
-const UNREADABLE_NEXT_STEP: &str =
-    r#"Run argv: ["assay","evidence","show","--format","json","--","<bundle>"]"#;
+/// `ReasonCode::EEvidenceUnreadable.next_step(Some(path))` — shell-free caller-argv.
+fn unreadable_next_step(path: &Path) -> String {
+    let path = path.to_str().expect("utf-8 test path");
+    format!(r#"Run argv: ["assay","evidence","show","--format","json","--","{path}"]"#)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExpectedDiagnosis {
@@ -486,13 +488,22 @@ fn assert_unreadable_profile_report(report: &Value, exit_code: i32, path: &Path)
     assert!(report.get("verdict").is_none());
     assert!(report.get("claims").is_none());
     assert_eq!(report["reason_code"], "E_EVIDENCE_UNREADABLE");
+    let argv_path = path.to_str().expect("utf-8 test path");
+    let detail = report["findings"][0]["detail"]
+        .as_str()
+        .expect("bundle_integrity finding detail");
+    assert!(
+        detail.contains(argv_path),
+        "findings.detail must contain the caller bundle argv: {detail}"
+    );
     let next_step = report["next_step"]
         .as_str()
         .expect("unreadable path must publish next_step");
-    assert_eq!(next_step, UNREADABLE_NEXT_STEP);
+    // Caller argv is safe to republish shell-free, unlike discovered host paths.
+    assert_eq!(next_step, unreadable_next_step(path));
     assert!(
-        !next_step.contains(path.to_str().unwrap_or_default()),
-        "next_step must not leak the local path: {next_step}"
+        next_step.starts_with("Run argv:") && next_step.contains(r#""--""#),
+        "unreadable next_step must be concrete JSON argv with a separator: {next_step}"
     );
     assert_eq!(
         report["non_claims"],
@@ -514,6 +525,15 @@ fn directory_bundle_publishes_unreadable_on_the_profile_report() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let (report, exit_code) = verify(tmp.path());
     assert_unreadable_profile_report(&report, exit_code, tmp.path());
+}
+
+#[test]
+fn post_open_unreadable_bundle_detail_contains_caller_argv() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let garbage = tmp.path().join("not-a-bundle.tar.gz");
+    std::fs::write(&garbage, b"not a gzip archive").expect("write garbage bundle");
+    let (report, exit_code) = verify(&garbage);
+    assert_unreadable_profile_report(&report, exit_code, &garbage);
 
     let show = Command::cargo_bin("assay")
         .expect("assay binary")
