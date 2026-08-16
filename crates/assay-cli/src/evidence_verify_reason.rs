@@ -7,8 +7,9 @@ use assay_evidence::{ErrorClass, ErrorCode, VerifyError};
 
 use crate::exit_codes::ReasonCode;
 
-/// Map a typed verifier error to the registered evidence reason, or `None` when the pair
-/// is outside this command's reachable completeness set.
+/// Map a typed verifier error to the registered evidence reason, or `None` when the
+/// class+code pair is outside the normative mapping. Reachability of a code on one
+/// command is not this function's question.
 pub(crate) fn reason_code_for_verify_error(error: &VerifyError) -> Option<ReasonCode> {
     match (error.class, error.code) {
         (
@@ -48,9 +49,10 @@ pub(crate) fn reason_code_for_verify_error(error: &VerifyError) -> Option<Reason
             | ErrorCode::LimitPathLength
             | ErrorCode::LimitJsonDepth,
         ) => Some(ReasonCode::EEvidenceLimitExceeded),
-        (ErrorClass::Security, ErrorCode::SecurityPathTraversal) => {
-            Some(ReasonCode::EEvidencePathRejected)
-        }
+        (
+            ErrorClass::Security,
+            ErrorCode::SecurityPathTraversal | ErrorCode::SecurityAbsolutePath,
+        ) => Some(ReasonCode::EEvidencePathRejected),
         _ => None,
     }
 }
@@ -163,23 +165,26 @@ mod tests {
     }
 
     #[test]
-    fn security_path_traversal_maps_to_path_rejected() {
-        assert_eq!(
-            classify(ErrorClass::Security, ErrorCode::SecurityPathTraversal),
-            Some(ReasonCode::EEvidencePathRejected)
-        );
-        assert_ne!(
-            classify(ErrorClass::Security, ErrorCode::SecurityPathTraversal),
-            Some(ReasonCode::EEvidenceLimitExceeded)
-        );
-    }
-
-    #[test]
-    fn security_absolute_path_is_not_required_for_completeness() {
-        assert_eq!(
-            classify(ErrorClass::Security, ErrorCode::SecurityAbsolutePath),
-            None,
-            "SecurityAbsolutePath is enum-only; do not invent an emission"
-        );
+    fn every_declared_security_star_maps_to_path_rejected_only_with_the_security_class() {
+        for code in [
+            ErrorCode::SecurityPathTraversal,
+            ErrorCode::SecurityAbsolutePath,
+        ] {
+            assert_eq!(
+                classify(ErrorClass::Security, code),
+                Some(ReasonCode::EEvidencePathRejected),
+                "{code}"
+            );
+            assert_ne!(
+                classify(ErrorClass::Security, code),
+                Some(ReasonCode::EEvidenceLimitExceeded),
+                "{code}"
+            );
+            assert_eq!(
+                classify(ErrorClass::Limits, code),
+                None,
+                "{code} under Limits must not fold into PATH_REJECTED"
+            );
+        }
     }
 }

@@ -350,7 +350,8 @@ fn write_named_member_bundle(dir: &Path, member: &str) -> PathBuf {
 }
 
 /// Synthetic command-level cases sit beside the 14 corpus vectors. They do not fold
-/// Limits/Security into Integrity/Contract/Unreadable. SecurityAbsolutePath is enum-only.
+/// Limits/Security into Integrity/Contract/Unreadable. Command-level drive covers the
+/// reachable traversal code; AbsolutePath is a non-claim here.
 #[test]
 fn synthetic_limit_and_path_cases_consume_their_own_codes() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -410,11 +411,15 @@ fn security_absolute_path_is_not_required_for_command_completeness() {
     let errors = include_str!("../../assay-evidence/src/bundle/writer_next/errors.rs");
     assert!(
         errors.contains("SecurityAbsolutePath,"),
-        "the enum still declares the unreachable SecurityAbsolutePath variant"
+        "the enum still declares SecurityAbsolutePath"
     );
     let verify_src = include_str!("../../assay-evidence/src/bundle/writer_next/verify.rs");
     assert!(
+        verify_src.contains("SecurityPathTraversal"),
+        "verify.rs must still construct the reachable SecurityPathTraversal code"
+    );
+    assert!(
         !verify_src.contains("SecurityAbsolutePath"),
-        "do not invent a SecurityAbsolutePath emission; PATH_REJECTED completeness is SecurityPathTraversal"
+        "verify.rs today constructs SecurityPathTraversal only; this is not a reachability claim for AbsolutePath"
     );
 }

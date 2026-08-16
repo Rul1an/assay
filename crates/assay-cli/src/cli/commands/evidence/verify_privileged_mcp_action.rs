@@ -938,17 +938,6 @@ mod tests {
         let path_value = serde_json::to_value(integrity_fail_report(&path_err)).unwrap();
         assert_eq!(path_value["reason_code"], "E_EVIDENCE_PATH_REJECTED");
         assert_ne!(path_value["reason_code"], "E_EVIDENCE_LIMIT_EXCEEDED");
-
-        let absolute = anyhow::Error::new(VerifyError::new(
-            ErrorClass::Security,
-            ErrorCode::SecurityAbsolutePath,
-            "absolute",
-        ));
-        let absolute_value = serde_json::to_value(integrity_fail_report(&absolute)).unwrap();
-        assert!(
-            absolute_value.get("reason_code").is_none(),
-            "SecurityAbsolutePath is enum-only; completeness does not require an emission"
-        );
     }
 
     #[test]

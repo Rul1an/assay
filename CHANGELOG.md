@@ -14,9 +14,9 @@ All notable changes to this project will be documented in this file.
   nothing about the bundle's content. Constructed by `verify-privileged-mcp-action` for reachable
   `Limit*` codes (#2165).
 - `E_EVIDENCE_PATH_REJECTED` is registered for a typed archive-path refusal
-  (`ErrorClass::Security` / `SecurityPathTraversal`). It carries no maliciousness or
-  producer-intent claim. Constructed by `verify-privileged-mcp-action`. `SecurityAbsolutePath`
-  remains enum-only and is not required for that command's completeness (#2165).
+  (`ErrorClass::Security` / `Security*`). The command-neutral classifier covers both
+  `SecurityPathTraversal` and `SecurityAbsolutePath`. Command-level synthetic drive covers
+  the reachable traversal code; AbsolutePath remains a non-claim (#2165).
 - `E_EVIDENCE_PROFILE_INVALID` is registered and constructed for a stage-1 pass whose privileged
   MCP action profile verdict is invalid. It is not a bundle defect and carries no claim or source
   class (#2165).
