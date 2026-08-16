@@ -333,8 +333,21 @@ fn declared_error_code_variant(line: &str, prefix: &str) -> Option<String> {
 /// `Contract*` is a prefix mention, not an identifier, and is dropped because `*` is not
 /// alphanumeric. That is the difference between naming the set and being a member of it.
 fn backtick_identifiers_with_prefix(text: &str, prefix: &str) -> BTreeSet<String> {
-    let found: BTreeSet<String> = text
-        .split('`')
+    let found = backtick_identifiers_with_prefix_allowing_none(text, prefix);
+    assert!(
+        !found.is_empty(),
+        "boundary parser found no `{prefix}*` identifiers; the fence shape moved"
+    );
+    found
+}
+
+/// The same collection rule without the non-empty guard.
+///
+/// A caller asserting that a boundary names *no* code of some other class needs the empty set to
+/// be an answer rather than a panic. One collection rule, two callers, so the two cannot disagree
+/// about what counts as a named identifier.
+fn backtick_identifiers_with_prefix_allowing_none(text: &str, prefix: &str) -> BTreeSet<String> {
+    text.split('`')
         .enumerate()
         .filter(|(i, _)| i % 2 == 1)
         .map(|(_, token)| token)
@@ -344,12 +357,7 @@ fn backtick_identifiers_with_prefix(text: &str, prefix: &str) -> BTreeSet<String
                 && token.chars().all(char::is_alphanumeric)
         })
         .map(str::to_owned)
-        .collect();
-    assert!(
-        !found.is_empty(),
-        "boundary parser found no `{prefix}*` identifiers; the fence shape moved"
-    );
-    found
+        .collect()
 }
 
 #[test]
@@ -894,16 +902,40 @@ fn both_new_boundaries_require_the_class_as_well_as_the_code() {
     // A code prefix alone is not the key. `impl From<serde_json::Error>` already shows a class
     // reaching a code that means something else, so an emitter that keys on the prefix without
     // the class can classify a failure the verifier never attributed to that class.
+    // Keying on the MUST clause, not on mere presence: both files also name their class in the
+    // opening description, so `contains("ErrorClass::Limits")` stays true after the requirement
+    // itself is deleted. That weaker assertion was written first and a mutation survived it.
     let limit = read(LIMIT_BOUNDARY);
     assert!(
-        limit.contains("ErrorClass::Limits"),
-        "{LIMIT_BOUNDARY} must name the class an emitter keys on, not only the code prefix"
+        flowed(&limit).contains("MUST key on `ErrorClass::Limits` together with"),
+        "{LIMIT_BOUNDARY} must require the class as well as the code prefix, in the MUST clause"
     );
     let path = read(PATH_BOUNDARY);
     assert!(
-        path.contains("ErrorClass::Security"),
-        "{PATH_BOUNDARY} must name the class an emitter keys on, not only the code prefix"
+        flowed(&path).contains("MUST key on `ErrorClass::Security` together with"),
+        "{PATH_BOUNDARY} must require the class as well as the code prefix, in the MUST clause"
     );
+}
+
+#[test]
+fn neither_new_boundary_names_a_code_from_another_class() {
+    // The set tests are prefix-scoped, so a `Contract*` name pasted into the limit boundary is
+    // invisible to them: it is neither a missing member nor an extra one. A mutation adding
+    // `ContractInvalidJson` to this file survived until this assertion existed.
+    for (file, own) in [(LIMIT_BOUNDARY, "Limit"), (PATH_BOUNDARY, "Security")] {
+        let text = read(file);
+        for foreign in ["Integrity", "Contract", "Limit", "Security"] {
+            if foreign == own {
+                continue;
+            }
+            let named = backtick_identifiers_with_prefix_allowing_none(&text, foreign);
+            assert!(
+                named.is_empty(),
+                "{file} names {foreign}* ErrorCode identifiers {named:?}; this boundary maps one \
+                 class, and naming another class's codes here invites an emitter to fold them in"
+            );
+        }
+    }
 }
 
 #[test]
