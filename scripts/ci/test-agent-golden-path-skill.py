@@ -10,9 +10,13 @@ import os
 import re
 from pathlib import Path
 import subprocess
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(ROOT / "scripts/ci/lib"))
+from workspace_version import read_workspace_version  # noqa: E402
 
 CONTRACT_PATH = ROOT / "docs/generated/agent-golden-path.json"
 GUIDE_PATH = ROOT / "docs/guides/agent-golden-path.md"
@@ -1095,6 +1099,12 @@ def main() -> None:
         fail("failed to read published release tag: " + release_tag_result.stderr.strip())
     release_tag = release_tag_result.stdout.strip()
     release_version = release_tag.removeprefix("v")
+    source_version = read_workspace_version(ROOT / "Cargo.toml")
+    source_tag = f"v{source_version}"
+    if contract.get("source_version") != source_version:
+        fail("golden-path source_version must match the workspace version")
+    if contract.get("source_tag") != source_tag:
+        fail("golden-path source_tag must match the workspace version")
     if contract.get("release_version") != release_version:
         fail("golden-path release_version must match the published release pin")
     if contract.get("release_tag") != release_tag:

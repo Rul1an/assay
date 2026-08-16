@@ -17,6 +17,7 @@ angle brackets are replaced with temporary files or committed fixtures.
 <!-- agent-golden-path-release:start -->
 ## Release-pinned start
 
+This source tree declares Assay `5.2.0` (`v5.2.0`).
 This journey is pinned to Assay `5.2.0` ([`v5.2.0`](https://github.com/Rul1an/assay/releases/tag/v5.2.0)).
 Install the CLI from a verified channel, then require `assay version` to print `5.2.0` before using the table below. Behavior merged after that tag is `Unreleased` and is not part of this release claim.
 

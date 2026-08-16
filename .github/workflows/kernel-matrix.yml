@@ -28,6 +28,10 @@ on:
       - "docs/generated/**"
       - "docs/AIcontext/architecture-diagrams.md"
       - "docs/guides/agent-golden-path.md"
+      # Candidate source identity is checked by the pre-commit leg below.
+      - "Cargo.toml"
+      - "CHANGELOG.md"
+      - "docs/reference/release.md"
       # The editor MCP recipe is judged by the editor-mcp-recipe-truth hook, which runs
       # under Lint (pre-commit) here. `scripts/**` covers a guard change; a recipe-only drift
       # touches no script, so the recipe needs its own entry or the guard never executes in CI.
@@ -65,7 +69,7 @@ on:
       - ".github/workflows/docs-auto-update.yml"
       - ".github/workflows/parity.yml"
       - ".github/workflows/release.yml"
-      # Note: Cargo.toml/Cargo.lock removed - check-ebpf-changes job handles skip logic
+      # Cargo.lock remains excluded; check-ebpf-changes handles its eBPF skip logic.
   push:
     branches: [ "main", "debug/**" ]
 
