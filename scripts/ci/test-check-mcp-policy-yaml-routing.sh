@@ -1,20 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GUARD="scripts/ci/check-mcp-policy-yaml-routing.py"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GUARD="$SCRIPT_DIR/check-mcp-policy-yaml-routing.py"
 FILES=(
   crates/assay-mcp-server/src/tools
   crates/assay-core/src/mcp/policy
 )
 
-python3 "$GUARD"
-echo "PASS: guard accepts the production routes"
+if ! python3 "$GUARD"; then
+  echo "FAIL: YAML guard must accept zero args from the allowlisted cwd" >&2
+  exit 1
+fi
+echo "PASS: YAML guard accepts zero args from the allowlisted cwd"
+
+for rejected_arg in extra --stdin .; do
+  if python3 "$GUARD" "$rejected_arg" 2>/dev/null; then
+    echo "FAIL: YAML guard must reject argv value: $rejected_arg" >&2
+    exit 1
+  fi
+done
+echo "PASS: YAML guard rejects every tested argv shape"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 mkdir -p "$TMPDIR/base/crates/assay-mcp-server/src" "$TMPDIR/base/crates/assay-core/src/mcp"
 cp -R "${FILES[0]}" "$TMPDIR/base/crates/assay-mcp-server/src/"
 cp -R "${FILES[1]}" "$TMPDIR/base/crates/assay-core/src/mcp/"
+
+if ! (
+  cd "$TMPDIR/base"
+  python3 "$GUARD"
+); then
+  echo "FAIL: unmutated scratch copy must pass before mutations are scored" >&2
+  exit 1
+fi
+echo "PASS: unmutated scratch copy passes from its own cwd"
 
 mutant() {
   local name=$1
@@ -24,7 +45,10 @@ mutant() {
   "$mutation" "$TMPDIR/current"
   local output status
   set +e
-  output=$(python3 "$GUARD" "$TMPDIR/current" 2>&1)
+  output=$(
+    cd "$TMPDIR/current"
+    python3 "$GUARD" 2>&1
+  )
   status=$?
   set -e
   if [ "$status" -eq 0 ]; then

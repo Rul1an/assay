@@ -111,14 +111,14 @@ def require(errors: list[str], source: str, fragment: str, label: str) -> None:
         errors.append(f"{label}: expected one effective {fragment!r}, found {actual}")
 
 
-def check(root: Path) -> bool:
-    guarded_roots = [root / SERVER, root / CORE]
+def check() -> bool:
+    guarded_roots = [SERVER, CORE]
     rust_files = sorted(path for base in guarded_roots for path in base.rglob("*.rs"))
     if not rust_files:
         print("FAIL: guarded Rust sources not found", file=sys.stderr)
         return False
 
-    sources = {path.relative_to(root): path.read_text() for path in rust_files}
+    sources = {path: path.read_text() for path in rust_files}
     errors: list[str] = []
     allowed_parser_calls = {
         SERVER / "mod.rs": ["serde_yaml::from_slice", "serde_yaml::from_value"],
@@ -186,5 +186,7 @@ def check(root: Path) -> bool:
 
 
 if __name__ == "__main__":
-    repo_root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")
-    raise SystemExit(0 if check(repo_root) else 1)
+    if len(sys.argv) != 1:
+        print(f"usage: {Path(sys.argv[0]).name}", file=sys.stderr)
+        raise SystemExit(1)
+    raise SystemExit(0 if check() else 1)

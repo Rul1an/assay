@@ -36,6 +36,15 @@ trap 'rm -rf "$TMPDIR"' EXIT
 mkdir -p "$TMPDIR/base/crates/assay-mcp-server/src"
 cp -R "${FILES[0]}" "$TMPDIR/base/crates/assay-mcp-server/src/"
 
+if ! (
+  cd "$TMPDIR/base"
+  python3 "$GUARD"
+); then
+  echo "FAIL: unmutated reader scratch copy must pass before mutations are scored" >&2
+  exit 1
+fi
+echo "PASS: unmutated reader scratch copy passes from its own cwd"
+
 mutant() {
   local name=$1
   local mutation=$2
