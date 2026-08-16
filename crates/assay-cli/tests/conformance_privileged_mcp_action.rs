@@ -31,6 +31,9 @@ const CONTRACT_NEXT_STEP: &str = "Obtain or reissue evidence that conforms to th
 const PROFILE_INVALID_NEXT_STEP: &str = "Obtain or reissue evidence whose records satisfy the named evidence profile; per-violation details are in findings";
 const LIMIT_NEXT_STEP: &str = "Verification stopped at a configured ceiling and reached no verdict; obtain a smaller bundle from its producer, or raise the ceiling deliberately and repeat the inspection";
 const PATH_NEXT_STEP: &str = "An archive member path was refused as unsafe to extract; obtain a bundle whose member paths stay inside the extraction root from its producer";
+/// `ReasonCode::EEvidenceUnreadable.next_step(None)` — placeholder operand, no local path.
+const UNREADABLE_NEXT_STEP: &str =
+    r#"Run argv: ["assay","evidence","show","--format","json","--","<bundle>"]"#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExpectedDiagnosis {
@@ -418,7 +421,8 @@ fn write_named_member_bundle(dir: &Path, member: &str) -> PathBuf {
 
 /// Synthetic command-level cases sit beside the 14 corpus vectors. They do not fold
 /// Limits/Security into Integrity/Contract/Unreadable. Command-level drive covers the
-/// reachable traversal code; AbsolutePath is a non-claim here.
+/// reachable traversal code in `writer_next/verify.rs`; AbsolutePath is a non-claim
+/// for that file.
 #[test]
 fn synthetic_limit_and_path_cases_consume_their_own_codes() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -474,7 +478,37 @@ fn synthetic_limit_and_path_cases_consume_their_own_codes() {
 }
 
 #[test]
-fn security_absolute_path_is_not_required_for_command_completeness() {
+fn missing_bundle_publishes_unreadable_on_the_profile_report() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let missing = tmp.path().join("missing.bundle.tar.gz");
+    assert!(!missing.exists(), "the missing-bundle child must not exist");
+    let (report, exit_code) = verify(&missing);
+    assert_eq!(exit_code, 2);
+    assert_eq!(report["schema"], REPORT_SCHEMA);
+    assert_ne!(report["schema"], "assay.run_summary.v1");
+    assert_eq!(report["profile"], PROFILE_ID);
+    assert_eq!(report["bundle_integrity"], "fail");
+    assert!(report.get("verdict").is_none());
+    assert!(report.get("claims").is_none());
+    assert_eq!(report["reason_code"], "E_EVIDENCE_UNREADABLE");
+    let next_step = report["next_step"]
+        .as_str()
+        .expect("missing bundle must publish next_step");
+    assert_eq!(next_step, UNREADABLE_NEXT_STEP);
+    assert!(
+        !next_step.contains(missing.to_str().unwrap_or_default()),
+        "next_step must not leak the local path: {next_step}"
+    );
+    assert_eq!(
+        report["non_claims"],
+        serde_json::json!(REPORT_NON_CLAIMS.to_vec())
+    );
+}
+
+/// Guards only `crates/assay-evidence/src/bundle/writer_next/verify.rs`, the stage-1
+/// verifier `BundleReader::open` runs. This is not a workspace-wide construction claim.
+#[test]
+fn security_absolute_path_is_not_constructed_by_stage1_verify_rs() {
     let errors = include_str!("../../assay-evidence/src/bundle/writer_next/errors.rs");
     assert!(
         errors.contains("SecurityAbsolutePath,"),
@@ -483,10 +517,10 @@ fn security_absolute_path_is_not_required_for_command_completeness() {
     let verify_src = include_str!("../../assay-evidence/src/bundle/writer_next/verify.rs");
     assert!(
         verify_src.contains("SecurityPathTraversal"),
-        "verify.rs must still construct the reachable SecurityPathTraversal code"
+        "writer_next/verify.rs must still construct the reachable SecurityPathTraversal code"
     );
     assert!(
         !verify_src.contains("SecurityAbsolutePath"),
-        "verify.rs today constructs SecurityPathTraversal only; this is not a reachability claim for AbsolutePath"
+        "writer_next/verify.rs constructs SecurityPathTraversal only; AbsolutePath is enum-only there"
     );
 }

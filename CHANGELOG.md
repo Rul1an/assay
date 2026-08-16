@@ -16,7 +16,11 @@ All notable changes to this project will be documented in this file.
 - `E_EVIDENCE_PATH_REJECTED` is registered for a typed archive-path refusal
   (`ErrorClass::Security` / `Security*`). The command-neutral classifier covers both
   `SecurityPathTraversal` and `SecurityAbsolutePath`. Command-level synthetic drive covers
-  the reachable traversal code; AbsolutePath remains a non-claim (#2165).
+  the reachable traversal code in `writer_next/verify.rs`; AbsolutePath remains a
+  non-claim for that stage-1 verifier file (#2165).
+- `verify-privileged-mcp-action` maps a missing or unreadable bundle path (pre-open I/O,
+  not a `VerifyError`) onto the existing `E_EVIDENCE_UNREADABLE` stage-1 profile report
+  instead of exiting through the usage-error envelope (#2165).
 - `E_EVIDENCE_PROFILE_INVALID` is registered and constructed for a stage-1 pass whose privileged
   MCP action profile verdict is invalid. It is not a bundle defect and carries no claim or source
   class (#2165).

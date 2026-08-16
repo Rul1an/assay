@@ -13,7 +13,7 @@
 
 use crate::evidence_verify_reason::reason_code_for_verify_error;
 use crate::exit_codes::{self, ReasonCode};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use assay_evidence::bundle::BundleReader;
 use assay_evidence::types::EvidenceEvent;
 use clap::{Args, ValueEnum};
@@ -186,11 +186,20 @@ pub fn cmd_verify_privileged_mcp_action(args: VerifyPrivilegedMcpActionArgs) -> 
     Ok(if ok { exit_codes::OK } else { 2 })
 }
 
-/// Stage 1 + stages 2-4 over one bundle path. A file that cannot be opened at all is a usage error;
-/// a bundle that opens but fails verification is an integrity-fail report, never an error.
+/// Stage 1 + stages 2-4 over one bundle path. A path that cannot be opened is the same
+/// stage-1 failure report as a bundle that opens and then fails verification: never a
+/// usage-error envelope. Pre-open I/O is not a `VerifyError`; the adapter maps it onto
+/// the existing unreadable reason.
 pub fn verify_bundle_report(bundle: &Path) -> Result<Report> {
-    let file = File::open(bundle)
-        .with_context(|| format!("failed to open bundle {}", bundle.display()))?;
+    let file = match File::open(bundle) {
+        Ok(file) => file,
+        Err(err) => {
+            return Ok(stage1_fail_report(
+                format!("failed to open bundle {}: {err}", bundle.display()),
+                Some(ReasonCode::EEvidenceUnreadable),
+            ));
+        }
+    };
     // Stage 1: BundleReader::open runs the full shipped bundle verification
     // (verify_bundle_with_limits with default limits) before exposing any event.
     let reader = match BundleReader::open(file) {
@@ -204,11 +213,7 @@ pub fn verify_bundle_report(bundle: &Path) -> Result<Report> {
     Ok(profile_report(&events))
 }
 
-fn integrity_fail_report(err: &anyhow::Error) -> Report {
-    let diagnosis = err
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<assay_evidence::VerifyError>())
-        .and_then(reason_code_for_verify_error);
+fn stage1_fail_report(detail: String, reason: Option<ReasonCode>) -> Report {
     Report {
         schema: REPORT_SCHEMA,
         profile: PROFILE_ID,
@@ -217,12 +222,20 @@ fn integrity_fail_report(err: &anyhow::Error) -> Report {
         claims: None,
         findings: vec![Finding {
             id: "bundle_integrity".to_string(),
-            detail: format!("{err:#}"),
+            detail,
         }],
         non_claims: REPORT_NON_CLAIMS,
-        reason_code: diagnosis.map(|reason| reason.as_str()),
-        next_step: diagnosis.map(|reason| reason.next_step(None)),
+        reason_code: reason.map(|reason| reason.as_str()),
+        next_step: reason.map(|reason| reason.next_step(None)),
     }
+}
+
+fn integrity_fail_report(err: &anyhow::Error) -> Report {
+    let diagnosis = err
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<assay_evidence::VerifyError>())
+        .and_then(reason_code_for_verify_error);
+    stage1_fail_report(format!("{err:#}"), diagnosis)
 }
 
 /// Stages 2-4 over the events of a bundle that already passed stage 1.
@@ -927,6 +940,10 @@ mod tests {
             assert_ne!(value["reason_code"], "E_EVIDENCE_INTEGRITY", "{code}");
             assert_ne!(value["reason_code"], "E_EVIDENCE_CONTRACT", "{code}");
             assert_ne!(value["reason_code"], "E_EVIDENCE_UNREADABLE", "{code}");
+            assert!(
+                !value["next_step"].as_str().unwrap_or("").is_empty(),
+                "{code}: emitted next_step must be non-empty"
+            );
             assert!(value.get("claims").is_none(), "{code}");
         }
 
@@ -938,6 +955,31 @@ mod tests {
         let path_value = serde_json::to_value(integrity_fail_report(&path_err)).unwrap();
         assert_eq!(path_value["reason_code"], "E_EVIDENCE_PATH_REJECTED");
         assert_ne!(path_value["reason_code"], "E_EVIDENCE_LIMIT_EXCEEDED");
+        assert!(
+            !path_value["next_step"].as_str().unwrap_or("").is_empty(),
+            "path next_step must be non-empty"
+        );
+    }
+
+    #[test]
+    fn missing_bundle_path_is_unreadable_stage1_report() {
+        let missing = std::env::temp_dir()
+            .join("assay-2165-missing-child")
+            .join("missing.bundle.tar.gz");
+        assert!(!missing.exists(), "the missing-bundle child must not exist");
+        let report =
+            verify_bundle_report(&missing).expect("pre-open I/O is a report, not a usage error");
+        let value = serde_json::to_value(&report).unwrap();
+        assert_eq!(value["schema"], REPORT_SCHEMA);
+        assert_ne!(value["schema"], "assay.run_summary.v1");
+        assert_eq!(value["profile"], PROFILE_ID);
+        assert_eq!(value["bundle_integrity"], "fail");
+        assert!(value.get("verdict").is_none());
+        assert!(value.get("claims").is_none());
+        assert_eq!(value["reason_code"], "E_EVIDENCE_UNREADABLE");
+        let expected_next = ReasonCode::EEvidenceUnreadable.next_step(None);
+        assert_eq!(value["next_step"].as_str(), Some(expected_next.as_str()));
+        assert_eq!(value["non_claims"], json!(REPORT_NON_CLAIMS.to_vec()));
     }
 
     #[test]

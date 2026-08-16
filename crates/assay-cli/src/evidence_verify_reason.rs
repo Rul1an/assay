@@ -25,6 +25,8 @@ pub(crate) fn reason_code_for_verify_error(error: &VerifyError) -> Option<Reason
         ) => Some(ReasonCode::EEvidenceUnreadable),
         (
             ErrorClass::Contract,
+            // ContractMissingManifest and ContractTimestampRegression are classifier
+            // members. writer_next/verify.rs does not currently construct them.
             ErrorCode::ContractMissingManifest
             | ErrorCode::ContractSchemaVersion
             | ErrorCode::ContractFileOrder
