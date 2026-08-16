@@ -5,6 +5,8 @@ use super::reporting::{
     build_summary_from_artifacts, maybe_export_baseline, print_pipeline_summary,
 };
 use super::run_output::write_extended_run_json;
+use crate::exit_codes::EXIT_SUCCESS;
+use crate::output_write::write_stdout_json;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -51,7 +53,10 @@ pub(crate) async fn run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32>
             print_pipeline_summary(&artifacts, args.explain_skip, &summary);
         }
         super::super::args::OutputFormat::Json => {
-            println!("{}", assay_core::report::json::render_json(&artifacts)?);
+            let write_code = write_stdout_json(&assay_core::report::json::render_json(&artifacts)?);
+            if write_code != EXIT_SUCCESS {
+                return Ok(write_code);
+            }
         }
     }
 

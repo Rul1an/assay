@@ -8,7 +8,10 @@ use crate::cli::args::DoctorArgs;
 use crate::cli::helpers::decide_exit;
 use crate::diagnostics;
 use crate::diagnostics::format::format_text;
-use crate::exit_codes::{reason_for_unloadable_explicit_config, ReasonCode, RunOutcome};
+use crate::exit_codes::{
+    reason_for_unloadable_explicit_config, ReasonCode, RunOutcome, EXIT_SUCCESS,
+};
+use crate::output_write::write_stdout_json;
 
 use super::fixes::run_doctor_fix;
 use super::parse_error::try_fix_parse_error;
@@ -120,7 +123,10 @@ fn reject_invalid_args(format: OutputFormat, outcome: RunOutcome) -> anyhow::Res
                 obj.insert("message".to_string(), serde_json::json!(message));
             }
         }
-        println!("{}", serde_json::to_string_pretty(&json_out)?);
+        let write_code = write_stdout_json(&serde_json::to_string_pretty(&json_out)?);
+        if write_code != EXIT_SUCCESS {
+            return Ok(write_code);
+        }
         return Ok(outcome.exit_code);
     }
     if let Some(message) = &outcome.message {
@@ -184,7 +190,10 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
                         "code": outcome.reason_code,
                     }),
                 );
-                println!("{}", serde_json::to_string_pretty(&json_out)?);
+                let write_code = write_stdout_json(&serde_json::to_string_pretty(&json_out)?);
+                if write_code != EXIT_SUCCESS {
+                    return Ok(write_code);
+                }
                 return Ok(outcome.exit_code);
             }
 
@@ -210,7 +219,10 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
             }
         }
 
-        println!("{}", serde_json::to_string_pretty(&json_out)?);
+        let write_code = write_stdout_json(&serde_json::to_string_pretty(&json_out)?);
+        if write_code != EXIT_SUCCESS {
+            return Ok(write_code);
+        }
         return Ok(exit);
     }
 
