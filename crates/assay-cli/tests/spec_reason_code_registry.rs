@@ -280,16 +280,69 @@ fn the_reserved_section_claims_nothing_a_variant_construction_contradicts() {
     );
 }
 
+/// Unit variants in `ErrorCode` whose name starts with `prefix`.
+fn error_code_unit_variants_with_prefix(prefix: &str) -> BTreeSet<String> {
+    let src = read("crates/assay-evidence/src/bundle/writer_next/errors.rs");
+    let body = after(&src, "pub enum ErrorCode {");
+    let body = before(body, "\n}");
+    let found: BTreeSet<String> = body
+        .lines()
+        .filter_map(|line| {
+            let name = line.trim().strip_suffix(',')?;
+            if name.starts_with(prefix)
+                && name.starts_with(|c: char| c.is_ascii_uppercase())
+                && name.chars().all(char::is_alphanumeric)
+            {
+                Some(name.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        !found.is_empty(),
+        "ErrorCode parser found no {prefix}* unit variants; the enum shape moved"
+    );
+    found
+}
+
+/// Backtick identifiers in `text` whose name starts with `prefix`.
+///
+/// `Contract*` is a prefix mention, not an identifier, and is dropped because `*` is not
+/// alphanumeric. That is the difference between naming the set and being a member of it.
+fn backtick_identifiers_with_prefix(text: &str, prefix: &str) -> BTreeSet<String> {
+    let found: BTreeSet<String> = text
+        .split('`')
+        .enumerate()
+        .filter(|(i, _)| i % 2 == 1)
+        .map(|(_, token)| token)
+        .filter(|token| {
+            token.starts_with(prefix)
+                && token.starts_with(|c: char| c.is_ascii_uppercase())
+                && token.chars().all(char::is_alphanumeric)
+        })
+        .map(str::to_owned)
+        .collect();
+    assert!(
+        !found.is_empty(),
+        "boundary parser found no `{prefix}*` identifiers; the fence shape moved"
+    );
+    found
+}
+
 #[test]
 fn the_boundary_names_error_codes_that_still_exist_in_assay_evidence() {
-    // The rule names seven `assay_evidence::ErrorCode` variants across a crate boundary, four it
-    // requires and three it forbids. They are correct today, but they are strings here: a rename in
-    // `assay-evidence` would leave a normative MUST pointing at a variant that does not exist, and
-    // nothing would fail. Negative control for this test: renaming `IntegrityRunRootMismatch`
-    // throughout `assay-evidence` only -- what a developer who has never read this spec would do --
-    // fails it.
+    // The integrity rule names seven `assay_evidence::ErrorCode` variants across a crate
+    // boundary, four it requires and three it forbids. They are correct today, but they are
+    // strings here: a rename in `assay-evidence` would leave a normative MUST pointing at a
+    // variant that does not exist, and nothing would fail. Negative control for this test:
+    // renaming `IntegrityRunRootMismatch` throughout `assay-evidence` only -- what a developer
+    // who has never read this spec would do -- fails it.
+    //
+    // Integrity is a named subset, not the whole `Integrity*` prefix (`IntegrityZipBomb` is
+    // outside this rule). Contract* is the complementary exact-set test below.
     let errors = read("crates/assay-evidence/src/bundle/writer_next/errors.rs");
-    let boundary = format!("{} {}", read(BOUNDARY), read(CONTRACT_BOUNDARY));
+    let boundary = read(BOUNDARY);
     for code in [
         "IntegrityManifestHash",
         "IntegrityEventHash",
@@ -298,11 +351,6 @@ fn the_boundary_names_error_codes_that_still_exist_in_assay_evidence() {
         "IntegrityIo",
         "IntegrityGzip",
         "IntegrityTar",
-        "ContractInvalidJson",
-        "ContractBundleIdMismatch",
-        "ContractDuplicateFile",
-        "ContractUnexpectedFile",
-        "ContractSequenceStart",
     ] {
         assert!(
             boundary.contains(code),
@@ -315,6 +363,22 @@ fn the_boundary_names_error_codes_that_still_exist_in_assay_evidence() {
              normative MUST pointing at a renamed variant is worse than one pointing at none."
         );
     }
+}
+
+#[test]
+fn the_contract_boundary_names_exactly_the_declared_contract_star_variants() {
+    // A hand list of five `Contract*` names left eight unguarded: renaming
+    // `ContractSchemaVersion` throughout `assay-evidence`, or adding `ContractRogueNew`,
+    // stayed green. The sets must be derived and equal, so either change fails until the
+    // boundary is re-decided in the same change.
+    let declared = error_code_unit_variants_with_prefix("Contract");
+    let named = backtick_identifiers_with_prefix(&read(CONTRACT_BOUNDARY), "Contract");
+    assert_eq!(
+        declared, named,
+        "CONTRACT_BOUNDARY and ErrorCode disagree on the Contract* set. A new variant is a new \
+         mapping decision, not an automatic member; a rename leaves a normative MUST pointing at \
+         a variant that does not exist."
+    );
 }
 
 #[test]
