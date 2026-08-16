@@ -32,6 +32,11 @@ All notable changes to this project will be documented in this file.
   class (#2165).
 
 ### Changed
+- `assay evidence show --format json` now emits `assay.run_summary.v1` with
+  `E_EVIDENCE_CONTRACT` for a typed `Contract*` format-contract failure. Classification
+  comes from the shared `reason_code_for_evidence_error` classifier. The command still
+  publishes only CONTRACT, INTEGRITY, and UNREADABLE; LIMIT, PATH, and PROFILE remain
+  unpublished on this path (#2412).
 - The built-in stdio MCP policy tools now fail closed on outer dispatch errors
   and timeouts. Caller `arguments.on_error` no longer selects fail-open;
   responses use fixed value-free `E_INTERNAL` / `E_TIMEOUT` messages and

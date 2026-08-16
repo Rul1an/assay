@@ -92,6 +92,27 @@ impl CliFailure {
         })
     }
 
+    /// Typed `Contract*` format-contract failure for `evidence show`.
+    pub(crate) fn evidence_contract(path: &Path, error: &anyhow::Error) -> Option<Self> {
+        if evidence_reason(error) != Some(ReasonCode::EEvidenceContract) {
+            return None;
+        }
+
+        let path = path.display().to_string();
+        let message =
+            format!("evidence bundle {path} violates its declared format contract: {error:#}");
+        let outcome = RunOutcome::from_reason(
+            ReasonCode::EEvidenceContract,
+            Some(message),
+            Some(path.as_str()),
+        );
+        Some(Self {
+            outcome,
+            source: "evidence",
+            context: serde_json::json!({ "path": path }),
+        })
+    }
+
     pub(crate) fn emit(self, machine_output_verify_enabled: Option<bool>) -> i32 {
         emit_operator_diagnostic(&self.diagnostic());
         if let Some(verify_enabled) = machine_output_verify_enabled {
@@ -332,5 +353,34 @@ mod tests {
                 .is_none(),
             "a typed contract code must not be reclassified from its nested I/O source"
         );
+    }
+
+    #[test]
+    fn evidence_contract_cannot_stamp_contract_on_a_non_contract_verifier() {
+        for (class, code) in [
+            (ErrorClass::Limits, ErrorCode::LimitBundleBytes),
+            (ErrorClass::Security, ErrorCode::SecurityPathTraversal),
+            (ErrorClass::Integrity, ErrorCode::IntegrityEventHash),
+        ] {
+            assert!(
+                CliFailure::evidence_contract(
+                    Path::new("bundle.tar.gz"),
+                    &verifier_error(class, code),
+                )
+                .is_none(),
+                "{code} must not be stampable as E_EVIDENCE_CONTRACT"
+            );
+        }
+    }
+
+    #[test]
+    fn evidence_contract_constructs_for_typed_contract_invalid_json() {
+        let failure = CliFailure::evidence_contract(
+            Path::new("bundle.tar.gz"),
+            &verifier_error(ErrorClass::Contract, ErrorCode::ContractInvalidJson),
+        )
+        .expect("ContractInvalidJson must construct as E_EVIDENCE_CONTRACT");
+        assert_eq!(failure.outcome.reason_code, "E_EVIDENCE_CONTRACT");
+        assert_eq!(failure.outcome.exit_code, 2);
     }
 }

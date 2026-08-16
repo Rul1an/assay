@@ -85,14 +85,6 @@ fn golden_path_contract_uses_only_supported_binaries() {
     runtime_coverage::assert_contract_binaries(&contract(), &["assay", "assay-mcp-server"]);
 }
 
-fn assert_gap(expected: &Value, issue: u64) {
-    assert_eq!(
-        expected["gap_issue"].as_u64(),
-        Some(issue),
-        "the measured gap must stay linked to its owning issue"
-    );
-}
-
 fn contract_argv(expected: &Value, replacements: &[(&str, &str)]) -> Vec<String> {
     let argv = expected["argv"]
         .as_array()
@@ -644,13 +636,32 @@ fn bundle_inspection_json_publishes_typed_failures_on_stdout() {
         &expected_contract_failure,
         "evidence show format-contract failure",
     );
-    assert!(contract_failure.stdout.is_empty());
+    assert!(
+        expected_contract_failure["gap_issue"].is_null(),
+        "format-contract JSON diagnosis must not remain a gap"
+    );
+    let contract_json = stdout_json(
+        &contract_failure,
+        &expected_contract_failure,
+        "evidence show format-contract failure",
+    );
+    assert_eq!(contract_json["reason_code"], "E_EVIDENCE_CONTRACT");
+    assert_eq!(contract_json["exit_code"], 2);
+    let next_step = contract_json["next_step"]
+        .as_str()
+        .expect("format-contract next_step");
+    assert_eq!(
+        Some(next_step),
+        expected_contract_failure["next_step"].as_str()
+    );
+    assert!(!next_step.trim().is_empty());
+    assert!(!next_step.starts_with("Run:") && !next_step.starts_with("Run argv:"));
+    assert!(!next_step.contains("assay evidence"));
     assert!(String::from_utf8_lossy(&contract_failure.stderr).contains("ContractInvalidJson"));
-    assert_gap(&expected_contract_failure, 2412);
 }
 
 #[test]
-fn evidence_inspection_contract_discloses_the_deferred_format_contract_gap() {
+fn evidence_inspection_contract_names_published_and_untyped_identities() {
     let contract = contract();
     let step = contract["steps"]
         .as_array()
@@ -661,13 +672,14 @@ fn evidence_inspection_contract_discloses_the_deferred_format_contract_gap() {
     let failure_summary = step["failure_summary"]
         .as_str()
         .expect("evidence inspection failure summary");
-    assert!(
-        failure_summary.contains("gap #2412"),
-        "the residual format-contract failure must remain disclosed"
-    );
-    assert!(
-        failure_summary.contains("empty stdout"),
-        "the residual gap must state its machine-channel consequence"
+    assert_eq!(
+        failure_summary,
+        "Only the four verifier codes that establish a recorded-value mismatch map to \
+         `E_EVIDENCE_INTEGRITY`; I/O, gzip, and tar failures use \
+         `E_EVIDENCE_UNREADABLE`. Typed `Contract*` failures encountered while opening \
+         the bundle publish `E_EVIDENCE_CONTRACT` with a bounded prose `next_step`. \
+         Event-line deserialization plus LIMIT/PATH and PROFILE, where they apply, \
+         remain exit `2` with empty stdout until typed on this command."
     );
     let stdout_summary = step["stdout_summary"]
         .as_str()
@@ -675,8 +687,9 @@ fn evidence_inspection_contract_discloses_the_deferred_format_contract_gap() {
     assert!(
         stdout_summary.contains("verify_mode")
             && stdout_summary.contains("enabled")
-            && stdout_summary.contains("disabled"),
-        "the shipped contract must publish the verification-mode field and vocabulary"
+            && stdout_summary.contains("disabled")
+            && stdout_summary.contains("E_EVIDENCE_CONTRACT"),
+        "the shipped contract must publish verification-mode vocabulary and the contract reason"
     );
 }
 

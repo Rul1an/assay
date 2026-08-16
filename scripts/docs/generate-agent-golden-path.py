@@ -518,9 +518,13 @@ STEPS: list[dict[str, object]] = [
                 "format-contract-failure",
                 "format-contract failure",
                 2,
-                stdout("empty"),
+                stdout("json", "assay.run_summary.v1"),
                 ["evidence", "show", "--format", "json", "--", "<bundle>"],
-                gap_issue=2412,
+                reason_code="E_EVIDENCE_CONTRACT",
+                next_step=(
+                    "Obtain or reissue evidence that conforms to the declared bundle contract; "
+                    "this bundle was readable and does not satisfy that contract"
+                ),
             ),
         ],
         "stdout_summary": (
@@ -528,13 +532,16 @@ STEPS: list[dict[str, object]] = [
             "the registered values are `enabled` and `disabled`, with `--no-verify` producing "
             "`disabled`. A recorded-value "
             "mismatch parses as `assay.run_summary.v1` with `E_EVIDENCE_INTEGRITY`; an "
-            "unreadable path uses `E_EVIDENCE_UNREADABLE`."
+            "unreadable path uses `E_EVIDENCE_UNREADABLE`; a typed `Contract*` defect uses "
+            "`E_EVIDENCE_CONTRACT`."
         ),
         "failure_summary": (
             "Only the four verifier codes that establish a recorded-value mismatch map to "
             "`E_EVIDENCE_INTEGRITY`; I/O, gzip, and tar failures use "
-            "`E_EVIDENCE_UNREADABLE`. Format-contract failures still exit `2` with empty "
-            "stdout: [gap #2412](https://github.com/Rul1an/assay/issues/2412)."
+            "`E_EVIDENCE_UNREADABLE`. Typed `Contract*` failures encountered while opening "
+            "the bundle publish `E_EVIDENCE_CONTRACT` with a bounded prose `next_step`. "
+            "Event-line deserialization plus LIMIT/PATH and PROFILE, where they apply, "
+            "remain exit `2` with empty stdout until typed on this command."
         ),
     },
     {
