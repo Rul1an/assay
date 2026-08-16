@@ -112,17 +112,64 @@ if [ "$mutations" -ne 6 ]; then
 fi
 printf 'tag-tree outward-truth mutations: %s observed\n' "$mutations"
 
+check_release_workflow() {
+ruby - "$1" <<'RUBY'
+require "yaml"
+
+workflow = YAML.safe_load_file(ARGV.fetch(0), aliases: false)
+steps = workflow.fetch("jobs", {}).fetch("release-contract", {}).fetch("steps", [])
+matching = steps.select { |step| step["name"] == "Verify candidate source-tree identity" }
+abort "release workflow must contain one active candidate source-tree guard" unless matching.length == 1
+step = matching.fetch(0)
+abort "release workflow candidate source-tree guard invokes the wrong command" unless
+  step["run"] == "bash scripts/ci/check-tag-tree-outward-truth.sh"
+expected_env = {
+  "CANDIDATE_TAG" => "${{ steps.version.outputs.version }}",
+  "EXPECTED_SHA" => "${{ github.sha }}",
+}
+abort "release workflow candidate source-tree guard has the wrong environment" unless
+  step["env"] == expected_env
+abort "release workflow candidate source-tree guard must be unconditional and blocking" if
+  step.key?("if") || step.key?("continue-on-error")
+RUBY
+}
+
 workflow="$ROOT/.github/workflows/release.yml"
-for required in \
-  'CANDIDATE_TAG: ${{ steps.version.outputs.version }}' \
-  'EXPECTED_SHA: ${{ github.sha }}' \
-  'bash scripts/ci/check-tag-tree-outward-truth.sh'; do
-  grep -Fq "$required" "$workflow" || {
-    echo "FAIL: release workflow does not invoke the exact-tree guard: $required" >&2
-    exit 1
-  }
-done
-printf 'PASS: release workflow invokes exact-tree guard\n'
+check_release_workflow "$workflow"
+printf 'PASS: release workflow structurally invokes blocking source-tree guard\n'
+
+python3 - "$workflow" "$TMP/release-disabled.yml" <<'PY'
+from pathlib import Path
+import sys
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+needle = "      - name: Verify candidate source-tree identity\n"
+if text.count(needle) != 1:
+    raise SystemExit("candidate source-tree guard fixture is ambiguous")
+Path(sys.argv[2]).write_text(text.replace(needle, needle + "        if: false\n"), encoding="utf-8")
+PY
+if check_release_workflow "$TMP/release-disabled.yml" >/dev/null 2>&1; then
+  echo "FAIL: disabled release guard was not observed" >&2
+  exit 1
+fi
+printf 'PASS: disabled release guard mutation rejected\n'
+
+python3 - "$workflow" "$TMP/release-commented.yml" <<'PY'
+from pathlib import Path
+import sys
+
+lines = Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+start = next(i for i, line in enumerate(lines) if line == "      - name: Verify candidate source-tree identity")
+end = next(i for i in range(start + 1, len(lines)) if lines[i].startswith("      - name:"))
+for i in range(start, end):
+    lines[i] = "# " + lines[i]
+Path(sys.argv[2]).write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
+if check_release_workflow "$TMP/release-commented.yml" >/dev/null 2>&1; then
+  echo "FAIL: commented release guard was not observed" >&2
+  exit 1
+fi
+printf 'PASS: commented release guard mutation rejected\n'
 
 python3 - "$ROOT/.pre-commit-config.yaml" <<'PY'
 from pathlib import Path
@@ -159,6 +206,24 @@ for required in (
 PY
 printf 'PASS: pre-commit hook covers candidate identity inputs\n'
 
+python3 - "$ROOT/.github/workflows/kernel-matrix.yml" <<'PY'
+from pathlib import Path
+import sys
+
+lines = Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+start = next(i for i, line in enumerate(lines) if line.strip() == "paths:")
+end = next(i for i in range(start + 1, len(lines)) if lines[i].startswith("  push:"))
+paths = {
+    line.strip().removeprefix("- ").strip('"')
+    for line in lines[start:end]
+    if line.strip().startswith("- ")
+}
+for required in ("Cargo.toml", "CHANGELOG.md", "docs/reference/release.md"):
+    if required not in paths:
+        raise SystemExit(f"kernel-matrix lint trigger omits candidate identity input: {required}")
+PY
+printf 'PASS: lint workflow triggers on candidate identity inputs\n'
+
 release_docs="$ROOT/docs/reference/release.md"
 required='CANDIDATE_TAG=vX.Y.Z EXPECTED_SHA="$(git rev-parse HEAD)"'
 grep -Fq "$required" "$release_docs" || {
@@ -173,5 +238,8 @@ normalized = " ".join(Path(sys.argv[1]).read_text(encoding="utf-8").split())
 required = "The published install pin may still name the previous release"
 if required not in normalized:
     raise SystemExit(f"release docs omit candidate/install separation: {required}")
+immutable = "Published release tags are immutable and are never moved or rewritten"
+if immutable not in normalized:
+    raise SystemExit(f"release docs omit tag immutability rule: {immutable}")
 PY
 printf 'PASS: release docs distinguish candidate identity from installability\n'

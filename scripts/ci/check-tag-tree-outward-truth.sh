@@ -8,6 +8,10 @@ EXPECTED_SHA="${EXPECTED_SHA:-}"
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
+for required_file in Cargo.toml CHANGELOG.md docs/generated/agent-golden-path.json docs/guides/agent-golden-path.md; do
+  [ -f "$ROOT/$required_file" ] || fail "required candidate source file is missing: $required_file"
+done
+
 [[ "$CANDIDATE_TAG" =~ ^v[0-9]+[.][0-9]+[.][0-9]+(-(rc|beta)[.][0-9]+)?$ ]] ||
   fail "candidate tag must be vX.Y.Z, vX.Y.Z-rc.N, or vX.Y.Z-beta.N"
 [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || fail "expected SHA must be 40 lowercase hex characters"
@@ -60,9 +64,10 @@ guide_declaration="This source tree declares Assay \`$source_version\` (\`$sourc
 [ "$(grep -Fxc "$guide_declaration" "$ROOT/docs/guides/agent-golden-path.md" || true)" -eq 1 ] ||
   fail "golden-path guide source-tree declaration does not match $source_tag"
 
-changelog_pattern="^## \\[${source_version}\\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$"
+changelog_version="${source_version//./[.]}"
+changelog_pattern="^## \\[${changelog_version}\\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$"
 [ "$(grep -Ec "$changelog_pattern" "$ROOT/CHANGELOG.md" || true)" -eq 1 ] ||
   fail "CHANGELOG.md must contain exactly one dated release heading for $source_version"
 
-printf 'tag-tree outward truth: source %s, candidate %s, sha %s\n' \
+printf 'tag-tree outward truth: source %s, candidate %s, checkout %s\n' \
   "$source_version" "$CANDIDATE_TAG" "$actual_sha"
