@@ -252,7 +252,7 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         if !core_report.diagnostics.is_empty() {
             println!("  Issues:   {}", core_report.diagnostics.len());
             for d in &core_report.diagnostics {
-                println!("    - [{}] {}", d.severity, d.message);
+                println!("    - [{}] [{}] {}", d.code, d.severity, d.message);
             }
         } else {
             println!("  Issues:   None (Clean)");

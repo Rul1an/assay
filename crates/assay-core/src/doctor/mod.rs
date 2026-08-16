@@ -7,7 +7,7 @@ use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use crate::config::path_resolver::PathResolver;
-use crate::errors::diagnostic::{codes, Diagnostic};
+use crate::errors::diagnostic::{codes, path_json, Diagnostic};
 use crate::model::{EvalConfig, Expected, Policy};
 use crate::validate::{validate, ValidateOptions};
 
@@ -60,7 +60,7 @@ pub async fn doctor(
                             format!("Failed to parse policy '{}': {}", path, msg),
                         )
                         .with_source("doctor.policy_load")
-                        .with_context(serde_json::json!({ "path": pb, "error": msg }));
+                        .with_context(serde_json::json!({ "path": path_json(&pb), "error": msg }));
 
                         if let Some(caps) = unknown_field_re.captures(&msg) {
                             let unknown = &caps[1];

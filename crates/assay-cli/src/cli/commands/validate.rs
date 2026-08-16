@@ -273,20 +273,3 @@ impl<'a> From<&'a Diagnostic> for DiagView<'a> {
         }
     }
 }
-
-#[cfg(test)]
-mod path_json_sites {
-    #[test]
-    fn named_config_site_uses_path_json() {
-        let src = include_str!("validate.rs");
-        let prod = src.split("#[cfg(test)]").next().expect("prod source");
-        assert!(
-            !prod.contains(r#""file": config_path"#),
-            "validate.rs still passes PathBuf config_path to json!"
-        );
-        assert!(
-            prod.contains("path_json(config_path)"),
-            "the --config load-fail site must call path_json"
-        );
-    }
-}

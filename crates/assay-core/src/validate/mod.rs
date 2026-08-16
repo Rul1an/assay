@@ -818,30 +818,3 @@ mod vacuous_expected_tests {
         assert_eq!(report.diagnostics[0].code, codes::W_CFG_VACUOUS_EXPECTED);
     }
 }
-
-#[cfg(test)]
-mod path_json_sites {
-    /// Production validate sites named for #2264 must go through `path_json`.
-    /// A raw `Path` / `PathBuf` in `json!` is the abort this issue exists to close.
-    #[test]
-    fn named_sites_use_path_json_not_raw_path() {
-        let src = include_str!("mod.rs");
-        let prod = src.split("#[cfg(test)]").next().expect("prod source");
-        assert!(
-            !prod.contains(r#""path": path }"#) && !prod.contains(r#""path": path,"#),
-            "validate/mod.rs still passes a Path/PathBuf named `path` to json!"
-        );
-        assert!(
-            !prod.contains("json!(opts.trace_file)"),
-            "validate/mod.rs still passes Option<PathBuf> to json!"
-        );
-        assert!(
-            !prod.contains(r#""path": policy_file"#),
-            "validate/mod.rs still passes policy_file PathBuf to json!"
-        );
-        assert!(
-            prod.contains("path_json(path)") && prod.contains("path_json(&policy_file)"),
-            "named sites must call path_json"
-        );
-    }
-}
