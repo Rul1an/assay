@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -15,6 +17,10 @@ STAGING = ROOT / "scripts/ci/lib/golden-path-fixture-staging.sh"
 GUIDE = Path("docs/guides/agent-golden-path.md")
 GUIDE_TABLE_START = "<!-- agent-golden-path-table:start -->"
 UNKNOWN_ARGUMENT = "--not-a-real-flag"
+PORTABLE_SCHEMA = Path("packaging/agent-plugin/schemas/plugin.schema.json")
+PORTABLE_SCHEMA_LOCK = Path("packaging/agent-plugin/schemas/plugin.schema.lock.json")
+PORTABLE_SCHEMA_URL = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
+PORTABLE_SCHEMA_SHA256 = "0a4aad95ce337878ad38802ebf0daa3fde76abe3f65400c86bcbb1ec0b3ab883"
 # Closed public inventory. Do not build this from rendered_outputs().
 GENERATED_OUTPUTS = (
     Path("docs/generated/agent-golden-path.json"),
@@ -35,6 +41,23 @@ GENERATED_OUTPUTS = (
     ),
     Path(
         "packaging/claude-plugin/skills/assay-golden-path/assets/"
+        "privileged-action-gate/policies/no-allowance.yaml"
+    ),
+    Path("packaging/agent-plugin/plugin.json"),
+    Path("packaging/agent-plugin/skills/assay-golden-path/SKILL.md"),
+    Path(
+        "packaging/agent-plugin/skills/assay-golden-path/references/agent-golden-path.json"
+    ),
+    Path(
+        "packaging/agent-plugin/skills/assay-golden-path/assets/"
+        "privileged-action-gate/mock_github_mcp.py"
+    ),
+    Path(
+        "packaging/agent-plugin/skills/assay-golden-path/assets/"
+        "privileged-action-gate/baseline-approved.json"
+    ),
+    Path(
+        "packaging/agent-plugin/skills/assay-golden-path/assets/"
         "privileged-action-gate/policies/no-allowance.yaml"
     ),
 )
@@ -124,6 +147,20 @@ def check_in_sync_is_clean(root: Path) -> None:
         fail("--check modified an in-sync tree")
 
 
+def check_portable_schema_lock(root: Path) -> None:
+    schema = (root / PORTABLE_SCHEMA).read_bytes()
+    lock = json.loads((root / PORTABLE_SCHEMA_LOCK).read_text(encoding="utf-8"))
+    expected = {
+        "canonical_url": PORTABLE_SCHEMA_URL,
+        "sha256": PORTABLE_SCHEMA_SHA256,
+        "bytes": len(schema),
+    }
+    if lock != expected:
+        fail("portable Agent Plugin schema lock does not match its pinned contract")
+    if hashlib.sha256(schema).hexdigest() != PORTABLE_SCHEMA_SHA256:
+        fail("portable Agent Plugin schema bytes differ from the pinned contract")
+
+
 def check_rejects_unknown_argument(root: Path) -> None:
     before = snapshot_tree(root)
     result = run_generator(root, [UNKNOWN_ARGUMENT])
@@ -163,6 +200,20 @@ def apply_omit_plugin_skill_outputs(root: Path) -> None:
     if text.count(anchor) != 1:
         fail("omission mutation could not find PLUGIN_SKILL_OUTPUTS render line")
     path.write_text(text.replace(anchor, "", 1), encoding="utf-8")
+
+
+def apply_omit_portable_skill_output(root: Path) -> None:
+    path = root / GENERATOR
+    text = path.read_text(encoding="utf-8")
+    anchor = '        (PORTABLE_SKILL_OUTPUT, rendered_portable_skill.encode("ascii")),\n'
+    if text.count(anchor) != 1:
+        fail("omission mutation could not find portable skill render line")
+    path.write_text(text.replace(anchor, "", 1), encoding="utf-8")
+
+
+def apply_portable_schema_byte_mutation(root: Path) -> None:
+    path = root / PORTABLE_SCHEMA
+    path.write_bytes(path.read_bytes() + b"\n")
 
 
 def expect_pins_reject(name: str, mutate) -> None:
@@ -214,11 +265,26 @@ def expect_omission_rejects(name: str, mutate) -> None:
         fail(f"{name}: self-test accepted omitted generated output group")
 
 
+def expect_schema_lock_rejects(name: str, mutate) -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        seed_case(root)
+        mutate(root)
+        try:
+            check_portable_schema_lock(root)
+        except SystemExit as error:
+            if "pinned contract" in str(error):
+                return
+            raise
+        fail(f"{name}: self-test accepted modified portable schema bytes")
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as raw:
         root = Path(raw)
         seed_case(root)
         check_in_sync_is_clean(root)
+        check_portable_schema_lock(root)
     with tempfile.TemporaryDirectory() as raw:
         root = Path(raw)
         seed_case(root)
@@ -232,6 +298,12 @@ def main() -> None:
     expect_unknown_pin_rejects("ignored unknown argument", apply_silent_repair_mutation)
     expect_omission_rejects(
         "omit PLUGIN_SKILL_OUTPUTS", apply_omit_plugin_skill_outputs
+    )
+    expect_omission_rejects(
+        "omit PORTABLE_SKILL_OUTPUT", apply_omit_portable_skill_output
+    )
+    expect_schema_lock_rejects(
+        "portable schema byte drift", apply_portable_schema_byte_mutation
     )
     print("golden-path generator --check: compares bytes, names drift, rejects unknown argv")
 

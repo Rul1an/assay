@@ -17,7 +17,10 @@ stage_golden_path_fixtures() {
     "$case_root/.claude-plugin" \
     "$case_root/packaging/claude-plugin/.claude-plugin" \
     "$case_root/packaging/claude-plugin/skills/assay-golden-path/references" \
-    "$case_root/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies"
+    "$case_root/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies" \
+    "$case_root/packaging/agent-plugin/schemas" \
+    "$case_root/packaging/agent-plugin/skills/assay-golden-path/references" \
+    "$case_root/packaging/agent-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies"
 
   cp "$repo_root/scripts/ci/test-agent-golden-path-skill.py" "$case_root/scripts/ci/"
   cp "$repo_root/scripts/ci/lib/workspace_version.py" "$case_root/scripts/ci/lib/"
@@ -53,4 +56,20 @@ stage_golden_path_fixtures() {
     "$case_root/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/"
   cp "$repo_root/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/no-allowance.yaml" \
     "$case_root/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/"
+  cp "$repo_root/packaging/agent-plugin/plugin.json" \
+    "$case_root/packaging/agent-plugin/"
+  cp "$repo_root/packaging/agent-plugin/schemas/plugin.schema.json" \
+    "$case_root/packaging/agent-plugin/schemas/"
+  cp "$repo_root/packaging/agent-plugin/schemas/plugin.schema.lock.json" \
+    "$case_root/packaging/agent-plugin/schemas/"
+  cp "$repo_root/packaging/agent-plugin/skills/assay-golden-path/SKILL.md" \
+    "$case_root/packaging/agent-plugin/skills/assay-golden-path/"
+  cp "$repo_root/packaging/agent-plugin/skills/assay-golden-path/references/agent-golden-path.json" \
+    "$case_root/packaging/agent-plugin/skills/assay-golden-path/references/"
+  cp "$repo_root/packaging/agent-plugin/skills/assay-golden-path/assets/privileged-action-gate/mock_github_mcp.py" \
+    "$case_root/packaging/agent-plugin/skills/assay-golden-path/assets/privileged-action-gate/"
+  cp "$repo_root/packaging/agent-plugin/skills/assay-golden-path/assets/privileged-action-gate/baseline-approved.json" \
+    "$case_root/packaging/agent-plugin/skills/assay-golden-path/assets/privileged-action-gate/"
+  cp "$repo_root/packaging/agent-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/no-allowance.yaml" \
+    "$case_root/packaging/agent-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/"
 }
