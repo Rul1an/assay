@@ -91,6 +91,16 @@ pub enum ReasonCode {
     // the SPEC-PR-Gate-Outputs-v1 §5.1 row.
     #[doc = include_str!("exit_codes/evidence_contract_boundary.md")]
     EEvidenceContract,
+    // A configured ceiling stopped verification, which is a refusal to look rather than a
+    // finding. Stated once in `exit_codes/evidence_limit_boundary.md` and transported here and
+    // into the SPEC-PR-Gate-Outputs-v1 §5.1 row.
+    #[doc = include_str!("exit_codes/evidence_limit_boundary.md")]
+    EEvidenceLimitExceeded,
+    // An archive member path was refused as unsafe to extract. Stated once in
+    // `exit_codes/evidence_path_boundary.md` and transported here and into the
+    // SPEC-PR-Gate-Outputs-v1 §5.1 row.
+    #[doc = include_str!("exit_codes/evidence_path_boundary.md")]
+    EEvidencePathRejected,
     /// Evidence bundle could not be opened or read to completion. This establishes no content
     /// mismatch; it is the companion to `EEvidenceIntegrity` for I/O/archive-read failures.
     EEvidenceUnreadable,
@@ -213,6 +223,8 @@ impl ReasonCode {
             | ReasonCode::EReplayMissingDependency
             | ReasonCode::EEvidenceIntegrity
             | ReasonCode::EEvidenceContract
+            | ReasonCode::EEvidenceLimitExceeded
+            | ReasonCode::EEvidencePathRejected
             | ReasonCode::EEvidenceUnreadable
             | ReasonCode::EInvalidArgs => EXIT_CONFIG_ERROR,
 
@@ -270,6 +282,8 @@ impl ReasonCode {
             ReasonCode::EReplayLimitExceeded => "E_REPLAY_LIMIT_EXCEEDED",
             ReasonCode::EEvidenceIntegrity => "E_EVIDENCE_INTEGRITY",
             ReasonCode::EEvidenceContract => "E_EVIDENCE_CONTRACT",
+            ReasonCode::EEvidenceLimitExceeded => "E_EVIDENCE_LIMIT_EXCEEDED",
+            ReasonCode::EEvidencePathRejected => "E_EVIDENCE_PATH_REJECTED",
             ReasonCode::EEvidenceUnreadable => "E_EVIDENCE_UNREADABLE",
             ReasonCode::EInvalidArgs => "E_INVALID_ARGS",
             ReasonCode::EJudgeUnavailable => "E_JUDGE_UNAVAILABLE",
@@ -325,6 +339,22 @@ impl ReasonCode {
                 // format-contract failure. Conforming evidence has to come from the producer.
                 "Obtain or reissue evidence that conforms to the declared bundle contract; \
                  this bundle was readable and does not satisfy that contract"
+                    .to_string()
+            }
+            ReasonCode::EEvidenceLimitExceeded => {
+                // Prose, not a command. No invocation of this tool raises the ceiling, and the
+                // bundle may be entirely valid, so naming a command would publish a diagnostic
+                // as a remedy for something that is not a defect.
+                "Verification stopped at a configured ceiling and reached no verdict; obtain a \
+                 smaller bundle from its producer, or raise the ceiling deliberately and repeat \
+                 the inspection"
+                    .to_string()
+            }
+            ReasonCode::EEvidencePathRejected => {
+                // Prose, not a command. Re-reading the same archive repeats the same refusal,
+                // and nothing this side of the producer makes the recorded path safe.
+                "An archive member path was refused as unsafe to extract; obtain a bundle whose \
+                 member paths stay inside the extraction root from its producer"
                     .to_string()
             }
             ReasonCode::EEvidenceUnreadable => {
@@ -582,6 +612,60 @@ mod tests {
         assert_eq!(
             ReasonCode::EEvidenceContract.exit_code_for(ExitCodeVersion::V2),
             EXIT_CONFIG_ERROR
+        );
+        assert_eq!(
+            ReasonCode::EEvidenceLimitExceeded.exit_code_for(ExitCodeVersion::V1),
+            EXIT_CONFIG_ERROR
+        );
+        assert_eq!(
+            ReasonCode::EEvidenceLimitExceeded.exit_code_for(ExitCodeVersion::V2),
+            EXIT_CONFIG_ERROR
+        );
+        assert_eq!(
+            ReasonCode::EEvidencePathRejected.exit_code_for(ExitCodeVersion::V1),
+            EXIT_CONFIG_ERROR
+        );
+        assert_eq!(
+            ReasonCode::EEvidencePathRejected.exit_code_for(ExitCodeVersion::V2),
+            EXIT_CONFIG_ERROR
+        );
+    }
+
+    #[test]
+    fn evidence_limit_remediation_promises_no_command() {
+        let next_step = ReasonCode::EEvidenceLimitExceeded.next_step(None);
+        assert!(!next_step.is_empty(), "the remediation must not be empty");
+        assert!(
+            !next_step.starts_with("Run:") && !next_step.starts_with("Run argv:"),
+            "limit remediation must stay prose, not an executable claim: {next_step}"
+        );
+        assert!(
+            !next_step.contains("assay evidence"),
+            "no assay invocation raises the ceiling, so naming one would publish a diagnostic \
+             as a remedy: {next_step}"
+        );
+        assert_eq!(
+            next_step,
+            ReasonCode::EEvidenceLimitExceeded.next_step(Some("bundle; rm -rf /.tar.gz"))
+        );
+    }
+
+    #[test]
+    fn evidence_path_remediation_promises_no_command() {
+        let next_step = ReasonCode::EEvidencePathRejected.next_step(None);
+        assert!(!next_step.is_empty(), "the remediation must not be empty");
+        assert!(
+            !next_step.starts_with("Run:") && !next_step.starts_with("Run argv:"),
+            "path remediation must stay prose, not an executable claim: {next_step}"
+        );
+        assert!(
+            !next_step.contains("assay evidence"),
+            "re-reading the same archive repeats the same refusal, so naming a command would \
+             publish a diagnostic as a remedy: {next_step}"
+        );
+        assert_eq!(
+            next_step,
+            ReasonCode::EEvidencePathRejected.next_step(Some("bundle; rm -rf /.tar.gz"))
         );
     }
 
@@ -867,6 +951,8 @@ mod tests {
             | ReasonCode::EReplayLimitExceeded
             | ReasonCode::EEvidenceIntegrity
             | ReasonCode::EEvidenceContract
+            | ReasonCode::EEvidenceLimitExceeded
+            | ReasonCode::EEvidencePathRejected
             | ReasonCode::EInvalidArgs
             | ReasonCode::EJudgeUnavailable
             | ReasonCode::ERateLimit
@@ -895,6 +981,8 @@ mod tests {
             ReasonCode::EReplayLimitExceeded,
             ReasonCode::EEvidenceIntegrity,
             ReasonCode::EEvidenceContract,
+            ReasonCode::EEvidenceLimitExceeded,
+            ReasonCode::EEvidencePathRejected,
             ReasonCode::EEvidenceUnreadable,
             ReasonCode::EInvalidArgs,
             ReasonCode::EJudgeUnavailable,
