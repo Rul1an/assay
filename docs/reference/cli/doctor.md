@@ -78,8 +78,8 @@ invocation reaches, the row says so rather than describing it as behaviour.
 | Code | Meaning |
 |------|---------|
 | `0` | No error-severity diagnostic remains, or the fixes resolved them. Measured identical on the text channel, under `--format json` and under `--fix --yes`, because all three read the class from one function. It also covers the run that checked no config at all, so read `config_check.status` before `data_diagnostics[]`; see below. |
-| `1` | Argument misuse: `--fix` under `--format json`, or `--yes`/`--dry-run` without `--fix`. Both return `1` with nothing at all on stdout, from a literal rather than from the class table, and [#2208](https://github.com/Rul1an/assay/issues/2208) owns them — the same binary exits `2` for an argument it rejects one command over (`assay init --preset nonsense`). Also a config that will not load under `--fix` when no repair was applied: nothing auto-fixable, no safe replacement found, the offer declined, or a dry-run preview. That is [#2209](https://github.com/Rul1an/assay/issues/2209). |
-| `2` | Four conditions, and the same class in each case comes from something outside this command: an explicit `--config` that will not load with no `--fix`, or an error-severity diagnostic whose registered class is a config fault — what `assay validate` and `assay run` return for the same input; `--fix` unable to write a repair — what `assay fix` returns for a patch that fails to apply; and a repair that rewrote the config and left it still unloadable — the reason code for an unloadable config, which the parse-repair path reads too. |
+| `1` | A config that will not load under `--fix` when no repair was applied: nothing auto-fixable, no safe replacement found, the offer declined, or a dry-run preview. That is [#2209](https://github.com/Rul1an/assay/issues/2209). |
+| `2` | Five conditions. Argument misuse — `--fix` under `--format json`, or `--yes`/`--dry-run` without `--fix` — exits the invalid-args class. The JSON request publishes one `assay.doctor_report.v0` with `E_INVALID_ARGS`; the text request keeps the existing rejection on stderr and empty stdout. The other four come from something outside this command: an explicit `--config` that will not load with no `--fix`, or an error-severity diagnostic whose registered class is a config fault — what `assay validate` and `assay run` return for the same input; `--fix` unable to write a repair — what `assay fix` returns for a patch that fails to apply; and a repair that rewrote the config and left it still unloadable — the reason code for an unloadable config, which the parse-repair path reads too. |
 
 Four things the table does not say, which a reader would otherwise have to find out:
 
@@ -87,7 +87,7 @@ Four things the table does not say, which a reader would otherwise have to find 
   diagnostic whose registered class is not a config fault, and every code doctor names deliberately
   is registered a config fault. That leaves the bare `E_UNKNOWN` raised as a fallback for a trace
   error the mapper does not recognise, and no input reaching it has been constructed. So `1` means
-  argument misuse or #2209, not a verdict about a tree.
+  #2209, not a verdict about a tree. Argument misuse is the invalid-args class on `2`.
 - **One flag-dependence remains, and it is the config no repair changed.** `doctor --config nope.yaml`
   exits `2`; the same config under `--fix --yes` exits `1`, because that return reports the outcome
   of a repair offer rather than the state of the config. #2209 owns it. Every other pairing measured

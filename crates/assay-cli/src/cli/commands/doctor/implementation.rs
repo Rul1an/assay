@@ -8,7 +8,7 @@ use crate::cli::args::DoctorArgs;
 use crate::cli::helpers::decide_exit;
 use crate::diagnostics;
 use crate::diagnostics::format::format_text;
-use crate::exit_codes::{reason_for_unloadable_explicit_config, RunOutcome};
+use crate::exit_codes::{reason_for_unloadable_explicit_config, ReasonCode, RunOutcome};
 
 use super::fixes::run_doctor_fix;
 use super::parse_error::try_fix_parse_error;
@@ -51,6 +51,13 @@ const NO_CONFIG_FOUND: &str = "No config found; run inside project or use --conf
 /// mean what. `reason` accompanies the two states that produced no diagnostics; on `failed` it
 /// restates `config_error.message` from the same value rather than deriving a second one, because
 /// the registered diagnosis stays the carrier a consumer branches on.
+fn config_check_skipped(reason: &str) -> serde_json::Value {
+    serde_json::json!({
+        "status": "skipped",
+        "reason": reason,
+    })
+}
+
 fn config_check_marker(checked: bool, error: Option<&str>) -> serde_json::Value {
     match (checked, error) {
         (_, Some(message)) => serde_json::json!({
@@ -58,21 +65,77 @@ fn config_check_marker(checked: bool, error: Option<&str>) -> serde_json::Value 
             "reason": message,
         }),
         (true, None) => serde_json::json!({ "status": "checked" }),
-        (false, None) => serde_json::json!({
-            "status": "skipped",
-            "reason": NO_CONFIG_FOUND,
-        }),
+        (false, None) => config_check_skipped(NO_CONFIG_FOUND),
     }
 }
 
-pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
-    if args.fix && args.format == OutputFormat::Json {
-        eprintln!("doctor --fix currently supports text output only; use --format text");
-        return Ok(1);
+fn insert_outcome_fields(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    outcome: &RunOutcome,
+) {
+    obj.insert(
+        "reason_code".to_string(),
+        serde_json::json!(outcome.reason_code),
+    );
+    obj.insert(
+        "next_step".to_string(),
+        serde_json::json!(outcome.next_step),
+    );
+}
+
+/// The one decision for a combination this command refuses itself.
+///
+/// Both channels read this outcome. The text path keeps the existing rejection line on stderr;
+/// the JSON path publishes the same identity on `assay.doctor_report.v0`. The class comes from
+/// `EInvalidArgs`, so a clap refusal and a command refusal of the same category no longer
+/// disagree about the integer.
+fn invalid_argument_outcome(args: &DoctorArgs) -> Option<RunOutcome> {
+    let message = if args.fix && args.format == OutputFormat::Json {
+        "doctor --fix currently supports text output only; use --format text"
+    } else if (args.yes || args.dry_run) && !args.fix {
+        "doctor: --yes/--dry-run require --fix"
+    } else {
+        return None;
+    };
+    Some(RunOutcome::from_reason(
+        ReasonCode::EInvalidArgs,
+        Some(message.to_string()),
+        None,
+    ))
+}
+
+fn reject_invalid_args(format: OutputFormat, outcome: RunOutcome) -> anyhow::Result<i32> {
+    if format == OutputFormat::Json {
+        let report = diagnostics::probe_system();
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let mut json_out = serde_json::to_value(&report)?;
+        if let Some(obj) = json_out.as_object_mut() {
+            obj.insert("generated_at".to_string(), serde_json::json!(timestamp));
+            let skip_reason = outcome
+                .message
+                .as_deref()
+                .unwrap_or(outcome.reason_code.as_str());
+            obj.insert(
+                "config_check".to_string(),
+                config_check_skipped(skip_reason),
+            );
+            insert_outcome_fields(obj, &outcome);
+            if let Some(message) = &outcome.message {
+                obj.insert("message".to_string(), serde_json::json!(message));
+            }
+        }
+        println!("{}", serde_json::to_string_pretty(&json_out)?);
+        return Ok(outcome.exit_code);
     }
-    if (args.yes || args.dry_run) && !args.fix {
-        eprintln!("doctor: --yes/--dry-run require --fix");
-        return Ok(1);
+    if let Some(message) = &outcome.message {
+        eprintln!("{message}");
+    }
+    Ok(outcome.exit_code)
+}
+
+pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
+    if let Some(outcome) = invalid_argument_outcome(&args) {
+        return reject_invalid_args(args.format, outcome);
     }
 
     // 1. Unified System Diagnostics
@@ -118,14 +181,7 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
 
             if let Some(err) = &cfg_err {
                 let outcome = config_failure(&target_path, err);
-                obj.insert(
-                    "reason_code".to_string(),
-                    serde_json::json!(outcome.reason_code),
-                );
-                obj.insert(
-                    "next_step".to_string(),
-                    serde_json::json!(outcome.next_step),
-                );
+                insert_outcome_fields(obj, &outcome);
                 obj.insert(
                     "config_error".to_string(),
                     serde_json::json!({
