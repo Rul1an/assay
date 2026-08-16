@@ -16,6 +16,16 @@ const PACKAGE_FILES: [&str; 8] = [
     "skills/assay-golden-path/assets/privileged-action-gate/baseline-approved.json",
     "skills/assay-golden-path/assets/privileged-action-gate/policies/no-allowance.yaml",
 ];
+const PACKAGE_DIRS: [&str; 8] = [
+    "",
+    "schemas",
+    "skills",
+    "skills/assay-golden-path",
+    "skills/assay-golden-path/references",
+    "skills/assay-golden-path/assets",
+    "skills/assay-golden-path/assets/privileged-action-gate",
+    "skills/assay-golden-path/assets/privileged-action-gate/policies",
+];
 
 struct LocalOnlyRetriever;
 
@@ -64,21 +74,40 @@ fn assert_invalid(validator: &Validator, value: &Value, context: &str) {
     );
 }
 
-fn collect_files(dir: &Path, relative: &Path, out: &mut BTreeSet<String>) {
-    for entry in std::fs::read_dir(dir)
-        .unwrap_or_else(|error| panic!("read package directory {}: {error}", dir.display()))
-    {
-        let entry = entry.expect("read package entry");
-        let file_type = entry.file_type().expect("read package entry type");
-        assert!(!file_type.is_symlink(), "package must not contain symlinks");
-        let child_relative = relative.join(entry.file_name());
-        if file_type.is_dir() {
-            collect_files(&entry.path(), &child_relative, out);
-        } else {
-            assert!(file_type.is_file(), "package entries must be regular files");
-            out.insert(child_relative.to_string_lossy().replace('\\', "/"));
+fn collect_files(root: &Path) -> BTreeSet<String> {
+    let expected_dirs = PACKAGE_DIRS.into_iter().collect::<BTreeSet<_>>();
+    let mut files = BTreeSet::new();
+
+    // Traverse only compile-time allowlisted directories. Directory entries are
+    // compared as names; they never become paths that this test opens.
+    for relative_dir in PACKAGE_DIRS {
+        let dir = root.join(relative_dir);
+        for entry in std::fs::read_dir(&dir)
+            .unwrap_or_else(|error| panic!("read package directory {}: {error}", dir.display()))
+        {
+            let entry = entry.expect("read package entry");
+            let file_type = entry.file_type().expect("read package entry type");
+            assert!(!file_type.is_symlink(), "package must not contain symlinks");
+            let name = entry.file_name();
+            let name = name.to_str().expect("package names must be UTF-8");
+            let relative = if relative_dir.is_empty() {
+                name.to_string()
+            } else {
+                format!("{relative_dir}/{name}")
+            };
+            if file_type.is_dir() {
+                assert!(
+                    expected_dirs.contains(relative.as_str()),
+                    "unexpected package directory: {relative}"
+                );
+            } else {
+                assert!(file_type.is_file(), "package entries must be regular files");
+                files.insert(relative);
+            }
         }
     }
+
+    files
 }
 
 #[test]
@@ -137,8 +166,7 @@ fn portable_agent_plugin_is_skills_only_and_self_contained() {
     let root = package_root();
     assert!(!root.join("mcp.json").exists(), "portable MCP is deferred");
 
-    let mut actual = BTreeSet::new();
-    collect_files(&root, Path::new(""), &mut actual);
+    let actual = collect_files(&root);
     let expected = PACKAGE_FILES
         .into_iter()
         .map(str::to_string)
