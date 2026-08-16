@@ -963,9 +963,8 @@ mod tests {
 
     #[test]
     fn missing_bundle_path_is_unreadable_stage1_report() {
-        let missing = std::env::temp_dir()
-            .join("assay-2165-missing-child")
-            .join("missing.bundle.tar.gz");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let missing = tmp.path().join("missing.bundle.tar.gz");
         assert!(!missing.exists(), "the missing-bundle child must not exist");
         let report =
             verify_bundle_report(&missing).expect("pre-open I/O is a report, not a usage error");
