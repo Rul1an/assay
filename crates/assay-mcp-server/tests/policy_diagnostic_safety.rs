@@ -9,7 +9,7 @@
 //! 4. `error.message` byte length ≤ 4096.
 //! 5. No temporary path or policy path leaks into the full JSON-RPC response.
 //! 6. Positive numeric `details.line`/`details.column` required for syntax errors.
-//! 7. Invalid UTF-8 through real `assay_check_args` → `E_POLICY_PARSE` / `Policy YAML is invalid`.
+//! 7. Invalid UTF-8 through all five policy tools stays value-free `E_POLICY_PARSE`.
 
 use serde_json::Value;
 use std::fs;
@@ -279,6 +279,9 @@ fn policy_decide_args(policy: &str) -> Value {
 }
 fn check_args_args(policy: &str) -> Value {
     serde_json::json!({"tool": "any_tool", "arguments": {}, "policy": policy})
+}
+fn check_sequence_args(policy: &str) -> Value {
+    serde_json::json!({"history": [], "next_tool": "any_tool", "policy": policy})
 }
 fn check_coverage_args(policy: &str) -> Value {
     serde_json::json!({"policy": policy, "traces": [{"tools": ["any_tool"]}]})
@@ -568,35 +571,59 @@ fn syntax_error_requires_positive_numeric_location() {
 // ── Invalid UTF-8 (gap 7 — discriminating, not vacuous) ────────────────
 
 #[test]
-fn invalid_utf8_classifies_as_yaml_syntax_error() {
+fn invalid_utf8_is_value_free_policy_parse_for_all_five_tools() {
     let dir = tempfile::tempdir().expect("policy-root");
     let root = dir.path();
     write_policy(root, "bad-utf8.yaml", &[0xFF, 0xFE, b'v', b':', b' ', b'1']);
 
     let mut conn = spawn_server(root);
     initialize(&mut conn);
-    let (result, body, full) = call_tool(
-        &mut conn,
-        "assay_check_args",
-        check_args_args("bad-utf8.yaml"),
-        2,
-    );
+    let cases: [(&str, Value, &str); 5] = [
+        (
+            "assay_policy_decide",
+            policy_decide_args("bad-utf8.yaml"),
+            YAML_INVALID,
+        ),
+        (
+            "assay_check_args",
+            check_args_args("bad-utf8.yaml"),
+            YAML_INVALID,
+        ),
+        (
+            "assay_check_sequence",
+            check_sequence_args("bad-utf8.yaml"),
+            "Invalid sequence policy format",
+        ),
+        (
+            "assay_check_coverage",
+            check_coverage_args("bad-utf8.yaml"),
+            YAML_INVALID,
+        ),
+        (
+            "assay_explain_trace",
+            explain_trace_args("bad-utf8.yaml"),
+            YAML_INVALID,
+        ),
+    ];
 
-    assert_parse_error(
-        "invalid-utf8",
-        &result,
-        &body,
-        &full,
-        YAML_INVALID,
-        root,
-        "bad-utf8.yaml",
-    );
-
-    // Must not contain raw UTF-8 error diagnostic
-    assert!(
-        !full.contains("invalid utf-8") && !full.contains("Utf8Error"),
-        "response must not contain raw UTF-8 diagnostic"
-    );
+    for (index, (tool, arguments, expected_message)) in cases.into_iter().enumerate() {
+        let (result, body, full) = call_tool(&mut conn, tool, arguments, index as u64 + 2);
+        assert_parse_error(
+            tool,
+            &result,
+            &body,
+            &full,
+            expected_message,
+            root,
+            "bad-utf8.yaml",
+        );
+        assert!(
+            !full.contains("invalid utf-8")
+                && !full.contains("Utf8Error")
+                && !full.contains('\u{fffd}'),
+            "{tool}: response must not contain raw or lossy UTF-8 diagnostics: {full}"
+        );
+    }
 
     let _ = conn.shutdown();
 }

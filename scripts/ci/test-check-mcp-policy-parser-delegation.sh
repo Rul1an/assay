@@ -38,6 +38,15 @@ mkdir -p "$TMPDIR/base/crates/assay-core/src/mcp/policy"
 cp "${FILES[0]}" "$TMPDIR/base/crates/assay-core/src/mcp/policy/"
 cp "${FILES[1]}" "$TMPDIR/base/crates/assay-core/src/mcp/policy/"
 
+if ! (
+  cd "$TMPDIR/base"
+  python3 "$GUARD"
+); then
+  echo "FAIL: unmutated parser scratch copy must pass before mutations are scored" >&2
+  exit 1
+fi
+echo "PASS: unmutated parser scratch copy passes from its own cwd"
+
 mutant() {
   local name=$1
   local mutation=$2
