@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import stat
 import subprocess
 import sys
@@ -567,17 +568,30 @@ STEPS: list[dict[str, object]] = [
                     "--format",
                     "json",
                 ],
-                gap_issue=2165,
+                reason_code="E_EVIDENCE_INTEGRITY",
+                next_step=(
+                    "Obtain an undamaged bundle from its producer; the content this bundle "
+                    "carries does not match what it records"
+                ),
             ),
         ],
         "stdout_summary": (
             "Both paths parse as `assay.privileged_mcp_action.verify.report.v0`. Success "
-            "has `bundle_integrity: pass` and `verdict: valid`; tamper has "
-            "`bundle_integrity: fail`, a bounded finding, and no verdict."
+            "has `bundle_integrity: pass` and `verdict: valid` and omits diagnosis. Tamper "
+            "has `bundle_integrity: fail`, a bounded finding, no verdict, and "
+            "`E_EVIDENCE_INTEGRITY`."
         ),
         "failure_summary": (
-            "The failure report has no registered `reason_code` or actionable `next_step`: "
-            "[gap #2165](https://github.com/Rul1an/assay/issues/2165)."
+            "A recorded-value mismatch publishes `E_EVIDENCE_INTEGRITY`. A typed "
+            "`Contract*` defect publishes `E_EVIDENCE_CONTRACT`. Untyped I/O and "
+            "archive-read failures publish `E_EVIDENCE_UNREADABLE`. A stage-1 pass whose "
+            "profile verdict is invalid publishes `E_EVIDENCE_PROFILE_INVALID`. Ceiling "
+            "refusals and `SecurityPathTraversal` publish `E_EVIDENCE_LIMIT_EXCEEDED` and "
+            "`E_EVIDENCE_PATH_REJECTED`. Success omits both diagnostic fields. "
+            "`findings[].detail` may retain the caller argv path. Unreadable "
+            "`next_step` is shell-free caller-argv (concrete JSON `Run argv` with "
+            "`--` and the caller path), not a shell string. Other owned codes stay "
+            "prose."
         ),
     },
     {
@@ -611,6 +625,33 @@ STEPS: list[dict[str, object]] = [
         ),
     },
 ]
+
+OWNED_PROFILE_EVIDENCE_REASON_CODES = (
+    "E_EVIDENCE_INTEGRITY",
+    "E_EVIDENCE_CONTRACT",
+    "E_EVIDENCE_UNREADABLE",
+    "E_EVIDENCE_PROFILE_INVALID",
+    "E_EVIDENCE_LIMIT_EXCEEDED",
+    "E_EVIDENCE_PATH_REJECTED",
+)
+
+
+def evidence_reason_codes_in(text: str) -> tuple[str, ...]:
+    return tuple(re.findall(r"E_EVIDENCE_[A-Z0-9_]+", text))
+
+
+def require_owned_profile_failure_vocabulary() -> None:
+    step = next(item for item in STEPS if item["id"] == "offline-profile-verification")
+    found = tuple(dict.fromkeys(evidence_reason_codes_in(step["failure_summary"])))
+    if found != OWNED_PROFILE_EVIDENCE_REASON_CODES:
+        raise SystemExit(
+            "offline-profile-verification failure_summary must name exactly these "
+            f"six evidence reason codes in this order: {OWNED_PROFILE_EVIDENCE_REASON_CODES}; "
+            f"got {found}"
+        )
+
+
+require_owned_profile_failure_vocabulary()
 
 for step in STEPS:
     outcomes = require_type(step["outcomes"], list, "golden-path outcomes")
