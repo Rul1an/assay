@@ -377,7 +377,7 @@ mod tests {
             import.mcp_format = Some(PrivilegedMcpTranscriptFormat::StreamableHttp);
             cmd_privileged_mcp_action(import.clone())
                 .unwrap_or_else(|error| panic!("{name}: {error:#}"));
-            let report = verify_bundle_report(&import.bundle_out).unwrap();
+            let report = verify_bundle_report(&import.bundle_out);
             assert_eq!(
                 serde_json::to_value(report).unwrap(),
                 expected_allow_report(),
@@ -460,7 +460,7 @@ mod tests {
             import.mcp_format = Some(format);
             cmd_privileged_mcp_action(import.clone())
                 .unwrap_or_else(|error| panic!("{name}: {error:#}"));
-            let report = verify_bundle_report(&import.bundle_out).unwrap();
+            let report = verify_bundle_report(&import.bundle_out);
             assert_eq!(
                 serde_json::to_value(report).unwrap(),
                 expected_allow_report(),

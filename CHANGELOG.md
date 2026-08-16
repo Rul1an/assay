@@ -18,9 +18,11 @@ All notable changes to this project will be documented in this file.
   `SecurityPathTraversal` and `SecurityAbsolutePath`. Command-level synthetic drive covers
   the reachable traversal code in `writer_next/verify.rs`; AbsolutePath remains a
   non-claim for that stage-1 verifier file (#2165).
-- `verify-privileged-mcp-action` maps a missing or unreadable bundle path (pre-open I/O,
-  not a `VerifyError`) onto the existing `E_EVIDENCE_UNREADABLE` stage-1 profile report
-  instead of exiting through the usage-error envelope (#2165).
+- `verify-privileged-mcp-action` and `CliFailure` share one `anyhow::Error` classifier:
+  typed `VerifyError` is authoritative; untyped I/O (missing file, directory/`EISDIR`)
+  is `E_EVIDENCE_UNREADABLE` only when no verifier code is present. The privileged
+  command stays on profile-report v0. `findings.detail` may retain the caller argv
+  path; `next_step` is path-free (#2165).
 - `E_EVIDENCE_PROFILE_INVALID` is registered and constructed for a stage-1 pass whose privileged
   MCP action profile verdict is invalid. It is not a bundle defect and carries no claim or source
   class (#2165).

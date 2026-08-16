@@ -477,12 +477,7 @@ fn synthetic_limit_and_path_cases_consume_their_own_codes() {
     );
 }
 
-#[test]
-fn missing_bundle_publishes_unreadable_on_the_profile_report() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let missing = tmp.path().join("missing.bundle.tar.gz");
-    assert!(!missing.exists(), "the missing-bundle child must not exist");
-    let (report, exit_code) = verify(&missing);
+fn assert_unreadable_profile_report(report: &Value, exit_code: i32, path: &Path) {
     assert_eq!(exit_code, 2);
     assert_eq!(report["schema"], REPORT_SCHEMA);
     assert_ne!(report["schema"], "assay.run_summary.v1");
@@ -493,16 +488,43 @@ fn missing_bundle_publishes_unreadable_on_the_profile_report() {
     assert_eq!(report["reason_code"], "E_EVIDENCE_UNREADABLE");
     let next_step = report["next_step"]
         .as_str()
-        .expect("missing bundle must publish next_step");
+        .expect("unreadable path must publish next_step");
     assert_eq!(next_step, UNREADABLE_NEXT_STEP);
     assert!(
-        !next_step.contains(missing.to_str().unwrap_or_default()),
+        !next_step.contains(path.to_str().unwrap_or_default()),
         "next_step must not leak the local path: {next_step}"
     );
     assert_eq!(
         report["non_claims"],
         serde_json::json!(REPORT_NON_CLAIMS.to_vec())
     );
+}
+
+#[test]
+fn missing_bundle_publishes_unreadable_on_the_profile_report() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let missing = tmp.path().join("missing.bundle.tar.gz");
+    assert!(!missing.exists(), "the missing-bundle child must not exist");
+    let (report, exit_code) = verify(&missing);
+    assert_unreadable_profile_report(&report, exit_code, &missing);
+}
+
+#[test]
+fn directory_bundle_publishes_unreadable_on_the_profile_report() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let (report, exit_code) = verify(tmp.path());
+    assert_unreadable_profile_report(&report, exit_code, tmp.path());
+
+    let show = Command::cargo_bin("assay")
+        .expect("assay binary")
+        .args(["evidence", "show", "--format", "json", "--"])
+        .arg(tmp.path())
+        .output()
+        .expect("evidence show");
+    assert_eq!(show.status.code(), Some(2));
+    let show_report: Value =
+        serde_json::from_slice(&show.stdout).expect("evidence show stdout is JSON");
+    assert_eq!(show_report["reason_code"], "E_EVIDENCE_UNREADABLE");
 }
 
 /// Guards only `crates/assay-evidence/src/bundle/writer_next/verify.rs`, the stage-1

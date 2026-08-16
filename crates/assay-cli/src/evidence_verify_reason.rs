@@ -1,7 +1,8 @@
-//! Command-neutral `VerifyError` → `ReasonCode` classifier.
+//! Command-neutral evidence-error → `ReasonCode` classifier.
 //!
-//! One function answers the class+code rule for every evidence CLI site. Profile-invalid is
-//! not a verifier-code fact and is not classified here.
+//! Typed `VerifyError` is authoritative. Untyped I/O is Unreadable only when no
+//! verifier code is present. Profile-invalid is not a verifier-code fact and is
+//! not classified here.
 
 use assay_evidence::{ErrorClass, ErrorCode, VerifyError};
 
@@ -59,9 +60,31 @@ pub(crate) fn reason_code_for_verify_error(error: &VerifyError) -> Option<Reason
     }
 }
 
+/// Classify a command-level evidence failure.
+///
+/// Walk the cause chain for a typed `VerifyError` first. That mapping is
+/// authoritative even when an `io::Error` is also present. Only when no
+/// verifier code is present does a direct or nested `std::io::Error` become
+/// `E_EVIDENCE_UNREADABLE`.
+pub(crate) fn reason_code_for_evidence_error(error: &anyhow::Error) -> Option<ReasonCode> {
+    if let Some(verifier) = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<VerifyError>())
+    {
+        return reason_code_for_verify_error(verifier);
+    }
+    if error
+        .chain()
+        .any(|cause| cause.downcast_ref::<std::io::Error>().is_some())
+    {
+        return Some(ReasonCode::EEvidenceUnreadable);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
-    use super::reason_code_for_verify_error;
+    use super::{reason_code_for_evidence_error, reason_code_for_verify_error};
     use crate::exit_codes::ReasonCode;
     use assay_evidence::{ErrorClass, ErrorCode, VerifyError};
 
@@ -188,5 +211,40 @@ mod tests {
                 "{code} under Limits must not fold into PATH_REJECTED"
             );
         }
+    }
+
+    #[test]
+    fn untyped_io_without_a_verifier_is_unreadable() {
+        let direct = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::NotFound));
+        assert_eq!(
+            reason_code_for_evidence_error(&direct),
+            Some(ReasonCode::EEvidenceUnreadable)
+        );
+        let wrapped = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::IsADirectory))
+            .context("bundle reader failed");
+        assert_eq!(
+            reason_code_for_evidence_error(&wrapped),
+            Some(ReasonCode::EEvidenceUnreadable)
+        );
+    }
+
+    #[test]
+    fn typed_contract_wrapped_with_io_stays_contract() {
+        let err = anyhow::Error::new(
+            VerifyError::new(
+                ErrorClass::Contract,
+                ErrorCode::ContractInvalidJson,
+                "invalid event",
+            )
+            .with_source(std::io::Error::from(std::io::ErrorKind::UnexpectedEof)),
+        );
+        assert_eq!(
+            reason_code_for_evidence_error(&err),
+            Some(ReasonCode::EEvidenceContract)
+        );
+        assert_ne!(
+            reason_code_for_evidence_error(&err),
+            Some(ReasonCode::EEvidenceUnreadable)
+        );
     }
 }

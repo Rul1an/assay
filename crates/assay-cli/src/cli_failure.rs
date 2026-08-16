@@ -7,8 +7,8 @@ use assay_core::report::summary::Summary;
 use crate::cli::commands::pipeline_error::emit_operator_diagnostic;
 use crate::exit_codes::{ReasonCode, RunOutcome};
 
-fn evidence_reason(error: &assay_evidence::VerifyError) -> Option<ReasonCode> {
-    crate::evidence_verify_reason::reason_code_for_verify_error(error)
+fn evidence_reason(error: &anyhow::Error) -> Option<ReasonCode> {
+    crate::evidence_verify_reason::reason_code_for_evidence_error(error)
 }
 
 /// A classified command failure that the top-level CLI funnel can render.
@@ -43,12 +43,12 @@ impl CliFailure {
     /// successfully read. The shared verifier-code mapping is pinned to the normative boundary by
     /// a mutation-sensitive test below.
     pub(crate) fn evidence_integrity(path: &Path, error: &anyhow::Error) -> Option<Self> {
+        if evidence_reason(error) != Some(ReasonCode::EEvidenceIntegrity) {
+            return None;
+        }
         let verifier = error
             .chain()
             .find_map(|cause| cause.downcast_ref::<assay_evidence::VerifyError>())?;
-        if evidence_reason(verifier) != Some(ReasonCode::EEvidenceIntegrity) {
-            return None;
-        }
 
         let path = path.display().to_string();
         let verifier_code = verifier.code.to_string();
@@ -74,19 +74,7 @@ impl CliFailure {
     /// rest of its source chain for an I/O error would misclassify a contract or content finding
     /// that merely carries an I/O source.
     pub(crate) fn evidence_unreadable(path: &Path, error: &anyhow::Error) -> Option<Self> {
-        let verifier = error
-            .chain()
-            .find_map(|cause| cause.downcast_ref::<assay_evidence::VerifyError>());
-        let unreadable = match verifier {
-            Some(verifier) => evidence_reason(verifier) == Some(ReasonCode::EEvidenceUnreadable),
-            None => {
-                error.downcast_ref::<std::io::Error>().is_some()
-                    || error
-                        .chain()
-                        .any(|cause| cause.downcast_ref::<std::io::Error>().is_some())
-            }
-        };
-        if !unreadable {
+        if evidence_reason(error) != Some(ReasonCode::EEvidenceUnreadable) {
             return None;
         }
 
