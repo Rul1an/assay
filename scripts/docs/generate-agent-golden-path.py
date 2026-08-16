@@ -588,7 +588,10 @@ STEPS: list[dict[str, object]] = [
             "profile verdict is invalid publishes `E_EVIDENCE_PROFILE_INVALID`. Ceiling "
             "refusals and `SecurityPathTraversal` publish `E_EVIDENCE_LIMIT_EXCEEDED` and "
             "`E_EVIDENCE_PATH_REJECTED`. Success omits both diagnostic fields. "
-            "`findings[].detail` may retain the caller argv path; `next_step` is path-free."
+            "`findings[].detail` may retain the caller argv path. Unreadable "
+            "`next_step` is shell-free caller-argv (concrete JSON `Run argv` with "
+            "`--` and the caller path), not a shell string. Other owned codes stay "
+            "prose."
         ),
     },
     {

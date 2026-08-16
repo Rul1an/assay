@@ -720,8 +720,43 @@ fn offline_profile_verifier_keeps_both_outcomes_on_stdout() {
     assert!(expected_failure["gap_issue"].is_null());
 }
 
+/// Extract the binary-owned registry strings from `evidence_verify_reason.rs`.
+/// The list lives in Rust; this test must not keep a second hand-coded array.
+fn rust_owned_profile_evidence_reason_codes() -> Vec<&'static str> {
+    let src = include_str!("../src/evidence_verify_reason.rs");
+    let start = src
+        .find("const PROFILE_EVIDENCE_REASON_CODES")
+        .expect("PROFILE_EVIDENCE_REASON_CODES must exist in evidence_verify_reason.rs");
+    let block = src[start..]
+        .split("];")
+        .next()
+        .expect("PROFILE_EVIDENCE_REASON_CODES must terminate");
+    let mut codes = Vec::new();
+    let mut rest = block;
+    while let Some(offset) = rest.find("\"E_EVIDENCE_") {
+        let quoted = &rest[offset + 1..];
+        let end = quoted
+            .find('"')
+            .expect("owned reason-code string must be quoted");
+        codes.push(&quoted[..end]);
+        rest = &quoted[end + 1..];
+    }
+    assert!(
+        !codes.is_empty(),
+        "failed to extract PROFILE_EVIDENCE_REASON_CODES from Rust source"
+    );
+    codes
+}
+
+fn spec_reason_table() -> String {
+    let path = workspace_root().join("docs/architecture/SPEC-PR-Gate-Outputs-v1.md");
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read SPEC reason table {}: {error}", path.display()))
+}
+
 #[test]
-fn offline_profile_failure_summary_names_exactly_the_six_owned_evidence_codes() {
+fn offline_profile_failure_summary_matches_binary_owned_evidence_codes() {
+    let owned = rust_owned_profile_evidence_reason_codes();
     let contract = contract();
     let step = contract["steps"]
         .as_array()
@@ -732,22 +767,21 @@ fn offline_profile_failure_summary_names_exactly_the_six_owned_evidence_codes() 
     let summary = step["failure_summary"]
         .as_str()
         .expect("offline profile failure summary");
-    let codes: Vec<&str> = summary
+    let extracted: Vec<&str> = summary
         .split('`')
         .filter(|token| token.starts_with("E_EVIDENCE_"))
         .collect();
     assert_eq!(
-        codes,
-        [
-            "E_EVIDENCE_INTEGRITY",
-            "E_EVIDENCE_CONTRACT",
-            "E_EVIDENCE_UNREADABLE",
-            "E_EVIDENCE_PROFILE_INVALID",
-            "E_EVIDENCE_LIMIT_EXCEEDED",
-            "E_EVIDENCE_PATH_REJECTED",
-        ],
-        "owned golden-path failure_summary must name exactly the six evidence codes"
+        extracted, owned,
+        "generated failure_summary must name exactly the Rust-owned evidence codes"
     );
+    let spec = spec_reason_table();
+    for code in &owned {
+        assert!(
+            spec.contains(&format!("| {code} |")),
+            "{code} must have an exact reason-table row in SPEC-PR-Gate-Outputs-v1.md"
+        );
+    }
 }
 
 #[test]

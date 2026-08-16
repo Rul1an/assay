@@ -104,7 +104,7 @@ Exit: Valid `0`; integrity or profile failure `2`.
 
 Stdout: Both paths parse as `assay.privileged_mcp_action.verify.report.v0`. Success has `bundle_integrity: pass` and `verdict: valid` and omits diagnosis. Tamper has `bundle_integrity: fail`, a bounded finding, no verdict, and `E_EVIDENCE_INTEGRITY`.
 
-On failure: A recorded-value mismatch publishes `E_EVIDENCE_INTEGRITY`. A typed `Contract*` defect publishes `E_EVIDENCE_CONTRACT`. Untyped I/O and archive-read failures publish `E_EVIDENCE_UNREADABLE`. A stage-1 pass whose profile verdict is invalid publishes `E_EVIDENCE_PROFILE_INVALID`. Ceiling refusals and `SecurityPathTraversal` publish `E_EVIDENCE_LIMIT_EXCEEDED` and `E_EVIDENCE_PATH_REJECTED`. Success omits both diagnostic fields. `findings[].detail` may retain the caller argv path; `next_step` is path-free.
+On failure: A recorded-value mismatch publishes `E_EVIDENCE_INTEGRITY`. A typed `Contract*` defect publishes `E_EVIDENCE_CONTRACT`. Untyped I/O and archive-read failures publish `E_EVIDENCE_UNREADABLE`. A stage-1 pass whose profile verdict is invalid publishes `E_EVIDENCE_PROFILE_INVALID`. Ceiling refusals and `SecurityPathTraversal` publish `E_EVIDENCE_LIMIT_EXCEEDED` and `E_EVIDENCE_PATH_REJECTED`. Success omits both diagnostic fields. `findings[].detail` may retain the caller argv path. Unreadable `next_step` is shell-free caller-argv (concrete JSON `Run argv` with `--` and the caller path), not a shell string. Other owned codes stay prose.
 
 ### 9. SARIF projection
 
