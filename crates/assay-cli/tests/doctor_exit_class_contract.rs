@@ -29,6 +29,7 @@
 mod bounded_process;
 
 use bounded_process::{run_bounded, GOLDEN_PATH_LIMITS};
+use std::ffi::OsStr;
 use std::path::Path;
 use std::process::Command;
 
@@ -331,4 +332,178 @@ fn a_repair_that_leaves_an_error_behind_does_not_change_the_exit_class() {
          A repair that runs and leaves an error-severity diagnostic in place reports the class that \
          diagnostic has."
     );
+}
+
+/// Drive `doctor` with a `--trace-file` that may not be UTF-8.
+///
+/// The existing helper takes `&str`, so it cannot name the argv the abort is
+/// measured on. This sibling keeps that helper's env scrub and bounded spawn,
+/// and returns the full `Output` so the caller can distinguish exit-by-code
+/// from signal death instead of collapsing the latter into an expect panic
+/// that would hide the diagnosis this issue is about.
+#[cfg(unix)]
+fn doctor_output_with_os_trace(cwd: &Path, format: &str, trace: &OsStr) -> std::process::Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_assay"));
+    for (name, _) in std::env::vars_os() {
+        if name
+            .to_string_lossy()
+            .to_ascii_uppercase()
+            .starts_with("ASSAY_")
+        {
+            command.env_remove(name);
+        }
+    }
+    command
+        .current_dir(cwd)
+        .env("NO_COLOR", "1")
+        .args(["doctor", "--format", format])
+        .args(["--config", "eval.yaml"])
+        .arg("--trace-file")
+        .arg(trace);
+    run_bounded(command, b"", GOLDEN_PATH_LIMITS, "assay doctor").expect("doctor ran")
+}
+
+#[cfg(unix)]
+fn validate_output_with_os_trace(cwd: &Path, format: &str, trace: &OsStr) -> std::process::Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_assay"));
+    for (name, _) in std::env::vars_os() {
+        if name
+            .to_string_lossy()
+            .to_ascii_uppercase()
+            .starts_with("ASSAY_")
+        {
+            command.env_remove(name);
+        }
+    }
+    command
+        .current_dir(cwd)
+        .env("NO_COLOR", "1")
+        .args(["validate", "--format", format])
+        .args(["--config", "eval.yaml"])
+        .arg("--trace-file")
+        .arg(trace);
+    run_bounded(command, b"", GOLDEN_PATH_LIMITS, "assay validate").expect("validate ran")
+}
+
+/// A non-UTF-8 `--trace-file` must exit by a defined code, not SIGABRT (#2264).
+///
+/// The measured abort is `json!({ "path": path })` on a `PathBuf` whose
+/// `to_str()` is `None`. serde returns `Error`; `json!` unwraps; `panic = "abort"`
+/// kills the process. The file need not exist: the measured path is
+/// `exists() == false`. Drive is argv bytes, not an APFS/ext4 create.
+///
+/// Windows is a non-claim here: `PathBuf` is WTF-16 and this `from_vec(0xff)`
+/// construction is Unix-only.
+#[cfg(unix)]
+#[test]
+fn a_non_utf8_trace_file_exits_by_code_and_diagnoses_path_not_found() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    tree(dir.path(), MATCHING_TRACE);
+
+    let mut bytes = b"traces/".to_vec();
+    bytes.push(0xff);
+    bytes.extend_from_slice(b".jsonl");
+    let bad = OsString::from_vec(bytes);
+    assert!(
+        !dir.path().join(&bad).exists(),
+        "the measured path is exists()==false; creating the file would miss the abort site"
+    );
+
+    let json = doctor_output_with_os_trace(dir.path(), "json", &bad);
+    let text = doctor_output_with_os_trace(dir.path(), "text", &bad);
+    let validate = validate_output_with_os_trace(dir.path(), "json", &bad);
+
+    let json_code = json.status.code().unwrap_or_else(|| {
+        panic!(
+            "doctor --format json died by signal {:?} (not a defined exit class). \
+             This is the #2264 abort: serde Path error -> json! unwrap -> panic=abort. \
+             stdout={}B stderr={}B\nstderr:\n{}",
+            json.status,
+            json.stdout.len(),
+            json.stderr.len(),
+            String::from_utf8_lossy(&json.stderr)
+        )
+    });
+    let text_code = text.status.code().unwrap_or_else(|| {
+        panic!(
+            "doctor --format text died by signal {:?} (not a defined exit class). \
+             stdout={}B stderr={}B\nstderr:\n{}",
+            text.status,
+            text.stdout.len(),
+            text.stderr.len(),
+            String::from_utf8_lossy(&text.stderr)
+        )
+    });
+    let validate_code = validate.status.code().unwrap_or_else(|| {
+        panic!(
+            "validate --format json died by signal {:?} (not a defined exit class). \
+             stdout={}B stderr={}B\nstderr:\n{}",
+            validate.status,
+            validate.stdout.len(),
+            validate.stderr.len(),
+            String::from_utf8_lossy(&validate.stderr)
+        )
+    });
+
+    assert_ne!(
+        json_code, 134,
+        "exit 134 is SIGABRT reported as a shell-style code; the process must exit by a defined class"
+    );
+    assert_ne!(
+        text_code, 134,
+        "exit 134 is SIGABRT reported as a shell-style code"
+    );
+    assert_ne!(
+        validate_code, 134,
+        "exit 134 is SIGABRT reported as a shell-style code"
+    );
+
+    // `E_PATH_NOT_FOUND` is `ExitClass::Config`, so `decide_exit` answers 2.
+    // The class itself is pinned in-crate; this test owns that a non-UTF-8
+    // missing path still gets that diagnosis rather than a signal death.
+    let expected = 2;
+    assert_eq!(
+        json_code, text_code,
+        "doctor returned exit {json_code} on the JSON channel and exit {text_code} on the text \
+         channel for one non-UTF-8 missing --trace-file. The exit class is a property of what \
+         was checked, not of how it was printed."
+    );
+    assert_eq!(
+        json_code, expected,
+        "doctor returned exit {json_code} for a missing non-UTF-8 --trace-file. \
+         Diagnosis stays E_PATH_NOT_FOUND (exists() is already false)."
+    );
+    assert_eq!(
+        validate_code, expected,
+        "validate returned exit {validate_code} for the same missing non-UTF-8 --trace-file."
+    );
+
+    let json_stdout = String::from_utf8_lossy(&json.stdout);
+    let json_stderr = String::from_utf8_lossy(&json.stderr);
+    let text_stderr = String::from_utf8_lossy(&text.stderr);
+    let validate_stdout = String::from_utf8_lossy(&validate.stdout);
+    let validate_stderr = String::from_utf8_lossy(&validate.stderr);
+    assert!(
+        json_stdout.contains("E_PATH_NOT_FOUND"),
+        "doctor --format json must still diagnose E_PATH_NOT_FOUND on the machine channel. \
+         stdout:\n{json_stdout}\nstderr:\n{json_stderr}"
+    );
+    assert!(
+        validate_stdout.contains("E_PATH_NOT_FOUND"),
+        "validate --format json must still diagnose E_PATH_NOT_FOUND on the machine channel. \
+         stdout:\n{validate_stdout}\nstderr:\n{validate_stderr}"
+    );
+    for (name, stderr) in [
+        ("doctor json", json_stderr.as_ref()),
+        ("doctor text", text_stderr.as_ref()),
+        ("validate json", validate_stderr.as_ref()),
+    ] {
+        assert!(
+            !stderr.contains("panicked at") && !stderr.contains("invalid UTF-8"),
+            "{name} stderr still shows a panic abort:\n{stderr}"
+        );
+    }
 }

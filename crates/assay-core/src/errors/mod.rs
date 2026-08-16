@@ -1,7 +1,7 @@
 pub mod diagnostic;
 pub mod similarity;
 
-pub use diagnostic::Diagnostic;
+pub use diagnostic::{path_json, Diagnostic};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunErrorKind {

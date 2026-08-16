@@ -1,5 +1,5 @@
 use crate::config::path_resolver::PathResolver;
-use crate::errors::diagnostic::{codes, Diagnostic};
+use crate::errors::diagnostic::{codes, path_json, Diagnostic};
 use crate::model::EvalConfig;
 use crate::model::Expected;
 use crate::providers::llm::LlmClient; // Import trait for .complete()
@@ -37,7 +37,7 @@ pub async fn validate(
                     codes::E_PATH_NOT_FOUND,
                     format!("Trace file not found: {}", path.display()),
                 )
-                .with_context(serde_json::json!({ "path": path }))
+                .with_context(serde_json::json!({ "path": path_json(path) }))
                 .with_source("validate")
                 .with_fix_step("Ensure the --trace-file path is correct and accessible"),
             );
@@ -51,7 +51,7 @@ pub async fn validate(
                     codes::E_PATH_NOT_FOUND,
                     format!("Baseline file not found: {}", path.display()),
                 )
-                .with_context(serde_json::json!({ "path": path }))
+                .with_context(serde_json::json!({ "path": path_json(path) }))
                 .with_source("validate")
                 .with_fix_step("Ensure the --baseline path is correct and accessible"),
             );
@@ -77,7 +77,9 @@ pub async fn validate(
                         format!("Failed to parse trace file: {}", e),
                     )
                     .with_source("trace")
-                    .with_context(serde_json::json!({ "path": path, "error": e.to_string() })),
+                    .with_context(
+                        serde_json::json!({ "path": path_json(path), "error": e.to_string() }),
+                    ),
                 );
                 return Ok(ValidateReport { diagnostics: diags });
             }
@@ -96,7 +98,9 @@ pub async fn validate(
                         format!("Failed to parse baseline: {}", e),
                     )
                     .with_source("baseline")
-                    .with_context(serde_json::json!({ "path": path, "error": e.to_string() })),
+                    .with_context(
+                        serde_json::json!({ "path": path_json(path), "error": e.to_string() }),
+                    ),
                 );
                 return Ok(ValidateReport { diagnostics: diags });
             }
@@ -126,7 +130,13 @@ pub async fn validate(
                     let mut d = diag.clone();
                     if let serde_json::Value::Object(ref mut map) = d.context {
                         map.insert("test_id".into(), serde_json::json!(tc.id));
-                        map.insert("trace_file".into(), serde_json::json!(opts.trace_file));
+                        map.insert(
+                            "trace_file".into(),
+                            opts.trace_file
+                                .as_deref()
+                                .map(path_json)
+                                .unwrap_or(serde_json::Value::Null),
+                        );
                     }
                     d.source = "trace".to_string();
                     diags.push(d);
@@ -169,7 +179,7 @@ pub async fn validate(
                                 format!("Policy file not found: {}", policy_file.display()),
                             )
                             .with_source("validate")
-                            .with_context(serde_json::json!({ "path": policy_file })),
+                            .with_context(serde_json::json!({ "path": path_json(&policy_file) })),
                         );
                     } else {
                         match crate::model::Policy::load(&policy_file) {
@@ -262,7 +272,7 @@ pub async fn validate(
                     .with_context(serde_json::json!({
                         "expected_suite": cfg.suite,
                         "baseline_suite": base.suite,
-                        "baseline_file": opts.baseline_file
+                        "baseline_file": opts.baseline_file.as_deref().map(path_json),
                     }))
                     .with_fix_step("Use the baseline file created for this suite")
                     .with_fix_step("Or export a new baseline: assay ci ... --export-baseline ..."),
@@ -436,7 +446,7 @@ fn validate_strict_requirements(
             .with_source("replay")
             .with_context(serde_json::json!({
                 "replay_strict": true,
-                "trace_file": trace_path,
+                "trace_file": trace_path.map(path_json),
                 "missing": missing,
                 "test_id": tc.id
             }))
@@ -466,7 +476,9 @@ fn check_embedding_dims(
                 diags.push(
                     Diagnostic::new(codes::E_EMB_DIMS, "Empty embedding vector found in trace")
                         .with_source("trace")
-                        .with_context(serde_json::json!({ "trace_file": trace_path }))
+                        .with_context(
+                            serde_json::json!({ "trace_file": trace_path.map(path_json) }),
+                        )
                         .with_fix_step("Regenerate embeddings with precompute-embeddings"),
                 );
             }
@@ -804,5 +816,32 @@ mod vacuous_expected_tests {
         let report = validate(&cfg, &opts, &resolver).await.expect("validate");
         assert_eq!(report.diagnostics.len(), 1);
         assert_eq!(report.diagnostics[0].code, codes::W_CFG_VACUOUS_EXPECTED);
+    }
+}
+
+#[cfg(test)]
+mod path_json_sites {
+    /// Production validate sites named for #2264 must go through `path_json`.
+    /// A raw `Path` / `PathBuf` in `json!` is the abort this issue exists to close.
+    #[test]
+    fn named_sites_use_path_json_not_raw_path() {
+        let src = include_str!("mod.rs");
+        let prod = src.split("#[cfg(test)]").next().expect("prod source");
+        assert!(
+            !prod.contains(r#""path": path }"#) && !prod.contains(r#""path": path,"#),
+            "validate/mod.rs still passes a Path/PathBuf named `path` to json!"
+        );
+        assert!(
+            !prod.contains("json!(opts.trace_file)"),
+            "validate/mod.rs still passes Option<PathBuf> to json!"
+        );
+        assert!(
+            !prod.contains(r#""path": policy_file"#),
+            "validate/mod.rs still passes policy_file PathBuf to json!"
+        );
+        assert!(
+            prod.contains("path_json(path)") && prod.contains("path_json(&policy_file)"),
+            "named sites must call path_json"
+        );
     }
 }
