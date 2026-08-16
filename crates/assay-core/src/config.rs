@@ -1,6 +1,8 @@
 use crate::errors::{ConfigError, ConfigLoadError};
 use crate::model::EvalConfig;
 use crate::render_safety::{render_safe, Sink, MAX_RENDER_FIELD};
+use std::fs::OpenOptions;
+use std::io::Read;
 use std::path::Path;
 
 pub mod otel;
@@ -8,6 +10,12 @@ pub mod path_resolver;
 pub mod resolve;
 
 pub const SUPPORTED_CONFIG_VERSION: u32 = 1;
+
+/// Inclusive byte ceiling for the one config-read seam. A caller config is not
+/// hostile ingest (not ADR-043); this is robustness so a 256 MiB `--config`
+/// is not fully materialized. Stated once; `doctor`, `run` and `validate`
+/// share [`load_config_with_cause`].
+pub const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 
 /// What a caller wants the loader to refuse, rather than merely parse.
 ///
@@ -71,12 +79,7 @@ pub fn load_config_with_cause(
         strict_unknown_fields: strict,
         allow_ineffective_assertions,
     } = opts;
-    let raw = std::fs::read_to_string(path).map_err(|e| {
-        ConfigLoadError::from_read(
-            format!("failed to read config {}: {}", path.display(), e),
-            e.kind(),
-        )
-    })?;
+    let raw = read_config_source(path)?;
 
     let mut ignored_keys = std::collections::HashSet::new();
     let deserializer = serde_yaml::Deserializer::from_str(&raw);
@@ -251,6 +254,64 @@ tests:
     Ok(())
 }
 
+/// The one config-read rule: open, inspect the opened file, refuse a
+/// non-regular path, then apply the inclusive byte ceiling before YAML.
+///
+/// `metadata.len()` is only an early rejection. The read itself is bounded
+/// to `MAX_CONFIG_BYTES + 1` so a regular file that grows after stat cannot
+/// bypass the ceiling. Exact `MAX_CONFIG_BYTES` is allowed. `O_NONBLOCK` is
+/// Unix-only so a FIFO fails on the file-type check instead of hanging in
+/// `open`. Not ADR-043 and not a second limit.
+fn read_config_source(path: &Path) -> Result<String, ConfigLoadError> {
+    let mut opts = OpenOptions::new();
+    opts.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = opts.open(path).map_err(|e| {
+        ConfigLoadError::from_read(
+            format!("failed to read config {}: {}", path.display(), e),
+            e.kind(),
+        )
+    })?;
+    let meta = file.metadata().map_err(|e| {
+        ConfigLoadError::from_read(
+            format!("failed to read config {}: {}", path.display(), e),
+            e.kind(),
+        )
+    })?;
+    if !meta.file_type().is_file() {
+        return Err(ConfigLoadError::new(format!(
+            "config {} is not a regular file",
+            path.display()
+        )));
+    }
+    if meta.len() > MAX_CONFIG_BYTES {
+        return Err(ConfigLoadError::new(format!(
+            "config {} exceeds the {MAX_CONFIG_BYTES}-byte ceiling",
+            path.display()
+        )));
+    }
+    let mut raw = String::new();
+    file.take(MAX_CONFIG_BYTES + 1)
+        .read_to_string(&mut raw)
+        .map_err(|e| {
+            ConfigLoadError::from_read(
+                format!("failed to read config {}: {}", path.display(), e),
+                e.kind(),
+            )
+        })?;
+    if (raw.len() as u64) > MAX_CONFIG_BYTES {
+        return Err(ConfigLoadError::new(format!(
+            "config {} exceeds the {MAX_CONFIG_BYTES}-byte ceiling",
+            path.display()
+        )));
+    }
+    Ok(raw)
+}
+
 /// Bound a `serde_yaml::Error` Display through `render_safe`, but keep the
 /// `location()` mark inside the same `MAX_RENDER_FIELD` budget. Truncating the
 /// whole Display would drop a trailing `at line N column M`. Reserve and
@@ -278,7 +339,7 @@ fn render_yaml_parse_error(err: &serde_yaml::Error) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_config_with, load_config_with_cause};
+    use super::{load_config_with, load_config_with_cause, MAX_CONFIG_BYTES};
     use std::io::ErrorKind;
     use std::path::Path;
 
@@ -470,6 +531,101 @@ mod tests {
             err.io_kind(),
             None,
             "parse fold must not invent a read kind"
+        );
+    }
+
+    fn yaml_of_len(len: usize) -> String {
+        let prefix = "version: 1\n";
+        assert!(len >= prefix.len(), "fixture shorter than the YAML prefix");
+        let mut yaml = String::from(prefix);
+        yaml.push_str(&"#".repeat(len - prefix.len()));
+        yaml
+    }
+
+    /// A FIFO must fail with a diagnosis, not block. `io_kind` stays off
+    /// NotFound so a missing file remains a distinct class.
+    #[cfg(unix)]
+    #[test]
+    fn fifo_config_is_refused_without_hanging() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("fifo.yaml");
+        std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .expect("mkfifo");
+        let path2 = path.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(load_config_with_cause(&path2, Default::default()));
+        });
+        let result = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("FIFO must return promptly, not hang the loader");
+        let err = result.expect_err("FIFO must be refused");
+        assert_ne!(
+            err.io_kind(),
+            Some(ErrorKind::NotFound),
+            "FIFO must not look like a missing file: {err}"
+        );
+        assert!(
+            err.to_string().contains("regular file"),
+            "FIFO diagnosis must name the file-type rule: {err}"
+        );
+        assert!(
+            !err.to_string().contains("failed to parse YAML"),
+            "FIFO must be refused before YAML parse: {err}"
+        );
+    }
+
+    #[test]
+    fn config_over_the_byte_ceiling_is_refused_before_parse() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("oversize.yaml");
+        let yaml = yaml_of_len((MAX_CONFIG_BYTES as usize) + 1);
+        std::fs::write(&path, &yaml).expect("write oversize yaml");
+        let err = load_config_with_cause(&path, Default::default())
+            .expect_err("ceiling+1 must be refused");
+        assert_ne!(
+            err.io_kind(),
+            Some(ErrorKind::NotFound),
+            "oversize must not look like a missing file: {err}"
+        );
+        assert!(
+            err.to_string().contains(&MAX_CONFIG_BYTES.to_string()),
+            "oversize diagnosis must state the ceiling: {err}"
+        );
+        assert!(
+            !err.to_string().contains("failed to parse YAML"),
+            "ceiling+1 must be refused before YAML parse: {err}"
+        );
+        assert!(
+            !err.to_string().contains("config has no tests"),
+            "ceiling+1 must not reach post-parse validation: {err}"
+        );
+    }
+
+    #[test]
+    fn config_at_the_byte_ceiling_is_allowed_to_parse() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("exact.yaml");
+        let yaml = yaml_of_len(MAX_CONFIG_BYTES as usize);
+        std::fs::write(&path, &yaml).expect("write exact-ceiling yaml");
+        let err = load_config_with_cause(&path, Default::default())
+            .expect_err("prefix-only YAML still has no tests");
+        assert!(
+            !err.to_string()
+                .contains(&format!("{MAX_CONFIG_BYTES}-byte")),
+            "exact ceiling must not be refused as oversize: {err}"
+        );
+        assert!(
+            err.to_string().contains("config has no tests")
+                || err.to_string().contains("failed to parse YAML"),
+            "exact ceiling must reach parse/validation, not the read rule: {err}"
+        );
+        assert_eq!(
+            err.io_kind(),
+            None,
+            "exact-ceiling parse is not a read kind"
         );
     }
 }
