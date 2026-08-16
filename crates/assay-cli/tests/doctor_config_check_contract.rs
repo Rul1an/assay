@@ -73,6 +73,49 @@ fn doctor_json<S: AsRef<OsStr>>(cwd: &Path, extra: &[S]) -> (i32, Value) {
     (code, document)
 }
 
+fn doctor_text<S: AsRef<OsStr>>(cwd: &Path, extra: &[S]) -> (i32, String, String) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_assay"));
+    for (name, _) in std::env::vars_os() {
+        if name
+            .to_string_lossy()
+            .to_ascii_uppercase()
+            .starts_with("ASSAY_")
+        {
+            command.env_remove(name);
+        }
+    }
+    command
+        .current_dir(cwd)
+        .env("NO_COLOR", "1")
+        .args(["doctor", "--format", "text"])
+        .args(extra);
+    let output = run_bounded(
+        command,
+        b"",
+        GOLDEN_PATH_LIMITS,
+        "assay doctor --format text",
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
+    let code = output
+        .status
+        .code()
+        .expect("assay process terminated without an exit code");
+    (
+        code,
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+/// github-token shape from `render_safety/rules.rs` (`ghp_` + 36 alphanumerics).
+/// Space-separated padding stays outside that rule so the extra bytes survive
+/// redaction and force the visible truncation marker.
+fn long_secret_yaml() -> (String, String) {
+    let token = format!("ghp_{}", "A".repeat(36));
+    let yaml = format!("version: \"{token} {}\"\n", "x".repeat(300));
+    (token, yaml)
+}
+
 fn init_project(cwd: &Path) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_assay"));
     command.current_dir(cwd).env("NO_COLOR", "1").args([
@@ -154,6 +197,117 @@ fn a_config_that_will_not_load_is_neither_checked_nor_skipped() {
         "failed",
         "a failed load is its own state; document:\n{}",
         serde_json::to_string_pretty(&document).expect("re-serialize")
+    );
+    assert!(
+        document["config_check"].get("reason").is_none(),
+        "failed config_check publishes status only; detail lives on config_error.message; document:\n{}",
+        serde_json::to_string_pretty(&document).expect("re-serialize")
+    );
+    let message = document["config_error"]["message"]
+        .as_str()
+        .unwrap_or_else(|| panic!("config_error.message must be a string: {document}"));
+    assert!(
+        message.contains("failed to parse YAML"),
+        "concise malformed YAML must stay diagnosed: {message}"
+    );
+    assert_eq!(
+        document["reason_code"], "E_CFG_PARSE",
+        "unloadable explicit config stays the parse class: {document}"
+    );
+    let next = document["next_step"]
+        .as_str()
+        .unwrap_or_else(|| panic!("next_step must be a string: {document}"));
+    assert!(
+        !next.trim().is_empty(),
+        "parse recovery must name a next step"
+    );
+}
+
+/// A parse error that quotes a long secret-shaped scalar must reach doctor
+/// redacted and bounded. This is the parse-Display fold, not a read ceiling,
+/// and not a claim that every YAML error echoes input.
+#[test]
+fn a_long_secret_parse_error_is_redacted_bounded_and_not_duplicated() {
+    let (token, yaml) = long_secret_yaml();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = dir.path().join("secret.yaml");
+    std::fs::write(&config, &yaml).expect("write long-secret config");
+    let config_arg = config.to_str().expect("UTF-8 path");
+
+    let (code, document) = doctor_json(dir.path(), &["--config", config_arg]);
+    assert_eq!(code, 2, "unloadable explicit config stays the config class");
+    assert_eq!(
+        document["config_check"]["status"],
+        "failed",
+        "a failed load is its own state; document:\n{}",
+        serde_json::to_string_pretty(&document).expect("re-serialize")
+    );
+    assert!(
+        document["config_check"].get("reason").is_none(),
+        "failed config_check must not restate config_error.message; document:\n{}",
+        serde_json::to_string_pretty(&document).expect("re-serialize")
+    );
+    assert_eq!(
+        document["reason_code"], "E_CFG_PARSE",
+        "long-secret parse stays the parse class: {document}"
+    );
+    let next = document["next_step"]
+        .as_str()
+        .unwrap_or_else(|| panic!("next_step must be a string: {document}"));
+    assert!(
+        !next.trim().is_empty(),
+        "parse recovery must name a next step"
+    );
+
+    let message = document["config_error"]["message"]
+        .as_str()
+        .unwrap_or_else(|| panic!("config_error.message must be a string: {document}"));
+    assert!(
+        message.contains("failed to parse YAML"),
+        "parse failures must stay diagnosed: {message}"
+    );
+    assert!(
+        !message.contains(&token),
+        "raw credential must not appear in config_error.message: {message}"
+    );
+    assert!(
+        message.contains("<redacted:"),
+        "redaction placeholder must be visible: {message}"
+    );
+    assert!(
+        message.contains("(truncated)"),
+        "truncation must be visible: {message}"
+    );
+    assert!(
+        message.chars().count() <= assay_core::render_safety::MAX_RENDER_FIELD + 80,
+        "config_error.message is prefix + bounded excerpt ({} chars): {message}",
+        message.chars().count()
+    );
+
+    let blob = serde_json::to_string(&document).expect("serialize doctor json");
+    assert!(
+        !blob.contains(&token),
+        "raw credential must not appear anywhere in the doctor JSON document"
+    );
+
+    let (text_code, stdout, stderr) = doctor_text(dir.path(), &["--config", config_arg]);
+    assert_eq!(text_code, 2, "text channel stays the config class");
+    let text = format!("{stdout}\n{stderr}");
+    assert!(
+        text.contains("Config Status: FAILED") || text.contains("failed to parse YAML"),
+        "text channel must stay diagnosed:\n{text}"
+    );
+    assert!(
+        !text.contains(&token),
+        "raw credential must not appear on the text channel:\n{text}"
+    );
+    assert!(
+        text.contains("<redacted:"),
+        "redaction placeholder must be visible on the text channel:\n{text}"
+    );
+    assert!(
+        text.contains("(truncated)"),
+        "truncation must be visible on the text channel:\n{text}"
     );
 }
 

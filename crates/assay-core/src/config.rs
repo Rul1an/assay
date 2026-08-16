@@ -1,5 +1,6 @@
 use crate::errors::{ConfigError, ConfigLoadError};
 use crate::model::EvalConfig;
+use crate::render_safety::{render_safe, Sink, MAX_RENDER_FIELD};
 use std::path::Path;
 
 pub mod otel;
@@ -84,7 +85,15 @@ pub fn load_config_with_cause(
     let mut cfg: EvalConfig = serde_ignored::deserialize(deserializer, |path| {
         ignored_keys.insert(path.to_string());
     })
-    .map_err(|e| ConfigLoadError::new(format!("failed to parse YAML: {}", e)))?;
+    // Parse Display can quote the offending scalar. Bound that excerpt through
+    // the existing render-safety pipeline (redact-before-truncate). This is not
+    // a read ceiling, and it does not claim every YAML error echoes input.
+    .map_err(|e| {
+        ConfigLoadError::new(format!(
+            "failed to parse YAML: {}",
+            render_safe(Sink::Json, &e.to_string(), MAX_RENDER_FIELD)
+        ))
+    })?;
 
     // Check strictness / significant unknown fields
     if strict && !ignored_keys.is_empty() {
@@ -264,6 +273,15 @@ mod tests {
         assert_eq!(typed.into_config_error().0, public.0);
     }
 
+    /// github-token shape from `render_safety/rules.rs` (`ghp_` + 36 alphanumerics).
+    /// A space then padding keeps the extra bytes outside that rule so redaction
+    /// cannot swallow the whole scalar (the `{36,}` quantifier is open-ended).
+    fn long_secret_yaml() -> (String, String) {
+        let token = format!("ghp_{}", "A".repeat(36));
+        let yaml = format!("version: \"{token} {}\"\n", "x".repeat(300));
+        (token, yaml)
+    }
+
     #[test]
     fn malformed_yaml_does_not_invent_not_found() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -275,7 +293,56 @@ mod tests {
             None,
             "YAML failures must not carry a read I/O kind: {err}"
         );
+        assert!(
+            err.to_string().contains("failed to parse YAML"),
+            "concise malformed YAML must stay diagnosed: {err}"
+        );
         let public = load_config_with(&path, Default::default()).expect_err("malformed yaml");
         assert_eq!(err.to_string(), public.to_string());
+    }
+
+    /// The YAML parse-Display fold is the one ceiling: prefix plus a render-safe
+    /// excerpt. Not a read ceiling, not a claim that every YAML error echoes input.
+    #[test]
+    fn yaml_parse_error_is_redacted_and_bounded() {
+        use crate::render_safety::MAX_RENDER_FIELD;
+
+        let (token, yaml) = long_secret_yaml();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("secret.yaml");
+        std::fs::write(&path, &yaml).expect("write long-secret yaml");
+        let err = load_config_with_cause(&path, Default::default())
+            .expect_err("long secret scalar must fail YAML parse");
+        let message = err.to_string();
+        assert!(
+            message.contains("failed to parse YAML"),
+            "parse failures must stay diagnosed: {message}"
+        );
+        assert!(
+            !message.contains(&token),
+            "raw credential must not survive the parse-Display fold: {message}"
+        );
+        assert!(
+            message.contains("<redacted:"),
+            "redaction placeholder must be visible: {message}"
+        );
+        assert!(
+            message.contains("(truncated)"),
+            "truncation must be visible: {message}"
+        );
+        assert!(
+            message.chars().count() <= MAX_RENDER_FIELD + 80,
+            "ConfigLoadError is prefix + bounded excerpt, not the full scalar ({} chars): {message}",
+            message.chars().count()
+        );
+        assert!(
+            message.len() < yaml.len(),
+            "bounded diagnostic must be shorter than the fixture that produced it"
+        );
+        assert_eq!(
+            err.io_kind(),
+            None,
+            "parse fold must not invent a read kind"
+        );
     }
 }
