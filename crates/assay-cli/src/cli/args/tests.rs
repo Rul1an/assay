@@ -88,10 +88,71 @@ fn mcp_group_accepts_canonical_paths_and_legacy_shims_are_removed() {
         })
     ));
 
+    let preflight = Cli::try_parse_from(["assay", "mcp", "preflight"])
+        .expect("canonical mcp preflight command should parse");
+    assert!(matches!(
+        preflight.cmd,
+        Command::Mcp(McpArgs {
+            cmd: McpSub::Preflight(_)
+        })
+    ));
+
     // The legacy top-level shims were retired; only the canonical `assay mcp ...` paths remain.
     assert!(Cli::try_parse_from(["assay", "discover", "--format", "json"]).is_err());
     assert!(Cli::try_parse_from(["assay", "kill", "proc-123"]).is_err());
     assert!(Cli::try_parse_from(["assay", "tool", "keygen", "--out", "keys"]).is_err());
+}
+
+#[test]
+fn mcp_preflight_defaults_to_dot_root_and_terminal_or_json() {
+    let defaults =
+        Cli::try_parse_from(["assay", "mcp", "preflight"]).expect("bare preflight should parse");
+    match defaults.cmd {
+        Command::Mcp(McpArgs {
+            cmd: McpSub::Preflight(args),
+        }) => {
+            assert_eq!(args.policy_root.as_os_str(), ".");
+            assert_eq!(args.format, PreflightFormat::Terminal);
+        }
+        _ => panic!("expected mcp preflight"),
+    }
+
+    let terminal = Cli::try_parse_from([
+        "assay",
+        "mcp",
+        "preflight",
+        "--policy-root",
+        ".",
+        "--format",
+        "terminal",
+    ])
+    .expect("--format terminal should parse");
+    assert!(matches!(
+        terminal.cmd,
+        Command::Mcp(McpArgs {
+            cmd: McpSub::Preflight(PreflightArgs {
+                format: PreflightFormat::Terminal,
+                ..
+            })
+        })
+    ));
+
+    let json = Cli::try_parse_from(["assay", "mcp", "preflight", "--format", "json"])
+        .expect("--format json should parse");
+    assert!(matches!(
+        json.cmd,
+        Command::Mcp(McpArgs {
+            cmd: McpSub::Preflight(PreflightArgs {
+                format: PreflightFormat::Json,
+                ..
+            })
+        })
+    ));
+
+    assert!(
+        Cli::try_parse_from(["assay", "mcp", "preflight", "--format", "text"]).is_err(),
+        "preflight format is terminal|json, not the global text|json pair"
+    );
 }
 
 #[test]

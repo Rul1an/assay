@@ -1,6 +1,6 @@
 use super::ToolArgs;
 use crate::cli::commands::kill::KillArgs;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -23,6 +23,26 @@ pub enum McpSub {
     Kill(KillArgs),
     /// Sign and verify MCP tool definitions
     Tool(ToolArgs),
+    /// Check whether assay-mcp-server on PATH can start with this policy root
+    Preflight(PreflightArgs),
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PreflightFormat {
+    #[default]
+    Terminal,
+    Json,
+}
+
+#[derive(Parser, Clone, Debug)]
+pub struct PreflightArgs {
+    /// Directory the host would pass as --policy-root. Must exist and be a directory.
+    #[arg(long, default_value = ".")]
+    pub policy_root: PathBuf,
+
+    /// Report format
+    #[arg(long, value_enum, default_value_t = PreflightFormat::Terminal)]
+    pub format: PreflightFormat,
 }
 
 #[derive(Parser, Clone, Debug)]

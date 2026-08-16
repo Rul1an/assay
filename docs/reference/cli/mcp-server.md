@@ -9,6 +9,7 @@ This page documents the current MCP runtime entry points in Assay.
 `assay mcp` is the canonical command family for MCP runtime work:
 
 - `assay mcp wrap`
+- `assay mcp preflight`
 - `assay mcp discover`
 - `assay mcp kill`
 - `assay mcp config-path`
@@ -56,7 +57,29 @@ assay mcp wrap --policy assay.yaml --dry-run -- <real-mcp-command> [args...]
 
 ---
 
-## 3) `assay-mcp-server` (separate binary)
+## 3) `assay mcp preflight` (CLI)
+
+Check whether `assay-mcp-server` on PATH matches this CLI and can start with a
+policy root. This command does not start an MCP session for a host.
+
+### Synopsis
+
+```bash
+assay mcp preflight [--policy-root .] [--format terminal|json]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--policy-root <PATH>` | Directory the host would pass as `--policy-root` (default: `.`). Must exist and be a directory. |
+| `--format <terminal\|json>` | Report format (default: `terminal`). JSON is one `assay.mcp_preflight.v0` object. |
+
+Exit `0` only for `ready`. Every other phase exits `2`.
+
+---
+
+## 4) `assay-mcp-server` (separate binary)
 
 Run the MCP server binary directly.
 

@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod coverage_input;
+mod preflight;
 mod tdt;
 
 use coverage_input::{collect_declared_tools, normalize_decision_jsonl_to_coverage_jsonl};
@@ -24,6 +25,7 @@ pub async fn run(args: McpArgs) -> anyhow::Result<i32> {
         McpSub::Inventory(inventory_args) => super::inventory::run(inventory_args).await,
         McpSub::Kill(kill_args) => super::kill::run(kill_args).await,
         McpSub::Tool(tool_args) => Ok(super::tool::cmd_tool(tool_args.cmd)),
+        McpSub::Preflight(preflight_args) => preflight::run(preflight_args),
     }
 }
 
