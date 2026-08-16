@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Diagnostic {
@@ -8,6 +9,18 @@ pub struct Diagnostic {
     pub message: String,
     pub context: serde_json::Value,
     pub fix_steps: Vec<String>,
+}
+
+/// Convert a filesystem path to a JSON string without going through serde's
+/// `Path` / `PathBuf` serializer.
+///
+/// serde's impl uses `to_str()` and returns `Error` on non-UTF-8 bytes.
+/// `serde_json::json!` unwraps that error, and this workspace sets
+/// `panic = "abort"` for both profiles, so a diagnostic that *reports* an
+/// unusable path would kill the process (#2264). `display().to_string()` is
+/// lossy and never panics.
+pub fn path_json(path: &Path) -> serde_json::Value {
+    serde_json::Value::String(path.display().to_string())
 }
 
 /// Severity icons, written as escapes so the source stays ASCII and the exact
@@ -334,6 +347,40 @@ mod tests {
         assert!(plain.contains("source: config"));
         assert!(plain.contains("assay.yaml"));
         assert!(plain.contains("1. Run: assay doctor --config assay.yaml"));
+    }
+
+    #[test]
+    fn path_json_is_a_string_value() {
+        let value = path_json(Path::new("traces/absent.jsonl"));
+        assert_eq!(
+            value,
+            serde_json::Value::String("traces/absent.jsonl".into())
+        );
+    }
+
+    /// The conversion that `json!({ "path": path })` cannot do: a non-UTF-8
+    /// `Path` becomes a JSON string and does not panic.
+    #[cfg(unix)]
+    #[test]
+    fn path_json_never_panics_on_non_utf8() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+        use std::path::PathBuf;
+
+        let path = PathBuf::from(OsString::from_vec(vec![b't', 0xff, b'x']));
+        let value = path_json(&path);
+        let s = value
+            .as_str()
+            .expect("path_json must return Value::String, not an error and not a panic");
+        assert!(
+            !s.is_empty(),
+            "lossy display of a non-empty path must not be empty"
+        );
+        // display() is lossy: the 0xff byte becomes U+FFFD, never a serde Error.
+        assert!(
+            s.contains('\u{FFFD}'),
+            "expected lossy replacement for 0xff, got {s:?}"
+        );
     }
 }
 

@@ -1,5 +1,5 @@
 use crate::config::path_resolver::PathResolver;
-use crate::errors::diagnostic::{codes, Diagnostic};
+use crate::errors::diagnostic::{codes, path_json, Diagnostic};
 use crate::model::EvalConfig;
 
 pub fn analyze_config_integrity(
@@ -20,7 +20,7 @@ pub fn analyze_config_integrity(
                         format!("Policy file referenced in test '{}' missing", test.id),
                     )
                     .with_source("doctor.config_integrity")
-                    .with_context(serde_json::json!({ "path": pb, "test_id": test.id }))
+                    .with_context(serde_json::json!({ "path": path_json(&pb), "test_id": test.id }))
                     .with_fix_step(format!("Create missing policy file: {}", pb.display())),
                 );
             }
