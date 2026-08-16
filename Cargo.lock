@@ -277,6 +277,7 @@ dependencies = [
  "rand 0.8.7",
  "ratatui",
  "regex",
+ "semver",
  "serde",
  "serde_json",
  "serde_yaml",
