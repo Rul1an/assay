@@ -101,6 +101,10 @@ pub enum ReasonCode {
     // SPEC-PR-Gate-Outputs-v1 §5.1 row.
     #[doc = include_str!("exit_codes/evidence_path_boundary.md")]
     EEvidencePathRejected,
+    /// A readable, integrity-checked bundle whose records do not satisfy the named evidence
+    /// profile. This is not a bundle defect and carries no claim or source class. It is not a
+    /// `VerifyError` classifier: fire only after stage 1 passes and `verdict == invalid`.
+    EEvidenceProfileInvalid,
     /// Evidence bundle could not be opened or read to completion. This establishes no content
     /// mismatch; it is the companion to `EEvidenceIntegrity` for I/O/archive-read failures.
     EEvidenceUnreadable,
@@ -225,6 +229,7 @@ impl ReasonCode {
             | ReasonCode::EEvidenceContract
             | ReasonCode::EEvidenceLimitExceeded
             | ReasonCode::EEvidencePathRejected
+            | ReasonCode::EEvidenceProfileInvalid
             | ReasonCode::EEvidenceUnreadable
             | ReasonCode::EInvalidArgs => EXIT_CONFIG_ERROR,
 
@@ -284,6 +289,7 @@ impl ReasonCode {
             ReasonCode::EEvidenceContract => "E_EVIDENCE_CONTRACT",
             ReasonCode::EEvidenceLimitExceeded => "E_EVIDENCE_LIMIT_EXCEEDED",
             ReasonCode::EEvidencePathRejected => "E_EVIDENCE_PATH_REJECTED",
+            ReasonCode::EEvidenceProfileInvalid => "E_EVIDENCE_PROFILE_INVALID",
             ReasonCode::EEvidenceUnreadable => "E_EVIDENCE_UNREADABLE",
             ReasonCode::EInvalidArgs => "E_INVALID_ARGS",
             ReasonCode::EJudgeUnavailable => "E_JUDGE_UNAVAILABLE",
@@ -355,6 +361,13 @@ impl ReasonCode {
                 // and nothing this side of the producer makes the recorded path safe.
                 "An archive member path was refused as unsafe to extract; obtain a bundle whose \
                  member paths stay inside the extraction root from its producer"
+                    .to_string()
+            }
+            ReasonCode::EEvidenceProfileInvalid => {
+                // Prose, not a command. Re-verifying the same records only repeats the same
+                // profile verdict. Conforming evidence has to come from the producer.
+                "Obtain or reissue evidence whose records satisfy the named evidence profile; \
+                 per-violation details are in findings"
                     .to_string()
             }
             ReasonCode::EEvidenceUnreadable => {
@@ -689,6 +702,24 @@ mod tests {
     }
 
     #[test]
+    fn evidence_profile_invalid_remediation_promises_no_command() {
+        let next_step = ReasonCode::EEvidenceProfileInvalid.next_step(None);
+        assert!(!next_step.is_empty(), "the remediation must not be empty");
+        assert!(
+            !next_step.starts_with("Run:") && !next_step.starts_with("Run argv:"),
+            "profile-invalid remediation must stay prose, not an executable claim: {next_step}"
+        );
+        assert!(
+            !next_step.contains('/') && !next_step.contains('\\'),
+            "profile-invalid next_step must not interpolate a path: {next_step}"
+        );
+        assert_eq!(
+            next_step,
+            ReasonCode::EEvidenceProfileInvalid.next_step(Some("bundle; rm -rf /.tar.gz"))
+        );
+    }
+
+    #[test]
     fn evidence_integrity_remediation_promises_no_command() {
         let next_step = ReasonCode::EEvidenceIntegrity.next_step(None);
         assert!(!next_step.is_empty(), "the remediation must not be empty");
@@ -729,6 +760,10 @@ mod tests {
         assert_eq!(
             ReasonCode::EEvidenceContract.as_str(),
             "E_EVIDENCE_CONTRACT"
+        );
+        assert_eq!(
+            ReasonCode::EEvidenceProfileInvalid.as_str(),
+            "E_EVIDENCE_PROFILE_INVALID"
         );
         assert_eq!(
             ReasonCode::EEvidenceUnreadable.as_str(),
@@ -953,6 +988,7 @@ mod tests {
             | ReasonCode::EEvidenceContract
             | ReasonCode::EEvidenceLimitExceeded
             | ReasonCode::EEvidencePathRejected
+            | ReasonCode::EEvidenceProfileInvalid
             | ReasonCode::EInvalidArgs
             | ReasonCode::EJudgeUnavailable
             | ReasonCode::ERateLimit
@@ -983,6 +1019,7 @@ mod tests {
             ReasonCode::EEvidenceContract,
             ReasonCode::EEvidenceLimitExceeded,
             ReasonCode::EEvidencePathRejected,
+            ReasonCode::EEvidenceProfileInvalid,
             ReasonCode::EEvidenceUnreadable,
             ReasonCode::EInvalidArgs,
             ReasonCode::EJudgeUnavailable,

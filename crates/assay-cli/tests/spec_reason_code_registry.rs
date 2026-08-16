@@ -859,8 +859,8 @@ fn e_evidence_limit_exceeded_is_registered_and_emittable() {
         "{SPEC} §5.1 has no E_EVIDENCE_LIMIT_EXCEEDED row"
     );
     assert!(
-        registered("5.4").contains("E_EVIDENCE_LIMIT_EXCEEDED"),
-        "{SPEC} §5.4 must keep E_EVIDENCE_LIMIT_EXCEEDED reserved until a production site \
+        !registered("5.4").contains("E_EVIDENCE_LIMIT_EXCEEDED"),
+        "{SPEC} §5.4 must not keep E_EVIDENCE_LIMIT_EXCEEDED reserved once a production site \
          constructs it"
     );
 }
@@ -878,8 +878,8 @@ fn e_evidence_path_rejected_is_registered_and_emittable() {
         "{SPEC} §5.1 has no E_EVIDENCE_PATH_REJECTED row"
     );
     assert!(
-        registered("5.4").contains("E_EVIDENCE_PATH_REJECTED"),
-        "{SPEC} §5.4 must keep E_EVIDENCE_PATH_REJECTED reserved until a production site \
+        !registered("5.4").contains("E_EVIDENCE_PATH_REJECTED"),
+        "{SPEC} §5.4 must not keep E_EVIDENCE_PATH_REJECTED reserved once a production site \
          constructs it"
     );
 }

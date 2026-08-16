@@ -15,6 +15,7 @@ mod cli_failure;
 pub mod diagnostics;
 pub mod enforcement_health_v1;
 mod env_filter;
+mod evidence_verify_reason;
 pub mod exit_codes;
 pub mod fs;
 pub mod landlock_check;

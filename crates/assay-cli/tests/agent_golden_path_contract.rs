@@ -709,8 +709,15 @@ fn offline_profile_verifier_keeps_both_outcomes_on_stdout() {
     assert_eq!(findings.len(), 1, "integrity failure must stay bounded");
     assert_eq!(findings[0]["id"], "bundle_integrity");
     assert!(failure_json.get("verdict").is_none());
-    assert_no_diagnosis(&expected_failure, &failure_json);
-    assert_gap(&expected_failure, 2165);
+    assert_eq!(
+        failure_json["reason_code"], expected_failure["reason_code"],
+        "tamper must publish the registered integrity reason"
+    );
+    assert_eq!(
+        failure_json["next_step"], expected_failure["next_step"],
+        "tamper remediation must match the generated contract"
+    );
+    assert!(expected_failure["gap_issue"].is_null());
 }
 
 #[test]

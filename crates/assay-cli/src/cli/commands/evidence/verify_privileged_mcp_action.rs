@@ -11,7 +11,8 @@
 //! The output is a claim matrix, never a score. Refuted claims still exit 0: the report is the
 //! product and consumers gate on cells; only integrity failure or an invalid verdict exits 2.
 
-use crate::exit_codes;
+use crate::evidence_verify_reason::reason_code_for_verify_error;
+use crate::exit_codes::{self, ReasonCode};
 use anyhow::{Context, Result};
 use assay_evidence::bundle::BundleReader;
 use assay_evidence::types::EvidenceEvent;
@@ -124,6 +125,12 @@ pub struct Report {
     pub claims: Option<Claims>,
     pub findings: Vec<Finding>,
     pub non_claims: [&'static str; 4],
+    /// Verifier diagnostic outside the claim lattice. Absent on success.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<&'static str>,
+    /// Context-invariant prose remediation. Absent on success.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_step: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -198,6 +205,10 @@ pub fn verify_bundle_report(bundle: &Path) -> Result<Report> {
 }
 
 fn integrity_fail_report(err: &anyhow::Error) -> Report {
+    let diagnosis = err
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<assay_evidence::VerifyError>())
+        .and_then(reason_code_for_verify_error);
     Report {
         schema: REPORT_SCHEMA,
         profile: PROFILE_ID,
@@ -209,6 +220,8 @@ fn integrity_fail_report(err: &anyhow::Error) -> Report {
             detail: format!("{err:#}"),
         }],
         non_claims: REPORT_NON_CLAIMS,
+        reason_code: diagnosis.map(|reason| reason.as_str()),
+        next_step: diagnosis.map(|reason| reason.next_step(None)),
     }
 }
 
@@ -367,6 +380,8 @@ pub fn profile_report(events: &[EvidenceEvent]) -> Report {
             claims: None,
             findings: violations,
             non_claims: REPORT_NON_CLAIMS,
+            reason_code: Some(ReasonCode::EEvidenceProfileInvalid.as_str()),
+            next_step: Some(ReasonCode::EEvidenceProfileInvalid.next_step(None)),
         };
     }
 
@@ -426,6 +441,8 @@ pub fn profile_report(events: &[EvidenceEvent]) -> Report {
         }),
         findings: notes,
         non_claims: REPORT_NON_CLAIMS,
+        reason_code: None,
+        next_step: None,
     }
 }
 
@@ -623,6 +640,12 @@ fn print_table(report: &Report) {
     println!("Bundle integrity: {}", report.bundle_integrity);
     if let Some(verdict) = report.verdict {
         println!("Verdict:          {verdict}");
+    }
+    if let Some(reason) = report.reason_code {
+        println!("Reason code:      {reason}");
+    }
+    if let Some(next_step) = &report.next_step {
+        println!("Next step:        {next_step}");
     }
     if let Some(claims) = &report.claims {
         println!();
@@ -883,5 +906,56 @@ mod tests {
         assert_eq!(report.verdict, Some("invalid"));
         let value = serde_json::to_value(&report).unwrap();
         assert!(value.get("claims").is_none());
+    }
+
+    #[test]
+    fn stage1_diagnosis_consumes_reachable_limit_and_path_codes() {
+        use assay_evidence::{ErrorClass, ErrorCode, VerifyError};
+
+        for code in [
+            ErrorCode::LimitBundleBytes,
+            ErrorCode::LimitDecodeBytes,
+            ErrorCode::LimitFileSize,
+            ErrorCode::LimitLineBytes,
+            ErrorCode::LimitTotalEvents,
+            ErrorCode::LimitPathLength,
+            ErrorCode::LimitJsonDepth,
+        ] {
+            let err = anyhow::Error::new(VerifyError::new(ErrorClass::Limits, code, "ceiling"));
+            let value = serde_json::to_value(integrity_fail_report(&err)).unwrap();
+            assert_eq!(value["reason_code"], "E_EVIDENCE_LIMIT_EXCEEDED", "{code}");
+            assert_ne!(value["reason_code"], "E_EVIDENCE_INTEGRITY", "{code}");
+            assert_ne!(value["reason_code"], "E_EVIDENCE_CONTRACT", "{code}");
+            assert_ne!(value["reason_code"], "E_EVIDENCE_UNREADABLE", "{code}");
+            assert!(value.get("claims").is_none(), "{code}");
+        }
+
+        let path_err = anyhow::Error::new(VerifyError::new(
+            ErrorClass::Security,
+            ErrorCode::SecurityPathTraversal,
+            "path",
+        ));
+        let path_value = serde_json::to_value(integrity_fail_report(&path_err)).unwrap();
+        assert_eq!(path_value["reason_code"], "E_EVIDENCE_PATH_REJECTED");
+        assert_ne!(path_value["reason_code"], "E_EVIDENCE_LIMIT_EXCEEDED");
+
+        let absolute = anyhow::Error::new(VerifyError::new(
+            ErrorClass::Security,
+            ErrorCode::SecurityAbsolutePath,
+            "absolute",
+        ));
+        let absolute_value = serde_json::to_value(integrity_fail_report(&absolute)).unwrap();
+        assert!(
+            absolute_value.get("reason_code").is_none(),
+            "SecurityAbsolutePath is enum-only; completeness does not require an emission"
+        );
+    }
+
+    #[test]
+    fn success_report_omits_diagnosis_fields() {
+        let report = profile_report(&[ev(decision_payload("deny"), 0)]);
+        let value = serde_json::to_value(&report).unwrap();
+        assert!(value.get("reason_code").is_none());
+        assert!(value.get("next_step").is_none());
     }
 }

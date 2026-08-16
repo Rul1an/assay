@@ -7,27 +7,8 @@ use assay_core::report::summary::Summary;
 use crate::cli::commands::pipeline_error::emit_operator_diagnostic;
 use crate::exit_codes::{ReasonCode, RunOutcome};
 
-const EVIDENCE_INTEGRITY_CODES: &[assay_evidence::ErrorCode] = &[
-    assay_evidence::ErrorCode::IntegrityManifestHash,
-    assay_evidence::ErrorCode::IntegrityEventHash,
-    assay_evidence::ErrorCode::IntegrityFileSizeMismatch,
-    assay_evidence::ErrorCode::IntegrityRunRootMismatch,
-];
-
-const EVIDENCE_UNREADABLE_CODES: &[assay_evidence::ErrorCode] = &[
-    assay_evidence::ErrorCode::IntegrityIo,
-    assay_evidence::ErrorCode::IntegrityGzip,
-    assay_evidence::ErrorCode::IntegrityTar,
-];
-
-fn evidence_reason_for_verifier_code(code: assay_evidence::ErrorCode) -> Option<ReasonCode> {
-    if EVIDENCE_INTEGRITY_CODES.contains(&code) {
-        Some(ReasonCode::EEvidenceIntegrity)
-    } else if EVIDENCE_UNREADABLE_CODES.contains(&code) {
-        Some(ReasonCode::EEvidenceUnreadable)
-    } else {
-        None
-    }
+fn evidence_reason(error: &assay_evidence::VerifyError) -> Option<ReasonCode> {
+    crate::evidence_verify_reason::reason_code_for_verify_error(error)
 }
 
 /// A classified command failure that the top-level CLI funnel can render.
@@ -65,8 +46,7 @@ impl CliFailure {
         let verifier = error
             .chain()
             .find_map(|cause| cause.downcast_ref::<assay_evidence::VerifyError>())?;
-        if evidence_reason_for_verifier_code(verifier.code) != Some(ReasonCode::EEvidenceIntegrity)
-        {
+        if evidence_reason(verifier) != Some(ReasonCode::EEvidenceIntegrity) {
             return None;
         }
 
@@ -98,10 +78,7 @@ impl CliFailure {
             .chain()
             .find_map(|cause| cause.downcast_ref::<assay_evidence::VerifyError>());
         let unreadable = match verifier {
-            Some(verifier) => {
-                evidence_reason_for_verifier_code(verifier.code)
-                    == Some(ReasonCode::EEvidenceUnreadable)
-            }
+            Some(verifier) => evidence_reason(verifier) == Some(ReasonCode::EEvidenceUnreadable),
             None => {
                 error.downcast_ref::<std::io::Error>().is_some()
                     || error
@@ -188,10 +165,24 @@ pub(crate) fn emit_summary_stdout(summary: &Summary) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CliFailure, EVIDENCE_INTEGRITY_CODES, EVIDENCE_UNREADABLE_CODES};
+    use super::CliFailure;
+    use crate::evidence_verify_reason::reason_code_for_verify_error;
+    use crate::exit_codes::ReasonCode;
     use assay_evidence::{ErrorClass, ErrorCode, VerifyError};
     use std::collections::BTreeSet;
     use std::path::Path;
+
+    const INTEGRITY_CODES: &[ErrorCode] = &[
+        ErrorCode::IntegrityManifestHash,
+        ErrorCode::IntegrityEventHash,
+        ErrorCode::IntegrityFileSizeMismatch,
+        ErrorCode::IntegrityRunRootMismatch,
+    ];
+    const UNREADABLE_CODES: &[ErrorCode] = &[
+        ErrorCode::IntegrityIo,
+        ErrorCode::IntegrityGzip,
+        ErrorCode::IntegrityTar,
+    ];
 
     fn verifier_error(class: ErrorClass, code: ErrorCode) -> anyhow::Error {
         anyhow::Error::new(VerifyError::new(class, code, "measured failure"))
@@ -214,9 +205,17 @@ mod tests {
             !normative.is_empty(),
             "the normative integrity boundary parser must find verifier codes"
         );
-        let implemented: BTreeSet<String> = EVIDENCE_INTEGRITY_CODES
+        let implemented: BTreeSet<String> = INTEGRITY_CODES
             .iter()
-            .map(ToString::to_string)
+            .copied()
+            .filter(|code| {
+                reason_code_for_verify_error(&VerifyError::new(
+                    ErrorClass::Integrity,
+                    *code,
+                    "boundary",
+                )) == Some(ReasonCode::EEvidenceIntegrity)
+            })
+            .map(|code| code.to_string())
             .collect();
         assert_eq!(
             implemented,
@@ -240,9 +239,17 @@ mod tests {
             !normative.is_empty(),
             "the unreadable reason registry parser must find verifier codes"
         );
-        let implemented: BTreeSet<String> = EVIDENCE_UNREADABLE_CODES
+        let implemented: BTreeSet<String> = UNREADABLE_CODES
             .iter()
-            .map(ToString::to_string)
+            .copied()
+            .filter(|code| {
+                reason_code_for_verify_error(&VerifyError::new(
+                    ErrorClass::Integrity,
+                    *code,
+                    "registry",
+                )) == Some(ReasonCode::EEvidenceUnreadable)
+            })
+            .map(|code| code.to_string())
             .collect();
         assert_eq!(
             implemented,
@@ -253,7 +260,7 @@ mod tests {
 
     #[test]
     fn evidence_integrity_classification_matches_the_normative_code_boundary() {
-        for &code in EVIDENCE_INTEGRITY_CODES {
+        for &code in INTEGRITY_CODES {
             let failure = CliFailure::evidence_integrity(
                 Path::new("bundle.tar.gz"),
                 &verifier_error(ErrorClass::Integrity, code),
@@ -297,7 +304,7 @@ mod tests {
             .expect("a direct open failure must classify as unreadable");
         assert_eq!(failure.outcome.reason_code, "E_EVIDENCE_UNREADABLE");
 
-        for &code in EVIDENCE_UNREADABLE_CODES {
+        for &code in UNREADABLE_CODES {
             assert!(
                 CliFailure::evidence_unreadable(
                     Path::new("bundle.tar.gz"),

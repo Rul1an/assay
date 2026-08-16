@@ -567,17 +567,25 @@ STEPS: list[dict[str, object]] = [
                     "--format",
                     "json",
                 ],
-                gap_issue=2165,
+                reason_code="E_EVIDENCE_INTEGRITY",
+                next_step=(
+                    "Obtain an undamaged bundle from its producer; the content this bundle "
+                    "carries does not match what it records"
+                ),
             ),
         ],
         "stdout_summary": (
             "Both paths parse as `assay.privileged_mcp_action.verify.report.v0`. Success "
-            "has `bundle_integrity: pass` and `verdict: valid`; tamper has "
-            "`bundle_integrity: fail`, a bounded finding, and no verdict."
+            "has `bundle_integrity: pass` and `verdict: valid` and omits diagnosis. Tamper "
+            "has `bundle_integrity: fail`, a bounded finding, no verdict, and "
+            "`E_EVIDENCE_INTEGRITY`."
         ),
         "failure_summary": (
-            "The failure report has no registered `reason_code` or actionable `next_step`: "
-            "[gap #2165](https://github.com/Rul1an/assay/issues/2165)."
+            "A recorded-value mismatch publishes `E_EVIDENCE_INTEGRITY`. A typed "
+            "`Contract*` defect publishes `E_EVIDENCE_CONTRACT`. A stage-1 pass whose "
+            "profile verdict is invalid publishes `E_EVIDENCE_PROFILE_INVALID`. Ceiling "
+            "refusals and `SecurityPathTraversal` publish `E_EVIDENCE_LIMIT_EXCEEDED` and "
+            "`E_EVIDENCE_PATH_REJECTED`. Success omits both diagnostic fields."
         ),
     },
     {

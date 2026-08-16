@@ -27,6 +27,8 @@ const REPORT_NON_CLAIMS: [&str; 4] = [
 const INTEGRITY_NEXT_STEP: &str = "Obtain an undamaged bundle from its producer; the content this bundle carries does not match what it records";
 const CONTRACT_NEXT_STEP: &str = "Obtain or reissue evidence that conforms to the declared bundle contract; this bundle was readable and does not satisfy that contract";
 const PROFILE_INVALID_NEXT_STEP: &str = "Obtain or reissue evidence whose records satisfy the named evidence profile; per-violation details are in findings";
+const LIMIT_NEXT_STEP: &str = "Verification stopped at a configured ceiling and reached no verdict; obtain a smaller bundle from its producer, or raise the ceiling deliberately and repeat the inspection";
+const PATH_NEXT_STEP: &str = "An archive member path was refused as unsafe to extract; obtain a bundle whose member paths stay inside the extraction root from its producer";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExpectedDiagnosis {
@@ -316,5 +318,103 @@ fn diagnosis_mutations_keep_the_three_facts_apart() {
     assert!(
         !bad_102["next_step"].as_str().unwrap_or("").is_empty(),
         "profile-invalid next_step must not be empty"
+    );
+}
+
+fn write_named_member_bundle(dir: &Path, member: &str) -> PathBuf {
+    let dest = dir.join("synthetic.bundle.tar.gz");
+    let script = dir.join("write_tar.py");
+    std::fs::write(
+        &script,
+        "import io, sys, tarfile\n\
+         dest, member = sys.argv[1], sys.argv[2]\n\
+         buf = io.BytesIO()\n\
+         archive = tarfile.open(fileobj=buf, mode='w:gz')\n\
+         info = tarfile.TarInfo(member)\n\
+         info.size = 1\n\
+         archive.addfile(info, io.BytesIO(b'x'))\n\
+         archive.close()\n\
+         open(dest, 'wb').write(buf.getvalue())\n",
+    )
+    .expect("write python helper");
+    let status = std::process::Command::new("python3")
+        .args([
+            script.as_os_str(),
+            dest.as_os_str(),
+            std::ffi::OsStr::new(member),
+        ])
+        .status()
+        .expect("python3 tarfile");
+    assert!(status.success(), "python3 failed to write {member}");
+    dest
+}
+
+/// Synthetic command-level cases sit beside the 14 corpus vectors. They do not fold
+/// Limits/Security into Integrity/Contract/Unreadable. SecurityAbsolutePath is enum-only.
+#[test]
+fn synthetic_limit_and_path_cases_consume_their_own_codes() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let long_name = "a".repeat(257);
+    let limit_bundle = write_named_member_bundle(tmp.path(), &long_name);
+    let (limit_report, limit_exit) = verify(&limit_bundle);
+    assert_eq!(limit_exit, 2);
+    assert_diagnosis(
+        "synthetic-limit-path-length",
+        &limit_report,
+        ExpectedDiagnosis::Present {
+            reason_code: "E_EVIDENCE_LIMIT_EXCEEDED",
+            next_step: LIMIT_NEXT_STEP,
+        },
+    );
+    assert_ne!(limit_report["reason_code"], "E_EVIDENCE_INTEGRITY");
+    assert_ne!(limit_report["reason_code"], "E_EVIDENCE_CONTRACT");
+    assert_ne!(limit_report["reason_code"], "E_EVIDENCE_UNREADABLE");
+    assert_ne!(limit_report["reason_code"], "E_EVIDENCE_PATH_REJECTED");
+    assert!(limit_report.get("claims").is_none());
+    assert_eq!(limit_report["bundle_integrity"], "fail");
+
+    let path_dir = tmp.path().join("path");
+    std::fs::create_dir(&path_dir).expect("path dir");
+    let path_bundle = write_named_member_bundle(&path_dir, "../x");
+    let (path_report, path_exit) = verify(&path_bundle);
+    assert_eq!(path_exit, 2);
+    assert_diagnosis(
+        "synthetic-security-path-traversal",
+        &path_report,
+        ExpectedDiagnosis::Present {
+            reason_code: "E_EVIDENCE_PATH_REJECTED",
+            next_step: PATH_NEXT_STEP,
+        },
+    );
+    assert_ne!(path_report["reason_code"], "E_EVIDENCE_LIMIT_EXCEEDED");
+    assert_ne!(path_report["reason_code"], "E_EVIDENCE_INTEGRITY");
+    assert_ne!(path_report["reason_code"], "E_EVIDENCE_CONTRACT");
+    assert_ne!(path_report["reason_code"], "E_EVIDENCE_UNREADABLE");
+    assert!(path_report.get("claims").is_none());
+    assert_eq!(path_report["bundle_integrity"], "fail");
+
+    let (limit_table, _) = verify_table(&limit_bundle);
+    assert!(
+        limit_table.contains("E_EVIDENCE_LIMIT_EXCEEDED") && limit_table.contains(LIMIT_NEXT_STEP),
+        "limit table must publish diagnosis, got:\n{limit_table}"
+    );
+    let (path_table, _) = verify_table(&path_bundle);
+    assert!(
+        path_table.contains("E_EVIDENCE_PATH_REJECTED") && path_table.contains(PATH_NEXT_STEP),
+        "path table must publish diagnosis, got:\n{path_table}"
+    );
+}
+
+#[test]
+fn security_absolute_path_is_not_required_for_command_completeness() {
+    let errors = include_str!("../../assay-evidence/src/bundle/writer_next/errors.rs");
+    assert!(
+        errors.contains("SecurityAbsolutePath,"),
+        "the enum still declares the unreachable SecurityAbsolutePath variant"
+    );
+    let verify_src = include_str!("../../assay-evidence/src/bundle/writer_next/verify.rs");
+    assert!(
+        !verify_src.contains("SecurityAbsolutePath"),
+        "do not invent a SecurityAbsolutePath emission; PATH_REJECTED completeness is SecurityPathTraversal"
     );
 }

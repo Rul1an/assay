@@ -7,16 +7,19 @@ All notable changes to this project will be documented in this file.
 ### Added
 - `E_EVIDENCE_CONTRACT` is registered for a readable evidence bundle that violates its declared
   format contract (`ErrorClass::Contract` / `Contract*`). It stays distinct from recorded-value
-  mismatch and from unreadable I/O or archive failures. Reserved: nothing constructs the variant
-  yet (#2219; consumers #2412, #2165).
+  mismatch and from unreadable I/O or archive failures. `assay evidence verify-privileged-mcp-action`
+  constructs it for typed `Contract*` stage-1 failures (#2165).
 - `E_EVIDENCE_LIMIT_EXCEEDED` is registered for a typed evidence-verifier ceiling refusal
   (`ErrorClass::Limits` / `Limit*`). Verification stopped before reaching a verdict, so it asserts
-  nothing about the bundle's content. Reserved: nothing constructs the variant yet
-  (#2415; consumer #2165).
+  nothing about the bundle's content. Constructed by `verify-privileged-mcp-action` for reachable
+  `Limit*` codes (#2165).
 - `E_EVIDENCE_PATH_REJECTED` is registered for a typed archive-path refusal
-  (`ErrorClass::Security` / `Security*`: an absolute or traversal-capable member path). It carries
-  no maliciousness or producer-intent claim. Reserved: nothing constructs the variant yet
-  (#2415; consumer #2165).
+  (`ErrorClass::Security` / `SecurityPathTraversal`). It carries no maliciousness or
+  producer-intent claim. Constructed by `verify-privileged-mcp-action`. `SecurityAbsolutePath`
+  remains enum-only and is not required for that command's completeness (#2165).
+- `E_EVIDENCE_PROFILE_INVALID` is registered and constructed for a stage-1 pass whose privileged
+  MCP action profile verdict is invalid. It is not a bundle defect and carries no claim or source
+  class (#2165).
 
 ### Changed
 - The built-in stdio MCP policy tools now fail closed on outer dispatch errors
