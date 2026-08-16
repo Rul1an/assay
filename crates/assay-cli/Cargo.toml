@@ -134,6 +134,7 @@ predicates = "3.1.4"
 proptest = "1.10"
 serial_test = "3.5.0"
 criterion = "0.8"
+sha2 = { workspace = true }
 
 [target.'cfg(unix)'.dev-dependencies]
 process-wrap = { workspace = true, features = ["process-group", "std"] }

@@ -13,6 +13,8 @@
 
 use assert_cmd::Command;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 const REPORT_SCHEMA: &str = "assay.privileged_mcp_action.verify.report.v0";
@@ -115,7 +117,7 @@ fn corpus_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/privileged-mcp-action-v0")
 }
 
-fn verify(bundle: &Path) -> (Value, i32) {
+fn verify_raw(bundle: &Path) -> (Vec<u8>, i32) {
     let output = Command::cargo_bin("assay")
         .expect("assay binary")
         .args(["evidence", "verify-privileged-mcp-action"])
@@ -123,9 +125,50 @@ fn verify(bundle: &Path) -> (Value, i32) {
         .args(["--format", "json"])
         .output()
         .expect("run verifier");
-    let report: Value = serde_json::from_slice(&output.stdout)
+    (output.stdout, output.status.code().expect("exit code"))
+}
+
+fn verify(bundle: &Path) -> (Value, i32) {
+    let (stdout, exit_code) = verify_raw(bundle);
+    let report: Value = serde_json::from_slice(&stdout)
         .unwrap_or_else(|e| panic!("report for {} is not JSON: {e}", bundle.display()));
-    (report, output.status.code().expect("exit code"))
+    (report, exit_code)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .fold(String::with_capacity(64), |mut acc, byte| {
+            let _ = write!(acc, "{byte:02x}");
+            acc
+        })
+}
+
+/// Pre-change success stdout pins measured 2026-08-16 from the assay binary built at
+/// `656e692ff02a00052d833d0676e229452c3f23fe` in temporary sibling worktree
+/// `/Users/roelschuurkes/wt-2165-prechange-bytes` (`cargo build -p assay-cli`).
+/// Command: `assay evidence verify-privileged-mcp-action --format json <bundle>`.
+/// Corpus: committed `conformance/privileged-mcp-action-v0/vectors/` (byte-identical
+/// to that commit). Digest is SHA-256 of raw stdout with no trailing-newline strip.
+/// Three unique forms: ok-001; shared ok-002/003/004; ok-005.
+fn prechange_success_stdout_pin(id: &str) -> (usize, &'static str) {
+    match id {
+        "ok-001-deny-bound-observation" => (
+            782,
+            "9832de15214edcb07ff9006897b95bdbd202a256918b5dd8086617e6afb85329",
+        ),
+        "ok-002-deny-observation-missing"
+        | "ok-003-allow-no-outcome-observation"
+        | "ok-004-allow-with-diagnostic-establish" => (
+            740,
+            "6a861a7c406eafb4ce450e1755c5c645e3ad4d97e5ca2fec618c123432cf4132",
+        ),
+        "ok-005-allow-contradicted-by-denial" => (
+            1000,
+            "f949e7f2332fdc993eb361020cf2fcfaaba85cb5c14aa28f9ac34a811f4d5392",
+        ),
+        other => panic!("no pre-change stdout pin for {other}"),
+    }
 }
 
 #[test]
@@ -230,6 +273,30 @@ fn contradiction_vector_reports_the_contradiction_finding() {
         &report,
         ExpectedDiagnosis::Absent,
     );
+}
+
+#[test]
+fn success_json_stdout_is_byte_identical_to_prechange() {
+    let corpus = corpus_dir();
+    let cases = [
+        "ok-001-deny-bound-observation",
+        "ok-002-deny-observation-missing",
+        "ok-003-allow-no-outcome-observation",
+        "ok-004-allow-with-diagnostic-establish",
+        "ok-005-allow-contradicted-by-denial",
+    ];
+    for id in cases {
+        let bundle = corpus.join(format!("vectors/{id}.bundle.tar.gz"));
+        let (stdout, exit_code) = verify_raw(&bundle);
+        assert_eq!(exit_code, 0, "{id}: success exits 0");
+        let (len, digest) = prechange_success_stdout_pin(id);
+        assert_eq!(stdout.len(), len, "{id}: raw stdout length vs pre-change");
+        assert_eq!(
+            sha256_hex(&stdout),
+            digest,
+            "{id}: raw stdout sha256 vs pre-change"
+        );
+    }
 }
 
 fn verify_table(bundle: &Path) -> (String, i32) {
