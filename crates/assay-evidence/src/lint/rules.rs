@@ -382,8 +382,10 @@ fn check_retained_view_readability(
                 .to_string()
         } else {
             "Approval basis declares an encrypted retained view (opaque_unbindable: no plaintext \
-             commitment) — content-review claims cap at incomplete; recoverable only by key \
-             disclosure"
+             commitment) — content-review claims cap at incomplete; recovery may run through key \
+             disclosure, but that path is not exhaustive: for some ciphertext classes plaintext is \
+             recoverable by a third party with no key holder involved, so opaque to the reviewer \
+             does not imply confidential against others"
                 .to_string()
         }
     } else {

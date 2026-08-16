@@ -45,6 +45,13 @@ pub const APPROVAL_RETAINED_VIEW_ENCRYPTED: &str = "encrypted";
 /// Reserved field beside an `encrypted` retained view: the party holding the decryption key.
 /// Opacity is reviewer-relative — without this a reviewer cannot even tell whether the record
 /// is opaque *to them*.
+///
+/// This field answers "who holds the key", which is a different question from "who can obtain
+/// the plaintext". The two coincide only when the ciphertext is closed, and that is a property
+/// of the crypto system, not of the retained record: for some ciphertext classes a third party
+/// recovers the plaintext with no key holder involved. So a named key holder bounds
+/// reviewability only — it never establishes that the retained body is confidential against
+/// others, and a record must not be treated as safe to publish because it is opaque.
 #[allow(dead_code)] // reserved vocabulary: no emitter exists by design
 pub const APPROVAL_ENCRYPTED_FIELD_KEY_HOLDER: &str = "approval_encryption_key_holder";
 /// Reserved field: SALTED commitment to the plaintext (salt disclosed together with the
