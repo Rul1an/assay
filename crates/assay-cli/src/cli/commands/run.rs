@@ -46,8 +46,9 @@ pub(crate) async fn run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32>
     // - text: human-readable summary on stderr (default; unchanged behavior).
     // - json: machine-readable report on stdout, so `assay run --format json
     //   > results.json` composes with CI pipelines.
-    // The run.json / summary.json artifacts are written regardless, so the
-    // exit-code contract is unaffected by the chosen display format.
+    // run.json is written before this display step. A JSON stdout write
+    // failure returns exit 3 without writing summary.json or exporting a
+    // baseline.
     match args.format {
         super::super::args::OutputFormat::Text => {
             print_pipeline_summary(&artifacts, args.explain_skip, &summary);

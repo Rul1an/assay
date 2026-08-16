@@ -17,11 +17,18 @@ pub(crate) fn write_document(writer: &mut impl Write, rendered: &str) -> io::Res
 
 /// Map an output-write result to an exit code. A write failure is an infra/output
 /// problem (`EXIT_INFRA_ERROR`) for every target, including stdout BrokenPipe.
+///
+/// The diagnostic line uses a fallible stderr write whose `Result` is ignored so
+/// a closed stderr cannot panic and replace the defined exit 3.
 pub(crate) fn map_write_result(target: &str, result: io::Result<()>) -> i32 {
     match result {
         Ok(()) => EXIT_SUCCESS,
         Err(error) => {
-            eprintln!("[infra_error] cannot write output ({target}): {error}");
+            let mut stderr = io::stderr().lock();
+            let _ = writeln!(
+                stderr,
+                "[infra_error] cannot write output ({target}): {error}"
+            );
             EXIT_INFRA_ERROR
         }
     }
@@ -48,6 +55,18 @@ mod tests {
 
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
+        }
+    }
+
+    struct FailFlush;
+
+    impl Write for FailFlush {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(Error::new(ErrorKind::BrokenPipe, "injected flush failure"))
         }
     }
 
@@ -85,6 +104,33 @@ mod tests {
                 "{kind:?} must not be swallowed or remapped"
             );
         }
+    }
+
+    #[test]
+    fn write_document_flush_failure_maps_to_infra_error() {
+        let mut writer = FailFlush;
+        let result = write_document(&mut writer, r#"{"ok":true}"#);
+        assert_eq!(
+            map_write_result("stdout", result),
+            EXIT_INFRA_ERROR,
+            "a successful write that fails on flush is still exit 3"
+        );
+    }
+
+    #[test]
+    fn map_write_result_uses_a_fallible_stderr_write() {
+        let prod = include_str!("output_write.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source precedes the test module");
+        assert!(
+            !prod.contains("eprintln!"),
+            "diagnostic write must not use eprintln!, which panics on a closed stderr"
+        );
+        assert!(
+            prod.contains("writeln!") && prod.contains("let _ ="),
+            "the diagnostic must writeln! to locked stderr and ignore that Result"
+        );
     }
 
     #[test]

@@ -14,6 +14,7 @@ use std::ffi::OsStr;
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -28,9 +29,8 @@ const LIMITS: ProcessLimits =
 const LARGE_RUN_LIMITS: ProcessLimits =
     ProcessLimits::new(Duration::from_secs(45), 4 * 1024 * 1024, 64 * 1024);
 const PIPE_CAPACITY: usize = 64 * 1024;
-/// POSIX minimum `PIPE_BUF`. Linux is typically 4096; either is far below the fixture.
-const PIPE_BUF: usize = 512;
 const PARTIAL_READ: usize = 200;
+const REAP_GRACE: Duration = Duration::from_secs(1);
 
 const MATCHING_TRACE: &str = r#"{"schema_version": 1, "type": "assay.trace", "request_id": "hello_1", "prompt": "hello_prompt", "response": "Hello Assay", "model": "trace", "provider": "trace"}
 "#;
@@ -154,6 +154,42 @@ fn join_bounded_reader(
         .unwrap_or_else(|error| panic!("{context}: read stderr: {error}"))
 }
 
+#[cfg(unix)]
+fn kill_already_gone(error: &std::io::Error) -> bool {
+    error.raw_os_error() == Some(libc::ESRCH)
+}
+
+#[cfg(windows)]
+fn kill_already_gone(_error: &std::io::Error) -> bool {
+    false
+}
+
+fn start_kill_named(child: &mut dyn ChildWrapper, context: &str) -> Result<(), String> {
+    match child.start_kill() {
+        Ok(()) => Ok(()),
+        Err(error) if kill_already_gone(&error) => Ok(()),
+        Err(error) => Err(format!("{context}: start_kill failed: {error}")),
+    }
+}
+
+fn reap_after_kill(child: &mut dyn ChildWrapper, context: &str) -> Result<(), String> {
+    let reap_deadline = Instant::now() + REAP_GRACE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return Ok(()),
+            Ok(None) if Instant::now() < reap_deadline => {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Ok(None) => {
+                return Err(format!(
+                    "{context}: child did not exit within the wait deadline; reap grace expired"
+                ));
+            }
+            Err(error) => return Err(format!("{context}: reap after kill failed: {error}")),
+        }
+    }
+}
+
 fn wait_or_kill(
     child: &mut dyn ChildWrapper,
     timeout: Duration,
@@ -167,31 +203,16 @@ fn wait_or_kill(
                 thread::sleep(Duration::from_millis(10));
             }
             Ok(None) => {
-                let _ = child.start_kill();
-                let reap_deadline = Instant::now() + Duration::from_secs(1);
-                while Instant::now() < reap_deadline {
-                    match child.try_wait() {
-                        Ok(Some(_)) => {
-                            return Err(format!(
-                                "{context}: child did not exit within {timeout:?}"
-                            ));
-                        }
-                        Ok(None) => thread::sleep(Duration::from_millis(10)),
-                        Err(error) => {
-                            return Err(format!("{context}: reap after kill failed: {error}"))
-                        }
-                    }
-                }
-                return Err(format!(
-                    "{context}: child did not exit within {timeout:?}; reap grace expired"
-                ));
+                start_kill_named(child, context)?;
+                reap_after_kill(child, context)?;
+                return Err(format!("{context}: child did not exit within {timeout:?}"));
             }
             Err(error) => return Err(format!("{context}: wait failed: {error}")),
         }
     }
 }
 
-/// Wait/kill owns the deadline. The stderr reader is joined only after that.
+/// Wait/kill owns the deadline. Stderr is joined only after a child-chosen exit.
 fn collect_closed_stdout(
     child: &mut dyn ChildWrapper,
     stderr_reader: Option<thread::JoinHandle<std::io::Result<Vec<u8>>>>,
@@ -199,18 +220,49 @@ fn collect_closed_stdout(
     stdout_prefix: Vec<u8>,
     context: &str,
 ) -> Result<ClosedStdout, String> {
-    let wait = wait_or_kill(child, timeout, context);
+    let code = wait_or_kill(child, timeout, context)?;
     let stderr = join_bounded_reader(stderr_reader, context);
-    match wait {
-        Ok(code) => Ok(ClosedStdout {
-            code,
-            stdout_prefix,
-            stderr,
-        }),
-        Err(error) => Err(format!(
-            "{error}; stderr={}",
-            String::from_utf8_lossy(&stderr)
-        )),
+    Ok(ClosedStdout {
+        code,
+        stdout_prefix,
+        stderr,
+    })
+}
+
+fn read_prefix_bounded(
+    mut reader: impl Read + Send + 'static,
+    child: &mut dyn ChildWrapper,
+    timeout: Duration,
+    context: &str,
+) -> Result<Vec<u8>, String> {
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut buf = vec![0_u8; PARTIAL_READ];
+        let result = reader.read(&mut buf).map(|n| {
+            buf.truncate(n);
+            buf
+        });
+        let _ = tx.send(result);
+    });
+    let deadline = Instant::now() + timeout;
+    loop {
+        match rx.try_recv() {
+            Ok(Ok(buf)) => return Ok(buf),
+            Ok(Err(error)) => return Err(format!("{context}: partial read: {error}")),
+            Err(mpsc::TryRecvError::Disconnected) => {
+                return Err(format!("{context}: partial-read worker disconnected"));
+            }
+            Err(mpsc::TryRecvError::Empty) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                start_kill_named(child, context)?;
+                reap_after_kill(child, context)?;
+                return Err(format!(
+                    "{context}: partial read did not complete within {timeout:?}"
+                ));
+            }
+        }
     }
 }
 
@@ -240,33 +292,36 @@ fn run_reader_already_gone(command: Command, context: &str) -> ClosedStdout {
         .unwrap_or_else(|error| panic!("{error}"))
 }
 
-fn run_partial_then_close(mut command: Command, context: &str) -> ClosedStdout {
-    let (mut reader, writer) = std::io::pipe().expect("pipe");
+fn run_partial_then_close_with(
+    mut command: Command,
+    timeout: Duration,
+    context: &str,
+) -> Result<ClosedStdout, String> {
+    let (reader, writer) = std::io::pipe().expect("pipe");
     command
         .stdin(Stdio::null())
         .stdout(Stdio::from(writer))
         .stderr(Stdio::piped());
     let mut child = wrap_command(command)
         .spawn()
-        .unwrap_or_else(|error| panic!("{context}: spawn: {error}"));
+        .map_err(|error| format!("{context}: spawn: {error}"))?;
     let stderr_reader = child
         .stderr()
         .take()
         .map(|pipe| spawn_bounded_reader(pipe, LARGE_RUN_LIMITS.max_stderr_bytes));
-    let mut stdout_prefix = vec![0_u8; PARTIAL_READ];
-    let read = reader
-        .read(&mut stdout_prefix)
-        .unwrap_or_else(|error| panic!("{context}: partial read: {error}"));
-    stdout_prefix.truncate(read);
-    drop(reader);
+    let stdout_prefix = read_prefix_bounded(reader, child.as_mut(), timeout, context)?;
     collect_closed_stdout(
         child.as_mut(),
         stderr_reader,
-        LARGE_RUN_LIMITS.timeout,
+        timeout,
         stdout_prefix,
         context,
     )
-    .unwrap_or_else(|error| panic!("{error}"))
+}
+
+fn run_partial_then_close(command: Command, context: &str) -> ClosedStdout {
+    run_partial_then_close_with(command, LARGE_RUN_LIMITS.timeout, context)
+        .unwrap_or_else(|error| panic!("{error}"))
 }
 
 fn assert_infra_write_failure(result: &ClosedStdout, context: &str) {
@@ -277,6 +332,26 @@ fn assert_infra_write_failure(result: &ClosedStdout, context: &str) {
         String::from_utf8_lossy(&result.stderr)
     );
     assert_no_rust_panic(&result.stderr, context);
+}
+
+#[test]
+fn closed_stdout_harness_does_not_join_stderr_on_wait_error() {
+    let harness = include_str!("stdout_json_write_contract.rs")
+        .split("#[test]")
+        .next()
+        .expect("harness helpers precede the tests");
+    assert!(
+        harness.contains("let code = wait_or_kill(child, timeout, context)?;"),
+        "wait Err must return before joining stderr"
+    );
+    assert!(
+        !harness.contains(concat!("let _ = child.", "start_kill()")),
+        "start_kill failures must be surfaced"
+    );
+    assert!(
+        harness.contains("read_prefix_bounded"),
+        "the prefix read must be deadline-bounded"
+    );
 }
 
 #[test]
@@ -388,11 +463,6 @@ fn run_json_partial_read_then_close_is_exit_three() {
         "partial-read fixture must exceed the pipe buffer, got {} bytes",
         drained.stdout.len()
     );
-    assert!(
-        drained.stdout.len() > PIPE_BUF,
-        "partial-read fixture must exceed PIPE_BUF ({PIPE_BUF}), got {} bytes",
-        drained.stdout.len()
-    );
 
     let mut command = assay_command(dir.path());
     command.args([
@@ -414,15 +484,21 @@ fn run_json_partial_read_then_close_is_exit_three() {
 
 #[cfg(unix)]
 fn hanging_stderr_command() -> Command {
-    let mut command = Command::new("sh");
-    command.args(["-c", "while :; do :; done"]);
+    let mut command = Command::new("sleep");
+    command.arg("60");
     command
 }
 
 #[cfg(windows)]
 fn hanging_stderr_command() -> Command {
-    let mut command = Command::new("ping");
-    command.args(["-t", "127.0.0.1"]);
+    let mut command = Command::new("powershell.exe");
+    command.args([
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Start-Sleep -Seconds 60",
+    ]);
     command
 }
 
@@ -442,6 +518,26 @@ fn closed_stdout_harness_times_out_when_child_keeps_stderr_open() {
     assert!(
         started.elapsed() < Duration::from_secs(2),
         "harness hung in stderr drain instead of timing out: {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn partial_read_times_out_when_the_child_never_writes_stdout() {
+    let started = Instant::now();
+    let error = run_partial_then_close_with(
+        hanging_stderr_command(),
+        Duration::from_millis(250),
+        "partial-read hang probe",
+    )
+    .expect_err("a silent child must not block forever on the prefix read");
+    assert!(
+        error.contains("partial read did not complete within"),
+        "prefix read must name its deadline after kill/reap: {error}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "prefix read hung instead of timing out: {:?}",
         started.elapsed()
     );
 }
