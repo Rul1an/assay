@@ -121,7 +121,7 @@ fn doctor_yes_without_fix_fails_fast() {
         .arg(&trace)
         .arg("--yes")
         .assert()
-        .code(1);
+        .code(2);
 
     assert!(
         !trace.exists(),
