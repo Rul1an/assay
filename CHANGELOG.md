@@ -9,6 +9,14 @@ All notable changes to this project will be documented in this file.
   format contract (`ErrorClass::Contract` / `Contract*`). It stays distinct from recorded-value
   mismatch and from unreadable I/O or archive failures. Reserved: nothing constructs the variant
   yet (#2219; consumers #2412, #2165).
+- `E_EVIDENCE_LIMIT_EXCEEDED` is registered for a typed evidence-verifier ceiling refusal
+  (`ErrorClass::Limits` / `Limit*`). Verification stopped before reaching a verdict, so it asserts
+  nothing about the bundle's content. Reserved: nothing constructs the variant yet
+  (#2415; consumer #2165).
+- `E_EVIDENCE_PATH_REJECTED` is registered for a typed archive-path refusal
+  (`ErrorClass::Security` / `Security*`: an absolute or traversal-capable member path). It carries
+  no maliciousness or producer-intent claim. Reserved: nothing constructs the variant yet
+  (#2415; consumer #2165).
 
 ### Changed
 - The built-in stdio MCP policy tools now fail closed on outer dispatch errors

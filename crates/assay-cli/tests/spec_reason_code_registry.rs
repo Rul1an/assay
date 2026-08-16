@@ -333,8 +333,21 @@ fn declared_error_code_variant(line: &str, prefix: &str) -> Option<String> {
 /// `Contract*` is a prefix mention, not an identifier, and is dropped because `*` is not
 /// alphanumeric. That is the difference between naming the set and being a member of it.
 fn backtick_identifiers_with_prefix(text: &str, prefix: &str) -> BTreeSet<String> {
-    let found: BTreeSet<String> = text
-        .split('`')
+    let found = backtick_identifiers_with_prefix_allowing_none(text, prefix);
+    assert!(
+        !found.is_empty(),
+        "boundary parser found no `{prefix}*` identifiers; the fence shape moved"
+    );
+    found
+}
+
+/// The same collection rule without the non-empty guard.
+///
+/// A caller asserting that a boundary names *no* code of some other class needs the empty set to
+/// be an answer rather than a panic. One collection rule, two callers, so the two cannot disagree
+/// about what counts as a named identifier.
+fn backtick_identifiers_with_prefix_allowing_none(text: &str, prefix: &str) -> BTreeSet<String> {
+    text.split('`')
         .enumerate()
         .filter(|(i, _)| i % 2 == 1)
         .map(|(_, token)| token)
@@ -344,12 +357,7 @@ fn backtick_identifiers_with_prefix(text: &str, prefix: &str) -> BTreeSet<String
                 && token.chars().all(char::is_alphanumeric)
         })
         .map(str::to_owned)
-        .collect();
-    assert!(
-        !found.is_empty(),
-        "boundary parser found no `{prefix}*` identifiers; the fence shape moved"
-    );
-    found
+        .collect()
 }
 
 #[test]
@@ -461,6 +469,8 @@ fn the_reserved_section_claims_nothing_that_is_live() {
 /// rule is written.
 const BOUNDARY: &str = "crates/assay-cli/src/exit_codes/evidence_integrity_boundary.md";
 const CONTRACT_BOUNDARY: &str = "crates/assay-cli/src/exit_codes/evidence_contract_boundary.md";
+const LIMIT_BOUNDARY: &str = "crates/assay-cli/src/exit_codes/evidence_limit_boundary.md";
+const PATH_BOUNDARY: &str = "crates/assay-cli/src/exit_codes/evidence_path_boundary.md";
 
 /// One line of flowed prose: every run of whitespace collapsed.
 ///
@@ -557,6 +567,10 @@ const BOUNDARY_INCLUDE: &str =
     "#[doc = include_str!(\"exit_codes/evidence_integrity_boundary.md\")]";
 const CONTRACT_INCLUDE: &str =
     "#[doc = include_str!(\"exit_codes/evidence_contract_boundary.md\")]";
+const LIMIT_DECL: &str = "\n    EEvidenceLimitExceeded,";
+const PATH_DECL: &str = "\n    EEvidencePathRejected,";
+const LIMIT_INCLUDE: &str = "#[doc = include_str!(\"exit_codes/evidence_limit_boundary.md\")]";
+const PATH_INCLUDE: &str = "#[doc = include_str!(\"exit_codes/evidence_path_boundary.md\")]";
 
 /// `text` with its string literals removed, and the number of brackets it leaves open.
 ///
@@ -814,4 +828,140 @@ fn the_boundary_states_the_canonical_flat_digest_formula() {
         !boundary.contains("Merkle"),
         "{BOUNDARY} must not name a structure the verifier does not build"
     );
+}
+
+#[test]
+fn e_evidence_limit_exceeded_is_registered_and_emittable() {
+    // #2415: a ceiling refusal is not a finding about the bundle. Registering the identity is what
+    // stops a consumer inventing a local string or folding the refusal into a content code.
+    assert!(
+        emittable_codes().contains("E_EVIDENCE_LIMIT_EXCEEDED"),
+        "ReasonCode::as_str does not emit E_EVIDENCE_LIMIT_EXCEEDED; the #2415 gap is still open"
+    );
+    assert!(
+        registered("5.1").contains("E_EVIDENCE_LIMIT_EXCEEDED"),
+        "{SPEC} §5.1 has no E_EVIDENCE_LIMIT_EXCEEDED row"
+    );
+    assert!(
+        registered("5.4").contains("E_EVIDENCE_LIMIT_EXCEEDED"),
+        "{SPEC} §5.4 must keep E_EVIDENCE_LIMIT_EXCEEDED reserved until a production site \
+         constructs it"
+    );
+}
+
+#[test]
+fn e_evidence_path_rejected_is_registered_and_emittable() {
+    // #2415: an archive-path refusal establishes that a member path was unsafe to extract, and
+    // nothing about who produced it or why. It needs its own identity for the same reason.
+    assert!(
+        emittable_codes().contains("E_EVIDENCE_PATH_REJECTED"),
+        "ReasonCode::as_str does not emit E_EVIDENCE_PATH_REJECTED; the #2415 gap is still open"
+    );
+    assert!(
+        registered("5.1").contains("E_EVIDENCE_PATH_REJECTED"),
+        "{SPEC} §5.1 has no E_EVIDENCE_PATH_REJECTED row"
+    );
+    assert!(
+        registered("5.4").contains("E_EVIDENCE_PATH_REJECTED"),
+        "{SPEC} §5.4 must keep E_EVIDENCE_PATH_REJECTED reserved until a production site \
+         constructs it"
+    );
+}
+
+#[test]
+fn the_limit_boundary_names_exactly_the_declared_limit_star_variants() {
+    // Derived on both sides, so a new `Limit*` variant is a mapping decision rather than an
+    // automatic member, and dropping one from the boundary fails rather than narrowing the rule
+    // silently. The boundary states the class and makes no reachability claim: which consumer
+    // reaches which code is a property of call graphs, and pinning it here would be one more
+    // thing to go stale in normative text.
+    let declared = error_code_unit_variants_with_prefix("Limit");
+    let named = backtick_identifiers_with_prefix(&read(LIMIT_BOUNDARY), "Limit");
+    assert_eq!(
+        declared, named,
+        "{LIMIT_BOUNDARY} and ErrorCode disagree on the Limit* set. A new variant is a new \
+         mapping decision: name it here in the same change, or say why it is excluded."
+    );
+}
+
+#[test]
+fn the_path_boundary_names_exactly_the_declared_security_star_variants() {
+    // The path code owns the whole `Security*` prefix, so the same derivation applies. A future
+    // `Security*` variant that is not an archive-path fact must not join by prefix alone.
+    let declared = error_code_unit_variants_with_prefix("Security");
+    let named = backtick_identifiers_with_prefix(&read(PATH_BOUNDARY), "Security");
+    assert_eq!(
+        declared, named,
+        "{PATH_BOUNDARY} and ErrorCode disagree on the Security* set. A new variant is a new \
+         mapping decision: name it here in the same change, or say why it is excluded."
+    );
+}
+
+#[test]
+fn both_new_boundaries_require_the_class_as_well_as_the_code() {
+    // A code prefix alone is not the key. `impl From<serde_json::Error>` already shows a class
+    // reaching a code that means something else, so an emitter that keys on the prefix without
+    // the class can classify a failure the verifier never attributed to that class.
+    // Keying on the MUST clause, not on mere presence: both files also name their class in the
+    // opening description, so `contains("ErrorClass::Limits")` stays true after the requirement
+    // itself is deleted. That weaker assertion was written first and a mutation survived it.
+    let limit = read(LIMIT_BOUNDARY);
+    assert!(
+        flowed(&limit).contains("MUST key on `ErrorClass::Limits` together with"),
+        "{LIMIT_BOUNDARY} must require the class as well as the code prefix, in the MUST clause"
+    );
+    let path = read(PATH_BOUNDARY);
+    assert!(
+        flowed(&path).contains("MUST key on `ErrorClass::Security` together with"),
+        "{PATH_BOUNDARY} must require the class as well as the code prefix, in the MUST clause"
+    );
+}
+
+#[test]
+fn neither_new_boundary_names_a_code_from_another_class() {
+    // The set tests are prefix-scoped, so a `Contract*` name pasted into the limit boundary is
+    // invisible to them: it is neither a missing member nor an extra one. A mutation adding
+    // `ContractInvalidJson` to this file survived until this assertion existed.
+    for (file, own) in [(LIMIT_BOUNDARY, "Limit"), (PATH_BOUNDARY, "Security")] {
+        let text = read(file);
+        for foreign in ["Integrity", "Contract", "Limit", "Security"] {
+            if foreign == own {
+                continue;
+            }
+            let named = backtick_identifiers_with_prefix_allowing_none(&text, foreign);
+            assert!(
+                named.is_empty(),
+                "{file} names {foreign}* ErrorCode identifiers {named:?}; this boundary maps one \
+                 class, and naming another class's codes here invites an emitter to fold them in"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_evidence_limit_boundary_reads_the_same_in_the_spec_and_the_code() {
+    assert_eq!(
+        spec_description("5.1", "E_EVIDENCE_LIMIT_EXCEEDED"),
+        flowed(&read(LIMIT_BOUNDARY)),
+        "the §5.1 row and {LIMIT_BOUNDARY} state the same rule; they must not drift apart"
+    );
+}
+
+#[test]
+fn the_evidence_path_boundary_reads_the_same_in_the_spec_and_the_code() {
+    assert_eq!(
+        spec_description("5.1", "E_EVIDENCE_PATH_REJECTED"),
+        flowed(&read(PATH_BOUNDARY)),
+        "the §5.1 row and {PATH_BOUNDARY} state the same rule; they must not drift apart"
+    );
+}
+
+#[test]
+fn nothing_but_the_boundary_include_documents_the_limit_variant() {
+    assert_variant_documented_only_by_include(LIMIT_DECL, LIMIT_INCLUDE, LIMIT_BOUNDARY);
+}
+
+#[test]
+fn nothing_but_the_boundary_include_documents_the_path_variant() {
+    assert_variant_documented_only_by_include(PATH_DECL, PATH_INCLUDE, PATH_BOUNDARY);
 }
