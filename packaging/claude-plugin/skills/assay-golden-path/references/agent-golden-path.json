@@ -8,6 +8,24 @@
   "release_tag": "v5.2.0",
   "source_issue": 2154,
   "journey_issue": 1975,
+  "working_directory_resolver": {
+    "operation": "replace",
+    "canonical_root": "examples/privileged-action-gate",
+    "by_surface": {
+      "source": {
+        "kind": "repository_relative",
+        "value": "examples/privileged-action-gate"
+      },
+      "claude_plugin": {
+        "kind": "host_path_template",
+        "value": "${CLAUDE_PLUGIN_ROOT}/skills/assay-golden-path/assets/privileged-action-gate"
+      },
+      "agent_plugin": {
+        "kind": "skill_relative",
+        "value": "assets/privileged-action-gate"
+      }
+    }
+  },
   "non_claims": [
     "The contract records current behavior; gap rows are not clean results.",
     "Schema identity conventions outside this narrow contract remain owned by issue #2167.",
