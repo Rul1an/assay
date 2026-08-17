@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::cli::args::PolicyValidateArgs;
-use crate::cli_failure::{emit_summary_stdout, summary_from_outcome, CliFailure};
+use crate::cli_failure::{summary_from_outcome, write_summary_stdout, CliFailure};
 use crate::exit_codes;
 use crate::exit_codes::RunOutcome;
 use anyhow::Result;
@@ -24,7 +24,7 @@ pub async fn run(args: PolicyValidateArgs) -> Result<i32> {
     if args.is_json() {
         let mut summary = summary_from_outcome(&RunOutcome::success(), true);
         summary.message = None;
-        emit_summary_stdout(&summary)?;
+        return Ok(write_summary_stdout(&summary));
     }
     Ok(exit_codes::OK)
 }
