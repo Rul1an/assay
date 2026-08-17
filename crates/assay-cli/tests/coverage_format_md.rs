@@ -28,6 +28,8 @@ fn coverage_format_md_generates_summary() {
             "web_search",
             "--declared-tool",
             "web_search_alt",
+            "--declared-tool",
+            "*",
             "--format",
             "md",
         ])
@@ -39,4 +41,7 @@ fn coverage_format_md_generates_summary() {
     assert!(markdown.contains("tools_unknown"));
     assert!(markdown.contains("`unknown_tool_x`"));
     assert!(markdown.contains("| `read_document` | `web_search_alt` | 1 |"));
+    assert!(markdown.contains(
+        "Caller-supplied declarations are literal values; wildcard-looking values are not expanded or filtered."
+    ));
 }
