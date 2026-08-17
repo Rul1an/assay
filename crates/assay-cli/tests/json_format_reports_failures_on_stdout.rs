@@ -121,3 +121,116 @@ fn the_text_format_keeps_stdout_clear() {
         "and stderr must still carry the human report"
     );
 }
+
+#[test]
+fn a_failing_ci_writes_the_diagnosis_to_stdout_under_json() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let missing = dir.path().join("missing.yaml");
+
+    let out = Command::new(env!("CARGO_BIN_EXE_assay"))
+        .current_dir(dir.path())
+        .args(["ci", "--format", "json", "--config"])
+        .arg(&missing)
+        .output()
+        .expect("the binary runs");
+
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "a missing config is exit 2; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    assert!(
+        !stdout.trim().is_empty(),
+        "ci --format json must publish its early-failure diagnosis; stderr was: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout must parse as JSON: {e}\n{stdout}"));
+
+    assert_eq!(parsed["schema"], "assay.run_summary.v1");
+    assert_eq!(parsed["exit_code"], 2);
+    assert_eq!(parsed["reason_code"], "E_MISSING_CONFIG");
+    assert!(
+        parsed["next_step"]
+            .as_str()
+            .is_some_and(|step| step.contains("assay")),
+        "the diagnosis must contain actionable recovery, got {:?}",
+        parsed["next_step"]
+    );
+
+    let summary = dir.path().join("summary.json");
+    assert!(summary.is_file(), "summary.json must remain the artifact");
+    let from_disk: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&summary).expect("read summary"))
+            .expect("summary.json parses");
+    assert_eq!(
+        from_disk["reason_code"], parsed["reason_code"],
+        "the artifact and stdout must carry one diagnosis"
+    );
+}
+
+#[test]
+fn a_completed_ci_writes_its_summary_to_stdout_under_json() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let suite = vacuous_suite(dir.path());
+
+    let out = Command::new(env!("CARGO_BIN_EXE_assay"))
+        .current_dir(dir.path())
+        .args([
+            "ci",
+            "--format",
+            "json",
+            "--allow-ineffective-assertions",
+            "--config",
+        ])
+        .arg(&suite)
+        .output()
+        .expect("the binary runs");
+
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "the trace-free probe completes with a failed test; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("completed ci stdout must be JSON: {e}\n{stdout}"));
+    assert_eq!(parsed["schema"], "assay.run_summary.v1");
+    assert_eq!(parsed["exit_code"], 1);
+
+    let from_disk: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("summary.json")).expect("read summary"),
+    )
+    .expect("summary.json parses");
+    assert_eq!(
+        parsed, from_disk,
+        "stdout and summary.json must be the same authoritative report"
+    );
+}
+
+#[test]
+fn the_ci_text_format_keeps_stdout_clear() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let missing = dir.path().join("missing.yaml");
+
+    let out = Command::new(env!("CARGO_BIN_EXE_assay"))
+        .current_dir(dir.path())
+        .args(["ci", "--config"])
+        .arg(&missing)
+        .output()
+        .expect("the binary runs");
+
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        out.stdout.is_empty(),
+        "ci text mode must not leak the machine report to stdout"
+    );
+    assert!(
+        !out.stderr.is_empty(),
+        "ci text mode must retain its operator diagnostic"
+    );
+}

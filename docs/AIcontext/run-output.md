@@ -15,6 +15,11 @@ After a run, Assay writes:
 
 Consumers should branch on **`(reason_code_version, reason_code)`** for semantics; exit code is coarse transport only.
 
+`assay ci --format json` writes the same `assay.run_summary.v1` document as `summary.json` to
+stdout after a completed gate, and writes the same early-failure diagnosis there when the pipeline
+cannot start. The default `text` format keeps stdout empty and retains the operator report on
+stderr. `summary.json` remains the authoritative artifact in both modes.
+
 ## run.json
 
 | Field | Type | Description |
@@ -92,6 +97,7 @@ On config error, missing trace, or similar early-exit:
 - **run.json** (minimal): exit_code, reason_code, reason_code_version, seed_version present; **order_seed** and **judge_seed** may be **null**.
 - **summary.json**: Uses `schema: "assay.run_summary.v1"`; seeds object present with seed_version; order_seed/judge_seed null when unknown.
 - **`assay run --format json` stdout**: uses `assay.run_report.v1` after a completed run, but emits the same `assay.run_summary.v1` diagnosis as `summary.json` when the run fails before results exist.
+- **`assay ci --format json` stdout**: uses `assay.run_summary.v1` for both completed gates and early failures; `summary.json` remains present with the same document.
 
 Replay-specific note (E9d hardening): for replay early-exit paths (missing dependency, verify fail, parse/open fail), seeds are intentionally written as `null` to indicate that no new deterministic replay execution occurred.
 

@@ -219,6 +219,10 @@ pub struct CiArgs {
     #[arg(long)]
     pub no_verify: bool,
 
+    /// Output format: text prints the human report to stderr; json prints the summary to stdout.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub format: OutputFormat,
+
     /// Write PR comment body (markdown) to file for GitHub Actions
     #[arg(long)]
     pub pr_comment: Option<PathBuf>,

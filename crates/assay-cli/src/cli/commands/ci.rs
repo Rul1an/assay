@@ -1,10 +1,12 @@
-use super::super::args::CiArgs;
+use super::super::args::{CiArgs, OutputFormat};
 use super::pipeline::{execute_pipeline, PipelineInput};
 use super::pipeline_error::elapsed_ms;
 use super::reporting::{
     build_summary_from_artifacts, maybe_export_baseline, print_pipeline_summary,
 };
 use super::run_output::write_extended_run_json;
+use crate::exit_codes::EXIT_SUCCESS;
+use crate::output_write::write_stdout_json;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -13,9 +15,10 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
     let run_json_path = PathBuf::from("run.json");
 
     let input = PipelineInput::from_ci(&args);
+    let json_output = matches!(args.format, OutputFormat::Json);
     let execution = match execute_pipeline(&input, legacy_mode).await {
         Ok(ok) => ok,
-        Err(e) => return e.into_exit_code(version, !args.no_verify, &run_json_path, false),
+        Err(e) => return e.into_exit_code(version, !args.no_verify, &run_json_path, json_output),
     };
 
     if execution.cfg.version > 0 {
@@ -68,7 +71,9 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
         build_summary_from_artifacts(&outcome, !args.no_verify, &artifacts, Some(&timings), None);
     summary = summary.with_sarif_omitted(sarif_omitted);
 
-    print_pipeline_summary(&artifacts, args.explain_skip, &summary);
+    if !json_output {
+        print_pipeline_summary(&artifacts, args.explain_skip, &summary);
+    }
 
     let otel_cfg = assay_core::otel::OTelConfig {
         jsonl_path: args.otel_jsonl.clone(),
@@ -99,6 +104,14 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
     );
     final_summary = final_summary.with_sarif_omitted(sarif_omitted);
     assay_core::report::summary::write_summary(&final_summary, &summary_path)?;
+
+    if json_output {
+        let rendered = assay_core::report::summary::render_summary_json(&final_summary)?;
+        let write_code = write_stdout_json(&rendered);
+        if write_code != EXIT_SUCCESS {
+            return Ok(write_code);
+        }
+    }
 
     Ok(outcome.exit_code)
 }
