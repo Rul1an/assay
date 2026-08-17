@@ -13,8 +13,14 @@ import sys
 from pathlib import Path
 
 
-SERVER_TOOLS = Path("crates/assay-mcp-server/src/tools")
+SERVER_SRC = Path("crates/assay-mcp-server/src")
+SERVER_TOOLS = SERVER_SRC / "tools"
 READER = SERVER_TOOLS / "policy_read.rs"
+PARSER = SERVER_SRC / "policy_byte_limit.rs"
+CONFIG = SERVER_SRC / "config.rs"
+MAIN = SERVER_SRC / "main.rs"
+PUBLIC_PARSER_FN = re.compile(r"\bpub\s+fn\s+policy_byte_limit_from_env\b")
+PUBLIC_PARSER_USE = re.compile(r"\bpub\s+use\b[^;]*\bpolicy_byte_limit_from_env\b")
 TOOL_FILES = [
     SERVER_TOOLS / "policy_decide.rs",
     SERVER_TOOLS / "check_sequence.rs",
@@ -117,8 +123,43 @@ def function_body(source: str, signature: str) -> str | None:
     return None
 
 
+def rust_sources() -> list[Path]:
+    if not SERVER_SRC.is_dir():
+        return []
+    return sorted(path for path in SERVER_SRC.rglob("*.rs") if path.is_file())
+
+
 def check() -> bool:
     errors: list[str] = []
+    if not PARSER.is_file():
+        errors.append("policy_byte_limit.rs is missing")
+    else:
+        parser = PARSER.read_text()
+        body = compact(parser)
+        if "pub(crate)fnpolicy_byte_limit_from_env(" not in body:
+            errors.append("policy_byte_limit.rs must define pub(crate) fn policy_byte_limit_from_env")
+        if "ASSAY_MCP_MAX_POLICY_BYTES" not in parser:
+            errors.append("policy_byte_limit.rs must parse ASSAY_MCP_MAX_POLICY_BYTES")
+    if CONFIG.is_file():
+        config_src = CONFIG.read_text()
+        config = compact(config_src)
+        if '#[path = "policy_byte_limit.rs"]' not in config_src:
+            errors.append("config.rs must compile policy_byte_limit.rs as a private path module")
+        if "pub(crate)usepolicy_byte_limit::" not in config or "policy_byte_limit_from_env" not in config:
+            errors.append("config.rs must pub(crate) re-export policy_byte_limit_from_env")
+    if MAIN.is_file():
+        main_src = MAIN.read_text()
+        main = compact(main_src)
+        if '#[path = "policy_byte_limit.rs"]' not in main_src:
+            errors.append("main.rs must compile policy_byte_limit.rs as a private path module")
+        if "policy_byte_limit::policy_byte_limit_from_env(" not in main:
+            errors.append("main.rs must log the ceiling via the shared private parser")
+    for path in rust_sources():
+        source = path.read_text()
+        if PUBLIC_PARSER_FN.search(source):
+            errors.append(f"{path}: pub fn policy_byte_limit_from_env expands the public API")
+        if PUBLIC_PARSER_USE.search(source):
+            errors.append(f"{path}: pub use of policy_byte_limit_from_env expands the public API")
     if not READER.is_file():
         print("FAIL: policy reader module not found", file=sys.stderr)
         return False

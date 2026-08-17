@@ -3,6 +3,10 @@
 use crate::auth::config::AuthConfig;
 use std::env;
 
+#[path = "policy_byte_limit.rs"]
+mod policy_byte_limit;
+pub(crate) use policy_byte_limit::policy_byte_limit_from_env;
+
 fn configured_server_auth_variables() -> Vec<String> {
     let mut names: Vec<String> = env::vars_os()
         .map(|(name, _)| name.to_string_lossy().into_owned())
@@ -24,23 +28,6 @@ pub fn reject_unsupported_stdio_auth_env() -> anyhow::Result<()> {
         );
     }
     Ok(())
-}
-
-/// Inclusive local-policy ingest ceiling. Invalid or absent
-/// `ASSAY_MCP_MAX_POLICY_BYTES` keeps this default. Independent of
-/// `ASSAY_MCP_MAX_BYTES`.
-pub(crate) const DEFAULT_POLICY_BYTE_LIMIT: usize = 1_000_000;
-
-/// Resolve the policy-file byte ceiling from the process environment.
-///
-/// One parser for startup logging and every production policy read. Not stored
-/// on `ServerConfig`: that public struct must keep the v5.2.0 field set.
-/// Visible to the stdio binary (`src/main.rs`), which is a separate crate.
-pub fn policy_byte_limit_from_env() -> usize {
-    match env::var("ASSAY_MCP_MAX_POLICY_BYTES") {
-        Ok(value) => value.parse().unwrap_or(DEFAULT_POLICY_BYTE_LIMIT),
-        Err(_) => DEFAULT_POLICY_BYTE_LIMIT,
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -113,6 +100,7 @@ impl ServerConfig {
 #[cfg(test)]
 #[allow(unsafe_code)]
 mod tests {
+    use super::policy_byte_limit::DEFAULT_POLICY_BYTE_LIMIT;
     use super::*;
     use std::sync::{Mutex, MutexGuard};
 
