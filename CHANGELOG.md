@@ -32,6 +32,10 @@ All notable changes to this project will be documented in this file.
   class (#2165).
 
 ### Changed
+- `summary.json` and machine-readable early-failure summaries now apply the existing JSON
+  record-sink safety pipeline to failure `message` and `next_step` text. Secret shapes and terminal
+  controls are neutralized without truncating record content or changing Assay-owned contract
+  fields (#2168).
 - `assay doctor --format json` and `assay run --format json` return exit 3 when
   writing the machine document to stdout fails, including `BrokenPipe`. A
   partial or absent document is not a clean success. They no longer abort with
