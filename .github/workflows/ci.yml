@@ -74,7 +74,7 @@ jobs:
               echo "workflow_dispatch PR must contain a non-empty docs-only file set" >&2
               exit 2
             fi
-            lightweight_only=true
+            lightweight_only="$(bash scripts/ci/classify-lightweight-changes.sh "$changed_file")"
             mcp_registry_touched=false
             ebpf_smoke_required=false
             self_hosted_ebpf_required=false
@@ -99,13 +99,7 @@ jobs:
               fi
             fi
 
-            if [[ ! -s "$changed_file" ]]; then
-              lightweight_only=false
-            elif grep -Ev '^(docs/|.*\.md$|mkdocs\.yml$|scripts/ci/review-[^/]+\.sh$|\.github/ISSUE_TEMPLATE/[^/]+\.ya?ml$|\.github/DISCUSSION_TEMPLATE/[^/]+\.ya?ml$)' "$changed_file" >/dev/null; then
-              lightweight_only=false
-            else
-              lightweight_only=true
-            fi
+            lightweight_only="$(bash scripts/ci/classify-lightweight-changes.sh "$changed_file")"
 
             if grep -E '^(crates/assay-mcp-server/|packaging/mcpb/|packaging/mcp-registry/|scripts/ci/(build_mcpb_bundle|write_sha256_sidecar)\.sh$|scripts/ci/render_registry_server_json\.sh$|scripts/publish-mcpcentral\.sh$|\.github/workflows/release\.yml$)' "$changed_file" >/dev/null; then
               mcp_registry_touched=true

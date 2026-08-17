@@ -128,10 +128,10 @@ repos:
 
       - id: agent-golden-path-skill-contract
         name: Agent golden-path skill contract
-        entry: bash -c 'python3 scripts/ci/test-agent-golden-path-skill.py && python3 scripts/ci/test-golden-path-mock-bounds.py && python3 scripts/ci/test-generate-agent-golden-path-check.py'
+        entry: bash -c 'python3 scripts/ci/test-agent-golden-path-skill.py && python3 scripts/ci/test-golden-path-mock-bounds.py && python3 scripts/ci/test-generate-agent-golden-path-check.py && bash scripts/ci/test-classify-lightweight-changes.sh'
         language: system
         pass_filenames: false
-        files: ^(Cargo\.toml|scripts/docs/generate-agent-golden-path\.py|scripts/ci/(read-assay-release-tag\.sh|test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|test-golden-path-mock-bounds\.py|test-generate-agent-golden-path-check\.py|lib/(golden-path-fixture-staging\.sh|workspace_version\.py))|\.github/assay-release-tag|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|packaging/agent-plugin/.*|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.gitattributes|\.pre-commit-config\.yaml)$
+        files: ^(Cargo\.toml|scripts/docs/generate-agent-golden-path\.py|scripts/ci/(read-assay-release-tag\.sh|test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|test-golden-path-mock-bounds\.py|test-generate-agent-golden-path-check\.py|(test-)?classify-lightweight-changes\.sh|lib/(golden-path-fixture-staging\.sh|workspace_version\.py))|\.github/assay-release-tag|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|packaging/agent-plugin/.*|\.github/workflows/(kernel-matrix|ci)\.yml|\.gitignore|\.gitattributes|\.pre-commit-config\.yaml)$
 
       - id: agent-golden-path-skill-mutations
         name: Agent golden-path skill mutations

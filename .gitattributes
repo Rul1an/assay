@@ -8,3 +8,4 @@ examples/mcp-jsonrpc-id-conformance/** text eol=lf
 packaging/claude-plugin/.claude-plugin/plugin.json text eol=lf
 packaging/claude-plugin/.mcp.json text eol=lf
 packaging/claude-plugin/skills/assay-golden-path/** text eol=lf
+packaging/agent-plugin/** text eol=lf
