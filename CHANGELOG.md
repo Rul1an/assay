@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- The JSON failure process contract now pins the explicit gate-command set (`run`, `ci`,
+  `coverage`, and `validate`) and drives both machine and default output modes (#2177).
 - Legacy `assay coverage --format json` argument failures now publish the existing
   `assay.run_summary.v1` diagnosis on stdout. Text mode stays operator-only and `--input` mode
   keeps writing `coverage_report_v1` to its requested file (#2177).
