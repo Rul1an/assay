@@ -335,7 +335,7 @@ async fn run() -> Result<()> {
                 policy_root = ?args.policy_root,
                 timeout_ms = cfg.timeout_ms,
                 max_msg_bytes = cfg.max_msg_bytes,
-                max_policy_bytes = cfg.max_policy_bytes,
+                max_policy_bytes = config::policy_byte_limit_from_env(),
                 max_tool_calls = cfg.max_tool_calls,
                 max_field_bytes = cfg.max_field_bytes,
                 cache_entries = cfg.cache_entries,

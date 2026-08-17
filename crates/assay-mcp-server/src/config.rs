@@ -26,11 +26,27 @@ pub fn reject_unsupported_stdio_auth_env() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Inclusive local-policy ingest ceiling. Invalid or absent
+/// `ASSAY_MCP_MAX_POLICY_BYTES` keeps this default. Independent of
+/// `ASSAY_MCP_MAX_BYTES`.
+pub(crate) const DEFAULT_POLICY_BYTE_LIMIT: usize = 1_000_000;
+
+/// Resolve the policy-file byte ceiling from the process environment.
+///
+/// One parser for startup logging and every production policy read. Not stored
+/// on `ServerConfig`: that public struct must keep the v5.2.0 field set.
+/// Visible to the stdio binary (`src/main.rs`), which is a separate crate.
+pub fn policy_byte_limit_from_env() -> usize {
+    match env::var("ASSAY_MCP_MAX_POLICY_BYTES") {
+        Ok(value) => value.parse().unwrap_or(DEFAULT_POLICY_BYTE_LIMIT),
+        Err(_) => DEFAULT_POLICY_BYTE_LIMIT,
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
     pub timeout_ms: u64,
     pub max_msg_bytes: usize,
-    pub max_policy_bytes: usize,
     pub max_tool_calls: usize,
     pub max_field_bytes: usize,
     pub cache_entries: u64,
@@ -50,7 +66,6 @@ impl Default for ServerConfig {
         Self {
             timeout_ms: 2000,
             max_msg_bytes: 1_000_000,
-            max_policy_bytes: 1_000_000,
             max_tool_calls: 2000,
             max_field_bytes: 64_000,
             cache_entries: 128,
@@ -71,11 +86,6 @@ impl ServerConfig {
         if let Ok(v) = env::var("ASSAY_MCP_MAX_BYTES") {
             if let Ok(n) = v.parse() {
                 cfg.max_msg_bytes = n;
-            }
-        }
-        if let Ok(v) = env::var("ASSAY_MCP_MAX_POLICY_BYTES") {
-            if let Ok(n) = v.parse() {
-                cfg.max_policy_bytes = n;
             }
         }
         if let Ok(v) = env::var("ASSAY_MCP_MAX_FIELD_BYTES") {
@@ -152,9 +162,8 @@ mod tests {
             ("ASSAY_MCP_MAX_POLICY_BYTES", None),
             ("ASSAY_MCP_MAX_BYTES", None),
         ]);
-        let cfg = ServerConfig::from_env();
-        assert_eq!(cfg.max_policy_bytes, 1_000_000);
-        assert_eq!(cfg.max_msg_bytes, 1_000_000);
+        assert_eq!(policy_byte_limit_from_env(), DEFAULT_POLICY_BYTE_LIMIT);
+        assert_eq!(ServerConfig::from_env().max_msg_bytes, 1_000_000);
     }
 
     #[test]
@@ -163,22 +172,22 @@ mod tests {
             ("ASSAY_MCP_MAX_POLICY_BYTES", Some("1234")),
             ("ASSAY_MCP_MAX_BYTES", Some("4321")),
         ]);
-        let cfg = ServerConfig::from_env();
-        assert_eq!(cfg.max_policy_bytes, 1234);
-        assert_eq!(cfg.max_msg_bytes, 4321);
+        assert_eq!(policy_byte_limit_from_env(), 1234);
+        assert_eq!(ServerConfig::from_env().max_msg_bytes, 4321);
 
         drop(_env);
         let _env = EnvRestore::apply(&[
             ("ASSAY_MCP_MAX_POLICY_BYTES", Some("4321")),
             ("ASSAY_MCP_MAX_BYTES", Some("1234")),
         ]);
-        let cfg = ServerConfig::from_env();
         assert_eq!(
-            cfg.max_policy_bytes, 4321,
+            policy_byte_limit_from_env(),
+            4321,
             "policy override must not follow ASSAY_MCP_MAX_BYTES"
         );
         assert_eq!(
-            cfg.max_msg_bytes, 1234,
+            ServerConfig::from_env().max_msg_bytes,
+            1234,
             "message override must not follow ASSAY_MCP_MAX_POLICY_BYTES"
         );
     }
@@ -189,18 +198,16 @@ mod tests {
             ("ASSAY_MCP_MAX_POLICY_BYTES", Some("1234")),
             ("ASSAY_MCP_MAX_BYTES", None),
         ]);
-        let cfg = ServerConfig::from_env();
-        assert_eq!(cfg.max_policy_bytes, 1234);
-        assert_eq!(cfg.max_msg_bytes, 1_000_000);
+        assert_eq!(policy_byte_limit_from_env(), 1234);
+        assert_eq!(ServerConfig::from_env().max_msg_bytes, 1_000_000);
 
         drop(_env);
         let _env = EnvRestore::apply(&[
             ("ASSAY_MCP_MAX_POLICY_BYTES", None),
             ("ASSAY_MCP_MAX_BYTES", Some("4321")),
         ]);
-        let cfg = ServerConfig::from_env();
-        assert_eq!(cfg.max_policy_bytes, 1_000_000);
-        assert_eq!(cfg.max_msg_bytes, 4321);
+        assert_eq!(policy_byte_limit_from_env(), DEFAULT_POLICY_BYTE_LIMIT);
+        assert_eq!(ServerConfig::from_env().max_msg_bytes, 4321);
     }
 
     #[test]
@@ -209,8 +216,7 @@ mod tests {
             ("ASSAY_MCP_MAX_POLICY_BYTES", Some("not-a-number")),
             ("ASSAY_MCP_MAX_BYTES", Some("4321")),
         ]);
-        let cfg = ServerConfig::from_env();
-        assert_eq!(cfg.max_policy_bytes, 1_000_000);
-        assert_eq!(cfg.max_msg_bytes, 4321);
+        assert_eq!(policy_byte_limit_from_env(), DEFAULT_POLICY_BYTE_LIMIT);
+        assert_eq!(ServerConfig::from_env().max_msg_bytes, 4321);
     }
 }

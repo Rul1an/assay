@@ -124,7 +124,8 @@ def check() -> bool:
         return False
     reader = READER.read_text()
     bounded = function_body(reader, "fn read_bounded")
-    async_entry = function_body(reader, "async fn read_policy_bounded")
+    async_entry = function_body(reader, "async fn read_policy_bounded(")
+    explicit = function_body(reader, "async fn read_policy_bounded_with_limit(")
     if bounded is None:
         errors.append("read_bounded is missing")
     else:
@@ -139,16 +140,30 @@ def check() -> bool:
         errors.append("read_policy_bounded is missing")
     else:
         body = compact(async_entry)
-        if "spawn_blocking" not in body:
-            errors.append("read_policy_bounded must read inside spawn_blocking")
-        if "File::open(" not in body:
-            errors.append("read_policy_bounded must open std::fs::File")
-        if "read_bounded(" not in body:
-            errors.append("read_policy_bounded must call read_bounded")
+        if "policy_byte_limit_from_env(" not in body:
+            errors.append("read_policy_bounded must resolve the ceiling via policy_byte_limit_from_env")
+        if "read_policy_bounded_with_limit(" not in body:
+            errors.append("read_policy_bounded must delegate to read_policy_bounded_with_limit")
+        if "tokio::fs::read" in body:
+            errors.append("read_policy_bounded must not bypass via tokio::fs::read")
         if "metadata(" in body:
             errors.append("read_policy_bounded must not consult metadata")
         if "read_to_end" in body:
             errors.append("read_policy_bounded must not duplicate the read")
+    if explicit is None:
+        errors.append("read_policy_bounded_with_limit is missing")
+    else:
+        body = compact(explicit)
+        if "spawn_blocking" not in body:
+            errors.append("read_policy_bounded_with_limit must read inside spawn_blocking")
+        if "File::open(" not in body:
+            errors.append("read_policy_bounded_with_limit must open std::fs::File")
+        if "read_bounded(" not in body:
+            errors.append("read_policy_bounded_with_limit must call read_bounded")
+        if "metadata(" in body:
+            errors.append("read_policy_bounded_with_limit must not consult metadata")
+        if "read_to_end" in body:
+            errors.append("read_policy_bounded_with_limit must not duplicate the read")
 
     for rel in TOOL_FILES:
         if not rel.is_file():
