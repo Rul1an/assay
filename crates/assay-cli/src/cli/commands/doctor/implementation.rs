@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use assay_core::config::{load_config_with_cause, path_resolver::PathResolver, LoadOptions};
 use assay_core::errors::ConfigLoadError;
+use assay_core::render_safety::{render_safe, Sink};
 
 use crate::cli::args::common::OutputFormat;
 use crate::cli::args::DoctorArgs;
@@ -38,6 +39,11 @@ pub(super) fn config_failure(path: &Path, err: &ConfigLoadError) -> RunOutcome {
 /// Why no config was read when none was requested and none was found. Rendered by both channels,
 /// from here, so the machine report cannot say something different from the line a human reads.
 const NO_CONFIG_FOUND: &str = "No config found; run inside project or use --config";
+
+/// Caller-derived doctor text for the terminal. Assay-owned labels stay outside this helper.
+fn caller_text(value: impl std::fmt::Display) -> String {
+    render_safe(Sink::Stdout, &value.to_string(), usize::MAX)
+}
 
 /// Whether the config check ran, for a consumer that reads only the JSON document.
 ///
@@ -232,8 +238,8 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
 
     if let Some(e) = &cfg_err {
         println!("\nConfig Status: FAILED");
-        println!("  File:     {}", target_path.display());
-        println!("  Error:    {}\n", e);
+        println!("  File:     {}", caller_text(target_path.display()));
+        println!("  Error:    {}\n", caller_text(e));
 
         if args.fix {
             return try_fix_parse_error(&args, &target_path, e, legacy_mode);
@@ -243,8 +249,8 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
 
     if let Some(c) = cfg {
         println!("\nPolicy Check:");
-        println!("  Config:   {}", target_path.display());
-        println!("  Suite:    {}", c.suite);
+        println!("  Config:   {}", caller_text(target_path.display()));
+        println!("  Suite:    {}", caller_text(&c.suite));
 
         let resolver = PathResolver::new(&target_path);
         let opts = assay_core::doctor::DoctorOptions {
@@ -259,7 +265,12 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         if !core_report.diagnostics.is_empty() {
             println!("  Issues:   {}", core_report.diagnostics.len());
             for d in &core_report.diagnostics {
-                println!("    - [{}] [{}] {}", d.code, d.severity, d.message);
+                println!(
+                    "    - [{}] [{}] {}",
+                    d.code,
+                    d.severity,
+                    caller_text(&d.message)
+                );
             }
         } else {
             println!("  Issues:   None (Clean)");
