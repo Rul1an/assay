@@ -95,7 +95,7 @@ fn doctor_fix_parse_error_dry_run_exits_nonzero_and_does_not_write() {
         .arg("--dry-run")
         .arg("--yes")
         .assert()
-        .code(1);
+        .failure();
 
     let after = fs::read_to_string(&config).expect("read after");
     assert_eq!(

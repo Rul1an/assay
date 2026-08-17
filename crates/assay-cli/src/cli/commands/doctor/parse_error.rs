@@ -3,6 +3,7 @@ use std::path::Path;
 use anyhow::Context;
 use assay_core::config::{load_config_with_cause, LoadOptions};
 use assay_core::errors::similarity::closest_prompt;
+use assay_core::errors::ConfigLoadError;
 use dialoguer::{theme::ColorfulTheme, Confirm};
 
 use crate::cli::args::DoctorArgs;
@@ -13,16 +14,19 @@ use super::patching::{print_unified_diff, write_text_file};
 pub(super) fn try_fix_parse_error(
     args: &DoctorArgs,
     config_path: &Path,
-    err: &str,
+    err: &ConfigLoadError,
     legacy_mode: bool,
 ) -> anyhow::Result<i32> {
-    let (unknown, candidates) = parse_unknown_field_error(err)
+    // `--fix` changes what doctor attempts, not the class of the config failure it observed.
+    let unresolved_exit = config_failure(config_path, err).exit_code;
+    let err_text = err.to_string();
+    let (unknown, candidates) = parse_unknown_field_error(&err_text)
         .map(|(u, c)| (u.to_string(), c))
         .unwrap_or_else(|| (String::new(), Vec::new()));
 
     if unknown.is_empty() || candidates.is_empty() {
         println!("No auto-fixable config parse issue detected.");
-        return Ok(1);
+        return Ok(unresolved_exit);
     }
 
     let replacement = closest_prompt(&unknown, candidates.iter()).and_then(|m| {
@@ -38,7 +42,7 @@ pub(super) fn try_fix_parse_error(
             "No safe replacement found for '{}'. Try fixing the key manually.",
             unknown
         );
-        return Ok(1);
+        return Ok(unresolved_exit);
     };
 
     let do_apply = if args.yes || args.dry_run {
@@ -58,7 +62,7 @@ pub(super) fn try_fix_parse_error(
 
     if !do_apply {
         println!("No fixes applied.");
-        return Ok(1);
+        return Ok(unresolved_exit);
     }
 
     let before = std::fs::read_to_string(config_path)
@@ -69,7 +73,7 @@ pub(super) fn try_fix_parse_error(
             unknown,
             config_path.display()
         );
-        return Ok(1);
+        return Ok(unresolved_exit);
     };
 
     if args.dry_run {
@@ -80,7 +84,7 @@ pub(super) fn try_fix_parse_error(
             &after,
         );
         println!("Dry run complete. 1 fix(es) previewed.");
-        return Ok(1);
+        return Ok(unresolved_exit);
     }
 
     write_text_file(config_path, &after)
@@ -104,10 +108,7 @@ pub(super) fn try_fix_parse_error(
             Ok(0)
         }
         Err(e) => {
-            // The same question `fixes.rs` asks after applying its own repairs — this config does
-            // not load — so the same answer, from the reason code that owns an unloadable config.
-            // The five returns above are a different question: no repair was applied, so they
-            // report the outcome of an offer, and #2209 owns what those are worth.
+            // A repair changed the file, so classify the new load failure rather than the original.
             println!("Config still has issues after fix: {}", e);
             Ok(config_failure(config_path, &e).exit_code)
         }

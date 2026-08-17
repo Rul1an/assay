@@ -236,7 +236,7 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         println!("  Error:    {}\n", e);
 
         if args.fix {
-            return try_fix_parse_error(&args, &target_path, &e.to_string(), legacy_mode);
+            return try_fix_parse_error(&args, &target_path, e, legacy_mode);
         }
         return Ok(config_failure(&target_path, e).exit_code);
     }
