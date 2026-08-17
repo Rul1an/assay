@@ -199,7 +199,7 @@ is incomplete, not weakly supported.
 `tracestate` and `baggage` are deliberately not retained: their values are free-form and may carry
 data the redaction rules above cannot reason about.
 
-Era scoping: this server still negotiates only legacy handshakes (`2024-11-05` / `2025-11-25`);
+Era scoping: this server still negotiates only legacy handshakes (`2024-11-05` / `2025-06-18` / `2025-11-25`);
 for such clients a `_meta.traceparent` is optional practice rather than SEP-414 conformance, so
 `basis: "none"` is the expected common case. The extraction does not gate on era: any client that
 does send the carrier gets it typed.

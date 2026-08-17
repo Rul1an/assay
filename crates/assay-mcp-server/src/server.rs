@@ -45,9 +45,6 @@ pub const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// The reserved `_meta` key a request may use to declare its revision.
 const PROTOCOL_VERSION_META_KEY: &str = "io.modelcontextprotocol/protocolVersion";
 
-/// Every legacy revision this server implements, newest last.
-const SUPPORTED_LEGACY_PROTOCOL_VERSIONS: &[&str] = &["2024-11-05", "2025-11-25"];
-
 /// `UnsupportedProtocolVersionError`, per the 2026-07-28 versioning spec.
 const ERROR_UNSUPPORTED_PROTOCOL_VERSION: i32 = -32022;
 
@@ -65,23 +62,38 @@ fn check_request_version(params: Option<&Value>) -> Result<(), Value> {
     else {
         return Ok(());
     };
-    if SUPPORTED_LEGACY_PROTOCOL_VERSIONS.contains(&requested) {
+    if LegacyProtocolVersion::parse(requested).is_some() {
         return Ok(());
     }
     Err(serde_json::json!({
         "requested": requested,
-        "supported": SUPPORTED_LEGACY_PROTOCOL_VERSIONS,
+        "supported": LegacyProtocolVersion::supported(),
     }))
 }
 
 #[derive(Clone, Copy)]
 enum LegacyProtocolVersion {
     V2024_11_05,
+    V2025_06_18,
     V2025_11_25,
 }
 
 impl LegacyProtocolVersion {
     const LATEST: Self = Self::V2025_11_25;
+
+    /// Every legacy revision this server implements, oldest to newest.
+    const ALL: &[Self] = &[Self::V2024_11_05, Self::V2025_06_18, Self::V2025_11_25];
+
+    fn parse(requested: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|version| version.as_str() == requested)
+    }
+
+    fn supported() -> Vec<&'static str> {
+        Self::ALL.iter().map(|version| version.as_str()).collect()
+    }
 
     fn negotiate(params: Option<&Value>) -> Result<Self, ()> {
         let params = params.and_then(Value::as_object).ok_or(())?;
@@ -103,16 +115,13 @@ impl LegacyProtocolVersion {
             .and_then(Value::as_str)
             .ok_or(())?;
 
-        Ok(match requested {
-            "2024-11-05" => Self::V2024_11_05,
-            "2025-11-25" => Self::V2025_11_25,
-            _ => Self::LATEST,
-        })
+        Ok(Self::parse(requested).unwrap_or(Self::LATEST))
     }
 
     const fn as_str(self) -> &'static str {
         match self {
             Self::V2024_11_05 => "2024-11-05",
+            Self::V2025_06_18 => "2025-06-18",
             Self::V2025_11_25 => "2025-11-25",
         }
     }
@@ -522,6 +531,7 @@ mod claims_boundary_tests {
     fn initialize_result_pins_every_value() {
         for (version, expected) in [
             (LegacyProtocolVersion::V2024_11_05, "2024-11-05"),
+            (LegacyProtocolVersion::V2025_06_18, "2025-06-18"),
             (LegacyProtocolVersion::V2025_11_25, "2025-11-25"),
         ] {
             let value = initialize_result(version);
