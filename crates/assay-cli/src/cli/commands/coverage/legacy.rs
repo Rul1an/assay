@@ -1,6 +1,7 @@
 use super::io::{print_markdown_report, print_text_report};
 use super::LegacyOutputFormat;
 use crate::cli::args::CoverageArgs;
+use crate::cli_failure::CliFailure;
 use anyhow::{Context, Result};
 
 pub(super) async fn cmd_coverage_legacy(
@@ -10,10 +11,10 @@ pub(super) async fn cmd_coverage_legacy(
     let trace_file = match args.trace_file.as_ref() {
         Some(path) => path,
         None => {
-            eprintln!(
-                "Measurement error: --trace-file/--traces is required when --input is not used"
-            );
-            return Ok(crate::exit_codes::EXIT_CONFIG_ERROR);
+            return Err(CliFailure::coverage_invalid_args(
+                "--trace-file/--traces is required when --input is not used",
+            )
+            .into());
         }
     };
 

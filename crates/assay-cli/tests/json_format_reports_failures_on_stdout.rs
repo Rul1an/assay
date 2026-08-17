@@ -234,3 +234,113 @@ fn the_ci_text_format_keeps_stdout_clear() {
         "ci text mode must retain its operator diagnostic"
     );
 }
+
+fn assert_coverage_failure_summary(out: std::process::Output, expected_message: &str) {
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "an invalid coverage invocation is exit 2; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("coverage stdout must be JSON: {error}\n{stdout}"));
+    assert_eq!(parsed["schema"], "assay.run_summary.v1");
+    assert_eq!(parsed["exit_code"], 2);
+    assert_eq!(parsed["reason_code"], "E_INVALID_ARGS");
+    assert!(
+        parsed["message"]
+            .as_str()
+            .is_some_and(|message| message.contains(expected_message)),
+        "coverage diagnosis must retain the concrete argument failure, got {:?}",
+        parsed["message"]
+    );
+    assert!(
+        parsed["next_step"]
+            .as_str()
+            .is_some_and(|step| step.contains("assay")),
+        "coverage diagnosis must contain actionable recovery, got {:?}",
+        parsed["next_step"]
+    );
+}
+
+#[test]
+fn coverage_missing_trace_writes_the_diagnosis_to_stdout_under_json() {
+    let out = Command::new(env!("CARGO_BIN_EXE_assay"))
+        .args(["coverage", "--format", "json"])
+        .output()
+        .expect("the binary runs");
+
+    assert_coverage_failure_summary(out, "--trace-file/--traces is required");
+}
+
+#[test]
+fn coverage_rejected_legacy_out_md_writes_the_diagnosis_to_stdout_under_json() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let markdown = dir.path().join("coverage.md");
+
+    let out = Command::new(env!("CARGO_BIN_EXE_assay"))
+        .args(["coverage", "--format", "json", "--out-md"])
+        .arg(markdown)
+        .output()
+        .expect("the binary runs");
+
+    assert_coverage_failure_summary(out, "--out-md is only supported with --input mode");
+}
+
+#[test]
+fn coverage_text_failures_keep_stdout_clear() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let markdown = dir.path().join("coverage.md");
+    let cases = [
+        vec!["coverage".to_string()],
+        vec![
+            "coverage".to_string(),
+            "--out-md".to_string(),
+            markdown.display().to_string(),
+        ],
+    ];
+
+    for args in cases {
+        let out = Command::new(env!("CARGO_BIN_EXE_assay"))
+            .args(&args)
+            .output()
+            .expect("the binary runs");
+        assert_eq!(out.status.code(), Some(2), "args: {args:?}");
+        assert!(
+            out.stdout.is_empty(),
+            "coverage text mode must keep stdout clear; args: {args:?}"
+        );
+        assert!(
+            !out.stderr.is_empty(),
+            "coverage text mode must retain its operator diagnostic; args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn coverage_input_failure_does_not_publish_a_summary_to_stdout() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let missing = dir.path().join("missing.jsonl");
+    let report = dir.path().join("coverage.json");
+
+    let out = Command::new(env!("CARGO_BIN_EXE_assay"))
+        .args(["coverage", "--input"])
+        .arg(missing)
+        .arg("--out")
+        .arg(report)
+        .args(["--declared-tool", "read_file", "--format", "json"])
+        .output()
+        .expect("the binary runs");
+
+    assert!(!out.status.success());
+    assert!(
+        out.stdout.is_empty(),
+        "--input mode writes its report to --out and must not inherit the legacy stdout envelope"
+    );
+    assert!(
+        !out.stderr.is_empty(),
+        "the input-mode failure must remain visible to the operator"
+    );
+}

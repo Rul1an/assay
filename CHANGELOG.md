@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Legacy `assay coverage --format json` argument failures now publish the existing
+  `assay.run_summary.v1` diagnosis on stdout. Text mode stays operator-only and `--input` mode
+  keeps writing `coverage_report_v1` to its requested file (#2177).
 - `assay ci --format json` now publishes its authoritative `assay.run_summary.v1` report on stdout
   for completed gates and early pipeline failures while preserving `summary.json`; default text
   mode keeps stdout clear (#2177).

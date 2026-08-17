@@ -1,4 +1,5 @@
 use crate::cli::args::{CoverageArgs, CoverageFormat};
+use crate::cli_failure::CliFailure;
 use anyhow::Result;
 use std::path::Path;
 
@@ -107,8 +108,10 @@ pub(crate) async fn write_generated_coverage_report_with_format(
 
 pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
     if args.input.is_none() && args.out_md.is_some() {
-        eprintln!("Measurement error: --out-md is only supported with --input mode");
-        return Ok(crate::exit_codes::EXIT_CONFIG_ERROR);
+        return Err(CliFailure::coverage_invalid_args(
+            "--out-md is only supported with --input mode",
+        )
+        .into());
     }
 
     // Both mode rules sit here: each applies its own default and each refuses by name the spelling
