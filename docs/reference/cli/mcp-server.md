@@ -79,7 +79,9 @@ Exit `0` only for `ready`. Every other phase exits `2`.
 
 Both child probes use a 2-second wall-clock deadline and cap each of stdout
 and stderr at 8 KiB before materialization. Child output is never copied into
-the preflight JSON document.
+the preflight JSON document. On timeout, cleanup kills and reaps only the
+direct probe child. Descendant or process-tree termination via Unix process
+groups or Windows Job Objects is not promised.
 
 ### JSON document (`assay.mcp_preflight.v0`)
 
