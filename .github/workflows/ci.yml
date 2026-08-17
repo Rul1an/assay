@@ -762,6 +762,23 @@ jobs:
           grep -F -- 'test native_windows_bare_command_uses_exe_not_pathext_scripts ... ok' \
             "$RUNNER_TEMP/mcp-preflight-windows.log"
 
+      - name: Test machine stdout sink contract (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p assay-cli --test stdout_json_write_contract -- \
+            --test-threads=1 --nocapture \
+            2>&1 | tee "$RUNNER_TEMP/stdout-json-write-windows.log"
+          for test_name in \
+            run_json_early_failure_reader_gone_is_exit_three \
+            typed_cli_failure_reader_gone_is_exit_three \
+            policy_validate_json_success_reader_gone_is_exit_three
+          do
+            grep -F -- "test ${test_name} ... ok" \
+              "$RUNNER_TEMP/stdout-json-write-windows.log"
+          done
+
       # Non-Linux: Exclude OS-specific crates (assay-monitor, assay-cli)
       # Windows/macOS automatically use bundled sqlite via cfg() in Cargo.toml
       - name: Test Workspace (Cross-Platform)
