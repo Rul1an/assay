@@ -174,7 +174,7 @@ def _git_env() -> dict[str, str]:
         if not key.startswith("GIT_")
     }
     env["GIT_CONFIG_NOSYSTEM"] = "1"
-    env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
     env["GIT_AUTHOR_NAME"] = "assay-ci"
     env["GIT_AUTHOR_EMAIL"] = "ci@example.com"
     env["GIT_COMMITTER_NAME"] = "assay-ci"
