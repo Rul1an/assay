@@ -105,6 +105,16 @@ reached after the second spawn retain it, as do `wrong_version`,
 attempt. It does not prove both resolutions selected one immutable
 executable.
 
+On Windows, the bare `assay-mcp-server` command resolves an
+`assay-mcp-server.exe` on `PATH` even when `.EXE` is absent from `PATHEXT`.
+The preflight does not expand `PATHEXT` to run `.cmd` or `.bat` shims; a
+directory containing only one of those shell-discoverable shims is reported as
+`missing`.
+
+This is process-level behavior for the preflight's environment. It does not
+establish that an editor or other GUI host sees the same `PATH`, add a published
+Windows MCP-server asset, or define an explicit-script invocation contract.
+
 This is a command-local schema. It is not a `ReasonCode`, policy verdict, or
 host-discovery document.
 
