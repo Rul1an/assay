@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -21,6 +22,9 @@ PORTABLE_SCHEMA = Path("packaging/agent-plugin/schemas/plugin.schema.json")
 PORTABLE_SCHEMA_LOCK = Path("packaging/agent-plugin/schemas/plugin.schema.lock.json")
 PORTABLE_SCHEMA_URL = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 PORTABLE_SCHEMA_SHA256 = "0a4aad95ce337878ad38802ebf0daa3fde76abe3f65400c86bcbb1ec0b3ab883"
+PORTABLE_SCHEMA_BYTES = 1805
+GITATTRIBUTES = Path(".gitattributes")
+PORTABLE_EOL_ATTR = "packaging/agent-plugin/** text eol=lf"
 # Closed public inventory. Do not build this from rendered_outputs().
 GENERATED_OUTPUTS = (
     Path("docs/generated/agent-golden-path.json"),
@@ -153,12 +157,82 @@ def check_portable_schema_lock(root: Path) -> None:
     expected = {
         "canonical_url": PORTABLE_SCHEMA_URL,
         "sha256": PORTABLE_SCHEMA_SHA256,
-        "bytes": len(schema),
+        "bytes": PORTABLE_SCHEMA_BYTES,
     }
     if lock != expected:
         fail("portable Agent Plugin schema lock does not match its pinned contract")
+    if len(schema) != PORTABLE_SCHEMA_BYTES:
+        fail("portable Agent Plugin schema bytes differ from the pinned contract")
     if hashlib.sha256(schema).hexdigest() != PORTABLE_SCHEMA_SHA256:
         fail("portable Agent Plugin schema bytes differ from the pinned contract")
+
+
+def _git_env() -> dict[str, str]:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("GIT_")
+    }
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+    env["GIT_AUTHOR_NAME"] = "assay-ci"
+    env["GIT_AUTHOR_EMAIL"] = "ci@example.com"
+    env["GIT_COMMITTER_NAME"] = "assay-ci"
+    env["GIT_COMMITTER_EMAIL"] = "ci@example.com"
+    return env
+
+
+def _run_git(args: list[str], cwd: Path) -> None:
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_git_env(),
+    )
+    if completed.returncode != 0:
+        fail("git " + " ".join(args) + " failed: " + (completed.stderr or completed.stdout).strip())
+
+
+def check_portable_schema_survives_autocrlf_checkout(source_root: Path) -> None:
+    attributes = (source_root / GITATTRIBUTES).read_text(encoding="utf-8")
+    schema = (source_root / PORTABLE_SCHEMA).read_bytes()
+    lock = (source_root / PORTABLE_SCHEMA_LOCK).read_bytes()
+    with tempfile.TemporaryDirectory() as raw:
+        workspace = Path(raw)
+        origin = workspace / "origin"
+        checkout = workspace / "checkout"
+        (origin / PORTABLE_SCHEMA.parent).mkdir(parents=True)
+        (origin / GITATTRIBUTES).write_text(attributes, encoding="utf-8")
+        (origin / PORTABLE_SCHEMA).write_bytes(schema)
+        (origin / PORTABLE_SCHEMA_LOCK).write_bytes(lock)
+        _run_git(["init", "--initial-branch=main"], origin)
+        _run_git(["-c", "core.autocrlf=false", "add", "-A"], origin)
+        _run_git(["-c", "core.autocrlf=false", "commit", "-m", "portable schema"], origin)
+        _run_git(
+            [
+                "-c",
+                "core.autocrlf=true",
+                "clone",
+                "--config",
+                "core.autocrlf=true",
+                origin.as_posix(),
+                checkout.as_posix(),
+            ],
+            workspace,
+        )
+        checked_out = (checkout / PORTABLE_SCHEMA).read_bytes()
+        if len(checked_out) != PORTABLE_SCHEMA_BYTES:
+            fail(
+                "portable schema checkout with core.autocrlf=true changed byte count: "
+                f"{len(checked_out)} != {PORTABLE_SCHEMA_BYTES}"
+            )
+        digest = hashlib.sha256(checked_out).hexdigest()
+        if digest != PORTABLE_SCHEMA_SHA256:
+            fail("portable schema checkout with core.autocrlf=true changed SHA-256")
+        if PORTABLE_EOL_ATTR not in attributes.splitlines():
+            fail("packaging/agent-plugin text eol=lf is missing from .gitattributes")
 
 
 def check_rejects_unknown_argument(root: Path) -> None:
@@ -305,6 +379,7 @@ def main() -> None:
     expect_schema_lock_rejects(
         "portable schema byte drift", apply_portable_schema_byte_mutation
     )
+    check_portable_schema_survives_autocrlf_checkout(ROOT)
     print("golden-path generator --check: compares bytes, names drift, rejects unknown argv")
 
 
