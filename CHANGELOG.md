@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- A stable JSON `startup_failure` diagnosis is emitted on stderr for enforcing-proxy policy,
+  manifest, and establish-budget startup failures while MCP stdout stays empty and recovery stays
+  independent of log level (#2163).
 - `E_EVIDENCE_CONTRACT` is registered for a readable evidence bundle that violates its declared
   format contract (`ErrorClass::Contract` / `Contract*`). It stays distinct from recorded-value
   mismatch and from unreadable I/O or archive failures. `assay evidence verify-privileged-mcp-action`

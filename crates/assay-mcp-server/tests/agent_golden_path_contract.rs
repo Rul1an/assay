@@ -65,10 +65,6 @@ fn assert_exit(output: &Output, expected: &ExpectedOutcome, context: &str) {
     runtime_coverage::record_observation(expected);
 }
 
-fn assert_gap(expected: &Value, issue: u64) {
-    assert_eq!(expected["gap_issue"].as_u64(), Some(issue));
-}
-
 fn contract_argv(expected: &Value, replacements: &[(&str, &str)]) -> Vec<String> {
     assert_eq!(expected["binary"], "assay-mcp-server");
     let argv = expected["argv"]
@@ -213,7 +209,7 @@ fn protected_action_contract_cwd_is_source_repo_relative_and_materialized() {
 }
 
 #[test]
-fn enforcing_proxy_denial_is_structured_but_startup_failure_is_not() {
+fn enforcing_proxy_denial_and_startup_failure_are_structured_on_their_own_channels() {
     let python = required_python();
     let denied_expected = expected_outcome("protected-action", "policy-denied");
     let example = contract_working_directory(&denied_expected);
@@ -275,7 +271,25 @@ fn enforcing_proxy_denial_is_structured_but_startup_failure_is_not() {
     let startup_failure = run_server(&example, &startup_argv, b"");
     assert_exit(&startup_failure, &startup_expected, "proxy startup failure");
     assert_empty_stdout(&startup_failure, &startup_expected, "proxy startup failure");
-    assert_gap(&startup_expected, 2163);
+    assert_eq!(
+        startup_expected["reason_code"],
+        "proxy_enforce_policy_invalid"
+    );
+    assert_eq!(
+        startup_expected["next_step"],
+        "Check --enforce-policy and retry proxy-enforce."
+    );
+    assert!(startup_expected["gap_issue"].is_null());
+
+    let stderr = String::from_utf8(startup_failure.stderr).expect("startup stderr is UTF-8");
+    let events: Vec<Value> = stderr
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .filter(|event: &Value| event["event"] == "startup_failure")
+        .collect();
+    assert_eq!(events.len(), 1, "startup stderr lacked one event: {stderr}");
+    assert_eq!(events[0]["reason_code"], startup_expected["reason_code"]);
+    assert_eq!(events[0]["next_step"], startup_expected["next_step"]);
 }
 
 #[test]
@@ -329,7 +343,7 @@ fn every_mcp_contract_outcome_is_executed_once() {
         &contract(),
         "assay-mcp-server",
         &[
-            enforcing_proxy_denial_is_structured_but_startup_failure_is_not,
+            enforcing_proxy_denial_and_startup_failure_are_structured_on_their_own_channels,
             sarif_projection_rejects_malformed_input_without_clean_output,
         ],
     );

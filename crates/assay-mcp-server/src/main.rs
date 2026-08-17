@@ -136,6 +136,23 @@ fn init_logging(log_level: &str) {
         .init();
 }
 
+fn proxy_startup<T>(
+    result: Result<T>,
+    reason_code: &'static str,
+    next_step: &'static str,
+) -> Result<T> {
+    result.inspect_err(|_| {
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "event": "startup_failure",
+                "reason_code": reason_code,
+                "next_step": next_step,
+            })
+        );
+    })
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -187,13 +204,27 @@ async fn main() -> Result<()> {
             // Load + validate BOTH inputs BEFORE starting the proxy. A bad policy or baseline is a
             // misconfigured service: fail startup with a non-zero exit, never start an enforcing proxy
             // that cannot decide (and never degrade to a runtime deny).
-            let policy = proxy::enforce::load(&enforce_policy)?;
-            let baseline = proxy::enforce::load_declared_manifest(&declared_mcp_manifest)?;
+            let policy = proxy_startup(
+                proxy::enforce::load(&enforce_policy),
+                "proxy_enforce_policy_invalid",
+                "Check --enforce-policy and retry proxy-enforce.",
+            )?;
+            let baseline = proxy_startup(
+                proxy::enforce::load_declared_manifest(&declared_mcp_manifest),
+                "proxy_declared_manifest_invalid",
+                "Check --declared-mcp-manifest and retry proxy-enforce.",
+            )?;
             // Validate the establish budget at startup (a misconfig fails fast, never a runtime deny):
             // 0 is rejected, and the value is capped at 60_000 ms.
-            if manifest_establish_budget_ms == 0 {
-                anyhow::bail!("--manifest-establish-budget-ms must be greater than 0");
-            }
+            let manifest_establish_budget_ms = proxy_startup(
+                (manifest_establish_budget_ms > 0)
+                    .then_some(manifest_establish_budget_ms)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("--manifest-establish-budget-ms must be greater than 0")
+                    }),
+                "proxy_establish_budget_invalid",
+                "Set --manifest-establish-budget-ms above 0 and retry proxy-enforce.",
+            )?;
             let budget_ms = manifest_establish_budget_ms.min(60_000);
             if budget_ms != manifest_establish_budget_ms {
                 tracing::warn!(

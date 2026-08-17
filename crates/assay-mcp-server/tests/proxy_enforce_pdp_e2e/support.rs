@@ -304,13 +304,12 @@ pub(crate) fn assert_no_secrets(rec: &Value) {
     );
 }
 
-pub(crate) fn startup_status(args: &[&str]) -> std::process::ExitStatus {
+pub(crate) fn startup_output(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
         .args(args)
+        .env("ASSAY_LOG", "off")
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
+        .output()
         .expect("spawn")
 }
 
@@ -328,10 +327,14 @@ pub(crate) fn upstream_args() -> Vec<String> {
 }
 
 pub(crate) fn run_startup(extra: &[&str]) -> std::process::ExitStatus {
+    run_startup_output(extra).status
+}
+
+pub(crate) fn run_startup_output(extra: &[&str]) -> std::process::Output {
     let mut args = upstream_args();
     for e in extra {
         args.push((*e).into());
     }
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    startup_status(&arg_refs)
+    startup_output(&arg_refs)
 }

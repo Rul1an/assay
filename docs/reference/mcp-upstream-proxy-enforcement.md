@@ -401,6 +401,21 @@ digest), and the only place a privileged `tools/call` is forwarded. `pdp_gate_un
 per-decision diagnostic `tracing` line now also carries `decision=allow|deny` and `forwarded`; it
 remains operability-only, NOT the canonical `assay.enforcement_decision.v0` record (that is P61e-d).
 
+**Startup diagnostic contract:** after argument parsing and before the upstream starts, an invalid
+enforcement policy, declared manifest, or establish budget exits non-zero with empty stdout and one
+top-level JSON object on stderr. This event is emitted independently of `ASSAY_LOG`, because callers
+use it for recovery rather than log filtering:
+
+```json
+{"event":"startup_failure","reason_code":"proxy_enforce_policy_invalid","next_step":"Check --enforce-policy and retry proxy-enforce."}
+```
+
+The stable startup reasons are `proxy_enforce_policy_invalid`,
+`proxy_declared_manifest_invalid`, and `proxy_establish_budget_invalid`. The ordinary human error
+chain may follow on stderr. Clap errors such as a missing required flag or a non-numeric budget happen
+before logging and retain clap's exit-2/text contract. A startup failure is never encoded as pre-session
+JSON-RPC, converted into a runtime deny, or downgraded to observe-only mode.
+
 **P61e-b is deliberately just a deny-all enforcing proxy** — no policy decision point, no inputs, no
 allow path. It lands the enforcement *boundary* so "fail-closed" and the `proxy_denied`-vs-
 `proxy_unsupported` distinction are testable the moment the mode exists (the same discipline as P61b's

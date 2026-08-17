@@ -448,7 +448,8 @@ STEPS: list[dict[str, object]] = [
                     "--declared-mcp-manifest",
                     "missing.json",
                 ],
-                gap_issue=2163,
+                reason_code="proxy_enforce_policy_invalid",
+                next_step="Check --enforce-policy and retry proxy-enforce.",
             ),
         ],
         "stdout_summary": (
@@ -458,8 +459,9 @@ STEPS: list[dict[str, object]] = [
         ),
         "failure_summary": (
             "Policy denial is not a process failure. A missing enforcement policy fails "
-            "startup with empty stdout and no stable reason/next-step object: "
-            "[gap #2163](https://github.com/Rul1an/assay/issues/2163)."
+            "startup with empty stdout and one JSON `startup_failure` event on stderr, "
+            "including `reason_code: proxy_enforce_policy_invalid` and an actionable "
+            "`next_step`."
         ),
     },
     {

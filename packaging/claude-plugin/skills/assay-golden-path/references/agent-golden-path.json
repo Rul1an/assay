@@ -393,13 +393,13 @@
             "kind": "empty",
             "document": null
           },
-          "reason_code": null,
-          "next_step": null,
-          "gap_issue": 2163
+          "reason_code": "proxy_enforce_policy_invalid",
+          "next_step": "Check --enforce-policy and retry proxy-enforce.",
+          "gap_issue": null
         }
       ],
       "stdout_summary": "The denied `tools/call` response pins `error.code: -32042`, `error.data.origin: assay-proxy`, and `error.data.reason: no_declared_allowance`.",
-      "failure_summary": "Policy denial is not a process failure. A missing enforcement policy fails startup with empty stdout and no stable reason/next-step object: [gap #2163](https://github.com/Rul1an/assay/issues/2163).",
+      "failure_summary": "Policy denial is not a process failure. A missing enforcement policy fails startup with empty stdout and one JSON `startup_failure` event on stderr, including `reason_code: proxy_enforce_policy_invalid` and an actionable `next_step`.",
       "command": "assay-mcp-server proxy-enforce --upstream-command <python> --upstream-arg -u --upstream-arg mock_github_mcp.py --enforce-policy policies/no-allowance.yaml --declared-mcp-manifest baseline-approved.json"
     },
     {
