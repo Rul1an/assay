@@ -142,8 +142,9 @@ property of the crypto system, not of the retained record, and for some classes 
 obtains the plaintext with no key holder involved. Two consequences: a named
 `approval_encryption_key_holder` bounds who can *review* the basis and says nothing about who can
 *read* it, and a bundle that lints clean may still carry third-party-recoverable content — the
-secret scan behind [`ASSAY-W001`](#assay-w001) matches plaintext patterns, so ciphertext passes it
-by construction. Treat publishability as a separate question from reviewability.
+[`ASSAY-W001`](#assay-w001) check is a narrow subject-pattern heuristic and neither validates nor
+decrypts retained approval payloads. Treat publishability as a separate question from
+reviewability.
 
 **How to fix.** Emit `structured_meta_jcs` where the approval basis is structured. Where the body
 genuinely must be encrypted, emit `approval_plaintext_commitment` alongside it so a later
