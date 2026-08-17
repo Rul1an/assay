@@ -223,15 +223,14 @@ fn native_windows_bare_command_uses_exe_not_pathext_scripts() {
             String::from_utf8_lossy(&where_output.stdout),
             String::from_utf8_lossy(&where_output.stderr)
         );
-        let where_stdout = String::from_utf8_lossy(&where_output.stdout).to_ascii_lowercase();
-        // tempfile may expose a verbatim `\\?\` path while where.exe prints
-        // the equivalent DOS path. Compare the same Windows representation.
-        let expected_script = script
-            .to_string_lossy()
-            .trim_start_matches(r"\\?\")
+        let where_stdout = String::from_utf8_lossy(&where_output.stdout)
+            .replace('\\', "/")
             .to_ascii_lowercase();
+        let expected_suffix = format!("/{extension}-only/assay-mcp-server.{extension}");
         assert!(
-            where_stdout.contains(expected_script.as_str()),
+            where_stdout
+                .lines()
+                .any(|line| line.ends_with(&expected_suffix)),
             "where.exe output must name the .{extension} fixture: {}",
             String::from_utf8_lossy(&where_output.stdout)
         );
