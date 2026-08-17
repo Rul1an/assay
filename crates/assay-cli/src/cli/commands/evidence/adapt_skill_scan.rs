@@ -13,6 +13,7 @@
 
 use super::skill_supply_chain::{expected_verdict, validate_carrier};
 use crate::exit_codes;
+use crate::output_write::write_stdout_json;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -67,7 +68,7 @@ pub fn cmd_adapt_skill_scan(args: AdaptSkillScanArgs) -> Result<i32> {
                 .with_context(|| format!("failed to write {}", path.display()))?;
             eprintln!("Wrote augmented carrier to {}", path.display());
         }
-        None => println!("{json}"),
+        None => return Ok(write_stdout_json(&json)),
     }
     Ok(exit_codes::OK)
 }
