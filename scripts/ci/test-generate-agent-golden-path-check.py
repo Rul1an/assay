@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -149,6 +150,72 @@ def check_in_sync_is_clean(root: Path) -> None:
         fail("--check rejected in-sync golden-path outputs: " + combined_output(result))
     if after != before:
         fail("--check modified an in-sync tree")
+
+
+def load_generator_module():
+    spec = importlib.util.spec_from_file_location(
+        "generate_agent_golden_path", ROOT / GENERATOR
+    )
+    if spec is None or spec.loader is None:
+        fail("could not load generate-agent-golden-path.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def check_resolver_uses_generator_constants() -> None:
+    module = load_generator_module()
+    resolver = module.CONTRACT.get("working_directory_resolver")
+    if not isinstance(resolver, dict):
+        fail("CONTRACT must publish working_directory_resolver")
+    if resolver.get("operation") != "replace":
+        fail("working_directory_resolver.operation must be replace")
+    if resolver.get("canonical_root") is not module.CANONICAL_WORKING_DIRECTORY:
+        fail("canonical_root is not the generator CANONICAL_WORKING_DIRECTORY constant")
+    surfaces = resolver.get("by_surface")
+    if not isinstance(surfaces, dict):
+        fail("working_directory_resolver.by_surface must be an object")
+    require_typed_surface(
+        surfaces,
+        "source",
+        module.KIND_REPOSITORY_RELATIVE,
+        module.CANONICAL_WORKING_DIRECTORY,
+        "KIND_REPOSITORY_RELATIVE",
+        "CANONICAL_WORKING_DIRECTORY",
+    )
+    require_typed_surface(
+        surfaces,
+        "claude_plugin",
+        module.KIND_HOST_PATH_TEMPLATE,
+        module.PLUGIN_ASSET_ROOT,
+        "KIND_HOST_PATH_TEMPLATE",
+        "PLUGIN_ASSET_ROOT",
+    )
+    require_typed_surface(
+        surfaces,
+        "agent_plugin",
+        module.KIND_SKILL_RELATIVE,
+        module.PORTABLE_ASSET_ROOT,
+        "KIND_SKILL_RELATIVE",
+        "PORTABLE_ASSET_ROOT",
+    )
+
+
+def require_typed_surface(
+    surfaces: dict,
+    name: str,
+    kind_constant: object,
+    value_constant: object,
+    kind_label: str,
+    value_label: str,
+) -> None:
+    surface = surfaces.get(name)
+    if not isinstance(surface, dict):
+        fail(f"by_surface.{name} must be a typed path object")
+    if surface.get("kind") is not kind_constant:
+        fail(f"by_surface.{name}.kind is not the generator {kind_label} constant")
+    if surface.get("value") is not value_constant:
+        fail(f"by_surface.{name}.value is not the generator {value_label} constant")
 
 
 def check_portable_schema_lock(root: Path) -> None:
@@ -380,6 +447,7 @@ def main() -> None:
         "portable schema byte drift", apply_portable_schema_byte_mutation
     )
     check_portable_schema_survives_autocrlf_checkout(ROOT)
+    check_resolver_uses_generator_constants()
     print("golden-path generator --check: compares bytes, names drift, rejects unknown argv")
 
 

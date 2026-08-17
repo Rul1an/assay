@@ -33,10 +33,33 @@ PLUGIN_CONTRACT_OUTPUT = (
     ROOT
     / "packaging/claude-plugin/skills/assay-golden-path/references/agent-golden-path.json"
 )
+CANONICAL_WORKING_DIRECTORY = "examples/privileged-action-gate"
 PLUGIN_ASSET_ROOT = (
     "${CLAUDE_PLUGIN_ROOT}/skills/assay-golden-path/assets/privileged-action-gate"
 )
 PORTABLE_ASSET_ROOT = "assets/privileged-action-gate"
+KIND_REPOSITORY_RELATIVE = "repository_relative"
+KIND_HOST_PATH_TEMPLATE = "host_path_template"
+KIND_SKILL_RELATIVE = "skill_relative"
+
+
+def typed_working_directory(kind: str, value: str) -> dict[str, str]:
+    return {"kind": kind, "value": value}
+
+
+WORKING_DIRECTORY_RESOLVER = {
+    "operation": "replace",
+    "canonical_root": CANONICAL_WORKING_DIRECTORY,
+    "by_surface": {
+        "source": typed_working_directory(
+            KIND_REPOSITORY_RELATIVE, CANONICAL_WORKING_DIRECTORY
+        ),
+        "claude_plugin": typed_working_directory(
+            KIND_HOST_PATH_TEMPLATE, PLUGIN_ASSET_ROOT
+        ),
+        "agent_plugin": typed_working_directory(KIND_SKILL_RELATIVE, PORTABLE_ASSET_ROOT),
+    },
+}
 PLUGIN_RESOURCE_COPIES = (
     (JSON_OUTPUT, PLUGIN_CONTRACT_OUTPUT),
     (
@@ -410,7 +433,7 @@ STEPS: list[dict[str, object]] = [
         "id": "protected-action",
         "label": "Protected action",
         "binary": "assay-mcp-server",
-        "working_directory": "examples/privileged-action-gate",
+        "working_directory": CANONICAL_WORKING_DIRECTORY,
         "outcomes": [
             outcome(
                 "policy-denied",
@@ -683,6 +706,7 @@ CONTRACT: dict[str, object] = {
     "release_tag": RELEASE_TAG,
     "source_issue": 2154,
     "journey_issue": 1975,
+    "working_directory_resolver": WORKING_DIRECTORY_RESOLVER,
     "non_claims": [
         "The contract records current behavior; gap rows are not clean results.",
         "Schema identity conventions outside this narrow contract remain owned by issue #2167.",

@@ -1,5 +1,10 @@
+#[allow(dead_code)]
+#[path = "../../../tests/support/agent_golden_path.rs"]
+mod agent_golden_path;
+
+use agent_golden_path::{classify_working_directory, WorkingDirectory};
 use jsonschema::{Draft, Validator};
-use serde_json::Value;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -200,4 +205,134 @@ fn portable_agent_plugin_is_skills_only_and_self_contained() {
             "portable skill omits package-relative path: {required}"
         );
     }
+}
+
+fn join_classified(base: &Path, components: &[String]) -> PathBuf {
+    let mut joined = base.to_path_buf();
+    for component in components {
+        joined.push(component);
+    }
+    joined
+}
+
+fn assert_stays_inside_package(package: &Path, candidate: &Path) {
+    let package = package.components().collect::<Vec<_>>();
+    let candidate = candidate.components().collect::<Vec<_>>();
+    assert!(
+        candidate.starts_with(&package),
+        "resolved working_directory escaped the package"
+    );
+}
+
+fn require_source_repo_relative(step: &Value) -> Vec<String> {
+    match classify_working_directory(step) {
+        Ok(WorkingDirectory::SourceRepoRelative(components)) => components,
+        Ok(WorkingDirectory::Invocation) => {
+            panic!("working_directory resolver path classified as invocation cwd")
+        }
+        Err(error) => panic!("{error}"),
+    }
+}
+
+fn require_typed_surface<'a>(
+    by_surface: &'a serde_json::Map<String, Value>,
+    name: &str,
+    expected_kind: &str,
+) -> &'a str {
+    let surface = by_surface
+        .get(name)
+        .and_then(Value::as_object)
+        .unwrap_or_else(|| panic!("by_surface.{name} must be a typed path object"));
+    assert_eq!(
+        surface.get("kind").and_then(Value::as_str),
+        Some(expected_kind),
+        "by_surface.{name}.kind"
+    );
+    surface
+        .get("value")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("by_surface.{name}.value"))
+}
+
+#[test]
+fn portable_agent_plugin_resolves_working_directories_inside_package() {
+    let package = package_root();
+    let contract =
+        read_json(&package.join("skills/assay-golden-path/references/agent-golden-path.json"));
+    let resolver = contract
+        .get("working_directory_resolver")
+        .and_then(Value::as_object)
+        .expect("bundled contract must publish working_directory_resolver");
+    assert_eq!(
+        resolver.get("operation").and_then(Value::as_str),
+        Some("replace"),
+        "working_directory_resolver.operation"
+    );
+    let canonical = resolver
+        .get("canonical_root")
+        .and_then(Value::as_str)
+        .expect("working_directory_resolver.canonical_root");
+    let by_surface = resolver
+        .get("by_surface")
+        .and_then(Value::as_object)
+        .expect("working_directory_resolver.by_surface");
+    let source = require_typed_surface(by_surface, "source", "repository_relative");
+    let claude_plugin = require_typed_surface(by_surface, "claude_plugin", "host_path_template");
+    let agent_plugin = require_typed_surface(by_surface, "agent_plugin", "skill_relative");
+    assert_eq!(source, canonical, "source surface must echo canonical_root");
+    assert!(
+        claude_plugin.contains("${CLAUDE_PLUGIN_ROOT}"),
+        "claude_plugin is a host path template, not a filesystem path"
+    );
+
+    let replacement = json!({ "working_directory": agent_plugin });
+    let replacement_components = require_source_repo_relative(&replacement);
+    let skill_root = package.join("skills/assay-golden-path");
+    let target = join_classified(&skill_root, &replacement_components);
+    assert_stays_inside_package(&package, &target);
+    assert!(
+        target.exists(),
+        "resolved agent-plugin working_directory is absent from the package: {}",
+        target.display()
+    );
+
+    let steps = contract["steps"]
+        .as_array()
+        .expect("bundled contract steps");
+    let mut saw_working_directory = false;
+    for step in steps {
+        if step.get("working_directory").is_none() {
+            continue;
+        }
+        saw_working_directory = true;
+        let components = require_source_repo_relative(step);
+        let working_directory = step["working_directory"]
+            .as_str()
+            .expect("working_directory string");
+        assert_eq!(
+            working_directory, canonical,
+            "shipped replace rule accepts only an exact canonical_root match"
+        );
+        assert_eq!(
+            components,
+            require_source_repo_relative(&json!({ "working_directory": canonical })),
+            "step working_directory and canonical_root must classify identically"
+        );
+    }
+    assert!(
+        saw_working_directory,
+        "bundled contract has no working_directory steps"
+    );
+}
+
+#[test]
+fn portable_resolver_hostile_replacement_reaches_shared_classifier() {
+    let error = classify_working_directory(&json!({
+        "working_directory": "../escape",
+    }))
+    .expect_err("hostile replacement root must be rejected by classify_working_directory");
+    assert!(
+        error.contains("working_directory"),
+        "hostile diagnostic did not name working_directory: {error}"
+    );
 }
