@@ -95,6 +95,13 @@ All notable changes to this project will be documented in this file.
       - dangerous_tool
   ```
 
+### Fixed
+- `assay doctor` text output now passes caller-derived interpolations (target
+  path, parse-error detail, suite, and diagnostic message) through the existing
+  `render_safe(Sink::Stdout, …, usize::MAX)` pipeline so ESC/CSI/OSC8/BEL cannot
+  paint the terminal. Assay-owned labels stay byte-stable, and the JSON channel
+  remains serializer-owned (#2265).
+
 ## [5.2.0] - 2026-08-14
 
 This release hardens the evidence verifier and makes the Linux monitor's declared observation
