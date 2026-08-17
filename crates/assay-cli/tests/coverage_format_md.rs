@@ -46,3 +46,24 @@ fn coverage_format_md_generates_summary() {
         "Caller-supplied declarations are literal values; wildcard-looking values are not expanded or filtered."
     ));
 }
+
+#[test]
+fn coverage_input_preserves_star_declaration_literally() {
+    let dir = tempdir().unwrap();
+    let out = dir.path().join("coverage.json");
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args(["coverage", "--input"])
+        .arg(fixture_path("input_basic.jsonl"))
+        .args(["--out"])
+        .arg(&out)
+        .args(["--declared-tool", "*", "--format", "json"])
+        .assert()
+        .success();
+
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&out).expect("JSON output should be written"))
+            .expect("coverage output should be valid JSON");
+    assert_eq!(report["tools"]["tools_declared"], serde_json::json!(["*"]));
+}

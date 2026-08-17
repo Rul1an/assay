@@ -11,8 +11,7 @@ fn is_explicit_tool_name(pattern: &str) -> bool {
 
 /// Enumerate the policy's explicit tool names for `coverage_report_v1`.
 ///
-/// Non-enumerable wildcard patterns are excluded by construction. The result is therefore an
-/// enumeration floor, not a description of the policy's complete reach.
+/// Every value containing `*` is excluded. This yields an enumeration floor, not full policy reach.
 pub(super) fn collect_declared_tools(policy: &McpPolicy) -> Vec<String> {
     let mut declared = BTreeSet::new();
 

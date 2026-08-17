@@ -33,8 +33,8 @@ Coverage Report v1 is designed to:
 - tools_seen: tool names observed in evidence / intercepted calls during the report window.
 - tools_declared: tool-name values supplied by one of two producer conventions:
   - `run.source: decision_jsonl` (`assay mcp wrap --coverage-out`) enumerates explicit names from
-    the policy and excludes non-enumerable wildcard patterns. The resulting set is a floor on the
-    policy's reach, not an exhaustive description of it.
+    the policy and excludes every value containing `*`. The resulting set is a floor on the policy's
+    reach, not an exhaustive description of it.
   - `run.source: jsonl` (`assay coverage --input`) retains caller-supplied declarations literally;
     wildcard-looking values are neither expanded nor filtered.
 - tools_unknown: tools_seen minus tools_declared.

@@ -14,7 +14,7 @@ fn as_string_array(value: Option<&Value>) -> Vec<String> {
 fn declared_tools_basis_note(source: &str) -> &'static str {
     match source {
         "decision_jsonl" => {
-            "Policy-derived declarations enumerate explicit tool names; wildcard patterns are excluded, so the set is a floor on policy reach."
+            "Policy-derived declarations enumerate explicit tool names; every value containing `*` is excluded, so the set is a floor on policy reach."
         }
         "jsonl" => {
             "Caller-supplied declarations are literal values; wildcard-looking values are not expanded or filtered."
@@ -139,7 +139,7 @@ mod tests {
 
         let markdown = render_coverage_markdown(&report, 0).expect("report should render");
         assert!(markdown.contains(
-            "Policy-derived declarations enumerate explicit tool names; wildcard patterns are excluded, so the set is a floor on policy reach."
+            "Policy-derived declarations enumerate explicit tool names; every value containing `*` is excluded, so the set is a floor on policy reach."
         ));
     }
 }
