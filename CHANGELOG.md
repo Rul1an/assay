@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `assay ci --format json` now publishes its authoritative `assay.run_summary.v1` report on stdout
+  for completed gates and early pipeline failures while preserving `summary.json`; default text
+  mode keeps stdout clear (#2177).
 - A stable JSON `startup_failure` diagnosis is emitted on stderr for enforcing-proxy policy,
   manifest, and establish-budget startup failures while MCP stdout stays empty and recovery stays
   independent of log level (#2163).
