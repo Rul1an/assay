@@ -2,7 +2,33 @@ use anyhow::{Context, Result};
 use assay_evidence::diff::engine::diff_bundles;
 use assay_evidence::VerifyLimits;
 use clap::{Args, ValueEnum};
+use serde::Serialize;
 use std::fs::File;
+
+const COMPARISON_SCOPE_SENTENCE: &str =
+    "Comparison scope: retained verified events. Absence and completeness are not established.";
+
+#[derive(Debug, Serialize)]
+struct DiffComparisonScope {
+    basis: &'static str,
+    absence_completeness: &'static str,
+}
+
+impl DiffComparisonScope {
+    const fn retained_verified() -> Self {
+        Self {
+            basis: "retained_verified_events",
+            absence_completeness: "not_established",
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct DiffCliDocument<'a> {
+    comparison_scope: DiffComparisonScope,
+    #[serde(flatten)]
+    report: &'a assay_evidence::diff::DiffReport,
+}
 
 /// The shapes `evidence diff` can emit. A type rather than a string, so the match over it is
 /// exhaustive and no spelling can reach it that the parser did not accept.
@@ -61,7 +87,11 @@ pub fn cmd_diff(args: DiffArgs) -> Result<i32> {
 
     match args.format {
         DiffFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&report)?);
+            let document = DiffCliDocument {
+                comparison_scope: DiffComparisonScope::retained_verified(),
+                report: &report,
+            };
+            println!("{}", serde_json::to_string_pretty(&document)?);
         }
         DiffFormat::Human => {
             eprintln!("Assay Evidence Diff");
@@ -75,6 +105,8 @@ pub fn cmd_diff(args: DiffArgs) -> Result<i32> {
                 report.candidate.run_id, report.candidate.event_count
             );
             eprintln!("Event count delta: {:+}", report.summary.event_count_delta);
+            eprintln!();
+            eprintln!("{COMPARISON_SCOPE_SENTENCE}");
             eprintln!();
 
             print_diff_set("Network", &report.network);
