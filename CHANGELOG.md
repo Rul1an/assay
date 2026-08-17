@@ -43,6 +43,11 @@ All notable changes to this project will be documented in this file.
   class (#2165).
 
 ### Changed
+- `assay-mcp-server` prefixes every line of its top-level human error chain, so a caller-supplied
+  path containing a newline can no longer place an unprefixed JSON line on stderr that a
+  line-oriented consumer reads as a second `startup_failure` event. The machine event itself is
+  unchanged: still path-free, still emitted once, still carrying its reason code and next step
+  (#2436).
 - `summary.json` and machine-readable early-failure summaries now apply the existing JSON
   record-sink safety pipeline to failure `message` text. Secret shapes and terminal controls are
   neutralized without truncating record content or changing Assay-owned contract fields, including

@@ -153,8 +153,40 @@ fn proxy_startup<T>(
     })
 }
 
+/// Opens every operator-channel error line. Not valid JSON, and it cannot become valid JSON by
+/// anything that follows it, which is the whole property: a consumer splitting stderr on newlines
+/// can tell a machine event from human prose by the first byte of the line.
+const HUMAN_ERROR_PREFIX: &str = "assay-mcp-server: ";
+
+/// Render a failed run for an operator without letting caller-controlled text begin a line.
+///
+/// `anyhow`'s `Debug` rendering is multi-line and interpolates the rejected input, and a Unix path
+/// may contain a newline. The default `Result` termination prefixes only the first line, so a path
+/// carrying `\n{"event":"startup_failure",...}` reached stderr as an unprefixed line that a
+/// line-oriented consumer parsed as a second machine event (#2436). The machine emitter was never
+/// the defect: it is path-free and emits once. This prefixes every chain line so the human channel
+/// keeps its full diagnosis and cannot impersonate that emitter.
+fn report_error(error: &anyhow::Error) {
+    for line in format!("{error:?}").lines() {
+        eprintln!("{HUMAN_ERROR_PREFIX}{line}");
+    }
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> std::process::ExitCode {
+    match run().await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        // `Result`'s own termination is what rendered the unprefixed chain, so the rendering is
+        // taken over here rather than left to it. The exit class is unchanged: `FAILURE` is the 1
+        // that `Result<()>` already returned.
+        Err(error) => {
+            report_error(&error);
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+async fn run() -> Result<()> {
     let args = Args::parse();
 
     // The stdio server and proxies do not implement transport authentication. Reject the entire
