@@ -7,6 +7,7 @@
 //! external. Attestation binds who-said-it and the bundle content; it does not
 //! upgrade observed support.
 
+use crate::output_write::write_stdout_json;
 use anyhow::{Context, Result};
 use assay_common::limits::{LimitKind, LimitReader};
 use assay_evidence::attestation::{sign_statement, statement_for_bundle_with_limits};
@@ -50,11 +51,18 @@ fn read_bundle_bounded(path: &std::path::Path, limits: VerifyLimits) -> Result<V
 }
 
 pub fn cmd_attest(args: AttestArgs) -> Result<i32> {
-    run(args)?;
-    Ok(0)
+    run(args)
 }
 
-fn run(args: AttestArgs) -> Result<()> {
+/// Returns the process exit rather than `()`.
+///
+/// The envelope is a machine document, and whether it was delivered is an exit class, not a detail
+/// of the value produced. `Result<()>` had nowhere to put that, so a failed stdout write could only
+/// become an `Err` — which reaches the generic top-level fallback and reports the config-error exit
+/// `2` for what is an output-write failure (#2441). Returning the writer's own code keeps the
+/// registered infrastructure exit `3` intact and leaves `Err` meaning what it already meant here:
+/// the attestation itself could not be produced.
+fn run(args: AttestArgs) -> Result<i32> {
     // 1. Refuse an unusable invocation before touching anything on disk.
     //
     //    `--predicate` is rejected rather than silently ignored: every v1 field is derived from the
@@ -106,9 +114,9 @@ fn run(args: AttestArgs) -> Result<()> {
                 .with_context(|| format!("write {}", p.display()))?;
             eprintln!("Attestation: {}", p.display());
         }
-        None => println!("{json}"),
+        None => return Ok(write_stdout_json(&json)),
     }
-    Ok(())
+    Ok(crate::exit_codes::EXIT_SUCCESS)
 }
 
 #[cfg(test)]

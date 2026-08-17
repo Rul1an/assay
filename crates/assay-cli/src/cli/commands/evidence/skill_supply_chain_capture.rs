@@ -11,6 +11,7 @@
 
 use super::skill_supply_chain::{expected_verdict, validate_carrier};
 use crate::exit_codes;
+use crate::output_write::write_stdout_json;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use std::fs;
@@ -58,7 +59,7 @@ pub fn cmd_capture_skill_supply_chain(args: CaptureSkillSupplyChainArgs) -> Resu
                 .with_context(|| format!("failed to write {}", path.display()))?;
             eprintln!("Captured skill supply-chain carrier to {}", path.display());
         }
-        None => println!("{json}"),
+        None => return Ok(write_stdout_json(&json)),
     }
     Ok(exit_codes::OK)
 }

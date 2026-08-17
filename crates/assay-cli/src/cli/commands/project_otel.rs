@@ -12,6 +12,7 @@ use serde_json::Value;
 
 use crate::cli::args::ProjectOtelArgs;
 use crate::exit_codes::{EXIT_CONFIG_ERROR, EXIT_SUCCESS};
+use crate::output_write::write_stdout_json;
 
 fn read_json(path: &Path) -> anyhow::Result<Value> {
     let text = std::fs::read_to_string(path)
@@ -77,7 +78,7 @@ pub fn run(args: ProjectOtelArgs) -> anyhow::Result<i32> {
                 return Ok(EXIT_CONFIG_ERROR);
             }
         }
-        None => println!("{json}"),
+        None => return Ok(write_stdout_json(&json)),
     }
     Ok(EXIT_SUCCESS)
 }
@@ -129,7 +130,7 @@ fn run_tool_decision_truth(bundle: &Path, out: Option<&Path>) -> anyhow::Result<
                 return Ok(EXIT_CONFIG_ERROR);
             }
         }
-        None => println!("{json}"),
+        None => return Ok(write_stdout_json(&json)),
     }
     Ok(EXIT_SUCCESS)
 }

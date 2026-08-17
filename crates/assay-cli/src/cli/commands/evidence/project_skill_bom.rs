@@ -10,6 +10,7 @@
 
 use super::skill_supply_chain::CARRIER_EVENT_TYPE;
 use crate::exit_codes;
+use crate::output_write::write_stdout_json;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::fs;
@@ -74,7 +75,7 @@ pub fn cmd_project_skill_bom(args: ProjectSkillBomArgs) -> Result<i32> {
                 .with_context(|| format!("failed to write {}", path.display()))?;
             eprintln!("Projected CycloneDX AI-BOM to {}", path.display());
         }
-        None => println!("{json}"),
+        None => return Ok(write_stdout_json(&json)),
     }
     Ok(exit_codes::OK)
 }

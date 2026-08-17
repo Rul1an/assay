@@ -43,6 +43,11 @@ All notable changes to this project will be documented in this file.
   class (#2165).
 
 ### Changed
+- Six machine-document stdout branches now use the shared fail-closed writer instead of raw
+  `println!`: `evidence adapt-skill-scan`, `evidence attest`, `evidence capture-skill-supply-chain`,
+  `evidence project-skill-bom`, and both `project-otel` projections. A requested document that
+  cannot be delivered returns the registered output-write exit `3` rather than aborting the process.
+  Open-reader bytes, `--out` file behaviour, and successful exits are unchanged (#2441).
 - `assay-mcp-server` prefixes every line of its top-level human error chain, so a caller-supplied
   path containing a newline can no longer place an unprefixed JSON line on stderr that a
   line-oriented consumer reads as a second `startup_failure` event. The machine event itself is

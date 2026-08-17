@@ -586,3 +586,338 @@ fn partial_read_times_out_when_the_child_never_writes_stdout() {
         started.elapsed()
     );
 }
+
+// --- the six bounded machine-stdout writers (#2441) -------------------------------------------
+//
+// These commands render a machine document and, with no `--out`, put it on stdout. They are outside
+// the golden path #2439 repaired, so they kept a raw `println!` and a closed reader turned them into
+// a Rust panic rather than the registered output-write exit.
+//
+// Every row drives the real binary twice. The first drive writes to `--out` and must succeed: a
+// fixture that fails verification exits before the writer is ever reached, and a closed-reader row
+// over such a fixture would pass while proving nothing. The second drive removes `--out` and hands
+// the process a stdout whose reader is already gone.
+
+/// One row per stdout branch this slice owns. Two `project-otel` variants because the command has
+/// two independent write paths, not one shared seam.
+#[derive(Clone, Copy, Debug)]
+enum SinkCase {
+    AdaptSkillScan,
+    Attest,
+    CaptureSkillSupplyChain,
+    ProjectSkillBom,
+    ProjectOtelCapabilitySurface,
+    ProjectOtelToolDecisionTruth,
+}
+
+/// Written out independently of `SINK_CASES`. The equality below is what makes deleting a row fail
+/// rather than silently shrinking the contract this file claims to cover.
+const EXPECTED_SINK_COMMANDS: &[&str] = &[
+    "evidence adapt-skill-scan",
+    "evidence attest",
+    "evidence capture-skill-supply-chain",
+    "evidence project-skill-bom",
+    "project-otel --capability-surface",
+    "project-otel --tool-decision-truth",
+];
+
+const SINK_CASES: &[SinkCase] = &[
+    SinkCase::AdaptSkillScan,
+    SinkCase::Attest,
+    SinkCase::CaptureSkillSupplyChain,
+    SinkCase::ProjectSkillBom,
+    SinkCase::ProjectOtelCapabilitySurface,
+    SinkCase::ProjectOtelToolDecisionTruth,
+];
+
+impl SinkCase {
+    fn label(self) -> &'static str {
+        match self {
+            Self::AdaptSkillScan => "evidence adapt-skill-scan",
+            Self::Attest => "evidence attest",
+            Self::CaptureSkillSupplyChain => "evidence capture-skill-supply-chain",
+            Self::ProjectSkillBom => "evidence project-skill-bom",
+            Self::ProjectOtelCapabilitySurface => "project-otel --capability-surface",
+            Self::ProjectOtelToolDecisionTruth => "project-otel --tool-decision-truth",
+        }
+    }
+
+    /// Build this row's inputs under `dir` and return the argv that reaches its stdout writer.
+    fn argv(self, dir: &Path) -> Vec<std::ffi::OsString> {
+        let s = |v: &str| std::ffi::OsString::from(v);
+        let p = |v: std::path::PathBuf| v.into_os_string();
+        match self {
+            Self::AdaptSkillScan => vec![
+                s("evidence"),
+                s("adapt-skill-scan"),
+                s("--carrier"),
+                p(write_skill_carrier(dir)),
+                s("--sarif"),
+                p(write_sarif(dir)),
+            ],
+            Self::Attest => vec![
+                s("evidence"),
+                s("attest"),
+                s("--bundle"),
+                p(skill_supply_chain_bundle(dir)),
+                s("--key"),
+                p(write_ed25519_key(dir)),
+            ],
+            Self::CaptureSkillSupplyChain => vec![
+                s("evidence"),
+                s("capture-skill-supply-chain"),
+                s("--root"),
+                p(write_skill_root(dir)),
+            ],
+            Self::ProjectSkillBom => vec![
+                s("evidence"),
+                s("project-skill-bom"),
+                p(skill_supply_chain_bundle(dir)),
+            ],
+            Self::ProjectOtelCapabilitySurface => vec![
+                s("project-otel"),
+                s("--capability-surface"),
+                p(write_capability_surface(dir)),
+            ],
+            Self::ProjectOtelToolDecisionTruth => vec![
+                s("project-otel"),
+                s("--evidence-bundle"),
+                p(tool_decision_truth_bundle(dir)),
+            ],
+        }
+    }
+}
+
+fn write_skill_root(dir: &Path) -> std::path::PathBuf {
+    let root = dir.join("skill");
+    std::fs::create_dir_all(&root).expect("create skill root");
+    std::fs::write(
+        root.join("SKILL.md"),
+        "---\nname: stdout-sink-probe\n---\n\nA skill body.\n",
+    )
+    .expect("write SKILL.md");
+    root
+}
+
+fn write_skill_carrier(dir: &Path) -> std::path::PathBuf {
+    let path = dir.join("carrier.json");
+    let carrier = serde_json::json!({
+        "schema": "assay.skill_supply_chain.v0",
+        "root": {"name": "s", "path": "skills/s"},
+        "verdict": "review_complete",
+        "reason_codes": [],
+        "coverage": {
+            "front_matter": "present", "body_text": "present", "scripts": "present",
+            "lockfiles": "present", "transitive_traversal": "present"
+        },
+        "signals": [],
+        "non_claims": ["review_complete_is_not_skill_safe"]
+    });
+    std::fs::write(&path, serde_json::to_string_pretty(&carrier).unwrap()).expect("write carrier");
+    path
+}
+
+fn write_sarif(dir: &Path) -> std::path::PathBuf {
+    let path = dir.join("scan.sarif");
+    let sarif = serde_json::json!({
+        "version": "2.1.0",
+        "runs": [{"tool": {"driver": {"name": "SkillSpector"}}, "results": []}]
+    });
+    std::fs::write(&path, serde_json::to_string_pretty(&sarif).unwrap()).expect("write sarif");
+    path
+}
+
+/// A real carrier through the real producer and the real import gate, rather than a hand-written
+/// one: the import gate refuses an incoherent carrier, so a bundle that exists here is one
+/// `project-skill-bom` will actually verify.
+fn skill_supply_chain_bundle(dir: &Path) -> std::path::PathBuf {
+    let bundle = dir.join("ssc.tar.gz");
+    if bundle.is_file() {
+        return bundle;
+    }
+    let carrier = dir.join("captured-carrier.json");
+    let captured = assay(
+        dir,
+        &[
+            OsStr::new("evidence"),
+            OsStr::new("capture-skill-supply-chain"),
+            OsStr::new("--root"),
+            write_skill_root(dir).as_os_str(),
+            OsStr::new("--out"),
+            carrier.as_os_str(),
+        ],
+        LIMITS,
+        "capture carrier for bundle",
+    );
+    assert_eq!(
+        captured.status.code(),
+        Some(0),
+        "capture must produce a carrier; stderr={}",
+        String::from_utf8_lossy(&captured.stderr)
+    );
+    let imported = assay(
+        dir,
+        &[
+            OsStr::new("evidence"),
+            OsStr::new("import"),
+            OsStr::new("skill-supply-chain"),
+            OsStr::new("--carrier"),
+            carrier.as_os_str(),
+            OsStr::new("--bundle-out"),
+            bundle.as_os_str(),
+        ],
+        LIMITS,
+        "import carrier into bundle",
+    );
+    assert_eq!(
+        imported.status.code(),
+        Some(0),
+        "import must produce a bundle; stderr={}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    bundle
+}
+
+/// Deterministic PKCS#8 PEM. The key material is a test constant, never generated, so the row does
+/// not depend on an RNG and the fixture is reproducible.
+fn write_ed25519_key(dir: &Path) -> std::path::PathBuf {
+    use ed25519_dalek::pkcs8::EncodePrivateKey;
+    let path = dir.join("attest-key.pem");
+    let key = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+    let pem = key
+        .to_pkcs8_pem(ed25519_dalek::pkcs8::spki::der::pem::LineEnding::LF)
+        .expect("encode PKCS#8 PEM");
+    std::fs::write(&path, pem.as_bytes()).expect("write key");
+    path
+}
+
+fn write_capability_surface(dir: &Path) -> std::path::PathBuf {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../assay-core/tests/fixtures/otel_projection/input.json");
+    let input: Value =
+        serde_json::from_str(&std::fs::read_to_string(&source).expect("read otel input fixture"))
+            .expect("otel input fixture parses");
+    let path = dir.join("capability-surface.json");
+    std::fs::write(
+        &path,
+        serde_json::to_string(&input["capability_surface"]).unwrap(),
+    )
+    .expect("write capability surface");
+    path
+}
+
+/// A carrier plus its recipe row, built through the same producers the verifier checks, so the
+/// bundle passes `verify_and_collect` and the projection reaches the writer.
+fn tool_decision_truth_bundle(dir: &Path) -> std::path::PathBuf {
+    use assay_core::mcp::policy::McpPolicy;
+    use assay_core::mcp::tool_decision_truth::{self as tdt, DecisionEvidence};
+    use assay_evidence::bundle::BundleWriter;
+    use assay_evidence::types::EvidenceEvent;
+
+    let bundle = dir.join("tdt.tar.gz");
+    let policy: McpPolicy = serde_json::from_value(serde_json::json!({
+        "version": "1",
+        "tools": {"allow": ["deploy"], "deny": ["delete_all"]},
+        "schemas": {"deploy": {"type": "object", "required": ["env"],
+            "properties": {"env": {"enum": ["staging", "prod"]}}}},
+        "enforcement": {"unconstrained_tools": "warn"}
+    }))
+    .expect("policy parses");
+    let carrier = tdt::build_classified_record(
+        &policy,
+        "deploy",
+        &serde_json::json!({"env": "prod"}),
+        0,
+        b"stdout-sink-test-key-v0",
+        "fixture-kid-v0",
+        "authoritative_boundary",
+        "c0",
+        "ok",
+        "present",
+        &DecisionEvidence::default(),
+    )
+    .expect("build classified record");
+    let row = tdt::pack_recipe_row(
+        &carrier,
+        carrier["decision_verdict"].as_str().expect("verdict"),
+        "assay://evidence-event/run/0",
+    )
+    .expect("pack recipe row");
+
+    let file = std::fs::File::create(&bundle).expect("create tdt bundle");
+    let mut writer = BundleWriter::new(file);
+    writer.add_event(EvidenceEvent::new(
+        "assay.tool_decision_truth.v0",
+        "urn:assay:test",
+        "run",
+        0,
+        carrier,
+    ));
+    writer.add_event(EvidenceEvent::new(
+        "assay.tool_decision_truth.recipe_row.v0",
+        "urn:assay:test",
+        "run",
+        1,
+        row,
+    ));
+    writer.finish().expect("finish tdt bundle");
+    bundle
+}
+
+#[test]
+fn the_sink_case_table_covers_the_expected_command_set() {
+    let labels: Vec<&str> = SINK_CASES.iter().map(|case| case.label()).collect();
+    assert_eq!(
+        labels, EXPECTED_SINK_COMMANDS,
+        "the driven machine-stdout table must cover exactly the bounded writer set"
+    );
+}
+
+#[test]
+fn every_sink_case_fixture_reaches_its_writer() {
+    for &case in SINK_CASES {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let out = dir.path().join("written.json");
+        let mut argv = case.argv(dir.path());
+        argv.push(std::ffi::OsString::from("--out"));
+        argv.push(out.clone().into_os_string());
+
+        let output = assay(dir.path(), &argv, LIMITS, case.label());
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}: the fixture must reach the writer, otherwise the closed-reader row is vacuous; \
+             stderr={}",
+            case.label(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let written = std::fs::read_to_string(&out)
+            .unwrap_or_else(|error| panic!("{}: --out file unreadable: {error}", case.label()));
+        serde_json::from_str::<Value>(&written)
+            .unwrap_or_else(|error| panic!("{}: --out file is not JSON: {error}", case.label()));
+    }
+}
+
+#[test]
+fn every_sink_case_reader_gone_is_exit_three() {
+    // Collected rather than asserted per row: one unconverted writer should not hide the state of
+    // the other five, and the failure text is the inventory a reader needs.
+    let mut offenders = Vec::new();
+    for &case in SINK_CASES {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let argv = case.argv(dir.path());
+        let mut command = assay_command(dir.path());
+        command.args(&argv);
+        let result = run_reader_already_gone(command, case.label());
+        if result.code != Some(3) {
+            offenders.push(format!("{} => exit {:?}", case.label(), result.code));
+            continue;
+        }
+        assert_no_rust_panic(&result.stderr, case.label());
+    }
+    assert!(
+        offenders.is_empty(),
+        "an undelivered machine document must exit 3, not abort or succeed: {}",
+        offenders.join("; ")
+    );
+}
