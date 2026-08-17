@@ -4,6 +4,18 @@ use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
 const LATEST_LEGACY_VERSION: &str = "2025-11-25";
+const CURSOR_INTERMEDIATE_VERSION: &str = "2025-06-18";
+
+/// Independent of the negotiation table so deleting a row fails this set comparison.
+const EXPECTED_ECHOED_REVISIONS: &[&str] = &["2024-11-05", "2025-06-18", "2025-11-25"];
+
+const PRODUCTION_TOOL_NAMES: &[&str] = &[
+    "assay_check_args",
+    "assay_check_sequence",
+    "assay_policy_decide",
+    "assay_check_coverage",
+    "assay_explain_trace",
+];
 
 /// `MODERN_PROTOCOL_VERSION` shipped public in `assay-mcp-server` 5.0.0, so removing it or
 /// narrowing it to private breaks a published API at an unchanged crate version.
@@ -84,14 +96,32 @@ fn initialize_request(protocol_version: Value, id: u64) -> Value {
     })
 }
 
+fn tools_list_request(id: u64) -> Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "tools/list",
+        "params": {}
+    })
+}
+
+fn tool_names(response: &Value) -> Vec<&str> {
+    response["result"]["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .map(|tool| tool["name"].as_str().expect("tool name"))
+        .collect()
+}
+
 #[test]
 fn supported_legacy_versions_are_echoed_exactly() {
-    for version in ["2024-11-05", LATEST_LEGACY_VERSION] {
+    for version in EXPECTED_ECHOED_REVISIONS {
         let output = run_session(&[initialize_request(Value::String(version.to_string()), 1)]);
         let response = responses(&output).pop().expect("initialize response");
         assert_eq!(
             response["result"]["protocolVersion"].as_str(),
-            Some(version),
+            Some(*version),
             "supported legacy version must be echoed"
         );
     }
@@ -99,7 +129,7 @@ fn supported_legacy_versions_are_echoed_exactly() {
 
 #[test]
 fn unsupported_versions_negotiate_to_the_latest_legacy_revision() {
-    for requested in ["2025-06-18", "2026-07-28", "future-version"] {
+    for requested in ["2026-07-28", "future-version"] {
         let output = run_session(&[initialize_request(Value::String(requested.to_string()), 1)]);
         let response = responses(&output).pop().expect("initialize response");
         assert_eq!(
@@ -246,7 +276,7 @@ fn a_modern_revision_claim_is_refused_with_the_legacy_set() {
     assert_eq!(response["error"]["data"]["requested"], "2026-07-28");
     assert_eq!(
         response["error"]["data"]["supported"],
-        serde_json::json!(["2024-11-05", "2025-11-25"])
+        serde_json::json!(EXPECTED_ECHOED_REVISIONS)
     );
     assert!(response.get("result").is_none());
 }
@@ -279,7 +309,7 @@ fn an_unimplemented_revision_is_refused_with_the_supported_set() {
 
 #[test]
 fn every_supported_legacy_revision_is_accepted_in_request_metadata() {
-    for version in ["2024-11-05", LATEST_LEGACY_VERSION] {
+    for version in EXPECTED_ECHOED_REVISIONS {
         let request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -346,4 +376,64 @@ fn latest_legacy_handshake_preserves_tools_list_and_call() {
     );
     assert!(parsed[1]["result"]["tools"].is_array());
     assert_eq!(parsed[2]["result"]["isError"].as_bool(), Some(false));
+}
+
+#[test]
+fn cursor_intermediate_revision_echoes_and_lists_production_tools() {
+    let requests = [
+        initialize_request(Value::String(CURSOR_INTERMEDIATE_VERSION.to_string()), 1),
+        tools_list_request(2),
+    ];
+    let parsed = responses(&run_session(&requests));
+    assert_eq!(parsed.len(), 2);
+    assert_eq!(
+        parsed[0]["result"]["protocolVersion"].as_str(),
+        Some(CURSOR_INTERMEDIATE_VERSION),
+        "2025-06-18 must be echoed exactly"
+    );
+    assert_eq!(tool_names(&parsed[1]), PRODUCTION_TOOL_NAMES);
+}
+
+#[test]
+fn negotiation_table_echoes_supported_set_and_falls_back_for_unknown_modern() {
+    let rows = [
+        ("2024-11-05", "2024-11-05"),
+        ("2025-06-18", "2025-06-18"),
+        ("2025-11-25", "2025-11-25"),
+        ("2026-07-28", LATEST_LEGACY_VERSION),
+    ];
+
+    let mut echoed = Vec::new();
+    for (requested, expected) in rows {
+        let output = run_session(&[initialize_request(Value::String(requested.to_string()), 1)]);
+        let response = responses(&output).pop().expect("initialize response");
+        let got = response["result"]["protocolVersion"]
+            .as_str()
+            .expect("protocolVersion");
+        assert_eq!(got, expected, "requested {requested}");
+        if got == requested {
+            echoed.push(requested);
+        }
+    }
+    assert_eq!(
+        echoed.as_slice(),
+        EXPECTED_ECHOED_REVISIONS,
+        "table rows that echo must match the independent expected set"
+    );
+
+    let refuse = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list",
+        "params": { "_meta": { "io.modelcontextprotocol/protocolVersion": "2099-01-01" } }
+    });
+    let refused = responses(&run_session(&[refuse]))
+        .pop()
+        .expect("unsupported revision response");
+    assert_eq!(refused["error"]["code"].as_i64(), Some(-32022));
+    assert_eq!(
+        refused["error"]["data"]["supported"],
+        serde_json::json!(EXPECTED_ECHOED_REVISIONS),
+        "-32022 data.supported must equal the revisions that echo"
+    );
 }

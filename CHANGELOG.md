@@ -43,6 +43,10 @@ All notable changes to this project will be documented in this file.
   class (#2165).
 
 ### Changed
+- `assay-mcp-server` now treats MCP `2025-06-18` as a supported legacy revision and echoes it
+  on `initialize`. The supported set is `2024-11-05`, `2025-06-18`, and `2025-11-25`. Unknown
+  requests still fall back to `2025-11-25`; this does not implement or advertise `2026-07-28`
+  (#2448).
 - Six machine-document stdout branches now use the shared fail-closed writer instead of raw
   `println!`: `evidence adapt-skill-scan`, `evidence attest`, `evidence capture-skill-supply-chain`,
   `evidence project-skill-bom`, and both `project-otel` projections. A requested document that

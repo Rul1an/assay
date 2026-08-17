@@ -164,8 +164,8 @@ server entry. Codex uses project `.codex/config.toml` or user
 ## Remote servers
 
 This recipe covers local stdio servers only, because that is the transport Assay
-enforces today. `assay-mcp-server` negotiates the legacy revisions `2024-11-05` and
-`2025-11-25` over stdio; a request declaring MCP revision `2026-07-28` is refused with
+enforces today. `assay-mcp-server` negotiates the legacy revisions `2024-11-05`,
+`2025-06-18`, and `2025-11-25` over stdio; a request declaring MCP revision `2026-07-28` is refused with
 JSON-RPC error `-32022` rather than accepted, and the constant naming that revision is
 deprecated and read by no dispatch path.
 
