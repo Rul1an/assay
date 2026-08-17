@@ -747,6 +747,21 @@ jobs:
               ;;
           esac
 
+      - name: Test native Windows MCP preflight resolution
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'sha=%s\nrunner_os=%s\nimage_os=%s\nimage_version=%s\n' \
+            "$GITHUB_SHA" "$RUNNER_OS" "${ImageOS:-unset}" "${ImageVersion:-unset}"
+          rustc -vV
+          cargo test --locked -p assay-cli --test mcp_preflight_contract -- \
+            native_windows_bare_command_uses_exe_not_pathext_scripts \
+            --exact --test-threads=1 --nocapture \
+            2>&1 | tee "$RUNNER_TEMP/mcp-preflight-windows.log"
+          grep -F -- 'test native_windows_bare_command_uses_exe_not_pathext_scripts ... ok' \
+            "$RUNNER_TEMP/mcp-preflight-windows.log"
+
       # Non-Linux: Exclude OS-specific crates (assay-monitor, assay-cli)
       # Windows/macOS automatically use bundled sqlite via cfg() in Cargo.toml
       - name: Test Workspace (Cross-Platform)

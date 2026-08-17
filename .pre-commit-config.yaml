@@ -359,6 +359,13 @@ repos:
         # 360-minute default; this hook rejects that, wrong classes, and eBPF drift.
         files: ^(scripts/ci/test-ci-job-timeouts-contract\.sh|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
 
+      - id: mcp-preflight-windows-contract-self-test
+        name: Native Windows MCP preflight workflow contract
+        entry: bash scripts/ci/test-mcp-preflight-windows-contract.sh --self-test
+        language: system
+        pass_filenames: false
+        files: ^(crates/assay-cli/tests/mcp_preflight_contract\.rs|scripts/ci/test-mcp-preflight-windows-contract\.sh|\.github/workflows/ci\.yml|docs/reference/cli/mcp-server\.md|\.pre-commit-config\.yaml)$
+
       - id: ci-gate-coverage
         name: Required CI gate waits on every gating job
         entry: bash -c 'python3 scripts/ci/check-ci-gate-coverage.py --self-test && python3 scripts/ci/check-ci-gate-coverage.py'
