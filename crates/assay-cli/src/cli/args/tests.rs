@@ -364,6 +364,33 @@ fn top_level_failure_funnel_owns_supported_machine_output_commands() {
         .expect("evidence show table parses");
     assert_eq!(evidence_table.machine_output_verify_enabled(), None);
 
+    let coverage_json = Cli::try_parse_from(["assay", "coverage", "--format", "json"])
+        .expect("legacy coverage JSON parses");
+    assert_eq!(
+        coverage_json.machine_output_verify_enabled(),
+        Some(true),
+        "legacy coverage JSON failures use the shared Summary envelope"
+    );
+
+    let coverage_input_json = Cli::try_parse_from([
+        "assay",
+        "coverage",
+        "--input",
+        "events.jsonl",
+        "--format",
+        "json",
+    ])
+    .expect("input-mode coverage JSON parses");
+    assert_eq!(
+        coverage_input_json.machine_output_verify_enabled(),
+        None,
+        "input mode writes coverage_report_v1 to a file and must not inherit the legacy envelope"
+    );
+
+    let coverage_text =
+        Cli::try_parse_from(["assay", "coverage"]).expect("legacy coverage text parses");
+    assert_eq!(coverage_text.machine_output_verify_enabled(), None);
+
     let run_json =
         Cli::try_parse_from(["assay", "run", "--config", "eval.yaml", "--format", "json"])
             .expect("run JSON parses");

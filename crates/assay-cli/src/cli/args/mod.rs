@@ -55,6 +55,14 @@ impl Cli {
         )
         .then_some(true)
         .or_else(|| match &self.cmd {
+            Command::Coverage(args)
+                if args.input.is_none() && args.format == Some(CoverageFormat::Json) =>
+            {
+                // Coverage has no signature-verification switch. Keep the inherited Summary
+                // convention used by classified machine-output paths; this flag selects the
+                // envelope and does not claim every internal coverage failure is classified.
+                Some(true)
+            }
             Command::Evidence(EvidenceArgs {
                 cmd: crate::cli::commands::evidence::EvidenceCmd::Show(args),
             }) if args.format == ShowFormat::Json => Some(!args.no_verify),

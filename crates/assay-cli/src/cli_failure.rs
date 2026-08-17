@@ -24,6 +24,15 @@ pub(crate) struct CliFailure {
 }
 
 impl CliFailure {
+    pub(crate) fn coverage_invalid_args(message: impl Into<String>) -> Self {
+        let outcome = RunOutcome::from_reason(ReasonCode::EInvalidArgs, Some(message.into()), None);
+        Self {
+            outcome,
+            source: "coverage",
+            context: serde_json::json!({}),
+        }
+    }
+
     pub(crate) fn policy_parse(path: &Path, error: impl std::fmt::Display) -> Self {
         let path = path.display().to_string();
         let message = format!("failed to parse policy {path}: {error}");
