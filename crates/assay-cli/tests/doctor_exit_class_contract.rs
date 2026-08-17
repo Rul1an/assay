@@ -71,6 +71,9 @@ tests:
       pattern: "Hello"
 "#;
 
+/// A malformed config for which `doctor --fix` has no repair to offer.
+const UNFIXABLE_CONFIG: &str = "configVersion: [\n";
+
 /// A second entry in the legacy OpenAI shape. `analyze_trace_schema` raises `E_TRACE_INVALID` at
 /// `warn` for it, which is how this fixture gets a diagnostic that is not an error.
 const LEGACY_LINE: &str = r#"{"schema_version": 1, "type": "assay.trace", "request_id": "legacy_1", "prompt": "p2", "response": "r", "model": "trace", "provider": "trace", "function_call": {"name": "x"}}
@@ -191,6 +194,29 @@ fn the_exit_class_does_not_depend_on_whether_a_fix_was_requested() {
         "doctor returned exit {plain} and `doctor --fix --dry-run` returned exit {fixing} for one \
          tree. `--fix` says what to attempt about a diagnostic, not what class the diagnostic has, \
          so a repair flag must not reclassify it: the class comes from `decide_exit` on both paths."
+    );
+}
+
+#[test]
+fn an_unfixed_parse_failure_keeps_its_exit_class() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("eval.yaml"), UNFIXABLE_CONFIG).expect("wrote config");
+    let before = std::fs::read_to_string(dir.path().join("eval.yaml")).expect("read config");
+
+    let plain = doctor_exit_code(dir.path(), "text", "unused.jsonl");
+    let fixing = doctor_exit_code_with(dir.path(), "text", "unused.jsonl", &["--fix", "--yes"]);
+
+    let after = std::fs::read_to_string(dir.path().join("eval.yaml")).expect("read config");
+    assert_eq!(after, before, "doctor changed a config it could not repair");
+    assert_eq!(
+        plain, 2,
+        "the malformed config did not use the config-error class"
+    );
+    assert_eq!(
+        fixing, plain,
+        "doctor returned exit {plain} and `doctor --fix --yes` returned exit {fixing} for the same \
+         malformed config. Requesting a repair must not reclassify the config failure when no \
+         repair is available."
     );
 }
 

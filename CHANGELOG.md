@@ -155,8 +155,9 @@ below may require CLI, MCP, evidence-input or policy-pin migration.
   the public `MODERN_PROTOCOL_VERSION` constant remains available but deprecated (#2267).
 - `assay doctor` now exits `2` for configuration-class failures. This changes JSON runs with an
   error-severity configuration diagnostic from `0` to `2`, and unloadable-config failures without
-  `--fix` from `1` to `2`; repair paths can still exit `1`, while scripts should treat `2` as
-  configuration/user error (#2247, #2209).
+  `--fix` from `1` to `2`. An unloadable config now retains that class under `--fix` when no repair
+  is available, a repair is declined or previewed, or the repair leaves it unresolved (#2247,
+  #2209).
 - MCP `tool_pins` now require 64-character lowercase hexadecimal hashes, and schema identity uses
   RFC 8785 canonical JSON bytes. A policy carrying a malformed pin now fails to load. Re-record
   otherwise valid pins created by older versions after upgrading or calls can be denied with
