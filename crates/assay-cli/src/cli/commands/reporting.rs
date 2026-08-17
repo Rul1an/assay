@@ -1,6 +1,7 @@
 use super::pipeline::PipelineTimings;
 use super::run_output::{export_baseline, summary_from_outcome, write_run_json_minimal};
-use crate::exit_codes::{ExitCodeVersion, ReasonCode, RunOutcome};
+use crate::cli_failure::write_summary_stdout;
+use crate::exit_codes::{ExitCodeVersion, ReasonCode, RunOutcome, EXIT_SUCCESS};
 use std::path::{Path, PathBuf};
 
 /// Write the early-exit artifacts, and put the diagnosis on stdout when the caller asked for
@@ -39,11 +40,9 @@ pub(crate) fn write_error_artifacts(
         eprintln!("WARNING: failed to write summary.json: {}", e);
     }
     if json_stdout {
-        match assay_core::report::summary::render_summary_json(&summary) {
-            Ok(rendered) => println!("{rendered}"),
-            // A failure to render is reported and does not change the exit code: the code is the
-            // classification of the run, not of our ability to describe it.
-            Err(e) => eprintln!("WARNING: failed to render summary for stdout: {e}"),
+        let write_code = write_summary_stdout(&summary);
+        if write_code != EXIT_SUCCESS {
+            return Ok(write_code);
         }
     }
     Ok(o.exit_code)

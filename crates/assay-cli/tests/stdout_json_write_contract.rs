@@ -48,6 +48,13 @@ tests:
       flags: ["i"]
 "#;
 
+const MCP_POLICY: &str = r#"version: "2.0"
+name: stdout-write
+tools:
+  allow:
+    - read_file
+"#;
+
 fn assay_command(cwd: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_assay"));
     for (name, _) in std::env::vars_os() {
@@ -480,6 +487,44 @@ fn run_json_partial_read_then_close_is_exit_three() {
         !result.stdout_prefix.is_empty(),
         "partial-read case must deliver a nonempty truncated prefix"
     );
+}
+
+#[test]
+fn run_json_early_failure_reader_gone_is_exit_three() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut command = assay_command(dir.path());
+    command.args(["run", "--config", "missing.yaml", "--format", "json"]);
+
+    let result = run_reader_already_gone(command, "run early failure reader gone");
+    assert_infra_write_failure(&result, "run early failure reader gone");
+}
+
+#[test]
+fn typed_cli_failure_reader_gone_is_exit_three() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut command = assay_command(dir.path());
+    command.args(["coverage", "--format", "json"]);
+
+    let result = run_reader_already_gone(command, "typed CLI failure reader gone");
+    assert_infra_write_failure(&result, "typed CLI failure reader gone");
+}
+
+#[test]
+fn policy_validate_json_success_reader_gone_is_exit_three() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("policy.yaml"), MCP_POLICY).expect("wrote policy");
+    let mut command = assay_command(dir.path());
+    command.args([
+        "policy",
+        "validate",
+        "--input",
+        "policy.yaml",
+        "--format",
+        "json",
+    ]);
+
+    let result = run_reader_already_gone(command, "policy validate reader gone");
+    assert_infra_write_failure(&result, "policy validate reader gone");
 }
 
 #[cfg(unix)]

@@ -128,6 +128,9 @@ pinning without changing the CLI or evidence wire schemas.
   claimed (#2351).
 
 ### Fixed
+- Machine-summary stdout failures now share one fail-closed policy across early `run`/`ci`
+  failures, typed CLI failures, and `policy validate`: an undelivered JSON document returns the
+  registered infrastructure exit `3` without panicking or becoming a config exit (#2439).
 - The Linux monitor no longer aliases the `dedup_open_paths` setting with another CONFIG-map key,
   renders raw connect destinations as `ip:port`, and fails closed when the loaded eBPF program set
   drifts from the declared inventory (#2337, #2338, #2341).

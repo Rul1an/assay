@@ -1,11 +1,12 @@
-use std::io::Write;
+use std::io;
 use std::path::Path;
 
 use assay_core::errors::Diagnostic;
 use assay_core::report::summary::Summary;
 
 use crate::cli::commands::pipeline_error::emit_operator_diagnostic;
-use crate::exit_codes::{ReasonCode, RunOutcome};
+use crate::exit_codes::{ReasonCode, RunOutcome, EXIT_SUCCESS};
+use crate::output_write::{map_write_result, write_stdout_json};
 
 fn evidence_reason(error: &anyhow::Error) -> Option<ReasonCode> {
     crate::evidence_verify_reason::reason_code_for_evidence_error(error)
@@ -126,11 +127,9 @@ impl CliFailure {
         emit_operator_diagnostic(&self.diagnostic());
         if let Some(verify_enabled) = machine_output_verify_enabled {
             let summary = summary_from_outcome(&self.outcome, verify_enabled);
-            if let Err(error) = emit_summary_stdout(&summary) {
-                let _ = writeln!(
-                    std::io::stderr().lock(),
-                    "WARNING: failed to render CLI failure on stdout: {error}"
-                );
+            let write_code = write_summary_stdout(&summary);
+            if write_code != EXIT_SUCCESS {
+                return write_code;
             }
         }
         self.outcome.exit_code
@@ -175,10 +174,23 @@ pub(crate) fn summary_from_outcome(outcome: &RunOutcome, verify_enabled: bool) -
     }
 }
 
-pub(crate) fn emit_summary_stdout(summary: &Summary) -> anyhow::Result<()> {
-    let rendered = assay_core::report::summary::render_summary_json(summary)?;
-    writeln!(std::io::stdout().lock(), "{rendered}")?;
-    Ok(())
+/// Render and deliver the one machine-summary shape used by command failures and policy validation.
+/// A render, write, or flush failure means the requested document was not delivered, so the shared
+/// output policy returns `EXIT_INFRA_ERROR` rather than preserving the semantic command result.
+pub(crate) fn write_summary_stdout(summary: &Summary) -> i32 {
+    let rendered = match assay_core::report::summary::render_summary_json(summary) {
+        Ok(rendered) => rendered,
+        Err(error) => {
+            return map_write_result(
+                "stdout",
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("failed to render machine summary: {error}"),
+                )),
+            )
+        }
+    };
+    write_stdout_json(&rendered)
 }
 
 #[cfg(test)]
