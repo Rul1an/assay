@@ -38,6 +38,7 @@ fn coverage_format_md_generates_summary() {
 
     let markdown = std::fs::read_to_string(&out).expect("markdown output should be written");
     assert!(markdown.contains("# Coverage Report"));
+    assert!(markdown.contains("| tools_declared | 4 |"));
     assert!(markdown.contains("tools_unknown"));
     assert!(markdown.contains("`unknown_tool_x`"));
     assert!(markdown.contains("| `read_document` | `web_search_alt` | 1 |"));
