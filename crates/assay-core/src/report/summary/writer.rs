@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::render_safety::{render_details_safe, render_safe, Sink};
+use crate::render_safety::{render_details_safe, Sink};
 
 use super::types::Summary;
 
@@ -16,9 +16,6 @@ pub fn render_summary_json(summary: &Summary) -> anyhow::Result<String> {
     let object = value
         .as_object_mut()
         .ok_or_else(|| anyhow::anyhow!("summary must serialize as a JSON object"))?;
-    if let Some(serde_json::Value::String(next_step)) = object.get_mut("next_step") {
-        *next_step = render_safe(Sink::Json, next_step, usize::MAX);
-    }
     object.insert(
         "schema".to_string(),
         serde_json::Value::String(SUMMARY_SCHEMA.to_string()),
@@ -74,8 +71,12 @@ mod tests {
             "provider said \u{1b}[2J{secret}\u{7} {}",
             "payload".repeat(80)
         );
-        let next_step = "retry with --config \u{1b}[31m/tmp/alice@example.com\u{1b}[0m";
-        let summary = Summary::failure(3, "E_PROVIDER", &message, next_step, "5.2.0", true);
+        let recovery_path = "\u{1b}[31m/tmp/alice@example.com\u{1b}[0m";
+        let next_step = format!(
+            "Run argv: {}",
+            serde_json::json!(["assay", "doctor", format!("--config={recovery_path}")])
+        );
+        let summary = Summary::failure(3, "E_PROVIDER", &message, &next_step, "5.2.0", true);
         let mut expected_owned = serde_json::to_value(&summary).expect("serialize summary");
 
         let rendered = render_summary_json(&summary).expect("render summary");
@@ -91,16 +92,23 @@ mod tests {
         );
         assert!(!rendered_message.contains('\u{1b}'));
         assert!(!rendered_message.contains('\u{7}'));
-        assert!(!rendered_next_step.contains('\u{1b}'));
-        assert!(!rendered_next_step.contains("alice@example.com"));
+        assert_eq!(
+            rendered_next_step, &next_step,
+            "executable recovery contract changed"
+        );
+        let recovery: Vec<String> = serde_json::from_str(
+            rendered_next_step
+                .strip_prefix("Run argv: ")
+                .expect("recovery prefix"),
+        )
+        .expect("recovery argv remains parseable");
+        assert_eq!(recovery[2], format!("--config={recovery_path}"));
 
         let expected_object = expected_owned.as_object_mut().expect("summary object");
         expected_object.remove("message");
-        expected_object.remove("next_step");
         let actual_object = actual.as_object_mut().expect("rendered summary object");
         actual_object.remove("schema");
         actual_object.remove("message");
-        actual_object.remove("next_step");
         assert_eq!(actual, expected_owned, "Assay-owned fields changed");
     }
 }
