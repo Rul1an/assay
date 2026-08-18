@@ -57,8 +57,9 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
                         [
                             sys.executable,
                             "-c",
-                            "import pathlib,sys,time; time.sleep(1.5); pathlib.Path(sys.argv[1]).write_text('survived')",
+                            'import pathlib,sys,time; time.sleep(1.5); pathlib.Path(sys.argv[1]).write_text("survived"); pathlib.Path(sys.argv[2]).write_text("mutated")',
                             str(sentinel),
+                            str(decisions),
                         ]
                     )
                 time.sleep(control["sleep"])
@@ -183,6 +184,20 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 124, completed.stderr.decode())
         time.sleep(1)
         self.assertFalse((results / "grandchild-sentinel").exists())
+
+    def test_success_reaps_proxy_descendants_before_recording(self) -> None:
+        completed, results = self.run_phase(0, spawn_grandchild=True)
+        self.assertEqual(
+            completed.returncode,
+            0,
+            (results / "proxy.stderr").read_text(encoding="utf-8"),
+        )
+        time.sleep(2)
+        self.assertFalse((results / "grandchild-sentinel").exists())
+        self.assertEqual(
+            (results / "decisions.ndjson").read_text(encoding="utf-8"),
+            '{"decision":"deny"}\n',
+        )
 
     def test_output_file_ceiling_stops_unbounded_child_output(self) -> None:
         completed, results = self.run_phase(0, fake_output_bytes=16_777_216 + 1)

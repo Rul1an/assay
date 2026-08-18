@@ -114,8 +114,9 @@ def main() -> int:
                 process.communicate(input=request, timeout=args.timeout_seconds)
                 status = process.returncode
             except subprocess.TimeoutExpired:
-                stop_process_group(process)
                 status = 124
+            finally:
+                stop_process_group(process)
         except OSError as error:
             stderr_handle.write(f"proxy process failed to start: {error}\n".encode())
             status = 127

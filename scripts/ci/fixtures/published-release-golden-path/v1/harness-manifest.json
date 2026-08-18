@@ -27,7 +27,7 @@
     },
     {
       "path": "scripts/ci/published_release_proxy_phase.py",
-      "sha256": "18e4bd292027cc2a27c3baa6720dbf3593dd1ff329be8f8240ab5cc4549ddae1"
+      "sha256": "487e630413335a0698f5ce89ea6bbc366ab25389731f802e47c7f3d035fee352"
     },
     {
       "path": "scripts/ci/release_attestation_enforce.sh",
