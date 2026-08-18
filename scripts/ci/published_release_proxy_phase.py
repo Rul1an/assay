@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import resource
 import shutil
+import signal
 import subprocess
 import sys
 
@@ -45,6 +46,22 @@ def child_environment() -> dict[str, str]:
 
 def limit_child_output() -> None:
     resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_OUTPUT_BYTES, MAX_OUTPUT_BYTES))
+
+
+def stop_process_group(process: subprocess.Popen[bytes]) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.wait()
 
 
 def main() -> int:
@@ -84,19 +101,21 @@ def main() -> int:
         results / "proxy.stderr"
     ).open("wb") as stderr_handle:
         try:
-            completed = subprocess.run(
+            process = subprocess.Popen(
                 argv,
-                input=request,
+                stdin=subprocess.PIPE,
                 stdout=stdout_handle,
                 stderr=stderr_handle,
-                check=False,
                 env=child_environment(),
                 preexec_fn=limit_child_output,
-                timeout=args.timeout_seconds,
+                start_new_session=True,
             )
-            status = completed.returncode
-        except subprocess.TimeoutExpired:
-            status = 124
+            try:
+                process.communicate(input=request, timeout=args.timeout_seconds)
+                status = process.returncode
+            except subprocess.TimeoutExpired:
+                stop_process_group(process)
+                status = 124
         except OSError as error:
             stderr_handle.write(f"proxy process failed to start: {error}\n".encode())
             status = 127

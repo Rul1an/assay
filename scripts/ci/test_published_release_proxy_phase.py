@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 
 
@@ -24,6 +25,7 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
         request: bytes = b'{"jsonrpc":"2.0","id":1}\n',
         fake_sleep: float = 0,
         fake_output_bytes: int = 0,
+        spawn_grandchild: bool = False,
         timeout_seconds: int = 60,
     ) -> tuple[subprocess.CompletedProcess[bytes], Path]:
         temporary = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="proxy phase ")))
@@ -32,7 +34,7 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
             textwrap.dedent(
                 """\
                 #!/usr/bin/env python3
-                import json, os, pathlib, sys, time
+                import json, os, pathlib, subprocess, sys, time
 
                 def value(flag):
                     return pathlib.Path(sys.argv[sys.argv.index(flag) + 1])
@@ -49,6 +51,16 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
                     (decisions.parent / "fake-control.json").read_text(encoding="utf-8")
                 )
                 sys.stdin.buffer.read()
+                if control["spawn_grandchild"]:
+                    sentinel = decisions.parent / "grandchild-sentinel"
+                    subprocess.Popen(
+                        [
+                            sys.executable,
+                            "-c",
+                            "import pathlib,sys,time; time.sleep(1.5); pathlib.Path(sys.argv[1]).write_text('survived')",
+                            str(sentinel),
+                        ]
+                    )
                 time.sleep(control["sleep"])
                 if control["output_bytes"]:
                     sys.stdout.write("x" * control["output_bytes"])
@@ -67,7 +79,12 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
         results.mkdir()
         (results / "fake-control.json").write_text(
             json.dumps(
-                {"exit": fake_exit, "sleep": fake_sleep, "output_bytes": fake_output_bytes}
+                {
+                    "exit": fake_exit,
+                    "sleep": fake_sleep,
+                    "output_bytes": fake_output_bytes,
+                    "spawn_grandchild": spawn_grandchild,
+                }
             ),
             encoding="utf-8",
         )
@@ -149,6 +166,14 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
             for line in (results / "fake-invocations.jsonl").read_text(encoding="utf-8").splitlines()
         ]
         self.assertEqual(records[0]["argv"], observed[0])
+
+    def test_timeout_reaps_proxy_descendants_before_recording(self) -> None:
+        completed, results = self.run_phase(
+            0, fake_sleep=3, spawn_grandchild=True, timeout_seconds=1
+        )
+        self.assertEqual(completed.returncode, 124, completed.stderr.decode())
+        time.sleep(1)
+        self.assertFalse((results / "grandchild-sentinel").exists())
 
     def test_output_file_ceiling_stops_unbounded_child_output(self) -> None:
         completed, results = self.run_phase(0, fake_output_bytes=16_777_216 + 1)

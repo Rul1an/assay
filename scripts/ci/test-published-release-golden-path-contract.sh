@@ -334,8 +334,8 @@ expect_mutation_failure \
 
 expect_proxy_helper_behavior_failure \
   "proxy-execution-diverges-from-record" \
-  $'            completed = subprocess.run(\n                argv,' \
-  $'            completed = subprocess.run(\n                argv[:-2],'
+  $'            process = subprocess.Popen(\n                argv,' \
+  $'            process = subprocess.Popen(\n                argv[:-2],'
 
 expect_proxy_helper_behavior_failure \
   "proxy-exit-status-diverges" \
@@ -344,18 +344,23 @@ expect_proxy_helper_behavior_failure \
 
 expect_proxy_helper_behavior_failure \
   "proxy-executes-twice" \
-  '            completed = subprocess.run(' \
-  $'            subprocess.run(argv, input=request, stdout=stdout_handle, stderr=stderr_handle, check=False)\n            completed = subprocess.run('
+  '            process = subprocess.Popen(' \
+  $'            subprocess.Popen(argv, env=child_environment()).wait()\n            process = subprocess.Popen('
 
 expect_proxy_helper_behavior_failure \
   "proxy-shell-interpretation-enabled" \
-  $'            completed = subprocess.run(\n                argv,' \
-  $'            completed = subprocess.run(\n                " ".join(argv),\n                shell=True,'
+  $'            process = subprocess.Popen(\n                argv,' \
+  $'            process = subprocess.Popen(\n                " ".join(argv),\n                shell=True,'
 
 expect_proxy_helper_behavior_failure \
   "github-token-added-to-child-environment" \
   '("HOME", "PATH", "LANG", "LC_ALL", "TZ")' \
   '("HOME", "PATH", "LANG", "LC_ALL", "TZ", "GITHUB_TOKEN")'
+
+expect_proxy_helper_behavior_failure \
+  "proxy-timeout-kills-only-parent" \
+  '                stop_process_group(process)' \
+  '                process.kill(); process.wait()'
 
 expect_mutation_failure \
   "proxy-block-unreachable" "driver.sh" \
