@@ -5,11 +5,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="${SCRIPT:-${ROOT}/infra/bpf-runner/health_check.sh}"
 EVENTS="$(mktemp)"
-trap 'rm -f "${EVENTS}"' EXIT
+GUEST_TEST_ROOT="$(mktemp -d)"
+trap 'rm -f "${EVENTS}"; rm -rf "${GUEST_TEST_ROOT}"' EXIT
 
 # shellcheck source=/dev/null
 source "${SCRIPT}"
 
+ORIGINAL_RUNNER_DIR="${RUNNER_DIR}"
 ORIGINAL_CLEANUP="$(declare -f cleanup_runner_config)"
 ORIGINAL_SYNC="$(declare -f sync_vm_time)"
 ORIGINAL_CONFIGURE="$(declare -f configure_runner)"
@@ -138,6 +140,41 @@ if grep -Eq 'svc\.sh (stop|uninstall).*\|\| true|systemctl daemon-reload.*\|\| t
     exit 1
 fi
 
+mkdir -p "${GUEST_TEST_ROOT}/runner" "${GUEST_TEST_ROOT}/bin"
+touch "${GUEST_TEST_ROOT}/runner/.service"
+cat >"${GUEST_TEST_ROOT}/runner/svc.sh" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+    stop) exit 42 ;;
+    uninstall) exit 0 ;;
+esac
+EOF
+cat >"${GUEST_TEST_ROOT}/bin/sudo" <<'EOF'
+#!/usr/bin/env bash
+exec "$@"
+EOF
+chmod +x "${GUEST_TEST_ROOT}/runner/svc.sh" "${GUEST_TEST_ROOT}/bin/sudo"
+RUNNER_DIR="${GUEST_TEST_ROOT}/runner"
+timeout() {
+    shift
+    "$@"
+}
+multipass() {
+    if [[ "$*" == *"svc.sh stop"* ]]; then
+        PATH="${GUEST_TEST_ROOT}/bin:${PATH}" bash -c "${!#}"
+    fi
+}
+set +e
+cleanup_runner_config
+guest_stop_status=$?
+set -e
+if [[ "${guest_stop_status}" -ne 42 ]]; then
+    echo "runner cleanup masked guest service-stop exit 42 as ${guest_stop_status}" >&2
+    exit 1
+fi
+RUNNER_DIR="${ORIGINAL_RUNNER_DIR}"
+eval "${ORIGINAL_CLEANUP}"
+
 for sync_phase in ntp restart read force; do
     timeout() {
         shift
@@ -158,6 +195,22 @@ for sync_phase in ntp restart read force; do
         exit 1
     fi
 done
+
+timeout() {
+    shift
+    if [[ "$*" == *"timedatectl set-ntp"* ]]; then
+        return 42
+    fi
+    "$@"
+}
+set +e
+sync_vm_time
+sync_non_timeout_status=$?
+set -e
+if [[ "${sync_non_timeout_status}" -ne 42 ]]; then
+    echo "runner time sync collapsed non-timeout exit 42 to ${sync_non_timeout_status}" >&2
+    exit 1
+fi
 
 # Invoked by the sourced production functions below.
 # shellcheck disable=SC2329
@@ -290,6 +343,25 @@ recovery_service_status=$?
 set -e
 if [[ "${recovery_service_status}" -ne 124 ]]; then
     echo "runner recovery collapsed service timeout 124 to ${recovery_service_status}" >&2
+    exit 1
+fi
+start_runner_service() { return 73; }
+set +e
+recover_runner
+recovery_service_non_timeout_status=$?
+set -e
+if [[ "${recovery_service_non_timeout_status}" -ne 73 ]]; then
+    echo "runner recovery collapsed service exit 73 to ${recovery_service_non_timeout_status}" >&2
+    exit 1
+fi
+
+sync_vm_time() { return 42; }
+set +e
+recover_runner
+recovery_sync_non_timeout_status=$?
+set -e
+if [[ "${recovery_sync_non_timeout_status}" -ne 42 ]]; then
+    echo "runner recovery collapsed time-sync exit 42 to ${recovery_sync_non_timeout_status}" >&2
     exit 1
 fi
 

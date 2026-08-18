@@ -404,6 +404,7 @@ cleanup_runner_config() {
 
     # Stop and uninstall service (MUST run from runner directory)
     timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass exec "$VM_NAME" -- bash -c "
+        set -e
         cd $RUNNER_DIR || exit 0
         if [[ -f .service ]]; then
             sudo ./svc.sh stop
