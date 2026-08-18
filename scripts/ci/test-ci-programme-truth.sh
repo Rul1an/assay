@@ -45,10 +45,9 @@ LEDGER_PHRASES = (
 ISSUE_LINK = re.compile(
     r"\[issue #(\d+)\]\((https://github\.com/[^)\s]+/issues/(\d+))\)"
 )
-# Spaced prose, or a list item whose token contains required-context(s)/check(s).
-# Do not match arbitrary hyphen tokens (crate names) or the checker filename.
+# List-item declarations only. Ordinary prose such as "ensure required checks
+# pass" is not a required-context declaration.
 REQUIRED_OUTSIDE = re.compile(
-    r"\brequired contexts?\b|\brequired checks?\b|"
     r"^\s*-\s+\S*required-contexts?\b|"
     r"^\s*-\s+\S*required-checks?\b",
     re.IGNORECASE | re.MULTILINE,
@@ -107,6 +106,9 @@ def collapsed(text: str) -> str:
 
 
 def validate_ledger(text: str, prefix: str) -> None:
+    # Non-claim: this offline structural check verifies issue-link form and
+    # visible-text/URL-ID parity only. It does not query live GitHub OPEN or
+    # CLOSED state. The current inactive AGENTS.md bullet satisfies #2515.
     bullet, remainder = split_top_level_bullet(text, prefix)
     bullet_c = collapsed(bullet)
     remainder_c = collapsed(remainder)
@@ -402,6 +404,10 @@ elsewhere_required="$(printf '%s\n%s\n' "$(<"$WAVE0")" '- stale-required-context
 expect_red "pointer-only required section plus stale-required-context elsewhere" \
   "required-context declaration outside ## Required checks" \
   assert_wave0_required_contexts "$elsewhere_required"
+
+ordinary_required_prose="$(printf '%s\n%s\n' "$(<"$WAVE0")" 'Before merging, ensure required checks pass.')"
+expect_ok "ordinary required-checks prose outside the section" \
+  assert_wave0_required_contexts "$ordinary_required_prose"
 
 narrowed_trigger="$(printf '%s\n' "$(<"$KERNEL_MATRIX")" | grep -v '"AGENTS.md"')"
 expect_red "AGENTS.md dropped from CI trigger" "omits AGENTS.md" \
