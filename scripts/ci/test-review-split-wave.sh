@@ -14,6 +14,7 @@ CEILINGS="$ROOT/scripts/ci/lib/resource_ceilings.py"
 export PYTHONPATH="$ROOT/scripts/ci/lib${PYTHONPATH:+:$PYTHONPATH}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+unset REVIEW_SPLIT_CEILINGS
 
 FAILURES=0
 ok()  { echo "ok    $1"; }
@@ -82,6 +83,25 @@ init_fixture() {
   git -C "$repo" commit -q -m change
 }
 
+install_hermetic_review() {
+  local dest="$1"
+  python3 - "$SCRIPT" "$CEILINGS" "$dest" <<'PY'
+import sys
+from pathlib import Path
+
+from resource_ceilings import read_bounded_file, require_bounded_bytes
+
+dest = Path(sys.argv[3])
+(dest / "lib").mkdir(parents=True, exist_ok=True)
+script = read_bounded_file(sys.argv[1])
+helper = read_bounded_file(sys.argv[2])
+require_bounded_bytes(script, "hermetic review-split-wave")
+require_bounded_bytes(helper, "hermetic resource_ceilings")
+(dest / "review-split-wave.sh").write_bytes(script)
+(dest / "lib" / "resource_ceilings.py").write_bytes(helper)
+PY
+}
+
 run_review() {
   local repo="$1"
   local script="$2"
@@ -91,8 +111,6 @@ run_review() {
   (
     cd "$repo"
     PATH="$bin:$PATH"
-    REVIEW_SPLIT_CEILINGS="$CEILINGS"
-    export REVIEW_SPLIT_CEILINGS
     bash "$script" demo '^allowed/' HEAD~1 "$@"
   )
 }
@@ -132,8 +150,9 @@ else
 fi
 
 # Mutation: restore the two-source inventory and require the leak to go silent.
-mutant="$TMP/review-split-wave.mutant.sh"
-python3 - "$SCRIPT" "$mutant" <<'PY'
+install_hermetic_review "$TMP/narrowed-layout"
+mutant="$TMP/narrowed-layout/review-split-wave.sh"
+python3 - "$mutant" "$mutant" <<'PY'
 from pathlib import Path
 import sys
 
@@ -280,6 +299,8 @@ from resource_ceilings import read_bounded_file
 text = read_bounded_file(sys.argv[1]).decode("utf-8")
 if 'python3 "${_REVIEW_SPLIT_CEILINGS}" inventory' not in text:
     raise SystemExit("review-split-wave does not invoke resource_ceilings inventory")
+if "${REVIEW_SPLIT_CEILINGS:-" in text or 'python3 "${REVIEW_SPLIT_CEILINGS}"' in text:
+    raise SystemExit("review-split-wave still accepts a caller helper override")
 PY
 then
   ok "review-split-wave inventories through the bounded helper"
@@ -309,8 +330,34 @@ else
   bad "production overflow red without max path count: $out"
 fi
 
-bypass="$TMP/review-split-wave.sort-u.sh"
-python3 - "$SCRIPT" "$bypass" <<'PY'
+printf '%s\n' 'import sys' 'for line in sys.stdin:' '    sys.stdout.write(line)' \
+  >"$TMP/unbounded_ceilings.py"
+if out="$(
+  REVIEW_SPLIT_CEILINGS="$TMP/unbounded_ceilings.py" \
+  run_review "$TMP/overflow" "$SCRIPT" 2>&1
+)"; then
+  bad "unbounded REVIEW_SPLIT_CEILINGS left the overflow green"
+elif grep -Fq 'cannot replace the canonical inventory helper' <<<"$out"; then
+  ok "caller cannot replace the production inventory helper"
+elif grep -Fq 'max path count' <<<"$out"; then
+  ok "caller helper override is ignored and overflow still fails"
+else
+  bad "unbounded helper override red without reject/overflow: $out"
+fi
+
+install_hermetic_review "$TMP/missing-helper"
+rm -f "$TMP/missing-helper/lib/resource_ceilings.py"
+if out="$(run_review "$TMP/overflow" "$TMP/missing-helper/review-split-wave.sh" 2>&1)"; then
+  bad "missing canonical helper left the gate green"
+elif grep -Fq 'canonical inventory helper missing' <<<"$out"; then
+  ok "missing canonical helper fails closed"
+else
+  bad "missing helper red without fail-closed: $out"
+fi
+
+install_hermetic_review "$TMP/sort-u-layout"
+bypass="$TMP/sort-u-layout/review-split-wave.sh"
+python3 - "$bypass" "$bypass" <<'PY'
 import sys
 from pathlib import Path
 

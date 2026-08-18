@@ -13,7 +13,7 @@
 # would break a later legitimate boundary split.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="${PROGRAMME_TRUTH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 CEILINGS="$ROOT/scripts/ci/lib/resource_ceilings.py"
 export PYTHONPATH="$ROOT/scripts/ci/lib${PYTHONPATH:+:$PYTHONPATH}"
 AGENTS="${PROGRAMME_TRUTH_AGENTS:-$ROOT/AGENTS.md}"
@@ -410,36 +410,15 @@ assert_monitor_rs_still_exists() {
   return 0
 }
 
+# Shared unsafe-preview checker (one implementation).
 assert_no_generic_unsafe_preview() {
-  local workflow="$1" docs="$2"
-  if grep -Fq 'deleted' <<<"$workflow$docs" && grep -Fq 'monitor.rs' <<<"$workflow$docs"; then
-    echo "preview removal must not claim monitor.rs was deleted"
-    return 1
-  fi
-  if grep -Fq 'Unsafe boundary preview' <<<"$workflow"; then
-    echo "workflow still has the generic warn-only unsafe preview"
-    return 1
-  fi
-  if grep -Fq 'unsafe allowed only in the monitor syscall boundary' <<<"$workflow$docs"; then
-    echo "single-boundary Wave 3 TODO is still present"
-    return 1
-  fi
-  if grep -Fq 'unsafe outside monitor.rs' <<<"$workflow"; then
-    echo "workflow still treats paths outside monitor.rs as the deviation"
-    return 1
-  fi
-  return 0
-}
-
-assert_no_generic_unsafe_preview_files() {
-  local workflow_path="$1" docs_path="$2"
-  PROGRAMME_TRUTH_WORKFLOW="$workflow_path" PROGRAMME_TRUTH_DOCS="$docs_path" python3 - <<'PY'
-import os
+  python3 - "$1" "$2" <<'PY'
+import sys
 
 from resource_ceilings import read_bounded_file
 
-workflow = read_bounded_file(os.environ["PROGRAMME_TRUTH_WORKFLOW"]).decode("utf-8")
-docs = read_bounded_file(os.environ["PROGRAMME_TRUTH_DOCS"]).decode("utf-8")
+workflow = read_bounded_file(sys.argv[1]).decode("utf-8")
+docs = read_bounded_file(sys.argv[2]).decode("utf-8")
 combined = workflow + docs
 if "deleted" in combined and "monitor.rs" in combined:
     raise SystemExit("preview removal must not claim monitor.rs was deleted")
@@ -573,7 +552,7 @@ done
 
 expect_ok "monitor.rs still exists" assert_monitor_rs_still_exists
 expect_ok "generic unsafe preview and single-boundary TODO are gone" \
-  assert_no_generic_unsafe_preview_files "$WORKFLOW" "$WAVE0"
+  assert_no_generic_unsafe_preview "$WORKFLOW" "$WAVE0"
 expect_ok "AGENTS.md ledger bullet is structurally valid" assert_agents_ledger "$AGENTS"
 expect_ok "WAVE0-GATES.md describes dynamic latest-release baseline" assert_wave0_semver_file "$WAVE0"
 expect_ok "WAVE0-GATES.md points at the canonical required-context contract" \
@@ -730,12 +709,19 @@ stale_wave71=$'| Wave71 | Hotspot LOC under 600 | in progress | Active | still r
 expect_red "Wave71 Active" "claims Active" assert_wave71_not_active "$stale_wave71"
 
 stale_preview=$'      - name: Unsafe boundary preview (warn-only)\n        run: echo unsafe outside monitor.rs\n# unsafe allowed only in the monitor syscall boundary module.\n'
+printf '%s' "$stale_preview" >"$TRUTH_TMP/restored-preview.yml"
+: >"$TRUTH_TMP/restored-preview-docs.md"
 expect_red "restored generic preview" "generic warn-only unsafe preview" \
-  assert_no_generic_unsafe_preview "$stale_preview" ""
+  assert_no_generic_unsafe_preview "$TRUTH_TMP/restored-preview.yml" "$TRUTH_TMP/restored-preview-docs.md"
+: >"$TRUTH_TMP/todo-preview.yml"
+printf '%s' 'unsafe allowed only in the monitor syscall boundary module.' \
+  >"$TRUTH_TMP/todo-preview-docs.md"
 expect_red "restored single-boundary TODO" "single-boundary Wave 3 TODO" \
-  assert_no_generic_unsafe_preview "" "unsafe allowed only in the monitor syscall boundary module."
+  assert_no_generic_unsafe_preview "$TRUTH_TMP/todo-preview.yml" "$TRUTH_TMP/todo-preview-docs.md"
+printf '%s' 'monitor.rs was deleted' >"$TRUTH_TMP/deleted-preview.yml"
+: >"$TRUTH_TMP/deleted-preview-docs.md"
 expect_red "deleted-monitor.rs claim" "must not claim monitor.rs was deleted" \
-  assert_no_generic_unsafe_preview "monitor.rs was deleted" ""
+  assert_no_generic_unsafe_preview "$TRUTH_TMP/deleted-preview.yml" "$TRUTH_TMP/deleted-preview-docs.md"
 
 python3 - "$AGENTS" "$TRUTH_TMP/nul-agents.md" <<'PY'
 import sys
@@ -788,7 +774,7 @@ expect_red "oversized real document" "exceeds 65536-byte ceiling" \
 expect_red "oversized document never reaches a ledger consumer" "exceeds 65536-byte ceiling" \
   assert_agents_ledger "$TRUTH_TMP/oversized.md"
 
-if [[ -z "${PROGRAMME_TRUTH_SELFHOST:-}" && -z "${PROGRAMME_TRUTH_CEILING_CHILD:-}" ]]; then
+if [[ -z "${PROGRAMME_TRUTH_SELFHOST:-}" && -z "${PROGRAMME_TRUTH_CEILING_CHILD:-}" && -z "${PROGRAMME_TRUTH_PREVIEW_MUTANT:-}" ]]; then
   active_agents="$TRUTH_TMP/selfhost-agents.md"
   selfhost_log="$TRUTH_TMP/selfhost.log"
   replace_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$ROOT/AGENTS.md" "$active_agents"
@@ -811,6 +797,41 @@ if [[ -z "${PROGRAMME_TRUTH_SELFHOST:-}" && -z "${PROGRAMME_TRUTH_CEILING_CHILD:
     ok "oversized AGENTS stops before consumers"
   else
     bad "oversized AGENTS red without ceiling: $child_out"
+  fi
+
+  python3 - "${BASH_SOURCE[0]}" "$TRUTH_TMP/truth-neutralized.sh" <<'PY'
+import sys
+from pathlib import Path
+
+from resource_ceilings import read_bounded_file, require_bounded_bytes
+
+src = read_bounded_file(sys.argv[1]).decode("utf-8")
+start = src.find("# Shared unsafe-preview checker (one implementation).")
+if start < 0:
+    raise SystemExit("shared unsafe-preview checker marker missing")
+end = src.find("\nassert_prepush_covers_ceilings()", start)
+if end < 0:
+    raise SystemExit("shared unsafe-preview checker end missing")
+out = (
+    src[:start]
+    + "assert_no_generic_unsafe_preview() { return 0; }\n"
+    + src[end:]
+)
+require_bounded_bytes(out.encode("utf-8"), "neutralized preview checker")
+Path(sys.argv[2]).write_text(out, encoding="utf-8")
+PY
+  if mutant_out="$(
+    PROGRAMME_TRUTH_ROOT="$ROOT" \
+    PROGRAMME_TRUTH_PREVIEW_MUTANT=1 \
+    PROGRAMME_TRUTH_SELFHOST=1 \
+    PROGRAMME_TRUTH_CEILING_CHILD=1 \
+    bash "$TRUTH_TMP/truth-neutralized.sh" 2>&1
+  )"; then
+    bad "neutralized preview checker left the suite green"
+  elif grep -Fq 'restored generic preview left the contract green' <<<"$mutant_out"; then
+    ok "neutralized preview checker turns the suite red"
+  else
+    bad "neutralized preview checker red without fixture miss: $mutant_out"
   fi
 fi
 

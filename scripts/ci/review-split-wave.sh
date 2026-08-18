@@ -28,7 +28,16 @@ fi
 # One inventory: committed-vs-base, staged, unstaged, and untracked. Omitting
 # dirty paths is how an out-of-scope file used to pass this gate silently.
 # Bound path count and UTF-8 bytes before unique-sort materialization.
-_REVIEW_SPLIT_CEILINGS="${REVIEW_SPLIT_CEILINGS:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/resource_ceilings.py}"
+# The helper path is the sibling module only. Callers cannot replace it.
+if [[ -n "${REVIEW_SPLIT_CEILINGS+x}" ]]; then
+  echo "FAIL: REVIEW_SPLIT_CEILINGS cannot replace the canonical inventory helper" >&2
+  exit 1
+fi
+_REVIEW_SPLIT_CEILINGS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/resource_ceilings.py"
+if [[ ! -f "${_REVIEW_SPLIT_CEILINGS}" ]]; then
+  echo "FAIL: canonical inventory helper missing: ${_REVIEW_SPLIT_CEILINGS}" >&2
+  exit 1
+fi
 
 split_wave_changed_files() {
   local inventory_base="$1"
