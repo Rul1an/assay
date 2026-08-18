@@ -23,7 +23,7 @@
     },
     {
       "path": "scripts/ci/published-release-golden-path.sh",
-      "sha256": "95ed52c2a068af457fcb9221fe131555f33b54dc744f37d8470a3d91046b428e"
+      "sha256": "d3a4ad56b35d27447625c18d90a18353d32499149d29ef9bc7fb23d2f242cbf3"
     },
     {
       "path": "scripts/ci/published_release_proxy_phase.py",

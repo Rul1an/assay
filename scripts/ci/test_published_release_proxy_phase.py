@@ -77,6 +77,13 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
         fake.chmod(0o755)
         results = temporary / "results"
         results.mkdir()
+        poison = temporary / "pythonpath-poison"
+        poison.mkdir()
+        poison_sentinel = results / "pythonpath-imported"
+        (poison / "json.py").write_text(
+            f"open({str(poison_sentinel)!r}, 'w').write('loaded')\nraise RuntimeError('PYTHONPATH loaded')\n",
+            encoding="utf-8",
+        )
         (results / "fake-control.json").write_text(
             json.dumps(
                 {
@@ -90,6 +97,7 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
         )
         command = [
             sys.executable,
+            "-I",
             str(HELPER),
             "--timeout-seconds",
             str(timeout_seconds),
@@ -97,7 +105,7 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
         environment = os.environ.copy()
         environment["GH_TOKEN"] = "must-not-reach-release-code"
         environment["GITHUB_TOKEN"] = "must-not-reach-release-code"
-        environment["PYTHONPATH"] = "/must/not/reach/release/code"
+        environment["PYTHONPATH"] = str(poison)
         environment["PATH"] = f"{temporary}{os.pathsep}{environment['PATH']}"
         completed = subprocess.run(
             command,
@@ -108,6 +116,7 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
             env=environment,
             cwd=results,
         )
+        self.assertFalse(poison_sentinel.exists(), "helper interpreter imported from PYTHONPATH")
         return completed, results
 
     def assert_observed_equals_recorded(self, results: Path, expected_status: int) -> None:

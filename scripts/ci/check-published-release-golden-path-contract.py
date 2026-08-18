@@ -270,7 +270,7 @@ def validate_contract(
         'fail "reviewed release attestation verifier rejected the published assets"',
         "fi",
         'record_command "verify-release-attestations" 0 "$harness_root/scripts/ci/release_attestation_enforce.sh"',
-        "unset GH_TOKEN GITHUB_TOKEN",
+        "unset GH_TOKEN GITHUB_TOKEN PYTHONPATH",
     ]
     attestation_block = lines_between(
         driver_text,
@@ -298,7 +298,7 @@ def validate_contract(
         "proxy_status=0",
         'printf \'%s\\n%s\\n\' "$init_request" "$call_request" \\',
         '| (cd "$results" && \\',
-        '"$PYTHON_BIN" "$harness_root/scripts/ci/published_release_proxy_phase.py" \\',
+        '"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" \\',
         "--timeout-seconds 60) || proxy_status=$?",
     ]
     proxy_block = lines_between(
@@ -338,7 +338,7 @@ def validate_contract(
         "retained release inputs": 'downloads="$results/release-assets"',
         "disposable HOME": 'export HOME="$run_root/home"',
         "restricted PATH": 'export PATH="$install_root/bin:/usr/bin:/bin"',
-        "release credential boundary": "unset GH_TOKEN GITHUB_TOKEN",
+        "release credential boundary": "unset GH_TOKEN GITHUB_TOKEN PYTHONPATH",
         "installed CLI resolution": '"$(command -v assay)" == "$install_root/bin/assay"',
         "installed MCP resolution": '"$(command -v assay-mcp-server)" == "$install_root/bin/assay-mcp-server"',
         "harness head": '"head_sha": harness_sha',
@@ -354,7 +354,7 @@ def validate_contract(
     }
     for label, fragment in required_driver_fragments.items():
         require(driver_text, fragment, f"driver lost {label}", problems)
-    if "unset GH_TOKEN GITHUB_TOKEN" not in driver_lines:
+    if "unset GH_TOKEN GITHUB_TOKEN PYTHONPATH" not in driver_lines:
         problems.append("release binaries must not inherit GitHub credentials")
     if "|| true" in driver_text or "set +e" in driver_text:
         problems.append("driver suppresses a failure instead of recording its exact status")

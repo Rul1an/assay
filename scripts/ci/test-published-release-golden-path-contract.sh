@@ -149,7 +149,7 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "github-token-reaches-release-binaries" "driver.sh" \
-  'unset GH_TOKEN GITHUB_TOKEN' ': # credentials retained' \
+  'unset GH_TOKEN GITHUB_TOKEN PYTHONPATH' ': # ambient environment retained' \
   "release binaries must not inherit GitHub credentials" \
   "scripts/ci/published-release-golden-path.sh"
 
@@ -296,6 +296,13 @@ expect_proxy_helper_behavior_failure \
   "proxy-provenance-truncated" \
   'append_command_record(results / "commands.ndjson", status, argv)' \
   'append_command_record(results / "commands.ndjson", status, argv[:-2])'
+
+expect_mutation_failure \
+  "proxy-python-isolation-removed" "driver.sh" \
+  $'"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" \\' \
+  $'"$PYTHON_BIN" "$harness_root/scripts/ci/published_release_proxy_phase.py" \\' \
+  "proxy execution and provenance block drifted" \
+  "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "workflow-driver-comment-decoy" "workflow.yml" \

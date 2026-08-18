@@ -206,7 +206,7 @@ fi
 record_command "verify-release-attestations" 0 "$harness_root/scripts/ci/release_attestation_enforce.sh"
 
 # Release binaries and the mock upstream do not need repository credentials.
-unset GH_TOKEN GITHUB_TOKEN
+unset GH_TOKEN GITHUB_TOKEN PYTHONPATH
 
 cli_extract="$run_root/cli-extract"
 mcp_extract="$run_root/mcp-extract"
@@ -255,7 +255,7 @@ call_request='{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"gi
 proxy_status=0
 printf '%s\n%s\n' "$init_request" "$call_request" \
   | (cd "$results" && \
-      "$PYTHON_BIN" "$harness_root/scripts/ci/published_release_proxy_phase.py" \
+      "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" \
         --timeout-seconds 60) || proxy_status=$?
 [[ "$proxy_status" -eq 0 ]] || fail "proxy-enforce exited $proxy_status, expected 0 for a policy denial"
 [[ -s "$decisions" ]] || fail "proxy-enforce produced no enforcement decision"
