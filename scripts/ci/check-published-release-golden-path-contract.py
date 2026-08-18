@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path, PurePosixPath
 
 
@@ -65,6 +66,41 @@ def lines_between(text: str, start_marker: str, end_marker: str, problems: list[
     start = text.index(start_marker)
     end = text.index(end_marker, start)
     return active_lines(text[start:end])
+
+
+def shell_control_depth_before(text: str, marker: str, problems: list[str]) -> int:
+    """Return lexical shell control depth before a unique executable marker."""
+    if text.count(marker) != 1:
+        problems.append(f"expected unique shell control marker: {marker!r}")
+        return -1
+
+    target_line = text[: text.index(marker)].count("\n")
+    stack: list[str] = []
+    heredoc_end: str | None = None
+    for raw_line in text.splitlines()[:target_line]:
+        stripped = raw_line.strip()
+        if heredoc_end is not None:
+            if stripped == heredoc_end:
+                heredoc_end = None
+            continue
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        if re.match(r"^(fi|done|esac|\})(?:\s|$)", stripped):
+            if stack:
+                stack.pop()
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*\(\)\s*\{$", stripped):
+            stack.append("function")
+        elif re.match(r"^(if|for|while|until|case)\b", stripped):
+            stack.append(stripped.split(maxsplit=1)[0])
+        elif re.search(r"(?:^|\|\||&&)\s*\{\s*$", stripped):
+            stack.append("group")
+
+        heredoc = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", stripped)
+        if heredoc:
+            heredoc_end = heredoc.group(1)
+
+    return len(stack)
 
 
 def validate_manifest(
@@ -314,6 +350,26 @@ def validate_contract(
     )
     if proxy_block != expected_proxy_block:
         problems.append("proxy execution and provenance block drifted")
+    if shell_control_depth_before(driver_text, "proxy_status=0", problems) != 0:
+        problems.append("proxy execution block must run at top level")
+    proxy_tokens = ("proxy-enforce", "proxy_argv", "proxy_status")
+    expected_proxy_surface = [
+        line
+        for line in expected_proxy_block
+        + [
+            '[[ "$proxy_status" -eq 0 ]] || fail "proxy-enforce exited $proxy_status, expected 0 for a policy denial"',
+            '[[ -s "$decisions" ]] || fail "proxy-enforce produced no enforcement decision"',
+            '[[ -s "$observations" ]] || fail "proxy-enforce produced no denied-call observation"',
+        ]
+        if any(token in line for token in proxy_tokens)
+    ]
+    proxy_surface = [
+        line
+        for line in driver_lines
+        if any(token in line for token in proxy_tokens)
+    ]
+    if proxy_surface != expected_proxy_surface:
+        problems.append("driver has an alternate proxy execution or provenance path")
     required_driver_fragments = {
         "exact stable tag": "release tag must be an exact stable vX.Y.Z tag",
         "fresh run root": "run root already exists; refusing to reuse prior evidence",

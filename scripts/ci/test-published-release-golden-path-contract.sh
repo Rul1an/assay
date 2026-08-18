@@ -41,6 +41,7 @@ proxy_execute_diverged='  | assay-mcp-server proxy-enforce --upstream-command "$
 
 expect_mutation_failure() {
   local name="$1" target="$2" old="$3" new="$4" expected="$5" refresh_path="${6:-}"
+  local second_old="${7:-}" second_new="${8:-}"
   local case_root="$scratch/$name"
   mkdir -p "$case_root"
   cp "$WORKFLOW" "$case_root/workflow.yml"
@@ -66,6 +67,17 @@ if text.count(old) != 1:
     raise SystemExit(f"mutation anchor count for {old!r}: {text.count(old)}")
 path.write_text(text.replace(old, new, 1), encoding="utf-8")
 PY
+  if [[ -n "$second_old" ]]; then
+    python3 - "$case_root/$target" "$second_old" "$second_new" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+old, new = sys.argv[2:]
+text = path.read_text(encoding="utf-8")
+if text.count(old) != 1:
+    raise SystemExit(f"second mutation anchor count for {old!r}: {text.count(old)}")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+  fi
   if [[ -n "$refresh_path" ]]; then
     python3 - "$case_root/manifest.json" "$case_root/$target" "$refresh_path" <<'PY'
 import hashlib, json, pathlib, sys
@@ -299,6 +311,21 @@ expect_mutation_failure \
   "$proxy_execute_call" \
   "$proxy_execute_diverged" \
   "proxy execution and provenance block drifted" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "proxy-block-unreachable" "driver.sh" \
+  'proxy_status=0' $'if false; then\nproxy_status=0' \
+  "proxy execution block must run at top level" \
+  "scripts/ci/published-release-golden-path.sh" \
+  'bundle="$results/produced.bundle.tar.gz"' \
+  $'fi\nbundle="$results/produced.bundle.tar.gz"'
+
+expect_mutation_failure \
+  "alternate-proxy-path" "driver.sh" \
+  'bundle="$results/produced.bundle.tar.gz"' \
+  $'assay-mcp-server proxy-enforce --upstream-command "$PYTHON_BIN"\nbundle="$results/produced.bundle.tar.gz"' \
+  "driver has an alternate proxy execution or provenance path" \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
