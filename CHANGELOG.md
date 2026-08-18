@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [5.3.0] - 2026-08-18
+
+This release collects the post-`v5.2.0` main line: fail-closed machine stdout,
+MCP policy ingest through one env-parsed byte ceiling that keeps the published
+`ServerConfig` shape minor-compatible, and `initialize` echo of Cursor
+`2025-06-18`. Install pins and GitHub release assets stay on `v5.2.0` until
+this tag is published.
+
 ### Added
 - The JSON failure process contract now pins the explicit gate-command set (`run`, `ci`,
   `coverage`, and `validate`) and drives both machine and default output modes (#2177).
