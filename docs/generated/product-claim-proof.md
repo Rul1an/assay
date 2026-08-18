@@ -11,11 +11,11 @@ Proof identities are checked for shape offline; this generator does not fetch th
 
 <a id="claim-v5-3-cli-release-assets"></a>
 ### `v5-3-cli-release-assets` (`observation`)
-- Proof: `artifact=assay-v5.3.0-aarch64-apple-darwin.tar.gz`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`, `digest=sha256:541a40eb72e387f1caf9c66586eae765fe0bcd9c702fc1eb3944d1fd098bfb68`, `run_id=32106898803`
-- Proof: `artifact=assay-v5.3.0-aarch64-unknown-linux-gnu.tar.gz`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`, `digest=sha256:15f18617505a0bc3652714ea5b1f17d87f346c5936fff3f0ac7d767a6cb8c0f4`, `run_id=32106898803`
-- Proof: `artifact=assay-v5.3.0-x86_64-apple-darwin.tar.gz`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`, `digest=sha256:11702950c0782272ef1b396fe92ac2e61ede8b67ba229eb8ed440f40efc20a84`, `run_id=32106898803`
-- Proof: `artifact=assay-v5.3.0-x86_64-pc-windows-msvc.zip`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`, `digest=sha256:4c831e6ce4897a423a4ce08b81bdeb2eed9beb88d70aa39781aa6afbab8e003f`, `run_id=32106898803`
-- Proof: `artifact=assay-v5.3.0-x86_64-unknown-linux-gnu.tar.gz`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`, `digest=sha256:c4ab77a4c3aa5f7f27afff3c80ca8cd4d7ee838d6e0524454a103620af10df34`, `run_id=32106898803`
+- Proof: `kind=release-asset`, `release_asset=assay-v5.3.0-aarch64-apple-darwin.tar.gz`, `release_asset_digest=sha256:541a40eb72e387f1caf9c66586eae765fe0bcd9c702fc1eb3944d1fd098bfb68`, `run_id=32106898803`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`
+- Proof: `kind=release-asset`, `release_asset=assay-v5.3.0-aarch64-unknown-linux-gnu.tar.gz`, `release_asset_digest=sha256:15f18617505a0bc3652714ea5b1f17d87f346c5936fff3f0ac7d767a6cb8c0f4`, `run_id=32106898803`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`
+- Proof: `kind=release-asset`, `release_asset=assay-v5.3.0-x86_64-apple-darwin.tar.gz`, `release_asset_digest=sha256:11702950c0782272ef1b396fe92ac2e61ede8b67ba229eb8ed440f40efc20a84`, `run_id=32106898803`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`
+- Proof: `kind=release-asset`, `release_asset=assay-v5.3.0-x86_64-pc-windows-msvc.zip`, `release_asset_digest=sha256:4c831e6ce4897a423a4ce08b81bdeb2eed9beb88d70aa39781aa6afbab8e003f`, `run_id=32106898803`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`
+- Proof: `kind=release-asset`, `release_asset=assay-v5.3.0-x86_64-unknown-linux-gnu.tar.gz`, `release_asset_digest=sha256:c4ab77a4c3aa5f7f27afff3c80ca8cd4d7ee838d6e0524454a103620af10df34`, `run_id=32106898803`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`
 
 ## `published-mcp-server`
 
@@ -25,15 +25,15 @@ Proof identities are checked for shape offline; this generator does not fetch th
 
 <a id="claim-v5-3-mcp-release-assets"></a>
 ### `v5-3-mcp-release-assets` (`observation`)
-- Proof: `artifact=assay-mcp-server-v5.3.0-aarch64-unknown-linux-gnu.tar.gz`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`, `digest=sha256:2d3e92a59475230b03155380ca3f01a43e2732958195424d0ebec73561a30dda`, `run_id=32106898803`
-- Proof: `artifact=assay-mcp-server-v5.3.0-x86_64-unknown-linux-gnu.tar.gz`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`, `digest=sha256:3bd678d9c85b881dbeb92d5f6f9194c51db9f58d826bebb8f79168b3e590b512`, `run_id=32106898803`
+- Proof: `kind=release-asset`, `release_asset=assay-mcp-server-v5.3.0-aarch64-unknown-linux-gnu.tar.gz`, `release_asset_digest=sha256:2d3e92a59475230b03155380ca3f01a43e2732958195424d0ebec73561a30dda`, `run_id=32106898803`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`
+- Proof: `kind=release-asset`, `release_asset=assay-mcp-server-v5.3.0-x86_64-unknown-linux-gnu.tar.gz`, `release_asset_digest=sha256:3bd678d9c85b881dbeb92d5f6f9194c51db9f58d826bebb8f79168b3e590b512`, `run_id=32106898803`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`
 
 ## `published-release-golden-path`
 
 - Protocol versions: mcp 2024-11-05 over stdio, mcp 2025-06-18 over stdio, mcp 2025-11-25 over stdio
 - Profile versions: privileged-mcp-action/v0
-- Non-claims: This proof does not cover macOS, Windows, Linux aarch64, editor discovery, remote transports, external side effects, policy completeness or semantic safety.
+- Non-claims: The exact-head harness, fixture, mock, policy and baseline are not shipped, release-attested or part of the v5.3.0 product archives; this proof does not cover macOS, Windows, Linux aarch64, editor discovery, remote transports, external side effects, policy completeness or semantic safety.
 
 <a id="claim-release-install-to-verified-evidence"></a>
 ### `release-install-to-verified-evidence` (`outcome`)
-- Proof: `artifact=published-release-golden-path-v5.3.0-3c0df3cbac793854f67caad44a46fda1bcafc02f`, `commit_sha=3c0df3cbac793854f67caad44a46fda1bcafc02f`, `digest=sha256:810989f56bcfa596b4f055435b4cd4db3ebdef0eb2089b55525f6acd022a2c5e`, `run_id=32166096190`
+- Proof: `kind=github-actions-artifact`, `run_artifact=published-release-golden-path-v5.3.0-3c0df3cbac793854f67caad44a46fda1bcafc02f`, `run_artifact_digest=sha256:810989f56bcfa596b4f055435b4cd4db3ebdef0eb2089b55525f6acd022a2c5e`, `run_id=32166096190`, `commit_sha=3c0df3cbac793854f67caad44a46fda1bcafc02f`

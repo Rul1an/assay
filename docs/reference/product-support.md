@@ -49,7 +49,7 @@ Install an attested release in a disposable environment and produce verified evi
 - Profile versions: privileged-mcp-action/v0
 - Enforcement points: cli, mcp-proxy
 - Limitations: The retained post-publication proof currently covers only the published Linux x86_64 CLI and MCP archives.
-- Non-claims: This proof does not cover macOS, Windows, Linux aarch64, editor discovery, remote transports, external side effects, policy completeness or semantic safety.
+- Non-claims: The exact-head harness, fixture, mock, policy and baseline are not shipped, release-attested or part of the v5.3.0 product archives; this proof does not cover macOS, Windows, Linux aarch64, editor discovery, remote transports, external side effects, policy completeness or semantic safety.
 
 | Claim | Axis | Evidence state |
 |---|---|---|
