@@ -15,12 +15,15 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CEILINGS="$ROOT/scripts/ci/lib/resource_ceilings.py"
+export PYTHONPATH="$ROOT/scripts/ci/lib${PYTHONPATH:+:$PYTHONPATH}"
 AGENTS="${PROGRAMME_TRUTH_AGENTS:-$ROOT/AGENTS.md}"
 WAVE0="$ROOT/docs/contributing/WAVE0-GATES.md"
 STATUS="$ROOT/docs/contributing/REFACTOR-WAVE-STATUS.md"
 WORKFLOW="$ROOT/.github/workflows/split-wave0-gates.yml"
 KERNEL_MATRIX="$ROOT/.github/workflows/kernel-matrix.yml"
 MONITOR="$ROOT/crates/assay-cli/src/cli/commands/monitor.rs"
+TRUTH_TMP="$(mktemp -d)"
+trap 'rm -rf -- "${TRUTH_TMP:?}"' EXIT
 
 FAILURES=0
 ok()  { echo "ok    $1"; }
@@ -28,23 +31,17 @@ bad() { echo "FAIL  $1"; FAILURES=$((FAILURES + 1)); }
 
 LEDGER_PREFIX='- The public execution ledger'
 
-require_truth_file() {
-  python3 "$CEILINGS" check-file "$1"
-}
-
-require_truth_text() {
-  printf '%s' "$1" | python3 "$CEILINGS" check-stdin "${2:-programme-truth document}"
-}
-
 assert_extracted_block() {
-  local kind="$1" expected="$2" text="$3"
-  require_truth_text "$text" "programme-truth document" || return 1
+  local kind="$1" expected="$2" path="$3"
   PROGRAMME_TRUTH_KIND="$kind" \
   PROGRAMME_TRUTH_EXPECTED="$expected" \
   PROGRAMME_TRUTH_LEDGER_PREFIX="$LEDGER_PREFIX" \
-  python3 - <<'PY' 3< <(printf '%s' "$text")
+  PROGRAMME_TRUTH_DOC_PATH="$path" \
+  python3 - <<'PY'
 import os
 import re
+
+from resource_ceilings import read_bounded_file
 
 INACTIVE_DECL = "**No programme is active.**"
 ISSUE_LINK = re.compile(
@@ -232,7 +229,7 @@ def validate_required(text: str, expected: str) -> None:
 
 
 kind = os.environ["PROGRAMME_TRUTH_KIND"]
-text = os.fdopen(3).read()
+text = read_bounded_file(os.environ["PROGRAMME_TRUTH_DOC_PATH"]).decode("utf-8")
 if kind == "ledger":
     validate_ledger(text, os.environ["PROGRAMME_TRUTH_LEDGER_PREFIX"])
 else:
@@ -262,6 +259,24 @@ assert_wave0_required_contexts() {
   assert_extracted_block required "$EXPECTED_REQUIRED_CHECKS" "$1"
 }
 
+assert_wave0_semver_file() {
+  local path="$1"
+  python3 "$CEILINGS" check-file "$path" || return 1
+  if grep -q 'WAVE0_SEMVER_BASELINE_SHA' "$path"; then
+    echo "WAVE0-GATES.md still documents WAVE0_SEMVER_BASELINE_SHA"
+    return 1
+  fi
+  if ! grep -Eqi 'newest|latest' "$path" || ! grep -Eq 'release tag' "$path"; then
+    echo "WAVE0-GATES.md does not describe the dynamic latest-release baseline"
+    return 1
+  fi
+  if ! grep -q 'test-semver-gate.sh' "$path"; then
+    echo "WAVE0-GATES.md does not point at scripts/ci/test-semver-gate.sh"
+    return 1
+  fi
+  return 0
+}
+
 assert_wave0_semver_doc() {
   local text="$1"
   if grep -q 'WAVE0_SEMVER_BASELINE_SHA' <<<"$text"; then
@@ -280,38 +295,46 @@ assert_wave0_semver_doc() {
 }
 
 insert_before_next_heading() {
-  local heading="$1" extra="$2" text="$3"
-  require_truth_text "$text" "programme-truth mutation input" || return 1
+  local heading="$1" extra="$2" src="$3" dest="$4"
   PROGRAMME_TRUTH_HEADING="$heading" PROGRAMME_TRUTH_EXTRA="$extra" \
-  python3 - <<'PY' 3< <(printf '%s' "$text")
+  python3 - "$src" "$dest" <<'PY'
 import os
+import sys
+from pathlib import Path
+
+from resource_ceilings import read_bounded_file, require_bounded_bytes
 
 heading = os.environ["PROGRAMME_TRUTH_HEADING"]
 extra = os.environ["PROGRAMME_TRUTH_EXTRA"]
-text = os.fdopen(3).read()
+text = read_bounded_file(sys.argv[1]).decode("utf-8")
 lines = text.splitlines(keepends=True)
 start = next((i for i, line in enumerate(lines) if line.strip() == heading), None)
 if start is None:
     raise SystemExit(f"missing {heading} section")
 end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
 lines.insert(end, extra if extra.endswith("\n") else extra + "\n")
-print("".join(lines), end="")
+data = "".join(lines).encode("utf-8")
+require_bounded_bytes(data, "programme-truth mutation output")
+Path(sys.argv[2]).write_bytes(data)
 PY
 }
 
 # Insert inside the ledger bullet, immediately before the next top-level "- ".
 insert_into_ledger_bullet() {
-  local extra="$1" text="$2"
-  require_truth_text "$text" "programme-truth mutation input" || return 1
+  local extra="$1" src="$2" dest="$3"
   PROGRAMME_TRUTH_MODE="${PROGRAMME_TRUTH_MODE:-insert}" \
   PROGRAMME_TRUTH_EXTRA="$extra" \
   PROGRAMME_TRUTH_LEDGER_PREFIX="$LEDGER_PREFIX" \
-  python3 - <<'PY' 3< <(printf '%s' "$text")
+  python3 - "$src" "$dest" <<'PY'
 import os
+import sys
+from pathlib import Path
+
+from resource_ceilings import read_bounded_file, require_bounded_bytes
 
 prefix = os.environ["PROGRAMME_TRUTH_LEDGER_PREFIX"]
 extra = os.environ["PROGRAMME_TRUTH_EXTRA"]
-text = os.fdopen(3).read()
+text = read_bounded_file(sys.argv[1]).decode("utf-8")
 lines = text.splitlines(keepends=True)
 start = next((i for i, line in enumerate(lines) if line.startswith(prefix)), None)
 if start is None:
@@ -329,12 +352,35 @@ if os.environ["PROGRAMME_TRUTH_MODE"] == "replace":
     lines[start:end] = [payload]
 else:
     lines.insert(end, payload)
-print("".join(lines), end="")
+data = "".join(lines).encode("utf-8")
+require_bounded_bytes(data, "programme-truth mutation output")
+Path(sys.argv[2]).write_bytes(data)
 PY
 }
 
 replace_ledger_bullet() {
-  PROGRAMME_TRUTH_MODE=replace insert_into_ledger_bullet "$1" "$2"
+  PROGRAMME_TRUTH_MODE=replace insert_into_ledger_bullet "$1" "$2" "$3"
+}
+
+append_doc_line() {
+  local extra="$1" src="$2" dest="$3"
+  PROGRAMME_TRUTH_EXTRA="$extra" python3 - "$src" "$dest" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+from resource_ceilings import read_bounded_file, require_bounded_bytes
+
+data = read_bounded_file(sys.argv[1])
+if data and not data.endswith(b"\n"):
+    data += b"\n"
+extra = os.environ["PROGRAMME_TRUTH_EXTRA"].encode("utf-8")
+if not extra.endswith(b"\n"):
+    extra += b"\n"
+out = data + extra
+require_bounded_bytes(out, "programme-truth mutation output")
+Path(sys.argv[2]).write_bytes(out)
+PY
 }
 
 # Docs/ruleset surfaces the hook reads that `scripts/**` does not cover.
@@ -345,13 +391,15 @@ TRUTH_TRIGGER_INPUTS="$(printf '%s\n' \
   .github/rulesets/main-required-ci-contexts.json)"
 
 assert_ci_trigger_owns_truth_inputs() {
-  local workflow_text="$1"
-  require_truth_text "$workflow_text" "kernel-matrix.yml" || return 1
+  local path="$1"
   PROGRAMME_TRUTH_INPUTS="$TRUTH_TRIGGER_INPUTS" \
-  python3 - <<'PY' 3< <(printf '%s' "$workflow_text")
+  PROGRAMME_TRUTH_DOC_PATH="$path" \
+  python3 - <<'PY'
 import os, re
 
-text = os.fdopen(3).read()
+from resource_ceilings import read_bounded_file
+
+text = read_bounded_file(os.environ["PROGRAMME_TRUTH_DOC_PATH"]).decode("utf-8")
 inputs = [line for line in os.environ["PROGRAMME_TRUTH_INPUTS"].splitlines() if line]
 block = re.search(r"(?ms)^  pull_request:\n((?:    .+\n|\n)*)", text)
 if not block:
@@ -394,6 +442,65 @@ assert_no_generic_unsafe_preview() {
     return 1
   fi
   return 0
+}
+
+assert_no_generic_unsafe_preview_files() {
+  local workflow_path="$1" docs_path="$2"
+  PROGRAMME_TRUTH_WORKFLOW="$workflow_path" PROGRAMME_TRUTH_DOCS="$docs_path" python3 - <<'PY'
+import os
+
+from resource_ceilings import read_bounded_file
+
+workflow = read_bounded_file(os.environ["PROGRAMME_TRUTH_WORKFLOW"]).decode("utf-8")
+docs = read_bounded_file(os.environ["PROGRAMME_TRUTH_DOCS"]).decode("utf-8")
+combined = workflow + docs
+if "deleted" in combined and "monitor.rs" in combined:
+    raise SystemExit("preview removal must not claim monitor.rs was deleted")
+if "Unsafe boundary preview" in workflow:
+    raise SystemExit("workflow still has the generic warn-only unsafe preview")
+if "unsafe allowed only in the monitor syscall boundary" in combined:
+    raise SystemExit("single-boundary Wave 3 TODO is still present")
+if "unsafe outside monitor.rs" in workflow:
+    raise SystemExit("workflow still treats paths outside monitor.rs as the deviation")
+PY
+}
+
+assert_prepush_covers_ceilings() {
+  local config="$1"
+  PROGRAMME_TRUTH_DOC_PATH="$config" python3 - <<'PY'
+import os
+import re
+
+from resource_ceilings import read_bounded_file
+
+text = read_bounded_file(os.environ["PROGRAMME_TRUTH_DOC_PATH"]).decode("utf-8")
+match = re.search(
+    r"- id: ci-programme-truth\n(?:.*\n)*?        files: (.+)\n",
+    text,
+)
+if match is None:
+    raise SystemExit("ci-programme-truth files regex is missing")
+raw = match.group(1).strip()
+if raw[0] in "'\"" and raw[-1] == raw[0]:
+    raw = raw[1:-1]
+helper = "scripts/ci/lib/resource_ceilings.py"
+token = r"scripts/ci/lib/resource_ceilings\.py"
+if token not in raw:
+    raise SystemExit("files regex does not name resource_ceilings.py")
+if re.search(raw, helper) is None:
+    raise SystemExit("files regex does not match resource_ceilings.py")
+stripped = raw.replace(f"|{token}", "").replace(f"{token}|", "")
+if re.search(stripped, helper) is not None:
+    raise SystemExit("stripped files regex still matches resource_ceilings.py")
+PY
+}
+
+assert_wave71_file() {
+  local path="$1"
+  python3 "$CEILINGS" check-file "$path" || return 1
+  local row
+  row="$(grep -E '^\| Wave71 \|' "$path" || true)"
+  assert_wave71_not_active "$row"
 }
 
 assert_wave71_not_active() {
@@ -439,150 +546,169 @@ expect_red() {
   fi
 }
 
+PRECOMMIT="$ROOT/.pre-commit-config.yaml"
+
 for truth_file in "$AGENTS" "$WAVE0" "$STATUS" "$WORKFLOW" "$KERNEL_MATRIX"; do
-  expect_ok "${truth_file#"$ROOT"/} is within the programme-truth byte ceiling" \
-    require_truth_file "$truth_file"
+  if ! python3 "$CEILINGS" check-file "$truth_file"; then
+    echo "FAIL: canonical programme-truth input exceeds ceiling: $truth_file" >&2
+    exit 1
+  fi
 done
 
 expect_ok "monitor.rs still exists" assert_monitor_rs_still_exists
 expect_ok "generic unsafe preview and single-boundary TODO are gone" \
-  assert_no_generic_unsafe_preview "$(<"$WORKFLOW")" "$(<"$WAVE0")"
-expect_ok "AGENTS.md ledger bullet is structurally valid" assert_agents_ledger "$(<"$AGENTS")"
-expect_ok "WAVE0-GATES.md describes dynamic latest-release baseline" assert_wave0_semver_doc "$(<"$WAVE0")"
+  assert_no_generic_unsafe_preview_files "$WORKFLOW" "$WAVE0"
+expect_ok "AGENTS.md ledger bullet is structurally valid" assert_agents_ledger "$AGENTS"
+expect_ok "WAVE0-GATES.md describes dynamic latest-release baseline" assert_wave0_semver_file "$WAVE0"
 expect_ok "WAVE0-GATES.md points at the canonical required-context contract" \
-  assert_wave0_required_contexts "$(<"$WAVE0")"
-expect_ok "Wave71 is dormant or incomplete" assert_wave71_not_active "$(<"$STATUS")"
+  assert_wave0_required_contexts "$WAVE0"
+expect_ok "Wave71 is dormant or incomplete" assert_wave71_file "$STATUS"
 expect_ok "kernel-matrix.yml pull_request.paths owns programme-truth inputs" \
-  assert_ci_trigger_owns_truth_inputs "$(<"$KERNEL_MATRIX")"
+  assert_ci_trigger_owns_truth_inputs "$KERNEL_MATRIX"
+expect_ok "pre-push files regex covers resource_ceilings.py" \
+  assert_prepush_covers_ceilings "$PRECOMMIT"
 
 stale_semver=$'Source of truth: workflow env WAVE0_SEMVER_BASELINE_SHA.\n'
 expect_red "pinned baseline SHA" "WAVE0_SEMVER_BASELINE_SHA" assert_wave0_semver_doc "$stale_semver"
 
-contradictory_ledger="$(insert_into_ledger_bullet \
+insert_into_ledger_bullet \
   'The active programme ledger is issue #9999.' \
-  "$(<"$AGENTS")")"
+  "$AGENTS" "$TRUTH_TMP/contradictory.md"
 expect_red "additive unlinked issue # in the ledger bullet" "unlinked issue #" \
-  assert_agents_ledger "$contradictory_ledger"
+  assert_agents_ledger "$TRUTH_TMP/contradictory.md"
 
-elsewhere_ledger="$(printf '%s\n%s\n' "$(<"$AGENTS")" 'The active programme ledger is issue #9999.')"
+append_doc_line 'The active programme ledger is issue #9999.' \
+  "$AGENTS" "$TRUTH_TMP/elsewhere.md"
 expect_red "active ledger declaration elsewhere" \
   "contradictory ledger declaration outside the ledger bullet" \
-  assert_agents_ledger "$elsewhere_ledger"
+  assert_agents_ledger "$TRUTH_TMP/elsewhere.md"
 
-ordinary_ledger_prose="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
-  'Reviewers should consult the public execution ledger before handoff.')"
+append_doc_line 'Reviewers should consult the public execution ledger before handoff.' \
+  "$AGENTS" "$TRUTH_TMP/ordinary-ledger.md"
 expect_ok "ordinary public-ledger prose outside the bullet" \
-  assert_agents_ledger "$ordinary_ledger_prose"
+  assert_agents_ledger "$TRUTH_TMP/ordinary-ledger.md"
 
-list_active_elsewhere="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
-  '- The active programme ledger is issue #7777.')"
+append_doc_line '- The active programme ledger is issue #7777.' \
+  "$AGENTS" "$TRUTH_TMP/list-active.md"
 expect_red "list-item active ledger declaration elsewhere" \
   "contradictory ledger declaration outside the ledger bullet" \
-  assert_agents_ledger "$list_active_elsewhere"
+  assert_agents_ledger "$TRUTH_TMP/list-active.md"
 
-list_inactive_elsewhere="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
-  '- **No programme is active.**')"
+append_doc_line '- **No programme is active.**' \
+  "$AGENTS" "$TRUTH_TMP/list-inactive.md"
 expect_red "list-item inactive declaration elsewhere" \
   "contradictory ledger declaration outside the ledger bullet" \
-  assert_agents_ledger "$list_inactive_elsewhere"
+  assert_agents_ledger "$TRUTH_TMP/list-inactive.md"
 
-star_active_elsewhere="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
-  '* The active programme ledger is issue #7777.')"
+append_doc_line '* The active programme ledger is issue #7777.' \
+  "$AGENTS" "$TRUTH_TMP/star-active.md"
 expect_red "star list-item active ledger declaration elsewhere" \
   "contradictory ledger declaration outside the ledger bullet" \
-  assert_agents_ledger "$star_active_elsewhere"
+  assert_agents_ledger "$TRUTH_TMP/star-active.md"
 
-plus_inactive_elsewhere="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
-  '+ **No programme is active.**')"
+append_doc_line '+ **No programme is active.**' \
+  "$AGENTS" "$TRUTH_TMP/plus-inactive.md"
 expect_red "plus list-item inactive declaration elsewhere" \
   "contradictory ledger declaration outside the ledger bullet" \
-  assert_agents_ledger "$plus_inactive_elsewhere"
+  assert_agents_ledger "$TRUTH_TMP/plus-inactive.md"
 
-documented_ledger_prose="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
-  '- **The active programme ledger is documented in the canonical bullet above.**')"
+append_doc_line '- **The active programme ledger is documented in the canonical bullet above.**' \
+  "$AGENTS" "$TRUTH_TMP/documented.md"
 expect_ok "documented-in-bullet prose is not a ledger declaration" \
-  assert_agents_ledger "$documented_ledger_prose"
+  assert_agents_ledger "$TRUTH_TMP/documented.md"
 
-link_active_elsewhere="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
-  '- The active programme ledger is [issue #7777](https://github.com/Rul1an/assay/issues/7777).')"
+append_doc_line '- The active programme ledger is [issue #7777](https://github.com/Rul1an/assay/issues/7777).' \
+  "$AGENTS" "$TRUTH_TMP/link-active.md"
 expect_red "markdown-link active ledger declaration elsewhere" \
   "contradictory ledger declaration outside the ledger bullet" \
-  assert_agents_ledger "$link_active_elsewhere"
+  assert_agents_ledger "$TRUTH_TMP/link-active.md"
 
-github_active_elsewhere="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
-  'The active programme ledger is GitHub issue #7777.')"
+append_doc_line 'The active programme ledger is GitHub issue #7777.' \
+  "$AGENTS" "$TRUTH_TMP/github-active.md"
 expect_red "GitHub issue active ledger declaration elsewhere" \
   "contradictory ledger declaration outside the ledger bullet" \
-  assert_agents_ledger "$github_active_elsewhere"
+  assert_agents_ledger "$TRUTH_TMP/github-active.md"
 
-blockquote_inactive_elsewhere="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
-  '> **No programme is active.**')"
+append_doc_line '> **No programme is active.**' \
+  "$AGENTS" "$TRUTH_TMP/blockquote.md"
 expect_red "blockquote inactive declaration elsewhere" \
   "contradictory ledger declaration outside the ledger bullet" \
-  assert_agents_ledger "$blockquote_inactive_elsewhere"
+  assert_agents_ledger "$TRUTH_TMP/blockquote.md"
 
-named_after_prose="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
-  '- The active programme ledger is named after the team that maintains it.')"
+append_doc_line '- The active programme ledger is named after the team that maintains it.' \
+  "$AGENTS" "$TRUTH_TMP/named-after.md"
 expect_ok "named-after prose is not a ledger declaration" \
-  assert_agents_ledger "$named_after_prose"
+  assert_agents_ledger "$TRUTH_TMP/named-after.md"
 
 ACTIVE_LEDGER_BULLET='- The public execution ledger for the active programme is named on this line: [issue #4242](https://github.com/Rul1an/assay/issues/4242).'
-active_ledger="$(replace_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$(<"$AGENTS")")"
-expect_ok "structurally active ledger fixture" assert_agents_ledger "$active_ledger"
+replace_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$AGENTS" "$TRUTH_TMP/active.md"
+expect_ok "structurally active ledger fixture" assert_agents_ledger "$TRUTH_TMP/active.md"
 
-retired_ledger="$(replace_ledger_bullet \
+replace_ledger_bullet \
   '- The public execution ledger historically recorded [issue #4242](https://github.com/Rul1an/assay/issues/4242).' \
-  "$(<"$AGENTS")")"
+  "$AGENTS" "$TRUTH_TMP/retired.md"
 expect_red "retired historical wording with a valid issue-link" "canonical active form" \
-  assert_agents_ledger "$retired_ledger"
+  assert_agents_ledger "$TRUTH_TMP/retired.md"
 
-mismatch_ledger="$(replace_ledger_bullet \
+replace_ledger_bullet \
   '- The public execution ledger for the active programme is named on this line: [issue #4242](https://github.com/Rul1an/assay/issues/4243).' \
-  "$(<"$AGENTS")")"
+  "$AGENTS" "$TRUTH_TMP/mismatch.md"
 expect_red "active fixture with text/link issue mismatch" "visible issue-ID != URL-ID" \
-  assert_agents_ledger "$mismatch_ledger"
+  assert_agents_ledger "$TRUTH_TMP/mismatch.md"
 
 # Synthetic inactive: previous-link mismatch without freezing a live issue number.
-inactive_mismatch="$(replace_ledger_bullet \
+replace_ledger_bullet \
   '- The public execution ledger for the active programme is named on this line. **No programme is active.** The previous one, [issue #4242](https://github.com/Rul1an/assay/issues/9999).' \
-  "$(<"$AGENTS")")"
+  "$AGENTS" "$TRUTH_TMP/inactive-mismatch.md"
 expect_red "inactive previous-link text/URL mismatch" "visible issue-ID != URL-ID" \
-  assert_agents_ledger "$inactive_mismatch"
+  assert_agents_ledger "$TRUTH_TMP/inactive-mismatch.md"
 
-linked_plus_plain="$(replace_ledger_bullet \
+replace_ledger_bullet \
   '- The public execution ledger for the active programme is named on this line: [issue #7777](https://github.com/Rul1an/assay/issues/7777). Also issue #7777.' \
-  "$(<"$AGENTS")")"
+  "$AGENTS" "$TRUTH_TMP/linked-plus-plain.md"
 expect_red "valid link plus extra plain issue # of the same ID" "unlinked issue #" \
-  assert_agents_ledger "$linked_plus_plain"
+  assert_agents_ledger "$TRUTH_TMP/linked-plus-plain.md"
 
-duplicate_ledger="$(insert_into_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$(<"$AGENTS")")"
+insert_into_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$AGENTS" "$TRUTH_TMP/duplicate.md"
 expect_red "duplicate ledger bullet" "duplicate ledger bullet" \
-  assert_agents_ledger "$duplicate_ledger"
+  assert_agents_ledger "$TRUTH_TMP/duplicate.md"
 
-stale_required="$(insert_before_next_heading "## Required checks" \
+insert_before_next_heading "## Required checks" \
   'Configure branch protection to require:' \
-  "$(<"$WAVE0")")"
+  "$WAVE0" "$TRUTH_TMP/stale-required.md"
 expect_red "Wave 0 jobs as required checks" "## Required checks section mismatch" \
-  assert_wave0_required_contexts "$stale_required"
+  assert_wave0_required_contexts "$TRUTH_TMP/stale-required.md"
 
-extra_context="$(insert_before_next_heading "## Required checks" \
+insert_before_next_heading "## Required checks" \
   'stale-required-context' \
-  "$(<"$WAVE0")")"
+  "$WAVE0" "$TRUTH_TMP/extra-context.md"
 expect_red "additive extra required context" "## Required checks section mismatch" \
-  assert_wave0_required_contexts "$extra_context"
+  assert_wave0_required_contexts "$TRUTH_TMP/extra-context.md"
 
-elsewhere_required="$(printf '%s\n%s\n' "$(<"$WAVE0")" '- stale-required-context')"
+append_doc_line '- stale-required-context' \
+  "$WAVE0" "$TRUTH_TMP/elsewhere-required.md"
 expect_red "pointer-only required section plus stale-required-context elsewhere" \
   "required-context declaration outside ## Required checks" \
-  assert_wave0_required_contexts "$elsewhere_required"
+  assert_wave0_required_contexts "$TRUTH_TMP/elsewhere-required.md"
 
-ordinary_required_prose="$(printf '%s\n%s\n' "$(<"$WAVE0")" 'Before merging, ensure required checks pass.')"
+append_doc_line 'Before merging, ensure required checks pass.' \
+  "$WAVE0" "$TRUTH_TMP/ordinary-required.md"
 expect_ok "ordinary required-checks prose outside the section" \
-  assert_wave0_required_contexts "$ordinary_required_prose"
+  assert_wave0_required_contexts "$TRUTH_TMP/ordinary-required.md"
 
-narrowed_trigger="$(printf '%s\n' "$(<"$KERNEL_MATRIX")" | grep -v '"AGENTS.md"')"
+python3 - "$KERNEL_MATRIX" "$TRUTH_TMP/narrowed.yml" <<'PY'
+import sys
+from pathlib import Path
+
+from resource_ceilings import read_bounded_file, require_bounded_bytes
+
+text = read_bounded_file(sys.argv[1]).decode("utf-8")
+out = "".join(line for line in text.splitlines(keepends=True) if '"AGENTS.md"' not in line)
+require_bounded_bytes(out.encode("utf-8"), "narrowed kernel-matrix")
+Path(sys.argv[2]).write_text(out, encoding="utf-8")
+PY
 expect_red "AGENTS.md dropped from CI trigger" "omits AGENTS.md" \
-  assert_ci_trigger_owns_truth_inputs "$narrowed_trigger"
+  assert_ci_trigger_owns_truth_inputs "$TRUTH_TMP/narrowed.yml"
 
 stale_wave71=$'| Wave71 | Hotspot LOC under 600 | in progress | Active | still reducing |\n'
 expect_red "Wave71 Active" "claims Active" assert_wave71_not_active "$stale_wave71"
@@ -595,31 +721,65 @@ expect_red "restored single-boundary TODO" "single-boundary Wave 3 TODO" \
 expect_red "deleted-monitor.rs claim" "must not claim monitor.rs was deleted" \
   assert_no_generic_unsafe_preview "monitor.rs was deleted" ""
 
-oversized_real="$(mktemp)"
-python3 -c "import sys; sys.stdout.buffer.write(b'x' * 65537)" >"$oversized_real"
+python3 - "$AGENTS" "$TRUTH_TMP/nul-agents.md" <<'PY'
+import sys
+from pathlib import Path
+
+from resource_ceilings import read_bounded_file
+
+Path(sys.argv[2]).write_bytes(read_bounded_file(sys.argv[1]) + b"\x00")
+PY
+assert_nul_preserved() {
+  python3 - "$1" <<'PY'
+import sys
+
+from resource_ceilings import read_bounded_file
+
+data = read_bounded_file(sys.argv[1])
+if b"\x00" not in data:
+    raise SystemExit("bounded reader dropped appended NUL")
+if data.decode("utf-8").count("\x00") != 1:
+    raise SystemExit("bounded reader did not keep exactly one appended NUL")
+PY
+}
+
+expect_ok "appended NUL is preserved by the bounded reader" \
+  assert_nul_preserved "$TRUTH_TMP/nul-agents.md"
+expect_ok "appended NUL still validates the ledger" assert_agents_ledger "$TRUTH_TMP/nul-agents.md"
+
+expect_red "non-regular programme-truth input" "not a regular file" \
+  python3 "$CEILINGS" check-file /dev/null
+
+python3 -c "import sys; sys.stdout.buffer.write(b'x' * 65537)" >"$TRUTH_TMP/oversized.md"
 expect_red "oversized real document" "exceeds 65536-byte ceiling" \
-  require_truth_file "$oversized_real"
-rm -f "$oversized_real"
+  python3 "$CEILINGS" check-file "$TRUTH_TMP/oversized.md"
+expect_red "oversized document never reaches a ledger consumer" "exceeds 65536-byte ceiling" \
+  assert_agents_ledger "$TRUTH_TMP/oversized.md"
 
-oversized_synth="$(python3 -c "print('x' * 65537, end='')")"
-expect_red "oversized synthetic document" "exceeds 65536-byte ceiling" \
-  assert_agents_ledger "$oversized_synth"
-
-if [[ -z "${PROGRAMME_TRUTH_SELFHOST:-}" ]]; then
-  cleanup_selfhost() { rm -rf -- "${selfhost_dir:?}"; }
-  selfhost_dir="$(mktemp -d)"
-  trap cleanup_selfhost EXIT
-  active_agents="$selfhost_dir/agents.md"
-  selfhost_log="$selfhost_dir/selfhost.log"
-  replace_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$(<"$ROOT/AGENTS.md")" >"$active_agents"
+if [[ -z "${PROGRAMME_TRUTH_SELFHOST:-}" && -z "${PROGRAMME_TRUTH_CEILING_CHILD:-}" ]]; then
+  active_agents="$TRUTH_TMP/selfhost-agents.md"
+  selfhost_log="$TRUTH_TMP/selfhost.log"
+  replace_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$ROOT/AGENTS.md" "$active_agents"
   if PROGRAMME_TRUTH_AGENTS="$active_agents" PROGRAMME_TRUTH_SELFHOST=1 \
     bash "${BASH_SOURCE[0]}" >"$selfhost_log" 2>&1; then
     ok "full contract on active canonical AGENTS ledger"
   else
     bad "full contract on active canonical AGENTS ledger: $(tail -n 20 "$selfhost_log")"
   fi
-  trap - EXIT
-  cleanup_selfhost
+
+  if child_out="$(
+    PROGRAMME_TRUTH_AGENTS="$TRUTH_TMP/oversized.md" \
+    PROGRAMME_TRUTH_CEILING_CHILD=1 \
+    bash "${BASH_SOURCE[0]}" 2>&1
+  )"; then
+    bad "oversized AGENTS left the suite green"
+  elif grep -Fq 'monitor.rs still exists' <<<"$child_out"; then
+    bad "consumers ran after ceiling failure"
+  elif grep -Fq 'exceeds 65536-byte ceiling' <<<"$child_out"; then
+    ok "oversized AGENTS stops before consumers"
+  else
+    bad "oversized AGENTS red without ceiling: $child_out"
+  fi
 fi
 
 if [[ "$FAILURES" -ne 0 ]]; then

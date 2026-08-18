@@ -5,11 +5,15 @@ Measured live max among programme-truth inputs: 26008 bytes
 (``.github/workflows/kernel-matrix.yml``). The document ceiling is 65536
 bytes (64 KiB). Inventories are bounded before unique-sort materialization.
 Exceeding a ceiling is an error; nothing is silently truncated.
+
+Callers may lower inventory caps via the environment. They cannot raise
+them above the canonical 8192 / 524288 values.
 """
 
 from __future__ import annotations
 
 import os
+import stat
 import sys
 
 MAX_DOC_BYTES = 65536
@@ -26,16 +30,35 @@ def require_bounded_bytes(
     return data
 
 
-def require_bounded_file(
+def read_bounded_file(
     path: str, label: str | None = None, limit: int = MAX_DOC_BYTES
-) -> None:
+) -> bytes:
+    """Read at most ``limit`` bytes from a regular file via one descriptor.
+
+    Non-regular inputs fail closed. At most ``limit + 1`` bytes are read
+    from the opened fd so an oversize file never reaches a consumer.
+    """
     label = label or path
     try:
-        n = os.path.getsize(path)
+        fd = os.open(path, os.O_RDONLY)
     except OSError as exc:
-        raise SystemExit(f"{label} could not be sized: {exc}") from exc
-    if n > limit:
-        raise SystemExit(f"{label} exceeds {limit}-byte ceiling ({n} bytes)")
+        raise SystemExit(f"{label} could not be opened: {exc}") from exc
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise SystemExit(f"{label} is not a regular file")
+        buf = bytearray()
+        want = limit + 1
+        while len(buf) < want:
+            chunk = os.read(fd, want - len(buf))
+            if not chunk:
+                break
+            buf.extend(chunk)
+    finally:
+        os.close(fd)
+    if len(buf) > limit:
+        raise SystemExit(f"{label} exceeds {limit}-byte ceiling ({len(buf)} bytes)")
+    return bytes(buf)
 
 
 def read_bounded_stream(
@@ -50,6 +73,21 @@ def read_bounded_stream(
             raise SystemExit(f"{label} exceeds {limit}-byte ceiling")
         buf.extend(chunk)
     return bytes(buf)
+
+
+def caller_cap(env_name: str, canonical: int) -> int:
+    raw = os.environ.get(env_name)
+    if raw is None or raw == "":
+        return canonical
+    try:
+        value = int(raw, 10)
+    except ValueError:
+        raise SystemExit(f"{env_name} is not a positive integer") from None
+    if value <= 0:
+        raise SystemExit(f"{env_name} must be a positive integer")
+    if value > canonical:
+        raise SystemExit(f"{env_name} cannot exceed canonical {canonical}")
+    return value
 
 
 def bound_inventory(
@@ -83,26 +121,29 @@ def main(argv: list[str]) -> None:
     if not argv:
         raise SystemExit(
             "usage: resource_ceilings.py "
-            "check-file|check-stdin|inventory|max-doc-bytes [path]"
+            "check-file|read-file|check-stdin|inventory|"
+            "max-doc-bytes|canonical-inventory-limits [path]"
         )
     cmd = argv[0]
     if cmd == "max-doc-bytes":
         print(MAX_DOC_BYTES)
         return
+    if cmd == "canonical-inventory-limits":
+        print(f"{MAX_INVENTORY_PATHS} {MAX_INVENTORY_BYTES}")
+        return
     if cmd == "check-file":
-        require_bounded_file(argv[1])
+        read_bounded_file(argv[1])
+        return
+    if cmd == "read-file":
+        sys.stdout.buffer.write(read_bounded_file(argv[1]))
         return
     if cmd == "check-stdin":
         label = argv[1] if len(argv) > 1 else "input"
         read_bounded_stream(sys.stdin.buffer, label)
         return
     if cmd == "inventory":
-        max_paths = int(
-            os.environ.get("BOUNDED_INVENTORY_MAX_PATHS", MAX_INVENTORY_PATHS)
-        )
-        max_bytes = int(
-            os.environ.get("BOUNDED_INVENTORY_MAX_BYTES", MAX_INVENTORY_BYTES)
-        )
+        max_paths = caller_cap("BOUNDED_INVENTORY_MAX_PATHS", MAX_INVENTORY_PATHS)
+        max_bytes = caller_cap("BOUNDED_INVENTORY_MAX_BYTES", MAX_INVENTORY_BYTES)
         for path in bound_inventory(
             sys.stdin, max_paths=max_paths, max_bytes=max_bytes
         ):

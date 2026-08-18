@@ -11,6 +11,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/clear-git-repository-e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="$ROOT/scripts/ci/review-split-wave.sh"
 CEILINGS="$ROOT/scripts/ci/lib/resource_ceilings.py"
+export PYTHONPATH="$ROOT/scripts/ci/lib${PYTHONPATH:+:$PYTHONPATH}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -20,15 +21,16 @@ bad() { echo "FAIL  $1"; FAILURES=$((FAILURES + 1)); }
 
 assert_usage_examples_exist() {
   local script="$1"
-  python3 "$CEILINGS" check-file "$script"
   python3 - "$script" "$ROOT" "$CEILINGS" <<'PY'
 import re, subprocess, sys
 from pathlib import Path
 
+from resource_ceilings import read_bounded_file
+
 script = Path(sys.argv[1])
 root = Path(sys.argv[2])
 ceilings = Path(sys.argv[3])
-text = script.read_text(encoding="utf-8")
+text = read_bounded_file(str(script)).decode("utf-8")
 examples = re.findall(
     r"review-split-wave\.sh\s+\S+\s+'([^']+)'",
     text,
@@ -183,6 +185,93 @@ elif grep -Fq '65536-byte ceiling' <<<"$out"; then
   ok "source-script byte ceiling turns red ($out)"
 else
   bad "source-script byte ceiling red without 65536-byte ceiling: $out"
+fi
+
+read -r CANON_PATHS CANON_BYTES < <(python3 "$CEILINGS" canonical-inventory-limits)
+raise_paths=$((CANON_PATHS + 1))
+raise_bytes=$((CANON_BYTES + 1))
+
+if out="$(BOUNDED_INVENTORY_MAX_PATHS="$raise_paths" python3 "$CEILINGS" inventory </dev/null 2>&1)"; then
+  bad "caller-raised path cap left the inventory green"
+elif grep -Fq "cannot exceed canonical ${CANON_PATHS}" <<<"$out"; then
+  ok "caller cannot raise the path cap ($out)"
+else
+  bad "raised path cap red without canonical ${CANON_PATHS}: $out"
+fi
+
+if out="$(BOUNDED_INVENTORY_MAX_BYTES="$raise_bytes" python3 "$CEILINGS" inventory </dev/null 2>&1)"; then
+  bad "caller-raised byte cap left the inventory green"
+elif grep -Fq "cannot exceed canonical ${CANON_BYTES}" <<<"$out"; then
+  ok "caller cannot raise the byte cap ($out)"
+else
+  bad "raised byte cap red without canonical ${CANON_BYTES}: $out"
+fi
+
+if out="$(BOUNDED_INVENTORY_MAX_PATHS=0 python3 "$CEILINGS" inventory </dev/null 2>&1)"; then
+  bad "nonpositive path cap left the inventory green"
+elif grep -Fq 'must be a positive integer' <<<"$out"; then
+  ok "nonpositive path cap turns red ($out)"
+else
+  bad "nonpositive path cap red without positive integer: $out"
+fi
+
+if out="$(BOUNDED_INVENTORY_MAX_PATHS=abc python3 "$CEILINGS" inventory </dev/null 2>&1)"; then
+  bad "invalid path cap left the inventory green"
+elif grep -Fq 'is not a positive integer' <<<"$out"; then
+  ok "invalid path cap turns red ($out)"
+else
+  bad "invalid path cap red without positive integer: $out"
+fi
+
+# shellcheck disable=SC2016 # Literal production helper invocation, not an expansion.
+if grep -Fq 'python3 "${_REVIEW_SPLIT_CEILINGS}" inventory' "$SCRIPT"; then
+  ok "review-split-wave inventories through the bounded helper"
+else
+  bad "review-split-wave does not invoke resource_ceilings inventory"
+fi
+
+init_fixture "$TMP/overflow"
+python3 - "$TMP/overflow/allowed" "$CEILINGS" <<'PY'
+import sys
+from pathlib import Path
+
+import runpy
+
+limits = runpy.run_path(sys.argv[2])
+root = Path(sys.argv[1])
+# keep.rs is already in the committed-vs-base inventory; add the canonical
+# max so the production gate sees one path too many.
+for i in range(limits["MAX_INVENTORY_PATHS"]):
+    (root / f"overflow-{i}.rs").write_text("x\n", encoding="utf-8")
+PY
+if out="$(run_review "$TMP/overflow" "$SCRIPT" 2>&1)"; then
+  bad "production inventory overflow left the gate green"
+elif grep -Fq 'max path count' <<<"$out"; then
+  ok "production gate rejects inventory overflow"
+else
+  bad "production overflow red without max path count: $out"
+fi
+
+bypass="$TMP/review-split-wave.sort-u.sh"
+python3 - "$SCRIPT" "$bypass" <<'PY'
+import sys
+from pathlib import Path
+
+from resource_ceilings import read_bounded_file, require_bounded_bytes
+
+src = read_bounded_file(sys.argv[1]).decode("utf-8")
+old = 'python3 "${_REVIEW_SPLIT_CEILINGS}" inventory'
+if old not in src:
+    raise SystemExit("production inventory helper invocation missing")
+out = src.replace(old, "sort -u")
+require_bounded_bytes(out.encode("utf-8"), "review-split-wave sort -u mutant")
+Path(sys.argv[2]).write_text(out, encoding="utf-8")
+PY
+chmod +x "$bypass"
+if out="$(run_review "$TMP/overflow" "$bypass" 2>&1)"; then
+  ok "sort -u mutant leaks overflow past the helper"
+else
+  bad "sort -u mutant still enforced a ceiling: $out"
 fi
 
 if [[ "$FAILURES" -ne 0 ]]; then
