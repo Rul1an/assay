@@ -198,6 +198,10 @@ CRONTAB_EXISTING+=$(printf '\n%s\n%s\n%s' \
     "12 * * * * ${CRON_SCRIPT_PATH}.backup --check")
 : >"${CRONTAB_CAPTURE}"
 install_cron >/dev/null
+if [[ ! -s "${CRONTAB_CAPTURE}" ]]; then
+    echo "runner cron migration did not rewrite the mixed canonical and legacy entries" >&2
+    exit 1
+fi
 if grep -Fq "${CRON_SCRIPT_PATH} >/tmp/old.log" "${CRONTAB_CAPTURE}"; then
     echo "runner cron migration retained the unlocked legacy entry" >&2
     cat "${CRONTAB_CAPTURE}" >&2
