@@ -724,6 +724,18 @@ health_check() {
     return 0
 }
 
+# Match only entries owned by this installer: marked entries, or the exact
+# pre-marker command position emitted by older versions.
+cron_line_is_managed() {
+    local line="$1"
+    local marker="$2"
+    local legacy_command_prefix="$3"
+
+    [[ "$line" == *" ${marker}" || \
+        "$line" == "$legacy_command_prefix" || \
+        "$line" == "$legacy_command_prefix "* ]]
+}
+
 # Install cron job
 install_cron() {
     local script_path
@@ -742,13 +754,14 @@ install_cron() {
     printf -v escaped_lock_file '%q' "$HEALTH_CHECK_LOCK_FILE"
     local cron_marker="# assay-bpf-runner-health-check"
     local cron_entry="*/5 * * * * ${env_prefix}/usr/bin/lockf -t 0 ${escaped_lock_file} ${escaped_script_path} >> ${escaped_log_file} 2>&1 ${cron_marker}"
+    local legacy_command_prefix="*/5 * * * * ${env_prefix}${escaped_script_path}"
 
     local existing_crontab
     existing_crontab=$(crontab -l 2>/dev/null || true)
     local managed_count=0
     local canonical_count=0
     while IFS= read -r line; do
-        if [[ "$line" == *"$cron_marker"* || "$line" == *"$escaped_script_path"* ]]; then
+        if cron_line_is_managed "$line" "$cron_marker" "$legacy_command_prefix"; then
             managed_count=$((managed_count + 1))
             if [[ "$line" == "$cron_entry" ]]; then
                 canonical_count=$((canonical_count + 1))
@@ -762,7 +775,7 @@ install_cron() {
     else
         {
             while IFS= read -r line; do
-                if [[ "$line" != *"$cron_marker"* && "$line" != *"$escaped_script_path"* ]]; then
+                if ! cron_line_is_managed "$line" "$cron_marker" "$legacy_command_prefix"; then
                     printf '%s\n' "$line"
                 fi
             done <<<"$existing_crontab"

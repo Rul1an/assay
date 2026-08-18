@@ -192,6 +192,10 @@ CRONTAB_EXISTING=$(printf '%s\n%s\n%s\n%s\n%s\n' \
     '23 * * * * /usr/local/bin/backup-health_check.sh' \
     "${CANONICAL_CRON}" \
     "*/5 * * * * ${CRON_SCRIPT_PATH} >/tmp/old.log 2>&1")
+CRONTAB_EXISTING+=$(printf '\n%s\n%s\n%s' \
+    "# audit source path ${CRON_SCRIPT_PATH}" \
+    "11 * * * * sha256sum ${CRON_SCRIPT_PATH} >/tmp/health.sha" \
+    "12 * * * * ${CRON_SCRIPT_PATH}.backup --check")
 : >"${CRONTAB_CAPTURE}"
 install_cron >/dev/null
 if grep -Fq "${CRON_SCRIPT_PATH} >/tmp/old.log" "${CRONTAB_CAPTURE}"; then
@@ -206,7 +210,10 @@ if ! grep -Fxq '17 * * * * /usr/local/bin/keep-me' "${CRONTAB_CAPTURE}"; then
 fi
 for unrelated in \
     '# retained operator note about health_check.sh' \
-    '23 * * * * /usr/local/bin/backup-health_check.sh'; do
+    '23 * * * * /usr/local/bin/backup-health_check.sh' \
+    "# audit source path ${CRON_SCRIPT_PATH}" \
+    "11 * * * * sha256sum ${CRON_SCRIPT_PATH} >/tmp/health.sha" \
+    "12 * * * * ${CRON_SCRIPT_PATH}.backup --check"; do
     if ! grep -Fxq "${unrelated}" "${CRONTAB_CAPTURE}"; then
         echo "runner cron migration removed unrelated content: ${unrelated}" >&2
         cat "${CRONTAB_CAPTURE}" >&2
