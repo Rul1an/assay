@@ -162,7 +162,7 @@ repos:
         entry: bash scripts/ci/test-published-release-golden-path-contract.sh
         language: system
         pass_filenames: false
-        files: ^(scripts/ci/(published-release-golden-path\.sh|check-published-release-golden-path-contract\.py|test-published-release-golden-path-contract\.sh|safe_extract_release_archive\.py|test_safe_extract_release_archive\.py|release_attestation_enforce\.sh|test-release-attestation-enforce\.sh|fixtures/published-release-golden-path/.*)|examples/privileged-action-gate/(mock_github_mcp\.py|baseline-approved\.json|policies/no-allowance\.yaml)|\.github/workflows/(published-release-golden-path|release)\.yml|\.pre-commit-config\.yaml)$
+        files: ^(scripts/ci/(published-release-golden-path\.sh|check-published-release-golden-path-contract\.py|test-published-release-golden-path-contract\.sh|safe_extract_release_archive\.py|test_safe_extract_release_archive\.py|bounded_download\.py|test_bounded_download\.py|release_attestation_enforce\.sh|test-release-attestation-enforce\.sh|fixtures/published-release-golden-path/.*)|examples/privileged-action-gate/(mock_github_mcp\.py|baseline-approved\.json|policies/no-allowance\.yaml)|\.github/workflows/(published-release-golden-path|release)\.yml|\.pre-commit-config\.yaml)$
 
       - id: claude-plugin-install-workflow-self-test
         name: Claude plugin install workflow self-test

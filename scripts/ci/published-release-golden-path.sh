@@ -158,21 +158,26 @@ done
 
 download_release_asset() {
   local asset_name="$1" max_bytes="$2"
-  local count api_size api_digest actual_size actual_digest
+  local count api_size api_digest asset_url actual_size actual_digest
   count="$($JQ_BIN -er --arg name "$asset_name" '[.assets[] | select(.name == $name)] | length' "$release_api")"
   [[ "$count" -eq 1 ]] || fail "release must contain exactly one asset named $asset_name"
   api_size="$($JQ_BIN -er --arg name "$asset_name" '.assets[] | select(.name == $name) | .size' "$release_api")"
   api_digest="$($JQ_BIN -er --arg name "$asset_name" '.assets[] | select(.name == $name) | .digest' "$release_api")"
+  asset_url="$($JQ_BIN -er --arg name "$asset_name" '.assets[] | select(.name == $name) | .browser_download_url' "$release_api")"
   [[ "$api_size" =~ ^[0-9]+$ && "$api_size" -gt 0 && "$api_size" -le "$max_bytes" ]] \
     || fail "release asset exceeds compressed-size ceiling: $asset_name"
   [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "release API omitted asset sha256: $asset_name"
-  "$GH_BIN" release download "$release_tag" --repo "$REPO" --dir "$downloads" --pattern "$asset_name" --clobber
+  [[ "$asset_url" == "https://github.com/${REPO}/releases/download/${release_tag}/${asset_name}" ]] \
+    || fail "release API returned an unexpected asset URL: $asset_name"
+  PYTHONPATH="$harness_root/scripts/ci" "$PYTHON_BIN" -c \
+    'import pathlib,sys; from bounded_download import download; download(sys.argv[1], pathlib.Path(sys.argv[2]), max_bytes=int(sys.argv[3]))' \
+    "$asset_url" "$downloads/$asset_name" "$max_bytes"
   actual_size="$(wc -c <"$downloads/$asset_name" | tr -d ' ')"
   [[ "$actual_size" -eq "$api_size" && "$actual_size" -le "$max_bytes" ]] \
     || fail "downloaded asset size differs or exceeds its ceiling: $asset_name"
   actual_digest="sha256:$(sha256sum "$downloads/$asset_name" | cut -d' ' -f1)"
   [[ "$actual_digest" == "$api_digest" ]] || fail "downloaded asset digest differs: $asset_name"
-  record_command "download-release-asset" 0 "$GH_BIN" release download "$release_tag" --pattern "$asset_name"
+  record_command "download-release-asset" 0 bounded_download "$asset_url" "$downloads/$asset_name" "$max_bytes"
 }
 
 download_release_asset "$cli_asset" 67108864
@@ -188,17 +193,17 @@ if ! GH_BIN="$GH_BIN" JQ_BIN="$JQ_BIN" \
   SIGNER_WORKFLOW="$signer_workflow" \
   SOURCE_REF="" \
   SOURCE_DIGEST="$source_digest" \
-  bash "$ROOT/scripts/ci/release_attestation_enforce.sh" \
+  bash "$harness_root/scripts/ci/release_attestation_enforce.sh" \
   >"$results/attestation-verify.log" 2>&1; then
   cat "$results/attestation-verify.log" >&2
   fail "reviewed release attestation verifier rejected the published assets"
 fi
-record_command "verify-release-attestations" 0 "$ROOT/scripts/ci/release_attestation_enforce.sh"
+record_command "verify-release-attestations" 0 "$harness_root/scripts/ci/release_attestation_enforce.sh"
 
 cli_extract="$run_root/cli-extract"
 mcp_extract="$run_root/mcp-extract"
 safe_extract() {
-  PYTHONPATH="$ROOT/scripts/ci" "$PYTHON_BIN" -c \
+  PYTHONPATH="$harness_root/scripts/ci" "$PYTHON_BIN" -c \
     'import pathlib,sys; from safe_extract_release_archive import extract_archive; extract_archive(pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), max_decoded_bytes=int(sys.argv[3]))' \
     "$1" "$2" "$3"
 }
@@ -221,7 +226,8 @@ export PATH="$install_root/bin:/usr/bin:/bin"
 run_capture "assay-version" 0 "$results/assay-version.txt" "$results/assay-version.stderr" assay version
 [[ "$(tr -d '\r\n' <"$results/assay-version.txt")" == "$version" ]] || fail "assay version differs from pinned release"
 run_capture "mcp-version" 0 "$results/mcp-version.txt" "$results/mcp-version.stderr" assay-mcp-server --version
-grep -Eq "(^|[[:space:]])${version}$" "$results/mcp-version.txt" || fail "assay-mcp-server version differs from pinned release"
+[[ "$(tr -d '\r\n' <"$results/mcp-version.txt")" == "assay-mcp-server $version" ]] \
+  || fail "assay-mcp-server version differs from pinned release"
 
 pushd "$session_root" >/dev/null
 run_capture "init" 0 "$results/init.json" "$results/init.stderr" assay init --preset dev --hello-trace --format json
@@ -248,7 +254,12 @@ printf '%s\n%s\n' "$init_request" "$call_request" \
       --enforcement-decision-out "$decisions" \
       --denied-call-observation-out "$observations" \
       >"$results/proxy.jsonl" 2>"$results/proxy.stderr" || proxy_status=$?
-record_command "proxy-enforce" "$proxy_status" assay-mcp-server proxy-enforce --upstream-command python3
+record_command "proxy-enforce" "$proxy_status" assay-mcp-server proxy-enforce \
+  --upstream-command "$PYTHON_BIN" --upstream-arg -u --upstream-arg "$fixture_dir/mock_github_mcp.py" \
+  --enforce-policy "$fixture_dir/policies/no-allowance.yaml" \
+  --declared-mcp-manifest "$fixture_dir/baseline-approved.json" \
+  --enforcement-decision-out "$decisions" \
+  --denied-call-observation-out "$observations"
 [[ "$proxy_status" -eq 0 ]] || fail "proxy-enforce exited $proxy_status, expected 0 for a policy denial"
 [[ -s "$decisions" ]] || fail "proxy-enforce produced no enforcement decision"
 [[ -s "$observations" ]] || fail "proxy-enforce produced no denied-call observation"

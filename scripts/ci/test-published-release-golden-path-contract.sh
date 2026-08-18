@@ -29,9 +29,14 @@ python3 "$CHECKER" \
   --source-root "$ROOT"
 bash "$ROOT/scripts/ci/test-release-attestation-enforce.sh"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_safe_extract_release_archive.py"
+PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_bounded_download.py"
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
+verifier_call='bash "$harness_root/scripts/ci/release_attestation_enforce.sh" '"\\"
+proxy_record_call='record_command "proxy-enforce" "$proxy_status" assay-mcp-server proxy-enforce '"\\"
+workflow_driver_call='          bash scripts/ci/published-release-golden-path.sh '"\\"
+workflow_driver_decoy=$'          # bash scripts/ci/published-release-golden-path.sh\n          echo skipped-reviewed-driver '"\\"
 
 expect_mutation_failure() {
   local name="$1" target="$2" old="$3" new="$4" expected="$5"
@@ -41,6 +46,16 @@ expect_mutation_failure() {
   cp "$RELEASE_WORKFLOW" "$case_root/release.yml"
   cp "$DRIVER" "$case_root/driver.sh"
   cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$MANIFEST" "$ROOT" "$case_root" <<'PY'
+import json, pathlib, shutil, sys
+manifest_path, source_root, destination_root = map(pathlib.Path, sys.argv[1:])
+for row in json.loads(manifest_path.read_text(encoding="utf-8"))["files"]:
+    relative = pathlib.PurePosixPath(row["path"])
+    source = source_root.joinpath(*relative.parts)
+    destination = destination_root.joinpath(*relative.parts)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
+PY
   python3 - "$case_root/$target" "$old" "$new" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
@@ -55,7 +70,7 @@ PY
       --release-workflow "$case_root/release.yml" \
       --driver "$case_root/driver.sh" \
       --manifest "$case_root/manifest.json" \
-      --source-root "$ROOT" >"$case_root/output" 2>&1; then
+      --source-root "$case_root" >"$case_root/output" 2>&1; then
     fail "mutation stayed green: $name"
   fi
   grep -F "$expected" "$case_root/output" >/dev/null \
@@ -64,14 +79,14 @@ PY
 
 expect_mutation_failure \
   "attestation-removed" "driver.sh" \
-  'bash "$ROOT/scripts/ci/release_attestation_enforce.sh"' \
+  'bash "$harness_root/scripts/ci/release_attestation_enforce.sh"' \
   'echo skipped-attestation' \
   "driver must execute the reviewed attestation verifier exactly once"
 
 expect_mutation_failure \
   "attestation-suppressed" "driver.sh" \
-  'bash "$ROOT/scripts/ci/release_attestation_enforce.sh"' \
-  'bash "$ROOT/scripts/ci/release_attestation_enforce.sh" || true' \
+  'bash "$harness_root/scripts/ci/release_attestation_enforce.sh"' \
+  'bash "$harness_root/scripts/ci/release_attestation_enforce.sh" || true' \
   "driver suppresses a failure"
 
 expect_mutation_failure \
@@ -145,8 +160,8 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "verifier-commented" "driver.sh" \
-  'bash "$ROOT/scripts/ci/release_attestation_enforce.sh"' \
-  '# bash "$ROOT/scripts/ci/release_attestation_enforce.sh"' \
+  'bash "$harness_root/scripts/ci/release_attestation_enforce.sh"' \
+  '# bash "$harness_root/scripts/ci/release_attestation_enforce.sh"' \
   "driver must execute the reviewed attestation verifier exactly once"
 
 expect_mutation_failure \
@@ -163,7 +178,7 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "release-carried-verifier" "driver.sh" \
-  'bash "$ROOT/scripts/ci/release_attestation_enforce.sh"' \
+  'bash "$harness_root/scripts/ci/release_attestation_enforce.sh"' \
   'bash "$downloads/release-proof-kit/verify-offline.sh"' \
   "driver must not execute or trust code carried by the release proof kit"
 
@@ -208,5 +223,41 @@ expect_mutation_failure \
   'OUT_RAW_DIR="$results/attestation-raw"' \
   'OUT_RAW_DIR="$run_root/attestation-raw"' \
   "raw attestation inputs must be retained"
+
+expect_mutation_failure \
+  "reviewed-driver-dead-code-decoy" "driver.sh" \
+  "$verifier_call" \
+  $'if false; then\n      bash "$harness_root/scripts/ci/release_attestation_enforce.sh" \\\n    fi\n    bash "$downloads/verifier.sh" \\' \
+  "harness digest drifted: scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "mcp-version-regex-loosened" "driver.sh" \
+  '"assay-mcp-server $version"' \
+  '"$version"' \
+  "harness digest drifted: scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "proxy-command-provenance-truncated" "driver.sh" \
+  "$proxy_record_call" \
+  'record_command "proxy-enforce" "$proxy_status" assay-mcp-server proxy-enforce --upstream-command python3' \
+  "harness digest drifted: scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "workflow-driver-comment-decoy" "workflow.yml" \
+  "$workflow_driver_call" \
+  "$workflow_driver_decoy" \
+  "harness digest drifted: .github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "signer-binding-removed" "scripts/ci/release_attestation_enforce.sh" \
+  '    --signer-workflow "$SIGNER_WORKFLOW"' \
+  '    --predicate-type https://slsa.dev/provenance/v1' \
+  "harness digest drifted: scripts/ci/release_attestation_enforce.sh"
+
+expect_mutation_failure \
+  "raw-attestation-count-disabled" "driver.sh" \
+  '("attestation-raw/*.json", 2)' \
+  '("attestation-raw/*.json", 0)' \
+  "harness digest drifted: scripts/ci/published-release-golden-path.sh"
 
 echo "ok: published-release golden-path contract"

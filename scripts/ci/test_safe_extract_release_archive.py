@@ -6,6 +6,7 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from safe_extract_release_archive import ArchiveRejected, extract_archive
 
@@ -43,6 +44,19 @@ class SafeExtractReleaseArchiveTests(unittest.TestCase):
 
         self.assertEqual((destination / "pkg/assay").read_bytes(), b"binary")
         self.assertTrue((destination / "pkg/assay").stat().st_mode & 0o100)
+
+    def test_does_not_materialize_member_table(self) -> None:
+        archive = self.write_archive([("pkg/assay", b"binary", "file")])
+        destination = self.root / "out"
+
+        with mock.patch.object(
+            tarfile.TarFile,
+            "getmembers",
+            side_effect=AssertionError("member table was materialized"),
+        ):
+            extract_archive(archive, destination, max_decoded_bytes=32, max_members=4)
+
+        self.assertEqual((destination / "pkg/assay").read_bytes(), b"binary")
 
     def test_rejects_traversal_before_materialization(self) -> None:
         archive = self.write_archive([("../escape", b"bad", "file")])

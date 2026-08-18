@@ -42,7 +42,14 @@ def mapping_block(text: str, key: str, indent: int, problems: list[str]) -> str:
     return "\n".join(lines[start:end])
 
 
-def validate_manifest(path: Path, source_root: Path, problems: list[str]) -> None:
+def validate_manifest(
+    path: Path,
+    source_root: Path,
+    workflow: Path,
+    release_workflow: Path,
+    driver: Path,
+    problems: list[str],
+) -> None:
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -55,6 +62,11 @@ def validate_manifest(path: Path, source_root: Path, problems: list[str]) -> Non
         problems.append("harness manifest has no files")
         return
     paths: list[str] = []
+    input_overrides = {
+        ".github/workflows/published-release-golden-path.yml": workflow,
+        ".github/workflows/release.yml": release_workflow,
+        "scripts/ci/published-release-golden-path.sh": driver,
+    }
     for row in files:
         if not isinstance(row, dict) or not isinstance(row.get("path"), str):
             problems.append("harness manifest row has no path")
@@ -64,7 +76,7 @@ def validate_manifest(path: Path, source_root: Path, problems: list[str]) -> Non
         if relative.is_absolute() or "." in relative.parts or ".." in relative.parts:
             problems.append(f"unsafe harness manifest path: {relative}")
             continue
-        source = source_root.joinpath(*relative.parts)
+        source = input_overrides.get(str(relative), source_root.joinpath(*relative.parts))
         try:
             actual = hashlib.sha256(source.read_bytes()).hexdigest()
         except OSError as error:
@@ -76,9 +88,15 @@ def validate_manifest(path: Path, source_root: Path, problems: list[str]) -> Non
         "examples/privileged-action-gate/mock_github_mcp.py",
         "examples/privileged-action-gate/policies/no-allowance.yaml",
         "examples/privileged-action-gate/baseline-approved.json",
+        ".github/workflows/published-release-golden-path.yml",
+        ".github/workflows/release.yml",
+        "scripts/ci/published-release-golden-path.sh",
+        "scripts/ci/release_attestation_enforce.sh",
+        "scripts/ci/safe_extract_release_archive.py",
+        "scripts/ci/bounded_download.py",
     ]
     if paths != expected:
-        problems.append("harness manifest must list exactly the bounded denied-call fixture")
+        problems.append("harness manifest must list exactly the reviewed harness inputs")
 
 
 def validate_contract(
@@ -186,7 +204,7 @@ def validate_contract(
         "fresh run root": "run root already exists; refusing to reuse prior evidence",
         "stable published release": "release tag is still draft or prerelease",
         "external tag source": '"$GH_BIN" api "repos/${REPO}/git/ref/tags/${release_tag}"',
-        "reviewed attestation verifier": 'bash "$ROOT/scripts/ci/release_attestation_enforce.sh"',
+        "reviewed attestation verifier": 'bash "$harness_root/scripts/ci/release_attestation_enforce.sh"',
         "compressed asset ceiling": "release asset exceeds compressed-size ceiling",
         "bounded archive extractor": "from safe_extract_release_archive import extract_archive",
         "retained release inputs": 'downloads="$results/release-assets"',
@@ -239,9 +257,11 @@ def validate_contract(
     for line, message in exact_active_lines.items():
         if driver_lines.count(line) != 1:
             problems.append(message)
+    if driver_lines.count('PYTHONPATH="$harness_root/scripts/ci" "$PYTHON_BIN" -c \\') != 2:
+        problems.append("bounded helper execution drifted")
     if any("verify-offline.sh" in line or "release-proof-kit" in line for line in driver_lines):
         problems.append("driver must not execute or trust code carried by the release proof kit")
-    verifier_line = 'bash "$ROOT/scripts/ci/release_attestation_enforce.sh" \\'
+    verifier_line = 'bash "$harness_root/scripts/ci/release_attestation_enforce.sh" \\'
     if driver_lines.count(verifier_line) != 1:
         problems.append("driver must execute the reviewed attestation verifier exactly once")
     else:
@@ -285,7 +305,7 @@ def validate_contract(
         if f'"{name}"' not in driver_text:
             problems.append(f"driver no longer requires retained artifact: {name}")
 
-    validate_manifest(manifest, source_root, problems)
+    validate_manifest(manifest, source_root, workflow, release_workflow, driver, problems)
     return problems
 
 

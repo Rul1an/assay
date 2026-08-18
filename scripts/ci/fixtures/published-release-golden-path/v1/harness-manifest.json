@@ -12,6 +12,30 @@
     {
       "path": "examples/privileged-action-gate/baseline-approved.json",
       "sha256": "db210a8f7d7e5850322eddf18ffbef268b1d19595f568e7b3b7a4ec8e50326c3"
+    },
+    {
+      "path": ".github/workflows/published-release-golden-path.yml",
+      "sha256": "807a930392bf2bfc3487d931840fcb7ae2e6f987e6db4e05c88a0a31adbf43e2"
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "sha256": "a25a1fc1e8a1f72806b8caca9747381fd6bee09a86bc6d0af94d11c6a708428a"
+    },
+    {
+      "path": "scripts/ci/published-release-golden-path.sh",
+      "sha256": "5cde9c8909df8f5b5a2c9ef4131e2aded6ded6e0d80c224bf7de8caef022afff"
+    },
+    {
+      "path": "scripts/ci/release_attestation_enforce.sh",
+      "sha256": "01bfa586b826fa74838c58e765f40982537f8ea14325b803fc9183fcf4e8277f"
+    },
+    {
+      "path": "scripts/ci/safe_extract_release_archive.py",
+      "sha256": "0d0c4462d2373cfd29fb6424ac6cba26e8218a3cdbe4cf93055362b19acdaef9"
+    },
+    {
+      "path": "scripts/ci/bounded_download.py",
+      "sha256": "08eff32101003614a9d5de93507c2d26ec087d1417179d34bea41a70ee4bafaa"
     }
   ]
 }
