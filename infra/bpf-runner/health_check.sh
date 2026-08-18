@@ -729,11 +729,25 @@ health_check() {
 cron_line_is_managed() {
     local line="$1"
     local marker="$2"
-    local legacy_command_prefix="$3"
+    local schedule_prefix="$3"
+    local escaped_script_path="$4"
 
-    [[ "$line" == *" ${marker}" || \
-        "$line" == "$legacy_command_prefix" || \
-        "$line" == "$legacy_command_prefix "* ]]
+    if [[ "$line" == *" ${marker}" ]]; then
+        return 0
+    fi
+
+    [[ "$line" == "$schedule_prefix"* ]] || return 1
+    local command="${line#"$schedule_prefix"}"
+
+    # Older installers optionally emitted GH_TOKEN_FILE before the script.
+    # Match that shell-escaped assignment structurally, not against today's
+    # configured value, so configuration changes cannot retain a second job.
+    if [[ "$command" =~ ^GH_TOKEN_FILE=([^[:space:]\\]|\\.)+[[:space:]]+ ]]; then
+        command="${command:${#BASH_REMATCH[0]}}"
+    fi
+
+    [[ "$command" == "$escaped_script_path" || \
+        "$command" == "$escaped_script_path "* ]]
 }
 
 # Install cron job
@@ -753,15 +767,15 @@ install_cron() {
     local escaped_lock_file
     printf -v escaped_lock_file '%q' "$HEALTH_CHECK_LOCK_FILE"
     local cron_marker="# assay-bpf-runner-health-check"
+    local schedule_prefix="*/5 * * * * "
     local cron_entry="*/5 * * * * ${env_prefix}/usr/bin/lockf -t 0 ${escaped_lock_file} ${escaped_script_path} >> ${escaped_log_file} 2>&1 ${cron_marker}"
-    local legacy_command_prefix="*/5 * * * * ${env_prefix}${escaped_script_path}"
 
     local existing_crontab
     existing_crontab=$(crontab -l 2>/dev/null || true)
     local managed_count=0
     local canonical_count=0
     while IFS= read -r line; do
-        if cron_line_is_managed "$line" "$cron_marker" "$legacy_command_prefix"; then
+        if cron_line_is_managed "$line" "$cron_marker" "$schedule_prefix" "$escaped_script_path"; then
             managed_count=$((managed_count + 1))
             if [[ "$line" == "$cron_entry" ]]; then
                 canonical_count=$((canonical_count + 1))
@@ -775,7 +789,7 @@ install_cron() {
     else
         {
             while IFS= read -r line; do
-                if ! cron_line_is_managed "$line" "$cron_marker" "$legacy_command_prefix"; then
+                if ! cron_line_is_managed "$line" "$cron_marker" "$schedule_prefix" "$escaped_script_path"; then
                     printf '%s\n' "$line"
                 fi
             done <<<"$existing_crontab"

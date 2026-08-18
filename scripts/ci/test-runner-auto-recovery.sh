@@ -186,6 +186,29 @@ fi
 
 CRON_SCRIPT_PATH=$(realpath "$0")
 CANONICAL_CRON=$(cat "${CRONTAB_CAPTURE}")
+
+# Pre-marker entries belong to the installer independently of the token-file
+# configuration used when they were generated. Each transition must converge
+# to one current, locked entry rather than leaving the old recovery job active.
+for transition in \
+    "none-to-token|*/5 * * * * ${CRON_SCRIPT_PATH} >/tmp/old.log 2>&1|/tmp/token-current" \
+    "token-to-none|*/5 * * * * GH_TOKEN_FILE=/tmp/token-old ${CRON_SCRIPT_PATH} >/tmp/old.log 2>&1|" \
+    "token-a-to-b|*/5 * * * * GH_TOKEN_FILE=/tmp/token-a ${CRON_SCRIPT_PATH} >/tmp/old.log 2>&1|/tmp/token-b"; do
+    IFS='|' read -r transition_name legacy_entry current_token_file <<<"${transition}"
+    CRONTAB_EXISTING="${legacy_entry}"
+    GH_TOKEN_FILE="${current_token_file}"
+    : >"${CRONTAB_CAPTURE}"
+    install_cron >/dev/null
+    if [[ "$(grep -Fc '# assay-bpf-runner-health-check' "${CRONTAB_CAPTURE}")" -ne 1 ]] || \
+        [[ "$(grep -Fc '/usr/bin/lockf -t 0 /tmp/assay-bpf-runner-health.lock' "${CRONTAB_CAPTURE}")" -ne 1 ]] || \
+        grep -Fq '>/tmp/old.log' "${CRONTAB_CAPTURE}"; then
+        echo "runner cron configuration transition did not converge: ${transition_name}" >&2
+        cat "${CRONTAB_CAPTURE}" >&2
+        exit 1
+    fi
+done
+export GH_TOKEN_FILE=""
+
 CRONTAB_EXISTING=$(printf '%s\n%s\n%s\n%s\n%s\n' \
     '17 * * * * /usr/local/bin/keep-me' \
     '# retained operator note about health_check.sh' \
