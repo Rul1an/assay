@@ -197,4 +197,16 @@ expect_mutation_failure \
   '--bundle-out "$bundle" --run-id published-release-golden-path' \
   "evidence run id is not bound to the workflow invocation"
 
+expect_mutation_failure \
+  "tag-peel-type-check-removed" "driver.sh" \
+  '[[ "$source_type" == "commit" && "$source_digest" =~ ^[0-9a-f]{40}$ ]]' \
+  '[[ "$source_digest" =~ ^[0-9a-f]{40}$ ]]' \
+  "release tag must peel to a commit before attestation verification"
+
+expect_mutation_failure \
+  "raw-attestations-not-retained" "driver.sh" \
+  'OUT_RAW_DIR="$results/attestation-raw"' \
+  'OUT_RAW_DIR="$run_root/attestation-raw"' \
+  "raw attestation inputs must be retained"
+
 echo "ok: published-release golden-path contract"

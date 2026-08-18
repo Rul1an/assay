@@ -223,6 +223,10 @@ def validate_contract(
             "external release-tag source binding drifted"
         ),
         'SOURCE_DIGEST="$source_digest" \\': "attestation source digest is not externally bound",
+        '[[ "$source_type" == "commit" && "$source_digest" =~ ^[0-9a-f]{40}$ ]] \\': (
+            "release tag must peel to a commit before attestation verification"
+        ),
+        'OUT_RAW_DIR="$results/attestation-raw" \\': "raw attestation inputs must be retained",
         'downloads="$results/release-assets"': "release inputs must be retained with the run artifact",
         'download_release_asset "$cli_asset" 67108864': "CLI compressed-size ceiling drifted",
         'download_release_asset "$mcp_asset" 33554432': "MCP compressed-size ceiling drifted",

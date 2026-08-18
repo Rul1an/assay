@@ -82,6 +82,14 @@ class SafeExtractReleaseArchiveTests(unittest.TestCase):
         with self.assertRaises(ArchiveRejected):
             extract_archive(archive, self.root / "out", max_decoded_bytes=4, max_members=4)
 
+    def test_rejects_aggregate_decoded_size_ceiling(self) -> None:
+        archive = self.write_archive(
+            [("pkg/assay", b"123", "file"), ("pkg/README.md", b"456", "file")]
+        )
+
+        with self.assertRaises(ArchiveRejected):
+            extract_archive(archive, self.root / "out", max_decoded_bytes=4, max_members=4)
+
 
 if __name__ == "__main__":
     unittest.main()
