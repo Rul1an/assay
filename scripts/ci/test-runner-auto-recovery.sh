@@ -168,10 +168,53 @@ if [[ "${start_status}" -ne 124 ]]; then
     exit 1
 fi
 
+for cleanup_phase in service unit credentials ownership; do
+    timeout() {
+        shift
+        case "${cleanup_phase}:$*" in
+            service:*"svc.sh stop"* | \
+            unit:*"actions.runner.*.service"* | \
+            credentials:*".credentials_rsaparams"* | \
+            ownership:*"chown -R"*) return 124 ;;
+        esac
+        "$@"
+    }
+    set +e
+    cleanup_runner_config
+    cleanup_status=$?
+    set -e
+    if [[ "${cleanup_status}" -ne 124 ]]; then
+        echo "runner cleanup ${cleanup_phase} did not propagate timeout exit 124 (got ${cleanup_status})" >&2
+        exit 1
+    fi
+done
+
+: >"${EVENTS}"
+cleanup_runner_config() {
+    echo cleanup >>"${EVENTS}"
+    return 124
+}
+set +e
+recover_runner
+recovery_cleanup_status=$?
+set -e
+if [[ "${recovery_cleanup_status}" -ne 124 ]]; then
+    echo "runner recovery did not propagate cleanup timeout exit 124 (got ${recovery_cleanup_status})" >&2
+    exit 1
+fi
+if grep -Fxq token "${EVENTS}"; then
+    echo "runner recovery generated a token after cleanup failed" >&2
+    exit 1
+fi
+
 CRONTAB_CAPTURE="${EVENTS}.crontab"
 CRONTAB_EXISTING=""
+CRONTAB_LIST_STATUS=0
 crontab() {
     if [[ "${1:-}" == -l ]]; then
+        if [[ "${CRONTAB_LIST_STATUS}" -ne 0 ]]; then
+            return "${CRONTAB_LIST_STATUS}"
+        fi
         printf '%s' "${CRONTAB_EXISTING}"
         return 0
     fi
@@ -183,6 +226,18 @@ if ! grep -Fq '/usr/bin/lockf -t 0 /tmp/assay-bpf-runner-health.lock' "${CRONTAB
     cat "${CRONTAB_CAPTURE}" >&2
     exit 1
 fi
+
+# Exit 1 is crontab's explicit "no crontab for user" result and is the only
+# nonzero read status from which installation may proceed.
+CRONTAB_LIST_STATUS=1
+: >"${CRONTAB_CAPTURE}"
+install_cron >/dev/null
+if ! grep -Fq '/usr/bin/lockf -t 0 /tmp/assay-bpf-runner-health.lock' "${CRONTAB_CAPTURE}"; then
+    echo "runner cron was not installed for a user without an existing crontab" >&2
+    cat "${CRONTAB_CAPTURE}" >&2
+    exit 1
+fi
+CRONTAB_LIST_STATUS=0
 
 CRON_SCRIPT_PATH=$(realpath "$0")
 CANONICAL_CRON=$(cat "${CRONTAB_CAPTURE}")
@@ -263,6 +318,22 @@ CRONTAB_EXISTING=$(cat "${CRONTAB_CAPTURE}")
 install_cron >/dev/null
 if [[ -s "${CRONTAB_CAPTURE}" ]]; then
     echo "canonical runner cron installation was not idempotent" >&2
+    cat "${CRONTAB_CAPTURE}" >&2
+    exit 1
+fi
+
+CRONTAB_LIST_STATUS=2
+: >"${CRONTAB_CAPTURE}"
+set +e
+install_cron >/dev/null
+crontab_failure_status=$?
+set -e
+if [[ "${crontab_failure_status}" -ne 2 ]]; then
+    echo "unexpected crontab read failure was not propagated (got ${crontab_failure_status})" >&2
+    exit 1
+fi
+if [[ -s "${CRONTAB_CAPTURE}" ]]; then
+    echo "unexpected crontab read failure replaced existing cron content" >&2
     cat "${CRONTAB_CAPTURE}" >&2
     exit 1
 fi

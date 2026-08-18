@@ -403,13 +403,13 @@ cleanup_runner_config() {
         cd $RUNNER_DIR || exit 0
         sudo ./svc.sh stop 2>/dev/null || true
         sudo ./svc.sh uninstall 2>/dev/null || true
-    " 2>/dev/null || true
+    " 2>/dev/null || return $?
 
     # Remove old service files
     timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass exec "$VM_NAME" -- sudo bash -c "
         rm -f /etc/systemd/system/actions.runner.*.service 2>/dev/null || true
         systemctl daemon-reload 2>/dev/null || true
-    " 2>/dev/null || true
+    " 2>/dev/null || return $?
 
     # Remove credentials to force fresh registration
     timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass exec "$VM_NAME" -- sudo rm -f \
@@ -418,12 +418,12 @@ cleanup_runner_config() {
         "$RUNNER_DIR/.credentials_rsaparams" \
         "$RUNNER_DIR/.service" \
         "$RUNNER_DIR/.runner_migrated" \
-        2>/dev/null || true
+        2>/dev/null || return $?
 
     timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass exec "$VM_NAME" -- sudo chown -R \
         "$RUNNER_USER:$RUNNER_USER" \
         "$RUNNER_DIR" \
-        2>/dev/null || true
+        2>/dev/null || return $?
 
     log_ok "Runner configuration cleaned"
 }
@@ -636,7 +636,7 @@ recover_runner() {
 
     # Step 2: Clean up old config before generating the short-lived token. A
     # stalled VM command must not leave a token aging while cleanup is blocked.
-    cleanup_runner_config
+    cleanup_runner_config || return $?
 
     # Step 3: Generate the token immediately before its only use.
     local token
@@ -771,7 +771,11 @@ install_cron() {
     local cron_entry="*/5 * * * * ${env_prefix}/usr/bin/lockf -t 0 ${escaped_lock_file} ${escaped_script_path} >> ${escaped_log_file} 2>&1 ${cron_marker}"
 
     local existing_crontab
-    existing_crontab=$(crontab -l 2>/dev/null || true)
+    local crontab_status=0
+    existing_crontab=$(crontab -l 2>/dev/null) || crontab_status=$?
+    if [[ "$crontab_status" -ne 0 && "$crontab_status" -ne 1 ]]; then
+        return "$crontab_status"
+    fi
     local managed_count=0
     local canonical_count=0
     while IFS= read -r line; do
