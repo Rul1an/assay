@@ -42,6 +42,31 @@ def mapping_block(text: str, key: str, indent: int, problems: list[str]) -> str:
     return "\n".join(lines[start:end])
 
 
+def named_step_lines(text: str, name: str, problems: list[str]) -> list[str]:
+    marker = f"      - name: {name}"
+    lines = text.splitlines()
+    starts = [index for index, line in enumerate(lines) if line == marker]
+    if len(starts) != 1:
+        problems.append(f"expected exactly one workflow step named {name!r}")
+        return []
+    start = starts[0]
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if lines[index].startswith("      - name:"):
+            end = index
+            break
+    return active_lines("\n".join(lines[start:end]))
+
+
+def lines_between(text: str, start_marker: str, end_marker: str, problems: list[str]) -> list[str]:
+    if text.count(start_marker) != 1 or text.count(end_marker) != 1:
+        problems.append(f"expected unique contract block markers: {start_marker!r}, {end_marker!r}")
+        return []
+    start = text.index(start_marker)
+    end = text.index(end_marker, start)
+    return active_lines(text[start:end])
+
+
 def validate_manifest(
     path: Path,
     source_root: Path,
@@ -119,6 +144,9 @@ def validate_contract(
         workflow_text = workflow.read_text(encoding="utf-8")
         release_text = release_workflow.read_text(encoding="utf-8")
         driver_text = driver.read_text(encoding="utf-8")
+        attestation_text = (source_root / "scripts/ci/release_attestation_enforce.sh").read_text(
+            encoding="utf-8"
+        )
     except OSError as error:
         return [f"contract input is missing: {error}"]
 
@@ -132,6 +160,24 @@ def validate_contract(
         "workflow must execute the reviewed driver",
         problems,
     )
+    expected_exercise_step = [
+        "- name: Exercise the attested published release",
+        "shell: bash",
+        "env:",
+        "GH_TOKEN: ${{ github.token }}",
+        "RELEASE_TAG: ${{ inputs.release_tag }}",
+        "RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path",
+        "run: |",
+        "set -euo pipefail",
+        "bash scripts/ci/published-release-golden-path.sh \\",
+        '--release-tag "$RELEASE_TAG" \\',
+        '--harness-sha "$GITHUB_SHA" \\',
+        '--workflow-run-id "$GITHUB_RUN_ID" \\',
+        '--workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\',
+        '--run-root "$RUN_ROOT"',
+    ]
+    if named_step_lines(workflow_text, "Exercise the attested published release", problems) != expected_exercise_step:
+        problems.append("workflow must execute only the exact reviewed driver invocation")
     require(workflow_text, "--harness-sha \"$GITHUB_SHA\"", "workflow must bind the harness head", problems)
     require(workflow_text, "--workflow-run-id \"$GITHUB_RUN_ID\"", "workflow must bind its run id", problems)
     require(
@@ -207,6 +253,31 @@ def validate_contract(
         problems.append("release transaction must describe this as post-publication verification")
 
     driver_lines = active_lines(driver_text)
+    expected_attestation_block = [
+        'signer_workflow="$REPO/.github/workflows/release.yml"',
+        'if ! GH_BIN="$GH_BIN" JQ_BIN="$JQ_BIN" \\',
+        'ASSETS_DIR="$downloads" \\',
+        'OUT_SUMMARY="$results/attestation-summary.json" \\',
+        'OUT_RAW_DIR="$results/attestation-raw" \\',
+        'REPO="$REPO" \\',
+        'SIGNER_WORKFLOW="$signer_workflow" \\',
+        'SOURCE_REF="" \\',
+        'SOURCE_DIGEST="$source_digest" \\',
+        'bash "$harness_root/scripts/ci/release_attestation_enforce.sh" \\',
+        '>"$results/attestation-verify.log" 2>&1; then',
+        'cat "$results/attestation-verify.log" >&2',
+        'fail "reviewed release attestation verifier rejected the published assets"',
+        "fi",
+        'record_command "verify-release-attestations" 0 "$harness_root/scripts/ci/release_attestation_enforce.sh"',
+    ]
+    attestation_block = lines_between(
+        driver_text,
+        "# Execute reviewed harness code, not a script carried inside a mutable release asset.",
+        'cli_extract="$run_root/cli-extract"',
+        problems,
+    )
+    if attestation_block != expected_attestation_block:
+        problems.append("driver attestation execution block drifted")
     required_driver_fragments = {
         "exact stable tag": "release tag must be an exact stable vX.Y.Z tag",
         "fresh run root": "run root already exists; refusing to reuse prior evidence",
@@ -267,6 +338,34 @@ def validate_contract(
             problems.append(message)
     if driver_lines.count('PYTHONPATH="$harness_root/scripts/ci" "$PYTHON_BIN" -c \\') != 2:
         problems.append("bounded helper execution drifted")
+    semantic_driver_lines = {
+        '[[ "$(tr -d \'\\r\\n\' <"$results/mcp-version.txt")" == "assay-mcp-server $version" ]] \\': (
+            "exact MCP version comparison drifted"
+        ),
+        'record_command "proxy-enforce" "$proxy_status" "${proxy_argv[@]}"': (
+            "proxy command provenance no longer uses the executed argv"
+        ),
+        'for pattern, expected in (("release-assets/*.tar.gz", 2), ("attestation-raw/*.json", 2)):': (
+            "retained trust-input count enforcement drifted"
+        ),
+        '[[ "$asset_url" == "https://github.com/${REPO}/releases/download/${release_tag}/${asset_name}" ]] \\': (
+            "release asset URL binding drifted"
+        ),
+    }
+    for line, message in semantic_driver_lines.items():
+        if driver_lines.count(line) != 1:
+            problems.append(message)
+    attestation_lines = active_lines(attestation_text)
+    for line, message in {
+        '--signer-workflow "$SIGNER_WORKFLOW"': "attestation signer binding drifted",
+        '--source-digest "$SOURCE_DIGEST"': "attestation source digest binding drifted",
+        '--deny-self-hosted-runners': "attestation hosted-runner policy drifted",
+        'any(.[]; any((.verificationResult.statement.subject // [])[]?; .digest.sha256? == $digest))': (
+            "attestation local-subject digest binding drifted"
+        ),
+    }.items():
+        if attestation_lines.count(line) != 1:
+            problems.append(message)
     if any("verify-offline.sh" in line or "release-proof-kit" in line for line in driver_lines):
         problems.append("driver must not execute or trust code carried by the release proof kit")
     verifier_line = 'bash "$harness_root/scripts/ci/release_attestation_enforce.sh" \\'

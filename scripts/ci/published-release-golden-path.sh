@@ -251,20 +251,18 @@ observations="$results/denied-observations.ndjson"
 init_request='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"published-release-gate","version":"1"}}}'
 call_request='{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"github.add_deploy_key","arguments":{"owner":"acme","repo":"prod-app"}}}'
 proxy_status=0
-printf '%s\n%s\n' "$init_request" "$call_request" \
-  | assay-mcp-server proxy-enforce \
-      --upstream-command "$PYTHON_BIN" --upstream-arg -u --upstream-arg "$fixture_dir/mock_github_mcp.py" \
-      --enforce-policy "$fixture_dir/policies/no-allowance.yaml" \
-      --declared-mcp-manifest "$fixture_dir/baseline-approved.json" \
-      --enforcement-decision-out "$decisions" \
-      --denied-call-observation-out "$observations" \
-      >"$results/proxy.jsonl" 2>"$results/proxy.stderr" || proxy_status=$?
-record_command "proxy-enforce" "$proxy_status" assay-mcp-server proxy-enforce \
-  --upstream-command "$PYTHON_BIN" --upstream-arg -u --upstream-arg "$fixture_dir/mock_github_mcp.py" \
-  --enforce-policy "$fixture_dir/policies/no-allowance.yaml" \
-  --declared-mcp-manifest "$fixture_dir/baseline-approved.json" \
-  --enforcement-decision-out "$decisions" \
+proxy_argv=(
+  assay-mcp-server proxy-enforce
+  --upstream-command "$PYTHON_BIN" --upstream-arg -u --upstream-arg "$fixture_dir/mock_github_mcp.py"
+  --enforce-policy "$fixture_dir/policies/no-allowance.yaml"
+  --declared-mcp-manifest "$fixture_dir/baseline-approved.json"
+  --enforcement-decision-out "$decisions"
   --denied-call-observation-out "$observations"
+)
+printf '%s\n%s\n' "$init_request" "$call_request" \
+  | "${proxy_argv[@]}" \
+      >"$results/proxy.jsonl" 2>"$results/proxy.stderr" || proxy_status=$?
+record_command "proxy-enforce" "$proxy_status" "${proxy_argv[@]}"
 [[ "$proxy_status" -eq 0 ]] || fail "proxy-enforce exited $proxy_status, expected 0 for a policy denial"
 [[ -s "$decisions" ]] || fail "proxy-enforce produced no enforcement decision"
 [[ -s "$observations" ]] || fail "proxy-enforce produced no denied-call observation"

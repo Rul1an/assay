@@ -34,12 +34,11 @@ PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_bounded_download.py
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 verifier_call='bash "$harness_root/scripts/ci/release_attestation_enforce.sh" '"\\"
-proxy_record_call='record_command "proxy-enforce" "$proxy_status" assay-mcp-server proxy-enforce '"\\"
 workflow_driver_call='          bash scripts/ci/published-release-golden-path.sh '"\\"
 workflow_driver_decoy=$'          # bash scripts/ci/published-release-golden-path.sh\n          echo skipped-reviewed-driver '"\\"
 
 expect_mutation_failure() {
-  local name="$1" target="$2" old="$3" new="$4" expected="$5"
+  local name="$1" target="$2" old="$3" new="$4" expected="$5" refresh_path="${6:-}"
   local case_root="$scratch/$name"
   mkdir -p "$case_root"
   cp "$WORKFLOW" "$case_root/workflow.yml"
@@ -65,6 +64,19 @@ if text.count(old) != 1:
     raise SystemExit(f"mutation anchor count for {old!r}: {text.count(old)}")
 path.write_text(text.replace(old, new, 1), encoding="utf-8")
 PY
+  if [[ -n "$refresh_path" ]]; then
+    python3 - "$case_root/manifest.json" "$case_root/$target" "$refresh_path" <<'PY'
+import hashlib, json, pathlib, sys
+manifest_path, changed_path = map(pathlib.Path, sys.argv[1:3])
+logical_path = sys.argv[3]
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+rows = [row for row in manifest["files"] if row["path"] == logical_path]
+if len(rows) != 1:
+    raise SystemExit(f"refresh path is not unique in manifest: {logical_path}")
+rows[0]["sha256"] = hashlib.sha256(changed_path.read_bytes()).hexdigest()
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  fi
   if python3 "$CHECKER" \
       --workflow "$case_root/workflow.yml" \
       --release-workflow "$case_root/release.yml" \
@@ -228,37 +240,57 @@ expect_mutation_failure \
   "reviewed-driver-dead-code-decoy" "driver.sh" \
   "$verifier_call" \
   $'if false; then\n      bash "$harness_root/scripts/ci/release_attestation_enforce.sh" \\\n    fi\n    bash "$downloads/verifier.sh" \\' \
-  "harness digest drifted: scripts/ci/published-release-golden-path.sh"
+  "driver attestation execution block drifted" \
+  "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "mcp-version-regex-loosened" "driver.sh" \
   '"assay-mcp-server $version"' \
   '"$version"' \
-  "harness digest drifted: scripts/ci/published-release-golden-path.sh"
+  "exact MCP version comparison drifted" \
+  "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "proxy-command-provenance-truncated" "driver.sh" \
-  "$proxy_record_call" \
+  'record_command "proxy-enforce" "$proxy_status" "${proxy_argv[@]}"' \
   'record_command "proxy-enforce" "$proxy_status" assay-mcp-server proxy-enforce --upstream-command python3' \
-  "harness digest drifted: scripts/ci/published-release-golden-path.sh"
+  "proxy command provenance no longer uses the executed argv" \
+  "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "workflow-driver-comment-decoy" "workflow.yml" \
   "$workflow_driver_call" \
   "$workflow_driver_decoy" \
-  "harness digest drifted: .github/workflows/published-release-golden-path.yml"
+  "workflow must execute only the exact reviewed driver invocation" \
+  ".github/workflows/published-release-golden-path.yml"
 
 expect_mutation_failure \
   "signer-binding-removed" "scripts/ci/release_attestation_enforce.sh" \
   '    --signer-workflow "$SIGNER_WORKFLOW"' \
   '    --predicate-type https://slsa.dev/provenance/v1' \
-  "harness digest drifted: scripts/ci/release_attestation_enforce.sh"
+  "attestation signer binding drifted" \
+  "scripts/ci/release_attestation_enforce.sh"
 
 expect_mutation_failure \
   "raw-attestation-count-disabled" "driver.sh" \
   '("attestation-raw/*.json", 2)' \
   '("attestation-raw/*.json", 0)' \
-  "harness digest drifted: scripts/ci/published-release-golden-path.sh"
+  "retained trust-input count enforcement drifted" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "source-digest-binding-removed" "scripts/ci/release_attestation_enforce.sh" \
+  '    --source-digest "$SOURCE_DIGEST"' \
+  '    --source-ref refs/heads/main' \
+  "attestation source digest binding drifted" \
+  "scripts/ci/release_attestation_enforce.sh"
+
+expect_mutation_failure \
+  "local-subject-binding-loosened" "scripts/ci/release_attestation_enforce.sh" \
+  'any(.[]; any((.verificationResult.statement.subject // [])[]?; .digest.sha256? == $digest))' \
+  'any(.[]; (.verificationResult.statement.subject // [] | length) > 0)' \
+  "attestation local-subject digest binding drifted" \
+  "scripts/ci/release_attestation_enforce.sh"
 
 expect_mutation_failure \
   "inventory-executable-flag-removed" "manifest.json" \
