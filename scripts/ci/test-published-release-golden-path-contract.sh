@@ -30,14 +30,13 @@ python3 "$CHECKER" \
 bash "$ROOT/scripts/ci/test-release-attestation-enforce.sh"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_safe_extract_release_archive.py"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_bounded_download.py"
+PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_published_release_proxy_phase.py"
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 verifier_call='bash "$harness_root/scripts/ci/release_attestation_enforce.sh" '"\\"
 workflow_driver_call='          bash scripts/ci/published-release-golden-path.sh '"\\"
 workflow_driver_decoy=$'          # bash scripts/ci/published-release-golden-path.sh\n          echo skipped-reviewed-driver '"\\"
-proxy_execute_call='  | "${proxy_argv[@]}" '"\\"
-proxy_execute_diverged='  | assay-mcp-server proxy-enforce --upstream-command "$PYTHON_BIN" '"\\"
 
 expect_mutation_failure() {
   local name="$1" target="$2" old="$3" new="$4" expected="$5" refresh_path="${6:-}"
@@ -103,6 +102,27 @@ PY
     || fail "mutation $name missed expected guard: $expected"
 }
 
+expect_proxy_helper_behavior_failure() {
+  local name="$1" old="$2" new="$3"
+  local case_root="$scratch/$name"
+  mkdir -p "$case_root"
+  cp "$ROOT/scripts/ci/published_release_proxy_phase.py" "$case_root/proxy-phase.py"
+  python3 - "$case_root/proxy-phase.py" "$old" "$new" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+old, new = sys.argv[2:]
+text = path.read_text(encoding="utf-8")
+if text.count(old) != 1:
+    raise SystemExit(f"proxy helper mutation anchor count for {old!r}: {text.count(old)}")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+  if PUBLISHED_RELEASE_PROXY_PHASE="$case_root/proxy-phase.py" \
+      python3 "$ROOT/scripts/ci/test_published_release_proxy_phase.py" \
+      >"$case_root/output" 2>&1; then
+    fail "proxy helper mutation stayed green: $name"
+  fi
+}
+
 expect_mutation_failure \
   "attestation-removed" "driver.sh" \
   'bash "$harness_root/scripts/ci/release_attestation_enforce.sh"' \
@@ -124,6 +144,12 @@ expect_mutation_failure \
   "ambient-path" "driver.sh" \
   'export PATH="$install_root/bin:/usr/bin:/bin"' 'export PATH="/usr/bin:/bin"' \
   "driver lost restricted PATH"
+
+expect_mutation_failure \
+  "github-token-reaches-release-binaries" "driver.sh" \
+  'unset GH_TOKEN GITHUB_TOKEN' ': # credentials retained' \
+  "release binaries must not inherit GitHub credentials" \
+  "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "preexisting-inspection" "driver.sh" \
@@ -264,12 +290,10 @@ expect_mutation_failure \
   "exact MCP version execution block drifted" \
   "scripts/ci/published-release-golden-path.sh"
 
-expect_mutation_failure \
-  "proxy-command-provenance-truncated" "driver.sh" \
-  'record_command "proxy-enforce" "$proxy_status" "${proxy_argv[@]}"' \
-  'record_command "proxy-enforce" "$proxy_status" assay-mcp-server proxy-enforce --upstream-command python3' \
-  "proxy execution and provenance block drifted" \
-  "scripts/ci/published-release-golden-path.sh"
+expect_proxy_helper_behavior_failure \
+  "proxy-provenance-truncated" \
+  'append_command_record(args.commands, status, argv)' \
+  'append_command_record(args.commands, status, argv[:-2])'
 
 expect_mutation_failure \
   "workflow-driver-comment-decoy" "workflow.yml" \
@@ -306,27 +330,58 @@ expect_mutation_failure \
   "attestation local-subject digest execution block drifted" \
   "scripts/ci/release_attestation_enforce.sh"
 
-expect_mutation_failure \
-  "proxy-execution-diverges-from-record" "driver.sh" \
-  "$proxy_execute_call" \
-  "$proxy_execute_diverged" \
-  "proxy execution and provenance block drifted" \
-  "scripts/ci/published-release-golden-path.sh"
+expect_proxy_helper_behavior_failure \
+  "proxy-execution-diverges-from-record" \
+  $'            completed = subprocess.run(\n                argv,' \
+  $'            completed = subprocess.run(\n                argv[:-2],'
+
+expect_proxy_helper_behavior_failure \
+  "proxy-exit-status-diverges" \
+  'append_command_record(args.commands, status, argv)' \
+  'append_command_record(args.commands, 0, argv)'
+
+expect_proxy_helper_behavior_failure \
+  "proxy-executes-twice" \
+  '            completed = subprocess.run(' \
+  $'            subprocess.run(argv, input=request, stdout=stdout_handle, stderr=stderr_handle, check=False)\n            completed = subprocess.run('
 
 expect_mutation_failure \
   "proxy-block-unreachable" "driver.sh" \
   'proxy_status=0' $'if false; then\nproxy_status=0' \
-  "proxy execution block must run at top level" \
+  "proxy execution and provenance block drifted" \
   "scripts/ci/published-release-golden-path.sh" \
   'bundle="$results/produced.bundle.tar.gz"' \
   $'fi\nbundle="$results/produced.bundle.tar.gz"'
 
 expect_mutation_failure \
+  "proxy-block-unreachable-subshell" "driver.sh" \
+  'proxy_status=0' $'false && (\nproxy_status=0' \
+  "proxy execution and provenance block drifted" \
+  "scripts/ci/published-release-golden-path.sh" \
+  'bundle="$results/produced.bundle.tar.gz"' \
+  $')\nbundle="$results/produced.bundle.tar.gz"'
+
+expect_mutation_failure \
   "alternate-proxy-path" "driver.sh" \
   'bundle="$results/produced.bundle.tar.gz"' \
   $'assay-mcp-server proxy-enforce --upstream-command "$PYTHON_BIN"\nbundle="$results/produced.bundle.tar.gz"' \
-  "driver has an alternate proxy execution or provenance path" \
+  "driver MCP binary invocation surface drifted" \
   "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "split-token-alternate-proxy-path" "driver.sh" \
+  'bundle="$results/produced.bundle.tar.gz"' \
+  $'verb="$(printf \'%s%s\' proxy -enforce)"\n"$install_root/bin/assay-mcp-server" "$verb"\nbundle="$results/produced.bundle.tar.gz"' \
+  "driver MCP binary invocation surface drifted" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "combined-dead-helper-and-truncated-alternate" "driver.sh" \
+  'proxy_status=0' $'false && (\nproxy_status=0' \
+  "proxy execution and provenance block drifted" \
+  "scripts/ci/published-release-golden-path.sh" \
+  'bundle="$results/produced.bundle.tar.gz"' \
+  $')\nverb="$(printf \'%s%s\' proxy -enforce)"\n"$install_root/bin/assay-mcp-server" "$verb"\nrecord_command "proxy-enforce" 0 "$install_root/bin/assay-mcp-server"\nbundle="$results/produced.bundle.tar.gz"'
 
 expect_mutation_failure \
   "inventory-executable-flag-removed" "manifest.json" \

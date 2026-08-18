@@ -205,6 +205,9 @@ if ! GH_BIN="$GH_BIN" JQ_BIN="$JQ_BIN" \
 fi
 record_command "verify-release-attestations" 0 "$harness_root/scripts/ci/release_attestation_enforce.sh"
 
+# Release binaries and the mock upstream do not need repository credentials.
+unset GH_TOKEN GITHUB_TOKEN
+
 cli_extract="$run_root/cli-extract"
 mcp_extract="$run_root/mcp-extract"
 safe_extract() {
@@ -251,18 +254,19 @@ observations="$results/denied-observations.ndjson"
 init_request='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"published-release-gate","version":"1"}}}'
 call_request='{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"github.add_deploy_key","arguments":{"owner":"acme","repo":"prod-app"}}}'
 proxy_status=0
-proxy_argv=(
-  assay-mcp-server proxy-enforce
-  --upstream-command "$PYTHON_BIN" --upstream-arg -u --upstream-arg "$fixture_dir/mock_github_mcp.py"
-  --enforce-policy "$fixture_dir/policies/no-allowance.yaml"
-  --declared-mcp-manifest "$fixture_dir/baseline-approved.json"
-  --enforcement-decision-out "$decisions"
-  --denied-call-observation-out "$observations"
-)
 printf '%s\n%s\n' "$init_request" "$call_request" \
-  | "${proxy_argv[@]}" \
-      >"$results/proxy.jsonl" 2>"$results/proxy.stderr" || proxy_status=$?
-record_command "proxy-enforce" "$proxy_status" "${proxy_argv[@]}"
+  | "$PYTHON_BIN" "$harness_root/scripts/ci/published_release_proxy_phase.py" \
+      --mcp-bin "$install_root/bin/assay-mcp-server" \
+      --python-bin "$PYTHON_BIN" \
+      --fixture "$fixture_dir/mock_github_mcp.py" \
+      --policy "$fixture_dir/policies/no-allowance.yaml" \
+      --declared-manifest "$fixture_dir/baseline-approved.json" \
+      --decisions "$decisions" \
+      --observations "$observations" \
+      --commands "$commands_file" \
+      --stdout "$results/proxy.jsonl" \
+      --stderr "$results/proxy.stderr" \
+      --timeout-seconds 60 || proxy_status=$?
 [[ "$proxy_status" -eq 0 ]] || fail "proxy-enforce exited $proxy_status, expected 0 for a policy denial"
 [[ -s "$decisions" ]] || fail "proxy-enforce produced no enforcement decision"
 [[ -s "$observations" ]] || fail "proxy-enforce produced no denied-call observation"

@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import re
 from pathlib import Path, PurePosixPath
 
 
@@ -68,41 +67,6 @@ def lines_between(text: str, start_marker: str, end_marker: str, problems: list[
     return active_lines(text[start:end])
 
 
-def shell_control_depth_before(text: str, marker: str, problems: list[str]) -> int:
-    """Return lexical shell control depth before a unique executable marker."""
-    if text.count(marker) != 1:
-        problems.append(f"expected unique shell control marker: {marker!r}")
-        return -1
-
-    target_line = text[: text.index(marker)].count("\n")
-    stack: list[str] = []
-    heredoc_end: str | None = None
-    for raw_line in text.splitlines()[:target_line]:
-        stripped = raw_line.strip()
-        if heredoc_end is not None:
-            if stripped == heredoc_end:
-                heredoc_end = None
-            continue
-        if not stripped or stripped.startswith("#"):
-            continue
-
-        if re.match(r"^(fi|done|esac|\})(?:\s|$)", stripped):
-            if stack:
-                stack.pop()
-        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*\(\)\s*\{$", stripped):
-            stack.append("function")
-        elif re.match(r"^(if|for|while|until|case)\b", stripped):
-            stack.append(stripped.split(maxsplit=1)[0])
-        elif re.search(r"(?:^|\|\||&&)\s*\{\s*$", stripped):
-            stack.append("group")
-
-        heredoc = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", stripped)
-        if heredoc:
-            heredoc_end = heredoc.group(1)
-
-    return len(stack)
-
-
 def validate_manifest(
     path: Path,
     source_root: Path,
@@ -152,6 +116,7 @@ def validate_manifest(
         ".github/workflows/published-release-golden-path.yml",
         ".github/workflows/release.yml",
         "scripts/ci/published-release-golden-path.sh",
+        "scripts/ci/published_release_proxy_phase.py",
         "scripts/ci/release_attestation_enforce.sh",
         "scripts/ci/release_archive_inventory.sh",
         "scripts/ci/safe_extract_release_archive.py",
@@ -305,6 +270,7 @@ def validate_contract(
         'fail "reviewed release attestation verifier rejected the published assets"',
         "fi",
         'record_command "verify-release-attestations" 0 "$harness_root/scripts/ci/release_attestation_enforce.sh"',
+        "unset GH_TOKEN GITHUB_TOKEN",
     ]
     attestation_block = lines_between(
         driver_text,
@@ -328,59 +294,61 @@ def validate_contract(
     if version_block != expected_version_block:
         problems.append("exact MCP version execution block drifted")
     expected_proxy_block = [
+        'call_request=\'{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"github.add_deploy_key","arguments":{"owner":"acme","repo":"prod-app"}}}\'',
         "proxy_status=0",
-        "proxy_argv=(",
-        "assay-mcp-server proxy-enforce",
-        '--upstream-command "$PYTHON_BIN" --upstream-arg -u --upstream-arg "$fixture_dir/mock_github_mcp.py"',
-        '--enforce-policy "$fixture_dir/policies/no-allowance.yaml"',
-        '--declared-mcp-manifest "$fixture_dir/baseline-approved.json"',
-        '--enforcement-decision-out "$decisions"',
-        '--denied-call-observation-out "$observations"',
-        ")",
         'printf \'%s\\n%s\\n\' "$init_request" "$call_request" \\',
-        '| "${proxy_argv[@]}" \\',
-        '>"$results/proxy.jsonl" 2>"$results/proxy.stderr" || proxy_status=$?',
-        'record_command "proxy-enforce" "$proxy_status" "${proxy_argv[@]}"',
+        '| "$PYTHON_BIN" "$harness_root/scripts/ci/published_release_proxy_phase.py" \\',
+        '--mcp-bin "$install_root/bin/assay-mcp-server" \\',
+        '--python-bin "$PYTHON_BIN" \\',
+        '--fixture "$fixture_dir/mock_github_mcp.py" \\',
+        '--policy "$fixture_dir/policies/no-allowance.yaml" \\',
+        '--declared-manifest "$fixture_dir/baseline-approved.json" \\',
+        '--decisions "$decisions" \\',
+        '--observations "$observations" \\',
+        '--commands "$commands_file" \\',
+        '--stdout "$results/proxy.jsonl" \\',
+        '--stderr "$results/proxy.stderr" \\',
+        "--timeout-seconds 60 || proxy_status=$?",
     ]
     proxy_block = lines_between(
         driver_text,
-        "proxy_status=0",
+        "call_request=",
         '[[ "$proxy_status"',
         problems,
     )
     if proxy_block != expected_proxy_block:
         problems.append("proxy execution and provenance block drifted")
-    if shell_control_depth_before(driver_text, "proxy_status=0", problems) != 0:
-        problems.append("proxy execution block must run at top level")
-    proxy_tokens = ("proxy-enforce", "proxy_argv", "proxy_status")
-    expected_proxy_surface = [
-        line
-        for line in expected_proxy_block
-        + [
-            '[[ "$proxy_status" -eq 0 ]] || fail "proxy-enforce exited $proxy_status, expected 0 for a policy denial"',
-            '[[ -s "$decisions" ]] || fail "proxy-enforce produced no enforcement decision"',
-            '[[ -s "$observations" ]] || fail "proxy-enforce produced no denied-call observation"',
-        ]
-        if any(token in line for token in proxy_tokens)
+    if 'record_command "proxy-enforce"' in driver_text:
+        problems.append("driver must not record proxy provenance separately from execution")
+    expected_mcp_binary_surface = [
+        'mcp_asset="assay-mcp-server-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"',
+        'mapfile -t mcp_candidates < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)',
+        '[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "MCP archive must contain exactly one executable assay-mcp-server binary"',
+        'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"',
+        'chmod 0755 "$install_root/bin/assay" "$install_root/bin/assay-mcp-server"',
+        '[[ "$(command -v assay-mcp-server)" == "$install_root/bin/assay-mcp-server" ]] || fail "assay-mcp-server did not resolve from the disposable install prefix"',
+        'run_capture "mcp-version" 0 "$results/mcp-version.txt" "$results/mcp-version.stderr" assay-mcp-server --version',
+        '[[ "$(tr -d \'\\r\\n\' <"$results/mcp-version.txt")" == "assay-mcp-server $version" ]] \\',
+        '|| fail "assay-mcp-server version differs from pinned release"',
+        '--mcp-bin "$install_root/bin/assay-mcp-server" \\',
+        'assay-mcp-server enforcement-sarif --input "$decisions" --output "$results/enforcement.sarif"',
     ]
-    proxy_surface = [
-        line
-        for line in driver_lines
-        if any(token in line for token in proxy_tokens)
-    ]
-    if proxy_surface != expected_proxy_surface:
-        problems.append("driver has an alternate proxy execution or provenance path")
+    mcp_binary_surface = [line for line in driver_lines if "assay-mcp-server" in line]
+    if mcp_binary_surface != expected_mcp_binary_surface:
+        problems.append("driver MCP binary invocation surface drifted")
     required_driver_fragments = {
         "exact stable tag": "release tag must be an exact stable vX.Y.Z tag",
         "fresh run root": "run root already exists; refusing to reuse prior evidence",
         "stable published release": "release tag is still draft or prerelease",
         "external tag source": '"$GH_BIN" api "repos/${REPO}/git/ref/tags/${release_tag}"',
         "reviewed attestation verifier": 'bash "$harness_root/scripts/ci/release_attestation_enforce.sh"',
+        "single-owner proxy phase": 'published_release_proxy_phase.py',
         "compressed asset ceiling": "release asset exceeds compressed-size ceiling",
         "bounded archive extractor": "from safe_extract_release_archive import extract_archive",
         "retained release inputs": 'downloads="$results/release-assets"',
         "disposable HOME": 'export HOME="$run_root/home"',
         "restricted PATH": 'export PATH="$install_root/bin:/usr/bin:/bin"',
+        "release credential boundary": "unset GH_TOKEN GITHUB_TOKEN",
         "installed CLI resolution": '"$(command -v assay)" == "$install_root/bin/assay"',
         "installed MCP resolution": '"$(command -v assay-mcp-server)" == "$install_root/bin/assay-mcp-server"',
         "harness head": '"head_sha": harness_sha',
@@ -396,6 +364,8 @@ def validate_contract(
     }
     for label, fragment in required_driver_fragments.items():
         require(driver_text, fragment, f"driver lost {label}", problems)
+    if "unset GH_TOKEN GITHUB_TOKEN" not in driver_lines:
+        problems.append("release binaries must not inherit GitHub credentials")
     if "|| true" in driver_text or "set +e" in driver_text:
         problems.append("driver suppresses a failure instead of recording its exact status")
     exact_active_lines = {
