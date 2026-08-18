@@ -1,0 +1,44 @@
+{
+  "descriptor_schema": "assay.profile.descriptor.v0",
+  "profile": "privileged-mcp-action/v1",
+  "status": "experimental-open-profile",
+  "spec": "docs/profiles/privileged-mcp-action/v1.md",
+  "records": {
+    "required": [
+      {
+        "schema": "assay.enforcement_decision.v0",
+        "cardinality": "exactly_one"
+      }
+    ],
+    "optional": [
+      {
+        "schema": "assay.denied_call_observation.v1",
+        "cardinality": "at_most_one",
+        "marker_triple": {
+          "schema": "assay.denied_call_observation.v1",
+          "caller_visible_error.code": -31999,
+          "caller_visible_error.origin": "assay-proxy"
+        },
+        "binding_key": {
+          "observation": ["call.tool_name", "call.target_digest"],
+          "decision": ["tool.name", "action.target_digest"]
+        }
+      },
+      {
+        "schema": "assay.manifest_establish.v0",
+        "cardinality": "at_most_one",
+        "role": "diagnostic_only_never_alters_claims"
+      }
+    ]
+  },
+  "selection": {
+    "flag": "--profile-version",
+    "values": ["v0", "v1"],
+    "default": "v0",
+    "autodetect": false
+  },
+  "report": {
+    "schema": "assay.privileged_mcp_action.verify.report.v0",
+    "profile_member": "selected profile id"
+  }
+}
