@@ -13,10 +13,35 @@
 # would break a later legitimate boundary split.
 set -euo pipefail
 
-ROOT="${PROGRAMME_TRUTH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+if [[ -n "${PROGRAMME_TRUTH_ROOT+x}" ]]; then
+  echo "FAIL: PROGRAMME_TRUTH_ROOT cannot replace the script worktree" >&2
+  exit 1
+fi
+if [[ -n "${PROGRAMME_TRUTH_AGENTS+x}" ]]; then
+  echo "FAIL: PROGRAMME_TRUTH_AGENTS cannot replace the script worktree" >&2
+  exit 1
+fi
+if [[ -n "${PROGRAMME_TRUTH_SELFHOST+x}" ]]; then
+  echo "FAIL: PROGRAMME_TRUTH_SELFHOST cannot replace the script worktree" >&2
+  exit 1
+fi
+if [[ -n "${PROGRAMME_TRUTH_CEILING_CHILD+x}" ]]; then
+  echo "FAIL: PROGRAMME_TRUTH_CEILING_CHILD cannot replace the script worktree" >&2
+  exit 1
+fi
+if [[ -n "${PROGRAMME_TRUTH_PREVIEW_MUTANT+x}" ]]; then
+  echo "FAIL: PROGRAMME_TRUTH_PREVIEW_MUTANT cannot replace the script worktree" >&2
+  exit 1
+fi
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [[ -e "$ROOT/.git" && -e "$ROOT/.programme-truth-hermetic" ]]; then
+  echo "FAIL: hermetic marker must not exist in the script worktree" >&2
+  exit 1
+fi
 CEILINGS="$ROOT/scripts/ci/lib/resource_ceilings.py"
 export PYTHONPATH="$ROOT/scripts/ci/lib${PYTHONPATH:+:$PYTHONPATH}"
-AGENTS="${PROGRAMME_TRUTH_AGENTS:-$ROOT/AGENTS.md}"
+AGENTS="$ROOT/AGENTS.md"
 WAVE0="$ROOT/docs/contributing/WAVE0-GATES.md"
 STATUS="$ROOT/docs/contributing/REFACTOR-WAVE-STATUS.md"
 WORKFLOW="$ROOT/.github/workflows/split-wave0-gates.yml"
@@ -30,6 +55,50 @@ ok()  { echo "ok    $1"; }
 bad() { echo "FAIL  $1"; FAILURES=$((FAILURES + 1)); }
 
 LEDGER_PREFIX='- The public execution ledger'
+
+HERMETIC_TRUTH_FILES="$(printf '%s\n' \
+  AGENTS.md \
+  docs/contributing/WAVE0-GATES.md \
+  docs/contributing/REFACTOR-WAVE-STATUS.md \
+  .github/workflows/split-wave0-gates.yml \
+  .github/workflows/kernel-matrix.yml \
+  .pre-commit-config.yaml \
+  scripts/ci/lib/resource_ceilings.py \
+  scripts/ci/test-ci-programme-truth.sh \
+  crates/assay-cli/src/cli/commands/monitor.rs)"
+
+install_hermetic_programme_truth() {
+  local dest="$1"
+  PROGRAMME_TRUTH_HERMETIC_FILES="$HERMETIC_TRUTH_FILES" \
+  python3 - "$ROOT" "$dest" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+from resource_ceilings import read_bounded_file, require_bounded_bytes
+
+src_root = Path(sys.argv[1])
+dest_root = Path(sys.argv[2])
+for rel in os.environ["PROGRAMME_TRUTH_HERMETIC_FILES"].splitlines():
+    if not rel:
+        continue
+    data = read_bounded_file(str(src_root / rel))
+    require_bounded_bytes(data, rel)
+    dest = dest_root / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(data)
+PY
+  printf 'hermetic\n' >"$dest/.programme-truth-hermetic"
+}
+
+run_hermetic_programme_truth() {
+  env -u PROGRAMME_TRUTH_ROOT \
+    -u PROGRAMME_TRUTH_AGENTS \
+    -u PROGRAMME_TRUTH_SELFHOST \
+    -u PROGRAMME_TRUTH_CEILING_CHILD \
+    -u PROGRAMME_TRUTH_PREVIEW_MUTANT \
+    bash "$1"
+}
 
 assert_extracted_block() {
   local kind="$1" expected="$2" path="$3"
@@ -563,6 +632,52 @@ expect_ok "kernel-matrix.yml pull_request.paths owns programme-truth inputs" \
 expect_ok "pre-push files regex covers resource_ceilings.py" \
   assert_prepush_covers_ceilings "$PRECOMMIT"
 
+assert_root_is_script_worktree() {
+  python3 - "$1" <<'PY'
+import sys
+
+from resource_ceilings import read_bounded_file
+
+text = read_bounded_file(sys.argv[1]).decode("utf-8")
+root_override = "ROOT=\"${" + "PROGRAMME_TRUTH_ROOT:-"
+agents_override = "AGENTS=\"${" + "PROGRAMME_TRUTH_AGENTS:-"
+if root_override in text:
+    raise SystemExit("PROGRAMME_TRUTH_ROOT is still a caller override")
+if agents_override in text:
+    raise SystemExit("PROGRAMME_TRUTH_AGENTS is still a caller override")
+if 'ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"' not in text:
+    raise SystemExit("ROOT is not derived from BASH_SOURCE")
+if 'AGENTS="$ROOT/AGENTS.md"' not in text:
+    raise SystemExit("AGENTS is not the worktree AGENTS.md")
+if '[[ ! -e "$ROOT/.programme-truth-hermetic" ]]' not in text:
+    raise SystemExit("recursion guard is not a hermetic layout marker")
+for flag in ("SELFHOST", "CEILING_CHILD", "PREVIEW_MUTANT"):
+    if "${PROGRAMME_TRUTH_" + flag + ":-" in text:
+        raise SystemExit("child flags are still a caller-controlled skip lock")
+PY
+}
+expect_ok "ROOT is the script worktree and not caller-overridable" \
+  assert_root_is_script_worktree "${BASH_SOURCE[0]}"
+
+expect_red "PROGRAMME_TRUTH_ROOT empty override" \
+  "PROGRAMME_TRUTH_ROOT cannot replace the script worktree" \
+  env PROGRAMME_TRUTH_ROOT= bash "${BASH_SOURCE[0]}"
+expect_red "PROGRAMME_TRUTH_ROOT nonexistent tree" \
+  "PROGRAMME_TRUTH_ROOT cannot replace the script worktree" \
+  env PROGRAMME_TRUTH_ROOT=/no/such/programme-truth-root bash "${BASH_SOURCE[0]}"
+expect_red "PROGRAMME_TRUTH_AGENTS override" \
+  "PROGRAMME_TRUTH_AGENTS cannot replace the script worktree" \
+  env PROGRAMME_TRUTH_AGENTS="$ROOT/AGENTS.md" bash "${BASH_SOURCE[0]}"
+expect_red "PROGRAMME_TRUTH_PREVIEW_MUTANT override" \
+  "PROGRAMME_TRUTH_PREVIEW_MUTANT cannot replace the script worktree" \
+  env PROGRAMME_TRUTH_PREVIEW_MUTANT=1 bash "${BASH_SOURCE[0]}"
+expect_red "combined AGENTS+SELFHOST+CEILING_CHILD bypass" \
+  "cannot replace the script worktree" \
+  env PROGRAMME_TRUTH_AGENTS="$ROOT/AGENTS.md" \
+  PROGRAMME_TRUTH_SELFHOST=1 \
+  PROGRAMME_TRUTH_CEILING_CHILD=1 \
+  bash "${BASH_SOURCE[0]}"
+
 stale_semver=$'Source of truth: workflow env WAVE0_SEMVER_BASELINE_SHA.\n'
 expect_red "pinned baseline SHA" "WAVE0_SEMVER_BASELINE_SHA" assert_wave0_semver_doc "$stale_semver"
 
@@ -774,21 +889,25 @@ expect_red "oversized real document" "exceeds 65536-byte ceiling" \
 expect_red "oversized document never reaches a ledger consumer" "exceeds 65536-byte ceiling" \
   assert_agents_ledger "$TRUTH_TMP/oversized.md"
 
-if [[ -z "${PROGRAMME_TRUTH_SELFHOST:-}" && -z "${PROGRAMME_TRUTH_CEILING_CHILD:-}" && -z "${PROGRAMME_TRUTH_PREVIEW_MUTANT:-}" ]]; then
-  active_agents="$TRUTH_TMP/selfhost-agents.md"
+if [[ ! -e "$ROOT/.programme-truth-hermetic" ]]; then
+  install_hermetic_programme_truth "$TRUTH_TMP/selfhost-layout"
+  replace_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$ROOT/AGENTS.md" \
+    "$TRUTH_TMP/selfhost-layout/AGENTS.md"
   selfhost_log="$TRUTH_TMP/selfhost.log"
-  replace_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$ROOT/AGENTS.md" "$active_agents"
-  if PROGRAMME_TRUTH_AGENTS="$active_agents" PROGRAMME_TRUTH_SELFHOST=1 \
-    bash "${BASH_SOURCE[0]}" >"$selfhost_log" 2>&1; then
+  if run_hermetic_programme_truth \
+    "$TRUTH_TMP/selfhost-layout/scripts/ci/test-ci-programme-truth.sh" \
+    >"$selfhost_log" 2>&1; then
     ok "full contract on active canonical AGENTS ledger"
   else
     bad "full contract on active canonical AGENTS ledger: $(tail -n 20 "$selfhost_log")"
   fi
 
+  install_hermetic_programme_truth "$TRUTH_TMP/oversize-layout"
+  python3 -c "import sys; sys.stdout.buffer.write(b'x' * 65537)" \
+    >"$TRUTH_TMP/oversize-layout/AGENTS.md"
   if child_out="$(
-    PROGRAMME_TRUTH_AGENTS="$TRUTH_TMP/oversized.md" \
-    PROGRAMME_TRUTH_CEILING_CHILD=1 \
-    bash "${BASH_SOURCE[0]}" 2>&1
+    run_hermetic_programme_truth \
+      "$TRUTH_TMP/oversize-layout/scripts/ci/test-ci-programme-truth.sh" 2>&1
   )"; then
     bad "oversized AGENTS left the suite green"
   elif grep -Fq 'monitor.rs still exists' <<<"$child_out"; then
@@ -799,13 +918,15 @@ if [[ -z "${PROGRAMME_TRUTH_SELFHOST:-}" && -z "${PROGRAMME_TRUTH_CEILING_CHILD:
     bad "oversized AGENTS red without ceiling: $child_out"
   fi
 
-  python3 - "${BASH_SOURCE[0]}" "$TRUTH_TMP/truth-neutralized.sh" <<'PY'
+  install_hermetic_programme_truth "$TRUTH_TMP/neutralized-layout"
+  python3 - "$TRUTH_TMP/neutralized-layout/scripts/ci/test-ci-programme-truth.sh" <<'PY'
 import sys
 from pathlib import Path
 
 from resource_ceilings import read_bounded_file, require_bounded_bytes
 
-src = read_bounded_file(sys.argv[1]).decode("utf-8")
+path = Path(sys.argv[1])
+src = read_bounded_file(str(path)).decode("utf-8")
 start = src.find("# Shared unsafe-preview checker (one implementation).")
 if start < 0:
     raise SystemExit("shared unsafe-preview checker marker missing")
@@ -818,20 +939,49 @@ out = (
     + src[end:]
 )
 require_bounded_bytes(out.encode("utf-8"), "neutralized preview checker")
-Path(sys.argv[2]).write_text(out, encoding="utf-8")
+path.write_text(out, encoding="utf-8")
 PY
   if mutant_out="$(
-    PROGRAMME_TRUTH_ROOT="$ROOT" \
-    PROGRAMME_TRUTH_PREVIEW_MUTANT=1 \
-    PROGRAMME_TRUTH_SELFHOST=1 \
-    PROGRAMME_TRUTH_CEILING_CHILD=1 \
-    bash "$TRUTH_TMP/truth-neutralized.sh" 2>&1
+    run_hermetic_programme_truth \
+      "$TRUTH_TMP/neutralized-layout/scripts/ci/test-ci-programme-truth.sh" 2>&1
   )"; then
     bad "neutralized preview checker left the suite green"
   elif grep -Fq 'restored generic preview left the contract green' <<<"$mutant_out"; then
     ok "neutralized preview checker turns the suite red"
   else
     bad "neutralized preview checker red without fixture miss: $mutant_out"
+  fi
+
+  install_hermetic_programme_truth "$TRUTH_TMP/dirty-preview-layout"
+  install_hermetic_programme_truth "$TRUTH_TMP/clean-preview-layout"
+  python3 - "$TRUTH_TMP/dirty-preview-layout/.github/workflows/split-wave0-gates.yml" <<'PY'
+import sys
+from pathlib import Path
+
+from resource_ceilings import read_bounded_file, require_bounded_bytes
+
+path = Path(sys.argv[1])
+data = read_bounded_file(str(path)) + b"\n      - name: Unsafe boundary preview (warn-only)\n"
+require_bounded_bytes(data, "dirty preview workflow")
+path.write_bytes(data)
+PY
+  dirty_script="$TRUTH_TMP/dirty-preview-layout/scripts/ci/test-ci-programme-truth.sh"
+  if dirty_out="$(run_hermetic_programme_truth "$dirty_script" 2>&1)"; then
+    bad "planted unsafe preview left the hermetic suite green"
+  elif grep -Fq 'generic warn-only unsafe preview' <<<"$dirty_out"; then
+    ok "planted unsafe preview turns the hermetic suite red"
+  else
+    bad "planted unsafe preview red without preview miss: $dirty_out"
+  fi
+  if override_out="$(
+    PROGRAMME_TRUTH_ROOT="$TRUTH_TMP/clean-preview-layout" \
+    bash "$dirty_script" 2>&1
+  )"; then
+    bad "stale preview plus PROGRAMME_TRUTH_ROOT to a clean tree left the suite green"
+  elif grep -Fq 'PROGRAMME_TRUTH_ROOT cannot replace the script worktree' <<<"$override_out"; then
+    ok "stale preview cannot hide behind PROGRAMME_TRUTH_ROOT"
+  else
+    bad "stale preview plus clean-tree root red without refuse: $override_out"
   fi
 fi
 

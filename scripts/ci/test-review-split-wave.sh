@@ -8,6 +8,31 @@ set -euo pipefail
 # shellcheck source=scripts/ci/lib/clear-git-repository-env.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/clear-git-repository-env.sh"
 
+if [[ -n "${PROGRAMME_TRUTH_ROOT+x}" ]]; then
+  echo "FAIL: PROGRAMME_TRUTH_ROOT cannot replace the script worktree" >&2
+  exit 1
+fi
+if [[ -n "${PROGRAMME_TRUTH_AGENTS+x}" ]]; then
+  echo "FAIL: PROGRAMME_TRUTH_AGENTS cannot replace the script worktree" >&2
+  exit 1
+fi
+if [[ -n "${PROGRAMME_TRUTH_SELFHOST+x}" ]]; then
+  echo "FAIL: PROGRAMME_TRUTH_SELFHOST cannot replace the script worktree" >&2
+  exit 1
+fi
+if [[ -n "${PROGRAMME_TRUTH_CEILING_CHILD+x}" ]]; then
+  echo "FAIL: PROGRAMME_TRUTH_CEILING_CHILD cannot replace the script worktree" >&2
+  exit 1
+fi
+if [[ -n "${PROGRAMME_TRUTH_PREVIEW_MUTANT+x}" ]]; then
+  echo "FAIL: PROGRAMME_TRUTH_PREVIEW_MUTANT cannot replace the script worktree" >&2
+  exit 1
+fi
+if [[ -n "${REVIEW_SPLIT_ROOT+x}" ]]; then
+  echo "FAIL: REVIEW_SPLIT_ROOT cannot replace the script worktree" >&2
+  exit 1
+fi
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="$ROOT/scripts/ci/review-split-wave.sh"
 CEILINGS="$ROOT/scripts/ci/lib/resource_ceilings.py"
@@ -291,7 +316,7 @@ else
   bad "equal path cap turned red: $out"
 fi
 
-if python3 - "$SCRIPT" <<'PY'
+if python3 - "$SCRIPT" "$ROOT/scripts/ci/test-review-split-wave.sh" <<'PY'
 import sys
 
 from resource_ceilings import read_bounded_file
@@ -301,6 +326,11 @@ if 'python3 "${_REVIEW_SPLIT_CEILINGS}" inventory' not in text:
     raise SystemExit("review-split-wave does not invoke resource_ceilings inventory")
 if "${REVIEW_SPLIT_CEILINGS:-" in text or 'python3 "${REVIEW_SPLIT_CEILINGS}"' in text:
     raise SystemExit("review-split-wave still accepts a caller helper override")
+suite = read_bounded_file(sys.argv[2]).decode("utf-8")
+if "${" + "PROGRAMME_TRUTH_ROOT:-" in suite or "${" + "REVIEW_SPLIT_ROOT:-" in suite:
+    raise SystemExit("review-split-wave tests still accept a caller root override")
+if "PROGRAMME_TRUTH_ROOT cannot replace the script worktree" not in suite:
+    raise SystemExit("review-split-wave tests do not refuse PROGRAMME_TRUTH_ROOT")
 PY
 then
   ok "review-split-wave inventories through the bounded helper"
