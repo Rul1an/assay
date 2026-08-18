@@ -31,7 +31,12 @@ Coverage Report v1 is designed to:
 
 ### Definitions (frozen)
 - tools_seen: tool names observed in evidence / intercepted calls during the report window.
-- tools_declared: tool names explicitly declared in policy/config.
+- tools_declared: tool-name values supplied by one of two producer conventions:
+  - `run.source: decision_jsonl` (`assay mcp wrap --coverage-out`) enumerates explicit names from
+    the policy and excludes every value containing `*`. The resulting set is a floor on the policy's
+    reach, not an exhaustive description of it.
+  - `run.source: jsonl` (`assay coverage --input`) retains caller-supplied declarations literally;
+    wildcard-looking values are neither expanded nor filtered.
 - tools_unknown: tools_seen minus tools_declared.
 - tool_classes_seen: union of classes for tools_seen that have taxonomy entries.
 - tool_classes_missing: tools_seen that have no taxonomy entry (empty class set).

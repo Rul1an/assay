@@ -119,6 +119,9 @@ pub(super) async fn cmd_coverage_generate(
     Ok(status)
 }
 
+/// Load caller-supplied declarations as literal values.
+///
+/// Unlike the policy-derived MCP-wrap path, this path does not filter wildcard-looking values.
 async fn load_declared_tools(args: &CoverageArgs) -> std::result::Result<Vec<String>, i32> {
     use crate::exit_codes::EXIT_CONFIG_ERROR;
 
