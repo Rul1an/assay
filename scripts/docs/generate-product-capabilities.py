@@ -71,6 +71,30 @@ def proof_has_immutable_identity(proof: dict) -> bool:
     return isinstance(digest, str) and DIGEST_PATTERN.fullmatch(digest) is not None
 
 
+def validate_proof(proof: object, claim_id: str) -> dict:
+    if not isinstance(proof, dict):
+        raise ValueError(f"claim {claim_id} proof must be an object")
+    if "run_id" in proof:
+        run_id = proof["run_id"]
+        if not isinstance(run_id, int) or isinstance(run_id, bool) or run_id <= 0:
+            raise ValueError(f"claim {claim_id} proof run_id must be a positive integer")
+    if "commit_sha" in proof:
+        commit_sha = proof["commit_sha"]
+        if not isinstance(commit_sha, str) or COMMIT_SHA_PATTERN.fullmatch(commit_sha) is None:
+            raise ValueError(f"claim {claim_id} proof commit_sha must be immutable")
+    if "digest" in proof:
+        digest = proof["digest"]
+        if not isinstance(digest, str) or DIGEST_PATTERN.fullmatch(digest) is None:
+            raise ValueError(f"claim {claim_id} proof digest must be sha256:<64 lowercase hex>")
+    if "artifact" in proof:
+        require_non_empty_string(proof["artifact"], f"claim {claim_id} proof artifact")
+        if "digest" not in proof:
+            raise ValueError(f"claim {claim_id} artifact requires a digest")
+    if not proof_has_immutable_identity(proof):
+        raise ValueError(f"claim {claim_id} proof must include an immutable identity")
+    return proof
+
+
 def load_manifest(path: Path) -> dict:
     manifest = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(manifest, dict) or manifest.get("schema") != "assay.product-capabilities.v0":
@@ -120,17 +144,12 @@ def load_manifest(path: Path) -> dict:
                 if capability["maturity"] == "planned":
                     raise ValueError(f"planned capability {capability_id} cannot carry current proof")
                 for proof in proofs:
-                    if not isinstance(proof, dict) or not proof_has_immutable_identity(proof):
-                        raise ValueError(
-                            f"claim {claim_id} proof must include an immutable identity"
-                        )
-                    if "artifact" in proof and "digest" not in proof:
-                        raise ValueError(f"claim {claim_id} artifact requires a digest")
+                    validate_proof(proof, claim_id)
             else:
                 gap = claim["gap"]
                 issue = gap.get("issue") if isinstance(gap, dict) else None
-                if not isinstance(issue, str) or not issue.isdigit():
-                    raise ValueError(f"claim {claim_id} gap.issue must contain digits")
+                if not isinstance(issue, str) or re.fullmatch(r"[1-9][0-9]*", issue) is None:
+                    raise ValueError(f"claim {claim_id} gap.issue must be a positive issue number")
         claims.sort(key=lambda item: item["id"])
     capabilities.sort(key=lambda item: item["id"])
     return manifest
@@ -146,6 +165,7 @@ def render_public(manifest: dict) -> str:
         "# Product Support",
         "",
         "This matrix states bounded product support and explicit evidence gaps. A row is not certification or universal host compatibility.",
+        "Proof identities are shape-checked offline; generation does not fetch or verify proof content, URLs, artifacts, or issue state.",
         "",
     ]
     for capability in manifest["capabilities"]:
@@ -168,7 +188,16 @@ def render_public(manifest: dict) -> str:
             ]
         )
         for claim in capability["claims"]:
-            disposition = "proof-backed" if "proofs" in claim else f"gap #{claim['gap']['issue']}"
+            if "proofs" in claim:
+                disposition = (
+                    "proof-backed "
+                    f"([identities](../generated/product-claim-proof.md#claim-{claim['id']}))"
+                )
+            else:
+                issue = claim["gap"]["issue"]
+                disposition = (
+                    f"[gap #{issue}](https://github.com/Rul1an/assay/issues/{issue})"
+                )
             lines.append(f"| `{claim['id']}` | `{claim['axis']}` | {disposition} |")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
@@ -186,6 +215,7 @@ def render_proof(manifest: dict) -> str:
         lines.append(f"## `{capability['id']}`")
         lines.append("")
         for claim in capability["claims"]:
+            lines.append(f'<a id="claim-{claim["id"]}"></a>')
             lines.append(f"### `{claim['id']}` (`{claim['axis']}`)")
             if "gap" in claim:
                 lines.append(f"- Gap issue: `#{claim['gap']['issue']}`")

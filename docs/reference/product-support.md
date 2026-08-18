@@ -2,6 +2,7 @@
 # Product Support
 
 This matrix states bounded product support and explicit evidence gaps. A row is not certification or universal host compatibility.
+Proof identities are shape-checked offline; generation does not fetch or verify proof content, URLs, artifacts, or issue state.
 
 ## Published v5.3.0 Assay CLI archives (`published-cli`)
 
@@ -17,7 +18,7 @@ Attested Assay CLI release archives are published for the listed targets.
 
 | Claim | Axis | Evidence state |
 |---|---|---|
-| `v5-3-cli-release-assets` | `observation` | proof-backed |
+| `v5-3-cli-release-assets` | `observation` | proof-backed ([identities](../generated/product-claim-proof.md#claim-v5-3-cli-release-assets)) |
 
 ## Published v5.3.0 local MCP server archives (`published-mcp-server`)
 
@@ -33,7 +34,7 @@ Attested assay-mcp-server release archives are published for the listed Linux ta
 
 | Claim | Axis | Evidence state |
 |---|---|---|
-| `v5-3-mcp-release-assets` | `observation` | proof-backed |
+| `v5-3-mcp-release-assets` | `observation` | proof-backed ([identities](../generated/product-claim-proof.md#claim-v5-3-mcp-release-assets)) |
 
 ## Published release golden path (`published-release-golden-path`)
 
@@ -49,4 +50,4 @@ Install an attested release in a disposable environment and produce verified evi
 
 | Claim | Axis | Evidence state |
 |---|---|---|
-| `release-install-to-verified-evidence` | `outcome` | gap #2486 |
+| `release-install-to-verified-evidence` | `outcome` | [gap #2486](https://github.com/Rul1an/assay/issues/2486) |

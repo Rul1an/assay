@@ -94,12 +94,22 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
         manifest = minimal_manifest()
         first = manifest["capabilities"][0]
         first["id"] = "z-capability"
+        first["claims"][0]["id"] = "z-claim"
         first["claims"][0]["proofs"] = [{"commit_sha": "a" * 40}]
+        earlier_claim = json.loads(json.dumps(first["claims"][0]))
+        earlier_claim["id"] = "b-claim"
+        earlier_claim["proofs"] = [{"run_id": 2}]
+        first["claims"].append(earlier_claim)
         second = json.loads(json.dumps(first))
         second["id"] = "a-capability"
         second["label"] = "A capability"
-        second["claims"][0]["id"] = "a-claim"
-        second["claims"][0]["proofs"] = [{"digest": "sha256:" + "b" * 64}]
+        second["claims"] = [
+            {
+                "id": "a-claim",
+                "axis": "observation",
+                "proofs": [{"digest": "sha256:" + "b" * 64}],
+            }
+        ]
         manifest["capabilities"].append(second)
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -111,6 +121,8 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
 
         self.assertLess(public.index("a-capability"), public.index("z-capability"))
         self.assertLess(proof.index("a-capability"), proof.index("z-capability"))
+        self.assertLess(public.index("b-claim"), public.index("z-claim"))
+        self.assertLess(proof.index("b-claim"), proof.index("z-claim"))
         self.assertIn("sha256:" + "b" * 64, proof)
         self.assertNotIn("sha256:" + "b" * 64, public)
 
@@ -121,7 +133,7 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
             result = run_generator(manifest, Path(tmp))
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("proof must include an immutable identity", result.stderr)
+        self.assertIn("proof run_id must be a positive integer", result.stderr)
 
     def test_rejects_markdown_unsafe_identifier(self) -> None:
         manifest = minimal_manifest()
@@ -142,7 +154,7 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
             result = run_generator(manifest, Path(tmp))
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("proof must include an immutable identity", result.stderr)
+        self.assertIn("proof commit_sha must be immutable", result.stderr)
 
     def test_rejects_artifact_without_digest(self) -> None:
         manifest = minimal_manifest()
@@ -154,6 +166,45 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("artifact requires a digest", result.stderr)
+
+    def test_rejects_invalid_digest_even_with_valid_run_id(self) -> None:
+        manifest = minimal_manifest()
+        manifest["capabilities"][0]["claims"][0]["proofs"] = [
+            {"artifact": "assay.tar.gz", "digest": "latest", "run_id": 1}
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            result = run_generator(manifest, Path(tmp))
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("proof digest must be sha256:<64 lowercase hex>", result.stderr)
+
+    def test_rejects_nonpositive_gap_issue(self) -> None:
+        manifest = minimal_manifest()
+        claim = manifest["capabilities"][0]["claims"][0]
+        claim.pop("proofs")
+        claim["gap"] = {"issue": "0"}
+        with tempfile.TemporaryDirectory() as tmp:
+            result = run_generator(manifest, Path(tmp))
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("gap.issue must be a positive issue number", result.stderr)
+
+    def test_public_view_links_proofs_and_gaps_and_states_verification_boundary(self) -> None:
+        manifest = minimal_manifest()
+        proof_claim = manifest["capabilities"][0]["claims"][0]
+        proof_claim["proofs"] = [{"run_id": 1}]
+        gap_claim = {"id": "tracked-gap", "axis": "outcome", "gap": {"issue": "2486"}}
+        manifest["capabilities"][0]["claims"].append(gap_claim)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = run_generator(manifest, root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            public = (root / "public.md").read_text(encoding="utf-8")
+
+        self.assertIn("does not fetch or verify proof content", public)
+        self.assertIn("product-claim-proof.md#claim-published-install", public)
+        self.assertIn("https://github.com/Rul1an/assay/issues/2486", public)
 
 
 if __name__ == "__main__":

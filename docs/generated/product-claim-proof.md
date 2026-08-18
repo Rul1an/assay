@@ -5,6 +5,7 @@ Proof identities are checked for shape offline; this generator does not fetch th
 
 ## `published-cli`
 
+<a id="claim-v5-3-cli-release-assets"></a>
 ### `v5-3-cli-release-assets` (`observation`)
 - Proof: `artifact=assay-v5.3.0-aarch64-apple-darwin.tar.gz`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`, `digest=sha256:541a40eb72e387f1caf9c66586eae765fe0bcd9c702fc1eb3944d1fd098bfb68`, `run_id=32106898803`
 - Proof: `artifact=assay-v5.3.0-aarch64-unknown-linux-gnu.tar.gz`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`, `digest=sha256:15f18617505a0bc3652714ea5b1f17d87f346c5936fff3f0ac7d767a6cb8c0f4`, `run_id=32106898803`
@@ -14,11 +15,13 @@ Proof identities are checked for shape offline; this generator does not fetch th
 
 ## `published-mcp-server`
 
+<a id="claim-v5-3-mcp-release-assets"></a>
 ### `v5-3-mcp-release-assets` (`observation`)
 - Proof: `artifact=assay-mcp-server-v5.3.0-aarch64-unknown-linux-gnu.tar.gz`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`, `digest=sha256:2d3e92a59475230b03155380ca3f01a43e2732958195424d0ebec73561a30dda`, `run_id=32106898803`
 - Proof: `artifact=assay-mcp-server-v5.3.0-x86_64-unknown-linux-gnu.tar.gz`, `commit_sha=9f1f2834215847479daffe3caf14bf44c7e4d270`, `digest=sha256:3bd678d9c85b881dbeb92d5f6f9194c51db9f58d826bebb8f79168b3e590b512`, `run_id=32106898803`
 
 ## `published-release-golden-path`
 
+<a id="claim-release-install-to-verified-evidence"></a>
 ### `release-install-to-verified-evidence` (`outcome`)
 - Gap issue: `#2486`
