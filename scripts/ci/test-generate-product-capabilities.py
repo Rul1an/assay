@@ -200,6 +200,22 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
             capabilities["published-release-golden-path"]["protocol_versions"], expected
         )
 
+    def test_published_binary_proofs_are_release_assets(self) -> None:
+        manifest = json.loads(
+            (REPO_ROOT / "docs/data/product-capabilities.v0.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        capabilities = {entry["id"]: entry for entry in manifest["capabilities"]}
+
+        for capability_id in ("published-cli", "published-mcp-server"):
+            with self.subTest(capability=capability_id):
+                proofs = capabilities[capability_id]["claims"][0]["proofs"]
+                self.assertTrue(proofs)
+                self.assertTrue(
+                    all(proof["kind"] == "release-asset" for proof in proofs)
+                )
+
     def test_published_release_golden_path_is_bound_to_retained_linux_proof(self) -> None:
         manifest = json.loads(
             (REPO_ROOT / "docs/data/product-capabilities.v0.json").read_text(
