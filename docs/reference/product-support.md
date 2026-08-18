@@ -42,15 +42,15 @@ Attested assay-mcp-server release archives are published for the listed Linux ta
 
 Install an attested release in a disposable environment and produce verified evidence.
 
-- Maturity: `planned`
-- Target release: `5.3.0`
-- Platforms: linux-aarch64, linux-x86_64
+- Maturity: `stable`
+- Introduced: `5.3.0`
+- Platforms: linux-x86_64
 - Protocol versions: mcp 2024-11-05 over stdio, mcp 2025-06-18 over stdio, mcp 2025-11-25 over stdio
 - Profile versions: privileged-mcp-action/v0
 - Enforcement points: cli, mcp-proxy
-- Limitations: No exact-release install-to-evidence gate has landed yet.
-- Non-claims: The planned gate will not prove external side effects, policy completeness or semantic safety.
+- Limitations: The retained post-publication proof currently covers only the published Linux x86_64 CLI and MCP archives.
+- Non-claims: The exact-head harness, fixture, mock, policy and baseline are not shipped, release-attested or part of the v5.3.0 product archives; this proof does not cover macOS, Windows, Linux aarch64, editor discovery, remote transports, external side effects, policy completeness or semantic safety.
 
 | Claim | Axis | Evidence state |
 |---|---|---|
-| `release-install-to-verified-evidence` | `outcome` | [gap #2486](https://github.com/Rul1an/assay/issues/2486) |
+| `release-install-to-verified-evidence` | `outcome` | proof-backed ([identities](../generated/product-claim-proof.md#claim-release-install-to-verified-evidence)) |

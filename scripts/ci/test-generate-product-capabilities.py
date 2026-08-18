@@ -32,7 +32,12 @@ def minimal_manifest() -> dict:
                     {
                         "id": "published-install",
                         "axis": "observation",
-                        "proofs": [{"url": "https://example.invalid/latest"}],
+                        "proofs": [
+                            {
+                                "kind": "github-actions-artifact",
+                                "url": "https://example.invalid/latest",
+                            }
+                        ],
                     }
                 ],
             }
@@ -88,7 +93,9 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
     def test_rejects_duplicate_claim_ids(self) -> None:
         manifest = minimal_manifest()
         claim = manifest["capabilities"][0]["claims"][0]
-        claim["proofs"] = [{"run_id": 32122877879}]
+        claim["proofs"] = [
+            {"kind": "github-actions-artifact", "run_id": 32122877879}
+        ]
         manifest["capabilities"][0]["claims"].append(dict(claim))
         with tempfile.TemporaryDirectory() as tmp:
             result = run_generator(manifest, Path(tmp))
@@ -98,7 +105,9 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
 
     def test_rejects_duplicate_capability_ids(self) -> None:
         manifest = minimal_manifest()
-        manifest["capabilities"][0]["claims"][0]["proofs"] = [{"run_id": 1}]
+        manifest["capabilities"][0]["claims"][0]["proofs"] = [
+            {"kind": "github-actions-artifact", "run_id": 1}
+        ]
         manifest["capabilities"].append(
             json.loads(json.dumps(manifest["capabilities"][0]))
         )
@@ -111,7 +120,7 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
     def test_rejects_unknown_proof_fields(self) -> None:
         manifest = minimal_manifest()
         manifest["capabilities"][0]["claims"][0]["proofs"] = [
-            {"run_id": 1, "status": "certified"}
+            {"kind": "github-actions-artifact", "run_id": 1, "status": "certified"}
         ]
         with tempfile.TemporaryDirectory() as tmp:
             result = run_generator(manifest, Path(tmp))
@@ -122,13 +131,15 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
     def test_rejects_unknown_fields_at_every_manifest_level(self) -> None:
         cases = []
         root_manifest = minimal_manifest()
-        root_manifest["capabilities"][0]["claims"][0]["proofs"] = [{"run_id": 1}]
+        root_manifest["capabilities"][0]["claims"][0]["proofs"] = [
+            {"kind": "github-actions-artifact", "run_id": 1}
+        ]
         root_manifest["status"] = "certified"
         cases.append((root_manifest, "manifest has unknown fields: status"))
 
         capability_manifest = minimal_manifest()
         capability_manifest["capabilities"][0]["claims"][0]["proofs"] = [
-            {"run_id": 1}
+            {"kind": "github-actions-artifact", "run_id": 1}
         ]
         capability_manifest["capabilities"][0]["certification"] = "certified"
         cases.append(
@@ -136,7 +147,9 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
         )
 
         claim_manifest = minimal_manifest()
-        claim_manifest["capabilities"][0]["claims"][0]["proofs"] = [{"run_id": 1}]
+        claim_manifest["capabilities"][0]["claims"][0]["proofs"] = [
+            {"kind": "github-actions-artifact", "run_id": 1}
+        ]
         claim_manifest["capabilities"][0]["claims"][0]["status"] = "certified"
         cases.append((claim_manifest, "claim has unknown fields: status"))
 
@@ -154,7 +167,9 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
 
     def test_rejects_duplicate_json_object_keys(self) -> None:
         manifest = minimal_manifest()
-        manifest["capabilities"][0]["claims"][0]["proofs"] = [{"run_id": 1}]
+        manifest["capabilities"][0]["claims"][0]["proofs"] = [
+            {"kind": "github-actions-artifact", "run_id": 1}
+        ]
         raw = json.dumps(manifest).replace(
             '"run_id": 1', '"run_id": 0, "run_id": 1'
         )
@@ -185,15 +200,129 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
             capabilities["published-release-golden-path"]["protocol_versions"], expected
         )
 
+    def test_published_binary_proofs_are_release_assets(self) -> None:
+        manifest = json.loads(
+            (REPO_ROOT / "docs/data/product-capabilities.v0.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        capabilities = {entry["id"]: entry for entry in manifest["capabilities"]}
+
+        for capability_id in ("published-cli", "published-mcp-server"):
+            with self.subTest(capability=capability_id):
+                proofs = capabilities[capability_id]["claims"][0]["proofs"]
+                self.assertTrue(proofs)
+                self.assertTrue(
+                    all(proof["kind"] == "release-asset" for proof in proofs)
+                )
+
+    def test_published_release_golden_path_is_bound_to_retained_linux_proof(self) -> None:
+        manifest = json.loads(
+            (REPO_ROOT / "docs/data/product-capabilities.v0.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        capabilities = {entry["id"]: entry for entry in manifest["capabilities"]}
+        capability = capabilities["published-release-golden-path"]
+        claim = capability["claims"][0]
+
+        self.assertEqual(capability["maturity"], "stable")
+        self.assertEqual(capability["introduced_release"], "5.3.0")
+        self.assertIsNone(capability["target_release"])
+        self.assertEqual(capability["platforms"], ["linux-x86_64"])
+        self.assertEqual(
+            capability["profile_versions"],
+            [{"profile": "privileged-mcp-action", "version": "v0"}],
+        )
+        self.assertEqual(capability["enforcement_points"], ["cli", "mcp-proxy"])
+        self.assertEqual(
+            capability["limitations"],
+            [
+                "The retained post-publication proof currently covers only the published Linux x86_64 CLI and MCP archives."
+            ],
+        )
+        self.assertEqual(
+            capability["non_claims"],
+            [
+                "The exact-head harness, fixture, mock, policy and baseline are not shipped, release-attested or part of the v5.3.0 product archives; this proof does not cover macOS, Windows, Linux aarch64, editor discovery, remote transports, external side effects, policy completeness or semantic safety."
+            ],
+        )
+        self.assertEqual(claim["axis"], "outcome")
+        self.assertNotIn("gap", claim)
+        self.assertEqual(
+            claim["proofs"],
+            [
+                {
+                    "kind": "github-actions-artifact",
+                    "url": "https://github.com/Rul1an/assay/actions/runs/32166096190",
+                    "run_id": 32166096190,
+                    "commit_sha": "3c0df3cbac793854f67caad44a46fda1bcafc02f",
+                    "digest": "sha256:810989f56bcfa596b4f055435b4cd4db3ebdef0eb2089b55525f6acd022a2c5e",
+                    "artifact": "published-release-golden-path-v5.3.0-3c0df3cbac793854f67caad44a46fda1bcafc02f",
+                }
+            ],
+        )
+
+    def test_rejects_proof_without_kind(self) -> None:
+        manifest = minimal_manifest()
+        manifest["capabilities"][0]["claims"][0]["proofs"] = [{"run_id": 1}]
+        with tempfile.TemporaryDirectory() as tmp:
+            result = run_generator(manifest, Path(tmp))
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("proof is missing fields: kind", result.stderr)
+
+    def test_rejects_unknown_proof_kind(self) -> None:
+        manifest = minimal_manifest()
+        manifest["capabilities"][0]["claims"][0]["proofs"] = [
+            {"kind": "generic-digest", "run_id": 1}
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            result = run_generator(manifest, Path(tmp))
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("proof has unknown kind", result.stderr)
+
+    def test_renders_digest_subject_by_proof_kind(self) -> None:
+        manifest = minimal_manifest()
+        claim = manifest["capabilities"][0]["claims"][0]
+        claim["proofs"] = [
+            {
+                "kind": "release-asset",
+                "artifact": "assay.tar.gz",
+                "digest": "sha256:" + "a" * 64,
+            },
+            {
+                "kind": "github-actions-artifact",
+                "artifact": "journey-proof",
+                "digest": "sha256:" + "b" * 64,
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = run_generator(manifest, root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            proof = (root / "proof.md").read_text(encoding="utf-8")
+
+        self.assertIn("release_asset=assay.tar.gz", proof)
+        self.assertIn("release_asset_digest=sha256:" + "a" * 64, proof)
+        self.assertIn("run_artifact=journey-proof", proof)
+        self.assertIn("run_artifact_digest=sha256:" + "b" * 64, proof)
+
     def test_writes_both_views_in_shared_id_order(self) -> None:
         manifest = minimal_manifest()
         first = manifest["capabilities"][0]
         first["id"] = "z-capability"
         first["claims"][0]["id"] = "z-claim"
-        first["claims"][0]["proofs"] = [{"commit_sha": "a" * 40}]
+        first["claims"][0]["proofs"] = [
+            {"kind": "github-actions-artifact", "commit_sha": "a" * 40}
+        ]
         earlier_claim = json.loads(json.dumps(first["claims"][0]))
         earlier_claim["id"] = "b-claim"
-        earlier_claim["proofs"] = [{"run_id": 2}]
+        earlier_claim["proofs"] = [
+            {"kind": "github-actions-artifact", "run_id": 2}
+        ]
         first["claims"].append(earlier_claim)
         second = json.loads(json.dumps(first))
         second["id"] = "a-capability"
@@ -202,7 +331,12 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
             {
                 "id": "a-claim",
                 "axis": "observation",
-                "proofs": [{"digest": "sha256:" + "b" * 64}],
+                "proofs": [
+                    {
+                        "kind": "github-actions-artifact",
+                        "digest": "sha256:" + "b" * 64,
+                    }
+                ],
             }
         ]
         manifest["capabilities"].append(second)
@@ -223,7 +357,9 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
 
     def test_rejects_boolean_run_id(self) -> None:
         manifest = minimal_manifest()
-        manifest["capabilities"][0]["claims"][0]["proofs"] = [{"run_id": True}]
+        manifest["capabilities"][0]["claims"][0]["proofs"] = [
+            {"kind": "github-actions-artifact", "run_id": True}
+        ]
         with tempfile.TemporaryDirectory() as tmp:
             result = run_generator(manifest, Path(tmp))
 
@@ -233,7 +369,9 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
     def test_rejects_markdown_unsafe_identifier(self) -> None:
         manifest = minimal_manifest()
         manifest["capabilities"][0]["id"] = "bad|identifier"
-        manifest["capabilities"][0]["claims"][0]["proofs"] = [{"run_id": 1}]
+        manifest["capabilities"][0]["claims"][0]["proofs"] = [
+            {"kind": "github-actions-artifact", "run_id": 1}
+        ]
         with tempfile.TemporaryDirectory() as tmp:
             result = run_generator(manifest, Path(tmp))
 
@@ -243,7 +381,7 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
     def test_rejects_mutable_commit_ref(self) -> None:
         manifest = minimal_manifest()
         manifest["capabilities"][0]["claims"][0]["proofs"] = [
-            {"commit_sha": "main"}
+            {"kind": "github-actions-artifact", "commit_sha": "main"}
         ]
         with tempfile.TemporaryDirectory() as tmp:
             result = run_generator(manifest, Path(tmp))
@@ -254,7 +392,7 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
     def test_rejects_artifact_without_digest(self) -> None:
         manifest = minimal_manifest()
         manifest["capabilities"][0]["claims"][0]["proofs"] = [
-            {"artifact": "assay.tar.gz", "run_id": 1}
+            {"kind": "release-asset", "artifact": "assay.tar.gz", "run_id": 1}
         ]
         with tempfile.TemporaryDirectory() as tmp:
             result = run_generator(manifest, Path(tmp))
@@ -265,7 +403,12 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
     def test_rejects_invalid_digest_even_with_valid_run_id(self) -> None:
         manifest = minimal_manifest()
         manifest["capabilities"][0]["claims"][0]["proofs"] = [
-            {"artifact": "assay.tar.gz", "digest": "latest", "run_id": 1}
+            {
+                "kind": "release-asset",
+                "artifact": "assay.tar.gz",
+                "digest": "latest",
+                "run_id": 1,
+            }
         ]
         with tempfile.TemporaryDirectory() as tmp:
             result = run_generator(manifest, Path(tmp))
@@ -287,7 +430,9 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
     def test_public_view_links_proofs_and_gaps_and_states_verification_boundary(self) -> None:
         manifest = minimal_manifest()
         proof_claim = manifest["capabilities"][0]["claims"][0]
-        proof_claim["proofs"] = [{"run_id": 1}]
+        proof_claim["proofs"] = [
+            {"kind": "github-actions-artifact", "run_id": 1}
+        ]
         gap_claim = {"id": "tracked-gap", "axis": "outcome", "gap": {"issue": "2486"}}
         manifest["capabilities"][0]["claims"].append(gap_claim)
 
@@ -310,7 +455,9 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
         capability["profile_versions"] = [
             {"profile": "privileged-mcp-action", "version": "v0"}
         ]
-        capability["claims"][0]["proofs"] = [{"run_id": 1}]
+        capability["claims"][0]["proofs"] = [
+            {"kind": "github-actions-artifact", "run_id": 1}
+        ]
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

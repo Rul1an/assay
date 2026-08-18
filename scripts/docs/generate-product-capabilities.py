@@ -27,7 +27,8 @@ CAPABILITY_FIELDS = {
 }
 CLAIM_FIELDS = {"id", "axis", "proofs", "gap"}
 GAP_FIELDS = {"issue"}
-PROOF_FIELDS = {"url", "run_id", "commit_sha", "digest", "artifact"}
+PROOF_FIELDS = {"kind", "url", "run_id", "commit_sha", "digest", "artifact"}
+PROOF_KIND_VALUES = {"release-asset", "github-actions-artifact"}
 ID_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 COMMIT_SHA_PATTERN = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 DIGEST_PATTERN = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -146,7 +147,11 @@ def proof_has_immutable_identity(proof: dict) -> bool:
 
 
 def validate_proof(proof: object, claim_id: str) -> dict:
-    proof = require_object_fields(proof, PROOF_FIELDS, set(), f"claim {claim_id} proof")
+    proof = require_object_fields(
+        proof, PROOF_FIELDS, {"kind"}, f"claim {claim_id} proof"
+    )
+    if proof["kind"] not in PROOF_KIND_VALUES:
+        raise ValueError(f"claim {claim_id} proof has unknown kind")
     if "run_id" in proof:
         run_id = proof["run_id"]
         if not isinstance(run_id, int) or isinstance(run_id, bool) or run_id <= 0:
@@ -339,8 +344,21 @@ def render_proof(manifest: dict) -> str:
                 lines.append(f"- Gap issue: `#{claim['gap']['issue']}`")
             else:
                 for proof in claim["proofs"]:
+                    field_names = {
+                        "release-asset": {
+                            "artifact": "release_asset",
+                            "digest": "release_asset_digest",
+                        },
+                        "github-actions-artifact": {
+                            "artifact": "run_artifact",
+                            "digest": "run_artifact_digest",
+                        },
+                    }[proof["kind"]]
+                    field_order = ("kind", "artifact", "digest", "run_id", "commit_sha")
                     rendered = ", ".join(
-                        f"`{key}={proof[key]}`" for key in sorted(proof) if key != "url"
+                        f"`{field_names.get(key, key)}={proof[key]}`"
+                        for key in field_order
+                        if key in proof
                     )
                     lines.append(f"- Proof: {rendered}")
             lines.append("")
