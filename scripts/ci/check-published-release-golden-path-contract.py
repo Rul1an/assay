@@ -278,6 +278,42 @@ def validate_contract(
     )
     if attestation_block != expected_attestation_block:
         problems.append("driver attestation execution block drifted")
+    expected_version_block = [
+        'run_capture "mcp-version" 0 "$results/mcp-version.txt" "$results/mcp-version.stderr" assay-mcp-server --version',
+        '[[ "$(tr -d \'\\r\\n\' <"$results/mcp-version.txt")" == "assay-mcp-server $version" ]] \\',
+        '|| fail "assay-mcp-server version differs from pinned release"',
+    ]
+    version_block = lines_between(
+        driver_text,
+        'run_capture "mcp-version"',
+        'pushd "$session_root"',
+        problems,
+    )
+    if version_block != expected_version_block:
+        problems.append("exact MCP version execution block drifted")
+    expected_proxy_block = [
+        "proxy_status=0",
+        "proxy_argv=(",
+        "assay-mcp-server proxy-enforce",
+        '--upstream-command "$PYTHON_BIN" --upstream-arg -u --upstream-arg "$fixture_dir/mock_github_mcp.py"',
+        '--enforce-policy "$fixture_dir/policies/no-allowance.yaml"',
+        '--declared-mcp-manifest "$fixture_dir/baseline-approved.json"',
+        '--enforcement-decision-out "$decisions"',
+        '--denied-call-observation-out "$observations"',
+        ")",
+        'printf \'%s\\n%s\\n\' "$init_request" "$call_request" \\',
+        '| "${proxy_argv[@]}" \\',
+        '>"$results/proxy.jsonl" 2>"$results/proxy.stderr" || proxy_status=$?',
+        'record_command "proxy-enforce" "$proxy_status" "${proxy_argv[@]}"',
+    ]
+    proxy_block = lines_between(
+        driver_text,
+        "proxy_status=0",
+        '[[ "$proxy_status"',
+        problems,
+    )
+    if proxy_block != expected_proxy_block:
+        problems.append("proxy execution and provenance block drifted")
     required_driver_fragments = {
         "exact stable tag": "release tag must be an exact stable vX.Y.Z tag",
         "fresh run root": "run root already exists; refusing to reuse prior evidence",
@@ -339,12 +375,6 @@ def validate_contract(
     if driver_lines.count('PYTHONPATH="$harness_root/scripts/ci" "$PYTHON_BIN" -c \\') != 2:
         problems.append("bounded helper execution drifted")
     semantic_driver_lines = {
-        '[[ "$(tr -d \'\\r\\n\' <"$results/mcp-version.txt")" == "assay-mcp-server $version" ]] \\': (
-            "exact MCP version comparison drifted"
-        ),
-        'record_command "proxy-enforce" "$proxy_status" "${proxy_argv[@]}"': (
-            "proxy command provenance no longer uses the executed argv"
-        ),
         'for pattern, expected in (("release-assets/*.tar.gz", 2), ("attestation-raw/*.json", 2)):': (
             "retained trust-input count enforcement drifted"
         ),
@@ -355,17 +385,42 @@ def validate_contract(
     for line, message in semantic_driver_lines.items():
         if driver_lines.count(line) != 1:
             problems.append(message)
-    attestation_lines = active_lines(attestation_text)
-    for line, message in {
-        '--signer-workflow "$SIGNER_WORKFLOW"': "attestation signer binding drifted",
-        '--source-digest "$SOURCE_DIGEST"': "attestation source digest binding drifted",
-        '--deny-self-hosted-runners': "attestation hosted-runner policy drifted",
-        'any(.[]; any((.verificationResult.statement.subject // [])[]?; .digest.sha256? == $digest))': (
-            "attestation local-subject digest binding drifted"
-        ),
-    }.items():
-        if attestation_lines.count(line) != 1:
-            problems.append(message)
+    expected_verify_args = [
+        "verify_args=(",
+        'attestation verify "$asset"',
+        '--repo "$REPO"',
+        '--signer-workflow "$SIGNER_WORKFLOW"',
+        '--cert-oidc-issuer "$CERT_OIDC_ISSUER"',
+        '--predicate-type "$PREDICATE_TYPE"',
+        '--source-digest "$SOURCE_DIGEST"',
+        "--deny-self-hosted-runners",
+        "--format json",
+        ")",
+    ]
+    verify_args = lines_between(
+        attestation_text,
+        "  verify_args=(",
+        '  if [ -n "$SOURCE_REF" ]',
+        problems,
+    )
+    if verify_args != expected_verify_args:
+        problems.append("attestation verification argv binding drifted")
+    expected_subject_digest_block = [
+        'if ! printf \'%s\\n\' "$verify_json" | "$JQ_BIN" -e --arg digest "$asset_sha256" \'',
+        'any(.[]; any((.verificationResult.statement.subject // [])[]?; .digest.sha256? == $digest))',
+        "' >/dev/null; then",
+        'echo "Verified attestation for ${asset_name} does not match the local subject digest" >&2',
+        "exit 1",
+        "fi",
+    ]
+    subject_digest_block = lines_between(
+        attestation_text,
+        '  if ! printf \'%s\\n\' "$verify_json" | "$JQ_BIN" -e --arg digest "$asset_sha256"',
+        '  printf \'%s\\n\' "$verify_json" | "$JQ_BIN" -c',
+        problems,
+    )
+    if subject_digest_block != expected_subject_digest_block:
+        problems.append("attestation local-subject digest execution block drifted")
     if any("verify-offline.sh" in line or "release-proof-kit" in line for line in driver_lines):
         problems.append("driver must not execute or trust code carried by the release proof kit")
     verifier_line = 'bash "$harness_root/scripts/ci/release_attestation_enforce.sh" \\'

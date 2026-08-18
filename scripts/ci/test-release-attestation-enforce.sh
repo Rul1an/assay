@@ -166,6 +166,7 @@ run_success_case() {
   jq -e '.assets[0].verified_timestamp_count == 1' "$summary" >/dev/null
   test -f "$raw_dir/test-asset.tar.gz.attestation.json"
   grep -F -- '--source-digest abc123' "$log" >/dev/null
+  grep -F -- '--signer-workflow Rul1an/assay/.github/workflows/release.yml' "$log" >/dev/null
   grep -F -- '--source-ref refs/tags/v9.9.9' "$log" >/dev/null
   grep -F -- '--deny-self-hosted-runners' "$log" >/dev/null
 }

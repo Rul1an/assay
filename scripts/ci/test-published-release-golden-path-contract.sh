@@ -36,6 +36,8 @@ trap 'rm -rf "$scratch"' EXIT
 verifier_call='bash "$harness_root/scripts/ci/release_attestation_enforce.sh" '"\\"
 workflow_driver_call='          bash scripts/ci/published-release-golden-path.sh '"\\"
 workflow_driver_decoy=$'          # bash scripts/ci/published-release-golden-path.sh\n          echo skipped-reviewed-driver '"\\"
+proxy_execute_call='  | "${proxy_argv[@]}" '"\\"
+proxy_execute_diverged='  | assay-mcp-server proxy-enforce --upstream-command "$PYTHON_BIN" '"\\"
 
 expect_mutation_failure() {
   local name="$1" target="$2" old="$3" new="$4" expected="$5" refresh_path="${6:-}"
@@ -247,14 +249,14 @@ expect_mutation_failure \
   "mcp-version-regex-loosened" "driver.sh" \
   '"assay-mcp-server $version"' \
   '"$version"' \
-  "exact MCP version comparison drifted" \
+  "exact MCP version execution block drifted" \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "proxy-command-provenance-truncated" "driver.sh" \
   'record_command "proxy-enforce" "$proxy_status" "${proxy_argv[@]}"' \
   'record_command "proxy-enforce" "$proxy_status" assay-mcp-server proxy-enforce --upstream-command python3' \
-  "proxy command provenance no longer uses the executed argv" \
+  "proxy execution and provenance block drifted" \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
@@ -268,7 +270,7 @@ expect_mutation_failure \
   "signer-binding-removed" "scripts/ci/release_attestation_enforce.sh" \
   '    --signer-workflow "$SIGNER_WORKFLOW"' \
   '    --predicate-type https://slsa.dev/provenance/v1' \
-  "attestation signer binding drifted" \
+  "attestation verification argv binding drifted" \
   "scripts/ci/release_attestation_enforce.sh"
 
 expect_mutation_failure \
@@ -282,15 +284,22 @@ expect_mutation_failure \
   "source-digest-binding-removed" "scripts/ci/release_attestation_enforce.sh" \
   '    --source-digest "$SOURCE_DIGEST"' \
   '    --source-ref refs/heads/main' \
-  "attestation source digest binding drifted" \
+  "attestation verification argv binding drifted" \
   "scripts/ci/release_attestation_enforce.sh"
 
 expect_mutation_failure \
   "local-subject-binding-loosened" "scripts/ci/release_attestation_enforce.sh" \
   'any(.[]; any((.verificationResult.statement.subject // [])[]?; .digest.sha256? == $digest))' \
   'any(.[]; (.verificationResult.statement.subject // [] | length) > 0)' \
-  "attestation local-subject digest binding drifted" \
+  "attestation local-subject digest execution block drifted" \
   "scripts/ci/release_attestation_enforce.sh"
+
+expect_mutation_failure \
+  "proxy-execution-diverges-from-record" "driver.sh" \
+  "$proxy_execute_call" \
+  "$proxy_execute_diverged" \
+  "proxy execution and provenance block drifted" \
+  "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "inventory-executable-flag-removed" "manifest.json" \
