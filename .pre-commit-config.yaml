@@ -100,6 +100,13 @@ repos:
         # workflow checks out the PR base on purpose, so a PR never runs this
         # against its own tree.
 
+      - id: runner-auto-recovery-contract
+        name: Runner auto-recovery token freshness
+        entry: bash scripts/ci/test-runner-auto-recovery.sh
+        language: system
+        pass_filenames: false
+        files: ^(infra/bpf-runner/health_check\.sh|scripts/ci/test-runner-auto-recovery\.sh)$
+
       - id: docs-generated-drift-self-test
         name: Generated-docs drift check self-test
         entry: bash -c 'bash scripts/ci/test-check-docs-generated-drift-safety.sh && bash scripts/ci/test-check-docs-generated-drift.sh'

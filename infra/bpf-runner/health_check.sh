@@ -34,6 +34,8 @@ LOG_FILE="${LOG_FILE:-/tmp/runner-health-check.log}"
 MAX_LOG_SIZE=1048576  # 1MB
 RUNNER_FATAL_PATTERNS="${RUNNER_FATAL_PATTERNS:-registration has been deleted from the server|Failed to create a session|token expired|Authentication failed}"
 ASSAY_UPDATE_SCRIPT="${ASSAY_UPDATE_SCRIPT:-/usr/local/sbin/update-assay-latest}"
+MULTIPASS_RECOVERY_TIMEOUT_SECONDS="${MULTIPASS_RECOVERY_TIMEOUT_SECONDS:-60}"
+RUNNER_CONFIG_TIMEOUT_SECONDS="${RUNNER_CONFIG_TIMEOUT_SECONDS:-120}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -396,20 +398,20 @@ cleanup_runner_config() {
     log_info "Cleaning up old runner configuration..."
 
     # Stop and uninstall service (MUST run from runner directory)
-    multipass exec "$VM_NAME" -- bash -c "
+    timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass exec "$VM_NAME" -- bash -c "
         cd $RUNNER_DIR || exit 0
         sudo ./svc.sh stop 2>/dev/null || true
         sudo ./svc.sh uninstall 2>/dev/null || true
     " 2>/dev/null || true
 
     # Remove old service files
-    multipass exec "$VM_NAME" -- sudo bash -c "
+    timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass exec "$VM_NAME" -- sudo bash -c "
         rm -f /etc/systemd/system/actions.runner.*.service 2>/dev/null || true
         systemctl daemon-reload 2>/dev/null || true
     " 2>/dev/null || true
 
     # Remove credentials to force fresh registration
-    multipass exec "$VM_NAME" -- sudo rm -f \
+    timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass exec "$VM_NAME" -- sudo rm -f \
         "$RUNNER_DIR/.runner" \
         "$RUNNER_DIR/.credentials" \
         "$RUNNER_DIR/.credentials_rsaparams" \
@@ -417,7 +419,7 @@ cleanup_runner_config() {
         "$RUNNER_DIR/.runner_migrated" \
         2>/dev/null || true
 
-    multipass exec "$VM_NAME" -- sudo chown -R \
+    timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass exec "$VM_NAME" -- sudo chown -R \
         "$RUNNER_USER:$RUNNER_USER" \
         "$RUNNER_DIR" \
         2>/dev/null || true
@@ -432,13 +434,15 @@ configure_runner() {
     log_info "Configuring runner with new token..."
 
     local result
-    result=$(multipass exec "$VM_NAME" -- bash -lc "
+    result=$(printf '%s\n' "$token" | timeout "$RUNNER_CONFIG_TIMEOUT_SECONDS" \
+        multipass exec "$VM_NAME" -- bash -lc "
         set -euo pipefail
+        IFS= read -r token
         cd '$RUNNER_DIR'
         sudo chown -R '$RUNNER_USER:$RUNNER_USER' '$RUNNER_DIR'
         sudo -u '$RUNNER_USER' ./config.sh \
             --url 'https://github.com/$REPO' \
-            --token '$token' \
+            --token \"\$token\" \
             --labels '$RUNNER_LABELS' \
             --name '$RUNNER_NAME' \
             --unattended \
@@ -461,13 +465,13 @@ start_runner_service() {
 
     # MUST run svc.sh from the runner directory
     local install_result
-    install_result=$(multipass exec "$VM_NAME" -- bash -c "
+    install_result=$(timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass exec "$VM_NAME" -- bash -c "
         cd $RUNNER_DIR && sudo ./svc.sh install $RUNNER_USER 2>&1
     ")
     log_info "Install output: $install_result"
 
     local start_result
-    start_result=$(multipass exec "$VM_NAME" -- bash -c "
+    start_result=$(timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass exec "$VM_NAME" -- bash -c "
         cd $RUNNER_DIR && sudo ./svc.sh start 2>&1
     ")
     log_info "Start output: $start_result"
@@ -615,14 +619,15 @@ recover_runner() {
     # Step 1: Sync time
     sync_vm_time
 
-    # Step 2: Generate new token
+    # Step 2: Clean up old config before generating the short-lived token. A
+    # stalled VM command must not leave a token aging while cleanup is blocked.
+    cleanup_runner_config
+
+    # Step 3: Generate the token immediately before its only use.
     local token
     token=$(generate_runner_token) || return 1
 
-    # Step 3: Clean up old config
-    cleanup_runner_config
-
-    # Step 4: Configure with new token
+    # Step 4: Configure with the fresh token.
     configure_runner "$token" || return 1
 
     # Step 5: Start service
