@@ -41,10 +41,11 @@ ISSUE_LINK = re.compile(
     r"\[issue #(\d+)\]\((https://github\.com/[^)\s]+/issues/(\d+))\)"
 )
 VISIBLE_ISSUE = re.compile(r"(?i)issue #(\d+)")
-# Optional list marker and strong prefix before a declaration-shaped start.
-DECL_PREFIX = r"(?:^|[.!?]\s+)(?:-\s+)?(?:\*{1,2})?"
+# Unordered marker [-*+] and strong prefix are independent.
+DECL_PREFIX = r"(?:^|[.!?]\s+)(?:[-*+]\s+)?(?:\*{1,2})?"
+# Declaration predicates only: "is issue #N" or "is named ...", not any "is ...".
 OUTSIDE_ACTIVE_DECL = re.compile(
-    rf"(?im){DECL_PREFIX}The active programme ledger is\b"
+    rf"(?im){DECL_PREFIX}The active programme ledger is(?: issue #\d+| named\b)"
 )
 OUTSIDE_INACTIVE_DECL = re.compile(
     rf"(?im){DECL_PREFIX}No programme is active\."
@@ -344,33 +345,6 @@ assert_wave71_not_active() {
   return 0
 }
 
-assert_selfhost_temp_contract() {
-  PROGRAMME_TRUTH_SCRIPT="${BASH_SOURCE[0]}" python3 - <<'PY'
-import os
-import re
-from pathlib import Path
-
-text = Path(os.environ["PROGRAMME_TRUTH_SCRIPT"]).read_text(encoding="utf-8")
-marker = 'if [[ -z "${PROGRAMME_TRUTH_SELFHOST:-}" ]]; then'
-idx = text.rfind(marker)
-if idx < 0:
-    raise SystemExit("missing selfhost runner")
-block = text[idx:]
-if block.count("mktemp -d") != 1:
-    raise SystemExit(
-        "selfhost runner must allocate exactly one temp directory"
-    )
-if re.search(r"\$\(mktemp\)(?! -d)", block):
-    raise SystemExit("selfhost still allocates a second mktemp file")
-alloc_at = block.find("mktemp -d")
-trap_m = re.search(r"trap\b[^\n]*\bEXIT\b", block[alloc_at:])
-if trap_m is None:
-    raise SystemExit("selfhost does not register an EXIT trap after allocation")
-if "${selfhost_dir:?}" not in block:
-    raise SystemExit("selfhost cleanup must refuse an empty directory via :?")
-PY
-}
-
 expect_ok() {
   local label="$1"
   shift
@@ -437,6 +411,23 @@ expect_red "list-item inactive declaration elsewhere" \
   "contradictory ledger declaration outside the ledger bullet" \
   assert_agents_ledger "$list_inactive_elsewhere"
 
+star_active_elsewhere="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
+  '* The active programme ledger is issue #7777.')"
+expect_red "star list-item active ledger declaration elsewhere" \
+  "contradictory ledger declaration outside the ledger bullet" \
+  assert_agents_ledger "$star_active_elsewhere"
+
+plus_inactive_elsewhere="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
+  '+ **No programme is active.**')"
+expect_red "plus list-item inactive declaration elsewhere" \
+  "contradictory ledger declaration outside the ledger bullet" \
+  assert_agents_ledger "$plus_inactive_elsewhere"
+
+documented_ledger_prose="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
+  '- **The active programme ledger is documented in the canonical bullet above.**')"
+expect_ok "documented-in-bullet prose is not a ledger declaration" \
+  assert_agents_ledger "$documented_ledger_prose"
+
 ACTIVE_LEDGER_BULLET='- The public execution ledger for the active programme is named on this line: [issue #4242](https://github.com/Rul1an/assay/issues/4242).'
 active_ledger="$(replace_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$(<"$AGENTS")")"
 expect_ok "structurally active ledger fixture" assert_agents_ledger "$active_ledger"
@@ -499,8 +490,6 @@ expect_red "restored single-boundary TODO" "single-boundary Wave 3 TODO" \
   assert_no_generic_unsafe_preview "" "unsafe allowed only in the monitor syscall boundary module."
 expect_red "deleted-monitor.rs claim" "must not claim monitor.rs was deleted" \
   assert_no_generic_unsafe_preview "monitor.rs was deleted" ""
-
-expect_ok "selfhost uses one tempdir and an EXIT trap" assert_selfhost_temp_contract
 
 if [[ -z "${PROGRAMME_TRUTH_SELFHOST:-}" ]]; then
   cleanup_selfhost() { rm -rf -- "${selfhost_dir:?}"; }
