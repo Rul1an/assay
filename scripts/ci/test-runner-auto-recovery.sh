@@ -251,15 +251,16 @@ fi
 log_error() { :; }
 
 TIMEOUT_SERVICE_PHASE="install"
+TIMEOUT_SERVICE_STATUS=124
 timeout() {
     shift
     if [[ "${TIMEOUT_SERVICE_PHASE}" == install && "$*" == *"svc.sh install"* ]]; then
         echo "installed"
-        return 124
+        return "${TIMEOUT_SERVICE_STATUS}"
     fi
     if [[ "${TIMEOUT_SERVICE_PHASE}" == start && "$*" == *"svc.sh start"* ]]; then
         echo "started"
-        return 124
+        return "${TIMEOUT_SERVICE_STATUS}"
     fi
     "$@"
 }
@@ -279,6 +280,28 @@ start_status=$?
 set -e
 if [[ "${start_status}" -ne 124 ]]; then
     echo "runner service start did not propagate timeout exit 124 (got ${start_status})" >&2
+    exit 1
+fi
+
+TIMEOUT_SERVICE_PHASE="install"
+TIMEOUT_SERVICE_STATUS=73
+set +e
+start_runner_service
+install_non_timeout_status=$?
+set -e
+if [[ "${install_non_timeout_status}" -ne 73 ]]; then
+    echo "runner service install collapsed non-timeout exit 73 to ${install_non_timeout_status}" >&2
+    exit 1
+fi
+
+TIMEOUT_SERVICE_PHASE="start"
+TIMEOUT_SERVICE_STATUS=42
+set +e
+start_runner_service
+start_non_timeout_status=$?
+set -e
+if [[ "${start_non_timeout_status}" -ne 42 ]]; then
+    echo "runner service start collapsed non-timeout exit 42 to ${start_non_timeout_status}" >&2
     exit 1
 fi
 
