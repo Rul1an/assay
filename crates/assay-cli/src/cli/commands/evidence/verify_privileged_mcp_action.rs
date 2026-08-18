@@ -1,4 +1,4 @@
-//! EXPERIMENTAL: verify an evidence bundle against the privileged-mcp-action/v0 open profile.
+//! EXPERIMENTAL: verify an evidence bundle against privileged-mcp-action v0 or v1.
 //!
 //! Spec: `docs/profiles/privileged-mcp-action/v0.md`. Four byte-pure stages:
 //! 1. bundle integrity (the shipped bundle verification, via `BundleReader::open` which runs
@@ -17,6 +17,7 @@ use crate::evidence_verify_reason::{
 use crate::exit_codes::{self, ReasonCode};
 use anyhow::{Context, Result};
 use assay_evidence::bundle::BundleReader;
+use assay_evidence::denial_marker::{classify_denial_marker, DenialMarkerVersion};
 use assay_evidence::types::EvidenceEvent;
 use clap::{Args, ValueEnum};
 use serde::Serialize;
@@ -26,12 +27,15 @@ use std::path::{Path, PathBuf};
 
 const REPORT_SCHEMA: &str = "assay.privileged_mcp_action.verify.report.v0";
 const PROFILE_ID: &str = "privileged-mcp-action/v0";
+const PROFILE_ID_V1: &str = "privileged-mcp-action/v1";
 
 const DECISION_SCHEMA: &str = "assay.enforcement_decision.v0";
 const OBSERVATION_SCHEMA: &str = "assay.denied_call_observation.v0";
+const OBSERVATION_SCHEMA_V1: &str = "assay.denied_call_observation.v1";
 const ESTABLISH_SCHEMA: &str = "assay.manifest_establish.v0";
-/// Profile namespaces: any payload schema with one of these prefixes that is not the exact `.v0`
-/// string is an unrecognized profile schema and fails closed.
+/// Profile namespaces: any payload schema with one of these prefixes that is not a recognized
+/// record for the *selected* profile version fails closed. Selection is explicit (`--profile-version`);
+/// there is no autodetect.
 const PROFILE_NAMESPACES: &[&str] = &[
     "assay.enforcement_decision.",
     "assay.denied_call_observation.",
@@ -66,9 +70,7 @@ const ESTABLISH_PATH_VOCAB: &[&str] = &[
     "immediate_deny",
 ];
 
-/// Marker triple values (stage 3).
-const MARKER_ERROR_CODE: i64 = -32042;
-const MARKER_ORIGIN: &str = "assay-proxy";
+// Marker recognition is the shared classifier in `assay_evidence::denial_marker`.
 
 /// The producer's five decision non-claims, byte-exact (source of truth:
 /// `assay-mcp-server/src/proxy/enforce/records.rs`; the fourth carries U+2014).
@@ -106,6 +108,42 @@ pub struct VerifyPrivilegedMcpActionArgs {
     /// Output format
     #[arg(long, value_enum, default_value_t = VerifyFormat::Table)]
     pub format: VerifyFormat,
+
+    /// Selected privileged-mcp-action profile. Default `v0`. No autodetect from bundle contents.
+    #[arg(long, value_enum, default_value_t = ProfileVersion::V0)]
+    pub profile_version: ProfileVersion,
+}
+
+#[derive(Debug, Clone, Copy, Default, ValueEnum, PartialEq, Eq)]
+pub enum ProfileVersion {
+    #[default]
+    #[value(name = "v0")]
+    V0,
+    #[value(name = "v1")]
+    V1,
+}
+
+impl ProfileVersion {
+    fn as_profile_id(self) -> &'static str {
+        match self {
+            Self::V0 => PROFILE_ID,
+            Self::V1 => PROFILE_ID_V1,
+        }
+    }
+
+    fn observation_schema(self) -> &'static str {
+        match self {
+            Self::V0 => OBSERVATION_SCHEMA,
+            Self::V1 => OBSERVATION_SCHEMA_V1,
+        }
+    }
+
+    fn marker_version(self) -> DenialMarkerVersion {
+        match self {
+            Self::V0 => DenialMarkerVersion::V0,
+            Self::V1 => DenialMarkerVersion::V1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -180,7 +218,7 @@ pub struct Finding {
 }
 
 pub fn cmd_verify_privileged_mcp_action(args: VerifyPrivilegedMcpActionArgs) -> Result<i32> {
-    let report = verify_bundle_report(&args.bundle);
+    let report = verify_bundle_report_for(&args.bundle, args.profile_version);
     match args.format {
         VerifyFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
         VerifyFormat::Table => print_table(&report),
@@ -194,10 +232,15 @@ pub fn cmd_verify_privileged_mcp_action(args: VerifyPrivilegedMcpActionArgs) -> 
 /// authoritative; untyped I/O (including a directory path) is Unreadable.
 /// `findings.detail` may retain the caller argv path. Unreadable `next_step` is
 /// shell-free caller-argv via `ReasonCode::next_step`, not a second remediation.
+#[cfg(test)]
 pub fn verify_bundle_report(bundle: &Path) -> Report {
+    verify_bundle_report_for(bundle, ProfileVersion::V0)
+}
+
+pub fn verify_bundle_report_for(bundle: &Path, profile_version: ProfileVersion) -> Report {
     match read_bundle_events(bundle) {
-        Ok(events) => profile_report(&events),
-        Err(err) => integrity_fail_report(&err, bundle),
+        Ok(events) => profile_report_for(&events, profile_version),
+        Err(err) => integrity_fail_report(&err, bundle, profile_version),
     }
 }
 
@@ -214,11 +257,16 @@ fn read_bundle_events(bundle: &Path) -> anyhow::Result<Vec<EvidenceEvent>> {
         .with_context(|| format!("failed to read events from bundle {}", bundle.display()))
 }
 
-fn stage1_fail_report(detail: String, reason: ReasonCode, bundle: &Path) -> Report {
+fn stage1_fail_report(
+    detail: String,
+    reason: ReasonCode,
+    bundle: &Path,
+    profile_version: ProfileVersion,
+) -> Report {
     // Caller argv is safe to republish shell-free, unlike discovered host paths.
     Report {
         schema: REPORT_SCHEMA,
-        profile: PROFILE_ID,
+        profile: profile_version.as_profile_id(),
         bundle_integrity: "fail",
         verdict: None,
         claims: None,
@@ -233,7 +281,11 @@ fn stage1_fail_report(detail: String, reason: ReasonCode, bundle: &Path) -> Repo
     }
 }
 
-fn integrity_fail_report(err: &anyhow::Error, bundle: &Path) -> Report {
+fn integrity_fail_report(
+    err: &anyhow::Error,
+    bundle: &Path,
+    profile_version: ProfileVersion,
+) -> Report {
     let reason = reason_code_for_evidence_error(err)
         .expect("stage-1 evidence errors must map to a ReasonCode");
     debug_assert!(
@@ -242,11 +294,18 @@ fn integrity_fail_report(err: &anyhow::Error, bundle: &Path) -> Report {
             .any(|(_, owned)| *owned == reason),
         "stage-1 reason must be one of the binary-owned profile codes"
     );
-    stage1_fail_report(format!("{err:#}"), reason, bundle)
+    stage1_fail_report(format!("{err:#}"), reason, bundle, profile_version)
 }
 
 /// Stages 2-4 over the events of a bundle that already passed stage 1.
+/// Default profile is v0 (explicit selection lives on `profile_report_for`).
+#[cfg(test)]
 pub fn profile_report(events: &[EvidenceEvent]) -> Report {
+    profile_report_for(events, ProfileVersion::V0)
+}
+
+/// Stages 2-4 for an explicitly selected profile version. No autodetect.
+pub fn profile_report_for(events: &[EvidenceEvent], profile_version: ProfileVersion) -> Report {
     let mut violations: Vec<Finding> = Vec::new();
 
     // Select profile events by the exact schema member of their payload.
@@ -268,12 +327,15 @@ pub fn profile_report(events: &[EvidenceEvent]) -> Report {
                 }
                 match s {
                     DECISION_SCHEMA => decisions.push(&ev.payload),
-                    OBSERVATION_SCHEMA => observations.push(&ev.payload),
                     ESTABLISH_SCHEMA => establishes.push(&ev.payload),
+                    other if other == profile_version.observation_schema() => {
+                        observations.push(&ev.payload)
+                    }
                     other => violations.push(finding(
                         "unknown_profile_schema",
                         format!(
-                            "payload schema {other:?} is inside the profile namespace but is not a recognized v0 record; unknown fails closed"
+                            "payload schema {other:?} is inside the profile namespace but is not a recognized {} record; unknown fails closed",
+                            profile_version.as_profile_id()
                         ),
                     )),
                 }
@@ -306,7 +368,8 @@ pub fn profile_report(events: &[EvidenceEvent]) -> Report {
         violations.push(finding(
             "observation_cardinality",
             format!(
-                "at most one assay.denied_call_observation.v0 payload is allowed, found {}",
+                "at most one {} payload is allowed, found {}",
+                profile_version.observation_schema(),
                 observations.len()
             ),
         ));
@@ -337,15 +400,9 @@ pub fn profile_report(events: &[EvidenceEvent]) -> Report {
     }
 
     // Stage 3: binding validity. An observation participates as a caller-visible denial marker only
-    // if the triple holds (schema exact + error code + origin); a marker must bind to the decision.
-    let marker = observation.filter(|obs| {
-        obs.get("caller_visible_error")
-            .map(|e| {
-                e.get("code").and_then(Value::as_i64) == Some(MARKER_ERROR_CODE)
-                    && e.get("origin").and_then(Value::as_str) == Some(MARKER_ORIGIN)
-            })
-            .unwrap_or(false)
-    });
+    // if the shared classifier returns the selected profile's exact triple.
+    let marker = observation
+        .filter(|obs| classify_denial_marker(obs) == Some(profile_version.marker_version()));
     let mut bound_marker = false;
     if let Some(obs) = marker {
         let obs_tool = obs
@@ -394,7 +451,7 @@ pub fn profile_report(events: &[EvidenceEvent]) -> Report {
     if !violations.is_empty() {
         return Report {
             schema: REPORT_SCHEMA,
-            profile: PROFILE_ID,
+            profile: profile_version.as_profile_id(),
             bundle_integrity: "pass",
             verdict: Some("invalid"),
             claims: None,
@@ -450,7 +507,7 @@ pub fn profile_report(events: &[EvidenceEvent]) -> Report {
 
     Report {
         schema: REPORT_SCHEMA,
-        profile: PROFILE_ID,
+        profile: profile_version.as_profile_id(),
         bundle_integrity: "pass",
         verdict: Some("valid"),
         claims: Some(Claims {
@@ -741,6 +798,13 @@ mod tests {
         })
     }
 
+    fn observation_payload_v1() -> Value {
+        let mut obs = observation_payload();
+        obs["schema"] = json!(OBSERVATION_SCHEMA_V1);
+        obs["caller_visible_error"]["code"] = json!(-31999);
+        obs
+    }
+
     fn establish_payload(path: &str) -> Value {
         json!({
             "schema": ESTABLISH_SCHEMA,
@@ -942,9 +1006,12 @@ mod tests {
             ErrorCode::LimitJsonDepth,
         ] {
             let err = anyhow::Error::new(VerifyError::new(ErrorClass::Limits, code, "ceiling"));
-            let value =
-                serde_json::to_value(integrity_fail_report(&err, Path::new("synthetic.bundle")))
-                    .unwrap();
+            let value = serde_json::to_value(integrity_fail_report(
+                &err,
+                Path::new("synthetic.bundle"),
+                ProfileVersion::V0,
+            ))
+            .unwrap();
             assert_eq!(value["reason_code"], "E_EVIDENCE_LIMIT_EXCEEDED", "{code}");
             assert_ne!(value["reason_code"], "E_EVIDENCE_INTEGRITY", "{code}");
             assert_ne!(value["reason_code"], "E_EVIDENCE_CONTRACT", "{code}");
@@ -964,6 +1031,7 @@ mod tests {
         let path_value = serde_json::to_value(integrity_fail_report(
             &path_err,
             Path::new("synthetic.bundle"),
+            ProfileVersion::V0,
         ))
         .unwrap();
         assert_eq!(path_value["reason_code"], "E_EVIDENCE_PATH_REJECTED");
@@ -1033,5 +1101,92 @@ mod tests {
         let value = serde_json::to_value(&report).unwrap();
         assert!(value.get("reason_code").is_none());
         assert!(value.get("next_step").is_none());
+    }
+
+    #[test]
+    fn default_profile_without_observation_is_v0() {
+        let report = profile_report(&[ev(decision_payload("deny"), 0)]);
+        assert_eq!(report.schema, REPORT_SCHEMA);
+        assert_eq!(report.profile, PROFILE_ID);
+        assert_eq!(status(&report, "caller_visible_denial"), "incomplete");
+    }
+
+    #[test]
+    fn explicit_v1_without_observation_reports_v1() {
+        let report = profile_report_for(&[ev(decision_payload("deny"), 0)], ProfileVersion::V1);
+        assert_eq!(report.schema, REPORT_SCHEMA);
+        assert_eq!(report.profile, PROFILE_ID_V1);
+        assert_eq!(status(&report, "caller_visible_denial"), "incomplete");
+    }
+
+    #[test]
+    fn v1_bound_marker_confirms_caller_visible_denial() {
+        let report = profile_report_for(
+            &[
+                ev(decision_payload("deny"), 0),
+                ev(observation_payload_v1(), 1),
+            ],
+            ProfileVersion::V1,
+        );
+        assert_eq!(report.verdict, Some("valid"));
+        assert_eq!(report.profile, PROFILE_ID_V1);
+        assert_eq!(status(&report, "caller_visible_denial"), "confirmed");
+    }
+
+    #[test]
+    fn v1_observation_under_default_v0_fails_closed() {
+        let report = profile_report(&[
+            ev(decision_payload("deny"), 0),
+            ev(observation_payload_v1(), 1),
+        ]);
+        assert_eq!(report.profile, PROFILE_ID);
+        assert_eq!(report.verdict, Some("invalid"));
+        assert!(report
+            .findings
+            .iter()
+            .any(|f| f.id == "unknown_profile_schema"));
+    }
+
+    #[test]
+    fn v0_observation_under_v1_fails_closed() {
+        let report = profile_report_for(
+            &[
+                ev(decision_payload("deny"), 0),
+                ev(observation_payload(), 1),
+            ],
+            ProfileVersion::V1,
+        );
+        assert_eq!(report.profile, PROFILE_ID_V1);
+        assert_eq!(report.verdict, Some("invalid"));
+        assert!(report
+            .findings
+            .iter()
+            .any(|f| f.id == "unknown_profile_schema"));
+    }
+
+    #[test]
+    fn mixed_v0_and_v1_observations_fail_closed() {
+        let report = profile_report(&[
+            ev(decision_payload("deny"), 0),
+            ev(observation_payload(), 1),
+            ev(observation_payload_v1(), 2),
+        ]);
+        assert_eq!(report.verdict, Some("invalid"));
+        assert!(report
+            .findings
+            .iter()
+            .any(|f| f.id == "unknown_profile_schema"));
+    }
+
+    #[test]
+    fn v1_schema_with_legacy_code_is_inert_under_v1() {
+        let mut obs = observation_payload_v1();
+        obs["caller_visible_error"]["code"] = json!(-32042);
+        let report = profile_report_for(
+            &[ev(decision_payload("deny"), 0), ev(obs, 1)],
+            ProfileVersion::V1,
+        );
+        assert_eq!(report.verdict, Some("valid"));
+        assert_eq!(status(&report, "caller_visible_denial"), "incomplete");
     }
 }

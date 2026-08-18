@@ -58,10 +58,13 @@ fn observed_proxy_refusal_event(seq: u64, tool_name: &str, target_digest: &str) 
     denied_call_observation_event(seq, tool_name, serde_json::json!(target_digest))
 }
 
-fn denied_call_observation_event(
+fn denied_call_observation_event_with(
     seq: u64,
+    schema: &str,
     tool_name: &str,
     target_digest: serde_json::Value,
+    code: serde_json::Value,
+    origin: &str,
 ) -> EvidenceEvent {
     let mut event = EvidenceEvent::new(
         "assay.mcp_call.observed",
@@ -69,14 +72,14 @@ fn denied_call_observation_event(
         "run_lint",
         seq,
         serde_json::json!({
-            "schema": "assay.denied_call_observation.v0",
+            "schema": schema,
             "call": {
                 "tool_name": tool_name,
                 "target_digest": target_digest
             },
             "caller_visible_error": {
-                "code": -32042,
-                "origin": "assay-proxy",
+                "code": code,
+                "origin": origin,
                 "reason": "credential_scope_insufficient"
             },
             "caller_visible_response_digest":
@@ -91,6 +94,36 @@ fn denied_call_observation_event(
     );
     event.time = Utc.timestamp_opt(1700000000 + seq as i64, 0).unwrap();
     event
+}
+
+fn denied_call_observation_event(
+    seq: u64,
+    tool_name: &str,
+    target_digest: serde_json::Value,
+) -> EvidenceEvent {
+    denied_call_observation_event_with(
+        seq,
+        "assay.denied_call_observation.v0",
+        tool_name,
+        target_digest,
+        serde_json::json!(-32042),
+        "assay-proxy",
+    )
+}
+
+fn v1_denied_call_observation_event(
+    seq: u64,
+    tool_name: &str,
+    target_digest: serde_json::Value,
+) -> EvidenceEvent {
+    denied_call_observation_event_with(
+        seq,
+        "assay.denied_call_observation.v1",
+        tool_name,
+        target_digest,
+        serde_json::json!(-31999),
+        "assay-proxy",
+    )
 }
 
 fn enforcement_decision_event(
@@ -264,6 +297,84 @@ fn test_w004_skips_unbindable_observation_without_target_digest() {
             .all(|finding| finding.rule_id != "ASSAY-W004"),
         "an unbindable observation must not produce an ASSAY-W004 finding"
     );
+}
+
+#[test]
+fn test_w004_flags_exact_v1_marker_without_bound_decision() {
+    let bundle = create_bundle_from_events(vec![v1_denied_call_observation_event(
+        0,
+        "fs_write",
+        serde_json::json!("sha256:call-target"),
+    )]);
+    let report = lint_bundle(Cursor::new(&bundle), VerifyLimits::default()).unwrap();
+    let findings: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.rule_id == "ASSAY-W004")
+        .collect();
+    assert_eq!(findings.len(), 1, "expected one ASSAY-W004 finding for v1");
+}
+
+#[test]
+fn test_w004_ignores_cross_pair_and_wrong_origin() {
+    let cross = denied_call_observation_event_with(
+        0,
+        "assay.denied_call_observation.v1",
+        "fs_write",
+        serde_json::json!("sha256:call-target"),
+        serde_json::json!(-32042),
+        "assay-proxy",
+    );
+    let wrong_origin = denied_call_observation_event_with(
+        1,
+        "assay.denied_call_observation.v0",
+        "fs_write",
+        serde_json::json!("sha256:call-target"),
+        serde_json::json!(-32042),
+        "upstream",
+    );
+    let bundle = create_bundle_from_events(vec![cross, wrong_origin]);
+    let report = lint_bundle(Cursor::new(&bundle), VerifyLimits::default()).unwrap();
+    assert!(
+        report
+            .findings
+            .iter()
+            .all(|finding| finding.rule_id != "ASSAY-W004"),
+        "cross-pair and wrong-origin must stay inert for ASSAY-W004"
+    );
+}
+
+#[test]
+fn test_w004_marker_presence_matches_shared_classifier() {
+    use assay_evidence::{bindable_denial_marker, classify_denial_marker};
+
+    let cases = [
+        v1_denied_call_observation_event(0, "fs_write", serde_json::json!("sha256:call-target")),
+        denied_call_observation_event(0, "fs_write", serde_json::json!("sha256:call-target")),
+        denied_call_observation_event_with(
+            0,
+            "assay.denied_call_observation.v0",
+            "fs_write",
+            serde_json::json!("sha256:call-target"),
+            serde_json::json!("-32042"),
+            "assay-proxy",
+        ),
+    ];
+    for event in cases {
+        let classified = classify_denial_marker(&event.payload);
+        let bindable = bindable_denial_marker(&event.payload).is_some();
+        let bundle = create_bundle_from_events(vec![event]);
+        let report = lint_bundle(Cursor::new(&bundle), VerifyLimits::default()).unwrap();
+        let w004 = report
+            .findings
+            .iter()
+            .any(|finding| finding.rule_id == "ASSAY-W004");
+        assert_eq!(
+            w004,
+            classified.is_some() && bindable,
+            "W004 must follow the shared classifier; classified={classified:?} bindable={bindable}"
+        );
+    }
 }
 
 /// Mirrors the shipped approval-retention block on `assay.enforcement_decision.v0`

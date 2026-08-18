@@ -1,0 +1,150 @@
+{
+  "suite": "privileged-mcp-action-v1-conformance",
+  "profile": "privileged-mcp-action/v1",
+  "spec": "docs/profiles/privileged-mcp-action/v1.md",
+  "generator": "gen_vectors.py (single generator; byte-deterministic)",
+  "normative_surface": "expected.bundle_integrity, expected.verdict and expected.claims are the normative comparison surface; first_failure_informative is informative only",
+  "corpus_digest_method": "sha256 over concat(vector sha256 + \"\\n\") in listed order",
+  "corpus_digest": "sha256:440b6fe15d1d8604acf7ba8d05504c65e40b1d891bc0fb263ee3d196fbff4466",
+  "counts": {
+    "accept": 4,
+    "reject": 3
+  },
+  "vectors": [
+    {
+      "id": "ok-001-deny-bound-v1-observation",
+      "file": "vectors/ok-001-deny-bound-v1-observation.bundle.tar.gz",
+      "sha256": "sha256:5c4f1f7e8b38f5713e438d01e47e9e71303d6f2ecee12190be25013478cc1786",
+      "description": "Deny with the exact v1 marker triple confirms caller_visible_denial.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "valid",
+        "claims": {
+          "policy_decision_recorded": {
+            "status": "confirmed",
+            "source_class": "producer_reported"
+          },
+          "caller_visible_denial": {
+            "status": "confirmed",
+            "source_class": "producer_reported"
+          },
+          "upstream_delivery": {
+            "status": "incomplete"
+          },
+          "external_side_effect": {
+            "status": "incomplete"
+          }
+        }
+      }
+    },
+    {
+      "id": "ok-002-deny-observation-missing",
+      "file": "vectors/ok-002-deny-observation-missing.bundle.tar.gz",
+      "sha256": "sha256:97e93d3e7653e24e7e475cef37e8a4e8e3f2bc83b39158457132c60f61f09973",
+      "description": "Deny without an observation stays incomplete; selected profile is still v1.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "valid",
+        "claims": {
+          "policy_decision_recorded": {
+            "status": "confirmed",
+            "source_class": "producer_reported"
+          },
+          "caller_visible_denial": {
+            "status": "incomplete"
+          },
+          "upstream_delivery": {
+            "status": "incomplete"
+          },
+          "external_side_effect": {
+            "status": "incomplete"
+          }
+        }
+      }
+    },
+    {
+      "id": "ok-003-cross-pair-inert",
+      "file": "vectors/ok-003-cross-pair-inert.bundle.tar.gz",
+      "sha256": "sha256:74d9586c634ba782fbe6d78e28381ef20ca097e7f503515e8ed9e88ffa7e0bed",
+      "description": "v1 schema with legacy -32042 is well-formed and inert, not a marker.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "valid",
+        "claims": {
+          "policy_decision_recorded": {
+            "status": "confirmed",
+            "source_class": "producer_reported"
+          },
+          "caller_visible_denial": {
+            "status": "incomplete"
+          },
+          "upstream_delivery": {
+            "status": "incomplete"
+          },
+          "external_side_effect": {
+            "status": "incomplete"
+          }
+        }
+      }
+    },
+    {
+      "id": "ok-004-allow-contradicted-by-v1-denial",
+      "file": "vectors/ok-004-allow-contradicted-by-v1-denial.bundle.tar.gz",
+      "sha256": "sha256:1b65d9794bcf9b93900a6cfea9391f281d1b483b6829a948095cfdcdc621f5b5",
+      "description": "Allow plus bound v1 marker refutes caller_visible_denial.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "valid",
+        "claims": {
+          "policy_decision_recorded": {
+            "status": "confirmed",
+            "source_class": "producer_reported"
+          },
+          "caller_visible_denial": {
+            "status": "refuted",
+            "source_class": "producer_reported"
+          },
+          "upstream_delivery": {
+            "status": "incomplete"
+          },
+          "external_side_effect": {
+            "status": "incomplete"
+          }
+        }
+      }
+    },
+    {
+      "id": "bad-201-v0-observation-under-v1",
+      "file": "vectors/bad-201-v0-observation-under-v1.bundle.tar.gz",
+      "sha256": "sha256:989580e2fb4338de420d5372ab3486d1edcda153f750e18c560b38aeb3aec485",
+      "description": "A v0 observation under the v1 profile fails closed.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "invalid"
+      },
+      "first_failure_informative": "unknown_profile_schema"
+    },
+    {
+      "id": "bad-202-mixed-marker-versions",
+      "file": "vectors/bad-202-mixed-marker-versions.bundle.tar.gz",
+      "sha256": "sha256:240919f3563771775eb59bc18fbbb667398cac9b1484c76e3582d7ba77cbbf85",
+      "description": "Mixed v0 and v1 observation records fail closed.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "invalid"
+      },
+      "first_failure_informative": "unknown_profile_schema"
+    },
+    {
+      "id": "bad-203-v1-marker-without-decision",
+      "file": "vectors/bad-203-v1-marker-without-decision.bundle.tar.gz",
+      "sha256": "sha256:621dd2ef21be97426ee143130805c2ad5a1cfa4ff1cc8f5d0b4f66e8183ddf16",
+      "description": "A v1 marker with no decision record is invalid.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "invalid"
+      },
+      "first_failure_informative": "decision_missing"
+    }
+  ]
+}

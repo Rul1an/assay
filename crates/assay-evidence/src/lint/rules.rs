@@ -1,4 +1,5 @@
 use super::{EventLocation, LintFinding, Severity};
+use crate::denial_marker::bindable_denial_marker;
 use crate::types::EvidenceEvent;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -434,31 +435,14 @@ fn extract_enforcement_decision(
     Some((key, EnforcementDecisionSummary { decision }))
 }
 
-// The marker is the SHIPPED denied-call observation carrier
-// (assay-mcp-server/src/proxy/denied_observation.rs): schema
-// `assay.denied_call_observation.v0` whose caller-visible error is the proxy deny wire shape,
-// `PROXY_DENIED = -32042` with `origin == "assay-proxy"` (assay-mcp-server/src/proxy/io.rs).
-// All three are required so an event that merely reuses the code, or merely names the origin,
-// does not read as an enforcement marker. An observation without a target digest is unbindable
-// and out of this rule's scope (binding cannot be checked for it).
-const DENIED_CALL_OBSERVATION_SCHEMA: &str = "assay.denied_call_observation.v0";
-const PROXY_DENIED_CODE: i64 = -32042;
-const PROXY_ORIGIN: &str = "assay-proxy";
-
+// Marker recognition is the shared classifier in `crate::denial_marker`.
+// Exact v0 and v1 triples only; code-only, origin-only, and cross-pairs stay inert.
+// An observation without a target digest is unbindable and out of this rule's scope.
 fn extract_proxy_refusal_marker(event: &EvidenceEvent) -> Option<EnforcementDecisionKey> {
-    let payload = &event.payload;
-    if payload.get("schema").and_then(Value::as_str) != Some(DENIED_CALL_OBSERVATION_SCHEMA) {
-        return None;
-    }
-    if payload.pointer("/caller_visible_error/code")?.as_i64()? != PROXY_DENIED_CODE
-        || payload.pointer("/caller_visible_error/origin")?.as_str()? != PROXY_ORIGIN
-    {
-        return None;
-    }
-
+    let marker = bindable_denial_marker(&event.payload)?;
     Some(EnforcementDecisionKey {
-        tool_name: non_empty(payload.pointer("/call/tool_name")?.as_str()?)?.to_string(),
-        target_digest: non_empty(payload.pointer("/call/target_digest")?.as_str()?)?.to_string(),
+        tool_name: marker.tool_name.to_string(),
+        target_digest: marker.target_digest.to_string(),
     })
 }
 

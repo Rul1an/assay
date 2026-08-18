@@ -56,7 +56,7 @@ pub enum EvidenceCmd {
     /// Promote side-effect levels against imported provider audit records (import + recompute, never a query)
     #[command(name = "verify-side-effects")]
     VerifySideEffects(verify_side_effects::VerifySideEffectsArgs),
-    /// Verify a bundle against the privileged-mcp-action/v0 open profile (claim matrix output)
+    /// Verify a bundle against privileged-mcp-action v0 or v1 (explicit --profile-version, default v0)
     #[command(name = "verify-privileged-mcp-action")]
     VerifyPrivilegedMcpAction(verify_privileged_mcp_action::VerifyPrivilegedMcpActionArgs),
     /// Verify experimental skill supply-chain carriers against the pinned contract in a bundle
