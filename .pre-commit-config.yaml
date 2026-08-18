@@ -157,6 +157,13 @@ repos:
         stages: [pre-push]
         files: ^(Cargo\.toml|scripts/docs/generate-agent-golden-path\.py|scripts/ci/(read-assay-release-tag\.sh|test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|test-golden-path-mock-bounds\.py|test-generate-agent-golden-path-check\.py|lib/(golden-path-fixture-staging\.sh|workspace_version\.py))|\.github/assay-release-tag|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|packaging/agent-plugin/.*|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.gitattributes|\.pre-commit-config\.yaml)$
 
+      - id: published-release-golden-path-contract
+        name: Published-release golden-path contract
+        entry: bash scripts/ci/test-published-release-golden-path-contract.sh
+        language: system
+        pass_filenames: false
+        files: ^(scripts/ci/(published-release-golden-path\.sh|published_release_proxy_phase\.py|test_published_release_proxy_phase\.py|check-published-release-golden-path-contract\.py|test-published-release-golden-path-contract\.sh|safe_extract_release_archive\.py|test_safe_extract_release_archive\.py|bounded_download\.py|test_bounded_download\.py|release_attestation_enforce\.sh|release_archive_inventory\.sh|test-release-attestation-enforce\.sh|fixtures/published-release-golden-path/.*)|examples/privileged-action-gate/(mock_github_mcp\.py|baseline-approved\.json|policies/no-allowance\.yaml)|\.github/workflows/(published-release-golden-path|release)\.yml|\.pre-commit-config\.yaml)$
+
       - id: claude-plugin-install-workflow-self-test
         name: Claude plugin install workflow self-test
         entry: bash scripts/ci/test-claude-plugin-install.sh --self-test

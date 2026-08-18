@@ -1,0 +1,53 @@
+name: Published Release Verification
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Exact stable release tag to exercise
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Exact stable release tag to exercise (vX.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  linux-x86_64:
+    name: Linux x86_64 post-publication journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout the exact harness
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Exercise the attested published release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path
+        run: |
+          set -euo pipefail
+          bash scripts/ci/published-release-golden-path.sh \
+            --release-tag "$RELEASE_TAG" \
+            --harness-sha "$GITHUB_SHA" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --run-root "$RUN_ROOT"
+
+      - name: Retain the replayable journey evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: published-release-golden-path-${{ inputs.release_tag }}-${{ github.sha }}
+          path: ${{ runner.temp }}/assay-published-release-golden-path/results/
+          if-no-files-found: error
+          retention-days: 30
