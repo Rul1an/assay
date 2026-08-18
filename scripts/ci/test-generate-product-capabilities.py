@@ -231,6 +231,11 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
         self.assertIsNone(capability["target_release"])
         self.assertEqual(capability["platforms"], ["linux-x86_64"])
         self.assertEqual(
+            capability["profile_versions"],
+            [{"profile": "privileged-mcp-action", "version": "v0"}],
+        )
+        self.assertEqual(capability["enforcement_points"], ["cli", "mcp-proxy"])
+        self.assertEqual(
             capability["limitations"],
             [
                 "The retained post-publication proof currently covers only the published Linux x86_64 CLI and MCP archives."
