@@ -35,6 +35,7 @@ cd "$repo_root"
 
 GENERATORS=(
   scripts/docs/generate-agent-golden-path.py
+  scripts/docs/generate-product-capabilities.py
   scripts/docs/generate-crate-deps.sh
   scripts/docs/generate-module-map.sh
   scripts/docs/update-architecture-docs.sh
@@ -55,6 +56,8 @@ GENERATED=(
   docs/generated/module-map.mermaid
   docs/AIcontext/architecture-diagrams.md
   docs/guides/agent-golden-path.md
+  docs/reference/product-support.md
+  docs/generated/product-claim-proof.md
 )
 
 # These outputs are wholly recreated and must not survive from the pre-seeded scratch tree. Starting
@@ -69,6 +72,8 @@ FRESH_GENERATED=(
   packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/baseline-approved.json
   packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/no-allowance.yaml
   docs/generated/agent-golden-path.json
+  docs/reference/product-support.md
+  docs/generated/product-claim-proof.md
 )
 
 scratch="$(mktemp -d)"
