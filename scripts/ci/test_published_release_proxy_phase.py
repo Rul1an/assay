@@ -26,7 +26,7 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
         fake_output_bytes: int = 0,
         timeout_seconds: int = 60,
     ) -> tuple[subprocess.CompletedProcess[bytes], Path]:
-        temporary = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        temporary = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="proxy phase ")))
         fake = temporary / "assay-mcp-server"
         fake.write_text(
             textwrap.dedent(
@@ -79,6 +79,7 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
         ]
         environment = os.environ.copy()
         environment["GH_TOKEN"] = "must-not-reach-release-code"
+        environment["GITHUB_TOKEN"] = "must-not-reach-release-code"
         environment["PYTHONPATH"] = "/must/not/reach/release/code"
         environment["PATH"] = f"{temporary}{os.pathsep}{environment['PATH']}"
         completed = subprocess.run(
@@ -114,6 +115,7 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
             (results / "fake-environment.json").read_text(encoding="utf-8")
         )
         self.assertNotIn("GH_TOKEN", child_environment)
+        self.assertNotIn("GITHUB_TOKEN", child_environment)
         self.assertNotIn("PYTHONPATH", child_environment)
 
     def test_success_records_the_executed_argv_once(self) -> None:

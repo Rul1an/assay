@@ -347,6 +347,16 @@ expect_proxy_helper_behavior_failure \
   '            completed = subprocess.run(' \
   $'            subprocess.run(argv, input=request, stdout=stdout_handle, stderr=stderr_handle, check=False)\n            completed = subprocess.run('
 
+expect_proxy_helper_behavior_failure \
+  "proxy-shell-interpretation-enabled" \
+  $'            completed = subprocess.run(\n                argv,' \
+  $'            completed = subprocess.run(\n                " ".join(argv),\n                shell=True,'
+
+expect_proxy_helper_behavior_failure \
+  "github-token-added-to-child-environment" \
+  '("HOME", "PATH", "LANG", "LC_ALL", "TZ")' \
+  '("HOME", "PATH", "LANG", "LC_ALL", "TZ", "GITHUB_TOKEN")'
+
 expect_mutation_failure \
   "proxy-block-unreachable" "driver.sh" \
   'proxy_status=0' $'if false; then\nproxy_status=0' \
