@@ -43,6 +43,10 @@ def minimal_manifest() -> dict:
 def run_generator(manifest: dict, root: Path) -> subprocess.CompletedProcess[str]:
     source = root / "capabilities.json"
     source.write_text(json.dumps(manifest), encoding="utf-8")
+    return run_generator_source(source, root)
+
+
+def run_generator_source(source: Path, root: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             "python3",
@@ -114,6 +118,54 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("proof has unknown fields: status", result.stderr)
+
+    def test_rejects_unknown_fields_at_every_manifest_level(self) -> None:
+        cases = []
+        root_manifest = minimal_manifest()
+        root_manifest["capabilities"][0]["claims"][0]["proofs"] = [{"run_id": 1}]
+        root_manifest["status"] = "certified"
+        cases.append((root_manifest, "manifest has unknown fields: status"))
+
+        capability_manifest = minimal_manifest()
+        capability_manifest["capabilities"][0]["claims"][0]["proofs"] = [
+            {"run_id": 1}
+        ]
+        capability_manifest["capabilities"][0]["certification"] = "certified"
+        cases.append(
+            (capability_manifest, "capability has unknown fields: certification")
+        )
+
+        claim_manifest = minimal_manifest()
+        claim_manifest["capabilities"][0]["claims"][0]["proofs"] = [{"run_id": 1}]
+        claim_manifest["capabilities"][0]["claims"][0]["status"] = "certified"
+        cases.append((claim_manifest, "claim has unknown fields: status"))
+
+        gap_manifest = minimal_manifest()
+        claim = gap_manifest["capabilities"][0]["claims"][0]
+        claim.pop("proofs")
+        claim["gap"] = {"issue": "2486", "status": "closed"}
+        cases.append((gap_manifest, "gap has unknown fields: status"))
+
+        for manifest, message in cases:
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as tmp:
+                result = run_generator(manifest, Path(tmp))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(message, result.stderr)
+
+    def test_rejects_duplicate_json_object_keys(self) -> None:
+        manifest = minimal_manifest()
+        manifest["capabilities"][0]["claims"][0]["proofs"] = [{"run_id": 1}]
+        raw = json.dumps(manifest).replace(
+            '"run_id": 1', '"run_id": 0, "run_id": 1'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "capabilities.json"
+            source.write_text(raw, encoding="utf-8")
+            result = run_generator_source(source, root)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("duplicate JSON object key: run_id", result.stderr)
 
     def test_published_mcp_capabilities_list_all_shipped_protocol_versions(self) -> None:
         manifest = json.loads(

@@ -9,6 +9,7 @@ from pathlib import Path
 
 MATURITY_VALUES = {"stable", "beta", "experimental", "verifier-only", "planned"}
 AXIS_VALUES = {"observation", "policy_decision", "outcome"}
+MANIFEST_FIELDS = {"schema", "capabilities"}
 CAPABILITY_FIELDS = {
     "id",
     "label",
@@ -24,6 +25,8 @@ CAPABILITY_FIELDS = {
     "non_claims",
     "claims",
 }
+CLAIM_FIELDS = {"id", "axis", "proofs", "gap"}
+GAP_FIELDS = {"issue"}
 PROOF_FIELDS = {"url", "run_id", "commit_sha", "digest", "artifact"}
 ID_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 COMMIT_SHA_PATTERN = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
@@ -79,6 +82,29 @@ def require_release(value: object, field: str) -> str:
     return release
 
 
+def require_object_fields(
+    value: object, allowed: set[str], required: set[str], context: str
+) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError(f"{context} must be an object")
+    unknown = set(value).difference(allowed)
+    if unknown:
+        raise ValueError(f"{context} has unknown fields: {', '.join(sorted(unknown))}")
+    missing = required.difference(value)
+    if missing:
+        raise ValueError(f"{context} is missing fields: {', '.join(sorted(missing))}")
+    return value
+
+
+def reject_duplicate_object_keys(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key: {key}")
+        result[key] = value
+    return result
+
+
 def validate_protocol_versions(value: object, capability_id: str) -> list[dict]:
     if not isinstance(value, list):
         raise ValueError(f"capability {capability_id} protocol_versions must be an array")
@@ -120,13 +146,7 @@ def proof_has_immutable_identity(proof: dict) -> bool:
 
 
 def validate_proof(proof: object, claim_id: str) -> dict:
-    if not isinstance(proof, dict):
-        raise ValueError(f"claim {claim_id} proof must be an object")
-    unknown_fields = set(proof).difference(PROOF_FIELDS)
-    if unknown_fields:
-        raise ValueError(
-            f"claim {claim_id} proof has unknown fields: {', '.join(sorted(unknown_fields))}"
-        )
+    proof = require_object_fields(proof, PROOF_FIELDS, set(), f"claim {claim_id} proof")
     if "run_id" in proof:
         run_id = proof["run_id"]
         if not isinstance(run_id, int) or isinstance(run_id, bool) or run_id <= 0:
@@ -149,8 +169,11 @@ def validate_proof(proof: object, claim_id: str) -> dict:
 
 
 def load_manifest(path: Path) -> dict:
-    manifest = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(manifest, dict) or manifest.get("schema") != "assay.product-capabilities.v0":
+    manifest = json.loads(
+        path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicate_object_keys
+    )
+    manifest = require_object_fields(manifest, MANIFEST_FIELDS, MANIFEST_FIELDS, "manifest")
+    if manifest.get("schema") != "assay.product-capabilities.v0":
         raise ValueError("schema must be assay.product-capabilities.v0")
     capabilities = manifest.get("capabilities")
     if not isinstance(capabilities, list):
@@ -159,11 +182,9 @@ def load_manifest(path: Path) -> dict:
     capability_ids: set[str] = set()
     claim_ids: set[str] = set()
     for capability in capabilities:
-        if not isinstance(capability, dict):
-            raise ValueError("each capability must be an object")
-        missing = CAPABILITY_FIELDS.difference(capability)
-        if missing:
-            raise ValueError(f"capability is missing fields: {', '.join(sorted(missing))}")
+        capability = require_object_fields(
+            capability, CAPABILITY_FIELDS, CAPABILITY_FIELDS, "capability"
+        )
         capability_id = require_id(capability["id"], "capability id")
         if capability_id in capability_ids:
             raise ValueError(f"duplicate capability id: {capability_id}")
@@ -197,8 +218,7 @@ def load_manifest(path: Path) -> dict:
         if not isinstance(claims, list):
             raise ValueError(f"capability {capability_id} claims must be an array")
         for claim in claims:
-            if not isinstance(claim, dict):
-                raise ValueError(f"capability {capability_id} claim must be an object")
+            claim = require_object_fields(claim, CLAIM_FIELDS, {"id", "axis"}, "claim")
             claim_id = require_id(claim.get("id"), "claim id")
             if claim_id in claim_ids:
                 raise ValueError(f"duplicate claim id: {claim_id}")
@@ -218,8 +238,8 @@ def load_manifest(path: Path) -> dict:
                 for proof in proofs:
                     validate_proof(proof, claim_id)
             else:
-                gap = claim["gap"]
-                issue = gap.get("issue") if isinstance(gap, dict) else None
+                gap = require_object_fields(claim["gap"], GAP_FIELDS, GAP_FIELDS, "gap")
+                issue = gap["issue"]
                 if not isinstance(issue, str) or re.fullmatch(r"[1-9][0-9]*", issue) is None:
                     raise ValueError(f"claim {claim_id} gap.issue must be a positive issue number")
         claims.sort(key=lambda item: item["id"])
