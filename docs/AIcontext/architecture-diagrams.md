@@ -881,6 +881,7 @@ flowchart TB
     assay_it --> assay_core
     assay_mcp_server --> assay_common
     assay_mcp_server --> assay_core
+    assay_mcp_server --> assay_evidence
     assay_mcp_server --> assay_metrics
     assay_metrics --> assay_common
     assay_metrics --> assay_core

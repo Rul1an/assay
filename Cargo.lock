@@ -418,6 +418,7 @@ dependencies = [
  "anyhow",
  "assay-common",
  "assay-core",
+ "assay-evidence",
  "assay-metrics",
  "aws-lc-rs",
  "base64",

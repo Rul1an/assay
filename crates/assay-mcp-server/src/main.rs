@@ -74,7 +74,7 @@ enum Mode {
         /// fails closed (it is not forwarded).
         #[arg(long)]
         enforcement_decision_out: Option<PathBuf>,
-        /// Optional NDJSON path for `assay.denied_call_observation.v0`: one record per answered
+        /// Optional NDJSON path for `assay.denied_call_observation.v1`: one record per answered
         /// proxy denial, retaining a digest/projection of the caller-visible denial surface. This is
         /// an observation carrier, not a policy verdict.
         #[arg(long)]

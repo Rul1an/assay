@@ -286,12 +286,26 @@ regardless (a missing deny-record is a completeness gap, logged, not a safety ga
 
 ## 11a. Denied-call observation record (separate carrier)
 
-The `assay.denied_call_observation.v0` artifact is an optional sibling carrier for the caller-visible
+The `assay.denied_call_observation.v1` artifact is an optional sibling carrier for the caller-visible
 proxy denial surface. It exists for post-hoc review of attribution claims such as "the caller saw an
 Assay proxy denial", without turning the observation into a policy verdict. The record carries the
-called tool name, the classified target digest when classification produced one, the proxy error code,
-`origin: assay-proxy`, the machine reason, and a `sha256:` digest of the exact JSON-RPC response line
-sent to the caller.
+called tool name, the classified target digest when classification produced one, the Assay deny code
+`-31999`, `origin: assay-proxy`, the machine reason, and a `sha256:` digest of the exact JSON-RPC
+response-line bytes sent to the caller.
+
+**Assay-owned application codes** sit outside JSON-RPC's reserved `-32768..=-32000` band. Discriminator
+is `error.data.origin = assay-proxy`, not the integer alone:
+
+| Meaning | Old (do not emit) | New | Observation |
+|---|---:|---:|---|
+| unsupported | `-32040` | `-31997` | none |
+| failed | `-32041` | `-31998` | none |
+| denied | `-32042` | `-31999` | `assay.denied_call_observation.v1` / `-31999` / `assay-proxy` |
+| upstream reserved elicitation | `-32042` (not Assay) | `-32042` unchanged | none |
+
+An upstream reserved `-32042` (MCP URL elicitation) is relayed value-equivalently and does not mint
+an Assay observation. Live producer output is valid under
+`assay evidence verify-privileged-mcp-action --profile-version v1`. The verifier default stays `v0`.
 
 **Implementation:** opt-in via `--denied-call-observation-out <path>` in `proxy-enforce`; the proxy
 appends one compact NDJSON record for each answered `proxy_denied` `tools/call`. The carrier is not
@@ -304,13 +318,13 @@ not certify safety or maliciousness, and does not replace `assay.enforcement_dec
 that wants to bind a caller-visible proxy denial to a policy decision must join this observation record
 to a digest-bound `assay.enforcement_decision.v0` deny record for the same tool and target digest.
 
-**Correlation (forward-looking, not shipped):** v0 carries no request-id, so a record is correlated to
-its call and to an upstream observation by order + content. An optional, caller-supplied, opaque
-per-call correlation id — echoed by the proxy, never minted by it (so the record stays deterministic),
-validated to a bounded safe shape before it lands (so the id can't smuggle content into the evidence),
-and carrying no transport claim — is specified as the clean join-key in
-[enforcement-decision-correlation-id.md](enforcement-decision-correlation-id.md). It is additive within
-v0, not a schema bump.
+**Correlation (forward-looking, not shipped):** the observation record carries no request-id, so a
+record is correlated to its call and to an upstream observation by order + content. An optional,
+caller-supplied, opaque per-call correlation id — echoed by the proxy, never minted by it (so the
+record stays deterministic), validated to a bounded safe shape before it lands (so the id can't
+smuggle content into the evidence), and carrying no transport claim — is specified as the clean
+join-key in [enforcement-decision-correlation-id.md](enforcement-decision-correlation-id.md). It is
+additive within the current observation schema, not a further schema bump.
 
 ## 12. Failure semantics (extends P61a)
 
