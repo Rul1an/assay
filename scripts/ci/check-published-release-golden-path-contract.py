@@ -17,6 +17,31 @@ def require(text: str, needle: str, message: str, problems: list[str]) -> None:
         problems.append(message)
 
 
+def active_lines(text: str) -> list[str]:
+    """Return executable/config lines, excluding blank and comment-only lines."""
+    return [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+
+
+def mapping_block(text: str, key: str, indent: int, problems: list[str]) -> str:
+    marker = f"{' ' * indent}{key}:"
+    lines = text.splitlines()
+    starts = [index for index, line in enumerate(lines) if line == marker]
+    if len(starts) != 1:
+        problems.append(f"expected exactly one {key} mapping, found {len(starts)}")
+        return ""
+    start = starts[0]
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        if line and not line.startswith(" "):
+            end = index
+            break
+        if line.startswith(" " * indent) and not line.startswith(" " * (indent + 1)):
+            end = index
+            break
+    return "\n".join(lines[start:end])
+
+
 def validate_manifest(path: Path, source_root: Path, problems: list[str]) -> None:
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
@@ -82,6 +107,13 @@ def validate_contract(
         problems,
     )
     require(workflow_text, "--harness-sha \"$GITHUB_SHA\"", "workflow must bind the harness head", problems)
+    require(workflow_text, "--workflow-run-id \"$GITHUB_RUN_ID\"", "workflow must bind its run id", problems)
+    require(
+        workflow_text,
+        "--workflow-run-attempt \"$GITHUB_RUN_ATTEMPT\"",
+        "workflow must bind its run attempt",
+        problems,
+    )
     require(workflow_text, "if: always()", "workflow must retain partial failure evidence", problems)
     require(workflow_text, "retention-days: 30", "workflow must pin artifact retention", problems)
     require(workflow_text, "if-no-files-found: error", "missing replay evidence must fail closed", problems)
@@ -105,7 +137,7 @@ def validate_contract(
     require(
         release_text,
         "uses: ./.github/workflows/published-release-golden-path.yml",
-        "release transaction must call the published-release gate",
+        "release transaction must call published-release verification",
         problems,
     )
     require(
@@ -117,23 +149,53 @@ def validate_contract(
     require(
         release_text,
         "needs: [release-contract, release]",
-        "published-release gate must wait until release publication completes",
+        "published-release verification must wait until release publication completes",
         problems,
     )
+    caller = mapping_block(release_text, "published-release-golden-path", 2, problems)
+    caller_lines = active_lines(caller)
+    reusable_call = "uses: ./.github/workflows/published-release-golden-path.yml"
+    if active_lines(release_text).count(reusable_call) != 1:
+        problems.append("release transaction must contain exactly one published-release workflow caller")
+    if reusable_call not in caller_lines:
+        problems.append("published-release job must be the reusable workflow caller")
+    if caller_lines.count("needs: [release-contract, release]") != 1:
+        problems.append("published-release job must uniquely wait for release publication")
+    if any(line.startswith("continue-on-error:") for line in caller_lines):
+        problems.append("release caller must not ignore failed published-release verification")
+    if caller_lines.count("if: >-") != 1:
+        problems.append("published-release job must have exactly one stable-release condition")
+    for condition in (
+        "startsWith(github.ref, 'refs/tags/v')",
+        "github.event_name == 'workflow_dispatch'",
+        "!contains(github.ref, '-rc')",
+        "!contains(github.ref, '-beta')",
+        "!contains(github.event.inputs.version, '-rc')",
+        "!contains(github.event.inputs.version, '-beta')",
+    ):
+        if condition not in caller:
+            problems.append(f"published-release caller condition lost: {condition}")
+    if caller_lines.count("release_tag: ${{ needs.release-contract.outputs.version }}") != 1:
+        problems.append("published-release caller must pass the validated version exactly once")
+    if caller_lines.count("name: Verify the published release journey") != 1:
+        problems.append("release transaction must describe this as post-publication verification")
 
+    driver_lines = active_lines(driver_text)
     required_driver_fragments = {
         "exact stable tag": "release tag must be an exact stable vX.Y.Z tag",
         "fresh run root": "run root already exists; refusing to reuse prior evidence",
-        "proof-kit API digest": "proof-kit digest differs from the release API",
-        "canonical attestation verifier": (
-            '"$kit_root/verify-offline.sh" --assets-dir "$downloads" '
-            '>"$results/attestation-verify.log" 2>&1'
-        ),
+        "stable published release": "release tag is still draft or prerelease",
+        "external tag source": '"$GH_BIN" api "repos/${REPO}/git/ref/tags/${release_tag}"',
+        "reviewed attestation verifier": 'bash "$ROOT/scripts/ci/release_attestation_enforce.sh"',
+        "compressed asset ceiling": "release asset exceeds compressed-size ceiling",
+        "bounded archive extractor": '"$PYTHON_BIN" "$ROOT/scripts/ci/safe_extract_release_archive.py"',
+        "retained release inputs": 'downloads="$results/release-assets"',
         "disposable HOME": 'export HOME="$run_root/home"',
         "restricted PATH": 'export PATH="$install_root/bin:/usr/bin:/bin"',
         "installed CLI resolution": '"$(command -v assay)" == "$install_root/bin/assay"',
         "installed MCP resolution": '"$(command -v assay-mcp-server)" == "$install_root/bin/assay-mcp-server"',
         "harness head": '"head_sha": harness_sha',
+        "workflow run binding": '"workflow_run_id": workflow_run_id',
         "separate release provenance": '"release": {',
         "separate harness provenance": '"harness": {',
         "produced bundle": 'bundle="$results/produced.bundle.tar.gz"',
@@ -141,18 +203,67 @@ def validate_contract(
         "verify produced bundle": 'assay evidence verify-privileged-mcp-action "$bundle" --format json',
         "tamper failure code": 'reason_code == "E_EVIDENCE_INTEGRITY"',
         "artifact manifest": '"assay.published_release_golden_path.artifacts.v1"',
+        "claim ceiling": "the harness is not a shipped release asset",
     }
     for label, fragment in required_driver_fragments.items():
         require(driver_text, fragment, f"driver lost {label}", problems)
     if "|| true" in driver_text or "set +e" in driver_text:
         problems.append("driver suppresses a failure instead of recording its exact status")
-    verifier = driver_text.find(
-        '"$kit_root/verify-offline.sh" --assets-dir "$downloads" '
-        '>"$results/attestation-verify.log" 2>&1'
-    )
-    first_product_call = driver_text.find('run_capture "assay-version"')
-    if verifier < 0 or first_product_call < 0 or verifier > first_product_call:
-        problems.append("release attestations must verify before the first Assay invocation")
+    exact_active_lines = {
+        '[[ "$release_tag" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]] || fail "release tag must be an exact stable vX.Y.Z tag"': (
+            "stable release-tag validation drifted"
+        ),
+        '"$JQ_BIN" -e \'.draft == false and .prerelease == false\' "$release_api" >/dev/null \\': (
+            "published release-state validation drifted"
+        ),
+        '[[ "$actual_digest" == "$api_digest" ]] || fail "downloaded asset digest differs: $asset_name"': (
+            "downloaded asset digest comparison drifted"
+        ),
+        '"$GH_BIN" api "repos/${REPO}/git/ref/tags/${release_tag}" >"$tag_ref"': (
+            "external release-tag source binding drifted"
+        ),
+        'SOURCE_DIGEST="$source_digest" \\': "attestation source digest is not externally bound",
+        'downloads="$results/release-assets"': "release inputs must be retained with the run artifact",
+        'download_release_asset "$cli_asset" 67108864': "CLI compressed-size ceiling drifted",
+        'download_release_asset "$mcp_asset" 33554432': "MCP compressed-size ceiling drifted",
+        '"$downloads/$cli_asset" "$cli_extract" --max-decoded-bytes 134217728': "CLI safe-extraction ceiling drifted",
+        '"$downloads/$mcp_asset" "$mcp_extract" --max-decoded-bytes 67108864': "MCP safe-extraction ceiling drifted",
+        '--bundle-out "$bundle" --run-id "published-release-${workflow_run_id}-${workflow_run_attempt}" \\': (
+            "evidence run id is not bound to the workflow invocation"
+        ),
+    }
+    for line, message in exact_active_lines.items():
+        if driver_lines.count(line) != 1:
+            problems.append(message)
+    if any("verify-offline.sh" in line or "release-proof-kit" in line for line in driver_lines):
+        problems.append("driver must not execute or trust code carried by the release proof kit")
+    verifier_line = 'bash "$ROOT/scripts/ci/release_attestation_enforce.sh" \\'
+    if driver_lines.count(verifier_line) != 1:
+        problems.append("driver must execute the reviewed attestation verifier exactly once")
+    else:
+        verifier = driver_lines.index(verifier_line)
+        product_boundaries = [
+            '"$downloads/$cli_asset" "$cli_extract" --max-decoded-bytes 134217728',
+            '"$downloads/$mcp_asset" "$mcp_extract" --max-decoded-bytes 67108864',
+            'cp "${cli_candidates[0]}" "$install_root/bin/assay"',
+            'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"',
+            'run_capture "assay-version" 0 "$results/assay-version.txt" "$results/assay-version.stderr" assay version',
+        ]
+        for boundary in product_boundaries:
+            if boundary not in driver_lines or verifier > driver_lines.index(boundary):
+                problems.append(f"release attestations must precede product use: {boundary}")
+    exact_assignments = [
+        'cli_asset="assay-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"',
+        'mcp_asset="assay-mcp-server-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"',
+    ]
+    for assignment in exact_assignments:
+        if driver_lines.count(assignment) != 1:
+            problems.append(f"Linux x86_64 product asset assignment drifted: {assignment}")
+    inspect_command = 'assay evidence show --format json -- "$bundle"'
+    if driver_lines.count(inspect_command) != 1:
+        problems.append("driver must inspect the same bundle it produced exactly once")
+    if sum("assay evidence show" in line for line in driver_lines) != 1:
+        problems.append("driver contains an alternate evidence-inspection target")
     required_artifacts = [
         "run-pin.json",
         "commands.ndjson",
@@ -162,6 +273,9 @@ def validate_contract(
         "verify.json",
         "tamper-verify.json",
         "enforcement.sarif",
+        "release-api.json",
+        "tag-ref.json",
+        "attestation-summary.json",
     ]
     for name in required_artifacts:
         if f'"{name}"' not in driver_text:

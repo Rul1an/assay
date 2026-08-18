@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# jq programs intentionally use single quotes so shell variables are not expanded.
+# shellcheck disable=SC2016
 set -euo pipefail
 
 GH_BIN="${GH_BIN:-gh}"
@@ -8,7 +10,7 @@ OUT_SUMMARY="${OUT_SUMMARY:?OUT_SUMMARY is required}"
 OUT_RAW_DIR="${OUT_RAW_DIR:?OUT_RAW_DIR is required}"
 REPO="${REPO:?REPO is required}"
 SIGNER_WORKFLOW="${SIGNER_WORKFLOW:?SIGNER_WORKFLOW is required}"
-SOURCE_REF="${SOURCE_REF:?SOURCE_REF is required}"
+SOURCE_REF="${SOURCE_REF:-}"
 SOURCE_DIGEST="${SOURCE_DIGEST:?SOURCE_DIGEST is required}"
 CERT_OIDC_ISSUER="${CERT_OIDC_ISSUER:-https://token.actions.githubusercontent.com}"
 PREDICATE_TYPE="${PREDICATE_TYPE:-https://slsa.dev/provenance/v1}"
@@ -63,17 +65,22 @@ for asset in "${assets[@]}"; do
   verify_json=""
   attempt=1
   delay_seconds="$ATTESTATION_VERIFY_RETRY_DELAY_SECONDS"
+  verify_args=(
+    attestation verify "$asset"
+    --repo "$REPO"
+    --signer-workflow "$SIGNER_WORKFLOW"
+    --cert-oidc-issuer "$CERT_OIDC_ISSUER"
+    --predicate-type "$PREDICATE_TYPE"
+    --source-digest "$SOURCE_DIGEST"
+    --deny-self-hosted-runners
+    --format json
+  )
+  if [ -n "$SOURCE_REF" ]; then
+    verify_args+=(--source-ref "$SOURCE_REF")
+  fi
 
   while :; do
-    if verify_json="$("$GH_BIN" attestation verify "$asset" \
-      --repo "$REPO" \
-      --signer-workflow "$SIGNER_WORKFLOW" \
-      --cert-oidc-issuer "$CERT_OIDC_ISSUER" \
-      --predicate-type "$PREDICATE_TYPE" \
-      --source-digest "$SOURCE_DIGEST" \
-      --source-ref "$SOURCE_REF" \
-      --deny-self-hosted-runners \
-      --format json)"; then
+    if verify_json="$("$GH_BIN" "${verify_args[@]}")"; then
       break
     fi
 
@@ -138,7 +145,7 @@ done
       repo: $repo,
       signer_workflow: $signer_workflow,
       cert_oidc_issuer: $cert_oidc_issuer,
-      source_ref: $source_ref,
+    source_ref: (if $source_ref == "" then null else $source_ref end),
       source_digest: $source_digest,
       predicate_type: $predicate_type,
       deny_self_hosted_runners: true

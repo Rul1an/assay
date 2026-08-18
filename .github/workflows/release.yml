@@ -755,10 +755,10 @@ jobs:
     with:
       version: ${{ needs.release-contract.outputs.version }}
 
-  # The release must exist before this job starts: the path intentionally downloads and verifies
-  # the published bytes rather than reusing build artifacts from this workflow.
+  # This is deliberately post-publication verification: it downloads the public bytes rather than
+  # reusing build artifacts. A failure turns the release workflow red but cannot unpublish assets.
   published-release-golden-path:
-    name: Gate the published release journey
+    name: Verify the published release journey
     needs: [release-contract, release]
     if: >-
       (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-rc') && !contains(github.ref, '-beta')) ||

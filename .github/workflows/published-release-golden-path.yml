@@ -1,4 +1,4 @@
-name: Published Release Golden Path
+name: Published Release Verification
 
 on:
   workflow_call:
@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   linux-x86_64:
-    name: Linux x86_64 install to verified evidence
+    name: Linux x86_64 post-publication journey
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -39,6 +39,8 @@ jobs:
           bash scripts/ci/published-release-golden-path.sh \
             --release-tag "$RELEASE_TAG" \
             --harness-sha "$GITHUB_SHA" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
             --run-root "$RUN_ROOT"
 
       - name: Retain the replayable journey evidence

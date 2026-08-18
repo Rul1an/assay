@@ -16,13 +16,15 @@ fail() {
 }
 
 usage() {
-  echo "usage: published-release-golden-path.sh --release-tag vX.Y.Z --harness-sha <40-hex> --run-root <abs-path>" >&2
+  echo "usage: published-release-golden-path.sh --release-tag vX.Y.Z --harness-sha <40-hex> --workflow-run-id <id> --workflow-run-attempt <n> --run-root <abs-path>" >&2
   exit 2
 }
 
 release_tag=""
 harness_sha=""
 run_root=""
+workflow_run_id=""
+workflow_run_attempt=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --release-tag)
@@ -40,27 +42,38 @@ while [[ "$#" -gt 0 ]]; do
       run_root="$2"
       shift 2
       ;;
+    --workflow-run-id)
+      [[ "$#" -ge 2 ]] || usage
+      workflow_run_id="$2"
+      shift 2
+      ;;
+    --workflow-run-attempt)
+      [[ "$#" -ge 2 ]] || usage
+      workflow_run_attempt="$2"
+      shift 2
+      ;;
     *) usage ;;
   esac
 done
 
 [[ "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "release tag must be an exact stable vX.Y.Z tag"
 [[ "$harness_sha" =~ ^[0-9a-f]{40}$ ]] || fail "harness SHA must be exactly 40 lowercase hex characters"
+[[ "$workflow_run_id" =~ ^[A-Za-z0-9_.-]+$ ]] || fail "workflow run id has an unsafe shape"
+[[ "$workflow_run_attempt" =~ ^[0-9]+$ ]] || fail "workflow run attempt must be numeric"
 [[ "$run_root" = /* ]] || fail "run root must be absolute"
 [[ ! -e "$run_root" ]] || fail "run root already exists; refusing to reuse prior evidence: $run_root"
 [[ -f "$HARNESS_MANIFEST" ]] || fail "harness manifest is missing"
 
-for required in "$GH_BIN" "$JQ_BIN" "$PYTHON_BIN" sha256sum tar; do
+for required in "$GH_BIN" "$JQ_BIN" "$PYTHON_BIN" sha256sum; do
   command -v "$required" >/dev/null 2>&1 || fail "missing required command: $required"
 done
 
-downloads="$run_root/downloads"
-proof_root="$run_root/proof"
 install_root="$run_root/install"
 harness_root="$run_root/harness"
 session_root="$run_root/session"
 results="$run_root/results"
-mkdir -p "$downloads" "$proof_root" "$install_root/bin" "$harness_root" "$session_root" "$results"
+downloads="$results/release-assets"
+mkdir -p "$downloads" "$install_root/bin" "$harness_root" "$session_root" "$results/attestation-raw"
 
 commands_file="$results/commands.ndjson"
 : >"$commands_file"
@@ -121,50 +134,73 @@ report_path.write_text(
 PY
 
 version="${release_tag#v}"
-proof_asset="assay-${release_tag}-release-proof-kit.tar.gz"
 release_api="$results/release-api.json"
 "$GH_BIN" api "repos/${REPO}/releases/tags/${release_tag}" >"$release_api"
-"$GH_BIN" release download "$release_tag" --repo "$REPO" --dir "$downloads" --pattern "$proof_asset" --clobber
-
-proof_digest="$($JQ_BIN -er --arg name "$proof_asset" '.assets[] | select(.name == $name) | .digest' "$release_api")"
-[[ "$proof_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "release API omitted the proof-kit sha256 digest"
-actual_proof_digest="sha256:$(sha256sum "$downloads/$proof_asset" | cut -d' ' -f1)"
-[[ "$actual_proof_digest" == "$proof_digest" ]] || fail "proof-kit digest differs from the release API"
-
-tar -xzf "$downloads/$proof_asset" -C "$proof_root"
-kit_root="$proof_root/release-proof-kit"
-kit_manifest="$kit_root/manifest.json"
-[[ -x "$kit_root/verify-offline.sh" ]] || fail "release proof kit has no executable offline verifier"
-[[ "$($JQ_BIN -er '.tag' "$kit_manifest")" == "$release_tag" ]] || fail "proof-kit tag differs from requested release"
-[[ "$($JQ_BIN -er '.repo' "$kit_manifest")" == "$REPO" ]] || fail "proof-kit repository differs from requested repository"
-source_digest="$($JQ_BIN -er '.source_digest' "$kit_manifest")"
-[[ "$source_digest" =~ ^[0-9a-f]{40}$ ]] || fail "proof-kit source digest is not a commit SHA"
-
-while IFS= read -r asset_name; do
-  "$GH_BIN" release download "$release_tag" --repo "$REPO" --dir "$downloads" --pattern "$asset_name" --clobber
-  expected_api_digest="$($JQ_BIN -er --arg name "$asset_name" '.assets[] | select(.name == $name) | .digest' "$release_api")"
-  expected_kit_digest="sha256:$($JQ_BIN -er --arg name "$asset_name" '.assets[] | select(.name == $name) | .sha256' "$kit_manifest")"
-  actual_digest="sha256:$(sha256sum "$downloads/$asset_name" | cut -d' ' -f1)"
-  [[ "$expected_api_digest" == "$expected_kit_digest" ]] || fail "release API and proof kit disagree for $asset_name"
-  [[ "$actual_digest" == "$expected_kit_digest" ]] || fail "downloaded asset digest differs for $asset_name"
-done < <("$JQ_BIN" -er '.assets[].name' "$kit_manifest")
-
-# This is the release's canonical offline attestation policy. It must complete before installation.
-"$kit_root/verify-offline.sh" --assets-dir "$downloads" >"$results/attestation-verify.log" 2>&1
-record_command "verify-release-attestations" 0 "$kit_root/verify-offline.sh" --assets-dir "$downloads"
-
+"$JQ_BIN" -e '.draft == false and .prerelease == false' "$release_api" >/dev/null \
+  || fail "release tag is still draft or prerelease"
 cli_asset="assay-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"
 mcp_asset="assay-mcp-server-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"
-for asset in "$cli_asset" "$mcp_asset"; do
-  "$JQ_BIN" -e --arg name "$asset" '.assets[] | select(.name == $name)' "$kit_manifest" >/dev/null \
-    || fail "proof kit does not attest required Linux asset: $asset"
+
+tag_ref="$results/tag-ref.json"
+"$GH_BIN" api "repos/${REPO}/git/ref/tags/${release_tag}" >"$tag_ref"
+source_type="$($JQ_BIN -er '.object.type' "$tag_ref")"
+source_digest="$($JQ_BIN -er '.object.sha' "$tag_ref")"
+for depth in 1 2 3 4; do
+  [[ "$source_type" != "tag" ]] || {
+    tag_object="$results/tag-object-${depth}.json"
+    "$GH_BIN" api "repos/${REPO}/git/tags/${source_digest}" >"$tag_object"
+    source_type="$($JQ_BIN -er '.object.type' "$tag_object")"
+    source_digest="$($JQ_BIN -er '.object.sha' "$tag_object")"
+  }
 done
+[[ "$source_type" == "commit" && "$source_digest" =~ ^[0-9a-f]{40}$ ]] \
+  || fail "release tag does not resolve to a commit within four tag objects"
+
+download_release_asset() {
+  local asset_name="$1" max_bytes="$2"
+  local count api_size api_digest actual_size actual_digest
+  count="$($JQ_BIN -er --arg name "$asset_name" '[.assets[] | select(.name == $name)] | length' "$release_api")"
+  [[ "$count" -eq 1 ]] || fail "release must contain exactly one asset named $asset_name"
+  api_size="$($JQ_BIN -er --arg name "$asset_name" '.assets[] | select(.name == $name) | .size' "$release_api")"
+  api_digest="$($JQ_BIN -er --arg name "$asset_name" '.assets[] | select(.name == $name) | .digest' "$release_api")"
+  [[ "$api_size" =~ ^[0-9]+$ && "$api_size" -gt 0 && "$api_size" -le "$max_bytes" ]] \
+    || fail "release asset exceeds compressed-size ceiling: $asset_name"
+  [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "release API omitted asset sha256: $asset_name"
+  "$GH_BIN" release download "$release_tag" --repo "$REPO" --dir "$downloads" --pattern "$asset_name" --clobber
+  actual_size="$(wc -c <"$downloads/$asset_name" | tr -d ' ')"
+  [[ "$actual_size" -eq "$api_size" && "$actual_size" -le "$max_bytes" ]] \
+    || fail "downloaded asset size differs or exceeds its ceiling: $asset_name"
+  actual_digest="sha256:$(sha256sum "$downloads/$asset_name" | cut -d' ' -f1)"
+  [[ "$actual_digest" == "$api_digest" ]] || fail "downloaded asset digest differs: $asset_name"
+  record_command "download-release-asset" 0 "$GH_BIN" release download "$release_tag" --pattern "$asset_name"
+}
+
+download_release_asset "$cli_asset" 67108864
+download_release_asset "$mcp_asset" 33554432
+
+# Execute reviewed harness code, not a script carried inside a mutable release asset.
+signer_workflow="$REPO/.github/workflows/release.yml"
+if ! GH_BIN="$GH_BIN" JQ_BIN="$JQ_BIN" \
+  ASSETS_DIR="$downloads" \
+  OUT_SUMMARY="$results/attestation-summary.json" \
+  OUT_RAW_DIR="$results/attestation-raw" \
+  REPO="$REPO" \
+  SIGNER_WORKFLOW="$signer_workflow" \
+  SOURCE_REF="" \
+  SOURCE_DIGEST="$source_digest" \
+  bash "$ROOT/scripts/ci/release_attestation_enforce.sh" \
+  >"$results/attestation-verify.log" 2>&1; then
+  cat "$results/attestation-verify.log" >&2
+  fail "reviewed release attestation verifier rejected the published assets"
+fi
+record_command "verify-release-attestations" 0 "$ROOT/scripts/ci/release_attestation_enforce.sh"
 
 cli_extract="$run_root/cli-extract"
 mcp_extract="$run_root/mcp-extract"
-mkdir -p "$cli_extract" "$mcp_extract"
-tar -xzf "$downloads/$cli_asset" -C "$cli_extract"
-tar -xzf "$downloads/$mcp_asset" -C "$mcp_extract"
+"$PYTHON_BIN" "$ROOT/scripts/ci/safe_extract_release_archive.py" \
+  "$downloads/$cli_asset" "$cli_extract" --max-decoded-bytes 134217728
+"$PYTHON_BIN" "$ROOT/scripts/ci/safe_extract_release_archive.py" \
+  "$downloads/$mcp_asset" "$mcp_extract" --max-decoded-bytes 67108864
 mapfile -t cli_candidates < <(find "$cli_extract" -type f -name assay -perm -u+x)
 mapfile -t mcp_candidates < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)
 [[ "${#cli_candidates[@]}" -eq 1 ]] || fail "CLI archive must contain exactly one executable assay binary"
@@ -221,7 +257,7 @@ bundle="$results/produced.bundle.tar.gz"
 run_capture "produce-bundle" 0 "$results/produce.stdout" "$results/produce.stderr" \
   assay evidence import privileged-mcp-action \
     --decisions "$decisions" --denied-observations "$observations" \
-    --bundle-out "$bundle" --run-id published-release-golden-path \
+    --bundle-out "$bundle" --run-id "published-release-${workflow_run_id}-${workflow_run_attempt}" \
     --import-time 2026-01-01T00:00:00Z
 [[ -s "$bundle" ]] || fail "bundle production yielded no bytes"
 
@@ -270,23 +306,28 @@ run_capture "verify-tampered-bundle" 2 "$results/tamper-verify.json" "$results/t
 
 driver_digest="$(sha256sum "$ROOT/scripts/ci/published-release-golden-path.sh" | cut -d' ' -f1)"
 harness_manifest_digest="$(sha256sum "$HARNESS_MANIFEST" | cut -d' ' -f1)"
-"$PYTHON_BIN" - "$release_tag" "$source_digest" "$kit_manifest" "$harness_sha" "$driver_digest" \
+"$PYTHON_BIN" - "$release_tag" "$source_digest" "$results/attestation-summary.json" \
+  "$harness_sha" "$workflow_run_id" "$workflow_run_attempt" "$driver_digest" \
   "$harness_manifest_digest" "$results/harness-files.json" "$commands_file" "$results/run-pin.json" <<'PY'
 import json, pathlib, sys
-(release_tag, source_digest, kit_manifest_path, harness_sha, driver_digest,
- harness_manifest_digest, harness_files_path, commands_path, output_path) = sys.argv[1:]
-kit = json.loads(pathlib.Path(kit_manifest_path).read_text(encoding="utf-8"))
+(release_tag, source_digest, attestation_summary_path, harness_sha, workflow_run_id,
+ workflow_run_attempt, driver_digest, harness_manifest_digest, harness_files_path,
+ commands_path, output_path) = sys.argv[1:]
+attestations = json.loads(pathlib.Path(attestation_summary_path).read_text(encoding="utf-8"))
 harness = json.loads(pathlib.Path(harness_files_path).read_text(encoding="utf-8"))
 commands = [json.loads(line) for line in pathlib.Path(commands_path).read_text(encoding="utf-8").splitlines() if line]
 document = {
     "schema": "assay.published_release_golden_path.run_pin.v1",
     "release": {
         "tag": release_tag,
+        "source_ref": f"refs/tags/{release_tag}",
         "source_digest": source_digest,
-        "assets": [{"name": row["name"], "sha256": row["sha256"]} for row in kit["assets"]],
+        "assets": [{"name": row["name"], "sha256": row["sha256"]} for row in attestations["assets"]],
     },
     "harness": {
         "head_sha": harness_sha,
+        "workflow_run_id": workflow_run_id,
+        "workflow_run_attempt": int(workflow_run_attempt),
         "driver_sha256": driver_digest,
         "manifest_sha256": harness_manifest_digest,
         "files": harness["files"],
@@ -306,15 +347,24 @@ root, output = map(pathlib.Path, sys.argv[1:])
 required = [
     "run-pin.json", "commands.ndjson", "produced.bundle.tar.gz", "decisions.ndjson",
     "inspect.json", "verify.json", "tamper-verify.json", "enforcement.sarif",
+    "release-api.json", "tag-ref.json", "attestation-summary.json",
 ]
 for name in required:
     path = root / name
     if not path.is_file() or path.stat().st_size == 0:
         raise SystemExit(f"required retained artifact is missing or empty: {name}")
+for pattern, expected in (("release-assets/*.tar.gz", 2), ("attestation-raw/*.json", 2)):
+    matches = list(root.glob(pattern))
+    if len(matches) != expected or any(path.stat().st_size == 0 for path in matches):
+        raise SystemExit(f"retained trust inputs for {pattern} are incomplete")
 files = []
-for path in sorted(root.iterdir()):
+for path in sorted(root.rglob("*")):
     if path.is_file() and path != output:
-        files.append({"path": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "size": path.stat().st_size})
+        files.append({
+            "path": path.relative_to(root).as_posix(),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "size": path.stat().st_size,
+        })
 document = {"schema": "assay.published_release_golden_path.artifacts.v1", "files": files}
 output.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY

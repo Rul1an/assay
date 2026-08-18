@@ -208,6 +208,41 @@ run_retry_success_case() {
   jq -e '.assets[0].verified_attestations == 1' "$summary" >/dev/null
 }
 
+run_digest_only_success_case() {
+  local temp_dir="$1"
+  local assets_dir="$temp_dir/assets-digest-only"
+  local raw_dir="$temp_dir/raw-digest-only"
+  local summary="$temp_dir/summary-digest-only.json"
+  local log="$temp_dir/gh-digest-only.log"
+  local json="$temp_dir/gh-digest-only.json"
+  local fake_gh="$temp_dir/fake-gh-digest-only"
+
+  mkdir -p "$assets_dir" "$raw_dir"
+  printf 'release bytes\n' > "$assets_dir/test-asset.tar.gz"
+  local digest
+  digest="$(compute_sha256 "$assets_dir/test-asset.tar.gz")"
+  write_success_json "$json" "$digest"
+  make_fake_gh "$fake_gh"
+
+  FAKE_GH_JSON="$json" \
+  FAKE_GH_LOG="$log" \
+  GH_BIN="$fake_gh" \
+  ASSETS_DIR="$assets_dir" \
+  OUT_SUMMARY="$summary" \
+  OUT_RAW_DIR="$raw_dir" \
+  REPO="Rul1an/assay" \
+  SIGNER_WORKFLOW="Rul1an/assay/.github/workflows/release.yml" \
+  SOURCE_DIGEST="abc123" \
+  bash "$SCRIPT"
+
+  jq -e '.verification_policy.source_ref == null' "$summary" >/dev/null
+  grep -F -- '--source-digest abc123' "$log" >/dev/null
+  if grep -F -- '--source-ref' "$log" >/dev/null; then
+    echo "digest-only verification unexpectedly passed --source-ref" >&2
+    exit 1
+  fi
+}
+
 run_missing_witness_case() {
   local temp_dir="$1"
   local assets_dir="$temp_dir/assets-missing-witness"
@@ -320,6 +355,7 @@ main() {
   trap cleanup EXIT
 
   run_success_case "$TEST_TEMP_DIR"
+  run_digest_only_success_case "$TEST_TEMP_DIR"
   run_retry_success_case "$TEST_TEMP_DIR"
   run_missing_attestation_case "$TEST_TEMP_DIR"
   run_missing_witness_case "$TEST_TEMP_DIR"
