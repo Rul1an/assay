@@ -42,6 +42,9 @@ jobs:
       - name: Exercise the runner-health state contract
         run: bash scripts/ci/test-check-runner-health.sh
 
+      - name: Exercise runner auto-recovery token freshness
+        run: bash scripts/ci/test-runner-auto-recovery.sh
+
       - name: Build CLI once
         run: cargo build --release --workspace --exclude assay-ebpf
 
