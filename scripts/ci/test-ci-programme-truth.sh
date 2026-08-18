@@ -14,7 +14,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-AGENTS="$ROOT/AGENTS.md"
+AGENTS="${PROGRAMME_TRUTH_AGENTS:-$ROOT/AGENTS.md}"
 WAVE0="$ROOT/docs/contributing/WAVE0-GATES.md"
 STATUS="$ROOT/docs/contributing/REFACTOR-WAVE-STATUS.md"
 WORKFLOW="$ROOT/.github/workflows/split-wave0-gates.yml"
@@ -37,13 +37,17 @@ import os
 import re
 
 INACTIVE_DECL = "**No programme is active.**"
-LEDGER_PHRASES = (
-    "active programme ledger",
-    "public execution ledger",
-    "No programme is active",
-)
 ISSUE_LINK = re.compile(
     r"\[issue #(\d+)\]\((https://github\.com/[^)\s]+/issues/(\d+))\)"
+)
+VISIBLE_ISSUE = re.compile(r"(?i)issue #(\d+)")
+# Declaration-shaped only: a sentence/line that names the active ledger, or a
+# standalone inactive declaration. Raw "public execution ledger" prose is not.
+OUTSIDE_ACTIVE_DECL = re.compile(
+    r"(?im)(?:^|[.!?]\s+)The active programme ledger is\b"
+)
+OUTSIDE_INACTIVE_DECL = re.compile(
+    r"(?im)(?:^|[.!?]\s+)\*{0,2}No programme is active\."
 )
 # List-item declarations only. Ordinary prose such as "ensure required checks
 # pass" is not a required-context declaration.
@@ -105,21 +109,39 @@ def collapsed(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
+def outside_ledger_declarations(remainder: str) -> list[str]:
+    found: list[str] = []
+    if OUTSIDE_ACTIVE_DECL.search(remainder):
+        found.append("The active programme ledger is")
+    if OUTSIDE_INACTIVE_DECL.search(remainder):
+        found.append("No programme is active")
+    return found
+
+
 def validate_ledger(text: str, prefix: str) -> None:
     # Non-claim: this offline structural check verifies issue-link form and
     # visible-text/URL-ID parity only. It does not query live GitHub OPEN or
     # CLOSED state. The current inactive AGENTS.md bullet satisfies #2515.
     bullet, remainder = split_top_level_bullet(text, prefix)
     bullet_c = collapsed(bullet)
-    remainder_c = collapsed(remainder)
-    outside = [phrase for phrase in LEDGER_PHRASES if phrase in remainder_c]
+    outside = outside_ledger_declarations(remainder)
     if outside:
         raise SystemExit(
             "contradictory ledger declaration outside the ledger bullet: "
             + ", ".join(outside)
         )
-    inactive_count = bullet_c.count(INACTIVE_DECL)
     links = ISSUE_LINK.findall(bullet)
+    for visible, _url, url_id in links:
+        if visible != url_id:
+            raise SystemExit("visible issue-ID != URL-ID")
+    linked_ids = {visible for visible, _url, _url_id in links}
+    unlinked = [num for num in VISIBLE_ISSUE.findall(bullet) if num not in linked_ids]
+    if unlinked:
+        raise SystemExit(
+            "unlinked issue # reference in the ledger bullet: "
+            + ", ".join(unlinked)
+        )
+    inactive_count = bullet_c.count(INACTIVE_DECL)
     if inactive_count > 1:
         raise SystemExit("ledger bullet has multiple inactive declarations")
     if inactive_count == 1:
@@ -130,9 +152,6 @@ def validate_ledger(text: str, prefix: str) -> None:
         raise SystemExit(
             "ledger bullet is neither a valid inactive nor a valid active state"
         )
-    visible, _url, url_id = links[0]
-    if visible != url_id:
-        raise SystemExit("visible issue-ID != URL-ID")
 
 
 def validate_required(text: str, expected: str) -> None:
@@ -366,13 +385,18 @@ expect_red "pinned baseline SHA" "WAVE0_SEMVER_BASELINE_SHA" assert_wave0_semver
 contradictory_ledger="$(insert_into_ledger_bullet \
   'The active programme ledger is issue #9999.' \
   "$(<"$AGENTS")")"
-expect_red "additive active-issue ledger in the bullet" "contradictory ledger claims in the ledger bullet" \
+expect_red "additive unlinked issue # in the ledger bullet" "unlinked issue #" \
   assert_agents_ledger "$contradictory_ledger"
 
 elsewhere_ledger="$(printf '%s\n%s\n' "$(<"$AGENTS")" 'The active programme ledger is issue #9999.')"
-expect_red "inactive plus active sentence elsewhere" \
+expect_red "active ledger declaration elsewhere" \
   "contradictory ledger declaration outside the ledger bullet" \
   assert_agents_ledger "$elsewhere_ledger"
+
+ordinary_ledger_prose="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
+  'Reviewers should consult the public execution ledger before handoff.')"
+expect_ok "ordinary public-ledger prose outside the bullet" \
+  assert_agents_ledger "$ordinary_ledger_prose"
 
 ACTIVE_LEDGER_BULLET='- The public execution ledger for the active programme is named on this line: [issue #4242](https://github.com/Rul1an/assay/issues/4242).'
 active_ledger="$(replace_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$(<"$AGENTS")")"
@@ -383,6 +407,13 @@ mismatch_ledger="$(replace_ledger_bullet \
   "$(<"$AGENTS")")"
 expect_red "active fixture with text/link issue mismatch" "visible issue-ID != URL-ID" \
   assert_agents_ledger "$mismatch_ledger"
+
+# Synthetic inactive: previous-link mismatch without freezing a live issue number.
+inactive_mismatch="$(replace_ledger_bullet \
+  '- The public execution ledger for the active programme is named on this line. **No programme is active.** The previous one, [issue #4242](https://github.com/Rul1an/assay/issues/9999).' \
+  "$(<"$AGENTS")")"
+expect_red "inactive previous-link text/URL mismatch" "visible issue-ID != URL-ID" \
+  assert_agents_ledger "$inactive_mismatch"
 
 duplicate_ledger="$(insert_into_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$(<"$AGENTS")")"
 expect_red "duplicate ledger bullet" "duplicate ledger bullet" \
@@ -423,6 +454,19 @@ expect_red "restored single-boundary TODO" "single-boundary Wave 3 TODO" \
   assert_no_generic_unsafe_preview "" "unsafe allowed only in the monitor syscall boundary module."
 expect_red "deleted-monitor.rs claim" "must not claim monitor.rs was deleted" \
   assert_no_generic_unsafe_preview "monitor.rs was deleted" ""
+
+if [[ -z "${PROGRAMME_TRUTH_SELFHOST:-}" ]]; then
+  active_agents="$(mktemp)"
+  selfhost_log="$(mktemp)"
+  replace_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$(<"$ROOT/AGENTS.md")" >"$active_agents"
+  if PROGRAMME_TRUTH_AGENTS="$active_agents" PROGRAMME_TRUTH_SELFHOST=1 \
+    bash "${BASH_SOURCE[0]}" >"$selfhost_log" 2>&1; then
+    ok "full contract on active canonical AGENTS ledger"
+  else
+    bad "full contract on active canonical AGENTS ledger: $(tail -n 20 "$selfhost_log")"
+  fi
+  rm -f "$active_agents" "$selfhost_log"
+fi
 
 if [[ "$FAILURES" -ne 0 ]]; then
   echo "$FAILURES programme-truth case(s) failed"
