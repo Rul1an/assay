@@ -1,0 +1,368 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+
+MATURITY_VALUES = {"stable", "beta", "experimental", "verifier-only", "planned"}
+AXIS_VALUES = {"observation", "policy_decision", "outcome"}
+MANIFEST_FIELDS = {"schema", "capabilities"}
+CAPABILITY_FIELDS = {
+    "id",
+    "label",
+    "summary",
+    "maturity",
+    "introduced_release",
+    "target_release",
+    "protocol_versions",
+    "profile_versions",
+    "platforms",
+    "enforcement_points",
+    "limitations",
+    "non_claims",
+    "claims",
+}
+CLAIM_FIELDS = {"id", "axis", "proofs", "gap"}
+GAP_FIELDS = {"issue"}
+PROOF_FIELDS = {"url", "run_id", "commit_sha", "digest", "artifact"}
+ID_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+COMMIT_SHA_PATTERN = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
+DIGEST_PATTERN = re.compile(r"sha256:[0-9a-f]{64}\Z")
+VERSION_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+RELEASE_PATTERN = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+\Z")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate Assay product capability views")
+    parser.add_argument(
+        "--source", type=Path, default=Path("docs/data/product-capabilities.v0.json")
+    )
+    parser.add_argument(
+        "--public-output", type=Path, default=Path("docs/reference/product-support.md")
+    )
+    parser.add_argument(
+        "--proof-output", type=Path, default=Path("docs/generated/product-claim-proof.md")
+    )
+    return parser.parse_args()
+
+
+def require_non_empty_string(value: object, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string")
+    return value
+
+
+def require_string_list(value: object, field: str) -> list[str]:
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ValueError(f"{field} must be an array of strings")
+    return value
+
+
+def require_id(value: object, field: str) -> str:
+    identifier = require_non_empty_string(value, field)
+    if ID_PATTERN.fullmatch(identifier) is None:
+        raise ValueError(f"{field} must match [a-z0-9-]+")
+    return identifier
+
+
+def require_version_token(value: object, field: str) -> str:
+    token = require_non_empty_string(value, field)
+    if VERSION_TOKEN_PATTERN.fullmatch(token) is None:
+        raise ValueError(f"{field} must be a version token")
+    return token
+
+
+def require_release(value: object, field: str) -> str:
+    release = require_non_empty_string(value, field)
+    if RELEASE_PATTERN.fullmatch(release) is None:
+        raise ValueError(f"{field} must be a major.minor.patch release")
+    return release
+
+
+def require_object_fields(
+    value: object, allowed: set[str], required: set[str], context: str
+) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError(f"{context} must be an object")
+    unknown = set(value).difference(allowed)
+    if unknown:
+        raise ValueError(f"{context} has unknown fields: {', '.join(sorted(unknown))}")
+    missing = required.difference(value)
+    if missing:
+        raise ValueError(f"{context} is missing fields: {', '.join(sorted(missing))}")
+    return value
+
+
+def reject_duplicate_object_keys(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key: {key}")
+        result[key] = value
+    return result
+
+
+def validate_protocol_versions(value: object, capability_id: str) -> list[dict]:
+    if not isinstance(value, list):
+        raise ValueError(f"capability {capability_id} protocol_versions must be an array")
+    for entry in value:
+        if not isinstance(entry, dict) or set(entry) != {"protocol", "version", "transport"}:
+            raise ValueError(
+                f"capability {capability_id} protocol version must contain protocol, version and transport"
+            )
+        require_id(entry["protocol"], f"capability {capability_id} protocol")
+        require_version_token(entry["version"], f"capability {capability_id} protocol version")
+        require_id(entry["transport"], f"capability {capability_id} protocol transport")
+    value.sort(key=lambda item: (item["protocol"], item["version"], item["transport"]))
+    return value
+
+
+def validate_profile_versions(value: object, capability_id: str) -> list[dict]:
+    if not isinstance(value, list):
+        raise ValueError(f"capability {capability_id} profile_versions must be an array")
+    for entry in value:
+        if not isinstance(entry, dict) or set(entry) != {"profile", "version"}:
+            raise ValueError(
+                f"capability {capability_id} profile version must contain profile and version"
+            )
+        require_id(entry["profile"], f"capability {capability_id} profile")
+        require_version_token(entry["version"], f"capability {capability_id} profile version")
+    value.sort(key=lambda item: (item["profile"], item["version"]))
+    return value
+
+
+def proof_has_immutable_identity(proof: dict) -> bool:
+    run_id = proof.get("run_id")
+    if isinstance(run_id, int) and not isinstance(run_id, bool) and run_id > 0:
+        return True
+    commit_sha = proof.get("commit_sha")
+    if isinstance(commit_sha, str) and COMMIT_SHA_PATTERN.fullmatch(commit_sha):
+        return True
+    digest = proof.get("digest")
+    return isinstance(digest, str) and DIGEST_PATTERN.fullmatch(digest) is not None
+
+
+def validate_proof(proof: object, claim_id: str) -> dict:
+    proof = require_object_fields(proof, PROOF_FIELDS, set(), f"claim {claim_id} proof")
+    if "run_id" in proof:
+        run_id = proof["run_id"]
+        if not isinstance(run_id, int) or isinstance(run_id, bool) or run_id <= 0:
+            raise ValueError(f"claim {claim_id} proof run_id must be a positive integer")
+    if "commit_sha" in proof:
+        commit_sha = proof["commit_sha"]
+        if not isinstance(commit_sha, str) or COMMIT_SHA_PATTERN.fullmatch(commit_sha) is None:
+            raise ValueError(f"claim {claim_id} proof commit_sha must be immutable")
+    if "digest" in proof:
+        digest = proof["digest"]
+        if not isinstance(digest, str) or DIGEST_PATTERN.fullmatch(digest) is None:
+            raise ValueError(f"claim {claim_id} proof digest must be sha256:<64 lowercase hex>")
+    if "artifact" in proof:
+        require_non_empty_string(proof["artifact"], f"claim {claim_id} proof artifact")
+        if "digest" not in proof:
+            raise ValueError(f"claim {claim_id} artifact requires a digest")
+    if not proof_has_immutable_identity(proof):
+        raise ValueError(f"claim {claim_id} proof must include an immutable identity")
+    return proof
+
+
+def load_manifest(path: Path) -> dict:
+    manifest = json.loads(
+        path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicate_object_keys
+    )
+    manifest = require_object_fields(manifest, MANIFEST_FIELDS, MANIFEST_FIELDS, "manifest")
+    if manifest.get("schema") != "assay.product-capabilities.v0":
+        raise ValueError("schema must be assay.product-capabilities.v0")
+    capabilities = manifest.get("capabilities")
+    if not isinstance(capabilities, list):
+        raise ValueError("capabilities must be an array")
+
+    capability_ids: set[str] = set()
+    claim_ids: set[str] = set()
+    for capability in capabilities:
+        capability = require_object_fields(
+            capability, CAPABILITY_FIELDS, CAPABILITY_FIELDS, "capability"
+        )
+        capability_id = require_id(capability["id"], "capability id")
+        if capability_id in capability_ids:
+            raise ValueError(f"duplicate capability id: {capability_id}")
+        capability_ids.add(capability_id)
+        for field in ("label", "summary"):
+            require_non_empty_string(capability[field], f"capability {capability_id} {field}")
+        if capability["maturity"] not in MATURITY_VALUES:
+            raise ValueError(f"capability {capability_id} has unknown maturity")
+        if capability["maturity"] == "planned":
+            if capability["introduced_release"] is not None:
+                raise ValueError(
+                    f"planned capability {capability_id} cannot have introduced_release"
+                )
+            require_release(
+                capability["target_release"], f"capability {capability_id} target_release"
+            )
+        else:
+            require_release(
+                capability["introduced_release"],
+                f"capability {capability_id} introduced_release",
+            )
+            if capability["target_release"] is not None:
+                raise ValueError(
+                    f"introduced capability {capability_id} cannot have target_release"
+                )
+        validate_protocol_versions(capability["protocol_versions"], capability_id)
+        validate_profile_versions(capability["profile_versions"], capability_id)
+        for field in ("platforms", "enforcement_points", "limitations", "non_claims"):
+            require_string_list(capability[field], f"capability {capability_id} {field}")
+        claims = capability["claims"]
+        if not isinstance(claims, list):
+            raise ValueError(f"capability {capability_id} claims must be an array")
+        for claim in claims:
+            claim = require_object_fields(claim, CLAIM_FIELDS, {"id", "axis"}, "claim")
+            claim_id = require_id(claim.get("id"), "claim id")
+            if claim_id in claim_ids:
+                raise ValueError(f"duplicate claim id: {claim_id}")
+            claim_ids.add(claim_id)
+            if claim.get("axis") not in AXIS_VALUES:
+                raise ValueError(f"claim {claim_id} has unknown axis")
+            has_proofs = "proofs" in claim
+            has_gap = "gap" in claim
+            if has_proofs == has_gap:
+                raise ValueError(f"claim {claim_id} must have exactly one disposition")
+            if has_proofs:
+                proofs = claim["proofs"]
+                if not isinstance(proofs, list) or not proofs:
+                    raise ValueError(f"claim {claim_id} proofs must be a non-empty array")
+                if capability["maturity"] == "planned":
+                    raise ValueError(f"planned capability {capability_id} cannot carry current proof")
+                for proof in proofs:
+                    validate_proof(proof, claim_id)
+            else:
+                gap = require_object_fields(claim["gap"], GAP_FIELDS, GAP_FIELDS, "gap")
+                issue = gap["issue"]
+                if not isinstance(issue, str) or re.fullmatch(r"[1-9][0-9]*", issue) is None:
+                    raise ValueError(f"claim {claim_id} gap.issue must be a positive issue number")
+        claims.sort(key=lambda item: item["id"])
+    capabilities.sort(key=lambda item: item["id"])
+    return manifest
+
+
+def join_values(values: list[str]) -> str:
+    return ", ".join(values) if values else "None declared"
+
+
+def render_protocol_versions(values: list[dict]) -> str:
+    rendered = [
+        f"{entry['protocol']} {entry['version']} over {entry['transport']}" for entry in values
+    ]
+    return join_values(rendered)
+
+
+def render_profile_versions(values: list[dict]) -> str:
+    rendered = [f"{entry['profile']}/{entry['version']}" for entry in values]
+    return join_values(rendered)
+
+
+def render_public(manifest: dict) -> str:
+    lines = [
+        "<!-- Generated by scripts/docs/generate-product-capabilities.py; do not edit. -->",
+        "# Product Support",
+        "",
+        "This matrix states bounded product support and explicit evidence gaps. A row is not certification or universal host compatibility.",
+        "Proof identities are shape-checked offline; generation does not fetch or verify proof content, URLs, artifacts, or issue state.",
+        "",
+    ]
+    for capability in manifest["capabilities"]:
+        release_line = (
+            f"- Target release: `{capability['target_release']}`"
+            if capability["maturity"] == "planned"
+            else f"- Introduced: `{capability['introduced_release']}`"
+        )
+        lines.extend(
+            [
+                f"## {capability['label']} (`{capability['id']}`)",
+                "",
+                capability["summary"],
+                "",
+                f"- Maturity: `{capability['maturity']}`",
+                release_line,
+                f"- Platforms: {join_values(capability['platforms'])}",
+                f"- Protocol versions: {render_protocol_versions(capability['protocol_versions'])}",
+                f"- Profile versions: {render_profile_versions(capability['profile_versions'])}",
+                f"- Enforcement points: {join_values(capability['enforcement_points'])}",
+                f"- Limitations: {join_values(capability['limitations'])}",
+                f"- Non-claims: {join_values(capability['non_claims'])}",
+                "",
+                "| Claim | Axis | Evidence state |",
+                "|---|---|---|",
+            ]
+        )
+        for claim in capability["claims"]:
+            if "proofs" in claim:
+                disposition = (
+                    "proof-backed "
+                    f"([identities](../generated/product-claim-proof.md#claim-{claim['id']}))"
+                )
+            else:
+                issue = claim["gap"]["issue"]
+                disposition = (
+                    f"[gap #{issue}](https://github.com/Rul1an/assay/issues/{issue})"
+                )
+            lines.append(f"| `{claim['id']}` | `{claim['axis']}` | {disposition} |")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_proof(manifest: dict) -> str:
+    lines = [
+        "<!-- Generated by scripts/docs/generate-product-capabilities.py; do not edit. -->",
+        "# Product Claim Proof Index",
+        "",
+        "Proof identities are checked for shape offline; this generator does not fetch them.",
+        "",
+    ]
+    for capability in manifest["capabilities"]:
+        lines.append(f"## `{capability['id']}`")
+        lines.append("")
+        lines.append(
+            f"- Protocol versions: {render_protocol_versions(capability['protocol_versions'])}"
+        )
+        lines.append(
+            f"- Profile versions: {render_profile_versions(capability['profile_versions'])}"
+        )
+        lines.append(f"- Non-claims: {join_values(capability['non_claims'])}")
+        lines.append("")
+        for claim in capability["claims"]:
+            lines.append(f'<a id="claim-{claim["id"]}"></a>')
+            lines.append(f"### `{claim['id']}` (`{claim['axis']}`)")
+            if "gap" in claim:
+                lines.append(f"- Gap issue: `#{claim['gap']['issue']}`")
+            else:
+                for proof in claim["proofs"]:
+                    rendered = ", ".join(
+                        f"`{key}={proof[key]}`" for key in sorted(proof) if key != "url"
+                    )
+                    lines.append(f"- Proof: {rendered}")
+            lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        manifest = load_manifest(args.source)
+        write_text(args.public_output, render_public(manifest))
+        write_text(args.proof_output, render_proof(manifest))
+    except (OSError, json.JSONDecodeError, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
