@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2329 # Test doubles are invoked indirectly by sourced production functions.
+# shellcheck disable=SC2218,SC2329 # Test doubles are restored/redefined and invoked indirectly.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -102,8 +102,6 @@ multipass() {
 check_runner_service() { return 0; }
 
 sync_vm_time
-# Restored from the sourced production definition above via eval.
-# shellcheck disable=SC2218
 cleanup_runner_config
 configure_runner fresh-token
 start_runner_service
