@@ -103,9 +103,9 @@
       "id": "published-release-golden-path",
       "label": "Published release golden path",
       "summary": "Install an attested release in a disposable environment and produce verified evidence.",
-      "maturity": "planned",
-      "introduced_release": null,
-      "target_release": "5.3.0",
+      "maturity": "stable",
+      "introduced_release": "5.3.0",
+      "target_release": null,
       "protocol_versions": [
         {"protocol": "mcp", "version": "2024-11-05", "transport": "stdio"},
         {"protocol": "mcp", "version": "2025-06-18", "transport": "stdio"},
@@ -114,15 +114,23 @@
       "profile_versions": [
         {"profile": "privileged-mcp-action", "version": "v0"}
       ],
-      "platforms": ["linux-aarch64", "linux-x86_64"],
+      "platforms": ["linux-x86_64"],
       "enforcement_points": ["cli", "mcp-proxy"],
-      "limitations": ["No exact-release install-to-evidence gate has landed yet."],
-      "non_claims": ["The planned gate will not prove external side effects, policy completeness or semantic safety."],
+      "limitations": ["The retained post-publication proof currently covers only the published Linux x86_64 CLI and MCP archives."],
+      "non_claims": ["This proof does not cover macOS, Windows, Linux aarch64, editor discovery, remote transports, external side effects, policy completeness or semantic safety."],
       "claims": [
         {
           "id": "release-install-to-verified-evidence",
           "axis": "outcome",
-          "gap": {"issue": "2486"}
+          "proofs": [
+            {
+              "url": "https://github.com/Rul1an/assay/actions/runs/32166096190",
+              "run_id": 32166096190,
+              "commit_sha": "3c0df3cbac793854f67caad44a46fda1bcafc02f",
+              "digest": "sha256:810989f56bcfa596b4f055435b4cd4db3ebdef0eb2089b55525f6acd022a2c5e",
+              "artifact": "published-release-golden-path-v5.3.0-3c0df3cbac793854f67caad44a46fda1bcafc02f"
+            }
+          ]
         }
       ]
     }

@@ -32,8 +32,8 @@ Proof identities are checked for shape offline; this generator does not fetch th
 
 - Protocol versions: mcp 2024-11-05 over stdio, mcp 2025-06-18 over stdio, mcp 2025-11-25 over stdio
 - Profile versions: privileged-mcp-action/v0
-- Non-claims: The planned gate will not prove external side effects, policy completeness or semantic safety.
+- Non-claims: This proof does not cover macOS, Windows, Linux aarch64, editor discovery, remote transports, external side effects, policy completeness or semantic safety.
 
 <a id="claim-release-install-to-verified-evidence"></a>
 ### `release-install-to-verified-evidence` (`outcome`)
-- Gap issue: `#2486`
+- Proof: `artifact=published-release-golden-path-v5.3.0-3c0df3cbac793854f67caad44a46fda1bcafc02f`, `commit_sha=3c0df3cbac793854f67caad44a46fda1bcafc02f`, `digest=sha256:810989f56bcfa596b4f055435b4cd4db3ebdef0eb2089b55525f6acd022a2c5e`, `run_id=32166096190`

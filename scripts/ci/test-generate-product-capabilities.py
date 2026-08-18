@@ -185,6 +185,34 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
             capabilities["published-release-golden-path"]["protocol_versions"], expected
         )
 
+    def test_published_release_golden_path_is_bound_to_retained_linux_proof(self) -> None:
+        manifest = json.loads(
+            (REPO_ROOT / "docs/data/product-capabilities.v0.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        capabilities = {entry["id"]: entry for entry in manifest["capabilities"]}
+        capability = capabilities["published-release-golden-path"]
+        claim = capability["claims"][0]
+
+        self.assertEqual(capability["maturity"], "stable")
+        self.assertEqual(capability["introduced_release"], "5.3.0")
+        self.assertIsNone(capability["target_release"])
+        self.assertEqual(capability["platforms"], ["linux-x86_64"])
+        self.assertNotIn("gap", claim)
+        self.assertEqual(
+            claim["proofs"],
+            [
+                {
+                    "url": "https://github.com/Rul1an/assay/actions/runs/32166096190",
+                    "run_id": 32166096190,
+                    "commit_sha": "3c0df3cbac793854f67caad44a46fda1bcafc02f",
+                    "digest": "sha256:810989f56bcfa596b4f055435b4cd4db3ebdef0eb2089b55525f6acd022a2c5e",
+                    "artifact": "published-release-golden-path-v5.3.0-3c0df3cbac793854f67caad44a46fda1bcafc02f",
+                }
+            ],
+        )
+
     def test_writes_both_views_in_shared_id_order(self) -> None:
         manifest = minimal_manifest()
         first = manifest["capabilities"][0]
