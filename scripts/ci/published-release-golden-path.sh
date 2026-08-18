@@ -248,25 +248,15 @@ run_capture "evaluate" 0 "$results/evaluate.json" "$results/evaluate.stderr" \
 "$JQ_BIN" -e '.schema == "assay.run_report.v1"' "$results/evaluate.json" >/dev/null || fail "evaluation output identity drifted"
 popd >/dev/null
 
-fixture_dir="$harness_root/examples/privileged-action-gate"
 decisions="$results/decisions.ndjson"
 observations="$results/denied-observations.ndjson"
 init_request='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"published-release-gate","version":"1"}}}'
 call_request='{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"github.add_deploy_key","arguments":{"owner":"acme","repo":"prod-app"}}}'
 proxy_status=0
 printf '%s\n%s\n' "$init_request" "$call_request" \
-  | "$PYTHON_BIN" "$harness_root/scripts/ci/published_release_proxy_phase.py" \
-      --mcp-bin "$install_root/bin/assay-mcp-server" \
-      --python-bin "$PYTHON_BIN" \
-      --fixture "$fixture_dir/mock_github_mcp.py" \
-      --policy "$fixture_dir/policies/no-allowance.yaml" \
-      --declared-manifest "$fixture_dir/baseline-approved.json" \
-      --decisions "$decisions" \
-      --observations "$observations" \
-      --commands "$commands_file" \
-      --stdout "$results/proxy.jsonl" \
-      --stderr "$results/proxy.stderr" \
-      --timeout-seconds 60 || proxy_status=$?
+  | (cd "$results" && \
+      "$PYTHON_BIN" "$harness_root/scripts/ci/published_release_proxy_phase.py" \
+        --timeout-seconds 60) || proxy_status=$?
 [[ "$proxy_status" -eq 0 ]] || fail "proxy-enforce exited $proxy_status, expected 0 for a policy denial"
 [[ -s "$decisions" ]] || fail "proxy-enforce produced no enforcement decision"
 [[ -s "$observations" ]] || fail "proxy-enforce produced no denied-call observation"

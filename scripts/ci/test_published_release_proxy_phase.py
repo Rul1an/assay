@@ -14,12 +14,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-HELPER = Path(
-    os.environ.get(
-        "PUBLISHED_RELEASE_PROXY_PHASE",
-        ROOT / "scripts/ci/published_release_proxy_phase.py",
-    )
-)
+HELPER = ROOT / "scripts/ci/published_release_proxy_phase.py"
 
 
 class PublishedReleaseProxyPhaseTests(unittest.TestCase):
@@ -76,40 +71,16 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        fixture = temporary / "fixture"
-        fixture.mkdir()
-        for name in ("mock.py", "policy.yaml", "manifest.json"):
-            (fixture / name).write_text("{}\n", encoding="utf-8")
-
         command = [
             sys.executable,
             str(HELPER),
-            "--mcp-bin",
-            str(fake),
-            "--python-bin",
-            sys.executable,
-            "--fixture",
-            str(fixture / "mock.py"),
-            "--policy",
-            str(fixture / "policy.yaml"),
-            "--declared-manifest",
-            str(fixture / "manifest.json"),
-            "--decisions",
-            str(results / "decisions.ndjson"),
-            "--observations",
-            str(results / "observations.ndjson"),
-            "--commands",
-            str(results / "commands.ndjson"),
-            "--stdout",
-            str(results / "proxy.jsonl"),
-            "--stderr",
-            str(results / "proxy.stderr"),
             "--timeout-seconds",
             str(timeout_seconds),
         ]
         environment = os.environ.copy()
         environment["GH_TOKEN"] = "must-not-reach-release-code"
         environment["PYTHONPATH"] = "/must/not/reach/release/code"
+        environment["PATH"] = f"{temporary}{os.pathsep}{environment['PATH']}"
         completed = subprocess.run(
             command,
             input=request,
@@ -117,6 +88,7 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
             stderr=subprocess.PIPE,
             check=False,
             env=environment,
+            cwd=results,
         )
         return completed, results
 
@@ -137,7 +109,7 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
         self.assertEqual((results / "proxy.jsonl").read_text(encoding="utf-8"), "fake proxy stdout\n")
         self.assertEqual((results / "proxy.stderr").read_text(encoding="utf-8"), "fake proxy stderr\n")
         self.assertTrue((results / "decisions.ndjson").is_file())
-        self.assertTrue((results / "observations.ndjson").is_file())
+        self.assertTrue((results / "denied-observations.ndjson").is_file())
         child_environment = json.loads(
             (results / "fake-environment.json").read_text(encoding="utf-8")
         )

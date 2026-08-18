@@ -105,9 +105,12 @@ PY
 expect_proxy_helper_behavior_failure() {
   local name="$1" old="$2" new="$3"
   local case_root="$scratch/$name"
-  mkdir -p "$case_root"
-  cp "$ROOT/scripts/ci/published_release_proxy_phase.py" "$case_root/proxy-phase.py"
-  python3 - "$case_root/proxy-phase.py" "$old" "$new" <<'PY'
+  mkdir -p "$case_root/scripts/ci"
+  cp "$ROOT/scripts/ci/published_release_proxy_phase.py" \
+    "$case_root/scripts/ci/published_release_proxy_phase.py"
+  cp "$ROOT/scripts/ci/test_published_release_proxy_phase.py" \
+    "$case_root/scripts/ci/test_published_release_proxy_phase.py"
+  python3 - "$case_root/scripts/ci/published_release_proxy_phase.py" "$old" "$new" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
 old, new = sys.argv[2:]
@@ -116,8 +119,7 @@ if text.count(old) != 1:
     raise SystemExit(f"proxy helper mutation anchor count for {old!r}: {text.count(old)}")
 path.write_text(text.replace(old, new, 1), encoding="utf-8")
 PY
-  if PUBLISHED_RELEASE_PROXY_PHASE="$case_root/proxy-phase.py" \
-      python3 "$ROOT/scripts/ci/test_published_release_proxy_phase.py" \
+  if python3 "$case_root/scripts/ci/test_published_release_proxy_phase.py" \
       >"$case_root/output" 2>&1; then
     fail "proxy helper mutation stayed green: $name"
   fi
@@ -292,8 +294,8 @@ expect_mutation_failure \
 
 expect_proxy_helper_behavior_failure \
   "proxy-provenance-truncated" \
-  'append_command_record(args.commands, status, argv)' \
-  'append_command_record(args.commands, status, argv[:-2])'
+  'append_command_record(results / "commands.ndjson", status, argv)' \
+  'append_command_record(results / "commands.ndjson", status, argv[:-2])'
 
 expect_mutation_failure \
   "workflow-driver-comment-decoy" "workflow.yml" \
@@ -337,8 +339,8 @@ expect_proxy_helper_behavior_failure \
 
 expect_proxy_helper_behavior_failure \
   "proxy-exit-status-diverges" \
-  'append_command_record(args.commands, status, argv)' \
-  'append_command_record(args.commands, 0, argv)'
+  'append_command_record(results / "commands.ndjson", status, argv)' \
+  'append_command_record(results / "commands.ndjson", 0, argv)'
 
 expect_proxy_helper_behavior_failure \
   "proxy-executes-twice" \

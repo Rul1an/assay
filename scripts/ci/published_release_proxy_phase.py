@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import resource
+import shutil
 import subprocess
 import sys
 
@@ -25,16 +26,6 @@ def bounded_seconds(value: str) -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mcp-bin", required=True)
-    parser.add_argument("--python-bin", required=True)
-    parser.add_argument("--fixture", type=Path, required=True)
-    parser.add_argument("--policy", type=Path, required=True)
-    parser.add_argument("--declared-manifest", type=Path, required=True)
-    parser.add_argument("--decisions", type=Path, required=True)
-    parser.add_argument("--observations", type=Path, required=True)
-    parser.add_argument("--commands", type=Path, required=True)
-    parser.add_argument("--stdout", type=Path, required=True)
-    parser.add_argument("--stderr", type=Path, required=True)
     parser.add_argument("--timeout-seconds", type=bounded_seconds, default=60)
     return parser.parse_args()
 
@@ -58,29 +49,40 @@ def limit_child_output() -> None:
 
 def main() -> int:
     args = parse_args()
+    results = Path.cwd().resolve()
+    harness_root = Path(__file__).resolve().parents[2]
+    fixture_root = harness_root / "examples/privileged-action-gate"
+    decisions = results / "decisions.ndjson"
+    observations = results / "denied-observations.ndjson"
     request = sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1)
     if len(request) > MAX_REQUEST_BYTES:
         raise SystemExit("proxy request exceeds 1 MiB ceiling")
 
+    mcp_bin = shutil.which("assay-mcp-server", path=child_environment().get("PATH"))
+    if mcp_bin is None:
+        raise SystemExit("assay-mcp-server is absent from the restricted PATH")
+
     argv = [
-        args.mcp_bin,
+        mcp_bin,
         "proxy-enforce",
         "--upstream-command",
-        args.python_bin,
+        sys.executable,
         "--upstream-arg",
         "-u",
         "--upstream-arg",
-        str(args.fixture),
+        str(fixture_root / "mock_github_mcp.py"),
         "--enforce-policy",
-        str(args.policy),
+        str(fixture_root / "policies/no-allowance.yaml"),
         "--declared-mcp-manifest",
-        str(args.declared_manifest),
+        str(fixture_root / "baseline-approved.json"),
         "--enforcement-decision-out",
-        str(args.decisions),
+        str(decisions),
         "--denied-call-observation-out",
-        str(args.observations),
+        str(observations),
     ]
-    with args.stdout.open("wb") as stdout_handle, args.stderr.open("wb") as stderr_handle:
+    with (results / "proxy.jsonl").open("wb") as stdout_handle, (
+        results / "proxy.stderr"
+    ).open("wb") as stderr_handle:
         try:
             completed = subprocess.run(
                 argv,
@@ -98,7 +100,7 @@ def main() -> int:
         except OSError as error:
             stderr_handle.write(f"proxy process failed to start: {error}\n".encode())
             status = 127
-    append_command_record(args.commands, status, argv)
+    append_command_record(results / "commands.ndjson", status, argv)
     return status if 0 <= status <= 255 else 125
 
 

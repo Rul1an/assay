@@ -297,18 +297,9 @@ def validate_contract(
         'call_request=\'{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"github.add_deploy_key","arguments":{"owner":"acme","repo":"prod-app"}}}\'',
         "proxy_status=0",
         'printf \'%s\\n%s\\n\' "$init_request" "$call_request" \\',
-        '| "$PYTHON_BIN" "$harness_root/scripts/ci/published_release_proxy_phase.py" \\',
-        '--mcp-bin "$install_root/bin/assay-mcp-server" \\',
-        '--python-bin "$PYTHON_BIN" \\',
-        '--fixture "$fixture_dir/mock_github_mcp.py" \\',
-        '--policy "$fixture_dir/policies/no-allowance.yaml" \\',
-        '--declared-manifest "$fixture_dir/baseline-approved.json" \\',
-        '--decisions "$decisions" \\',
-        '--observations "$observations" \\',
-        '--commands "$commands_file" \\',
-        '--stdout "$results/proxy.jsonl" \\',
-        '--stderr "$results/proxy.stderr" \\',
-        "--timeout-seconds 60 || proxy_status=$?",
+        '| (cd "$results" && \\',
+        '"$PYTHON_BIN" "$harness_root/scripts/ci/published_release_proxy_phase.py" \\',
+        "--timeout-seconds 60) || proxy_status=$?",
     ]
     proxy_block = lines_between(
         driver_text,
@@ -330,7 +321,6 @@ def validate_contract(
         'run_capture "mcp-version" 0 "$results/mcp-version.txt" "$results/mcp-version.stderr" assay-mcp-server --version',
         '[[ "$(tr -d \'\\r\\n\' <"$results/mcp-version.txt")" == "assay-mcp-server $version" ]] \\',
         '|| fail "assay-mcp-server version differs from pinned release"',
-        '--mcp-bin "$install_root/bin/assay-mcp-server" \\',
         'assay-mcp-server enforcement-sarif --input "$decisions" --output "$results/enforcement.sarif"',
     ]
     mcp_binary_surface = [line for line in driver_lines if "assay-mcp-server" in line]
