@@ -9,6 +9,9 @@ fn is_explicit_tool_name(pattern: &str) -> bool {
     !trimmed.is_empty() && !trimmed.contains('*')
 }
 
+/// Enumerate the policy's explicit tool names for `coverage_report_v1`.
+///
+/// Every value containing `*` is excluded. This yields an enumeration floor, not full policy reach.
 pub(super) fn collect_declared_tools(policy: &McpPolicy) -> Vec<String> {
     let mut declared = BTreeSet::new();
 

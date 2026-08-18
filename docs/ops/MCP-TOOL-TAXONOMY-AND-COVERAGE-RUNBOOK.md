@@ -53,7 +53,9 @@ assay coverage \
 ```
 
 Interpretation:
-- `tools.tools_unknown`: observed tools not declared by policy/config
+- `tools.tools_unknown`: set difference between observed tools and this report's `tools_declared`
+  list. Its meaning follows the source-specific declaration basis recorded in `run.source`; it
+  does not prove that a tool escaped policy matching or enforcement.
 - `taxonomy.tool_classes_missing`: observed tools with no taxonomy entry (blind spots)
 - `routes.routes_seen`: adjacent tool-call edges (v1 is order-based, no session inference)
 
@@ -73,7 +75,7 @@ Notes:
 
 ## Operational interpretation guidelines
 ### Completeness questions this answers
-- Did we see any tools that our policy did not explicitly declare?
+- Which observed tools fall outside this report's source-specific `tools_declared` list?
 - Are we missing taxonomy for tools that occurred in production traces?
 - What tool-to-tool adjacency edges are actually exercised?
 
@@ -81,6 +83,7 @@ Notes:
 - No session/state inference in coverage v1 routes.
 - No taint tracking or semantic flow labeling.
 - No enforcement changes from coverage emission.
+- `tools_unknown` does not prove a policy miss, policy bypass, or unenforced tool call.
 
 ## Troubleshooting
 ### Coverage-out exists but is empty or missing fields

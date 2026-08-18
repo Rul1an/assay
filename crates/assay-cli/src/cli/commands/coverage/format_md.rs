@@ -11,6 +11,18 @@ fn as_string_array(value: Option<&Value>) -> Vec<String> {
     }
 }
 
+fn declared_tools_basis_note(source: &str) -> &'static str {
+    match source {
+        "decision_jsonl" => {
+            "Policy-derived declarations enumerate explicit tool names; every value containing `*` is excluded, so the set is a floor on policy reach."
+        }
+        "jsonl" => {
+            "Caller-supplied declarations are literal values; wildcard-looking values are not expanded or filtered."
+        }
+        _ => "The declaration basis is unknown; inspect `run.source` before interpreting the set.",
+    }
+}
+
 pub(crate) fn render_coverage_markdown(
     report: &Value,
     routes_top: usize,
@@ -98,8 +110,36 @@ pub(crate) fn render_coverage_markdown(
     }
 
     out.push_str("## Notes\n\n");
+    out.push_str(&format!("- {}\n", declared_tools_basis_note(source)));
     out.push_str("- Routes are adjacent tool-call edges in observed order (v1).\n");
     out.push_str("- This markdown is a presentation of `coverage_report_v1`; enforcement behavior is unchanged.\n");
 
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn markdown_states_policy_enumeration_floor_for_decision_source() {
+        let report = json!({
+            "schema_version": "coverage_report_v1",
+            "report_version": "1",
+            "run": {"source": "decision_jsonl"},
+            "tools": {
+                "tools_seen": [],
+                "tools_declared": [],
+                "tools_unknown": []
+            },
+            "taxonomy": {"tool_classes_missing": []},
+            "routes": {"routes_seen": []}
+        });
+
+        let markdown = render_coverage_markdown(&report, 0).expect("report should render");
+        assert!(markdown.contains(
+            "Policy-derived declarations enumerate explicit tool names; every value containing `*` is excluded, so the set is a floor on policy reach."
+        ));
+    }
 }
