@@ -4,7 +4,13 @@ The Assay MCP Server exposes tools for agent self-verification.
 
 ## Error Handling
 All tools return a standardized error structure if the operation cannot be performed (e.g., policy missing).
-Note: This is an **Application-Level Error**, returned within the JSON-RPC `result`. Protocol-level errors (invalid JSON) return a JSON-RPC `error`.
+Note: This is an **Application-Level Error**, returned within the JSON-RPC `result`.
+Stdio invalid JSON lines are ignored and produce no JSON-RPC response; the
+server continues to the next line. On a valid `tools/call`, missing or malformed tool arguments
+are not a distinct client error: they are published as the
+fixed outer-dispatch payload `E_INTERNAL` / `Tool execution failed` with
+`allowed: false` and `isError: true`. Unknown JSON-RPC methods remain protocol
+error `-32601`.
 
 ### Error Shape
 
