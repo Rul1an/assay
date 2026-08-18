@@ -13,8 +13,8 @@ use std::process::{Child, Command, Stdio};
 mod jsonrpc_conn;
 use jsonrpc_conn::Conn;
 
-const PROXY_UNSUPPORTED: i64 = -32040;
-const PROXY_FAILED: i64 = -32041;
+const PROXY_UNSUPPORTED: i64 = -31997;
+const PROXY_FAILED: i64 = -31998;
 
 fn python() -> &'static str {
     // GitHub-hosted Windows exposes `python`; Linux/macOS expose `python3`.

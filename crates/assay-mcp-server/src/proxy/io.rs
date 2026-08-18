@@ -2,16 +2,10 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-// Proxy-originated JSON-RPC error codes (private server-error range). `data.origin` marks them so they
-// are unambiguously distinguishable from upstream errors regardless of code.
-pub(super) const PROXY_UNSUPPORTED: i32 = -32040;
-pub(super) const PROXY_FAILED: i32 = -32041;
-// PROXY_DENIED: a P61e enforcing-mode policy denial. The `reason` is the precedence-pinned gate that
-// fired (unclassified_tool_call / classification_incomplete / no_declared_allowance /
-// credential_scope_insufficient / credential_scope_unknown / manifest_baseline_missing /
-// manifest_current_observation_incomplete / manifest_observation_ambiguous /
-// manifest_drifted_since_approval).
-pub(super) const PROXY_DENIED: i32 = -32042;
+// Assay-owned application codes. `data.origin` marks them so they are distinguishable from
+// upstream errors regardless of code. PROXY_DENIED is a P61e enforcing-mode policy denial;
+// the `reason` is the precedence-pinned gate that fired.
+pub(super) use super::error_codes::{PROXY_DENIED, PROXY_FAILED, PROXY_UNSUPPORTED};
 
 pub(super) fn proxy_error_line(id: Value, code: i32, reason: &str, message: &str) -> String {
     json!({

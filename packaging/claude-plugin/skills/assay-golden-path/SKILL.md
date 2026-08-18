@@ -82,7 +82,7 @@ Run: `assay-mcp-server proxy-enforce --upstream-command <python> --upstream-arg 
 
 Exit: Policy-denied call after stdin closes `0`; startup input failure `1`.
 
-Stdout: The denied `tools/call` response pins `error.code: -32042`, `error.data.origin: assay-proxy`, and `error.data.reason: no_declared_allowance`.
+Stdout: The denied `tools/call` response pins `error.code: -31999`, `error.data.origin: assay-proxy`, and `error.data.reason: no_declared_allowance`.
 
 On failure: Policy denial is not a process failure. A missing enforcement policy fails startup with empty stdout and one JSON `startup_failure` event on stderr, including `reason_code: proxy_enforce_policy_invalid` and an actionable `next_step`.
 

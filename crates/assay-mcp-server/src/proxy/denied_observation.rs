@@ -8,7 +8,7 @@ use assay_mcp_server::tool_decision::sanitize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-pub const DENIED_CALL_OBSERVATION_SCHEMA: &str = "assay.denied_call_observation.v0";
+pub const DENIED_CALL_OBSERVATION_SCHEMA: &str = "assay.denied_call_observation.v1";
 
 pub fn denied_call_observation_record(
     tool_name: &str,
@@ -48,11 +48,11 @@ mod tests {
 
     #[test]
     fn record_is_observation_not_verdict() {
-        let response = r#"{"jsonrpc":"2.0","id":9,"error":{"code":-32042,"message":"tools/call denied by enforcing proxy: credential_scope","data":{"origin":"assay-proxy","reason":"credential_scope"}}}"#;
+        let response = r#"{"jsonrpc":"2.0","id":9,"error":{"code":-31999,"message":"tools/call denied by enforcing proxy: credential_scope","data":{"origin":"assay-proxy","reason":"credential_scope"}}}"#;
         let rec = denied_call_observation_record(
             "github.add_deploy_key",
             Some("sha256:abc"),
-            -32042,
+            -31999,
             "credential_scope",
             response,
         );
@@ -68,5 +68,38 @@ mod tests {
         assert!(rec.get("decision").is_none());
         assert!(rec.get("target").is_none());
         assert!(rec.get("arguments").is_none());
+    }
+
+    #[test]
+    fn observation_schema_is_v1_and_digest_covers_raw_line_bytes() {
+        assert_eq!(
+            DENIED_CALL_OBSERVATION_SCHEMA,
+            "assay.denied_call_observation.v1"
+        );
+        let response = r#"{"jsonrpc":"2.0","id":9,"error":{"code":-31999,"message":"tools/call denied by enforcing proxy: credential_scope","data":{"origin":"assay-proxy","reason":"credential_scope"}}}"#;
+        let rec = denied_call_observation_record(
+            "github.add_deploy_key",
+            Some("sha256:abc"),
+            -31999,
+            "credential_scope",
+            response,
+        );
+        assert_eq!(rec["schema"], "assay.denied_call_observation.v1");
+        assert_eq!(rec["caller_visible_error"]["code"], -31999);
+        let expected = format!(
+            "sha256:{}",
+            hex::encode(Sha256::digest(response.as_bytes()))
+        );
+        assert_eq!(rec["caller_visible_response_digest"], expected);
+        let mutated = format!("{response} ");
+        assert_ne!(
+            rec["caller_visible_response_digest"],
+            format!("sha256:{}", hex::encode(Sha256::digest(mutated.as_bytes()))),
+            "digest must cover the exact response-line bytes, not a rebuilt or padded form"
+        );
+        assert_eq!(
+            DENIED_CALL_OBSERVATION_SCHEMA,
+            assay_evidence::DENIED_CALL_OBSERVATION_V1
+        );
     }
 }

@@ -7,6 +7,7 @@ fn spawn_enforce_with_denied_observations(
     log: &std::path::Path,
     policy: &std::path::Path,
     denied_observations: &std::path::Path,
+    mode: &str,
 ) -> std::process::Child {
     Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
         .args([
@@ -25,7 +26,7 @@ fn spawn_enforce_with_denied_observations(
             denied_observations.to_str().unwrap(),
         ])
         .env("MOCK_UPSTREAM_LOG", log)
-        .env("MOCK_UPSTREAM_MODE", "normal")
+        .env("MOCK_UPSTREAM_MODE", mode)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -52,6 +53,7 @@ fn denied_call_observation_records_caller_visible_proxy_denial_without_becoming_
         &log,
         &policy,
         &denied_observations,
+        "normal",
     ));
 
     out.send(init());
@@ -81,7 +83,7 @@ fn denied_call_observation_records_caller_visible_proxy_denial_without_becoming_
         "one denied observation per answered denial"
     );
     let rec = &records[0];
-    assert_eq!(rec["schema"], "assay.denied_call_observation.v0");
+    assert_eq!(rec["schema"], "assay.denied_call_observation.v1");
     assert_eq!(rec["call"]["tool_name"], "github.add_deploy_key");
     assert!(
         rec["call"]["target_digest"]
@@ -89,7 +91,7 @@ fn denied_call_observation_records_caller_visible_proxy_denial_without_becoming_
             .is_some_and(|digest| digest.starts_with("sha256:")),
         "record must bind to the classified call target: {rec}"
     );
-    assert_eq!(rec["caller_visible_error"]["code"], PROXY_DENIED);
+    assert_eq!(rec["caller_visible_error"]["code"], -31999);
     assert_eq!(rec["caller_visible_error"]["origin"], "assay-proxy");
     assert_eq!(
         rec["caller_visible_error"]["reason"],
@@ -143,5 +145,53 @@ fn denied_call_observation_flag_off_writes_no_file() {
     assert!(
         !denied_observations.exists(),
         "denied observation file is opt-in"
+    );
+}
+
+#[test]
+fn upstream_reserved_elicitation_relays_without_assay_observation() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let denied_observations = dir.path().join("denied_observations.ndjson");
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut out = Conn::attach(spawn_enforce_with_denied_observations(
+        &log,
+        &policy,
+        &denied_observations,
+        "p60a_upstream_elicitation",
+    ));
+
+    out.send(init());
+    let _ = out.read_response();
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let _ = out.read_response();
+    out.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "github.add_deploy_key",
+            "arguments": {"owner": "acme", "repo": "prod-app"}
+        }
+    }));
+    let response = out.read_response();
+    assert_eq!(
+        response["error"]["code"], -32042,
+        "upstream reserved elicitation must be relayed value-equivalently: {response}"
+    );
+    assert_ne!(
+        response["error"]["data"]["origin"], "assay-proxy",
+        "upstream reserved -32042 must not be rewritten as an Assay origin: {response}"
+    );
+    let _ = out.shutdown();
+
+    assert!(
+        read_methods(&log).contains(&"tools/call".to_string()),
+        "the allowed tools/call must reach the upstream so its reserved error can be relayed"
+    );
+    assert!(
+        !denied_observations.exists()
+            || read_denied_observation_records(&denied_observations).is_empty(),
+        "upstream reserved -32042 must not produce an Assay denial observation"
     );
 }

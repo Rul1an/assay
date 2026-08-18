@@ -5,7 +5,7 @@ use std::process::{Child, Command, Stdio};
 // Re-exported so the sibling modules pick it up through their `use crate::support::*;`.
 pub(crate) use crate::jsonrpc_conn::Conn;
 
-pub(crate) const PROXY_DENIED: i64 = -32042;
+pub(crate) const PROXY_DENIED: i64 = -31999;
 
 pub(crate) const ALLOW_ACME: &str = r#"
 caller:

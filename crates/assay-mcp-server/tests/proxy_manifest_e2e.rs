@@ -15,7 +15,7 @@ use std::process::{Command, Stdio};
 mod jsonrpc_conn;
 use jsonrpc_conn::Conn;
 
-const PROXY_UNSUPPORTED: i64 = -32040;
+const PROXY_UNSUPPORTED: i64 = -31997;
 
 fn python() -> &'static str {
     if cfg!(windows) {

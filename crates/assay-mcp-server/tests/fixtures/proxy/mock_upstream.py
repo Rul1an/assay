@@ -8,7 +8,9 @@ fixed set of methods with canned results. It uses no network and performs no aut
 Environment:
   MOCK_UPSTREAM_LOG       append each received `method` (one per line) to this path
   MOCK_UPSTREAM_RAW_LOG   append each raw received line to this path (to prove verbatim forwarding)
-  MOCK_UPSTREAM_MODE      "normal" (default) or "malformed" (emit a non-JSON line for tools/list)
+  MOCK_UPSTREAM_MODE      "normal" (default), "malformed" (emit a non-JSON line for tools/list),
+                          or "p60a_upstream_elicitation" (p60a tools/list; tools/call returns
+                          reserved JSON-RPC -32042 with no assay-proxy origin)
 """
 import json
 import os
@@ -86,7 +88,7 @@ def _handle_tools_list(mid, cursor):
         # A non-JSON line: the proxy must not relay this as a successful response.
         sys.stdout.write("THIS IS NOT JSON-RPC\n")
         sys.stdout.flush()
-    elif MODE == "p60a":
+    elif MODE in ("p60a", "p60a_upstream_elicitation"):
         _result(mid, _P60A_TOOLS)
     elif MODE == "p60a_readonly_annotation":
         _result(mid, _P60A_READONLY_ANNOTATION_TOOLS)
@@ -159,13 +161,21 @@ def main():
         elif method == "tools/list":
             _handle_tools_list(mid, (msg.get("params") or {}).get("cursor"))
         elif method == "tools/call":
-            # Only the enforcing proxy's allow path forwards tools/call to us (P61e-c3). Answer with a
-            # canned success so the test can assert the upstream's reply was relayed verbatim.
-            _send({
-                "jsonrpc": "2.0",
-                "id": mid,
-                "result": {"content": [{"type": "text", "text": "forwarded-ok"}], "isError": False},
-            })
+            # Only the enforcing proxy's allow path forwards tools/call to us (P61e-c3).
+            if MODE == "p60a_upstream_elicitation":
+                # MCP reserved URL-elicitation code, not an Assay-originated deny.
+                _send({
+                    "jsonrpc": "2.0",
+                    "id": mid,
+                    "error": {"code": -32042, "message": "URL elicitation required"},
+                })
+            else:
+                # Canned success so the test can assert the upstream's reply was relayed verbatim.
+                _send({
+                    "jsonrpc": "2.0",
+                    "id": mid,
+                    "result": {"content": [{"type": "text", "text": "forwarded-ok"}], "isError": False},
+                })
         elif method is not None and mid is not None:
             # Should never happen for other methods: the proxy denies non-allowlisted methods before
             # they reach us. If a request slips through, fail loudly rather than silently accept it.

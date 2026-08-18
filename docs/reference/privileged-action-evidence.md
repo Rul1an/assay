@@ -18,7 +18,7 @@ tools/call under review
   -> pre-call manifest-establish journey      (assay.manifest_establish.v0, establish path only,
                                                never the verdict)
   -> fail-closed allow or deny, with reason   (assay.enforcement_decision.v0)
-  -> caller-visible deny observation          (assay.denied_call_observation.v0, opt-in sibling)
+  -> caller-visible deny observation          (assay.denied_call_observation.v1, opt-in sibling)
 ```
 
 The observe-path carriers record and review what was seen around a call:
@@ -38,7 +38,7 @@ observed tool call
 |--------|-----------------|-----------|
 | `assay.enforcement_decision.v0` | the enforcing proxy's per-call allow or deny: decision, precedence-pinned reason, `fail_closed`, drift state, credential alias (never the token) | [mcp-upstream-proxy-enforcement.md](mcp-upstream-proxy-enforcement.md) |
 | `assay.manifest_establish.v0` | the bounded pre-call re-list journey (establish path and run outcome), kept separate from the verdict | [mcp-upstream-proxy-enforcement.md](mcp-upstream-proxy-enforcement.md) |
-| `assay.denied_call_observation.v0` | opt-in caller-visible proxy-deny observation, kept separate from `assay.enforcement_decision.v0` verdict records | [mcp-upstream-proxy-enforcement.md](mcp-upstream-proxy-enforcement.md) |
+| `assay.denied_call_observation.v1` | opt-in caller-visible proxy-deny observation (`-31999` / `assay-proxy`); v0 remains the historical profile | [mcp-upstream-proxy-enforcement.md](mcp-upstream-proxy-enforcement.md) |
 | `assay.tool_decision_surface.v0` | per-call: server, classified action + projected target, decision, response, redaction, correlation basis | [tool-decision-surface.md](tool-decision-surface.md) |
 | `assay.declared_tool_surface.v0` | declared/allowed privileged actions, for observed-vs-declared review | [declared-tool-surface.md](declared-tool-surface.md) |
 | `assay.tool_decision_truth.v0` | experimental declared-vs-observed policy-decision carrier, digest, verdict, and pack-row primitive | [tool-decision-truth.md](tool-decision-truth.md) |
@@ -96,7 +96,9 @@ emits that artifact with honest completeness, while never executing tools throug
 privileged `tools/call` before forwarding through fail-closed caller-allowance, credential-scope, and
 manifest-drift gates and emits the per-call `assay.enforcement_decision.v0` record, joined by the
 `assay.manifest_establish.v0` establish journey (v3.25.0) and the opt-in
-`assay.denied_call_observation.v0` deny observation (v3.33.0); spec:
+deny observation (introduced as `assay.denied_call_observation.v0` in v3.33.0; current
+emission is `assay.denied_call_observation.v1` with Assay deny code `-31999`, verified with
+`--profile-version v1`; the verifier default stays v0); spec:
 [mcp-upstream-proxy-enforcement.md](mcp-upstream-proxy-enforcement.md), runnable end to end in
 [examples/privileged-action-gate](../../examples/privileged-action-gate/).
 

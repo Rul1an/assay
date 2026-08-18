@@ -453,7 +453,7 @@ STEPS: list[dict[str, object]] = [
                     "--declared-mcp-manifest",
                     "baseline-approved.json",
                 ],
-                jsonrpc_error_code=-32042,
+                jsonrpc_error_code=-31999,
                 origin="assay-proxy",
                 reason="no_declared_allowance",
             ),
@@ -476,7 +476,7 @@ STEPS: list[dict[str, object]] = [
             ),
         ],
         "stdout_summary": (
-            "The denied `tools/call` response pins `error.code: -32042`, "
+            "The denied `tools/call` response pins `error.code: -31999`, "
             "`error.data.origin: assay-proxy`, and `error.data.reason: "
             "no_declared_allowance`."
         ),

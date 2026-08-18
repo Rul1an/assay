@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- Assay-owned MCP proxy application codes move out of the JSON-RPC reserved band:
+  unsupported `-31997`, failed `-31998`, denied `-31999`. The opt-in deny observation is
+  `assay.denied_call_observation.v1` and binds the same `-31999` code. An upstream reserved
+  `-32042` (MCP URL elicitation) still relays value-equivalently and does not mint an Assay
+  observation. Live produce verifies with `--profile-version v1`; the verifier default stays
+  `v0`. No policy, forwarding, or process-exit change (#2509).
 - Telemetry follow-up for the #2391 outer-fallback surface: `tool_call_crash`
   was removed; outer dispatch failures emit `tool_execution_error`. Remaining
   `tool_call_start` / `tool_call_done` / `tool_call_timeout` events stay
