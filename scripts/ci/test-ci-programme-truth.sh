@@ -90,6 +90,7 @@ EXPECTED_LEDGER_BULLET='- The public execution ledger for the active programme i
   instruction and not a guarantee — and the way it fails is quiet: the line kept pointing at a
   finished programme, which reads as an active ledger and sends handoffs to a closed issue.'
 
+# shellcheck disable=SC2016 # Markdown backticks in this exact-section fixture are literal.
 EXPECTED_REQUIRED_CHECKS='## Required checks
 
 The live required contexts are named once in `CI-CONTRACT.md` at
