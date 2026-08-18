@@ -23,7 +23,7 @@
     },
     {
       "path": "scripts/ci/published-release-golden-path.sh",
-      "sha256": "5cde9c8909df8f5b5a2c9ef4131e2aded6ded6e0d80c224bf7de8caef022afff"
+      "sha256": "9ab436674b998c6753e2962bbe1b6c48f8c9231075d138b1cd887be0ea8aa838"
     },
     {
       "path": "scripts/ci/release_attestation_enforce.sh",
@@ -31,7 +31,8 @@
     },
     {
       "path": "scripts/ci/release_archive_inventory.sh",
-      "sha256": "3ac3604dc26b843066751a50d9c25c8e780ac6e5e8bcf9645b672af27f161afb"
+      "sha256": "3ac3604dc26b843066751a50d9c25c8e780ac6e5e8bcf9645b672af27f161afb",
+      "executable": true
     },
     {
       "path": "scripts/ci/safe_extract_release_archive.py",

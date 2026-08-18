@@ -260,4 +260,10 @@ expect_mutation_failure \
   '("attestation-raw/*.json", 0)' \
   "harness digest drifted: scripts/ci/published-release-golden-path.sh"
 
+expect_mutation_failure \
+  "inventory-executable-flag-removed" "manifest.json" \
+  '"executable": true' \
+  '"executable": false' \
+  "harness executable surface drifted"
+
 echo "ok: published-release golden-path contract"

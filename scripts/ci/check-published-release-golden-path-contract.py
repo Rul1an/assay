@@ -98,6 +98,13 @@ def validate_manifest(
     ]
     if paths != expected:
         problems.append("harness manifest must list exactly the reviewed harness inputs")
+    executable_paths = [
+        row.get("path")
+        for row in files
+        if isinstance(row, dict) and row.get("executable") is True
+    ]
+    if executable_paths != ["scripts/ci/release_archive_inventory.sh"]:
+        problems.append("harness executable surface drifted")
 
 
 def validate_contract(
