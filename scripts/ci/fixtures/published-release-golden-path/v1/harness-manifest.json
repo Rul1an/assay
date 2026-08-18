@@ -30,6 +30,10 @@
       "sha256": "01bfa586b826fa74838c58e765f40982537f8ea14325b803fc9183fcf4e8277f"
     },
     {
+      "path": "scripts/ci/release_archive_inventory.sh",
+      "sha256": "3ac3604dc26b843066751a50d9c25c8e780ac6e5e8bcf9645b672af27f161afb"
+    },
+    {
       "path": "scripts/ci/safe_extract_release_archive.py",
       "sha256": "0d0c4462d2373cfd29fb6424ac6cba26e8218a3cdbe4cf93055362b19acdaef9"
     },

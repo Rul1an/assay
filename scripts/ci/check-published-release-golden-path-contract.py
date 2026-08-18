@@ -92,6 +92,7 @@ def validate_manifest(
         ".github/workflows/release.yml",
         "scripts/ci/published-release-golden-path.sh",
         "scripts/ci/release_attestation_enforce.sh",
+        "scripts/ci/release_archive_inventory.sh",
         "scripts/ci/safe_extract_release_archive.py",
         "scripts/ci/bounded_download.py",
     ]
