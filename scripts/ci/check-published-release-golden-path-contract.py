@@ -188,7 +188,7 @@ def validate_contract(
         "external tag source": '"$GH_BIN" api "repos/${REPO}/git/ref/tags/${release_tag}"',
         "reviewed attestation verifier": 'bash "$ROOT/scripts/ci/release_attestation_enforce.sh"',
         "compressed asset ceiling": "release asset exceeds compressed-size ceiling",
-        "bounded archive extractor": '"$PYTHON_BIN" "$ROOT/scripts/ci/safe_extract_release_archive.py"',
+        "bounded archive extractor": "from safe_extract_release_archive import extract_archive",
         "retained release inputs": 'downloads="$results/release-assets"',
         "disposable HOME": 'export HOME="$run_root/home"',
         "restricted PATH": 'export PATH="$install_root/bin:/usr/bin:/bin"',
@@ -226,8 +226,8 @@ def validate_contract(
         'downloads="$results/release-assets"': "release inputs must be retained with the run artifact",
         'download_release_asset "$cli_asset" 67108864': "CLI compressed-size ceiling drifted",
         'download_release_asset "$mcp_asset" 33554432': "MCP compressed-size ceiling drifted",
-        '"$downloads/$cli_asset" "$cli_extract" --max-decoded-bytes 134217728': "CLI safe-extraction ceiling drifted",
-        '"$downloads/$mcp_asset" "$mcp_extract" --max-decoded-bytes 67108864': "MCP safe-extraction ceiling drifted",
+        'safe_extract "$downloads/$cli_asset" "$cli_extract" 134217728': "CLI safe-extraction ceiling drifted",
+        'safe_extract "$downloads/$mcp_asset" "$mcp_extract" 67108864': "MCP safe-extraction ceiling drifted",
         '--bundle-out "$bundle" --run-id "published-release-${workflow_run_id}-${workflow_run_attempt}" \\': (
             "evidence run id is not bound to the workflow invocation"
         ),
@@ -243,8 +243,8 @@ def validate_contract(
     else:
         verifier = driver_lines.index(verifier_line)
         product_boundaries = [
-            '"$downloads/$cli_asset" "$cli_extract" --max-decoded-bytes 134217728',
-            '"$downloads/$mcp_asset" "$mcp_extract" --max-decoded-bytes 67108864',
+            'safe_extract "$downloads/$cli_asset" "$cli_extract" 134217728',
+            'safe_extract "$downloads/$mcp_asset" "$mcp_extract" 67108864',
             'cp "${cli_candidates[0]}" "$install_root/bin/assay"',
             'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"',
             'run_capture "assay-version" 0 "$results/assay-version.txt" "$results/assay-version.stderr" assay version',

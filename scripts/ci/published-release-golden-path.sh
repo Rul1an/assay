@@ -197,10 +197,13 @@ record_command "verify-release-attestations" 0 "$ROOT/scripts/ci/release_attesta
 
 cli_extract="$run_root/cli-extract"
 mcp_extract="$run_root/mcp-extract"
-"$PYTHON_BIN" "$ROOT/scripts/ci/safe_extract_release_archive.py" \
-  "$downloads/$cli_asset" "$cli_extract" --max-decoded-bytes 134217728
-"$PYTHON_BIN" "$ROOT/scripts/ci/safe_extract_release_archive.py" \
-  "$downloads/$mcp_asset" "$mcp_extract" --max-decoded-bytes 67108864
+safe_extract() {
+  PYTHONPATH="$ROOT/scripts/ci" "$PYTHON_BIN" -c \
+    'import pathlib,sys; from safe_extract_release_archive import extract_archive; extract_archive(pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), max_decoded_bytes=int(sys.argv[3]))' \
+    "$1" "$2" "$3"
+}
+safe_extract "$downloads/$cli_asset" "$cli_extract" 134217728
+safe_extract "$downloads/$mcp_asset" "$mcp_extract" 67108864
 mapfile -t cli_candidates < <(find "$cli_extract" -type f -name assay -perm -u+x)
 mapfile -t mcp_candidates < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)
 [[ "${#cli_candidates[@]}" -eq 1 ]] || fail "CLI archive must contain exactly one executable assay binary"

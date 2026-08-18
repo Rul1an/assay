@@ -181,8 +181,8 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "unsafe-archive-extraction" "driver.sh" \
-  '"$downloads/$cli_asset" "$cli_extract" --max-decoded-bytes 134217728' \
-  '"$downloads/$cli_asset" -C "$cli_extract"' \
+  'safe_extract "$downloads/$cli_asset" "$cli_extract" 134217728' \
+  'tar -xzf "$downloads/$cli_asset" -C "$cli_extract"' \
   "CLI safe-extraction ceiling drifted"
 
 expect_mutation_failure \

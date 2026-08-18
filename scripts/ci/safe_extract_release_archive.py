@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import argparse
 import pathlib
 import shutil
 import tarfile
@@ -57,44 +56,11 @@ def extract_archive(
             raise ArchiveRejected("archive scratch destination already exists")
         scratch.mkdir(parents=True)
         try:
-            for member in members:
-                target = scratch.joinpath(*pathlib.PurePosixPath(member.name).parts)
-                if member.isdir():
-                    target.mkdir(parents=True, exist_ok=True)
-                    continue
-                target.parent.mkdir(parents=True, exist_ok=True)
-                source = handle.extractfile(member)
-                if source is None:
-                    raise ArchiveRejected(f"archive member could not be read: {member.name}")
-                with source, target.open("wb") as output:
-                    shutil.copyfileobj(source, output, length=1024 * 1024)
-                if target.stat().st_size != member.size:
-                    raise ArchiveRejected(f"archive member size changed while extracting: {member.name}")
-                target.chmod(member.mode & 0o777)
+            handle.extractall(path=scratch, members=members, filter="data")
+            extracted_size = sum(path.stat().st_size for path in scratch.rglob("*") if path.is_file())
+            if extracted_size != total:
+                raise ArchiveRejected("archive decoded size changed while extracting")
             scratch.replace(destination)
         except BaseException:
             shutil.rmtree(scratch, ignore_errors=True)
             raise
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("archive", type=pathlib.Path)
-    parser.add_argument("destination", type=pathlib.Path)
-    parser.add_argument("--max-decoded-bytes", type=int, required=True)
-    parser.add_argument("--max-members", type=int, default=32)
-    args = parser.parse_args()
-    try:
-        extract_archive(
-            args.archive,
-            args.destination,
-            max_decoded_bytes=args.max_decoded_bytes,
-            max_members=args.max_members,
-        )
-    except (ArchiveRejected, OSError, tarfile.TarError) as error:
-        parser.error(str(error))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
