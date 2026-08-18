@@ -184,10 +184,17 @@ if ! grep -Fq '/usr/bin/lockf -t 0 /tmp/assay-bpf-runner-health.lock' "${CRONTAB
     exit 1
 fi
 
-CRONTAB_EXISTING=$'17 * * * * /usr/local/bin/keep-me\n*/5 * * * * /old/health_check.sh >/tmp/old.log 2>&1\n'
+CRON_SCRIPT_PATH=$(realpath "$0")
+CANONICAL_CRON=$(cat "${CRONTAB_CAPTURE}")
+CRONTAB_EXISTING=$(printf '%s\n%s\n%s\n%s\n%s\n' \
+    '17 * * * * /usr/local/bin/keep-me' \
+    '# retained operator note about health_check.sh' \
+    '23 * * * * /usr/local/bin/backup-health_check.sh' \
+    "${CANONICAL_CRON}" \
+    "*/5 * * * * ${CRON_SCRIPT_PATH} >/tmp/old.log 2>&1")
 : >"${CRONTAB_CAPTURE}"
 install_cron >/dev/null
-if grep -Fq '/old/health_check.sh' "${CRONTAB_CAPTURE}"; then
+if grep -Fq "${CRON_SCRIPT_PATH} >/tmp/old.log" "${CRONTAB_CAPTURE}"; then
     echo "runner cron migration retained the unlocked legacy entry" >&2
     cat "${CRONTAB_CAPTURE}" >&2
     exit 1
@@ -197,8 +204,31 @@ if ! grep -Fxq '17 * * * * /usr/local/bin/keep-me' "${CRONTAB_CAPTURE}"; then
     cat "${CRONTAB_CAPTURE}" >&2
     exit 1
 fi
+for unrelated in \
+    '# retained operator note about health_check.sh' \
+    '23 * * * * /usr/local/bin/backup-health_check.sh'; do
+    if ! grep -Fxq "${unrelated}" "${CRONTAB_CAPTURE}"; then
+        echo "runner cron migration removed unrelated content: ${unrelated}" >&2
+        cat "${CRONTAB_CAPTURE}" >&2
+        exit 1
+    fi
+done
 if [[ "$(grep -Fc '/usr/bin/lockf -t 0 /tmp/assay-bpf-runner-health.lock' "${CRONTAB_CAPTURE}")" -ne 1 ]]; then
     echo "runner cron migration did not install exactly one canonical locked entry" >&2
+    cat "${CRONTAB_CAPTURE}" >&2
+    exit 1
+fi
+if [[ "$(grep -Fc '# assay-bpf-runner-health-check' "${CRONTAB_CAPTURE}")" -ne 1 ]]; then
+    echo "runner cron migration did not retain exactly one ownership marker" >&2
+    cat "${CRONTAB_CAPTURE}" >&2
+    exit 1
+fi
+
+CRONTAB_EXISTING=$(cat "${CRONTAB_CAPTURE}")
+: >"${CRONTAB_CAPTURE}"
+install_cron >/dev/null
+if [[ -s "${CRONTAB_CAPTURE}" ]]; then
+    echo "canonical runner cron installation was not idempotent" >&2
     cat "${CRONTAB_CAPTURE}" >&2
     exit 1
 fi

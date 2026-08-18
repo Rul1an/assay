@@ -740,17 +740,29 @@ install_cron() {
     fi
     local escaped_lock_file
     printf -v escaped_lock_file '%q' "$HEALTH_CHECK_LOCK_FILE"
-    local cron_entry="*/5 * * * * ${env_prefix}/usr/bin/lockf -t 0 ${escaped_lock_file} ${escaped_script_path} >> ${escaped_log_file} 2>&1"
+    local cron_marker="# assay-bpf-runner-health-check"
+    local cron_entry="*/5 * * * * ${env_prefix}/usr/bin/lockf -t 0 ${escaped_lock_file} ${escaped_script_path} >> ${escaped_log_file} 2>&1 ${cron_marker}"
 
     local existing_crontab
     existing_crontab=$(crontab -l 2>/dev/null || true)
-    if printf '%s\n' "$existing_crontab" | grep -Fxq "$cron_entry"; then
+    local managed_count=0
+    local canonical_count=0
+    while IFS= read -r line; do
+        if [[ "$line" == *"$cron_marker"* || "$line" == *"$escaped_script_path"* ]]; then
+            managed_count=$((managed_count + 1))
+            if [[ "$line" == "$cron_entry" ]]; then
+                canonical_count=$((canonical_count + 1))
+            fi
+        fi
+    done <<<"$existing_crontab"
+
+    if [[ "$managed_count" -eq 1 && "$canonical_count" -eq 1 ]]; then
         echo "Cron job already installed"
         echo "$cron_entry"
     else
         {
             while IFS= read -r line; do
-                if [[ "$line" != *"health_check.sh"* ]]; then
+                if [[ "$line" != *"$cron_marker"* && "$line" != *"$escaped_script_path"* ]]; then
                     printf '%s\n' "$line"
                 fi
             done <<<"$existing_crontab"
