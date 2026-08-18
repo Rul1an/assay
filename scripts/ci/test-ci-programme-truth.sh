@@ -41,13 +41,13 @@ ISSUE_LINK = re.compile(
     r"\[issue #(\d+)\]\((https://github\.com/[^)\s]+/issues/(\d+))\)"
 )
 VISIBLE_ISSUE = re.compile(r"(?i)issue #(\d+)")
-# Declaration-shaped only: a sentence/line that names the active ledger, or a
-# standalone inactive declaration. Raw "public execution ledger" prose is not.
+# Optional list marker and strong prefix before a declaration-shaped start.
+DECL_PREFIX = r"(?:^|[.!?]\s+)(?:-\s+)?(?:\*{1,2})?"
 OUTSIDE_ACTIVE_DECL = re.compile(
-    r"(?im)(?:^|[.!?]\s+)The active programme ledger is\b"
+    rf"(?im){DECL_PREFIX}The active programme ledger is\b"
 )
 OUTSIDE_INACTIVE_DECL = re.compile(
-    r"(?im)(?:^|[.!?]\s+)\*{0,2}No programme is active\."
+    rf"(?im){DECL_PREFIX}No programme is active\."
 )
 # List-item declarations only. Ordinary prose such as "ensure required checks
 # pass" is not a required-context declaration.
@@ -134,8 +134,8 @@ def validate_ledger(text: str, prefix: str) -> None:
     for visible, _url, url_id in links:
         if visible != url_id:
             raise SystemExit("visible issue-ID != URL-ID")
-    linked_ids = {visible for visible, _url, _url_id in links}
-    unlinked = [num for num in VISIBLE_ISSUE.findall(bullet) if num not in linked_ids]
+    stripped = ISSUE_LINK.sub("", bullet)
+    unlinked = VISIBLE_ISSUE.findall(stripped)
     if unlinked:
         raise SystemExit(
             "unlinked issue # reference in the ledger bullet: "
@@ -344,6 +344,33 @@ assert_wave71_not_active() {
   return 0
 }
 
+assert_selfhost_temp_contract() {
+  PROGRAMME_TRUTH_SCRIPT="${BASH_SOURCE[0]}" python3 - <<'PY'
+import os
+import re
+from pathlib import Path
+
+text = Path(os.environ["PROGRAMME_TRUTH_SCRIPT"]).read_text(encoding="utf-8")
+marker = 'if [[ -z "${PROGRAMME_TRUTH_SELFHOST:-}" ]]; then'
+idx = text.rfind(marker)
+if idx < 0:
+    raise SystemExit("missing selfhost runner")
+block = text[idx:]
+if block.count("mktemp -d") != 1:
+    raise SystemExit(
+        "selfhost runner must allocate exactly one temp directory"
+    )
+if re.search(r"\$\(mktemp\)(?! -d)", block):
+    raise SystemExit("selfhost still allocates a second mktemp file")
+alloc_at = block.find("mktemp -d")
+trap_m = re.search(r"trap\b[^\n]*\bEXIT\b", block[alloc_at:])
+if trap_m is None:
+    raise SystemExit("selfhost does not register an EXIT trap after allocation")
+if "${selfhost_dir:?}" not in block:
+    raise SystemExit("selfhost cleanup must refuse an empty directory via :?")
+PY
+}
+
 expect_ok() {
   local label="$1"
   shift
@@ -398,6 +425,18 @@ ordinary_ledger_prose="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
 expect_ok "ordinary public-ledger prose outside the bullet" \
   assert_agents_ledger "$ordinary_ledger_prose"
 
+list_active_elsewhere="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
+  '- The active programme ledger is issue #7777.')"
+expect_red "list-item active ledger declaration elsewhere" \
+  "contradictory ledger declaration outside the ledger bullet" \
+  assert_agents_ledger "$list_active_elsewhere"
+
+list_inactive_elsewhere="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
+  '- **No programme is active.**')"
+expect_red "list-item inactive declaration elsewhere" \
+  "contradictory ledger declaration outside the ledger bullet" \
+  assert_agents_ledger "$list_inactive_elsewhere"
+
 ACTIVE_LEDGER_BULLET='- The public execution ledger for the active programme is named on this line: [issue #4242](https://github.com/Rul1an/assay/issues/4242).'
 active_ledger="$(replace_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$(<"$AGENTS")")"
 expect_ok "structurally active ledger fixture" assert_agents_ledger "$active_ledger"
@@ -414,6 +453,12 @@ inactive_mismatch="$(replace_ledger_bullet \
   "$(<"$AGENTS")")"
 expect_red "inactive previous-link text/URL mismatch" "visible issue-ID != URL-ID" \
   assert_agents_ledger "$inactive_mismatch"
+
+linked_plus_plain="$(replace_ledger_bullet \
+  '- The public execution ledger for the active programme is named on this line: [issue #7777](https://github.com/Rul1an/assay/issues/7777). Also issue #7777.' \
+  "$(<"$AGENTS")")"
+expect_red "valid link plus extra plain issue # of the same ID" "unlinked issue #" \
+  assert_agents_ledger "$linked_plus_plain"
 
 duplicate_ledger="$(insert_into_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$(<"$AGENTS")")"
 expect_red "duplicate ledger bullet" "duplicate ledger bullet" \
@@ -455,9 +500,14 @@ expect_red "restored single-boundary TODO" "single-boundary Wave 3 TODO" \
 expect_red "deleted-monitor.rs claim" "must not claim monitor.rs was deleted" \
   assert_no_generic_unsafe_preview "monitor.rs was deleted" ""
 
+expect_ok "selfhost uses one tempdir and an EXIT trap" assert_selfhost_temp_contract
+
 if [[ -z "${PROGRAMME_TRUTH_SELFHOST:-}" ]]; then
-  active_agents="$(mktemp)"
-  selfhost_log="$(mktemp)"
+  cleanup_selfhost() { rm -rf -- "${selfhost_dir:?}"; }
+  selfhost_dir="$(mktemp -d)"
+  trap cleanup_selfhost EXIT
+  active_agents="$selfhost_dir/agents.md"
+  selfhost_log="$selfhost_dir/selfhost.log"
   replace_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$(<"$ROOT/AGENTS.md")" >"$active_agents"
   if PROGRAMME_TRUTH_AGENTS="$active_agents" PROGRAMME_TRUTH_SELFHOST=1 \
     bash "${BASH_SOURCE[0]}" >"$selfhost_log" 2>&1; then
@@ -465,7 +515,8 @@ if [[ -z "${PROGRAMME_TRUTH_SELFHOST:-}" ]]; then
   else
     bad "full contract on active canonical AGENTS ledger: $(tail -n 20 "$selfhost_log")"
   fi
-  rm -f "$active_agents" "$selfhost_log"
+  trap - EXIT
+  cleanup_selfhost
 fi
 
 if [[ "$FAILURES" -ne 0 ]]; then
