@@ -742,12 +742,21 @@ install_cron() {
     printf -v escaped_lock_file '%q' "$HEALTH_CHECK_LOCK_FILE"
     local cron_entry="*/5 * * * * ${env_prefix}/usr/bin/lockf -t 0 ${escaped_lock_file} ${escaped_script_path} >> ${escaped_log_file} 2>&1"
 
-    if crontab -l 2>/dev/null | grep -q "health_check.sh"; then
+    local existing_crontab
+    existing_crontab=$(crontab -l 2>/dev/null || true)
+    if printf '%s\n' "$existing_crontab" | grep -Fxq "$cron_entry"; then
         echo "Cron job already installed"
-        crontab -l | grep "health_check.sh"
+        echo "$cron_entry"
     else
-        (crontab -l 2>/dev/null; echo "$cron_entry") | crontab -
-        echo "Cron job installed: $cron_entry"
+        {
+            while IFS= read -r line; do
+                if [[ "$line" != *"health_check.sh"* ]]; then
+                    printf '%s\n' "$line"
+                fi
+            done <<<"$existing_crontab"
+            echo "$cron_entry"
+        } | crontab -
+        echo "Cron job installed or updated: $cron_entry"
         if [[ -z "$GH_TOKEN_FILE" ]]; then
             echo "⚠️  No GH_TOKEN_FILE set; cron runs rely on interactive gh auth state."
         fi

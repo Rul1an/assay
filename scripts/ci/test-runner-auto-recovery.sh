@@ -127,27 +127,52 @@ timeout() {
     fi
     "$@"
 }
-if configure_runner fresh-token; then
-    echo "runner configuration accepted a timed-out command" >&2
+set +e
+configure_runner fresh-token
+configure_status=$?
+set -e
+if [[ "${configure_status}" -ne 124 ]]; then
+    echo "runner configuration did not propagate timeout exit 124 (got ${configure_status})" >&2
     exit 1
 fi
 
+TIMEOUT_SERVICE_PHASE="install"
 timeout() {
     shift
-    if [[ "$*" == *"svc.sh install"* ]]; then
+    if [[ "${TIMEOUT_SERVICE_PHASE}" == install && "$*" == *"svc.sh install"* ]]; then
         echo "installed"
+        return 124
+    fi
+    if [[ "${TIMEOUT_SERVICE_PHASE}" == start && "$*" == *"svc.sh start"* ]]; then
+        echo "started"
         return 124
     fi
     "$@"
 }
-if start_runner_service; then
-    echo "runner service setup accepted a timed-out install" >&2
+set +e
+start_runner_service
+install_status=$?
+set -e
+if [[ "${install_status}" -ne 124 ]]; then
+    echo "runner service install did not propagate timeout exit 124 (got ${install_status})" >&2
+    exit 1
+fi
+
+TIMEOUT_SERVICE_PHASE="start"
+set +e
+start_runner_service
+start_status=$?
+set -e
+if [[ "${start_status}" -ne 124 ]]; then
+    echo "runner service start did not propagate timeout exit 124 (got ${start_status})" >&2
     exit 1
 fi
 
 CRONTAB_CAPTURE="${EVENTS}.crontab"
+CRONTAB_EXISTING=""
 crontab() {
     if [[ "${1:-}" == -l ]]; then
+        printf '%s' "${CRONTAB_EXISTING}"
         return 0
     fi
     cat >"${CRONTAB_CAPTURE}"
@@ -155,6 +180,25 @@ crontab() {
 install_cron >/dev/null
 if ! grep -Fq '/usr/bin/lockf -t 0 /tmp/assay-bpf-runner-health.lock' "${CRONTAB_CAPTURE}"; then
     echo "installed runner cron does not prevent overlapping recovery runs" >&2
+    cat "${CRONTAB_CAPTURE}" >&2
+    exit 1
+fi
+
+CRONTAB_EXISTING=$'17 * * * * /usr/local/bin/keep-me\n*/5 * * * * /old/health_check.sh >/tmp/old.log 2>&1\n'
+: >"${CRONTAB_CAPTURE}"
+install_cron >/dev/null
+if grep -Fq '/old/health_check.sh' "${CRONTAB_CAPTURE}"; then
+    echo "runner cron migration retained the unlocked legacy entry" >&2
+    cat "${CRONTAB_CAPTURE}" >&2
+    exit 1
+fi
+if ! grep -Fxq '17 * * * * /usr/local/bin/keep-me' "${CRONTAB_CAPTURE}"; then
+    echo "runner cron migration removed an unrelated cron entry" >&2
+    cat "${CRONTAB_CAPTURE}" >&2
+    exit 1
+fi
+if [[ "$(grep -Fc '/usr/bin/lockf -t 0 /tmp/assay-bpf-runner-health.lock' "${CRONTAB_CAPTURE}")" -ne 1 ]]; then
+    echo "runner cron migration did not install exactly one canonical locked entry" >&2
     cat "${CRONTAB_CAPTURE}" >&2
     exit 1
 fi
