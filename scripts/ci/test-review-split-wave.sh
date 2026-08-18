@@ -133,11 +133,13 @@ fi
 
 # Mutation: restore the two-source inventory and require the leak to go silent.
 mutant="$TMP/review-split-wave.mutant.sh"
-python3 "$CEILINGS" check-file "$SCRIPT"
 python3 - "$SCRIPT" "$mutant" <<'PY'
 from pathlib import Path
 import sys
-src = Path(sys.argv[1]).read_text(encoding="utf-8")
+
+from resource_ceilings import read_bounded_file, require_bounded_bytes
+
+src = read_bounded_file(sys.argv[1]).decode("utf-8")
 old = """changed_files="$(
   {
     git diff --name-only "${base_ref}"...HEAD
@@ -151,6 +153,7 @@ if old not in src:
     mutated = mutated.replace("git ls-files --others --exclude-standard\n", "")
 else:
     mutated = src
+require_bounded_bytes(mutated.encode("utf-8"), "review-split-wave inventory mutant")
 Path(sys.argv[2]).write_text(mutated, encoding="utf-8")
 PY
 chmod +x "$mutant"
@@ -223,8 +226,62 @@ else
   bad "invalid path cap red without positive integer: $out"
 fi
 
-# shellcheck disable=SC2016 # Literal production helper invocation, not an expansion.
-if grep -Fq 'python3 "${_REVIEW_SPLIT_CEILINGS}" inventory' "$SCRIPT"; then
+if out="$(BOUNDED_INVENTORY_MAX_PATHS='' python3 "$CEILINGS" inventory </dev/null 2>&1)"; then
+  bad "empty path cap left the inventory green"
+elif grep -Fq 'is not a positive integer' <<<"$out"; then
+  ok "empty path cap turns red ($out)"
+else
+  bad "empty path cap red without positive integer: $out"
+fi
+
+if out="$(BOUNDED_INVENTORY_MAX_PATHS=+2 python3 "$CEILINGS" inventory </dev/null 2>&1)"; then
+  bad "plus-prefixed path cap left the inventory green"
+elif grep -Fq 'is not a positive integer' <<<"$out"; then
+  ok "plus-prefixed path cap turns red ($out)"
+else
+  bad "plus-prefixed path cap red without positive integer: $out"
+fi
+
+if out="$(BOUNDED_INVENTORY_MAX_PATHS=' 2' python3 "$CEILINGS" inventory </dev/null 2>&1)"; then
+  bad "spaced path cap left the inventory green"
+elif grep -Fq 'is not a positive integer' <<<"$out"; then
+  ok "spaced path cap turns red ($out)"
+else
+  bad "spaced path cap red without positive integer: $out"
+fi
+
+if out="$(BOUNDED_INVENTORY_MAX_PATHS=2.0 python3 "$CEILINGS" inventory </dev/null 2>&1)"; then
+  bad "float path cap left the inventory green"
+elif grep -Fq 'is not a positive integer' <<<"$out"; then
+  ok "float path cap turns red ($out)"
+else
+  bad "float path cap red without positive integer: $out"
+fi
+
+if out="$(BOUNDED_INVENTORY_MAX_PATHS=-1 python3 "$CEILINGS" inventory </dev/null 2>&1)"; then
+  bad "negative path cap left the inventory green"
+elif grep -Fq 'must be a positive integer' <<<"$out"; then
+  ok "negative path cap turns red ($out)"
+else
+  bad "negative path cap red without positive integer: $out"
+fi
+
+if out="$(printf 'a\n' | BOUNDED_INVENTORY_MAX_PATHS="$CANON_PATHS" python3 "$CEILINGS" inventory 2>&1)"; then
+  ok "equal path cap is allowed"
+else
+  bad "equal path cap turned red: $out"
+fi
+
+if python3 - "$SCRIPT" <<'PY'
+import sys
+
+from resource_ceilings import read_bounded_file
+
+text = read_bounded_file(sys.argv[1]).decode("utf-8")
+if 'python3 "${_REVIEW_SPLIT_CEILINGS}" inventory' not in text:
+    raise SystemExit("review-split-wave does not invoke resource_ceilings inventory")
+PY
+then
   ok "review-split-wave inventories through the bounded helper"
 else
   bad "review-split-wave does not invoke resource_ceilings inventory"

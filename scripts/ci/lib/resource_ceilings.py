@@ -7,7 +7,8 @@ bytes (64 KiB). Inventories are bounded before unique-sort materialization.
 Exceeding a ceiling is an error; nothing is silently truncated.
 
 Callers may lower inventory caps via the environment. They cannot raise
-them above the canonical 8192 / 524288 values.
+them above the canonical 8192 / 524288 values. An absent variable uses
+the default; an explicit empty override is invalid.
 """
 
 from __future__ import annotations
@@ -30,6 +31,13 @@ def require_bounded_bytes(
     return data
 
 
+def _readonly_open_flags() -> int:
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
+    return flags
+
+
 def read_bounded_file(
     path: str, label: str | None = None, limit: int = MAX_DOC_BYTES
 ) -> bytes:
@@ -40,7 +48,7 @@ def read_bounded_file(
     """
     label = label or path
     try:
-        fd = os.open(path, os.O_RDONLY)
+        fd = os.open(path, _readonly_open_flags())
     except OSError as exc:
         raise SystemExit(f"{label} could not be opened: {exc}") from exc
     try:
@@ -76,15 +84,14 @@ def read_bounded_stream(
 
 
 def caller_cap(env_name: str, canonical: int) -> int:
-    raw = os.environ.get(env_name)
-    if raw is None or raw == "":
+    if env_name not in os.environ:
         return canonical
-    try:
-        value = int(raw, 10)
-    except ValueError:
-        raise SystemExit(f"{env_name} is not a positive integer") from None
-    if value <= 0:
+    raw = os.environ[env_name]
+    if raw == "0" or (raw.startswith("-") and raw[1:].isascii() and raw[1:].isdigit()):
         raise SystemExit(f"{env_name} must be a positive integer")
+    if not raw.isascii() or not raw.isdigit() or raw.startswith("0"):
+        raise SystemExit(f"{env_name} is not a positive integer")
+    value = int(raw, 10)
     if value > canonical:
         raise SystemExit(f"{env_name} cannot exceed canonical {canonical}")
     return value

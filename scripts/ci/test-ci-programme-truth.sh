@@ -260,38 +260,25 @@ assert_wave0_required_contexts() {
 }
 
 assert_wave0_semver_file() {
-  local path="$1"
-  python3 "$CEILINGS" check-file "$path" || return 1
-  if grep -q 'WAVE0_SEMVER_BASELINE_SHA' "$path"; then
-    echo "WAVE0-GATES.md still documents WAVE0_SEMVER_BASELINE_SHA"
-    return 1
-  fi
-  if ! grep -Eqi 'newest|latest' "$path" || ! grep -Eq 'release tag' "$path"; then
-    echo "WAVE0-GATES.md does not describe the dynamic latest-release baseline"
-    return 1
-  fi
-  if ! grep -q 'test-semver-gate.sh' "$path"; then
-    echo "WAVE0-GATES.md does not point at scripts/ci/test-semver-gate.sh"
-    return 1
-  fi
-  return 0
+  python3 - "$1" <<'PY'
+import sys
+
+from resource_ceilings import read_bounded_file
+
+text = read_bounded_file(sys.argv[1]).decode("utf-8")
+if "WAVE0_SEMVER_BASELINE_SHA" in text:
+    raise SystemExit("WAVE0-GATES.md still documents WAVE0_SEMVER_BASELINE_SHA")
+lower = text.lower()
+if ("newest" not in lower and "latest" not in lower) or "release tag" not in text:
+    raise SystemExit("WAVE0-GATES.md does not describe the dynamic latest-release baseline")
+if "test-semver-gate.sh" not in text:
+    raise SystemExit("WAVE0-GATES.md does not point at scripts/ci/test-semver-gate.sh")
+PY
 }
 
 assert_wave0_semver_doc() {
-  local text="$1"
-  if grep -q 'WAVE0_SEMVER_BASELINE_SHA' <<<"$text"; then
-    echo "WAVE0-GATES.md still documents WAVE0_SEMVER_BASELINE_SHA"
-    return 1
-  fi
-  if ! grep -Eqi 'newest|latest' <<<"$text" || ! grep -Eq 'release tag' <<<"$text"; then
-    echo "WAVE0-GATES.md does not describe the dynamic latest-release baseline"
-    return 1
-  fi
-  if ! grep -q 'test-semver-gate.sh' <<<"$text"; then
-    echo "WAVE0-GATES.md does not point at scripts/ci/test-semver-gate.sh"
-    return 1
-  fi
-  return 0
+  printf '%s' "$1" >"$TRUTH_TMP/wave0-semver-fixture.md"
+  assert_wave0_semver_file "$TRUTH_TMP/wave0-semver-fixture.md"
 }
 
 insert_before_next_heading() {
@@ -496,30 +483,59 @@ PY
 }
 
 assert_wave71_file() {
-  local path="$1"
-  python3 "$CEILINGS" check-file "$path" || return 1
-  local row
-  row="$(grep -E '^\| Wave71 \|' "$path" || true)"
-  assert_wave71_not_active "$row"
+  python3 - "$1" <<'PY'
+import re
+import sys
+
+from resource_ceilings import read_bounded_file
+
+text = read_bounded_file(sys.argv[1]).decode("utf-8")
+rows = [line for line in text.splitlines() if re.match(r"^\| Wave71 \|", line)]
+if not rows:
+    raise SystemExit("REFACTOR-WAVE-STATUS.md has no Wave71 row")
+row = rows[0]
+if "| Active |" in row:
+    raise SystemExit("Wave71 row still claims Active without a current execution ledger")
+if re.search(r"Dormant|Incomplete", row, re.I) is None:
+    raise SystemExit("Wave71 row is not marked Dormant or Incomplete")
+PY
 }
 
 assert_wave71_not_active() {
-  local text="$1"
-  local row
-  row="$(printf '%s\n' "$text" | grep -E '^\| Wave71 \|' || true)"
-  if [[ -z "$row" ]]; then
-    echo "REFACTOR-WAVE-STATUS.md has no Wave71 row"
-    return 1
-  fi
-  if grep -Fq '| Active |' <<<"$row"; then
-    echo "Wave71 row still claims Active without a current execution ledger"
-    return 1
-  fi
-  if ! grep -Eqi 'Dormant|Incomplete' <<<"$row"; then
-    echo "Wave71 row is not marked Dormant or Incomplete"
-    return 1
-  fi
-  return 0
+  printf '%s' "$1" >"$TRUTH_TMP/wave71-fixture.md"
+  assert_wave71_file "$TRUTH_TMP/wave71-fixture.md"
+}
+
+assert_hostile_path_fails_quickly() {
+  local path="$1"
+  shift
+  PROGRAMME_TRUTH_HOSTILE_PATH="$path" PROGRAMME_TRUTH_HOSTILE_NEEDLES="$*" python3 - <<'PY'
+import os
+import signal
+
+from resource_ceilings import read_bounded_file
+
+needles = [item for item in os.environ["PROGRAMME_TRUTH_HOSTILE_NEEDLES"].split("\n") if item]
+path = os.environ["PROGRAMME_TRUTH_HOSTILE_PATH"]
+
+
+def _timeout(_signum, _frame):
+    raise SystemExit("bounded open hung")
+
+
+signal.signal(signal.SIGALRM, _timeout)
+signal.alarm(2)
+try:
+    read_bounded_file(path)
+    raise SystemExit("hostile path left the reader green")
+except SystemExit as exc:
+    signal.alarm(0)
+    msg = str(exc)
+    if msg in {"bounded open hung", "hostile path left the reader green"}:
+        raise
+    if not any(needle in msg for needle in needles):
+        raise SystemExit(f"hostile path red without {needles}: {msg}") from exc
+PY
 }
 
 expect_ok() {
@@ -749,6 +765,22 @@ expect_ok "appended NUL still validates the ledger" assert_agents_ledger "$TRUTH
 
 expect_red "non-regular programme-truth input" "not a regular file" \
   python3 "$CEILINGS" check-file /dev/null
+expect_ok "open flags refuse follow and do not block" python3 - "$CEILINGS" <<'PY'
+import sys
+
+from resource_ceilings import read_bounded_file
+
+text = read_bounded_file(sys.argv[1]).decode("utf-8")
+if "O_NOFOLLOW" not in text or "O_NONBLOCK" not in text:
+    raise SystemExit("bounded open is missing O_NOFOLLOW or O_NONBLOCK")
+PY
+
+mkfifo "$TRUTH_TMP/fifo"
+ln -s "$AGENTS" "$TRUTH_TMP/agents.link"
+expect_ok "FIFO fails closed without hanging" \
+  assert_hostile_path_fails_quickly "$TRUTH_TMP/fifo" $'not a regular file\ncould not be opened'
+expect_ok "symlink fails closed without following" \
+  assert_hostile_path_fails_quickly "$TRUTH_TMP/agents.link" "could not be opened"
 
 python3 -c "import sys; sys.stdout.buffer.write(b'x' * 65537)" >"$TRUTH_TMP/oversized.md"
 expect_red "oversized real document" "exceeds 65536-byte ceiling" \
