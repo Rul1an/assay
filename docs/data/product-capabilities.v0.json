@@ -7,7 +7,11 @@
       "summary": "Attested Assay CLI release archives are published for the listed targets.",
       "maturity": "stable",
       "introduced_release": "5.3.0",
-      "protocols": [],
+      "target_release": null,
+      "protocol_versions": [],
+      "profile_versions": [
+        {"profile": "privileged-mcp-action", "version": "v0"}
+      ],
       "platforms": [
         "darwin-aarch64",
         "darwin-x86_64",
@@ -63,7 +67,12 @@
       "summary": "Attested assay-mcp-server release archives are published for the listed Linux targets.",
       "maturity": "stable",
       "introduced_release": "5.3.0",
-      "protocols": ["MCP stdio"],
+      "target_release": null,
+      "protocol_versions": [
+        {"protocol": "mcp", "version": "2024-11-05", "transport": "stdio"},
+        {"protocol": "mcp", "version": "2025-11-25", "transport": "stdio"}
+      ],
+      "profile_versions": [],
       "platforms": ["linux-aarch64", "linux-x86_64"],
       "enforcement_points": ["mcp-server"],
       "limitations": ["The v5.3.0 release does not publish macOS or Windows MCP-server archives."],
@@ -94,8 +103,15 @@
       "label": "Published release golden path",
       "summary": "Install an attested release in a disposable environment and produce verified evidence.",
       "maturity": "planned",
-      "introduced_release": "5.3.0",
-      "protocols": ["MCP stdio"],
+      "introduced_release": null,
+      "target_release": "5.3.0",
+      "protocol_versions": [
+        {"protocol": "mcp", "version": "2024-11-05", "transport": "stdio"},
+        {"protocol": "mcp", "version": "2025-11-25", "transport": "stdio"}
+      ],
+      "profile_versions": [
+        {"profile": "privileged-mcp-action", "version": "v0"}
+      ],
       "platforms": ["linux-aarch64", "linux-x86_64"],
       "enforcement_points": ["cli", "mcp-proxy"],
       "limitations": ["No exact-release install-to-evidence gate has landed yet."],

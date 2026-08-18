@@ -15,7 +15,9 @@ CAPABILITY_FIELDS = {
     "summary",
     "maturity",
     "introduced_release",
-    "protocols",
+    "target_release",
+    "protocol_versions",
+    "profile_versions",
     "platforms",
     "enforcement_points",
     "limitations",
@@ -25,6 +27,8 @@ CAPABILITY_FIELDS = {
 ID_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 COMMIT_SHA_PATTERN = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 DIGEST_PATTERN = re.compile(r"sha256:[0-9a-f]{64}\Z")
+VERSION_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+RELEASE_PATTERN = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+\Z")
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,6 +62,49 @@ def require_id(value: object, field: str) -> str:
     if ID_PATTERN.fullmatch(identifier) is None:
         raise ValueError(f"{field} must match [a-z0-9-]+")
     return identifier
+
+
+def require_version_token(value: object, field: str) -> str:
+    token = require_non_empty_string(value, field)
+    if VERSION_TOKEN_PATTERN.fullmatch(token) is None:
+        raise ValueError(f"{field} must be a version token")
+    return token
+
+
+def require_release(value: object, field: str) -> str:
+    release = require_non_empty_string(value, field)
+    if RELEASE_PATTERN.fullmatch(release) is None:
+        raise ValueError(f"{field} must be a major.minor.patch release")
+    return release
+
+
+def validate_protocol_versions(value: object, capability_id: str) -> list[dict]:
+    if not isinstance(value, list):
+        raise ValueError(f"capability {capability_id} protocol_versions must be an array")
+    for entry in value:
+        if not isinstance(entry, dict) or set(entry) != {"protocol", "version", "transport"}:
+            raise ValueError(
+                f"capability {capability_id} protocol version must contain protocol, version and transport"
+            )
+        require_id(entry["protocol"], f"capability {capability_id} protocol")
+        require_version_token(entry["version"], f"capability {capability_id} protocol version")
+        require_id(entry["transport"], f"capability {capability_id} protocol transport")
+    value.sort(key=lambda item: (item["protocol"], item["version"], item["transport"]))
+    return value
+
+
+def validate_profile_versions(value: object, capability_id: str) -> list[dict]:
+    if not isinstance(value, list):
+        raise ValueError(f"capability {capability_id} profile_versions must be an array")
+    for entry in value:
+        if not isinstance(entry, dict) or set(entry) != {"profile", "version"}:
+            raise ValueError(
+                f"capability {capability_id} profile version must contain profile and version"
+            )
+        require_id(entry["profile"], f"capability {capability_id} profile")
+        require_version_token(entry["version"], f"capability {capability_id} profile version")
+    value.sort(key=lambda item: (item["profile"], item["version"]))
+    return value
 
 
 def proof_has_immutable_identity(proof: dict) -> bool:
@@ -115,11 +162,30 @@ def load_manifest(path: Path) -> dict:
         if capability_id in capability_ids:
             raise ValueError(f"duplicate capability id: {capability_id}")
         capability_ids.add(capability_id)
-        for field in ("label", "summary", "introduced_release"):
+        for field in ("label", "summary"):
             require_non_empty_string(capability[field], f"capability {capability_id} {field}")
         if capability["maturity"] not in MATURITY_VALUES:
             raise ValueError(f"capability {capability_id} has unknown maturity")
-        for field in ("protocols", "platforms", "enforcement_points", "limitations", "non_claims"):
+        if capability["maturity"] == "planned":
+            if capability["introduced_release"] is not None:
+                raise ValueError(
+                    f"planned capability {capability_id} cannot have introduced_release"
+                )
+            require_release(
+                capability["target_release"], f"capability {capability_id} target_release"
+            )
+        else:
+            require_release(
+                capability["introduced_release"],
+                f"capability {capability_id} introduced_release",
+            )
+            if capability["target_release"] is not None:
+                raise ValueError(
+                    f"introduced capability {capability_id} cannot have target_release"
+                )
+        validate_protocol_versions(capability["protocol_versions"], capability_id)
+        validate_profile_versions(capability["profile_versions"], capability_id)
+        for field in ("platforms", "enforcement_points", "limitations", "non_claims"):
             require_string_list(capability[field], f"capability {capability_id} {field}")
         claims = capability["claims"]
         if not isinstance(claims, list):
@@ -159,6 +225,18 @@ def join_values(values: list[str]) -> str:
     return ", ".join(values) if values else "None declared"
 
 
+def render_protocol_versions(values: list[dict]) -> str:
+    rendered = [
+        f"{entry['protocol']} {entry['version']} over {entry['transport']}" for entry in values
+    ]
+    return join_values(rendered)
+
+
+def render_profile_versions(values: list[dict]) -> str:
+    rendered = [f"{entry['profile']}/{entry['version']}" for entry in values]
+    return join_values(rendered)
+
+
 def render_public(manifest: dict) -> str:
     lines = [
         "<!-- Generated by scripts/docs/generate-product-capabilities.py; do not edit. -->",
@@ -169,6 +247,11 @@ def render_public(manifest: dict) -> str:
         "",
     ]
     for capability in manifest["capabilities"]:
+        release_line = (
+            f"- Target release: `{capability['target_release']}`"
+            if capability["maturity"] == "planned"
+            else f"- Introduced: `{capability['introduced_release']}`"
+        )
         lines.extend(
             [
                 f"## {capability['label']} (`{capability['id']}`)",
@@ -176,9 +259,10 @@ def render_public(manifest: dict) -> str:
                 capability["summary"],
                 "",
                 f"- Maturity: `{capability['maturity']}`",
-                f"- Introduced: `{capability['introduced_release']}`",
+                release_line,
                 f"- Platforms: {join_values(capability['platforms'])}",
-                f"- Protocols: {join_values(capability['protocols'])}",
+                f"- Protocol versions: {render_protocol_versions(capability['protocol_versions'])}",
+                f"- Profile versions: {render_profile_versions(capability['profile_versions'])}",
                 f"- Enforcement points: {join_values(capability['enforcement_points'])}",
                 f"- Limitations: {join_values(capability['limitations'])}",
                 f"- Non-claims: {join_values(capability['non_claims'])}",
@@ -213,6 +297,14 @@ def render_proof(manifest: dict) -> str:
     ]
     for capability in manifest["capabilities"]:
         lines.append(f"## `{capability['id']}`")
+        lines.append("")
+        lines.append(
+            f"- Protocol versions: {render_protocol_versions(capability['protocol_versions'])}"
+        )
+        lines.append(
+            f"- Profile versions: {render_profile_versions(capability['profile_versions'])}"
+        )
+        lines.append(f"- Non-claims: {join_values(capability['non_claims'])}")
         lines.append("")
         for claim in capability["claims"]:
             lines.append(f'<a id="claim-{claim["id"]}"></a>')

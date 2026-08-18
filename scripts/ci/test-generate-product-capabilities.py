@@ -21,7 +21,9 @@ def minimal_manifest() -> dict:
                 "summary": "Install Assay and produce verifiable evidence.",
                 "maturity": "stable",
                 "introduced_release": "5.3.0",
-                "protocols": [],
+                "target_release": None,
+                "protocol_versions": [],
+                "profile_versions": [],
                 "platforms": ["linux-x86_64"],
                 "enforcement_points": ["cli"],
                 "limitations": [],
@@ -205,6 +207,67 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
         self.assertIn("does not fetch or verify proof content", public)
         self.assertIn("product-claim-proof.md#claim-published-install", public)
         self.assertIn("https://github.com/Rul1an/assay/issues/2486", public)
+
+    def test_renders_versioned_protocols_profiles_and_nonclaims_in_both_views(self) -> None:
+        manifest = minimal_manifest()
+        capability = manifest["capabilities"][0]
+        capability["protocol_versions"] = [
+            {"protocol": "mcp", "version": "2025-11-25", "transport": "stdio"}
+        ]
+        capability["profile_versions"] = [
+            {"profile": "privileged-mcp-action", "version": "v0"}
+        ]
+        capability["claims"][0]["proofs"] = [{"run_id": 1}]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = run_generator(manifest, root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            public = (root / "public.md").read_text(encoding="utf-8")
+            proof = (root / "proof.md").read_text(encoding="utf-8")
+
+        for output in (public, proof):
+            self.assertIn("mcp 2025-11-25 over stdio", output)
+            self.assertIn("privileged-mcp-action/v0", output)
+            self.assertIn("No universal host compatibility claim.", output)
+
+    def test_planned_capability_has_target_not_introduced_release(self) -> None:
+        manifest = minimal_manifest()
+        capability = manifest["capabilities"][0]
+        capability["maturity"] = "planned"
+        capability["target_release"] = "5.4.0"
+        capability["claims"][0].pop("proofs")
+        capability["claims"][0]["gap"] = {"issue": "2486"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            rejected = run_generator(manifest, root)
+            capability["introduced_release"] = None
+            accepted = run_generator(manifest, root)
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+            public = (root / "public.md").read_text(encoding="utf-8")
+
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("planned capability install-to-evidence cannot have introduced_release", rejected.stderr)
+        self.assertIn("Target release: `5.4.0`", public)
+        self.assertNotIn("Introduced:", public)
+
+    def test_rejects_protocol_or_profile_without_version(self) -> None:
+        manifest = minimal_manifest()
+        capability = manifest["capabilities"][0]
+        capability["protocol_versions"] = [{"protocol": "mcp", "transport": "stdio"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            protocol_result = run_generator(manifest, Path(tmp))
+
+        capability["protocol_versions"] = []
+        capability["profile_versions"] = [{"profile": "privileged-mcp-action"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_result = run_generator(manifest, Path(tmp))
+
+        self.assertNotEqual(protocol_result.returncode, 0)
+        self.assertIn("protocol version must contain protocol, version and transport", protocol_result.stderr)
+        self.assertNotEqual(profile_result.returncode, 0)
+        self.assertIn("profile version must contain profile and version", profile_result.stderr)
 
 
 if __name__ == "__main__":

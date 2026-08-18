@@ -11,7 +11,8 @@ Attested Assay CLI release archives are published for the listed targets.
 - Maturity: `stable`
 - Introduced: `5.3.0`
 - Platforms: darwin-aarch64, darwin-x86_64, linux-aarch64, linux-x86_64, windows-x86_64
-- Protocols: None declared
+- Protocol versions: None declared
+- Profile versions: privileged-mcp-action/v0
 - Enforcement points: cli
 - Limitations: Archive support is limited to the targets listed here.
 - Non-claims: Asset publication does not prove installation or every command on every host.
@@ -27,7 +28,8 @@ Attested assay-mcp-server release archives are published for the listed Linux ta
 - Maturity: `stable`
 - Introduced: `5.3.0`
 - Platforms: linux-aarch64, linux-x86_64
-- Protocols: MCP stdio
+- Protocol versions: mcp 2024-11-05 over stdio, mcp 2025-11-25 over stdio
+- Profile versions: None declared
 - Enforcement points: mcp-server
 - Limitations: The v5.3.0 release does not publish macOS or Windows MCP-server archives.
 - Non-claims: Asset publication does not prove installation, universal editor support, transport support or protocol compatibility.
@@ -41,9 +43,10 @@ Attested assay-mcp-server release archives are published for the listed Linux ta
 Install an attested release in a disposable environment and produce verified evidence.
 
 - Maturity: `planned`
-- Introduced: `5.3.0`
+- Target release: `5.3.0`
 - Platforms: linux-aarch64, linux-x86_64
-- Protocols: MCP stdio
+- Protocol versions: mcp 2024-11-05 over stdio, mcp 2025-11-25 over stdio
+- Profile versions: privileged-mcp-action/v0
 - Enforcement points: cli, mcp-proxy
 - Limitations: No exact-release install-to-evidence gate has landed yet.
 - Non-claims: The planned gate will not prove external side effects, policy completeness or semantic safety.
