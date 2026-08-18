@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Telemetry follow-up for the #2391 outer-fallback surface: `tool_call_crash`
+  was removed; outer dispatch failures emit `tool_execution_error`. Remaining
+  `tool_call_start` / `tool_call_done` / `tool_call_timeout` events stay
+  value-free (no caller tool or policy strings). `tool_decision` is unchanged
+  and still out of this note's scope (#2402).
+
 ## [5.3.0] - 2026-08-18
 
 This release collects the post-`v5.2.0` main line: fail-closed machine stdout,

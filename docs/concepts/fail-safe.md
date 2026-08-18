@@ -162,11 +162,15 @@ or raw internal errors. For example, a timeout result contains:
 Use structured results and logs to:
 1. Monitor error rates
 2. Debug configuration issues
-3. Verify that the configured failure policy was applied
+3. Verify that the fixed MCP fail-closed payload (`allowed: false`, `isError: true`) was published
 
 ---
 
 ## Decision Framework
+
+This tree applies only to `assay run` suite `settings.on_error`.
+It is not an MCP server setting. The stdio MCP server always fail-closes with
+a fixed payload; see [In the stdio MCP server](#in-the-stdio-mcp-server-assay-mcp-server).
 
 ```
 Is this a regulated/compliance environment?

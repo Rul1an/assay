@@ -487,6 +487,13 @@ mod claims_boundary_tests {
                 serde_json::json!({"allowed": false, "error": {"code": "E_INTERNAL"}}),
                 (false, true),
             ),
+            // Defence: an error object without `allowed` is still an MCP error. Production
+            // `ToolError::result` always sets both, so this row is the only independent
+            // witness for the `has_error` arm.
+            (
+                serde_json::json!({"error": {"code": "E_INTERNAL"}}),
+                (false, true),
+            ),
             // Report tools return data rather than a policy decision. Preserve the existing
             // decision telemetry while keeping their successful MCP result non-error.
             (serde_json::json!({"report": {}}), (false, false)),
