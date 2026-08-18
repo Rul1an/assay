@@ -41,15 +41,23 @@ ISSUE_LINK = re.compile(
     r"\[issue #(\d+)\]\((https://github\.com/[^)\s]+/issues/(\d+))\)"
 )
 VISIBLE_ISSUE = re.compile(r"(?i)issue #(\d+)")
-# Unordered marker [-*+] and strong prefix are independent.
-DECL_PREFIX = r"(?:^|[.!?]\s+)(?:[-*+]\s+)?(?:\*{1,2})?"
-# Declaration predicates only: "is issue #N" or "is named ...", not any "is ...".
-OUTSIDE_ACTIVE_DECL = re.compile(
-    rf"(?im){DECL_PREFIX}The active programme ledger is(?: issue #\d+| named\b)"
-)
-OUTSIDE_INACTIVE_DECL = re.compile(
-    rf"(?im){DECL_PREFIX}No programme is active\."
-)
+# Outside the canonical ledger bullet we recognize only checkable
+# declaration forms. This is not semantic NLP.
+#
+# At line or sentence start, strip: leading whitespace, repeated `>`,
+# one unordered marker [-*+], then an optional strong prefix.
+# Active subject (exact): "The active programme ledger is"
+# Active predicates (only):
+#   a) issue #N
+#   b) GitHub issue #N
+#   c) [issue #N](.../issues/N) with matching N
+#   d) named on this line
+# Inactive (exact): "No programme is active."
+ACTIVE_SUBJECT = "The active programme ledger is"
+INACTIVE_OUTSIDE = "No programme is active."
+ISSUE_PRED = re.compile(r"issue #\d+")
+GITHUB_ISSUE_PRED = re.compile(r"GitHub issue #\d+")
+NAMED_PRED = "named on this line"
 # List-item declarations only. Ordinary prose such as "ensure required checks
 # pass" is not a required-context declaration.
 REQUIRED_OUTSIDE = re.compile(
@@ -110,12 +118,50 @@ def collapsed(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
+def strip_decl_wrappers(text: str) -> str:
+    s = text.lstrip()
+    while s.startswith(">"):
+        s = s[1:].lstrip()
+    if len(s) >= 2 and s[0] in "-*+" and s[1].isspace():
+        s = s[2:].lstrip()
+    if s.startswith("**"):
+        s = s[2:]
+    return s
+
+
+def declaration_candidates(remainder: str) -> list[str]:
+    found: list[str] = []
+    for line in remainder.splitlines():
+        for piece in re.split(r"(?<=[.!?])\s+", line):
+            stripped = strip_decl_wrappers(piece)
+            if stripped:
+                found.append(stripped)
+    return found
+
+
+def is_active_declaration(text: str) -> bool:
+    if not text.startswith(ACTIVE_SUBJECT):
+        return False
+    pred = text[len(ACTIVE_SUBJECT) :].lstrip()
+    if ISSUE_PRED.match(pred) or GITHUB_ISSUE_PRED.match(pred):
+        return True
+    link = ISSUE_LINK.match(pred)
+    if link is not None and link.group(1) == link.group(3):
+        return True
+    return pred.startswith(NAMED_PRED)
+
+
+def is_inactive_declaration(text: str) -> bool:
+    return text.startswith(INACTIVE_OUTSIDE)
+
+
 def outside_ledger_declarations(remainder: str) -> list[str]:
     found: list[str] = []
-    if OUTSIDE_ACTIVE_DECL.search(remainder):
-        found.append("The active programme ledger is")
-    if OUTSIDE_INACTIVE_DECL.search(remainder):
-        found.append("No programme is active")
+    for candidate in declaration_candidates(remainder):
+        if is_active_declaration(candidate):
+            found.append("The active programme ledger is")
+        if is_inactive_declaration(candidate):
+            found.append("No programme is active")
     return found
 
 
@@ -427,6 +473,29 @@ documented_ledger_prose="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
   '- **The active programme ledger is documented in the canonical bullet above.**')"
 expect_ok "documented-in-bullet prose is not a ledger declaration" \
   assert_agents_ledger "$documented_ledger_prose"
+
+link_active_elsewhere="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
+  '- The active programme ledger is [issue #7777](https://github.com/Rul1an/assay/issues/7777).')"
+expect_red "markdown-link active ledger declaration elsewhere" \
+  "contradictory ledger declaration outside the ledger bullet" \
+  assert_agents_ledger "$link_active_elsewhere"
+
+github_active_elsewhere="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
+  'The active programme ledger is GitHub issue #7777.')"
+expect_red "GitHub issue active ledger declaration elsewhere" \
+  "contradictory ledger declaration outside the ledger bullet" \
+  assert_agents_ledger "$github_active_elsewhere"
+
+blockquote_inactive_elsewhere="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
+  '> **No programme is active.**')"
+expect_red "blockquote inactive declaration elsewhere" \
+  "contradictory ledger declaration outside the ledger bullet" \
+  assert_agents_ledger "$blockquote_inactive_elsewhere"
+
+named_after_prose="$(printf '%s\n%s\n' "$(<"$AGENTS")" \
+  '- The active programme ledger is named after the team that maintains it.')"
+expect_ok "named-after prose is not a ledger declaration" \
+  assert_agents_ledger "$named_after_prose"
 
 ACTIVE_LEDGER_BULLET='- The public execution ledger for the active programme is named on this line: [issue #4242](https://github.com/Rul1an/assay/issues/4242).'
 active_ledger="$(replace_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$(<"$AGENTS")")"
