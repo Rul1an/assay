@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2329 # Test doubles are invoked indirectly by sourced production functions.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -10,6 +11,7 @@ trap 'rm -f "${EVENTS}"' EXIT
 source "${SCRIPT}"
 
 ORIGINAL_CLEANUP="$(declare -f cleanup_runner_config)"
+ORIGINAL_SYNC="$(declare -f sync_vm_time)"
 ORIGINAL_CONFIGURE="$(declare -f configure_runner)"
 ORIGINAL_START_SERVICE="$(declare -f start_runner_service)"
 
@@ -55,6 +57,7 @@ rm -f "${EVENTS}.expected"
 
 : >"${EVENTS}"
 eval "${ORIGINAL_CLEANUP}"
+eval "${ORIGINAL_SYNC}"
 eval "${ORIGINAL_CONFIGURE}"
 eval "${ORIGINAL_START_SERVICE}"
 # Invoked by the sourced production functions below.
@@ -67,6 +70,10 @@ timeout() {
 multipass() {
     local phase="unknown"
     case "$*" in
+        *"timedatectl set-ntp"*) phase="sync-ntp" ;;
+        *"systemd-timesyncd"*) phase="sync-restart" ;;
+        *"date +%s"*) phase="sync-read" ;;
+        *"date -s"*) phase="sync-force" ;;
         *"svc.sh stop"*) phase="cleanup-service" ;;
         *"actions.runner.*.service"*) phase="cleanup-unit" ;;
         *".credentials_rsaparams"*) phase="cleanup-credentials" ;;
@@ -86,9 +93,15 @@ multipass() {
     if [[ "$*" == *config.sh* ]]; then
         echo "Settings Saved"
     fi
+    if [[ "$phase" == sync-read ]]; then
+        echo 0
+    fi
 }
 check_runner_service() { return 0; }
 
+sync_vm_time
+# Restored from the sourced production definition above via eval.
+# shellcheck disable=SC2218
 cleanup_runner_config
 configure_runner fresh-token
 start_runner_service
@@ -99,6 +112,10 @@ if grep -Fq 'unbounded:' "${EVENTS}"; then
     exit 1
 fi
 for expected in \
+    "bounded:sync-ntp:${MULTIPASS_RECOVERY_TIMEOUT_SECONDS}" \
+    "bounded:sync-restart:${MULTIPASS_RECOVERY_TIMEOUT_SECONDS}" \
+    "bounded:sync-read:${MULTIPASS_RECOVERY_TIMEOUT_SECONDS}" \
+    "bounded:sync-force:${MULTIPASS_RECOVERY_TIMEOUT_SECONDS}" \
     "bounded:cleanup-service:${MULTIPASS_RECOVERY_TIMEOUT_SECONDS}" \
     "bounded:cleanup-unit:${MULTIPASS_RECOVERY_TIMEOUT_SECONDS}" \
     "bounded:cleanup-credentials:${MULTIPASS_RECOVERY_TIMEOUT_SECONDS}" \
@@ -116,6 +133,31 @@ if grep -Fxq token-in-host-argv "${EVENTS}"; then
     echo "runner registration token leaked into the host-side multipass argv" >&2
     exit 1
 fi
+if grep -Eq 'svc\.sh (stop|uninstall).*\|\| true|systemctl daemon-reload.*\|\| true' <<<"${ORIGINAL_CLEANUP}"; then
+    echo "guest-side runner cleanup failures are still ignored" >&2
+    exit 1
+fi
+
+for sync_phase in ntp restart read force; do
+    timeout() {
+        shift
+        case "${sync_phase}:$*" in
+            ntp:*"timedatectl set-ntp"* | \
+            restart:*"systemd-timesyncd"* | \
+            read:*"date +%s"* | \
+            force:*"date -s"*) return 124 ;;
+        esac
+        "$@"
+    }
+    set +e
+    sync_vm_time
+    sync_status=$?
+    set -e
+    if [[ "${sync_status}" -ne 124 ]]; then
+        echo "runner time sync ${sync_phase} did not propagate timeout exit 124 (got ${sync_status})" >&2
+        exit 1
+    fi
+done
 
 # Invoked by the sourced production functions below.
 # shellcheck disable=SC2329
@@ -135,6 +177,27 @@ if [[ "${configure_status}" -ne 124 ]]; then
     echo "runner configuration did not propagate timeout exit 124 (got ${configure_status})" >&2
     exit 1
 fi
+
+: >"${EVENTS}"
+log_error() { printf '%s\n' "$*" >>"${EVENTS}"; }
+timeout() {
+    shift
+    echo fresh-token
+    return 1
+}
+set +e
+configure_runner fresh-token
+configure_secret_status=$?
+set -e
+if [[ "${configure_secret_status}" -ne 1 ]]; then
+    echo "runner configuration secret-output probe returned ${configure_secret_status}" >&2
+    exit 1
+fi
+if grep -Fq fresh-token "${EVENTS}"; then
+    echo "runner configuration copied guest output containing the token into logs" >&2
+    exit 1
+fi
+log_error() { :; }
 
 TIMEOUT_SERVICE_PHASE="install"
 timeout() {
@@ -207,18 +270,45 @@ if grep -Fxq token "${EVENTS}"; then
     exit 1
 fi
 
+sync_vm_time() { :; }
+cleanup_runner_config() { :; }
+generate_runner_token() { printf '%s\n' fresh-token; }
+configure_runner() { return 124; }
+set +e
+recover_runner
+recovery_configure_status=$?
+set -e
+if [[ "${recovery_configure_status}" -ne 124 ]]; then
+    echo "runner recovery collapsed configuration timeout 124 to ${recovery_configure_status}" >&2
+    exit 1
+fi
+configure_runner() { :; }
+start_runner_service() { return 124; }
+set +e
+recover_runner
+recovery_service_status=$?
+set -e
+if [[ "${recovery_service_status}" -ne 124 ]]; then
+    echo "runner recovery collapsed service timeout 124 to ${recovery_service_status}" >&2
+    exit 1
+fi
+
 CRONTAB_CAPTURE="${EVENTS}.crontab"
 CRONTAB_EXISTING=""
 CRONTAB_LIST_STATUS=0
+CRONTAB_LIST_ERROR=""
+CRONTAB_WRITE_STATUS=0
 crontab() {
     if [[ "${1:-}" == -l ]]; then
         if [[ "${CRONTAB_LIST_STATUS}" -ne 0 ]]; then
+            printf '%s' "${CRONTAB_LIST_ERROR}" >&2
             return "${CRONTAB_LIST_STATUS}"
         fi
         printf '%s' "${CRONTAB_EXISTING}"
         return 0
     fi
     cat >"${CRONTAB_CAPTURE}"
+    return "${CRONTAB_WRITE_STATUS}"
 }
 install_cron >/dev/null
 if ! grep -Fq '/usr/bin/lockf -t 0 /tmp/assay-bpf-runner-health.lock' "${CRONTAB_CAPTURE}"; then
@@ -230,6 +320,7 @@ fi
 # Exit 1 is crontab's explicit "no crontab for user" result and is the only
 # nonzero read status from which installation may proceed.
 CRONTAB_LIST_STATUS=1
+CRONTAB_LIST_ERROR="no crontab for test-user"
 : >"${CRONTAB_CAPTURE}"
 install_cron >/dev/null
 if ! grep -Fq '/usr/bin/lockf -t 0 /tmp/assay-bpf-runner-health.lock' "${CRONTAB_CAPTURE}"; then
@@ -238,6 +329,26 @@ if ! grep -Fq '/usr/bin/lockf -t 0 /tmp/assay-bpf-runner-health.lock' "${CRONTAB
     exit 1
 fi
 CRONTAB_LIST_STATUS=0
+CRONTAB_LIST_ERROR=""
+
+# BSD/macOS prefixes the same explicit empty-crontab diagnostic with `crontab:`.
+CRONTAB_LIST_STATUS=1
+CRONTAB_LIST_ERROR="crontab: no crontab for test-user"
+: >"${CRONTAB_CAPTURE}"
+set +e
+install_cron >/dev/null
+bsd_no_crontab_status=$?
+set -e
+if [[ "${bsd_no_crontab_status}" -ne 0 ]]; then
+    echo "BSD/macOS no-crontab diagnostic was rejected (got ${bsd_no_crontab_status})" >&2
+    exit 1
+fi
+if ! grep -Fq '/usr/bin/lockf -t 0 /tmp/assay-bpf-runner-health.lock' "${CRONTAB_CAPTURE}"; then
+    echo "BSD/macOS no-crontab diagnostic did not allow cron installation" >&2
+    exit 1
+fi
+CRONTAB_LIST_STATUS=0
+CRONTAB_LIST_ERROR=""
 
 CRON_SCRIPT_PATH=$(realpath "$0")
 CANONICAL_CRON=$(cat "${CRONTAB_CAPTURE}")
@@ -262,6 +373,17 @@ for transition in \
         exit 1
     fi
 done
+
+CRONTAB_EXISTING="*/5 * * * * PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin GH_TOKEN_FILE=/tmp/token-live /usr/bin/lockf -t 0 /tmp/assay-bpf-runner-health.lock ${CRON_SCRIPT_PATH} >> /tmp/live.log 2>&1"
+GH_TOKEN_FILE="/tmp/token-current"
+: >"${CRONTAB_CAPTURE}"
+install_cron >/dev/null
+if [[ "$(grep -Fc "${CRON_SCRIPT_PATH}" "${CRONTAB_CAPTURE}")" -ne 1 ]] || \
+    ! grep -Fq 'PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' "${CRONTAB_CAPTURE}"; then
+    echo "deployed PATH-prefixed runner cron did not converge to one executable entry" >&2
+    cat "${CRONTAB_CAPTURE}" >&2
+    exit 1
+fi
 export GH_TOKEN_FILE=""
 
 CRONTAB_EXISTING=$(printf '%s\n%s\n%s\n%s\n%s\n' \
@@ -323,6 +445,7 @@ if [[ -s "${CRONTAB_CAPTURE}" ]]; then
 fi
 
 CRONTAB_LIST_STATUS=2
+CRONTAB_LIST_ERROR="crontab: permission denied"
 : >"${CRONTAB_CAPTURE}"
 set +e
 install_cron >/dev/null
@@ -335,6 +458,36 @@ fi
 if [[ -s "${CRONTAB_CAPTURE}" ]]; then
     echo "unexpected crontab read failure replaced existing cron content" >&2
     cat "${CRONTAB_CAPTURE}" >&2
+    exit 1
+fi
+
+CRONTAB_LIST_STATUS=1
+CRONTAB_LIST_ERROR="crontab: permission denied"
+: >"${CRONTAB_CAPTURE}"
+set +e
+install_cron >/dev/null
+crontab_exit_one_error_status=$?
+set -e
+if [[ "${crontab_exit_one_error_status}" -ne 1 ]]; then
+    echo "ambiguous crontab exit 1 was not propagated (got ${crontab_exit_one_error_status})" >&2
+    exit 1
+fi
+if [[ -s "${CRONTAB_CAPTURE}" ]]; then
+    echo "ambiguous crontab exit 1 replaced existing cron content" >&2
+    exit 1
+fi
+
+CRONTAB_LIST_STATUS=0
+CRONTAB_LIST_ERROR=""
+CRONTAB_WRITE_STATUS=73
+CRONTAB_EXISTING="17 * * * * /usr/local/bin/keep-me"
+: >"${CRONTAB_CAPTURE}"
+set +e
+install_cron >/dev/null
+crontab_write_status=$?
+set -e
+if [[ "${crontab_write_status}" -ne 73 ]]; then
+    echo "crontab write failure was not propagated (got ${crontab_write_status})" >&2
     exit 1
 fi
 rm -f "${CRONTAB_CAPTURE}"

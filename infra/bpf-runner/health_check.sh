@@ -364,18 +364,22 @@ runner_log_has_fatal_session_error() {
 # Sync VM time via NTP (fixes token expiration due to clock drift)
 sync_vm_time() {
     log_info "Synchronizing VM time via NTP..."
-    multipass exec "$VM_NAME" -- sudo timedatectl set-ntp true 2>/dev/null || true
-    multipass exec "$VM_NAME" -- sudo systemctl restart systemd-timesyncd 2>/dev/null || true
+    timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass exec "$VM_NAME" -- \
+        sudo timedatectl set-ntp true 2>/dev/null || return $?
+    timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass exec "$VM_NAME" -- \
+        sudo systemctl restart systemd-timesyncd 2>/dev/null || return $?
     sleep 3
 
     local vm_time host_time
-    vm_time=$(multipass exec "$VM_NAME" -- date '+%s' 2>/dev/null || echo "0")
+    vm_time=$(timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" \
+        multipass exec "$VM_NAME" -- date '+%s' 2>/dev/null) || return $?
     host_time=$(date '+%s')
     local drift=$((host_time - vm_time))
 
     if [[ ${drift#-} -gt 60 ]]; then
         log_warn "Clock drift detected: ${drift}s - forcing time sync"
-        multipass exec "$VM_NAME" -- sudo date -s "@$host_time" 2>/dev/null || true
+        timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass exec "$VM_NAME" -- \
+            sudo date -s "@$host_time" 2>/dev/null || return $?
     fi
 
     log_ok "VM time synchronized (drift: ${drift}s)"
@@ -401,14 +405,17 @@ cleanup_runner_config() {
     # Stop and uninstall service (MUST run from runner directory)
     timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass exec "$VM_NAME" -- bash -c "
         cd $RUNNER_DIR || exit 0
-        sudo ./svc.sh stop 2>/dev/null || true
-        sudo ./svc.sh uninstall 2>/dev/null || true
+        if [[ -f .service ]]; then
+            sudo ./svc.sh stop
+            sudo ./svc.sh uninstall
+        fi
     " 2>/dev/null || return $?
 
     # Remove old service files
     timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass exec "$VM_NAME" -- sudo bash -c "
-        rm -f /etc/systemd/system/actions.runner.*.service 2>/dev/null || true
-        systemctl daemon-reload 2>/dev/null || true
+        set -e
+        rm -f /etc/systemd/system/actions.runner.*.service
+        systemctl daemon-reload
     " 2>/dev/null || return $?
 
     # Remove credentials to force fresh registration
@@ -451,7 +458,7 @@ configure_runner() {
             --replace
     " 2>&1) || {
         status=$?
-        log_error "Runner configuration command failed with exit ${status}: $result"
+        log_error "Runner configuration command failed with exit ${status}"
         return "$status"
     }
 
@@ -460,7 +467,7 @@ configure_runner() {
         log_ok "Runner configured successfully"
         return 0
     else
-        log_error "Runner configuration failed: $result"
+        log_error "Runner configuration failed: success indicator missing"
         return 1
     fi
 }
@@ -632,7 +639,7 @@ recover_runner() {
     log_warn "Starting runner recovery..."
 
     # Step 1: Sync time
-    sync_vm_time
+    sync_vm_time || return $?
 
     # Step 2: Clean up old config before generating the short-lived token. A
     # stalled VM command must not leave a token aging while cleanup is blocked.
@@ -643,10 +650,10 @@ recover_runner() {
     token=$(generate_runner_token) || return 1
 
     # Step 4: Configure with the fresh token.
-    configure_runner "$token" || return 1
+    configure_runner "$token" || return $?
 
     # Step 5: Start service
-    start_runner_service || return 1
+    start_runner_service || return $?
 
     # Step 6: Verify online status
     sleep 10
@@ -731,6 +738,7 @@ cron_line_is_managed() {
     local marker="$2"
     local schedule_prefix="$3"
     local escaped_script_path="$4"
+    local escaped_lock_file="$5"
 
     if [[ "$line" == *" ${marker}" ]]; then
         return 0
@@ -739,11 +747,21 @@ cron_line_is_managed() {
     [[ "$line" == "$schedule_prefix"* ]] || return 1
     local command="${line#"$schedule_prefix"}"
 
+    # The deployed pre-marker installer included this PATH before GH_TOKEN_FILE.
+    if [[ "$command" =~ ^PATH=([^[:space:]\\]|\\.)+[[:space:]]+ ]]; then
+        command="${command:${#BASH_REMATCH[0]}}"
+    fi
+
     # Older installers optionally emitted GH_TOKEN_FILE before the script.
     # Match that shell-escaped assignment structurally, not against today's
     # configured value, so configuration changes cannot retain a second job.
     if [[ "$command" =~ ^GH_TOKEN_FILE=([^[:space:]\\]|\\.)+[[:space:]]+ ]]; then
         command="${command:${#BASH_REMATCH[0]}}"
+    fi
+
+    local lock_prefix="/usr/bin/lockf -t 0 ${escaped_lock_file} "
+    if [[ "$command" == "$lock_prefix"* ]]; then
+        command="${command#"$lock_prefix"}"
     fi
 
     [[ "$command" == "$escaped_script_path" || \
@@ -754,7 +772,7 @@ cron_line_is_managed() {
 install_cron() {
     local script_path
     script_path=$(realpath "$0")
-    local env_prefix=""
+    local env_prefix="PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin "
     local escaped_script_path
     local escaped_log_file
     printf -v escaped_script_path '%q' "$script_path"
@@ -762,7 +780,7 @@ install_cron() {
     if [[ -n "$GH_TOKEN_FILE" ]]; then
         local escaped_gh_token_file
         printf -v escaped_gh_token_file '%q' "$GH_TOKEN_FILE"
-        env_prefix="GH_TOKEN_FILE=${escaped_gh_token_file} "
+        env_prefix+="GH_TOKEN_FILE=${escaped_gh_token_file} "
     fi
     local escaped_lock_file
     printf -v escaped_lock_file '%q' "$HEALTH_CHECK_LOCK_FILE"
@@ -771,15 +789,21 @@ install_cron() {
     local cron_entry="*/5 * * * * ${env_prefix}/usr/bin/lockf -t 0 ${escaped_lock_file} ${escaped_script_path} >> ${escaped_log_file} 2>&1 ${cron_marker}"
 
     local existing_crontab
+    local crontab_output
     local crontab_status=0
-    existing_crontab=$(crontab -l 2>/dev/null) || crontab_status=$?
-    if [[ "$crontab_status" -ne 0 && "$crontab_status" -ne 1 ]]; then
+    crontab_output=$(LC_ALL=C crontab -l 2>&1) || crontab_status=$?
+    if [[ "$crontab_status" -eq 0 ]]; then
+        existing_crontab="$crontab_output"
+    elif [[ "$crontab_status" -eq 1 && \
+        "$crontab_output" =~ ^(crontab:[[:space:]])?no[[:space:]]crontab[[:space:]]for[[:space:]][^[:space:]]+$ ]]; then
+        existing_crontab=""
+    else
         return "$crontab_status"
     fi
     local managed_count=0
     local canonical_count=0
     while IFS= read -r line; do
-        if cron_line_is_managed "$line" "$cron_marker" "$schedule_prefix" "$escaped_script_path"; then
+        if cron_line_is_managed "$line" "$cron_marker" "$schedule_prefix" "$escaped_script_path" "$escaped_lock_file"; then
             managed_count=$((managed_count + 1))
             if [[ "$line" == "$cron_entry" ]]; then
                 canonical_count=$((canonical_count + 1))
@@ -791,14 +815,16 @@ install_cron() {
         echo "Cron job already installed"
         echo "$cron_entry"
     else
-        {
+        local replacement
+        replacement=$({
             while IFS= read -r line; do
-                if ! cron_line_is_managed "$line" "$cron_marker" "$schedule_prefix" "$escaped_script_path"; then
+                if ! cron_line_is_managed "$line" "$cron_marker" "$schedule_prefix" "$escaped_script_path" "$escaped_lock_file"; then
                     printf '%s\n' "$line"
                 fi
             done <<<"$existing_crontab"
             echo "$cron_entry"
-        } | crontab -
+        })
+        printf '%s\n' "$replacement" | crontab - || return $?
         echo "Cron job installed or updated: $cron_entry"
         if [[ -z "$GH_TOKEN_FILE" ]]; then
             echo "⚠️  No GH_TOKEN_FILE set; cron runs rely on interactive gh auth state."
