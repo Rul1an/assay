@@ -81,12 +81,10 @@ fires before tag, not at release time.
 
 ## Required checks
 
-Live `main` branch protection requires the contexts in
-`.github/rulesets/main-required-ci-contexts.json`:
-
-- `CI`
-- `host-capability-check`
-- `lane-check/proof`
+The live required contexts are named once in `CI-CONTRACT.md` at
+`Currently required live branch-protection contexts`, and
+`scripts/ci/check-required-contexts.py` pins that list to
+`.github/rulesets/main-required-ci-contexts.json`. Do not copy the names here.
 
 Wave 0 job names (`Wave 0 feature matrix`, `Wave 0 quality gates`,
 `Wave 0 semver checks (public crates)`) are workflow jobs, not current

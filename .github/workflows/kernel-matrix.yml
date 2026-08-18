@@ -37,6 +37,12 @@ on:
       # under Lint (pre-commit) here. `scripts/**` covers a guard change; a recipe-only drift
       # touches no script, so the recipe needs its own entry or the guard never executes in CI.
       - "docs/guides/editor-mcp-recipe.md"
+      # Programme-truth hook runs under Lint (pre-commit) here. scripts/** covers
+      # the tests; these docs/ruleset paths are the remaining truth inputs.
+      - "AGENTS.md"
+      - "docs/contributing/WAVE0-GATES.md"
+      - "docs/contributing/REFACTOR-WAVE-STATUS.md"
+      - ".github/rulesets/main-required-ci-contexts.json"
       - ".github/workflows/kernel-matrix.yml"
       # S1b coverage-gate hook runs under Lint (pre-commit) in this workflow.
       - ".github/workflows/monitor-attach-smoke.yml"
