@@ -92,6 +92,47 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("duplicate claim id: published-install", result.stderr)
 
+    def test_rejects_duplicate_capability_ids(self) -> None:
+        manifest = minimal_manifest()
+        manifest["capabilities"][0]["claims"][0]["proofs"] = [{"run_id": 1}]
+        manifest["capabilities"].append(
+            json.loads(json.dumps(manifest["capabilities"][0]))
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            result = run_generator(manifest, Path(tmp))
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("duplicate capability id: install-to-evidence", result.stderr)
+
+    def test_rejects_unknown_proof_fields(self) -> None:
+        manifest = minimal_manifest()
+        manifest["capabilities"][0]["claims"][0]["proofs"] = [
+            {"run_id": 1, "status": "certified"}
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            result = run_generator(manifest, Path(tmp))
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("proof has unknown fields: status", result.stderr)
+
+    def test_published_mcp_capabilities_list_all_shipped_protocol_versions(self) -> None:
+        manifest = json.loads(
+            (REPO_ROOT / "docs/data/product-capabilities.v0.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        capabilities = {entry["id"]: entry for entry in manifest["capabilities"]}
+        expected = [
+            {"protocol": "mcp", "version": "2024-11-05", "transport": "stdio"},
+            {"protocol": "mcp", "version": "2025-06-18", "transport": "stdio"},
+            {"protocol": "mcp", "version": "2025-11-25", "transport": "stdio"},
+        ]
+
+        self.assertEqual(capabilities["published-mcp-server"]["protocol_versions"], expected)
+        self.assertEqual(
+            capabilities["published-release-golden-path"]["protocol_versions"], expected
+        )
+
     def test_writes_both_views_in_shared_id_order(self) -> None:
         manifest = minimal_manifest()
         first = manifest["capabilities"][0]

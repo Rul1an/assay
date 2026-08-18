@@ -24,6 +24,7 @@ CAPABILITY_FIELDS = {
     "non_claims",
     "claims",
 }
+PROOF_FIELDS = {"url", "run_id", "commit_sha", "digest", "artifact"}
 ID_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 COMMIT_SHA_PATTERN = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 DIGEST_PATTERN = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -121,6 +122,11 @@ def proof_has_immutable_identity(proof: dict) -> bool:
 def validate_proof(proof: object, claim_id: str) -> dict:
     if not isinstance(proof, dict):
         raise ValueError(f"claim {claim_id} proof must be an object")
+    unknown_fields = set(proof).difference(PROOF_FIELDS)
+    if unknown_fields:
+        raise ValueError(
+            f"claim {claim_id} proof has unknown fields: {', '.join(sorted(unknown_fields))}"
+        )
     if "run_id" in proof:
         run_id = proof["run_id"]
         if not isinstance(run_id, int) or isinstance(run_id, bool) or run_id <= 0:

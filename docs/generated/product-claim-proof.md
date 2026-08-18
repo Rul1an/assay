@@ -19,7 +19,7 @@ Proof identities are checked for shape offline; this generator does not fetch th
 
 ## `published-mcp-server`
 
-- Protocol versions: mcp 2024-11-05 over stdio, mcp 2025-11-25 over stdio
+- Protocol versions: mcp 2024-11-05 over stdio, mcp 2025-06-18 over stdio, mcp 2025-11-25 over stdio
 - Profile versions: None declared
 - Non-claims: Asset publication does not prove installation, universal editor support, transport support or protocol compatibility.
 
@@ -30,7 +30,7 @@ Proof identities are checked for shape offline; this generator does not fetch th
 
 ## `published-release-golden-path`
 
-- Protocol versions: mcp 2024-11-05 over stdio, mcp 2025-11-25 over stdio
+- Protocol versions: mcp 2024-11-05 over stdio, mcp 2025-06-18 over stdio, mcp 2025-11-25 over stdio
 - Profile versions: privileged-mcp-action/v0
 - Non-claims: The planned gate will not prove external side effects, policy completeness or semantic safety.
 

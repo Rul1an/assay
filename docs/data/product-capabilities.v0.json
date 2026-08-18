@@ -70,6 +70,7 @@
       "target_release": null,
       "protocol_versions": [
         {"protocol": "mcp", "version": "2024-11-05", "transport": "stdio"},
+        {"protocol": "mcp", "version": "2025-06-18", "transport": "stdio"},
         {"protocol": "mcp", "version": "2025-11-25", "transport": "stdio"}
       ],
       "profile_versions": [],
@@ -107,6 +108,7 @@
       "target_release": "5.3.0",
       "protocol_versions": [
         {"protocol": "mcp", "version": "2024-11-05", "transport": "stdio"},
+        {"protocol": "mcp", "version": "2025-06-18", "transport": "stdio"},
         {"protocol": "mcp", "version": "2025-11-25", "transport": "stdio"}
       ],
       "profile_versions": [

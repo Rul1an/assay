@@ -28,7 +28,7 @@ Attested assay-mcp-server release archives are published for the listed Linux ta
 - Maturity: `stable`
 - Introduced: `5.3.0`
 - Platforms: linux-aarch64, linux-x86_64
-- Protocol versions: mcp 2024-11-05 over stdio, mcp 2025-11-25 over stdio
+- Protocol versions: mcp 2024-11-05 over stdio, mcp 2025-06-18 over stdio, mcp 2025-11-25 over stdio
 - Profile versions: None declared
 - Enforcement points: mcp-server
 - Limitations: The v5.3.0 release does not publish macOS or Windows MCP-server archives.
@@ -45,7 +45,7 @@ Install an attested release in a disposable environment and produce verified evi
 - Maturity: `planned`
 - Target release: `5.3.0`
 - Platforms: linux-aarch64, linux-x86_64
-- Protocol versions: mcp 2024-11-05 over stdio, mcp 2025-11-25 over stdio
+- Protocol versions: mcp 2024-11-05 over stdio, mcp 2025-06-18 over stdio, mcp 2025-11-25 over stdio
 - Profile versions: privileged-mcp-action/v0
 - Enforcement points: cli, mcp-proxy
 - Limitations: No exact-release install-to-evidence gate has landed yet.
