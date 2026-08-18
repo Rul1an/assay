@@ -57,15 +57,31 @@ rm -f "${EVENTS}.expected"
 eval "${ORIGINAL_CLEANUP}"
 eval "${ORIGINAL_CONFIGURE}"
 eval "${ORIGINAL_START_SERVICE}"
+# Invoked by the sourced production functions below.
+# shellcheck disable=SC2329
 timeout() {
+    local seconds="$1"
     shift
-    ASSAY_TEST_TIMEOUT_ACTIVE=1 "$@"
+    ASSAY_TEST_TIMEOUT_ACTIVE=1 ASSAY_TEST_TIMEOUT_SECONDS="${seconds}" "$@"
 }
 multipass() {
+    local phase="unknown"
+    case "$*" in
+        *"svc.sh stop"*) phase="cleanup-service" ;;
+        *"actions.runner.*.service"*) phase="cleanup-unit" ;;
+        *".credentials_rsaparams"*) phase="cleanup-credentials" ;;
+        *"chown -R"*"config.sh"*) phase="configure" ;;
+        *"chown -R"*) phase="cleanup-ownership" ;;
+        *"svc.sh install"*) phase="service-install" ;;
+        *"svc.sh start"*) phase="service-start" ;;
+    esac
     if [[ "${ASSAY_TEST_TIMEOUT_ACTIVE:-0}" == 1 ]]; then
-        echo bounded >>"${EVENTS}"
+        echo "bounded:${phase}:${ASSAY_TEST_TIMEOUT_SECONDS}" >>"${EVENTS}"
     else
-        echo unbounded >>"${EVENTS}"
+        echo "unbounded:${phase}" >>"${EVENTS}"
+    fi
+    if [[ "$*" == *fresh-token* ]]; then
+        echo token-in-host-argv >>"${EVENTS}"
     fi
     if [[ "$*" == *config.sh* ]]; then
         echo "Settings Saved"
@@ -77,15 +93,71 @@ cleanup_runner_config
 configure_runner fresh-token
 start_runner_service
 
-if grep -Fxq unbounded "${EVENTS}"; then
+if grep -Fq 'unbounded:' "${EVENTS}"; then
     echo "destructive runner recovery invoked multipass without a timeout" >&2
     cat "${EVENTS}" >&2
     exit 1
 fi
-if [[ "$(grep -Fxc bounded "${EVENTS}")" -lt 5 ]]; then
-    echo "runner recovery timeout test did not exercise every destructive phase" >&2
-    cat "${EVENTS}" >&2
+for expected in \
+    "bounded:cleanup-service:${MULTIPASS_RECOVERY_TIMEOUT_SECONDS}" \
+    "bounded:cleanup-unit:${MULTIPASS_RECOVERY_TIMEOUT_SECONDS}" \
+    "bounded:cleanup-credentials:${MULTIPASS_RECOVERY_TIMEOUT_SECONDS}" \
+    "bounded:cleanup-ownership:${MULTIPASS_RECOVERY_TIMEOUT_SECONDS}" \
+    "bounded:configure:${RUNNER_CONFIG_TIMEOUT_SECONDS}" \
+    "bounded:service-install:${MULTIPASS_RECOVERY_TIMEOUT_SECONDS}" \
+    "bounded:service-start:${MULTIPASS_RECOVERY_TIMEOUT_SECONDS}"; do
+    if ! grep -Fxq "${expected}" "${EVENTS}"; then
+        echo "runner recovery did not exercise bounded phase: ${expected}" >&2
+        cat "${EVENTS}" >&2
+        exit 1
+    fi
+done
+if grep -Fxq token-in-host-argv "${EVENTS}"; then
+    echo "runner registration token leaked into the host-side multipass argv" >&2
     exit 1
 fi
+
+# Invoked by the sourced production functions below.
+# shellcheck disable=SC2329
+timeout() {
+    shift
+    if [[ "$*" == *config.sh* ]]; then
+        echo "Settings Saved"
+        return 124
+    fi
+    "$@"
+}
+if configure_runner fresh-token; then
+    echo "runner configuration accepted a timed-out command" >&2
+    exit 1
+fi
+
+timeout() {
+    shift
+    if [[ "$*" == *"svc.sh install"* ]]; then
+        echo "installed"
+        return 124
+    fi
+    "$@"
+}
+if start_runner_service; then
+    echo "runner service setup accepted a timed-out install" >&2
+    exit 1
+fi
+
+CRONTAB_CAPTURE="${EVENTS}.crontab"
+crontab() {
+    if [[ "${1:-}" == -l ]]; then
+        return 0
+    fi
+    cat >"${CRONTAB_CAPTURE}"
+}
+install_cron >/dev/null
+if ! grep -Fq '/usr/bin/lockf -t 0 /tmp/assay-bpf-runner-health.lock' "${CRONTAB_CAPTURE}"; then
+    echo "installed runner cron does not prevent overlapping recovery runs" >&2
+    cat "${CRONTAB_CAPTURE}" >&2
+    exit 1
+fi
+rm -f "${CRONTAB_CAPTURE}"
 
 echo "ok: runner auto-recovery keeps registration tokens fresh and bounds destructive calls"

@@ -36,6 +36,7 @@ RUNNER_FATAL_PATTERNS="${RUNNER_FATAL_PATTERNS:-registration has been deleted fr
 ASSAY_UPDATE_SCRIPT="${ASSAY_UPDATE_SCRIPT:-/usr/local/sbin/update-assay-latest}"
 MULTIPASS_RECOVERY_TIMEOUT_SECONDS="${MULTIPASS_RECOVERY_TIMEOUT_SECONDS:-60}"
 RUNNER_CONFIG_TIMEOUT_SECONDS="${RUNNER_CONFIG_TIMEOUT_SECONDS:-120}"
+HEALTH_CHECK_LOCK_FILE="${HEALTH_CHECK_LOCK_FILE:-/tmp/assay-bpf-runner-health.lock}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -434,6 +435,7 @@ configure_runner() {
     log_info "Configuring runner with new token..."
 
     local result
+    local status
     result=$(printf '%s\n' "$token" | timeout "$RUNNER_CONFIG_TIMEOUT_SECONDS" \
         multipass exec "$VM_NAME" -- bash -lc "
         set -euo pipefail
@@ -447,7 +449,11 @@ configure_runner() {
             --name '$RUNNER_NAME' \
             --unattended \
             --replace
-    " 2>&1)
+    " 2>&1) || {
+        status=$?
+        log_error "Runner configuration command failed with exit ${status}: $result"
+        return "$status"
+    }
 
     # Check for success indicators (handles both fresh install and replacement)
     if echo "$result" | grep -qE "(Successfully|Settings Saved)"; then
@@ -465,15 +471,24 @@ start_runner_service() {
 
     # MUST run svc.sh from the runner directory
     local install_result
+    local status
     install_result=$(timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass exec "$VM_NAME" -- bash -c "
         cd $RUNNER_DIR && sudo ./svc.sh install $RUNNER_USER 2>&1
-    ")
+    ") || {
+        status=$?
+        log_error "Runner service install failed with exit ${status}: $install_result"
+        return "$status"
+    }
     log_info "Install output: $install_result"
 
     local start_result
     start_result=$(timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass exec "$VM_NAME" -- bash -c "
         cd $RUNNER_DIR && sudo ./svc.sh start 2>&1
-    ")
+    ") || {
+        status=$?
+        log_error "Runner service start failed with exit ${status}: $start_result"
+        return "$status"
+    }
     log_info "Start output: $start_result"
 
     sleep 5
@@ -723,7 +738,9 @@ install_cron() {
         printf -v escaped_gh_token_file '%q' "$GH_TOKEN_FILE"
         env_prefix="GH_TOKEN_FILE=${escaped_gh_token_file} "
     fi
-    local cron_entry="*/5 * * * * ${env_prefix}${escaped_script_path} >> ${escaped_log_file} 2>&1"
+    local escaped_lock_file
+    printf -v escaped_lock_file '%q' "$HEALTH_CHECK_LOCK_FILE"
+    local cron_entry="*/5 * * * * ${env_prefix}/usr/bin/lockf -t 0 ${escaped_lock_file} ${escaped_script_path} >> ${escaped_log_file} 2>&1"
 
     if crontab -l 2>/dev/null | grep -q "health_check.sh"; then
         echo "Cron job already installed"
