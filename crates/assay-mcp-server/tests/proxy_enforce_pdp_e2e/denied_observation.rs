@@ -175,9 +175,29 @@ fn upstream_reserved_elicitation_relays_without_assay_observation() {
         }
     }));
     let response = out.read_response();
+    let expected = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "error": {
+            "code": -32042,
+            "message": "URL elicitation required",
+            "data": {
+                "sentinel": {
+                    "kind": "upstream-reserved-elicitation",
+                    "token": "wt-2509-value-equivalent"
+                }
+            }
+        }
+    });
     assert_eq!(
-        response["error"]["code"], -32042,
+        response, expected,
         "upstream reserved elicitation must be relayed value-equivalently: {response}"
+    );
+    let mut mutated = expected.clone();
+    mutated["error"]["message"] = serde_json::json!("rewritten by proxy");
+    assert_ne!(
+        response, mutated,
+        "full-object equality must fail when a response field is rewritten"
     );
     assert_ne!(
         response["error"]["data"]["origin"], "assay-proxy",

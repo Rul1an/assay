@@ -10,7 +10,8 @@ Environment:
   MOCK_UPSTREAM_RAW_LOG   append each raw received line to this path (to prove verbatim forwarding)
   MOCK_UPSTREAM_MODE      "normal" (default), "malformed" (emit a non-JSON line for tools/list),
                           or "p60a_upstream_elicitation" (p60a tools/list; tools/call returns
-                          reserved JSON-RPC -32042 with no assay-proxy origin)
+                          reserved JSON-RPC -32042 with a nested sentinel data object and no
+                          assay-proxy origin)
 """
 import json
 import os
@@ -167,7 +168,16 @@ def main():
                 _send({
                     "jsonrpc": "2.0",
                     "id": mid,
-                    "error": {"code": -32042, "message": "URL elicitation required"},
+                    "error": {
+                        "code": -32042,
+                        "message": "URL elicitation required",
+                        "data": {
+                            "sentinel": {
+                                "kind": "upstream-reserved-elicitation",
+                                "token": "wt-2509-value-equivalent",
+                            }
+                        },
+                    },
                 })
             else:
                 # Canned success so the test can assert the upstream's reply was relayed verbatim.
