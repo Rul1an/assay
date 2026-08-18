@@ -9,6 +9,9 @@ use std::path::PathBuf;
 // because it is invoked solely from here. See docs/reference/mcp-upstream-proxy-mode.md.
 mod proxy;
 
+#[path = "policy_byte_limit.rs"]
+mod policy_byte_limit;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -335,7 +338,7 @@ async fn run() -> Result<()> {
                 policy_root = ?args.policy_root,
                 timeout_ms = cfg.timeout_ms,
                 max_msg_bytes = cfg.max_msg_bytes,
-                max_policy_bytes = cfg.max_policy_bytes,
+                max_policy_bytes = policy_byte_limit::policy_byte_limit_from_env(),
                 max_tool_calls = cfg.max_tool_calls,
                 max_field_bytes = cfg.max_field_bytes,
                 cache_entries = cfg.cache_entries,

@@ -46,6 +46,7 @@ This document outlines the canonical checklist for releasing new versions of Ass
   - `assay-registry`
   - `assay-canonical`
   - `assay-evidence`
+  - `assay-adapter-api`
   - `assay-core`
   - `assay-metrics`
   - `assay-policy`
@@ -57,7 +58,6 @@ This document outlines the canonical checklist for releasing new versions of Ass
   - `assay-sim`
   - `assay-cli`
 - [ ] **Non-crates.io workspace members**: Confirm these remain `publish = false` unless a dedicated distribution freeze changes the contract:
-  - `assay-adapter-api` (historical crates.io versions exist, but the current release line does not publish it)
   - `assay-adapter-acp`
   - `assay-adapter-a2a`
   - `assay-adapter-ucp`

@@ -35,8 +35,17 @@ impl ToolContext {
     /// Resolve `user_path`, then read the file through `read_bounded` on a
     /// blocking thread. The `File` is opened inside `spawn_blocking`.
     pub async fn read_policy_bounded(&self, user_path: &str) -> Result<Vec<u8>, ToolError> {
+        self.read_policy_bounded_with_limit(user_path, crate::config::policy_byte_limit_from_env())
+            .await
+    }
+
+    /// Same ingest path as production, with an explicit ceiling for focused tests.
+    pub(crate) async fn read_policy_bounded_with_limit(
+        &self,
+        user_path: &str,
+        limit: usize,
+    ) -> Result<Vec<u8>, ToolError> {
         let path = self.resolve_policy_path(user_path).await?;
-        let limit = self.cfg.max_policy_bytes;
         let rel_path = user_path.to_string();
         match tokio::task::spawn_blocking(move || {
             let file = File::open(&path)?;
@@ -157,16 +166,12 @@ mod tests {
         assert!(err.to_string().contains("injected read failure"));
     }
 
-    async fn context_with_limit(root: PathBuf, limit: usize) -> ToolContext {
-        let cfg = ServerConfig {
-            max_policy_bytes: limit,
-            ..ServerConfig::default()
-        };
+    async fn context_at(root: PathBuf) -> ToolContext {
         let canon = tokio::fs::canonicalize(&root).await.unwrap();
         ToolContext {
             policy_root: root,
             policy_root_canon: canon,
-            cfg,
+            cfg: ServerConfig::default(),
             caches: PolicyCaches::new(8),
         }
     }
@@ -174,9 +179,9 @@ mod tests {
     #[tokio::test]
     async fn async_entry_maps_missing_file() {
         let tmp = TempDir::new().unwrap();
-        let ctx = context_with_limit(tmp.path().to_path_buf(), 32).await;
+        let ctx = context_at(tmp.path().to_path_buf()).await;
         let err = ctx
-            .read_policy_bounded("missing.yaml")
+            .read_policy_bounded_with_limit("missing.yaml", 32)
             .await
             .expect_err("missing");
         assert_eq!(err.code, "E_POLICY_NOT_FOUND");
@@ -191,9 +196,9 @@ mod tests {
     async fn async_entry_maps_directory_read_as_other_io() {
         let tmp = TempDir::new().unwrap();
         std::fs::create_dir(tmp.path().join("not-a-file")).unwrap();
-        let ctx = context_with_limit(tmp.path().to_path_buf(), 32).await;
+        let ctx = context_at(tmp.path().to_path_buf()).await;
         let err = ctx
-            .read_policy_bounded("not-a-file")
+            .read_policy_bounded_with_limit("not-a-file", 32)
             .await
             .expect_err("directory");
         assert_eq!(err.code, "E_POLICY_READ");
@@ -207,9 +212,9 @@ mod tests {
     async fn async_entry_accepts_exact_limit_file() {
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("exact.yaml"), vec![b'e'; 16]).unwrap();
-        let ctx = context_with_limit(tmp.path().to_path_buf(), 16).await;
+        let ctx = context_at(tmp.path().to_path_buf()).await;
         let bytes = ctx
-            .read_policy_bounded("exact.yaml")
+            .read_policy_bounded_with_limit("exact.yaml", 16)
             .await
             .unwrap_or_else(|err| {
                 panic!("exact file must be accepted: {} {}", err.code, err.message)
@@ -227,9 +232,9 @@ mod tests {
         file.sync_all().unwrap();
         drop(file);
 
-        let ctx = context_with_limit(tmp.path().to_path_buf(), 16).await;
+        let ctx = context_at(tmp.path().to_path_buf()).await;
         let err = ctx
-            .read_policy_bounded("sparse.yaml")
+            .read_policy_bounded_with_limit("sparse.yaml", 16)
             .await
             .expect_err("sparse limit+1");
         assert_eq!(err.code, "E_LIMIT_EXCEEDED");

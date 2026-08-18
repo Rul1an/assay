@@ -80,11 +80,12 @@ All notable changes to this project will be documented in this file.
   events no longer copy caller-controlled tool or policy strings. The separate
   `tool_decision` evidence event retains its existing redaction contract.
 - The five advertised MCP policy tools now read local policy files through one
-  inclusive byte ceiling (`ServerConfig.max_policy_bytes`, default 1,000,000,
-  override `ASSAY_MCP_MAX_POLICY_BYTES`) before parse or cache insertion.
-  Exactly the limit is accepted; one extra byte returns `E_LIMIT_EXCEEDED`.
-  The ceiling is independent of the JSON-RPC `ASSAY_MCP_MAX_BYTES` message
-  limit. Operators with previously accepted larger local policy files must
+  inclusive byte ceiling (default 1,000,000, override
+  `ASSAY_MCP_MAX_POLICY_BYTES`) before parse or cache insertion. Exactly the
+  limit is accepted; one extra byte returns `E_LIMIT_EXCEEDED`. The ceiling is
+  independent of the JSON-RPC `ASSAY_MCP_MAX_BYTES` message limit and is not a
+  `ServerConfig` field, so the v5.2.0 public struct shape stays minor-compatible
+  (#2453). Operators with previously accepted larger local policy files must
   shrink the file or set an explicit bounded override. This does not bound
   parser nesting, YAML aliases, proxy startup policy, manifests, trust
   policy, or CLI readers (#2389).
