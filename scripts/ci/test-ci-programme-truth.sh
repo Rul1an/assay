@@ -34,6 +34,26 @@ assert_extracted_block() {
   PROGRAMME_TRUTH_DOC="$text" \
   PROGRAMME_TRUTH_LEDGER_PREFIX="$LEDGER_PREFIX" python3 - <<'PY'
 import os
+import re
+
+INACTIVE_DECL = "**No programme is active.**"
+LEDGER_PHRASES = (
+    "active programme ledger",
+    "public execution ledger",
+    "No programme is active",
+)
+ISSUE_LINK = re.compile(
+    r"\[issue #(\d+)\]\((https://github\.com/[^)\s]+/issues/(\d+))\)"
+)
+# Spaced prose, or a list item whose token contains required-context(s)/check(s).
+# Do not match arbitrary hyphen tokens (crate names) or the checker filename.
+REQUIRED_OUTSIDE = re.compile(
+    r"\brequired contexts?\b|\brequired checks?\b|"
+    r"^\s*-\s+\S*required-contexts?\b|"
+    r"^\s*-\s+\S*required-checks?\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
 
 def normalize(text: str) -> str:
     lines = [line.rstrip() for line in text.splitlines()]
@@ -43,7 +63,8 @@ def normalize(text: str) -> str:
         lines.pop()
     return "\n".join(lines)
 
-def extract_heading_section(text: str, heading: str) -> str:
+
+def heading_bounds(text: str, heading: str) -> tuple[int, int]:
     lines = text.splitlines()
     start = next((i for i, line in enumerate(lines) if line.strip() == heading), None)
     if start is None:
@@ -52,13 +73,22 @@ def extract_heading_section(text: str, heading: str) -> str:
         (i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
         len(lines),
     )
-    return normalize("\n".join(lines[start:end]))
+    return start, end
 
-def extract_top_level_bullet(text: str, prefix: str) -> str:
+
+def extract_heading_section(text: str, heading: str) -> str:
+    start, end = heading_bounds(text, heading)
+    return normalize("\n".join(text.splitlines()[start:end]))
+
+
+def split_top_level_bullet(text: str, prefix: str) -> tuple[str, str]:
     lines = text.splitlines()
-    start = next((i for i, line in enumerate(lines) if line.startswith(prefix)), None)
-    if start is None:
+    starts = [i for i, line in enumerate(lines) if line.startswith(prefix)]
+    if not starts:
         raise SystemExit("missing ledger bullet")
+    if len(starts) != 1:
+        raise SystemExit("duplicate ledger bullet")
+    start = starts[0]
     end = next(
         (
             i
@@ -67,28 +97,61 @@ def extract_top_level_bullet(text: str, prefix: str) -> str:
         ),
         len(lines),
     )
-    return normalize("\n".join(lines[start:end]))
+    bullet = normalize("\n".join(lines[start:end]))
+    remainder = "\n".join(lines[:start] + lines[end:])
+    return bullet, remainder
+
+
+def collapsed(text: str) -> str:
+    return re.sub(r"\s+", " ", text)
+
+
+def validate_ledger(text: str, prefix: str) -> None:
+    bullet, remainder = split_top_level_bullet(text, prefix)
+    bullet_c = collapsed(bullet)
+    remainder_c = collapsed(remainder)
+    outside = [phrase for phrase in LEDGER_PHRASES if phrase in remainder_c]
+    if outside:
+        raise SystemExit(
+            "contradictory ledger declaration outside the ledger bullet: "
+            + ", ".join(outside)
+        )
+    inactive_count = bullet_c.count(INACTIVE_DECL)
+    links = ISSUE_LINK.findall(bullet)
+    if inactive_count > 1:
+        raise SystemExit("ledger bullet has multiple inactive declarations")
+    if inactive_count == 1:
+        if "active programme ledger" in bullet_c:
+            raise SystemExit("contradictory ledger claims in the ledger bullet")
+        return
+    if len(links) != 1:
+        raise SystemExit(
+            "ledger bullet is neither a valid inactive nor a valid active state"
+        )
+    visible, _url, url_id = links[0]
+    if visible != url_id:
+        raise SystemExit("visible issue-ID != URL-ID")
+
+
+def validate_required(text: str, expected: str) -> None:
+    heading = "## Required checks"
+    actual = extract_heading_section(text, heading)
+    if actual != normalize(expected):
+        raise SystemExit("## Required checks section mismatch")
+    start, end = heading_bounds(text, heading)
+    remainder = "\n".join(text.splitlines()[:start] + text.splitlines()[end:])
+    if REQUIRED_OUTSIDE.search(remainder):
+        raise SystemExit("required-context declaration outside ## Required checks")
+
 
 kind = os.environ["PROGRAMME_TRUTH_KIND"]
 text = os.environ["PROGRAMME_TRUTH_DOC"]
 if kind == "ledger":
-    actual = extract_top_level_bullet(text, os.environ["PROGRAMME_TRUTH_LEDGER_PREFIX"])
-    label = "ledger bullet mismatch"
+    validate_ledger(text, os.environ["PROGRAMME_TRUTH_LEDGER_PREFIX"])
 else:
-    actual = extract_heading_section(text, "## Required checks")
-    label = "## Required checks section mismatch"
-if actual != normalize(os.environ["PROGRAMME_TRUTH_EXPECTED"]):
-    raise SystemExit(label)
+    validate_required(text, os.environ["PROGRAMME_TRUTH_EXPECTED"])
 PY
 }
-
-EXPECTED_LEDGER_BULLET='- The public execution ledger for the active programme is named on this line. **No programme is
-  active.** The previous one, [issue #2388](https://github.com/Rul1an/assay/issues/2388), closed on
-  2026-08-15; name the new ledger here when one opens, and say so plainly here when none is. Keep
-  the number to this one line; everywhere else the contract names the role, so the next programme
-  costs one edit here rather than one in every section. Nothing enforces that, so it is an
-  instruction and not a guarantee — and the way it fails is quiet: the line kept pointing at a
-  finished programme, which reads as an active ledger and sends handoffs to a closed issue.'
 
 # shellcheck disable=SC2016 # Markdown backticks in this exact-section fixture are literal.
 EXPECTED_REQUIRED_CHECKS='## Required checks
@@ -105,7 +168,7 @@ required contexts.
 Wave 0 workflow always triggers on `pull_request`; heavy jobs are conditional to avoid docs-only blocking.'
 
 assert_agents_ledger() {
-  assert_extracted_block ledger "$EXPECTED_LEDGER_BULLET" "$1"
+  assert_extracted_block ledger "" "$1"
 }
 
 assert_wave0_required_contexts() {
@@ -150,6 +213,7 @@ PY
 # Insert inside the ledger bullet, immediately before the next top-level "- ".
 insert_into_ledger_bullet() {
   local extra="$1" text="$2"
+  PROGRAMME_TRUTH_MODE="${PROGRAMME_TRUTH_MODE:-insert}" \
   PROGRAMME_TRUTH_EXTRA="$extra" PROGRAMME_TRUTH_DOC="$text" \
   PROGRAMME_TRUTH_LEDGER_PREFIX="$LEDGER_PREFIX" python3 - <<'PY'
 import os
@@ -169,9 +233,17 @@ end = next(
     ),
     len(lines),
 )
-lines.insert(end, extra if extra.endswith("\n") else extra + "\n")
+payload = extra if extra.endswith("\n") else extra + "\n"
+if os.environ["PROGRAMME_TRUTH_MODE"] == "replace":
+    lines[start:end] = [payload]
+else:
+    lines.insert(end, payload)
 print("".join(lines), end="")
 PY
+}
+
+replace_ledger_bullet() {
+  PROGRAMME_TRUTH_MODE=replace insert_into_ledger_bullet "$1" "$2"
 }
 
 # Docs/ruleset surfaces the hook reads that `scripts/**` does not cover.
@@ -278,7 +350,7 @@ expect_red() {
 expect_ok "monitor.rs still exists" assert_monitor_rs_still_exists
 expect_ok "generic unsafe preview and single-boundary TODO are gone" \
   assert_no_generic_unsafe_preview "$(<"$WORKFLOW")" "$(<"$WAVE0")"
-expect_ok "AGENTS.md ledger says no programme is active" assert_agents_ledger "$(<"$AGENTS")"
+expect_ok "AGENTS.md ledger bullet is structurally valid" assert_agents_ledger "$(<"$AGENTS")"
 expect_ok "WAVE0-GATES.md describes dynamic latest-release baseline" assert_wave0_semver_doc "$(<"$WAVE0")"
 expect_ok "WAVE0-GATES.md points at the canonical required-context contract" \
   assert_wave0_required_contexts "$(<"$WAVE0")"
@@ -286,20 +358,33 @@ expect_ok "Wave71 is dormant or incomplete" assert_wave71_not_active "$(<"$STATU
 expect_ok "kernel-matrix.yml pull_request.paths owns programme-truth inputs" \
   assert_ci_trigger_owns_truth_inputs "$(<"$KERNEL_MATRIX")"
 
-stale_ledger="$(insert_into_ledger_bullet \
-  '  named on this line: [issue #2388](https://example.invalid).' \
-  "$(<"$AGENTS")")"
-expect_red "active-issue ledger pointer" "ledger bullet mismatch" \
-  assert_agents_ledger "$stale_ledger"
-
 stale_semver=$'Source of truth: workflow env WAVE0_SEMVER_BASELINE_SHA.\n'
 expect_red "pinned baseline SHA" "WAVE0_SEMVER_BASELINE_SHA" assert_wave0_semver_doc "$stale_semver"
 
 contradictory_ledger="$(insert_into_ledger_bullet \
   'The active programme ledger is issue #9999.' \
   "$(<"$AGENTS")")"
-expect_red "additive active-issue ledger" "ledger bullet mismatch" \
+expect_red "additive active-issue ledger in the bullet" "contradictory ledger claims in the ledger bullet" \
   assert_agents_ledger "$contradictory_ledger"
+
+elsewhere_ledger="$(printf '%s\n%s\n' "$(<"$AGENTS")" 'The active programme ledger is issue #9999.')"
+expect_red "inactive plus active sentence elsewhere" \
+  "contradictory ledger declaration outside the ledger bullet" \
+  assert_agents_ledger "$elsewhere_ledger"
+
+ACTIVE_LEDGER_BULLET='- The public execution ledger for the active programme is named on this line: [issue #4242](https://github.com/Rul1an/assay/issues/4242).'
+active_ledger="$(replace_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$(<"$AGENTS")")"
+expect_ok "structurally active ledger fixture" assert_agents_ledger "$active_ledger"
+
+mismatch_ledger="$(replace_ledger_bullet \
+  '- The public execution ledger for the active programme is named on this line: [issue #4242](https://github.com/Rul1an/assay/issues/4243).' \
+  "$(<"$AGENTS")")"
+expect_red "active fixture with text/link issue mismatch" "visible issue-ID != URL-ID" \
+  assert_agents_ledger "$mismatch_ledger"
+
+duplicate_ledger="$(insert_into_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$(<"$AGENTS")")"
+expect_red "duplicate ledger bullet" "duplicate ledger bullet" \
+  assert_agents_ledger "$duplicate_ledger"
 
 stale_required="$(insert_before_next_heading "## Required checks" \
   'Configure branch protection to require:' \
@@ -312,6 +397,11 @@ extra_context="$(insert_before_next_heading "## Required checks" \
   "$(<"$WAVE0")")"
 expect_red "additive extra required context" "## Required checks section mismatch" \
   assert_wave0_required_contexts "$extra_context"
+
+elsewhere_required="$(printf '%s\n%s\n' "$(<"$WAVE0")" '- stale-required-context')"
+expect_red "pointer-only required section plus stale-required-context elsewhere" \
+  "required-context declaration outside ## Required checks" \
+  assert_wave0_required_contexts "$elsewhere_required"
 
 narrowed_trigger="$(printf '%s\n' "$(<"$KERNEL_MATRIX")" | grep -v '"AGENTS.md"')"
 expect_red "AGENTS.md dropped from CI trigger" "omits AGENTS.md" \
