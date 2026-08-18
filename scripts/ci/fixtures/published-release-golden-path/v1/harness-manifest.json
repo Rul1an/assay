@@ -1,0 +1,17 @@
+{
+  "schema": "assay.published_release_golden_path.harness.v1",
+  "files": [
+    {
+      "path": "examples/privileged-action-gate/mock_github_mcp.py",
+      "sha256": "4b489043fed724b332f9f216942778992270d85a89de4589c73a23fbb86aa48d"
+    },
+    {
+      "path": "examples/privileged-action-gate/policies/no-allowance.yaml",
+      "sha256": "2f7ae26b2d172b291f0d98b3724c729cccd52f7bfc1b9003df96a92c8434f1d2"
+    },
+    {
+      "path": "examples/privileged-action-gate/baseline-approved.json",
+      "sha256": "db210a8f7d7e5850322eddf18ffbef268b1d19595f568e7b3b7a4ec8e50326c3"
+    }
+  ]
+}

@@ -755,6 +755,20 @@ jobs:
     with:
       version: ${{ needs.release-contract.outputs.version }}
 
+  # The release must exist before this job starts: the path intentionally downloads and verifies
+  # the published bytes rather than reusing build artifacts from this workflow.
+  published-release-golden-path:
+    name: Gate the published release journey
+    needs: [release-contract, release]
+    if: >-
+      (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-rc') && !contains(github.ref, '-beta')) ||
+      (github.event_name == 'workflow_dispatch' && startsWith(github.event.inputs.version, 'v') && !contains(github.event.inputs.version, '-rc') && !contains(github.event.inputs.version, '-beta'))
+    permissions:
+      contents: read
+    uses: ./.github/workflows/published-release-golden-path.yml
+    with:
+      release_tag: ${{ needs.release-contract.outputs.version }}
+
   record-mcp-registry-result:
     name: Record MCP Registry result
     needs: [release-contract, release, publish-mcp-registry]
