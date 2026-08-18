@@ -2,7 +2,8 @@
 
 use serde_json::Value;
 use std::fs;
-use std::process::{Command, Stdio};
+use std::io::Write;
+use std::process::{Command, Output, Stdio};
 
 mod jsonrpc_conn;
 use jsonrpc_conn::Conn;
@@ -10,6 +11,7 @@ use jsonrpc_conn::Conn;
 const HEAD: &str = "HEAD_SENTINEL";
 const MID: &str = "MID_SENTINEL";
 const TAIL: &str = "TAIL_SENTINEL";
+const NOT_JSON: &str = "NOT_JSON_SENTINEL";
 
 fn spawn_server(timeout_ms: Option<&str>) -> (Conn, tempfile::TempDir) {
     let policy_root = tempfile::tempdir().expect("temporary policy root");
@@ -163,4 +165,76 @@ fn caller_cannot_fail_open_timeouts() {
 
     assert_fixed_failure(&response, "E_TIMEOUT", "Tool execution timed out");
     assert!(conn.shutdown().success());
+}
+
+/// Batch stdin with piped stderr. `Conn::send` only accepts JSON `Value`, so a
+/// non-JSON line has to go through this local spawn, not the shared harness.
+fn run_raw_session(lines: &[&str]) -> Output {
+    let policy_root = tempfile::tempdir().expect("temporary policy root");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+        .args(["--policy-root", policy_root.path().to_str().unwrap()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn assay-mcp-server");
+    {
+        let mut stdin = child.stdin.take().expect("child stdin");
+        for line in lines {
+            writeln!(stdin, "{line}").expect("write stdin line");
+        }
+    }
+    let output = child.wait_with_output().expect("wait for server");
+    drop(policy_root);
+    output
+}
+
+#[test]
+fn invalid_json_line_is_ignored_and_session_continues() {
+    let initialize = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": {"name": "outer-fallback-contract", "version": "1"}
+        }
+    });
+    let output = run_raw_session(&[NOT_JSON, &initialize.to_string()]);
+    assert!(
+        output.status.success(),
+        "server failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains(NOT_JSON), "stdout reflected {NOT_JSON}");
+    let responses: Vec<Value> = stdout
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_str(line).expect("JSON-RPC response"))
+        .collect();
+    assert_eq!(responses.len(), 1, "stdout: {stdout}");
+    assert_eq!(responses[0]["id"], 1);
+    assert!(
+        responses[0].get("result").is_some(),
+        "initialize: {}",
+        responses[0]
+    );
+    assert!(
+        responses[0].get("error").is_none(),
+        "unexpected protocol error: {}",
+        responses[0]
+    );
+    for response in &responses {
+        assert_ne!(
+            response.pointer("/error/code"),
+            Some(&serde_json::json!(-32700)),
+            "parse error leaked: {response}"
+        );
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains(NOT_JSON), "stderr reflected {NOT_JSON}");
 }
