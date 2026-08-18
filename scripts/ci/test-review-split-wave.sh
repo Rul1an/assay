@@ -10,6 +10,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/clear-git-repository-e
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="$ROOT/scripts/ci/review-split-wave.sh"
+CEILINGS="$ROOT/scripts/ci/lib/resource_ceilings.py"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -19,21 +20,33 @@ bad() { echo "FAIL  $1"; FAILURES=$((FAILURES + 1)); }
 
 assert_usage_examples_exist() {
   local script="$1"
-  python3 - "$script" "$ROOT" <<'PY'
+  python3 "$CEILINGS" check-file "$script"
+  python3 - "$script" "$ROOT" "$CEILINGS" <<'PY'
 import re, subprocess, sys
 from pathlib import Path
-text = Path(sys.argv[1]).read_text(encoding="utf-8")
+
+script = Path(sys.argv[1])
 root = Path(sys.argv[2])
+ceilings = Path(sys.argv[3])
+text = script.read_text(encoding="utf-8")
 examples = re.findall(
     r"review-split-wave\.sh\s+\S+\s+'([^']+)'",
     text,
 )
 if not examples:
     raise SystemExit("no usage examples with an allowed-path regex")
-tracked = subprocess.check_output(
+git = subprocess.Popen(
     ["git", "-C", str(root), "ls-files"],
+    stdout=subprocess.PIPE,
+)
+assert git.stdout is not None
+tracked = subprocess.check_output(
+    [sys.executable, str(ceilings), "inventory"],
+    stdin=git.stdout,
     text=True,
 ).splitlines()
+if git.wait() != 0:
+    raise SystemExit("git ls-files failed")
 for regex in examples:
     rx = re.compile(regex)
     if not any(rx.search(path) for path in tracked):
@@ -76,6 +89,8 @@ run_review() {
   (
     cd "$repo"
     PATH="$bin:$PATH"
+    REVIEW_SPLIT_CEILINGS="$CEILINGS"
+    export REVIEW_SPLIT_CEILINGS
     bash "$script" demo '^allowed/' HEAD~1 "$@"
   )
 }
@@ -116,6 +131,7 @@ fi
 
 # Mutation: restore the two-source inventory and require the leak to go silent.
 mutant="$TMP/review-split-wave.mutant.sh"
+python3 "$CEILINGS" check-file "$SCRIPT"
 python3 - "$SCRIPT" "$mutant" <<'PY'
 from pathlib import Path
 import sys
@@ -142,6 +158,31 @@ if out="$(run_review "$TMP/mutant" "$mutant" 2>&1)"; then
   ok "narrowed inventory mutation stays silent on untracked leak"
 else
   bad "narrowed inventory mutation still caught the leak: $out"
+fi
+
+if out="$(printf 'a\nb\nc\n' | BOUNDED_INVENTORY_MAX_PATHS=2 python3 "$CEILINGS" inventory 2>&1)"; then
+  bad "path-count ceiling left the inventory green"
+elif grep -Fq 'max path count' <<<"$out"; then
+  ok "path-count ceiling turns red ($out)"
+else
+  bad "path-count ceiling red without max path count: $out"
+fi
+
+if out="$(printf 'xxxxxxxxxxxxxxxxxxxx\nyyyyyyyyyyyyyyyyyyyy\n' | BOUNDED_INVENTORY_MAX_BYTES=30 python3 "$CEILINGS" inventory 2>&1)"; then
+  bad "inventory byte ceiling left the inventory green"
+elif grep -Fq 'max byte budget' <<<"$out"; then
+  ok "inventory byte ceiling turns red ($out)"
+else
+  bad "inventory byte ceiling red without max byte budget: $out"
+fi
+
+python3 -c "import sys; sys.stdout.buffer.write(b'x' * 65537)" >"$TMP/oversized.sh"
+if out="$(python3 "$CEILINGS" check-file "$TMP/oversized.sh" 2>&1)"; then
+  bad "source-script byte ceiling left green"
+elif grep -Fq '65536-byte ceiling' <<<"$out"; then
+  ok "source-script byte ceiling turns red ($out)"
+else
+  bad "source-script byte ceiling red without 65536-byte ceiling: $out"
 fi
 
 if [[ "$FAILURES" -ne 0 ]]; then

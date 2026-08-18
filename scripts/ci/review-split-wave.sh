@@ -27,6 +27,9 @@ fi
 
 # One inventory: committed-vs-base, staged, unstaged, and untracked. Omitting
 # dirty paths is how an out-of-scope file used to pass this gate silently.
+# Bound path count and UTF-8 bytes before unique-sort materialization.
+_REVIEW_SPLIT_CEILINGS="${REVIEW_SPLIT_CEILINGS:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/resource_ceilings.py}"
+
 split_wave_changed_files() {
   local inventory_base="$1"
   {
@@ -34,7 +37,7 @@ split_wave_changed_files() {
     git diff --cached --name-only
     git diff --name-only
     git ls-files --others --exclude-standard
-  } | sed '/^$/d' | sort -u
+  } | sed '/^$/d' | python3 "${_REVIEW_SPLIT_CEILINGS}" inventory
 }
 
 changed_files="$(split_wave_changed_files "${base_ref}")"

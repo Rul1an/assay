@@ -14,6 +14,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CEILINGS="$ROOT/scripts/ci/lib/resource_ceilings.py"
 AGENTS="${PROGRAMME_TRUTH_AGENTS:-$ROOT/AGENTS.md}"
 WAVE0="$ROOT/docs/contributing/WAVE0-GATES.md"
 STATUS="$ROOT/docs/contributing/REFACTOR-WAVE-STATUS.md"
@@ -27,12 +28,21 @@ bad() { echo "FAIL  $1"; FAILURES=$((FAILURES + 1)); }
 
 LEDGER_PREFIX='- The public execution ledger'
 
+require_truth_file() {
+  python3 "$CEILINGS" check-file "$1"
+}
+
+require_truth_text() {
+  printf '%s' "$1" | python3 "$CEILINGS" check-stdin "${2:-programme-truth document}"
+}
+
 assert_extracted_block() {
   local kind="$1" expected="$2" text="$3"
+  require_truth_text "$text" "programme-truth document" || return 1
   PROGRAMME_TRUTH_KIND="$kind" \
   PROGRAMME_TRUTH_EXPECTED="$expected" \
-  PROGRAMME_TRUTH_DOC="$text" \
-  PROGRAMME_TRUTH_LEDGER_PREFIX="$LEDGER_PREFIX" python3 - <<'PY'
+  PROGRAMME_TRUTH_LEDGER_PREFIX="$LEDGER_PREFIX" \
+  python3 - <<'PY' 3< <(printf '%s' "$text")
 import os
 import re
 
@@ -199,6 +209,15 @@ def validate_ledger(text: str, prefix: str) -> None:
         raise SystemExit(
             "ledger bullet is neither a valid inactive nor a valid active state"
         )
+    canonical_active = (
+        "- The public execution ledger for the active programme is named on this line:"
+    )
+    if not bullet_c.startswith(canonical_active):
+        raise SystemExit("ledger bullet is not the canonical active form")
+    after = bullet_c[len(canonical_active) :].strip().rstrip(".").strip()
+    link = ISSUE_LINK.fullmatch(after)
+    if link is None or link.group(1) != link.group(3):
+        raise SystemExit("ledger bullet is not the canonical active form")
 
 
 def validate_required(text: str, expected: str) -> None:
@@ -213,7 +232,7 @@ def validate_required(text: str, expected: str) -> None:
 
 
 kind = os.environ["PROGRAMME_TRUTH_KIND"]
-text = os.environ["PROGRAMME_TRUTH_DOC"]
+text = os.fdopen(3).read()
 if kind == "ledger":
     validate_ledger(text, os.environ["PROGRAMME_TRUTH_LEDGER_PREFIX"])
 else:
@@ -262,12 +281,14 @@ assert_wave0_semver_doc() {
 
 insert_before_next_heading() {
   local heading="$1" extra="$2" text="$3"
-  PROGRAMME_TRUTH_HEADING="$heading" PROGRAMME_TRUTH_EXTRA="$extra" PROGRAMME_TRUTH_DOC="$text" python3 - <<'PY'
+  require_truth_text "$text" "programme-truth mutation input" || return 1
+  PROGRAMME_TRUTH_HEADING="$heading" PROGRAMME_TRUTH_EXTRA="$extra" \
+  python3 - <<'PY' 3< <(printf '%s' "$text")
 import os
 
 heading = os.environ["PROGRAMME_TRUTH_HEADING"]
 extra = os.environ["PROGRAMME_TRUTH_EXTRA"]
-text = os.environ["PROGRAMME_TRUTH_DOC"]
+text = os.fdopen(3).read()
 lines = text.splitlines(keepends=True)
 start = next((i for i, line in enumerate(lines) if line.strip() == heading), None)
 if start is None:
@@ -281,14 +302,16 @@ PY
 # Insert inside the ledger bullet, immediately before the next top-level "- ".
 insert_into_ledger_bullet() {
   local extra="$1" text="$2"
+  require_truth_text "$text" "programme-truth mutation input" || return 1
   PROGRAMME_TRUTH_MODE="${PROGRAMME_TRUTH_MODE:-insert}" \
-  PROGRAMME_TRUTH_EXTRA="$extra" PROGRAMME_TRUTH_DOC="$text" \
-  PROGRAMME_TRUTH_LEDGER_PREFIX="$LEDGER_PREFIX" python3 - <<'PY'
+  PROGRAMME_TRUTH_EXTRA="$extra" \
+  PROGRAMME_TRUTH_LEDGER_PREFIX="$LEDGER_PREFIX" \
+  python3 - <<'PY' 3< <(printf '%s' "$text")
 import os
 
 prefix = os.environ["PROGRAMME_TRUTH_LEDGER_PREFIX"]
 extra = os.environ["PROGRAMME_TRUTH_EXTRA"]
-text = os.environ["PROGRAMME_TRUTH_DOC"]
+text = os.fdopen(3).read()
 lines = text.splitlines(keepends=True)
 start = next((i for i, line in enumerate(lines) if line.startswith(prefix)), None)
 if start is None:
@@ -323,11 +346,12 @@ TRUTH_TRIGGER_INPUTS="$(printf '%s\n' \
 
 assert_ci_trigger_owns_truth_inputs() {
   local workflow_text="$1"
-  PROGRAMME_TRUTH_WORKFLOW="$workflow_text" \
-  PROGRAMME_TRUTH_INPUTS="$TRUTH_TRIGGER_INPUTS" python3 - <<'PY'
+  require_truth_text "$workflow_text" "kernel-matrix.yml" || return 1
+  PROGRAMME_TRUTH_INPUTS="$TRUTH_TRIGGER_INPUTS" \
+  python3 - <<'PY' 3< <(printf '%s' "$workflow_text")
 import os, re
 
-text = os.environ["PROGRAMME_TRUTH_WORKFLOW"]
+text = os.fdopen(3).read()
 inputs = [line for line in os.environ["PROGRAMME_TRUTH_INPUTS"].splitlines() if line]
 block = re.search(r"(?ms)^  pull_request:\n((?:    .+\n|\n)*)", text)
 if not block:
@@ -415,6 +439,11 @@ expect_red() {
   fi
 }
 
+for truth_file in "$AGENTS" "$WAVE0" "$STATUS" "$WORKFLOW" "$KERNEL_MATRIX"; do
+  expect_ok "${truth_file#"$ROOT"/} is within the programme-truth byte ceiling" \
+    require_truth_file "$truth_file"
+done
+
 expect_ok "monitor.rs still exists" assert_monitor_rs_still_exists
 expect_ok "generic unsafe preview and single-boundary TODO are gone" \
   assert_no_generic_unsafe_preview "$(<"$WORKFLOW")" "$(<"$WAVE0")"
@@ -501,6 +530,12 @@ ACTIVE_LEDGER_BULLET='- The public execution ledger for the active programme is 
 active_ledger="$(replace_ledger_bullet "$ACTIVE_LEDGER_BULLET" "$(<"$AGENTS")")"
 expect_ok "structurally active ledger fixture" assert_agents_ledger "$active_ledger"
 
+retired_ledger="$(replace_ledger_bullet \
+  '- The public execution ledger historically recorded [issue #4242](https://github.com/Rul1an/assay/issues/4242).' \
+  "$(<"$AGENTS")")"
+expect_red "retired historical wording with a valid issue-link" "canonical active form" \
+  assert_agents_ledger "$retired_ledger"
+
 mismatch_ledger="$(replace_ledger_bullet \
   '- The public execution ledger for the active programme is named on this line: [issue #4242](https://github.com/Rul1an/assay/issues/4243).' \
   "$(<"$AGENTS")")"
@@ -559,6 +594,16 @@ expect_red "restored single-boundary TODO" "single-boundary Wave 3 TODO" \
   assert_no_generic_unsafe_preview "" "unsafe allowed only in the monitor syscall boundary module."
 expect_red "deleted-monitor.rs claim" "must not claim monitor.rs was deleted" \
   assert_no_generic_unsafe_preview "monitor.rs was deleted" ""
+
+oversized_real="$(mktemp)"
+python3 -c "import sys; sys.stdout.buffer.write(b'x' * 65537)" >"$oversized_real"
+expect_red "oversized real document" "exceeds 65536-byte ceiling" \
+  require_truth_file "$oversized_real"
+rm -f "$oversized_real"
+
+oversized_synth="$(python3 -c "print('x' * 65537, end='')")"
+expect_red "oversized synthetic document" "exceeds 65536-byte ceiling" \
+  assert_agents_ledger "$oversized_synth"
 
 if [[ -z "${PROGRAMME_TRUTH_SELFHOST:-}" ]]; then
   cleanup_selfhost() { rm -rf -- "${selfhost_dir:?}"; }
