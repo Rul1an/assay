@@ -172,7 +172,64 @@ class KnownHoles(unittest.TestCase):
                                                 "recorded": "2026-08-19"}]}})
             rep = ca.run(p)
         self.assertFalse(rep["adequate"])
-        self.assertTrue(any("now exercises" in f for f in rep["failures"]), rep["failures"])
+        # The message widened from "now exercises" to cover every transition away
+        # from known-hole, not only becoming killed.
+        self.assertTrue(any("no longer holes" in f and "now killed" in f
+                            for f in rep["failures"]), rep["failures"])
+
+    def test_the_report_does_not_claim_the_pin_is_to_the_corpus(self):
+        # The wording was false and the tool printed it: with a corpus that had moved
+        # it said the acknowledgement "expires the moment the corpus changes" while
+        # exiting 0 at 100%. The digest is a value read from a file the manifest
+        # names, never recomputed from the vectors, and the report must say so.
+        with tempfile.TemporaryDirectory() as d:
+            p = self._mf(Path(d), "sha256:aaa", "sha256:aaa", [KILLABLE])
+            r = subprocess.run([sys.executable, str(ca.__file__), str(p)],
+                               capture_output=True, text=True, timeout=120)
+        self.assertNotIn("expires the moment the corpus changes", r.stdout)
+        self.assertIn("not recomputed from the vectors", r.stdout)
+
+    def test_pre_declared_future_digests_are_surfaced(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            (tmp / "digest.json").write_text(json.dumps({"corpus_digest": "sha256:aaa"}))
+            p = _manifest(tmp, {"a": [KILLABLE, dict(SURVIVOR, label="hole")]}, raw={
+                "corpus_digest_file": "digest.json", "corpus_digest_key": "corpus_digest",
+                "known_holes": {"sha256:aaa": [{"label": "hole", "reason": "x",
+                                                "recorded": "2026-08-19"}],
+                                "sha256:future1": [], "sha256:future2": []}})
+            r = subprocess.run([sys.executable, str(ca.__file__), str(p)],
+                               capture_output=True, text=True, timeout=120)
+        self.assertIn("digests carry acknowledgements", r.stdout)
+
+    def test_holes_outnumbering_measurements_is_stated(self):
+        holes = [dict(SURVIVOR, label=f"h{i}") for i in range(4)]
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            (tmp / "digest.json").write_text(json.dumps({"corpus_digest": "sha256:aaa"}))
+            p = _manifest(tmp, {"a": [KILLABLE] + holes}, raw={
+                "corpus_digest_file": "digest.json", "corpus_digest_key": "corpus_digest",
+                "known_holes": {"sha256:aaa": [{"label": f"h{i}", "reason": "x",
+                                                "recorded": "2026-08-19"} for i in range(4)]}})
+            r = subprocess.run([sys.executable, str(ca.__file__), str(p)],
+                               capture_output=True, text=True, timeout=120)
+        self.assertIn("acknowledged as holes than are measured", r.stdout)
+        self.assertIn("acknowledged holes", r.stdout.strip().splitlines()[-1])
+
+    def test_an_acknowledgement_lingers_when_its_rule_becomes_out_of_scope(self):
+        # Only one of four transitions was covered: killed. A rule that becomes
+        # out_of_scope left the acknowledgement pointing at nothing, silently.
+        oos = dict(SURVIVOR, label="hole", scope="out_of_scope", reason="marked oos later")
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            (tmp / "digest.json").write_text(json.dumps({"corpus_digest": "sha256:aaa"}))
+            p = _manifest(tmp, {"a": [KILLABLE, oos]}, raw={
+                "corpus_digest_file": "digest.json", "corpus_digest_key": "corpus_digest",
+                "known_holes": {"sha256:aaa": [{"label": "hole", "reason": "x",
+                                                "recorded": "2026-08-19"}]}})
+            rep = ca.run(p)
+        self.assertFalse(rep["adequate"])
+        self.assertTrue(any("no longer holes" in f for f in rep["failures"]), rep["failures"])
 
     def test_a_hole_without_a_reason_is_refused(self):
         with tempfile.TemporaryDirectory() as d:

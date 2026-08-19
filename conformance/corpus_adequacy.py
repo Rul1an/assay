@@ -201,11 +201,19 @@ def _load_module(source: str, tag: str, tmp: Path):
 
 
 def _acknowledged_holes(m: dict) -> dict:
-    """Holes acknowledged against the corpus digest that is actually present.
+    """Holes acknowledged against the DECLARED corpus digest.
 
-    Pinned deliberately. An acknowledgement is a statement about ONE corpus, so a
-    corpus that moves loses every acknowledgement and the holes reappear as
-    survivors. Without that, this becomes the escape hatch out_of_scope nearly was.
+    STATED PRECISELY, because the earlier wording here was false. This pins to a
+    digest STRING read from a file the manifest itself names. It is an
+    author-supplied claim about the corpus, not a measurement of it: nothing here
+    recomputes the digest from the vectors. Point the file at a stale value, or
+    leave it untouched while the corpus moves, and every acknowledgement survives
+    a corpus it no longer describes.
+
+    So the expiry is only as strong as the honesty of that file. That is the same
+    declared-versus-observed gap this tool exists to find, one level up, in its
+    own implementation. Whether the tool should recompute the digest is a contract
+    decision with a canonicalisation question attached, and it is not made here.
     """
     if not m.get("_corpus_digest"):
         return {}
@@ -447,12 +455,15 @@ def _run_process(m: dict, manifest_path: Path) -> dict:
             failures.append("SOURCES NOT RESTORED: %s" % leaked)
         _build(m)   # leave the tree with a binary built from the real source
 
-    fixed = [r["label"] for r in results
-             if r["verdict"] == "killed" and r["label"] in acknowledged]
-    if fixed:
-        failures.append("known_holes still acknowledge rules the corpus now exercises: %s. "
-                        "Remove them; a stale acknowledgement hides a real regression later"
-                        % sorted(fixed))
+    # A stale acknowledgement is not only one whose rule became killed. Any verdict
+    # other than known-hole means the acknowledgement no longer describes anything,
+    # and a leftover that points at nothing is what hides the next regression.
+    linger = {r["label"]: r["verdict"] for r in results
+              if r["label"] in acknowledged and r["verdict"] != "known-hole"}
+    if linger:
+        failures.append("known_holes acknowledge rules that are no longer holes: %s. Remove "
+                        "them; an acknowledgement pointing at nothing hides the next regression"
+                        % sorted("%s (now %s)" % kv for kv in linger.items()))
     denom = killed + survived
     # No denominator means no measurement. Printing 100% over zero is the same
     # defect as excluding everything and printing 100%.
@@ -473,6 +484,9 @@ def _run_process(m: dict, manifest_path: Path) -> dict:
     return {"schema": "assay.corpus_adequacy.report.v0", "manifest": str(manifest_path),
             "runner": "process", "killed": killed, "survived": survived,
             "known_holes": known_holes, "corpus_digest": m.get("_corpus_digest"),
+            "acknowledged_digests": len(m.get("known_holes", {})),
+            "hole_ratio": (None if (killed + survived) == 0
+                           else round(known_holes / (killed + survived), 2)),
             "equivalent": equivalent, "unexercised_out_of_scope": out_of_scope,
             "unproved": unproved,
             "declared_total": (killed + survived + equivalent + out_of_scope + unproved
@@ -620,12 +634,12 @@ def run(manifest_path: Path) -> dict:
                                 "how": eq["reason"], "moved": 0})
                 equivalent += 1
 
-    fixed = [r["label"] for r in results
-             if r["verdict"] == "killed" and r["label"] in acknowledged]
-    if fixed:
-        failures.append("known_holes still acknowledge rules the corpus now exercises: %s. "
-                        "Remove them; a stale acknowledgement hides a real regression later"
-                        % sorted(fixed))
+    linger = {r["label"]: r["verdict"] for r in results
+              if r["label"] in acknowledged and r["verdict"] != "known-hole"}
+    if linger:
+        failures.append("known_holes acknowledge rules that are no longer holes: %s. Remove "
+                        "them; an acknowledgement pointing at nothing hides the next regression"
+                        % sorted("%s (now %s)" % kv for kv in linger.items()))
     denom = killed + survived
     score = None if denom == 0 else round(100.0 * killed / denom, 1)
     if unproved:
@@ -646,6 +660,9 @@ def run(manifest_path: Path) -> dict:
     return {"schema": "assay.corpus_adequacy.report.v0", "manifest": str(manifest_path),
             "killed": killed, "survived": survived, "equivalent": equivalent,
             "known_holes": known_holes, "corpus_digest": m.get("_corpus_digest"),
+            "acknowledged_digests": len(m.get("known_holes", {})),
+            "hole_ratio": (None if (killed + survived) == 0
+                           else round(known_holes / (killed + survived), 2)),
             "unexercised_out_of_scope": out_of_scope, "unproved": unproved,
             "declared_total": (killed + survived + equivalent + out_of_scope + unproved
                                + known_holes),
@@ -702,10 +719,21 @@ def main() -> int:
         if rep.get("known_holes"):
             # Louder than the pass line, and pinned. An acknowledgement that outlives
             # the corpus it was made about is worse than no acknowledgement.
-            print("%d KNOWN HOLE(S) recorded against %s. These are rules the corpus DOES "
-                  "claim and does NOT exercise. The acknowledgement is pinned to that digest "
-                  "and expires the moment the corpus changes."
+            print("%d KNOWN HOLE(S) against the DECLARED digest %s. These are rules the "
+                  "corpus DOES claim and does NOT exercise."
                   % (rep["known_holes"], rep.get("corpus_digest")))
+            print("  The digest is a value READ FROM A FILE THE MANIFEST NAMES. It is not "
+                  "recomputed from the vectors, so these acknowledgements expire only if that "
+                  "file is kept honest.")
+            if rep.get("acknowledged_digests", 0) > 1:
+                print("  %d digests carry acknowledgements in this manifest. Entries for a "
+                      "digest that is not the declared one are not in force, but pre-declaring "
+                      "future digests is how this expiry gets bypassed."
+                      % rep["acknowledged_digests"])
+            if rep.get("hole_ratio") is not None and rep["hole_ratio"] > 1.0:
+                print("  more rules are acknowledged as holes than are measured (ratio %.2f). "
+                      "The score below is a statement about a minority of the declared rules."
+                      % rep["hole_ratio"])
         if rep["adequate"]:
             if rep["out_of_scope_ratio"] is not None and rep["out_of_scope_ratio"] > 1.0:
                 # The closing line is what gets quoted. It may not read as unqualified
@@ -714,7 +742,10 @@ def main() -> int:
                       "(%d of %d rules declared here were excluded from it)"
                       % (rep["unexercised_out_of_scope"], rep["declared_total"]))
             else:
-                suffix = (" -- but see the known holes above" if rep.get("known_holes") else "")
+                suffix = ""
+                if rep.get("known_holes"):
+                    suffix = (" for the rules still measured -- %d are acknowledged holes"
+                              % rep["known_holes"])
                 print("mutation-adequacy check passed: every non-equivalent mutant is killed"
                       + suffix)
 
