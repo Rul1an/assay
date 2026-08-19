@@ -347,7 +347,10 @@ def validate_contract(
         "separate harness provenance": '"harness": {',
         "produced bundle": 'bundle="$results/produced.bundle.tar.gz"',
         "inspect produced bundle": 'assay evidence show --format json -- "$bundle"',
-        "verify produced bundle": 'assay evidence verify-privileged-mcp-action "$bundle" --format json',
+        "produce denied observations": '--denied-observations "$observations"',
+        "verify produced bundle": 'assay evidence verify-privileged-mcp-action "$bundle" --format json --profile-version v1',
+        "verify tampered bundle": 'assay evidence verify-privileged-mcp-action "$tampered" --format json --profile-version v1',
+        "produced bundle valid verdict": '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "pass" and .verdict == "valid"',
         "tamper failure code": 'reason_code == "E_EVIDENCE_INTEGRITY"',
         "artifact manifest": '"assay.published_release_golden_path.artifacts.v1"',
         "claim ceiling": "the harness is not a shipped release asset",
@@ -466,6 +469,25 @@ def validate_contract(
         problems.append("driver must inspect the same bundle it produced exactly once")
     if sum("assay evidence show" in line for line in driver_lines) != 1:
         problems.append("driver contains an alternate evidence-inspection target")
+    produced_verify = (
+        'assay evidence verify-privileged-mcp-action "$bundle" --format json --profile-version v1'
+    )
+    tampered_verify = (
+        'assay evidence verify-privileged-mcp-action "$tampered" --format json --profile-version v1'
+    )
+    if driver_lines.count(produced_verify) != 1:
+        problems.append(
+            "driver must verify the produced denial-observation bundle with --profile-version v1 exactly once"
+        )
+    if driver_lines.count(tampered_verify) != 1:
+        problems.append(
+            "driver must verify the tampered denial-observation bundle with --profile-version v1 exactly once"
+        )
+    if any(
+        "verify-privileged-mcp-action" in line and "--profile-version v1" not in line
+        for line in driver_lines
+    ):
+        problems.append("driver verifies a produced or tampered bundle without --profile-version v1")
     required_artifacts = [
         "run-pin.json",
         "commands.ndjson",

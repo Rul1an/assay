@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Published-release golden path verifies the live-produced denial-observation bundle with
+  `--profile-version v1`. The verifier default stays `v0`. No product, policy, or process-exit
+  change.
+
 ## [5.4.0] - 2026-08-19
 
 This release collects the post-`v5.3.0` main line: privileged-mcp-action v1

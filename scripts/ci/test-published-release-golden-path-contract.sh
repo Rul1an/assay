@@ -213,6 +213,27 @@ expect_mutation_failure \
   "driver must inspect the same bundle it produced exactly once"
 
 expect_mutation_failure \
+  "produced-verify-default-v0" "driver.sh" \
+  'assay evidence verify-privileged-mcp-action "$bundle" --format json --profile-version v1' \
+  'assay evidence verify-privileged-mcp-action "$bundle" --format json' \
+  "driver must verify the produced denial-observation bundle with --profile-version v1 exactly once" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "tampered-verify-default-v0" "driver.sh" \
+  'assay evidence verify-privileged-mcp-action "$tampered" --format json --profile-version v1' \
+  'assay evidence verify-privileged-mcp-action "$tampered" --format json' \
+  "driver must verify the tampered denial-observation bundle with --profile-version v1 exactly once" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "produced-bundle-verdict-loosened" "driver.sh" \
+  '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "pass" and .verdict == "valid"' \
+  '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "pass"' \
+  "driver lost produced bundle valid verdict" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
   "verifier-commented" "driver.sh" \
   'bash "$harness_root/scripts/ci/release_attestation_enforce.sh"' \
   '# bash "$harness_root/scripts/ci/release_attestation_enforce.sh"' \
