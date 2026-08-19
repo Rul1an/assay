@@ -235,7 +235,34 @@ jobs:
             echo "::error::the plan selected no corpora; a run that measures nothing must not reach the drift check as though it had"
             exit 1
           fi
-          echo "declared non-instrument sibling pins: ${SIBLING_PINS:-<none>}"
+          # Non-instrument siblings: corpora whose subject lives in another
+          # repository. They were out of scope while nothing pinned them, because
+          # cloning at a floating ref would measure whatever that repo happened to
+          # be. Pinned, they are ordinary: a score against a named commit stays
+          # permanently true of it, and re-deriving it here is what proves the
+          # published number is reproducible rather than remembered.
+          #
+          # Fetched by explicit sha and verified, exactly like the instrument. A
+          # clone that silently lands elsewhere would produce a real-looking number
+          # about the wrong subject, which is worse than not measuring.
+          for pin in ${SIBLING_PINS}; do
+            dir="${pin%%=*}"
+            spec="${pin#*=}"
+            repo="${spec%@*}"
+            sha="${spec#*@}"
+            target="${GITHUB_WORKSPACE}/../${dir}"
+            echo "::group::sibling ${dir} <- ${repo}@${sha}"
+            git init --quiet "${target}"
+            git -C "${target}" remote add origin "https://github.com/${repo}.git"
+            git -C "${target}" fetch --quiet --depth 1 origin "${sha}"
+            git -C "${target}" checkout --quiet --detach FETCH_HEAD
+            landed="$(git -C "${target}" rev-parse HEAD)"
+            if [[ "${landed}" != "${sha}" ]]; then
+              echo "::error::${dir} is at ${landed}, not the pinned ${sha}"
+              exit 1
+            fi
+            echo "::endgroup::"
+          done
 
           # One pass per instrument commit, so every row records the commit its manifest pins.
           for group in ${PIN_GROUPS}; do

@@ -1,7 +1,19 @@
 # Errata for privileged-mcp-action/v0
 
-**Applies to corpus digest `sha256:cb58ce91863f52e0568742b977f0642158453ec11bbcd25821f9171dccd03342`**, and to
-nothing else. If the digest changes, this file is void until it is re-measured against the new one.
+**Applies to corpus digest `sha256:cb58ce91863f52e0568742b977f0642158453ec11bbcd25821f9171dccd03342`
+AND to the implementation that digest was measured against.** Two conditions void it, not one.
+
+An earlier version of this line said "and to nothing else. If the digest changes, this file is void",
+which is false in the direction that makes the document look more durable than it is. Every number
+below is produced by deleting a rule *from an implementation* and seeing whether the corpus notices.
+The implementation can move while the digest does not, because the digest covers vector bytes only.
+Pinning to the digest alone would leave exactly the silent staleness this errata exists to describe,
+one level up and in the file describing it.
+
+So: void when the digest changes, and void when a declared implementation source changes without a
+re-measurement. The second is not left to good intentions — `conformance/adequacy/results.json` is
+re-derived by [`adequacy-drift.yml`](../../.github/workflows/adequacy-drift.yml) and the numbers here
+are checked against it, so the two coming apart is a red check rather than a quiet disagreement.
 
 Recorded 2026-08-19. **No vector, expectation or digest is changed by this file.** A published
 corpus whose digest is its identity does not get edited; it gets an erratum, and a later corpus

@@ -14,8 +14,16 @@ unacceptable; never is how the numbers rot.
 This applies the lesson `scripts/ci/perf_bench_relevance.py` already records for benchmarks: a path
 pattern like `^crates/` matched all 21 crates and alerted on changes outside the benchmark's
 compilation unit, so relevance is derived from the artifact's own declaration instead of from a glob
-someone guessed. Here the declaration is the manifest: `implementation_sources`, `vectors`,
-`corpus_digest_file`, and the manifest file itself. A hand-written path list would be a second
+someone guessed. Here the declaration is the manifest: `implementation`,
+`implementation_sources`, `vectors`, `corpus_digest_file`, and the manifest file itself.
+
+`implementation` is named FIRST and deliberately. A reader who saw only
+`implementation_sources` in this list concluded that `mcp-jsonrpc-id` and
+`rge-bench` -- which declare `implementation` and no `implementation_sources` --
+could never be selected, so an empty list would read as "never changed" and they
+would freeze on first commit. That reading is wrong about the code and was right
+about this sentence, which listed one field of the two that `_declared_paths`
+actually reads. A hand-written path list would be a second
 statement of what the manifest already says, and the two would drift.
 
 Two different failure directions, two different postures:
