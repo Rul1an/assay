@@ -14,6 +14,15 @@ pub struct SimReport {
     /// Phases skipped when time budget exceeded
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub skipped_phases: Vec<String>,
+    /// Phases this tier does not run at all, named so a clean summary cannot be
+    /// read as "everything was tried".
+    ///
+    /// Deliberately not merged with `skipped_phases`: a phase absent because the
+    /// tier never includes it is a programme statement, and a phase dropped
+    /// because the budget ran out is a degradation. A reader deciding whether a
+    /// `bypassed=0` run is reassuring needs to tell those apart.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub phases_not_attempted: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Clone, Default)]
@@ -54,7 +63,16 @@ impl SimReport {
             results: Vec::new(),
             time_budget_exceeded: false,
             skipped_phases: Vec::new(),
+            phases_not_attempted: Vec::new(),
         }
+    }
+
+    /// Record the phases this tier never runs.
+    ///
+    /// `total` counts what ran, so without this a tier that omits a whole phase
+    /// and a tier that ran everything produce the same shape of clean report.
+    pub fn set_phases_not_attempted(&mut self, not_attempted: Vec<String>) {
+        self.phases_not_attempted = not_attempted;
     }
 
     pub fn set_time_budget_exceeded(&mut self, skipped: Vec<String>) {
