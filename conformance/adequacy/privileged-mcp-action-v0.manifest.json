@@ -1,7 +1,7 @@
 {
   "schema": "corpus-adequacy.manifest.v0",
   "runner": "process",
-  "_about": "Mutation adequacy for privileged-mcp-action/v0. First pass declared THREE rules and scored nothing: one genuine hole (the origin leg) and two that mutate the wrong stage and the wrong profile, kept out_of_scope with that reasoning rather than dropped. A corpus of 14 vectors that yields no adequacy result is a signal about the DECLARATION, not about the corpus -- so eight further rules were declared, read off the verifier path rather than off the vector names.",
+  "_about": "Mutation adequacy for privileged-mcp-action/v0, third declaration. The first declared THREE rules and scored nothing. The second declared eight read off the verifier path and scored 4 of 8, which was published with a pattern claim that an adversarial re-measurement then refuted: deleting 23 further promised rules AT ONCE reproduced all fourteen outcomes and all five claim matrices. This declaration folds those in, deduplicated by (anchor, replacement) rather than by label -- five of the 23 turned out to restate rules already declared here, and counting them again would have inflated the denominator in the direction that flatters. outcome_from now reads the surface MANIFEST.json declares normative rather than the one it calls informative.",
   "repo_root": "../..",
   "implementation_sources": [
     "../../crates/assay-evidence/src/denial_marker.rs",
@@ -27,7 +27,7 @@
   "outcome_from": [
     "bundle_integrity",
     "verdict",
-    "reason_code"
+    "claims"
   ],
   "vectors": "privileged-mcp-action-v0.vectors.json",
   "id_key": "vector_id",
@@ -95,6 +95,127 @@
         "replacement": "if obs_tool.is_some() && obs_tool == dec_tool {"
       },
       {
+        "label": "11 the code must be the v0 deny code",
+        "anchor": "(DENIED_CALL_OBSERVATION_V0, PROXY_DENIED_V0, PROXY_ORIGIN) => {",
+        "replacement": "(DENIED_CALL_OBSERVATION_V0, _, PROXY_ORIGIN) => {"
+      },
+      {
+        "label": "26 the decision reason must be in the closed producer set",
+        "anchor": "check_vocab(dec, \"reason\", REASON_VOCAB, violations);",
+        "replacement": "let _ = (dec, REASON_VOCAB, &violations);",
+        "reason": "v0 Section 5 Stage 2: `reason` in the closed producer set unclassified_tool_call | classification_incomplete | no_declared_allowance | credential_scope_unknown | credential_scope_insufficient | manifest_baseline_missing | manifest_observation_ambiguous | manifest_current_observation_incomplete | manifest_drifted_since_approval | allow."
+      },
+      {
+        "label": "27 the decision drift_state must be in the closed set",
+        "anchor": "check_vocab(dec, \"drift_state\", DRIFT_STATE_VOCAB, violations);",
+        "replacement": "let _ = (dec, DRIFT_STATE_VOCAB, &violations);",
+        "reason": "v0 Section 5 Stage 2: `drift_state` in satisfied | baseline_missing | current_observation_incomplete | observation_ambiguous | drifted | not_evaluated."
+      },
+      {
+        "label": "28 the decision tool.name must be a non-empty string",
+        "anchor": "if tool_name.map(str::is_empty).unwrap_or(true) {\n        violations.push(finding(\n            \"decision_tool_name\",",
+        "replacement": "if false {\n        violations.push(finding(\n            \"decision_tool_name\",",
+        "reason": "v0 Section 5 Stage 2: `tool.name` a non-empty string."
+      },
+      {
+        "label": "29 the observation call.tool_name must be a non-empty string",
+        "anchor": "if tool_name.map(str::is_empty).unwrap_or(true) {\n        violations.push(finding(\n            \"observation_tool_name\",",
+        "replacement": "if false {\n        violations.push(finding(\n            \"observation_tool_name\",",
+        "reason": "v0 Section 5 Stage 2: observation record constraints, `call.tool_name` non-empty."
+      },
+      {
+        "label": "31 the observation caller_visible_error.code must be present and non-null",
+        "anchor": "for member in [\"code\", \"origin\", \"reason\"] {",
+        "replacement": "for member in [\"origin\", \"reason\"] {",
+        "reason": "v0 Section 5 Stage 2: caller_visible_error.code, caller_visible_error.origin, caller_visible_error.reason present and non-null. Stage 2 checks presence only; stage 3 compares typed values."
+      },
+      {
+        "label": "32 the observation caller_visible_error.origin must be present and non-null",
+        "anchor": "for member in [\"code\", \"origin\", \"reason\"] {",
+        "replacement": "for member in [\"code\", \"reason\"] {",
+        "reason": "v0 Section 5 Stage 2: caller_visible_error.code, caller_visible_error.origin, caller_visible_error.reason present and non-null. Stage 2 checks presence only; stage 3 compares typed values."
+      },
+      {
+        "label": "33 the observation caller_visible_error.reason must be present and non-null",
+        "anchor": "for member in [\"code\", \"origin\", \"reason\"] {",
+        "replacement": "for member in [\"code\", \"origin\"] {",
+        "reason": "v0 Section 5 Stage 2: caller_visible_error.code, caller_visible_error.origin, caller_visible_error.reason present and non-null. Stage 2 checks presence only; stage 3 compares typed values."
+      },
+      {
+        "label": "34 the decision must carry the five producer non-claims verbatim",
+        "anchor": "    check_non_claims(\n        dec,\n        DECISION_PRODUCER_NON_CLAIMS,\n        \"decision_non_claims\",\n        violations,\n    );",
+        "replacement": "    let _ = (\n        dec,\n        DECISION_PRODUCER_NON_CLAIMS,\n        \"decision_non_claims\",\n        &violations,\n    );",
+        "reason": "v0 Section 5 Stage 2: `non_claims` MUST be an array containing at least the five producer strings verbatim."
+      },
+      {
+        "label": "35 the observation must carry the four producer non-claims verbatim",
+        "anchor": "    check_non_claims(\n        obs,\n        OBSERVATION_PRODUCER_NON_CLAIMS,\n        \"observation_non_claims\",\n        violations,\n    );",
+        "replacement": "    let _ = (\n        obs,\n        OBSERVATION_PRODUCER_NON_CLAIMS,\n        \"observation_non_claims\",\n        &violations,\n    );",
+        "reason": "v0 Section 5 Stage 2: observation `non_claims` containing the four producer strings."
+      },
+      {
+        "label": "36 the establish_path must be in the closed set",
+        "anchor": "check_vocab(est, \"establish_path\", ESTABLISH_PATH_VOCAB, violations);",
+        "replacement": "let _ = (est, ESTABLISH_PATH_VOCAB, &violations);",
+        "reason": "v0 Section 5 Stage 2: `establish_path` in no_establish_needed | established_then_allowed | established_then_denied | immediate_deny."
+      },
+      {
+        "label": "37 establish_attempted must equal (run_outcome != not_performed)",
+        "anchor": "if attempted != (outcome != \"not_performed\") {",
+        "replacement": "if false {",
+        "reason": "v0 Section 5 Stage 2: establish_attempted MUST equal (run_outcome != \"not_performed\"). Note: the sibling promise in the same bullet -- that a missing or wrongly typed member is itself invalid, since the equality must be checkable -- is NOT declared here and is a further undeclared rule."
+      },
+      {
+        "label": "38 the event type must equal the payload schema it declares",
+        "anchor": "if ev.type_ != s {",
+        "replacement": "if false {",
+        "reason": "v0 Section 2: events are selected by the exact `schema` member of their payload; the event's `type` MUST equal that schema string."
+      },
+      {
+        "label": "39 an in-namespace event type over a payload that declares no in-namespace schema fails closed",
+        "anchor": "_ if in_namespace(&ev.type_) => violations.push(finding(",
+        "replacement": "_ if in_namespace(&ev.type_) => drop(finding(",
+        "reason": "v0 Section 2: a mismatch in either direction within the profile's namespaces -- including an in-namespace type over a payload that declares no in-namespace schema -- is invalid, fail closed."
+      },
+      {
+        "label": "40 a caller-visible denial marker must be backed by a decision record",
+        "anchor": "(None, _) => violations.push(finding(\n                \"marker_not_backed\",",
+        "replacement": "(None, _) => drop(finding(\n                \"marker_not_backed\",",
+        "reason": "v0 Section 5 Stage 3: a marker present with no decision record at all is invalid. Undiscriminated by masking rather than by absence: bad-108 does present this input, but the same bundle also trips decision_cardinality, which reaches the same outcome, so deleting this rule alone moves nothing."
+      },
+      {
+        "label": "41 a marker with a null or empty call.target_digest is unbindable and invalid",
+        "anchor": "(Some(_), None) => violations.push(finding(\n                \"marker_digest_unbindable\",",
+        "replacement": "(Some(_), None) => drop(finding(\n                \"marker_digest_unbindable\",",
+        "reason": "v0 Section 5 Stage 3: a marker with a null or empty call.target_digest is unbindable and invalid for the same reason."
+      },
+      {
+        "label": "43 a contradicting establish journey must be reported as a finding",
+        "anchor": "if contradiction {",
+        "replacement": "if false {",
+        "scope": "out_of_scope",
+        "reason": "OUT OF SCOPE ON THE COMPARISON SURFACE, and separately a corpus gap. v0 Section 5 Stage 4 makes the contradiction set normative and requires the verifier to emit a finding and not alter the matrix. Deleting the rule can only remove a finding, and findings are not part of the corpus's normative comparison surface (Section 8: bundle_integrity, verdict, and for accepts the claim matrix). No vector could discriminate it under that surface however it were written. Independently, the corpus also presents no contradicting journey at all: ok-004 is an allow beside established_then_allowed, which never contradicts. If findings are ever admitted to the comparison surface this becomes an in-scope hole needing a vector, so it is recorded rather than dropped."
+      },
+      {
+        "label": "44 the marker triple must match on the schema leg",
+        "anchor": "(DENIED_CALL_OBSERVATION_V0, PROXY_DENIED_V0, PROXY_ORIGIN) => {",
+        "replacement": "(_, PROXY_DENIED_V0, PROXY_ORIGIN) => {",
+        "scope": "out_of_scope",
+        "reason": "WRONG STAGE, same argument as declared mutant 0. Under v0 selection only payloads whose schema member is assay.denied_call_observation.v0 are collected into `observations`, so the classifier's schema leg cannot decide anything on this path: it is an equivalent mutant here, not a hole. Measured SURVIVED, as the reasoning predicts. Recorded because the published table credits this leg to the corpus."
+      },
+      {
+        "label": "47 an unrecognised in-namespace payload schema fails closed (Stage 2)",
+        "anchor": "                    other => violations.push(finding(\n                        \"unknown_profile_schema\",\n                        format!(\n                            \"payload schema {other:?} is inside the profile namespace but is not a recognized {} record; unknown fails closed\",\n                            profile_version.as_profile_id()\n                        ),\n                    )),",
+        "replacement": "                    other => { let _ = other; }",
+        "reason": "v0 Stage 2. Declared mutant 0 mutates the Stage 3 classifier and is out of scope for exactly this reason -- 'to measure that promise, mutate the Stage 2 match instead'. This is that mutant. bad-104 should kill it."
+      },
+      {
+        "label": "48 the decision value must be in the closed vocabulary",
+        "anchor": "check_vocab(dec, \"decision\", DECISION_VOCAB, violations);",
+        "replacement": "let _ = DECISION_VOCAB;",
+        "reason": "v0 Stage 2 closed vocabulary. Declared as its own call site rather than by mutating check_vocab, which would delete four rules at once. bad-107 should kill it."
+      },
+      {
         "label": "CONTROL harness reachability on the verifier path",
         "anchor": ".filter(|obs| classify_denial_marker(obs) == Some(profile_version.marker_version()));",
         "replacement": ".filter(|_obs| false);",
@@ -113,7 +234,14 @@
         "recorded": "2026-08-19",
         "exercised_outside_corpus": "crates/assay-evidence/tests/denial_marker_classifier.rs::wrong_origin_is_inert",
         "corrected": "2026-08-19"
+      },
+      {
+        "label": "11 the code must be the v0 deny code",
+        "reason": "The SECOND leg of the same triple, found only because the first was published as a hole and someone asked what the other two do. v0 Stage 3 promises all three legs. Deleting the code conjunct leaves the 14-vector corpus test at 10 of 10 green, so no vector discriminates it. Cause is structural rather than an oversight in any one vector: gen_vectors.py:103 hard-codes the single marker shape {code: -32042, origin: assay-proxy} and is the only marker construction site, so no vector CAN vary either member. Corpus-only, like the origin leg: our tree does catch it -- deleting the conjunct fails crates/assay-evidence/tests/denial_marker_classifier.rs::cross_pair_v0_schema_v1_code_is_inert. Note the schema leg is not caught by the triple match either; bad-104 is decided earlier at Stage 2. Of the three legs the corpus discriminates NONE.",
+        "exercised_outside_corpus": "crates/assay-evidence/tests/denial_marker_classifier.rs::cross_pair_v0_schema_v1_code_is_inert",
+        "recorded": "2026-08-19"
       }
     ]
-  }
+  },
+  "_outcome_from_why": "The corpus declares its own comparison surface in MANIFEST.json: 'expected.bundle_integrity, expected.verdict and expected.claims are the normative comparison surface; first_failure_informative is this generator's own vocabulary and is informative only.' The first version of this manifest read [bundle_integrity, verdict, reason_code] -- the informative vocabulary, with the normative member omitted. That is weaker AND wider than the corpus at once. Measured consequence: a mutant flipping the Stage 4 (allow, bound) arm from refuted to confirmed moves ok-005's claim cell, so the CORPUS kills it, while the old surface did not see it and scored it a survivor. Wider, because reason_code separates bad-101 from bad-109 where the corpus does not."
 }
