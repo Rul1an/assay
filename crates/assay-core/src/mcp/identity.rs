@@ -108,6 +108,17 @@ mod tests {
         );
     }
 
+    /// The premise behind `compute_json_hash`'s `expect` and behind
+    /// `canonicalization_succeeds_across_the_value_domain`: a parsed `Value` cannot hold a
+    /// non-finite number, because a literal outside `f64` range does not parse.
+    /// `arbitrary_precision` would retain the literal, `serde_jcs` would reject it, and the
+    /// `expect` would abort.
+    #[test]
+    fn premise_out_of_range_number_literals_do_not_parse_in_this_build() {
+        assert!(serde_json::from_str::<Value>("1e400").is_err());
+        assert!(serde_json::from_str::<Value>("-1e400").is_err());
+    }
+
     /// The defect: two spellings of one schema must be one identity.
     #[test]
     fn reordered_schema_keys_produce_the_same_identity() {
