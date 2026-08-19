@@ -10,6 +10,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/clear-git-repository-e
 
 _TRUTH_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/resource_ceilings.py"
 python3 "$_TRUTH_LIB" reject-overrides
+python3 "$_TRUTH_LIB" assert-reject-caller "${BASH_SOURCE[0]}"
 if [[ -n "${REVIEW_SPLIT_ROOT+x}" ]]; then
   echo "FAIL: REVIEW_SPLIT_ROOT cannot replace the script worktree" >&2
   exit 1
@@ -311,8 +312,6 @@ if "${REVIEW_SPLIT_CEILINGS:-" in text or 'python3 "${REVIEW_SPLIT_CEILINGS}"' i
 suite = read_bounded_file(sys.argv[2]).decode("utf-8")
 if "${" + "PROGRAMME_TRUTH_ROOT:-" in suite or "${" + "REVIEW_SPLIT_ROOT:-" in suite:
     raise SystemExit("review-split-wave tests still accept a caller root override")
-if "reject-overrides" not in suite:
-    raise SystemExit("review-split-wave tests do not invoke reject-overrides")
 if "if [[ -n \"${" + "PROGRAMME_TRUTH_AGENTS+x}\" ]]" in suite:
     raise SystemExit("review-split-wave tests still inlined programme override rejects")
 PY

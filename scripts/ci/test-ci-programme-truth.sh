@@ -15,6 +15,7 @@ set -euo pipefail
 
 _TRUTH_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/resource_ceilings.py"
 python3 "$_TRUTH_LIB" reject-overrides
+python3 "$_TRUTH_LIB" assert-reject-caller "${BASH_SOURCE[0]}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 if [[ -e "$ROOT/.git" && -e "$ROOT/.programme-truth-hermetic" ]]; then
@@ -23,6 +24,7 @@ if [[ -e "$ROOT/.git" && -e "$ROOT/.programme-truth-hermetic" ]]; then
 fi
 CEILINGS="$ROOT/scripts/ci/lib/resource_ceilings.py"
 export PYTHONPATH="$ROOT/scripts/ci/lib${PYTHONPATH:+:$PYTHONPATH}"
+python3 "$CEILINGS" assert-reject-caller "$ROOT/scripts/ci/test-review-split-wave.sh"
 AGENTS="$ROOT/AGENTS.md"
 WAVE0="$ROOT/docs/contributing/WAVE0-GATES.md"
 STATUS="$ROOT/docs/contributing/REFACTOR-WAVE-STATUS.md"
@@ -47,6 +49,7 @@ HERMETIC_TRUTH_FILES="$(printf '%s\n' \
   .pre-commit-config.yaml \
   scripts/ci/lib/resource_ceilings.py \
   scripts/ci/test-ci-programme-truth.sh \
+  scripts/ci/test-review-split-wave.sh \
   crates/assay-cli/src/cli/commands/monitor.rs)"
 
 install_hermetic_programme_truth() {
@@ -502,6 +505,15 @@ match = re.search(
 )
 if match is None:
     raise SystemExit("ci-programme-truth files regex is missing")
+entry = re.search(
+    r"- id: ci-programme-truth\n(?:.*\n)*?        entry: (.+)\n",
+    text,
+)
+if entry is None:
+    raise SystemExit("ci-programme-truth hook entry is missing")
+hook = entry.group(1)
+if "test-ci-programme-truth.sh" not in hook or "test-review-split-wave.sh" not in hook:
+    raise SystemExit("ci-programme-truth hook does not run both focused suites")
 raw = match.group(1).strip()
 if raw[0] in "'\"" and raw[-1] == raw[0]:
     raw = raw[1:-1]
@@ -632,8 +644,6 @@ if root_override in text:
     raise SystemExit("PROGRAMME_TRUTH_ROOT is still a caller override")
 if agents_override in text:
     raise SystemExit("PROGRAMME_TRUTH_AGENTS is still a caller override")
-if "reject-overrides" not in text:
-    raise SystemExit("script does not invoke reject-overrides")
 inline_reject = "if [[ -n \"${" + "PROGRAMME_TRUTH_AGENTS+x}\" ]]"
 if inline_reject in text:
     raise SystemExit("script still inlines programme override rejects")
@@ -686,6 +696,17 @@ expect_red "PROGRAMME_TRUTH_ROOT empty override" \
 expect_red "PROGRAMME_TRUTH_ROOT nonexistent tree" \
   "PROGRAMME_TRUTH_ROOT cannot replace the script worktree" \
   env PROGRAMME_TRUTH_ROOT=/no/such/programme-truth-root bash "${BASH_SOURCE[0]}"
+
+for suite in \
+  "${BASH_SOURCE[0]}" \
+  "$ROOT/scripts/ci/test-review-split-wave.sh"
+do
+  dest="$TRUTH_TMP/no-reject-caller-$(basename -- "$suite")"
+  python3 "$CEILINGS" drop-reject-caller "$suite" "$dest"
+  expect_red "deleted reject-overrides caller in $(basename -- "$suite")" \
+    "reject-overrides caller count is 0, want 1" \
+    python3 "$CEILINGS" assert-reject-caller "$dest"
+done
 
 for override_name in "${FORBIDDEN_SPEC[@]}"; do
   install_hermetic_programme_truth "$TRUTH_TMP/drop-${override_name}"

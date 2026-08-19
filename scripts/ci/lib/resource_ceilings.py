@@ -36,6 +36,39 @@ def reject_programme_overrides(env: dict[str, str] | None = None) -> None:
             raise SystemExit(f"{name} cannot replace the script worktree")
 
 
+REJECT_OVERRIDES_CALLER = "python3 " + '"$_TRUTH_LIB"' + " reject-overrides"
+
+
+def reject_overrides_caller_count(text: str) -> int:
+    count = 0
+    for line in text.splitlines():
+        if line.split("#", 1)[0].strip() == REJECT_OVERRIDES_CALLER:
+            count += 1
+    return count
+
+
+def assert_reject_overrides_caller(path: str) -> None:
+    count = reject_overrides_caller_count(read_bounded_file(path).decode("utf-8"))
+    if count != 1:
+        raise SystemExit(f"reject-overrides caller count is {count}, want 1")
+
+
+def drop_reject_overrides_caller(src: str, dst: str) -> None:
+    text = read_bounded_file(src).decode("utf-8")
+    count = reject_overrides_caller_count(text)
+    if count != 1:
+        raise SystemExit(f"reject-overrides caller count is {count}, want 1")
+    kept = [
+        line
+        for line in text.splitlines(keepends=True)
+        if line.split("#", 1)[0].strip() != REJECT_OVERRIDES_CALLER
+    ]
+    out = "".join(kept).encode("utf-8")
+    require_bounded_bytes(out, dst)
+    with open(dst, "wb") as fh:
+        fh.write(out)
+
+
 def require_bounded_bytes(
     data: bytes, label: str, limit: int = MAX_DOC_BYTES
 ) -> bytes:
@@ -144,7 +177,8 @@ def main(argv: list[str]) -> None:
             "usage: resource_ceilings.py "
             "check-file|read-file|check-stdin|inventory|"
             "max-doc-bytes|canonical-inventory-limits|"
-            "reject-overrides|forbidden-overrides [path]"
+            "reject-overrides|forbidden-overrides|"
+            "assert-reject-caller|drop-reject-caller [path]"
         )
     cmd = argv[0]
     if cmd == "max-doc-bytes":
@@ -159,6 +193,12 @@ def main(argv: list[str]) -> None:
         return
     if cmd == "reject-overrides":
         reject_programme_overrides()
+        return
+    if cmd == "assert-reject-caller":
+        assert_reject_overrides_caller(argv[1])
+        return
+    if cmd == "drop-reject-caller":
+        drop_reject_overrides_caller(argv[1], argv[2])
         return
     if cmd == "check-file":
         read_bounded_file(argv[1])
