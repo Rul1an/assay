@@ -1,5 +1,5 @@
-use assay_core::metrics_api::{Metric, MetricResult};
 use assay_core::mcp::jcs;
+use assay_core::metrics_api::{Metric, MetricResult};
 use assay_core::model::{Expected, LlmResponse, TestCase};
 use async_trait::async_trait;
 use sha2::{Digest, Sha256};
