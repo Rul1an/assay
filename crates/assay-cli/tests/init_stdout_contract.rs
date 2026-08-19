@@ -15,6 +15,15 @@ use bounded_process::{run_bounded, GOLDEN_PATH_LIMITS};
 use serde_json::Value;
 
 const INIT_REPORT: &str = "assay.init_report.v0";
+const SCAN_BANNER: &str = "🔍 Scanning project for MCP configurations...\n";
+const GENERIC_PROJECT: &str = "   ℹ️  No specific MCP config found, initializing generic project.";
+const FROM_TRACE_COMPLETE: &str = "✅  Initialization complete.";
+const FROM_TRACE_CLOSING_BLOCK: &str = concat!(
+    "✅  Initialization complete.\n\n",
+    "   Next: assay validate --config=eval.yaml --format json\n",
+    "   Note: a separate runtime replay trace is required; the generator-event input cannot fill that role.\n\n",
+    "   Tip: For EU AI Act compliance scanning, add: --pack eu-ai-act-baseline\n",
+);
 
 struct Run {
     exit_code: i32,
@@ -32,6 +41,14 @@ fn init(dir: &Path, args: &[&str]) -> Run {
             .expect("assay init terminated without an exit code"),
         stdout: String::from_utf8(output.stdout).expect("stdout is UTF-8"),
     }
+}
+
+fn write_generator_events(dir: &Path) {
+    std::fs::write(
+        dir.join("events.jsonl"),
+        "{\"type\":\"file_open\",\"path\":\"/workspace/app.py\",\"pid\":1,\"timestamp\":1}\n",
+    )
+    .expect("write generator events");
 }
 
 /// Parses the whole of stdout, not a fragment of it.
@@ -280,17 +297,37 @@ fn the_default_text_stream_is_pinned_where_the_run_controls_it() {
     assert_eq!(own_output(&plain.stdout), CREATED_WITHOUT_HELLO_TRACE);
 }
 
+/// The deterministic prefix for an empty project is guarded separately from the run-owned region.
+///
+/// This separately pins the unconditional scan banner and the generic-project line for an empty
+/// temporary directory. It deliberately does not pin text between them: `Detected Claude Desktop
+/// config (global)` may appear there after a home-directory probe and is not the same bytes on
+/// every runner.
+#[test]
+fn the_empty_project_prefix_is_pinned_without_the_home_directory_probe() {
+    let dir = tempfile::tempdir().expect("empty-project tempdir");
+    let run = init(dir.path(), &["--preset", "dev"]);
+
+    assert_eq!(run.exit_code, 0);
+    assert!(
+        run.stdout.starts_with(SCAN_BANNER),
+        "the deterministic prefix must start with the scan banner; stdout was:\n{}",
+        run.stdout
+    );
+    assert!(
+        run.stdout.contains(GENERIC_PROJECT),
+        "an empty project must publish the generic-project line; stdout was:\n{}",
+        run.stdout
+    );
+}
+
 /// `--from-trace` input is generator-event JSONL, not a runtime replay trace.
 /// Publishing `assay ci --config=…` without `--trace-file` exits 2 with
 /// `E_INVALID_ARGS`. The text channel must not print that failing command.
 #[test]
 fn from_trace_text_does_not_publish_a_failing_ci_command() {
     let dir = tempfile::tempdir().expect("from-trace tempdir");
-    std::fs::write(
-        dir.path().join("events.jsonl"),
-        "{\"type\":\"file_open\",\"path\":\"/workspace/app.py\",\"pid\":1,\"timestamp\":1}\n",
-    )
-    .expect("write generator events");
+    write_generator_events(dir.path());
     let run = init(dir.path(), &["--from-trace", "events.jsonl"]);
     assert_eq!(run.exit_code, 0);
     assert!(
@@ -305,4 +342,22 @@ fn from_trace_text_does_not_publish_a_failing_ci_command() {
         "from-trace text must say a separate runtime replay trace is required and the generator-event input cannot fill that role:\n{}",
         run.stdout
     );
+}
+
+/// `--from-trace` output is data-dependent before completion, so only its deterministic close is
+/// pinned. This is not a whole-stream golden: aggregation counts remain outside this scope.
+#[test]
+fn from_trace_text_closing_block_is_byte_exact_and_ordered() {
+    let dir = tempfile::tempdir().expect("from-trace tempdir");
+    write_generator_events(dir.path());
+    let run = init(dir.path(), &["--from-trace", "events.jsonl"]);
+
+    assert_eq!(run.exit_code, 0);
+    let start = run.stdout.find(FROM_TRACE_COMPLETE).unwrap_or_else(|| {
+        panic!(
+            "from-trace stdout never reaches {FROM_TRACE_COMPLETE:?}; stdout was:\n{}",
+            run.stdout
+        )
+    });
+    assert_eq!(&run.stdout[start..], FROM_TRACE_CLOSING_BLOCK);
 }

@@ -31,6 +31,8 @@ All notable changes to this project will be documented in this file.
   (#2245).
 
 ### Fixed
+- `assay init` stdout contract tests now separately pin the deterministic empty-project prefix
+  and the ordered `--from-trace` closing block (#2254).
 - Published-release golden path and `examples/privileged-action-gate/run.sh` verify the
   live-produced denial-observation bundle with `--profile-version v1`. The verifier default
   stays `v0`. No product, policy, or process-exit change.
