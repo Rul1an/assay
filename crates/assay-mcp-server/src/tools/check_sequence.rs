@@ -1,6 +1,8 @@
 use super::{ToolContext, ToolError};
 use anyhow::{Context, Result};
-use serde_json::Value;
+use assay_core::model::SequenceRule;
+use assay_core::sequence_eval::{evaluate_rules, RuleEvaluation, SequenceCall, TraceExtent};
+use serde_json::{json, Value};
 
 pub async fn check_sequence(ctx: &ToolContext, args: &Value) -> Result<Value> {
     // 1. Unpack args & Check Limits
@@ -94,15 +96,9 @@ pub async fn check_sequence(ctx: &ToolContext, args: &Value) -> Result<Value> {
     }
 }
 
-/// Whether this evaluator finds any violation. Exists only for `tests/sequence_eval_parity.rs`.
-///
-/// This copy of the rule language has not called through to `assay_core::sequence_eval` yet,
-/// because its JSON violation shape is a published tool contract. Until it does, the parity test
-/// is what keeps the two from drifting, and it needs a verdict it can compare. Deliberately
-/// narrow: a bool, not the violation payload, so nothing outside this crate grows a dependency
-/// on the shape while the port is pending.
+/// Whether the shared evaluator finds any violation. Exists for `tests/sequence_eval_parity.rs`.
 pub fn validate_rules_for_parity(
-    rules: &[assay_core::model::SequenceRule],
+    rules: &[SequenceRule],
     actual_names: &[String],
     policy_context: Option<&assay_core::model::Policy>,
 ) -> bool {
@@ -115,396 +111,84 @@ pub fn validate_rules_for_parity(
         .unwrap_or(false)
 }
 
-// TODO(sequence-v11): call `assay_core::sequence_eval::evaluate_rules` instead of this copy.
-// Blocked on preserving the JSON violation shape, which is a published tool contract.
+/// Live-proxy reading of the sequence-rule language: one call to the owner, then a
+/// presentation map into the published tool JSON.
+///
+/// `assay-mcp-server` already depends on `assay-core`, and `assay-metrics` already calls
+/// [`evaluate_rules`]. The remaining work was this map, not a second copy of the rule.
+/// `TraceExtent::Partial` is the proxy question: history-so-far, more calls still possible.
 fn validate_rules(
-    rules: &[assay_core::model::SequenceRule],
+    rules: &[SequenceRule],
     actual_names: &[String],
     policy_context: Option<&assay_core::model::Policy>,
 ) -> Result<Value> {
-    let mut violations = Vec::new();
-
-    // Helper to resolve aliases
-    let resolve = |tool: &str| -> Vec<String> {
-        if let Some(ctx) = policy_context {
-            ctx.resolve_alias(tool)
-        } else {
-            vec![tool.to_string()]
-        }
-    };
-
-    // Helper to check if tool matches any target
-    let matches_any =
-        |tool_name: &str, targets: &[String]| -> bool { targets.iter().any(|t| t == tool_name) };
-
-    for rule in rules {
-        match rule {
-            // ===== REQUIRE (v1.0 legacy) =====
-            assay_core::model::SequenceRule::Require { tool } => {
-                let targets = resolve(tool.tool());
-                // Requirement: At least ONE of the alias members must be present in history
-                let found = targets.iter().any(|t| actual_names.contains(t));
-                if !found {
-                    let msg = if targets.len() > 1 {
-                        format!(
-                            "required tool '{}' (aliases: {:?}) not found",
-                            tool, targets
-                        )
-                    } else {
-                        format!("required tool '{}' not found", tool)
-                    };
-                    violations.push(serde_json::json!({
-                        "rule_type": "require",
-                        "constraint": "sequence_rule",
-                        "message": msg
-                    }));
-                }
-            }
-
-            // ===== EVENTUALLY: tool must appear within first N calls =====
-            assay_core::model::SequenceRule::Eventually { tool, within } => {
-                let targets = resolve(tool.tool());
-                let found_idx = actual_names.iter().position(|n| matches_any(n, &targets));
-
-                if let Some(idx) = found_idx {
-                    // 0-based index. "within: 3" means indices 0, 1, 2 are valid.
-                    if (idx as u32) >= *within {
-                        violations.push(serde_json::json!({
-                            "rule_type": "eventually",
-                            "tool": tool,
-                            "event_index": idx,
-                            "constraint": "eventually",
-                            "message": format!(
-                                "tool '{}' appeared at index {} but must appear within first {} calls",
-                                tool, idx, within
-                            )
-                        }));
-                    }
-                } else {
-                    // Not found. If trace length > within, we've missed the deadline.
-                    // `>=`, not `>`. The window is indices `0..within-1`, so it is spent once the
-                    // trace reaches `within` calls -- not one call later. At `within: 2` a
-                    // two-call trace has already used both chances.
-                    if (actual_names.len() as u32) >= *within {
-                        violations.push(serde_json::json!({
-                            "rule_type": "eventually",
-                            "tool": tool,
-                            "event_index": actual_names.len() - 1,
-                            "constraint": "eventually",
-                            "message": format!(
-                                "tool '{}' required within first {} calls but not found (trace length: {})",
-                                tool, within, actual_names.len()
-                            )
-                        }));
-                    }
-                }
-            }
-
-            // ===== MAX_CALLS: tool can be called at most N times =====
-            assay_core::model::SequenceRule::MaxCalls { tool, max } => {
-                let targets = resolve(tool.tool());
-                let mut count = 0u32;
-                let mut violation_idx = None;
-
-                for (idx, name) in actual_names.iter().enumerate() {
-                    if matches_any(name, &targets) {
-                        count += 1;
-                        if count > *max && violation_idx.is_none() {
-                            violation_idx = Some(idx);
-                        }
-                    }
-                }
-
-                if let Some(idx) = violation_idx {
-                    violations.push(serde_json::json!({
-                        "rule_type": "max_calls",
-                        "tool": tool,
-                        "event_index": idx,
-                        "constraint": "max_calls",
-                        "message": format!(
-                            "tool '{}' exceeded max calls ({} > {})",
-                            tool, count, max
-                        ),
-                        "context": {
-                            "max": max,
-                            "actual": count
-                        }
-                    }));
-                }
-            }
-
-            // ===== BEFORE: first must be called before then =====
-            assay_core::model::SequenceRule::Before { first, then } => {
-                let first_targets = resolve(first.tool());
-                let then_targets = resolve(then.tool());
-
-                // Check positions
-                let first_idx = actual_names
-                    .iter()
-                    .position(|n| matches_any(n, &first_targets));
-                let then_idx = actual_names
-                    .iter()
-                    .position(|n| matches_any(n, &then_targets));
-
-                // Only check if 'then' was called
-                if let Some(t_idx) = then_idx {
-                    if let Some(f_idx) = first_idx {
-                        if f_idx > t_idx {
-                            violations.push(serde_json::json!({
-                                "rule_type": "before",
-                                "tool": then,
-                                "event_index": t_idx,
-                                "constraint": "before",
-                                "message": format!(
-                                    "tool '{}' at index {} requires '{}' to be called first (found at index {})",
-                                    then, t_idx, first, f_idx
-                                ),
-                                "context": {
-                                    "required_tool": first,
-                                    "required_tool_seen": true,
-                                    "required_tool_index": f_idx
-                                }
-                            }));
-                        }
-                    } else {
-                        violations.push(serde_json::json!({
-                            "rule_type": "before",
-                            "tool": then,
-                            "event_index": t_idx,
-                            "constraint": "before",
-                            "message": format!(
-                                "tool '{}' at index {} requires '{}' to be called first",
-                                then, t_idx, first
-                            ),
-                            "context": {
-                                "required_tool": first,
-                                "required_tool_seen": false
-                            }
-                        }));
-                    }
-                }
-            }
-
-            // ===== AFTER: after trigger, then must occur within N calls =====
-            assay_core::model::SequenceRule::After {
-                trigger,
-                then,
-                within,
-            } => {
-                let trigger_targets = resolve(trigger.tool());
-                let then_targets = resolve(then.tool());
-
-                // Each trigger is its own obligation, checked against its own window.
-                //
-                // This used to carry one mutable `pending_deadline` slot, and leaked a violation
-                // through it two ways. The satisfy-check ran before the deadline check, so a
-                // `then` arriving one call past the window cleared the obligation instead of
-                // failing it: `[T, X, A]` at `within: 1` reported no violation. And a new trigger
-                // overwrote an unsatisfied one, so `[T, T, A]` reported none either, while the
-                // trigger at index 0 was never answered. This is the enforcing path, so both were
-                // permissive: the proxy allowed a call sequence the policy forbids.
-                //
-                // The JSON below is unchanged -- same keys, same two message forms, same
-                // conditions for choosing between them -- because it is a published tool contract.
-                let trigger_indices: Vec<usize> = actual_names
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, n)| matches_any(n, &trigger_targets))
-                    .map(|(i, _)| i)
-                    .collect();
-
-                for trigger_idx in trigger_indices {
-                    let deadline = trigger_idx + (*within as usize);
-                    let answered = actual_names
-                        .iter()
-                        .enumerate()
-                        .skip(trigger_idx + 1)
-                        .take_while(|(j, _)| *j <= deadline)
-                        .any(|(_, n)| matches_any(n, &then_targets));
-                    if answered {
-                        continue;
-                    }
-
-                    if actual_names.len() > deadline {
-                        // The window closed inside the trace.
-                        violations.push(serde_json::json!({
-                            "rule_type": "after",
-                            "tool": then,
-                            "event_index": deadline + 1,
-                            "constraint": "after",
-                            "message": format!(
-                                "tool '{}' required within {} calls after '{}' (triggered at index {})",
-                                then, within, trigger, trigger_idx
-                            ),
-                            "context": {
-                                "trigger": trigger,
-                                "trigger_index": trigger_idx,
-                                "within": within
-                            }
-                        }));
-                    }
-                    // No `else`. A trace that ended inside the window has not missed the
-                    // deadline: this evaluator validates history-so-far, and the next call can
-                    // still answer the obligation. The original guarded its end-of-trace
-                    // violation on `len > deadline` for exactly this reason, and an earlier
-                    // version of this rewrite dropped the guard -- which made the proxy stricter
-                    // than the shared evaluator and tripped the parity test in #2112 on 58 cases.
-                }
-            }
-
-            // ===== NEVER_AFTER: after trigger, forbidden is permanently denied =====
-            assay_core::model::SequenceRule::NeverAfter { trigger, forbidden } => {
-                let trigger_targets = resolve(trigger.tool());
-                let forbidden_targets = resolve(forbidden.tool());
-
-                let mut triggered = false;
-                let mut trigger_idx = 0usize;
-
-                for (idx, name) in actual_names.iter().enumerate() {
-                    // Check forbidden first if already triggered
-                    if triggered && matches_any(name, &forbidden_targets) {
-                        violations.push(serde_json::json!({
-                            "rule_type": "never_after",
-                            "tool": forbidden,
-                            "event_index": idx,
-                            "constraint": "never_after",
-                            "message": format!(
-                                "tool '{}' at index {} is forbidden after '{}' (triggered at index {})",
-                                forbidden, idx, trigger, trigger_idx
-                            ),
-                            "context": {
-                                "trigger": trigger,
-                                "trigger_index": trigger_idx
-                            }
-                        }));
-                        break; // One violation is enough
-                    }
-
-                    // Check for trigger
-                    // Note: if trigger and forbidden are same, it triggers immediately on next call?
-                    // Or on itself? "after trigger". Usually implies strict >.
-                    // But if triggered is set, we check forbidden.
-                    // If we set triggered AFTER checking forbidden for current item:
-                    if !triggered && matches_any(name, &trigger_targets) {
-                        triggered = true;
-                        trigger_idx = idx;
-                    }
-                }
-            }
-
-            // ===== SEQUENCE: exact ordering (with optional strict mode) =====
-            assay_core::model::SequenceRule::Sequence { tools, strict } => {
-                // Resolve all tools through aliases
-                let tool_targets: Vec<Vec<String>> =
-                    tools.iter().map(|t| resolve(t.tool())).collect();
-
-                if *strict {
-                    // Strict mode: tools must appear consecutively in exact order
-                    let mut seq_idx = 0usize;
-                    let mut started = false;
-                    let mut start_idx = 0usize;
-
-                    for (idx, name) in actual_names.iter().enumerate() {
-                        if seq_idx < tool_targets.len() && matches_any(name, &tool_targets[seq_idx])
-                        {
-                            if !started {
-                                started = true;
-                                start_idx = idx;
-                            }
-                            seq_idx += 1;
-                        } else if started && seq_idx < tool_targets.len() {
-                            // We started the sequence but this tool doesn't match next expected
-                            violations.push(serde_json::json!({
-                                "rule_type": "sequence",
-                                "tool": name,
-                                "event_index": idx,
-                                "constraint": "sequence_strict",
-                                "message": format!(
-                                    "strict sequence violated: expected '{}' at index {} but found '{}'",
-                                    tools[seq_idx], idx, name
-                                ),
-                                "context": {
-                                    "expected": tools[seq_idx],
-                                    "actual": name,
-                                    "sequence_start": start_idx
-                                }
-                            }));
-                            break;
-                        }
-                    }
-
-                    // Note: Check for completeness is usually for "trace end".
-                    // But check_sequence validates partial traces too.
-                    // If incomplete, it's NOT a violation unless we know trace ended.
-                    // But Assay doesn't know if trace ended.
-                    // So we only enforce negative constraints (wrong order, intervening tools).
-                    // We DO NOT enforce "missing tail of sequence" here unless explicit?
-                    // The RFC says "All tools in sequence must appear for trace to pass".
-                    // But if we are mid-trace, we can't fail yet.
-                    // So we skip the "incomplete" check for now in strict mode too.
-                } else {
-                    // Non-strict: tools must appear in order but other tools can be between
-                    let mut seq_idx = 0usize;
-                    // let mut out_of_order_detected = false;
-
-                    for (idx, name) in actual_names.iter().enumerate() {
-                        if seq_idx < tool_targets.len() && matches_any(name, &tool_targets[seq_idx])
-                        {
-                            seq_idx += 1;
-                        } else {
-                            // Check for out-of-order: a later sequence member appearing before current
-                            for (future_seq_idx, future_targets) in
-                                tool_targets.iter().enumerate().skip(seq_idx + 1)
-                            {
-                                if matches_any(name, future_targets) {
-                                    violations.push(serde_json::json!({
-                                        "rule_type": "sequence",
-                                        "tool": name,
-                                        "event_index": idx,
-                                        "constraint": "sequence_order",
-                                        "message": format!(
-                                            "sequence order violated: '{}' at index {} appeared before '{}'",
-                                            tools[future_seq_idx], idx, tools[seq_idx]
-                                        ),
-                                        "context": {
-                                            "expected_next": tools[seq_idx],
-                                            "found_later": tools[future_seq_idx]
-                                        }
-                                    }));
-                                    // out_of_order_detected = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ===== BLOCKLIST (v1.0 legacy pattern matching) =====
-            assay_core::model::SequenceRule::Blocklist { pattern } => {
-                for (idx, name) in actual_names.iter().enumerate() {
-                    if name.contains(pattern) {
-                        violations.push(serde_json::json!({
-                            "rule_type": "blocklist",
-                            "tool": name,
-                            "event_index": idx,
-                            "constraint": "blocklist",
-                            "message": format!(
-                                "tool '{}' at index {} matches blocklist pattern '{}'",
-                                name, idx, pattern
-                            )
-                        }));
-                    }
-                }
-            }
-        }
-    }
+    let calls: Vec<SequenceCall> = actual_names.iter().map(SequenceCall::named).collect();
+    let evaluations = evaluate_rules(rules, &calls, policy_context, TraceExtent::Partial);
+    let violations: Vec<Value> = rules
+        .iter()
+        .zip(evaluations.iter())
+        .filter(|(_, ev)| ev.is_violation())
+        .map(|(rule, ev)| published_violation(rule, ev))
+        .collect();
 
     if violations.is_empty() {
-        Ok(serde_json::json!({ "allowed": true, "violations": [], "suggested_fix": null }))
+        Ok(json!({ "allowed": true, "violations": [], "suggested_fix": null }))
     } else {
-        Ok(serde_json::json!({ "allowed": false, "violations": violations, "suggested_fix": null }))
+        Ok(json!({ "allowed": false, "violations": violations, "suggested_fix": null }))
     }
+}
+
+fn published_constraint(rule: &SequenceRule) -> &'static str {
+    match rule {
+        SequenceRule::Require { .. } => "sequence_rule",
+        SequenceRule::Eventually { .. } => "eventually",
+        SequenceRule::MaxCalls { .. } => "max_calls",
+        SequenceRule::Before { .. } => "before",
+        SequenceRule::After { .. } => "after",
+        SequenceRule::NeverAfter { .. } => "never_after",
+        SequenceRule::Sequence { strict: true, .. } => "sequence_strict",
+        SequenceRule::Sequence { strict: false, .. } => "sequence_order",
+        SequenceRule::Blocklist { .. } => "blocklist",
+    }
+}
+
+fn published_tool(rule: &SequenceRule) -> Option<String> {
+    match rule {
+        SequenceRule::Require { tool }
+        | SequenceRule::Eventually { tool, .. }
+        | SequenceRule::MaxCalls { tool, .. } => Some(tool.to_string()),
+        SequenceRule::Before { then, .. } | SequenceRule::After { then, .. } => {
+            Some(then.to_string())
+        }
+        SequenceRule::NeverAfter { forbidden, .. } => Some(forbidden.to_string()),
+        SequenceRule::Sequence { .. } | SequenceRule::Blocklist { .. } => None,
+    }
+}
+
+/// Envelope keys the tool already published (`rule_type`, `constraint`, `message`), plus
+/// `spanned` from the owner so span and prose cannot drift from the verdict.
+fn published_violation(rule: &SequenceRule, ev: &RuleEvaluation) -> Value {
+    let mut obj = serde_json::Map::new();
+    obj.insert("rule_type".into(), json!(ev.kind));
+    obj.insert("constraint".into(), json!(published_constraint(rule)));
+    obj.insert(
+        "message".into(),
+        json!(ev.reason.clone().unwrap_or_default()),
+    );
+    obj.insert("spanned".into(), json!(ev.spanned));
+    if let Some(tool) = published_tool(rule) {
+        obj.insert("tool".into(), json!(tool));
+    }
+    if let Some(&idx) = ev.spanned.last() {
+        obj.insert("event_index".into(), json!(idx));
+    }
+    if let SequenceRule::MaxCalls { max, .. } = rule {
+        obj.insert(
+            "context".into(),
+            json!({ "max": max, "actual": ev.spanned.len() as u32 }),
+        );
+    }
+    Value::Object(obj)
 }
 
 #[cfg(test)]
@@ -554,5 +238,46 @@ mod after_obligation_tests {
         assert!(!violates(&["T", "A"], 1));
         assert!(!violates(&["T", "X", "A"], 2));
         assert!(!violates(&["X", "Y"], 1));
+    }
+
+    /// #2228 control: both evaluators already agree this is a violation. The copy's JSON
+    /// has no `spanned` and a shorter message, so nothing notices the shared record's span
+    /// `[0]` or the "and no call answered it by index 1" suffix. After the call-through,
+    /// the published violation must carry both from `evaluate_rules`.
+    #[test]
+    fn after_closed_window_carries_shared_span_and_prose() {
+        use assay_core::sequence_eval::{evaluate_rules, SequenceCall, TraceExtent};
+
+        let rules = vec![SequenceRule::After {
+            trigger: "A".into(),
+            then: "B".into(),
+            within: 1,
+        }];
+        let names = n(&["A", "C"]);
+        let calls: Vec<SequenceCall> = names.iter().map(SequenceCall::named).collect();
+        let shared = evaluate_rules(&rules, &calls, None, TraceExtent::Partial);
+        assert!(
+            shared[0].is_violation(),
+            "control: the shared evaluator reports a violation"
+        );
+
+        let published = super::validate_rules(&rules, &names, None).unwrap();
+        let violations = published["violations"]
+            .as_array()
+            .expect("violations array");
+        assert!(
+            !violations.is_empty(),
+            "control: the published tool also reports a violation"
+        );
+        assert_eq!(
+            violations[0]["spanned"],
+            serde_json::json!(shared[0].spanned),
+            "span must come from sequence_eval, not a second copy"
+        );
+        assert_eq!(
+            violations[0]["message"].as_str(),
+            shared[0].reason.as_deref(),
+            "prose must come from sequence_eval, not a second copy"
+        );
     }
 }

@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- `assay_check_sequence` answers the sequence-rule language by calling
+  `assay_core::sequence_eval` and mapping the record into its published JSON.
+  The MCP copy of the rule is gone (#2227, #2228).
 - `TraceExtent` and session-finding notes state that extent makes no fidelity claim:
   `complete` must not be read as "nothing is missing" (#2422). A producer-declared
   `coverage` field on the finding waits for a planned major.
