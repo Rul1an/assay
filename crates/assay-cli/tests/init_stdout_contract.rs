@@ -358,8 +358,5 @@ fn from_trace_text_closing_block_is_byte_exact_and_ordered() {
             run.stdout
         )
     });
-    assert_eq!(
-        &run.stdout[start..],
-        FROM_TRACE_CLOSING_BLOCK
-    );
+    assert_eq!(&run.stdout[start..], FROM_TRACE_CLOSING_BLOCK);
 }
