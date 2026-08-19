@@ -148,5 +148,12 @@
       }
     ]
   },
-  "equivalent": {}
+  "equivalent": {},
+  "pins": {
+    "observed-effect-v0": {
+      "repository": "Rul1an/observed-effect-v0",
+      "commit": "dc10fad0cc867b1f652e2727f98e9370da429904"
+    }
+  },
+  "_pins_why": "Freshness is not the goal and cannot be: this corpus lives in a repository this diff cannot see, and it moves without us. A score against Rul1an/observed-effect-v0@dc10fad0c stays permanently true of that commit, which is what makes it a claim rather than a mood. Pinning is therefore not a compromise on keeping up -- it is the thing that makes the number mean something, and it lets the lane re-derive it when the INSTRUMENT changes, which is the drift vector that actually applies here. Re-pinning is a deliberate act, like tool_pin."
 }

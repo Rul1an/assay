@@ -84,6 +84,26 @@ Use **`CI`** (not `CIExpected` or any other variant). No workflow in this repo r
 | **assay-action-contract-tests** | Tests GitHub Action in `assay-action/` | Not needed — Cargo.toml/Cargo.lock don't touch the action. | **Essential** if PR touches `assay-action/` or workflows. |
 | **MCP Security (Assay)** | Install assay, run validate with demo config | Redundant with CI for deps-only (CI validates the binary). | Useful — sanity check for security workflow. |
 | **Kernel Matrix CI** | eBPF tests on self-hosted runner | Not needed — kernel-matrix `paths` exclude Cargo.toml/Cargo.lock. | **Essential** if PR touches eBPF/Monitor/evidence. |
+| **Adequacy drift gate** | Re-derives every published mutation-adequacy number and fails when a document and the measurement disagree | Not needed — relevance is derived from each manifest's own declared sources, which a deps bump does not touch. | Load-bearing when a PR touches a declared corpus source, its vectors, its manifest, or `conformance/INDEX.md` / `ERRATA.md`. **Deliberately not required — see below.** |
+
+### Why the adequacy drift gate is not required, and what would change that
+
+It fits the criterion the other three meet: universal, quick when irrelevant,
+load-bearing when relevant. It is kept out for a property none of them has —
+**it clones an external repository**. `corpus-adequacy` is a sibling checkout,
+deliberately not vendored, and the lane fetches it at the commit each manifest
+pins. Making the gate required would couple `main` to a third party's
+availability, and no current required check does that.
+
+That is a property of the instrument, not of the measurement, so it is fixable.
+**Promote this gate to required once the tool no longer needs a network fetch at
+gate time** — a pinned local copy verified against `tool_pin`. That is a cache,
+not a second implementation, so it does not conflict with the reason the tool is
+unvendored, which is drift between two implementations rather than storage.
+
+Until then the gate runs, reports on every PR, and is a review obligation like
+Smoke Install and MCP Security: if a PR moves a published number, its green tick
+is the thing to look for before merging.
 
 **Current recommendation:** Keep **`CI`, `lane-check/proof`, and
 `host-capability-check`** required. `CI` is the universal build/security gate;

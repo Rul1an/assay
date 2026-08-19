@@ -337,5 +337,12 @@
         "reason": "Python == already treats 1 and 1.0 as equal, so deleting the Number branch cannot move a vector in this implementation. The rule exists for language-neutral implementers (JM-Lab's JVM drift) and is equivalent here, not unexercised."
       }
     ]
-  }
+  },
+  "pins": {
+    "rge-bench": {
+      "repository": "rge-bench/rge-bench",
+      "commit": "c51c5af18112b2ecc80b6c56a8f6493dee5900b0"
+    }
+  },
+  "_pins_why": "Freshness is not the goal and cannot be: this corpus lives in a repository this diff cannot see, and it moves without us. A score against rge-bench/rge-bench@c51c5af18 stays permanently true of that commit, which is what makes it a claim rather than a mood. Pinning is therefore not a compromise on keeping up -- it is the thing that makes the number mean something, and it lets the lane re-derive it when the INSTRUMENT changes, which is the drift vector that actually applies here. Re-pinning is a deliberate act, like tool_pin."
 }
