@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- A pinned, model-only MCP `2026-07-28` wire vocabulary validates required request metadata,
+  `resultType`, cache hints, `server/discover` shapes, and `-32022` error data without advertising
+  or accepting that revision (#2481).
+
 ### Changed
 - `assay_check_sequence` answers the sequence-rule language by calling
   `assay_core::sequence_eval` and mapping the record into its published JSON.
