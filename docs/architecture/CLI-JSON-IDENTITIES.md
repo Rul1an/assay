@@ -207,7 +207,20 @@ of, and there is no instrument that fixes that.
   been wrong today, and the third was written after conceding the first two.
 - **The writer-to-identity tie is a token check, not dataflow.** A writer that mentions the right
   constant while serializing something else would pass. Closing that means following the value into
-  the `schema` field, which nothing here does.
+  the `schema` field, which nothing here does. Both sides now ignore comments and generic published
+  names (`new`, `from`, `parse`, …); one row was briefly tied by a single `//!` line, and another
+  would have stayed tied through `Sha256::new()` alone.
+
+- **The split-row tie has no demonstrated source-mutation red, and cannot have one.** Severing it in
+  source — removing the writer's use of the naming file's symbol — does not compile
+  (`unresolved import`). That is a stronger guarantee than a red test and it is why the mutations for
+  this property are edits to *this file* rather than to code. Stated because a guard whose reds are
+  all document edits has not been shown to notice a source change, and here the reason is structural
+  rather than an omission.
+
+- **A shared naming file is one bit for several rows.** `evidence/schema/write.rs` and
+  `schema/reports.rs` serve three identities, and the tie for all three is the same `use`. Requiring
+  a symbol unique to each identity would need a fourth column naming it; that is not done here.
 
 - **The writer list is a fixed set of idioms**, and it has been wrong twice. `serde_json::to_writer`
   was missing until `assay describe` exposed it; `to_vec_pretty`, `tokio::fs::write`,
