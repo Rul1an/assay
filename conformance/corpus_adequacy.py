@@ -717,8 +717,8 @@ def main() -> int:
         for f in rep["failures"]:
             print("FAIL: %s" % f)
         if rep.get("known_holes"):
-            # Louder than the pass line, and pinned. An acknowledgement that outlives
-            # the corpus it was made about is worse than no acknowledgement.
+            # Louder than the pass line. Not pinned to the corpus: pinned to a value
+            # another tool has to keep honest, which is what the text below says.
             print("%d KNOWN HOLE(S) against the DECLARED digest %s. These are rules the "
                   "corpus DOES claim and does NOT exercise."
                   % (rep["known_holes"], rep.get("corpus_digest")))
@@ -732,8 +732,8 @@ def main() -> int:
                       % rep["acknowledged_digests"])
             if rep.get("hole_ratio") is not None and rep["hole_ratio"] > 1.0:
                 print("  more rules are acknowledged as holes than are measured (ratio %.2f). "
-                      "The score below is a statement about a minority of the declared rules."
-                      % rep["hole_ratio"])
+                      "The score printed above is a statement about a minority of the "
+                      "declared rules." % rep["hole_ratio"])
         if rep["adequate"]:
             if rep["out_of_scope_ratio"] is not None and rep["out_of_scope_ratio"] > 1.0:
                 # The closing line is what gets quoted. It may not read as unqualified
