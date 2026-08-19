@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `assay describe [path...]` walks the clap command tree so a caller can ask
+  for the top-level surface and descend. Node identities are the existing
+  shipping constants, not a second registry. Global `--quiet` /
+  `--non-interactive` stay absent: `NO_COLOR` is already honoured and `watch`
+  is the only interactive command (#2178).
 - A pinned, model-only MCP `2026-07-28` wire vocabulary validates required request metadata,
   `resultType`, cache hints, `server/discover` shapes, and `-32022` error data without advertising
   or accepting that revision (#2481).

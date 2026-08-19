@@ -3,6 +3,8 @@ mod reports;
 mod validate;
 mod write;
 
+pub(crate) use reports::{SCHEMA_LIST_REPORT, SCHEMA_SHOW_REPORT, SCHEMA_VALIDATION_REPORT};
+
 use crate::cli::args::OutputFormat;
 use crate::exit_codes::{EXIT_CONFIG_ERROR, EXIT_SUCCESS, EXIT_TEST_FAILURE};
 use anyhow::{Context, Result};

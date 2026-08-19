@@ -1,9 +1,9 @@
 use serde::Serialize;
 use std::fmt;
 
-pub(super) const SCHEMA_LIST_REPORT: &str = "assay.evidence.schema.list.v1";
-pub(super) const SCHEMA_SHOW_REPORT: &str = "assay.evidence.schema.show.v1";
-pub(super) const SCHEMA_VALIDATION_REPORT: &str = "assay.evidence.schema.validation.v1";
+pub(crate) const SCHEMA_LIST_REPORT: &str = "assay.evidence.schema.list.v1";
+pub(crate) const SCHEMA_SHOW_REPORT: &str = "assay.evidence.schema.show.v1";
+pub(crate) const SCHEMA_VALIDATION_REPORT: &str = "assay.evidence.schema.validation.v1";
 
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
