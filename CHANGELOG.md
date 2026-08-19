@@ -4,18 +4,38 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [5.4.0] - 2026-08-19
+
+This release collects the post-`v5.3.0` main line: privileged-mcp-action v1
+denial recognition, Assay-owned proxy application codes with a v1 deny
+observation, outer-fallback telemetry, the h2 advisory refresh, published-release
+golden-path verification, and runner registration-token recovery. Install pins
+and GitHub release assets stay on `v5.3.0` until this tag is published. The
+verifier default stays `v0`. No policy, forwarding, or process-exit semantic
+change is claimed.
+
+### Added
+- Readers accept the exact privileged-mcp-action v1 denial marker (v1 schema /
+  `-31999` / `assay-proxy`) through one shared classifier. Default profile
+  selection stays `v0`; historical v0 corpus remains byte-exact (#2508, #2520).
+
 ### Changed
 - Assay-owned MCP proxy application codes move out of the JSON-RPC reserved band:
   unsupported `-31997`, failed `-31998`, denied `-31999`. The opt-in deny observation is
   `assay.denied_call_observation.v1` and binds the same `-31999` code. An upstream reserved
   `-32042` (MCP URL elicitation) still relays value-equivalently and does not mint an Assay
   observation. Live produce verifies with `--profile-version v1`; the verifier default stays
-  `v0`. No policy, forwarding, or process-exit change (#2509).
+  `v0`. No policy, forwarding, or process-exit change (#2509, #2521).
 - Telemetry follow-up for the #2391 outer-fallback surface: `tool_call_crash`
   was removed; outer dispatch failures emit `tool_execution_error`. Remaining
   `tool_call_start` / `tool_call_done` / `tool_call_timeout` events stay
   value-free (no caller tool or policy strings). `tool_decision` is unchanged
-  and still out of this note's scope (#2402).
+  and still out of this note's scope (#2402, #2480).
+- `h2` is updated past RUSTSEC-2026-0258 (#2506).
+- CI proves the published-release golden path, and the product-support views
+  describe that published evidence (#2513, #2514).
+- Auto-recovery runner registration tokens stay fresh; timed-out recovery
+  phases fail closed (#2478).
 
 ## [5.3.0] - 2026-08-18
 
