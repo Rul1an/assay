@@ -79,6 +79,30 @@ fn recorded_set(marker: &str) -> BTreeSet<String> {
     set
 }
 
+/// The `not-cli-documents` block, as `identity -> reason`.
+///
+/// The reason is mandatory. A static check cannot tell a document from an event when the naming and
+/// the writing sit in different files, which is true of several of these. What it can do is make a
+/// misclassification require someone to write a false sentence instead of deleting a line.
+fn non_document_rows() -> BTreeMap<String, String> {
+    let mut rows = BTreeMap::new();
+    for line in recorded("not-cli-documents") {
+        let (ident, reason) = line.split_once('|').unwrap_or_else(|| {
+            panic!("{INVENTORY}: `not-cli-documents` row is not `identity | reason`: {line:?}")
+        });
+        let (ident, reason) = (ident.trim(), reason.trim());
+        assert!(
+            !reason.is_empty(),
+            "{INVENTORY}: {ident:?} is recorded as a non-document with no reason"
+        );
+        assert!(
+            rows.insert(ident.to_string(), reason.to_string()).is_none(),
+            "{INVENTORY}: `not-cli-documents` records {ident:?} twice"
+        );
+    }
+    rows
+}
+
 /// Source with `#[cfg(test)] mod … { … }` bodies removed.
 ///
 /// A test module inside a production file is not a producer. It is removed by brace matching
@@ -200,12 +224,110 @@ fn skip_char(bytes: &[u8], open: usize) -> usize {
     }
 }
 
+/// Files that are test-only because a `#[cfg(test)] mod name;` declaration brings them in.
+///
+/// The brace-matching stripper only removes `#[cfg(test)] mod name { … }` written inline. Thirty
+/// modules in these two crates are declared as a bare `#[cfg(test)] mod name;` instead, and their
+/// files sit in `src/` looking exactly like production. Scanning them collected identities that no
+/// shipping code writes — which is the failure this whole file exists to stop, found inside the
+/// guard itself.
+fn test_only_files() -> BTreeSet<PathBuf> {
+    let mut out = BTreeSet::new();
+    let mut queue: Vec<PathBuf> = Vec::new();
+    for dir in SCANNED {
+        let base = workspace_root().join(dir);
+        let mut stack = vec![base];
+        while let Some(path) = stack.pop() {
+            for entry in std::fs::read_dir(&path).expect("read_dir") {
+                let p = entry.expect("dir entry").path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    for name in test_mod_declarations(&std::fs::read_to_string(&p).expect("read")) {
+                        queue.extend(module_files(&p, &name));
+                    }
+                }
+            }
+        }
+    }
+    // A test-only module's own submodules are test-only too.
+    while let Some(file) = queue.pop() {
+        if !out.insert(file.clone()) {
+            continue;
+        }
+        let Ok(src) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        for name in declared_modules(&src) {
+            queue.extend(module_files(&file, &name));
+        }
+    }
+    out
+}
+
+/// `name` for each `#[cfg(test)] mod name;` in this source.
+fn test_mod_declarations(src: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut lines = src.lines().peekable();
+    while let Some(line) = lines.next() {
+        if line.trim() != "#[cfg(test)]" {
+            continue;
+        }
+        let Some(next) = lines.peek() else { continue };
+        if let Some(name) = bare_mod_name(next) {
+            names.push(name);
+        }
+    }
+    names
+}
+
+/// `name` for every `mod name;` in this source, cfg-gated or not.
+fn declared_modules(src: &str) -> Vec<String> {
+    src.lines().filter_map(bare_mod_name).collect()
+}
+
+fn bare_mod_name(line: &str) -> Option<String> {
+    let line = line.trim();
+    let rest = line
+        .strip_prefix("mod ")
+        .or_else(|| line.strip_prefix("pub mod "))
+        .or_else(|| line.strip_prefix("pub(crate) mod "))
+        .or_else(|| line.strip_prefix("pub(super) mod "))?;
+    let name = rest.strip_suffix(';')?;
+    name.chars()
+        .all(|c| c.is_alphanumeric() || c == '_')
+        .then(|| name.to_string())
+}
+
+/// The candidate files a `mod name;` inside `declaring` resolves to.
+fn module_files(declaring: &std::path::Path, name: &str) -> Vec<PathBuf> {
+    let dir = if declaring.file_name().and_then(|f| f.to_str()) == Some("mod.rs")
+        || declaring.file_name().and_then(|f| f.to_str()) == Some("main.rs")
+        || declaring.file_name().and_then(|f| f.to_str()) == Some("lib.rs")
+    {
+        declaring.parent().map(|p| p.to_path_buf())
+    } else {
+        declaring
+            .parent()
+            .map(|p| p.join(declaring.file_stem().and_then(|s| s.to_str()).unwrap_or("")))
+    };
+    let Some(dir) = dir else { return Vec::new() };
+    [
+        dir.join(format!("{name}.rs")),
+        dir.join(name).join("mod.rs"),
+    ]
+    .into_iter()
+    .filter(|p| p.exists())
+    .collect()
+}
+
 /// Every `"assay.<segments>.vN"` string literal in production source, with one citing site.
 ///
 /// Both `const NAME: &str = "…"` and inline literals, because the codebase writes both and the
 /// difference is a style choice rather than a property of the document.
 fn identities_in_source() -> BTreeMap<String, String> {
     let root = workspace_root();
+    let test_only = test_only_files();
     let mut found: BTreeMap<String, String> = BTreeMap::new();
     for dir in SCANNED {
         let base = root.join(dir);
@@ -219,6 +341,9 @@ fn identities_in_source() -> BTreeMap<String, String> {
                 if p.is_dir() {
                     stack.push(p);
                 } else if p.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    if test_only.contains(&p) {
+                        continue;
+                    }
                     let src = std::fs::read_to_string(&p)
                         .unwrap_or_else(|e| panic!("read {}: {e}", p.display()));
                     let src = strip_test_modules(&src);
@@ -286,11 +411,45 @@ fn identities_in_line(line: &str) -> Vec<String> {
     out
 }
 
+/// Writer idioms. A file that contains none of these does not emit anything, so a row naming it as
+/// the writer of a document is wrong.
+const WRITERS: &[&str] = &[
+    "write_stdout_json",
+    "to_string_pretty",
+    "to_writer",
+    "std::fs::write",
+    "println!",
+];
+
+/// `identity -> writing command file`, from the `cli-documents` block.
+fn document_rows() -> BTreeMap<String, (String, String)> {
+    let mut rows = BTreeMap::new();
+    for line in recorded("cli-documents") {
+        let parts: Vec<&str> = line.split('|').map(str::trim).collect();
+        assert_eq!(
+            parts.len(),
+            3,
+            "{INVENTORY}: `cli-documents` row is not `identity | writer | namer`: {line:?}"
+        );
+        let namer = if parts[2] == "-" { parts[1] } else { parts[2] };
+        assert!(
+            rows.insert(
+                parts[0].to_string(),
+                (parts[1].to_string(), namer.to_string())
+            )
+            .is_none(),
+            "{INVENTORY}: `cli-documents` records {:?} twice",
+            parts[0]
+        );
+    }
+    rows
+}
+
 /// Every identity in source is recorded as a document or as not-a-document, and nothing else is.
 #[test]
 fn every_production_identity_is_classified() {
-    let documents = recorded_set("cli-documents");
-    let others = recorded_set("not-cli-documents");
+    let documents: BTreeSet<String> = document_rows().keys().cloned().collect();
+    let others: BTreeSet<String> = non_document_rows().keys().cloned().collect();
 
     let overlap: Vec<_> = documents.intersection(&others).cloned().collect();
     assert!(
@@ -314,11 +473,16 @@ fn every_production_identity_is_classified() {
         unrecorded.join("\n  ")
     );
 
-    let stale: Vec<_> = recorded.difference(&collected).cloned().collect();
+    // A document row may name an identity declared outside the scanned crates — `assay-evidence`
+    // declares one that the CLI writes. Following the write rather than the crate is deliberate,
+    // and `documents_are_bound_to_a_writer` is what keeps such a row honest. Non-document rows have
+    // no write to bind to, so a stale one there is simply stale.
+    let stale: Vec<_> = others.difference(&collected).cloned().collect();
     assert!(
         stale.is_empty(),
-        "{INVENTORY} records identities that no longer appear in production source: {stale:?}"
+        "{INVENTORY} records non-documents that no longer appear in production source: {stale:?}"
     );
+    let _ = &recorded;
 }
 
 /// Documents with no identity string are required rows, and each row still names something real.
@@ -400,7 +564,7 @@ fn documents_without_an_identity_are_recorded_and_still_exist() {
 /// this test is a bookkeeping guard.
 #[test]
 fn describe_binds_only_recorded_documents() {
-    let documents = recorded_set("cli-documents");
+    let documents: BTreeSet<String> = document_rows().keys().cloned().collect();
     let src = read("crates/assay-cli/src/cli/commands/describe/bindings.rs");
 
     let mut constants = BTreeSet::new();
@@ -453,4 +617,62 @@ fn describe_binds_only_recorded_documents() {
         "`assay describe` binds identities the inventory does not record as documents: \
          {unrecorded:?}"
     );
+}
+
+/// Every recorded document names a file that both knows the identity and writes something.
+///
+/// Membership alone let six identities sit in the wrong block because a word in their name —
+/// "carrier", "projection", "health artifact" — read as not-a-document. The partition stayed green,
+/// since it only asked whether each identity appeared *somewhere*. Binding the row to a write is
+/// what makes that class of mistake fail.
+#[test]
+fn documents_are_bound_to_a_writer() {
+    for (identity, (writer, namer)) in document_rows() {
+        let naming = read(&namer);
+        let names_it = naming.contains(&format!("\"{identity}\""))
+            || constant_names_for(&identity)
+                .iter()
+                .any(|name| naming.contains(name.as_str()));
+        assert!(
+            names_it,
+            "{INVENTORY}: {identity} is recorded as named in {namer}, and that file neither \
+             contains the literal nor mentions a constant holding it"
+        );
+        let writing = read(&writer);
+        assert!(
+            WRITERS.iter().any(|w| writing.contains(w)),
+            "{INVENTORY}: {identity} is recorded as written by {writer}, and that file calls no \
+             writer ({WRITERS:?}). Either it is not the writer, or it is not a document"
+        );
+    }
+}
+
+/// Constant names anywhere in the scanned source whose value is this identity.
+fn constant_names_for(identity: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for dir in SCANNED {
+        let base = workspace_root().join(dir);
+        let mut stack = vec![base];
+        while let Some(path) = stack.pop() {
+            for entry in std::fs::read_dir(&path).expect("read_dir") {
+                let p = entry.expect("dir entry").path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    let text = std::fs::read_to_string(&p).expect("read");
+                    for line in text.lines() {
+                        if !line.contains(&format!("\"{identity}\"")) {
+                            continue;
+                        }
+                        if let Some(rest) = line.trim().split("const ").nth(1) {
+                            if let Some(name) = rest.split(':').next() {
+                                names.push(name.trim().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    names
 }

@@ -27,78 +27,102 @@ what it is. Removing one from the source fails until the row goes. See #2167 for
 
 ## Machine-checked: identities that ARE CLI JSON documents
 
-A top-level JSON document written to stdout or to a `--report` / artifact path, carrying this string
-as its `schema`.
+A top-level JSON document a command writes to stdout or to a caller-named path, carrying this
+string as its `schema`.
+
+Each row is `identity | writing file | naming file`, where `-` means the writing file also names the
+identity. The test asserts the writing file calls a writer and the naming file carries the identity.
+The third column exists because some documents split the two: `assay doctor` sets its `schema` in
+`diagnostics/probes.rs` and writes in `doctor/implementation.rs`, and the three `evidence schema`
+reports are declared in `schema/reports.rs` and written in `schema/write.rs`. Recording the split is
+better than loosening the check until it fits. Membership alone was not enough: an earlier
+revision of this file classified six of these as non-documents on the strength of a word in their
+name — "carrier", "projection", "health artifact" — and the partition stayed green, because it only
+checked that every identity appeared somewhere. Two independent reviews found all six. Binding the
+row to a write is what turns that class of mistake into a failure.
 
 <!-- machine-checked: cli-documents -->
 ```text
-assay.cli.describe.v0
-assay.doctor_report.v0
-assay.evidence.schema.list.v1
-assay.evidence.schema.show.v1
-assay.evidence.schema.validation.v1
-assay.experiment.runner_phase_timing.v0
-assay.init_report.v0
-assay.mcp.execution-record-pairing.report.v0
-assay.mcp.execution-record-supersession.report.v0
-assay.mcp.tunnel-observed.report.v0
-assay.mcp_preflight.v0
-assay.monitor.observed_peers.v0
-assay.privileged_mcp_action.verify.report.v0
-assay.run_report.v1
-assay.run_summary.v1
-assay.side_effect_verification.v0
-assay.skill_supply_chain.verify_report.v0
-assay.supply_chain_conformance.v0
-assay.tool_decision_truth.verify.report.v0
-assay.trust-basis.assert.v1
-assay.validate_report.v1
+assay.cli.describe.v0 | crates/assay-cli/src/cli/commands/describe.rs | -
+assay.doctor_report.v0 | crates/assay-cli/src/cli/commands/doctor/implementation.rs | crates/assay-cli/src/diagnostics/probes.rs
+assay.enforcement_health.v0 | crates/assay-cli/src/cli/commands/monitor_next/enforcement_health.rs | -
+assay.enforcement_health.v1 | crates/assay-cli/src/enforcement_health_v1.rs | -
+assay.evidence.schema.list.v1 | crates/assay-cli/src/cli/commands/evidence/schema/write.rs | crates/assay-cli/src/cli/commands/evidence/schema/reports.rs
+assay.evidence.schema.show.v1 | crates/assay-cli/src/cli/commands/evidence/schema/write.rs | crates/assay-cli/src/cli/commands/evidence/schema/reports.rs
+assay.evidence.schema.validation.v1 | crates/assay-cli/src/cli/commands/evidence/schema/write.rs | crates/assay-cli/src/cli/commands/evidence/schema/reports.rs
+assay.experiment.runner_phase_timing.v0 | crates/assay-cli/src/cli/commands/runner_spike/phases.rs | -
+assay.init_report.v0 | crates/assay-cli/src/cli/commands/init_report.rs | -
+assay.mcp.execution-record-pairing.report.v0 | crates/assay-cli/src/cli/commands/evidence/mcp_execution_records.rs | -
+assay.mcp.execution-record-supersession.report.v0 | crates/assay-cli/src/cli/commands/evidence/mcp_supersession.rs | -
+assay.mcp.tunnel-observed.report.v0 | crates/assay-cli/src/cli/commands/evidence/mcp_tunnel_observed.rs | -
+assay.mcp_preflight.v0 | crates/assay-cli/src/cli/commands/mcp/preflight.rs | -
+assay.mcp_server_inventory.v0 | crates/assay-cli/src/cli/commands/inventory.rs | crates/assay-core/src/discovery/inventory_carrier.rs
+assay.monitor.observed_peers.v0 | crates/assay-cli/src/cli/commands/monitor_next/observed_peers.rs | -
+assay.otel_projection.v0 | crates/assay-cli/src/cli/commands/project_otel.rs | crates/assay-core/src/otel/projection.rs
+assay.privileged_mcp_action.verify.report.v0 | crates/assay-cli/src/cli/commands/evidence/verify_privileged_mcp_action.rs | -
+assay.run_report.v1 | crates/assay-core/src/report/json.rs | -
+assay.run_summary.v1 | crates/assay-core/src/report/summary/writer.rs | -
+assay.side_effect_verification.v0 | crates/assay-cli/src/cli/commands/evidence/verify_side_effects.rs | -
+assay.skill_supply_chain.v0 | crates/assay-cli/src/cli/commands/evidence/skill_supply_chain_capture.rs | -
+assay.skill_supply_chain.verify_report.v0 | crates/assay-cli/src/cli/commands/evidence/verify_skill_supply_chain.rs | -
+assay.supply_chain_conformance.v0 | crates/assay-cli/src/cli/commands/supply_chain_conformance.rs | crates/assay-registry/src/supply_chain.rs
+assay.tool_decision_truth.otel_projection.v0 | crates/assay-cli/src/cli/commands/project_otel.rs | crates/assay-core/src/otel/projection.rs
+assay.tool_decision_truth.verify.report.v0 | crates/assay-cli/src/cli/commands/evidence/verify_tool_decision_truth.rs | -
+assay.trust-basis.assert.v1 | crates/assay-cli/src/cli/commands/trust_basis.rs | -
+assay.trust-basis.diff.v1 | crates/assay-cli/src/cli/commands/trust_basis.rs | crates/assay-evidence/src/trust_basis/types.rs
+assay.validate_report.v1 | crates/assay-cli/src/cli/commands/validate.rs | -
 ```
+
+`assay.trust-basis.diff.v1` is declared in `assay-evidence`, outside the scanned crates. An earlier
+revision recorded that as a known hole. It is not a hole: the CLI writes the document
+(`write_diff_json`), and following the write rather than the crate puts it here with everything else.
 
 ## Machine-checked: identities that are NOT CLI JSON documents
 
-Evidence events inside a bundle, nested objects, read-only inputs, projections, and one digest
-domain. They are recorded so that the partition is total: an identity that is in neither block is a
-failed build, which is what stops a new emitter from arriving unnoticed.
+Evidence events inside a bundle, nested objects, read-only inputs, and one digest domain. Each row is
+`identity | reason`, and the reason is required.
+
+The partition is total, so an identity in neither block fails the build. That stops a new emitter
+arriving unnoticed. It does not stop a *misclassification*, and no static check can: naming and
+writing live in different files for several of these, so nothing can decide from source alone that
+`assay.otel_projection.v0` is the document `assay project-otel` writes. Requiring a reason is what
+this file can do about it — moving a real document into this block now means writing a sentence that
+is false, rather than deleting a line. Two independent reviews caught six such moves in the previous
+revision, when this block was a bare list.
 
 <!-- machine-checked: not-cli-documents -->
 ```text
-assay.aee_run_context.v0
-assay.aee_seal_key.v0
-assay.aee_trust_set.v0
-assay.approval_artifact.structured_meta_jcs.v0
-assay.denied_call_observation.v0
-assay.denied_call_observation.v1
-assay.enforcement_decision.v0
-assay.enforcement_health.v0
-assay.enforcement_health.v1
-assay.fallback_projection.v0
-assay.mandate.revoked.v1
-assay.mandate.used.v1
-assay.manifest_establish.v0
-assay.mcp.policy.snapshot.v1
-assay.mcp.tool-definition.snapshot.v1
-assay.mcp.tunnel_observed.v0
-assay.mcp_server_inventory.v0
-assay.otel_projection.v0
-assay.receipt.cyclonedx.mlbom-model-component.v1
-assay.receipt.cyclonedx.mlbom_model_component.v1
-assay.receipt.livekit.tool-action.v1
-assay.receipt.livekit.tool_action.v1
-assay.receipt.mastra.score_event.v1
-assay.receipt.openfeature.evaluation_details.v1
-assay.receipt.promptfoo.assertion-component.v1
-assay.receipt.promptfoo.assertion_component.v1
-assay.receipt.pydantic.case_result.v1
-assay.render_safety_conformance.v0
-assay.skill_supply_chain.v0
-assay.supply_chain_conformance.input.v0
-assay.tool_args.v0
-assay.tool_decision_surface.v0
-assay.tool_decision_truth.otel_projection.v0
-assay.tool_decision_truth.recipe_row.v0
-assay.tool_decision_truth.v0
+assay.aee_run_context.v0 | input the sandbox reads; exact key set enforced on read
+assay.aee_seal_key.v0 | input the sandbox reads; exact key set enforced on read
+assay.aee_trust_set.v0 | input the sandbox reads; exact key set enforced on read
+assay.approval_artifact.structured_meta_jcs.v0 | a canonicalization domain for approval metadata, not a document
+assay.denied_call_observation.v0 | nested inside the privileged-mcp-action verify report
+assay.denied_call_observation.v1 | nested inside the privileged-mcp-action verify report
+assay.enforcement_decision.v0 | evidence event read from a bundle; the command writes a verify report about it
+assay.fallback_projection.v0 | an input mode name for mcp-execution-records, not a schema it emits
+assay.mandate.revoked.v1 | MCP lifecycle event type inside a bundle
+assay.mandate.used.v1 | MCP lifecycle event type inside a bundle
+assay.manifest_establish.v0 | nested inside the privileged-mcp-action verify report
+assay.mcp.policy.snapshot.v1 | policy snapshot event carried in evidence, not written by a command
+assay.mcp.tool-definition.snapshot.v1 | tool-definition snapshot event carried in evidence
+assay.mcp.tunnel_observed.v0 | the carrier event; the command writes assay.mcp.tunnel-observed.report.v0
+assay.receipt.cyclonedx.mlbom-model-component.v1 | receipt written into an evidence bundle by BundleWriter, never to stdout
+assay.receipt.cyclonedx.mlbom_model_component.v1 | event type beside that receipt schema, same bundle write
+assay.receipt.livekit.tool-action.v1 | receipt written into an evidence bundle by BundleWriter, never to stdout
+assay.receipt.livekit.tool_action.v1 | event type beside that receipt schema, same bundle write
+assay.receipt.mastra.score_event.v1 | receipt written into an evidence bundle by BundleWriter, never to stdout
+assay.receipt.openfeature.evaluation_details.v1 | receipt written into an evidence bundle by BundleWriter, never to stdout
+assay.receipt.promptfoo.assertion-component.v1 | receipt written into an evidence bundle by BundleWriter, never to stdout
+assay.receipt.promptfoo.assertion_component.v1 | event type beside that receipt schema, same bundle write
+assay.receipt.pydantic.case_result.v1 | receipt written into an evidence bundle by BundleWriter, never to stdout
+assay.render_safety_conformance.v0 | a golden corpus identity compared against, not a document a command mints
+assay.supply_chain_conformance.input.v0 | the input descriptor the command reads; it writes assay.supply_chain_conformance.v0
+assay.tool_args.v0 | a digest domain string; nothing serializes it as a document
+assay.tool_decision_surface.v0 | event type read from a bundle by verify-side-effects
+assay.tool_decision_truth.recipe_row.v0 | a row inside the projection, not the projection
+assay.tool_decision_truth.v0 | the carrier read as input by project-otel; the projection is the document
 ```
+
 
 ## Machine-checked: documents with no identity at all
 
@@ -147,21 +171,31 @@ missed them. That is the argument for the required-rows check stated as evidence
 principle: the documents a scan cannot see are also the ones a single careful reader does not think
 of, and there is no instrument that fixes that.
 
-## Confidence
+## What this guard cannot do, stated plainly
 
-Rows I opened the producer for: every entry in *documents with no identity*, plus `run_report`,
-`run_summary`, `validate_report`, `doctor_report`, `describe`, `skill_supply_chain.verify_report`,
-`fallback_projection`, and the six receipt families.
+- **It cannot verify a classification.** For several identities the naming and the writing live in
+  different files — `assay project-otel` calls into `assay-core`, which sets the schema — so nothing
+  in source connects them. A reclassification is caught only because every non-document row must
+  carry a reason: moving a document here means writing a false sentence, not deleting a line. That
+  is a weaker guarantee than the rest of this file and it is the honest ceiling.
+- **The writer list is a fixed set of idioms.** A file emitting through some other route would not be
+  seen by `documents_are_bound_to_a_writer`. `serde_json::to_writer` was missing from the first
+  version and `assay describe` exposed it.
+- **Four crates now declare identities the CLI writes** — `assay-cli`, `assay-core`,
+  `assay-evidence` (`trust-basis.diff`) and `assay-registry` (`supply_chain_conformance`). The
+  collector scans the first two; the other two are reached only through a document row's naming
+  column. An identity minted in a fifth crate and written by the CLI would be invisible.
+- **`describe ⊆ pin` is one-directional.** `BINDING_ROWS` is seven clap paths and omits the run
+  report and run summary. Forcing `describe` to grow is a product decision, not bookkeeping.
 
-Rows classified from the declaration site without following the emit path: the remaining
-`not-cli-documents` entries, and `assay.experiment.runner_phase_timing.v0`,
-`assay.supply_chain_conformance.v0`, `assay.side_effect_verification.v0`,
-`assay.mcp.execution-record-*.report.v0` and `assay.trust-basis.assert.v1` under documents. Those are
-the rows most likely to be wrong, and they are named here rather than left for a reader to discover.
+## Provenance of this file
 
-`assay.trust-basis.diff.v1` is declared in `assay-evidence` and printed by the CLI. It is out of the
-collector's crates and therefore **not** covered by this guard today. That is a known hole, recorded
-rather than silently omitted.
+The identity strings were located by searching source; the classification, the writer bindings and
+every reason are hand-made judgements, and they are the content. Three rows — `baseline_diff`,
+`discover_inventory`, `trust_basis_generate` — came from an independent read after two separately
+written inventories missed them. Six identities were misclassified as non-documents in the first
+revision on the strength of a word in their name ("carrier", "projection", "health artifact"); two
+independent reviews found all six, which is why the reason column exists.
 
 ## What is not here
 
