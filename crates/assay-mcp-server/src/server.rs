@@ -54,7 +54,19 @@ pub const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 const PROTOCOL_VERSION_META_KEY: &str = "io.modelcontextprotocol/protocolVersion";
 
 /// `UnsupportedProtocolVersionError`, per the 2026-07-28 versioning spec.
-const ERROR_UNSUPPORTED_PROTOCOL_VERSION: i32 = -32022;
+pub const ERROR_UNSUPPORTED_PROTOCOL_VERSION: i32 = -32022;
+
+/// JSON-RPC `Method not found`. `server/discover` stays on this code while the gate is closed.
+pub const ERROR_METHOD_NOT_FOUND: i32 = -32601;
+
+/// Every protocol revision this server accepts on the public wire, oldest to newest.
+///
+/// Independent of [`MODERN_PROTOCOL_VERSION`]. Adding that name here is the #2483 tripwire.
+pub const ACCEPTED_PROTOCOL_VERSIONS: &[&str] = &[
+    LegacyProtocolVersion::V2024_11_05.as_str(),
+    LegacyProtocolVersion::V2025_06_18.as_str(),
+    LegacyProtocolVersion::V2025_11_25.as_str(),
+];
 
 /// Refuse a request that declares a revision this legacy server does not implement.
 ///
@@ -100,7 +112,7 @@ impl LegacyProtocolVersion {
     }
 
     fn supported() -> Vec<&'static str> {
-        Self::ALL.iter().map(|version| version.as_str()).collect()
+        ACCEPTED_PROTOCOL_VERSIONS.to_vec()
     }
 
     fn negotiate(params: Option<&Value>) -> Result<Self, ()> {
@@ -469,7 +481,11 @@ impl Server {
                         JsonRpcResponse::error(req.id.clone(), -32602, "Missing params".to_string())
                     }
                 }
-                _ => JsonRpcResponse::error(req.id.clone(), -32601, "Method not found".to_string()),
+                _ => JsonRpcResponse::error(
+                    req.id.clone(),
+                    ERROR_METHOD_NOT_FOUND,
+                    "Method not found".to_string(),
+                ),
             };
 
             // Send Response
@@ -703,6 +719,19 @@ mod claims_boundary_tests {
                 found.iter().any(|p| p == permitted),
                 "`{permitted}` is declared permitted but no longer emitted; prune it"
             );
+        }
+    }
+
+    #[test]
+    fn accepted_protocol_versions_match_the_legacy_enum() {
+        let from_enum: Vec<&str> = LegacyProtocolVersion::ALL
+            .iter()
+            .map(|version| version.as_str())
+            .collect();
+        assert_eq!(from_enum, super::ACCEPTED_PROTOCOL_VERSIONS);
+        #[allow(deprecated)]
+        {
+            assert!(!super::ACCEPTED_PROTOCOL_VERSIONS.contains(&super::MODERN_PROTOCOL_VERSION));
         }
     }
 
