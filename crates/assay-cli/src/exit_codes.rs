@@ -645,100 +645,93 @@ mod tests {
         );
     }
 
-    #[test]
-    fn evidence_limit_remediation_promises_no_command() {
-        let next_step = ReasonCode::EEvidenceLimitExceeded.next_step(None);
-        assert!(!next_step.is_empty(), "the remediation must not be empty");
+    /// One rule for every "the remediation is prose, not a command" test.
+    ///
+    /// Each of these tests used to carry its own ad-hoc literal: two forbade `"assay evidence"`,
+    /// two forbade only `"assay evidence verify"`, and one checked for a path separator rather
+    /// than for a command at all. Prose carrying an embedded invocation therefore survived on the
+    /// variants whose literal happened not to match it (#2414), while the shared property — a
+    /// remediation must not publish something the reader can run — was asserted five different
+    /// ways and enforced at five different strengths.
+    ///
+    /// The property, stated once: the remediation is prose that names no invocable command.
+    ///
+    /// Naming the tool at all is refused, rather than the narrower "tool followed by a
+    /// subcommand". Every remediation that this rule guards already avoids the name entirely,
+    /// because the reason these codes exist is that no invocation of this tool repairs them —
+    /// only the producer can. A future remediation that wants to say "Assay" is a deliberate
+    /// change to that claim, and failing here is the right place to have that conversation.
+    fn assert_remediation_is_prose_only(code: ReasonCode) {
+        let next_step = code.next_step(None);
+        let name = code.as_str();
+        assert!(
+            !next_step.is_empty(),
+            "{name}: the remediation must not be empty"
+        );
         assert!(
             !next_step.starts_with("Run:") && !next_step.starts_with("Run argv:"),
-            "limit remediation must stay prose, not an executable claim: {next_step}"
+            "{name}: remediation must stay prose, not an executable claim: {next_step}"
         );
         assert!(
-            !next_step.contains("assay evidence"),
-            "no assay invocation raises the ceiling, so naming one would publish a diagnostic \
-             as a remedy: {next_step}"
+            !next_step.to_ascii_lowercase().contains("assay"),
+            "{name}: remediation names this tool, so it publishes something the reader can run \
+             as a remedy for a condition running it cannot repair: {next_step}"
         );
+        assert!(
+            !next_step.contains('/') && !next_step.contains('\\'),
+            "{name}: remediation must not interpolate a path: {next_step}"
+        );
+        // The context argument is the caller's path. Nothing is interpolated, so a hostile bundle
+        // path cannot reach the published string at all.
         assert_eq!(
             next_step,
-            ReasonCode::EEvidenceLimitExceeded.next_step(Some("bundle; rm -rf /.tar.gz"))
+            code.next_step(Some("bundle; rm -rf /.tar.gz")),
+            "{name}: remediation changed with caller-supplied context"
         );
+    }
+
+    /// The control for [`assert_remediation_is_prose_only`]. Prose with an embedded invocation is
+    /// exactly the shape that survived the per-variant literals, so the rule is only worth having
+    /// if it rejects that shape. A guard never shown to fail proves nothing.
+    #[test]
+    fn prose_only_rule_rejects_an_embedded_invocation() {
+        let embedded = "Try assay evidence show --format json to inspect the records";
+        assert!(
+            embedded.to_ascii_lowercase().contains("assay"),
+            "the control string no longer carries an invocation, so it controls nothing"
+        );
+        let prose = "Obtain or reissue evidence from its producer";
+        assert!(
+            !prose.to_ascii_lowercase().contains("assay")
+                && !prose.contains('/')
+                && !prose.starts_with("Run:"),
+            "the accepted control is no longer plain prose"
+        );
+    }
+
+    #[test]
+    fn evidence_limit_remediation_promises_no_command() {
+        assert_remediation_is_prose_only(ReasonCode::EEvidenceLimitExceeded);
     }
 
     #[test]
     fn evidence_path_remediation_promises_no_command() {
-        let next_step = ReasonCode::EEvidencePathRejected.next_step(None);
-        assert!(!next_step.is_empty(), "the remediation must not be empty");
-        assert!(
-            !next_step.starts_with("Run:") && !next_step.starts_with("Run argv:"),
-            "path remediation must stay prose, not an executable claim: {next_step}"
-        );
-        assert!(
-            !next_step.contains("assay evidence"),
-            "re-reading the same archive repeats the same refusal, so naming a command would \
-             publish a diagnostic as a remedy: {next_step}"
-        );
-        assert_eq!(
-            next_step,
-            ReasonCode::EEvidencePathRejected.next_step(Some("bundle; rm -rf /.tar.gz"))
-        );
+        assert_remediation_is_prose_only(ReasonCode::EEvidencePathRejected);
     }
 
     #[test]
     fn evidence_contract_remediation_promises_no_command() {
-        let next_step = ReasonCode::EEvidenceContract.next_step(None);
-        assert!(!next_step.is_empty(), "the remediation must not be empty");
-        assert!(
-            !next_step.starts_with("Run:") && !next_step.starts_with("Run argv:"),
-            "contract remediation must stay prose, not an executable claim: {next_step}"
-        );
-        assert!(
-            !next_step.contains("assay evidence verify"),
-            "re-verifying the same bundle repeats the same failure, so naming that command \
-             would publish a diagnostic as a remedy: {next_step}"
-        );
-        assert_eq!(
-            next_step,
-            ReasonCode::EEvidenceContract.next_step(Some("bundle; rm -rf /.tar.gz"))
-        );
+        assert_remediation_is_prose_only(ReasonCode::EEvidenceContract);
     }
 
     #[test]
     fn evidence_profile_invalid_remediation_promises_no_command() {
-        let next_step = ReasonCode::EEvidenceProfileInvalid.next_step(None);
-        assert!(!next_step.is_empty(), "the remediation must not be empty");
-        assert!(
-            !next_step.starts_with("Run:") && !next_step.starts_with("Run argv:"),
-            "profile-invalid remediation must stay prose, not an executable claim: {next_step}"
-        );
-        assert!(
-            !next_step.contains('/') && !next_step.contains('\\'),
-            "profile-invalid next_step must not interpolate a path: {next_step}"
-        );
-        assert_eq!(
-            next_step,
-            ReasonCode::EEvidenceProfileInvalid.next_step(Some("bundle; rm -rf /.tar.gz"))
-        );
+        assert_remediation_is_prose_only(ReasonCode::EEvidenceProfileInvalid);
     }
 
     #[test]
     fn evidence_integrity_remediation_promises_no_command() {
-        let next_step = ReasonCode::EEvidenceIntegrity.next_step(None);
-        assert!(!next_step.is_empty(), "the remediation must not be empty");
-        assert!(
-            !next_step.starts_with("Run:") && !next_step.starts_with("Run argv:"),
-            "integrity remediation must stay prose, not an executable claim: {next_step}"
-        );
-        assert!(
-            !next_step.contains("assay evidence verify"),
-            "re-verifying the same bundle repeats the same failure, so naming that command \
-             would publish a diagnostic as a remedy: {next_step}"
-        );
-        // The context argument is the caller's path. Nothing is interpolated here, so a hostile
-        // bundle path cannot reach the published string at all.
-        assert_eq!(
-            next_step,
-            ReasonCode::EEvidenceIntegrity.next_step(Some("bundle; rm -rf /.tar.gz"))
-        );
+        assert_remediation_is_prose_only(ReasonCode::EEvidenceIntegrity);
     }
 
     #[test]
