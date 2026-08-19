@@ -15,12 +15,6 @@
 //! would be legal, but it would pull the whole crate into this crate's test build to compare six
 //! string literals, and the existing AEE version-parity test set the lighter precedent.
 
-use assay_evidence::types::PayloadSessionFinding;
-use assay_evidence::{
-    coding_agent_claim_decision, session_finding_coverage_state, CodingAgentClaimKind,
-    CodingAgentCoverageGap, CodingAgentCoverageState, CodingAgentGateDecision,
-    CodingAgentSourceClass,
-};
 use std::path::Path;
 
 fn sequence_eval_src() -> String {
@@ -200,107 +194,8 @@ fn extent_docs_make_no_fidelity_claim() {
         field_docs.contains("nothing is missing"),
         "session-finding notes must say complete must not be read as nothing is missing"
     );
-}
-
-fn coverage_wire(state: assay_evidence::CodingAgentCoverageState) -> String {
-    match serde_json::to_value(state).expect("coverage state serialises") {
-        serde_json::Value::String(s) => s,
-        other => panic!("coverage state must serialise as a string, got {other}"),
-    }
-}
-
-fn complete_extent_label() -> String {
-    labels_of(&sequence_eval_src(), "TraceExtent")
-        .into_iter()
-        .next()
-        .expect("TraceExtent::label has a first member, pinned as complete above")
-}
-
-/// The reported bypass: `extent: complete` and no coverage field. A reader who
-/// treats complete as "the trace is whole" exits 0; the existing coverage
-/// vocabulary exits 1 because silence over the rest is not a fact.
-///
-/// Same mutant, both guards, both exit codes. Labels come from shipping
-/// serde / `label()`, not copied literals.
-#[test]
-fn a_complete_narrowed_finding_fails_closed_on_existing_coverage_vocabulary() {
-    let finding = PayloadSessionFinding::new(
-        "never_after:bash[command]->bash[command]",
-        "never_after",
-        "held",
-        vec![],
-        complete_extent_label(),
-        None,
+    assert!(
+        !field_docs.contains("Self::coverage"),
+        "option 1 must not point at a coverage field that has not shipped"
     );
-    assert_eq!(
-        finding.coverage, None,
-        "the constructor must not invent a coverage declaration"
-    );
-
-    let old_guard_exit = i32::from(finding.extent != complete_extent_label());
-    let coverage = session_finding_coverage_state(finding.coverage.as_deref());
-    let absence = coding_agent_claim_decision(
-        CodingAgentSourceClass::BoundaryObserved,
-        coverage,
-        CodingAgentClaimKind::BoundedNegative,
-    );
-    let new_guard_exit = i32::from(absence.decision != CodingAgentGateDecision::Allowed);
-
-    assert_eq!(
-        old_guard_exit, 0,
-        "the reported bypass: complete with no coverage looks faithful to a temporal-only reader"
-    );
-    assert_eq!(
-        coverage,
-        CodingAgentCoverageState::Partial,
-        "absence of coverage is Partial, not Observed"
-    );
-    assert_eq!(
-        absence.gap,
-        Some(CodingAgentCoverageGap::PartialOnly),
-        "Partial + absence is the existing PartialOnly rule, not a second vocabulary"
-    );
-    assert_eq!(
-        new_guard_exit, 1,
-        "the same mutant must not pass an absence claim after the coverage key"
-    );
-}
-
-#[test]
-fn unrecognised_coverage_is_partial_and_observed_is_the_declared_faithful_value() {
-    assert_eq!(
-        session_finding_coverage_state(Some("narrowed")),
-        CodingAgentCoverageState::Partial,
-        "unrecognised values fail closed rather than as a faithful trace"
-    );
-
-    let observed = coverage_wire(CodingAgentCoverageState::Observed);
-    assert_eq!(
-        session_finding_coverage_state(Some(observed.as_str())),
-        CodingAgentCoverageState::Observed
-    );
-    let allowed = coding_agent_claim_decision(
-        CodingAgentSourceClass::BoundaryObserved,
-        session_finding_coverage_state(Some(observed.as_str())),
-        CodingAgentClaimKind::BoundedNegative,
-    );
-    assert_eq!(allowed.decision, CodingAgentGateDecision::Allowed);
-}
-
-#[test]
-fn session_finding_coverage_reuses_coding_agent_coverage_state_wire_names() {
-    for state in [
-        CodingAgentCoverageState::Observed,
-        CodingAgentCoverageState::Unavailable,
-        CodingAgentCoverageState::SelfReported,
-        CodingAgentCoverageState::Absent,
-        CodingAgentCoverageState::Partial,
-    ] {
-        let name = coverage_wire(state);
-        assert_eq!(
-            session_finding_coverage_state(Some(name.as_str())),
-            state,
-            "the session-finding field must accept this enum's serde name {name}"
-        );
-    }
 }

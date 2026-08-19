@@ -189,8 +189,9 @@ work that took one predicate.
   rules and the trace — it is only in who is asking.
   Extent makes **no fidelity claim**: `complete` must not be read as "nothing is missing". A
   compacted session can be finished, so temporal completeness and record faithfulness are
-  orthogonal. Session findings key that second axis on `CodingAgentCoverageState` /
-  `CodingAgentCoverageGap::PartialOnly` rather than a third `TraceExtent` variant (#2422).
+  orthogonal. A producer-declared coverage field on that second axis waits for a planned
+  major (with `#[non_exhaustive]` on the finding) rather than a third `TraceExtent` variant
+  (#2422).
 - ADR-045 is unchanged. This ADR states its boundary so that a future disposition proposal has to
   argue against a written decision rather than into a gap.
 

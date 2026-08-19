@@ -4,15 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Added
-- Optional `coverage` on `PayloadSessionFinding`, keyed on `CodingAgentCoverageState`.
-  Absence or an unrecognised value reads as `partial` (most restrictive), which is
-  `CodingAgentCoverageGap::PartialOnly` for an absence claim through the existing
-  claim gate. No new vocabulary, and no third `TraceExtent` variant (#2422).
-
 ### Changed
 - `TraceExtent` and session-finding notes state that extent makes no fidelity claim:
-  `complete` must not be read as "nothing is missing" (#2422).
+  `complete` must not be read as "nothing is missing" (#2422). A producer-declared
+  `coverage` field on the finding waits for a planned major.
 
 ### Fixed
 - Published-release golden path and `examples/privileged-action-gate/run.sh` verify the

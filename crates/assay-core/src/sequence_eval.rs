@@ -65,8 +65,8 @@ impl TraceExtent {
     /// evidence payload would have invented its spellings -- worse than duplicating a vocabulary,
     /// because there is no source to drift from. Like `RuleOutcome::label`, this is an interface.
     ///
-    /// `complete` still makes no fidelity claim. A consumer that needs to know whether the
-    /// evaluated sequence is the whole record keys on coverage, not on this label.
+    /// `complete` still makes no fidelity claim. Whether the evaluated sequence is the
+    /// whole record is a different question, and this label does not answer it.
     pub const fn label(self) -> &'static str {
         match self {
             Self::Complete => "complete",
