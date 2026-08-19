@@ -10,7 +10,7 @@ Assay is a **Policy-as-Code** engine for Model Context Protocol (MCP) that valid
 
 ## Workspace Structure
 
-Rust monorepo, workspace version `5.3.0`, 22 workspace packages (21 under `crates/` plus
+Rust monorepo, workspace version `5.4.0`, 22 workspace packages (21 under `crates/` plus
 `assay-python-sdk`; 7 are `publish = false`). Curated view, grouped by role:
 
 ```
