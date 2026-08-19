@@ -616,3 +616,79 @@ fn a_non_utf8_baseline_and_config_exit_by_code_without_abort() {
          stdout:\n{validate_config_out}"
     );
 }
+
+/// `assay mcp config-path --json` must exit by a defined code with a non-UTF-8 `HOME` (#2421).
+///
+/// Same causal class as the `--trace-file` case above and the same fix (`path_json`), reached
+/// through a different ingress: the environment rather than argv. #2264's sweep closed the argv
+/// sites and missed this one, which is why the ingress is named in the test rather than left to
+/// the reader.
+///
+/// The measured abort was `json!({ "config_path": PathBuf })` in
+/// `crates/assay-cli/src/cli/commands/config_path.rs`: serde's `Path` impl returns `Error` on
+/// non-UTF-8 bytes, `json!` unwraps it, and `panic = "abort"` turns that into SIGABRT with an
+/// empty stdout. The directory need not exist; the drive is env bytes, not a filesystem create,
+/// which also keeps the test runnable on APFS where such a name cannot be created at all.
+///
+/// The text channel already exited 0 via `Path::display()`, so it is asserted here too: the fix
+/// must bring JSON up to the text channel's behaviour, not bring text down to JSON's.
+#[cfg(unix)]
+#[test]
+fn a_non_utf8_home_leaves_mcp_config_path_json_on_a_defined_exit() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let bad_home = non_utf8_os(b"/tmp/assay-home-", b"");
+
+    let run = |format_json: bool| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay"));
+        for (name, _) in std::env::vars_os() {
+            if name
+                .to_string_lossy()
+                .to_ascii_uppercase()
+                .starts_with("ASSAY_")
+            {
+                cmd.env_remove(name);
+            }
+        }
+        cmd.current_dir(dir.path())
+            .env("NO_COLOR", "1")
+            .env("HOME", &bad_home)
+            .env_remove("XDG_CONFIG_HOME")
+            .args(["mcp", "config-path"]);
+        if format_json {
+            cmd.arg("--json");
+        }
+        cmd.arg("cursor");
+        run_bounded(cmd, b"", GOLDEN_PATH_LIMITS, "mcp config-path")
+            .unwrap_or_else(|error| panic!("{error}"))
+    };
+
+    let json = run(true);
+    let text = run(false);
+
+    let json_code = defined_exit("mcp config-path --json", &json);
+    let text_code = defined_exit("mcp config-path", &text);
+
+    assert_eq!(
+        json_code,
+        0,
+        "a non-UTF-8 HOME must not change the exit class of a successful path report; \
+         stdout was {} byte(s), stderr: {}",
+        json.stdout.len(),
+        String::from_utf8_lossy(&json.stderr)
+    );
+    assert_eq!(
+        text_code, 0,
+        "the text channel already exited 0 and must stay there"
+    );
+
+    let parsed: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap_or_else(|error| {
+        panic!(
+            "--json must still emit parseable JSON, got {} byte(s): {error}",
+            json.stdout.len()
+        )
+    });
+    assert!(
+        parsed.get("config_path").is_some_and(|v| v.is_string()),
+        "config_path must be a lossy JSON string rather than a serde error: {parsed}"
+    );
+}
