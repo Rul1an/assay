@@ -2,7 +2,7 @@
 //!
 //! Two things live here, and the second is the reason the first moved.
 //!
-//! **One implementation, most of the way.** The rule language had two evaluators. `assay-metrics`'
+//! **One implementation.** The rule language had two evaluators. `assay-metrics`'
 //! `sequence_valid` handled `Require`, `Before` and `Blocklist` and resolved no aliases;
 //! `assay-mcp-server`'s `check_sequence` handled all eight variants and did resolve them.
 //! The same suite YAML therefore got two answers, and the silent one was the pass: a
@@ -10,14 +10,13 @@
 //! in, fell through the metric's `_` arm and reported a clean run. `assay-metrics` cannot
 //! call `assay-mcp-server` (the dependency runs the other way), so the shared home is here.
 //!
-//! `assay-mcp-server` has not called through yet: its JSON violation shape is a published tool
-//! contract and porting it means preserving message text field by field. Until it does the two
-//! are guarded by `assay-mcp-server/tests/sequence_eval_parity.rs` rather than by a shared call,
-//! which is the fallback CLAUDE.md sanctions and the weaker of the two options. What that test
-//! guards is not hypothetical: a differential over every trace of length <= 5 on a three-symbol
-//! alphabet found 213 `after` disagreements between the copies at this module's first commit.
-//! Those were closed by the `after` rewrite, not by [`TraceExtent`]; the extent parameter creates
-//! divergences of its own, by design, which is why the parity test pins the proxy's reading.
+//! `assay-mcp-server::check_sequence` now calls through and maps the record into its published
+//! JSON. `assay-mcp-server/tests/sequence_eval_parity.rs` remains as a mapping lock on the
+//! proxy's `TraceExtent::Partial` reading. A differential over every trace of length <= 5 on a
+//! three-symbol alphabet found 213 `after` disagreements between the copies at this module's
+//! first commit. Those were closed by the `after` rewrite, not by [`TraceExtent`]; the extent
+//! parameter creates divergences of its own, by design, which is why the parity test pins the
+//! proxy's reading.
 //!
 //! **A record, not a verdict.** Each rule yields a [`RuleEvaluation`] naming the rule, the
 //! call indices it read, and what it found. A consumer recomputes the conclusion from the

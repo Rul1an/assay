@@ -73,9 +73,7 @@ sequences:
         "Missing required tool (alias group) should fail"
     );
     let msg = res3["violations"][0]["message"].as_str().unwrap();
-    assert!(
-        msg.contains("required tool 'Search' (aliases: [\"SearchWeb\", \"SearchKB\"]) not found")
-    );
+    assert_eq!(msg, "required tool 'Search' not found in trace");
 
     // Cleanup
     let _ = tokio::fs::remove_dir_all(temp_dir).await;
