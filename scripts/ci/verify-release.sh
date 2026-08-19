@@ -3,7 +3,6 @@
 # 2=infra (missing tools, API/network failure, timeout, or unreadable input).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 REPO="${REPO:-Rul1an/assay}"
 GH="${GH:-$(command -v gh)}"
 PYTHON="${PYTHON:-$(command -v python3)}"
