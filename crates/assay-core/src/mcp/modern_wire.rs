@@ -16,6 +16,7 @@ pub const MODERN_PROTOCOL_VERSION: &str = RESULT_TYPE_SINCE;
 
 /// A value-free reason a modeled modern shape cannot be used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ModernWireError {
     MissingProtocolVersion,
     MalformedProtocolVersion,
