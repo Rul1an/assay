@@ -142,10 +142,35 @@ audits corpora is worth nothing if its author has not survived it.
 | `privileged-mcp-action-v0` | process | **1 known hole**: the origin leg of the v0 marker triple is promised by §5 and no vector discriminates it. Recorded against `sha256:cb58ce91…` rather than fixed, because adding a vector moves a published digest. Two further rules I declared turned out to mutate the wrong stage and the wrong profile; they are marked out of scope **with that reasoning rather than deleted** |
 | [`observed-effect-v0`](https://github.com/Rul1an/observed-effect-v0) drift consumer | batch | **4 of 5**. One survivor: an implementation can read the body regardless of whether the ref recomputed and still reproduce all fourteen cases |
 | [rge-bench](https://github.com/rge-bench/rge-bench) | module | 30 of 30, 1 declared equivalent |
-| `rfc8785` · `mcp-era-parity-v0` | — | **not measurable today.** Driven by Rust *tests* without a per-vector verdict, which is a fourth runner shape |
+| `rfc8785` canonicalization | batch (test-names) | **control killed** — the corpus bites. No rules declared: see below |
+| `mcp-era-parity-v0` | — | **not measurable today.** Driven by Rust *tests* without a per-vector verdict |
 
-**Four of six.** Stated rather than rounded up: two corpora have no adequacy
-measurement at all, and one of the four measured has an acknowledged hole.
+**Four measured, one control-only, one not measurable.** Stated rather than
+rounded up.
+
+### Why `rfc8785` has a control and no declared rules
+
+`crates/assay-canonical/src/jcs.rs` is a thin wrapper: it delegates to `serde_jcs`
+and declares almost no rules of its own. Rule-deletion mutation therefore does not
+apply the way it does to a corpus with its own logic — there is nothing of ours to
+delete. The question for a delegating wrapper is different: **does the corpus catch
+a wrong delegate?**
+
+That control was not invented for this measurement. `tests/rfc8785_conformance.rs`
+documents it in prose at the top of the file: swap `serde_jcs::to_vec` for
+`serde_json::to_vec` and at least 8 of 31 vectors must fail, with
+`keyorder_utf16_vs_codepoint` among them, because that is the only vector where
+code-unit, code-point and byte order disagree. The file says the property is
+written down "so it stays checkable rather than remembered".
+
+**It was remembered, not checked.** Run for the first time on 2026-08-19 it holds
+exactly: `8 of 31 RFC 8785 vectors diverged`, and the named vector is among them.
+That is now executable rather than a paragraph.
+
+What the control does **not** establish is coverage of RFC 8785 itself. It shows
+the corpus bites against **one** wrong implementation. Whether it bites against the
+other plausible ones is a question about RFC coverage rather than about our code,
+and it is open.
 
 Every manifest must declare at least one **control** — a mutation on the same
 path that MUST be killed. All-survivors because a corpus is weak and
