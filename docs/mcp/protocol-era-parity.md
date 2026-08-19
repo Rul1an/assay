@@ -80,6 +80,30 @@ Assay also runs a separate, pinned upstream reference lane for the official MCP 
 and Rust SDK. That lane checks named upstream scenarios and source integrity. It does not represent
 Assay as an MCP client or server and does not turn this corpus into a broad conformance claim.
 
+## 2026-07-28 Wire-Model Ownership
+
+The vendored `schema-2026-07-28.json` digest in `PIN.json` is the final schema pin used by the
+wire-model tests: MCP specification commit
+`5f5440bb26a62e2cf3440b92da5a667efa03b267`. The model validates only the required request
+metadata, `resultType`, `CacheableResult` hints, `server/discover` shapes, and the reserved
+`-32022` error shape. It does not accept a request, negotiate a protocol version, or produce a
+`server/discover` response.
+
+Assay's custom codec remains the single production owner. The following is an ownership comparison,
+not an assertion that the two implementations have matching runtime behavior:
+
+| Concern | Assay custom codec | Official Rust SDK lane |
+|---|---|---|
+| Message ceilings | Assay applies its own bounded parsing and public-message ceilings. | Reference-only upstream build; no Assay message-ceiling behavior is imported. |
+| Timeouts | Assay applies its configured tool timeout. | Reference scenarios do not own Assay tool execution timeouts. |
+| Stdio authentication | Assay rejects unsupported `ASSAY_AUTH_*` stdio configuration before protocol I/O. | Reference-only; it does not configure Assay authentication behavior. |
+| Policy root | Assay canonicalizes and confines `--policy-root`. | No Assay policy-root semantics. |
+| Five tools | Assay owns `assay_check_args`, `assay_check_sequence`, `assay_policy_decide`, `assay_check_coverage`, and `assay_explain_trace`. | No Assay tool surface or dispatch. |
+
+The official Rust SDK remains a pinned upstream reference in
+[`mcp-upstream-reference.yml`](../../.github/workflows/mcp-upstream-reference.yml), not a
+production dependency. There is no dual implementation: Assay's codec owns the production model.
+
 ## Claim Ceiling
 
 This run supports a bounded statement: Assay preserves the measured privileged-action evidence

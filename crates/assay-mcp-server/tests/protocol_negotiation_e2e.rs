@@ -1,3 +1,6 @@
+use assay_core::mcp::modern_wire::{
+    validate_request_metadata, MODERN_PROTOCOL_VERSION as MODELED_PROTOCOL_VERSION,
+};
 use serde_json::Value;
 use std::io::Write;
 use std::path::PathBuf;
@@ -274,6 +277,41 @@ fn a_modern_revision_claim_is_refused_with_the_legacy_set() {
     let response = responses(&output).pop().expect("tools/list response");
     assert_eq!(response["error"]["code"].as_i64(), Some(-32022));
     assert_eq!(response["error"]["data"]["requested"], "2026-07-28");
+    assert_eq!(
+        response["error"]["data"]["supported"],
+        serde_json::json!(EXPECTED_ECHOED_REVISIONS)
+    );
+    assert!(response.get("result").is_none());
+}
+
+/// The wire model is deliberately independent from the legacy server's accepted set.
+///
+/// Adding the modeled revision to `LegacyProtocolVersion::ALL` turns the response into a success
+/// and makes this test fail. That is the #2483 negotiation/advertisement tripwire.
+#[test]
+fn the_modeled_revision_is_validated_but_not_advertised() {
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list",
+        "params": {
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": MODELED_PROTOCOL_VERSION,
+                "io.modelcontextprotocol/clientCapabilities": {}
+            }
+        }
+    });
+    assert_eq!(validate_request_metadata(&request), Ok(()));
+    assert!(!EXPECTED_ECHOED_REVISIONS.contains(&MODELED_PROTOCOL_VERSION));
+
+    let response = responses(&run_session(&[request]))
+        .pop()
+        .expect("refusal response");
+    assert_eq!(response["error"]["code"].as_i64(), Some(-32022));
+    assert_eq!(
+        response["error"]["data"]["requested"],
+        MODELED_PROTOCOL_VERSION
+    );
     assert_eq!(
         response["error"]["data"]["supported"],
         serde_json::json!(EXPECTED_ECHOED_REVISIONS)
