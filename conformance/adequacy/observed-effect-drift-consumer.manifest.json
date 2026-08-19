@@ -1,7 +1,7 @@
 {
   "schema": "corpus-adequacy.manifest.v0",
   "runner": "batch",
-  "_about": "Mutation adequacy for the observed-effect-v0 drift consumer. BATCH runner: the checker takes the whole vector file and reports a summary, so the corpus is exercised as a unit and the summary IS the outcome. Its failures list names the case ids, which is what makes it discriminate; a checker reporting only a boolean would make every mutant kill everything or nothing. The command is relative on purpose -- the consumer REFUSES an absolute vectors path, which is its own hardening and not something to work around. Requires Rul1an/observed-effect-v0 cloned as a sibling of this repository; without it the run fails with a missing source rather than silently measuring nothing.",
+  "_about": "Mutation adequacy for the observed-effect-v0 drift consumer. BATCH runner: the checker takes the whole vector file and reports a summary, so the corpus is exercised as a unit and the summary IS the outcome. Its failures list names the case ids, which is what makes it discriminate; a checker reporting only a boolean would make every mutant kill everything or nothing. The first declaration scored five merge-policy rules (4 of 5). The 14 case names announce the recompute, advisory, and profile rules as well; those belong in the denominator. The command is relative on purpose -- the consumer REFUSES an absolute vectors path, which is its own hardening and not something to work around. Requires Rul1an/observed-effect-v0 cloned as a sibling of this repository; without it the run fails with a missing source rather than silently measuring nothing.",
   "repo_root": "../../../observed-effect-v0/observed-effect-drift-consumer-2026-06",
   "implementation_sources": [
     "../../../observed-effect-v0/observed-effect-drift-consumer-2026-06/independent_consumer.py"
@@ -44,6 +44,96 @@
         "label": "4 the body is only read when the ref recomputed",
         "anchor": "body = store.get(ref.get(\"ref\")) if rv == \"recomputed\" else None",
         "replacement": "body = store.get(ref.get(\"ref\"))"
+      },
+      {
+        "label": "5 agreement falls through to allow",
+        "anchor": "    else:\n        decision = \"allow\"",
+        "replacement": "    else:\n        decision = \"review_required\""
+      },
+      {
+        "label": "6 surface remains the authority",
+        "anchor": "\"surface_is_authority\": True,",
+        "replacement": "\"surface_is_authority\": False,"
+      },
+      {
+        "label": "7 observed divergence drives the decision",
+        "anchor": "    elif adv == \"divergence_observed\":\n        decision = \"quarantine\" if opt_in else \"review_required\"",
+        "replacement": "    elif False:\n        decision = \"quarantine\" if opt_in else \"review_required\""
+      },
+      {
+        "label": "8 not_observed or unknown basis is insufficient coverage",
+        "anchor": "    if b not in BASIS_OK or b in (\"not_observed\", \"unknown\"):",
+        "replacement": "    if b not in BASIS_OK:"
+      },
+      {
+        "label": "9 an unexpected basis is insufficient coverage",
+        "anchor": "    if b not in BASIS_OK or b in (\"not_observed\", \"unknown\"):",
+        "replacement": "    if b in (\"not_observed\", \"unknown\"):"
+      },
+      {
+        "label": "10 nonempty divergence is observed",
+        "anchor": "    return \"divergence_observed\" if (body.get(\"divergence\") or []) else \"none\"",
+        "replacement": "    return \"none\""
+      },
+      {
+        "label": "11 an unknown profile is unsupported",
+        "anchor": "    if not isinstance(canon, str) or canon not in PROFILES:\n        return \"unsupported_canonicalization\"",
+        "replacement": "    if False:\n        return \"unsupported_canonicalization\""
+      },
+      {
+        "label": "12 the digest must match the recomputed address",
+        "anchor": "    if addr(body, canon) != ref[\"digest\"]:",
+        "replacement": "    if False:"
+      },
+      {
+        "label": "13 required fields must be present and unredacted",
+        "anchor": "    if any(f not in body or redacted(body[f]) for f in spec[\"required_fields\"]):\n        return \"incomplete_projection\"",
+        "replacement": "    if False:\n        return \"incomplete_projection\""
+      },
+      {
+        "label": "14 a redacted required field is incomplete",
+        "anchor": "    if any(f not in body or redacted(body[f]) for f in spec[\"required_fields\"]):",
+        "replacement": "    if any(f not in body for f in spec[\"required_fields\"]):"
+      },
+      {
+        "label": "15 jcs-json-v1 is a live profile",
+        "anchor": "    if profile == \"jcs-json-v1\":\n        return \"sha256:\" + hashlib.sha256(canon_jcs(body)).hexdigest()",
+        "replacement": "    if False:\n        return \"sha256:\" + hashlib.sha256(canon_jcs(body)).hexdigest()"
+      },
+      {
+        "label": "16 cbor-deterministic-v1 is a live profile",
+        "anchor": "    if profile == \"cbor-deterministic-v1\":\n        return \"sha256:\" + hashlib.sha256(canon_cbor(body)).hexdigest()",
+        "replacement": "    if False:\n        return \"sha256:\" + hashlib.sha256(canon_cbor(body)).hexdigest()"
+      },
+      {
+        "label": "17 JCS object keys are ordered by UTF-16 code unit",
+        "anchor": "        items = sorted(o.items(), key=lambda kv: kv[0].encode(\"utf-16-be\"))",
+        "replacement": "        items = sorted(o.items(), key=lambda kv: kv[0])"
+      },
+      {
+        "label": "18 a missing digest or profile is malformed",
+        "anchor": "    if not ref.get(\"digest\") or not ref.get(\"canonicalization\"):\n        return \"malformed_ref\"",
+        "replacement": "    if False:\n        return \"malformed_ref\""
+      },
+      {
+        "label": "19 a digest without a location is unresolvable",
+        "anchor": "    if loc is None:\n        return \"unresolvable_digest_only\"",
+        "replacement": "    if False:\n        return \"unresolvable_digest_only\""
+      },
+      {
+        "label": "20 a location absent from the store is unresolved",
+        "anchor": "    if loc not in store:\n        return \"unresolved_ref\"",
+        "replacement": "    if False:\n        return \"unresolved_ref\""
+      },
+      {
+        "label": "21 an unknown schema fails closed",
+        "anchor": "    if spec is None:\n        return \"schema_mismatch\"",
+        "replacement": "    if False:\n        return \"schema_mismatch\""
+      },
+      {
+        "label": "22 a digest that matches the other profile is a canonicalization mismatch",
+        "anchor": "        for alt in PROFILES:\n            if alt != canon and addr(body, alt) == ref[\"digest\"]:\n                return \"canonicalization_mismatch\"\n        return \"digest_mismatch\"",
+        "replacement": "        return \"digest_mismatch\""
       },
       {
         "label": "CONTROL harness reachability",

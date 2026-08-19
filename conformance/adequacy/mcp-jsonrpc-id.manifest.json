@@ -1,6 +1,6 @@
 {
   "schema": "corpus-adequacy.manifest.v0",
-  "_about": "Mutation adequacy for the mcp-jsonrpc-id pack. The pack's README declares a NARROW scope: the error-response id contradiction, two incompatibility arms plus one positive control. The four id rules are in scope. The envelope-shape rules are real rules the pack depends on but never claimed to exercise, so they are declared out_of_scope and reported rather than scored. Lives OUTSIDE the pack on purpose: the pack checksums its own public files, so adding a manifest to it would break its integrity guard. The vectors file here is derived from the pack's vectors/*.json and conformance/tests/test_corpus_adequacy_own_corpora.py asserts it has not drifted.",
+  "_about": "Mutation adequacy for the mcp-jsonrpc-id pack. The pack's README declares a NARROW scope: the error-response id contradiction, two incompatibility arms plus one positive control. Envelope-shape rules are real rules the pack depends on but never claimed to exercise, so they are out_of_scope and reported rather than scored. The first declaration scored only the four presence/null arms and called that 4 of 4. The positive control is a string id, and RequestId is string | number, so the type arms belong in the denominator: two of them (string) are isolated by that control, and the number/bool siblings are not. Lives OUTSIDE the pack on purpose: the pack checksums its own public files, so adding a manifest to it would break its integrity guard. The vectors file here is derived from the pack's vectors/*.json and conformance/tests/test_corpus_adequacy_own_corpora.py asserts it has not drifted.",
   "implementation": "../../examples/mcp-jsonrpc-id-conformance/check.py",
   "entrypoint": "evaluate_message",
   "entrypoint_args": [
@@ -76,6 +76,36 @@
         "anchor": "        identifier is None or isinstance(identifier, str) or _is_number(identifier)",
         "replacement": "        isinstance(identifier, str) or _is_number(identifier)",
         "scope": "declared"
+      },
+      {
+        "label": "11 MCP RequestId includes string",
+        "anchor": "    mcp_id_valid = not has_id or (\n        isinstance(identifier, str)\n        or (isinstance(identifier, int) and not isinstance(identifier, bool))",
+        "replacement": "    mcp_id_valid = not has_id or (\n        False\n        or (isinstance(identifier, int) and not isinstance(identifier, bool))"
+      },
+      {
+        "label": "12 JSON-RPC accepts a string id",
+        "anchor": "    jsonrpc_id_valid = has_id and (\n        identifier is None or isinstance(identifier, str) or _is_number(identifier)\n    )",
+        "replacement": "    jsonrpc_id_valid = has_id and (\n        identifier is None or False or _is_number(identifier)\n    )"
+      },
+      {
+        "label": "13 MCP RequestId includes number",
+        "anchor": "        or (isinstance(identifier, int) and not isinstance(identifier, bool))\n    )",
+        "replacement": "        or False\n    )"
+      },
+      {
+        "label": "14 a bool is not an MCP RequestId",
+        "anchor": "isinstance(identifier, int) and not isinstance(identifier, bool)",
+        "replacement": "isinstance(identifier, int)"
+      },
+      {
+        "label": "15 JSON-RPC accepts a number id",
+        "anchor": "    jsonrpc_id_valid = has_id and (\n        identifier is None or isinstance(identifier, str) or _is_number(identifier)\n    )",
+        "replacement": "    jsonrpc_id_valid = has_id and (\n        identifier is None or isinstance(identifier, str)\n    )"
+      },
+      {
+        "label": "16 a bool is not a JSON-RPC number id",
+        "anchor": "    return isinstance(value, (int, float)) and not isinstance(value, bool)",
+        "replacement": "    return isinstance(value, (int, float))"
       },
       {
         "label": "10 a non-object message is rejected outright",

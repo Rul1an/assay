@@ -145,11 +145,11 @@ the rows below say which of the two they mean.
 
 | Corpus | Runner | Result |
 |---|---|---|
-| `mcp-jsonrpc-id-conformance` | module | **4 of 4** in scope. **7 rules unexercised and out of scope**, ratio 1.75 — the score is a statement about a minority of the declared rules |
+| `mcp-jsonrpc-id-conformance` | module | **6 of 10 in scope (60%), 4 survivors.** The first score was **4 of 4** over the presence/null arms alone. The positive control is a string id and RequestId is string or number, so the type arms belong in the denominator: string is isolated, number and bool are not. **7 envelope rules unexercised and out of scope**, ratio 0.7 — re-checked against the three published messages; none of them moves an outcome, and the reasons still hold |
 | `privileged-mcp-action-v0` | process | **4 of 8 in scope (50%), 4 survivors, 1 known hole.** First measured as *no result*: three rules declared, two of them mutating the wrong stage and the wrong profile. That was a fact about the declaration, not the corpus — eight more rules were read off the verifier path and half of them survive. The survivors form **one systematic gap, not four**: wherever a rule has sibling members, the corpus discriminates exactly one and leaves the rest free. Decision cardinality is caught (`bad-103`) and observation and establish cardinality are not; the decision's `target_digest` is caught (`bad-102`) and the observation's `response_digest` is not; the binding pair is caught on its digest leg (`bad-105`) and not on its tool-name leg; the marker triple is caught on schema and code and not on origin (the known hole). One vector per failure mode, and every failure mode has siblings on the same code path that never got one. **This is the corpus carrying our live reproduction request ([#1840](https://github.com/Rul1an/assay/issues/1840))** |
-| [`observed-effect-v0`](https://github.com/Rul1an/observed-effect-v0) drift consumer | batch | **4 of 5**. One survivor: an implementation can read the body regardless of whether the ref recomputed and still reproduce all fourteen cases |
-| [rge-bench](https://github.com/rge-bench/rge-bench) | module | 30 of 30, 1 declared equivalent |
-| `rfc8785` canonicalization | batch (test-names) | **control killed** — the corpus bites. No rules declared: see below |
+| [`observed-effect-v0`](https://github.com/Rul1an/observed-effect-v0) drift consumer | batch | **14 of 23 in scope (60.9%), 9 survivors.** The first score was **4 of 5** over merge-policy rules only. The 14 case names announce the recompute, advisory, and profile rules as well. The original survivor remains (the body can be read whether or not the ref recomputed); the new ones are the fail-closed recompute siblings the cases never present, the RFC 8785 UTF-16 key-order rule the consumer claims but no body isolates, and a redacted-field conjunct that `incomplete_missing_non_claims` does not distinguish from a missing field |
+| [rge-bench](https://github.com/rge-bench/rge-bench) | module | **51 of 54 in scope (94.4%), 3 survivors, 2 declared equivalent, 1 out of scope.** The first score was **30 of 30** over the hand-written table in `scripts/check_rule_liveness.py`. [ADMISSION.md](https://github.com/rge-bench/rge-bench/blob/main/ADMISSION.md) already says that table is not checked against the rules `ref_example.py` contains. The missing rules were discriminable: the strength ladder (the ceiling ladder's sibling — the same shape that hole already had), the AND conjuncts scored as one mutant, and the soft-digest and replay-equality fallthroughs. The three survivors include a claimed contract-edge (`True` is not `1`) that no vector isolates |
+| `rfc8785` canonicalization | batch (test-names) | **control killed** — the corpus bites. No rules declared: the wrapper still has nothing of ours to delete. `to_string` is a second convenience over the same delegate and is not on this corpus's path |
 | `mcp-era-parity-v0` | — | **not measurable today.** Driven by Rust *tests* without a per-vector verdict |
 
 **Four measured, one control-only, one not measurable.** Stated rather than
@@ -159,6 +159,14 @@ was corrected to *three*; and it is four again only because that corpus was then
 declared properly and finally produced a number. The number is 50%, which is the
 worst result on this page. Both corrections are left visible, because a table
 whose purpose is to publish unflattering results should show its own edits.
+
+The same under-declaration then showed up on the other three scored rows. Each
+first score was a number about the rules the author happened to list, not about
+the rules the implementation has: 4 of 4 over four of ten id-field arms; 4 of 5
+over merge-policy while the 14 cases name recompute and profile; 30 of 30 over a
+hand-written table that ADMISSION.md already warned was unchecked against
+`ref_example.py`. The rows above now score the larger denominator. The numbers
+went down. That is the point.
 
 ### The v0 survivors are one gap wearing four faces
 
@@ -180,9 +188,14 @@ any of these pairs and reproduce all fourteen outcomes.
 
 That the pattern is uniform is the useful part: it says the fix is not fourteen
 judgement calls but one rule — **for every conjunct and every sibling member, ask
-whether a vector isolates it** — and it says the same audit is worth running against
-the other corpora on this page before trusting their scores. Note that our own tree
-catches all four; this is about what the corpus can transmit, not about what we ship.
+whether a vector isolates it**. That audit was then run against the other scored
+rows on this page, independently of what each manifest declared. The same habit
+showed up: mcp-jsonrpc-id isolated presence and null and left number and bool
+free; the drift consumer isolated digest-mismatch and left malformed / unresolved
+/ redacted free; rge-bench isolated the origin-ceiling ladder and left the
+strength ladder undeclared until this measurement. Note that our own tree
+catches the v0 four; this is about what the corpus can transmit, not about what
+we ship.
 
 Not fixed here. Every one of these needs a new vector, and a new vector moves a
 digest that [#1840](https://github.com/Rul1an/assay/issues/1840) has published as a
