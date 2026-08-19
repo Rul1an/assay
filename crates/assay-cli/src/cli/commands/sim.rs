@@ -155,7 +155,16 @@ fn cmd_run(args: SimRunArgs) -> Result<i32> {
         return Ok(2);
     }
 
-    println!("\n✅ All attacks blocked.");
+    if report.phases_not_attempted.is_empty() {
+        println!("\n✅ All attacks blocked.");
+    } else {
+        // "All attacks blocked" over a tier that skips a phase invites the reading
+        // that everything was tried. Name the untried phases in the same breath.
+        println!(
+            "\n✅ All attempted attacks blocked. Not attempted by this tier: {}.",
+            report.phases_not_attempted.join(", ")
+        );
+    }
     Ok(0)
 }
 
