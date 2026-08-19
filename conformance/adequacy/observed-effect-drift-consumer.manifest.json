@@ -1,0 +1,57 @@
+{
+  "schema": "corpus-adequacy.manifest.v0",
+  "runner": "batch",
+  "_about": "Mutation adequacy for the observed-effect-v0 drift consumer. BATCH runner: the checker takes the whole vector file and reports a summary, so the corpus is exercised as a unit and the summary IS the outcome. Its failures list names the case ids, which is what makes it discriminate; a checker reporting only a boolean would make every mutant kill everything or nothing. The command is relative on purpose -- the consumer REFUSES an absolute vectors path, which is its own hardening and not something to work around. Requires Rul1an/observed-effect-v0 cloned as a sibling of this repository; without it the run fails with a missing source rather than silently measuring nothing.",
+  "repo_root": "../../../observed-effect-v0/observed-effect-drift-consumer-2026-06",
+  "implementation_sources": [
+    "../../../observed-effect-v0/observed-effect-drift-consumer-2026-06/independent_consumer.py"
+  ],
+  "entrypoint_command": [
+    "python3",
+    "independent_consumer.py",
+    "vectors.json"
+  ],
+  "outcome_from": [
+    "all_reproduced",
+    "failures"
+  ],
+  "vectors": "../../../observed-effect-v0/observed-effect-drift-consumer-2026-06/vectors.json",
+  "id_key": "vector_id",
+  "default_group": "drift_consumer",
+  "mutants": {
+    "drift_consumer": [
+      {
+        "label": "0 a surface drift block overrides everything",
+        "anchor": "    if surface == \"surface_drift_block\":\n        decision = \"block\"",
+        "replacement": "    if False:\n        decision = \"block\""
+      },
+      {
+        "label": "1 observed divergence without opt-in is review, not quarantine",
+        "anchor": "decision = \"quarantine\" if opt_in else \"review_required\"",
+        "replacement": "decision = \"quarantine\""
+      },
+      {
+        "label": "2 insufficient coverage requires review",
+        "anchor": "    elif adv == \"insufficient_coverage\":\n        decision = \"review_required\"",
+        "replacement": "    elif False:\n        decision = \"review_required\""
+      },
+      {
+        "label": "3 hard-block capability follows operator opt-in",
+        "anchor": "\"effect_can_hard_block\": bool(opt_in),",
+        "replacement": "\"effect_can_hard_block\": True,"
+      },
+      {
+        "label": "4 the body is only read when the ref recomputed",
+        "anchor": "body = store.get(ref.get(\"ref\")) if rv == \"recomputed\" else None",
+        "replacement": "body = store.get(ref.get(\"ref\"))"
+      },
+      {
+        "label": "CONTROL harness reachability",
+        "control": true,
+        "anchor": "if merge(c, registry) != c[\"expected\"]",
+        "replacement": "if True"
+      }
+    ]
+  },
+  "equivalent": {}
+}

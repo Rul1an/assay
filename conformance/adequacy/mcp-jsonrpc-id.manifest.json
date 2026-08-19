@@ -1,5 +1,5 @@
 {
-  "schema": "assay.corpus_adequacy.manifest.v0",
+  "schema": "corpus-adequacy.manifest.v0",
   "_about": "Mutation adequacy for the mcp-jsonrpc-id pack. The pack's README declares a NARROW scope: the error-response id contradiction, two incompatibility arms plus one positive control. The four id rules are in scope. The envelope-shape rules are real rules the pack depends on but never claimed to exercise, so they are declared out_of_scope and reported rather than scored. Lives OUTSIDE the pack on purpose: the pack checksums its own public files, so adding a manifest to it would break its integrity guard. The vectors file here is derived from the pack's vectors/*.json and conformance/tests/test_corpus_adequacy_own_corpora.py asserts it has not drifted.",
   "implementation": "../../examples/mcp-jsonrpc-id-conformance/check.py",
   "entrypoint": "evaluate_message",
