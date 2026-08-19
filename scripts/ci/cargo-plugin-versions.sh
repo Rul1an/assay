@@ -15,6 +15,13 @@ export CARGO_AUDIT_VERSION="0.22.2"
 # crates.io max_stable_version and Rust 1.96 (each tool's MSRV is below that).
 export CARGO_NEXTEST_VERSION="0.9.143"
 export CARGO_HACK_VERSION="0.6.45"
+# cargo-semver-checks is ONE signal, not a source-compatibility proof. Measured on 0.50.0: a public
+# generic whose accepted iterator item type narrows from an owned value to a reference passes all
+# 223 checks and reports "no semver update required", while a caller passing a `Vec` fails to
+# compile with E0271 (#2356). The compensating signal is
+# `crates/assay-evidence/tests/public_api_source_compat.rs`, which fails to build on exactly that
+# change. Re-measure this note when the pinned version moves; it may stop being true, which would be
+# good news.
 export CARGO_SEMVER_CHECKS_VERSION="0.50.0"
 # CI-4D3 / #2224: optional public-api + mutants. Measured crates.io max_stable_version,
 # unyanked. cargo-public-api publishes no rust_version (do not claim formal MSRV; CI Rust
