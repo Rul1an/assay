@@ -1,3 +1,4 @@
+use assay_core::mcp::jcs;
 use assay_core::metrics_api::{Metric, MetricResult};
 use assay_core::model::{Expected, LlmResponse, TestCase};
 use async_trait::async_trait;
@@ -10,9 +11,11 @@ fn sha256_str(s: &str) -> String {
     hex::encode(Sha256::digest(s.as_bytes()))
 }
 
-/// Stable hash over a JSON value: serialise to compact JSON then SHA-256.
+/// Hash a JSON value over the RFC 8785 canonical bytes used by tool identity.
 fn sha256_value(v: &serde_json::Value) -> String {
-    sha256_str(&serde_json::to_string(v).unwrap_or_default())
+    hex::encode(Sha256::digest(
+        jcs::to_vec(v).expect("a serde_json::Value is always JCS-serializable"),
+    ))
 }
 
 /// Extract `meta["tool_definitions"]` as a flat list of tool objects.
@@ -317,6 +320,61 @@ mod tests {
                 .unwrap()
                 .contains("E_TOOL_DESCRIPTION_MUTATED"),
             "details={}",
+            result.details
+        );
+    }
+
+    #[test]
+    fn schema_hash_ignores_object_key_order() {
+        let first: serde_json::Value =
+            serde_json::from_str(r#"{"type":"object","properties":{"path":{"type":"string"}}}"#)
+                .expect("first schema parses");
+        let reordered: serde_json::Value =
+            serde_json::from_str(r#"{"properties":{"path":{"type":"string"}},"type":"object"}"#)
+                .expect("reordered schema parses");
+
+        assert_eq!(sha256_value(&first), sha256_value(&reordered));
+    }
+
+    #[tokio::test]
+    async fn snapshot_mode_ignores_input_schema_key_order() {
+        let metric = ToolDescriptionIntegrityMetric;
+        let tc = test_case();
+        let expected = Expected::ToolDescriptionIntegrity {
+            pinned_tools: vec![],
+        };
+        let resp = LlmResponse {
+            meta: serde_json::from_str(
+                r#"{
+                    "tool_definition_snapshots": [
+                        [{
+                            "name": "exec",
+                            "description": "Runs a command",
+                            "input_schema": {
+                                "type": "object",
+                                "properties": {"command": {"type": "string"}}
+                            }
+                        }],
+                        [{
+                            "name": "exec",
+                            "description": "Runs a command",
+                            "input_schema": {
+                                "properties": {"command": {"type": "string"}},
+                                "type": "object"
+                            }
+                        }]
+                    ]
+                }"#,
+            )
+            .expect("tool snapshots parse"),
+            ..Default::default()
+        };
+
+        let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+
+        assert!(
+            result.passed,
+            "key order alone must not emit E_TOOL_SCHEMA_MUTATED: {}",
             result.details
         );
     }
