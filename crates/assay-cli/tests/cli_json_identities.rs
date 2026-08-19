@@ -68,17 +68,6 @@ fn recorded(marker: &str) -> Vec<String> {
         .collect()
 }
 
-fn recorded_set(marker: &str) -> BTreeSet<String> {
-    let mut set = BTreeSet::new();
-    for line in recorded(marker) {
-        assert!(
-            set.insert(line.clone()),
-            "{INVENTORY}: `{marker}` records {line:?} twice"
-        );
-    }
-    set
-}
-
 /// The `not-cli-documents` block, as `identity -> reason`.
 ///
 /// The reason is mandatory. A static check cannot tell a document from an event when the naming and
