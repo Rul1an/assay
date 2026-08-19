@@ -15,6 +15,7 @@
 //! - a publisher or reason variant silently dropped from the table
 //! - a new `InitSuccess` variant with no driven `PUBLISHERS` case
 
+use std::collections::{BTreeMap, BTreeSet};
 #[path = "../../../tests/support/bounded_process.rs"]
 #[allow(dead_code)]
 mod bounded_process;
@@ -340,20 +341,112 @@ fn drive_publisher(publisher: Publisher, value: &str) {
 #[test]
 fn every_init_success_variant_is_a_driven_publisher() {
     let source = include_str!("../src/cli/commands/init_report.rs");
-    let table = publishers_table(include_str!("recovery_argv_publisher_parity.rs"));
+    let registered = parsed_publisher_ids(publishers_table(include_str!(
+        "recovery_argv_publisher_parity.rs"
+    )));
     let variants = init_success_variants(source);
     assert!(
         !variants.is_empty(),
         "InitSuccess must keep its variants; an empty scan is not a clean inventory"
     );
-    for variant in variants {
-        for id in driven_ids_for_variant(&variant) {
+
+    // Many ids from one variant is the shipped `Validate` shape. One id from many variants is an
+    // ambiguity: the second variant would inherit the first's registration and never need its own,
+    // which is how a new live variant stays green while publishing unreviewed argv.
+    let mut owner: BTreeMap<String, String> = BTreeMap::new();
+    let mut expected: BTreeSet<String> = BTreeSet::new();
+    for variant in &variants {
+        for id in driven_ids_for_variant(variant) {
+            if let Some(first) = owner.get(&id) {
+                panic!(
+                    "InitSuccess::{first} and InitSuccess::{variant} both derive {id}; the second \
+                     would inherit the first's PUBLISHERS entry. Give the derivation a \
+                     discriminating name or register each shape."
+                );
+            }
+            owner.insert(id.clone(), variant.clone());
+            expected.insert(id);
+        }
+    }
+
+    // Both directions. Registration-without-a-shape is the drift the old one-way check allowed:
+    // a publisher could stay in the table after its production variant was removed, and the test
+    // that exists to inventory the live surface would keep passing.
+    let registered_init: BTreeSet<String> = registered
+        .iter()
+        .filter(|id| id.starts_with("Init"))
+        .cloned()
+        .collect();
+    assert_eq!(
+        expected, registered_init,
+        "InitSuccess publishing shapes and Init* PUBLISHERS entries must match exactly; \
+         left-only entries publish Run argv unregistered, right-only entries register a shape \
+         production no longer has"
+    );
+}
+
+/// Parse `PUBLISHERS` into the identifiers it actually registers.
+///
+/// The previous check asked whether the table's raw source text contained `Publisher::{id}`, which
+/// is a neighbouring property in three ways measured in #2383: a `//` comment naming a publisher
+/// satisfied it (M15), a duplicate or colliding entry was invisible to it (M14), and it could only
+/// ever answer one direction. Source text is not the set being asserted about, so this parses the
+/// set and compares sets.
+fn parsed_publisher_ids(table: &str) -> BTreeSet<String> {
+    let mut ids = BTreeSet::new();
+    for line in table.lines() {
+        // A comment cannot register anything, so it is removed before any name is read.
+        let code = line.split("//").next().unwrap_or("");
+        for entry in code.split(',') {
+            let entry = entry.trim();
+            if entry.is_empty() {
+                continue;
+            }
+            let id = entry.strip_prefix("Publisher::").unwrap_or_else(|| {
+                panic!("PUBLISHERS entry is not a `Publisher::` path: {entry:?}")
+            });
             assert!(
-                table.contains(&format!("Publisher::{id}")),
-                "InitSuccess::{variant} publishes Run argv but {id} is absent from PUBLISHERS"
+                !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric()),
+                "PUBLISHERS entry is not a plain identifier: {entry:?}"
+            );
+            assert!(
+                ids.insert(id.to_string()),
+                "PUBLISHERS registers {id} twice; a duplicate hides which shape a row covers"
             );
         }
     }
+    assert!(!ids.is_empty(), "PUBLISHERS must not parse to an empty set");
+    ids
+}
+
+/// Controls for [`parsed_publisher_ids`], one per mutation #2383 measured as surviving.
+///
+/// Each runs the shape that used to pass and asserts it no longer does. A guard never shown to
+/// reject anything proves nothing, and these three are the reason this parser exists.
+#[test]
+fn publisher_parsing_rejects_the_measured_mutations() {
+    // M15, comment containment: the old `contains` was satisfied by a commented-out name.
+    let commented = parsed_publisher_ids("Publisher::InitPreset, // Publisher::InitCiFollowUp\n");
+    assert_eq!(
+        commented,
+        BTreeSet::from(["InitPreset".to_string()]),
+        "a commented publisher must not register"
+    );
+
+    // M14's mechanism at this layer: a duplicate entry must be refused rather than folded away.
+    let duplicated = std::panic::catch_unwind(|| {
+        parsed_publisher_ids("Publisher::InitPreset,\nPublisher::InitPreset,\n")
+    });
+    assert!(
+        duplicated.is_err(),
+        "a duplicate registration must be refused"
+    );
+
+    // Anything that is not a plain `Publisher::Ident` is refused rather than guessed at.
+    let malformed = std::panic::catch_unwind(|| parsed_publisher_ids("Publisher::Init Preset,\n"));
+    assert!(malformed.is_err(), "a non-identifier entry must be refused");
+    let foreign = std::panic::catch_unwind(|| parsed_publisher_ids("SomethingElse::Init,\n"));
+    assert!(foreign.is_err(), "a non-Publisher path must be refused");
 }
 
 fn publishers_table(harness: &str) -> &str {
