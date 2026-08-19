@@ -80,6 +80,16 @@ Assay also runs a separate, pinned upstream reference lane for the official MCP 
 and Rust SDK. That lane checks named upstream scenarios and source integrity. It does not represent
 Assay as an MCP client or server and does not turn this corpus into a broad conformance claim.
 
+## Closed 2026-07-28 server adapter
+
+`assay-mcp-server` compiles a complete stateless adapter for the pinned revision: per-request
+`_meta` validation, `server/discover`, deterministic `tools/list` with `ttlMs=0` /
+`cacheScope=private`, and the five release tools with modern result metadata. The public stdio
+loop does not call that adapter. A client still cannot obtain a modern result: `_meta: 2026-07-28`
+stays `-32022` with the legacy supported set, `server/discover` stays `-32601`, and initialize
+still falls back to `2025-11-25`. This is not negotiation and not an advertisement that the
+revision is served.
+
 ## Claim Ceiling
 
 This run supports a bounded statement: Assay preserves the measured privileged-action evidence

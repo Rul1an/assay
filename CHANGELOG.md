@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- A complete MCP `2026-07-28` stateless server adapter exists in-process behind a
+  closed gate. Public stdio still refuses `_meta: 2026-07-28` with `-32022`,
+  keeps `server/discover` at `-32601`, and does not advertise or accept that
+  revision (#2482).
+
 ### Changed
 - `assay_check_sequence` answers the sequence-rule language by calling
   `assay_core::sequence_eval` and mapping the record into its published JSON.
