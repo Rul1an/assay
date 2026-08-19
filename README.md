@@ -160,7 +160,7 @@ Repositories that compose with Assay's evidence layer:
 - [Assay-Harness](https://github.com/Rul1an/Assay-Harness) — recipe, gate, and report layer over canonical evidence artifacts.
 - [observed-effect-v0](https://github.com/Rul1an/observed-effect-v0) — worked examples of the bounded observed-effect evidence record and its neutral carriers (in-toto, SCITT, MCP evidenceRef).
 - [gateway-evidence-replay](https://github.com/Rul1an/gateway-evidence-replay) — deterministic offline replay verifier for gateway-path evidence bundles.
-- [RGE-Bench](https://github.com/rge-bench/rge-bench) — a neutral, externally reproduced conformance kit for evidence reviewability, maintained separately under its own machine-checked neutrality guard.
+- [RGE-Bench](https://github.com/rge-bench/rge-bench) — a conformance kit for evidence reviewability, maintained separately under its own machine-checked neutrality guard. Reproduction there is **digest-scoped and does not carry forward**: the v1 71-vector digest `sha256:e769822b…` carries one reported **independent implementation** by a second author on a different stack ([JM-Lab/rge-bench-java](https://github.com/JM-Lab/rge-bench-java), written from the contract text importing nothing from the kit, recomputing every `expected` from `inputs`) against author-supplied vectors, while the current v2-candidate digest `sha256:ba0e3795…` (95 vectors) has **not** been reproduced by anyone but the author. See its [REPRODUCTIONS.md](https://github.com/rge-bench/rge-bench/blob/main/REPRODUCTIONS.md).
 
 ## Open profile: privileged-mcp-action/v0
 
