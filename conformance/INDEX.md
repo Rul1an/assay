@@ -11,6 +11,10 @@ python3 conformance/run_all.py --json        # machine-readable report
 
 Standard library only. No Assay import, no pip install, no network.
 
+The runner's own behaviour is tested in `conformance/tests/test_run_all.py`
+(`python3 conformance/tests/test_run_all.py`), including every path that must
+grade `false` or `unproved` rather than pass silently.
+
 ## The corpora
 
 | Corpus | Vectors | Runner | Maturity |
@@ -42,8 +46,16 @@ report, or a test filter that selected nothing. It is **never** inferred from a
 primary check that ran and failed, because that would report more than the run
 established. Where a run mixes states, the worst one wins.
 
-Exit codes: `0` nothing disagreed and nothing was left unproved · `1` at least
-one suite graded `false` · `2` at least one suite graded `unproved`.
+Exit codes, with `false` taking precedence over `unproved`:
+
+| Code | Condition |
+|---|---|
+| `0` | no suite graded `false` and none graded `unproved` |
+| `1` | **at least one suite graded `false`**, regardless of any `unproved` |
+| `2` | no suite graded `false` and at least one graded `unproved` |
+
+A run with both a `false` and an `unproved` suite exits `1`: a checked disagreement is a
+stronger, more actionable result than a check that could not complete.
 
 ## Suites that do not run, and why that is not a pass
 
@@ -81,7 +93,15 @@ Where a reproduction is recorded, it carries an
 class, because the distinction is easy to blur and ACM already drew it. Note the
 terms are the reverse of the common intuition:
 
-| Class | Meaning |
+**These one-line glosses are abbreviations, not the criteria.** The badges carry
+requirements this table does not restate: *Artifacts Available* needs an archival
+repository, a unique dereferenceable identifier and a plan for permanent
+accessibility; *Artifacts Evaluated — Functional* additionally needs the artifact
+to be documented, consistent, complete and exercisable, so running a checker over
+shipped vectors does not on its own earn it. Read the criteria at the source
+before claiming a badge; the column below only says which distinction is meant.
+
+| Class | Distinction meant here |
 |---|---|
 | Artifacts Available | the artifact is published and permanently retrievable |
 | Artifacts Evaluated — Functional | the artifact runs and produces its own stated result |

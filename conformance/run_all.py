@@ -36,6 +36,8 @@ import argparse
 import json
 import re
 import subprocess
+import tempfile
+import time
 import sys
 from pathlib import Path
 
@@ -49,42 +51,103 @@ NEEDS_CANDIDATE, NOT_SELECTED, EXTERNAL = "needs_candidate", "not_selected", "ex
 RANK = {PROVED: 0, NEEDS_CANDIDATE: 0, NOT_SELECTED: 0, EXTERNAL: 0, UNPROVED: 1, FALSE: 2}
 
 
+# Output ceiling per child process. Both children can emit arbitrary output and
+# a timeout does not bound memory, so the cap is applied while the process runs
+# rather than after it exits.
+OUTPUT_CAP_BYTES = 4 * 1024 * 1024
+
+
+class _OutputTooLarge(Exception):
+    """A child exceeded OUTPUT_CAP_BYTES; its output is not materialized."""
+
+
+def _run_capped(cmd: list[str], cwd: Path, timeout: int) -> subprocess.CompletedProcess:
+    """subprocess.run with a ceiling on how much output is ever held.
+
+    Streams both pipes to temporary files, polls their combined size while the
+    child runs, and kills it the moment the cap is crossed. Only the first
+    OUTPUT_CAP_BYTES are ever read into memory.
+    """
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        proc = subprocess.Popen(cmd, cwd=str(cwd), stdout=out, stderr=err)
+        deadline = time.monotonic() + timeout
+        try:
+            while True:
+                try:
+                    proc.wait(timeout=0.25)
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
+                if out.tell() + err.tell() > OUTPUT_CAP_BYTES:
+                    proc.kill(); proc.wait()
+                    raise _OutputTooLarge()
+                if time.monotonic() > deadline:
+                    proc.kill(); proc.wait()
+                    raise subprocess.TimeoutExpired(cmd, timeout)
+        finally:
+            if proc.poll() is None:
+                proc.kill(); proc.wait()
+        if out.tell() + err.tell() > OUTPUT_CAP_BYTES:
+            raise _OutputTooLarge()
+        out.seek(0); err.seek(0)
+        return subprocess.CompletedProcess(
+            cmd, proc.returncode,
+            out.read(OUTPUT_CAP_BYTES).decode("utf-8", "replace"),
+            err.read(OUTPUT_CAP_BYTES).decode("utf-8", "replace"),
+        )
+
+
 def _stdlib_jsonrpc(suite: dict) -> tuple[str, str]:
     """examples/mcp-jsonrpc-id-conformance: `check.py reproduce`, offline."""
     d = REPO / suite["path"]
     if not (d / "check.py").is_file():
         return UNPROVED, "check.py absent at %s" % suite["path"]
     try:
-        p = subprocess.run(
-            [sys.executable, "check.py", "reproduce"],
-            cwd=d, capture_output=True, text=True, timeout=120,
-        )
+        p = _run_capped([sys.executable, "check.py", "reproduce"], d, timeout=120)
+    except _OutputTooLarge:
+        return UNPROVED, "output exceeded %d bytes; not materialized" % OUTPUT_CAP_BYTES
     except (OSError, subprocess.TimeoutExpired) as exc:
         return UNPROVED, "runner could not complete: %r" % (exc,)
-    if p.returncode != 0:
-        return UNPROVED, "exit %d; stderr: %s" % (p.returncode, p.stderr.strip()[:200])
+
+    # Parse BEFORE classifying the exit status. A checker may report a real
+    # disagreement through a nonzero exit while still emitting a usable report,
+    # and "checked and disagreed" must not be filed as "could not check".
     try:
         report = json.loads(p.stdout)
-    except json.JSONDecodeError as exc:
-        return UNPROVED, "report is not JSON: %s" % exc
+    except json.JSONDecodeError:
+        report = None
+
+    if report is None:
+        if p.returncode != 0:
+            return UNPROVED, "exit %d, no parseable report; stderr: %s" % (
+                p.returncode, p.stderr.strip()[:200])
+        return UNPROVED, "exit 0 but the report is not JSON"
+
     status = report.get("status")
     expected = suite["expect_status"]
-    if status == expected:
-        s = report.get("summary", {})
-        return PROVED, "status=%s %s" % (status, json.dumps(s, sort_keys=True))
-    return FALSE, "status=%r, pinned expectation is %r" % (status, expected)
+    if status != expected:
+        return FALSE, "status=%r, pinned expectation is %r (exit %d)" % (
+            status, expected, p.returncode)
+    if p.returncode != 0:
+        # Status agrees but the checker still failed: an execution condition we
+        # observed, not a disagreement we can report.
+        return UNPROVED, "status matched but exit was %d; stderr: %s" % (
+            p.returncode, p.stderr.strip()[:200])
+    return PROVED, "status=%s %s" % (status, json.dumps(report.get("summary", {}), sort_keys=True))
 
 
 def _cargo(suite: dict) -> tuple[str, str]:
     """Rust-driven corpora. Reports unproved when the toolchain is absent."""
     try:
-        p = subprocess.run(
+        p = _run_capped(
             ["cargo", "test", "-p", suite["crate"], suite["cargo_target_flag"],
              suite["cargo_target"], "--", "--nocapture"],
-            cwd=REPO, capture_output=True, text=True, timeout=1800,
+            REPO, timeout=1800,
         )
     except FileNotFoundError:
         return UNPROVED, "cargo not on PATH"
+    except _OutputTooLarge:
+        return UNPROVED, "cargo output exceeded %d bytes; not materialized" % OUTPUT_CAP_BYTES
     except (OSError, subprocess.TimeoutExpired) as exc:
         return UNPROVED, "runner could not complete: %r" % (exc,)
     out = p.stdout + p.stderr

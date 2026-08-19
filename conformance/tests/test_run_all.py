@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""Behavioural tests for conformance/run_all.py. Standard library only.
+
+    python3 conformance/tests/test_run_all.py
+
+These exist because a runner that cannot report failure is worthless, and
+because the grading distinction this runner is built on -- "checked and
+disagreed" versus "could not check" -- is exactly the kind of thing that
+silently inverts. Every failure path below is exercised against a fake child
+process rather than asserted in prose.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import run_all  # noqa: E402
+
+
+def _fake_suite(**kw):
+    s = {"id": "fake", "path": "examples/mcp-jsonrpc-id-conformance",
+         "expect_status": "contradiction"}
+    s.update(kw)
+    return s
+
+
+class _Child:
+    """Stands in for _run_capped: returns a canned CompletedProcess."""
+
+    def __init__(self, stdout="", stderr="", returncode=0, raises=None):
+        self.args = (stdout, stderr, returncode, raises)
+
+    def __call__(self, cmd, cwd, timeout):
+        stdout, stderr, rc, raises = self.args
+        if raises is not None:
+            raise raises
+        return subprocess.CompletedProcess(cmd, rc, stdout, stderr)
+
+
+class StdlibClassification(unittest.TestCase):
+    """The proved / false / unproved split, one test per boundary."""
+
+    def _run(self, child):
+        orig, run_all._run_capped = run_all._run_capped, child
+        try:
+            return run_all._stdlib_jsonrpc(_fake_suite())
+        finally:
+            run_all._run_capped = orig
+
+    def test_matching_status_and_clean_exit_is_proved(self):
+        g, _ = self._run(_Child(json.dumps({"status": "contradiction", "summary": {}})))
+        self.assertEqual(g, run_all.PROVED)
+
+    def test_mismatching_status_is_false_not_unproved(self):
+        g, d = self._run(_Child(json.dumps({"status": "no_contradiction"})))
+        self.assertEqual(g, run_all.FALSE)
+        self.assertIn("no_contradiction", d)
+
+    def test_mismatch_reported_through_a_nonzero_exit_is_still_false(self):
+        # The regression this test exists for: a checker that signals a real
+        # disagreement by exiting nonzero while still emitting a usable report
+        # must not be filed as "could not check".
+        g, _ = self._run(_Child(json.dumps({"status": "no_contradiction"}), returncode=1))
+        self.assertEqual(g, run_all.FALSE)
+
+    def test_nonzero_exit_with_no_parseable_report_is_unproved(self):
+        g, d = self._run(_Child("not json", "boom", returncode=2))
+        self.assertEqual(g, run_all.UNPROVED)
+        self.assertIn("boom", d)
+
+    def test_clean_exit_with_unparsable_report_is_unproved(self):
+        g, _ = self._run(_Child("not json"))
+        self.assertEqual(g, run_all.UNPROVED)
+
+    def test_matching_status_but_nonzero_exit_is_unproved(self):
+        g, _ = self._run(_Child(json.dumps({"status": "contradiction"}), returncode=3))
+        self.assertEqual(g, run_all.UNPROVED)
+
+    def test_output_over_the_cap_is_unproved_and_says_so(self):
+        g, d = self._run(_Child(raises=run_all._OutputTooLarge()))
+        self.assertEqual(g, run_all.UNPROVED)
+        self.assertIn("exceeded", d)
+
+    def test_timeout_is_unproved(self):
+        g, _ = self._run(_Child(raises=subprocess.TimeoutExpired("x", 1)))
+        self.assertEqual(g, run_all.UNPROVED)
+
+    def test_missing_checker_is_unproved(self):
+        g, d = run_all._stdlib_jsonrpc(_fake_suite(path="does/not/exist"))
+        self.assertEqual(g, run_all.UNPROVED)
+        self.assertIn("absent", d)
+
+
+class CargoClassification(unittest.TestCase):
+    def _run(self, child):
+        suite = {"crate": "c", "cargo_target_flag": "--test", "cargo_target": "t"}
+        orig, run_all._run_capped = run_all._run_capped, child
+        try:
+            return run_all._cargo(suite)
+        finally:
+            run_all._run_capped = orig
+
+    def test_zero_tests_selected_is_unproved_not_proved(self):
+        # cargo exits 0 when its filter matches nothing, so a green exit alone
+        # would report a suite that never ran as a suite that agreed.
+        g, d = self._run(_Child("running 0 tests\n", returncode=0))
+        self.assertEqual(g, run_all.UNPROVED)
+        self.assertIn("NO tests", d)
+
+    def test_passing_tests_report_the_count(self):
+        g, d = self._run(_Child("test result: ok. 7 passed; 0 failed\n"))
+        self.assertEqual(g, run_all.PROVED)
+        self.assertIn("7 tests", d)
+
+    def test_assertion_failure_is_false(self):
+        g, _ = self._run(_Child("test result: FAILED. 1 passed; 2 failed\n", returncode=101))
+        self.assertEqual(g, run_all.FALSE)
+
+    def test_compile_error_is_unproved_not_false(self):
+        # A build that never ran is an execution condition, not a disagreement.
+        g, _ = self._run(_Child("", "error[E0433]: failed to resolve", returncode=101))
+        self.assertEqual(g, run_all.UNPROVED)
+
+    def test_missing_toolchain_is_unproved(self):
+        g, d = self._run(_Child(raises=FileNotFoundError()))
+        self.assertEqual(g, run_all.UNPROVED)
+        self.assertIn("cargo", d)
+
+
+class ExitCodePrecedence(unittest.TestCase):
+    """false outranks unproved, and non-run states never set an exit code."""
+
+    def test_rank_orders_false_above_unproved(self):
+        self.assertGreater(run_all.RANK[run_all.FALSE], run_all.RANK[run_all.UNPROVED])
+
+    def test_declared_non_run_states_rank_with_proved(self):
+        for state in (run_all.NEEDS_CANDIDATE, run_all.NOT_SELECTED, run_all.EXTERNAL):
+            self.assertEqual(run_all.RANK[state], run_all.RANK[run_all.PROVED], state)
+
+
+class OutputCap(unittest.TestCase):
+    def test_a_child_that_floods_is_killed_and_raises(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(run_all._OutputTooLarge):
+                run_all._run_capped(
+                    [sys.executable, "-c",
+                     "import sys\nwhile True: sys.stdout.write('x'*65536)"],
+                    Path(d), timeout=60)
+
+    def test_normal_output_passes_through(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = run_all._run_capped([sys.executable, "-c", "print('hi')"], Path(d), timeout=30)
+            self.assertEqual(p.returncode, 0)
+            self.assertIn("hi", p.stdout)
+
+
+class EndToEnd(unittest.TestCase):
+    def test_json_mode_is_wellformed_and_counts_the_non_run_suites(self):
+        p = subprocess.run([sys.executable, str(run_all.__file__), "--json"],
+                           capture_output=True, text=True, timeout=300)
+        self.assertIn(p.returncode, (0, 1, 2))
+        d = json.loads(p.stdout)
+        self.assertEqual(d["schema"], "assay.conformance.run_all.v1")
+        self.assertEqual(len(d["suites"]), d["ran"] + d["not_run"])
+        self.assertGreater(d["not_run"], 0, "non-run suites must be counted, never omitted")
+
+    def test_text_mode_always_names_the_suites_that_did_not_run(self):
+        p = subprocess.run([sys.executable, str(run_all.__file__)],
+                           capture_output=True, text=True, timeout=300)
+        self.assertIn("NOT RUN (declared, not a pass)", p.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
