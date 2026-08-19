@@ -4,6 +4,9 @@ pub(crate) mod era;
 #[cfg(test)]
 mod era_parity_tests;
 pub mod g3_auth_context;
+pub mod modern_wire;
+#[cfg(test)]
+mod modern_wire_tests;
 
 pub use g3_auth_context::AuthContextProjection;
 pub mod identity;
