@@ -31,7 +31,10 @@ A top-level JSON document a command writes to stdout or to a caller-named path, 
 string as its `schema`.
 
 Each row is `identity | writing file | naming file`, where `-` means the writing file also names the
-identity. The test asserts the writing file calls a writer and the naming file carries the identity.
+identity. The test asserts three things: the writing file calls a writer, the naming file carries the
+identity, and **the writing file is about this identity** — it names the identity itself, or, when
+the two files differ, mentions a symbol the naming file publishes. Without the third, a row could be
+bound to a file that writes some other document and happens to call a writer.
 The third column exists because some documents split the two: `assay doctor` sets its `schema` in
 `diagnostics/probes.rs` and writes in `doctor/implementation.rs`, and the three `evidence schema`
 reports are declared in `schema/reports.rs` and written in `schema/write.rs`. Recording the split is
@@ -202,6 +205,10 @@ of, and there is no instrument that fixes that.
   The theory that produced those six ("a projection, not a document") writes a perfectly non-empty
   reason. **#2485 must not read these sentences as evidence that a row is right.** Three of them have
   been wrong today, and the third was written after conceding the first two.
+- **The writer-to-identity tie is a token check, not dataflow.** A writer that mentions the right
+  constant while serializing something else would pass. Closing that means following the value into
+  the `schema` field, which nothing here does.
+
 - **The writer list is a fixed set of idioms**, and it has been wrong twice. `serde_json::to_writer`
   was missing until `assay describe` exposed it; `to_vec_pretty`, `tokio::fs::write`,
   `serde_json::to_string` and a bare `fs::write` were missing until a review opened the emit paths.
