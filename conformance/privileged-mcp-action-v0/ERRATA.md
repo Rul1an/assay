@@ -7,111 +7,222 @@ Recorded 2026-08-19. **No vector, expectation or digest is changed by this file.
 corpus whose digest is its identity does not get edited; it gets an erratum, and a later corpus
 gets the fix.
 
-## What reproducing this corpus does and does not establish
+## What reproducing this corpus can and cannot distinguish
 
-An independent implementation that reproduces all fourteen outcomes has demonstrated agreement on
-**six** of the profile's rules. It has not demonstrated agreement on the profile.
+Reproducing all fourteen outcomes **can distinguish an implementation on at most five of the
+profile's rules, and even those only at the points these vectors probe.** It cannot distinguish it on
+the other twenty-two, and it does not demonstrate agreement on the profile.
+
+The ceiling wording is load-bearing. Mutation adequacy licenses one direction only: *a surviving
+mutant means the corpus cannot transmit that rule.* It does **not** license the reverse, that a killed
+mutant means anyone reproducing the outcomes holds the rule. A kill shows that deleting the rule from
+*this* implementation moved an outcome, which is a fact about this implementation. Five is a bound on
+what can be shown here, never a floor on what was shown.
 
 This is not a defect in the vectors as written, nor a claim that the reference implementation is
 wrong. It is a statement about **what fourteen vectors can transmit**. Where the profile promises a
-rule that no vector isolates, an implementation can omit that rule, reproduce this digest, and be
-indistinguishable here from one that honours it.
+rule that no vector isolates, an implementation can omit that rule, reproduce all fourteen expected
+outcomes, and be indistinguishable here from one that honours it.
 
-Measured with [`corpus-adequacy`](https://github.com/corpus-adequacy/corpus-adequacy) over the
-normative comparison surface this corpus declares in `MANIFEST.json`
-(`bundle_integrity`, `verdict`, `claims`):
+## The measurement
+
+Twenty-seven declared in-scope rules, each promised by [v0.md](../../docs/profiles/privileged-mcp-action/v0.md)
+with a quoted sentence and section reference (audited independently; none is an implementation
+detail smuggled into the count).
 
 ```
 6 of 25 DECLARED in-scope rules killed (24.0%). 4 declared out of scope, 31 rules declared.
 control-killed. 19 mutant(s) survived. 2 KNOWN HOLES.
 ```
 
-Reproduce with:
+That block is the tool's own output, kept verbatim. **Neither of its numbers is the number to quote
+here**, for two separate reasons:
+
+- Its denominator of 25 excludes the two acknowledged holes. That is right for a *score* and wrong for
+  this document, whose subject is what the corpus fails to transmit: an acknowledged hole fails to
+  transmit exactly as a survivor does. The denominator here is **twenty-seven**.
+- Its numerator of 6 counts rules the corpus discriminates *against this implementation*. One of the
+  six does not survive the change of subject to a third party (below), so the numerator here is
+  **five**.
+
+**Five of twenty-seven, 18.5%.**
+
+Reproduce the tool's run with [`corpus-adequacy`](https://github.com/corpus-adequacy/corpus-adequacy)
+at commit `6c419200b284ec84dffeb54ca20800ce1c445954`, from the repository root, with that tool checked
+out as a sibling directory:
 
 ```
-python3 ../../../corpus-adequacy/corpus_adequacy.py \
-  ../adequacy/privileged-mcp-action-v0.manifest.json
+python3 ../corpus-adequacy/corpus_adequacy.py \
+  conformance/adequacy/privileged-mcp-action-v0.manifest.json
 ```
 
-## The six rules reproduction does establish
+It edits declared source files in place and restores them. Do not run it against a tree you are also
+working in, and do not commit while it runs.
 
-| rule | isolated by |
-|---|---|
-| exactly one decision record | `bad-103` |
-| the decision value is in the closed vocabulary | `bad-107` |
-| an unrecognised in-namespace payload schema fails closed (Stage 2) | `bad-104` |
-| the decision `action.target_digest` is a well-formed sha256 | `bad-102` |
-| `fail_closed` equals (`decision` == `"deny"`) | `bad-106` |
-| a marker binds on the `target_digest` leg | `bad-105` |
+## The five rules a reproduction can distinguish
 
-## The nineteen it does not
+| rule | isolated by | what the vector actually probes |
+|---|---|---|
+| exactly one decision record | `bad-103` | two well-formed decisions |
+| an unrecognised in-namespace payload schema fails closed (Stage 2) | `bad-104` | a `.v1` schema inside the namespace |
+| the decision `action.target_digest` is a well-formed sha256 | `bad-102` | **`null` only.** No vector carries uppercase hex, a wrong length, an empty string, or a missing `sha256:` prefix, all of which §5 Stage 2 also names |
+| `fail_closed` equals (`decision` == `"deny"`) | `bad-106` | **the deny arm only.** No vector carries `allow` with `fail_closed: true`, so an implementation checking only `deny ⇒ fail_closed` reproduces all fourteen |
+| a marker binds on the `target_digest` leg | `bad-105` | an all-zero digest, tool name matching |
 
-Each is promised by [v0.md](../../docs/profiles/privileged-mcp-action/v0.md) and is not
-discriminated by any of the fourteen vectors.
+### The sixth is not isolated for a third party
 
-**Cardinality and shape**
-- at most one observation record; at most one establish record
-- the observation `caller_visible_response_digest` is a well-formed sha256
-- the decision `tool.name` is a non-empty string; the observation `call.tool_name` is a non-empty string
-- the event type equals the payload schema it declares
-- an in-namespace event type over a payload declaring no in-namespace schema fails closed
+The tool kills the **closed decision vocabulary** rule, and for the reference implementation that is
+correct. It does not carry over. `bad-107`'s decision payload is `{"decision": "permit", …,
+"fail_closed": true}`, and `"permit"` is not `"deny"`, so §5 Stage 2's `fail_closed` rule is
+independently violated by the same record. A stranger who applies the `fail_closed` rule without
+guarding it on vocabulary membership rejects `bad-107` on that ground alone and never implements the
+closed set.
+
+The reference implementation does guard it — `verify_privileged_mcp_action.rs:560` only compares
+`fail_closed` when `DECISION_VOCAB.contains(&d)` — and that guard is an implementation choice the
+profile nowhere requires. Secondary point on the same row: with the vocabulary check deleted, the
+reference reaches `unreachable!("decision vocabulary is closed")`, so the mutant is killed by a panic
+rather than by a verdict, and reproducing a crash is not what this corpus asks anyone to do.
+
+The rule is therefore counted below among the twenty-two, not among the five.
+
+## The twenty-two it cannot
+
+Each is promised by [v0.md](../../docs/profiles/privileged-mcp-action/v0.md). Numbered so the count is
+checkable against the list.
+
+**Cardinality and record shape**
+1. at most one observation record
+2. at most one establish record
+3. the observation `caller_visible_response_digest` is a well-formed sha256
+4. the decision `tool.name` is a non-empty string
+5. the observation `call.tool_name` is a non-empty string
+6. the event type equals the payload schema it declares — *structurally blocked, see below*
+7. an in-namespace event type over a payload declaring no in-namespace schema fails closed — *structurally blocked, see below*
 
 **Closed vocabularies**
-- the decision `reason` is in the closed producer set
-- the decision `drift_state` is in the closed set
-- the `establish_path` is in the closed set
-- `establish_attempted` equals (`run_outcome` != `not_performed`)
+8. the decision value is in the closed set `allow | deny` — *see the section above; the tool scores this killed*
+9. the decision `reason` is in the closed producer set
+10. the decision `drift_state` is in the closed set
+11. the `establish_path` is in the closed set
+12. `establish_attempted` equals (`run_outcome` != `not_performed`)
 
 **Marker binding**
-- a marker binds on the `tool_name` leg
-- a caller-visible denial marker is backed by a decision record
-- a marker with a null or empty `call.target_digest` is unbindable and invalid
+13. a marker binds on the `tool_name` leg
+14. a caller-visible denial marker is backed by a decision record — *no vector can ever isolate this, see below*
+15. a marker with a null or empty `call.target_digest` is unbindable and invalid
 
 **Marker payload members**
-- `caller_visible_error.code`, `.origin` and `.reason` are each present and non-null
+16. `caller_visible_error.code` is present and non-null
+17. `caller_visible_error.origin` is present and non-null
+18. `caller_visible_error.reason` is present and non-null
 
 **Producer non-claims**
-- the decision carries the five producer non-claims verbatim
-- the observation carries the four producer non-claims verbatim
+19. the decision carries the five producer non-claims verbatim — *not derivable from the spec text, see below*
+20. the observation carries the four producer non-claims verbatim — *not derivable from the spec text, see below*
 
-## Two known holes, and why they are structural
+**The Stage 3 marker triple**
+21. `caller_visible_error.origin` must be `"assay-proxy"`
+22. `caller_visible_error.code` must be `-32042`
 
-`caller_visible_error.origin` must be `"assay-proxy"` and `caller_visible_error.code` must be
-`-32042` — both legs of the Stage 3 marker triple, both promised, neither discriminated.
+The triple's third leg, `schema`, is decided earlier at Stage 2, so of its three legs this corpus
+isolates none.
 
-The cause is not an omission in any one vector. [`gen_vectors.py:103`](gen_vectors.py) hard-codes the
-single marker shape and is the only marker construction site, so **no vector in this corpus can vary
-either member**. Closing them requires a generator parameter, which is a new corpus.
+## Which of the twenty-two a new vector could close, and which it could not
 
-The triple's third leg, `schema`, is decided earlier at Stage 2 and so is not discriminated by the
-triple match either. Of the triple's three legs this corpus isolates none.
+An earlier draft of this file had this exactly backwards, and the correction matters because it
+changes what a fix costs.
 
-## Rules out of scope for this corpus
+**Ordinary, closable by writing a vector** — including 21 and 22, the two recorded as `known_holes`.
+The generator hard-codes the marker shape at [`gen_vectors.py:103`](gen_vectors.py), but it already
+carries a hand-written literal payload dict at line 320, so a vector varying `caller_visible_error.code`
+or `.origin` can be written the same way. Closing them costs a new vector and therefore a new digest,
+which is the ordinary price, not a structural barrier.
 
-Four declared rules are excluded with stated reasons in
-[`../adequacy/privileged-mcp-action-v0.manifest.json`](../adequacy/privileged-mcp-action-v0.manifest.json):
-two mutate a v1 arm or an earlier stage and cannot move an outcome here even in principle, and one —
-the establish-journey contradiction — emits only a *finding*, and findings are not on this corpus's
-normative comparison surface. That last one is undiscriminable in principle rather than in practice,
-and becomes an in-scope hole the moment findings join the surface.
+**Structurally blocked, needing a generator change rather than a vector** — rules 6 and 7. `event()`
+sets `"type": payload["schema"]` unconditionally at lines 121 and 130, so no vector this generator can
+emit has a type/schema mismatch, and a payload with no `schema` member raises `KeyError` before a
+bundle exists.
+
+**Not closable by any vector at all** — rule 14. `marker_not_backed` fires only when there is no
+decision record, and a bundle with no decision record already violates the decision-cardinality rule
+unconditionally. On the declared comparison surface no bundle can exist in which this rule alone moves
+an outcome. It is in scope in the manifest while the establish-journey contradiction is out of scope
+for the same in-principle reason; that scoping is inconsistent and is recorded here rather than
+quietly aligned.
+
+**Not derivable from the specification text** — rules 19 and 20. §5 Stage 2 requires the five and four
+producer non-claim strings "verbatim" and refers the reader to the corpus for the exact bytes; v0.md
+does not enumerate them, and the strings §3 and §6 list are the *report* non-claims, which are
+different text. §8 asks for reproduction "from this specification text alone", and for these two rules
+that is not satisfiable from the text. This is a gap in the specification rather than in the corpus.
+
+## The four rules out of scope for this corpus
+
+Excluded with stated reasons in
+[`../adequacy/privileged-mcp-action-v0.manifest.json`](../adequacy/privileged-mcp-action-v0.manifest.json).
+All four are named, because an earlier draft said "two … and one" while claiming four, and the one it
+left out is the one with the contested history.
+
+1. **an unrecognised marker triple fails closed** — mutates the Stage 3 classifier, but the promise is
+   the Stage 2 arm, which runs first. Rule 47 in the manifest is that promise measured at the right
+   stage, and it is killed.
+2. **v1 pairs with the v1 error code** — a v1 arm. Under v0 selection a `.v1` payload never enters
+   observations.
+3. **the marker triple's `schema` leg** — wrong stage, by the same argument as (1). `INDEX.md` records
+   that this leg was credited to the corpus in an earlier draft until the argument was applied evenly.
+4. **a contradicting establish journey must be reported as a finding** — its only output is a *finding*,
+   and findings are not on this corpus's normative comparison surface. See rule 14 above for the
+   inconsistency this creates.
+
+## Reading this before an implementation freeze
+
+**Permitted, and disclose it.** This file names which rule each vector isolates, which is slightly more
+than the vector filenames already carry — `bad-105-observation-binding-mismatch` does not say the
+divergence is on the digest leg rather than the tool-name leg, and the table above does. That is a
+small cost to independence and a large gain in knowing what the exercise establishes, so it is allowed
+rather than forbidden, and [`IMPLEMENTATION-REPORT.template.md`](IMPLEMENTATION-REPORT.template.md)
+asks whether it was read.
 
 ## What this changes for an implementer
 
-Nothing about the exercise. Reproducing the fourteen outcomes remains the task, the expectations are
-unchanged, and a reproduction is still worth having: it is the only independent evidence that the
-specification text is sufficient to build against.
+The run and the expectations are unchanged, and a reproduction is still the only independent evidence
+that the specification text is sufficient to build against.
 
-What changes is the claim you can make afterwards, and the claim we can make about you. A successful
-reproduction establishes agreement on the six rules above. Anyone stating more than that — including
+Two things do change, and an earlier draft of this file said "nothing about the exercise" while both
+were already true. The report template now carries a scope field, so the claim is written down rather
+than invented. And reading this file before a freeze is a disclosure question, answered above.
+
+A reproduction distinguishes at most the five rules named. Anyone stating more than that — including
 us — is overstating what fourteen vectors measured.
+
+**What the corpus cannot ask for, and we can.** Twenty-two of these rules will get no evidence from
+any reproduction of this corpus. If you implemented them anyway, say which in your report. That is
+information no vector can extract, it costs nothing to supply, and until a later corpus exists it is
+the only route by which any of the twenty-two gets any evidence at all.
+
+## Two smaller things a reader should know
+
+**The expectations are not digest-pinned.** `corpus_digest` is sha256 over the vector bundle bytes and
+does not cover `MANIFEST.json`'s `expected` block. v0.md §8 says accurately that any edit to any vector
+changes the digest, and is silent on the expectations. This file leans on digest immutability to
+justify recording rather than fixing, so the limit of that immutability belongs here.
+
+**Adding this file moved nothing.** The digest is computed at
+[`gen_vectors.py:401`](gen_vectors.py) over concatenated vector hashes from an in-code list, with no
+directory scan anywhere, and the clean-room pack's rendered-set digest is likewise over vector digests
+only. Verified by recomputation and by running the activation-kit suite with and without this file.
 
 ## How this was found
 
-Not by inspection. By mutation adequacy: delete one declared rule from the implementation, rebuild,
-and see whether the corpus notices. A rule the corpus cannot notice is a rule it cannot ask a third
-party to implement.
+Not by inspection. By mutation adequacy: delete one declared rule from the implementation, rebuild, and
+see whether the corpus notices. A rule the corpus cannot notice is a rule it cannot ask a third party
+to implement.
 
-The first three declarations of that measurement were themselves wrong — the first declared three
-rules and scored nothing, the second declared eight and published a pattern claim that an
-adversarial re-measurement refuted. `../INDEX.md` carries that sequence, including the run whose
-control survived and which therefore said nothing at all.
+The first three declarations of that measurement were themselves wrong — the first declared three rules
+and scored nothing, the second declared eight and published a pattern claim that an adversarial
+re-measurement refuted. The first draft of *this file* then quoted the tool's denominator as though it
+were the reader's, understating the undiscriminated set by two; the second draft got the structural
+barrier exactly backwards and counted a sixth isolated rule that does not isolate for a third party.
+`../INDEX.md` carries that sequence, including the run whose control survived and which therefore said
+nothing at all.
