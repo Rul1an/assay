@@ -90,11 +90,223 @@ class Scoring(unittest.TestCase):
         self.assertEqual(rep["equivalent"], 1)
         self.assertEqual(rep["killed"] + rep["survived"], 1)
 
-    def test_a_mutant_that_crashes_the_module_counts_as_killed(self):
+    def test_a_mutant_that_never_loads_is_unproved_not_killed(self):
+        # Reversed deliberately on the Rust-adapter review: a mutant that never
+        # loaded was never shown to the corpus, so the corpus said nothing about
+        # that rule. Counting it killed lets a typo in the substitution print as
+        # "rule covered". Measure a load-bearing rule with a variant that RUNS.
         broken = {"label": "syntax", "anchor": 'return "ok"', "replacement": "return ??"}
         with tempfile.TemporaryDirectory() as d:
             rep = ca.run(_manifest(Path(d), {"a": [broken]}))
+        self.assertEqual(rep["killed"], 0)
+        self.assertEqual(rep["unproved"], 1)
+        self.assertFalse(rep["adequate"])
+        self.assertTrue(any("never ran" in f for f in rep["failures"]), rep["failures"])
+
+
+class ControlMutants(unittest.TestCase):
+    """A control proves the harness detects anything. It is never scored."""
+
+    def test_a_killed_control_does_not_inflate_the_score(self):
+        ctrl = dict(KILLABLE, label="CONTROL reachability", control=True)
+        with tempfile.TemporaryDirectory() as d:
+            rep = ca.run(_manifest(Path(d), {"a": [ctrl]}))
+        self.assertEqual(rep["killed"], 0, "a control must not count as a kill")
+        self.assertIn("control-killed", [r["verdict"] for r in rep["mutants"]])
+
+    def test_a_surviving_control_invalidates_the_whole_run(self):
+        # The distinction the control exists for: all-survivors because the corpus is
+        # weak, versus all-survivors because nothing was ever measured.
+        ctrl = dict(SURVIVOR, label="CONTROL reachability", control=True)
+        with tempfile.TemporaryDirectory() as d:
+            rep = ca.run(_manifest(Path(d), {"a": [KILLABLE, ctrl]}))
+        self.assertFalse(rep["adequate"])
+        self.assertTrue(any("harness cannot detect" in f for f in rep["failures"]),
+                        rep["failures"])
+
+    def test_a_control_may_not_be_declared_out_of_scope(self):
+        ctrl = dict(KILLABLE, label="c", control=True, scope="out_of_scope", reason="x")
+        with tempfile.TemporaryDirectory() as d:
+            p = _manifest(Path(d), {"a": [ctrl]})
+            with self.assertRaises(ca.ManifestError) as cm:
+                ca.load_manifest(p)
+        self.assertIn("control cannot be out_of_scope", str(cm.exception))
+
+
+class KnownHoles(unittest.TestCase):
+    """An acknowledged hole is pinned to one digest and expires with it."""
+
+    def _mf(self, tmp: Path, digest_in_file, holes_for, extra_mutants=None):
+        (tmp / "digest.json").write_text(json.dumps({"corpus_digest": digest_in_file}))
+        muts = [dict(SURVIVOR, label="unexercised rule")] + (extra_mutants or [])
+        p = _manifest(tmp, {"a": muts}, raw={
+            "corpus_digest_file": "digest.json", "corpus_digest_key": "corpus_digest",
+            "known_holes": {holes_for: [{"label": "unexercised rule",
+                                         "reason": "no vector reaches it",
+                                         "recorded": "2026-08-19"}]}})
+        return p
+
+    def test_a_hole_acknowledged_for_the_present_digest_is_not_a_survivor(self):
+        with tempfile.TemporaryDirectory() as d:
+            rep = ca.run(self._mf(Path(d), "sha256:aaa", "sha256:aaa", [KILLABLE]))
+        self.assertEqual(rep["survived"], 0)
+        self.assertEqual(rep["known_holes"], 1)
+        self.assertIn("known-hole", [r["verdict"] for r in rep["mutants"]])
+
+    def test_the_acknowledgement_expires_when_the_corpus_moves(self):
+        # The rule that stops this being an escape hatch: an acknowledgement is a
+        # statement about ONE corpus, so a corpus that changes loses it.
+        with tempfile.TemporaryDirectory() as d:
+            rep = ca.run(self._mf(Path(d), "sha256:NEW", "sha256:OLD", [KILLABLE]))
+        self.assertEqual(rep["known_holes"], 0)
+        self.assertEqual(rep["survived"], 1, "the hole must reappear as a survivor")
+        self.assertFalse(rep["adequate"])
+
+    def test_an_acknowledgement_for_a_rule_now_exercised_is_flagged(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            (tmp / "digest.json").write_text(json.dumps({"corpus_digest": "sha256:aaa"}))
+            p = _manifest(tmp, {"a": [dict(KILLABLE, label="now exercised")]}, raw={
+                "corpus_digest_file": "digest.json", "corpus_digest_key": "corpus_digest",
+                "known_holes": {"sha256:aaa": [{"label": "now exercised", "reason": "x",
+                                                "recorded": "2026-08-19"}]}})
+            rep = ca.run(p)
+        self.assertFalse(rep["adequate"])
+        # The message widened from "now exercises" to cover every transition away
+        # from known-hole, not only becoming killed.
+        self.assertTrue(any("no longer holes" in f and "now killed" in f
+                            for f in rep["failures"]), rep["failures"])
+
+    def test_the_report_does_not_claim_the_pin_is_to_the_corpus(self):
+        # The wording was false and the tool printed it: with a corpus that had moved
+        # it said the acknowledgement "expires the moment the corpus changes" while
+        # exiting 0 at 100%. The digest is a value read from a file the manifest
+        # names, never recomputed from the vectors, and the report must say so.
+        with tempfile.TemporaryDirectory() as d:
+            p = self._mf(Path(d), "sha256:aaa", "sha256:aaa", [KILLABLE])
+            r = subprocess.run([sys.executable, str(ca.__file__), str(p)],
+                               capture_output=True, text=True, timeout=120)
+        self.assertNotIn("expires the moment the corpus changes", r.stdout)
+        self.assertIn("not recomputed from the vectors", r.stdout)
+
+    def test_pre_declared_future_digests_are_surfaced(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            (tmp / "digest.json").write_text(json.dumps({"corpus_digest": "sha256:aaa"}))
+            p = _manifest(tmp, {"a": [KILLABLE, dict(SURVIVOR, label="hole")]}, raw={
+                "corpus_digest_file": "digest.json", "corpus_digest_key": "corpus_digest",
+                "known_holes": {"sha256:aaa": [{"label": "hole", "reason": "x",
+                                                "recorded": "2026-08-19"}],
+                                "sha256:future1": [], "sha256:future2": []}})
+            r = subprocess.run([sys.executable, str(ca.__file__), str(p)],
+                               capture_output=True, text=True, timeout=120)
+        self.assertIn("digests carry acknowledgements", r.stdout)
+
+    def test_holes_outnumbering_measurements_is_stated(self):
+        holes = [dict(SURVIVOR, label=f"h{i}") for i in range(4)]
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            (tmp / "digest.json").write_text(json.dumps({"corpus_digest": "sha256:aaa"}))
+            p = _manifest(tmp, {"a": [KILLABLE] + holes}, raw={
+                "corpus_digest_file": "digest.json", "corpus_digest_key": "corpus_digest",
+                "known_holes": {"sha256:aaa": [{"label": f"h{i}", "reason": "x",
+                                                "recorded": "2026-08-19"} for i in range(4)]}})
+            r = subprocess.run([sys.executable, str(ca.__file__), str(p)],
+                               capture_output=True, text=True, timeout=120)
+        self.assertIn("acknowledged as holes than are measured", r.stdout)
+        self.assertIn("acknowledged holes", r.stdout.strip().splitlines()[-1])
+
+    def test_an_acknowledgement_lingers_when_its_rule_becomes_out_of_scope(self):
+        # Only one of four transitions was covered: killed. A rule that becomes
+        # out_of_scope left the acknowledgement pointing at nothing, silently.
+        oos = dict(SURVIVOR, label="hole", scope="out_of_scope", reason="marked oos later")
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            (tmp / "digest.json").write_text(json.dumps({"corpus_digest": "sha256:aaa"}))
+            p = _manifest(tmp, {"a": [KILLABLE, oos]}, raw={
+                "corpus_digest_file": "digest.json", "corpus_digest_key": "corpus_digest",
+                "known_holes": {"sha256:aaa": [{"label": "hole", "reason": "x",
+                                                "recorded": "2026-08-19"}]}})
+            rep = ca.run(p)
+        self.assertFalse(rep["adequate"])
+        self.assertTrue(any("no longer holes" in f for f in rep["failures"]), rep["failures"])
+
+    def test_a_hole_without_a_reason_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            (tmp / "digest.json").write_text(json.dumps({"corpus_digest": "sha256:aaa"}))
+            p = _manifest(tmp, {"a": [KILLABLE]}, raw={
+                "corpus_digest_file": "digest.json", "corpus_digest_key": "corpus_digest",
+                "known_holes": {"sha256:aaa": [{"label": "x", "reason": " ",
+                                                "recorded": "2026-08-19"}]}})
+            with self.assertRaises(ca.ManifestError) as cm:
+                ca.load_manifest(p)
+        self.assertIn("stated reason", str(cm.exception))
+
+    def test_an_all_holes_manifest_reports_no_result_rather_than_100_percent(self):
+        with tempfile.TemporaryDirectory() as d:
+            rep = ca.run(self._mf(Path(d), "sha256:aaa", "sha256:aaa"))
+        self.assertIsNone(rep["score_percent"], "an empty denominator is not 100%")
+        self.assertFalse(rep["adequate"])
+        self.assertTrue(any("nothing was measured" in f for f in rep["failures"]))
+
+
+class BatchRunner(unittest.TestCase):
+    """A corpus consumed as a unit: one invocation, the summary is the outcome."""
+
+    def _corpus(self, tmp: Path):
+        (tmp / "check.py").write_text(
+            "import json, sys\n"
+            "doc = json.load(open(sys.argv[1]))\n"
+            "fails = [c['id'] for c in doc['cases'] if c['n'] > 10]\n"
+            "print(json.dumps({'ok': not fails, 'failures': fails}))\n")
+        (tmp / "vectors.json").write_text(json.dumps({"cases": [
+            {"id": "c1", "n": 1}, {"id": "c2", "n": 2}]}))
+        m = {"schema": ca.SCHEMA, "runner": "batch", "repo_root": ".",
+             "implementation_sources": ["check.py"],
+             "entrypoint_command": ["python3", "check.py", "vectors.json"],
+             "outcome_from": ["ok", "failures"], "vectors": "vectors.json",
+             "id_key": "vector_id", "default_group": "g",
+             "mutants": {"g": [
+                 {"label": "threshold", "anchor": "c['n'] > 10", "replacement": "c['n'] > 1"},
+                 # must actually move the summary: emptying the case list leaves
+                 # `failures` empty exactly as the baseline does, and the control
+                 # guard correctly refused that when it was tried.
+                 {"label": "CONTROL", "control": True,
+                  "anchor": "'ok': not fails", "replacement": "'ok': 'MOVED'"}]}}
+        p = tmp / "m.json"
+        p.write_text(json.dumps(m))
+        return p
+
+    def test_one_invocation_still_discriminates_via_the_summary(self):
+        with tempfile.TemporaryDirectory() as d:
+            rep = ca.run(self._corpus(Path(d)))
+        self.assertEqual(rep["runner"], "batch")
         self.assertEqual(rep["killed"], 1)
+        self.assertTrue(rep["adequate"], rep["failures"])
+
+    def test_the_source_is_restored_after_a_batch_run(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            p = self._corpus(tmp)
+            before = (tmp / "check.py").read_bytes()
+            ca.run(p)
+            self.assertEqual((tmp / "check.py").read_bytes(), before)
+
+    def test_a_batch_manifest_needs_no_build(self):
+        # An interpreted corpus has no build step; requiring one would exclude it.
+        with tempfile.TemporaryDirectory() as d:
+            m = ca.load_manifest(self._corpus(Path(d)))
+        self.assertEqual(m["build"], [])
+
+    def test_an_unreadable_summary_is_a_raise_not_a_silent_pass(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            p = self._corpus(tmp)
+            (tmp / "check.py").write_text("print('not json')\n")
+            rep = ca.run(p)
+        self.assertFalse(rep["adequate"])
+        self.assertTrue(any("UNMUTATED" in f for f in rep["failures"]), rep["failures"])
 
 
 class Guards(unittest.TestCase):

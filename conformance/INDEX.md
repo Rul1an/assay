@@ -23,7 +23,7 @@ grade `false` or `unproved` rather than pass silently.
 | [`mcp-jsonrpc-id-conformance`](../examples/mcp-jsonrpc-id-conformance/) | 3 | stdlib, `check.py reproduce` | published pack; carries a positive control |
 | [`rfc8785` canonicalization](../crates/assay-canonical/tests/vectors/rfc8785.json) | 31 | `cargo test -p assay-canonical --test rfc8785_conformance` | prerequisite vectors; vendored byte-identical into the clean-room pack |
 | [`mcp-era-parity-v0`](../crates/assay-core/tests/fixtures/mcp-era-parity-v0/) | 18 (+2 equivalence pairs) | `cargo test -p assay-core --lib mcp::era_parity_tests` | **exploratory** — deliberately lower than the frozen corpus |
-| [`observed-effect-v0`](https://github.com/Rul1an/observed-effect-v0) | — | its own repository | published separately; stdlib recompute + `corpusDigest` |
+| [`observed-effect-v0`](https://github.com/Rul1an/observed-effect-v0) | 14 cases | its own repository | published separately; stdlib recompute + `corpusDigest`. Adequacy measured — see below |
 
 Related but not a corpus in this table: [RGE-Bench](https://github.com/rge-bench/rge-bench)
 is maintained in its own repository under its own machine-checked neutrality guard,
@@ -123,3 +123,32 @@ The fact worth reporting has no ACM badge: **independent implementation,
 author-supplied vectors, expected outcomes recomputed from inputs alone.** That
 is what [#1840](https://github.com/Rul1an/assay/issues/1840) asks for, and it is
 more informative than either badge on its own.
+
+## Mutation adequacy, measured on ourselves
+
+`conformance/corpus_adequacy.py` asks a different question from the runner above:
+not *do these corpora reproduce their own verdicts*, but **can an implementer
+delete a declared rule, still reproduce the pinned outcomes, and be
+indistinguishable from a conforming implementation?** A surviving mutant is a
+hole in the contract rather than a gap in confidence, so the bar is 100% of the
+rules the author declared.
+
+The results below include the ones that do not flatter us, because a tool that
+audits corpora is worth nothing if its author has not survived it.
+
+| Corpus | Runner | Result |
+|---|---|---|
+| `mcp-jsonrpc-id-conformance` | module | **4 of 4** in scope. **7 rules unexercised and out of scope**, ratio 1.75 — the score is a statement about a minority of the declared rules |
+| `privileged-mcp-action-v0` | process | **1 known hole**: the origin leg of the v0 marker triple is promised by §5 and no vector discriminates it. Recorded against `sha256:cb58ce91…` rather than fixed, because adding a vector moves a published digest. Two further rules I declared turned out to mutate the wrong stage and the wrong profile; they are marked out of scope **with that reasoning rather than deleted** |
+| [`observed-effect-v0`](https://github.com/Rul1an/observed-effect-v0) drift consumer | batch | **4 of 5**. One survivor: an implementation can read the body regardless of whether the ref recomputed and still reproduce all fourteen cases |
+| [rge-bench](https://github.com/rge-bench/rge-bench) | module | 30 of 30, 1 declared equivalent |
+| `rfc8785` · `mcp-era-parity-v0` | — | **not measurable today.** Driven by Rust *tests* without a per-vector verdict, which is a fourth runner shape |
+
+**Four of six.** Stated rather than rounded up: two corpora have no adequacy
+measurement at all, and one of the four measured has an acknowledged hole.
+
+Every manifest must declare at least one **control** — a mutation on the same
+path that MUST be killed. All-survivors because a corpus is weak and
+all-survivors because nothing was ever measured print identically, so without a
+control a zero says nothing. Controls are excluded from the score, and a control
+that survives fails the run with every other verdict declared meaningless.
