@@ -146,7 +146,7 @@ the rows below say which of the two they mean.
 | Corpus | Runner | Result |
 |---|---|---|
 | `mcp-jsonrpc-id-conformance` | module | **6 of 10 in scope (60%), 4 survivors.** The first score was **4 of 4** over the presence/null arms alone. The positive control is a string id and RequestId is string or number, so the type arms belong in the denominator: string is isolated, number and bool are not. **7 envelope rules unexercised and out of scope**, ratio 0.7 — re-checked against the three published messages; none of them moves an outcome, and the reasons still hold |
-| `privileged-mcp-action-v0` | process | **4 of 8 in scope (50%), 4 survivors, 2 known holes.** First measured as *no result*: three rules declared, two of them mutating the wrong stage and the wrong profile. That was a fact about the declaration, not the corpus — eight more rules were read off the verifier path and half of them survive. **The denominator of 8 is the finding, not the 50%.** An adversarial re-measurement deleted **23 further promised rules at once** and reproduced all fourteen outcomes and all five claim matrices exactly, so the corpus isolates six rules of a declared twenty-four in scope, where eight had been declared before. Measured on the surface the corpus itself declares normative, after a lock and a HEAD check closed a cross-run contamination. See below. **This is the corpus carrying our live reproduction request ([#1840](https://github.com/Rul1an/assay/issues/1840))** |
+| `privileged-mcp-action-v0` | process | **6 of 25 in scope (24.0%), 19 survivors, 2 known holes.** Declared three times before it said anything true. First three rules and *no result*; then eight read off the verifier path, scoring 50%, published with a pattern claim. **The denominator was the finding, not the score.** An adversarial re-measurement deleted a further set of promised rules in one build and reproduced every outcome and every claim matrix, so the declaration grew from eight in-scope rules to twenty-five and the score fell to 24.0%. All six rules the corpus does isolate are now declared, and all six are killed. Measured on the surface the corpus itself declares normative, after a lock and a HEAD check closed a cross-run contamination. See below. **This is the corpus carrying our live reproduction request ([#1840](https://github.com/Rul1an/assay/issues/1840))** |
 | [`observed-effect-v0`](https://github.com/Rul1an/observed-effect-v0) drift consumer | batch | **14 of 23 in scope (60.9%), 9 survivors.** The first score was **4 of 5** over merge-policy rules only. The 14 case names announce the recompute, advisory, and profile rules as well. The original survivor remains (the body can be read whether or not the ref recomputed); the new ones are the fail-closed recompute siblings the cases never present, the RFC 8785 UTF-16 key-order rule the consumer claims but no body isolates, and a redacted-field conjunct that `incomplete_missing_non_claims` does not distinguish from a missing field |
 | [rge-bench](https://github.com/rge-bench/rge-bench) | module | **51 of 54 in scope (94.4%), 3 survivors, 2 declared equivalent, 1 out of scope.** The first score was **30 of 30** over the hand-written table in `scripts/check_rule_liveness.py`. [ADMISSION.md](https://github.com/rge-bench/rge-bench/blob/main/ADMISSION.md) already says that table is not checked against the rules `ref_example.py` contains. The missing rules were discriminable: the strength ladder (the ceiling ladder's sibling — the same shape that hole already had), the AND conjuncts scored as one mutant, and the soft-digest and replay-equality fallthroughs. The three survivors include a claimed contract-edge (`True` is not `1`) that no vector isolates |
 | `rfc8785` canonicalization | batch (test-names) | **control killed** — the corpus bites. No rules declared: the wrapper still has nothing of ours to delete. `to_string` is a second convenience over the same delegate and is not on this corpus's path |
@@ -156,9 +156,10 @@ the rows below say which of the two they mean.
 rounded up — and this line has now been wrong in both directions on the same day.
 It read *four measured* while `privileged-mcp-action-v0` was scoring nothing; it
 was corrected to *three*; and it is four again only because that corpus was then
-declared properly and finally produced a number. The number is 50%, the worst on
-this page, and it is still too kind: it is 50% of eight declared rules where the
-implementation has roughly twenty-nine, which the section below measures. Both
+declared properly and finally produced a number. That number was 50% of eight
+declared rules; over the twenty-five now declared it is **24.0%**, the worst on
+this page by a wide margin. It fell because the denominator became honest, not
+because the corpus changed. Both
 corrections are left visible, because a table whose purpose is to publish
 unflattering results should show its own edits.
 
@@ -169,8 +170,13 @@ over merge-policy while the 14 cases name recompute and profile; 30 of 30 over a
 hand-written table that ADMISSION.md already warned was unchecked against
 `ref_example.py`. Those three rows now score the larger denominator and the
 numbers went down, which is the point. `privileged-mcp-action-v0` took the same
-treatment last and hardest: sixteen further in-scope rules are now declared
-individually, taking its denominator from eight to twenty-four.
+treatment last and hardest: eighteen further in-scope rules are now declared
+individually, taking its denominator from eight to twenty-five. Two of those
+eighteen were added last and are the only correction today that moved a number
+**up**: an independent count named six isolated rules where this manifest
+declared four, and the two missing ones — the Stage 2 unknown-schema arm and the
+decision vocabulary — are both killed. One of them is the measurement this
+manifest's own out-of-scope note had asked for and never ran.
 
 ### The v0 corpus isolates six rules and leaves most of the rest free
 
@@ -195,6 +201,16 @@ and all three legs of the marker triple.
 **All fourteen outcomes and all five claim matrices reproduced exactly.** The
 only difference anywhere in the corpus was one finding string, and findings are
 not on the comparison surface the corpus declares.
+
+Reproduced here independently, and the reproduction is narrower than the sentence
+above so it is stated as it ran: **nineteen** of the twenty-three applied
+simultaneously, and all fourteen vectors were byte-identical on
+`[bundle_integrity, verdict, claims]`. The other four could not join the composite
+because they share an anchor with a rule already in it — `31/32/33` are three
+replacements over one line, as are `44/45/46`. Each of those four is scored a
+survivor on its own in the per-mutant run below, so the twenty-three-way
+conclusion holds; the nineteen-way deletion is simply what was actually executed
+in one build.
 
 So an implementer can delete twenty-three rules the profile promises, reproduce
 the pinned digest, and be indistinguishable from a conforming implementation.

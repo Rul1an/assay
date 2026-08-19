@@ -204,6 +204,18 @@
         "reason": "WRONG STAGE, same argument as declared mutant 0. Under v0 selection only payloads whose schema member is assay.denied_call_observation.v0 are collected into `observations`, so the classifier's schema leg cannot decide anything on this path: it is an equivalent mutant here, not a hole. Measured SURVIVED, as the reasoning predicts. Recorded because the published table credits this leg to the corpus."
       },
       {
+        "label": "47 an unrecognised in-namespace payload schema fails closed (Stage 2)",
+        "anchor": "                    other => violations.push(finding(\n                        \"unknown_profile_schema\",\n                        format!(\n                            \"payload schema {other:?} is inside the profile namespace but is not a recognized {} record; unknown fails closed\",\n                            profile_version.as_profile_id()\n                        ),\n                    )),",
+        "replacement": "                    other => { let _ = other; }",
+        "reason": "v0 Stage 2. Declared mutant 0 mutates the Stage 3 classifier and is out of scope for exactly this reason -- 'to measure that promise, mutate the Stage 2 match instead'. This is that mutant. bad-104 should kill it."
+      },
+      {
+        "label": "48 the decision value must be in the closed vocabulary",
+        "anchor": "check_vocab(dec, \"decision\", DECISION_VOCAB, violations);",
+        "replacement": "let _ = DECISION_VOCAB;",
+        "reason": "v0 Stage 2 closed vocabulary. Declared as its own call site rather than by mutating check_vocab, which would delete four rules at once. bad-107 should kill it."
+      },
+      {
         "label": "CONTROL harness reachability on the verifier path",
         "anchor": ".filter(|obs| classify_denial_marker(obs) == Some(profile_version.marker_version()));",
         "replacement": ".filter(|_obs| false);",
