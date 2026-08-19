@@ -48,7 +48,7 @@ here**, for two separate reasons:
 **Five of twenty-seven, 18.5%.**
 
 Reproduce the tool's run with [`corpus-adequacy`](https://github.com/corpus-adequacy/corpus-adequacy)
-at commit `6c419200b284ec84dffeb54ca20800ce1c445954`, from the repository root, with that tool checked
+at commit `b87ef706e70a2bcfe163514ec0360022e93fa175`, from the repository root, with that tool checked
 out as a sibling directory:
 
 ```
@@ -245,3 +245,84 @@ were the reader's, understating the undiscriminated set by two; the second draft
 barrier exactly backwards and counted a sixth isolated rule that does not isolate for a third party.
 `../INDEX.md` carries that sequence, including the run whose control survived and which therefore said
 nothing at all.
+
+<!-- BEGIN CHECKED NUMBERS -->
+
+## Checked numbers
+
+Every adequacy number above is re-derived from [`adequacy/results.json`](../adequacy/results.json) and asserted by
+[`adequacy/check_published_numbers.py`](../adequacy/check_published_numbers.py). Editing a number in the prose without editing the
+measurement, or the reverse, is a red check rather than a silent disagreement.
+
+```json
+{
+  "_about": "Owned by conformance/adequacy/check_published_numbers.py. This file's numbers are recomputed from conformance/adequacy/results.json, whose privileged-mcp-action-v0 row is TRANSCRIBED from the verbatim tool output above rather than re-derived on every run; the checker holds the transcription to that block and cannot hold the block to the implementation. See measure_all.py.",
+  "claims": [
+    {
+      "corpus": "privileged-mcp-action-v0",
+      "text": "6 of 25 DECLARED in-scope rules killed (24.0%). 4 declared out of scope, 31 rules declared. control-killed. 19 mutant(s) survived. 2 KNOWN HOLES.",
+      "asserts": {
+        "killed": 6,
+        "killed + survived": 25,
+        "score_percent": 24.0,
+        "out_of_scope": 4,
+        "declared_total": 31,
+        "survived": 19,
+        "known_holes": 2
+      }
+    },
+    {
+      "corpus": "privileged-mcp-action-v0",
+      "text": "Twenty-seven declared in-scope rules",
+      "asserts": {
+        "killed + survived + known_holes": 27
+      }
+    },
+    {
+      "corpus": "privileged-mcp-action-v0",
+      "text": "The denominator here is **twenty-seven**",
+      "asserts": {
+        "killed + survived + known_holes": 27
+      }
+    },
+    {
+      "corpus": "privileged-mcp-action-v0",
+      "text": "**Five of twenty-seven, 18.5%.**",
+      "locals": {
+        "not_isolated_for_a_third_party": 1,
+        "_why_not_isolated_for_a_third_party": "ERRATA.md's numerator is the tool's minus one: the closed decision vocabulary is killed for the reference implementation but not for a third party, because bad-107's payload violates the fail_closed rule independently. That subtraction is an editorial judgement about a stranger's implementation, not something the tool measures, so it is declared here rather than derived."
+      },
+      "asserts": {
+        "killed - not_isolated_for_a_third_party": 5,
+        "killed + survived + known_holes": 27,
+        "round(100.0 * (killed - not_isolated_for_a_third_party) / (killed + survived + known_holes), 1)": 18.5
+      }
+    },
+    {
+      "corpus": "privileged-mcp-action-v0",
+      "text": "on at most five of the profile's rules",
+      "locals": {
+        "not_isolated_for_a_third_party": 1,
+        "_why_not_isolated_for_a_third_party": "ERRATA.md's numerator is the tool's minus one: the closed decision vocabulary is killed for the reference implementation but not for a third party, because bad-107's payload violates the fail_closed rule independently. That subtraction is an editorial judgement about a stranger's implementation, not something the tool measures, so it is declared here rather than derived."
+      },
+      "asserts": {
+        "killed - not_isolated_for_a_third_party": 5
+      }
+    },
+    {
+      "corpus": "privileged-mcp-action-v0",
+      "text": "the other twenty-two",
+      "locals": {
+        "not_isolated_for_a_third_party": 1,
+        "_why_not_isolated_for_a_third_party": "ERRATA.md's numerator is the tool's minus one: the closed decision vocabulary is killed for the reference implementation but not for a third party, because bad-107's payload violates the fail_closed rule independently. That subtraction is an editorial judgement about a stranger's implementation, not something the tool measures, so it is declared here rather than derived."
+      },
+      "asserts": {
+        "survived + known_holes + not_isolated_for_a_third_party": 22
+      }
+    }
+  ],
+  "not_derived": []
+}
+```
+
+<!-- END CHECKED NUMBERS -->

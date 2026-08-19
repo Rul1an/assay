@@ -1,5 +1,10 @@
 {
   "schema": "corpus-adequacy.manifest.v0",
+  "tool_pin": {
+    "_why": "Re-pinned to b87ef70, which enforces the control requirement on EVERY runner from one function. The previous pin enforced it only on the process path, so a module corpus could score with no control -- and this repository had one in that state. Re-measured under the new pin; no number moved.",
+    "commit": "b87ef706e70a2bcfe163514ec0360022e93fa175",
+    "tool": "https://github.com/corpus-adequacy/corpus-adequacy"
+  },
   "runner": "batch",
   "outcome_parse": "test-names",
   "_about": "Mutation adequacy for the RFC 8785 (JCS) conformance corpus. Every content id, mandate id and bundle run root in this workspace is a sha256 over the bytes this canonicalizer emits, so a divergence makes those digests irreproducible by any other implementation. THE CONTROL IS NOT INVENTED HERE: rfc8785_conformance.rs documents it in prose at the top of the file -- swap serde_jcs::to_vec for serde_json::to_vec and at least 8 vectors must fail, keyorder_utf16_vs_codepoint among them. That property was written down so it would stay checkable rather than remembered. This runs it.",

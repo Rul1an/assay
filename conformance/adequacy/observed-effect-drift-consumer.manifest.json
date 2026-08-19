@@ -1,5 +1,10 @@
 {
   "schema": "corpus-adequacy.manifest.v0",
+  "tool_pin": {
+    "_why": "Re-pinned to b87ef70, which enforces the control requirement on EVERY runner from one function. The previous pin enforced it only on the process path, so a module corpus could score with no control -- and this repository had one in that state. Re-measured under the new pin; no number moved.",
+    "commit": "b87ef706e70a2bcfe163514ec0360022e93fa175",
+    "tool": "https://github.com/corpus-adequacy/corpus-adequacy"
+  },
   "runner": "batch",
   "_about": "Mutation adequacy for the observed-effect-v0 drift consumer. BATCH runner: the checker takes the whole vector file and reports a summary, so the corpus is exercised as a unit and the summary IS the outcome. Its failures list names the case ids, which is what makes it discriminate; a checker reporting only a boolean would make every mutant kill everything or nothing. The first declaration scored five merge-policy rules (4 of 5). The 14 case names announce the recompute, advisory, and profile rules as well; those belong in the denominator. The command is relative on purpose -- the consumer REFUSES an absolute vectors path, which is its own hardening and not something to work around. Requires Rul1an/observed-effect-v0 cloned as a sibling of this repository; without it the run fails with a missing source rather than silently measuring nothing.",
   "repo_root": "../../../observed-effect-v0/observed-effect-drift-consumer-2026-06",

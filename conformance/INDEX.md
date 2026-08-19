@@ -147,10 +147,18 @@ the rows below say which of the two they mean.
 |---|---|---|
 | `mcp-jsonrpc-id-conformance` | module | **6 of 10 in scope (60%), 4 survivors.** The first score was **4 of 4** over the presence/null arms alone. The positive control is a string id and RequestId is string or number, so the type arms belong in the denominator: string is isolated, number and bool are not. **7 envelope rules unexercised and out of scope**, ratio 0.7 — re-checked against the three published messages; none of them moves an outcome, and the reasons still hold |
 | `privileged-mcp-action-v0` | process | **6 of 25 in scope (24.0%), 19 survivors, 2 known holes.** Declared three times before it said anything true. First three rules and *no result*; then eight read off the verifier path, scoring 50%, published with a pattern claim. **The denominator was the finding, not the score.** An adversarial re-measurement deleted a further set of promised rules in one build and reproduced every outcome and every claim matrix, so the declaration grew from eight in-scope rules to twenty-five and the score fell to 24.0%. All six rules the corpus does isolate are now declared, and all six are killed. Measured on the surface the corpus itself declares normative, after a lock and a HEAD check closed a cross-run contamination. See below. **This is the corpus carrying our live reproduction request ([#1840](https://github.com/Rul1an/assay/issues/1840))** |
-| [`observed-effect-v0`](https://github.com/Rul1an/observed-effect-v0) drift consumer | batch | **14 of 23 in scope (60.9%), 9 survivors.** The first score was **4 of 5** over merge-policy rules only. The 14 case names announce the recompute, advisory, and profile rules as well. The original survivor remains (the body can be read whether or not the ref recomputed); the new ones are the fail-closed recompute siblings the cases never present, the RFC 8785 UTF-16 key-order rule the consumer claims but no body isolates, and a redacted-field conjunct that `incomplete_missing_non_claims` does not distinguish from a missing field |
-| [rge-bench](https://github.com/rge-bench/rge-bench) | module | **51 of 54 in scope (94.4%), 3 survivors, 2 declared equivalent, 1 out of scope.** The first score was **30 of 30** over the hand-written table in `scripts/check_rule_liveness.py`. [ADMISSION.md](https://github.com/rge-bench/rge-bench/blob/main/ADMISSION.md) already says that table is not checked against the rules `ref_example.py` contains. The missing rules were discriminable: the strength ladder (the ceiling ladder's sibling — the same shape that hole already had), the AND conjuncts scored as one mutant, and the soft-digest and replay-equality fallthroughs. The three survivors include a claimed contract-edge (`True` is not `1`) that no vector isolates |
+| [`observed-effect-v0`](https://github.com/Rul1an/observed-effect-v0) drift consumer @ `dc10fad0c` | batch | **14 of 23 in scope (60.9%), 9 survivors.** The first score was **4 of 5** over merge-policy rules only. The 14 case names announce the recompute, advisory, and profile rules as well. The original survivor remains (the body can be read whether or not the ref recomputed); the new ones are the fail-closed recompute siblings the cases never present, the RFC 8785 UTF-16 key-order rule the consumer claims but no body isolates, and a redacted-field conjunct that `incomplete_missing_non_claims` does not distinguish from a missing field |
+| [rge-bench](https://github.com/rge-bench/rge-bench) @ `c51c5af18` | module | **51 of 54 in scope (94.4%), 3 survivors, 2 declared equivalent, 1 out of scope.** The first score was **30 of 30** over the hand-written table in `scripts/check_rule_liveness.py`. [ADMISSION.md](https://github.com/rge-bench/rge-bench/blob/main/ADMISSION.md) already says that table is not checked against the rules `ref_example.py` contains. The missing rules were discriminable: the strength ladder (the ceiling ladder's sibling — the same shape that hole already had), the AND conjuncts scored as one mutant, and the soft-digest and replay-equality fallthroughs. The three survivors include a claimed contract-edge (`True` is not `1`) that no vector isolates |
 | `rfc8785` canonicalization | batch (test-names) | **control killed** — the corpus bites. No rules declared: the wrapper still has nothing of ours to delete. `to_string` is a second convenience over the same delegate and is not on this corpus's path |
 | `mcp-era-parity-v0` | — | **not measurable today.** Driven by Rust *tests* without a per-vector verdict |
+
+Two of these corpora live in repositories this one does not own, so their rows
+name the commit measured. That is not a freshness claim and cannot be: those
+repositories move without this diff seeing it. It is the opposite: a score against a
+named commit stays permanently true of that commit, and without one the sentence
+was true of nothing in particular. Both were
+published unpinned until 2026-08-20; `check_published_numbers.py` now refuses a
+measurement of an out-of-tree corpus whose commit no published document names.
 
 **Four measured, one control-only, one not measurable.** Stated rather than
 rounded up — and this line has now been wrong in both directions on the same day.
@@ -352,3 +360,130 @@ foreseen.
 `conformance/bounded_run.py` stays here and is duplicated upstream. It serves
 `run_all.py`, which is this repository's own runner, so both copies have a live
 local caller. That is a known duplication rather than an unnoticed one.
+
+<!-- BEGIN CHECKED NUMBERS -->
+
+## Checked numbers
+
+Every adequacy number above is re-derived from [`adequacy/results.json`](adequacy/results.json) and asserted by
+[`adequacy/check_published_numbers.py`](adequacy/check_published_numbers.py). Editing a number in the prose without editing the
+measurement, or the reverse, is a red check rather than a silent disagreement.
+
+```json
+{
+  "_about": "Owned by conformance/adequacy/check_published_numbers.py. Each claim's numbers are recomputed from conformance/adequacy/results.json AND its wording must still occur above; editing either alone is a red check. not_derived lists number-shaped tokens that are deliberately not measurements, each with the reason it is exempt.",
+  "claims": [
+    {
+      "corpus": "mcp-jsonrpc-id",
+      "text": "6 of 10 in scope (60%), 4 survivors",
+      "asserts": {
+        "killed": 6,
+        "killed + survived": 10,
+        "score_percent": 60.0,
+        "survived": 4
+      }
+    },
+    {
+      "corpus": "privileged-mcp-action-v0",
+      "text": "6 of 25 in scope (24.0%), 19 survivors, 2 known holes",
+      "asserts": {
+        "killed": 6,
+        "killed + survived": 25,
+        "score_percent": 24.0,
+        "survived": 19,
+        "known_holes": 2
+      }
+    },
+    {
+      "corpus": "privileged-mcp-action-v0",
+      "text": "the score fell to 24.0%",
+      "asserts": {
+        "score_percent": 24.0
+      }
+    },
+    {
+      "corpus": "privileged-mcp-action-v0",
+      "text": "over the twenty-five now declared it is **24.0%**",
+      "asserts": {
+        "killed + survived": 25,
+        "score_percent": 24.0
+      }
+    },
+    {
+      "corpus": "observed-effect-drift-consumer",
+      "text": "14 of 23 in scope (60.9%), 9 survivors",
+      "asserts": {
+        "killed": 14,
+        "killed + survived": 23,
+        "score_percent": 60.9,
+        "survived": 9
+      }
+    },
+    {
+      "corpus": "rge-bench",
+      "text": "51 of 54 in scope (94.4%), 3 survivors, 2 declared equivalent, 1 out of scope",
+      "asserts": {
+        "killed": 51,
+        "killed + survived": 54,
+        "score_percent": 94.4,
+        "survived": 3,
+        "equivalent": 2,
+        "out_of_scope": 1
+      }
+    },
+    {
+      "corpus": "*",
+      "text": "Four measured, one control-only, one not measurable",
+      "locals": {
+        "not_measurable": 1,
+        "_why_not_measurable": "mcp-era-parity-v0 has no manifest and can have none: it is driven by Rust tests with no per-vector verdict, so there is nothing for the tool to score. A corpus that cannot be measured cannot be counted from the measurement, so it is declared here."
+      },
+      "asserts": {
+        "measured": 4,
+        "control_only": 1,
+        "not_measurable": 1
+      }
+    }
+  ],
+  "not_derived": [
+    {
+      "token": "100%",
+      "reason": "the adequacy bar itself, not a result: 100% of the rules the author declared is what the tool requires to pass."
+    },
+    {
+      "token": "4 of 4",
+      "reason": "the superseded first score for mcp-jsonrpc-id, kept visible on purpose. A page that publishes unflattering results shows its own edits."
+    },
+    {
+      "token": "4 of 5",
+      "reason": "the superseded first score for the observed-effect drift consumer, over merge-policy rules only."
+    },
+    {
+      "token": "30 of 30",
+      "reason": "the superseded first score for rge-bench, over the hand-written table in check_rule_liveness.py."
+    },
+    {
+      "token": "50%",
+      "reason": "the superseded second score for privileged-mcp-action-v0, over eight declared rules."
+    },
+    {
+      "token": "6 of 8",
+      "reason": "the contaminated run's believable-but-wrong number, recorded as the anecdote that motivated the tool's exclusive lock."
+    },
+    {
+      "token": "75.0%",
+      "reason": "the percentage of that same contaminated run."
+    },
+    {
+      "token": "4 of 8",
+      "reason": "what clean re-runs of that superseded declaration gave."
+    },
+    {
+      "token": "8 of 31",
+      "reason": "the rfc8785 control's own divergence count, from tests/rfc8785_conformance.rs. It is a property of that Rust test, not a mutation score, and results.json carries no field for it."
+    }
+  ]
+}
+```
+
+<!-- END CHECKED NUMBERS -->

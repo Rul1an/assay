@@ -1,5 +1,10 @@
 {
   "schema": "corpus-adequacy.manifest.v0",
+  "tool_pin": {
+    "_why": "Re-pinned to b87ef70 and re-measured, so this row stops being transcribed from ERRATA.md prose and becomes a derivation. A transcribed row goes stale the moment denial_marker.rs moves and nothing can tell; a measured one cannot.",
+    "commit": "b87ef706e70a2bcfe163514ec0360022e93fa175",
+    "tool": "https://github.com/corpus-adequacy/corpus-adequacy"
+  },
   "runner": "process",
   "_about": "Mutation adequacy for privileged-mcp-action/v0, third declaration. The first declared THREE rules and scored nothing. The second declared eight read off the verifier path and scored 4 of 8, which was published with a pattern claim that an adversarial re-measurement then refuted: deleting 23 further promised rules AT ONCE reproduced all fourteen outcomes and all five claim matrices. This declaration folds those in, deduplicated by (anchor, replacement) rather than by label -- five of the 23 turned out to restate rules already declared here, and counting them again would have inflated the denominator in the direction that flatters. outcome_from now reads the surface MANIFEST.json declares normative rather than the one it calls informative.",
   "repo_root": "../..",
