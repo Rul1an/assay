@@ -299,9 +299,10 @@ fn the_default_text_stream_is_pinned_where_the_run_controls_it() {
 
 /// The deterministic prefix for an empty project is guarded separately from the run-owned region.
 ///
-/// This pins the unconditional scan banner and the generic-project line that follows an empty
-/// temporary directory. It deliberately excludes `Detected Claude Desktop config (global)`: that
-/// one line comes from a home-directory probe and is not the same bytes on every runner.
+/// This separately pins the unconditional scan banner and the generic-project line for an empty
+/// temporary directory. It deliberately does not pin text between them: `Detected Claude Desktop
+/// config (global)` may appear there after a home-directory probe and is not the same bytes on
+/// every runner.
 #[test]
 fn the_empty_project_prefix_is_pinned_without_the_home_directory_probe() {
     let dir = tempfile::tempdir().expect("empty-project tempdir");
