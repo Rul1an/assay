@@ -54,7 +54,7 @@ pub use fidelity::{
     RUNNER_FIDELITY_VERDICT_SCHEMA,
 };
 pub use health::{
-    CgroupCorrelationStatus, KernelLayerStatus, NetworkEndpointClaimScope,
+    CaptureOrigin, CgroupCorrelationStatus, KernelLayerStatus, NetworkEndpointClaimScope,
     NetworkProtocolCoverageStatus, ObservationHealth, ObservationHealthError, PolicyLayerStatus,
     Redaction, RedactionReceipt, RedactionReceiptStatus, SdkLayerStatus, OBSERVATION_HEALTH_SCHEMA,
     REDACTION_RECEIPT_SCHEMA,

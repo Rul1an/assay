@@ -73,8 +73,25 @@ impl TimeBudget {
     }
 }
 
+/// The phases a tier never runs.
+///
+/// Kept beside `run_suite`'s phase gates rather than derived from them, because the
+/// gates are `if` statements over a tier and cannot be enumerated. The pairing is
+/// pinned by `chaos_phase_gate_matches_the_declared_omission`, so a new gate that
+/// forgets this list fails a test instead of quietly overstating the run.
+fn phases_not_attempted_for(tier: &SuiteTier) -> Vec<String> {
+    match tier {
+        SuiteTier::Chaos => Vec::new(),
+        SuiteTier::Quick | SuiteTier::Nightly | SuiteTier::Stress => vec!["chaos".to_string()],
+    }
+}
+
 pub fn run_suite(cfg: SuiteConfig) -> Result<SimReport> {
     let mut report = SimReport::new(&format!("{:?}", cfg.tier), cfg.seed);
+    // The chaos phase is gated on the Chaos tier below. Naming it here keeps the
+    // statement next to the gate that causes it, so a new gate that forgets to
+    // update this list is a visible omission rather than a silent one.
+    report.set_phases_not_attempted(phases_not_attempted_for(&cfg.tier));
     let budget = TimeBudget::new(Duration::from_secs(cfg.time_budget_secs));
     let limits = cfg
         .verify_limits
@@ -258,5 +275,52 @@ fn run_chaos_phase(report: &mut SimReport, seed: u64, budget: &TimeBudget) {
                 duration_ms: 0,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod not_attempted_tests {
+    use super::*;
+
+    /// The tiers that skip the chaos phase must say so, and the tier that runs it must not.
+    ///
+    /// This is the control for #2170: before it, a Quick run reported `bypassed=0` over a
+    /// programme that never attempted a whole phase, and a reader could not tell that from a
+    /// run that attempted everything.
+    #[test]
+    fn tiers_that_skip_chaos_declare_it() {
+        for tier in [SuiteTier::Quick, SuiteTier::Nightly, SuiteTier::Stress] {
+            assert_eq!(
+                phases_not_attempted_for(&tier),
+                vec!["chaos".to_string()],
+                "{tier:?} does not run the chaos phase and must declare it"
+            );
+        }
+        assert!(
+            phases_not_attempted_for(&SuiteTier::Chaos).is_empty(),
+            "the Chaos tier runs every phase, so it declares no omission"
+        );
+    }
+
+    /// Pins the declaration to the gate that causes it.
+    ///
+    /// `run_suite` gates the chaos phase on `matches!(cfg.tier, SuiteTier::Chaos)`. If that gate
+    /// moves, this reads the source and fails, rather than leaving the declaration describing a
+    /// programme the code no longer runs.
+    ///
+    /// Only the code above `#[cfg(test)]` is searched. This test lives in the file it reads, so a
+    /// whole-file search would be satisfied by this test's own literal — the assertion would hold
+    /// even after the real gate moved, which is precisely the failure it exists to prevent.
+    #[test]
+    fn chaos_phase_gate_matches_the_declared_omission() {
+        let source = include_str!("suite.rs");
+        let production = source
+            .split_once("#[cfg(test)]")
+            .expect("suite.rs keeps its test module")
+            .0;
+        assert!(
+            production.contains("if matches!(cfg.tier, SuiteTier::Chaos) {"),
+            "the chaos gate moved; phases_not_attempted_for must be updated with it"
+        );
     }
 }
