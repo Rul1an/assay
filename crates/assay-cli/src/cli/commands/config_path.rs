@@ -3,6 +3,7 @@
 //! Detects MCP client config locations and generates ready-to-use configurations.
 //! Supports: Claude Desktop, Cursor, and generic MCP clients.
 
+use assay_core::errors::diagnostic::path_json;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::env;
@@ -344,7 +345,11 @@ pub fn run(args: crate::cli::args::ConfigPathArgs) {
 
         let output = json!({
             "client": client.display_name(),
-            "config_path": detection.as_ref().map(|d| d.config_path.clone()),
+            // `path_json`, not the `PathBuf` itself: serde's `Path` impl returns an
+            // `Error` on non-UTF-8 bytes, `json!` unwraps it, and this workspace builds with
+            // `panic = "abort"`, so reporting an unusable path killed the process (#2421).
+            // Same defect and same fix as #2264; this site was missed by that sweep.
+            "config_path": detection.as_ref().map(|d| path_json(&d.config_path)),
             "config_exists": detection.as_ref().map(|d| d.exists).unwrap_or(false),
             "generated_server": config
         });
