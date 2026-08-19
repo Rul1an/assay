@@ -16,6 +16,18 @@ Vectors for the [Privileged MCP Action Evidence Profile v0](../../docs/profiles/
 - The corpus digest is a **candidate** until an independent, non-author implementation reproduces
   the expected outcomes from the specification text alone.
 
+## What a reproduction establishes: read [ERRATA.md](ERRATA.md) first
+
+Reproducing all fourteen outcomes demonstrates agreement on **six** of the profile's rules, not on
+the profile. Nineteen further rules that v0.md promises are not discriminated by any vector here, so
+an implementation can omit them and still reproduce this digest. Two of those — the `origin` and
+`code` legs of the Stage 3 marker triple — cannot be discriminated by any vector this generator can
+produce, because `gen_vectors.py` hard-codes the single marker shape.
+
+That does not change the exercise, the expectations, or the value of doing it. It changes the claim
+that can be made afterwards, by the implementer and by us. [ERRATA.md](ERRATA.md) names all
+twenty-five measured rules and is pinned to the current corpus digest.
+
 ## Attempting the independent reproduction
 
 The corpus digest stays a **candidate** until a non-author implementation reproduces the expected

@@ -1,0 +1,336 @@
+{
+  "schema": "corpus-adequacy.manifest.v0",
+  "_about": "Mutation adequacy for rge-bench's ref_example.py, measured from this workspace against the sibling checkout. The first published score was 30 of 30 over the hand-written mutant table in scripts/check_rule_liveness.py. ADMISSION.md already says that table is not checked against the rules the implementation contains. The missing rules were read off ref_example.py and the 95 vectors: the strength ladder (the ceiling ladder's sibling, already known to need permutations), the AND conjuncts scored as one mutant, the soft-digest and replay-equality fallthroughs, and the semantic-equality helpers the contract-edge prose claims. A 30 of 30 over half the discriminable rules is a number about half a corpus.",
+  "implementation": "../../../rge-bench/ref_example.py",
+  "entrypoint": "evaluate",
+  "entrypoint_args": [
+    "axis",
+    "inputs"
+  ],
+  "vectors": "../../../rge-bench/vectors.json",
+  "id_key": "vector_id",
+  "group_key": "axis",
+  "mutants": {
+    "claim_support": [
+      {
+        "label": "0 unknown vocabulary fails closed",
+        "anchor": "if observer.get(\"class\") not in _SUBJECT_CONTROLLABLE or kind not in (\"occurrence\", \"absence\"):\n        return \"invalid\"",
+        "replacement": "if False:\n        return \"invalid\""
+      },
+      {
+        "label": "0a unknown observer class fails closed",
+        "anchor": "if observer.get(\"class\") not in _SUBJECT_CONTROLLABLE or kind not in (\"occurrence\", \"absence\"):\n        return \"invalid\"",
+        "replacement": "if kind not in (\"occurrence\", \"absence\"):\n        return \"invalid\""
+      },
+      {
+        "label": "0b unknown claim kind fails closed",
+        "anchor": "if observer.get(\"class\") not in _SUBJECT_CONTROLLABLE or kind not in (\"occurrence\", \"absence\"):\n        return \"invalid\"",
+        "replacement": "if observer.get(\"class\") not in _SUBJECT_CONTROLLABLE:\n        return \"invalid\""
+      },
+      {
+        "label": "1 undeclared probe set is invalid",
+        "anchor": "if declared is None:\n        if is_absence:\n            return \"invalid\"",
+        "replacement": "if declared is None:\n        if False:\n            return \"invalid\""
+      },
+      {
+        "label": "2 surface outside the declared set",
+        "anchor": "elif claim.get(\"surface\") not in declared:\n        return \"inconclusive_no_coverage\"",
+        "replacement": "elif False:\n        return \"inconclusive_no_coverage\""
+      },
+      {
+        "label": "3 reported gap removes absence support",
+        "anchor": "if observation.get(\"observation_gap\") and is_absence:\n        return \"inconclusive_no_coverage\"",
+        "replacement": "if False:\n        return \"inconclusive_no_coverage\""
+      },
+      {
+        "label": "3a a gap without absence still fires",
+        "anchor": "if observation.get(\"observation_gap\") and is_absence:\n        return \"inconclusive_no_coverage\"",
+        "replacement": "if observation.get(\"observation_gap\"):\n        return \"inconclusive_no_coverage\""
+      },
+      {
+        "label": "3b absence without a gap still fires",
+        "anchor": "if observation.get(\"observation_gap\") and is_absence:\n        return \"inconclusive_no_coverage\"",
+        "replacement": "if is_absence:\n        return \"inconclusive_no_coverage\""
+      },
+      {
+        "label": "4 occurrence branch",
+        "anchor": "    if not is_absence:\n        return \"supported\" if observation.get(\"saw_event\") else \"unsupported\"",
+        "replacement": "    if False:\n        return \"supported\" if observation.get(\"saw_event\") else \"unsupported\""
+      },
+      {
+        "label": "4a occurrence requires a seen event",
+        "anchor": "        return \"supported\" if observation.get(\"saw_event\") else \"unsupported\"",
+        "replacement": "        return \"supported\""
+      },
+      {
+        "label": "5 a seen event contradicts absence",
+        "anchor": "if observation.get(\"saw_event\"):\n        return \"contradicted\"",
+        "replacement": "if False:\n        return \"contradicted\""
+      },
+      {
+        "label": "6 blinding cost bounds silence",
+        "anchor": "if _SUBJECT_CONTROLLABLE[observer[\"class\"]] and not observer.get(\"routing_enforced_by\"):\n        return \"inconclusive_no_coverage\"",
+        "replacement": "if False:\n        return \"inconclusive_no_coverage\""
+      },
+      {
+        "label": "6b independently enforced routing escape",
+        "anchor": "if _SUBJECT_CONTROLLABLE[observer[\"class\"]] and not observer.get(\"routing_enforced_by\"):",
+        "replacement": "if _SUBJECT_CONTROLLABLE[observer[\"class\"]]:"
+      },
+      {
+        "label": "7 silence from an unblindable observer is supported",
+        "anchor": "    # 7. silence from an observer the subject cannot blind, within its declared probe set\n    return \"supported\"",
+        "replacement": "    # 7. silence from an observer the subject cannot blind, within its declared probe set\n    return \"inconclusive_no_coverage\""
+      }
+    ],
+    "coverage_honesty": [
+      {
+        "label": "declared set must be a non-empty list and results a dict",
+        "anchor": "if not isinstance(declared, list) or not declared or not isinstance(results, dict):\n        return \"invalid\"",
+        "replacement": "if False:\n        return \"invalid\""
+      },
+      {
+        "label": "declared_cases must be a list",
+        "anchor": "if not isinstance(declared, list) or not declared or not isinstance(results, dict):\n        return \"invalid\"",
+        "replacement": "if not declared or not isinstance(results, dict):\n        return \"invalid\""
+      },
+      {
+        "label": "declared_cases must be non-empty",
+        "anchor": "if not isinstance(declared, list) or not declared or not isinstance(results, dict):\n        return \"invalid\"",
+        "replacement": "if not isinstance(declared, list) or not isinstance(results, dict):\n        return \"invalid\""
+      },
+      {
+        "label": "case_results must be a dict",
+        "anchor": "if not isinstance(declared, list) or not declared or not isinstance(results, dict):\n        return \"invalid\"",
+        "replacement": "if not isinstance(declared, list) or not declared:\n        return \"invalid\""
+      },
+      {
+        "label": "a missing result reads not_run rather than passing",
+        "anchor": "states = [results.get(case_id, \"not_run\") for case_id in declared]",
+        "replacement": "states = [results.get(case_id, \"passed\") for case_id in declared]"
+      },
+      {
+        "label": "an explicit failure refutes, ahead of confirmation",
+        "anchor": "if any(state == \"failed\" for state in states):\n        return \"refuted\"",
+        "replacement": "if False:\n        return \"refuted\""
+      },
+      {
+        "label": "confirmation requires every declared case to pass",
+        "anchor": "if all(state == \"passed\" for state in states):\n        return \"confirmed\"",
+        "replacement": "if any(state == \"passed\" for state in states):\n        return \"confirmed\""
+      }
+    ],
+    "hard_soft_digest": [
+      {
+        "label": "a missing or mismatched hard digest fails closed",
+        "anchor": "if not _present_string(hs) or not _present_string(hr) or hs != hr:\n        return \"rejected_hard\"",
+        "replacement": "if False:\n        return \"rejected_hard\""
+      },
+      {
+        "label": "an empty hard digest counts as missing",
+        "anchor": "if not _present_string(hs) or not _present_string(hr) or hs != hr:",
+        "replacement": "if hs is None or hr is None or hs != hr:"
+      },
+      {
+        "label": "soft compares only after hard accepts",
+        "anchor": "    return \"soft_equivalent\" if inp.get(\"soft_a\") == inp.get(\"soft_b\") else \"soft_divergent\"",
+        "replacement": "    return \"soft_equivalent\" if True else \"soft_divergent\""
+      }
+    ],
+    "retained_replay": [
+      {
+        "label": "carrier validity is a precondition",
+        "anchor": "if not inp.get(\"carrier_valid\"):\n        return \"rejected_carrier\"",
+        "replacement": "if False:\n        return \"rejected_carrier\""
+      },
+      {
+        "label": "a valid carrier over absent records is incomplete",
+        "anchor": "if not inp.get(\"records_retained\"):\n        return \"incomplete\"",
+        "replacement": "if False:\n        return \"incomplete\""
+      },
+      {
+        "label": "replayed must equal recorded",
+        "anchor": "    return \"replayed_match\" if set(inp.get(\"replayed\", [])) == set(inp.get(\"recorded\", [])) else \"replayed_mismatch\"",
+        "replacement": "    return \"replayed_match\" if True else \"replayed_mismatch\""
+      }
+    ],
+    "delegated_scope": [
+      {
+        "label": "granted and used must both be lists",
+        "anchor": "if not isinstance(granted, list) or not isinstance(used, list):\n        return \"invalid\"",
+        "replacement": "if False:\n        return \"invalid\""
+      },
+      {
+        "label": "granted must be a list",
+        "anchor": "if not isinstance(granted, list) or not isinstance(used, list):\n        return \"invalid\"",
+        "replacement": "if not isinstance(used, list):\n        return \"invalid\""
+      },
+      {
+        "label": "used must be a list",
+        "anchor": "if not isinstance(granted, list) or not isinstance(used, list):\n        return \"invalid\"",
+        "replacement": "if not isinstance(granted, list):\n        return \"invalid\""
+      },
+      {
+        "label": "used must stay within granted",
+        "anchor": "return \"within_grant\" if set(used) <= set(granted) else \"exceeds_grant\"",
+        "replacement": "return \"within_grant\" if True else \"exceeds_grant\""
+      }
+    ],
+    "mcp_description_code": [
+      {
+        "label": "undeclared effect takes precedence over over-declaration",
+        "anchor": "if code - declared:\n        return \"undeclared_effect\"",
+        "replacement": "if False:\n        return \"undeclared_effect\""
+      },
+      {
+        "label": "an interface declaring unexercised effects is over_declared",
+        "anchor": "if declared - code:\n        return \"over_declared\"",
+        "replacement": "if False:\n        return \"over_declared\""
+      },
+      {
+        "label": "matching declared and code is consistent",
+        "anchor": "    return \"consistent\"",
+        "replacement": "    return \"over_declared\""
+      }
+    ],
+    "tamper_fail_closed": [
+      {
+        "label": "a missing digest fails closed",
+        "anchor": "return \"accepted\" if _present_string(stored) and _present_string(recomputed) and stored == recomputed else \"rejected\"",
+        "replacement": "return \"accepted\" if stored == recomputed else \"rejected\""
+      },
+      {
+        "label": "stored and recomputed digests must be equal",
+        "anchor": "return \"accepted\" if _present_string(stored) and _present_string(recomputed) and stored == recomputed else \"rejected\"",
+        "replacement": "return \"accepted\" if _present_string(stored) and _present_string(recomputed) else \"rejected\""
+      },
+      {
+        "label": "an empty digest string counts as missing",
+        "anchor": "    return isinstance(value, str) and value != \"\"",
+        "replacement": "    return isinstance(value, str)"
+      }
+    ],
+    "sufficiency": [
+      {
+        "label": "sufficiency requires a valid record AND complete coverage",
+        "anchor": "        if inp.get(\"record_valid\") and inp.get(\"coverage\") == \"complete\"",
+        "replacement": "        if inp.get(\"record_valid\")"
+      },
+      {
+        "label": "sufficiency requires a valid record",
+        "anchor": "        if inp.get(\"record_valid\") and inp.get(\"coverage\") == \"complete\"",
+        "replacement": "        if inp.get(\"coverage\") == \"complete\""
+      },
+      {
+        "label": "coverage must be the token complete",
+        "anchor": "        if inp.get(\"record_valid\") and inp.get(\"coverage\") == \"complete\"",
+        "replacement": "        if inp.get(\"record_valid\") and inp.get(\"coverage\")"
+      }
+    ],
+    "incomplete_visibility": [
+      {
+        "label": "only a present observation is observed",
+        "anchor": "return \"observed\" if inp.get(\"observation\") == \"present\" else \"incomplete\"",
+        "replacement": "return \"observed\" if inp.get(\"observation\") != \"not_checked\" else \"incomplete\""
+      }
+    ],
+    "source_class_ceiling": [
+      {
+        "label": "an unknown class or strength is invalid, not a pass",
+        "anchor": "if ceiling is None or strength is None:\n        return \"invalid\"",
+        "replacement": "if False:\n        return \"invalid\""
+      },
+      {
+        "label": "claim strength must not exceed the origin ceiling",
+        "anchor": "return \"within_ceiling\" if strength <= ceiling else \"exceeds_ceiling\"",
+        "replacement": "return \"within_ceiling\" if True else \"exceeds_ceiling\""
+      },
+      {
+        "label": "the ceiling ladder ranks origin classes, flattened to the highest",
+        "anchor": "_CEILING = {\n    \"producer_reported\": 1,\n    \"issuer_attested\": 2,\n    \"receiver_receipt\": 3,\n}",
+        "replacement": "_CEILING = {\n    \"producer_reported\": 3,\n    \"issuer_attested\": 3,\n    \"receiver_receipt\": 3,\n}"
+      },
+      {
+        "label": "the ceiling ladder ranks origin classes, flattened to the lowest",
+        "anchor": "_CEILING = {\n    \"producer_reported\": 1,\n    \"issuer_attested\": 2,\n    \"receiver_receipt\": 3,\n}",
+        "replacement": "_CEILING = {\n    \"producer_reported\": 1,\n    \"issuer_attested\": 1,\n    \"receiver_receipt\": 1,\n}"
+      },
+      {
+        "label": "the ceiling ladder is ordered, not merely three-valued: inverted",
+        "anchor": "_CEILING = {\n    \"producer_reported\": 1,\n    \"issuer_attested\": 2,\n    \"receiver_receipt\": 3,\n}",
+        "replacement": "_CEILING = {\n    \"producer_reported\": 3,\n    \"issuer_attested\": 2,\n    \"receiver_receipt\": 1,\n}"
+      },
+      {
+        "label": "the strength ladder ranks claims, flattened to the highest",
+        "anchor": "_STRENGTH = {\n    \"asserted\": 1,\n    \"asserted_signed\": 2,\n    \"observed_at_receiver\": 3,\n    \"observed_in_path\": 4,\n    \"independently_confirmed\": 5,\n}",
+        "replacement": "_STRENGTH = {\n    \"asserted\": 5,\n    \"asserted_signed\": 5,\n    \"observed_at_receiver\": 5,\n    \"observed_in_path\": 5,\n    \"independently_confirmed\": 5,\n}"
+      },
+      {
+        "label": "the strength ladder ranks claims, flattened to the lowest",
+        "anchor": "_STRENGTH = {\n    \"asserted\": 1,\n    \"asserted_signed\": 2,\n    \"observed_at_receiver\": 3,\n    \"observed_in_path\": 4,\n    \"independently_confirmed\": 5,\n}",
+        "replacement": "_STRENGTH = {\n    \"asserted\": 1,\n    \"asserted_signed\": 1,\n    \"observed_at_receiver\": 1,\n    \"observed_in_path\": 1,\n    \"independently_confirmed\": 1,\n}"
+      },
+      {
+        "label": "the strength ladder is ordered, not merely five-valued: inverted",
+        "anchor": "_STRENGTH = {\n    \"asserted\": 1,\n    \"asserted_signed\": 2,\n    \"observed_at_receiver\": 3,\n    \"observed_in_path\": 4,\n    \"independently_confirmed\": 5,\n}",
+        "replacement": "_STRENGTH = {\n    \"asserted\": 5,\n    \"asserted_signed\": 4,\n    \"observed_at_receiver\": 3,\n    \"observed_in_path\": 2,\n    \"independently_confirmed\": 1,\n}"
+      }
+    ],
+    "format_equivalence": [
+      {
+        "label": "equivalence is over semantic fields, not the envelope shape",
+        "anchor": "        if _json_semantic_equal(inp.get(\"a\", {}).get(\"semantic\"), inp.get(\"b\", {}).get(\"semantic\"))",
+        "replacement": "        if inp.get(\"a\", {}).get(\"shape\") == inp.get(\"b\", {}).get(\"shape\")"
+      },
+      {
+        "label": "semantic equality preserves array order",
+        "anchor": "        return len(left) == len(right) and all(_json_semantic_equal(a, b) for a, b in zip(left, right))",
+        "replacement": "        return sorted(left) == sorted(right)"
+      },
+      {
+        "label": "semantic equality is over object key sets",
+        "anchor": "        return set(left) == set(right) and all(_json_semantic_equal(left[key], right[key]) for key in left)",
+        "replacement": "        return True"
+      },
+      {
+        "label": "a bool is not equal to the number one",
+        "anchor": "    if isinstance(left, bool) or isinstance(right, bool):\n        return left is right",
+        "replacement": "    if False:\n        return left is right"
+      }
+    ],
+    "recompute": [
+      {
+        "label": "observed must be a subset of declared",
+        "anchor": "return \"match\" if set(inp.get(\"observed\", [])) <= set(inp.get(\"declared\", [])) else \"mismatch\"",
+        "replacement": "return \"match\" if True else \"mismatch\""
+      },
+      {
+        "label": "CONTROL harness reachability",
+        "control": true,
+        "anchor": "    return fn(inputs) if fn else \"unsupported\"",
+        "replacement": "    return \"unsupported\""
+      },
+      {
+        "label": "an unknown axis is unsupported",
+        "scope": "out_of_scope",
+        "reason": "input-domain guard; the published corpus only presents the twelve named axes, so evaluate's unsupported fallback never runs",
+        "anchor": "    return fn(inputs) if fn else \"unsupported\"",
+        "replacement": "    return fn(inputs) if fn else \"sufficient\""
+      }
+    ]
+  },
+  "equivalent": {
+    "claim_support": [
+      {
+        "label": "order of rules 2 and 3",
+        "reason": "both return inconclusive_no_coverage, so no vector can distinguish which one fired; stated in the README as a deliberate boundary rather than found as a gap"
+      }
+    ],
+    "format_equivalence": [
+      {
+        "label": "JSON numbers compare by numeric value",
+        "reason": "Python == already treats 1 and 1.0 as equal, so deleting the Number branch cannot move a vector in this implementation. The rule exists for language-neutral implementers (JM-Lab's JVM drift) and is equivalent here, not unexercised."
+      }
+    ]
+  }
+}
