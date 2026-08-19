@@ -75,6 +75,26 @@ pub enum KernelLayerStatus {
     Absent,
 }
 
+/// Where the kernel-layer capture was observed.
+///
+/// `Own` is the historic meaning of an omitted field. `Unsupported` preserves an unrecognised
+/// wire value as not-own rather than silently upgrading it to local runner vantage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptureOrigin {
+    #[default]
+    Own,
+    ThirdParty,
+    #[serde(other)]
+    Unsupported,
+}
+
+impl CaptureOrigin {
+    fn is_own(&self) -> bool {
+        matches!(self, Self::Own)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PolicyLayerStatus {
@@ -125,6 +145,8 @@ pub struct ObservationHealth {
     pub run_id: String,
     pub platform: String,
     pub kernel_layer: KernelLayerStatus,
+    #[serde(default, skip_serializing_if = "CaptureOrigin::is_own")]
+    pub capture_origin: CaptureOrigin,
     pub ringbuf_drops: u64,
     pub policy_layer: PolicyLayerStatus,
     pub sdk_layer: SdkLayerStatus,
@@ -160,6 +182,7 @@ impl ObservationHealth {
             run_id: run_id.into(),
             platform: platform.into(),
             kernel_layer: KernelLayerStatus::Absent,
+            capture_origin: CaptureOrigin::Own,
             ringbuf_drops: 0,
             policy_layer: PolicyLayerStatus::Absent,
             sdk_layer: SdkLayerStatus::Absent,
@@ -361,5 +384,40 @@ mod tests {
             health.validate(),
             Err(ObservationHealthError::NonLinuxRequiresAbsentKernelLayer)
         );
+    }
+
+    #[test]
+    fn third_party_complete_kernel_capture_survives_json_roundtrip() {
+        let mut value = serde_json::to_value(ObservationHealth::new("run_001", "linux")).unwrap();
+        value["kernel_layer"] = serde_json::json!("complete");
+        value["capture_origin"] = serde_json::json!("third_party");
+
+        let health: ObservationHealth = serde_json::from_value(value).unwrap();
+        assert_eq!(health.capture_origin, CaptureOrigin::ThirdParty);
+        let serialized = serde_json::to_value(health).unwrap();
+
+        assert_eq!(serialized["capture_origin"], "third_party");
+    }
+
+    #[test]
+    fn missing_capture_origin_deserializes_as_own_without_emitting_a_key() {
+        let legacy = serde_json::to_value(ObservationHealth::new("run_001", "linux")).unwrap();
+
+        let health: ObservationHealth = serde_json::from_value(legacy).unwrap();
+        assert_eq!(health.capture_origin, CaptureOrigin::Own);
+
+        let serialized = serde_json::to_value(health).unwrap();
+        assert!(serialized.get("capture_origin").is_none());
+    }
+
+    #[test]
+    fn unknown_capture_origin_is_not_treated_as_own() {
+        let mut value = serde_json::to_value(ObservationHealth::new("run_001", "linux")).unwrap();
+        value["capture_origin"] = serde_json::json!("unreviewed_future_origin");
+
+        let health: ObservationHealth = serde_json::from_value(value).unwrap();
+
+        assert_eq!(health.capture_origin, CaptureOrigin::Unsupported);
+        assert_ne!(health.capture_origin, CaptureOrigin::Own);
     }
 }
