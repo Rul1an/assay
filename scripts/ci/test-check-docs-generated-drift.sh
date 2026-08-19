@@ -13,7 +13,7 @@ SELECTED_CASE="${ASSAY_DOCS_DRIFT_SELF_TEST_CASE:-}"
 INTERRUPT_CASE="${ASSAY_DOCS_DRIFT_INTERRUPT_AFTER_MUTATION:-}"
 GATE_OUTPUT=""
 # Full mode is a fixed mutation battery; selected mode deliberately executes one row.
-EXPECTED_CASES=12
+EXPECTED_CASES=14
 
 seed_repo() {
   local destination="$1"
@@ -144,6 +144,22 @@ case_hand_edited_plugin_skill() {
   expect_gate_status "$name" "$case_root" 1
 }
 
+case_hand_edited_agent_plugin_skill() {
+  local case_root="$1" name="$2"
+  printf '\n%%%% drift planted by the drift-check self-test\n' \
+    >> "$case_root/packaging/agent-plugin/skills/assay-golden-path/SKILL.md"
+  maybe_interrupt_after_mutation "$name"
+  expect_gate_status "$name" "$case_root" 1
+}
+
+case_hand_edited_agent_plugin_contract() {
+  local case_root="$1" name="$2"
+  printf '\n' \
+    >> "$case_root/packaging/agent-plugin/skills/assay-golden-path/references/agent-golden-path.json"
+  maybe_interrupt_after_mutation "$name"
+  expect_gate_status "$name" "$case_root" 1
+}
+
 case_missing_codex_destination() {
   local case_root="$1" name="$2"
   local destination=".agents/skills/assay-golden-path/SKILL.md"
@@ -214,6 +230,8 @@ CASES=(
   "hand-edited-rendered-guide-table|case_hand_edited_rendered_guide_table"
   "hand-edited-codex-skill|case_hand_edited_codex_skill"
   "hand-edited-plugin-skill|case_hand_edited_plugin_skill"
+  "hand-edited-agent-plugin-skill|case_hand_edited_agent_plugin_skill"
+  "hand-edited-agent-plugin-contract|case_hand_edited_agent_plugin_contract"
   "missing-codex-skill-destination|case_missing_codex_destination"
   "missing-claude-skill-destination|case_missing_claude_destination"
   "missing-plugin-skill-destination|case_missing_plugin_destination"
