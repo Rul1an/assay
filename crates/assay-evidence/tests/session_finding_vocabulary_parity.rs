@@ -148,3 +148,54 @@ fn the_constructor_and_the_event_type_agree_with_the_registered_variant() {
         other => panic!("expected the session-finding variant, got {other:?}"),
     }
 }
+
+fn types_src() -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/types.rs")
+        .canonicalize()
+        .expect("types.rs");
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+}
+
+/// Option 1: `extent` docs must refuse the stronger reading. A grep is a weak
+/// control — it proves the sentence is present, not that a reader heeds it —
+/// and the PR should say so. It still fails if the disclaimer is deleted.
+#[test]
+fn extent_docs_make_no_fidelity_claim() {
+    let core = sequence_eval_src();
+    let extent_docs = core
+        .split("pub enum TraceExtent")
+        .next()
+        .expect("TraceExtent is documented above its declaration");
+    assert!(
+        extent_docs.contains("no fidelity claim"),
+        "TraceExtent docs must state that extent makes no fidelity claim"
+    );
+    assert!(
+        extent_docs.contains("nothing is missing"),
+        "TraceExtent docs must say complete must not be read as nothing is missing"
+    );
+
+    let notes = types_src();
+    let extent_field = notes
+        .split("pub extent:")
+        .next()
+        .expect("extent field is documented");
+    // Take the last doc block before `pub extent`.
+    let start = extent_field
+        .rfind("/// Whether the trace")
+        .expect("extent field keeps its temporal-claim lead-in");
+    let field_docs = &extent_field[start..];
+    assert!(
+        field_docs.contains("no fidelity claim"),
+        "session-finding notes must state that extent makes no fidelity claim"
+    );
+    assert!(
+        field_docs.contains("nothing is missing"),
+        "session-finding notes must say complete must not be read as nothing is missing"
+    );
+    assert!(
+        !field_docs.contains("Self::coverage"),
+        "option 1 must not point at a coverage field that has not shipped"
+    );
+}

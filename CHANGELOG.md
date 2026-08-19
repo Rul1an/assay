@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- `TraceExtent` and session-finding notes state that extent makes no fidelity claim:
+  `complete` must not be read as "nothing is missing" (#2422). A producer-declared
+  `coverage` field on the finding waits for a planned major.
+
 ### Fixed
 - Published-release golden path and `examples/privileged-action-gate/run.sh` verify the
   live-produced denial-observation bundle with `--profile-version v1`. The verifier default

@@ -442,6 +442,10 @@ pub struct PayloadSessionFinding {
     /// The strings are `assay_core::sequence_eval::TraceExtent::label()`, added with this ADR
     /// because the enum had no rendering before it, and pinned by the same parity test as
     /// `outcome`.
+    ///
+    /// This is a temporal claim only. It makes **no fidelity claim**: `complete` must not be
+    /// read as "nothing is missing". A compacted session can be entirely finished, so the run
+    /// being over and the evaluated sequence being a faithful record are orthogonal.
     pub extent: String,
     /// Why, in the producer's words. Present for `violated` and `not_exercised`; a held rule needs
     /// no prose, and inventing one would invite readers to parse it.

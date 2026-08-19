@@ -187,6 +187,11 @@ work that took one predicate.
   The distinction is worth carrying: a violation found on a partial trace and one found on a
   finished run are different claims, and #2112 established that the difference is invisible in the
   rules and the trace — it is only in who is asking.
+  Extent makes **no fidelity claim**: `complete` must not be read as "nothing is missing". A
+  compacted session can be finished, so temporal completeness and record faithfulness are
+  orthogonal. A producer-declared coverage field on that second axis waits for a planned
+  major (with `#[non_exhaustive]` on the finding) rather than a third `TraceExtent` variant
+  (#2422).
 - ADR-045 is unchanged. This ADR states its boundary so that a future disposition proposal has to
   argue against a written decision rather than into a gap.
 
