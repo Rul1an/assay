@@ -217,3 +217,30 @@ a match is bounded further by the result cited under Authorship method: agreemen
 correlated on the profile's ambiguous regions, which is where a corpus carries its information. A
 report may state agreement; it may not state that agreement was reached independently unless the
 authorship methods make that a claim someone can check.
+
+### Which badge a run earns, and the one it cannot
+
+**No badge here is conferred by anyone.** ACM badges are awarded by a venue's artifact-evaluation committee. What follows borrows ACM's *vocabulary* to describe a claim precisely; it is a self-description under a published definition, not an ACM award.
+
+Reports here describe themselves with an [ACM Artifact Review and Badging](https://www.acm.org/publications/policies/artifact-review-and-badging-current)
+class, because the distinction between kinds of reproduction is easy to blur and
+ACM already drew it. The two terms are the reverse of the common intuition:
+*Results Reproduced* means a different team obtained the result **using** the
+author's artifacts; *Results Replicated* means **without** them.
+
+A blind from-spec run against this pack earns **Results Reproduced**. The
+implementation is the reproducer's own and imports nothing from Assay, but the
+opaque cases, the descriptor and the specification all come from the author.
+
+**Results Replicated is not reachable against this or any conformance corpus, and
+that is a property of corpora rather than a shortfall of any reproducer.** ACM
+assumes the author-supplied artifact is the author's *code*, so obtaining the
+result without it is meaningful. A conformance corpus inverts that: the corpus is
+the artifact, and no reproduction can avoid using it. A report claiming
+*Replicated* against this pack has either misread the badge or not used the pack.
+
+So the fact worth stating has no ACM badge, and a report should state it in full
+rather than reach for a stronger label: **an independently written implementation,
+run against author-supplied cases, deriving every outcome from the specification
+alone.** That is a stronger and more checkable sentence than either badge, and it
+is what `reproduction_mode: blind_from_spec` is claiming.
