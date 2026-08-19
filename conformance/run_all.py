@@ -43,6 +43,11 @@ import time
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from bounded_run import (  # noqa: E402
+    OUTPUT_CAP_BYTES, _OutputTooLarge, _run_capped,
+)
+
 REPO = Path(__file__).resolve().parent.parent
 
 # Grades a run can produce.
@@ -51,68 +56,6 @@ PROVED, FALSE, UNPROVED = "proved", "false", "unproved"
 NEEDS_CANDIDATE, NOT_SELECTED, EXTERNAL = "needs_candidate", "not_selected", "external"
 
 RANK = {PROVED: 0, NEEDS_CANDIDATE: 0, NOT_SELECTED: 0, EXTERNAL: 0, UNPROVED: 1, FALSE: 2}
-
-
-# Output ceiling per child process. Both children can emit arbitrary output and
-# a timeout does not bound memory, so the cap is applied while the process runs
-# rather than after it exits.
-OUTPUT_CAP_BYTES = 4 * 1024 * 1024
-
-
-class _OutputTooLarge(Exception):
-    """A child exceeded OUTPUT_CAP_BYTES; its output is not materialized."""
-
-
-def _run_capped(cmd: list[str], cwd: Path, timeout: int) -> subprocess.CompletedProcess:
-    """subprocess.run with a ceiling on how much output is ever held.
-
-    Streams both pipes to temporary files, polls their combined size while the
-    child runs, and kills it the moment the cap is crossed. Only the first
-    OUTPUT_CAP_BYTES are ever read into memory.
-    """
-    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
-        # A descendant that inherits stdout/stderr keeps writing after proc.kill()
-        # and walks straight through the ceiling, so the child leads its own session
-        # and the whole group is stopped and reaped.
-        proc = subprocess.Popen(cmd, cwd=str(cwd), stdout=out, stderr=err,
-                                start_new_session=True)
-
-        def _kill_tree() -> None:
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except (ProcessLookupError, PermissionError, OSError):
-                proc.kill()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                pass
-        deadline = time.monotonic() + timeout
-        try:
-            while True:
-                try:
-                    proc.wait(timeout=0.25)
-                    break
-                except subprocess.TimeoutExpired:
-                    pass
-                if out.tell() + err.tell() > OUTPUT_CAP_BYTES:
-                    _kill_tree()
-                    raise _OutputTooLarge()
-                if time.monotonic() > deadline:
-                    _kill_tree()
-                    raise subprocess.TimeoutExpired(cmd, timeout)
-        finally:
-            # Reap the group even on the clean path: the leader can exit while a
-            # descendant it spawned is still holding the inherited handles.
-            _kill_tree()
-        if out.tell() + err.tell() > OUTPUT_CAP_BYTES:
-            raise _OutputTooLarge()
-        out.seek(0)
-        err.seek(0)
-        return subprocess.CompletedProcess(
-            cmd, proc.returncode,
-            out.read(OUTPUT_CAP_BYTES).decode("utf-8", "replace"),
-            err.read(OUTPUT_CAP_BYTES).decode("utf-8", "replace"),
-        )
 
 
 def _stdlib_jsonrpc(suite: dict) -> tuple[str, str]:

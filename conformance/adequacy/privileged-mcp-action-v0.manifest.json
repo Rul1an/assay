@@ -1,0 +1,77 @@
+{
+  "schema": "corpus-adequacy.manifest.v0",
+  "runner": "process",
+  "_about": "Mutation adequacy for privileged-mcp-action/v0. ONE genuine hole: the origin leg of the v0 marker triple is promised and unexercised. Two further rules were declared and are NOT holes -- they mutate the wrong stage and the wrong profile -- and are marked out_of_scope with that reasoning rather than dropped, so the mistake stays visible. Independently classified by Ruley against docs/profiles/privileged-mcp-action/v0.md \u00a75 and the Stage 2/3 architecture.",
+  "repo_root": "../..",
+  "implementation_sources": [
+    "../../crates/assay-evidence/src/denial_marker.rs",
+    "../../crates/assay-cli/src/cli/commands/evidence/verify_privileged_mcp_action.rs",
+    "../../crates/assay-cli/src/cli/commands/evidence/privileged_mcp_action.rs"
+  ],
+  "build": [
+    "cargo",
+    "build",
+    "-p",
+    "assay-cli",
+    "--bin",
+    "assay"
+  ],
+  "entrypoint_command": [
+    "./target/debug/assay",
+    "evidence",
+    "verify-privileged-mcp-action",
+    "{vector}",
+    "--format",
+    "json"
+  ],
+  "outcome_from": [
+    "bundle_integrity",
+    "verdict",
+    "reason_code"
+  ],
+  "vectors": "privileged-mcp-action-v0.vectors.json",
+  "id_key": "vector_id",
+  "vector_path_key": "path",
+  "default_group": "denial_marker_binding",
+  "mutants": {
+    "denial_marker_binding": [
+      {
+        "label": "0 an unrecognised marker triple fails closed",
+        "anchor": "        _ => None,\n    }\n}",
+        "replacement": "        _ => Some(DenialMarkerVersion::V1),\n    }\n}",
+        "scope": "out_of_scope",
+        "reason": "WRONG STAGE, not a hole. v0 does promise that an unrecognised in-namespace schema fails closed, but that promise is the Stage 2 arm (other => unknown_profile_schema) at verify_privileged_mcp_action.rs:331, which runs BEFORE the classifier. Under v0, observation_schema() admits only .v0 payloads, so classify_denial_marker never sees an unrecognised schema on this path: returning Some(V1) for a non-triple still fails == Some(V0) and is still not a marker. This mutant cannot move any of the 14 outcomes even in theory. To measure that promise, mutate the Stage 2 match instead."
+      },
+      {
+        "label": "1 the origin must be the proxy",
+        "anchor": "(DENIED_CALL_OBSERVATION_V0, PROXY_DENIED_V0, PROXY_ORIGIN)",
+        "replacement": "(DENIED_CALL_OBSERVATION_V0, PROXY_DENIED_V0, _)"
+      },
+      {
+        "label": "2 v1 pairs with the v1 error code",
+        "anchor": "(DENIED_CALL_OBSERVATION_V1, PROXY_DENIED_V1, PROXY_ORIGIN)",
+        "replacement": "(DENIED_CALL_OBSERVATION_V1, _, PROXY_ORIGIN)",
+        "scope": "out_of_scope",
+        "reason": "WRONG PROFILE, not a hole. The v1 schema / -31999 pairing is Stage 3 of v1.md. v0's rule for a v1 schema is the opposite of pairing: unrecognised, therefore invalid. Under v0 selection a .v1 payload never enters observations, so the V1 arm of the match is unreachable here. Its survival does not mean a stranger can ignore the v1 pairing and reproduce the v0 digest; it means the v0 corpus never presents that pairing. The v1 corpus already covers it (ok-003-cross-pair-inert)."
+      },
+      {
+        "label": "CONTROL harness reachability on the verifier path",
+        "anchor": ".filter(|obs| classify_denial_marker(obs) == Some(profile_version.marker_version()));",
+        "replacement": ".filter(|_obs| false);",
+        "control": true
+      }
+    ]
+  },
+  "equivalent": {},
+  "corpus_digest_file": "../privileged-mcp-action-v0/candidate-release.json",
+  "corpus_digest_key": "corpus_digest",
+  "known_holes": {
+    "sha256:cb58ce91863f52e0568742b977f0642158453ec11bbcd25821f9171dccd03342": [
+      {
+        "label": "1 the origin must be the proxy",
+        "reason": "v0 Stage 3 promises an observation is a marker only if ALL THREE legs hold: schema, code AND origin == assay-proxy. No vector among the 14 is a well-formed v0 observation whose only defect is a wrong origin, so deleting the third leg cannot move a pinned outcome. This is a genuine, profile-promised, unexercised check. Recorded rather than fixed because adding a vector moves a digest that is a published contract carried by assay#1840.",
+        "recorded": "2026-08-19"
+      }
+    ]
+  }
+}

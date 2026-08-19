@@ -16,14 +16,26 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import corpus_adequacy as ca  # noqa: E402
+# The tool lives in its own organisation now: corpus-adequacy/corpus-adequacy.
+# It is NOT vendored here, because two implementations of a measurement drift and
+# the copy that drifts is the one that stops measuring. Expect it as a sibling
+# checkout, and skip loudly rather than pretending the corpora were measured.
+_TOOL = Path(__file__).resolve().parents[3] / "corpus-adequacy"
+if _TOOL.is_dir():
+    sys.path.insert(0, str(_TOOL))
+try:
+    import corpus_adequacy as ca  # noqa: E402
+except ImportError:  # pragma: no cover - environment without the sibling checkout
+    ca = None
 
 REPO = Path(__file__).resolve().parents[2]
 MANIFEST = REPO / "conformance/adequacy/mcp-jsonrpc-id.manifest.json"
 PACK = REPO / "examples/mcp-jsonrpc-id-conformance"
 
 
+@unittest.skipIf(ca is None,
+                 "corpus-adequacy not found as a sibling checkout; clone "
+                 "https://github.com/corpus-adequacy/corpus-adequacy next to this repository")
 class DerivedVectorsDoNotDrift(unittest.TestCase):
     """The adequacy vectors are a projection of the pack; keep them one thing."""
 
@@ -44,6 +56,7 @@ class DerivedVectorsDoNotDrift(unittest.TestCase):
             self.fail("adequacy artifact inside the checksummed pack: %s" % p)
 
 
+@unittest.skipIf(ca is None, "corpus-adequacy not found as a sibling checkout")
 class OwnCorpusAdequacy(unittest.TestCase):
     def test_mcp_jsonrpc_id_is_adequate_within_its_declared_scope(self):
         rep = ca.run(MANIFEST)
