@@ -1,5 +1,5 @@
 {
-  "schema": "assay.corpus_adequacy.manifest.v0",
+  "schema": "corpus-adequacy.manifest.v0",
   "runner": "batch",
   "_about": "Mutation adequacy for the observed-effect-v0 drift consumer. BATCH runner: the checker takes the whole vector file and reports a summary, so the corpus is exercised as a unit and the summary IS the outcome. Its failures list names the case ids, which is what makes it discriminate; a checker reporting only a boolean would make every mutant kill everything or nothing. The command is relative on purpose -- the consumer REFUSES an absolute vectors path, which is its own hardening and not something to work around. Requires Rul1an/observed-effect-v0 cloned as a sibling of this repository; without it the run fails with a missing source rather than silently measuring nothing.",
   "repo_root": "../../../observed-effect-v0/observed-effect-drift-consumer-2026-06",

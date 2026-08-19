@@ -126,7 +126,7 @@ more informative than either badge on its own.
 
 ## Mutation adequacy, measured on ourselves
 
-`conformance/corpus_adequacy.py` asks a different question from the runner above:
+[`corpus-adequacy`](https://github.com/corpus-adequacy/corpus-adequacy) asks a different question from the runner above:
 not *do these corpora reproduce their own verdicts*, but **can an implementer
 delete a declared rule, still reproduce the pinned outcomes, and be
 indistinguishable from a conforming implementation?** A surviving mutant is a
@@ -152,3 +152,35 @@ path that MUST be killed. All-survivors because a corpus is weak and
 all-survivors because nothing was ever measured print identically, so without a
 control a zero says nothing. Controls are excluded from the score, and a control
 that survives fails the run with every other verdict declared meaningless.
+
+### Where the adequacy tool lives, and why not here
+
+The measurement tool is **not vendored in this repository**. It lives at
+[`corpus-adequacy/corpus-adequacy`](https://github.com/corpus-adequacy/corpus-adequacy),
+in its own organisation, and this repository keeps only the **manifests** that
+describe our corpora to it.
+
+```bash
+git clone https://github.com/corpus-adequacy/corpus-adequacy   # as a sibling of this repo
+python3 ../corpus-adequacy/corpus_adequacy.py conformance/adequacy/<name>.manifest.json
+```
+
+Two reasons, and the second is the one that decided it.
+
+**One implementation.** Two copies of a measurement drift, and the copy that
+drifts is the one that stops measuring. That is the same rule this workspace
+applies to canonicalization and to DSSE pre-authentication encoding. The
+duplication had already begun within a day: the vendored copy and the extracted
+one disagreed on their schema ids before either had been used in anger.
+
+**An instrument offered to peers may not be vendor-named.** The schema id was
+`assay.corpus_adequacy.manifest.v0`, and it is now `corpus-adequacy.manifest.v0`.
+That id ends up inside another project's manifest. `rge-bench`'s own
+`check_public_surface.py` — a neutrality guard written in this workspace —
+rejected the vendored id on exactly that ground, which is a stronger signal than
+any outside comparison because it is our own rule applied to a case we had not
+foreseen.
+
+`conformance/bounded_run.py` stays here and is duplicated upstream. It serves
+`run_all.py`, which is this repository's own runner, so both copies have a live
+local caller. That is a known duplication rather than an unnoticed one.

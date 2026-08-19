@@ -1,5 +1,5 @@
 {
-  "schema": "assay.corpus_adequacy.manifest.v0",
+  "schema": "corpus-adequacy.manifest.v0",
   "runner": "process",
   "_about": "Mutation adequacy for privileged-mcp-action/v0. ONE genuine hole: the origin leg of the v0 marker triple is promised and unexercised. Two further rules were declared and are NOT holes -- they mutate the wrong stage and the wrong profile -- and are marked out_of_scope with that reasoning rather than dropped, so the mistake stays visible. Independently classified by Ruley against docs/profiles/privileged-mcp-action/v0.md \u00a75 and the Stage 2/3 architecture.",
   "repo_root": "../..",
