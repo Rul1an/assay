@@ -15,37 +15,43 @@
         "label": "0 envelope must declare jsonrpc 2.0",
         "anchor": "        message.get(\"jsonrpc\") == \"2.0\"\n        and \"result\" not in message",
         "replacement": "        True\n        and \"result\" not in message",
-        "scope": "out_of_scope"
+        "scope": "out_of_scope",
+        "reason": "envelope shape; the pack tests the id contradiction, and every vector is already a well-formed 2.0 error response"
       },
       {
         "label": "1 an error response must not carry result",
         "anchor": "        and \"result\" not in message\n        and isinstance(error, dict)",
         "replacement": "        and isinstance(error, dict)",
-        "scope": "out_of_scope"
+        "scope": "out_of_scope",
+        "reason": "envelope shape; no vector carries both result and error because the contradiction under test is about id alone"
       },
       {
         "label": "2 error must be an object",
         "anchor": "        and isinstance(error, dict)\n        and isinstance(error.get(\"code\"), int)",
         "replacement": "        and isinstance(error.get(\"code\"), int)",
-        "scope": "out_of_scope"
+        "scope": "out_of_scope",
+        "reason": "envelope shape; all three vectors carry a well-formed error object by construction"
       },
       {
         "label": "3 error code must be an int",
         "anchor": "        and isinstance(error.get(\"code\"), int)\n",
         "replacement": "        and True\n",
-        "scope": "out_of_scope"
+        "scope": "out_of_scope",
+        "reason": "envelope shape; code type is not part of the MCP-vs-JSON-RPC id disagreement"
       },
       {
         "label": "4 a bool is not an int code",
         "anchor": "        and not isinstance(error.get(\"code\"), bool)\n",
         "replacement": "        and True\n",
-        "scope": "out_of_scope"
+        "scope": "out_of_scope",
+        "reason": "envelope shape; the bool-is-not-int edge belongs to a code-type corpus, not this one"
       },
       {
         "label": "5 error message must be a string",
         "anchor": "        and isinstance(error.get(\"message\"), str)\n",
         "replacement": "        and True\n",
-        "scope": "out_of_scope"
+        "scope": "out_of_scope",
+        "reason": "envelope shape; message type is not part of the id disagreement"
       },
       {
         "label": "6 MCP tolerates an omitted id",
@@ -75,7 +81,8 @@
         "label": "10 a non-object message is rejected outright",
         "anchor": "    if not isinstance(message, dict) or not _error_shape_is_valid(message):",
         "replacement": "    if not _error_shape_is_valid(message):",
-        "scope": "out_of_scope"
+        "scope": "out_of_scope",
+        "reason": "input-domain guard; the pack's three vectors are all objects, so nothing exercises the non-object branch"
       }
     ]
   },

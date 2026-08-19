@@ -74,7 +74,7 @@ class Scoring(unittest.TestCase):
     def test_out_of_scope_is_reported_but_never_scored(self):
         # The distinction the tool exists to keep: a rule nobody claimed is a
         # scope statement, not a hole, and must not manufacture a failure.
-        oos = dict(SURVIVOR, scope="out_of_scope")
+        oos = dict(SURVIVOR, scope="out_of_scope", reason="the corpus does not claim this rule")
         with tempfile.TemporaryDirectory() as d:
             rep = ca.run(_manifest(Path(d), {"a": [KILLABLE, oos]}))
         self.assertEqual(rep["survived"], 0)
@@ -142,6 +142,60 @@ class ManifestValidation(unittest.TestCase):
         self.assertIn("mutates nothing",
                       self._err({"mutants": {"a": [{"label": "noop", "anchor": "x",
                                                     "replacement": "x"}]}}))
+
+
+class RuleyFindings(unittest.TestCase):
+    """Regressions for the blocking review on #2538. Each one scored 100% before."""
+
+    def test_out_of_scope_without_a_reason_is_refused(self):
+        # Finding 1: 1 killable + 5 unreasoned out_of_scope printed 100% and exited 0.
+        # An out_of_scope mutant leaves the denominator exactly as an equivalent one
+        # does, so it carries the same obligation.
+        oos = dict(SURVIVOR, scope="out_of_scope")
+        with tempfile.TemporaryDirectory() as d:
+            p = _manifest(Path(d), {"a": [KILLABLE, oos]})
+            with self.assertRaises(ca.ManifestError) as cm:
+                ca.load_manifest(p)
+        self.assertIn("stated reason", str(cm.exception))
+
+    def test_an_empty_anchor_is_refused(self):
+        # Finding 2a: "" matches everywhere, corrupts the source, and the resulting
+        # import failure was then counted as a kill.
+        with tempfile.TemporaryDirectory() as d:
+            p = _manifest(Path(d), {"a": [{"label": "empty", "anchor": "",
+                                           "replacement": "# x"}]})
+            with self.assertRaises(ca.ManifestError) as cm:
+                ca.load_manifest(p)
+        self.assertIn("anchor is empty", str(cm.exception))
+
+    def test_an_anchor_occurring_more_than_once_fails_the_run(self):
+        # Finding 2b: a substring anchor mangled the source; the breakage scored as a kill.
+        dup = {"label": "substring", "anchor": "inputs", "replacement": "broken"}
+        with tempfile.TemporaryDirectory() as d:
+            rep = ca.run(_manifest(Path(d), {"a": [KILLABLE, dup]}))
+        self.assertFalse(rep["adequate"])
+        self.assertTrue(any("occurs" in f and "unique" in f for f in rep["failures"]),
+                        rep["failures"])
+
+    def test_the_report_states_what_the_percentage_is_a_percentage_of(self):
+        # Finding 3: the fix is the published sentence, not code. 100% is 100% of what
+        # the author declared, never of the rules the implementation has.
+        oos = dict(SURVIVOR, scope="out_of_scope", reason="not claimed")
+        with tempfile.TemporaryDirectory() as d:
+            rep = ca.run(_manifest(Path(d), {"a": [KILLABLE, oos]}))
+        self.assertEqual(rep["declared_total"], 2)
+        self.assertEqual(rep["out_of_scope_ratio"], 1.0)
+        self.assertIn("author-declared", rep["score_means"])
+
+    def test_a_majority_excluded_corpus_says_so(self):
+        oos = [dict(SURVIVOR, label=f"o{i}", anchor=f'return "ok"',
+                    replacement=f'return "ok"  # {i}', scope="out_of_scope",
+                    reason="not claimed") for i in range(3)]
+        with tempfile.TemporaryDirectory() as d:
+            p = _manifest(Path(d), {"a": [KILLABLE] + oos})
+            r = subprocess.run([sys.executable, str(ca.__file__), str(p)],
+                               capture_output=True, text=True, timeout=120)
+        self.assertIn("more rules are excluded than measured", r.stdout)
 
 
 class Portability(unittest.TestCase):

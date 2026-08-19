@@ -52,6 +52,21 @@ class OwnCorpusAdequacy(unittest.TestCase):
         self.assertEqual(rep["killed"], 4)
         self.assertEqual(rep["survived"], 0)
 
+    def test_every_out_of_scope_declaration_carries_a_reason(self):
+        # Blocking review on #2538: an unreasoned exclusion is a percentage target
+        # wearing a different coat.
+        import json as _json
+        m = _json.loads(MANIFEST.read_text())
+        for mut in m["mutants"]["error_response_id"]:
+            if mut.get("scope") == "out_of_scope":
+                self.assertTrue(str(mut.get("reason", "")).strip(), mut["label"])
+
+    def test_the_report_names_the_denominator_and_the_ratio(self):
+        rep = ca.run(MANIFEST)
+        self.assertEqual(rep["declared_total"], 11)
+        self.assertEqual(rep["out_of_scope_ratio"], 1.75)
+        self.assertIn("author-declared", rep["score_means"])
+
     def test_the_out_of_scope_count_is_stated_rather_than_hidden(self):
         # The honest half of the result: seven envelope rules no vector exercises.
         # If this number silently drops to zero, someone removed the disclosure

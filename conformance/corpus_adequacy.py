@@ -43,6 +43,23 @@ declares its own mutants in a manifest:
   - a crash is a KILL, reported separately, because "raises without this rule"
     says more about the rule than "returns something else".
 
+WHAT THE PERCENTAGE IS A PERCENTAGE OF
+---------------------------------------
+100% here means 100% of the rules THE AUTHOR DECLARED. It does not mean 100% of
+the rules the implementation has. A rule nobody declared is invisible to this
+check, and there is no honest mechanical fix for that inside a manifest-driven
+design: the manifest is written by the same hand as the corpus.
+
+That is why the report never prints a bare percentage. It prints the numerator,
+the denominator, the count declared equivalent, the count declared out of scope,
+and the ratio between excluded and measured. A score reported without those is a
+percentage target wearing a different coat, because an author can exclude almost
+everything and still print 100%.
+
+For the same reason an out_of_scope mutant must carry a stated reason. It leaves
+the denominator exactly as a declared-equivalent one does, so it carries the same
+obligation.
+
 SELF-COVERAGE, APPLIED TO THIS CHECK
 -------------------------------------
 A group present in the corpus that declares no mutant is the same defect one
@@ -105,6 +122,17 @@ def load_manifest(path: Path) -> dict:
             if e["scope"] not in ("declared", "out_of_scope"):
                 raise ManifestError("mutants[%s][%d] %r: scope must be declared or out_of_scope"
                                     % (group, i, e["label"]))
+            # An out-of-scope mutant leaves the denominator exactly as an equivalent one does,
+            # so it carries the same obligation: a stated reason, never a bare exclusion.
+            if e["scope"] == "out_of_scope" and not str(e.get("reason", "")).strip():
+                raise ManifestError(
+                    "mutants[%s][%d] %r: an out_of_scope mutant needs a stated reason. It leaves "
+                    "the denominator like an equivalent one, so it carries the same obligation"
+                    % (group, i, e["label"]))
+            if not e["anchor"]:
+                raise ManifestError(
+                    "mutants[%s][%d] %r: the anchor is empty. An empty anchor matches everywhere, "
+                    "corrupts the source and is then counted as a kill" % (group, i, e["label"]))
             if e["anchor"] == e["replacement"]:
                 raise ManifestError(
                     "mutants[%s][%d] %r: anchor and replacement are identical, so it mutates nothing"
@@ -184,10 +212,19 @@ def run(manifest_path: Path) -> dict:
                 continue
 
             for idx, mut in enumerate(m["mutants"][group]):
-                if mut["anchor"] not in source:
+                occurrences = source.count(mut["anchor"])
+                if occurrences == 0:
                     failures.append(
                         "%s / %s: anchor not found in %s. The rule was renamed or removed and the "
                         "mutant is measuring nothing" % (group, mut["label"], m["implementation"]))
+                    continue
+                if occurrences > 1:
+                    # Substituting the first of several is a coin flip about which rule is being
+                    # measured, and a mangled substitution is then scored as a kill.
+                    failures.append(
+                        "%s / %s: the anchor occurs %d times in %s, so the substitution would pick "
+                        "one arbitrarily and any breakage would be scored as a kill. Make the "
+                        "anchor unique" % (group, mut["label"], occurrences, m["implementation"]))
                     continue
                 mutated = source.replace(mut["anchor"], mut["replacement"], 1)
                 try:
@@ -247,6 +284,11 @@ def run(manifest_path: Path) -> dict:
     return {"schema": "assay.corpus_adequacy.report.v0", "manifest": str(manifest_path),
             "killed": killed, "survived": survived, "equivalent": equivalent,
             "unexercised_out_of_scope": out_of_scope,
+            "declared_total": killed + survived + equivalent + out_of_scope,
+            "out_of_scope_ratio": (None if (killed + survived) == 0
+                                   else round(out_of_scope / (killed + survived), 2)),
+            "score_means": ("percent of author-declared in-scope rules killed; NOT percent of the "
+                            "rules the implementation actually has"),
             "score_percent": score, "mutants": results, "failures": failures,
             "adequate": not failures}
 
@@ -270,14 +312,22 @@ def main() -> int:
             if r["verdict"] != "killed":
                 print("    %s" % r["how"])
         print()
-        print("score %.1f%% over %d in-scope non-equivalent mutants (%d killed, %d survived, "
-              "%d declared equivalent and excluded)"
-              % (rep["score_percent"], rep["killed"] + rep["survived"], rep["killed"],
-                 rep["survived"], rep["equivalent"]))
+        # Never a bare percentage. A score reported without its denominator and its
+        # exclusions is a percentage target wearing a different coat: an author can
+        # exclude almost everything and still print 100%.
+        print("%d of %d DECLARED in-scope rules killed (%.1f%%). %d declared equivalent, "
+              "%d declared out of scope. %d rules declared in total."
+              % (rep["killed"], rep["killed"] + rep["survived"], rep["score_percent"],
+                 rep["equivalent"], rep["unexercised_out_of_scope"], rep["declared_total"]))
+        print("This is %.1f%% of what the AUTHOR DECLARED, not of the rules the implementation "
+              "has. A rule nobody declared is invisible to this check." % rep["score_percent"])
         if rep["unexercised_out_of_scope"]:
-            # Always stated. A scope exclusion that is not printed reads as coverage.
-            print("%d rule(s) unexercised and declared OUT OF SCOPE: real gaps in what the corpus "
+            print("out of scope (%d, each with a stated reason): real gaps in what the corpus "
                   "covers, not holes in what it claims" % rep["unexercised_out_of_scope"])
+        if rep["out_of_scope_ratio"] is not None and rep["out_of_scope_ratio"] > 1.0:
+            print("NOTE: more rules are excluded than measured (ratio %.2f). The score is real "
+                  "but it is a statement about a minority of the declared rules."
+                  % rep["out_of_scope_ratio"])
         for f in rep["failures"]:
             print("FAIL: %s" % f)
         if rep["adequate"]:
