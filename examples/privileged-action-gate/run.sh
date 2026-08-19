@@ -117,10 +117,11 @@ capture() {
         >/dev/null 2>&1 || true
 }
 
-# matrix <label> <bundle>: verify one bundle and print a compact claim-matrix line.
+# matrix <label> <bundle> [verify-args...]: verify one bundle and print a compact claim-matrix line.
 matrix() {
   local label="$1" bundle="$2"
-  "$ASSAY_CLI" evidence verify-privileged-mcp-action "$bundle" --format json \
+  shift 2
+  "$ASSAY_CLI" evidence verify-privileged-mcp-action "$bundle" --format json "$@" \
     | "$PY" -c '
 import json, sys
 label = sys.argv[1]
@@ -142,6 +143,6 @@ capture policies/allow.yaml        baseline-approved.json approved "$WORK/pmaall
   --decisions "$WORK/pmaallow.ndjson" \
   --bundle-out "$WORK/pmaallow.bundle.tar.gz" 2>/dev/null
 
-matrix "denied path bundle " "$WORK/pmadeny.bundle.tar.gz"
+matrix "denied path bundle " "$WORK/pmadeny.bundle.tar.gz" --profile-version v1
 matrix "allowed path bundle" "$WORK/pmaallow.bundle.tar.gz"
 echo "The matrix is recomputed from carried bytes; delivery and side effect stay incomplete by design."

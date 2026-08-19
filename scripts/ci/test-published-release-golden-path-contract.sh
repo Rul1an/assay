@@ -9,6 +9,7 @@ DRIVER="${DRIVER:-${ROOT}/scripts/ci/published-release-golden-path.sh}"
 MANIFEST="${MANIFEST:-${ROOT}/scripts/ci/fixtures/published-release-golden-path/v1/harness-manifest.json}"
 RELEASE_WORKFLOW="${RELEASE_WORKFLOW:-${ROOT}/.github/workflows/release.yml}"
 CHECKER="${ROOT}/scripts/ci/check-published-release-golden-path-contract.py"
+EXAMPLE_RUN="${EXAMPLE_RUN:-${ROOT}/examples/privileged-action-gate/run.sh}"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -20,6 +21,7 @@ fail() {
 [[ -f "$MANIFEST" ]] || fail "missing published-release golden-path harness manifest"
 [[ -f "$RELEASE_WORKFLOW" ]] || fail "missing release workflow"
 [[ -f "$CHECKER" ]] || fail "missing published-release golden-path checker"
+[[ -f "$EXAMPLE_RUN" ]] || fail "missing privileged-action-gate example"
 
 python3 "$CHECKER" \
   --workflow "$WORKFLOW" \
@@ -211,6 +213,27 @@ expect_mutation_failure \
   'assay evidence show --format json -- "$bundle"' \
   $'assay evidence show --format json -- conformance/privileged-mcp-action-v0/vectors/ok-001.bundle.tar.gz\n  # assay evidence show --format json -- "$bundle"' \
   "driver must inspect the same bundle it produced exactly once"
+
+expect_mutation_failure \
+  "produced-verify-default-v0" "driver.sh" \
+  'assay evidence verify-privileged-mcp-action "$bundle" --format json --profile-version v1' \
+  'assay evidence verify-privileged-mcp-action "$bundle" --format json' \
+  "driver must verify the produced denial-observation bundle with --profile-version v1 exactly once" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "tampered-verify-default-v0" "driver.sh" \
+  'assay evidence verify-privileged-mcp-action "$tampered" --format json --profile-version v1' \
+  'assay evidence verify-privileged-mcp-action "$tampered" --format json' \
+  "driver must verify the tampered denial-observation bundle with --profile-version v1 exactly once" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "produced-bundle-verdict-loosened" "driver.sh" \
+  '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "pass" and .verdict == "valid"' \
+  '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "pass"' \
+  "driver lost produced bundle valid verdict" \
+  "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "verifier-commented" "driver.sh" \
@@ -412,5 +435,103 @@ expect_mutation_failure \
   '"executable": true' \
   '"executable": false' \
   "harness executable surface drifted"
+
+# Same reported bypass against the old (driver-only) guard and the new example pairing guard.
+# The mutant is the shipping denied-bundle verify line with PROFILE_VERSION_V1 removed — not a
+# copied command literal.
+expect_example_bypass_old_and_new_guard() {
+  local case_root="$scratch/example-denied-verify-default-v0"
+  local old_exit new_exit expected
+  mkdir -p "$case_root"
+  expected="$(
+    python3 - "$CHECKER" "$EXAMPLE_RUN" "$case_root/run.sh" <<'PY'
+import importlib.util, pathlib, sys
+
+spec = importlib.util.spec_from_file_location("checker", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+shipping = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
+line = mod.shipping_denied_verify_source_line(shipping)
+if mod.PROFILE_VERSION_V1 not in line:
+    raise SystemExit("shipping denied-bundle verify is not the paired constant")
+pathlib.Path(sys.argv[3]).write_text(mod.seed_denied_verify_bypass(shipping), encoding="utf-8")
+print(mod.EXAMPLE_DENIED_VERIFY_PAIRED)
+PY
+  )" || fail "could not seed the example pairing bypass from the shipping constant"
+
+  if python3 - "$CHECKER" "$WORKFLOW" "$RELEASE_WORKFLOW" "$DRIVER" "$MANIFEST" "$ROOT" <<'PY'
+import importlib.util, pathlib, sys
+
+spec = importlib.util.spec_from_file_location("checker", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+problems = mod.validate_contract(*map(pathlib.Path, sys.argv[2:7]))
+raise SystemExit(1 if problems else 0)
+PY
+  then
+    old_exit=0
+  else
+    old_exit=$?
+    fail "old guard rejected the example bypass (exit $old_exit)"
+  fi
+
+  if python3 "$CHECKER" \
+      --workflow "$WORKFLOW" \
+      --release-workflow "$RELEASE_WORKFLOW" \
+      --driver "$DRIVER" \
+      --manifest "$MANIFEST" \
+      --source-root "$ROOT" \
+      --example-run "$case_root/run.sh" >"$case_root/output" 2>&1; then
+    new_exit=0
+    fail "new guard stayed green on the example bypass"
+  else
+    new_exit=$?
+  fi
+  grep -F "$expected" "$case_root/output" >/dev/null \
+    || fail "new guard missed shipping pairing constant: $expected"
+  echo "example bypass old_guard_exit=$old_exit new_guard_exit=$new_exit"
+}
+
+expect_example_matrix_forward_mutation() {
+  local case_root="$scratch/example-matrix-drops-verify-args"
+  local expected
+  mkdir -p "$case_root"
+  expected="$(
+    python3 - "$CHECKER" "$EXAMPLE_RUN" "$case_root/run.sh" <<'PY'
+import importlib.util, pathlib, sys
+
+spec = importlib.util.spec_from_file_location("checker", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+shipping = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
+anchors = [
+    line
+    for line in shipping.splitlines()
+    if mod.VERIFY_PRIVILEGED in line and '"$bundle"' in line
+]
+if len(anchors) != 1 or '"$@"' not in anchors[0]:
+    raise SystemExit("shipping matrix verify is not the forwarded constant")
+pathlib.Path(sys.argv[3]).write_text(
+    shipping.replace(anchors[0], anchors[0].replace('"$@"', "", 1), 1),
+    encoding="utf-8",
+)
+print(mod.EXAMPLE_MATRIX_FORWARDS_ARGS)
+PY
+  )" || fail "could not seed the example matrix-forward mutant from the shipping constant"
+  if python3 "$CHECKER" \
+      --workflow "$WORKFLOW" \
+      --release-workflow "$RELEASE_WORKFLOW" \
+      --driver "$DRIVER" \
+      --manifest "$MANIFEST" \
+      --source-root "$ROOT" \
+      --example-run "$case_root/run.sh" >"$case_root/output" 2>&1; then
+    fail "matrix-forward mutation stayed green"
+  fi
+  grep -F "$expected" "$case_root/output" >/dev/null \
+    || fail "matrix-forward mutation missed shipping guard constant: $expected"
+}
+
+expect_example_bypass_old_and_new_guard
+expect_example_matrix_forward_mutation
 
 echo "ok: published-release golden-path contract"
