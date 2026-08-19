@@ -118,17 +118,53 @@ capture() {
 }
 
 # matrix <label> <bundle> [verify-args...]: verify one bundle and print a compact claim-matrix line.
+# The verifier carries "claims" only behind a valid verdict: a stage-1 integrity failure or a
+# rejected statement omits the member and exits 2, because a matrix it could not recompute is not
+# a matrix it will print. The report is read from a file rather than piped, so neither the exit
+# code (pipefail) nor the absent member (KeyError) can end the demo without saying why.
 matrix() {
   local label="$1" bundle="$2"
   shift 2
+  local report="$WORK/verify-report.json" status=0
   "$ASSAY_CLI" evidence verify-privileged-mcp-action "$bundle" --format json "$@" \
-    | "$PY" -c '
+    >"$report" || status=$?
+  "$PY" - "$label" "$report" "$status" <<'PYEOF'
 import json, sys
-label = sys.argv[1]
-report = json.load(sys.stdin)
-cells = " ".join("{}={}".format(name, cell["status"]) for name, cell in report["claims"].items())
+
+label, path, status = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    with open(path) as handle:
+        report = json.load(handle)
+except (OSError, ValueError):
+    print(f"  {label}: the verifier produced no JSON report (exit {status})", file=sys.stderr)
+    raise SystemExit(1)
+
+claims = report.get("claims")
+if claims is None:
+    # Absent by design, never by omission. Print the verifier's own diagnosis: which stage refused,
+    # under which reason code, and every finding it recorded.
+    print(
+        "  {}: NO CLAIM MATRIX  bundle_integrity={}  verdict={}  reason_code={}  (verifier exit {})".format(
+            label,
+            report.get("bundle_integrity", "?"),
+            report.get("verdict", "absent"),
+            report.get("reason_code", "?"),
+            status,
+        ),
+        file=sys.stderr,
+    )
+    for finding in report.get("findings", []):
+        print("    {}: {}".format(finding.get("id", "?"), finding.get("detail", "")), file=sys.stderr)
+    print(
+        "    The claim matrix is recomputed only behind a valid verdict. A profile mismatch is the"
+        " usual cause: pass the --profile-version matching the records this demo produced.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+cells = " ".join("{}={}".format(name, cell["status"]) for name, cell in claims.items())
 print("  {}: verdict={}  {}".format(label, report["verdict"], cells))
-' "$label"
+PYEOF
 }
 
 echo
