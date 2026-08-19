@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `assay describe [path...]` walks the clap command tree so a caller can ask
+  for the top-level surface and descend. Node identities are the existing
+  shipping constants, not a second registry. Global `--quiet` /
+  `--non-interactive` stay absent: `NO_COLOR` is already honoured and `watch`
+  is the only interactive command (#2178).
 - A complete MCP `2026-07-28` stateless server adapter exists in-process behind a
   closed gate. Public stdio still refuses `_meta: 2026-07-28` with `-32022`,
   keeps `server/discover` at `-32601`, and does not advertise or accept that

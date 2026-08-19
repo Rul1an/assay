@@ -32,6 +32,7 @@ exclude = [
     "tests/doctor_exit_class_contract.rs",
     "tests/doctor_argument_contract.rs",
     "tests/doctor_text_render_contract.rs",
+    "tests/cli_describe_contract.rs",
     "tests/stdout_json_write_contract.rs",
     "tests/mcp_preflight_contract.rs",
     "tests/recovery_argv_publisher_parity.rs",
