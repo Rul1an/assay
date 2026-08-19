@@ -220,7 +220,9 @@ authorship methods make that a claim someone can check.
 
 ### Which badge a run earns, and the one it cannot
 
-Reports here carry an [ACM Artifact Review and Badging](https://www.acm.org/publications/policies/artifact-review-and-badging-current)
+**No badge here is conferred by anyone.** ACM badges are awarded by a venue's artifact-evaluation committee. What follows borrows ACM's *vocabulary* to describe a claim precisely; it is a self-description under a published definition, not an ACM award.
+
+Reports here describe themselves with an [ACM Artifact Review and Badging](https://www.acm.org/publications/policies/artifact-review-and-badging-current)
 class, because the distinction between kinds of reproduction is easy to blur and
 ACM already drew it. The two terms are the reverse of the common intuition:
 *Results Reproduced* means a different team obtained the result **using** the
