@@ -59,6 +59,7 @@ assay.mcp_preflight.v0 | crates/assay-cli/src/cli/commands/mcp/preflight.rs | -
 assay.mcp_server_inventory.v0 | crates/assay-cli/src/cli/commands/inventory.rs | crates/assay-core/src/discovery/inventory_carrier.rs
 assay.monitor.observed_peers.v0 | crates/assay-cli/src/cli/commands/monitor_next/observed_peers.rs | -
 assay.otel_projection.v0 | crates/assay-cli/src/cli/commands/project_otel.rs | crates/assay-core/src/otel/projection.rs
+assay.runner.observation_health.v0 | crates/assay-cli/src/cli/commands/monitor_next/observation_health.rs | crates/assay-runner-schema/src/health.rs
 assay.privileged_mcp_action.verify.report.v0 | crates/assay-cli/src/cli/commands/evidence/verify_privileged_mcp_action.rs | -
 assay.run_report.v1 | crates/assay-core/src/report/json.rs | -
 assay.run_summary.v1 | crates/assay-core/src/report/summary/writer.rs | -
@@ -178,13 +179,27 @@ of, and there is no instrument that fixes that.
   in source connects them. A reclassification is caught only because every non-document row must
   carry a reason: moving a document here means writing a false sentence, not deleting a line. That
   is a weaker guarantee than the rest of this file and it is the honest ceiling.
-- **The writer list is a fixed set of idioms.** A file emitting through some other route would not be
-  seen by `documents_are_bound_to_a_writer`. `serde_json::to_writer` was missing from the first
-  version and `assay describe` exposed it.
-- **Four crates now declare identities the CLI writes** — `assay-cli`, `assay-core`,
-  `assay-evidence` (`trust-basis.diff`) and `assay-registry` (`supply_chain_conformance`). The
-  collector scans the first two; the other two are reached only through a document row's naming
-  column. An identity minted in a fifth crate and written by the CLI would be invisible.
+- **The writer list is a fixed set of idioms**, and it has been wrong twice. `serde_json::to_writer`
+  was missing until `assay describe` exposed it; `to_vec_pretty`, `tokio::fs::write`,
+  `serde_json::to_string` and a bare `fs::write` were missing until a review opened the emit paths.
+  A file emitting through some route still not on the list is invisible to
+  `documents_are_bound_to_a_writer`.
+
+- **The guard follows rows to writers, never writers to rows.** A document row must name a file that
+  writes; a file that writes need not be named by any row. That is the hole
+  `assay.runner.observation_health.v0` fell through. Measured on this head: **31 production files
+  under `cli/commands` serialize JSON and are named by no row.** Some of them almost certainly emit
+  documents — `evidence lint`, `evidence diff`, `evidence list`, `store-status`, `explain`, `import`,
+  `trace`. Closing this means requiring every JSON-serializing command file to be named by a row or
+  to carry an explicit opt-out, and triaging those 31. It is tracked separately rather than answered
+  here, because thirty-one classifications written in one sitting is the failure this file exists to
+  record.
+- **Five crates declare identities the CLI writes** — `assay-cli`, `assay-core`, `assay-evidence`
+  (`trust-basis.diff`), `assay-registry` (`supply_chain_conformance`) and `assay-runner-schema`
+  (`runner.observation_health`). The collector scans the first two; the rest are reached only through
+  a document row's naming column, which is why `runner.observation_health` was missing from the first
+  revision of this file and the guard was green without it. The converse-writer rule below is what
+  turns "invisible" into "must be answered"; until it lands, a sixth crate would be invisible too.
 - **`describe ⊆ pin` is one-directional.** `BINDING_ROWS` is seven clap paths and omits the run
   report and run summary. Forcing `describe` to grow is a product decision, not bookkeeping.
 

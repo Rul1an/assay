@@ -405,8 +405,13 @@ fn identities_in_line(line: &str) -> Vec<String> {
 const WRITERS: &[&str] = &[
     "write_stdout_json",
     "to_string_pretty",
+    "to_vec_pretty",
     "to_writer",
+    "serde_json::to_string(",
+    "serde_json::to_vec(",
     "std::fs::write",
+    "tokio::fs::write",
+    "fs::write",
     "println!",
 ];
 
