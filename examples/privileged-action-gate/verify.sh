@@ -4,7 +4,22 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-actual="$(./run.sh 2>/dev/null | "${PYTHON:-python3}" -c '
+# run.sh writes build progress and any diagnosis to stderr. It is captured rather than discarded:
+# discarding it (and letting pipefail abort the pipeline) is why a failing example used to reach CI
+# as a bare "Process completed with exit code 1" with nothing to read. Its exit code is also read
+# here directly, not through a pipe, so a failure is reported before any output is parsed.
+log="$(mktemp)"
+trap 'rm -f "$log"' EXIT
+
+status=0
+raw="$(./run.sh 2>"$log")" || status=$?
+if [ "$status" -ne 0 ]; then
+  echo "FAIL: run.sh exited ${status}. Its stderr follows:" >&2
+  cat "$log" >&2
+  exit 1
+fi
+
+actual="$(printf '%s\n' "$raw" | "${PYTHON:-python3}" -c '
 import sys, re
 for line in sys.stdin:
     m = re.search(r"(DENY|ALLOW).*reason=([a-z_]+)", line)

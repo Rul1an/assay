@@ -1,0 +1,36 @@
+{
+  "vectors": [
+    {
+      "vector_id": "jsonrpc-error-with-null-id",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": null,
+        "error": {
+          "code": -32700,
+          "message": "Parse error"
+        }
+      }
+    },
+    {
+      "vector_id": "mcp-error-with-omitted-id",
+      "message": {
+        "jsonrpc": "2.0",
+        "error": {
+          "code": -32700,
+          "message": "Parse error"
+        }
+      }
+    },
+    {
+      "vector_id": "shared-string-id-control",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": "call-1",
+        "error": {
+          "code": -32603,
+          "message": "Internal error"
+        }
+      }
+    }
+  ]
+}
