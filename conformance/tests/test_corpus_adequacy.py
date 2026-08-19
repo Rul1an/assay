@@ -187,6 +187,39 @@ class RuleyFindings(unittest.TestCase):
         self.assertEqual(rep["out_of_scope_ratio"], 1.0)
         self.assertIn("author-declared", rep["score_means"])
 
+    def test_the_out_of_scope_reason_is_printed_on_its_own_line(self):
+        # Follow-up on the #2538 review: "each with a stated reason" without showing
+        # one is an assertion. A declared equivalent already prints its reason.
+        oos = dict(SURVIVOR, scope="out_of_scope", reason="UNIQUEMARKER not claimed here")
+        with tempfile.TemporaryDirectory() as d:
+            p = _manifest(Path(d), {"a": [KILLABLE, oos]})
+            r = subprocess.run([sys.executable, str(ca.__file__), str(p)],
+                               capture_output=True, text=True, timeout=120)
+        self.assertIn("UNIQUEMARKER", r.stdout)
+
+    def test_the_closing_line_is_qualified_when_most_rules_were_excluded(self):
+        # Follow-up: the last line is what gets quoted, so at ratio > 1 it may not
+        # read as unqualified success.
+        oos = [dict(SURVIVOR, label=f"o{i}", anchor='return "ok"',
+                    replacement=f'return "ok"  # {i}', scope="out_of_scope",
+                    reason="not claimed") for i in range(3)]
+        with tempfile.TemporaryDirectory() as d:
+            p = _manifest(Path(d), {"a": [KILLABLE] + oos})
+            r = subprocess.run([sys.executable, str(ca.__file__), str(p)],
+                               capture_output=True, text=True, timeout=120)
+        self.assertEqual(r.returncode, 0)
+        last = [l for l in r.stdout.strip().splitlines() if l.strip()][-1]
+        self.assertIn("DECLARED IN-SCOPE rules only", last)
+        self.assertNotEqual(
+            last.strip(), "mutation-adequacy check passed: every non-equivalent mutant is killed")
+
+    def test_the_closing_line_is_unqualified_when_nothing_was_excluded(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = _manifest(Path(d), {"a": [KILLABLE]})
+            r = subprocess.run([sys.executable, str(ca.__file__), str(p)],
+                               capture_output=True, text=True, timeout=120)
+        self.assertIn("every non-equivalent mutant is killed", r.stdout)
+
     def test_a_majority_excluded_corpus_says_so(self):
         oos = [dict(SURVIVOR, label=f"o{i}", anchor=f'return "ok"',
                     replacement=f'return "ok"  # {i}', scope="out_of_scope",

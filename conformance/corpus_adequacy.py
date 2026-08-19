@@ -255,8 +255,9 @@ def run(manifest_path: Path) -> dict:
                     results.append({
                         "group": group, "label": mut["label"], "verdict": "unexercised",
                         "scope": scope, "moved": 0,
-                        "how": "no vector distinguishes it, and the corpus does not claim to "
-                               "cover this rule. Not a contract hole; a scope statement"})
+                        # Print the stated reason, exactly as a declared equivalent does.
+                        # "each with a stated reason" without showing one is an assertion.
+                        "how": "out of scope: %s" % mut["reason"]})
                     out_of_scope += 1
                 else:
                     results.append({
@@ -331,7 +332,14 @@ def main() -> int:
         for f in rep["failures"]:
             print("FAIL: %s" % f)
         if rep["adequate"]:
-            print("mutation-adequacy check passed: every non-equivalent mutant is killed")
+            if rep["out_of_scope_ratio"] is not None and rep["out_of_scope_ratio"] > 1.0:
+                # The closing line is what gets quoted. It may not read as unqualified
+                # success when most declared rules were excluded from the measurement.
+                print("mutation-adequacy check passed for the DECLARED IN-SCOPE rules only "
+                      "(%d of %d rules declared here were excluded from it)"
+                      % (rep["unexercised_out_of_scope"], rep["declared_total"]))
+            else:
+                print("mutation-adequacy check passed: every non-equivalent mutant is killed")
 
     return 0 if rep["adequate"] else 1
 
