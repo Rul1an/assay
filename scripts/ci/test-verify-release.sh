@@ -20,6 +20,8 @@ expect_status() {
 }
 
 [[ -f "$ORACLE" ]] || fail "release oracle is missing: $ORACLE"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
 
 expected_assets="$("$ORACLE" --unit-expected-assets 5.3.0)"
 [[ "$(printf '%s\n' "$expected_assets" | wc -l | tr -d ' ')" -eq 23 ]] \
@@ -47,10 +49,17 @@ for name in \
 done
 expect_status 1 "$ORACLE" --unit-classify-attestation assay-v5.3.0-x86_64-unknown-linux-gnu.tar.gz 404
 
+# GitHub wraps the in-toto statement in a Sigstore bundle. The required
+# application/vnd.in-toto+json value belongs to dsseEnvelope.payloadType.
+attestation="$tmp/attestation.json"
+mkdir -p "$tmp"
+printf '%s\n' \
+  '{"attestations":[{"bundle":{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json","dsseEnvelope":{"payloadType":"application/vnd.in-toto+json"}}}]}' \
+  >"$attestation"
+expect_status 0 "$ORACLE" --unit-verify-attestation-json "$attestation"
+
 # Mutation proof: treating expected 404s as failures must make the targeted
 # assertion red. This checks behavior through a copied oracle, not a mock.
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
 mutant="$tmp/verify-release.sh"
 cp "$ORACLE" "$mutant"
 python3 - "$mutant" <<'PY'

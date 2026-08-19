@@ -158,9 +158,8 @@ items = document.get("attestations")
 if not isinstance(items, list) or len(items) != 1:
     raise SystemExit("attestation response must contain exactly one attestation")
 item = items[0]
-media_type = item.get("media_type")
-if media_type is None and isinstance(item.get("bundle"), dict):
-    media_type = item["bundle"].get("mediaType")
+bundle = item.get("bundle")
+media_type = bundle.get("dsseEnvelope", {}).get("payloadType") if isinstance(bundle, dict) else None
 if media_type != "application/vnd.in-toto+json":
     raise SystemExit("attestation is not application/vnd.in-toto+json")
 PY
@@ -331,6 +330,7 @@ usage() { printf 'usage: verify-release.sh [--pre-tag [PIN_SHA]|--self-test]\n' 
 case "${1:-}" in
   --unit-expected-assets) [[ $# -eq 2 ]] || usage; expected_assets "$2"; exit 0 ;;
   --unit-validate-sha) [[ $# -eq 2 ]] || usage; valid_sha "$2" || exit 1; exit 0 ;;
+  --unit-verify-attestation-json) [[ $# -eq 2 ]] || usage; verify_attestation_json "$2"; exit $? ;;
   --unit-classify-attestation)
     [[ $# -eq 3 && "$2" =~ v([0-9]+\.[0-9]+\.[0-9]+) ]] || usage
     VERSION="${BASH_REMATCH[1]}"
