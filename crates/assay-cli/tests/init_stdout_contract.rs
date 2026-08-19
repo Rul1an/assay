@@ -18,6 +18,12 @@ const INIT_REPORT: &str = "assay.init_report.v0";
 const SCAN_BANNER: &str = "🔍 Scanning project for MCP configurations...\n";
 const GENERIC_PROJECT: &str = "   ℹ️  No specific MCP config found, initializing generic project.";
 const FROM_TRACE_COMPLETE: &str = "✅  Initialization complete.";
+const FROM_TRACE_CLOSING_BLOCK: &str = concat!(
+    "✅  Initialization complete.\n\n",
+    "   Next: assay validate --config=eval.yaml --format json\n",
+    "   Note: a separate runtime replay trace is required; the generator-event input cannot fill that role.\n\n",
+    "   Tip: For EU AI Act compliance scanning, add: --pack eu-ai-act-baseline\n",
+);
 
 struct Run {
     exit_code: i32,
@@ -354,9 +360,6 @@ fn from_trace_text_closing_block_is_byte_exact_and_ordered() {
     });
     assert_eq!(
         &run.stdout[start..],
-        "✅  Initialization complete.\n\n\
-           Next: assay validate --config=eval.yaml --format json\n\
-           Note: a separate runtime replay trace is required; the generator-event input cannot fill that role.\n\n\
-           Tip: For EU AI Act compliance scanning, add: --pack eu-ai-act-baseline\n"
+        FROM_TRACE_CLOSING_BLOCK
     );
 }
