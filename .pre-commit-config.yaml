@@ -346,6 +346,15 @@ repos:
         # no `target/` build it still verifies source and published-release truth independently.
         files: ^(scripts/ci/((check|test-check)-release-surface|read-assay-release-tag)\.sh|\.github/assay-release-tag|Cargo\.toml|README\.md|docs/(index\.md|getting-started/(index|installation|quickstart|ci-integration)\.md|reference/cli/index\.md|python-sdk/index\.md|use-cases/(air-gapped|ci-gate)\.md|AIcontext/user-flows\.md|migration-v1\.2\.md|guides/editor-mcp-recipe\.md)|\.pre-commit-config\.yaml)$
 
+      - id: workflow-continue-on-error-policy
+        name: Workflow continue-on-error policy
+        entry: bash scripts/ci/test-check-workflow-continue-on-error.sh
+        language: system
+        pass_filenames: false
+        # Every workflow, plus the checker and its battery. A new workflow must reach this hook,
+        # which is the case the battery's unauthorized-new-workflow mutation covers.
+        files: ^(\.github/workflows/.*\.ya?ml|scripts/ci/(check|test-check)-workflow-continue-on-error\.(py|sh)|\.pre-commit-config\.yaml)$
+
       - id: verify-release-oracle-self-test
         name: Release oracle offline contract tests
         entry: bash scripts/ci/test-verify-release.sh
