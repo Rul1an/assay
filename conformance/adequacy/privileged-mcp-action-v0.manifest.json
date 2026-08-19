@@ -1,0 +1,62 @@
+{
+  "schema": "assay.corpus_adequacy.manifest.v0",
+  "runner": "process",
+  "_about": "Mutation adequacy for privileged-mcp-action/v0, the corpus whose digest is a published contract. Mutants span BOTH crates that carry its rules: the CLI verifier and assay-evidence's denial-marker classification. Every mutant COMPILES, because a build failure means the corpus never saw the mutant and proves nothing about the rule. NOTE: bindable_denial_marker mutants were removed after grep showed the CLI verifier never calls it; declaring a mutant on an unreachable rule measures nothing.",
+  "repo_root": "../..",
+  "implementation_sources": [
+    "../../crates/assay-evidence/src/denial_marker.rs",
+    "../../crates/assay-cli/src/cli/commands/evidence/verify_privileged_mcp_action.rs",
+    "../../crates/assay-cli/src/cli/commands/evidence/privileged_mcp_action.rs"
+  ],
+  "build": [
+    "cargo",
+    "build",
+    "-p",
+    "assay-cli",
+    "--bin",
+    "assay"
+  ],
+  "entrypoint_command": [
+    "./target/debug/assay",
+    "evidence",
+    "verify-privileged-mcp-action",
+    "{vector}",
+    "--format",
+    "json"
+  ],
+  "outcome_from": [
+    "bundle_integrity",
+    "verdict",
+    "reason_code"
+  ],
+  "vectors": "privileged-mcp-action-v0.vectors.json",
+  "id_key": "vector_id",
+  "vector_path_key": "path",
+  "default_group": "denial_marker_binding",
+  "mutants": {
+    "denial_marker_binding": [
+      {
+        "label": "0 an unrecognised marker triple fails closed",
+        "anchor": "        _ => None,\n    }\n}",
+        "replacement": "        _ => Some(DenialMarkerVersion::V1),\n    }\n}"
+      },
+      {
+        "label": "1 the origin must be the proxy",
+        "anchor": "(DENIED_CALL_OBSERVATION_V0, PROXY_DENIED_V0, PROXY_ORIGIN)",
+        "replacement": "(DENIED_CALL_OBSERVATION_V0, PROXY_DENIED_V0, _)"
+      },
+      {
+        "label": "2 v1 pairs with the v1 error code",
+        "anchor": "(DENIED_CALL_OBSERVATION_V1, PROXY_DENIED_V1, PROXY_ORIGIN)",
+        "replacement": "(DENIED_CALL_OBSERVATION_V1, _, PROXY_ORIGIN)"
+      },
+      {
+        "label": "CONTROL harness reachability on the verifier path",
+        "anchor": ".filter(|obs| classify_denial_marker(obs) == Some(profile_version.marker_version()));",
+        "replacement": ".filter(|_obs| false);",
+        "control": true
+      }
+    ]
+  },
+  "equivalent": {}
+}

@@ -90,11 +90,47 @@ class Scoring(unittest.TestCase):
         self.assertEqual(rep["equivalent"], 1)
         self.assertEqual(rep["killed"] + rep["survived"], 1)
 
-    def test_a_mutant_that_crashes_the_module_counts_as_killed(self):
+    def test_a_mutant_that_never_loads_is_unproved_not_killed(self):
+        # Reversed deliberately on the Rust-adapter review: a mutant that never
+        # loaded was never shown to the corpus, so the corpus said nothing about
+        # that rule. Counting it killed lets a typo in the substitution print as
+        # "rule covered". Measure a load-bearing rule with a variant that RUNS.
         broken = {"label": "syntax", "anchor": 'return "ok"', "replacement": "return ??"}
         with tempfile.TemporaryDirectory() as d:
             rep = ca.run(_manifest(Path(d), {"a": [broken]}))
-        self.assertEqual(rep["killed"], 1)
+        self.assertEqual(rep["killed"], 0)
+        self.assertEqual(rep["unproved"], 1)
+        self.assertFalse(rep["adequate"])
+        self.assertTrue(any("never ran" in f for f in rep["failures"]), rep["failures"])
+
+
+class ControlMutants(unittest.TestCase):
+    """A control proves the harness detects anything. It is never scored."""
+
+    def test_a_killed_control_does_not_inflate_the_score(self):
+        ctrl = dict(KILLABLE, label="CONTROL reachability", control=True)
+        with tempfile.TemporaryDirectory() as d:
+            rep = ca.run(_manifest(Path(d), {"a": [ctrl]}))
+        self.assertEqual(rep["killed"], 0, "a control must not count as a kill")
+        self.assertIn("control-killed", [r["verdict"] for r in rep["mutants"]])
+
+    def test_a_surviving_control_invalidates_the_whole_run(self):
+        # The distinction the control exists for: all-survivors because the corpus is
+        # weak, versus all-survivors because nothing was ever measured.
+        ctrl = dict(SURVIVOR, label="CONTROL reachability", control=True)
+        with tempfile.TemporaryDirectory() as d:
+            rep = ca.run(_manifest(Path(d), {"a": [KILLABLE, ctrl]}))
+        self.assertFalse(rep["adequate"])
+        self.assertTrue(any("harness cannot detect" in f for f in rep["failures"]),
+                        rep["failures"])
+
+    def test_a_control_may_not_be_declared_out_of_scope(self):
+        ctrl = dict(KILLABLE, label="c", control=True, scope="out_of_scope", reason="x")
+        with tempfile.TemporaryDirectory() as d:
+            p = _manifest(Path(d), {"a": [ctrl]})
+            with self.assertRaises(ca.ManifestError) as cm:
+                ca.load_manifest(p)
+        self.assertIn("control cannot be out_of_scope", str(cm.exception))
 
 
 class Guards(unittest.TestCase):

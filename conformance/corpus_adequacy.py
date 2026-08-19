@@ -73,8 +73,14 @@ import argparse
 import importlib.util
 import json
 import sys
+import subprocess
 import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from bounded_run import (  # noqa: E402
+    OUTPUT_CAP_BYTES, _OutputTooLarge, _run_capped,
+)
 
 SCHEMA = "assay.corpus_adequacy.manifest.v0"
 
@@ -94,9 +100,10 @@ def load_manifest(path: Path) -> dict:
     if m.get("schema") != SCHEMA:
         raise ManifestError("schema must be %r, got %r" % (SCHEMA, m.get("schema")))
     base = path.parent
-    for key in ("implementation", "vectors"):
-        _req(m, key, "manifest")
-    m["_impl_path"] = (base / m["implementation"]).resolve()
+    _req(m, "vectors", "manifest")
+    if m.get("runner", "module") == "module":
+        _req(m, "implementation", "manifest")
+    m["_impl_path"] = (base / m["implementation"]).resolve() if m.get("implementation") else None
     m["_vectors_path"] = (base / m["vectors"]).resolve()
     m.setdefault("entrypoint", "evaluate")
     # group_key is OPTIONAL. A corpus with no axis column is one group; forcing it to invent
@@ -110,6 +117,22 @@ def load_manifest(path: Path) -> dict:
     m.setdefault("entrypoint_args",
                  [k for k in (m["group_key"], m["inputs_key"]) if k is not None])
     m.setdefault("default_group", "all")
+    m.setdefault("runner", "module")
+    if m["runner"] not in ("module", "process"):
+        raise ManifestError("runner must be module or process, got %r" % m["runner"])
+    if m["runner"] == "process":
+        for key in ("build", "entrypoint_command", "outcome_from"):
+            _req(m, key, "manifest (runner=process)")
+        srcs = m.get("implementation_sources") or [m["implementation"]]
+        m["_source_paths"] = [(base / x).resolve() for x in srcs]
+        for sp in m["_source_paths"]:
+            if not sp.is_file():
+                raise ManifestError("implementation source not found: %s" % sp)
+        m.setdefault("repo_root", ".")
+        m["_repo_root"] = (base / m["repo_root"]).resolve()
+        m.setdefault("vector_path_key", "path")
+        m.setdefault("build_timeout", 1800)
+        m.setdefault("vector_timeout", 120)
     m.setdefault("mutants", {})
     m.setdefault("equivalent", {})
     if not m["mutants"]:
@@ -119,6 +142,10 @@ def load_manifest(path: Path) -> dict:
             for key in ("label", "anchor", "replacement"):
                 _req(e, key, "mutants[%s][%d]" % (group, i))
             e.setdefault("scope", "declared")
+            e.setdefault("control", False)
+            if e["control"] and e["scope"] != "declared":
+                raise ManifestError("mutants[%s][%d] %r: a control cannot be out_of_scope"
+                                    % (group, i, e["label"]))
             if e["scope"] not in ("declared", "out_of_scope"):
                 raise ManifestError("mutants[%s][%d] %r: scope must be declared or out_of_scope"
                                     % (group, i, e["label"]))
@@ -173,8 +200,236 @@ def _outcomes(fn, vectors: list[dict], m: dict) -> tuple[dict, list[str]]:
     return outcomes, raised
 
 
+
+# ---------------------------------------------------------------------------
+# process runner: a compiled implementation behind a command line
+# ---------------------------------------------------------------------------
+
+
+class _SourceGuard:
+    """Restores every mutated source file, including on crash.
+
+    The adapter edits files in the working tree. A restore that only happens on
+    the happy path leaks a mutant into a commit, so the originals are captured
+    up front and rewritten in a finally block.
+    """
+
+    def __init__(self, paths: list[Path]) -> None:
+        self.original = {p: p.read_bytes() for p in paths}
+
+    def restore(self) -> None:
+        for path, data in self.original.items():
+            if path.read_bytes() != data:
+                path.write_bytes(data)
+
+    def verify_clean(self) -> list[str]:
+        return [str(p) for p, d in self.original.items() if p.read_bytes() != d]
+
+
+def _tree_is_dirty(repo_root: Path, paths: list[Path]) -> list[str]:
+    """Declared sources with uncommitted changes. Mutating those loses work."""
+    try:
+        out = subprocess.run(["git", "-C", str(repo_root), "status", "--porcelain", "--"]
+                             + [str(p) for p in paths],
+                             capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return []          # no git: nothing to protect, and nothing to claim
+    return [ln[3:] for ln in out.stdout.splitlines() if ln.strip()]
+
+
+def _build(m: dict) -> tuple[bool, str]:
+    try:
+        p = _run_capped(list(m["build"]), m["_repo_root"], timeout=m["build_timeout"])
+    except _OutputTooLarge:
+        return False, "build output exceeded the ceiling"
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, "build could not complete: %r" % (exc,)
+    if p.returncode != 0:
+        tail = [ln for ln in (p.stdout + p.stderr).splitlines()
+                if "error" in ln.lower()][-3:]
+        return False, " | ".join(tail)[:300] or "build exited %d" % p.returncode
+    return True, "built"
+
+
+def _process_outcomes(m: dict, vectors: list[dict]) -> tuple[dict, list[str]]:
+    """Run the built command once per vector. A vector that cannot be read is a raise."""
+    outcomes, raised = {}, []
+    for v in vectors:
+        vid = v[m["id_key"]]
+        cmd = [str(x).replace("{vector}", str((m["_repo_root"] / v[m["vector_path_key"]]).resolve()))
+               for x in m["entrypoint_command"]]
+        try:
+            p = _run_capped(cmd, m["_repo_root"], timeout=m["vector_timeout"])
+            doc = json.loads(p.stdout)
+            keys = m["outcome_from"]
+            # A single key can collapse every rejection onto one value and lose all
+            # discrimination, so a list is allowed and compared as a tuple.
+            outcomes[vid] = (tuple(doc.get(k) for k in keys) if isinstance(keys, list)
+                             else doc.get(keys))
+        except Exception:  # noqa: BLE001 - unreadable output is a behaviour change
+            raised.append(vid)
+    return outcomes, raised
+
+
+
+def _run_process(m: dict, manifest_path: Path) -> dict:
+    """Mutate declared sources, rebuild, and run the corpus against the binary."""
+    doc = json.loads(m["_vectors_path"].read_text(encoding="utf-8"))
+    all_vectors = doc[m["vectors_key"]] if isinstance(doc, dict) else doc
+    failures: list[str] = []
+
+    dirty = _tree_is_dirty(m["_repo_root"], m["_source_paths"])
+    if dirty:
+        raise ManifestError(
+            "declared sources have uncommitted changes: %s. This adapter edits them in "
+            "place, so it refuses to run rather than risk losing that work" % dirty)
+
+    groups_in_corpus = {_group_of(v, m) for v in all_vectors}
+    unmutated = sorted(groups_in_corpus - set(m["mutants"]))
+    if unmutated:
+        failures.append("groups present in the corpus with no declared mutants: %s" % unmutated)
+    stale = sorted(set(m["mutants"]) - groups_in_corpus)
+    if stale:
+        failures.append("mutants declared for groups not in the corpus: %s" % stale)
+
+    if not any(mut.get("control") for muts in m["mutants"].values() for mut in muts):
+        failures.append("no control mutant declared. Without one, a run of all-survivors "
+                        "cannot be told apart from a harness that detects nothing")
+    results, killed, survived, equivalent, out_of_scope, unproved = [], 0, 0, 0, 0, 0
+    guard = _SourceGuard(m["_source_paths"])
+    try:
+        ok, detail = _build(m)
+        if not ok:
+            raise ManifestError("the UNMUTATED tree does not build: %s" % detail)
+
+        baselines = {}
+        for group in sorted(m["mutants"]):
+            vectors = [v for v in all_vectors if _group_of(v, m) == group]
+            if not vectors:
+                failures.append("%s: no vectors, so its mutants cannot be scored" % group)
+                continue
+            base, raised = _process_outcomes(m, vectors)
+            if raised:
+                failures.append("%s: the UNMUTATED binary failed on %s" % (group, raised))
+                continue
+            baselines[group] = (vectors, base)
+
+        for group in sorted(m["mutants"]):
+            if group not in baselines:
+                continue
+            vectors, baseline = baselines[group]
+            for mut in m["mutants"][group]:
+                scope = mut.get("scope", "declared")
+                hits = [(sp, sp.read_text(encoding="utf-8").count(mut["anchor"]))
+                        for sp in m["_source_paths"]]
+                total = sum(n for _, n in hits)
+                if total == 0:
+                    failures.append("%s / %s: anchor not found in any declared source"
+                                    % (group, mut["label"]))
+                    continue
+                if total > 1:
+                    failures.append(
+                        "%s / %s: the anchor occurs %d times across the declared sources, so "
+                        "the substitution would pick one arbitrarily. Make it unique"
+                        % (group, mut["label"], total))
+                    continue
+
+                target = next(sp for sp, n in hits if n == 1)
+                original = target.read_text(encoding="utf-8")
+                target.write_text(original.replace(mut["anchor"], mut["replacement"], 1),
+                                  encoding="utf-8")
+                try:
+                    built, detail = _build(m)
+                    if not built:
+                        # Cursor's ruling on the design: rustc exit 1 yields no verdict, so
+                        # the corpus never saw this mutant. Counting it killed would let a
+                        # typo in the substitution print as "rule covered". Measure a
+                        # load-bearing arm with a variant that COMPILES, or declare it
+                        # equivalent.
+                        results.append({"group": group, "label": mut["label"],
+                                        "verdict": "unproved", "scope": scope, "moved": 0,
+                                        "how": "the mutant does not build, so the corpus was "
+                                               "never run against it: %s" % detail})
+                        unproved += 1
+                        continue
+                    out, raised = _process_outcomes(m, vectors)
+                finally:
+                    target.write_text(original, encoding="utf-8")
+
+                moved = [vid for vid, val in out.items() if baseline.get(vid) != val]
+                if mut.get("control"):
+                    # A control exists to prove the harness can detect ANYTHING. It is
+                    # never scored: counting it would inflate the very number it exists
+                    # to make trustworthy. A control that survives means the run says
+                    # nothing at all about the corpus.
+                    ok = bool(raised or moved)
+                    results.append({"group": group, "label": mut["label"],
+                                    "verdict": "control-killed" if ok else "control-SURVIVED",
+                                    "scope": scope, "moved": len(moved),
+                                    "how": ("harness detects a change on this path"
+                                            if ok else "THE HARNESS DETECTS NOTHING")})
+                    if not ok:
+                        failures.append(
+                            "control %r survived: the harness cannot detect a change on this "
+                            "path, so every other verdict in this run is meaningless"
+                            % mut["label"])
+                    continue
+                if raised or moved:
+                    results.append({"group": group, "label": mut["label"], "verdict": "killed",
+                                    "scope": scope, "moved": len(moved),
+                                    "how": ("raises on %d vector(s)" % len(raised)) if raised
+                                           else "%d vector(s) moved" % len(moved)})
+                    killed += 1
+                elif scope == "out_of_scope":
+                    results.append({"group": group, "label": mut["label"],
+                                    "verdict": "unexercised", "scope": scope, "moved": 0,
+                                    "how": "out of scope: %s" % mut["reason"]})
+                    out_of_scope += 1
+                else:
+                    results.append({"group": group, "label": mut["label"], "verdict": "survived",
+                                    "scope": scope, "moved": 0,
+                                    "how": "no vector distinguishes it. An implementation can "
+                                           "delete this rule and still reproduce the digest"})
+                    survived += 1
+
+            for eq in m["equivalent"].get(group, []):
+                results.append({"group": group, "label": eq["label"], "verdict": "equivalent",
+                                "how": eq["reason"], "moved": 0})
+                equivalent += 1
+    finally:
+        guard.restore()
+        leaked = guard.verify_clean()
+        if leaked:
+            failures.append("SOURCES NOT RESTORED: %s" % leaked)
+        _build(m)   # leave the tree with a binary built from the real source
+
+    denom = killed + survived
+    score = 100.0 if denom == 0 else round(100.0 * killed / denom, 1)
+    if unproved:
+        failures.append("%d mutant(s) never ran, so this corpus was not measured against them"
+                        % unproved)
+    if survived:
+        failures.append("%d mutant(s) survived; the required score is 100%% of non-equivalent "
+                        "mutants" % survived)
+    if denom == 0 and not failures:
+        failures.append("no non-equivalent mutants were scored, so no adequacy was measured")
+
+    return {"schema": "assay.corpus_adequacy.report.v0", "manifest": str(manifest_path),
+            "runner": "process", "killed": killed, "survived": survived,
+            "equivalent": equivalent, "unexercised_out_of_scope": out_of_scope,
+            "unproved": unproved,
+            "declared_total": killed + survived + equivalent + out_of_scope + unproved,
+            "out_of_scope_ratio": (None if denom == 0 else round(out_of_scope / denom, 2)),
+            "score_percent": score,
+            "score_means": ("percent of author-declared in-scope rules killed; NOT percent of "
+                            "the rules the implementation actually has"),
+            "mutants": results, "failures": failures, "adequate": not failures}
+
+
 def run(manifest_path: Path) -> dict:
     m = load_manifest(manifest_path)
+    if m["runner"] == "process":
+        return _run_process(m, manifest_path)
     source = m["_impl_path"].read_text(encoding="utf-8")
     doc = json.loads(m["_vectors_path"].read_text(encoding="utf-8"))
     all_vectors = doc[m["vectors_key"]] if isinstance(doc, dict) else doc
@@ -193,6 +448,7 @@ def run(manifest_path: Path) -> dict:
         failures.append("mutants declared for groups not in the corpus: %s" % stale)
 
     results, killed, survived, equivalent, out_of_scope = [], 0, 0, 0, 0
+    unproved = 0
     with tempfile.TemporaryDirectory() as raw:
         tmp = Path(raw)
         base_mod = _load_module(source, "base", tmp)
@@ -226,18 +482,38 @@ def run(manifest_path: Path) -> dict:
                         "one arbitrarily and any breakage would be scored as a kill. Make the "
                         "anchor unique" % (group, mut["label"], occurrences, m["implementation"]))
                     continue
+                scope = mut.get("scope", "declared")
                 mutated = source.replace(mut["anchor"], mut["replacement"], 1)
                 try:
                     mod = _load_module(mutated, "%s_%d" % (group.replace("-", "_"), idx), tmp)
                     fn = getattr(mod, m["entrypoint"])
                 except Exception as exc:  # noqa: BLE001
-                    results.append({"group": group, "label": mut["label"], "verdict": "killed",
-                                    "how": "the mutant does not load: %r" % (exc,), "moved": 0})
-                    killed += 1
+                    # A mutant that never loaded was never shown to the corpus, so the
+                    # corpus said nothing about it. Counting that as a kill lets a typo
+                    # in the substitution print as "rule covered". The same argument
+                    # rules out treating a Rust build failure as a kill; measure a
+                    # load-bearing rule with a variant that RUNS, or declare it equivalent.
+                    results.append({"group": group, "label": mut["label"],
+                                    "verdict": "unproved", "scope": scope, "moved": 0,
+                                    "how": "the mutant does not load, so the corpus never "
+                                           "saw it and said nothing about this rule: %r" % (exc,)})
+                    unproved += 1
                     continue
-                scope = mut.get("scope", "declared")
                 out, raised = _outcomes(fn, vectors, m)
                 moved = [vid for vid, val in out.items() if baseline.get(vid) != val]
+                if mut.get("control"):
+                    ok = bool(raised or moved)
+                    results.append({"group": group, "label": mut["label"],
+                                    "verdict": "control-killed" if ok else "control-SURVIVED",
+                                    "scope": scope, "moved": len(moved),
+                                    "how": ("harness detects a change on this path"
+                                            if ok else "THE HARNESS DETECTS NOTHING")})
+                    if not ok:
+                        failures.append(
+                            "control %r survived: the harness cannot detect a change on this "
+                            "path, so every other verdict in this run is meaningless"
+                            % mut["label"])
+                    continue
                 if raised:
                     results.append({"group": group, "label": mut["label"], "verdict": "killed",
                                     "scope": scope, "how": "raises on %d vector(s)" % len(raised),
@@ -276,6 +552,11 @@ def run(manifest_path: Path) -> dict:
 
     denom = killed + survived
     score = 100.0 if denom == 0 else round(100.0 * killed / denom, 1)
+    if unproved:
+        # Not a soft warning: an unproved mutant means the measurement did not happen,
+        # and a score computed over the rest reports more than the run established.
+        failures.append("%d mutant(s) never ran, so this corpus was not measured against "
+                        "them. Fix the substitution or declare them equivalent" % unproved)
     if survived:
         failures.append("%d mutant(s) survived; the required score is 100%% of non-equivalent "
                         "mutants" % survived)
@@ -284,8 +565,8 @@ def run(manifest_path: Path) -> dict:
 
     return {"schema": "assay.corpus_adequacy.report.v0", "manifest": str(manifest_path),
             "killed": killed, "survived": survived, "equivalent": equivalent,
-            "unexercised_out_of_scope": out_of_scope,
-            "declared_total": killed + survived + equivalent + out_of_scope,
+            "unexercised_out_of_scope": out_of_scope, "unproved": unproved,
+            "declared_total": killed + survived + equivalent + out_of_scope + unproved,
             "out_of_scope_ratio": (None if (killed + survived) == 0
                                    else round(out_of_scope / (killed + survived), 2)),
             "score_means": ("percent of author-declared in-scope rules killed; NOT percent of the "
@@ -317,9 +598,10 @@ def main() -> int:
         # exclusions is a percentage target wearing a different coat: an author can
         # exclude almost everything and still print 100%.
         print("%d of %d DECLARED in-scope rules killed (%.1f%%). %d declared equivalent, "
-              "%d declared out of scope. %d rules declared in total."
+              "%d declared out of scope, %d unproved. %d rules declared in total."
               % (rep["killed"], rep["killed"] + rep["survived"], rep["score_percent"],
-                 rep["equivalent"], rep["unexercised_out_of_scope"], rep["declared_total"]))
+                 rep["equivalent"], rep["unexercised_out_of_scope"], rep["unproved"],
+                 rep["declared_total"]))
         print("This is %.1f%% of what the AUTHOR DECLARED, not of the rules the implementation "
               "has. A rule nobody declared is invisible to this check." % rep["score_percent"])
         if rep["unexercised_out_of_scope"]:
