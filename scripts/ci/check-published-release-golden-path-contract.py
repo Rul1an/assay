@@ -10,6 +10,15 @@ from pathlib import Path, PurePosixPath
 
 
 ROOT = Path(__file__).resolve().parents[2]
+PROFILE_VERSION_V1 = "--profile-version v1"
+DENIED_OBSERVATIONS_FLAG = "--denied-observations"
+VERIFY_PRIVILEGED = "verify-privileged-mcp-action"
+EXAMPLE_DENIED_VERIFY_PAIRED = (
+    "example must verify the denied-observation bundle with --profile-version v1"
+)
+EXAMPLE_MATRIX_FORWARDS_ARGS = (
+    "example matrix() must forward extra args to verify-privileged-mcp-action"
+)
 
 
 def require(text: str, needle: str, message: str, problems: list[str]) -> None:
@@ -347,7 +356,10 @@ def validate_contract(
         "separate harness provenance": '"harness": {',
         "produced bundle": 'bundle="$results/produced.bundle.tar.gz"',
         "inspect produced bundle": 'assay evidence show --format json -- "$bundle"',
-        "verify produced bundle": 'assay evidence verify-privileged-mcp-action "$bundle" --format json',
+        "produce denied observations": '--denied-observations "$observations"',
+        "verify produced bundle": 'assay evidence verify-privileged-mcp-action "$bundle" --format json --profile-version v1',
+        "verify tampered bundle": 'assay evidence verify-privileged-mcp-action "$tampered" --format json --profile-version v1',
+        "produced bundle valid verdict": '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "pass" and .verdict == "valid"',
         "tamper failure code": 'reason_code == "E_EVIDENCE_INTEGRITY"',
         "artifact manifest": '"assay.published_release_golden_path.artifacts.v1"',
         "claim ceiling": "the harness is not a shipped release asset",
@@ -466,6 +478,25 @@ def validate_contract(
         problems.append("driver must inspect the same bundle it produced exactly once")
     if sum("assay evidence show" in line for line in driver_lines) != 1:
         problems.append("driver contains an alternate evidence-inspection target")
+    produced_verify = (
+        'assay evidence verify-privileged-mcp-action "$bundle" --format json --profile-version v1'
+    )
+    tampered_verify = (
+        'assay evidence verify-privileged-mcp-action "$tampered" --format json --profile-version v1'
+    )
+    if driver_lines.count(produced_verify) != 1:
+        problems.append(
+            "driver must verify the produced denial-observation bundle with --profile-version v1 exactly once"
+        )
+    if driver_lines.count(tampered_verify) != 1:
+        problems.append(
+            "driver must verify the tampered denial-observation bundle with --profile-version v1 exactly once"
+        )
+    if any(
+        "verify-privileged-mcp-action" in line and "--profile-version v1" not in line
+        for line in driver_lines
+    ):
+        problems.append("driver verifies a produced or tampered bundle without --profile-version v1")
     required_artifacts = [
         "run-pin.json",
         "commands.ndjson",
@@ -487,6 +518,87 @@ def validate_contract(
     return problems
 
 
+def joined_active_commands(text: str) -> list[str]:
+    commands: list[str] = []
+    current: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        continued = stripped.endswith("\\")
+        piece = stripped[:-1].rstrip() if continued else stripped
+        current.append(piece)
+        if not continued:
+            commands.append(" ".join(current))
+            current = []
+    if current:
+        commands.append(" ".join(current))
+    return commands
+
+
+def denied_observation_bundle_out(text: str) -> str:
+    for command in joined_active_commands(text):
+        if DENIED_OBSERVATIONS_FLAG not in command or "--bundle-out" not in command:
+            continue
+        parts = command.split()
+        marker = parts.index("--bundle-out")
+        if marker + 1 >= len(parts):
+            break
+        return parts[marker + 1]
+    raise ValueError("example has no --denied-observations import with --bundle-out")
+
+
+def shipping_denied_verify_source_line(text: str) -> str:
+    """Return the shipping verify/matrix line that checks the denied-observation bundle."""
+    bundle = denied_observation_bundle_out(text)
+    matches = []
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if bundle not in stripped or "--bundle-out" in stripped or "import" in stripped:
+            continue
+        if stripped.startswith("matrix ") or VERIFY_PRIVILEGED in stripped:
+            matches.append(stripped)
+    if len(matches) != 1:
+        raise ValueError(
+            f"example must verify the denied-observation bundle exactly once, found {len(matches)}"
+        )
+    return matches[0]
+
+
+def seed_denied_verify_bypass(text: str) -> str:
+    """Remove --profile-version v1 from the shipping denied-bundle verify. Same mutant both guards."""
+    line = shipping_denied_verify_source_line(text)
+    return text.replace(line, line.replace(PROFILE_VERSION_V1, "").rstrip(), 1)
+
+
+def matrix_forwards_verify_args(text: str) -> bool:
+    verify_lines = [
+        line
+        for line in active_lines(text)
+        if VERIFY_PRIVILEGED in line and '"$bundle"' in line
+    ]
+    return len(verify_lines) == 1 and '"$@"' in verify_lines[0]
+
+
+def validate_example_pairing(example_run: Path) -> list[str]:
+    try:
+        text = example_run.read_text(encoding="utf-8")
+    except OSError as error:
+        return [f"example run.sh is unreadable: {error}"]
+    try:
+        line = shipping_denied_verify_source_line(text)
+    except ValueError as error:
+        return [str(error)]
+    problems: list[str] = []
+    if PROFILE_VERSION_V1 not in line:
+        problems.append(EXAMPLE_DENIED_VERIFY_PAIRED)
+    if line.startswith("matrix ") and not matrix_forwards_verify_args(text):
+        problems.append(EXAMPLE_MATRIX_FORWARDS_ARGS)
+    return problems
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workflow", type=Path, default=ROOT / ".github/workflows/published-release-golden-path.yml")
@@ -498,10 +610,16 @@ def main() -> int:
         default=ROOT / "scripts/ci/fixtures/published-release-golden-path/v1/harness-manifest.json",
     )
     parser.add_argument("--source-root", type=Path, default=ROOT)
+    parser.add_argument(
+        "--example-run",
+        type=Path,
+        default=ROOT / "examples/privileged-action-gate/run.sh",
+    )
     args = parser.parse_args()
     problems = validate_contract(
         args.workflow, args.release_workflow, args.driver, args.manifest, args.source_root
     )
+    problems.extend(validate_example_pairing(args.example_run))
     if problems:
         for problem in problems:
             print(f"FAIL: {problem}")

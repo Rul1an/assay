@@ -277,7 +277,7 @@ run_capture "inspect-produced-bundle" 0 "$results/inspect.json" "$results/inspec
 "$JQ_BIN" -e '.verify_mode == "enabled" and (.manifest | type == "object") and (.events | length > 0)' "$results/inspect.json" >/dev/null \
   || fail "inspection did not verify the produced bundle"
 run_capture "verify-produced-bundle" 0 "$results/verify.json" "$results/verify.stderr" \
-  assay evidence verify-privileged-mcp-action "$bundle" --format json
+  assay evidence verify-privileged-mcp-action "$bundle" --format json --profile-version v1
 "$JQ_BIN" -e '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "pass" and .verdict == "valid"' "$results/verify.json" >/dev/null \
   || fail "profile verification did not validate the produced bundle"
 
@@ -311,7 +311,7 @@ with tarfile.open(destination, "w:gz") as archive:
             archive.addfile(member)
 PY
 run_capture "verify-tampered-bundle" 2 "$results/tamper-verify.json" "$results/tamper-verify.stderr" \
-  assay evidence verify-privileged-mcp-action "$tampered" --format json
+  assay evidence verify-privileged-mcp-action "$tampered" --format json --profile-version v1
 "$JQ_BIN" -e '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "fail" and .reason_code == "E_EVIDENCE_INTEGRITY"' "$results/tamper-verify.json" >/dev/null \
   || fail "tampered produced bundle did not fail with E_EVIDENCE_INTEGRITY"
 
