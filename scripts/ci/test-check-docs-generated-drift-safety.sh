@@ -189,7 +189,7 @@ if [[ "$COUNT_STATUS" -ne 1 ]]; then
   echo "FAIL: deleted drift-battery row exited $COUNT_STATUS, wanted 1" >&2
   exit 1
 fi
-if ! grep -Fq 'FAIL: full drift self-test executed 11 cases, wanted 12' "$COUNT_OUTPUT"; then
+if ! grep -Fq 'FAIL: full drift self-test executed 13 cases, wanted 14' "$COUNT_OUTPUT"; then
   cat "$COUNT_OUTPUT" >&2
   echo "FAIL: deleted drift-battery row did not reach the exact count guard" >&2
   exit 1
