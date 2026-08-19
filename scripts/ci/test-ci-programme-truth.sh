@@ -25,6 +25,32 @@ fi
 CEILINGS="$ROOT/scripts/ci/lib/resource_ceilings.py"
 export PYTHONPATH="$ROOT/scripts/ci/lib${PYTHONPATH:+:$PYTHONPATH}"
 python3 "$CEILINGS" assert-reject-caller "$ROOT/scripts/ci/test-review-split-wave.sh"
+
+FORBIDDEN_SPEC=(
+  PROGRAMME_TRUTH_ROOT
+  PROGRAMME_TRUTH_AGENTS
+  PROGRAMME_TRUTH_SELFHOST
+  PROGRAMME_TRUTH_CEILING_CHILD
+  PROGRAMME_TRUTH_PREVIEW_MUTANT
+)
+
+assert_forbidden_override_set() {
+  python3 - "$1" "${FORBIDDEN_SPEC[@]}" <<'PY'
+import runpy
+import sys
+
+required = tuple(sys.argv[2:])
+got = tuple(runpy.run_path(sys.argv[1])["FORBIDDEN_PROGRAMME_OVERRIDES"])
+if got != required:
+    raise SystemExit(f"forbidden override set mismatch: {got!r}")
+PY
+}
+
+if ! _parity_err="$(assert_forbidden_override_set "$CEILINGS" 2>&1)"; then
+  echo "FAIL: forbidden programme overrides are the canonical five: ${_parity_err}" >&2
+  exit 1
+fi
+
 AGENTS="$ROOT/AGENTS.md"
 WAVE0="$ROOT/docs/contributing/WAVE0-GATES.md"
 STATUS="$ROOT/docs/contributing/REFACTOR-WAVE-STATUS.md"
@@ -686,26 +712,6 @@ PY
 expect_ok "ROOT is the script worktree and not caller-overridable" \
   assert_root_is_script_worktree "${BASH_SOURCE[0]}"
 
-FORBIDDEN_SPEC=(
-  PROGRAMME_TRUTH_ROOT
-  PROGRAMME_TRUTH_AGENTS
-  PROGRAMME_TRUTH_SELFHOST
-  PROGRAMME_TRUTH_CEILING_CHILD
-  PROGRAMME_TRUTH_PREVIEW_MUTANT
-)
-
-assert_forbidden_override_set() {
-  python3 - "$1" "${FORBIDDEN_SPEC[@]}" <<'PY'
-import runpy
-import sys
-
-required = tuple(sys.argv[2:])
-got = tuple(runpy.run_path(sys.argv[1])["FORBIDDEN_PROGRAMME_OVERRIDES"])
-if got != required:
-    raise SystemExit(f"forbidden override set mismatch: {got!r}")
-PY
-}
-
 expect_ok "forbidden programme overrides are the canonical five" \
   assert_forbidden_override_set "$CEILINGS"
 
@@ -732,6 +738,28 @@ do
     "reject-overrides caller count is 0, want 1" \
     python3 "$CEILINGS" assert-reject-caller "$dest"
 done
+
+expect_ok "reject-overrides count and drop share one parser" python3 - "$CEILINGS" <<'PY'
+import runpy
+import sys
+
+mod = runpy.run_path(sys.argv[1])
+sample = (
+    "keep\n"
+    + "python3 "
+    + '"$_TRUTH_LIB"'
+    + " reject-overrides  # note\n"
+    + "keep\n"
+)
+marks = mod["reject_overrides_caller_marks"](sample)
+if sum(1 for _line, is_caller in marks if is_caller) != 1:
+    raise SystemExit("commented caller was not marked once")
+dropped = "".join(line for line, is_caller in marks if not is_caller)
+if dropped != "keep\nkeep\n":
+    raise SystemExit(f"drop diverged from marks: {dropped!r}")
+if mod["reject_overrides_caller_count"](dropped) != 0:
+    raise SystemExit("dropped text still counts a caller")
+PY
 
 for override_name in "${FORBIDDEN_SPEC[@]}"; do
   install_hermetic_programme_truth "$TRUTH_TMP/drop-${override_name}"
@@ -762,6 +790,39 @@ PY
   expect_red "forbidden set without ${override_name}" "forbidden override set mismatch" \
     assert_forbidden_override_set \
     "$TRUTH_TMP/drop-${override_name}/scripts/ci/lib/resource_ceilings.py"
+  expect_red "dropped ${override_name} suite fail-fast" \
+    "forbidden override set mismatch" \
+    python3 - \
+      "$TRUTH_TMP/drop-${override_name}/scripts/ci/test-ci-programme-truth.sh" \
+      "$CEILINGS" <<'PY'
+import os
+import subprocess
+import sys
+
+script = sys.argv[1]
+helper = sys.argv[2]
+env = os.environ.copy()
+for name in subprocess.check_output(
+    [sys.executable, helper, "forbidden-overrides"],
+    text=True,
+).split():
+    env.pop(name, None)
+try:
+    proc = subprocess.run(
+        ["/bin/bash", script],
+        env=env,
+        timeout=5,
+        capture_output=True,
+        text=True,
+    )
+except subprocess.TimeoutExpired:
+    raise SystemExit("dropped-override suite timed out")
+err = (proc.stderr or "") + (proc.stdout or "")
+if proc.returncode == 0:
+    raise SystemExit("dropped-override suite left the contract green")
+sys.stderr.write(err)
+raise SystemExit(proc.returncode)
+PY
 done
 
 stale_semver=$'Source of truth: workflow env WAVE0_SEMVER_BASELINE_SHA.\n'
