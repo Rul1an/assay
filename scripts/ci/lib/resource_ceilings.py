@@ -39,12 +39,18 @@ def reject_programme_overrides(env: dict[str, str] | None = None) -> None:
 REJECT_OVERRIDES_CALLER = "python3 " + '"$_TRUTH_LIB"' + " reject-overrides"
 
 
+def reject_overrides_caller_marks(text: str) -> list[tuple[str, bool]]:
+    marks: list[tuple[str, bool]] = []
+    for line in text.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        marks.append(
+            (line, body.split("#", 1)[0].strip() == REJECT_OVERRIDES_CALLER)
+        )
+    return marks
+
+
 def reject_overrides_caller_count(text: str) -> int:
-    count = 0
-    for line in text.splitlines():
-        if line.split("#", 1)[0].strip() == REJECT_OVERRIDES_CALLER:
-            count += 1
-    return count
+    return sum(1 for _line, is_caller in reject_overrides_caller_marks(text) if is_caller)
 
 
 def assert_reject_overrides_caller(path: str) -> None:
@@ -55,15 +61,11 @@ def assert_reject_overrides_caller(path: str) -> None:
 
 def drop_reject_overrides_caller(src: str, dst: str) -> None:
     text = read_bounded_file(src).decode("utf-8")
-    count = reject_overrides_caller_count(text)
+    marks = reject_overrides_caller_marks(text)
+    count = sum(1 for _line, is_caller in marks if is_caller)
     if count != 1:
         raise SystemExit(f"reject-overrides caller count is {count}, want 1")
-    kept = [
-        line
-        for line in text.splitlines(keepends=True)
-        if line.split("#", 1)[0].strip() != REJECT_OVERRIDES_CALLER
-    ]
-    out = "".join(kept).encode("utf-8")
+    out = "".join(line for line, is_caller in marks if not is_caller).encode("utf-8")
     require_bounded_bytes(out, dst)
     with open(dst, "wb") as fh:
         fh.write(out)
