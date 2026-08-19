@@ -1,0 +1,83 @@
+{
+  "schema": "assay.corpus_adequacy.manifest.v0",
+  "_about": "Mutation adequacy for the mcp-jsonrpc-id pack. The pack's README declares a NARROW scope: the error-response id contradiction, two incompatibility arms plus one positive control. The four id rules are in scope. The envelope-shape rules are real rules the pack depends on but never claimed to exercise, so they are declared out_of_scope and reported rather than scored. Lives OUTSIDE the pack on purpose: the pack checksums its own public files, so adding a manifest to it would break its integrity guard. The vectors file here is derived from the pack's vectors/*.json and conformance/tests/test_corpus_adequacy_own_corpora.py asserts it has not drifted.",
+  "implementation": "../../examples/mcp-jsonrpc-id-conformance/check.py",
+  "entrypoint": "evaluate_message",
+  "entrypoint_args": [
+    "message"
+  ],
+  "vectors": "mcp-jsonrpc-id.vectors.json",
+  "id_key": "vector_id",
+  "default_group": "error_response_id",
+  "mutants": {
+    "error_response_id": [
+      {
+        "label": "0 envelope must declare jsonrpc 2.0",
+        "anchor": "        message.get(\"jsonrpc\") == \"2.0\"\n        and \"result\" not in message",
+        "replacement": "        True\n        and \"result\" not in message",
+        "scope": "out_of_scope"
+      },
+      {
+        "label": "1 an error response must not carry result",
+        "anchor": "        and \"result\" not in message\n        and isinstance(error, dict)",
+        "replacement": "        and isinstance(error, dict)",
+        "scope": "out_of_scope"
+      },
+      {
+        "label": "2 error must be an object",
+        "anchor": "        and isinstance(error, dict)\n        and isinstance(error.get(\"code\"), int)",
+        "replacement": "        and isinstance(error.get(\"code\"), int)",
+        "scope": "out_of_scope"
+      },
+      {
+        "label": "3 error code must be an int",
+        "anchor": "        and isinstance(error.get(\"code\"), int)\n",
+        "replacement": "        and True\n",
+        "scope": "out_of_scope"
+      },
+      {
+        "label": "4 a bool is not an int code",
+        "anchor": "        and not isinstance(error.get(\"code\"), bool)\n",
+        "replacement": "        and True\n",
+        "scope": "out_of_scope"
+      },
+      {
+        "label": "5 error message must be a string",
+        "anchor": "        and isinstance(error.get(\"message\"), str)\n",
+        "replacement": "        and True\n",
+        "scope": "out_of_scope"
+      },
+      {
+        "label": "6 MCP tolerates an omitted id",
+        "anchor": "    mcp_id_valid = not has_id or (",
+        "replacement": "    mcp_id_valid = False or (",
+        "scope": "declared"
+      },
+      {
+        "label": "7 MCP RequestId excludes null",
+        "anchor": "        isinstance(identifier, str)\n        or (isinstance(identifier, int) and not isinstance(identifier, bool))\n    )",
+        "replacement": "        identifier is None\n        or isinstance(identifier, str)\n        or (isinstance(identifier, int) and not isinstance(identifier, bool))\n    )",
+        "scope": "declared"
+      },
+      {
+        "label": "8 JSON-RPC requires id to be present",
+        "anchor": "    jsonrpc_id_valid = has_id and (",
+        "replacement": "    jsonrpc_id_valid = True and (",
+        "scope": "declared"
+      },
+      {
+        "label": "9 JSON-RPC permits a null id",
+        "anchor": "        identifier is None or isinstance(identifier, str) or _is_number(identifier)",
+        "replacement": "        isinstance(identifier, str) or _is_number(identifier)",
+        "scope": "declared"
+      },
+      {
+        "label": "10 a non-object message is rejected outright",
+        "anchor": "    if not isinstance(message, dict) or not _error_shape_is_valid(message):",
+        "replacement": "    if not _error_shape_is_valid(message):",
+        "scope": "out_of_scope"
+      }
+    ]
+  },
+  "equivalent": {}
+}
