@@ -146,17 +146,49 @@ the rows below say which of the two they mean.
 | Corpus | Runner | Result |
 |---|---|---|
 | `mcp-jsonrpc-id-conformance` | module | **4 of 4** in scope. **7 rules unexercised and out of scope**, ratio 1.75 — the score is a statement about a minority of the declared rules |
-| `privileged-mcp-action-v0` | process | **No adequacy result. Exit 1.** All three declared rules are a known hole or out of scope, so nothing was measured, and the tool refuses to report a score it did not earn. The hole: the origin leg of the v0 marker triple is promised by §5 Stage 3 and no vector discriminates it. **The gap is in the corpus, not in the implementation** — our own tree exercises the leg in `denial_marker_classifier.rs::wrong_origin_is_inert`; what the corpus cannot do is *transmit* the requirement to a stranger, who can skip the leg and still reproduce the pinned digest. Recorded against `sha256:cb58ce91…` rather than fixed, because adding a vector moves a published digest. The other two rules I declared turned out to mutate the wrong stage and the wrong profile; they are out of scope **with that reasoning rather than deleted**. Three declared, none scorable — the corpus that carries our most public reproduction request is the one this tool can say least about |
+| `privileged-mcp-action-v0` | process | **4 of 8 in scope (50%), 4 survivors, 1 known hole.** First measured as *no result*: three rules declared, two of them mutating the wrong stage and the wrong profile. That was a fact about the declaration, not the corpus — eight more rules were read off the verifier path and half of them survive. The survivors form **one systematic gap, not four**: wherever a rule has sibling members, the corpus discriminates exactly one and leaves the rest free. Decision cardinality is caught (`bad-103`) and observation and establish cardinality are not; the decision's `target_digest` is caught (`bad-102`) and the observation's `response_digest` is not; the binding pair is caught on its digest leg (`bad-105`) and not on its tool-name leg; the marker triple is caught on schema and code and not on origin (the known hole). One vector per failure mode, and every failure mode has siblings on the same code path that never got one. **This is the corpus carrying our live reproduction request ([#1840](https://github.com/Rul1an/assay/issues/1840))** |
 | [`observed-effect-v0`](https://github.com/Rul1an/observed-effect-v0) drift consumer | batch | **4 of 5**. One survivor: an implementation can read the body regardless of whether the ref recomputed and still reproduce all fourteen cases |
 | [rge-bench](https://github.com/rge-bench/rge-bench) | module | 30 of 30, 1 declared equivalent |
 | `rfc8785` canonicalization | batch (test-names) | **control killed** — the corpus bites. No rules declared: see below |
 | `mcp-era-parity-v0` | — | **not measurable today.** Driven by Rust *tests* without a per-vector verdict |
 
-**Three measured, one with no scorable result, one control-only, one not
-measurable.** Stated rather than rounded up — and corrected on 2026-08-19, when
-this line still read *four measured* and counted `privileged-mcp-action-v0` among
-them. The tool had been printing `FAIL: nothing was measured` for that corpus the
-whole time; the summary above it had rounded up anyway.
+**Four measured, one control-only, one not measurable.** Stated rather than
+rounded up — and this line has now been wrong in both directions on the same day.
+It read *four measured* while `privileged-mcp-action-v0` was scoring nothing; it
+was corrected to *three*; and it is four again only because that corpus was then
+declared properly and finally produced a number. The number is 50%, which is the
+worst result on this page. Both corrections are left visible, because a table
+whose purpose is to publish unflattering results should show its own edits.
+
+### The v0 survivors are one gap wearing four faces
+
+Worth stating separately because it changes what closing them costs. The four
+survivors in `privileged-mcp-action-v0` are not four independent oversights; they
+are four instances of the same construction habit. Every one of them is a *sibling*
+of a rule the corpus does catch, sitting on the same code path:
+
+| the corpus discriminates | it does not discriminate | shared path |
+|---|---|---|
+| `decisions.len() != 1` (`bad-103`) | `observations.len() > 1`, `establishes.len() > 1` | Stage 2 cardinality |
+| decision `action.target_digest` (`bad-102`) | observation `caller_visible_response_digest` | `is_sha256_digest` |
+| binding on `target_digest` (`bad-105`) | binding on `tool_name` | the same `&&` chain |
+| marker `schema` + `code` | marker `origin` (the known hole) | the same triple match |
+
+The corpus was built one vector per failure *mode*. Each mode's siblings share the
+structure but never got a vector, so an implementer can drop the second member of
+any of these pairs and reproduce all fourteen outcomes.
+
+That the pattern is uniform is the useful part: it says the fix is not fourteen
+judgement calls but one rule — **for every conjunct and every sibling member, ask
+whether a vector isolates it** — and it says the same audit is worth running against
+the other corpora on this page before trusting their scores. Note that our own tree
+catches all four; this is about what the corpus can transmit, not about what we ship.
+
+Not fixed here. Every one of these needs a new vector, and a new vector moves a
+digest that [#1840](https://github.com/Rul1an/assay/issues/1840) has published as a
+reproduction target. Whether that is answered by an addendum corpus at a second
+digest, or by leaving v0 pinned and honest, is a contract decision rather than a
+tooling one.
 
 ### Why `rfc8785` has a control and no declared rules
 

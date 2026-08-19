@@ -1,7 +1,7 @@
 {
   "schema": "corpus-adequacy.manifest.v0",
   "runner": "process",
-  "_about": "Mutation adequacy for privileged-mcp-action/v0. ONE genuine hole: the origin leg of the v0 marker triple is promised and unexercised. Two further rules were declared and are NOT holes -- they mutate the wrong stage and the wrong profile -- and are marked out_of_scope with that reasoning rather than dropped, so the mistake stays visible. Independently classified by Ruley against docs/profiles/privileged-mcp-action/v0.md \u00a75 and the Stage 2/3 architecture.",
+  "_about": "Mutation adequacy for privileged-mcp-action/v0. First pass declared THREE rules and scored nothing: one genuine hole (the origin leg) and two that mutate the wrong stage and the wrong profile, kept out_of_scope with that reasoning rather than dropped. A corpus of 14 vectors that yields no adequacy result is a signal about the DECLARATION, not about the corpus -- so eight further rules were declared, read off the verifier path rather than off the vector names.",
   "repo_root": "../..",
   "implementation_sources": [
     "../../crates/assay-evidence/src/denial_marker.rs",
@@ -53,6 +53,46 @@
         "replacement": "(DENIED_CALL_OBSERVATION_V1, _, PROXY_ORIGIN)",
         "scope": "out_of_scope",
         "reason": "WRONG PROFILE, not a hole. The v1 schema / -31999 pairing is Stage 3 of v1.md. v0's rule for a v1 schema is the opposite of pairing: unrecognised, therefore invalid. Under v0 selection a .v1 payload never enters observations, so the V1 arm of the match is unreachable here. Its survival does not mean a stranger can ignore the v1 pairing and reproduce the v0 digest; it means the v0 corpus never presents that pairing. The v1 corpus already covers it (ok-003-cross-pair-inert)."
+      },
+      {
+        "label": "3 exactly one decision record",
+        "anchor": "if decisions.len() != 1 {",
+        "replacement": "if false {"
+      },
+      {
+        "label": "4 at most one observation record",
+        "anchor": "if observations.len() > 1 {",
+        "replacement": "if false {"
+      },
+      {
+        "label": "5 at most one establish record",
+        "anchor": "if establishes.len() > 1 {",
+        "replacement": "if false {"
+      },
+      {
+        "label": "6 the decision target digest must be a well-formed sha256",
+        "anchor": "if !digest.map(is_sha256_digest).unwrap_or(false) {\n        violations.push(finding(\n            \"target_digest_missing\",",
+        "replacement": "if false {\n        violations.push(finding(\n            \"target_digest_missing\","
+      },
+      {
+        "label": "7 the observation response digest must be a well-formed sha256",
+        "anchor": "if !digest.map(is_sha256_digest).unwrap_or(false) {\n        violations.push(finding(\n            \"observation_response_digest\",",
+        "replacement": "if false {\n        violations.push(finding(\n            \"observation_response_digest\","
+      },
+      {
+        "label": "8 fail_closed must equal (decision == deny)",
+        "anchor": "if fc != (d == \"deny\") {",
+        "replacement": "if false {"
+      },
+      {
+        "label": "9 the marker must bind on the tool-name leg",
+        "anchor": "if obs_tool.is_some() && obs_tool == dec_tool && Some(obs_digest) == dec_digest {",
+        "replacement": "if obs_tool.is_some() && Some(obs_digest) == dec_digest {"
+      },
+      {
+        "label": "10 the marker must bind on the target-digest leg",
+        "anchor": "if obs_tool.is_some() && obs_tool == dec_tool && Some(obs_digest) == dec_digest {",
+        "replacement": "if obs_tool.is_some() && obs_tool == dec_tool {"
       },
       {
         "label": "CONTROL harness reachability on the verifier path",
