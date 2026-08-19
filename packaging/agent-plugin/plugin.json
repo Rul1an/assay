@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "assay",
-  "version": "5.3.0",
+  "version": "5.4.0",
   "description": "Operate Assay's install-to-evidence golden path with explicit failure boundaries.",
   "author": {
     "name": "Assay"
