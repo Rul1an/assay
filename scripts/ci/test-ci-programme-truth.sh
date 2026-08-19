@@ -13,26 +13,8 @@
 # would break a later legitimate boundary split.
 set -euo pipefail
 
-if [[ -n "${PROGRAMME_TRUTH_ROOT+x}" ]]; then
-  echo "FAIL: PROGRAMME_TRUTH_ROOT cannot replace the script worktree" >&2
-  exit 1
-fi
-if [[ -n "${PROGRAMME_TRUTH_AGENTS+x}" ]]; then
-  echo "FAIL: PROGRAMME_TRUTH_AGENTS cannot replace the script worktree" >&2
-  exit 1
-fi
-if [[ -n "${PROGRAMME_TRUTH_SELFHOST+x}" ]]; then
-  echo "FAIL: PROGRAMME_TRUTH_SELFHOST cannot replace the script worktree" >&2
-  exit 1
-fi
-if [[ -n "${PROGRAMME_TRUTH_CEILING_CHILD+x}" ]]; then
-  echo "FAIL: PROGRAMME_TRUTH_CEILING_CHILD cannot replace the script worktree" >&2
-  exit 1
-fi
-if [[ -n "${PROGRAMME_TRUTH_PREVIEW_MUTANT+x}" ]]; then
-  echo "FAIL: PROGRAMME_TRUTH_PREVIEW_MUTANT cannot replace the script worktree" >&2
-  exit 1
-fi
+_TRUTH_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/resource_ceilings.py"
+python3 "$_TRUTH_LIB" reject-overrides
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 if [[ -e "$ROOT/.git" && -e "$ROOT/.programme-truth-hermetic" ]]; then
@@ -92,12 +74,17 @@ PY
 }
 
 run_hermetic_programme_truth() {
-  env -u PROGRAMME_TRUTH_ROOT \
-    -u PROGRAMME_TRUTH_AGENTS \
-    -u PROGRAMME_TRUTH_SELFHOST \
-    -u PROGRAMME_TRUTH_CEILING_CHILD \
-    -u PROGRAMME_TRUTH_PREVIEW_MUTANT \
-    bash "$1"
+  local -a env_args
+  local name
+  env_args=()
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    env_args[${#env_args[@]}]="-u"
+    env_args[${#env_args[@]}]="$name"
+  done <<EOF
+$(python3 "$CEILINGS" forbidden-overrides)
+EOF
+  env "${env_args[@]}" bash "$1"
 }
 
 assert_extracted_block() {
@@ -645,6 +632,11 @@ if root_override in text:
     raise SystemExit("PROGRAMME_TRUTH_ROOT is still a caller override")
 if agents_override in text:
     raise SystemExit("PROGRAMME_TRUTH_AGENTS is still a caller override")
+if "reject-overrides" not in text:
+    raise SystemExit("script does not invoke reject-overrides")
+inline_reject = "if [[ -n \"${" + "PROGRAMME_TRUTH_AGENTS+x}\" ]]"
+if inline_reject in text:
+    raise SystemExit("script still inlines programme override rejects")
 if 'ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"' not in text:
     raise SystemExit("ROOT is not derived from BASH_SOURCE")
 if 'AGENTS="$ROOT/AGENTS.md"' not in text:
@@ -659,24 +651,72 @@ PY
 expect_ok "ROOT is the script worktree and not caller-overridable" \
   assert_root_is_script_worktree "${BASH_SOURCE[0]}"
 
+FORBIDDEN_SPEC=(
+  PROGRAMME_TRUTH_ROOT
+  PROGRAMME_TRUTH_AGENTS
+  PROGRAMME_TRUTH_SELFHOST
+  PROGRAMME_TRUTH_CEILING_CHILD
+  PROGRAMME_TRUTH_PREVIEW_MUTANT
+)
+
+assert_forbidden_override_set() {
+  python3 - "$1" "${FORBIDDEN_SPEC[@]}" <<'PY'
+import runpy
+import sys
+
+required = tuple(sys.argv[2:])
+got = tuple(runpy.run_path(sys.argv[1])["FORBIDDEN_PROGRAMME_OVERRIDES"])
+if got != required:
+    raise SystemExit(f"forbidden override set mismatch: {got!r}")
+PY
+}
+
+expect_ok "forbidden programme overrides are the canonical five" \
+  assert_forbidden_override_set "$CEILINGS"
+
+for override_name in "${FORBIDDEN_SPEC[@]}"; do
+  expect_red "${override_name} override" \
+    "${override_name} cannot replace the script worktree" \
+    env "${override_name}=1" python3 "$CEILINGS" reject-overrides
+done
+
 expect_red "PROGRAMME_TRUTH_ROOT empty override" \
   "PROGRAMME_TRUTH_ROOT cannot replace the script worktree" \
   env PROGRAMME_TRUTH_ROOT= bash "${BASH_SOURCE[0]}"
 expect_red "PROGRAMME_TRUTH_ROOT nonexistent tree" \
   "PROGRAMME_TRUTH_ROOT cannot replace the script worktree" \
   env PROGRAMME_TRUTH_ROOT=/no/such/programme-truth-root bash "${BASH_SOURCE[0]}"
-expect_red "PROGRAMME_TRUTH_AGENTS override" \
-  "PROGRAMME_TRUTH_AGENTS cannot replace the script worktree" \
-  env PROGRAMME_TRUTH_AGENTS="$ROOT/AGENTS.md" bash "${BASH_SOURCE[0]}"
-expect_red "PROGRAMME_TRUTH_PREVIEW_MUTANT override" \
-  "PROGRAMME_TRUTH_PREVIEW_MUTANT cannot replace the script worktree" \
-  env PROGRAMME_TRUTH_PREVIEW_MUTANT=1 bash "${BASH_SOURCE[0]}"
-expect_red "combined AGENTS+SELFHOST+CEILING_CHILD bypass" \
-  "cannot replace the script worktree" \
-  env PROGRAMME_TRUTH_AGENTS="$ROOT/AGENTS.md" \
-  PROGRAMME_TRUTH_SELFHOST=1 \
-  PROGRAMME_TRUTH_CEILING_CHILD=1 \
-  bash "${BASH_SOURCE[0]}"
+
+for override_name in "${FORBIDDEN_SPEC[@]}"; do
+  install_hermetic_programme_truth "$TRUTH_TMP/drop-${override_name}"
+  python3 - "$TRUTH_TMP/drop-${override_name}/scripts/ci/lib/resource_ceilings.py" \
+    "$override_name" <<'PY'
+import sys
+from pathlib import Path
+
+from resource_ceilings import read_bounded_file, require_bounded_bytes
+
+path = Path(sys.argv[1])
+name = sys.argv[2]
+text = read_bounded_file(str(path)).decode("utf-8")
+needle = f'    "{name}",\n'
+if needle not in text:
+    raise SystemExit(f"forbidden set does not name {name}")
+out = text.replace(needle, "", 1)
+require_bounded_bytes(out.encode("utf-8"), "dropped override set")
+path.write_text(out, encoding="utf-8")
+PY
+  if env "${override_name}=1" python3 \
+    "$TRUTH_TMP/drop-${override_name}/scripts/ci/lib/resource_ceilings.py" \
+    reject-overrides >/dev/null 2>&1; then
+    ok "dropping ${override_name} from the set leaves that override green"
+  else
+    bad "dropping ${override_name} still rejected"
+  fi
+  expect_red "forbidden set without ${override_name}" "forbidden override set mismatch" \
+    assert_forbidden_override_set \
+    "$TRUTH_TMP/drop-${override_name}/scripts/ci/lib/resource_ceilings.py"
+done
 
 stale_semver=$'Source of truth: workflow env WAVE0_SEMVER_BASELINE_SHA.\n'
 expect_red "pinned baseline SHA" "WAVE0_SEMVER_BASELINE_SHA" assert_wave0_semver_doc "$stale_semver"

@@ -20,6 +20,20 @@ import sys
 MAX_DOC_BYTES = 65536
 MAX_INVENTORY_PATHS = 8192
 MAX_INVENTORY_BYTES = 524288
+FORBIDDEN_PROGRAMME_OVERRIDES = (
+    "PROGRAMME_TRUTH_ROOT",
+    "PROGRAMME_TRUTH_AGENTS",
+    "PROGRAMME_TRUTH_SELFHOST",
+    "PROGRAMME_TRUTH_CEILING_CHILD",
+    "PROGRAMME_TRUTH_PREVIEW_MUTANT",
+)
+
+
+def reject_programme_overrides(env: dict[str, str] | None = None) -> None:
+    source = os.environ if env is None else env
+    for name in FORBIDDEN_PROGRAMME_OVERRIDES:
+        if name in source:
+            raise SystemExit(f"{name} cannot replace the script worktree")
 
 
 def require_bounded_bytes(
@@ -129,7 +143,8 @@ def main(argv: list[str]) -> None:
         raise SystemExit(
             "usage: resource_ceilings.py "
             "check-file|read-file|check-stdin|inventory|"
-            "max-doc-bytes|canonical-inventory-limits [path]"
+            "max-doc-bytes|canonical-inventory-limits|"
+            "reject-overrides|forbidden-overrides [path]"
         )
     cmd = argv[0]
     if cmd == "max-doc-bytes":
@@ -137,6 +152,13 @@ def main(argv: list[str]) -> None:
         return
     if cmd == "canonical-inventory-limits":
         print(f"{MAX_INVENTORY_PATHS} {MAX_INVENTORY_BYTES}")
+        return
+    if cmd == "forbidden-overrides":
+        for name in FORBIDDEN_PROGRAMME_OVERRIDES:
+            print(name)
+        return
+    if cmd == "reject-overrides":
+        reject_programme_overrides()
         return
     if cmd == "check-file":
         read_bounded_file(argv[1])

@@ -8,26 +8,8 @@ set -euo pipefail
 # shellcheck source=scripts/ci/lib/clear-git-repository-env.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/clear-git-repository-env.sh"
 
-if [[ -n "${PROGRAMME_TRUTH_ROOT+x}" ]]; then
-  echo "FAIL: PROGRAMME_TRUTH_ROOT cannot replace the script worktree" >&2
-  exit 1
-fi
-if [[ -n "${PROGRAMME_TRUTH_AGENTS+x}" ]]; then
-  echo "FAIL: PROGRAMME_TRUTH_AGENTS cannot replace the script worktree" >&2
-  exit 1
-fi
-if [[ -n "${PROGRAMME_TRUTH_SELFHOST+x}" ]]; then
-  echo "FAIL: PROGRAMME_TRUTH_SELFHOST cannot replace the script worktree" >&2
-  exit 1
-fi
-if [[ -n "${PROGRAMME_TRUTH_CEILING_CHILD+x}" ]]; then
-  echo "FAIL: PROGRAMME_TRUTH_CEILING_CHILD cannot replace the script worktree" >&2
-  exit 1
-fi
-if [[ -n "${PROGRAMME_TRUTH_PREVIEW_MUTANT+x}" ]]; then
-  echo "FAIL: PROGRAMME_TRUTH_PREVIEW_MUTANT cannot replace the script worktree" >&2
-  exit 1
-fi
+_TRUTH_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/resource_ceilings.py"
+python3 "$_TRUTH_LIB" reject-overrides
 if [[ -n "${REVIEW_SPLIT_ROOT+x}" ]]; then
   echo "FAIL: REVIEW_SPLIT_ROOT cannot replace the script worktree" >&2
   exit 1
@@ -329,8 +311,10 @@ if "${REVIEW_SPLIT_CEILINGS:-" in text or 'python3 "${REVIEW_SPLIT_CEILINGS}"' i
 suite = read_bounded_file(sys.argv[2]).decode("utf-8")
 if "${" + "PROGRAMME_TRUTH_ROOT:-" in suite or "${" + "REVIEW_SPLIT_ROOT:-" in suite:
     raise SystemExit("review-split-wave tests still accept a caller root override")
-if "PROGRAMME_TRUTH_ROOT cannot replace the script worktree" not in suite:
-    raise SystemExit("review-split-wave tests do not refuse PROGRAMME_TRUTH_ROOT")
+if "reject-overrides" not in suite:
+    raise SystemExit("review-split-wave tests do not invoke reject-overrides")
+if "if [[ -n \"${" + "PROGRAMME_TRUTH_AGENTS+x}\" ]]" in suite:
+    raise SystemExit("review-split-wave tests still inlined programme override rejects")
 PY
 then
   ok "review-split-wave inventories through the bounded helper"
