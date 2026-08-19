@@ -842,7 +842,12 @@ fn dependency_crates_match_the_manifest() {
 /// - the naming file is separate: the writer must mention a symbol that file publishes. A writer
 ///   that touches none of the namer's types is not the writer of its document.
 fn assert_writer_is_about_this_identity(identity: &str, writer: &str, namer: &str) {
-    let writing = read(writer);
+    // Comments are stripped on both sides. `published_symbols` already ignored them and the writer
+    // side did not, so the two halves of the tie spoke different languages: at one point
+    // `supply_chain_conformance.rs` was tied to its namer by a single `//!` line naming
+    // `verify_supply_chain`, and rewriting that sentence would have dissolved the tie without
+    // touching a line of code.
+    let writing = strip_comments(&writer_module_source(writer));
     if writer == namer {
         let named = writing.contains(&format!("\"{identity}\""))
             || constant_names_for(identity)
@@ -873,6 +878,68 @@ fn assert_writer_is_about_this_identity(identity: &str, writer: &str, namer: &st
          some other document and happens to call a writer would look identical"
     );
 }
+
+/// A writer file plus the non-test modules it declares.
+///
+/// A command is its module tree, not one file. `assay registry supply-chain-conformance` writes in
+/// `supply_chain_conformance.rs` and builds the carrier in its own `descriptor` module, so the
+/// registry symbols that prove the tie live one file down. Reading only the named file made that
+/// row green on a single `//!` line and red as soon as comments were stripped from both sides —
+/// the row was never wrong, the reading was.
+fn writer_module_source(writer: &str) -> String {
+    let root = workspace_root();
+    let path = root.join(writer);
+    let mut out = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {writer}: {e}"));
+    let head = strip_comments(&out);
+    let test_only: BTreeSet<String> = test_mod_declarations(&head).into_iter().collect();
+    for name in declared_modules(&head) {
+        if test_only.contains(&name) {
+            continue;
+        }
+        for file in module_files(&path, &name) {
+            if let Ok(src) = std::fs::read_to_string(&file) {
+                out.push('\n');
+                out.push_str(&src);
+            }
+        }
+    }
+    out
+}
+
+/// Source with every `//` comment removed, line by line.
+fn strip_comments(src: &str) -> String {
+    src.lines()
+        .map(code_before_comment)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Published names too generic to tie a writer to a document.
+///
+/// Identifier boundaries stop `SCHEMA` matching `INIT_REPORT_SCHEMA`. They do not stop `new`
+/// matching `Sha256::new()`: `assay-runner-schema`'s health module publishes `pub fn new`, and the
+/// observation-health writer calls `Sha256::new()`, so that row would stay tied with every
+/// meaningful symbol removed.
+const TOO_GENERIC: &[&str] = &[
+    "new",
+    "default",
+    "from",
+    "try_from",
+    "into",
+    "parse",
+    "fmt",
+    "next",
+    "len",
+    "is_empty",
+    "build",
+    "builder",
+    "as_str",
+    "to_string",
+    "get",
+    "insert",
+    "push",
+    "run",
+];
 
 /// Whether `src` uses `token` as a whole identifier rather than as a substring of a longer one.
 ///
@@ -930,7 +997,7 @@ fn published_symbols(path: &str) -> BTreeSet<String> {
             .chars()
             .take_while(|c| c.is_alphanumeric() || *c == '_')
             .collect();
-        if !name.is_empty() {
+        if !name.is_empty() && !TOO_GENERIC.contains(&name.as_str()) {
             names.insert(name);
         }
     }
