@@ -1,0 +1,60 @@
+{
+  "vectors": [
+    {
+      "vector_id": "bad-101-tampered-bundle",
+      "path": "conformance/privileged-mcp-action-v0/vectors/bad-101-tampered-bundle.bundle.tar.gz"
+    },
+    {
+      "vector_id": "bad-102-missing-target-digest",
+      "path": "conformance/privileged-mcp-action-v0/vectors/bad-102-missing-target-digest.bundle.tar.gz"
+    },
+    {
+      "vector_id": "bad-103-two-decisions",
+      "path": "conformance/privileged-mcp-action-v0/vectors/bad-103-two-decisions.bundle.tar.gz"
+    },
+    {
+      "vector_id": "bad-104-unknown-schema",
+      "path": "conformance/privileged-mcp-action-v0/vectors/bad-104-unknown-schema.bundle.tar.gz"
+    },
+    {
+      "vector_id": "bad-105-observation-binding-mismatch",
+      "path": "conformance/privileged-mcp-action-v0/vectors/bad-105-observation-binding-mismatch.bundle.tar.gz"
+    },
+    {
+      "vector_id": "bad-106-fail-closed-inconsistent",
+      "path": "conformance/privileged-mcp-action-v0/vectors/bad-106-fail-closed-inconsistent.bundle.tar.gz"
+    },
+    {
+      "vector_id": "bad-107-unknown-decision-value",
+      "path": "conformance/privileged-mcp-action-v0/vectors/bad-107-unknown-decision-value.bundle.tar.gz"
+    },
+    {
+      "vector_id": "bad-108-observation-without-decision",
+      "path": "conformance/privileged-mcp-action-v0/vectors/bad-108-observation-without-decision.bundle.tar.gz"
+    },
+    {
+      "vector_id": "bad-109-bundle-id-mismatch",
+      "path": "conformance/privileged-mcp-action-v0/vectors/bad-109-bundle-id-mismatch.bundle.tar.gz"
+    },
+    {
+      "vector_id": "ok-001-deny-bound-observation",
+      "path": "conformance/privileged-mcp-action-v0/vectors/ok-001-deny-bound-observation.bundle.tar.gz"
+    },
+    {
+      "vector_id": "ok-002-deny-observation-missing",
+      "path": "conformance/privileged-mcp-action-v0/vectors/ok-002-deny-observation-missing.bundle.tar.gz"
+    },
+    {
+      "vector_id": "ok-003-allow-no-outcome-observation",
+      "path": "conformance/privileged-mcp-action-v0/vectors/ok-003-allow-no-outcome-observation.bundle.tar.gz"
+    },
+    {
+      "vector_id": "ok-004-allow-with-diagnostic-establish",
+      "path": "conformance/privileged-mcp-action-v0/vectors/ok-004-allow-with-diagnostic-establish.bundle.tar.gz"
+    },
+    {
+      "vector_id": "ok-005-allow-contradicted-by-denial",
+      "path": "conformance/privileged-mcp-action-v0/vectors/ok-005-allow-contradicted-by-denial.bundle.tar.gz"
+    }
+  ]
+}
