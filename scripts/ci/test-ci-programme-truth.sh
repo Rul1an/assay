@@ -512,8 +512,12 @@ entry = re.search(
 if entry is None:
     raise SystemExit("ci-programme-truth hook entry is missing")
 hook = entry.group(1)
-if "test-ci-programme-truth.sh" not in hook or "test-review-split-wave.sh" not in hook:
-    raise SystemExit("ci-programme-truth hook does not run both focused suites")
+expected_entry = (
+    "bash -c 'bash scripts/ci/test-ci-programme-truth.sh && "
+    "bash scripts/ci/test-review-split-wave.sh'"
+)
+if hook != expected_entry:
+    raise SystemExit(f"ci-programme-truth hook entry mismatch: {hook!r}")
 raw = match.group(1).strip()
 if raw[0] in "'\"" and raw[-1] == raw[0]:
     raw = raw[1:-1]
@@ -630,6 +634,27 @@ expect_ok "kernel-matrix.yml pull_request.paths owns programme-truth inputs" \
   assert_ci_trigger_owns_truth_inputs "$KERNEL_MATRIX"
 expect_ok "pre-push files regex covers resource_ceilings.py" \
   assert_prepush_covers_ceilings "$PRECOMMIT"
+
+python3 - "$PRECOMMIT" "$TRUTH_TMP/precommit-echo.yaml" <<'PY'
+import sys
+from pathlib import Path
+
+from resource_ceilings import read_bounded_file, require_bounded_bytes
+
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+text = read_bounded_file(str(src)).decode("utf-8")
+old = "&& bash " + "scripts/ci/test-review-split-wave.sh"
+new = "&& echo " + "scripts/ci/test-review-split-wave.sh"
+if old not in text:
+    raise SystemExit("hook entry does not execute test-review-split-wave.sh")
+out = text.replace(old, new, 1)
+require_bounded_bytes(out.encode("utf-8"), "neutralized hook entry")
+dst.write_text(out, encoding="utf-8")
+PY
+expect_red "neutralized review-split hook execution" \
+  "ci-programme-truth hook entry mismatch" \
+  assert_prepush_covers_ceilings "$TRUTH_TMP/precommit-echo.yaml"
 
 assert_root_is_script_worktree() {
   python3 - "$1" <<'PY'
