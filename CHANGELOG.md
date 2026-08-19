@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `docs/architecture/CLI-JSON-IDENTITIES.md` records which `assay.<segments>.vN` identities
+  ship and which of them are CLI JSON documents. `cli_json_identities.rs` fails the build when
+  source and record disagree, including for the nine documents that carry no identity at all
+  and which no source scan can see; three of those twelve were found only by an independent
+  read, after two separately written inventories missed them (#2484, #2167).
 - `assay describe [path...]` walks the clap command tree so a caller can ask
   for the top-level surface and descend. Node identities are the existing
   shipping constants, not a second registry. Global `--quiet` /
