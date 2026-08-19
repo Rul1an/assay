@@ -10,6 +10,14 @@
       "killed": 6,
       "known_holes": 0,
       "manifest": "conformance/adequacy/mcp-jsonrpc-id.manifest.json",
+      "measured_at": {
+        "commit": "bcbb1ce7682a1dc94450bb7b31bb5258ad8b3fb3",
+        "depends_on": [
+          "conformance/adequacy/mcp-jsonrpc-id.manifest.json",
+          "conformance/adequacy/mcp-jsonrpc-id.vectors.json",
+          "examples/mcp-jsonrpc-id-conformance/check.py"
+        ]
+      },
       "out_of_scope": 7,
       "provenance": {
         "kind": "measured"
@@ -33,6 +41,12 @@
       "killed": 14,
       "known_holes": 0,
       "manifest": "conformance/adequacy/observed-effect-drift-consumer.manifest.json",
+      "measured_at": {
+        "commit": "bcbb1ce7682a1dc94450bb7b31bb5258ad8b3fb3",
+        "depends_on": [
+          "conformance/adequacy/observed-effect-drift-consumer.manifest.json"
+        ]
+      },
       "out_of_scope": 0,
       "provenance": {
         "kind": "measured"
@@ -66,6 +80,17 @@
       "killed": 6,
       "known_holes": 2,
       "manifest": "conformance/adequacy/privileged-mcp-action-v0.manifest.json",
+      "measured_at": {
+        "commit": "bcbb1ce7682a1dc94450bb7b31bb5258ad8b3fb3",
+        "depends_on": [
+          "conformance/adequacy/privileged-mcp-action-v0.manifest.json",
+          "conformance/adequacy/privileged-mcp-action-v0.vectors.json",
+          "conformance/privileged-mcp-action-v0/candidate-release.json",
+          "crates/assay-cli/src/cli/commands/evidence/privileged_mcp_action.rs",
+          "crates/assay-cli/src/cli/commands/evidence/verify_privileged_mcp_action.rs",
+          "crates/assay-evidence/src/denial_marker.rs"
+        ]
+      },
       "out_of_scope": 4,
       "provenance": {
         "kind": "measured"
@@ -89,6 +114,14 @@
       "killed": 0,
       "known_holes": 0,
       "manifest": "conformance/adequacy/rfc8785-canonicalization.manifest.json",
+      "measured_at": {
+        "commit": "bcbb1ce7682a1dc94450bb7b31bb5258ad8b3fb3",
+        "depends_on": [
+          "conformance/adequacy/rfc8785-canonicalization.manifest.json",
+          "crates/assay-canonical/src/jcs.rs",
+          "crates/assay-canonical/tests/vectors/rfc8785.json"
+        ]
+      },
       "out_of_scope": 0,
       "provenance": {
         "kind": "measured"
@@ -112,6 +145,12 @@
       "killed": 51,
       "known_holes": 0,
       "manifest": "conformance/adequacy/rge-bench.manifest.json",
+      "measured_at": {
+        "commit": "bcbb1ce7682a1dc94450bb7b31bb5258ad8b3fb3",
+        "depends_on": [
+          "conformance/adequacy/rge-bench.manifest.json"
+        ]
+      },
       "out_of_scope": 1,
       "provenance": {
         "kind": "measured"

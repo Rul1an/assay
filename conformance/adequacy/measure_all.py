@@ -126,6 +126,38 @@ def control_verdict(report: dict) -> str:
     return "none_declared"
 
 
+def measured_at(declared: dict, manifest: Path) -> dict:
+    """The revision of THIS repository the row was measured against.
+
+    Without it a number is present tense forever. The lane re-derives a corpus
+    only when its declared sources move, which is the right cost trade and leaves
+    every other revision comparing the documents against an older results.json and
+    going green. That green is accurate about the comparison and silent about the
+    measurement being old, and last week's figure read as a fact about today is
+    the thing this whole file exists to stop.
+
+    Recording the commit lets `check_published_numbers.py` ask the only question
+    that matters: has anything this row DEPENDS ON moved since it was taken. Not
+    "was it re-run this revision", which would mark almost every row stale and
+    train people to ignore it.
+    """
+    out = subprocess.run(["git", "-C", str(REPO), "rev-parse", "HEAD"],
+                         capture_output=True, text=True)
+    if out.returncode != 0:
+        return {}
+    paths = [declared[k] for k in ("implementation", "vectors", "corpus_digest_file")
+             if isinstance(declared.get(k), str)]
+    paths += [x for x in (declared.get("implementation_sources") or []) if isinstance(x, str)]
+    rel = []
+    for raw in paths:
+        try:
+            rel.append(str((manifest.parent / raw).resolve().relative_to(REPO)))
+        except ValueError:
+            continue          # out-of-tree: pinned separately by `subject`
+    return {"measured_at": {"commit": out.stdout.strip(),
+                            "depends_on": sorted(set(rel + [str(manifest.relative_to(REPO))]))}}
+
+
 def subject(manifest: Path, declared: dict) -> dict:
     """Which state of the measured thing this number describes.
 
@@ -207,6 +239,7 @@ def row(manifest: Path, report: dict, who: dict) -> dict:
         "control": control_verdict(report),
         "provenance": {"kind": "measured"},
         **subject(manifest, declared),
+        **measured_at(declared, manifest),
         **who,
     }
 

@@ -71,6 +71,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -233,6 +234,35 @@ def check() -> list[str]:
                     "commit. Provenance recorded only in results.json is provenance the reader "
                     "does not get" % (name, repo.get("repository") or "an external repository",
                                       commit[:9]))
+
+    # ---- 1c. is the measurement still current for the code ------------------
+    # The lane re-derives a corpus only when its declared sources move. Every
+    # other revision compares the documents against an older results.json and
+    # goes green, which is accurate about the comparison and silent about the
+    # measurement. A figure taken last week, read as a fact about today, is the
+    # thing this file exists to stop, and matching prose to JSON does not stop it.
+    #
+    # The question asked is not "was this re-run at HEAD", which would mark almost
+    # every row stale and train people to ignore the finding. It is whether
+    # anything the row DEPENDS ON has moved since it was taken.
+    for name, row in sorted(by_corpus.items()):
+        taken = row.get("measured_at")
+        if not taken or not taken.get("commit"):
+            findings.append("%s records no measured_at commit, so nothing can say whether its "
+                            "number is still current for this code" % name)
+            continue
+        moved = subprocess.run(
+            ["git", "-C", str(REPO), "diff", "--name-only", taken["commit"], "HEAD", "--",
+             *taken.get("depends_on", [])],
+            capture_output=True, text=True)
+        if moved.returncode != 0:
+            continue          # shallow clone or unknown commit: not a claim either way
+        changed = [ln for ln in moved.stdout.splitlines() if ln.strip()]
+        if changed:
+            findings.append(
+                "%s was measured at %s and %s changed since, so the published number describes "
+                "code this revision no longer has. Re-run measure_all.py --only %s"
+                % (name, taken["commit"][:9], ", ".join(sorted(changed)[:3]), name))
 
     # ---- 2. tool pin ------------------------------------------------------
     for name, path in sorted(on_disk.items()):
