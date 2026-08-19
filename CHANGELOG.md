@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay describe [path...]` walks the clap command tree so a caller can ask
+  for the top-level surface and descend. Node identities are the existing
+  shipping constants, not a second registry. Global `--quiet` /
+  `--non-interactive` stay absent: `NO_COLOR` is already honoured and `watch`
+  is the only interactive command (#2178).
+
 ### Changed
 - `assay_check_sequence` answers the sequence-rule language by calling
   `assay_core::sequence_eval` and mapping the record into its published JSON.
@@ -11,6 +18,10 @@ All notable changes to this project will be documented in this file.
 - `TraceExtent` and session-finding notes state that extent makes no fidelity claim:
   `complete` must not be read as "nothing is missing" (#2422). A producer-declared
   `coverage` field on the finding waits for a planned major.
+- `tool_description_integrity` hashes `input_schema` over canonical RFC 8785 bytes through
+  `assay_core::mcp::jcs`. Pins recorded against the prior compact-JSON preimage may need
+  regeneration even where a schema is unchanged; key reordering no longer reads as a mutation
+  (#2245).
 
 ### Fixed
 - Published-release golden path and `examples/privileged-action-gate/run.sh` verify the
