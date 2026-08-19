@@ -725,6 +725,7 @@ fn describe_binds_only_recorded_documents() {
 #[test]
 fn documents_are_bound_to_a_writer() {
     for (identity, (writer, namer)) in document_rows() {
+        assert_writer_is_about_this_identity(&identity, &writer, &namer);
         let naming = read(&namer);
         let names_it = naming.contains(&format!("\"{identity}\""))
             || constant_names_for(&identity)
@@ -825,4 +826,180 @@ fn dependency_crates_match_the_manifest() {
          either scanned in full (SCANNED) or scanned for pub const identities (DEPENDENCY_CRATES); \
          a dependency in neither is a crate whose published identities nothing classifies"
     );
+}
+
+/// The writer file must be about *this* identity, not merely about writing.
+///
+/// `documents_are_bound_to_a_writer` asks whether the named file contains any writer idiom. That
+/// leaves `assay.foo.v0` bindable to a file that writes `assay.bar.v0` and happens to `println!`.
+/// A review measured the gap: six rows do not contain their identity in the writer at all, and all
+/// six are the write/name splits.
+///
+/// Two cases, no dataflow:
+///
+/// - the writer also names the identity (`namer` is `-`): it must contain the literal, or a
+///   constant whose value is the literal. Almost every row.
+/// - the naming file is separate: the writer must mention a symbol that file publishes. A writer
+///   that touches none of the namer's types is not the writer of its document.
+fn assert_writer_is_about_this_identity(identity: &str, writer: &str, namer: &str) {
+    // Comments are stripped on both sides. `published_symbols` already ignored them and the writer
+    // side did not, so the two halves of the tie spoke different languages: at one point
+    // `supply_chain_conformance.rs` was tied to its namer by a single `//!` line naming
+    // `verify_supply_chain`, and rewriting that sentence would have dissolved the tie without
+    // touching a line of code.
+    let writing = strip_comments(&writer_module_source(writer));
+    if writer == namer {
+        let named = writing.contains(&format!("\"{identity}\""))
+            || constant_names_for(identity)
+                .iter()
+                .any(|name| mentions_token(&writing, name));
+        assert!(
+            named,
+            "{INVENTORY}: {identity} names {writer} as both writer and namer, and that file does \
+             not mention the identity. Either it is not the writer, or the naming column should \
+             point at the file that sets the schema"
+        );
+        return;
+    }
+    let published = published_symbols(namer);
+    assert!(
+        !published.is_empty(),
+        "{INVENTORY}: {identity} names {namer} as its naming file and that file publishes no \
+         symbols, so nothing can tie the writer to it"
+    );
+    let touched: Vec<&String> = published
+        .iter()
+        .filter(|symbol| mentions_token(&writing, symbol))
+        .collect();
+    assert!(
+        !touched.is_empty(),
+        "{INVENTORY}: {identity} is recorded as written by {writer} and named in {namer}, and the \
+         writer mentions none of that file's public symbols ({published:?}). A file that writes \
+         some other document and happens to call a writer would look identical"
+    );
+}
+
+/// A writer file plus the non-test modules it declares.
+///
+/// A command is its module tree, not one file. `assay registry supply-chain-conformance` writes in
+/// `supply_chain_conformance.rs` and builds the carrier in its own `descriptor` module, so the
+/// registry symbols that prove the tie live one file down. Reading only the named file made that
+/// row green on a single `//!` line and red as soon as comments were stripped from both sides —
+/// the row was never wrong, the reading was.
+fn writer_module_source(writer: &str) -> String {
+    let root = workspace_root();
+    let path = root.join(writer);
+    let mut out = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {writer}: {e}"));
+    let head = strip_comments(&out);
+    let test_only: BTreeSet<String> = test_mod_declarations(&head).into_iter().collect();
+    for name in declared_modules(&head) {
+        if test_only.contains(&name) {
+            continue;
+        }
+        for file in module_files(&path, &name) {
+            if let Ok(src) = std::fs::read_to_string(&file) {
+                out.push('\n');
+                out.push_str(&src);
+            }
+        }
+    }
+    out
+}
+
+/// Source with every `//` comment removed, line by line.
+fn strip_comments(src: &str) -> String {
+    src.lines()
+        .map(code_before_comment)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Published names too generic to tie a writer to a document.
+///
+/// Identifier boundaries stop `SCHEMA` matching `INIT_REPORT_SCHEMA`. They do not stop `new`
+/// matching `Sha256::new()`: `assay-runner-schema`'s health module publishes `pub fn new`, and the
+/// observation-health writer calls `Sha256::new()`, so that row would stay tied with every
+/// meaningful symbol removed.
+const TOO_GENERIC: &[&str] = &[
+    "new",
+    "default",
+    "from",
+    "try_from",
+    "into",
+    "parse",
+    "fmt",
+    "next",
+    "len",
+    "is_empty",
+    "build",
+    "builder",
+    "as_str",
+    "to_string",
+    "get",
+    "insert",
+    "push",
+    "run",
+];
+
+/// Whether `src` uses `token` as a whole identifier rather than as a substring of a longer one.
+///
+/// `contains` was wrong here and a mutation caught it: `mcp/preflight.rs` declares its identity as
+/// `const SCHEMA`, and `init_report.rs` contains `INIT_REPORT_SCHEMA`, so binding the preflight
+/// document to the init writer passed. A substring match knows nothing about identifiers — the same
+/// defect that made a `git grep` for a constant look empty earlier in this file's history.
+fn mentions_token(src: &str, token: &str) -> bool {
+    let mut from = 0usize;
+    while let Some(rel) = src[from..].find(token) {
+        let start = from + rel;
+        let end = start + token.len();
+        let before_ok = start == 0
+            || !src.as_bytes()[start - 1].is_ascii_alphanumeric()
+                && src.as_bytes()[start - 1] != b'_';
+        let after_ok = end >= src.len()
+            || !src.as_bytes()[end].is_ascii_alphanumeric() && src.as_bytes()[end] != b'_';
+        if before_ok && after_ok {
+            return true;
+        }
+        from = start + token.len();
+    }
+    false
+}
+
+/// `pub` item names declared in a file: consts, structs, enums, type aliases and functions.
+fn published_symbols(path: &str) -> BTreeSet<String> {
+    let src = read(path);
+    let mut names = BTreeSet::new();
+    for line in src.lines() {
+        let line = code_before_comment(line).trim();
+        // `pub(crate)` and `pub(super)` publish to the writer just as well as bare `pub`; the
+        // schema-report constants are `pub(crate)` and this parser saw none of them at first.
+        let Some(rest) = line.strip_prefix("pub") else {
+            continue;
+        };
+        let rest = match rest.strip_prefix('(') {
+            Some(restricted) => match restricted.split_once(')') {
+                Some((_, after)) => after,
+                None => continue,
+            },
+            None => rest,
+        };
+        let Some(rest) = rest.strip_prefix(' ') else {
+            continue;
+        };
+        let rest = rest
+            .strip_prefix("const ")
+            .or_else(|| rest.strip_prefix("struct "))
+            .or_else(|| rest.strip_prefix("enum "))
+            .or_else(|| rest.strip_prefix("type "))
+            .or_else(|| rest.strip_prefix("fn "));
+        let Some(rest) = rest else { continue };
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        if !name.is_empty() && !TOO_GENERIC.contains(&name.as_str()) {
+            names.insert(name);
+        }
+    }
+    names
 }
