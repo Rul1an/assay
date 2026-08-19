@@ -10,6 +10,7 @@ pub(crate) mod ci;
 pub mod config_path;
 pub mod coverage;
 pub mod demo;
+pub mod describe;
 pub mod discover;
 pub mod doctor;
 pub mod events;

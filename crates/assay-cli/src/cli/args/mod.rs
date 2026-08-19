@@ -4,6 +4,7 @@ pub mod baseline;
 pub mod bundle;
 pub mod common;
 pub mod coverage;
+pub mod describe;
 pub mod evidence;
 pub mod import;
 pub mod mcp;
@@ -21,6 +22,7 @@ pub use baseline::*;
 pub use bundle::*;
 pub use common::*;
 pub use coverage::*;
+pub use describe::*;
 pub use evidence::*;
 pub use import::*;
 pub use mcp::*;
@@ -115,6 +117,8 @@ pub enum Command {
     Registry(RegistryArgs),
     /// Print Assay version information
     Version,
+    /// Enumerate the CLI contract at a command path
+    Describe(DescribeArgs),
     /// Validate, format, and migrate policies
     Policy(PolicyArgs),
     /// Runtime eBPF Monitor (Linux only)

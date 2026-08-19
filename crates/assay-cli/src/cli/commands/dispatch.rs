@@ -51,5 +51,6 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(EXIT_SUCCESS)
         }
+        Command::Describe(args) => super::describe::run(args),
     }
 }
