@@ -12,6 +12,14 @@ static RID: AtomicU64 = AtomicU64::new(1);
 const INVALID_INITIALIZE_PARAMS: &str =
     "Invalid initialize params: expected the required legacy MCP fields";
 
+/// The messages the fail-closed tool path puts on the wire.
+///
+/// Named so the claims-boundary guard reads the value that ships. Inline literals at the call
+/// sites would have left the guard asserting over its own copies, which is a neighbouring
+/// property: the shipped message could gain a status claim while the test stayed green.
+const TOOL_EXECUTION_FAILED: &str = "Tool execution failed";
+const TOOL_EXECUTION_TIMED_OUT: &str = "Tool execution timed out";
+
 fn fail_closed_tool_result(code: &'static str, message: &'static str) -> Result<Value> {
     tools::ToolError::new(code, message).result()
 }
@@ -373,7 +381,7 @@ impl Server {
                                     duration_ms = start.elapsed().as_millis() as u64,
                                     code = "E_INTERNAL"
                                 );
-                                fail_closed_tool_result("E_INTERNAL", "Tool execution failed")?
+                                fail_closed_tool_result("E_INTERNAL", TOOL_EXECUTION_FAILED)?
                             }
                             Err(_) => {
                                 let dur = start.elapsed().as_millis() as u64;
@@ -384,7 +392,7 @@ impl Server {
                                    duration_ms=dur,
                                    code="E_TIMEOUT"
                                 );
-                                fail_closed_tool_result("E_TIMEOUT", "Tool execution timed out")?
+                                fail_closed_tool_result("E_TIMEOUT", TOOL_EXECUTION_TIMED_OUT)?
                             }
                         };
 
@@ -476,7 +484,10 @@ impl Server {
 
 #[cfg(test)]
 mod claims_boundary_tests {
-    use super::{classify_tool_result, initialize_result, LegacyProtocolVersion};
+    use super::{
+        classify_tool_result, fail_closed_tool_result, initialize_result, LegacyProtocolVersion,
+        TOOL_EXECUTION_FAILED, TOOL_EXECUTION_TIMED_OUT,
+    };
 
     #[test]
     fn tool_result_classification_separates_decision_from_mcp_error() {
@@ -502,29 +513,79 @@ mod claims_boundary_tests {
         }
     }
 
-    /// ADR-042 stop list, ADR-043 §2. The handshake must not assert a status the server
-    /// cannot substantiate. A denylist over the serialized response catches a claim
-    /// reintroduced anywhere in the object under any nesting, but it only knows the words
-    /// it was given, so it is the backstop here and not the primary control. The primary
-    /// control is `initialize_result_pins_every_value`, which pins the leaves.
+    /// ADR-043 §2's closed set of forbidden public wire status claims, in one place.
+    ///
+    /// It lived inline in the `initialize` test, which made it the stop list for exactly one
+    /// response: adding a word covered that response and nothing else, and a second generated
+    /// surface could only be covered by writing a second list free to drift from this one
+    /// (#2232). One list, one meaning — adding a word here now covers every surface that calls
+    /// [`assert_no_unearned_status`].
+    const UNEARNED_STATUS_WORDS: [&str; 8] = [
+        "certified",
+        "certification",
+        "partner",
+        "compliant",
+        "compliance",
+        "approved",
+        "endorsed",
+        "accredited",
+    ];
+
+    /// Assert that one Assay-originated generated response asserts no unearned status.
+    ///
+    /// A denylist over the serialized value catches a claim reintroduced anywhere in the object
+    /// under any nesting, but it only knows the words it was given. It is a backstop, never the
+    /// primary control: a claim can still live in a *value* on a permitted path, which is what
+    /// `initialize_result_pins_every_value` exists to catch for the handshake. Applying this to a
+    /// surface is therefore a floor, not a certificate that the surface is fully pinned.
+    fn assert_no_unearned_status(label: &str, value: &serde_json::Value) {
+        let wire = serde_json::to_string(value).expect("serializable");
+        let haystack = wire.to_ascii_lowercase();
+        for forbidden in UNEARNED_STATUS_WORDS {
+            assert!(
+                !haystack.contains(forbidden),
+                "{label} asserts `{forbidden}` without a checkable basis: {wire}"
+            );
+        }
+    }
+
+    /// The control for [`assert_no_unearned_status`]. A guard never shown to reject anything
+    /// proves nothing, and this one is a denylist, so the thing worth pinning is that it actually
+    /// fires — including on a word nested below the top level, which is the shape it exists for.
+    #[test]
+    #[should_panic(expected = "asserts `certified`")]
+    fn unearned_status_rule_rejects_a_nested_claim() {
+        assert_no_unearned_status(
+            "control",
+            &serde_json::json!({"serverInfo": {"name": "assay", "status": "certified"}}),
+        );
+    }
+
+    /// ADR-042 stop list, ADR-043 §2. The handshake must not assert a status the server cannot
+    /// substantiate. Every accepted protocol version is checked, not just `LATEST`: each builds
+    /// its own response, so checking one left the others unread.
     #[test]
     fn initialize_result_asserts_no_unearned_status() {
-        let wire = serde_json::to_string(&initialize_result(LegacyProtocolVersion::LATEST))
-            .expect("serializable");
-        for forbidden in [
-            "certified",
-            "certification",
-            "partner",
-            "compliant",
-            "compliance",
-            "approved",
-            "endorsed",
-            "accredited",
+        for version in [
+            LegacyProtocolVersion::V2024_11_05,
+            LegacyProtocolVersion::V2025_06_18,
+            LegacyProtocolVersion::V2025_11_25,
         ] {
-            assert!(
-                !wire.to_ascii_lowercase().contains(forbidden),
-                "initialize result asserts `{forbidden}` without a checkable basis: {wire}"
-            );
+            assert_no_unearned_status("initialize result", &initialize_result(version));
+        }
+    }
+
+    /// The deny path is Assay's own words reaching a client, and it was not covered by any claims
+    /// assertion. Both call sites are checked by their real arguments rather than by a
+    /// constructed sample, so the test reads what ships.
+    #[test]
+    fn fail_closed_tool_result_asserts_no_unearned_status() {
+        for (code, message) in [
+            ("E_INTERNAL", TOOL_EXECUTION_FAILED),
+            ("E_TIMEOUT", TOOL_EXECUTION_TIMED_OUT),
+        ] {
+            let value = fail_closed_tool_result(code, message).expect("fail-closed result");
+            assert_no_unearned_status("fail-closed tool result", &value);
         }
     }
 
