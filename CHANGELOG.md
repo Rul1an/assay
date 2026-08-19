@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay describe [path...]` walks the clap command tree so a caller can ask
+  for the top-level surface and descend. Node identities are the existing
+  shipping constants, not a second registry. Global `--quiet` /
+  `--non-interactive` stay absent: `NO_COLOR` is already honoured and `watch`
+  is the only interactive command (#2178).
+
 ### Changed
 - `assay_check_sequence` answers the sequence-rule language by calling
   `assay_core::sequence_eval` and mapping the record into its published JSON.

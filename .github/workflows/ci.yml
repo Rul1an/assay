@@ -173,6 +173,7 @@ jobs:
           export PATH="${HOME}/.local/bin:${PATH}"
           bash scripts/ci/test-evidence-vocabulary.sh
           python3 scripts/ci/check-evidence-vocabulary.py
+          bash scripts/ci/test-cli-describe-contract.sh
 
   # --- Dependency security (advisories, licenses, sources) ---
   deps-security:
