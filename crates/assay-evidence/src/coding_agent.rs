@@ -34,6 +34,10 @@ pub enum CodingAgentNetworkPolicy {
 }
 
 /// Coverage state for a coding-agent evidence surface.
+///
+/// Session findings key on this same enum for the evaluated call sequence
+/// ([`session_finding_coverage_state`]): `Partial` is "watched for part
+/// of the run", which is the fidelity axis, not a second vocabulary.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CodingAgentCoverageState {
@@ -275,6 +279,25 @@ pub fn coding_agent_claim_decision(
         gap: None,
         rule: "observed_coverage_allows_claim".to_string(),
     }
+}
+
+/// Coverage a session finding declared for the evaluated call sequence.
+///
+/// [`crate::types::PayloadSessionFinding::coverage`] is optional. Absence and any
+/// string this build does not recognise are [`CodingAgentCoverageState::Partial`]:
+/// the most restrictive value that still admits a sequence was evaluated, rather
+/// than a faithful trace. A consumer asking whether something did not happen then
+/// hits [`CodingAgentCoverageGap::PartialOnly`] through [`coding_agent_claim_decision`]
+/// — the existing rule, not a second one.
+///
+/// `Partial` here is not `TraceExtent::Partial`. Extent is whether more calls may
+/// arrive. This is whether the sequence already in hand is the whole record.
+pub fn session_finding_coverage_state(declared: Option<&str>) -> CodingAgentCoverageState {
+    let Some(raw) = declared else {
+        return CodingAgentCoverageState::Partial;
+    };
+    serde_json::from_value(serde_json::Value::String(raw.to_owned()))
+        .unwrap_or(CodingAgentCoverageState::Partial)
 }
 
 /// Per-dimension decisions for one evidence payload, for one kind of claim.

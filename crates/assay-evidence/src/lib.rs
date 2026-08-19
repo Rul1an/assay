@@ -23,12 +23,12 @@ pub use bundle::{
 };
 pub use coding_agent::{
     coding_agent_claim_ceiling, coding_agent_claim_decision, coding_agent_evidence_event,
-    coding_agent_weakest_ceiling, CodingAgentClaimCeiling, CodingAgentClaimDecision,
-    CodingAgentClaimKind, CodingAgentCoverage, CodingAgentCoverageGap, CodingAgentCoverageReport,
-    CodingAgentCoverageState, CodingAgentDeclaredScope, CodingAgentEvidencePayload,
-    CodingAgentGateDecision, CodingAgentNetworkPolicy, CodingAgentObservedEffects,
-    CodingAgentSourceClass, CodingAgentWeakestCeiling, CODING_AGENT_EVIDENCE_EVENT_TYPE,
-    CODING_AGENT_EVIDENCE_SOURCE,
+    coding_agent_weakest_ceiling, session_finding_coverage_state, CodingAgentClaimCeiling,
+    CodingAgentClaimDecision, CodingAgentClaimKind, CodingAgentCoverage, CodingAgentCoverageGap,
+    CodingAgentCoverageReport, CodingAgentCoverageState, CodingAgentDeclaredScope,
+    CodingAgentEvidencePayload, CodingAgentGateDecision, CodingAgentNetworkPolicy,
+    CodingAgentObservedEffects, CodingAgentSourceClass, CodingAgentWeakestCeiling,
+    CODING_AGENT_EVIDENCE_EVENT_TYPE, CODING_AGENT_EVIDENCE_SOURCE,
 };
 pub use denial_marker::{
     bindable_denial_marker, classify_denial_marker, BindableDenialMarker, DenialMarkerVersion,

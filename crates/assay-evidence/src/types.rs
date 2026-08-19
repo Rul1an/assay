@@ -442,7 +442,24 @@ pub struct PayloadSessionFinding {
     /// The strings are `assay_core::sequence_eval::TraceExtent::label()`, added with this ADR
     /// because the enum had no rendering before it, and pinned by the same parity test as
     /// `outcome`.
+    ///
+    /// This is a temporal claim only. It makes **no fidelity claim**: `complete` must not be
+    /// read as "nothing is missing". A compacted session can be entirely finished, so the run
+    /// being over and the evaluated sequence being a faithful record are orthogonal. Coverage
+    /// of the sequence is [`Self::coverage`].
     pub extent: String,
+    /// Producer-declared coverage of the evaluated call sequence.
+    ///
+    /// This is `CodingAgentCoverageState`'s wire spelling, not a second vocabulary. The
+    /// existing claim gate already maps `partial` plus an absence claim to
+    /// `CodingAgentCoverageGap::PartialOnly` ("silence over the rest is not a fact"). A
+    /// session finding keys on that rule rather than inventing a fidelity enum.
+    ///
+    /// Optional. Absence and an unrecognised value read as `partial` — the most restrictive
+    /// value that still admits a sequence was evaluated — rather than as a faithful trace.
+    /// Orthogonal to [`Self::extent`]: a finished run can still be `partial` here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<String>,
     /// Why, in the producer's words. Present for `violated` and `not_exercised`; a held rule needs
     /// no prose, and inventing one would invite readers to parse it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -483,6 +500,7 @@ impl PayloadSessionFinding {
             outcome: outcome.into(),
             spanned,
             extent: extent.into(),
+            coverage: None,
             reason,
         }
     }

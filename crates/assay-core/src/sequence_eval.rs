@@ -42,9 +42,15 @@ use crate::model::{CallSelector, Policy, SequenceRule};
 /// invisible in the rules and the trace -- it is only in who is asking. So the caller states it
 /// rather than the evaluator assuming it. Porting the proxy's reading into the metric silently is
 /// what made completed runs with an unmet deadline report as undecided.
+///
+/// This is a temporal claim only. It makes **no fidelity claim** about the sequence already
+/// in hand. `Complete` must not be read as "nothing is missing": a compacted session can be
+/// entirely finished, so the run being over and the record being faithful are orthogonal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TraceExtent {
     /// The run is over. An unmet deadline is a violation, because nothing further is coming.
+    ///
+    /// Not a claim that the evaluated sequence is a faithful record of the session.
     Complete,
     /// More calls may follow. An unmet deadline whose window is still open has not decided.
     Partial,
@@ -58,6 +64,9 @@ impl TraceExtent {
     /// finished run are different claims. Before that this enum had no rendering at all, so the
     /// evidence payload would have invented its spellings -- worse than duplicating a vocabulary,
     /// because there is no source to drift from. Like `RuleOutcome::label`, this is an interface.
+    ///
+    /// `complete` still makes no fidelity claim. A consumer that needs to know whether the
+    /// evaluated sequence is the whole record keys on coverage, not on this label.
     pub const fn label(self) -> &'static str {
         match self {
             Self::Complete => "complete",
