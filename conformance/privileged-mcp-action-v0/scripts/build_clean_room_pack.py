@@ -57,6 +57,27 @@ results. Verify the release attestation separately before relying on pack proven
 Start with `canonicalization/`. A canonicalizer that is wrong makes every later
 result uninterpretable, and it is the first thing a cross-language attempt has
 been observed to fail on. Read `canonicalization/README.md` before the spec.
+
+## What matching all fourteen cases establishes
+
+Less than the profile, and you should know the size of it before you start.
+
+These fourteen cases can distinguish an implementation on **at most five** of the
+profile's rules, and even those only at the points the cases probe. **Twenty-two
+rules that `spec.md` promises are not discriminated by any case in this pack**, so
+an implementation that omits them matches all fourteen expected outcomes anyway.
+That was measured by deleting each rule from a reference implementation and
+checking whether these cases noticed; most do not.
+
+Nothing here says which case probes which rule, because that would hand you the
+answers this pack exists to withhold. The full measurement, including the
+per-case attributions, is published as `ERRATA.md` in the source repository and
+is safe to read only after your implementation is frozen.
+
+Two consequences for your report. A match establishes agreement on at most those
+five rules and not on the profile, so do not write more than that and neither
+will we. And if you implemented any of the twenty-two anyway, say which: no case
+here can extract that, and it is the only evidence those rules can get.
 """
 
 

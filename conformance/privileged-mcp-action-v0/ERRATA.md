@@ -175,6 +175,25 @@ left out is the one with the contested history.
    and findings are not on this corpus's normative comparison surface. See rule 14 above for the
    inconsistency this creates.
 
+## Reaching the person who actually does the work
+
+This file is in the repository. The invited implementer walks the clean-room path
+and receives a tarball, and **`candidate.4` does not contain it**. An erratum that
+does not travel with the bytes a stranger downloads is a record for us rather than
+a notice to them, which is the difference between the IETF putting errata on an
+RFC's page and a maintainer noting a defect in a commit message.
+
+The whole file cannot travel with the pack. It names which case isolates which
+rule, and the pack deliberately omits semantic case names, expected outcomes and
+the generator. Shipping it would hand over the answers the pack exists to withhold.
+
+So the pack's own README now carries the **scope statement without the
+attributions**: at most five rules distinguishable, twenty-two not discriminated,
+do not claim more, and say which of the twenty-two you implemented anyway. That
+lands in the next pack built from this repository. `candidate.4` is already
+released and is not modified; reaching the people holding it is a decision about
+[#1840](https://github.com/Rul1an/assay/issues/1840) rather than about this file.
+
 ## Reading this before an implementation freeze
 
 **Permitted, and disclose it.** This file names which rule each vector isolates, which is slightly more
