@@ -35,6 +35,8 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import os
+import signal
 import subprocess
 import tempfile
 import time
@@ -69,7 +71,21 @@ def _run_capped(cmd: list[str], cwd: Path, timeout: int) -> subprocess.Completed
     OUTPUT_CAP_BYTES are ever read into memory.
     """
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
-        proc = subprocess.Popen(cmd, cwd=str(cwd), stdout=out, stderr=err)
+        # A descendant that inherits stdout/stderr keeps writing after proc.kill()
+        # and walks straight through the ceiling, so the child leads its own session
+        # and the whole group is stopped and reaped.
+        proc = subprocess.Popen(cmd, cwd=str(cwd), stdout=out, stderr=err,
+                                start_new_session=True)
+
+        def _kill_tree() -> None:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                proc.kill()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
         deadline = time.monotonic() + timeout
         try:
             while True:
@@ -79,17 +95,19 @@ def _run_capped(cmd: list[str], cwd: Path, timeout: int) -> subprocess.Completed
                 except subprocess.TimeoutExpired:
                     pass
                 if out.tell() + err.tell() > OUTPUT_CAP_BYTES:
-                    proc.kill(); proc.wait()
+                    _kill_tree()
                     raise _OutputTooLarge()
                 if time.monotonic() > deadline:
-                    proc.kill(); proc.wait()
+                    _kill_tree()
                     raise subprocess.TimeoutExpired(cmd, timeout)
         finally:
-            if proc.poll() is None:
-                proc.kill(); proc.wait()
+            # Reap the group even on the clean path: the leader can exit while a
+            # descendant it spawned is still holding the inherited handles.
+            _kill_tree()
         if out.tell() + err.tell() > OUTPUT_CAP_BYTES:
             raise _OutputTooLarge()
-        out.seek(0); err.seek(0)
+        out.seek(0)
+        err.seek(0)
         return subprocess.CompletedProcess(
             cmd, proc.returncode,
             out.read(OUTPUT_CAP_BYTES).decode("utf-8", "replace"),
@@ -116,6 +134,16 @@ def _stdlib_jsonrpc(suite: dict) -> tuple[str, str]:
         report = json.loads(p.stdout)
     except json.JSONDecodeError:
         report = None
+
+    # An unusable report is an execution condition, not a disagreement. A list, an
+    # object with no status, or a non-string status all mean the run produced nothing
+    # this runner can compare -- grading that `false` would report a checked
+    # disagreement that never happened.
+    if report is not None and not isinstance(report, dict):
+        return UNPROVED, "report is %s, not an object" % type(report).__name__
+    if report is not None and not isinstance(report.get("status"), str):
+        return UNPROVED, ("report carries no string `status` (got %r), so there is nothing "
+                          "to compare" % (report.get("status"),))
 
     if report is None:
         if p.returncode != 0:

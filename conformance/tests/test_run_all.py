@@ -16,6 +16,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -95,6 +96,57 @@ class StdlibClassification(unittest.TestCase):
         g, d = run_all._stdlib_jsonrpc(_fake_suite(path="does/not/exist"))
         self.assertEqual(g, run_all.UNPROVED)
         self.assertIn("absent", d)
+
+
+class UnusableReports(unittest.TestCase):
+    """A report this runner cannot compare is `could not check`, never a disagreement."""
+
+    def _run(self, child):
+        orig, run_all._run_capped = run_all._run_capped, child
+        try:
+            return run_all._stdlib_jsonrpc(_fake_suite())
+        finally:
+            run_all._run_capped = orig
+
+    def test_a_json_array_is_unproved_and_does_not_crash(self):
+        # Before the fix this raised AttributeError and took the whole run with it.
+        g, d = self._run(_Child("[]"))
+        self.assertEqual(g, run_all.UNPROVED)
+        self.assertIn("not an object", d)
+
+    def test_an_object_with_no_status_is_unproved_not_false(self):
+        g, d = self._run(_Child("{}"))
+        self.assertEqual(g, run_all.UNPROVED)
+        self.assertIn("no string", d)
+
+    def test_a_non_string_status_is_unproved_not_false(self):
+        g, _ = self._run(_Child('{"status": 5}'))
+        self.assertEqual(g, run_all.UNPROVED)
+
+    def test_a_string_status_that_disagrees_is_still_false(self):
+        # The guard must not swallow a genuine disagreement.
+        g, _ = self._run(_Child('{"status": "no_contradiction"}'))
+        self.assertEqual(g, run_all.FALSE)
+
+
+class ProcessTreeContainment(unittest.TestCase):
+    def test_a_descendant_holding_the_pipes_is_reaped(self):
+        # A forked descendant inherits stdout and can keep writing past the ceiling
+        # after the direct child is killed, so the whole group must be stopped.
+        script = (
+            "import subprocess, sys, time\n"
+            "subprocess.Popen([sys.executable, '-c',"
+            " \"import sys,time\\nfor _ in range(200):\\n sys.stdout.write('x'*4096)\\n"
+            " sys.stdout.flush()\\n time.sleep(0.05)\"])\n"
+            "time.sleep(0.2)\n"
+        )
+        with tempfile.TemporaryDirectory() as d:
+            start = time.monotonic()
+            p = run_all._run_capped([sys.executable, "-c", script], Path(d), timeout=20)
+            elapsed = time.monotonic() - start
+        # It must return promptly rather than waiting on the descendant's lifetime.
+        self.assertLess(elapsed, 15, "runner did not reap the descendant")
+        self.assertIsNotNone(p)
 
 
 class CargoClassification(unittest.TestCase):
