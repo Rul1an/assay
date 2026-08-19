@@ -133,6 +133,67 @@ class ControlMutants(unittest.TestCase):
         self.assertIn("control cannot be out_of_scope", str(cm.exception))
 
 
+class KnownHoles(unittest.TestCase):
+    """An acknowledged hole is pinned to one digest and expires with it."""
+
+    def _mf(self, tmp: Path, digest_in_file, holes_for, extra_mutants=None):
+        (tmp / "digest.json").write_text(json.dumps({"corpus_digest": digest_in_file}))
+        muts = [dict(SURVIVOR, label="unexercised rule")] + (extra_mutants or [])
+        p = _manifest(tmp, {"a": muts}, raw={
+            "corpus_digest_file": "digest.json", "corpus_digest_key": "corpus_digest",
+            "known_holes": {holes_for: [{"label": "unexercised rule",
+                                         "reason": "no vector reaches it",
+                                         "recorded": "2026-08-19"}]}})
+        return p
+
+    def test_a_hole_acknowledged_for_the_present_digest_is_not_a_survivor(self):
+        with tempfile.TemporaryDirectory() as d:
+            rep = ca.run(self._mf(Path(d), "sha256:aaa", "sha256:aaa", [KILLABLE]))
+        self.assertEqual(rep["survived"], 0)
+        self.assertEqual(rep["known_holes"], 1)
+        self.assertIn("known-hole", [r["verdict"] for r in rep["mutants"]])
+
+    def test_the_acknowledgement_expires_when_the_corpus_moves(self):
+        # The rule that stops this being an escape hatch: an acknowledgement is a
+        # statement about ONE corpus, so a corpus that changes loses it.
+        with tempfile.TemporaryDirectory() as d:
+            rep = ca.run(self._mf(Path(d), "sha256:NEW", "sha256:OLD", [KILLABLE]))
+        self.assertEqual(rep["known_holes"], 0)
+        self.assertEqual(rep["survived"], 1, "the hole must reappear as a survivor")
+        self.assertFalse(rep["adequate"])
+
+    def test_an_acknowledgement_for_a_rule_now_exercised_is_flagged(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            (tmp / "digest.json").write_text(json.dumps({"corpus_digest": "sha256:aaa"}))
+            p = _manifest(tmp, {"a": [dict(KILLABLE, label="now exercised")]}, raw={
+                "corpus_digest_file": "digest.json", "corpus_digest_key": "corpus_digest",
+                "known_holes": {"sha256:aaa": [{"label": "now exercised", "reason": "x",
+                                                "recorded": "2026-08-19"}]}})
+            rep = ca.run(p)
+        self.assertFalse(rep["adequate"])
+        self.assertTrue(any("now exercises" in f for f in rep["failures"]), rep["failures"])
+
+    def test_a_hole_without_a_reason_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            (tmp / "digest.json").write_text(json.dumps({"corpus_digest": "sha256:aaa"}))
+            p = _manifest(tmp, {"a": [KILLABLE]}, raw={
+                "corpus_digest_file": "digest.json", "corpus_digest_key": "corpus_digest",
+                "known_holes": {"sha256:aaa": [{"label": "x", "reason": " ",
+                                                "recorded": "2026-08-19"}]}})
+            with self.assertRaises(ca.ManifestError) as cm:
+                ca.load_manifest(p)
+        self.assertIn("stated reason", str(cm.exception))
+
+    def test_an_all_holes_manifest_reports_no_result_rather_than_100_percent(self):
+        with tempfile.TemporaryDirectory() as d:
+            rep = ca.run(self._mf(Path(d), "sha256:aaa", "sha256:aaa"))
+        self.assertIsNone(rep["score_percent"], "an empty denominator is not 100%")
+        self.assertFalse(rep["adequate"])
+        self.assertTrue(any("nothing was measured" in f for f in rep["failures"]))
+
+
 class Guards(unittest.TestCase):
     def test_a_group_in_the_corpus_with_no_mutants_is_a_hard_failure(self):
         v = {"vectors": VECTORS["vectors"] + [

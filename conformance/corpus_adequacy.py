@@ -117,6 +117,22 @@ def load_manifest(path: Path) -> dict:
     m.setdefault("entrypoint_args",
                  [k for k in (m["group_key"], m["inputs_key"]) if k is not None])
     m.setdefault("default_group", "all")
+    m.setdefault("known_holes", {})
+    m["_corpus_digest"] = None
+    if m["known_holes"]:
+        for key in ("corpus_digest_file", "corpus_digest_key"):
+            _req(m, key, "manifest (known_holes declared)")
+        dp = (base / m["corpus_digest_file"]).resolve()
+        if not dp.is_file():
+            raise ManifestError("corpus_digest_file not found: %s" % dp)
+        m["_corpus_digest"] = json.loads(dp.read_text(encoding="utf-8"))[m["corpus_digest_key"]]
+        for digest, entries in m["known_holes"].items():
+            for i, e in enumerate(entries):
+                for key in ("label", "reason", "recorded"):
+                    _req(e, key, "known_holes[%s][%d]" % (digest, i))
+                if not str(e["reason"]).strip():
+                    raise ManifestError("known_holes[%s][%d] %r: a hole needs a stated reason"
+                                        % (digest, i, e["label"]))
     m.setdefault("runner", "module")
     if m["runner"] not in ("module", "process"):
         raise ManifestError("runner must be module or process, got %r" % m["runner"])
@@ -182,6 +198,18 @@ def _load_module(source: str, tag: str, tmp: Path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _acknowledged_holes(m: dict) -> dict:
+    """Holes acknowledged against the corpus digest that is actually present.
+
+    Pinned deliberately. An acknowledgement is a statement about ONE corpus, so a
+    corpus that moves loses every acknowledgement and the holes reappear as
+    survivors. Without that, this becomes the escape hatch out_of_scope nearly was.
+    """
+    if not m.get("_corpus_digest"):
+        return {}
+    return {e["label"]: e for e in m["known_holes"].get(m["_corpus_digest"], [])}
 
 
 def _group_of(v: dict, m: dict) -> str:
@@ -295,7 +323,12 @@ def _run_process(m: dict, manifest_path: Path) -> dict:
     if not any(mut.get("control") for muts in m["mutants"].values() for mut in muts):
         failures.append("no control mutant declared. Without one, a run of all-survivors "
                         "cannot be told apart from a harness that detects nothing")
+    acknowledged = _acknowledged_holes(m)
+    stale = set(acknowledged) - {mu["label"] for ms in m["mutants"].values() for mu in ms}
+    if stale:
+        failures.append("known_holes name mutants that do not exist: %s" % sorted(stale))
     results, killed, survived, equivalent, out_of_scope, unproved = [], 0, 0, 0, 0, 0
+    known_holes = 0
     guard = _SourceGuard(m["_source_paths"])
     try:
         ok, detail = _build(m)
@@ -385,6 +418,17 @@ def _run_process(m: dict, manifest_path: Path) -> dict:
                                     "verdict": "unexercised", "scope": scope, "moved": 0,
                                     "how": "out of scope: %s" % mut["reason"]})
                     out_of_scope += 1
+                elif mut["label"] in acknowledged:
+                    ack = acknowledged[mut["label"]]
+                    # A KNOWN HOLE is not a scope statement. The corpus does claim this
+                    # rule, the rule is genuinely unexercised, and that fact is recorded
+                    # against ONE digest rather than fixed today. It stays loud.
+                    results.append({"group": group, "label": mut["label"],
+                                    "verdict": "known-hole", "scope": scope, "moved": 0,
+                                    "how": "KNOWN HOLE against %s, recorded %s: %s"
+                                           % (m["_corpus_digest"][:19], ack["recorded"],
+                                              ack["reason"])})
+                    known_holes += 1
                 else:
                     results.append({"group": group, "label": mut["label"], "verdict": "survived",
                                     "scope": scope, "moved": 0,
@@ -403,22 +447,36 @@ def _run_process(m: dict, manifest_path: Path) -> dict:
             failures.append("SOURCES NOT RESTORED: %s" % leaked)
         _build(m)   # leave the tree with a binary built from the real source
 
+    fixed = [r["label"] for r in results
+             if r["verdict"] == "killed" and r["label"] in acknowledged]
+    if fixed:
+        failures.append("known_holes still acknowledge rules the corpus now exercises: %s. "
+                        "Remove them; a stale acknowledgement hides a real regression later"
+                        % sorted(fixed))
     denom = killed + survived
-    score = 100.0 if denom == 0 else round(100.0 * killed / denom, 1)
+    # No denominator means no measurement. Printing 100% over zero is the same
+    # defect as excluding everything and printing 100%.
+    score = None if denom == 0 else round(100.0 * killed / denom, 1)
     if unproved:
         failures.append("%d mutant(s) never ran, so this corpus was not measured against them"
                         % unproved)
     if survived:
         failures.append("%d mutant(s) survived; the required score is 100%% of non-equivalent "
                         "mutants" % survived)
-    if denom == 0 and not failures:
-        failures.append("no non-equivalent mutants were scored, so no adequacy was measured")
+    if denom == 0:
+        failures.append(
+            "nothing was measured: every declared in-scope rule is either a known hole, "
+            "declared equivalent or out of scope. There is no adequacy result here"
+            if (known_holes or equivalent or out_of_scope)
+            else "no non-equivalent mutants were scored, so no adequacy was measured")
 
     return {"schema": "assay.corpus_adequacy.report.v0", "manifest": str(manifest_path),
             "runner": "process", "killed": killed, "survived": survived,
+            "known_holes": known_holes, "corpus_digest": m.get("_corpus_digest"),
             "equivalent": equivalent, "unexercised_out_of_scope": out_of_scope,
             "unproved": unproved,
-            "declared_total": killed + survived + equivalent + out_of_scope + unproved,
+            "declared_total": (killed + survived + equivalent + out_of_scope + unproved
+                               + known_holes),
             "out_of_scope_ratio": (None if denom == 0 else round(out_of_scope / denom, 2)),
             "score_percent": score,
             "score_means": ("percent of author-declared in-scope rules killed; NOT percent of "
@@ -447,8 +505,12 @@ def run(manifest_path: Path) -> dict:
     if stale:
         failures.append("mutants declared for groups not in the corpus: %s" % stale)
 
+    acknowledged = _acknowledged_holes(m)
+    stale = set(acknowledged) - {mu["label"] for ms in m["mutants"].values() for mu in ms}
+    if stale:
+        failures.append("known_holes name mutants that do not exist: %s" % sorted(stale))
     results, killed, survived, equivalent, out_of_scope = [], 0, 0, 0, 0
-    unproved = 0
+    unproved = known_holes = 0
     with tempfile.TemporaryDirectory() as raw:
         tmp = Path(raw)
         base_mod = _load_module(source, "base", tmp)
@@ -535,6 +597,14 @@ def run(manifest_path: Path) -> dict:
                         # "each with a stated reason" without showing one is an assertion.
                         "how": "out of scope: %s" % mut["reason"]})
                     out_of_scope += 1
+                elif mut["label"] in acknowledged:
+                    ack = acknowledged[mut["label"]]
+                    results.append({"group": group, "label": mut["label"],
+                                    "verdict": "known-hole", "scope": scope, "moved": 0,
+                                    "how": "KNOWN HOLE against %s, recorded %s: %s"
+                                           % (str(m["_corpus_digest"])[:19], ack["recorded"],
+                                              ack["reason"])})
+                    known_holes += 1
                 else:
                     results.append({
                         "group": group, "label": mut["label"], "verdict": "survived",
@@ -550,8 +620,14 @@ def run(manifest_path: Path) -> dict:
                                 "how": eq["reason"], "moved": 0})
                 equivalent += 1
 
+    fixed = [r["label"] for r in results
+             if r["verdict"] == "killed" and r["label"] in acknowledged]
+    if fixed:
+        failures.append("known_holes still acknowledge rules the corpus now exercises: %s. "
+                        "Remove them; a stale acknowledgement hides a real regression later"
+                        % sorted(fixed))
     denom = killed + survived
-    score = 100.0 if denom == 0 else round(100.0 * killed / denom, 1)
+    score = None if denom == 0 else round(100.0 * killed / denom, 1)
     if unproved:
         # Not a soft warning: an unproved mutant means the measurement did not happen,
         # and a score computed over the rest reports more than the run established.
@@ -560,13 +636,19 @@ def run(manifest_path: Path) -> dict:
     if survived:
         failures.append("%d mutant(s) survived; the required score is 100%% of non-equivalent "
                         "mutants" % survived)
-    if denom == 0 and not failures:
-        failures.append("no non-equivalent mutants were scored, so no adequacy was measured")
+    if denom == 0:
+        failures.append(
+            "nothing was measured: every declared in-scope rule is either a known hole, "
+            "declared equivalent or out of scope. There is no adequacy result here"
+            if (known_holes or equivalent or out_of_scope)
+            else "no non-equivalent mutants were scored, so no adequacy was measured")
 
     return {"schema": "assay.corpus_adequacy.report.v0", "manifest": str(manifest_path),
             "killed": killed, "survived": survived, "equivalent": equivalent,
+            "known_holes": known_holes, "corpus_digest": m.get("_corpus_digest"),
             "unexercised_out_of_scope": out_of_scope, "unproved": unproved,
-            "declared_total": killed + survived + equivalent + out_of_scope + unproved,
+            "declared_total": (killed + survived + equivalent + out_of_scope + unproved
+                               + known_holes),
             "out_of_scope_ratio": (None if (killed + survived) == 0
                                    else round(out_of_scope / (killed + survived), 2)),
             "score_means": ("percent of author-declared in-scope rules killed; NOT percent of the "
@@ -597,13 +679,17 @@ def main() -> int:
         # Never a bare percentage. A score reported without its denominator and its
         # exclusions is a percentage target wearing a different coat: an author can
         # exclude almost everything and still print 100%.
-        print("%d of %d DECLARED in-scope rules killed (%.1f%%). %d declared equivalent, "
+        pct = ("no result" if rep["score_percent"] is None
+               else "%.1f%%" % rep["score_percent"])
+        print("%d of %d DECLARED in-scope rules killed (%s). %d declared equivalent, "
               "%d declared out of scope, %d unproved. %d rules declared in total."
-              % (rep["killed"], rep["killed"] + rep["survived"], rep["score_percent"],
+              % (rep["killed"], rep["killed"] + rep["survived"], pct,
                  rep["equivalent"], rep["unexercised_out_of_scope"], rep["unproved"],
                  rep["declared_total"]))
-        print("This is %.1f%% of what the AUTHOR DECLARED, not of the rules the implementation "
-              "has. A rule nobody declared is invisible to this check." % rep["score_percent"])
+        if rep["score_percent"] is not None:
+            print("This is %.1f%% of what the AUTHOR DECLARED, not of the rules the "
+                  "implementation has. A rule nobody declared is invisible to this check."
+                  % rep["score_percent"])
         if rep["unexercised_out_of_scope"]:
             print("out of scope (%d, each with a stated reason): real gaps in what the corpus "
                   "covers, not holes in what it claims" % rep["unexercised_out_of_scope"])
@@ -613,6 +699,13 @@ def main() -> int:
                   % rep["out_of_scope_ratio"])
         for f in rep["failures"]:
             print("FAIL: %s" % f)
+        if rep.get("known_holes"):
+            # Louder than the pass line, and pinned. An acknowledgement that outlives
+            # the corpus it was made about is worse than no acknowledgement.
+            print("%d KNOWN HOLE(S) recorded against %s. These are rules the corpus DOES "
+                  "claim and does NOT exercise. The acknowledgement is pinned to that digest "
+                  "and expires the moment the corpus changes."
+                  % (rep["known_holes"], rep.get("corpus_digest")))
         if rep["adequate"]:
             if rep["out_of_scope_ratio"] is not None and rep["out_of_scope_ratio"] > 1.0:
                 # The closing line is what gets quoted. It may not read as unqualified
@@ -621,7 +714,9 @@ def main() -> int:
                       "(%d of %d rules declared here were excluded from it)"
                       % (rep["unexercised_out_of_scope"], rep["declared_total"]))
             else:
-                print("mutation-adequacy check passed: every non-equivalent mutant is killed")
+                suffix = (" -- but see the known holes above" if rep.get("known_holes") else "")
+                print("mutation-adequacy check passed: every non-equivalent mutant is killed"
+                      + suffix)
 
     return 0 if rep["adequate"] else 1
 
