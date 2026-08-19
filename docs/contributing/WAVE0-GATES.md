@@ -9,14 +9,13 @@ Wave 0 gates are the pre-refactor guardrails for:
 - feature drift
 - semver drift for public crates
 - placeholder/temporary panic regressions
-- unsafe-boundary creep (warn-only in first iteration)
 
-## Baseline SHA policy (semver checks)
+## Baseline policy (semver checks)
 
-- Source of truth: workflow env `WAVE0_SEMVER_BASELINE_SHA`.
-- Current pinned baseline: `9cc23b4c684be7cfd81f170c4f66d59903dd76eb`.
-- Reset cadence: update once at the start of a refactor sprint, not during a sprint.
-- Update rule: change SHA + mention the reset in PR description with reason.
+- Source of truth: the newest `v[0-9]*` release tag, resolved at job time
+  (`git tag --list 'v[0-9]*' --sort=-v:refname`).
+- There is no pinned baseline SHA. A missing tag fails the job.
+- The contract is `scripts/ci/test-semver-gate.sh`.
 
 ## Runtime budget targets
 
@@ -80,13 +79,16 @@ fires before tag, not at release time.
   - parser/crypto fuzz smoke with fixed runtime budget
   - optional Kani lane (opt-in)
 
-## Required checks recommendation
+## Required checks
 
-Configure branch protection to require:
+The live required contexts are named once in `CI-CONTRACT.md` at
+`Currently required live branch-protection contexts`, and
+`scripts/ci/check-required-contexts.py` pins that list to
+`.github/rulesets/main-required-ci-contexts.json`. Do not copy the names here.
 
-- `Wave 0 feature matrix`
-- `Wave 0 quality gates`
-- `Wave 0 semver checks (public crates)`
+Wave 0 job names (`Wave 0 feature matrix`, `Wave 0 quality gates`,
+`Wave 0 semver checks (public crates)`) are workflow jobs, not current
+required contexts.
 
 Wave 0 workflow always triggers on `pull_request`; heavy jobs are conditional to avoid docs-only blocking.
 
@@ -96,4 +98,3 @@ Before declaring Wave 0 stable:
 
 1. No new semver false-positive failures across 3 non-refactor PRs.
 2. Runtime stays within budget targets above.
-3. Unsafe preview remains non-blocking until monitor split isolates unsafe code.

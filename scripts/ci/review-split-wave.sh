@@ -25,15 +25,34 @@ if ! git rev-parse --verify "${base_ref}" >/dev/null 2>&1; then
   exit 1
 fi
 
-changed_files="$(
+# One inventory: committed-vs-base, staged, unstaged, and untracked. Omitting
+# dirty paths is how an out-of-scope file used to pass this gate silently.
+# Bound path count and UTF-8 bytes before unique-sort materialization.
+# The helper path is the sibling module only. Callers cannot replace it.
+if [[ -n "${REVIEW_SPLIT_CEILINGS+x}" ]]; then
+  echo "FAIL: REVIEW_SPLIT_CEILINGS cannot replace the canonical inventory helper" >&2
+  exit 1
+fi
+_REVIEW_SPLIT_CEILINGS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/resource_ceilings.py"
+if [[ ! -f "${_REVIEW_SPLIT_CEILINGS}" ]]; then
+  echo "FAIL: canonical inventory helper missing: ${_REVIEW_SPLIT_CEILINGS}" >&2
+  exit 1
+fi
+
+split_wave_changed_files() {
+  local inventory_base="$1"
   {
-    git diff --name-only "${base_ref}"...HEAD
+    git diff --name-only "${inventory_base}...HEAD"
     git diff --cached --name-only
-  } | sort -u
-)"
+    git diff --name-only
+    git ls-files --others --exclude-standard
+  } | sed '/^$/d' | python3 "${_REVIEW_SPLIT_CEILINGS}" inventory
+}
+
+changed_files="$(split_wave_changed_files "${base_ref}")"
 
 if [[ -z "${changed_files}" ]]; then
-  echo "FAIL: no tracked changes found against ${base_ref}" >&2
+  echo "FAIL: no changes found against ${base_ref}" >&2
   exit 1
 fi
 

@@ -353,35 +353,6 @@ jobs:
       - name: Clippy (deny placeholder paths)
         run: cargo clippy --workspace --all-targets -- -D warnings -D clippy::todo -D clippy::unimplemented
 
-      - name: Unsafe boundary preview (warn-only)
-        shell: bash
-        run: |
-          set -euo pipefail
-          all_unsafe="$(rg -n '\bunsafe\b' crates/assay-cli/src/cli/commands -g '*.rs' || true)"
-          outside_target="$(printf '%s\n' "$all_unsafe" | rg -v 'crates/assay-cli/src/cli/commands/monitor.rs' || true)"
-          {
-            echo "## Unsafe preview (warn-only)"
-            if [[ -z "$all_unsafe" ]]; then
-              echo "- No unsafe usage found under commands/"
-            else
-              echo "- Unsafe usage found under commands/:"
-              echo '```text'
-              printf '%s\n' "$all_unsafe"
-              echo '```'
-            fi
-            if [[ -n "$outside_target" ]]; then
-              echo "- Warning: unsafe outside monitor.rs detected (non-blocking in Wave 0):"
-              echo '```text'
-              printf '%s\n' "$outside_target"
-              echo '```'
-            else
-              echo "- Unsafe outside monitor.rs: none"
-            fi
-            echo ""
-            echo "### Wave 3 TODO"
-            echo "- Promote this preview to a blocking boundary gate: unsafe allowed only in the monitor syscall boundary module."
-          } >> "$GITHUB_STEP_SUMMARY"
-
   semver-public:
     name: Wave 0 semver checks (public crates)
     needs: detect-changes

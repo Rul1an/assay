@@ -570,6 +570,14 @@ repos:
         stages: [pre-push]
         pass_filenames: false
 
+      - id: ci-programme-truth
+        name: CI programme-truth contract
+        entry: bash -c 'bash scripts/ci/test-ci-programme-truth.sh && bash scripts/ci/test-review-split-wave.sh'
+        language: system
+        pass_filenames: false
+        stages: [pre-commit, pre-push]
+        files: ^(AGENTS\.md|docs/contributing/(WAVE0-GATES|REFACTOR-WAVE-STATUS)\.md|\.github/(workflows/(split-wave0-gates|kernel-matrix)\.yml|rulesets/main-required-ci-contexts\.json)|scripts/ci/(review-split-wave|test-ci-programme-truth|test-review-split-wave)\.sh|scripts/ci/lib/resource_ceilings\.py|\.pre-commit-config\.yaml)$
+
       - id: semver-gate-self-test
         name: Semver gate self-test
         entry: bash scripts/ci/test-semver-gate.sh
