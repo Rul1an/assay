@@ -27,7 +27,7 @@
   "outcome_from": [
     "bundle_integrity",
     "verdict",
-    "reason_code"
+    "claims"
   ],
   "vectors": "privileged-mcp-action-v0.vectors.json",
   "id_key": "vector_id",
@@ -95,6 +95,11 @@
         "replacement": "if obs_tool.is_some() && obs_tool == dec_tool {"
       },
       {
+        "label": "11 the code must be the v0 deny code",
+        "anchor": "(DENIED_CALL_OBSERVATION_V0, PROXY_DENIED_V0, PROXY_ORIGIN) => {",
+        "replacement": "(DENIED_CALL_OBSERVATION_V0, _, PROXY_ORIGIN) => {"
+      },
+      {
         "label": "CONTROL harness reachability on the verifier path",
         "anchor": ".filter(|obs| classify_denial_marker(obs) == Some(profile_version.marker_version()));",
         "replacement": ".filter(|_obs| false);",
@@ -113,7 +118,14 @@
         "recorded": "2026-08-19",
         "exercised_outside_corpus": "crates/assay-evidence/tests/denial_marker_classifier.rs::wrong_origin_is_inert",
         "corrected": "2026-08-19"
+      },
+      {
+        "label": "11 the code must be the v0 deny code",
+        "reason": "The SECOND leg of the same triple, found only because the first was published as a hole and someone asked what the other two do. v0 Stage 3 promises all three legs. Deleting the code conjunct leaves the 14-vector corpus test at 10 of 10 green, so no vector discriminates it. Cause is structural rather than an oversight in any one vector: gen_vectors.py:103 hard-codes the single marker shape {code: -32042, origin: assay-proxy} and is the only marker construction site, so no vector CAN vary either member. Corpus-only, like the origin leg: our tree does catch it -- deleting the conjunct fails crates/assay-evidence/tests/denial_marker_classifier.rs::cross_pair_v0_schema_v1_code_is_inert. Note the schema leg is not caught by the triple match either; bad-104 is decided earlier at Stage 2. Of the three legs the corpus discriminates NONE.",
+        "exercised_outside_corpus": "crates/assay-evidence/tests/denial_marker_classifier.rs::cross_pair_v0_schema_v1_code_is_inert",
+        "recorded": "2026-08-19"
       }
     ]
-  }
+  },
+  "_outcome_from_why": "The corpus declares its own comparison surface in MANIFEST.json: 'expected.bundle_integrity, expected.verdict and expected.claims are the normative comparison surface; first_failure_informative is this generator's own vocabulary and is informative only.' The first version of this manifest read [bundle_integrity, verdict, reason_code] -- the informative vocabulary, with the normative member omitted. That is weaker AND wider than the corpus at once. Measured consequence: a mutant flipping the Stage 4 (allow, bound) arm from refuted to confirmed moves ok-005's claim cell, so the CORPUS kills it, while the old surface did not see it and scored it a survivor. Wider, because reason_code separates bad-101 from bad-109 where the corpus does not."
 }
