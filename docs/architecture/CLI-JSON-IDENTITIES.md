@@ -93,6 +93,27 @@ revision, when this block was a bare list.
 
 <!-- machine-checked: not-cli-documents -->
 ```text
+assay.coding_agent.evidence_pack.v0 | declared in assay-evidence as a bundle pack schema; no CLI write opened
+assay.mandate.v1 | mandate event carried in evidence, not written by a command
+assay.mcp_manifest_observed.v0 | assay-mcp-server observation event inside a bundle
+assay.mcp_manifest_projection.v0 | assay-mcp-server projection event inside a bundle
+assay.mcp_tool_field.v0 | a field-level record nested in the manifest observation
+assay.provider_audit_record.v0 | assay-mcp-server audit record written to the audit log, not a command document
+assay.redaction_receipt.v0 | runner receipt inside an archive
+assay.runner.archive_manifest.v0 | runner archive manifest; #2552 owns archive integers and identities
+assay.runner.capability_surface.v0 | runner capability surface read by project-otel as input
+assay.runner.claim_support_parity.v0 | runner parity artifact inside an archive
+assay.runner.correlation_report.v0 | runner correlation artifact inside an archive
+assay.runner.coverage_descriptor.v0 | runner coverage descriptor inside an archive
+assay.runner.event.v0 | runner event stream entry
+assay.runner.fidelity_verdict.v0 | runner verdict inside an archive
+assay.runner.kernel_event.v0 | kernel event stream entry
+assay.runner.path_projection.v0 | runner path projection inside an archive
+assay.runner.policy_event.v0 | policy event stream entry
+assay.runner.sdk_event.v0 | SDK event stream entry
+assay.semantic-digest.jcs-rfc8785.v1 | a canonicalization profile name, not a document
+assay.token_passthrough_conformance.v0 | assay-mcp-server conformance carrier inside a bundle
+assay.tool_annotation_conformance.v0 | assay-mcp-server conformance carrier inside a bundle
 assay.aee_run_context.v0 | input the sandbox reads; exact key set enforced on read
 assay.aee_seal_key.v0 | input the sandbox reads; exact key set enforced on read
 assay.aee_trust_set.v0 | input the sandbox reads; exact key set enforced on read
@@ -121,7 +142,7 @@ assay.supply_chain_conformance.input.v0 | the input descriptor the command reads
 assay.tool_args.v0 | a digest domain string; nothing serializes it as a document
 assay.tool_decision_surface.v0 | event type read from a bundle by verify-side-effects
 assay.tool_decision_truth.recipe_row.v0 | a row inside the projection, not the projection
-assay.tool_decision_truth.v0 | the carrier read as input by project-otel; the projection is the document
+assay.tool_decision_truth.v0 | `assay mcp --tool-decision-truth-out` DOES append these to a caller-named path, one JSON object per line; the file is NDJSON and no line is the top-level document. An earlier reason here said "read as input", which was the same keyword error as "projection"
 ```
 
 
@@ -194,6 +215,10 @@ of, and there is no instrument that fixes that.
   to carry an explicit opt-out, and triaging those 31. It is tracked separately rather than answered
   here, because thirty-one classifications written in one sitting is the failure this file exists to
   record.
+- **Twenty-one of the non-document rows are declared in dependency crates and their emit paths were
+  not opened.** They are classified from the declaring module. That is a weaker basis than the rows
+  whose producer I read, and three such judgements have already been wrong today.
+
 - **Five crates declare identities the CLI writes** — `assay-cli`, `assay-core`, `assay-evidence`
   (`trust-basis.diff`), `assay-registry` (`supply_chain_conformance`) and `assay-runner-schema`
   (`runner.observation_health`). The collector scans the first two; the rest are reached only through

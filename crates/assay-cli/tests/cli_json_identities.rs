@@ -32,6 +32,31 @@ const INVENTORY: &str = "docs/architecture/CLI-JSON-IDENTITIES.md";
 /// class of mistake this file exists to catch.
 const SCANNED: &[&str] = &["crates/assay-cli/src", "crates/assay-core/src"];
 
+/// Crates `assay-cli` depends on. Their `pub const` identities must be classified too.
+///
+/// Following each write by hand does not notice the next one. `trust-basis.diff` was found that
+/// way, and then `runner.observation_health` shipped unrecorded anyway: its string appears in
+/// `assay-cli` only inside a `//!` comment and a `#[cfg(test)]` assertion, so nothing here could
+/// see it. Requiring every published identity in the import graph to be classified turns the next
+/// such crate into a red instead of a review comment.
+///
+/// Only `pub const` in these crates, never every literal: scanning their full source would flood
+/// the partition with kernel events and mandate events that no command has any relationship to.
+const DEPENDENCY_CRATES: &[&str] = &[
+    "crates/assay-canonical/src",
+    "crates/assay-common/src",
+    "crates/assay-evidence/src",
+    "crates/assay-mcp-server/src",
+    "crates/assay-metrics/src",
+    "crates/assay-monitor/src",
+    "crates/assay-policy/src",
+    "crates/assay-registry/src",
+    "crates/assay-runner-core/src",
+    "crates/assay-runner-linux/src",
+    "crates/assay-runner-schema/src",
+    "crates/assay-sim/src",
+];
+
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
@@ -98,12 +123,12 @@ fn non_document_rows() -> BTreeMap<String, String> {
 /// rather than by a path or filename rule, because `supply_chain_conformance/tests.rs` is a file
 /// named `tests.rs` that sits in `src/`: any name-based rule has to decide it, and deciding it
 /// wrongly is silent in both directions.
-fn strip_test_modules(src: &str) -> String {
+fn strip_test_modules_at(src: &str, whose: &str) -> String {
     let mut out = String::with_capacity(src.len());
     let mut rest = src;
     while let Some((attr, body)) = find_test_mod(rest) {
         out.push_str(&rest[..attr]);
-        rest = &rest[skip_balanced(rest, body)..];
+        rest = &rest[skip_balanced(rest, body, whose)..];
     }
     out.push_str(rest);
     out
@@ -140,7 +165,7 @@ fn find_test_mod(src: &str) -> Option<(usize, usize)> {
 /// Braces inside string literals, char literals and comments are not braces. Counting them was
 /// this function's first bug: a production file containing `"{"` made the depth never reach zero,
 /// and the failure surfaced as an assertion about unbalanced source rather than as a wrong answer.
-fn skip_balanced(src: &str, from: usize) -> usize {
+fn skip_balanced(src: &str, from: usize, whose: &str) -> usize {
     let bytes = src.as_bytes();
     let mut i = from;
     let mut depth = 1usize;
@@ -166,7 +191,10 @@ fn skip_balanced(src: &str, from: usize) -> usize {
         }
         i += 1;
     }
-    assert_eq!(depth, 0, "a `#[cfg(test)] mod` block is never closed");
+    assert_eq!(
+        depth, 0,
+        "a `#[cfg(test)] mod` block is never closed in {whose}"
+    );
     i
 }
 
@@ -179,7 +207,12 @@ fn skip_string(bytes: &[u8], open: usize) -> usize {
         hashes += 1;
         back -= 1;
     }
-    let raw = hashes > 0 && back > 0 && bytes[back - 1] == b'r';
+    // `r"…"` with zero hashes is raw too. Treating it as escaped was this scanner's second bug:
+    // `assay-evidence`'s glob tests contain `r"test\\"`, a raw string ending in a backslash, and
+    // reading that backslash as an escape ran the scan past the closing quote and off the end of
+    // the module. It surfaced as "a `#[cfg(test)] mod` block is never closed", which is at least a
+    // loud failure rather than a wrong answer — the same luck as the first brace bug.
+    let raw = back > 0 && bytes[back - 1] == b'r';
     let mut i = open + 1;
     if raw {
         while i < bytes.len() {
@@ -335,9 +368,14 @@ fn identities_in_source() -> BTreeMap<String, String> {
                     }
                     let src = std::fs::read_to_string(&p)
                         .unwrap_or_else(|e| panic!("read {}: {e}", p.display()));
-                    let src = strip_test_modules(&src);
+                    let src = strip_test_modules_at(&src, &p.display().to_string());
                     for (lineno, line) in src.lines().enumerate() {
-                        if line.trim_start().starts_with("//") {
+                        // Trailing comments too, not only whole-line ones. `let x = 1; //
+                        // "assay.foo.v0"` would otherwise be collected as a producer. No instance
+                        // exists on this head; the hole was pointed out before one did, which is
+                        // the only time it is cheap to close.
+                        let line = code_before_comment(line);
+                        if line.trim().is_empty() {
                             continue;
                         }
                         for ident in identities_in_line(line) {
@@ -351,11 +389,73 @@ fn identities_in_source() -> BTreeMap<String, String> {
             }
         }
     }
+    for (identity, site) in published_identities_in_dependencies() {
+        found.entry(identity).or_insert(site);
+    }
     assert!(
         !found.is_empty(),
         "collected no identities; the scan shape moved"
     );
     found
+}
+
+/// `pub const NAME: &str = "assay.…vN"` in every crate `assay-cli` depends on.
+fn published_identities_in_dependencies() -> BTreeMap<String, String> {
+    let root = workspace_root();
+    let mut found = BTreeMap::new();
+    for dir in DEPENDENCY_CRATES {
+        let base = root.join(dir);
+        if !base.exists() {
+            continue;
+        }
+        let mut stack = vec![base];
+        while let Some(path) = stack.pop() {
+            for entry in std::fs::read_dir(&path).expect("read_dir") {
+                let p = entry.expect("dir entry").path();
+                if p.is_dir() {
+                    stack.push(p);
+                    continue;
+                }
+                if p.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                let src = strip_test_modules_at(
+                    &std::fs::read_to_string(&p).expect("read"),
+                    &p.display().to_string(),
+                );
+                for (lineno, line) in src.lines().enumerate() {
+                    let line = code_before_comment(line);
+                    if !line.trim_start().starts_with("pub const ") {
+                        continue;
+                    }
+                    for identity in identities_in_line(line) {
+                        let rel = p.strip_prefix(&root).unwrap_or(&p).display();
+                        found
+                            .entry(identity)
+                            .or_insert_with(|| format!("{rel}:{}", lineno + 1));
+                    }
+                }
+            }
+        }
+    }
+    found
+}
+
+/// The part of a line before a `//` that is not inside a string literal.
+fn code_before_comment(line: &str) -> &str {
+    let bytes = line.as_bytes();
+    let mut i = 0usize;
+    let mut in_string = false;
+    while i + 1 < bytes.len() {
+        match bytes[i] {
+            b'\\' if in_string => i += 1,
+            b'"' => in_string = !in_string,
+            b'/' if !in_string && bytes[i + 1] == b'/' => return &line[..i],
+            _ => {}
+        }
+        i += 1;
+    }
+    line
 }
 
 /// `"assay.…vN"` literals on one line.
@@ -412,6 +512,9 @@ const WRITERS: &[&str] = &[
     "std::fs::write",
     "tokio::fs::write",
     "fs::write",
+    "write_document",
+    "write_all",
+    "writeln!",
     "println!",
 ];
 
