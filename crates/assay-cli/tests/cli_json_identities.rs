@@ -773,3 +773,56 @@ fn constant_names_for(identity: &str) -> Vec<String> {
     }
     names
 }
+
+/// `DEPENDENCY_CRATES` is the `assay-*` dependency list of `assay-cli`, not a list someone typed.
+///
+/// The const-in-dependencies rule is only as tight as this array. Adding `assay-new` to the
+/// manifest and forgetting it here is the sixth crate, invisible again, with every other test
+/// green — the same hole the rule was written to close, one level up. A review pointed that out
+/// before it happened, which is the only time it costs one function.
+#[test]
+fn dependency_crates_match_the_manifest() {
+    let manifest = read("crates/assay-cli/Cargo.toml");
+    let deps = manifest
+        .split_once("\n[dependencies]")
+        .expect("assay-cli manifest has no [dependencies] section")
+        .1;
+    let deps = deps.split_once("\n[").map(|(head, _)| head).unwrap_or(deps);
+
+    let mut declared = BTreeSet::new();
+    for line in deps.lines() {
+        // `assay-core.workspace = true` and `assay-policy = { … }` are both dependency lines, and
+        // a crate name never contains a dot, so the key ends at the first `.`, `=` or space.
+        let name = line.split(['.', '=', ' ']).next().unwrap_or("").trim();
+        if name.starts_with("assay-") {
+            declared.insert(name.to_string());
+        }
+    }
+    assert!(
+        !declared.is_empty(),
+        "parsed no assay-* dependencies; the manifest shape moved"
+    );
+
+    // `assay-core` is scanned in full by SCANNED, so it is not in the pub-const-only list.
+    let separately_scanned: BTreeSet<String> = SCANNED
+        .iter()
+        .filter_map(|dir| dir.strip_prefix("crates/"))
+        .filter_map(|rest| rest.strip_suffix("/src"))
+        .map(str::to_string)
+        .collect();
+
+    let listed: BTreeSet<String> = DEPENDENCY_CRATES
+        .iter()
+        .filter_map(|dir| dir.strip_prefix("crates/"))
+        .filter_map(|rest| rest.strip_suffix("/src"))
+        .map(str::to_string)
+        .collect();
+
+    let expected: BTreeSet<String> = declared.difference(&separately_scanned).cloned().collect();
+    assert_eq!(
+        listed, expected,
+        "DEPENDENCY_CRATES has drifted from assay-cli/Cargo.toml. Every assay-* dependency is \
+         either scanned in full (SCANNED) or scanned for pub const identities (DEPENDENCY_CRATES); \
+         a dependency in neither is a crate whose published identities nothing classifies"
+    );
+}

@@ -195,11 +195,13 @@ of, and there is no instrument that fixes that.
 
 ## What this guard cannot do, stated plainly
 
-- **It cannot verify a classification.** For several identities the naming and the writing live in
-  different files — `assay project-otel` calls into `assay-core`, which sets the schema — so nothing
-  in source connects them. A reclassification is caught only because every non-document row must
-  carry a reason: moving a document here means writing a false sentence, not deleting a line. That
-  is a weaker guarantee than the rest of this file and it is the honest ceiling.
+- **It cannot verify a classification, and the reason column is a speed bump, not a gate.** The test
+  checks that a row has a `|` and a non-empty right-hand side. It does not read the sentence: `a
+  banana` passes. A misclassification costs writing a false sentence instead of deleting a line,
+  which is why two independent reviews caught six of them — but the build stays green either way.
+  The theory that produced those six ("a projection, not a document") writes a perfectly non-empty
+  reason. **#2485 must not read these sentences as evidence that a row is right.** Three of them have
+  been wrong today, and the third was written after conceding the first two.
 - **The writer list is a fixed set of idioms**, and it has been wrong twice. `serde_json::to_writer`
   was missing until `assay describe` exposed it; `to_vec_pretty`, `tokio::fs::write`,
   `serde_json::to_string` and a bare `fs::write` were missing until a review opened the emit paths.
@@ -223,8 +225,11 @@ of, and there is no instrument that fixes that.
   (`trust-basis.diff`), `assay-registry` (`supply_chain_conformance`) and `assay-runner-schema`
   (`runner.observation_health`). The collector scans the first two; the rest are reached only through
   a document row's naming column, which is why `runner.observation_health` was missing from the first
-  revision of this file and the guard was green without it. The converse-writer rule below is what
-  turns "invisible" into "must be answered"; until it lands, a sixth crate would be invisible too.
+  revision of this file and the guard was green without it. A **sixth** crate is now caught:
+  `every_production_identity_is_classified` also collects `pub const` identities from every crate
+  `assay-cli` depends on, and `DEPENDENCY_CRATES` is pinned against `assay-cli/Cargo.toml` so the
+  list cannot drift away from the manifest. What that rule does *not* catch is a new command file in
+  a crate already scanned — `evidence lint` and `evidence diff` are that class, and it is #2555.
 - **`describe ⊆ pin` is one-directional.** `BINDING_ROWS` is seven clap paths and omits the run
   report and run summary. Forcing `describe` to grow is a product decision, not bookkeeping.
 
