@@ -69,8 +69,10 @@
     "sha256:cb58ce91863f52e0568742b977f0642158453ec11bbcd25821f9171dccd03342": [
       {
         "label": "1 the origin must be the proxy",
-        "reason": "v0 Stage 3 promises an observation is a marker only if ALL THREE legs hold: schema, code AND origin == assay-proxy. No vector among the 14 is a well-formed v0 observation whose only defect is a wrong origin, so deleting the third leg cannot move a pinned outcome. This is a genuine, profile-promised, unexercised check. Recorded rather than fixed because adding a vector moves a digest that is a published contract carried by assay#1840.",
-        "recorded": "2026-08-19"
+        "reason": "v0 Stage 3 promises an observation is a marker only if ALL THREE legs hold: schema, code AND origin == assay-proxy, and it spells out the consequence -- an observation that is well-formed but fails the triple is valid and inert. No vector among the 14 is a well-formed v0 observation whose only defect is a wrong origin, so deleting the third leg cannot move a pinned outcome. THE GAP IS IN THE CORPUS, NOT IN THE IMPLEMENTATION. Our own tree does exercise this leg, in crates/assay-evidence/tests/denial_marker_classifier.rs::wrong_origin_is_inert, for v0 and v1 both. What the corpus cannot do is TRANSMIT the requirement: a stranger reimplementing from the published vectors plus v0.md gets no vector that fails if they skip the origin leg, and still reproduces the pinned digest. Recorded rather than fixed because adding a vector moves a digest that is a published contract carried by assay#1840.",
+        "recorded": "2026-08-19",
+        "exercised_outside_corpus": "crates/assay-evidence/tests/denial_marker_classifier.rs::wrong_origin_is_inert",
+        "corrected": "2026-08-19"
       }
     ]
   }

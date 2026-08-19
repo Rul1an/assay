@@ -136,17 +136,27 @@ rules the author declared.
 The results below include the ones that do not flatter us, because a tool that
 audits corpora is worth nothing if its author has not survived it.
 
+**"Unexercised" below always means unexercised *by the published corpus*, never
+unexercised in our tree.** The two come apart, and the difference is the whole
+point: a rule our unit tests cover but our vectors cannot discriminate is one our
+implementation gets right and our corpus cannot ask a stranger to get right. Such a
+rule is a hole in what the corpus *transmits*, not a defect in what we ship, and
+the rows below say which of the two they mean.
+
 | Corpus | Runner | Result |
 |---|---|---|
 | `mcp-jsonrpc-id-conformance` | module | **4 of 4** in scope. **7 rules unexercised and out of scope**, ratio 1.75 — the score is a statement about a minority of the declared rules |
-| `privileged-mcp-action-v0` | process | **1 known hole**: the origin leg of the v0 marker triple is promised by §5 and no vector discriminates it. Recorded against `sha256:cb58ce91…` rather than fixed, because adding a vector moves a published digest. Two further rules I declared turned out to mutate the wrong stage and the wrong profile; they are marked out of scope **with that reasoning rather than deleted** |
+| `privileged-mcp-action-v0` | process | **No adequacy result. Exit 1.** All three declared rules are a known hole or out of scope, so nothing was measured, and the tool refuses to report a score it did not earn. The hole: the origin leg of the v0 marker triple is promised by §5 Stage 3 and no vector discriminates it. **The gap is in the corpus, not in the implementation** — our own tree exercises the leg in `denial_marker_classifier.rs::wrong_origin_is_inert`; what the corpus cannot do is *transmit* the requirement to a stranger, who can skip the leg and still reproduce the pinned digest. Recorded against `sha256:cb58ce91…` rather than fixed, because adding a vector moves a published digest. The other two rules I declared turned out to mutate the wrong stage and the wrong profile; they are out of scope **with that reasoning rather than deleted**. Three declared, none scorable — the corpus that carries our most public reproduction request is the one this tool can say least about |
 | [`observed-effect-v0`](https://github.com/Rul1an/observed-effect-v0) drift consumer | batch | **4 of 5**. One survivor: an implementation can read the body regardless of whether the ref recomputed and still reproduce all fourteen cases |
 | [rge-bench](https://github.com/rge-bench/rge-bench) | module | 30 of 30, 1 declared equivalent |
 | `rfc8785` canonicalization | batch (test-names) | **control killed** — the corpus bites. No rules declared: see below |
 | `mcp-era-parity-v0` | — | **not measurable today.** Driven by Rust *tests* without a per-vector verdict |
 
-**Four measured, one control-only, one not measurable.** Stated rather than
-rounded up.
+**Three measured, one with no scorable result, one control-only, one not
+measurable.** Stated rather than rounded up — and corrected on 2026-08-19, when
+this line still read *four measured* and counted `privileged-mcp-action-v0` among
+them. The tool had been printing `FAIL: nothing was measured` for that corpus the
+whole time; the summary above it had rounded up anyway.
 
 ### Why `rfc8785` has a control and no declared rules
 
