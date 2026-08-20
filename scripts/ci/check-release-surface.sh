@@ -277,6 +277,24 @@ check_rust_cli_installs() {
     'unsupported Rust CLI package; use assay-cli'
 }
 
+check_rge_bench_claim_parity() {
+  local readme_claim llms_claim
+  readme_claim="$(
+    sed -n 's#^- \[RGE-Bench\](https://github.com/rge-bench/rge-bench) — ##p' README.md
+  )"
+  llms_claim="$(
+    sed -n 's#^- \[RGE-Bench\](https://github.com/rge-bench/rge-bench): ##p' llms.txt
+  )"
+
+  if [ -z "$readme_claim" ]; then
+    fail "README.md: expected exactly one canonical RGE-Bench claim"
+    return
+  fi
+  if [ -z "$llms_claim" ] || [ "$llms_claim" != "$readme_claim" ]; then
+    fail "llms.txt: RGE-Bench claim must match README.md digest scope"
+  fi
+}
+
 check_rust_cli_installs README.md 1
 check_rust_cli_installs docs/getting-started/index.md 1
 check_rust_cli_installs docs/getting-started/installation.md 2
@@ -289,6 +307,7 @@ check_rust_cli_installs docs/use-cases/ci-gate.md 1
 release_link="Current release: [\`$PUBLISHED_TAG\`](https://github.com/Rul1an/assay/releases/tag/$PUBLISHED_TAG)"
 check_current_release_link README.md "$release_link"
 check_current_release_link docs/index.md "$release_link"
+check_rge_bench_claim_parity
 
 for file in \
   docs/getting-started/index.md \

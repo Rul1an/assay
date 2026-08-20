@@ -82,11 +82,14 @@ Install the SDK with pip install assay-it.
 uses: github/codeql-action/upload-sarif@d1ba80a13dd99fba24a470575428917156a28b43
 DOC
 printf '%s\n' 'Historical correction: pip install assay-it.' > "$TMP/docs/migration-v1.2.md"
+rge_claim='digest-scoped reproduction: v1 digest `sha256:reproduced` was independently implemented; the current candidate digest `sha256:current` has not been reproduced by anyone but the author.'
 cat > "$TMP/README.md" <<'DOC'
 cargo install assay-cli --version 5.1.0 --locked
 Current release: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0)
 Claude and Cursor config-path only.
 DOC
+printf '%s\n' "- [RGE-Bench](https://github.com/rge-bench/rge-bench) — $rge_claim" >> "$TMP/README.md"
+printf '%s\n' "- [RGE-Bench](https://github.com/rge-bench/rge-bench): $rge_claim" > "$TMP/llms.txt"
 printf '%s\n' 'Current release: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0)' > "$TMP/docs/index.md"
 printf '%s\n' 'Codex uses .codex/config.toml.' > "$TMP/docs/guides/editor-mcp-recipe.md"
 (
@@ -115,6 +118,7 @@ pattern = re.compile(files_lines[0])
 for path in (
     ".github/assay-release-tag",
     "scripts/ci/read-assay-release-tag.sh",
+    "llms.txt",
     "docs/getting-started/ci-integration.md",
     "docs/use-cases/air-gapped.md",
     "docs/use-cases/ci-gate.md",
@@ -187,6 +191,9 @@ mutate_and_expect_failure unsupported-codex-literal README.md \
 mutate_and_expect_failure unsupported-codex-guide docs/guides/editor-mcp-recipe.md \
   's/Codex uses .codex\/config.toml./assay mcp config-path codex/' \
   'config-path does not support Codex'
+mutate_and_expect_failure broad-rge-claim llms.txt \
+  's#digest-scoped reproduction:.*#neutral, externally reproduced conformance kit for evidence reviewability#' \
+  'RGE-Bench claim must match README.md digest scope'
 mutate_and_expect_failure wrong-rust-package-ci docs/getting-started/ci-integration.md \
   's/cargo install assay-cli --version 5.1.0 --locked/cargo install assay/' \
   'unsupported Rust CLI package'
@@ -277,8 +284,8 @@ echo "PASS: duplicate-release"
 mutate_and_expect_failure stale-cli-version docs/reference/cli/index.md \
   's/# assay 5.1.0/# assay 5.0.0/' 'documented CLI version drift'
 
-if [ "$mutation_count" -ne 41 ]; then
-  echo "FAIL: expected 41 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 42 ]; then
+  echo "FAIL: expected 42 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"
