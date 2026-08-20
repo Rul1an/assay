@@ -222,10 +222,52 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(len(d["suites"]), d["ran"] + d["not_run"])
         self.assertGreater(d["not_run"], 0, "non-run suites must be counted, never omitted")
 
+    def test_json_mode_marks_partial_execution_instead_of_reporting_complete(self):
+        p = subprocess.run([sys.executable, str(run_all.__file__), "--json"],
+                           capture_output=True, text=True, timeout=300)
+        self.assertIn(p.returncode, (0, 1, 2))
+        d = json.loads(p.stdout)
+        self.assertEqual(d["declared"], len(d["suites"]))
+        self.assertEqual(d["executed"], d["ran"])
+        self.assertLess(d["executed"], d["declared"])
+        self.assertIs(d["complete"], False)
+
+    def test_v1_corpus_is_inventoried_with_an_honest_non_run_state(self):
+        p = subprocess.run([sys.executable, str(run_all.__file__), "--json"],
+                           capture_output=True, text=True, timeout=300)
+        d = json.loads(p.stdout)
+        v1 = next(s for s in d["suites"] if s["id"] == "privileged-mcp-action-v1")
+        self.assertEqual(v1["grade"], run_all.NEEDS_CANDIDATE)
+        self.assertIn("candidate", v1["detail"].lower())
+
+    def test_v1_inventory_path_and_vector_count_match_its_manifest(self):
+        suite = next(s for s in run_all.SUITES if s["id"] == "privileged-mcp-action-v1")
+        manifest_path = run_all.REPO / suite["path"] / "MANIFEST.json"
+        self.assertTrue(manifest_path.is_file(), manifest_path)
+        manifest = json.loads(manifest_path.read_text())
+        self.assertEqual(suite["vectors"], sum(manifest["counts"].values()))
+
     def test_text_mode_always_names_the_suites_that_did_not_run(self):
         p = subprocess.run([sys.executable, str(run_all.__file__)],
                            capture_output=True, text=True, timeout=300)
         self.assertIn("NOT RUN (declared, not a pass)", p.stdout)
+
+
+class DocumentationTruth(unittest.TestCase):
+    def test_acm_language_is_aligned_not_awarded_and_does_not_narrow_artifacts_to_code(self):
+        documents = (
+            run_all.REPO / "conformance/INDEX.md",
+            run_all.REPO / "conformance/privileged-mcp-action-v0/CONFORMANCE-PROTOCOL.md",
+        )
+        for path in documents:
+            text = path.read_text()
+            self.assertIn("ACM-aligned", text, path)
+            self.assertIn("not ACM-awarded", text, path)
+            self.assertNotIn("ACM assumes the author-supplied artifact is the author's *code*", text,
+                             path)
+            self.assertNotIn("badge a run earns", text, path)
+        index = documents[0].read_text()
+        self.assertNotIn("shipped vectors is *Functional*", index)
 
 
 if __name__ == "__main__":

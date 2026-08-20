@@ -218,9 +218,9 @@ correlated on the profile's ambiguous regions, which is where a corpus carries i
 report may state agreement; it may not state that agreement was reached independently unless the
 authorship methods make that a claim someone can check.
 
-### Which badge a run earns, and the one it cannot
+### Which ACM classification describes a run, and the one that cannot
 
-**No badge here is conferred by anyone.** ACM badges are awarded by a venue's artifact-evaluation committee. What follows borrows ACM's *vocabulary* to describe a claim precisely; it is a self-description under a published definition, not an ACM award.
+**No badge here is conferred by anyone.** ACM badges are awarded by a venue's artifact-evaluation committee. What follows is an **ACM-aligned classification, not ACM-awarded**; it borrows ACM's *vocabulary* to describe a claim precisely.
 
 Reports here describe themselves with an [ACM Artifact Review and Badging](https://www.acm.org/publications/policies/artifact-review-and-badging-current)
 class, because the distinction between kinds of reproduction is easy to blur and
@@ -228,16 +228,16 @@ ACM already drew it. The two terms are the reverse of the common intuition:
 *Results Reproduced* means a different team obtained the result **using** the
 author's artifacts; *Results Replicated* means **without** them.
 
-A blind from-spec run against this pack earns **Results Reproduced**. The
+A blind from-spec run against this pack is aligned with **Results Reproduced**. The
 implementation is the reproducer's own and imports nothing from Assay, but the
 opaque cases, the descriptor and the specification all come from the author.
 
-**Results Replicated is not reachable against this or any conformance corpus, and
-that is a property of corpora rather than a shortfall of any reproducer.** ACM
-assumes the author-supplied artifact is the author's *code*, so obtaining the
-result without it is meaningful. A conformance corpus inverts that: the corpus is
-the artifact, and no reproduction can avoid using it. A report claiming
-*Replicated* against this pack has either misread the badge or not used the pack.
+**Results Replicated is not reachable for a run that scores this conformance
+corpus, and that is a property of the measurement rather than a shortfall of any
+reproducer.** ACM artifacts explicitly include software, scripts, input datasets
+and raw data. This corpus is therefore an author-supplied artifact. A report
+claiming *Replicated* while scoring this pack has either misread the classification
+or not used the pack.
 
 So the fact worth stating has no ACM badge, and a report should state it in full
 rather than reach for a stronger label: **an independently written implementation,
