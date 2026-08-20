@@ -81,14 +81,18 @@
       "known_holes": 2,
       "manifest": "conformance/adequacy/privileged-mcp-action-v0.manifest.json",
       "measured_at": {
-        "commit": "bcbb1ce7682a1dc94450bb7b31bb5258ad8b3fb3",
+        "commit": "d95ff224e7112ee62f8e14f82235cafb11518779",
         "depends_on": [
           "conformance/adequacy/privileged-mcp-action-v0.manifest.json",
           "conformance/adequacy/privileged-mcp-action-v0.vectors.json",
+          "conformance/privileged-mcp-action-v0/MANIFEST.json",
           "conformance/privileged-mcp-action-v0/candidate-release.json",
+          "conformance/privileged-mcp-action-v0/gen_vectors.py",
+          "conformance/privileged-mcp-action-v0/vectors",
           "crates/assay-cli/src/cli/commands/evidence/privileged_mcp_action.rs",
           "crates/assay-cli/src/cli/commands/evidence/verify_privileged_mcp_action.rs",
-          "crates/assay-evidence/src/denial_marker.rs"
+          "crates/assay-evidence/src/denial_marker.rs",
+          "docs/profiles/privileged-mcp-action/v0.md"
         ]
       },
       "out_of_scope": 4,
