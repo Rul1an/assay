@@ -298,6 +298,24 @@ class CompletenessPolicy(unittest.TestCase):
         self.assertEqual(run_all.exit_status(results, require_complete=True),
                          run_all.REQUIRE_COMPLETE_EXIT)
 
+    def test_require_complete_does_not_mask_incomplete_false(self):
+        results = [
+            {"id": "ran", "grade": run_all.FALSE},
+            {"id": "skip", "grade": run_all.NOT_SELECTED},
+        ]
+        self.assertIs(run_all.summarize(results)["complete"], False)
+        self.assertEqual(run_all.summarize(results)["worst_executed_grade"], run_all.FALSE)
+        self.assertEqual(run_all.exit_status(results, require_complete=True), 1)
+
+    def test_require_complete_does_not_mask_incomplete_unproved(self):
+        results = [
+            {"id": "ran", "grade": run_all.UNPROVED},
+            {"id": "skip", "grade": run_all.NOT_SELECTED},
+        ]
+        self.assertIs(run_all.summarize(results)["complete"], False)
+        self.assertEqual(run_all.summarize(results)["worst_executed_grade"], run_all.UNPROVED)
+        self.assertEqual(run_all.exit_status(results, require_complete=True), 2)
+
     def test_n_of_n_is_complete_and_require_complete_keeps_grade_exit(self):
         proved = [
             {"id": "a", "grade": run_all.PROVED},
@@ -357,8 +375,8 @@ class RequireCompleteFlag(unittest.TestCase):
             s["grade"] in (run_all.NEEDS_CANDIDATE, run_all.NOT_SELECTED, run_all.EXTERNAL)
             for s in d["suites"]))
 
-    def test_require_complete_is_applied_not_merely_parsed(self):
-        # Mutation bite: --require-complete accepted by argparse but unused.
+    def test_json_reports_whether_require_complete_was_requested(self):
+        # JSON echo of the flag, not proof the exit rule ran.
         p = subprocess.run(
             [sys.executable, str(run_all.__file__), "--json", "--require-complete"],
             capture_output=True, text=True, timeout=300)

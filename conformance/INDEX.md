@@ -7,7 +7,7 @@ does and does not establish.
 python3 conformance/run_all.py                     # stdlib suites only, no toolchain
 python3 conformance/run_all.py --with-cargo        # also the Rust-driven corpora
 python3 conformance/run_all.py --json              # machine-readable report
-python3 conformance/run_all.py --require-complete  # same report; exit 3 unless executed == declared
+python3 conformance/run_all.py --require-complete  # same report; exit 3 if incomplete after false/unproved
 ```
 
 Plain inventory mode — `python3 conformance/run_all.py`, with or without `--json` — is **not a completeness gate**. Exit 0 means no executed suite graded `false` or `unproved`. It does not mean every declared suite ran. Callers that require a complete inventory pass `--require-complete`.
@@ -54,16 +54,16 @@ Exit codes, with `false` taking precedence over `unproved`:
 
 | Code | Condition |
 |---|---|
-| `0` | no suite graded `false` and none graded `unproved` |
-| `1` | **at least one suite graded `false`**, regardless of any `unproved` |
-| `2` | no suite graded `false` and at least one graded `unproved` |
-| `3` | `--require-complete` was set and `complete` is false (`executed != declared`) |
+| `0` | no suite graded `false` and none graded `unproved` (plain mode ignores incompleteness) |
+| `1` | **at least one suite graded `false`**, regardless of any `unproved` or incompleteness |
+| `2` | no suite graded `false` and at least one graded `unproved` (incompleteness does not override) |
+| `3` | `--require-complete`, `complete` is false, and no suite graded `false` or `unproved` |
 
 A run with both a `false` and an `unproved` suite exits `1`: a checked disagreement is a
 stronger, more actionable result than a check that could not complete. `--require-complete`
-on an incomplete inventory exits `3` even when every executed suite graded `proved`; the
-inventory and executed outcomes are still printed. Without that flag, incompleteness does
-not change the exit.
+never hides that: incomplete+`false` is still `1`, incomplete+`unproved` is still `2`. Exit
+`3` is only incompleteness after those measured signals. The inventory and executed
+outcomes are still printed. Without the flag, incompleteness does not change the exit.
 
 ## Suites that do not run, and why that is not a pass
 

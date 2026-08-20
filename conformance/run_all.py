@@ -231,13 +231,13 @@ def summarize(results: list) -> dict:
 
 
 def exit_status(results: list, require_complete: bool = False) -> int:
-    """Grade exits 0/1/2. --require-complete adds one extra nonzero when incomplete."""
-    if require_complete and not summarize(results)["complete"]:
-        return REQUIRE_COMPLETE_EXIT
+    """FALSE, then UNPROVED, then incompleteness if --require-complete."""
     if any(r["grade"] == FALSE for r in results):
         return 1
     if any(r["grade"] == UNPROVED for r in results):
         return 2
+    if require_complete and not summarize(results)["complete"]:
+        return REQUIRE_COMPLETE_EXIT
     return 0
 
 
@@ -247,7 +247,7 @@ def main() -> int:
                     help="also run the Rust-driven corpora (needs a toolchain)")
     ap.add_argument("--json", action="store_true", help="emit a machine-readable report")
     ap.add_argument("--require-complete", action="store_true",
-                    help="exit 3 unless every declared suite executed")
+                    help="exit 3 when incomplete, after any false (1) or unproved (2)")
     args = ap.parse_args()
 
     results = []
