@@ -1,5 +1,10 @@
 {
   "schema": "corpus-adequacy.manifest.v0",
+  "tool_pin": {
+    "_why": "Re-pinned to b87ef70, which enforces the control requirement on EVERY runner from one function. The previous pin enforced it only on the process path, so a module corpus could score with no control -- and this repository had one in that state. Re-measured under the new pin; no number moved.",
+    "commit": "b87ef706e70a2bcfe163514ec0360022e93fa175",
+    "tool": "https://github.com/corpus-adequacy/corpus-adequacy"
+  },
   "_about": "Mutation adequacy for rge-bench's ref_example.py, measured from this workspace against the sibling checkout. The first published score was 30 of 30 over the hand-written mutant table in scripts/check_rule_liveness.py. ADMISSION.md already says that table is not checked against the rules the implementation contains. The missing rules were read off ref_example.py and the 95 vectors: the strength ladder (the ceiling ladder's sibling, already known to need permutations), the AND conjuncts scored as one mutant, the soft-digest and replay-equality fallthroughs, and the semantic-equality helpers the contract-edge prose claims. A 30 of 30 over half the discriminable rules is a number about half a corpus.",
   "implementation": "../../../rge-bench/ref_example.py",
   "entrypoint": "evaluate",
@@ -332,5 +337,12 @@
         "reason": "Python == already treats 1 and 1.0 as equal, so deleting the Number branch cannot move a vector in this implementation. The rule exists for language-neutral implementers (JM-Lab's JVM drift) and is equivalent here, not unexercised."
       }
     ]
-  }
+  },
+  "pins": {
+    "rge-bench": {
+      "repository": "rge-bench/rge-bench",
+      "commit": "c51c5af18112b2ecc80b6c56a8f6493dee5900b0"
+    }
+  },
+  "_pins_why": "Freshness is not the goal and cannot be: this corpus lives in a repository this diff cannot see, and it moves without us. A score against rge-bench/rge-bench@c51c5af18 stays permanently true of that commit, which is what makes it a claim rather than a mood. Pinning is therefore not a compromise on keeping up -- it is the thing that makes the number mean something, and it lets the lane re-derive it when the INSTRUMENT changes, which is the drift vector that actually applies here. Re-pinning is a deliberate act, like tool_pin."
 }

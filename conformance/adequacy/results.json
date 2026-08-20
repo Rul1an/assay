@@ -1,0 +1,180 @@
+{
+  "_about": "Measured mutation adequacy for every corpus manifest in this directory. Written by measure_all.py; asserted against the published prose by check_published_numbers.py. Do not hand-edit a measured row.",
+  "corpora": [
+    {
+      "adequate": false,
+      "control": "killed",
+      "corpus": "mcp-jsonrpc-id",
+      "declared_total": 17,
+      "equivalent": 0,
+      "killed": 6,
+      "known_holes": 0,
+      "manifest": "conformance/adequacy/mcp-jsonrpc-id.manifest.json",
+      "measured_at": {
+        "commit": "bcbb1ce7682a1dc94450bb7b31bb5258ad8b3fb3",
+        "depends_on": [
+          "conformance/adequacy/mcp-jsonrpc-id.manifest.json",
+          "conformance/adequacy/mcp-jsonrpc-id.vectors.json",
+          "examples/mcp-jsonrpc-id-conformance/check.py"
+        ]
+      },
+      "out_of_scope": 7,
+      "provenance": {
+        "kind": "measured"
+      },
+      "runner": "module",
+      "score_percent": 60.0,
+      "subject": {
+        "kind": "in_tree"
+      },
+      "survived": 4,
+      "tool_commit": "b87ef706e70a2bcfe163514ec0360022e93fa175",
+      "tool_version": "0.1.0",
+      "unproved": 0
+    },
+    {
+      "adequate": false,
+      "control": "killed",
+      "corpus": "observed-effect-drift-consumer",
+      "declared_total": 23,
+      "equivalent": 0,
+      "killed": 14,
+      "known_holes": 0,
+      "manifest": "conformance/adequacy/observed-effect-drift-consumer.manifest.json",
+      "measured_at": {
+        "commit": "bcbb1ce7682a1dc94450bb7b31bb5258ad8b3fb3",
+        "depends_on": [
+          "conformance/adequacy/observed-effect-drift-consumer.manifest.json"
+        ]
+      },
+      "out_of_scope": 0,
+      "provenance": {
+        "kind": "measured"
+      },
+      "runner": "batch",
+      "score_percent": 60.9,
+      "subject": {
+        "kind": "out_of_tree",
+        "repos": [
+          {
+            "commit": "dc10fad0cc867b1f652e2727f98e9370da429904",
+            "dirty": false,
+            "measured": [
+              "../../../observed-effect-v0/observed-effect-drift-consumer-2026-06/independent_consumer.py"
+            ],
+            "repository": "Rul1an/observed-effect-v0"
+          }
+        ]
+      },
+      "survived": 9,
+      "tool_commit": "b87ef706e70a2bcfe163514ec0360022e93fa175",
+      "tool_version": "0.1.0",
+      "unproved": 0
+    },
+    {
+      "adequate": false,
+      "control": "killed",
+      "corpus": "privileged-mcp-action-v0",
+      "declared_total": 31,
+      "equivalent": 0,
+      "killed": 6,
+      "known_holes": 2,
+      "manifest": "conformance/adequacy/privileged-mcp-action-v0.manifest.json",
+      "measured_at": {
+        "commit": "bcbb1ce7682a1dc94450bb7b31bb5258ad8b3fb3",
+        "depends_on": [
+          "conformance/adequacy/privileged-mcp-action-v0.manifest.json",
+          "conformance/adequacy/privileged-mcp-action-v0.vectors.json",
+          "conformance/privileged-mcp-action-v0/candidate-release.json",
+          "crates/assay-cli/src/cli/commands/evidence/privileged_mcp_action.rs",
+          "crates/assay-cli/src/cli/commands/evidence/verify_privileged_mcp_action.rs",
+          "crates/assay-evidence/src/denial_marker.rs"
+        ]
+      },
+      "out_of_scope": 4,
+      "provenance": {
+        "kind": "measured"
+      },
+      "runner": "process",
+      "score_percent": 24.0,
+      "subject": {
+        "kind": "in_tree"
+      },
+      "survived": 19,
+      "tool_commit": "b87ef706e70a2bcfe163514ec0360022e93fa175",
+      "tool_version": "0.1.0",
+      "unproved": 0
+    },
+    {
+      "adequate": false,
+      "control": "killed",
+      "corpus": "rfc8785-canonicalization",
+      "declared_total": 0,
+      "equivalent": 0,
+      "killed": 0,
+      "known_holes": 0,
+      "manifest": "conformance/adequacy/rfc8785-canonicalization.manifest.json",
+      "measured_at": {
+        "commit": "bcbb1ce7682a1dc94450bb7b31bb5258ad8b3fb3",
+        "depends_on": [
+          "conformance/adequacy/rfc8785-canonicalization.manifest.json",
+          "crates/assay-canonical/src/jcs.rs",
+          "crates/assay-canonical/tests/vectors/rfc8785.json"
+        ]
+      },
+      "out_of_scope": 0,
+      "provenance": {
+        "kind": "measured"
+      },
+      "runner": "batch",
+      "score_percent": null,
+      "subject": {
+        "kind": "in_tree"
+      },
+      "survived": 0,
+      "tool_commit": "b87ef706e70a2bcfe163514ec0360022e93fa175",
+      "tool_version": "0.1.0",
+      "unproved": 0
+    },
+    {
+      "adequate": false,
+      "control": "killed",
+      "corpus": "rge-bench",
+      "declared_total": 57,
+      "equivalent": 2,
+      "killed": 51,
+      "known_holes": 0,
+      "manifest": "conformance/adequacy/rge-bench.manifest.json",
+      "measured_at": {
+        "commit": "bcbb1ce7682a1dc94450bb7b31bb5258ad8b3fb3",
+        "depends_on": [
+          "conformance/adequacy/rge-bench.manifest.json"
+        ]
+      },
+      "out_of_scope": 1,
+      "provenance": {
+        "kind": "measured"
+      },
+      "runner": "module",
+      "score_percent": 94.4,
+      "subject": {
+        "kind": "out_of_tree",
+        "repos": [
+          {
+            "commit": "c51c5af18112b2ecc80b6c56a8f6493dee5900b0",
+            "dirty": false,
+            "measured": [
+              "../../../rge-bench/ref_example.py"
+            ],
+            "repository": "rge-bench/rge-bench"
+          }
+        ]
+      },
+      "survived": 3,
+      "tool_commit": "b87ef706e70a2bcfe163514ec0360022e93fa175",
+      "tool_version": "0.1.0",
+      "unproved": 0
+    }
+  ],
+  "schema": "assay.conformance.adequacy.results.v0"
+}

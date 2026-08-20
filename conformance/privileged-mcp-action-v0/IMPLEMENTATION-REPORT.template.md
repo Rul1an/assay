@@ -51,6 +51,18 @@ canonical expectation. Do not replace the original implementation commit or firs
 - Operating system:
 - Re-run result:
 
+## Scope of what this establishes
+
+Pre-filled from [ERRATA.md](ERRATA.md), pinned to corpus digest `sha256:cb58ce91…`. Do not widen it.
+
+- This reproduction can distinguish this implementation on **at most five** of the profile's rules,
+  and even those only at the points these vectors probe. It does not establish agreement on the
+  profile. Twenty-two promised rules are not discriminated by any vector in this corpus.
+- Was `ERRATA.md` read before the implementation was frozen? (yes/no; reading it is permitted and
+  disclosed, not disqualifying):
+- Which of the twenty-two undiscriminated rules did you implement anyway? List them. No vector can
+  extract this and it is the only evidence those rules can get before a later corpus exists:
+
 ## Non-claims
 
 This report records one implementation's result against the pinned corpus. It does not by itself

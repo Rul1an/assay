@@ -1,0 +1,398 @@
+# Keep the published mutation-adequacy numbers from rotting.
+#
+# `conformance/INDEX.md` and `conformance/privileged-mcp-action-v0/ERRATA.md` publish measured
+# adequacy numbers. They were produced by hand one evening and nothing re-derived them. ERRATA.md
+# pins its scope to a corpus DIGEST, which does not move when the implementation moves, so a rule
+# deleted from a declared implementation source changes what the corpus can transmit, changes no
+# digest, and trips no existing guard. That is a published claim nobody re-derives, which is the
+# exact defect this whole body of work exists to criticise.
+#
+# COST IS THE WHOLE PROBLEM. Four corpora are module or batch runners and finish in seconds.
+# `privileged-mcp-action-v0` is a process runner: about 32 `cargo build -p assay-cli` invocations,
+# roughly fifteen minutes. Running that on every pull request is unacceptable; running it never is
+# how the numbers rot. So the lane is relevance-gated, and relevance is DERIVED from each manifest's
+# own `implementation_sources` / `vectors` / `corpus_digest_file` declaration rather than from a
+# path glob — the lesson `scripts/ci/perf_bench_relevance.py` already records, where `^crates/`
+# matched all 21 crates and alerted on changes outside the benchmark's compilation unit.
+#
+# A LANE THAT PASSES BY NOT RUNNING IS THE DEFECT ONE LEVEL UP. Two structural rules follow, and
+# both are load-bearing:
+#
+#   * `check-drift` is the gating job, never `measure` alone. It runs with `if: always()` and
+#     refuses when an upstream job did not succeed, so a skipped or failed measurement is a RED
+#     gate rather than an absent one.
+#   * `measure_all.py --only X` deliberately carries over the rows it did not select, and a
+#     carried-over row is byte-identical to a freshly measured one. `check_published_numbers.py`
+#     therefore cannot tell "re-derived and matched" from "not run". `adequacy_lane_assert.py`
+#     can: it holds every selected corpus to `provenance.kind == "measured"` and names every
+#     unselected one, in words, as NOT re-derived by this run.
+#
+# THE INSTRUMENT IS PINNED. The tool lives at a sibling checkout,
+# `github.com/corpus-adequacy/corpus-adequacy`, deliberately not vendored (INDEX.md, "Where the
+# adequacy tool lives"). It is checked out at the commit `tool_pin.commit` names in the manifests,
+# never at a floating ref: an instrument that can change under the numbers is the same class of bug
+# this lane exists to catch. The same rule applies to every other sibling a corpus reads, which is
+# why two corpora are reported OUT OF SCOPE rather than cloned from a branch name.
+
+name: Adequacy drift
+
+on:
+  # No `paths:` filter. Relevance is derived from the manifests inside the plan job, and a path
+  # filter here would be a second, guessed statement of the same thing — the failure mode this
+  # lane copies its design from. Every PR runs `plan`, which costs seconds.
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, Mondays 04:17 UTC. Off the hour on purpose: GitHub's scheduler queues heavily at
+    # :00 and a delayed run is a run nobody reads.
+    #
+    # WHY WEEKLY AND NOT NIGHTLY. Every merge to main re-runs this lane on the push diff, so drift
+    # caused by a change to a DECLARED implementation source is already caught within minutes of
+    # landing — the schedule is not what covers that case. What the schedule covers is drift from
+    # sources nobody declared: `privileged-mcp-action-v0` is measured through a whole
+    # `cargo build -p assay-cli`, so a change anywhere in that binary's dependency closure can move
+    # its number without touching the three files its manifest names. Gating on the full closure
+    # instead would run fifteen minutes on nearly every PR, which is the cost this lane exists to
+    # avoid, so that class of drift is deliberately traded for a bounded staleness window.
+    #
+    # Weekly is that bound. The response to a red scheduled run is a human re-measurement and a
+    # republish of INDEX.md and ERRATA.md, which is a weekly-cadence activity, not a nightly one; a
+    # nightly lane would surface the same finding six times before anyone acted on it, and a lane
+    # that cries out more often than it is answered is one people learn to skip.
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "Measure every in-scope corpus regardless of relevance"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: adequacy-drift-${{ github.ref }}
+  # Superseding a pull-request run is free. Superseding a scheduled or main-branch run would drop
+  # the only full measurement that week.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PYTHON_VERSION: "3.13.8"
+
+jobs:
+  plan:
+    name: Plan (derive relevance, resolve instrument pin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      tool_repository: ${{ steps.plan.outputs.tool_repository }}
+      tool_dir: ${{ steps.plan.outputs.tool_dir }}
+      pin_groups: ${{ steps.plan.outputs.pin_groups }}
+      all_corpora: ${{ steps.plan.outputs.all_corpora }}
+      relevant_corpora: ${{ steps.plan.outputs.relevant_corpora }}
+      out_of_scope_corpora: ${{ steps.plan.outputs.out_of_scope_corpora }}
+      sibling_pins: ${{ steps.plan.outputs.sibling_pins }}
+    steps:
+      # Pin the event head SHA explicitly. After a squash-merge a delayed event can otherwise land
+      # the default checkout on current main while relevance still diffs the event's own commits
+      # (the failure perf_pr.yml records as #2326).
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # The guard's own refusals, exercised before anything depends on them. A relevance
+      # derivation that has silently stopped refusing would gate this lane open.
+      - name: Self-test the lane helpers
+        # sys.path[0] is the script's own directory, so the two helpers import from repo root too.
+        run: python3 scripts/ci/test_adequacy_lane.py
+
+      - name: Derive relevance
+        id: plan
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_FULL: ${{ inputs.full }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # A schedule measures everything by definition. A dispatch defaults to full because a
+          # human asking for this lane by hand is asking for a measurement, not for a gate.
+          # `x && y` as the last command of a case branch returns 1 when x is false, which under
+          # `set -e` aborts the job instead of choosing relevance mode. Spelled out as an `if`.
+          full=""
+          if [[ "${EVENT_NAME}" == "schedule" ]]; then
+            full="--full"
+          elif [[ "${EVENT_NAME}" == "workflow_dispatch" && "${DISPATCH_FULL}" == "true" ]]; then
+            full="--full"
+          fi
+
+          if [[ -n "${full}" ]]; then
+            python3 scripts/ci/adequacy_lane_plan.py --full | tee plan.txt
+          else
+            if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+              base="${BASE_SHA}"; head="${HEAD_SHA}"
+            else
+              base="${PUSH_BEFORE}"; head="${PUSH_AFTER}"
+            fi
+            # Fail OPEN, never quiet. A diff we cannot compute is not evidence that nothing
+            # changed, so an unresolvable range measures everything instead of measuring nothing.
+            if [[ -z "${base}" || "${base}" =~ ^0+$ ]] \
+               || ! git cat-file -e "${base}^{commit}" 2>/dev/null \
+               || ! git cat-file -e "${head}^{commit}" 2>/dev/null; then
+              echo "::warning::cannot resolve ${base:-<empty>}...${head}; measuring every in-scope corpus"
+              python3 scripts/ci/adequacy_lane_plan.py --full | tee plan.txt
+            else
+              git diff --name-only "${base}...${head}" \
+                | python3 scripts/ci/adequacy_lane_plan.py | tee plan.txt
+            fi
+          fi
+
+          # The script writes only to stdout and never opens $GITHUB_OUTPUT or
+          # $GITHUB_STEP_SUMMARY itself: opening a path read from the environment is an
+          # uncontrolled-path sink (CodeQL py/path-injection). Routing happens here.
+          grep -E '^[a-z_]+=' plan.txt >> "$GITHUB_OUTPUT"
+          {
+            echo "## Adequacy lane plan"
+            echo
+            echo '```'
+            cat plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  measure:
+    name: Re-derive selected corpora
+    needs: plan
+    # Relevance finding nothing is the common case and a legitimate one: no change in this diff can
+    # move a published number, so there is nothing to re-derive. The job is skipped rather than run
+    # empty, and `check-drift` below knows the difference between this skip and a skip caused by a
+    # failure — the two must never read alike.
+    if: needs.plan.outputs.relevant_corpora != ''
+    runs-on: ubuntu-latest
+    # Ceiling for the process corpus: ~32 `cargo build -p assay-cli` invocations plus a cold
+    # first build, measured at roughly fifteen minutes. 75 leaves room for a cache miss without
+    # inheriting GitHub's 360-minute default, which is not a ceiling.
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # `privileged-mcp-action-v0` builds `assay-cli` per mutant and `rfc8785-canonicalization`
+      # builds `assay-canonical`'s tests, so the toolchain is set up unconditionally rather than
+      # behind a condition that would have to restate the cost classes.
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-workspaces: "."
+
+      # The tool is not vendored (INDEX.md, "Where the adequacy tool lives"): `measure_all.py`
+      # imports it from `<repo>/../corpus-adequacy` and reads `git -C <tool> rev-parse HEAD` to
+      # record which instrument produced each number.
+      #
+      # Plain `git`, not actions/checkout, for two reasons. The destination is a SIBLING of the
+      # workspace and actions/checkout refuses a path outside it; and the tool is pinned PER
+      # CORPUS, so one measurement run may need the tool at two different commits — a row must
+      # record the commit its own manifest declares, and a corpus whose number was transcribed
+      # from a document measured at an older commit keeps that commit. Fetching an explicit SHA is
+      # pinned by construction, which is the property the SHA-pinning policy is protecting.
+      - name: Clone the instrument
+        shell: bash
+        env:
+          TOOL_REPOSITORY: ${{ needs.plan.outputs.tool_repository }}
+          TOOL_DIR: ${{ needs.plan.outputs.tool_dir }}
+        run: |
+          set -euo pipefail
+          tool="$(dirname "${GITHUB_WORKSPACE}")/${TOOL_DIR}"
+          git init --quiet "${tool}"
+          git -C "${tool}" remote add origin "https://github.com/${TOOL_REPOSITORY}.git"
+          echo "TOOL_PATH=${tool}" >> "$GITHUB_ENV"
+
+      - name: Re-derive the selected corpora
+        shell: bash
+        env:
+          PLANNED: ${{ needs.plan.outputs.relevant_corpora }}
+          PIN_GROUPS: ${{ needs.plan.outputs.pin_groups }}
+          SIBLING_PINS: ${{ needs.plan.outputs.sibling_pins }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${PLANNED}" || -z "${PIN_GROUPS}" ]]; then
+            echo "::error::the plan selected no corpora; a run that measures nothing must not reach the drift check as though it had"
+            exit 1
+          fi
+          # Non-instrument siblings: corpora whose subject lives in another
+          # repository. They were out of scope while nothing pinned them, because
+          # cloning at a floating ref would measure whatever that repo happened to
+          # be. Pinned, they are ordinary: a score against a named commit stays
+          # permanently true of it, and re-deriving it here is what proves the
+          # published number is reproducible rather than remembered.
+          #
+          # Fetched by explicit sha and verified, exactly like the instrument. A
+          # clone that silently lands elsewhere would produce a real-looking number
+          # about the wrong subject, which is worse than not measuring.
+          for pin in ${SIBLING_PINS}; do
+            dir="${pin%%=*}"
+            spec="${pin#*=}"
+            repo="${spec%@*}"
+            sha="${spec#*@}"
+            target="${GITHUB_WORKSPACE}/../${dir}"
+            echo "::group::sibling ${dir} <- ${repo}@${sha}"
+            git init --quiet "${target}"
+            git -C "${target}" remote add origin "https://github.com/${repo}.git"
+            git -C "${target}" fetch --quiet --depth 1 origin "${sha}"
+            git -C "${target}" checkout --quiet --detach FETCH_HEAD
+            landed="$(git -C "${target}" rev-parse HEAD)"
+            if [[ "${landed}" != "${sha}" ]]; then
+              echo "::error::${dir} is at ${landed}, not the pinned ${sha}"
+              exit 1
+            fi
+            echo "::endgroup::"
+          done
+
+          # One pass per instrument commit, so every row records the commit its manifest pins.
+          for group in ${PIN_GROUPS}; do
+            commit="${group%%=*}"
+            names="${group#*=}"
+            [[ -n "${names}" ]] || continue
+
+            git -C "${TOOL_PATH}" fetch --quiet --depth 1 origin "${commit}"
+            git -C "${TOOL_PATH}" checkout --quiet --detach FETCH_HEAD
+            actual="$(git -C "${TOOL_PATH}" rev-parse HEAD)"
+            if [[ "${actual}" != "${commit}" ]]; then
+              echo "::error::instrument is at ${actual}, not the pinned ${commit}"
+              exit 1
+            fi
+
+            args=()
+            IFS=',' read -ra corpora <<< "${names}"
+            for name in "${corpora[@]}"; do
+              args+=(--only "${name}")
+            done
+            echo "::group::measuring ${corpora[*]} with corpus-adequacy @ ${commit}"
+            python3 conformance/adequacy/measure_all.py "${args[@]}"
+            echo "::endgroup::"
+          done
+
+      - name: Upload measured results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: adequacy-results
+          path: conformance/adequacy/results.json
+          if-no-files-found: error
+          retention-days: 30
+
+  check-drift:
+    name: Adequacy drift gate
+    needs: [plan, measure]
+    # THE GATE. `always()` so an upstream job that failed or was skipped produces a red gate rather
+    # than an absent one: a required check that disappears when the work does not run is the bug
+    # this lane exists to catch, one level up.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Refuse an upstream job that did not succeed
+        shell: bash
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          MEASURE_RESULT: ${{ needs.measure.result }}
+          PLANNED: ${{ needs.plan.outputs.relevant_corpora }}
+        run: |
+          set -euo pipefail
+          if [[ "${PLAN_RESULT}" != "success" ]]; then
+            echo "::error::plan finished '${PLAN_RESULT}'; without a plan this gate cannot say what should have been measured, so it refuses"
+            exit 1
+          fi
+          # The ONLY skip this gate accepts, and only because the plan itself said there was
+          # nothing to re-derive. Any other skip or failure is a lane that went quiet.
+          if [[ "${MEASURE_RESULT}" == "skipped" && -z "${PLANNED}" ]]; then
+            echo "measure skipped: the plan selected no corpora, so nothing needed re-deriving"
+            exit 0
+          fi
+          if [[ "${MEASURE_RESULT}" != "success" ]]; then
+            echo "::error::measure finished '${MEASURE_RESULT}' while the plan selected '${PLANNED}'; the published numbers were not re-derived, so this gate refuses rather than reporting a verdict it cannot support"
+            exit 1
+          fi
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # Deliberately overwrites the committed results.json with the one this run measured. The
+      # gate must judge what was re-derived here, not what was committed earlier. When nothing was
+      # selected there is no artifact and the committed file stands — which is the whole content of
+      # the claim being made in that case, and the coverage report below says so per corpus.
+      - name: Download measured results
+        if: needs.measure.result == 'success'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: adequacy-results
+          path: conformance/adequacy
+
+      - name: Assert the run held to its plan
+        shell: bash
+        env:
+          PLANNED: ${{ needs.plan.outputs.relevant_corpora }}
+          ALL: ${{ needs.plan.outputs.all_corpora }}
+          OUT_OF_SCOPE: ${{ needs.plan.outputs.out_of_scope_corpora }}
+          MODE: ${{ needs.plan.outputs.mode }}
+        run: |
+          set -euo pipefail
+          # A full run owes every in-scope corpus. Letting it report success on a subset would
+          # make the schedule — the only thing bounding staleness — meaningless.
+          require_all=()
+          if [[ "${MODE}" == "full" ]]; then
+            require_all+=(--require-all)
+          fi
+          python3 scripts/ci/adequacy_lane_assert.py \
+            --results conformance/adequacy/results.json \
+            --manifest-dir conformance/adequacy \
+            --planned "${PLANNED}" \
+            --all "${ALL}" \
+            --out-of-scope "${OUT_OF_SCOPE}" \
+            "${require_all[@]}" | tee coverage.txt
+
+      # The drift check is what gates. It compares every published number in INDEX.md and
+      # ERRATA.md against the measurement, and fails when the prose and the JSON have parted.
+      - name: Check published numbers against the measurement
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 conformance/adequacy/check_published_numbers.py | tee drift.txt
+
+      - name: Summarise what this run does and does not vouch for
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Adequacy drift gate"
+            echo
+            echo '```'
+            cat coverage.txt 2>/dev/null || echo "(coverage assertion did not run)"
+            echo '```'
+            echo
+            echo '```'
+            cat drift.txt 2>/dev/null || echo "(drift check did not run)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

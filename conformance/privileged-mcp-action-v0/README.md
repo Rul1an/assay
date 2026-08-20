@@ -18,15 +18,17 @@ Vectors for the [Privileged MCP Action Evidence Profile v0](../../docs/profiles/
 
 ## What a reproduction establishes: read [ERRATA.md](ERRATA.md) first
 
-Reproducing all fourteen outcomes demonstrates agreement on **six** of the profile's rules, not on
-the profile. Nineteen further rules that v0.md promises are not discriminated by any vector here, so
-an implementation can omit them and still reproduce this digest. Two of those — the `origin` and
-`code` legs of the Stage 3 marker triple — cannot be discriminated by any vector this generator can
-produce, because `gen_vectors.py` hard-codes the single marker shape.
+Reproducing all fourteen outcomes **can distinguish an implementation on at most five** of the
+profile's rules, and even those only at the points these vectors probe. **Twenty-two further rules
+that v0.md promises are not discriminated by any vector here**, so an implementation can omit them and
+still reproduce all fourteen expected outcomes. Two of the twenty-two cannot be closed by writing a
+better vector at all, and one cannot be isolated by any bundle that could exist.
 
-That does not change the exercise, the expectations, or the value of doing it. It changes the claim
-that can be made afterwards, by the implementer and by us. [ERRATA.md](ERRATA.md) names all
-twenty-five measured rules and is pinned to the current corpus digest.
+Five of twenty-seven is 18.5%. The run and the expectations are unchanged and the exercise is still
+worth doing. What changes is the claim that can be made afterwards, by the implementer and by us, and
+the report template now carries a field for it. [ERRATA.md](ERRATA.md) names all twenty-seven measured
+rules with the profile sentence promising each, says which a new vector could close and which it could
+not, rules on whether it may be read before a freeze, and is pinned to the current corpus digest.
 
 ## Attempting the independent reproduction
 

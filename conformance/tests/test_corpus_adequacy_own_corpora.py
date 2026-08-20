@@ -100,7 +100,7 @@ class OwnCorpusAdequacy(unittest.TestCase):
         # the pack's README declares, not whatever happens to be killable.
         m = json.loads(MANIFEST.read_text())
         in_scope = {x["label"] for x in m["mutants"]["error_response_id"]
-                    if x.get("scope", "declared") == "declared"}
+                    if x.get("scope", "declared") == "declared" and not x.get("control")}
         self.assertEqual(in_scope, {
             "6 MCP tolerates an omitted id",
             "7 MCP RequestId excludes null",
