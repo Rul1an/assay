@@ -126,15 +126,54 @@ CLEAN = "clean"
 _GIT_TIMEOUT = 30
 
 
+def is_canonical_dependency(path, repo: Path) -> bool:
+    """True iff path is a canonical non-empty repository-relative path.
+
+    Rejects git pathspec magic (a leading colon), absolute paths, ``..``,
+    empty segments, and anything that resolves outside the repo root.
+    A malformed dependency is a typed finding, never filtered away.
+    """
+    if not isinstance(path, str) or path == "":
+        return False
+    if path.startswith(":"):
+        return False
+    if "\\" in path:
+        return False
+    if path.startswith("/") or Path(path).is_absolute():
+        return False
+    parts = path.split("/")
+    if any(part == "" or part == "." or part == ".." for part in parts):
+        return False
+    try:
+        root = repo.resolve()
+        resolved = (root / path).resolve()
+        resolved.relative_to(root)
+    except (ValueError, OSError):
+        return False
+    return True
+
+
 def classify_measured_commit(commit, depends_on, repo: Path) -> tuple[str, list[str]]:
     """Classify one recorded measurement commit. Unresolved is never clean.
 
     Only a lowercase 40-hex string is offered to git. Everything else is
     malformed, including names git would resolve (HEAD, origin/main) and
-    strings that look like flags (-n).
+    strings that look like flags (-n). Each depends_on entry must be a
+    canonical repository-relative path; pathspec magic is malformed.
     """
     if not isinstance(commit, str) or not COMMIT_RE.fullmatch(commit):
         return MALFORMED, []
+    if depends_on is None:
+        paths_in = []
+    elif isinstance(depends_on, (list, tuple)):
+        paths_in = list(depends_on)
+    else:
+        return MALFORMED, []
+    paths = []
+    for raw in paths_in:
+        if not is_canonical_dependency(raw, repo):
+            return MALFORMED, [raw] if isinstance(raw, str) else []
+        paths.append(raw)
     repo_s = str(repo)
     try:
         probe = subprocess.run(
@@ -147,10 +186,10 @@ def classify_measured_commit(commit, depends_on, repo: Path) -> tuple[str, list[
         return UNREACHABLE, []
     if probe.returncode != 0:
         return UNREACHABLE, []
-    paths = [p for p in (depends_on or []) if isinstance(p, str)]
     try:
         moved = subprocess.run(
-            ["git", "-C", repo_s, "diff", "--name-only", commit, "HEAD", "--", *paths],
+            ["git", "-C", repo_s, "--literal-pathspecs",
+             "diff", "--name-only", commit, "HEAD", "--", *paths],
             capture_output=True,
             text=True,
             timeout=_GIT_TIMEOUT,
@@ -303,9 +342,14 @@ def check() -> list[str]:
         kind, extra = classify_measured_commit(
             taken["commit"], taken.get("depends_on", []), GIT_REPO)
         if kind == MALFORMED:
-            findings.append(
-                "%s records a malformed measured_at.commit; a freshness claim "
-                "cannot be made from %r" % (name, taken["commit"]))
+            if extra:
+                findings.append(
+                    "%s records a malformed depends_on path; a freshness claim "
+                    "cannot be made from %r" % (name, extra[0]))
+            else:
+                findings.append(
+                    "%s records a malformed measured_at.commit; a freshness claim "
+                    "cannot be made from %r" % (name, taken["commit"]))
         elif kind == UNREACHABLE:
             shown = taken["commit"]
             if isinstance(shown, str) and COMMIT_RE.fullmatch(shown):

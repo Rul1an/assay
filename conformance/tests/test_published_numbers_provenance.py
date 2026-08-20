@@ -141,6 +141,66 @@ class ClassifyMeasuredCommit(unittest.TestCase):
             self.assertEqual(kind, chk.CLEAN)
             self.assertEqual(extra, [])
 
+    HOSTILE_DEPENDS = (
+        ":(exclude)tracked.txt",
+        ":!tracked.txt",
+        ":(glob,exclude)**",
+        "/tracked.txt",
+        "../tracked.txt",
+        "foo/../tracked.txt",
+        "foo//tracked.txt",
+        "",
+        "tracked.txt/",
+        ":tracked.txt",
+    )
+
+    def test_hostile_depends_on_is_malformed_not_clean(self):
+        """CONTROL: pathspec magic / non-canonical paths are typed findings.
+
+        Accepting :(exclude)tracked.txt as a path would hide a dirty file and
+        report CLEAN. Validation removed must make this test RED.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            first = self._tiny_repo(
+                repo, {"tracked.txt": "a\n"}, later={"tracked.txt": "b\n"}
+            )
+            dirty_kind, dirty_extra = chk.classify_measured_commit(
+                first, ["tracked.txt"], repo
+            )
+            self.assertEqual(dirty_kind, chk.DIRTY)
+            self.assertIn("tracked.txt", dirty_extra)
+            for pathspec in self.HOSTILE_DEPENDS:
+                with self.subTest(pathspec=pathspec):
+                    kind, extra = chk.classify_measured_commit(first, [pathspec], repo)
+                    self.assertEqual(kind, chk.MALFORMED)
+                    self.assertNotEqual(kind, chk.CLEAN)
+                    if pathspec:
+                        self.assertIn(pathspec, extra)
+
+    def test_true_no_drift_on_tracked_path_is_clean(self):
+        """CONTROL: a genuine no-drift path is still GREEN after path validation."""
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            first = self._tiny_repo(repo, {"tracked.txt": "a\n"})
+            kind, extra = chk.classify_measured_commit(first, ["tracked.txt"], repo)
+            self.assertEqual(kind, chk.CLEAN)
+            self.assertEqual(extra, [])
+
+    def test_one_malformed_dependency_is_not_filtered_away(self):
+        """A valid dirty path next to pathspec magic is still a typed finding."""
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            first = self._tiny_repo(
+                repo, {"tracked.txt": "a\n"}, later={"tracked.txt": "b\n"}
+            )
+            kind, extra = chk.classify_measured_commit(
+                first, ["tracked.txt", ":(exclude)tracked.txt"], repo
+            )
+            self.assertEqual(kind, chk.MALFORMED)
+            self.assertNotEqual(kind, chk.CLEAN)
+            self.assertNotEqual(kind, chk.DIRTY)
+
 
 class CheckerFailsClosedOnUnresolved(unittest.TestCase):
     """The caller's findings and exit must not stay clean when resolution fails.
@@ -201,11 +261,22 @@ class CheckerFailsClosedOnUnresolved(unittest.TestCase):
             self.assertFalse(payload["ok"])
             self.assertTrue(payload["findings"])
 
-
     def test_checker_does_no_network(self):
         src = Path(chk.__file__).read_text(encoding="utf-8")
         self.assertNotIn("git fetch", src)
         self.assertNotIn("shell=True", src)
+        self.assertIn("--literal-pathspecs", src)
+
+    def test_a_hostile_depends_on_makes_the_checker_red(self):
+        """CONTROL: :(exclude) in results.json is a typed finding, not no-drift."""
+        with sandbox() as root:
+            self.assertEqual(chk.check(), [])
+            res = root / "conformance/adequacy/results.json"
+            doc = json.loads(res.read_text())
+            doc["corpora"][0]["measured_at"]["depends_on"] = [":(exclude)tracked.txt"]
+            res.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
+            self.assert_red("malformed")
+            self.assertEqual(chk.main(["--json"]), 1)
 
 
 if __name__ == "__main__":

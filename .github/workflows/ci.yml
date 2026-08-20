@@ -164,6 +164,15 @@ jobs:
           python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py
           python3 conformance/run_all.py --require-complete --completion-scope required
 
+      # Stdlib-only. Required CI cannot go green if these tests are deleted;
+      # adequacy-drift is not a required context. No if:/continue-on-error.
+      # After setup-python so this uses the pinned 3.12, not the runner default.
+      - name: Published-numbers provenance contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 conformance/tests/test_published_numbers_provenance.py
+
       - name: Evidence vocabulary guard
         shell: bash
         run: |
