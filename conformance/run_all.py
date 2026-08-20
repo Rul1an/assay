@@ -152,6 +152,15 @@ SUITES = [
                 "No self-run by design.",
     },
     {
+        "id": "privileged-mcp-action-v1",
+        "path": "conformance/privileged-mcp-action-v1",
+        "vectors": 7,
+        "maturity": "published profile corpus; candidate-neutral runner not registered",
+        "kind": NEEDS_CANDIDATE,
+        "note": "candidate-neutral runner is not registered. The shipped Assay verifier "
+                "would exercise the author implementation, not an outside candidate.",
+    },
+    {
         "id": "mcp-jsonrpc-id-conformance",
         "path": "examples/mcp-jsonrpc-id-conformance",
         "vectors": 3,
@@ -215,6 +224,9 @@ def main() -> int:
 
     ran = [r for r in results if r["grade"] in (PROVED, FALSE, UNPROVED)]
     not_run = [r for r in results if r not in ran]
+    declared = len(results)
+    executed = len(ran)
+    complete = executed == declared
     worst = max((RANK[r["grade"]] for r in results), default=0)
 
     if args.json:
@@ -222,6 +234,7 @@ def main() -> int:
             "schema": "assay.conformance.run_all.v1",
             "suites": results,
             "ran": len(ran), "not_run": len(not_run),
+            "declared": declared, "executed": executed, "complete": complete,
             "worst_grade": [PROVED, UNPROVED, FALSE][worst],
         }, indent=2, sort_keys=True))
     else:
@@ -229,8 +242,9 @@ def main() -> int:
         for r in results:
             print("%-*s  %-15s  %s" % (width, r["id"], r["grade"], r["detail"]))
         print()
-        print("ran: %d   did NOT run: %d   worst grade: %s"
-              % (len(ran), len(not_run), [PROVED, UNPROVED, FALSE][worst]))
+        print("executed: %d/%d   complete: %s   did NOT run: %d   worst grade: %s"
+              % (executed, declared, "yes" if complete else "no", len(not_run),
+                 [PROVED, UNPROVED, FALSE][worst]))
         if not_run:
             # State this every time. A suite that did not run is not a suite that agreed.
             print("NOT RUN (declared, not a pass): %s"

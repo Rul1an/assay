@@ -20,6 +20,7 @@ grade `false` or `unproved` rather than pass silently.
 | Corpus | Vectors | Runner | Maturity |
 |---|---|---|---|
 | [`privileged-mcp-action-v0`](privileged-mcp-action-v0/) | 14 (5 accept, 9 reject) | **needs a candidate** | frozen, digest-pinned, open reproduction request ([#1840](https://github.com/Rul1an/assay/issues/1840)) |
+| [`privileged-mcp-action-v1`](privileged-mcp-action-v1/) | 7 (4 accept, 3 reject) | **needs a candidate** | published profile corpus; no candidate-neutral runner registered |
 | [`mcp-jsonrpc-id-conformance`](../examples/mcp-jsonrpc-id-conformance/) | 3 | stdlib, `check.py reproduce` | published pack; carries a positive control |
 | [`rfc8785` canonicalization](../crates/assay-canonical/tests/vectors/rfc8785.json) | 31 | `cargo test -p assay-canonical --test rfc8785_conformance` | prerequisite vectors; vendored byte-identical into the clean-room pack |
 | [`mcp-era-parity-v0`](../crates/assay-core/tests/fixtures/mcp-era-parity-v0/) | 18 (+2 equivalence pairs) | `cargo test -p assay-core --lib mcp::era_parity_tests` | **exploratory** — deliberately lower than the frozen corpus |
@@ -61,9 +62,11 @@ stronger, more actionable result than a check that could not complete.
 
 Three states are **declared, never inferred**, and always printed in the summary:
 
-- `needs_candidate` — `privileged-mcp-action-v0` is a clean-room gate.
-  `score_candidate.py` requires `--entrypoint`, an outside implementation. There
-  is no self-run and deliberately so: a corpus that scores itself answers a
+- `needs_candidate` — `privileged-mcp-action-v0` is a clean-room gate whose
+  `score_candidate.py` requires `--entrypoint`, an outside implementation.
+  `privileged-mcp-action-v1` likewise has no candidate-neutral runner registered;
+  invoking the shipped Assay verifier would exercise the author implementation.
+  There is no self-run for either corpus: a corpus that scores itself answers a
   question nobody asked.
 - `not_selected` — a Rust-driven corpus when `--with-cargo` was not passed.
 - `external` — the corpus lives in another repository.
@@ -74,8 +77,10 @@ implementations they grade, applied to the runner that grades them.
 
 ## What a green run does and does not establish
 
-A green run says the published corpora reproduce **their own** pinned verdicts
-on this checkout. It says nothing about:
+A green run says every suite that **executed** reproduced its own pinned verdicts
+on this checkout. It does not say every declared suite ran: inspect `complete`
+and `executed/declared` in JSON, or `complete` in terminal output. It also says
+nothing about:
 
 - **independence** — everything here was authored in this workspace. Agreement
   with yourself is not evidence.
@@ -88,10 +93,11 @@ on this checkout. It says nothing about:
 
 ## Claim vocabulary
 
-Where a reproduction is recorded, it carries an
+Where a reproduction is recorded, it uses an
 [ACM Artifact Review and Badging](https://www.acm.org/publications/policies/artifact-review-and-badging-current)
-class, because the distinction is easy to blur and ACM already drew it. Note the
-terms are the reverse of the common intuition:
+classification because the distinction is easy to blur and ACM already drew it.
+These are **ACM-aligned classifications, not ACM-awarded badges**. Note the terms
+are the reverse of the common intuition:
 
 **These one-line glosses are abbreviations, not the criteria.** The badges carry
 requirements this table does not restate: *Artifacts Available* needs an archival
@@ -108,16 +114,18 @@ before claiming a badge; the column below only says which distinction is meant.
 | **Results Reproduced** | a different team obtained the result, **using** the author's artifacts |
 | **Results Replicated** | a different team obtained the result **without** the author's artifacts |
 
-Running a published checker over its own shipped vectors is *Functional*.
+Running a published checker over its own shipped vectors is aligned with
+*Artifacts Evaluated -- Functional*; this project does not award that badge.
 
-**Where the ACM frame stops short, stated rather than glossed.** ACM assumes the
-author-supplied artifact is the author's *code*, so *Replicated* means obtaining
-the result without it. A conformance corpus inverts that: the corpus IS the
-artifact, and no reproduction can avoid using it. An outside party who writes an
-implementation from the specification text alone, imports none of the author's
-code, and recomputes every expected outcome from the inputs is therefore still
-*Results Reproduced* under a strict reading, because the vectors came from the
-author. That is the class this project claims, and it is the defensible one.
+**Where the ACM frame stops short, stated rather than glossed.** ACM artifacts
+explicitly include software, scripts, input datasets and raw data. A conformance
+corpus is therefore an author-supplied artifact, not an exception to that
+definition. An outside party who writes an implementation from the specification
+text alone, imports none of the author's code, and recomputes every expected
+outcome from the inputs is still *Results Reproduced* under a strict reading,
+because the run uses the author's vectors. *Results Replicated* would require
+obtaining the result without the author's artifacts and therefore cannot describe
+a run that scores this corpus.
 
 The fact worth reporting has no ACM badge: **independent implementation,
 author-supplied vectors, expected outcomes recomputed from inputs alone.** That
