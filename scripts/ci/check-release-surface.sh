@@ -277,22 +277,49 @@ check_rust_cli_installs() {
     'unsupported Rust CLI package; use assay-cli'
 }
 
-check_rge_bench_claim_parity() {
-  local readme_claim llms_claim
-  readme_claim="$(
-    sed -n 's#^- \[RGE-Bench\](https://github.com/rge-bench/rge-bench) — ##p' README.md
-  )"
-  llms_claim="$(
-    sed -n 's#^- \[RGE-Bench\](https://github.com/rge-bench/rge-bench): ##p' llms.txt
-  )"
+is_digest_scoped_rge_bench_claim() {
+  local claim="$1"
+  [[ "$claim" == *"digest-scoped and does not carry forward"* ]] || return 1
+  [[ "$claim" != *"externally reproduced"* ]] || return 1
+  printf '%s\n' "$claim" | grep -Eq \
+    'v1 71-vector digest `sha256:[0-9a-f]{64}`' || return 1
+  printf '%s\n' "$claim" | grep -Eq \
+    'current v2-candidate digest `sha256:[0-9a-f]{64}` \(95 vectors\) has \*\*not\*\* been reproduced by anyone but the author' || return 1
+}
 
-  if [ -z "$readme_claim" ]; then
-    fail "README.md: expected exactly one canonical RGE-Bench claim"
+check_rge_bench_claims() {
+  local link='[RGE-Bench](https://github.com/rge-bench/rge-bench)'
+  local claim_prefix="- $link" readme_prefix="- $link — " llms_prefix="- $link: "
+  local readme_count llms_count readme_claim llms_claim file claim
+
+  readme_count="$(awk -v prefix="$claim_prefix" 'index($0, prefix) == 1 { count++ } END { print count + 0 }' README.md)"
+  llms_count="$(awk -v prefix="$claim_prefix" 'index($0, prefix) == 1 { count++ } END { print count + 0 }' llms.txt)"
+  if [ "$readme_count" -ne 1 ]; then
+    fail "README.md: expected exactly one RGE-Bench claim"
+  fi
+  if [ "$llms_count" -ne 1 ]; then
+    fail "llms.txt: expected exactly one RGE-Bench claim"
+  fi
+  if [ "$readme_count" -ne 1 ] || [ "$llms_count" -ne 1 ]; then
     return
   fi
-  if [ -z "$llms_claim" ] || [ "$llms_claim" != "$readme_claim" ]; then
+
+  readme_claim="$(awk -v prefix="$readme_prefix" 'index($0, prefix) == 1 { print substr($0, length(prefix) + 1) }' README.md)"
+  llms_claim="$(awk -v prefix="$llms_prefix" 'index($0, prefix) == 1 { print substr($0, length(prefix) + 1) }' llms.txt)"
+  if [ "$llms_claim" != "$readme_claim" ]; then
     fail "llms.txt: RGE-Bench claim must match README.md digest scope"
   fi
+
+  for file in README.md llms.txt; do
+    if [ "$file" = "README.md" ]; then
+      claim="$readme_claim"
+    else
+      claim="$llms_claim"
+    fi
+    if ! is_digest_scoped_rge_bench_claim "$claim"; then
+      fail "$file: RGE-Bench claim must remain digest-scoped and name current-candidate non-reproduction"
+    fi
+  done
 }
 
 check_rust_cli_installs README.md 1
@@ -307,7 +334,7 @@ check_rust_cli_installs docs/use-cases/ci-gate.md 1
 release_link="Current release: [\`$PUBLISHED_TAG\`](https://github.com/Rul1an/assay/releases/tag/$PUBLISHED_TAG)"
 check_current_release_link README.md "$release_link"
 check_current_release_link docs/index.md "$release_link"
-check_rge_bench_claim_parity
+check_rge_bench_claims
 
 for file in \
   docs/getting-started/index.md \

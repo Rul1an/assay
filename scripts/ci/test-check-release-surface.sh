@@ -82,7 +82,8 @@ Install the SDK with pip install assay-it.
 uses: github/codeql-action/upload-sarif@d1ba80a13dd99fba24a470575428917156a28b43
 DOC
 printf '%s\n' 'Historical correction: pip install assay-it.' > "$TMP/docs/migration-v1.2.md"
-rge_claim='digest-scoped reproduction: v1 digest `sha256:reproduced` was independently implemented; the current candidate digest `sha256:current` has not been reproduced by anyone but the author.'
+rge_claim='reproduction is digest-scoped and does not carry forward: v1 71-vector digest `sha256:1111111111111111111111111111111111111111111111111111111111111111` was independently implemented; current v2-candidate digest `sha256:2222222222222222222222222222222222222222222222222222222222222222` (95 vectors) has **not** been reproduced by anyone but the author.'
+broad_rge_claim='neutral, externally reproduced conformance kit for evidence reviewability'
 cat > "$TMP/README.md" <<'DOC'
 cargo install assay-cli --version 5.1.0 --locked
 Current release: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0)
@@ -156,6 +157,43 @@ mutate_and_expect_failure() {
   echo "PASS: $name"
 }
 
+mutate_rge_pair_and_expect_failure() {
+  local name="$1" mode="$2" diagnostic="$3"
+  local readme_backup="$TMP/README.md.$name" llms_backup="$TMP/llms.txt.$name"
+  cp "$TMP/README.md" "$readme_backup"
+  cp "$TMP/llms.txt" "$llms_backup"
+
+  case "$mode" in
+    replace)
+      sed -i.bak -e "s#^- \[RGE-Bench\].*#- [RGE-Bench](https://github.com/rge-bench/rge-bench) — $broad_rge_claim#" "$TMP/README.md"
+      sed -i.bak -e "s#^- \[RGE-Bench\].*#- [RGE-Bench](https://github.com/rge-bench/rge-bench): $broad_rge_claim#" "$TMP/llms.txt"
+      rm -f "$TMP/README.md.bak" "$TMP/llms.txt.bak"
+      ;;
+    append)
+      printf '%s\n' "- [RGE-Bench](https://github.com/rge-bench/rge-bench) — $broad_rge_claim" >> "$TMP/README.md"
+      printf '%s\n' "- [RGE-Bench](https://github.com/rge-bench/rge-bench): $broad_rge_claim" >> "$TMP/llms.txt"
+      ;;
+    *)
+      echo "FAIL: unknown RGE mutation mode: $mode" >&2
+      exit 1
+      ;;
+  esac
+
+  if run_check >"$TMP/$name.out" 2>&1; then
+    echo "FAIL: mutation $name was not observed" >&2
+    exit 1
+  fi
+  grep -Fq "$diagnostic" "$TMP/$name.out" || {
+    echo "FAIL: mutation $name missed diagnostic: $diagnostic" >&2
+    cat "$TMP/$name.out" >&2
+    exit 1
+  }
+  mv "$readme_backup" "$TMP/README.md"
+  mv "$llms_backup" "$TMP/llms.txt"
+  mutation_count=$((mutation_count + 1))
+  echo "PASS: $name"
+}
+
 mutate_and_expect_failure wrong-python-package docs/getting-started/index.md \
   's/pip install assay-it/pip install assay/' 'unsupported Python package'
 mutate_and_expect_failure wrong-python-package-installation docs/getting-started/installation.md \
@@ -192,8 +230,12 @@ mutate_and_expect_failure unsupported-codex-guide docs/guides/editor-mcp-recipe.
   's/Codex uses .codex\/config.toml./assay mcp config-path codex/' \
   'config-path does not support Codex'
 mutate_and_expect_failure broad-rge-claim llms.txt \
-  's#digest-scoped reproduction:.*#neutral, externally reproduced conformance kit for evidence reviewability#' \
+  "s#^- \[RGE-Bench\].*#- [RGE-Bench](https://github.com/rge-bench/rge-bench): $broad_rge_claim#" \
   'RGE-Bench claim must match README.md digest scope'
+mutate_rge_pair_and_expect_failure broad-rge-claim-both replace \
+  'RGE-Bench claim must remain digest-scoped'
+mutate_rge_pair_and_expect_failure duplicate-broad-rge-claim-both append \
+  'expected exactly one RGE-Bench claim'
 mutate_and_expect_failure wrong-rust-package-ci docs/getting-started/ci-integration.md \
   's/cargo install assay-cli --version 5.1.0 --locked/cargo install assay/' \
   'unsupported Rust CLI package'
@@ -284,8 +326,8 @@ echo "PASS: duplicate-release"
 mutate_and_expect_failure stale-cli-version docs/reference/cli/index.md \
   's/# assay 5.1.0/# assay 5.0.0/' 'documented CLI version drift'
 
-if [ "$mutation_count" -ne 42 ]; then
-  echo "FAIL: expected 42 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 44 ]; then
+  echo "FAIL: expected 44 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"
