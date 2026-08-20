@@ -240,6 +240,13 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(v1["grade"], run_all.NEEDS_CANDIDATE)
         self.assertIn("candidate", v1["detail"].lower())
 
+    def test_v1_inventory_path_and_vector_count_match_its_manifest(self):
+        suite = next(s for s in run_all.SUITES if s["id"] == "privileged-mcp-action-v1")
+        manifest_path = run_all.REPO / suite["path"] / "MANIFEST.json"
+        self.assertTrue(manifest_path.is_file(), manifest_path)
+        manifest = json.loads(manifest_path.read_text())
+        self.assertEqual(suite["vectors"], sum(manifest["counts"].values()))
+
     def test_text_mode_always_names_the_suites_that_did_not_run(self):
         p = subprocess.run([sys.executable, str(run_all.__file__)],
                            capture_output=True, text=True, timeout=300)
