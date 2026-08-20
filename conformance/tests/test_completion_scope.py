@@ -11,6 +11,7 @@ on required_complete, not by mapping 3 to 0.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import unittest
@@ -20,7 +21,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import registry  # noqa: E402
 import run_all  # noqa: E402
 
-WORKFLOW = Path(__file__).resolve().parents[2] / ".github/workflows/conformance-inventory.yml"
+REPO = Path(__file__).resolve().parents[2]
+CI_YML = REPO / ".github/workflows/ci.yml"
+STANDALONE = REPO / ".github/workflows/conformance-inventory.yml"
+INVENTORY_STEP_RE = re.compile(r"(?ms)^      - name: Conformance inventory\n(?:        .+\n)+")
+JOB_KEY_RE = re.compile(r"^  [A-Za-z0-9_][A-Za-z0-9_-]*:")
+
+
+def _scope_job(text: str) -> str:
+    lines = text.splitlines(keepends=True)
+    start = next((i for i, line in enumerate(lines) if line.startswith("  scope:")), None)
+    if start is None:
+        raise AssertionError("ci.yml missing scope job")
+    end = start + 1
+    while end < len(lines) and not JOB_KEY_RE.match(lines[end]):
+        end += 1
+    return "".join(lines[start:end])
+
+
+def _inventory_step(text: str) -> str:
+    step = INVENTORY_STEP_RE.search(_scope_job(text))
+    if step is None:
+        raise AssertionError("scope job missing Conformance inventory step")
+    return step.group(0)
 
 POLICIES = {
     "mcp-jsonrpc-id-conformance": "required",
@@ -196,23 +219,36 @@ class RealTreeScopes(unittest.TestCase):
 
 
 class ProductCallsite(unittest.TestCase):
-    def test_workflow_invokes_both_flags_and_does_not_map_3_to_0(self):
-        text = WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("conformance/run_all.py --require-complete --completion-scope required", text)
-        self.assertNotIn("continue-on-error", text)
-        self.assertNotIn("paths:", text)
-        self.assertNotRegex(text, r"eq 3|returncode in \(0, 3\)")
+    def test_no_separate_inventory_workflow(self):
+        self.assertFalse(STANDALONE.exists(), STANDALONE)
+
+    def test_scope_job_invokes_both_flags_and_does_not_map_3_to_0(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        step = _inventory_step(text)
+        self.assertIn("python3 conformance/registry.py", step)
+        self.assertIn("conformance/tests/test_registry.py", step)
+        self.assertIn("conformance/tests/test_run_all.py", step)
+        self.assertIn("conformance/tests/test_completion_scope.py", step)
+        self.assertIn("conformance/run_all.py --require-complete --completion-scope required", step)
+        self.assertNotIn("continue-on-error", step)
+        self.assertNotRegex(step, r"eq 3|returncode in \(0, 3\)")
+
+    def test_deleting_the_scope_job_callsite_fails(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        mutated = INVENTORY_STEP_RE.sub("", text)
+        with self.assertRaises(AssertionError):
+            _inventory_step(mutated)
 
     def test_deleting_require_complete_callsite_fails(self):
-        text = WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("--require-complete", text)
-        self.assertNotIn("--require-complete", text.replace("--require-complete", ""))
+        step = _inventory_step(CI_YML.read_text(encoding="utf-8"))
+        self.assertIn("--require-complete", step)
+        self.assertNotIn("--require-complete", step.replace("--require-complete", ""))
 
     def test_deleting_completion_scope_required_callsite_fails(self):
-        text = WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("--completion-scope required", text)
+        step = _inventory_step(CI_YML.read_text(encoding="utf-8"))
+        self.assertIn("--completion-scope required", step)
         self.assertNotIn("--completion-scope required",
-                         text.replace("--completion-scope required", ""))
+                         step.replace("--completion-scope required", ""))
 
     def test_registry_py_does_not_neutralize_exit_3(self):
         source = Path(registry.__file__).read_text(encoding="utf-8")

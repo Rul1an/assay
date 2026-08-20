@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -26,7 +27,28 @@ sys.path.insert(0, str(REPO / "conformance"))
 import registry  # noqa: E402
 import run_all  # noqa: E402
 
-WORKFLOW = REPO / ".github/workflows/conformance-inventory.yml"
+CI_YML = REPO / ".github/workflows/ci.yml"
+STANDALONE = REPO / ".github/workflows/conformance-inventory.yml"
+INVENTORY_STEP_RE = re.compile(r"(?ms)^      - name: Conformance inventory\n(?:        .+\n)+")
+JOB_KEY_RE = re.compile(r"^  [A-Za-z0-9_][A-Za-z0-9_-]*:")
+
+
+def _scope_job(text: str) -> str:
+    lines = text.splitlines(keepends=True)
+    start = next((i for i, line in enumerate(lines) if line.startswith("  scope:")), None)
+    if start is None:
+        raise AssertionError("ci.yml missing scope job")
+    end = start + 1
+    while end < len(lines) and not JOB_KEY_RE.match(lines[end]):
+        end += 1
+    return "".join(lines[start:end])
+
+
+def _inventory_step(text: str) -> str:
+    step = INVENTORY_STEP_RE.search(_scope_job(text))
+    if step is None:
+        raise AssertionError("scope job missing Conformance inventory step")
+    return step.group(0)
 POLICIES = ("required", "optional", "external-candidate")
 
 
@@ -213,18 +235,24 @@ class HostileLoader(unittest.TestCase):
 
 
 class ProductWorkflow(unittest.TestCase):
-    def test_workflow_invokes_require_complete_as_a_hard_check(self):
-        self.assertTrue(WORKFLOW.is_file(), WORKFLOW)
-        text = WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("conformance/registry.py", text)
-        self.assertIn("conformance/run_all.py --require-complete --completion-scope required", text)
-        self.assertNotIn("continue-on-error", text)
-        self.assertNotIn("paths:", text)
+    def test_no_separate_inventory_workflow(self):
+        self.assertFalse(STANDALONE.exists(), STANDALONE)
+
+    def test_scope_job_invokes_require_complete_as_a_hard_check(self):
+        step = _inventory_step(CI_YML.read_text(encoding="utf-8"))
+        self.assertIn("python3 conformance/registry.py", step)
+        self.assertIn("conformance/run_all.py --require-complete --completion-scope required", step)
+        self.assertNotIn("continue-on-error", step)
+
+    def test_deleting_the_scope_job_callsite_fails_this_test(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        with self.assertRaises(AssertionError):
+            _inventory_step(INVENTORY_STEP_RE.sub("", text))
 
     def test_deleting_the_require_complete_callsite_fails_this_test(self):
-        text = WORKFLOW.read_text(encoding="utf-8")
-        mutated = text.replace("--require-complete", "")
-        self.assertNotEqual(mutated, text)
+        step = _inventory_step(CI_YML.read_text(encoding="utf-8"))
+        mutated = step.replace("--require-complete", "")
+        self.assertNotEqual(mutated, step)
         self.assertNotIn("--require-complete", mutated)
 
 
