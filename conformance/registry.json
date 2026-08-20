@@ -43,7 +43,7 @@
     },
     {
       "id": "rfc8785-canonicalization",
-      "path": "crates/assay-canonical/tests/vectors/rfc8785.json",
+      "path": "crates/assay-canonical/tests/vectors",
       "vectors": 31,
       "maturity": "prerequisite vectors; also vendored byte-identical into the clean-room pack",
       "kind": "cargo",

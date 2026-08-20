@@ -11,6 +11,7 @@ inventory.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -49,6 +50,8 @@ def _inventory_step(text: str) -> str:
     if step is None:
         raise AssertionError("scope job missing Conformance inventory step")
     return step.group(0)
+
+
 POLICIES = ("required", "optional", "external-candidate")
 
 
@@ -100,41 +103,93 @@ class PolicyAndMachineOutput(unittest.TestCase):
 
 
 class CompletenessMutations(unittest.TestCase):
-    """RED on the old hand list: delete-one and add-unregistered must bite."""
+    """Presence markers are an independent oracle. Registry stays the metadata source."""
 
-    def test_deleting_one_registered_published_suite_fails_the_gate(self):
-        doc = registry.load_registry()
-        before = [s["id"] for s in doc["suites"]]
-        self.assertIn("privileged-mcp-action-v0", before)
-        doc["suites"] = [s for s in doc["suites"] if s["id"] != "privileged-mcp-action-v0"]
-        with tempfile.TemporaryDirectory() as raw:
-            mutated = Path(raw) / "registry.json"
-            mutated.write_text(json.dumps(doc), encoding="utf-8")
-            reasons = registry.registry_completeness_reasons(
-                REPO, registry_path=mutated)
-        self.assertTrue(reasons, "deleting a published suite must not stay clean")
-        self.assertTrue(
-            any("privileged-mcp-action-v0" in r or "unregistered" in r for r in reasons),
-            reasons)
+    def test_each_local_suite_delete_is_caught_while_its_marker_remains(self):
+        suites = registry.load_suites()
+        local = [s for s in suites if not s["path"].startswith(("http://", "https://"))]
+        self.assertEqual(len(local), 5, [s["id"] for s in local])
+        for suite in local:
+            with self.subTest(suite["id"]):
+                marker = REPO / registry.sidecar_rel(suite["path"])
+                self.assertTrue(marker.is_file(), marker)
+                self.assertFalse(marker.is_symlink(), marker)
+                self.assertFalse((REPO / suite["path"] / ".assay-conformance-root").exists())
+                doc = registry.load_registry()
+                doc["suites"] = [s for s in doc["suites"] if s["id"] != suite["id"]]
+                with tempfile.TemporaryDirectory() as raw:
+                    mutated = Path(raw) / "registry.json"
+                    mutated.write_text(json.dumps(doc), encoding="utf-8")
+                    reasons = registry.registry_completeness_reasons(
+                        REPO, registry_path=mutated)
+                self.assertTrue(reasons, "deleting %s must not stay clean" % suite["id"])
+                self.assertTrue(
+                    any("unregistered published root" in r and suite["path"] in r
+                        for r in reasons),
+                    reasons)
 
-    def test_adding_an_unregistered_published_root_fails_the_gate(self):
-        root = REPO / "conformance" / "_unpublished_mutation_root_"
-        if root.exists():
-            shutil.rmtree(root)
+    def test_adding_an_unregistered_marker_fails_the_gate(self):
+        sidecar = REPO / registry.sidecar_rel("conformance/_unpublished_mutation_root_")
+        if sidecar.exists() or sidecar.is_symlink():
+            sidecar.unlink()
         try:
-            root.mkdir()
-            (root / "MANIFEST.json").write_text("{}\n", encoding="utf-8")
+            sidecar.write_bytes(b"")
             reasons = registry.registry_completeness_reasons(REPO)
-            self.assertTrue(reasons, "an unregistered published root must not pass")
+            self.assertTrue(reasons, "an unregistered marker must not pass")
             self.assertTrue(
                 any("_unpublished_mutation_root_" in r for r in reasons),
                 reasons)
         finally:
-            if root.exists():
-                shutil.rmtree(root)
+            if sidecar.exists() or sidecar.is_symlink():
+                sidecar.unlink()
+
+    def test_discovery_does_not_follow_symlink_directories(self):
+        outside = Path(tempfile.mkdtemp(prefix="assay-marker-"))
+        link = REPO / "conformance" / "_symlink_root_"
+        if link.exists() or link.is_symlink():
+            if link.is_symlink() or link.is_file():
+                link.unlink()
+            else:
+                shutil.rmtree(link)
+        try:
+            (outside / "nested.assay-conformance-root").write_bytes(b"")
+            os.symlink(outside, link)
+            roots = registry.discover_published_roots(REPO)
+            self.assertNotIn("conformance/_symlink_root_/nested", roots)
+            self.assertNotIn("conformance/_symlink_root_", roots)
+        finally:
+            if link.exists() or link.is_symlink():
+                link.unlink()
+            shutil.rmtree(outside, ignore_errors=True)
+
+    def test_marker_hardening_does_not_change_digest_pinned_files(self):
+        pinned = {
+            "examples/mcp-jsonrpc-id-conformance/SHA256SUMS":
+                "19443e513ea29b1d83c8f184fae65a056cd7c50f2f0fef9a9a54c224673ae5ac",
+            "conformance/privileged-mcp-action-v0/MANIFEST.json":
+                "15a726d1ecd3dec624d0224c5137921f55962a6dcdeefba2cf85041356858569",
+            "conformance/privileged-mcp-action-v1/MANIFEST.json":
+                "dafa33394e1d93869dbd17bdde3b6191ca237598429134c951aeec4e916a35b3",
+            "crates/assay-canonical/tests/vectors/rfc8785.json":
+                "64a71a5e26fc51918b77420c2b6b9b487de2ddd6ee8aa1ce7f3d9b55403a5c20",
+        }
+        for rel, expected in pinned.items():
+            data = (REPO / rel).read_bytes()
+            self.assertEqual(hashlib.sha256(data).hexdigest(), expected, rel)
+            self.assertNotIn(b"assay-conformance-root", data)
+        local = [s for s in registry.load_suites()
+                 if not s["path"].startswith(("http://", "https://"))]
+        for suite in local:
+            root = REPO / suite["path"]
+            self.assertFalse((root / ".assay-conformance-root").exists(), root)
+            self.assertTrue((REPO / registry.sidecar_rel(suite["path"])).is_file())
 
     def test_the_real_tree_is_green(self):
         self.assertEqual(registry.registry_completeness_reasons(REPO), [])
+        self.assertEqual(
+            sorted(registry.discover_published_roots(REPO)),
+            sorted(s["path"] for s in registry.load_suites()
+                   if not s["path"].startswith(("http://", "https://"))))
 
 
 class IndexProjection(unittest.TestCase):
@@ -228,6 +283,52 @@ class HostileLoader(unittest.TestCase):
             os.symlink(outside, link)
             with self.assertRaises(registry.RegistryError) as ctx:
                 registry.load_registry(link)
+            self.assertIn("symlink", str(ctx.exception).lower())
+        finally:
+            if link.exists() or link.is_symlink():
+                link.unlink()
+
+    def test_bool_is_not_a_vectors_int(self):
+        suite = dict(registry.load_suites()[0])
+        suite["vectors"] = True
+        path = self._write({"schema": registry.SCHEMA, "suites": [suite]})
+        with self.assertRaises(registry.RegistryError) as ctx:
+            registry.load_registry(path)
+        self.assertIn("vectors", str(ctx.exception))
+
+    def test_maturity_and_index_fields_must_be_strings(self):
+        for field, value in (
+            ("maturity", 1),
+            ("index_corpus", 1),
+            ("index_vectors", 3),
+            ("index_runner", False),
+            ("index_maturity", ["x"]),
+        ):
+            with self.subTest(field):
+                suite = dict(registry.load_suites()[0])
+                suite[field] = value
+                path = self._write({"schema": registry.SCHEMA, "suites": [suite]})
+                with self.assertRaises(registry.RegistryError) as ctx:
+                    registry.load_registry(path)
+                self.assertIn(field, str(ctx.exception))
+
+    def test_local_suite_path_symlink_outside_the_repo_is_rejected(self):
+        outside = Path(self.raw) / "outside_root"
+        outside.mkdir()
+        link = REPO / "conformance" / "_escape_suite_root_"
+        if link.exists() or link.is_symlink():
+            if link.is_symlink() or link.is_file():
+                link.unlink()
+            else:
+                shutil.rmtree(link)
+        try:
+            os.symlink(outside, link)
+            suite = dict(registry.load_suites()[0])
+            suite["id"] = "escape-suite"
+            suite["path"] = "conformance/_escape_suite_root_"
+            path = self._write({"schema": registry.SCHEMA, "suites": [suite]})
+            with self.assertRaises(registry.RegistryError) as ctx:
+                registry.load_registry(path)
             self.assertIn("symlink", str(ctx.exception).lower())
         finally:
             if link.exists() or link.is_symlink():

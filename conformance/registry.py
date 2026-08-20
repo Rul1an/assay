@@ -12,6 +12,7 @@ domain.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -23,7 +24,8 @@ KINDS = frozenset(("needs_candidate", "stdlib", "cargo", "external"))
 POLICIES = frozenset(("required", "optional", "external-candidate"))
 INDEX_FIELDS = ("index_corpus", "index_vectors", "index_runner", "index_maturity")
 REQUIRED_FIELDS = ("id", "path", "kind", "policy", "maturity") + INDEX_FIELDS
-SKIP_DIRS = frozenset(("adequacy", "tests"))
+MARKER_SUFFIX = ".assay-conformance-root"
+MARKER_SCAN_ROOTS = ("conformance", "examples", "crates")
 BEGIN_INVENTORY = "<!-- BEGIN REGISTRY INVENTORY -->"
 END_INVENTORY = "<!-- END REGISTRY INVENTORY -->"
 
@@ -38,6 +40,16 @@ def _reject_escape(path: str) -> None:
     parts = Path(path).parts
     if Path(path).is_absolute() or ".." in parts:
         raise RegistryError("suite path escapes the repository: %r" % path)
+
+
+def _reject_path_symlink_escape(path: str, repo: Path = REPO) -> None:
+    if path.startswith(("http://", "https://")):
+        return
+    resolved = (repo / path).resolve()
+    try:
+        resolved.relative_to(repo.resolve())
+    except ValueError:
+        raise RegistryError("suite path symlink escapes the repository: %r" % path)
 
 
 def _validate_suite(suite: object, seen: set[str]) -> dict:
@@ -60,8 +72,14 @@ def _validate_suite(suite: object, seen: set[str]) -> dict:
     if not isinstance(path, str) or not path:
         raise RegistryError("%s: path must be a non-empty string" % ident)
     _reject_escape(path)
+    _reject_path_symlink_escape(path)
+    if not isinstance(suite["maturity"], str):
+        raise RegistryError("%s: maturity must be a string" % ident)
+    for field in INDEX_FIELDS:
+        if not isinstance(suite[field], str):
+            raise RegistryError("%s: %s must be a string" % (ident, field))
     vectors = suite.get("vectors")
-    if vectors is not None and not isinstance(vectors, int):
+    if isinstance(vectors, bool) or (vectors is not None and not isinstance(vectors, int)):
         raise RegistryError("%s: vectors must be an int or null" % ident)
     kind = suite["kind"]
     if kind == "stdlib" and not isinstance(suite.get("expect_status"), str):
@@ -107,21 +125,43 @@ def load_suites(path: Path | None = None) -> list[dict]:
     return load_registry(path)["suites"]
 
 
+def _is_presence_marker(path: Path) -> bool:
+    return path.is_file() and not path.is_symlink() and path.stat().st_size == 0
+
+
+def sidecar_rel(root_rel: str) -> str:
+    """Map a registered local path to its sibling presence-oracle sidecar."""
+    return root_rel.rstrip("/") + MARKER_SUFFIX
+
+
+def _root_stem_from_sidecar_name(name: str) -> str | None:
+    if not name.endswith(MARKER_SUFFIX):
+        return None
+    stem = name[:-len(MARKER_SUFFIX)]
+    if not stem or stem.startswith("."):
+        return None
+    return stem
+
+
 def discover_published_roots(repo: Path) -> list[str]:
-    """In-tree published roots, independent of the registry (the add/delete bite)."""
+    """Presence-oracle scan. Sidecars sit beside roots; do not follow symlink dirs."""
     roots: list[str] = []
-    conformance = repo / "conformance"
-    if conformance.is_dir():
-        for child in sorted(conformance.iterdir()):
-            if not child.is_dir() or child.name in SKIP_DIRS or child.name.startswith("."):
-                continue
-            if (child / "MANIFEST.json").is_file() or (child / "descriptor.json").is_file():
-                roots.append(child.relative_to(repo).as_posix())
-    examples = repo / "examples"
-    if examples.is_dir():
-        for child in sorted(examples.iterdir()):
-            if child.is_dir() and child.name.endswith("-conformance"):
-                roots.append(child.relative_to(repo).as_posix())
+    for top in MARKER_SCAN_ROOTS:
+        base = repo / top
+        if not base.is_dir() or base.is_symlink():
+            continue
+        for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
+            dirnames[:] = [
+                name for name in dirnames
+                if not name.startswith(".") and not (Path(dirpath) / name).is_symlink()
+            ]
+            for name in filenames:
+                stem = _root_stem_from_sidecar_name(name)
+                if stem is None:
+                    continue
+                marker = Path(dirpath) / name
+                if _is_presence_marker(marker):
+                    roots.append((Path(dirpath) / stem).relative_to(repo).as_posix())
     return roots
 
 
@@ -174,6 +214,8 @@ def registry_completeness_reasons(
         registered.add(rel.rstrip("/"))
         if not (repo / rel).exists():
             reasons.append("registered path missing: %s (%s)" % (suite["id"], rel))
+        elif not _is_presence_marker(repo / sidecar_rel(rel)):
+            reasons.append("registered path missing marker: %s (%s)" % (suite["id"], rel))
     for root in discover_published_roots(repo):
         if root not in registered:
             reasons.append("unregistered published root: %s" % root)

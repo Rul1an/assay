@@ -26,6 +26,9 @@ CI_YML = REPO / ".github/workflows/ci.yml"
 STANDALONE = REPO / ".github/workflows/conformance-inventory.yml"
 INVENTORY_STEP_RE = re.compile(r"(?ms)^      - name: Conformance inventory\n(?:        .+\n)+")
 JOB_KEY_RE = re.compile(r"^  [A-Za-z0-9_][A-Za-z0-9_-]*:")
+REQUIRED_RUN_ALL = (
+    "python3 conformance/run_all.py --require-complete --completion-scope required"
+)
 
 
 def _scope_job(text: str) -> str:
@@ -44,6 +47,23 @@ def _inventory_step(text: str) -> str:
     if step is None:
         raise AssertionError("scope job missing Conformance inventory step")
     return step.group(0)
+
+
+def _active_run_lines(step: str) -> list[str]:
+    lines: list[str] = []
+    in_run = False
+    for raw in step.splitlines():
+        if raw.strip() == "run: |":
+            in_run = True
+            continue
+        if not in_run:
+            continue
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        lines.append(stripped)
+    return lines
+
 
 POLICIES = {
     "mcp-jsonrpc-id-conformance": "required",
@@ -225,13 +245,28 @@ class ProductCallsite(unittest.TestCase):
     def test_scope_job_invokes_both_flags_and_does_not_map_3_to_0(self):
         text = CI_YML.read_text(encoding="utf-8")
         step = _inventory_step(text)
-        self.assertIn("python3 conformance/registry.py", step)
-        self.assertIn("conformance/tests/test_registry.py", step)
-        self.assertIn("conformance/tests/test_run_all.py", step)
-        self.assertIn("conformance/tests/test_completion_scope.py", step)
-        self.assertIn("conformance/run_all.py --require-complete --completion-scope required", step)
+        lines = _active_run_lines(step)
+        self.assertEqual(lines[0], "set -euo pipefail")
+        self.assertIn("python3 conformance/registry.py", lines)
+        self.assertTrue(any("conformance/tests/test_registry.py" in ln for ln in lines))
+        self.assertTrue(any("conformance/tests/test_run_all.py" in ln for ln in lines))
+        self.assertTrue(any("conformance/tests/test_completion_scope.py" in ln for ln in lines))
+        self.assertIn(REQUIRED_RUN_ALL, lines)
+        self.assertEqual(lines.count(REQUIRED_RUN_ALL), 1)
+        self.assertFalse(any("||" in ln for ln in lines if REQUIRED_RUN_ALL in ln))
+        self.assertFalse(any(ln == "set +e" or ln.startswith("set +e ") for ln in lines))
+        self.assertNotIn("|| true", step)
+        self.assertNotIn("|| :", step)
         self.assertNotIn("continue-on-error", step)
         self.assertNotRegex(step, r"eq 3|returncode in \(0, 3\)")
+
+    def test_commented_or_colon_run_all_line_is_not_an_active_callsite(self):
+        step = _inventory_step(CI_YML.read_text(encoding="utf-8"))
+        commented = step.replace(REQUIRED_RUN_ALL, "# " + REQUIRED_RUN_ALL)
+        self.assertNotIn(REQUIRED_RUN_ALL, _active_run_lines(commented))
+        replaced = step.replace(REQUIRED_RUN_ALL, ":")
+        self.assertNotIn(REQUIRED_RUN_ALL, _active_run_lines(replaced))
+        self.assertIn(REQUIRED_RUN_ALL, _active_run_lines(step))
 
     def test_deleting_the_scope_job_callsite_fails(self):
         text = CI_YML.read_text(encoding="utf-8")
