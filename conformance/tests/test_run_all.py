@@ -253,7 +253,137 @@ class EndToEnd(unittest.TestCase):
         self.assertIn("NOT RUN (declared, not a pass)", p.stdout)
 
 
+class CompletenessPolicy(unittest.TestCase):
+    """complete is executed == declared. The executed grade is a different fact."""
+
+    def test_zero_of_n_is_incomplete_and_has_no_executed_grade(self):
+        results = [
+            {"id": "a", "grade": run_all.NEEDS_CANDIDATE},
+            {"id": "b", "grade": run_all.EXTERNAL},
+        ]
+        s = run_all.summarize(results)
+        self.assertEqual(s["declared"], 2)
+        self.assertEqual(s["executed"], 0)
+        self.assertIs(s["complete"], False)
+        self.assertIs(s["worst_executed_grade"], None)
+        self.assertEqual([r["grade"] for r in s["not_run"]],
+                         [run_all.NEEDS_CANDIDATE, run_all.EXTERNAL])
+        self.assertEqual(s["ran"], [])
+        self.assertEqual(run_all.exit_status(results, require_complete=False), 0)
+
+    def test_one_of_n_is_incomplete_even_when_executed_grade_is_proved(self):
+        results = [
+            {"id": "ran", "grade": run_all.PROVED},
+            {"id": "skip", "grade": run_all.NOT_SELECTED},
+            {"id": "need", "grade": run_all.NEEDS_CANDIDATE},
+        ]
+        s = run_all.summarize(results)
+        self.assertEqual(s["declared"], 3)
+        self.assertEqual(s["executed"], 1)
+        self.assertIs(s["complete"], False)
+        self.assertEqual(s["worst_executed_grade"], run_all.PROVED)
+        self.assertEqual([r["id"] for r in s["not_run"]], ["skip", "need"])
+        self.assertEqual(run_all.exit_status(results, require_complete=False), 0)
+
+    def test_require_complete_exit_uses_complete_not_the_executed_grade(self):
+        # Mutation bite: deleting the completeness exit check. Uses NOT_SELECTED
+        # so a "count needs_candidate as executed" mutant cannot satisfy this.
+        results = [
+            {"id": "ran", "grade": run_all.PROVED},
+            {"id": "skip", "grade": run_all.NOT_SELECTED},
+        ]
+        self.assertIs(run_all.summarize(results)["complete"], False)
+        self.assertEqual(run_all.summarize(results)["worst_executed_grade"], run_all.PROVED)
+        self.assertEqual(run_all.exit_status(results, require_complete=False), 0)
+        self.assertEqual(run_all.exit_status(results, require_complete=True),
+                         run_all.REQUIRE_COMPLETE_EXIT)
+
+    def test_n_of_n_is_complete_and_require_complete_keeps_grade_exit(self):
+        proved = [
+            {"id": "a", "grade": run_all.PROVED},
+            {"id": "b", "grade": run_all.PROVED},
+        ]
+        s = run_all.summarize(proved)
+        self.assertEqual(s["executed"], s["declared"])
+        self.assertIs(s["complete"], True)
+        self.assertEqual(s["worst_executed_grade"], run_all.PROVED)
+        self.assertEqual(s["not_run"], [])
+        self.assertEqual(run_all.exit_status(proved, require_complete=True), 0)
+
+        mixed = [
+            {"id": "a", "grade": run_all.PROVED},
+            {"id": "b", "grade": run_all.FALSE},
+        ]
+        self.assertIs(run_all.summarize(mixed)["complete"], True)
+        self.assertEqual(run_all.summarize(mixed)["worst_executed_grade"], run_all.FALSE)
+        self.assertEqual(run_all.exit_status(mixed, require_complete=True), 1)
+
+    def test_not_run_states_are_not_counted_as_executed(self):
+        # Mutation bite: treating a not-run suite as executed makes 1/N look complete.
+        results = [
+            {"id": "ran", "grade": run_all.PROVED},
+            {"id": "need", "grade": run_all.NEEDS_CANDIDATE},
+        ]
+        s = run_all.summarize(results)
+        self.assertEqual(s["executed"], 1)
+        self.assertEqual(s["declared"], 2)
+        self.assertIs(s["complete"], False)
+        self.assertEqual(s["not_run"][0]["grade"], run_all.NEEDS_CANDIDATE)
+
+
+class RequireCompleteFlag(unittest.TestCase):
+    def test_plain_json_mode_is_not_a_completeness_gate(self):
+        p = subprocess.run([sys.executable, str(run_all.__file__), "--json"],
+                           capture_output=True, text=True, timeout=300)
+        d = json.loads(p.stdout)
+        self.assertIs(d["complete"], False)
+        self.assertLess(d["executed"], d["declared"])
+        self.assertIn(d["worst_executed_grade"], (run_all.PROVED, run_all.UNPROVED, run_all.FALSE))
+        self.assertIs(d["require_complete"], False)
+        if d["worst_executed_grade"] == run_all.PROVED:
+            self.assertEqual(p.returncode, 0)
+
+    def test_require_complete_exits_nonzero_on_incomplete_without_hiding_results(self):
+        # Mutation bite: deleting the completeness exit check.
+        p = subprocess.run(
+            [sys.executable, str(run_all.__file__), "--json", "--require-complete"],
+            capture_output=True, text=True, timeout=300)
+        self.assertEqual(p.returncode, run_all.REQUIRE_COMPLETE_EXIT)
+        d = json.loads(p.stdout)
+        self.assertIs(d["complete"], False)
+        self.assertEqual(d["declared"], len(d["suites"]))
+        self.assertGreater(d["not_run"], 0)
+        self.assertTrue(any(
+            s["grade"] in (run_all.NEEDS_CANDIDATE, run_all.NOT_SELECTED, run_all.EXTERNAL)
+            for s in d["suites"]))
+
+    def test_require_complete_is_applied_not_merely_parsed(self):
+        # Mutation bite: --require-complete accepted by argparse but unused.
+        p = subprocess.run(
+            [sys.executable, str(run_all.__file__), "--json", "--require-complete"],
+            capture_output=True, text=True, timeout=300)
+        d = json.loads(p.stdout)
+        self.assertIs(d["require_complete"], True)
+        plain = subprocess.run(
+            [sys.executable, str(run_all.__file__), "--json"],
+            capture_output=True, text=True, timeout=300)
+        self.assertIs(json.loads(plain.stdout)["require_complete"], False)
+
+    def test_plain_text_mode_still_prints_inventory_under_require_complete(self):
+        p = subprocess.run(
+            [sys.executable, str(run_all.__file__), "--require-complete"],
+            capture_output=True, text=True, timeout=300)
+        self.assertEqual(p.returncode, run_all.REQUIRE_COMPLETE_EXIT)
+        self.assertIn("NOT RUN (declared, not a pass)", p.stdout)
+        self.assertIn("complete: no", p.stdout)
+
+
 class DocumentationTruth(unittest.TestCase):
+    def test_index_says_plain_mode_is_not_a_completeness_gate(self):
+        index = (run_all.REPO / "conformance/INDEX.md").read_text()
+        self.assertIn("not a completeness gate", index)
+        self.assertIn("--require-complete", index)
+
     def test_acm_language_is_aligned_not_awarded_and_does_not_narrow_artifacts_to_code(self):
         documents = (
             run_all.REPO / "conformance/INDEX.md",

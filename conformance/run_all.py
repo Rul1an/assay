@@ -56,6 +56,10 @@ PROVED, FALSE, UNPROVED = "proved", "false", "unproved"
 NEEDS_CANDIDATE, NOT_SELECTED, EXTERNAL = "needs_candidate", "not_selected", "external"
 
 RANK = {PROVED: 0, NEEDS_CANDIDATE: 0, NOT_SELECTED: 0, EXTERNAL: 0, UNPROVED: 1, FALSE: 2}
+EXECUTED_GRADES = (PROVED, FALSE, UNPROVED)
+# Distinct from grade exits 0/1/2. Plain mode never uses this.
+REQUIRE_COMPLETE_EXIT = 3
+_WORST_EXECUTED = (PROVED, UNPROVED, FALSE)
 
 
 def _stdlib_jsonrpc(suite: dict) -> tuple[str, str]:
@@ -203,11 +207,47 @@ SUITES = [
 ]
 
 
+def summarize(results: list) -> dict:
+    """Inventory counts plus the worst *executed* grade. complete is executed == declared."""
+    ran = [r for r in results if r["grade"] in EXECUTED_GRADES]
+    not_run = [r for r in results if r not in ran]
+    declared = len(results)
+    executed = len(ran)
+    if ran:
+        worst_executed_grade = _WORST_EXECUTED[max(RANK[r["grade"]] for r in ran)]
+    else:
+        worst_executed_grade = None
+    # worst_grade stays the executed-or-empty default used before this flag existed.
+    worst_grade = _WORST_EXECUTED[max((RANK[r["grade"]] for r in results), default=0)]
+    return {
+        "ran": ran,
+        "not_run": not_run,
+        "declared": declared,
+        "executed": executed,
+        "complete": executed == declared,
+        "worst_grade": worst_grade,
+        "worst_executed_grade": worst_executed_grade,
+    }
+
+
+def exit_status(results: list, require_complete: bool = False) -> int:
+    """Grade exits 0/1/2. --require-complete adds one extra nonzero when incomplete."""
+    if require_complete and not summarize(results)["complete"]:
+        return REQUIRE_COMPLETE_EXIT
+    if any(r["grade"] == FALSE for r in results):
+        return 1
+    if any(r["grade"] == UNPROVED for r in results):
+        return 2
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--with-cargo", action="store_true",
                     help="also run the Rust-driven corpora (needs a toolchain)")
     ap.add_argument("--json", action="store_true", help="emit a machine-readable report")
+    ap.add_argument("--require-complete", action="store_true",
+                    help="exit 3 unless every declared suite executed")
     args = ap.parse_args()
 
     results = []
@@ -222,39 +262,36 @@ def main() -> int:
         results.append({"id": suite["id"], "grade": grade, "detail": detail,
                         "vectors": suite["vectors"], "maturity": suite["maturity"]})
 
-    ran = [r for r in results if r["grade"] in (PROVED, FALSE, UNPROVED)]
-    not_run = [r for r in results if r not in ran]
-    declared = len(results)
-    executed = len(ran)
-    complete = executed == declared
-    worst = max((RANK[r["grade"]] for r in results), default=0)
+    summary = summarize(results)
+    ran = summary["ran"]
+    not_run = summary["not_run"]
 
     if args.json:
         print(json.dumps({
             "schema": "assay.conformance.run_all.v1",
             "suites": results,
             "ran": len(ran), "not_run": len(not_run),
-            "declared": declared, "executed": executed, "complete": complete,
-            "worst_grade": [PROVED, UNPROVED, FALSE][worst],
+            "declared": summary["declared"], "executed": summary["executed"],
+            "complete": summary["complete"],
+            "worst_grade": summary["worst_grade"],
+            "worst_executed_grade": summary["worst_executed_grade"],
+            "require_complete": args.require_complete,
         }, indent=2, sort_keys=True))
     else:
         width = max(len(r["id"]) for r in results)
         for r in results:
             print("%-*s  %-15s  %s" % (width, r["id"], r["grade"], r["detail"]))
         print()
-        print("executed: %d/%d   complete: %s   did NOT run: %d   worst grade: %s"
-              % (executed, declared, "yes" if complete else "no", len(not_run),
-                 [PROVED, UNPROVED, FALSE][worst]))
+        print("executed: %d/%d   complete: %s   did NOT run: %d   worst executed grade: %s"
+              % (summary["executed"], summary["declared"],
+                 "yes" if summary["complete"] else "no", len(not_run),
+                 summary["worst_executed_grade"] or "none"))
         if not_run:
             # State this every time. A suite that did not run is not a suite that agreed.
             print("NOT RUN (declared, not a pass): %s"
                   % ", ".join("%s=%s" % (r["id"], r["grade"]) for r in not_run))
 
-    if any(r["grade"] == FALSE for r in results):
-        return 1
-    if any(r["grade"] == UNPROVED for r in results):
-        return 2
-    return 0
+    return exit_status(results, require_complete=args.require_complete)
 
 
 if __name__ == "__main__":

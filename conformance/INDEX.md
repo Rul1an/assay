@@ -4,10 +4,13 @@ One front door over every published corpus in this workspace, plus what each one
 does and does not establish.
 
 ```bash
-python3 conformance/run_all.py               # stdlib suites only, no toolchain
-python3 conformance/run_all.py --with-cargo  # also the Rust-driven corpora
-python3 conformance/run_all.py --json        # machine-readable report
+python3 conformance/run_all.py                     # stdlib suites only, no toolchain
+python3 conformance/run_all.py --with-cargo        # also the Rust-driven corpora
+python3 conformance/run_all.py --json              # machine-readable report
+python3 conformance/run_all.py --require-complete  # same report; exit 3 unless executed == declared
 ```
+
+Plain inventory mode — `python3 conformance/run_all.py`, with or without `--json` — is **not a completeness gate**. Exit 0 means no executed suite graded `false` or `unproved`. It does not mean every declared suite ran. Callers that require a complete inventory pass `--require-complete`.
 
 Standard library only. No Assay import, no pip install, no network.
 
@@ -54,9 +57,13 @@ Exit codes, with `false` taking precedence over `unproved`:
 | `0` | no suite graded `false` and none graded `unproved` |
 | `1` | **at least one suite graded `false`**, regardless of any `unproved` |
 | `2` | no suite graded `false` and at least one graded `unproved` |
+| `3` | `--require-complete` was set and `complete` is false (`executed != declared`) |
 
 A run with both a `false` and an `unproved` suite exits `1`: a checked disagreement is a
-stronger, more actionable result than a check that could not complete.
+stronger, more actionable result than a check that could not complete. `--require-complete`
+on an incomplete inventory exits `3` even when every executed suite graded `proved`; the
+inventory and executed outcomes are still printed. Without that flag, incompleteness does
+not change the exit.
 
 ## Suites that do not run, and why that is not a pass
 
@@ -79,7 +86,8 @@ implementations they grade, applied to the runner that grades them.
 
 A green run says every suite that **executed** reproduced its own pinned verdicts
 on this checkout. It does not say every declared suite ran: inspect `complete`
-and `executed/declared` in JSON, or `complete` in terminal output. It also says
+and `executed/declared` in JSON, or `complete` in terminal output. `worst_executed_grade`
+is the worst grade among suites that ran; it is not a completeness signal. It also says
 nothing about:
 
 - **independence** — everything here was authored in this workspace. Agreement
