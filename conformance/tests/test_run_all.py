@@ -417,11 +417,57 @@ class RequireCompleteFlag(unittest.TestCase):
         self.assertIn("complete: no", p.stdout)
 
 
+class MainExitPrecedence(unittest.TestCase):
+    """false > unproved > incomplete must hold through main(), not only exit_status()."""
+
+    def _main(self, suites, argv):
+        orig_suites, orig_argv = run_all.SUITES, sys.argv
+        run_all.SUITES = suites
+        sys.argv = argv
+        try:
+            return run_all.main()
+        finally:
+            run_all.SUITES = orig_suites
+            sys.argv = orig_argv
+
+    def _suite(self, ident, kind, runner=None):
+        row = {"id": ident, "kind": kind, "vectors": 1, "maturity": "test",
+               "path": "does/not/exist", "note": "fixture"}
+        if runner is not None:
+            row["runner"] = runner
+        if kind == "cargo":
+            row.update(crate="c", cargo_target_flag="--lib", cargo_target="t")
+        return row
+
+    def test_main_false_outranks_unproved_and_incomplete(self):
+        suites = [
+            self._suite("bad", "stdlib", lambda _s: (run_all.FALSE, "disagreed")),
+            self._suite("stuck", "stdlib", lambda _s: (run_all.UNPROVED, "stuck")),
+            self._suite("skip", "cargo"),
+        ]
+        self.assertEqual(self._main(suites, ["run_all.py", "--require-complete"]), 1)
+
+    def test_main_unproved_outranks_incomplete(self):
+        suites = [
+            self._suite("stuck", "stdlib", lambda _s: (run_all.UNPROVED, "stuck")),
+            self._suite("skip", "cargo"),
+        ]
+        self.assertEqual(self._main(suites, ["run_all.py", "--require-complete"]), 2)
+
+    def test_main_incomplete_is_exit_three_when_nothing_worse_ran(self):
+        suites = [
+            self._suite("ok", "stdlib", lambda _s: (run_all.PROVED, "ok")),
+            self._suite("skip", "cargo"),
+        ]
+        self.assertEqual(self._main(suites, ["run_all.py", "--require-complete"]), 3)
+
+
 class DocumentationTruth(unittest.TestCase):
     def test_index_says_plain_mode_is_not_a_completeness_gate(self):
         index = (run_all.REPO / "conformance/INDEX.md").read_text()
         self.assertIn("not a completeness gate", index)
         self.assertIn("--require-complete", index)
+        self.assertIn("--completion-scope required", index)
 
     def test_acm_language_is_aligned_not_awarded_and_does_not_narrow_artifacts_to_code(self):
         documents = (

@@ -47,6 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bounded_run import (  # noqa: E402
     OUTPUT_CAP_BYTES, _OutputTooLarge, _run_capped,
 )
+from registry import load_suites  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -145,66 +146,21 @@ def _cargo(suite: dict) -> tuple[str, str]:
     return FALSE, detail[:200]
 
 
-SUITES = [
-    {
-        "id": "privileged-mcp-action-v0",
-        "path": "conformance/privileged-mcp-action-v0",
-        "vectors": 14,
-        "maturity": "frozen, digest-pinned, open reproduction request (Rul1an/assay#1840)",
-        "kind": NEEDS_CANDIDATE,
-        "note": "clean-room gate: score_candidate.py REQUIRES --entrypoint. "
-                "No self-run by design.",
-    },
-    {
-        "id": "privileged-mcp-action-v1",
-        "path": "conformance/privileged-mcp-action-v1",
-        "vectors": 7,
-        "maturity": "published profile corpus; candidate-neutral runner not registered",
-        "kind": NEEDS_CANDIDATE,
-        "note": "candidate-neutral runner is not registered. The shipped Assay verifier "
-                "would exercise the author implementation, not an outside candidate.",
-    },
-    {
-        "id": "mcp-jsonrpc-id-conformance",
-        "path": "examples/mcp-jsonrpc-id-conformance",
-        "vectors": 3,
-        "maturity": "published pack, stdlib checker, carries a positive control",
-        "kind": "stdlib",
-        "runner": _stdlib_jsonrpc,
-        "expect_status": "contradiction",
-    },
-    {
-        "id": "rfc8785-canonicalization",
-        "path": "crates/assay-canonical/tests/vectors/rfc8785.json",
-        "vectors": 31,
-        "maturity": "prerequisite vectors; also vendored byte-identical into the clean-room pack",
-        "kind": "cargo",
-        "runner": _cargo,
-        "crate": "assay-canonical",
-        "cargo_target_flag": "--test",
-        "cargo_target": "rfc8785_conformance",
-    },
-    {
-        "id": "mcp-era-parity-v0",
-        "path": "crates/assay-core/tests/fixtures/mcp-era-parity-v0",
-        "vectors": 18,
-        "maturity": "EXPLORATORY -- lower than privileged-mcp-action-v0, deliberately. "
-                    "No reproduction request; no claim here inherits the frozen corpus standing.",
-        "kind": "cargo",
-        "runner": _cargo,
-        "crate": "assay-core",
-        "cargo_target_flag": "--lib",
-        "cargo_target": "mcp::era_parity_tests",
-    },
-    {
-        "id": "observed-effect-v0",
-        "path": "https://github.com/Rul1an/observed-effect-v0",
-        "vectors": None,
-        "maturity": "published in its own repository",
-        "kind": EXTERNAL,
-        "note": "two suites with stdlib recompute and a corpusDigest; run it from that repo.",
-    },
-]
+def _bind_runners(raw: list) -> list:
+    """Attach in-process runners. The inventory itself is conformance/registry.json."""
+    bound = []
+    for item in raw:
+        suite = dict(item)
+        kind = suite["kind"]
+        if kind == "stdlib":
+            suite["runner"] = _stdlib_jsonrpc
+        elif kind == "cargo":
+            suite["runner"] = _cargo
+        bound.append(suite)
+    return bound
+
+
+SUITES = _bind_runners(load_suites())
 
 
 def summarize(results: list) -> dict:
@@ -230,14 +186,38 @@ def summarize(results: list) -> dict:
     }
 
 
-def exit_status(results: list, require_complete: bool = False) -> int:
-    """FALSE, then UNPROVED, then incompleteness if --require-complete."""
+def required_counts(results: list) -> dict:
+    """required_* is a different fact from global complete. Empty required is not complete."""
+    required = [r for r in results if r.get("policy") == "required"]
+    declared = len(required)
+    executed = sum(1 for r in required if r["grade"] in EXECUTED_GRADES)
+    return {
+        "required_declared": declared,
+        "required_executed": executed,
+        "required_complete": declared > 0 and executed == declared,
+    }
+
+
+def exit_status(results: list, require_complete: bool = False,
+                completion_scope: str = "all") -> int:
+    """FALSE, then UNPROVED, then incompleteness if --require-complete.
+
+    Default scope uses global complete (executed == declared). Explicit
+    `required` scope uses required_complete. This does not change summarize().
+    """
     if any(r["grade"] == FALSE for r in results):
         return 1
     if any(r["grade"] == UNPROVED for r in results):
         return 2
-    if require_complete and not summarize(results)["complete"]:
-        return REQUIRE_COMPLETE_EXIT
+    if require_complete:
+        if completion_scope == "required":
+            scoped_complete = required_counts(results)["required_complete"]
+        elif completion_scope == "all":
+            scoped_complete = summarize(results)["complete"]
+        else:
+            scoped_complete = False
+        if not scoped_complete:
+            return REQUIRE_COMPLETE_EXIT
     return 0
 
 
@@ -248,7 +228,14 @@ def main() -> int:
     ap.add_argument("--json", action="store_true", help="emit a machine-readable report")
     ap.add_argument("--require-complete", action="store_true",
                     help="exit 3 when incomplete, after any false (1) or unproved (2)")
+    ap.add_argument(
+        "--completion-scope", choices=("all", "required"), default=None,
+        help="with --require-complete: exit 3 on global complete (all, default) "
+             "or required_complete (required)")
     args = ap.parse_args()
+    if args.completion_scope is not None and not args.require_complete:
+        ap.error("--completion-scope is only valid together with --require-complete")
+    completion_scope = args.completion_scope or "all"
 
     results = []
     for suite in SUITES:
@@ -260,9 +247,11 @@ def main() -> int:
         else:
             grade, detail = suite["runner"](suite)
         results.append({"id": suite["id"], "grade": grade, "detail": detail,
-                        "vectors": suite["vectors"], "maturity": suite["maturity"]})
+                        "vectors": suite["vectors"], "maturity": suite["maturity"],
+                        "policy": suite.get("policy")})
 
     summary = summarize(results)
+    scoped = required_counts(results)
     ran = summary["ran"]
     not_run = summary["not_run"]
 
@@ -273,6 +262,10 @@ def main() -> int:
             "ran": len(ran), "not_run": len(not_run),
             "declared": summary["declared"], "executed": summary["executed"],
             "complete": summary["complete"],
+            "completion_scope": completion_scope,
+            "required_declared": scoped["required_declared"],
+            "required_executed": scoped["required_executed"],
+            "required_complete": scoped["required_complete"],
             "worst_grade": summary["worst_grade"],
             "worst_executed_grade": summary["worst_executed_grade"],
             "require_complete": args.require_complete,
@@ -286,12 +279,16 @@ def main() -> int:
               % (summary["executed"], summary["declared"],
                  "yes" if summary["complete"] else "no", len(not_run),
                  summary["worst_executed_grade"] or "none"))
+        print("required: %d/%d   required_complete: %s   completion_scope: %s"
+              % (scoped["required_executed"], scoped["required_declared"],
+                 "yes" if scoped["required_complete"] else "no", completion_scope))
         if not_run:
             # State this every time. A suite that did not run is not a suite that agreed.
             print("NOT RUN (declared, not a pass): %s"
                   % ", ".join("%s=%s" % (r["id"], r["grade"]) for r in not_run))
 
-    return exit_status(results, require_complete=args.require_complete)
+    return exit_status(results, require_complete=args.require_complete,
+                       completion_scope=completion_scope)
 
 
 if __name__ == "__main__":
