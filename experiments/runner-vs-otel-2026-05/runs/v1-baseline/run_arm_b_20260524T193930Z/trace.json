@@ -1,0 +1,113 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "assay-runner-otel-experiment"
+            }
+          },
+          {
+            "key": "service.version",
+            "value": {
+              "stringValue": "0.0.0"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "assay-runner-otel-experiment"
+          },
+          "spans": [
+            {
+              "name": "execute_tool read_file",
+              "spanId": "c9115925bceb54a9",
+              "traceId": "76bf0406e4abb25d4937a7b63a2f252f",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1779651571323000000",
+              "endTimeUnixNano": "1779651571323145709",
+              "attributes": [
+                {
+                  "key": "assay.run.id",
+                  "value": {
+                    "stringValue": "run_arm_b_20260524T193930Z"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "read_file"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.type",
+                  "value": {
+                    "stringValue": "function"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "tc_runner_policy_001"
+                  }
+                }
+              ],
+              "events": [],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "name": "assay.runner.measured_run",
+              "spanId": "49b7e61679e124fb",
+              "traceId": "7806c890975e7f2d7ae3032b212d4b99",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1779651571313000000",
+              "endTimeUnixNano": "1779651571324415125",
+              "attributes": [
+                {
+                  "key": "assay.run.id",
+                  "value": {
+                    "stringValue": "run_arm_b_20260524T193930Z"
+                  }
+                },
+                {
+                  "key": "assay.measurement.boundary",
+                  "value": {
+                    "stringValue": "linux_ebpf_cgroup_v2"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "openai"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "create_agent"
+                  }
+                }
+              ],
+              "events": [],
+              "status": {
+                "code": 1
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
