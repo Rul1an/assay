@@ -7,10 +7,12 @@ does and does not establish.
 python3 conformance/run_all.py                     # stdlib suites only, no toolchain
 python3 conformance/run_all.py --with-cargo        # also the Rust-driven corpora
 python3 conformance/run_all.py --json              # machine-readable report
-python3 conformance/run_all.py --require-complete  # same report; exit 3 if incomplete after false/unproved
+python3 conformance/run_all.py --require-complete  # exit 3 if global complete is false
+python3 conformance/run_all.py --require-complete --completion-scope required
+    # product gate: exit 3 if the required subset did not execute
 ```
 
-Plain inventory mode — `python3 conformance/run_all.py`, with or without `--json` — is **not a completeness gate**. Exit 0 means no executed suite graded `false` or `unproved`. It does not mean every declared suite ran. Callers that require a complete inventory pass `--require-complete`.
+Plain inventory mode — `python3 conformance/run_all.py`, with or without `--json` — is **not a completeness gate**. Exit 0 means no executed suite graded `false` or `unproved`. It does not mean every declared suite ran. `--require-complete` without a scope still uses global `complete` (`executed == declared` over every declared suite). `--completion-scope required` is only valid together with `--require-complete` and exits 3 on `required_complete`. Global `complete` stays the all-six fact and is still false on this tree. That is repository execution coverage, not semantic completeness of any corpus.
 
 Standard library only. No Assay import, no pip install, no network.
 
@@ -20,6 +22,11 @@ grade `false` or `unproved` rather than pass silently.
 
 ## The corpora
 
+The table is the public projection of [`registry.json`](registry.json). Edit that file,
+not this table. A matching gate fails when they drift. That match is repository
+inventory coverage, not semantic completeness of any corpus.
+
+<!-- BEGIN REGISTRY INVENTORY -->
 | Corpus | Vectors | Runner | Maturity |
 |---|---|---|---|
 | [`privileged-mcp-action-v0`](privileged-mcp-action-v0/) | 14 (5 accept, 9 reject) | **needs a candidate** | frozen, digest-pinned, open reproduction request ([#1840](https://github.com/Rul1an/assay/issues/1840)) |
@@ -28,6 +35,7 @@ grade `false` or `unproved` rather than pass silently.
 | [`rfc8785` canonicalization](../crates/assay-canonical/tests/vectors/rfc8785.json) | 31 | `cargo test -p assay-canonical --test rfc8785_conformance` | prerequisite vectors; vendored byte-identical into the clean-room pack |
 | [`mcp-era-parity-v0`](../crates/assay-core/tests/fixtures/mcp-era-parity-v0/) | 18 (+2 equivalence pairs) | `cargo test -p assay-core --lib mcp::era_parity_tests` | **exploratory** — deliberately lower than the frozen corpus |
 | [`observed-effect-v0`](https://github.com/Rul1an/observed-effect-v0) | 14 cases | its own repository | published separately; stdlib recompute + `corpusDigest`. Adequacy measured — see below |
+<!-- END REGISTRY INVENTORY -->
 
 Related but not a corpus in this table: [RGE-Bench](https://github.com/rge-bench/rge-bench)
 is maintained in its own repository under its own machine-checked neutrality guard,
@@ -57,7 +65,7 @@ Exit codes, with `false` taking precedence over `unproved`:
 | `0` | no suite graded `false` and none graded `unproved` (plain mode ignores incompleteness) |
 | `1` | **at least one suite graded `false`**, regardless of any `unproved` or incompleteness |
 | `2` | no suite graded `false` and at least one graded `unproved` (incompleteness does not override) |
-| `3` | `--require-complete`, `complete` is false, and no suite graded `false` or `unproved` |
+| `3` | `--require-complete`, the selected completeness fact is false, and no suite graded `false` or `unproved`. Default scope uses global `complete`; `--completion-scope required` uses `required_complete`. |
 
 A run with both a `false` and an `unproved` suite exits `1`: a checked disagreement is a
 stronger, more actionable result than a check that could not complete. `--require-complete`

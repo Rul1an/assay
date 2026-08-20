@@ -1,0 +1,88 @@
+{
+  "schema": "assay.conformance.registry.v1",
+  "_about": "Canonical runnable-suite inventory. The aggregate runner and the INDEX corpora table both load this file. Registry completeness is a repository contract, not semantic completeness of any corpus. Adequacy manifests (conformance/adequacy/*.manifest.json) are a different id space.",
+  "suites": [
+    {
+      "id": "privileged-mcp-action-v0",
+      "path": "conformance/privileged-mcp-action-v0",
+      "vectors": 14,
+      "maturity": "frozen, digest-pinned, open reproduction request (Rul1an/assay#1840)",
+      "kind": "needs_candidate",
+      "policy": "external-candidate",
+      "note": "clean-room gate: score_candidate.py REQUIRES --entrypoint. No self-run by design.",
+      "index_corpus": "[`privileged-mcp-action-v0`](privileged-mcp-action-v0/)",
+      "index_vectors": "14 (5 accept, 9 reject)",
+      "index_runner": "**needs a candidate**",
+      "index_maturity": "frozen, digest-pinned, open reproduction request ([#1840](https://github.com/Rul1an/assay/issues/1840))"
+    },
+    {
+      "id": "privileged-mcp-action-v1",
+      "path": "conformance/privileged-mcp-action-v1",
+      "vectors": 7,
+      "maturity": "published profile corpus; candidate-neutral runner not registered",
+      "kind": "needs_candidate",
+      "policy": "external-candidate",
+      "note": "candidate-neutral runner is not registered. The shipped Assay verifier would exercise the author implementation, not an outside candidate.",
+      "index_corpus": "[`privileged-mcp-action-v1`](privileged-mcp-action-v1/)",
+      "index_vectors": "7 (4 accept, 3 reject)",
+      "index_runner": "**needs a candidate**",
+      "index_maturity": "published profile corpus; no candidate-neutral runner registered"
+    },
+    {
+      "id": "mcp-jsonrpc-id-conformance",
+      "path": "examples/mcp-jsonrpc-id-conformance",
+      "vectors": 3,
+      "maturity": "published pack, stdlib checker, carries a positive control",
+      "kind": "stdlib",
+      "policy": "required",
+      "expect_status": "contradiction",
+      "index_corpus": "[`mcp-jsonrpc-id-conformance`](../examples/mcp-jsonrpc-id-conformance/)",
+      "index_vectors": "3",
+      "index_runner": "stdlib, `check.py reproduce`",
+      "index_maturity": "published pack; carries a positive control"
+    },
+    {
+      "id": "rfc8785-canonicalization",
+      "path": "crates/assay-canonical/tests/vectors",
+      "vectors": 31,
+      "maturity": "prerequisite vectors; also vendored byte-identical into the clean-room pack",
+      "kind": "cargo",
+      "policy": "optional",
+      "crate": "assay-canonical",
+      "cargo_target_flag": "--test",
+      "cargo_target": "rfc8785_conformance",
+      "index_corpus": "[`rfc8785` canonicalization](../crates/assay-canonical/tests/vectors/rfc8785.json)",
+      "index_vectors": "31",
+      "index_runner": "`cargo test -p assay-canonical --test rfc8785_conformance`",
+      "index_maturity": "prerequisite vectors; vendored byte-identical into the clean-room pack"
+    },
+    {
+      "id": "mcp-era-parity-v0",
+      "path": "crates/assay-core/tests/fixtures/mcp-era-parity-v0",
+      "vectors": 18,
+      "maturity": "EXPLORATORY -- lower than privileged-mcp-action-v0, deliberately. No reproduction request; no claim here inherits the frozen corpus standing.",
+      "kind": "cargo",
+      "policy": "optional",
+      "crate": "assay-core",
+      "cargo_target_flag": "--lib",
+      "cargo_target": "mcp::era_parity_tests",
+      "index_corpus": "[`mcp-era-parity-v0`](../crates/assay-core/tests/fixtures/mcp-era-parity-v0/)",
+      "index_vectors": "18 (+2 equivalence pairs)",
+      "index_runner": "`cargo test -p assay-core --lib mcp::era_parity_tests`",
+      "index_maturity": "**exploratory** — deliberately lower than the frozen corpus"
+    },
+    {
+      "id": "observed-effect-v0",
+      "path": "https://github.com/Rul1an/observed-effect-v0",
+      "vectors": null,
+      "maturity": "published in its own repository",
+      "kind": "external",
+      "policy": "external-candidate",
+      "note": "two suites with stdlib recompute and a corpusDigest; run it from that repo.",
+      "index_corpus": "[`observed-effect-v0`](https://github.com/Rul1an/observed-effect-v0)",
+      "index_vectors": "14 cases",
+      "index_runner": "its own repository",
+      "index_maturity": "published separately; stdlib recompute + `corpusDigest`. Adequacy measured — see below"
+    }
+  ]
+}
