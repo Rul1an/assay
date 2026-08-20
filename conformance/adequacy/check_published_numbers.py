@@ -76,6 +76,9 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+# Object database for freshness. File reads use REPO; a sandbox may point
+# those at a copy, but git must still see the real commits.
+GIT_REPO = REPO
 ADEQUACY = REPO / "conformance/adequacy"
 RESULTS = ADEQUACY / "results.json"
 
@@ -114,6 +117,52 @@ _WORD_RE = re.compile(r"\b(%s)\b" % "|".join(sorted(_WORDS, key=len, reverse=Tru
 # An expression is arithmetic over the measured row. Anything else is refused
 # rather than evaluated: this file runs in CI over repository content.
 _EXPR_OK = re.compile(r"^[A-Za-z0-9_+\-*/(). ,]+$")
+
+COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+MALFORMED = "malformed"
+UNREACHABLE = "unreachable"
+DIRTY = "dirty"
+CLEAN = "clean"
+_GIT_TIMEOUT = 30
+
+
+def classify_measured_commit(commit, depends_on, repo: Path) -> tuple[str, list[str]]:
+    """Classify one recorded measurement commit. Unresolved is never clean.
+
+    Only a lowercase 40-hex string is offered to git. Everything else is
+    malformed, including names git would resolve (HEAD, origin/main) and
+    strings that look like flags (-n).
+    """
+    if not isinstance(commit, str) or not COMMIT_RE.fullmatch(commit):
+        return MALFORMED, []
+    repo_s = str(repo)
+    try:
+        probe = subprocess.run(
+            ["git", "-C", repo_s, "cat-file", "-e", commit + "^{commit}"],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return UNREACHABLE, []
+    if probe.returncode != 0:
+        return UNREACHABLE, []
+    paths = [p for p in (depends_on or []) if isinstance(p, str)]
+    try:
+        moved = subprocess.run(
+            ["git", "-C", repo_s, "diff", "--name-only", commit, "HEAD", "--", *paths],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return UNREACHABLE, []
+    if moved.returncode != 0:
+        return UNREACHABLE, []
+    changed = [ln for ln in moved.stdout.splitlines() if ln.strip()]
+    if changed:
+        return DIRTY, changed
+    return CLEAN, []
 
 
 def normalise(text: str) -> str:
@@ -251,18 +300,24 @@ def check() -> list[str]:
             findings.append("%s records no measured_at commit, so nothing can say whether its "
                             "number is still current for this code" % name)
             continue
-        moved = subprocess.run(
-            ["git", "-C", str(REPO), "diff", "--name-only", taken["commit"], "HEAD", "--",
-             *taken.get("depends_on", [])],
-            capture_output=True, text=True)
-        if moved.returncode != 0:
-            continue          # shallow clone or unknown commit: not a claim either way
-        changed = [ln for ln in moved.stdout.splitlines() if ln.strip()]
-        if changed:
+        kind, extra = classify_measured_commit(
+            taken["commit"], taken.get("depends_on", []), GIT_REPO)
+        if kind == MALFORMED:
+            findings.append(
+                "%s records a malformed measured_at.commit; a freshness claim "
+                "cannot be made from %r" % (name, taken["commit"]))
+        elif kind == UNREACHABLE:
+            shown = taken["commit"]
+            if isinstance(shown, str) and COMMIT_RE.fullmatch(shown):
+                shown = shown[:9]
+            findings.append(
+                "%s was measured at %s which cannot be resolved in this checkout, "
+                "so freshness is unavailable rather than clean" % (name, shown))
+        elif kind == DIRTY:
             findings.append(
                 "%s was measured at %s and %s changed since, so the published number describes "
                 "code this revision no longer has. Re-run measure_all.py --only %s"
-                % (name, taken["commit"][:9], ", ".join(sorted(changed)[:3]), name))
+                % (name, taken["commit"][:9], ", ".join(sorted(extra)[:3]), name))
 
     # ---- 2. tool pin ------------------------------------------------------
     for name, path in sorted(on_disk.items()):
