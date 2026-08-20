@@ -1,0 +1,22 @@
+{
+  "schema": "assay.conformance.adequacy.adjustments.v0",
+  "_about": "Declared editorial adjustments to published adequacy figures. The tool measures what it measures; a document sometimes publishes a figure that is the measurement plus a stated human judgement. Those judgements are declared HERE, with the magnitude and the reason, so publish_numbers.py can project them instead of an author typing the adjusted figure by hand.",
+  "_why_they_render_marked": "A judgement that enters through a field shaped like a measurement and leaves as a rendered token in a generated document would be LAUNDERED by this mechanism: the page would give it the authority of the tool. So every value an adjustment touches renders with a visible `(judged)` next to it, and the unadjusted measurement beside it renders bare. The two must not look alike on the page.",
+  "_why_not_in_the_manifest": "A manifest is a declared DEPENDENCY of its own measurement -- every row's measured_at.depends_on lists it -- so filing a publication-side note in a manifest would mark that corpus stale and demand an expensive re-measurement to publish an editorial sentence. The adjustment is not an input to the measurement and must not be able to invalidate it. It is also not in results.json, which measure_all.py rewrites wholesale from the tool's report and would drop any hand-added key on the next run.",
+  "adjustments": [
+    {
+      "scope": "privileged-mcp-action-v0",
+      "name": "not_isolated_for_a_third_party",
+      "effect": "moves_killed_to_not_transmitted",
+      "value": 1,
+      "_why": "ERRATA.md's numerator is the tool's minus one: the closed decision vocabulary is killed for the reference implementation and is not individually transmitted to a third party, because bad-107's payload violates the fail_closed biconditional independently. The subtraction is sound and the reason for it is narrower than an earlier version of this field said. What the corpus transmits is a DISJUNCTION -- the vocabulary OR an unguarded fail_closed -- so either alone suffices and dropping both fails, demonstrated by building that implementation and watching bad-107 go from invalid to valid. Five is therefore the count of INDIVIDUALLY isolated rules, which single-deletion mutation can express; the disjunction is stated in the prose because no count can carry it."
+    },
+    {
+      "scope": "@all",
+      "name": "not_measurable",
+      "effect": "declared_count",
+      "value": 1,
+      "_why": "mcp-era-parity-v0 has no manifest and can have none: it is driven by Rust tests with no per-vector verdict, so there is nothing for the tool to score. A corpus that cannot be measured cannot be counted from the measurement, so it is declared here."
+    }
+  ]
+}

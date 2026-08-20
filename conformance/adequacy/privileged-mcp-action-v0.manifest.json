@@ -13,6 +13,13 @@
     "../../crates/assay-cli/src/cli/commands/evidence/verify_privileged_mcp_action.rs",
     "../../crates/assay-cli/src/cli/commands/evidence/privileged_mcp_action.rs"
   ],
+  "_why_declaration_sources": "`implementation_sources` are what the tool MUTATES. These are what decides whether the declaration is still right, which is a different question and had no home. The score's numerator comes from deleting rules; its denominator comes from an audit of v0.md against this manifest, and until this key existed a normative rule could be added to the profile with nothing going red and this corpus never re-selected. The vectors and the generator are here for the same reason from the other side: what a corpus can transmit changes when its bundles or the code that emits them change. Consumed by measure_all.measured_at, so a change to any of these marks the row stale and every published figure for it renders as an explicit refusal rather than a number.",
+  "declaration_sources": [
+    "../../docs/profiles/privileged-mcp-action/v0.md",
+    "../privileged-mcp-action-v0/MANIFEST.json",
+    "../privileged-mcp-action-v0/gen_vectors.py",
+    "../privileged-mcp-action-v0/vectors"
+  ],
   "build": [
     "cargo",
     "build",

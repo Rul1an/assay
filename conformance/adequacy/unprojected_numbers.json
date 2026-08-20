@@ -1,0 +1,47 @@
+{
+  "schema": "assay.conformance.adequacy.unprojected.v0",
+  "_about": "Number-shaped text a template is allowed to write by hand. Everything else of adequacy shape in the AUTHORED PROSE of a template -- `N of M`, `NN.N%` -- is a red check, because regenerate-and-compare cannot see it: a newly invented figure that was never tokenised renders byte-identically and reads as a present-tense measurement. Projection stops a measured cell from being edited; this list is what stops a new one from being written.",
+  "_why_a_separate_file": "The exemptions used to live in a JSON block inside the document they exempted, which put the checker's own copy of a sentence inside the text it was searching. A separate file cannot satisfy itself. It also keeps the templates what they are for: prose.",
+  "_rules": "Each entry needs a token and a reason. A token that no longer occurs in its template is a red check -- an exemption pointing at nothing is where the next unchecked number hides. A token exempts every occurrence in that template.",
+  "documents": {
+    "conformance/INDEX.md.in": [
+      {
+        "token": "100%",
+        "reason": "the adequacy bar itself, not a result: 100% of the rules the author declared is what the tool requires to pass."
+      },
+      {
+        "token": "4 of 4",
+        "reason": "the superseded first score for mcp-jsonrpc-id, kept visible on purpose. A page that publishes unflattering results shows its own edits."
+      },
+      {
+        "token": "4 of 5",
+        "reason": "the superseded first score for the observed-effect drift consumer, over merge-policy rules only."
+      },
+      {
+        "token": "30 of 30",
+        "reason": "the superseded first score for rge-bench, over the hand-written table in check_rule_liveness.py."
+      },
+      {
+        "token": "50%",
+        "reason": "the superseded second score for privileged-mcp-action-v0, over eight declared rules."
+      },
+      {
+        "token": "6 of 8",
+        "reason": "the contaminated run's believable-but-wrong number, recorded as the anecdote that motivated the tool's exclusive lock."
+      },
+      {
+        "token": "75.0%",
+        "reason": "the percentage of that same contaminated run."
+      },
+      {
+        "token": "4 of 8",
+        "reason": "what clean re-runs of that superseded declaration gave."
+      },
+      {
+        "token": "8 of 31",
+        "reason": "the rfc8785 control's own divergence count, from tests/rfc8785_conformance.rs. It is a property of that Rust test, not a mutation score, and results.json carries no field for it."
+      }
+    ],
+    "conformance/privileged-mcp-action-v0/ERRATA.md.in": []
+  }
+}

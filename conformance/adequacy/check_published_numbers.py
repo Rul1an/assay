@@ -1,69 +1,85 @@
 #!/usr/bin/env python3
-"""Fail when a published adequacy number stops agreeing with the measurement.
+"""Fail when the published adequacy documents stop agreeing with the measurement.
 
     python3 conformance/adequacy/check_published_numbers.py
     python3 conformance/adequacy/check_published_numbers.py --json
 
 `conformance/INDEX.md` and `conformance/privileged-mcp-action-v0/ERRATA.md` publish
-measured mutation-adequacy numbers. Until this checker existed those numbers were
-produced once, by hand, and nothing re-derived them: a rule deleted from a declared
-implementation source changes what a corpus can transmit, changes no digest, and
-would have left both documents silently wrong. A published claim nobody re-derives
-is the exact defect this body of work exists to criticise, so the numbers were held
-to a lower standard than the ones they replaced.
+measured mutation-adequacy numbers. They are now GENERATED from `INDEX.md.in` and
+`ERRATA.md.in` by `publish_numbers.py`: the narrative is hand-written, and every
+measured cell is a token projected from `results.json`.
 
-WHAT IS CHECKED
+WHAT CHANGED, AND WHY THE OLD MACHINERY IS GONE
+
+This file used to hold prose to JSON with a bindings block: each published
+sentence was registered with the expressions that produced its numbers, every
+number in the wording had to be among the asserted values, and a regex swept the
+rest of the document for unregistered `N of M` and `NN.N%` shapes.
+
+The bindings were the wrong mechanism. A checker over authored prose can only say
+that a registered cell agrees with the JSON. The sentence beside it still says
+whatever its author typed, and a figure this revision did not measure can still be
+published as a present-tense fact. The failure is authorship, so authorship is
+what changed: a measured number is no longer something an author can write. The
+bindings and their assertion evaluator existed to detect what projection makes
+impossible, and two mechanisms for one rule is the drift this repository keeps
+finding, so they are deleted rather than kept alongside.
+
+THE SWEEP IS NOT IN THAT CATEGORY AND STAYS. Regenerate-and-compare has exactly
+one failure mode: someone edited the output. It cannot see a number-shaped claim
+that was never tokenised, because a freshly invented figure in the narrative
+regenerates byte-identically. The sweep is the only mechanism here that forces a
+NEW number to be justified rather than merely consistent. It changed subject --
+from the rendered document to the TEMPLATE's authored prose -- and it kept its
+rule: any `N of M` or `NN.N%` that is not a projection token and not declared
+with a reason in `unprojected_numbers.json` is red.
+
+WHAT IS CHECKED HERE
 
 1. Self-coverage. Every `*.manifest.json` on disk has a row in results.json and
    every row has a manifest. A checker that silently skips a corpus is the same
    failure one level up, so a new manifest with no measurement is red, not absent.
-2. Tool pin. Every manifest declares `tool_pin.commit`, and every row was measured
-   with the commit its manifest declares.
-3. Transcription. A row that was not re-derived by the tool must name the document
+2. Subject provenance. Every row says which state of the measured thing it
+   describes, and a row measuring a repository we do not own names that
+   repository's commit, is not measured against a dirty tree, and has that commit
+   published where a reader can see it.
+3. Staleness. A row whose declared `depends_on` moved since it was taken no longer
+   describes this revision. Computed by `publish_numbers.stale_corpora`, which is
+   the same function that makes such a row's tokens refuse to render a figure --
+   one implementation, so the guard and the renderer cannot disagree about which
+   rows are current.
+4. Tool pin. Every manifest declares `tool_pin.commit`, every row was measured
+   with the commit its manifest declares, and no published document hands a
+   reproducer a different commit in hand-written prose.
+5. Transcription. A row that was not re-derived by the tool must name the document
    it was transcribed from and quote it verbatim, and that quote must still occur
    in that document byte-for-byte (whitespace-normalised).
-4. Prose. Every registered claim's numbers must equal the measurement, and the
-   claim's exact wording must still occur in the document.
-5. Sweep. No number of adequacy shape may appear in a checked document without
-   being either derived from results.json or declared `not_derived` with a reason.
+6. Projection. Each generated document is re-rendered from its template and
+   compared BYTE FOR BYTE. A hand-edited number, a hand-edited narrative, a stale
+   template, an unresolvable token: all one finding, and all fixed the same way.
+7. Sweep. No number of adequacy shape may appear in a template's authored prose
+   without being either a projection token or declared, with a reason, in
+   `unprojected_numbers.json`.
 
-HOW PROSE IS TIED TO JSON, AND WHAT THAT DOES NOT PROTECT
+THE GAP, NAMED RATHER THAN IMPLIED. Projection makes a measured cell unwritable.
+It does not make the documents true.
 
-A regex over free prose is fragile in both directions: it misses "twenty-two" and
-it fires on "8 of 31 RFC 8785 vectors". So each document carries a *bindings
-block* this checker owns, delimited by `<!-- BEGIN CHECKED NUMBERS -->`. Each
-binding is a triple:
-
-    text     the exact wording published in the document
-    asserts  expressions over the measured row, with their expected values
-    (locals) declared constants, each with a stated reason
-
-and three separate obligations hold it in place:
-
-  * every `asserts` expression is evaluated against results.json and must match,
-    so editing the JSON without editing the prose is red;
-  * every number appearing in `text` -- digits or English words -- must be among
-    the asserted values, so a binding cannot carry a number it never checked;
-  * `text` must still occur in the document, so editing the prose without editing
-    the binding is red.
-
-To change a published number you must therefore move all three together, and
-moving all three means re-running the measurement.
-
-THE GAP, NAMED RATHER THAN IMPLIED. This makes registered numbers un-rottable; it
-does not make the documents' *prose* true. Three specific holes:
-
-  * The sweep in check 5 only knows two shapes, `N of M` and `NN.N%`. A claim
-    written entirely in English words -- "the corpus isolates six" -- can be added,
-    or silently changed, without this checker noticing. The bindings cover the
-    word-numbers that were already published; they cannot cover ones invented
-    later.
-  * Only the documents in DOCUMENTS are read. A third file publishing adequacy
-    numbers is unguarded until someone adds it here.
-  * A transcribed row (check 3) is pinned to a quote, not to a measurement. It
-    goes stale the moment the implementation it describes moves, and nothing here
-    can tell. That is the same declared-versus-observed gap one level up, and the
-    only repair is running `measure_all.py` for that corpus.
+  * The sweep knows two shapes, `N of M` and `NN.N%`. A claim written entirely in
+    English words -- "the corpus isolates six" -- can be added by hand, and the
+    tokens cover only the word-numbers already published.
+  * Superseded scores, vector counts, the rfc8785 control's `8 of 31` and the
+    hand-numbered list of twenty-two rules in ERRATA.md are hand-written on
+    purpose, and nothing re-derives them.
+  * A token can name the wrong field. `killed` where the sentence means `survived`
+    renders a number that is true of the measurement and false in the sentence.
+  * A `(judged)` figure is marked, not verified. Marking stops the mechanism from
+    lending the tool's authority to a human judgement; it does not make the
+    judgement right.
+  * Only the documents in `publish_numbers.pairs()` are generated. A third file
+    publishing adequacy numbers is unguarded until someone adds it there.
+  * Staleness is judged over each row's declared `depends_on`. A rule can move in a
+    file no manifest declares, and nothing here notices. That is the same
+    declared-versus-observed gap one level up.
 """
 
 from __future__ import annotations
@@ -71,49 +87,14 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import publish_numbers  # noqa: E402
+
 REPO = Path(__file__).resolve().parents[2]
-ADEQUACY = REPO / "conformance/adequacy"
-RESULTS = ADEQUACY / "results.json"
-
-# Documents that MUST carry a bindings block. Discovery is not used for these two:
-# a document that could opt out by deleting its block would be guarded only while
-# someone remembered to keep it guarded.
-DOCUMENTS = [
-    REPO / "conformance/INDEX.md",
-    REPO / "conformance/privileged-mcp-action-v0/ERRATA.md",
-]
-
-BEGIN = "<!-- BEGIN CHECKED NUMBERS -->"
-END = "<!-- END CHECKED NUMBERS -->"
-
-# The shapes a published adequacy number takes in these documents. Deliberately
-# narrow: broadening it to every integer would make the not_derived list a
-# transcription of the prose and nobody would maintain it.
-SWEEP = re.compile(r"\b\d+ of \d+\b|\b\d+(?:\.\d+)?%")
-
-_UNITS = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
-          "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
-          "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17,
-          "eighteen": 18, "nineteen": 19}
-_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60,
-         "seventy": 70, "eighty": 80, "ninety": 90}
-_WORDS: dict[str, int] = dict(_UNITS)
-for _t, _tv in _TENS.items():
-    _WORDS[_t] = _tv
-    for _u, _uv in _UNITS.items():
-        if _uv:
-            _WORDS["%s-%s" % (_t, _u)] = _tv + _uv
-# Longest first so "twenty-seven" is not read as "twenty".
-_WORD_RE = re.compile(r"\b(%s)\b" % "|".join(sorted(_WORDS, key=len, reverse=True)),
-                      re.IGNORECASE)
-
-# An expression is arithmetic over the measured row. Anything else is refused
-# rather than evaluated: this file runs in CI over repository content.
-_EXPR_OK = re.compile(r"^[A-Za-z0-9_+\-*/(). ,]+$")
 
 
 def normalise(text: str) -> str:
@@ -125,74 +106,23 @@ def normalise(text: str) -> str:
     return " ".join(text.split())
 
 
-def numbers_in(text: str) -> list[float]:
-    found = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", text)]
-    found += [float(_WORDS[m.group(1).lower()]) for m in _WORD_RE.finditer(text)]
-    return found
-
-
-def evaluate(expr: str, namespace: dict) -> float:
-    if not _EXPR_OK.match(expr):
-        raise ValueError("expression contains characters this checker will not evaluate: %r"
-                         % expr)
-    return eval(expr, {"__builtins__": {}}, dict(namespace, round=round))  # noqa: S307
-
-
-def strip_block(text: str) -> str:
-    """Everything outside the bindings block.
-
-    Found by a positive control: the block quotes the prose it binds, so a check
-    that searched the whole document could be satisfied by the binding's own copy
-    of the sentence. Editing the prose then left the guard green because the guard
-    was reading itself.
-    """
-    if BEGIN in text and END in text:
-        start, stop = text.index(BEGIN), text.index(END) + len(END)
-        if stop > start:
-            return text[:start] + text[stop:]
-    return text
-
-
-def load_bindings(doc: Path) -> tuple[dict, str]:
-    """Return (bindings, document text with the block region removed)."""
-    text = doc.read_text(encoding="utf-8")
-    if text.count(BEGIN) != 1 or text.count(END) != 1:
-        raise ValueError("%s must contain exactly one %s ... %s block"
-                         % (doc.name, BEGIN, END))
-    start = text.index(BEGIN)
-    stop = text.index(END) + len(END)
-    if stop < start:
-        raise ValueError("%s: END marker precedes BEGIN" % doc.name)
-    block = text[start:stop]
-    fence = re.search(r"```json\n(.*?)\n```", block, re.DOTALL)
-    if not fence:
-        raise ValueError("%s: the checked-numbers block carries no ```json fence" % doc.name)
-    return json.loads(fence.group(1)), text[:start] + text[stop:]
-
-
-def aggregate_namespace(rows: list[dict]) -> dict:
-    return {
-        "corpora_total": len(rows),
-        "measured": sum(1 for r in rows if r["score_percent"] is not None),
-        "control_only": sum(1 for r in rows
-                            if r["score_percent"] is None and r["control"] == "killed"),
-        "transcribed": sum(1 for r in rows if r["provenance"]["kind"] == "transcribed"),
-    }
-
-
 def check() -> list[str]:
     findings: list[str] = []
 
-    if not RESULTS.is_file():
+    adequacy = REPO / "conformance/adequacy"
+    results = adequacy / "results.json"
+    documents = [target for _, target in publish_numbers.pairs(REPO)]
+
+    if not results.is_file():
         return ["%s does not exist. Nothing re-derives the published numbers; run "
-                "conformance/adequacy/measure_all.py" % RESULTS.relative_to(REPO)]
-    doc = json.loads(RESULTS.read_text(encoding="utf-8"))
+                "conformance/adequacy/measure_all.py" % results.relative_to(REPO)]
+    doc = json.loads(results.read_text(encoding="utf-8"))
     rows = doc.get("corpora", [])
     by_corpus = {r["corpus"]: r for r in rows}
 
     # ---- 1. self-coverage -------------------------------------------------
     on_disk = {p.name[: -len(".manifest.json")]: p
-               for p in sorted(ADEQUACY.glob("*.manifest.json"))}
+               for p in sorted(adequacy.glob("*.manifest.json"))}
     for missing in sorted(set(on_disk) - set(by_corpus)):
         findings.append("no measurement for %s. results.json covers %d of %d manifests; a "
                         "checker that skips a corpus is the failure it is checking for"
@@ -201,15 +131,18 @@ def check() -> list[str]:
         findings.append("results.json carries %r, which has no manifest on disk. A result "
                         "outliving its manifest is a number about nothing" % orphan)
 
-    # ---- 1b. subject provenance for out-of-tree corpora --------------------
+    # ---- 2. subject provenance for out-of-tree corpora ---------------------
     # A number about a repository we do not own says nothing checkable unless it
     # names which state of that repository it describes. Two were published that
     # way: rge-bench and observed-effect-v0, scored with no commit anywhere in
     # the prose or the results. Freshness is not the requirement and cannot be --
     # those repositories move without this diff seeing it -- so the requirement
     # is that the published claim carries the commit it is permanently true of.
-    published = "\n".join(strip_block(d.read_text(encoding="utf-8"))
-                          for d in DOCUMENTS if d.is_file())
+    #
+    # Projection now supplies that commit through a `subject_commit` token, which
+    # is how the requirement is MET rather than a reason to drop it: delete the
+    # token from a template and this rule is what notices.
+    published = "\n".join(d.read_text(encoding="utf-8") for d in documents if d.is_file())
     for name, row in sorted(by_corpus.items()):
         subject = row.get("subject")
         if not subject:
@@ -235,36 +168,22 @@ def check() -> list[str]:
                     "does not get" % (name, repo.get("repository") or "an external repository",
                                       commit[:9]))
 
-    # ---- 1c. is the measurement still current for the code ------------------
+    # ---- 3. is the measurement still current for the code -------------------
     # The lane re-derives a corpus only when its declared sources move. Every
     # other revision compares the documents against an older results.json and
     # goes green, which is accurate about the comparison and silent about the
     # measurement. A figure taken last week, read as a fact about today, is the
-    # thing this file exists to stop, and matching prose to JSON does not stop it.
+    # thing this file exists to stop.
     #
     # The question asked is not "was this re-run at HEAD", which would mark almost
     # every row stale and train people to ignore the finding. It is whether
-    # anything the row DEPENDS ON has moved since it was taken.
-    for name, row in sorted(by_corpus.items()):
-        taken = row.get("measured_at")
-        if not taken or not taken.get("commit"):
-            findings.append("%s records no measured_at commit, so nothing can say whether its "
-                            "number is still current for this code" % name)
-            continue
-        moved = subprocess.run(
-            ["git", "-C", str(REPO), "diff", "--name-only", taken["commit"], "HEAD", "--",
-             *taken.get("depends_on", [])],
-            capture_output=True, text=True)
-        if moved.returncode != 0:
-            continue          # shallow clone or unknown commit: not a claim either way
-        changed = [ln for ln in moved.stdout.splitlines() if ln.strip()]
-        if changed:
-            findings.append(
-                "%s was measured at %s and %s changed since, so the published number describes "
-                "code this revision no longer has. Re-run measure_all.py --only %s"
-                % (name, taken["commit"][:9], ", ".join(sorted(changed)[:3]), name))
+    # anything the row DEPENDS ON has moved since it was taken. Delegated to the
+    # renderer so that "which rows are stale" has exactly one answer: a row this
+    # reports is a row whose tokens refuse to print a figure.
+    for name, why in sorted(publish_numbers.stale_corpora(by_corpus, REPO).items()):
+        findings.append("%s %s" % (name, why))
 
-    # ---- 2. tool pin ------------------------------------------------------
+    # ---- 4. tool pin ------------------------------------------------------
     for name, path in sorted(on_disk.items()):
         manifest = json.loads(path.read_text(encoding="utf-8"))
         pin = (manifest.get("tool_pin") or {}).get("commit")
@@ -278,7 +197,7 @@ def check() -> list[str]:
                             "or re-pin; a number and its tool must move together"
                             % (name, row.get("tool_commit"), path.name, pin))
 
-    # ---- 3. transcription -------------------------------------------------
+    # ---- 5. transcription -------------------------------------------------
     for row in rows:
         prov = row.get("provenance") or {}
         if prov.get("kind") == "measured":
@@ -297,40 +216,29 @@ def check() -> list[str]:
             findings.append("%s is transcribed from %s, which does not exist"
                             % (row["corpus"], src))
             continue
-        source_text = strip_block(source.read_text(encoding="utf-8"))
-        if normalise(quote) not in normalise(source_text):
+        if normalise(quote) not in normalise(source.read_text(encoding="utf-8")):
             findings.append("%s is transcribed from %s, but that document no longer contains "
                             "the quoted measurement. Either it was edited, in which case the "
                             "transcription is void, or re-run measure_all.py --only %s"
                             % (row["corpus"], src, row["corpus"]))
-        # The source document also pins the tool commit in PROSE, which is where it
-        # drifts: the manifest can be re-pinned and the sentence left behind.
-        if row.get("tool_commit") and row["tool_commit"] not in source_text:
-            findings.append("%s names corpus-adequacy %s, which %s no longer mentions. The "
-                            "document tells a reproducer which tool to use; a transcription "
-                            "measured with a different one is not the run it describes"
-                            % (row["corpus"], row["tool_commit"], src))
 
-    # ---- 3b. the prose tool pin, whatever the provenance --------------------
-    # This lived inside the transcription branch, so the moment a row stopped
-    # being transcribed the rule went quiet. It caught a real staleness within
-    # the hour: privileged-mcp-action-v0 was re-pinned to a newer tool and
-    # ERRATA.md kept handing a reproducer the old commit. The document tells
-    # someone which instrument to check out; whether we derived the row or
-    # quoted it changes nothing about that sentence needing to be true.
+    # ---- 4b. the tool pin as a published document spells it -----------------
+    # The tool commit ERRATA.md hands a reproducer is a projected token, so it
+    # cannot part from the row by an author's edit. This rule stays because a
+    # template may still hard-code a hash instead of using the token, and that is
+    # exactly the pin that drifted before: the manifest was re-pinned to a newer
+    # tool and the sentence kept handing out the old commit. Any full hash in a
+    # document that talks about the tool is treated as the pin.
     for row in rows:
         commit = row.get("tool_commit")
         if not commit:
             continue
-        for path in DOCUMENTS:
+        for path in documents:
             if not path.is_file():
                 continue
             text = path.read_text(encoding="utf-8")
             if row["corpus"] not in text and path.name != "ERRATA.md":
                 continue
-            # Not same-line: the sentence wraps, and a same-line regex silently
-            # matched nothing, which is a guard that cannot fail. Any full commit
-            # hash in a document that talks about the tool is treated as the pin.
             named = re.findall(r"\b([0-9a-f]{40})\b", text) if "corpus-adequacy" in text else []
             if named and not any(commit.startswith(c) or c.startswith(commit[:9])
                                  for c in named):
@@ -340,92 +248,19 @@ def check() -> list[str]:
                     "different one is not the run it describes"
                     % (path.relative_to(REPO), named[0][:9], row["corpus"], commit[:9]))
 
-    # ---- 4 and 5. prose ---------------------------------------------------
-    for path in DOCUMENTS:
-        rel = path.relative_to(REPO)
-        if not path.is_file():
-            findings.append("%s does not exist" % rel)
-            continue
-        try:
-            bindings, body = load_bindings(path)
-        except ValueError as exc:
-            findings.append(str(exc))
-            continue
-        except json.JSONDecodeError as exc:
-            findings.append("%s: the checked-numbers block is not valid JSON: %s" % (rel, exc))
-            continue
+    # ---- 6. projection ----------------------------------------------------
+    # The whole prose-side guarantee, in one comparison. Re-render each document
+    # from its template and require the bytes on disk to be exactly that.
+    findings.extend(publish_numbers.differences(REPO))
 
-        haystack = normalise(body)
-        for claim in bindings.get("claims", []):
-            label = "%s: %r" % (rel, claim.get("text", "")[:60])
-            text = claim.get("text")
-            asserts = claim.get("asserts")
-            if not text or not isinstance(asserts, dict) or not asserts:
-                findings.append("%s: a claim needs a text and at least one assertion" % label)
-                continue
-
-            corpus = claim.get("corpus")
-            if corpus == "*":
-                namespace = aggregate_namespace(rows)
-            elif corpus in by_corpus:
-                namespace = {k: v for k, v in by_corpus[corpus].items()
-                             if isinstance(v, (int, float)) and not isinstance(v, bool)}
-            else:
-                findings.append("%s: names corpus %r, which results.json does not measure"
-                                % (label, corpus))
-                continue
-            for key, local in (claim.get("locals") or {}).items():
-                if key.startswith("_"):
-                    continue
-                if not str((claim.get("locals") or {}).get("_why_" + key, "")).strip():
-                    findings.append("%s: local %r has no _why_%s. A declared constant with no "
-                                    "stated reason is a number smuggled past the measurement"
-                                    % (label, key, key))
-                namespace[key] = local
-
-            expected_values: list[float] = []
-            for expr, expected in asserts.items():
-                try:
-                    actual = evaluate(expr, namespace)
-                except Exception as exc:  # noqa: BLE001
-                    findings.append("%s: cannot evaluate %r: %s" % (label, expr, exc))
-                    continue
-                expected_values.append(float(expected))
-                if abs(float(actual) - float(expected)) > 1e-9:
-                    findings.append("%s: publishes %s = %s, the measurement gives %s. "
-                                    "Re-run measure_all.py or correct the document"
-                                    % (label, expr, expected, actual))
-
-            for n in numbers_in(text):
-                if not any(abs(n - v) <= 1e-9 for v in expected_values):
-                    findings.append("%s: the wording carries %g, which no assertion checks. "
-                                    "Every number in a published claim must be checked against "
-                                    "the measurement" % (label, n))
-
-            if normalise(text) not in haystack:
-                findings.append("%s: this exact wording is no longer in %s. The prose was "
-                                "edited away from the binding; update both together"
-                                % (label, rel))
-
-        # ---- 5. sweep -----------------------------------------------------
-        swept = haystack
-        for claim in bindings.get("claims", []):
-            swept = swept.replace(normalise(claim.get("text", "") or "\0"), " ")
-        for entry in bindings.get("not_derived", []):
-            token, reason = entry.get("token"), entry.get("reason")
-            if not token or not str(reason or "").strip():
-                findings.append("%s: a not_derived entry needs a token and a reason" % rel)
-                continue
-            if token not in swept:
-                findings.append("%s: not_derived declares %r, which no longer appears. Remove "
-                                "it; an exemption pointing at nothing is where the next "
-                                "unchecked number hides" % (rel, token))
-            swept = swept.replace(token, " ")
-        for leftover in SWEEP.finditer(swept):
-            at = swept[max(0, leftover.start() - 70): leftover.end() + 70]
-            findings.append("%s: %r is published but neither derived from results.json nor "
-                            "declared not_derived. Context: ...%s..."
-                            % (rel, leftover.group(0), at))
+    # ---- 7. the sweep, over the templates ----------------------------------
+    # Kept from the old checker and pointed somewhere new. Regenerate-and-compare
+    # detects one thing: that someone edited the output. It is blind to a
+    # number-shaped claim that was never a token, because a freshly invented
+    # figure in the narrative regenerates byte-identically and reads to a
+    # stranger exactly like a measurement. Projection stops a measured cell from
+    # being edited; this is what stops a new one from being written.
+    findings.extend(publish_numbers.unprojected_findings(REPO))
 
     return findings
 

@@ -71,6 +71,16 @@ GLOBAL_TRIGGERS = (
     "conformance/adequacy/check_published_numbers.py",
     "conformance/INDEX.md",
     "conformance/privileged-mcp-action-v0/ERRATA.md",
+    # The published documents became PROJECTIONS. Their content now lives in the
+    # templates and the generator, so triggering on the rendered files alone would
+    # watch the output and miss every input to it -- the exact shape of gap this
+    # lane exists to close. Verified by running the planner over a changed-template
+    # diff before this was added: relevant_corpora came back empty.
+    "conformance/INDEX.md.in",
+    "conformance/privileged-mcp-action-v0/ERRATA.md.in",
+    "conformance/adequacy/publish_numbers.py",
+    "conformance/adequacy/adjustments.json",
+    "conformance/adequacy/unprojected_numbers.json",
 )
 
 TOOL_REPOSITORY = "corpus-adequacy/corpus-adequacy"
@@ -113,9 +123,16 @@ def _declared_paths(manifest: dict) -> list[str]:
         value = manifest.get(key)
         if isinstance(value, str):
             out.append(value)
-    sources = manifest.get("implementation_sources")
-    if isinstance(sources, list):
-        out.extend(s for s in sources if isinstance(s, str))
+    for key in ("implementation_sources", "declaration_sources"):
+        # `declaration_sources` is what a corpus's DENOMINATOR rests on: the profile
+        # text its declared rules are audited against, the corpus manifest, the
+        # generator. Without it a normative rule can be added to the profile, the
+        # published denominator becomes wrong, and this planner never selects the
+        # corpus because no implementation source moved. The denominator was the
+        # finding on this branch; leaving it unwatched would repeat it one layer up.
+        values = manifest.get(key)
+        if isinstance(values, list):
+            out.extend(s for s in values if isinstance(s, str))
     return out
 
 

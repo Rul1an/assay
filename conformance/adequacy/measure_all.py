@@ -140,6 +140,13 @@ def measured_at(declared: dict, manifest: Path) -> dict:
     that matters: has anything this row DEPENDS ON moved since it was taken. Not
     "was it re-run this revision", which would mark almost every row stale and
     train people to ignore it.
+
+    `declaration_sources` was added because the sources the tool MUTATES are not
+    the only ones the number rests on. The numerator comes from deleting rules;
+    the denominator comes from an audit of the profile text against the manifest's
+    declared set. A normative rule added to a profile changes what the corpus ought
+    to be scored against, mutates nothing, and used to move nothing here -- which
+    is under-declaration one layer up from the one this measurement reports.
     """
     out = subprocess.run(["git", "-C", str(REPO), "rev-parse", "HEAD"],
                          capture_output=True, text=True)
@@ -147,7 +154,8 @@ def measured_at(declared: dict, manifest: Path) -> dict:
         return {}
     paths = [declared[k] for k in ("implementation", "vectors", "corpus_digest_file")
              if isinstance(declared.get(k), str)]
-    paths += [x for x in (declared.get("implementation_sources") or []) if isinstance(x, str)]
+    for key in ("implementation_sources", "declaration_sources"):
+        paths += [x for x in (declared.get(key) or []) if isinstance(x, str)]
     rel = []
     for raw in paths:
         try:
