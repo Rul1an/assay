@@ -295,8 +295,22 @@ class CompletenessPolicy(unittest.TestCase):
         self.assertIs(run_all.summarize(results)["complete"], False)
         self.assertEqual(run_all.summarize(results)["worst_executed_grade"], run_all.PROVED)
         self.assertEqual(run_all.exit_status(results, require_complete=False), 0)
-        self.assertEqual(run_all.exit_status(results, require_complete=True),
-                         run_all.REQUIRE_COMPLETE_EXIT)
+        self.assertEqual(run_all.exit_status(results, require_complete=True), 3)
+        self.assertEqual(run_all.REQUIRE_COMPLETE_EXIT, 3)
+
+    def test_mixed_false_unproved_incomplete_exits_false_first(self):
+        # FALSE + UNPROVED + a not-run suite: measured disagreement wins, not 2 or 3.
+        results = [
+            {"id": "bad", "grade": run_all.FALSE},
+            {"id": "stuck", "grade": run_all.UNPROVED},
+            {"id": "skip", "grade": run_all.NOT_SELECTED},
+        ]
+        self.assertIs(run_all.summarize(results)["complete"], False)
+        self.assertEqual(run_all.summarize(results)["worst_executed_grade"], run_all.FALSE)
+        code = run_all.exit_status(results, require_complete=True)
+        self.assertEqual(code, 1)
+        self.assertNotEqual(code, 2)
+        self.assertNotEqual(code, 3)
 
     def test_require_complete_does_not_mask_incomplete_false(self):
         results = [
@@ -366,7 +380,7 @@ class RequireCompleteFlag(unittest.TestCase):
         p = subprocess.run(
             [sys.executable, str(run_all.__file__), "--json", "--require-complete"],
             capture_output=True, text=True, timeout=300)
-        self.assertEqual(p.returncode, run_all.REQUIRE_COMPLETE_EXIT)
+        self.assertEqual(p.returncode, 3)
         d = json.loads(p.stdout)
         self.assertIs(d["complete"], False)
         self.assertEqual(d["declared"], len(d["suites"]))
@@ -374,6 +388,13 @@ class RequireCompleteFlag(unittest.TestCase):
         self.assertTrue(any(
             s["grade"] in (run_all.NEEDS_CANDIDATE, run_all.NOT_SELECTED, run_all.EXTERNAL)
             for s in d["suites"]))
+
+    def test_json_keeps_v1_worst_grade_key(self):
+        p = subprocess.run([sys.executable, str(run_all.__file__), "--json"],
+                           capture_output=True, text=True, timeout=300)
+        d = json.loads(p.stdout)
+        self.assertIn("worst_grade", d)
+        self.assertIn(d["worst_grade"], (run_all.PROVED, run_all.UNPROVED, run_all.FALSE))
 
     def test_json_reports_whether_require_complete_was_requested(self):
         # JSON echo of the flag, not proof the exit rule ran.
@@ -391,7 +412,7 @@ class RequireCompleteFlag(unittest.TestCase):
         p = subprocess.run(
             [sys.executable, str(run_all.__file__), "--require-complete"],
             capture_output=True, text=True, timeout=300)
-        self.assertEqual(p.returncode, run_all.REQUIRE_COMPLETE_EXIT)
+        self.assertEqual(p.returncode, 3)
         self.assertIn("NOT RUN (declared, not a pass)", p.stdout)
         self.assertIn("complete: no", p.stdout)
 
