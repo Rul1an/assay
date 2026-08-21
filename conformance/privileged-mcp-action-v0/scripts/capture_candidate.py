@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import gzip
-import hashlib
 import io
 import json
 import shlex
@@ -27,6 +26,11 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bounded_process import ProcessCaptureError, ProcessLimitError, run_bounded  # noqa: E402
+from artifact_io import (  # noqa: E402
+    content_sha256 as sha256,
+    render_deterministic_json_bytes,
+    write_regular_file_atomically,
+)
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "adequacy"))
 import published_rows  # noqa: E402
 from capture_format import (  # noqa: E402
@@ -70,10 +74,6 @@ class CandidateError(ValueError):
 
 class HarnessError(RuntimeError):
     pass
-
-
-def sha256(data: bytes) -> str:
-    return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
 def read_pack_bytes(path: Path) -> bytes:
@@ -368,10 +368,7 @@ def main() -> int:
         print(f"capture host produced an invalid capture: {error}", file=sys.stderr)
         return 2
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(capture, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    write_regular_file_atomically(args.output, render_deterministic_json_bytes(capture))
     print(f"captured {len(observations)} observations")
     return 0
 

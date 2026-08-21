@@ -25,6 +25,11 @@ from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bounded_process import ProcessLimitError, run_bounded  # noqa: E402
+from artifact_io import (  # noqa: E402
+    ARTIFACT_TEMP_PREFIX as CAPTURE_TEMP_PREFIX,
+    render_deterministic_json_bytes,
+    write_regular_file_atomically,
+)
 import capture_candidate  # noqa: E402
 from capture_candidate import CandidateError, HarnessError  # noqa: E402
 from capture_format import (  # noqa: E402
@@ -65,7 +70,6 @@ EXECUTION_DOCUMENT_NAME = "oci-execution.json"
 CANDIDATE_STDOUT_NAME = "candidate.stdout"
 CANDIDATE_STDERR_NAME = "candidate.stderr"
 HANDOFF_TEMP_PREFIX = ".assay-oci-handoff-"
-CAPTURE_TEMP_PREFIX = ".assay-oci-capture-"
 MAX_EXECUTION_BYTES = 16 * 1024
 MAX_EXECUTION_DEPTH = 6
 
@@ -519,7 +523,7 @@ def write_handoff(output_dir: Path, result: OciExecution) -> None:
                 "stderr_bytes": len(result.stderr),
             },
         }
-        payload = (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        payload = render_deterministic_json_bytes(document)
         (tmp / CANDIDATE_STDOUT_NAME).write_bytes(result.stdout)
         (tmp / CANDIDATE_STDERR_NAME).write_bytes(result.stderr)
         (tmp / EXECUTION_DOCUMENT_NAME).write_bytes(payload)
@@ -649,28 +653,9 @@ def write_validated_capture(
     validate_capture(capture)
     write_regular_file_atomically(
         output,
-        (json.dumps(capture, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+        render_deterministic_json_bytes(capture),
     )
     print(f"captured {len(observations)} observations")
-
-
-def write_regular_file_atomically(path: Path, data: bytes) -> None:
-    parent = Path(path).parent
-    parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=CAPTURE_TEMP_PREFIX, dir=str(parent))
-    tmp = Path(tmp_name)
-    try:
-        written = 0
-        while written < len(data):
-            written += os.write(fd, data[written:])
-        os.fsync(fd)
-        os.close(fd)
-        fd = -1
-        os.replace(tmp, path)
-    finally:
-        if fd >= 0:
-            os.close(fd)
-        tmp.unlink(missing_ok=True)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import ast
 import gzip
 import hashlib
+import importlib
 import inspect
 import io
 import json
@@ -1242,12 +1244,149 @@ class CandidateScorerTests(CandidateHarness, unittest.TestCase):
 
 
 sys.path.insert(0, str(CORPUS_DIR / "scripts"))
+import artifact_io  # noqa: E402
 import capture_format  # noqa: E402
 import score_candidate  # noqa: E402
 import strict_json  # noqa: E402
 
 CAPTURE_SCRIPT = CORPUS_DIR / "scripts" / "capture_candidate.py"
 CAPTURE_SCHEMA_DOC = CORPUS_DIR / "capture.schema.json"
+ARTIFACT_IO_PATH = CORPUS_DIR / "scripts" / "artifact_io.py"
+
+
+class SharedArtifactIoContractTests(unittest.TestCase):
+    """The byte-I/O rule is shared, not restated by each producer."""
+
+    def artifact_io(self):
+        self.assertTrue(ARTIFACT_IO_PATH.is_file(), "shared artifact_io.py is missing")
+        importlib.invalidate_caches()
+        sys.modules.pop("artifact_io", None)
+        return importlib.import_module("artifact_io")
+
+    def test_deterministic_json_bytes_pin_key_order_indent_and_one_lf(self) -> None:
+        artifact_io = self.artifact_io()
+        self.assertEqual(
+            artifact_io.render_deterministic_json_bytes(
+                {"z": 3, "a": {"second": 2, "first": 1}}
+            ),
+            b'{\n  "a": {\n    "first": 1,\n    "second": 2\n  },\n  "z": 3\n}\n',
+        )
+
+    def test_every_pretty_json_producer_calls_the_shared_renderer(self) -> None:
+        scripts = CORPUS_DIR / "scripts"
+        paths = tuple(
+            scripts / name
+            for name in (
+                "pack_format.py",
+                "build_clean_room_pack.py",
+                "capture_candidate.py",
+                "score_candidate.py",
+                "oci_candidate_executor.py",
+            )
+        )
+        shared_calls = 0
+        inline_pretty_calls = []
+        for path in paths:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                if isinstance(node.func, ast.Name) and node.func.id == "render_deterministic_json_bytes":
+                    shared_calls += 1
+                if not (
+                    isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "json"
+                    and node.func.attr == "dumps"
+                ):
+                    continue
+                keywords = {item.arg: item.value for item in node.keywords if item.arg}
+                indent = keywords.get("indent")
+                sort_keys = keywords.get("sort_keys")
+                if (
+                    isinstance(indent, ast.Constant)
+                    and indent.value == 2
+                    and isinstance(sort_keys, ast.Constant)
+                    and sort_keys.value is True
+                ):
+                    inline_pretty_calls.append(f"{path.name}:{node.lineno}")
+        self.assertEqual(inline_pretty_calls, [], "inline deterministic renderers drift")
+        self.assertEqual(shared_calls, 6, "the six shipped pretty-JSON sites must delegate")
+
+    def test_capture_and_record_outputs_use_one_atomic_writer(self) -> None:
+        scripts = CORPUS_DIR / "scripts"
+        paths = tuple(
+            scripts / name
+            for name in (
+                "capture_candidate.py",
+                "score_candidate.py",
+                "oci_candidate_executor.py",
+            )
+        )
+        atomic_calls = 0
+        direct_writes = []
+        for path in paths:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                if isinstance(node.func, ast.Name) and node.func.id == "write_regular_file_atomically":
+                    atomic_calls += 1
+                if isinstance(node.func, ast.Attribute) and node.func.attr == "write_text":
+                    direct_writes.append(f"{path.name}:{node.lineno}")
+        self.assertEqual(direct_writes, [], "capture/scoring output must not truncate in place")
+        self.assertEqual(atomic_calls, 3, "capture, scorer and OCI capture must share the writer")
+
+    def test_failed_atomic_replace_preserves_old_bytes_and_cleans_temp(self) -> None:
+        artifact_io = self.artifact_io()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            output = root / "record.json"
+            stale = b'{"stale":true}\n'
+            output.write_bytes(stale)
+            with mock.patch.object(
+                artifact_io.os, "replace", side_effect=OSError("rename interrupted")
+            ):
+                with self.assertRaisesRegex(OSError, "rename interrupted"):
+                    artifact_io.write_regular_file_atomically(output, b'{"new":true}\n')
+            self.assertEqual(output.read_bytes(), stale)
+            self.assertEqual(
+                [p for p in root.iterdir() if p.name.startswith(artifact_io.ARTIFACT_TEMP_PREFIX)],
+                [],
+            )
+
+    def test_atomic_writer_completes_short_writes(self) -> None:
+        artifact_io = self.artifact_io()
+        with tempfile.TemporaryDirectory() as raw:
+            output = Path(raw) / "record.json"
+            expected = b'{"long":"enough to require several writes"}\n'
+            real_write = artifact_io.os.write
+
+            def short_write(fd: int, data: bytes) -> int:
+                return real_write(fd, data[:3])
+
+            with mock.patch.object(artifact_io.os, "write", side_effect=short_write):
+                artifact_io.write_regular_file_atomically(output, expected)
+
+            self.assertEqual(output.read_bytes(), expected)
+
+    def test_zero_progress_write_preserves_old_bytes_and_cleans_temp(self) -> None:
+        artifact_io = self.artifact_io()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            output = root / "record.json"
+            stale = b'{"stale":true}\n'
+            output.write_bytes(stale)
+
+            with mock.patch.object(artifact_io.os, "write", return_value=0):
+                with self.assertRaisesRegex(OSError, "made no progress"):
+                    artifact_io.write_regular_file_atomically(output, b'{"new":true}\n')
+
+            self.assertEqual(output.read_bytes(), stale)
+            self.assertEqual(
+                [p for p in root.iterdir() if p.name.startswith(artifact_io.ARTIFACT_TEMP_PREFIX)],
+                [],
+            )
 
 
 class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
@@ -1343,6 +1482,71 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         report = json.loads(output.read_text())
         self.assertEqual(report["summary"]["match"], 14)
         self.assertEqual(report["summary"]["total"], 14)
+
+    def test_capture_digest_binds_the_single_bounded_read(self) -> None:
+        self.assertTrue(
+            hasattr(capture_format, "published_rows"),
+            "capture loading must delegate its bounded read to published_rows",
+        )
+        self.assertTrue(
+            hasattr(capture_format, "load_capture_with_digest"),
+            "capture loading must return the document and digest from one read",
+        )
+        capture = self.valid_capture("one-read-digest")
+        original = capture.read_bytes()
+        original_document = json.loads(original)
+        swapped_document = json.loads(original)
+        swapped_document["implementation"]["name"] = "swapped implementation"
+        swapped = artifact_io.render_deterministic_json_bytes(swapped_document)
+        reads = {"count": 0}
+        real_read = capture_format.published_rows.read_regular_file
+
+        def read_then_swap(path: Path, *, limit: int) -> bytes:
+            data = real_read(path, limit=limit)
+            reads["count"] += 1
+            Path(path).write_bytes(swapped)
+            return data
+
+        with mock.patch.object(
+            capture_format.published_rows,
+            "read_regular_file",
+            side_effect=read_then_swap,
+        ):
+            document, digest = capture_format.load_capture_with_digest(capture)
+
+        capture_format.validate_capture(document)
+        self.assertEqual(document, original_document)
+        self.assertNotEqual(document, swapped_document)
+        self.assertEqual(digest, sha256(original))
+        self.assertEqual(reads["count"], 1)
+        self.assertEqual(capture.read_bytes(), swapped)
+        self.assertNotEqual(digest, sha256(swapped))
+
+    def test_capture_digest_hashes_input_bytes_not_a_reserialization(self) -> None:
+        self.assertTrue(
+            hasattr(capture_format, "load_capture_with_digest"),
+            "capture loading must expose the digest of the exact input bytes",
+        )
+        capture = self.valid_capture("input-byte-digest")
+        document = json.loads(capture.read_text(encoding="utf-8"))
+        compact = json.dumps(document, separators=(",", ":")).encode("utf-8")
+        capture.write_bytes(compact)
+
+        loaded, digest = capture_format.load_capture_with_digest(capture)
+
+        self.assertEqual(loaded, document)
+        self.assertEqual(digest, sha256(compact))
+        self.assertNotEqual(digest, sha256(json.dumps(document, sort_keys=True).encode()))
+        self.assertEqual(capture_format.load_capture(capture), loaded)
+
+    def test_capture_digest_path_still_rejects_semantically_invalid_input(self) -> None:
+        capture = self.valid_capture("digest-validation")
+        document = json.loads(capture.read_text(encoding="utf-8"))
+        document["schema"] = "unknown.capture.v0"
+        capture.write_text(json.dumps(document), encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "capture schema mismatch"):
+            capture_format.load_capture_with_digest(capture)
 
     def test_missing_or_duplicated_observation_is_refused_without_a_record(self) -> None:
         capture = self.valid_capture("cardinality")
