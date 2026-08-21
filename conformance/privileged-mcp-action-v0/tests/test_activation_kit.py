@@ -2290,23 +2290,6 @@ def _job_mapping_keys(text: str, job: str) -> tuple[str, ...]:
     return tuple(keys)
 
 
-def _named_step_env_keys(block: str) -> frozenset[str]:
-    """Active `env:` mapping keys inside one named step block."""
-    keys: set[str] = set()
-    in_env = False
-    for line in _active_lines(block):
-        key = line.split(":", 1)[0]
-        if key == "env":
-            in_env = True
-            continue
-        if not in_env:
-            continue
-        if key in _STEP_FIELD_KEYS:
-            break
-        keys.add(key)
-    return frozenset(keys)
-
-
 def _named_step_block(text: str, name: str) -> str | None:
     """Full named step mapping, from `- name:` through the next sibling step."""
     marker = f"      - name: {name}\n"
@@ -2463,7 +2446,7 @@ def oci_candidate_workflow_problems(
             continue
         problems.append("inputs interpolated in run script")
         break
-    if "continue-on-error" in active_text:
+    if not omitted("continue-on-error swallows failure") and "continue-on-error" in active_text:
         problems.append("continue-on-error swallows failure")
     if "|| true" in active_text:
         problems.append("|| true swallows failure")
@@ -2511,8 +2494,10 @@ def oci_candidate_workflow_problems(
         if name == OCI_UPLOAD_STEP:
             continue
         block = _named_step_block(text, name)
-        if block is not None and any(
-            re.match(r"^if:", line) for line in _active_lines(block)
+        if (
+            not omitted("conditional step")
+            and block is not None
+            and any(re.match(r"^if:", line) for line in _active_lines(block))
         ):
             problems.append(f"conditional step: {name}")
     for name, allowed in OCI_PINNED_STEP_SEQUENCES.items():
@@ -2529,10 +2514,16 @@ def oci_candidate_workflow_problems(
         problems.append("unexpected top-level permissions")
     if _has_job_level_permissions(text):
         problems.append("job-level permissions")
-    for name, allowed in OCI_STEP_ENV_KEYS.items():
-        block = _named_step_block(text, name)
-        if block is None or _named_step_env_keys(block) != allowed:
-            problems.append(f"unexpected env keys: {name}")
+    if not omitted("unexpected env keys"):
+        for name, allowed in OCI_STEP_ENV_KEYS.items():
+            block = _named_step_block(text, name)
+            actual = (
+                frozenset(_keys_at_indent(block, 10, under="env"))
+                if block is not None
+                else frozenset()
+            )
+            if block is None or actual != allowed:
+                problems.append(f"unexpected env keys: {name}")
     if not omitted("unexpected top-level keys"):
         if _keys_at_indent(text, 0) != OCI_DOCUMENT_KEYS:
             problems.append("unexpected top-level keys")
@@ -2853,6 +2844,17 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
                 capture_env + "          GH_TOKEN: ${{ github.token }}\n",
                 "unexpected env keys",
             ),
+            *(
+                (
+                    f"capture_env_break_{field}",
+                    capture_env,
+                    capture_env
+                    + f"          {field}: breakpoint\n"
+                    + "          GH_TOKEN: token-value\n",
+                    "unexpected env keys",
+                )
+                for field in sorted(_STEP_FIELD_KEYS)
+            ),
             (
                 "inline_python_direct",
                 executor_line,
@@ -2860,6 +2862,10 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
                 "inline Python",
             ),
         )
+        env_break_extra_skip = {
+            "if": "conditional step",
+            "continue-on-error": "continue-on-error swallows failure",
+        }
         for kind, needle, replacement, expected in shape:
             with self.subTest(kind=kind):
                 self.assertIn(needle, text)
@@ -2869,6 +2875,20 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
                     any(expected in problem for problem in problems),
                     f"expected {expected!r} in {problems}",
                 )
+                if kind.startswith("capture_env_break_"):
+                    field = kind.removeprefix("capture_env_break_")
+                    skip = {expected}
+                    extra = env_break_extra_skip.get(field)
+                    if extra:
+                        skip.add(extra)
+                    restored = oci_candidate_workflow_problems(
+                        mutated, skip=frozenset(skip)
+                    )
+                    self.assertEqual(
+                        restored,
+                        [],
+                        f"{kind} must be [] when {sorted(skip)} is skipped: {restored}",
+                    )
         with self.subTest(kind="duplicate_upload_always"):
             mutated = text + (
                 f"\n      - name: {OCI_UPLOAD_STEP}\n"
