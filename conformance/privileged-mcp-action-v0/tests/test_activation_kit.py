@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import inspect
 import io
 import json
 import re
@@ -125,6 +126,22 @@ class CleanRoomPackTests(unittest.TestCase):
             "--output",
             str(output),
         )
+
+    def test_pack_digest_binds_the_bytes_the_loader_parsed(self) -> None:
+        import capture_candidate
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_path = Path(tmp) / "pack.tar.gz"
+            dest = Path(tmp) / "out"
+            dest.mkdir()
+            self.build(pack_path)
+            original = pack_path.read_bytes()
+            digest_a = sha256(original)
+            loaded, bound = capture_candidate.load_pack_with_digest(pack_path, dest)
+            pack_path.write_bytes(original + b"\x00")
+            self.assertEqual(bound, digest_a)
+            self.assertEqual(loaded["case_count"], 14)
+            self.assertNotEqual(bound, capture_candidate.sha256_file(pack_path))
 
     def test_pack_is_deterministic_opaque_and_inputs_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1220,6 +1237,16 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         target = self.root / f"capture-{name}.json"
         target.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
         return target
+
+    def test_capture_observations_runner_is_keyword_only_and_defaults(self) -> None:
+        import capture_candidate
+
+        params = inspect.signature(capture_candidate.capture_observations).parameters
+        self.assertIn("candidate_runner", params)
+        self.assertEqual(params["candidate_runner"].kind, inspect.Parameter.KEYWORD_ONLY)
+        self.assertIs(params["candidate_runner"].default, capture_candidate.run_candidate)
+        with self.assertRaises(TypeError):
+            capture_candidate.capture_observations({}, [], 1, capture_candidate.run_candidate)
 
     def test_valid_capture_scores_every_case(self) -> None:
         """Positive control for every refusal below.

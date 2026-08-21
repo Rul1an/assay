@@ -15,16 +15,20 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
+import io
 import json
 import shlex
 import sys
 import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
+from collections.abc import Callable
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bounded_process import ProcessCaptureError, ProcessLimitError, run_bounded  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "adequacy"))
+import published_rows  # noqa: E402
 from capture_format import (  # noqa: E402
     CAPTURE_NON_CLAIMS,
     CAPTURE_SCHEMA,
@@ -72,12 +76,12 @@ def sha256(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
+def read_pack_bytes(path: Path) -> bytes:
+    return published_rows.read_regular_file(Path(path), limit=MAX_PACK_BYTES)
+
+
 def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while chunk := stream.read(1024 * 1024):
-            digest.update(chunk)
-    return "sha256:" + digest.hexdigest()
+    return sha256(read_pack_bytes(path))
 
 
 def read_member(archive: tarfile.TarFile, member: tarfile.TarInfo) -> bytes:
@@ -94,12 +98,12 @@ def read_member(archive: tarfile.TarFile, member: tarfile.TarInfo) -> bytes:
     return data
 
 
-def load_pack(pack: Path, destination: Path) -> dict[str, Any]:
-    if pack.stat().st_size > MAX_PACK_BYTES:
+def load_pack_from_bytes(data: bytes, destination: Path) -> dict[str, Any]:
+    if len(data) > MAX_PACK_BYTES:
         raise ValueError(f"pack exceeds {MAX_PACK_BYTES} bytes")
     files: dict[str, bytes] = {}
     expanded_bytes = 0
-    with pack.open("rb") as raw:
+    with io.BytesIO(data) as raw:
         with gzip.GzipFile(fileobj=raw) as decoded:
             bounded = BoundedReader(decoded, MAX_PACK_ARCHIVE_BYTES)
             with tarfile.open(fileobj=bounded, mode="r|") as archive:
@@ -193,6 +197,16 @@ def load_pack(pack: Path, destination: Path) -> dict[str, Any]:
     return index
 
 
+def load_pack_with_digest(pack: Path, destination: Path) -> tuple[dict[str, Any], str]:
+    data = read_pack_bytes(pack)
+    return load_pack_from_bytes(data, destination), sha256(data)
+
+
+def load_pack(pack: Path, destination: Path) -> dict[str, Any]:
+    loaded, _digest = load_pack_with_digest(pack, destination)
+    return loaded
+
+
 def parse_candidate_report(stdout: bytes) -> dict[str, Any]:
     try:
         value = json.loads(stdout.decode("utf-8"))
@@ -245,18 +259,28 @@ def run_candidate(command: list[str], bundle: Path, timeout_seconds: int) -> dic
     }
 
 
+_DEFAULT_CANDIDATE_RUNNER = run_candidate
+
+
 def capture_observations(
     pack: dict[str, Any],
     command: list[str],
     timeout_seconds: int,
+    *,
+    candidate_runner: Callable[[list[str], Path, int], dict[str, Any]] = _DEFAULT_CANDIDATE_RUNNER,
 ) -> list[dict[str, Any]]:
     """Execute every opaque case and record one observation each, in pack order."""
+    runner = (
+        run_candidate
+        if candidate_runner is _DEFAULT_CANDIDATE_RUNNER
+        else candidate_runner
+    )
     observations = []
     for case in pack["cases"]:
         case_id = case["id"]
         digest = case["sha256"]
         try:
-            execution = run_candidate(command, Path(case["_local_path"]), timeout_seconds)
+            execution = runner(command, Path(case["_local_path"]), timeout_seconds)
         except HarnessError as error:
             observations.append(
                 observe_error(case_id, digest, STATE_CAPTURE_ERROR, str(error))
@@ -323,8 +347,7 @@ def main() -> int:
         return 2
     with tempfile.TemporaryDirectory() as tmp:
         try:
-            pack = load_pack(args.pack, Path(tmp))
-            pack_digest = sha256_file(args.pack)
+            pack, pack_digest = load_pack_with_digest(args.pack, Path(tmp))
         except (
             OSError,
             EOFError,
