@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 
 from bounded_process import ProcessLimitError, run_bounded
+from artifact_io import render_deterministic_json_bytes
 from pack_format import (
     clean_room_descriptor,
     clean_room_spec,
@@ -205,9 +206,7 @@ def build_pack(repo_root: Path, source_commit: str) -> bytes:
         "README.md": README.encode(),
         "canonicalization/README.md": JCS_README.encode(),
         "canonicalization/rfc8785-vectors.json": jcs_vectors,
-        "cases.json": (
-            json.dumps(case_index, indent=2, sort_keys=True) + "\n"
-        ).encode(),
+        "cases.json": render_deterministic_json_bytes(case_index),
         "descriptor.json": descriptor,
         "spec.md": spec,
     }

@@ -10,6 +10,8 @@ import json
 import tarfile
 from typing import Any, BinaryIO, Iterable
 
+from artifact_io import render_deterministic_json_bytes
+
 MAX_SOURCE_BUNDLE_BYTES = 16 * 1024 * 1024
 MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_EVENTS_BYTES = 8 * 1024 * 1024
@@ -219,4 +221,4 @@ omitted from this pack because they name answer-bearing corpus surfaces. Normati
 def clean_room_descriptor(descriptor: bytes) -> bytes:
     value = json.loads(descriptor)
     value.pop("corpus", None)
-    return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
+    return render_deterministic_json_bytes(value)

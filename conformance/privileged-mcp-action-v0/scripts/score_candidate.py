@@ -33,6 +33,10 @@ from capture_candidate import (  # noqa: E402
     positive_int,
     sha256,
 )
+from artifact_io import (  # noqa: E402
+    render_deterministic_json_bytes,
+    write_regular_file_atomically,
+)
 from capture_format import (  # noqa: E402
     STATE_CANDIDATE_ERROR,
     STATE_CAPTURE_ERROR,
@@ -329,10 +333,7 @@ def main() -> int:
         print(f"scorer produced an invalid run record: {error}", file=sys.stderr)
         return 2
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    write_regular_file_atomically(args.output, render_deterministic_json_bytes(report))
     print(json.dumps(report["summary"], sort_keys=True))
     if (
         report["summary"]["execution_error"]

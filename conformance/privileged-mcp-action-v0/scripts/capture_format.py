@@ -21,7 +21,8 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from strict_json import load_strict_object  # noqa: E402
+from artifact_io import content_sha256  # noqa: E402
+from strict_json import parse_strict_object  # noqa: E402
 from validate_run_record import (  # noqa: E402
     EXPECTED_CASE_COUNT,
     FULL_SHA,
@@ -36,6 +37,9 @@ from implementations import (  # noqa: E402
     ImplementationRegistryError,
     validate_image_reference,
 )
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "adequacy"))
+import published_rows  # noqa: E402
 
 CAPTURE_SCHEMA = "assay.privileged_mcp_action.candidate_capture.v0"
 REPORT_SCHEMA = "assay.privileged_mcp_action.verify.report.v0"
@@ -328,19 +332,24 @@ def validate_capture(capture: Any) -> None:
     )
 
 
-def load_capture(path: Path) -> dict:
-    """Read one capture as hostile input, then validate it whole."""
+def load_capture_with_digest(path: Path) -> tuple[dict, str]:
+    """Read hostile capture bytes once, bind their digest, then validate them whole."""
     try:
-        document = load_strict_object(
-            Path(path),
+        data = published_rows.read_regular_file(Path(path), limit=MAX_CAPTURE_BYTES)
+        document = parse_strict_object(
+            data,
             label="capture",
-            max_bytes=MAX_CAPTURE_BYTES,
             max_depth=MAX_CAPTURE_DEPTH,
         )
     except ValueError as error:
         raise CaptureError(str(error)) from error
     validate_capture(document)
-    return document
+    return document, content_sha256(data)
+
+
+def load_capture(path: Path) -> dict:
+    """Read one capture as hostile input, then validate it whole."""
+    return load_capture_with_digest(path)[0]
 
 
 def add_identity_arguments(parser: "argparse.ArgumentParser", *, required: bool = True) -> None:
