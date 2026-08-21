@@ -29,10 +29,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from capture_candidate import (  # noqa: E402
     build_capture,
     capture_observations,
-    load_pack,
+    load_pack_with_digest,
     positive_int,
     sha256,
-    sha256_file,
 )
 from capture_format import (  # noqa: E402
     STATE_CANDIDATE_ERROR,
@@ -269,8 +268,7 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmp:
         try:
-            pack = load_pack(args.pack, Path(tmp))
-            pack_digest = sha256_file(args.pack)
+            pack, pack_digest = load_pack_with_digest(args.pack, Path(tmp))
         except (
             OSError,
             EOFError,
