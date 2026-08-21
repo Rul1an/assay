@@ -10,10 +10,13 @@ on required_complete, not by mapping 3 to 0.
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -24,45 +27,500 @@ import run_all  # noqa: E402
 REPO = Path(__file__).resolve().parents[2]
 CI_YML = REPO / ".github/workflows/ci.yml"
 STANDALONE = REPO / ".github/workflows/conformance-inventory.yml"
-INVENTORY_STEP_RE = re.compile(r"(?ms)^      - name: Conformance inventory\n(?:        .+\n)+")
-JOB_KEY_RE = re.compile(r"^  [A-Za-z0-9_][A-Za-z0-9_-]*:")
 REQUIRED_RUN_ALL = (
     "python3 conformance/run_all.py --require-complete --completion-scope required"
 )
+REVISION_WITNESS = 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"'
+CONFORMANCE_YML = REPO / ".github/workflows/privileged-mcp-action-conformance.yml"
+COMBINED_UNITTEST = (
+    "          python3 -m unittest \\\n"
+    "            conformance/privileged-mcp-action-v0/tests/test_activation_kit.py \\\n"
+    "            conformance/privileged-mcp-action-v0/tests/test_oci_candidate_executor.py"
+)
+INVENTORY_RUN_SCRIPT = (
+    "set -euo pipefail",
+    REVISION_WITNESS,
+    "python3 conformance/registry.py",
+    "python3 conformance/implementations.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_implementations.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_pma_v0_registration.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_registry.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_run_all.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py",
+    REQUIRED_RUN_ALL,
+)
+ACTIVATION_KIT_RUN_SCRIPT = (
+    "set -euo pipefail",
+    REVISION_WITNESS,
+    *(line.strip() for line in COMBINED_UNITTEST.splitlines()),
+)
+HARD_RUN_CONTRACTS = {
+    ("scope", "Conformance inventory"): (
+        frozenset({"name", "runs-on", "timeout-minutes", "permissions",
+                   "outputs", "steps"}),
+        frozenset({"name", "shell", "run"}),
+        INVENTORY_RUN_SCRIPT,
+        frozenset({"name", "on", "permissions", "env", "jobs"}),
+        frozenset({"ASSAY_PUBLIC_MSRV"}),
+    ),
+    ("activation-kit", "Run activation-kit contract tests"): (
+        frozenset({"runs-on", "steps"}),
+        frozenset({"name", "shell", "run"}),
+        ACTIVATION_KIT_RUN_SCRIPT,
+        frozenset({"name", "on", "permissions", "concurrency", "jobs"}),
+        frozenset(),
+    ),
+}
+CHECKOUT_REF = "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
+SETUP_PYTHON_REF = (
+    "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1")
+# The trusted prefix prevents earlier steps from changing runner state before the
+# hard call. Pins constrain workflow inputs; they do not attest the runner platform
+# or the implementation and behavior of GitHub-hosted actions.
+TRUSTED_PREFIX_CONTRACTS = {
+    ("scope", "Conformance inventory"): (
+        (frozenset({"uses", "with"}),
+         {"uses": CHECKOUT_REF},
+         {"persist-credentials": "false", "fetch-depth": "0"}),
+        (frozenset({"uses", "with"}),
+         {"uses": SETUP_PYTHON_REF},
+         {"python-version": "3.12"}),
+    ),
+    ("activation-kit", "Run activation-kit contract tests"): (
+        (frozenset({"name", "uses", "with"}),
+         {"name": "Check out source", "uses": CHECKOUT_REF},
+         {"fetch-depth": "0", "persist-credentials": "false"}),
+        (frozenset({"name", "uses", "with"}),
+         {"name": "Set up Python", "uses": SETUP_PYTHON_REF},
+         {"python-version": "3.13.8"}),
+    ),
+}
+ACTIVATION_KIT = (
+    REPO / "conformance/privileged-mcp-action-v0/tests/test_activation_kit.py"
+)
 
 
-def _scope_job(text: str) -> str:
-    lines = text.splitlines(keepends=True)
-    start = next((i for i, line in enumerate(lines) if line.startswith("  scope:")), None)
-    if start is None:
-        raise AssertionError("ci.yml missing scope job")
+def _indentation_bounded_block(
+        lines: list[str], start: int, block_indent: int) -> str:
     end = start + 1
-    while end < len(lines) and not JOB_KEY_RE.match(lines[end]):
+    while end < len(lines):
+        line = lines[end]
+        if line.strip():
+            indent = len(line) - len(line.lstrip(" "))
+            if indent <= block_indent:
+                break
         end += 1
     return "".join(lines[start:end])
 
 
+def named_job(text: str, name: str) -> str:
+    lines = text.splitlines(keepends=True)
+    marker = re.compile(rf"^  {re.escape(name)}:\s*$")
+    matches = [
+        (i, marker.fullmatch(line.rstrip("\r\n")))
+        for i, line in enumerate(lines)
+    ]
+    matches = [(i, match) for i, match in matches if match is not None]
+    if len(matches) != 1:
+        raise AssertionError(f"expected one {name!r} job, found {len(matches)}")
+    return _indentation_bounded_block(lines, matches[0][0], 2)
+
+
+def named_step(text: str, job_name: str, step_name: str) -> str:
+    lines = named_job(text, job_name).splitlines(keepends=True)
+    marker = re.compile(rf"^(?P<indent> +)- name: {re.escape(step_name)}\s*$")
+    matches = [
+        (i, marker.fullmatch(line.rstrip("\r\n")))
+        for i, line in enumerate(lines)
+    ]
+    matches = [(i, match) for i, match in matches if match is not None]
+    if len(matches) != 1:
+        raise AssertionError(
+            f"expected one {step_name!r} step in {job_name!r}, found {len(matches)}")
+    start, match = matches[0]
+    assert match is not None
+    return _indentation_bounded_block(
+        lines, start, len(match.group("indent")))
+
+
 def _inventory_step(text: str) -> str:
-    step = INVENTORY_STEP_RE.search(_scope_job(text))
-    if step is None:
-        raise AssertionError("scope job missing Conformance inventory step")
-    return step.group(0)
+    return named_step(text, "scope", "Conformance inventory")
 
 
 def _active_run_lines(step: str) -> list[str]:
+    raw_lines = step.splitlines()
+    if not raw_lines:
+        return []
+    step_indent = len(raw_lines[0]) - len(raw_lines[0].lstrip(" "))
+    run_indent = step_indent + 2
+    run_indexes = [
+        i for i, raw in enumerate(raw_lines)
+        if raw == " " * run_indent + "run: |"
+    ]
+    if len(run_indexes) != 1:
+        return []
     lines: list[str] = []
-    in_run = False
-    for raw in step.splitlines():
-        if raw.strip() == "run: |":
-            in_run = True
-            continue
-        if not in_run:
-            continue
+    for raw in raw_lines[run_indexes[0] + 1:]:
         stripped = raw.strip()
+        indent = len(raw) - len(raw.lstrip(" "))
+        if stripped and indent <= run_indent:
+            break
         if not stripped or stripped.startswith("#"):
             continue
         lines.append(stripped)
     return lines
+
+
+DIRECT_ENTRY_RE = re.compile(
+    r"^(?:(?P<plain>[A-Za-z0-9_-]+)|'(?P<single>[A-Za-z0-9_-]+)'|"
+    r'"(?P<double>[A-Za-z0-9_-]+)")\s*:(?P<value>.*)$')
+
+
+def _direct_mapping(block: str) -> dict[str, str]:
+    lines = block.splitlines()
+    if not lines:
+        raise AssertionError("empty mapping block")
+    block_indent = len(lines[0]) - len(lines[0].lstrip(" "))
+    sequence_item = lines[0][block_indent:].startswith("- ")
+    direct_indent = block_indent + 2 if sequence_item else None
+    if direct_indent is None:
+        for line in lines[1:]:
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            direct_indent = len(line) - len(line.lstrip(" "))
+            if direct_indent <= block_indent:
+                raise AssertionError("mapping block has no indented entry")
+            break
+    if direct_indent is None:
+        raise AssertionError("mapping block has no direct entries")
+
+    entries: dict[str, str] = {}
+    for index, line in enumerate(lines):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if index == 0 and sequence_item:
+            direct = line[indent + 2:]
+        elif indent == direct_indent:
+            direct = line[direct_indent:]
+        elif block_indent < indent < direct_indent:
+            raise AssertionError("inconsistent direct mapping indentation")
+        else:
+            continue
+        match = DIRECT_ENTRY_RE.fullmatch(direct)
+        if match is None:
+            raise AssertionError(f"unrecognized direct mapping key syntax: {direct!r}")
+        key = next(match.group(name) for name in ("plain", "single", "double")
+                   if match.group(name) is not None)
+        if key in entries:
+            raise AssertionError(f"duplicate direct mapping key: {key}")
+        entries[key] = match.group("value")
+    return entries
+
+
+def _ordered_job_steps(text: str, job_name: str) -> list[str]:
+    lines = named_job(text, job_name).splitlines(keepends=True)
+    job_indent = len(lines[0]) - len(lines[0].lstrip(" "))
+    direct_indent = None
+    steps_index = None
+    for index, raw in enumerate(lines[1:], 1):
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        if direct_indent is None:
+            direct_indent = indent
+        if indent != direct_indent:
+            continue
+        match = DIRECT_ENTRY_RE.fullmatch(raw[direct_indent:].rstrip("\r\n"))
+        if match is None:
+            raise AssertionError("unrecognized direct job key in steps parser")
+        key = next(match.group(name) for name in ("plain", "single", "double")
+                   if match.group(name) is not None)
+        if key == "steps":
+            if match.group("value").strip():
+                raise AssertionError("job steps must use a block sequence")
+            steps_index = index
+            break
+    if steps_index is None or direct_indent is None:
+        raise AssertionError(f"{job_name} job has no direct steps block")
+
+    end = steps_index + 1
+    while end < len(lines):
+        raw = lines[end]
+        if raw.strip():
+            indent = len(raw) - len(raw.lstrip(" "))
+            if indent <= direct_indent:
+                break
+        end += 1
+    step_indent = None
+    starts: list[int] = []
+    for index in range(steps_index + 1, end):
+        raw = lines[index]
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        if step_indent is None:
+            step_indent = indent
+        if indent == step_indent:
+            if not raw[step_indent:].startswith("- "):
+                raise AssertionError("unrecognized direct workflow step syntax")
+            starts.append(index)
+        elif indent < step_indent:
+            raise AssertionError("inconsistent workflow step indentation")
+    if not starts:
+        raise AssertionError(f"{job_name} job has no steps")
+    return [
+        "".join(lines[start:starts[index + 1] if index + 1 < len(starts) else end])
+        for index, start in enumerate(starts)
+    ]
+
+
+def _assert_trusted_prefix(text: str, job_name: str, step_name: str) -> None:
+    contracts = TRUSTED_PREFIX_CONTRACTS.get((job_name, step_name))
+    if contracts is None:
+        raise AssertionError(f"no trusted-prefix contract for {job_name}/{step_name}")
+    steps = _ordered_job_steps(text, job_name)
+    target = named_step(text, job_name, step_name)
+    if len(steps) < 3 or steps[2] != target:
+        raise AssertionError(
+            f"{step_name} must be the third step after pinned checkout and setup")
+
+    for step, (expected_keys, expected_values, expected_with) in zip(
+            steps[:2], contracts, strict=True):
+        entries = _direct_mapping(step)
+        actual_keys = frozenset(entries)
+        if actual_keys != expected_keys:
+            raise AssertionError(
+                "trusted action step keys differ: "
+                f"expected {sorted(expected_keys)}, got {sorted(actual_keys)}")
+
+        def direct_value(key: str) -> str:
+            return entries[key].split(" #", 1)[0].strip()
+
+        actual_values = {key: direct_value(key) for key in expected_values}
+        if actual_values != expected_values:
+            raise AssertionError(
+                f"trusted action values differ: expected {expected_values}, "
+                f"got {actual_values}")
+
+        raw_lines = step.splitlines(keepends=True)
+        step_indent = len(raw_lines[0]) - len(raw_lines[0].lstrip(" "))
+        with_indent = step_indent + 2
+        with_indexes = [
+            index for index, raw in enumerate(raw_lines)
+            if raw.rstrip("\r\n") == " " * with_indent + "with:"
+        ]
+        if len(with_indexes) != 1:
+            raise AssertionError("trusted action must have one direct with mapping")
+        with_block = _indentation_bounded_block(
+            raw_lines, with_indexes[0], with_indent)
+        actual_with = {
+            key: _direct_scalar(value)
+            for key, value in _direct_mapping(with_block).items()
+        }
+        if actual_with != expected_with:
+            raise AssertionError(
+                f"trusted action with values differ: expected {expected_with}, "
+                f"got {actual_with}")
+
+
+def _assert_workflow_document(
+        text: str,
+        expected_keys: frozenset[str],
+        expected_env_keys: frozenset[str]) -> None:
+    lines = text.splitlines(keepends=True)
+    document = "document:\n" + "".join(
+        "  " + line if line.strip() else line for line in lines)
+    actual_keys = frozenset(_direct_mapping(document))
+    if actual_keys != expected_keys:
+        raise AssertionError(
+            "workflow top-level keys differ: "
+            f"expected {sorted(expected_keys)}, got {sorted(actual_keys)}")
+
+    env_index = None
+    for index, raw in enumerate(lines):
+        line = raw.rstrip("\r\n")
+        if not line or line.startswith((" ", "#")):
+            continue
+        match = DIRECT_ENTRY_RE.fullmatch(line)
+        if match is None:
+            continue
+        key = next(match.group(name) for name in ("plain", "single", "double")
+                   if match.group(name) is not None)
+        if key != "env":
+            continue
+        if match.group("value").strip():
+            raise AssertionError("workflow env must use a direct mapping")
+        env_index = index
+    actual_env_keys = frozenset()
+    if env_index is not None:
+        env_block = _indentation_bounded_block(lines, env_index, 0)
+        actual_env_keys = frozenset(_direct_mapping(env_block))
+    if actual_env_keys != expected_env_keys:
+        raise AssertionError(
+            "workflow env keys differ: "
+            f"expected {sorted(expected_env_keys)}, got {sorted(actual_env_keys)}")
+
+
+def _direct_scalar(raw: str) -> str:
+    value = raw.strip()
+    if re.fullmatch(r"[A-Za-z0-9_.-]+", value):
+        return value
+    if re.fullmatch(r"'(?:[^']|'')*'", value):
+        return value[1:-1].replace("''", "'")
+    if value.startswith('"') and value.endswith('"'):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as error:
+            raise AssertionError(
+                f"unsupported direct scalar syntax: {raw!r}") from error
+        if isinstance(parsed, str):
+            return parsed
+    raise AssertionError(f"unsupported direct scalar syntax: {raw!r}")
+
+
+def assert_hard_run_command(
+        text: str, job_name: str, step_name: str) -> str:
+    contract = HARD_RUN_CONTRACTS.get((job_name, step_name))
+    if contract is None:
+        raise AssertionError(f"no hard-run contract for {job_name}/{step_name}")
+    (allowed_job_keys, allowed_step_keys, expected_script,
+     workflow_keys, workflow_env_keys) = contract
+    _assert_workflow_document(text, workflow_keys, workflow_env_keys)
+
+    job = named_job(text, job_name)
+    actual_job_keys = frozenset(_direct_mapping(job))
+    if actual_job_keys != allowed_job_keys:
+        raise AssertionError(
+            f"{job_name} job direct keys differ: "
+            f"expected {sorted(allowed_job_keys)}, got {sorted(actual_job_keys)}")
+    _assert_trusted_prefix(text, job_name, step_name)
+
+    step = named_step(text, job_name, step_name)
+    step_entries = _direct_mapping(step)
+    actual_step_keys = frozenset(step_entries)
+    if actual_step_keys != allowed_step_keys:
+        raise AssertionError(
+            f"{step_name} direct keys differ: "
+            f"expected {sorted(allowed_step_keys)}, got {sorted(actual_step_keys)}")
+    if _direct_scalar(step_entries["shell"]) != "bash":
+        raise AssertionError(f"{step_name} must use shell: bash")
+
+    active = tuple(_active_run_lines(step))
+    if active != expected_script:
+        raise AssertionError(f"{step_name} run script differs from the canonical script")
+    return step
+
+
+def _load_activation_kit():
+    spec = importlib.util.spec_from_file_location(
+        "pma_activation_kit_required_ci", ACTIVATION_KIT)
+    if spec is None or spec.loader is None:
+        raise AssertionError("activation kit is not loadable")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def assert_oci_candidate_checker(mod) -> None:
+    checker = getattr(mod, "oci_candidate_workflow_problems", None)
+    if not callable(checker):
+        raise AssertionError("oci_candidate_workflow_problems missing")
+    cls = getattr(mod, "PrivilegedMcpActionOciCandidateWorkflowContract", None)
+    if cls is None:
+        raise AssertionError("PrivilegedMcpActionOciCandidateWorkflowContract missing")
+    if not hasattr(cls, "test_mutations_fail_independently"):
+        raise AssertionError("standalone mutation matrix missing")
+    workflow = getattr(mod, "OCI_CANDIDATE_WORKFLOW", None)
+    if workflow is None:
+        raise AssertionError("OCI_CANDIDATE_WORKFLOW missing")
+    text = workflow.read_text(encoding="utf-8")
+    problems = checker(text)
+    if problems:
+        raise AssertionError(f"committed workflow problems: {problems}")
+    executor = getattr(mod, "OCI_EXECUTOR", None)
+    if not executor:
+        raise AssertionError("OCI_EXECUTOR missing")
+    mutations = (
+        ("        if: success()\n", "        if: always()\n", "upload not gated on success"),
+        ("gh attestation verify", "", "missing gh attestation verify"),
+        (f"python3 {executor}", "python3 -c 'pass'", "missing canonical executor"),
+    )
+    for needle, replacement, expected in mutations:
+        mutated = text.replace(needle, replacement, 1)
+        if mutated == text:
+            raise AssertionError(f"mutation needle missing: {needle!r}")
+        got = checker(mutated)
+        if not any(expected in problem for problem in got):
+            raise AssertionError(f"expected {expected!r} in {got}")
+    if checker(text.replace("no-such-token", "no-such-token")):
+        raise AssertionError("no-op control was not green")
+
+
+def assert_combined_unittest(text: str) -> None:
+    assert_hard_run_command(
+        text, "activation-kit", "Run activation-kit contract tests")
+
+
+TRUSTED_PREFIX_WRITERS = (
+    (
+        "BASH_ENV writer",
+        "      - name: Preload Bash functions\n"
+        "        run: |\n"
+        "          printf '%s\\n' 'test() { return 0; }' "
+        "'python3() { return 0; }' > \"$RUNNER_TEMP/bash-env\"\n"
+        "          echo \"BASH_ENV=$RUNNER_TEMP/bash-env\" >> \"$GITHUB_ENV\"\n\n",
+    ),
+    (
+        "PATH writer",
+        "      - name: Prepend executable path\n"
+        "        run: echo \"$RUNNER_TEMP/bin\" >> \"$GITHUB_PATH\"\n\n",
+    ),
+    (
+        "Git and Python path writer",
+        "      - name: Redirect Git and Python\n"
+        "        run: |\n"
+        "          echo \"GIT_DIR=$RUNNER_TEMP/base.git\" >> \"$GITHUB_ENV\"\n"
+        "          echo \"PYTHONPATH=$RUNNER_TEMP/base\" >> \"$GITHUB_ENV\"\n\n",
+    ),
+)
+
+
+def trusted_prefix_mutations(
+        text: str, target_line: str, checkout: str, setup: str):
+    mutations = [
+        (label, text.replace(target_line, writer + target_line, 1))
+        for label, writer in TRUSTED_PREFIX_WRITERS
+    ]
+    mutations.extend((
+        ("checkout env", text.replace(
+            checkout, checkout.replace(
+                "        with:\n", "        env:\n          EXTRA: value\n        with:\n",
+                1), 1)),
+        ("checkout with", text.replace(
+            checkout, checkout.replace(
+                "          persist-credentials: false\n",
+                "          persist-credentials: false\n          extra: value\n", 1), 1)),
+        ("checkout mutable ref", text.replace(
+            checkout, checkout.replace(CHECKOUT_REF, "actions/checkout@main", 1), 1)),
+        ("setup if", text.replace(
+            setup, setup.replace("        with:\n", "        if: always()\n        with:\n", 1),
+            1)),
+        ("setup continue", text.replace(
+            setup, setup.replace(
+                "        with:\n", "        continue-on-error: true\n        with:\n", 1),
+            1)),
+        ("setup with", text.replace(
+            setup, re.sub(
+                r'(          python-version:.*\n)', r'\1          cache: pip\n',
+                setup, count=1), 1)),
+        ("setup mutable ref", text.replace(
+            setup, setup.replace(SETUP_PYTHON_REF, "actions/setup-python@main", 1), 1)),
+    ))
+    reordered = text.replace(checkout, "__CHECKOUT__", 1)
+    reordered = reordered.replace(setup, checkout, 1).replace("__CHECKOUT__", setup, 1)
+    mutations.append(("reordered prefix", reordered))
+    return mutations
 
 
 POLICIES = {
@@ -242,23 +700,72 @@ class ProductCallsite(unittest.TestCase):
     def test_no_separate_inventory_workflow(self):
         self.assertFalse(STANDALONE.exists(), STANDALONE)
 
+    def test_revision_witness_accepts_head_and_rejects_mismatch(self):
+        head = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
+        for label, sha, expected in (
+            ("actual", head, 0),
+            ("mismatch", "0" * 40, 1),
+        ):
+            with self.subTest(label=label):
+                completed = subprocess.run(
+                    ["bash", "-c", REVISION_WITNESS],
+                    cwd=REPO,
+                    env={**os.environ, "GITHUB_SHA": sha},
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, expected)
+
+    def test_bash_env_neutralizes_both_unchanged_hard_scripts(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bash_env = Path(raw) / "bash-env"
+            bash_env.write_text(
+                "test() { return 0; }\npython3() { return 0; }\n",
+                encoding="utf-8",
+            )
+            env = {
+                **os.environ,
+                "BASH_ENV": str(bash_env),
+                "GITHUB_SHA": "0" * 40,
+            }
+            for label, script in (
+                ("inventory", INVENTORY_RUN_SCRIPT),
+                ("activation", ACTIVATION_KIT_RUN_SCRIPT),
+            ):
+                with self.subTest(label=label):
+                    completed = subprocess.run(
+                        ["bash", "-c", "\n".join(script)],
+                        cwd=REPO,
+                        env=env,
+                        check=False,
+                    )
+                    self.assertEqual(completed.returncode, 0)
+
+    def test_direct_key_parser_ignores_nested_soft_failure_names(self):
+        block = (
+            "  scope:\n"
+            "    \"runs-on\": ubuntu-latest\n"
+            "    outputs:\n"
+            "      if: nested-output\n"
+            "      continue-on-error: nested-output\n"
+            "    'steps': []\n"
+        )
+        self.assertEqual(
+            frozenset(_direct_mapping(block)),
+            frozenset({"runs-on", "outputs", "steps"}),
+        )
+
+    def test_direct_key_parser_fails_closed_on_unrecognized_syntax(self):
+        block = "  scope:\n    ? [if]\n    : false\n"
+        with self.assertRaises(AssertionError):
+            _direct_mapping(block)
+
     def test_scope_job_invokes_both_flags_and_does_not_map_3_to_0(self):
         text = CI_YML.read_text(encoding="utf-8")
-        step = _inventory_step(text)
+        step = assert_hard_run_command(
+            text, "scope", "Conformance inventory")
         lines = _active_run_lines(step)
-        self.assertEqual(lines[0], "set -euo pipefail")
-        self.assertIn("python3 conformance/registry.py", lines)
-        self.assertTrue(any("conformance/tests/test_registry.py" in ln for ln in lines))
-        self.assertTrue(any("conformance/tests/test_run_all.py" in ln for ln in lines))
-        self.assertTrue(any("conformance/tests/test_completion_scope.py" in ln for ln in lines))
-        self.assertIn(REQUIRED_RUN_ALL, lines)
-        self.assertEqual(lines.count(REQUIRED_RUN_ALL), 1)
-        self.assertFalse(any("||" in ln for ln in lines if REQUIRED_RUN_ALL in ln))
-        self.assertFalse(any(ln == "set +e" or ln.startswith("set +e ") for ln in lines))
-        self.assertNotIn("|| true", step)
-        self.assertNotIn("|| :", step)
-        self.assertNotIn("continue-on-error", step)
-        self.assertNotRegex(step, r"eq 3|returncode in \(0, 3\)")
+        self.assertEqual(tuple(lines), INVENTORY_RUN_SCRIPT)
 
     def test_commented_or_colon_run_all_line_is_not_an_active_callsite(self):
         step = _inventory_step(CI_YML.read_text(encoding="utf-8"))
@@ -270,7 +777,11 @@ class ProductCallsite(unittest.TestCase):
 
     def test_deleting_the_scope_job_callsite_fails(self):
         text = CI_YML.read_text(encoding="utf-8")
-        mutated = INVENTORY_STEP_RE.sub("", text)
+        mutated = text.replace(
+            "      - name: Conformance inventory\n",
+            "      - name: Deleted conformance inventory\n",
+            1,
+        )
         with self.assertRaises(AssertionError):
             _inventory_step(mutated)
 
@@ -289,6 +800,228 @@ class ProductCallsite(unittest.TestCase):
         source = Path(registry.__file__).read_text(encoding="utf-8")
         self.assertNotRegex(source, r"returncode in \(0, 3\)")
         self.assertNotIn("if completed.returncode in (0, 3)", source)
+
+    def test_deleting_registry_suite_callsite_fails(self):
+        step = _inventory_step(CI_YML.read_text(encoding="utf-8"))
+        self.assertTrue(any("conformance/tests/test_registry.py" in ln
+                            for ln in _active_run_lines(step)))
+        mutated = step.replace("conformance/tests/test_registry.py", "")
+        self.assertFalse(any("conformance/tests/test_registry.py" in ln
+                             for ln in _active_run_lines(mutated)))
+
+    def test_conformance_combined_unittest_is_a_hard_callsite(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        assert_combined_unittest(text)
+        assert_combined_unittest(text.replace("no-such-token", "no-such-token"))
+        name = "      - name: Run activation-kit contract tests\n"
+        mutations = (
+            text.replace(COMBINED_UNITTEST, "          true"),
+            text.replace("          python3 -m unittest \\",
+                         "          # python3 -m unittest \\"),
+            text.replace(COMBINED_UNITTEST, "          :"),
+            text.replace("test_activation_kit.py", ""),
+            text.replace("test_oci_candidate_executor.py", ""),
+            text.replace(COMBINED_UNITTEST, COMBINED_UNITTEST + " || true"),
+            text.replace(COMBINED_UNITTEST, COMBINED_UNITTEST + " || :"),
+            text.replace("          set -euo pipefail", "          set +e", 1),
+            text.replace(name, name + "        continue-on-error: true\n"),
+        )
+        for index, mutated in enumerate(mutations):
+            with self.subTest(index=index):
+                with self.assertRaises(AssertionError):
+                    assert_combined_unittest(mutated)
+
+    def test_removing_activation_revision_witness_fails(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        mutated = text.replace("          " + REVISION_WITNESS + "\n", "", 1)
+        self.assertNotEqual(mutated, text)
+        with self.assertRaises(AssertionError):
+            assert_combined_unittest(mutated)
+
+    def test_activation_workflow_document_shape_fails_closed(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        mutations = (
+            ("BASH_ENV", "env:\n  BASH_ENV: /tmp/assay-bash-env\n\n"),
+            ("PATH", "env:\n  PATH: /tmp\n\n"),
+            ("quoted GIT_DIR", "env:\n  'GIT_DIR': /tmp/repo\n\n"),
+            ("unrelated env", "env:\n  UNRELATED_WORKFLOW_ENV: allowed\n\n"),
+            (
+                "defaults working-directory",
+                "defaults:\n  run:\n    working-directory: /tmp\n\n",
+            ),
+        )
+        for label, addition in mutations:
+            with self.subTest(label=label):
+                mutated = text.replace(
+                    "permissions:\n", addition + "permissions:\n", 1)
+                self.assertNotEqual(mutated, text)
+                with self.assertRaises(AssertionError):
+                    assert_combined_unittest(mutated)
+
+    def test_activation_trusted_prefix_fails_closed(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        target = "      - name: Run activation-kit contract tests\n"
+        checkout = named_step(text, "activation-kit", "Check out source")
+        setup = named_step(text, "activation-kit", "Set up Python")
+        for label, mutated in trusted_prefix_mutations(
+                text, target, checkout, setup):
+            with self.subTest(label=label):
+                self.assertNotEqual(mutated, text)
+                with self.assertRaises(AssertionError):
+                    assert_combined_unittest(mutated)
+
+        target_step = named_step(
+            text, "activation-kit", "Run activation-kit contract tests")
+        post_target = target_step + (
+            "      - name: Harmless post-target control\n"
+            "        run: echo harmless\n\n")
+        assert_combined_unittest(text.replace(target_step, post_target, 1))
+
+    def test_activation_kit_step_uses_explicit_bash(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        step = named_step(
+            text,
+            "activation-kit",
+            "Run activation-kit contract tests",
+        )
+        self.assertIn("        shell: bash\n", step)
+        mutations = (
+            step.replace(
+                "        shell: bash\n",
+                "        shell: bash -c 'true' -- {0}\n",
+                1,
+            ),
+            step.replace("        shell: bash\n", "", 1),
+        )
+        for index, mutated_step in enumerate(mutations):
+            with self.subTest(index=index):
+                self.assertNotEqual(mutated_step, step)
+                with self.assertRaises(AssertionError):
+                    assert_combined_unittest(text.replace(step, mutated_step, 1))
+
+    def test_wider_indented_conditional_activation_job_fails(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        job = named_job(text, "activation-kit")
+        lines = job.splitlines(keepends=True)
+        widened = (
+            lines[0]
+            + "      if: ${{ github.event_name == 'disabled' }}\n"
+            + "".join("  " + line if line.strip() else line for line in lines[1:])
+        )
+        with self.assertRaises(AssertionError):
+            assert_combined_unittest(text.replace(job, widened, 1))
+
+    def test_conditional_activation_kit_step_fails_the_hard_callsite(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        mutated = text.replace(
+            "      - name: Run activation-kit contract tests\n",
+            "      - name: Run activation-kit contract tests\n"
+            "        if: ${{ github.event_name == 'disabled' }}\n",
+            1,
+        )
+        with self.assertRaises(AssertionError):
+            assert_combined_unittest(mutated)
+
+    def test_conditional_activation_kit_job_fails_the_hard_callsite(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        mutated = text.replace(
+            "  activation-kit:\n",
+            "  activation-kit:\n"
+            "    if: ${{ github.event_name == 'disabled' }}\n",
+            1,
+        )
+        with self.assertRaises(AssertionError):
+            assert_combined_unittest(mutated)
+
+    def test_softened_activation_kit_job_fails_the_hard_callsite(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        mutated = text.replace(
+            "  activation-kit:\n",
+            "  activation-kit:\n    continue-on-error: true\n",
+            1,
+        )
+        with self.assertRaises(AssertionError):
+            assert_combined_unittest(mutated)
+
+    def test_quoted_activation_kit_job_and_step_keys_fail(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        job = "  activation-kit:\n"
+        step = "      - name: Run activation-kit contract tests\n"
+        mutations = (
+            ("job double if", job,
+             job + "    \"if\": ${{ github.event_name == 'disabled' }}\n"),
+            ("job single continue", job,
+             job + "    'continue-on-error': true\n"),
+            ("step double if", step,
+             step + "        \"if\": ${{ github.event_name == 'disabled' }}\n"),
+            ("step single continue", step,
+             step + "        'continue-on-error': true\n"),
+        )
+        for label, needle, replacement in mutations:
+            with self.subTest(label=label):
+                with self.assertRaises(AssertionError):
+                    assert_combined_unittest(text.replace(needle, replacement, 1))
+
+    def test_shell_neutralizers_fail_the_activation_kit_guard(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        mutations = (
+            text.replace(
+                "          set -euo pipefail\n",
+                "          set -euo pipefail\n          set +o errexit\n",
+                1,
+            ).replace(COMBINED_UNITTEST, COMBINED_UNITTEST + "\n          true", 1),
+            text.replace(
+                "          set -euo pipefail\n",
+                "          set -euo pipefail\n          python3() { :; }\n",
+                1,
+            ),
+        )
+        for index, mutated in enumerate(mutations):
+            with self.subTest(index=index):
+                with self.assertRaises(AssertionError):
+                    assert_combined_unittest(mutated)
+
+    def test_relocated_activation_kit_command_fails_the_hard_callsite(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        mutated = text.replace(COMBINED_UNITTEST, "          :", 1).replace(
+            "      - name: Validate public JSON documents\n",
+            "      - name: Decorative activation-kit note\n"
+            "        run: |\n"
+            f"{COMBINED_UNITTEST}\n\n"
+            "      - name: Validate public JSON documents\n",
+            1,
+        )
+        with self.assertRaises(AssertionError):
+            assert_combined_unittest(mutated)
+
+    def test_inventory_step_moved_to_conditional_job_fails(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        step = named_step(text, "scope", "Conformance inventory")
+        mutated = text.replace(step, "", 1)
+        job_start = mutated.index("  ebpf-smoke-ubuntu:\n")
+        insert_at = mutated.index("    steps:\n", job_start) + len("    steps:\n")
+        mutated = mutated[:insert_at] + step + mutated[insert_at:]
+        with self.assertRaises(AssertionError):
+            assert_hard_run_command(
+                mutated, "scope", "Conformance inventory")
+
+    def test_required_ci_invokes_oci_candidate_checker(self):
+        mod = _load_activation_kit()
+        assert_oci_candidate_checker(mod)
+        cls = mod.PrivilegedMcpActionOciCandidateWorkflowContract
+        drops = (
+            (mod, "oci_candidate_workflow_problems"),
+            (mod, "PrivilegedMcpActionOciCandidateWorkflowContract"),
+            (cls, "test_mutations_fail_independently"),
+        )
+        for owner, name in drops:
+            saved = getattr(owner, name)
+            delattr(owner, name)
+            try:
+                with self.assertRaises(AssertionError):
+                    assert_oci_candidate_checker(mod)
+            finally:
+                setattr(owner, name, saved)
 
 
 if __name__ == "__main__":

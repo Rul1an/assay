@@ -14,7 +14,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -24,34 +23,21 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "conformance"))
+sys.path.insert(0, str(REPO / "conformance/tests"))
 
 import registry  # noqa: E402
 import run_all  # noqa: E402
+from test_completion_scope import (  # noqa: E402
+    REQUIRED_RUN_ALL,
+    REVISION_WITNESS,
+    assert_hard_run_command,
+    named_job,
+    named_step,
+    trusted_prefix_mutations,
+)
 
 CI_YML = REPO / ".github/workflows/ci.yml"
 STANDALONE = REPO / ".github/workflows/conformance-inventory.yml"
-INVENTORY_STEP_RE = re.compile(r"(?ms)^      - name: Conformance inventory\n(?:        .+\n)+")
-JOB_KEY_RE = re.compile(r"^  [A-Za-z0-9_][A-Za-z0-9_-]*:")
-
-
-def _scope_job(text: str) -> str:
-    lines = text.splitlines(keepends=True)
-    start = next((i for i, line in enumerate(lines) if line.startswith("  scope:")), None)
-    if start is None:
-        raise AssertionError("ci.yml missing scope job")
-    end = start + 1
-    while end < len(lines) and not JOB_KEY_RE.match(lines[end]):
-        end += 1
-    return "".join(lines[start:end])
-
-
-def _inventory_step(text: str) -> str:
-    step = INVENTORY_STEP_RE.search(_scope_job(text))
-    if step is None:
-        raise AssertionError("scope job missing Conformance inventory step")
-    return step.group(0)
-
-
 POLICIES = ("required", "optional", "external-candidate")
 
 
@@ -340,21 +326,247 @@ class ProductWorkflow(unittest.TestCase):
         self.assertFalse(STANDALONE.exists(), STANDALONE)
 
     def test_scope_job_invokes_require_complete_as_a_hard_check(self):
-        step = _inventory_step(CI_YML.read_text(encoding="utf-8"))
+        text = CI_YML.read_text(encoding="utf-8")
+        step = assert_hard_run_command(
+            text, "scope", "Conformance inventory")
         self.assertIn("python3 conformance/registry.py", step)
-        self.assertIn("conformance/run_all.py --require-complete --completion-scope required", step)
-        self.assertNotIn("continue-on-error", step)
+
+    def test_scope_job_invokes_completion_scope_suite(self):
+        step = named_step(
+            CI_YML.read_text(encoding="utf-8"),
+            "scope",
+            "Conformance inventory",
+        )
+        self.assertIn("conformance/tests/test_completion_scope.py", step)
+        mutated = step.replace("conformance/tests/test_completion_scope.py", "")
+        self.assertNotEqual(mutated, step)
+        self.assertNotIn("conformance/tests/test_completion_scope.py", mutated)
 
     def test_deleting_the_scope_job_callsite_fails_this_test(self):
         text = CI_YML.read_text(encoding="utf-8")
         with self.assertRaises(AssertionError):
-            _inventory_step(INVENTORY_STEP_RE.sub("", text))
+            named_step(
+                text.replace(
+                    "      - name: Conformance inventory\n",
+                    "      - name: Deleted conformance inventory\n",
+                    1,
+                ),
+                "scope",
+                "Conformance inventory",
+            )
 
     def test_deleting_the_require_complete_callsite_fails_this_test(self):
-        step = _inventory_step(CI_YML.read_text(encoding="utf-8"))
+        step = named_step(
+            CI_YML.read_text(encoding="utf-8"),
+            "scope",
+            "Conformance inventory",
+        )
         mutated = step.replace("--require-complete", "")
         self.assertNotEqual(mutated, step)
         self.assertNotIn("--require-complete", mutated)
+
+    def test_commented_run_all_command_fails_the_inventory_guard(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        mutated = text.replace(REQUIRED_RUN_ALL, "# " + REQUIRED_RUN_ALL, 1)
+        with self.assertRaises(AssertionError):
+            assert_hard_run_command(
+                mutated, "scope", "Conformance inventory")
+
+    def test_softened_run_all_command_fails_the_inventory_guard(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        mutated = text.replace(REQUIRED_RUN_ALL, REQUIRED_RUN_ALL + " || true", 1)
+        with self.assertRaises(AssertionError):
+            assert_hard_run_command(
+                mutated, "scope", "Conformance inventory")
+
+    def test_removing_scope_revision_witness_fails(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        step = named_step(text, "scope", "Conformance inventory")
+        mutated_step = step.replace("          " + REVISION_WITNESS + "\n", "", 1)
+        self.assertNotEqual(mutated_step, step)
+        with self.assertRaises(AssertionError):
+            assert_hard_run_command(
+                text.replace(step, mutated_step, 1),
+                "scope",
+                "Conformance inventory",
+            )
+
+    def test_scope_workflow_document_shape_fails_closed(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        env_mutations = (
+            ("BASH_ENV", "  BASH_ENV: /tmp/assay-bash-env\n"),
+            ("PATH", "  PATH: /tmp\n"),
+            ("quoted GIT_DIR", "  'GIT_DIR': /tmp/repo\n"),
+            ("unrelated env", "  UNRELATED_WORKFLOW_ENV: allowed\n"),
+        )
+        for label, addition in env_mutations:
+            with self.subTest(label=label):
+                mutated = text.replace("env:\n", "env:\n" + addition, 1)
+                with self.assertRaises(AssertionError):
+                    assert_hard_run_command(
+                        mutated, "scope", "Conformance inventory")
+        defaults = text.replace(
+            "permissions: {}\n",
+            "defaults:\n  run:\n    working-directory: /tmp\n\npermissions: {}\n",
+            1,
+        )
+        self.assertNotEqual(defaults, text)
+        with self.assertRaises(AssertionError):
+            assert_hard_run_command(
+                defaults, "scope", "Conformance inventory")
+        value_change = text.replace(
+            '  ASSAY_PUBLIC_MSRV: "1.89.0"\n',
+            '  ASSAY_PUBLIC_MSRV: "9.99.0"\n',
+            1,
+        )
+        self.assertNotEqual(value_change, text)
+        assert_hard_run_command(
+            value_change, "scope", "Conformance inventory")
+
+    def test_scope_trusted_prefix_fails_closed(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        target = "      - name: Conformance inventory\n"
+        checkout = (
+            "      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0\n"
+            "        with:\n"
+            "          persist-credentials: false\n"
+            "          fetch-depth: 0\n\n")
+        setup = (
+            "      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0\n"
+            "        with:\n"
+            "          python-version: \"3.12\"\n\n")
+        for label, mutated in trusted_prefix_mutations(
+                text, target, checkout, setup):
+            with self.subTest(label=label):
+                self.assertNotEqual(mutated, text)
+                with self.assertRaises(AssertionError):
+                    assert_hard_run_command(
+                        mutated, "scope", "Conformance inventory")
+
+        target_step = named_step(text, "scope", "Conformance inventory")
+        post_target = target_step + (
+            "      - name: Harmless post-target control\n"
+            "        run: echo harmless\n\n")
+        assert_hard_run_command(
+            text.replace(target_step, post_target, 1),
+            "scope", "Conformance inventory")
+
+    def test_conditional_scope_job_fails_the_inventory_guard(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        mutated = text.replace(
+            "  scope:\n",
+            "  scope:\n    if: ${{ github.event_name == 'disabled' }}\n",
+            1,
+        )
+        with self.assertRaises(AssertionError):
+            assert_hard_run_command(
+                mutated, "scope", "Conformance inventory")
+
+    def test_softened_scope_job_fails_the_inventory_guard(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        mutated = text.replace(
+            "  scope:\n",
+            "  scope:\n    continue-on-error: true\n",
+            1,
+        )
+        with self.assertRaises(AssertionError):
+            assert_hard_run_command(
+                mutated, "scope", "Conformance inventory")
+
+    def test_wider_indented_conditional_scope_job_fails(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        job = named_job(text, "scope")
+        lines = job.splitlines(keepends=True)
+        widened = (
+            lines[0]
+            + "      if: ${{ github.event_name == 'disabled' }}\n"
+            + "".join("  " + line if line.strip() else line for line in lines[1:])
+        )
+        with self.assertRaises(AssertionError):
+            assert_hard_run_command(
+                text.replace(job, widened, 1),
+                "scope",
+                "Conformance inventory",
+            )
+        with self.assertRaises(AssertionError):
+            assert_hard_run_command(
+                text.replace("    timeout-minutes: 10\n", "", 1),
+                "scope",
+                "Conformance inventory",
+            )
+
+    def test_custom_scope_shell_fails_the_inventory_guard(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        step = named_step(text, "scope", "Conformance inventory")
+        mutated_step = step.replace(
+            "        shell: bash\n",
+            "        shell: bash -c 'true' -- {0}\n",
+            1,
+        )
+        self.assertNotEqual(mutated_step, step)
+        with self.assertRaises(AssertionError):
+            assert_hard_run_command(
+                text.replace(step, mutated_step, 1),
+                "scope",
+                "Conformance inventory",
+            )
+
+    def test_quoted_scope_job_and_inventory_step_keys_fail(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        job = "  scope:\n"
+        step = "      - name: Conformance inventory\n"
+        mutations = (
+            ("job double if", job,
+             job + "    \"if\": ${{ github.event_name == 'disabled' }}\n"),
+            ("job single continue", job,
+             job + "    'continue-on-error': true\n"),
+            ("step double if", step,
+             step + "        \"if\": ${{ github.event_name == 'disabled' }}\n"),
+            ("step single continue", step,
+             step + "        'continue-on-error': true\n"),
+        )
+        for label, needle, replacement in mutations:
+            with self.subTest(label=label):
+                with self.assertRaises(AssertionError):
+                    assert_hard_run_command(
+                        text.replace(needle, replacement, 1),
+                        "scope", "Conformance inventory")
+
+    def test_shell_neutralizers_fail_the_inventory_guard(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        step = named_step(text, "scope", "Conformance inventory")
+        mutations = (
+            step.replace(
+                "          set -euo pipefail\n",
+                "          set -euo pipefail\n          set +o errexit\n",
+                1,
+            ).replace(REQUIRED_RUN_ALL, REQUIRED_RUN_ALL + "\n          true", 1),
+            step.replace(
+                "          set -euo pipefail\n",
+                "          set -euo pipefail\n          python3() { :; }\n",
+                1,
+            ),
+        )
+        for index, mutated_step in enumerate(mutations):
+            with self.subTest(index=index):
+                with self.assertRaises(AssertionError):
+                    assert_hard_run_command(
+                        text.replace(step, mutated_step, 1),
+                        "scope", "Conformance inventory")
+
+    def test_relocated_run_all_command_fails_the_inventory_guard(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        mutated = text.replace("          " + REQUIRED_RUN_ALL, "          :", 1).replace(
+            "      - name: Published-numbers projection contract\n",
+            "      - name: Decorative completion-scope note\n"
+            "        run: |\n"
+            f"          {REQUIRED_RUN_ALL}\n\n"
+            "      - name: Published-numbers projection contract\n",
+            1,
+        )
+        with self.assertRaises(AssertionError):
+            assert_hard_run_command(
+                mutated, "scope", "Conformance inventory")
 
 
 class RegistryDoesNotRunAll(unittest.TestCase):

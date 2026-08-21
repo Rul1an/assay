@@ -43,6 +43,151 @@ CANDIDATE_RELEASE = CORPUS_DIR / "candidate-release.json"
 RELEASE_WORKFLOW = (
     REPO_ROOT / ".github/workflows/privileged-mcp-action-pack-release.yml"
 )
+OCI_CANDIDATE_WORKFLOW = (
+    REPO_ROOT / ".github/workflows/privileged-mcp-action-oci-candidate.yml"
+)
+CONFORMANCE_WORKFLOW = (
+    REPO_ROOT / ".github/workflows/privileged-mcp-action-conformance.yml"
+)
+OCI_WORKFLOW_PATH = ".github/workflows/privileged-mcp-action-oci-candidate.yml"
+OCI_CHECKOUT_PIN = "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
+OCI_SETUP_PYTHON_PIN = "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"
+OCI_UPLOAD_PIN = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+OCI_EXECUTOR = (
+    "conformance/privileged-mcp-action-v0/scripts/oci_candidate_executor.py"
+)
+OCI_SIGNER_WORKFLOW = (
+    "Rul1an/assay/.github/workflows/privileged-mcp-action-pack-release.yml"
+)
+OCI_PYTHON_VERSION = 'python-version: "3.13.8"'
+OCI_SOURCE_DIGEST_SHAPE = '[[ "$source_digest" =~ ^[0-9a-f]{40}$ ]]'
+OCI_SOURCE_DIGEST_GUARD = OCI_SOURCE_DIGEST_SHAPE + " || exit 2"
+OCI_CAPTURE_UPLOAD_PATH = "${{ runner.temp }}/oci-capture/candidate_capture.v0"
+OCI_IMPLEMENTATION_ID_ENV = "IMPLEMENTATION_ID: ${{ inputs.implementation_id }}"
+OCI_IMPLEMENTATION_ID_ARGV = '--implementation-id "$IMPLEMENTATION_ID"'
+OCI_UPLOAD_STEP = "Upload validated capture"
+USES_SHA_RE = re.compile(r"uses:\s*\S+@([^\s#]+)")
+# Ordered capture-job shape. Env-key sets and the step-name tuple are one table
+# so a skipped setup, extra step, leaked token, or duplicate upload cannot
+# look green by matching a looser presence pin.
+OCI_STEP_ENV_KEYS = {
+    "Check out current main": frozenset(),
+    "Set up Python": frozenset(),
+    "Require trusted main": frozenset(),
+    "Resolve published pack tag": frozenset(),
+    "Download attested pack": frozenset({"GH_TOKEN", "TAG"}),
+    "Verify pack attestation": frozenset({"GH_TOKEN", "TAG"}),
+    "Capture candidate observations": frozenset({"IMPLEMENTATION_ID"}),
+    OCI_UPLOAD_STEP: frozenset(),
+}
+OCI_CAPTURE_STEP_NAMES = tuple(OCI_STEP_ENV_KEYS)
+OCI_CAPTURE_JOB = "capture"
+OCI_CAPTURE_JOB_KEYS = ("runs-on", "timeout-minutes", "steps")
+OCI_DOCUMENT_KEYS = ("name", "on", "permissions", "concurrency", "jobs")
+OCI_TAG_BINDING = "TAG: ${{ steps.candidate.outputs.tag }}"
+OCI_ARTIFACT_NAME = "name: candidate-capture-v0"
+OCI_STEP_KEYS = {
+    "Check out current main": ("name", "uses", "with"),
+    "Set up Python": ("name", "uses", "with"),
+    "Require trusted main": ("name", "run"),
+    "Resolve published pack tag": ("name", "id", "run"),
+    "Download attested pack": ("name", "env", "run"),
+    "Verify pack attestation": ("name", "env", "run"),
+    "Capture candidate observations": ("name", "env", "run"),
+    OCI_UPLOAD_STEP: ("name", "if", "uses", "with"),
+}
+OCI_STEP_WITH_KEYS = {
+    "Check out current main": ("persist-credentials", "ref"),
+    "Set up Python": ("python-version",),
+    OCI_UPLOAD_STEP: ("name", "path", "if-no-files-found", "retention-days"),
+}
+CONFORMANCE_REQUIRED_PATHS = (
+    "conformance/privileged-mcp-action-v0/**",
+    ".github/actions/privileged-mcp-action-conformance/**",
+    ".github/workflows/privileged-mcp-action-conformance.yml",
+    ".github/workflows/privileged-mcp-action-pack-release.yml",
+    OCI_WORKFLOW_PATH,
+    "scripts/ci/check_clean_room_pack_reachable.py",
+)
+OCI_TOP_LEVEL_PERMISSIONS = ("contents: read",)
+_STEP_FIELD_KEYS = frozenset(
+    {
+        "name",
+        "id",
+        "if",
+        "env",
+        "run",
+        "uses",
+        "with",
+        "shell",
+        "timeout-minutes",
+        "continue-on-error",
+        "working-directory",
+    }
+)
+
+# Normalized `run:` sequences for the named capture steps. Copied from the
+# committed YAML after joining `\` continuations and collapsing whitespace;
+# not a second parser of workflow intent.
+OCI_PINNED_STEP_SEQUENCES = {
+    "Require trusted main": (
+        "set -euo pipefail",
+        'if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then',
+        'echo "oci capture must be dispatched from main, got $GITHUB_REF" >&2',
+        "exit 2",
+        "fi",
+        'if [[ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]]; then',
+        'echo "checked-out main does not match the workflow source commit" >&2',
+        "exit 2",
+        "fi",
+    ),
+    "Resolve published pack tag": (
+        "set -euo pipefail",
+        "python3"
+        " conformance/privileged-mcp-action-v0/scripts/validate_candidate_release.py"
+        " --candidate conformance/privileged-mcp-action-v0/candidate-release.json"
+        " --manifest conformance/privileged-mcp-action-v0/MANIFEST.json"
+        ' --github-output "$GITHUB_OUTPUT"',
+    ),
+    "Download attested pack": (
+        "set -euo pipefail",
+        'mkdir -p "$RUNNER_TEMP/oci-downloads"',
+        'gh release download "$TAG" --repo Rul1an/assay'
+        " --pattern privileged-mcp-action-v0-clean-room.tar.gz"
+        " --pattern SHA256SUMS"
+        " --pattern attestation-bundle.json"
+        ' --dir "$RUNNER_TEMP/oci-downloads"',
+        "(",
+        'cd "$RUNNER_TEMP/oci-downloads"',
+        "sha256sum -c SHA256SUMS",
+        ")",
+    ),
+    "Verify pack attestation": (
+        "set -euo pipefail",
+        'source_digest="$(gh api "repos/Rul1an/assay/commits/$TAG" --jq .sha)"',
+        OCI_SOURCE_DIGEST_GUARD,
+        "gh attestation verify"
+        ' "$RUNNER_TEMP/oci-downloads/privileged-mcp-action-v0-clean-room.tar.gz"'
+        " --repo Rul1an/assay"
+        ' --bundle "$RUNNER_TEMP/oci-downloads/attestation-bundle.json"'
+        f" --signer-workflow {OCI_SIGNER_WORKFLOW}"
+        ' --source-digest "$source_digest"'
+        " --source-ref refs/heads/main"
+        " --deny-self-hosted-runners",
+    ),
+    "Capture candidate observations": (
+        "set -euo pipefail",
+        'PACK="$RUNNER_TEMP/oci-downloads/privileged-mcp-action-v0-clean-room.tar.gz"',
+        'OUTPUT="$RUNNER_TEMP/oci-capture/candidate_capture.v0"',
+        'mkdir -p "$(dirname "$OUTPUT")"',
+        f"python3 {OCI_EXECUTOR}"
+        ' --pack "$PACK"'
+        f" {OCI_IMPLEMENTATION_ID_ARGV}"
+        ' --output "$OUTPUT"'
+        " --timeout-seconds 30",
+    ),
+}
+
 
 def _head_commit() -> str:
     """Resolve HEAD, the way the conformance and pack-release workflows already do.
@@ -1984,6 +2129,863 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
             "positive control: the probe must be able to discriminate",
         )
 
+
+def _uses_pin_line(line: str, pin: str) -> bool:
+    """True when `uses:` is exactly `pin`, then only whitespace or a comment."""
+    return re.fullmatch(rf"(?:-\s+)?uses:\s*{re.escape(pin)}(?:\s+#.*)?", line) is not None
+
+
+def _active_lines(text: str) -> list[str]:
+    """YAML/script lines that can execute. Full-line comments and blanks do not."""
+    lines = []
+    for raw in text.splitlines():
+        stripped = raw.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        lines.append(stripped)
+    return lines
+
+
+def _keys_at_indent(
+    block: str, indent: int, *, under: str | None = None
+) -> tuple[str, ...]:
+    """Active mapping keys at exactly `indent` spaces. One allowlist extractor.
+
+    `under` limits collection to children of that parent key (parent at indent-2).
+    """
+    keys: list[str] = []
+    parent_indent = indent - 2
+    in_under = under is None
+    key_prefix = " " * indent
+    parent_prefix = " " * parent_indent if parent_indent >= 0 else ""
+    for raw in block.splitlines():
+        stripped = raw.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if under is not None:
+            if parent_indent <= 0:
+                at_parent = not raw.startswith(" ")
+            else:
+                at_parent = raw.startswith(parent_prefix) and not raw.startswith(
+                    parent_prefix + " "
+                )
+            if at_parent:
+                in_under = stripped.split(":", 1)[0] == under
+                continue
+        if not in_under:
+            continue
+        if indent == 0:
+            at_key = not raw.startswith(" ")
+        else:
+            at_key = raw.startswith(key_prefix) and not raw.startswith(key_prefix + " ")
+        if not at_key:
+            continue
+        if stripped.startswith("- "):
+            item = stripped[2:].lstrip()
+            if item.startswith("name:"):
+                keys.append("name")
+            continue
+        keys.append(stripped.split(":", 1)[0])
+    return tuple(keys)
+
+
+def _on_paths(text: str, trigger: str) -> tuple[str, ...]:
+    """Quoted path-filter entries under `on.<trigger>.paths`."""
+    paths: list[str] = []
+    in_on = False
+    in_trigger = False
+    in_paths = False
+    for raw in text.splitlines():
+        stripped = raw.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if raw == "on:":
+            in_on = True
+            in_trigger = False
+            in_paths = False
+            continue
+        if not in_on:
+            continue
+        if not raw.startswith(" "):
+            break
+        if raw.startswith("  ") and not raw.startswith("   "):
+            in_trigger = stripped.split(":", 1)[0] == trigger
+            in_paths = False
+            continue
+        if not in_trigger:
+            continue
+        if raw.startswith("    ") and not raw.startswith("     "):
+            in_paths = stripped.rstrip(":") == "paths" or stripped.split(":", 1)[0] == "paths"
+            continue
+        if in_paths and raw.startswith("      - "):
+            item = stripped[2:].strip()
+            if item.startswith('"') and item.endswith('"'):
+                item = item[1:-1]
+            paths.append(item)
+    return tuple(paths)
+
+
+def _named_step_names(text: str) -> list[str]:
+    """Active `- name:` values in document order."""
+    names: list[str] = []
+    for line in _active_lines(text):
+        match = re.match(r"^-\s+name:\s*(.+)$", line)
+        if match:
+            names.append(match.group(1).strip())
+    return names
+
+
+def _top_level_mapping_children(text: str, header: str) -> tuple[str, ...]:
+    """Active 2-space lines under column-0 `header:`, or a same-line scalar."""
+    children: list[str] = []
+    in_map = False
+    prefix = f"{header}:"
+    for raw in text.splitlines():
+        stripped = raw.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not raw.startswith(" ") and raw.startswith(prefix):
+            in_map = True
+            scalar = raw[len(prefix) :].strip()
+            if scalar:
+                children.append(scalar)
+            continue
+        if not in_map:
+            continue
+        if raw.startswith("  ") and not raw.startswith("   "):
+            children.append(stripped)
+        elif not raw.startswith(" "):
+            in_map = False
+    return tuple(children)
+
+
+def _top_level_mapping_keys(text: str, header: str) -> tuple[str, ...]:
+    """Document-order keys of a column-0 mapping."""
+    return tuple(child.split(":", 1)[0] for child in _top_level_mapping_children(text, header))
+
+
+def _has_job_level_permissions(text: str) -> bool:
+    """True when a job mapping (exactly 4-space keys) declares `permissions:`."""
+    for raw in text.splitlines():
+        stripped = raw.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if raw.startswith("    permissions:") and not raw.startswith("     "):
+            return True
+    return False
+
+
+def _job_mapping_keys(text: str, job: str) -> tuple[str, ...]:
+    """Document-order 4-space keys under the `  {job}:` mapping."""
+    keys: list[str] = []
+    in_job = False
+    for raw in text.splitlines():
+        stripped = raw.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if raw.startswith("  ") and not raw.startswith("   "):
+            in_job = stripped.split(":", 1)[0] == job
+            continue
+        if not in_job:
+            continue
+        if raw.startswith("    ") and not raw.startswith("     "):
+            keys.append(stripped.split(":", 1)[0])
+        elif not raw.startswith(" "):
+            in_job = False
+    return tuple(keys)
+
+
+def _named_step_block(text: str, name: str) -> str | None:
+    """Full named step mapping, from `- name:` through the next sibling step."""
+    marker = f"      - name: {name}\n"
+    start = text.find(marker)
+    if start < 0:
+        return None
+    rest = text[start + len(marker) :]
+    nxt = re.search(r"(?m)^      - ", rest)
+    tail = rest if nxt is None else rest[: nxt.start()]
+    return marker + tail
+
+
+def _named_step_run_body(text: str, name: str) -> str | None:
+    """Literal `run:` body of a named step. None if the step or body is missing."""
+    block = _named_step_block(text, name)
+    if block is None:
+        return None
+    run_m = re.search(r"(?m)^        run:\s*\|\s*$", block)
+    if run_m is None:
+        return None
+    after = block[run_m.end() :]
+    if after.startswith("\n"):
+        after = after[1:]
+    body: list[str] = []
+    for line in after.splitlines():
+        if line.startswith("          ") or line == "":
+            body.append(line)
+            continue
+        break
+    return "\n".join(body)
+
+
+def _normalized_command_sequence(run_body: str) -> tuple[str, ...]:
+    """Join `\\` continuations, drop comments, collapse insignificant whitespace."""
+    commands: list[str] = []
+    pending: list[str] = []
+    for line in _active_lines(run_body):
+        continued = line.endswith("\\")
+        piece = line[:-1].rstrip() if continued else line
+        if piece:
+            pending.append(piece)
+        if continued:
+            continue
+        if pending:
+            commands.append(re.sub(r"\s+", " ", " ".join(pending)).strip())
+            pending = []
+    if pending:
+        commands.append(re.sub(r"\s+", " ", " ".join(pending)).strip())
+    return tuple(commands)
+
+
+def oci_candidate_workflow_problems(
+    text: str, *, skip: frozenset[str] = frozenset()
+) -> list[str]:
+    """Structural pins for the trusted-main OCI capture workflow. One function."""
+    problems: list[str] = []
+
+    def omitted(label: str) -> bool:
+        return any(label == token or label.startswith(token) for token in skip)
+
+    active = _active_lines(text)
+    active_text = "\n".join(active)
+    on_keys = _top_level_mapping_keys(text, "on")
+    if on_keys != ("workflow_dispatch",):
+        if "workflow_dispatch" not in on_keys:
+            problems.append("missing workflow_dispatch")
+        for key in on_keys:
+            if key == "workflow_dispatch":
+                continue
+            if key in ("pull_request", "pull_request_target"):
+                problems.append("untrusted pull_request trigger")
+            elif key == "push":
+                problems.append("push trigger")
+            else:
+                problems.append(f"extra trigger: {key}")
+    if "runs-on: ubuntu-24.04" not in active_text:
+        problems.append("missing ubuntu-24.04")
+    if re.search(r"runs-on:\s*.*self-hosted", active_text):
+        problems.append("self-hosted runner")
+    if (
+        re.search(r"(?m)^\S+:\s*write\s*$", active_text)
+        or "id-token:" in active_text
+        or "attestations:" in active_text
+    ):
+        problems.append("excess permissions")
+    if "contents: read" not in active_text:
+        problems.append("missing contents:read")
+    if "secrets." in active_text:
+        problems.append("explicit secrets")
+    if 'if [[ "$GITHUB_REF" != "refs/heads/main" ]]' not in active_text:
+        problems.append("missing main ref guard")
+    if "git rev-parse HEAD" not in active_text or "$GITHUB_SHA" not in active_text:
+        problems.append("missing HEAD/SHA guard")
+    if "persist-credentials: false" not in active_text:
+        problems.append("missing persist-credentials:false")
+    if "candidate-release.json" not in active_text:
+        problems.append("missing candidate-release.json")
+    if "validate_candidate_release.py" not in active_text:
+        problems.append("missing validate_candidate_release.py")
+    if "attestation-bundle.json" not in active_text:
+        problems.append("missing attestation-bundle.json")
+    if not any(re.match(r"^(-\s+)?gh attestation verify(\s|\\|$)", line) for line in active):
+        problems.append("missing gh attestation verify")
+    if "--bundle" not in active_text:
+        problems.append("missing --bundle")
+    if f"--signer-workflow {OCI_SIGNER_WORKFLOW}" not in active_text:
+        problems.append("missing or wrong signer-workflow")
+    if "--source-digest" not in active_text:
+        problems.append("missing --source-digest")
+    if OCI_SOURCE_DIGEST_SHAPE not in active_text:
+        problems.append("missing source_digest regex")
+    elif OCI_SOURCE_DIGEST_GUARD not in active_text:
+        problems.append("source_digest check not fail-closed")
+    if "--source-ref refs/heads/main" not in active_text:
+        problems.append("missing --source-ref")
+    if "--deny-self-hosted-runners" not in active_text:
+        problems.append("missing --deny-self-hosted-runners")
+    if "release_attestation_enforce.sh" in active_text:
+        problems.append("software-release verifier used for pack")
+    if not any(
+        re.match(rf"^(-\s+)?python3\s+{re.escape(OCI_EXECUTOR)}(\s|\\|$)", line)
+        for line in active
+    ):
+        problems.append("missing canonical executor")
+    if (
+        "--pack" not in active_text
+        or "--implementation-id" not in active_text
+        or "--output" not in active_text
+    ):
+        problems.append("missing executor argv")
+    if "--timeout-seconds 30" not in active_text:
+        problems.append("missing --timeout-seconds 30")
+    if "--implementation-image" in active_text or "--registry" in active_text:
+        problems.append("direct image or registry override")
+    if "python3 - <<" in active_text:
+        problems.append("inline Python")
+    if OCI_IMPLEMENTATION_ID_ENV not in active_text:
+        problems.append("missing implementation_id env binding")
+    if OCI_IMPLEMENTATION_ID_ARGV not in active_text:
+        problems.append("implementation_id not quoted argv")
+    for line in active:
+        if "${{ inputs." not in line:
+            continue
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*:\s*\$\{\{ inputs\.", line):
+            continue
+        problems.append("inputs interpolated in run script")
+        break
+    if not omitted("continue-on-error swallows failure") and "continue-on-error" in active_text:
+        problems.append("continue-on-error swallows failure")
+    if "|| true" in active_text:
+        problems.append("|| true swallows failure")
+    for pin, label in (
+        (OCI_CHECKOUT_PIN, "unpinned or wrong checkout"),
+        (OCI_SETUP_PYTHON_PIN, "unpinned or wrong setup-python"),
+        (OCI_UPLOAD_PIN, "unpinned or wrong upload-artifact"),
+    ):
+        if not any(_uses_pin_line(line, pin) for line in active):
+            problems.append(label)
+    if OCI_PYTHON_VERSION not in active_text:
+        problems.append("missing python 3.13.8")
+    upload_steps = [
+        block
+        for block in re.split(r"(?m)^(?=      - )", text)
+        if any(_uses_pin_line(line, OCI_UPLOAD_PIN) for line in _active_lines(block))
+    ]
+    upload_ifs = [
+        line
+        for block in upload_steps
+        for line in _active_lines(block)
+        if line.startswith("if:")
+    ]
+    if not omitted("upload not gated on success") and upload_ifs != ["if: success()"]:
+        problems.append("upload not gated on success")
+    if "candidate_capture.v0" not in active_text:
+        problems.append("missing fixed capture name")
+    if OCI_CAPTURE_UPLOAD_PATH not in active_text:
+        problems.append("missing exact capture upload path")
+    if "retention-days: 7" not in active_text:
+        problems.append("missing retention-days: 7")
+    if "if-no-files-found: error" not in active_text:
+        problems.append("missing if-no-files-found:error")
+    if "timeout-minutes: 25" not in active_text:
+        problems.append("missing timeout-minutes: 25")
+    for line in active:
+        for match in USES_SHA_RE.finditer(line):
+            pin = match.group(1)
+            if not re.fullmatch(r"[0-9a-f]{40}", pin):
+                problems.append(f"unpinned uses: {match.group(0)}")
+    for name in _named_step_names(text):
+        if name == OCI_UPLOAD_STEP:
+            continue
+        block = _named_step_block(text, name)
+        if (
+            not omitted("conditional step")
+            and block is not None
+            and any(re.match(r"^if:", line) for line in _active_lines(block))
+        ):
+            problems.append(f"conditional step: {name}")
+    for name, allowed in OCI_PINNED_STEP_SEQUENCES.items():
+        body = _named_step_run_body(text, name)
+        if body is None or _normalized_command_sequence(body) != allowed:
+            problems.append(f"unexpected run sequence: {name}")
+    if _top_level_mapping_keys(text, "jobs") != (OCI_CAPTURE_JOB,):
+        problems.append("unexpected jobs")
+    if _job_mapping_keys(text, OCI_CAPTURE_JOB) != OCI_CAPTURE_JOB_KEYS:
+        problems.append("unexpected capture job keys")
+    if tuple(_named_step_names(text)) != OCI_CAPTURE_STEP_NAMES:
+        problems.append("unexpected step names")
+    if _top_level_mapping_children(text, "permissions") != OCI_TOP_LEVEL_PERMISSIONS:
+        problems.append("unexpected top-level permissions")
+    if _has_job_level_permissions(text):
+        problems.append("job-level permissions")
+    if not omitted("unexpected env keys"):
+        for name, allowed in OCI_STEP_ENV_KEYS.items():
+            block = _named_step_block(text, name)
+            actual = (
+                frozenset(_keys_at_indent(block, 10, under="env"))
+                if block is not None
+                else frozenset()
+            )
+            if block is None or actual != allowed:
+                problems.append(f"unexpected env keys: {name}")
+    if not omitted("unexpected top-level keys"):
+        if _keys_at_indent(text, 0) != OCI_DOCUMENT_KEYS:
+            problems.append("unexpected top-level keys")
+    if not omitted("unexpected step keys"):
+        for name, allowed in OCI_STEP_KEYS.items():
+            block = _named_step_block(text, name)
+            actual = ("name",) + _keys_at_indent(block, 8) if block is not None else ()
+            if block is None or actual != allowed:
+                problems.append(f"unexpected step keys: {name}")
+    if not omitted("unexpected with keys"):
+        for name, allowed in OCI_STEP_WITH_KEYS.items():
+            block = _named_step_block(text, name)
+            actual = (
+                _keys_at_indent(block, 10, under="with") if block is not None else ()
+            )
+            if block is None or actual != allowed:
+                problems.append(f"unexpected with keys: {name}")
+    if not omitted("unexpected TAG bindings"):
+        if sum(1 for line in active if line == OCI_TAG_BINDING) != 2:
+            problems.append("unexpected TAG bindings")
+    if not omitted("missing exact artifact name"):
+        if sum(1 for line in active if line == OCI_ARTIFACT_NAME) != 1:
+            problems.append("missing exact artifact name")
+    return problems
+
+
+class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
+    """Capture-only trusted-main workflow. Structural; no live dispatch."""
+
+    def test_workflow_file_exists(self) -> None:
+        self.assertTrue(
+            OCI_CANDIDATE_WORKFLOW.is_file(),
+            f"missing {OCI_CANDIDATE_WORKFLOW}",
+        )
+
+    def test_trusted_main_capture_contract(self) -> None:
+        text = OCI_CANDIDATE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(oci_candidate_workflow_problems(text), [])
+
+    def test_mutations_fail_independently(self) -> None:
+        text = OCI_CANDIDATE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(oci_candidate_workflow_problems(text), [])
+        drops = (
+            ('if [[ "$GITHUB_REF" != "refs/heads/main" ]]', "missing main ref guard"),
+            ("gh attestation verify", "missing gh attestation verify"),
+            ("attestation-bundle.json", "missing attestation-bundle.json"),
+            ("--source-digest", "missing --source-digest"),
+            ("^[0-9a-f]{40}$", "missing source_digest regex"),
+            (" || exit 2", "source_digest check not fail-closed"),
+            ("--source-ref refs/heads/main", "missing --source-ref"),
+            (f"--signer-workflow {OCI_SIGNER_WORKFLOW}", "missing or wrong signer-workflow"),
+            ("--deny-self-hosted-runners", "missing --deny-self-hosted-runners"),
+            (OCI_EXECUTOR, "missing canonical executor"),
+            ("--implementation-id", "missing executor argv"),
+            (OCI_IMPLEMENTATION_ID_ENV, "missing implementation_id env binding"),
+            (OCI_IMPLEMENTATION_ID_ARGV, "implementation_id not quoted argv"),
+            (OCI_SETUP_PYTHON_PIN, "unpinned or wrong setup-python"),
+            (OCI_PYTHON_VERSION, "missing python 3.13.8"),
+            (OCI_CAPTURE_UPLOAD_PATH, "missing exact capture upload path"),
+            ("retention-days: 7", "missing retention-days: 7"),
+            ("if: success()", "upload not gated on success"),
+        )
+        for needle, expected in drops:
+            with self.subTest(drop=needle):
+                mutated = text.replace(needle, "")
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any(expected in problem for problem in problems),
+                    f"expected {expected!r} in {problems}",
+                )
+        comment_out = (
+            (
+                OCI_SOURCE_DIGEST_GUARD,
+                f"# {OCI_SOURCE_DIGEST_GUARD}",
+                "missing source_digest regex",
+            ),
+            (
+                "--source-ref refs/heads/main",
+                "# --source-ref refs/heads/main",
+                "missing --source-ref",
+            ),
+            (
+                f"--signer-workflow {OCI_SIGNER_WORKFLOW}",
+                f"# --signer-workflow {OCI_SIGNER_WORKFLOW}",
+                "missing or wrong signer-workflow",
+            ),
+            (
+                "--bundle",
+                "# --bundle",
+                "missing --bundle",
+            ),
+            (
+                "contents: read",
+                "# contents: read",
+                "missing contents:read",
+            ),
+        )
+        for needle, replacement, expected in comment_out:
+            with self.subTest(comment_out=expected):
+                mutated = text.replace(needle, replacement)
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any(expected in problem for problem in problems),
+                    f"expected {expected!r} in {problems}",
+                )
+        decorative = (
+            (
+                "gh attestation verify \\",
+                "echo gh attestation verify \\",
+                "missing gh attestation verify",
+            ),
+            (
+                f"python3 {OCI_EXECUTOR} \\",
+                f"echo python3 {OCI_EXECUTOR} \\",
+                "missing canonical executor",
+            ),
+            (
+                "if: success()",
+                "# if: success()",
+                "upload not gated on success",
+            ),
+        )
+        for needle, replacement, expected in decorative:
+            with self.subTest(decorative=expected):
+                mutated = text.replace(needle, replacement, 1)
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any(expected in problem for problem in problems),
+                    f"expected {expected!r} in {problems}",
+                )
+        extra = text + "\n      --implementation-image ghcr.io/example/x@sha256:" + "ab" * 32 + "\n"
+        extra = extra.replace(OCI_EXECUTOR, "python3 -c 'pass'", 1)
+        with self.subTest(kind="inline-and-image"):
+            problems = oci_candidate_workflow_problems(extra)
+            self.assertTrue(any("canonical executor" in p or "inline" in p for p in problems))
+            self.assertTrue(any("image or registry" in p for p in problems))
+        software = text.replace(
+            "gh attestation verify",
+            "bash scripts/ci/release_attestation_enforce.sh",
+            1,
+        )
+        with self.subTest(kind="software-release-verifier"):
+            problems = oci_candidate_workflow_problems(software)
+            self.assertTrue(any("software-release verifier" in p for p in problems))
+        inserts = (
+            ("on:\n", "on:\n  pull_request:\n    branches: [main]\n", "untrusted pull_request trigger"),
+            ("on:\n", "on:\n  schedule:\n    - cron: '0 0 * * *'\n", "extra trigger: schedule"),
+            ("on:\n", "on:\n  repository_dispatch:\n", "extra trigger: repository_dispatch"),
+            ("on:\n", "on:\n  workflow_call:\n", "extra trigger: workflow_call"),
+            ("ubuntu-24.04", "self-hosted", "self-hosted runner"),
+            ("permissions:\n  contents: read\n", "permissions:\n  contents: write\n", "excess permissions"),
+            (
+                "permissions:\n  contents: read\n",
+                "permissions:\n  contents: read\n  packages: write\n",
+                "excess permissions",
+            ),
+            ("permissions:\n", "env:\n  TOKEN: ${{ secrets.FOO }}\npermissions:\n", "explicit secrets"),
+            (OCI_CHECKOUT_PIN, "actions/checkout@v5", "unpinned uses:"),
+            (OCI_SETUP_PYTHON_PIN, "actions/setup-python@v6", "unpinned or wrong setup-python"),
+            (OCI_PYTHON_VERSION, 'python-version: "3.12.0"', "missing python 3.13.8"),
+            (OCI_CHECKOUT_PIN, f"{OCI_CHECKOUT_PIN}-mutable", "unpinned or wrong checkout"),
+            (OCI_SETUP_PYTHON_PIN, f"{OCI_SETUP_PYTHON_PIN}-mutable", "unpinned or wrong setup-python"),
+            (OCI_UPLOAD_PIN, f"{OCI_UPLOAD_PIN}-mutable", "unpinned or wrong upload-artifact"),
+        )
+        for needle, replacement, expected in inserts:
+            with self.subTest(insert=expected):
+                mutated = text.replace(needle, replacement, 1)
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any(expected in problem for problem in problems),
+                    f"expected {expected!r} in {problems}",
+                )
+        with self.subTest(kind="flow_style_on_pull_request"):
+            block_on = text[text.index("on:\n") : text.index("\npermissions:")]
+            flow_on = (
+                "on: {workflow_dispatch: {inputs: {implementation_id: "
+                "{description: Checked-in implementation_id, required: true, "
+                "type: string}}}, pull_request: {}}"
+            )
+            mutated = text.replace(block_on, flow_on, 1)
+            problems = oci_candidate_workflow_problems(mutated)
+            self.assertTrue(
+                any("unexpected on triggers" in problem or "missing workflow_dispatch" in problem
+                    or "untrusted pull_request" in problem or "extra trigger" in problem
+                    for problem in problems),
+                f"expected trigger guard in {problems}",
+            )
+            self.assertEqual(oci_candidate_workflow_problems(text), [])
+        with self.subTest(kind="inputs-in-run"):
+            mutated = text.replace(OCI_IMPLEMENTATION_ID_ENV + "\n", "", 1).replace(
+                OCI_IMPLEMENTATION_ID_ARGV,
+                "--implementation-id ${{ inputs.implementation_id }}",
+                1,
+            )
+            problems = oci_candidate_workflow_problems(mutated)
+            self.assertTrue(
+                any("inputs interpolated in run script" in problem for problem in problems),
+                f"expected inputs interpolated in {problems}",
+            )
+        swallow_steps = (
+            "Resolve published pack tag",
+            "Download attested pack",
+            "Verify pack attestation",
+            "Capture candidate observations",
+        )
+        for step in swallow_steps:
+            with self.subTest(continue_on_error=step):
+                needle = f"      - name: {step}\n"
+                mutated = text.replace(needle, needle + "        continue-on-error: true\n", 1)
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any("continue-on-error swallows failure" in problem for problem in problems),
+                    f"expected continue-on-error in {problems}",
+                )
+        swallow_commands = (
+            "validate_candidate_release.py",
+            "gh release download",
+            "gh attestation verify",
+            OCI_EXECUTOR,
+        )
+        for cmd in swallow_commands:
+            with self.subTest(or_true=cmd):
+                mutated = text.replace(cmd, f"{cmd} || true", 1)
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any("|| true swallows failure" in problem for problem in problems),
+                    f"expected || true in {problems}",
+                )
+        verify_cmd = (
+            "          gh attestation verify \\\n"
+            '            "$RUNNER_TEMP/oci-downloads/privileged-mcp-action-v0-clean-room.tar.gz" \\\n'
+            "            --repo Rul1an/assay \\\n"
+            '            --bundle "$RUNNER_TEMP/oci-downloads/attestation-bundle.json" \\\n'
+            f"            --signer-workflow {OCI_SIGNER_WORKFLOW} \\\n"
+            '            --source-digest "$source_digest" \\\n'
+            "            --source-ref refs/heads/main \\\n"
+            "            --deny-self-hosted-runners"
+        )
+        executor_cmd = (
+            f"          python3 {OCI_EXECUTOR} \\\n"
+            '            --pack "$PACK" \\\n'
+            '            --implementation-id "$IMPLEMENTATION_ID" \\\n'
+            '            --output "$OUTPUT" \\\n'
+            "            --timeout-seconds 30"
+        )
+        reachability = (
+            (
+                "verify_if_false",
+                verify_cmd,
+                f"          if false; then\n{verify_cmd}\n          fi",
+                "unexpected run sequence: Verify pack attestation",
+            ),
+            (
+                "executor_if_false",
+                executor_cmd,
+                f"          if false; then\n{executor_cmd}\n          fi",
+                "unexpected run sequence: Capture candidate observations",
+            ),
+            (
+                "exit_0_before_verify",
+                "          gh attestation verify \\",
+                "          exit 0\n          gh attestation verify \\",
+                "unexpected run sequence: Verify pack attestation",
+            ),
+        )
+        for kind, needle, replacement, expected in reachability:
+            with self.subTest(kind=kind):
+                self.assertIn(needle, text)
+                mutated = text.replace(needle, replacement, 1)
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any(expected in problem for problem in problems),
+                    f"expected {expected!r} in {problems}",
+                )
+        step_conditionals = (
+            (
+                "checkout_if_false",
+                "Check out current main",
+                "conditional step: Check out current main",
+            ),
+            (
+                "setup_python_if_false",
+                "Set up Python",
+                "conditional step: Set up Python",
+            ),
+            (
+                "trusted_main_if_false",
+                "Require trusted main",
+                "conditional step: Require trusted main",
+            ),
+            (
+                "verify_step_if_false",
+                "Verify pack attestation",
+                "conditional step: Verify pack attestation",
+            ),
+            (
+                "capture_step_if_false",
+                "Capture candidate observations",
+                "conditional step: Capture candidate observations",
+            ),
+        )
+        for kind, step, expected in step_conditionals:
+            with self.subTest(kind=kind):
+                needle = f"      - name: {step}\n"
+                self.assertIn(needle, text)
+                mutated = text.replace(needle, needle + "        if: false\n", 1)
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any(expected in problem for problem in problems),
+                    f"expected {expected!r} in {problems}",
+                )
+        capture_job = "  capture:\n"
+        capture_env = "          IMPLEMENTATION_ID: ${{ inputs.implementation_id }}\n"
+        executor_line = f"          python3 {OCI_EXECUTOR} \\\n"
+        shape = (
+            (
+                "job_write_all",
+                capture_job,
+                "  capture:\n    permissions: write-all\n",
+                "unexpected capture job keys",
+            ),
+            (
+                "job_env_token",
+                capture_job,
+                "  capture:\n    env:\n      GH_TOKEN: ${{ github.token }}\n",
+                "unexpected capture job keys",
+            ),
+            (
+                "curl_bash_pre_guard",
+                "    steps:\n",
+                "    steps:\n      - name: Pre-guard\n        run: curl | bash\n",
+                "unexpected step names",
+            ),
+            (
+                "capture_gh_token",
+                capture_env,
+                capture_env + "          GH_TOKEN: ${{ github.token }}\n",
+                "unexpected env keys",
+            ),
+            *(
+                (
+                    f"capture_env_break_{field}",
+                    capture_env,
+                    capture_env
+                    + f"          {field}: breakpoint\n"
+                    + "          GH_TOKEN: token-value\n",
+                    "unexpected env keys",
+                )
+                for field in sorted(_STEP_FIELD_KEYS)
+            ),
+            (
+                "inline_python_direct",
+                executor_line,
+                "          python3 - <<'PY'\n          print(0)\n          PY\n" + executor_line,
+                "inline Python",
+            ),
+        )
+        env_break_extra_skip = {
+            "if": "conditional step",
+            "continue-on-error": "continue-on-error swallows failure",
+        }
+        for kind, needle, replacement, expected in shape:
+            with self.subTest(kind=kind):
+                self.assertIn(needle, text)
+                mutated = text.replace(needle, replacement, 1)
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any(expected in problem for problem in problems),
+                    f"expected {expected!r} in {problems}",
+                )
+                if kind.startswith("capture_env_break_"):
+                    field = kind.removeprefix("capture_env_break_")
+                    skip = {expected}
+                    extra = env_break_extra_skip.get(field)
+                    if extra:
+                        skip.add(extra)
+                    restored = oci_candidate_workflow_problems(
+                        mutated, skip=frozenset(skip)
+                    )
+                    self.assertEqual(
+                        restored,
+                        [],
+                        f"{kind} must be [] when {sorted(skip)} is skipped: {restored}",
+                    )
+        with self.subTest(kind="duplicate_upload_always"):
+            mutated = text + (
+                f"\n      - name: {OCI_UPLOAD_STEP}\n"
+                "        if: always()\n"
+                f"        uses: {OCI_UPLOAD_PIN}\n"
+            )
+            problems = oci_candidate_workflow_problems(mutated)
+            self.assertTrue(
+                any("unexpected step names" in problem for problem in problems),
+                f"expected unexpected step names in {problems}",
+            )
+        allowlist = (
+            (
+                "workflow_env_token",
+                "on:\n",
+                "env:\n  GH_TOKEN: ${{ github.token }}\non:\n",
+                "unexpected top-level keys",
+            ),
+            (
+                "upload_if_or_failure",
+                "        if: success()\n",
+                "        if: success() || failure()\n",
+                "upload not gated on success",
+            ),
+            (
+                "tag_literal",
+                f"          {OCI_TAG_BINDING}\n",
+                "          TAG: privileged-mcp-action-v0-candidate.4\n",
+                "unexpected TAG bindings",
+            ),
+            (
+                "artifact_name",
+                f"          {OCI_ARTIFACT_NAME}\n",
+                "          name: candidate-capture-v0-extra\n",
+                "missing exact artifact name",
+            ),
+            (
+                "capture_working_directory",
+                "      - name: Capture candidate observations\n",
+                "      - name: Capture candidate observations\n"
+                "        working-directory: /tmp\n",
+                "unexpected step keys",
+            ),
+            (
+                "checkout_extra_with",
+                "          persist-credentials: false\n",
+                "          persist-credentials: false\n"
+                "          repository: example/evil\n",
+                "unexpected with keys",
+            ),
+            (
+                "unknown_top_level",
+                "on:\n",
+                "assay-note: ignore\non:\n",
+                "unexpected top-level keys",
+            ),
+            (
+                "unknown_step_timeout",
+                "      - name: Require trusted main\n",
+                "      - name: Require trusted main\n        timeout-minutes: 5\n",
+                "unexpected step keys",
+            ),
+        )
+        for kind, needle, replacement, expected in allowlist:
+            with self.subTest(kind=kind):
+                self.assertIn(needle, text)
+                mutated = text.replace(needle, replacement)
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any(expected in problem for problem in problems),
+                    f"expected {expected!r} in {problems}",
+                )
+                restored = oci_candidate_workflow_problems(
+                    mutated, skip=frozenset({expected})
+                )
+                self.assertEqual(
+                    restored,
+                    [],
+                    f"{kind} must be [] when {expected!r} is skipped: {restored}",
+                )
+
+    def test_conformance_path_filters_include_oci_workflow(self) -> None:
+        text = CONFORMANCE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(_on_paths(text, "pull_request"), CONFORMANCE_REQUIRED_PATHS)
+        self.assertEqual(_on_paths(text, "push"), CONFORMANCE_REQUIRED_PATHS)
 
 
 if __name__ == "__main__":
