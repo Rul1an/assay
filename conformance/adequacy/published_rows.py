@@ -92,7 +92,7 @@ def _reject_nonfinite_json_number(value: str) -> None:
     raise ValueError("non-finite JSON number %s is not permitted" % value)
 
 
-def _parse_json_bytes(data: bytes, label: str) -> dict:
+def parse_json_object(data: bytes, label: str) -> dict:
     try:
         value = json.loads(
             data.decode("utf-8"), parse_constant=_reject_nonfinite_json_number
@@ -241,10 +241,10 @@ def project_report(
         raise ValueError("corpus id must be a non-empty string")
     manifest = _dependencies([manifest])[0]
     _validate_report(report)
-    if _parse_json_bytes(encoded_report, "producer report") != report:
+    if parse_json_object(encoded_report, "producer report") != report:
         raise ValueError("producer report bytes do not encode the supplied report")
     manifest_data = read_regular_file(manifest_path)
-    declared = _parse_json_bytes(manifest_data, str(manifest_path))
+    declared = parse_json_object(manifest_data, str(manifest_path))
     if report.get("manifest") != manifest:
         raise ValueError("producer manifest differs from the repository-relative row identity")
     if declared.get("runner", "module") != report["runner"]:
@@ -291,7 +291,7 @@ def _validate_current_row(row: dict, reports: dict, repo: Path) -> None:
     raw = encoded.encode("utf-8")
     if _digest(raw) != digest:
         raise ValueError("report_sha256 does not address the stored producer bytes")
-    report = _parse_json_bytes(raw, "stored producer report")
+    report = parse_json_object(raw, "stored producer report")
     _validate_report(report)
     for row_field, report_field in ROW_FROM_REPORT.items():
         if row.get(row_field) != report.get(report_field):
@@ -305,7 +305,7 @@ def _validate_current_row(row: dict, reports: dict, repo: Path) -> None:
         raise ValueError("producer manifest differs from the repository-relative row identity")
     manifest_path = _indexed_manifest_path(repo, manifest_rel)
     manifest_data = read_regular_file(manifest_path)
-    declared = _parse_json_bytes(manifest_data, str(manifest_path))
+    declared = parse_json_object(manifest_data, str(manifest_path))
     if _digest(manifest_data) != report["manifest_sha256"]:
         raise ValueError("manifest_sha256 does not address the indexed manifest")
     if declared.get("runner", "module") != report["runner"]:
@@ -352,7 +352,7 @@ def _validate_current_row(row: dict, reports: dict, repo: Path) -> None:
 def load_results(
     path: Path, *, limit: int = MAX_RESULTS_BYTES, require_current: bool = False
 ) -> LoadedResults:
-    document = _parse_json_bytes(read_regular_file(path, limit), "%s results JSON" % path)
+    document = parse_json_object(read_regular_file(path, limit), "%s results JSON" % path)
     if document.get("schema") not in (None, RESULTS_SCHEMA):
         raise ValueError("results document has an unsupported schema")
     rows = document.get("corpora")

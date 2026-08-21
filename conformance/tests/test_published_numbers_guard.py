@@ -227,6 +227,29 @@ class ProjectionTemplateContract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "1048576-byte limit"):
                 project.render_template(template, {})
 
+    def test_checked_metadata_requires_exactly_one_json_fence(self):
+        with tempfile.TemporaryDirectory() as raw:
+            template = Path(raw) / "INDEX.md.in"
+            template.write_text(
+                self.template("body")
+                .replace("\n<!-- END CHECKED NUMBERS -->", "\n```json\n{}\n```\n<!-- END CHECKED NUMBERS -->"),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "exactly one JSON metadata fence"):
+                project.template_parts(template)
+
+    def test_checked_metadata_rejects_nonfinite_json_numbers(self):
+        with tempfile.TemporaryDirectory() as raw:
+            template = Path(raw) / "INDEX.md.in"
+            template.write_text(
+                self.template("body").replace(
+                    '{"not_derived": []}', '{"not_derived": [], "hostile": NaN}'
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "not readable JSON"):
+                project.template_parts(template)
+
     @unittest.skipUnless(hasattr(Path, "symlink_to"), "symlinks unavailable")
     def test_atomic_writer_does_not_follow_a_predictable_temporary_symlink(self):
         with tempfile.TemporaryDirectory() as raw:

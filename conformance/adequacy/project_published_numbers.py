@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import sys
@@ -96,15 +95,20 @@ def template_parts(template: Path) -> tuple[str, dict, str]:
     if stop < start:
         raise ValueError("%s: END marker precedes BEGIN" % template.name)
     block = source[start:stop]
-    fence = re.search(r"```json\n(.*?)\n```", block, re.DOTALL)
-    if not fence:
-        raise ValueError("%s: checked-numbers block carries no JSON metadata" % template.name)
-    try:
-        metadata = json.loads(fence.group(1))
-    except json.JSONDecodeError as exc:
-        raise ValueError("%s: checked-numbers metadata is not valid JSON: %s" % (template.name, exc)) from exc
-    if not isinstance(metadata, dict):
-        raise ValueError("%s: checked-numbers metadata must be an object" % template.name)
+    fence_start = "```json\n"
+    fence_end = "\n```"
+    if block.count(fence_start) != 1:
+        raise ValueError(
+            "%s: checked-numbers block needs exactly one JSON metadata fence" % template.name
+        )
+    payload_start = block.index(fence_start) + len(fence_start)
+    payload_end = block.find(fence_end, payload_start)
+    if payload_end < 0:
+        raise ValueError("%s: checked-numbers JSON metadata fence is not closed" % template.name)
+    metadata = published_rows.parse_json_object(
+        block[payload_start:payload_end].encode("utf-8"),
+        "%s checked-numbers metadata" % template.name,
+    )
     return source, metadata, source[:start] + source[stop:]
 
 
