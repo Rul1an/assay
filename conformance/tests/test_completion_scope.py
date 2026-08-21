@@ -10,6 +10,7 @@ on required_complete, not by mapping 3 to 0.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import subprocess
@@ -36,6 +37,9 @@ COMBINED_UNITTEST = (
     "          python3 -m unittest \\\n"
     "            conformance/privileged-mcp-action-v0/tests/test_activation_kit.py \\\n"
     "            conformance/privileged-mcp-action-v0/tests/test_oci_candidate_executor.py"
+)
+ACTIVATION_KIT = (
+    REPO / "conformance/privileged-mcp-action-v0/tests/test_activation_kit.py"
 )
 
 
@@ -78,6 +82,51 @@ def _kit_step(text: str) -> str:
     if step is None:
         raise AssertionError("conformance workflow missing kit contract step")
     return step.group(0)
+
+
+def _load_activation_kit():
+    spec = importlib.util.spec_from_file_location(
+        "pma_activation_kit_required_ci", ACTIVATION_KIT)
+    if spec is None or spec.loader is None:
+        raise AssertionError("activation kit is not loadable")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def assert_oci_candidate_checker(mod) -> None:
+    checker = getattr(mod, "oci_candidate_workflow_problems", None)
+    if not callable(checker):
+        raise AssertionError("oci_candidate_workflow_problems missing")
+    cls = getattr(mod, "PrivilegedMcpActionOciCandidateWorkflowContract", None)
+    if cls is None:
+        raise AssertionError("PrivilegedMcpActionOciCandidateWorkflowContract missing")
+    if not hasattr(cls, "test_mutations_fail_independently"):
+        raise AssertionError("standalone mutation matrix missing")
+    workflow = getattr(mod, "OCI_CANDIDATE_WORKFLOW", None)
+    if workflow is None:
+        raise AssertionError("OCI_CANDIDATE_WORKFLOW missing")
+    text = workflow.read_text(encoding="utf-8")
+    problems = checker(text)
+    if problems:
+        raise AssertionError(f"committed workflow problems: {problems}")
+    executor = getattr(mod, "OCI_EXECUTOR", None)
+    if not executor:
+        raise AssertionError("OCI_EXECUTOR missing")
+    mutations = (
+        ("        if: success()\n", "        if: always()\n", "upload not gated on success"),
+        ("gh attestation verify", "", "missing gh attestation verify"),
+        (f"python3 {executor}", "python3 -c 'pass'", "missing canonical executor"),
+    )
+    for needle, replacement, expected in mutations:
+        mutated = text.replace(needle, replacement, 1)
+        if mutated == text:
+            raise AssertionError(f"mutation needle missing: {needle!r}")
+        got = checker(mutated)
+        if not any(expected in problem for problem in got):
+            raise AssertionError(f"expected {expected!r} in {got}")
+    if checker(text.replace("no-such-token", "no-such-token")):
+        raise AssertionError("no-op control was not green")
 
 
 def assert_combined_unittest(step: str) -> None:
@@ -348,6 +397,24 @@ class ProductCallsite(unittest.TestCase):
         for mutated in mutations:
             with self.assertRaises(AssertionError):
                 assert_combined_unittest(mutated)
+
+    def test_required_ci_invokes_oci_candidate_checker(self):
+        mod = _load_activation_kit()
+        assert_oci_candidate_checker(mod)
+        cls = mod.PrivilegedMcpActionOciCandidateWorkflowContract
+        drops = (
+            (mod, "oci_candidate_workflow_problems"),
+            (mod, "PrivilegedMcpActionOciCandidateWorkflowContract"),
+            (cls, "test_mutations_fail_independently"),
+        )
+        for owner, name in drops:
+            saved = getattr(owner, name)
+            delattr(owner, name)
+            try:
+                with self.assertRaises(AssertionError):
+                    assert_oci_candidate_checker(mod)
+            finally:
+                setattr(owner, name, saved)
 
 
 if __name__ == "__main__":

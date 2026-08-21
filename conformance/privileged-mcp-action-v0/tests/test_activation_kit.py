@@ -66,7 +66,7 @@ OCI_CAPTURE_UPLOAD_PATH = "${{ runner.temp }}/oci-capture/candidate_capture.v0"
 OCI_IMPLEMENTATION_ID_ENV = "IMPLEMENTATION_ID: ${{ inputs.implementation_id }}"
 OCI_IMPLEMENTATION_ID_ARGV = '--implementation-id "$IMPLEMENTATION_ID"'
 OCI_UPLOAD_STEP = "Upload validated capture"
-USES_SHA_RE = re.compile(r"uses:\s*\S+@([0-9a-f]{40}|[^\s#]+)")
+USES_SHA_RE = re.compile(r"uses:\s*\S+@([^\s#]+)")
 # Ordered capture-job shape. Env-key sets and the step-name tuple are one table
 # so a skipped setup, extra step, leaked token, or duplicate upload cannot
 # look green by matching a looser presence pin.
@@ -2130,6 +2130,11 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         )
 
 
+def _uses_pin_line(line: str, pin: str) -> bool:
+    """True when `uses:` is exactly `pin`, then only whitespace or a comment."""
+    return re.fullmatch(rf"(?:-\s+)?uses:\s*{re.escape(pin)}(?:\s+#.*)?", line) is not None
+
+
 def _active_lines(text: str) -> list[str]:
     """YAML/script lines that can execute. Full-line comments and blanks do not."""
     lines = []
@@ -2352,28 +2357,19 @@ def oci_candidate_workflow_problems(
 
     active = _active_lines(text)
     active_text = "\n".join(active)
-    if "workflow_dispatch:" not in active_text:
-        problems.append("missing workflow_dispatch")
-    if re.search(r"(?m)^  pull_request", text) or "pull_request_target:" in active_text:
-        problems.append("untrusted pull_request trigger")
-    if re.search(r"(?m)^  push:", text):
-        problems.append("push trigger")
-    in_on = False
-    for line in text.splitlines():
-        stripped = line.lstrip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if line == "on:":
-            in_on = True
-            continue
-        if not in_on:
-            continue
-        if line.startswith("  ") and not line.startswith("   "):
-            key = stripped.split(":", 1)[0]
-            if key != "workflow_dispatch":
+    on_keys = _top_level_mapping_keys(text, "on")
+    if on_keys != ("workflow_dispatch",):
+        if "workflow_dispatch" not in on_keys:
+            problems.append("missing workflow_dispatch")
+        for key in on_keys:
+            if key == "workflow_dispatch":
+                continue
+            if key in ("pull_request", "pull_request_target"):
+                problems.append("untrusted pull_request trigger")
+            elif key == "push":
+                problems.append("push trigger")
+            else:
                 problems.append(f"extra trigger: {key}")
-        elif not line.startswith(" "):
-            in_on = False
     if "runs-on: ubuntu-24.04" not in active_text:
         problems.append("missing ubuntu-24.04")
     if re.search(r"runs-on:\s*.*self-hosted", active_text):
@@ -2455,17 +2451,14 @@ def oci_candidate_workflow_problems(
         (OCI_SETUP_PYTHON_PIN, "unpinned or wrong setup-python"),
         (OCI_UPLOAD_PIN, "unpinned or wrong upload-artifact"),
     ):
-        if not any(re.match(rf"^(-\s+)?uses:\s*{re.escape(pin)}", line) for line in active):
+        if not any(_uses_pin_line(line, pin) for line in active):
             problems.append(label)
     if OCI_PYTHON_VERSION not in active_text:
         problems.append("missing python 3.13.8")
     upload_steps = [
         block
         for block in re.split(r"(?m)^(?=      - )", text)
-        if any(
-            re.match(rf"^(-\s+)?uses:\s*{re.escape(OCI_UPLOAD_PIN)}", line)
-            for line in _active_lines(block)
-        )
+        if any(_uses_pin_line(line, OCI_UPLOAD_PIN) for line in _active_lines(block))
     ]
     upload_ifs = [
         line
@@ -2684,6 +2677,9 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
             (OCI_CHECKOUT_PIN, "actions/checkout@v5", "unpinned uses:"),
             (OCI_SETUP_PYTHON_PIN, "actions/setup-python@v6", "unpinned or wrong setup-python"),
             (OCI_PYTHON_VERSION, 'python-version: "3.12.0"', "missing python 3.13.8"),
+            (OCI_CHECKOUT_PIN, f"{OCI_CHECKOUT_PIN}-mutable", "unpinned or wrong checkout"),
+            (OCI_SETUP_PYTHON_PIN, f"{OCI_SETUP_PYTHON_PIN}-mutable", "unpinned or wrong setup-python"),
+            (OCI_UPLOAD_PIN, f"{OCI_UPLOAD_PIN}-mutable", "unpinned or wrong upload-artifact"),
         )
         for needle, replacement, expected in inserts:
             with self.subTest(insert=expected):
@@ -2693,6 +2689,22 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
                     any(expected in problem for problem in problems),
                     f"expected {expected!r} in {problems}",
                 )
+        with self.subTest(kind="flow_style_on_pull_request"):
+            block_on = text[text.index("on:\n") : text.index("\npermissions:")]
+            flow_on = (
+                "on: {workflow_dispatch: {inputs: {implementation_id: "
+                "{description: Checked-in implementation_id, required: true, "
+                "type: string}}}, pull_request: {}}"
+            )
+            mutated = text.replace(block_on, flow_on, 1)
+            problems = oci_candidate_workflow_problems(mutated)
+            self.assertTrue(
+                any("unexpected on triggers" in problem or "missing workflow_dispatch" in problem
+                    or "untrusted pull_request" in problem or "extra trigger" in problem
+                    for problem in problems),
+                f"expected trigger guard in {problems}",
+            )
+            self.assertEqual(oci_candidate_workflow_problems(text), [])
         with self.subTest(kind="inputs-in-run"):
             mutated = text.replace(OCI_IMPLEMENTATION_ID_ENV + "\n", "", 1).replace(
                 OCI_IMPLEMENTATION_ID_ARGV,
