@@ -390,23 +390,37 @@ class ProductWorkflow(unittest.TestCase):
                 "Conformance inventory",
             )
 
-    def test_scope_workflow_bash_env_fails_closed(self):
+    def test_scope_workflow_document_shape_fails_closed(self):
         text = CI_YML.read_text(encoding="utf-8")
-        mutated = text.replace(
-            "env:\n",
-            "env:\n  BASH_ENV: /tmp/assay-bash-env\n",
+        env_mutations = (
+            ("BASH_ENV", "  BASH_ENV: /tmp/assay-bash-env\n"),
+            ("PATH", "  PATH: /tmp\n"),
+            ("quoted GIT_DIR", "  'GIT_DIR': /tmp/repo\n"),
+            ("unrelated env", "  UNRELATED_WORKFLOW_ENV: allowed\n"),
+        )
+        for label, addition in env_mutations:
+            with self.subTest(label=label):
+                mutated = text.replace("env:\n", "env:\n" + addition, 1)
+                with self.assertRaises(AssertionError):
+                    assert_hard_run_command(
+                        mutated, "scope", "Conformance inventory")
+        defaults = text.replace(
+            "permissions: {}\n",
+            "defaults:\n  run:\n    working-directory: /tmp\n\npermissions: {}\n",
             1,
         )
+        self.assertNotEqual(defaults, text)
         with self.assertRaises(AssertionError):
             assert_hard_run_command(
-                mutated, "scope", "Conformance inventory")
-        control = text.replace(
-            "env:\n",
-            "env:\n  UNRELATED_WORKFLOW_ENV: allowed\n",
+                defaults, "scope", "Conformance inventory")
+        value_change = text.replace(
+            '  ASSAY_PUBLIC_MSRV: "1.89.0"\n',
+            '  ASSAY_PUBLIC_MSRV: "9.99.0"\n',
             1,
         )
+        self.assertNotEqual(value_change, text)
         assert_hard_run_command(
-            control, "scope", "Conformance inventory")
+            value_change, "scope", "Conformance inventory")
 
     def test_conditional_scope_job_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")

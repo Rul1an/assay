@@ -60,11 +60,15 @@ HARD_RUN_CONTRACTS = {
                    "outputs", "steps"}),
         frozenset({"name", "shell", "run"}),
         INVENTORY_RUN_SCRIPT,
+        frozenset({"name", "on", "permissions", "env", "jobs"}),
+        frozenset({"ASSAY_PUBLIC_MSRV"}),
     ),
     ("activation-kit", "Run activation-kit contract tests"): (
         frozenset({"runs-on", "steps"}),
         frozenset({"name", "shell", "run"}),
         ACTIVATION_KIT_RUN_SCRIPT,
+        frozenset({"name", "on", "permissions", "concurrency", "jobs"}),
+        frozenset(),
     ),
 }
 ACTIVATION_KIT = (
@@ -190,9 +194,20 @@ def _direct_mapping(block: str) -> dict[str, str]:
     return entries
 
 
-def _assert_no_workflow_bash_env(text: str) -> None:
+def _assert_workflow_document(
+        text: str,
+        expected_keys: frozenset[str],
+        expected_env_keys: frozenset[str]) -> None:
     lines = text.splitlines(keepends=True)
-    env_indexes: list[int] = []
+    document = "document:\n" + "".join(
+        "  " + line if line.strip() else line for line in lines)
+    actual_keys = frozenset(_direct_mapping(document))
+    if actual_keys != expected_keys:
+        raise AssertionError(
+            "workflow top-level keys differ: "
+            f"expected {sorted(expected_keys)}, got {sorted(actual_keys)}")
+
+    env_index = None
     for index, raw in enumerate(lines):
         line = raw.rstrip("\r\n")
         if not line or line.startswith((" ", "#")):
@@ -206,14 +221,15 @@ def _assert_no_workflow_bash_env(text: str) -> None:
             continue
         if match.group("value").strip():
             raise AssertionError("workflow env must use a direct mapping")
-        env_indexes.append(index)
-    if len(env_indexes) > 1:
-        raise AssertionError("workflow has duplicate top-level env mappings")
-    if not env_indexes:
-        return
-    env_block = _indentation_bounded_block(lines, env_indexes[0], 0)
-    if "BASH_ENV" in _direct_mapping(env_block):
-        raise AssertionError("workflow-level BASH_ENV can neutralize hard-run scripts")
+        env_index = index
+    actual_env_keys = frozenset()
+    if env_index is not None:
+        env_block = _indentation_bounded_block(lines, env_index, 0)
+        actual_env_keys = frozenset(_direct_mapping(env_block))
+    if actual_env_keys != expected_env_keys:
+        raise AssertionError(
+            "workflow env keys differ: "
+            f"expected {sorted(expected_env_keys)}, got {sorted(actual_env_keys)}")
 
 
 def _direct_scalar(raw: str) -> str:
@@ -238,8 +254,9 @@ def assert_hard_run_command(
     contract = HARD_RUN_CONTRACTS.get((job_name, step_name))
     if contract is None:
         raise AssertionError(f"no hard-run contract for {job_name}/{step_name}")
-    allowed_job_keys, allowed_step_keys, expected_script = contract
-    _assert_no_workflow_bash_env(text)
+    (allowed_job_keys, allowed_step_keys, expected_script,
+     workflow_keys, workflow_env_keys) = contract
+    _assert_workflow_document(text, workflow_keys, workflow_env_keys)
 
     job = named_job(text, job_name)
     actual_job_keys = frozenset(_direct_mapping(job))
@@ -629,21 +646,25 @@ class ProductCallsite(unittest.TestCase):
         with self.assertRaises(AssertionError):
             assert_combined_unittest(mutated)
 
-    def test_activation_workflow_bash_env_fails_closed(self):
+    def test_activation_workflow_document_shape_fails_closed(self):
         text = CONFORMANCE_YML.read_text(encoding="utf-8")
-        mutated = text.replace(
-            "permissions:\n",
-            "env:\n  BASH_ENV: /tmp/assay-bash-env\n\npermissions:\n",
-            1,
+        mutations = (
+            ("BASH_ENV", "env:\n  BASH_ENV: /tmp/assay-bash-env\n\n"),
+            ("PATH", "env:\n  PATH: /tmp\n\n"),
+            ("quoted GIT_DIR", "env:\n  'GIT_DIR': /tmp/repo\n\n"),
+            ("unrelated env", "env:\n  UNRELATED_WORKFLOW_ENV: allowed\n\n"),
+            (
+                "defaults working-directory",
+                "defaults:\n  run:\n    working-directory: /tmp\n\n",
+            ),
         )
-        with self.assertRaises(AssertionError):
-            assert_combined_unittest(mutated)
-        control = text.replace(
-            "permissions:\n",
-            "env:\n  UNRELATED_WORKFLOW_ENV: allowed\n\npermissions:\n",
-            1,
-        )
-        assert_combined_unittest(control)
+        for label, addition in mutations:
+            with self.subTest(label=label):
+                mutated = text.replace(
+                    "permissions:\n", addition + "permissions:\n", 1)
+                self.assertNotEqual(mutated, text)
+                with self.assertRaises(AssertionError):
+                    assert_combined_unittest(mutated)
 
     def test_activation_kit_step_uses_explicit_bash(self):
         text = CONFORMANCE_YML.read_text(encoding="utf-8")
@@ -666,19 +687,6 @@ class ProductCallsite(unittest.TestCase):
                 self.assertNotEqual(mutated_step, step)
                 with self.assertRaises(AssertionError):
                     assert_combined_unittest(text.replace(step, mutated_step, 1))
-
-    def test_explicit_activation_shell_overrides_workflow_default(self):
-        text = CONFORMANCE_YML.read_text(encoding="utf-8")
-        mutated = text.replace(
-            "permissions:\n",
-            "defaults:\n"
-            "  run:\n"
-            "    shell: bash -c 'true' -- {0}\n\n"
-            "permissions:\n",
-            1,
-        )
-        self.assertNotEqual(mutated, text)
-        assert_combined_unittest(mutated)
 
     def test_wider_indented_conditional_activation_job_fails(self):
         text = CONFORMANCE_YML.read_text(encoding="utf-8")
