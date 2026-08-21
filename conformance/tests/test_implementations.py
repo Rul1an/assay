@@ -215,8 +215,13 @@ class PositiveFixtureAndHostileMatrix(unittest.TestCase):
         cases = (
             ("https://github.com/example/checker", True),
             ("http://127.0.0.1:8080/path", True),
+            ("https://example.com?x", True),
+            ("https://example.com#frag", True),
+            ("https://example.com/a?x#frag", True),
             ("https:///", False),
             ("https:///foo", False),
+            ("https://?x", False),
+            ("https://#frag", False),
             ("https://exa mple.com/a", False),
             ("github.com/example/checker", False),
         )

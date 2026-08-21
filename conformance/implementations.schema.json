@@ -47,7 +47,7 @@
           },
           "source": {
             "type": "string",
-            "pattern": "^https?://[^/\\s]+(?:/[^\\s]*)?$"
+            "pattern": "^https?://[^/?#\\s]+(?:[/?#][^\\s]*)?$"
           },
           "commit": {
             "type": "string",
