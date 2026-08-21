@@ -130,15 +130,17 @@ def is_canonical_dependency(path) -> bool:
     """True iff path is a canonical non-empty repository-relative path.
 
     Rejects git pathspec magic (a leading colon), absolute paths, ``..``,
-    empty segments, and backslashes. This is intentionally lexical: resolving
-    through the working tree would let a symlink answer a different question
-    than the literal path later passed to Git.
+    empty segments, control characters, and backslashes. This is intentionally
+    lexical: resolving through the working tree would let a symlink answer a
+    different question than the literal path later passed to Git.
     """
     if not isinstance(path, str) or path == "":
         return False
     if path.startswith(":"):
         return False
     if "\\" in path:
+        return False
+    if any(ord(char) < 32 or ord(char) == 127 for char in path):
         return False
     if path.startswith("/") or Path(path).is_absolute():
         return False

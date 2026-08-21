@@ -152,6 +152,7 @@ class ClassifyMeasuredCommit(unittest.TestCase):
         "",
         "tracked.txt/",
         ":tracked.txt",
+        "bad\0path",
     )
 
     def test_hostile_depends_on_is_malformed_not_clean(self):
