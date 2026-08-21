@@ -2554,7 +2554,7 @@ def oci_candidate_workflow_problems(
         if sum(1 for line in active if line == OCI_TAG_BINDING) != 2:
             problems.append("unexpected TAG bindings")
     if not omitted("missing exact artifact name"):
-        if OCI_ARTIFACT_NAME not in active_text:
+        if sum(1 for line in active if line == OCI_ARTIFACT_NAME) != 1:
             problems.append("missing exact artifact name")
     return problems
 
@@ -2902,7 +2902,7 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
             (
                 "artifact_name",
                 f"          {OCI_ARTIFACT_NAME}\n",
-                "          name: leaked-capture\n",
+                "          name: candidate-capture-v0-extra\n",
                 "missing exact artifact name",
             ),
             (
