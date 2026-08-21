@@ -68,6 +68,26 @@ def _reject_unknown_fields(obj: dict, allowed: tuple[str, ...], *, what: str) ->
         )
 
 
+def validate_image_reference(value: object) -> str:
+    """Refuse anything that is not an exact `name@sha256:<64 hex>` reference.
+
+    Public because the conformance capture format binds a run to the same image
+    reference this registry stores, and two spellings of that rule are two
+    answers to what a capture is bound to. `_validate_row` calls this rather
+    than matching the pattern again.
+
+    A digest addresses bytes. It does not authenticate the publisher and it does
+    not establish that the addressed image is the one that ran.
+    """
+    if not isinstance(value, str) or not value:
+        raise ImplementationRegistryError("image must be a non-empty string")
+    if not IMAGE_RE.fullmatch(value):
+        raise ImplementationRegistryError(
+            "image must be name@sha256:<64 hex digest>, not a tag"
+        )
+    return value
+
+
 def _require_text(value: object, field: str, ident: str) -> str:
     if not isinstance(value, str) or not value:
         raise ImplementationRegistryError("%s: %s must be a non-empty string" % (ident, field))
@@ -107,11 +127,10 @@ def _validate_row(row: object, seen: set[str]) -> dict:
     suite = _require_text(row["suite"], "suite", ident)
     if suite not in ALLOWED_SUITES:
         raise ImplementationRegistryError("%s: unknown suite %r" % (ident, suite))
-    image = _require_text(row["image"], "image", ident)
-    if not IMAGE_RE.fullmatch(image):
-        raise ImplementationRegistryError(
-            "%s: image must be name@sha256:<64 hex digest>, not a tag" % ident
-        )
+    try:
+        validate_image_reference(row["image"])
+    except ImplementationRegistryError as exc:
+        raise ImplementationRegistryError("%s: %s" % (ident, exc)) from exc
     source = _require_text(row["source"], "source", ident)
     if not SOURCE_RE.fullmatch(source):
         raise ImplementationRegistryError(
