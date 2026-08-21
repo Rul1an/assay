@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/conformance/implementations.schema.json",
+  "title": "Assay static implementation registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "implementations"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.conformance.implementations.v0"
+    },
+    "implementations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "suite",
+          "image",
+          "source",
+          "commit",
+          "language",
+          "reproduction_mode",
+          "authorship"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "suite": {
+            "const": "privileged-mcp-action-v0"
+          },
+          "image": {
+            "type": "string",
+            "pattern": "^[^:@\\s]+(?:/[^:@\\s]+)*@sha256:[0-9a-f]{64}$",
+            "description": "Exact name@sha256:<64 hex>. A digest addresses bytes; it does not authenticate the publisher."
+          },
+          "source": {
+            "type": "string",
+            "pattern": "^https?://[^\\s]+$"
+          },
+          "commit": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "language": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reproduction_mode": {
+            "enum": [
+              "blind_from_spec",
+              "from_spec_then_conformance",
+              "commissioned_clean_room",
+              "other_disclosed"
+            ]
+          },
+          "authorship": {
+            "type": "string",
+            "pattern": "^(Authored-By: human|Assisted-By: \\S+ \\S+|Generated-By: \\S+ \\S+)$"
+          }
+        }
+      }
+    }
+  }
+}

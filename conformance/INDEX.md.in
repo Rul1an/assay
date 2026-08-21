@@ -41,6 +41,20 @@ Related but not a corpus in this table: [RGE-Bench](https://github.com/rge-bench
 is maintained in its own repository under its own machine-checked neutrality guard,
 and carries its own [`REPRODUCTIONS.md`](https://github.com/rge-bench/rge-bench/blob/main/REPRODUCTIONS.md).
 
+## Implementation registry
+
+[`implementations.json`](implementations.json) is a static, fail-closed list of
+declared candidate images for `privileged-mcp-action-v0`. Each image is written
+as `name@sha256:` plus sixty-four lowercase hex digits. A digest addresses
+bytes; it does not authenticate the publisher. A row does not prove that the
+image is safe, reproducible, independent, or conformant, and this check does
+not pull or run it.
+
+```bash
+python3 conformance/implementations.py
+python3 -W error::ResourceWarning conformance/tests/test_implementations.py
+```
+
 ## How a suite is graded, and why two values are not enough
 
 A boolean cannot tell a reader whether a check ran and disagreed or was never

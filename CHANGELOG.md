@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `conformance/implementations.json` is a static, fail-closed registry of candidate
+  images addressed as `name@sha256:<64 hex>`. Required CI calls the same stdlib
+  validator. A digest addresses bytes; registration does not authenticate a
+  publisher or prove safety, reproducibility, independence, or conformance
+  (Rul1an/assay-tunnel-experiments#198).
 - `docs/architecture/CLI-JSON-IDENTITIES.md` records which `assay.<segments>.vN` identities
   ship and which of them are CLI JSON documents. `cli_json_identities.rs` fails the build when
   source and record disagree, including for the nine documents that carry no identity at all
