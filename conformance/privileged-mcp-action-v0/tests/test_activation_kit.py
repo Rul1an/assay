@@ -2028,9 +2028,54 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         self.assertEqual(capture, original_capture)
         capture_format.validate_capture(capture)
 
-    def test_binder_refuses_swapped_status_and_error_on_non_observed_case(self) -> None:
-        """candidate_error scores to execution_error; status/error still must bind."""
-        capture_path = self.valid_capture("cross-bind-error-case")
+    def test_binder_refuses_swapped_status_on_non_observed_case(self) -> None:
+        """status alone must bind; error stays, summary stays coherent."""
+        capture, digest, original_capture, report = self._non_observed_bound_report(
+            "cross-bind-status-only"
+        )
+        swapped = json.loads(json.dumps(report))
+        swapped["cases"][0]["status"] = "harness_error"
+        swapped["summary"]["execution_error"] -= 1
+        swapped["summary"]["harness_error"] += 1
+        self._assert_case_swap_refused(swapped, capture, digest, original_capture)
+
+    def test_binder_refuses_swapped_error_on_non_observed_case(self) -> None:
+        """error alone must bind; status stays execution_error."""
+        capture, digest, original_capture, report = self._non_observed_bound_report(
+            "cross-bind-error-only"
+        )
+        swapped = json.loads(json.dumps(report))
+        swapped["cases"][0]["error"] = "swapped harness error"
+        self.assertEqual(swapped["cases"][0]["status"], "execution_error")
+        self._assert_case_swap_refused(swapped, capture, digest, original_capture)
+
+    def test_binder_refuses_swapped_exit_code(self) -> None:
+        capture, digest, original_capture, report = self._observed_warned_bound_report(
+            "cross-bind-exit-code"
+        )
+        swapped = json.loads(json.dumps(report))
+        swapped["cases"][0]["exit_code"] = swapped["cases"][0]["exit_code"] + 1
+        self._assert_case_swap_refused(swapped, capture, digest, original_capture)
+
+    def test_binder_refuses_swapped_stderr_present(self) -> None:
+        capture, digest, original_capture, report = self._observed_warned_bound_report(
+            "cross-bind-stderr"
+        )
+        swapped = json.loads(json.dumps(report))
+        swapped["cases"][0]["stderr_present"] = not swapped["cases"][0]["stderr_present"]
+        self._assert_case_swap_refused(swapped, capture, digest, original_capture)
+
+    def test_binder_refuses_swapped_review_warnings(self) -> None:
+        capture, digest, original_capture, report = self._observed_warned_bound_report(
+            "cross-bind-warnings"
+        )
+        swapped = json.loads(json.dumps(report))
+        warnings = swapped["cases"][0].pop("review_warnings")
+        swapped["summary"]["review_warnings"] -= len(warnings)
+        self._assert_case_swap_refused(swapped, capture, digest, original_capture)
+
+    def _non_observed_bound_report(self, name: str):
+        capture_path = self.valid_capture(name)
 
         def as_candidate_error(document):
             first = document["observations"][0]
@@ -2041,21 +2086,34 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
                 "error": capture_format.bound_error("candidate failed this case"),
             }
 
-        rewritten = self.rewrite(
-            capture_path, "cross-bind-error-case-rewritten", as_candidate_error
-        )
+        rewritten = self.rewrite(capture_path, f"{name}-rewritten", as_candidate_error)
         capture, digest = capture_format.load_capture_with_digest(rewritten)
         original_capture = json.loads(json.dumps(capture))
         report = self.bound_report(capture, digest)
         self.assertEqual(report["cases"][0]["status"], "execution_error")
         self.assertEqual(report["cases"][0]["error"], "candidate failed this case")
-        swapped = json.loads(json.dumps(report))
-        swapped["cases"][0]["status"] = "harness_error"
-        swapped["cases"][0]["error"] = "swapped harness error"
-        swapped["summary"]["execution_error"] -= 1
-        swapped["summary"]["harness_error"] += 1
+        return capture, digest, original_capture, report
+
+    def _observed_warned_bound_report(self, name: str):
+        capture_path = self.valid_capture(name)
+
+        def flag_schema_mismatch(document):
+            document["observations"][0]["report_schema_matches"] = False
+
+        warned = self.rewrite(capture_path, f"{name}-warned", flag_schema_mismatch)
+        capture, digest = capture_format.load_capture_with_digest(warned)
+        original_capture = json.loads(json.dumps(capture))
+        self.assertTrue(capture_format.review_warnings(capture["observations"][0]))
+        report = self.bound_report(capture, digest)
+        self.assertTrue(report["cases"][0].get("review_warnings"))
+        return capture, digest, original_capture, report
+
+    def _assert_case_swap_refused(self, swapped, capture, digest, original_capture):
         self.assertEqual(swapped["capture_sha256"], digest)
-        self.assertEqual(swapped["cases"][0]["case_id"], capture["observations"][0]["case_id"])
+        self.assertEqual(
+            swapped["cases"][0]["case_id"],
+            capture["observations"][0]["case_id"],
+        )
         self.assertEqual(
             swapped["cases"][0]["input_sha256"],
             capture["observations"][0]["input_sha256"],
@@ -2063,69 +2121,10 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         capture_format.validate_capture(capture)
         validate_run_record.validate_run_record(swapped)
         with self.assertRaisesRegex(ValueError, "do not bind"):
-            validate_run_record.require_run_record_binds_capture(swapped, capture, digest, self.expected_from(capture))
+            validate_run_record.require_run_record_binds_capture(
+                swapped, capture, digest, self.expected_from(capture)
+            )
         self.assertEqual(capture, original_capture)
-        capture_format.validate_capture(capture)
-
-    def test_binder_refuses_swapped_exit_code_stderr_or_review_warnings(self) -> None:
-        """exit_code, stderr_present, and capture-derived warnings must bind."""
-        capture_path = self.valid_capture("cross-bind-case-facts")
-
-        def flag_schema_mismatch(document):
-            document["observations"][0]["report_schema_matches"] = False
-
-        warned = self.rewrite(
-            capture_path, "cross-bind-case-facts-warned", flag_schema_mismatch
-        )
-        capture, digest = capture_format.load_capture_with_digest(warned)
-        original_capture = json.loads(json.dumps(capture))
-        self.assertTrue(capture_format.review_warnings(capture["observations"][0]))
-        report = self.bound_report(capture, digest)
-        self.assertTrue(report["cases"][0].get("review_warnings"))
-
-        with self.subTest(field="exit_code_and_stderr_present"):
-            swapped = json.loads(json.dumps(report))
-            swapped["cases"][0]["exit_code"] = swapped["cases"][0]["exit_code"] + 1
-            swapped["cases"][0]["stderr_present"] = not swapped["cases"][0][
-                "stderr_present"
-            ]
-            self.assertEqual(swapped["capture_sha256"], digest)
-            self.assertEqual(
-                swapped["cases"][0]["case_id"],
-                capture["observations"][0]["case_id"],
-            )
-            self.assertEqual(
-                swapped["cases"][0]["input_sha256"],
-                capture["observations"][0]["input_sha256"],
-            )
-            capture_format.validate_capture(capture)
-            validate_run_record.validate_run_record(swapped)
-            with self.assertRaisesRegex(ValueError, "do not bind"):
-                validate_run_record.require_run_record_binds_capture(
-                    swapped, capture, digest, self.expected_from(capture)
-                )
-            self.assertEqual(capture, original_capture)
-
-        with self.subTest(field="review_warnings"):
-            swapped = json.loads(json.dumps(report))
-            warnings = swapped["cases"][0].pop("review_warnings")
-            swapped["summary"]["review_warnings"] -= len(warnings)
-            self.assertEqual(swapped["capture_sha256"], digest)
-            self.assertEqual(
-                swapped["cases"][0]["case_id"],
-                capture["observations"][0]["case_id"],
-            )
-            self.assertEqual(
-                swapped["cases"][0]["input_sha256"],
-                capture["observations"][0]["input_sha256"],
-            )
-            capture_format.validate_capture(capture)
-            validate_run_record.validate_run_record(swapped)
-            with self.assertRaisesRegex(ValueError, "do not bind"):
-                validate_run_record.require_run_record_binds_capture(
-                    swapped, capture, digest, self.expected_from(capture)
-                )
-            self.assertEqual(capture, original_capture)
         capture_format.validate_capture(capture)
 
     def test_swapped_observed_does_not_overwrite_prior_output(self) -> None:
