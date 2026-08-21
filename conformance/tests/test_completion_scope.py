@@ -58,7 +58,7 @@ HARD_RUN_CONTRACTS = {
     ),
     ("activation-kit", "Run activation-kit contract tests"): (
         frozenset({"runs-on", "steps"}),
-        frozenset({"name", "run"}),
+        frozenset({"name", "shell", "run"}),
         ACTIVATION_KIT_RUN_SCRIPT,
     ),
 }
@@ -138,34 +138,68 @@ def _active_run_lines(step: str) -> list[str]:
     return lines
 
 
-DIRECT_KEY_RE = re.compile(
+DIRECT_ENTRY_RE = re.compile(
     r"^(?:(?P<plain>[A-Za-z0-9_-]+)|'(?P<single>[A-Za-z0-9_-]+)'|"
-    r'"(?P<double>[A-Za-z0-9_-]+)")\s*:')
+    r'"(?P<double>[A-Za-z0-9_-]+)")\s*:(?P<value>.*)$')
 
 
-def _direct_mapping_keys(block: str) -> frozenset[str]:
+def _direct_mapping(block: str) -> dict[str, str]:
     lines = block.splitlines()
+    if not lines:
+        raise AssertionError("empty mapping block")
     block_indent = len(lines[0]) - len(lines[0].lstrip(" "))
-    direct_indent = block_indent + 2
-    keys: set[str] = set()
+    sequence_item = lines[0][block_indent:].startswith("- ")
+    direct_indent = block_indent + 2 if sequence_item else None
+    if direct_indent is None:
+        for line in lines[1:]:
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            direct_indent = len(line) - len(line.lstrip(" "))
+            if direct_indent <= block_indent:
+                raise AssertionError("mapping block has no indented entry")
+            break
+    if direct_indent is None:
+        raise AssertionError("mapping block has no direct entries")
+
+    entries: dict[str, str] = {}
     for index, line in enumerate(lines):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         indent = len(line) - len(line.lstrip(" "))
-        if index == 0 and indent == block_indent and line[indent:].startswith("- "):
+        if index == 0 and sequence_item:
             direct = line[indent + 2:]
         elif indent == direct_indent:
             direct = line[direct_indent:]
+        elif block_indent < indent < direct_indent:
+            raise AssertionError("inconsistent direct mapping indentation")
         else:
             continue
-        match = DIRECT_KEY_RE.match(direct)
+        match = DIRECT_ENTRY_RE.fullmatch(direct)
         if match is None:
             raise AssertionError(f"unrecognized direct mapping key syntax: {direct!r}")
-        key = next(value for value in match.groupdict().values() if value is not None)
-        if key in keys:
+        key = next(match.group(name) for name in ("plain", "single", "double")
+                   if match.group(name) is not None)
+        if key in entries:
             raise AssertionError(f"duplicate direct mapping key: {key}")
-        keys.add(key)
-    return frozenset(keys)
+        entries[key] = match.group("value")
+    return entries
+
+
+def _direct_scalar(raw: str) -> str:
+    value = raw.strip()
+    if re.fullmatch(r"[A-Za-z0-9_.-]+", value):
+        return value
+    if re.fullmatch(r"'(?:[^']|'')*'", value):
+        return value[1:-1].replace("''", "'")
+    if value.startswith('"') and value.endswith('"'):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as error:
+            raise AssertionError(
+                f"unsupported direct scalar syntax: {raw!r}") from error
+        if isinstance(parsed, str):
+            return parsed
+    raise AssertionError(f"unsupported direct scalar syntax: {raw!r}")
 
 
 def assert_hard_run_command(
@@ -176,16 +210,21 @@ def assert_hard_run_command(
     allowed_job_keys, allowed_step_keys, expected_script = contract
 
     job = named_job(text, job_name)
-    unexpected_job_keys = _direct_mapping_keys(job) - allowed_job_keys
-    if unexpected_job_keys:
+    actual_job_keys = frozenset(_direct_mapping(job))
+    if actual_job_keys != allowed_job_keys:
         raise AssertionError(
-            f"{job_name} job has unexpected direct keys: {sorted(unexpected_job_keys)}")
+            f"{job_name} job direct keys differ: "
+            f"expected {sorted(allowed_job_keys)}, got {sorted(actual_job_keys)}")
 
     step = named_step(text, job_name, step_name)
-    unexpected_step_keys = _direct_mapping_keys(step) - allowed_step_keys
-    if unexpected_step_keys:
+    step_entries = _direct_mapping(step)
+    actual_step_keys = frozenset(step_entries)
+    if actual_step_keys != allowed_step_keys:
         raise AssertionError(
-            f"{step_name} has unexpected direct keys: {sorted(unexpected_step_keys)}")
+            f"{step_name} direct keys differ: "
+            f"expected {sorted(allowed_step_keys)}, got {sorted(actual_step_keys)}")
+    if _direct_scalar(step_entries["shell"]) != "bash":
+        raise AssertionError(f"{step_name} must use shell: bash")
 
     active = tuple(_active_run_lines(step))
     if active != expected_script:
@@ -430,14 +469,14 @@ class ProductCallsite(unittest.TestCase):
             "    'steps': []\n"
         )
         self.assertEqual(
-            _direct_mapping_keys(block),
+            frozenset(_direct_mapping(block)),
             frozenset({"runs-on", "outputs", "steps"}),
         )
 
     def test_direct_key_parser_fails_closed_on_unrecognized_syntax(self):
         block = "  scope:\n    ? [if]\n    : false\n"
         with self.assertRaises(AssertionError):
-            _direct_mapping_keys(block)
+            _direct_mapping(block)
 
     def test_scope_job_invokes_both_flags_and_does_not_map_3_to_0(self):
         text = CI_YML.read_text(encoding="utf-8")
@@ -509,6 +548,53 @@ class ProductCallsite(unittest.TestCase):
             with self.subTest(index=index):
                 with self.assertRaises(AssertionError):
                     assert_combined_unittest(mutated)
+
+    def test_activation_kit_step_uses_explicit_bash(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        step = named_step(
+            text,
+            "activation-kit",
+            "Run activation-kit contract tests",
+        )
+        self.assertIn("        shell: bash\n", step)
+        mutations = (
+            step.replace(
+                "        shell: bash\n",
+                "        shell: bash -c 'true' -- {0}\n",
+                1,
+            ),
+            step.replace("        shell: bash\n", "", 1),
+        )
+        for index, mutated_step in enumerate(mutations):
+            with self.subTest(index=index):
+                self.assertNotEqual(mutated_step, step)
+                with self.assertRaises(AssertionError):
+                    assert_combined_unittest(text.replace(step, mutated_step, 1))
+
+    def test_explicit_activation_shell_overrides_workflow_default(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        mutated = text.replace(
+            "permissions:\n",
+            "defaults:\n"
+            "  run:\n"
+            "    shell: bash -c 'true' -- {0}\n\n"
+            "permissions:\n",
+            1,
+        )
+        self.assertNotEqual(mutated, text)
+        assert_combined_unittest(mutated)
+
+    def test_wider_indented_conditional_activation_job_fails(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        job = named_job(text, "activation-kit")
+        lines = job.splitlines(keepends=True)
+        widened = (
+            lines[0]
+            + "      if: ${{ github.event_name == 'disabled' }}\n"
+            + "".join("  " + line if line.strip() else line for line in lines[1:])
+        )
+        with self.assertRaises(AssertionError):
+            assert_combined_unittest(text.replace(job, widened, 1))
 
     def test_conditional_activation_kit_step_fails_the_hard_callsite(self):
         text = CONFORMANCE_YML.read_text(encoding="utf-8")

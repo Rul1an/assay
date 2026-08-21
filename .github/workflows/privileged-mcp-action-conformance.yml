@@ -44,6 +44,7 @@ jobs:
           python-version: "3.13.8"
 
       - name: Run activation-kit contract tests
+        shell: bash
         run: |
           set -euo pipefail
           python3 -m unittest \
