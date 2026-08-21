@@ -31,8 +31,9 @@ def write_regular_file_atomically(path: Path, data: bytes) -> None:
     # codeql[py/path-injection]
     parent.mkdir(parents=True, exist_ok=True)
     # The temporary file stays beside that explicit destination so replacement is atomic.
-    # codeql[py/path-injection]
-    fd, tmp_name = tempfile.mkstemp(prefix=ARTIFACT_TEMP_PREFIX, dir=str(parent))
+    fd, tmp_name = tempfile.mkstemp(  # codeql[py/path-injection]
+        prefix=ARTIFACT_TEMP_PREFIX, dir=str(parent)
+    )
     tmp = Path(tmp_name)
     try:
         written = 0
@@ -51,5 +52,4 @@ def write_regular_file_atomically(path: Path, data: bytes) -> None:
         if fd >= 0:
             os.close(fd)
         # `tmp` is the exact path returned by mkstemp above, never caller-provided.
-        # codeql[py/path-injection]
-        tmp.unlink(missing_ok=True)
+        tmp.unlink(missing_ok=True)  # codeql[py/path-injection]
