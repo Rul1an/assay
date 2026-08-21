@@ -32,9 +32,9 @@ class CleanupBoundary(unittest.TestCase):
             (victim / "sentinel").write_text("not cargo output", encoding="utf-8")
 
             env = os.environ.copy()
-            env["GITHUB_WORKSPACE"] = str(workspace)
+            env["CARGO_TARGET_DIR"] = str(workspace / "target")
             subprocess.run(
-                ["cargo", "clean", "--target-dir", str(workspace / "target")],
+                ["cargo", "clean"],
                 cwd=workspace,
                 env=env,
                 check=True,

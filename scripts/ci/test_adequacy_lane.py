@@ -400,14 +400,15 @@ class MeasurementWorkspaceHygiene(unittest.TestCase):
         workflow = self.WORKFLOW.read_text(encoding="utf-8")
         setup = workflow.index("uses: ./.github/actions/setup-rust")
         cleanup_test = workflow.index("python3 scripts/ci/test_adequacy_cleanup.py")
-        clean_command = (
-            'run: cargo clean --target-dir "${GITHUB_WORKSPACE}/target"\n'
-        )
+        cleanup_target = "CARGO_TARGET_DIR: ${{ github.workspace }}/target"
+        target = workflow.index(cleanup_target)
+        clean_command = "run: cargo clean\n"
         clean = workflow.index(clean_command)
         measure = workflow.index("python3 conformance/adequacy/measure_all.py")
         self.assertNotIn("cargo clean --workspace", workflow)
         self.assertLess(setup, cleanup_test)
-        self.assertLess(cleanup_test, clean)
+        self.assertLess(cleanup_test, target)
+        self.assertLess(target, clean)
         self.assertLess(setup, clean)
         self.assertLess(clean, measure)
 
