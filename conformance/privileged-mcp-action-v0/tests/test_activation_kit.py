@@ -2019,96 +2019,104 @@ def oci_candidate_workflow_problems(text: str) -> list[str]:
     """Structural pins for the trusted-main OCI capture workflow. One function."""
     problems: list[str] = []
     active = _active_lines(text)
-    if "workflow_dispatch:" not in text:
+    active_text = "\n".join(active)
+    if "workflow_dispatch:" not in active_text:
         problems.append("missing workflow_dispatch")
-    if re.search(r"(?m)^  pull_request", text) or "pull_request_target:" in text:
+    if re.search(r"(?m)^  pull_request", text) or "pull_request_target:" in active_text:
         problems.append("untrusted pull_request trigger")
     if re.search(r"(?m)^  push:", text):
         problems.append("push trigger")
     in_on = False
     for line in text.splitlines():
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
         if line == "on:":
             in_on = True
             continue
         if not in_on:
             continue
         if line.startswith("  ") and not line.startswith("   "):
-            key = line.strip().split(":", 1)[0]
+            key = stripped.split(":", 1)[0]
             if key != "workflow_dispatch":
                 problems.append(f"extra trigger: {key}")
-        elif line != "" and not line.startswith(" "):
+        elif not line.startswith(" "):
             in_on = False
-    if "runs-on: ubuntu-24.04" not in text:
+    if "runs-on: ubuntu-24.04" not in active_text:
         problems.append("missing ubuntu-24.04")
-    if re.search(r"runs-on:\s*.*self-hosted", text):
+    if re.search(r"runs-on:\s*.*self-hosted", active_text):
         problems.append("self-hosted runner")
     if (
-        re.search(r"(?m)^\s+\S+:\s*write\s*$", text)
-        or "id-token:" in text
-        or "attestations:" in text
+        re.search(r"(?m)^\S+:\s*write\s*$", active_text)
+        or "id-token:" in active_text
+        or "attestations:" in active_text
     ):
         problems.append("excess permissions")
-    if "contents: read" not in text:
+    if "contents: read" not in active_text:
         problems.append("missing contents:read")
-    if "secrets." in text:
+    if "secrets." in active_text:
         problems.append("explicit secrets")
-    if 'if [[ "$GITHUB_REF" != "refs/heads/main" ]]' not in text:
+    if 'if [[ "$GITHUB_REF" != "refs/heads/main" ]]' not in active_text:
         problems.append("missing main ref guard")
-    if 'git rev-parse HEAD' not in text or "$GITHUB_SHA" not in text:
+    if "git rev-parse HEAD" not in active_text or "$GITHUB_SHA" not in active_text:
         problems.append("missing HEAD/SHA guard")
-    if "persist-credentials: false" not in text:
+    if "persist-credentials: false" not in active_text:
         problems.append("missing persist-credentials:false")
-    if "candidate-release.json" not in text:
+    if "candidate-release.json" not in active_text:
         problems.append("missing candidate-release.json")
-    if "validate_candidate_release.py" not in text:
+    if "validate_candidate_release.py" not in active_text:
         problems.append("missing validate_candidate_release.py")
-    if "attestation-bundle.json" not in text:
+    if "attestation-bundle.json" not in active_text:
         problems.append("missing attestation-bundle.json")
     if not any(re.match(r"^(-\s+)?gh attestation verify(\s|\\|$)", line) for line in active):
         problems.append("missing gh attestation verify")
-    if "--bundle" not in text:
+    if "--bundle" not in active_text:
         problems.append("missing --bundle")
-    if f"--signer-workflow {OCI_SIGNER_WORKFLOW}" not in text:
+    if f"--signer-workflow {OCI_SIGNER_WORKFLOW}" not in active_text:
         problems.append("missing or wrong signer-workflow")
-    if "--source-digest" not in text:
+    if "--source-digest" not in active_text:
         problems.append("missing --source-digest")
-    if OCI_SOURCE_DIGEST_SHAPE not in text:
+    if OCI_SOURCE_DIGEST_SHAPE not in active_text:
         problems.append("missing source_digest regex")
-    elif OCI_SOURCE_DIGEST_GUARD not in text:
+    elif OCI_SOURCE_DIGEST_GUARD not in active_text:
         problems.append("source_digest check not fail-closed")
-    if "--source-ref refs/heads/main" not in text:
+    if "--source-ref refs/heads/main" not in active_text:
         problems.append("missing --source-ref")
-    if "--deny-self-hosted-runners" not in text:
+    if "--deny-self-hosted-runners" not in active_text:
         problems.append("missing --deny-self-hosted-runners")
-    if "release_attestation_enforce.sh" in text:
+    if "release_attestation_enforce.sh" in active_text:
         problems.append("software-release verifier used for pack")
     if not any(
         re.match(rf"^(-\s+)?python3\s+{re.escape(OCI_EXECUTOR)}(\s|\\|$)", line)
         for line in active
     ):
         problems.append("missing canonical executor")
-    if "--pack" not in text or "--implementation-id" not in text or "--output" not in text:
+    if (
+        "--pack" not in active_text
+        or "--implementation-id" not in active_text
+        or "--output" not in active_text
+    ):
         problems.append("missing executor argv")
-    if "--timeout-seconds 30" not in text:
+    if "--timeout-seconds 30" not in active_text:
         problems.append("missing --timeout-seconds 30")
-    if "--implementation-image" in text or "--registry" in text:
+    if "--implementation-image" in active_text or "--registry" in active_text:
         problems.append("direct image or registry override")
-    if "python3 - <<" in text:
+    if "python3 - <<" in active_text:
         problems.append("inline Python")
-    if OCI_IMPLEMENTATION_ID_ENV not in text:
+    if OCI_IMPLEMENTATION_ID_ENV not in active_text:
         problems.append("missing implementation_id env binding")
-    if OCI_IMPLEMENTATION_ID_ARGV not in text:
+    if OCI_IMPLEMENTATION_ID_ARGV not in active_text:
         problems.append("implementation_id not quoted argv")
-    for line in text.splitlines():
+    for line in active:
         if "${{ inputs." not in line:
             continue
-        if re.match(r"^\s+[A-Za-z_][A-Za-z0-9_]*:\s*\$\{\{ inputs\.", line):
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*:\s*\$\{\{ inputs\.", line):
             continue
         problems.append("inputs interpolated in run script")
         break
-    if "continue-on-error" in text:
+    if "continue-on-error" in active_text:
         problems.append("continue-on-error swallows failure")
-    if "|| true" in text:
+    if "|| true" in active_text:
         problems.append("|| true swallows failure")
     for pin, label in (
         (OCI_CHECKOUT_PIN, "unpinned or wrong checkout"),
@@ -2117,7 +2125,7 @@ def oci_candidate_workflow_problems(text: str) -> list[str]:
     ):
         if not any(re.match(rf"^(-\s+)?uses:\s*{re.escape(pin)}", line) for line in active):
             problems.append(label)
-    if OCI_PYTHON_VERSION not in text:
+    if OCI_PYTHON_VERSION not in active_text:
         problems.append("missing python 3.13.8")
     upload_steps = [
         block
@@ -2133,15 +2141,15 @@ def oci_candidate_workflow_problems(text: str) -> list[str]:
         for line in _active_lines(block)
     ):
         problems.append("upload not gated on success")
-    if "candidate_capture.v0" not in text:
+    if "candidate_capture.v0" not in active_text:
         problems.append("missing fixed capture name")
-    if OCI_CAPTURE_UPLOAD_PATH not in text:
+    if OCI_CAPTURE_UPLOAD_PATH not in active_text:
         problems.append("missing exact capture upload path")
-    if "retention-days: 7" not in text:
+    if "retention-days: 7" not in active_text:
         problems.append("missing retention-days: 7")
-    if "if-no-files-found: error" not in text:
+    if "if-no-files-found: error" not in active_text:
         problems.append("missing if-no-files-found:error")
-    if "timeout-minutes: 25" not in text:
+    if "timeout-minutes: 25" not in active_text:
         problems.append("missing timeout-minutes: 25")
     for line in active:
         for match in USES_SHA_RE.finditer(line):
@@ -2190,6 +2198,41 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
         for needle, expected in drops:
             with self.subTest(drop=needle):
                 mutated = text.replace(needle, "")
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any(expected in problem for problem in problems),
+                    f"expected {expected!r} in {problems}",
+                )
+        comment_out = (
+            (
+                OCI_SOURCE_DIGEST_GUARD,
+                f"# {OCI_SOURCE_DIGEST_GUARD}",
+                "missing source_digest regex",
+            ),
+            (
+                "--source-ref refs/heads/main",
+                "# --source-ref refs/heads/main",
+                "missing --source-ref",
+            ),
+            (
+                f"--signer-workflow {OCI_SIGNER_WORKFLOW}",
+                f"# --signer-workflow {OCI_SIGNER_WORKFLOW}",
+                "missing or wrong signer-workflow",
+            ),
+            (
+                "--bundle",
+                "# --bundle",
+                "missing --bundle",
+            ),
+            (
+                "contents: read",
+                "# contents: read",
+                "missing contents:read",
+            ),
+        )
+        for needle, replacement, expected in comment_out:
+            with self.subTest(comment_out=expected):
+                mutated = text.replace(needle, replacement)
                 problems = oci_candidate_workflow_problems(mutated)
                 self.assertTrue(
                     any(expected in problem for problem in problems),
