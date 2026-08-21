@@ -60,6 +60,7 @@ EXECUTION_SCHEMA = "assay.privileged_mcp_action.oci_execution.v0"
 EXECUTION_DOCUMENT_NAME = "oci-execution.json"
 CANDIDATE_STDOUT_NAME = "candidate.stdout"
 CANDIDATE_STDERR_NAME = "candidate.stderr"
+HANDOFF_TEMP_PREFIX = ".assay-oci-handoff-"
 MAX_EXECUTION_BYTES = 16 * 1024
 MAX_EXECUTION_DEPTH = 6
 
@@ -438,62 +439,49 @@ def execute_candidate(
     return OciExecution(state, implementation_id, image, exit_code, stdout, stderr, error)
 
 
-def _atomic_write_bytes(path: Path, data: bytes) -> None:
-    fd, tmp_name = tempfile.mkstemp(prefix=".partial-", dir=str(path.parent))
-    tmp = Path(tmp_name)
-    try:
-        written = 0
-        while written < len(data):
-            written += os.write(fd, data[written:])
-        os.close(fd)
-        fd = -1
-        os.replace(tmp, path)
-    except Exception:
-        if fd >= 0:
-            os.close(fd)
-        tmp.unlink(missing_ok=True)
-        raise
-
-
 def write_handoff(output_dir: Path, result: OciExecution) -> None:
     output_dir = Path(output_dir)
-    if output_dir.is_symlink():
-        raise ValueError("handoff directory must not be a symlink")
-    if output_dir.exists() and not output_dir.is_dir():
-        raise ValueError("handoff path must be an empty directory")
-    if output_dir.exists() and any(output_dir.iterdir()):
-        raise ValueError("handoff directory must be empty")
+    if output_dir.is_symlink() or output_dir.exists():
+        raise ValueError("handoff destination must not already exist")
     if len(result.stdout) > STDOUT_LIMIT or len(result.stderr) > STDERR_LIMIT:
         raise ValueError("candidate output exceeds its byte ceiling")
-    if not output_dir.exists():
-        output_dir.mkdir(parents=True)
-    document = {
-        "schema": EXECUTION_SCHEMA,
-        "implementation_id": result.implementation_id,
-        "image": result.image,
-        "execution_state": result.state,
-        "exit_code": result.exit_code,
-        "error": result.error,
-        "oci_executor_non_claims": list(OCI_EXECUTOR_NON_CLAIMS),
-        "candidate_output": {
-            "stdout": CANDIDATE_STDOUT_NAME,
-            "stderr": CANDIDATE_STDERR_NAME,
-            "stdout_sha256": _content_digest(result.stdout),
-            "stderr_sha256": _content_digest(result.stderr),
-            "stdout_bytes": len(result.stdout),
-            "stderr_bytes": len(result.stderr),
-        },
-    }
-    payload = (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
-    _atomic_write_bytes(output_dir / CANDIDATE_STDOUT_NAME, result.stdout)
-    _atomic_write_bytes(output_dir / CANDIDATE_STDERR_NAME, result.stderr)
-    _atomic_write_bytes(output_dir / EXECUTION_DOCUMENT_NAME, payload)
-    load_strict_object(
-        output_dir / EXECUTION_DOCUMENT_NAME,
-        label="oci execution",
-        max_bytes=MAX_EXECUTION_BYTES,
-        max_depth=MAX_EXECUTION_DEPTH,
-    )
+    parent = output_dir.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix=HANDOFF_TEMP_PREFIX, dir=str(parent)))
+    try:
+        document = {
+            "schema": EXECUTION_SCHEMA,
+            "implementation_id": result.implementation_id,
+            "image": result.image,
+            "execution_state": result.state,
+            "exit_code": result.exit_code,
+            "error": result.error,
+            "oci_executor_non_claims": list(OCI_EXECUTOR_NON_CLAIMS),
+            "candidate_output": {
+                "stdout": CANDIDATE_STDOUT_NAME,
+                "stderr": CANDIDATE_STDERR_NAME,
+                "stdout_sha256": _content_digest(result.stdout),
+                "stderr_sha256": _content_digest(result.stderr),
+                "stdout_bytes": len(result.stdout),
+                "stderr_bytes": len(result.stderr),
+            },
+        }
+        payload = (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        (tmp / CANDIDATE_STDOUT_NAME).write_bytes(result.stdout)
+        (tmp / CANDIDATE_STDERR_NAME).write_bytes(result.stderr)
+        (tmp / EXECUTION_DOCUMENT_NAME).write_bytes(payload)
+        load_strict_object(
+            tmp / EXECUTION_DOCUMENT_NAME,
+            label="oci execution",
+            max_bytes=MAX_EXECUTION_BYTES,
+            max_depth=MAX_EXECUTION_DEPTH,
+        )
+        if output_dir.is_symlink() or output_dir.exists():
+            raise ValueError("handoff destination must not already exist")
+        os.rename(tmp, output_dir)
+    except Exception:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
 
 
 def oci_entrypoint_command(

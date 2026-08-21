@@ -1019,6 +1019,43 @@ class CandidateOutputHandoff(unittest.TestCase):
         module = _require()
         self.assertFalse(hasattr(module, "write_execution"))
 
+    def _completed(self, stdout: bytes = b"ok") -> Any:
+        module = _require()
+        return module.OciExecution(
+            module.STATE_COMPLETED,
+            "inert-fixture",
+            DIGEST_IMAGE,
+            0,
+            stdout,
+            b"",
+            "",
+        )
+
+    def test_preexisting_empty_dir_is_rejected(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            empty = Path(raw) / "empty"
+            empty.mkdir()
+            with self.assertRaises(ValueError):
+                module.write_handoff(empty, self._completed())
+            self.assertTrue(empty.is_dir())
+            self.assertEqual(list(empty.iterdir()), [])
+
+    def test_failed_rename_leaves_destination_absent_and_cleans_temp(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            dest = Path(raw) / "handoff"
+            with mock.patch.object(os, "rename", side_effect=OSError("simulated rename failure")):
+                with self.assertRaises(OSError):
+                    module.write_handoff(dest, self._completed())
+            self.assertFalse(dest.exists())
+            leftovers = [
+                path
+                for path in Path(raw).iterdir()
+                if path.name.startswith(module.HANDOFF_TEMP_PREFIX)
+            ]
+            self.assertEqual(leftovers, [])
+
 
 class CaptureAdapterEquivalence(unittest.TestCase):
     """#199 capture_observations via the OCI adapter, no second loop."""
