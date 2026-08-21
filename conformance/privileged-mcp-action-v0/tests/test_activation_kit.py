@@ -43,6 +43,25 @@ CANDIDATE_RELEASE = CORPUS_DIR / "candidate-release.json"
 RELEASE_WORKFLOW = (
     REPO_ROOT / ".github/workflows/privileged-mcp-action-pack-release.yml"
 )
+OCI_CANDIDATE_WORKFLOW = (
+    REPO_ROOT / ".github/workflows/privileged-mcp-action-oci-candidate.yml"
+)
+OCI_CHECKOUT_PIN = "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
+OCI_SETUP_PYTHON_PIN = "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"
+OCI_UPLOAD_PIN = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+OCI_EXECUTOR = (
+    "conformance/privileged-mcp-action-v0/scripts/oci_candidate_executor.py"
+)
+OCI_SIGNER_WORKFLOW = (
+    "Rul1an/assay/.github/workflows/privileged-mcp-action-pack-release.yml"
+)
+OCI_PYTHON_VERSION = 'python-version: "3.13.8"'
+OCI_SOURCE_DIGEST_SHAPE = '[[ "$source_digest" =~ ^[0-9a-f]{40}$ ]]'
+OCI_SOURCE_DIGEST_GUARD = OCI_SOURCE_DIGEST_SHAPE + " || exit 2"
+OCI_CAPTURE_UPLOAD_PATH = "${{ runner.temp }}/oci-capture/candidate_capture.v0"
+OCI_IMPLEMENTATION_ID_ENV = "IMPLEMENTATION_ID: ${{ inputs.implementation_id }}"
+OCI_IMPLEMENTATION_ID_ARGV = '--implementation-id "$IMPLEMENTATION_ID"'
+USES_SHA_RE = re.compile(r"uses:\s*\S+@([0-9a-f]{40}|[^\s#]+)")
 
 def _head_commit() -> str:
     """Resolve HEAD, the way the conformance and pack-release workflows already do.
@@ -1984,6 +2003,248 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
             "positive control: the probe must be able to discriminate",
         )
 
+
+def oci_candidate_workflow_problems(text: str) -> list[str]:
+    """Structural pins for the trusted-main OCI capture workflow. One function."""
+    problems: list[str] = []
+    if "workflow_dispatch:" not in text:
+        problems.append("missing workflow_dispatch")
+    if re.search(r"(?m)^  pull_request", text) or "pull_request_target:" in text:
+        problems.append("untrusted pull_request trigger")
+    if re.search(r"(?m)^  push:", text):
+        problems.append("push trigger")
+    in_on = False
+    for line in text.splitlines():
+        if line == "on:":
+            in_on = True
+            continue
+        if not in_on:
+            continue
+        if line.startswith("  ") and not line.startswith("   "):
+            key = line.strip().split(":", 1)[0]
+            if key != "workflow_dispatch":
+                problems.append(f"extra trigger: {key}")
+        elif line != "" and not line.startswith(" "):
+            in_on = False
+    if "runs-on: ubuntu-24.04" not in text:
+        problems.append("missing ubuntu-24.04")
+    if re.search(r"runs-on:\s*.*self-hosted", text):
+        problems.append("self-hosted runner")
+    if (
+        re.search(r"(?m)^\s+\S+:\s*write\s*$", text)
+        or "id-token:" in text
+        or "attestations:" in text
+    ):
+        problems.append("excess permissions")
+    if "contents: read" not in text:
+        problems.append("missing contents:read")
+    if "secrets." in text:
+        problems.append("explicit secrets")
+    if 'if [[ "$GITHUB_REF" != "refs/heads/main" ]]' not in text:
+        problems.append("missing main ref guard")
+    if 'git rev-parse HEAD' not in text or "$GITHUB_SHA" not in text:
+        problems.append("missing HEAD/SHA guard")
+    if "persist-credentials: false" not in text:
+        problems.append("missing persist-credentials:false")
+    if "candidate-release.json" not in text:
+        problems.append("missing candidate-release.json")
+    if "validate_candidate_release.py" not in text:
+        problems.append("missing validate_candidate_release.py")
+    if "attestation-bundle.json" not in text:
+        problems.append("missing attestation-bundle.json")
+    if "gh attestation verify" not in text:
+        problems.append("missing gh attestation verify")
+    if "--bundle" not in text:
+        problems.append("missing --bundle")
+    if f"--signer-workflow {OCI_SIGNER_WORKFLOW}" not in text:
+        problems.append("missing or wrong signer-workflow")
+    if "--source-digest" not in text:
+        problems.append("missing --source-digest")
+    if OCI_SOURCE_DIGEST_SHAPE not in text:
+        problems.append("missing source_digest regex")
+    elif OCI_SOURCE_DIGEST_GUARD not in text:
+        problems.append("source_digest check not fail-closed")
+    if "--source-ref refs/heads/main" not in text:
+        problems.append("missing --source-ref")
+    if "--deny-self-hosted-runners" not in text:
+        problems.append("missing --deny-self-hosted-runners")
+    if "release_attestation_enforce.sh" in text:
+        problems.append("software-release verifier used for pack")
+    if OCI_EXECUTOR not in text:
+        problems.append("missing canonical executor")
+    if "--pack" not in text or "--implementation-id" not in text or "--output" not in text:
+        problems.append("missing executor argv")
+    if "--timeout-seconds 30" not in text:
+        problems.append("missing --timeout-seconds 30")
+    if "--implementation-image" in text or "--registry" in text:
+        problems.append("direct image or registry override")
+    if "python3 - <<" in text:
+        problems.append("inline Python")
+    if OCI_IMPLEMENTATION_ID_ENV not in text:
+        problems.append("missing implementation_id env binding")
+    if OCI_IMPLEMENTATION_ID_ARGV not in text:
+        problems.append("implementation_id not quoted argv")
+    for line in text.splitlines():
+        if "${{ inputs." not in line:
+            continue
+        if re.match(r"^\s+[A-Za-z_][A-Za-z0-9_]*:\s*\$\{\{ inputs\.", line):
+            continue
+        problems.append("inputs interpolated in run script")
+        break
+    if "continue-on-error" in text:
+        problems.append("continue-on-error swallows failure")
+    if "|| true" in text:
+        problems.append("|| true swallows failure")
+    if OCI_CHECKOUT_PIN not in text:
+        problems.append("unpinned or wrong checkout")
+    if OCI_SETUP_PYTHON_PIN not in text:
+        problems.append("unpinned or wrong setup-python")
+    if OCI_PYTHON_VERSION not in text:
+        problems.append("missing python 3.13.8")
+    if OCI_UPLOAD_PIN not in text:
+        problems.append("unpinned or wrong upload-artifact")
+    if "if: success()" not in text:
+        problems.append("upload not gated on success")
+    if "candidate_capture.v0" not in text:
+        problems.append("missing fixed capture name")
+    if OCI_CAPTURE_UPLOAD_PATH not in text:
+        problems.append("missing exact capture upload path")
+    if "retention-days: 7" not in text:
+        problems.append("missing retention-days: 7")
+    if "if-no-files-found: error" not in text:
+        problems.append("missing if-no-files-found:error")
+    if "timeout-minutes: 25" not in text:
+        problems.append("missing timeout-minutes: 25")
+    for match in USES_SHA_RE.finditer(text):
+        pin = match.group(1)
+        if not re.fullmatch(r"[0-9a-f]{40}", pin):
+            problems.append(f"unpinned uses: {match.group(0)}")
+    return problems
+
+
+class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
+    """Capture-only trusted-main workflow. Structural; no live dispatch."""
+
+    def test_workflow_file_exists(self) -> None:
+        self.assertTrue(
+            OCI_CANDIDATE_WORKFLOW.is_file(),
+            f"missing {OCI_CANDIDATE_WORKFLOW}",
+        )
+
+    def test_trusted_main_capture_contract(self) -> None:
+        text = OCI_CANDIDATE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(oci_candidate_workflow_problems(text), [])
+
+    def test_mutations_fail_independently(self) -> None:
+        text = OCI_CANDIDATE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(oci_candidate_workflow_problems(text), [])
+        drops = (
+            ('if [[ "$GITHUB_REF" != "refs/heads/main" ]]', "missing main ref guard"),
+            ("gh attestation verify", "missing gh attestation verify"),
+            ("attestation-bundle.json", "missing attestation-bundle.json"),
+            ("--source-digest", "missing --source-digest"),
+            ("^[0-9a-f]{40}$", "missing source_digest regex"),
+            (" || exit 2", "source_digest check not fail-closed"),
+            ("--source-ref refs/heads/main", "missing --source-ref"),
+            (f"--signer-workflow {OCI_SIGNER_WORKFLOW}", "missing or wrong signer-workflow"),
+            ("--deny-self-hosted-runners", "missing --deny-self-hosted-runners"),
+            (OCI_EXECUTOR, "missing canonical executor"),
+            ("--implementation-id", "missing executor argv"),
+            (OCI_IMPLEMENTATION_ID_ENV, "missing implementation_id env binding"),
+            (OCI_IMPLEMENTATION_ID_ARGV, "implementation_id not quoted argv"),
+            (OCI_SETUP_PYTHON_PIN, "unpinned or wrong setup-python"),
+            (OCI_PYTHON_VERSION, "missing python 3.13.8"),
+            (OCI_CAPTURE_UPLOAD_PATH, "missing exact capture upload path"),
+            ("retention-days: 7", "missing retention-days: 7"),
+            ("if: success()", "upload not gated on success"),
+        )
+        for needle, expected in drops:
+            with self.subTest(drop=needle):
+                mutated = text.replace(needle, "")
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any(expected in problem for problem in problems),
+                    f"expected {expected!r} in {problems}",
+                )
+        extra = text + "\n      --implementation-image ghcr.io/example/x@sha256:" + "ab" * 32 + "\n"
+        extra = extra.replace(OCI_EXECUTOR, "python3 -c 'pass'", 1)
+        with self.subTest(kind="inline-and-image"):
+            problems = oci_candidate_workflow_problems(extra)
+            self.assertTrue(any("canonical executor" in p or "inline" in p for p in problems))
+            self.assertTrue(any("image or registry" in p for p in problems))
+        software = text.replace(
+            "gh attestation verify",
+            "bash scripts/ci/release_attestation_enforce.sh",
+            1,
+        )
+        with self.subTest(kind="software-release-verifier"):
+            problems = oci_candidate_workflow_problems(software)
+            self.assertTrue(any("software-release verifier" in p for p in problems))
+        inserts = (
+            ("on:\n", "on:\n  pull_request:\n    branches: [main]\n", "untrusted pull_request trigger"),
+            ("on:\n", "on:\n  schedule:\n    - cron: '0 0 * * *'\n", "extra trigger: schedule"),
+            ("on:\n", "on:\n  repository_dispatch:\n", "extra trigger: repository_dispatch"),
+            ("on:\n", "on:\n  workflow_call:\n", "extra trigger: workflow_call"),
+            ("ubuntu-24.04", "self-hosted", "self-hosted runner"),
+            ("permissions:\n  contents: read\n", "permissions:\n  contents: write\n", "excess permissions"),
+            (
+                "permissions:\n  contents: read\n",
+                "permissions:\n  contents: read\n  packages: write\n",
+                "excess permissions",
+            ),
+            ("permissions:\n", "env:\n  TOKEN: ${{ secrets.FOO }}\npermissions:\n", "explicit secrets"),
+            (OCI_CHECKOUT_PIN, "actions/checkout@v5", "unpinned uses:"),
+            (OCI_SETUP_PYTHON_PIN, "actions/setup-python@v6", "unpinned or wrong setup-python"),
+            (OCI_PYTHON_VERSION, 'python-version: "3.12.0"', "missing python 3.13.8"),
+        )
+        for needle, replacement, expected in inserts:
+            with self.subTest(insert=expected):
+                mutated = text.replace(needle, replacement, 1)
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any(expected in problem for problem in problems),
+                    f"expected {expected!r} in {problems}",
+                )
+        with self.subTest(kind="inputs-in-run"):
+            mutated = text.replace(OCI_IMPLEMENTATION_ID_ENV + "\n", "", 1).replace(
+                OCI_IMPLEMENTATION_ID_ARGV,
+                "--implementation-id ${{ inputs.implementation_id }}",
+                1,
+            )
+            problems = oci_candidate_workflow_problems(mutated)
+            self.assertTrue(
+                any("inputs interpolated in run script" in problem for problem in problems),
+                f"expected inputs interpolated in {problems}",
+            )
+        swallow_steps = (
+            "Resolve published pack tag",
+            "Download attested pack",
+            "Verify pack attestation",
+            "Capture candidate observations",
+        )
+        for step in swallow_steps:
+            with self.subTest(continue_on_error=step):
+                needle = f"      - name: {step}\n"
+                mutated = text.replace(needle, needle + "        continue-on-error: true\n", 1)
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any("continue-on-error swallows failure" in problem for problem in problems),
+                    f"expected continue-on-error in {problems}",
+                )
+        swallow_commands = (
+            "validate_candidate_release.py",
+            "gh release download",
+            "gh attestation verify",
+            OCI_EXECUTOR,
+        )
+        for cmd in swallow_commands:
+            with self.subTest(or_true=cmd):
+                mutated = text.replace(cmd, f"{cmd} || true", 1)
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any("|| true swallows failure" in problem for problem in problems),
+                    f"expected || true in {problems}",
+                )
 
 
 if __name__ == "__main__":
