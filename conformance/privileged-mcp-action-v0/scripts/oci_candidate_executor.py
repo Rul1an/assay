@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import sys
+import tarfile
 import tempfile
 import uuid
 from dataclasses import dataclass
@@ -29,6 +30,7 @@ from capture_format import (  # noqa: E402
     STATE_CANDIDATE_ERROR,
     STATE_CAPTURE_ERROR,
     observe_error,
+    validate_capture,
 )
 from strict_json import load_strict_object  # noqa: E402
 
@@ -176,6 +178,18 @@ def implementation_from_registry(
             validate_image_reference(row["image"])
             return row
     raise ImplementationRegistryError("unknown implementation id: %s" % implementation_id)
+
+
+def identity_from_registry_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "image": row["image"],
+        "name": row["name"],
+        "version": None,
+        "source": row["source"],
+        "commit": row["commit"],
+        "reproduction_mode": row["reproduction_mode"],
+    }
 
 
 def reject_declared_volumes(image_inspect: dict[str, Any]) -> None:
@@ -551,10 +565,40 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--implementation-id", required=True)
     parser.add_argument("--registry", type=Path)
+    parser.add_argument("--pack", type=Path)
     parser.add_argument("--bundle", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--timeout-seconds", type=int, default=30)
     return parser.parse_args(argv)
+
+
+def write_validated_capture(
+    pack_path: Path,
+    implementation_id: str,
+    output: Path,
+    *,
+    registry_path: Path | None,
+    timeout_seconds: int,
+) -> None:
+    row = implementation_from_registry(implementation_id, registry_path)
+    command = oci_entrypoint_command(
+        implementation_id=implementation_id,
+        registry_path=registry_path,
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        pack = capture_candidate.load_pack(pack_path, Path(tmp))
+        pack_digest = capture_candidate.sha256_file(pack_path)
+        observations = capture_oci_observations(pack, command, timeout_seconds)
+    capture = capture_candidate.build_capture(
+        pack, pack_digest, observations, identity_from_registry_row(row)
+    )
+    validate_capture(capture)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(capture, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(f"captured {len(observations)} observations")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -562,8 +606,36 @@ def main(argv: list[str] | None = None) -> int:
     if args.timeout_seconds <= 0:
         print("timeout-seconds must be positive", file=sys.stderr)
         return 2
+    if args.pack is not None and args.bundle is not None:
+        print("use --pack or --bundle, not both", file=sys.stderr)
+        return 2
+    if args.pack is not None:
+        if args.output is None:
+            print("--output is required", file=sys.stderr)
+            return 2
+        try:
+            write_validated_capture(
+                args.pack,
+                args.implementation_id,
+                args.output,
+                registry_path=args.registry,
+                timeout_seconds=args.timeout_seconds,
+            )
+        except (
+            ImplementationRegistryError,
+            OSError,
+            EOFError,
+            ValueError,
+            KeyError,
+            RecursionError,
+            json.JSONDecodeError,
+            tarfile.TarError,
+        ) as error:
+            print(str(error), file=sys.stderr)
+            return 2
+        return 0
     if args.bundle is None:
-        print("--bundle is required", file=sys.stderr)
+        print("--pack or --bundle is required", file=sys.stderr)
         return 2
     try:
         result = execute_candidate(

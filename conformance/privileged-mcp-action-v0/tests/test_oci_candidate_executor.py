@@ -43,7 +43,12 @@ except ModuleNotFoundError as exc:
 
 import capture_candidate
 import implementations
-from capture_format import STATE_CANDIDATE_ERROR, STATE_CAPTURE_ERROR
+from capture_format import (  # noqa: E402
+    CAPTURE_SCHEMA,
+    STATE_CANDIDATE_ERROR,
+    STATE_CAPTURE_ERROR,
+    validate_capture,
+)
 from score_candidate import STATE_TO_STATUS
 
 DIGEST_IMAGE = (
@@ -1259,6 +1264,131 @@ class CaptureAdapterEquivalence(unittest.TestCase):
                     DIGEST_IMAGE,
                 ]
             )
+
+
+def _write_pack(directory: Path) -> Path:
+    dest = directory / "pack.tar.gz"
+    commit = subprocess.check_output(
+        ["git", "-C", str(REPO), "rev-parse", "HEAD"],
+        text=True,
+    ).strip()
+    built = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPTS / "build_clean_room_pack.py"),
+            "--repo-root",
+            str(REPO),
+            "--source-commit",
+            commit,
+            "--output",
+            str(dest),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if built.returncode != 0:
+        raise AssertionError(built.stderr)
+    return dest
+
+
+class PackCaptureCli(unittest.TestCase):
+    """Pack + registry id → validated candidate_capture.v0. No second loop."""
+
+    def _fake_runner(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return {
+            "exit_code": 0,
+            "report": {"bundle_integrity": "fail"},
+            "stderr_present": False,
+        }
+
+    def test_cli_writes_validated_capture_from_pack_and_id(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            pack = _write_pack(Path(raw))
+            registry = _write_registry(Path(raw), DIGEST_IMAGE)
+            output = Path(raw) / "capture.json"
+            printed = mock.Mock()
+            with (
+                mock.patch.object(module, "run_oci_candidate", side_effect=self._fake_runner),
+                mock.patch.object(sys, "stdout", printed),
+            ):
+                code = module.main(
+                    [
+                        "--pack",
+                        str(pack),
+                        "--implementation-id",
+                        "inert-fixture",
+                        "--registry",
+                        str(registry),
+                        "--output",
+                        str(output),
+                    ]
+                )
+            document = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(code, 0)
+        validate_capture(document)
+        self.assertEqual(document["schema"], CAPTURE_SCHEMA)
+        self.assertEqual(document["implementation"]["id"], "inert-fixture")
+        self.assertEqual(document["implementation"]["image"], DIGEST_IMAGE)
+        written = "".join(
+            str(call.args[0]) for call in printed.write.call_args_list if call.args
+        )
+        self.assertNotIn("bundle_integrity", written)
+        self.assertNotIn("hostile", written)
+
+    def test_bypassing_validate_capture_does_not_write(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            pack = _write_pack(Path(raw))
+            registry = _write_registry(Path(raw), DIGEST_IMAGE)
+            output = Path(raw) / "capture.json"
+            with (
+                mock.patch.object(module, "run_oci_candidate", side_effect=self._fake_runner),
+                mock.patch.object(
+                    capture_candidate,
+                    "build_capture",
+                    return_value={"schema": "not-a-capture"},
+                ),
+            ):
+                code = module.main(
+                    [
+                        "--pack",
+                        str(pack),
+                        "--implementation-id",
+                        "inert-fixture",
+                        "--registry",
+                        str(registry),
+                        "--output",
+                        str(output),
+                    ]
+                )
+            self.assertEqual(code, 2)
+            self.assertFalse(output.exists())
+
+    def test_pack_cli_rejects_direct_image(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(module.__file__)),
+                    "--pack",
+                    str(Path(raw) / "pack.tar.gz"),
+                    "--implementation-id",
+                    "inert-fixture",
+                    "--implementation-image",
+                    DIGEST_IMAGE,
+                    "--output",
+                    str(Path(raw) / "capture.json"),
+                ],
+                cwd=REPO,
+                capture_output=True,
+                text=True,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrecognized arguments", result.stderr)
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("--implementation-image", source)
 
 
 if __name__ == "__main__":
