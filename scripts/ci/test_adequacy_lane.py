@@ -387,8 +387,10 @@ class MeasurementWorkspaceHygiene(unittest.TestCase):
     def test_restored_build_outputs_are_removed_before_measurement(self):
         workflow = self.WORKFLOW.read_text(encoding="utf-8")
         setup = workflow.index("uses: ./.github/actions/setup-rust")
-        clean = workflow.index("cargo clean --workspace")
+        clean_command = "run: cargo clean\n"
+        clean = workflow.index(clean_command)
         measure = workflow.index("python3 conformance/adequacy/measure_all.py")
+        self.assertNotIn("cargo clean --workspace", workflow)
         self.assertLess(setup, clean)
         self.assertLess(clean, measure)
 
