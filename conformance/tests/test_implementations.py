@@ -205,6 +205,36 @@ class PositiveFixtureAndHostileMatrix(unittest.TestCase):
             self.module.load_implementations(path)
         self.assertIn("source", str(ctx.exception).lower())
 
+    def test_source_runtime_and_schema_agree_on_authority(self):
+        schema_pattern = (
+            self.module.implementation_schema()
+            ["properties"]["implementations"]["items"]["properties"]["source"]["pattern"]
+        )
+        self.assertEqual(schema_pattern, self.module.SOURCE_PATTERN)
+        schema_re = re.compile(schema_pattern)
+        cases = (
+            ("https://github.com/example/checker", True),
+            ("http://127.0.0.1:8080/path", True),
+            ("https:///", False),
+            ("https:///foo", False),
+            ("https://exa mple.com/a", False),
+            ("github.com/example/checker", False),
+        )
+        for source, accepted in cases:
+            with self.subTest(source=source):
+                pattern_ok = self.module.SOURCE_RE.fullmatch(source) is not None
+                schema_ok = schema_re.fullmatch(source) is not None
+                self.assertEqual(pattern_ok, accepted)
+                self.assertEqual(schema_ok, accepted)
+                path = self._write(_doc([_valid_row(id="source-parity", source=source)]))
+                if accepted:
+                    loaded = self.module.load_implementations(path)
+                    self.assertEqual(loaded["implementations"][0]["source"], source)
+                    continue
+                with self.assertRaises(self.module.ImplementationRegistryError) as ctx:
+                    self.module.load_implementations(path)
+                self.assertIn("source", str(ctx.exception).lower())
+
     def test_authorship_string_is_rejected(self):
         path = self._write(_doc([_valid_row(authorship="Authored-By: human")]))
         with self.assertRaises(self.module.ImplementationRegistryError) as ctx:

@@ -13,7 +13,6 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
-from urllib.parse import urlparse
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent / "adequacy"))
@@ -32,7 +31,7 @@ AUTHORSHIP_KINDS = frozenset(("human", "agent-assisted", "agent-generated"))
 AGENT_KINDS = frozenset(("agent-assisted", "agent-generated"))
 HUMAN_AUTHORSHIP_FIELDS = ("kind",)
 AGENT_AUTHORSHIP_FIELDS = ("kind", "model", "prompt_strategy")
-SOURCE_PATTERN = r"^https?://[^\s]+$"
+SOURCE_PATTERN = r"^https?://[^/\s]+(?:/[^\s]*)?$"
 IMAGE_PATTERN = r"^[^:@/\s]+(?:/[^:@/\s]+)*@sha256:[0-9a-f]{64}$"
 DOC_FIELDS = ("schema", "implementations")
 ROW_FIELDS = (
@@ -114,8 +113,7 @@ def _validate_row(row: object, seen: set[str]) -> dict:
             "%s: image must be name@sha256:<64 hex digest>, not a tag" % ident
         )
     source = _require_text(row["source"], "source", ident)
-    parsed = urlparse(source)
-    if not SOURCE_RE.fullmatch(source) or parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if not SOURCE_RE.fullmatch(source):
         raise ImplementationRegistryError(
             "%s: source must be an absolute HTTP(S) URL" % ident
         )
