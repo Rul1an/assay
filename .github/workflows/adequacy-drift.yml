@@ -203,6 +203,9 @@ jobs:
         with:
           cache-workspaces: "."
 
+      - name: Self-test bounded cleanup target
+        run: python3 scripts/ci/test_adequacy_cleanup.py
+
       # setup-rust restores target/ inside the repository. The process runner
       # materializes repo_root under a hard byte ceiling, so all cached build
       # output, including dependency artifacts outside workspace packages, must

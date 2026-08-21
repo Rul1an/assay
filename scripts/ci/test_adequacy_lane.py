@@ -12,9 +12,6 @@ from __future__ import annotations
 import io
 import json
 import contextlib
-import os
-import shlex
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -311,6 +308,18 @@ class LiveTree(unittest.TestCase):
         )
         self.assertFalse(result["heavy_relevant"])
 
+    def test_cleanup_contract_change_forces_a_full_measurement(self) -> None:
+        result = lp.plan(
+            self.corpora,
+            ["scripts/ci/test_adequacy_cleanup.py"],
+            full=False,
+            pinned_siblings=self.pins,
+        )
+        self.assertEqual(
+            result["relevant"],
+            sorted(c.name for c in self.corpora),
+        )
+
     def test_emit_lines_are_routable_key_values(self) -> None:
         result = lp.plan(self.corpora, [], full=True, pinned_siblings=self.pins)
         buffer = io.StringIO()
@@ -387,65 +396,20 @@ class MeasurementWorkspaceHygiene(unittest.TestCase):
 
     WORKFLOW = REPO_ROOT / ".github/workflows/adequacy-drift.yml"
 
-    def _cleanup_command(self) -> str:
-        workflow = self.WORKFLOW.read_text(encoding="utf-8")
-        marker = "- name: Remove restored build outputs before bounded materialization"
-        step = workflow[workflow.index(marker):]
-        for line in step.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("run: "):
-                return stripped.removeprefix("run: ")
-        self.fail("measurement cleanup step has no run command")
-
     def test_restored_build_outputs_are_removed_before_measurement(self):
         workflow = self.WORKFLOW.read_text(encoding="utf-8")
         setup = workflow.index("uses: ./.github/actions/setup-rust")
+        cleanup_test = workflow.index("python3 scripts/ci/test_adequacy_cleanup.py")
         clean_command = (
             'run: cargo clean --target-dir "${GITHUB_WORKSPACE}/target"\n'
         )
         clean = workflow.index(clean_command)
         measure = workflow.index("python3 conformance/adequacy/measure_all.py")
         self.assertNotIn("cargo clean --workspace", workflow)
+        self.assertLess(setup, cleanup_test)
+        self.assertLess(cleanup_test, clean)
         self.assertLess(setup, clean)
         self.assertLess(clean, measure)
-
-    def test_cleanup_ignores_a_repository_controlled_target_dir(self):
-        with tempfile.TemporaryDirectory() as td:
-            parent = Path(td)
-            workspace = parent / "workspace"
-            victim = parent / "victim"
-            (workspace / ".cargo").mkdir(parents=True)
-            (workspace / "target").mkdir()
-            victim.mkdir()
-            (workspace / "Cargo.toml").write_text(
-                '[package]\nname = "cleanup-fixture"\nversion = "0.0.0"\n',
-                encoding="utf-8",
-            )
-            (workspace / "src").mkdir()
-            (workspace / "src/lib.rs").write_text("", encoding="utf-8")
-            (workspace / ".cargo/config.toml").write_text(
-                '[build]\ntarget-dir = "../victim"\n', encoding="utf-8"
-            )
-            (workspace / "target/generated").write_text("generated", encoding="utf-8")
-            (victim / "sentinel").write_text("not cargo output", encoding="utf-8")
-
-            env = os.environ.copy()
-            env["GITHUB_WORKSPACE"] = str(workspace)
-            command = [
-                str(workspace / "target") if arg == "${GITHUB_WORKSPACE}/target" else arg
-                for arg in shlex.split(self._cleanup_command())
-            ]
-            subprocess.run(
-                command,
-                cwd=workspace,
-                env=env,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-
-            self.assertTrue((victim / "sentinel").is_file())
-            self.assertFalse((workspace / "target").exists())
 
 
 if __name__ == "__main__":

@@ -67,6 +67,7 @@ GLOBAL_TRIGGERS = (
     ".github/workflows/adequacy-drift.yml",
     "scripts/ci/adequacy_lane_plan.py",
     "scripts/ci/adequacy_lane_assert.py",
+    "scripts/ci/test_adequacy_cleanup.py",
     "conformance/adequacy/measure_all.py",
     "conformance/adequacy/check_published_numbers.py",
     "conformance/INDEX.md",
