@@ -10,21 +10,30 @@ a publisher or endorse a candidate.
 
 from __future__ import annotations
 
+import ast
 import json
+import os
 import re
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 from urllib.parse import urlparse
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "conformance"))
+sys.path.insert(0, str(REPO / "conformance/adequacy"))
 
 try:
     import implementations
-except ImportError:  # expected on the first RED before the loader exists
+except ModuleNotFoundError as exc:
+    if getattr(exc, "name", None) != "implementations":
+        raise
     implementations = None
+
+import published_rows  # noqa: E402
 
 CI_YML = REPO / ".github/workflows/ci.yml"
 INVENTORY_STEP_RE = re.compile(r"(?ms)^      - name: Conformance inventory\n(?:        .+\n)+")
@@ -35,6 +44,12 @@ DIGEST_IMAGE = (
     "ghcr.io/example/checker@sha256:"
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 )
+HUMAN_AUTHORSHIP = {"kind": "human"}
+ASSISTED_AUTHORSHIP = {
+    "kind": "agent-assisted",
+    "model": "claude-opus",
+    "prompt_strategy": "spec-then-conformance",
+}
 
 
 def _scope_job(text: str) -> str:
@@ -65,7 +80,7 @@ def _valid_row(**overrides):
         "commit": "0123456789abcdef0123456789abcdef01234567",
         "language": "rust",
         "reproduction_mode": "blind_from_spec",
-        "authorship": "Authored-By: human",
+        "authorship": dict(HUMAN_AUTHORSHIP),
     }
     row.update(overrides)
     return row
@@ -75,28 +90,41 @@ def _doc(rows):
     return {"schema": "assay.conformance.implementations.v0", "implementations": rows}
 
 
+def _require_module():
+    if implementations is None:
+        raise AssertionError("stdlib validator conformance/implementations.py is missing")
+    return implementations
+
+
+class ImportBoundary(unittest.TestCase):
+    def test_unrelated_missing_module_is_not_treated_as_absent_registry(self):
+        with self.assertRaises(ModuleNotFoundError) as ctx:
+            try:
+                raise ModuleNotFoundError(
+                    "No module named 'not_stdlib'", name="not_stdlib"
+                )
+            except ModuleNotFoundError as exc:
+                if getattr(exc, "name", None) != "implementations":
+                    raise
+        self.assertEqual(ctx.exception.name, "not_stdlib")
+
+
 class TagOnlyImageIsTheFirstRed(unittest.TestCase):
     """Issue #198: tag-only image must fail the validator and the CI contract."""
 
     def test_tag_only_image_is_rejected_by_the_validator(self):
-        self.assertIsNotNone(
-            implementations,
-            "stdlib validator conformance/implementations.py is missing",
-        )
+        module = _require_module()
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / "implementations.json"
             path.write_text(
                 json.dumps(_doc([_valid_row(image=TAG_ONLY_IMAGE)])),
                 encoding="utf-8",
             )
-            with self.assertRaises(implementations.ImplementationRegistryError) as ctx:
-                implementations.load_implementations(path)
+            with self.assertRaises(module.ImplementationRegistryError) as ctx:
+                module.load_implementations(path)
         message = str(ctx.exception).lower()
         self.assertIn("image", message)
-        self.assertTrue(
-            "digest" in message or "sha256" in message,
-            ctx.exception,
-        )
+        self.assertTrue("digest" in message or "sha256" in message, ctx.exception)
 
     def test_required_ci_invokes_the_same_validator(self):
         step = _inventory_step(CI_YML.read_text(encoding="utf-8"))
@@ -115,10 +143,7 @@ class TagOnlyImageIsTheFirstRed(unittest.TestCase):
 
 class PositiveFixtureAndHostileMatrix(unittest.TestCase):
     def setUp(self):
-        self.assertIsNotNone(
-            implementations,
-            "stdlib validator conformance/implementations.py is missing",
-        )
+        self.module = _require_module()
         self._tmp = tempfile.TemporaryDirectory()
         self.raw = Path(self._tmp.name)
 
@@ -135,67 +160,90 @@ class PositiveFixtureAndHostileMatrix(unittest.TestCase):
 
     def test_minimal_digest_row_loads(self):
         path = self._write(_doc([_valid_row()]))
-        loaded = implementations.load_implementations(path)
-        self.assertEqual(loaded["schema"], implementations.SCHEMA)
+        loaded = self.module.load_implementations(path)
+        self.assertEqual(loaded["schema"], self.module.SCHEMA)
         self.assertEqual(len(loaded["implementations"]), 1)
-        self.assertEqual(loaded["implementations"][0]["id"], "example-checker")
+        row = loaded["implementations"][0]
+        self.assertEqual(row["id"], "example-checker")
+        self.assertEqual(row["language"], "rust")
+        self.assertEqual(row["authorship"], HUMAN_AUTHORSHIP)
+
+    def test_agent_assisted_requires_nonempty_model_and_prompt_strategy(self):
+        path = self._write(_doc([_valid_row(authorship=dict(ASSISTED_AUTHORSHIP))]))
+        loaded = self.module.load_implementations(path)
+        self.assertEqual(loaded["implementations"][0]["authorship"], ASSISTED_AUTHORSHIP)
+        for field in ("model", "prompt_strategy"):
+            broken = dict(ASSISTED_AUTHORSHIP)
+            broken[field] = ""
+            path = self._write(_doc([_valid_row(id="broken-%s" % field, authorship=broken)]))
+            with self.subTest(field=field), self.assertRaises(
+                self.module.ImplementationRegistryError
+            ) as ctx:
+                self.module.load_implementations(path)
+            self.assertIn(field, str(ctx.exception).lower())
+
+    def test_authorship_string_is_rejected(self):
+        path = self._write(_doc([_valid_row(authorship="Authored-By: human")]))
+        with self.assertRaises(self.module.ImplementationRegistryError) as ctx:
+            self.module.load_implementations(path)
+        self.assertIn("authorship", str(ctx.exception).lower())
 
     def test_shipped_registry_is_loadable(self):
-        loaded = implementations.load_implementations()
-        self.assertEqual(loaded["schema"], implementations.SCHEMA)
+        loaded = self.module.load_implementations()
+        self.assertEqual(loaded["schema"], self.module.SCHEMA)
         self.assertIsInstance(loaded["implementations"], list)
 
     def test_duplicate_id_is_rejected(self):
         path = self._write(_doc([_valid_row(), _valid_row(name="Other")]))
-        with self.assertRaises(implementations.ImplementationRegistryError) as ctx:
-            implementations.load_implementations(path)
+        with self.assertRaises(self.module.ImplementationRegistryError) as ctx:
+            self.module.load_implementations(path)
         self.assertIn("duplicate", str(ctx.exception).lower())
 
     def test_unknown_suite_is_rejected(self):
         path = self._write(_doc([_valid_row(suite="privileged-mcp-action-v1")]))
-        with self.assertRaises(implementations.ImplementationRegistryError) as ctx:
-            implementations.load_implementations(path)
+        with self.assertRaises(self.module.ImplementationRegistryError) as ctx:
+            self.module.load_implementations(path)
         self.assertIn("suite", str(ctx.exception).lower())
 
     def test_unknown_reproduction_mode_is_rejected(self):
         path = self._write(_doc([_valid_row(reproduction_mode="from_expected_values")]))
-        with self.assertRaises(implementations.ImplementationRegistryError) as ctx:
-            implementations.load_implementations(path)
+        with self.assertRaises(self.module.ImplementationRegistryError) as ctx:
+            self.module.load_implementations(path)
         self.assertIn("reproduction_mode", str(ctx.exception).lower())
 
     def test_missing_source_commit_is_rejected(self):
         row = _valid_row()
         del row["commit"]
         path = self._write(_doc([row]))
-        with self.assertRaises(implementations.ImplementationRegistryError) as ctx:
-            implementations.load_implementations(path)
+        with self.assertRaises(self.module.ImplementationRegistryError) as ctx:
+            self.module.load_implementations(path)
         self.assertIn("commit", str(ctx.exception).lower())
 
     def test_short_source_commit_is_rejected(self):
         path = self._write(_doc([_valid_row(commit="0123456789abcdef")]))
-        with self.assertRaises(implementations.ImplementationRegistryError) as ctx:
-            implementations.load_implementations(path)
+        with self.assertRaises(self.module.ImplementationRegistryError) as ctx:
+            self.module.load_implementations(path)
         self.assertIn("commit", str(ctx.exception).lower())
 
     def test_missing_authorship_disclosure_is_rejected(self):
         row = _valid_row()
         del row["authorship"]
         path = self._write(_doc([row]))
-        with self.assertRaises(implementations.ImplementationRegistryError) as ctx:
-            implementations.load_implementations(path)
+        with self.assertRaises(self.module.ImplementationRegistryError) as ctx:
+            self.module.load_implementations(path)
         self.assertIn("authorship", str(ctx.exception).lower())
 
     def test_unknown_field_is_rejected(self):
         row = _valid_row(tier="T0")
         path = self._write(_doc([row]))
-        with self.assertRaises(implementations.ImplementationRegistryError) as ctx:
-            implementations.load_implementations(path)
+        with self.assertRaises(self.module.ImplementationRegistryError) as ctx:
+            self.module.load_implementations(path)
         self.assertIn("unknown", str(ctx.exception).lower())
 
     def test_relative_source_url_is_rejected(self):
         path = self._write(_doc([_valid_row(source="github.com/example/checker")]))
-        with self.assertRaises(implementations.ImplementationRegistryError) as ctx:
-            implementations.load_implementations(path)
+        with self.assertRaises(self.module.ImplementationRegistryError) as ctx:
+            self.module.load_implementations(path)
         parsed = urlparse("github.com/example/checker")
         self.assertFalse(parsed.scheme)
         self.assertIn("source", str(ctx.exception).lower())
@@ -206,30 +254,146 @@ class PositiveFixtureAndHostileMatrix(unittest.TestCase):
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         )
         path = self._write(_doc([_valid_row(image=image)]))
-        with self.assertRaises(implementations.ImplementationRegistryError):
-            implementations.load_implementations(path)
+        with self.assertRaises(self.module.ImplementationRegistryError):
+            self.module.load_implementations(path)
+
+
+class HostileRegistryInput(unittest.TestCase):
+    def setUp(self):
+        self.module = _require_module()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.raw = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_does_not_declare_a_second_byte_cap(self):
+        self.assertFalse(
+            hasattr(self.module, "MAX_REGISTRY_BYTES"),
+            "reuse the shared regular-file cap; do not invent a second ceiling",
+        )
+
+    def test_loads_through_the_shared_regular_file_reader(self):
+        path = self.raw / "implementations.json"
+        path.write_text(json.dumps(_doc([])), encoding="utf-8")
+        with mock.patch.object(
+            published_rows, "read_regular_file", wraps=published_rows.read_regular_file
+        ) as reader:
+            self.module.load_implementations(path)
+        self.assertTrue(reader.called, "load_implementations must reuse read_regular_file")
+
+    def test_duplicate_json_keys_are_rejected(self):
+        path = self.raw / "implementations.json"
+        path.write_text(
+            '{"schema":"assay.conformance.implementations.v0",'
+            '"implementations":[],"schema":"other"}',
+            encoding="utf-8",
+        )
+        with self.assertRaises((self.module.ImplementationRegistryError, ValueError)) as ctx:
+            self.module.load_implementations(path)
+        self.assertIn("duplicate", str(ctx.exception).lower())
+
+    def test_nonfinite_json_numbers_are_rejected(self):
+        row = json.dumps(_valid_row())
+        for token in ("NaN", "Infinity", "-Infinity", "1e999"):
+            mutated = row.replace('"Example Checker"', token, 1)
+            path = self.raw / "implementations.json"
+            path.write_text(
+                '{"schema":"assay.conformance.implementations.v0",'
+                '"implementations":[%s]}' % mutated,
+                encoding="utf-8",
+            )
+            with self.subTest(token=token), self.assertRaises(
+                (self.module.ImplementationRegistryError, ValueError)
+            ) as ctx:
+                self.module.load_implementations(path)
+            message = str(ctx.exception).lower()
+            self.assertTrue(
+                any(part in message for part in ("finite", "nan", "infinity", "1e999")),
+                ctx.exception,
+            )
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
+    def test_symlink_input_is_rejected_without_following(self):
+        target = self.raw / "target.json"
+        target.write_text(json.dumps(_doc([])), encoding="utf-8")
+        link = self.raw / "implementations.json"
+        link.symlink_to(target)
+        with self.assertRaises((self.module.ImplementationRegistryError, ValueError)) as ctx:
+            self.module.load_implementations(link)
+        message = str(ctx.exception).lower()
+        self.assertTrue("regular" in message or "symlink" in message, ctx.exception)
+        self.assertNotIn("escape", message)
+
+    def test_nonregular_input_is_rejected(self):
+        with self.assertRaises((self.module.ImplementationRegistryError, ValueError)) as ctx:
+            self.module.load_implementations(self.raw)
+        self.assertIn("regular", str(ctx.exception).lower())
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFOs unavailable")
+    def test_fifo_is_rejected_without_waiting_for_a_writer(self):
+        path = self.raw / "implementations.json"
+        os.mkfifo(path)
+        started = time.monotonic()
+        with self.assertRaises((self.module.ImplementationRegistryError, ValueError)):
+            self.module.load_implementations(path)
+        self.assertLess(time.monotonic() - started, 1.0)
 
 
 class OneRuleNoNetwork(unittest.TestCase):
     def test_validator_does_not_pull_run_or_network(self):
-        self.assertIsNotNone(implementations)
-        source = Path(implementations.__file__).read_text(encoding="utf-8")
+        module = _require_module()
+        source = Path(module.__file__).read_text(encoding="utf-8")
         self.assertNotIn("subprocess", source)
         self.assertNotIn("urllib.request", source)
         self.assertNotIn("docker", source.lower())
         self.assertNotIn("http.client", source)
 
-    def test_main_uses_the_same_loader(self):
-        self.assertIsNotNone(implementations)
-        source = Path(implementations.__file__).read_text(encoding="utf-8")
-        self.assertIn("load_implementations()", source)
+    def test_main_calls_load_implementations(self):
+        module = _require_module()
+        sentinel = {"schema": module.SCHEMA, "implementations": []}
+        with mock.patch.object(module, "load_implementations", return_value=sentinel) as loader:
+            self.assertEqual(module.main(), 0)
+            loader.assert_called_once_with()
+        tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+        calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "main"
+            for child in ast.walk(node)
+            if isinstance(child, ast.Call)
+            and (
+                (isinstance(child.func, ast.Name) and child.func.id == "load_implementations")
+                or (
+                    isinstance(child.func, ast.Attribute)
+                    and child.func.attr == "load_implementations"
+                )
+            )
+        ]
+        self.assertTrue(calls, "main() AST must call load_implementations")
 
-    def test_schema_forbids_unknown_fields(self):
-        schema_path = REPO / "conformance/implementations.schema.json"
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        self.assertIs(schema["additionalProperties"], False)
-        row = schema["properties"]["implementations"]["items"]
-        self.assertIs(row["additionalProperties"], False)
+    def test_schema_matches_validator_vocabulary(self):
+        module = _require_module()
+        rendered = module.implementation_schema()
+        on_disk = json.loads(
+            (REPO / "conformance/implementations.schema.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(on_disk, rendered)
+        items = rendered["properties"]["implementations"]["items"]
+        self.assertEqual(frozenset(items["required"]), frozenset(module.ROW_FIELDS))
+        self.assertEqual(frozenset(items["properties"]), frozenset(module.ROW_FIELDS))
+        suite = items["properties"]["suite"]
+        allowed = suite.get("enum") or [suite["const"]]
+        self.assertEqual(frozenset(allowed), frozenset(module.ALLOWED_SUITES))
+        modes = items["properties"]["reproduction_mode"]["enum"]
+        self.assertEqual(frozenset(modes), frozenset(module.REPRODUCTION_MODES))
+        authorship = items["properties"]["authorship"]
+        self.assertEqual(authorship["type"], "object")
+        self.assertIs(authorship["additionalProperties"], False)
+        self.assertEqual(
+            frozenset(authorship["properties"]["kind"]["enum"]),
+            frozenset(module.AUTHORSHIP_KINDS),
+        )
 
 
 if __name__ == "__main__":

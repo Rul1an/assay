@@ -175,6 +175,49 @@ class BoundedInput(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "exceeds"):
                 published_rows.load_results(path, limit=len(exact))
 
+    def test_short_os_read_loop_accepts_exact_cap_and_rejects_cap_plus_one(self):
+        exact = b'{"corpora":[]}'
+        real_read = published_rows.os.read
+        real_fstat = published_rows.os.fstat
+
+        def one_byte(fd, _n):
+            return real_read(fd, 1)
+
+        def size_at_most_limit(fd):
+            info = real_fstat(fd)
+            return mock.Mock(
+                st_mode=info.st_mode,
+                st_dev=info.st_dev,
+                st_ino=info.st_ino,
+                st_size=min(info.st_size, len(exact)),
+            )
+
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "results.json"
+            path.write_bytes(exact)
+            with mock.patch.object(published_rows.os, "read", side_effect=one_byte):
+                self.assertEqual(
+                    published_rows.read_regular_file(path, limit=len(exact)),
+                    exact,
+                )
+            path.write_bytes(exact + b" ")
+            with (
+                mock.patch.object(published_rows.os, "read", side_effect=one_byte),
+                mock.patch.object(published_rows.os, "fstat", side_effect=size_at_most_limit),
+            ):
+                with self.assertRaisesRegex(ValueError, "exceeds"):
+                    published_rows.read_regular_file(path, limit=len(exact))
+
+    def test_duplicate_object_keys_are_rejected_at_every_level(self):
+        cases = (
+            b'{"corpora":[],"corpora":[]}',
+            b'{"corpora":[],"nested":{"a":1,"a":2}}',
+            b'{"corpora":[{"id":"x","id":"y"}]}',
+        )
+        for data in cases:
+            with self.subTest(data=data), self.assertRaisesRegex(ValueError, "duplicate"):
+                published_rows.parse_json_object(data, "results JSON")
+
     def test_malformed_json_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / "results.json"

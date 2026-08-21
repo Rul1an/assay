@@ -6,9 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - `conformance/implementations.json` is a static, fail-closed registry of candidate
-  images addressed as `name@sha256:<64 hex>`. Required CI calls the same stdlib
-  validator. A digest addresses bytes; registration does not authenticate a
-  publisher or prove safety, reproducibility, independence, or conformance
+  images addressed as `name@sha256:<64 hex>`. Authorship is a typed object (`human`,
+  or agent kinds with model and prompt strategy). Required CI calls the same stdlib
+  validator, which reuses the shared regular-file reader and JSON parser. A digest
+  addresses bytes; registration does not authenticate a publisher or prove safety,
+  reproducibility, independence, or conformance
   (Rul1an/assay-tunnel-experiments#198).
 - `docs/architecture/CLI-JSON-IDENTITIES.md` records which `assay.<segments>.vN` identities
   ship and which of them are CLI JSON documents. `cli_json_identities.rs` fails the build when

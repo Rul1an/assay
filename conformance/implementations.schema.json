@@ -60,14 +60,34 @@
           "reproduction_mode": {
             "enum": [
               "blind_from_spec",
-              "from_spec_then_conformance",
               "commissioned_clean_room",
+              "from_spec_then_conformance",
               "other_disclosed"
             ]
           },
           "authorship": {
-            "type": "string",
-            "pattern": "^(Authored-By: human|Assisted-By: \\S+ \\S+|Generated-By: \\S+ \\S+)$"
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "agent-assisted",
+                  "agent-generated",
+                  "human"
+                ]
+              },
+              "model": {
+                "type": "string",
+                "minLength": 1
+              },
+              "prompt_strategy": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
           }
         }
       }

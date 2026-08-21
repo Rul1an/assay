@@ -45,10 +45,12 @@ and carries its own [`REPRODUCTIONS.md`](https://github.com/rge-bench/rge-bench/
 
 [`implementations.json`](implementations.json) is a static, fail-closed list of
 declared candidate images for `privileged-mcp-action-v0`. Each image is written
-as `name@sha256:` plus sixty-four lowercase hex digits. A digest addresses
-bytes; it does not authenticate the publisher. A row does not prove that the
-image is safe, reproducible, independent, or conformant, and this check does
-not pull or run it.
+as `name@sha256:` plus sixty-four lowercase hex digits. Authorship is a typed
+object: `human` is explicit; `agent-assisted` and `agent-generated` require a
+non-empty model and prompt strategy. Language is the other independence axis.
+A digest addresses bytes; it does not authenticate the publisher. A row does
+not prove that the image is safe, reproducible, independent, or conformant,
+and this check does not pull or run it.
 
 ```bash
 python3 conformance/implementations.py

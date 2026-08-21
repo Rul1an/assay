@@ -10,16 +10,17 @@ This module does not pull, run, or fetch an image.
 
 from __future__ import annotations
 
-import json
 import re
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent / "adequacy"))
+import published_rows  # noqa: E402
+
 REGISTRY_PATH = Path(__file__).resolve().parent / "implementations.json"
 SCHEMA = "assay.conformance.implementations.v0"
-MAX_REGISTRY_BYTES = 256 * 1024
 ALLOWED_SUITES = frozenset(("privileged-mcp-action-v0",))
 REPRODUCTION_MODES = frozenset((
     "blind_from_spec",
@@ -27,6 +28,8 @@ REPRODUCTION_MODES = frozenset((
     "commissioned_clean_room",
     "other_disclosed",
 ))
+AUTHORSHIP_KINDS = frozenset(("human", "agent-assisted", "agent-generated"))
+AGENT_KINDS = frozenset(("agent-assisted", "agent-generated"))
 DOC_FIELDS = ("schema", "implementations")
 ROW_FIELDS = (
     "id",
@@ -42,9 +45,6 @@ ROW_FIELDS = (
 ID_RE = re.compile(r"\A[a-z][a-z0-9]*(?:-[a-z0-9]+)*\Z")
 IMAGE_RE = re.compile(r"\A[^:@\s]+(?:/[^:@\s]+)*@sha256:[0-9a-f]{64}\Z")
 COMMIT_RE = re.compile(r"\A[0-9a-f]{40}\Z")
-AUTHORSHIP_RE = re.compile(
-    r"\A(?:Authored-By: human|Assisted-By: \S+ \S+|Generated-By: \S+ \S+)\Z"
-)
 
 
 class ImplementationRegistryError(Exception):
@@ -68,6 +68,23 @@ def _require_text(value: object, field: str, ident: str) -> str:
     if not isinstance(value, str) or not value:
         raise ImplementationRegistryError("%s: %s must be a non-empty string" % (ident, field))
     return value
+
+
+def _validate_authorship(value: object, ident: str) -> dict:
+    if not isinstance(value, dict):
+        raise ImplementationRegistryError("%s: authorship must be an object" % ident)
+    kind = value.get("kind")
+    if kind == "human":
+        _reject_unknown_fields(value, ("kind",), what="%s authorship" % ident)
+        return value
+    if kind in AGENT_KINDS:
+        _reject_unknown_fields(
+            value, ("kind", "model", "prompt_strategy"), what="%s authorship" % ident
+        )
+        _require_text(value.get("model"), "model", ident)
+        _require_text(value.get("prompt_strategy"), "prompt_strategy", ident)
+        return value
+    raise ImplementationRegistryError("%s: unknown authorship kind %r" % (ident, kind))
 
 
 def _validate_row(row: object, seen: set[str]) -> dict:
@@ -104,38 +121,70 @@ def _validate_row(row: object, seen: set[str]) -> dict:
     mode = _require_text(row["reproduction_mode"], "reproduction_mode", ident)
     if mode not in REPRODUCTION_MODES:
         raise ImplementationRegistryError("%s: unknown reproduction_mode %r" % (ident, mode))
-    authorship = _require_text(row["authorship"], "authorship", ident)
-    if not AUTHORSHIP_RE.fullmatch(authorship):
-        raise ImplementationRegistryError("%s: authorship disclosure is invalid" % ident)
+    _validate_authorship(row["authorship"], ident)
     return row
+
+
+def implementation_schema() -> dict:
+    """JSON Schema rendered from the same vocabulary the validator uses."""
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/conformance/implementations.schema.json",
+        "title": "Assay static implementation registry",
+        "type": "object",
+        "additionalProperties": False,
+        "required": list(DOC_FIELDS),
+        "properties": {
+            "schema": {"const": SCHEMA},
+            "implementations": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": list(ROW_FIELDS),
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                        },
+                        "name": {"type": "string", "minLength": 1},
+                        "suite": {"const": next(iter(ALLOWED_SUITES))},
+                        "image": {
+                            "type": "string",
+                            "pattern": "^[^:@\\s]+(?:/[^:@\\s]+)*@sha256:[0-9a-f]{64}$",
+                            "description": (
+                                "Exact name@sha256:<64 hex>. A digest addresses bytes; "
+                                "it does not authenticate the publisher."
+                            ),
+                        },
+                        "source": {"type": "string", "pattern": "^https?://[^\\s]+$"},
+                        "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "language": {"type": "string", "minLength": 1},
+                        "reproduction_mode": {"enum": sorted(REPRODUCTION_MODES)},
+                        "authorship": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["kind"],
+                            "properties": {
+                                "kind": {"enum": sorted(AUTHORSHIP_KINDS)},
+                                "model": {"type": "string", "minLength": 1},
+                                "prompt_strategy": {"type": "string", "minLength": 1},
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    }
 
 
 def load_implementations(path: Path | None = None) -> dict:
     path = Path(path) if path is not None else REGISTRY_PATH
-    if path.is_symlink():
-        try:
-            path.resolve().relative_to(REPO.resolve())
-        except ValueError:
-            raise ImplementationRegistryError(
-                "registry symlink escapes the repository: %s" % path
-            )
-    if not path.is_file():
-        raise ImplementationRegistryError("implementation registry missing: %s" % path)
-    data = path.read_bytes()
-    if len(data) > MAX_REGISTRY_BYTES:
-        raise ImplementationRegistryError(
-            "implementation registry exceeds %d bytes" % MAX_REGISTRY_BYTES
-        )
     try:
-        doc = json.loads(data)
-    except json.JSONDecodeError as exc:
-        raise ImplementationRegistryError(
-            "implementation registry is not JSON: %s" % exc
-        ) from exc
-    if not isinstance(doc, dict):
-        raise ImplementationRegistryError(
-            "implementation registry is %s, not an object" % type(doc).__name__
-        )
+        data = published_rows.read_regular_file(path)
+        doc = published_rows.parse_json_object(data, "implementation registry")
+    except ValueError as exc:
+        raise ImplementationRegistryError(str(exc)) from exc
     _reject_unknown_fields(doc, DOC_FIELDS, what="implementation registry")
     if doc.get("schema") != SCHEMA:
         raise ImplementationRegistryError(
