@@ -379,5 +379,19 @@ class CheckDriftProvenanceTransport(unittest.TestCase):
         self.assertNotIn("git fetch", job)
 
 
+class MeasurementWorkspaceHygiene(unittest.TestCase):
+    """Bounded isolation must see source, not a restored Cargo cache."""
+
+    WORKFLOW = REPO_ROOT / ".github/workflows/adequacy-drift.yml"
+
+    def test_restored_build_outputs_are_removed_before_measurement(self):
+        workflow = self.WORKFLOW.read_text(encoding="utf-8")
+        setup = workflow.index("uses: ./.github/actions/setup-rust")
+        clean = workflow.index("cargo clean --workspace")
+        measure = workflow.index("python3 conformance/adequacy/measure_all.py")
+        self.assertLess(setup, clean)
+        self.assertLess(clean, measure)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
