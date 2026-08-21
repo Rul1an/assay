@@ -412,7 +412,7 @@ class ResultsAreStillWhatTheToolProduces(unittest.TestCase):
             if sibling is not None and not sibling.is_dir():
                 unavailable.append(corpus)
                 continue
-            report = ca.run(manifest)
+            report = measure_all.run_producer(ca, manifest)
             fresh = measure_all.row(manifest, report, ca.encode_report_v0(report))
             def trim(row):
                 comparable = {k: v for k, v in row.items() if k != "tool_version"}

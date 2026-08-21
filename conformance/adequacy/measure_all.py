@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -88,6 +89,16 @@ def corpus_id(manifest: Path) -> str:
 
 def rel(path: Path) -> str:
     return path.resolve().relative_to(REPO).as_posix()
+
+
+def run_producer(ca, manifest: Path) -> dict:
+    """Run the producer with a stable repository-relative manifest identity."""
+    previous = Path.cwd()
+    try:
+        os.chdir(REPO)
+        return ca.run(Path(rel(manifest)))
+    finally:
+        os.chdir(previous)
 
 
 def measured_at(declared: dict, manifest: Path) -> dict:
@@ -240,7 +251,7 @@ def main(argv: list[str] | None = None) -> int:
 
     for manifest in selected:
         print("measuring %s ..." % corpus_id(manifest), flush=True)
-        report = ca.run(manifest)
+        report = run_producer(ca, manifest)
         encoded_report = ca.encode_report_v0(report)
         rows[corpus_id(manifest)] = row(manifest, report, encoded_report)
         reports[rows[corpus_id(manifest)]["report_sha256"]] = encoded_report.decode("utf-8")

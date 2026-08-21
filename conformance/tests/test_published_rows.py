@@ -101,6 +101,25 @@ def projected(temp: Path, *, value: dict | None = None, runner: str = "module",
 
 
 class WriterUsesCanonicalRows(unittest.TestCase):
+    def test_producer_is_invoked_with_a_repository_relative_manifest(self):
+        class Producer:
+            def __init__(self):
+                self.seen = None
+
+            def run(self, manifest):
+                self.seen = (Path.cwd(), manifest)
+                return {"ok": True}
+
+        producer = Producer()
+        manifest = measure_all.REPO / "conformance/adequacy/sample.manifest.json"
+        original_cwd = Path.cwd()
+        self.assertEqual(measure_all.run_producer(producer, manifest), {"ok": True})
+        self.assertEqual(producer.seen, (
+            measure_all.REPO,
+            Path("conformance/adequacy/sample.manifest.json"),
+        ))
+        self.assertEqual(Path.cwd(), original_cwd)
+
     def test_duplicate_corpus_ids_are_rejected_before_dict_projection(self):
         document = {
             "schema": measure_all.SCHEMA,
