@@ -67,7 +67,7 @@ OCI_PYTHON_VERSION = 'python-version: "3.13.8"'
 OCI_SOURCE_DIGEST_SHAPE = '[[ "$source_digest" =~ ^[0-9a-f]{40}$ ]]'
 OCI_SOURCE_DIGEST_GUARD = OCI_SOURCE_DIGEST_SHAPE + " || exit 2"
 OCI_CAPTURE_UPLOAD_PATH = "${{ runner.temp }}/oci-capture/candidate_capture.v0"
-OCI_SCORE_UPLOAD_PATH = "${{ runner.temp }}/oci-score/conformance_run.v0"
+OCI_SCORE_UPLOAD_PATH = "${{ runner.temp }}/oci-score/conformance_run.v1"
 OCI_IMPLEMENTATION_ID_ENV = "IMPLEMENTATION_ID: ${{ inputs.implementation_id }}"
 OCI_IMPLEMENTATION_ID_ARGV = '--implementation-id "$IMPLEMENTATION_ID"'
 OCI_UPLOAD_STEP = "Upload validated capture"
@@ -96,7 +96,7 @@ OCI_SCORE_JOB_KEYS = ("needs", "if", "runs-on", "timeout-minutes", "steps")
 OCI_DOCUMENT_KEYS = ("name", "on", "permissions", "concurrency", "jobs")
 OCI_TAG_BINDING = "TAG: ${{ steps.candidate.outputs.tag }}"
 OCI_ARTIFACT_NAME = "name: candidate-capture-v0"
-OCI_SCORE_ARTIFACT_NAME = "name: candidate-run-record-v0"
+OCI_SCORE_ARTIFACT_NAME = "name: candidate-run-record-v1"
 OCI_SCORE_NEEDS = "needs: [capture]"
 OCI_STEP_KEYS = {
     "Check out current main": ("name", "uses", "with"),
@@ -233,7 +233,7 @@ OCI_SCORE_PINNED_STEP_SEQUENCES = {
         "set -euo pipefail",
         'PACK="$RUNNER_TEMP/oci-downloads/privileged-mcp-action-v0-clean-room.tar.gz"',
         'CAPTURE="$RUNNER_TEMP/oci-score/candidate_capture.v0"',
-        'OUTPUT="$RUNNER_TEMP/oci-score/conformance_run.v0"',
+        'OUTPUT="$RUNNER_TEMP/oci-score/conformance_run.v1"',
         'mkdir -p "$(dirname "$OUTPUT")"',
         f"python3 {OCI_SCORER}"
         ' --pack "$PACK"'
@@ -1660,6 +1660,14 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         target.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
         return target
 
+    def expected_from(self, capture: dict) -> dict:
+        """The expected dict `bound_report` already builds."""
+        return {
+            observation["input_sha256"]: observation["observed"]
+            for observation in capture["observations"]
+            if observation["state"] == capture_format.STATE_OBSERVED
+        }
+
     def bound_report(self, capture: dict, digest: str) -> dict:
         pack = {
             "declared_source_commit": capture["pack_declared_source_commit"],
@@ -1670,11 +1678,7 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
                 for observation in capture["observations"]
             ],
         }
-        expected = {
-            observation["input_sha256"]: observation["observed"]
-            for observation in capture["observations"]
-            if observation["state"] == capture_format.STATE_OBSERVED
-        }
+        expected = self.expected_from(capture)
         report = score_candidate.score_capture(
             capture,
             pack,
@@ -1806,6 +1810,7 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
                 validate_run_record.load_run_record(record),
                 document,
                 h1,
+                self.expected_from(document),
             )
         self.assertEqual(record.read_bytes(), original_record)
 
@@ -1872,7 +1877,7 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
             "capture_sha256 does not address the scored capture bytes",
         ):
             validate_run_record.validate_run_record(report)
-            validate_run_record.require_run_record_binds_capture(report, loaded, h1)
+            validate_run_record.require_run_record_binds_capture(report, loaded, h1, self.expected_from(loaded))
         self.assertFalse(output.exists())
 
     def test_unmutated_capture_binds_and_rescore_is_byte_identical(self) -> None:
@@ -1884,6 +1889,7 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
             validate_run_record.load_run_record(first),
             document,
             h0,
+            self.expected_from(document),
         )
         second = self.root / "noop-rescore-second.json"
         first_bytes = first.read_bytes()
@@ -1902,7 +1908,7 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         self.assertEqual(report["suite"], capture_format.SUITE)
         self.assertEqual(report["capture_sha256"], digest)
         self.assertNotEqual(report["suite"], report["profile"])
-        validate_run_record.require_run_record_binds_capture(report, document, digest)
+        validate_run_record.require_run_record_binds_capture(report, document, digest, self.expected_from(document))
 
     def test_unswapped_scored_report_binds_capture(self) -> None:
         """No-op control: a report scored from the capture must bind it."""
@@ -1911,11 +1917,11 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         report = self.bound_report(capture, digest)
         capture_format.validate_capture(capture)
         validate_run_record.validate_run_record(report)
-        validate_run_record.require_run_record_binds_capture(report, capture, digest)
+        validate_run_record.require_run_record_binds_capture(report, capture, digest, self.expected_from(capture))
         params = list(
             inspect.signature(validate_run_record.require_run_record_binds_capture).parameters
         )
-        self.assertEqual(params, ["report", "capture", "capture_digest"])
+        self.assertEqual(params, ["report", "capture", "capture_digest", "expected_by_hash"])
 
     def test_binder_refuses_swapped_implementation_identity(self) -> None:
         capture_path = self.valid_capture("cross-bind-impl")
@@ -1930,7 +1936,7 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         capture_format.validate_capture(capture)
         validate_run_record.validate_run_record(swapped)
         with self.assertRaisesRegex(ValueError, "implementation does not bind"):
-            validate_run_record.require_run_record_binds_capture(swapped, capture, digest)
+            validate_run_record.require_run_record_binds_capture(swapped, capture, digest, self.expected_from(capture))
         self.assertEqual(capture, original_capture)
         capture_format.validate_capture(capture)
 
@@ -1960,7 +1966,7 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         capture_format.validate_capture(capture)
         validate_run_record.validate_run_record(swapped)
         with self.assertRaisesRegex(ValueError, "implementation does not bind"):
-            validate_run_record.require_run_record_binds_capture(swapped, capture, digest)
+            validate_run_record.require_run_record_binds_capture(swapped, capture, digest, self.expected_from(capture))
         self.assertEqual(capture, original_capture)
         capture_format.validate_capture(capture)
 
@@ -1977,7 +1983,7 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         capture_format.validate_capture(capture)
         validate_run_record.validate_run_record(swapped)
         with self.assertRaisesRegex(ValueError, "does not bind the scored capture"):
-            validate_run_record.require_run_record_binds_capture(swapped, capture, digest)
+            validate_run_record.require_run_record_binds_capture(swapped, capture, digest, self.expected_from(capture))
         self.assertEqual(capture, original_capture)
         capture_format.validate_capture(capture)
 
@@ -1991,9 +1997,172 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         capture_format.validate_capture(capture)
         validate_run_record.validate_run_record(swapped)
         with self.assertRaisesRegex(ValueError, "cases do not bind"):
-            validate_run_record.require_run_record_binds_capture(swapped, capture, digest)
+            validate_run_record.require_run_record_binds_capture(swapped, capture, digest, self.expected_from(capture))
         self.assertEqual(capture, original_capture)
         capture_format.validate_capture(capture)
+
+    def test_binder_refuses_swapped_observed_on_match_case(self) -> None:
+        """A match report can keep IDs/digests and still carry a foreign observed."""
+        capture_path = self.valid_capture("cross-bind-observed")
+        capture, digest = capture_format.load_capture_with_digest(capture_path)
+        original_capture = json.loads(json.dumps(capture))
+        report = self.bound_report(capture, digest)
+        swapped = json.loads(json.dumps(report))
+        original_observed = swapped["cases"][0]["observed"]
+        swapped_observed = {"bundle_integrity": "fail"}
+        if original_observed == swapped_observed:
+            swapped_observed = {"bundle_integrity": "pass", "verdict": "invalid"}
+        swapped["cases"][0]["observed"] = swapped_observed
+        self.assertEqual(swapped["capture_sha256"], digest)
+        self.assertEqual(swapped["cases"][0]["case_id"], capture["observations"][0]["case_id"])
+        self.assertEqual(
+            swapped["cases"][0]["input_sha256"],
+            capture["observations"][0]["input_sha256"],
+        )
+        self.assertEqual(swapped["cases"][0]["status"], "match")
+        self.assertNotEqual(swapped["cases"][0]["observed"], original_observed)
+        capture_format.validate_capture(capture)
+        validate_run_record.validate_run_record(swapped)
+        with self.assertRaisesRegex(ValueError, "do not bind"):
+            validate_run_record.require_run_record_binds_capture(swapped, capture, digest, self.expected_from(capture))
+        self.assertEqual(capture, original_capture)
+        capture_format.validate_capture(capture)
+
+    def test_binder_refuses_swapped_status_and_error_on_non_observed_case(self) -> None:
+        """candidate_error scores to execution_error; status/error still must bind."""
+        capture_path = self.valid_capture("cross-bind-error-case")
+
+        def as_candidate_error(document):
+            first = document["observations"][0]
+            document["observations"][0] = {
+                "case_id": first["case_id"],
+                "input_sha256": first["input_sha256"],
+                "state": capture_format.STATE_CANDIDATE_ERROR,
+                "error": capture_format.bound_error("candidate failed this case"),
+            }
+
+        rewritten = self.rewrite(
+            capture_path, "cross-bind-error-case-rewritten", as_candidate_error
+        )
+        capture, digest = capture_format.load_capture_with_digest(rewritten)
+        original_capture = json.loads(json.dumps(capture))
+        report = self.bound_report(capture, digest)
+        self.assertEqual(report["cases"][0]["status"], "execution_error")
+        self.assertEqual(report["cases"][0]["error"], "candidate failed this case")
+        swapped = json.loads(json.dumps(report))
+        swapped["cases"][0]["status"] = "harness_error"
+        swapped["cases"][0]["error"] = "swapped harness error"
+        swapped["summary"]["execution_error"] -= 1
+        swapped["summary"]["harness_error"] += 1
+        self.assertEqual(swapped["capture_sha256"], digest)
+        self.assertEqual(swapped["cases"][0]["case_id"], capture["observations"][0]["case_id"])
+        self.assertEqual(
+            swapped["cases"][0]["input_sha256"],
+            capture["observations"][0]["input_sha256"],
+        )
+        capture_format.validate_capture(capture)
+        validate_run_record.validate_run_record(swapped)
+        with self.assertRaisesRegex(ValueError, "do not bind"):
+            validate_run_record.require_run_record_binds_capture(swapped, capture, digest, self.expected_from(capture))
+        self.assertEqual(capture, original_capture)
+        capture_format.validate_capture(capture)
+
+    def test_binder_refuses_swapped_exit_code_stderr_or_review_warnings(self) -> None:
+        """exit_code, stderr_present, and capture-derived warnings must bind."""
+        capture_path = self.valid_capture("cross-bind-case-facts")
+
+        def flag_schema_mismatch(document):
+            document["observations"][0]["report_schema_matches"] = False
+
+        warned = self.rewrite(
+            capture_path, "cross-bind-case-facts-warned", flag_schema_mismatch
+        )
+        capture, digest = capture_format.load_capture_with_digest(warned)
+        original_capture = json.loads(json.dumps(capture))
+        self.assertTrue(capture_format.review_warnings(capture["observations"][0]))
+        report = self.bound_report(capture, digest)
+        self.assertTrue(report["cases"][0].get("review_warnings"))
+
+        with self.subTest(field="exit_code_and_stderr_present"):
+            swapped = json.loads(json.dumps(report))
+            swapped["cases"][0]["exit_code"] = swapped["cases"][0]["exit_code"] + 1
+            swapped["cases"][0]["stderr_present"] = not swapped["cases"][0][
+                "stderr_present"
+            ]
+            self.assertEqual(swapped["capture_sha256"], digest)
+            self.assertEqual(
+                swapped["cases"][0]["case_id"],
+                capture["observations"][0]["case_id"],
+            )
+            self.assertEqual(
+                swapped["cases"][0]["input_sha256"],
+                capture["observations"][0]["input_sha256"],
+            )
+            capture_format.validate_capture(capture)
+            validate_run_record.validate_run_record(swapped)
+            with self.assertRaisesRegex(ValueError, "do not bind"):
+                validate_run_record.require_run_record_binds_capture(
+                    swapped, capture, digest, self.expected_from(capture)
+                )
+            self.assertEqual(capture, original_capture)
+
+        with self.subTest(field="review_warnings"):
+            swapped = json.loads(json.dumps(report))
+            warnings = swapped["cases"][0].pop("review_warnings")
+            swapped["summary"]["review_warnings"] -= len(warnings)
+            self.assertEqual(swapped["capture_sha256"], digest)
+            self.assertEqual(
+                swapped["cases"][0]["case_id"],
+                capture["observations"][0]["case_id"],
+            )
+            self.assertEqual(
+                swapped["cases"][0]["input_sha256"],
+                capture["observations"][0]["input_sha256"],
+            )
+            capture_format.validate_capture(capture)
+            validate_run_record.validate_run_record(swapped)
+            with self.assertRaisesRegex(ValueError, "do not bind"):
+                validate_run_record.require_run_record_binds_capture(
+                    swapped, capture, digest, self.expected_from(capture)
+                )
+            self.assertEqual(capture, original_capture)
+        capture_format.validate_capture(capture)
+
+    def test_swapped_observed_does_not_overwrite_prior_output(self) -> None:
+        capture_path = self.valid_capture("prior-output-observed")
+        output = self.root / "prior-output-observed-record.json"
+        prior = b'{"prior":true}\n'
+        output.write_bytes(prior)
+        real_score = score_candidate.score_capture
+
+        def score_then_swap(*args, **kwargs):
+            report = real_score(*args, **kwargs)
+            observed = report["cases"][0]["observed"]
+            swapped_observed = {"bundle_integrity": "fail"}
+            if observed == swapped_observed:
+                swapped_observed = {"bundle_integrity": "pass", "verdict": "invalid"}
+            report["cases"][0]["observed"] = swapped_observed
+            return report
+
+        argv = [
+            str(SCORE_SCRIPT),
+            "--pack",
+            str(self.pack),
+            "--manifest",
+            str(CORPUS_DIR / "MANIFEST.json"),
+            "--capture",
+            str(capture_path),
+            "--output",
+            str(output),
+        ]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(
+                score_candidate, "score_capture", side_effect=score_then_swap
+            ),
+        ):
+            self.assertEqual(score_candidate.main(), 2)
+        self.assertEqual(output.read_bytes(), prior)
 
     def test_swapped_report_does_not_overwrite_prior_output(self) -> None:
         capture_path = self.valid_capture("prior-output")
@@ -2046,6 +2215,28 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
             inspect.getsource(validate_run_record.require_run_record_binds_capture),
         )
 
+    def test_report_case_from_observation_is_one_shared_projection(self) -> None:
+        source = Path(score_candidate.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("def report_case_from_observation", source)
+        self.assertIs(
+            score_candidate.report_case_from_observation,
+            validate_run_record.report_case_from_observation,
+        )
+        self.assertIn(
+            "report_case_from_observation(observation, expected_by_hash)",
+            inspect.getsource(score_candidate.score_capture),
+        )
+        self.assertIn(
+            "report_case_from_observation(obs, expected_by_hash)",
+            inspect.getsource(validate_run_record.require_run_record_binds_capture),
+        )
+        defs = [
+            node.name
+            for node in ast.parse(source).body
+            if isinstance(node, ast.FunctionDef)
+        ]
+        self.assertEqual(defs.count("report_case_from_observation"), 0)
+
     def test_scorer_uses_one_read_digest_and_keeps_the_bind_callsite(self) -> None:
         source = inspect.getsource(score_candidate.main)
         self.assertIn("load_capture_with_digest(", source)
@@ -2053,7 +2244,7 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         self.assertIn('report["suite"] = capture["suite"]', source)
         self.assertNotIn("PROFILE.replace", source)
         self.assertIn("validate_run_record(", source)
-        self.assertIn("require_run_record_binds_capture(report, capture, digest)", source)
+        self.assertIn("require_run_record_binds_capture(report, capture, digest, expected_by_hash)", source)
         self.assertIn("write_regular_file_atomically(", source)
         self.assertNotIn("write_text", source)
         self.assertIs(
@@ -2074,6 +2265,70 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
             schema["properties"]["capture_sha256"]["$ref"],
             "#/$defs/sha256",
         )
+
+    def test_run_record_schema_identity_is_v1(self) -> None:
+        schema = json.loads((CORPUS_DIR / "report.schema.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            schema["$id"],
+            "urn:assay:schema:privileged-mcp-action:conformance-run:v1",
+        )
+        self.assertNotIn("getassay.dev", schema["$id"])
+        self.assertNotIn("githubusercontent.com", schema["$id"])
+        self.assertEqual(
+            schema["properties"]["schema"]["const"],
+            "assay.privileged_mcp_action.conformance_run.v1",
+        )
+        self.assertEqual(
+            validate_run_record.RUN_SCHEMA,
+            "assay.privileged_mcp_action.conformance_run.v1",
+        )
+        self.assertEqual(
+            schema["properties"]["schema"]["const"],
+            validate_run_record.RUN_SCHEMA,
+        )
+        capture = self.valid_capture("schema-v1")
+        output = self.root / "schema-v1-report.json"
+        self.assertEqual(self.score_capture(capture, output).returncode, 0)
+        report = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(report["schema"], validate_run_record.RUN_SCHEMA)
+        self.assertEqual(report["schema"], schema["properties"]["schema"]["const"])
+
+    def test_validator_refuses_canonical_v0_as_unsupported_schema(self) -> None:
+        """A v0 record is refused as unsupported schema, not as a shape error."""
+        capture = self.valid_capture("v0-refusal")
+        output = self.root / "v0-refusal-report.json"
+        self.assertEqual(self.score_capture(capture, output).returncode, 0)
+        report = json.loads(output.read_text(encoding="utf-8"))
+        v0 = json.loads(json.dumps(report))
+        v0["schema"] = "assay.privileged_mcp_action.conformance_run.v0"
+        del v0["suite"]
+        del v0["capture_sha256"]
+        with self.assertRaisesRegex(ValueError, "unsupported schema") as ctx:
+            validate_run_record.validate_run_record(v0)
+        self.assertNotIn("missing or surplus fields", str(ctx.exception))
+
+    def test_profile_remains_privileged_mcp_action_v0(self) -> None:
+        schema = json.loads((CORPUS_DIR / "report.schema.json").read_text(encoding="utf-8"))
+        self.assertEqual(validate_run_record.PROFILE, "privileged-mcp-action/v0")
+        self.assertEqual(
+            schema["properties"]["profile"]["const"],
+            "privileged-mcp-action/v0",
+        )
+        capture = self.valid_capture("profile-v0")
+        output = self.root / "profile-v0-report.json"
+        self.assertEqual(self.score_capture(capture, output).returncode, 0)
+        report = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(report["profile"], "privileged-mcp-action/v0")
+
+    def test_workflow_score_output_is_v1_only(self) -> None:
+        text = OCI_CANDIDATE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn('OUTPUT="$RUNNER_TEMP/oci-score/conformance_run.v1"', text)
+        self.assertIn("name: candidate-run-record-v1", text)
+        self.assertIn("${{ runner.temp }}/oci-score/conformance_run.v1", text)
+        self.assertNotIn("conformance_run.v0", text)
+        self.assertNotIn("candidate-run-record-v0", text)
+        self.assertIn("name: candidate-capture-v0", text)
+        self.assertIn("candidate_capture.v0", text)
 
     def test_missing_or_duplicated_observation_is_refused_without_a_record(self) -> None:
         capture = self.valid_capture("cardinality")
@@ -3496,7 +3751,7 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
             (
                 "score_artifact_name",
                 f"          {OCI_SCORE_ARTIFACT_NAME}\n",
-                "          name: candidate-run-record-v0-extra\n",
+                "          name: candidate-run-record-v1-extra\n",
                 "missing exact run-record artifact name",
             ),
         )

@@ -39,15 +39,11 @@ from artifact_io import (  # noqa: E402
     write_regular_file_atomically,
 )
 from capture_format import (  # noqa: E402
-    STATE_CANDIDATE_ERROR,
-    STATE_CAPTURE_ERROR,
-    STATE_OBSERVED,
     CaptureError,
     add_identity_arguments,
     identity_from_args,
     load_capture_with_digest,
     normative_surface,
-    review_warnings,
     validate_capture,
 )
 from pack_format import ordered_vectors, rewrite_bundle_stream_identity  # noqa: E402
@@ -56,17 +52,12 @@ from validate_run_record import (  # noqa: E402
     PROFILE,
     RUN_NON_CLAIMS,
     RUN_SCHEMA,
+    STATE_TO_STATUS,
     implementation_record,
+    report_case_from_observation,
     require_run_record_binds_capture,
     validate_run_record,
 )
-
-# A capture state names what happened on the capture host; a run-record status
-# names what the run concluded. The two vocabularies are joined in one place.
-STATE_TO_STATUS = {
-    STATE_CANDIDATE_ERROR: "execution_error",
-    STATE_CAPTURE_ERROR: "harness_error",
-}
 
 
 def load_expectations(manifest_path: Path) -> tuple[dict[str, Any], str, str]:
@@ -157,37 +148,10 @@ def score_capture(
         "review_warnings": 0,
     }
     for observation in capture["observations"]:
-        result: dict[str, Any] = {
-            "case_id": observation["case_id"],
-            "input_sha256": observation["input_sha256"],
-        }
-        if observation["state"] != STATE_OBSERVED:
-            status = STATE_TO_STATUS[observation["state"]]
-            result.update(status=status, error=observation["error"])
-            counts[status] += 1
-            cases.append(result)
-            continue
-        observed = observation["observed"]
-        expected = expected_by_hash.get(observation["input_sha256"])
-        if expected is None:
-            result.update(
-                status="harness_error",
-                error="opaque case is absent from canonical expectations",
-            )
-            counts["harness_error"] += 1
-            cases.append(result)
-            continue
-        result.update(
-            status="match" if observed == expected else "mismatch",
-            observed=observed,
-            exit_code=observation["exit_code"],
-            stderr_present=observation["stderr_present"],
-        )
+        result = report_case_from_observation(observation, expected_by_hash)
         counts[result["status"]] += 1
-        warnings = review_warnings(observation)
-        if warnings:
-            result["review_warnings"] = warnings
-            counts["review_warnings"] += len(warnings)
+        warnings = result.get("review_warnings", [])
+        counts["review_warnings"] += len(warnings)
         cases.append(result)
 
     return {
@@ -315,7 +279,7 @@ def main() -> int:
     report["capture_sha256"] = digest
     try:
         validate_run_record(report)
-        require_run_record_binds_capture(report, capture, digest)
+        require_run_record_binds_capture(report, capture, digest, expected_by_hash)
     except (KeyError, TypeError, ValueError) as error:
         print(f"scorer produced an invalid run record: {error}", file=sys.stderr)
         return 2

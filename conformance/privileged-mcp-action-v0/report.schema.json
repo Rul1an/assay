@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/Rul1an/assay/privileged-mcp-action-v0-candidate.1/conformance/privileged-mcp-action-v0/report.schema.json",
+  "$id": "urn:assay:schema:privileged-mcp-action:conformance-run:v1",
   "title": "Privileged MCP Action v0 conformance run",
   "type": "object",
   "additionalProperties": false,
@@ -22,7 +22,7 @@
   ],
   "properties": {
     "schema": {
-      "const": "assay.privileged_mcp_action.conformance_run.v0"
+      "const": "assay.privileged_mcp_action.conformance_run.v1"
     },
     "profile": {
       "const": "privileged-mcp-action/v0"
