@@ -187,6 +187,49 @@ class ClassifyMeasuredCommit(unittest.TestCase):
             self.assertEqual(kind, chk.CLEAN)
             self.assertEqual(extra, [])
 
+    def test_dependency_absent_from_both_git_trees_is_malformed(self):
+        """An untracked name cannot establish freshness by producing an empty diff."""
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            first = self._tiny_repo(repo, {"tracked.txt": "a\n"})
+            kind, extra = chk.classify_measured_commit(first, ["missing.txt"], repo)
+            self.assertEqual(kind, chk.MALFORMED)
+            self.assertEqual(extra, ["missing.txt"])
+
+    def test_git_symlink_dependency_is_malformed_even_if_worktree_file_is_regular(self):
+        """Git-tree mode, not the current filesystem target, defines the dependency."""
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            self._tiny_repo(repo, {"target.txt": "a\n"})
+            link = repo / "link.txt"
+            link.write_text("target.txt", encoding="utf-8")
+            blob = self._git(repo, "hash-object", "-w", "--", "link.txt").stdout.strip()
+            self._git(repo, "update-index", "--add", "--cacheinfo", "120000,%s,link.txt" % blob)
+            self._git(repo, "commit", "-m", "git symlink entry")
+            measured = self._git(repo, "rev-parse", "HEAD").stdout.strip()
+
+            kind, extra = chk.classify_measured_commit(measured, ["link.txt"], repo)
+            self.assertEqual(kind, chk.MALFORMED)
+            self.assertEqual(extra, ["link.txt"])
+
+    def test_regular_file_added_after_measurement_is_dirty(self):
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            first = self._tiny_repo(repo, {"keep.txt": "a\n"}, later={"added.txt": "b\n"})
+            kind, extra = chk.classify_measured_commit(first, ["added.txt"], repo)
+            self.assertEqual(kind, chk.DIRTY)
+            self.assertEqual(extra, ["added.txt"])
+
+    def test_regular_file_deleted_after_measurement_is_dirty(self):
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            first = self._tiny_repo(repo, {"deleted.txt": "a\n"})
+            self._git(repo, "rm", "--", "deleted.txt")
+            self._git(repo, "commit", "-m", "delete regular dependency")
+            kind, extra = chk.classify_measured_commit(first, ["deleted.txt"], repo)
+            self.assertEqual(kind, chk.DIRTY)
+            self.assertEqual(extra, ["deleted.txt"])
+
     def test_one_malformed_dependency_is_not_filtered_away(self):
         """A valid dirty path next to pathspec magic is still a typed finding."""
         with tempfile.TemporaryDirectory() as raw:
@@ -200,6 +243,14 @@ class ClassifyMeasuredCommit(unittest.TestCase):
             self.assertEqual(kind, chk.MALFORMED)
             self.assertNotEqual(kind, chk.CLEAN)
             self.assertNotEqual(kind, chk.DIRTY)
+
+    def test_wrongly_typed_depends_on_is_reported_as_a_dependency_problem(self):
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            first = self._tiny_repo(repo, {"tracked.txt": "a\n"})
+            kind, extra = chk.classify_measured_commit(first, "tracked.txt", repo)
+            self.assertEqual(kind, chk.MALFORMED)
+            self.assertEqual(extra, ["tracked.txt"])
 
 
 class CheckerFailsClosedOnUnresolved(unittest.TestCase):

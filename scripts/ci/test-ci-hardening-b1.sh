@@ -690,14 +690,9 @@ required = (
     "set -euo pipefail",
     "python3 conformance/tests/test_published_numbers_provenance.py",
 )
-for cmd in required:
-    if cmd not in active:
-        sys.exit("active command missing or not live: " + cmd)
-    for line in active:
-        if line == cmd:
-            continue
-        if line == ": " + cmd or line.startswith(": " + cmd):
-            sys.exit("active command neutralized with ':': " + cmd)
+if active != list(required):
+    sys.exit("active provenance step body must be exactly %r, got %r" %
+             (list(required), active))
 sys.exit(0)
 PY
 then

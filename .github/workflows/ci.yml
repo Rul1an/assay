@@ -165,7 +165,7 @@ jobs:
           python3 conformance/run_all.py --require-complete --completion-scope required
 
       # Stdlib-only. Required CI cannot go green if these tests are deleted;
-      # adequacy-drift is not a required context. No if:/continue-on-error.
+      # adequacy-drift is not a required context. No conditional or soft-failure settings.
       # After setup-python so this uses the pinned 3.12, not the runner default.
       - name: Published-numbers provenance contract
         shell: bash
