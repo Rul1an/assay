@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import stat
@@ -88,13 +89,28 @@ def read_regular_file(path: Path, limit: int = MAX_RESULTS_BYTES) -> bytes:
         os.close(fd)
 
 
-def _parse_json_bytes(data: bytes, label: str) -> dict:
+def _reject_nonfinite_json_number(value: str) -> None:
+    raise ValueError("non-finite JSON number %s is not permitted" % value)
+
+
+def parse_json_object(data: bytes, label: str) -> dict:
     try:
-        value = json.loads(data.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        value = json.loads(
+            data.decode("utf-8"), parse_constant=_reject_nonfinite_json_number
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise ValueError("%s is not readable JSON: %s" % (label, exc)) from exc
     if not isinstance(value, dict):
         raise ValueError("%s must be a JSON object" % label)
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, float) and not math.isfinite(current):
+            raise ValueError("%s is not readable JSON: non-finite number" % label)
+        if isinstance(current, dict):
+            pending.extend(current.values())
+        elif isinstance(current, list):
+            pending.extend(current)
     return value
 
 
@@ -202,14 +218,34 @@ def _validate_report(report: dict) -> None:
     if report["declared_total"] != total:
         raise ValueError("declared_total does not match the producer counts")
     score = report.get("score_percent")
-    if score is not None and (isinstance(score, bool) or not isinstance(score, (int, float))):
-        raise ValueError("score_percent must be numeric or null")
-    if not isinstance(report.get("adequate"), bool):
+    denominator = report["killed"] + report["survived"] + report["silent"]
+    if denominator == 0:
+        if score is not None:
+            raise ValueError("score_percent must be null when the scored denominator is zero")
+    else:
+        if isinstance(score, bool) or not isinstance(score, (int, float)):
+            raise ValueError("score_percent must be numeric when the scored denominator is nonzero")
+        if not math.isfinite(score):
+            raise ValueError("producer report score_percent must be finite")
+        expected_score = round(100.0 * report["killed"] / denominator, 1)
+        if score != expected_score:
+            raise ValueError("score_percent does not match the producer counts")
+    adequate = report.get("adequate")
+    if not isinstance(adequate, bool):
         raise ValueError("adequate must be boolean")
+    failures = report.get("failures")
+    if (not isinstance(failures, list)
+            or any(not isinstance(item, str) or not item for item in failures)):
+        raise ValueError("failures must be a list of non-empty strings")
+    if adequate != (not failures):
+        raise ValueError("adequate does not match failures")
     if not isinstance(report.get("diagnostic_channel_declared"), bool):
         raise ValueError("diagnostic_channel_declared must be boolean")
-    if report.get("control_status") not in CONTROL:
+    control_status = report.get("control_status")
+    if control_status not in CONTROL:
         raise ValueError("control_status is not a producer verdict")
+    if score is not None and control_status != "killed":
+        raise ValueError("a scored producer report requires a killed control")
     _sha(report.get("manifest_sha256"), "manifest_sha256")
     if report.get("tool_source_state") != "exact":
         raise ValueError("tool_source_state is %s, not exact" % report.get("tool_source_state"))
@@ -226,6 +262,13 @@ def _validate_subject(value: object) -> dict:
     return value
 
 
+def _validate_manifest_report_binding(declared: dict, report: dict) -> None:
+    if declared.get("runner", "module") != report["runner"]:
+        raise ValueError("runner differs between manifest and producer report")
+    if report["diagnostic_channel_declared"] != (declared.get("diagnostic_from") is not None):
+        raise ValueError("diagnostic channel differs between manifest and producer report")
+
+
 def project_report(
     manifest_path: Path, report: dict, encoded_report: bytes, *, corpus: str,
     manifest: str, measured_commit: str, depends_on: list[str], subject: dict,
@@ -235,14 +278,13 @@ def project_report(
         raise ValueError("corpus id must be a non-empty string")
     manifest = _dependencies([manifest])[0]
     _validate_report(report)
-    if _parse_json_bytes(encoded_report, "producer report") != report:
+    if parse_json_object(encoded_report, "producer report") != report:
         raise ValueError("producer report bytes do not encode the supplied report")
     manifest_data = read_regular_file(manifest_path)
-    declared = _parse_json_bytes(manifest_data, str(manifest_path))
+    declared = parse_json_object(manifest_data, str(manifest_path))
     if report.get("manifest") != manifest:
         raise ValueError("producer manifest differs from the repository-relative row identity")
-    if declared.get("runner", "module") != report["runner"]:
-        raise ValueError("runner differs between manifest and producer report")
+    _validate_manifest_report_binding(declared, report)
     if report["manifest_sha256"] != _digest(manifest_data):
         raise ValueError("manifest_sha256 does not address the exact manifest bytes")
     if not isinstance(measured_commit, str) or not HEX40.fullmatch(measured_commit):
@@ -285,7 +327,7 @@ def _validate_current_row(row: dict, reports: dict, repo: Path) -> None:
     raw = encoded.encode("utf-8")
     if _digest(raw) != digest:
         raise ValueError("report_sha256 does not address the stored producer bytes")
-    report = _parse_json_bytes(raw, "stored producer report")
+    report = parse_json_object(raw, "stored producer report")
     _validate_report(report)
     for row_field, report_field in ROW_FROM_REPORT.items():
         if row.get(row_field) != report.get(report_field):
@@ -299,11 +341,10 @@ def _validate_current_row(row: dict, reports: dict, repo: Path) -> None:
         raise ValueError("producer manifest differs from the repository-relative row identity")
     manifest_path = _indexed_manifest_path(repo, manifest_rel)
     manifest_data = read_regular_file(manifest_path)
-    declared = _parse_json_bytes(manifest_data, str(manifest_path))
+    declared = parse_json_object(manifest_data, str(manifest_path))
     if _digest(manifest_data) != report["manifest_sha256"]:
         raise ValueError("manifest_sha256 does not address the indexed manifest")
-    if declared.get("runner", "module") != report["runner"]:
-        raise ValueError("runner differs between indexed manifest and producer report")
+    _validate_manifest_report_binding(declared, report)
     measured = row.get("measured_at")
     if not isinstance(measured, dict) or not isinstance(measured.get("commit"), str):
         raise ValueError("measured_at must name a commit and dependencies")
@@ -346,7 +387,7 @@ def _validate_current_row(row: dict, reports: dict, repo: Path) -> None:
 def load_results(
     path: Path, *, limit: int = MAX_RESULTS_BYTES, require_current: bool = False
 ) -> LoadedResults:
-    document = _parse_json_bytes(read_regular_file(path, limit), "%s results JSON" % path)
+    document = parse_json_object(read_regular_file(path, limit), "%s results JSON" % path)
     if document.get("schema") not in (None, RESULTS_SCHEMA):
         raise ValueError("results document has an unsupported schema")
     rows = document.get("corpora")

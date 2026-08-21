@@ -650,9 +650,9 @@ else
   fail "ci.yml does not actively invoke evidence-vocabulary in the scope job"
 fi
 
-echo "== required CI workflow actively runs published-numbers provenance contract =="
+echo "== required CI workflow actively runs published-numbers projection contract =="
 # Adequacy-drift is not a required context. Without this always-run scope-job
-# caller, required CI can go green after the provenance tests are deleted.
+# caller, required CI can go green after the provenance, projection, or live checker is deleted.
 # This is the only callsite guard: comment-out, ':' neutralization, or deletion
 # of either live command must make this contract red.
 if python3 - "${CI_WF}" <<'PY'
@@ -665,19 +665,19 @@ if not match:
     sys.exit("scope job missing from ci.yml")
 section = match.group(1)
 setup_at = section.find("uses: actions/setup-python")
-step_at = section.find("- name: Published-numbers provenance contract")
+step_at = section.find("- name: Published-numbers projection contract")
 if setup_at < 0 or step_at < 0 or step_at < setup_at:
-    sys.exit("provenance-contract step must follow actions/setup-python")
+    sys.exit("published-numbers step must follow actions/setup-python")
 step = re.search(
-    r"(?m)^      - name: Published-numbers provenance contract\n(?P<body>(?:        .+\n)+)(?:\n*)(?=^      - |\Z)",
+    r"(?m)^      - name: Published-numbers projection contract\n(?P<body>(?:        .+\n)+)(?:\n*)(?=^      - |\Z)",
     section,
 )
 if not step:
-    sys.exit("scope job missing 'Published-numbers provenance contract' step")
+    sys.exit("scope job missing 'Published-numbers projection contract' step")
 body = step.group("body")
 for forbidden in ("if:", "continue-on-error:"):
     if re.search(rf"(?m)^        {re.escape(forbidden)}", body):
-        sys.exit(f"provenance-contract step must not use {forbidden}")
+        sys.exit(f"published-numbers step must not use {forbidden}")
 active = []
 for line in body.splitlines():
     if not line.startswith("          "):
@@ -689,16 +689,18 @@ for line in body.splitlines():
 required = (
     "set -euo pipefail",
     "python3 conformance/tests/test_published_numbers_provenance.py",
+    "python3 conformance/tests/test_published_numbers_guard.py",
+    "python3 conformance/adequacy/check_published_numbers.py",
 )
 if active != list(required):
-    sys.exit("active provenance step body must be exactly %r, got %r" %
+    sys.exit("active published-numbers step body must be exactly %r, got %r" %
              (list(required), active))
 sys.exit(0)
 PY
 then
-  ok "ci.yml scope job actively runs the published-numbers provenance contract"
+  ok "ci.yml scope job actively runs the published-numbers projection contract"
 else
-  fail "ci.yml does not actively invoke the provenance contract in the scope job"
+  fail "ci.yml does not actively invoke the published-numbers projection contract"
 fi
 
 if [[ "${failures}" -ne 0 ]]; then

@@ -22,8 +22,10 @@ Without it every other test could pass against a sandbox the checker never reads
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -36,11 +38,14 @@ sys.path.insert(0, str(REPO / "conformance/adequacy"))
 
 import check_published_numbers as chk  # noqa: E402
 import measure_all  # noqa: E402
+import project_published_numbers as project  # noqa: E402
 
 COPIED = [
     "conformance/adequacy/results.json",
     "conformance/INDEX.md",
+    "conformance/INDEX.md.in",
     "conformance/privileged-mcp-action-v0/ERRATA.md",
+    "conformance/privileged-mcp-action-v0/ERRATA.md.in",
 ]
 
 
@@ -72,16 +77,224 @@ def sandbox():
 def edit(path: Path, old: str, new: str) -> None:
     """Replace the FIRST occurrence only.
 
-    Replacing every occurrence would edit the prose and the bindings block
-    together, which is the one edit a careful author makes and therefore the one
-    a control must not simulate. The controls here break exactly one side.
+    Replacing every occurrence could edit both authored template and generated
+    output, which is the one edit a careless control must not simulate. The
+    controls here break exactly one side.
     """
     text = path.read_text(encoding="utf-8")
     assert text.count(old) >= 1, "control anchor not found, so it would break nothing: %r" % old
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
+class ProjectionTemplateContract(unittest.TestCase):
+    @staticmethod
+    def template(body: str) -> str:
+        return (
+            body
+            + "\n<!-- BEGIN CHECKED NUMBERS -->\n```json\n"
+            + '{"not_derived": []}'
+            + "\n```\n<!-- END CHECKED NUMBERS -->\n"
+        )
+
+    def test_publication_values_name_the_scored_denominator_and_control(self):
+        rows = [
+            {
+                "corpus": "demo",
+                "killed": 2,
+                "survived": 3,
+                "silent": 4,
+                "score_percent": 22.2,
+                "control": "killed",
+                "control_status": "killed",
+                "equivalent": 1,
+                "out_of_scope": 5,
+                "known_holes": 6,
+                "declared_total": 21,
+            },
+            {
+                "corpus": "control-only",
+                "killed": 0,
+                "survived": 0,
+                "silent": 0,
+                "score_percent": None,
+                "control": "killed",
+                "control_status": "killed",
+                "equivalent": 0,
+                "out_of_scope": 0,
+                "known_holes": 0,
+                "declared_total": 0,
+            },
+            {
+                "corpus": "unmeasured-survivor",
+                "killed": 0,
+                "survived": 0,
+                "silent": 0,
+                "score_percent": None,
+                "control": "survived",
+                "control_status": "survived",
+                "equivalent": 0,
+                "out_of_scope": 0,
+                "known_holes": 0,
+                "declared_total": 0,
+            },
+        ]
+        values_for = getattr(project, "publication_values", None)
+        self.assertIsNotNone(values_for, "the production projector has no typed value map")
+        values = values_for(rows)
+        self.assertEqual(values["demo.in_scope"], 9)
+        self.assertEqual(values["demo.corpus"], "demo")
+        self.assertEqual(values["demo.score_percent"], 22.2)
+        self.assertEqual(values["control-only.control"], "killed")
+        self.assertIsNone(values["control-only.score_percent"])
+        self.assertEqual(values["aggregate.measured"], 1)
+        self.assertEqual(values["aggregate.control_only"], 1)
+        self.assertEqual(
+            values["demo.table_result"],
+            "2 of 9 in scope (22.2%), 3 survivors, 1 declared equivalent, "
+            "5 out of scope, 6 known holes",
+        )
+        self.assertEqual(values["aggregate.summary"], "One measured, one control-only")
+
+    def test_real_templates_render_the_committed_documents(self):
+        render_all = getattr(project, "render_documents", None)
+        self.assertIsNotNone(render_all, "the production projector has no document projection")
+        rendered = render_all(REPO)
+        self.assertEqual(
+            rendered[REPO / "conformance/INDEX.md"],
+            (REPO / "conformance/INDEX.md").read_text(encoding="utf-8"),
+        )
+        errata = REPO / "conformance/privileged-mcp-action-v0/ERRATA.md"
+        self.assertEqual(rendered[errata], errata.read_text(encoding="utf-8"))
+
+    def test_expression_dsl_does_not_return_through_templates_or_checker(self):
+        sources = [
+            REPO / "conformance/adequacy/check_published_numbers.py",
+            REPO / "conformance/adequacy/project_published_numbers.py",
+            REPO / "conformance/INDEX.md.in",
+            REPO / "conformance/privileged-mcp-action-v0/ERRATA.md.in",
+        ]
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in sources)
+        for forbidden in ("eval(", '"asserts"', '"locals"', "adjustments.json"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, combined)
+
+    def test_named_fields_render_without_an_expression_language(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw) / "demo"
+            directory.mkdir()
+            template = directory / "INDEX.md.in"
+            template.write_text(
+                self.template(
+                    "| {{demo.corpus}} | module | {{demo.table_result}} |"
+                ),
+                encoding="utf-8",
+            )
+            render = getattr(project, "render_template", None)
+            self.assertIsNotNone(render, "the production projector has no template renderer")
+            self.assertEqual(
+                render(
+                    template,
+                    {
+                        "demo.corpus": "demo",
+                        "demo.table_result": "6 of 10 in scope (60.0%)",
+                    },
+                ),
+                self.template("| demo | module | 6 of 10 in scope (60.0%) |"),
+            )
+
+    def test_bounded_formatters_preserve_public_wording_without_evaluation(self):
+        self.assertEqual(project.format_value(4, "word-title"), "Four")
+        self.assertEqual(project.format_value(1, "word"), "one")
+        self.assertEqual(project.format_value(25, "word"), "twenty-five")
+        self.assertEqual(project.format_value(60.0, "compact"), "60")
+
+    def test_unknown_and_null_tokens_fail_closed(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw) / "demo"
+            directory.mkdir()
+            template = directory / "INDEX.md.in"
+            for token, values in (
+                ("{{demo.missing}}", {}),
+                ("{{demo.missing}}", {"demo.missing": None}),
+                ("{{Demo.missing}}", {"Demo.missing": 1}),
+                ("{{demo.missing:eval}}", {"demo.missing": 1}),
+            ):
+                template.write_text(
+                    self.template("| {{demo.corpus}} | module | %s |" % token),
+                    encoding="utf-8",
+                )
+                with self.subTest(token=token, values=values), self.assertRaisesRegex(
+                    ValueError, "template|table result role"
+                ):
+                    project.render_template(
+                        template, {"demo.corpus": "demo", **values}
+                    )
+
+    def test_template_read_is_bounded_before_materialization(self):
+        with tempfile.TemporaryDirectory() as raw:
+            template = Path(raw) / "INDEX.md.in"
+            template.write_bytes(b"x" * (1024 * 1024 + 1))
+            with self.assertRaisesRegex(ValueError, "1048576-byte limit"):
+                project.render_template(template, {})
+
+    def test_checked_metadata_requires_exactly_one_json_fence(self):
+        with tempfile.TemporaryDirectory() as raw:
+            template = Path(raw) / "INDEX.md.in"
+            template.write_text(
+                self.template("body")
+                .replace("\n<!-- END CHECKED NUMBERS -->", "\n```json\n{}\n```\n<!-- END CHECKED NUMBERS -->"),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "exactly one JSON metadata fence"):
+                project.template_parts(template)
+
+    def test_checked_metadata_rejects_nonfinite_json_numbers(self):
+        with tempfile.TemporaryDirectory() as raw:
+            template = Path(raw) / "INDEX.md.in"
+            for token in ("NaN", "1e999"):
+                hostile = token if token != "1e999" else '{"nested":[1e999]}'
+                template.write_text(
+                    self.template("body").replace(
+                        '{"not_derived": []}',
+                        '{"not_derived": [], "hostile": %s}' % hostile,
+                    ),
+                    encoding="utf-8",
+                )
+                with self.subTest(token=token), self.assertRaisesRegex(
+                    ValueError, "not readable JSON"
+                ):
+                    project.template_parts(template)
+
+    @unittest.skipUnless(hasattr(Path, "symlink_to"), "symlinks unavailable")
+    def test_atomic_writer_does_not_follow_a_predictable_temporary_symlink(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            output = root / "INDEX.md"
+            victim = root / "outside.txt"
+            victim.write_text("keep\n", encoding="utf-8")
+            output.with_name(output.name + ".tmp").symlink_to(victim)
+            with mock.patch.object(project, "render_documents", return_value={output: "safe\n"}):
+                project.write_documents(root)
+            self.assertEqual(victim.read_text(encoding="utf-8"), "keep\n")
+            self.assertEqual(output.read_text(encoding="utf-8"), "safe\n")
+
+
 class TheGuardIsWiredToTheRealTree(unittest.TestCase):
+    def test_committed_documents_are_a_fresh_projection(self):
+        """The generator itself must prove the checked-in Markdown is current."""
+        projection = subprocess.run(
+            [
+                sys.executable,
+                str(REPO / "conformance/adequacy/project_published_numbers.py"),
+                "--check",
+            ],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(projection.returncode, 0, projection.stdout + projection.stderr)
+
     def test_the_real_tree_is_green(self):
         """Wiring, not a control: the checker's own constants over the real repository.
 
@@ -109,7 +322,7 @@ class TheGuardIsWiredToTheRealTree(unittest.TestCase):
         self.assertEqual(doc["schema"], measure_all.SCHEMA)
 
 
-class ControlsOnTheProseBinding(unittest.TestCase):
+class ControlsOnThePublicProjection(unittest.TestCase):
     def assert_red(self, needle: str):
         findings = chk.check()
         self.assertTrue(findings, "the checker stayed green; this guard is wired to nothing")
@@ -127,46 +340,170 @@ class ControlsOnTheProseBinding(unittest.TestCase):
         self.assertFalse(findings, "expected a clean baseline, got: %s" % findings)
 
     def test_a_measurement_that_moves_without_the_prose_is_red(self):
-        """CONTROL: change killed 51 -> 50 in results.json for rge-bench.
+        """CONTROL: move an addressed report and row without regenerating the prose.
 
-        INDEX.md still says 51 of 54. Red on the assertion, green again on restore.
+        Both layers must remain mutually consistent so only the projection guard,
+        rather than the earlier row-to-report validation, can make this test red.
         """
         with sandbox() as root:
             self.assertEqual(chk.check(), [])
             res = root / "conformance/adequacy/results.json"
             doc = json.loads(res.read_text())
-            for c in doc["corpora"]:
-                if c["corpus"] == "rge-bench":
-                    c["killed"] = 50
+            row = next(c for c in doc["corpora"] if c["corpus"] == "rge-bench")
+            old_digest = row["report_sha256"]
+            report = json.loads(doc["reports"].pop(old_digest))
+            report["killed"] -= 1
+            report["survived"] += 1
+            denominator = report["killed"] + report["survived"] + report["silent"]
+            report["score_percent"] = round(100.0 * report["killed"] / denominator, 1)
+            encoded = (json.dumps(report, indent=2, sort_keys=True) + "\n").encode("utf-8")
+            digest = "sha256:" + hashlib.sha256(encoded).hexdigest()
+            doc["reports"][digest] = encoded.decode("utf-8")
+            for field in ("killed", "survived", "score_percent"):
+                row[field] = report[field]
+            row["report_sha256"] = digest
+            row["report_ref"] = "#/reports/" + digest
             res.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
-            self.assert_red("the measurement gives")
+            self.assert_red("differs from its fresh deterministic projection")
             shutil.copy2(REPO / "conformance/adequacy/results.json", res)
             self.assertEqual(chk.check(), [])
 
-    def test_prose_edited_away_from_the_binding_is_red(self):
-        """CONTROL: rewrite INDEX.md's rge-bench row to '51 of 55'.
+    def test_a_valid_token_from_another_corpus_is_red(self):
+        """CONTROL: a valid value must remain bound to the claim it describes."""
+        with sandbox() as root:
+            template = root / "conformance/INDEX.md.in"
+            edit(template, "{{mcp-jsonrpc-id.table_result}}", "{{rge-bench.table_result}}")
+            self.assert_red("token line must use exactly one corpus namespace")
 
-        The registered wording no longer occurs, so the binding is orphaned.
+    def test_a_claim_cannot_move_all_tokens_and_its_binding_to_another_corpus(self):
+        """CONTROL: claim identity and values must come from the same typed row.
+
+        Moving every value token together used to publish rge-bench values
+        under the visible mcp-jsonrpc-id row while the projector and checker
+        both stayed green.
         """
         with sandbox() as root:
+            template = root / "conformance/INDEX.md.in"
+            source = template.read_text(encoding="utf-8")
+            original = next(
+                line for line in source.splitlines()
+                if line.startswith("| `{{mcp-jsonrpc-id.corpus}}-conformance`")
+            )
+            moved = original.replace("mcp-jsonrpc-id.", "rge-bench.")
+            self.assertNotEqual(original, moved)
+            template.write_text(source.replace(original, moved, 1), encoding="utf-8")
+            with self.assertRaisesRegex(
+                ValueError, "corpus table must bind each measured corpus exactly once"
+            ):
+                project.write_documents(root)
+
+    def test_two_complete_claim_namespaces_cannot_trade_places(self):
+        """CONTROL: a corpus-table permutation must not preserve a green projection."""
+        with sandbox() as root:
+            template = root / "conformance/INDEX.md.in"
+            source = template.read_text(encoding="utf-8")
+            source = source.replace("mcp-jsonrpc-id.", "temporary-corpus.")
+            source = source.replace("rge-bench.", "mcp-jsonrpc-id.")
+            source = source.replace("temporary-corpus.", "rge-bench.")
+            template.write_text(source, encoding="utf-8")
+            with self.assertRaisesRegex(
+                ValueError, "measured corpus order"
+            ):
+                project.write_documents(root)
+
+    def test_a_corpus_table_row_cannot_restate_its_identity_by_hand(self):
+        """CONTROL: the reader-visible identity is projected, not transcribed."""
+        with sandbox() as root:
+            template = root / "conformance/INDEX.md.in"
+            edit(template, "{{mcp-jsonrpc-id.corpus}}", "mcp-jsonrpc-id")
+            with self.assertRaisesRegex(
+                ValueError, "corpus table row must render its identity"
+            ):
+                project.write_documents(root)
+
+    def test_a_corpus_specific_document_cannot_move_to_another_corpus(self):
+        """CONTROL: a document path provides an independent corpus binding."""
+        with sandbox() as root:
+            template = root / "conformance/privileged-mcp-action-v0/ERRATA.md.in"
+            source = template.read_text(encoding="utf-8")
+            template.write_text(
+                source.replace("privileged-mcp-action-v0.", "rge-bench."),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "document context"):
+                project.write_documents(root)
+
+    def test_a_general_document_cannot_hide_a_corpus_claim_outside_its_table(self):
+        """CONTROL: index-level corpus claims belong in its ordered corpus table."""
+        with tempfile.TemporaryDirectory() as raw:
+            template = Path(raw) / "INDEX.md.in"
+            template.write_text(
+                ProjectionTemplateContract.template("{{demo.killed}} killed"),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "outside a corpus table"):
+                project.render_template(
+                    template,
+                    {"demo.corpus": "demo", "demo.killed": 1},
+                )
+
+    def test_a_table_result_cannot_substitute_a_same_corpus_field(self):
+        """CONTROL: table result is one typed phrase, not interchangeable scalars."""
+        with sandbox() as root:
+            template = root / "conformance/INDEX.md.in"
+            edit(
+                template,
+                "{{mcp-jsonrpc-id.table_result}}",
+                "{{mcp-jsonrpc-id.survived}}",
+            )
+            with self.assertRaisesRegex(ValueError, "table result role"):
+                project.write_documents(root)
+
+    def test_a_document_summary_cannot_substitute_a_same_corpus_field(self):
+        """CONTROL: corpus document summary has one non-interchangeable role."""
+        with sandbox() as root:
+            template = root / "conformance/privileged-mcp-action-v0/ERRATA.md.in"
+            edit(
+                template,
+                "{{privileged-mcp-action-v0.document_summary}}",
+                "{{privileged-mcp-action-v0.survived}}",
+            )
+            with self.assertRaisesRegex(ValueError, "document summary role"):
+                project.write_documents(root)
+
+    def test_an_aggregate_summary_cannot_substitute_one_of_its_fields(self):
+        """CONTROL: aggregate wording is projected as one typed phrase."""
+        with sandbox() as root:
+            template = root / "conformance/INDEX.md.in"
+            edit(template, "{{aggregate.summary}}", "{{aggregate.control_only:word}}")
+            with self.assertRaisesRegex(ValueError, "aggregate summary role"):
+                project.write_documents(root)
+
+    def test_a_hand_edited_generated_document_is_red(self):
+        """CONTROL: mutate fresh output without carrying a hard-coded current score."""
+        with sandbox() as root:
             idx = root / "conformance/INDEX.md"
-            edit(idx, "51 of 54 in scope (94.4%)", "51 of 55 in scope (94.4%)")
-            self.assert_red("this exact wording is no longer in")
+            fresh = project.render_documents(root)[idx]
+            self.assertEqual(idx.read_text(encoding="utf-8"), fresh)
+            marker = " in scope ("
+            self.assertIn(marker, fresh, "fresh render did not reach a score line")
+            idx.write_text(fresh.replace(marker, " not in scope (", 1), encoding="utf-8")
+            self.assert_red("differs from its fresh deterministic projection")
             shutil.copy2(REPO / "conformance/INDEX.md", idx)
             self.assertEqual(chk.check(), [])
 
-    def test_an_unregistered_number_added_to_the_prose_is_red(self):
-        """CONTROL: append a plausible new score to INDEX.md that no binding covers.
+    def test_an_unregistered_number_added_to_the_template_is_red(self):
+        """CONTROL: append a plausible new score to INDEX.md.in without a token.
 
         This is the failure mode the sweep exists for: a number that reads like a
         measurement, was never measured, and would otherwise pass silently.
         """
         with sandbox() as root:
-            idx = root / "conformance/INDEX.md"
+            idx = root / "conformance/INDEX.md.in"
             edit(idx, "## Claim vocabulary",
                  "A later re-measurement gave 12 of 13 in scope (92.3%).\n\n## Claim vocabulary")
-            self.assert_red("neither derived from results.json nor")
-            shutil.copy2(REPO / "conformance/INDEX.md", idx)
+            self.assert_red("neither a generated token nor declared not_derived")
+            shutil.copy2(REPO / "conformance/INDEX.md.in", idx)
             self.assertEqual(chk.check(), [])
 
     def test_a_stale_not_derived_exemption_is_red(self):
@@ -176,49 +513,32 @@ class ControlsOnTheProseBinding(unittest.TestCase):
         so the checker refuses to carry it.
         """
         with sandbox() as root:
-            idx = root / "conformance/INDEX.md"
+            idx = root / "conformance/INDEX.md.in"
             edit(idx, "`6 of 8 (75.0%)`", "`(75.0%)`")
             self.assert_red("not_derived declares '6 of 8'")
-            shutil.copy2(REPO / "conformance/INDEX.md", idx)
+            shutil.copy2(REPO / "conformance/INDEX.md.in", idx)
             self.assertEqual(chk.check(), [])
 
-    def test_a_binding_that_checks_fewer_numbers_than_it_publishes_is_red(self):
-        """CONTROL: drop the survivors assertion from the mcp-jsonrpc-id binding.
-
-        The wording still says '4 survivors'. Without this rule a binding could
-        register a sentence and check only the flattering half of it.
-        """
+    def test_a_not_derived_exemption_without_a_reason_is_red(self):
+        """CONTROL: an editorial exemption needs its reason in the template."""
         with sandbox() as root:
-            idx = root / "conformance/INDEX.md"
-            edit(idx, '"score_percent": 60.0,\n        "survived": 4',
-                 '"score_percent": 60.0')
-            self.assert_red("which no assertion checks")
-            shutil.copy2(REPO / "conformance/INDEX.md", idx)
-            self.assertEqual(chk.check(), [])
-
-    def test_a_declared_constant_without_a_reason_is_red(self):
-        """CONTROL: strip the _why from INDEX.md's not_measurable local.
-
-        A constant with no stated reason is a number smuggled past the measurement,
-        which is precisely how the out_of_scope discipline was breached upstream.
-        """
-        with sandbox() as root:
-            idx = root / "conformance/INDEX.md"
-            edit(idx, '"_why_not_measurable"', '"_note_not_measurable"')
-            self.assert_red("has no _why_")
-            shutil.copy2(REPO / "conformance/INDEX.md", idx)
+            idx = root / "conformance/INDEX.md.in"
+            edit(idx, '"reason": "the superseded first mcp-jsonrpc-id score"',
+                 '"reason": ""')
+            self.assert_red("a not_derived entry needs a token and a reason")
+            shutil.copy2(REPO / "conformance/INDEX.md.in", idx)
             self.assertEqual(chk.check(), [])
 
     def test_deleting_the_block_is_red(self):
-        """CONTROL: remove the BEGIN marker from ERRATA.md.
+        """CONTROL: remove the BEGIN marker from the ERRATA template.
 
-        A document must not be able to opt out of the guard by dropping its block.
+        A template must not be able to opt out by dropping its exemption block.
         """
         with sandbox() as root:
-            err = root / "conformance/privileged-mcp-action-v0/ERRATA.md"
+            err = root / "conformance/privileged-mcp-action-v0/ERRATA.md.in"
             edit(err, chk.BEGIN, "<!-- gone -->")
             self.assert_red("must contain exactly one")
-            shutil.copy2(REPO / "conformance/privileged-mcp-action-v0/ERRATA.md", err)
+            shutil.copy2(REPO / "conformance/privileged-mcp-action-v0/ERRATA.md.in", err)
             self.assertEqual(chk.check(), [])
 
 

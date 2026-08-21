@@ -53,7 +53,7 @@ def report(*, runner: str = "module", control_status: str = "killed") -> dict:
         "declared_total": 11,
         "score_percent": 50.0,
         "adequate": False,
-        "diagnostic_channel_declared": True,
+        "diagnostic_channel_declared": False,
         "control_status": control_status,
         "manifest_sha256": "",
         "tool_commit": TOOL_COMMIT,
@@ -61,7 +61,7 @@ def report(*, runner: str = "module", control_status: str = "killed") -> dict:
         "tool_content_sha256": "sha256:" + "a" * 64,
         "tool_version": "0.1.0",
         "mutants": [{"verdict": "control-killed"}],
-        "failures": [],
+        "failures": ["synthetic survivor"],
     }
 
 
@@ -182,6 +182,17 @@ class BoundedInput(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "results JSON"):
                 published_rows.load_results(path)
 
+    def test_nonfinite_json_numbers_are_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "results.json"
+            for token in ("NaN", "Infinity", "-Infinity", "1e999"):
+                hostile = token if token != "1e999" else '{"nested":[1e999]}'
+                path.write_text('{"corpora":[],"hostile":%s}' % hostile, encoding="utf-8")
+                with self.subTest(token=token), self.assertRaisesRegex(
+                    ValueError, "results JSON"
+                ):
+                    published_rows.load_results(path)
+
     @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
     def test_symlink_input_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -218,20 +229,35 @@ class CurrentReportProjection(unittest.TestCase):
         self.assertEqual(row["out_of_scope"], 3)
         self.assertEqual(row["known_holes"], 1)
         self.assertEqual(row["unproved"], 2)
-        self.assertTrue(row["diagnostic_channel_declared"])
+        self.assertFalse(row["diagnostic_channel_declared"])
         self.assertEqual(row["control_status"], "killed")
         self.assertEqual(row["tool_source_state"], "exact")
         self.assertEqual(row["tool_content_sha256"], "sha256:" + "a" * 64)
         self.assertEqual(row["report_sha256"], sha256(encoded))
         self.assertEqual(row["report_ref"], "#/reports/%s" % sha256(encoded))
 
-    def test_control_status_is_not_reconstructed_from_mutant_rows(self):
+    def test_a_scored_report_requires_a_killed_control(self):
         value = report(control_status="survived")
         value["mutants"] = [{"verdict": "control-killed"}]
         with tempfile.TemporaryDirectory() as raw:
-            row, _ = projected(Path(raw), value=value)
-        self.assertEqual(row["control_status"], "survived")
-        self.assertEqual(row["control"], "SURVIVED")
+            with self.assertRaisesRegex(ValueError, "requires a killed control"):
+                projected(Path(raw), value=value)
+
+    def test_adequate_must_match_the_failure_inventory(self):
+        for adequate, failures in ((True, ["failure"]), (False, [])):
+            value = report()
+            value["adequate"] = adequate
+            value["failures"] = failures
+            with self.subTest(adequate=adequate), tempfile.TemporaryDirectory() as raw:
+                with self.assertRaisesRegex(ValueError, "adequate does not match failures"):
+                    projected(Path(raw), value=value)
+
+    def test_diagnostic_channel_must_match_the_manifest(self):
+        value = report()
+        value["diagnostic_channel_declared"] = True
+        with tempfile.TemporaryDirectory() as raw:
+            with self.assertRaisesRegex(ValueError, "diagnostic channel differs"):
+                projected(Path(raw), value=value)
 
     def test_error_envelope_is_not_a_successful_report(self):
         value = report()
@@ -247,12 +273,42 @@ class CurrentReportProjection(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "killed"):
                 projected(Path(raw), value=value)
 
-    def test_control_only_report_may_have_no_score(self):
+    def test_nonfinite_producer_score_is_rejected_before_projection(self):
+        for score in (float("nan"), float("inf"), float("-inf")):
+            value = report()
+            value["score_percent"] = score
+            with self.subTest(score=score), tempfile.TemporaryDirectory() as raw:
+                with self.assertRaisesRegex(ValueError, "producer report"):
+                    projected(Path(raw), value=value)
+
+    def test_finite_producer_score_must_match_the_scored_counts(self):
+        for score in (999.0, 50.1):
+            value = report()
+            value["score_percent"] = score
+            with self.subTest(score=score), tempfile.TemporaryDirectory() as raw:
+                with self.assertRaisesRegex(ValueError, "score_percent does not match"):
+                    projected(Path(raw), value=value)
+
+    def test_a_nonempty_scored_denominator_requires_a_score(self):
         value = report()
+        value["score_percent"] = None
+        with tempfile.TemporaryDirectory() as raw:
+            with self.assertRaisesRegex(ValueError, "score_percent must be numeric"):
+                projected(Path(raw), value=value)
+
+    def test_a_zero_scored_denominator_has_no_score(self):
+        value = report()
+        for field in ("killed", "survived", "silent"):
+            value[field] = 0
+        value["declared_total"] = sum(value[field] for field in published_rows.COUNT_FIELDS[:-1])
         value["score_percent"] = None
         with tempfile.TemporaryDirectory() as raw:
             row, _ = projected(Path(raw), value=value)
         self.assertIsNone(row["score_percent"])
+        value["score_percent"] = 0.0
+        with tempfile.TemporaryDirectory() as raw:
+            with self.assertRaisesRegex(ValueError, "must be null"):
+                projected(Path(raw), value=value)
 
     def test_dirty_and_unresolved_current_identity_fail_closed(self):
         for state in ("dirty", "unresolved"):
@@ -406,6 +462,23 @@ class CurrentResultsDocument(unittest.TestCase):
             document["corpora"][0]["control"] = "SURVIVED"
             path.write_text(json.dumps(document), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "control"):
+                published_rows.load_results(path)
+
+    def test_stored_diagnostic_channel_must_match_the_manifest(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path, document, encoded = self.write_current(Path(raw))
+            old_digest = sha256(encoded)
+            producer = json.loads(document["reports"].pop(old_digest))
+            producer["diagnostic_channel_declared"] = True
+            changed = report_bytes(producer)
+            new_digest = sha256(changed)
+            document["reports"][new_digest] = changed.decode("utf-8")
+            row = document["corpora"][0]
+            row["report_sha256"] = new_digest
+            row["report_ref"] = "#/reports/%s" % new_digest
+            row["diagnostic_channel_declared"] = True
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "diagnostic channel differs"):
                 published_rows.load_results(path)
 
     def test_unaddressed_report_bytes_are_rejected(self):

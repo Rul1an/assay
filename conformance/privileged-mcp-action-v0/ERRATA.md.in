@@ -43,8 +43,7 @@ with a quoted sentence and section reference (audited independently; none is an 
 detail smuggled into the count).
 
 ```
-6 of 25 DECLARED in-scope rules killed (24.0%). 4 declared out of scope, 31 rules declared.
-control-killed. 19 mutant(s) survived. 2 KNOWN HOLES.
+{{privileged-mcp-action-v0.document_summary}}
 ```
 
 That block is the tool's own output, kept verbatim. **Neither of its numbers is the number to quote
