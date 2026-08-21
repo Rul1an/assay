@@ -75,6 +75,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import published_rows
+
 REPO = Path(__file__).resolve().parents[2]
 # Object database for freshness. File reads use REPO; a sandbox may point
 # those at a copy, but git must still see the real commits.
@@ -318,9 +320,14 @@ def check() -> list[str]:
     if not RESULTS.is_file():
         return ["%s does not exist. Nothing re-derives the published numbers; run "
                 "conformance/adequacy/measure_all.py" % RESULTS.relative_to(REPO)]
-    doc = json.loads(RESULTS.read_text(encoding="utf-8"))
-    rows = doc.get("corpora", [])
-    by_corpus = {r["corpus"]: r for r in rows}
+    try:
+        loaded = published_rows.load_results(RESULTS)
+    except ValueError as exc:
+        return [str(exc)]
+    rows = list(loaded.rows)
+    by_corpus = loaded.by_corpus()
+    for corpus in loaded.document.get("unmeasured", []):
+        findings.append("%s was not measured; completed comparisons were retained" % corpus)
 
     # ---- 1. self-coverage -------------------------------------------------
     on_disk = {p.name[: -len(".manifest.json")]: p

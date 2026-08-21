@@ -40,6 +40,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import published_rows
+
 REPO = Path(__file__).resolve().parents[2]
 ADEQUACY = REPO / "conformance/adequacy"
 RESULTS = ADEQUACY / "results.json"
@@ -60,41 +62,20 @@ def load_tool():
     return ca
 
 
-def tool_is_dirty(allow_dirty: bool) -> bool:
+def require_clean_tool() -> None:
     """Refuse to record a measurement taken with an uncommitted tool checkout.
 
     A commit id that does not describe the code that ran is worse than no pin: it
-    is a pin that looks re-derivable and is not. --allow-dirty-tool records the
-    dirt in the commit string itself, so it can never match a manifest pin and the
-    checker goes red rather than quietly accepting it.
+    is a pin that looks re-derivable and is not. Dirty and unresolved producer
+    identities are not publishable rows.
     """
     dirty = bool(subprocess.run(["git", "-C", str(TOOL), "status", "--porcelain"],
                                 capture_output=True, text=True, check=True).stdout.strip())
-    if dirty and not allow_dirty:
+    if dirty:
         raise SystemExit(
             "the corpus-adequacy checkout at %s has uncommitted changes, so no commit id\n"
-            "describes the code that would run. Commit or stash them, or pass\n"
-            "--allow-dirty-tool to record the measurement as unpinned." % TOOL)
-    return dirty
-
-
-def identity(report: dict, dirty: bool) -> dict:
-    """Who measured this, taken from the tool's OWN report where it offers one.
-
-    corpus-adequacy carries `tool_version` and `tool_commit` in its report as of
-    0.1.0. Reading them beats re-deriving the commit here: two implementations of
-    "which tool ran" would drift, and the copy that drifts is the one that stops
-    describing the run. The git fallback exists only for tool checkouts older than
-    that, which report neither.
-    """
-    commit = report.get("tool_commit")
-    if not commit:
-        commit = subprocess.run(["git", "-C", str(TOOL), "rev-parse", "HEAD"],
-                                capture_output=True, text=True, check=True).stdout.strip()
-    out = {"tool_commit": commit + "-dirty" if dirty else commit}
-    if report.get("tool_version"):
-        out["tool_version"] = report["tool_version"]
-    return out
+            "describes the code that would run. Commit or restore it before measuring."
+            % TOOL)
 
 
 def manifests() -> list[Path]:
@@ -107,23 +88,6 @@ def corpus_id(manifest: Path) -> str:
 
 def rel(path: Path) -> str:
     return path.resolve().relative_to(REPO).as_posix()
-
-
-def control_verdict(report: dict) -> str:
-    """What the control did, as a first-class field rather than a footnote.
-
-    All-survivors because a corpus is weak and all-survivors because nothing was
-    ever measured print identically, so a score without a control verdict is not
-    a result. `none_declared` is recorded rather than hidden: the module runner
-    does not require a control, so a manifest can carry none, and that is a fact
-    a reader of the numbers needs.
-    """
-    verdicts = {m["verdict"] for m in report["mutants"]}
-    if "control-SURVIVED" in verdicts:
-        return "SURVIVED"
-    if "control-killed" in verdicts:
-        return "killed"
-    return "none_declared"
 
 
 def measured_at(declared: dict, manifest: Path) -> dict:
@@ -219,43 +183,36 @@ def subject(manifest: Path, declared: dict) -> dict:
     return {"subject": {"kind": "out_of_tree", "repos": repos}}
 
 
-def row(manifest: Path, report: dict, who: dict) -> dict:
-    # runner comes from the manifest, not the report: the module runner's report
-    # omits it and a KeyError here would be a writer crash over a label.
-    declared = json.loads(manifest.read_text(encoding="utf-8"))
-    return {
-        "corpus": corpus_id(manifest),
-        "manifest": rel(manifest),
-        "runner": declared.get("runner", "module"),
-        "killed": report["killed"],
-        "survived": report["survived"],
-        "equivalent": report["equivalent"],
-        "out_of_scope": report["unexercised_out_of_scope"],
-        "known_holes": report["known_holes"],
-        "unproved": report["unproved"],
-        "declared_total": report["declared_total"],
-        "score_percent": report["score_percent"],
-        "adequate": report["adequate"],
-        "control": control_verdict(report),
-        "provenance": {"kind": "measured"},
-        **subject(manifest, declared),
-        **measured_at(declared, manifest),
-        **who,
-    }
+def row(manifest: Path, report: dict, encoded_report: bytes) -> dict:
+    """Build one index row from the producer report and its exact wire bytes."""
+    declared = json.loads(published_rows.read_regular_file(manifest).decode("utf-8"))
+    measured = measured_at(declared, manifest).get("measured_at") or {}
+    return published_rows.project_report(
+        manifest,
+        report,
+        encoded_report,
+        corpus=corpus_id(manifest),
+        manifest=rel(manifest),
+        measured_commit=measured.get("commit"),
+        depends_on=measured.get("depends_on"),
+        subject=subject(manifest, declared)["subject"],
+    )
 
 
 def read_existing() -> dict[str, dict]:
     if not RESULTS.is_file():
         return {}
-    doc = json.loads(RESULTS.read_text(encoding="utf-8"))
-    return {c["corpus"]: c for c in doc.get("corpora", [])}
+    return published_rows.load_results(RESULTS).by_corpus()
 
 
-def write(rows: dict[str, dict]) -> None:
+def write(rows: dict[str, dict], reports: dict[str, str]) -> None:
+    addressed = {row["report_sha256"] for row in rows.values()}
     doc = {"schema": SCHEMA,
            "_about": "Measured mutation adequacy for every corpus manifest in this "
                      "directory. Written by measure_all.py; asserted against the published "
                      "prose by check_published_numbers.py. Do not hand-edit a measured row.",
+           "reports": {key: reports[key] for key in sorted(addressed)},
+           "unmeasured": [],
            "corpora": [rows[k] for k in sorted(rows)]}
     RESULTS.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -267,9 +224,6 @@ def main(argv: list[str] | None = None) -> int:
                     help="measure only this corpus (repeatable). Rows for the others are "
                          "carried over from results.json unchanged.")
     ap.add_argument("--list", action="store_true", help="list corpus ids and exit")
-    ap.add_argument("--allow-dirty-tool", action="store_true",
-                    help="record a measurement taken with an uncommitted tool checkout. The "
-                         "recorded commit is suffixed -dirty and will fail the pin check.")
     args = ap.parse_args(argv)
 
     found = manifests()
@@ -290,18 +244,27 @@ def main(argv: list[str] | None = None) -> int:
         selected = [m for m in found if corpus_id(m) in set(args.only)]
 
     ca = load_tool()
-    dirty = tool_is_dirty(args.allow_dirty_tool)
-    rows = read_existing()
+    require_clean_tool()
+    if RESULTS.is_file():
+        loaded = published_rows.load_results(RESULTS)
+        rows = loaded.by_corpus()
+        reports = dict(loaded.document.get("reports") or {})
+        if "reports" not in loaded.document and set(selected) != set(found):
+            raise SystemExit("legacy results require one full remeasurement before --only")
+    else:
+        rows, reports = {}, {}
 
     for manifest in selected:
         print("measuring %s ..." % corpus_id(manifest), flush=True)
         report = ca.run(manifest)
-        rows[corpus_id(manifest)] = row(manifest, report, identity(report, dirty))
+        encoded_report = ca.encode_report_v0(report)
+        rows[corpus_id(manifest)] = row(manifest, report, encoded_report)
+        reports[rows[corpus_id(manifest)]["report_sha256"]] = encoded_report.decode("utf-8")
         r = rows[corpus_id(manifest)]
         print("  killed=%s survived=%s score=%s control=%s"
               % (r["killed"], r["survived"], r["score_percent"], r["control"]), flush=True)
 
-    write(rows)
+    write(rows, reports)
     print("wrote %s (%d corpora)" % (rel(RESULTS), len(rows)))
     return 0
 

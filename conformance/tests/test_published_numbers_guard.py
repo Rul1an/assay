@@ -23,12 +23,13 @@ from __future__ import annotations
 
 import contextlib
 import json
-import json
 import shutil
 import sys
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "conformance/adequacy"))
@@ -391,38 +392,61 @@ class ResultsAreStillWhatTheToolProduces(unittest.TestCase):
         return {c["corpus"]: c for c in json.loads(
             (REPO / "conformance/adequacy/results.json").read_text())["corpora"]}
 
-    def drifted(self, stored: dict) -> list[str]:
+    def drifted(self, stored: dict) -> tuple[list[str], list[str]]:
         """Corpora whose recorded row differs from a fresh run of the tool.
 
         Rows are built through measure_all.row, so this comparison cannot drift
         from the shape the writer actually records. tool_version is provenance
         rather than measurement, and older tool checkouts report none.
         """
-        out = []
+        out, unavailable = [], []
         for corpus, manifest in sorted(CHEAP.items()):
             sibling = SIBLINGS.get(corpus)
             if sibling is not None and not sibling.is_dir():
-                self.skipTest("%s not found as a sibling checkout" % sibling.name)
-            fresh = measure_all.row(manifest, ca.run(manifest),
-                                    {"tool_commit": stored[corpus]["tool_commit"]})
+                unavailable.append(corpus)
+                continue
+            report = ca.run(manifest)
+            fresh = measure_all.row(manifest, report, ca.encode_report_v0(report))
             trim = lambda r: {k: v for k, v in r.items() if k != "tool_version"}  # noqa: E731
             if trim(fresh) != trim(stored[corpus]):
                 out.append(corpus)
-        return out
+        if unavailable:
+            warnings.warn("not measured: %s" % ", ".join(unavailable), RuntimeWarning)
+        return out, unavailable
 
     def test_the_cheap_corpora_still_measure_what_results_json_records(self):
-        self.assertEqual(self.drifted(self.stored()), [],
+        drifted, unavailable = self.drifted(self.stored())
+        if len(unavailable) == len(CHEAP):
+            self.skipTest("no declared cheap comparison can run")
+        self.assertEqual(drifted, [],
                          "results.json has gone stale; re-run measure_all.py")
 
+    def test_a_missing_sibling_keeps_completed_comparisons(self):
+        missing = REPO / "a-sibling-that-does-not-exist"
+        selected = {name: CHEAP[name] for name in ("mcp-jsonrpc-id", "rge-bench")}
+        siblings = {"rge-bench": missing}
+        with mock.patch.dict(CHEAP, selected, clear=True), \
+                mock.patch.dict(SIBLINGS, siblings, clear=True), \
+                warnings.catch_warnings(record=True) as caught:
+            try:
+                drifted, unavailable = self.drifted(self.stored())
+            except unittest.SkipTest:
+                self.fail("one missing sibling discarded a completed comparison")
+        self.assertEqual(drifted, [])
+        self.assertEqual(unavailable, ["rge-bench"])
+        self.assertTrue(any("not measured: rge-bench" in str(item.message) for item in caught))
+
     def test_a_doctored_result_is_caught(self):
-        """CONTROL: hand-edit rge-bench's killed count and confirm the drift check bites.
+        """CONTROL: hand-edit mcp-jsonrpc-id's killed count and confirm the drift check bites.
 
         Without it this comparison could be structurally unable to fail -- comparing
         a value with itself, or skipping every corpus -- and would still print green.
         """
         stored = self.stored()
-        stored["rge-bench"] = dict(stored["rge-bench"], killed=stored["rge-bench"]["killed"] + 1)
-        self.assertEqual(self.drifted(stored), ["rge-bench"])
+        stored["mcp-jsonrpc-id"] = dict(
+            stored["mcp-jsonrpc-id"], killed=stored["mcp-jsonrpc-id"]["killed"] + 1)
+        drifted, _ = self.drifted(stored)
+        self.assertEqual(drifted, ["mcp-jsonrpc-id"])
 
 
 class TheTranscribedRowSaysSoOutLoud(unittest.TestCase):
