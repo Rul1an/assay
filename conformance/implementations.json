@@ -1,4 +1,20 @@
 {
   "schema": "assay.conformance.implementations.v0",
-  "implementations": []
+  "implementations": [
+    {
+      "id": "pma-v0-repro",
+      "name": "pma-v0-repro privileged-mcp-action/v0 verifier",
+      "suite": "privileged-mcp-action-v0",
+      "image": "ghcr.io/rul1an/pma-v0-repro@sha256:88a5ef285a80dc0caeb2b11093eba79f8f08c870b549cafc395aa77ee5ffc493",
+      "source": "https://github.com/Rul1an/pma-v0-repro",
+      "commit": "c226a34f3cea50a114607c35f0976048ff3cab2b",
+      "language": "python",
+      "reproduction_mode": "other_disclosed",
+      "authorship": {
+        "kind": "agent-assisted",
+        "model": "Grok Bot",
+        "prompt_strategy": "Packaging and registry row authored by Grok Bot assistant RuleyRuley. Verifier core was written blind_from_spec and frozen at fc6cb25d5d1e18396d78815723e241425447ab7d (tree 1c66ef3b8ca35cfbff53938b791c56a39eef77a0). OCI packaging, listing consent, and a SHA-pinned GHCR publish workflow were added later by an agent without changing verifier blobs, so reproduction_mode is other_disclosed. Consent to public listing and bounded execution: https://github.com/Rul1an/pma-v0-repro/blob/c226a34f3cea50a114607c35f0976048ff3cab2b/README.md"
+      }
+    }
+  ]
 }
