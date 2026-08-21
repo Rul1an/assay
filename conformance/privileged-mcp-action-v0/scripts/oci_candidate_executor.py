@@ -30,6 +30,7 @@ from capture_candidate import CandidateError, HarnessError  # noqa: E402
 from capture_format import (  # noqa: E402
     STATE_CANDIDATE_ERROR,
     STATE_CAPTURE_ERROR,
+    bound_error,
     observe_error,
     validate_capture,
 )
@@ -281,6 +282,23 @@ def observation_for(
     return observe_error(case_id, input_sha256, capture_state, message)
 
 
+def digest_image_refs(argv: list[str]) -> list[str]:
+    refs: list[str] = []
+    for item in argv:
+        try:
+            validate_image_reference(item)
+        except ImplementationRegistryError:
+            continue
+        refs.append(item)
+    return refs
+
+
+def assert_wrapped_keeps_digest_refs(argv: list[str], wrapped: list[str]) -> None:
+    for ref in digest_image_refs(argv):
+        if ref not in wrapped:
+            raise DockerCommandError("digest-qualified image was stripped before docker")
+
+
 def run_docker(
     argv: list[str],
     *,
@@ -292,8 +310,10 @@ def run_docker(
 ) -> BoundedDockerResult:
     if env is None:
         raise DockerCommandError("docker invocations require a fresh DOCKER_CONFIG")
+    wrapped = wrap_docker_command(argv, env)
+    assert_wrapped_keeps_digest_refs(argv, wrapped)
     result = run_bounded(
-        wrap_docker_command(argv, env),
+        wrapped,
         timeout_seconds=timeout_seconds,
         stdout_limit=stdout_limit,
         stderr_limit=stderr_limit,
@@ -302,52 +322,6 @@ def run_docker(
         detail = result.stderr.decode("utf-8", "replace").strip() or f"exit {result.returncode}"
         raise DockerCommandError(detail)
     return BoundedDockerResult(result.returncode, result.stdout, result.stderr)
-
-
-def rewrite_fixture_image_argv(
-    argv: list[str], *, registry_ref: str, local_ref: str
-) -> list[str]:
-    """Test-only: a local tag is not a RepoDigest. Hosted Docker will pull."""
-    if not registry_ref or not local_ref or registry_ref == local_ref:
-        raise ValueError("fixture registry ref and local ref must be distinct")
-    return [local_ref if item == registry_ref else item for item in argv]
-
-
-def local_image_docker_runner(*, registry_ref: str, local_ref: str) -> DockerRunner:
-    """Pull step records the canonical argv; daemon calls use the local tag/id."""
-
-    def runner(argv: list[str], **kwargs: Any) -> BoundedDockerResult:
-        env = kwargs.get("env")
-        if env is None:
-            raise DockerCommandError("docker invocations require a fresh DOCKER_CONFIG")
-        if len(argv) >= 2 and argv[1] == "pull":
-            expected = ["docker", "pull", "--platform", PLATFORM, registry_ref]
-            if argv != expected:
-                raise DockerCommandError("pull argv drifted from the digest/platform contract")
-            probe = run_bounded(
-                wrap_docker_command(
-                    rewrite_fixture_image_argv(
-                        ["docker", "image", "inspect", registry_ref],
-                        registry_ref=registry_ref,
-                        local_ref=local_ref,
-                    ),
-                    env,
-                ),
-                timeout_seconds=30,
-                stdout_limit=1_000_000,
-                stderr_limit=64 * 1024,
-            )
-            if probe.returncode != 0:
-                raise DockerCommandError("local fixture image is missing")
-            return BoundedDockerResult(0, b"", b"")
-        return run_docker(
-            rewrite_fixture_image_argv(
-                argv, registry_ref=registry_ref, local_ref=local_ref
-            ),
-            **kwargs,
-        )
-
-    return runner
 
 
 def _parse_inspect(payload: bytes) -> dict[str, Any]:
@@ -369,17 +343,36 @@ def _limit_state(error: ProcessLimitError) -> str:
     return STATE_START_FAILURE
 
 
+def resolved_implementation_row(
+    implementation_id: str,
+    *,
+    implementation: dict[str, Any] | None = None,
+    registry_path: Path | None = None,
+) -> dict[str, Any]:
+    if implementation is not None:
+        if implementation.get("id") != implementation_id:
+            raise ImplementationRegistryError(
+                "implementation id does not match the resolved row"
+            )
+        validate_image_reference(implementation["image"])
+        return implementation
+    return implementation_from_registry(implementation_id, registry_path)
+
+
 def execute_candidate(
     *,
     implementation_id: str,
     bundle_path: Path,
     registry_path: Path | None = None,
+    implementation: dict[str, Any] | None = None,
     timeout_seconds: int = 30,
     command: tuple[str, ...] = (),
     docker_runner: DockerRunner | None = None,
 ) -> OciExecution:
     runner = docker_runner or run_docker
-    row = implementation_from_registry(implementation_id, registry_path)
+    row = resolved_implementation_row(
+        implementation_id, implementation=implementation, registry_path=registry_path
+    )
     image = row["image"]
     state: str | None = None
     exit_code: int | None = None
@@ -387,9 +380,15 @@ def execute_candidate(
     stderr = b""
     error = ""
     container_id: str | None = None
+    container_name: str | None = None
     with tempfile.TemporaryDirectory(prefix="assay-oci-exec-") as raw:
         root = Path(raw)
-        env, _config_dir = fresh_docker_env(root)
+        try:
+            env, _config_dir = fresh_docker_env(root)
+        except DOCKER_LIFECYCLE_ERRORS as exc:
+            return OciExecution(
+                STATE_PULL_FAILURE, implementation_id, image, None, b"", b"", str(exc)
+            )
         staging_dir = root / "stage"
         try:
             try:
@@ -403,7 +402,7 @@ def execute_candidate(
                     STATE_PULL_FAILURE, implementation_id, image, None, b"", b"", str(exc)
                 )
             try:
-                inspected = runner(["docker", "inspect", image], env=env)
+                inspected = runner(["docker", "image", "inspect", image], env=env)
                 reject_declared_volumes(_parse_inspect(inspected.stdout))
             except VolumeDeclarationError as exc:
                 return OciExecution(
@@ -413,14 +412,14 @@ def execute_candidate(
                 return OciExecution(
                     STATE_CREATE_FAILURE, implementation_id, image, None, b"", b"", str(exc)
                 )
-            name = f"assay-oci-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+            container_name = f"assay-oci-{os.getpid()}-{uuid.uuid4().hex[:8]}"
             try:
                 try:
                     created = runner(
                         build_container_create_argv(
                             image=image,
                             bundle_path=bundle_path,
-                            container_name=name,
+                            container_name=container_name,
                             staging_dir=staging_dir,
                             command=command,
                         ),
@@ -456,28 +455,37 @@ def execute_candidate(
                 container = _parse_inspect(
                     runner(["docker", "inspect", container_id], env=env).stdout
                 )
-                exit_code = (container.get("State") or {}).get("ExitCode")
-                if not isinstance(exit_code, int):
+                raw_exit = (container.get("State") or {}).get("ExitCode")
+                if isinstance(raw_exit, int):
+                    exit_code = raw_exit
+                    if (container.get("State") or {}).get("OOMKilled"):
+                        state = STATE_OOM
+                        error = error or "container OOMKilled"
+                    if state is None:
+                        state = STATE_COMPLETED
+                else:
                     exit_code = None
-                if (container.get("State") or {}).get("OOMKilled"):
-                    state = STATE_OOM
-                    error = error or "container OOMKilled"
-                if state is None:
-                    state = STATE_COMPLETED
+                    if state is None:
+                        state = STATE_START_FAILURE
+                        error = "container exit code is unavailable"
             except DOCKER_LIFECYCLE_ERRORS as exc:
                 if state is None:
                     state = STATE_START_FAILURE
                     error = str(exc)
         finally:
-            if container_id:
+            target = container_id or container_name
+            if target:
                 try:
                     runner(
-                        ["docker", "rm", "--force", "--volumes", container_id],
+                        ["docker", "rm", "--force", "--volumes", target],
                         env=env,
                     )
                 except DOCKER_LIFECYCLE_ERRORS as exc:
-                    state = STATE_CLEANUP_FAILURE
-                    error = str(exc)
+                    if state in CANDIDATE_LIMIT_STATES:
+                        error = bound_error("%s; cleanup: %s" % (error or state, exc))
+                    else:
+                        state = STATE_CLEANUP_FAILURE
+                        error = str(exc)
     if state is None:
         state = STATE_START_FAILURE
         error = error or "execution produced no state"
@@ -500,7 +508,7 @@ def write_handoff(output_dir: Path, result: OciExecution) -> None:
             "image": result.image,
             "execution_state": result.state,
             "exit_code": result.exit_code,
-            "error": result.error,
+            "error": bound_error(result.error) if result.error else "",
             "oci_executor_non_claims": list(OCI_EXECUTOR_NON_CLAIMS),
             "candidate_output": {
                 "stdout": CANDIDATE_STDOUT_NAME,
@@ -554,6 +562,7 @@ def run_oci_candidate(
     *,
     docker_runner: DockerRunner | None = None,
     registry_path: Path | None = None,
+    implementation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Same shape as `capture_candidate.run_candidate` for the shared loop."""
     args = parse_oci_command(command)
@@ -561,13 +570,16 @@ def run_oci_candidate(
         implementation_id=args.implementation_id,
         bundle_path=bundle,
         registry_path=registry_path,
+        implementation=implementation,
         timeout_seconds=timeout_seconds,
         docker_runner=docker_runner,
     )
     if result.state == STATE_COMPLETED:
+        if result.exit_code is None:
+            raise HarnessError("container exit code is unavailable")
         report = capture_candidate.parse_candidate_report(result.stdout)
         return {
-            "exit_code": 0 if result.exit_code is None else result.exit_code,
+            "exit_code": result.exit_code,
             "report": report,
             "stderr_present": bool(result.stderr),
         }
@@ -582,15 +594,20 @@ def capture_oci_observations(
     timeout_seconds: int,
     *,
     registry_path: Path | None = None,
+    implementation: dict[str, Any] | None = None,
     docker_runner: DockerRunner | None = None,
 ) -> list[dict[str, Any]]:
+    row = implementation
+    if row is None:
+        args = parse_oci_command(command)
+        row = implementation_from_registry(args.implementation_id, registry_path)
     return capture_candidate.capture_observations(
         pack,
         command,
         timeout_seconds,
         candidate_runner=functools.partial(
             run_oci_candidate,
-            registry_path=registry_path,
+            implementation=row,
             docker_runner=docker_runner,
         ),
     )
@@ -618,13 +635,12 @@ def write_validated_capture(
     row = implementation_from_registry(implementation_id, registry_path)
     command = oci_entrypoint_command(implementation_id=implementation_id)
     with tempfile.TemporaryDirectory() as tmp:
-        pack = capture_candidate.load_pack(pack_path, Path(tmp))
-        pack_digest = capture_candidate.sha256_file(pack_path)
+        pack, pack_digest = capture_candidate.load_pack_with_digest(pack_path, Path(tmp))
         observations = capture_oci_observations(
             pack,
             command,
             timeout_seconds,
-            registry_path=registry_path,
+            implementation=row,
             docker_runner=docker_runner,
         )
     capture = capture_candidate.build_capture(
@@ -678,6 +694,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         except (
             ImplementationRegistryError,
+            DockerCommandError,
             OSError,
             EOFError,
             ValueError,
@@ -700,7 +717,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.output is not None:
             write_handoff(args.output, result)
-    except (ImplementationRegistryError, ValueError, OSError) as error:
+    except (ImplementationRegistryError, DockerCommandError, ValueError, OSError) as error:
         print(str(error), file=sys.stderr)
         return 2
     print(result.state)

@@ -46,8 +46,10 @@ import implementations
 from bounded_process import ProcessLimitError
 from capture_format import (  # noqa: E402
     CAPTURE_SCHEMA,
+    MAX_ERROR_CHARS,
     STATE_CANDIDATE_ERROR,
     STATE_CAPTURE_ERROR,
+    bound_error,
     validate_capture,
 )
 from score_candidate import STATE_TO_STATUS
@@ -56,6 +58,11 @@ DIGEST_IMAGE = (
     "ghcr.io/example/checker@sha256:"
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 )
+SWAPPED_IMAGE = (
+    "ghcr.io/example/swapped@sha256:"
+    "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+)
+IMAGE_ID = "sha256:" + "cd" * 32
 AGREEMENT = frozenset(
     {"match", "mismatch", "unproved", "execution_error", "harness_error"}
 )
@@ -101,6 +108,68 @@ def _bundle(directory: Path) -> Path:
     path = directory / "opaque.bundle.tar.gz"
     path.write_bytes(b"opaque-bundle")
     return path
+
+
+def _docker_kind(argv: list[str]) -> str:
+    if len(argv) >= 3 and argv[1] == "image" and argv[2] == "inspect":
+        return "image-inspect"
+    return argv[1] if len(argv) > 1 else ""
+
+
+def rewrite_fixture_image_argv(
+    argv: list[str], *, registry_ref: str, local_ref: str
+) -> list[str]:
+    if not registry_ref or not local_ref or registry_ref == local_ref:
+        raise ValueError("fixture registry ref and local ref must be distinct")
+    if not (local_ref.startswith("sha256:") and len(local_ref) == 71):
+        raise ValueError("local fixture ref must be an immutable image id")
+    return [local_ref if item == registry_ref else item for item in argv]
+
+
+def local_image_docker_runner(*, registry_ref: str, local_ref: str) -> Any:
+    module = _require()
+    if not (local_ref.startswith("sha256:") and len(local_ref) == 71):
+        raise ValueError("local fixture ref must be an immutable image id")
+
+    def runner(argv: list[str], **kwargs: Any) -> Any:
+        env = kwargs.get("env")
+        if env is None:
+            raise module.DockerCommandError("docker invocations require a fresh DOCKER_CONFIG")
+        if len(argv) >= 2 and argv[1] == "pull":
+            expected = ["docker", "pull", "--platform", module.PLATFORM, registry_ref]
+            if argv != expected:
+                raise module.DockerCommandError("pull argv drifted from the digest/platform contract")
+            probe = module.run_bounded(
+                module.wrap_docker_command(
+                    rewrite_fixture_image_argv(
+                        ["docker", "image", "inspect", registry_ref],
+                        registry_ref=registry_ref,
+                        local_ref=local_ref,
+                    ),
+                    env,
+                ),
+                timeout_seconds=30,
+                stdout_limit=1_000_000,
+                stderr_limit=64 * 1024,
+            )
+            if probe.returncode != 0:
+                raise module.DockerCommandError("local fixture image is missing")
+            return module.BoundedDockerResult(0, b"", b"")
+        return module.run_docker(
+            rewrite_fixture_image_argv(argv, registry_ref=registry_ref, local_ref=local_ref),
+            **kwargs,
+        )
+
+    return runner
+
+
+def _inspect_doc(*, exit_code: Any = 0, oom: bool = False) -> dict[str, Any]:
+    return {
+        "Id": IMAGE_ID,
+        "Config": {"Volumes": None, "User": "65532:65532"},
+        "HostConfig": {"NetworkMode": "none"},
+        "State": {"OOMKilled": oom, "ExitCode": exit_code, "Status": "exited"},
+    }
 
 
 def _argv(*, image: str = DIGEST_IMAGE, bundle: Path | None = None) -> list[str]:
@@ -487,17 +556,18 @@ class LifecycleClassification(unittest.TestCase):
         }
 
         def runner(argv: list[str], **_kwargs: Any) -> Any:
-            if argv[:2] == ["docker", "pull"] or argv[1] == "pull":
+            kind = _docker_kind(argv)
+            if kind == "pull":
                 return module.BoundedDockerResult(0, b"", b"")
-            if argv[:2] == ["docker", "inspect"] or argv[1] == "inspect":
+            if kind in {"inspect", "image-inspect"}:
                 return module.BoundedDockerResult(
                     0, json.dumps([inspect_doc]).encode(), b""
                 )
-            if argv[:2] == ["docker", "create"] or argv[1] == "create":
+            if kind == "create":
                 return module.BoundedDockerResult(0, b"cid-1\n", b"")
-            if argv[:2] == ["docker", "start"] or argv[1] == "start":
+            if kind == "start":
                 return module.BoundedDockerResult(0, b"", b"")
-            if argv[:2] == ["docker", "rm"] or argv[1] == "rm":
+            if kind == "rm":
                 raise module.DockerCommandError("rm refused")
             raise AssertionError(argv)
 
@@ -523,15 +593,16 @@ class LifecycleClassification(unittest.TestCase):
         }
 
         def runner(argv: list[str], **_kwargs: Any) -> Any:
-            if argv[1] == "pull":
+            kind = _docker_kind(argv)
+            if kind == "pull":
                 return module.BoundedDockerResult(0, b"", b"")
-            if argv[1] == "inspect":
+            if kind in {"inspect", "image-inspect"}:
                 return module.BoundedDockerResult(0, json.dumps([inspect_doc]).encode(), b"")
-            if argv[1] == "create":
+            if kind == "create":
                 return module.BoundedDockerResult(0, b"cid-start\n", b"")
-            if argv[1] == "start":
+            if kind == "start":
                 raise module.DockerCommandError("cannot start container")
-            if argv[1] == "rm":
+            if kind == "rm":
                 return module.BoundedDockerResult(0, b"", b"")
             raise AssertionError(argv)
 
@@ -550,9 +621,10 @@ class LifecycleClassification(unittest.TestCase):
         module = _require()
 
         def runner(argv: list[str], **_kwargs: Any) -> Any:
-            if argv[1] == "pull":
+            kind = _docker_kind(argv)
+            if kind == "pull":
                 return module.BoundedDockerResult(0, b"", b"")
-            if argv[1] == "inspect":
+            if kind in {"inspect", "image-inspect"}:
                 return module.BoundedDockerResult(
                     0,
                     json.dumps([{"Config": {"Volumes": {"/data": {}}}}]).encode(),
@@ -579,12 +651,15 @@ class LifecycleClassification(unittest.TestCase):
         }
 
         def runner(argv: list[str], **_kwargs: Any) -> Any:
-            if argv[1] == "pull":
+            kind = _docker_kind(argv)
+            if kind == "pull":
                 return module.BoundedDockerResult(0, b"", b"")
-            if argv[1] == "inspect":
+            if kind in {"inspect", "image-inspect"}:
                 return module.BoundedDockerResult(0, json.dumps([inspect_doc]).encode(), b"")
-            if argv[1] == "create":
+            if kind == "create":
                 raise OSError("create refused")
+            if kind == "rm":
+                return module.BoundedDockerResult(0, b"", b"")
             raise AssertionError(argv)
 
         with tempfile.TemporaryDirectory() as raw:
@@ -607,15 +682,16 @@ class LifecycleClassification(unittest.TestCase):
         }
 
         def runner(argv: list[str], **_kwargs: Any) -> Any:
-            if argv[1] == "pull":
+            kind = _docker_kind(argv)
+            if kind == "pull":
                 return module.BoundedDockerResult(0, b"", b"")
-            if argv[1] == "inspect":
+            if kind in {"inspect", "image-inspect"}:
                 return module.BoundedDockerResult(0, json.dumps([inspect_doc]).encode(), b"")
-            if argv[1] == "create":
+            if kind == "create":
                 return module.BoundedDockerResult(0, b"cid-os\n", b"")
-            if argv[1] == "start":
+            if kind == "start":
                 return module.BoundedDockerResult(0, b"", b"")
-            if argv[1] == "rm":
+            if kind == "rm":
                 raise OSError("rm refused")
             raise AssertionError(argv)
 
@@ -737,7 +813,7 @@ def _build_inert_image() -> tuple[str, str]:
     digest = image_id.split(":", 1)[1]
     registry_ref = f"assay-oci-inert@sha256:{digest}"
     implementations.validate_image_reference(registry_ref)
-    return registry_ref, "assay-oci-inert:local"
+    return registry_ref, image_id
 
 
 class LiveDockerInspect(unittest.TestCase):
@@ -758,7 +834,7 @@ class LiveDockerInspect(unittest.TestCase):
         module = _require()
         assert self.image_ref is not None
         assert self.local_ref is not None
-        return module.local_image_docker_runner(
+        return local_image_docker_runner(
             registry_ref=self.image_ref,
             local_ref=self.local_ref,
         )
@@ -780,7 +856,7 @@ class LiveDockerInspect(unittest.TestCase):
             assert_argv_runtime_user(argv)
             self.assertIn(self.image_ref, argv)
             assert self.local_ref is not None
-            live_argv = module.rewrite_fixture_image_argv(
+            live_argv = rewrite_fixture_image_argv(
                 argv, registry_ref=self.image_ref, local_ref=self.local_ref
             )
             self.assertNotIn(self.image_ref, live_argv)
@@ -847,11 +923,8 @@ class LiveDockerInspect(unittest.TestCase):
             capture_output=True,
             text=True,
         ).stdout.strip()
-        digest = image_id.split(":", 1)[1]
-        volume_ref = f"assay-oci-inert-volume@sha256:{digest}"
-        implementations.validate_image_reference(volume_ref)
         inspect_raw = subprocess.run(
-            ["docker", "inspect", volume_tag],
+            ["docker", "image", "inspect", image_id],
             check=True,
             capture_output=True,
             text=True,
@@ -923,6 +996,55 @@ class LiveDockerInspect(unittest.TestCase):
             )
         self.assertEqual(result.state, module.STATE_OOM)
         self.assertNotIn(result.state, AGREEMENT)
+
+    def test_live_create_survives_retag_of_local_tag(self) -> None:
+        module = _require()
+        assert self.image_ref is not None
+        assert self.local_ref is not None
+        self.assertTrue(self.local_ref.startswith("sha256:"))
+        subprocess.run(
+            [
+                "docker",
+                "build",
+                "--platform",
+                "linux/amd64",
+                "-t",
+                "assay-oci-inert-other:local",
+                "-",
+            ],
+            input=b"FROM assay-oci-inert:local\nLABEL assay=other\n",
+            check=True,
+            capture_output=True,
+        )
+        other_id = subprocess.run(
+            ["docker", "inspect", "--format", "{{.Id}}", "assay-oci-inert-other:local"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        subprocess.run(["docker", "tag", other_id, "assay-oci-inert:local"], check=True)
+        try:
+            with tempfile.TemporaryDirectory() as raw:
+                registry = _write_registry(Path(raw), self.image_ref)
+                result = module.execute_candidate(
+                    implementation_id="inert-fixture",
+                    bundle_path=_bundle(Path(raw)),
+                    registry_path=registry,
+                    timeout_seconds=10,
+                    command=("/oci-candidate", "ok"),
+                    docker_runner=self._local_runner(),
+                )
+            tagged = subprocess.run(
+                ["docker", "inspect", "--format", "{{.Id}}", "assay-oci-inert:local"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            self.assertEqual(tagged, other_id)
+            self.assertEqual(result.state, module.STATE_COMPLETED)
+            self.assertNotEqual(self.local_ref, other_id)
+        finally:
+            subprocess.run(["docker", "tag", self.local_ref, "assay-oci-inert:local"], check=False)
 
     def test_fresh_docker_config_is_anonymous(self) -> None:
         module = _require()
@@ -997,22 +1119,22 @@ class AllowlistedDockerEnv(unittest.TestCase):
         module = _require()
         with tempfile.TemporaryDirectory() as raw:
             env, _ = module.fresh_docker_env(Path(raw))
-        probe = module.wrap_docker_command(["docker", "image", "inspect", "assay-oci-inert:local"], env)
+        probe = module.wrap_docker_command(["docker", "image", "inspect", IMAGE_ID], env)
         self.assertIn("-i", probe)
         for key in SENTINEL_ENV:
             self.assertNotIn(key, " ".join(probe))
         source = Path(module.__file__).read_text(encoding="utf-8")
         self.assertIn("wrap_docker_command", source)
-        self.assertNotIn('run_bounded(\n                ["docker", "image", "inspect"', source)
+        self.assertNotIn("def rewrite_fixture_image_argv", source)
+        self.assertNotIn("def local_image_docker_runner", source)
 
     def test_synthetic_repo_digest_is_rewritten_for_pull_inspect_and_create(self) -> None:
         """A local tag is not a RepoDigest. Hosted Docker treats name@sha256:<id>
-        as a remote pull. The test runner must map that ref to a local tag/id.
+        as a remote pull. The test runner must map that ref to an image id.
         """
         module = _require()
-        local_ref = "assay-oci-inert:local"
         pull = ["docker", "pull", "--platform", module.PLATFORM, DIGEST_IMAGE]
-        inspect = ["docker", "inspect", DIGEST_IMAGE]
+        inspect = ["docker", "image", "inspect", DIGEST_IMAGE]
         with tempfile.TemporaryDirectory() as raw:
             create = module.build_container_create_argv(
                 image=DIGEST_IMAGE,
@@ -1021,29 +1143,28 @@ class AllowlistedDockerEnv(unittest.TestCase):
                 staging_dir=Path(raw) / "stage",
             )
         self.assertEqual(create[-1], DIGEST_IMAGE)
-        mapped_pull = module.rewrite_fixture_image_argv(
-            pull, registry_ref=DIGEST_IMAGE, local_ref=local_ref
+        mapped_pull = rewrite_fixture_image_argv(
+            pull, registry_ref=DIGEST_IMAGE, local_ref=IMAGE_ID
         )
-        mapped_inspect = module.rewrite_fixture_image_argv(
-            inspect, registry_ref=DIGEST_IMAGE, local_ref=local_ref
+        mapped_inspect = rewrite_fixture_image_argv(
+            inspect, registry_ref=DIGEST_IMAGE, local_ref=IMAGE_ID
         )
-        mapped_create = module.rewrite_fixture_image_argv(
-            create, registry_ref=DIGEST_IMAGE, local_ref=local_ref
+        mapped_create = rewrite_fixture_image_argv(
+            create, registry_ref=DIGEST_IMAGE, local_ref=IMAGE_ID
         )
-        self.assertEqual(mapped_pull[-1], local_ref)
-        self.assertEqual(mapped_inspect[-1], local_ref)
-        self.assertEqual(mapped_create[-1], local_ref)
+        self.assertEqual(mapped_pull[-1], IMAGE_ID)
+        self.assertEqual(mapped_inspect[-1], IMAGE_ID)
+        self.assertEqual(mapped_create[-1], IMAGE_ID)
         self.assertNotIn(DIGEST_IMAGE, mapped_inspect)
         self.assertNotIn(DIGEST_IMAGE, mapped_create)
-        self.assertEqual(
-            mapped_pull,
-            ["docker", "pull", "--platform", module.PLATFORM, local_ref],
-        )
         implementations.validate_image_reference(DIGEST_IMAGE)
+        with self.assertRaises(ValueError):
+            rewrite_fixture_image_argv(
+                pull, registry_ref=DIGEST_IMAGE, local_ref="assay-oci-inert:local"
+            )
 
     def test_local_runner_does_not_send_synthetic_repo_digest_to_docker(self) -> None:
         module = _require()
-        local_ref = "assay-oci-inert:local"
         seen: list[list[str]] = []
 
         def fake_run_docker(argv: list[str], **kwargs: Any) -> Any:
@@ -1052,9 +1173,7 @@ class AllowlistedDockerEnv(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as raw:
             env, _ = module.fresh_docker_env(Path(raw))
-        runner = module.local_image_docker_runner(
-            registry_ref=DIGEST_IMAGE, local_ref=local_ref
-        )
+        runner = local_image_docker_runner(registry_ref=DIGEST_IMAGE, local_ref=IMAGE_ID)
         with mock.patch.object(module, "run_docker", side_effect=fake_run_docker):
             with mock.patch.object(module, "run_bounded") as bounded:
                 bounded.return_value = mock.Mock(returncode=0, stdout=b"", stderr=b"")
@@ -1062,14 +1181,14 @@ class AllowlistedDockerEnv(unittest.TestCase):
                     ["docker", "pull", "--platform", module.PLATFORM, DIGEST_IMAGE],
                     env=env,
                 )
-                runner(["docker", "inspect", DIGEST_IMAGE], env=env)
+                runner(["docker", "image", "inspect", DIGEST_IMAGE], env=env)
                 runner(["docker", "create", "--name", "x", DIGEST_IMAGE], env=env)
                 probe = bounded.call_args[0][0]
-        self.assertIn(local_ref, probe)
+        self.assertIn(IMAGE_ID, probe)
         self.assertNotIn(DIGEST_IMAGE, probe)
         self.assertEqual(len(seen), 2)
         for argv in seen:
-            self.assertIn(local_ref, argv)
+            self.assertIn(IMAGE_ID, argv)
             self.assertNotIn(DIGEST_IMAGE, argv)
 
 
@@ -1337,15 +1456,16 @@ class CaptureAdapterEquivalence(unittest.TestCase):
         }
 
         def runner(argv: list[str], **_kwargs: Any) -> Any:
-            if argv[1] == "pull":
+            kind = _docker_kind(argv)
+            if kind == "pull":
                 return module.BoundedDockerResult(0, b"", b"")
-            if argv[1] == "inspect":
+            if kind in {"inspect", "image-inspect"}:
                 return module.BoundedDockerResult(0, json.dumps([inspect_doc]).encode(), b"")
-            if argv[1] == "create":
+            if kind == "create":
                 return module.BoundedDockerResult(0, b"cid-eq\n", b"")
-            if argv[1] == "start":
+            if kind == "start":
                 return module.BoundedDockerResult(0, stdout, b"")
-            if argv[1] == "rm":
+            if kind == "rm":
                 return module.BoundedDockerResult(0, b"", b"")
             raise AssertionError(argv)
 
@@ -1542,16 +1662,17 @@ class PackCaptureCli(unittest.TestCase):
         }
 
         def runner(argv: list[str], **_kwargs: Any) -> Any:
-            if argv[1] == "pull":
+            kind = _docker_kind(argv)
+            if kind == "pull":
                 pulled.append(argv[-1])
                 return module.BoundedDockerResult(0, b"", b"")
-            if argv[1] == "inspect":
+            if kind in {"inspect", "image-inspect"}:
                 return module.BoundedDockerResult(0, json.dumps([inspect_doc]).encode(), b"")
-            if argv[1] == "create":
+            if kind == "create":
                 return module.BoundedDockerResult(0, b"cid-reg\n", b"")
-            if argv[1] == "start":
+            if kind == "start":
                 return module.BoundedDockerResult(0, VALID_REPORT, b"")
-            if argv[1] == "rm":
+            if kind == "rm":
                 return module.BoundedDockerResult(0, b"", b"")
             raise AssertionError(argv)
 
@@ -1732,6 +1853,296 @@ class PackCaptureCli(unittest.TestCase):
         self.assertIn("unrecognized arguments", result.stderr)
         source = Path(module.__file__).read_text(encoding="utf-8")
         self.assertNotIn("--implementation-image", source)
+
+
+class EvidenceBinding(unittest.TestCase):
+    """Close registry/pack/digest/lifecycle binding. Mutations must bite."""
+
+    def _completed_docker(self, pulled: list[str], *, swap_registry: Path | None = None):
+        module = _require()
+        inspect_doc = _inspect_doc()
+
+        def runner(argv: list[str], **_kwargs: Any) -> Any:
+            kind = _docker_kind(argv)
+            if kind == "pull":
+                if swap_registry is not None and not pulled:
+                    swap_registry.write_text(
+                        json.dumps(_registry_doc(SWAPPED_IMAGE)), encoding="utf-8"
+                    )
+                pulled.append(argv[-1])
+                return module.BoundedDockerResult(0, b"", b"")
+            if kind in {"inspect", "image-inspect"}:
+                return module.BoundedDockerResult(0, json.dumps([inspect_doc]).encode(), b"")
+            if kind == "create":
+                return module.BoundedDockerResult(0, b"cid-bind\n", b"")
+            if kind == "start":
+                return module.BoundedDockerResult(0, VALID_REPORT, b"")
+            if kind == "rm":
+                return module.BoundedDockerResult(0, b"", b"")
+            raise AssertionError(argv)
+
+        return runner
+
+    def test_registry_swap_cannot_split_identity_from_execution(self) -> None:
+        module = _require()
+        pulled: list[str] = []
+        with tempfile.TemporaryDirectory() as raw:
+            pack = _write_pack(Path(raw))
+            registry = _write_registry(Path(raw), DIGEST_IMAGE)
+            output = Path(raw) / "capture.json"
+            module.write_validated_capture(
+                pack,
+                "inert-fixture",
+                output,
+                registry_path=registry,
+                docker_runner=self._completed_docker(pulled, swap_registry=registry),
+                timeout_seconds=5,
+            )
+            document = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(len(pulled), 14)
+        self.assertEqual(set(pulled), {DIGEST_IMAGE})
+        self.assertNotIn(SWAPPED_IMAGE, pulled)
+        self.assertEqual(document["implementation"]["image"], DIGEST_IMAGE)
+        validate_capture(document)
+
+    def test_pack_swap_cannot_split_parsed_bytes_from_digest(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            pack_path = _write_pack(Path(raw))
+            original = pack_path.read_bytes()
+            digest_a = "sha256:" + hashlib.sha256(original).hexdigest()
+            reads = {"n": 0}
+            real_read = capture_candidate.read_pack_bytes
+
+            def read_then_swap(path: Path) -> bytes:
+                data = real_read(path)
+                reads["n"] += 1
+                if reads["n"] == 1:
+                    path.write_bytes(original + b"\x00")
+                return data
+
+            output = Path(raw) / "capture.json"
+            registry = _write_registry(Path(raw), DIGEST_IMAGE)
+            with mock.patch.object(
+                capture_candidate, "read_pack_bytes", side_effect=read_then_swap
+            ):
+                module.write_validated_capture(
+                    pack_path,
+                    "inert-fixture",
+                    output,
+                    registry_path=registry,
+                    docker_runner=self._completed_docker([]),
+                    timeout_seconds=5,
+                )
+            document = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(document["pack_sha256"], digest_a)
+        self.assertEqual(reads["n"], 1)
+
+    def test_run_docker_forwards_digest_ref_to_wrapped_argv(self) -> None:
+        module = _require()
+        seen: list[list[str]] = []
+
+        def fake_bounded(argv: list[str], **_kwargs: Any) -> Any:
+            seen.append(list(argv))
+            return mock.Mock(returncode=0, stdout=b"", stderr=b"")
+
+        with tempfile.TemporaryDirectory() as raw:
+            env, _ = module.fresh_docker_env(Path(raw))
+        with mock.patch.object(module, "run_bounded", side_effect=fake_bounded):
+            module.run_docker(
+                ["docker", "pull", "--platform", module.PLATFORM, DIGEST_IMAGE],
+                env=env,
+            )
+        self.assertEqual(len(seen), 1)
+        self.assertIn(DIGEST_IMAGE, seen[0])
+        self.assertTrue(any("@sha256:" in item for item in seen[0]))
+
+    def test_digest_strip_at_wrap_bites(self) -> None:
+        module = _require()
+        original = module.wrap_docker_command
+
+        def strip_digest(argv: list[str], env: dict[str, str]) -> list[str]:
+            wrapped = original(argv, env)
+            return [item.split("@sha256:")[0] if "@sha256:" in item else item for item in wrapped]
+
+        with tempfile.TemporaryDirectory() as raw:
+            env, _ = module.fresh_docker_env(Path(raw))
+        with mock.patch.object(module, "wrap_docker_command", side_effect=strip_digest):
+            with mock.patch.object(
+                module, "run_bounded", return_value=mock.Mock(returncode=0, stdout=b"", stderr=b"")
+            ):
+                with self.assertRaises(module.DockerCommandError):
+                    module.run_docker(
+                        ["docker", "pull", "--platform", module.PLATFORM, DIGEST_IMAGE],
+                        env=env,
+                    )
+
+    def test_missing_docker_is_named_pull_failure(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            with mock.patch.object(
+                module,
+                "resolve_docker_executable",
+                side_effect=module.DockerCommandError("docker executable not found"),
+            ):
+                result = module.execute_candidate(
+                    implementation_id="inert-fixture",
+                    bundle_path=_bundle(Path(raw)),
+                    registry_path=_write_registry(Path(raw), DIGEST_IMAGE),
+                    timeout_seconds=2,
+                )
+        self.assertEqual(result.state, module.STATE_PULL_FAILURE)
+        self.assertNotIn(result.state, AGREEMENT)
+
+    def test_missing_docker_main_is_not_a_traceback(self) -> None:
+        module = _require()
+        stderr = mock.Mock()
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = _bundle(Path(raw))
+            row = _registry_doc(DIGEST_IMAGE)["implementations"][0]
+            with (
+                mock.patch.object(
+                    module,
+                    "resolve_docker_executable",
+                    side_effect=module.DockerCommandError("docker executable not found"),
+                ),
+                mock.patch.object(module, "implementation_from_registry", return_value=row),
+                mock.patch.object(sys, "stderr", stderr),
+            ):
+                code = module.main(
+                    [
+                        "--implementation-id",
+                        "inert-fixture",
+                        "--bundle",
+                        str(bundle),
+                    ]
+                )
+        written = "".join(str(call.args[0]) for call in stderr.write.call_args_list if call.args)
+        self.assertNotIn("Traceback", written)
+        self.assertIn(code, (0, 2))
+        if code == 0:
+            self.assertIn(module.STATE_PULL_FAILURE, written or "pull_failure")
+
+    def test_create_timeout_cleans_up_by_container_name(self) -> None:
+        module = _require()
+        removed: list[str] = []
+        created_name = {"value": ""}
+
+        def runner(argv: list[str], **_kwargs: Any) -> Any:
+            kind = _docker_kind(argv)
+            if kind == "pull":
+                return module.BoundedDockerResult(0, b"", b"")
+            if kind in {"inspect", "image-inspect"}:
+                return module.BoundedDockerResult(0, json.dumps([_inspect_doc()]).encode(), b"")
+            if kind == "create":
+                created_name["value"] = argv[argv.index("--name") + 1]
+                raise ProcessLimitError("timed out after the daemon created the container")
+            if kind == "rm":
+                removed.append(argv[-1])
+                return module.BoundedDockerResult(0, b"", b"")
+            raise AssertionError(argv)
+
+        with tempfile.TemporaryDirectory() as raw:
+            result = module.execute_candidate(
+                implementation_id="inert-fixture",
+                bundle_path=_bundle(Path(raw)),
+                registry_path=_write_registry(Path(raw), DIGEST_IMAGE),
+                timeout_seconds=2,
+                docker_runner=runner,
+            )
+        self.assertEqual(result.state, module.STATE_CREATE_FAILURE)
+        self.assertEqual(removed, [created_name["value"]])
+        self.assertTrue(created_name["value"].startswith("assay-oci-"))
+
+    def test_cleanup_failure_does_not_overwrite_timeout(self) -> None:
+        module = _require()
+
+        def runner(argv: list[str], **_kwargs: Any) -> Any:
+            kind = _docker_kind(argv)
+            if kind == "pull":
+                return module.BoundedDockerResult(0, b"", b"")
+            if kind in {"inspect", "image-inspect"}:
+                return module.BoundedDockerResult(0, json.dumps([_inspect_doc()]).encode(), b"")
+            if kind == "create":
+                return module.BoundedDockerResult(0, b"cid-timeout\n", b"")
+            if kind == "start":
+                raise ProcessLimitError("timed out waiting for candidate")
+            if kind == "rm":
+                raise module.DockerCommandError("rm refused after timeout")
+            raise AssertionError(argv)
+
+        with tempfile.TemporaryDirectory() as raw:
+            result = module.execute_candidate(
+                implementation_id="inert-fixture",
+                bundle_path=_bundle(Path(raw)),
+                registry_path=_write_registry(Path(raw), DIGEST_IMAGE),
+                timeout_seconds=2,
+                docker_runner=runner,
+            )
+        self.assertEqual(result.state, module.STATE_TIMEOUT)
+        self.assertIn("cleanup", result.error)
+        self.assertLessEqual(len(result.error), MAX_ERROR_CHARS)
+
+    def test_handoff_error_uses_canonical_bound(self) -> None:
+        module = _require()
+        long_error = "e" * (MAX_ERROR_CHARS * 4)
+        result = module.OciExecution(
+            module.STATE_START_FAILURE,
+            "inert-fixture",
+            DIGEST_IMAGE,
+            None,
+            b"",
+            b"",
+            long_error,
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            module.write_handoff(Path(raw) / "out", result)
+            document = json.loads(
+                (Path(raw) / "out" / module.EXECUTION_DOCUMENT_NAME).read_text(encoding="utf-8")
+            )
+        self.assertEqual(document["error"], bound_error(long_error))
+        self.assertLessEqual(len(document["error"]), MAX_ERROR_CHARS)
+
+    def test_missing_exit_code_is_harness_error_not_zero(self) -> None:
+        module = _require()
+
+        def runner(argv: list[str], **_kwargs: Any) -> Any:
+            kind = _docker_kind(argv)
+            if kind == "pull":
+                return module.BoundedDockerResult(0, b"", b"")
+            if kind in {"inspect", "image-inspect"}:
+                return module.BoundedDockerResult(
+                    0, json.dumps([_inspect_doc(exit_code=None)]).encode(), b""
+                )
+            if kind == "create":
+                return module.BoundedDockerResult(0, b"cid-exit\n", b"")
+            if kind == "start":
+                return module.BoundedDockerResult(0, VALID_REPORT, b"")
+            if kind == "rm":
+                return module.BoundedDockerResult(0, b"", b"")
+            raise AssertionError(argv)
+
+        with tempfile.TemporaryDirectory() as raw:
+            registry = _write_registry(Path(raw), DIGEST_IMAGE)
+            bundle = _bundle(Path(raw))
+            result = module.execute_candidate(
+                implementation_id="inert-fixture",
+                bundle_path=bundle,
+                registry_path=registry,
+                timeout_seconds=2,
+                docker_runner=runner,
+            )
+            with self.assertRaises(capture_candidate.HarnessError):
+                module.run_oci_candidate(
+                    module.oci_entrypoint_command(implementation_id="inert-fixture"),
+                    bundle,
+                    2,
+                    docker_runner=runner,
+                    registry_path=registry,
+                )
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertNotEqual(result.state, module.STATE_COMPLETED)
+        self.assertIn(result.state, module.HARNESS_FAILURE_STATES)
 
 
 if __name__ == "__main__":

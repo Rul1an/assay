@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
+import io
 import json
 import shlex
 import sys
@@ -26,6 +27,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bounded_process import ProcessCaptureError, ProcessLimitError, run_bounded  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "adequacy"))
+import published_rows  # noqa: E402
 from capture_format import (  # noqa: E402
     CAPTURE_NON_CLAIMS,
     CAPTURE_SCHEMA,
@@ -73,12 +76,12 @@ def sha256(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
+def read_pack_bytes(path: Path) -> bytes:
+    return published_rows.read_regular_file(Path(path), limit=MAX_PACK_BYTES)
+
+
 def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while chunk := stream.read(1024 * 1024):
-            digest.update(chunk)
-    return "sha256:" + digest.hexdigest()
+    return sha256(read_pack_bytes(path))
 
 
 def read_member(archive: tarfile.TarFile, member: tarfile.TarInfo) -> bytes:
@@ -95,12 +98,12 @@ def read_member(archive: tarfile.TarFile, member: tarfile.TarInfo) -> bytes:
     return data
 
 
-def load_pack(pack: Path, destination: Path) -> dict[str, Any]:
-    if pack.stat().st_size > MAX_PACK_BYTES:
+def load_pack_from_bytes(data: bytes, destination: Path) -> dict[str, Any]:
+    if len(data) > MAX_PACK_BYTES:
         raise ValueError(f"pack exceeds {MAX_PACK_BYTES} bytes")
     files: dict[str, bytes] = {}
     expanded_bytes = 0
-    with pack.open("rb") as raw:
+    with io.BytesIO(data) as raw:
         with gzip.GzipFile(fileobj=raw) as decoded:
             bounded = BoundedReader(decoded, MAX_PACK_ARCHIVE_BYTES)
             with tarfile.open(fileobj=bounded, mode="r|") as archive:
@@ -192,6 +195,16 @@ def load_pack(pack: Path, destination: Path) -> dict[str, Any]:
     if rendered_set_digest != index["rendered_set_digest"]:
         raise ValueError("pack rendered_set_digest does not bind its cases")
     return index
+
+
+def load_pack_with_digest(pack: Path, destination: Path) -> tuple[dict[str, Any], str]:
+    data = read_pack_bytes(pack)
+    return load_pack_from_bytes(data, destination), sha256(data)
+
+
+def load_pack(pack: Path, destination: Path) -> dict[str, Any]:
+    loaded, _digest = load_pack_with_digest(pack, destination)
+    return loaded
 
 
 def parse_candidate_report(stdout: bytes) -> dict[str, Any]:
@@ -334,8 +347,7 @@ def main() -> int:
         return 2
     with tempfile.TemporaryDirectory() as tmp:
         try:
-            pack = load_pack(args.pack, Path(tmp))
-            pack_digest = sha256_file(args.pack)
+            pack, pack_digest = load_pack_with_digest(args.pack, Path(tmp))
         except (
             OSError,
             EOFError,
