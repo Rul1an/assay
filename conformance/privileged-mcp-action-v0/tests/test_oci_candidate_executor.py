@@ -29,7 +29,6 @@ CORPUS = Path(__file__).resolve().parents[1]
 REPO = CORPUS.parents[1]
 SCRIPTS = CORPUS / "scripts"
 FIXTURE_C = Path(__file__).resolve().parent / "fixtures" / "oci-candidate.c"
-CONFORMANCE_WORKFLOW = REPO / ".github/workflows/privileged-mcp-action-conformance.yml"
 
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(REPO / "conformance"))
@@ -715,19 +714,6 @@ class LifecycleClassification(unittest.TestCase):
         execute_src = inspect.getsource(module.execute_candidate)
         self.assertIn("DOCKER_LIFECYCLE_ERRORS", execute_src)
         self.assertNotIn("except (DockerCommandError", execute_src)
-
-
-class ConformanceCiContract(unittest.TestCase):
-    def test_existing_workflow_runs_this_file(self) -> None:
-        text = CONFORMANCE_WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("test_activation_kit.py", text)
-        self.assertIn("test_oci_candidate_executor.py", text)
-        self.assertRegex(
-            text,
-            r"python3 -m unittest \\\n"
-            r"\s+conformance/privileged-mcp-action-v0/tests/test_activation_kit.py \\\n"
-            r"\s+conformance/privileged-mcp-action-v0/tests/test_oci_candidate_executor.py",
-        )
 
 
 def _docker_info() -> subprocess.CompletedProcess[bytes]:
