@@ -14,10 +14,10 @@ import published_rows
 
 MAX_TEMPLATE_BYTES = 1024 * 1024
 TOKEN = re.compile(r"\{\{([a-z0-9_.-]+)(?::([a-z-]+))?\}\}")
-BINDING = re.compile(r"<!-- adequacy-bind:([a-z0-9_.-]+) -->")
 BEGIN = "<!-- BEGIN CHECKED NUMBERS -->"
 END = "<!-- END CHECKED NUMBERS -->"
 PUBLIC_FIELDS = (
+    "corpus",
     "killed",
     "survived",
     "silent",
@@ -74,23 +74,37 @@ def format_value(value: object, style: str | None) -> str:
 
 def render_template(template: Path, values: dict[str, object]) -> str:
     source, _metadata, _body = template_parts(template)
-    # Claim context is explicit in the authored template and never leaks into output.
+    table_bindings: list[str] = []
     for number, line in enumerate(source.splitlines(), 1):
         tokens = list(TOKEN.finditer(line))
         if not tokens:
             continue
-        bindings = BINDING.findall(line)
+        bindings = {token.group(1).rsplit(".", 1)[0] for token in tokens}
         if len(bindings) != 1:
             raise ValueError(
-                "%s:%d token line needs exactly one adequacy binding" % (template.name, number)
+                "%s:%d token line must use exactly one corpus namespace"
+                % (template.name, number)
             )
-        bound = bindings[0]
-        for token in tokens:
-            if not token.group(1).startswith(bound + "."):
+        bound = next(iter(bindings))
+        if line.startswith("|"):
+            first_cell = line.split("|", 2)[1]
+            identity = bound + ".corpus"
+            if [token.group(1) for token in TOKEN.finditer(first_cell)] != [identity]:
                 raise ValueError(
-                    "%s:%d token %s is bound to %s"
-                    % (template.name, number, token.group(1), bound)
+                    "%s:%d corpus table row must render its identity from %s"
+                    % (template.name, number, identity)
                 )
+            table_bindings.append(bound)
+
+    if table_bindings:
+        expected = sorted(
+            str(value) for name, value in values.items() if name.endswith(".corpus")
+        )
+        if sorted(table_bindings) != expected:
+            raise ValueError(
+                "%s: corpus table must bind each measured corpus exactly once"
+                % template.name
+            )
 
     def replace(match: re.Match[str]) -> str:
         name = match.group(1)
@@ -98,7 +112,7 @@ def render_template(template: Path, values: dict[str, object]) -> str:
             raise ValueError("template token %s has no non-null publication value" % name)
         return format_value(values[name], match.group(2))
 
-    rendered = BINDING.sub("", TOKEN.sub(replace, source))
+    rendered = TOKEN.sub(replace, source)
     if "{{" in rendered or "}}" in rendered:
         raise ValueError("template carries an unresolved or malformed token")
     return rendered

@@ -89,19 +89,8 @@ def edit(path: Path, old: str, new: str) -> None:
 class ProjectionTemplateContract(unittest.TestCase):
     @staticmethod
     def template(body: str) -> str:
-        bound = []
-        for line in body.split("\n"):
-            prefixes = {
-                match.group(1).rsplit(".", 1)[0] for match in project.TOKEN.finditer(line)
-            }
-            binding = (
-                "<!-- adequacy-bind:%s -->" % next(iter(prefixes))
-                if len(prefixes) == 1
-                else ""
-            )
-            bound.append(line + binding)
         return (
-            "\n".join(bound)
+            body
             + "\n<!-- BEGIN CHECKED NUMBERS -->\n```json\n"
             + '{"not_derived": []}'
             + "\n```\n<!-- END CHECKED NUMBERS -->\n"
@@ -135,11 +124,25 @@ class ProjectionTemplateContract(unittest.TestCase):
                 "known_holes": 0,
                 "declared_total": 0,
             },
+            {
+                "corpus": "unmeasured-survivor",
+                "killed": 0,
+                "survived": 0,
+                "silent": 0,
+                "score_percent": None,
+                "control": "survived",
+                "control_status": "survived",
+                "equivalent": 0,
+                "out_of_scope": 0,
+                "known_holes": 0,
+                "declared_total": 0,
+            },
         ]
         values_for = getattr(project, "publication_values", None)
         self.assertIsNotNone(values_for, "the production projector has no typed value map")
         values = values_for(rows)
         self.assertEqual(values["demo.in_scope"], 9)
+        self.assertEqual(values["demo.corpus"], "demo")
         self.assertEqual(values["demo.score_percent"], 22.2)
         self.assertEqual(values["control-only.control"], "killed")
         self.assertIsNone(values["control-only.score_percent"])
@@ -254,10 +257,11 @@ class ProjectionTemplateContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             template = Path(raw) / "INDEX.md.in"
             for token in ("NaN", "1e999"):
+                hostile = token if token != "1e999" else '{"nested":[1e999]}'
                 template.write_text(
                     self.template("body").replace(
                         '{"not_derived": []}',
-                        '{"not_derived": [], "hostile": %s}' % token,
+                        '{"not_derived": [], "hostile": %s}' % hostile,
                     ),
                     encoding="utf-8",
                 )
@@ -374,7 +378,39 @@ class ControlsOnThePublicProjection(unittest.TestCase):
         with sandbox() as root:
             template = root / "conformance/INDEX.md.in"
             edit(template, "{{mcp-jsonrpc-id.killed}}", "{{rge-bench.killed}}")
-            self.assert_red("is bound to mcp-jsonrpc-id")
+            self.assert_red("token line must use exactly one corpus namespace")
+
+    def test_a_claim_cannot_move_all_tokens_and_its_binding_to_another_corpus(self):
+        """CONTROL: claim identity and values must come from the same typed row.
+
+        Moving every value token together used to publish rge-bench values
+        under the visible mcp-jsonrpc-id row while the projector and checker
+        both stayed green.
+        """
+        with sandbox() as root:
+            template = root / "conformance/INDEX.md.in"
+            source = template.read_text(encoding="utf-8")
+            original = next(
+                line for line in source.splitlines()
+                if line.startswith("| `{{mcp-jsonrpc-id.corpus}}-conformance`")
+            )
+            moved = original.replace("mcp-jsonrpc-id.", "rge-bench.")
+            self.assertNotEqual(original, moved)
+            template.write_text(source.replace(original, moved, 1), encoding="utf-8")
+            with self.assertRaisesRegex(
+                ValueError, "corpus table must bind each measured corpus exactly once"
+            ):
+                project.write_documents(root)
+
+    def test_a_corpus_table_row_cannot_restate_its_identity_by_hand(self):
+        """CONTROL: the reader-visible identity is projected, not transcribed."""
+        with sandbox() as root:
+            template = root / "conformance/INDEX.md.in"
+            edit(template, "{{mcp-jsonrpc-id.corpus}}", "mcp-jsonrpc-id")
+            with self.assertRaisesRegex(
+                ValueError, "corpus table row must render its identity"
+            ):
+                project.write_documents(root)
 
     def test_a_hand_edited_generated_document_is_red(self):
         """CONTROL: mutate fresh output without carrying a hard-coded current score."""

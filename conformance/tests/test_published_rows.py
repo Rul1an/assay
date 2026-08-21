@@ -186,7 +186,8 @@ class BoundedInput(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / "results.json"
             for token in ("NaN", "Infinity", "-Infinity", "1e999"):
-                path.write_text('{"corpora":[],"hostile":%s}' % token, encoding="utf-8")
+                hostile = token if token != "1e999" else '{"nested":[1e999]}'
+                path.write_text('{"corpora":[],"hostile":%s}' % hostile, encoding="utf-8")
                 with self.subTest(token=token), self.assertRaisesRegex(
                     ValueError, "results JSON"
                 ):
