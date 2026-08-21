@@ -63,6 +63,7 @@ EXECUTION_DOCUMENT_NAME = "oci-execution.json"
 CANDIDATE_STDOUT_NAME = "candidate.stdout"
 CANDIDATE_STDERR_NAME = "candidate.stderr"
 HANDOFF_TEMP_PREFIX = ".assay-oci-handoff-"
+CAPTURE_TEMP_PREFIX = ".assay-oci-capture-"
 MAX_EXECUTION_BYTES = 16 * 1024
 MAX_EXECUTION_DEPTH = 6
 
@@ -592,12 +593,30 @@ def write_validated_capture(
         pack, pack_digest, observations, identity_from_registry_row(row)
     )
     validate_capture(capture)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
-        json.dumps(capture, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    write_regular_file_atomically(
+        output,
+        (json.dumps(capture, indent=2, sort_keys=True) + "\n").encode("utf-8"),
     )
     print(f"captured {len(observations)} observations")
+
+
+def write_regular_file_atomically(path: Path, data: bytes) -> None:
+    parent = Path(path).parent
+    parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=CAPTURE_TEMP_PREFIX, dir=str(parent))
+    tmp = Path(tmp_name)
+    try:
+        written = 0
+        while written < len(data):
+            written += os.write(fd, data[written:])
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        os.replace(tmp, path)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        tmp.unlink(missing_ok=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -641,11 +660,11 @@ def main(argv: list[str] | None = None) -> int:
             bundle_path=args.bundle,
             timeout_seconds=args.timeout_seconds,
         )
+        if args.output is not None:
+            write_handoff(args.output, result)
     except (ImplementationRegistryError, ValueError, OSError) as error:
         print(str(error), file=sys.stderr)
         return 2
-    if args.output is not None:
-        write_handoff(args.output, result)
     print(result.state)
     return 0
 

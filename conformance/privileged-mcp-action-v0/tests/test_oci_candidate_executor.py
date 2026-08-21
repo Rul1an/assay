@@ -1146,6 +1146,71 @@ class CandidateOutputHandoff(unittest.TestCase):
             ]
             self.assertEqual(leftovers, [])
 
+    def _main_handoff(self, dest: Path, bundle: Path, *, rename_error: bool = False) -> tuple[int, str]:
+        module = _require()
+        stderr = mock.Mock()
+        argv = [
+            "--implementation-id",
+            "inert-fixture",
+            "--bundle",
+            str(bundle),
+            "--output",
+            str(dest),
+        ]
+        with mock.patch.object(module, "execute_candidate", return_value=self._completed()):
+            with mock.patch.object(sys, "stderr", stderr):
+                if rename_error:
+                    with mock.patch.object(
+                        os, "rename", side_effect=OSError("simulated rename failure")
+                    ):
+                        code = module.main(argv)
+                else:
+                    code = module.main(argv)
+        written = "".join(
+            str(call.args[0]) for call in stderr.write.call_args_list if call.args
+        )
+        return code, written
+
+    def test_main_handoff_existing_dest_exits_2_without_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            dest = Path(raw) / "handoff"
+            dest.mkdir()
+            (dest / "stale").write_bytes(b"keep-me")
+            code, err = self._main_handoff(dest, _bundle(Path(raw)))
+            self.assertEqual((dest / "stale").read_bytes(), b"keep-me")
+        self.assertEqual(code, 2)
+        self.assertTrue(err.strip())
+        self.assertNotIn("Traceback", err)
+
+    def test_main_handoff_symlink_dest_exits_2_without_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            target = Path(raw) / "real"
+            target.mkdir()
+            dest = Path(raw) / "handoff"
+            dest.symlink_to(target)
+            code, err = self._main_handoff(dest, _bundle(Path(raw)))
+            self.assertTrue(dest.is_symlink())
+            self.assertEqual(list(target.iterdir()), [])
+        self.assertEqual(code, 2)
+        self.assertTrue(err.strip())
+        self.assertNotIn("Traceback", err)
+
+    def test_main_handoff_rename_failure_exits_2_and_leaves_dest_absent(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            dest = Path(raw) / "handoff"
+            code, err = self._main_handoff(dest, _bundle(Path(raw)), rename_error=True)
+            self.assertFalse(dest.exists())
+            leftovers = [
+                path
+                for path in Path(raw).iterdir()
+                if path.name.startswith(module.HANDOFF_TEMP_PREFIX)
+            ]
+            self.assertEqual(leftovers, [])
+        self.assertEqual(code, 2)
+        self.assertTrue(err.strip())
+        self.assertNotIn("Traceback", err)
+
 
 class CaptureAdapterEquivalence(unittest.TestCase):
     """#199 capture_observations via the OCI adapter, no second loop."""
@@ -1443,6 +1508,60 @@ class PackCaptureCli(unittest.TestCase):
                         timeout_seconds=30,
                     )
             self.assertFalse(output.exists())
+
+    def test_stale_capture_stays_byte_identical_on_validation_failure(self) -> None:
+        module = _require()
+        stale = b'{"stale":true}\n'
+        with tempfile.TemporaryDirectory() as raw:
+            pack = _write_pack(Path(raw))
+            registry = _write_registry(Path(raw), DIGEST_IMAGE)
+            output = Path(raw) / "capture.json"
+            output.write_bytes(stale)
+            with (
+                mock.patch.object(module, "run_oci_candidate", side_effect=self._fake_runner),
+                mock.patch.object(
+                    capture_candidate,
+                    "build_capture",
+                    return_value={"schema": "not-a-capture"},
+                ),
+            ):
+                with self.assertRaises(ValueError):
+                    module.write_validated_capture(
+                        pack,
+                        "inert-fixture",
+                        output,
+                        registry_path=registry,
+                        timeout_seconds=30,
+                    )
+            self.assertEqual(output.read_bytes(), stale)
+
+    def test_stale_capture_stays_byte_identical_on_write_failure(self) -> None:
+        module = _require()
+        stale = b'{"stale":true}\n'
+        with tempfile.TemporaryDirectory() as raw:
+            pack = _write_pack(Path(raw))
+            registry = _write_registry(Path(raw), DIGEST_IMAGE)
+            output = Path(raw) / "capture.json"
+            output.write_bytes(stale)
+            with (
+                mock.patch.object(module, "run_oci_candidate", side_effect=self._fake_runner),
+                mock.patch.object(os, "replace", side_effect=OSError("write interrupted")),
+            ):
+                with self.assertRaises(OSError):
+                    module.write_validated_capture(
+                        pack,
+                        "inert-fixture",
+                        output,
+                        registry_path=registry,
+                        timeout_seconds=30,
+                    )
+            self.assertEqual(output.read_bytes(), stale)
+            leftovers = [
+                path
+                for path in Path(raw).iterdir()
+                if path.name.startswith(module.CAPTURE_TEMP_PREFIX)
+            ]
+            self.assertEqual(leftovers, [])
 
     def test_pack_cli_rejects_direct_image(self) -> None:
         module = _require()
