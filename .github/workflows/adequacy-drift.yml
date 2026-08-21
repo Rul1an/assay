@@ -203,6 +203,18 @@ jobs:
         with:
           cache-workspaces: "."
 
+      - name: Self-test bounded cleanup target
+        run: python3 scripts/ci/test_adequacy_cleanup.py
+
+      # setup-rust restores target/ inside the repository. The process runner
+      # materializes repo_root under a hard byte ceiling, so all cached build
+      # output, including dependency artifacts outside workspace packages, must
+      # not be mistaken for governed source input.
+      - name: Remove restored build outputs before bounded materialization
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: cargo clean
+
       # The tool is not vendored (INDEX.md, "Where the adequacy tool lives"): `measure_all.py`
       # imports it from `<repo>/../corpus-adequacy` and reads `git -C <tool> rev-parse HEAD` to
       # record which instrument produced each number.

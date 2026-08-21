@@ -308,6 +308,18 @@ class LiveTree(unittest.TestCase):
         )
         self.assertFalse(result["heavy_relevant"])
 
+    def test_cleanup_contract_change_forces_a_full_measurement(self) -> None:
+        result = lp.plan(
+            self.corpora,
+            ["scripts/ci/test_adequacy_cleanup.py"],
+            full=False,
+            pinned_siblings=self.pins,
+        )
+        self.assertEqual(
+            result["relevant"],
+            sorted(c.name for c in self.corpora),
+        )
+
     def test_emit_lines_are_routable_key_values(self) -> None:
         result = lp.plan(self.corpora, [], full=True, pinned_siblings=self.pins)
         buffer = io.StringIO()
@@ -377,6 +389,28 @@ class CheckDriftProvenanceTransport(unittest.TestCase):
         job = self._check_drift_job()
         self.assertNotIn("Fetch recorded measurement commits", job)
         self.assertNotIn("git fetch", job)
+
+
+class MeasurementWorkspaceHygiene(unittest.TestCase):
+    """Bounded isolation must see source, not a restored Cargo cache."""
+
+    WORKFLOW = REPO_ROOT / ".github/workflows/adequacy-drift.yml"
+
+    def test_restored_build_outputs_are_removed_before_measurement(self):
+        workflow = self.WORKFLOW.read_text(encoding="utf-8")
+        setup = workflow.index("uses: ./.github/actions/setup-rust")
+        cleanup_test = workflow.index("python3 scripts/ci/test_adequacy_cleanup.py")
+        cleanup_target = "CARGO_TARGET_DIR: ${{ github.workspace }}/target"
+        target = workflow.index(cleanup_target)
+        clean_command = "run: cargo clean\n"
+        clean = workflow.index(clean_command)
+        measure = workflow.index("python3 conformance/adequacy/measure_all.py")
+        self.assertNotIn("cargo clean --workspace", workflow)
+        self.assertLess(setup, cleanup_test)
+        self.assertLess(cleanup_test, target)
+        self.assertLess(target, clean)
+        self.assertLess(setup, clean)
+        self.assertLess(clean, measure)
 
 
 if __name__ == "__main__":

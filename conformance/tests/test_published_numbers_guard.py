@@ -23,12 +23,13 @@ from __future__ import annotations
 
 import contextlib
 import json
-import json
 import shutil
 import sys
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "conformance/adequacy"))
@@ -251,14 +252,32 @@ class ControlsOnCoverageAndPinning(unittest.TestCase):
             new.unlink()
             self.assertEqual(chk.check(), [])
 
-    def test_a_result_outliving_its_manifest_is_red(self):
-        """CONTROL: delete the rge-bench manifest, leaving its row behind."""
+    def test_a_current_row_whose_indexed_manifest_disappears_is_red(self):
+        """CONTROL: delete the manifest addressed by a current typed row."""
         with sandbox() as root:
             manifest = root / "conformance/adequacy/rge-bench.manifest.json"
             keep = manifest.read_bytes()
             manifest.unlink()
-            self.assert_red("has no manifest on disk")
+            self.assert_red("indexed manifest is not present")
             manifest.write_bytes(keep)
+            self.assertEqual(chk.check(), [])
+
+    def test_a_result_identity_outliving_the_manifest_inventory_is_red(self):
+        """CONTROL: rename only a row identity while its addressed manifest stays readable.
+
+        The typed loader must succeed so this reaches the checker's orphan-row rule,
+        rather than passing because an earlier manifest read happened to fail.
+        """
+        with sandbox() as root:
+            results = root / "conformance/adequacy/results.json"
+            document = json.loads(results.read_text(encoding="utf-8"))
+            row = next(item for item in document["corpora"]
+                       if item["corpus"] == "rge-bench")
+            row["corpus"] = "retired-rge-bench"
+            results.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n",
+                               encoding="utf-8")
+            self.assert_red("outliving its manifest is a number about nothing")
+            shutil.copy2(REPO / "conformance/adequacy/results.json", results)
             self.assertEqual(chk.check(), [])
 
     def test_a_manifest_with_no_tool_pin_is_red(self):
@@ -268,13 +287,18 @@ class ControlsOnCoverageAndPinning(unittest.TestCase):
         is the state every manifest was in before this layer existed.
         """
         with sandbox() as root:
+            baseline = chk.published_rows.load_results(chk.RESULTS)
             path = root / "conformance/adequacy/observed-effect-drift-consumer.manifest.json"
+            original = path.read_bytes()
             doc = json.loads(path.read_text())
-            saved = doc.pop("tool_pin")
+            doc.pop("tool_pin")
             path.write_text(json.dumps(doc, indent=2))
-            self.assert_red("declares no tool_pin.commit")
-            doc["tool_pin"] = saved
-            path.write_text(json.dumps(doc, indent=2))
+            # The canonical loader normally catches the changed manifest digest first.
+            # Freeze its validated rows here so this control still proves the downstream
+            # tool-pin rule independently rather than passing for the earlier guard.
+            with mock.patch.object(chk.published_rows, "load_results", return_value=baseline):
+                self.assert_red("declares no tool_pin.commit")
+            path.write_bytes(original)
             self.assertEqual(chk.check(), [])
 
     def test_a_row_measured_with_another_commit_is_red(self):
@@ -284,12 +308,14 @@ class ControlsOnCoverageAndPinning(unittest.TestCase):
         tool that produced it must move together.
         """
         with sandbox() as root:
+            baseline = chk.published_rows.load_results(chk.RESULTS)
             path = root / "conformance/adequacy/mcp-jsonrpc-id.manifest.json"
             # Read the pin rather than hard-coding it: a control that carries its
             # own copy of the value stops firing the day the real pin moves, which
             # is precisely when it is needed.
             edit(path, json.loads(path.read_text())["tool_pin"]["commit"], "0" * 40)
-            self.assert_red("but mcp-jsonrpc-id.manifest.json pins")
+            with mock.patch.object(chk.published_rows, "load_results", return_value=baseline):
+                self.assert_red("but mcp-jsonrpc-id.manifest.json pins")
             shutil.copy2(REPO / "conformance/adequacy/mcp-jsonrpc-id.manifest.json", path)
             self.assertEqual(chk.check(), [])
 
@@ -391,38 +417,66 @@ class ResultsAreStillWhatTheToolProduces(unittest.TestCase):
         return {c["corpus"]: c for c in json.loads(
             (REPO / "conformance/adequacy/results.json").read_text())["corpora"]}
 
-    def drifted(self, stored: dict) -> list[str]:
+    def drifted(self, stored: dict) -> tuple[list[str], list[str]]:
         """Corpora whose recorded row differs from a fresh run of the tool.
 
         Rows are built through measure_all.row, so this comparison cannot drift
         from the shape the writer actually records. tool_version is provenance
         rather than measurement, and older tool checkouts report none.
         """
-        out = []
+        out, unavailable = [], []
         for corpus, manifest in sorted(CHEAP.items()):
             sibling = SIBLINGS.get(corpus)
             if sibling is not None and not sibling.is_dir():
-                self.skipTest("%s not found as a sibling checkout" % sibling.name)
-            fresh = measure_all.row(manifest, ca.run(manifest),
-                                    {"tool_commit": stored[corpus]["tool_commit"]})
-            trim = lambda r: {k: v for k, v in r.items() if k != "tool_version"}  # noqa: E731
+                unavailable.append(corpus)
+                continue
+            report = measure_all.run_producer(ca, manifest)
+            fresh = measure_all.row(manifest, report, ca.encode_report_v0(report))
+            def trim(row):
+                comparable = {k: v for k, v in row.items() if k != "tool_version"}
+                measured = dict(comparable["measured_at"])
+                measured.pop("commit", None)
+                comparable["measured_at"] = measured
+                return comparable
             if trim(fresh) != trim(stored[corpus]):
                 out.append(corpus)
-        return out
+        if unavailable:
+            warnings.warn("not measured: %s" % ", ".join(unavailable), RuntimeWarning)
+        return out, unavailable
 
     def test_the_cheap_corpora_still_measure_what_results_json_records(self):
-        self.assertEqual(self.drifted(self.stored()), [],
+        drifted, unavailable = self.drifted(self.stored())
+        if len(unavailable) == len(CHEAP):
+            self.skipTest("no declared cheap comparison can run")
+        self.assertEqual(drifted, [],
                          "results.json has gone stale; re-run measure_all.py")
 
+    def test_a_missing_sibling_keeps_completed_comparisons(self):
+        missing = REPO / "a-sibling-that-does-not-exist"
+        selected = {name: CHEAP[name] for name in ("mcp-jsonrpc-id", "rge-bench")}
+        siblings = {"rge-bench": missing}
+        with mock.patch.dict(CHEAP, selected, clear=True), \
+                mock.patch.dict(SIBLINGS, siblings, clear=True), \
+                warnings.catch_warnings(record=True) as caught:
+            try:
+                drifted, unavailable = self.drifted(self.stored())
+            except unittest.SkipTest:
+                self.fail("one missing sibling discarded a completed comparison")
+        self.assertEqual(drifted, [])
+        self.assertEqual(unavailable, ["rge-bench"])
+        self.assertTrue(any("not measured: rge-bench" in str(item.message) for item in caught))
+
     def test_a_doctored_result_is_caught(self):
-        """CONTROL: hand-edit rge-bench's killed count and confirm the drift check bites.
+        """CONTROL: hand-edit mcp-jsonrpc-id's killed count and confirm the drift check bites.
 
         Without it this comparison could be structurally unable to fail -- comparing
         a value with itself, or skipping every corpus -- and would still print green.
         """
         stored = self.stored()
-        stored["rge-bench"] = dict(stored["rge-bench"], killed=stored["rge-bench"]["killed"] + 1)
-        self.assertEqual(self.drifted(stored), ["rge-bench"])
+        stored["mcp-jsonrpc-id"] = dict(
+            stored["mcp-jsonrpc-id"], killed=stored["mcp-jsonrpc-id"]["killed"] + 1)
+        drifted, _ = self.drifted(stored)
+        self.assertEqual(drifted, ["mcp-jsonrpc-id"])
 
 
 class TheTranscribedRowSaysSoOutLoud(unittest.TestCase):

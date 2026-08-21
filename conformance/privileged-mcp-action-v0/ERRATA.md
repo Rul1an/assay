@@ -60,7 +60,7 @@ here**, for two separate reasons:
 **Five of twenty-seven, 18.5%.**
 
 Reproduce the tool's run with [`corpus-adequacy`](https://github.com/corpus-adequacy/corpus-adequacy)
-at commit `b87ef706e70a2bcfe163514ec0360022e93fa175`, from the repository root, with that tool checked
+at commit `13048989c84ab6b4e0281f9514ea45fb79a2d8b4`, from the repository root, with that tool checked
 out as a sibling directory:
 
 ```
