@@ -25,14 +25,10 @@ import run_all  # noqa: E402
 REPO = Path(__file__).resolve().parents[2]
 CI_YML = REPO / ".github/workflows/ci.yml"
 STANDALONE = REPO / ".github/workflows/conformance-inventory.yml"
-INVENTORY_STEP_RE = re.compile(r"(?ms)^      - name: Conformance inventory\n(?:        .+\n)+")
-JOB_KEY_RE = re.compile(r"^  [A-Za-z0-9_][A-Za-z0-9_-]*:")
 REQUIRED_RUN_ALL = (
     "python3 conformance/run_all.py --require-complete --completion-scope required"
 )
 CONFORMANCE_YML = REPO / ".github/workflows/privileged-mcp-action-conformance.yml"
-KIT_STEP_RE = re.compile(
-    r"(?ms)^      - name: Run activation-kit contract tests\n(?:        .+\n)+")
 COMBINED_UNITTEST = (
     "          python3 -m unittest \\\n"
     "            conformance/privileged-mcp-action-v0/tests/test_activation_kit.py \\\n"
@@ -43,34 +39,52 @@ ACTIVATION_KIT = (
 )
 
 
-def _scope_job(text: str) -> str:
+def named_step(text: str, name: str) -> str:
     lines = text.splitlines(keepends=True)
-    start = next((i for i, line in enumerate(lines) if line.startswith("  scope:")), None)
-    if start is None:
-        raise AssertionError("ci.yml missing scope job")
+    marker = re.compile(rf"^(?P<indent> +)- name: {re.escape(name)}\s*$")
+    matches = [
+        (i, marker.fullmatch(line.rstrip("\r\n")))
+        for i, line in enumerate(lines)
+    ]
+    matches = [(i, match) for i, match in matches if match is not None]
+    if len(matches) != 1:
+        raise AssertionError(f"expected one {name!r} step, found {len(matches)}")
+    start, match = matches[0]
+    assert match is not None
+    step_indent = len(match.group("indent"))
     end = start + 1
-    while end < len(lines) and not JOB_KEY_RE.match(lines[end]):
+    while end < len(lines):
+        line = lines[end]
+        if line.strip():
+            indent = len(line) - len(line.lstrip(" "))
+            if indent <= step_indent:
+                break
         end += 1
     return "".join(lines[start:end])
 
 
 def _inventory_step(text: str) -> str:
-    step = INVENTORY_STEP_RE.search(_scope_job(text))
-    if step is None:
-        raise AssertionError("scope job missing Conformance inventory step")
-    return step.group(0)
+    return named_step(text, "Conformance inventory")
 
 
 def _active_run_lines(step: str) -> list[str]:
+    raw_lines = step.splitlines()
+    if not raw_lines:
+        return []
+    step_indent = len(raw_lines[0]) - len(raw_lines[0].lstrip(" "))
+    run_indent = step_indent + 2
+    run_indexes = [
+        i for i, raw in enumerate(raw_lines)
+        if raw == " " * run_indent + "run: |"
+    ]
+    if len(run_indexes) != 1:
+        return []
     lines: list[str] = []
-    in_run = False
-    for raw in step.splitlines():
-        if raw.strip() == "run: |":
-            in_run = True
-            continue
-        if not in_run:
-            continue
+    for raw in raw_lines[run_indexes[0] + 1:]:
         stripped = raw.strip()
+        indent = len(raw) - len(raw.lstrip(" "))
+        if stripped and indent <= run_indent:
+            break
         if not stripped or stripped.startswith("#"):
             continue
         lines.append(stripped)
@@ -78,10 +92,31 @@ def _active_run_lines(step: str) -> list[str]:
 
 
 def _kit_step(text: str) -> str:
-    step = KIT_STEP_RE.search(text)
-    if step is None:
-        raise AssertionError("conformance workflow missing kit contract step")
-    return step.group(0)
+    return named_step(text, "Run activation-kit contract tests")
+
+
+def assert_hard_run_command(text: str, step_name: str, command: str) -> str:
+    step = named_step(text, step_name)
+    first = step.splitlines()[0]
+    step_indent = len(first) - len(first.lstrip(" "))
+    guarded = re.compile(
+        rf"^ {{{step_indent + 2}}}(?:if|continue-on-error)\s*:")
+    if any(guarded.match(line) for line in step.splitlines()[1:]):
+        raise AssertionError(f"{step_name} has a conditional or soft-failure key")
+
+    active = _active_run_lines(step)
+    expected = [line.strip() for line in command.splitlines()]
+    matches = sum(
+        active[i:i + len(expected)] == expected
+        for i in range(len(active) - len(expected) + 1)
+    )
+    if matches != 1:
+        raise AssertionError(f"{step_name} must run the canonical command exactly once")
+    if any(re.search(r"\|\|\s*(?:true|:)(?:\s|$)", line) for line in active):
+        raise AssertionError(f"{step_name} command is neutralized with ||")
+    if any(line == "set +e" or line.startswith("set +e ") for line in active):
+        raise AssertionError(f"{step_name} disables fail-fast shell behavior")
+    return step
 
 
 def _load_activation_kit():
@@ -129,21 +164,9 @@ def assert_oci_candidate_checker(mod) -> None:
         raise AssertionError("no-op control was not green")
 
 
-def assert_combined_unittest(step: str) -> None:
-    if COMBINED_UNITTEST not in step:
-        raise AssertionError("combined unittest command missing")
-    lines = _active_run_lines(step)
-    joined = "\n".join(lines)
-    if "python3 -m unittest" not in joined:
-        raise AssertionError("combined unittest is not active")
-    if "test_activation_kit.py" not in joined:
-        raise AssertionError("activation kit is not active")
-    if "test_oci_candidate_executor.py" not in joined:
-        raise AssertionError("executor kit is not active")
-    if "|| true" in step or "|| :" in step or "continue-on-error" in step:
-        raise AssertionError("combined unittest is neutralized")
-    if any(ln == "set +e" or ln.startswith("set +e ") for ln in lines):
-        raise AssertionError("kit contract step disables -e")
+def assert_combined_unittest(text: str) -> None:
+    assert_hard_run_command(
+        text, "Run activation-kit contract tests", COMBINED_UNITTEST)
 
 
 POLICIES = {
@@ -325,7 +348,8 @@ class ProductCallsite(unittest.TestCase):
 
     def test_scope_job_invokes_both_flags_and_does_not_map_3_to_0(self):
         text = CI_YML.read_text(encoding="utf-8")
-        step = _inventory_step(text)
+        step = assert_hard_run_command(
+            text, "Conformance inventory", REQUIRED_RUN_ALL)
         lines = _active_run_lines(step)
         self.assertEqual(lines[0], "set -euo pipefail")
         self.assertIn("python3 conformance/registry.py", lines)
@@ -351,7 +375,11 @@ class ProductCallsite(unittest.TestCase):
 
     def test_deleting_the_scope_job_callsite_fails(self):
         text = CI_YML.read_text(encoding="utf-8")
-        mutated = INVENTORY_STEP_RE.sub("", text)
+        mutated = text.replace(
+            "      - name: Conformance inventory\n",
+            "      - name: Deleted conformance inventory\n",
+            1,
+        )
         with self.assertRaises(AssertionError):
             _inventory_step(mutated)
 
@@ -380,8 +408,9 @@ class ProductCallsite(unittest.TestCase):
                              for ln in _active_run_lines(mutated)))
 
     def test_conformance_combined_unittest_is_a_hard_callsite(self):
-        step = _kit_step(CONFORMANCE_YML.read_text(encoding="utf-8"))
-        assert_combined_unittest(step)
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        step = _kit_step(text)
+        assert_combined_unittest(text)
         assert_combined_unittest(step.replace("no-such-token", "no-such-token"))
         name = "      - name: Run activation-kit contract tests\n"
         mutations = (
@@ -392,11 +421,37 @@ class ProductCallsite(unittest.TestCase):
             step.replace("test_activation_kit.py", ""),
             step.replace("test_oci_candidate_executor.py", ""),
             step.replace(COMBINED_UNITTEST, COMBINED_UNITTEST + " || true"),
+            step.replace(COMBINED_UNITTEST, COMBINED_UNITTEST + " || :"),
+            step.replace("          set -euo pipefail", "          set +e"),
             step.replace(name, name + "        continue-on-error: true\n"),
         )
         for mutated in mutations:
             with self.assertRaises(AssertionError):
                 assert_combined_unittest(mutated)
+
+    def test_conditional_activation_kit_step_fails_the_hard_callsite(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        mutated = text.replace(
+            "      - name: Run activation-kit contract tests\n",
+            "      - name: Run activation-kit contract tests\n"
+            "        if: ${{ github.event_name == 'disabled' }}\n",
+            1,
+        )
+        with self.assertRaises(AssertionError):
+            assert_combined_unittest(mutated)
+
+    def test_relocated_activation_kit_command_fails_the_hard_callsite(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        mutated = text.replace(COMBINED_UNITTEST, "          :", 1).replace(
+            "      - name: Validate public JSON documents\n",
+            "      - name: Decorative activation-kit note\n"
+            "        run: |\n"
+            f"{COMBINED_UNITTEST}\n\n"
+            "      - name: Validate public JSON documents\n",
+            1,
+        )
+        with self.assertRaises(AssertionError):
+            assert_combined_unittest(mutated)
 
     def test_required_ci_invokes_oci_candidate_checker(self):
         mod = _load_activation_kit()
