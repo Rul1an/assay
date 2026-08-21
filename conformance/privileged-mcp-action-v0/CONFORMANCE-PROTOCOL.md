@@ -14,8 +14,7 @@ verifier logic, interpret the profile, or establish that an implementation is in
 3. Read `spec.md` and `descriptor.json`.
 4. Implement a command that consumes one bundle path and emits the profile report.
 5. Freeze the implementation commit and record all materials consulted.
-6. Run the scorer. It snapshots the canonical oracle into scorer-private memory for tamper resistance,
-   executes every opaque case without passing that oracle to the candidate, and only then compares.
+6. Run the scorer, in one phase or two. See "Scoring" below for which to pick.
 7. Publish the implementation source, run record, and completed implementation report.
 
 Reading Assay's verifier, `gen_vectors.py`, the canonical `MANIFEST.json`, or a prior scored report
@@ -130,7 +129,13 @@ disclosure it does not make itself is asking for deference rather than evidence.
 
 ## Scoring
 
-Run from an Assay source checkout at the pinned activation-kit revision:
+Two shapes, one comparison. Both call the same capture builder and the same
+scorer, so a given candidate produces byte-identical run records either way.
+
+### One phase, when you trust the candidate
+
+Run from an Assay source checkout at the pinned activation-kit revision. The
+canonical oracle is resident in this process while candidate code runs.
 
 ```bash
 python3 conformance/privileged-mcp-action-v0/scripts/score_candidate.py \
@@ -143,6 +148,56 @@ python3 conformance/privileged-mcp-action-v0/scripts/score_candidate.py \
   --reproduction-mode blind_from_spec \
   --output implementation-report.json
 ```
+
+### Two phases, when you do not
+
+The capture phase takes a pack and an entrypoint. It takes no manifest, no
+expectations and no canonical corpus, so a candidate that escapes its process
+bounds finds no answers on that host to read. Run it wherever you are willing to
+run the candidate; it needs no Assay checkout beyond these scripts.
+
+```bash
+python3 conformance/privileged-mcp-action-v0/scripts/capture_candidate.py \
+  --pack privileged-mcp-action-v0-clean-room.tar.gz \
+  --entrypoint "./my-verifier --format json" \
+  --implementation-name "my verifier" \
+  --implementation-source "https://github.com/example/my-verifier" \
+  --implementation-commit "<full commit>" \
+  --reproduction-mode blind_from_spec \
+  --output capture.json
+```
+
+Add `--implementation-id` and `--implementation-image` when a registered image
+produced the capture. They travel together: a capture names a registry row and
+the image bytes that row addresses, or it names neither. Omitting them is a
+disclosure that no image was declared, not a gap to be filled with a placeholder.
+
+Score the capture on a host that never ran the candidate:
+
+```bash
+python3 conformance/privileged-mcp-action-v0/scripts/score_candidate.py \
+  --pack privileged-mcp-action-v0-clean-room.tar.gz \
+  --manifest conformance/privileged-mcp-action-v0/MANIFEST.json \
+  --capture capture.json \
+  --output implementation-report.json
+```
+
+The scoring host recomputes the pack digest, the declared source commit, the
+corpus digest, the rendered-set digest and every case identifier and input digest
+from its own copy of the pack. The capture's copies of those values are compared
+against the recomputed ones and never adopted. A capture that does not bind is
+refused before any comparison, exit status `2`, and no run record is written:
+a partial record would publish agreement that was never measured.
+
+`capture.schema.json` documents the capture format. It carries no expected value,
+no match or mismatch, no count of agreement, no score and no badge.
+
+### What the split does and does not buy
+
+It removes the oracle from the host that runs candidate code. It does not
+authenticate the capture. A hostile capture host can emit a capture claiming
+whatever it likes, and this protocol has no way to tell. The two threat models
+are different, and only the first one is addressed here.
 
 Exit status is `0` for complete normative agreement, `1` for a completed run with at least one
 normative mismatch, and `2` for an execution or harness error. A mismatch is a useful result and
@@ -211,6 +266,12 @@ pinning when updating the action used by a long-lived workflow.
 A matching run demonstrates agreement on the pinned 14-case corpus. It does not establish
 implementation independence, security, compliance, complete profile determinacy, or any provider
 outcome. Those claims require separate evidence.
+
+A capture adds no claim of its own. It records what a candidate emitted; it is not a verdict, an
+attestation, a sandbox proof, or an independent reproduction. A capture host can fabricate
+observations wholesale, so a capture is an unauthenticated artifact and separating the phases does
+not change that. A declared image digest addresses bytes; it neither authenticates the publisher nor
+establishes that the addressed image is the one that ran.
 
 Nor does it establish independence of failure. Where either implementation was generatively written,
 a match is bounded further by the result cited under Authorship method: agreement is expected to be

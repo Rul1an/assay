@@ -546,7 +546,14 @@ class CleanRoomPackTests(unittest.TestCase):
                     rewrite_bundle_stream_identity(bundle, "pmav0-case-001")
 
 
-class CandidateScorerTests(unittest.TestCase):
+class CandidateHarness:
+    """Pack build and fake-candidate factory, shared by both scoring shapes.
+
+    A plain mixin rather than a base TestCase: subclassing the combined-mode
+    suite would re-run all sixteen of its cases under the split-mode suite.
+    """
+
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.tmp = tempfile.TemporaryDirectory()
@@ -682,6 +689,8 @@ class CandidateScorerTests(unittest.TestCase):
             check=False,
         )
 
+
+class CandidateScorerTests(CandidateHarness, unittest.TestCase):
     def test_matching_candidate_scores_all_cases(self) -> None:
         output = self.root / "report.json"
         result = self.score(self.candidate("match"), output)
@@ -861,10 +870,18 @@ class CandidateScorerTests(unittest.TestCase):
         oversized.write_bytes(b'{"padding":"' + b"x" * (4 * 1024 * 1024) + b'"}')
         too_deep = self.root / "deep-run-record.json"
         too_deep.write_text("[" * 65 + "0" + "]" * 65)
+        # Past CPython's decoder recursion limit and still inside the 4 MiB
+        # ceiling: the case the depth scan exists for. Parsed first, this raises
+        # RecursionError, which is not a ValueError and reaches the user as a
+        # traceback. The capture ceiling is too small to reach here, so this is
+        # the only place the scan's purpose can be observed.
+        recursive = self.root / "recursive-run-record.json"
+        recursive.write_text("[" * 200_000 + "0" + "]" * 200_000)
 
         for path, diagnostic in (
-            (oversized, "exceeds 4194304 bytes"),
+            (oversized, "exceeds the 4194304-byte limit"),
             (too_deep, "nesting exceeds 64"),
+            (recursive, "nesting exceeds 64"),
         ):
             with self.subTest(path=path.name):
                 result = run(str(VALIDATE_SCRIPT), str(path), check=False)
@@ -932,7 +949,7 @@ class CandidateScorerTests(unittest.TestCase):
         bundle.write_bytes(b"ignored")
         sys.path.insert(0, str(CORPUS_DIR / "scripts"))
         try:
-            from score_candidate import CandidateError, run_candidate
+            from capture_candidate import CandidateError, run_candidate
         finally:
             sys.path.pop(0)
 
@@ -965,7 +982,7 @@ class CandidateScorerTests(unittest.TestCase):
         bundle.write_bytes(b"ignored")
         sys.path.insert(0, str(CORPUS_DIR / "scripts"))
         try:
-            from score_candidate import CandidateError, run_candidate
+            from capture_candidate import CandidateError, run_candidate
         finally:
             sys.path.pop(0)
 
@@ -1030,6 +1047,7 @@ class CandidateScorerTests(unittest.TestCase):
         output = self.root / "capture-harness-error.json"
         sys.path.insert(0, str(CORPUS_DIR / "scripts"))
         try:
+            import capture_candidate
             import score_candidate
         finally:
             sys.path.pop(0)
@@ -1055,10 +1073,12 @@ class CandidateScorerTests(unittest.TestCase):
         ]
         with (
             mock.patch.object(sys, "argv", argv),
+            # Patched where it is executed: capture_observations resolves
+            # run_candidate in its own module, not through score_candidate.
             mock.patch.object(
-                score_candidate,
+                capture_candidate,
                 "run_candidate",
-                side_effect=score_candidate.HarnessError("synthetic capture failure"),
+                side_effect=capture_candidate.HarnessError("synthetic capture failure"),
             ),
         ):
             self.assertEqual(score_candidate.main(), 2)
@@ -1120,6 +1140,537 @@ class CandidateScorerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertNotIn("Traceback", result.stderr)
         self.assertFalse(output.exists())
+
+
+sys.path.insert(0, str(CORPUS_DIR / "scripts"))
+import capture_format  # noqa: E402
+import score_candidate  # noqa: E402
+import strict_json  # noqa: E402
+
+CAPTURE_SCRIPT = CORPUS_DIR / "scripts" / "capture_candidate.py"
+CAPTURE_SCHEMA_DOC = CORPUS_DIR / "capture.schema.json"
+
+
+class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
+    """Split-phase capture and trusted scoring.
+
+    Inherits the pack build and the fake-candidate factory from the combined-mode
+    tests rather than restating them: the point of the split is that both phases
+    drive the same candidate over the same pack.
+    """
+
+    def capture(
+        self,
+        candidate: Path,
+        output: Path,
+        *,
+        pack: Path | None = None,
+        extra: tuple[str, ...] = (),
+    ) -> subprocess.CompletedProcess[str]:
+        return run(
+            str(CAPTURE_SCRIPT),
+            "--pack",
+            str(pack or self.pack),
+            "--entrypoint",
+            shlex.join([sys.executable, str(candidate)]),
+            "--implementation-name",
+            "test implementation",
+            "--implementation-source",
+            "https://example.test/verifier",
+            "--implementation-commit",
+            IMPLEMENTATION_COMMIT,
+            "--reproduction-mode",
+            "blind_from_spec",
+            *extra,
+            "--output",
+            str(output),
+            check=False,
+        )
+
+    def score_capture(
+        self,
+        capture: Path,
+        output: Path,
+        *,
+        pack: Path | None = None,
+        manifest: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return run(
+            str(SCORE_SCRIPT),
+            "--pack",
+            str(pack or self.pack),
+            "--manifest",
+            str(manifest or CORPUS_DIR / "MANIFEST.json"),
+            "--capture",
+            str(capture),
+            "--output",
+            str(output),
+            check=False,
+        )
+
+    def valid_capture(self, name: str) -> Path:
+        capture = self.root / f"capture-{name}.json"
+        result = self.capture(self.candidate("match"), capture)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return capture
+
+    def rewrite(self, capture: Path, name: str, mutate) -> Path:
+        document = json.loads(capture.read_text())
+        mutate(document)
+        target = self.root / f"capture-{name}.json"
+        target.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
+        return target
+
+    def test_valid_capture_scores_every_case(self) -> None:
+        """Positive control for every refusal below.
+
+        Without it, a scorer that refused all captures would satisfy the negative
+        cases and prove nothing.
+        """
+        capture = self.valid_capture("control")
+        output = self.root / "capture-control-report.json"
+        result = self.score_capture(capture, output)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(output.read_text())
+        self.assertEqual(report["summary"]["match"], 14)
+        self.assertEqual(report["summary"]["total"], 14)
+
+    def test_missing_or_duplicated_observation_is_refused_without_a_record(self) -> None:
+        capture = self.valid_capture("cardinality")
+
+        def drop(document: object) -> None:
+            del document["observations"][6]
+
+        def duplicate(document: object) -> None:
+            document["observations"].append(json.loads(json.dumps(document["observations"][6])))
+
+        for name, mutate in (("thirteen", drop), ("fifteen", duplicate)):
+            with self.subTest(shape=name):
+                hostile = self.rewrite(capture, name, mutate)
+                output = self.root / f"capture-{name}-report.json"
+                result = self.score_capture(hostile, output)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertFalse(
+                    output.exists(),
+                    "a capture that does not bind must leave no run record",
+                )
+
+    def test_direct_and_split_paths_produce_byte_identical_run_records(self) -> None:
+        """The migration guarantee, and the proof that there is one comparison.
+
+        Two records built from the same candidate through different plumbing can
+        only be byte-identical if both went through the same scorer.
+        """
+        candidate = self.candidate("match")
+        direct = self.root / "equivalence-direct.json"
+        self.assertEqual(self.score(candidate, direct).returncode, 0)
+
+        capture = self.root / "equivalence-capture.json"
+        self.assertEqual(self.capture(candidate, capture).returncode, 0)
+        split = self.root / "equivalence-split.json"
+        self.assertEqual(self.score_capture(capture, split).returncode, 0)
+
+        self.assertEqual(direct.read_bytes(), split.read_bytes())
+
+    def test_run_record_pack_digest_is_recomputed_locally(self) -> None:
+        capture = self.valid_capture("digest")
+        output = self.root / "digest-report.json"
+        self.assertEqual(self.score_capture(capture, output).returncode, 0)
+        self.assertEqual(
+            json.loads(output.read_text())["pack_sha256"],
+            sha256(self.pack.read_bytes()),
+        )
+
+    def test_scorer_recomputes_the_pack_digest_rather_than_copying_it(self) -> None:
+        """Directly on the scorer, with the CLI's binding guard out of the way.
+
+        Through the CLI a lying capture never reaches this code, so `recomputed`
+        and `capture["pack_sha256"]` are equal wherever it can be observed and
+        the difference between them is invisible. Calling the scorer with a
+        capture that lies is the only way to see which one the record carries.
+        """
+        capture = json.loads(self.valid_capture("recompute").read_text())
+        lie = "sha256:" + "d" * 64
+        capture["pack_sha256"] = lie
+        recomputed = sha256(self.pack.read_bytes())
+        self.assertNotEqual(lie, recomputed)
+
+        pack = {
+            "declared_source_commit": capture["pack_declared_source_commit"],
+            "source_corpus_digest": capture["source_corpus_digest"],
+            "rendered_set_digest": capture["rendered_set_digest"],
+            "cases": [
+                {"id": observation["case_id"], "sha256": observation["input_sha256"]}
+                for observation in capture["observations"]
+            ],
+        }
+        expected = {
+            observation["input_sha256"]: observation["observed"]
+            for observation in capture["observations"]
+        }
+        report = score_candidate.score_capture(
+            capture,
+            pack,
+            recomputed,
+            expected,
+            pack["source_corpus_digest"],
+            pack["rendered_set_digest"],
+        )
+        self.assertEqual(report["pack_sha256"], recomputed)
+        self.assertNotEqual(report["pack_sha256"], lie)
+
+    def test_capture_that_does_not_bind_the_pack_is_refused(self) -> None:
+        capture = self.valid_capture("binding")
+        other = "sha256:" + "b" * 64
+
+        def swap_order(document):
+            document["observations"][2], document["observations"][9] = (
+                document["observations"][9],
+                document["observations"][2],
+            )
+
+        def foreign_input_digest(document):
+            document["observations"][4]["input_sha256"] = other
+
+        def foreign_pack(document):
+            document["pack_sha256"] = other
+
+        def foreign_corpus(document):
+            document["source_corpus_digest"] = other
+
+        def foreign_commit(document):
+            document["pack_declared_source_commit"] = "c" * 40
+
+        for name, mutate in (
+            ("reordered", swap_order),
+            ("foreign-input-digest", foreign_input_digest),
+            ("foreign-pack", foreign_pack),
+            ("foreign-corpus", foreign_corpus),
+            ("foreign-commit", foreign_commit),
+        ):
+            with self.subTest(binding=name):
+                hostile = self.rewrite(capture, name, mutate)
+                output = self.root / f"bind-{name}.json"
+                result = self.score_capture(hostile, output)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertFalse(output.exists())
+                self.assertNotIn("Traceback", result.stderr)
+
+    def test_hostile_capture_bytes_fail_closed_without_a_traceback(self) -> None:
+        capture = self.valid_capture("hostile")
+        valid_text = capture.read_text()
+        cases = {
+            "duplicate-key": valid_text.replace(
+                '"schema":', '"schema": "assay.privileged_mcp_action.candidate_capture.v0",\n  "schema":', 1
+            ),
+            "non-finite": valid_text.replace('"exit_code": 0', '"exit_code": NaN', 1),
+            "float-exit-code": valid_text.replace('"exit_code": 0', '"exit_code": 0.0', 1),
+            "oversized-integer": valid_text.replace(
+                '"exit_code": 0', '"exit_code": 9007199254740992', 1
+            ),
+            "out-of-range-exit-code": valid_text.replace('"exit_code": 0', '"exit_code": 4096', 1),
+            # Deep enough that json.loads would raise RecursionError, small enough
+            # that the byte ceiling cannot be what refuses it. Without both, this
+            # case proves the ceiling works and says nothing about the depth scan.
+            "deeply-nested": "[" * 30000 + "0" + "]" * 30000,
+            "not-utf8": None,
+            "not-an-object": "[]",
+        }
+        for name, text in cases.items():
+            with self.subTest(hostile=name):
+                path = self.root / f"hostile-{name}.json"
+                if text is None:
+                    path.write_bytes(b'{"schema": "\xff\xfe"}')
+                else:
+                    path.write_text(text)
+                output = self.root / f"hostile-{name}-report.json"
+                result = self.score_capture(path, output)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertFalse(output.exists())
+                self.assertNotIn("Traceback", result.stderr)
+
+    def test_capture_over_the_byte_ceiling_is_refused_by_the_ceiling(self) -> None:
+        """Oversized but otherwise valid, so only the ceiling can be the refusal.
+
+        A padded piece of junk would also be shape-invalid, and then this case
+        would pass with the ceiling removed.
+        """
+        # A literal, not a multiple of the ceiling: a fixture sized from the
+        # constant under test grows with it, and a raised ceiling would then
+        # never be observed.
+        padding = 200_000
+        self.assertGreater(
+            padding,
+            capture_format.MAX_CAPTURE_BYTES,
+            "fixture must exceed the shipped ceiling for this test to mean anything",
+        )
+        document = json.loads(self.valid_capture("ceiling").read_text())
+        document["implementation"]["version"] = "v" * padding
+        path = self.root / "capture-over-ceiling.json"
+        path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
+        capture_format.validate_capture(document)  # valid but for its size
+
+        output = self.root / "over-ceiling-report.json"
+        result = self.score_capture(path, output)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertFalse(output.exists())
+        self.assertIn(str(capture_format.MAX_CAPTURE_BYTES), result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_capture_validator_owns_cardinality_and_ordering(self) -> None:
+        """Directly on the validator.
+
+        Through the CLI these refusals are masked by the run-record case count
+        and by the pack-binding check, so a CLI-only test cannot tell whether the
+        capture format states its own rules.
+        """
+        valid = json.loads(self.valid_capture("validator").read_text())
+        capture_format.validate_capture(valid)
+
+        def dropped(document):
+            del document["observations"][6]
+
+        def duplicated(document):
+            document["observations"].append(document["observations"][6])
+
+        def reordered(document):
+            document["observations"][0], document["observations"][1] = (
+                document["observations"][1],
+                document["observations"][0],
+            )
+
+        def renamed(document):
+            document["observations"][3]["case_id"] = "case-999"
+
+        for name, mutate in (
+            ("thirteen", dropped),
+            ("fifteen", duplicated),
+            ("reordered", reordered),
+            ("renamed", renamed),
+        ):
+            with self.subTest(shape=name):
+                document = json.loads(json.dumps(valid))
+                mutate(document)
+                with self.assertRaises(capture_format.CaptureError):
+                    capture_format.validate_capture(document)
+
+    def test_strict_loader_owns_the_json_number_domain(self) -> None:
+        """Directly on the shared loader.
+
+        Every capture field is separately type-checked, so at capture level this
+        rule is defence in depth. It is pinned here because the same loader reads
+        run records, where a number can land in a less tightly checked position.
+        """
+        self.assertEqual(
+            strict_json.parse_strict_object(b'{"a": 1, "b": [-9]}', label="probe"),
+            {"a": 1, "b": [-9]},
+        )
+        for payload in (
+            b'{"a": 1.0}',
+            b'{"a": [1.5]}',
+            b'{"a": 9007199254740992}',
+            b'{"a": {"b": -9007199254740992}}',
+        ):
+            with self.subTest(payload=payload):
+                with self.assertRaises(ValueError):
+                    strict_json.parse_strict_object(payload, label="probe")
+
+    def test_capture_refuses_a_symlink_and_a_missing_file(self) -> None:
+        capture = self.valid_capture("symlink-source")
+        link = self.root / "capture-symlink.json"
+        if link.exists() or link.is_symlink():
+            link.unlink()
+        link.symlink_to(capture)
+        for path in (link, self.root / "capture-absent.json"):
+            with self.subTest(path=path.name):
+                output = self.root / f"nofollow-{path.name}"
+                result = self.score_capture(path, output)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertFalse(output.exists())
+                self.assertNotIn("Traceback", result.stderr)
+
+    def test_capture_error_text_is_bounded(self) -> None:
+        long_message = "e" * (capture_format.MAX_ERROR_CHARS * 4)
+        bounded = capture_format.bound_error(long_message)
+        self.assertLessEqual(len(bounded), capture_format.MAX_ERROR_CHARS)
+        self.assertEqual(capture_format.bound_error("  short  "), "short")
+        self.assertEqual(capture_format.bound_error("   "), "unspecified error")
+
+        capture = self.valid_capture("bounded-error")
+
+        def overlong_error(document):
+            document["observations"][0] = {
+                "case_id": document["observations"][0]["case_id"],
+                "input_sha256": document["observations"][0]["input_sha256"],
+                "state": "candidate_error",
+                "error": long_message,
+            }
+
+        hostile = self.rewrite(capture, "overlong-error", overlong_error)
+        output = self.root / "overlong-error-report.json"
+        result = self.score_capture(hostile, output)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertFalse(output.exists())
+
+    def test_capture_image_binding_uses_the_registry_rule(self) -> None:
+        digest_image = "ghcr.io/example/verifier@sha256:" + "1" * 64
+        capture = self.root / "capture-image.json"
+        result = self.capture(
+            self.candidate("match"),
+            capture,
+            extra=("--implementation-id", "example-verifier",
+                   "--implementation-image", digest_image),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = self.root / "image-report.json"
+        self.assertEqual(self.score_capture(capture, output).returncode, 0)
+        implementation = json.loads(output.read_text())["implementation"]
+        self.assertEqual(implementation["id"], "example-verifier")
+        self.assertEqual(implementation["image"], digest_image)
+
+        def tag_only(document):
+            document["implementation"]["image"] = "ghcr.io/example/verifier:latest"
+
+        def half_binding(document):
+            document["implementation"]["image"] = None
+
+        for name, mutate in (("tag-only", tag_only), ("half-binding", half_binding)):
+            with self.subTest(image=name):
+                hostile = self.rewrite(capture, name, mutate)
+                bad = self.root / f"image-{name}.json"
+                result = self.score_capture(hostile, bad)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertFalse(bad.exists())
+
+    def test_run_record_omits_the_binding_when_the_capture_declared_none(self) -> None:
+        capture = self.valid_capture("no-image")
+        self.assertIsNone(json.loads(capture.read_text())["implementation"]["id"])
+        output = self.root / "no-image-report.json"
+        self.assertEqual(self.score_capture(capture, output).returncode, 0)
+        implementation = json.loads(output.read_text())["implementation"]
+        self.assertNotIn("id", implementation)
+        self.assertNotIn("image", implementation)
+
+    def test_capture_carries_no_oracle_derived_field(self) -> None:
+        """Structural, not textual: every key must come from the declared vocabulary."""
+        capture = json.loads(self.valid_capture("vocabulary").read_text())
+        seen = set()
+        pending = [capture]
+        while pending:
+            current = pending.pop()
+            if isinstance(current, dict):
+                seen.update(current)
+                pending.extend(current.values())
+            elif isinstance(current, list):
+                pending.extend(current)
+        allowed = (
+            capture_format.TOP_LEVEL_KEYS
+            | capture_format.IMPLEMENTATION_KEYS
+            | capture_format.OBSERVED_KEYS
+            | capture_format.ERROR_KEYS
+            | {"bundle_integrity", "verdict", "claims", "status", "source_class"}
+            | {
+                "policy_decision_recorded",
+                "caller_visible_denial",
+                "upstream_delivery",
+                "external_side_effect",
+            }
+        )
+        self.assertEqual(seen - allowed, set())
+        for forbidden in ("expected", "match", "mismatch", "score", "badge", "summary"):
+            self.assertNotIn(forbidden, seen)
+
+    def test_capture_schema_document_matches_the_validator_vocabulary(self) -> None:
+        schema = json.loads(CAPTURE_SCHEMA_DOC.read_text())
+        self.assertEqual(schema["properties"]["schema"]["const"], capture_format.CAPTURE_SCHEMA)
+        self.assertEqual(sorted(capture_format.TOP_LEVEL_KEYS), schema["required"])
+        observations = schema["properties"]["observations"]
+        self.assertEqual(observations["minItems"], capture_format.EXPECTED_CASE_COUNT)
+        self.assertEqual(observations["maxItems"], capture_format.EXPECTED_CASE_COUNT)
+        self.assertEqual(
+            schema["properties"]["capture_non_claims"]["prefixItems"],
+            [{"const": text} for text in capture_format.CAPTURE_NON_CLAIMS],
+        )
+        observed = schema["$defs"]["observed"]["properties"]["exit_code"]
+        self.assertEqual(observed["minimum"], capture_format.MIN_EXIT_CODE)
+        self.assertEqual(observed["maximum"], capture_format.MAX_EXIT_CODE)
+        self.assertEqual(
+            schema["$defs"]["errored"]["properties"]["error"]["maxLength"],
+            capture_format.MAX_ERROR_CHARS,
+        )
+
+    def test_capture_phase_completes_with_the_oracle_absent_from_its_filesystem(self) -> None:
+        """The point of the split, measured rather than asserted.
+
+        The probe reports whether it could open the canonical MANIFEST.json by
+        the same relative path the composite action uses. The combined-mode arm
+        is the positive control: without it, a probe that always reported
+        `False` would pass this test while proving nothing.
+        """
+        probe = self.root / "oracle-probe.py"
+        marker = self.root / "oracle-probe-marker.json"
+        probe.write_text(
+            textwrap.dedent(
+                f"""\
+                import json, os
+                from pathlib import Path
+                oracle = Path("conformance/privileged-mcp-action-v0/MANIFEST.json")
+                marker = Path({str(marker)!r})
+                try:
+                    readable = len(json.loads(oracle.read_text())["vectors"]) > 0
+                except OSError:
+                    readable = False
+                seen = json.loads(marker.read_text()) if marker.exists() else []
+                seen.append({{"cwd": os.getcwd(), "oracle_readable": readable}})
+                marker.write_text(json.dumps(seen))
+                print(json.dumps({{"bundle_integrity": "fail"}}))
+                """
+            )
+        )
+
+        elsewhere = self.root / "no-oracle-here"
+        elsewhere.mkdir(exist_ok=True)
+        capture = self.root / "oracle-absent-capture.json"
+        split = subprocess.run(
+            [
+                sys.executable,
+                str(CAPTURE_SCRIPT),
+                "--pack", str(self.pack),
+                "--entrypoint", shlex.join([sys.executable, str(probe)]),
+                "--implementation-name", "oracle probe",
+                "--implementation-source", "https://example.test/verifier",
+                "--implementation-commit", IMPLEMENTATION_COMMIT,
+                "--reproduction-mode", "blind_from_spec",
+                "--output", str(capture),
+            ],
+            cwd=elsewhere,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(split.returncode, 0, split.stderr)
+        split_observations = json.loads(marker.read_text())
+        marker.unlink()
+
+        self.assertEqual(len(split_observations), 14)
+        self.assertTrue(
+            all(not seen["oracle_readable"] for seen in split_observations),
+            "the capture phase must not carry the oracle on its filesystem",
+        )
+
+        report = self.root / "oracle-absent-report.json"
+        self.assertEqual(self.score_capture(capture, report).returncode, 1)
+        self.assertEqual(json.loads(report.read_text())["summary"]["total"], 14)
+
+        combined = self.root / "oracle-present-report.json"
+        self.score(probe, combined)
+        combined_observations = json.loads(marker.read_text())
+        self.assertEqual(len(combined_observations), 14)
+        self.assertTrue(
+            all(seen["oracle_readable"] for seen in combined_observations),
+            "positive control: the probe must be able to discriminate",
+        )
+
 
 
 if __name__ == "__main__":

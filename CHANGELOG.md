@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `capture_candidate.py` records a candidate's observations over the opaque cases and
+  writes `assay.privileged_mcp_action.candidate_capture.v0`. It takes no manifest and no
+  expectations, so a candidate that escapes its process bounds finds no answers on that
+  host. `score_candidate.py --capture` scores that artifact on a host that never ran the
+  candidate; `--entrypoint` still captures and scores in one process, and both paths call
+  the same capture builder and the same scorer, so a given candidate yields byte-identical
+  run records either way. A capture that does not bind the pack is refused before any
+  comparison, exit `2`, and no run record is written. `report.v0` gains optional
+  `implementation.id` and `implementation.image`, present only together, so an existing v0
+  record stays valid. A capture is an observation artifact, not a verdict, attestation,
+  sandbox proof, or independent reproduction; a capture host can fabricate observations, so
+  separating the phases removes the oracle from the hostile host without authenticating what
+  that host produces (Rul1an/assay-tunnel-experiments#199).
 - `conformance/implementations.json` is a static, fail-closed registry of candidate
   images addressed as `name@sha256:<64 hex>`. Authorship is a typed object (`human`,
   or agent kinds with model and prompt strategy). Required CI calls the same stdlib
@@ -31,6 +44,14 @@ All notable changes to this project will be documented in this file.
   revision (#2482).
 
 ### Changed
+- One strict bounded loader now reads every hostile JSON input in the conformance corpus.
+  `strict_json.load_strict_object` calls the existing regular-file reader and JSON parser and
+  adds the two bounds they did not carry: nesting depth, scanned before `json.loads` sees the
+  text, and the JSON number domain. `validate_run_record.py` reads through it rather than
+  keeping its own reader, which changes one diagnostic's wording and no exit status.
+  `conformance/implementations.py` exposes `validate_image_reference`, and `_validate_row`
+  calls it instead of matching the image pattern a second time.
+
 - `assay_check_sequence` answers the sequence-rule language by calling
   `assay_core::sequence_eval` and mapping the record into its published JSON.
   The MCP copy of the rule is gone (#2227, #2228).

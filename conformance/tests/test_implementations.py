@@ -480,5 +480,81 @@ class OneRuleNoNetwork(unittest.TestCase):
         self.assertEqual(items["properties"]["image"]["pattern"], module.IMAGE_PATTERN)
 
 
+class PublicImageValidator(unittest.TestCase):
+    """The image rule has one implementation, and the row validator calls it.
+
+    The conformance capture format binds a run to the same image reference this
+    registry stores. Two spellings of that rule would be two answers to what a
+    run is bound to, so the test is that there is one function, not that two
+    functions currently agree.
+    """
+
+    HOSTILE = (
+        "ghcr.io/example/verifier:latest",
+        "ghcr.io/example/verifier:v1@sha256:" + "a" * 64,
+        "ghcr.io/example/verifier@sha256:" + "a" * 63,
+        "ghcr.io/example/verifier@sha256:" + "A" * 64,
+        "ghcr.io/example/verifier@sha512:" + "a" * 64,
+        "ghcr.io/example/verifier",
+        "ghcr.io/exam ple/verifier@sha256:" + "a" * 64,
+        "",
+    )
+    VALID = "ghcr.io/example/verifier@sha256:" + "a" * 64
+
+    def setUp(self) -> None:
+        self.module = _require_module()
+
+    def test_public_validator_refuses_every_non_digest_reference(self) -> None:
+        self.assertEqual(self.module.validate_image_reference(self.VALID), self.VALID)
+        for reference in self.HOSTILE:
+            with self.subTest(image=reference):
+                with self.assertRaises(self.module.ImplementationRegistryError):
+                    self.module.validate_image_reference(reference)
+        for reference in (None, 42, ["x"], {"x": 1}):
+            with self.subTest(image=type(reference).__name__):
+                with self.assertRaises(self.module.ImplementationRegistryError):
+                    self.module.validate_image_reference(reference)
+
+    def _row(self, image: object) -> dict:
+        return {
+            "id": "example-verifier",
+            "name": "Example verifier",
+            "suite": "privileged-mcp-action-v0",
+            "image": image,
+            "source": "https://example.test/verifier",
+            "commit": "1" * 40,
+            "language": "rust",
+            "reproduction_mode": "blind_from_spec",
+            "authorship": {"kind": "human"},
+        }
+
+    def test_row_validation_refuses_the_same_references(self) -> None:
+        self.module._validate_row(self._row(self.VALID), set())
+        for reference in self.HOSTILE:
+            with self.subTest(image=reference):
+                with self.assertRaises(self.module.ImplementationRegistryError):
+                    self.module._validate_row(self._row(reference), set())
+
+    def test_row_validation_goes_through_the_public_validator(self) -> None:
+        """Behavioural single-source proof.
+
+        If the row validator still matched the pattern itself, neutering the
+        public function would leave a tag-only image refused and this would fail.
+        """
+        with mock.patch.object(self.module, "validate_image_reference", return_value="accepted"):
+            self.module._validate_row(self._row("ghcr.io/example/verifier:latest"), set())
+
+    def test_published_schema_states_the_same_pattern(self) -> None:
+        schema = self.module.implementation_schema()
+        pattern = schema["properties"]["implementations"]["items"]["properties"]["image"]["pattern"]
+        self.assertEqual(pattern, self.module.IMAGE_PATTERN)
+        compiled = re.compile(pattern)
+        self.assertTrue(compiled.fullmatch(self.VALID))
+        for reference in self.HOSTILE:
+            with self.subTest(image=reference):
+                self.assertIsNone(compiled.fullmatch(reference))
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

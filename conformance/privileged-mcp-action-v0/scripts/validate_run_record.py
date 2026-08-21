@@ -8,8 +8,18 @@ from collections import Counter
 import json
 from pathlib import Path
 import re
+import sys
 from typing import Any
 from urllib.parse import urlparse
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from implementations import (  # noqa: E402
+    ID_RE,
+    ImplementationRegistryError,
+    validate_image_reference,
+)
+from strict_json import MAX_JSON_DEPTH, load_strict_object  # noqa: E402
 
 
 RUN_SCHEMA = "assay.privileged_mcp_action.conformance_run.v0"
@@ -37,7 +47,6 @@ SOURCE_CLASSES = {
     "unknown",
 }
 MAX_RUN_RECORD_BYTES = 4 * 1024 * 1024
-MAX_JSON_DEPTH = 64
 RUN_NON_CLAIMS = (
     "a matching run demonstrates agreement on the pinned corpus only",
     "a matching run does not establish implementation independence",
@@ -51,6 +60,14 @@ REPRODUCTION_MODES = {
     "commissioned_clean_room",
     "other_disclosed",
 }
+IMPLEMENTATION_REQUIRED_KEYS = {
+    "name",
+    "version",
+    "source",
+    "commit",
+    "reproduction_mode",
+}
+IMPLEMENTATION_BINDING_KEYS = {"id", "image"}
 TOP_LEVEL_KEYS = {
     "schema",
     "profile",
@@ -73,32 +90,18 @@ def require(condition: bool, message: str) -> None:
 
 
 def load_run_record(path: Path) -> Any:
-    with path.open("rb") as source:
-        data = source.read(MAX_RUN_RECORD_BYTES + 1)
-    require(
-        len(data) <= MAX_RUN_RECORD_BYTES,
-        f"run record exceeds {MAX_RUN_RECORD_BYTES} bytes",
+    """Read one run record through the corpus-wide strict loader.
+
+    The bounds are the same ones every hostile input in this corpus gets, which
+    is the point: a second bounded reader here would be a second answer to what
+    this project will parse.
+    """
+    return load_strict_object(
+        path,
+        label="run record",
+        max_bytes=MAX_RUN_RECORD_BYTES,
+        max_depth=MAX_JSON_DEPTH,
     )
-    text = data.decode("utf-8")
-    depth = 0
-    in_string = False
-    escaped = False
-    for character in text:
-        if in_string:
-            if escaped:
-                escaped = False
-            elif character == "\\":
-                escaped = True
-            elif character == '"':
-                in_string = False
-        elif character == '"':
-            in_string = True
-        elif character in "[{":
-            depth += 1
-            require(depth <= MAX_JSON_DEPTH, f"run record nesting exceeds {MAX_JSON_DEPTH}")
-        elif character in "]}":
-            depth -= 1
-    return json.loads(text)
 
 
 def validate_normative_surface(value: dict[str, Any]) -> None:
@@ -168,10 +171,28 @@ def validate_run_record(report: dict[str, Any]) -> None:
     implementation = report["implementation"]
     require(isinstance(implementation, dict), "implementation must be an object")
     require(
-        set(implementation)
-        == {"name", "version", "source", "commit", "reproduction_mode"},
+        set(implementation) >= IMPLEMENTATION_REQUIRED_KEYS
+        and set(implementation) <= IMPLEMENTATION_REQUIRED_KEYS | IMPLEMENTATION_BINDING_KEYS,
         "implementation has missing or surplus fields",
     )
+    # `id` and `image` are optional so a v0 record produced before this binding
+    # existed stays valid, and they travel together so a record cannot name a
+    # registry row without naming the image bytes that row addresses.
+    binding = set(implementation) & IMPLEMENTATION_BINDING_KEYS
+    require(
+        binding in (set(), IMPLEMENTATION_BINDING_KEYS),
+        "implementation id and image must both be present or both be absent",
+    )
+    if binding:
+        require(
+            isinstance(implementation["id"], str)
+            and bool(ID_RE.fullmatch(implementation["id"])),
+            "implementation id is malformed",
+        )
+        try:
+            validate_image_reference(implementation["image"])
+        except ImplementationRegistryError as error:
+            raise ValueError("implementation image is invalid: %s" % error) from error
     require(
         isinstance(implementation["name"], str) and bool(implementation["name"]),
         "implementation name is missing",

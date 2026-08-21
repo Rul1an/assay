@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/conformance/privileged-mcp-action-v0/capture.schema.json",
+  "title": "Privileged MCP Action v0 candidate capture",
+  "description": "What an untrusted capture host may record. It carries no expected value, no match or mismatch, no count of agreement, no score and no badge.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "capture_non_claims",
+    "implementation",
+    "observations",
+    "pack_declared_source_commit",
+    "pack_sha256",
+    "profile",
+    "rendered_set_digest",
+    "schema",
+    "source_corpus_digest",
+    "suite"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.privileged_mcp_action.candidate_capture.v0"
+    },
+    "profile": {
+      "const": "privileged-mcp-action/v0"
+    },
+    "suite": {
+      "const": "privileged-mcp-action-v0"
+    },
+    "pack_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "pack_declared_source_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "source_corpus_digest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "rendered_set_digest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "implementation": {
+      "$ref": "#/$defs/implementation"
+    },
+    "observations": {
+      "type": "array",
+      "minItems": 14,
+      "maxItems": 14,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/observed"
+          },
+          {
+            "$ref": "#/$defs/errored"
+          }
+        ]
+      }
+    },
+    "capture_non_claims": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "prefixItems": [
+        {
+          "const": "a capture records what a candidate emitted; it is not a verdict"
+        },
+        {
+          "const": "a capture host can fabricate observations, so a capture is not authenticated"
+        },
+        {
+          "const": "candidate process limits are operational bounds, not a sandbox"
+        },
+        {
+          "const": "a declared image digest addresses bytes; it does not prove which image ran"
+        }
+      ],
+      "items": false
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "implementation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commit",
+        "id",
+        "image",
+        "name",
+        "reproduction_mode",
+        "source",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "image": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[^:@\\s]+(?:/[^:@\\s]+)*@sha256:[0-9a-f]{64}$",
+          "description": "Exact name@sha256:<64 hex>, or null when no image was declared. A digest addresses bytes; it does not prove which image ran."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "pattern": "^https?://[^\\s]+$"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "reproduction_mode": {
+          "enum": [
+            "blind_from_spec",
+            "commissioned_clean_room",
+            "from_spec_then_conformance",
+            "other_disclosed"
+          ]
+        }
+      }
+    },
+    "observed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "exit_code",
+        "input_sha256",
+        "observed",
+        "report_profile_matches",
+        "report_schema_matches",
+        "reviewer_reason_present",
+        "state",
+        "stderr_present"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "pattern": "^case-[0-9]{3}$"
+        },
+        "input_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "state": {
+          "const": "observed"
+        },
+        "observed": {
+          "$ref": "#/$defs/normativeSurface"
+        },
+        "exit_code": {
+          "type": "integer",
+          "minimum": -256,
+          "maximum": 255
+        },
+        "stderr_present": {
+          "type": "boolean"
+        },
+        "reviewer_reason_present": {
+          "type": "boolean"
+        },
+        "report_schema_matches": {
+          "type": "boolean"
+        },
+        "report_profile_matches": {
+          "type": "boolean"
+        }
+      }
+    },
+    "errored": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "error",
+        "input_sha256",
+        "state"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "pattern": "^case-[0-9]{3}$"
+        },
+        "input_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "state": {
+          "enum": [
+            "candidate_error",
+            "capture_error"
+          ]
+        },
+        "error": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    },
+    "normativeSurface": {
+      "description": "Identical to the run record's observed surface; see report.schema.json.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "bundle_integrity"
+          ],
+          "properties": {
+            "bundle_integrity": {
+              "const": "fail"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "bundle_integrity",
+            "verdict"
+          ],
+          "properties": {
+            "bundle_integrity": {
+              "const": "pass"
+            },
+            "verdict": {
+              "const": "invalid"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "bundle_integrity",
+            "verdict",
+            "claims"
+          ],
+          "properties": {
+            "bundle_integrity": {
+              "const": "pass"
+            },
+            "verdict": {
+              "const": "valid"
+            },
+            "claims": {
+              "type": "object"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
