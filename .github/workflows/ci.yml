@@ -40,6 +40,24 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Conformance inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 conformance/registry.py
+          python3 conformance/implementations.py
+          python3 -W error::ResourceWarning conformance/tests/test_implementations.py
+          python3 -W error::ResourceWarning conformance/tests/test_pma_v0_registration.py
+          python3 -W error::ResourceWarning conformance/tests/test_registry.py
+          python3 -W error::ResourceWarning conformance/tests/test_run_all.py
+          python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py
+          python3 conformance/run_all.py --require-complete --completion-scope required
+
       - id: detect
         shell: bash
         env:
@@ -149,24 +167,6 @@ jobs:
           bash scripts/ci/check-assay-release-pin.sh --published
           bash scripts/ci/test-ci-hardening-b1.sh
           bash scripts/ci/test-structurizr-export-docker.sh
-
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: "3.12"
-
-      - name: Conformance inventory
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          python3 conformance/registry.py
-          python3 conformance/implementations.py
-          python3 -W error::ResourceWarning conformance/tests/test_implementations.py
-          python3 -W error::ResourceWarning conformance/tests/test_pma_v0_registration.py
-          python3 -W error::ResourceWarning conformance/tests/test_registry.py
-          python3 -W error::ResourceWarning conformance/tests/test_run_all.py
-          python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py
-          python3 conformance/run_all.py --require-complete --completion-scope required
 
       # Stdlib-only. Required CI cannot go green if these tests are deleted;
       # adequacy-drift is not a required context. No conditional or soft-failure settings.

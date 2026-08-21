@@ -71,6 +71,30 @@ HARD_RUN_CONTRACTS = {
         frozenset(),
     ),
 }
+CHECKOUT_REF = "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
+SETUP_PYTHON_REF = (
+    "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1")
+# The trusted prefix prevents earlier steps from changing runner state before the
+# hard call. Pins constrain workflow inputs; they do not attest the runner platform
+# or the implementation and behavior of GitHub-hosted actions.
+TRUSTED_PREFIX_CONTRACTS = {
+    ("scope", "Conformance inventory"): (
+        (frozenset({"uses", "with"}),
+         {"uses": CHECKOUT_REF},
+         {"persist-credentials": "false", "fetch-depth": "0"}),
+        (frozenset({"uses", "with"}),
+         {"uses": SETUP_PYTHON_REF},
+         {"python-version": "3.12"}),
+    ),
+    ("activation-kit", "Run activation-kit contract tests"): (
+        (frozenset({"name", "uses", "with"}),
+         {"name": "Check out source", "uses": CHECKOUT_REF},
+         {"fetch-depth": "0", "persist-credentials": "false"}),
+        (frozenset({"name", "uses", "with"}),
+         {"name": "Set up Python", "uses": SETUP_PYTHON_REF},
+         {"python-version": "3.13.8"}),
+    ),
+}
 ACTIVATION_KIT = (
     REPO / "conformance/privileged-mcp-action-v0/tests/test_activation_kit.py"
 )
@@ -194,6 +218,112 @@ def _direct_mapping(block: str) -> dict[str, str]:
     return entries
 
 
+def _ordered_job_steps(text: str, job_name: str) -> list[str]:
+    lines = named_job(text, job_name).splitlines(keepends=True)
+    job_indent = len(lines[0]) - len(lines[0].lstrip(" "))
+    direct_indent = None
+    steps_index = None
+    for index, raw in enumerate(lines[1:], 1):
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        if direct_indent is None:
+            direct_indent = indent
+        if indent != direct_indent:
+            continue
+        match = DIRECT_ENTRY_RE.fullmatch(raw[direct_indent:].rstrip("\r\n"))
+        if match is None:
+            raise AssertionError("unrecognized direct job key in steps parser")
+        key = next(match.group(name) for name in ("plain", "single", "double")
+                   if match.group(name) is not None)
+        if key == "steps":
+            if match.group("value").strip():
+                raise AssertionError("job steps must use a block sequence")
+            steps_index = index
+            break
+    if steps_index is None or direct_indent is None:
+        raise AssertionError(f"{job_name} job has no direct steps block")
+
+    end = steps_index + 1
+    while end < len(lines):
+        raw = lines[end]
+        if raw.strip():
+            indent = len(raw) - len(raw.lstrip(" "))
+            if indent <= direct_indent:
+                break
+        end += 1
+    step_indent = None
+    starts: list[int] = []
+    for index in range(steps_index + 1, end):
+        raw = lines[index]
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        if step_indent is None:
+            step_indent = indent
+        if indent == step_indent:
+            if not raw[step_indent:].startswith("- "):
+                raise AssertionError("unrecognized direct workflow step syntax")
+            starts.append(index)
+        elif indent < step_indent:
+            raise AssertionError("inconsistent workflow step indentation")
+    if not starts:
+        raise AssertionError(f"{job_name} job has no steps")
+    return [
+        "".join(lines[start:starts[index + 1] if index + 1 < len(starts) else end])
+        for index, start in enumerate(starts)
+    ]
+
+
+def _assert_trusted_prefix(text: str, job_name: str, step_name: str) -> None:
+    contracts = TRUSTED_PREFIX_CONTRACTS.get((job_name, step_name))
+    if contracts is None:
+        raise AssertionError(f"no trusted-prefix contract for {job_name}/{step_name}")
+    steps = _ordered_job_steps(text, job_name)
+    target = named_step(text, job_name, step_name)
+    if len(steps) < 3 or steps[2] != target:
+        raise AssertionError(
+            f"{step_name} must be the third step after pinned checkout and setup")
+
+    for step, (expected_keys, expected_values, expected_with) in zip(
+            steps[:2], contracts, strict=True):
+        entries = _direct_mapping(step)
+        actual_keys = frozenset(entries)
+        if actual_keys != expected_keys:
+            raise AssertionError(
+                "trusted action step keys differ: "
+                f"expected {sorted(expected_keys)}, got {sorted(actual_keys)}")
+
+        def direct_value(key: str) -> str:
+            return entries[key].split(" #", 1)[0].strip()
+
+        actual_values = {key: direct_value(key) for key in expected_values}
+        if actual_values != expected_values:
+            raise AssertionError(
+                f"trusted action values differ: expected {expected_values}, "
+                f"got {actual_values}")
+
+        raw_lines = step.splitlines(keepends=True)
+        step_indent = len(raw_lines[0]) - len(raw_lines[0].lstrip(" "))
+        with_indent = step_indent + 2
+        with_indexes = [
+            index for index, raw in enumerate(raw_lines)
+            if raw.rstrip("\r\n") == " " * with_indent + "with:"
+        ]
+        if len(with_indexes) != 1:
+            raise AssertionError("trusted action must have one direct with mapping")
+        with_block = _indentation_bounded_block(
+            raw_lines, with_indexes[0], with_indent)
+        actual_with = {
+            key: _direct_scalar(value)
+            for key, value in _direct_mapping(with_block).items()
+        }
+        if actual_with != expected_with:
+            raise AssertionError(
+                f"trusted action with values differ: expected {expected_with}, "
+                f"got {actual_with}")
+
+
 def _assert_workflow_document(
         text: str,
         expected_keys: frozenset[str],
@@ -264,6 +394,7 @@ def assert_hard_run_command(
         raise AssertionError(
             f"{job_name} job direct keys differ: "
             f"expected {sorted(allowed_job_keys)}, got {sorted(actual_job_keys)}")
+    _assert_trusted_prefix(text, job_name, step_name)
 
     step = named_step(text, job_name, step_name)
     step_entries = _direct_mapping(step)
@@ -329,6 +460,67 @@ def assert_oci_candidate_checker(mod) -> None:
 def assert_combined_unittest(text: str) -> None:
     assert_hard_run_command(
         text, "activation-kit", "Run activation-kit contract tests")
+
+
+TRUSTED_PREFIX_WRITERS = (
+    (
+        "BASH_ENV writer",
+        "      - name: Preload Bash functions\n"
+        "        run: |\n"
+        "          printf '%s\\n' 'test() { return 0; }' "
+        "'python3() { return 0; }' > \"$RUNNER_TEMP/bash-env\"\n"
+        "          echo \"BASH_ENV=$RUNNER_TEMP/bash-env\" >> \"$GITHUB_ENV\"\n\n",
+    ),
+    (
+        "PATH writer",
+        "      - name: Prepend executable path\n"
+        "        run: echo \"$RUNNER_TEMP/bin\" >> \"$GITHUB_PATH\"\n\n",
+    ),
+    (
+        "Git and Python path writer",
+        "      - name: Redirect Git and Python\n"
+        "        run: |\n"
+        "          echo \"GIT_DIR=$RUNNER_TEMP/base.git\" >> \"$GITHUB_ENV\"\n"
+        "          echo \"PYTHONPATH=$RUNNER_TEMP/base\" >> \"$GITHUB_ENV\"\n\n",
+    ),
+)
+
+
+def trusted_prefix_mutations(
+        text: str, target_line: str, checkout: str, setup: str):
+    mutations = [
+        (label, text.replace(target_line, writer + target_line, 1))
+        for label, writer in TRUSTED_PREFIX_WRITERS
+    ]
+    mutations.extend((
+        ("checkout env", text.replace(
+            checkout, checkout.replace(
+                "        with:\n", "        env:\n          EXTRA: value\n        with:\n",
+                1), 1)),
+        ("checkout with", text.replace(
+            checkout, checkout.replace(
+                "          persist-credentials: false\n",
+                "          persist-credentials: false\n          extra: value\n", 1), 1)),
+        ("checkout mutable ref", text.replace(
+            checkout, checkout.replace(CHECKOUT_REF, "actions/checkout@main", 1), 1)),
+        ("setup if", text.replace(
+            setup, setup.replace("        with:\n", "        if: always()\n        with:\n", 1),
+            1)),
+        ("setup continue", text.replace(
+            setup, setup.replace(
+                "        with:\n", "        continue-on-error: true\n        with:\n", 1),
+            1)),
+        ("setup with", text.replace(
+            setup, re.sub(
+                r'(          python-version:.*\n)', r'\1          cache: pip\n',
+                setup, count=1), 1)),
+        ("setup mutable ref", text.replace(
+            setup, setup.replace(SETUP_PYTHON_REF, "actions/setup-python@main", 1), 1)),
+    ))
+    reordered = text.replace(checkout, "__CHECKOUT__", 1)
+    reordered = reordered.replace(setup, checkout, 1).replace("__CHECKOUT__", setup, 1)
+    mutations.append(("reordered prefix", reordered))
+    return mutations
 
 
 POLICIES = {
@@ -665,6 +857,25 @@ class ProductCallsite(unittest.TestCase):
                 self.assertNotEqual(mutated, text)
                 with self.assertRaises(AssertionError):
                     assert_combined_unittest(mutated)
+
+    def test_activation_trusted_prefix_fails_closed(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        target = "      - name: Run activation-kit contract tests\n"
+        checkout = named_step(text, "activation-kit", "Check out source")
+        setup = named_step(text, "activation-kit", "Set up Python")
+        for label, mutated in trusted_prefix_mutations(
+                text, target, checkout, setup):
+            with self.subTest(label=label):
+                self.assertNotEqual(mutated, text)
+                with self.assertRaises(AssertionError):
+                    assert_combined_unittest(mutated)
+
+        target_step = named_step(
+            text, "activation-kit", "Run activation-kit contract tests")
+        post_target = target_step + (
+            "      - name: Harmless post-target control\n"
+            "        run: echo harmless\n\n")
+        assert_combined_unittest(text.replace(target_step, post_target, 1))
 
     def test_activation_kit_step_uses_explicit_bash(self):
         text = CONFORMANCE_YML.read_text(encoding="utf-8")

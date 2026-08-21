@@ -33,6 +33,7 @@ from test_completion_scope import (  # noqa: E402
     assert_hard_run_command,
     named_job,
     named_step,
+    trusted_prefix_mutations,
 )
 
 CI_YML = REPO / ".github/workflows/ci.yml"
@@ -421,6 +422,34 @@ class ProductWorkflow(unittest.TestCase):
         self.assertNotEqual(value_change, text)
         assert_hard_run_command(
             value_change, "scope", "Conformance inventory")
+
+    def test_scope_trusted_prefix_fails_closed(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        target = "      - name: Conformance inventory\n"
+        checkout = (
+            "      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0\n"
+            "        with:\n"
+            "          persist-credentials: false\n"
+            "          fetch-depth: 0\n\n")
+        setup = (
+            "      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0\n"
+            "        with:\n"
+            "          python-version: \"3.12\"\n\n")
+        for label, mutated in trusted_prefix_mutations(
+                text, target, checkout, setup):
+            with self.subTest(label=label):
+                self.assertNotEqual(mutated, text)
+                with self.assertRaises(AssertionError):
+                    assert_hard_run_command(
+                        mutated, "scope", "Conformance inventory")
+
+        target_step = named_step(text, "scope", "Conformance inventory")
+        post_target = target_step + (
+            "      - name: Harmless post-target control\n"
+            "        run: echo harmless\n\n")
+        assert_hard_run_command(
+            text.replace(target_step, post_target, 1),
+            "scope", "Conformance inventory")
 
     def test_conditional_scope_job_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")
