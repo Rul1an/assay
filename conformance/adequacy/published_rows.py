@@ -81,10 +81,17 @@ def read_regular_file(path: Path, limit: int = MAX_RESULTS_BYTES) -> bytes:
             raise ValueError("%s changed while it was opened" % path)
         if info.st_size > limit:
             raise ValueError("%s exceeds the %d-byte limit" % (path, limit))
-        data = os.read(fd, limit + 1)
-        if len(data) > limit:
-            raise ValueError("%s exceeds the %d-byte limit" % (path, limit))
-        return data
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(fd, min(65536, limit + 1 - total))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > limit:
+                raise ValueError("%s exceeds the %d-byte limit" % (path, limit))
+            chunks.append(chunk)
+        return b"".join(chunks)
     finally:
         os.close(fd)
 
@@ -93,10 +100,21 @@ def _reject_nonfinite_json_number(value: str) -> None:
     raise ValueError("non-finite JSON number %s is not permitted" % value)
 
 
+def _reject_duplicate_object_keys(pairs: list[tuple[str, object]]) -> dict:
+    seen: dict[str, object] = {}
+    for key, value in pairs:
+        if key in seen:
+            raise ValueError("duplicate JSON object key: %s" % key)
+        seen[key] = value
+    return seen
+
+
 def parse_json_object(data: bytes, label: str) -> dict:
     try:
         value = json.loads(
-            data.decode("utf-8"), parse_constant=_reject_nonfinite_json_number
+            data.decode("utf-8"),
+            parse_constant=_reject_nonfinite_json_number,
+            object_pairs_hook=_reject_duplicate_object_keys,
         )
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise ValueError("%s is not readable JSON: %s" % (label, exc)) from exc

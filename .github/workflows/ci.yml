@@ -159,6 +159,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 conformance/registry.py
+          python3 conformance/implementations.py
+          python3 -W error::ResourceWarning conformance/tests/test_implementations.py
           python3 -W error::ResourceWarning conformance/tests/test_registry.py
           python3 -W error::ResourceWarning conformance/tests/test_run_all.py
           python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py
