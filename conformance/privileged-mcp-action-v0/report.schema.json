@@ -7,6 +7,7 @@
   "required": [
     "schema",
     "profile",
+    "suite",
     "source_corpus_digest",
     "rendered_set_digest",
     "pack_sha256",
@@ -16,7 +17,8 @@
     "summary",
     "harness_errors",
     "cases",
-    "non_claims"
+    "non_claims",
+    "capture_sha256"
   ],
   "properties": {
     "schema": {
@@ -24,6 +26,9 @@
     },
     "profile": {
       "const": "privileged-mcp-action/v0"
+    },
+    "suite": {
+      "const": "privileged-mcp-action-v0"
     },
     "source_corpus_digest": {
       "$ref": "#/$defs/sha256"
@@ -163,6 +168,9 @@
           }
         ]
       }
+    },
+    "capture_sha256": {
+      "$ref": "#/$defs/sha256"
     },
     "non_claims": {
       "type": "array",

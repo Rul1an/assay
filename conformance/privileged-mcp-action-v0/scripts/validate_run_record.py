@@ -24,6 +24,8 @@ from strict_json import MAX_JSON_DEPTH, load_strict_object  # noqa: E402
 
 RUN_SCHEMA = "assay.privileged_mcp_action.conformance_run.v0"
 PROFILE = "privileged-mcp-action/v0"
+# Captured from the capture document, never reconstructed from PROFILE.
+SUITE = "privileged-mcp-action-v0"
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 # Kept beside the other corpus-shape constants rather than written into the checks, which is how
 # "13" survived in seven separate files after the corpus grew: two scripts, this one's own checks,
@@ -71,6 +73,7 @@ IMPLEMENTATION_BINDING_KEYS = {"id", "image"}
 TOP_LEVEL_KEYS = {
     "schema",
     "profile",
+    "suite",
     "source_corpus_digest",
     "rendered_set_digest",
     "pack_sha256",
@@ -81,12 +84,21 @@ TOP_LEVEL_KEYS = {
     "harness_errors",
     "cases",
     "non_claims",
+    "capture_sha256",
 }
 
 
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise ValueError(message)
+
+
+def require_run_record_binds_capture(report: dict[str, Any], capture_digest: str) -> None:
+    require(bool(SHA256.fullmatch(capture_digest)), "capture digest is malformed")
+    require(
+        report["capture_sha256"] == capture_digest,
+        "capture_sha256 does not address the scored capture bytes",
+    )
 
 
 def load_run_record(path: Path) -> Any:
@@ -157,7 +169,8 @@ def validate_run_record(report: dict[str, Any]) -> None:
     require(set(report) == TOP_LEVEL_KEYS, "run record has missing or surplus fields")
     require(report["schema"] == RUN_SCHEMA, "run record schema mismatch")
     require(report["profile"] == PROFILE, "run record profile mismatch")
-    for field in ("source_corpus_digest", "rendered_set_digest", "pack_sha256"):
+    require(report["suite"] == SUITE, "run record suite mismatch")
+    for field in ("source_corpus_digest", "rendered_set_digest", "pack_sha256", "capture_sha256"):
         require(bool(SHA256.fullmatch(report[field])), f"{field} is malformed")
     require(
         bool(FULL_SHA.fullmatch(report["pack_declared_source_commit"])),

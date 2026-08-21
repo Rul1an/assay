@@ -109,3 +109,104 @@ jobs:
           path: ${{ runner.temp }}/oci-capture/candidate_capture.v0
           if-no-files-found: error
           retention-days: 7
+
+  score:
+    needs: [capture]
+    if: success()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.8"
+
+      - name: Require trusted main
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "oci capture must be dispatched from main, got $GITHUB_REF" >&2
+            exit 2
+          fi
+          if [[ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]]; then
+            echo "checked-out main does not match the workflow source commit" >&2
+            exit 2
+          fi
+
+      - name: Resolve published pack tag
+        id: candidate
+        run: |
+          set -euo pipefail
+          python3 \
+            conformance/privileged-mcp-action-v0/scripts/validate_candidate_release.py \
+            --candidate conformance/privileged-mcp-action-v0/candidate-release.json \
+            --manifest conformance/privileged-mcp-action-v0/MANIFEST.json \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Download attested pack
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.candidate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/oci-downloads"
+          gh release download "$TAG" --repo Rul1an/assay \
+            --pattern privileged-mcp-action-v0-clean-room.tar.gz \
+            --pattern SHA256SUMS \
+            --pattern attestation-bundle.json \
+            --dir "$RUNNER_TEMP/oci-downloads"
+          (
+            cd "$RUNNER_TEMP/oci-downloads"
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Verify pack attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.candidate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          source_digest="$(gh api "repos/Rul1an/assay/commits/$TAG" --jq .sha)"
+          [[ "$source_digest" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          gh attestation verify \
+            "$RUNNER_TEMP/oci-downloads/privileged-mcp-action-v0-clean-room.tar.gz" \
+            --repo Rul1an/assay \
+            --bundle "$RUNNER_TEMP/oci-downloads/attestation-bundle.json" \
+            --signer-workflow Rul1an/assay/.github/workflows/privileged-mcp-action-pack-release.yml \
+            --source-digest "$source_digest" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners
+
+      - name: Download candidate capture
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: candidate-capture-v0
+          path: ${{ runner.temp }}/oci-score
+
+      - name: Score candidate capture
+        run: |
+          set -euo pipefail
+          PACK="$RUNNER_TEMP/oci-downloads/privileged-mcp-action-v0-clean-room.tar.gz"
+          CAPTURE="$RUNNER_TEMP/oci-score/candidate_capture.v0"
+          OUTPUT="$RUNNER_TEMP/oci-score/conformance_run.v0"
+          mkdir -p "$(dirname "$OUTPUT")"
+          python3 conformance/privileged-mcp-action-v0/scripts/score_candidate.py \
+            --pack "$PACK" \
+            --manifest conformance/privileged-mcp-action-v0/MANIFEST.json \
+            --capture "$CAPTURE" \
+            --output "$OUTPUT"
+
+      - name: Upload validated run record
+        if: success()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: candidate-run-record-v0
+          path: ${{ runner.temp }}/oci-score/conformance_run.v0
+          if-no-files-found: error
+          retention-days: 7

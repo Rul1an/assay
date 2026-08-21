@@ -34,6 +34,7 @@ from capture_candidate import (  # noqa: E402
     sha256,
 )
 from artifact_io import (  # noqa: E402
+    content_sha256,
     render_deterministic_json_bytes,
     write_regular_file_atomically,
 )
@@ -44,7 +45,7 @@ from capture_format import (  # noqa: E402
     CaptureError,
     add_identity_arguments,
     identity_from_args,
-    load_capture,
+    load_capture_with_digest,
     normative_surface,
     review_warnings,
     validate_capture,
@@ -55,6 +56,7 @@ from validate_run_record import (  # noqa: E402
     PROFILE,
     RUN_NON_CLAIMS,
     RUN_SCHEMA,
+    require_run_record_binds_capture,
     validate_run_record,
 )
 
@@ -304,7 +306,7 @@ def main() -> int:
 
         try:
             if args.capture is not None:
-                capture = load_capture(args.capture)
+                capture, digest = load_capture_with_digest(args.capture)
             else:
                 # The oracle is already resident, so this path is for candidates
                 # the operator trusts. capture_candidate.py exists for the ones
@@ -314,6 +316,7 @@ def main() -> int:
                     pack, pack_digest, observations, identity_from_args(args)
                 )
                 validate_capture(capture)
+                digest = content_sha256(render_deterministic_json_bytes(capture))
             require_capture_binds_pack(capture, pack, pack_digest)
         except (CaptureError, OSError) as error:
             print(f"capture does not bind: {error}", file=sys.stderr)
@@ -327,8 +330,11 @@ def main() -> int:
         source_corpus_digest,
         rendered_set_digest,
     )
+    report["suite"] = capture["suite"]
+    report["capture_sha256"] = digest
     try:
         validate_run_record(report)
+        require_run_record_binds_capture(report, digest)
     except (KeyError, TypeError, ValueError) as error:
         print(f"scorer produced an invalid run record: {error}", file=sys.stderr)
         return 2

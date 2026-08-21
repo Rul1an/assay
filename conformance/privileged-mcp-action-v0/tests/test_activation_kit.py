@@ -53,8 +53,12 @@ OCI_WORKFLOW_PATH = ".github/workflows/privileged-mcp-action-oci-candidate.yml"
 OCI_CHECKOUT_PIN = "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
 OCI_SETUP_PYTHON_PIN = "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"
 OCI_UPLOAD_PIN = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+OCI_DOWNLOAD_PIN = "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
 OCI_EXECUTOR = (
     "conformance/privileged-mcp-action-v0/scripts/oci_candidate_executor.py"
+)
+OCI_SCORER = (
+    "conformance/privileged-mcp-action-v0/scripts/score_candidate.py"
 )
 OCI_SIGNER_WORKFLOW = (
     "Rul1an/assay/.github/workflows/privileged-mcp-action-pack-release.yml"
@@ -63,9 +67,13 @@ OCI_PYTHON_VERSION = 'python-version: "3.13.8"'
 OCI_SOURCE_DIGEST_SHAPE = '[[ "$source_digest" =~ ^[0-9a-f]{40}$ ]]'
 OCI_SOURCE_DIGEST_GUARD = OCI_SOURCE_DIGEST_SHAPE + " || exit 2"
 OCI_CAPTURE_UPLOAD_PATH = "${{ runner.temp }}/oci-capture/candidate_capture.v0"
+OCI_SCORE_UPLOAD_PATH = "${{ runner.temp }}/oci-score/conformance_run.v0"
 OCI_IMPLEMENTATION_ID_ENV = "IMPLEMENTATION_ID: ${{ inputs.implementation_id }}"
 OCI_IMPLEMENTATION_ID_ARGV = '--implementation-id "$IMPLEMENTATION_ID"'
 OCI_UPLOAD_STEP = "Upload validated capture"
+OCI_SCORE_UPLOAD_STEP = "Upload validated run record"
+OCI_SCORE_DOWNLOAD_STEP = "Download candidate capture"
+OCI_SCORE_STEP = "Score candidate capture"
 USES_SHA_RE = re.compile(r"uses:\s*\S+@([^\s#]+)")
 # Ordered capture-job shape. Env-key sets and the step-name tuple are one table
 # so a skipped setup, extra step, leaked token, or duplicate upload cannot
@@ -82,10 +90,14 @@ OCI_STEP_ENV_KEYS = {
 }
 OCI_CAPTURE_STEP_NAMES = tuple(OCI_STEP_ENV_KEYS)
 OCI_CAPTURE_JOB = "capture"
+OCI_SCORE_JOB = "score"
 OCI_CAPTURE_JOB_KEYS = ("runs-on", "timeout-minutes", "steps")
+OCI_SCORE_JOB_KEYS = ("needs", "if", "runs-on", "timeout-minutes", "steps")
 OCI_DOCUMENT_KEYS = ("name", "on", "permissions", "concurrency", "jobs")
 OCI_TAG_BINDING = "TAG: ${{ steps.candidate.outputs.tag }}"
 OCI_ARTIFACT_NAME = "name: candidate-capture-v0"
+OCI_SCORE_ARTIFACT_NAME = "name: candidate-run-record-v0"
+OCI_SCORE_NEEDS = "needs: [capture]"
 OCI_STEP_KEYS = {
     "Check out current main": ("name", "uses", "with"),
     "Set up Python": ("name", "uses", "with"),
@@ -185,6 +197,49 @@ OCI_PINNED_STEP_SEQUENCES = {
         f" {OCI_IMPLEMENTATION_ID_ARGV}"
         ' --output "$OUTPUT"'
         " --timeout-seconds 30",
+    ),
+}
+OCI_SCORE_STEP_ENV_KEYS = {
+    "Check out current main": frozenset(),
+    "Set up Python": frozenset(),
+    "Require trusted main": frozenset(),
+    "Resolve published pack tag": frozenset(),
+    "Download attested pack": frozenset({"GH_TOKEN", "TAG"}),
+    "Verify pack attestation": frozenset({"GH_TOKEN", "TAG"}),
+    OCI_SCORE_DOWNLOAD_STEP: frozenset(),
+    OCI_SCORE_STEP: frozenset(),
+    OCI_SCORE_UPLOAD_STEP: frozenset(),
+}
+OCI_SCORE_STEP_NAMES = tuple(OCI_SCORE_STEP_ENV_KEYS)
+OCI_SCORE_STEP_KEYS = {
+    "Check out current main": ("name", "uses", "with"),
+    "Set up Python": ("name", "uses", "with"),
+    "Require trusted main": ("name", "run"),
+    "Resolve published pack tag": ("name", "id", "run"),
+    "Download attested pack": ("name", "env", "run"),
+    "Verify pack attestation": ("name", "env", "run"),
+    OCI_SCORE_DOWNLOAD_STEP: ("name", "uses", "with"),
+    OCI_SCORE_STEP: ("name", "run"),
+    OCI_SCORE_UPLOAD_STEP: ("name", "if", "uses", "with"),
+}
+OCI_SCORE_STEP_WITH_KEYS = {
+    "Check out current main": ("persist-credentials", "ref"),
+    "Set up Python": ("python-version",),
+    OCI_SCORE_DOWNLOAD_STEP: ("name", "path"),
+    OCI_SCORE_UPLOAD_STEP: ("name", "path", "if-no-files-found", "retention-days"),
+}
+OCI_SCORE_PINNED_STEP_SEQUENCES = {
+    OCI_SCORE_STEP: (
+        "set -euo pipefail",
+        'PACK="$RUNNER_TEMP/oci-downloads/privileged-mcp-action-v0-clean-room.tar.gz"',
+        'CAPTURE="$RUNNER_TEMP/oci-score/candidate_capture.v0"',
+        'OUTPUT="$RUNNER_TEMP/oci-score/conformance_run.v0"',
+        'mkdir -p "$(dirname "$OUTPUT")"',
+        f"python3 {OCI_SCORER}"
+        ' --pack "$PACK"'
+        " --manifest conformance/privileged-mcp-action-v0/MANIFEST.json"
+        ' --capture "$CAPTURE"'
+        ' --output "$OUTPUT"',
     ),
 }
 
@@ -1393,6 +1448,7 @@ import artifact_io  # noqa: E402
 import capture_format  # noqa: E402
 import score_candidate  # noqa: E402
 import strict_json  # noqa: E402
+import validate_run_record  # noqa: E402
 
 CAPTURE_SCRIPT = CORPUS_DIR / "scripts" / "capture_candidate.py"
 CAPTURE_SCHEMA_DOC = CORPUS_DIR / "capture.schema.json"
@@ -1456,7 +1512,7 @@ class SharedArtifactIoContractTests(unittest.TestCase):
                 ):
                     inline_pretty_calls.append(f"{path.name}:{node.lineno}")
         self.assertEqual(inline_pretty_calls, [], "inline deterministic renderers drift")
-        self.assertEqual(shared_calls, 6, "the six shipped pretty-JSON sites must delegate")
+        self.assertEqual(shared_calls, 7, "the seven shipped pretty-JSON sites must delegate")
 
     def test_capture_and_record_outputs_use_one_atomic_writer(self) -> None:
         scripts = CORPUS_DIR / "scripts"
@@ -1692,6 +1748,161 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "capture schema mismatch"):
             capture_format.load_capture_with_digest(capture)
+
+    def test_stale_run_record_does_not_bind_mutated_capture_bytes(self) -> None:
+        """Existing R addressed H0; mutated exact-read C' is H1. Bind must refuse.
+
+        Capture files do not declare capture_sha256. Fresh scoring of C' may
+        compute H1 and write a new record; this case is the cross-artifact
+        check: load C' once, compare R's stamped digest to that one-read
+        digest, and write nothing.
+        """
+        capture = self.valid_capture("stale-bind")
+        record = self.root / "stale-bind-record.json"
+        scored = self.score_capture(capture, record)
+        self.assertEqual(scored.returncode, 0, scored.stderr)
+        original_record = record.read_bytes()
+        h0 = capture_format.load_capture_with_digest(capture)[1]
+
+        def rename(document: object) -> None:
+            document["implementation"]["name"] = "mutated implementation"
+
+        mutated = self.rewrite(capture, "stale-bind-mutated", rename)
+        _document, h1 = capture_format.load_capture_with_digest(mutated)
+        self.assertNotEqual(h0, h1)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "capture_sha256 does not address the scored capture bytes",
+        ):
+            validate_run_record.require_run_record_binds_capture(
+                validate_run_record.load_run_record(record),
+                h1,
+            )
+        self.assertEqual(record.read_bytes(), original_record)
+
+    def test_unknown_observation_state_is_refused_without_a_record(self) -> None:
+        capture = self.valid_capture("unknown-state")
+
+        def invent(document: object) -> None:
+            first = document["observations"][0]
+            document["observations"][0] = {
+                "case_id": first["case_id"],
+                "input_sha256": first["input_sha256"],
+                "state": "invented",
+                "error": "unknown observation state",
+            }
+
+        hostile = self.rewrite(capture, "unknown-state", invent)
+        output = self.root / "unknown-state-report.json"
+        result = self.score_capture(hostile, output)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertFalse(output.exists())
+        self.assertNotIn("Traceback", result.stderr)
+        with self.assertRaises(KeyError):
+            score_candidate.STATE_TO_STATUS["invented"]
+
+    def test_producer_refuses_stale_digest_before_write(self) -> None:
+        """Stamping H0 while the one-read digest is H1 must fail before write."""
+        capture = self.valid_capture("stale-producer")
+        h0 = capture_format.load_capture_with_digest(capture)[1]
+
+        def rename(document: object) -> None:
+            document["implementation"]["name"] = "producer-stale implementation"
+
+        mutated = self.rewrite(capture, "stale-producer-mutated", rename)
+        loaded, h1 = capture_format.load_capture_with_digest(mutated)
+        self.assertNotEqual(h0, h1)
+
+        pack = {
+            "declared_source_commit": loaded["pack_declared_source_commit"],
+            "source_corpus_digest": loaded["source_corpus_digest"],
+            "rendered_set_digest": loaded["rendered_set_digest"],
+            "cases": [
+                {"id": observation["case_id"], "sha256": observation["input_sha256"]}
+                for observation in loaded["observations"]
+            ],
+        }
+        expected = {
+            observation["input_sha256"]: observation["observed"]
+            for observation in loaded["observations"]
+            if observation["state"] == capture_format.STATE_OBSERVED
+        }
+        report = score_candidate.score_capture(
+            loaded,
+            pack,
+            loaded["pack_sha256"],
+            expected,
+            pack["source_corpus_digest"],
+            pack["rendered_set_digest"],
+        )
+        report["suite"] = loaded["suite"]
+        report["capture_sha256"] = h0
+        output = self.root / "stale-producer-record.json"
+        with self.assertRaisesRegex(
+            ValueError,
+            "capture_sha256 does not address the scored capture bytes",
+        ):
+            validate_run_record.validate_run_record(report)
+            validate_run_record.require_run_record_binds_capture(report, h1)
+        self.assertFalse(output.exists())
+
+    def test_unmutated_capture_binds_and_rescore_is_byte_identical(self) -> None:
+        capture = self.valid_capture("noop-rescore")
+        first = self.root / "noop-rescore-first.json"
+        self.assertEqual(self.score_capture(capture, first).returncode, 0)
+        h0 = capture_format.load_capture_with_digest(capture)[1]
+        validate_run_record.require_run_record_binds_capture(
+            validate_run_record.load_run_record(first),
+            h0,
+        )
+        second = self.root / "noop-rescore-second.json"
+        first_bytes = first.read_bytes()
+        self.assertEqual(self.score_capture(capture, second).returncode, 0)
+        self.assertEqual(second.read_bytes(), first_bytes)
+        self.assertEqual(self.score_capture(capture, first).returncode, 0)
+        self.assertEqual(first.read_bytes(), first_bytes)
+
+    def test_scorer_stamps_suite_from_capture_and_one_read_digest(self) -> None:
+        capture = self.valid_capture("stamp-from-capture")
+        output = self.root / "stamp-from-capture-record.json"
+        self.assertEqual(self.score_capture(capture, output).returncode, 0)
+        document, digest = capture_format.load_capture_with_digest(capture)
+        report = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(report["suite"], document["suite"])
+        self.assertEqual(report["suite"], capture_format.SUITE)
+        self.assertEqual(report["capture_sha256"], digest)
+        self.assertNotEqual(report["suite"], report["profile"])
+        validate_run_record.require_run_record_binds_capture(report, digest)
+
+    def test_scorer_uses_one_read_digest_and_keeps_the_bind_callsite(self) -> None:
+        source = inspect.getsource(score_candidate.main)
+        self.assertIn("load_capture_with_digest(", source)
+        self.assertNotRegex(source, r"(?<![_\w])load_capture\(")
+        self.assertIn('report["suite"] = capture["suite"]', source)
+        self.assertNotIn("PROFILE.replace", source)
+        self.assertIn("validate_run_record(", source)
+        self.assertIn("require_run_record_binds_capture(", source)
+        self.assertIn("write_regular_file_atomically(", source)
+        self.assertNotIn("write_text", source)
+        self.assertIs(
+            score_candidate.load_capture_with_digest,
+            capture_format.load_capture_with_digest,
+        )
+
+    def test_run_record_schema_document_requires_suite_and_capture_digest(self) -> None:
+        schema = json.loads((CORPUS_DIR / "report.schema.json").read_text(encoding="utf-8"))
+        self.assertFalse(schema["additionalProperties"])
+        self.assertEqual(set(schema["required"]), validate_run_record.TOP_LEVEL_KEYS)
+        self.assertEqual(schema["properties"]["suite"]["const"], capture_format.SUITE)
+        self.assertEqual(
+            schema["properties"]["suite"]["const"],
+            validate_run_record.SUITE,
+        )
+        self.assertEqual(
+            schema["properties"]["capture_sha256"]["$ref"],
+            "#/$defs/sha256",
+        )
 
     def test_missing_or_duplicated_observation_is_refused_without_a_record(self) -> None:
         capture = self.valid_capture("cardinality")
@@ -2346,6 +2557,18 @@ def _normalized_command_sequence(run_body: str) -> tuple[str, ...]:
     return tuple(commands)
 
 
+def _job_block(text: str, job: str) -> str | None:
+    """Full job mapping, from `  {job}:` through the next sibling job."""
+    marker = f"  {job}:\n"
+    start = text.find(marker)
+    if start < 0:
+        return None
+    rest = text[start + len(marker) :]
+    nxt = re.search(r"(?m)^  [A-Za-z0-9_-]+:", rest)
+    tail = rest if nxt is None else rest[: nxt.start()]
+    return marker + tail
+
+
 def oci_candidate_workflow_problems(
     text: str, *, skip: frozenset[str] = frozenset()
 ) -> list[str]:
@@ -2357,6 +2580,8 @@ def oci_candidate_workflow_problems(
 
     active = _active_lines(text)
     active_text = "\n".join(active)
+    capture_block = _job_block(text, OCI_CAPTURE_JOB)
+    score_block = _job_block(text, OCI_SCORE_JOB)
     on_keys = _top_level_mapping_keys(text, "on")
     if on_keys != ("workflow_dispatch",):
         if "workflow_dispatch" not in on_keys:
@@ -2370,7 +2595,7 @@ def oci_candidate_workflow_problems(
                 problems.append("push trigger")
             else:
                 problems.append(f"extra trigger: {key}")
-    if "runs-on: ubuntu-24.04" not in active_text:
+    if sum(1 for line in active if line == "runs-on: ubuntu-24.04") != 2:
         problems.append("missing ubuntu-24.04")
     if re.search(r"runs-on:\s*.*self-hosted", active_text):
         problems.append("self-hosted runner")
@@ -2388,7 +2613,7 @@ def oci_candidate_workflow_problems(
         problems.append("missing main ref guard")
     if "git rev-parse HEAD" not in active_text or "$GITHUB_SHA" not in active_text:
         problems.append("missing HEAD/SHA guard")
-    if "persist-credentials: false" not in active_text:
+    if sum(1 for line in active if line == "persist-credentials: false") != 2:
         problems.append("missing persist-credentials:false")
     if "candidate-release.json" not in active_text:
         problems.append("missing candidate-release.json")
@@ -2396,8 +2621,10 @@ def oci_candidate_workflow_problems(
         problems.append("missing validate_candidate_release.py")
     if "attestation-bundle.json" not in active_text:
         problems.append("missing attestation-bundle.json")
-    if not any(re.match(r"^(-\s+)?gh attestation verify(\s|\\|$)", line) for line in active):
-        problems.append("missing gh attestation verify")
+    for job_text in (capture_block, score_block):
+        job_active = _active_lines(job_text or "")
+        if not any(re.match(r"^(-\s+)?gh attestation verify(\s|\\|$)", line) for line in job_active):
+            problems.append("missing gh attestation verify")
     if "--bundle" not in active_text:
         problems.append("missing --bundle")
     if f"--signer-workflow {OCI_SIGNER_WORKFLOW}" not in active_text:
@@ -2446,63 +2673,108 @@ def oci_candidate_workflow_problems(
         problems.append("continue-on-error swallows failure")
     if "|| true" in active_text:
         problems.append("|| true swallows failure")
-    for pin, label in (
-        (OCI_CHECKOUT_PIN, "unpinned or wrong checkout"),
-        (OCI_SETUP_PYTHON_PIN, "unpinned or wrong setup-python"),
-        (OCI_UPLOAD_PIN, "unpinned or wrong upload-artifact"),
+    for pin, label, expected in (
+        (OCI_CHECKOUT_PIN, "unpinned or wrong checkout", 2),
+        (OCI_SETUP_PYTHON_PIN, "unpinned or wrong setup-python", 2),
+        (OCI_UPLOAD_PIN, "unpinned or wrong upload-artifact", 2),
+        (OCI_DOWNLOAD_PIN, "unpinned or wrong download-artifact", 1),
     ):
-        if not any(_uses_pin_line(line, pin) for line in active):
+        if sum(1 for line in active if _uses_pin_line(line, pin)) != expected:
             problems.append(label)
-    if OCI_PYTHON_VERSION not in active_text:
+    if sum(1 for line in active if line == OCI_PYTHON_VERSION) != 2:
         problems.append("missing python 3.13.8")
-    upload_steps = [
-        block
-        for block in re.split(r"(?m)^(?=      - )", text)
-        if any(_uses_pin_line(line, OCI_UPLOAD_PIN) for line in _active_lines(block))
-    ]
-    upload_ifs = [
-        line
-        for block in upload_steps
-        for line in _active_lines(block)
-        if line.startswith("if:")
-    ]
-    if not omitted("upload not gated on success") and upload_ifs != ["if: success()"]:
+    upload_ifs = []
+    for block in (
+        _named_step_block(capture_block or "", OCI_UPLOAD_STEP),
+        _named_step_block(score_block or "", OCI_SCORE_UPLOAD_STEP),
+    ):
+        if block is None:
+            upload_ifs.append("<missing-upload>")
+            continue
+        ifs = [line for line in _active_lines(block) if line.startswith("if:")]
+        upload_ifs.extend(ifs or ["<missing-if>"])
+    if not omitted("upload not gated on success") and upload_ifs != ["if: success()", "if: success()"]:
         problems.append("upload not gated on success")
     if "candidate_capture.v0" not in active_text:
         problems.append("missing fixed capture name")
     if OCI_CAPTURE_UPLOAD_PATH not in active_text:
         problems.append("missing exact capture upload path")
-    if "retention-days: 7" not in active_text:
+    if sum(1 for line in active if line == "retention-days: 7") != 2:
         problems.append("missing retention-days: 7")
-    if "if-no-files-found: error" not in active_text:
+    if sum(1 for line in active if line == "if-no-files-found: error") != 2:
         problems.append("missing if-no-files-found:error")
-    if "timeout-minutes: 25" not in active_text:
+    if sum(1 for line in active if line == "timeout-minutes: 25") != 2:
         problems.append("missing timeout-minutes: 25")
     for line in active:
         for match in USES_SHA_RE.finditer(line):
             pin = match.group(1)
             if not re.fullmatch(r"[0-9a-f]{40}", pin):
                 problems.append(f"unpinned uses: {match.group(0)}")
-    for name in _named_step_names(text):
-        if name == OCI_UPLOAD_STEP:
+    for job_text, upload_name in (
+        (capture_block, OCI_UPLOAD_STEP),
+        (score_block, OCI_SCORE_UPLOAD_STEP),
+    ):
+        if job_text is None:
             continue
-        block = _named_step_block(text, name)
-        if (
-            not omitted("conditional step")
-            and block is not None
-            and any(re.match(r"^if:", line) for line in _active_lines(block))
-        ):
-            problems.append(f"conditional step: {name}")
+        for name in _named_step_names(job_text):
+            if name == upload_name:
+                continue
+            block = _named_step_block(job_text, name)
+            if (
+                not omitted("conditional step")
+                and block is not None
+                and any(re.match(r"^if:", line) for line in _active_lines(block))
+            ):
+                problems.append(f"conditional step: {name}")
     for name, allowed in OCI_PINNED_STEP_SEQUENCES.items():
         body = _named_step_run_body(text, name)
         if body is None or _normalized_command_sequence(body) != allowed:
             problems.append(f"unexpected run sequence: {name}")
-    if _top_level_mapping_keys(text, "jobs") != (OCI_CAPTURE_JOB,):
+        if score_block is not None and name in OCI_SCORE_STEP_ENV_KEYS:
+            score_body = _named_step_run_body(score_block, name)
+            if score_body is None or _normalized_command_sequence(score_body) != allowed:
+                problems.append(f"unexpected run sequence: {name}")
+    for name, allowed in OCI_SCORE_PINNED_STEP_SEQUENCES.items():
+        body = _named_step_run_body(score_block or "", name)
+        if body is None or _normalized_command_sequence(body) != allowed:
+            problems.append(f"unexpected run sequence: {name}")
+    if _top_level_mapping_keys(text, "jobs") != (OCI_CAPTURE_JOB, OCI_SCORE_JOB):
         problems.append("unexpected jobs")
     if _job_mapping_keys(text, OCI_CAPTURE_JOB) != OCI_CAPTURE_JOB_KEYS:
         problems.append("unexpected capture job keys")
-    if tuple(_named_step_names(text)) != OCI_CAPTURE_STEP_NAMES:
+    if _job_mapping_keys(text, OCI_SCORE_JOB) != OCI_SCORE_JOB_KEYS:
+        problems.append("unexpected score job keys")
+    score_needs = [
+        raw.strip()
+        for raw in (score_block or "").splitlines()
+        if raw.startswith("    needs:") and not raw.startswith("     ")
+    ]
+    if score_needs != [OCI_SCORE_NEEDS]:
+        problems.append("score job missing needs: capture")
+    score_ifs = [
+        raw.strip()
+        for raw in (score_block or "").splitlines()
+        if raw.startswith("    if:") and not raw.startswith("     ")
+    ]
+    if score_ifs != ["if: success()"]:
+        problems.append("score job not gated on success")
+    if capture_block is None or tuple(_named_step_names(capture_block)) != OCI_CAPTURE_STEP_NAMES:
         problems.append("unexpected step names")
+    if score_block is None or tuple(_named_step_names(score_block)) != OCI_SCORE_STEP_NAMES:
+        problems.append("unexpected step names")
+    score_active = "\n".join(_active_lines(score_block or ""))
+    if "--entrypoint" in score_active:
+        problems.append("score job invokes --entrypoint")
+    if "docker" in score_active:
+        problems.append("score job invokes docker")
+    if OCI_EXECUTOR in score_active:
+        problems.append("score job invokes executor")
+    if OCI_SCORER not in score_active:
+        problems.append("missing score_candidate.py")
+    if "--capture" not in score_active:
+        problems.append("missing --capture")
+    if OCI_SCORE_UPLOAD_PATH not in active_text:
+        problems.append("missing exact run-record upload path")
     if _top_level_mapping_children(text, "permissions") != OCI_TOP_LEVEL_PERMISSIONS:
         problems.append("unexpected top-level permissions")
     if _has_job_level_permissions(text):
@@ -2510,6 +2782,15 @@ def oci_candidate_workflow_problems(
     if not omitted("unexpected env keys"):
         for name, allowed in OCI_STEP_ENV_KEYS.items():
             block = _named_step_block(text, name)
+            actual = (
+                frozenset(_keys_at_indent(block, 10, under="env"))
+                if block is not None
+                else frozenset()
+            )
+            if block is None or actual != allowed:
+                problems.append(f"unexpected env keys: {name}")
+        for name, allowed in OCI_SCORE_STEP_ENV_KEYS.items():
+            block = _named_step_block(score_block or "", name)
             actual = (
                 frozenset(_keys_at_indent(block, 10, under="env"))
                 if block is not None
@@ -2526,6 +2807,11 @@ def oci_candidate_workflow_problems(
             actual = ("name",) + _keys_at_indent(block, 8) if block is not None else ()
             if block is None or actual != allowed:
                 problems.append(f"unexpected step keys: {name}")
+        for name, allowed in OCI_SCORE_STEP_KEYS.items():
+            block = _named_step_block(score_block or "", name)
+            actual = ("name",) + _keys_at_indent(block, 8) if block is not None else ()
+            if block is None or actual != allowed:
+                problems.append(f"unexpected step keys: {name}")
     if not omitted("unexpected with keys"):
         for name, allowed in OCI_STEP_WITH_KEYS.items():
             block = _named_step_block(text, name)
@@ -2534,17 +2820,27 @@ def oci_candidate_workflow_problems(
             )
             if block is None or actual != allowed:
                 problems.append(f"unexpected with keys: {name}")
+        for name, allowed in OCI_SCORE_STEP_WITH_KEYS.items():
+            block = _named_step_block(score_block or "", name)
+            actual = (
+                _keys_at_indent(block, 10, under="with") if block is not None else ()
+            )
+            if block is None or actual != allowed:
+                problems.append(f"unexpected with keys: {name}")
     if not omitted("unexpected TAG bindings"):
-        if sum(1 for line in active if line == OCI_TAG_BINDING) != 2:
+        if sum(1 for line in active if line == OCI_TAG_BINDING) != 4:
             problems.append("unexpected TAG bindings")
     if not omitted("missing exact artifact name"):
-        if sum(1 for line in active if line == OCI_ARTIFACT_NAME) != 1:
+        if sum(1 for line in active if line == OCI_ARTIFACT_NAME) != 2:
             problems.append("missing exact artifact name")
+    if not omitted("missing exact run-record artifact name"):
+        if sum(1 for line in active if line == OCI_SCORE_ARTIFACT_NAME) != 1:
+            problems.append("missing exact run-record artifact name")
     return problems
 
 
 class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
-    """Capture-only trusted-main workflow. Structural; no live dispatch."""
+    """Trusted-main OCI capture then score. Structural; no live dispatch."""
 
     def test_workflow_file_exists(self) -> None:
         self.assertTrue(
@@ -2576,8 +2872,13 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
             (OCI_SETUP_PYTHON_PIN, "unpinned or wrong setup-python"),
             (OCI_PYTHON_VERSION, "missing python 3.13.8"),
             (OCI_CAPTURE_UPLOAD_PATH, "missing exact capture upload path"),
+            (OCI_SCORE_UPLOAD_PATH, "missing exact run-record upload path"),
             ("retention-days: 7", "missing retention-days: 7"),
             ("if: success()", "upload not gated on success"),
+            (OCI_SCORE_NEEDS, "score job missing needs: capture"),
+            (OCI_SCORER, "missing score_candidate.py"),
+            ("--capture", "missing --capture"),
+            (OCI_DOWNLOAD_PIN, "unpinned or wrong download-artifact"),
         )
         for needle, expected in drops:
             with self.subTest(drop=needle):
@@ -2980,6 +3281,62 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
                     restored,
                     [],
                     f"{kind} must be [] when {expected!r} is skipped: {restored}",
+                )
+
+        score_mutations = (
+            (
+                "score_needs_dropped",
+                f"    {OCI_SCORE_NEEDS}\n",
+                "",
+                "score job missing needs: capture",
+            ),
+            (
+                "score_if_always",
+                f"    {OCI_SCORE_NEEDS}\n    if: success()\n",
+                f"    {OCI_SCORE_NEEDS}\n    if: always()\n",
+                "score job not gated on success",
+            ),
+            (
+                "score_entrypoint",
+                '            --capture "$CAPTURE" \\\n',
+                '            --entrypoint /bin/true \\\n            --capture "$CAPTURE" \\\n',
+                "score job invokes --entrypoint",
+            ),
+            (
+                "score_docker",
+                f"          python3 {OCI_SCORER} \\\n",
+                "          docker run --rm example \\\n"
+                f"          python3 {OCI_SCORER} \\\n",
+                "score job invokes docker",
+            ),
+            (
+                "score_executor",
+                f"          python3 {OCI_SCORER} \\\n",
+                f"          python3 {OCI_EXECUTOR} \\\n"
+                f"          python3 {OCI_SCORER} \\\n",
+                "score job invokes executor",
+            ),
+            (
+                "score_upload_on_failure",
+                "      - name: Upload validated run record\n        if: success()\n",
+                "      - name: Upload validated run record\n        if: failure()\n",
+                "upload not gated on success",
+            ),
+            (
+                "score_artifact_name",
+                f"          {OCI_SCORE_ARTIFACT_NAME}\n",
+                "          name: candidate-run-record-v0-extra\n",
+                "missing exact run-record artifact name",
+            ),
+        )
+        for kind, needle, replacement, expected in score_mutations:
+            with self.subTest(kind=kind):
+                self.assertIn(needle, text)
+                mutated = text.replace(needle, replacement, 1)
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any(expected in problem for problem in problems),
+                    f"expected {expected!r} in {problems}",
                 )
 
     def test_conformance_path_filters_include_oci_workflow(self) -> None:
