@@ -79,6 +79,7 @@ def projected(temp: Path, *, value: dict | None = None, runner: str = "module",
     if not implementation.startswith("../"):
         (temp / implementation).write_text("# measured\n", encoding="utf-8")
     value = dict(value or report(runner=runner))
+    value.setdefault("manifest", "conformance/adequacy/sample.manifest.json")
     if not value.get("manifest_sha256"):
         value["manifest_sha256"] = sha256(raw_manifest)
     raw_report = report_bytes(value)
@@ -320,10 +321,27 @@ class CurrentResultsDocument(unittest.TestCase):
             path, document, _ = self.write_current(Path(raw))
             del document["reports"]
             del document["row_contract"]
-            for field in ("report_sha256", "report_ref"):
-                del document["corpora"][0][field]
+            document["corpora"][0] = {
+                "corpus": document["corpora"][0]["corpus"],
+                "manifest": document["corpora"][0]["manifest"],
+            }
             path.write_text(json.dumps(document), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "downgraded"):
+                published_rows.load_results(path, require_current=True)
+
+    def test_producer_manifest_must_match_the_repository_relative_row_identity(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path, document, encoded = self.write_current(Path(raw))
+            old_digest = sha256(encoded)
+            producer = json.loads(document["reports"].pop(old_digest))
+            producer["manifest"] = "/Users/reviewer/private-worktree/sample.manifest.json"
+            changed = report_bytes(producer)
+            new_digest = sha256(changed)
+            document["reports"][new_digest] = changed.decode("utf-8")
+            document["corpora"][0]["report_sha256"] = new_digest
+            document["corpora"][0]["report_ref"] = "#/reports/%s" % new_digest
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "producer manifest"):
                 published_rows.load_results(path)
 
     def test_dependencies_must_be_complete_for_the_addressed_manifest(self):
@@ -425,7 +443,7 @@ class CheckerUsesCanonicalRows(unittest.TestCase):
             published_rows, "load_results", side_effect=ValueError("canonical sentinel")
         ) as loader:
             findings = checker.check()
-        loader.assert_called_once_with(checker.RESULTS)
+        loader.assert_called_once_with(checker.RESULTS, require_current=True)
         self.assertTrue(any("canonical sentinel" in finding for finding in findings), findings)
 
     def test_checker_names_unmeasured_rows_without_discarding_loaded_rows(self):

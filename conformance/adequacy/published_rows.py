@@ -221,11 +221,14 @@ def project_report(
     """Project one exact producer report into the typed publication index."""
     if not isinstance(corpus, str) or not corpus:
         raise ValueError("corpus id must be a non-empty string")
+    manifest = _dependencies([manifest])[0]
     _validate_report(report)
     if _parse_json_bytes(encoded_report, "producer report") != report:
         raise ValueError("producer report bytes do not encode the supplied report")
     manifest_data = read_regular_file(manifest_path)
     declared = _parse_json_bytes(manifest_data, str(manifest_path))
+    if report.get("manifest") != manifest:
+        raise ValueError("producer manifest differs from the repository-relative row identity")
     if declared.get("runner", "module") != report["runner"]:
         raise ValueError("runner differs between manifest and producer report")
     if report["manifest_sha256"] != _digest(manifest_data):
@@ -280,6 +283,8 @@ def _validate_current_row(row: dict, reports: dict, repo: Path) -> None:
     if row.get("control") != _control_display(report["control_status"]):
         raise ValueError("control differs from producer control_status")
     manifest_rel = _dependencies([row.get("manifest")])[0]
+    if report.get("manifest") != manifest_rel:
+        raise ValueError("producer manifest differs from the repository-relative row identity")
     manifest_path = _lexical_path(repo, manifest_rel)
     manifest_data = read_regular_file(manifest_path)
     declared = _parse_json_bytes(manifest_data, str(manifest_path))
@@ -326,7 +331,9 @@ def _validate_current_row(row: dict, reports: dict, repo: Path) -> None:
             raise ValueError("out_of_tree repos do not cover every external declared source")
 
 
-def load_results(path: Path, *, limit: int = MAX_RESULTS_BYTES) -> LoadedResults:
+def load_results(
+    path: Path, *, limit: int = MAX_RESULTS_BYTES, require_current: bool = False
+) -> LoadedResults:
     document = _parse_json_bytes(read_regular_file(path, limit), "%s results JSON" % path)
     if document.get("schema") not in (None, RESULTS_SCHEMA):
         raise ValueError("results document has an unsupported schema")
@@ -338,6 +345,8 @@ def load_results(path: Path, *, limit: int = MAX_RESULTS_BYTES) -> LoadedResults
     current = contract == ROW_CONTRACT
     if contract not in (None, ROW_CONTRACT):
         raise ValueError("results document has an unsupported row_contract")
+    if require_current and not current:
+        raise ValueError("current rows cannot be downgraded to the legacy row contract")
     if current and reports is None:
         raise ValueError("current rows cannot be downgraded by removing the reports object")
     if current and not isinstance(reports, dict):

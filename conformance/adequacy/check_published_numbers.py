@@ -321,7 +321,7 @@ def check() -> list[str]:
         return ["%s does not exist. Nothing re-derives the published numbers; run "
                 "conformance/adequacy/measure_all.py" % RESULTS.relative_to(REPO)]
     try:
-        loaded = published_rows.load_results(RESULTS)
+        loaded = published_rows.load_results(RESULTS, require_current=True)
     except ValueError as exc:
         return [str(exc)]
     rows = list(loaded.rows)
