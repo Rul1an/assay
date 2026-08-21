@@ -2004,9 +2004,21 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         )
 
 
+def _active_lines(text: str) -> list[str]:
+    """YAML/script lines that can execute. Full-line comments and blanks do not."""
+    lines = []
+    for raw in text.splitlines():
+        stripped = raw.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        lines.append(stripped)
+    return lines
+
+
 def oci_candidate_workflow_problems(text: str) -> list[str]:
     """Structural pins for the trusted-main OCI capture workflow. One function."""
     problems: list[str] = []
+    active = _active_lines(text)
     if "workflow_dispatch:" not in text:
         problems.append("missing workflow_dispatch")
     if re.search(r"(?m)^  pull_request", text) or "pull_request_target:" in text:
@@ -2052,7 +2064,7 @@ def oci_candidate_workflow_problems(text: str) -> list[str]:
         problems.append("missing validate_candidate_release.py")
     if "attestation-bundle.json" not in text:
         problems.append("missing attestation-bundle.json")
-    if "gh attestation verify" not in text:
+    if not any(re.match(r"^(-\s+)?gh attestation verify(\s|\\|$)", line) for line in active):
         problems.append("missing gh attestation verify")
     if "--bundle" not in text:
         problems.append("missing --bundle")
@@ -2070,7 +2082,10 @@ def oci_candidate_workflow_problems(text: str) -> list[str]:
         problems.append("missing --deny-self-hosted-runners")
     if "release_attestation_enforce.sh" in text:
         problems.append("software-release verifier used for pack")
-    if OCI_EXECUTOR not in text:
+    if not any(
+        re.match(rf"^(-\s+)?python3\s+{re.escape(OCI_EXECUTOR)}(\s|\\|$)", line)
+        for line in active
+    ):
         problems.append("missing canonical executor")
     if "--pack" not in text or "--implementation-id" not in text or "--output" not in text:
         problems.append("missing executor argv")
@@ -2095,15 +2110,28 @@ def oci_candidate_workflow_problems(text: str) -> list[str]:
         problems.append("continue-on-error swallows failure")
     if "|| true" in text:
         problems.append("|| true swallows failure")
-    if OCI_CHECKOUT_PIN not in text:
-        problems.append("unpinned or wrong checkout")
-    if OCI_SETUP_PYTHON_PIN not in text:
-        problems.append("unpinned or wrong setup-python")
+    for pin, label in (
+        (OCI_CHECKOUT_PIN, "unpinned or wrong checkout"),
+        (OCI_SETUP_PYTHON_PIN, "unpinned or wrong setup-python"),
+        (OCI_UPLOAD_PIN, "unpinned or wrong upload-artifact"),
+    ):
+        if not any(re.match(rf"^(-\s+)?uses:\s*{re.escape(pin)}", line) for line in active):
+            problems.append(label)
     if OCI_PYTHON_VERSION not in text:
         problems.append("missing python 3.13.8")
-    if OCI_UPLOAD_PIN not in text:
-        problems.append("unpinned or wrong upload-artifact")
-    if "if: success()" not in text:
+    upload_steps = [
+        block
+        for block in re.split(r"(?m)^(?=      - )", text)
+        if any(
+            re.match(rf"^(-\s+)?uses:\s*{re.escape(OCI_UPLOAD_PIN)}", line)
+            for line in _active_lines(block)
+        )
+    ]
+    if not any(
+        re.match(r"^if:\s*success\(\)", line)
+        for block in upload_steps
+        for line in _active_lines(block)
+    ):
         problems.append("upload not gated on success")
     if "candidate_capture.v0" not in text:
         problems.append("missing fixed capture name")
@@ -2115,10 +2143,11 @@ def oci_candidate_workflow_problems(text: str) -> list[str]:
         problems.append("missing if-no-files-found:error")
     if "timeout-minutes: 25" not in text:
         problems.append("missing timeout-minutes: 25")
-    for match in USES_SHA_RE.finditer(text):
-        pin = match.group(1)
-        if not re.fullmatch(r"[0-9a-f]{40}", pin):
-            problems.append(f"unpinned uses: {match.group(0)}")
+    for line in active:
+        for match in USES_SHA_RE.finditer(line):
+            pin = match.group(1)
+            if not re.fullmatch(r"[0-9a-f]{40}", pin):
+                problems.append(f"unpinned uses: {match.group(0)}")
     return problems
 
 
@@ -2161,6 +2190,31 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
         for needle, expected in drops:
             with self.subTest(drop=needle):
                 mutated = text.replace(needle, "")
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any(expected in problem for problem in problems),
+                    f"expected {expected!r} in {problems}",
+                )
+        decorative = (
+            (
+                "gh attestation verify \\",
+                "echo gh attestation verify \\",
+                "missing gh attestation verify",
+            ),
+            (
+                f"python3 {OCI_EXECUTOR} \\",
+                f"echo python3 {OCI_EXECUTOR} \\",
+                "missing canonical executor",
+            ),
+            (
+                "if: success()",
+                "# if: success()",
+                "upload not gated on success",
+            ),
+        )
+        for needle, replacement, expected in decorative:
+            with self.subTest(decorative=expected):
+                mutated = text.replace(needle, replacement, 1)
                 problems = oci_candidate_workflow_problems(mutated)
                 self.assertTrue(
                     any(expected in problem for problem in problems),
