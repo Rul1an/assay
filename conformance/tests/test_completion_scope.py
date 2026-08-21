@@ -110,15 +110,29 @@ def _active_run_lines(step: str) -> list[str]:
     return lines
 
 
+def _direct_soft_failure_key(block: str) -> str | None:
+    lines = block.splitlines()
+    block_indent = len(lines[0]) - len(lines[0].lstrip(" "))
+    guarded = re.compile(
+        rf"^ {{{block_indent + 2}}}(?P<key>if|continue-on-error)\s*:")
+    for line in lines[1:]:
+        match = guarded.match(line)
+        if match:
+            return match.group("key")
+    return None
+
+
 def assert_hard_run_command(
         text: str, job_name: str, step_name: str, command: str) -> str:
+    job = named_job(text, job_name)
+    job_key = _direct_soft_failure_key(job)
+    if job_key:
+        raise AssertionError(f"{job_name} job has a direct {job_key} key")
+
     step = named_step(text, job_name, step_name)
-    first = step.splitlines()[0]
-    step_indent = len(first) - len(first.lstrip(" "))
-    guarded = re.compile(
-        rf"^ {{{step_indent + 2}}}(?:if|continue-on-error)\s*:")
-    if any(guarded.match(line) for line in step.splitlines()[1:]):
-        raise AssertionError(f"{step_name} has a conditional or soft-failure key")
+    step_key = _direct_soft_failure_key(step)
+    if step_key:
+        raise AssertionError(f"{step_name} has a direct {step_key} key")
 
     active = _active_run_lines(step)
     expected = [line.strip() for line in command.splitlines()]
@@ -451,6 +465,27 @@ class ProductCallsite(unittest.TestCase):
             "      - name: Run activation-kit contract tests\n",
             "      - name: Run activation-kit contract tests\n"
             "        if: ${{ github.event_name == 'disabled' }}\n",
+            1,
+        )
+        with self.assertRaises(AssertionError):
+            assert_combined_unittest(mutated)
+
+    def test_conditional_activation_kit_job_fails_the_hard_callsite(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        mutated = text.replace(
+            "  activation-kit:\n",
+            "  activation-kit:\n"
+            "    if: ${{ github.event_name == 'disabled' }}\n",
+            1,
+        )
+        with self.assertRaises(AssertionError):
+            assert_combined_unittest(mutated)
+
+    def test_softened_activation_kit_job_fails_the_hard_callsite(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        mutated = text.replace(
+            "  activation-kit:\n",
+            "  activation-kit:\n    continue-on-error: true\n",
             1,
         )
         with self.assertRaises(AssertionError):

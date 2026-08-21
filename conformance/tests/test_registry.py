@@ -377,6 +377,28 @@ class ProductWorkflow(unittest.TestCase):
             assert_hard_run_command(
                 mutated, "scope", "Conformance inventory", RUN_ALL_COMMAND)
 
+    def test_conditional_scope_job_fails_the_inventory_guard(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        mutated = text.replace(
+            "  scope:\n",
+            "  scope:\n    if: ${{ github.event_name == 'disabled' }}\n",
+            1,
+        )
+        with self.assertRaises(AssertionError):
+            assert_hard_run_command(
+                mutated, "scope", "Conformance inventory", RUN_ALL_COMMAND)
+
+    def test_softened_scope_job_fails_the_inventory_guard(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        mutated = text.replace(
+            "  scope:\n",
+            "  scope:\n    continue-on-error: true\n",
+            1,
+        )
+        with self.assertRaises(AssertionError):
+            assert_hard_run_command(
+                mutated, "scope", "Conformance inventory", RUN_ALL_COMMAND)
+
     def test_relocated_run_all_command_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")
         mutated = text.replace("          " + RUN_ALL_COMMAND, "          :", 1).replace(
