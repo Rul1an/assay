@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""#206: one opt-in pma-v0-repro registry row, plus PMA delivery wiring.
+"""#206: one opt-in pma-v0-repro registry row.
 
     python3 -W error::ResourceWarning conformance/tests/test_pma_v0_registration.py
 
 A digest addresses bytes. This test does not pull, run, or endorse the image.
 Generic schema rejection lives in test_implementations.py.
-Required CI also pins that privileged-mcp-action-conformance.yml still
-invokes both kit files in one unittest command.
 """
 
 from __future__ import annotations
@@ -37,26 +35,9 @@ CONSENT_URL = (
 ROW_ID = "pma-v0-repro"
 MODEL = "Grok Bot"
 CI_YML = REPO / ".github/workflows/ci.yml"
-CONFORMANCE_WORKFLOW = REPO / ".github/workflows/privileged-mcp-action-conformance.yml"
 CI_COMMAND = (
     "python3 -W error::ResourceWarning "
     "conformance/tests/test_pma_v0_registration.py"
-)
-ACTIVATION_KIT = (
-    "conformance/privileged-mcp-action-v0/tests/test_activation_kit.py"
-)
-EXECUTOR_KIT = (
-    "conformance/privileged-mcp-action-v0/tests/test_oci_candidate_executor.py"
-)
-COMBINED_UNITTEST = (
-    "          python3 -m unittest \\\n"
-    f"            {ACTIVATION_KIT} \\\n"
-    f"            {EXECUTOR_KIT}"
-)
-COMBINED_UNITTEST_RE = re.compile(
-    r"python3 -m unittest \\\n"
-    rf"\s+{re.escape(ACTIVATION_KIT)} \\\n"
-    rf"\s+{re.escape(EXECUTOR_KIT)}"
 )
 INVENTORY_STEP_RE = re.compile(
     r"(?ms)^      - name: Conformance inventory\n(?:        .+\n)+"
@@ -123,47 +104,6 @@ class RequiredCi(unittest.TestCase):
         step = _inventory_step()
         self.assertIn(CI_COMMAND, step)
         self.assertNotIn("continue-on-error", step)
-
-
-class PmaDeliveryWiring(unittest.TestCase):
-    """Required-CI pin of PMA delivery: both kit files in one unittest command."""
-
-    def _assert_combined_command(self, text: str) -> None:
-        self.assertIn("test_activation_kit.py", text)
-        self.assertIn("test_oci_candidate_executor.py", text)
-        self.assertRegex(text, COMBINED_UNITTEST_RE)
-
-    def test_conformance_workflow_runs_both_kit_files(self) -> None:
-        text = CONFORMANCE_WORKFLOW.read_text(encoding="utf-8")
-        self._assert_combined_command(text)
-
-    def test_replacing_combined_command_with_true_is_rejected(self) -> None:
-        text = CONFORMANCE_WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn(COMBINED_UNITTEST, text)
-        mutated = text.replace(COMBINED_UNITTEST, "          true", 1)
-        with self.assertRaises(AssertionError):
-            self._assert_combined_command(mutated)
-
-    def test_removing_only_activation_arg_is_rejected(self) -> None:
-        text = CONFORMANCE_WORKFLOW.read_text(encoding="utf-8")
-        mutated = text.replace(f"            {ACTIVATION_KIT} \\\n", "", 1)
-        with self.assertRaises(AssertionError):
-            self._assert_combined_command(mutated)
-
-    def test_removing_only_executor_arg_is_rejected(self) -> None:
-        text = CONFORMANCE_WORKFLOW.read_text(encoding="utf-8")
-        mutated = text.replace(f"            {EXECUTOR_KIT}\n", "", 1)
-        with self.assertRaises(AssertionError):
-            self._assert_combined_command(mutated)
-
-    def test_reverse_and_noop_remain_green(self) -> None:
-        text = CONFORMANCE_WORKFLOW.read_text(encoding="utf-8")
-        self._assert_combined_command(text)
-        mutated = text.replace(COMBINED_UNITTEST, "          true", 1)
-        self.assertNotEqual(mutated, text)
-        with self.assertRaises(AssertionError):
-            self._assert_combined_command(mutated)
-        self._assert_combined_command(text)
 
 
 if __name__ == "__main__":

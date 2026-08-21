@@ -345,6 +345,13 @@ class ProductWorkflow(unittest.TestCase):
         self.assertIn("conformance/run_all.py --require-complete --completion-scope required", step)
         self.assertNotIn("continue-on-error", step)
 
+    def test_scope_job_invokes_completion_scope_suite(self):
+        step = _inventory_step(CI_YML.read_text(encoding="utf-8"))
+        self.assertIn("conformance/tests/test_completion_scope.py", step)
+        mutated = step.replace("conformance/tests/test_completion_scope.py", "")
+        self.assertNotEqual(mutated, step)
+        self.assertNotIn("conformance/tests/test_completion_scope.py", mutated)
+
     def test_deleting_the_scope_job_callsite_fails_this_test(self):
         text = CI_YML.read_text(encoding="utf-8")
         with self.assertRaises(AssertionError):

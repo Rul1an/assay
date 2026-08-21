@@ -29,6 +29,14 @@ JOB_KEY_RE = re.compile(r"^  [A-Za-z0-9_][A-Za-z0-9_-]*:")
 REQUIRED_RUN_ALL = (
     "python3 conformance/run_all.py --require-complete --completion-scope required"
 )
+CONFORMANCE_YML = REPO / ".github/workflows/privileged-mcp-action-conformance.yml"
+KIT_STEP_RE = re.compile(
+    r"(?ms)^      - name: Run activation-kit contract tests\n(?:        .+\n)+")
+COMBINED_UNITTEST = (
+    "          python3 -m unittest \\\n"
+    "            conformance/privileged-mcp-action-v0/tests/test_activation_kit.py \\\n"
+    "            conformance/privileged-mcp-action-v0/tests/test_oci_candidate_executor.py"
+)
 
 
 def _scope_job(text: str) -> str:
@@ -63,6 +71,30 @@ def _active_run_lines(step: str) -> list[str]:
             continue
         lines.append(stripped)
     return lines
+
+
+def _kit_step(text: str) -> str:
+    step = KIT_STEP_RE.search(text)
+    if step is None:
+        raise AssertionError("conformance workflow missing kit contract step")
+    return step.group(0)
+
+
+def assert_combined_unittest(step: str) -> None:
+    if COMBINED_UNITTEST not in step:
+        raise AssertionError("combined unittest command missing")
+    lines = _active_run_lines(step)
+    joined = "\n".join(lines)
+    if "python3 -m unittest" not in joined:
+        raise AssertionError("combined unittest is not active")
+    if "test_activation_kit.py" not in joined:
+        raise AssertionError("activation kit is not active")
+    if "test_oci_candidate_executor.py" not in joined:
+        raise AssertionError("executor kit is not active")
+    if "|| true" in step or "|| :" in step or "continue-on-error" in step:
+        raise AssertionError("combined unittest is neutralized")
+    if any(ln == "set +e" or ln.startswith("set +e ") for ln in lines):
+        raise AssertionError("kit contract step disables -e")
 
 
 POLICIES = {
@@ -289,6 +321,33 @@ class ProductCallsite(unittest.TestCase):
         source = Path(registry.__file__).read_text(encoding="utf-8")
         self.assertNotRegex(source, r"returncode in \(0, 3\)")
         self.assertNotIn("if completed.returncode in (0, 3)", source)
+
+    def test_deleting_registry_suite_callsite_fails(self):
+        step = _inventory_step(CI_YML.read_text(encoding="utf-8"))
+        self.assertTrue(any("conformance/tests/test_registry.py" in ln
+                            for ln in _active_run_lines(step)))
+        mutated = step.replace("conformance/tests/test_registry.py", "")
+        self.assertFalse(any("conformance/tests/test_registry.py" in ln
+                             for ln in _active_run_lines(mutated)))
+
+    def test_conformance_combined_unittest_is_a_hard_callsite(self):
+        step = _kit_step(CONFORMANCE_YML.read_text(encoding="utf-8"))
+        assert_combined_unittest(step)
+        assert_combined_unittest(step.replace("no-such-token", "no-such-token"))
+        name = "      - name: Run activation-kit contract tests\n"
+        mutations = (
+            step.replace(COMBINED_UNITTEST, "          true"),
+            step.replace("          python3 -m unittest \\",
+                         "          # python3 -m unittest \\"),
+            step.replace(COMBINED_UNITTEST, "          :"),
+            step.replace("test_activation_kit.py", ""),
+            step.replace("test_oci_candidate_executor.py", ""),
+            step.replace(COMBINED_UNITTEST, COMBINED_UNITTEST + " || true"),
+            step.replace(name, name + "        continue-on-error: true\n"),
+        )
+        for mutated in mutations:
+            with self.assertRaises(AssertionError):
+                assert_combined_unittest(mutated)
 
 
 if __name__ == "__main__":
