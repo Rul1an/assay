@@ -158,6 +158,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           python3 conformance/registry.py
           python3 conformance/implementations.py
           python3 -W error::ResourceWarning conformance/tests/test_implementations.py

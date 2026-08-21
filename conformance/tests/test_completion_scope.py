@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -28,6 +29,7 @@ STANDALONE = REPO / ".github/workflows/conformance-inventory.yml"
 REQUIRED_RUN_ALL = (
     "python3 conformance/run_all.py --require-complete --completion-scope required"
 )
+REVISION_WITNESS = 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"'
 CONFORMANCE_YML = REPO / ".github/workflows/privileged-mcp-action-conformance.yml"
 COMBINED_UNITTEST = (
     "          python3 -m unittest \\\n"
@@ -36,6 +38,7 @@ COMBINED_UNITTEST = (
 )
 INVENTORY_RUN_SCRIPT = (
     "set -euo pipefail",
+    REVISION_WITNESS,
     "python3 conformance/registry.py",
     "python3 conformance/implementations.py",
     "python3 -W error::ResourceWarning conformance/tests/test_implementations.py",
@@ -47,6 +50,7 @@ INVENTORY_RUN_SCRIPT = (
 )
 ACTIVATION_KIT_RUN_SCRIPT = (
     "set -euo pipefail",
+    REVISION_WITNESS,
     *(line.strip() for line in COMBINED_UNITTEST.splitlines()),
 )
 HARD_RUN_CONTRACTS = {
@@ -459,6 +463,22 @@ class ProductCallsite(unittest.TestCase):
     def test_no_separate_inventory_workflow(self):
         self.assertFalse(STANDALONE.exists(), STANDALONE)
 
+    def test_revision_witness_accepts_head_and_rejects_mismatch(self):
+        head = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
+        for label, sha, expected in (
+            ("actual", head, 0),
+            ("mismatch", "0" * 40, 1),
+        ):
+            with self.subTest(label=label):
+                completed = subprocess.run(
+                    ["bash", "-c", REVISION_WITNESS],
+                    cwd=REPO,
+                    env={**os.environ, "GITHUB_SHA": sha},
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, expected)
+
     def test_direct_key_parser_ignores_nested_soft_failure_names(self):
         block = (
             "  scope:\n"
@@ -548,6 +568,13 @@ class ProductCallsite(unittest.TestCase):
             with self.subTest(index=index):
                 with self.assertRaises(AssertionError):
                     assert_combined_unittest(mutated)
+
+    def test_removing_activation_revision_witness_fails(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        mutated = text.replace("          " + REVISION_WITNESS + "\n", "", 1)
+        self.assertNotEqual(mutated, text)
+        with self.assertRaises(AssertionError):
+            assert_combined_unittest(mutated)
 
     def test_activation_kit_step_uses_explicit_bash(self):
         text = CONFORMANCE_YML.read_text(encoding="utf-8")

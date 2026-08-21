@@ -29,6 +29,7 @@ import registry  # noqa: E402
 import run_all  # noqa: E402
 from test_completion_scope import (  # noqa: E402
     REQUIRED_RUN_ALL,
+    REVISION_WITNESS,
     assert_hard_run_command,
     named_job,
     named_step,
@@ -376,6 +377,18 @@ class ProductWorkflow(unittest.TestCase):
         with self.assertRaises(AssertionError):
             assert_hard_run_command(
                 mutated, "scope", "Conformance inventory")
+
+    def test_removing_scope_revision_witness_fails(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        step = named_step(text, "scope", "Conformance inventory")
+        mutated_step = step.replace("          " + REVISION_WITNESS + "\n", "", 1)
+        self.assertNotEqual(mutated_step, step)
+        with self.assertRaises(AssertionError):
+            assert_hard_run_command(
+                text.replace(step, mutated_step, 1),
+                "scope",
+                "Conformance inventory",
+            )
 
     def test_conditional_scope_job_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")

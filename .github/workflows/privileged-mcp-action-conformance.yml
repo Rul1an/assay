@@ -47,6 +47,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           python3 -m unittest \
             conformance/privileged-mcp-action-v0/tests/test_activation_kit.py \
             conformance/privileged-mcp-action-v0/tests/test_oci_candidate_executor.py
