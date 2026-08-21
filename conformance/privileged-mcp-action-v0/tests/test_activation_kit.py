@@ -63,6 +63,37 @@ OCI_IMPLEMENTATION_ID_ENV = "IMPLEMENTATION_ID: ${{ inputs.implementation_id }}"
 OCI_IMPLEMENTATION_ID_ARGV = '--implementation-id "$IMPLEMENTATION_ID"'
 OCI_UPLOAD_STEP = "Upload validated capture"
 USES_SHA_RE = re.compile(r"uses:\s*\S+@([0-9a-f]{40}|[^\s#]+)")
+# Ordered capture-job shape. Env-key sets and the step-name tuple are one table
+# so a skipped setup, extra step, leaked token, or duplicate upload cannot
+# look green by matching a looser presence pin.
+OCI_STEP_ENV_KEYS = {
+    "Check out current main": frozenset(),
+    "Set up Python": frozenset(),
+    "Require trusted main": frozenset(),
+    "Resolve published pack tag": frozenset(),
+    "Download attested pack": frozenset({"GH_TOKEN", "TAG"}),
+    "Verify pack attestation": frozenset({"GH_TOKEN", "TAG"}),
+    "Capture candidate observations": frozenset({"IMPLEMENTATION_ID"}),
+    OCI_UPLOAD_STEP: frozenset(),
+}
+OCI_CAPTURE_STEP_NAMES = tuple(OCI_STEP_ENV_KEYS)
+OCI_CAPTURE_JOB = "capture"
+OCI_TOP_LEVEL_PERMISSIONS = ("contents: read",)
+_STEP_FIELD_KEYS = frozenset(
+    {
+        "name",
+        "id",
+        "if",
+        "env",
+        "run",
+        "uses",
+        "with",
+        "shell",
+        "timeout-minutes",
+        "continue-on-error",
+        "working-directory",
+    }
+)
 
 # Normalized `run:` sequences for the named capture steps. Copied from the
 # committed YAML after joining `\` continuations and collapsing whitespace;
@@ -2089,6 +2120,63 @@ def _named_step_names(text: str) -> list[str]:
     return names
 
 
+def _top_level_mapping_children(text: str, header: str) -> tuple[str, ...]:
+    """Active 2-space lines under column-0 `header:`, or a same-line scalar."""
+    children: list[str] = []
+    in_map = False
+    prefix = f"{header}:"
+    for raw in text.splitlines():
+        stripped = raw.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not raw.startswith(" ") and raw.startswith(prefix):
+            in_map = True
+            scalar = raw[len(prefix) :].strip()
+            if scalar:
+                children.append(scalar)
+            continue
+        if not in_map:
+            continue
+        if raw.startswith("  ") and not raw.startswith("   "):
+            children.append(stripped)
+        elif not raw.startswith(" "):
+            in_map = False
+    return tuple(children)
+
+
+def _top_level_mapping_keys(text: str, header: str) -> tuple[str, ...]:
+    """Document-order keys of a column-0 mapping."""
+    return tuple(child.split(":", 1)[0] for child in _top_level_mapping_children(text, header))
+
+
+def _has_job_level_permissions(text: str) -> bool:
+    """True when a job mapping (exactly 4-space keys) declares `permissions:`."""
+    for raw in text.splitlines():
+        stripped = raw.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if raw.startswith("    permissions:") and not raw.startswith("     "):
+            return True
+    return False
+
+
+def _named_step_env_keys(block: str) -> frozenset[str]:
+    """Active `env:` mapping keys inside one named step block."""
+    keys: set[str] = set()
+    in_env = False
+    for line in _active_lines(block):
+        key = line.split(":", 1)[0]
+        if key == "env":
+            in_env = True
+            continue
+        if not in_env:
+            continue
+        if key in _STEP_FIELD_KEYS:
+            break
+        keys.add(key)
+    return frozenset(keys)
+
+
 def _named_step_block(text: str, name: str) -> str | None:
     """Full named step mapping, from `- name:` through the next sibling step."""
     marker = f"      - name: {name}\n"
@@ -2293,6 +2381,18 @@ def oci_candidate_workflow_problems(text: str) -> list[str]:
         body = _named_step_run_body(text, name)
         if body is None or _normalized_command_sequence(body) != allowed:
             problems.append(f"unexpected run sequence: {name}")
+    if _top_level_mapping_keys(text, "jobs") != (OCI_CAPTURE_JOB,):
+        problems.append("unexpected jobs")
+    if tuple(_named_step_names(text)) != OCI_CAPTURE_STEP_NAMES:
+        problems.append("unexpected step names")
+    if _top_level_mapping_children(text, "permissions") != OCI_TOP_LEVEL_PERMISSIONS:
+        problems.append("unexpected top-level permissions")
+    if _has_job_level_permissions(text):
+        problems.append("job-level permissions")
+    for name, allowed in OCI_STEP_ENV_KEYS.items():
+        block = _named_step_block(text, name)
+        if block is None or _named_step_env_keys(block) != allowed:
+            problems.append(f"unexpected env keys: {name}")
     return problems
 
 
@@ -2562,6 +2662,55 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
                     any(expected in problem for problem in problems),
                     f"expected {expected!r} in {problems}",
                 )
+        capture_job = "  capture:\n"
+        capture_env = "          IMPLEMENTATION_ID: ${{ inputs.implementation_id }}\n"
+        executor_line = f"          python3 {OCI_EXECUTOR} \\\n"
+        shape = (
+            (
+                "job_write_all",
+                capture_job,
+                "  capture:\n    permissions: write-all\n",
+                "job-level permissions",
+            ),
+            (
+                "curl_bash_pre_guard",
+                "    steps:\n",
+                "    steps:\n      - name: Pre-guard\n        run: curl | bash\n",
+                "unexpected step names",
+            ),
+            (
+                "capture_gh_token",
+                capture_env,
+                capture_env + "          GH_TOKEN: ${{ github.token }}\n",
+                "unexpected env keys",
+            ),
+            (
+                "inline_python_direct",
+                executor_line,
+                "          python3 - <<'PY'\n          print(0)\n          PY\n" + executor_line,
+                "inline Python",
+            ),
+        )
+        for kind, needle, replacement, expected in shape:
+            with self.subTest(kind=kind):
+                self.assertIn(needle, text)
+                mutated = text.replace(needle, replacement, 1)
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any(expected in problem for problem in problems),
+                    f"expected {expected!r} in {problems}",
+                )
+        with self.subTest(kind="duplicate_upload_always"):
+            mutated = text + (
+                f"\n      - name: {OCI_UPLOAD_STEP}\n"
+                "        if: always()\n"
+                f"        uses: {OCI_UPLOAD_PIN}\n"
+            )
+            problems = oci_candidate_workflow_problems(mutated)
+            self.assertTrue(
+                any("unexpected step names" in problem for problem in problems),
+                f"expected unexpected step names in {problems}",
+            )
 
 
 if __name__ == "__main__":
