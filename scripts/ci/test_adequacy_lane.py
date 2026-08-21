@@ -13,6 +13,7 @@ import io
 import json
 import contextlib
 import os
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -430,12 +431,14 @@ class MeasurementWorkspaceHygiene(unittest.TestCase):
 
             env = os.environ.copy()
             env["GITHUB_WORKSPACE"] = str(workspace)
+            command = [
+                str(workspace / "target") if arg == "${GITHUB_WORKSPACE}/target" else arg
+                for arg in shlex.split(self._cleanup_command())
+            ]
             subprocess.run(
-                self._cleanup_command(),
+                command,
                 cwd=workspace,
                 env=env,
-                shell=True,
-                executable="/bin/bash",
                 check=True,
                 capture_output=True,
                 text=True,
