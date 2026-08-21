@@ -650,6 +650,57 @@ else
   fail "ci.yml does not actively invoke evidence-vocabulary in the scope job"
 fi
 
+echo "== required CI workflow actively runs published-numbers provenance contract =="
+# Adequacy-drift is not a required context. Without this always-run scope-job
+# caller, required CI can go green after the provenance tests are deleted.
+# This is the only callsite guard: comment-out, ':' neutralization, or deletion
+# of either live command must make this contract red.
+if python3 - "${CI_WF}" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1]).read()
+match = re.search(r"(?ms)^  scope:\n(.*?)(?=^  [a-zA-Z][\w-]*:|\Z)", text)
+if not match:
+    sys.exit("scope job missing from ci.yml")
+section = match.group(1)
+setup_at = section.find("uses: actions/setup-python")
+step_at = section.find("- name: Published-numbers provenance contract")
+if setup_at < 0 or step_at < 0 or step_at < setup_at:
+    sys.exit("provenance-contract step must follow actions/setup-python")
+step = re.search(
+    r"(?m)^      - name: Published-numbers provenance contract\n(?P<body>(?:        .+\n)+)(?:\n*)(?=^      - |\Z)",
+    section,
+)
+if not step:
+    sys.exit("scope job missing 'Published-numbers provenance contract' step")
+body = step.group("body")
+for forbidden in ("if:", "continue-on-error:"):
+    if re.search(rf"(?m)^        {re.escape(forbidden)}", body):
+        sys.exit(f"provenance-contract step must not use {forbidden}")
+active = []
+for line in body.splitlines():
+    if not line.startswith("          "):
+        continue
+    stripped = line.lstrip()
+    if stripped.startswith("#"):
+        continue
+    active.append(stripped)
+required = (
+    "set -euo pipefail",
+    "python3 conformance/tests/test_published_numbers_provenance.py",
+)
+if active != list(required):
+    sys.exit("active provenance step body must be exactly %r, got %r" %
+             (list(required), active))
+sys.exit(0)
+PY
+then
+  ok "ci.yml scope job actively runs the published-numbers provenance contract"
+else
+  fail "ci.yml does not actively invoke the provenance contract in the scope job"
+fi
+
 if [[ "${failures}" -ne 0 ]]; then
   echo "ci-hardening-b1 contract: ${failures} failure(s)" >&2
   exit 1

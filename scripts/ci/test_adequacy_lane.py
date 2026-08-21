@@ -343,5 +343,41 @@ class LiveTree(unittest.TestCase):
         )
 
 
+
+class CheckDriftProvenanceTransport(unittest.TestCase):
+    """The check-drift job must fetch history or the exact commit, never a branch."""
+
+    WORKFLOW = REPO_ROOT / ".github/workflows/adequacy-drift.yml"
+
+    def _check_drift_job(self) -> str:
+        text = self.WORKFLOW.read_text(encoding="utf-8")
+        marker = "name: Adequacy drift gate"
+        start = text.index(marker)
+        return text[start:]
+
+    def test_check_drift_checkout_is_not_shallow(self):
+        """The gate's checkout used to be depth-1; a missing measured_at then skipped."""
+        job = self._check_drift_job()
+        checkout = job.split("uses: actions/checkout", 1)[1]
+        # First checkout block in this job.
+        self.assertIn("fetch-depth: 0", checkout.split("\n- ")[0])
+
+    def test_check_drift_does_not_substitute_a_branch_for_the_commit(self):
+        job = self._check_drift_job()
+        self.assertNotIn("origin/main", job)
+        self.assertNotIn("git fetch origin main", job)
+        self.assertNotIn("refs/heads/main", job)
+
+    def test_checker_step_has_no_continue_on_error(self):
+        job = self._check_drift_job()
+        self.assertIn("python3 conformance/adequacy/check_published_numbers.py", job)
+        self.assertNotIn("continue-on-error:", job)
+
+    def test_check_drift_does_not_fetch_commits_from_results_json(self):
+        job = self._check_drift_job()
+        self.assertNotIn("Fetch recorded measurement commits", job)
+        self.assertNotIn("git fetch", job)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

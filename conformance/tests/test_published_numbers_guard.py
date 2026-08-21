@@ -56,7 +56,7 @@ def sandbox():
         for manifest in (REPO / "conformance/adequacy").glob("*.manifest.json"):
             shutil.copy2(manifest, adequacy / manifest.name)
 
-        saved = (chk.REPO, chk.ADEQUACY, chk.RESULTS, chk.DOCUMENTS)
+        saved = (chk.REPO, chk.ADEQUACY, chk.RESULTS, chk.DOCUMENTS, chk.GIT_REPO)
         chk.REPO = root
         chk.ADEQUACY = adequacy
         chk.RESULTS = adequacy / "results.json"
@@ -65,7 +65,7 @@ def sandbox():
         try:
             yield root
         finally:
-            chk.REPO, chk.ADEQUACY, chk.RESULTS, chk.DOCUMENTS = saved
+            chk.REPO, chk.ADEQUACY, chk.RESULTS, chk.DOCUMENTS, chk.GIT_REPO = saved
 
 
 def edit(path: Path, old: str, new: str) -> None:

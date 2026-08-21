@@ -112,7 +112,9 @@ jobs:
       # derivation that has silently stopped refusing would gate this lane open.
       - name: Self-test the lane helpers
         # sys.path[0] is the script's own directory, so the two helpers import from repo root too.
-        run: python3 scripts/ci/test_adequacy_lane.py
+        run: |
+          python3 scripts/ci/test_adequacy_lane.py
+          python3 conformance/tests/test_published_numbers_provenance.py
 
       - name: Derive relevance
         id: plan
@@ -332,6 +334,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+          fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0

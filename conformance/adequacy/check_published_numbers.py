@@ -76,6 +76,9 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+# Object database for freshness. File reads use REPO; a sandbox may point
+# those at a copy, but git must still see the real commits.
+GIT_REPO = REPO
 ADEQUACY = REPO / "conformance/adequacy"
 RESULTS = ADEQUACY / "results.json"
 
@@ -114,6 +117,135 @@ _WORD_RE = re.compile(r"\b(%s)\b" % "|".join(sorted(_WORDS, key=len, reverse=Tru
 # An expression is arithmetic over the measured row. Anything else is refused
 # rather than evaluated: this file runs in CI over repository content.
 _EXPR_OK = re.compile(r"^[A-Za-z0-9_+\-*/(). ,]+$")
+
+COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+MALFORMED = "malformed"
+UNREACHABLE = "unreachable"
+DIRTY = "dirty"
+CLEAN = "clean"
+_GIT_TIMEOUT = 30
+
+
+def is_canonical_dependency(path) -> bool:
+    """True iff path is a canonical non-empty repository-relative path.
+
+    Rejects git pathspec magic (a leading colon), absolute paths, ``..``,
+    empty segments, control characters, and backslashes. This is intentionally
+    lexical: resolving through the working tree would let a symlink answer a
+    different question than the literal path later passed to Git.
+    """
+    if not isinstance(path, str) or path == "":
+        return False
+    if path.startswith(":"):
+        return False
+    if "\\" in path:
+        return False
+    if any(ord(char) < 32 or ord(char) == 127 for char in path):
+        return False
+    if path.startswith("/") or Path(path).is_absolute():
+        return False
+    parts = path.split("/")
+    if any(part == "" or part == "." or part == ".." for part in parts):
+        return False
+    return True
+
+
+def git_tree_entry_kind(repo: Path, revision: str, path: str) -> str | None:
+    """Classify one literal path in one Git tree without materializing it.
+
+    ``None`` means the tree could not be inspected. ``absent`` is distinct from
+    an inspection failure so a regular add/delete can be accepted while a name
+    absent at both endpoints cannot become a false-clean empty diff.
+    """
+    try:
+        entry = subprocess.run(
+            ["git", "-C", str(repo), "--literal-pathspecs", "ls-tree", "-z",
+             revision, "--", path],
+            capture_output=True,
+            timeout=_GIT_TIMEOUT,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if entry.returncode != 0:
+        return None
+    records = [record for record in entry.stdout.split(b"\0") if record]
+    if not records:
+        return "absent"
+    if len(records) != 1:
+        return "nonregular"
+    meta, separator, raw_name = records[0].partition(b"\t")
+    if not separator:
+        return "nonregular"
+    try:
+        mode, object_type, _object_id = meta.decode("ascii").split()
+        name = raw_name.decode("utf-8")
+    except (UnicodeDecodeError, ValueError):
+        return "nonregular"
+    if name != path:
+        return "nonregular"
+    if object_type == "blob" and mode in ("100644", "100755"):
+        return "regular"
+    return "nonregular"
+
+
+def classify_measured_commit(commit, depends_on, repo: Path) -> tuple[str, list[str]]:
+    """Classify one recorded measurement commit. Unresolved is never clean.
+
+    Only a lowercase 40-hex string is offered to git. Everything else is
+    malformed, including names git would resolve (HEAD, origin/main) and
+    strings that look like flags (-n). Each depends_on entry must be a
+    canonical repository-relative path; pathspec magic is malformed.
+    """
+    if not isinstance(commit, str) or not COMMIT_RE.fullmatch(commit):
+        return MALFORMED, []
+    if depends_on is None:
+        paths_in = []
+    elif isinstance(depends_on, (list, tuple)):
+        paths_in = list(depends_on)
+    else:
+        return MALFORMED, [depends_on]
+    paths = []
+    for raw in paths_in:
+        if not is_canonical_dependency(raw):
+            return MALFORMED, [raw] if isinstance(raw, str) else []
+        paths.append(raw)
+    repo_s = str(repo)
+    try:
+        probe = subprocess.run(
+            ["git", "-C", repo_s, "cat-file", "-e", commit + "^{commit}"],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return UNREACHABLE, []
+    if probe.returncode != 0:
+        return UNREACHABLE, []
+    for path in paths:
+        measured_kind = git_tree_entry_kind(repo, commit, path)
+        head_kind = git_tree_entry_kind(repo, "HEAD", path)
+        if measured_kind is None or head_kind is None:
+            return UNREACHABLE, []
+        if "nonregular" in (measured_kind, head_kind):
+            return MALFORMED, [path]
+        if measured_kind == "absent" and head_kind == "absent":
+            return MALFORMED, [path]
+    try:
+        moved = subprocess.run(
+            ["git", "-C", repo_s, "--literal-pathspecs",
+             "diff", "--name-only", commit, "HEAD", "--", *paths],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return UNREACHABLE, []
+    if moved.returncode != 0:
+        return UNREACHABLE, []
+    changed = [ln for ln in moved.stdout.splitlines() if ln.strip()]
+    if changed:
+        return DIRTY, changed
+    return CLEAN, []
 
 
 def normalise(text: str) -> str:
@@ -251,18 +383,29 @@ def check() -> list[str]:
             findings.append("%s records no measured_at commit, so nothing can say whether its "
                             "number is still current for this code" % name)
             continue
-        moved = subprocess.run(
-            ["git", "-C", str(REPO), "diff", "--name-only", taken["commit"], "HEAD", "--",
-             *taken.get("depends_on", [])],
-            capture_output=True, text=True)
-        if moved.returncode != 0:
-            continue          # shallow clone or unknown commit: not a claim either way
-        changed = [ln for ln in moved.stdout.splitlines() if ln.strip()]
-        if changed:
+        kind, extra = classify_measured_commit(
+            taken["commit"], taken.get("depends_on", []), GIT_REPO)
+        if kind == MALFORMED:
+            if extra:
+                findings.append(
+                    "%s records a malformed depends_on path; a freshness claim "
+                    "cannot be made from %r" % (name, extra[0]))
+            else:
+                findings.append(
+                    "%s records a malformed measured_at.commit; a freshness claim "
+                    "cannot be made from %r" % (name, taken["commit"]))
+        elif kind == UNREACHABLE:
+            shown = taken["commit"]
+            if isinstance(shown, str) and COMMIT_RE.fullmatch(shown):
+                shown = shown[:9]
+            findings.append(
+                "%s was measured at %s which cannot be resolved in this checkout, "
+                "so freshness is unavailable rather than clean" % (name, shown))
+        elif kind == DIRTY:
             findings.append(
                 "%s was measured at %s and %s changed since, so the published number describes "
                 "code this revision no longer has. Re-run measure_all.py --only %s"
-                % (name, taken["commit"][:9], ", ".join(sorted(changed)[:3]), name))
+                % (name, taken["commit"][:9], ", ".join(sorted(extra)[:3]), name))
 
     # ---- 2. tool pin ------------------------------------------------------
     for name, path in sorted(on_disk.items()):
