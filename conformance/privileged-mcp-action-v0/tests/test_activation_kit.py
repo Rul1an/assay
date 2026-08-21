@@ -78,6 +78,7 @@ OCI_STEP_ENV_KEYS = {
 }
 OCI_CAPTURE_STEP_NAMES = tuple(OCI_STEP_ENV_KEYS)
 OCI_CAPTURE_JOB = "capture"
+OCI_CAPTURE_JOB_KEYS = ("runs-on", "timeout-minutes", "steps")
 OCI_TOP_LEVEL_PERMISSIONS = ("contents: read",)
 _STEP_FIELD_KEYS = frozenset(
     {
@@ -2160,6 +2161,26 @@ def _has_job_level_permissions(text: str) -> bool:
     return False
 
 
+def _job_mapping_keys(text: str, job: str) -> tuple[str, ...]:
+    """Document-order 4-space keys under the `  {job}:` mapping."""
+    keys: list[str] = []
+    in_job = False
+    for raw in text.splitlines():
+        stripped = raw.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if raw.startswith("  ") and not raw.startswith("   "):
+            in_job = stripped.split(":", 1)[0] == job
+            continue
+        if not in_job:
+            continue
+        if raw.startswith("    ") and not raw.startswith("     "):
+            keys.append(stripped.split(":", 1)[0])
+        elif not raw.startswith(" "):
+            in_job = False
+    return tuple(keys)
+
+
 def _named_step_env_keys(block: str) -> frozenset[str]:
     """Active `env:` mapping keys inside one named step block."""
     keys: set[str] = set()
@@ -2383,6 +2404,8 @@ def oci_candidate_workflow_problems(text: str) -> list[str]:
             problems.append(f"unexpected run sequence: {name}")
     if _top_level_mapping_keys(text, "jobs") != (OCI_CAPTURE_JOB,):
         problems.append("unexpected jobs")
+    if _job_mapping_keys(text, OCI_CAPTURE_JOB) != OCI_CAPTURE_JOB_KEYS:
+        problems.append("unexpected capture job keys")
     if tuple(_named_step_names(text)) != OCI_CAPTURE_STEP_NAMES:
         problems.append("unexpected step names")
     if _top_level_mapping_children(text, "permissions") != OCI_TOP_LEVEL_PERMISSIONS:
@@ -2670,7 +2693,13 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
                 "job_write_all",
                 capture_job,
                 "  capture:\n    permissions: write-all\n",
-                "job-level permissions",
+                "unexpected capture job keys",
+            ),
+            (
+                "job_env_token",
+                capture_job,
+                "  capture:\n    env:\n      GH_TOKEN: ${{ github.token }}\n",
+                "unexpected capture job keys",
             ),
             (
                 "curl_bash_pre_guard",
