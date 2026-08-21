@@ -258,7 +258,7 @@ class ControlsOnCoverageAndPinning(unittest.TestCase):
             manifest = root / "conformance/adequacy/rge-bench.manifest.json"
             keep = manifest.read_bytes()
             manifest.unlink()
-            self.assert_red("is not a readable regular file")
+            self.assert_red("indexed manifest is not present")
             manifest.write_bytes(keep)
             self.assertEqual(chk.check(), [])
 

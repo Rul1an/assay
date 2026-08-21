@@ -145,6 +145,18 @@ def _lexical_path(base: Path, raw: str) -> Path:
     return Path(os.path.normpath(str(base / raw)))
 
 
+def _indexed_manifest_path(repo: Path, relative: str) -> Path:
+    """Select a manifest from fixed-root discovery; never construct a path from row input."""
+    discovered = {
+        path.relative_to(repo).as_posix(): path
+        for path in (repo / "conformance/adequacy").glob("*.manifest.json")
+    }
+    try:
+        return discovered[relative]
+    except KeyError as exc:
+        raise ValueError("indexed manifest is not present under conformance/adequacy") from exc
+
+
 def declared_external_paths(
     manifest_path: Path, repo: Path, declared: dict
 ) -> list[tuple[str, Path]]:
@@ -285,7 +297,7 @@ def _validate_current_row(row: dict, reports: dict, repo: Path) -> None:
     manifest_rel = _dependencies([row.get("manifest")])[0]
     if report.get("manifest") != manifest_rel:
         raise ValueError("producer manifest differs from the repository-relative row identity")
-    manifest_path = _lexical_path(repo, manifest_rel)
+    manifest_path = _indexed_manifest_path(repo, manifest_rel)
     manifest_data = read_regular_file(manifest_path)
     declared = _parse_json_bytes(manifest_data, str(manifest_path))
     if _digest(manifest_data) != report["manifest_sha256"]:
