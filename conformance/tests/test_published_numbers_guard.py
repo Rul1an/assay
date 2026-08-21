@@ -89,8 +89,19 @@ def edit(path: Path, old: str, new: str) -> None:
 class ProjectionTemplateContract(unittest.TestCase):
     @staticmethod
     def template(body: str) -> str:
+        bound = []
+        for line in body.split("\n"):
+            prefixes = {
+                match.group(1).rsplit(".", 1)[0] for match in project.TOKEN.finditer(line)
+            }
+            binding = (
+                "<!-- adequacy-bind:%s -->" % next(iter(prefixes))
+                if len(prefixes) == 1
+                else ""
+            )
+            bound.append(line + binding)
         return (
-            body
+            "\n".join(bound)
             + "\n<!-- BEGIN CHECKED NUMBERS -->\n```json\n"
             + '{"not_derived": []}'
             + "\n```\n<!-- END CHECKED NUMBERS -->\n"
@@ -188,7 +199,7 @@ class ProjectionTemplateContract(unittest.TestCase):
             template.write_text(
                 self.template(
                     "{{aggregate.measured:word-title}} measured, "
-                    "{{aggregate.control_only:word}}, "
+                    "{{aggregate.control_only:word}},\n"
                     "{{demo.in_scope:word}} rules, {{demo.score_percent:compact}}%"
                 ),
                 encoding="utf-8",
@@ -203,7 +214,7 @@ class ProjectionTemplateContract(unittest.TestCase):
                         "demo.score_percent": 60.0,
                     },
                 ),
-                self.template("Four measured, one, twenty-five rules, 60%"),
+                self.template("Four measured, one,\ntwenty-five rules, 60%"),
             )
 
     def test_unknown_and_null_tokens_fail_closed(self):
@@ -357,6 +368,13 @@ class ControlsOnThePublicProjection(unittest.TestCase):
             self.assert_red("differs from its fresh deterministic projection")
             shutil.copy2(REPO / "conformance/adequacy/results.json", res)
             self.assertEqual(chk.check(), [])
+
+    def test_a_valid_token_from_another_corpus_is_red(self):
+        """CONTROL: a valid value must remain bound to the claim it describes."""
+        with sandbox() as root:
+            template = root / "conformance/INDEX.md.in"
+            edit(template, "{{mcp-jsonrpc-id.killed}}", "{{rge-bench.killed}}")
+            self.assert_red("is bound to mcp-jsonrpc-id")
 
     def test_a_hand_edited_generated_document_is_red(self):
         """CONTROL: mutate fresh output without carrying a hard-coded current score."""

@@ -14,6 +14,7 @@ import published_rows
 
 MAX_TEMPLATE_BYTES = 1024 * 1024
 TOKEN = re.compile(r"\{\{([a-z0-9_.-]+)(?::([a-z-]+))?\}\}")
+BINDING = re.compile(r"<!-- adequacy-bind:([a-z0-9_.-]+) -->")
 BEGIN = "<!-- BEGIN CHECKED NUMBERS -->"
 END = "<!-- END CHECKED NUMBERS -->"
 PUBLIC_FIELDS = (
@@ -73,6 +74,23 @@ def format_value(value: object, style: str | None) -> str:
 
 def render_template(template: Path, values: dict[str, object]) -> str:
     source, _metadata, _body = template_parts(template)
+    # Claim context is explicit in the authored template and never leaks into output.
+    for number, line in enumerate(source.splitlines(), 1):
+        tokens = list(TOKEN.finditer(line))
+        if not tokens:
+            continue
+        bindings = BINDING.findall(line)
+        if len(bindings) != 1:
+            raise ValueError(
+                "%s:%d token line needs exactly one adequacy binding" % (template.name, number)
+            )
+        bound = bindings[0]
+        for token in tokens:
+            if not token.group(1).startswith(bound + "."):
+                raise ValueError(
+                    "%s:%d token %s is bound to %s"
+                    % (template.name, number, token.group(1), bound)
+                )
 
     def replace(match: re.Match[str]) -> str:
         name = match.group(1)
@@ -80,7 +98,7 @@ def render_template(template: Path, values: dict[str, object]) -> str:
             raise ValueError("template token %s has no non-null publication value" % name)
         return format_value(values[name], match.group(2))
 
-    rendered = TOKEN.sub(replace, source)
+    rendered = BINDING.sub("", TOKEN.sub(replace, source))
     if "{{" in rendered or "}}" in rendered:
         raise ValueError("template carries an unresolved or malformed token")
     return rendered
