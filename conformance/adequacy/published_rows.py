@@ -262,6 +262,13 @@ def _validate_subject(value: object) -> dict:
     return value
 
 
+def _validate_manifest_report_binding(declared: dict, report: dict) -> None:
+    if declared.get("runner", "module") != report["runner"]:
+        raise ValueError("runner differs between manifest and producer report")
+    if report["diagnostic_channel_declared"] != (declared.get("diagnostic_from") is not None):
+        raise ValueError("diagnostic channel differs between manifest and producer report")
+
+
 def project_report(
     manifest_path: Path, report: dict, encoded_report: bytes, *, corpus: str,
     manifest: str, measured_commit: str, depends_on: list[str], subject: dict,
@@ -277,10 +284,7 @@ def project_report(
     declared = parse_json_object(manifest_data, str(manifest_path))
     if report.get("manifest") != manifest:
         raise ValueError("producer manifest differs from the repository-relative row identity")
-    if declared.get("runner", "module") != report["runner"]:
-        raise ValueError("runner differs between manifest and producer report")
-    if report["diagnostic_channel_declared"] != (declared.get("diagnostic_from") is not None):
-        raise ValueError("diagnostic channel differs between manifest and producer report")
+    _validate_manifest_report_binding(declared, report)
     if report["manifest_sha256"] != _digest(manifest_data):
         raise ValueError("manifest_sha256 does not address the exact manifest bytes")
     if not isinstance(measured_commit, str) or not HEX40.fullmatch(measured_commit):
@@ -340,8 +344,7 @@ def _validate_current_row(row: dict, reports: dict, repo: Path) -> None:
     declared = parse_json_object(manifest_data, str(manifest_path))
     if _digest(manifest_data) != report["manifest_sha256"]:
         raise ValueError("manifest_sha256 does not address the indexed manifest")
-    if declared.get("runner", "module") != report["runner"]:
-        raise ValueError("runner differs between indexed manifest and producer report")
+    _validate_manifest_report_binding(declared, report)
     measured = row.get("measured_at")
     if not isinstance(measured, dict) or not isinstance(measured.get("commit"), str):
         raise ValueError("measured_at must name a commit and dependencies")

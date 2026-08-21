@@ -464,6 +464,23 @@ class CurrentResultsDocument(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "control"):
                 published_rows.load_results(path)
 
+    def test_stored_diagnostic_channel_must_match_the_manifest(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path, document, encoded = self.write_current(Path(raw))
+            old_digest = sha256(encoded)
+            producer = json.loads(document["reports"].pop(old_digest))
+            producer["diagnostic_channel_declared"] = True
+            changed = report_bytes(producer)
+            new_digest = sha256(changed)
+            document["reports"][new_digest] = changed.decode("utf-8")
+            row = document["corpora"][0]
+            row["report_sha256"] = new_digest
+            row["report_ref"] = "#/reports/%s" % new_digest
+            row["diagnostic_channel_declared"] = True
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "diagnostic channel differs"):
+                published_rows.load_results(path)
+
     def test_unaddressed_report_bytes_are_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
             path, document, _ = self.write_current(Path(raw))
