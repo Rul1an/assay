@@ -598,6 +598,8 @@ required = (
     "bash scripts/ci/check-assay-release-pin.sh --published",
     "bash scripts/ci/test-ci-hardening-b1.sh",
     "bash scripts/ci/test-structurizr-export-docker.sh",
+    "python3 scripts/ci/check-conformance-inventory-callsite.py",
+    "python3 scripts/ci/test-conformance-inventory-callsite.py",
 )
 missing = [cmd for cmd in required if cmd not in active]
 if missing:
@@ -701,21 +703,6 @@ then
   ok "ci.yml scope job actively runs the published-numbers projection contract"
 else
   fail "ci.yml does not actively invoke the published-numbers projection contract"
-fi
-
-echo "== required CI pins the conformance inventory callsite from outside its step =="
-# The inventory tests already encode this contract, but they execute inside the
-# step they guard. Deleting that step would leave required CI green unless this
-# later root calls the same rule.
-if python3 "${ROOT}/scripts/ci/check-conformance-inventory-callsite.py"; then
-  ok "live conformance inventory callsite matches the hard-run contract"
-else
-  fail "live conformance inventory callsite failed the later required-CI checker"
-fi
-if python3 "${ROOT}/scripts/ci/test-conformance-inventory-callsite.py"; then
-  ok "conformance inventory callsite mutations fail independently"
-else
-  fail "conformance inventory callsite mutation contract failed"
 fi
 
 if [[ "${failures}" -ne 0 ]]; then

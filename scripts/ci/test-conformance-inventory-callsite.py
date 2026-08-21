@@ -5,7 +5,8 @@
 
 The inventory tests already encode this contract, but they execute inside the
 step they guard. These mutations therefore target the later required-CI
-checker, not the in-step suite. The live workflow file is never written.
+checker and the workflow calls that invoke it. The live workflow is never
+written. Command literals here are an independent oracle, not an import.
 """
 
 from __future__ import annotations
@@ -19,19 +20,31 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "conformance/tests"))
 
-from test_completion_scope import (  # noqa: E402
-    INVENTORY_RUN_SCRIPT,
-    REQUIRED_RUN_ALL,
-    named_step,
-)
+from test_completion_scope import _active_run_lines, named_step  # noqa: E402
 
 CHECKER_PATH = REPO / "scripts/ci/check-conformance-inventory-callsite.py"
 B1_PATH = REPO / "scripts/ci/test-ci-hardening-b1.sh"
 CI_YML = REPO / ".github/workflows/ci.yml"
 JOB = "scope"
-STEP = "Conformance inventory"
-CHECKER_PATH_TOKEN = "scripts/ci/check-conformance-inventory-callsite.py"
-TEST_PATH_TOKEN = "scripts/ci/test-conformance-inventory-callsite.py"
+INVENTORY_STEP = "Conformance inventory"
+
+# Independent oracle. Do not import the completion-scope run-script tuple.
+REQUIRED_INVENTORY_COMMANDS = (
+    "set -euo pipefail",
+    'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"',
+    "python3 conformance/registry.py",
+    "python3 conformance/implementations.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_implementations.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_pma_v0_registration.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_registry.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_run_all.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py",
+    "python3 conformance/run_all.py --require-complete --completion-scope required",
+)
+HARDENING_GUARD_COMMANDS = (
+    "python3 scripts/ci/check-conformance-inventory-callsite.py",
+    "python3 scripts/ci/test-conformance-inventory-callsite.py",
+)
 
 
 def load_checker():
@@ -43,27 +56,48 @@ def load_checker():
         raise AssertionError("checker is not loadable")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    checker = getattr(module, "conformance_inventory_callsite_problems", None)
-    if not callable(checker):
+    problems_fn = getattr(module, "conformance_inventory_callsite_problems", None)
+    guards_fn = getattr(module, "hardening_guard_callsite_problems", None)
+    if not callable(problems_fn):
         raise AssertionError("conformance_inventory_callsite_problems missing")
-    return checker
+    if not callable(guards_fn):
+        raise AssertionError("hardening_guard_callsite_problems missing")
+    return problems_fn, guards_fn
 
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def neutralize(text: str, command: str, mode: str) -> str:
+    needle = f"          {command}\n"
+    if needle not in text:
+        raise AssertionError(f"missing live command {command!r}")
+    if mode == "remove":
+        replacement = ""
+    elif mode == "comment":
+        replacement = f"          # {command}\n"
+    elif mode == "colon":
+        replacement = "          :\n"
+    else:
+        raise AssertionError(f"unknown neutralize mode {mode!r}")
+    mutated = text.replace(needle, replacement, 1)
+    if mutated == text:
+        raise AssertionError(f"{mode} mutation of {command!r} was a no-op")
+    return mutated
+
+
 def delete_step(text: str) -> str:
-    step = named_step(text, JOB, STEP)
+    step = named_step(text, JOB, INVENTORY_STEP)
     mutated = text.replace(step, "", 1)
-    if mutated == text or f"      - name: {STEP}\n" in mutated:
+    if mutated == text or f"      - name: {INVENTORY_STEP}\n" in mutated:
         raise AssertionError("delete-step mutation was a no-op")
     return mutated
 
 
 def rename_step(text: str) -> str:
     mutated = text.replace(
-        f"      - name: {STEP}\n",
+        f"      - name: {INVENTORY_STEP}\n",
         "      - name: Inventory conformance\n",
         1,
     )
@@ -73,30 +107,10 @@ def rename_step(text: str) -> str:
 
 
 def false_if(text: str) -> str:
-    needle = f"      - name: {STEP}\n"
+    needle = f"      - name: {INVENTORY_STEP}\n"
     mutated = text.replace(needle, needle + "        if: false\n", 1)
     if mutated == text:
         raise AssertionError("if:false mutation was a no-op")
-    return mutated
-
-
-def comment_live_commands(text: str) -> str:
-    mutated = text
-    for command in INVENTORY_RUN_SCRIPT[1:]:
-        needle = f"          {command}\n"
-        if needle not in mutated:
-            raise AssertionError(f"missing live command {command!r}")
-        mutated = mutated.replace(needle, f"          # {command}\n", 1)
-    if mutated == text:
-        raise AssertionError("comment mutation was a no-op")
-    return mutated
-
-
-def colon_one_command(text: str) -> str:
-    needle = f"          {REQUIRED_RUN_ALL}\n"
-    mutated = text.replace(needle, "          :\n", 1)
-    if mutated == text:
-        raise AssertionError("colon mutation was a no-op")
     return mutated
 
 
@@ -113,12 +127,10 @@ def reorder_one_command(text: str) -> str:
     return mutated
 
 
-MUTATIONS = (
+STRUCTURAL_MUTATIONS = (
     ("delete_step", delete_step),
     ("rename_step", rename_step),
     ("false_if", false_if),
-    ("comment_live_commands", comment_live_commands),
-    ("colon_one_command", colon_one_command),
     ("reorder_one_command", reorder_one_command),
 )
 
@@ -128,30 +140,68 @@ class ConformanceInventoryCallsite(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.live = CI_YML.read_text(encoding="utf-8")
         cls.live_digest = sha256_text(cls.live)
-        cls.problems_fn = staticmethod(load_checker())
+        problems_fn, guards_fn = load_checker()
+        cls.problems_fn = staticmethod(problems_fn)
+        cls.guards_fn = staticmethod(guards_fn)
 
     def tearDown(self) -> None:
         current = CI_YML.read_text(encoding="utf-8")
         self.assertEqual(sha256_text(current), self.live_digest)
         self.assertEqual(current, self.live)
 
+    def test_command_table_is_not_an_import_of_the_completion_scope_tuple(self) -> None:
+        imported = [
+            line
+            for line in Path(__file__).read_text(encoding="utf-8").splitlines()
+            if "import" in line and "test_completion_scope" in line
+        ]
+        joined = "\n".join(imported)
+        self.assertNotIn("INVENTORY_" + "RUN_SCRIPT", joined)
+        self.assertNotIn("REQUIRED_" + "RUN_ALL", joined)
+
     def test_pristine_workflow_is_green(self) -> None:
         self.assertEqual(self.problems_fn(self.live), [])
+        self.assertEqual(self.guards_fn(self.live), [])
 
-    def test_each_mutation_fails_independently(self) -> None:
+    def test_live_inventory_step_matches_independent_literals(self) -> None:
+        step = named_step(self.live, JOB, INVENTORY_STEP)
+        self.assertEqual(tuple(_active_run_lines(step)), REQUIRED_INVENTORY_COMMANDS)
+
+    def test_structural_mutations_fail_independently(self) -> None:
         self.assertEqual(self.problems_fn(self.live), [])
-        for label, mutate in MUTATIONS:
+        for label, mutate in STRUCTURAL_MUTATIONS:
             with self.subTest(label=label):
-                mutated = mutate(self.live)
-                self.assertNotEqual(mutated, self.live)
-                problems = self.problems_fn(mutated)
-                self.assertTrue(
-                    problems,
-                    f"{label} must fail the later required-CI checker",
-                )
+                problems = self.problems_fn(mutate(self.live))
+                self.assertTrue(problems, f"{label} must fail the later checker")
         self.assertEqual(self.problems_fn(self.live), [])
 
-    def test_b1_actively_invokes_checker_and_mutations(self) -> None:
+    def test_each_required_command_neutralization_fails(self) -> None:
+        self.assertEqual(self.problems_fn(self.live), [])
+        for command in REQUIRED_INVENTORY_COMMANDS:
+            for mode in ("remove", "comment", "colon"):
+                with self.subTest(command=command, mode=mode):
+                    problems = self.problems_fn(
+                        neutralize(self.live, command, mode))
+                    self.assertTrue(
+                        problems,
+                        f"{mode} {command!r} must fail the later checker",
+                    )
+        self.assertEqual(self.problems_fn(self.live), [])
+
+    def test_hardening_guard_call_neutralization_fails(self) -> None:
+        self.assertEqual(self.guards_fn(self.live), [])
+        for command in HARDENING_GUARD_COMMANDS:
+            for mode in ("remove", "comment", "colon"):
+                with self.subTest(command=command, mode=mode):
+                    problems = self.guards_fn(
+                        neutralize(self.live, command, mode))
+                    self.assertTrue(
+                        problems,
+                        f"{mode} {command!r} must fail the workflow-call pin",
+                    )
+        self.assertEqual(self.guards_fn(self.live), [])
+
+    def test_b1_pins_the_exact_hardening_guard_commands(self) -> None:
         text = B1_PATH.read_text(encoding="utf-8")
         active = [
             line
@@ -159,16 +209,8 @@ class ConformanceInventoryCallsite(unittest.TestCase):
             if line.strip() and not line.lstrip().startswith("#")
         ]
         joined = "\n".join(active)
-        self.assertIn(CHECKER_PATH_TOKEN, joined)
-        self.assertIn(TEST_PATH_TOKEN, joined)
-        self.assertTrue(
-            any("python3" in line and CHECKER_PATH_TOKEN in line for line in active),
-            "B1 must actively invoke the live callsite checker",
-        )
-        self.assertTrue(
-            any("python3" in line and TEST_PATH_TOKEN in line for line in active),
-            "B1 must actively invoke the callsite mutation tests",
-        )
+        for command in HARDENING_GUARD_COMMANDS:
+            self.assertIn(f'"{command}"', joined)
 
 
 if __name__ == "__main__":
