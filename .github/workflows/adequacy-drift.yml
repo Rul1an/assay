@@ -208,7 +208,7 @@ jobs:
       # output, including dependency artifacts outside workspace packages, must
       # not be mistaken for governed source input.
       - name: Remove restored build outputs before bounded materialization
-        run: cargo clean
+        run: cargo clean --target-dir "${GITHUB_WORKSPACE}/target"
 
       # The tool is not vendored (INDEX.md, "Where the adequacy tool lives"): `measure_all.py`
       # imports it from `<repo>/../corpus-adequacy` and reads `git -C <tool> rev-parse HEAD` to
