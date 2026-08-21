@@ -46,6 +46,10 @@ RELEASE_WORKFLOW = (
 OCI_CANDIDATE_WORKFLOW = (
     REPO_ROOT / ".github/workflows/privileged-mcp-action-oci-candidate.yml"
 )
+CONFORMANCE_WORKFLOW = (
+    REPO_ROOT / ".github/workflows/privileged-mcp-action-conformance.yml"
+)
+OCI_WORKFLOW_PATH = ".github/workflows/privileged-mcp-action-oci-candidate.yml"
 OCI_CHECKOUT_PIN = "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
 OCI_SETUP_PYTHON_PIN = "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"
 OCI_UPLOAD_PIN = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
@@ -79,6 +83,32 @@ OCI_STEP_ENV_KEYS = {
 OCI_CAPTURE_STEP_NAMES = tuple(OCI_STEP_ENV_KEYS)
 OCI_CAPTURE_JOB = "capture"
 OCI_CAPTURE_JOB_KEYS = ("runs-on", "timeout-minutes", "steps")
+OCI_DOCUMENT_KEYS = ("name", "on", "permissions", "concurrency", "jobs")
+OCI_TAG_BINDING = "TAG: ${{ steps.candidate.outputs.tag }}"
+OCI_ARTIFACT_NAME = "name: candidate-capture-v0"
+OCI_STEP_KEYS = {
+    "Check out current main": ("name", "uses", "with"),
+    "Set up Python": ("name", "uses", "with"),
+    "Require trusted main": ("name", "run"),
+    "Resolve published pack tag": ("name", "id", "run"),
+    "Download attested pack": ("name", "env", "run"),
+    "Verify pack attestation": ("name", "env", "run"),
+    "Capture candidate observations": ("name", "env", "run"),
+    OCI_UPLOAD_STEP: ("name", "if", "uses", "with"),
+}
+OCI_STEP_WITH_KEYS = {
+    "Check out current main": ("persist-credentials", "ref"),
+    "Set up Python": ("python-version",),
+    OCI_UPLOAD_STEP: ("name", "path", "if-no-files-found", "retention-days"),
+}
+CONFORMANCE_REQUIRED_PATHS = (
+    "conformance/privileged-mcp-action-v0/**",
+    ".github/actions/privileged-mcp-action-conformance/**",
+    ".github/workflows/privileged-mcp-action-conformance.yml",
+    ".github/workflows/privileged-mcp-action-pack-release.yml",
+    OCI_WORKFLOW_PATH,
+    "scripts/ci/check_clean_room_pack_reachable.py",
+)
 OCI_TOP_LEVEL_PERMISSIONS = ("contents: read",)
 _STEP_FIELD_KEYS = frozenset(
     {
@@ -2111,6 +2141,85 @@ def _active_lines(text: str) -> list[str]:
     return lines
 
 
+def _keys_at_indent(
+    block: str, indent: int, *, under: str | None = None
+) -> tuple[str, ...]:
+    """Active mapping keys at exactly `indent` spaces. One allowlist extractor.
+
+    `under` limits collection to children of that parent key (parent at indent-2).
+    """
+    keys: list[str] = []
+    parent_indent = indent - 2
+    in_under = under is None
+    key_prefix = " " * indent
+    parent_prefix = " " * parent_indent if parent_indent >= 0 else ""
+    for raw in block.splitlines():
+        stripped = raw.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if under is not None:
+            if parent_indent <= 0:
+                at_parent = not raw.startswith(" ")
+            else:
+                at_parent = raw.startswith(parent_prefix) and not raw.startswith(
+                    parent_prefix + " "
+                )
+            if at_parent:
+                in_under = stripped.split(":", 1)[0] == under
+                continue
+        if not in_under:
+            continue
+        if indent == 0:
+            at_key = not raw.startswith(" ")
+        else:
+            at_key = raw.startswith(key_prefix) and not raw.startswith(key_prefix + " ")
+        if not at_key:
+            continue
+        if stripped.startswith("- "):
+            item = stripped[2:].lstrip()
+            if item.startswith("name:"):
+                keys.append("name")
+            continue
+        keys.append(stripped.split(":", 1)[0])
+    return tuple(keys)
+
+
+def _on_paths(text: str, trigger: str) -> tuple[str, ...]:
+    """Quoted path-filter entries under `on.<trigger>.paths`."""
+    paths: list[str] = []
+    in_on = False
+    in_trigger = False
+    in_paths = False
+    for raw in text.splitlines():
+        stripped = raw.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if raw == "on:":
+            in_on = True
+            in_trigger = False
+            in_paths = False
+            continue
+        if not in_on:
+            continue
+        if not raw.startswith(" "):
+            break
+        if raw.startswith("  ") and not raw.startswith("   "):
+            in_trigger = stripped.split(":", 1)[0] == trigger
+            in_paths = False
+            continue
+        if not in_trigger:
+            continue
+        if raw.startswith("    ") and not raw.startswith("     "):
+            in_paths = stripped.rstrip(":") == "paths" or stripped.split(":", 1)[0] == "paths"
+            continue
+        if in_paths and raw.startswith("      - "):
+            item = stripped[2:].strip()
+            if item.startswith('"') and item.endswith('"'):
+                item = item[1:-1]
+            paths.append(item)
+    return tuple(paths)
+
+
 def _named_step_names(text: str) -> list[str]:
     """Active `- name:` values in document order."""
     names: list[str] = []
@@ -2249,9 +2358,15 @@ def _normalized_command_sequence(run_body: str) -> tuple[str, ...]:
     return tuple(commands)
 
 
-def oci_candidate_workflow_problems(text: str) -> list[str]:
+def oci_candidate_workflow_problems(
+    text: str, *, skip: frozenset[str] = frozenset()
+) -> list[str]:
     """Structural pins for the trusted-main OCI capture workflow. One function."""
     problems: list[str] = []
+
+    def omitted(label: str) -> bool:
+        return any(label == token or label.startswith(token) for token in skip)
+
     active = _active_lines(text)
     active_text = "\n".join(active)
     if "workflow_dispatch:" not in active_text:
@@ -2369,11 +2484,13 @@ def oci_candidate_workflow_problems(text: str) -> list[str]:
             for line in _active_lines(block)
         )
     ]
-    if not any(
-        re.match(r"^if:\s*success\(\)", line)
+    upload_ifs = [
+        line
         for block in upload_steps
         for line in _active_lines(block)
-    ):
+        if line.startswith("if:")
+    ]
+    if not omitted("upload not gated on success") and upload_ifs != ["if: success()"]:
         problems.append("upload not gated on success")
     if "candidate_capture.v0" not in active_text:
         problems.append("missing fixed capture name")
@@ -2416,6 +2533,29 @@ def oci_candidate_workflow_problems(text: str) -> list[str]:
         block = _named_step_block(text, name)
         if block is None or _named_step_env_keys(block) != allowed:
             problems.append(f"unexpected env keys: {name}")
+    if not omitted("unexpected top-level keys"):
+        if _keys_at_indent(text, 0) != OCI_DOCUMENT_KEYS:
+            problems.append("unexpected top-level keys")
+    if not omitted("unexpected step keys"):
+        for name, allowed in OCI_STEP_KEYS.items():
+            block = _named_step_block(text, name)
+            actual = ("name",) + _keys_at_indent(block, 8) if block is not None else ()
+            if block is None or actual != allowed:
+                problems.append(f"unexpected step keys: {name}")
+    if not omitted("unexpected with keys"):
+        for name, allowed in OCI_STEP_WITH_KEYS.items():
+            block = _named_step_block(text, name)
+            actual = (
+                _keys_at_indent(block, 10, under="with") if block is not None else ()
+            )
+            if block is None or actual != allowed:
+                problems.append(f"unexpected with keys: {name}")
+    if not omitted("unexpected TAG bindings"):
+        if sum(1 for line in active if line == OCI_TAG_BINDING) != 2:
+            problems.append("unexpected TAG bindings")
+    if not omitted("missing exact artifact name"):
+        if OCI_ARTIFACT_NAME not in active_text:
+            problems.append("missing exact artifact name")
     return problems
 
 
@@ -2740,6 +2880,80 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
                 any("unexpected step names" in problem for problem in problems),
                 f"expected unexpected step names in {problems}",
             )
+        allowlist = (
+            (
+                "workflow_env_token",
+                "on:\n",
+                "env:\n  GH_TOKEN: ${{ github.token }}\non:\n",
+                "unexpected top-level keys",
+            ),
+            (
+                "upload_if_or_failure",
+                "        if: success()\n",
+                "        if: success() || failure()\n",
+                "upload not gated on success",
+            ),
+            (
+                "tag_literal",
+                f"          {OCI_TAG_BINDING}\n",
+                "          TAG: privileged-mcp-action-v0-candidate.4\n",
+                "unexpected TAG bindings",
+            ),
+            (
+                "artifact_name",
+                f"          {OCI_ARTIFACT_NAME}\n",
+                "          name: leaked-capture\n",
+                "missing exact artifact name",
+            ),
+            (
+                "capture_working_directory",
+                "      - name: Capture candidate observations\n",
+                "      - name: Capture candidate observations\n"
+                "        working-directory: /tmp\n",
+                "unexpected step keys",
+            ),
+            (
+                "checkout_extra_with",
+                "          persist-credentials: false\n",
+                "          persist-credentials: false\n"
+                "          repository: example/evil\n",
+                "unexpected with keys",
+            ),
+            (
+                "unknown_top_level",
+                "on:\n",
+                "assay-note: ignore\non:\n",
+                "unexpected top-level keys",
+            ),
+            (
+                "unknown_step_timeout",
+                "      - name: Require trusted main\n",
+                "      - name: Require trusted main\n        timeout-minutes: 5\n",
+                "unexpected step keys",
+            ),
+        )
+        for kind, needle, replacement, expected in allowlist:
+            with self.subTest(kind=kind):
+                self.assertIn(needle, text)
+                mutated = text.replace(needle, replacement)
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any(expected in problem for problem in problems),
+                    f"expected {expected!r} in {problems}",
+                )
+                restored = oci_candidate_workflow_problems(
+                    mutated, skip=frozenset({expected})
+                )
+                self.assertEqual(
+                    restored,
+                    [],
+                    f"{kind} must be [] when {expected!r} is skipped: {restored}",
+                )
+
+    def test_conformance_path_filters_include_oci_workflow(self) -> None:
+        text = CONFORMANCE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(_on_paths(text, "pull_request"), CONFORMANCE_REQUIRED_PATHS)
+        self.assertEqual(_on_paths(text, "push"), CONFORMANCE_REQUIRED_PATHS)
 
 
 if __name__ == "__main__":

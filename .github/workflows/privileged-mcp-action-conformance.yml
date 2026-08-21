@@ -7,6 +7,7 @@ on:
       - ".github/actions/privileged-mcp-action-conformance/**"
       - ".github/workflows/privileged-mcp-action-conformance.yml"
       - ".github/workflows/privileged-mcp-action-pack-release.yml"
+      - ".github/workflows/privileged-mcp-action-oci-candidate.yml"
       - "scripts/ci/check_clean_room_pack_reachable.py"
   push:
     branches:
@@ -16,6 +17,7 @@ on:
       - ".github/actions/privileged-mcp-action-conformance/**"
       - ".github/workflows/privileged-mcp-action-conformance.yml"
       - ".github/workflows/privileged-mcp-action-pack-release.yml"
+      - ".github/workflows/privileged-mcp-action-oci-candidate.yml"
       - "scripts/ci/check_clean_room_pack_reachable.py"
   workflow_dispatch:
 
