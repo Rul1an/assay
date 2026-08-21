@@ -22,6 +22,7 @@ Without it every other test could pass against a sandbox the checker never reads
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import shutil
 import subprocess
@@ -325,16 +326,31 @@ class ControlsOnThePublicProjection(unittest.TestCase):
         self.assertFalse(findings, "expected a clean baseline, got: %s" % findings)
 
     def test_a_measurement_that_moves_without_the_prose_is_red(self):
-        """CONTROL: move a measured value without regenerating its projection."""
+        """CONTROL: move an addressed report and row without regenerating the prose.
+
+        Both layers must remain mutually consistent so only the projection guard,
+        rather than the earlier row-to-report validation, can make this test red.
+        """
         with sandbox() as root:
             self.assertEqual(chk.check(), [])
             res = root / "conformance/adequacy/results.json"
             doc = json.loads(res.read_text())
-            for c in doc["corpora"]:
-                if c["corpus"] == "rge-bench":
-                    c["killed"] = 50
+            row = next(c for c in doc["corpora"] if c["corpus"] == "rge-bench")
+            old_digest = row["report_sha256"]
+            report = json.loads(doc["reports"].pop(old_digest))
+            report["killed"] -= 1
+            report["survived"] += 1
+            denominator = report["killed"] + report["survived"] + report["silent"]
+            report["score_percent"] = round(100.0 * report["killed"] / denominator, 1)
+            encoded = (json.dumps(report, indent=2, sort_keys=True) + "\n").encode("utf-8")
+            digest = "sha256:" + hashlib.sha256(encoded).hexdigest()
+            doc["reports"][digest] = encoded.decode("utf-8")
+            for field in ("killed", "survived", "score_percent"):
+                row[field] = report[field]
+            row["report_sha256"] = digest
+            row["report_ref"] = "#/reports/" + digest
             res.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
-            self.assert_red("the measurement gives")
+            self.assert_red("differs from its fresh deterministic projection")
             shutil.copy2(REPO / "conformance/adequacy/results.json", res)
             self.assertEqual(chk.check(), [])
 
