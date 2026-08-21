@@ -61,6 +61,7 @@ OCI_SOURCE_DIGEST_GUARD = OCI_SOURCE_DIGEST_SHAPE + " || exit 2"
 OCI_CAPTURE_UPLOAD_PATH = "${{ runner.temp }}/oci-capture/candidate_capture.v0"
 OCI_IMPLEMENTATION_ID_ENV = "IMPLEMENTATION_ID: ${{ inputs.implementation_id }}"
 OCI_IMPLEMENTATION_ID_ARGV = '--implementation-id "$IMPLEMENTATION_ID"'
+OCI_UPLOAD_STEP = "Upload validated capture"
 USES_SHA_RE = re.compile(r"uses:\s*\S+@([0-9a-f]{40}|[^\s#]+)")
 
 # Normalized `run:` sequences for the named capture steps. Copied from the
@@ -2078,15 +2079,33 @@ def _active_lines(text: str) -> list[str]:
     return lines
 
 
-def _named_step_run_body(text: str, name: str) -> str | None:
-    """Literal `run:` body of a named step. None if the step or body is missing."""
+def _named_step_names(text: str) -> list[str]:
+    """Active `- name:` values in document order."""
+    names: list[str] = []
+    for line in _active_lines(text):
+        match = re.match(r"^-\s+name:\s*(.+)$", line)
+        if match:
+            names.append(match.group(1).strip())
+    return names
+
+
+def _named_step_block(text: str, name: str) -> str | None:
+    """Full named step mapping, from `- name:` through the next sibling step."""
     marker = f"      - name: {name}\n"
     start = text.find(marker)
     if start < 0:
         return None
     rest = text[start + len(marker) :]
     nxt = re.search(r"(?m)^      - ", rest)
-    block = rest if nxt is None else rest[: nxt.start()]
+    tail = rest if nxt is None else rest[: nxt.start()]
+    return marker + tail
+
+
+def _named_step_run_body(text: str, name: str) -> str | None:
+    """Literal `run:` body of a named step. None if the step or body is missing."""
+    block = _named_step_block(text, name)
+    if block is None:
+        return None
     run_m = re.search(r"(?m)^        run:\s*\|\s*$", block)
     if run_m is None:
         return None
@@ -2262,6 +2281,14 @@ def oci_candidate_workflow_problems(text: str) -> list[str]:
             pin = match.group(1)
             if not re.fullmatch(r"[0-9a-f]{40}", pin):
                 problems.append(f"unpinned uses: {match.group(0)}")
+    for name in _named_step_names(text):
+        if name == OCI_UPLOAD_STEP:
+            continue
+        block = _named_step_block(text, name)
+        if block is not None and any(
+            re.match(r"^if:", line) for line in _active_lines(block)
+        ):
+            problems.append(f"conditional step: {name}")
     for name, allowed in OCI_PINNED_STEP_SEQUENCES.items():
         body = _named_step_run_body(text, name)
         if body is None or _normalized_command_sequence(body) != allowed:
@@ -2493,6 +2520,43 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
             with self.subTest(kind=kind):
                 self.assertIn(needle, text)
                 mutated = text.replace(needle, replacement, 1)
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any(expected in problem for problem in problems),
+                    f"expected {expected!r} in {problems}",
+                )
+        step_conditionals = (
+            (
+                "checkout_if_false",
+                "Check out current main",
+                "conditional step: Check out current main",
+            ),
+            (
+                "setup_python_if_false",
+                "Set up Python",
+                "conditional step: Set up Python",
+            ),
+            (
+                "trusted_main_if_false",
+                "Require trusted main",
+                "conditional step: Require trusted main",
+            ),
+            (
+                "verify_step_if_false",
+                "Verify pack attestation",
+                "conditional step: Verify pack attestation",
+            ),
+            (
+                "capture_step_if_false",
+                "Capture candidate observations",
+                "conditional step: Capture candidate observations",
+            ),
+        )
+        for kind, step, expected in step_conditionals:
+            with self.subTest(kind=kind):
+                needle = f"      - name: {step}\n"
+                self.assertIn(needle, text)
+                mutated = text.replace(needle, needle + "        if: false\n", 1)
                 problems = oci_candidate_workflow_problems(mutated)
                 self.assertTrue(
                     any(expected in problem for problem in problems),
