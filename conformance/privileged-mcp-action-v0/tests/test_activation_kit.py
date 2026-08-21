@@ -63,6 +63,69 @@ OCI_IMPLEMENTATION_ID_ENV = "IMPLEMENTATION_ID: ${{ inputs.implementation_id }}"
 OCI_IMPLEMENTATION_ID_ARGV = '--implementation-id "$IMPLEMENTATION_ID"'
 USES_SHA_RE = re.compile(r"uses:\s*\S+@([0-9a-f]{40}|[^\s#]+)")
 
+# Normalized `run:` sequences for the named capture steps. Copied from the
+# committed YAML after joining `\` continuations and collapsing whitespace;
+# not a second parser of workflow intent.
+OCI_PINNED_STEP_SEQUENCES = {
+    "Require trusted main": (
+        "set -euo pipefail",
+        'if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then',
+        'echo "oci capture must be dispatched from main, got $GITHUB_REF" >&2',
+        "exit 2",
+        "fi",
+        'if [[ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]]; then',
+        'echo "checked-out main does not match the workflow source commit" >&2',
+        "exit 2",
+        "fi",
+    ),
+    "Resolve published pack tag": (
+        "set -euo pipefail",
+        "python3"
+        " conformance/privileged-mcp-action-v0/scripts/validate_candidate_release.py"
+        " --candidate conformance/privileged-mcp-action-v0/candidate-release.json"
+        " --manifest conformance/privileged-mcp-action-v0/MANIFEST.json"
+        ' --github-output "$GITHUB_OUTPUT"',
+    ),
+    "Download attested pack": (
+        "set -euo pipefail",
+        'mkdir -p "$RUNNER_TEMP/oci-downloads"',
+        'gh release download "$TAG" --repo Rul1an/assay'
+        " --pattern privileged-mcp-action-v0-clean-room.tar.gz"
+        " --pattern SHA256SUMS"
+        " --pattern attestation-bundle.json"
+        ' --dir "$RUNNER_TEMP/oci-downloads"',
+        "(",
+        'cd "$RUNNER_TEMP/oci-downloads"',
+        "sha256sum -c SHA256SUMS",
+        ")",
+    ),
+    "Verify pack attestation": (
+        "set -euo pipefail",
+        'source_digest="$(gh api "repos/Rul1an/assay/commits/$TAG" --jq .sha)"',
+        OCI_SOURCE_DIGEST_GUARD,
+        "gh attestation verify"
+        ' "$RUNNER_TEMP/oci-downloads/privileged-mcp-action-v0-clean-room.tar.gz"'
+        " --repo Rul1an/assay"
+        ' --bundle "$RUNNER_TEMP/oci-downloads/attestation-bundle.json"'
+        f" --signer-workflow {OCI_SIGNER_WORKFLOW}"
+        ' --source-digest "$source_digest"'
+        " --source-ref refs/heads/main"
+        " --deny-self-hosted-runners",
+    ),
+    "Capture candidate observations": (
+        "set -euo pipefail",
+        'PACK="$RUNNER_TEMP/oci-downloads/privileged-mcp-action-v0-clean-room.tar.gz"',
+        'OUTPUT="$RUNNER_TEMP/oci-capture/candidate_capture.v0"',
+        'mkdir -p "$(dirname "$OUTPUT")"',
+        f"python3 {OCI_EXECUTOR}"
+        ' --pack "$PACK"'
+        f" {OCI_IMPLEMENTATION_ID_ARGV}"
+        ' --output "$OUTPUT"'
+        " --timeout-seconds 30",
+    ),
+}
+
+
 def _head_commit() -> str:
     """Resolve HEAD, the way the conformance and pack-release workflows already do.
 
@@ -2015,6 +2078,49 @@ def _active_lines(text: str) -> list[str]:
     return lines
 
 
+def _named_step_run_body(text: str, name: str) -> str | None:
+    """Literal `run:` body of a named step. None if the step or body is missing."""
+    marker = f"      - name: {name}\n"
+    start = text.find(marker)
+    if start < 0:
+        return None
+    rest = text[start + len(marker) :]
+    nxt = re.search(r"(?m)^      - ", rest)
+    block = rest if nxt is None else rest[: nxt.start()]
+    run_m = re.search(r"(?m)^        run:\s*\|\s*$", block)
+    if run_m is None:
+        return None
+    after = block[run_m.end() :]
+    if after.startswith("\n"):
+        after = after[1:]
+    body: list[str] = []
+    for line in after.splitlines():
+        if line.startswith("          ") or line == "":
+            body.append(line)
+            continue
+        break
+    return "\n".join(body)
+
+
+def _normalized_command_sequence(run_body: str) -> tuple[str, ...]:
+    """Join `\\` continuations, drop comments, collapse insignificant whitespace."""
+    commands: list[str] = []
+    pending: list[str] = []
+    for line in _active_lines(run_body):
+        continued = line.endswith("\\")
+        piece = line[:-1].rstrip() if continued else line
+        if piece:
+            pending.append(piece)
+        if continued:
+            continue
+        if pending:
+            commands.append(re.sub(r"\s+", " ", " ".join(pending)).strip())
+            pending = []
+    if pending:
+        commands.append(re.sub(r"\s+", " ", " ".join(pending)).strip())
+    return tuple(commands)
+
+
 def oci_candidate_workflow_problems(text: str) -> list[str]:
     """Structural pins for the trusted-main OCI capture workflow. One function."""
     problems: list[str] = []
@@ -2156,6 +2262,10 @@ def oci_candidate_workflow_problems(text: str) -> list[str]:
             pin = match.group(1)
             if not re.fullmatch(r"[0-9a-f]{40}", pin):
                 problems.append(f"unpinned uses: {match.group(0)}")
+    for name, allowed in OCI_PINNED_STEP_SEQUENCES.items():
+        body = _named_step_run_body(text, name)
+        if body is None or _normalized_command_sequence(body) != allowed:
+            problems.append(f"unexpected run sequence: {name}")
     return problems
 
 
@@ -2341,6 +2451,52 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
                 self.assertTrue(
                     any("|| true swallows failure" in problem for problem in problems),
                     f"expected || true in {problems}",
+                )
+        verify_cmd = (
+            "          gh attestation verify \\\n"
+            '            "$RUNNER_TEMP/oci-downloads/privileged-mcp-action-v0-clean-room.tar.gz" \\\n'
+            "            --repo Rul1an/assay \\\n"
+            '            --bundle "$RUNNER_TEMP/oci-downloads/attestation-bundle.json" \\\n'
+            f"            --signer-workflow {OCI_SIGNER_WORKFLOW} \\\n"
+            '            --source-digest "$source_digest" \\\n'
+            "            --source-ref refs/heads/main \\\n"
+            "            --deny-self-hosted-runners"
+        )
+        executor_cmd = (
+            f"          python3 {OCI_EXECUTOR} \\\n"
+            '            --pack "$PACK" \\\n'
+            '            --implementation-id "$IMPLEMENTATION_ID" \\\n'
+            '            --output "$OUTPUT" \\\n'
+            "            --timeout-seconds 30"
+        )
+        reachability = (
+            (
+                "verify_if_false",
+                verify_cmd,
+                f"          if false; then\n{verify_cmd}\n          fi",
+                "unexpected run sequence: Verify pack attestation",
+            ),
+            (
+                "executor_if_false",
+                executor_cmd,
+                f"          if false; then\n{executor_cmd}\n          fi",
+                "unexpected run sequence: Capture candidate observations",
+            ),
+            (
+                "exit_0_before_verify",
+                "          gh attestation verify \\",
+                "          exit 0\n          gh attestation verify \\",
+                "unexpected run sequence: Verify pack attestation",
+            ),
+        )
+        for kind, needle, replacement, expected in reachability:
+            with self.subTest(kind=kind):
+                self.assertIn(needle, text)
+                mutated = text.replace(needle, replacement, 1)
+                problems = oci_candidate_workflow_problems(mutated)
+                self.assertTrue(
+                    any(expected in problem for problem in problems),
+                    f"expected {expected!r} in {problems}",
                 )
 
 
