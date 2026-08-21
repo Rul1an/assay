@@ -174,7 +174,9 @@ class ProjectionTemplateContract(unittest.TestCase):
 
     def test_named_fields_render_without_an_expression_language(self):
         with tempfile.TemporaryDirectory() as raw:
-            template = Path(raw) / "INDEX.md.in"
+            directory = Path(raw) / "demo"
+            directory.mkdir()
+            template = directory / "INDEX.md.in"
             template.write_text(
                 self.template(
                     "{{demo.killed}} of {{demo.in_scope}} in scope "
@@ -188,6 +190,7 @@ class ProjectionTemplateContract(unittest.TestCase):
                 render(
                     template,
                     {
+                        "demo.corpus": "demo",
                         "demo.killed": 6,
                         "demo.in_scope": 10,
                         "demo.score_percent": "60.0",
@@ -198,7 +201,9 @@ class ProjectionTemplateContract(unittest.TestCase):
 
     def test_bounded_formatters_preserve_public_wording_without_evaluation(self):
         with tempfile.TemporaryDirectory() as raw:
-            template = Path(raw) / "INDEX.md.in"
+            directory = Path(raw) / "demo"
+            directory.mkdir()
+            template = directory / "INDEX.md.in"
             template.write_text(
                 self.template(
                     "{{aggregate.measured:word-title}} measured, "
@@ -213,6 +218,7 @@ class ProjectionTemplateContract(unittest.TestCase):
                     {
                         "aggregate.measured": 4,
                         "aggregate.control_only": 1,
+                        "demo.corpus": "demo",
                         "demo.in_scope": 25,
                         "demo.score_percent": 60.0,
                     },
@@ -222,7 +228,9 @@ class ProjectionTemplateContract(unittest.TestCase):
 
     def test_unknown_and_null_tokens_fail_closed(self):
         with tempfile.TemporaryDirectory() as raw:
-            template = Path(raw) / "INDEX.md.in"
+            directory = Path(raw) / "demo"
+            directory.mkdir()
+            template = directory / "INDEX.md.in"
             for token, values in (
                 ("{{demo.missing}}", {}),
                 ("{{demo.missing}}", {"demo.missing": None}),
@@ -233,7 +241,9 @@ class ProjectionTemplateContract(unittest.TestCase):
                 with self.subTest(token=token, values=values), self.assertRaisesRegex(
                     ValueError, "template"
                 ):
-                    project.render_template(template, values)
+                    project.render_template(
+                        template, {"demo.corpus": "demo", **values}
+                    )
 
     def test_template_read_is_bounded_before_materialization(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -425,6 +435,32 @@ class ControlsOnThePublicProjection(unittest.TestCase):
                 ValueError, "corpus table row must render its identity"
             ):
                 project.write_documents(root)
+
+    def test_a_corpus_specific_document_cannot_move_to_another_corpus(self):
+        """CONTROL: a document path provides an independent corpus binding."""
+        with sandbox() as root:
+            template = root / "conformance/privileged-mcp-action-v0/ERRATA.md.in"
+            source = template.read_text(encoding="utf-8")
+            template.write_text(
+                source.replace("privileged-mcp-action-v0.", "rge-bench."),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "document context"):
+                project.write_documents(root)
+
+    def test_a_general_document_cannot_hide_a_corpus_claim_outside_its_table(self):
+        """CONTROL: index-level corpus claims belong in its ordered corpus table."""
+        with tempfile.TemporaryDirectory() as raw:
+            template = Path(raw) / "INDEX.md.in"
+            template.write_text(
+                ProjectionTemplateContract.template("{{demo.killed}} killed"),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "outside a corpus table"):
+                project.render_template(
+                    template,
+                    {"demo.corpus": "demo", "demo.killed": 1},
+                )
 
     def test_a_hand_edited_generated_document_is_red(self):
         """CONTROL: mutate fresh output without carrying a hard-coded current score."""

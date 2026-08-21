@@ -189,7 +189,7 @@ rounded up — and this line has now been wrong in both directions on the same d
 It read *four measured* while `privileged-mcp-action-v0` was scoring nothing; it
 was corrected to *three*; and it is four again only because that corpus was then
 declared properly and finally produced a number. That number was 50% of eight
-declared rules; over the twenty-five now declared it is **24.0%**, the worst on
+declared rules; the current typed row above now makes it the worst on
 this page by a wide margin. It fell because the denominator became honest, not
 because the corpus changed. Both
 corrections are left visible, because a table whose purpose is to publish

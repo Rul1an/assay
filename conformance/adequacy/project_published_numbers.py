@@ -74,6 +74,10 @@ def format_value(value: object, style: str | None) -> str:
 
 def render_template(template: Path, values: dict[str, object]) -> str:
     source, _metadata, _body = template_parts(template)
+    corpus_names = {
+        str(value) for name, value in values.items() if name.endswith(".corpus")
+    }
+    document_corpus = template.parent.name if template.parent.name in corpus_names else None
     table_bindings: list[str] = []
     for number, line in enumerate(source.splitlines(), 1):
         tokens = list(TOKEN.finditer(line))
@@ -95,6 +99,17 @@ def render_template(template: Path, values: dict[str, object]) -> str:
                     % (template.name, number, identity)
                 )
             table_bindings.append(bound)
+        elif bound != "aggregate":
+            if document_corpus is None:
+                raise ValueError(
+                    "%s:%d corpus token %s appears outside a corpus table"
+                    % (template.name, number, bound)
+                )
+            if bound != document_corpus:
+                raise ValueError(
+                    "%s:%d corpus token %s conflicts with document context %s"
+                    % (template.name, number, bound, document_corpus)
+                )
 
     if table_bindings:
         expected = sorted(
