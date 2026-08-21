@@ -14,7 +14,7 @@
       "manifest": "conformance/adequacy/mcp-jsonrpc-id.manifest.json",
       "manifest_sha256": "sha256:7b2b81672b2c27a08fdf0602fe526b4d47ee9a8442bbce3f80273f56755ec0c5",
       "measured_at": {
-        "commit": "7c68894a2065ca8a273ddfd36824f28e3bfdc168",
+        "commit": "da8107a74137994c4a4fa3cd9773b32d4375142f",
         "depends_on": [
           "conformance/adequacy/mcp-jsonrpc-id.manifest.json",
           "conformance/adequacy/mcp-jsonrpc-id.vectors.json",
@@ -53,7 +53,7 @@
       "manifest": "conformance/adequacy/observed-effect-drift-consumer.manifest.json",
       "manifest_sha256": "sha256:f5ebcb794f78bafd5f1f16c7dc208a6767365d7745a6e882e29015fb847b2a0e",
       "measured_at": {
-        "commit": "7c68894a2065ca8a273ddfd36824f28e3bfdc168",
+        "commit": "da8107a74137994c4a4fa3cd9773b32d4375142f",
         "depends_on": [
           "conformance/adequacy/observed-effect-drift-consumer.manifest.json"
         ]
@@ -100,7 +100,7 @@
       "manifest": "conformance/adequacy/privileged-mcp-action-v0.manifest.json",
       "manifest_sha256": "sha256:73ec3dbb954512ef8d463b54c6f6d3be20159e01b4c9d83a4a9cb5db92f486d4",
       "measured_at": {
-        "commit": "7c68894a2065ca8a273ddfd36824f28e3bfdc168",
+        "commit": "da8107a74137994c4a4fa3cd9773b32d4375142f",
         "depends_on": [
           "conformance/adequacy/privileged-mcp-action-v0.manifest.json",
           "conformance/adequacy/privileged-mcp-action-v0.vectors.json",
@@ -142,7 +142,7 @@
       "manifest": "conformance/adequacy/rfc8785-canonicalization.manifest.json",
       "manifest_sha256": "sha256:8162fbeb6dae07978ae07ecdb70188de159327425adf4bf188d37164d55e197e",
       "measured_at": {
-        "commit": "7c68894a2065ca8a273ddfd36824f28e3bfdc168",
+        "commit": "da8107a74137994c4a4fa3cd9773b32d4375142f",
         "depends_on": [
           "conformance/adequacy/rfc8785-canonicalization.manifest.json",
           "crates/assay-canonical/src/jcs.rs",
@@ -181,7 +181,7 @@
       "manifest": "conformance/adequacy/rge-bench.manifest.json",
       "manifest_sha256": "sha256:55538348c5a45458d07476a544b6749c3b8652d792b7ce17201ea83ce6274b1f",
       "measured_at": {
-        "commit": "7c68894a2065ca8a273ddfd36824f28e3bfdc168",
+        "commit": "da8107a74137994c4a4fa3cd9773b32d4375142f",
         "depends_on": [
           "conformance/adequacy/rge-bench.manifest.json"
         ]
