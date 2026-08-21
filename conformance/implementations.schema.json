@@ -42,7 +42,7 @@
           },
           "image": {
             "type": "string",
-            "pattern": "^[^:@\\s]+(?:/[^:@\\s]+)*@sha256:[0-9a-f]{64}$",
+            "pattern": "^[^:@/\\s]+(?:/[^:@/\\s]+)*@sha256:[0-9a-f]{64}$",
             "description": "Exact name@sha256:<64 hex>. A digest addresses bytes; it does not authenticate the publisher."
           },
           "source": {

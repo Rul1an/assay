@@ -33,6 +33,7 @@ AGENT_KINDS = frozenset(("agent-assisted", "agent-generated"))
 HUMAN_AUTHORSHIP_FIELDS = ("kind",)
 AGENT_AUTHORSHIP_FIELDS = ("kind", "model", "prompt_strategy")
 SOURCE_PATTERN = r"^https?://[^\s]+$"
+IMAGE_PATTERN = r"^[^:@/\s]+(?:/[^:@/\s]+)*@sha256:[0-9a-f]{64}$"
 DOC_FIELDS = ("schema", "implementations")
 ROW_FIELDS = (
     "id",
@@ -46,7 +47,7 @@ ROW_FIELDS = (
     "authorship",
 )
 ID_RE = re.compile(r"\A[a-z][a-z0-9]*(?:-[a-z0-9]+)*\Z")
-IMAGE_RE = re.compile(r"\A[^:@\s]+(?:/[^:@\s]+)*@sha256:[0-9a-f]{64}\Z")
+IMAGE_RE = re.compile(IMAGE_PATTERN)
 COMMIT_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 SOURCE_RE = re.compile(SOURCE_PATTERN)
 
@@ -155,7 +156,7 @@ def implementation_schema() -> dict:
                         "suite": {"const": next(iter(ALLOWED_SUITES))},
                         "image": {
                             "type": "string",
-                            "pattern": "^[^:@\\s]+(?:/[^:@\\s]+)*@sha256:[0-9a-f]{64}$",
+                            "pattern": IMAGE_PATTERN,
                             "description": (
                                 "Exact name@sha256:<64 hex>. A digest addresses bytes; "
                                 "it does not authenticate the publisher."

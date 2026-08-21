@@ -280,6 +280,23 @@ class PositiveFixtureAndHostileMatrix(unittest.TestCase):
         with self.assertRaises(self.module.ImplementationRegistryError):
             self.module.load_implementations(path)
 
+    def test_double_slash_image_is_rejected(self):
+        digest = DIGEST_IMAGE.split("@", 1)[1]
+        path = self._write(_doc([_valid_row(image="ghcr.io/example//checker@" + digest)]))
+        with self.assertRaises(self.module.ImplementationRegistryError) as ctx:
+            self.module.load_implementations(path)
+        self.assertIn("image", str(ctx.exception).lower())
+
+    def test_long_adversarial_image_is_rejected_promptly(self):
+        digest = DIGEST_IMAGE.split("@", 1)[1]
+        image = "x" + ("/" * 80) + "y@" + digest
+        started = time.monotonic()
+        path = self._write(_doc([_valid_row(image=image)]))
+        with self.assertRaises(self.module.ImplementationRegistryError) as ctx:
+            self.module.load_implementations(path)
+        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertIn("image", str(ctx.exception).lower())
+
 
 class HostileRegistryInput(unittest.TestCase):
     def setUp(self):
@@ -425,6 +442,7 @@ class OneRuleNoNetwork(unittest.TestCase):
         self.assertEqual(frozenset(agent["properties"]), frozenset(module.AGENT_AUTHORSHIP_FIELDS))
         self.assertEqual(frozenset(agent["properties"]["kind"]["enum"]), frozenset(module.AGENT_KINDS))
         self.assertEqual(items["properties"]["source"]["pattern"], module.SOURCE_PATTERN)
+        self.assertEqual(items["properties"]["image"]["pattern"], module.IMAGE_PATTERN)
 
 
 if __name__ == "__main__":
