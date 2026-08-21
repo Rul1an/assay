@@ -148,6 +148,12 @@ class ProjectionTemplateContract(unittest.TestCase):
         self.assertIsNone(values["control-only.score_percent"])
         self.assertEqual(values["aggregate.measured"], 1)
         self.assertEqual(values["aggregate.control_only"], 1)
+        self.assertEqual(
+            values["demo.table_result"],
+            "2 of 9 in scope (22.2%), 3 survivors, 1 declared equivalent, "
+            "5 out of scope, 6 known holes",
+        )
+        self.assertEqual(values["aggregate.summary"], "One measured, one control-only")
 
     def test_real_templates_render_the_committed_documents(self):
         render_all = getattr(project, "render_documents", None)
@@ -179,8 +185,7 @@ class ProjectionTemplateContract(unittest.TestCase):
             template = directory / "INDEX.md.in"
             template.write_text(
                 self.template(
-                    "{{demo.killed}} of {{demo.in_scope}} in scope "
-                    "({{demo.score_percent}}%)"
+                    "| {{demo.corpus}} | module | {{demo.table_result}} |"
                 ),
                 encoding="utf-8",
             )
@@ -191,40 +196,17 @@ class ProjectionTemplateContract(unittest.TestCase):
                     template,
                     {
                         "demo.corpus": "demo",
-                        "demo.killed": 6,
-                        "demo.in_scope": 10,
-                        "demo.score_percent": "60.0",
+                        "demo.table_result": "6 of 10 in scope (60.0%)",
                     },
                 ),
-                self.template("6 of 10 in scope (60.0%)"),
+                self.template("| demo | module | 6 of 10 in scope (60.0%) |"),
             )
 
     def test_bounded_formatters_preserve_public_wording_without_evaluation(self):
-        with tempfile.TemporaryDirectory() as raw:
-            directory = Path(raw) / "demo"
-            directory.mkdir()
-            template = directory / "INDEX.md.in"
-            template.write_text(
-                self.template(
-                    "{{aggregate.measured:word-title}} measured, "
-                    "{{aggregate.control_only:word}},\n"
-                    "{{demo.in_scope:word}} rules, {{demo.score_percent:compact}}%"
-                ),
-                encoding="utf-8",
-            )
-            self.assertEqual(
-                project.render_template(
-                    template,
-                    {
-                        "aggregate.measured": 4,
-                        "aggregate.control_only": 1,
-                        "demo.corpus": "demo",
-                        "demo.in_scope": 25,
-                        "demo.score_percent": 60.0,
-                    },
-                ),
-                self.template("Four measured, one,\ntwenty-five rules, 60%"),
-            )
+        self.assertEqual(project.format_value(4, "word-title"), "Four")
+        self.assertEqual(project.format_value(1, "word"), "one")
+        self.assertEqual(project.format_value(25, "word"), "twenty-five")
+        self.assertEqual(project.format_value(60.0, "compact"), "60")
 
     def test_unknown_and_null_tokens_fail_closed(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -237,9 +219,12 @@ class ProjectionTemplateContract(unittest.TestCase):
                 ("{{Demo.missing}}", {"Demo.missing": 1}),
                 ("{{demo.missing:eval}}", {"demo.missing": 1}),
             ):
-                template.write_text(self.template(token), encoding="utf-8")
+                template.write_text(
+                    self.template("| {{demo.corpus}} | module | %s |" % token),
+                    encoding="utf-8",
+                )
                 with self.subTest(token=token, values=values), self.assertRaisesRegex(
-                    ValueError, "template"
+                    ValueError, "template|table result role"
                 ):
                     project.render_template(
                         template, {"demo.corpus": "demo", **values}
@@ -387,7 +372,7 @@ class ControlsOnThePublicProjection(unittest.TestCase):
         """CONTROL: a valid value must remain bound to the claim it describes."""
         with sandbox() as root:
             template = root / "conformance/INDEX.md.in"
-            edit(template, "{{mcp-jsonrpc-id.killed}}", "{{rge-bench.killed}}")
+            edit(template, "{{mcp-jsonrpc-id.table_result}}", "{{rge-bench.table_result}}")
             self.assert_red("token line must use exactly one corpus namespace")
 
     def test_a_claim_cannot_move_all_tokens_and_its_binding_to_another_corpus(self):
@@ -461,6 +446,38 @@ class ControlsOnThePublicProjection(unittest.TestCase):
                     template,
                     {"demo.corpus": "demo", "demo.killed": 1},
                 )
+
+    def test_a_table_result_cannot_substitute_a_same_corpus_field(self):
+        """CONTROL: table result is one typed phrase, not interchangeable scalars."""
+        with sandbox() as root:
+            template = root / "conformance/INDEX.md.in"
+            edit(
+                template,
+                "{{mcp-jsonrpc-id.table_result}}",
+                "{{mcp-jsonrpc-id.survived}}",
+            )
+            with self.assertRaisesRegex(ValueError, "table result role"):
+                project.write_documents(root)
+
+    def test_a_document_summary_cannot_substitute_a_same_corpus_field(self):
+        """CONTROL: corpus document summary has one non-interchangeable role."""
+        with sandbox() as root:
+            template = root / "conformance/privileged-mcp-action-v0/ERRATA.md.in"
+            edit(
+                template,
+                "{{privileged-mcp-action-v0.document_summary}}",
+                "{{privileged-mcp-action-v0.survived}}",
+            )
+            with self.assertRaisesRegex(ValueError, "document summary role"):
+                project.write_documents(root)
+
+    def test_an_aggregate_summary_cannot_substitute_one_of_its_fields(self):
+        """CONTROL: aggregate wording is projected as one typed phrase."""
+        with sandbox() as root:
+            template = root / "conformance/INDEX.md.in"
+            edit(template, "{{aggregate.summary}}", "{{aggregate.control_only:word}}")
+            with self.assertRaisesRegex(ValueError, "aggregate summary role"):
+                project.write_documents(root)
 
     def test_a_hand_edited_generated_document_is_red(self):
         """CONTROL: mutate fresh output without carrying a hard-coded current score."""

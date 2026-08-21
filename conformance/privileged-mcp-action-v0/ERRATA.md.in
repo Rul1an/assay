@@ -43,8 +43,7 @@ with a quoted sentence and section reference (audited independently; none is an 
 detail smuggled into the count).
 
 ```
-{{privileged-mcp-action-v0.killed}} of {{privileged-mcp-action-v0.in_scope}} DECLARED in-scope rules killed ({{privileged-mcp-action-v0.score_percent}}%). {{privileged-mcp-action-v0.out_of_scope}} declared out of scope, {{privileged-mcp-action-v0.declared_total}} rules declared.
-control-{{privileged-mcp-action-v0.control}}. {{privileged-mcp-action-v0.survived}} mutant(s) survived. {{privileged-mcp-action-v0.known_holes}} KNOWN HOLES.
+{{privileged-mcp-action-v0.document_summary}}
 ```
 
 That block is the tool's own output, kept verbatim. **Neither of its numbers is the number to quote
