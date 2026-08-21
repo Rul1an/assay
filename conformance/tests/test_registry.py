@@ -326,12 +326,15 @@ class ProductWorkflow(unittest.TestCase):
     def test_scope_job_invokes_require_complete_as_a_hard_check(self):
         text = CI_YML.read_text(encoding="utf-8")
         step = assert_hard_run_command(
-            text, "Conformance inventory", RUN_ALL_COMMAND)
+            text, "scope", "Conformance inventory", RUN_ALL_COMMAND)
         self.assertIn("python3 conformance/registry.py", step)
 
     def test_scope_job_invokes_completion_scope_suite(self):
         step = named_step(
-            CI_YML.read_text(encoding="utf-8"), "Conformance inventory")
+            CI_YML.read_text(encoding="utf-8"),
+            "scope",
+            "Conformance inventory",
+        )
         self.assertIn("conformance/tests/test_completion_scope.py", step)
         mutated = step.replace("conformance/tests/test_completion_scope.py", "")
         self.assertNotEqual(mutated, step)
@@ -346,12 +349,16 @@ class ProductWorkflow(unittest.TestCase):
                     "      - name: Deleted conformance inventory\n",
                     1,
                 ),
+                "scope",
                 "Conformance inventory",
             )
 
     def test_deleting_the_require_complete_callsite_fails_this_test(self):
         step = named_step(
-            CI_YML.read_text(encoding="utf-8"), "Conformance inventory")
+            CI_YML.read_text(encoding="utf-8"),
+            "scope",
+            "Conformance inventory",
+        )
         mutated = step.replace("--require-complete", "")
         self.assertNotEqual(mutated, step)
         self.assertNotIn("--require-complete", mutated)
@@ -361,14 +368,14 @@ class ProductWorkflow(unittest.TestCase):
         mutated = text.replace(RUN_ALL_COMMAND, "# " + RUN_ALL_COMMAND, 1)
         with self.assertRaises(AssertionError):
             assert_hard_run_command(
-                mutated, "Conformance inventory", RUN_ALL_COMMAND)
+                mutated, "scope", "Conformance inventory", RUN_ALL_COMMAND)
 
     def test_softened_run_all_command_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")
         mutated = text.replace(RUN_ALL_COMMAND, RUN_ALL_COMMAND + " || true", 1)
         with self.assertRaises(AssertionError):
             assert_hard_run_command(
-                mutated, "Conformance inventory", RUN_ALL_COMMAND)
+                mutated, "scope", "Conformance inventory", RUN_ALL_COMMAND)
 
     def test_relocated_run_all_command_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")
@@ -382,7 +389,7 @@ class ProductWorkflow(unittest.TestCase):
         )
         with self.assertRaises(AssertionError):
             assert_hard_run_command(
-                mutated, "Conformance inventory", RUN_ALL_COMMAND)
+                mutated, "scope", "Conformance inventory", RUN_ALL_COMMAND)
 
 
 class RegistryDoesNotRunAll(unittest.TestCase):

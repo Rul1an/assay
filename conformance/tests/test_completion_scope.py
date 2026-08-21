@@ -39,32 +39,51 @@ ACTIVATION_KIT = (
 )
 
 
-def named_step(text: str, name: str) -> str:
+def _indentation_bounded_block(
+        lines: list[str], start: int, block_indent: int) -> str:
+    end = start + 1
+    while end < len(lines):
+        line = lines[end]
+        if line.strip():
+            indent = len(line) - len(line.lstrip(" "))
+            if indent <= block_indent:
+                break
+        end += 1
+    return "".join(lines[start:end])
+
+
+def named_job(text: str, name: str) -> str:
     lines = text.splitlines(keepends=True)
-    marker = re.compile(rf"^(?P<indent> +)- name: {re.escape(name)}\s*$")
+    marker = re.compile(rf"^  {re.escape(name)}:\s*$")
     matches = [
         (i, marker.fullmatch(line.rstrip("\r\n")))
         for i, line in enumerate(lines)
     ]
     matches = [(i, match) for i, match in matches if match is not None]
     if len(matches) != 1:
-        raise AssertionError(f"expected one {name!r} step, found {len(matches)}")
+        raise AssertionError(f"expected one {name!r} job, found {len(matches)}")
+    return _indentation_bounded_block(lines, matches[0][0], 2)
+
+
+def named_step(text: str, job_name: str, step_name: str) -> str:
+    lines = named_job(text, job_name).splitlines(keepends=True)
+    marker = re.compile(rf"^(?P<indent> +)- name: {re.escape(step_name)}\s*$")
+    matches = [
+        (i, marker.fullmatch(line.rstrip("\r\n")))
+        for i, line in enumerate(lines)
+    ]
+    matches = [(i, match) for i, match in matches if match is not None]
+    if len(matches) != 1:
+        raise AssertionError(
+            f"expected one {step_name!r} step in {job_name!r}, found {len(matches)}")
     start, match = matches[0]
     assert match is not None
-    step_indent = len(match.group("indent"))
-    end = start + 1
-    while end < len(lines):
-        line = lines[end]
-        if line.strip():
-            indent = len(line) - len(line.lstrip(" "))
-            if indent <= step_indent:
-                break
-        end += 1
-    return "".join(lines[start:end])
+    return _indentation_bounded_block(
+        lines, start, len(match.group("indent")))
 
 
 def _inventory_step(text: str) -> str:
-    return named_step(text, "Conformance inventory")
+    return named_step(text, "scope", "Conformance inventory")
 
 
 def _active_run_lines(step: str) -> list[str]:
@@ -91,12 +110,9 @@ def _active_run_lines(step: str) -> list[str]:
     return lines
 
 
-def _kit_step(text: str) -> str:
-    return named_step(text, "Run activation-kit contract tests")
-
-
-def assert_hard_run_command(text: str, step_name: str, command: str) -> str:
-    step = named_step(text, step_name)
+def assert_hard_run_command(
+        text: str, job_name: str, step_name: str, command: str) -> str:
+    step = named_step(text, job_name, step_name)
     first = step.splitlines()[0]
     step_indent = len(first) - len(first.lstrip(" "))
     guarded = re.compile(
@@ -166,7 +182,8 @@ def assert_oci_candidate_checker(mod) -> None:
 
 def assert_combined_unittest(text: str) -> None:
     assert_hard_run_command(
-        text, "Run activation-kit contract tests", COMBINED_UNITTEST)
+        text, "activation-kit", "Run activation-kit contract tests",
+        COMBINED_UNITTEST)
 
 
 POLICIES = {
@@ -349,7 +366,7 @@ class ProductCallsite(unittest.TestCase):
     def test_scope_job_invokes_both_flags_and_does_not_map_3_to_0(self):
         text = CI_YML.read_text(encoding="utf-8")
         step = assert_hard_run_command(
-            text, "Conformance inventory", REQUIRED_RUN_ALL)
+            text, "scope", "Conformance inventory", REQUIRED_RUN_ALL)
         lines = _active_run_lines(step)
         self.assertEqual(lines[0], "set -euo pipefail")
         self.assertIn("python3 conformance/registry.py", lines)
@@ -409,21 +426,20 @@ class ProductCallsite(unittest.TestCase):
 
     def test_conformance_combined_unittest_is_a_hard_callsite(self):
         text = CONFORMANCE_YML.read_text(encoding="utf-8")
-        step = _kit_step(text)
         assert_combined_unittest(text)
-        assert_combined_unittest(step.replace("no-such-token", "no-such-token"))
+        assert_combined_unittest(text.replace("no-such-token", "no-such-token"))
         name = "      - name: Run activation-kit contract tests\n"
         mutations = (
-            step.replace(COMBINED_UNITTEST, "          true"),
-            step.replace("          python3 -m unittest \\",
+            text.replace(COMBINED_UNITTEST, "          true"),
+            text.replace("          python3 -m unittest \\",
                          "          # python3 -m unittest \\"),
-            step.replace(COMBINED_UNITTEST, "          :"),
-            step.replace("test_activation_kit.py", ""),
-            step.replace("test_oci_candidate_executor.py", ""),
-            step.replace(COMBINED_UNITTEST, COMBINED_UNITTEST + " || true"),
-            step.replace(COMBINED_UNITTEST, COMBINED_UNITTEST + " || :"),
-            step.replace("          set -euo pipefail", "          set +e"),
-            step.replace(name, name + "        continue-on-error: true\n"),
+            text.replace(COMBINED_UNITTEST, "          :"),
+            text.replace("test_activation_kit.py", ""),
+            text.replace("test_oci_candidate_executor.py", ""),
+            text.replace(COMBINED_UNITTEST, COMBINED_UNITTEST + " || true"),
+            text.replace(COMBINED_UNITTEST, COMBINED_UNITTEST + " || :"),
+            text.replace("          set -euo pipefail", "          set +e", 1),
+            text.replace(name, name + "        continue-on-error: true\n"),
         )
         for mutated in mutations:
             with self.assertRaises(AssertionError):
@@ -452,6 +468,17 @@ class ProductCallsite(unittest.TestCase):
         )
         with self.assertRaises(AssertionError):
             assert_combined_unittest(mutated)
+
+    def test_inventory_step_moved_to_conditional_job_fails(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        step = named_step(text, "scope", "Conformance inventory")
+        mutated = text.replace(step, "", 1)
+        job_start = mutated.index("  ebpf-smoke-ubuntu:\n")
+        insert_at = mutated.index("    steps:\n", job_start) + len("    steps:\n")
+        mutated = mutated[:insert_at] + step + mutated[insert_at:]
+        with self.assertRaises(AssertionError):
+            assert_hard_run_command(
+                mutated, "scope", "Conformance inventory", REQUIRED_RUN_ALL)
 
     def test_required_ci_invokes_oci_candidate_checker(self):
         mod = _load_activation_kit()
