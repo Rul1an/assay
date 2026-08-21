@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -189,6 +190,32 @@ def _direct_mapping(block: str) -> dict[str, str]:
     return entries
 
 
+def _assert_no_workflow_bash_env(text: str) -> None:
+    lines = text.splitlines(keepends=True)
+    env_indexes: list[int] = []
+    for index, raw in enumerate(lines):
+        line = raw.rstrip("\r\n")
+        if not line or line.startswith((" ", "#")):
+            continue
+        match = DIRECT_ENTRY_RE.fullmatch(line)
+        if match is None:
+            continue
+        key = next(match.group(name) for name in ("plain", "single", "double")
+                   if match.group(name) is not None)
+        if key != "env":
+            continue
+        if match.group("value").strip():
+            raise AssertionError("workflow env must use a direct mapping")
+        env_indexes.append(index)
+    if len(env_indexes) > 1:
+        raise AssertionError("workflow has duplicate top-level env mappings")
+    if not env_indexes:
+        return
+    env_block = _indentation_bounded_block(lines, env_indexes[0], 0)
+    if "BASH_ENV" in _direct_mapping(env_block):
+        raise AssertionError("workflow-level BASH_ENV can neutralize hard-run scripts")
+
+
 def _direct_scalar(raw: str) -> str:
     value = raw.strip()
     if re.fullmatch(r"[A-Za-z0-9_.-]+", value):
@@ -212,6 +239,7 @@ def assert_hard_run_command(
     if contract is None:
         raise AssertionError(f"no hard-run contract for {job_name}/{step_name}")
     allowed_job_keys, allowed_step_keys, expected_script = contract
+    _assert_no_workflow_bash_env(text)
 
     job = named_job(text, job_name)
     actual_job_keys = frozenset(_direct_mapping(job))
@@ -479,6 +507,31 @@ class ProductCallsite(unittest.TestCase):
                 )
                 self.assertEqual(completed.returncode, expected)
 
+    def test_bash_env_neutralizes_both_unchanged_hard_scripts(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bash_env = Path(raw) / "bash-env"
+            bash_env.write_text(
+                "test() { return 0; }\npython3() { return 0; }\n",
+                encoding="utf-8",
+            )
+            env = {
+                **os.environ,
+                "BASH_ENV": str(bash_env),
+                "GITHUB_SHA": "0" * 40,
+            }
+            for label, script in (
+                ("inventory", INVENTORY_RUN_SCRIPT),
+                ("activation", ACTIVATION_KIT_RUN_SCRIPT),
+            ):
+                with self.subTest(label=label):
+                    completed = subprocess.run(
+                        ["bash", "-c", "\n".join(script)],
+                        cwd=REPO,
+                        env=env,
+                        check=False,
+                    )
+                    self.assertEqual(completed.returncode, 0)
+
     def test_direct_key_parser_ignores_nested_soft_failure_names(self):
         block = (
             "  scope:\n"
@@ -575,6 +628,22 @@ class ProductCallsite(unittest.TestCase):
         self.assertNotEqual(mutated, text)
         with self.assertRaises(AssertionError):
             assert_combined_unittest(mutated)
+
+    def test_activation_workflow_bash_env_fails_closed(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        mutated = text.replace(
+            "permissions:\n",
+            "env:\n  BASH_ENV: /tmp/assay-bash-env\n\npermissions:\n",
+            1,
+        )
+        with self.assertRaises(AssertionError):
+            assert_combined_unittest(mutated)
+        control = text.replace(
+            "permissions:\n",
+            "env:\n  UNRELATED_WORKFLOW_ENV: allowed\n\npermissions:\n",
+            1,
+        )
+        assert_combined_unittest(control)
 
     def test_activation_kit_step_uses_explicit_bash(self):
         text = CONFORMANCE_YML.read_text(encoding="utf-8")

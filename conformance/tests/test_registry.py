@@ -390,6 +390,24 @@ class ProductWorkflow(unittest.TestCase):
                 "Conformance inventory",
             )
 
+    def test_scope_workflow_bash_env_fails_closed(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        mutated = text.replace(
+            "env:\n",
+            "env:\n  BASH_ENV: /tmp/assay-bash-env\n",
+            1,
+        )
+        with self.assertRaises(AssertionError):
+            assert_hard_run_command(
+                mutated, "scope", "Conformance inventory")
+        control = text.replace(
+            "env:\n",
+            "env:\n  UNRELATED_WORKFLOW_ENV: allowed\n",
+            1,
+        )
+        assert_hard_run_command(
+            control, "scope", "Conformance inventory")
+
     def test_conditional_scope_job_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")
         mutated = text.replace(
