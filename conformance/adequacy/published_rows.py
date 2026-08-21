@@ -88,10 +88,16 @@ def read_regular_file(path: Path, limit: int = MAX_RESULTS_BYTES) -> bytes:
         os.close(fd)
 
 
+def _reject_nonfinite_json_number(value: str) -> None:
+    raise ValueError("non-finite JSON number %s is not permitted" % value)
+
+
 def _parse_json_bytes(data: bytes, label: str) -> dict:
     try:
-        value = json.loads(data.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        value = json.loads(
+            data.decode("utf-8"), parse_constant=_reject_nonfinite_json_number
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise ValueError("%s is not readable JSON: %s" % (label, exc)) from exc
     if not isinstance(value, dict):
         raise ValueError("%s must be a JSON object" % label)

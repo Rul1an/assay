@@ -182,6 +182,16 @@ class BoundedInput(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "results JSON"):
                 published_rows.load_results(path)
 
+    def test_nonfinite_json_numbers_are_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "results.json"
+            for token in ("NaN", "Infinity", "-Infinity"):
+                path.write_text('{"corpora":[],"hostile":%s}' % token, encoding="utf-8")
+                with self.subTest(token=token), self.assertRaisesRegex(
+                    ValueError, "results JSON"
+                ):
+                    published_rows.load_results(path)
+
     @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
     def test_symlink_input_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -246,6 +256,14 @@ class CurrentReportProjection(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             with self.assertRaisesRegex(ValueError, "killed"):
                 projected(Path(raw), value=value)
+
+    def test_nonfinite_producer_score_is_rejected_before_projection(self):
+        for score in (float("nan"), float("inf"), float("-inf")):
+            value = report()
+            value["score_percent"] = score
+            with self.subTest(score=score), tempfile.TemporaryDirectory() as raw:
+                with self.assertRaisesRegex(ValueError, "producer report"):
+                    projected(Path(raw), value=value)
 
     def test_control_only_report_may_have_no_score(self):
         value = report()
