@@ -167,11 +167,13 @@ jobs:
       # Stdlib-only. Required CI cannot go green if these tests are deleted;
       # adequacy-drift is not a required context. No conditional or soft-failure settings.
       # After setup-python so this uses the pinned 3.12, not the runner default.
-      - name: Published-numbers provenance contract
+      - name: Published-numbers projection contract
         shell: bash
         run: |
           set -euo pipefail
           python3 conformance/tests/test_published_numbers_provenance.py
+          python3 conformance/tests/test_published_numbers_guard.py
+          python3 conformance/adequacy/check_published_numbers.py
 
       - name: Evidence vocabulary guard
         shell: bash

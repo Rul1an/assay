@@ -96,15 +96,25 @@ class RelevanceDerivation(unittest.TestCase):
         # the intended reading: the instrument changing invalidates every number on the page.
         self.assertEqual(result["relevant"], ["cheap", "heavy"])
 
-    def test_editing_a_published_document_forces_a_full_measurement(self) -> None:
-        # Editing a number without re-deriving it is the rot this lane exists to prevent, so the
-        # edit itself is the trigger.
+    def test_projection_changes_do_not_remeasure_unchanged_corpora(self) -> None:
+        # Required CI renders and checks these paths directly. Re-running every producer would
+        # measure unchanged implementations and conflate publication drift with corpus drift.
         for document in (
             "conformance/INDEX.md",
+            "conformance/INDEX.md.in",
             "conformance/privileged-mcp-action-v0/ERRATA.md",
+            "conformance/privileged-mcp-action-v0/ERRATA.md.in",
+            "conformance/adequacy/project_published_numbers.py",
+            "conformance/adequacy/check_published_numbers.py",
         ):
             with self.subTest(document=document):
-                self.assertEqual(sorted(self.tree.plan([document])["relevant"]), ["cheap", "heavy"])
+                self.assertEqual(self.tree.plan([document])["relevant"], [])
+
+    def test_measurement_driver_change_still_forces_a_full_measurement(self) -> None:
+        self.assertEqual(
+            sorted(self.tree.plan(["conformance/adequacy/measure_all.py"])["relevant"]),
+            ["cheap", "heavy"],
+        )
 
     def test_a_declared_source_missing_from_the_tree_fails_open(self) -> None:
         self.tree.write("gone", manifest(implementation="../../crates/thing/src/vanished.rs"))

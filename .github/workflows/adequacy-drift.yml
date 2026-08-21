@@ -1,11 +1,10 @@
 # Keep the published mutation-adequacy numbers from rotting.
 #
-# `conformance/INDEX.md` and `conformance/privileged-mcp-action-v0/ERRATA.md` publish measured
-# adequacy numbers. They were produced by hand one evening and nothing re-derived them. ERRATA.md
-# pins its scope to a corpus DIGEST, which does not move when the implementation moves, so a rule
-# deleted from a declared implementation source changes what the corpus can transmit, changes no
-# digest, and trips no existing guard. That is a published claim nobody re-derives, which is the
-# exact defect this whole body of work exists to criticise.
+# `conformance/INDEX.md` and `conformance/privileged-mcp-action-v0/ERRATA.md` publish deterministic
+# projections of typed measured rows. Required CI checks that projection. This lane answers the
+# separate question whether a declared implementation source moved after its measurement. A rule
+# deleted from an undeclared source can still change what a corpus transmits without moving its
+# digest, so scheduled full measurement bounds that residual staleness.
 #
 # COST IS THE WHOLE PROBLEM. Four corpora are module or batch runners and finish in seconds.
 # `privileged-mcp-action-v0` is a process runner: about 32 `cargo build -p assay-cli` invocations,
@@ -57,7 +56,7 @@ on:
     # avoid, so that class of drift is deliberately traded for a bounded staleness window.
     #
     # Weekly is that bound. The response to a red scheduled run is a human re-measurement and a
-    # republish of INDEX.md and ERRATA.md, which is a weekly-cadence activity, not a nightly one; a
+    # regeneration of INDEX.md and ERRATA.md, which is a weekly-cadence activity, not a nightly one; a
     # nightly lane would surface the same finding six times before anyone acted on it, and a lane
     # that cries out more often than it is answered is one people learn to skip.
     - cron: "17 4 * * 1"
@@ -387,8 +386,8 @@ jobs:
             --out-of-scope "${OUT_OF_SCOPE}" \
             "${require_all[@]}" | tee coverage.txt
 
-      # The drift check is what gates. It compares every published number in INDEX.md and
-      # ERRATA.md against the measurement, and fails when the prose and the JSON have parted.
+      # The drift check is what gates. It verifies current typed rows, deterministic projection,
+      # and the narrow unbound-number sweep over the authored templates.
       - name: Check published numbers against the measurement
         shell: bash
         run: |

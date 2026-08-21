@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Decide which mutation-adequacy corpora a changed-file set can affect, and pin the instrument.
 
-`conformance/INDEX.md` and `conformance/privileged-mcp-action-v0/ERRATA.md` publish measured
-adequacy numbers. They were produced by hand, nothing re-derives them, and ERRATA.md is pinned to a
-corpus *digest* — which does not move when the implementation moves. So the first change to a
-declared implementation source makes a published number silently wrong and no existing guard fires.
+`conformance/INDEX.md` and `conformance/privileged-mcp-action-v0/ERRATA.md` publish deterministic
+projections of typed measured rows. Required CI checks that projection. This planner separately
+answers whether a changed path can invalidate a producer measurement.
 
 Cost is what makes this a gating problem rather than a "just run it" problem. Four corpora are
 module or batch runners and finish in seconds. `privileged-mcp-action-v0` is a process runner: about
@@ -60,18 +59,14 @@ from pathlib import Path
 ADEQUACY_DIR = "conformance/adequacy"
 
 # Changed paths outside any single manifest's declaration that still change what the lane measures
-# or what it is measured against. The two documents are here because they ARE the published numbers:
-# editing a number without re-deriving it is precisely the rot this lane exists to prevent, so an
-# edit to either forces a full measurement rather than trusting the edit.
+# or what it is measured against. Publication templates and generated Markdown are checked directly
+# in required CI; they do not change a corpus implementation and must not trigger costly remeasurement.
 GLOBAL_TRIGGERS = (
     ".github/workflows/adequacy-drift.yml",
     "scripts/ci/adequacy_lane_plan.py",
     "scripts/ci/adequacy_lane_assert.py",
     "scripts/ci/test_adequacy_cleanup.py",
     "conformance/adequacy/measure_all.py",
-    "conformance/adequacy/check_published_numbers.py",
-    "conformance/INDEX.md",
-    "conformance/privileged-mcp-action-v0/ERRATA.md",
 )
 
 TOOL_REPOSITORY = "corpus-adequacy/corpus-adequacy"
