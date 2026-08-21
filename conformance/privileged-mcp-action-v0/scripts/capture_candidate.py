@@ -21,6 +21,7 @@ import sys
 import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
+from collections.abc import Callable
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -245,18 +246,28 @@ def run_candidate(command: list[str], bundle: Path, timeout_seconds: int) -> dic
     }
 
 
+_DEFAULT_CANDIDATE_RUNNER = run_candidate
+
+
 def capture_observations(
     pack: dict[str, Any],
     command: list[str],
     timeout_seconds: int,
+    *,
+    candidate_runner: Callable[[list[str], Path, int], dict[str, Any]] = _DEFAULT_CANDIDATE_RUNNER,
 ) -> list[dict[str, Any]]:
     """Execute every opaque case and record one observation each, in pack order."""
+    runner = (
+        run_candidate
+        if candidate_runner is _DEFAULT_CANDIDATE_RUNNER
+        else candidate_runner
+    )
     observations = []
     for case in pack["cases"]:
         case_id = case["id"]
         digest = case["sha256"]
         try:
-            execution = run_candidate(command, Path(case["_local_path"]), timeout_seconds)
+            execution = runner(command, Path(case["_local_path"]), timeout_seconds)
         except HarnessError as error:
             observations.append(
                 observe_error(case_id, digest, STATE_CAPTURE_ERROR, str(error))

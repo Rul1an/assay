@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import inspect
 import io
 import json
 import re
@@ -1220,6 +1221,16 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         target = self.root / f"capture-{name}.json"
         target.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
         return target
+
+    def test_capture_observations_runner_is_keyword_only_and_defaults(self) -> None:
+        import capture_candidate
+
+        params = inspect.signature(capture_candidate.capture_observations).parameters
+        self.assertIn("candidate_runner", params)
+        self.assertEqual(params["candidate_runner"].kind, inspect.Parameter.KEYWORD_ONLY)
+        self.assertIs(params["candidate_runner"].default, capture_candidate.run_candidate)
+        with self.assertRaises(TypeError):
+            capture_candidate.capture_observations({}, [], 1, capture_candidate.run_candidate)
 
     def test_valid_capture_scores_every_case(self) -> None:
         """Positive control for every refusal below.

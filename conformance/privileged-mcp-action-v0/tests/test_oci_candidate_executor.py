@@ -11,7 +11,9 @@ canonical builder must break both, not a workflow comment.
 from __future__ import annotations
 
 import ast
+import functools
 import hashlib
+import inspect
 import json
 import os
 import shutil
@@ -974,6 +976,49 @@ class CandidateOutputHandoff(unittest.TestCase):
         self.assertEqual(document["candidate_output"]["stdout"], module.CANDIDATE_STDOUT_NAME)
         self.assertTrue(document["candidate_output"]["stdout_sha256"].startswith("sha256:"))
 
+    def test_handoff_rejects_symlink_nonempty_and_oversize(self) -> None:
+        module = _require()
+        result = module.OciExecution(
+            module.STATE_COMPLETED,
+            "inert-fixture",
+            DIGEST_IMAGE,
+            0,
+            b"ok",
+            b"",
+            "",
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            nonempty = Path(raw) / "nonempty"
+            nonempty.mkdir()
+            (nonempty / "stale").write_text("x", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                module.write_handoff(nonempty, result)
+            as_file = Path(raw) / "not-a-dir"
+            as_file.write_text("x", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                module.write_handoff(as_file, result)
+            target = Path(raw) / "real-dir"
+            target.mkdir()
+            link = Path(raw) / "link-dir"
+            link.symlink_to(target)
+            with self.assertRaises(ValueError):
+                module.write_handoff(link, result)
+            oversized = module.OciExecution(
+                module.STATE_COMPLETED,
+                "inert-fixture",
+                DIGEST_IMAGE,
+                0,
+                b"x" * (module.STDOUT_LIMIT + 1),
+                b"",
+                "",
+            )
+            with self.assertRaises(ValueError):
+                module.write_handoff(Path(raw) / "fresh", oversized)
+
+    def test_write_execution_is_not_a_silent_parent_rewrite(self) -> None:
+        module = _require()
+        self.assertFalse(hasattr(module, "write_execution"))
+
 
 class CaptureAdapterEquivalence(unittest.TestCase):
     """#199 capture_observations via the OCI adapter, no second loop."""
@@ -1043,19 +1088,19 @@ class CaptureAdapterEquivalence(unittest.TestCase):
                 implementation_id="inert-fixture",
                 registry_path=registry,
             )
-            runner = self._completed_runner()
-
-            def adapted(cmd: list[str], bundle: Path, timeout: int) -> dict[str, Any]:
-                return module.run_oci_candidate(
-                    cmd, bundle, timeout, docker_runner=runner
-                )
-
-            original = capture_candidate.run_candidate
-            capture_candidate.run_candidate = adapted
-            try:
-                via_oci = capture_candidate.capture_observations(pack, command, 5)
-            finally:
-                capture_candidate.run_candidate = original
+            bound = functools.partial(
+                module.run_oci_candidate,
+                docker_runner=self._completed_runner(),
+            )
+            via_oci = capture_candidate.capture_observations(
+                pack,
+                command,
+                5,
+                candidate_runner=bound,
+            )
+            with mock.patch.object(module, "run_oci_candidate", bound):
+                via_wrapper = module.capture_oci_observations(pack, command, 5)
+        self.assertEqual(via_oci, via_wrapper)
         self.assertEqual(via_oci, direct)
         identity = {
             "id": None,
@@ -1080,24 +1125,18 @@ class CaptureAdapterEquivalence(unittest.TestCase):
             direct = capture_candidate.capture_observations(
                 pack, self._direct_candidate(Path(raw)), 5
             )
-            runner = self._completed_runner(stdout=b"")
-            original = capture_candidate.run_candidate
-            capture_candidate.run_candidate = (
-                lambda cmd, bundle, timeout: module.run_oci_candidate(
-                    cmd, bundle, timeout, docker_runner=runner
-                )
+            dropped = capture_candidate.capture_observations(
+                pack,
+                module.oci_entrypoint_command(
+                    implementation_id="inert-fixture",
+                    registry_path=registry,
+                ),
+                5,
+                candidate_runner=functools.partial(
+                    module.run_oci_candidate,
+                    docker_runner=self._completed_runner(stdout=b""),
+                ),
             )
-            try:
-                dropped = capture_candidate.capture_observations(
-                    pack,
-                    module.oci_entrypoint_command(
-                        implementation_id="inert-fixture",
-                        registry_path=registry,
-                    ),
-                    5,
-                )
-            finally:
-                capture_candidate.run_candidate = original
         self.assertNotEqual(dropped, direct)
         self.assertTrue(all(item["state"] == STATE_CANDIDATE_ERROR for item in dropped))
 
@@ -1150,6 +1189,39 @@ class CaptureAdapterEquivalence(unittest.TestCase):
         self.assertEqual(result.stdout, marker)
         self.assertNotIn(marker, written)
         self.assertNotIn("MUST-NOT-LOG-STDOUT", metadata)
+
+    def test_public_api_does_not_monkeypatch_run_candidate(self) -> None:
+        tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+        patched = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Attribute) and target.attr == "run_candidate"
+                for target in node.targets
+            )
+        ]
+        self.assertEqual(patched, [])
+        params = inspect.signature(capture_candidate.capture_observations).parameters
+        self.assertIn("candidate_runner", params)
+        self.assertEqual(params["candidate_runner"].kind, inspect.Parameter.KEYWORD_ONLY)
+        self.assertIs(params["candidate_runner"].default, capture_candidate.run_candidate)
+        wrapper = inspect.getsource(_require().capture_oci_observations)
+        self.assertIn("candidate_runner", wrapper)
+        self.assertIn("run_oci_candidate", wrapper)
+        self.assertNotIn("for ", wrapper)
+
+    def test_parse_oci_command_rejects_unknown_image_flag(self) -> None:
+        module = _require()
+        with self.assertRaises(SystemExit):
+            module.parse_oci_command(
+                [
+                    "--implementation-id",
+                    "inert-fixture",
+                    "--implementation-image",
+                    DIGEST_IMAGE,
+                ]
+            )
 
 
 if __name__ == "__main__":

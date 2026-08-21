@@ -438,10 +438,35 @@ def execute_candidate(
     return OciExecution(state, implementation_id, image, exit_code, stdout, stderr, error)
 
 
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    fd, tmp_name = tempfile.mkstemp(prefix=".partial-", dir=str(path.parent))
+    tmp = Path(tmp_name)
+    try:
+        written = 0
+        while written < len(data):
+            written += os.write(fd, data[written:])
+        os.close(fd)
+        fd = -1
+        os.replace(tmp, path)
+    except Exception:
+        if fd >= 0:
+            os.close(fd)
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 def write_handoff(output_dir: Path, result: OciExecution) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / CANDIDATE_STDOUT_NAME).write_bytes(result.stdout)
-    (output_dir / CANDIDATE_STDERR_NAME).write_bytes(result.stderr)
+    output_dir = Path(output_dir)
+    if output_dir.is_symlink():
+        raise ValueError("handoff directory must not be a symlink")
+    if output_dir.exists() and not output_dir.is_dir():
+        raise ValueError("handoff path must be an empty directory")
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise ValueError("handoff directory must be empty")
+    if len(result.stdout) > STDOUT_LIMIT or len(result.stderr) > STDERR_LIMIT:
+        raise ValueError("candidate output exceeds its byte ceiling")
+    if not output_dir.exists():
+        output_dir.mkdir(parents=True)
     document = {
         "schema": EXECUTION_SCHEMA,
         "implementation_id": result.implementation_id,
@@ -459,18 +484,16 @@ def write_handoff(output_dir: Path, result: OciExecution) -> None:
             "stderr_bytes": len(result.stderr),
         },
     }
-    path = output_dir / EXECUTION_DOCUMENT_NAME
-    path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    payload = (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    _atomic_write_bytes(output_dir / CANDIDATE_STDOUT_NAME, result.stdout)
+    _atomic_write_bytes(output_dir / CANDIDATE_STDERR_NAME, result.stderr)
+    _atomic_write_bytes(output_dir / EXECUTION_DOCUMENT_NAME, payload)
     load_strict_object(
-        path,
+        output_dir / EXECUTION_DOCUMENT_NAME,
         label="oci execution",
         max_bytes=MAX_EXECUTION_BYTES,
         max_depth=MAX_EXECUTION_DEPTH,
     )
-
-
-def write_execution(path: Path, result: OciExecution) -> None:
-    write_handoff(path if path.suffix != ".json" else path.parent, result)
 
 
 def oci_entrypoint_command(
@@ -495,14 +518,7 @@ def parse_oci_command(command: list[str]) -> argparse.Namespace:
         argv = argv[1:]
     if argv and argv[0].endswith("oci_candidate_executor.py"):
         argv = argv[1:]
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--implementation-id", required=True)
-    parser.add_argument("--registry", type=Path)
-    parser.add_argument("--bundle", type=Path)
-    parser.add_argument("--output", type=Path)
-    parser.add_argument("--timeout-seconds", type=int, default=30)
-    parsed, _unknown = parser.parse_known_args(argv)
-    return parsed
+    return parse_args(argv)
 
 
 def run_oci_candidate(
@@ -512,12 +528,7 @@ def run_oci_candidate(
     *,
     docker_runner: DockerRunner | None = None,
 ) -> dict[str, Any]:
-    """Drop-in for `capture_candidate.run_candidate`.
-
-    `command` is an entrypoint list from `oci_entrypoint_command`.
-    `capture_observations(pack, command, timeout)` calls this in place of
-    `run_candidate` without a second observation loop.
-    """
+    """Same shape as `capture_candidate.run_candidate` for the shared loop."""
     args = parse_oci_command(command)
     result = execute_candidate(
         implementation_id=args.implementation_id,
@@ -536,6 +547,16 @@ def run_oci_candidate(
     if result.state in CANDIDATE_LIMIT_STATES:
         raise CandidateError(result.error or result.state)
     raise HarnessError(result.error or result.state)
+
+
+def capture_oci_observations(
+    pack: dict[str, Any],
+    command: list[str],
+    timeout_seconds: int,
+) -> list[dict[str, Any]]:
+    return capture_candidate.capture_observations(
+        pack, command, timeout_seconds, candidate_runner=run_oci_candidate
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
