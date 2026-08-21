@@ -242,14 +242,18 @@ class ProjectionTemplateContract(unittest.TestCase):
     def test_checked_metadata_rejects_nonfinite_json_numbers(self):
         with tempfile.TemporaryDirectory() as raw:
             template = Path(raw) / "INDEX.md.in"
-            template.write_text(
-                self.template("body").replace(
-                    '{"not_derived": []}', '{"not_derived": [], "hostile": NaN}'
-                ),
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(ValueError, "not readable JSON"):
-                project.template_parts(template)
+            for token in ("NaN", "1e999"):
+                template.write_text(
+                    self.template("body").replace(
+                        '{"not_derived": []}',
+                        '{"not_derived": [], "hostile": %s}' % token,
+                    ),
+                    encoding="utf-8",
+                )
+                with self.subTest(token=token), self.assertRaisesRegex(
+                    ValueError, "not readable JSON"
+                ):
+                    project.template_parts(template)
 
     @unittest.skipUnless(hasattr(Path, "symlink_to"), "symlinks unavailable")
     def test_atomic_writer_does_not_follow_a_predictable_temporary_symlink(self):

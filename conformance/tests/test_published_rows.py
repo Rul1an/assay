@@ -185,7 +185,7 @@ class BoundedInput(unittest.TestCase):
     def test_nonfinite_json_numbers_are_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / "results.json"
-            for token in ("NaN", "Infinity", "-Infinity"):
+            for token in ("NaN", "Infinity", "-Infinity", "1e999"):
                 path.write_text('{"corpora":[],"hostile":%s}' % token, encoding="utf-8")
                 with self.subTest(token=token), self.assertRaisesRegex(
                     ValueError, "results JSON"

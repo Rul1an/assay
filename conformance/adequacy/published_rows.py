@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import stat
@@ -101,6 +102,15 @@ def parse_json_object(data: bytes, label: str) -> dict:
         raise ValueError("%s is not readable JSON: %s" % (label, exc)) from exc
     if not isinstance(value, dict):
         raise ValueError("%s must be a JSON object" % label)
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, float) and not math.isfinite(current):
+            raise ValueError("%s is not readable JSON: non-finite number" % label)
+        if isinstance(current, dict):
+            pending.extend(current.values())
+        elif isinstance(current, list):
+            pending.extend(current)
     return value
 
 
