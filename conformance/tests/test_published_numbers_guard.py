@@ -402,6 +402,20 @@ class ControlsOnThePublicProjection(unittest.TestCase):
             ):
                 project.write_documents(root)
 
+    def test_two_complete_claim_namespaces_cannot_trade_places(self):
+        """CONTROL: a corpus-table permutation must not preserve a green projection."""
+        with sandbox() as root:
+            template = root / "conformance/INDEX.md.in"
+            source = template.read_text(encoding="utf-8")
+            source = source.replace("mcp-jsonrpc-id.", "temporary-corpus.")
+            source = source.replace("rge-bench.", "mcp-jsonrpc-id.")
+            source = source.replace("temporary-corpus.", "rge-bench.")
+            template.write_text(source, encoding="utf-8")
+            with self.assertRaisesRegex(
+                ValueError, "measured corpus order"
+            ):
+                project.write_documents(root)
+
     def test_a_corpus_table_row_cannot_restate_its_identity_by_hand(self):
         """CONTROL: the reader-visible identity is projected, not transcribed."""
         with sandbox() as root:

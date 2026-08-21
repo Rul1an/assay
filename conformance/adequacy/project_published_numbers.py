@@ -100,9 +100,9 @@ def render_template(template: Path, values: dict[str, object]) -> str:
         expected = sorted(
             str(value) for name, value in values.items() if name.endswith(".corpus")
         )
-        if sorted(table_bindings) != expected:
+        if table_bindings != expected:
             raise ValueError(
-                "%s: corpus table must bind each measured corpus exactly once"
+                "%s: corpus table must bind each measured corpus exactly once in measured corpus order"
                 % template.name
             )
 
