@@ -266,12 +266,34 @@ class CurrentReportProjection(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "producer report"):
                     projected(Path(raw), value=value)
 
-    def test_control_only_report_may_have_no_score(self):
+    def test_finite_producer_score_must_match_the_scored_counts(self):
+        for score in (999.0, 50.1):
+            value = report()
+            value["score_percent"] = score
+            with self.subTest(score=score), tempfile.TemporaryDirectory() as raw:
+                with self.assertRaisesRegex(ValueError, "score_percent does not match"):
+                    projected(Path(raw), value=value)
+
+    def test_a_nonempty_scored_denominator_requires_a_score(self):
         value = report()
+        value["score_percent"] = None
+        with tempfile.TemporaryDirectory() as raw:
+            with self.assertRaisesRegex(ValueError, "score_percent must be numeric"):
+                projected(Path(raw), value=value)
+
+    def test_a_zero_scored_denominator_has_no_score(self):
+        value = report()
+        for field in ("killed", "survived", "silent"):
+            value[field] = 0
+        value["declared_total"] = sum(value[field] for field in published_rows.COUNT_FIELDS[:-1])
         value["score_percent"] = None
         with tempfile.TemporaryDirectory() as raw:
             row, _ = projected(Path(raw), value=value)
         self.assertIsNone(row["score_percent"])
+        value["score_percent"] = 0.0
+        with tempfile.TemporaryDirectory() as raw:
+            with self.assertRaisesRegex(ValueError, "must be null"):
+                projected(Path(raw), value=value)
 
     def test_dirty_and_unresolved_current_identity_fail_closed(self):
         for state in ("dirty", "unresolved"):

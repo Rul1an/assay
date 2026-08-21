@@ -218,8 +218,18 @@ def _validate_report(report: dict) -> None:
     if report["declared_total"] != total:
         raise ValueError("declared_total does not match the producer counts")
     score = report.get("score_percent")
-    if score is not None and (isinstance(score, bool) or not isinstance(score, (int, float))):
-        raise ValueError("score_percent must be numeric or null")
+    denominator = report["killed"] + report["survived"] + report["silent"]
+    if denominator == 0:
+        if score is not None:
+            raise ValueError("score_percent must be null when the scored denominator is zero")
+    else:
+        if isinstance(score, bool) or not isinstance(score, (int, float)):
+            raise ValueError("score_percent must be numeric when the scored denominator is nonzero")
+        if not math.isfinite(score):
+            raise ValueError("producer report score_percent must be finite")
+        expected_score = round(100.0 * report["killed"] / denominator, 1)
+        if score != expected_score:
+            raise ValueError("score_percent does not match the producer counts")
     if not isinstance(report.get("adequate"), bool):
         raise ValueError("adequate must be boolean")
     if not isinstance(report.get("diagnostic_channel_declared"), bool):
