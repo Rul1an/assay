@@ -1244,6 +1244,7 @@ class CandidateScorerTests(CandidateHarness, unittest.TestCase):
 
 
 sys.path.insert(0, str(CORPUS_DIR / "scripts"))
+import artifact_io  # noqa: E402
 import capture_format  # noqa: E402
 import score_candidate  # noqa: E402
 import strict_json  # noqa: E402
@@ -1493,7 +1494,10 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         )
         capture = self.valid_capture("one-read-digest")
         original = capture.read_bytes()
-        swapped = original + b" "
+        original_document = json.loads(original)
+        swapped_document = json.loads(original)
+        swapped_document["implementation"]["name"] = "swapped implementation"
+        swapped = artifact_io.render_deterministic_json_bytes(swapped_document)
         reads = {"count": 0}
         real_read = capture_format.published_rows.read_regular_file
 
@@ -1511,6 +1515,8 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
             document, digest = capture_format.load_capture_with_digest(capture)
 
         capture_format.validate_capture(document)
+        self.assertEqual(document, original_document)
+        self.assertNotEqual(document, swapped_document)
         self.assertEqual(digest, sha256(original))
         self.assertEqual(reads["count"], 1)
         self.assertEqual(capture.read_bytes(), swapped)
