@@ -252,14 +252,32 @@ class ControlsOnCoverageAndPinning(unittest.TestCase):
             new.unlink()
             self.assertEqual(chk.check(), [])
 
-    def test_a_result_outliving_its_manifest_is_red(self):
-        """CONTROL: delete the rge-bench manifest, leaving its row behind."""
+    def test_a_current_row_whose_indexed_manifest_disappears_is_red(self):
+        """CONTROL: delete the manifest addressed by a current typed row."""
         with sandbox() as root:
             manifest = root / "conformance/adequacy/rge-bench.manifest.json"
             keep = manifest.read_bytes()
             manifest.unlink()
             self.assert_red("indexed manifest is not present")
             manifest.write_bytes(keep)
+            self.assertEqual(chk.check(), [])
+
+    def test_a_result_identity_outliving_the_manifest_inventory_is_red(self):
+        """CONTROL: rename only a row identity while its addressed manifest stays readable.
+
+        The typed loader must succeed so this reaches the checker's orphan-row rule,
+        rather than passing because an earlier manifest read happened to fail.
+        """
+        with sandbox() as root:
+            results = root / "conformance/adequacy/results.json"
+            document = json.loads(results.read_text(encoding="utf-8"))
+            row = next(item for item in document["corpora"]
+                       if item["corpus"] == "rge-bench")
+            row["corpus"] = "retired-rge-bench"
+            results.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n",
+                               encoding="utf-8")
+            self.assert_red("outliving its manifest is a number about nothing")
+            shutil.copy2(REPO / "conformance/adequacy/results.json", results)
             self.assertEqual(chk.check(), [])
 
     def test_a_manifest_with_no_tool_pin_is_red(self):
