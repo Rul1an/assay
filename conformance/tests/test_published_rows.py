@@ -53,7 +53,7 @@ def report(*, runner: str = "module", control_status: str = "killed") -> dict:
         "declared_total": 11,
         "score_percent": 50.0,
         "adequate": False,
-        "diagnostic_channel_declared": True,
+        "diagnostic_channel_declared": False,
         "control_status": control_status,
         "manifest_sha256": "",
         "tool_commit": TOOL_COMMIT,
@@ -61,7 +61,7 @@ def report(*, runner: str = "module", control_status: str = "killed") -> dict:
         "tool_content_sha256": "sha256:" + "a" * 64,
         "tool_version": "0.1.0",
         "mutants": [{"verdict": "control-killed"}],
-        "failures": [],
+        "failures": ["synthetic survivor"],
     }
 
 
@@ -229,20 +229,35 @@ class CurrentReportProjection(unittest.TestCase):
         self.assertEqual(row["out_of_scope"], 3)
         self.assertEqual(row["known_holes"], 1)
         self.assertEqual(row["unproved"], 2)
-        self.assertTrue(row["diagnostic_channel_declared"])
+        self.assertFalse(row["diagnostic_channel_declared"])
         self.assertEqual(row["control_status"], "killed")
         self.assertEqual(row["tool_source_state"], "exact")
         self.assertEqual(row["tool_content_sha256"], "sha256:" + "a" * 64)
         self.assertEqual(row["report_sha256"], sha256(encoded))
         self.assertEqual(row["report_ref"], "#/reports/%s" % sha256(encoded))
 
-    def test_control_status_is_not_reconstructed_from_mutant_rows(self):
+    def test_a_scored_report_requires_a_killed_control(self):
         value = report(control_status="survived")
         value["mutants"] = [{"verdict": "control-killed"}]
         with tempfile.TemporaryDirectory() as raw:
-            row, _ = projected(Path(raw), value=value)
-        self.assertEqual(row["control_status"], "survived")
-        self.assertEqual(row["control"], "SURVIVED")
+            with self.assertRaisesRegex(ValueError, "requires a killed control"):
+                projected(Path(raw), value=value)
+
+    def test_adequate_must_match_the_failure_inventory(self):
+        for adequate, failures in ((True, ["failure"]), (False, [])):
+            value = report()
+            value["adequate"] = adequate
+            value["failures"] = failures
+            with self.subTest(adequate=adequate), tempfile.TemporaryDirectory() as raw:
+                with self.assertRaisesRegex(ValueError, "adequate does not match failures"):
+                    projected(Path(raw), value=value)
+
+    def test_diagnostic_channel_must_match_the_manifest(self):
+        value = report()
+        value["diagnostic_channel_declared"] = True
+        with tempfile.TemporaryDirectory() as raw:
+            with self.assertRaisesRegex(ValueError, "diagnostic channel differs"):
+                projected(Path(raw), value=value)
 
     def test_error_envelope_is_not_a_successful_report(self):
         value = report()

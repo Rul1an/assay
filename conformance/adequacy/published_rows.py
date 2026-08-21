@@ -230,12 +230,22 @@ def _validate_report(report: dict) -> None:
         expected_score = round(100.0 * report["killed"] / denominator, 1)
         if score != expected_score:
             raise ValueError("score_percent does not match the producer counts")
-    if not isinstance(report.get("adequate"), bool):
+    adequate = report.get("adequate")
+    if not isinstance(adequate, bool):
         raise ValueError("adequate must be boolean")
+    failures = report.get("failures")
+    if (not isinstance(failures, list)
+            or any(not isinstance(item, str) or not item for item in failures)):
+        raise ValueError("failures must be a list of non-empty strings")
+    if adequate != (not failures):
+        raise ValueError("adequate does not match failures")
     if not isinstance(report.get("diagnostic_channel_declared"), bool):
         raise ValueError("diagnostic_channel_declared must be boolean")
-    if report.get("control_status") not in CONTROL:
+    control_status = report.get("control_status")
+    if control_status not in CONTROL:
         raise ValueError("control_status is not a producer verdict")
+    if score is not None and control_status != "killed":
+        raise ValueError("a scored producer report requires a killed control")
     _sha(report.get("manifest_sha256"), "manifest_sha256")
     if report.get("tool_source_state") != "exact":
         raise ValueError("tool_source_state is %s, not exact" % report.get("tool_source_state"))
@@ -269,6 +279,8 @@ def project_report(
         raise ValueError("producer manifest differs from the repository-relative row identity")
     if declared.get("runner", "module") != report["runner"]:
         raise ValueError("runner differs between manifest and producer report")
+    if report["diagnostic_channel_declared"] != (declared.get("diagnostic_from") is not None):
+        raise ValueError("diagnostic channel differs between manifest and producer report")
     if report["manifest_sha256"] != _digest(manifest_data):
         raise ValueError("manifest_sha256 does not address the exact manifest bytes")
     if not isinstance(measured_commit, str) or not HEX40.fullmatch(measured_commit):
