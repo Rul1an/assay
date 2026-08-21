@@ -1277,19 +1277,24 @@ class CaptureAdapterEquivalence(unittest.TestCase):
                 pack, self._direct_candidate(Path(raw)), 5
             )
             command = module.oci_entrypoint_command(implementation_id="inert-fixture")
-            bound = functools.partial(
-                module.run_oci_candidate,
-                docker_runner=self._completed_runner(),
-                registry_path=registry,
-            )
+            runner = self._completed_runner()
             via_oci = capture_candidate.capture_observations(
                 pack,
                 command,
                 5,
-                candidate_runner=bound,
+                candidate_runner=functools.partial(
+                    module.run_oci_candidate,
+                    docker_runner=runner,
+                    registry_path=registry,
+                ),
             )
-            with mock.patch.object(module, "run_oci_candidate", bound):
-                via_wrapper = module.capture_oci_observations(pack, command, 5)
+            via_wrapper = module.capture_oci_observations(
+                pack,
+                command,
+                5,
+                registry_path=registry,
+                docker_runner=runner,
+            )
         self.assertEqual(via_oci, via_wrapper)
         self.assertEqual(via_oci, direct)
         identity = {
@@ -1444,6 +1449,63 @@ class PackCaptureCli(unittest.TestCase):
             "report": {"bundle_integrity": "fail"},
             "stderr_present": False,
         }
+
+    def _completed_docker(self, pulled: list[str]):
+        module = _require()
+        inspect_doc = {
+            "Config": {"Volumes": None, "User": "65532:65532"},
+            "HostConfig": {"NetworkMode": "none"},
+            "State": {"OOMKilled": False, "ExitCode": 0, "Status": "exited"},
+        }
+
+        def runner(argv: list[str], **_kwargs: Any) -> Any:
+            if argv[1] == "pull":
+                pulled.append(argv[-1])
+                return module.BoundedDockerResult(0, b"", b"")
+            if argv[1] == "inspect":
+                return module.BoundedDockerResult(0, json.dumps([inspect_doc]).encode(), b"")
+            if argv[1] == "create":
+                return module.BoundedDockerResult(0, b"cid-reg\n", b"")
+            if argv[1] == "start":
+                return module.BoundedDockerResult(0, VALID_REPORT, b"")
+            if argv[1] == "rm":
+                return module.BoundedDockerResult(0, b"", b"")
+            raise AssertionError(argv)
+
+        return runner
+
+    def test_chosen_registry_feeds_executor_and_identity(self) -> None:
+        module = _require()
+        other_image = (
+            "ghcr.io/example/other@sha256:"
+            "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            pack = _write_pack(Path(raw))
+            chosen_doc = _registry_doc(DIGEST_IMAGE)
+            chosen_doc["implementations"][0]["source"] = "https://example.example/chosen"
+            chosen = Path(raw) / "chosen.json"
+            chosen.write_text(json.dumps(chosen_doc), encoding="utf-8")
+            other_doc = _registry_doc(other_image)
+            other_doc["implementations"][0]["source"] = "https://example.example/other"
+            (Path(raw) / "other.json").write_text(json.dumps(other_doc), encoding="utf-8")
+            output = Path(raw) / "capture.json"
+            pulled: list[str] = []
+            module.write_validated_capture(
+                pack,
+                "inert-fixture",
+                output,
+                registry_path=chosen,
+                docker_runner=self._completed_docker(pulled),
+                timeout_seconds=5,
+            )
+            document = json.loads(output.read_text(encoding="utf-8"))
+        validate_capture(document)
+        self.assertEqual(set(pulled), {DIGEST_IMAGE})
+        self.assertNotIn(other_image, pulled)
+        self.assertEqual(document["implementation"]["image"], DIGEST_IMAGE)
+        self.assertEqual(document["implementation"]["source"], "https://example.example/chosen")
+        self.assertNotEqual(document["implementation"]["source"], "https://example.example/other")
 
     def test_cli_writes_validated_capture_from_pack_and_id(self) -> None:
         module = _require()

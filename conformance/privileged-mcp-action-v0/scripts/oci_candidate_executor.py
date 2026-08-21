@@ -10,6 +10,7 @@ failures are named execution states, never agreement.
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import json
 import os
@@ -559,9 +560,19 @@ def capture_oci_observations(
     pack: dict[str, Any],
     command: list[str],
     timeout_seconds: int,
+    *,
+    registry_path: Path | None = None,
+    docker_runner: DockerRunner | None = None,
 ) -> list[dict[str, Any]]:
     return capture_candidate.capture_observations(
-        pack, command, timeout_seconds, candidate_runner=run_oci_candidate
+        pack,
+        command,
+        timeout_seconds,
+        candidate_runner=functools.partial(
+            run_oci_candidate,
+            registry_path=registry_path,
+            docker_runner=docker_runner,
+        ),
     )
 
 
@@ -581,6 +592,7 @@ def write_validated_capture(
     output: Path,
     *,
     registry_path: Path | None = None,
+    docker_runner: DockerRunner | None = None,
     timeout_seconds: int,
 ) -> None:
     row = implementation_from_registry(implementation_id, registry_path)
@@ -588,7 +600,13 @@ def write_validated_capture(
     with tempfile.TemporaryDirectory() as tmp:
         pack = capture_candidate.load_pack(pack_path, Path(tmp))
         pack_digest = capture_candidate.sha256_file(pack_path)
-        observations = capture_oci_observations(pack, command, timeout_seconds)
+        observations = capture_oci_observations(
+            pack,
+            command,
+            timeout_seconds,
+            registry_path=registry_path,
+            docker_runner=docker_runner,
+        )
     capture = capture_candidate.build_capture(
         pack, pack_digest, observations, identity_from_registry_row(row)
     )
