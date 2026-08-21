@@ -30,7 +30,7 @@ int main(int argc, char **argv)
     }
     if (strcmp(mode, "oom") == 0) {
         for (;;) {
-            char *block = malloc(1024 * 1024);
+            volatile char *block = (volatile char *)malloc(1024 * 1024);
             if (block != NULL) {
                 block[0] = 1;
                 block[1024 * 1024 - 1] = 1;

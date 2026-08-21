@@ -10,8 +10,10 @@ failures are named execution states, never agreement.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import shutil
 import sys
 import tempfile
 import uuid
@@ -21,6 +23,8 @@ from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bounded_process import ProcessLimitError, run_bounded  # noqa: E402
+import capture_candidate  # noqa: E402
+from capture_candidate import CandidateError, HarnessError  # noqa: E402
 from capture_format import (  # noqa: E402
     STATE_CANDIDATE_ERROR,
     STATE_CAPTURE_ERROR,
@@ -35,6 +39,9 @@ from implementations import (  # noqa: E402
     validate_image_reference,
 )
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "adequacy"))
+import published_rows  # noqa: E402
+
 PLATFORM = "linux/amd64"
 RUNTIME_USER = "65532:65532"
 CPUS = "0.50"
@@ -45,9 +52,14 @@ TMPFS_SPEC = "/tmp:rw,nosuid,nodev,noexec,size=16m"
 LOG_MAX_SIZE = "64k"
 LOG_MAX_FILE = "1"
 BUNDLE_DEST = "/input/bundle.tar.gz"
+STAGED_BUNDLE_NAME = "opaque.bundle"
 STDOUT_LIMIT = 64 * 1024
 STDERR_LIMIT = 64 * 1024
+MAX_BUNDLE_BYTES = 16 * 1024 * 1024
 EXECUTION_SCHEMA = "assay.privileged_mcp_action.oci_execution.v0"
+EXECUTION_DOCUMENT_NAME = "oci-execution.json"
+CANDIDATE_STDOUT_NAME = "candidate.stdout"
+CANDIDATE_STDERR_NAME = "candidate.stderr"
 MAX_EXECUTION_BYTES = 16 * 1024
 MAX_EXECUTION_DEPTH = 6
 
@@ -113,11 +125,45 @@ class OciExecution:
 DockerRunner = Callable[..., BoundedDockerResult]
 
 
+def _content_digest(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def resolve_docker_executable() -> Path:
+    found = shutil.which("docker")
+    if found is None:
+        raise DockerCommandError("docker executable not found")
+    return Path(found).resolve()
+
+
+def resolve_local_docker_host() -> str | None:
+    for socket in (Path("/var/run/docker.sock"), Path.home() / ".docker/run/docker.sock"):
+        if socket.exists():
+            return "unix://%s" % socket
+    return None
+
+
 def fresh_docker_env(parent: Path) -> tuple[dict[str, str], Path]:
     config_dir = Path(tempfile.mkdtemp(prefix="assay-oci-docker-config-", dir=parent))
-    env = {key: value for key, value in os.environ.items() if key != "REGISTRY_AUTH_FILE"}
-    env["DOCKER_CONFIG"] = str(config_dir)
+    home = Path(parent) / "empty-home"
+    home.mkdir(exist_ok=True)
+    env = {
+        "PATH": str(resolve_docker_executable().parent),
+        "DOCKER_CONFIG": str(config_dir),
+        "HOME": str(home),
+        "TMPDIR": str(parent),
+    }
+    host = resolve_local_docker_host()
+    if host is not None:
+        env["DOCKER_HOST"] = host
     return env, config_dir
+
+
+def wrap_docker_command(argv: list[str], env: dict[str, str]) -> list[str]:
+    if not argv or argv[0] != "docker":
+        raise DockerCommandError("docker argv must start with docker")
+    assignments = ["%s=%s" % (key, env[key]) for key in sorted(env)]
+    return ["env", "-i", *assignments, str(resolve_docker_executable()), *argv[1:]]
 
 
 def implementation_from_registry(
@@ -137,18 +183,25 @@ def reject_declared_volumes(image_inspect: dict[str, Any]) -> None:
         raise VolumeDeclarationError("image declares volume(s): %s" % sorted(volumes))
 
 
+def stage_opaque_bundle(source: Path, staging_dir: Path) -> Path:
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    data = published_rows.read_regular_file(Path(source), limit=MAX_BUNDLE_BYTES)
+    staged = Path(staging_dir) / STAGED_BUNDLE_NAME
+    staged.write_bytes(data)
+    staged.chmod(0o400)
+    return staged.resolve()
+
+
 def build_container_create_argv(
     *,
     image: str,
     bundle_path: Path,
     container_name: str,
+    staging_dir: Path,
     command: tuple[str, ...] = (),
 ) -> list[str]:
     validate_image_reference(image)
-    bundle = Path(bundle_path)
-    if bundle.is_symlink() or not bundle.is_file():
-        raise ValueError("bundle must be a regular file")
-    bundle = bundle.resolve()
+    staged = stage_opaque_bundle(bundle_path, staging_dir)
     return [
         "docker",
         "create",
@@ -184,7 +237,7 @@ def build_container_create_argv(
         "--restart",
         "no",
         "--mount",
-        f"type=bind,src={bundle},dst={BUNDLE_DEST},ro=true",
+        f"type=bind,src={staged},dst={BUNDLE_DEST},ro=true",
         image,
         *command,
     ]
@@ -208,18 +261,6 @@ def observation_for(
     return observe_error(case_id, input_sha256, capture_state, message)
 
 
-def _wrap_docker(argv: list[str], env: dict[str, str]) -> list[str]:
-    if not argv or argv[0] != "docker":
-        raise DockerCommandError("docker argv must start with docker")
-    return [
-        "env",
-        "-u",
-        "REGISTRY_AUTH_FILE",
-        f"DOCKER_CONFIG={env['DOCKER_CONFIG']}",
-        *argv,
-    ]
-
-
 def run_docker(
     argv: list[str],
     *,
@@ -231,15 +272,12 @@ def run_docker(
 ) -> BoundedDockerResult:
     if env is None:
         raise DockerCommandError("docker invocations require a fresh DOCKER_CONFIG")
-    try:
-        result = run_bounded(
-            _wrap_docker(argv, env),
-            timeout_seconds=timeout_seconds,
-            stdout_limit=stdout_limit,
-            stderr_limit=stderr_limit,
-        )
-    except ProcessLimitError as error:
-        raise
+    result = run_bounded(
+        wrap_docker_command(argv, env),
+        timeout_seconds=timeout_seconds,
+        stdout_limit=stdout_limit,
+        stderr_limit=stderr_limit,
+    )
     if result.returncode != 0 and not allow_nonzero:
         detail = result.stderr.decode("utf-8", "replace").strip() or f"exit {result.returncode}"
         raise DockerCommandError(detail)
@@ -250,13 +288,16 @@ def local_image_docker_runner() -> DockerRunner:
     """Pull step records the canonical argv; the inert fixture is already local."""
 
     def runner(argv: list[str], **kwargs: Any) -> BoundedDockerResult:
+        env = kwargs.get("env")
+        if env is None:
+            raise DockerCommandError("docker invocations require a fresh DOCKER_CONFIG")
         if len(argv) >= 2 and argv[1] == "pull":
             image = argv[-1]
             expected = ["docker", "pull", "--platform", PLATFORM, image]
             if argv != expected:
                 raise DockerCommandError("pull argv drifted from the digest/platform contract")
             probe = run_bounded(
-                ["docker", "image", "inspect", image],
+                wrap_docker_command(["docker", "image", "inspect", image], env),
                 timeout_seconds=30,
                 stdout_limit=1_000_000,
                 stderr_limit=64 * 1024,
@@ -271,12 +312,9 @@ def local_image_docker_runner() -> DockerRunner:
 
 def _parse_inspect(payload: bytes) -> dict[str, Any]:
     document = json.loads(payload.decode("utf-8"))
-    if not isinstance(document, list) or not document:
+    if not isinstance(document, list) or not document or not isinstance(document[0], dict):
         raise DockerCommandError("docker inspect did not return an object")
-    first = document[0]
-    if not isinstance(first, dict):
-        raise DockerCommandError("docker inspect did not return an object")
-    return first
+    return document[0]
 
 
 def _limit_state(error: ProcessLimitError) -> str:
@@ -307,7 +345,9 @@ def execute_candidate(
     error = ""
     container_id: str | None = None
     with tempfile.TemporaryDirectory(prefix="assay-oci-exec-") as raw:
-        env, _config_dir = fresh_docker_env(Path(raw))
+        root = Path(raw)
+        env, _config_dir = fresh_docker_env(root)
+        staging_dir = root / "stage"
         try:
             try:
                 runner(
@@ -337,6 +377,7 @@ def execute_candidate(
                         image=image,
                         bundle_path=bundle_path,
                         container_name=name,
+                        staging_dir=staging_dir,
                         command=command,
                     ),
                     env=env,
@@ -372,10 +413,7 @@ def execute_candidate(
                 exit_code = (container.get("State") or {}).get("ExitCode")
                 if not isinstance(exit_code, int):
                     exit_code = None
-                if (container.get("State") or {}).get("OOMKilled") and state not in (
-                    STATE_TIMEOUT,
-                    STATE_OUTPUT_OVERFLOW,
-                ):
+                if (container.get("State") or {}).get("OOMKilled"):
                     state = STATE_OOM
                     error = error or "container OOMKilled"
                 if state is None:
@@ -400,7 +438,10 @@ def execute_candidate(
     return OciExecution(state, implementation_id, image, exit_code, stdout, stderr, error)
 
 
-def write_execution(path: Path, result: OciExecution) -> None:
+def write_handoff(output_dir: Path, result: OciExecution) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / CANDIDATE_STDOUT_NAME).write_bytes(result.stdout)
+    (output_dir / CANDIDATE_STDERR_NAME).write_bytes(result.stderr)
     document = {
         "schema": EXECUTION_SCHEMA,
         "implementation_id": result.implementation_id,
@@ -409,8 +450,16 @@ def write_execution(path: Path, result: OciExecution) -> None:
         "exit_code": result.exit_code,
         "error": result.error,
         "oci_executor_non_claims": list(OCI_EXECUTOR_NON_CLAIMS),
+        "candidate_output": {
+            "stdout": CANDIDATE_STDOUT_NAME,
+            "stderr": CANDIDATE_STDERR_NAME,
+            "stdout_sha256": _content_digest(result.stdout),
+            "stderr_sha256": _content_digest(result.stderr),
+            "stdout_bytes": len(result.stdout),
+            "stderr_bytes": len(result.stderr),
+        },
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path = output_dir / EXECUTION_DOCUMENT_NAME
     path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     load_strict_object(
         path,
@@ -420,11 +469,81 @@ def write_execution(path: Path, result: OciExecution) -> None:
     )
 
 
+def write_execution(path: Path, result: OciExecution) -> None:
+    write_handoff(path if path.suffix != ".json" else path.parent, result)
+
+
+def oci_entrypoint_command(
+    *,
+    implementation_id: str,
+    registry_path: Path | None = None,
+) -> list[str]:
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--implementation-id",
+        implementation_id,
+    ]
+    if registry_path is not None:
+        command.extend(["--registry", str(registry_path)])
+    return command
+
+
+def parse_oci_command(command: list[str]) -> argparse.Namespace:
+    argv = list(command)
+    if argv and Path(argv[0]).name.startswith("python"):
+        argv = argv[1:]
+    if argv and argv[0].endswith("oci_candidate_executor.py"):
+        argv = argv[1:]
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--implementation-id", required=True)
+    parser.add_argument("--registry", type=Path)
+    parser.add_argument("--bundle", type=Path)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--timeout-seconds", type=int, default=30)
+    parsed, _unknown = parser.parse_known_args(argv)
+    return parsed
+
+
+def run_oci_candidate(
+    command: list[str],
+    bundle: Path,
+    timeout_seconds: int,
+    *,
+    docker_runner: DockerRunner | None = None,
+) -> dict[str, Any]:
+    """Drop-in for `capture_candidate.run_candidate`.
+
+    `command` is an entrypoint list from `oci_entrypoint_command`.
+    `capture_observations(pack, command, timeout)` calls this in place of
+    `run_candidate` without a second observation loop.
+    """
+    args = parse_oci_command(command)
+    result = execute_candidate(
+        implementation_id=args.implementation_id,
+        bundle_path=bundle,
+        registry_path=args.registry,
+        timeout_seconds=timeout_seconds,
+        docker_runner=docker_runner,
+    )
+    if result.state == STATE_COMPLETED:
+        report = capture_candidate.parse_candidate_report(result.stdout)
+        return {
+            "exit_code": 0 if result.exit_code is None else result.exit_code,
+            "report": report,
+            "stderr_present": bool(result.stderr),
+        }
+    if result.state in CANDIDATE_LIMIT_STATES:
+        raise CandidateError(result.error or result.state)
+    raise HarnessError(result.error or result.state)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--implementation-id", required=True)
-    parser.add_argument("--bundle", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--registry", type=Path)
+    parser.add_argument("--bundle", type=Path)
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--timeout-seconds", type=int, default=30)
     return parser.parse_args(argv)
 
@@ -434,16 +553,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.timeout_seconds <= 0:
         print("timeout-seconds must be positive", file=sys.stderr)
         return 2
+    if args.bundle is None:
+        print("--bundle is required", file=sys.stderr)
+        return 2
     try:
         result = execute_candidate(
             implementation_id=args.implementation_id,
             bundle_path=args.bundle,
+            registry_path=args.registry,
             timeout_seconds=args.timeout_seconds,
         )
     except (ImplementationRegistryError, ValueError, OSError) as error:
         print(str(error), file=sys.stderr)
         return 2
-    write_execution(args.output, result)
+    if args.output is not None:
+        write_handoff(args.output, result)
     print(result.state)
     return 0
 

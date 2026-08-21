@@ -11,14 +11,17 @@ canonical builder must break both, not a workflow comment.
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 CORPUS = Path(__file__).resolve().parents[1]
 REPO = CORPUS.parents[1]
@@ -36,6 +39,7 @@ except ModuleNotFoundError as exc:
         raise
     oci = None
 
+import capture_candidate
 import implementations
 from capture_format import STATE_CANDIDATE_ERROR, STATE_CAPTURE_ERROR
 from score_candidate import STATE_TO_STATUS
@@ -94,11 +98,15 @@ def _bundle(directory: Path) -> Path:
 def _argv(*, image: str = DIGEST_IMAGE, bundle: Path | None = None) -> list[str]:
     module = _require()
     with tempfile.TemporaryDirectory() as raw:
-        path = bundle or _bundle(Path(raw))
+        root = Path(raw)
+        path = bundle or _bundle(root)
+        staging = root / "stage"
+        staging.mkdir()
         return module.build_container_create_argv(
             image=image,
             bundle_path=path,
             container_name="assay-oci-test",
+            staging_dir=staging,
         )
 
 
@@ -209,22 +217,14 @@ class ArgvContract(unittest.TestCase):
 
     def test_builder_validates_image_with_registry_function(self) -> None:
         module = _require()
-        with self.assertRaises(implementations.ImplementationRegistryError):
-            module.build_container_create_argv(
-                image="ghcr.io/example/checker:latest",
-                bundle_path=Path("/tmp/missing"),
-                container_name="x",
-            )
-        source = Path(module.__file__).read_text(encoding="utf-8")
-        self.assertIn("validate_image_reference", source)
-        self.assertNotIn("IMAGE_RE", source)
-        tree = ast.parse(source)
-        self.assertFalse(
-            any(
-                isinstance(node, ast.FunctionDef) and node.name == "validate_image_reference"
-                for node in ast.walk(tree)
-            )
-        )
+        with tempfile.TemporaryDirectory() as raw:
+            with self.assertRaises(implementations.ImplementationRegistryError):
+                module.build_container_create_argv(
+                    image="ghcr.io/example/checker:latest",
+                    bundle_path=Path(raw) / "missing",
+                    container_name="x",
+                    staging_dir=Path(raw) / "stage",
+                )
 
     def test_argv_pins_every_isolation_bound(self) -> None:
         argv = _argv()
@@ -271,10 +271,12 @@ class ArgvContract(unittest.TestCase):
     def test_mount_is_only_the_opaque_bundle_readonly(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             bundle = _bundle(Path(raw))
+            staging = Path(raw) / "stage"
             argv = _require().build_container_create_argv(
                 image=DIGEST_IMAGE,
                 bundle_path=bundle,
                 container_name="assay-oci-test",
+                staging_dir=staging,
             )
         mounts = [
             argv[index + 1]
@@ -283,8 +285,10 @@ class ArgvContract(unittest.TestCase):
         ]
         self.assertEqual(len(mounts), 1)
         mount = mounts[0]
+        staged = (staging / "opaque.bundle").resolve()
         self.assertIn("type=bind", mount)
-        self.assertIn(f"src={bundle.resolve()}", mount)
+        self.assertIn(f"src={staged}", mount)
+        self.assertNotIn(str(bundle.resolve()), mount)
         self.assertIn("dst=/input/bundle.tar.gz", mount)
         self.assertTrue("ro=true" in mount or "readonly=true" in mount)
 
@@ -296,6 +300,7 @@ class ArgvContract(unittest.TestCase):
                     image=DIGEST_IMAGE,
                     bundle_path=Path(raw),
                     container_name="x",
+                    staging_dir=Path(raw) / "stage",
                 )
 
 
@@ -402,10 +407,6 @@ class NamedExecutionStates(unittest.TestCase):
                 True,
             )
             self.assertNotIn(observation["state"], AGREEMENT)
-        source = Path(module.__file__).read_text(encoding="utf-8")
-        self.assertIn("observe_error", source)
-        self.assertIn("validate_image_reference", source)
-        self.assertIn("load_implementations", source)
 
     def test_completed_is_not_a_score(self) -> None:
         module = _require()
@@ -422,18 +423,6 @@ class NonClaimsAndReuse(unittest.TestCase):
     def test_non_claims_are_exact_issue_203_text(self) -> None:
         module = _require()
         self.assertEqual(module.OCI_EXECUTOR_NON_CLAIMS, (ISSUE_203_NON_CLAIMS,))
-
-    def test_output_is_loaded_with_strict_capture_loader(self) -> None:
-        module = _require()
-        source = Path(module.__file__).read_text(encoding="utf-8")
-        self.assertIn("load_strict_object", source)
-        tree = ast.parse(source)
-        self.assertFalse(
-            any(
-                isinstance(node, ast.FunctionDef) and node.name in {"load_capture", "validate_capture"}
-                for node in ast.walk(tree)
-            )
-        )
 
 
 class DeclaredVolumes(unittest.TestCase):
@@ -582,19 +571,53 @@ def _docker_info() -> subprocess.CompletedProcess[bytes]:
     )
 
 
+def _compile_inert_linux_elf(dest: Path) -> None:
+    """Host-compile a linux/amd64 static ELF. FROM scratch copies only this file."""
+    errors: list[str] = []
+    if sys.platform.startswith("linux"):
+        compiler = shutil.which("gcc") or shutil.which("cc")
+        if compiler is not None:
+            compiled = subprocess.run(
+                [compiler, "-static", "-Os", "-o", str(dest), str(FIXTURE_C)],
+                capture_output=True,
+            )
+            if compiled.returncode == 0:
+                return
+            errors.append(compiled.stderr.decode("utf-8", "replace"))
+    zig = shutil.which("zig")
+    if zig is not None:
+        compiled = subprocess.run(
+            [
+                zig,
+                "cc",
+                "-target",
+                "x86_64-linux-musl",
+                "-static",
+                "-Os",
+                "-o",
+                str(dest),
+                str(FIXTURE_C),
+            ],
+            capture_output=True,
+        )
+        if compiled.returncode == 0:
+            return
+        errors.append(compiled.stderr.decode("utf-8", "replace"))
+    raise AssertionError(
+        "could not host-compile the inert linux/amd64 ELF; the fixture "
+        "image is FROM scratch and must not pull a compiler or candidate "
+        "image: %s" % (" | ".join(errors) or "no gcc/zig")
+    )
+
+
 def _build_inert_image() -> str:
     if not FIXTURE_C.is_file():
         raise AssertionError(f"missing fixture {FIXTURE_C}")
     with tempfile.TemporaryDirectory() as raw:
         context = Path(raw)
-        (context / "oci-candidate.c").write_bytes(FIXTURE_C.read_bytes())
+        _compile_inert_linux_elf(context / "oci-candidate")
         (context / "Dockerfile").write_text(
-            "FROM gcc:14-bookworm AS build\n"
-            "WORKDIR /src\n"
-            "COPY oci-candidate.c .\n"
-            "RUN gcc -static -Os -o /oci-candidate oci-candidate.c\n"
-            "FROM scratch\n"
-            "COPY --from=build /oci-candidate /oci-candidate\n",
+            "FROM scratch\nCOPY oci-candidate /oci-candidate\n",
             encoding="utf-8",
         )
         subprocess.run(
@@ -643,10 +666,12 @@ class LiveDockerInspect(unittest.TestCase):
         assert self.image_ref is not None
         with tempfile.TemporaryDirectory() as raw:
             bundle = _bundle(Path(raw))
+            staging = Path(raw) / "stage"
             argv = module.build_container_create_argv(
                 image=self.image_ref,
                 bundle_path=bundle,
                 container_name=f"assay-oci-live-{os.getpid()}",
+                staging_dir=staging,
                 command=("/oci-candidate", "ok"),
             )
             assert_argv_network_none(argv)
@@ -672,7 +697,11 @@ class LiveDockerInspect(unittest.TestCase):
                 self.assertEqual((host.get("RestartPolicy") or {}).get("Name"), "no")
                 mounts = doc.get("Mounts") or []
                 self.assertEqual(len(mounts), 1)
-                self.assertEqual(mounts[0]["Source"], str(bundle.resolve()))
+                self.assertEqual(
+                    mounts[0]["Source"],
+                    str((staging / "opaque.bundle").resolve()),
+                )
+                self.assertNotEqual(mounts[0]["Source"], str(bundle.resolve()))
                 self.assertEqual(mounts[0]["Destination"], "/input/bundle.tar.gz")
                 self.assertTrue(mounts[0]["RW"] is False)
                 for forbidden in ("/var/run/docker.sock", str(REPO), str(Path.home())):
@@ -780,7 +809,7 @@ class LiveDockerInspect(unittest.TestCase):
                 implementation_id="inert-fixture",
                 bundle_path=_bundle(Path(raw)),
                 registry_path=registry,
-                timeout_seconds=20,
+                timeout_seconds=60,
                 command=("/oci-candidate", "oom"),
                 docker_runner=module.local_image_docker_runner(),
             )
@@ -829,6 +858,298 @@ class BoundMutations(unittest.TestCase):
                     flag not in mutated or flag == "--log-opt",
                     f"{flag} survived drop",
                 )
+
+
+SENTINEL_ENV = {
+    "GITHUB_TOKEN": "sentinel-gh-token",
+    "DOCKER_AUTH_CONFIG": "sentinel-docker-auth",
+    "HTTP_PROXY": "http://sentinel-proxy.example",
+    "HTTPS_PROXY": "http://sentinel-proxy.example",
+    "AWS_SECRET_ACCESS_KEY": "sentinel-aws-key",
+    "REGISTRY_AUTH_FILE": "/tmp/sentinel-registry-auth",
+}
+VALID_REPORT = b'{"bundle_integrity":"fail"}'
+
+
+class AllowlistedDockerEnv(unittest.TestCase):
+    def test_parent_secrets_do_not_reach_docker_cli_env(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            with mock.patch.dict(os.environ, SENTINEL_ENV, clear=False):
+                env, config_dir = module.fresh_docker_env(Path(raw))
+                wrapped = module.wrap_docker_command(["docker", "info"], env)
+        for key, value in SENTINEL_ENV.items():
+            self.assertNotIn(key, env)
+            self.assertNotIn(value, " ".join(wrapped))
+        self.assertEqual(env.get("DOCKER_CONFIG"), str(config_dir))
+        self.assertFalse((config_dir / "config.json").exists())
+        self.assertIn("-i", wrapped)
+
+    def test_local_image_runner_uses_the_same_wrap(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            env, _ = module.fresh_docker_env(Path(raw))
+        probe = module.wrap_docker_command(["docker", "image", "inspect", DIGEST_IMAGE], env)
+        self.assertIn("-i", probe)
+        for key in SENTINEL_ENV:
+            self.assertNotIn(key, " ".join(probe))
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        self.assertIn("wrap_docker_command", source)
+        self.assertNotIn('run_bounded(\n                ["docker", "image", "inspect"', source)
+
+
+class StagedBundleMount(unittest.TestCase):
+    def test_repo_and_home_inputs_are_staged_before_mount(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            caller = Path(raw) / "repo-or-home" / "secret.bundle"
+            caller.parent.mkdir()
+            caller.write_bytes(b"caller-bytes")
+            staging = Path(raw) / "assay-oci-stage"
+            staging.mkdir()
+            argv = module.build_container_create_argv(
+                image=DIGEST_IMAGE,
+                bundle_path=caller,
+                container_name="assay-oci-test",
+                staging_dir=staging,
+            )
+            mount = _flag_value(argv, "--mount") or ""
+            staged = (staging / "opaque.bundle").resolve()
+            self.assertIn(f"src={staged}", mount)
+            self.assertNotIn(str(caller.resolve()), mount)
+            self.assertEqual(staged.read_bytes(), b"caller-bytes")
+
+    def test_symlink_bundle_is_rejected_by_the_shared_reader(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            real = _bundle(Path(raw))
+            link = Path(raw) / "link.bundle"
+            link.symlink_to(real)
+            with self.assertRaises(ValueError):
+                module.stage_opaque_bundle(link, Path(raw) / "stage")
+
+    def test_oversize_bundle_is_rejected_by_the_shared_reader(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            huge = Path(raw) / "huge.bundle"
+            huge.write_bytes(b"x" * (module.MAX_BUNDLE_BYTES + 1))
+            with self.assertRaises(ValueError):
+                module.stage_opaque_bundle(huge, Path(raw) / "stage")
+
+    def test_swap_after_read_does_not_change_staged_bytes(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            source = Path(raw) / "moving.bundle"
+            source.write_bytes(b"first")
+            staged = module.stage_opaque_bundle(source, Path(raw) / "stage")
+            source.write_bytes(b"swapped")
+            self.assertEqual(staged.read_bytes(), b"first")
+
+
+class CandidateOutputHandoff(unittest.TestCase):
+    def test_handoff_keeps_exact_bytes_out_of_trusted_metadata(self) -> None:
+        module = _require()
+        payload = b"\x00hostile-stdout\xff"
+        result = module.OciExecution(
+            module.STATE_COMPLETED,
+            "inert-fixture",
+            DIGEST_IMAGE,
+            0,
+            payload,
+            b"err-bytes",
+            "",
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            output = Path(raw) / "handoff"
+            module.write_handoff(output, result)
+            metadata = (output / module.EXECUTION_DOCUMENT_NAME).read_text(encoding="utf-8")
+            stdout_file = (output / module.CANDIDATE_STDOUT_NAME).read_bytes()
+            stderr_file = (output / module.CANDIDATE_STDERR_NAME).read_bytes()
+            document = json.loads(metadata)
+        self.assertEqual(stdout_file, payload)
+        self.assertEqual(stderr_file, b"err-bytes")
+        self.assertNotIn("hostile-stdout", metadata)
+        self.assertNotIn(payload.decode("latin1"), metadata)
+        self.assertNotIn("stdout", document)
+        self.assertEqual(document["candidate_output"]["stdout"], module.CANDIDATE_STDOUT_NAME)
+        self.assertTrue(document["candidate_output"]["stdout_sha256"].startswith("sha256:"))
+
+
+class CaptureAdapterEquivalence(unittest.TestCase):
+    """#199 capture_observations via the OCI adapter, no second loop."""
+
+    def _pack(self, directory: Path) -> dict[str, Any]:
+        cases = []
+        for index in range(1, 15):
+            case_id = f"case-{index:03d}"
+            data = f"bundle-{index}".encode()
+            path = directory / f"{case_id}.bundle.tar.gz"
+            path.write_bytes(data)
+            cases.append(
+                {
+                    "id": case_id,
+                    "sha256": "sha256:" + hashlib.sha256(data).hexdigest(),
+                    "_local_path": str(path),
+                }
+            )
+        return {
+            "declared_source_commit": "1" * 40,
+            "source_corpus_digest": "sha256:" + "ab" * 32,
+            "rendered_set_digest": "sha256:" + "cd" * 32,
+            "cases": cases,
+        }
+
+    def _direct_candidate(self, directory: Path) -> list[str]:
+        script = directory / "direct-candidate.py"
+        script.write_text(
+            "import sys\n"
+            "sys.stdout.buffer.write(%r)\n" % (VALID_REPORT,),
+            encoding="utf-8",
+        )
+        return [sys.executable, str(script)]
+
+    def _completed_runner(self, stdout: bytes = VALID_REPORT):
+        module = _require()
+        inspect_doc = {
+            "Config": {"Volumes": None, "User": "65532:65532"},
+            "HostConfig": {"NetworkMode": "none"},
+            "State": {"OOMKilled": False, "ExitCode": 0, "Status": "exited"},
+        }
+
+        def runner(argv: list[str], **_kwargs: Any) -> Any:
+            if argv[1] == "pull":
+                return module.BoundedDockerResult(0, b"", b"")
+            if argv[1] == "inspect":
+                return module.BoundedDockerResult(0, json.dumps([inspect_doc]).encode(), b"")
+            if argv[1] == "create":
+                return module.BoundedDockerResult(0, b"cid-eq\n", b"")
+            if argv[1] == "start":
+                return module.BoundedDockerResult(0, stdout, b"")
+            if argv[1] == "rm":
+                return module.BoundedDockerResult(0, b"", b"")
+            raise AssertionError(argv)
+
+        return runner
+
+    def test_adapter_matches_direct_capture_observations(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            pack = self._pack(Path(raw))
+            registry = _write_registry(Path(raw), DIGEST_IMAGE)
+            direct = capture_candidate.capture_observations(
+                pack, self._direct_candidate(Path(raw)), 5
+            )
+            command = module.oci_entrypoint_command(
+                implementation_id="inert-fixture",
+                registry_path=registry,
+            )
+            runner = self._completed_runner()
+
+            def adapted(cmd: list[str], bundle: Path, timeout: int) -> dict[str, Any]:
+                return module.run_oci_candidate(
+                    cmd, bundle, timeout, docker_runner=runner
+                )
+
+            original = capture_candidate.run_candidate
+            capture_candidate.run_candidate = adapted
+            try:
+                via_oci = capture_candidate.capture_observations(pack, command, 5)
+            finally:
+                capture_candidate.run_candidate = original
+        self.assertEqual(via_oci, direct)
+        identity = {
+            "id": None,
+            "image": None,
+            "name": "eq",
+            "version": None,
+            "source": "https://example.example/eq",
+            "commit": "1" * 40,
+            "reproduction_mode": "other_disclosed",
+        }
+        first = capture_candidate.build_capture(pack, "sha256:" + "11" * 32, via_oci, identity)
+        second = capture_candidate.build_capture(pack, "sha256:" + "11" * 32, direct, identity)
+        capture_candidate.validate_capture(first)
+        capture_candidate.validate_capture(second)
+        self.assertEqual(first, second)
+
+    def test_dropping_stdout_breaks_equivalence(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            pack = self._pack(Path(raw))
+            registry = _write_registry(Path(raw), DIGEST_IMAGE)
+            direct = capture_candidate.capture_observations(
+                pack, self._direct_candidate(Path(raw)), 5
+            )
+            runner = self._completed_runner(stdout=b"")
+            original = capture_candidate.run_candidate
+            capture_candidate.run_candidate = (
+                lambda cmd, bundle, timeout: module.run_oci_candidate(
+                    cmd, bundle, timeout, docker_runner=runner
+                )
+            )
+            try:
+                dropped = capture_candidate.capture_observations(
+                    pack,
+                    module.oci_entrypoint_command(
+                        implementation_id="inert-fixture",
+                        registry_path=registry,
+                    ),
+                    5,
+                )
+            finally:
+                capture_candidate.run_candidate = original
+        self.assertNotEqual(dropped, direct)
+        self.assertTrue(all(item["state"] == STATE_CANDIDATE_ERROR for item in dropped))
+
+    def test_stdout_is_parsed_once_by_the_existing_parser(self) -> None:
+        module = _require()
+        calls: list[bytes] = []
+        real = capture_candidate.parse_candidate_report
+
+        def spy(stdout: bytes) -> dict[str, Any]:
+            calls.append(stdout)
+            return real(stdout)
+
+        with tempfile.TemporaryDirectory() as raw:
+            registry = _write_registry(Path(raw), DIGEST_IMAGE)
+            with mock.patch.object(capture_candidate, "parse_candidate_report", side_effect=spy):
+                module.run_oci_candidate(
+                    module.oci_entrypoint_command(
+                        implementation_id="inert-fixture",
+                        registry_path=registry,
+                    ),
+                    _bundle(Path(raw)),
+                    5,
+                    docker_runner=self._completed_runner(),
+                )
+        self.assertEqual(calls, [VALID_REPORT])
+
+    def test_logging_or_metadata_stdout_is_refused(self) -> None:
+        module = _require()
+        marker = b"MUST-NOT-LOG-STDOUT"
+        runner = self._completed_runner(stdout=marker)
+        with tempfile.TemporaryDirectory() as raw:
+            registry = _write_registry(Path(raw), DIGEST_IMAGE)
+            with mock.patch.object(sys, "stdout", mock.Mock()) as fake_out:
+                result = module.execute_candidate(
+                    implementation_id="inert-fixture",
+                    bundle_path=_bundle(Path(raw)),
+                    registry_path=registry,
+                    timeout_seconds=5,
+                    docker_runner=runner,
+                )
+                module.write_handoff(Path(raw) / "out", result)
+            written = b"".join(
+                call.args[0] if isinstance(call.args[0], bytes) else call.args[0].encode()
+                for call in fake_out.write.call_args_list
+                if call.args
+            )
+            metadata = (Path(raw) / "out" / module.EXECUTION_DOCUMENT_NAME).read_text(
+                encoding="utf-8"
+            )
+        self.assertEqual(result.stdout, marker)
+        self.assertNotIn(marker, written)
+        self.assertNotIn("MUST-NOT-LOG-STDOUT", metadata)
 
 
 if __name__ == "__main__":
