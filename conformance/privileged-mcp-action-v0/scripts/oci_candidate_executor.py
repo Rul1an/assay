@@ -107,6 +107,9 @@ class DockerCommandError(RuntimeError):
     """A docker CLI invocation failed before a named limit applied."""
 
 
+DOCKER_LIFECYCLE_ERRORS = (DockerCommandError, ProcessLimitError, OSError)
+
+
 @dataclass(frozen=True)
 class BoundedDockerResult:
     returncode: int
@@ -326,7 +329,10 @@ def local_image_docker_runner() -> DockerRunner:
 
 
 def _parse_inspect(payload: bytes) -> dict[str, Any]:
-    document = json.loads(payload.decode("utf-8"))
+    try:
+        document = json.loads(payload.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise DockerCommandError("docker inspect did not return an object") from exc
     if not isinstance(document, list) or not document or not isinstance(document[0], dict):
         raise DockerCommandError("docker inspect did not return an object")
     return document[0]
@@ -370,7 +376,7 @@ def execute_candidate(
                     env=env,
                     timeout_seconds=60,
                 )
-            except (DockerCommandError, ProcessLimitError, OSError) as exc:
+            except DOCKER_LIFECYCLE_ERRORS as exc:
                 return OciExecution(
                     STATE_PULL_FAILURE, implementation_id, image, None, b"", b"", str(exc)
                 )
@@ -381,26 +387,29 @@ def execute_candidate(
                 return OciExecution(
                     STATE_CREATE_FAILURE, implementation_id, image, None, b"", b"", str(exc)
                 )
-            except (DockerCommandError, ProcessLimitError, json.JSONDecodeError) as exc:
+            except DOCKER_LIFECYCLE_ERRORS as exc:
                 return OciExecution(
                     STATE_CREATE_FAILURE, implementation_id, image, None, b"", b"", str(exc)
                 )
             name = f"assay-oci-{os.getpid()}-{uuid.uuid4().hex[:8]}"
             try:
-                created = runner(
-                    build_container_create_argv(
-                        image=image,
-                        bundle_path=bundle_path,
-                        container_name=name,
-                        staging_dir=staging_dir,
-                        command=command,
-                    ),
-                    env=env,
-                )
+                try:
+                    created = runner(
+                        build_container_create_argv(
+                            image=image,
+                            bundle_path=bundle_path,
+                            container_name=name,
+                            staging_dir=staging_dir,
+                            command=command,
+                        ),
+                        env=env,
+                    )
+                except ValueError as exc:
+                    raise DockerCommandError(str(exc)) from exc
                 container_id = created.stdout.decode("utf-8", "replace").strip()
                 if not container_id:
                     raise DockerCommandError("docker create returned no container id")
-            except (DockerCommandError, ProcessLimitError, ValueError) as exc:
+            except DOCKER_LIFECYCLE_ERRORS as exc:
                 return OciExecution(
                     STATE_CREATE_FAILURE, implementation_id, image, None, b"", b"", str(exc)
                 )
@@ -415,11 +424,11 @@ def execute_candidate(
                 )
                 stdout = started.stdout
                 stderr = started.stderr
-            except ProcessLimitError as exc:
-                state = _limit_state(exc)
-                error = str(exc)
-            except DockerCommandError as exc:
-                state = STATE_START_FAILURE
+            except DOCKER_LIFECYCLE_ERRORS as exc:
+                if isinstance(exc, ProcessLimitError):
+                    state = _limit_state(exc)
+                else:
+                    state = STATE_START_FAILURE
                 error = str(exc)
             try:
                 container = _parse_inspect(
@@ -433,7 +442,7 @@ def execute_candidate(
                     error = error or "container OOMKilled"
                 if state is None:
                     state = STATE_COMPLETED
-            except (DockerCommandError, ProcessLimitError, json.JSONDecodeError) as exc:
+            except DOCKER_LIFECYCLE_ERRORS as exc:
                 if state is None:
                     state = STATE_START_FAILURE
                     error = str(exc)
@@ -444,7 +453,7 @@ def execute_candidate(
                         ["docker", "rm", "--force", "--volumes", container_id],
                         env=env,
                     )
-                except (DockerCommandError, ProcessLimitError) as exc:
+                except DOCKER_LIFECYCLE_ERRORS as exc:
                     state = STATE_CLEANUP_FAILURE
                     error = str(exc)
     if state is None:
@@ -498,20 +507,13 @@ def write_handoff(output_dir: Path, result: OciExecution) -> None:
         raise
 
 
-def oci_entrypoint_command(
-    *,
-    implementation_id: str,
-    registry_path: Path | None = None,
-) -> list[str]:
-    command = [
+def oci_entrypoint_command(*, implementation_id: str) -> list[str]:
+    return [
         sys.executable,
         str(Path(__file__).resolve()),
         "--implementation-id",
         implementation_id,
     ]
-    if registry_path is not None:
-        command.extend(["--registry", str(registry_path)])
-    return command
 
 
 def parse_oci_command(command: list[str]) -> argparse.Namespace:
@@ -529,13 +531,14 @@ def run_oci_candidate(
     timeout_seconds: int,
     *,
     docker_runner: DockerRunner | None = None,
+    registry_path: Path | None = None,
 ) -> dict[str, Any]:
     """Same shape as `capture_candidate.run_candidate` for the shared loop."""
     args = parse_oci_command(command)
     result = execute_candidate(
         implementation_id=args.implementation_id,
         bundle_path=bundle,
-        registry_path=args.registry,
+        registry_path=registry_path,
         timeout_seconds=timeout_seconds,
         docker_runner=docker_runner,
     )
@@ -564,7 +567,6 @@ def capture_oci_observations(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--implementation-id", required=True)
-    parser.add_argument("--registry", type=Path)
     parser.add_argument("--pack", type=Path)
     parser.add_argument("--bundle", type=Path)
     parser.add_argument("--output", type=Path)
@@ -577,14 +579,11 @@ def write_validated_capture(
     implementation_id: str,
     output: Path,
     *,
-    registry_path: Path | None,
+    registry_path: Path | None = None,
     timeout_seconds: int,
 ) -> None:
     row = implementation_from_registry(implementation_id, registry_path)
-    command = oci_entrypoint_command(
-        implementation_id=implementation_id,
-        registry_path=registry_path,
-    )
+    command = oci_entrypoint_command(implementation_id=implementation_id)
     with tempfile.TemporaryDirectory() as tmp:
         pack = capture_candidate.load_pack(pack_path, Path(tmp))
         pack_digest = capture_candidate.sha256_file(pack_path)
@@ -618,7 +617,6 @@ def main(argv: list[str] | None = None) -> int:
                 args.pack,
                 args.implementation_id,
                 args.output,
-                registry_path=args.registry,
                 timeout_seconds=args.timeout_seconds,
             )
         except (
@@ -641,7 +639,6 @@ def main(argv: list[str] | None = None) -> int:
         result = execute_candidate(
             implementation_id=args.implementation_id,
             bundle_path=args.bundle,
-            registry_path=args.registry,
             timeout_seconds=args.timeout_seconds,
         )
     except (ImplementationRegistryError, ValueError, OSError) as error:

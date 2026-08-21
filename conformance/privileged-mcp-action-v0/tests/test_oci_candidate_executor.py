@@ -43,6 +43,7 @@ except ModuleNotFoundError as exc:
 
 import capture_candidate
 import implementations
+from bounded_process import ProcessLimitError
 from capture_format import (  # noqa: E402
     CAPTURE_SCHEMA,
     STATE_CANDIDATE_ERROR,
@@ -373,6 +374,21 @@ class RegistrySelection(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unrecognized arguments", result.stderr)
 
+    def test_public_cli_rejects_registry_override(self) -> None:
+        module = _require()
+        with self.assertRaises(SystemExit):
+            module.parse_args(
+                [
+                    "--implementation-id",
+                    "inert-fixture",
+                    "--registry",
+                    "/tmp/implementations.json",
+                ]
+            )
+        self.assertNotIn("--registry", inspect.getsource(module.parse_args))
+        self.assertNotIn("--registry", inspect.getsource(module.oci_entrypoint_command))
+        self.assertNotIn("--registry", inspect.getsource(module.main))
+
 
 class NamedExecutionStates(unittest.TestCase):
     def test_named_states_are_never_agreement(self) -> None:
@@ -554,6 +570,75 @@ class LifecycleClassification(unittest.TestCase):
             )
         self.assertEqual(result.state, module.STATE_CREATE_FAILURE)
         self.assertNotIn(result.state, AGREEMENT)
+
+    def test_create_oserror_is_named_create_failure(self) -> None:
+        module = _require()
+        inspect_doc = {
+            "Config": {"Volumes": None, "User": "65532:65532"},
+            "HostConfig": {"NetworkMode": "none"},
+        }
+
+        def runner(argv: list[str], **_kwargs: Any) -> Any:
+            if argv[1] == "pull":
+                return module.BoundedDockerResult(0, b"", b"")
+            if argv[1] == "inspect":
+                return module.BoundedDockerResult(0, json.dumps([inspect_doc]).encode(), b"")
+            if argv[1] == "create":
+                raise OSError("create refused")
+            raise AssertionError(argv)
+
+        with tempfile.TemporaryDirectory() as raw:
+            result = module.execute_candidate(
+                implementation_id="inert-fixture",
+                bundle_path=_bundle(Path(raw)),
+                registry_path=_write_registry(Path(raw), DIGEST_IMAGE),
+                timeout_seconds=2,
+                docker_runner=runner,
+            )
+        self.assertEqual(result.state, module.STATE_CREATE_FAILURE)
+        self.assertNotIn(result.state, AGREEMENT)
+
+    def test_cleanup_oserror_is_named_cleanup_failure(self) -> None:
+        module = _require()
+        inspect_doc = {
+            "Config": {"Volumes": None, "User": "65532:65532"},
+            "HostConfig": {"NetworkMode": "none"},
+            "State": {"OOMKilled": False, "ExitCode": 0, "Status": "exited"},
+        }
+
+        def runner(argv: list[str], **_kwargs: Any) -> Any:
+            if argv[1] == "pull":
+                return module.BoundedDockerResult(0, b"", b"")
+            if argv[1] == "inspect":
+                return module.BoundedDockerResult(0, json.dumps([inspect_doc]).encode(), b"")
+            if argv[1] == "create":
+                return module.BoundedDockerResult(0, b"cid-os\n", b"")
+            if argv[1] == "start":
+                return module.BoundedDockerResult(0, b"", b"")
+            if argv[1] == "rm":
+                raise OSError("rm refused")
+            raise AssertionError(argv)
+
+        with tempfile.TemporaryDirectory() as raw:
+            result = module.execute_candidate(
+                implementation_id="inert-fixture",
+                bundle_path=_bundle(Path(raw)),
+                registry_path=_write_registry(Path(raw), DIGEST_IMAGE),
+                timeout_seconds=2,
+                docker_runner=runner,
+            )
+        self.assertEqual(result.state, module.STATE_CLEANUP_FAILURE)
+        self.assertNotIn(result.state, AGREEMENT)
+
+    def test_lifecycle_errors_are_one_shared_tuple(self) -> None:
+        module = _require()
+        self.assertEqual(
+            module.DOCKER_LIFECYCLE_ERRORS,
+            (module.DockerCommandError, ProcessLimitError, OSError),
+        )
+        execute_src = inspect.getsource(module.execute_candidate)
+        self.assertIn("DOCKER_LIFECYCLE_ERRORS", execute_src)
+        self.assertNotIn("except (DockerCommandError", execute_src)
 
 
 class ConformanceCiContract(unittest.TestCase):
@@ -1126,13 +1211,11 @@ class CaptureAdapterEquivalence(unittest.TestCase):
             direct = capture_candidate.capture_observations(
                 pack, self._direct_candidate(Path(raw)), 5
             )
-            command = module.oci_entrypoint_command(
-                implementation_id="inert-fixture",
-                registry_path=registry,
-            )
+            command = module.oci_entrypoint_command(implementation_id="inert-fixture")
             bound = functools.partial(
                 module.run_oci_candidate,
                 docker_runner=self._completed_runner(),
+                registry_path=registry,
             )
             via_oci = capture_candidate.capture_observations(
                 pack,
@@ -1169,14 +1252,12 @@ class CaptureAdapterEquivalence(unittest.TestCase):
             )
             dropped = capture_candidate.capture_observations(
                 pack,
-                module.oci_entrypoint_command(
-                    implementation_id="inert-fixture",
-                    registry_path=registry,
-                ),
+                module.oci_entrypoint_command(implementation_id="inert-fixture"),
                 5,
                 candidate_runner=functools.partial(
                     module.run_oci_candidate,
                     docker_runner=self._completed_runner(stdout=b""),
+                    registry_path=registry,
                 ),
             )
         self.assertNotEqual(dropped, direct)
@@ -1195,13 +1276,11 @@ class CaptureAdapterEquivalence(unittest.TestCase):
             registry = _write_registry(Path(raw), DIGEST_IMAGE)
             with mock.patch.object(capture_candidate, "parse_candidate_report", side_effect=spy):
                 module.run_oci_candidate(
-                    module.oci_entrypoint_command(
-                        implementation_id="inert-fixture",
-                        registry_path=registry,
-                    ),
+                    module.oci_entrypoint_command(implementation_id="inert-fixture"),
                     _bundle(Path(raw)),
                     5,
                     docker_runner=self._completed_runner(),
+                    registry_path=registry,
                 )
         self.assertEqual(calls, [VALID_REPORT])
 
@@ -1308,24 +1387,29 @@ class PackCaptureCli(unittest.TestCase):
             registry = _write_registry(Path(raw), DIGEST_IMAGE)
             output = Path(raw) / "capture.json"
             printed = mock.Mock()
+            parsed = module.parse_args(
+                [
+                    "--pack",
+                    str(pack),
+                    "--implementation-id",
+                    "inert-fixture",
+                    "--output",
+                    str(output),
+                ]
+            )
+            self.assertFalse(hasattr(parsed, "registry"))
             with (
                 mock.patch.object(module, "run_oci_candidate", side_effect=self._fake_runner),
                 mock.patch.object(sys, "stdout", printed),
             ):
-                code = module.main(
-                    [
-                        "--pack",
-                        str(pack),
-                        "--implementation-id",
-                        "inert-fixture",
-                        "--registry",
-                        str(registry),
-                        "--output",
-                        str(output),
-                    ]
+                module.write_validated_capture(
+                    pack,
+                    "inert-fixture",
+                    output,
+                    registry_path=registry,
+                    timeout_seconds=30,
                 )
             document = json.loads(output.read_text(encoding="utf-8"))
-        self.assertEqual(code, 0)
         validate_capture(document)
         self.assertEqual(document["schema"], CAPTURE_SCHEMA)
         self.assertEqual(document["implementation"]["id"], "inert-fixture")
@@ -1350,19 +1434,14 @@ class PackCaptureCli(unittest.TestCase):
                     return_value={"schema": "not-a-capture"},
                 ),
             ):
-                code = module.main(
-                    [
-                        "--pack",
-                        str(pack),
-                        "--implementation-id",
+                with self.assertRaises(ValueError):
+                    module.write_validated_capture(
+                        pack,
                         "inert-fixture",
-                        "--registry",
-                        str(registry),
-                        "--output",
-                        str(output),
-                    ]
-                )
-            self.assertEqual(code, 2)
+                        output,
+                        registry_path=registry,
+                        timeout_seconds=30,
+                    )
             self.assertFalse(output.exists())
 
     def test_pack_cli_rejects_direct_image(self) -> None:
