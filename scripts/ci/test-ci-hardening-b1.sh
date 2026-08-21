@@ -563,31 +563,27 @@ fi
 
 echo "== required CI workflow actively runs both hardening contracts =="
 # Without a workflow invocation, every GitHub check can stay green while these
-# regressions return. The scope job is always required by the CI aggregator.
+# regressions return. The final CI job is the required aggregator.
 if python3 - "${CI_WF}" <<'PY'
 import re
 import sys
 
 text = open(sys.argv[1]).read()
-match = re.search(r"(?ms)^  scope:\n(.*?)(?=^  [a-zA-Z][\w-]*:|\Z)", text)
+match = re.search(r"(?ms)^  ci:\n(.*?)(?=^  [a-zA-Z][\w-]*:|\Z)", text)
 if not match:
-    sys.exit("scope job missing from ci.yml")
+    sys.exit("ci job missing from ci.yml")
 section = match.group(1)
 # Reject if/continue-on-error on the hardening step itself.
 heading = "      - name: Verify CI hardening contracts\n"
 start = section.find(heading)
 if start < 0:
-    sys.exit("scope job missing 'Verify CI hardening contracts' step")
+    sys.exit("ci job missing 'Verify CI hardening contracts' step")
 rest = section[start + len(heading):]
 nxt = re.search(r"(?m)^      - ", rest)
 body = rest if nxt is None else rest[:nxt.start()]
 for forbidden in ("if:", "continue-on-error:"):
     if re.search(rf"(?m)^        {re.escape(forbidden)}", body):
         sys.exit(f"hardening step must not use {forbidden}")
-required_env = ("GH_TOKEN: ${{ github.token }}",)
-missing_env = [entry for entry in required_env if entry not in body]
-if missing_env:
-    sys.exit("hardening step environment missing: " + ", ".join(missing_env))
 run_at = body.find("        run: |\n")
 if run_at < 0:
     sys.exit("hardening step missing run script")
@@ -612,9 +608,9 @@ if active != list(required):
 sys.exit(0)
 PY
 then
-  ok "ci.yml scope job actively runs both hardening contract scripts"
+  ok "ci.yml ci job actively runs both hardening contract scripts"
 else
-  fail "ci.yml does not actively invoke both hardening contracts in the scope job"
+  fail "ci.yml does not actively invoke both hardening contracts in the ci job"
 fi
 
 echo "== required CI workflow actively runs evidence-vocabulary self-test and live checker =="

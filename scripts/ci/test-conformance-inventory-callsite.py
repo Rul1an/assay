@@ -22,13 +22,21 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "conformance/tests"))
 
-from test_completion_scope import _active_run_lines, named_step  # noqa: E402
+from test_completion_scope import (  # noqa: E402
+    TRUSTED_PREFIX_WRITERS,
+    _active_run_lines,
+    named_step,
+)
 
 CHECKER_PATH = REPO / "scripts/ci/check-conformance-inventory-callsite.py"
 B1_PATH = REPO / "scripts/ci/test-ci-hardening-b1.sh"
 CI_YML = REPO / ".github/workflows/ci.yml"
 JOB = "scope"
 INVENTORY_STEP = "Conformance inventory"
+HARDENING_STEP = "Verify CI hardening contracts"
+FINALE_JOB = "ci"
+FINALE_STEP = "Verify this gate waits on every gating job"
+FINALE_CHECKER = "python3 scripts/ci/check-conformance-inventory-callsite.py"
 
 # Independent oracle. Do not import the completion-scope run-script tuple.
 REQUIRED_INVENTORY_COMMANDS = (
@@ -194,6 +202,87 @@ STRUCTURAL_MUTATIONS = (
 )
 
 
+def hardening_heading(text: str) -> str:
+    heading = f"      - name: {HARDENING_STEP}\n"
+    if heading not in text:
+        raise AssertionError("hardening step heading missing")
+    return heading
+
+
+def delete_hardening_step(text: str) -> str:
+    for job in (FINALE_JOB, JOB):
+        try:
+            step = named_step(text, job, HARDENING_STEP)
+        except AssertionError:
+            continue
+        mutated = text.replace(step, "", 1)
+        if mutated == text or f"      - name: {HARDENING_STEP}\n" in mutated:
+            raise AssertionError("delete-hardening mutation was a no-op")
+        return mutated
+    raise AssertionError("hardening step missing")
+
+
+def rename_hardening_step(text: str) -> str:
+    mutated = text.replace(
+        hardening_heading(text),
+        "      - name: Verify CI hardening contract\n",
+        1,
+    )
+    if mutated == text:
+        raise AssertionError("rename-hardening mutation was a no-op")
+    return mutated
+
+
+def false_if_hardening(text: str) -> str:
+    needle = hardening_heading(text)
+    mutated = text.replace(needle, needle + "        if: false\n", 1)
+    if mutated == text:
+        raise AssertionError("if:false hardening mutation was a no-op")
+    return mutated
+
+
+def hostile_hardening_shell(text: str) -> str:
+    needle = hardening_heading(text) + "        shell: bash\n"
+    mutated = text.replace(
+        needle,
+        hardening_heading(text) + '        shell: bash -c "exit 0" {0}\n',
+        1,
+    )
+    if mutated == text:
+        raise AssertionError("hostile-shell mutation was a no-op")
+    return mutated
+
+
+def bash_env_before_hardening(text: str) -> str:
+    needle = hardening_heading(text)
+    writer = TRUSTED_PREFIX_WRITERS[0][1]
+    mutated = text.replace(needle, writer + needle, 1)
+    if mutated == text:
+        raise AssertionError("BASH_ENV writer mutation was a no-op")
+    return mutated
+
+
+def neutralize_finale_checker(text: str) -> str:
+    step = named_step(text, FINALE_JOB, FINALE_STEP)
+    needle = f"          {FINALE_CHECKER}\n"
+    if needle not in step:
+        raise AssertionError("finale checker callsite missing")
+    mutated_step = step.replace(needle, "", 1)
+    mutated = text.replace(step, mutated_step, 1)
+    if mutated == text:
+        raise AssertionError("finale-checker neutralization was a no-op")
+    return mutated
+
+
+HARDENING_EXECUTION_MUTATIONS = (
+    ("delete_hardening_step", delete_hardening_step),
+    ("rename_hardening_step", rename_hardening_step),
+    ("false_if_hardening", false_if_hardening),
+    ("hostile_hardening_shell", hostile_hardening_shell),
+    ("bash_env_before_hardening", bash_env_before_hardening),
+)
+
+
 class ConformanceInventoryCallsite(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -221,7 +310,7 @@ class ConformanceInventoryCallsite(unittest.TestCase):
     def test_pristine_workflow_is_green(self) -> None:
         self.assertEqual(self.problems_fn(self.live), [])
         self.assertEqual(self.guards_fn(self.live), [])
-        step = named_step(self.live, JOB, "Verify CI hardening contracts")
+        step = named_step(self.live, FINALE_JOB, HARDENING_STEP)
         self.assertEqual(tuple(_active_run_lines(step)), HARDENING_STEP_COMMANDS)
 
     def test_live_inventory_step_matches_independent_literals(self) -> None:
@@ -292,6 +381,22 @@ class ConformanceInventoryCallsite(unittest.TestCase):
                     f"{label} must fail the B1 hardening-step pin",
                 )
         self.assertEqual(b1_hardening_pin_rc(self.live), 0)
+
+    def test_hardening_execution_removal_fails_the_required_root(self) -> None:
+        self.assertEqual(self.guards_fn(self.live), [])
+        for label, mutate in HARDENING_EXECUTION_MUTATIONS:
+            with self.subTest(label=label):
+                problems = self.guards_fn(mutate(self.live))
+                self.assertTrue(
+                    problems,
+                    f"{label} must fail the hardening hard-run contract",
+                )
+        self.assertEqual(self.guards_fn(self.live), [])
+
+    def test_finale_ci_invokes_the_hardening_checker(self) -> None:
+        step = named_step(self.live, FINALE_JOB, FINALE_STEP)
+        self.assertIn(FINALE_CHECKER, _active_run_lines(step))
+        self.assertTrue(self.guards_fn(neutralize_finale_checker(self.live)))
 
 
 if __name__ == "__main__":

@@ -3,8 +3,9 @@
 
 The inventory tests already encode this contract, but they execute inside the
 step they guard. Required CI therefore invokes this module from the later
-hardening step. This file does not parse workflow YAML; it calls
-assert_hard_run_command and named_step/_active_run_lines.
+hardening step and again from the final required CI job. This file does not
+parse workflow YAML; it calls assert_hard_run_command and
+named_step/_active_run_lines.
 Canonical CI always reads the committed CI_YML. Tests inject text at the
 function seam.
 """
@@ -26,11 +27,10 @@ from test_completion_scope import (  # noqa: E402
 CI_YML = REPO / ".github/workflows/ci.yml"
 JOB = "scope"
 INVENTORY_STEP = "Conformance inventory"
+HARDENING_JOB = "ci"
 HARDENING_STEP = "Verify CI hardening contracts"
-HARDENING_GUARD_COMMANDS = (
-    "python3 scripts/ci/check-conformance-inventory-callsite.py",
-    "python3 scripts/ci/test-conformance-inventory-callsite.py",
-)
+FINALE_STEP = "Verify this gate waits on every gating job"
+FINALE_CHECKER = "python3 scripts/ci/check-conformance-inventory-callsite.py"
 
 
 def conformance_inventory_callsite_problems(text: str) -> list[str]:
@@ -44,16 +44,19 @@ def conformance_inventory_callsite_problems(text: str) -> list[str]:
 
 def hardening_guard_callsite_problems(text: str) -> list[str]:
     try:
-        step = named_step(text, JOB, HARDENING_STEP)
+        assert_hard_run_command(text, HARDENING_JOB, HARDENING_STEP)
     except AssertionError as exc:
-        message = str(exc).strip() or "hardening step missing"
-        return [message]
-    active = _active_run_lines(step)
-    return [
-        f"hardening step missing active {command}"
-        for command in HARDENING_GUARD_COMMANDS
-        if command not in active
-    ]
+        problems = [str(exc).strip() or "hardening hard-run contract failed"]
+    else:
+        problems = []
+    try:
+        step = named_step(text, HARDENING_JOB, FINALE_STEP)
+    except AssertionError as exc:
+        problems.append(str(exc).strip() or "finale CI checker step missing")
+        return problems
+    if FINALE_CHECKER not in _active_run_lines(step):
+        problems.append("finale CI missing active hardening-step checker")
+    return problems
 
 
 def main() -> int:

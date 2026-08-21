@@ -49,6 +49,15 @@ INVENTORY_RUN_SCRIPT = (
     "python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py",
     REQUIRED_RUN_ALL,
 )
+HARDENING_RUN_SCRIPT = (
+    "set -euo pipefail",
+    "bash scripts/ci/test-check-assay-release-pin.sh",
+    "bash scripts/ci/check-assay-release-pin.sh --published",
+    "bash scripts/ci/test-ci-hardening-b1.sh",
+    "bash scripts/ci/test-structurizr-export-docker.sh",
+    "python3 scripts/ci/check-conformance-inventory-callsite.py",
+    "python3 scripts/ci/test-conformance-inventory-callsite.py",
+)
 ACTIVATION_KIT_RUN_SCRIPT = (
     "set -euo pipefail",
     REVISION_WITNESS,
@@ -69,6 +78,14 @@ HARD_RUN_CONTRACTS = {
         ACTIVATION_KIT_RUN_SCRIPT,
         frozenset({"name", "on", "permissions", "concurrency", "jobs"}),
         frozenset(),
+    ),
+    ("ci", "Verify CI hardening contracts"): (
+        frozenset({"name", "runs-on", "timeout-minutes", "if", "needs",
+                   "permissions", "steps"}),
+        frozenset({"name", "shell", "run"}),
+        HARDENING_RUN_SCRIPT,
+        frozenset({"name", "on", "permissions", "env", "jobs"}),
+        frozenset({"ASSAY_PUBLIC_MSRV"}),
     ),
 }
 CHECKOUT_REF = "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
@@ -93,6 +110,14 @@ TRUSTED_PREFIX_CONTRACTS = {
         (frozenset({"name", "uses", "with"}),
          {"name": "Set up Python", "uses": SETUP_PYTHON_REF},
          {"python-version": "3.13.8"}),
+    ),
+    ("ci", "Verify CI hardening contracts"): (
+        (frozenset({"uses", "with"}),
+         {"uses": CHECKOUT_REF},
+         {"persist-credentials": "false"}),
+        (frozenset({"uses", "with"}),
+         {"uses": SETUP_PYTHON_REF},
+         {"python-version": "3.12"}),
     ),
 }
 ACTIVATION_KIT = (
