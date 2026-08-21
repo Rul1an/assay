@@ -27,15 +27,14 @@ sys.path.insert(0, str(REPO / "conformance/tests"))
 
 import registry  # noqa: E402
 import run_all  # noqa: E402
-from test_completion_scope import assert_hard_run_command, named_step  # noqa: E402
+from test_completion_scope import (  # noqa: E402
+    REQUIRED_RUN_ALL,
+    assert_hard_run_command,
+    named_step,
+)
 
 CI_YML = REPO / ".github/workflows/ci.yml"
 STANDALONE = REPO / ".github/workflows/conformance-inventory.yml"
-RUN_ALL_COMMAND = (
-    "python3 conformance/run_all.py --require-complete --completion-scope required"
-)
-
-
 POLICIES = ("required", "optional", "external-candidate")
 
 
@@ -326,7 +325,7 @@ class ProductWorkflow(unittest.TestCase):
     def test_scope_job_invokes_require_complete_as_a_hard_check(self):
         text = CI_YML.read_text(encoding="utf-8")
         step = assert_hard_run_command(
-            text, "scope", "Conformance inventory", RUN_ALL_COMMAND)
+            text, "scope", "Conformance inventory")
         self.assertIn("python3 conformance/registry.py", step)
 
     def test_scope_job_invokes_completion_scope_suite(self):
@@ -365,17 +364,17 @@ class ProductWorkflow(unittest.TestCase):
 
     def test_commented_run_all_command_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")
-        mutated = text.replace(RUN_ALL_COMMAND, "# " + RUN_ALL_COMMAND, 1)
+        mutated = text.replace(REQUIRED_RUN_ALL, "# " + REQUIRED_RUN_ALL, 1)
         with self.assertRaises(AssertionError):
             assert_hard_run_command(
-                mutated, "scope", "Conformance inventory", RUN_ALL_COMMAND)
+                mutated, "scope", "Conformance inventory")
 
     def test_softened_run_all_command_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")
-        mutated = text.replace(RUN_ALL_COMMAND, RUN_ALL_COMMAND + " || true", 1)
+        mutated = text.replace(REQUIRED_RUN_ALL, REQUIRED_RUN_ALL + " || true", 1)
         with self.assertRaises(AssertionError):
             assert_hard_run_command(
-                mutated, "scope", "Conformance inventory", RUN_ALL_COMMAND)
+                mutated, "scope", "Conformance inventory")
 
     def test_conditional_scope_job_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")
@@ -386,7 +385,7 @@ class ProductWorkflow(unittest.TestCase):
         )
         with self.assertRaises(AssertionError):
             assert_hard_run_command(
-                mutated, "scope", "Conformance inventory", RUN_ALL_COMMAND)
+                mutated, "scope", "Conformance inventory")
 
     def test_softened_scope_job_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")
@@ -397,21 +396,64 @@ class ProductWorkflow(unittest.TestCase):
         )
         with self.assertRaises(AssertionError):
             assert_hard_run_command(
-                mutated, "scope", "Conformance inventory", RUN_ALL_COMMAND)
+                mutated, "scope", "Conformance inventory")
+
+    def test_quoted_scope_job_and_inventory_step_keys_fail(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        job = "  scope:\n"
+        step = "      - name: Conformance inventory\n"
+        mutations = (
+            ("job double if", job,
+             job + "    \"if\": ${{ github.event_name == 'disabled' }}\n"),
+            ("job single continue", job,
+             job + "    'continue-on-error': true\n"),
+            ("step double if", step,
+             step + "        \"if\": ${{ github.event_name == 'disabled' }}\n"),
+            ("step single continue", step,
+             step + "        'continue-on-error': true\n"),
+        )
+        for label, needle, replacement in mutations:
+            with self.subTest(label=label):
+                with self.assertRaises(AssertionError):
+                    assert_hard_run_command(
+                        text.replace(needle, replacement, 1),
+                        "scope", "Conformance inventory")
+
+    def test_shell_neutralizers_fail_the_inventory_guard(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        step = named_step(text, "scope", "Conformance inventory")
+        mutations = (
+            step.replace(
+                "          set -euo pipefail\n",
+                "          set -euo pipefail\n          set +o errexit\n",
+                1,
+            ).replace(REQUIRED_RUN_ALL, REQUIRED_RUN_ALL + "\n          true", 1),
+            step.replace(
+                "          set -euo pipefail\n",
+                "          set -euo pipefail\n          python3() { :; }\n",
+                1,
+            ),
+        )
+        for index, mutated_step in enumerate(mutations):
+            with self.subTest(index=index):
+                with self.assertRaises(AssertionError):
+                    assert_hard_run_command(
+                        text.replace(step, mutated_step, 1),
+                        "scope", "Conformance inventory")
 
     def test_relocated_run_all_command_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")
-        mutated = text.replace("          " + RUN_ALL_COMMAND, "          :", 1).replace(
+        mutated = text.replace("          " + REQUIRED_RUN_ALL, "          :", 1).replace(
             "      - name: Published-numbers projection contract\n",
             "      - name: Decorative completion-scope note\n"
             "        run: |\n"
-            f"          {RUN_ALL_COMMAND}\n\n"
+            f"          {REQUIRED_RUN_ALL}\n\n"
             "      - name: Published-numbers projection contract\n",
             1,
         )
         with self.assertRaises(AssertionError):
             assert_hard_run_command(
-                mutated, "scope", "Conformance inventory", RUN_ALL_COMMAND)
+                mutated, "scope", "Conformance inventory")
 
 
 class RegistryDoesNotRunAll(unittest.TestCase):

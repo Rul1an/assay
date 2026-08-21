@@ -34,6 +34,34 @@ COMBINED_UNITTEST = (
     "            conformance/privileged-mcp-action-v0/tests/test_activation_kit.py \\\n"
     "            conformance/privileged-mcp-action-v0/tests/test_oci_candidate_executor.py"
 )
+INVENTORY_RUN_SCRIPT = (
+    "set -euo pipefail",
+    "python3 conformance/registry.py",
+    "python3 conformance/implementations.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_implementations.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_pma_v0_registration.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_registry.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_run_all.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py",
+    REQUIRED_RUN_ALL,
+)
+ACTIVATION_KIT_RUN_SCRIPT = (
+    "set -euo pipefail",
+    *(line.strip() for line in COMBINED_UNITTEST.splitlines()),
+)
+HARD_RUN_CONTRACTS = {
+    ("scope", "Conformance inventory"): (
+        frozenset({"name", "runs-on", "timeout-minutes", "permissions",
+                   "outputs", "steps"}),
+        frozenset({"name", "shell", "run"}),
+        INVENTORY_RUN_SCRIPT,
+    ),
+    ("activation-kit", "Run activation-kit contract tests"): (
+        frozenset({"runs-on", "steps"}),
+        frozenset({"name", "run"}),
+        ACTIVATION_KIT_RUN_SCRIPT,
+    ),
+}
 ACTIVATION_KIT = (
     REPO / "conformance/privileged-mcp-action-v0/tests/test_activation_kit.py"
 )
@@ -110,42 +138,58 @@ def _active_run_lines(step: str) -> list[str]:
     return lines
 
 
-def _direct_soft_failure_key(block: str) -> str | None:
+DIRECT_KEY_RE = re.compile(
+    r"^(?:(?P<plain>[A-Za-z0-9_-]+)|'(?P<single>[A-Za-z0-9_-]+)'|"
+    r'"(?P<double>[A-Za-z0-9_-]+)")\s*:')
+
+
+def _direct_mapping_keys(block: str) -> frozenset[str]:
     lines = block.splitlines()
     block_indent = len(lines[0]) - len(lines[0].lstrip(" "))
-    guarded = re.compile(
-        rf"^ {{{block_indent + 2}}}(?P<key>if|continue-on-error)\s*:")
-    for line in lines[1:]:
-        match = guarded.match(line)
-        if match:
-            return match.group("key")
-    return None
+    direct_indent = block_indent + 2
+    keys: set[str] = set()
+    for index, line in enumerate(lines):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if index == 0 and indent == block_indent and line[indent:].startswith("- "):
+            direct = line[indent + 2:]
+        elif indent == direct_indent:
+            direct = line[direct_indent:]
+        else:
+            continue
+        match = DIRECT_KEY_RE.match(direct)
+        if match is None:
+            raise AssertionError(f"unrecognized direct mapping key syntax: {direct!r}")
+        key = next(value for value in match.groupdict().values() if value is not None)
+        if key in keys:
+            raise AssertionError(f"duplicate direct mapping key: {key}")
+        keys.add(key)
+    return frozenset(keys)
 
 
 def assert_hard_run_command(
-        text: str, job_name: str, step_name: str, command: str) -> str:
+        text: str, job_name: str, step_name: str) -> str:
+    contract = HARD_RUN_CONTRACTS.get((job_name, step_name))
+    if contract is None:
+        raise AssertionError(f"no hard-run contract for {job_name}/{step_name}")
+    allowed_job_keys, allowed_step_keys, expected_script = contract
+
     job = named_job(text, job_name)
-    job_key = _direct_soft_failure_key(job)
-    if job_key:
-        raise AssertionError(f"{job_name} job has a direct {job_key} key")
+    unexpected_job_keys = _direct_mapping_keys(job) - allowed_job_keys
+    if unexpected_job_keys:
+        raise AssertionError(
+            f"{job_name} job has unexpected direct keys: {sorted(unexpected_job_keys)}")
 
     step = named_step(text, job_name, step_name)
-    step_key = _direct_soft_failure_key(step)
-    if step_key:
-        raise AssertionError(f"{step_name} has a direct {step_key} key")
+    unexpected_step_keys = _direct_mapping_keys(step) - allowed_step_keys
+    if unexpected_step_keys:
+        raise AssertionError(
+            f"{step_name} has unexpected direct keys: {sorted(unexpected_step_keys)}")
 
-    active = _active_run_lines(step)
-    expected = [line.strip() for line in command.splitlines()]
-    matches = sum(
-        active[i:i + len(expected)] == expected
-        for i in range(len(active) - len(expected) + 1)
-    )
-    if matches != 1:
-        raise AssertionError(f"{step_name} must run the canonical command exactly once")
-    if any(re.search(r"\|\|\s*(?:true|:)(?:\s|$)", line) for line in active):
-        raise AssertionError(f"{step_name} command is neutralized with ||")
-    if any(line == "set +e" or line.startswith("set +e ") for line in active):
-        raise AssertionError(f"{step_name} disables fail-fast shell behavior")
+    active = tuple(_active_run_lines(step))
+    if active != expected_script:
+        raise AssertionError(f"{step_name} run script differs from the canonical script")
     return step
 
 
@@ -196,8 +240,7 @@ def assert_oci_candidate_checker(mod) -> None:
 
 def assert_combined_unittest(text: str) -> None:
     assert_hard_run_command(
-        text, "activation-kit", "Run activation-kit contract tests",
-        COMBINED_UNITTEST)
+        text, "activation-kit", "Run activation-kit contract tests")
 
 
 POLICIES = {
@@ -377,24 +420,31 @@ class ProductCallsite(unittest.TestCase):
     def test_no_separate_inventory_workflow(self):
         self.assertFalse(STANDALONE.exists(), STANDALONE)
 
+    def test_direct_key_parser_ignores_nested_soft_failure_names(self):
+        block = (
+            "  scope:\n"
+            "    \"runs-on\": ubuntu-latest\n"
+            "    outputs:\n"
+            "      if: nested-output\n"
+            "      continue-on-error: nested-output\n"
+            "    'steps': []\n"
+        )
+        self.assertEqual(
+            _direct_mapping_keys(block),
+            frozenset({"runs-on", "outputs", "steps"}),
+        )
+
+    def test_direct_key_parser_fails_closed_on_unrecognized_syntax(self):
+        block = "  scope:\n    ? [if]\n    : false\n"
+        with self.assertRaises(AssertionError):
+            _direct_mapping_keys(block)
+
     def test_scope_job_invokes_both_flags_and_does_not_map_3_to_0(self):
         text = CI_YML.read_text(encoding="utf-8")
         step = assert_hard_run_command(
-            text, "scope", "Conformance inventory", REQUIRED_RUN_ALL)
+            text, "scope", "Conformance inventory")
         lines = _active_run_lines(step)
-        self.assertEqual(lines[0], "set -euo pipefail")
-        self.assertIn("python3 conformance/registry.py", lines)
-        self.assertTrue(any("conformance/tests/test_registry.py" in ln for ln in lines))
-        self.assertTrue(any("conformance/tests/test_run_all.py" in ln for ln in lines))
-        self.assertTrue(any("conformance/tests/test_completion_scope.py" in ln for ln in lines))
-        self.assertIn(REQUIRED_RUN_ALL, lines)
-        self.assertEqual(lines.count(REQUIRED_RUN_ALL), 1)
-        self.assertFalse(any("||" in ln for ln in lines if REQUIRED_RUN_ALL in ln))
-        self.assertFalse(any(ln == "set +e" or ln.startswith("set +e ") for ln in lines))
-        self.assertNotIn("|| true", step)
-        self.assertNotIn("|| :", step)
-        self.assertNotIn("continue-on-error", step)
-        self.assertNotRegex(step, r"eq 3|returncode in \(0, 3\)")
+        self.assertEqual(tuple(lines), INVENTORY_RUN_SCRIPT)
 
     def test_commented_or_colon_run_all_line_is_not_an_active_callsite(self):
         step = _inventory_step(CI_YML.read_text(encoding="utf-8"))
@@ -455,9 +505,10 @@ class ProductCallsite(unittest.TestCase):
             text.replace("          set -euo pipefail", "          set +e", 1),
             text.replace(name, name + "        continue-on-error: true\n"),
         )
-        for mutated in mutations:
-            with self.assertRaises(AssertionError):
-                assert_combined_unittest(mutated)
+        for index, mutated in enumerate(mutations):
+            with self.subTest(index=index):
+                with self.assertRaises(AssertionError):
+                    assert_combined_unittest(mutated)
 
     def test_conditional_activation_kit_step_fails_the_hard_callsite(self):
         text = CONFORMANCE_YML.read_text(encoding="utf-8")
@@ -491,6 +542,44 @@ class ProductCallsite(unittest.TestCase):
         with self.assertRaises(AssertionError):
             assert_combined_unittest(mutated)
 
+    def test_quoted_activation_kit_job_and_step_keys_fail(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        job = "  activation-kit:\n"
+        step = "      - name: Run activation-kit contract tests\n"
+        mutations = (
+            ("job double if", job,
+             job + "    \"if\": ${{ github.event_name == 'disabled' }}\n"),
+            ("job single continue", job,
+             job + "    'continue-on-error': true\n"),
+            ("step double if", step,
+             step + "        \"if\": ${{ github.event_name == 'disabled' }}\n"),
+            ("step single continue", step,
+             step + "        'continue-on-error': true\n"),
+        )
+        for label, needle, replacement in mutations:
+            with self.subTest(label=label):
+                with self.assertRaises(AssertionError):
+                    assert_combined_unittest(text.replace(needle, replacement, 1))
+
+    def test_shell_neutralizers_fail_the_activation_kit_guard(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        mutations = (
+            text.replace(
+                "          set -euo pipefail\n",
+                "          set -euo pipefail\n          set +o errexit\n",
+                1,
+            ).replace(COMBINED_UNITTEST, COMBINED_UNITTEST + "\n          true", 1),
+            text.replace(
+                "          set -euo pipefail\n",
+                "          set -euo pipefail\n          python3() { :; }\n",
+                1,
+            ),
+        )
+        for index, mutated in enumerate(mutations):
+            with self.subTest(index=index):
+                with self.assertRaises(AssertionError):
+                    assert_combined_unittest(mutated)
+
     def test_relocated_activation_kit_command_fails_the_hard_callsite(self):
         text = CONFORMANCE_YML.read_text(encoding="utf-8")
         mutated = text.replace(COMBINED_UNITTEST, "          :", 1).replace(
@@ -513,7 +602,7 @@ class ProductCallsite(unittest.TestCase):
         mutated = mutated[:insert_at] + step + mutated[insert_at:]
         with self.assertRaises(AssertionError):
             assert_hard_run_command(
-                mutated, "scope", "Conformance inventory", REQUIRED_RUN_ALL)
+                mutated, "scope", "Conformance inventory")
 
     def test_required_ci_invokes_oci_candidate_checker(self):
         mod = _load_activation_kit()
