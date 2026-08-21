@@ -181,6 +181,29 @@ class PositiveFixtureAndHostileMatrix(unittest.TestCase):
             ) as ctx:
                 self.module.load_implementations(path)
             self.assertIn(field, str(ctx.exception).lower())
+        kind_only = self._write(_doc([_valid_row(id="kind-only", authorship={"kind": "agent-generated"})]))
+        with self.assertRaises(self.module.ImplementationRegistryError) as ctx:
+            self.module.load_implementations(kind_only)
+        message = str(ctx.exception).lower()
+        self.assertTrue("model" in message or "prompt_strategy" in message, ctx.exception)
+
+    def test_human_authorship_forbids_model_and_prompt_strategy(self):
+        for extra in (
+            {"kind": "human", "model": "claude-opus"},
+            {"kind": "human", "prompt_strategy": "spec-first"},
+        ):
+            path = self._write(_doc([_valid_row(id="human-extra", authorship=extra)]))
+            with self.subTest(extra=extra), self.assertRaises(
+                self.module.ImplementationRegistryError
+            ) as ctx:
+                self.module.load_implementations(path)
+            self.assertIn("authorship", str(ctx.exception).lower())
+
+    def test_whitespace_in_source_url_is_rejected(self):
+        path = self._write(_doc([_valid_row(source="https://exa mple.com/a")]))
+        with self.assertRaises(self.module.ImplementationRegistryError) as ctx:
+            self.module.load_implementations(path)
+        self.assertIn("source", str(ctx.exception).lower())
 
     def test_authorship_string_is_rejected(self):
         path = self._write(_doc([_valid_row(authorship="Authored-By: human")]))
@@ -388,12 +411,20 @@ class OneRuleNoNetwork(unittest.TestCase):
         modes = items["properties"]["reproduction_mode"]["enum"]
         self.assertEqual(frozenset(modes), frozenset(module.REPRODUCTION_MODES))
         authorship = items["properties"]["authorship"]
-        self.assertEqual(authorship["type"], "object")
-        self.assertIs(authorship["additionalProperties"], False)
-        self.assertEqual(
-            frozenset(authorship["properties"]["kind"]["enum"]),
-            frozenset(module.AUTHORSHIP_KINDS),
-        )
+        branches = authorship["oneOf"]
+        self.assertEqual(len(branches), 2)
+        human = next(branch for branch in branches if branch["properties"]["kind"].get("const") == "human")
+        agent = next(branch for branch in branches if "enum" in branch["properties"]["kind"])
+        self.assertIs(human["additionalProperties"], False)
+        self.assertEqual(frozenset(human["required"]), frozenset(module.HUMAN_AUTHORSHIP_FIELDS))
+        self.assertEqual(frozenset(human["properties"]), frozenset(module.HUMAN_AUTHORSHIP_FIELDS))
+        self.assertNotIn("model", human["properties"])
+        self.assertNotIn("prompt_strategy", human["properties"])
+        self.assertIs(agent["additionalProperties"], False)
+        self.assertEqual(frozenset(agent["required"]), frozenset(module.AGENT_AUTHORSHIP_FIELDS))
+        self.assertEqual(frozenset(agent["properties"]), frozenset(module.AGENT_AUTHORSHIP_FIELDS))
+        self.assertEqual(frozenset(agent["properties"]["kind"]["enum"]), frozenset(module.AGENT_KINDS))
+        self.assertEqual(items["properties"]["source"]["pattern"], module.SOURCE_PATTERN)
 
 
 if __name__ == "__main__":

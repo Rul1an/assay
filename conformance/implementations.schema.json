@@ -66,28 +66,45 @@
             ]
           },
           "authorship": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "kind"
-            ],
-            "properties": {
-              "kind": {
-                "enum": [
-                  "agent-assisted",
-                  "agent-generated",
-                  "human"
-                ]
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "human"
+                  }
+                }
               },
-              "model": {
-                "type": "string",
-                "minLength": 1
-              },
-              "prompt_strategy": {
-                "type": "string",
-                "minLength": 1
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "model",
+                  "prompt_strategy"
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "agent-assisted",
+                      "agent-generated"
+                    ]
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "prompt_strategy": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
               }
-            }
+            ]
           }
         }
       }

@@ -30,6 +30,9 @@ REPRODUCTION_MODES = frozenset((
 ))
 AUTHORSHIP_KINDS = frozenset(("human", "agent-assisted", "agent-generated"))
 AGENT_KINDS = frozenset(("agent-assisted", "agent-generated"))
+HUMAN_AUTHORSHIP_FIELDS = ("kind",)
+AGENT_AUTHORSHIP_FIELDS = ("kind", "model", "prompt_strategy")
+SOURCE_PATTERN = r"^https?://[^\s]+$"
 DOC_FIELDS = ("schema", "implementations")
 ROW_FIELDS = (
     "id",
@@ -45,6 +48,7 @@ ROW_FIELDS = (
 ID_RE = re.compile(r"\A[a-z][a-z0-9]*(?:-[a-z0-9]+)*\Z")
 IMAGE_RE = re.compile(r"\A[^:@\s]+(?:/[^:@\s]+)*@sha256:[0-9a-f]{64}\Z")
 COMMIT_RE = re.compile(r"\A[0-9a-f]{40}\Z")
+SOURCE_RE = re.compile(SOURCE_PATTERN)
 
 
 class ImplementationRegistryError(Exception):
@@ -75,11 +79,11 @@ def _validate_authorship(value: object, ident: str) -> dict:
         raise ImplementationRegistryError("%s: authorship must be an object" % ident)
     kind = value.get("kind")
     if kind == "human":
-        _reject_unknown_fields(value, ("kind",), what="%s authorship" % ident)
+        _reject_unknown_fields(value, HUMAN_AUTHORSHIP_FIELDS, what="%s authorship" % ident)
         return value
     if kind in AGENT_KINDS:
         _reject_unknown_fields(
-            value, ("kind", "model", "prompt_strategy"), what="%s authorship" % ident
+            value, AGENT_AUTHORSHIP_FIELDS, what="%s authorship" % ident
         )
         _require_text(value.get("model"), "model", ident)
         _require_text(value.get("prompt_strategy"), "prompt_strategy", ident)
@@ -110,7 +114,7 @@ def _validate_row(row: object, seen: set[str]) -> dict:
         )
     source = _require_text(row["source"], "source", ident)
     parsed = urlparse(source)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if not SOURCE_RE.fullmatch(source) or parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ImplementationRegistryError(
             "%s: source must be an absolute HTTP(S) URL" % ident
         )
@@ -157,19 +161,29 @@ def implementation_schema() -> dict:
                                 "it does not authenticate the publisher."
                             ),
                         },
-                        "source": {"type": "string", "pattern": "^https?://[^\\s]+$"},
+                        "source": {"type": "string", "pattern": SOURCE_PATTERN},
                         "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
                         "language": {"type": "string", "minLength": 1},
                         "reproduction_mode": {"enum": sorted(REPRODUCTION_MODES)},
                         "authorship": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "required": ["kind"],
-                            "properties": {
-                                "kind": {"enum": sorted(AUTHORSHIP_KINDS)},
-                                "model": {"type": "string", "minLength": 1},
-                                "prompt_strategy": {"type": "string", "minLength": 1},
-                            },
+                            "oneOf": [
+                                {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "required": list(HUMAN_AUTHORSHIP_FIELDS),
+                                    "properties": {"kind": {"const": "human"}},
+                                },
+                                {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "required": list(AGENT_AUTHORSHIP_FIELDS),
+                                    "properties": {
+                                        "kind": {"enum": sorted(AGENT_KINDS)},
+                                        "model": {"type": "string", "minLength": 1},
+                                        "prompt_strategy": {"type": "string", "minLength": 1},
+                                    },
+                                },
+                            ]
                         },
                     },
                 },
