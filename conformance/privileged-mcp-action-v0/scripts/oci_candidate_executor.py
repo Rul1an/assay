@@ -456,7 +456,7 @@ def execute_candidate(
                     runner(["docker", "inspect", container_id], env=env).stdout
                 )
                 raw_exit = (container.get("State") or {}).get("ExitCode")
-                if isinstance(raw_exit, int):
+                if type(raw_exit) is int:
                     exit_code = raw_exit
                     if (container.get("State") or {}).get("OOMKilled"):
                         state = STATE_OOM

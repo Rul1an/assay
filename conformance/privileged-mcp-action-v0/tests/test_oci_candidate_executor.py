@@ -1996,6 +1996,7 @@ class EvidenceBinding(unittest.TestCase):
 
     def test_missing_docker_main_is_not_a_traceback(self) -> None:
         module = _require()
+        stdout = mock.Mock()
         stderr = mock.Mock()
         with tempfile.TemporaryDirectory() as raw:
             bundle = _bundle(Path(raw))
@@ -2007,6 +2008,7 @@ class EvidenceBinding(unittest.TestCase):
                     side_effect=module.DockerCommandError("docker executable not found"),
                 ),
                 mock.patch.object(module, "implementation_from_registry", return_value=row),
+                mock.patch.object(sys, "stdout", stdout),
                 mock.patch.object(sys, "stderr", stderr),
             ):
                 code = module.main(
@@ -2017,11 +2019,12 @@ class EvidenceBinding(unittest.TestCase):
                         str(bundle),
                     ]
                 )
-        written = "".join(str(call.args[0]) for call in stderr.write.call_args_list if call.args)
-        self.assertNotIn("Traceback", written)
-        self.assertIn(code, (0, 2))
-        if code == 0:
-            self.assertIn(module.STATE_PULL_FAILURE, written or "pull_failure")
+        out = "".join(str(call.args[0]) for call in stdout.write.call_args_list if call.args)
+        err = "".join(str(call.args[0]) for call in stderr.write.call_args_list if call.args)
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), module.STATE_PULL_FAILURE)
+        self.assertNotIn("Traceback", out)
+        self.assertNotIn("Traceback", err)
 
     def test_create_timeout_cleans_up_by_container_name(self) -> None:
         module = _require()
@@ -2141,6 +2144,47 @@ class EvidenceBinding(unittest.TestCase):
                     registry_path=registry,
                 )
         self.assertNotEqual(result.exit_code, 0)
+        self.assertNotEqual(result.state, module.STATE_COMPLETED)
+        self.assertIn(result.state, module.HARNESS_FAILURE_STATES)
+
+    def test_bool_exit_code_is_harness_error_not_zero_or_one(self) -> None:
+        module = _require()
+
+        def runner(argv: list[str], **_kwargs: Any) -> Any:
+            kind = _docker_kind(argv)
+            if kind == "pull":
+                return module.BoundedDockerResult(0, b"", b"")
+            if kind in {"inspect", "image-inspect"}:
+                return module.BoundedDockerResult(
+                    0, json.dumps([_inspect_doc(exit_code=True)]).encode(), b""
+                )
+            if kind == "create":
+                return module.BoundedDockerResult(0, b"cid-bool\n", b"")
+            if kind == "start":
+                return module.BoundedDockerResult(0, VALID_REPORT, b"")
+            if kind == "rm":
+                return module.BoundedDockerResult(0, b"", b"")
+            raise AssertionError(argv)
+
+        with tempfile.TemporaryDirectory() as raw:
+            registry = _write_registry(Path(raw), DIGEST_IMAGE)
+            bundle = _bundle(Path(raw))
+            result = module.execute_candidate(
+                implementation_id="inert-fixture",
+                bundle_path=bundle,
+                registry_path=registry,
+                timeout_seconds=2,
+                docker_runner=runner,
+            )
+            with self.assertRaises(capture_candidate.HarnessError):
+                module.run_oci_candidate(
+                    module.oci_entrypoint_command(implementation_id="inert-fixture"),
+                    bundle,
+                    2,
+                    docker_runner=runner,
+                    registry_path=registry,
+                )
+        self.assertNotIn(result.exit_code, (0, 1, True, False))
         self.assertNotEqual(result.state, module.STATE_COMPLETED)
         self.assertIn(result.state, module.HARNESS_FAILURE_STATES)
 
