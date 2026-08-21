@@ -87,14 +87,15 @@ def b1_hardening_pin_rc(workflow_text: str) -> int:
     start = source.index(marker)
     py_start = source.index("import re\n", start)
     py_end = source.index("\nPY\n", py_start)
-    scratch = Path(tempfile.mkdtemp()) / "ci.yml"
-    scratch.write_text(workflow_text, encoding="utf-8")
-    completed = subprocess.run(
-        [sys.executable, "-c", source[py_start:py_end], str(scratch)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    with tempfile.TemporaryDirectory() as tmp:
+        scratch = Path(tmp) / "ci.yml"
+        scratch.write_text(workflow_text, encoding="utf-8")
+        completed = subprocess.run(
+            [sys.executable, "-c", source[py_start:py_end], str(scratch)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
     return completed.returncode
 
 
