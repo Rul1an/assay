@@ -574,13 +574,13 @@ if not match:
     sys.exit("scope job missing from ci.yml")
 section = match.group(1)
 # Reject if/continue-on-error on the hardening step itself.
-step = re.search(
-    r"(?ms)^      - name: Verify CI hardening contracts\n(?P<body>(?:        .+\n)+)",
-    section,
-)
-if not step:
+heading = "      - name: Verify CI hardening contracts\n"
+start = section.find(heading)
+if start < 0:
     sys.exit("scope job missing 'Verify CI hardening contracts' step")
-body = step.group("body")
+rest = section[start + len(heading):]
+nxt = re.search(r"(?m)^      - ", rest)
+body = rest if nxt is None else rest[:nxt.start()]
 for forbidden in ("if:", "continue-on-error:"):
     if re.search(rf"(?m)^        {re.escape(forbidden)}", body):
         sys.exit(f"hardening step must not use {forbidden}")
@@ -588,12 +588,17 @@ required_env = ("GH_TOKEN: ${{ github.token }}",)
 missing_env = [entry for entry in required_env if entry not in body]
 if missing_env:
     sys.exit("hardening step environment missing: " + ", ".join(missing_env))
+run_at = body.find("        run: |\n")
+if run_at < 0:
+    sys.exit("hardening step missing run script")
+script = body[run_at + len("        run: |\n"):]
 active = [
     line.strip()
-    for line in body.splitlines()
+    for line in script.splitlines()
     if line.startswith("          ") and not line.lstrip().startswith("#")
 ]
 required = (
+    "set -euo pipefail",
     "bash scripts/ci/test-check-assay-release-pin.sh",
     "bash scripts/ci/check-assay-release-pin.sh --published",
     "bash scripts/ci/test-ci-hardening-b1.sh",
@@ -601,9 +606,9 @@ required = (
     "python3 scripts/ci/check-conformance-inventory-callsite.py",
     "python3 scripts/ci/test-conformance-inventory-callsite.py",
 )
-missing = [cmd for cmd in required if cmd not in active]
-if missing:
-    sys.exit("active commands missing: " + ", ".join(missing))
+if active != list(required):
+    sys.exit("active hardening step body must be exactly %r, got %r" %
+             (list(required), active))
 sys.exit(0)
 PY
 then

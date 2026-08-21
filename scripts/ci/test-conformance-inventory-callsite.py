@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -45,6 +47,16 @@ HARDENING_GUARD_COMMANDS = (
     "python3 scripts/ci/check-conformance-inventory-callsite.py",
     "python3 scripts/ci/test-conformance-inventory-callsite.py",
 )
+# Independent of the checker module. B1 keeps its own copy of this sequence.
+HARDENING_STEP_COMMANDS = (
+    "set -euo pipefail",
+    "bash scripts/ci/test-check-assay-release-pin.sh",
+    "bash scripts/ci/check-assay-release-pin.sh --published",
+    "bash scripts/ci/test-ci-hardening-b1.sh",
+    "bash scripts/ci/test-structurizr-export-docker.sh",
+    "python3 scripts/ci/check-conformance-inventory-callsite.py",
+    "python3 scripts/ci/test-conformance-inventory-callsite.py",
+)
 
 
 def load_checker():
@@ -67,6 +79,52 @@ def load_checker():
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def b1_hardening_pin_rc(workflow_text: str) -> int:
+    source = B1_PATH.read_text(encoding="utf-8")
+    marker = 'echo "== required CI workflow actively runs both hardening contracts =="'
+    start = source.index(marker)
+    py_start = source.index("import re\n", start)
+    py_end = source.index("\nPY\n", py_start)
+    scratch = Path(tempfile.mkdtemp()) / "ci.yml"
+    scratch.write_text(workflow_text, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, "-c", source[py_start:py_end], str(scratch)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return completed.returncode
+
+
+def early_exit_0(text: str) -> str:
+    needle = "          bash scripts/ci/test-ci-hardening-b1.sh\n"
+    mutated = text.replace(needle, needle + "          exit 0\n", 1)
+    if mutated == text:
+        raise AssertionError("early exit 0 mutation was a no-op")
+    return mutated
+
+
+def swap_hardening_guards(text: str) -> str:
+    first = "          python3 scripts/ci/check-conformance-inventory-callsite.py\n"
+    second = "          python3 scripts/ci/test-conformance-inventory-callsite.py\n"
+    if first not in text or second not in text:
+        raise AssertionError("guard swap targets missing")
+    mutated = text.replace(first, "__SWAP_A__\n", 1)
+    mutated = mutated.replace(second, first, 1)
+    mutated = mutated.replace("__SWAP_A__\n", second, 1)
+    if mutated == text:
+        raise AssertionError("guard swap mutation was a no-op")
+    return mutated
+
+
+def extra_hardening_command(text: str) -> str:
+    needle = "          python3 scripts/ci/check-conformance-inventory-callsite.py\n"
+    mutated = text.replace(needle, needle + "          echo extra-active\n", 1)
+    if mutated == text:
+        raise AssertionError("extra-command mutation was a no-op")
+    return mutated
 
 
 def neutralize(text: str, command: str, mode: str) -> str:
@@ -162,6 +220,8 @@ class ConformanceInventoryCallsite(unittest.TestCase):
     def test_pristine_workflow_is_green(self) -> None:
         self.assertEqual(self.problems_fn(self.live), [])
         self.assertEqual(self.guards_fn(self.live), [])
+        step = named_step(self.live, JOB, "Verify CI hardening contracts")
+        self.assertEqual(tuple(_active_run_lines(step)), HARDENING_STEP_COMMANDS)
 
     def test_live_inventory_step_matches_independent_literals(self) -> None:
         step = named_step(self.live, JOB, INVENTORY_STEP)
@@ -201,16 +261,36 @@ class ConformanceInventoryCallsite(unittest.TestCase):
                     )
         self.assertEqual(self.guards_fn(self.live), [])
 
-    def test_b1_pins_the_exact_hardening_guard_commands(self) -> None:
+    def test_b1_pins_the_exact_hardening_step_sequence(self) -> None:
         text = B1_PATH.read_text(encoding="utf-8")
-        active = [
-            line
-            for line in text.splitlines()
-            if line.strip() and not line.lstrip().startswith("#")
-        ]
-        joined = "\n".join(active)
-        for command in HARDENING_GUARD_COMMANDS:
-            self.assertIn(f'"{command}"', joined)
+        marker = 'echo "== required CI workflow actively runs both hardening contracts =="'
+        start = text.index(marker)
+        py_start = text.index("import re\n", start)
+        py_end = text.index("\nPY\n", py_start)
+        block = text[py_start:py_end]
+        self.assertIn("if active != list(required):", block)
+        self.assertNotIn(
+            "missing = [cmd for cmd in required if cmd not in active]",
+            block,
+        )
+        for command in HARDENING_STEP_COMMANDS:
+            self.assertIn(f'"{command}"', block)
+
+    def test_hardening_step_sequence_mutations_fail_b1(self) -> None:
+        self.assertEqual(b1_hardening_pin_rc(self.live), 0)
+        mutations = (
+            ("early_exit_0", early_exit_0),
+            ("swap_guards", swap_hardening_guards),
+            ("extra_command", extra_hardening_command),
+        )
+        for label, mutate in mutations:
+            with self.subTest(label=label):
+                self.assertNotEqual(
+                    b1_hardening_pin_rc(mutate(self.live)),
+                    0,
+                    f"{label} must fail the B1 hardening-step pin",
+                )
+        self.assertEqual(b1_hardening_pin_rc(self.live), 0)
 
 
 if __name__ == "__main__":
