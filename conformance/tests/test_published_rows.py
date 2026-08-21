@@ -29,11 +29,12 @@ def sha256(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
-def manifest_bytes(*, runner: str = "module") -> bytes:
+def manifest_bytes(*, runner: str = "module", implementation: str = "implementation.py") -> bytes:
     return (json.dumps({
         "schema": "corpus-adequacy.manifest.v0",
         "runner": runner,
         "tool_pin": {"commit": TOOL_COMMIT, "tool": "producer"},
+        "implementation": implementation,
         "mutants": {"rules": []},
     }, indent=2, sort_keys=True) + "\n").encode()
 
@@ -68,10 +69,15 @@ def report_bytes(value: dict) -> bytes:
     return (json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
 
 
-def projected(temp: Path, *, value: dict | None = None, runner: str = "module") -> tuple[dict, bytes]:
+def projected(temp: Path, *, value: dict | None = None, runner: str = "module",
+              implementation: str = "implementation.py",
+              subject: dict | None = None) -> tuple[dict, bytes]:
     manifest = temp / "sample.manifest.json"
-    raw_manifest = manifest_bytes(runner=runner)
+    temp.mkdir(parents=True, exist_ok=True)
+    raw_manifest = manifest_bytes(runner=runner, implementation=implementation)
     manifest.write_bytes(raw_manifest)
+    if not implementation.startswith("../"):
+        (temp / implementation).write_text("# measured\n", encoding="utf-8")
     value = dict(value or report(runner=runner))
     if not value.get("manifest_sha256"):
         value["manifest_sha256"] = sha256(raw_manifest)
@@ -83,8 +89,13 @@ def projected(temp: Path, *, value: dict | None = None, runner: str = "module") 
         corpus="sample",
         manifest="conformance/adequacy/sample.manifest.json",
         measured_commit=MEASURED_COMMIT,
-        depends_on=["conformance/adequacy/sample.manifest.json"],
-        subject={"kind": "in_tree"},
+        depends_on=(
+            ["conformance/adequacy/sample.manifest.json"]
+            if implementation.startswith("../") else
+            ["conformance/adequacy/implementation.py",
+             "conformance/adequacy/sample.manifest.json"]
+        ),
+        subject=subject or {"kind": "in_tree"},
     )
     return row, raw_report
 
@@ -247,14 +258,16 @@ class CurrentReportProjection(unittest.TestCase):
 
 class CurrentResultsDocument(unittest.TestCase):
     def write_current(self, root: Path) -> tuple[Path, dict, bytes]:
-        row, encoded = projected(root)
+        adequacy = root / "conformance/adequacy"
+        row, encoded = projected(adequacy)
         document = {
             "schema": measure_all.SCHEMA,
+            "row_contract": published_rows.ROW_CONTRACT,
             "reports": {sha256(encoded): encoded.decode("utf-8")},
             "unmeasured": [],
             "corpora": [row],
         }
-        path = root / "results.json"
+        path = adequacy / "results.json"
         path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return path, document, encoded
 
@@ -281,6 +294,81 @@ class CurrentResultsDocument(unittest.TestCase):
             del document["reports"]
             path.write_text(json.dumps(document), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "downgraded"):
+                published_rows.load_results(path)
+
+    def test_removing_all_current_markers_cannot_downgrade_the_document(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path, document, _ = self.write_current(Path(raw))
+            del document["reports"]
+            del document["row_contract"]
+            for field in ("report_sha256", "report_ref"):
+                del document["corpora"][0][field]
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "downgraded"):
+                published_rows.load_results(path)
+
+    def test_dependencies_must_be_complete_for_the_addressed_manifest(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path, document, _ = self.write_current(Path(raw))
+            document["corpora"][0]["measured_at"]["depends_on"] = [
+                "conformance/adequacy/sample.manifest.json"]
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "complete dependency"):
+                published_rows.load_results(path)
+
+    def test_external_manifest_cannot_be_relabelled_in_tree(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            adequacy = root / "conformance/adequacy"
+            external_subject = {
+                "kind": "out_of_tree",
+                "repos": [{"repository": "example/external", "commit": "b" * 40,
+                           "dirty": False, "measured": ["../../../outside/file.py"]}],
+            }
+            row, encoded = projected(
+                adequacy, implementation="../../../outside/file.py", subject=external_subject)
+            row["subject"] = {"kind": "in_tree"}
+            document = {
+                "schema": measure_all.SCHEMA,
+                "row_contract": published_rows.ROW_CONTRACT,
+                "reports": {sha256(encoded): encoded.decode("utf-8")},
+                "unmeasured": [],
+                "corpora": [row],
+            }
+            path = adequacy / "results.json"
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "out_of_tree"):
+                published_rows.load_results(path)
+
+    def test_external_subject_requires_a_typed_nonempty_repository_list(self):
+        invalid_repos = ([], {}, ["not-an-object"])
+        for repos in invalid_repos:
+            with self.subTest(repos=repos), tempfile.TemporaryDirectory() as raw:
+                root = Path(raw)
+                adequacy = root / "conformance/adequacy"
+                row, encoded = projected(
+                    adequacy,
+                    implementation="../../../outside/file.py",
+                    subject={"kind": "out_of_tree", "repos": repos},
+                )
+                document = {
+                    "schema": measure_all.SCHEMA,
+                    "row_contract": published_rows.ROW_CONTRACT,
+                    "reports": {sha256(encoded): encoded.decode("utf-8")},
+                    "unmeasured": [],
+                    "corpora": [row],
+                }
+                path = adequacy / "results.json"
+                path.write_text(json.dumps(document), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "repos"):
+                    published_rows.load_results(path)
+
+    def test_control_display_must_match_the_producer_status(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path, document, _ = self.write_current(Path(raw))
+            document["corpora"][0]["control"] = "SURVIVED"
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "control"):
                 published_rows.load_results(path)
 
     def test_unaddressed_report_bytes_are_rejected(self):

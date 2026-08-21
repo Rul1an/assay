@@ -14,10 +14,15 @@ from pathlib import Path, PurePosixPath
 MAX_RESULTS_BYTES = 8 * 1024 * 1024
 REPORT_SCHEMA = "corpus-adequacy.report.v0"
 RESULTS_SCHEMA = "assay.conformance.adequacy.results.v0"
+ROW_CONTRACT = "producer-report-addressed.v0"
 HEX40 = re.compile(r"[0-9a-f]{40}")
 SHA256 = re.compile(r"sha256:[0-9a-f]{64}")
 RUNNERS = {"module", "process", "batch"}
 CONTROL = {"killed", "survived", "error", "absent-or-invalid"}
+CURRENT_HINT_FIELDS = {
+    "report_sha256", "report_ref", "manifest_sha256", "control_status",
+    "tool_source_state", "diagnostic_channel_declared", "silent",
+}
 COUNT_FIELDS = (
     "killed", "survived", "silent", "equivalent",
     "unexercised_out_of_scope", "known_holes", "unproved", "declared_total",
@@ -121,6 +126,59 @@ def _dependencies(value: object) -> list[str]:
     return clean
 
 
+def _implementation_paths(declared: dict) -> list[str]:
+    paths = [declared["implementation"]] if isinstance(declared.get("implementation"), str) else []
+    paths += [item for item in (declared.get("implementation_sources") or [])
+              if isinstance(item, str)]
+    return paths
+
+
+def _declared_paths(declared: dict) -> list[str]:
+    paths = [declared[key] for key in ("implementation", "vectors", "corpus_digest_file")
+             if isinstance(declared.get(key), str)]
+    paths += [item for item in (declared.get("implementation_sources") or [])
+              if isinstance(item, str)]
+    return paths
+
+
+def _lexical_path(base: Path, raw: str) -> Path:
+    return Path(os.path.normpath(str(base / raw)))
+
+
+def declared_external_paths(
+    manifest_path: Path, repo: Path, declared: dict
+) -> list[tuple[str, Path]]:
+    """Return measured implementation paths that are lexically outside the repository."""
+    outside = []
+    for raw in _implementation_paths(declared):
+        candidate = _lexical_path(manifest_path.parent, raw)
+        try:
+            candidate.relative_to(repo)
+        except ValueError:
+            outside.append((raw, candidate))
+    return outside
+
+
+def declared_dependencies(manifest_path: Path, repo: Path, declared: dict) -> list[str]:
+    """Derive the complete in-repository freshness set from the governed manifest."""
+    paths = []
+    for raw in _declared_paths(declared):
+        candidate = _lexical_path(manifest_path.parent, raw)
+        try:
+            paths.append(candidate.relative_to(repo).as_posix())
+        except ValueError:
+            continue
+    paths.append(manifest_path.relative_to(repo).as_posix())
+    return sorted(set(paths))
+
+
+def _control_display(status: str) -> str:
+    return {
+        "killed": "killed", "survived": "SURVIVED", "error": "error",
+        "absent-or-invalid": "none_declared",
+    }[status]
+
+
 def _validate_report(report: dict) -> None:
     if report.get("schema") != REPORT_SCHEMA:
         raise ValueError("successful measurement must be a %s" % REPORT_SCHEMA)
@@ -177,10 +235,7 @@ def project_report(
     dependencies = _dependencies(depends_on)
     report_sha = _digest(encoded_report)
     control_status = report["control_status"]
-    control = {
-        "killed": "killed", "survived": "SURVIVED", "error": "error",
-        "absent-or-invalid": "none_declared",
-    }[control_status]
+    control = _control_display(control_status)
     return {
         "corpus": corpus, "manifest": manifest, "runner": report["runner"],
         "killed": report["killed"], "survived": report["survived"],
@@ -202,7 +257,7 @@ def project_report(
     }
 
 
-def _validate_current_row(row: dict, reports: dict) -> None:
+def _validate_current_row(row: dict, reports: dict, repo: Path) -> None:
     for field in ("corpus", "manifest", "report_sha256", "report_ref", "measured_at"):
         if field not in row:
             raise ValueError("current row is missing %s" % field)
@@ -222,13 +277,53 @@ def _validate_current_row(row: dict, reports: dict) -> None:
             raise ValueError(
                 "%s: the measurement gives %r but the indexed row gives %r"
                 % (row_field, report.get(report_field), row.get(row_field)))
+    if row.get("control") != _control_display(report["control_status"]):
+        raise ValueError("control differs from producer control_status")
+    manifest_rel = _dependencies([row.get("manifest")])[0]
+    manifest_path = _lexical_path(repo, manifest_rel)
+    manifest_data = read_regular_file(manifest_path)
+    declared = _parse_json_bytes(manifest_data, str(manifest_path))
+    if _digest(manifest_data) != report["manifest_sha256"]:
+        raise ValueError("manifest_sha256 does not address the indexed manifest")
+    if declared.get("runner", "module") != report["runner"]:
+        raise ValueError("runner differs between indexed manifest and producer report")
     measured = row.get("measured_at")
     if not isinstance(measured, dict) or not isinstance(measured.get("commit"), str):
         raise ValueError("measured_at must name a commit and dependencies")
     if not HEX40.fullmatch(measured["commit"]):
         raise ValueError("malformed measured_at.commit must be a full Git object id")
-    _dependencies(measured.get("depends_on"))
-    _validate_subject(row.get("subject"))
+    dependencies = _dependencies(measured.get("depends_on"))
+    expected_dependencies = declared_dependencies(manifest_path, repo, declared)
+    if dependencies != expected_dependencies:
+        raise ValueError("measured_at.depends_on is not the complete dependency set")
+    subject = _validate_subject(row.get("subject"))
+    external = declared_external_paths(manifest_path, repo, declared)
+    expected_kind = "out_of_tree" if external else "in_tree"
+    if subject["kind"] != expected_kind:
+        raise ValueError("subject must be %s for the addressed manifest" % expected_kind)
+    if expected_kind == "in_tree":
+        if subject != {"kind": "in_tree"}:
+            raise ValueError("in_tree subject must not carry external repository claims")
+    else:
+        repos = subject.get("repos")
+        if not isinstance(repos, list) or not repos:
+            raise ValueError("out_of_tree subject must carry a non-empty repos list")
+        measured_paths = []
+        for external_repo in repos:
+            if not isinstance(external_repo, dict):
+                raise ValueError("out_of_tree repos entries must be objects")
+            commit = external_repo.get("commit")
+            if not isinstance(commit, str) or not HEX40.fullmatch(commit):
+                raise ValueError("out_of_tree repository commit must be a full Git object id")
+            if not isinstance(external_repo.get("dirty"), bool):
+                raise ValueError("out_of_tree repository dirty state must be boolean")
+            measured = external_repo.get("measured")
+            if (not isinstance(measured, list) or not measured
+                    or not all(isinstance(path, str) and path for path in measured)):
+                raise ValueError("out_of_tree repository measured paths must be non-empty strings")
+            measured_paths.extend(measured)
+        if sorted(measured_paths) != sorted(raw for raw, _ in external):
+            raise ValueError("out_of_tree repos do not cover every external declared source")
 
 
 def load_results(path: Path, *, limit: int = MAX_RESULTS_BYTES) -> LoadedResults:
@@ -238,11 +333,17 @@ def load_results(path: Path, *, limit: int = MAX_RESULTS_BYTES) -> LoadedResults
     rows = document.get("corpora")
     if not isinstance(rows, list):
         raise ValueError("results document has no corpora list")
+    contract = document.get("row_contract")
     reports = document.get("reports")
-    current = reports is not None
+    current = contract == ROW_CONTRACT
+    if contract not in (None, ROW_CONTRACT):
+        raise ValueError("results document has an unsupported row_contract")
+    if current and reports is None:
+        raise ValueError("current rows cannot be downgraded by removing the reports object")
     if current and not isinstance(reports, dict):
         raise ValueError("results reports must be an object")
-    if not current and any(isinstance(row, dict) and "report_sha256" in row for row in rows):
+    if not current and (reports is not None or any(
+            isinstance(row, dict) and CURRENT_HINT_FIELDS.intersection(row) for row in rows)):
         raise ValueError("current rows cannot be downgraded by removing the reports object")
     unmeasured = document.get("unmeasured", [])
     if (not isinstance(unmeasured, list)
@@ -259,7 +360,7 @@ def load_results(path: Path, *, limit: int = MAX_RESULTS_BYTES) -> LoadedResults
             raise ValueError("duplicate corpus id: %s" % name)
         seen.add(name)
         if current:
-            _validate_current_row(row, reports)
+            _validate_current_row(row, reports, path.absolute().parents[2])
             addressed.add(row["report_sha256"])
     if current and set(reports) != addressed:
         raise ValueError("results reports must contain exactly the addressed producer reports")

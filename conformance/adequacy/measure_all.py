@@ -109,17 +109,9 @@ def measured_at(declared: dict, manifest: Path) -> dict:
                          capture_output=True, text=True)
     if out.returncode != 0:
         return {}
-    paths = [declared[k] for k in ("implementation", "vectors", "corpus_digest_file")
-             if isinstance(declared.get(k), str)]
-    paths += [x for x in (declared.get("implementation_sources") or []) if isinstance(x, str)]
-    rel = []
-    for raw in paths:
-        try:
-            rel.append(str((manifest.parent / raw).resolve().relative_to(REPO)))
-        except ValueError:
-            continue          # out-of-tree: pinned separately by `subject`
     return {"measured_at": {"commit": out.stdout.strip(),
-                            "depends_on": sorted(set(rel + [str(manifest.relative_to(REPO))]))}}
+                            "depends_on": published_rows.declared_dependencies(
+                                manifest, REPO, declared)}}
 
 
 def subject(manifest: Path, declared: dict) -> dict:
@@ -142,17 +134,8 @@ def subject(manifest: Path, declared: dict) -> dict:
     corpus as internal is the same silence this field exists to break, so it is
     derived from `implementation` and `implementation_sources` instead.
     """
-    declared_paths = list(declared.get("implementation_sources") or [])
-    if declared.get("implementation"):
-        declared_paths.append(declared["implementation"])
     outside = {}
-    for rel_path in declared_paths:
-        src = (manifest.parent / rel_path).resolve()
-        try:
-            src.relative_to(REPO)
-            continue
-        except ValueError:
-            pass
+    for rel_path, src in published_rows.declared_external_paths(manifest, REPO, declared):
         root = subprocess.run(["git", "-C", str(src.parent), "rev-parse", "--show-toplevel"],
                               capture_output=True, text=True)
         key = root.stdout.strip() if root.returncode == 0 else str(src.parent)
@@ -208,6 +191,7 @@ def read_existing() -> dict[str, dict]:
 def write(rows: dict[str, dict], reports: dict[str, str]) -> None:
     addressed = {row["report_sha256"] for row in rows.values()}
     doc = {"schema": SCHEMA,
+           "row_contract": published_rows.ROW_CONTRACT,
            "_about": "Measured mutation adequacy for every corpus manifest in this "
                      "directory. Written by measure_all.py; asserted against the published "
                      "prose by check_published_numbers.py. Do not hand-edit a measured row.",

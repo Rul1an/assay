@@ -258,7 +258,7 @@ class ControlsOnCoverageAndPinning(unittest.TestCase):
             manifest = root / "conformance/adequacy/rge-bench.manifest.json"
             keep = manifest.read_bytes()
             manifest.unlink()
-            self.assert_red("has no manifest on disk")
+            self.assert_red("is not a readable regular file")
             manifest.write_bytes(keep)
             self.assertEqual(chk.check(), [])
 
@@ -269,13 +269,18 @@ class ControlsOnCoverageAndPinning(unittest.TestCase):
         is the state every manifest was in before this layer existed.
         """
         with sandbox() as root:
+            baseline = chk.published_rows.load_results(chk.RESULTS)
             path = root / "conformance/adequacy/observed-effect-drift-consumer.manifest.json"
+            original = path.read_bytes()
             doc = json.loads(path.read_text())
-            saved = doc.pop("tool_pin")
+            doc.pop("tool_pin")
             path.write_text(json.dumps(doc, indent=2))
-            self.assert_red("declares no tool_pin.commit")
-            doc["tool_pin"] = saved
-            path.write_text(json.dumps(doc, indent=2))
+            # The canonical loader normally catches the changed manifest digest first.
+            # Freeze its validated rows here so this control still proves the downstream
+            # tool-pin rule independently rather than passing for the earlier guard.
+            with mock.patch.object(chk.published_rows, "load_results", return_value=baseline):
+                self.assert_red("declares no tool_pin.commit")
+            path.write_bytes(original)
             self.assertEqual(chk.check(), [])
 
     def test_a_row_measured_with_another_commit_is_red(self):
@@ -285,12 +290,14 @@ class ControlsOnCoverageAndPinning(unittest.TestCase):
         tool that produced it must move together.
         """
         with sandbox() as root:
+            baseline = chk.published_rows.load_results(chk.RESULTS)
             path = root / "conformance/adequacy/mcp-jsonrpc-id.manifest.json"
             # Read the pin rather than hard-coding it: a control that carries its
             # own copy of the value stops firing the day the real pin moves, which
             # is precisely when it is needed.
             edit(path, json.loads(path.read_text())["tool_pin"]["commit"], "0" * 40)
-            self.assert_red("but mcp-jsonrpc-id.manifest.json pins")
+            with mock.patch.object(chk.published_rows, "load_results", return_value=baseline):
+                self.assert_red("but mcp-jsonrpc-id.manifest.json pins")
             shutil.copy2(REPO / "conformance/adequacy/mcp-jsonrpc-id.manifest.json", path)
             self.assertEqual(chk.check(), [])
 
@@ -407,7 +414,12 @@ class ResultsAreStillWhatTheToolProduces(unittest.TestCase):
                 continue
             report = ca.run(manifest)
             fresh = measure_all.row(manifest, report, ca.encode_report_v0(report))
-            trim = lambda r: {k: v for k, v in r.items() if k != "tool_version"}  # noqa: E731
+            def trim(row):
+                comparable = {k: v for k, v in row.items() if k != "tool_version"}
+                measured = dict(comparable["measured_at"])
+                measured.pop("commit", None)
+                comparable["measured_at"] = measured
+                return comparable
             if trim(fresh) != trim(stored[corpus]):
                 out.append(corpus)
         if unavailable:
