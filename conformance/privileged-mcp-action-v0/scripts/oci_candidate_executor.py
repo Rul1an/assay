@@ -304,20 +304,35 @@ def run_docker(
     return BoundedDockerResult(result.returncode, result.stdout, result.stderr)
 
 
-def local_image_docker_runner() -> DockerRunner:
-    """Pull step records the canonical argv; the inert fixture is already local."""
+def rewrite_fixture_image_argv(
+    argv: list[str], *, registry_ref: str, local_ref: str
+) -> list[str]:
+    """Test-only: a local tag is not a RepoDigest. Hosted Docker will pull."""
+    if not registry_ref or not local_ref or registry_ref == local_ref:
+        raise ValueError("fixture registry ref and local ref must be distinct")
+    return [local_ref if item == registry_ref else item for item in argv]
+
+
+def local_image_docker_runner(*, registry_ref: str, local_ref: str) -> DockerRunner:
+    """Pull step records the canonical argv; daemon calls use the local tag/id."""
 
     def runner(argv: list[str], **kwargs: Any) -> BoundedDockerResult:
         env = kwargs.get("env")
         if env is None:
             raise DockerCommandError("docker invocations require a fresh DOCKER_CONFIG")
         if len(argv) >= 2 and argv[1] == "pull":
-            image = argv[-1]
-            expected = ["docker", "pull", "--platform", PLATFORM, image]
+            expected = ["docker", "pull", "--platform", PLATFORM, registry_ref]
             if argv != expected:
                 raise DockerCommandError("pull argv drifted from the digest/platform contract")
             probe = run_bounded(
-                wrap_docker_command(["docker", "image", "inspect", image], env),
+                wrap_docker_command(
+                    rewrite_fixture_image_argv(
+                        ["docker", "image", "inspect", registry_ref],
+                        registry_ref=registry_ref,
+                        local_ref=local_ref,
+                    ),
+                    env,
+                ),
                 timeout_seconds=30,
                 stdout_limit=1_000_000,
                 stderr_limit=64 * 1024,
@@ -325,7 +340,12 @@ def local_image_docker_runner() -> DockerRunner:
             if probe.returncode != 0:
                 raise DockerCommandError("local fixture image is missing")
             return BoundedDockerResult(0, b"", b"")
-        return run_docker(argv, **kwargs)
+        return run_docker(
+            rewrite_fixture_image_argv(
+                argv, registry_ref=registry_ref, local_ref=local_ref
+            ),
+            **kwargs,
+        )
 
     return runner
 

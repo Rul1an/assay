@@ -702,7 +702,7 @@ def _compile_inert_linux_elf(dest: Path) -> None:
     )
 
 
-def _build_inert_image() -> str:
+def _build_inert_image() -> tuple[str, str]:
     if not FIXTURE_C.is_file():
         raise AssertionError(f"missing fixture {FIXTURE_C}")
     with tempfile.TemporaryDirectory() as raw:
@@ -735,13 +735,14 @@ def _build_inert_image() -> str:
     if not image_id.startswith("sha256:") or len(image_id) != 71:
         raise AssertionError(f"unexpected image id {image_id!r}")
     digest = image_id.split(":", 1)[1]
-    ref = f"assay-oci-inert@sha256:{digest}"
-    subprocess.run(["docker", "tag", image_id, f"assay-oci-inert:{digest}"], check=True)
-    return ref
+    registry_ref = f"assay-oci-inert@sha256:{digest}"
+    implementations.validate_image_reference(registry_ref)
+    return registry_ref, "assay-oci-inert:local"
 
 
 class LiveDockerInspect(unittest.TestCase):
     image_ref: str | None = None
+    local_ref: str | None = None
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -751,7 +752,16 @@ class LiveDockerInspect(unittest.TestCase):
                 "docker is required for live inspect; unavailable infrastructure "
                 f"is not a pass: {info.stderr.decode('utf-8', 'replace')}"
             )
-        cls.image_ref = _build_inert_image()
+        cls.image_ref, cls.local_ref = _build_inert_image()
+
+    def _local_runner(self) -> Any:
+        module = _require()
+        assert self.image_ref is not None
+        assert self.local_ref is not None
+        return module.local_image_docker_runner(
+            registry_ref=self.image_ref,
+            local_ref=self.local_ref,
+        )
 
     def test_live_inspect_pins_network_and_user_independently_of_argv_strings(self) -> None:
         module = _require()
@@ -768,7 +778,13 @@ class LiveDockerInspect(unittest.TestCase):
             )
             assert_argv_network_none(argv)
             assert_argv_runtime_user(argv)
-            created = subprocess.run(argv, capture_output=True, text=True, check=False)
+            self.assertIn(self.image_ref, argv)
+            assert self.local_ref is not None
+            live_argv = module.rewrite_fixture_image_argv(
+                argv, registry_ref=self.image_ref, local_ref=self.local_ref
+            )
+            self.assertNotIn(self.image_ref, live_argv)
+            created = subprocess.run(live_argv, capture_output=True, text=True, check=False)
             self.assertEqual(created.returncode, 0, created.stderr)
             container = created.stdout.strip()
             try:
@@ -833,9 +849,9 @@ class LiveDockerInspect(unittest.TestCase):
         ).stdout.strip()
         digest = image_id.split(":", 1)[1]
         volume_ref = f"assay-oci-inert-volume@sha256:{digest}"
-        subprocess.run(["docker", "tag", image_id, f"assay-oci-inert-volume:{digest}"], check=True)
+        implementations.validate_image_reference(volume_ref)
         inspect_raw = subprocess.run(
-            ["docker", "inspect", volume_ref],
+            ["docker", "inspect", volume_tag],
             check=True,
             capture_output=True,
             text=True,
@@ -854,7 +870,7 @@ class LiveDockerInspect(unittest.TestCase):
                 registry_path=registry,
                 timeout_seconds=1,
                 command=("/oci-candidate", "sleep"),
-                docker_runner=module.local_image_docker_runner(),
+                docker_runner=self._local_runner(),
             )
         self.assertEqual(result.state, module.STATE_TIMEOUT)
         self.assertNotIn(result.state, AGREEMENT)
@@ -870,7 +886,7 @@ class LiveDockerInspect(unittest.TestCase):
                 registry_path=registry,
                 timeout_seconds=5,
                 command=("/oci-candidate", "flood"),
-                docker_runner=module.local_image_docker_runner(),
+                docker_runner=self._local_runner(),
             )
         self.assertEqual(result.state, module.STATE_OUTPUT_OVERFLOW)
         self.assertNotIn(result.state, AGREEMENT)
@@ -886,7 +902,7 @@ class LiveDockerInspect(unittest.TestCase):
                 registry_path=registry,
                 timeout_seconds=10,
                 command=("/oci-candidate", "ok"),
-                docker_runner=module.local_image_docker_runner(),
+                docker_runner=self._local_runner(),
             )
         self.assertEqual(result.state, module.STATE_COMPLETED)
         self.assertNotIn(result.state, AGREEMENT)
@@ -903,7 +919,7 @@ class LiveDockerInspect(unittest.TestCase):
                 registry_path=registry,
                 timeout_seconds=60,
                 command=("/oci-candidate", "oom"),
-                docker_runner=module.local_image_docker_runner(),
+                docker_runner=self._local_runner(),
             )
         self.assertEqual(result.state, module.STATE_OOM)
         self.assertNotIn(result.state, AGREEMENT)
@@ -981,13 +997,80 @@ class AllowlistedDockerEnv(unittest.TestCase):
         module = _require()
         with tempfile.TemporaryDirectory() as raw:
             env, _ = module.fresh_docker_env(Path(raw))
-        probe = module.wrap_docker_command(["docker", "image", "inspect", DIGEST_IMAGE], env)
+        probe = module.wrap_docker_command(["docker", "image", "inspect", "assay-oci-inert:local"], env)
         self.assertIn("-i", probe)
         for key in SENTINEL_ENV:
             self.assertNotIn(key, " ".join(probe))
         source = Path(module.__file__).read_text(encoding="utf-8")
         self.assertIn("wrap_docker_command", source)
         self.assertNotIn('run_bounded(\n                ["docker", "image", "inspect"', source)
+
+    def test_synthetic_repo_digest_is_rewritten_for_pull_inspect_and_create(self) -> None:
+        """A local tag is not a RepoDigest. Hosted Docker treats name@sha256:<id>
+        as a remote pull. The test runner must map that ref to a local tag/id.
+        """
+        module = _require()
+        local_ref = "assay-oci-inert:local"
+        pull = ["docker", "pull", "--platform", module.PLATFORM, DIGEST_IMAGE]
+        inspect = ["docker", "inspect", DIGEST_IMAGE]
+        with tempfile.TemporaryDirectory() as raw:
+            create = module.build_container_create_argv(
+                image=DIGEST_IMAGE,
+                bundle_path=_bundle(Path(raw)),
+                container_name="assay-oci-map",
+                staging_dir=Path(raw) / "stage",
+            )
+        self.assertEqual(create[-1], DIGEST_IMAGE)
+        mapped_pull = module.rewrite_fixture_image_argv(
+            pull, registry_ref=DIGEST_IMAGE, local_ref=local_ref
+        )
+        mapped_inspect = module.rewrite_fixture_image_argv(
+            inspect, registry_ref=DIGEST_IMAGE, local_ref=local_ref
+        )
+        mapped_create = module.rewrite_fixture_image_argv(
+            create, registry_ref=DIGEST_IMAGE, local_ref=local_ref
+        )
+        self.assertEqual(mapped_pull[-1], local_ref)
+        self.assertEqual(mapped_inspect[-1], local_ref)
+        self.assertEqual(mapped_create[-1], local_ref)
+        self.assertNotIn(DIGEST_IMAGE, mapped_inspect)
+        self.assertNotIn(DIGEST_IMAGE, mapped_create)
+        self.assertEqual(
+            mapped_pull,
+            ["docker", "pull", "--platform", module.PLATFORM, local_ref],
+        )
+        implementations.validate_image_reference(DIGEST_IMAGE)
+
+    def test_local_runner_does_not_send_synthetic_repo_digest_to_docker(self) -> None:
+        module = _require()
+        local_ref = "assay-oci-inert:local"
+        seen: list[list[str]] = []
+
+        def fake_run_docker(argv: list[str], **kwargs: Any) -> Any:
+            seen.append(list(argv))
+            return module.BoundedDockerResult(0, b"[]", b"")
+
+        with tempfile.TemporaryDirectory() as raw:
+            env, _ = module.fresh_docker_env(Path(raw))
+        runner = module.local_image_docker_runner(
+            registry_ref=DIGEST_IMAGE, local_ref=local_ref
+        )
+        with mock.patch.object(module, "run_docker", side_effect=fake_run_docker):
+            with mock.patch.object(module, "run_bounded") as bounded:
+                bounded.return_value = mock.Mock(returncode=0, stdout=b"", stderr=b"")
+                runner(
+                    ["docker", "pull", "--platform", module.PLATFORM, DIGEST_IMAGE],
+                    env=env,
+                )
+                runner(["docker", "inspect", DIGEST_IMAGE], env=env)
+                runner(["docker", "create", "--name", "x", DIGEST_IMAGE], env=env)
+                probe = bounded.call_args[0][0]
+        self.assertIn(local_ref, probe)
+        self.assertNotIn(DIGEST_IMAGE, probe)
+        self.assertEqual(len(seen), 2)
+        for argv in seen:
+            self.assertIn(local_ref, argv)
+            self.assertNotIn(DIGEST_IMAGE, argv)
 
 
 class StagedBundleMount(unittest.TestCase):
