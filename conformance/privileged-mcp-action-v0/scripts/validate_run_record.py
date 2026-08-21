@@ -93,11 +93,59 @@ def require(condition: bool, message: str) -> None:
         raise ValueError(message)
 
 
-def require_run_record_binds_capture(report: dict[str, Any], capture_digest: str) -> None:
+def implementation_record(declared: dict[str, Any]) -> dict[str, Any]:
+    """Carry the capture's declared identity. Shape-validated, never verified.
+
+    `id` and `image` appear only when the capture declared them, so an existing
+    v0 run record with neither stays valid and a run that named no image does
+    not grow a field implying one.
+    """
+    record = {
+        "name": declared["name"],
+        "version": declared["version"],
+        "source": declared["source"],
+        "commit": declared["commit"],
+        "reproduction_mode": declared["reproduction_mode"],
+    }
+    if declared["id"] is not None:
+        record["id"] = declared["id"]
+        record["image"] = declared["image"]
+    return record
+
+
+def require_run_record_binds_capture(
+    report: dict[str, Any], capture: dict[str, Any], capture_digest: str
+) -> None:
     require(bool(SHA256.fullmatch(capture_digest)), "capture digest is malformed")
     require(
         report["capture_sha256"] == capture_digest,
         "capture_sha256 does not address the scored capture bytes",
+    )
+    require(
+        report["suite"] == capture["suite"],
+        "run record suite does not bind the scored capture",
+    )
+    for field in (
+        "pack_sha256",
+        "source_corpus_digest",
+        "rendered_set_digest",
+        "pack_declared_source_commit",
+    ):
+        require(
+            report[field] == capture[field],
+            f"run record {field} does not bind the scored capture",
+        )
+    require(
+        report["implementation"] == implementation_record(capture["implementation"]),
+        "run record implementation does not bind the scored capture",
+    )
+    require(
+        [(case["case_id"], case["input_sha256"]) for case in report["cases"]]
+        == [
+            (observation["case_id"], observation["input_sha256"])
+            for observation in capture["observations"]
+        ],
+        "run record cases do not bind the scored capture observations in order",
     )
 
 

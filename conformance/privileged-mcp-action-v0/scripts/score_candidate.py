@@ -56,6 +56,7 @@ from validate_run_record import (  # noqa: E402
     PROFILE,
     RUN_NON_CLAIMS,
     RUN_SCHEMA,
+    implementation_record,
     require_run_record_binds_capture,
     validate_run_record,
 )
@@ -117,26 +118,6 @@ def require_capture_binds_pack(capture: dict[str, Any], pack: dict[str, Any], pa
             raise CaptureError(
                 f"{case['id']}: capture input digest does not bind this pack"
             )
-
-
-def implementation_record(declared: dict[str, Any]) -> dict[str, Any]:
-    """Carry the capture's declared identity. Shape-validated, never verified.
-
-    `id` and `image` appear only when the capture declared them, so an existing
-    v0 run record with neither stays valid and a run that named no image does
-    not grow a field implying one.
-    """
-    record = {
-        "name": declared["name"],
-        "version": declared["version"],
-        "source": declared["source"],
-        "commit": declared["commit"],
-        "reproduction_mode": declared["reproduction_mode"],
-    }
-    if declared["id"] is not None:
-        record["id"] = declared["id"]
-        record["image"] = declared["image"]
-    return record
 
 
 def score_capture(
@@ -334,7 +315,7 @@ def main() -> int:
     report["capture_sha256"] = digest
     try:
         validate_run_record(report)
-        require_run_record_binds_capture(report, digest)
+        require_run_record_binds_capture(report, capture, digest)
     except (KeyError, TypeError, ValueError) as error:
         print(f"scorer produced an invalid run record: {error}", file=sys.stderr)
         return 2
