@@ -942,6 +942,88 @@ class CandidateScorerTests(CandidateHarness, unittest.TestCase):
             original_pack_hash,
         )
 
+    def test_between_read_pack_swap_cannot_split_parsed_bytes_from_digest(self) -> None:
+        """Same-path replacement after parse must not bind a different digest.
+
+        The scorer used to parse one read and hash a second. Replacing the pack
+        between those reads recorded digest B for a pack object parsed from A.
+        """
+        sys.path.insert(0, str(CORPUS_DIR / "scripts"))
+        try:
+            import capture_candidate
+            import score_candidate
+        finally:
+            sys.path.pop(0)
+
+        mutable = self.root / "between-read-pack.tar.gz"
+        original = self.pack.read_bytes()
+        mutable.write_bytes(original)
+        digest_a = sha256(original)
+        digest_b = sha256(original + b"\x00")
+        self.assertNotEqual(digest_a, digest_b)
+
+        reads = {"n": 0}
+        real_read = capture_candidate.read_pack_bytes
+
+        def read_then_swap(path: Path) -> bytes:
+            data = real_read(path)
+            reads["n"] += 1
+            if reads["n"] == 1:
+                path.write_bytes(original + b"\x00")
+            return data
+
+        output = self.root / "between-read-report.json"
+        argv = [
+            str(SCORE_SCRIPT),
+            "--pack",
+            str(mutable),
+            "--manifest",
+            str(CORPUS_DIR / "MANIFEST.json"),
+            "--entrypoint",
+            shlex.join([sys.executable, str(self.candidate("match"))]),
+            "--implementation-name",
+            "test implementation",
+            "--implementation-source",
+            "https://example.test/verifier",
+            "--implementation-commit",
+            IMPLEMENTATION_COMMIT,
+            "--reproduction-mode",
+            "blind_from_spec",
+            "--output",
+            str(output),
+        ]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(
+                capture_candidate, "read_pack_bytes", side_effect=read_then_swap
+            ),
+        ):
+            self.assertEqual(score_candidate.main(), 0)
+
+        report = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(report["summary"]["match"], 14)
+        self.assertEqual(report["pack_sha256"], digest_a)
+        self.assertEqual(reads["n"], 1)
+        self.assertEqual(sha256(mutable.read_bytes()), digest_b)
+
+    def test_scorer_uses_canonical_load_pack_with_digest(self) -> None:
+        """Parse and digest must come from the existing helper, not a second read."""
+        sys.path.insert(0, str(CORPUS_DIR / "scripts"))
+        try:
+            import capture_candidate
+            import score_candidate
+        finally:
+            sys.path.pop(0)
+
+        source = inspect.getsource(score_candidate.main)
+        self.assertIn("load_pack_with_digest(", source)
+        self.assertNotIn("sha256_file(", source)
+        self.assertNotRegex(source, r"(?<![_\w])load_pack\(")
+        self.assertIs(
+            score_candidate.load_pack_with_digest,
+            capture_candidate.load_pack_with_digest,
+        )
+
     def test_timeout_kills_candidate_process_group(self) -> None:
         marker = self.root / "escaped-timeout-child"
         candidate = self.root / "candidate-timeout.py"
