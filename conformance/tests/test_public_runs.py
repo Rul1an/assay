@@ -308,7 +308,24 @@ class PublicRunMutations(unittest.TestCase):
             markdown.write_bytes(b"stale-prior-bytes\n")
             project.write_document(root)
             expected = project.render_document(root, project.load_publication(root)).encode("utf-8")
+            self.assertNotIn(b"\r\n", expected)
+            self.assertIn(b"\n", expected)
             self.assertEqual(markdown.read_bytes(), expected)
+            tree = ast.parse((REPO / "conformance/project_public_runs.py").read_text(encoding="utf-8"))
+            write_fn = next(
+                node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "write_document"
+            )
+            named = [
+                node
+                for node in ast.walk(write_fn)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "NamedTemporaryFile"
+            ]
+            self.assertEqual(len(named), 1)
+            newline = next((kw.value for kw in named[0].keywords if kw.arg == "newline"), None)
+            self.assertIsNotNone(newline)
+            self.assertEqual(ast.literal_eval(newline), "\n")
 
     def test_write_document_failures_keep_prior_bytes_and_clean_temp(self) -> None:
         with sandbox() as (root, project):

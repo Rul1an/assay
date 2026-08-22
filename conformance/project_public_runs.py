@@ -250,6 +250,7 @@ def write_document(repo: Path) -> None:
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
+            newline="\n",
             dir=output.parent,
             prefix=output.name + ".",
             delete=False,
