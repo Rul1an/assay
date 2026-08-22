@@ -181,6 +181,36 @@ class PublicRunMutations(unittest.TestCase):
             (root / "conformance/public-runs.json").write_text(json.dumps(index) + "\n")
             findings = project.projection_findings(root)
             self.assertTrue(any("duplicate" in item for item in findings), findings)
+            self.assertTrue(any(HOSTED_SHA256 in item for item in findings), findings)
+
+    def test_same_implementation_two_digests_are_kept_and_sorted(self) -> None:
+        with sandbox() as (root, project):
+            import validate_run_record
+
+            record = root / "conformance/public-runs" / HOSTED_SHA256
+            payload = json.loads(record.read_text())
+            payload["cases"][0]["review_warnings"] = ["one typed warning"]
+            payload["summary"]["review_warnings"] = 1
+            mutated = json.dumps(payload, indent=2, sort_keys=True).encode() + b"\n"
+            digest = hashlib.sha256(mutated).hexdigest()
+            (root / "conformance/public-runs" / digest).write_bytes(mutated)
+            report = validate_run_record.load_run_record(root / "conformance/public-runs" / digest)
+            validate_run_record.validate_run_record(report)
+            index_path = root / "conformance/public-runs.json"
+            index = json.loads(index_path.read_text())
+            second = dict(index["runs"][0])
+            second["record_sha256"] = "sha256:" + digest
+            index["runs"] = [second, index["runs"][0]]
+            index_path.write_text(json.dumps(index) + "\n")
+            try:
+                rows = project.load_publication(root)
+            except ValueError as exc:
+                self.fail("same implementation with two digests must load, got %s" % exc)
+            self.assertEqual(len(rows), 2)
+            self.assertEqual({row["implementation_id"] for row in rows}, {"pma-v0-repro"})
+            digests = [row["record_sha256"] for row in rows]
+            self.assertEqual(set(digests), {HOSTED_DIGEST, "sha256:" + digest})
+            self.assertEqual(digests, sorted(digests))
 
     def test_missing_and_surplus_record_fail_closed(self) -> None:
         with sandbox() as (root, project):

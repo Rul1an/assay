@@ -91,17 +91,21 @@ def _load_index(repo: Path) -> list[dict]:
     runs = document["runs"]
     if not isinstance(runs, list):
         raise ValueError("public-runs runs must be a list")
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     clean: list[dict] = []
     for row in runs:
         if not isinstance(row, dict) or set(row) != set(RUN_FIELDS):
             raise ValueError("public-runs row has missing or surplus fields")
         ident = row["implementation_id"]
-        if not isinstance(ident, str) or ident in seen:
-            raise ValueError("duplicate public-run identity: %s" % ident)
-        seen.add(ident)
-        if not SHA256.fullmatch(row["record_sha256"]):
+        digest = row["record_sha256"]
+        if not isinstance(ident, str):
+            raise ValueError("implementation_id must be a string")
+        if not SHA256.fullmatch(digest):
             raise ValueError("record_sha256 must be a sha256 content address")
+        key = (ident, digest)
+        if key in seen:
+            raise ValueError("duplicate public-run identity: %s %s" % key)
+        seen.add(key)
         clean.append(row)
     return clean
 
