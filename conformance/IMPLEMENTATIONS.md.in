@@ -1,0 +1,11 @@
+# Public implementation runs
+
+This page lists reviewed, digest-addressed `conformance_run.v1` records.
+It is not a leaderboard, badge, certification, or trust score.
+
+A digest addresses bytes. It does not authenticate a publisher.
+A match is agreement on the pinned corpus only.
+
+| implementation | suite | record | image | commit | match | mismatch | execution_error | harness_error |
+|---|---|---|---|---|---|---|---|---|
+{{public_runs_table}}
