@@ -9,10 +9,12 @@ checker and the workflow calls that invoke it. The live workflow is never
 written. Command literals here are an independent oracle, not an import.
 
 Hardening and finale check each other under a single-mutation contract:
-changing only one root must turn the remaining caller red. Deleting or
-neutralizing both mutual roots in the same rewrite is outside that
-contract and is not a hosted-CI proof. This is not absolute protection
-against a fully rewritten workflow.
+changing only one root must turn the remaining caller red. The host job
+is used as the scheduling root only because it has no if/needs; the CI
+root pins that absence. Simultaneous mutation of both required roots
+(jobs.ci.if and the host check job if/needs) is outside repo-local
+enforcement. This is not self-enforcement against coordinated workflow
+edits, and not a hosted-CI proof.
 """
 
 from __future__ import annotations
@@ -38,12 +40,27 @@ from test_completion_scope import (  # noqa: E402
 CHECKER_PATH = REPO / "scripts/ci/check-conformance-inventory-callsite.py"
 B1_PATH = REPO / "scripts/ci/test-ci-hardening-b1.sh"
 CI_YML = REPO / ".github/workflows/ci.yml"
+HOST_YML = REPO / ".github/workflows/host-capability-check.yml"
 JOB = "scope"
 INVENTORY_STEP = "Conformance inventory"
 HARDENING_STEP = "Verify CI hardening contracts"
 FINALE_JOB = "ci"
 FINALE_STEP = "Verify this gate waits on every gating job"
 FINALE_CHECKER = "python3 scripts/ci/check-conformance-inventory-callsite.py"
+HOST_JOB = "check"
+HOST_STEP = "Verify required CI aggregator scheduling"
+# Independent of the checker module and of HOST_SCHEDULE_RUN_SCRIPT.
+HOST_SCHEDULE_COMMANDS = (
+    "set -euo pipefail",
+    "python3 scripts/ci/check-conformance-inventory-callsite.py --required-aggregator-schedule",
+)
+CI_JOB_IF_BLOCK = (
+    "  ci:\n"
+    "    name: CI\n"
+    "    runs-on: ubuntu-latest\n"
+    "    timeout-minutes: 10\n"
+    "    if: always()\n"
+)
 
 # Independent oracle. Do not import the completion-scope run-script tuple.
 REQUIRED_INVENTORY_COMMANDS = (
@@ -96,13 +113,19 @@ def load_checker():
     spec.loader.exec_module(module)
     problems_fn = getattr(module, "conformance_inventory_callsite_problems", None)
     guards_fn = getattr(module, "hardening_guard_callsite_problems", None)
+    schedule_fn = getattr(module, "required_aggregator_schedule_problems", None)
+    host_fn = getattr(module, "host_schedule_callsite_problems", None)
     if not callable(problems_fn):
         raise AssertionError("conformance_inventory_callsite_problems missing")
     if not callable(guards_fn):
         raise AssertionError("hardening_guard_callsite_problems missing")
+    if not callable(schedule_fn):
+        raise AssertionError("required_aggregator_schedule_problems missing")
+    if not callable(host_fn):
+        raise AssertionError("host_schedule_callsite_problems missing")
     if not callable(getattr(module, "main", None)):
         raise AssertionError("checker main missing")
-    return module, problems_fn, guards_fn
+    return module, problems_fn, guards_fn, schedule_fn, host_fn
 
 
 def sha256_text(text: str) -> str:
@@ -282,6 +305,133 @@ def bash_env_before_hardening(text: str) -> str:
     return mutated
 
 
+def mutate_ci_job_if(text: str, value: str | None) -> str:
+    if CI_JOB_IF_BLOCK not in text:
+        raise AssertionError("canonical ci job if: always() block missing")
+    if value is None:
+        replacement = (
+            "  ci:\n"
+            "    name: CI\n"
+            "    runs-on: ubuntu-latest\n"
+            "    timeout-minutes: 10\n"
+        )
+    else:
+        replacement = CI_JOB_IF_BLOCK.replace("    if: always()\n", f"    if: {value}\n")
+    mutated = text.replace(CI_JOB_IF_BLOCK, replacement, 1)
+    if mutated == text:
+        raise AssertionError(f"ci job if mutation {value!r} was a no-op")
+    return mutated
+
+
+def comment_between_hardening_and_finale(text: str) -> str:
+    needle = finale_heading(text)
+    mutated = text.replace(
+        needle,
+        "      # documentation-only line between hardening and finale\n" + needle,
+        1,
+    )
+    if mutated == text:
+        raise AssertionError("comment-between-steps mutation was a no-op")
+    return mutated
+
+
+def blank_between_hardening_and_finale(text: str) -> str:
+    needle = finale_heading(text)
+    mutated = text.replace(needle, "\n" + needle, 1)
+    if mutated == text:
+        raise AssertionError("blank-between-steps mutation was a no-op")
+    return mutated
+
+
+def intervening_step_between_hardening_and_finale(text: str) -> str:
+    needle = finale_heading(text)
+    writer = TRUSTED_PREFIX_WRITERS[0][1]
+    mutated = text.replace(needle, writer + needle, 1)
+    if mutated == text:
+        raise AssertionError("intervening-step mutation was a no-op")
+    return mutated
+
+
+def host_heading(text: str) -> str:
+    heading = f"      - name: {HOST_STEP}\n"
+    if heading not in text:
+        raise AssertionError("host scheduling step heading missing")
+    return heading
+
+
+def delete_host_schedule_step(text: str) -> str:
+    step = named_step(text, HOST_JOB, HOST_STEP)
+    mutated = text.replace(step, "", 1)
+    if mutated == text or f"      - name: {HOST_STEP}\n" in mutated:
+        raise AssertionError("delete-host-schedule mutation was a no-op")
+    return mutated
+
+
+def rename_host_schedule_step(text: str) -> str:
+    mutated = text.replace(
+        host_heading(text),
+        "      - name: Verify required CI aggregator schedule\n",
+        1,
+    )
+    if mutated == text:
+        raise AssertionError("rename-host-schedule mutation was a no-op")
+    return mutated
+
+
+def false_if_host_schedule_step(text: str) -> str:
+    needle = host_heading(text)
+    mutated = text.replace(needle, needle + "        if: false\n", 1)
+    if mutated == text:
+        raise AssertionError("if:false host-schedule mutation was a no-op")
+    return mutated
+
+
+def neutralize_host_schedule_command(text: str, mode: str) -> str:
+    command = HOST_SCHEDULE_COMMANDS[1]
+    needle = f"          {command}\n"
+    if needle not in text:
+        raise AssertionError("host scheduling command missing")
+    if mode == "remove":
+        replacement = ""
+    elif mode == "comment":
+        replacement = f"          # {command}\n"
+    else:
+        raise AssertionError(f"unknown neutralize mode {mode!r}")
+    mutated = text.replace(needle, replacement, 1)
+    if mutated == text:
+        raise AssertionError(f"{mode} mutation of host scheduling command was a no-op")
+    return mutated
+
+
+HOST_JOB_NAME = "    name: host-capability-check\n"
+
+
+def add_host_job_key(text: str, key_line: str) -> str:
+    if text.count(HOST_JOB_NAME) != 1:
+        raise AssertionError("expected one host-capability-check job name")
+    mutated = text.replace(HOST_JOB_NAME, HOST_JOB_NAME + f"    {key_line}\n", 1)
+    if mutated == text:
+        raise AssertionError(f"host job {key_line!r} mutation was a no-op")
+    return mutated
+
+
+HOST_JOB_MUTATIONS = (
+    ("host_job_if_false", lambda text: add_host_job_key(text, "if: false")),
+    ("host_job_needs", lambda text: add_host_job_key(text, "needs: [ci]")),
+)
+
+
+HOST_SCHEDULE_MUTATIONS = (
+    ("delete_host_schedule_step", delete_host_schedule_step),
+    ("rename_host_schedule_step", rename_host_schedule_step),
+    ("false_if_host_schedule_step", false_if_host_schedule_step),
+    ("comment_host_schedule_command",
+     lambda text: neutralize_host_schedule_command(text, "comment")),
+    ("remove_host_schedule_command",
+     lambda text: neutralize_host_schedule_command(text, "remove")),
+)
+
+
 def neutralize_finale_checker(text: str) -> str:
     step = named_step(text, FINALE_JOB, FINALE_STEP)
     needle = f"          {FINALE_CHECKER}\n"
@@ -382,18 +532,27 @@ def rebind_hardening_gh_token(text: str) -> str:
     return mutated
 
 
-def run_checker_main(module, workflow_text: str) -> int:
+def run_checker_main(
+        module, workflow_text: str, *args: str, host_text: str | None = None) -> int:
     original = module.CI_YML
+    original_host = getattr(module, "HOST_YML", None)
     original_argv = sys.argv
+    if host_text is None:
+        host_text = HOST_YML.read_text(encoding="utf-8")
     with tempfile.TemporaryDirectory() as tmp:
         scratch = Path(tmp) / "ci.yml"
         scratch.write_text(workflow_text, encoding="utf-8")
+        host_scratch = Path(tmp) / "host.yml"
+        host_scratch.write_text(host_text, encoding="utf-8")
         module.CI_YML = scratch
-        sys.argv = [str(CHECKER_PATH)]
+        module.HOST_YML = host_scratch
+        sys.argv = [str(CHECKER_PATH), *args]
         try:
             return module.main()
         finally:
             module.CI_YML = original
+            if original_host is not None:
+                module.HOST_YML = original_host
             sys.argv = original_argv
 
 
@@ -425,15 +584,22 @@ class ConformanceInventoryCallsite(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.live = CI_YML.read_text(encoding="utf-8")
         cls.live_digest = sha256_text(cls.live)
-        module, problems_fn, guards_fn = load_checker()
+        module, problems_fn, guards_fn, schedule_fn, host_fn = load_checker()
         cls.checker = module
         cls.problems_fn = staticmethod(problems_fn)
         cls.guards_fn = staticmethod(guards_fn)
+        cls.schedule_fn = staticmethod(schedule_fn)
+        cls.host_fn = staticmethod(host_fn)
+        cls.host_live = HOST_YML.read_text(encoding="utf-8")
+        cls.host_digest = sha256_text(cls.host_live)
 
     def tearDown(self) -> None:
         current = CI_YML.read_text(encoding="utf-8")
         self.assertEqual(sha256_text(current), self.live_digest)
         self.assertEqual(current, self.live)
+        host = HOST_YML.read_text(encoding="utf-8")
+        self.assertEqual(sha256_text(host), self.host_digest)
+        self.assertEqual(host, self.host_live)
 
     def test_command_table_is_not_an_import_of_the_completion_scope_tuple(self) -> None:
         imported = [
@@ -450,11 +616,15 @@ class ConformanceInventoryCallsite(unittest.TestCase):
     def test_pristine_workflow_is_green(self) -> None:
         self.assertEqual(self.problems_fn(self.live), [])
         self.assertEqual(self.guards_fn(self.live), [])
+        self.assertEqual(self.schedule_fn(self.live), [])
+        self.assertEqual(self.host_fn(self.host_live), [])
         step = named_step(self.live, FINALE_JOB, HARDENING_STEP)
         self.assertEqual(tuple(_active_run_lines(step)), HARDENING_STEP_COMMANDS)
         self.assertIn(HARDENING_ENV_BLOCK, step)
         finale = named_step(self.live, FINALE_JOB, FINALE_STEP)
         self.assertEqual(tuple(_active_run_lines(finale)), FINALE_STEP_COMMANDS)
+        host = named_step(self.host_live, HOST_JOB, HOST_STEP)
+        self.assertEqual(tuple(_active_run_lines(host)), HOST_SCHEDULE_COMMANDS)
 
     def test_live_inventory_step_matches_independent_literals(self) -> None:
         step = named_step(self.live, JOB, INVENTORY_STEP)
@@ -610,6 +780,7 @@ class ConformanceInventoryCallsite(unittest.TestCase):
             ("inventory_delete", delete_step),
             ("hardening_delete", delete_hardening_step),
             ("finale_if_false", false_if_finale),
+            ("ci_if_false", lambda text: mutate_ci_job_if(text, "false")),
         )
         for label, mutate in mutations:
             with self.subTest(label=label):
@@ -646,6 +817,107 @@ class ConformanceInventoryCallsite(unittest.TestCase):
             0,
             "live main() must stay red on the same mutated workflow",
         )
+
+    def test_ci_aggregator_if_mutations_fail_the_host_root(self) -> None:
+        self.assertEqual(self.schedule_fn(self.live), [])
+        self.assertEqual(
+            run_checker_main(
+                self.checker, self.live, "--required-aggregator-schedule"),
+            0,
+        )
+        mutations = (
+            ("if_false", lambda text: mutate_ci_job_if(text, "false")),
+            ("if_missing", lambda text: mutate_ci_job_if(text, None)),
+            ("if_success", lambda text: mutate_ci_job_if(text, "success()")),
+        )
+        for label, mutate in mutations:
+            with self.subTest(label=label):
+                mutated = mutate(self.live)
+                self.assertEqual(self.problems_fn(mutated), [])
+                self.assertTrue(
+                    self.schedule_fn(mutated),
+                    f"{label} must fail the host-root schedule pin",
+                )
+                self.assertNotEqual(
+                    run_checker_main(
+                        self.checker, mutated, "--required-aggregator-schedule"),
+                    0,
+                    f"{label} must fail checker --required-aggregator-schedule",
+                )
+        self.assertEqual(self.schedule_fn(self.live), [])
+
+    def test_host_schedule_invocation_mutations_fail(self) -> None:
+        self.assertEqual(self.host_fn(self.host_live), [])
+        self.assertEqual(run_checker_main(self.checker, self.live), 0)
+        for label, mutate in HOST_SCHEDULE_MUTATIONS:
+            with self.subTest(label=label):
+                mutated = mutate(self.host_live)
+                self.assertTrue(
+                    self.host_fn(mutated),
+                    f"{label} must fail the host scheduling callsite pin",
+                )
+                self.assertNotEqual(
+                    run_checker_main(self.checker, self.live, host_text=mutated),
+                    0,
+                    f"{label} must fail checker main()",
+                )
+        self.assertEqual(self.host_fn(self.host_live), [])
+        self.assertEqual(run_checker_main(self.checker, self.live), 0)
+
+    def test_parent_host_job_if_false_after_name_fails_the_ci_root(self) -> None:
+        mutated = add_host_job_key(self.host_live, "if: false")
+        self.assertIn(
+            "    name: host-capability-check\n    if: false\n", mutated)
+        self.assertTrue(
+            self.host_fn(mutated),
+            "job-level if: false after the host job name must fail the CI-root pin",
+        )
+        self.assertNotEqual(
+            run_checker_main(self.checker, self.live, host_text=mutated),
+            0,
+            "job-level if: false must fail checker main()",
+        )
+        self.assertEqual(self.host_fn(self.host_live), [])
+
+    def test_host_job_if_or_needs_fails_the_ci_root(self) -> None:
+        self.assertEqual(self.host_fn(self.host_live), [])
+        self.assertEqual(run_checker_main(self.checker, self.live), 0)
+        for label, mutate in HOST_JOB_MUTATIONS:
+            with self.subTest(label=label):
+                mutated = mutate(self.host_live)
+                self.assertTrue(
+                    self.host_fn(mutated),
+                    f"{label} must fail the CI-root host-job pin",
+                )
+                self.assertNotEqual(
+                    run_checker_main(self.checker, self.live, host_text=mutated),
+                    0,
+                    f"{label} must fail checker main()",
+                )
+        self.assertEqual(self.host_fn(self.host_live), [])
+        self.assertEqual(run_checker_main(self.checker, self.live), 0)
+
+    def test_blank_or_comment_between_hardening_and_finale_stays_green(self) -> None:
+        self.assertEqual(self.guards_fn(self.live), [])
+        for label, mutate in (
+            ("blank", blank_between_hardening_and_finale),
+            ("comment", comment_between_hardening_and_finale),
+        ):
+            with self.subTest(label=label):
+                self.assertEqual(
+                    self.guards_fn(mutate(self.live)),
+                    [],
+                    f"{label} lines must not break hardening/finale successor identity",
+                )
+        self.assertEqual(self.guards_fn(self.live), [])
+
+    def test_intervening_executable_step_still_fails_successor(self) -> None:
+        self.assertEqual(self.guards_fn(self.live), [])
+        self.assertTrue(
+            self.guards_fn(intervening_step_between_hardening_and_finale(self.live)),
+            "an intervening executable step must still fail successor identity",
+        )
+        self.assertEqual(self.guards_fn(self.live), [])
 
 
 if __name__ == "__main__":
