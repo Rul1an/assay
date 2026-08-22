@@ -403,21 +403,13 @@ def neutralize_host_schedule_command(text: str, mode: str) -> str:
     return mutated
 
 
-HOST_JOB_BLOCK = (
-    "  check:\n"
-    "    name: host-capability-check\n"
-    "    runs-on: ubuntu-latest\n"
-    "    timeout-minutes: 10\n"
-    "    steps:\n"
-)
+HOST_JOB_NAME = "    name: host-capability-check\n"
 
 
 def add_host_job_key(text: str, key_line: str) -> str:
-    if HOST_JOB_BLOCK not in text:
-        raise AssertionError("canonical host check job block missing")
-    replacement = HOST_JOB_BLOCK.replace(
-        "    steps:\n", f"    {key_line}\n    steps:\n")
-    mutated = text.replace(HOST_JOB_BLOCK, replacement, 1)
+    if text.count(HOST_JOB_NAME) != 1:
+        raise AssertionError("expected one host-capability-check job name")
+    mutated = text.replace(HOST_JOB_NAME, HOST_JOB_NAME + f"    {key_line}\n", 1)
     if mutated == text:
         raise AssertionError(f"host job {key_line!r} mutation was a no-op")
     return mutated
@@ -871,6 +863,21 @@ class ConformanceInventoryCallsite(unittest.TestCase):
                 )
         self.assertEqual(self.host_fn(self.host_live), [])
         self.assertEqual(run_checker_main(self.checker, self.live), 0)
+
+    def test_parent_host_job_if_false_after_name_fails_the_ci_root(self) -> None:
+        mutated = add_host_job_key(self.host_live, "if: false")
+        self.assertIn(
+            "    name: host-capability-check\n    if: false\n", mutated)
+        self.assertTrue(
+            self.host_fn(mutated),
+            "job-level if: false after the host job name must fail the CI-root pin",
+        )
+        self.assertNotEqual(
+            run_checker_main(self.checker, self.live, host_text=mutated),
+            0,
+            "job-level if: false must fail checker main()",
+        )
+        self.assertEqual(self.host_fn(self.host_live), [])
 
     def test_host_job_if_or_needs_fails_the_ci_root(self) -> None:
         self.assertEqual(self.host_fn(self.host_live), [])

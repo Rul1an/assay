@@ -1161,20 +1161,11 @@ class ProductCallsite(unittest.TestCase):
         text = (REPO / ".github/workflows/host-capability-check.yml").read_text(
             encoding="utf-8")
         assert_host_schedule_invocation(text)
-        needle = (
-            "  check:\n"
-            "    name: host-capability-check\n"
-            "    runs-on: ubuntu-latest\n"
-            "    timeout-minutes: 10\n"
-            "    steps:\n"
-        )
+        needle = "    name: host-capability-check\n"
+        self.assertEqual(text.count(needle), 1)
         for key_line in ("if: false", "needs: [ci]"):
             with self.subTest(key_line=key_line):
-                mutated = text.replace(
-                    needle,
-                    needle.replace("    steps:\n", f"    {key_line}\n    steps:\n"),
-                    1,
-                )
+                mutated = text.replace(needle, needle + f"    {key_line}\n", 1)
                 self.assertNotEqual(mutated, text)
                 with self.assertRaises(AssertionError):
                     assert_host_schedule_invocation(mutated)
