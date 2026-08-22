@@ -60,6 +60,16 @@ def sort_publication_rows(rows: list[dict]) -> list[dict]:
     return sorted(rows, key=lambda row: (row["implementation_id"], row["record_sha256"]))
 
 
+def escape_markdown_cell(value: object) -> str:
+    return (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace("|", "\\|")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
 def _registry_by_id(repo: Path) -> dict[str, dict]:
     try:
         document = load_implementations(repo / "conformance/implementations.json")
@@ -169,18 +179,24 @@ def render_table(rows: list[dict]) -> str:
     lines = []
     for row in rows:
         summary = row["summary"]
+        digest = row["record_sha256"]
+        record_cell = "[%s](%s)" % (
+            escape_markdown_cell(digest),
+            escape_markdown_cell("public-runs/" + digest.removeprefix("sha256:")),
+        )
         lines.append(
-            "| %s | %s | %s | %s | %s | %s | %s | %s | %s |"
+            "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |"
             % (
-                row["implementation_id"],
-                row["suite"],
-                row["record_sha256"],
-                row["image"],
-                row["commit"],
-                summary["match"],
-                summary["mismatch"],
-                summary["execution_error"],
-                summary["harness_error"],
+                escape_markdown_cell(row["implementation_id"]),
+                escape_markdown_cell(row["suite"]),
+                record_cell,
+                escape_markdown_cell(row["image"]),
+                escape_markdown_cell(row["commit"]),
+                escape_markdown_cell(summary["match"]),
+                escape_markdown_cell(summary["mismatch"]),
+                escape_markdown_cell(summary["execution_error"]),
+                escape_markdown_cell(summary["harness_error"]),
+                escape_markdown_cell(summary["review_warnings"]),
             )
         )
     return "\n".join(lines)
@@ -225,10 +241,10 @@ def write_document(repo: Path) -> None:
             prefix=output.name + ".",
             delete=False,
         ) as handle:
+            temporary = Path(handle.name)
             handle.write(rendered)
             handle.flush()
             os.fsync(handle.fileno())
-            temporary = Path(handle.name)
         os.chmod(temporary, 0o644)
         os.replace(temporary, output)
         temporary = None

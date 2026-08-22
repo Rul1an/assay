@@ -68,6 +68,37 @@ def run_check(project, repo: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _table_cells(row: str) -> list[str]:
+    body = row.strip()
+    if body.startswith("|"):
+        body = body[1:]
+    if body.endswith("|"):
+        body = body[:-1]
+    return [cell.strip() for cell in body.split(" | ")]
+
+
+def _rebind_record(root: Path, mutate_payload, mutate_index=None, mutate_registry=None) -> str:
+    record = root / "conformance/public-runs" / HOSTED_SHA256
+    payload = json.loads(record.read_text())
+    mutate_payload(payload)
+    mutated = json.dumps(payload, indent=2, sort_keys=True).encode() + b"\n"
+    digest = hashlib.sha256(mutated).hexdigest()
+    record.unlink()
+    (root / "conformance/public-runs" / digest).write_bytes(mutated)
+    index_path = root / "conformance/public-runs.json"
+    index = json.loads(index_path.read_text())
+    index["runs"][0]["record_sha256"] = "sha256:" + digest
+    if mutate_index is not None:
+        mutate_index(index)
+    index_path.write_text(json.dumps(index) + "\n")
+    if mutate_registry is not None:
+        registry_path = root / "conformance/implementations.json"
+        registry = json.loads(registry_path.read_text())
+        mutate_registry(registry)
+        registry_path.write_text(json.dumps(registry) + "\n")
+    return digest
+
+
 class PublicRunProjection(unittest.TestCase):
     def test_record_byte_flip_fails_check_and_preserves_markdown(self) -> None:
         with sandbox() as (root, project):
@@ -208,7 +239,7 @@ class PublicRunMutations(unittest.TestCase):
                 with self.assertRaises(AssertionError):
                     project.load_publication(root)
 
-    def test_hostile_index_inputs_fail_before_render(self) -> None:
+    def test_index_path_hostile_inputs_fail_before_render(self) -> None:
         with sandbox() as (root, project):
             index = root / "conformance/public-runs.json"
             markdown = root / "conformance/IMPLEMENTATIONS.md"
@@ -220,19 +251,127 @@ class PublicRunMutations(unittest.TestCase):
             index.write_bytes(b'{"schema":"x","schema":"y"}\n')
             with self.assertRaises(ValueError):
                 project.load_publication(root)
-            huge = root / "huge.json"
-            huge.write_bytes(b"{" + (b"a" * (project.MAX_INDEX_BYTES + 1)) + b"}")
+            shutil.copy2(REPO / "conformance/public-runs.json", index)
+            hidden = root / "hidden-index.json"
+            shutil.copy2(index, hidden)
+            index.unlink()
+            index.symlink_to(hidden)
             with self.assertRaises(ValueError):
-                project.published_rows.read_regular_file(huge, project.MAX_INDEX_BYTES)
+                project.load_publication(root)
+            index.unlink()
+            shutil.copy2(REPO / "conformance/public-runs.json", index)
             if hasattr(os, "mkfifo"):
-                fifo = root / "fifo.json"
-                os.mkfifo(fifo)
+                index.unlink()
+                os.mkfifo(index)
                 with self.assertRaises(ValueError):
-                    project.published_rows.read_regular_file(fifo, project.MAX_INDEX_BYTES)
-            link = root / "link.json"
-            link.symlink_to(root / "conformance/public-runs.json")
-            with self.assertRaises(ValueError):
-                project.published_rows.read_regular_file(link, project.MAX_INDEX_BYTES)
+                    project.load_publication(root)
+                index.unlink()
+                shutil.copy2(REPO / "conformance/public-runs.json", index)
+            index.write_bytes(b"{" + (b"a" * 65535) + b"}")
+            with self.assertRaises(ValueError) as oversize:
+                project.load_publication(root)
+            self.assertIn("exceeds", str(oversize.exception))
+
+    def test_write_document_replaces_with_exact_render_bytes(self) -> None:
+        with sandbox() as (root, project):
+            markdown = root / "conformance/IMPLEMENTATIONS.md"
+            markdown.write_bytes(b"stale-prior-bytes\n")
+            project.write_document(root)
+            expected = project.render_document(root, project.load_publication(root)).encode("utf-8")
+            self.assertEqual(markdown.read_bytes(), expected)
+
+    def test_write_document_failures_keep_prior_bytes_and_clean_temp(self) -> None:
+        with sandbox() as (root, project):
+            markdown = root / "conformance/IMPLEMENTATIONS.md"
+            prior = b"keep-these-bytes\n"
+            markdown.write_bytes(prior)
+
+            real_named = tempfile.NamedTemporaryFile
+
+            def leaking_write(*args, **kwargs):
+                handle = real_named(*args, **kwargs)
+                handle.write = lambda _data: (_ for _ in ()).throw(OSError("injected write failure"))
+                return handle
+
+            with mock.patch.object(project.tempfile, "NamedTemporaryFile", side_effect=leaking_write):
+                with self.assertRaises(OSError):
+                    project.write_document(root)
+            self.assertEqual(markdown.read_bytes(), prior)
+            leftovers = [
+                path.name
+                for path in (root / "conformance").iterdir()
+                if path.name.startswith("IMPLEMENTATIONS.md.") and path.name != "IMPLEMENTATIONS.md.in"
+            ]
+            self.assertEqual(leftovers, [])
+
+            markdown.write_bytes(prior)
+            with mock.patch.object(project.os, "replace", side_effect=OSError("injected replace failure")):
+                with self.assertRaises(OSError):
+                    project.write_document(root)
+            self.assertEqual(markdown.read_bytes(), prior)
+            leftovers = [
+                path.name
+                for path in (root / "conformance").iterdir()
+                if path.name.startswith("IMPLEMENTATIONS.md.") and path.name != "IMPLEMENTATIONS.md.in"
+            ]
+            self.assertEqual(leftovers, [])
+
+    def test_valid_review_warnings_are_projected(self) -> None:
+        with sandbox() as (root, project):
+            import validate_run_record
+
+            def add_warning(payload: dict) -> None:
+                payload["cases"][0]["review_warnings"] = ["one typed warning"]
+                payload["summary"]["review_warnings"] = 1
+
+            digest = _rebind_record(root, add_warning)
+            report = validate_run_record.load_run_record(root / "conformance/public-runs" / digest)
+            validate_run_record.validate_run_record(report)
+            self.assertEqual(report["summary"]["review_warnings"], 1)
+            rows = project.load_publication(root)
+            self.assertEqual(rows[0]["summary"]["review_warnings"], 1)
+            document = project.render_document(root, rows)
+            self.assertIn("| review_warnings |", document)
+            row = next(line for line in document.splitlines() if "pma-v0-repro" in line)
+            cells = _table_cells(row)
+            self.assertEqual(len(cells), 10)
+            self.assertEqual(cells[-1], "1")
+
+    def test_bound_image_markup_stays_one_cell(self) -> None:
+        with sandbox() as (root, project):
+            image = (
+                "ghcr.io/rul1an/pma|<v0>@sha256:"
+                "88a5ef285a80dc0caeb2b11093eba79f8f08c870b549cafc395aa77ee5ffc493"
+            )
+
+            def set_image(payload: dict) -> None:
+                payload["implementation"]["image"] = image
+
+            def set_index_image(index: dict) -> None:
+                index["runs"][0]["image"] = image
+
+            def set_registry_image(registry: dict) -> None:
+                registry["implementations"][0]["image"] = image
+
+            _rebind_record(root, set_image, set_index_image, set_registry_image)
+            rows = project.load_publication(root)
+            table = project.render_table(rows)
+            cells = _table_cells(table.splitlines()[0])
+            self.assertEqual(len(cells), 10)
+            self.assertIn("\\|", cells[3])
+            self.assertIn("&lt;", cells[3])
+            self.assertIn("&gt;", cells[3])
+            self.assertEqual(project.escape_markdown_cell("a|b<c>d"), "a\\|b&lt;c&gt;d")
+
+    def test_record_digest_links_to_stored_bytes_and_names_opt_in(self) -> None:
+        with sandbox() as (root, project):
+            rows = project.load_publication(root)
+            document = project.render_document(root, rows)
+            self.assertIn(
+                "[sha256:%s](public-runs/%s)" % (HOSTED_SHA256, HOSTED_SHA256),
+                document,
+            )
+            self.assertIn("python3 conformance/project_public_runs.py --check", document)
 
     def test_check_does_not_write(self) -> None:
         with sandbox() as (root, project):
