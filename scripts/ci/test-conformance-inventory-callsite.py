@@ -100,7 +100,9 @@ def load_checker():
         raise AssertionError("conformance_inventory_callsite_problems missing")
     if not callable(guards_fn):
         raise AssertionError("hardening_guard_callsite_problems missing")
-    return problems_fn, guards_fn
+    if not callable(getattr(module, "main", None)):
+        raise AssertionError("checker main missing")
+    return module, problems_fn, guards_fn
 
 
 def sha256_text(text: str) -> str:
@@ -380,6 +382,21 @@ def rebind_hardening_gh_token(text: str) -> str:
     return mutated
 
 
+def run_checker_main(module, workflow_text: str) -> int:
+    original = module.CI_YML
+    original_argv = sys.argv
+    with tempfile.TemporaryDirectory() as tmp:
+        scratch = Path(tmp) / "ci.yml"
+        scratch.write_text(workflow_text, encoding="utf-8")
+        module.CI_YML = scratch
+        sys.argv = [str(CHECKER_PATH)]
+        try:
+            return module.main()
+        finally:
+            module.CI_YML = original
+            sys.argv = original_argv
+
+
 def run_live_finale_step(workflow_text: str, *, fail_first: bool) -> int:
     script = "\n".join(_active_run_lines(named_step(
         workflow_text, FINALE_JOB, FINALE_STEP)))
@@ -408,7 +425,8 @@ class ConformanceInventoryCallsite(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.live = CI_YML.read_text(encoding="utf-8")
         cls.live_digest = sha256_text(cls.live)
-        problems_fn, guards_fn = load_checker()
+        module, problems_fn, guards_fn = load_checker()
+        cls.checker = module
         cls.problems_fn = staticmethod(problems_fn)
         cls.guards_fn = staticmethod(guards_fn)
 
@@ -585,6 +603,49 @@ class ConformanceInventoryCallsite(unittest.TestCase):
                     tuple(_active_run_lines(finale)),
                     FINALE_STEP_COMMANDS,
                 )
+
+    def test_main_fails_closed_on_mutated_workflows(self) -> None:
+        self.assertEqual(run_checker_main(self.checker, self.live), 0)
+        mutations = (
+            ("inventory_delete", delete_step),
+            ("hardening_delete", delete_hardening_step),
+            ("finale_if_false", false_if_finale),
+        )
+        for label, mutate in mutations:
+            with self.subTest(label=label):
+                self.assertNotEqual(
+                    run_checker_main(self.checker, mutate(self.live)),
+                    0,
+                    f"{label} must fail checker main()",
+                )
+        self.assertEqual(run_checker_main(self.checker, self.live), 0)
+
+    def test_neutralizing_main_failure_branch_is_visible(self) -> None:
+        source = CHECKER_PATH.read_text(encoding="utf-8")
+        needle = "    if problems:\n"
+        self.assertIn(needle, source)
+        self.assertNotIn("    if False and problems:\n", source)
+        disabled = source.replace(needle, "    if False and problems:\n", 1)
+        mutated_workflow = delete_step(self.live)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "checker.py"
+            path.write_text(disabled, encoding="utf-8")
+            spec = importlib.util.spec_from_file_location(
+                "disabled_inventory_callsite", path)
+            if spec is None or spec.loader is None:
+                raise AssertionError("disabled checker is not loadable")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            self.assertEqual(
+                run_checker_main(module, mutated_workflow),
+                0,
+                "the reported if False and problems mutation must skip main failure",
+            )
+        self.assertNotEqual(
+            run_checker_main(self.checker, mutated_workflow),
+            0,
+            "live main() must stay red on the same mutated workflow",
+        )
 
 
 if __name__ == "__main__":
