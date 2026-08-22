@@ -190,20 +190,29 @@ jobs:
           path: ${{ runner.temp }}/oci-score
 
       - name: Score candidate capture
+        id: score
         run: |
           set -euo pipefail
           PACK="$RUNNER_TEMP/oci-downloads/privileged-mcp-action-v0-clean-room.tar.gz"
           CAPTURE="$RUNNER_TEMP/oci-score/candidate_capture.v0"
           OUTPUT="$RUNNER_TEMP/oci-score/conformance_run.v1"
           mkdir -p "$(dirname "$OUTPUT")"
+          set +e
           python3 conformance/privileged-mcp-action-v0/scripts/score_candidate.py \
             --pack "$PACK" \
             --manifest conformance/privileged-mcp-action-v0/MANIFEST.json \
             --capture "$CAPTURE" \
             --output "$OUTPUT"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 0 || "$rc" -eq 1 ]]; then
+            python3 conformance/privileged-mcp-action-v0/scripts/validate_run_record.py "$OUTPUT"
+            echo "upload=yes" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$rc"
 
       - name: Upload validated run record
-        if: success()
+        if: always() && steps.score.outputs.upload == 'yes'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: candidate-run-record-v1

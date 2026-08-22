@@ -60,6 +60,10 @@ OCI_EXECUTOR = (
 OCI_SCORER = (
     "conformance/privileged-mcp-action-v0/scripts/score_candidate.py"
 )
+OCI_VALIDATOR = (
+    "conformance/privileged-mcp-action-v0/scripts/validate_run_record.py"
+)
+OCI_SCORE_UPLOAD_IF = "if: always() && steps.score.outputs.upload == 'yes'"
 OCI_SIGNER_WORKFLOW = (
     "Rul1an/assay/.github/workflows/privileged-mcp-action-pack-release.yml"
 )
@@ -219,7 +223,7 @@ OCI_SCORE_STEP_KEYS = {
     "Download attested pack": ("name", "env", "run"),
     "Verify pack attestation": ("name", "env", "run"),
     OCI_SCORE_DOWNLOAD_STEP: ("name", "uses", "with"),
-    OCI_SCORE_STEP: ("name", "run"),
+    OCI_SCORE_STEP: ("name", "id", "run"),
     OCI_SCORE_UPLOAD_STEP: ("name", "if", "uses", "with"),
 }
 OCI_SCORE_STEP_WITH_KEYS = {
@@ -235,11 +239,19 @@ OCI_SCORE_PINNED_STEP_SEQUENCES = {
         'CAPTURE="$RUNNER_TEMP/oci-score/candidate_capture.v0"',
         'OUTPUT="$RUNNER_TEMP/oci-score/conformance_run.v1"',
         'mkdir -p "$(dirname "$OUTPUT")"',
+        "set +e",
         f"python3 {OCI_SCORER}"
         ' --pack "$PACK"'
         " --manifest conformance/privileged-mcp-action-v0/MANIFEST.json"
         ' --capture "$CAPTURE"'
         ' --output "$OUTPUT"',
+        "rc=$?",
+        "set -e",
+        'if [[ "$rc" -eq 0 || "$rc" -eq 1 ]]; then',
+        f'python3 {OCI_VALIDATOR} "$OUTPUT"',
+        'echo "upload=yes" >> "$GITHUB_OUTPUT"',
+        "fi",
+        'exit "$rc"',
     ),
 }
 
@@ -3118,8 +3130,46 @@ def oci_candidate_workflow_problems(
             continue
         ifs = [line for line in _active_lines(block) if line.startswith("if:")]
         upload_ifs.extend(ifs or ["<missing-if>"])
-    if not omitted("upload not gated on success") and upload_ifs != ["if: success()", "if: success()"]:
+    if not omitted("upload not gated on success") and (
+        not upload_ifs or upload_ifs[0] != "if: success()"
+    ):
         problems.append("upload not gated on success")
+    if not omitted("score upload not gated on revalidated output") and (
+        len(upload_ifs) < 2 or upload_ifs[1] != OCI_SCORE_UPLOAD_IF
+    ):
+        problems.append("score upload not gated on revalidated output")
+    score_run = _named_step_run_body(score_block or "", OCI_SCORE_STEP)
+    score_seq = _normalized_command_sequence(score_run or "")
+    validate_idx = next(
+        (i for i, cmd in enumerate(score_seq) if "validate_run_record.py" in cmd),
+        -1,
+    )
+    upload_yes_idxs = [
+        i for i, cmd in enumerate(score_seq) if 'echo "upload=yes"' in cmd
+    ]
+    if not omitted("score sets upload=yes before revalidate"):
+        if any(idx < validate_idx or validate_idx < 0 for idx in upload_yes_idxs):
+            problems.append("score sets upload=yes before revalidate")
+    if not omitted("score uploads stale output on rc 2"):
+        in_01 = False
+        wrote_outside = False
+        saw_01 = False
+        for cmd in score_seq:
+            if 'if [[ "$rc" -eq 0 || "$rc" -eq 1 ]]' in cmd:
+                in_01 = True
+                saw_01 = True
+            elif cmd == "fi":
+                in_01 = False
+            elif 'echo "upload=yes"' in cmd and not in_01:
+                wrote_outside = True
+        if upload_yes_idxs and (wrote_outside or not saw_01):
+            problems.append("score uploads stale output on rc 2")
+    score_step = _named_step_block(score_block or "", OCI_SCORE_STEP)
+    score_ids = [
+        line for line in _active_lines(score_step or "") if line.startswith("id:")
+    ]
+    if not omitted("score step missing id: score") and score_ids != ["id: score"]:
+        problems.append("score step missing id: score")
     if "candidate_capture.v0" not in active_text:
         problems.append("missing fixed capture name")
     if OCI_CAPTURE_UPLOAD_PATH not in active_text:
@@ -3447,6 +3497,7 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
             "Download attested pack",
             "Verify pack attestation",
             "Capture candidate observations",
+            OCI_SCORE_STEP,
         )
         for step in swallow_steps:
             with self.subTest(continue_on_error=step):
@@ -3462,6 +3513,8 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
             "gh release download",
             "gh attestation verify",
             OCI_EXECUTOR,
+            OCI_SCORER,
+            OCI_VALIDATOR,
         )
         for cmd in swallow_commands:
             with self.subTest(or_true=cmd):
@@ -3742,10 +3795,47 @@ class PrivilegedMcpActionOciCandidateWorkflowContract(unittest.TestCase):
                 "score job invokes executor",
             ),
             (
-                "score_upload_on_failure",
+                "score_upload_if_success",
+                "      - name: Upload validated run record\n        "
+                + OCI_SCORE_UPLOAD_IF
+                + "\n",
                 "      - name: Upload validated run record\n        if: success()\n",
-                "      - name: Upload validated run record\n        if: failure()\n",
-                "upload not gated on success",
+                "score upload not gated on revalidated output",
+            ),
+            (
+                "score_upload_if_or_failure",
+                "      - name: Upload validated run record\n        "
+                + OCI_SCORE_UPLOAD_IF
+                + "\n",
+                "      - name: Upload validated run record\n"
+                "        if: success() || failure()\n",
+                "score upload not gated on revalidated output",
+            ),
+            (
+                "score_continue_on_error",
+                f"      - name: {OCI_SCORE_STEP}\n",
+                f"      - name: {OCI_SCORE_STEP}\n        continue-on-error: true\n",
+                "continue-on-error swallows failure",
+            ),
+            (
+                "score_upload_yes_before_revalidate",
+                f'            python3 {OCI_VALIDATOR} "$OUTPUT"\n'
+                '            echo "upload=yes" >> "$GITHUB_OUTPUT"\n',
+                '            echo "upload=yes" >> "$GITHUB_OUTPUT"\n'
+                f'            python3 {OCI_VALIDATOR} "$OUTPUT"\n',
+                "score sets upload=yes before revalidate",
+            ),
+            (
+                "score_upload_yes_on_rc_2",
+                '          if [[ "$rc" -eq 0 || "$rc" -eq 1 ]]; then\n'
+                f'            python3 {OCI_VALIDATOR} "$OUTPUT"\n'
+                '            echo "upload=yes" >> "$GITHUB_OUTPUT"\n'
+                "          fi\n",
+                '          if [[ "$rc" -eq 0 || "$rc" -eq 1 ]]; then\n'
+                f'            python3 {OCI_VALIDATOR} "$OUTPUT"\n'
+                "          fi\n"
+                '          echo "upload=yes" >> "$GITHUB_OUTPUT"\n',
+                "score uploads stale output on rc 2",
             ),
             (
                 "score_artifact_name",
