@@ -213,7 +213,7 @@ def stage_opaque_bundle(source: Path, staging_dir: Path) -> Path:
     data = published_rows.read_regular_file(Path(source), limit=MAX_BUNDLE_BYTES)
     staged = Path(staging_dir) / STAGED_BUNDLE_NAME
     staged.write_bytes(data)
-    staged.chmod(0o400)
+    staged.chmod(0o444)  # runtime UID 65532 reads via other-read; not a security claim
     return staged.resolve()
 
 
