@@ -58,6 +58,13 @@ jobs:
           python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py
           python3 conformance/run_all.py --require-complete --completion-scope required
 
+      - name: Public-run projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -W error::ResourceWarning conformance/tests/test_public_runs.py
+          python3 conformance/project_public_runs.py --check
+
       - id: detect
         shell: bash
         env:

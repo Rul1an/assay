@@ -1,0 +1,267 @@
+{
+  "capture_sha256": "sha256:3980810946a51c7fbc708f365991997636a9888a84c96a896dd6ea11173611d7",
+  "cases": [
+    {
+      "case_id": "case-001",
+      "exit_code": 0,
+      "input_sha256": "sha256:0066a1d32a5d87b8c9de8b4c6c54e7baed4fe5185369b9b146faa4ef46ccc442",
+      "observed": {
+        "bundle_integrity": "pass",
+        "claims": {
+          "caller_visible_denial": {
+            "status": "incomplete"
+          },
+          "external_side_effect": {
+            "status": "incomplete"
+          },
+          "policy_decision_recorded": {
+            "source_class": "producer_reported",
+            "status": "confirmed"
+          },
+          "upstream_delivery": {
+            "status": "incomplete"
+          }
+        },
+        "verdict": "valid"
+      },
+      "status": "match",
+      "stderr_present": false
+    },
+    {
+      "case_id": "case-002",
+      "exit_code": 0,
+      "input_sha256": "sha256:d22bcd852850d5b92490cebeccf8fec934da9fa3464cee5aa7d8c1a9b11a70da",
+      "observed": {
+        "bundle_integrity": "pass",
+        "claims": {
+          "caller_visible_denial": {
+            "source_class": "producer_reported",
+            "status": "refuted"
+          },
+          "external_side_effect": {
+            "status": "incomplete"
+          },
+          "policy_decision_recorded": {
+            "source_class": "producer_reported",
+            "status": "confirmed"
+          },
+          "upstream_delivery": {
+            "status": "incomplete"
+          }
+        },
+        "verdict": "valid"
+      },
+      "status": "match",
+      "stderr_present": false
+    },
+    {
+      "case_id": "case-003",
+      "exit_code": 0,
+      "input_sha256": "sha256:0592a8a6f4a0047f6f3502e6b10dddc77b00409d047cdffa3c0b3d6a7d88359f",
+      "observed": {
+        "bundle_integrity": "pass",
+        "verdict": "invalid"
+      },
+      "status": "match",
+      "stderr_present": false
+    },
+    {
+      "case_id": "case-004",
+      "exit_code": 0,
+      "input_sha256": "sha256:a179f445e622107d18fa3f18d7765205f8dc6ec5ebae7f8f8803ae5c431955aa",
+      "observed": {
+        "bundle_integrity": "pass",
+        "claims": {
+          "caller_visible_denial": {
+            "source_class": "producer_reported",
+            "status": "confirmed"
+          },
+          "external_side_effect": {
+            "status": "incomplete"
+          },
+          "policy_decision_recorded": {
+            "source_class": "producer_reported",
+            "status": "confirmed"
+          },
+          "upstream_delivery": {
+            "status": "incomplete"
+          }
+        },
+        "verdict": "valid"
+      },
+      "status": "match",
+      "stderr_present": false
+    },
+    {
+      "case_id": "case-005",
+      "exit_code": 0,
+      "input_sha256": "sha256:1963a5ec5a7a9c681fc931f481facd287037ea66305790a391deb6839f2d4831",
+      "observed": {
+        "bundle_integrity": "fail"
+      },
+      "status": "match",
+      "stderr_present": false
+    },
+    {
+      "case_id": "case-006",
+      "exit_code": 0,
+      "input_sha256": "sha256:676f8792f4826e14425b3008f765e61d87e34e4a7a8b896143ba3fc85532fab8",
+      "observed": {
+        "bundle_integrity": "pass",
+        "claims": {
+          "caller_visible_denial": {
+            "status": "incomplete"
+          },
+          "external_side_effect": {
+            "status": "incomplete"
+          },
+          "policy_decision_recorded": {
+            "source_class": "producer_reported",
+            "status": "confirmed"
+          },
+          "upstream_delivery": {
+            "status": "incomplete"
+          }
+        },
+        "verdict": "valid"
+      },
+      "status": "match",
+      "stderr_present": false
+    },
+    {
+      "case_id": "case-007",
+      "exit_code": 0,
+      "input_sha256": "sha256:c49c3b502716625868cb8fb2bf768758f965a3bb77ab5f777f8bef334392d9d6",
+      "observed": {
+        "bundle_integrity": "pass",
+        "verdict": "invalid"
+      },
+      "status": "match",
+      "stderr_present": false
+    },
+    {
+      "case_id": "case-008",
+      "exit_code": 0,
+      "input_sha256": "sha256:b546b655645e16743b69db0b3dbeca63fb928111de9fd811369dffd8fba825a5",
+      "observed": {
+        "bundle_integrity": "pass",
+        "verdict": "invalid"
+      },
+      "status": "match",
+      "stderr_present": false
+    },
+    {
+      "case_id": "case-009",
+      "exit_code": 0,
+      "input_sha256": "sha256:e76d15edeb1e095d4c3aeef15f86053bdb4034c46d403e8c35c78378517b1ff9",
+      "observed": {
+        "bundle_integrity": "pass",
+        "verdict": "invalid"
+      },
+      "status": "match",
+      "stderr_present": false
+    },
+    {
+      "case_id": "case-010",
+      "exit_code": 0,
+      "input_sha256": "sha256:bee21b4a71053f0942788680e61d15a047ef39f5c28d14e84e12cb22f825b54f",
+      "observed": {
+        "bundle_integrity": "pass",
+        "verdict": "invalid"
+      },
+      "status": "match",
+      "stderr_present": false
+    },
+    {
+      "case_id": "case-011",
+      "exit_code": 0,
+      "input_sha256": "sha256:7f39cb84904b62b8cccc1fd60869d2e8cecdee359eedc0c61417a0397113b1f7",
+      "observed": {
+        "bundle_integrity": "pass",
+        "verdict": "invalid"
+      },
+      "status": "match",
+      "stderr_present": false
+    },
+    {
+      "case_id": "case-012",
+      "exit_code": 0,
+      "input_sha256": "sha256:1ae4201ae3040f6878fcdaf7f5ba8ad68f40fedfc7be4e165be29944dd29981f",
+      "observed": {
+        "bundle_integrity": "pass",
+        "claims": {
+          "caller_visible_denial": {
+            "status": "incomplete"
+          },
+          "external_side_effect": {
+            "status": "incomplete"
+          },
+          "policy_decision_recorded": {
+            "source_class": "producer_reported",
+            "status": "confirmed"
+          },
+          "upstream_delivery": {
+            "status": "incomplete"
+          }
+        },
+        "verdict": "valid"
+      },
+      "status": "match",
+      "stderr_present": false
+    },
+    {
+      "case_id": "case-013",
+      "exit_code": 0,
+      "input_sha256": "sha256:b7b20aeaf194aaa45700b71c5ffdbd6ae2ce8c28796ab0f383c5d83441822998",
+      "observed": {
+        "bundle_integrity": "fail"
+      },
+      "status": "match",
+      "stderr_present": false
+    },
+    {
+      "case_id": "case-014",
+      "exit_code": 0,
+      "input_sha256": "sha256:571a15cb9a77dc41fda4a5001e9d7c6c99443db9154c707ffa77ce4de92243b1",
+      "observed": {
+        "bundle_integrity": "pass",
+        "verdict": "invalid"
+      },
+      "status": "match",
+      "stderr_present": false
+    }
+  ],
+  "harness_errors": [],
+  "implementation": {
+    "commit": "c226a34f3cea50a114607c35f0976048ff3cab2b",
+    "id": "pma-v0-repro",
+    "image": "ghcr.io/rul1an/pma-v0-repro@sha256:88a5ef285a80dc0caeb2b11093eba79f8f08c870b549cafc395aa77ee5ffc493",
+    "name": "pma-v0-repro privileged-mcp-action/v0 verifier",
+    "reproduction_mode": "other_disclosed",
+    "source": "https://github.com/Rul1an/pma-v0-repro",
+    "version": null
+  },
+  "non_claims": [
+    "a matching run demonstrates agreement on the pinned corpus only",
+    "a matching run does not establish implementation independence",
+    "the scorer records but does not verify the pack's declared source commit",
+    "the scorer does not assess security, compliance, or provider outcomes",
+    "candidate process limits are operational bounds, not a sandbox"
+  ],
+  "pack_declared_source_commit": "0c055ead5a2661569d544df4a0df40df90b98e18",
+  "pack_provenance_verification": "not_performed_by_scorer",
+  "pack_sha256": "sha256:4a3d5a713d424b37eb77ab238e73582e3dd26d42f8b656d0a6216c2993909b72",
+  "profile": "privileged-mcp-action/v0",
+  "rendered_set_digest": "sha256:b2f715408c82346b0928852f0bc6cb11c17dd7e3233395316d764b282080a05c",
+  "schema": "assay.privileged_mcp_action.conformance_run.v1",
+  "source_corpus_digest": "sha256:cb58ce91863f52e0568742b977f0642158453ec11bbcd25821f9171dccd03342",
+  "suite": "privileged-mcp-action-v0",
+  "summary": {
+    "execution_error": 0,
+    "harness_error": 0,
+    "match": 14,
+    "mismatch": 0,
+    "review_warnings": 0,
+    "total": 14
+  }
+}

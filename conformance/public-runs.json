@@ -1,0 +1,14 @@
+{
+  "schema": "assay.conformance.public_runs.v0",
+  "runs": [
+    {
+      "implementation_id": "pma-v0-repro",
+      "suite": "privileged-mcp-action-v0",
+      "record_sha256": "sha256:9275ac65b1f2dde89299fcc811c733096b3b5683cb5ed15a8f32560d4580ae27",
+      "image": "ghcr.io/rul1an/pma-v0-repro@sha256:88a5ef285a80dc0caeb2b11093eba79f8f08c870b549cafc395aa77ee5ffc493",
+      "source": "https://github.com/Rul1an/pma-v0-repro",
+      "commit": "c226a34f3cea50a114607c35f0976048ff3cab2b",
+      "reproduction_mode": "other_disclosed"
+    }
+  ]
+}
