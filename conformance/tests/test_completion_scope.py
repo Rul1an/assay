@@ -49,6 +49,20 @@ INVENTORY_RUN_SCRIPT = (
     "python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py",
     REQUIRED_RUN_ALL,
 )
+HARDENING_RUN_SCRIPT = (
+    "set -euo pipefail",
+    "bash scripts/ci/test-check-assay-release-pin.sh",
+    "bash scripts/ci/check-assay-release-pin.sh --published",
+    "bash scripts/ci/test-ci-hardening-b1.sh",
+    "bash scripts/ci/test-structurizr-export-docker.sh",
+    "python3 scripts/ci/check-conformance-inventory-callsite.py",
+    "python3 scripts/ci/test-conformance-inventory-callsite.py",
+)
+FINALE_RUN_SCRIPT = (
+    "set -euo pipefail",
+    "python3 scripts/ci/check-ci-gate-coverage.py",
+    "python3 scripts/ci/check-conformance-inventory-callsite.py",
+)
 ACTIVATION_KIT_RUN_SCRIPT = (
     "set -euo pipefail",
     REVISION_WITNESS,
@@ -69,6 +83,22 @@ HARD_RUN_CONTRACTS = {
         ACTIVATION_KIT_RUN_SCRIPT,
         frozenset({"name", "on", "permissions", "concurrency", "jobs"}),
         frozenset(),
+    ),
+    ("ci", "Verify CI hardening contracts"): (
+        frozenset({"name", "runs-on", "timeout-minutes", "if", "needs",
+                   "permissions", "steps"}),
+        frozenset({"name", "shell", "env", "run"}),
+        HARDENING_RUN_SCRIPT,
+        frozenset({"name", "on", "permissions", "env", "jobs"}),
+        frozenset({"ASSAY_PUBLIC_MSRV"}),
+    ),
+    ("ci", "Verify this gate waits on every gating job"): (
+        frozenset({"name", "runs-on", "timeout-minutes", "if", "needs",
+                   "permissions", "steps"}),
+        frozenset({"name", "shell", "run"}),
+        FINALE_RUN_SCRIPT,
+        frozenset({"name", "on", "permissions", "env", "jobs"}),
+        frozenset({"ASSAY_PUBLIC_MSRV"}),
     ),
 }
 CHECKOUT_REF = "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
@@ -94,10 +124,23 @@ TRUSTED_PREFIX_CONTRACTS = {
          {"name": "Set up Python", "uses": SETUP_PYTHON_REF},
          {"python-version": "3.13.8"}),
     ),
+    ("ci", "Verify CI hardening contracts"): (
+        (frozenset({"uses", "with"}),
+         {"uses": CHECKOUT_REF},
+         {"persist-credentials": "false"}),
+        (frozenset({"uses", "with"}),
+         {"uses": SETUP_PYTHON_REF},
+         {"python-version": "3.12"}),
+    ),
 }
 ACTIVATION_KIT = (
     REPO / "conformance/privileged-mcp-action-v0/tests/test_activation_kit.py"
 )
+HARD_RUN_ENV_CONTRACTS = {
+    ("ci", "Verify CI hardening contracts"): {
+        "GH_TOKEN": "${{ github.token }}",
+    },
+}
 
 
 def _indentation_bounded_block(
@@ -379,6 +422,54 @@ def _direct_scalar(raw: str) -> str:
     raise AssertionError(f"unsupported direct scalar syntax: {raw!r}")
 
 
+def _assert_hard_run_env(
+        step: str, job_name: str, step_name: str) -> None:
+    expected = HARD_RUN_ENV_CONTRACTS.get((job_name, step_name))
+    raw_lines = step.splitlines(keepends=True)
+    step_indent = len(raw_lines[0]) - len(raw_lines[0].lstrip(" "))
+    env_indent = step_indent + 2
+    env_indexes = [
+        index for index, raw in enumerate(raw_lines)
+        if raw.rstrip("\r\n") == " " * env_indent + "env:"
+    ]
+    if expected is None:
+        if env_indexes:
+            raise AssertionError(f"{step_name} must not set env")
+        return
+    if len(env_indexes) != 1:
+        raise AssertionError(f"{step_name} must have one direct env mapping")
+    env_block = _indentation_bounded_block(
+        raw_lines, env_indexes[0], env_indent)
+    actual = {
+        key: value.strip()
+        for key, value in _direct_mapping(env_block).items()
+    }
+    if actual != expected:
+        raise AssertionError(
+            f"{step_name} env mapping differs: expected {expected}, got {actual}")
+
+
+def _assert_hard_run_step(
+        step: str,
+        job_name: str,
+        step_name: str,
+        allowed_step_keys: frozenset[str],
+        expected_script: tuple[str, ...]) -> None:
+    step_entries = _direct_mapping(step)
+    actual_step_keys = frozenset(step_entries)
+    if actual_step_keys != allowed_step_keys:
+        raise AssertionError(
+            f"{step_name} direct keys differ: "
+            f"expected {sorted(allowed_step_keys)}, got {sorted(actual_step_keys)}")
+    if _direct_scalar(step_entries["shell"]) != "bash":
+        raise AssertionError(f"{step_name} must use shell: bash")
+    _assert_hard_run_env(step, job_name, step_name)
+
+    active = tuple(_active_run_lines(step))
+    if active != expected_script:
+        raise AssertionError(f"{step_name} run script differs from the canonical script")
+
+
 def assert_hard_run_command(
         text: str, job_name: str, step_name: str) -> str:
     contract = HARD_RUN_CONTRACTS.get((job_name, step_name))
@@ -397,18 +488,30 @@ def assert_hard_run_command(
     _assert_trusted_prefix(text, job_name, step_name)
 
     step = named_step(text, job_name, step_name)
-    step_entries = _direct_mapping(step)
-    actual_step_keys = frozenset(step_entries)
-    if actual_step_keys != allowed_step_keys:
-        raise AssertionError(
-            f"{step_name} direct keys differ: "
-            f"expected {sorted(allowed_step_keys)}, got {sorted(actual_step_keys)}")
-    if _direct_scalar(step_entries["shell"]) != "bash":
-        raise AssertionError(f"{step_name} must use shell: bash")
+    _assert_hard_run_step(
+        step, job_name, step_name, allowed_step_keys, expected_script)
+    return step
 
-    active = tuple(_active_run_lines(step))
-    if active != expected_script:
-        raise AssertionError(f"{step_name} run script differs from the canonical script")
+
+def assert_hard_run_successor(
+        text: str, job_name: str, predecessor: str, successor: str) -> str:
+    contract = HARD_RUN_CONTRACTS.get((job_name, successor))
+    if contract is None:
+        raise AssertionError(f"no hard-run contract for {job_name}/{successor}")
+    allowed_step_keys, expected_script = contract[1], contract[2]
+    steps = _ordered_job_steps(text, job_name)
+    before = named_step(text, job_name, predecessor)
+    step = named_step(text, job_name, successor)
+    try:
+        index = steps.index(before)
+    except ValueError as error:
+        raise AssertionError(
+            f"{predecessor} is not a direct step in {job_name}") from error
+    if index + 1 >= len(steps) or steps[index + 1] != step:
+        raise AssertionError(
+            f"{successor} must immediately follow {predecessor}")
+    _assert_hard_run_step(
+        step, job_name, successor, allowed_step_keys, expected_script)
     return step
 
 
