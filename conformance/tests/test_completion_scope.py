@@ -49,6 +49,20 @@ INVENTORY_RUN_SCRIPT = (
     "python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py",
     REQUIRED_RUN_ALL,
 )
+HARDENING_RUN_SCRIPT = (
+    "set -euo pipefail",
+    "bash scripts/ci/test-check-assay-release-pin.sh",
+    "bash scripts/ci/check-assay-release-pin.sh --published",
+    "bash scripts/ci/test-ci-hardening-b1.sh",
+    "bash scripts/ci/test-structurizr-export-docker.sh",
+    "python3 scripts/ci/check-conformance-inventory-callsite.py",
+    "python3 scripts/ci/test-conformance-inventory-callsite.py",
+)
+FINALE_RUN_SCRIPT = (
+    "set -euo pipefail",
+    "python3 scripts/ci/check-ci-gate-coverage.py",
+    "python3 scripts/ci/check-conformance-inventory-callsite.py",
+)
 ACTIVATION_KIT_RUN_SCRIPT = (
     "set -euo pipefail",
     REVISION_WITNESS,
@@ -69,6 +83,22 @@ HARD_RUN_CONTRACTS = {
         ACTIVATION_KIT_RUN_SCRIPT,
         frozenset({"name", "on", "permissions", "concurrency", "jobs"}),
         frozenset(),
+    ),
+    ("ci", "Verify CI hardening contracts"): (
+        frozenset({"name", "runs-on", "timeout-minutes", "if", "needs",
+                   "permissions", "steps"}),
+        frozenset({"name", "shell", "env", "run"}),
+        HARDENING_RUN_SCRIPT,
+        frozenset({"name", "on", "permissions", "env", "jobs"}),
+        frozenset({"ASSAY_PUBLIC_MSRV"}),
+    ),
+    ("ci", "Verify this gate waits on every gating job"): (
+        frozenset({"name", "runs-on", "timeout-minutes", "if", "needs",
+                   "permissions", "steps"}),
+        frozenset({"name", "shell", "run"}),
+        FINALE_RUN_SCRIPT,
+        frozenset({"name", "on", "permissions", "env", "jobs"}),
+        frozenset({"ASSAY_PUBLIC_MSRV"}),
     ),
 }
 CHECKOUT_REF = "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
@@ -94,10 +124,32 @@ TRUSTED_PREFIX_CONTRACTS = {
          {"name": "Set up Python", "uses": SETUP_PYTHON_REF},
          {"python-version": "3.13.8"}),
     ),
+    ("ci", "Verify CI hardening contracts"): (
+        (frozenset({"uses", "with"}),
+         {"uses": CHECKOUT_REF},
+         {"persist-credentials": "false"}),
+        (frozenset({"uses", "with"}),
+         {"uses": SETUP_PYTHON_REF},
+         {"python-version": "3.12"}),
+    ),
 }
 ACTIVATION_KIT = (
     REPO / "conformance/privileged-mcp-action-v0/tests/test_activation_kit.py"
 )
+HARD_RUN_ENV_CONTRACTS = {
+    ("ci", "Verify CI hardening contracts"): {
+        "GH_TOKEN": "${{ github.token }}",
+    },
+}
+REQUIRED_AGGREGATOR_JOB = "ci"
+REQUIRED_AGGREGATOR_IF = "always()"
+HOST_SCHEDULE_JOB = "check"
+HOST_SCHEDULE_STEP = "Verify required CI aggregator scheduling"
+HOST_SCHEDULE_RUN_SCRIPT = (
+    "set -euo pipefail",
+    "python3 scripts/ci/check-conformance-inventory-callsite.py --required-aggregator-schedule",
+)
+HOST_FORBIDDEN_JOB_KEYS = frozenset({"if", "needs"})
 
 
 def _indentation_bounded_block(
@@ -270,8 +322,8 @@ def _ordered_job_steps(text: str, job_name: str) -> list[str]:
     if not starts:
         raise AssertionError(f"{job_name} job has no steps")
     return [
-        "".join(lines[start:starts[index + 1] if index + 1 < len(starts) else end])
-        for index, start in enumerate(starts)
+        _indentation_bounded_block(lines, start, step_indent)
+        for start in starts
     ]
 
 
@@ -379,6 +431,81 @@ def _direct_scalar(raw: str) -> str:
     raise AssertionError(f"unsupported direct scalar syntax: {raw!r}")
 
 
+def _assert_hard_run_env(
+        step: str, job_name: str, step_name: str) -> None:
+    expected = HARD_RUN_ENV_CONTRACTS.get((job_name, step_name))
+    raw_lines = step.splitlines(keepends=True)
+    step_indent = len(raw_lines[0]) - len(raw_lines[0].lstrip(" "))
+    env_indent = step_indent + 2
+    env_indexes = [
+        index for index, raw in enumerate(raw_lines)
+        if raw.rstrip("\r\n") == " " * env_indent + "env:"
+    ]
+    if expected is None:
+        if env_indexes:
+            raise AssertionError(f"{step_name} must not set env")
+        return
+    if len(env_indexes) != 1:
+        raise AssertionError(f"{step_name} must have one direct env mapping")
+    env_block = _indentation_bounded_block(
+        raw_lines, env_indexes[0], env_indent)
+    actual = {
+        key: value.strip()
+        for key, value in _direct_mapping(env_block).items()
+    }
+    if actual != expected:
+        raise AssertionError(
+            f"{step_name} env mapping differs: expected {expected}, got {actual}")
+
+
+def _assert_hard_run_step(
+        step: str,
+        job_name: str,
+        step_name: str,
+        allowed_step_keys: frozenset[str],
+        expected_script: tuple[str, ...]) -> None:
+    step_entries = _direct_mapping(step)
+    actual_step_keys = frozenset(step_entries)
+    if actual_step_keys != allowed_step_keys:
+        raise AssertionError(
+            f"{step_name} direct keys differ: "
+            f"expected {sorted(allowed_step_keys)}, got {sorted(actual_step_keys)}")
+    if _direct_scalar(step_entries["shell"]) != "bash":
+        raise AssertionError(f"{step_name} must use shell: bash")
+    _assert_hard_run_env(step, job_name, step_name)
+
+    active = tuple(_active_run_lines(step))
+    if active != expected_script:
+        raise AssertionError(f"{step_name} run script differs from the canonical script")
+
+
+def assert_required_aggregator_schedule(text: str) -> None:
+    job = named_job(text, REQUIRED_AGGREGATOR_JOB)
+    entries = _direct_mapping(job)
+    actual = entries["if"].strip() if "if" in entries else ""
+    if actual != REQUIRED_AGGREGATOR_IF:
+        raise AssertionError(
+            f"{REQUIRED_AGGREGATOR_JOB} job if differs: "
+            f"expected {REQUIRED_AGGREGATOR_IF}, got {actual or '<missing>'}")
+
+
+def assert_host_schedule_invocation(text: str) -> str:
+    job = named_job(text, HOST_SCHEDULE_JOB)
+    forbidden = frozenset(_direct_mapping(job)) & HOST_FORBIDDEN_JOB_KEYS
+    if forbidden:
+        raise AssertionError(
+            f"{HOST_SCHEDULE_JOB} job must not set {sorted(forbidden)}")
+    step = named_step(text, HOST_SCHEDULE_JOB, HOST_SCHEDULE_STEP)
+    _assert_hard_run_step(
+        step,
+        HOST_SCHEDULE_JOB,
+        HOST_SCHEDULE_STEP,
+        frozenset({"name", "shell", "run"}),
+        HOST_SCHEDULE_RUN_SCRIPT,
+    )
+    return step
+
+
 def assert_hard_run_command(
         text: str, job_name: str, step_name: str) -> str:
     contract = HARD_RUN_CONTRACTS.get((job_name, step_name))
@@ -387,6 +514,8 @@ def assert_hard_run_command(
     (allowed_job_keys, allowed_step_keys, expected_script,
      workflow_keys, workflow_env_keys) = contract
     _assert_workflow_document(text, workflow_keys, workflow_env_keys)
+    if job_name == REQUIRED_AGGREGATOR_JOB:
+        assert_required_aggregator_schedule(text)
 
     job = named_job(text, job_name)
     actual_job_keys = frozenset(_direct_mapping(job))
@@ -397,18 +526,30 @@ def assert_hard_run_command(
     _assert_trusted_prefix(text, job_name, step_name)
 
     step = named_step(text, job_name, step_name)
-    step_entries = _direct_mapping(step)
-    actual_step_keys = frozenset(step_entries)
-    if actual_step_keys != allowed_step_keys:
-        raise AssertionError(
-            f"{step_name} direct keys differ: "
-            f"expected {sorted(allowed_step_keys)}, got {sorted(actual_step_keys)}")
-    if _direct_scalar(step_entries["shell"]) != "bash":
-        raise AssertionError(f"{step_name} must use shell: bash")
+    _assert_hard_run_step(
+        step, job_name, step_name, allowed_step_keys, expected_script)
+    return step
 
-    active = tuple(_active_run_lines(step))
-    if active != expected_script:
-        raise AssertionError(f"{step_name} run script differs from the canonical script")
+
+def assert_hard_run_successor(
+        text: str, job_name: str, predecessor: str, successor: str) -> str:
+    contract = HARD_RUN_CONTRACTS.get((job_name, successor))
+    if contract is None:
+        raise AssertionError(f"no hard-run contract for {job_name}/{successor}")
+    allowed_step_keys, expected_script = contract[1], contract[2]
+    steps = _ordered_job_steps(text, job_name)
+    before = named_step(text, job_name, predecessor)
+    step = named_step(text, job_name, successor)
+    try:
+        index = steps.index(before)
+    except ValueError as error:
+        raise AssertionError(
+            f"{predecessor} is not a direct step in {job_name}") from error
+    if index + 1 >= len(steps) or steps[index + 1] != step:
+        raise AssertionError(
+            f"{successor} must immediately follow {predecessor}")
+    _assert_hard_run_step(
+        step, job_name, successor, allowed_step_keys, expected_script)
     return step
 
 
@@ -993,6 +1134,72 @@ class ProductCallsite(unittest.TestCase):
         )
         with self.assertRaises(AssertionError):
             assert_combined_unittest(mutated)
+
+    def test_required_aggregator_schedule_is_always(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        assert_required_aggregator_schedule(text)
+        needle = (
+            "  ci:\n"
+            "    name: CI\n"
+            "    runs-on: ubuntu-latest\n"
+            "    timeout-minutes: 10\n"
+            "    if: always()\n"
+        )
+        mutations = (
+            needle.replace("    if: always()\n", "    if: false\n"),
+            needle.replace("    if: always()\n", ""),
+            needle.replace("    if: always()\n", "    if: success()\n"),
+        )
+        for replacement in mutations:
+            with self.subTest(replacement=replacement):
+                mutated = text.replace(needle, replacement, 1)
+                self.assertNotEqual(mutated, text)
+                with self.assertRaises(AssertionError):
+                    assert_required_aggregator_schedule(mutated)
+
+    def test_host_schedule_job_rejects_if_and_needs(self):
+        text = (REPO / ".github/workflows/host-capability-check.yml").read_text(
+            encoding="utf-8")
+        assert_host_schedule_invocation(text)
+        needle = "    name: host-capability-check\n"
+        self.assertEqual(text.count(needle), 1)
+        for key_line in ("if: false", "needs: [ci]"):
+            with self.subTest(key_line=key_line):
+                mutated = text.replace(needle, needle + f"    {key_line}\n", 1)
+                self.assertNotEqual(mutated, text)
+                with self.assertRaises(AssertionError):
+                    assert_host_schedule_invocation(mutated)
+
+    def test_hard_run_successor_ignores_blank_and_comment_only_lines(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        finale = "      - name: Verify this gate waits on every gating job\n"
+        for insert in (
+            "\n",
+            "      # comment-only documentation\n",
+            "\n      # comment-only documentation\n\n",
+        ):
+            with self.subTest(insert=insert):
+                mutated = text.replace(finale, insert + finale, 1)
+                self.assertNotEqual(mutated, text)
+                assert_hard_run_successor(
+                    mutated,
+                    "ci",
+                    "Verify CI hardening contracts",
+                    "Verify this gate waits on every gating job",
+                )
+
+    def test_hard_run_successor_rejects_intervening_executable_step(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        finale = "      - name: Verify this gate waits on every gating job\n"
+        mutated = text.replace(finale, TRUSTED_PREFIX_WRITERS[0][1] + finale, 1)
+        self.assertNotEqual(mutated, text)
+        with self.assertRaises(AssertionError):
+            assert_hard_run_successor(
+                mutated,
+                "ci",
+                "Verify CI hardening contracts",
+                "Verify this gate waits on every gating job",
+            )
 
     def test_inventory_step_moved_to_conditional_job_fails(self):
         text = CI_YML.read_text(encoding="utf-8")
