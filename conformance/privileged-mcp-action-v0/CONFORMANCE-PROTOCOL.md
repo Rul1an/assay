@@ -192,6 +192,9 @@ a partial record would publish agreement that was never measured.
 `capture.schema.json` documents the capture format. It carries no expected value,
 no match or mismatch, no count of agreement, no score and no badge.
 
+Historical v0 run records are read with the validator from their exact
+activation-kit tag.
+
 ### What the split does and does not buy
 
 It removes the oracle from the host that runs candidate code. It does not

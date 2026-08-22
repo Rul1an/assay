@@ -22,8 +22,10 @@ from implementations import (  # noqa: E402
 from strict_json import MAX_JSON_DEPTH, load_strict_object  # noqa: E402
 
 
-RUN_SCHEMA = "assay.privileged_mcp_action.conformance_run.v0"
+RUN_SCHEMA = "assay.privileged_mcp_action.conformance_run.v1"
 PROFILE = "privileged-mcp-action/v0"
+# Captured from the capture document, never reconstructed from PROFILE.
+SUITE = "privileged-mcp-action-v0"
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 # Kept beside the other corpus-shape constants rather than written into the checks, which is how
 # "13" survived in seven separate files after the corpus grew: two scripts, this one's own checks,
@@ -71,6 +73,7 @@ IMPLEMENTATION_BINDING_KEYS = {"id", "image"}
 TOP_LEVEL_KEYS = {
     "schema",
     "profile",
+    "suite",
     "source_corpus_digest",
     "rendered_set_digest",
     "pack_sha256",
@@ -81,12 +84,115 @@ TOP_LEVEL_KEYS = {
     "harness_errors",
     "cases",
     "non_claims",
+    "capture_sha256",
 }
 
 
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise ValueError(message)
+
+
+def implementation_record(declared: dict[str, Any]) -> dict[str, Any]:
+    """Carry the capture's declared identity. Shape-validated, never verified.
+
+    Optional `id` and `image` follow only the capture; a run that named no
+    image does not grow a field implying one.
+    """
+    record = {
+        "name": declared["name"],
+        "version": declared["version"],
+        "source": declared["source"],
+        "commit": declared["commit"],
+        "reproduction_mode": declared["reproduction_mode"],
+    }
+    if declared["id"] is not None:
+        record["id"] = declared["id"]
+        record["image"] = declared["image"]
+    return record
+
+
+# A capture state names what happened on the capture host; a run-record status
+# names what the run concluded. The two vocabularies are joined in one place.
+# Keys are capture_format.STATE_* values, kept as literals so this module does
+# not import capture_format at load time (capture_format imports us).
+STATE_TO_STATUS = {
+    "candidate_error": "execution_error",
+    "capture_error": "harness_error",
+}
+
+
+def report_case_from_observation(
+    observation: dict[str, Any], expected_by_hash: dict[str, Any]
+) -> dict[str, Any]:
+    """Project one capture observation into a run-record case. The only projector."""
+    from capture_format import STATE_OBSERVED, review_warnings
+
+    result: dict[str, Any] = {
+        "case_id": observation["case_id"],
+        "input_sha256": observation["input_sha256"],
+    }
+    if observation["state"] != STATE_OBSERVED:
+        status = STATE_TO_STATUS[observation["state"]]
+        result.update(status=status, error=observation["error"])
+        return result
+    observed = observation["observed"]
+    expected = expected_by_hash.get(observation["input_sha256"])
+    if expected is None:
+        result.update(
+            status="harness_error",
+            error="opaque case is absent from canonical expectations",
+        )
+        return result
+    result.update(
+        status="match" if observed == expected else "mismatch",
+        observed=observed,
+        exit_code=observation["exit_code"],
+        stderr_present=observation["stderr_present"],
+    )
+    warnings = review_warnings(observation)
+    if warnings:
+        result["review_warnings"] = warnings
+    return result
+
+
+def require_run_record_binds_capture(
+    report: dict[str, Any],
+    capture: dict[str, Any],
+    capture_digest: str,
+    expected_by_hash: dict[str, Any],
+) -> None:
+    require(bool(SHA256.fullmatch(capture_digest)), "capture digest is malformed")
+    require(
+        report["capture_sha256"] == capture_digest,
+        "capture_sha256 does not address the scored capture bytes",
+    )
+    require(
+        report["suite"] == capture["suite"],
+        "run record suite does not bind the scored capture",
+    )
+    for field in (
+        "pack_sha256",
+        "source_corpus_digest",
+        "rendered_set_digest",
+        "pack_declared_source_commit",
+    ):
+        require(
+            report[field] == capture[field],
+            f"run record {field} does not bind the scored capture",
+        )
+    require(
+        report["implementation"] == implementation_record(capture["implementation"]),
+        "run record implementation does not bind the scored capture",
+    )
+    projected = [
+        report_case_from_observation(obs, expected_by_hash)
+        for obs in capture["observations"]
+    ]
+    require(
+        report["cases"] == projected,
+        "run record cases do not bind the projected capture observations",
+    )
 
 
 def load_run_record(path: Path) -> Any:
@@ -154,10 +260,11 @@ def validate_normative_surface(value: dict[str, Any]) -> None:
 
 
 def validate_run_record(report: dict[str, Any]) -> None:
+    require(report.get("schema") == RUN_SCHEMA, "unsupported schema")
     require(set(report) == TOP_LEVEL_KEYS, "run record has missing or surplus fields")
-    require(report["schema"] == RUN_SCHEMA, "run record schema mismatch")
     require(report["profile"] == PROFILE, "run record profile mismatch")
-    for field in ("source_corpus_digest", "rendered_set_digest", "pack_sha256"):
+    require(report["suite"] == SUITE, "run record suite mismatch")
+    for field in ("source_corpus_digest", "rendered_set_digest", "pack_sha256", "capture_sha256"):
         require(bool(SHA256.fullmatch(report[field])), f"{field} is malformed")
     require(
         bool(FULL_SHA.fullmatch(report["pack_declared_source_commit"])),
@@ -175,9 +282,8 @@ def validate_run_record(report: dict[str, Any]) -> None:
         and set(implementation) <= IMPLEMENTATION_REQUIRED_KEYS | IMPLEMENTATION_BINDING_KEYS,
         "implementation has missing or surplus fields",
     )
-    # `id` and `image` are optional so a v0 record produced before this binding
-    # existed stays valid, and they travel together so a record cannot name a
-    # registry row without naming the image bytes that row addresses.
+    # `id` and `image` are optional and travel together, so a record cannot
+    # name a registry row without naming the image bytes that row addresses.
     binding = set(implementation) & IMPLEMENTATION_BINDING_KEYS
     require(
         binding in (set(), IMPLEMENTATION_BINDING_KEYS),

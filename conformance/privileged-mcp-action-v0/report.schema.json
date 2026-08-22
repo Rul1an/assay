@@ -1,12 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/Rul1an/assay/privileged-mcp-action-v0-candidate.1/conformance/privileged-mcp-action-v0/report.schema.json",
+  "$id": "urn:assay:schema:privileged-mcp-action:conformance-run:v1",
   "title": "Privileged MCP Action v0 conformance run",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema",
     "profile",
+    "suite",
     "source_corpus_digest",
     "rendered_set_digest",
     "pack_sha256",
@@ -16,14 +17,18 @@
     "summary",
     "harness_errors",
     "cases",
-    "non_claims"
+    "non_claims",
+    "capture_sha256"
   ],
   "properties": {
     "schema": {
-      "const": "assay.privileged_mcp_action.conformance_run.v0"
+      "const": "assay.privileged_mcp_action.conformance_run.v1"
     },
     "profile": {
       "const": "privileged-mcp-action/v0"
+    },
+    "suite": {
+      "const": "privileged-mcp-action-v0"
     },
     "source_corpus_digest": {
       "$ref": "#/$defs/sha256"
@@ -163,6 +168,9 @@
           }
         ]
       }
+    },
+    "capture_sha256": {
+      "$ref": "#/$defs/sha256"
     },
     "non_claims": {
       "type": "array",

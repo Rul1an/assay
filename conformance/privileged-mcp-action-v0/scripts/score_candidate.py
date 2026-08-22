@@ -34,19 +34,16 @@ from capture_candidate import (  # noqa: E402
     sha256,
 )
 from artifact_io import (  # noqa: E402
+    content_sha256,
     render_deterministic_json_bytes,
     write_regular_file_atomically,
 )
 from capture_format import (  # noqa: E402
-    STATE_CANDIDATE_ERROR,
-    STATE_CAPTURE_ERROR,
-    STATE_OBSERVED,
     CaptureError,
     add_identity_arguments,
     identity_from_args,
-    load_capture,
+    load_capture_with_digest,
     normative_surface,
-    review_warnings,
     validate_capture,
 )
 from pack_format import ordered_vectors, rewrite_bundle_stream_identity  # noqa: E402
@@ -55,15 +52,12 @@ from validate_run_record import (  # noqa: E402
     PROFILE,
     RUN_NON_CLAIMS,
     RUN_SCHEMA,
+    STATE_TO_STATUS,
+    implementation_record,
+    report_case_from_observation,
+    require_run_record_binds_capture,
     validate_run_record,
 )
-
-# A capture state names what happened on the capture host; a run-record status
-# names what the run concluded. The two vocabularies are joined in one place.
-STATE_TO_STATUS = {
-    STATE_CANDIDATE_ERROR: "execution_error",
-    STATE_CAPTURE_ERROR: "harness_error",
-}
 
 
 def load_expectations(manifest_path: Path) -> tuple[dict[str, Any], str, str]:
@@ -117,26 +111,6 @@ def require_capture_binds_pack(capture: dict[str, Any], pack: dict[str, Any], pa
             )
 
 
-def implementation_record(declared: dict[str, Any]) -> dict[str, Any]:
-    """Carry the capture's declared identity. Shape-validated, never verified.
-
-    `id` and `image` appear only when the capture declared them, so an existing
-    v0 run record with neither stays valid and a run that named no image does
-    not grow a field implying one.
-    """
-    record = {
-        "name": declared["name"],
-        "version": declared["version"],
-        "source": declared["source"],
-        "commit": declared["commit"],
-        "reproduction_mode": declared["reproduction_mode"],
-    }
-    if declared["id"] is not None:
-        record["id"] = declared["id"]
-        record["image"] = declared["image"]
-    return record
-
-
 def score_capture(
     capture: dict[str, Any],
     pack: dict[str, Any],
@@ -174,37 +148,10 @@ def score_capture(
         "review_warnings": 0,
     }
     for observation in capture["observations"]:
-        result: dict[str, Any] = {
-            "case_id": observation["case_id"],
-            "input_sha256": observation["input_sha256"],
-        }
-        if observation["state"] != STATE_OBSERVED:
-            status = STATE_TO_STATUS[observation["state"]]
-            result.update(status=status, error=observation["error"])
-            counts[status] += 1
-            cases.append(result)
-            continue
-        observed = observation["observed"]
-        expected = expected_by_hash.get(observation["input_sha256"])
-        if expected is None:
-            result.update(
-                status="harness_error",
-                error="opaque case is absent from canonical expectations",
-            )
-            counts["harness_error"] += 1
-            cases.append(result)
-            continue
-        result.update(
-            status="match" if observed == expected else "mismatch",
-            observed=observed,
-            exit_code=observation["exit_code"],
-            stderr_present=observation["stderr_present"],
-        )
+        result = report_case_from_observation(observation, expected_by_hash)
         counts[result["status"]] += 1
-        warnings = review_warnings(observation)
-        if warnings:
-            result["review_warnings"] = warnings
-            counts["review_warnings"] += len(warnings)
+        warnings = result.get("review_warnings", [])
+        counts["review_warnings"] += len(warnings)
         cases.append(result)
 
     return {
@@ -304,7 +251,7 @@ def main() -> int:
 
         try:
             if args.capture is not None:
-                capture = load_capture(args.capture)
+                capture, digest = load_capture_with_digest(args.capture)
             else:
                 # The oracle is already resident, so this path is for candidates
                 # the operator trusts. capture_candidate.py exists for the ones
@@ -314,6 +261,7 @@ def main() -> int:
                     pack, pack_digest, observations, identity_from_args(args)
                 )
                 validate_capture(capture)
+                digest = content_sha256(render_deterministic_json_bytes(capture))
             require_capture_binds_pack(capture, pack, pack_digest)
         except (CaptureError, OSError) as error:
             print(f"capture does not bind: {error}", file=sys.stderr)
@@ -327,8 +275,11 @@ def main() -> int:
         source_corpus_digest,
         rendered_set_digest,
     )
+    report["suite"] = capture["suite"]
+    report["capture_sha256"] = digest
     try:
         validate_run_record(report)
+        require_run_record_binds_capture(report, capture, digest, expected_by_hash)
     except (KeyError, TypeError, ValueError) as error:
         print(f"scorer produced an invalid run record: {error}", file=sys.stderr)
         return 2
