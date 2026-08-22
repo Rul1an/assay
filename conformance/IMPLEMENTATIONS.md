@@ -5,6 +5,8 @@ It is not a leaderboard, badge, certification, or trust score.
 
 A digest addresses bytes. It does not authenticate a publisher.
 A match is agreement on the pinned corpus only.
+Corpus agreement does not prove implementation independence.
+reproduction_mode, image, and identity are publisher-declared and bound; they are not attested or verified.
 
 To add a reviewed row, write it to `public-runs.json` and the digest-named file under `public-runs/`, then run `python3 conformance/project_public_runs.py --check`.
 

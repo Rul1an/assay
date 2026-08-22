@@ -211,6 +211,11 @@ class PublicRunMutations(unittest.TestCase):
             digests = [row["record_sha256"] for row in rows]
             self.assertEqual(set(digests), {HOSTED_DIGEST, "sha256:" + digest})
             self.assertEqual(digests, sorted(digests))
+            document = project.render_document(root, rows)
+            data_rows = [line for line in document.splitlines() if "pma-v0-repro" in line]
+            self.assertEqual(len(data_rows), 2)
+            self.assertIn("[sha256:%s](public-runs/%s)" % (HOSTED_SHA256, HOSTED_SHA256), document)
+            self.assertIn("[sha256:%s](public-runs/%s)" % (digest, digest), document)
 
     def test_missing_and_surplus_record_fail_closed(self) -> None:
         with sandbox() as (root, project):
@@ -435,6 +440,41 @@ class PublicRunMutations(unittest.TestCase):
             cells = _table_cells(next(line for line in document.splitlines() if "pma-v0-repro" in line))
             self.assertEqual(len(cells), 11)
             self.assertEqual(cells[5], "other_disclosed")
+
+    def test_missing_registry_row_fails_unknown(self) -> None:
+        with sandbox() as (root, project):
+            def rename_registry(registry: dict) -> None:
+                registry["implementations"][0]["id"] = "not-pma-v0-repro"
+
+            _rebind_record(root, lambda _payload: None, mutate_registry=rename_registry)
+            with self.assertRaises(ValueError) as ctx:
+                project.load_publication(root)
+            self.assertIn("unknown", str(ctx.exception))
+
+    def test_oversize_digest_named_record_fails_before_parse(self) -> None:
+        with sandbox() as (root, project):
+            markdown = root / "conformance/IMPLEMENTATIONS.md"
+            before = markdown.read_bytes()
+            huge = b"{" + (b"a" * 4194303) + b"}"
+            self.assertEqual(len(huge), 4194305)
+            digest = hashlib.sha256(huge).hexdigest()
+            (root / "conformance/public-runs" / HOSTED_SHA256).unlink()
+            (root / "conformance/public-runs" / digest).write_bytes(huge)
+            index_path = root / "conformance/public-runs.json"
+            index = json.loads(index_path.read_text())
+            index["runs"][0]["record_sha256"] = "sha256:" + digest
+            index_path.write_text(json.dumps(index) + "\n")
+            with self.assertRaises(ValueError) as ctx:
+                project.load_publication(root)
+            self.assertIn("exceeds", str(ctx.exception))
+            self.assertEqual(markdown.read_bytes(), before)
+
+    def test_public_non_claims_name_binding_without_attestation(self) -> None:
+        with sandbox() as (root, project):
+            document = project.render_document(root, project.load_publication(root))
+            self.assertIn("does not prove implementation independence", document)
+            self.assertIn("publisher-declared and bound", document)
+            self.assertIn("not attested or verified", document)
 
     def test_record_digest_links_to_stored_bytes_and_names_opt_in(self) -> None:
         with sandbox() as (root, project):
