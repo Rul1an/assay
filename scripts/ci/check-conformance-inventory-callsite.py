@@ -14,11 +14,11 @@ Canonical CI always reads the committed CI_YML. Tests inject text at the
 function seam.
 
 Hardening and finale own each other under a single-mutation contract: changing
-only one root must turn the remaining caller red. The host workflow pins the
-aggregator `if: always()` value and the CI job pins that host invocation.
-Deleting or neutralizing both mutual roots in the same rewrite is outside
-that contract. Hosted CI then has no remaining in-repo caller, so this is
-not absolute protection against a fully rewritten workflow.
+only one root must turn the remaining caller red. The host job is the
+scheduling root only because it has no if/needs; the CI checker pins that
+absence. Simultaneous mutation of both required roots (jobs.ci.if and the
+host check job if/needs) is outside repo-local enforcement. This is not
+self-enforcement against coordinated workflow edits.
 """
 
 from __future__ import annotations

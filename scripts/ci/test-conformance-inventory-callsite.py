@@ -9,10 +9,12 @@ checker and the workflow calls that invoke it. The live workflow is never
 written. Command literals here are an independent oracle, not an import.
 
 Hardening and finale check each other under a single-mutation contract:
-changing only one root must turn the remaining caller red. Deleting or
-neutralizing both mutual roots in the same rewrite is outside that
-contract and is not a hosted-CI proof. This is not absolute protection
-against a fully rewritten workflow.
+changing only one root must turn the remaining caller red. The host job
+is used as the scheduling root only because it has no if/needs; the CI
+root pins that absence. Simultaneous mutation of both required roots
+(jobs.ci.if and the host check job if/needs) is outside repo-local
+enforcement. This is not self-enforcement against coordinated workflow
+edits, and not a hosted-CI proof.
 """
 
 from __future__ import annotations
@@ -399,6 +401,32 @@ def neutralize_host_schedule_command(text: str, mode: str) -> str:
     if mutated == text:
         raise AssertionError(f"{mode} mutation of host scheduling command was a no-op")
     return mutated
+
+
+HOST_JOB_BLOCK = (
+    "  check:\n"
+    "    name: host-capability-check\n"
+    "    runs-on: ubuntu-latest\n"
+    "    timeout-minutes: 10\n"
+    "    steps:\n"
+)
+
+
+def add_host_job_key(text: str, key_line: str) -> str:
+    if HOST_JOB_BLOCK not in text:
+        raise AssertionError("canonical host check job block missing")
+    replacement = HOST_JOB_BLOCK.replace(
+        "    steps:\n", f"    {key_line}\n    steps:\n")
+    mutated = text.replace(HOST_JOB_BLOCK, replacement, 1)
+    if mutated == text:
+        raise AssertionError(f"host job {key_line!r} mutation was a no-op")
+    return mutated
+
+
+HOST_JOB_MUTATIONS = (
+    ("host_job_if_false", lambda text: add_host_job_key(text, "if: false")),
+    ("host_job_needs", lambda text: add_host_job_key(text, "needs: [ci]")),
+)
 
 
 HOST_SCHEDULE_MUTATIONS = (
@@ -835,6 +863,24 @@ class ConformanceInventoryCallsite(unittest.TestCase):
                 self.assertTrue(
                     self.host_fn(mutated),
                     f"{label} must fail the host scheduling callsite pin",
+                )
+                self.assertNotEqual(
+                    run_checker_main(self.checker, self.live, host_text=mutated),
+                    0,
+                    f"{label} must fail checker main()",
+                )
+        self.assertEqual(self.host_fn(self.host_live), [])
+        self.assertEqual(run_checker_main(self.checker, self.live), 0)
+
+    def test_host_job_if_or_needs_fails_the_ci_root(self) -> None:
+        self.assertEqual(self.host_fn(self.host_live), [])
+        self.assertEqual(run_checker_main(self.checker, self.live), 0)
+        for label, mutate in HOST_JOB_MUTATIONS:
+            with self.subTest(label=label):
+                mutated = mutate(self.host_live)
+                self.assertTrue(
+                    self.host_fn(mutated),
+                    f"{label} must fail the CI-root host-job pin",
                 )
                 self.assertNotEqual(
                     run_checker_main(self.checker, self.live, host_text=mutated),

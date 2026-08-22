@@ -149,6 +149,7 @@ HOST_SCHEDULE_RUN_SCRIPT = (
     "set -euo pipefail",
     "python3 scripts/ci/check-conformance-inventory-callsite.py --required-aggregator-schedule",
 )
+HOST_FORBIDDEN_JOB_KEYS = frozenset({"if", "needs"})
 
 
 def _indentation_bounded_block(
@@ -489,6 +490,11 @@ def assert_required_aggregator_schedule(text: str) -> None:
 
 
 def assert_host_schedule_invocation(text: str) -> str:
+    job = named_job(text, HOST_SCHEDULE_JOB)
+    forbidden = frozenset(_direct_mapping(job)) & HOST_FORBIDDEN_JOB_KEYS
+    if forbidden:
+        raise AssertionError(
+            f"{HOST_SCHEDULE_JOB} job must not set {sorted(forbidden)}")
     step = named_step(text, HOST_SCHEDULE_JOB, HOST_SCHEDULE_STEP)
     _assert_hard_run_step(
         step,
@@ -1150,6 +1156,28 @@ class ProductCallsite(unittest.TestCase):
                 self.assertNotEqual(mutated, text)
                 with self.assertRaises(AssertionError):
                     assert_required_aggregator_schedule(mutated)
+
+    def test_host_schedule_job_rejects_if_and_needs(self):
+        text = (REPO / ".github/workflows/host-capability-check.yml").read_text(
+            encoding="utf-8")
+        assert_host_schedule_invocation(text)
+        needle = (
+            "  check:\n"
+            "    name: host-capability-check\n"
+            "    runs-on: ubuntu-latest\n"
+            "    timeout-minutes: 10\n"
+            "    steps:\n"
+        )
+        for key_line in ("if: false", "needs: [ci]"):
+            with self.subTest(key_line=key_line):
+                mutated = text.replace(
+                    needle,
+                    needle.replace("    steps:\n", f"    {key_line}\n    steps:\n"),
+                    1,
+                )
+                self.assertNotEqual(mutated, text)
+                with self.assertRaises(AssertionError):
+                    assert_host_schedule_invocation(mutated)
 
     def test_hard_run_successor_ignores_blank_and_comment_only_lines(self):
         text = CI_YML.read_text(encoding="utf-8")
