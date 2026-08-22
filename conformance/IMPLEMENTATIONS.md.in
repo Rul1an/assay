@@ -8,6 +8,6 @@ A match is agreement on the pinned corpus only.
 
 To add a reviewed row, write it to `public-runs.json` and the digest-named file under `public-runs/`, then run `python3 conformance/project_public_runs.py --check`.
 
-| implementation | suite | record | image | commit | match | mismatch | execution_error | harness_error | review_warnings |
-|---|---|---|---|---|---|---|---|---|---|
+| implementation | suite | record | image | commit | reproduction_mode | match | mismatch | execution_error | harness_error | review_warnings |
+|---|---|---|---|---|---|---|---|---|---|---|
 {{public_runs_table}}

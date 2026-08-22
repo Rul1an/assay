@@ -30,6 +30,7 @@ RUN_FIELDS = (
     "image",
     "source",
     "commit",
+    "reproduction_mode",
 )
 MAX_INDEX_BYTES = 64 * 1024
 MAX_TEMPLATE_BYTES = 1024 * 1024
@@ -134,6 +135,12 @@ def _bind_row(row: dict, report: dict, registry: dict[str, dict]) -> None:
         ("image", row["image"], implementation["image"], registered["image"]),
         ("source", row["source"], implementation["source"], registered["source"]),
         ("commit", row["commit"], implementation["commit"], registered["commit"]),
+        (
+            "reproduction_mode",
+            row["reproduction_mode"],
+            implementation["reproduction_mode"],
+            registered["reproduction_mode"],
+        ),
     )
     for name, indexed, recorded, expected in checks:
         if not indexed == recorded == expected:
@@ -169,6 +176,7 @@ def load_publication(repo: Path) -> list[dict]:
                 "image": row["image"],
                 "source": row["source"],
                 "commit": row["commit"],
+                "reproduction_mode": row["reproduction_mode"],
                 "summary": report["summary"],
             }
         )
@@ -185,13 +193,14 @@ def render_table(rows: list[dict]) -> str:
             escape_markdown_cell("public-runs/" + digest.removeprefix("sha256:")),
         )
         lines.append(
-            "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |"
+            "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |"
             % (
                 escape_markdown_cell(row["implementation_id"]),
                 escape_markdown_cell(row["suite"]),
                 record_cell,
                 escape_markdown_cell(row["image"]),
                 escape_markdown_cell(row["commit"]),
+                escape_markdown_cell(row["reproduction_mode"]),
                 escape_markdown_cell(summary["match"]),
                 escape_markdown_cell(summary["mismatch"]),
                 escape_markdown_cell(summary["execution_error"]),

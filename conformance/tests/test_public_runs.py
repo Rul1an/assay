@@ -334,7 +334,7 @@ class PublicRunMutations(unittest.TestCase):
             self.assertIn("| review_warnings |", document)
             row = next(line for line in document.splitlines() if "pma-v0-repro" in line)
             cells = _table_cells(row)
-            self.assertEqual(len(cells), 10)
+            self.assertEqual(len(cells), 11)
             self.assertEqual(cells[-1], "1")
 
     def test_bound_image_markup_stays_one_cell(self) -> None:
@@ -357,11 +357,37 @@ class PublicRunMutations(unittest.TestCase):
             rows = project.load_publication(root)
             table = project.render_table(rows)
             cells = _table_cells(table.splitlines()[0])
-            self.assertEqual(len(cells), 10)
+            self.assertEqual(len(cells), 11)
             self.assertIn("\\|", cells[3])
             self.assertIn("&lt;", cells[3])
             self.assertIn("&gt;", cells[3])
             self.assertEqual(project.escape_markdown_cell("a|b<c>d"), "a\\|b&lt;c&gt;d")
+
+    def test_valid_reproduction_mode_swap_fails_closed(self) -> None:
+        with sandbox() as (root, project):
+            import validate_run_record
+
+            def swap_mode(payload: dict) -> None:
+                self.assertEqual(payload["implementation"]["reproduction_mode"], "other_disclosed")
+                payload["implementation"]["reproduction_mode"] = "blind_from_spec"
+
+            digest = _rebind_record(root, swap_mode)
+            report = validate_run_record.load_run_record(root / "conformance/public-runs" / digest)
+            validate_run_record.validate_run_record(report)
+            self.assertEqual(report["implementation"]["reproduction_mode"], "blind_from_spec")
+            registry = json.loads((root / "conformance/implementations.json").read_text())
+            self.assertEqual(registry["implementations"][0]["reproduction_mode"], "other_disclosed")
+            with self.assertRaises(ValueError) as ctx:
+                project.load_publication(root)
+            self.assertIn("reproduction_mode", str(ctx.exception))
+
+    def test_reproduction_mode_is_projected(self) -> None:
+        with sandbox() as (root, project):
+            document = project.render_document(root, project.load_publication(root))
+            self.assertIn("| reproduction_mode |", document)
+            cells = _table_cells(next(line for line in document.splitlines() if "pma-v0-repro" in line))
+            self.assertEqual(len(cells), 11)
+            self.assertEqual(cells[5], "other_disclosed")
 
     def test_record_digest_links_to_stored_bytes_and_names_opt_in(self) -> None:
         with sandbox() as (root, project):
