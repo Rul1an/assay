@@ -141,6 +141,14 @@ HARD_RUN_ENV_CONTRACTS = {
         "GH_TOKEN": "${{ github.token }}",
     },
 }
+REQUIRED_AGGREGATOR_JOB = "ci"
+REQUIRED_AGGREGATOR_IF = "always()"
+HOST_SCHEDULE_JOB = "check"
+HOST_SCHEDULE_STEP = "Verify required CI aggregator scheduling"
+HOST_SCHEDULE_RUN_SCRIPT = (
+    "set -euo pipefail",
+    "python3 scripts/ci/check-conformance-inventory-callsite.py --required-aggregator-schedule",
+)
 
 
 def _indentation_bounded_block(
@@ -313,8 +321,8 @@ def _ordered_job_steps(text: str, job_name: str) -> list[str]:
     if not starts:
         raise AssertionError(f"{job_name} job has no steps")
     return [
-        "".join(lines[start:starts[index + 1] if index + 1 < len(starts) else end])
-        for index, start in enumerate(starts)
+        _indentation_bounded_block(lines, start, step_indent)
+        for start in starts
     ]
 
 
@@ -470,6 +478,28 @@ def _assert_hard_run_step(
         raise AssertionError(f"{step_name} run script differs from the canonical script")
 
 
+def assert_required_aggregator_schedule(text: str) -> None:
+    job = named_job(text, REQUIRED_AGGREGATOR_JOB)
+    entries = _direct_mapping(job)
+    actual = entries["if"].strip() if "if" in entries else ""
+    if actual != REQUIRED_AGGREGATOR_IF:
+        raise AssertionError(
+            f"{REQUIRED_AGGREGATOR_JOB} job if differs: "
+            f"expected {REQUIRED_AGGREGATOR_IF}, got {actual or '<missing>'}")
+
+
+def assert_host_schedule_invocation(text: str) -> str:
+    step = named_step(text, HOST_SCHEDULE_JOB, HOST_SCHEDULE_STEP)
+    _assert_hard_run_step(
+        step,
+        HOST_SCHEDULE_JOB,
+        HOST_SCHEDULE_STEP,
+        frozenset({"name", "shell", "run"}),
+        HOST_SCHEDULE_RUN_SCRIPT,
+    )
+    return step
+
+
 def assert_hard_run_command(
         text: str, job_name: str, step_name: str) -> str:
     contract = HARD_RUN_CONTRACTS.get((job_name, step_name))
@@ -478,6 +508,8 @@ def assert_hard_run_command(
     (allowed_job_keys, allowed_step_keys, expected_script,
      workflow_keys, workflow_env_keys) = contract
     _assert_workflow_document(text, workflow_keys, workflow_env_keys)
+    if job_name == REQUIRED_AGGREGATOR_JOB:
+        assert_required_aggregator_schedule(text)
 
     job = named_job(text, job_name)
     actual_job_keys = frozenset(_direct_mapping(job))
@@ -1096,6 +1128,59 @@ class ProductCallsite(unittest.TestCase):
         )
         with self.assertRaises(AssertionError):
             assert_combined_unittest(mutated)
+
+    def test_required_aggregator_schedule_is_always(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        assert_required_aggregator_schedule(text)
+        needle = (
+            "  ci:\n"
+            "    name: CI\n"
+            "    runs-on: ubuntu-latest\n"
+            "    timeout-minutes: 10\n"
+            "    if: always()\n"
+        )
+        mutations = (
+            needle.replace("    if: always()\n", "    if: false\n"),
+            needle.replace("    if: always()\n", ""),
+            needle.replace("    if: always()\n", "    if: success()\n"),
+        )
+        for replacement in mutations:
+            with self.subTest(replacement=replacement):
+                mutated = text.replace(needle, replacement, 1)
+                self.assertNotEqual(mutated, text)
+                with self.assertRaises(AssertionError):
+                    assert_required_aggregator_schedule(mutated)
+
+    def test_hard_run_successor_ignores_blank_and_comment_only_lines(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        finale = "      - name: Verify this gate waits on every gating job\n"
+        for insert in (
+            "\n",
+            "      # comment-only documentation\n",
+            "\n      # comment-only documentation\n\n",
+        ):
+            with self.subTest(insert=insert):
+                mutated = text.replace(finale, insert + finale, 1)
+                self.assertNotEqual(mutated, text)
+                assert_hard_run_successor(
+                    mutated,
+                    "ci",
+                    "Verify CI hardening contracts",
+                    "Verify this gate waits on every gating job",
+                )
+
+    def test_hard_run_successor_rejects_intervening_executable_step(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        finale = "      - name: Verify this gate waits on every gating job\n"
+        mutated = text.replace(finale, TRUSTED_PREFIX_WRITERS[0][1] + finale, 1)
+        self.assertNotEqual(mutated, text)
+        with self.assertRaises(AssertionError):
+            assert_hard_run_successor(
+                mutated,
+                "ci",
+                "Verify CI hardening contracts",
+                "Verify this gate waits on every gating job",
+            )
 
     def test_inventory_step_moved_to_conditional_job_fails(self):
         text = CI_YML.read_text(encoding="utf-8")

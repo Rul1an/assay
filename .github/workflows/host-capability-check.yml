@@ -61,3 +61,9 @@ jobs:
             fi
           fi
           python3 scripts/ci/assay_host_capability_check.py --pr "$PR_NUMBER"
+
+      - name: Verify required CI aggregator scheduling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/check-conformance-inventory-callsite.py --required-aggregator-schedule
