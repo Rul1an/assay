@@ -1054,6 +1054,8 @@ jobs:
 
       - name: Verify CI hardening contracts
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           bash scripts/ci/test-check-assay-release-pin.sh
@@ -1066,6 +1068,7 @@ jobs:
       - name: Verify this gate waits on every gating job
         shell: bash
         run: |
+          set -euo pipefail
           python3 scripts/ci/check-ci-gate-coverage.py
           python3 scripts/ci/check-conformance-inventory-callsite.py
 

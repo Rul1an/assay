@@ -74,8 +74,14 @@ HARDENING_STEP_COMMANDS = (
 )
 # Independent of the checker module and of FINALE_RUN_SCRIPT.
 FINALE_STEP_COMMANDS = (
+    "set -euo pipefail",
     "python3 scripts/ci/check-ci-gate-coverage.py",
     "python3 scripts/ci/check-conformance-inventory-callsite.py",
+)
+HARDENING_GH_TOKEN = "GH_TOKEN: ${{ github.token }}"
+HARDENING_ENV_BLOCK = (
+    "        env:\n"
+    f"          {HARDENING_GH_TOKEN}\n"
 )
 
 
@@ -348,6 +354,55 @@ FINALE_EXECUTION_MUTATIONS = (
 )
 
 
+def drop_hardening_gh_token(text: str) -> str:
+    step = named_step(text, FINALE_JOB, HARDENING_STEP)
+    if HARDENING_ENV_BLOCK not in step:
+        raise AssertionError("hardening GH_TOKEN env block missing")
+    mutated_step = step.replace(HARDENING_ENV_BLOCK, "", 1)
+    mutated = text.replace(step, mutated_step, 1)
+    if mutated == text:
+        raise AssertionError("drop-GH_TOKEN mutation was a no-op")
+    return mutated
+
+
+def rebind_hardening_gh_token(text: str) -> str:
+    step = named_step(text, FINALE_JOB, HARDENING_STEP)
+    if HARDENING_GH_TOKEN not in step:
+        raise AssertionError("hardening GH_TOKEN binding missing")
+    mutated_step = step.replace(
+        HARDENING_GH_TOKEN,
+        "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}",
+        1,
+    )
+    mutated = text.replace(step, mutated_step, 1)
+    if mutated == text:
+        raise AssertionError("rebind-GH_TOKEN mutation was a no-op")
+    return mutated
+
+
+def run_live_finale_step(workflow_text: str, *, fail_first: bool) -> int:
+    script = "\n".join(_active_run_lines(named_step(
+        workflow_text, FINALE_JOB, FINALE_STEP)))
+    if fail_first:
+        script = (
+            "python3() {\n"
+            "  if [ \"$1\" = \"scripts/ci/check-ci-gate-coverage.py\" ]; then\n"
+            "    return 2\n"
+            "  fi\n"
+            "  command python3 \"$@\"\n"
+            "}\n"
+            + script
+        )
+    completed = subprocess.run(
+        ["bash", "-c", script],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return completed.returncode
+
+
 class ConformanceInventoryCallsite(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -379,6 +434,7 @@ class ConformanceInventoryCallsite(unittest.TestCase):
         self.assertEqual(self.guards_fn(self.live), [])
         step = named_step(self.live, FINALE_JOB, HARDENING_STEP)
         self.assertEqual(tuple(_active_run_lines(step)), HARDENING_STEP_COMMANDS)
+        self.assertIn(HARDENING_ENV_BLOCK, step)
         finale = named_step(self.live, FINALE_JOB, FINALE_STEP)
         self.assertEqual(tuple(_active_run_lines(finale)), FINALE_STEP_COMMANDS)
 
@@ -434,6 +490,7 @@ class ConformanceInventoryCallsite(unittest.TestCase):
         )
         for command in HARDENING_STEP_COMMANDS:
             self.assertIn(f'"{command}"', block)
+        self.assertIn(HARDENING_GH_TOKEN, block)
 
     def test_hardening_step_sequence_mutations_fail_b1(self) -> None:
         self.assertEqual(b1_hardening_pin_rc(self.live), 0)
@@ -477,6 +534,35 @@ class ConformanceInventoryCallsite(unittest.TestCase):
                     f"{label} must fail the finale hard-run contract",
                 )
         self.assertEqual(self.guards_fn(self.live), [])
+
+    def test_hardening_gh_token_binding_mutations_fail(self) -> None:
+        self.assertEqual(self.guards_fn(self.live), [])
+        for label, mutate in (
+            ("drop_hardening_gh_token", drop_hardening_gh_token),
+            ("rebind_hardening_gh_token", rebind_hardening_gh_token),
+        ):
+            with self.subTest(label=label):
+                problems = self.guards_fn(mutate(self.live))
+                self.assertTrue(
+                    problems,
+                    f"{label} must fail the exact GH_TOKEN env pin",
+                )
+        self.assertEqual(self.guards_fn(self.live), [])
+
+    def test_finale_first_checker_failure_fails_the_real_step(self) -> None:
+        second = subprocess.run(
+            [sys.executable, str(CHECKER_PATH)],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertNotEqual(
+            run_live_finale_step(self.live, fail_first=True),
+            0,
+            "first-checker failure must fail the live finale step",
+        )
 
     def test_single_mutation_ownership_is_mutual(self) -> None:
         for label, mutate in FINALE_EXECUTION_MUTATIONS:

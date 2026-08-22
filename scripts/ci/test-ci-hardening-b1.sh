@@ -584,6 +584,10 @@ body = rest if nxt is None else rest[:nxt.start()]
 for forbidden in ("if:", "continue-on-error:"):
     if re.search(rf"(?m)^        {re.escape(forbidden)}", body):
         sys.exit(f"hardening step must not use {forbidden}")
+required_env = ("GH_TOKEN: ${{ github.token }}",)
+missing_env = [entry for entry in required_env if entry not in body]
+if missing_env:
+    sys.exit("hardening step environment missing: " + ", ".join(missing_env))
 run_at = body.find("        run: |\n")
 if run_at < 0:
     sys.exit("hardening step missing run script")

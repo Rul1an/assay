@@ -59,6 +59,7 @@ HARDENING_RUN_SCRIPT = (
     "python3 scripts/ci/test-conformance-inventory-callsite.py",
 )
 FINALE_RUN_SCRIPT = (
+    "set -euo pipefail",
     "python3 scripts/ci/check-ci-gate-coverage.py",
     "python3 scripts/ci/check-conformance-inventory-callsite.py",
 )
@@ -86,7 +87,7 @@ HARD_RUN_CONTRACTS = {
     ("ci", "Verify CI hardening contracts"): (
         frozenset({"name", "runs-on", "timeout-minutes", "if", "needs",
                    "permissions", "steps"}),
-        frozenset({"name", "shell", "run"}),
+        frozenset({"name", "shell", "env", "run"}),
         HARDENING_RUN_SCRIPT,
         frozenset({"name", "on", "permissions", "env", "jobs"}),
         frozenset({"ASSAY_PUBLIC_MSRV"}),
@@ -135,6 +136,11 @@ TRUSTED_PREFIX_CONTRACTS = {
 ACTIVATION_KIT = (
     REPO / "conformance/privileged-mcp-action-v0/tests/test_activation_kit.py"
 )
+HARD_RUN_ENV_CONTRACTS = {
+    ("ci", "Verify CI hardening contracts"): {
+        "GH_TOKEN": "${{ github.token }}",
+    },
+}
 
 
 def _indentation_bounded_block(
@@ -416,8 +422,36 @@ def _direct_scalar(raw: str) -> str:
     raise AssertionError(f"unsupported direct scalar syntax: {raw!r}")
 
 
+def _assert_hard_run_env(
+        step: str, job_name: str, step_name: str) -> None:
+    expected = HARD_RUN_ENV_CONTRACTS.get((job_name, step_name))
+    raw_lines = step.splitlines(keepends=True)
+    step_indent = len(raw_lines[0]) - len(raw_lines[0].lstrip(" "))
+    env_indent = step_indent + 2
+    env_indexes = [
+        index for index, raw in enumerate(raw_lines)
+        if raw.rstrip("\r\n") == " " * env_indent + "env:"
+    ]
+    if expected is None:
+        if env_indexes:
+            raise AssertionError(f"{step_name} must not set env")
+        return
+    if len(env_indexes) != 1:
+        raise AssertionError(f"{step_name} must have one direct env mapping")
+    env_block = _indentation_bounded_block(
+        raw_lines, env_indexes[0], env_indent)
+    actual = {
+        key: value.strip()
+        for key, value in _direct_mapping(env_block).items()
+    }
+    if actual != expected:
+        raise AssertionError(
+            f"{step_name} env mapping differs: expected {expected}, got {actual}")
+
+
 def _assert_hard_run_step(
         step: str,
+        job_name: str,
         step_name: str,
         allowed_step_keys: frozenset[str],
         expected_script: tuple[str, ...]) -> None:
@@ -429,6 +463,7 @@ def _assert_hard_run_step(
             f"expected {sorted(allowed_step_keys)}, got {sorted(actual_step_keys)}")
     if _direct_scalar(step_entries["shell"]) != "bash":
         raise AssertionError(f"{step_name} must use shell: bash")
+    _assert_hard_run_env(step, job_name, step_name)
 
     active = tuple(_active_run_lines(step))
     if active != expected_script:
@@ -453,7 +488,8 @@ def assert_hard_run_command(
     _assert_trusted_prefix(text, job_name, step_name)
 
     step = named_step(text, job_name, step_name)
-    _assert_hard_run_step(step, step_name, allowed_step_keys, expected_script)
+    _assert_hard_run_step(
+        step, job_name, step_name, allowed_step_keys, expected_script)
     return step
 
 
@@ -474,7 +510,8 @@ def assert_hard_run_successor(
     if index + 1 >= len(steps) or steps[index + 1] != step:
         raise AssertionError(
             f"{successor} must immediately follow {predecessor}")
-    _assert_hard_run_step(step, successor, allowed_step_keys, expected_script)
+    _assert_hard_run_step(
+        step, job_name, successor, allowed_step_keys, expected_script)
     return step
 
 
