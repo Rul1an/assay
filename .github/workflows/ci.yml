@@ -1064,6 +1064,7 @@ jobs:
           python3 scripts/ci/test-conformance-inventory-callsite.py
 
       - name: Verify this gate waits on every gating job
+        shell: bash
         run: |
           python3 scripts/ci/check-ci-gate-coverage.py
           python3 scripts/ci/check-conformance-inventory-callsite.py

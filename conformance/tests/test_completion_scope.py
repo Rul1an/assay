@@ -58,6 +58,10 @@ HARDENING_RUN_SCRIPT = (
     "python3 scripts/ci/check-conformance-inventory-callsite.py",
     "python3 scripts/ci/test-conformance-inventory-callsite.py",
 )
+FINALE_RUN_SCRIPT = (
+    "python3 scripts/ci/check-ci-gate-coverage.py",
+    "python3 scripts/ci/check-conformance-inventory-callsite.py",
+)
 ACTIVATION_KIT_RUN_SCRIPT = (
     "set -euo pipefail",
     REVISION_WITNESS,
@@ -84,6 +88,14 @@ HARD_RUN_CONTRACTS = {
                    "permissions", "steps"}),
         frozenset({"name", "shell", "run"}),
         HARDENING_RUN_SCRIPT,
+        frozenset({"name", "on", "permissions", "env", "jobs"}),
+        frozenset({"ASSAY_PUBLIC_MSRV"}),
+    ),
+    ("ci", "Verify this gate waits on every gating job"): (
+        frozenset({"name", "runs-on", "timeout-minutes", "if", "needs",
+                   "permissions", "steps"}),
+        frozenset({"name", "shell", "run"}),
+        FINALE_RUN_SCRIPT,
         frozenset({"name", "on", "permissions", "env", "jobs"}),
         frozenset({"ASSAY_PUBLIC_MSRV"}),
     ),
@@ -404,6 +416,25 @@ def _direct_scalar(raw: str) -> str:
     raise AssertionError(f"unsupported direct scalar syntax: {raw!r}")
 
 
+def _assert_hard_run_step(
+        step: str,
+        step_name: str,
+        allowed_step_keys: frozenset[str],
+        expected_script: tuple[str, ...]) -> None:
+    step_entries = _direct_mapping(step)
+    actual_step_keys = frozenset(step_entries)
+    if actual_step_keys != allowed_step_keys:
+        raise AssertionError(
+            f"{step_name} direct keys differ: "
+            f"expected {sorted(allowed_step_keys)}, got {sorted(actual_step_keys)}")
+    if _direct_scalar(step_entries["shell"]) != "bash":
+        raise AssertionError(f"{step_name} must use shell: bash")
+
+    active = tuple(_active_run_lines(step))
+    if active != expected_script:
+        raise AssertionError(f"{step_name} run script differs from the canonical script")
+
+
 def assert_hard_run_command(
         text: str, job_name: str, step_name: str) -> str:
     contract = HARD_RUN_CONTRACTS.get((job_name, step_name))
@@ -422,18 +453,28 @@ def assert_hard_run_command(
     _assert_trusted_prefix(text, job_name, step_name)
 
     step = named_step(text, job_name, step_name)
-    step_entries = _direct_mapping(step)
-    actual_step_keys = frozenset(step_entries)
-    if actual_step_keys != allowed_step_keys:
-        raise AssertionError(
-            f"{step_name} direct keys differ: "
-            f"expected {sorted(allowed_step_keys)}, got {sorted(actual_step_keys)}")
-    if _direct_scalar(step_entries["shell"]) != "bash":
-        raise AssertionError(f"{step_name} must use shell: bash")
+    _assert_hard_run_step(step, step_name, allowed_step_keys, expected_script)
+    return step
 
-    active = tuple(_active_run_lines(step))
-    if active != expected_script:
-        raise AssertionError(f"{step_name} run script differs from the canonical script")
+
+def assert_hard_run_successor(
+        text: str, job_name: str, predecessor: str, successor: str) -> str:
+    contract = HARD_RUN_CONTRACTS.get((job_name, successor))
+    if contract is None:
+        raise AssertionError(f"no hard-run contract for {job_name}/{successor}")
+    allowed_step_keys, expected_script = contract[1], contract[2]
+    steps = _ordered_job_steps(text, job_name)
+    before = named_step(text, job_name, predecessor)
+    step = named_step(text, job_name, successor)
+    try:
+        index = steps.index(before)
+    except ValueError as error:
+        raise AssertionError(
+            f"{predecessor} is not a direct step in {job_name}") from error
+    if index + 1 >= len(steps) or steps[index + 1] != step:
+        raise AssertionError(
+            f"{successor} must immediately follow {predecessor}")
+    _assert_hard_run_step(step, successor, allowed_step_keys, expected_script)
     return step
 
 

@@ -4,10 +4,16 @@
 The inventory tests already encode this contract, but they execute inside the
 step they guard. Required CI therefore invokes this module from the later
 hardening step and again from the final required CI job. This file does not
-parse workflow YAML; it calls assert_hard_run_command and
-named_step/_active_run_lines.
+parse workflow YAML; it calls assert_hard_run_command / assert_hard_run_successor
+and the shared indentation/direct-key helpers.
 Canonical CI always reads the committed CI_YML. Tests inject text at the
 function seam.
+
+Hardening and finale own each other under a single-mutation contract: changing
+only one root must turn the remaining caller red. Deleting or neutralizing
+both mutual roots in the same rewrite is outside that contract. Hosted CI
+then has no remaining in-repo caller, so this is not absolute protection
+against a fully rewritten workflow.
 """
 
 from __future__ import annotations
@@ -19,9 +25,8 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "conformance/tests"))
 
 from test_completion_scope import (  # noqa: E402
-    _active_run_lines,
     assert_hard_run_command,
-    named_step,
+    assert_hard_run_successor,
 )
 
 CI_YML = REPO / ".github/workflows/ci.yml"
@@ -30,7 +35,6 @@ INVENTORY_STEP = "Conformance inventory"
 HARDENING_JOB = "ci"
 HARDENING_STEP = "Verify CI hardening contracts"
 FINALE_STEP = "Verify this gate waits on every gating job"
-FINALE_CHECKER = "python3 scripts/ci/check-conformance-inventory-callsite.py"
 
 
 def conformance_inventory_callsite_problems(text: str) -> list[str]:
@@ -50,12 +54,10 @@ def hardening_guard_callsite_problems(text: str) -> list[str]:
     else:
         problems = []
     try:
-        step = named_step(text, HARDENING_JOB, FINALE_STEP)
+        assert_hard_run_successor(
+            text, HARDENING_JOB, HARDENING_STEP, FINALE_STEP)
     except AssertionError as exc:
-        problems.append(str(exc).strip() or "finale CI checker step missing")
-        return problems
-    if FINALE_CHECKER not in _active_run_lines(step):
-        problems.append("finale CI missing active hardening-step checker")
+        problems.append(str(exc).strip() or "finale hard-run successor failed")
     return problems
 
 

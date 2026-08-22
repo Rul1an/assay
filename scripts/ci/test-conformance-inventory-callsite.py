@@ -7,6 +7,12 @@ The inventory tests already encode this contract, but they execute inside the
 step they guard. These mutations therefore target the later required-CI
 checker and the workflow calls that invoke it. The live workflow is never
 written. Command literals here are an independent oracle, not an import.
+
+Hardening and finale check each other under a single-mutation contract:
+changing only one root must turn the remaining caller red. Deleting or
+neutralizing both mutual roots in the same rewrite is outside that
+contract and is not a hosted-CI proof. This is not absolute protection
+against a fully rewritten workflow.
 """
 
 from __future__ import annotations
@@ -25,6 +31,7 @@ sys.path.insert(0, str(REPO / "conformance/tests"))
 from test_completion_scope import (  # noqa: E402
     TRUSTED_PREFIX_WRITERS,
     _active_run_lines,
+    assert_hard_run_command,
     named_step,
 )
 
@@ -64,6 +71,11 @@ HARDENING_STEP_COMMANDS = (
     "bash scripts/ci/test-structurizr-export-docker.sh",
     "python3 scripts/ci/check-conformance-inventory-callsite.py",
     "python3 scripts/ci/test-conformance-inventory-callsite.py",
+)
+# Independent of the checker module and of FINALE_RUN_SCRIPT.
+FINALE_STEP_COMMANDS = (
+    "python3 scripts/ci/check-ci-gate-coverage.py",
+    "python3 scripts/ci/check-conformance-inventory-callsite.py",
 )
 
 
@@ -283,6 +295,59 @@ HARDENING_EXECUTION_MUTATIONS = (
 )
 
 
+def finale_heading(text: str) -> str:
+    heading = f"      - name: {FINALE_STEP}\n"
+    if heading not in text:
+        raise AssertionError("finale step heading missing")
+    return heading
+
+
+def false_if_finale(text: str) -> str:
+    needle = finale_heading(text)
+    mutated = text.replace(needle, needle + "        if: false\n", 1)
+    if mutated == text:
+        raise AssertionError("if:false finale mutation was a no-op")
+    return mutated
+
+
+def hostile_finale_shell(text: str) -> str:
+    heading = finale_heading(text)
+    bash = heading + "        shell: bash\n"
+    hostile = heading + '        shell: bash -c "exit 0" {0}\n'
+    if bash in text:
+        mutated = text.replace(bash, hostile, 1)
+    else:
+        mutated = text.replace(heading, hostile, 1)
+    if mutated == text:
+        raise AssertionError("hostile-finale-shell mutation was a no-op")
+    return mutated
+
+
+def continue_on_error_finale(text: str) -> str:
+    needle = finale_heading(text)
+    mutated = text.replace(needle, needle + "        continue-on-error: true\n", 1)
+    if mutated == text:
+        raise AssertionError("continue-on-error finale mutation was a no-op")
+    return mutated
+
+
+def bash_env_between_hardening_and_finale(text: str) -> str:
+    needle = finale_heading(text)
+    writer = TRUSTED_PREFIX_WRITERS[0][1]
+    mutated = text.replace(needle, writer + needle, 1)
+    if mutated == text:
+        raise AssertionError("inter-step BASH_ENV writer mutation was a no-op")
+    return mutated
+
+
+FINALE_EXECUTION_MUTATIONS = (
+    ("false_if_finale", false_if_finale),
+    ("hostile_finale_shell", hostile_finale_shell),
+    ("continue_on_error_finale", continue_on_error_finale),
+    ("bash_env_between_hardening_and_finale", bash_env_between_hardening_and_finale),
+)
+
+
 class ConformanceInventoryCallsite(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -306,12 +371,16 @@ class ConformanceInventoryCallsite(unittest.TestCase):
         joined = "\n".join(imported)
         self.assertNotIn("INVENTORY_" + "RUN_SCRIPT", joined)
         self.assertNotIn("REQUIRED_" + "RUN_ALL", joined)
+        self.assertNotIn("HARDENING_" + "RUN_SCRIPT", joined)
+        self.assertNotIn("FINALE_" + "RUN_SCRIPT", joined)
 
     def test_pristine_workflow_is_green(self) -> None:
         self.assertEqual(self.problems_fn(self.live), [])
         self.assertEqual(self.guards_fn(self.live), [])
         step = named_step(self.live, FINALE_JOB, HARDENING_STEP)
         self.assertEqual(tuple(_active_run_lines(step)), HARDENING_STEP_COMMANDS)
+        finale = named_step(self.live, FINALE_JOB, FINALE_STEP)
+        self.assertEqual(tuple(_active_run_lines(finale)), FINALE_STEP_COMMANDS)
 
     def test_live_inventory_step_matches_independent_literals(self) -> None:
         step = named_step(self.live, JOB, INVENTORY_STEP)
@@ -395,8 +464,41 @@ class ConformanceInventoryCallsite(unittest.TestCase):
 
     def test_finale_ci_invokes_the_hardening_checker(self) -> None:
         step = named_step(self.live, FINALE_JOB, FINALE_STEP)
-        self.assertIn(FINALE_CHECKER, _active_run_lines(step))
+        self.assertEqual(tuple(_active_run_lines(step)), FINALE_STEP_COMMANDS)
         self.assertTrue(self.guards_fn(neutralize_finale_checker(self.live)))
+
+    def test_finale_execution_removal_fails_the_hardening_root(self) -> None:
+        self.assertEqual(self.guards_fn(self.live), [])
+        for label, mutate in FINALE_EXECUTION_MUTATIONS:
+            with self.subTest(label=label):
+                problems = self.guards_fn(mutate(self.live))
+                self.assertTrue(
+                    problems,
+                    f"{label} must fail the finale hard-run contract",
+                )
+        self.assertEqual(self.guards_fn(self.live), [])
+
+    def test_single_mutation_ownership_is_mutual(self) -> None:
+        for label, mutate in FINALE_EXECUTION_MUTATIONS:
+            with self.subTest(direction="finale-only", label=label):
+                mutated = mutate(self.live)
+                assert_hard_run_command(mutated, FINALE_JOB, HARDENING_STEP)
+                self.assertTrue(
+                    self.guards_fn(mutated),
+                    f"{label} must fail finale ownership while hardening stays green",
+                )
+        for label, mutate in HARDENING_EXECUTION_MUTATIONS:
+            with self.subTest(direction="hardening-only", label=label):
+                mutated = mutate(self.live)
+                self.assertTrue(
+                    self.guards_fn(mutated),
+                    f"{label} must fail hardening ownership",
+                )
+                finale = named_step(mutated, FINALE_JOB, FINALE_STEP)
+                self.assertEqual(
+                    tuple(_active_run_lines(finale)),
+                    FINALE_STEP_COMMANDS,
+                )
 
 
 if __name__ == "__main__":
