@@ -17,6 +17,7 @@ import inspect
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -70,6 +71,26 @@ ISSUE_203_NON_CLAIMS = (
     "malware safety, supply-chain integrity, conformance, or cleanup "
     "guarantee after host/daemon/SIGKILL failure."
 )
+
+
+
+def _mount_src(mount: str) -> Path:
+    for part in mount.split(","):
+        if part.startswith("src="):
+            return Path(part[4:])
+    raise AssertionError(f"mount lost src=: {mount!r}")
+
+
+def _other_readable_for_runtime(path: Path, runtime_user: str) -> bool:
+    uid_s, gid_s = runtime_user.split(":")
+    uid, gid = int(uid_s), int(gid_s)
+    st = path.stat()
+    mode = stat.S_IMODE(st.st_mode)
+    if st.st_uid == uid:
+        return bool(mode & 0o400)
+    if st.st_gid == gid and mode & 0o040:
+        return True
+    return bool(mode & 0o004)
 
 
 def _require() -> Any:
@@ -950,6 +971,52 @@ class LiveDockerInspect(unittest.TestCase):
         self.assertEqual(result.state, module.STATE_OUTPUT_OVERFLOW)
         self.assertNotIn(result.state, AGREEMENT)
 
+    def test_live_runtime_user_reads_exact_mounted_bundle_bytes(self) -> None:
+        module = _require()
+        assert self.image_ref is not None
+        payload = b"opaque-runtime-read-bytes"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            bundle = root / "opaque.bundle.tar.gz"
+            bundle.write_bytes(payload)
+            staging = root / "stage"
+            staging.mkdir(mode=0o700)
+            os.chmod(staging, 0o700)
+            argv = module.build_container_create_argv(
+                image=self.image_ref,
+                bundle_path=bundle,
+                container_name=f"assay-oci-live-read-{os.getpid()}",
+                staging_dir=staging,
+                command=("/oci-candidate", "read"),
+            )
+            assert_argv_runtime_user(argv)
+            self.assertEqual(_flag_value(argv, "--user"), module.RUNTIME_USER)
+            mounted = _mount_src(_flag_value(argv, "--mount") or "")
+            self.assertEqual(stat.S_IMODE(mounted.stat().st_mode), 0o444)
+            self.assertEqual(stat.S_IMODE(staging.stat().st_mode), 0o700)
+            self.assertEqual(mounted.read_bytes(), payload)
+            assert self.local_ref is not None
+            live_argv = rewrite_fixture_image_argv(
+                argv, registry_ref=self.image_ref, local_ref=self.local_ref
+            )
+            created = subprocess.run(live_argv, capture_output=True, text=True, check=False)
+            self.assertEqual(created.returncode, 0, created.stderr)
+            container = created.stdout.strip()
+            try:
+                started = subprocess.run(
+                    ["docker", "start", "-a", container],
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(started.returncode, 0, started.stderr)
+                self.assertEqual(started.stdout, payload)
+            finally:
+                subprocess.run(
+                    ["docker", "rm", "--force", "--volumes", container],
+                    capture_output=True,
+                    check=False,
+                )
+
     def test_live_completed_ok_is_not_agreement(self) -> None:
         module = _require()
         assert self.image_ref is not None
@@ -1224,6 +1291,44 @@ class StagedBundleMount(unittest.TestCase):
             staged = module.stage_opaque_bundle(source, Path(raw) / "stage")
             source.write_bytes(b"swapped")
             self.assertEqual(staged.read_bytes(), b"first")
+
+
+    def test_umask_077_keeps_bytes_and_is_readable_for_runtime_user(self) -> None:
+        module = _require()
+        previous = os.umask(0o077)
+        try:
+            with tempfile.TemporaryDirectory() as raw:
+                root = Path(raw)
+                source = root / "input.bundle"
+                payload = b"opaque-umask-077-bytes"
+                source.write_bytes(payload)
+                staging = root / "stage"
+                staging.mkdir(mode=0o700)
+                os.chmod(staging, 0o700)
+                staged = module.stage_opaque_bundle(source, staging)
+                self.assertEqual(staged.read_bytes(), payload)
+                self.assertEqual(stat.S_IMODE(staging.stat().st_mode), 0o700)
+                self.assertEqual(stat.S_IMODE(staged.stat().st_mode), 0o444)
+                self.assertTrue(
+                    _other_readable_for_runtime(staged, module.RUNTIME_USER),
+                    f"{oct(stat.S_IMODE(staged.stat().st_mode))} is not readable "
+                    f"for runtime {module.RUNTIME_USER} without widening host scope",
+                )
+                argv_staging = root / "argv-stage"
+                argv_staging.mkdir(mode=0o700)
+                os.chmod(argv_staging, 0o700)
+                argv = module.build_container_create_argv(
+                    image=DIGEST_IMAGE,
+                    bundle_path=source,
+                    container_name="assay-oci-umask",
+                    staging_dir=argv_staging,
+                )
+                mounted = _mount_src(_flag_value(argv, "--mount") or "")
+                self.assertEqual(stat.S_IMODE(mounted.stat().st_mode), 0o444)
+                self.assertEqual(mounted.read_bytes(), payload)
+                self.assertEqual(stat.S_IMODE(argv_staging.stat().st_mode), 0o700)
+        finally:
+            os.umask(previous)
 
 
 class CandidateOutputHandoff(unittest.TestCase):
