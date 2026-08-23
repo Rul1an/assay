@@ -66,6 +66,11 @@ Declared rather than left to inference:
   `ArgsProjection` form is surfaced on the same terms: shown, not checked.
 - **Runtime effect.** A reproduced verdict says the records bind to each other as specified. It
   does not say the recorded action occurred. Reported as `runtime_side_effect_truth`.
+- **Fallback observation and nonce semantics.** In request-envelope mode, Assay checks its selected
+  envelope projection, requires a nonce on the decision back-link, and requires the decision and
+  outcome back-links to agree. It does not establish that `_meta.authorization_binding.nonce` was
+  observed by the server, equals the back-link nonce, or is fresh or unique. Reported as
+  `fallback_server_observation_truth` and `fallback_nonce_freshness_or_uniqueness`.
 
 ## The case that was not reproduced
 
@@ -86,8 +91,13 @@ Assay projection is `assay.fallback_projection.v0`; the decision names
 `tools_call_params_plus_meta_authorization_binding_v1`. Those identifiers denote different object
 shapes and therefore different digest pre-images.
 
-That is a general property rather than a complaint about one profile, and it is raised as such in
-the venue where the rule is being written, on the SCITT Canonical Payload Binding draft:
+The published text names the source fields (`tools/call` name and arguments, plus the authorization
+binding block), but it does not define the projected JSON member names and nesting. That shape is
+part of the JCS bytes, so the identifier alone is not enough for an independent implementation to
+reconstruct the same pre-image.
+
+That is a general property rather than a complaint about one profile. It was raised on the SCITT
+Canonical Payload Binding draft and resolved by adding an assembled pre-image member-mapping rule:
 [action-state-group/scitt-payload-binding#5](https://github.com/action-state-group/scitt-payload-binding/issues/5).
 Short version: an identifier that travels is necessary but not sufficient. It has to resolve to a
 published pre-image construction, or it names a shape only its author can build.
