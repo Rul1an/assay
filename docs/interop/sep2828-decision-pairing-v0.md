@@ -15,8 +15,8 @@ scripts/interop/reproduce-sep2828-decision-pairing.sh
 
 The vectors are published by [vaaraio/vaara](https://github.com/vaaraio/vaara) under
 AGPL-3.0-or-later. The script fetches them at run time and never vendors them into this MIT
-repository. No upstream code is fetched or executed, and every verdict below is computed by
-`assay` from the published JSON wire bytes. Assay computes the individual checks; the local
+repository. No upstream code is fetched or executed. Assay computes the individual checks from
+the published JSON wire bytes; the local
 fallback classifier applies this record's disposition rule to those check results.
 
 ## Why this record exists
@@ -105,12 +105,12 @@ artifact is bad rather than that their pre-image is wrong.
 | Assay | `assay-cli` 5.4.0, release profile |
 | Verifier commands | `assay evidence verify-mcp-records`, `assay evidence verify-mcp-supersession` |
 | Upstream vectors | Vaara `v1.75.0`, `tests/vectors/decision_pairing_v0/normative` at `9fefe51a61f16dc13cd64ca8ca4b8792e48fb64b` |
-| Method | upstream JSON fetched and read; no upstream code fetched or executed; all verdicts computed by `assay` |
+| Method | upstream JSON fetched and read; no upstream code fetched or executed; checks computed by `assay`, recorded fallback disposition applied locally |
 
 The upstream revision is pinned rather than tracked from `main`, because a record whose inputs can
 move is not a record. Drift shows up as a fetch failure instead of as a quietly different number.
 `ASSAY_INTEROP_REV` re-runs the comparison against another commit. The script prints the revision
-and the versions of `assay`, `curl` and `python3` it used, and fails closed on a bad fetch or an
+and the versions of `assay` and `python3` it used, and fails closed on a bad fetch or an
 unexpected tool exit rather than reporting either as a comparison result. Every fetched JSON file
 and the fallback report are bounded to 1 MiB before parsing.
 

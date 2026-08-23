@@ -45,7 +45,7 @@ class FallbackClassificationTests(unittest.TestCase):
                 "digest_source": "request_envelope_named_projection_jcs",
             },
             "checks": [
-                {"id": check_id, "ok": check_id in required_true}
+                {"id": check_id, "ok": check_id not in false_checks}
                 for check_id in sorted(required_true | set(false_checks))
             ],
         }
@@ -103,6 +103,41 @@ class FallbackClassificationTests(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         self.assertEqual(result["classification"], "diverged")
+
+    def test_missing_overall_verdict_is_a_divergence(self) -> None:
+        report = self.report(
+            ok=False,
+            false_checks=[
+                "decision_request_envelope_digest_match",
+                "outcome_request_envelope_digest_match",
+            ],
+        )
+        del report["ok"]
+
+        rc, result = self.classify(report, self.decision())
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(result["classification"], "diverged")
+
+    def test_each_binding_field_is_load_bearing(self) -> None:
+        expected_false = [
+            "decision_request_envelope_digest_match",
+            "outcome_request_envelope_digest_match",
+        ]
+        mutations = {
+            "mode": "attestation",
+            "projection": "another.assay.projection.v0",
+            "digest_source": "whole_request_envelope_jcs",
+        }
+        for field, replacement in mutations.items():
+            with self.subTest(field=field):
+                report = self.report(ok=False, false_checks=expected_false)
+                report["binding"][field] = replacement
+
+                rc, result = self.classify(report, self.decision())
+
+                self.assertEqual(rc, 0)
+                self.assertEqual(result["classification"], "diverged")
 
     def test_different_upstream_projection_is_a_divergence(self) -> None:
         rc, result = self.classify(

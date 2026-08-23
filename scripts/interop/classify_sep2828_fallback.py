@@ -57,7 +57,8 @@ def classify(report: dict, upstream_projection: object) -> dict:
             binding.get(key) == value for key, value in EXPECTED_BINDING.items()
         )
         exact_mismatch = (
-            exact_binding
+            report.get("ok") is False
+            and exact_binding
             and upstream_projection == EXPECTED_UPSTREAM_PROJECTION
             and upstream_projection != assay_projection
             and not duplicate_check_ids

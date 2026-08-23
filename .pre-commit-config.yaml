@@ -125,11 +125,11 @@ repos:
         files: ^(scripts/(ci/test-generate-product-capabilities|docs/generate-product-capabilities)\.py|docs/data/product-capabilities\.v0\.json|docs/(reference/product-support|generated/product-claim-proof)\.md)$
 
       - id: sep2828-fallback-classifier-self-test
-        name: SEP-2828 fallback classifier self-test
-        entry: python3 scripts/ci/test_classify_sep2828_fallback.py
+        name: SEP-2828 fallback reproduction self-test
+        entry: bash -c 'python3 scripts/ci/test_classify_sep2828_fallback.py && python3 scripts/ci/test_reproduce_sep2828_decision_pairing.py'
         language: system
         pass_filenames: false
-        files: ^(scripts/(ci/test_classify_sep2828_fallback|interop/classify_sep2828_fallback)\.py|scripts/interop/reproduce-sep2828-decision-pairing\.sh|docs/interop/sep2828-decision-pairing-v0\.md|\.pre-commit-config\.yaml)$
+        files: ^(scripts/(ci/(test_classify_sep2828_fallback|test_reproduce_sep2828_decision_pairing|bounded_download)|interop/classify_sep2828_fallback)\.py|scripts/interop/reproduce-sep2828-decision-pairing\.sh|docs/interop/sep2828-decision-pairing-v0\.md|\.pre-commit-config\.yaml)$
 
       - id: docs-generated-drift
         name: Generated docs match their generators
