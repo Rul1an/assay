@@ -106,8 +106,12 @@ does not change Assay's digest. That behavior is not counted as reproduced here 
 from the upstream member-mapping gap above.
 
 That is a general property rather than a complaint about one profile. It was raised on the SCITT
-Canonical Payload Binding draft and resolved by adding an assembled pre-image member-mapping rule:
+Canonical Payload Binding draft in
 [action-state-group/scitt-payload-binding#5](https://github.com/action-state-group/scitt-payload-binding/issues/5).
+The issue closed after executable vectors and a proposed `member_mapping` landed in
+[PR #16](https://github.com/action-state-group/scitt-payload-binding/pull/16); the normative section
+and registry-template text were deliberately deferred after prerequisite
+[PR #9](https://github.com/action-state-group/scitt-payload-binding/pull/9) closed unmerged.
 Short version: an identifier that travels is necessary but not sufficient. It has to resolve to a
 published pre-image construction, or it names a shape only its author can build.
 
