@@ -10,17 +10,23 @@ CLASSIFIER = ROOT / "scripts" / "interop" / "classify_sep2828_fallback.py"
 
 
 class FallbackClassificationTests(unittest.TestCase):
+    MAX_REPORT_BYTES = 1024 * 1024
+
     def classify(self, report: dict, decision: dict) -> tuple[int, dict]:
+        return self.classify_raw(json.dumps(report), decision)
+
+    def classify_raw(self, report: str, decision: dict) -> tuple[int, dict | None]:
         self.assertTrue(CLASSIFIER.is_file(), f"missing classifier: {CLASSIFIER}")
         projection = decision.get("backLink", {}).get("fallbackProjection")
         completed = subprocess.run(
             ["python3", str(CLASSIFIER), json.dumps(projection)],
-            input=json.dumps(report),
+            input=report,
             check=False,
             capture_output=True,
             text=True,
         )
-        return completed.returncode, json.loads(completed.stdout)
+        result = json.loads(completed.stdout) if completed.stdout else None
+        return completed.returncode, result
 
     @staticmethod
     def report(*, ok: bool, false_checks: list[str]) -> dict:
@@ -97,6 +103,47 @@ class FallbackClassificationTests(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         self.assertEqual(result["classification"], "diverged")
+
+    def test_different_upstream_projection_is_a_divergence(self) -> None:
+        rc, result = self.classify(
+            self.report(
+                ok=False,
+                false_checks=[
+                    "decision_request_envelope_digest_match",
+                    "outcome_request_envelope_digest_match",
+                ],
+            ),
+            self.decision("another_named_projection_v2"),
+        )
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(result["classification"], "diverged")
+
+    def test_duplicate_check_id_is_a_divergence(self) -> None:
+        report = self.report(
+            ok=False,
+            false_checks=[
+                "decision_request_envelope_digest_match",
+                "outcome_request_envelope_digest_match",
+            ],
+        )
+        report["checks"].insert(
+            0,
+            {"id": "decision_request_envelope_digest_match", "ok": True},
+        )
+
+        rc, result = self.classify(report, self.decision())
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(result["classification"], "diverged")
+
+    def test_oversized_report_fails_closed(self) -> None:
+        oversized = json.dumps({"padding": "x" * self.MAX_REPORT_BYTES})
+
+        rc, result = self.classify_raw(oversized, self.decision())
+
+        self.assertEqual(rc, 2)
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,8 @@ EXPECTED_FALSE = {
     "decision_request_envelope_digest_match",
     "outcome_request_envelope_digest_match",
 }
+EXPECTED_UPSTREAM_PROJECTION = "tools_call_params_plus_meta_authorization_binding_v1"
+MAX_REPORT_BYTES = 1024 * 1024
 REQUIRED_TRUE = {
     "fallback_projection_binding_present",
     "decision_request_envelope_nonce_present",
@@ -24,7 +26,10 @@ EXPECTED_BINDING = {
 
 
 def load_report() -> dict:
-    value = json.load(sys.stdin)
+    raw = sys.stdin.buffer.read(MAX_REPORT_BYTES + 1)
+    if len(raw) > MAX_REPORT_BYTES:
+        raise ValueError(f"stdin exceeds {MAX_REPORT_BYTES} bytes")
+    value = json.loads(raw)
     if not isinstance(value, dict):
         raise ValueError("stdin must contain a JSON object")
     return value
@@ -36,9 +41,12 @@ def classify(report: dict, upstream_projection: object) -> dict:
     assay_projection = binding.get("projection") if isinstance(binding, dict) else None
 
     checks = {}
+    duplicate_check_ids = set()
     if isinstance(checks_raw, list):
         for check in checks_raw:
             if isinstance(check, dict) and isinstance(check.get("id"), str):
+                if check["id"] in checks:
+                    duplicate_check_ids.add(check["id"])
                 checks[check["id"]] = check.get("ok")
     false_checks = sorted(check_id for check_id, ok in checks.items() if ok is False)
 
@@ -50,9 +58,9 @@ def classify(report: dict, upstream_projection: object) -> dict:
         )
         exact_mismatch = (
             exact_binding
-            and isinstance(upstream_projection, str)
-            and upstream_projection
+            and upstream_projection == EXPECTED_UPSTREAM_PROJECTION
             and upstream_projection != assay_projection
+            and not duplicate_check_ids
             and set(false_checks) == EXPECTED_FALSE
             and all(checks.get(check_id) is True for check_id in REQUIRED_TRUE)
         )
@@ -63,6 +71,7 @@ def classify(report: dict, upstream_projection: object) -> dict:
         "assay_projection": assay_projection,
         "upstream_projection": upstream_projection,
         "false_checks": false_checks,
+        "duplicate_check_ids": sorted(duplicate_check_ids),
     }
 
 

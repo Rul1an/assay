@@ -16,7 +16,8 @@ scripts/interop/reproduce-sep2828-decision-pairing.sh
 The vectors are published by [vaaraio/vaara](https://github.com/vaaraio/vaara) under
 AGPL-3.0-or-later. The script fetches them at run time and never vendors them into this MIT
 repository. No upstream code is fetched or executed, and every verdict below is computed by
-`assay` from the published JSON wire bytes.
+`assay` from the published JSON wire bytes. Assay computes the individual checks; the local
+fallback classifier applies this record's disposition rule to those check results.
 
 ## Why this record exists
 
@@ -110,7 +111,8 @@ The upstream revision is pinned rather than tracked from `main`, because a recor
 move is not a record. Drift shows up as a fetch failure instead of as a quietly different number.
 `ASSAY_INTEROP_REV` re-runs the comparison against another commit. The script prints the revision
 and the versions of `assay`, `curl` and `python3` it used, and fails closed on a bad fetch or an
-unexpected tool exit rather than reporting either as a comparison result.
+unexpected tool exit rather than reporting either as a comparison result. Every fetched JSON file
+and the fallback report are bounded to 1 MiB before parsing.
 
 The comparison is per check, not per case. Each row above pins the specific check ids that must
 pass and must fail, so a case that reaches the right overall verdict for the wrong reason is

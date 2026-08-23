@@ -22,6 +22,7 @@ REV="${ASSAY_INTEROP_REV:-9fefe51a61f16dc13cd64ca8ca4b8792e48fb64b}"
 UPSTREAM="https://raw.githubusercontent.com/vaaraio/vaara/${REV}/tests/vectors/decision_pairing_v0/normative"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FALLBACK_CLASSIFIER="$SCRIPT_DIR/classify_sep2828_fallback.py"
+MAX_INPUT_BYTES=1048576
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -47,8 +48,12 @@ non_reproduced=0
 
 # A missing or empty fetch is a setup failure, never an absent optional input.
 fetch() { # case, file
-  curl -sfL --max-time 30 "$UPSTREAM/$1/$2" -o "$WORK/$2" || return 1
+  curl -sfL --max-time 30 --max-filesize "$MAX_INPUT_BYTES" \
+    "$UPSTREAM/$1/$2" -o "$WORK/$2" \
+    || die "failed to fetch $1/$2 at $REV within $MAX_INPUT_BYTES bytes"
   [ -s "$WORK/$2" ] || die "empty response for $1/$2 at $REV"
+  [ "$(wc -c <"$WORK/$2")" -le "$MAX_INPUT_BYTES" ] \
+    || die "oversized response for $1/$2 at $REV"
 }
 
 # Runs the verifier and echoes the ids of the checks that passed and failed. Exit code 2 means a
