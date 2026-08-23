@@ -71,6 +71,10 @@ Declared rather than left to inference:
   outcome back-links to agree. It does not establish that `_meta.authorization_binding.nonce` was
   observed by the server, equals the back-link nonce, or is fresh or unique. Reported as
   `fallback_server_observation_truth` and `fallback_nonce_freshness_or_uniqueness`.
+- **Fallback call parameters on this upstream shape.** The vector carries top-level `name` and
+  `arguments`; Assay 5.4.0's named projection reads top-level `params` and substitutes JSON `null`
+  when it is absent. This run therefore does not establish that the call name or arguments are
+  bound by Assay's fallback digest. Tracked as [#2595](https://github.com/Rul1an/assay/issues/2595).
 
 ## The case that was not reproduced
 
@@ -95,6 +99,11 @@ The published text names the source fields (`tools/call` name and arguments, plu
 binding block), but it does not define the projected JSON member names and nesting. That shape is
 part of the JCS bytes, so the identifier alone is not enough for an independent implementation to
 reconstruct the same pre-image.
+
+There is also a distinct Assay-side boundary: for this vector's top-level `name`/`arguments` shape,
+Assay's own projection hashes `params: null`. Changing those two upstream fields alone therefore
+does not change Assay's digest. That behavior is not counted as reproduced here and is separated
+from the upstream member-mapping gap above.
 
 That is a general property rather than a complaint about one profile. It was raised on the SCITT
 Canonical Payload Binding draft and resolved by adding an assembled pre-image member-mapping rule:
