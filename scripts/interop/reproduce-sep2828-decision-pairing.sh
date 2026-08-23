@@ -164,8 +164,13 @@ fallback_rc=0
   --fallback-projection named \
   --format json >"$WORK/fallback_report.json" 2>/dev/null || fallback_rc=$?
 case "$fallback_rc" in 0|2) ;; *) die "assay exited $fallback_rc on fallback_envelope_binding" ;; esac
-fallback_classification="$(python3 "$FALLBACK_CLASSIFIER" \
-  "$WORK/fallback_report.json" "$WORK/decision.json")" \
+upstream_projection_json="$(python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+print(json.dumps(d.get("backLink", {}).get("fallbackProjection"), separators=(",", ":")))
+' <"$WORK/decision.json")" || die "could not read upstream fallback projection"
+fallback_classification="$(python3 "$FALLBACK_CLASSIFIER" "$upstream_projection_json" \
+  <"$WORK/fallback_report.json")" \
   || die "could not classify fallback_envelope_binding"
 fallback_disposition="$(printf '%s' "$fallback_classification" | python3 -c \
   'import json,sys; print(json.load(sys.stdin)["classification"])')"

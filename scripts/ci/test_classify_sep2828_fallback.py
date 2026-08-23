@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import json
 import subprocess
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -13,17 +12,14 @@ CLASSIFIER = ROOT / "scripts" / "interop" / "classify_sep2828_fallback.py"
 class FallbackClassificationTests(unittest.TestCase):
     def classify(self, report: dict, decision: dict) -> tuple[int, dict]:
         self.assertTrue(CLASSIFIER.is_file(), f"missing classifier: {CLASSIFIER}")
-        with tempfile.TemporaryDirectory() as tmp:
-            report_path = Path(tmp) / "report.json"
-            decision_path = Path(tmp) / "decision.json"
-            report_path.write_text(json.dumps(report))
-            decision_path.write_text(json.dumps(decision))
-            completed = subprocess.run(
-                ["python3", str(CLASSIFIER), str(report_path), str(decision_path)],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
+        projection = decision.get("backLink", {}).get("fallbackProjection")
+        completed = subprocess.run(
+            ["python3", str(CLASSIFIER), json.dumps(projection)],
+            input=json.dumps(report),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
         return completed.returncode, json.loads(completed.stdout)
 
     @staticmethod

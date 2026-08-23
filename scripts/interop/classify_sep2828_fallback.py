@@ -3,7 +3,6 @@
 
 import json
 import sys
-from pathlib import Path
 
 
 EXPECTED_FALSE = {
@@ -24,18 +23,16 @@ EXPECTED_BINDING = {
 }
 
 
-def load_object(path: str) -> dict:
-    value = json.loads(Path(path).read_text())
+def load_report() -> dict:
+    value = json.load(sys.stdin)
     if not isinstance(value, dict):
-        raise ValueError(f"{path} must contain a JSON object")
+        raise ValueError("stdin must contain a JSON object")
     return value
 
 
-def classify(report: dict, decision: dict) -> dict:
+def classify(report: dict, upstream_projection: object) -> dict:
     binding = report.get("binding")
     checks_raw = report.get("checks")
-    upstream = decision.get("backLink")
-    upstream_projection = upstream.get("fallbackProjection") if isinstance(upstream, dict) else None
     assay_projection = binding.get("projection") if isinstance(binding, dict) else None
 
     checks = {}
@@ -70,12 +67,13 @@ def classify(report: dict, decision: dict) -> dict:
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        print("usage: classify_sep2828_fallback.py REPORT DECISION", file=sys.stderr)
+    if len(sys.argv) != 2:
+        print("usage: classify_sep2828_fallback.py UPSTREAM_PROJECTION_JSON < REPORT", file=sys.stderr)
         return 2
     try:
-        result = classify(load_object(sys.argv[1]), load_object(sys.argv[2]))
-    except (OSError, ValueError, json.JSONDecodeError) as error:
+        upstream_projection = json.loads(sys.argv[1])
+        result = classify(load_report(), upstream_projection)
+    except (ValueError, json.JSONDecodeError) as error:
         print(f"failed to classify fallback result: {error}", file=sys.stderr)
         return 2
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
