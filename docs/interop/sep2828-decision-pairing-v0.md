@@ -15,8 +15,8 @@ scripts/interop/reproduce-sep2828-decision-pairing.sh
 
 The vectors are published by [vaaraio/vaara](https://github.com/vaaraio/vaara) under
 AGPL-3.0-or-later. The script fetches them at run time and never vendors them into this MIT
-repository. Nothing upstream is executed: the upstream checker is read but not run, and every
-verdict below is computed by `assay` from the wire bytes.
+repository. No upstream code is fetched or executed, and every verdict below is computed by
+`assay` from the published JSON wire bytes.
 
 ## Why this record exists
 
@@ -36,7 +36,7 @@ rather than a sentence in a README.
 | `substituted_pairing_nonce` | Check A fails | attestation digest holds, nonce mismatch, pairing refused |
 | `substituted_decision_under_shared_attestation` | Check A holds, Check B fails | back-links match, `outcomeDerived.decisionDigest` does not |
 | `supersession_equal_decidedat_tie` | `ambiguous` | `ambiguous`, reason `supersession_ambiguous_missing_sequence` |
-| `fallback_envelope_binding` | binding holds | not reproduced, see below |
+| `fallback_envelope_binding` | binding holds | named projection is present; both envelope-digest checks fail, see below |
 
 Two of these are worth calling out as good corpus design. `substituted_pairing_nonce` and
 `substituted_decision_under_shared_attestation` are the cases that separate an implementation which
@@ -77,11 +77,13 @@ silent. Assay computes `assay.fallback_projection.v0`; the vectors carry
 `tools_call_params_plus_meta_authorization_binding_v1`.
 
 Assay does not implement the upstream projection version, and reconstructing it from the published
-specification text turned out not to be possible. The text declares the allowlist exactly, the
-`tools/call` `name` and `arguments` plus the named binding block, which fixes *which* fields enter
-the pre-image. It does not fix the *shape* of the object the digest is taken over, and the shape is
-part of the bytes. Five readings of the published prose were tried before the reference checker's
-source settled it.
+specification text turned out not to be possible. The current vector does publish the request
+envelope, decision, and receipt, so this record now executes the case directly. Assay confirms the
+binding block, request nonce, decision/outcome backlink, outcome decision digest, and result
+commitment. It refuses the pair only on the two request-envelope digest checks. The measured
+Assay projection is `assay.fallback_projection.v0`; the decision names
+`tools_call_params_plus_meta_authorization_binding_v1`. Those identifiers denote different object
+shapes and therefore different digest pre-images.
 
 That is a general property rather than a complaint about one profile, and it is raised as such in
 the venue where the rule is being written, on the SCITT Canonical Payload Binding draft:
@@ -98,11 +100,11 @@ artifact is bad rather than that their pre-image is wrong.
 
 | | |
 |---|---|
-| Run | 2026-08-03 |
-| Assay | `assay-cli` 3.37.0, release profile |
+| Run | 2026-08-23 |
+| Assay | `assay-cli` 5.4.0, release profile |
 | Verifier commands | `assay evidence verify-mcp-records`, `assay evidence verify-mcp-supersession` |
-| Upstream vectors | `tests/vectors/decision_pairing_v0/normative` at `519d3df8749bc0adbd79b28d0fb3d19142ababc7` |
-| Method | upstream JSON read; upstream checker read, not executed; all verdicts computed by `assay` |
+| Upstream vectors | Vaara `v1.75.0`, `tests/vectors/decision_pairing_v0/normative` at `9fefe51a61f16dc13cd64ca8ca4b8792e48fb64b` |
+| Method | upstream JSON fetched and read; no upstream code fetched or executed; all verdicts computed by `assay` |
 
 The upstream revision is pinned rather than tracked from `main`, because a record whose inputs can
 move is not a record. Drift shows up as a fetch failure instead of as a quietly different number.
@@ -112,4 +114,6 @@ unexpected tool exit rather than reporting either as a comparison result.
 
 The comparison is per check, not per case. Each row above pins the specific check ids that must
 pass and must fail, so a case that reaches the right overall verdict for the wrong reason is
-reported as a divergence.
+reported as a divergence. The fallback row also pins Assay's binding mode, projection identifier,
+and digest source. A newly reproduced fallback is likewise reported as drift until this record is
+updated; the script cannot silently retain the 6-of-7 result.

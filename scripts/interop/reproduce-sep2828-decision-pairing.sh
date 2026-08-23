@@ -18,8 +18,10 @@
 set -euo pipefail
 
 ASSAY="${1:-./target/release/assay}"
-REV="${ASSAY_INTEROP_REV:-519d3df8749bc0adbd79b28d0fb3d19142ababc7}"
+REV="${ASSAY_INTEROP_REV:-9fefe51a61f16dc13cd64ca8ca4b8792e48fb64b}"
 UPSTREAM="https://raw.githubusercontent.com/vaaraio/vaara/${REV}/tests/vectors/decision_pairing_v0/normative"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FALLBACK_CLASSIFIER="$SCRIPT_DIR/classify_sep2828_fallback.py"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -29,6 +31,7 @@ die() { echo "$*" >&2; exit 2; }
   || die "assay binary not found at '$ASSAY'. Build it with: cargo build -p assay-cli --release"
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
+[ -f "$FALLBACK_CLASSIFIER" ] || die "fallback classifier not found at '$FALLBACK_CLASSIFIER'"
 
 echo "SEP-2828 decision_pairing_v0, reproduced by Assay as an independent consumer"
 echo "Vectors: vaaraio/vaara (AGPL-3.0-or-later), fetched, not vendored, not executed"
@@ -40,6 +43,7 @@ echo
 
 pass=0
 diverge=0
+non_reproduced=0
 
 # A missing or empty fetch is a setup failure, never an absent optional input.
 fetch() { # case, file
@@ -145,14 +149,44 @@ else
   diverge=$((diverge + 1))
 fi
 
-# The fallback case is a documented non-reproduction: Assay implements its own named projection
-# (assay.fallback_projection.v0) and the upstream projection's pre-image cannot be reconstructed
-# from the published specification text. See docs/interop/sep2828-decision-pairing-v0.md.
-printf '  %-46s not reproduced (upstream projection pre-image, see the record)\n' fallback_envelope_binding
+# The fallback case uses a different named projection in each implementation. Execute it rather
+# than printing a fixed conclusion: only the exact recorded projection mismatch is a documented
+# non-reproduction. A different failure or a new success is drift that must update this record.
+rm -f "$WORK"/*.json
+fetch fallback_envelope_binding request_envelope.json
+fetch fallback_envelope_binding decision.json
+fetch fallback_envelope_binding receipt.json
+fallback_rc=0
+"$ASSAY" evidence verify-mcp-records \
+  --request-envelope "$WORK/request_envelope.json" \
+  --decision "$WORK/decision.json" \
+  --outcome "$WORK/receipt.json" \
+  --fallback-projection named \
+  --format json >"$WORK/fallback_report.json" 2>/dev/null || fallback_rc=$?
+case "$fallback_rc" in 0|2) ;; *) die "assay exited $fallback_rc on fallback_envelope_binding" ;; esac
+fallback_classification="$(python3 "$FALLBACK_CLASSIFIER" \
+  "$WORK/fallback_report.json" "$WORK/decision.json")" \
+  || die "could not classify fallback_envelope_binding"
+fallback_disposition="$(printf '%s' "$fallback_classification" | python3 -c \
+  'import json,sys; print(json.load(sys.stdin)["classification"])')"
+case "$fallback_disposition" in
+  documented_non_reproduction)
+    printf '  %-46s not reproduced (explicit named-projection mismatch)\n' fallback_envelope_binding
+    non_reproduced=$((non_reproduced + 1))
+    ;;
+  reproduced)
+    printf '  %-46s DIVERGES     now reproduced; update the recorded result\n' fallback_envelope_binding
+    diverge=$((diverge + 1))
+    ;;
+  *)
+    printf '  %-46s DIVERGES     unexpected fallback failure\n' fallback_envelope_binding
+    diverge=$((diverge + 1))
+    ;;
+esac
 
 echo
-echo "reproduced: $pass   diverged: $diverge   documented non-reproduction: 1"
-if [ "$diverge" -ne 0 ] || [ "$pass" -ne 6 ]; then
+echo "reproduced: $pass   diverged: $diverge   documented non-reproduction: $non_reproduced"
+if [ "$diverge" -ne 0 ] || [ "$pass" -ne 6 ] || [ "$non_reproduced" -ne 1 ]; then
   echo "Result differs from the recorded 6 of 7. Update docs/interop/sep2828-decision-pairing-v0.md." >&2
   exit 1
 fi
