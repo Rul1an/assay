@@ -80,8 +80,8 @@ class HarnessError(Exception):
     pass
 
 
-def repo_root(arg: str | None) -> Path:
-    return Path(arg or os.environ.get("ADEQUACY_REPO_ROOT", ".")).resolve()
+def repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
 
 
 def _sha256(path: Path) -> str:
@@ -541,7 +541,37 @@ def _timeout_self_check(root: Path) -> None:
             raise HarnessError("TimeoutExpired must become HarnessError")
 
 
+def _repo_root_self_checks() -> None:
+    expected = Path(__file__).resolve().parents[2]
+    if repo_root() != expected:
+        raise HarnessError("repo_root() must derive from __file__ only")
+
+    hostile = Path(tempfile.mkdtemp(prefix="adequacy-hostile-"))
+    old_cwd = Path.cwd()
+    old_env = os.environ.pop("ADEQUACY_REPO_ROOT", None)
+    try:
+        os.environ["ADEQUACY_REPO_ROOT"] = str(hostile / "nested")
+        os.chdir(hostile)
+        if repo_root() != expected:
+            raise HarnessError("hostile ADEQUACY_REPO_ROOT and cwd must not change repo_root()")
+    finally:
+        os.chdir(old_cwd)
+        if old_env is None:
+            os.environ.pop("ADEQUACY_REPO_ROOT", None)
+        else:
+            os.environ["ADEQUACY_REPO_ROOT"] = old_env
+
+    try:
+        main(["verify-vendor", "--repo-root", str(hostile)])
+    except SystemExit as exc:
+        if exc.code in (None, 0):
+            raise HarnessError("--repo-root must be rejected by argparse")
+    else:
+        raise HarnessError("--repo-root must be rejected by argparse")
+
+
 def self_test(root: Path) -> None:
+    _repo_root_self_checks()
     lock_before = (root / "Cargo.lock").read_bytes()
     verify_vendor(root)
     _metadata_validator_self_checks(root)
@@ -670,9 +700,8 @@ def self_test(root: Path) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("self-test", "verify-vendor", "build", "test"))
-    parser.add_argument("--repo-root", default=None)
     args = parser.parse_args(argv)
-    root = repo_root(args.repo_root)
+    root = repo_root()
     if args.command == "self-test":
         self_test(root)
         print("OK: adequacy_serde_jcs self-test")
