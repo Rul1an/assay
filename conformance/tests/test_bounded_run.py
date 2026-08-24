@@ -512,12 +512,12 @@ class ContinuousCap(_WithTestCap):
         self.assertEqual(done.stderr, "hello-err\n")
 
     def test_fast_sub_cap_payload_is_byte_exact_on_both_streams(self):
-        # Small chunks force many loop turns. A stop.set() on clean exit
-        # then drops whatever is still sitting in the pipes.
+        # Keep both readers behind the leader-exit observation. A stop.set()
+        # on clean exit then permits one read but drops the remaining bytes.
         chunk = mock.patch.object(br, "READ_CHUNK_BYTES", 256)
         chunk.start()
         self.addCleanup(chunk.stop)
-        n = 20 * 1024
+        n = 4 * 1024
         body = (
             "import sys\n"
             "sys.stdout.buffer.write(b'O' * %d)\n"
@@ -529,18 +529,42 @@ class ContinuousCap(_WithTestCap):
 
         def spy(*args, **kwargs):
             proc = real(*args, **kwargs)
+            allow_read = threading.Event()
+            leader_observed = threading.Event()
 
-            class _YieldPipe(_CountPipe):
+            def release_readers_after_leader_exit():
+                if leader_observed.is_set():
+                    return
+                leader_observed.set()
+                threading.Timer(0.1, allow_read.set).start()
+
+            real_poll = proc.poll
+            real_wait = proc.wait
+
+            def coordinated_poll():
+                returncode = real_poll()
+                if returncode is not None:
+                    release_readers_after_leader_exit()
+                return returncode
+
+            def coordinated_wait(*wait_args, **wait_kwargs):
+                returncode = real_wait(*wait_args, **wait_kwargs)
+                if returncode is not None:
+                    release_readers_after_leader_exit()
+                return returncode
+
+            class _GatedPipe(_CountPipe):
                 def read(self, size=-1):
-                    data = super().read(size)
-                    if data:
-                        time.sleep(0.01)
-                    return data
+                    if not allow_read.wait(timeout=2):
+                        raise RuntimeError("leader exit was not observed")
+                    return super().read(size)
 
             if proc.stdout is not None:
-                proc.stdout = _YieldPipe(proc.stdout, pulled)
+                proc.stdout = _GatedPipe(proc.stdout, pulled)
             if proc.stderr is not None:
-                proc.stderr = _YieldPipe(proc.stderr, pulled)
+                proc.stderr = _GatedPipe(proc.stderr, pulled)
+            proc.poll = coordinated_poll
+            proc.wait = coordinated_wait
             return proc
 
         popen = mock.patch.object(subprocess, "Popen", side_effect=spy)
