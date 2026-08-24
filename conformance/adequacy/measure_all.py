@@ -241,7 +241,8 @@ def main(argv: list[str] | None = None) -> int:
     ca = load_tool()
     require_clean_tool()
     if RESULTS.is_file():
-        loaded = published_rows.load_results(RESULTS)
+        replace = frozenset(corpus_id(m) for m in selected)
+        loaded = published_rows.load_results(RESULTS, replace_corpora=replace)
         rows = loaded.by_corpus()
         reports = dict(loaded.document.get("reports") or {})
         if "reports" not in loaded.document and set(selected) != set(found):
