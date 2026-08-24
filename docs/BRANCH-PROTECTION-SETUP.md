@@ -12,8 +12,9 @@ that protection in sync (UI or `gh` CLI).
 
 - **Require a pull request** before merging (no direct pushes to main).
 - **Required approvals:** at least 1–2.
-- **Required status checks:** `CI`, `host-capability-check`, and the commit
-  status `lane-check/proof` (pinned to the GitHub Actions app; observed live on
+- **Required status checks:** `CI`, `host-capability-check`,
+  `review-record-check`, and the commit status `lane-check/proof` (pinned to
+  the GitHub Actions app; observed live on
   2026-07-27, issue #1869 migration). The `lane-check` Actions job still runs
   and reports, but is informational: the proof status is posted on the exact PR
   head and refreshes on a same-head delegated proof, which the check-run cannot.
@@ -42,8 +43,9 @@ Ensure `.github/CODEOWNERS` exists and lists the right owners (see repo root).
 4. Enable:
    - Require a pull request before merging.
    - Require approvals (set number, e.g. 1).
-   - Require status checks: add `CI`, `host-capability-check`, and
-     `lane-check/proof` (or the exact context names your workflows expose;
+   - Require status checks: add `CI`, `host-capability-check`,
+     `review-record-check`, and `lane-check/proof` (or the exact context names
+     your workflows expose;
      check **Settings → Branches → Branch protection** or the Ruleset UI for the
      list of available checks).
    - Require branches to be up to date before merging.
@@ -63,6 +65,7 @@ Ensure `.github/CODEOWNERS` exists and lists the right owners (see repo root).
 | `lane-check/proof` | commit status posted by `scripts/ci/assay_runner_lane_check.py` (runs in `.github/workflows/assay-runner-lane-check.yml`) |
 | `lane-check` | `.github/workflows/assay-runner-lane-check.yml` (informational since the #1869 migration) |
 | `host-capability-check` | `.github/workflows/host-capability-check.yml` |
+| `review-record-check` | `.github/workflows/review-record-check.yml` |
 | `Smoke Install (E2E)` | `.github/workflows/smoke-install.yml` |
 | `assay-action-contract-tests` | `.github/workflows/action-tests.yml` |
 | `MCP Security (Assay)` | `.github/workflows/assay-security.yml` |
@@ -80,6 +83,7 @@ Use **`CI`** (not `CIExpected` or any other variant). No workflow in this repo r
 | **CI** | Build, test, clippy, cargo-deny, cargo-audit, eBPF smoke | **Essential** — new deps must not break build or tests. | **Essential** — same. |
 | **lane-check/proof** | Commit status confirming runner-sensitive PRs carry the delegated proof for the exact head. | Required but normally quick/no-op unless the classifier says proof is needed. | Required; becomes load-bearing for runner/evidence-sensitive changes. A same-head delegated proof refreshes it without a manual rerun. |
 | **host-capability-check** | Confirms whether the PR requires host-capability proof before privileged runner evidence is trusted. | Required but normally quick/no-op for ordinary dependency updates. | Required; becomes load-bearing for host/kernel/runner capability-sensitive changes. |
+| **review-record-check** | Requires a public non-building review record bound to the current PR head. | Required; dependency automation still needs an independent exact-head record. | Required; a later push invalidates the prior record until a new review is posted. |
 | **Smoke Install (E2E)** | Build from source, run assay, JUnit | Redundant with CI (CI already builds and tests). | Useful — verifies install path. |
 | **assay-action-contract-tests** | Tests GitHub Action in `assay-action/` | Not needed — Cargo.toml/Cargo.lock don't touch the action. | **Essential** if PR touches `assay-action/` or workflows. |
 | **MCP Security (Assay)** | Install assay, run validate with demo config | Redundant with CI for deps-only (CI validates the binary). | Useful — sanity check for security workflow. |
@@ -105,9 +109,9 @@ Until then the gate runs, reports on every PR, and is a review obligation like
 Smoke Install and MCP Security: if a PR moves a published number, its green tick
 is the thing to look for before merging.
 
-**Current recommendation:** Keep **`CI`, `lane-check/proof`, and
-`host-capability-check`** required. `CI` is the universal build/security gate;
-`lane-check/proof` and `host-capability-check` are quick for ordinary PRs but
+**Current recommendation:** Keep **`CI`, `lane-check/proof`,
+`host-capability-check`, and `review-record-check`** required. `CI` is the
+universal build/security gate; `lane-check/proof` and `host-capability-check` are quick for ordinary PRs but
 preserve the runner/evidence proof boundary when a PR touches sensitive paths. Smoke
 Install, assay-action-contract-tests, and MCP Security still run and appear on
 the PR; they are not required to merge. If you merge changes to `assay-action/`
@@ -131,7 +135,7 @@ gh api repos/OWNER/REPO/branches/main/protection -X PUT \
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["CI", "host-capability-check", "lane-check/proof"]
+    "contexts": ["CI", "host-capability-check", "lane-check/proof", "review-record-check"]
   },
   "enforce_admins": false,
   "required_pull_request_reviews": {
@@ -226,8 +230,8 @@ See `docs/REVIEWER-PACK.md` (sectie 3, “Environments & approvals”) and the c
 ## Checklist
 
 - [x] Branch protection or ruleset on `main` with: require PR, approvals, status checks, up to date, no force-push.
-- [x] Required status checks: `CI`, `host-capability-check`, and
-  `lane-check/proof` (see "Required checks: when each is needed" above;
+- [x] Required status checks: `CI`, `host-capability-check`,
+  `lane-check/proof`, and `review-record-check` (see "Required checks: when each is needed" above;
   add Smoke Install / contract tests / MCP Security / Kernel Matrix only when
   stricter gates are intentionally needed).
 - [x] CODEOWNERS in place; “Require review from Code Owners” enabled.
@@ -242,10 +246,10 @@ If a PR shows a required check **CIExpected** that never completes, branch prote
 **Fix:** In **Settings → Branches → Branch protection rule for `main`**, under
 "Require status checks", remove **CIExpected** and add **CI** (from
 `.github/workflows/ci.yml`) plus the current required live contexts
-`host-capability-check` and `lane-check/proof`. Save.
+`host-capability-check`, `lane-check/proof`, and `review-record-check`. Save.
 
 **Via API:** Inspect with `gh api repos/OWNER/REPO/branches/main/protection`.
 Ensure `required_status_checks.contexts` contains `CI`, `host-capability-check`,
-and `lane-check/proof`, and does not contain `CIExpected` or the retired bare
+`lane-check/proof`, and `review-record-check`, and does not contain `CIExpected` or the retired bare
 `lane-check`. Re-apply using the JSON in Option B above with
-`"contexts": ["CI", "host-capability-check", "lane-check/proof"]`.
+`"contexts": ["CI", "host-capability-check", "lane-check/proof", "review-record-check"]`.

@@ -444,6 +444,7 @@ Currently required live branch-protection contexts:
 - `CI`
 - `host-capability-check`
 - `lane-check/proof` (commit status posted by `scripts/ci/assay_runner_lane_check.py`)
+- `review-record-check`
 <!-- required-contexts:end (scripts/ci/check-required-contexts.py reads the entries between
      the "Currently required" line above and this marker; keep it after the last entry) -->
 
@@ -478,7 +479,7 @@ Checked-in ruleset activation lives at
 
 Import note: the checked-in ruleset is config-as-code only until imported in
 GitHub settings, which makes it an importable description of the required set that
-nothing reconciles against reality. It therefore carries exactly the three contexts
+nothing reconciles against reality. It therefore carries exactly the four contexts
 above that are live, and no proposals: a proposal that ships inside an importable
 artifact gets promoted by whoever imports it, without the review it is waiting for.
 Importing the ruleset as checked in neither weakens nor widens the existing
