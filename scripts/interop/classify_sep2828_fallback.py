@@ -6,13 +6,17 @@ import sys
 
 
 EXPECTED_FALSE = {
+    "fallback_projection_missing_params",
+}
+FORBIDDEN_UNRESOLVED_CHECKS = {
+    "fallback_projection_binding_present",
     "decision_request_envelope_digest_match",
     "outcome_request_envelope_digest_match",
 }
 EXPECTED_UPSTREAM_PROJECTION = "tools_call_params_plus_meta_authorization_binding_v1"
+REQUIRED_NONCLAIM = "fallback_call_parameter_binding"
 MAX_REPORT_BYTES = 1024 * 1024
 REQUIRED_TRUE = {
-    "fallback_projection_binding_present",
     "decision_request_envelope_nonce_present",
     "decision_outcome_backlink_match",
     "outcome_decision_digest_match",
@@ -38,16 +42,24 @@ def load_report() -> dict:
 def classify(report: dict, upstream_projection: object) -> dict:
     binding = report.get("binding")
     checks_raw = report.get("checks")
+    claims_not_made = report.get("claims_not_made")
     assay_projection = binding.get("projection") if isinstance(binding, dict) else None
 
     checks = {}
     duplicate_check_ids = set()
+    malformed_checks = not isinstance(checks_raw, list)
     if isinstance(checks_raw, list):
         for check in checks_raw:
-            if isinstance(check, dict) and isinstance(check.get("id"), str):
-                if check["id"] in checks:
-                    duplicate_check_ids.add(check["id"])
-                checks[check["id"]] = check.get("ok")
+            if not (
+                isinstance(check, dict)
+                and isinstance(check.get("id"), str)
+                and isinstance(check.get("ok"), bool)
+            ):
+                malformed_checks = True
+                continue
+            if check["id"] in checks:
+                duplicate_check_ids.add(check["id"])
+            checks[check["id"]] = check["ok"]
     false_checks = sorted(check_id for check_id, ok in checks.items() if ok is False)
 
     if report.get("ok") is True:
@@ -56,14 +68,24 @@ def classify(report: dict, upstream_projection: object) -> dict:
         exact_binding = isinstance(binding, dict) and all(
             binding.get(key) == value for key, value in EXPECTED_BINDING.items()
         )
+        unresolved_digest = (
+            isinstance(binding, dict)
+            and "digest" in binding
+            and binding["digest"] is None
+        )
         exact_mismatch = (
             report.get("ok") is False
             and exact_binding
+            and unresolved_digest
             and upstream_projection == EXPECTED_UPSTREAM_PROJECTION
             and upstream_projection != assay_projection
+            and not malformed_checks
             and not duplicate_check_ids
             and set(false_checks) == EXPECTED_FALSE
             and all(checks.get(check_id) is True for check_id in REQUIRED_TRUE)
+            and FORBIDDEN_UNRESOLVED_CHECKS.isdisjoint(checks)
+            and isinstance(claims_not_made, list)
+            and REQUIRED_NONCLAIM in claims_not_made
         )
         disposition = "documented_non_reproduction" if exact_mismatch else "diverged"
 

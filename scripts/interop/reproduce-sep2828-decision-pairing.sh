@@ -192,7 +192,7 @@ fallback_disposition="$(printf '%s' "$fallback_classification" | python3 -c \
   'import json,sys; print(json.load(sys.stdin)["classification"])')"
 case "$fallback_disposition" in
   documented_non_reproduction)
-    printf '  %-46s not reproduced (explicit named-projection mismatch)\n' fallback_envelope_binding
+    printf '  %-46s not reproduced (unsupported named-projection envelope shape)\n' fallback_envelope_binding
     non_reproduced=$((non_reproduced + 1))
     ;;
   reproduced)

@@ -37,7 +37,7 @@ rather than a sentence in a README.
 | `substituted_pairing_nonce` | Check A fails | attestation digest holds, nonce mismatch, pairing refused |
 | `substituted_decision_under_shared_attestation` | Check A holds, Check B fails | back-links match, `outcomeDerived.decisionDigest` does not |
 | `supersession_equal_decidedat_tie` | `ambiguous` | `ambiguous`, reason `supersession_ambiguous_missing_sequence` |
-| `fallback_envelope_binding` | binding holds | named projection is present; both envelope-digest checks fail, see below |
+| `fallback_envelope_binding` | binding holds | unsupported envelope shape is refused (`fallback_projection_missing_params`); no binding digest is published, see below |
 
 Two of these are worth calling out as good corpus design. `substituted_pairing_nonce` and
 `substituted_decision_under_shared_attestation` are the cases that separate an implementation which
@@ -72,9 +72,10 @@ Declared rather than left to inference:
   observed by the server, equals the back-link nonce, or is fresh or unique. Reported as
   `fallback_server_observation_truth` and `fallback_nonce_freshness_or_uniqueness`.
 - **Fallback call parameters on this upstream shape.** The vector carries top-level `name` and
-  `arguments`; Assay 5.4.0's named projection reads top-level `params` and substitutes JSON `null`
-  when it is absent. This run therefore does not establish that the call name or arguments are
-  bound by Assay's fallback digest. Tracked as [#2595](https://github.com/Rul1an/assay/issues/2595).
+  `arguments`. Assay's named projection requires object-valued `params`, so it fails closed on this
+  shape rather than binding a partial pre-image. This run therefore establishes nothing about
+  whether the call name or arguments are bound. The earlier silent-`null` behavior was fixed in
+  [#2596](https://github.com/Rul1an/assay/pull/2596).
 
 ## The case that was not reproduced
 
@@ -88,10 +89,11 @@ silent. Assay computes `assay.fallback_projection.v0`; the vectors carry
 
 Assay does not implement the upstream projection version, and reconstructing it from the published
 specification text turned out not to be possible. The current vector does publish the request
-envelope, decision, and receipt, so this record now executes the case directly. Assay confirms the
-binding block, request nonce, decision/outcome backlink, outcome decision digest, and result
-commitment. It refuses the pair only on the two request-envelope digest checks. The measured
-Assay projection is `assay.fallback_projection.v0`; the decision names
+envelope, decision, and receipt, so this record now executes the case directly. Assay's named
+pre-image does not resolve for this envelope, so no binding digest is published and the dependent
+decision and outcome digest comparisons are omitted. The refusal is the
+`fallback_projection_missing_params` projection-shape check. The measured Assay projection is
+`assay.fallback_projection.v0`; the decision names
 `tools_call_params_plus_meta_authorization_binding_v1`. Those identifiers denote different object
 shapes and therefore different digest pre-images.
 
@@ -99,11 +101,6 @@ The published text names the source fields (`tools/call` name and arguments, plu
 binding block), but it does not define the projected JSON member names and nesting. That shape is
 part of the JCS bytes, so the identifier alone is not enough for an independent implementation to
 reconstruct the same pre-image.
-
-There is also a distinct Assay-side boundary: for this vector's top-level `name`/`arguments` shape,
-Assay's own projection hashes `params: null`. Changing those two upstream fields alone therefore
-does not change Assay's digest. That behavior is not counted as reproduced here and is separated
-from the upstream member-mapping gap above.
 
 That is a general property rather than a complaint about one profile. It was raised on the SCITT
 Canonical Payload Binding draft in
@@ -124,7 +121,7 @@ artifact is bad rather than that their pre-image is wrong.
 
 | | |
 |---|---|
-| Run | 2026-08-23 |
+| Run | 2026-08-24 |
 | Assay | `assay-cli` 5.4.0, release profile |
 | Verifier commands | `assay evidence verify-mcp-records`, `assay evidence verify-mcp-supersession` |
 | Upstream vectors | Vaara `v1.75.0`, `tests/vectors/decision_pairing_v0/normative` at `9fefe51a61f16dc13cd64ca8ca4b8792e48fb64b` |

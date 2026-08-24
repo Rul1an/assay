@@ -114,25 +114,33 @@ class ReproductionFunnelTests(unittest.TestCase):
                 }
                 if case == "fallback":
                     required = {
-                        "fallback_projection_binding_present": True,
+                        "fallback_projection_missing_params": False,
                         "decision_request_envelope_nonce_present": True,
                         "decision_outcome_backlink_match": True,
                         "outcome_decision_digest_match": True,
                         "result_commitment_projection_digest_match": True,
-                        "decision_request_envelope_digest_match": False,
-                        "outcome_request_envelope_digest_match": False,
                     }
                     ok = os.environ.get("FAKE_FALLBACK_REPRODUCED") == "1"
                     if ok:
-                        required = {key: True for key in required}
+                        required = {
+                            "fallback_projection_binding_present": True,
+                            "decision_request_envelope_nonce_present": True,
+                            "decision_request_envelope_digest_match": True,
+                            "decision_outcome_backlink_match": True,
+                            "outcome_request_envelope_digest_match": True,
+                            "outcome_decision_digest_match": True,
+                            "result_commitment_projection_digest_match": True,
+                        }
                     report = {
                         "ok": ok,
                         "binding": {
                             "mode": "request_envelope",
                             "projection": "assay.fallback_projection.v0",
                             "digest_source": "request_envelope_named_projection_jcs",
+                            "digest": "sha256:future" if ok else None,
                         },
                         "checks": [{"id": key, "ok": value} for key, value in required.items()],
+                        "claims_not_made": [] if ok else ["fallback_call_parameter_binding"],
                     }
                     if os.environ.get("FAKE_FALLBACK_OMIT_OK") == "1":
                         del report["ok"]
@@ -169,6 +177,10 @@ class ReproductionFunnelTests(unittest.TestCase):
         completed = self.run_script()
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn(
+            "not reproduced (unsupported named-projection envelope shape)",
+            completed.stdout,
+        )
         self.assertIn("reproduced: 6   diverged: 0   documented non-reproduction: 1", completed.stdout)
         invocations = [json.loads(line) for line in self.invocations.read_text().splitlines()]
         fallback = [args for args in invocations if "--request-envelope" in args]
