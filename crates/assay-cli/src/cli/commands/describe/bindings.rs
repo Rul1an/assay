@@ -5,6 +5,8 @@ use crate::cli::commands::evidence::schema::{
 use crate::cli::commands::init_report::INIT_REPORT_SCHEMA;
 use crate::cli::commands::validate::VALIDATE_REPORT_SCHEMA;
 use crate::diagnostics::report::DOCTOR_REPORT_SCHEMA;
+use assay_core::report::json::RUN_REPORT_SCHEMA;
+use assay_core::report::summary::SUMMARY_SCHEMA;
 
 /// One shipping identity owned by a clap path. The identity field is the
 /// existing constant, not a second string.
@@ -26,6 +28,14 @@ pub(super) const BINDING_ROWS: &[IdentityBinding] = &[
     IdentityBinding {
         path: "init",
         identity: INIT_REPORT_SCHEMA,
+    },
+    IdentityBinding {
+        path: "run",
+        identity: RUN_REPORT_SCHEMA,
+    },
+    IdentityBinding {
+        path: "run",
+        identity: SUMMARY_SCHEMA,
     },
     IdentityBinding {
         path: "validate",

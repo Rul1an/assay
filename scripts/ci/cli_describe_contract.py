@@ -20,15 +20,19 @@ BINDING_RE = re.compile(
     re.MULTILINE,
 )
 BINDINGS_REL = Path("crates/assay-cli/src/cli/commands/describe/bindings.rs")
-CLI_SRC_REL = Path("crates/assay-cli/src")
+SOURCE_RELS = (Path("crates/assay-cli/src"), Path("crates/assay-core/src"))
+REQUIRED_COMMAND_OWNERS = {
+    "run": ("RUN_REPORT_SCHEMA", "SUMMARY_SCHEMA"),
+}
 
 
-def shipping_constants(src_root: Path) -> dict[str, str]:
+def shipping_constants(repo: Path) -> dict[str, str]:
     found: dict[str, str] = {}
-    for path in src_root.rglob("*.rs"):
-        text = path.read_text(encoding="utf-8")
-        for match in CONST_RE.finditer(text):
-            found[match.group(1)] = match.group(2)
+    for relative in SOURCE_RELS:
+        for path in (repo / relative).rglob("*.rs"):
+            text = path.read_text(encoding="utf-8")
+            for match in CONST_RE.finditer(text):
+                found[match.group(1)] = match.group(2)
     return found
 
 
@@ -54,6 +58,16 @@ def belongs_on_node(binding_path: str, node_path: str) -> bool:
     return rest.startswith("/") and "/" not in rest[1:]
 
 
+def required_owner_rows(constants: dict[str, str]) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = []
+    for path, names in REQUIRED_COMMAND_OWNERS.items():
+        for name in names:
+            if name not in constants:
+                raise SystemExit(f"required command owner {path} references unknown constant {name}")
+            rows.append((path, constants[name]))
+    return rows
+
+
 def node_path(listing: dict) -> str:
     path = listing.get("path")
     if not isinstance(path, list) or not all(isinstance(part, str) for part in path):
@@ -70,8 +84,18 @@ def old_guard(listing: dict) -> list[str]:
     return problems
 
 
-def new_guard(listing: dict, rows: list[tuple[str, str]]) -> list[str]:
+def new_guard(
+    listing: dict,
+    rows: list[tuple[str, str]],
+    required_rows: list[tuple[str, str]],
+) -> list[str]:
     problems = old_guard(listing)
+    row_set = set(rows)
+    for path, identity in required_rows:
+        if (path, identity) not in row_set:
+            problems.append(
+                f"required command owner {path} omitted shipping identity {identity}"
+            )
     identities = listing.get("identities")
     if not isinstance(identities, list) or not all(isinstance(item, str) for item in identities):
         problems.append("describe listing is missing an identities array")
@@ -105,10 +129,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--listing", type=Path, required=True)
     parser.add_argument("--guard", choices=("old", "new"), required=True)
     args = parser.parse_args(argv)
-    constants = shipping_constants(args.repo / CLI_SRC_REL)
-    rows = binding_rows(args.repo, constants)
     listing = load_listing(args.listing)
-    problems = old_guard(listing) if args.guard == "old" else new_guard(listing, rows)
+    if args.guard == "old":
+        problems = old_guard(listing)
+    else:
+        constants = shipping_constants(args.repo)
+        rows = binding_rows(args.repo, constants)
+        problems = new_guard(listing, rows, required_owner_rows(constants))
     for problem in problems:
         print(problem, file=sys.stderr)
     return 1 if problems else 0
