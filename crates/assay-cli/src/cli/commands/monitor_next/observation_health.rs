@@ -31,37 +31,18 @@ use assay_runner_schema::{
     CgroupCorrelationStatus, KernelLayerStatus, NetworkEndpointClaimScope,
     NetworkProtocolCoverageStatus, ObservationHealth, PolicyLayerStatus, SdkLayerStatus,
 };
-use std::path::Path;
 
 /// Tracepoint that must not earn peer coverage (tests only).
 #[cfg(test)]
 const CONNECT_PROBE: &str = "sys_enter_connect";
 
-/// A deterministic run id over what the run observed, matching the sandbox convention
-/// (`sandbox_<digest-prefix>`): the same observation produces the same id, and nothing is invented
-/// from a clock or a random source that a reader could not recompute.
-pub(crate) fn run_id(
-    attachment: &ProbeAttachment,
-    ringbuf_drops: u64,
-    policy_declared: bool,
-) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    for probe in attachment.attached_probes() {
-        hasher.update(b"attached\0");
-        hasher.update(probe.as_bytes());
-    }
-    for probe in attachment.skipped_probes() {
-        hasher.update(b"skipped\0");
-        hasher.update(probe.as_bytes());
-    }
-    hasher.update(ringbuf_drops.to_string().as_bytes());
-    hasher.update(if policy_declared {
-        &b"policy"[..]
-    } else {
-        &b"nopolicy"[..]
-    });
-    format!("monitor_{}", &hex::encode(hasher.finalize())[..16])
+/// Create a correlation id for one monitor invocation.
+///
+/// Equal observation posture is not same-run provenance: two invocations can attach the same
+/// probes and lose the same number of records. A fresh id keeps those runs distinct while every
+/// artifact from one invocation receives the same value from the caller.
+pub(crate) fn new_run_id() -> String {
+    format!("monitor_{:032x}", rand::random::<u128>())
 }
 
 /// Build the artifact from what this run actually knows.
@@ -126,23 +107,13 @@ pub(crate) fn build(
     health
 }
 
-/// Write the artifact. Returns false if it was requested and could not be written.
-pub(crate) fn write_to(health: &ObservationHealth, path: &Path) -> bool {
-    let json = match serde_json::to_string_pretty(health) {
-        Ok(json) => json,
-        Err(err) => {
-            eprintln!("Failed to serialize observation_health artifact: {err}");
-            return false;
-        }
-    };
-    if let Err(err) = std::fs::write(path, format!("{json}\n")) {
-        eprintln!(
-            "Failed to write observation_health artifact to {}: {err}",
-            path.display()
-        );
-        return false;
-    }
-    true
+pub(crate) fn write_to(
+    health: &ObservationHealth,
+    writer: &mut impl std::io::Write,
+) -> std::io::Result<()> {
+    serde_json::to_writer_pretty(&mut *writer, health).map_err(std::io::Error::other)?;
+    writer.write_all(b"\n")?;
+    writer.flush()
 }
 
 #[cfg(test)]
@@ -250,23 +221,18 @@ mod tests {
     }
 
     #[test]
-    fn the_run_id_is_deterministic_and_distinguishes_observations() {
-        let a = attachment(&[CONNECT_PROBE], &["sys_enter_fork"]);
-        assert_eq!(
-            run_id(&a, 0, false),
-            run_id(&a, 0, false),
-            "same run, same id"
-        );
+    fn distinct_invocations_do_not_share_a_run_id_when_posture_matches() {
+        // The generator deliberately takes no posture input. Equal attachment/drop/policy state in
+        // two invocations therefore cannot collapse them onto one deterministic identifier.
+        let first = new_run_id();
+        let second = new_run_id();
 
-        // A different blind spot is a different observation and must not share an id.
-        let b = attachment(&[CONNECT_PROBE], &[]);
-        assert_ne!(run_id(&a, 0, false), run_id(&b, 0, false));
         assert_ne!(
-            run_id(&a, 0, false),
-            run_id(&a, 1, false),
-            "lost records change the run"
+            first, second,
+            "equal monitor posture does not prove two artifacts came from one invocation"
         );
-        assert!(run_id(&a, 0, false).starts_with("monitor_"));
+        assert!(first.starts_with("monitor_"));
+        assert!(second.starts_with("monitor_"));
     }
 
     #[test]

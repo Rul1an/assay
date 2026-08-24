@@ -47,6 +47,131 @@ pub(crate) mod rules;
 pub(crate) mod syscall_linux;
 pub(crate) mod tests;
 
+#[cfg(all(feature = "runner", any(target_os = "linux", test)))]
+struct ObservationArtifacts {
+    observed_peers: observed_peers::ObservedPeers,
+    observation_health: assay_runner_schema::ObservationHealth,
+}
+
+#[cfg(all(feature = "runner", any(target_os = "linux", test)))]
+fn build_observation_artifacts(
+    run_id: &str,
+    attachment: &assay_monitor::probes::ProbeAttachment,
+    ringbuf_drops: u64,
+    policy_declared: bool,
+    peers: Vec<String>,
+) -> ObservationArtifacts {
+    let observed_peers = observed_peers::ObservedPeers::new(run_id, peers);
+    let observation_health =
+        observation_health::build(run_id, attachment, ringbuf_drops, policy_declared);
+
+    ObservationArtifacts {
+        observed_peers,
+        observation_health,
+    }
+}
+
+#[cfg(all(feature = "runner", any(target_os = "linux", test)))]
+fn resolved_observation_target(path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    if path.exists() {
+        return std::fs::canonicalize(path);
+    }
+
+    let file_name = path.file_name().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "observation artifact output path must name a file",
+        )
+    })?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    Ok(std::fs::canonicalize(parent)?.join(file_name))
+}
+
+#[cfg(all(feature = "runner", any(target_os = "linux", test)))]
+#[derive(Debug)]
+struct ReservedObservationArtifact {
+    path: std::path::PathBuf,
+    file: std::fs::File,
+}
+
+#[cfg(all(feature = "runner", any(target_os = "linux", test)))]
+impl ReservedObservationArtifact {
+    fn reserve(path: &std::path::Path) -> std::io::Result<Self> {
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            file,
+        })
+    }
+
+    fn writer(&mut self) -> std::io::Result<&mut std::fs::File> {
+        use std::io::Seek;
+
+        self.file.set_len(0)?;
+        self.file.seek(std::io::SeekFrom::Start(0))?;
+        Ok(&mut self.file)
+    }
+}
+
+#[cfg(all(feature = "runner", any(target_os = "linux", test)))]
+#[derive(Debug, Default)]
+struct ObservationArtifactTargets {
+    observed_peers: Option<ReservedObservationArtifact>,
+    observation_health: Option<ReservedObservationArtifact>,
+}
+
+#[cfg(all(feature = "runner", any(target_os = "linux", test)))]
+fn prepare_observation_artifact_targets(
+    observed_peers: Option<&std::path::Path>,
+    observation_health: Option<&std::path::Path>,
+) -> std::io::Result<ObservationArtifactTargets> {
+    if let (Some(peers), Some(health)) = (observed_peers, observation_health) {
+        if resolved_observation_target(peers)? == resolved_observation_target(health)? {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "observed_peers and observation_health must use different output paths",
+            ));
+        }
+    }
+
+    for path in [observed_peers, observation_health].into_iter().flatten() {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err),
+        }
+    }
+
+    let observed_peers = observed_peers
+        .map(ReservedObservationArtifact::reserve)
+        .transpose()?;
+    let observation_health = match observation_health
+        .map(ReservedObservationArtifact::reserve)
+        .transpose()
+    {
+        Ok(target) => target,
+        Err(err) => {
+            if let Some(target) = observed_peers {
+                let path = target.path.clone();
+                drop(target);
+                let _ = std::fs::remove_file(path);
+            }
+            return Err(err);
+        }
+    };
+
+    Ok(ObservationArtifactTargets {
+        observed_peers,
+        observation_health,
+    })
+}
+
 #[cfg(target_os = "linux")]
 macro_rules! emit_out {
     ($($arg:tt)*) => {
@@ -168,6 +293,30 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
     use assay_common::{get_inode_generation, strict_open};
     use assay_monitor::Monitor;
     use enforcement_health::{EnforcementHealth, SCOPE_IPV4_TCP_CONNECT};
+
+    #[cfg(feature = "runner")]
+    let mut observation_artifact_targets = if args.observation_health.is_some()
+        || args.observed_peers.is_some()
+    {
+        match prepare_observation_artifact_targets(
+            args.observed_peers.as_deref(),
+            args.observation_health.as_deref(),
+        ) {
+            Ok(targets) => Some(targets),
+            Err(err) => {
+                emit_err!(
+                        "FATAL: observation artifact targets could not be prepared: {err}; refusing to emit a mixed old/new identity set"
+                    );
+                return Ok(exit_codes::EXIT_INFRA_ERROR);
+            }
+        }
+    } else {
+        None
+    };
+    #[cfg(feature = "runner")]
+    let observation_run_id = observation_artifact_targets
+        .as_ref()
+        .map(|_| observation_health::new_run_id());
 
     let mut runtime_config = None;
     let mut kill_config = None;
@@ -649,40 +798,43 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
     // from one run checked against another run's coverage would let a well-covered run vouch for a
     // blind one. Sharing `run_id` at the point of writing is what lets the consumer detect that.
     #[cfg(feature = "runner")]
-    if args.observation_health.is_some() || args.observed_peers.is_some() {
+    if let Some(run_id) = observation_run_id.as_deref() {
         let attachment = monitor.probe_attachment();
-        let run_id =
-            observation_health::run_id(&attachment, observed_ringbuf_drops, args.policy.is_some());
+        let artifacts = build_observation_artifacts(
+            run_id,
+            &attachment,
+            observed_ringbuf_drops,
+            args.policy.is_some(),
+            observed_peers,
+        );
 
-        if let Some(path) = args.observed_peers.as_ref() {
-            let record = observed_peers::ObservedPeers::new(&run_id, observed_peers);
-            if record.write_to(path).is_err() {
+        let targets = observation_artifact_targets
+            .as_mut()
+            .expect("an observation run id has reserved artifact targets");
+        if let Some(target) = targets.observed_peers.as_mut() {
+            let write_result = target
+                .writer()
+                .and_then(|writer| artifacts.observed_peers.write_to(writer));
+            if write_result.is_err() {
                 emit_err!(
-                    "FATAL: observed_peers artifact was requested but could not be written; refusing exit 0 so a missing artifact is never read as an empty peer set"
+                    "FATAL: observed_peers artifact was requested but could not be written; refusing exit 0 so an invalid artifact is never read as an empty peer set"
                 );
                 return Ok(exit_codes::EXIT_INFRA_ERROR);
             }
         }
-    }
 
-    #[cfg(feature = "runner")]
-    if let Some(path) = args.observation_health.as_ref() {
-        let attachment = monitor.probe_attachment();
-        let run_id =
-            observation_health::run_id(&attachment, observed_ringbuf_drops, args.policy.is_some());
-        let health = observation_health::build(
-            &run_id,
-            &attachment,
-            observed_ringbuf_drops,
-            args.policy.is_some(),
-        );
-        if !observation_health::write_to(&health, path) {
-            // Same fail-closed rule as enforcement_health: a consumer reads a missing artifact as
-            // "not requested", which would misreport a run that did observe.
-            emit_err!(
-                "FATAL: observation_health artifact was requested but could not be written; refusing exit 0 so a missing artifact is never read as not-requested"
-            );
-            return Ok(exit_codes::EXIT_INFRA_ERROR);
+        if let Some(target) = targets.observation_health.as_mut() {
+            let write_result = target.writer().and_then(|writer| {
+                observation_health::write_to(&artifacts.observation_health, writer)
+            });
+            if write_result.is_err() {
+                // Same fail-closed rule as enforcement_health: a consumer reads a missing artifact as
+                // "not requested", which would misreport a run that did observe.
+                emit_err!(
+                    "FATAL: observation_health artifact was requested but could not be written; refusing exit 0 so an invalid artifact is never read as not-requested"
+                );
+                return Ok(exit_codes::EXIT_INFRA_ERROR);
+            }
         }
     }
 

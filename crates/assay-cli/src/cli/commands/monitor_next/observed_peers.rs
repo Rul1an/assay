@@ -34,8 +34,10 @@ impl ObservedPeers {
         }
     }
 
-    pub fn write_to(&self, path: &std::path::Path) -> std::io::Result<()> {
-        std::fs::write(path, serde_json::to_string_pretty(self).unwrap_or_default())
+    pub fn write_to(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        serde_json::to_writer_pretty(&mut *writer, self).map_err(std::io::Error::other)?;
+        writer.write_all(b"\n")?;
+        writer.flush()
     }
 }
 
