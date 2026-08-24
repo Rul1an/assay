@@ -36,6 +36,7 @@ UPSTREAM_COPY = (
     / "upstream/corpus-adequacy/08e3b3f013c72f016131b32dfae03f749e432228"
     / "bounded_run.py"
 )
+UPSTREAM_LICENSE = UPSTREAM_COPY.with_name("LICENSE")
 UPSTREAM_WINDOWS_DOC = (
     "    Windows: process/batch already refuse where fcntl is missing, and this\n"
     "    helper kills only the direct child. That is not a process-tree claim.\n"
@@ -177,6 +178,11 @@ class UpstreamSourceContract(unittest.TestCase):
         )
         self.assertEqual(pin["path"], "bounded_run.py")
         self.assertEqual(pin["license"], "MIT")
+        self.assertEqual(pin["license_path"], "LICENSE")
+        self.assertEqual(
+            hashlib.sha256(UPSTREAM_LICENSE.read_bytes()).hexdigest(),
+            pin["license_sha256"],
+        )
         self.assertEqual(
             pin["upstream_sha256"],
             "71dedb0e8d62a110b25b97f68b5f0ead1b1e9abf3251b284a6401ae91968636a",
