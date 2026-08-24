@@ -33,6 +33,215 @@ fn sample_binding() -> Value {
     serde_json::json!({ "tenant": "acme", "resource": "provider/customer/cus_123" })
 }
 
+fn verify_named_json(envelope: Value, decision_digest: &str) -> (i32, Value) {
+    let dir = tempdir().unwrap();
+    let env_path = dir.path().join("request-envelope.json");
+    let decision = dir.path().join("decision.json");
+    fs::write(&env_path, envelope.to_string()).unwrap();
+    fs::write(&decision, decision_json(decision_digest)).unwrap();
+
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "evidence",
+            "verify-mcp-records",
+            "--request-envelope",
+            env_path.to_str().unwrap(),
+            "--decision",
+            decision.to_str().unwrap(),
+            "--fallback-projection",
+            "named",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    let report = serde_json::from_slice(&output.stdout).unwrap();
+    (output.status.code().unwrap(), report)
+}
+
+#[test]
+fn fallback_named_projection_missing_params_fails_closed_without_a_digest() {
+    let binding = sample_binding();
+    let envelope = serde_json::json!({
+        "name": "provider.lookup",
+        "arguments": { "customer": "cus_123" },
+        "_meta": { "authorization_binding": binding },
+    });
+    // This is the digest the old implementation produced after silently substituting null.
+    let historical_null_digest = named_digest(&Value::Null, &sample_binding());
+
+    let (exit, report) = verify_named_json(envelope, &historical_null_digest);
+
+    assert_eq!(exit, 2);
+    assert_eq!(report["ok"], false);
+    assert!(report["binding"]["digest"].is_null());
+    assert!(report["checks"].as_array().unwrap().iter().any(|check| {
+        check["id"] == "fallback_projection_missing_params" && check["ok"] == false
+    }));
+    assert!(report["claims_not_made"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|claim| claim == "fallback_call_parameter_binding"));
+}
+
+#[test]
+fn fallback_named_projection_rejects_non_object_params() {
+    let binding = sample_binding();
+
+    for invalid_params in [
+        Value::Null,
+        serde_json::json!("provider.lookup"),
+        serde_json::json!(["provider.lookup"]),
+    ] {
+        let envelope = serde_json::json!({
+            "params": invalid_params,
+            "_meta": { "authorization_binding": binding },
+        });
+        let historical_digest = named_digest(&envelope["params"], &sample_binding());
+
+        let (exit, report) = verify_named_json(envelope, &historical_digest);
+
+        assert_eq!(exit, 2, "invalid params: {}", invalid_params);
+        assert_eq!(report["ok"], false, "invalid params: {}", invalid_params);
+        assert!(
+            report["binding"]["digest"].is_null(),
+            "invalid params: {}",
+            invalid_params
+        );
+        assert!(report["checks"].as_array().unwrap().iter().any(|check| {
+            check["id"] == "fallback_projection_invalid_params" && check["ok"] == false
+        }));
+    }
+}
+
+#[test]
+fn fallback_named_projection_params_error_precedes_meta_error() {
+    let envelope = serde_json::json!({
+        "name": "provider.lookup",
+        "arguments": {},
+        "_meta": "not-an-object",
+    });
+
+    let (exit, report) = verify_named_json(envelope, "sha256:not-used");
+
+    assert_eq!(exit, 2);
+    assert!(report["checks"].as_array().unwrap().iter().any(|check| {
+        check["id"] == "fallback_projection_missing_params" && check["ok"] == false
+    }));
+    assert!(!report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|check| check["id"] == "fallback_projection_invalid_meta"));
+    assert!(!report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|check| check["id"] == "decision_request_envelope_digest_match"));
+}
+
+#[test]
+fn fallback_named_projection_accepts_empty_object_params_without_failure_nonclaim() {
+    let params = serde_json::json!({});
+    let binding = sample_binding();
+    let envelope: Value =
+        serde_json::from_str(&named_envelope(&params, Some(&binding), &[])).unwrap();
+    let digest = named_digest(&params, &binding);
+
+    let (exit, report) = verify_named_json(envelope, &digest);
+
+    assert_eq!(exit, 0);
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["binding"]["digest"], digest);
+    assert!(!report["claims_not_made"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|claim| claim == "fallback_call_parameter_binding"));
+    assert!(!report["checks"].as_array().unwrap().iter().any(|check| {
+        matches!(
+            check["id"].as_str(),
+            Some("fallback_projection_missing_params" | "fallback_projection_invalid_params")
+        )
+    }));
+}
+
+#[test]
+fn whole_envelope_mode_still_accepts_an_envelope_without_params() {
+    let dir = tempdir().unwrap();
+    let envelope = serde_json::json!({
+        "name": "provider.lookup",
+        "arguments": { "customer": "cus_123" },
+        "_meta": { "authorization_binding": sample_binding() },
+    });
+    let digest = jcs_digest_value(&envelope);
+    let env_path = dir.path().join("request-envelope.json");
+    let decision = dir.path().join("decision.json");
+    fs::write(&env_path, envelope.to_string()).unwrap();
+    fs::write(&decision, decision_json(&digest)).unwrap();
+
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "evidence",
+            "verify-mcp-records",
+            "--request-envelope",
+            env_path.to_str().unwrap(),
+            "--decision",
+            decision.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["binding"]["digest"], digest);
+    assert_eq!(report["binding"]["projection"], Value::Null);
+}
+
+#[test]
+fn fallback_named_projection_failure_table_has_no_pseudo_digest() {
+    let dir = tempdir().unwrap();
+    let env_path = dir.path().join("request-envelope.json");
+    let decision = dir.path().join("decision.json");
+    fs::write(
+        &env_path,
+        serde_json::json!({
+            "name": "provider.lookup",
+            "_meta": { "authorization_binding": sample_binding() },
+        })
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(&decision, decision_json("sha256:not-used")).unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "evidence",
+            "verify-mcp-records",
+            "--request-envelope",
+            env_path.to_str().unwrap(),
+            "--decision",
+            decision.to_str().unwrap(),
+            "--fallback-projection",
+            "named",
+        ])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("OK:               no"))
+        .stdout(predicate::str::contains("Binding digest:   -"))
+        .stdout(predicate::str::contains(
+            "fallback_projection_missing_params",
+        ))
+        .stdout(predicate::str::contains("sha256:unresolved").not());
+}
+
 #[test]
 fn fallback_named_projection_excludes_nonbinding_meta() {
     let dir = tempdir().unwrap();
@@ -142,63 +351,36 @@ fn fallback_named_projection_same_digest_for_different_nonbinding_meta() {
 
 #[test]
 fn fallback_named_projection_fails_closed_when_binding_block_absent() {
-    let dir = tempdir().unwrap();
     let params = sample_params();
-    // Envelope with NO _meta.authorization_binding.
-    let envelope = named_envelope(&params, None, &[("progress_token", serde_json::json!("p"))]);
+    let envelope: Value = serde_json::from_str(&named_envelope(
+        &params,
+        None,
+        &[("progress_token", serde_json::json!("p"))],
+    ))
+    .unwrap();
     let digest = named_digest(&params, &sample_binding());
-    let env_path = dir.path().join("request-envelope.json");
-    let decision = dir.path().join("decision.json");
-    fs::write(&env_path, envelope).unwrap();
-    fs::write(&decision, decision_json(&digest)).unwrap();
 
-    Command::cargo_bin("assay")
-        .unwrap()
-        .args([
-            "evidence",
-            "verify-mcp-records",
-            "--request-envelope",
-            env_path.to_str().unwrap(),
-            "--decision",
-            decision.to_str().unwrap(),
-            "--fallback-projection",
-            "named",
-        ])
-        .assert()
-        .code(2)
-        .stdout(predicate::str::contains(
-            "fallback_projection_missing_authorization_binding",
-        ))
-        .stdout(predicate::str::contains("failing closed"));
+    let (exit, report) = verify_named_json(envelope, &digest);
+
+    assert_eq!(exit, 2);
+    assert!(report["binding"]["digest"].is_null());
+    assert!(report["checks"].as_array().unwrap().iter().any(|check| {
+        check["id"] == "fallback_projection_missing_authorization_binding" && check["ok"] == false
+    }));
 }
 
 #[test]
 fn fallback_named_projection_invalid_meta_fails_closed() {
-    let dir = tempdir().unwrap();
-    // `_meta` present but not an object -> invalid, distinct reason code from a missing binding.
-    let envelope =
-        serde_json::json!({ "params": sample_params(), "_meta": "not-an-object" }).to_string();
+    let envelope = serde_json::json!({ "params": sample_params(), "_meta": "not-an-object" });
     let digest = named_digest(&sample_params(), &sample_binding());
-    let env_path = dir.path().join("request-envelope.json");
-    let decision = dir.path().join("decision.json");
-    fs::write(&env_path, envelope).unwrap();
-    fs::write(&decision, decision_json(&digest)).unwrap();
 
-    Command::cargo_bin("assay")
-        .unwrap()
-        .args([
-            "evidence",
-            "verify-mcp-records",
-            "--request-envelope",
-            env_path.to_str().unwrap(),
-            "--decision",
-            decision.to_str().unwrap(),
-            "--fallback-projection",
-            "named",
-        ])
-        .assert()
-        .code(2)
-        .stdout(predicate::str::contains("fallback_projection_invalid_meta"));
+    let (exit, report) = verify_named_json(envelope, &digest);
+
+    assert_eq!(exit, 2);
+    assert!(report["binding"]["digest"].is_null());
+    assert!(report["checks"].as_array().unwrap().iter().any(|check| {
+        check["id"] == "fallback_projection_invalid_meta" && check["ok"] == false
+    }));
 }
 
 #[test]
@@ -311,7 +493,7 @@ fn fallback_named_projection_breaks_on_changed_binding_block() {
 }
 
 #[test]
-fn fallback_named_projection_breaks_on_changed_bound_param() {
+fn fallback_named_projection_breaks_on_changed_bound_arguments() {
     let dir = tempdir().unwrap();
     let binding = sample_binding();
     // Decision binds the ORIGINAL params; the envelope carries DIFFERENT params.
@@ -342,4 +524,23 @@ fn fallback_named_projection_breaks_on_changed_bound_param() {
             "decision_request_envelope_digest_match",
         ))
         .stdout(predicate::str::contains("fail mismatch"));
+}
+
+#[test]
+fn fallback_named_projection_breaks_on_changed_bound_name() {
+    let binding = sample_binding();
+    let digest = named_digest(&sample_params(), &binding);
+    let other_params = serde_json::json!({
+        "name": "tools/list",
+        "arguments": { "processInstanceKey": "2251799813685249" }
+    });
+    let envelope: Value =
+        serde_json::from_str(&named_envelope(&other_params, Some(&binding), &[])).unwrap();
+
+    let (exit, report) = verify_named_json(envelope, &digest);
+
+    assert_eq!(exit, 2);
+    assert!(report["checks"].as_array().unwrap().iter().any(|check| {
+        check["id"] == "decision_request_envelope_digest_match" && check["ok"] == false
+    }));
 }

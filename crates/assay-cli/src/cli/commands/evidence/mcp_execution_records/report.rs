@@ -29,7 +29,7 @@ pub(super) struct AttestationReport {
 #[derive(Debug, Serialize)]
 pub(super) struct BindingReport {
     pub(super) mode: &'static str,
-    pub(super) digest: String,
+    pub(super) digest: Option<String>,
     pub(super) digest_source: &'static str,
     pub(super) projection: Option<&'static str>,
     pub(super) nonce: Option<String>,
@@ -87,7 +87,10 @@ pub(super) fn print_table_report(report: &PairingReport) {
     println!("OK:               {}", if report.ok { "yes" } else { "no" });
     println!("Role:             {}", report.verification_scope.role);
     println!("Binding:          {}", report.binding.mode);
-    println!("Binding digest:   {}", report.binding.digest);
+    println!(
+        "Binding digest:   {}",
+        report.binding.digest.as_deref().unwrap_or("-")
+    );
     println!(
         "Binding nonce:    {}",
         report.binding.nonce.as_deref().unwrap_or("-")
