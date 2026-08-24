@@ -508,6 +508,23 @@ def _metadata_validator_self_checks(root: Path) -> None:
         raise HarnessError("duplicate serde_jcs packages must fail metadata validation")
 
 
+def _timeout_wiring_self_check(root: Path) -> None:
+    from unittest import mock
+
+    captured: dict = {}
+
+    def fake_run(*_args, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(["cargo", "metadata"], 0, "", "")
+
+    with mock.patch("subprocess.run", side_effect=fake_run):
+        _run(["cargo", "metadata"], root, check=False)
+    if captured.get("timeout") != COMMAND_TIMEOUT_S:
+        raise HarnessError(
+            f"_run must pass timeout={COMMAND_TIMEOUT_S}, got {captured.get('timeout')!r}"
+        )
+
+
 def _timeout_self_check(root: Path) -> None:
     from unittest import mock
 
@@ -528,6 +545,7 @@ def self_test(root: Path) -> None:
     lock_before = (root / "Cargo.lock").read_bytes()
     verify_vendor(root)
     _metadata_validator_self_checks(root)
+    _timeout_wiring_self_check(root)
     _timeout_self_check(root)
     try:
         build(root)
