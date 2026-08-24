@@ -305,6 +305,7 @@ def self_test() -> int:
         ))])
         evaluate(live, "feature/fix", [_cmt(_rec(builder={"agent": "human", "instance": "ext"}))])
         evaluate(live, "ruley", [_cmt(_rec(builder={"agent": "human", "instance": "ext"}))])
+        evaluate(live, "ruley/", [_cmt(_rec(builder={"agent": "human", "instance": "ext"}))])
     except GateError as exc:
         fail.append(f"GREEN {exc.reason}")
 
@@ -319,9 +320,11 @@ def self_test() -> int:
         ("no_current_record", "c" * 40, ref, [_cmt(green)]),
         ("no_current_record", live, ref, [_cmt(None, body="READY " + live)]),
         ("bot_carrier", live, ref, [_cmt(green, bot=True)]),
+        ("bot_carrier", live, ref, [_cmt(green, user_type="Organization")]),
         ("missing_field", live, ref, [_cmt(green, user_type=None)]),
         ("missing_field", live, ref, [_cmt(green, created=None, updated=None)]),
         ("missing_field", live, ref, [_cmt(green, created=None)]),
+        ("missing_field", live, ref, [_cmt(green, created="", updated="")]),
         ("identical_writer_reviewer", live, ref, [_cmt(_rec(
             reviewer={"agent": "ruley", "instance": "w1", "github_login": "Rul1an"}))]),
         ("missing_field", live, ref, [_cmt(_rec(verdict=None))]),
@@ -362,15 +365,22 @@ def self_test() -> int:
         urllib.request.urlopen = boom
 
     class _Pages(GitHubApi):
+        pages: list[int] = []
+
         def get(self, path: str) -> Any:
+            m = re.search(r"[?&]page=(\d+)", path)
+            self.pages.append(int(m.group(1)) if m else 0)
             return [{}] * COMMENT_PAGE_SIZE
 
+    _Pages.pages = []
     try:
         _Pages("o/r", "t").comments(1)
         fail.append("wanted comments_limit, got pass")
     except GateError as exc:
         if exc.reason != "comments_limit":
             fail.append(f"wanted comments_limit, got {exc.reason}")
+    if _Pages.pages != [1, 2]:
+        fail.append(f"wanted pages [1, 2] immediately, got {_Pages.pages!r}")
 
     try:
         bounded_json(lambda n: b"x" * n, "pr_api_failure", limit=8)
@@ -427,6 +437,24 @@ def self_test() -> int:
     except GateError as exc:
         if exc.reason != "head_moved":
             fail.append(f"wanted head_moved, got {exc.reason}")
+
+    class _RaceRef(GitHubApi):
+        n = 0
+
+        def get(self, path: str) -> Any:
+            if "comments" in path:
+                return [_cmt(green)]
+            type(self).n += 1
+            ref = "ruley/x" if type(self).n == 1 else "ruley/y"
+            return {"head": {"sha": "a" * 40, "ref": ref}}
+
+    _RaceRef.n = 0
+    try:
+        live_check(1, api=_RaceRef("o/r", "t"))
+        fail.append("wanted head_moved same-sha, got pass")
+    except GateError as exc:
+        if exc.reason != "head_moved":
+            fail.append(f"wanted head_moved same-sha, got {exc.reason}")
 
     try:
         head_fields({"head": {"sha": None, "ref": "feature/fix"}})
