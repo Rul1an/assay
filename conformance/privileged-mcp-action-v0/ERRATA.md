@@ -19,6 +19,27 @@ Recorded 2026-08-19. **No vector, expectation or digest is changed by this file.
 corpus whose digest is its identity does not get edited; it gets an erratum, and a later corpus
 gets the fix.
 
+## Historical v0 run-schema identity
+
+The four published candidate tags declared the same canonical schema identity even though that
+identity resolved to two different schema resources. The declared `$id` was:
+
+`https://raw.githubusercontent.com/Rul1an/assay/privileged-mcp-action-v0-candidate.1/conformance/privileged-mcp-action-v0/report.schema.json`
+
+| candidate tag | cases | `report.schema.json` SHA-256 |
+|---|---:|---|
+| `candidate.1` | 13 | `ebbee1990a7206cfe5ea7c23f54079f6eeb0b263cf750fb57a77b50b0f72aa9b` |
+| `candidate.2` | 13 | `ebbee1990a7206cfe5ea7c23f54079f6eeb0b263cf750fb57a77b50b0f72aa9b` |
+| `candidate.3` | 14 | `571e35aed92ae0c23f78c81021cb1c604f307f1e9dd4700a6aedc884d6be0d16` |
+| `candidate.4` | 14 | `571e35aed92ae0c23f78c81021cb1c604f307f1e9dd4700a6aedc884d6be0d16` |
+
+Interpret a historical v0 run record with the schema and validator from its exact candidate tag;
+do not dereference the `candidate.1` `$id` and assume those bytes describe a `candidate.3` or
+`candidate.4` record. Candidate tags and their assets remain immutable. The portable successor is
+[`urn:assay:schema:privileged-mcp-action:conformance-run:v1`](report.schema.json). This mapping
+documents the collision; it does not retroactively repair the identity of any v0 schema resource or
+run record.
+
 ## What reproducing this corpus can and cannot distinguish
 
 Reproducing all fourteen outcomes **can distinguish an implementation on at most five of the
