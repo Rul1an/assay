@@ -2304,6 +2304,34 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         self.assertEqual(report["schema"], validate_run_record.RUN_SCHEMA)
         self.assertEqual(report["schema"], schema["properties"]["schema"]["const"])
 
+    def test_historical_v0_schema_identity_is_reserved_and_documented(self) -> None:
+        historical_id = (
+            "https://raw.githubusercontent.com/Rul1an/assay/"
+            "privileged-mcp-action-v0-candidate.1/"
+            "conformance/privileged-mcp-action-v0/report.schema.json"
+        )
+        schema = json.loads((CORPUS_DIR / "report.schema.json").read_text(encoding="utf-8"))
+        self.assertNotEqual(schema["$id"], historical_id)
+
+        expected_rows = (
+            "| `candidate.1` | 13 | `ebbee1990a7206cfe5ea7c23f54079f6eeb0b263cf750fb57a77b50b0f72aa9b` |",
+            "| `candidate.2` | 13 | `ebbee1990a7206cfe5ea7c23f54079f6eeb0b263cf750fb57a77b50b0f72aa9b` |",
+            "| `candidate.3` | 14 | `571e35aed92ae0c23f78c81021cb1c604f307f1e9dd4700a6aedc884d6be0d16` |",
+            "| `candidate.4` | 14 | `571e35aed92ae0c23f78c81021cb1c604f307f1e9dd4700a6aedc884d6be0d16` |",
+        )
+        for path in (CORPUS_DIR / "ERRATA.md.in", CORPUS_DIR / "ERRATA.md"):
+            errata = path.read_text(encoding="utf-8")
+            self.assertIn(historical_id, errata)
+            for row in expected_rows:
+                self.assertIn(row, errata)
+            self.assertIn("schema and validator from its exact candidate tag", errata)
+            self.assertIn("Candidate tags and their assets remain immutable", errata)
+            self.assertIn(
+                "urn:assay:schema:privileged-mcp-action:conformance-run:v1",
+                errata,
+            )
+            self.assertIn("does not retroactively repair", errata)
+
     def test_validator_refuses_canonical_v0_as_unsupported_schema(self) -> None:
         """A v0 record is refused as unsupported schema, not as a shape error."""
         capture = self.valid_capture("v0-refusal")
