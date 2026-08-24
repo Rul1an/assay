@@ -28,6 +28,31 @@ PATCH_CONFIG = f'patch.crates-io.serde_jcs.path="{PATCH_PATH}"'
 WIRING_ANCHOR = "self.tag.cmp(&other.tag)"
 WIRING_REPLACEMENT = "self.key.cmp(&other.key)"
 EXPECTED_WIRING_VECTORS = frozenset({"keyorder_utf16_vs_codepoint"})
+NUMBER_WIRING_ANCHOR = "buffer.format_finite(value)"
+# The borrow keeps the vendored crate's deny(unused) build green while the
+# mutant deliberately bypasses ryu-js and serializes through Rust Display.
+NUMBER_WIRING_REPLACEMENT = "({ let _ = &mut buffer; value.to_string() })"
+EXPECTED_NUMBER_WIRING_VECTORS = frozenset(
+    {
+        "num_1e21_boundary",
+        "num_1e_minus_7",
+        "num_big_exponent",
+        "num_negative_zero",
+        "num_tiny",
+        "rfc8785_appendix_mixed",
+    }
+)
+EXPECTED_SLICE_B_RULES = {
+    "RFC 8785 section 3.2.3 UTF-16 object-key ordering": (
+        "self.tag.cmp(&other.tag)",
+        "self.key.cmp(&other.key)",
+    ),
+    "RFC 8785 section 3.2.2.3 and Appendix B ECMAScript-compatible number serialization": (
+        NUMBER_WIRING_ANCHOR,
+        NUMBER_WIRING_REPLACEMENT,
+    ),
+}
+EXPECTED_SLICE_B_WITNESSES = frozenset({"utf16", "number"})
 VECTOR_FAIL_RE = re.compile(r"^\[([a-z0-9_]+)\]\s*$")
 EXPECTED_FILES = frozenset(
     {
@@ -420,13 +445,21 @@ def _mutate_compile_break(root: Path) -> None:
     path.write_text(text.replace("pub fn to_vec", "pub fn to_vec BREAK"), encoding="utf-8")
 
 
-def _mutate_wiring(root: Path) -> None:
+def _mutate_exact(root: Path, anchor: str, replacement: str, name: str) -> None:
     path = root / PATCH_PATH / "src/lib.rs"
     text = path.read_text(encoding="utf-8")
-    count = text.count(WIRING_ANCHOR)
+    count = text.count(anchor)
     if count != 1:
-        raise HarnessError(f"wiring anchor must occur exactly once, got {count}")
-    path.write_text(text.replace(WIRING_ANCHOR, WIRING_REPLACEMENT, 1), encoding="utf-8")
+        raise HarnessError(f"{name} wiring anchor must occur exactly once, got {count}")
+    path.write_text(text.replace(anchor, replacement, 1), encoding="utf-8")
+
+
+def _mutate_wiring(root: Path) -> None:
+    _mutate_exact(root, WIRING_ANCHOR, WIRING_REPLACEMENT, "UTF-16")
+
+
+def _mutate_number_wiring(root: Path) -> None:
+    _mutate_exact(root, NUMBER_WIRING_ANCHOR, NUMBER_WIRING_REPLACEMENT, "number")
 
 
 def _run_conformance(root: Path, *, patch: bool) -> subprocess.CompletedProcess[str]:
@@ -462,6 +495,45 @@ def _parse_failed_vectors(proc: subprocess.CompletedProcess[str]) -> frozenset[s
         if line.strip().startswith("A divergence"):
             break
     return frozenset(names)
+
+
+def _wiring_witness(
+    root: Path,
+    *,
+    name: str,
+    mutate,
+    expected_vectors: frozenset[str],
+) -> str:
+    patched = patch_off = None
+    try:
+        patched = _copy_root(root)
+        mutate(patched)
+        try:
+            build(patched)
+        except HarnessError as exc:
+            if _vendor_mismatch(exc):
+                raise HarnessError(
+                    f"{name} compilable mutant must reach cargo, not vendor mismatch"
+                ) from exc
+            raise
+        failed = _parse_failed_vectors(_run_conformance(patched, patch=True))
+        if failed != expected_vectors:
+            raise HarnessError(
+                f"{name} vector set mismatch: got {failed}, want {expected_vectors}"
+            )
+
+        patch_off = _copy_root(root)
+        mutate(patch_off)
+        proc = _run_conformance(patch_off, patch=False)
+        if proc.returncode != 0:
+            raise HarnessError(
+                f"{name} patch-off registry build must stay green without the path patch"
+            )
+        return name
+    finally:
+        for tree in (patched, patch_off):
+            if tree is not None:
+                _drop_copy(tree)
 
 
 def _metadata_validator_self_checks(root: Path) -> None:
@@ -508,6 +580,42 @@ def _metadata_validator_self_checks(root: Path) -> None:
             raise
     else:
         raise HarnessError("duplicate serde_jcs packages must fail metadata validation")
+
+
+def _assert_slice_b_contract(root: Path, witnessed: frozenset[str]) -> None:
+    manifest_path = root / "conformance/adequacy/rfc8785-canonicalization.manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    groups = manifest.get("mutants")
+    problems: list[str] = []
+    if not isinstance(groups, dict) or set(groups) != {"jcs_canonicalization"}:
+        problems.append("manifest must declare only the jcs_canonicalization mutant group")
+        entries: list[dict] = []
+    else:
+        entries = groups["jcs_canonicalization"]
+
+    controls = [entry for entry in entries if entry.get("control") is True]
+    if len(controls) != 1 or (
+        controls[0].get("anchor"), controls[0].get("replacement")
+    ) != ("serde_jcs::to_vec(value)", "serde_json::to_vec(value)"):
+        problems.append("wrapper swap must remain the single control")
+
+    declared = {
+        entry.get("label"): (entry.get("anchor"), entry.get("replacement"))
+        for entry in entries
+        if entry.get("control") is not True
+    }
+    if declared != EXPECTED_SLICE_B_RULES:
+        problems.append(
+            f"declared RFC 8785 rules differ: got {declared!r}, "
+            f"want {EXPECTED_SLICE_B_RULES!r}"
+        )
+    if witnessed != EXPECTED_SLICE_B_WITNESSES:
+        problems.append(
+            f"wiring witnesses differ: got {sorted(witnessed)!r}, "
+            f"want {sorted(EXPECTED_SLICE_B_WITNESSES)!r}"
+        )
+    if problems:
+        raise HarnessError("Slice B contract failed: " + "; ".join(problems))
 
 
 def _timeout_wiring_self_check(root: Path) -> None:
@@ -592,7 +700,7 @@ def self_test(root: Path) -> None:
     else:
         raise HarnessError("build must refuse a git worktree (writer checkout)")
 
-    scratch = scratch2 = scratch3 = scratch4 = None
+    scratch = None
     try:
         scratch = _copy_root(root)
         _mutate_compile_break(scratch)
@@ -606,31 +714,27 @@ def self_test(root: Path) -> None:
         else:
             raise HarnessError("compile-breaking mutation must fail build")
 
-        scratch4 = _copy_root(root)
-        _mutate_wiring(scratch4)
-        try:
-            build(scratch4)
-        except HarnessError as exc:
-            if _vendor_mismatch(exc):
-                raise HarnessError("compilable lib.rs mutant must reach cargo, not vendor mismatch") from exc
-            raise
-
-        scratch2 = _copy_root(root)
-        _mutate_wiring(scratch2)
-        build(scratch2)
-        failed = _parse_failed_vectors(_run_conformance(scratch2, patch=True))
-        if failed != EXPECTED_WIRING_VECTORS:
-            raise HarnessError(f"P-WIRING vector set mismatch: got {failed}, want {EXPECTED_WIRING_VECTORS}")
-
-        scratch3 = _copy_root(root)
-        _mutate_wiring(scratch3)
-        proc = _run_conformance(scratch3, patch=False)
-        if proc.returncode != 0:
-            raise HarnessError("P-PATCH-OFF: registry build must stay green without patch")
     finally:
-        for tree in (scratch, scratch2, scratch3, scratch4):
-            if tree is not None:
-                _drop_copy(tree)
+        if scratch is not None:
+            _drop_copy(scratch)
+
+    witnessed = frozenset(
+        {
+            _wiring_witness(
+                root,
+                name="utf16",
+                mutate=_mutate_wiring,
+                expected_vectors=EXPECTED_WIRING_VECTORS,
+            ),
+            _wiring_witness(
+                root,
+                name="number",
+                mutate=_mutate_number_wiring,
+                expected_vectors=EXPECTED_NUMBER_WIRING_VECTORS,
+            ),
+        }
+    )
+    _assert_slice_b_contract(root, witnessed)
 
     bad = _copy_root(root)
     try:

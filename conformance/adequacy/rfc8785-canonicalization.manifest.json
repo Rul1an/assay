@@ -11,7 +11,7 @@
     0,
     101
   ],
-  "_about": "Mutation adequacy for the RFC 8785 (JCS) conformance corpus. Every content id, mandate id and bundle run root in this workspace is a sha256 over the bytes this canonicalizer emits, so a divergence makes those digests irreproducible by any other implementation. THE CONTROL IS NOT INVENTED HERE: rfc8785_conformance.rs documents it in prose at the top of the file -- swap serde_jcs::to_vec for serde_json::to_vec and at least 8 vectors must fail, keyorder_utf16_vs_codepoint among them. That property was written down so it would stay checkable rather than remembered. This runs it.",
+  "_about": "Mutation adequacy for the RFC 8785 (JCS) conformance corpus. The scored denominator is exactly two author-declared rules in the pinned serde_jcs dependency: RFC 8785 UTF-16 object-key ordering and ECMAScript-compatible number serialization. It is not RFC certification, corpus coverage, or full implementation adequacy. The existing wrapper swap remains a separate control proving the runner, mutation and scorer are connected. ryu-js is the pinned transitive number-formatting oracle, not a mutable subject.",
   "repo_root": "../..",
   "implementation_sources": [
     "../../crates/assay-canonical/src/jcs.rs",
@@ -43,6 +43,16 @@
         "control": true,
         "anchor": "serde_jcs::to_vec(value)",
         "replacement": "serde_json::to_vec(value)"
+      },
+      {
+        "label": "RFC 8785 section 3.2.3 UTF-16 object-key ordering",
+        "anchor": "self.tag.cmp(&other.tag)",
+        "replacement": "self.key.cmp(&other.key)"
+      },
+      {
+        "label": "RFC 8785 section 3.2.2.3 and Appendix B ECMAScript-compatible number serialization",
+        "anchor": "buffer.format_finite(value)",
+        "replacement": "({ let _ = &mut buffer; value.to_string() })"
       }
     ]
   },
