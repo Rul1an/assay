@@ -15,8 +15,9 @@ scripts/interop/reproduce-sep2828-decision-pairing.sh
 
 The vectors are published by [vaaraio/vaara](https://github.com/vaaraio/vaara) under
 AGPL-3.0-or-later. The script fetches them at run time and never vendors them into this MIT
-repository. Nothing upstream is executed: the upstream checker is read but not run, and every
-verdict below is computed by `assay` from the wire bytes.
+repository. No upstream code is fetched or executed. Assay computes the individual checks from
+the published JSON wire bytes; the local
+fallback classifier applies this record's disposition rule to those check results.
 
 ## Why this record exists
 
@@ -36,7 +37,7 @@ rather than a sentence in a README.
 | `substituted_pairing_nonce` | Check A fails | attestation digest holds, nonce mismatch, pairing refused |
 | `substituted_decision_under_shared_attestation` | Check A holds, Check B fails | back-links match, `outcomeDerived.decisionDigest` does not |
 | `supersession_equal_decidedat_tie` | `ambiguous` | `ambiguous`, reason `supersession_ambiguous_missing_sequence` |
-| `fallback_envelope_binding` | binding holds | not reproduced, see below |
+| `fallback_envelope_binding` | binding holds | unsupported envelope shape is refused (`fallback_projection_missing_params`); no binding digest is published, see below |
 
 Two of these are worth calling out as good corpus design. `substituted_pairing_nonce` and
 `substituted_decision_under_shared_attestation` are the cases that separate an implementation which
@@ -65,6 +66,16 @@ Declared rather than left to inference:
   `ArgsProjection` form is surfaced on the same terms: shown, not checked.
 - **Runtime effect.** A reproduced verdict says the records bind to each other as specified. It
   does not say the recorded action occurred. Reported as `runtime_side_effect_truth`.
+- **Fallback observation and nonce semantics.** In request-envelope mode, Assay checks its selected
+  envelope projection, requires a nonce on the decision back-link, and requires the decision and
+  outcome back-links to agree. It does not establish that `_meta.authorization_binding.nonce` was
+  observed by the server, equals the back-link nonce, or is fresh or unique. Reported as
+  `fallback_server_observation_truth` and `fallback_nonce_freshness_or_uniqueness`.
+- **Fallback call parameters on this upstream shape.** The vector carries top-level `name` and
+  `arguments`. Assay's named projection requires object-valued `params`, so it fails closed on this
+  shape rather than binding a partial pre-image. This run therefore establishes nothing about
+  whether the call name or arguments are bound. The earlier silent-`null` behavior was fixed in
+  [#2596](https://github.com/Rul1an/assay/pull/2596).
 
 ## The case that was not reproduced
 
@@ -77,15 +88,27 @@ silent. Assay computes `assay.fallback_projection.v0`; the vectors carry
 `tools_call_params_plus_meta_authorization_binding_v1`.
 
 Assay does not implement the upstream projection version, and reconstructing it from the published
-specification text turned out not to be possible. The text declares the allowlist exactly, the
-`tools/call` `name` and `arguments` plus the named binding block, which fixes *which* fields enter
-the pre-image. It does not fix the *shape* of the object the digest is taken over, and the shape is
-part of the bytes. Five readings of the published prose were tried before the reference checker's
-source settled it.
+specification text turned out not to be possible. The current vector does publish the request
+envelope, decision, and receipt, so this record now executes the case directly. Assay's named
+pre-image does not resolve for this envelope, so no binding digest is published and the dependent
+decision and outcome digest comparisons are omitted. The refusal is the
+`fallback_projection_missing_params` projection-shape check. The measured Assay projection is
+`assay.fallback_projection.v0`; the decision names
+`tools_call_params_plus_meta_authorization_binding_v1`. Those identifiers denote different object
+shapes and therefore different digest pre-images.
 
-That is a general property rather than a complaint about one profile, and it is raised as such in
-the venue where the rule is being written, on the SCITT Canonical Payload Binding draft:
+The published text names the source fields (`tools/call` name and arguments, plus the authorization
+binding block), but it does not define the projected JSON member names and nesting. That shape is
+part of the JCS bytes, so the identifier alone is not enough for an independent implementation to
+reconstruct the same pre-image.
+
+That is a general property rather than a complaint about one profile. It was raised on the SCITT
+Canonical Payload Binding draft in
 [action-state-group/scitt-payload-binding#5](https://github.com/action-state-group/scitt-payload-binding/issues/5).
+The issue closed after executable vectors and a proposed `member_mapping` landed in
+[PR #16](https://github.com/action-state-group/scitt-payload-binding/pull/16); the normative section
+and registry-template text were deliberately deferred after prerequisite
+[PR #9](https://github.com/action-state-group/scitt-payload-binding/pull/9) closed unmerged.
 Short version: an identifier that travels is necessary but not sufficient. It has to resolve to a
 published pre-image construction, or it names a shape only its author can build.
 
@@ -98,18 +121,21 @@ artifact is bad rather than that their pre-image is wrong.
 
 | | |
 |---|---|
-| Run | 2026-08-03 |
-| Assay | `assay-cli` 3.37.0, release profile |
+| Run | 2026-08-24 |
+| Assay | `assay-cli` 5.4.0, release profile |
 | Verifier commands | `assay evidence verify-mcp-records`, `assay evidence verify-mcp-supersession` |
-| Upstream vectors | `tests/vectors/decision_pairing_v0/normative` at `519d3df8749bc0adbd79b28d0fb3d19142ababc7` |
-| Method | upstream JSON read; upstream checker read, not executed; all verdicts computed by `assay` |
+| Upstream vectors | Vaara `v1.75.0`, `tests/vectors/decision_pairing_v0/normative` at `9fefe51a61f16dc13cd64ca8ca4b8792e48fb64b` |
+| Method | upstream JSON fetched and read; no upstream code fetched or executed; checks computed by `assay`, recorded fallback disposition applied locally |
 
 The upstream revision is pinned rather than tracked from `main`, because a record whose inputs can
 move is not a record. Drift shows up as a fetch failure instead of as a quietly different number.
 `ASSAY_INTEROP_REV` re-runs the comparison against another commit. The script prints the revision
-and the versions of `assay`, `curl` and `python3` it used, and fails closed on a bad fetch or an
-unexpected tool exit rather than reporting either as a comparison result.
+and the versions of `assay` and `python3` it used, and fails closed on a bad fetch or an
+unexpected tool exit rather than reporting either as a comparison result. Every fetched JSON file
+and the fallback report are bounded to 1 MiB before parsing.
 
 The comparison is per check, not per case. Each row above pins the specific check ids that must
 pass and must fail, so a case that reaches the right overall verdict for the wrong reason is
-reported as a divergence.
+reported as a divergence. The fallback row also pins Assay's binding mode, projection identifier,
+and digest source. A newly reproduced fallback is likewise reported as drift until this record is
+updated; the script cannot silently retain the 6-of-7 result.
