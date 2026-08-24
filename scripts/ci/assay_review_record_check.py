@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exact-head review-record checker (#2561 slice A). Not a live CI gate."""
+"""Exact-head review-record checker used by the Slice B advisory workflow."""
 from __future__ import annotations
 
 import json
@@ -352,8 +352,8 @@ def self_test() -> int:
     pc = open(os.path.join(_root(), ".pre-commit-config.yaml"), encoding="utf-8").read()
     if HOOK_ID not in pc or f"{CHECKER} --self-test" not in pc:
         fail.append("pre-commit hook not registered")
-    if "review-record-check.yml" in pc:
-        fail.append("slice A must not pin a workflow file")
+    if "review-record-check\\.yml" not in pc:
+        fail.append("review-record workflow is not covered by pre-commit")
     boom, urllib.request.urlopen = urllib.request.urlopen, lambda *_a, **_k: (_ for _ in ()).throw(urllib.error.URLError("down"))
     try:
         GitHubApi("o/r", "t").comments(1)

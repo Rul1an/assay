@@ -91,7 +91,13 @@ repos:
         entry: python3 scripts/ci/assay_review_record_check.py --self-test
         language: system
         pass_filenames: false
-        files: ^(scripts/ci/assay_review_record_check\.py|docs/reference/review-record\.md|\.pre-commit-config\.yaml)$
+        files: ^(scripts/ci/assay_review_record_check\.py|docs/reference/review-record\.md|\.github/workflows/review-record-check\.yml|\.pre-commit-config\.yaml)$
+      - id: review-record-workflow-contract
+        name: Review-record workflow structural contract
+        entry: python3 scripts/ci/test-review-record-workflow.py
+        language: system
+        pass_filenames: false
+        files: ^(scripts/ci/(assay_review_record_check|check-review-record-workflow|test-review-record-workflow)\.py|\.github/workflows/(review-record-check|host-capability-check|ci)\.yml|docs/reference/review-record\.md|\.pre-commit-config\.yaml)$
       - id: assay-runner-lane-check-self-test
         name: Assay-Runner lane-check self-test
         entry: python3 scripts/ci/assay_runner_lane_check.py --self-test

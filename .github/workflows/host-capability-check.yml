@@ -67,3 +67,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/ci/check-conformance-inventory-callsite.py --required-aggregator-schedule
+
+      - name: Verify review-record workflow contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/check-review-record-workflow.py
