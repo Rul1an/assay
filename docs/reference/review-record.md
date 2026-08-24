@@ -63,7 +63,7 @@ pages (200 comments) with `comments_limit`. A comments-API failure is
 `comments_api_failure`. The pre-commit hook is
 `assay-review-record-self-test`.
 
-## Advisory workflow
+## Required workflow
 
 `.github/workflows/review-record-check.yml` runs for `opened`, `reopened`,
 `synchronize`, and `ready_for_review` pull-request events. It checks out the
