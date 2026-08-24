@@ -1079,6 +1079,12 @@ jobs:
           python3 scripts/ci/check-ci-gate-coverage.py
           python3 scripts/ci/check-conformance-inventory-callsite.py
 
+      - name: Verify review-record workflow contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/check-review-record-workflow.py
+
       - name: Evaluate required job results
         env:
           SCOPE_RESULT: ${{ needs.scope.result }}
