@@ -88,6 +88,12 @@ repos:
   # Assay-Runner proof consumer: runs on PR-head via pre-commit/Kernel Matrix lint.
   - repo: local
     hooks:
+      - id: assay-review-record-self-test
+        name: Review-record checker self-test
+        entry: python3 scripts/ci/assay_review_record_check.py --self-test
+        language: system
+        pass_filenames: false
+        files: ^(scripts/ci/assay_review_record_check\.py|docs/reference/review-record\.md|\.pre-commit-config\.yaml)$
       - id: assay-runner-lane-check-self-test
         name: Assay-Runner lane-check self-test
         entry: python3 scripts/ci/assay_runner_lane_check.py --self-test
