@@ -95,11 +95,11 @@ the `sys_enter_connect` tracepoint. The set is **diagnostic and not exhaustive**
 only, empty when connect4 is not attached, and not a complete peer inventory. It does not prove
 UDP/QUIC identity, already-open sockets, or every destination the process reached.
 
-The `run_id` shared by `--observed-peers` and `--observation-health` currently hashes
-attachment / drop / policy posture, not invocation identity. Distinct invocations with the same
-posture can share an id. That pairing defect is tracked as
-[#2342](https://github.com/Rul1an/assay/issues/2342) and is **not** fixed here; it remains
-ordered separately.
+One unpredictable `run_id` is created for each `assay monitor` invocation and shared by the
+requested `--observed-peers` and `--observation-health` artifacts. This lets a consumer refuse a
+crossed pair from different invocations. The value is only a correlation handle: it is not content
+identity, artifact authenticity, cryptographic provenance, or proof that the files were not copied
+after production.
 
 ## 3. Developer Workflow
 
@@ -193,4 +193,4 @@ Non-claims for this page:
 - no scalar trust score, no "complete egress", no certification
   ([ADR-042](../architecture/ADR-042-evidence-first-positioning.md));
 - checkout-to-object binding: `./target/assay-ebpf.o` digest was not retained;
-- monitor artifact `run_id` pairing remains [#2342](https://github.com/Rul1an/assay/issues/2342).
+- monitor artifact `run_id` equality is correlation, not authenticity or cryptographic provenance.
