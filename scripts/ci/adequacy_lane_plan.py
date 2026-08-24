@@ -112,6 +112,9 @@ def _declared_paths(manifest: dict) -> list[str]:
     sources = manifest.get("implementation_sources")
     if isinstance(sources, list):
         out.extend(s for s in sources if isinstance(s, str))
+    harness = manifest.get("harness_sources")
+    if isinstance(harness, list):
+        out.extend(s for s in harness if isinstance(s, str))
     return out
 
 

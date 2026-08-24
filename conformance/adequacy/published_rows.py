@@ -332,7 +332,13 @@ def project_report(
     }
 
 
-def _validate_current_row(row: dict, reports: dict, repo: Path) -> None:
+def _validate_current_row(
+    row: dict,
+    reports: dict,
+    repo: Path,
+    *,
+    replace_manifest_binding: bool = False,
+) -> None:
     for field in ("corpus", "manifest", "report_sha256", "report_ref", "measured_at"):
         if field not in row:
             raise ValueError("current row is missing %s" % field)
@@ -357,34 +363,20 @@ def _validate_current_row(row: dict, reports: dict, repo: Path) -> None:
     manifest_rel = _dependencies([row.get("manifest")])[0]
     if report.get("manifest") != manifest_rel:
         raise ValueError("producer manifest differs from the repository-relative row identity")
-    manifest_path = _indexed_manifest_path(repo, manifest_rel)
-    manifest_data = read_regular_file(manifest_path)
-    declared = parse_json_object(manifest_data, str(manifest_path))
-    if _digest(manifest_data) != report["manifest_sha256"]:
-        raise ValueError("manifest_sha256 does not address the indexed manifest")
-    _validate_manifest_report_binding(declared, report)
     measured = row.get("measured_at")
     if not isinstance(measured, dict) or not isinstance(measured.get("commit"), str):
         raise ValueError("measured_at must name a commit and dependencies")
     if not HEX40.fullmatch(measured["commit"]):
         raise ValueError("malformed measured_at.commit must be a full Git object id")
     dependencies = _dependencies(measured.get("depends_on"))
-    expected_dependencies = declared_dependencies(manifest_path, repo, declared)
-    if dependencies != expected_dependencies:
-        raise ValueError("measured_at.depends_on is not the complete dependency set")
     subject = _validate_subject(row.get("subject"))
-    external = declared_external_paths(manifest_path, repo, declared)
-    expected_kind = "out_of_tree" if external else "in_tree"
-    if subject["kind"] != expected_kind:
-        raise ValueError("subject must be %s for the addressed manifest" % expected_kind)
-    if expected_kind == "in_tree":
+    if subject["kind"] == "in_tree":
         if subject != {"kind": "in_tree"}:
             raise ValueError("in_tree subject must not carry external repository claims")
     else:
         repos = subject.get("repos")
         if not isinstance(repos, list) or not repos:
             raise ValueError("out_of_tree subject must carry a non-empty repos list")
-        measured_paths = []
         for external_repo in repos:
             if not isinstance(external_repo, dict):
                 raise ValueError("out_of_tree repos entries must be objects")
@@ -393,17 +385,39 @@ def _validate_current_row(row: dict, reports: dict, repo: Path) -> None:
                 raise ValueError("out_of_tree repository commit must be a full Git object id")
             if not isinstance(external_repo.get("dirty"), bool):
                 raise ValueError("out_of_tree repository dirty state must be boolean")
-            measured = external_repo.get("measured")
-            if (not isinstance(measured, list) or not measured
-                    or not all(isinstance(path, str) and path for path in measured)):
+            measured_paths = external_repo.get("measured")
+            if (not isinstance(measured_paths, list) or not measured_paths
+                    or not all(isinstance(path, str) and path for path in measured_paths)):
                 raise ValueError("out_of_tree repository measured paths must be non-empty strings")
-            measured_paths.extend(measured)
+    if replace_manifest_binding:
+        return
+    manifest_path = _indexed_manifest_path(repo, manifest_rel)
+    manifest_data = read_regular_file(manifest_path)
+    declared = parse_json_object(manifest_data, str(manifest_path))
+    if _digest(manifest_data) != report["manifest_sha256"]:
+        raise ValueError("manifest_sha256 does not address the indexed manifest")
+    _validate_manifest_report_binding(declared, report)
+    expected_dependencies = declared_dependencies(manifest_path, repo, declared)
+    if dependencies != expected_dependencies:
+        raise ValueError("measured_at.depends_on is not the complete dependency set")
+    external = declared_external_paths(manifest_path, repo, declared)
+    expected_kind = "out_of_tree" if external else "in_tree"
+    if subject["kind"] != expected_kind:
+        raise ValueError("subject must be %s for the addressed manifest" % expected_kind)
+    if expected_kind == "out_of_tree":
+        measured_paths = []
+        for external_repo in subject["repos"]:
+            measured_paths.extend(external_repo["measured"])
         if sorted(measured_paths) != sorted(raw for raw, _ in external):
             raise ValueError("out_of_tree repos do not cover every external declared source")
 
 
 def load_results(
-    path: Path, *, limit: int = MAX_RESULTS_BYTES, require_current: bool = False
+    path: Path,
+    *,
+    limit: int = MAX_RESULTS_BYTES,
+    require_current: bool = False,
+    replace_corpora: frozenset[str] | None = None,
 ) -> LoadedResults:
     document = parse_json_object(read_regular_file(path, limit), "%s results JSON" % path)
     if document.get("schema") not in (None, RESULTS_SCHEMA):
@@ -430,6 +444,7 @@ def load_results(
             or any(not isinstance(item, str) or not item for item in unmeasured)
             or unmeasured != sorted(set(unmeasured))):
         raise ValueError("unmeasured must be a sorted unique list of corpus ids")
+    replace = replace_corpora or frozenset()
     seen: set[str] = set()
     addressed: set[str] = set()
     for row in rows:
@@ -440,7 +455,12 @@ def load_results(
             raise ValueError("duplicate corpus id: %s" % name)
         seen.add(name)
         if current:
-            _validate_current_row(row, reports, path.absolute().parents[2])
+            _validate_current_row(
+                row,
+                reports,
+                path.absolute().parents[2],
+                replace_manifest_binding=name in replace,
+            )
             addressed.add(row["report_sha256"])
     if current and set(reports) != addressed:
         raise ValueError("results reports must contain exactly the addressed producer reports")
