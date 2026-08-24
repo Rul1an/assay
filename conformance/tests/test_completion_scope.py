@@ -45,6 +45,7 @@ INVENTORY_RUN_SCRIPT = (
     "python3 -W error::ResourceWarning conformance/tests/test_implementations.py",
     "python3 -W error::ResourceWarning conformance/tests/test_pma_v0_registration.py",
     "python3 -W error::ResourceWarning conformance/tests/test_registry.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_bounded_run.py",
     "python3 -W error::ResourceWarning conformance/tests/test_run_all.py",
     "python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py",
     REQUIRED_RUN_ALL,

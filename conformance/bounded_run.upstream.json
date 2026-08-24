@@ -1,0 +1,11 @@
+{
+  "repository": "corpus-adequacy/corpus-adequacy",
+  "commit": "08e3b3f013c72f016131b32dfae03f749e432228",
+  "path": "bounded_run.py",
+  "license": "MIT",
+  "upstream_sha256": "71dedb0e8d62a110b25b97f68b5f0ead1b1e9abf3251b284a6401ae91968636a",
+  "local_sha256": "e15360a996ef6587c3f602fbf12dc5587888b791ffb002dc98a5230fbc8f2972",
+  "transformations": [
+    "Replace the corpus-adequacy caller-specific Windows docstring with Assay's direct-child-only non-claim; bytecode instructions are unchanged and only the runtime-visible docstring constant differs."
+  ]
+}
