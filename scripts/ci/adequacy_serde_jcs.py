@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
+import io
 import json
 import os
 import re
@@ -562,13 +564,17 @@ def _repo_root_self_checks() -> None:
             else:
                 os.environ["ADEQUACY_REPO_ROOT"] = old_env
 
-        try:
-            main(["verify-vendor", "--repo-root", str(hostile)])
-        except SystemExit as exc:
-            if exc.code in (None, 0):
+        parser_err = io.StringIO()
+        with contextlib.redirect_stderr(parser_err):
+            try:
+                main(["verify-vendor", "--repo-root", str(hostile)])
+            except SystemExit as exc:
+                if exc.code in (None, 0):
+                    raise HarnessError("--repo-root must be rejected by argparse")
+            else:
                 raise HarnessError("--repo-root must be rejected by argparse")
-        else:
-            raise HarnessError("--repo-root must be rejected by argparse")
+        if "unrecognized arguments" not in parser_err.getvalue():
+            raise HarnessError("expected argparse rejection was not captured")
 
 
 def self_test(root: Path) -> None:
