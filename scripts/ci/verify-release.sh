@@ -75,9 +75,11 @@ bounded_capture() {
 import math
 import os
 import pathlib
+import selectors
 import signal
 import subprocess
 import sys
+import time
 
 output, command = pathlib.Path(sys.argv[1]), sys.argv[2:]
 limit = 1024 * 1024
@@ -97,24 +99,27 @@ try:
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         start_new_session=True,
     )
 except OSError as error:
     raise SystemExit(f"could not execute {command[0]}: {error}")
 
-try:
-    stdout, _ = process.communicate(timeout=timeout)
-except subprocess.TimeoutExpired:
+
+class CaptureFailure(Exception):
+    pass
+
+
+def stop_process_group():
     try:
         os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
         pass
     try:
-        process.communicate(timeout=0.2)
+        process.wait(timeout=0.2)
     except subprocess.TimeoutExpired:
         pass
-    # The direct child may exit and close its pipes while a TERM-resistant
-    # descendant remains in the session. Always finish cleanup at group scope.
+    # The direct child may exit while a TERM-resistant descendant remains.
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
@@ -124,12 +129,66 @@ except subprocess.TimeoutExpired:
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=0.2)
-    raise SystemExit(f"{command[0]} exceeded {timeout:g}s deadline")
+
+
+stdout = bytearray()
+total = 0
+deadline = time.monotonic() + timeout
+selector = selectors.DefaultSelector()
+streams = ((process.stdout, "stdout"), (process.stderr, "stderr"))
+for pipe, name in streams:
+    os.set_blocking(pipe.fileno(), False)
+    selector.register(pipe, selectors.EVENT_READ, name)
+
+try:
+    while selector.get_map():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise CaptureFailure(f"{command[0]} exceeded {timeout:g}s deadline")
+        events = selector.select(timeout=remaining)
+        if not events:
+            continue
+        for key, _ in events:
+            try:
+                chunk = os.read(key.fd, min(64 * 1024, limit + 1 - total))
+            except BlockingIOError:
+                continue
+            except OSError as error:
+                raise CaptureFailure(f"could not read {command[0]} output: {error}")
+            if not chunk:
+                selector.unregister(key.fileobj)
+                key.fileobj.close()
+                continue
+            next_total = total + len(chunk)
+            if next_total > limit:
+                raise CaptureFailure(
+                    f"{command[0]} response exceeds {limit} combined stdout+stderr bytes"
+                )
+            total = next_total
+            if key.data == "stdout":
+                stdout.extend(chunk)
+            else:
+                sys.stderr.buffer.write(chunk)
+                sys.stderr.buffer.flush()
+
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise CaptureFailure(f"{command[0]} exceeded {timeout:g}s deadline")
+    try:
+        process.wait(timeout=remaining)
+    except subprocess.TimeoutExpired:
+        raise CaptureFailure(f"{command[0]} exceeded {timeout:g}s deadline")
+except CaptureFailure as error:
+    stop_process_group()
+    raise SystemExit(str(error))
+finally:
+    selector.close()
+    for pipe, _ in streams:
+        if not pipe.closed:
+            pipe.close()
 
 if process.returncode:
     raise SystemExit(f"{command[0]} exited {process.returncode}")
-if len(stdout) > limit:
-    raise SystemExit(f"{command[0]} response exceeds {limit} bytes")
 output.write_bytes(stdout)
 PY
 }
