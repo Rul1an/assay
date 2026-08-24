@@ -24,11 +24,18 @@ class GateError(Exception):
         self.reason, self.detail = reason, detail
 def _root() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-def builder_agent_from_ref(ref: str) -> str:
+def head_fields(pr: Any) -> tuple[str, str]:
+    head = pr.get("head") if isinstance(pr, dict) and isinstance(pr.get("head"), dict) else {}
+    sha, ref = head.get("sha"), head.get("ref")
+    if not isinstance(sha, str) or not HEX40.match(sha) or sha != sha.lower():
+        raise GateError("pr_api_failure", "head.sha")
+    if not isinstance(ref, str) or not ref.strip():
+        raise GateError("pr_api_failure", "head.ref")
+    return sha, ref
+
+def inferred_builder_prefix(ref: str) -> str | None:
     first = (ref or "").split("/", 1)[0].lower()
-    if first not in PREFIXES:
-        raise GateError("branch_prefix_mismatch", ref)
-    return first
+    return first if first in PREFIXES else None
 
 def _loose_object(text: str) -> dict[str, Any] | None:
     start, end = text.find("{"), text.rfind("}")
@@ -101,7 +108,8 @@ def validate_record(record: dict[str, Any], *, live_sha: str, branch_ref: str) -
     ) is not True:
         raise GateError("missing_field", "independence")
     builder_agent, builder_instance = _pair(record.get("builder"), "builder")
-    if builder_agent.lower() != builder_agent_from_ref(branch_ref):
+    prefix = inferred_builder_prefix(branch_ref)
+    if prefix and builder_agent.lower() != prefix:
         raise GateError("branch_prefix_mismatch", builder_agent)
     reviewer = record.get("reviewer")
     reviewer_agent, reviewer_instance = _pair(reviewer, "reviewer")
@@ -171,7 +179,7 @@ class GitHubApi:
 
     def comments(self, number: int) -> list[dict[str, Any]]:
         out, page = [], 1
-        while True:
+        while page <= 10:
             batch = self.get(f"/issues/{number}/comments?per_page=100&page={page}")
             if not isinstance(batch, list):
                 raise GateError("comments_api_failure", "not a list")
@@ -179,6 +187,7 @@ class GitHubApi:
             if len(batch) < 100:
                 return out
             page += 1
+        raise GateError("comments_limit", "more than 1000 comments")
 
 def live_check(number: int) -> int:
     repo, token = os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("GITHUB_TOKEN", "")
@@ -189,11 +198,9 @@ def live_check(number: int) -> int:
     pr = api.get(f"/pulls/{number}")
     if not isinstance(pr, dict):
         raise GateError("pr_api_failure", "pull")
-    head = pr.get("head") if isinstance(pr.get("head"), dict) else {}
-    if "sha" not in head:
-        raise GateError("pr_api_failure", "head")
-    evaluate(str(head.get("sha") or ""), str(head.get("ref") or ""), api.comments(number))
-    print(f"review-record-check=pass head={head.get('sha')}")
+    sha, ref = head_fields(pr)
+    evaluate(sha, ref, api.comments(number))
+    print(f"review-record-check=pass head={sha}")
     return 0
 
 def _rec(**over: Any) -> dict[str, Any]:
@@ -233,10 +240,11 @@ def self_test() -> int:
 
     try:
         evaluate(live, ref, [_cmt(green)])
-        evaluate("a" * 40, "cursor/feature", [_cmt(_rec(
+        evaluate(live, "cursor/feature", [_cmt(_rec(
             builder={"agent": "cursor", "instance": "w"},
             reviewer={"agent": "cursor", "instance": "r", "github_login": "Rul1an"},
         ))])
+        evaluate(live, "feature/fix", [_cmt(_rec(builder={"agent": "human", "instance": "ext"}))])
     except GateError as exc:
         fail.append(f"GREEN {exc.reason}")
 
@@ -263,6 +271,7 @@ def self_test() -> int:
         ("edited_current", live, ref, [_cmt(green, edited=True)]),
         ("blocked", live, ref, [_cmt(_rec(verdict="BLOCKED"))]),
         ("branch_prefix_mismatch", live, ref, [_cmt(_rec(builder={"agent": "codex", "instance": "w1"}))]),
+        ("branch_prefix_mismatch", live, "codex/foo", [_cmt(_rec(builder={"agent": "cursor", "instance": "w1"}))]),
         ("extra_prose", live, ref, [_cmt(green, extra="\nplease look\n")]),
         ("multiple_fences", live, ref, [_cmt(green, second=True)]),
         ("missing_field", live, ref, [_cmt(_rec(independence={
@@ -286,6 +295,21 @@ def self_test() -> int:
             fail.append(f"wanted comments_api_failure, got {exc.reason}")
     finally:
         urllib.request.urlopen = boom
+    class _Pages(GitHubApi):
+        def get(self, path: str) -> Any:
+            return [{}] * 100
+    try:
+        _Pages("o/r", "t").comments(1)
+        fail.append("wanted comments_limit, got pass")
+    except GateError as exc:
+        if exc.reason != "comments_limit":
+            fail.append(f"wanted comments_limit, got {exc.reason}")
+    try:
+        head_fields({"head": {"sha": None, "ref": "feature/fix"}})
+        fail.append("wanted pr_api_failure, got pass")
+    except GateError as exc:
+        if exc.reason != "pr_api_failure":
+            fail.append(f"wanted pr_api_failure, got {exc.reason}")
     if fail:
         print("self-test=failed", file=sys.stderr)
         print("\n".join(f"  {x}" for x in fail), file=sys.stderr)

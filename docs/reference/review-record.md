@@ -32,8 +32,11 @@ comment body:
 ```
 ````
 
-`builder.agent` must match the PR branch prefix (`codex/`, `claude/`,
-`cursor/`, `ruley/`). Same family is allowed. The checker rejects only
+`builder.agent` is checked against the branch prefix only when that
+prefix is one of `codex/`, `claude/`, `cursor/`, `ruley/`. Same family
+is allowed. On any other first path component (human or fork branches
+such as `feature/fix`) the declared builder is self-declared, not
+inferred or verified. The checker rejects only
 an identical `(agent, instance)` pair. `reviewer.github_login` must
 equal the comment author. GitHub `Bot` comments fail. Editing the
 current-head comment fails (`updated_at != created_at`). Older-head
