@@ -246,6 +246,44 @@ if kill -0 "$(cat "$cap_pid_file")" 2>/dev/null; then
   fail "combined output fake gh survived the size ceiling"
 fi
 
+# Charge before display: the one byte beyond the cap must not reach stderr.
+sink_gh="$tmp/sink-gh"
+cat >"$sink_gh" <<'SH'
+#!/usr/bin/env bash
+exec python3 - <<'PY'
+import sys
+import time
+
+sys.stderr.buffer.write(b"\x01" * (1024 * 1024 + 1))
+sys.stderr.buffer.flush()
+time.sleep(30)
+PY
+SH
+chmod +x "$sink_gh"
+
+sink_stderr_file="$tmp/sink-gh.stderr"
+sink_status=0
+ASSAY_RELEASE_GH_TIMEOUT_SECONDS=2 GH="$sink_gh" \
+  "$ORACLE" --self-test >/dev/null 2>"$sink_stderr_file" || sink_status=$?
+[[ "$sink_status" -eq 2 ]] \
+  || fail "stderr overflow was not infrastructure exit 2 (got $sink_status)"
+grep -q 'combined stdout+stderr' "$sink_stderr_file" \
+  || fail "stderr overflow lacks the size diagnostic"
+if grep -q 'deadline' "$sink_stderr_file"; then
+  fail "stderr overflow reached the command deadline"
+fi
+python3 - "$sink_stderr_file" <<'PY'
+import pathlib
+import sys
+
+visible = pathlib.Path(sys.argv[1]).read_bytes().count(b"\x01")
+limit = 1024 * 1024
+if visible != limit:
+    raise SystemExit(
+        f"overflow bytes reached stderr: expected {limit} visible child bytes, got {visible}"
+    )
+PY
+
 for invalid_timeout in 0 nan invalid; do
   status=0
   diagnostic="$(
