@@ -553,6 +553,165 @@ class CurrentResultsDocument(unittest.TestCase):
         self.assertEqual(loaded.rows[0]["corpus"], "legacy")
 
 
+class SelectiveReplacementLoad(unittest.TestCase):
+    def _stale_results(self, root: Path) -> Path:
+        adequacy = root / "conformance" / "adequacy"
+        row, encoded = projected(adequacy)
+        path = adequacy / "results.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": measure_all.SCHEMA,
+                    "row_contract": published_rows.ROW_CONTRACT,
+                    "reports": {sha256(encoded): encoded.decode("utf-8")},
+                    "unmeasured": [],
+                    "corpora": [row],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        manifest = adequacy / "sample.manifest.json"
+        manifest.write_bytes(manifest.read_bytes() + b"\n")
+        return path
+
+    def test_selected_stale_row_loads_with_replace_corpora(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = self._stale_results(Path(raw))
+            published_rows.load_results(path, replace_corpora=frozenset({"sample"}))
+
+    def test_unselected_stale_row_still_fails(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = self._stale_results(Path(raw))
+            with self.assertRaisesRegex(ValueError, "manifest_sha256"):
+                published_rows.load_results(path)
+
+    def test_malformed_report_address_fails_even_when_selected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path, document, _ = CurrentResultsDocument().write_current(Path(raw))
+            document["corpora"][0]["report_ref"] = "#/reports/sha256:" + "f" * 64
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "report_ref"):
+                published_rows.load_results(path, replace_corpora=frozenset({"sample"}))
+
+    def test_bypass_removal_fails_on_stale_selected_row(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = self._stale_results(Path(raw))
+            with self.assertRaisesRegex(ValueError, "manifest_sha256"):
+                published_rows.load_results(path, replace_corpora=frozenset())
+
+    def test_selected_stale_row_malformed_measured_at_still_fails(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = self._stale_results(Path(raw))
+            document = json.loads(path.read_text(encoding="utf-8"))
+            document["corpora"][0]["measured_at"] = {"commit": "not-a-full-sha", "depends_on": []}
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "malformed measured_at.commit"):
+                published_rows.load_results(path, replace_corpora=frozenset({"sample"}))
+
+    def test_selected_stale_row_malformed_subject_still_fails(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = self._stale_results(Path(raw))
+            document = json.loads(path.read_text(encoding="utf-8"))
+            document["corpora"][0]["subject"] = {"kind": "in_tree", "repos": []}
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "in_tree subject must not carry external repository claims"):
+                published_rows.load_results(path, replace_corpora=frozenset({"sample"}))
+
+    def test_measure_all_only_remeasures_stale_selected_row(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            path = self._stale_results(root)
+            old_digest = json.loads(path.read_text(encoding="utf-8"))["corpora"][0]["report_sha256"]
+            manifest = root / "conformance" / "adequacy" / "sample.manifest.json"
+            fresh = report(control_status="killed")
+            fresh["manifest"] = "conformance/adequacy/sample.manifest.json"
+            fresh["manifest_sha256"] = sha256(manifest.read_bytes())
+            encoded = report_bytes(fresh)
+            adequacy = root / "conformance" / "adequacy"
+            with mock.patch.object(measure_all, "REPO", root), \
+                 mock.patch.object(measure_all, "ADEQUACY", adequacy), \
+                 mock.patch.object(measure_all, "RESULTS", path), \
+                 mock.patch.object(measure_all, "load_tool") as load_tool, \
+                 mock.patch.object(measure_all, "require_clean_tool"), \
+                 mock.patch.object(measure_all, "run_producer", return_value=fresh), \
+                 mock.patch.object(
+                     measure_all,
+                     "measured_at",
+                     return_value={
+                         "measured_at": {
+                             "commit": MEASURED_COMMIT,
+                             "depends_on": [
+                                 "conformance/adequacy/implementation.py",
+                                 "conformance/adequacy/sample.manifest.json",
+                             ],
+                         }
+                     },
+                 ), \
+                 mock.patch.object(measure_all, "subject", return_value={"subject": {"kind": "in_tree"}}), \
+                 mock.patch.object(measure_all, "rel", return_value="conformance/adequacy/sample.manifest.json"):
+                load_tool.return_value.encode_report_v0.return_value = encoded
+                self.assertEqual(measure_all.main(["--only", "sample"]), 0)
+            loaded = published_rows.load_results(path)
+            self.assertNotEqual(loaded.by_corpus()["sample"]["report_sha256"], old_digest)
+
+    def test_full_remeasurement_loads_stale_selected_manifest(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            path = self._stale_results(root)
+            old_digest = json.loads(path.read_text(encoding="utf-8"))["corpora"][0]["report_sha256"]
+            adequacy = root / "conformance" / "adequacy"
+            manifest = adequacy / "sample.manifest.json"
+            fresh = report(control_status="killed")
+            fresh["manifest"] = "conformance/adequacy/sample.manifest.json"
+            fresh["manifest_sha256"] = sha256(manifest.read_bytes())
+            encoded = report_bytes(fresh)
+            with mock.patch.object(measure_all, "REPO", root), \
+                 mock.patch.object(measure_all, "ADEQUACY", adequacy), \
+                 mock.patch.object(measure_all, "RESULTS", path), \
+                 mock.patch.object(measure_all, "manifests", return_value=[manifest]), \
+                 mock.patch.object(measure_all, "load_tool") as load_tool, \
+                 mock.patch.object(measure_all, "require_clean_tool"), \
+                 mock.patch.object(measure_all, "run_producer", return_value=fresh), \
+                 mock.patch.object(
+                     measure_all,
+                     "measured_at",
+                     return_value={
+                         "measured_at": {
+                             "commit": MEASURED_COMMIT,
+                             "depends_on": [
+                                 "conformance/adequacy/implementation.py",
+                                 "conformance/adequacy/sample.manifest.json",
+                             ],
+                         }
+                     },
+                 ), \
+                 mock.patch.object(measure_all, "subject", return_value={"subject": {"kind": "in_tree"}}), \
+                 mock.patch.object(measure_all, "rel", return_value="conformance/adequacy/sample.manifest.json"):
+                load_tool.return_value.encode_report_v0.return_value = encoded
+                self.assertEqual(measure_all.main([]), 0)
+            loaded = published_rows.load_results(path)
+            self.assertNotEqual(loaded.by_corpus()["sample"]["report_sha256"], old_digest)
+
+    def test_producer_failure_leaves_results_unchanged(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            path = self._stale_results(root)
+            before = path.read_bytes()
+            adequacy = root / "conformance" / "adequacy"
+            with mock.patch.object(measure_all, "REPO", root), \
+                 mock.patch.object(measure_all, "ADEQUACY", adequacy), \
+                 mock.patch.object(measure_all, "RESULTS", path), \
+                 mock.patch.object(measure_all, "load_tool", return_value=mock.Mock()), \
+                 mock.patch.object(measure_all, "require_clean_tool"), \
+                 mock.patch.object(measure_all, "run_producer", side_effect=RuntimeError("boom")):
+                with self.assertRaisesRegex(RuntimeError, "boom"):
+                    measure_all.main(["--only", "sample"])
+            self.assertEqual(path.read_bytes(), before)
+
+
 class CheckerUsesCanonicalRows(unittest.TestCase):
     def test_checker_calls_the_canonical_loader(self):
         with mock.patch.object(
