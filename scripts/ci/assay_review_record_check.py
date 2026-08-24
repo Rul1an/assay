@@ -385,6 +385,31 @@ def self_test() -> int:
         if exc.reason != "comments_api_failure":
             fail.append(f"wanted comments_api_failure decode, got {exc.reason}")
 
+    class _Wired:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def read(self, n: int) -> bytes:
+            reads.append(n)
+            return b"{}"
+
+    reads, timeouts = [], []
+
+    def _open(_req, timeout=None):
+        timeouts.append(timeout)
+        return _Wired()
+
+    wired, urllib.request.urlopen = urllib.request.urlopen, _open
+    try:
+        GitHubApi("o/r", "t").get("/pulls/1")
+    finally:
+        urllib.request.urlopen = wired
+    if timeouts != [HTTP_TIMEOUT_S] or reads != [MAX_RESPONSE_BYTES + 1]:
+        fail.append(f"wired get bounds timeout={timeouts!r} read={reads!r}")
+
     class _Race(GitHubApi):
         n = 0
 
@@ -395,6 +420,7 @@ def self_test() -> int:
             sha = ("a" * 40) if type(self).n == 1 else ("b" * 40)
             return {"head": {"sha": sha, "ref": "ruley/x"}}
 
+    _Race.n = 0
     try:
         live_check(1, api=_Race("o/r", "t"))
         fail.append("wanted head_moved, got pass")
