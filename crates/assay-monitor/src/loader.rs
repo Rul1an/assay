@@ -32,8 +32,20 @@ fn attach_kernel_lacks_point(err: &ProgramError) -> bool {
     // ENOENT=2, EOPNOTSUPP=95 on Linux.
     match err {
         ProgramError::SyscallError(sy) => matches!(sy.io_error.raw_os_error(), Some(2 | 95)),
+        ProgramError::TracePointError(aya::programs::trace_point::TracePointError::FileError {
+            io_error,
+            ..
+        }) => matches!(io_error.raw_os_error(), Some(2 | 95)),
         _ => false,
     }
+}
+
+fn classify_send_attach_error(error: ProgramError) -> (SendFault, String) {
+    let kernel_lacks_point = attach_kernel_lacks_point(&error);
+    (
+        SendFault::AttachFailed { kernel_lacks_point },
+        error.to_string(),
+    )
 }
 
 #[cfg(target_os = "linux")]
@@ -51,14 +63,9 @@ fn attach_send_tracepoint(
         .map_err(|error| (SendFault::WrongProgramKind, error.to_string()))?;
     tp.load()
         .map_err(|error| (SendFault::LoadFailed, error.to_string()))?;
-    let link_id = tp.attach(row.tp().0, row.tp().1).map_err(|error| {
-        (
-            SendFault::AttachFailed {
-                kernel_lacks_point: attach_kernel_lacks_point(&error),
-            },
-            error.to_string(),
-        )
-    })?;
+    let link_id = tp
+        .attach(row.tp().0, row.tp().1)
+        .map_err(classify_send_attach_error)?;
     tp.take_link(link_id).map_err(|error| {
         (
             SendFault::AttachFailed {
@@ -703,5 +710,88 @@ impl LinuxMonitor {
             .map_err(|_| MonitorError::ReaderDied)?;
 
         Ok(ReceiverStream::new(rx))
+    }
+}
+
+#[cfg(test)]
+mod attach_error_tests {
+    use super::{attach_kernel_lacks_point, classify_send_attach_error};
+    use crate::probes::{send_update, ProbeAttachment, ProbeOutcome};
+    use aya::{
+        programs::{trace_point::TracePointError, ProgramError},
+        sys::SyscallError,
+    };
+    use std::io;
+
+    fn syscall_error(errno: i32) -> ProgramError {
+        ProgramError::SyscallError(SyscallError {
+            call: "test_attach",
+            io_error: io::Error::from_raw_os_error(errno),
+        })
+    }
+
+    fn tracepoint_file_error(errno: i32) -> ProgramError {
+        ProgramError::TracePointError(TracePointError::FileError {
+            filename: "/tracefs/events/syscalls/test/id".into(),
+            io_error: io::Error::from_raw_os_error(errno),
+        })
+    }
+
+    #[test]
+    fn missing_tracepoint_classification_covers_both_aya_error_paths() {
+        let cases = [
+            ("syscall ENOENT", syscall_error(2), true),
+            ("syscall EOPNOTSUPP", syscall_error(95), true),
+            ("tracepoint ENOENT", tracepoint_file_error(2), true),
+            ("tracepoint EOPNOTSUPP", tracepoint_file_error(95), true),
+            ("syscall EACCES", syscall_error(13), false),
+            ("tracepoint EACCES", tracepoint_file_error(13), false),
+            ("unrelated program error", ProgramError::NotLoaded, false),
+        ];
+
+        for (name, error, expected) in cases {
+            assert_eq!(attach_kernel_lacks_point(&error), expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn send_attach_error_reaches_the_final_probe_outcome() {
+        for (name, error, expected) in [
+            (
+                "missing tracepoint",
+                tracepoint_file_error(2),
+                ProbeOutcome::Unsupported,
+            ),
+            (
+                "permission failure",
+                tracepoint_file_error(13),
+                ProbeOutcome::Failed,
+            ),
+        ] {
+            let (fault, _) = classify_send_attach_error(error);
+            let mut attachment = ProbeAttachment::default();
+            attachment.record_attempt_failure("sys_enter_sendto", send_update(fault));
+            assert_eq!(
+                attachment.outcome("sys_enter_sendto"),
+                Some(expected),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn send_attach_site_delegates_to_the_classification_owner() {
+        let production = include_str!("loader.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production loader source");
+
+        assert_eq!(
+            production
+                .matches(".map_err(classify_send_attach_error)?")
+                .count(),
+            1,
+            "send attach must use the tested classification owner exactly once"
+        );
     }
 }
