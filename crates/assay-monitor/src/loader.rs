@@ -40,6 +40,14 @@ fn attach_kernel_lacks_point(err: &ProgramError) -> bool {
     }
 }
 
+fn classify_send_attach_error(error: ProgramError) -> (SendFault, String) {
+    let kernel_lacks_point = attach_kernel_lacks_point(&error);
+    (
+        SendFault::AttachFailed { kernel_lacks_point },
+        error.to_string(),
+    )
+}
+
 #[cfg(target_os = "linux")]
 fn attach_send_tracepoint(
     bpf: &mut Ebpf,
@@ -55,14 +63,9 @@ fn attach_send_tracepoint(
         .map_err(|error| (SendFault::WrongProgramKind, error.to_string()))?;
     tp.load()
         .map_err(|error| (SendFault::LoadFailed, error.to_string()))?;
-    let link_id = tp.attach(row.tp().0, row.tp().1).map_err(|error| {
-        (
-            SendFault::AttachFailed {
-                kernel_lacks_point: attach_kernel_lacks_point(&error),
-            },
-            error.to_string(),
-        )
-    })?;
+    let link_id = tp
+        .attach(row.tp().0, row.tp().1)
+        .map_err(classify_send_attach_error)?;
     tp.take_link(link_id).map_err(|error| {
         (
             SendFault::AttachFailed {
@@ -712,7 +715,8 @@ impl LinuxMonitor {
 
 #[cfg(test)]
 mod attach_error_tests {
-    use super::attach_kernel_lacks_point;
+    use super::{attach_kernel_lacks_point, classify_send_attach_error};
+    use crate::probes::{send_update, ProbeAttachment, ProbeOutcome};
     use aya::{
         programs::{trace_point::TracePointError, ProgramError},
         sys::SyscallError,
@@ -748,5 +752,46 @@ mod attach_error_tests {
         for (name, error, expected) in cases {
             assert_eq!(attach_kernel_lacks_point(&error), expected, "{name}");
         }
+    }
+
+    #[test]
+    fn send_attach_error_reaches_the_final_probe_outcome() {
+        for (name, error, expected) in [
+            (
+                "missing tracepoint",
+                tracepoint_file_error(2),
+                ProbeOutcome::Unsupported,
+            ),
+            (
+                "permission failure",
+                tracepoint_file_error(13),
+                ProbeOutcome::Failed,
+            ),
+        ] {
+            let (fault, _) = classify_send_attach_error(error);
+            let mut attachment = ProbeAttachment::default();
+            attachment.record_attempt_failure("sys_enter_sendto", send_update(fault));
+            assert_eq!(
+                attachment.outcome("sys_enter_sendto"),
+                Some(expected),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn send_attach_site_delegates_to_the_classification_owner() {
+        let production = include_str!("loader.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production loader source");
+
+        assert_eq!(
+            production
+                .matches(".map_err(classify_send_attach_error)?")
+                .count(),
+            1,
+            "send attach must use the tested classification owner exactly once"
+        );
     }
 }
