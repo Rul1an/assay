@@ -72,21 +72,65 @@ bounded_capture() {
   local output="$1"
   shift
   "$PYTHON" - "$output" "$@" <<'PY'
+import math
+import os
 import pathlib
+import signal
 import subprocess
 import sys
 
 output, command = pathlib.Path(sys.argv[1]), sys.argv[2:]
 limit = 1024 * 1024
+raw_timeout = os.environ.get("ASSAY_RELEASE_GH_TIMEOUT_SECONDS", "60")
 try:
-    result = subprocess.run(command, stdout=subprocess.PIPE, check=False)
+    timeout = float(raw_timeout)
+except ValueError:
+    raise SystemExit(
+        "ASSAY_RELEASE_GH_TIMEOUT_SECONDS must be a positive finite number"
+    )
+if not math.isfinite(timeout) or timeout <= 0:
+    raise SystemExit(
+        "ASSAY_RELEASE_GH_TIMEOUT_SECONDS must be a positive finite number"
+    )
+
+try:
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        start_new_session=True,
+    )
 except OSError as error:
     raise SystemExit(f"could not execute {command[0]}: {error}")
-if result.returncode:
-    raise SystemExit(f"{command[0]} exited {result.returncode}")
-if len(result.stdout) > limit:
+
+try:
+    stdout, _ = process.communicate(timeout=timeout)
+except subprocess.TimeoutExpired:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        process.communicate(timeout=0.2)
+    except subprocess.TimeoutExpired:
+        pass
+    # The direct child may exit and close its pipes while a TERM-resistant
+    # descendant remains in the session. Always finish cleanup at group scope.
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=0.2)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=0.2)
+    raise SystemExit(f"{command[0]} exceeded {timeout:g}s deadline")
+
+if process.returncode:
+    raise SystemExit(f"{command[0]} exited {process.returncode}")
+if len(stdout) > limit:
     raise SystemExit(f"{command[0]} response exceeds {limit} bytes")
-output.write_bytes(result.stdout)
+output.write_bytes(stdout)
 PY
 }
 

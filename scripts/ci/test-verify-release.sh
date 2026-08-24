@@ -82,4 +82,114 @@ if grep -Eq '\|[[:space:]]*(python3|"\$PYTHON")[[:space:]].*<<' "$ORACLE"; then
 fi
 grep -q 'bounded_capture' "$ORACLE" || fail "oracle has no bounded JSON capture"
 
+# A stalled GitHub CLI must be bounded by the verifier itself. The outer Python
+# watchdog protects this test from hanging when that inner deadline regresses.
+fake_gh="$tmp/gh"
+cat >"$fake_gh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$$" >"$FAKE_GH_PID_FILE"
+python3 - "$FAKE_GH_PID_FILE" <<'PY' &
+import os
+import signal
+import sys
+import time
+
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+with open(sys.argv[1], "a", encoding="utf-8") as handle:
+    handle.write(f"{os.getpid()}\n")
+os.close(1)
+os.close(2)
+while True:
+    time.sleep(30)
+PY
+while [[ "$(wc -l <"$FAKE_GH_PID_FILE" | tr -d ' ')" -lt 2 ]]; do
+  sleep 0.01
+done
+wait
+SH
+chmod +x "$fake_gh"
+
+status_file="$tmp/hung-gh.status"
+stderr_file="$tmp/hung-gh.stderr"
+pid_file="$tmp/hung-gh.pid"
+survivor_file="$tmp/hung-gh.survivors"
+FAKE_GH_PID_FILE="$pid_file" \
+ASSAY_RELEASE_GH_TIMEOUT_SECONDS=0.2 \
+GH="$fake_gh" \
+python3 - "$ORACLE" "$status_file" "$stderr_file" "$pid_file" "$survivor_file" <<'PY'
+import os
+import pathlib
+import signal
+import subprocess
+import sys
+
+oracle, status_path, stderr_path, pid_path, survivor_path = sys.argv[1:]
+process = subprocess.Popen(
+    [oracle, "--self-test"],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    start_new_session=True,
+)
+try:
+    _, stderr = process.communicate(timeout=2.0)
+    status = process.returncode
+except subprocess.TimeoutExpired:
+    os.killpg(process.pid, signal.SIGKILL)
+    try:
+        pids = pathlib.Path(pid_path).read_text(encoding="utf-8").splitlines()
+        if pids:
+            os.killpg(int(pids[0]), signal.SIGKILL)
+    except (FileNotFoundError, ProcessLookupError, ValueError):
+        pass
+    _, stderr = process.communicate()
+    status = 124
+pids = []
+try:
+    pids = [int(pid) for pid in pathlib.Path(pid_path).read_text(encoding="utf-8").splitlines()]
+except (FileNotFoundError, ValueError):
+    pass
+survivors = []
+for pid in pids:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        continue
+    survivors.append(pid)
+pathlib.Path(survivor_path).write_text(
+    "".join(f"{pid}\n" for pid in survivors), encoding="utf-8"
+)
+if pids:
+    try:
+        os.killpg(pids[0], signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+pathlib.Path(status_path).write_text(f"{status}\n", encoding="utf-8")
+pathlib.Path(stderr_path).write_bytes(stderr)
+PY
+[[ "$(cat "$status_file")" -eq 2 ]] \
+  || fail "hung gh was not classified as infrastructure exit 2 (got $(cat "$status_file"))"
+grep -q 'deadline' "$stderr_file" || fail "hung gh diagnostic does not name the deadline"
+[[ -s "$pid_file" ]] || fail "fake gh did not record its pid"
+[[ ! -s "$survivor_file" ]] \
+  || fail "hung gh processes survived verifier timeout: $(tr '\n' ' ' <"$survivor_file")"
+while IFS= read -r pid; do
+  if kill -0 "$pid" 2>/dev/null; then
+    fail "hung gh process $pid survived verifier timeout"
+  fi
+done <"$pid_file"
+[[ "$(wc -l <"$pid_file" | tr -d ' ')" -eq 2 ]] \
+  || fail "fake gh did not record both parent and descendant pids"
+
+for invalid_timeout in 0 nan invalid; do
+  status=0
+  diagnostic="$(
+    ASSAY_RELEASE_GH_TIMEOUT_SECONDS="$invalid_timeout" GH="$fake_gh" \
+      "$ORACLE" --self-test 2>&1 >/dev/null
+  )" || status=$?
+  [[ "$status" -eq 2 ]] \
+    || fail "invalid gh deadline '$invalid_timeout' did not fail as infrastructure"
+  printf '%s\n' "$diagnostic" | grep -q 'must be a positive finite number' \
+    || fail "invalid gh deadline '$invalid_timeout' lacks a bounded diagnostic"
+done
+
 printf 'PASS: verify-release offline contract tests\n'
