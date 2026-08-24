@@ -265,6 +265,8 @@ Stable, machine-readable reason codes (CI consumers key on these, not on prose `
   `fallback_projection_missing_authorization_binding`, `fallback_projection_invalid_meta`; a digest
   mismatch surfaces through the existing `decision_request_envelope_digest_match` check. Missing or
   invalid `params` additionally declares `fallback_call_parameter_binding` in `claims_not_made`.
+  When the named preimage cannot be resolved, Assay omits dependent decision/outcome digest-match
+  checks because no expected digest exists; the stable projection-shape check is the primary failure.
 - supersession (`verify-mcp-supersession` `groups[].reason_code`):
   `supersession_resolved_single`, `supersession_resolved_latest_decided_at`,
   `supersession_resolved_sequence`, `supersession_ambiguous_missing_sequence`,
