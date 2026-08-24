@@ -32,15 +32,19 @@ comment body:
 ```
 ````
 
-`builder.agent` is checked against the branch prefix only when that
-prefix is one of `codex/`, `claude/`, `cursor/`, `ruley/`. Same family
-is allowed. On any other first path component (human or fork branches
-such as `feature/fix`) the declared builder is self-declared, not
-inferred or verified. The checker rejects only
-an identical `(agent, instance)` pair. `reviewer.github_login` must
-equal the comment author. GitHub `Bot` comments fail. Editing the
-current-head comment fails (`updated_at != created_at`). Older-head
-records stay as history.
+`builder.agent` is checked against the branch prefix only when the
+ref is a known agent prefix plus a nonempty suffix (`codex/foo`,
+`claude/…`, `cursor/…`, `ruley/…`). Same family is allowed. A bare
+`ruley` branch, or any other first path component such as
+`feature/fix`, treats the declared builder as self-declared, not
+inferred or verified. The checker rejects only an identical
+`(agent, instance)` pair.
+
+The carrier must be `user.type == "User"` with nonempty string
+`created_at` and `updated_at`. Missing type or timestamps fail.
+`Bot` (and any other type) fails. Editing fails when the two
+timestamps differ. Older-head records stay as history.
+`reviewer.github_login` must equal the comment author.
 
 `READY` is the only passing verdict. `BLOCKED` must parse and still
 fail. Empty `findings` requires `no_findings: true`; each finding is
@@ -51,8 +55,12 @@ not the string `"true"`. `reviewer` must be an object.
 
 `scripts/ci/assay_review_record_check.py --self-test` pins the record
 contract. `--pr N` talks to the live GitHub API when `GITHUB_REPOSITORY`
-and `GITHUB_TOKEN` are set. A comments-API failure is `comments_api_failure`.
-The pre-commit hook is `assay-review-record-self-test`.
+and `GITHUB_TOKEN` are set. It reads the PR head, then comments, then
+the PR head again; a sha/ref change is `head_moved`. Responses are
+capped at 8 MiB, HTTP timeout is 30s, and comments stop after two
+pages (200 comments) with `comments_limit`. A comments-API failure is
+`comments_api_failure`. The pre-commit hook is
+`assay-review-record-self-test`.
 
 ## Non-claims
 
