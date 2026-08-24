@@ -141,6 +141,9 @@ fn one_monitor_invocation_shares_one_id_across_observation_artifacts() {
     let output_dir = tempfile::TempDir::new().expect("temporary artifact directory");
     let peers_path = output_dir.path().join("observed-peers.json");
     let health_path = output_dir.path().join("observation-health.json");
+    let mut targets =
+        super::prepare_observation_artifact_targets(Some(&peers_path), Some(&health_path))
+            .expect("reserve observation artifact targets");
     let run_id = super::observation_health::new_run_id();
     let artifacts = super::build_observation_artifacts(
         &run_id,
@@ -149,14 +152,21 @@ fn one_monitor_invocation_shares_one_id_across_observation_artifacts() {
         false,
         vec!["127.0.0.1:443".to_string()],
     );
-    artifacts
+    targets
         .observed_peers
-        .write_to(&peers_path)
+        .as_mut()
+        .expect("reserved peers target")
+        .writer()
+        .and_then(|writer| artifacts.observed_peers.write_to(writer))
         .expect("write observed peers");
-    assert!(super::observation_health::write_to(
-        &artifacts.observation_health,
-        &health_path
-    ));
+    let health_writer = targets
+        .observation_health
+        .as_mut()
+        .expect("reserved health target")
+        .writer()
+        .expect("prepare health writer");
+    super::observation_health::write_to(&artifacts.observation_health, health_writer)
+        .expect("write observation health");
 
     let peers: super::observed_peers::ObservedPeers =
         serde_json::from_slice(&std::fs::read(peers_path).expect("read observed peers"))
@@ -180,17 +190,24 @@ fn preparing_observation_outputs_removes_both_stale_counterparts() {
     std::fs::write(&peers_path, "old peers").expect("write stale peers");
     std::fs::write(&health_path, "old health").expect("write stale health");
 
-    super::prepare_observation_artifact_targets(Some(&peers_path), Some(&health_path))
-        .expect("prepare artifact targets");
+    let targets =
+        super::prepare_observation_artifact_targets(Some(&peers_path), Some(&health_path))
+            .expect("prepare artifact targets");
 
     assert!(
-        !peers_path.exists(),
-        "stale peers must not survive a new run"
+        std::fs::read(&peers_path)
+            .expect("read reserved peers target")
+            .is_empty(),
+        "stale peers must be replaced by an empty reserved target"
     );
     assert!(
-        !health_path.exists(),
-        "stale health must not pair with a partially written new run"
+        std::fs::read(&health_path)
+            .expect("read reserved health target")
+            .is_empty(),
+        "stale health must be replaced by an empty reserved target"
     );
+    assert!(targets.observed_peers.is_some());
+    assert!(targets.observation_health.is_some());
 }
 
 #[cfg(feature = "runner")]
@@ -222,4 +239,32 @@ fn observation_outputs_refuse_aliases_to_the_same_absent_target() {
 
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     assert!(err.to_string().contains("different output paths"));
+}
+
+#[cfg(feature = "runner")]
+#[test]
+fn observation_outputs_refuse_case_aliases_on_case_insensitive_filesystems() {
+    let output_dir = tempfile::TempDir::new().expect("temporary artifact directory");
+    let probe_lower = output_dir.path().join("case-probe");
+    let probe_upper = output_dir.path().join("CASE-PROBE");
+    std::fs::write(&probe_lower, "probe").expect("write case-sensitivity probe");
+    let case_insensitive = probe_upper.exists();
+    std::fs::remove_file(&probe_lower).expect("remove case-sensitivity probe");
+    if !case_insensitive {
+        return;
+    }
+
+    let lower = output_dir.path().join("observation.json");
+    let upper = output_dir.path().join("OBSERVATION.JSON");
+    let err = super::prepare_observation_artifact_targets(Some(&lower), Some(&upper))
+        .expect_err("case aliases must not overwrite one requested artifact");
+
+    assert!(matches!(
+        err.kind(),
+        std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::InvalidInput
+    ));
+    assert!(
+        !lower.exists(),
+        "a failed reservation must clean its first target"
+    );
 }

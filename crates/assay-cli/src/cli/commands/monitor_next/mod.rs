@@ -91,10 +91,46 @@ fn resolved_observation_target(path: &std::path::Path) -> std::io::Result<std::p
 }
 
 #[cfg(all(feature = "runner", any(target_os = "linux", test)))]
+#[derive(Debug)]
+struct ReservedObservationArtifact {
+    path: std::path::PathBuf,
+    file: std::fs::File,
+}
+
+#[cfg(all(feature = "runner", any(target_os = "linux", test)))]
+impl ReservedObservationArtifact {
+    fn reserve(path: &std::path::Path) -> std::io::Result<Self> {
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            file,
+        })
+    }
+
+    fn writer(&mut self) -> std::io::Result<&mut std::fs::File> {
+        use std::io::Seek;
+
+        self.file.set_len(0)?;
+        self.file.seek(std::io::SeekFrom::Start(0))?;
+        Ok(&mut self.file)
+    }
+}
+
+#[cfg(all(feature = "runner", any(target_os = "linux", test)))]
+#[derive(Debug, Default)]
+struct ObservationArtifactTargets {
+    observed_peers: Option<ReservedObservationArtifact>,
+    observation_health: Option<ReservedObservationArtifact>,
+}
+
+#[cfg(all(feature = "runner", any(target_os = "linux", test)))]
 fn prepare_observation_artifact_targets(
     observed_peers: Option<&std::path::Path>,
     observation_health: Option<&std::path::Path>,
-) -> std::io::Result<()> {
+) -> std::io::Result<ObservationArtifactTargets> {
     if let (Some(peers), Some(health)) = (observed_peers, observation_health) {
         if resolved_observation_target(peers)? == resolved_observation_target(health)? {
             return Err(std::io::Error::new(
@@ -111,7 +147,29 @@ fn prepare_observation_artifact_targets(
             Err(err) => return Err(err),
         }
     }
-    Ok(())
+
+    let observed_peers = observed_peers
+        .map(ReservedObservationArtifact::reserve)
+        .transpose()?;
+    let observation_health = match observation_health
+        .map(ReservedObservationArtifact::reserve)
+        .transpose()
+    {
+        Ok(target) => target,
+        Err(err) => {
+            if let Some(target) = observed_peers {
+                let path = target.path.clone();
+                drop(target);
+                let _ = std::fs::remove_file(path);
+            }
+            return Err(err);
+        }
+    };
+
+    Ok(ObservationArtifactTargets {
+        observed_peers,
+        observation_health,
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -237,20 +295,28 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
     use enforcement_health::{EnforcementHealth, SCOPE_IPV4_TCP_CONNECT};
 
     #[cfg(feature = "runner")]
-    let observation_run_id = if args.observation_health.is_some() || args.observed_peers.is_some() {
-        if let Err(err) = prepare_observation_artifact_targets(
+    let mut observation_artifact_targets = if args.observation_health.is_some()
+        || args.observed_peers.is_some()
+    {
+        match prepare_observation_artifact_targets(
             args.observed_peers.as_deref(),
             args.observation_health.as_deref(),
         ) {
-            emit_err!(
-                "FATAL: observation artifact targets could not be prepared: {err}; refusing to emit a mixed old/new identity set"
-            );
-            return Ok(exit_codes::EXIT_INFRA_ERROR);
+            Ok(targets) => Some(targets),
+            Err(err) => {
+                emit_err!(
+                        "FATAL: observation artifact targets could not be prepared: {err}; refusing to emit a mixed old/new identity set"
+                    );
+                return Ok(exit_codes::EXIT_INFRA_ERROR);
+            }
         }
-        Some(observation_health::new_run_id())
     } else {
         None
     };
+    #[cfg(feature = "runner")]
+    let observation_run_id = observation_artifact_targets
+        .as_ref()
+        .map(|_| observation_health::new_run_id());
 
     let mut runtime_config = None;
     let mut kill_config = None;
@@ -742,21 +808,30 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
             observed_peers,
         );
 
-        if let Some(path) = args.observed_peers.as_ref() {
-            if artifacts.observed_peers.write_to(path).is_err() {
+        let targets = observation_artifact_targets
+            .as_mut()
+            .expect("an observation run id has reserved artifact targets");
+        if let Some(target) = targets.observed_peers.as_mut() {
+            let write_result = target
+                .writer()
+                .and_then(|writer| artifacts.observed_peers.write_to(writer));
+            if write_result.is_err() {
                 emit_err!(
-                    "FATAL: observed_peers artifact was requested but could not be written; refusing exit 0 so a missing artifact is never read as an empty peer set"
+                    "FATAL: observed_peers artifact was requested but could not be written; refusing exit 0 so an invalid artifact is never read as an empty peer set"
                 );
                 return Ok(exit_codes::EXIT_INFRA_ERROR);
             }
         }
 
-        if let Some(path) = args.observation_health.as_ref() {
-            if !observation_health::write_to(&artifacts.observation_health, path) {
+        if let Some(target) = targets.observation_health.as_mut() {
+            let write_result = target.writer().and_then(|writer| {
+                observation_health::write_to(&artifacts.observation_health, writer)
+            });
+            if write_result.is_err() {
                 // Same fail-closed rule as enforcement_health: a consumer reads a missing artifact as
                 // "not requested", which would misreport a run that did observe.
                 emit_err!(
-                    "FATAL: observation_health artifact was requested but could not be written; refusing exit 0 so a missing artifact is never read as not-requested"
+                    "FATAL: observation_health artifact was requested but could not be written; refusing exit 0 so an invalid artifact is never read as not-requested"
                 );
                 return Ok(exit_codes::EXIT_INFRA_ERROR);
             }

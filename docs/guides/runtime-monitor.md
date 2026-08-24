@@ -101,6 +101,9 @@ crossed pair from different invocations. The value is only a correlation handle:
 identity, artifact authenticity, cryptographic provenance, or proof that the files were not copied
 after production.
 
+Before monitoring starts, requested output names are cleared and exclusively reserved. Aliases that
+resolve to one filesystem target are refused rather than allowing one artifact to overwrite the other.
+
 ## 3. Developer Workflow
 
 ### Environment Setup

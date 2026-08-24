@@ -31,7 +31,6 @@ use assay_runner_schema::{
     CgroupCorrelationStatus, KernelLayerStatus, NetworkEndpointClaimScope,
     NetworkProtocolCoverageStatus, ObservationHealth, PolicyLayerStatus, SdkLayerStatus,
 };
-use std::path::Path;
 
 /// Tracepoint that must not earn peer coverage (tests only).
 #[cfg(test)]
@@ -108,23 +107,13 @@ pub(crate) fn build(
     health
 }
 
-/// Write the artifact. Returns false if it was requested and could not be written.
-pub(crate) fn write_to(health: &ObservationHealth, path: &Path) -> bool {
-    let json = match serde_json::to_string_pretty(health) {
-        Ok(json) => json,
-        Err(err) => {
-            eprintln!("Failed to serialize observation_health artifact: {err}");
-            return false;
-        }
-    };
-    if let Err(err) = std::fs::write(path, format!("{json}\n")) {
-        eprintln!(
-            "Failed to write observation_health artifact to {}: {err}",
-            path.display()
-        );
-        return false;
-    }
-    true
+pub(crate) fn write_to(
+    health: &ObservationHealth,
+    writer: &mut impl std::io::Write,
+) -> std::io::Result<()> {
+    serde_json::to_writer_pretty(&mut *writer, health).map_err(std::io::Error::other)?;
+    writer.write_all(b"\n")?;
+    writer.flush()
 }
 
 #[cfg(test)]
