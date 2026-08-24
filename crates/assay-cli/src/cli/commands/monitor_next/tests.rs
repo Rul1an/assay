@@ -205,3 +205,21 @@ fn observation_outputs_refuse_the_same_target_path() {
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     assert!(err.to_string().contains("different output paths"));
 }
+
+#[cfg(feature = "runner")]
+#[test]
+fn observation_outputs_refuse_aliases_to_the_same_absent_target() {
+    let output_dir = tempfile::TempDir::new().expect("temporary artifact directory");
+    let detour = output_dir.path().join("detour");
+    std::fs::create_dir(&detour).expect("create path detour");
+    let direct = output_dir.path().join("observation.json");
+    let aliased = detour.join("..").join("observation.json");
+    assert!(!direct.exists());
+    assert!(!aliased.exists());
+
+    let err = super::prepare_observation_artifact_targets(Some(&direct), Some(&aliased))
+        .expect_err("lexically different paths must not overwrite one artifact target");
+
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(err.to_string().contains("different output paths"));
+}

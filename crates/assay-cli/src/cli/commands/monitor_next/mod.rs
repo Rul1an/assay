@@ -72,15 +72,31 @@ fn build_observation_artifacts(
 }
 
 #[cfg(all(feature = "runner", any(target_os = "linux", test)))]
+fn resolved_observation_target(path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    if path.exists() {
+        return std::fs::canonicalize(path);
+    }
+
+    let file_name = path.file_name().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "observation artifact output path must name a file",
+        )
+    })?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    Ok(std::fs::canonicalize(parent)?.join(file_name))
+}
+
+#[cfg(all(feature = "runner", any(target_os = "linux", test)))]
 fn prepare_observation_artifact_targets(
     observed_peers: Option<&std::path::Path>,
     observation_health: Option<&std::path::Path>,
 ) -> std::io::Result<()> {
     if let (Some(peers), Some(health)) = (observed_peers, observation_health) {
-        let same_existing_target = peers.exists()
-            && health.exists()
-            && std::fs::canonicalize(peers)? == std::fs::canonicalize(health)?;
-        if peers == health || same_existing_target {
+        if resolved_observation_target(peers)? == resolved_observation_target(health)? {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "observed_peers and observation_health must use different output paths",
