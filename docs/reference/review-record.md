@@ -3,8 +3,9 @@
 Assay #2561. A merge to `main` still needs the AGENTS.md non-building
 exact-head review. This page documents the **public, machine-readable
 record** and the checker that proves one exists for a named head. Slice B
-adds the advisory `review-record-check` GitHub Actions job. It is deliberately
-not a required branch-protection context yet.
+added the `review-record-check` GitHub Actions job. Slice C makes that stable
+context required by classic branch protection after the workflow proved both
+a missing-record failure and a current-record success on the same PR head.
 
 ## What to post
 
@@ -62,7 +63,7 @@ pages (200 comments) with `comments_limit`. A comments-API failure is
 `comments_api_failure`. The pre-commit hook is
 `assay-review-record-self-test`.
 
-## Advisory workflow
+## Required workflow
 
 `.github/workflows/review-record-check.yml` runs for `opened`, `reopened`,
 `synchronize`, and `ready_for_review` pull-request events. It checks out the
@@ -78,15 +79,18 @@ record. A later push triggers `synchronize`; the old record is stale and the
 new head needs a new independent review record before a rerun can pass.
 
 The workflow structure is cross-pinned from the existing required CI and
-host-capability roots. That makes a single changed root detectable, but does
-not turn this advisory job into merge enforcement.
+host-capability roots. Classic branch protection requires its stable
+`review-record-check` context, and
+`.github/rulesets/main-required-ci-contexts.json` records that expected live
+set. The scheduled reconciliation workflow detects drift between that file and
+the live protection rule.
 
 ## Non-claims
 
 The record is not cryptographic agent identity, intellectual adequacy, review
-quality, an approval count, or AGENTS carry-forward. Slice B does not change
-branch protection, support merge queues, write comments or statuses, or use a
-write token. API failure is a failed check, not evidence that the review was
-defective. A base checkout protects the executed repository code, not the
-PR-supplied workflow definition. Coordinated mutation of the workflow,
-checker, and both required roots is outside repo-local enforcement.
+quality, an approval count, or AGENTS carry-forward. The workflow does not
+support merge queues, write comments or statuses, or use a write token. API
+failure is a failed required check, not evidence that the review was defective.
+A base checkout protects the executed repository code, not the PR-supplied
+workflow definition. Coordinated mutation of the workflow, checker, both
+required roots, and live protection is outside repo-local enforcement.

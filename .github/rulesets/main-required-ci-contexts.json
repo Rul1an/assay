@@ -28,6 +28,10 @@
           {
             "context": "host-capability-check",
             "integration_id": 15368
+          },
+          {
+            "context": "review-record-check",
+            "integration_id": 15368
           }
         ]
       }
