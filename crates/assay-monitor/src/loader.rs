@@ -32,6 +32,10 @@ fn attach_kernel_lacks_point(err: &ProgramError) -> bool {
     // ENOENT=2, EOPNOTSUPP=95 on Linux.
     match err {
         ProgramError::SyscallError(sy) => matches!(sy.io_error.raw_os_error(), Some(2 | 95)),
+        ProgramError::TracePointError(aya::programs::trace_point::TracePointError::FileError {
+            io_error,
+            ..
+        }) => matches!(io_error.raw_os_error(), Some(2 | 95)),
         _ => false,
     }
 }
@@ -703,5 +707,46 @@ impl LinuxMonitor {
             .map_err(|_| MonitorError::ReaderDied)?;
 
         Ok(ReceiverStream::new(rx))
+    }
+}
+
+#[cfg(test)]
+mod attach_error_tests {
+    use super::attach_kernel_lacks_point;
+    use aya::{
+        programs::{trace_point::TracePointError, ProgramError},
+        sys::SyscallError,
+    };
+    use std::io;
+
+    fn syscall_error(errno: i32) -> ProgramError {
+        ProgramError::SyscallError(SyscallError {
+            call: "test_attach",
+            io_error: io::Error::from_raw_os_error(errno),
+        })
+    }
+
+    fn tracepoint_file_error(errno: i32) -> ProgramError {
+        ProgramError::TracePointError(TracePointError::FileError {
+            filename: "/tracefs/events/syscalls/test/id".into(),
+            io_error: io::Error::from_raw_os_error(errno),
+        })
+    }
+
+    #[test]
+    fn missing_tracepoint_classification_covers_both_aya_error_paths() {
+        let cases = [
+            ("syscall ENOENT", syscall_error(2), true),
+            ("syscall EOPNOTSUPP", syscall_error(95), true),
+            ("tracepoint ENOENT", tracepoint_file_error(2), true),
+            ("tracepoint EOPNOTSUPP", tracepoint_file_error(95), true),
+            ("syscall EACCES", syscall_error(13), false),
+            ("tracepoint EACCES", tracepoint_file_error(13), false),
+            ("unrelated program error", ProgramError::NotLoaded, false),
+        ];
+
+        for (name, error, expected) in cases {
+            assert_eq!(attach_kernel_lacks_point(&error), expected, "{name}");
+        }
     }
 }
