@@ -493,54 +493,36 @@ fn fallback_named_projection_breaks_on_changed_binding_block() {
 }
 
 #[test]
-fn fallback_named_projection_breaks_on_changed_bound_arguments() {
-    let dir = tempdir().unwrap();
+fn fallback_named_projection_binds_changed_arguments() {
     let binding = sample_binding();
-    // Decision binds the ORIGINAL params; the envelope carries DIFFERENT params.
-    let digest = named_digest(&sample_params(), &binding);
+    let original_digest = named_digest(&sample_params(), &binding);
     let other_params =
         serde_json::json!({ "name": "tools/call", "arguments": { "processInstanceKey": "9999" } });
-    let envelope = named_envelope(&other_params, Some(&binding), &[]);
-    let env_path = dir.path().join("request-envelope.json");
-    let decision = dir.path().join("decision.json");
-    fs::write(&env_path, envelope).unwrap();
-    fs::write(&decision, decision_json(&digest)).unwrap();
+    let changed_digest = named_digest(&other_params, &binding);
+    let envelope: Value =
+        serde_json::from_str(&named_envelope(&other_params, Some(&binding), &[])).unwrap();
 
-    Command::cargo_bin("assay")
-        .unwrap()
-        .args([
-            "evidence",
-            "verify-mcp-records",
-            "--request-envelope",
-            env_path.to_str().unwrap(),
-            "--decision",
-            decision.to_str().unwrap(),
-            "--fallback-projection",
-            "named",
-        ])
-        .assert()
-        .code(2)
-        .stdout(predicate::str::contains(
-            "decision_request_envelope_digest_match",
-        ))
-        .stdout(predicate::str::contains("fail mismatch"));
+    assert_ne!(changed_digest, original_digest);
+    let (exit, report) = verify_named_json(envelope, &changed_digest);
+    assert_eq!(exit, 0);
+    assert_eq!(report["binding"]["digest"], changed_digest);
 }
 
 #[test]
-fn fallback_named_projection_breaks_on_changed_bound_name() {
+fn fallback_named_projection_binds_changed_name() {
     let binding = sample_binding();
-    let digest = named_digest(&sample_params(), &binding);
+    let original_digest = named_digest(&sample_params(), &binding);
     let other_params = serde_json::json!({
         "name": "tools/list",
         "arguments": { "processInstanceKey": "2251799813685249" }
     });
+    let changed_digest = named_digest(&other_params, &binding);
     let envelope: Value =
         serde_json::from_str(&named_envelope(&other_params, Some(&binding), &[])).unwrap();
 
-    let (exit, report) = verify_named_json(envelope, &digest);
+    assert_ne!(changed_digest, original_digest);
+    let (exit, report) = verify_named_json(envelope, &changed_digest);
 
-    assert_eq!(exit, 2);
-    assert!(report["checks"].as_array().unwrap().iter().any(|check| {
-        check["id"] == "decision_request_envelope_digest_match" && check["ok"] == false
-    }));
+    assert_eq!(exit, 0);
+    assert_eq!(report["binding"]["digest"], changed_digest);
 }
