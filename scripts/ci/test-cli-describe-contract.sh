@@ -19,6 +19,63 @@ fail() {
 [[ -f "$CHECKER" ]] || fail "checker missing: $CHECKER"
 [[ -f "$BINDINGS" ]] || fail "bindings missing: $BINDINGS"
 
+for omitted in RUN_REPORT_SCHEMA SUMMARY_SCHEMA; do
+  MUTANT_REPO="${SCRATCH}/owner-omission-${omitted}"
+  mkdir -p "${MUTANT_REPO}/crates/assay-cli"
+  cp -R "${ROOT}/crates/assay-cli/src" "${MUTANT_REPO}/crates/assay-cli/src"
+  mkdir -p "${MUTANT_REPO}/crates/assay-core"
+  cp -R "${ROOT}/crates/assay-core/src" "${MUTANT_REPO}/crates/assay-core/src"
+  RUN_LISTING="${SCRATCH}/run-${omitted}.json"
+  python3 - "$CHECKER" "${MUTANT_REPO}/${BINDINGS#"${ROOT}/"}" \
+    "$MUTANT_REPO" "$RUN_LISTING" "$omitted" <<'PY' \
+    || fail "could not seed run owner omission for ${omitted}"
+import importlib.util
+import json
+import pathlib
+import re
+import sys
+
+spec = importlib.util.spec_from_file_location("cli_describe_contract", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+path = pathlib.Path(sys.argv[2])
+text = path.read_text(encoding="utf-8")
+pattern = re.compile(
+    r'\s*IdentityBinding \{\s*path: "run",\s*identity: '
+    + re.escape(sys.argv[5])
+    + r',\s*\},'
+)
+mutated, count = pattern.subn("", text)
+if count != 1:
+    raise SystemExit(f"expected one {sys.argv[5]} binding, removed {count}")
+path.write_text(mutated, encoding="utf-8")
+repo = pathlib.Path(sys.argv[3])
+constants = mod.shipping_constants(repo)
+rows = mod.binding_rows(repo, constants)
+identities = [identity for owner, identity in rows if owner == "run"]
+pathlib.Path(sys.argv[4]).write_text(
+    json.dumps(
+        {
+            "schema": "assay.cli.describe.v0",
+            "path": ["run"],
+            "commands": [],
+            "identities": identities,
+        }
+    ),
+    encoding="utf-8",
+)
+PY
+
+  owner_exit=0
+  python3 "$CHECKER" --repo "$MUTANT_REPO" --listing "$RUN_LISTING" --guard new \
+    >/dev/null 2>"$SCRATCH/owner-${omitted}.err" || owner_exit=$?
+  [[ "$owner_exit" -ne 0 ]] \
+    || fail "new guard stayed green when run lost ${omitted}"
+  grep -F "required command owner run omitted shipping identity" \
+    "$SCRATCH/owner-${omitted}.err" >/dev/null \
+    || fail "new guard did not name ${omitted}: $(cat "$SCRATCH/owner-${omitted}.err")"
+done
+
 DOCTOR_SCHEMA="$(
   python3 - "$DOCTOR_SRC" <<'PY'
 import re, sys

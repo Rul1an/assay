@@ -8,6 +8,8 @@
 #[allow(dead_code)]
 mod bounded_process;
 
+use assay_core::report::json::RUN_REPORT_SCHEMA;
+use assay_core::report::summary::SUMMARY_SCHEMA;
 use bounded_process::{run_bounded, GOLDEN_PATH_LIMITS};
 use serde_json::Value;
 use std::fs;
@@ -181,5 +183,28 @@ fn describe_parent_listing_includes_child_identities() {
     assert!(
         listed.contains(&list_schema.as_str()),
         "parent listing must include a child identity that exists in code; identities={listed:?}"
+    );
+}
+
+#[test]
+fn describe_run_lists_both_shipping_identities() {
+    let output = describe(&["run"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        exit_code(&output),
+        0,
+        "assay describe run must descend; stderr={stderr}"
+    );
+
+    let document = sole_report(&output);
+    assert_eq!(document["path"], Value::Array(vec!["run".into()]));
+
+    let mut listed = identities(&document);
+    listed.sort_unstable();
+    let mut expected = vec![RUN_REPORT_SCHEMA, SUMMARY_SCHEMA];
+    expected.sort_unstable();
+    assert_eq!(
+        listed, expected,
+        "run must publish both shipping output identities"
     );
 }
