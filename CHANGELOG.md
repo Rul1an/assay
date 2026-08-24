@@ -64,6 +64,10 @@ All notable changes to this project will be documented in this file.
   (#2245).
 
 ### Fixed
+- Named MCP request-envelope projection now fails closed when `params` is missing or is not a JSON
+  object. These cases report stable `fallback_projection_missing_params` or
+  `fallback_projection_invalid_params` checks, exit `2`, and serialize `binding.digest` as `null`
+  instead of publishing a digest over synthetic or unsupported input (#2595).
 - `assay init` stdout contract tests now separately pin the deterministic empty-project prefix
   and the ordered `--from-trace` closing block (#2254).
 - Published-release golden path and `examples/privileged-action-gate/run.sh` verify the

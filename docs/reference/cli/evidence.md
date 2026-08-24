@@ -97,9 +97,14 @@ computes the binding digest, checks the decision and optional outcome
 `backLink` fields, verifies the outcome's `decisionDigest` commitment to the
 full signed decision record, and verifies the narrow decision/outcome enum
 surface. In SEP-2787 mode the binding digest is the attestation JCS digest and
-the nonce comes from `issuerAsserted.nonce`. In request-envelope mode the
-binding digest is the JCS digest of the supplied envelope, while the nonce is
-only checked for decision/outcome record consistency.
+the nonce comes from `issuerAsserted.nonce`. Request-envelope mode defaults to
+`--fallback-projection whole-envelope`, which digests the supplied envelope.
+With `--fallback-projection named`, `params` must be a present JSON object and
+the digest binds only `{projection, params, binding}`, where `binding` is
+`_meta.authorization_binding`. Missing or non-object `params` fails closed with
+exit `2`, a stable `fallback_projection_*_params` check id, and
+`binding.digest: null`. The nonce is only checked for decision/outcome record
+consistency in either request-envelope mode.
 
 The command is deliberately not an MCP proxy, issuer, policy engine, or runtime
 truth oracle. It does not verify signatures, establish issuer key trust, prove

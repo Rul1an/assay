@@ -275,10 +275,10 @@ Pinned semantics:
 - **Projection id is bound.** The named projection digest is `sha256(jcs({projection, params, binding}))`,
   so the projection id is part of the preimage; changing it changes the digest. A rename or rule change
   is an explicit version bump.
-- **Bind-all inside the binding block.** Extra non-binding `_meta` fields are excluded from the digest,
-  but the `authorization_binding` object is included as a whole — there is no allowlist *inside* the
-  binding block, so any field within it is bound. (A closed schema for `authorization_binding` is a
-  possible later policy step, not part of this hardening.)
+- **Bind-all inside the binding value.** Extra non-binding `_meta` fields are excluded from the digest,
+  but the `authorization_binding` JSON value is included as a whole — there is no allowlist inside it.
+  When the value is an object, every field within it is therefore bound. A closed schema for
+  `authorization_binding` is a possible later policy step, not part of this hardening.
 - **`whole-envelope` is legacy compatibility.** `named` is the mode used for the `_meta`
   authorization-binding allowlist behavior. The default is unchanged here.
 - **Asserted sequence ordering.** `sequence` is read from the canonical `decisionDerived` content.

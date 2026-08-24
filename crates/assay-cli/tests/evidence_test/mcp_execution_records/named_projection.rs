@@ -113,6 +113,16 @@ fn fallback_named_projection_rejects_non_object_params() {
         assert!(report["checks"].as_array().unwrap().iter().any(|check| {
             check["id"] == "fallback_projection_invalid_params" && check["ok"] == false
         }));
+        assert!(!report["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|check| check["id"] == "decision_request_envelope_digest_match"));
+        assert!(report["claims_not_made"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|claim| claim == "fallback_call_parameter_binding"));
     }
 }
 
