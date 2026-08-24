@@ -112,11 +112,18 @@ except subprocess.TimeoutExpired:
     try:
         process.communicate(timeout=0.2)
     except subprocess.TimeoutExpired:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        process.communicate()
+        pass
+    # The direct child may exit and close its pipes while a TERM-resistant
+    # descendant remains in the session. Always finish cleanup at group scope.
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=0.2)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=0.2)
     raise SystemExit(f"{command[0]} exceeded {timeout:g}s deadline")
 
 if process.returncode:
