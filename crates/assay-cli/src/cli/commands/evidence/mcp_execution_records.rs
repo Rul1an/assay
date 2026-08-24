@@ -37,11 +37,11 @@ pub struct McpExecutionRecordArgs {
 
     /// For the no-attestation fallback, how the request-envelope binding digest is computed.
     /// `whole-envelope` (default) is the legacy compatibility mode: it digests the full JCS envelope.
-    /// `named` is the named fallback projection mode: it digests only the `tools/call` params plus the
-    /// `_meta.authorization_binding` block, so transport-local or observation-local `_meta` fields a
-    /// gateway/provider can legitimately add or strip do not change the digest. Named mode is
-    /// allowlist + fail-closed: if the binding block cannot be resolved the fallback case is
-    /// non-conformant rather than silently hashing the whole envelope. Ignored for the SEP-2787 path.
+    /// `named` is the named fallback projection mode: it requires object-valued `params` and digests
+    /// only those params plus the `_meta.authorization_binding` block, so transport-local or
+    /// observation-local `_meta` fields a gateway/provider can legitimately add or strip do not
+    /// change the digest. Named mode is allowlist + fail-closed: an incomplete preimage is
+    /// non-conformant rather than silently hashing synthetic input. Ignored for the SEP-2787 path.
     #[arg(long, value_enum, default_value_t = FallbackProjection::WholeEnvelope)]
     pub fallback_projection: FallbackProjection,
 
@@ -110,13 +110,13 @@ enum BindingInput {
 
 struct BindingExpectation {
     mode: &'static str,
-    digest: String,
+    digest: Option<String>,
     digest_source: &'static str,
     projection: Option<&'static str>,
-    /// `Some(false)` when named projection was requested but the binding block could not be resolved
-    /// (fail-closed); `None` when not applicable (whole-envelope / attestation).
-    binding_block_present: Option<bool>,
-    /// Stable reason code for the named-projection fail-closed case (None when present / N/A).
+    /// `Some(false)` when named projection was requested but its complete preimage could not be
+    /// resolved (fail-closed); `None` when not applicable (whole-envelope / attestation).
+    named_projection_ready: Option<bool>,
+    /// Stable reason code for the named-projection fail-closed case (None when ready / N/A).
     named_fail_code: Option<&'static str>,
     nonce: Option<String>,
     nonce_source: &'static str,
@@ -140,19 +140,19 @@ fn build_report(
     // non-conformant, never a silent fall-back to hashing the whole envelope. The check id is the
     // stable reason code (invalid `_meta` vs missing `authorization_binding`).
     match (
-        expectation.binding_block_present,
+        expectation.named_projection_ready,
         expectation.named_fail_code,
     ) {
         (Some(true), _) => checks.push(CheckReport {
             id: "fallback_projection_binding_present",
             ok: true,
-            detail: "named fallback projection binding block present".to_string(),
+            detail: "named fallback projection preimage is complete".to_string(),
         }),
         (Some(false), Some(code)) => checks.push(CheckReport {
             id: code,
             ok: false,
-            detail: "named fallback projection requested but the binding block could not be \
-                     resolved; failing closed instead of hashing the whole envelope"
+            detail: "named fallback projection requested but its preimage could not be resolved; \
+                     failing closed without publishing a binding digest"
                 .to_string(),
         }),
         _ => {}
@@ -254,6 +254,12 @@ fn claims_not_made(expectation: &BindingExpectation) -> Vec<&'static str> {
     if expectation.mode == "request_envelope" {
         claims.push("fallback_server_observation_truth");
         claims.push("fallback_nonce_freshness_or_uniqueness");
+    }
+    if matches!(
+        expectation.named_fail_code,
+        Some("fallback_projection_missing_params" | "fallback_projection_invalid_params")
+    ) {
+        claims.push("fallback_call_parameter_binding");
     }
     claims
 }
@@ -395,10 +401,10 @@ fn binding_expectation(
     match binding_input {
         BindingInput::Attestation(attestation) => Ok(BindingExpectation {
             mode: "sep2787_attestation",
-            digest: jcs_digest(attestation).context("failed to digest attestation")?,
+            digest: Some(jcs_digest(attestation).context("failed to digest attestation")?),
             digest_source: "sep2787_attestation_jcs",
             projection: None,
-            binding_block_present: None,
+            named_projection_ready: None,
             named_fail_code: None,
             nonce: string_at(attestation, &["issuerAsserted", "nonce"]),
             nonce_source: "issuerAsserted.nonce",
@@ -406,53 +412,42 @@ fn binding_expectation(
         BindingInput::RequestEnvelope(request_envelope) => match fallback_projection {
             FallbackProjection::WholeEnvelope => Ok(BindingExpectation {
                 mode: "request_envelope",
-                digest: jcs_digest(request_envelope)
-                    .context("failed to digest request envelope")?,
+                digest: Some(
+                    jcs_digest(request_envelope).context("failed to digest request envelope")?,
+                ),
                 digest_source: "request_envelope_jcs",
                 projection: None,
-                binding_block_present: None,
+                named_projection_ready: None,
                 named_fail_code: None,
                 nonce: decision_backlink.attestation_nonce.clone(),
                 nonce_source: "record_backlink_consistency",
             }),
             FallbackProjection::Named => {
-                // Allowlist: the preimage is exactly the named params plus the whole named binding
-                // block, everything else under _meta is excluded by construction. Fail-closed with a
-                // stable reason when the binding cannot be resolved — never hash the whole envelope.
-                // `_meta` absent or not an object -> invalid_meta; object but no binding -> missing.
-                let meta = request_envelope.get("_meta");
-                let (named_fail_code, binding): (Option<&'static str>, Option<&Value>) = match meta
-                {
-                    None => (Some("fallback_projection_invalid_meta"), None),
-                    Some(m) if !m.is_object() => (Some("fallback_projection_invalid_meta"), None),
-                    Some(m) => match m.get("authorization_binding") {
-                        Some(b) => (None, Some(b)),
-                        None => (
-                            Some("fallback_projection_missing_authorization_binding"),
-                            None,
-                        ),
-                    },
-                };
-                let digest = match binding {
-                    Some(binding) => {
-                        // The whole authorization_binding object is bound (bind-all); any field
-                        // inside it is part of the preimage. The projection id is bound too.
+                let resolved = resolve_named_projection(request_envelope);
+                let (digest, named_fail_code) = match resolved {
+                    Ok((params, binding)) => {
                         let projected = serde_json::json!({
                             "projection": FALLBACK_PROJECTION_V0,
-                            "params": request_envelope.get("params").unwrap_or(&Value::Null),
+                            "params": params,
                             "binding": binding,
                         });
-                        jcs_digest(&projected)
-                            .context("failed to digest named fallback projection")?
+                        (
+                            Some(
+                                jcs_digest(&projected)
+                                    .context("failed to digest named fallback projection")?,
+                            ),
+                            None,
+                        )
                     }
-                    None => "sha256:unresolved-binding-block".to_string(),
+                    Err(code) => (None, Some(code)),
                 };
+                let named_projection_ready = digest.is_some();
                 Ok(BindingExpectation {
                     mode: "request_envelope",
                     digest,
                     digest_source: "request_envelope_named_projection_jcs",
                     projection: Some(FALLBACK_PROJECTION_V0),
-                    binding_block_present: Some(binding.is_some()),
+                    named_projection_ready: Some(named_projection_ready),
                     named_fail_code,
                     nonce: decision_backlink.attestation_nonce.clone(),
                     nonce_source: "record_backlink_consistency",
@@ -462,13 +457,37 @@ fn binding_expectation(
     }
 }
 
+/// Resolve the complete v0 preimage once so validation and digest construction cannot drift.
+fn resolve_named_projection(
+    request_envelope: &Value,
+) -> std::result::Result<(&Value, &Value), &'static str> {
+    let params = request_envelope
+        .get("params")
+        .ok_or("fallback_projection_missing_params")?;
+    if !params.is_object() {
+        return Err("fallback_projection_invalid_params");
+    }
+
+    let meta = request_envelope
+        .get("_meta")
+        .filter(|meta| meta.is_object())
+        .ok_or("fallback_projection_invalid_meta")?;
+    let binding = meta
+        .get("authorization_binding")
+        .ok_or("fallback_projection_missing_authorization_binding")?;
+    Ok((params, binding))
+}
+
 fn attestation_report(
     binding_input: &BindingInput,
     expectation: &BindingExpectation,
 ) -> Option<AttestationReport> {
     match binding_input {
         BindingInput::Attestation(_) => Some(AttestationReport {
-            digest: expectation.digest.clone(),
+            digest: expectation
+                .digest
+                .clone()
+                .expect("attestation binding always has a digest"),
             nonce: expectation.nonce.clone(),
         }),
         BindingInput::RequestEnvelope(_) => None,
@@ -485,7 +504,7 @@ fn push_decision_binding_checks(
             checks.push(check_eq(
                 "decision_attestation_digest_match",
                 decision_backlink.attestation_digest.as_deref(),
-                Some(expectation.digest.as_str()),
+                expectation.digest.as_deref(),
                 "decision backLink.attestationDigest matches SEP-2787 JCS digest",
             ));
             checks.push(check_eq(
@@ -496,12 +515,14 @@ fn push_decision_binding_checks(
             ));
         }
         "request_envelope" => {
-            checks.push(check_eq(
-                "decision_request_envelope_digest_match",
-                decision_backlink.attestation_digest.as_deref(),
-                Some(expectation.digest.as_str()),
-                "decision backLink.attestationDigest matches request-envelope JCS digest",
-            ));
+            if let Some(digest) = expectation.digest.as_deref() {
+                checks.push(check_eq(
+                    "decision_request_envelope_digest_match",
+                    decision_backlink.attestation_digest.as_deref(),
+                    Some(digest),
+                    "decision backLink.attestationDigest matches request-envelope JCS digest",
+                ));
+            }
             checks.push(check_present(
                 "decision_request_envelope_nonce_present",
                 decision_backlink.attestation_nonce.as_deref(),
@@ -522,7 +543,7 @@ fn push_outcome_binding_checks(
             checks.push(check_eq(
                 "outcome_attestation_digest_match",
                 outcome_backlink.attestation_digest.as_deref(),
-                Some(expectation.digest.as_str()),
+                expectation.digest.as_deref(),
                 "outcome backLink.attestationDigest matches SEP-2787 JCS digest",
             ));
             checks.push(check_eq(
@@ -533,12 +554,14 @@ fn push_outcome_binding_checks(
             ));
         }
         "request_envelope" => {
-            checks.push(check_eq(
-                "outcome_request_envelope_digest_match",
-                outcome_backlink.attestation_digest.as_deref(),
-                Some(expectation.digest.as_str()),
-                "outcome backLink.attestationDigest matches request-envelope JCS digest",
-            ));
+            if let Some(digest) = expectation.digest.as_deref() {
+                checks.push(check_eq(
+                    "outcome_request_envelope_digest_match",
+                    outcome_backlink.attestation_digest.as_deref(),
+                    Some(digest),
+                    "outcome backLink.attestationDigest matches request-envelope JCS digest",
+                ));
+            }
         }
         _ => unreachable!("unknown binding mode"),
     }
