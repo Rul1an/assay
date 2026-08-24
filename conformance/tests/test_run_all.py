@@ -21,6 +21,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import bounded_run as br  # noqa: E402
 import run_all  # noqa: E402
 
 
@@ -91,6 +92,11 @@ class StdlibClassification(unittest.TestCase):
     def test_timeout_is_unproved(self):
         g, _ = self._run(_Child(raises=subprocess.TimeoutExpired("x", 1)))
         self.assertEqual(g, run_all.UNPROVED)
+
+    def test_incomplete_output_drain_is_unproved(self):
+        g, d = self._run(_Child(raises=br._OutputDrainIncomplete("not EOF")))
+        self.assertEqual(g, run_all.UNPROVED)
+        self.assertIn("runner could not complete", d)
 
     def test_missing_checker_is_unproved(self):
         g, d = run_all._stdlib_jsonrpc(_fake_suite(path="does/not/exist"))

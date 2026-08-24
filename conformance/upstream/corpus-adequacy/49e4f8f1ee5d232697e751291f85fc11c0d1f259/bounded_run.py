@@ -66,8 +66,8 @@ def _run_capped(cmd: list[str], cwd: Path, timeout: int) -> subprocess.Completed
     exits while an escaped descendant retains the streams raises
     _OutputDrainIncomplete. No temporary output files are used.
 
-    On Windows this helper kills only the direct child. That is not a
-    process-tree claim.
+    Windows: process/batch already refuse where fcntl is missing, and this
+    helper kills only the direct child. That is not a process-tree claim.
     """
     cap = OUTPUT_CAP_BYTES
     posix = _posix_process_group()
