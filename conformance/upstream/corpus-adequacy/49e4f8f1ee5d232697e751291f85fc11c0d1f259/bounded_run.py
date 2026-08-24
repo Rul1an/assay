@@ -9,6 +9,7 @@ drifts is the one that stops enforcing it.
 from __future__ import annotations
 
 import os
+import select
 import signal
 import subprocess
 import threading
@@ -27,10 +28,16 @@ OUTPUT_CAP_BYTES = 4 * 1024 * 1024
 # most 2 * READ_CHUNK_BYTES. Reads themselves are not locked: serializing a
 # blocking read can stall the other pipe.
 READ_CHUNK_BYTES = 64 * 1024
+READ_WAIT_SECONDS = 0.05
+READER_JOIN_TIMEOUT_SECONDS = 1.0
 
 
 class _OutputTooLarge(Exception):
     """A child exceeded OUTPUT_CAP_BYTES; its output is not materialized."""
+
+
+class _OutputDrainIncomplete(OSError):
+    """The child exited, but its captured output streams did not reach EOF."""
 
 
 def _charge_before_retain(total: int, cap: int, data: bytes) -> tuple[bytes, bool]:
@@ -55,8 +62,9 @@ def _run_capped(cmd: list[str], cwd: Path, timeout: int) -> subprocess.Completed
     charge-before-retain keeps combined retained bytes at most
     OUTPUT_CAP_BYTES. Crossing the cap kills the POSIX process group and
     raises _OutputTooLarge. In-flight read buffers may briefly hold
-    2 * READ_CHUNK_BYTES more. Timeout remains TimeoutExpired. No
-    temporary output files are used.
+    2 * READ_CHUNK_BYTES more. Timeout remains TimeoutExpired. A child that
+    exits while an escaped descendant retains the streams raises
+    _OutputDrainIncomplete. No temporary output files are used.
 
     Windows: process/batch already refuse where fcntl is missing, and this
     helper kills only the direct child. That is not a process-tree claim.
@@ -106,15 +114,6 @@ def _run_capped(cmd: list[str], cwd: Path, timeout: int) -> subprocess.Completed
         except subprocess.TimeoutExpired:
             pass
 
-    def close_pipes() -> None:
-        for stream in (proc.stdout, proc.stderr):
-            if stream is None:
-                continue
-            try:
-                stream.close()
-            except OSError:
-                pass
-
     def charge(which: int, data: bytes) -> None:
         nonlocal total, overflow
         with lock:
@@ -131,7 +130,15 @@ def _run_capped(cmd: list[str], cwd: Path, timeout: int) -> subprocess.Completed
     def reader(stream, which: int) -> None:
         try:
             while not stop.is_set():
-                data = stream.read(READ_CHUNK_BYTES)
+                if posix and hasattr(stream, "fileno") and hasattr(stream, "read1"):
+                    readable, _, _ = select.select(
+                        [stream.fileno()], [], [], READ_WAIT_SECONDS
+                    )
+                    if not readable:
+                        continue
+                    data = stream.read1(READ_CHUNK_BYTES)
+                else:
+                    data = stream.read(READ_CHUNK_BYTES)
                 if not data:
                     break
                 charge(which, data)
@@ -149,13 +156,18 @@ def _run_capped(cmd: list[str], cwd: Path, timeout: int) -> subprocess.Completed
                 pass
 
     threads = (
-        threading.Thread(target=reader, args=(proc.stdout, 1)),
-        threading.Thread(target=reader, args=(proc.stderr, 2)),
+        threading.Thread(
+            target=reader, args=(proc.stdout, 1), name="bounded-run-stdout", daemon=True
+        ),
+        threading.Thread(
+            target=reader, args=(proc.stderr, 2), name="bounded-run-stderr", daemon=True
+        ),
     )
     for thread in threads:
         thread.start()
 
     deadline = time.monotonic() + timeout
+    incomplete_drain = False
     try:
         while True:
             returncode = proc.poll()
@@ -180,14 +192,14 @@ def _run_capped(cmd: list[str], cwd: Path, timeout: int) -> subprocess.Completed
         else:
             kill_boundary()
         for thread in threads:
-            thread.join(timeout=10)
+            thread.join(timeout=READER_JOIN_TIMEOUT_SECONDS)
             if thread.is_alive():
+                incomplete_drain = True
                 stop.set()
                 kill_boundary()
-                close_pipes()
-                thread.join(timeout=1)
+        for thread in threads:
             if thread.is_alive():
-                raise RuntimeError("capped child reader did not stop")
+                thread.join(timeout=4 * READ_WAIT_SECONDS)
 
     if overflow:
         raise _OutputTooLarge()
@@ -195,6 +207,8 @@ def _run_capped(cmd: list[str], cwd: Path, timeout: int) -> subprocess.Completed
         raise subprocess.TimeoutExpired(cmd, timeout)
     if reader_error:
         raise reader_error[0]
+    if incomplete_drain:
+        raise _OutputDrainIncomplete("capped child output did not reach EOF")
     stdout_text = b"".join(chunks[1]).decode("utf-8", "replace")
     stderr_text = b"".join(chunks[2]).decode("utf-8", "replace")
     return subprocess.CompletedProcess(

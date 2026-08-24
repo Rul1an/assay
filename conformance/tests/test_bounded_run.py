@@ -33,7 +33,7 @@ SOURCE = (REPO_ROOT / "bounded_run.py").read_text(encoding="utf-8")
 PIN_PATH = REPO_ROOT / "bounded_run.upstream.json"
 UPSTREAM_COPY = (
     REPO_ROOT
-    / "upstream/corpus-adequacy/08e3b3f013c72f016131b32dfae03f749e432228"
+    / "upstream/corpus-adequacy/49e4f8f1ee5d232697e751291f85fc11c0d1f259"
     / "bounded_run.py"
 )
 UPSTREAM_LICENSE = UPSTREAM_COPY.with_name("LICENSE")
@@ -72,6 +72,25 @@ for _ in range(200):
     time.sleep(0.01)
 os._exit(0)
 """
+ESCAPED_DESCENDANT = """\
+import os, sys, time
+from pathlib import Path
+pid_path = Path(sys.argv[1])
+stop_path = Path(sys.argv[2])
+if os.fork() == 0:
+    time.sleep(0.25)
+    os.setsid()
+    pid_path.write_text(str(os.getpid()))
+    deadline = time.monotonic() + 30
+    while not stop_path.exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    os._exit(0)
+for _ in range(200):
+    if pid_path.exists() and pid_path.stat().st_size:
+        break
+    time.sleep(0.01)
+os._exit(0)
+"""
 
 
 class _CountPipe:
@@ -81,6 +100,11 @@ class _CountPipe:
 
     def read(self, n=-1):
         data = self._raw.read(n)
+        self._counter[0] += len(data)
+        return data
+
+    def read1(self, n=-1):
+        data = self._raw.read1(n)
         self._counter[0] += len(data)
         return data
 
@@ -174,7 +198,7 @@ class UpstreamSourceContract(unittest.TestCase):
         pin = json.loads(PIN_PATH.read_text(encoding="utf-8"))
         self.assertEqual(pin["repository"], "corpus-adequacy/corpus-adequacy")
         self.assertEqual(
-            pin["commit"], "08e3b3f013c72f016131b32dfae03f749e432228"
+            pin["commit"], "49e4f8f1ee5d232697e751291f85fc11c0d1f259"
         )
         self.assertEqual(pin["path"], "bounded_run.py")
         self.assertEqual(pin["license"], "MIT")
@@ -185,7 +209,7 @@ class UpstreamSourceContract(unittest.TestCase):
         )
         self.assertEqual(
             pin["upstream_sha256"],
-            "71dedb0e8d62a110b25b97f68b5f0ead1b1e9abf3251b284a6401ae91968636a",
+            "166ccab56ffa002316829ca978a9ba0b519d6927f86b9bbf647ee06b9c69f081",
         )
         upstream_bytes = UPSTREAM_COPY.read_bytes()
         self.assertEqual(
@@ -565,6 +589,11 @@ class ContinuousCap(_WithTestCap):
                         raise RuntimeError("leader exit was not observed")
                     return super().read(size)
 
+                def read1(self, size=-1):
+                    if not allow_read.wait(timeout=2):
+                        raise RuntimeError("leader exit was not observed")
+                    return super().read1(size)
+
             if proc.stdout is not None:
                 proc.stdout = _GatedPipe(proc.stdout, pulled)
             if proc.stderr is not None:
@@ -604,6 +633,9 @@ class ContinuousCap(_WithTestCap):
 class DescendantPipes(_WithTestCap):
     """Leader-exit must not lose the captured POSIX group."""
 
+    def test_drain_incomplete_is_an_io_failure_for_existing_callers(self):
+        self.assertTrue(issubclass(br._OutputDrainIncomplete, OSError))
+
     def test_descendant_holding_pipes_is_group_killed(self):
         if not POSIX:
             self.skipTest(
@@ -624,6 +656,84 @@ class DescendantPipes(_WithTestCap):
             finally:
                 if pid_path.exists() and pid_path.stat().st_size:
                     _reap_pid(int(pid_path.read_text()))
+
+    @unittest.skipUnless(POSIX, "requires POSIX fork and setsid")
+    def test_escaped_descendant_yields_a_bounded_named_drain_failure(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            pid_path = tmp / "escaped.pid"
+            stop_path = tmp / "escaped.stop"
+            candidate = _probe(
+                tmp, ESCAPED_DESCENDANT, str(pid_path), str(stop_path)
+            )
+            worker = tmp / "worker.py"
+            worker.write_text(
+                "import sys\n"
+                "import threading\n"
+                "from pathlib import Path\n"
+                f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
+                "import bounded_run as br\n"
+                "br.READER_JOIN_TIMEOUT_SECONDS = 0.25\n"
+                "try:\n"
+                "    br._run_capped(sys.argv[1:], Path.cwd(), 2)\n"
+                "except br._OutputDrainIncomplete:\n"
+                "    alive = [t.name for t in threading.enumerate() "
+                "if t.name.startswith('bounded-run-')]\n"
+                "    if alive:\n"
+                "        print('reader-leak:' + ','.join(sorted(alive)))\n"
+                "        raise SystemExit(5)\n"
+                "    print('drain-incomplete')\n"
+                "    raise SystemExit(0)\n"
+                "except BaseException as exc:\n"
+                "    print(type(exc).__name__)\n"
+                "    raise SystemExit(3)\n"
+                "raise SystemExit(4)\n",
+                encoding="utf-8",
+            )
+            supervisor = subprocess.Popen(
+                [sys.executable, str(worker), *candidate],
+                cwd=tmp,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+            )
+            escaped_pid = None
+            try:
+                try:
+                    stdout, stderr = supervisor.communicate(timeout=4)
+                except subprocess.TimeoutExpired:
+                    os.killpg(supervisor.pid, signal.SIGKILL)
+                    supervisor.communicate(timeout=2)
+                    self.fail("bounded runner did not return within the outer bound")
+                self.assertEqual(supervisor.returncode, 0, stderr)
+                self.assertEqual(stdout.strip(), "drain-incomplete")
+                self.assertTrue(
+                    pid_path.exists() and pid_path.stat().st_size,
+                    "escaped descendant witness was never created",
+                )
+            finally:
+                stop_path.touch()
+                witness_deadline = time.monotonic() + 2
+                while (
+                    (not pid_path.exists() or not pid_path.stat().st_size)
+                    and time.monotonic() < witness_deadline
+                ):
+                    time.sleep(0.02)
+                if pid_path.exists() and pid_path.stat().st_size:
+                    escaped_pid = int(pid_path.read_text())
+                    _reap_pid(escaped_pid)
+                    reap_deadline = time.monotonic() + 2
+                    while _pid_alive(escaped_pid) and time.monotonic() < reap_deadline:
+                        time.sleep(0.02)
+                    self.assertFalse(
+                        _pid_alive(escaped_pid),
+                        "escaped descendant remained alive after test cleanup",
+                    )
+                try:
+                    os.killpg(supervisor.pid, signal.SIGKILL)
+                except OSError:
+                    pass
 
 
 class Mutations(unittest.TestCase):
