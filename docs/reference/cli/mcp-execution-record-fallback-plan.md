@@ -1,8 +1,7 @@
 # MCP Execution Record Fallback Binding Plan
 
-> **Status:** docs-first slice plan. This page scopes the next
-> `assay evidence verify-mcp-records` capability after Check B support.
-> It is not a shipped CLI contract yet. The slice adds a no-attestation
+> **Status:** shipped CLI behavior plus retained design rationale. This page documents
+> `assay evidence verify-mcp-records` after Check B support. The command includes a no-attestation
 > request-envelope fallback path for SEP-2828-style execution records,
 > while preserving Assay's current boundary as an independent consumer
 > verifier. It does not add signature verification, issuer trust,
@@ -238,7 +237,11 @@ Everything else under `_meta` is excluded by construction. The rules, in code an
   preimage; unrelated `_meta` (progress tokens, trace context, other SEP blocks) is excluded, so two
   views that differ only in non-binding `_meta` produce the same digest.
 - **Fail-closed.** If `_meta.authorization_binding` is absent, the fallback case is non-conformant
-  (`fallback_binding_block_present` fails, exit `2`) rather than silently hashing the whole envelope.
+  (`fallback_projection_missing_authorization_binding`, exit `2`) rather than silently hashing the
+  whole envelope. The same rule applies when the named preimage is incomplete: `params` must be a
+  present JSON object. Missing `params` reports `fallback_projection_missing_params`; null, array,
+  or scalar `params` reports `fallback_projection_invalid_params`. These failures publish
+  `binding.digest: null`, not a digest over synthetic input.
 - **Self-describing version.** The report carries `binding.projection = "assay.fallback_projection.v0"`.
   This tracks the in-progress SEP-2828 fallback-binding discussion; a rename or rule change is an
   explicit version bump, never a silent reinterpretation.
@@ -247,6 +250,8 @@ Everything else under `_meta` is excluded by construction. The rules, in code an
 
 - The named field set (`params` + `_meta.authorization_binding`) is a proposed shape tracking the
   upstream discussion, not a finalized SEP contract; it is versioned so it can change explicitly.
+- A flat object with top-level `name` and `arguments` is not silently reinterpreted as v0 `params`.
+  Supporting that shape requires a separately named projection and an addressable preimage contract.
 - Matching the named projection digest does not prove the server observed the envelope honestly, nor
   that the omitted `_meta` was irrelevant to anything other than the binding.
 - `whole-envelope` mode remains for interop with current external fixtures that bind the full envelope.
@@ -256,8 +261,12 @@ Everything else under `_meta` is excluded by construction. The rules, in code an
 Stable, machine-readable reason codes (CI consumers key on these, not on prose `detail`):
 
 - fallback (named mode, in `verify-mcp-records` check ids): `fallback_projection_binding_present`,
+  `fallback_projection_missing_params`, `fallback_projection_invalid_params`,
   `fallback_projection_missing_authorization_binding`, `fallback_projection_invalid_meta`; a digest
-  mismatch surfaces through the existing `decision_request_envelope_digest_match` check.
+  mismatch surfaces through the existing `decision_request_envelope_digest_match` check. Missing or
+  invalid `params` additionally declares `fallback_call_parameter_binding` in `claims_not_made`.
+  When the named preimage cannot be resolved, Assay omits dependent decision/outcome digest-match
+  checks because no expected digest exists; the stable projection-shape check is the primary failure.
 - supersession (`verify-mcp-supersession` `groups[].reason_code`):
   `supersession_resolved_single`, `supersession_resolved_latest_decided_at`,
   `supersession_resolved_sequence`, `supersession_ambiguous_missing_sequence`,
@@ -268,10 +277,10 @@ Pinned semantics:
 - **Projection id is bound.** The named projection digest is `sha256(jcs({projection, params, binding}))`,
   so the projection id is part of the preimage; changing it changes the digest. A rename or rule change
   is an explicit version bump.
-- **Bind-all inside the binding block.** Extra non-binding `_meta` fields are excluded from the digest,
-  but the `authorization_binding` object is included as a whole — there is no allowlist *inside* the
-  binding block, so any field within it is bound. (A closed schema for `authorization_binding` is a
-  possible later policy step, not part of this hardening.)
+- **Bind-all inside the binding value.** Extra non-binding `_meta` fields are excluded from the digest,
+  but the `authorization_binding` JSON value is included as a whole — there is no allowlist inside it.
+  When the value is an object, every field within it is therefore bound. A closed schema for
+  `authorization_binding` is a possible later policy step, not part of this hardening.
 - **`whole-envelope` is legacy compatibility.** `named` is the mode used for the `_meta`
   authorization-binding allowlist behavior. The default is unchanged here.
 - **Asserted sequence ordering.** `sequence` is read from the canonical `decisionDerived` content.
