@@ -180,6 +180,72 @@ done <"$pid_file"
 [[ "$(wc -l <"$pid_file" | tr -d ' ')" -eq 2 ]] \
   || fail "fake gh did not record both parent and descendant pids"
 
+# The ceiling applies while reading and across both streams. Each stream stays
+# below 1 MiB, then the fake sleeps so a post-completion check loses to timeout.
+cap_gh="$tmp/cap-gh"
+cat >"$cap_gh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$$" >"$FAKE_GH_PID_FILE"
+exec python3 - <<'PY'
+import sys
+import time
+
+sys.stdout.buffer.write(b"o" * (600 * 1024))
+sys.stdout.buffer.flush()
+sys.stderr.buffer.write(b"e" * (600 * 1024))
+sys.stderr.buffer.flush()
+time.sleep(30)
+PY
+SH
+chmod +x "$cap_gh"
+
+cap_status_file="$tmp/cap-gh.status"
+cap_stderr_file="$tmp/cap-gh.stderr"
+cap_pid_file="$tmp/cap-gh.pid"
+FAKE_GH_PID_FILE="$cap_pid_file" \
+ASSAY_RELEASE_GH_TIMEOUT_SECONDS=2 \
+GH="$cap_gh" \
+python3 - "$ORACLE" "$cap_status_file" "$cap_stderr_file" "$cap_pid_file" <<'PY'
+import os
+import pathlib
+import signal
+import subprocess
+import sys
+
+oracle, status_path, stderr_path, pid_path = sys.argv[1:]
+process = subprocess.Popen(
+    [oracle, "--self-test"],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    start_new_session=True,
+)
+try:
+    _, stderr = process.communicate(timeout=5.0)
+    status = process.returncode
+except subprocess.TimeoutExpired:
+    os.killpg(process.pid, signal.SIGKILL)
+    _, stderr = process.communicate()
+    status = 124
+pathlib.Path(status_path).write_text(f"{status}\n", encoding="utf-8")
+pathlib.Path(stderr_path).write_bytes(stderr)
+try:
+    fake_pid = int(pathlib.Path(pid_path).read_text(encoding="utf-8").strip())
+    os.killpg(fake_pid, signal.SIGKILL)
+except (FileNotFoundError, ProcessLookupError, ValueError):
+    pass
+PY
+[[ "$(cat "$cap_status_file")" -eq 2 ]] \
+  || fail "combined output overflow was not infrastructure exit 2 (got $(cat "$cap_status_file"))"
+grep -q 'combined stdout+stderr' "$cap_stderr_file" \
+  || fail "combined output overflow lacks the size diagnostic"
+if grep -q 'deadline' "$cap_stderr_file"; then
+  fail "combined output overflow reached the command deadline"
+fi
+[[ -s "$cap_pid_file" ]] || fail "combined output fake gh did not record its pid"
+if kill -0 "$(cat "$cap_pid_file")" 2>/dev/null; then
+  fail "combined output fake gh survived the size ceiling"
+fi
+
 for invalid_timeout in 0 nan invalid; do
   status=0
   diagnostic="$(
