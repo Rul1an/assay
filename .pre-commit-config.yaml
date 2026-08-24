@@ -34,12 +34,14 @@ repos:
           (?x)^(
             docs/experiments/.+/archive-contents/.+
             |crates/assay-core/tests/fixtures/mcp-era-parity-v0/schema-.+\.json
+            |third_party/serde_jcs-0\.2\.0/.+
           )$
       - id: trailing-whitespace
         exclude: |
           (?x)^(
             docs/experiments/.+/archive-contents/.+
             |crates/assay-core/tests/fixtures/mcp-era-parity-v0/schema-.+\.json
+            |third_party/serde_jcs-0\.2\.0/.+
           )$
 
   # GitGuardian secrets detection (manual/local opt-in; requires GITGUARDIAN_API_KEY)
@@ -370,6 +372,15 @@ repos:
         # The asset download replay is intentionally separate; this hook proves
         # local mutation cases without downloading a release on each commit.
         files: ^(scripts/ci/(verify-release|test-verify-release)\.sh|\.pre-commit-config\.yaml)$
+
+      - id: adequacy-serde-jcs-verify-vendor
+        name: Vendored serde_jcs baseline verify-vendor
+        entry: python3 scripts/ci/adequacy_serde_jcs.py verify-vendor
+        language: system
+        pass_filenames: false
+        # Committed vendor bytes only. build/test allow corpus mutants on lib.rs and
+        # run in the corpus tool's isolated copy; self-test stays out of pre-commit.
+        files: ^(third_party/serde_jcs-0\.2\.0(\.crate|\.provenance\.json|/.*)|scripts/ci/adequacy_serde_jcs\.py|\.pre-commit-config\.yaml)$
 
       - id: tag-tree-outward-truth
         name: Candidate tag tree identifies its source version

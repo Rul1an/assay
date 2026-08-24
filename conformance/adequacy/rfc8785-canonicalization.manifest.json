@@ -14,18 +14,23 @@
   "_about": "Mutation adequacy for the RFC 8785 (JCS) conformance corpus. Every content id, mandate id and bundle run root in this workspace is a sha256 over the bytes this canonicalizer emits, so a divergence makes those digests irreproducible by any other implementation. THE CONTROL IS NOT INVENTED HERE: rfc8785_conformance.rs documents it in prose at the top of the file -- swap serde_jcs::to_vec for serde_json::to_vec and at least 8 vectors must fail, keyorder_utf16_vs_codepoint among them. That property was written down so it would stay checkable rather than remembered. This runs it.",
   "repo_root": "../..",
   "implementation_sources": [
-    "../../crates/assay-canonical/src/jcs.rs"
+    "../../crates/assay-canonical/src/jcs.rs",
+    "../../third_party/serde_jcs-0.2.0/src/lib.rs"
   ],
-  "build": [],
+  "harness_sources": [
+    "../../scripts/ci/adequacy_serde_jcs.py",
+    "../../third_party/serde_jcs-0.2.0.crate",
+    "../../third_party/serde_jcs-0.2.0.provenance.json"
+  ],
+  "build": [
+    "python3",
+    "scripts/ci/adequacy_serde_jcs.py",
+    "build"
+  ],
   "entrypoint_command": [
-    "cargo",
-    "test",
-    "-p",
-    "assay-canonical",
-    "--test",
-    "rfc8785_conformance",
-    "--",
-    "--nocapture"
+    "python3",
+    "scripts/ci/adequacy_serde_jcs.py",
+    "test"
   ],
   "vectors": "../../crates/assay-canonical/tests/vectors/rfc8785.json",
   "id_key": "vector_id",

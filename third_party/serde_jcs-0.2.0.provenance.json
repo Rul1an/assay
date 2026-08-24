@@ -1,0 +1,12 @@
+{
+  "crate": "serde_jcs",
+  "version": "0.2.0",
+  "archive_path": "third_party/serde_jcs-0.2.0.crate",
+  "archive_sha256": "d3a60f3fda61525e439ef6d67422118f11e986566997d9021c56867ad814a0aa",
+  "extract_dir": "third_party/serde_jcs-0.2.0",
+  "file_count": 27,
+  "vcs_sha1": "da9568831881506731d0da73e4afa46e1f8b0fdf",
+  "ryu_js_checksum": "6518fc26bced4d53678a22d6e423e9d8716377def84545fe328236e3af070e7f",
+  "proof_composition": "Compile-unproved classification composes pinned corpus-adequacy@13048989 build-gate semantics (mutant does not build => unproved) with this harness self-test bite (compile-break lib.rs reaches cargo, not verify_vendor).",
+  "non_claim": "Patched extracted source in adequacy runs is a controlled mutation subject, not the published crate."
+}

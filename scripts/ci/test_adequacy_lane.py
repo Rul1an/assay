@@ -84,6 +84,22 @@ class RelevanceDerivation(unittest.TestCase):
         self.assertEqual(result["relevant"], ["heavy"])
         self.assertTrue(result["heavy_relevant"])
 
+    def test_harness_sources_select_only_declaring_corpus(self) -> None:
+        (self.tree.root / "scripts" / "ci").mkdir(parents=True, exist_ok=True)
+        helper = self.tree.root / "scripts" / "ci" / "adequacy_serde_jcs.py"
+        helper.write_text("# fixture\n", encoding="utf-8")
+        self.tree.write(
+            "rfc8785-canonicalization",
+            manifest(
+                implementation_sources=["../../crates/thing/src/lib.rs"],
+                harness_sources=["../../scripts/ci/adequacy_serde_jcs.py"],
+            ),
+        )
+        result = self.tree.plan(["scripts/ci/adequacy_serde_jcs.py"])
+        self.assertEqual(result["relevant"], ["rfc8785-canonicalization"])
+        self.assertNotIn("heavy", result["relevant"])
+        self.assertNotIn("cheap", result["relevant"])
+
     def test_unrelated_change_selects_nothing(self) -> None:
         # The whole point of the gate: a change no corpus declares must not cost fifteen minutes.
         result = self.tree.plan(["crates/unrelated/src/main.rs", "README.md"])
