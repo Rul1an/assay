@@ -1,10 +1,10 @@
-# Review record (slice A)
+# Review record
 
 Assay #2561. A merge to `main` still needs the AGENTS.md non-building
 exact-head review. This page documents the **public, machine-readable
-record** and the local checker that proves one exists for a named head.
-It does not install a GitHub Actions workflow. The workflow lands in a
-later slice, after this checker is on `main`.
+record** and the checker that proves one exists for a named head. Slice B
+adds the advisory `review-record-check` GitHub Actions job. It is deliberately
+not a required branch-protection context yet.
 
 ## What to post
 
@@ -62,9 +62,31 @@ pages (200 comments) with `comments_limit`. A comments-API failure is
 `comments_api_failure`. The pre-commit hook is
 `assay-review-record-self-test`.
 
+## Advisory workflow
+
+`.github/workflows/review-record-check.yml` runs for `opened`, `reopened`,
+`synchronize`, and `ready_for_review` pull-request events. It checks out the
+PR's base SHA, verifies that checkout, self-tests the checker from that trusted
+base, and then reads the live PR head and issue comments through the GitHub API.
+It never checks out or executes PR-head code and has only `contents: read` and
+`pull-requests: read` permissions.
+
+Posting a comment does not itself trigger a workflow. The normal path is to
+post the record while the PR is draft and then mark the PR ready for review.
+For an already-ready PR, rerun the workflow in GitHub Actions after posting the
+record. A later push triggers `synchronize`; the old record is stale and the
+new head needs a new independent review record before a rerun can pass.
+
+The workflow structure is cross-pinned from the existing required CI and
+host-capability roots. That makes a single changed root detectable, but does
+not turn this advisory job into merge enforcement.
+
 ## Non-claims
 
-The record is not cryptographic agent identity, not intellectual
-adequacy, not an approval count, and not AGENTS carry-forward. Slice A
-does not add a required branch-protection context and does not claim a
-live `review-record-check` job.
+The record is not cryptographic agent identity, intellectual adequacy, review
+quality, an approval count, or AGENTS carry-forward. Slice B does not change
+branch protection, support merge queues, write comments or statuses, or use a
+write token. API failure is a failed check, not evidence that the review was
+defective. A base checkout protects the executed repository code, not the
+PR-supplied workflow definition. Coordinated mutation of the workflow,
+checker, and both required roots is outside repo-local enforcement.
