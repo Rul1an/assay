@@ -187,7 +187,7 @@ class GitHubApi:
             if len(batch) < 100:
                 return out
             page += 1
-        raise GateError("comments_limit", "more than 1000 comments")
+        raise GateError("comments_limit", "1000-comment safety ceiling reached")
 
 def live_check(number: int) -> int:
     repo, token = os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("GITHUB_TOKEN", "")
