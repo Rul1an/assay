@@ -36,8 +36,9 @@ identity resolved to two different schema resources. The declared `$id` was:
 Interpret a historical v0 run record with the schema and validator from its exact candidate tag;
 do not dereference the `candidate.1` `$id` and assume those bytes describe a `candidate.3` or
 `candidate.4` record. Candidate tags and their assets remain immutable. The portable successor is
-`urn:assay:schema:privileged-mcp-action:conformance-run:v1`. This mapping documents the collision; it
-does not retroactively repair the identity of any v0 schema resource or run record.
+[`urn:assay:schema:privileged-mcp-action:conformance-run:v1`](report.schema.json). This mapping
+documents the collision; it does not retroactively repair the identity of any v0 schema resource or
+run record.
 
 ## What reproducing this corpus can and cannot distinguish
 

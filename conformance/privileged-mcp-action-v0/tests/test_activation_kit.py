@@ -2327,7 +2327,8 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
             self.assertIn("schema and validator from its exact candidate tag", errata)
             self.assertIn("Candidate tags and their assets remain immutable", errata)
             self.assertIn(
-                "urn:assay:schema:privileged-mcp-action:conformance-run:v1",
+                "[`urn:assay:schema:privileged-mcp-action:conformance-run:v1`]"
+                "(report.schema.json)",
                 errata,
             )
             self.assertIn("does not retroactively repair", errata)
