@@ -8,15 +8,13 @@ mod response;
 mod schema;
 mod types;
 
-/// Typed classification of full-policy parse failures.
+/// Typed classification of full-policy load failures.
 ///
 /// Non-exhaustive so downstream match arms must use a wildcard.
-/// `check_args` maps these to the three fixed `PolicyParseFailure` summaries.
+/// `check_args` maps only parse variants to the fixed `PolicyParseFailure` summaries.
 #[non_exhaustive]
 #[derive(Debug)]
 pub enum McpPolicyErrorKind {
-    /// The policy file could not be read from the supplied path.
-    Io,
     /// YAML decode or UTF-8 failure.
     Syntax {
         line: Option<usize>,
@@ -28,6 +26,8 @@ pub enum McpPolicyErrorKind {
     Structure,
     /// Post-deserialization validation (kill-switch refs, pin hashes) failed.
     Validation,
+    /// The policy file could not be read from the supplied path.
+    Io,
     /// V1 policy input was refused because strict deprecation handling is enabled.
     StrictDeprecation,
 }
