@@ -471,7 +471,7 @@ repos:
         entry: bash scripts/ci/test-setup-rust-composite-contract.sh
         language: system
         pass_filenames: false
-        files: ^(\.github/actions/setup-rust/action\.yml|scripts/ci/test-setup-rust-composite-contract\.sh|\.pre-commit-config\.yaml|\.github/workflows/[^/]+\.ya?ml)$
+        files: ^(\.github/actions/setup-rust/action\.yml|scripts/ci/test-setup-rust-composite-contract\.sh|scripts/ci/test-host-capability-proof-contract\.sh|\.pre-commit-config\.yaml|\.github/workflows/[^/]+\.ya?ml)$
 
       - id: s1b-coverage-gate-contract
         name: S1b send-matrix coverage-gate contract

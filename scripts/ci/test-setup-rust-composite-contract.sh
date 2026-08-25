@@ -23,7 +23,7 @@ SPLIT_WAVE0="${ROOT}/.github/workflows/split-wave0-gates.yml"
 CI_YML="${ROOT}/.github/workflows/ci.yml"
 KERNEL_MATRIX="${ROOT}/.github/workflows/kernel-matrix.yml"
 TOOLCHAIN_REF="dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
-CACHE_REF="Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4"
+CACHE_REF="Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok() { echo "ok   $*"; }
@@ -685,7 +685,56 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 TC = "dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
-RC = "Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4"
+RC = "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6"
+
+# CACHE_REF (composite uses:) and RC (workflow-direct uses:) are independent
+# literals today. A slice can update one pin + its production side and leave
+# the other green. Align them, and align CACHE_PIN, then inventory every
+# production uses: Swatinem/rust-cache@SHA (comments are not invocations).
+_src = (root / "scripts/ci/test-setup-rust-composite-contract.sh").read_text(encoding="utf-8")
+_m_ref = re.search(r'(?m)^CACHE_REF="Swatinem/rust-cache@([0-9a-f]{40})"$', _src)
+if not _m_ref:
+    raise SystemExit("CACHE_REF pin missing or not a 40-char SHA")
+_cache_ref_sha = _m_ref.group(1)
+_rc_sha = RC.rsplit("@", 1)[-1]
+if _cache_ref_sha != _rc_sha:
+    raise SystemExit(f"CACHE_REF SHA {_cache_ref_sha} != RC SHA {_rc_sha}")
+_host = (root / "scripts/ci/test-host-capability-proof-contract.sh").read_text(encoding="utf-8")
+_m_pin = re.search(r'(?m)^CACHE_PIN="([0-9a-f]{40})"$', _host)
+if not _m_pin:
+    raise SystemExit("CACHE_PIN pin missing or not a 40-char SHA")
+if _m_pin.group(1) != _rc_sha:
+    raise SystemExit(f"CACHE_PIN {_m_pin.group(1)} != RC SHA {_rc_sha}")
+
+_PROD_USES = re.compile(
+    r"^[ \t]*(?:-[ \t]+)?uses:\s*(?:'|\")?"
+    r"Swatinem/rust-cache@([0-9a-f]{40})"
+)
+_prod_files = (
+    root / ".github/actions/setup-rust/action.yml",
+    root / ".github/workflows/ci.yml",
+    root / ".github/workflows/host-capability-proof.yml",
+    root / ".github/workflows/kernel-matrix.yml",
+)
+_found = []
+for _path in _prod_files:
+    _body = _path.read_text(encoding="utf-8")
+    for _lineno, _line in enumerate(_body.splitlines(), 1):
+        _mm = _PROD_USES.search(_line)
+        if _mm:
+            _found.append((str(_path.relative_to(root)), _lineno, _mm.group(1)))
+if len(_found) != 6:
+    raise SystemExit(
+        f"expected 6 production rust-cache uses: lines, found {len(_found)}: {_found}"
+    )
+_lag = [f for f in _found if f[2] != _rc_sha]
+if _lag:
+    raise SystemExit(f"production rust-cache uses: SHA lagged expected {_rc_sha}: {_lag}")
+print(
+    f"ok   CACHE_REF/RC/CACHE_PIN SHA aligned ({_rc_sha}); "
+    f"6 production rust-cache uses: pins match"
+)
+
 
 def jobs_by_id(text: str) -> dict[str, str]:
     return {j: b for j, b in re.findall(
@@ -771,6 +820,7 @@ if files_line is None:
 expected = (
     r"^(\.github/actions/setup-rust/action\.yml|"
     r"scripts/ci/test-setup-rust-composite-contract\.sh|"
+    r"scripts/ci/test-host-capability-proof-contract\.sh|"
     r"\.pre-commit-config\.yaml|"
     r"\.github/workflows/[^/]+\.ya?ml)$")
 if files_line != expected:
@@ -781,6 +831,7 @@ missed = [s for s in (
     ".github/workflows/demo.yml", ".github/workflows/docs-auto-update.yml",
     ".github/workflows/parity.yml", ".github/workflows/release.yml",
     ".github/workflows/ci.yml", ".github/workflows/kernel-matrix.yml",
+    "scripts/ci/test-host-capability-proof-contract.sh",
 ) if not cre.search(s)]
 if missed:
     raise SystemExit(f"pre-commit files regex must match exception workflows; missed {missed}")
