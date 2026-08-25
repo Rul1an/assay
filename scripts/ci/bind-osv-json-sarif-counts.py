@@ -91,16 +91,12 @@ def bind(json_path: Path, sarif_path: Path) -> None:
     refuse_if_counts_differ(json_count, sarif_count)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
-    if len(args) != 2:
-        print(
-            "usage: bind-osv-json-sarif-counts.py <osv-results.json> <osv-results.sarif>",
-            file=sys.stderr,
-        )
+def main() -> int:
+    if len(sys.argv) != 1:
+        print("usage: bind-osv-json-sarif-counts.py", file=sys.stderr)
         return 2
     try:
-        bind(Path(args[0]), Path(args[1]))
+        bind(Path("osv-results.json"), Path("osv-results.sarif"))
     except SystemExit as exc:
         code = exc.code
         return int(code) if isinstance(code, int) else 1

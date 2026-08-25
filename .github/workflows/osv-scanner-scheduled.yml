@@ -148,7 +148,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/ci/bind-osv-json-sarif-counts.py osv-results.json osv-results.sarif
+          python3 scripts/ci/bind-osv-json-sarif-counts.py
 
       - name: Upload SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@d1ba80a13dd99fba24a470575428917156a28b43 # v4.37.5

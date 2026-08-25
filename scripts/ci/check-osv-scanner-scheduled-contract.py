@@ -24,11 +24,10 @@ USES_RE = re.compile(
     r"@([0-9a-f]{40})[ \t]+#[ \t]+(v\d+\.\d+\.\d+)[ \t]*$",
 )
 
-# Active invocation: the workflow must call the one runtime script with both
-# production filenames. A comment, a different script, or dropped args is drift.
+# Active invocation: the workflow must call the one runtime script with no
+# path args. Filenames are fixed inside the script (cwd osv-results.json/.sarif).
 INVOKE_RE = re.compile(
-    r"^[ \t]+(?:run:[ \t]+)?python3[ \t]+scripts/ci/bind-osv-json-sarif-counts\.py"
-    r"[ \t]+osv-results\.json[ \t]+osv-results\.sarif[ \t]*$"
+    r"^[ \t]+(?:run:[ \t]+)?python3[ \t]+scripts/ci/bind-osv-json-sarif-counts\.py[ \t]*$"
 )
 
 
@@ -83,7 +82,7 @@ def check(text: str) -> list[str]:
     if len(invokes) != 1:
         errors.append(
             "want exactly one active invocation "
-            f"`python3 {BIND_SCRIPT} osv-results.json osv-results.sarif`, "
+            f"`python3 {BIND_SCRIPT}`, "
             f"found {len(invokes)}"
         )
 

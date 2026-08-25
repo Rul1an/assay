@@ -2,7 +2,8 @@
 # Mutation + fixture battery for the scheduled OSV lockstep/bind contract.
 #
 # Control must be green. SHA-drift and invocation-bypass must bite the checker.
-# The runtime script is executed against synthetic fixtures (scratch only).
+# The runtime script is executed against synthetic fixtures (scratch only),
+# always via cwd-fixed names with zero CLI path args.
 # A compare/exit mutation on refuse_if_counts_differ must flip mismatch
 # from exit 1 to exit 0, proving the fixture hits that function.
 set -euo pipefail
@@ -11,7 +12,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="scripts/ci/check-osv-scanner-scheduled-contract.py"
 BIND="scripts/ci/bind-osv-json-sarif-counts.py"
 WORKFLOW=".github/workflows/osv-scanner-scheduled.yml"
-ACTIVE_INVOKE="python3 scripts/ci/bind-osv-json-sarif-counts.py osv-results.json osv-results.sarif"
+ACTIVE_INVOKE="python3 scripts/ci/bind-osv-json-sarif-counts.py"
 COMPARE_LINE="if json_count != sarif_count:"
 
 [[ -f "${ROOT}/${CHECKER}" ]] || { echo "FAIL: checker missing" >&2; exit 1; }
@@ -41,10 +42,11 @@ run_checker() {
   echo "ok    $name (exit $status)"
 }
 
-run_bind() {
-  local name="$1" bind_path="$2" json_path="$3" sarif_path="$4" expected="$5"
+# Production CLI is argumentless. Fixtures live in cwd as the fixed names.
+run_bind_cwd() {
+  local name="$1" case_dir="$2" bind_path="$3" expected="$4"
   local status=0
-  python3 "$bind_path" "$json_path" "$sarif_path" >"$scratch/$name.log" 2>&1 || status=$?
+  ( cd "$case_dir" && python3 "$bind_path" ) >"$scratch/$name.log" 2>&1 || status=$?
   if [[ "$status" -ne "$expected" ]]; then
     cat "$scratch/$name.log" >&2
     echo "FAIL: $name exited $status, wanted $expected" >&2
@@ -53,14 +55,19 @@ run_bind() {
   echo "ok    $name (exit $status)"
 }
 
+write_pair() {
+  local dest="$1" json_body="$2" sarif_body="$3"
+  mkdir -p "$dest"
+  printf '%s\n' "$json_body" >"$dest/osv-results.json"
+  printf '%s\n' "$sarif_body" >"$dest/osv-results.sarif"
+}
+
 # --- checker cases ---
 
-# 0. Copied real tree is the control.
 c="$scratch/control"
 seed "$c"
 run_checker "control-is-green" "$c" 0
 
-# 1. SHA-drift: roll back ONLY the reporter 40-hex.
 c="$scratch/sha-drift"
 seed "$c"
 python3 - "$c/${WORKFLOW}" <<'PY'
@@ -82,7 +89,6 @@ p.write_text(text)
 PY
 run_checker "sha-drift-is-refused" "$c" 1
 
-# 2. Invocation-bypass: replace the exact active invocation with a no-op.
 c="$scratch/invoke-bypass"
 seed "$c"
 python3 - "$c/${WORKFLOW}" "$ACTIVE_INVOKE" <<'PY'
@@ -100,42 +106,24 @@ run_checker "invoke-bypass-is-refused" "$c" 1
 
 # --- runtime fixtures (scratch only; not added to the repo) ---
 
-fx="$scratch/fixtures"
-mkdir -p "$fx"
+ACCEPT_JSON='{"results": [{"vulnerabilities": [{"id": "OSV-TEST-1"}]}]}'
+ACCEPT_SARIF='{"runs": [{"results": [{"ruleId": "OSV-TEST-1"}]}]}'
+EMPTY_SARIF='{"runs": [{"results": []}]}'
+MISSING_RUNS_SARIF='{"version": "2.1.0"}'
+BAD_JSON='{not-json'
 
-cat >"$fx/accept.json" <<'JSON'
-{"results": [{"vulnerabilities": [{"id": "OSV-TEST-1"}]}]}
-JSON
-cat >"$fx/accept.sarif" <<'JSON'
-{"runs": [{"results": [{"ruleId": "OSV-TEST-1"}]}]}
-JSON
+write_pair "$scratch/fx-accept" "$ACCEPT_JSON" "$ACCEPT_SARIF"
+write_pair "$scratch/fx-mismatch" "$ACCEPT_JSON" "$EMPTY_SARIF"
+write_pair "$scratch/fx-malformed-json" "$BAD_JSON" "$ACCEPT_SARIF"
+write_pair "$scratch/fx-malformed-sarif" "$ACCEPT_JSON" "$MISSING_RUNS_SARIF"
 
-cat >"$fx/mismatch.json" <<'JSON'
-{"results": [{"vulnerabilities": [{"id": "OSV-TEST-1"}]}]}
-JSON
-cat >"$fx/mismatch.sarif" <<'JSON'
-{"runs": [{"results": []}]}
-JSON
-
-printf '{not-json\n' >"$fx/malformed.json"
-cat >"$fx/ok.sarif" <<'JSON'
-{"runs": [{"results": [{"ruleId": "OSV-TEST-1"}]}]}
-JSON
-
-cat >"$fx/ok.json" <<'JSON'
-{"results": [{"vulnerabilities": [{"id": "OSV-TEST-1"}]}]}
-JSON
-cat >"$fx/malformed.sarif" <<'JSON'
-{"version": "2.1.0"}
-JSON
-
-run_bind "fixture-acceptance" "${ROOT}/${BIND}" "$fx/accept.json" "$fx/accept.sarif" 0
-run_bind "fixture-mismatch" "${ROOT}/${BIND}" "$fx/mismatch.json" "$fx/mismatch.sarif" 1
-run_bind "fixture-malformed-json" "${ROOT}/${BIND}" "$fx/malformed.json" "$fx/ok.sarif" 1
-run_bind "fixture-malformed-sarif" "${ROOT}/${BIND}" "$fx/ok.json" "$fx/malformed.sarif" 1
+run_bind_cwd "fixture-acceptance" "$scratch/fx-accept" "${ROOT}/${BIND}" 0
+run_bind_cwd "fixture-mismatch" "$scratch/fx-mismatch" "${ROOT}/${BIND}" 1
+run_bind_cwd "fixture-malformed-json" "$scratch/fx-malformed-json" "${ROOT}/${BIND}" 1
+run_bind_cwd "fixture-malformed-sarif" "$scratch/fx-malformed-sarif" "${ROOT}/${BIND}" 1
 
 # --- compare/exit mutation must bite refuse_if_counts_differ ---
-# Same mismatch fixture. Unmutated already refused (exit 1 above).
+# Same mismatch fixture (cwd-fixed names, zero CLI args).
 # Mutating `if json_count != sarif_count:` -> `if False:` must accept (exit 0).
 mutated="$scratch/mutated-bind.py"
 cp "${ROOT}/${BIND}" "$mutated"
@@ -150,6 +138,6 @@ if old not in text:
     raise SystemExit("FAIL: compare/exit string missing from bind script; cannot mutate")
 p.write_text(text.replace(old, "if False:", 1))
 PY
-run_bind "compare-exit-mutation-accepts-mismatch" "$mutated" "$fx/mismatch.json" "$fx/mismatch.sarif" 0
+run_bind_cwd "compare-exit-mutation-accepts-mismatch" "$scratch/fx-mismatch" "$mutated" 0
 
 printf 'PASS: osv-scanner scheduled lockstep/bind battery (control, sha-drift, invoke-bypass, fixture-acceptance, fixture-mismatch, fixture-malformed-json, fixture-malformed-sarif, compare-exit-mutation)\n'
