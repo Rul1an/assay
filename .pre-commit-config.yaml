@@ -367,6 +367,14 @@ repos:
         # no `target/` build it still verifies source and published-release truth independently.
         files: ^(scripts/ci/((check|test-check)-release-surface|read-assay-release-tag)\.sh|\.github/assay-release-tag|Cargo\.toml|README\.md|llms\.txt|docs/(index\.md|getting-started/(index|installation|quickstart|ci-integration)\.md|reference/cli/index\.md|python-sdk/index\.md|use-cases/(air-gapped|ci-gate)\.md|AIcontext/user-flows\.md|migration-v1\.2\.md|guides/editor-mcp-recipe\.md)|\.pre-commit-config\.yaml)$
 
+
+      - id: osv-scanner-scheduled-lockstep
+        name: OSV scanner/reporter lockstep and count bind
+        entry: bash scripts/ci/test-osv-scanner-scheduled-contract.sh
+        language: system
+        pass_filenames: false
+        files: ^(\.github/workflows/osv-scanner-scheduled\.yml|scripts/ci/(bind-osv-json-sarif-counts\.py|(check|test)-osv-scanner-scheduled-contract\.(py|sh))|\.pre-commit-config\.yaml)$
+
       - id: workflow-continue-on-error-policy
         name: Workflow continue-on-error policy
         entry: bash scripts/ci/test-check-workflow-continue-on-error.sh
