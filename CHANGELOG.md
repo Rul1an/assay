@@ -8,12 +8,16 @@ All notable changes to this project will be documented in this file.
 - The Claude plugin workflow now runs its bounded model session with
   `--output-format stream-json --verbose` and classifies the transcript through one
   validator, `classify_model_mediated_call`, that fixture replay and the live path both
-  call. `model_mediated_tool_call=pass` requires exactly one `mcp__assay__` tool_use,
-  exactly one matching non-error tool_result after it, a payload typed against the
-  `assay_policy_decide` contract, and a later assistant message quoting a value the model
-  could not have taken from its own request. Absence stays `not_exercised`; malformed,
-  oversized, duplicated, out-of-order and error transcripts stay `unavailable`. Process
-  exit is never the evidence (#2632, child of #2194).
+  call. `model_mediated_tool_call=pass` requires exactly one
+  `mcp__assay__assay_policy_decide` tool_use in an assistant-role envelope, exactly one
+  matching non-error tool_result in a user-role envelope after it, a payload typed against
+  the server's contract with every `matches` member a non-empty string, a later assistant
+  message quoting a value the model could not have taken from its own request, and exactly
+  one terminal result envelope after that turn reporting `subtype: success` with
+  `is_error: false`. All of those envelopes must share one non-empty session id. Absence
+  stays `not_exercised`; malformed, oversized, duplicated, out-of-order, wrong-tool,
+  wrong-session, incomplete and error transcripts stay `unavailable`. Process exit is never
+  the evidence, and an incomplete observation never becomes clean (#2632, child of #2194).
 
 - The CLI JSON identity guard now follows writers to rows as well as rows to writers. Every
   production file under `cli/commands` that serializes JSON through the six issue idioms must be

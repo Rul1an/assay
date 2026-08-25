@@ -473,8 +473,10 @@ def _decide_payload_tokens(payload: object) -> tuple[list[str], str]:
     """Type the assay_policy_decide result and return its quotable values.
 
     The contract is the server's, not this script's: a decision carries
-    ``allowed: bool``, a denial carries a non-empty ``matches`` list of
-    strings, and an allow carries a non-empty ``reason`` string.
+    ``allowed: bool``, a denial carries a non-empty ``matches`` list whose every
+    member is a non-empty string, and an allow carries a non-empty ``reason``.
+    A non-string member is refused rather than filtered away, because silently
+    dropping it would accept a payload the server never emits.
     """
     if not isinstance(payload, dict):
         return [], "result payload is not a JSON object"
@@ -489,22 +491,34 @@ def _decide_payload_tokens(payload: object) -> tuple[list[str], str]:
     matches = payload.get("matches")
     if not isinstance(matches, list) or not matches:
         return [], "deny decision carries no non-empty 'matches' list"
-    tokens = [item for item in matches if isinstance(item, str) and item.strip()]
-    if not tokens:
-        return [], "deny decision 'matches' holds no non-empty string"
-    return tokens, ""
+    for position, item in enumerate(matches):
+        if not isinstance(item, str) or not item.strip():
+            return [], f"deny decision 'matches[{position}]' is not a non-empty string"
+    return list(matches), ""
+
+
+def _envelope_role(envelope: dict[str, object]) -> str | None:
+    message = envelope.get("message")
+    if not isinstance(message, dict):
+        return None
+    role = message.get("role")
+    return role if isinstance(role, str) else None
 
 
 def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
     """Classify one Claude stream-json transcript.
 
     Returns ``pass`` only when the transcript shows exactly one
-    ``mcp__assay__`` tool_use, exactly one matching non-error tool_result that
-    appears after it, a payload typed against the tool's own contract, and a
-    later assistant message quoting a value the model could not have written
-    without the result. Absence is ``not_exercised``; every other shape is
-    ``unavailable``. Nothing here upgrades a missing, ambiguous, out-of-order,
-    or malformed observation into a pass.
+    ``mcp__assay__assay_policy_decide`` tool_use, exactly one matching non-error
+    tool_result carried by a user envelope after it, a payload typed against the
+    tool's own contract, a later assistant message quoting a value the model
+    could not have taken from its own request, and exactly one terminal result
+    envelope after that turn reporting success. Every one of those envelopes must
+    share one non-empty session id. Absence is ``not_exercised``; every other
+    shape is ``unavailable``. An incomplete observation never becomes clean.
+
+    Envelope types this rule does not name are ignored, so a future CLI may add
+    them without turning an otherwise valid transcript into a refusal.
     """
     try:
         envelopes = _stream_envelopes(stream)
@@ -514,21 +528,26 @@ def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
     uses: list[tuple[int, str, str, object]] = []
     results: list[tuple[int, str, dict[str, object]]] = []
     texts: list[tuple[int, str]] = []
+    terminals: list[tuple[int, dict[str, object]]] = []
     for index, envelope in enumerate(envelopes):
         kind = envelope.get("type")
+        role = _envelope_role(envelope)
+        if kind == "result":
+            terminals.append((index, envelope))
+            continue
         for block in _content_blocks(envelope):
             block_type = block.get("type")
-            if kind == "assistant" and block_type == "tool_use":
+            if kind == "assistant" and role == "assistant" and block_type == "tool_use":
                 name, identifier = block.get("name"), block.get("id")
                 if isinstance(name, str) and name.startswith(ASSAY_TOOL_PREFIX):
                     if not isinstance(identifier, str) or not identifier:
                         return "unavailable", f"{name} tool_use has no id"
                     uses.append((index, identifier, name, block.get("input")))
-            elif kind == "assistant" and block_type == "text":
+            elif kind == "assistant" and role == "assistant" and block_type == "text":
                 value = block.get("text")
                 if isinstance(value, str):
                     texts.append((index, value))
-            elif block_type == "tool_result":
+            elif kind == "user" and role == "user" and block_type == "tool_result":
                 identifier = block.get("tool_use_id")
                 if isinstance(identifier, str) and identifier:
                     results.append((index, identifier, block))
@@ -540,9 +559,12 @@ def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
         return "unavailable", f"expected exactly one Assay tool_use, found {len(uses)}: {names}"
 
     use_index, use_id, use_name, use_input = uses[0]
+    if use_name != ASSAY_DECIDE_TOOL:
+        return "unavailable", f"expected {ASSAY_DECIDE_TOOL}, transcript invoked {use_name}"
+
     matching = [entry for entry in results if entry[1] == use_id]
     if not matching:
-        return "unavailable", f"no tool_result matches tool_use_id {use_id!r} for {use_name}"
+        return "unavailable", f"no user tool_result matches tool_use_id {use_id!r} for {use_name}"
     if len(matching) > 1:
         return "unavailable", f"expected exactly one tool_result for {use_id!r}, found {len(matching)}"
     result_index, _identifier, result_block = matching[0]
@@ -569,10 +591,39 @@ def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
     ]
     if not derived:
         return "unavailable", f"{use_name} result carries no value absent from its own request"
+    dependent_index = None
     for index, value in texts:
         if index > result_index and any(token in value for token in derived):
-            return "pass", f"{use_name} invoked once and its server-generated result quoted later"
-    return "unavailable", f"no later assistant message quotes the {use_name} result"
+            dependent_index = index
+            break
+    if dependent_index is None:
+        return "unavailable", f"no later assistant message quotes the {use_name} result"
+
+    # A transcript that stops before its own terminal envelope is an incomplete
+    # observation, and an incomplete observation is never a clean result.
+    if len(terminals) != 1:
+        return "unavailable", f"expected exactly one terminal result envelope, found {len(terminals)}"
+    terminal_index, terminal = terminals[0]
+    if terminal_index <= dependent_index:
+        return "unavailable", "terminal result envelope precedes the dependent assistant turn"
+    if terminal.get("subtype") != "success":
+        return "unavailable", f"terminal result subtype is {terminal.get('subtype')!r}, not 'success'"
+    # `subtype: success` and `is_error: true` co-occur in this CLI, so both are
+    # checked; neither alone is the completion signal.
+    if terminal.get("is_error") is not False:
+        return "unavailable", "terminal result envelope reports is_error"
+
+    sessions = {
+        envelopes[index].get("session_id")
+        for index in (use_index, result_index, dependent_index, terminal_index)
+    }
+    if len(sessions) != 1:
+        return "unavailable", "transcript envelopes do not share one session id"
+    session = sessions.pop()
+    if not isinstance(session, str) or not session:
+        return "unavailable", "transcript envelopes carry no non-empty session id"
+
+    return "pass", f"{use_name} invoked once in session {session} and its result quoted before a successful close"
 
 
 def verify_workflow() -> None:
@@ -959,6 +1010,17 @@ STREAM_FIXTURE_EXPECTATIONS = (
     ("duplicate-result.jsonl", "unavailable"),
     ("untyped-payload.jsonl", "unavailable"),
     ("deny-without-matches.jsonl", "unavailable"),
+    ("wrong-assay-tool.jsonl", "unavailable"),
+    ("matches-mixed-types.jsonl", "unavailable"),
+    ("missing-terminal-result.jsonl", "unavailable"),
+    ("terminal-result-error.jsonl", "unavailable"),
+    ("terminal-result-not-success.jsonl", "unavailable"),
+    ("duplicate-terminal-result.jsonl", "unavailable"),
+    ("terminal-result-wrong-session.jsonl", "unavailable"),
+    ("terminal-result-before-dependency.jsonl", "unavailable"),
+    ("tool-result-in-assistant-envelope.jsonl", "unavailable"),
+    ("assistant-envelope-user-role.jsonl", "not_exercised"),
+    ("quote-in-user-role-envelope.jsonl", "unavailable"),
 )
 
 
