@@ -391,8 +391,8 @@ echo "ok: missing-allowlisted-path"
 
 printf 'Merkle\0root' > "$FIXTURE/binary.bin"
 git -C "$FIXTURE" add -A -- binary.bin
-run_case binary-input pass rekor
-echo "ok: binary-input"
+run_case binary-input fail rekor
+echo "ok: binary-input-nul-without-magic"
 
 # Hostile GIT_DIR pointing at an empty repo must not pass with zero files.
 HOSTILE="$TMP/hostile-gitdir"
@@ -455,7 +455,8 @@ if rc == 0 or "tracked set is empty" not in out:
 print("ok: empty-tracked-set")
 PY
 
-# NUL + false claim in docs/*.md must fail closed; generic binary still passes.
+# NUL + false claim in docs/*.md must fail closed. NUL without recognized
+# binary magic fails regardless of extension; genuine magic-matched binaries skip.
 NULDOC="$TMP/nul-docs"
 init_fixture "$NULDOC"
 python3 - "$CHECKER" "$NULDOC" "$FALSE_INJECT" <<'PY'
