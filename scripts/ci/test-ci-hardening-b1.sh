@@ -619,25 +619,28 @@ fi
 
 echo "== required CI workflow command reachability (structural, not a runtime witness) =="
 # One rule: a required command is reachable iff it appears as the exact
-# canonical active line. An unconditional terminator (`exit`/`return`) makes
-# later lines unreachable. A genuine short-circuit (`false && cmd`,
-# `true || cmd`) makes only that skipped operand unreachable; later lines
-# are still scanned. `true && cmd` still runs cmd in Bash, so it is a
-# canonical-form miss, not a reachability bypass.
+# canonical active line. A direct active `exit`/`return` command, with or
+# without shell arguments (including quotes and expansions), makes later
+# lines unreachable. Identifiers like `exit_status` and quoted prose are
+# not terminators. A genuine short-circuit (`false && cmd`, `true || cmd`)
+# makes only that skipped operand unreachable; later lines are still
+# scanned. `true && cmd` still runs cmd in Bash, so it is a canonical-form
+# miss, not a reachability bypass.
 # Structural only: not a hosted execution witness.
 if python3 - "${CI_WF}" <<'PY'
 import re
 import sys
 
-TERMINATOR_RE = re.compile(r"^(?:exit|return)(?:\s+\d+)?$")
+TERMINATOR_RE = re.compile(r"^(?:exit|return)(?:\s+.*)?$")
 SHORT_CIRCUIT_RE = re.compile(r"^(?:false\s+&&|true\s+\|\|)\s+(.+)$")
 
 def command_reachability_problems(active, required):
     """Return problems if any required command is not structurally reachable.
 
-    Canonical form is exact-line identity. Unconditional `exit`/`return`
-    stops later lines. Short-circuit skips only its operand. `true && cmd`
-    executes cmd and is reported as not canonical, never as unreachable.
+    Canonical form is exact-line identity. A direct `exit`/`return` command
+    (optional arguments, including quotes and expansions) stops later lines.
+    Short-circuit skips only its operand. `true && cmd` executes cmd and is
+    reported as not canonical, never as unreachable.
     """
     reachable = []
     terminator = None
@@ -771,6 +774,42 @@ if not any("not canonical" in p for p in true_and_problems):
         + "; ".join(true_and_problems)
     )
 
+def _quoted_or_expanded_terminates(line):
+    problems = command_reachability_problems(
+        [line, EVIDENCE_REQUIRED[0], EVIDENCE_REQUIRED[1]],
+        EVIDENCE_REQUIRED,
+    )
+    joined = "; ".join(problems)
+    if not problems:
+        sys.exit(
+            f"{line!r} must make later required commands unreachable (false-clean)"
+        )
+    for cmd in EVIDENCE_REQUIRED:
+        if cmd not in joined or "unreachable" not in joined:
+            sys.exit(
+                f"{line!r} must mark later required commands unreachable: "
+                + joined
+            )
+
+_quoted_or_expanded_terminates('exit "0"')
+_quoted_or_expanded_terminates('exit "$?"')
+_quoted_or_expanded_terminates('return "$code"')
+
+# Direct exit/return only. Identifiers and quoted prose are not terminators.
+for decoy, label in (
+    ("exit_status=1", "exit_status assignment"),
+    ('echo "please exit now"', "quoted text containing exit"),
+):
+    decoy_problems = command_reachability_problems(
+        [decoy, EVIDENCE_REQUIRED[0], EVIDENCE_REQUIRED[1]],
+        EVIDENCE_REQUIRED,
+    )
+    if decoy_problems:
+        sys.exit(
+            f"{label} must not terminate later lines: "
+            + "; ".join(decoy_problems)
+        )
+
 # Optional short-circuit skips only that operand; later required lines run.
 later_pair = ("bash required-one.sh", "bash required-two.sh")
 optional_later = command_reachability_problems(
@@ -832,6 +871,12 @@ def apply_mutation(source, needle, kind):
         return source.replace(needle, "          exit\n" + needle, 1)
     if kind == "return 0":
         return source.replace(needle, "          return 0\n" + needle, 1)
+    if kind == 'exit "0"':
+        return source.replace(needle, '          exit "0"\n' + needle, 1)
+    if kind == 'exit "$?"':
+        return source.replace(needle, '          exit "$?"\n' + needle, 1)
+    if kind == 'return "$code"':
+        return source.replace(needle, '          return "$code"\n' + needle, 1)
     if kind == ": neutralization":
         return source.replace(needle, "          :\n", 1)
     if kind == "false && skip":
@@ -848,6 +893,9 @@ MUTATIONS = (
     "exit 0",
     "exit",
     "return 0",
+    'exit "0"',
+    'exit "$?"',
+    'return "$code"',
     ": neutralization",
     "false && skip",
     "true || skip",
