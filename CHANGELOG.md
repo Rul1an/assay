@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- The Claude plugin workflow now runs its bounded model session with
+  `--output-format stream-json --verbose` and classifies the transcript through one
+  validator, `classify_model_mediated_call`, that fixture replay and the live path both
+  call. `model_mediated_tool_call=pass` requires exactly one
+  `mcp__assay__assay_policy_decide` tool_use in an assistant-role envelope whose input is
+  exactly the pinned probe the live prompt asks for, exactly one
+  matching non-error tool_result in a user-role envelope after it, a payload typed against
+  the server's contract with every `matches` member a non-empty string, a later assistant
+  message quoting a value the model could not have taken from its own request, and exactly
+  one terminal result envelope after that turn reporting `subtype: success` with
+  `is_error` absent or the literal boolean `false` — checked by identity at both
+  `is_error` sites, so `0`, `"false"` and other stand-ins are refused. All of those envelopes must share one non-empty session id. Absence
+  stays `not_exercised`; malformed, oversized, duplicated, out-of-order, wrong-tool,
+  wrong-session, incomplete and error transcripts stay `unavailable`. Process exit is never
+  the evidence, and an incomplete observation never becomes clean (#2632, child of #2194).
+
+  The record path uses its own **allowed** probe, separate from the blocked probe that
+  proves policy-root resolution. `assay-mcp-server` maps a policy denial to MCP
+  `isError: true`, so a denied probe can never yield an accepted transcript; a self-test
+  guard fails closed if the two are ever re-coupled. A denied decision is therefore
+  evidence about policy routing, never about model-mediated tool use.
+  The live prompt is built by one function and asks for the field the allowed decision
+  actually carries (`reason`); `matches` exists only on a denial. The fake session refuses
+  a prompt that has dropped that output contract, so injected fixture bytes can no longer
+  mask prompt drift.
+
 - The CLI JSON identity guard now follows writers to rows as well as rows to writers. Every
   production file under `cli/commands` that serializes JSON through the six issue idioms must be
   named by a `cli-documents` writer/namer, an `unnamed-documents` producer, or an explicit

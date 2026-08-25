@@ -306,14 +306,14 @@ def drive_cached_manifest(installed: Path, consumer: Path, env: dict[str, str], 
     if Path(resolved).resolve() != expected_server.resolve():
         fail("binary_spawn", f"PATH resolved an unexpected server: {resolved}", "put the exact-SHA assay-mcp-server first on the isolated PATH")
 
-    policy = consumer / "install-surface-policy.yaml"
+    policy = consumer / PROBE_POLICY
     if (consumer / "policies").exists():
         fail(
             "policy_root_resolved_to_consumer",
             "consumer probe unexpectedly contains the server's default policies directory",
             "remove the default-path fixture so the probe discriminates `.` from `policies`",
         )
-    policy.write_text("blocklist:\n  - install_surface_probe\n", encoding="utf-8")
+    policy.write_text(probe_policy_body(), encoding="utf-8")
     requests = [
         {
             "jsonrpc": "2.0",
@@ -411,6 +411,277 @@ def drive_cached_manifest(installed: Path, consumer: Path, env: dict[str, str], 
     print("missing_policy_refused=pass")
 
 
+# One transcript validator. Fixture replay and the live session both call it;
+# a second parser is how the two would drift while each kept its own tests green.
+# The byte ceiling is MAX_BYTES, the same one `run_bounded` and `read_bounded`
+# already apply, because a second larger ceiling here would be unreachable.
+ASSAY_TOOL_PREFIX = "mcp__assay__"
+# The one production tool this proof invokes. Registered in EXPECTED_TOOLS and
+# implemented in crates/assay-mcp-server/src/tools/policy_decide.rs.
+ASSAY_DECIDE_TOOL = f"{ASSAY_TOOL_PREFIX}assay_policy_decide"
+# The pinned probe. The live prompt asks for exactly this decision and the
+# validator requires exactly it back, so the two cannot drift into asking for
+# one probe and accepting another.
+# Two probes, deliberately separate. The denied one proves the policy root
+# resolves to the consumer; `assay-mcp-server` maps that denial to MCP
+# `isError: true`, so it can never produce an accepted transcript. The allowed
+# one is the model-mediated record path and returns a clean result.
+PROBE_TOOL = "install_surface_probe"
+TRANSCRIPT_PROBE_TOOL = "install_surface_allowed_probe"
+# The field the allowed decision actually carries. `policy_decide` returns
+# `{"allowed": true, "reason": ...}` for an allow and `matches` only for a deny,
+# so the prompt must ask for the field the probe can produce.
+TRANSCRIPT_RESULT_FIELD = "reason"
+
+
+def transcript_prompt() -> str:
+    """The one live prompt. Built here so the fake can hold it to its contract."""
+    return (
+        "Use the assay golden-path skill. Call the assay_policy_decide tool "
+        f"once for tool {TRANSCRIPT_PROBE_TOOL} with policy {PROBE_POLICY}, "
+        f"then report its result field {TRANSCRIPT_RESULT_FIELD} verbatim."
+    )
+
+
+def transcript_prompt_contract() -> str:
+    """The substring the session must carry, so fixture bytes cannot mask drift."""
+    return f"result field {TRANSCRIPT_RESULT_FIELD} verbatim"
+
+
+PROBE_POLICY = "install-surface-policy.yaml"
+
+
+def probe_policy_body() -> str:
+    """The one policy body the probe writes and every guard reads."""
+    return f"blocklist:\n  - {PROBE_TOOL}\n"
+
+
+EXPECTED_DECIDE_INPUT = {"tool": TRANSCRIPT_PROBE_TOOL, "policy": PROBE_POLICY}
+# A dependency token shorter than this matches too much ordinary prose to
+# demonstrate that a later turn consumed the result.
+MIN_DEPENDENCY_TOKEN = 8
+
+
+def _stream_envelopes(stream: bytes) -> list[dict[str, object]]:
+    """Decode bounded stream-json. Any malformed line refuses the whole stream."""
+    if len(stream) > MAX_BYTES:
+        raise ValueError(f"transcript exceeds {MAX_BYTES}-byte ceiling")
+    try:
+        text = stream.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError("transcript is not UTF-8") from error
+    envelopes: list[dict[str, object]] = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            value = json.loads(line)
+        except (ValueError, RecursionError) as error:
+            raise ValueError(f"line {number} is not JSON: {error}") from error
+        if not isinstance(value, dict):
+            raise ValueError(f"line {number} is not a JSON object")
+        envelopes.append(value)
+    return envelopes
+
+
+def _content_blocks(envelope: dict[str, object]) -> list[dict[str, object]]:
+    message = envelope.get("message")
+    if not isinstance(message, dict):
+        return []
+    content = message.get("content")
+    if not isinstance(content, list):
+        return []
+    return [block for block in content if isinstance(block, dict)]
+
+
+def _result_text(block: dict[str, object]) -> str:
+    content = block.get("content")
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    return "".join(
+        item["text"]
+        for item in content
+        if isinstance(item, dict) and isinstance(item.get("text"), str)
+    )
+
+
+def _decide_payload_tokens(payload: object) -> tuple[list[str], str]:
+    """Type the assay_policy_decide result and return its quotable values.
+
+    The contract is the server's, not this script's: a decision carries
+    ``allowed: bool``, a denial carries a non-empty ``matches`` list whose every
+    member is a non-empty string, and an allow carries a non-empty ``reason``.
+    A non-string member is refused rather than filtered away, because silently
+    dropping it would accept a payload the server never emits.
+    """
+    if not isinstance(payload, dict):
+        return [], "result payload is not a JSON object"
+    allowed = payload.get("allowed")
+    if not isinstance(allowed, bool):
+        return [], "result payload has no boolean 'allowed' field"
+    if allowed:
+        reason = payload.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            return [], "allow decision carries no 'reason' string"
+        return [reason], ""
+    matches = payload.get("matches")
+    if not isinstance(matches, list) or not matches:
+        return [], "deny decision carries no non-empty 'matches' list"
+    for position, item in enumerate(matches):
+        if not isinstance(item, str) or not item.strip():
+            return [], f"deny decision 'matches[{position}]' is not a non-empty string"
+    return list(matches), ""
+
+
+def _is_error_flag_ok(block: dict[str, object]) -> bool:
+    """One rule for every `is_error` in the stream contract.
+
+    The field may be absent. When present it must be the literal boolean
+    `False`; identity is used rather than equality so that `0`, which compares
+    equal to `False` in Python, is refused along with `"false"` and every other
+    stand-in. A value the CLI never emits is not evidence of a clean result.
+    """
+    if "is_error" not in block:
+        return True
+    return block["is_error"] is False
+
+
+def _envelope_role(envelope: dict[str, object]) -> str | None:
+    message = envelope.get("message")
+    if not isinstance(message, dict):
+        return None
+    role = message.get("role")
+    return role if isinstance(role, str) else None
+
+
+def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
+    """Classify one Claude stream-json transcript.
+
+    Returns ``pass`` only when the transcript shows exactly one
+    ``mcp__assay__assay_policy_decide`` tool_use, exactly one matching non-error
+    tool_result carried by a user envelope after it, a payload typed against the
+    tool's own contract, a later assistant message quoting a value the model
+    could not have taken from its own request, and exactly one terminal result
+    envelope after that turn reporting success. Every one of those envelopes must
+    share one non-empty session id. Absence is ``not_exercised``; every other
+    shape is ``unavailable``. An incomplete observation never becomes clean.
+
+    Envelope types this rule does not name are ignored, so a future CLI may add
+    them without turning an otherwise valid transcript into a refusal.
+    """
+    try:
+        envelopes = _stream_envelopes(stream)
+    except ValueError as error:
+        return "unavailable", str(error)
+
+    uses: list[tuple[int, str, str, object]] = []
+    results: list[tuple[int, str, dict[str, object]]] = []
+    texts: list[tuple[int, str]] = []
+    terminals: list[tuple[int, dict[str, object]]] = []
+    for index, envelope in enumerate(envelopes):
+        kind = envelope.get("type")
+        role = _envelope_role(envelope)
+        if kind == "result":
+            terminals.append((index, envelope))
+            continue
+        for block in _content_blocks(envelope):
+            block_type = block.get("type")
+            if kind == "assistant" and role == "assistant" and block_type == "tool_use":
+                name, identifier = block.get("name"), block.get("id")
+                if isinstance(name, str) and name.startswith(ASSAY_TOOL_PREFIX):
+                    if not isinstance(identifier, str) or not identifier:
+                        return "unavailable", f"{name} tool_use has no id"
+                    uses.append((index, identifier, name, block.get("input")))
+            elif kind == "assistant" and role == "assistant" and block_type == "text":
+                value = block.get("text")
+                if isinstance(value, str):
+                    texts.append((index, value))
+            elif kind == "user" and role == "user" and block_type == "tool_result":
+                identifier = block.get("tool_use_id")
+                if isinstance(identifier, str) and identifier:
+                    results.append((index, identifier, block))
+
+    if not uses:
+        return "not_exercised", f"no {ASSAY_TOOL_PREFIX} tool_use in transcript"
+    if len(uses) > 1:
+        names = ", ".join(sorted(name for _i, _d, name, _in in uses))
+        return "unavailable", f"expected exactly one Assay tool_use, found {len(uses)}: {names}"
+
+    use_index, use_id, use_name, use_input = uses[0]
+    if use_name != ASSAY_DECIDE_TOOL:
+        return "unavailable", f"expected {ASSAY_DECIDE_TOOL}, transcript invoked {use_name}"
+    # Exact object, not a superset: this is a pinned probe, so a transcript that
+    # decided some other tool or policy did not run the probe the prompt asked
+    # for, and neither did one that carried extra arguments we never requested.
+    if use_input != EXPECTED_DECIDE_INPUT:
+        return "unavailable", f"{use_name} input is not the pinned probe {EXPECTED_DECIDE_INPUT}"
+
+    matching = [entry for entry in results if entry[1] == use_id]
+    if not matching:
+        return "unavailable", f"no user tool_result matches tool_use_id {use_id!r} for {use_name}"
+    if len(matching) > 1:
+        return "unavailable", f"expected exactly one tool_result for {use_id!r}, found {len(matching)}"
+    result_index, _identifier, result_block = matching[0]
+    if result_index <= use_index:
+        return "unavailable", f"tool_result for {use_id!r} precedes its tool_use"
+    if not _is_error_flag_ok(result_block):
+        return "unavailable", f"tool_result for {use_name} reports or malforms is_error"
+
+    try:
+        payload = json.loads(_result_text(result_block))
+    except (ValueError, RecursionError) as error:
+        return "unavailable", f"tool_result payload for {use_name} is not JSON: {error}"
+    tokens, problem = _decide_payload_tokens(payload)
+    if problem:
+        return "unavailable", f"{use_name}: {problem}"
+
+    # A value the model already held in its own tool_use input proves nothing
+    # about consuming the result. Only server-generated text can carry that.
+    request = json.dumps(use_input, sort_keys=True) if use_input is not None else ""
+    derived = [
+        token
+        for token in tokens
+        if len(token) >= MIN_DEPENDENCY_TOKEN and token not in request
+    ]
+    if not derived:
+        return "unavailable", f"{use_name} result carries no value absent from its own request"
+    dependent_index = None
+    for index, value in texts:
+        if index > result_index and any(token in value for token in derived):
+            dependent_index = index
+            break
+    if dependent_index is None:
+        return "unavailable", f"no later assistant message quotes the {use_name} result"
+
+    # A transcript that stops before its own terminal envelope is an incomplete
+    # observation, and an incomplete observation is never a clean result.
+    if len(terminals) != 1:
+        return "unavailable", f"expected exactly one terminal result envelope, found {len(terminals)}"
+    terminal_index, terminal = terminals[0]
+    if terminal_index <= dependent_index:
+        return "unavailable", "terminal result envelope precedes the dependent assistant turn"
+    if terminal.get("subtype") != "success":
+        return "unavailable", f"terminal result subtype is {terminal.get('subtype')!r}, not 'success'"
+    # `subtype: success` and `is_error: true` co-occur in this CLI, so both are
+    # checked; neither alone is the completion signal.
+    if not _is_error_flag_ok(terminal):
+        return "unavailable", "terminal result envelope reports or malforms is_error"
+
+    sessions = {
+        envelopes[index].get("session_id")
+        for index in (use_index, result_index, dependent_index, terminal_index)
+    }
+    if len(sessions) != 1:
+        return "unavailable", "transcript envelopes do not share one session id"
+    session = sessions.pop()
+    if not isinstance(session, str) or not session:
+        return "unavailable", "transcript envelopes carry no non-empty session id"
+
+    return "pass", f"{use_name} invoked once in session {session} and its result quoted before a successful close"
+
+
 def verify_workflow() -> None:
     script = WORKFLOW_SCRIPT
     source_root = SOURCE_ROOT
@@ -499,11 +770,15 @@ def verify_workflow() -> None:
             [
                 str(claude),
                 "-p",
-                "Use the assay golden-path skill and report only its first contract step.",
+                transcript_prompt(),
                 "--debug-file",
                 str(debug),
                 "--output-format",
-                "json",
+                "stream-json",
+                # Claude Code refuses stream-json under --print without this.
+                # `json` reports only the final result, which cannot distinguish
+                # a real tool invocation from a no-op.
+                "--verbose",
             ],
             cwd=consumer,
             env=env,
@@ -518,9 +793,19 @@ def verify_workflow() -> None:
         print("skill_discovery=pass")
 
         combined = ((session.stdout + session.stderr).decode("utf-8", "replace") + debug_text).lower()
-        model_status = "not_exercised" if session.returncode == 0 else "unavailable"
-        if model_status == "unavailable" and not any(token in combined for token in ("api key", "auth", "login", "credential")):
+        auth_unavailable = session.returncode != 0 and any(
+            token in combined for token in ("api key", "auth", "login", "credential")
+        )
+        if session.returncode != 0 and not auth_unavailable:
             fail("model_mediated_tool_call", "session failed for a reason other than unavailable authentication", "inspect the bounded session diagnostic")
+        if auth_unavailable:
+            model_status = "unavailable"
+            model_detail = "authentication unavailable for the disposable profile"
+        else:
+            # The same validator fixture replay uses. Process exit is never the
+            # evidence: a zero exit with no Assay tool_use is `not_exercised`.
+            model_status, model_detail = classify_model_mediated_call(session.stdout)
+        print(f"model_mediated_detail={model_detail}")
 
         print(f"source_sha={source_sha}")
         print(f"claude_version={claude_version}")
@@ -530,6 +815,8 @@ def verify_workflow() -> None:
 
 
 def write_fake_tools(root: Path, cache_version: str) -> tuple[Path, Path]:
+    fixtures_dir = str(STREAM_FIXTURES)
+    contract = transcript_prompt_contract()
     fake_bin = root / "fake-bin"
     fake_bin.mkdir()
     claude = fake_bin / "claude"
@@ -610,6 +897,25 @@ elif args[:2] == ["mcp", "list"]:
 else:
     debug = pathlib.Path(args[args.index("--debug-file") + 1])
     debug.write_text('Successfully connected to assay\\nSkill prompt: showing "assay:assay-golden-path"\\n')
+    # The fake is the witness for the invocation contract. Without this, the
+    # workflow could revert to `--output-format json` and every test would stay
+    # green while the live session stopped emitting a transcript to validate.
+    if "--output-format" not in args or args[args.index("--output-format") + 1] != "stream-json":
+        print("session must request --output-format stream-json", file=sys.stderr)
+        raise SystemExit(64)
+    if "--verbose" not in args:
+        print("stream-json under --print requires --verbose", file=sys.stderr)
+        raise SystemExit(64)
+    # Injecting fixture bytes without reading the prompt is exactly how a live
+    # prompt asking for a field the probe cannot return stayed green. The fake
+    # holds the session to its own output contract before it replays anything.
+    if "-p" not in args or {contract!r} not in args[args.index("-p") + 1]:
+        print("session prompt must request the typed result field verbatim", file=sys.stderr)
+        raise SystemExit(64)
+    fixture = os.environ.get("FAKE_STREAM_FIXTURE")
+    if fixture:
+        sys.stdout.write(pathlib.Path({fixtures_dir!r}, fixture).read_text(encoding="utf-8"))
+        raise SystemExit(0)
     print("Invalid API key", file=sys.stderr)
     raise SystemExit(1)
 """,
@@ -656,6 +962,10 @@ for line in sys.stdin:
 
 
 def self_test() -> None:
+    # First, because every later failure caused by a re-coupled probe would
+    # surface as an unexplained fixture mismatch instead of the design error.
+    assert_transcript_probe_is_not_denied()
+    assert_transcript_prompt_contract()
     script = WORKFLOW_SCRIPT
     source_root = SOURCE_ROOT
     git = run_bounded("self_test", ["git", "rev-parse", "HEAD"], cwd=source_root, env=clean_env())
@@ -721,7 +1031,155 @@ def self_test() -> None:
             if result.returncode == 0 or expected not in output:
                 fail("self_test", f"mutation {key} did not bite its named guard: {output[-600:]}", "repair the workflow discriminator")
 
+        # Live/fixture parity. The workflow is driven end to end with the fake
+        # session replaying each checked-in transcript, and must report exactly
+        # what `classify_model_mediated_call` returns for the same bytes. This is
+        # what makes "one validator" checkable rather than asserted.
+        for name, expected in STREAM_FIXTURE_EXPECTATIONS:
+            live_env = dict(base_env)
+            live_env["FAKE_STREAM_FIXTURE"] = name
+            live = run_bounded(
+                "self_test_live_parity",
+                [str(script), "--verify"],
+                cwd=source_root,
+                env=live_env,
+                allowed_codes=range(0, 256),
+            )
+            live_text = (live.stdout + live.stderr).decode("utf-8", "replace")
+            if f"model_mediated_tool_call={expected}" not in live_text:
+                fail(
+                    "self_test",
+                    f"live replay of {name} did not report {expected}: {live_text[-400:]}",
+                    "route the live session through classify_model_mediated_call",
+                )
+
+    replay_stream_fixtures()
+
+
+
     print("claude_plugin_install_self_test=pass")
+
+
+STREAM_FIXTURES = DRIVER.parent / "fixtures" / "claude-stream"
+STREAM_FIXTURE_EXPECTATIONS = (
+    ("valid-allow.jsonl", "pass"),
+    ("deny-probe-arrives-as-error.jsonl", "unavailable"),
+    ("no-call.jsonl", "not_exercised"),
+    ("assistant-envelope-user-role.jsonl", "not_exercised"),
+    ("duplicate-call.jsonl", "unavailable"),
+    ("mismatched-id.jsonl", "unavailable"),
+    ("error-result.jsonl", "unavailable"),
+    ("malformed.jsonl", "unavailable"),
+    ("independent-final.jsonl", "unavailable"),
+    ("dependency-echoes-input.jsonl", "unavailable"),
+    ("result-before-use.jsonl", "unavailable"),
+    ("duplicate-result.jsonl", "unavailable"),
+    ("untyped-payload.jsonl", "unavailable"),
+    ("allow-without-reason.jsonl", "unavailable"),
+    ("deny-without-matches.jsonl", "unavailable"),
+    ("matches-mixed-types.jsonl", "unavailable"),
+    ("wrong-assay-tool.jsonl", "unavailable"),
+    ("missing-terminal-result.jsonl", "unavailable"),
+    ("terminal-result-error.jsonl", "unavailable"),
+    ("terminal-result-not-success.jsonl", "unavailable"),
+    ("duplicate-terminal-result.jsonl", "unavailable"),
+    ("terminal-result-wrong-session.jsonl", "unavailable"),
+    ("terminal-result-before-dependency.jsonl", "unavailable"),
+    ("tool-result-in-assistant-envelope.jsonl", "unavailable"),
+    ("quote-in-user-role-envelope.jsonl", "unavailable"),
+    ("tool-result-is-error-not-bool.jsonl", "unavailable"),
+    ("tool-result-is-error-zero.jsonl", "unavailable"),
+    ("terminal-result-is-error-not-bool.jsonl", "unavailable"),
+    ("tool-use-null-input.jsonl", "unavailable"),
+    ("tool-use-wrong-probe-input.jsonl", "unavailable"),
+    ("tool-use-surplus-input-key.jsonl", "unavailable"),
+)
+
+
+def assert_transcript_prompt_contract() -> None:
+    """The prompt must ask for a field the allowed probe actually returns.
+
+    `matches` exists only on a denial, and the denied probe is deliberately not
+    the transcript probe. A prompt asking for a match string therefore requests
+    data the live session can never produce, and fixture replay cannot see it
+    because the fake injects bytes without reading the prompt.
+    """
+    prompt = transcript_prompt()
+    if transcript_prompt_contract() not in prompt:
+        fail(
+            "transcript_prompt",
+            f"live prompt does not request {TRANSCRIPT_RESULT_FIELD!r} verbatim: {prompt!r}",
+            "ask for the field the allowed decision carries",
+        )
+    if "match" in prompt:
+        fail(
+            "transcript_prompt",
+            "live prompt asks for a match string, which only a denial carries",
+            "the transcript probe is allowed, so its result has no matches list",
+        )
+    print("transcript_prompt_contract=pass")
+
+
+def assert_transcript_probe_is_not_denied() -> None:
+    """The transcript probe must be a decision the real server can return cleanly.
+
+    `assay-mcp-server` maps a policy denial to MCP `isError: true`
+    (`classify_tool_result`: `is_error = has_error || explicit_allowed == Some(false)`),
+    and the validator refuses any errored tool_result. So a probe on a blocklisted
+    tool can never produce a transcript that passes, and a fixture claiming
+    otherwise would assert a shape the server does not emit.
+    """
+    blocklist = probe_policy_body()
+    requested = EXPECTED_DECIDE_INPUT["tool"]
+    if f"- {requested}\n" in blocklist:
+        fail(
+            "transcript_probe",
+            f"transcript probe {requested!r} is blocked by the probe policy; a denial "
+            "arrives as isError and can never yield an accepted transcript",
+            "give the transcript path its own allowed probe and keep the blocked tool "
+            "for policy-root verification",
+        )
+    if f"- {PROBE_TOOL}\n" not in blocklist:
+        fail(
+            "transcript_probe",
+            f"policy-root probe {PROBE_TOOL!r} is no longer blocked by the probe policy",
+            "restore the denied probe used by the policy-root phase",
+        )
+    print("transcript_probe_is_not_denied=pass")
+
+
+def replay_stream_fixtures() -> None:
+    """Replay checked-in transcripts through the one production validator.
+
+    Fixture replay and the live workflow call `classify_model_mediated_call`;
+    a second parser here would let the two drift while both stayed green.
+    """
+    for name, expected in STREAM_FIXTURE_EXPECTATIONS:
+        path = STREAM_FIXTURES / name
+        status, detail = classify_model_mediated_call(read_bounded(path, "stream_fixture"))
+        if status != expected:
+            fail(
+                "stream_fixture",
+                f"{name}: expected {expected}, got {status} ({detail})",
+                "repair the transcript validator or the fixture it is measured against",
+            )
+    # A literal, not a multiple of the ceiling under test: a fixture sized from
+    # MAX_BYTES would grow with a raised ceiling and never observe it.
+    oversize = b'{"type":"system"}\n' * 200_000
+    if len(oversize) <= MAX_BYTES:
+        fail(
+            "stream_fixture",
+            f"oversize fixture ({len(oversize)} bytes) must exceed the {MAX_BYTES}-byte ceiling",
+            "grow the oversize fixture past the shipped ceiling",
+        )
+    status, _detail = classify_model_mediated_call(oversize)
+    if status != "unavailable":
+        fail(
+            "stream_fixture",
+            f"oversized stream must be unavailable, got {status}",
+            "restore the transcript byte ceiling",
+        )
+    print("stream_fixture_replay=pass")
 
 
 def main() -> int:
