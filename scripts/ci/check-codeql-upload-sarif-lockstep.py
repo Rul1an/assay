@@ -15,18 +15,13 @@ WORKFLOWS = (
     Path(".github/workflows/osv-scanner-scheduled.yml"),
 )
 WORKFLOW_DIR = Path(".github/workflows")
+UPLOAD_ACTION = "github/codeql-action/upload-sarif@"
 USES_RE = re.compile(
     r"^[ \t]*(?:-[ \t]+)?uses:[ \t]+"
     r"(?P<quote>['\"]?)github/codeql-action/upload-sarif@"
     r"(?P<sha>[0-9a-f]{40})(?P=quote)[ \t]+"
     r"#[ \t]+(?P<tag>v\d+\.\d+\.\d+)[ \t]*$"
 )
-ACTIVE_UPLOAD_RE = re.compile(
-    r"^[ \t]*(?:-[ \t]+)?uses:[ \t]+['\"]?"
-    r"github/codeql-action/upload-sarif@"
-)
-
-
 def active_upload_pins(text: str) -> list[tuple[str, str]]:
     pins: list[tuple[str, str]] = []
     for line in text.splitlines():
@@ -40,13 +35,14 @@ def active_upload_pins(text: str) -> list[tuple[str, str]]:
 
 
 def has_active_upload_callsite(text: str) -> bool:
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if ACTIVE_UPLOAD_RE.match(line):
-            return True
-    return False
+    return active_upload_references(text) > 0
+
+
+def active_upload_references(text: str) -> int:
+    active_text = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+    return active_text.count(UPLOAD_ACTION)
 
 
 def check() -> list[str]:
@@ -66,7 +62,14 @@ def check() -> list[str]:
         if not workflow.is_file():
             errors.append(f"workflow missing: {workflow}")
             continue
-        pins = active_upload_pins(workflow.read_text(encoding="utf-8"))
+        text = workflow.read_text(encoding="utf-8")
+        pins = active_upload_pins(text)
+        references = active_upload_references(text)
+        if references != len(pins):
+            errors.append(
+                f"{workflow}: found {references} upload-sarif reference(s), "
+                f"but only {len(pins)} canonical pin(s)"
+            )
         if len(pins) != 1:
             errors.append(
                 f"{workflow}: want exactly one active upload-sarif SHA pin, found {len(pins)}"

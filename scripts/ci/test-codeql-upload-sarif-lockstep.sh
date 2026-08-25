@@ -164,4 +164,57 @@ jobs:
 YAML
 run_case quoted-foreign-workflow-callsite-is-refused "$case_root" 1
 
+case_root="$scratch/flow-mapping-foreign-workflow"
+seed "$case_root"
+cat >"$case_root/.github/workflows/flow-upload.yml" <<'YAML'
+name: Mutated flow-mapping CodeQL upload
+on: workflow_dispatch
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - {uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28}
+YAML
+run_case flow-mapping-foreign-workflow-is-refused "$case_root" 1
+
+case_root="$scratch/quoted-key-foreign-workflow"
+seed "$case_root"
+cat >"$case_root/.github/workflows/quoted-key-upload.yml" <<'YAML'
+name: Mutated quoted-key CodeQL upload
+on: workflow_dispatch
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - "uses": github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28
+YAML
+run_case quoted-key-foreign-workflow-is-refused "$case_root" 1
+
+case_root="$scratch/spaced-colon-foreign-workflow"
+seed "$case_root"
+cat >"$case_root/.github/workflows/spaced-colon-upload.yml" <<'YAML'
+name: Mutated spaced-colon CodeQL upload
+on: workflow_dispatch
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses : github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28
+YAML
+run_case spaced-colon-foreign-workflow-is-refused "$case_root" 1
+
+case_root="$scratch/folded-scalar-foreign-workflow"
+seed "$case_root"
+cat >"$case_root/.github/workflows/folded-upload.yml" <<'YAML'
+name: Mutated folded-scalar CodeQL upload
+on: workflow_dispatch
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: >-
+          github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28
+YAML
+run_case folded-scalar-foreign-workflow-is-refused "$case_root" 1
+
 printf 'PASS: CodeQL upload-sarif lockstep battery\n'
