@@ -497,6 +497,19 @@ def _decide_payload_tokens(payload: object) -> tuple[list[str], str]:
     return list(matches), ""
 
 
+def _is_error_flag_ok(block: dict[str, object]) -> bool:
+    """One rule for every `is_error` in the stream contract.
+
+    The field may be absent. When present it must be the literal boolean
+    `False`; identity is used rather than equality so that `0`, which compares
+    equal to `False` in Python, is refused along with `"false"` and every other
+    stand-in. A value the CLI never emits is not evidence of a clean result.
+    """
+    if "is_error" not in block:
+        return True
+    return block["is_error"] is False
+
+
 def _envelope_role(envelope: dict[str, object]) -> str | None:
     message = envelope.get("message")
     if not isinstance(message, dict):
@@ -570,8 +583,8 @@ def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
     result_index, _identifier, result_block = matching[0]
     if result_index <= use_index:
         return "unavailable", f"tool_result for {use_id!r} precedes its tool_use"
-    if result_block.get("is_error") is True:
-        return "unavailable", f"tool_result for {use_name} is an error result"
+    if not _is_error_flag_ok(result_block):
+        return "unavailable", f"tool_result for {use_name} reports or malforms is_error"
 
     try:
         payload = json.loads(_result_text(result_block))
@@ -610,8 +623,8 @@ def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
         return "unavailable", f"terminal result subtype is {terminal.get('subtype')!r}, not 'success'"
     # `subtype: success` and `is_error: true` co-occur in this CLI, so both are
     # checked; neither alone is the completion signal.
-    if terminal.get("is_error") is not False:
-        return "unavailable", "terminal result envelope reports is_error"
+    if not _is_error_flag_ok(terminal):
+        return "unavailable", "terminal result envelope reports or malforms is_error"
 
     sessions = {
         envelopes[index].get("session_id")
@@ -1021,6 +1034,9 @@ STREAM_FIXTURE_EXPECTATIONS = (
     ("tool-result-in-assistant-envelope.jsonl", "unavailable"),
     ("assistant-envelope-user-role.jsonl", "not_exercised"),
     ("quote-in-user-role-envelope.jsonl", "unavailable"),
+    ("tool-result-is-error-not-bool.jsonl", "unavailable"),
+    ("tool-result-is-error-zero.jsonl", "unavailable"),
+    ("terminal-result-is-error-not-bool.jsonl", "unavailable"),
 )
 
 

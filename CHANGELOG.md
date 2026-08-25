@@ -14,7 +14,8 @@ All notable changes to this project will be documented in this file.
   the server's contract with every `matches` member a non-empty string, a later assistant
   message quoting a value the model could not have taken from its own request, and exactly
   one terminal result envelope after that turn reporting `subtype: success` with
-  `is_error: false`. All of those envelopes must share one non-empty session id. Absence
+  `is_error` absent or the literal boolean `false` — checked by identity at both
+  `is_error` sites, so `0`, `"false"` and other stand-ins are refused. All of those envelopes must share one non-empty session id. Absence
   stays `not_exercised`; malformed, oversized, duplicated, out-of-order, wrong-tool,
   wrong-session, incomplete and error transcripts stay `unavailable`. Process exit is never
   the evidence, and an incomplete observation never becomes clean (#2632, child of #2194).
