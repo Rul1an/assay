@@ -9,6 +9,7 @@ pub mod evidence;
 pub mod import;
 pub mod mcp;
 pub mod policy;
+pub mod project_enforcement_health;
 pub mod project_otel;
 pub mod registry;
 pub mod replay;
@@ -27,6 +28,7 @@ pub use evidence::*;
 pub use import::*;
 pub use mcp::*;
 pub use policy::*;
+pub use project_enforcement_health::*;
 pub use project_otel::*;
 pub use registry::*;
 pub use replay::*;
@@ -103,6 +105,8 @@ pub enum Command {
     Coverage(CoverageArgs),
     /// Project assay evidence into the OTel GenAI + OpenInference view (`assay.otel_projection.v0`)
     ProjectOtel(ProjectOtelArgs),
+    /// Project one existing enforcement-health document (`assay.enforcement_health_projection.v0`)
+    ProjectEnforcementHealth(ProjectEnforcementHealthArgs),
     /// Explain a test result or trace decision
     Explain(super::commands::explain::ExplainArgs),
     /// Generate and run the local demo project

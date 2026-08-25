@@ -50,6 +50,7 @@ assay.cli.describe.v0 | crates/assay-cli/src/cli/commands/describe.rs | -
 assay.doctor_report.v0 | crates/assay-cli/src/cli/commands/doctor/implementation.rs | crates/assay-cli/src/diagnostics/probes.rs
 assay.enforcement_health.v0 | crates/assay-cli/src/cli/commands/monitor_next/enforcement_health.rs | -
 assay.enforcement_health.v1 | crates/assay-cli/src/enforcement_health_v1.rs | -
+assay.enforcement_health_projection.v0 | crates/assay-cli/src/cli/commands/project_enforcement_health.rs | -
 assay.evidence.schema.list.v1 | crates/assay-cli/src/cli/commands/evidence/schema/write.rs | crates/assay-cli/src/cli/commands/evidence/schema/reports.rs
 assay.evidence.schema.show.v1 | crates/assay-cli/src/cli/commands/evidence/schema/write.rs | crates/assay-cli/src/cli/commands/evidence/schema/reports.rs
 assay.evidence.schema.validation.v1 | crates/assay-cli/src/cli/commands/evidence/schema/write.rs | crates/assay-cli/src/cli/commands/evidence/schema/reports.rs
