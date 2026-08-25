@@ -205,7 +205,8 @@ pub struct SandboxArgs {
 
     /// Write the `assay.enforcement_health.v1` artifact (Landlock TCP-connect domain) to this path.
     /// A requested artifact that cannot be written is a command failure, never a silent absence.
-    #[arg(long = "enforcement-health")]
+    /// Requires --enforce-net: the Landlock v1 producer is reached only on that path.
+    #[arg(long = "enforcement-health", requires = "enforce_net")]
     pub enforcement_health: Option<PathBuf>,
 
     // Six digests -- subject, substrate, corpus, catch policy, observation vocabulary, run entropy

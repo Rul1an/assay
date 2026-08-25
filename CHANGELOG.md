@@ -100,6 +100,10 @@ All notable changes to this project will be documented in this file.
   (#2245).
 
 ### Fixed
+- `assay sandbox --enforcement-health` now requires `--enforce-net` at clap
+  validation, matching `--probe-enforcement`. The previously accepted combination
+  requested a v1 artifact without requesting its Landlock producer and wrote
+  nothing (#2635).
 - Evidence-vocabulary CI structurally rejects a required command after an
   unconditional `exit`/`return`, or when that command is the skipped operand
   of `false &&` / `true ||`. A short-circuit skip does not make later lines

@@ -399,3 +399,56 @@ fn top_level_failure_funnel_owns_supported_machine_output_commands() {
         "run owns its JSON error renderer and must not be rendered twice"
     );
 }
+
+#[test]
+fn sandbox_enforcement_health_without_enforce_net_is_clap_usage_error() {
+    let missing = Cli::try_parse_from([
+        "assay",
+        "sandbox",
+        "--enforcement-health",
+        "health.json",
+        "--",
+        "true",
+    ]);
+    let err = match missing {
+        Ok(_) => panic!(
+            "sandbox --enforcement-health without --enforce-net must fail clap before execution"
+        ),
+        Err(err) => err,
+    };
+    assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("--enforce-net"),
+        "clap must name the missing --enforce-net requirement: {rendered}"
+    );
+}
+
+#[test]
+fn sandbox_enforcement_health_with_enforce_net_still_parses() {
+    // Control: a live parser still accepts the coherent invocation. A dead harness
+    // that always returned Err would make the rejection test look green.
+    let ok = Cli::try_parse_from([
+        "assay",
+        "sandbox",
+        "--enforce",
+        "--enforce-net",
+        "--enforcement-health",
+        "health.json",
+        "--",
+        "true",
+    ])
+    .expect("sandbox --enforce --enforce-net --enforcement-health must still parse");
+    match ok.cmd {
+        Command::Sandbox(args) => {
+            assert!(args.enforce);
+            assert!(args.enforce_net);
+            assert_eq!(
+                args.enforcement_health.as_deref(),
+                Some(std::path::Path::new("health.json"))
+            );
+            assert_eq!(args.command, ["true"]);
+        }
+        _ => panic!("expected sandbox command"),
+    }
+}
