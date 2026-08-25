@@ -1,0 +1,3 @@
+{"session_id": "S", "subtype": "init", "tools": ["mcp__assay__assay_check_args", "mcp__assay__assay_check_coverage", "mcp__assay__assay_check_sequence", "mcp__assay__assay_explain_trace", "mcp__assay__assay_policy_decide"], "type": "system"}
+{this is not json
+{"is_error": false, "session_id": "S", "subtype": "success", "type": "result"}
