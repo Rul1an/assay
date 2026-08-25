@@ -3,7 +3,11 @@
 
 One rule, one function: refuse when the JSON `vulnerabilities` walk and the SARIF
 `runs[].results` length disagree, or when either artifact is missing/malformed.
+A second named function owns the scanner outcome gate: non-success plus a zero
+JSON count is an execution failure, not a clean scan.
+
 The scheduled workflow invokes this script; it does not reimplement the walk.
+OSV_OUTCOME must be wired from steps.osv-scan.outcome.
 
 Does not claim live scanner/reporter schema compatibility beyond these two counts.
 """
@@ -11,6 +15,7 @@ Does not claim live scanner/reporter schema compatibility beyond these two count
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -51,6 +56,27 @@ def sarif_result_count(data: Any) -> int:
     return count
 
 
+def read_osv_outcome() -> str:
+    outcome = os.environ.get("OSV_OUTCOME")
+    if outcome is None or outcome == "":
+        print(
+            "::error::OSV_OUTCOME is unset or empty; refusing (wiring hole)",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    return outcome
+
+
+def refuse_if_scanner_execution_failed(outcome: str, json_count: int) -> None:
+    """Non-success with zero JSON vulns is a scanner crash, not a clean scan."""
+    if outcome != "success" and json_count == 0:
+        print(
+            "::error::OSV scanner exited non-zero without vulnerability results; treating this as scanner execution failure",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
 def refuse_if_counts_differ(json_count: int, sarif_count: int) -> None:
     """The compare/exit. Mutating this is the false-green hole."""
     if json_count != sarif_count:
@@ -64,6 +90,7 @@ def refuse_if_counts_differ(json_count: int, sarif_count: int) -> None:
 
 
 def bind(json_path: Path, sarif_path: Path) -> None:
+    outcome = read_osv_outcome()
     if not json_path.is_file() or json_path.stat().st_size == 0:
         print(f"::error::OSV JSON result missing: {json_path}", file=sys.stderr)
         raise SystemExit(1)
@@ -88,6 +115,7 @@ def bind(json_path: Path, sarif_path: Path) -> None:
         raise SystemExit(1) from exc
     print(f"osv-json-vulnerabilities={json_count}")
     print(f"osv-sarif-results={sarif_count}")
+    refuse_if_scanner_execution_failed(outcome, json_count)
     refuse_if_counts_differ(json_count, sarif_count)
 
 

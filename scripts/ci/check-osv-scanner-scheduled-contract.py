@@ -3,8 +3,9 @@
 
 The reporter fail-opens on unreadable JSON (warn, empty results, exit 0). The
 runtime rule lives in scripts/ci/bind-osv-json-sarif-counts.py. This checker
-only pins that the workflow calls that script with both artifacts, and that
-scanner/reporter share one 40-hex SHA and semver comment.
+only pins that the workflow calls that script with both artifacts, wires
+OSV_OUTCOME from the scanner step, does not walk vulnerabilities itself, and
+that scanner/reporter share one 40-hex SHA and semver comment.
 
 It does not reimplement the count. Does not run the actions.
 """
@@ -17,6 +18,7 @@ from pathlib import Path
 
 WORKFLOW = Path(".github/workflows/osv-scanner-scheduled.yml")
 BIND_SCRIPT = "scripts/ci/bind-osv-json-sarif-counts.py"
+ENV_WIRING = "OSV_OUTCOME: ${{ steps.osv-scan.outcome }}"
 
 USES_RE = re.compile(
     r"^[ \t]*uses:[ \t]+google/osv-scanner-action/"
@@ -28,6 +30,11 @@ USES_RE = re.compile(
 # path args. Filenames are fixed inside the script (cwd osv-results.json/.sarif).
 INVOKE_RE = re.compile(
     r"^[ \t]+(?:run:[ \t]+)?python3[ \t]+scripts/ci/bind-osv-json-sarif-counts\.py[ \t]*$"
+)
+
+INLINE_WALK_TELLS = (
+    'key == "vulnerabilities"',
+    "key == 'vulnerabilities'",
 )
 
 
@@ -84,6 +91,19 @@ def check(text: str) -> list[str]:
             "want exactly one active invocation "
             f"`python3 {BIND_SCRIPT}`, "
             f"found {len(invokes)}"
+        )
+
+    env_lines = [line for line in active_lines if line.strip() == ENV_WIRING]
+    if len(env_lines) != 1:
+        errors.append(
+            "want exactly one active env wiring "
+            f"`{ENV_WIRING}`, found {len(env_lines)}"
+        )
+
+    if any(tell in text for tell in INLINE_WALK_TELLS):
+        errors.append(
+            "workflow still contains an inline vulnerabilities walk; "
+            f"{BIND_SCRIPT} is the only JSON counter"
         )
 
     return errors

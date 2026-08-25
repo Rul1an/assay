@@ -2,10 +2,13 @@
 # Mutation + fixture battery for the scheduled OSV lockstep/bind contract.
 #
 # Control must be green. SHA-drift and invocation-bypass must bite the checker.
+# Env-wiring and a restored inline vulnerabilities walk must also bite.
 # The runtime script is executed against synthetic fixtures (scratch only),
 # always via cwd-fixed names with zero CLI path args.
 # A compare/exit mutation on refuse_if_counts_differ must flip mismatch
 # from exit 1 to exit 0, proving the fixture hits that function.
+# A compare/exit mutation on refuse_if_scanner_execution_failed must flip
+# non-success+0+empty-SARIF from exit 1 to exit 0 (crashed scanner hole).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -13,7 +16,9 @@ CHECKER="scripts/ci/check-osv-scanner-scheduled-contract.py"
 BIND="scripts/ci/bind-osv-json-sarif-counts.py"
 WORKFLOW=".github/workflows/osv-scanner-scheduled.yml"
 ACTIVE_INVOKE="python3 scripts/ci/bind-osv-json-sarif-counts.py"
+ENV_WIRING='OSV_OUTCOME: ${{ steps.osv-scan.outcome }}'
 COMPARE_LINE="if json_count != sarif_count:"
+OUTCOME_COMPARE_LINE='if outcome != "success" and json_count == 0:'
 
 [[ -f "${ROOT}/${CHECKER}" ]] || { echo "FAIL: checker missing" >&2; exit 1; }
 [[ -f "${ROOT}/${BIND}" ]] || { echo "FAIL: bind script missing" >&2; exit 1; }
@@ -43,10 +48,12 @@ run_checker() {
 }
 
 # Production CLI is argumentless. Fixtures live in cwd as the fixed names.
+# Extra args after expected are env assignments (OSV_OUTCOME=...).
 run_bind_cwd() {
   local name="$1" case_dir="$2" bind_path="$3" expected="$4"
+  shift 4
   local status=0
-  ( cd "$case_dir" && python3 "$bind_path" ) >"$scratch/$name.log" 2>&1 || status=$?
+  ( cd "$case_dir" && env "$@" python3 "$bind_path" ) >"$scratch/$name.log" 2>&1 || status=$?
   if [[ "$status" -ne "$expected" ]]; then
     cat "$scratch/$name.log" >&2
     echo "FAIL: $name exited $status, wanted $expected" >&2
@@ -104,10 +111,47 @@ p.write_text(text.replace(old, "echo 'bypassed'", 1))
 PY
 run_checker "invoke-bypass-is-refused" "$c" 1
 
+c="$scratch/env-unwired"
+seed "$c"
+python3 - "$c/${WORKFLOW}" "$ENV_WIRING" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+old = sys.argv[2]
+text = p.read_text()
+if old not in text:
+    raise SystemExit("env wiring missing from seed; cannot mutate")
+p.write_text(text.replace(old, "OSV_SCAN_RESULT: ${{ steps.osv-scan.outcome }}", 1))
+PY
+run_checker "env-wiring-mutation-is-refused" "$c" 1
+
+c="$scratch/shared-teller"
+seed "$c"
+python3 - "$c/${WORKFLOW}" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+text = p.read_text()
+walk = (
+    "          def walk(value):\n"
+    "              if isinstance(value, dict):\n"
+    "                  for key, child in value.items():\n"
+    '                      if key == "vulnerabilities" and isinstance(child, list):\n'
+    "                          pass\n"
+)
+if 'key == "vulnerabilities"' in text:
+    text = text.replace('key == "vulnerabilities"', 'key == "packages"', 1)
+p.write_text(text + "\n" + walk)
+PY
+run_checker "shared-teller-walk-is-refused" "$c" 1
+
 # --- runtime fixtures (scratch only; not added to the repo) ---
 
 ACCEPT_JSON='{"results": [{"vulnerabilities": [{"id": "OSV-TEST-1"}]}]}'
 ACCEPT_SARIF='{"runs": [{"results": [{"ruleId": "OSV-TEST-1"}]}]}'
+EMPTY_JSON='{"results": []}'
 EMPTY_SARIF='{"runs": [{"results": []}]}'
 MISSING_RUNS_SARIF='{"version": "2.1.0"}'
 BAD_JSON='{not-json'
@@ -116,11 +160,16 @@ write_pair "$scratch/fx-accept" "$ACCEPT_JSON" "$ACCEPT_SARIF"
 write_pair "$scratch/fx-mismatch" "$ACCEPT_JSON" "$EMPTY_SARIF"
 write_pair "$scratch/fx-malformed-json" "$BAD_JSON" "$ACCEPT_SARIF"
 write_pair "$scratch/fx-malformed-sarif" "$ACCEPT_JSON" "$MISSING_RUNS_SARIF"
+write_pair "$scratch/fx-empty" "$EMPTY_JSON" "$EMPTY_SARIF"
 
-run_bind_cwd "fixture-acceptance" "$scratch/fx-accept" "${ROOT}/${BIND}" 0
-run_bind_cwd "fixture-mismatch" "$scratch/fx-mismatch" "${ROOT}/${BIND}" 1
-run_bind_cwd "fixture-malformed-json" "$scratch/fx-malformed-json" "${ROOT}/${BIND}" 1
-run_bind_cwd "fixture-malformed-sarif" "$scratch/fx-malformed-sarif" "${ROOT}/${BIND}" 1
+run_bind_cwd "fixture-acceptance" "$scratch/fx-accept" "${ROOT}/${BIND}" 0 OSV_OUTCOME=success
+run_bind_cwd "fixture-mismatch" "$scratch/fx-mismatch" "${ROOT}/${BIND}" 1 OSV_OUTCOME=success
+run_bind_cwd "fixture-malformed-json" "$scratch/fx-malformed-json" "${ROOT}/${BIND}" 1 OSV_OUTCOME=success
+run_bind_cwd "fixture-malformed-sarif" "$scratch/fx-malformed-sarif" "${ROOT}/${BIND}" 1 OSV_OUTCOME=success
+run_bind_cwd "fixture-clean-scan" "$scratch/fx-empty" "${ROOT}/${BIND}" 0 OSV_OUTCOME=success
+run_bind_cwd "fixture-execution-failure" "$scratch/fx-empty" "${ROOT}/${BIND}" 1 OSV_OUTCOME=failure
+run_bind_cwd "fixture-non-success-with-vulns" "$scratch/fx-accept" "${ROOT}/${BIND}" 0 OSV_OUTCOME=failure
+run_bind_cwd "fixture-missing-outcome" "$scratch/fx-accept" "${ROOT}/${BIND}" 1
 
 # --- compare/exit mutation must bite refuse_if_counts_differ ---
 # Same mismatch fixture (cwd-fixed names, zero CLI args).
@@ -138,6 +187,23 @@ if old not in text:
     raise SystemExit("FAIL: compare/exit string missing from bind script; cannot mutate")
 p.write_text(text.replace(old, "if False:", 1))
 PY
-run_bind_cwd "compare-exit-mutation-accepts-mismatch" "$scratch/fx-mismatch" "$mutated" 0
+run_bind_cwd "compare-exit-mutation-accepts-mismatch" "$scratch/fx-mismatch" "$mutated" 0 OSV_OUTCOME=success
 
-printf 'PASS: osv-scanner scheduled lockstep/bind battery (control, sha-drift, invoke-bypass, fixture-acceptance, fixture-mismatch, fixture-malformed-json, fixture-malformed-sarif, compare-exit-mutation)\n'
+# --- outcome-gate mutation: unmutated is 1, mutated is 0 ---
+# Crashed scanner + empty matching artifacts must not go green.
+mutated_outcome="$scratch/mutated-outcome-bind.py"
+cp "${ROOT}/${BIND}" "$mutated_outcome"
+python3 - "$mutated_outcome" "$OUTCOME_COMPARE_LINE" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+old = sys.argv[2]
+text = p.read_text()
+if old not in text:
+    raise SystemExit("FAIL: outcome compare/exit string missing from bind script; cannot mutate")
+p.write_text(text.replace(old, "if False:", 1))
+PY
+run_bind_cwd "outcome-gate-mutation-accepts-execution-failure" "$scratch/fx-empty" "$mutated_outcome" 0 OSV_OUTCOME=failure
+
+printf 'PASS: osv-scanner scheduled lockstep/bind battery (control, sha-drift, invoke-bypass, env-wiring-mutation, shared-teller-walk, fixture-acceptance, fixture-mismatch, fixture-malformed-json, fixture-malformed-sarif, fixture-clean-scan, fixture-execution-failure, fixture-non-success-with-vulns, fixture-missing-outcome, compare-exit-mutation, outcome-gate-mutation)\n'

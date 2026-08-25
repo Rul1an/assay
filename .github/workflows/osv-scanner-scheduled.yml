@@ -92,46 +92,11 @@ jobs:
 
       - name: Validate OSV scanner result
         shell: bash
-        env:
-          OSV_OUTCOME: ${{ steps.osv-scan.outcome }}
         run: |
           set -euo pipefail
 
           if [ ! -s osv-results.json ]; then
             echo "::error::OSV scanner did not produce a JSON result"
-            exit 1
-          fi
-
-          vuln_count="$(
-            python3 - <<'PY'
-          import json
-          import sys
-
-          with open("osv-results.json", "r", encoding="utf-8") as handle:
-              data = json.load(handle)
-
-          count = 0
-
-          def walk(value):
-              global count
-              if isinstance(value, dict):
-                  for key, child in value.items():
-                      if key == "vulnerabilities" and isinstance(child, list):
-                          count += len(child)
-                      walk(child)
-              elif isinstance(value, list):
-                  for item in value:
-                      walk(item)
-
-          walk(data)
-          print(count)
-          PY
-          )"
-
-          echo "osv-vulnerability-results=$vuln_count"
-
-          if [ "$OSV_OUTCOME" != "success" ] && [ "$vuln_count" -eq 0 ]; then
-            echo "::error::OSV scanner exited non-zero without vulnerability results; treating this as scanner execution failure"
             exit 1
           fi
 
@@ -146,6 +111,8 @@ jobs:
 
       - name: Bind scanner JSON count to reporter SARIF count
         shell: bash
+        env:
+          OSV_OUTCOME: ${{ steps.osv-scan.outcome }}
         run: |
           set -euo pipefail
           python3 scripts/ci/bind-osv-json-sarif-counts.py
