@@ -35,6 +35,7 @@ This is the recommended way to run untrusted MCP servers in CI/CD or development
 | `--fail-closed` | Exit if policy cannot be fully enforced (no degradation) |
 | `--enforce` | Require active Landlock filesystem enforcement |
 | `--enforce-net` | Enforce an explicit TCP destination-port allowlist; requires `--enforce` |
+| `--enforcement-health <path>` | Write `assay.enforcement_health.v1` (Landlock TCP-connect) to this path; requires `--enforce-net` |
 | `--dry-run` | Audit without active blocking; conflicts with `--enforce` |
 
 ### Environment Control
@@ -221,6 +222,12 @@ When degraded execution continues and profiling is enabled, the evidence profile
 sidecar can carry a typed `assay.sandbox.degraded` signal for the supported
 fallback paths. Intentional audit/permissive runs and fail-closed aborts do not
 emit that signal.
+
+`--enforcement-health` requires `--enforce-net`. If execution degrades to audit
+before Landlock is applied (unsupported backend, or a policy conflict that is
+not `--fail-closed`), the mechanism artifact is not written and Assay names the
+requested path on stderr. That diagnostic is not an `assay.enforcement_health.v1`
+record.
 
 ---
 

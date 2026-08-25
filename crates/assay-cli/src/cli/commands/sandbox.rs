@@ -31,6 +31,10 @@ use tmp::create_scoped_tmp;
 /// A refusal happens before the child runs, so there is genuinely nothing to profile and no
 /// enforcement to describe. Writing an empty artifact would be worse than writing none: it
 /// would look like a measured run. What the caller is owed is the sentence, not the file.
+fn note_unwritten_artifact(flag: &str, path: &std::path::Path, reason: &str) {
+    eprintln!("NOTE: {flag} {} not written: {reason}", path.display());
+}
+
 fn report_unwritten_artifacts(args: &SandboxArgs, reason: &str) {
     for (flag, path) in [
         ("--profile", args.profile.as_ref()),
@@ -39,8 +43,17 @@ fn report_unwritten_artifacts(args: &SandboxArgs, reason: &str) {
         ("--otel-jsonl", args.otel_jsonl.as_ref()),
     ] {
         if let Some(path) = path {
-            eprintln!("NOTE: {flag} {} not written: {reason}", path.display());
+            note_unwritten_artifact(flag, path, reason);
         }
+    }
+}
+
+/// A requested `--enforcement-health` path that cannot exist because execution
+/// degraded to audit before the v1 producer. Profile/bundle/otel may still be
+/// written after the child runs; do not reuse `report_unwritten_artifacts` here.
+fn report_unwritten_enforcement_health(args: &SandboxArgs, reason: &str) {
+    if let Some(path) = args.enforcement_health.as_ref() {
+        note_unwritten_artifact("--enforcement-health", path, reason);
     }
 }
 
@@ -80,6 +93,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         eprintln!(
             "WARN: Active enforcement requested but not supported. Falling back to Audit mode."
         );
+        report_unwritten_enforcement_health(&args, "execution degraded to audit");
     }
 
     if !args.quiet {
@@ -273,6 +287,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         eprintln!(
             "WARN: Degrading to Audit mode (no containment). use --fail-closed to make this fatal."
         );
+        report_unwritten_enforcement_health(&args, "execution degraded to audit");
         metrics::increment("degraded_to_audit_conflict");
         actual_enforcement = false;
     }
