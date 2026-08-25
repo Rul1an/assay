@@ -617,97 +617,518 @@ else
   fail "ci.yml does not actively invoke both hardening contracts in the ci job"
 fi
 
-echo "== required CI workflow actively runs evidence-vocabulary self-test and live checker =="
+echo "== required CI workflow command reachability (structural, not a runtime witness) =="
+# One rule: a required command is reachable iff it appears as the exact
+# canonical active line. A direct active `exit`/`return` command, with or
+# without shell arguments (including quotes and expansions), makes later
+# lines unreachable. Identifiers like `exit_status` and quoted prose are
+# not terminators. A genuine short-circuit (`false && cmd`, `true || cmd`)
+# makes only that skipped operand unreachable; later lines are still
+# scanned. `true && cmd` still runs cmd in Bash, so it is a canonical-form
+# miss, not a reachability bypass.
+# Structural only: not a hosted execution witness.
 if python3 - "${CI_WF}" <<'PY'
 import re
 import sys
 
-text = open(sys.argv[1]).read()
-match = re.search(r"(?ms)^  scope:\n(.*?)(?=^  [a-zA-Z][\w-]*:|\Z)", text)
-if not match:
-    sys.exit("scope job missing from ci.yml")
-section = match.group(1)
-step = re.search(
-    r"(?ms)^      - name: Evidence vocabulary guard\n(?P<body>(?:        .+\n)+)",
-    section,
+TERMINATOR_RE = re.compile(r"^(?:exit|return)(?:\s+.*)?$")
+SHORT_CIRCUIT_RE = re.compile(r"^(?:false\s+&&|true\s+\|\|)\s+(.+)$")
+
+def command_reachability_problems(active, required):
+    """Return problems if any required command is not structurally reachable.
+
+    Canonical form is exact-line identity. A direct `exit`/`return` command
+    (optional arguments, including quotes and expansions) stops later lines.
+    Short-circuit skips only its operand. `true && cmd` executes cmd and is
+    reported as not canonical, never as unreachable.
+    """
+    reachable = []
+    terminator = None
+    skipped_by = {}
+    for line in active:
+        if terminator is not None:
+            break
+        if TERMINATOR_RE.fullmatch(line):
+            terminator = line
+            break
+        skipped = SHORT_CIRCUIT_RE.fullmatch(line)
+        if skipped:
+            operand = skipped.group(1)
+            skipped_by.setdefault(operand, line)
+            continue
+        if line == ":":
+            continue
+        reachable.append(line)
+    problems = []
+    for cmd in required:
+        if cmd in reachable:
+            continue
+        if cmd in skipped_by:
+            problems.append(
+                "required command unreachable after short-circuit "
+                f"{skipped_by[cmd]!r}: {cmd}"
+            )
+        elif terminator is not None:
+            problems.append(
+                f"required command unreachable after {terminator!r}: {cmd}"
+            )
+        else:
+            problems.append(
+                f"required command missing, neutralized, or not canonical: {cmd}"
+            )
+    return problems
+
+def scope_section(text):
+    match = re.search(r"(?ms)^  scope:\n(.*?)(?=^  [a-zA-Z][\w-]*:|\Z)", text)
+    if not match:
+        sys.exit("scope job missing from ci.yml")
+    return match.group(1)
+
+def step_body(section, heading, step_re):
+    step = re.search(step_re, section)
+    if not step:
+        sys.exit(f"scope job missing {heading!r} step")
+    body = step.group("body")
+    for forbidden in ("if:", "continue-on-error:"):
+        if re.search(rf"(?m)^        {re.escape(forbidden)}", body):
+            sys.exit(f"{heading} step must not use {forbidden}")
+    return body
+
+def active_run_lines(body):
+    active = []
+    for line in body.splitlines():
+        if not line.startswith("          "):
+            continue
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        active.append(stripped)
+    return active
+
+EVIDENCE_HEADING = "Evidence vocabulary guard"
+EVIDENCE_RE = (
+    r"(?ms)^      - name: Evidence vocabulary guard\n(?P<body>(?:        .+\n)+)"
 )
-if not step:
-    sys.exit("scope job missing 'Evidence vocabulary guard' step")
-body = step.group("body")
-for forbidden in ("if:", "continue-on-error:"):
-    if re.search(rf"(?m)^        {re.escape(forbidden)}", body):
-        sys.exit(f"evidence-vocabulary step must not use {forbidden}")
-active = [
-    line.strip()
-    for line in body.splitlines()
-    if line.startswith("          ") and not line.lstrip().startswith("#")
-]
-required = (
+EVIDENCE_REQUIRED = (
     "bash scripts/ci/test-evidence-vocabulary.sh",
     "python3 scripts/ci/check-evidence-vocabulary.py",
 )
-missing = [cmd for cmd in required if cmd not in active]
-if missing:
-    sys.exit("active commands missing: " + ", ".join(missing))
-sys.exit(0)
-PY
-then
-  ok "ci.yml scope job actively runs evidence-vocabulary self-test and live checker"
-else
-  fail "ci.yml does not actively invoke evidence-vocabulary in the scope job"
-fi
-
-echo "== required CI workflow actively runs published-numbers projection contract =="
-# Adequacy-drift is not a required context. Without this always-run scope-job
-# caller, required CI can go green after the provenance, projection, or live checker is deleted.
-# This is the only callsite guard: comment-out, ':' neutralization, or deletion
-# of either live command must make this contract red.
-if python3 - "${CI_WF}" <<'PY'
-import re
-import sys
-
-text = open(sys.argv[1]).read()
-match = re.search(r"(?ms)^  scope:\n(.*?)(?=^  [a-zA-Z][\w-]*:|\Z)", text)
-if not match:
-    sys.exit("scope job missing from ci.yml")
-section = match.group(1)
-setup_at = section.find("uses: actions/setup-python")
-step_at = section.find("- name: Published-numbers projection contract")
-if setup_at < 0 or step_at < 0 or step_at < setup_at:
-    sys.exit("published-numbers step must follow actions/setup-python")
-step = re.search(
-    r"(?m)^      - name: Published-numbers projection contract\n(?P<body>(?:        .+\n)+)(?:\n*)(?=^      - |\Z)",
-    section,
+EVIDENCE_NEEDLE = "          bash scripts/ci/test-evidence-vocabulary.sh\n"
+PUBLISHED_HEADING = "Published-numbers projection contract"
+PUBLISHED_RE = (
+    r"(?m)^      - name: Published-numbers projection contract\n"
+    r"(?P<body>(?:        .+\n)+)(?:\n*)(?=^      - |\Z)"
 )
-if not step:
-    sys.exit("scope job missing 'Published-numbers projection contract' step")
-body = step.group("body")
-for forbidden in ("if:", "continue-on-error:"):
-    if re.search(rf"(?m)^        {re.escape(forbidden)}", body):
-        sys.exit(f"published-numbers step must not use {forbidden}")
-active = []
-for line in body.splitlines():
-    if not line.startswith("          "):
-        continue
-    stripped = line.lstrip()
-    if stripped.startswith("#"):
-        continue
-    active.append(stripped)
-required = (
+PUBLISHED_REQUIRED = (
     "set -euo pipefail",
     "python3 conformance/tests/test_published_numbers_provenance.py",
     "python3 conformance/tests/test_published_numbers_guard.py",
     "python3 conformance/adequacy/check_published_numbers.py",
 )
-if active != list(required):
-    sys.exit("active published-numbers step body must be exactly %r, got %r" %
-             (list(required), active))
+PUBLISHED_NEEDLE = (
+    "          python3 conformance/tests/test_published_numbers_provenance.py\n"
+)
+
+text = open(sys.argv[1]).read()
+section = scope_section(text)
+evidence_body = step_body(section, EVIDENCE_HEADING, EVIDENCE_RE)
+evidence_active = active_run_lines(evidence_body)
+evidence_problems = command_reachability_problems(
+    evidence_active, EVIDENCE_REQUIRED
+)
+if evidence_problems:
+    sys.exit("; ".join(evidence_problems))
+
+setup_at = section.find("uses: actions/setup-python")
+step_at = section.find("- name: Published-numbers projection contract")
+if setup_at < 0 or step_at < 0 or step_at < setup_at:
+    sys.exit("published-numbers step must follow actions/setup-python")
+published_body = step_body(section, PUBLISHED_HEADING, PUBLISHED_RE)
+published_active = active_run_lines(published_body)
+if published_active != list(PUBLISHED_REQUIRED):
+    sys.exit(
+        "active published-numbers step body must be exactly %r, got %r"
+        % (list(PUBLISHED_REQUIRED), published_active)
+    )
+published_problems = command_reachability_problems(
+    published_active, PUBLISHED_REQUIRED
+)
+if published_problems:
+    sys.exit("; ".join(published_problems))
+
+# `true && cmd` executes cmd. Exact-form miss, not a reachability bypass.
+true_and_problems = command_reachability_problems(
+    [f"true && {EVIDENCE_REQUIRED[0]}", EVIDENCE_REQUIRED[1]],
+    EVIDENCE_REQUIRED,
+)
+if not true_and_problems:
+    sys.exit("true && prefix must fail canonical form")
+if any("unreachable" in p for p in true_and_problems):
+    sys.exit(
+        "true && cmd still executes; must not be reported as unreachable: "
+        + "; ".join(true_and_problems)
+    )
+if not any("not canonical" in p for p in true_and_problems):
+    sys.exit(
+        "true && cmd must be named as a canonical-form miss: "
+        + "; ".join(true_and_problems)
+    )
+
+def _quoted_or_expanded_terminates(line):
+    problems = command_reachability_problems(
+        [line, EVIDENCE_REQUIRED[0], EVIDENCE_REQUIRED[1]],
+        EVIDENCE_REQUIRED,
+    )
+    joined = "; ".join(problems)
+    if not problems:
+        sys.exit(
+            f"{line!r} must make later required commands unreachable (false-clean)"
+        )
+    for cmd in EVIDENCE_REQUIRED:
+        if cmd not in joined or "unreachable" not in joined:
+            sys.exit(
+                f"{line!r} must mark later required commands unreachable: "
+                + joined
+            )
+
+_quoted_or_expanded_terminates('exit "0"')
+_quoted_or_expanded_terminates('exit "$?"')
+_quoted_or_expanded_terminates('return "$code"')
+
+# Direct exit/return only. Identifiers and quoted prose are not terminators.
+for decoy, label in (
+    ("exit_status=1", "exit_status assignment"),
+    ('echo "please exit now"', "quoted text containing exit"),
+):
+    decoy_problems = command_reachability_problems(
+        [decoy, EVIDENCE_REQUIRED[0], EVIDENCE_REQUIRED[1]],
+        EVIDENCE_REQUIRED,
+    )
+    if decoy_problems:
+        sys.exit(
+            f"{label} must not terminate later lines: "
+            + "; ".join(decoy_problems)
+        )
+
+# Optional short-circuit skips only that operand; later required lines run.
+later_pair = ("bash required-one.sh", "bash required-two.sh")
+optional_later = command_reachability_problems(
+    ["false && echo optional", later_pair[0], later_pair[1]],
+    later_pair,
+)
+if optional_later:
+    sys.exit(
+        "optional false && before two required commands must leave both "
+        "reachable: " + "; ".join(optional_later)
+    )
+optional_and = command_reachability_problems(
+    ["false && echo optional", EVIDENCE_REQUIRED[0], EVIDENCE_REQUIRED[1]],
+    EVIDENCE_REQUIRED,
+)
+if optional_and:
+    sys.exit(
+        "optional false && must leave later required commands reachable: "
+        + "; ".join(optional_and)
+    )
+optional_or = command_reachability_problems(
+    ["true || echo optional", EVIDENCE_REQUIRED[0], EVIDENCE_REQUIRED[1]],
+    EVIDENCE_REQUIRED,
+)
+if optional_or:
+    sys.exit(
+        "optional true || must leave later required commands reachable: "
+        + "; ".join(optional_or)
+    )
+
+def _short_circuit_only_operand(prefix, required):
+    active = [f"{prefix} {required[0]}", required[1]]
+    problems = command_reachability_problems(active, required)
+    joined = "; ".join(problems)
+    if not problems:
+        sys.exit(f"{prefix} REQUIRED must fail that required command")
+    if required[0] not in joined or "unreachable" not in joined:
+        sys.exit(
+            f"{prefix} REQUIRED must mark only that operand unreachable: "
+            + joined
+        )
+    if required[1] in joined:
+        sys.exit(
+            f"{prefix} REQUIRED must not mark the later command unreachable: "
+            + joined
+        )
+
+_short_circuit_only_operand("false &&", later_pair)
+_short_circuit_only_operand("true ||", later_pair)
+_short_circuit_only_operand("false &&", EVIDENCE_REQUIRED)
+_short_circuit_only_operand("true ||", EVIDENCE_REQUIRED)
+
+def apply_mutation(source, needle, kind):
+    if needle not in source:
+        sys.exit(f"{kind} mutation needle missing: {needle!r}")
+    if kind == "exit 0":
+        return source.replace(needle, "          exit 0\n" + needle, 1)
+    if kind == "exit":
+        return source.replace(needle, "          exit\n" + needle, 1)
+    if kind == "return 0":
+        return source.replace(needle, "          return 0\n" + needle, 1)
+    if kind == 'exit "0"':
+        return source.replace(needle, '          exit "0"\n' + needle, 1)
+    if kind == 'exit "$?"':
+        return source.replace(needle, '          exit "$?"\n' + needle, 1)
+    if kind == 'return "$code"':
+        return source.replace(needle, '          return "$code"\n' + needle, 1)
+    if kind == ": neutralization":
+        return source.replace(needle, "          :\n", 1)
+    if kind == "false && skip":
+        return source.replace(needle, "          false && " + needle.lstrip(), 1)
+    if kind == "true || skip":
+        return source.replace(needle, "          true || " + needle.lstrip(), 1)
+    if kind == "comment-out":
+        return source.replace(needle, "          # " + needle.lstrip(), 1)
+    if kind == "deletion":
+        return source.replace(needle, "", 1)
+    sys.exit(f"unknown mutation {kind!r}")
+
+MUTATIONS = (
+    "exit 0",
+    "exit",
+    "return 0",
+    'exit "0"',
+    'exit "$?"',
+    'return "$code"',
+    ": neutralization",
+    "false && skip",
+    "true || skip",
+    "comment-out",
+    "deletion",
+)
+TARGETS = (
+    (EVIDENCE_HEADING, EVIDENCE_RE, EVIDENCE_REQUIRED, EVIDENCE_NEEDLE),
+    (PUBLISHED_HEADING, PUBLISHED_RE, PUBLISHED_REQUIRED, PUBLISHED_NEEDLE),
+)
+for heading, step_re, required, needle in TARGETS:
+    for kind in MUTATIONS:
+        control = command_reachability_problems(
+            active_run_lines(step_body(scope_section(text), heading, step_re)),
+            required,
+        )
+        if control:
+            sys.exit(f"green control red before {heading} {kind}: " + "; ".join(control))
+        mutated = apply_mutation(text, needle, kind)
+        if mutated == text:
+            sys.exit(f"{heading} {kind} mutation was a no-op")
+        problems = command_reachability_problems(
+            active_run_lines(
+                step_body(scope_section(mutated), heading, step_re)
+            ),
+            required,
+        )
+        if not problems:
+            sys.exit(
+                f"{heading}: {kind} left required commands reachable (false-clean)"
+            )
+        if kind in ("false && skip", "true || skip"):
+            mutated_cmd = needle.strip()
+            joined = "; ".join(problems)
+            if mutated_cmd not in joined:
+                sys.exit(
+                    f"{heading}: {kind} must fail the skipped operand: "
+                    + joined
+                )
+            later = False
+            for line in active_run_lines(
+                step_body(scope_section(mutated), heading, step_re)
+            ):
+                if later and line in required and line in joined:
+                    sys.exit(
+                        f"{heading}: {kind} over-reported later command "
+                        f"{line!r}: " + joined
+                    )
+                if line.startswith(("false && ", "true || ")) and line.endswith(
+                    mutated_cmd
+                ):
+                    later = True
+        control = command_reachability_problems(
+            active_run_lines(step_body(scope_section(text), heading, step_re)),
+            required,
+        )
+        if control:
+            sys.exit(f"green control red after {heading} {kind}: " + "; ".join(control))
 sys.exit(0)
 PY
 then
-  ok "ci.yml scope job actively runs the published-numbers projection contract"
+  ok "ci.yml scope job required commands are structurally reachable"
 else
-  fail "ci.yml does not actively invoke the published-numbers projection contract"
+  fail "ci.yml required command reachability failed"
+fi
+
+echo "== evidence-vocabulary NUL policy is content-first with a stale-checked binary allowlist =="
+if python3 - "${ROOT}" <<'PY'
+import importlib.util
+import inspect
+import io
+import subprocess
+import sys
+import tempfile
+from contextlib import redirect_stdout
+from pathlib import Path
+
+root = Path(sys.argv[1])
+checker = root / "scripts/ci/check-evidence-vocabulary.py"
+spec = importlib.util.spec_from_file_location("evidence_vocabulary", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+
+positive = root / "tests/fixtures/ci/content-first/extensionless-text"
+negative = root / "tests/fixtures/ci/content-first/genuine.bin"
+if not positive.is_file() or positive.suffix:
+    sys.exit("extensionless textual positive fixture missing")
+if b"\0" in positive.read_bytes():
+    sys.exit("positive fixture must be textual (no NUL) so live CI stays green")
+if not negative.is_file() or negative.suffix != ".bin":
+    sys.exit("genuine binary negative fixture missing")
+if b"\0" not in negative.read_bytes():
+    sys.exit("negative fixture must contain NUL")
+
+rekor_rel = "crates/assay-registry/src/rekor.rs"
+rekor = (root / rekor_rel).read_bytes()
+allow_attr = next(
+    n for n in dir(module) if n.startswith("ALLOWED_") and n.endswith("_USES")
+)
+allow_map = getattr(module, allow_attr)
+
+def run_tree(files, **kwargs):
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp)
+        (dest / "crates/assay-registry/src").mkdir(parents=True)
+        (dest / "crates/assay-registry/src/rekor.rs").write_bytes(rekor)
+        for rel, data in files.items():
+            path = dest / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        subprocess.run(["git", "init", "-q"], cwd=dest, check=True)
+        subprocess.run(["git", "add", "-A", "--", "."], cwd=dest, check=True)
+        allow = {rekor_rel: allow_map[rekor_rel]}
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = module.check_tree(dest, allow, identifiers={}, **kwargs)
+        return rc, buf.getvalue()
+
+rc, out = run_tree({"extensionless-text": b"plain text with a NUL\x00byte\n"})
+if rc == 0 or "extensionless-text" not in out:
+    sys.exit(
+        "FAIL: NUL in an extensionless tracked file must fail closed:\n" + out
+    )
+
+rc, out = run_tree({"notes.mdx": b"docs with a NUL\x00inside\n"})
+if rc == 0 or "notes.mdx" not in out:
+    sys.exit("FAIL: NUL in an unlisted textual suffix must fail closed:\n" + out)
+
+rc, out = run_tree(
+    {"tests/fixtures/ci/content-first/genuine.bin": negative.read_bytes()}
+)
+if rc != 0:
+    sys.exit(
+        "FAIL: path-bound genuine binary with matching magic must pass:\n" + out
+    )
+
+rc, out = run_tree({"genuine.bin": negative.read_bytes()})
+if rc == 0 or "genuine.bin" not in out:
+    sys.exit(
+        "FAIL: ELF magic at a non-allowlisted path must fail closed:\n" + out
+    )
+
+rc, out = run_tree({"disguise.bin": b"plain text with a NUL\x00byte\n"})
+if rc == 0 or "disguise.bin" not in out:
+    sys.exit(
+        "FAIL: NUL text named .bin without binary magic must fail closed:\n" + out
+    )
+
+png_sig = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+token = "M" + "erkle"
+hostile = png_sig + b"\x00" + f"run_root is a {token} root\n".encode()
+rc, out = run_tree({"hostile-png-prefix": hostile})
+if rc == 0 or "hostile-png-prefix" not in out:
+    sys.exit(
+        "FAIL: PNG magic prefix + NUL + forbidden claim at a non-allowlisted "
+        "path must fail closed:\n" + out
+    )
+
+if getattr(module, "BINARY_ALLOWLIST_SUFFIXES", None):
+    sys.exit("FAIL: suffix binary escape must not exist")
+if getattr(module, "BINARY_MAGIC", None) is not None:
+    sys.exit("FAIL: global BINARY_MAGIC escape must not exist")
+if getattr(module, "BINARY_ALLOWLIST_PATHS", None):
+    sys.exit("FAIL: path-only binary OR-escape must not exist")
+exceptions = getattr(module, "BINARY_EXCEPTIONS", None)
+if not exceptions:
+    sys.exit("FAIL: BINARY_EXCEPTIONS path-and-magic table missing")
+path_class = getattr(module, "matches_path_class", None)
+allow_bin = getattr(module, "is_allowlisted_binary", None)
+stale = getattr(module, "binary_allowlist_staleness", None)
+if not callable(path_class) or not callable(allow_bin) or not callable(stale):
+    sys.exit("FAIL: path-class matcher, runtime allowance, or staleness missing")
+if "matches_path_class" not in inspect.getsource(allow_bin):
+    sys.exit("FAIL: runtime allowance must call matches_path_class")
+if "matches_path_class" not in inspect.getsource(stale):
+    sys.exit("FAIL: staleness must call matches_path_class")
+matcher_src = inspect.getsource(path_class)
+if "fnmatchcase" not in matcher_src or "fnmatch.fnmatch(" in matcher_src:
+    sys.exit("FAIL: matches_path_class must use fnmatchcase, not fnmatch.fnmatch")
+if "fnmatch.fnmatch(" in inspect.getsource(allow_bin) + inspect.getsource(stale):
+    sys.exit("FAIL: must not use fnmatch.fnmatch on repository paths")
+
+SEGMENT_PATTERN = "docs/assets/evidence-receipts-in-action/*/evidence.tar.gz"
+SEGMENT_ONE = "docs/assets/evidence-receipts-in-action/a/evidence.tar.gz"
+SEGMENT_DEEP = "docs/assets/evidence-receipts-in-action/a/b/evidence.tar.gz"
+SEGMENT_CASE = "docs/assets/evidence-receipts-in-action/a/Evidence.tar.gz"
+GZIP_NUL = b"\x1f\x8b\x00"
+
+
+def assert_segment_bound(match, label):
+    if not match(SEGMENT_ONE, SEGMENT_PATTERN):
+        sys.exit(f"FAIL: {label}: one-segment path class must match")
+    if match(SEGMENT_DEEP, SEGMENT_PATTERN):
+        sys.exit(f"FAIL: {label}: extra-depth path must not match one-segment glob")
+    if match(SEGMENT_CASE, SEGMENT_PATTERN):
+        sys.exit(f"FAIL: {label}: case-changed path must not match")
+
+
+assert_segment_bound(path_class, "matches_path_class")
+assert_segment_bound(
+    lambda rel, pat: allow_bin(rel, GZIP_NUL, ((pat, "gzip"),)),
+    "is_allowlisted_binary",
+)
+
+
+def stale_hit(rel, pattern):
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp)
+        path = dest / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(GZIP_NUL)
+        return not stale(dest, [path], exceptions=((pattern, "gzip"),))
+
+
+assert_segment_bound(stale_hit, "binary_allowlist_staleness")
+
+messages = stale(
+    root,
+    [root / "README.md"],
+    exceptions=(("tests/fixtures/ci/content-first/missing.bin", "elf"),),
+)
+if not messages:
+    sys.exit("FAIL: stale binary allowlist entries must fail")
+joined = "\n".join(messages)
+if "tests/fixtures/ci/content-first/missing.bin" not in joined:
+    sys.exit("FAIL: stale path was not reported:\n" + joined)
+sys.exit(0)
+PY
+then
+  ok "NUL policy is content-first; stale binary allowlist entries fail"
+else
+  fail "evidence-vocabulary NUL policy contract failed"
 fi
 
 if [[ "${failures}" -ne 0 ]]; then

@@ -89,6 +89,16 @@ All notable changes to this project will be documented in this file.
   (#2245).
 
 ### Fixed
+- Evidence-vocabulary CI structurally rejects a required command after an
+  unconditional `exit`/`return`, or when that command is the skipped operand
+  of `false &&` / `true ||`. A short-circuit skip does not make later lines
+  unreachable. `true && cmd` still executes in Bash, so it is a canonical-form
+  miss rather than a reachability bypass; this is not a runtime execution
+  witness. Tracked-file NUL scanning is content-first: NUL fails closed unless
+  the path matches a declared POSIX, case-sensitive, segment-bound path
+  class AND the bytes match that class's expected magic. A header prefix
+  alone is not a binary. Vacuous path classes fail. No `run_root` semantic
+  change (#2362).
 - Named MCP request-envelope projection now fails closed when `params` is missing or is not a JSON
   object. These cases report stable `fallback_projection_missing_params` or
   `fallback_projection_invalid_params` checks, exit `2`, and serialize `binding.digest` as `null`
