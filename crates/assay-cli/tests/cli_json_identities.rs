@@ -1094,8 +1094,21 @@ fn safe_component(name: &std::ffi::OsStr) -> Option<String> {
 ///
 /// Uses `DirEntry::file_type()` (does not follow) and never `DirEntry::path()`. A symlink is a
 /// hard failure, not a skip: skipping would leave a serializer on the other side of the link
-/// unaccounted without anyone noticing.
+/// unaccounted without anyone noticing. The walk root is checked with `symlink_metadata` before
+/// the first `read_dir`, because `read_dir` follows a symlink root and would inventory its target.
 fn collect_rs_under(root: &Path) -> Vec<PathBuf> {
+    let meta = std::fs::symlink_metadata(root)
+        .unwrap_or_else(|e| panic!("unreadable command tree root {}: {e}", root.display()));
+    assert!(
+        !meta.file_type().is_symlink(),
+        "command tree root must not be a symlink: {}",
+        root.display()
+    );
+    assert!(
+        meta.is_dir(),
+        "command tree root must be a real directory: {}",
+        root.display()
+    );
     let mut stack = vec![root.to_path_buf()];
     let mut files = Vec::new();
     while let Some(dir) = stack.pop() {
@@ -1456,5 +1469,22 @@ fn command_tree_walk_rejects_symlinks_fail_closed() {
     assert!(
         result.is_err(),
         "a symlink in the command tree must fail closed, not be followed or skipped"
+    );
+}
+
+/// `read_dir` follows a symlink root. The walk must refuse before the first listing, so a
+/// replaced `cli/commands` link cannot inventory a tree outside that directory.
+#[cfg(unix)]
+#[test]
+fn command_tree_walk_rejects_symlink_root_fail_closed() {
+    let holder = tempfile::tempdir().expect("holder");
+    let outside = tempfile::tempdir().expect("outside");
+    std::fs::write(outside.path().join("escaped.rs"), "fn x() {}\n").expect("escaped.rs");
+    let commands = holder.path().join("commands");
+    std::os::unix::fs::symlink(outside.path(), &commands).expect("root symlink");
+    let result = std::panic::catch_unwind(|| collect_rs_under(&commands));
+    assert!(
+        result.is_err(),
+        "a symlink supplied as the walk root must fail closed, not be followed"
     );
 }

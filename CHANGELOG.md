@@ -13,8 +13,8 @@ All notable changes to this project will be documented in this file.
   `evidence lint` (SARIF, not the run-report `sarif` row), `evidence list` (`list_all` vs
   `list_for_run`), and `assay profile update` (`ASSAY_PROFILE_PERF_JSON`, not `profile show`).
   Fourteen files were opted out after reading the emit path. The command-tree walk admits one
-  safe ASCII component at a time, rejects symlinks fail-closed, and never uses `DirEntry::path()`.
-  No schema, runtime, or CLI output changed (#2555).
+  safe ASCII component at a time, rejects a symlink root and nested symlinks fail-closed, and
+  never uses `DirEntry::path()`. No schema, runtime, or CLI output changed (#2555).
 - `capture_candidate.py` records a candidate's observations over the opaque cases and
   writes `assay.privileged_mcp_action.candidate_capture.v0`. It takes no manifest and no
   expectations, so a candidate that escapes its process bounds finds no answers on that
