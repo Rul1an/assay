@@ -3,7 +3,11 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 pub(super) fn from_file(path: &Path) -> anyhow::Result<McpPolicy> {
-    let bytes = std::fs::read(path)?;
+    let bytes = std::fs::read(path).map_err(|error| McpPolicyError {
+        kind: McpPolicyErrorKind::Io,
+        source: anyhow::Error::new(error)
+            .context(format!("failed to read policy {}", path.display())),
+    })?;
     McpPolicy::from_slice(&bytes)
 }
 
@@ -70,7 +74,13 @@ pub(super) fn from_slice(bytes: &[u8]) -> anyhow::Result<McpPolicy> {
     // Check for v1 format and warn if necessary
     if is_v1_format(&policy) {
         if std::env::var("ASSAY_STRICT_DEPRECATIONS").ok().as_deref() == Some("1") {
-            anyhow::bail!("Strict mode: v1 policy format (constraints) is not allowed.");
+            return Err(McpPolicyError {
+                kind: McpPolicyErrorKind::StrictDeprecation,
+                source: anyhow::anyhow!(
+                    "Strict mode: v1 policy format (constraints) is not allowed."
+                ),
+            }
+            .into());
         }
         emit_deprecation_warning();
     }

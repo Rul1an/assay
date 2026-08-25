@@ -94,6 +94,29 @@ fn policy_error_classification_invalid_utf8() {
     );
 }
 
+#[test]
+fn policy_error_classification_io_preserves_path_and_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("missing-policy.yaml");
+
+    let err = McpPolicy::from_file(&path).unwrap_err();
+    let typed = err
+        .downcast_ref::<McpPolicyError>()
+        .expect("file I/O must have a core-owned typed cause");
+
+    assert!(matches!(typed.kind, McpPolicyErrorKind::Io));
+    assert!(!typed.is_parse_failure(), "file I/O is not a parse failure");
+    assert!(
+        err.to_string().contains(&path.display().to_string()),
+        "file-load diagnostic must name the policy path: {err}"
+    );
+    assert!(
+        err.chain()
+            .any(|cause| cause.downcast_ref::<std::io::Error>().is_some()),
+        "file-load error chain must retain std::io::Error: {err:#}"
+    );
+}
+
 // ── Validation kind (gap 4) ──────────────────────────────────────────────
 
 #[test]
@@ -247,8 +270,17 @@ fn policy_file_parser_contract_strict_deprecations_rejects_v1() {
     unsafe { std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1") };
     let err = McpPolicy::from_file(tmp.path());
     assert!(err.is_err(), "strict deprecations must reject v1");
+    let err = err.unwrap_err();
+    let typed = err
+        .downcast_ref::<McpPolicyError>()
+        .expect("strict deprecation refusal must have a core-owned typed cause");
+    assert!(matches!(typed.kind, McpPolicyErrorKind::StrictDeprecation));
     assert!(
-        err.unwrap_err().to_string().contains("Strict mode"),
+        !typed.is_parse_failure(),
+        "strict deprecation refusal is not a parse failure"
+    );
+    assert!(
+        err.to_string().contains("Strict mode"),
         "error must mention Strict mode"
     );
     unsafe { std::env::remove_var("ASSAY_STRICT_DEPRECATIONS") };
@@ -544,14 +576,13 @@ enum ParserOutcome {
 fn classify_policy_err(err: anyhow::Error) -> ParserOutcome {
     if let Some(typed) = err.downcast_ref::<McpPolicyError>() {
         return match typed.kind {
+            McpPolicyErrorKind::Io => panic!("parity fixtures must not produce file I/O errors"),
             McpPolicyErrorKind::Syntax { .. } => ParserOutcome::Syntax,
             McpPolicyErrorKind::RootNotMapping => ParserOutcome::RootNotMapping,
             McpPolicyErrorKind::Structure => ParserOutcome::Structure,
             McpPolicyErrorKind::Validation => ParserOutcome::Validation,
+            McpPolicyErrorKind::StrictDeprecation => ParserOutcome::StrictDeprecation,
         };
-    }
-    if err.to_string().contains("Strict mode") {
-        return ParserOutcome::StrictDeprecation;
     }
     panic!("unclassified policy error: {err}");
 }
