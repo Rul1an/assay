@@ -17,10 +17,12 @@
 //! row it produced was false, which is why that list warns that a stale entry is worse than none.
 //!
 //! Honesty rules baked into the shape:
-//! - `status` is `active` or `failed` only. There is no `not_applicable`, and no `absent`: the
-//!   presence of a v1 artifact means Landlock enforcement was requested. A run that does not request
-//!   Landlock enforcement simply writes no v1 artifact (and a requested-but-unwritable artifact must
-//!   be a hard error at the producer, the same rule v0 enforces).
+//! - `status` is `active` or `failed` only. There is no `not_applicable`, and no `absent`.
+//!   Presence of a v1 artifact is producer-reported observation for that episode. Absence of a
+//!   v1 artifact is no artifact and no claim: it cannot prove that enforcement was not requested
+//!   (no output flag, a non-Linux build, or a clap-rejected invocation all produce absence).
+//!   A requested-but-unwritable artifact must be a hard error at the producer. This is not v0
+//!   parity: v0 serializes `absent` inside the artifact; v1 has no such status.
 //! - `probe` is always present and is `null` when no real-block probe was run, so a consumer can
 //!   distinguish "schema knows about probe, none happened" from an older shape that lacked the field.
 //!   `active` without a probe means the ruleset was applied (`no_new_privs` + `restrict_self`
@@ -36,8 +38,9 @@ pub const SCHEMA_V1: &str = "assay.enforcement_health.v1";
 /// IPv4-only, so the transport lives under `probe`, not in the scope string.
 pub const SCOPE_TCP_CONNECT_LANDLOCK_PORT: &str = "tcp_connect_landlock_port";
 
-/// Whether enforcement was active or failed to install. No `not_applicable`; `absent` is modelled by
-/// the artifact not existing (presence means requested).
+/// Whether enforcement was active or failed to install. No `not_applicable` and no `absent`
+/// variant. Artifact absence is no artifact and no claim; it does not prove that enforcement
+/// was not requested.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
@@ -519,8 +522,8 @@ mod tests {
 
     #[test]
     fn v1_status_has_no_not_applicable_or_absent() {
-        // The carrier vocabulary is intentionally only active/failed; absent is "no artifact",
-        // and not_applicable does not exist in v1.
+        // The carrier vocabulary is only active/failed. Missing artifact is no claim, not a
+        // v0-style `absent` / not-requested status. not_applicable does not exist in v1.
         assert!(serde_json::from_str::<Status>("\"active\"").is_ok());
         assert!(serde_json::from_str::<Status>("\"failed\"").is_ok());
         assert!(serde_json::from_str::<Status>("\"absent\"").is_err());
