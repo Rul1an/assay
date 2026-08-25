@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- The CLI JSON identity guard now follows writers to rows as well as rows to writers. Every
+  production file under `cli/commands` that serializes JSON through the six issue idioms must be
+  named by a `cli-documents` writer/namer, an `unnamed-documents` producer, or an explicit
+  stale-checked opt-out. Nineteen previously unrecorded CLI JSON emits were added as unnamed
+  document rows without changing production commands, including the second emit forms in
+  `evidence lint` (SARIF, not the run-report `sarif` row), `evidence list` (`list_all` vs
+  `list_for_run`), and `assay profile update` (`ASSAY_PROFILE_PERF_JSON`, not `profile show`).
+  Fourteen files were opted out after reading the emit path. No schema, runtime, or CLI output
+  changed (#2555).
 - `capture_candidate.py` records a candidate's observations over the opaque cases and
   writes `assay.privileged_mcp_action.candidate_capture.v0`. It takes no manifest and no
   expectations, so a candidate that escapes its process bounds finds no answers on that

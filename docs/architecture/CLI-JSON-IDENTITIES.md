@@ -152,8 +152,9 @@ assay.tool_decision_truth.v0 | `assay mcp --tool-decision-truth-out` DOES append
 ## Machine-checked: documents with no identity at all
 
 These are the rows a source scan structurally cannot produce, because **none of them has a dotted
-identity constant** — measured, all twelve. A pin built only from identity strings would satisfy every
-other check in the guard while omitting every document #2485 has to migrate. They are therefore
+identity constant**. Twelve were measured from identity-less producers; nineteen more were added when
+#2555 followed writers to rows. A pin built only from identity strings would satisfy every other
+check in the guard while omitting every document #2485 has to migrate. They are therefore
 *required* rows: a missing one fails the build even though there is nothing in the source to collect.
 
 Each row is `key | producer path | token`, and the test asserts the producer file exists and still
@@ -173,6 +174,25 @@ session_state_window | crates/assay-cli/src/cli/commands/session_state_window.rs
 sim_run_report | crates/assay-cli/src/cli/commands/sim.rs | to_string_pretty
 soak_report | crates/assay-cli/src/cli/commands/sim/soak/report.rs | soak-report-v1
 trust_basis_generate | crates/assay-cli/src/cli/commands/trust_basis.rs | generate_trust_basis
+aee_landlock_seal | crates/assay-cli/src/cli/commands/sandbox/child.rs | maybe_emit_aee_seal
+calibration_report | crates/assay-cli/src/cli/commands/calibrate.rs | to_string_pretty(&report)
+coverage_legacy | crates/assay-cli/src/cli/commands/coverage/legacy.rs | LegacyOutputFormat::Json
+evidence_attest_dsse | crates/assay-cli/src/cli/commands/evidence/attest.rs | sign_statement
+evidence_diff | crates/assay-cli/src/cli/commands/evidence/diff.rs | DiffCliDocument
+evidence_lint | crates/assay-cli/src/cli/commands/evidence/lint.rs | LintFormat::Json
+evidence_lint_sarif | crates/assay-cli/src/cli/commands/evidence/lint.rs | LintFormat::Sarif
+evidence_list | crates/assay-cli/src/cli/commands/evidence/list.rs | list_all
+evidence_list_for_run | crates/assay-cli/src/cli/commands/evidence/list.rs | list_for_run
+evidence_show | crates/assay-cli/src/cli/commands/evidence/mod.rs | "verify_mode"
+evidence_store_status | crates/assay-cli/src/cli/commands/evidence/store_status.rs | StatusFormat::Json
+explain_report | crates/assay-cli/src/cli/commands/explain.rs | ExplainFormat::Json
+generated_policy | crates/assay-cli/src/cli/commands/generate/model.rs | PolicyOutputFormat::Json
+mcp_config_path | crates/assay-cli/src/cli/commands/config_path.rs | "generated_server"
+profile_file | crates/assay-cli/src/cli/commands/profile_types.rs | save_profile
+profile_perf | crates/assay-cli/src/cli/commands/profile_next/mod.rs | ASSAY_PROFILE_PERF_JSON
+profile_show | crates/assay-cli/src/cli/commands/profile_next/mod.rs | ProfileShowFormat::Json
+signed_tool | crates/assay-cli/src/cli/commands/tool/sign.rs | sign_tool
+skill_supply_chain_cdx | crates/assay-cli/src/cli/commands/evidence/project_skill_bom.rs | project_bom
 ```
 
 | key | version field | class | note |
@@ -189,12 +209,67 @@ trust_basis_generate | crates/assay-cli/src/cli/commands/trust_basis.rs | genera
 | `discover_inventory` | none | (d) | `assay mcp discover --format json`; **not** `assay.mcp_server_inventory.v0` |
 | `trust_basis_generate` | none | (d) | `assay trust-basis generate` writes canonical JSON; the `assert` report is a separate, named document |
 | `soak_report` | string `soak-report-v1` + `report_version` | (b) | closed schema, validated on emit |
+| `aee_landlock_seal` | DSSE payload type `application/vnd.assay.aee-landlock-seal.v1+json` | (g) | `assay sandbox --aee-seal`; foreign envelope, not an `assay.*` document identity |
+| `calibration_report` | integer `schema_version` on the core model | (c) | `assay calibrate --out`; minting an identity is a #2485 review |
+| `coverage_legacy` | none | (d) | `assay coverage` legacy `--format json`; **not** `coverage_report_v1` |
+| `evidence_attest_dsse` | in-toto/DSSE envelope | (g) | `assay evidence attest`; foreign envelope, integers stay under #2552 |
+| `evidence_diff` | none | (d) | `assay evidence diff --format json` prints `DiffCliDocument` |
+| `evidence_lint` | none | (d) | `assay evidence lint --format json`; **not** the SARIF emit |
+| `evidence_lint_sarif` | SARIF `2.1.0` | (g) | `assay evidence lint --format sarif` via `to_sarif_with_options`; **not** the `sarif` row, whose producer is `assay-core` run-report SARIF |
+| `evidence_list` | none | (d) | `assay evidence list --format json` without `--run-id` (`list_all`) |
+| `evidence_list_for_run` | none | (d) | `assay evidence list --run-id --format json` (`list_for_run`); different object keys than `evidence_list` |
+| `evidence_show` | none | (d) | `assay evidence show --format json` prints manifest + events |
+| `evidence_store_status` | none | (d) | `assay evidence store-status --format json` |
+| `explain_report` | none | (d) | `assay explain --format json` |
+| `generated_policy` | none | (d) | `assay generate --format json` writes a policy, not an `assay.*` document |
+| `mcp_config_path` | none | (d) | `assay mcp config-path` JSON object |
+| `profile_file` | none | (d) | `save_profile` writes a Profile JSON file |
+| `profile_perf` | none | (d) | `ASSAY_PROFILE_PERF_JSON` sidecar from `assay profile update`; **not** `profile_show` |
+| `profile_show` | none | (d) | `assay profile show --format json`; **not** the perf sidecar |
+| `signed_tool` | none | (d) | `assay mcp tool sign` writes a signed tool definition |
+| `skill_supply_chain_cdx` | CycloneDX 1.6 | (g) | `assay evidence project-skill-bom`; foreign identity, do not mint `assay.*` |
 
 Three of these rows — `baseline_diff`, `discover_inventory` and `trust_basis_generate` — came from
 an independent read, not from the author of this file. Two separately written inventories both
 missed them. That is the argument for the required-rows check stated as evidence rather than as
 principle: the documents a scan cannot see are also the ones a single careful reader does not think
 of, and there is no instrument that fixes that.
+
+Nineteen of the rows above were not on that first measured twelve. They were found by reading the
+emit path of each unaccounted serializer on `1c560a912`, which is #2555: the file writes JSON, so
+the inventory has to say what that JSON is. No production command changed. Adding the row does not
+prove the classification; it records that a document was shipped unnamed. The converse detector is
+still file-level, so several of these keys share a producer; the extra rows exist so a second emit
+form in that file is not hidden behind the first.
+
+## Machine-checked: JSON-serializing command files that are not document producers
+
+A production file under `crates/assay-cli/src/cli/commands` that serializes JSON through
+`write_stdout_json`, `to_string_pretty`, `to_vec_pretty`, `to_writer`, `serde_json::to_string(`, or
+`serde_json::to_vec(` — after inline `#[cfg(test)]` modules and external `*/tests.rs` files are
+removed — must be named by a `cli-documents` writer/namer, an `unnamed-documents` producer, or
+listed here with a non-empty motive that names the emit or helper role. Paths are the exact
+workspace-relative POSIX path; a basename does not match. A stale opt-out (missing path, file that
+no longer serializes, or path already named by a document row) is a failure. The motive is a
+reviewable declaration, not mechanical proof.
+
+<!-- machine-checked: json-writer-opt-outs -->
+```text
+crates/assay-cli/src/cli/commands/ci.rs | stdout helper: write_stdout_json of render_summary_json for already-recorded assay.run_summary.v1 (writer is assay-core report/summary/writer.rs)
+crates/assay-cli/src/cli/commands/coverage/io.rs | emit helper: to_vec_pretty of coverage_report_v1 whose unnamed producer is coverage/report.rs
+crates/assay-cli/src/cli/commands/evidence/adapt_skill_scan.rs | second emit: write_stdout_json of an augmented assay.skill_supply_chain.v0 carrier; the cli-documents writer is skill_supply_chain_capture.rs
+crates/assay-cli/src/cli/commands/evidence/explore.rs | TUI helper: to_string_pretty of event.payload for the detail pane, not a CLI document
+crates/assay-cli/src/cli/commands/evidence/livekit_tool_action/canonical.rs | hash helper: serde_json::to_string of keys and strings while building canonical JSON for a digest, not a CLI document
+crates/assay-cli/src/cli/commands/import.rs | NDJSON helper: serde_json::to_string of each TraceEvent into a .trace.jsonl file; no line is a top-level document
+crates/assay-cli/src/cli/commands/mcp/coverage_input.rs | NDJSON helper: serde_json::to_string of one {tool, tool_classes} object per line as coverage_report_v1 input
+crates/assay-cli/src/cli/commands/replay/fs_ops.rs | config helper: to_string_pretty rewriting settings.seed in an existing JSON config
+crates/assay-cli/src/cli/commands/replay/provenance.rs | rewrite helper: to_string_pretty annotating provenance onto an existing run.json
+crates/assay-cli/src/cli/commands/run.rs | stdout helper: write_stdout_json of render_json for already-recorded assay.run_report.v1 (writer is assay-core report/json.rs)
+crates/assay-cli/src/cli/commands/sandbox/profile.rs | digest helper: serde_json::to_string of a degradation record as hasher input, not a CLI document
+crates/assay-cli/src/cli/commands/sim/soak/mod.rs | emit helper: to_string_pretty of soak-report-v1 whose unnamed producer is sim/soak/report.rs
+crates/assay-cli/src/cli/commands/trace.rs | NDJSON helper: serde_json::to_string of each ingested V2 event to --out-trace; no line is a top-level document
+crates/assay-cli/src/cli/commands/trace/import_mcp.rs | NDJSON helper: serde_json::to_string of each TraceEvent to --out-trace; no line is a top-level document
+```
 
 ## What this guard cannot do, stated plainly
 
@@ -228,15 +303,12 @@ of, and there is no instrument that fixes that.
   A file emitting through some route still not on the list is invisible to
   `documents_are_bound_to_a_writer`.
 
-- **The guard follows rows to writers, never writers to rows.** A document row must name a file that
-  writes; a file that writes need not be named by any row. That is the hole
-  `assay.runner.observation_health.v0` fell through. Measured on this head: **31 production files
-  under `cli/commands` serialize JSON and are named by no row.** Some of them almost certainly emit
-  documents — `evidence lint`, `evidence diff`, `evidence list`, `store-status`, `explain`, `import`,
-  `trace`. Closing this means requiring every JSON-serializing command file to be named by a row or
-  to carry an explicit opt-out, and triaging those 31. It is tracked separately rather than answered
-  here, because thirty-one classifications written in one sitting is the failure this file exists to
-  record.
+- **The converse detector is file-level, not dataflow, and its idiom list is not `WRITERS`.** A
+  command file that serializes through `println!` or a filesystem helper not on the six issue
+  idioms stays invisible. A second writer of an already-recorded identity is an opt-out, not a
+  second `cli-documents` row, because that block is keyed by identity. `import` and `trace` write
+  NDJSON; they are opted out for the same reason `assay.tool_decision_truth.v0` is not a document.
+  Classifications cite the emit path and remain reviewable declarations.
 - **Twenty-one of the non-document rows are declared in dependency crates and their emit paths were
   not opened.** They are classified from the declaring module. That is a weaker basis than the rows
   whose producer I read, and three such judgements have already been wrong today.
@@ -248,8 +320,8 @@ of, and there is no instrument that fixes that.
   revision of this file and the guard was green without it. A **sixth** crate is now caught:
   `every_production_identity_is_classified` also collects `pub const` identities from every crate
   `assay-cli` depends on, and `DEPENDENCY_CRATES` is pinned against `assay-cli/Cargo.toml` so the
-  list cannot drift away from the manifest. What that rule does *not* catch is a new command file in
-  a crate already scanned — `evidence lint` and `evidence diff` are that class, and it is #2555.
+  list cannot drift away from the manifest. A new JSON-serializing command file in a crate already
+  scanned is #2555's converse rule.
 - **`describe ⊆ pin` is one-directional.** `BINDING_ROWS` is seven clap paths and omits the run
   report and run summary. Forcing `describe` to grow is a product decision, not bookkeeping.
 

@@ -5,7 +5,7 @@
 //! emitter could arrive and no record would notice, which is how two counts of that set were
 //! published and withdrawn before this guard existed.
 //!
-//! Three properties, and the third is the one that matters:
+//! Four properties, and the third and fourth are the ones that matter:
 //!
 //! 1. Every identity string in production source is recorded, in the block that says what it is.
 //!    The two blocks are a partition, so "in neither" is a failure rather than a silence.
@@ -16,6 +16,11 @@
 //!    window, soak, `Baseline`, `HygieneReport`, both `run.json` writers, the sim-run report and
 //!    SARIF have zero identity constants between them. A pin built from a source scan alone
 //!    satisfies (1) and (2) while omitting every document #2485 has to migrate, and stays green.
+//! 4. The inventory follows rows to writers *and* writers to rows. A production file under
+//!    `cli/commands` that serializes JSON through the issue idioms must be named by a
+//!    `cli-documents` writer/namer, an `unnamed-documents` producer, or (once classified) an
+//!    explicit opt-out. The older one-way check is how `assay.runner.observation_health.v0`
+//!    shipped unrecorded.
 //!
 //! The inventory is never generated — not in CI and not locally-then-committed. This test reads it
 //! and never writes it.
@@ -143,14 +148,18 @@ fn find_test_mod(src: &str) -> Option<(usize, usize)> {
         let attr = from + rel;
         let after = &src[attr + ATTR.len()..];
         let trimmed = after.trim_start();
-        if let Some(tail) = trimmed.strip_prefix("mod ") {
+        // Visibility prefixes are the same ones `bare_mod_name` already accepts for `mod name;`.
+        // `#[cfg(test)] pub(crate) mod tests { … }` is still a test module; matching only
+        // `mod ` left `skill_supply_chain.rs` looking like a production serializer.
+        if let Some(tail) = module_after_visibility(trimmed) {
             if let Some(brace) = tail.find('{') {
                 if tail[..brace]
                     .trim()
                     .chars()
                     .all(|c| c.is_alphanumeric() || c == '_')
                 {
-                    let consumed = after.len() - trimmed.len() + "mod ".len() + brace + 1;
+                    let prefix_len = trimmed.len() - tail.len();
+                    let consumed = after.len() - trimmed.len() + prefix_len + brace + 1;
                     return Some((attr, attr + ATTR.len() + consumed));
                 }
             }
@@ -308,13 +317,17 @@ fn declared_modules(src: &str) -> Vec<String> {
     src.lines().filter_map(bare_mod_name).collect()
 }
 
+/// Remainder after an optional visibility prefix and `mod `, if this text introduces a module.
+fn module_after_visibility(src: &str) -> Option<&str> {
+    src.strip_prefix("mod ")
+        .or_else(|| src.strip_prefix("pub mod "))
+        .or_else(|| src.strip_prefix("pub(crate) mod "))
+        .or_else(|| src.strip_prefix("pub(super) mod "))
+}
+
 fn bare_mod_name(line: &str) -> Option<String> {
     let line = line.trim();
-    let rest = line
-        .strip_prefix("mod ")
-        .or_else(|| line.strip_prefix("pub mod "))
-        .or_else(|| line.strip_prefix("pub(crate) mod "))
-        .or_else(|| line.strip_prefix("pub(super) mod "))?;
+    let rest = module_after_visibility(line)?;
     let name = rest.strip_suffix(';')?;
     name.chars()
         .all(|c| c.is_alphanumeric() || c == '_')
@@ -589,16 +602,35 @@ fn every_production_identity_is_classified() {
 #[test]
 fn documents_without_an_identity_are_recorded_and_still_exist() {
     const REQUIRED: &[&str] = &[
+        "aee_landlock_seal",
         "baseline",
         "baseline_diff",
+        "calibration_report",
+        "coverage_legacy",
         "coverage_report",
         "discover_inventory",
+        "evidence_attest_dsse",
+        "evidence_diff",
+        "evidence_lint",
+        "evidence_lint_sarif",
+        "evidence_list",
+        "evidence_list_for_run",
+        "evidence_show",
+        "evidence_store_status",
+        "explain_report",
+        "generated_policy",
         "hygiene_report",
+        "mcp_config_path",
+        "profile_file",
+        "profile_perf",
+        "profile_show",
         "run_json_extended",
         "run_json_minimal",
         "sarif",
         "session_state_window",
+        "signed_tool",
         "sim_run_report",
+        "skill_supply_chain_cdx",
         "soak_report",
         "trust_basis_generate",
     ];
@@ -1002,4 +1034,296 @@ fn published_symbols(path: &str) -> BTreeSet<String> {
         }
     }
     names
+}
+
+/// Command files whose JSON emit is the converse of `documents_are_bound_to_a_writer`.
+const COMMANDS_DIR: &str = "crates/assay-cli/src/cli/commands";
+
+/// Idioms that mean a command file serializes JSON.
+///
+/// Deliberately not `WRITERS`: that list includes `println!` and filesystem helpers that 110
+/// command files hit without emitting a document. This converse detector is the issue's
+/// six serializers, matched as those exact substrings after test-module bodies are gone.
+const JSON_SERIALIZER_IDIOMS: &[&str] = &[
+    "write_stdout_json",
+    "to_string_pretty",
+    "to_vec_pretty",
+    "to_writer",
+    "serde_json::to_string(",
+    "serde_json::to_vec(",
+];
+
+/// `true` for a file whose path is an external `tests.rs` module under `COMMANDS_DIR`.
+///
+/// Path-suffix, not basename: `attest.rs` and `livekit_tool_action.rs` must not match, and a
+/// `tests.rs` sitting anywhere else in the crate is out of scope.
+fn is_external_tests_rs(rel: &str) -> bool {
+    rel.starts_with(COMMANDS_DIR)
+        && rel.ends_with("/tests.rs")
+        && rel.as_bytes().get(COMMANDS_DIR.len()) == Some(&b'/')
+}
+
+fn posix_rel(path: &std::path::Path, root: &std::path::Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_str()
+        .unwrap_or_else(|| panic!("{} is not utf-8", path.display()))
+        .replace('\\', "/")
+}
+
+fn command_rs_files() -> Vec<PathBuf> {
+    let base = workspace_root().join(COMMANDS_DIR);
+    let mut stack = vec![base];
+    let mut files = Vec::new();
+    while let Some(path) = stack.pop() {
+        let entries = std::fs::read_dir(&path)
+            .unwrap_or_else(|e| panic!("unreadable command directory {}: {e}", path.display()));
+        for entry in entries {
+            let p = entry.expect("dir entry").path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().and_then(|e| e.to_str()) == Some("rs") {
+                files.push(p);
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+fn source_has_json_serializer(src: &str) -> bool {
+    JSON_SERIALIZER_IDIOMS
+        .iter()
+        .any(|idiom| src.contains(idiom))
+}
+
+/// Production command files that serialize JSON, as exact workspace-relative POSIX paths.
+fn json_serializing_command_files() -> BTreeSet<String> {
+    let root = workspace_root();
+    let test_only = test_only_files();
+    let mut found = BTreeSet::new();
+    for path in command_rs_files() {
+        let rel = posix_rel(&path, &root);
+        if is_external_tests_rs(&rel) {
+            continue;
+        }
+        if test_only.contains(&path) {
+            continue;
+        }
+        let src = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("unreadable production command file {rel}: {e}"));
+        let src = strip_comments(&strip_test_modules_at(&src, &rel));
+        if source_has_json_serializer(&src) {
+            found.insert(rel);
+        }
+    }
+    found
+}
+
+/// Exact command-tree paths named by a `cli-documents` writer/namer or an `unnamed-documents`
+/// producer. Basename matching is not a fallback: a row that says `lint.rs` does not cover
+/// `crates/assay-cli/src/cli/commands/evidence/lint.rs`.
+fn is_command_tree_path(path: &str) -> bool {
+    path.starts_with(COMMANDS_DIR) && path.as_bytes().get(COMMANDS_DIR.len()) == Some(&b'/')
+}
+
+fn command_paths_named_by_inventory_rows() -> BTreeSet<String> {
+    let mut named = BTreeSet::new();
+    for (writer, namer) in document_rows().into_values() {
+        if is_command_tree_path(&writer) {
+            named.insert(writer);
+        }
+        if is_command_tree_path(&namer) {
+            named.insert(namer);
+        }
+    }
+    for line in recorded("unnamed-documents") {
+        let parts: Vec<&str> = line.split('|').map(str::trim).collect();
+        assert_eq!(
+            parts.len(),
+            3,
+            "{INVENTORY}: `unnamed-documents` row is not `key | producer | token`: {line:?}"
+        );
+        let producer = parts[1];
+        if is_command_tree_path(producer) {
+            named.insert(producer.to_string());
+        }
+    }
+    named
+}
+
+/// Exact command-tree paths opted out of being document producers, with a non-empty motive.
+///
+/// The motive is a reviewable declaration of the emit or helper role, not proof. An unreadable
+/// inventory or an unparsable `json-writer-opt-outs` block fails in `recorded` before this runs.
+fn json_writer_opt_outs() -> BTreeMap<String, String> {
+    let mut rows = BTreeMap::new();
+    for line in recorded("json-writer-opt-outs") {
+        let (path, motive) = line.split_once('|').unwrap_or_else(|| {
+            panic!("{INVENTORY}: `json-writer-opt-outs` row is not `path | motive`: {line:?}")
+        });
+        let (path, motive) = (path.trim(), motive.trim());
+        assert!(
+            is_command_tree_path(path),
+            "{INVENTORY}: opt-out path must be the exact command-tree path, not a basename: {path:?}"
+        );
+        assert!(
+            !motive.is_empty(),
+            "{INVENTORY}: opt-out {path:?} has an empty motive; name the emit or helper role"
+        );
+        assert!(
+            rows.insert(path.to_string(), motive.to_string()).is_none(),
+            "{INVENTORY}: `json-writer-opt-outs` records {path:?} twice"
+        );
+    }
+    rows
+}
+
+/// Every production command file that serializes JSON is named by a document row or an opt-out.
+///
+/// The older guard only followed rows to writers. A file that writes JSON without being named
+/// stayed green — which is how `assay.runner.observation_health.v0` shipped unrecorded.
+#[test]
+fn json_serializing_command_files_are_named_by_a_row() {
+    let writers = json_serializing_command_files();
+    assert!(
+        !writers.is_empty(),
+        "collected no JSON-serializing command files; the scan shape moved"
+    );
+    let named = command_paths_named_by_inventory_rows();
+    let opt_outs = json_writer_opt_outs();
+    let opted: BTreeSet<String> = opt_outs.keys().cloned().collect();
+
+    let also_named: Vec<_> = opted.intersection(&named).cloned().collect();
+    assert!(
+        also_named.is_empty(),
+        "{INVENTORY}: these opt-outs are already named by a `cli-documents` writer/namer or \
+         `unnamed-documents` producer, so the opt-out is stale:\n  {}",
+        also_named.join("\n  ")
+    );
+
+    let missing: Vec<_> = opted
+        .iter()
+        .filter(|path| !workspace_root().join(path).is_file())
+        .cloned()
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "{INVENTORY}: these opt-out paths do not exist:\n  {}",
+        missing.join("\n  ")
+    );
+
+    let no_longer_serialize: Vec<_> = opted.difference(&writers).cloned().collect();
+    assert!(
+        no_longer_serialize.is_empty(),
+        "{INVENTORY}: these opt-outs no longer serialize JSON through the converse idioms:\n  {}",
+        no_longer_serialize.join("\n  ")
+    );
+
+    let accounted: BTreeSet<String> = named.union(&opted).cloned().collect();
+    let unaccounted: Vec<String> = writers.difference(&accounted).cloned().collect();
+    assert!(
+        unaccounted.is_empty(),
+        "these production command files serialize JSON and are named by no `cli-documents` \
+         writer/namer, no `unnamed-documents` producer, and no `json-writer-opt-outs` row:\n  {}",
+        unaccounted.join("\n  ")
+    );
+}
+
+/// `*/tests.rs` under the command tree is excluded by a path rule, not because those files
+/// happen to lack serializers. Several of them serialize today; leaking them into the candidate
+/// set is a failure of the rule, not of the inventory.
+#[test]
+fn external_tests_rs_serializers_are_not_candidates() {
+    let root = workspace_root();
+    let mut tests_rs_with_idioms = Vec::new();
+    for path in command_rs_files() {
+        let rel = posix_rel(&path, &root);
+        if !is_external_tests_rs(&rel) {
+            continue;
+        }
+        let src =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("unreadable {rel}: {e}"));
+        if source_has_json_serializer(&src) {
+            tests_rs_with_idioms.push(rel);
+        }
+    }
+    assert!(
+        !tests_rs_with_idioms.is_empty(),
+        "no `*/tests.rs` under {COMMANDS_DIR} currently contains a serializer idiom; the \
+         exclusion would be an omission rather than a tested rule"
+    );
+    let candidates = json_serializing_command_files();
+    let leaked: Vec<_> = tests_rs_with_idioms
+        .into_iter()
+        .filter(|rel| candidates.contains(rel))
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "external `*/tests.rs` files leaked into writer candidates: {leaked:?}"
+    );
+}
+
+/// Inline `#[cfg(test)] mod` bodies are stripped before the idiom scan. Files whose only
+/// serializer sits in that body are not candidates; if the stripper stopped running they would
+/// appear as unaccounted production writers.
+#[test]
+fn inline_cfg_test_module_serializers_are_not_candidates() {
+    let root = workspace_root();
+    let test_only = test_only_files();
+    let mut inline_only = Vec::new();
+    for path in command_rs_files() {
+        let rel = posix_rel(&path, &root);
+        if is_external_tests_rs(&rel) || test_only.contains(&path) {
+            continue;
+        }
+        let src =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("unreadable {rel}: {e}"));
+        let with_tests = strip_comments(&src);
+        let without_tests = strip_comments(&strip_test_modules_at(&src, &rel));
+        if source_has_json_serializer(&with_tests) && !source_has_json_serializer(&without_tests) {
+            inline_only.push(rel);
+        }
+    }
+    assert!(
+        !inline_only.is_empty(),
+        "no production command file currently keeps its serializer only inside an inline \
+         `#[cfg(test)] mod`; the exclusion would be an omission rather than a tested rule"
+    );
+    let candidates = json_serializing_command_files();
+    let leaked: Vec<_> = inline_only
+        .into_iter()
+        .filter(|rel| candidates.contains(rel))
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "inline `#[cfg(test)]` serializers leaked into writer candidates: {leaked:?}"
+    );
+}
+
+#[test]
+fn external_tests_rs_rule_is_a_commands_path_suffix() {
+    assert!(is_external_tests_rs(
+        "crates/assay-cli/src/cli/commands/replay/tests.rs"
+    ));
+    assert!(!is_external_tests_rs(
+        "crates/assay-cli/src/cli/commands/evidence/attest.rs"
+    ));
+    assert!(!is_external_tests_rs(
+        "crates/assay-core/src/report/tests.rs"
+    ));
+    assert!(!is_external_tests_rs(
+        "crates/assay-cli/src/cli/commands/tests_helpers.rs"
+    ));
+}
+
+#[test]
+fn strip_test_modules_removes_pub_crate_mod() {
+    let src = "fn prod() {}\n#[cfg(test)]\npub(crate) mod tests {\n    let _ = serde_json::to_string(&1);\n}\n";
+    let stripped = strip_test_modules_at(src, "fixture");
+    assert!(
+        !stripped.contains("serde_json::to_string("),
+        "visibility-prefixed test modules must strip like bare `mod tests`"
+    );
+    assert!(stripped.contains("fn prod"));
 }
