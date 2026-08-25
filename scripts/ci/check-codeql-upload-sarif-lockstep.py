@@ -15,10 +15,15 @@ WORKFLOWS = (
     Path(".github/workflows/osv-scanner-scheduled.yml"),
 )
 WORKFLOW_DIR = Path(".github/workflows")
-UPLOAD_PREFIX = "uses: github/codeql-action/upload-sarif@"
 USES_RE = re.compile(
-    r"^[ \t]*uses:[ \t]+github/codeql-action/upload-sarif@"
-    r"([0-9a-f]{40})[ \t]+#[ \t]+(v\d+\.\d+\.\d+)[ \t]*$"
+    r"^[ \t]*(?:-[ \t]+)?uses:[ \t]+"
+    r"(?P<quote>['\"]?)github/codeql-action/upload-sarif@"
+    r"(?P<sha>[0-9a-f]{40})(?P=quote)[ \t]+"
+    r"#[ \t]+(?P<tag>v\d+\.\d+\.\d+)[ \t]*$"
+)
+ACTIVE_UPLOAD_RE = re.compile(
+    r"^[ \t]*(?:-[ \t]+)?uses:[ \t]+['\"]?"
+    r"github/codeql-action/upload-sarif@"
 )
 
 
@@ -30,7 +35,7 @@ def active_upload_pins(text: str) -> list[tuple[str, str]]:
             continue
         match = USES_RE.match(line)
         if match:
-            pins.append((match.group(1), match.group(2)))
+            pins.append((match.group("sha"), match.group("tag")))
     return pins
 
 
@@ -39,7 +44,7 @@ def has_active_upload_callsite(text: str) -> bool:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        if stripped.removeprefix("- ").startswith(UPLOAD_PREFIX):
+        if ACTIVE_UPLOAD_RE.match(line):
             return True
     return False
 

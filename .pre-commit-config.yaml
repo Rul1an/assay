@@ -380,7 +380,7 @@ repos:
         entry: bash scripts/ci/test-codeql-upload-sarif-lockstep.sh
         language: system
         pass_filenames: false
-        files: ^(\.github/workflows/(assay-security|openssf-scorecard|osv-scanner-scheduled)\.yml|scripts/ci/(check-codeql-upload-sarif-lockstep\.py|test-codeql-upload-sarif-lockstep\.sh)|\.pre-commit-config\.yaml)$
+        files: ^(\.github/workflows/.*\.ya?ml|scripts/ci/(check-codeql-upload-sarif-lockstep\.py|test-codeql-upload-sarif-lockstep\.sh)|\.pre-commit-config\.yaml)$
 
       - id: workflow-continue-on-error-policy
         name: Workflow continue-on-error policy

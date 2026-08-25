@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="scripts/ci/check-codeql-upload-sarif-lockstep.py"
+PRECOMMIT=".pre-commit-config.yaml"
 WORKFLOWS=(
   .github/workflows/assay-security.yml
   .github/workflows/openssf-scorecard.yml
@@ -17,9 +18,47 @@ seed() {
   local dest="$1" path
   mkdir -p "$dest/scripts/ci" "$dest/.github/workflows"
   cp "$ROOT/$CHECKER" "$dest/$CHECKER"
+  cp "$ROOT/$PRECOMMIT" "$dest/$PRECOMMIT"
   for path in "${WORKFLOWS[@]}"; do
     cp "$ROOT/$path" "$dest/$path"
   done
+}
+
+check_hook_scope() {
+  local root="$1"
+  python3 - "$root/$PRECOMMIT" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+block = text.split("- id: codeql-upload-sarif-lockstep", 1)[1].split("\n      - id:", 1)[0]
+match = re.search(r"^[ \t]*files:[ \t]*(.+)$", block, re.MULTILINE)
+if match is None:
+    raise SystemExit("CodeQL lockstep hook has no files selector")
+pattern = match.group(1).strip()
+required = (
+    ".github/workflows/fourth-upload.yml",
+    ".github/workflows/fourth-upload.yaml",
+    "scripts/ci/check-codeql-upload-sarif-lockstep.py",
+    "scripts/ci/test-codeql-upload-sarif-lockstep.sh",
+    ".pre-commit-config.yaml",
+)
+missing = [path for path in required if re.search(pattern, path) is None]
+if missing:
+    raise SystemExit(f"CodeQL lockstep hook does not trigger for: {', '.join(missing)}")
+PY
+}
+
+run_hook_scope_case() {
+  local name="$1" root="$2" expected="$3" status=0
+  check_hook_scope "$root" >"$scratch/$name.log" 2>&1 || status=$?
+  if [[ "$status" -ne "$expected" ]]; then
+    cat "$scratch/$name.log" >&2
+    echo "FAIL: $name exited $status, wanted $expected" >&2
+    exit 1
+  fi
+  echo "ok    $name (exit $status)"
 }
 
 run_case() {
@@ -51,6 +90,15 @@ PY
 case_root="$scratch/control"
 seed "$case_root"
 run_case control-is-green "$case_root" 0
+run_hook_scope_case hook-scope-covers-all-workflows "$case_root" 0
+
+case_root="$scratch/narrow-hook-scope"
+seed "$case_root"
+mutate_once \
+  "$case_root/$PRECOMMIT" \
+  'files: ^(\.github/workflows/.*\.ya?ml|scripts/ci/(check-codeql-upload-sarif-lockstep\.py|test-codeql-upload-sarif-lockstep\.sh)|\.pre-commit-config\.yaml)$' \
+  'files: ^(\.github/workflows/(assay-security|openssf-scorecard|osv-scanner-scheduled)\.yml|scripts/ci/(check-codeql-upload-sarif-lockstep\.py|test-codeql-upload-sarif-lockstep\.sh)|\.pre-commit-config\.yaml)$'
+run_hook_scope_case narrow-hook-scope-is-refused "$case_root" 1
 
 case_root="$scratch/one-laggard"
 seed "$case_root"
@@ -85,6 +133,15 @@ uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28
 YAML
 run_case extra-callsite-is-refused "$case_root" 1
 
+case_root="$scratch/quoted-duplicate"
+seed "$case_root"
+cat >>"$case_root/.github/workflows/assay-security.yml" <<'YAML'
+
+# Mutation: quoted uses values are valid workflow YAML and remain active.
+uses: "github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28" # v4.37.8
+YAML
+run_case quoted-duplicate-is-refused "$case_root" 1
+
 case_root="$scratch/foreign-workflow"
 seed "$case_root"
 cat >"$case_root/.github/workflows/fourth-upload.yml" <<'YAML'
@@ -95,5 +152,16 @@ jobs:
       - uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
 YAML
 run_case foreign-workflow-callsite-is-refused "$case_root" 1
+
+case_root="$scratch/quoted-foreign-workflow"
+seed "$case_root"
+cat >"$case_root/.github/workflows/quoted-upload.yaml" <<'YAML'
+name: Mutated quoted CodeQL upload
+jobs:
+  upload:
+    steps:
+      - uses: 'github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28' # v4.37.8
+YAML
+run_case quoted-foreign-workflow-callsite-is-refused "$case_root" 1
 
 printf 'PASS: CodeQL upload-sarif lockstep battery\n'
