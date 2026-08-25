@@ -8,10 +8,10 @@ mod response;
 mod schema;
 mod types;
 
-/// Typed classification of full-policy parse failures.
+/// Typed classification of full-policy load failures.
 ///
 /// Non-exhaustive so downstream match arms must use a wildcard.
-/// `check_args` maps these to the three fixed `PolicyParseFailure` summaries.
+/// `check_args` maps only parse variants to the fixed `PolicyParseFailure` summaries.
 #[non_exhaustive]
 #[derive(Debug)]
 pub enum McpPolicyErrorKind {
@@ -26,6 +26,10 @@ pub enum McpPolicyErrorKind {
     Structure,
     /// Post-deserialization validation (kill-switch refs, pin hashes) failed.
     Validation,
+    /// The policy file could not be read from the supplied path.
+    Io,
+    /// V1 policy input was refused because strict deprecation handling is enabled.
+    StrictDeprecation,
 }
 
 /// Wrapper that carries the typed kind alongside the anyhow error chain.
@@ -96,11 +100,17 @@ mod error_source_contract {
             assert!(error.is_parse_failure());
         }
 
-        let validation = McpPolicyError {
-            kind: McpPolicyErrorKind::Validation,
-            source: anyhow::anyhow!("validation failure"),
-        };
-        assert!(!validation.is_parse_failure());
+        for kind in [
+            McpPolicyErrorKind::Io,
+            McpPolicyErrorKind::Validation,
+            McpPolicyErrorKind::StrictDeprecation,
+        ] {
+            let error = McpPolicyError {
+                kind,
+                source: anyhow::anyhow!("non-parse failure"),
+            };
+            assert!(!error.is_parse_failure());
+        }
     }
 }
 

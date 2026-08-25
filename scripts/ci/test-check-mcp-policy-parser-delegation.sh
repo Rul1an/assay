@@ -93,11 +93,10 @@ mutate_from_file_reparse() {
 import sys
 from pathlib import Path
 p = Path(sys.argv[1]); s = p.read_text()
-old = "let bytes = std::fs::read(path)?;\n    McpPolicy::from_slice(&bytes)"
-new = """let bytes = std::fs::read(path)?;
-    let _ = serde_yaml::from_slice::<serde_yaml::Value>(&bytes);
+old = "    McpPolicy::from_slice(&bytes)"
+new = """    let _ = serde_yaml::from_slice::<serde_yaml::Value>(&bytes);
     McpPolicy::from_slice(&bytes)"""
-assert old in s
+assert s.count(old) == 1
 p.write_text(s.replace(old, new, 1))
 PY
 }
