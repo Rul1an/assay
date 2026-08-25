@@ -81,13 +81,14 @@ fn doctor_fix_parse_error_dry_run_exits_nonzero_and_does_not_write() {
 
     fs::write(
         &config,
-        "version: 1\nsuite: doctor-fix\nmodel: trace\nresponse_format: text\ntests:\n  - id: t1\n    input:\n      prompt: \"hello\"\n    expected:\n      type: must_contain\n      must_contain: [\"hello\"]\n",
+        "version: 1\nsuite: doctor-fix\nmodel: trace\nsettngs: {}\ntests:\n  - id: t1\n    input:\n      prompt: \"hello\"\n    expected:\n      type: must_contain\n      must_contain: [\"hello\"]\n",
     )
     .expect("write invalid eval config");
     let before = fs::read_to_string(&config).expect("read before");
 
     let mut cmd = Command::cargo_bin("assay").expect("cargo bin");
-    cmd.current_dir(temp.path())
+    let assert = cmd
+        .current_dir(temp.path())
         .arg("doctor")
         .arg("--config")
         .arg(&config)
@@ -96,6 +97,41 @@ fn doctor_fix_parse_error_dry_run_exits_nonzero_and_does_not_write() {
         .arg("--yes")
         .assert()
         .failure();
+
+    let output = assert.get_output();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let path = config.display();
+    let misspelled_line = before.lines().nth(3).expect("fixture has misspelled key");
+    assert!(
+        stdout.contains(&format!("--- {path} (dry-run) patch=rename_config_key ---")),
+        "dry-run output must identify the file and patch; stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!("--- {path}\n+++ {path}\n")),
+        "dry-run output must contain unified-diff file headers; stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.lines().any(|line| line.starts_with("@@ ")),
+        "dry-run output must contain a unified-diff hunk; stdout:\n{stdout}"
+    );
+    assert!(
+        stdout
+            .lines()
+            .any(|line| line == format!("-{misspelled_line}"))
+            && stdout.lines().any(|line| line == "+settings: {}"),
+        "dry-run output must show the old key removed and replacement added; stdout:\n{stdout}"
+    );
+    assert!(
+        !stdout
+            .lines()
+            .any(|line| line == format!("+{misspelled_line}"))
+            && !stdout.lines().any(|line| line == "-settings: {}"),
+        "dry-run output must preserve diff direction; stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("--- end ---\nDry run complete. 1 fix(es) previewed."),
+        "dry-run output must close the preview before its summary; stdout:\n{stdout}"
+    );
 
     let after = fs::read_to_string(&config).expect("read after");
     assert_eq!(
