@@ -41,3 +41,30 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 pub fn key(abs_path: &str, sha: &str) -> String {
     format!("{}:{}", abs_path, sha)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn policy_caches_store_and_retrieve_compiled_values() {
+        let caches = PolicyCaches::new(2);
+
+        let sequence = std::sync::Arc::new(SequencePolicy::Legacy(vec!["deploy".into()]));
+        caches.sequence.insert("sequence".into(), sequence.clone());
+
+        let blocklist = std::sync::Arc::new(vec!["shell".into()]);
+        caches
+            .blocklist
+            .insert("blocklist".into(), blocklist.clone());
+
+        assert!(std::sync::Arc::ptr_eq(
+            &caches.sequence.get("sequence").expect("sequence cached"),
+            &sequence
+        ));
+        assert!(std::sync::Arc::ptr_eq(
+            &caches.blocklist.get("blocklist").expect("blocklist cached"),
+            &blocklist
+        ));
+    }
+}
