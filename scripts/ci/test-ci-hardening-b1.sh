@@ -932,8 +932,8 @@ module = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(module)
 
-positive = root / "tests/fixtures/ci/nul/extensionless-text"
-negative = root / "tests/fixtures/ci/nul/genuine.bin"
+positive = root / "tests/fixtures/ci/content-first/extensionless-text"
+negative = root / "tests/fixtures/ci/content-first/genuine.bin"
 if not positive.is_file() or positive.suffix:
     sys.exit("extensionless textual positive fixture missing")
 if b"\0" in positive.read_bytes():
@@ -978,7 +978,7 @@ if rc == 0 or "notes.mdx" not in out:
     sys.exit("FAIL: NUL in an unlisted textual suffix must fail closed:\n" + out)
 
 rc, out = run_tree(
-    {"tests/fixtures/ci/nul/genuine.bin": negative.read_bytes()}
+    {"tests/fixtures/ci/content-first/genuine.bin": negative.read_bytes()}
 )
 if rc != 0:
     sys.exit(
@@ -1068,12 +1068,12 @@ assert_segment_bound(stale_hit, "binary_allowlist_staleness")
 messages = stale(
     root,
     [root / "README.md"],
-    exceptions=(("tests/fixtures/ci/nul/missing.bin", "elf"),),
+    exceptions=(("tests/fixtures/ci/content-first/missing.bin", "elf"),),
 )
 if not messages:
     sys.exit("FAIL: stale binary allowlist entries must fail")
 joined = "\n".join(messages)
-if "tests/fixtures/ci/nul/missing.bin" not in joined:
+if "tests/fixtures/ci/content-first/missing.bin" not in joined:
     sys.exit("FAIL: stale path was not reported:\n" + joined)
 sys.exit(0)
 PY

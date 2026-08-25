@@ -106,7 +106,7 @@ BINARY_EXCEPTIONS: tuple[tuple[str, str], ...] = (
     ("demo/output/screenshots/*.png", "png"),
     ("demo/scenes/*.mp4", "mp4"),
     ("examples/privileged-action-gate/demo.gif", "gif"),
-    ("tests/fixtures/ci/nul/genuine.bin", "elf"),
+    ("tests/fixtures/ci/content-first/genuine.bin", "elf"),
 )
 
 # Complete-line patterns (fullmatch on the stripped line). Hand-written
