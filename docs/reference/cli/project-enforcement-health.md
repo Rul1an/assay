@@ -27,8 +27,11 @@ On success, stdout is exactly one `assay.enforcement_health_projection.v0` docum
 | v1 | `active` | `applied` |
 | v1 | `failed` | `degraded` |
 
-v0 `not_applicable`, unknown schema or status, forged v1 `absent`, and
-malformed, missing, or oversized input exit nonzero with empty stdout.
+`active` maps to `applied` only when the supporting producer invariants hold
+(v0 confirmed attach and `strong`; v1 both Landlock confirmations, `strong`,
+and no failure). Constructor-illegal `active`, v0 `not_applicable`, unknown
+schema or status, forged v1 `absent`, and malformed, missing, or oversized
+input exit nonzero with empty stdout.
 
 ## Normative
 

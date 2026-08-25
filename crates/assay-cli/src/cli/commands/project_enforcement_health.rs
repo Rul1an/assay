@@ -2,7 +2,8 @@
 //!
 //! Guardrail: one private mapping function is the only source of observation
 //! truth. The CLI reads a bounded input, dispatches on `schema`, deserializes
-//! the matching typed carrier, reduces to a source status, and writes JSON.
+//! the matching typed carrier, checks producer-legal `active` before reducing
+//! to a source status, and writes JSON.
 
 use std::fs::File;
 use std::io::Read;
@@ -12,9 +13,11 @@ use serde::Serialize;
 
 use crate::cli::args::ProjectEnforcementHealthArgs;
 use crate::cli::commands::monitor::monitor_next::enforcement_health::{
-    EnforcementHealth, NetworkEnforcement, SCHEMA_V0,
+    EnforcementClass as V0Class, EnforcementHealth, NetworkEnforcement, SCHEMA_V0,
 };
-use crate::enforcement_health_v1::{EnforcementHealthV1, Status as V1Status, SCHEMA_V1};
+use crate::enforcement_health_v1::{
+    EnforcementClass as V1Class, EnforcementHealthV1, Status as V1Status, SCHEMA_V1,
+};
 use crate::exit_codes::EXIT_CONFIG_ERROR;
 use crate::output_write::write_stdout_json;
 
@@ -73,17 +76,44 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>, ()> {
     Ok(buf)
 }
 
+/// `active` is applied only when the producer invariants still hold.
+/// Failed/absent stay status-only; this slice does not grow a failed framework.
+fn v0_active_is_producer_legal(health: &EnforcementHealth) -> bool {
+    health.attach_confirmed && health.enforcement_class == V0Class::Strong
+}
+
+fn v1_active_is_producer_legal(health: &EnforcementHealthV1) -> bool {
+    health.enforcement_class == V1Class::Strong
+        && health.failure.is_none()
+        && health.landlock.no_new_privs_confirmed
+        && health.landlock.restrict_self_confirmed
+}
+
 fn parse_health(bytes: &[u8]) -> Option<SourceStatus> {
     let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
     let schema = value.get("schema")?.as_str()?;
     match schema {
         SCHEMA_V0 => {
             let health: EnforcementHealth = serde_json::from_value(value).ok()?;
-            (health.schema == SCHEMA_V0).then_some(SourceStatus::V0(health.network_enforcement))
+            if health.schema != SCHEMA_V0 {
+                return None;
+            }
+            if health.network_enforcement == NetworkEnforcement::Active
+                && !v0_active_is_producer_legal(&health)
+            {
+                return None;
+            }
+            Some(SourceStatus::V0(health.network_enforcement))
         }
         SCHEMA_V1 => {
             let health: EnforcementHealthV1 = serde_json::from_value(value).ok()?;
-            (health.schema == SCHEMA_V1).then_some(SourceStatus::V1(health.status))
+            if health.schema != SCHEMA_V1 {
+                return None;
+            }
+            if health.status == V1Status::Active && !v1_active_is_producer_legal(&health) {
+                return None;
+            }
+            Some(SourceStatus::V1(health.status))
         }
         _ => None,
     }
