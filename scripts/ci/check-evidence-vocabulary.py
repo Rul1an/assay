@@ -14,13 +14,14 @@ dated correction, or a dated sidecar for frozen generated results.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import hashlib
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
+from typing import Callable, Iterable, Mapping, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -52,18 +53,60 @@ HOSTILE_GIT_ENV_NAMES = (
     "GIT_COMMON_DIR",
 )
 
-TEXTUAL_SCAN_SUFFIXES = (
-    ".md",
-    ".rs",
-    ".py",
-    ".ts",
-    ".js",
-    ".yml",
-    ".yaml",
-    ".toml",
-    ".sh",
-    ".txt",
-    ".json",
+# Content-first scan: NUL fails closed unless the path matches a declared
+# exception class AND the bytes match that class's magic. A four/eight-byte
+# header at an unlisted path is not a binary. Each exception is stale if it
+# matches 0 tracked binaries (NUL + expected magic). A glob companion without
+# NUL stays on the textual scan. A NUL hit with the wrong magic fails.
+def _magic_gzip(data: bytes) -> bool:
+    return data.startswith(b"\x1f\x8b")
+
+
+def _magic_png(data: bytes) -> bool:
+    return data.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def _magic_gif(data: bytes) -> bool:
+    return data.startswith(b"GIF87a") or data.startswith(b"GIF89a")
+
+
+def _magic_mp4(data: bytes) -> bool:
+    return len(data) >= 12 and data[4:8] == b"ftyp"
+
+
+def _magic_elf(data: bytes) -> bool:
+    return data.startswith(b"\x7fELF")
+
+
+BINARY_MAGIC_PREDICATES: dict[str, Callable[[bytes], bool]] = {
+    "gzip": _magic_gzip,
+    "png": _magic_png,
+    "gif": _magic_gif,
+    "mp4": _magic_mp4,
+    "elf": _magic_elf,
+}
+
+# Path class, then required magic. Matching is POSIX, case-sensitive, and
+# segment-bound via matches_path_class: split rel and pattern on `/`, then
+# fnmatchcase each equal-count segment. Do not call fnmatch.fnmatch; it lets
+# `*` cross `/` and folds case on Windows.
+BINARY_EXCEPTIONS: tuple[tuple[str, str], ...] = (
+    ("conformance/privileged-mcp-action-v0/vectors/*.bundle.tar.gz", "gzip"),
+    ("conformance/privileged-mcp-action-v1/vectors/*.bundle.tar.gz", "gzip"),
+    ("crates/assay-cli/tests/fixtures/evidence/invalid-manifest.bundle.tar.gz", "gzip"),
+    ("demo/fixtures/bundle.tar.gz", "gzip"),
+    ("demo/walkthrough_tmp/bundle.tar.gz", "gzip"),
+    ("docs/assets/evidence-receipts-in-action/*/evidence.tar.gz", "gzip"),
+    ("docs/experiments/cross-runtime-drift-2026-05/runs/*/*/archive.tar.gz", "gzip"),
+    ("docs/reference/runner/proof-packs/phase1-delegated-2026-05-21.workflow-log.txt.gz", "gzip"),
+    ("fuzz/corpus/bundle_reader/*", "gzip"),
+    ("tests/fixtures/evidence/test-bundle.tar.gz", "gzip"),
+    ("third_party/serde_jcs-0.2.0.crate", "gzip"),
+    ("demo/output/*.png", "png"),
+    ("demo/output/screenshots/*.png", "png"),
+    ("demo/scenes/*.mp4", "mp4"),
+    ("examples/privileged-action-gate/demo.gif", "gif"),
+    ("tests/fixtures/ci/nul/genuine.bin", "elf"),
 )
 
 # Complete-line patterns (fullmatch on the stripped line). Hand-written
@@ -263,9 +306,98 @@ def rel_posix(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
 
 
-def is_textual_scan_surface(rel: str) -> bool:
-    lower = rel.lower()
-    return any(lower.endswith(suffix) for suffix in TEXTUAL_SCAN_SUFFIXES)
+def matches_path_class(rel: str, pattern: str) -> bool:
+    """POSIX, case-sensitive, segment-bound path-class match.
+
+    Split both strings on `/` and fnmatchcase each pair only when the
+    segment counts are equal, so `*` cannot cross `/`.
+    """
+    rel_parts = rel.split("/")
+    pat_parts = pattern.split("/")
+    if len(rel_parts) != len(pat_parts):
+        return False
+    return all(
+        fnmatch.fnmatchcase(part, pat)
+        for part, pat in zip(rel_parts, pat_parts, strict=True)
+    )
+
+
+def is_allowlisted_binary(
+    rel: str,
+    data: bytes,
+    exceptions: Sequence[tuple[str, str]] | None = None,
+) -> bool:
+    chosen = BINARY_EXCEPTIONS if exceptions is None else exceptions
+    for pattern, magic in chosen:
+        if not matches_path_class(rel, pattern):
+            continue
+        pred = BINARY_MAGIC_PREDICATES.get(magic)
+        if pred is None:
+            continue
+        return pred(data)
+    return False
+
+
+def is_textual_scan_surface(
+    rel: str,
+    data: bytes,
+    exceptions: Sequence[tuple[str, str]] | None = None,
+) -> bool:
+    return not is_allowlisted_binary(rel, data, exceptions)
+
+
+def binary_allowlist_staleness(
+    root: Path,
+    files: Iterable[Path],
+    exceptions: Sequence[tuple[str, str]] | None = None,
+) -> list[str]:
+    using_defaults = exceptions is None
+    if using_defaults and not (
+        (root / "scripts/ci/check-evidence-vocabulary.py").is_file()
+        and (root / ".github/workflows/ci.yml").is_file()
+    ):
+        return []
+    chosen = BINARY_EXCEPTIONS if exceptions is None else exceptions
+    tracked: list[str] = []
+    for path in files:
+        try:
+            tracked.append(rel_posix(path, root))
+        except ValueError:
+            continue
+    messages: list[str] = []
+    for pattern, magic in chosen:
+        pred = BINARY_MAGIC_PREDICATES.get(magic)
+        if pred is None:
+            messages.append(
+                f"stale binary exception: unknown magic {magic!r} for {pattern}"
+            )
+            continue
+        hits = [rel for rel in tracked if matches_path_class(rel, pattern)]
+        if not hits:
+            messages.append(
+                f"stale binary exception: {pattern} matched 0 tracked files"
+            )
+            continue
+        valid = 0
+        for rel in hits:
+            try:
+                data = (root / rel).read_bytes()
+            except OSError:
+                messages.append(f"stale binary exception: {rel} is unreadable")
+                continue
+            if b"\0" not in data:
+                continue
+            if not pred(data):
+                messages.append(
+                    f"stale binary exception: {rel} does not match {magic} magic"
+                )
+                continue
+            valid += 1
+        if valid == 0:
+            messages.append(
+                f"stale binary exception: {pattern} matched 0 tracked binaries"
+            )
+    return messages
 
 
 def is_excluded(rel: str) -> bool:
@@ -719,6 +851,7 @@ def scan_findings(
     files: Iterable[Path],
     allowlist: Mapping[str, Sequence[str]],
     identifiers: Mapping[str, Sequence[str]],
+    binary_exceptions: Sequence[tuple[str, str]] | None = None,
 ) -> list[str]:
     compiled = {rel: compiled_patterns(pats) for rel, pats in allowlist.items()}
     compiled_ids = {rel: compiled_patterns(pats) for rel, pats in identifiers.items()}
@@ -727,11 +860,16 @@ def scan_findings(
         rel = rel_posix(path, root)
         if is_excluded(rel):
             continue
-        text = read_text(path)
-        if text is None:
-            if is_textual_scan_surface(rel):
+        try:
+            data = path.read_bytes()
+        except OSError:
+            findings.append(f"{rel}: unreadable or NUL textual surface")
+            continue
+        if b"\0" in data:
+            if is_textual_scan_surface(rel, data, binary_exceptions):
                 findings.append(f"{rel}: unreadable or NUL textual surface")
             continue
+        text = data.decode("utf-8", errors="replace")
         allowed = compiled.get(rel, ())
         legacy = compiled_ids.get(rel, ())
         lines = text.splitlines()
@@ -768,17 +906,26 @@ def scan_findings(
     return findings
 
 
-def scan_withdrawn_labels(root: Path, files: Iterable[Path]) -> list[str]:
+def scan_withdrawn_labels(
+    root: Path,
+    files: Iterable[Path],
+    binary_exceptions: Sequence[tuple[str, str]] | None = None,
+) -> list[str]:
     findings: list[str] = []
     for path in files:
         rel = rel_posix(path, root)
         if is_excluded(rel) or not is_withdrawn_surface(rel):
             continue
-        text = read_text(path)
-        if text is None:
-            if is_textual_scan_surface(rel):
+        try:
+            data = path.read_bytes()
+        except OSError:
+            findings.append(f"{rel}: unreadable or NUL textual surface")
+            continue
+        if b"\0" in data:
+            if is_textual_scan_surface(rel, data, binary_exceptions):
                 findings.append(f"{rel}: unreadable or NUL textual surface")
             continue
+        text = data.decode("utf-8", errors="replace")
         lines = text.splitlines()
         for line_no, line in enumerate(lines, start=1):
             for label, cre in zip(WITHDRAWN_METRIC_LABELS, WITHDRAWN_LABEL_RES, strict=True):
@@ -796,22 +943,34 @@ def check_tree(
     root: Path,
     allowlist: Mapping[str, Sequence[str]] | None = None,
     identifiers: Mapping[str, Sequence[str]] | None = None,
+    binary_exceptions: Sequence[tuple[str, str]] | None = None,
 ) -> int:
     rules = ALLOWED_MERKLE_USES if allowlist is None else allowlist
     idents = LEGACY_IDENTIFIERS if identifiers is None else identifiers
+    tracked = git_files(root)
     stale = (
         allowlist_staleness(root, rules)
         + allowlist_staleness(root, idents)
         + corrected_history_staleness(root)
+        + binary_allowlist_staleness(root, tracked, exceptions=binary_exceptions)
     )
-    tracked = git_files(root)
     if not tracked:
         print("evidence-vocabulary=failed")
         print("tracked set is empty; refuse to pass")
         return 1
     findings = (
-        scan_findings(root, tracked, rules, idents)
-        + scan_withdrawn_labels(root, tracked)
+        scan_findings(
+            root,
+            tracked,
+            rules,
+            idents,
+            binary_exceptions=binary_exceptions,
+        )
+        + scan_withdrawn_labels(
+            root,
+            tracked,
+            binary_exceptions=binary_exceptions,
+        )
         + formula_parity_findings(root)
     )
     if stale or findings:
@@ -831,7 +990,12 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    return check_tree(args.repo_root.resolve(), ALLOWED_MERKLE_USES)
+    try:
+        return check_tree(args.repo_root.resolve(), ALLOWED_MERKLE_USES)
+    except Exception as exc:
+        print("evidence-vocabulary=failed")
+        print(f"{type(exc).__name__}: {exc}")
+        return 1
 
 
 if __name__ == "__main__":
