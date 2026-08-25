@@ -287,7 +287,6 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         eprintln!(
             "WARN: Degrading to Audit mode (no containment). use --fail-closed to make this fatal."
         );
-        report_unwritten_enforcement_health(&args, "execution degraded to audit");
         metrics::increment("degraded_to_audit_conflict");
         actual_enforcement = false;
     }
