@@ -4,8 +4,9 @@
 The reporter fail-opens on unreadable JSON (warn, empty results, exit 0). The
 runtime rule lives in scripts/ci/bind-osv-json-sarif-counts.py. This checker
 only pins that the workflow calls that script with both artifacts, wires
-OSV_OUTCOME from the scanner step, does not walk vulnerabilities itself, and
-that scanner/reporter share one 40-hex SHA and semver comment.
+OSV_OUTCOME from the scanner step, does not walk vulnerabilities itself, does
+not re-check missing/empty JSON (bind() is the only owner), and that
+scanner/reporter share one 40-hex SHA and semver comment.
 
 It does not reimplement the count. Does not run the actions.
 """
@@ -35,6 +36,14 @@ INVOKE_RE = re.compile(
 INLINE_WALK_TELLS = (
     'key == "vulnerabilities"',
     "key == 'vulnerabilities'",
+)
+
+VALIDATE_STEP_NAME = "Validate OSV scanner result"
+
+# bind() owns missing/empty JSON. Refuse the leftover `[ ! -s osv-results.json ]`
+# and close equivalents (`! -f` / `! -e`) still running in the workflow.
+MISSING_EMPTY_JSON_RE = re.compile(
+    r"""!\s+-[sfe]\s+["']?osv-results\.json["']?"""
 )
 
 
@@ -104,6 +113,19 @@ def check(text: str) -> list[str]:
         errors.append(
             "workflow still contains an inline vulnerabilities walk; "
             f"{BIND_SCRIPT} is the only JSON counter"
+        )
+
+    if VALIDATE_STEP_NAME in active:
+        errors.append(
+            f"leftover step name `{VALIDATE_STEP_NAME}`; "
+            f"missing/empty JSON is owned only by {BIND_SCRIPT} bind()"
+        )
+
+    if MISSING_EMPTY_JSON_RE.search(active):
+        errors.append(
+            "leftover missing/empty JSON check "
+            "(`[ ! -s osv-results.json ]` or equivalent); "
+            f"{BIND_SCRIPT} bind() is the only owner"
         )
 
     return errors

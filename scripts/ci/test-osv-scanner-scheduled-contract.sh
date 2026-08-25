@@ -3,6 +3,8 @@
 #
 # Control must be green. SHA-drift and invocation-bypass must bite the checker.
 # Env-wiring and a restored inline vulnerabilities walk must also bite.
+# A leftover Validate-step / `! -s osv-results.json` mutation must also bite
+# (bind() is the only missing/empty JSON owner).
 # The runtime script is executed against synthetic fixtures (scratch only),
 # always via cwd-fixed names with zero CLI path args.
 # A compare/exit mutation on refuse_if_counts_differ must flip mismatch
@@ -147,6 +149,35 @@ p.write_text(text + "\n" + walk)
 PY
 run_checker "shared-teller-walk-is-refused" "$c" 1
 
+c="$scratch/leftover-validate"
+seed "$c"
+python3 - "$c/${WORKFLOW}" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+text = p.read_text()
+needle = "      - name: Build advisory SARIF\n"
+step = (
+    "      - name: Validate OSV scanner result\n"
+    "        shell: bash\n"
+    "        run: |\n"
+    "          set -euo pipefail\n"
+    "\n"
+    "          if [ ! -s osv-results.json ]; then\n"
+    "            echo \"::error::OSV scanner did not produce a JSON result\"\n"
+    "            exit 1\n"
+    "          fi\n"
+    "\n"
+)
+if needle not in text:
+    raise SystemExit("Build advisory SARIF step missing from seed; cannot mutate")
+if "Validate OSV scanner result" in text:
+    raise SystemExit("Validate step already present; mutation would be a no-op")
+p.write_text(text.replace(needle, step + needle, 1))
+PY
+run_checker "leftover-validate-step-is-refused" "$c" 1
+
 # --- runtime fixtures (scratch only; not added to the repo) ---
 
 ACCEPT_JSON='{"results": [{"vulnerabilities": [{"id": "OSV-TEST-1"}]}]}'
@@ -206,4 +237,4 @@ p.write_text(text.replace(old, "if False:", 1))
 PY
 run_bind_cwd "outcome-gate-mutation-accepts-execution-failure" "$scratch/fx-empty" "$mutated_outcome" 0 OSV_OUTCOME=failure
 
-printf 'PASS: osv-scanner scheduled lockstep/bind battery (control, sha-drift, invoke-bypass, env-wiring-mutation, shared-teller-walk, fixture-acceptance, fixture-mismatch, fixture-malformed-json, fixture-malformed-sarif, fixture-clean-scan, fixture-execution-failure, fixture-non-success-with-vulns, fixture-missing-outcome, compare-exit-mutation, outcome-gate-mutation)\n'
+printf 'PASS: osv-scanner scheduled lockstep/bind battery (control, sha-drift, invoke-bypass, env-wiring-mutation, shared-teller-walk, leftover-validate-step, fixture-acceptance, fixture-mismatch, fixture-malformed-json, fixture-malformed-sarif, fixture-clean-scan, fixture-execution-failure, fixture-non-success-with-vulns, fixture-missing-outcome, compare-exit-mutation, outcome-gate-mutation)\n'

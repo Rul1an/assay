@@ -90,16 +90,6 @@ jobs:
           scan-args: ${{ steps.osv-targets.outputs.scan_args }}
         continue-on-error: true
 
-      - name: Validate OSV scanner result
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ ! -s osv-results.json ]; then
-            echo "::error::OSV scanner did not produce a JSON result"
-            exit 1
-          fi
-
       - name: Build advisory SARIF
         uses: google/osv-scanner-action/osv-reporter-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
         with:
