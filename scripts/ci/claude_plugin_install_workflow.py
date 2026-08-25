@@ -313,7 +313,7 @@ def drive_cached_manifest(installed: Path, consumer: Path, env: dict[str, str], 
             "consumer probe unexpectedly contains the server's default policies directory",
             "remove the default-path fixture so the probe discriminates `.` from `policies`",
         )
-    policy.write_text(f"blocklist:\n  - {PROBE_TOOL}\n", encoding="utf-8")
+    policy.write_text(probe_policy_body(), encoding="utf-8")
     requests = [
         {
             "jsonrpc": "2.0",
@@ -422,9 +422,21 @@ ASSAY_DECIDE_TOOL = f"{ASSAY_TOOL_PREFIX}assay_policy_decide"
 # The pinned probe. The live prompt asks for exactly this decision and the
 # validator requires exactly it back, so the two cannot drift into asking for
 # one probe and accepting another.
+# Two probes, deliberately separate. The denied one proves the policy root
+# resolves to the consumer; `assay-mcp-server` maps that denial to MCP
+# `isError: true`, so it can never produce an accepted transcript. The allowed
+# one is the model-mediated record path and returns a clean result.
 PROBE_TOOL = "install_surface_probe"
+TRANSCRIPT_PROBE_TOOL = "install_surface_allowed_probe"
 PROBE_POLICY = "install-surface-policy.yaml"
-EXPECTED_DECIDE_INPUT = {"tool": PROBE_TOOL, "policy": PROBE_POLICY}
+
+
+def probe_policy_body() -> str:
+    """The one policy body the probe writes and every guard reads."""
+    return f"blocklist:\n  - {PROBE_TOOL}\n"
+
+
+EXPECTED_DECIDE_INPUT = {"tool": TRANSCRIPT_PROBE_TOOL, "policy": PROBE_POLICY}
 # A dependency token shorter than this matches too much ordinary prose to
 # demonstrate that a later turn consumed the result.
 MIN_DEPENDENCY_TOKEN = 8
@@ -740,7 +752,7 @@ def verify_workflow() -> None:
                 "-p",
                 (
                     "Use the assay golden-path skill. Call the assay_policy_decide tool "
-                    f"once for tool {PROBE_TOOL} with policy {PROBE_POLICY}, "
+                    f"once for tool {TRANSCRIPT_PROBE_TOOL} with policy {PROBE_POLICY}, "
                     "then report the first match string from its result verbatim."
                 ),
                 "--debug-file",
@@ -927,6 +939,9 @@ for line in sys.stdin:
 
 
 def self_test() -> None:
+    # First, because every later failure caused by a re-coupled probe would
+    # surface as an unexplained fixture mismatch instead of the design error.
+    assert_transcript_probe_is_not_denied()
     script = WORKFLOW_SCRIPT
     source_root = SOURCE_ROOT
     git = run_bounded("self_test", ["git", "rev-parse", "HEAD"], cwd=source_root, env=clean_env())
@@ -1023,9 +1038,10 @@ def self_test() -> None:
 
 STREAM_FIXTURES = DRIVER.parent / "fixtures" / "claude-stream"
 STREAM_FIXTURE_EXPECTATIONS = (
-    ("valid-deny.jsonl", "pass"),
     ("valid-allow.jsonl", "pass"),
+    ("deny-probe-arrives-as-error.jsonl", "unavailable"),
     ("no-call.jsonl", "not_exercised"),
+    ("assistant-envelope-user-role.jsonl", "not_exercised"),
     ("duplicate-call.jsonl", "unavailable"),
     ("mismatched-id.jsonl", "unavailable"),
     ("error-result.jsonl", "unavailable"),
@@ -1035,9 +1051,10 @@ STREAM_FIXTURE_EXPECTATIONS = (
     ("result-before-use.jsonl", "unavailable"),
     ("duplicate-result.jsonl", "unavailable"),
     ("untyped-payload.jsonl", "unavailable"),
+    ("allow-without-reason.jsonl", "unavailable"),
     ("deny-without-matches.jsonl", "unavailable"),
-    ("wrong-assay-tool.jsonl", "unavailable"),
     ("matches-mixed-types.jsonl", "unavailable"),
+    ("wrong-assay-tool.jsonl", "unavailable"),
     ("missing-terminal-result.jsonl", "unavailable"),
     ("terminal-result-error.jsonl", "unavailable"),
     ("terminal-result-not-success.jsonl", "unavailable"),
@@ -1045,7 +1062,6 @@ STREAM_FIXTURE_EXPECTATIONS = (
     ("terminal-result-wrong-session.jsonl", "unavailable"),
     ("terminal-result-before-dependency.jsonl", "unavailable"),
     ("tool-result-in-assistant-envelope.jsonl", "unavailable"),
-    ("assistant-envelope-user-role.jsonl", "not_exercised"),
     ("quote-in-user-role-envelope.jsonl", "unavailable"),
     ("tool-result-is-error-not-bool.jsonl", "unavailable"),
     ("tool-result-is-error-zero.jsonl", "unavailable"),
@@ -1054,6 +1070,34 @@ STREAM_FIXTURE_EXPECTATIONS = (
     ("tool-use-wrong-probe-input.jsonl", "unavailable"),
     ("tool-use-surplus-input-key.jsonl", "unavailable"),
 )
+
+
+def assert_transcript_probe_is_not_denied() -> None:
+    """The transcript probe must be a decision the real server can return cleanly.
+
+    `assay-mcp-server` maps a policy denial to MCP `isError: true`
+    (`classify_tool_result`: `is_error = has_error || explicit_allowed == Some(false)`),
+    and the validator refuses any errored tool_result. So a probe on a blocklisted
+    tool can never produce a transcript that passes, and a fixture claiming
+    otherwise would assert a shape the server does not emit.
+    """
+    blocklist = probe_policy_body()
+    requested = EXPECTED_DECIDE_INPUT["tool"]
+    if f"- {requested}\n" in blocklist:
+        fail(
+            "transcript_probe",
+            f"transcript probe {requested!r} is blocked by the probe policy; a denial "
+            "arrives as isError and can never yield an accepted transcript",
+            "give the transcript path its own allowed probe and keep the blocked tool "
+            "for policy-root verification",
+        )
+    if f"- {PROBE_TOOL}\n" not in blocklist:
+        fail(
+            "transcript_probe",
+            f"policy-root probe {PROBE_TOOL!r} is no longer blocked by the probe policy",
+            "restore the denied probe used by the policy-root phase",
+        )
+    print("transcript_probe_is_not_denied=pass")
 
 
 def replay_stream_fixtures() -> None:

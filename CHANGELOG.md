@@ -21,6 +21,12 @@ All notable changes to this project will be documented in this file.
   wrong-session, incomplete and error transcripts stay `unavailable`. Process exit is never
   the evidence, and an incomplete observation never becomes clean (#2632, child of #2194).
 
+  The record path uses its own **allowed** probe, separate from the blocked probe that
+  proves policy-root resolution. `assay-mcp-server` maps a policy denial to MCP
+  `isError: true`, so a denied probe can never yield an accepted transcript; a self-test
+  guard fails closed if the two are ever re-coupled. A denied decision is therefore
+  evidence about policy routing, never about model-mediated tool use.
+
 - The CLI JSON identity guard now follows writers to rows as well as rows to writers. Every
   production file under `cli/commands` that serializes JSON through the six issue idioms must be
   named by a `cli-documents` writer/namer, an `unnamed-documents` producer, or an explicit
