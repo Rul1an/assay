@@ -91,17 +91,16 @@ def check(text: str) -> list[str]:
 
 
 def main() -> int:
-    path = Path(sys.argv[1]) if len(sys.argv) > 1 else WORKFLOW
-    if not path.is_file():
-        print(f"FAIL: workflow missing: {path}", file=sys.stderr)
+    if not WORKFLOW.is_file():
+        print(f"FAIL: workflow missing: {WORKFLOW}", file=sys.stderr)
         return 2
-    errors = check(path.read_text(encoding="utf-8"))
+    errors = check(WORKFLOW.read_text(encoding="utf-8"))
     if errors:
-        print(f"FAIL: {path}", file=sys.stderr)
+        print(f"FAIL: {WORKFLOW}", file=sys.stderr)
         for err in errors:
             print(f"  {err}", file=sys.stderr)
         return 1
-    print(f"ok    {path}")
+    print(f"ok    {WORKFLOW}")
     return 0
 
 
