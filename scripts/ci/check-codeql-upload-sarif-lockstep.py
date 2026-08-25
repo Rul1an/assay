@@ -16,6 +16,9 @@ WORKFLOWS = (
 )
 WORKFLOW_DIR = Path(".github/workflows")
 UPLOAD_ACTION = "github/codeql-action/upload-sarif@"
+YAML_HEX_ESCAPE_RE = re.compile(
+    r"\\(?:x([0-9a-fA-F]{2})|u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8}))"
+)
 USES_RE = re.compile(
     r"^[ \t]*(?:-[ \t]+)?uses:[ \t]+"
     r"(?P<quote>['\"]?)github/codeql-action/upload-sarif@"
@@ -42,7 +45,20 @@ def active_upload_references(text: str) -> int:
     active_text = "\n".join(
         line for line in text.splitlines() if not line.lstrip().startswith("#")
     )
-    return active_text.count(UPLOAD_ACTION)
+
+    def decode_hex_escape(match: re.Match[str]) -> str:
+        codepoint = next(group for group in match.groups() if group is not None)
+        try:
+            return chr(int(codepoint, 16))
+        except ValueError:
+            return "\N{REPLACEMENT CHARACTER}"
+
+    # GitHub resolves repository names case-insensitively, and YAML double-quoted
+    # scalars decode hexadecimal escapes and escaped line breaks before dispatch.
+    normalized = re.sub(r"\\\r?\n[ \t]*", "", active_text)
+    normalized = YAML_HEX_ESCAPE_RE.sub(decode_hex_escape, normalized)
+    normalized = normalized.casefold()
+    return normalized.count(UPLOAD_ACTION)
 
 
 def check() -> list[str]:

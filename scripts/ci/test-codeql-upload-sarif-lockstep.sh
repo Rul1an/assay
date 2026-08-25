@@ -217,4 +217,70 @@ jobs:
 YAML
 run_case folded-scalar-foreign-workflow-is-refused "$case_root" 1
 
+case_root="$scratch/unicode-escaped-action"
+seed "$case_root"
+cat >"$case_root/.github/workflows/unicode-escaped-upload.yml" <<'YAML'
+name: Mutated Unicode-escaped CodeQL upload
+on: workflow_dispatch
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: "github/codeql-action/upload-sarif\u0040db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28"
+YAML
+run_case unicode-escaped-action-is-refused "$case_root" 1
+
+case_root="$scratch/hex-escaped-action"
+seed "$case_root"
+cat >"$case_root/.github/workflows/hex-escaped-upload.yml" <<'YAML'
+name: Mutated hex-escaped CodeQL upload
+on: workflow_dispatch
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: "github/codeql-action/upload-sarif\x40db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28"
+YAML
+run_case hex-escaped-action-is-refused "$case_root" 1
+
+case_root="$scratch/case-variant-action"
+seed "$case_root"
+cat >"$case_root/.github/workflows/case-variant-upload.yml" <<'YAML'
+name: Mutated case-variant CodeQL upload
+on: workflow_dispatch
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: GitHub/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28
+YAML
+run_case case-variant-action-is-refused "$case_root" 1
+
+case_root="$scratch/unicode-escaped-identity"
+seed "$case_root"
+cat >"$case_root/.github/workflows/unicode-identity-upload.yml" <<'YAML'
+name: Mutated Unicode-escaped CodeQL identity
+on: workflow_dispatch
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: "\u0067ithub/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28"
+YAML
+run_case unicode-escaped-identity-is-refused "$case_root" 1
+
+case_root="$scratch/escaped-line-break-action"
+seed "$case_root"
+cat >"$case_root/.github/workflows/escaped-break-upload.yml" <<'YAML'
+name: Mutated escaped-line-break CodeQL upload
+on: workflow_dispatch
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: "github/codeql-action/upload-\
+          sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28"
+YAML
+run_case escaped-line-break-action-is-refused "$case_root" 1
+
 printf 'PASS: CodeQL upload-sarif lockstep battery\n'
