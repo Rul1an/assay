@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
-"""Lockstep + count-bind contract for the scheduled OSV scanner/reporter pair.
+"""Lockstep + bind-invocation contract for the scheduled OSV pair.
 
-The reporter fail-opens on unreadable JSON (warn, empty results, exit 0). A
-version-skewed pair can therefore upload an empty SARIF while the scanner JSON
-still lists vulnerabilities. This checker refuses that hole in the workflow
-text: scanner and reporter must share one 40-hex SHA and semver comment, and a
-non-comment bind must compare the JSON vulnerability walk to the SARIF result
-count and exit non-zero on mismatch.
+The reporter fail-opens on unreadable JSON (warn, empty results, exit 0). The
+runtime rule lives in scripts/ci/bind-osv-json-sarif-counts.py. This checker
+only pins that the workflow calls that script with both artifacts, and that
+scanner/reporter share one 40-hex SHA and semver comment.
 
-Does not run the actions. Does not claim live 2.5.1 JSON/SARIF compatibility.
+It does not reimplement the count. Does not run the actions.
 """
 
 from __future__ import annotations
@@ -18,23 +16,23 @@ import sys
 from pathlib import Path
 
 WORKFLOW = Path(".github/workflows/osv-scanner-scheduled.yml")
+BIND_SCRIPT = "scripts/ci/bind-osv-json-sarif-counts.py"
 
 USES_RE = re.compile(
     r"^[ \t]*uses:[ \t]+google/osv-scanner-action/"
     r"(osv-scanner-action|osv-reporter-action)"
     r"@([0-9a-f]{40})[ \t]+#[ \t]+(v\d+\.\d+\.\d+)[ \t]*$",
-    re.M,
 )
 
-# Distinctive identifiers the bind step must use so a comment or a no-op
-# `if False` cannot satisfy the contract.
-BIND_CONDITION = "osv_json_vuln_count != osv_sarif_result_count"
-JSON_NAME = "osv-results.json"
-SARIF_NAME = "osv-results.sarif"
+# Active invocation: the workflow must call the one runtime script with both
+# production filenames. A comment, a different script, or dropped args is drift.
+INVOKE_RE = re.compile(
+    r"^[ \t]+(?:run:[ \t]+)?python3[ \t]+scripts/ci/bind-osv-json-sarif-counts\.py"
+    r"[ \t]+osv-results\.json[ \t]+osv-results\.sarif[ \t]*$"
+)
 
 
 def _active_lines(text: str) -> list[str]:
-    """Lines that are not empty and not full-line comments."""
     out: list[str] = []
     for raw in text.splitlines():
         stripped = raw.strip()
@@ -46,16 +44,14 @@ def _active_lines(text: str) -> list[str]:
 
 def check(text: str) -> list[str]:
     errors: list[str] = []
-    active = "\n".join(_active_lines(text))
-    uses = USES_RE.findall(text)
-    by_kind: dict[str, list[tuple[str, str]]] = {"osv-scanner-action": [], "osv-reporter-action": []}
-    for kind, sha, tag in uses:
-        # Ignore matches that live on a commented uses line.
-        by_kind[kind].append((sha, tag))
+    active_lines = _active_lines(text)
+    active = "\n".join(active_lines)
 
-    # Re-scan line by line so a commented uses: is not counted.
-    by_kind = {"osv-scanner-action": [], "osv-reporter-action": []}
-    for line in _active_lines(text):
+    by_kind: dict[str, list[tuple[str, str]]] = {
+        "osv-scanner-action": [],
+        "osv-reporter-action": [],
+    }
+    for line in active_lines:
         m = USES_RE.match(line)
         if not m:
             continue
@@ -83,29 +79,13 @@ def check(text: str) -> list[str]:
     if "category: osv-scanner-non-rust" not in active:
         errors.append("upload category osv-scanner-non-rust is missing")
 
-    if JSON_NAME not in active or SARIF_NAME not in active:
-        errors.append("workflow no longer names both osv-results.json and osv-results.sarif")
-
-    if BIND_CONDITION not in active:
+    invokes = [line for line in active_lines if INVOKE_RE.match(line)]
+    if len(invokes) != 1:
         errors.append(
-            "missing fail-closed count bind "
-            f"({BIND_CONDITION} on an active line); "
-            "reporter parse-fail can upload empty SARIF at exit 0"
+            "want exactly one active invocation "
+            f"`python3 {BIND_SCRIPT} osv-results.json osv-results.sarif`, "
+            f"found {len(invokes)}"
         )
-    elif "sys.exit(1)" not in active and "exit 1" not in active:
-        errors.append("count bind has no non-zero exit")
-
-    # The bind must actually read both artifacts, not just mention them in uses/with.
-    bind_reads_json = re.search(
-        r"(?:open|Path|vulnerability_count)\(\s*['\"]osv-results\.json['\"]",
-        active,
-    )
-    bind_reads_sarif = re.search(
-        r"(?:open|Path|sarif_result_count)\(\s*['\"]osv-results\.sarif['\"]",
-        active,
-    )
-    if BIND_CONDITION in active and not (bind_reads_json and bind_reads_sarif):
-        errors.append("count bind does not read both osv-results.json and osv-results.sarif")
 
     return errors
 

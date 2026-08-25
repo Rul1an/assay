@@ -148,61 +148,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import sys
-
-          def vulnerability_count(path):
-              with open(path, "r", encoding="utf-8") as handle:
-                  data = json.load(handle)
-              count = 0
-
-              def walk(value):
-                  nonlocal count
-                  if isinstance(value, dict):
-                      for key, child in value.items():
-                          if key == "vulnerabilities" and isinstance(child, list):
-                              count += len(child)
-                          walk(child)
-                  elif isinstance(value, list):
-                      for item in value:
-                          walk(item)
-
-              walk(data)
-              return count
-
-          def sarif_result_count(path):
-              with open(path, "r", encoding="utf-8") as handle:
-                  data = json.load(handle)
-              count = 0
-              runs = data.get("runs")
-              if not isinstance(runs, list):
-                  print("::error::OSV SARIF is missing a runs list", file=sys.stderr)
-                  sys.exit(1)
-              for run in runs:
-                  if not isinstance(run, dict):
-                      print("::error::OSV SARIF runs[] entry is not an object", file=sys.stderr)
-                      sys.exit(1)
-                  results = run.get("results")
-                  if not isinstance(results, list):
-                      print("::error::OSV SARIF runs[].results is not a list", file=sys.stderr)
-                      sys.exit(1)
-                  count += len(results)
-              return count
-
-          osv_json_vuln_count = vulnerability_count("osv-results.json")
-          osv_sarif_result_count = sarif_result_count("osv-results.sarif")
-          print(f"osv-json-vulnerabilities={osv_json_vuln_count}")
-          print(f"osv-sarif-results={osv_sarif_result_count}")
-          if osv_json_vuln_count != osv_sarif_result_count:
-              print(
-                  "::error::OSV reporter SARIF result count "
-                  f"{osv_sarif_result_count} does not match scanner JSON "
-                  f"vulnerability count {osv_json_vuln_count}",
-                  file=sys.stderr,
-              )
-              sys.exit(1)
-          PY
+          python3 scripts/ci/bind-osv-json-sarif-counts.py osv-results.json osv-results.sarif
 
       - name: Upload SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@d1ba80a13dd99fba24a470575428917156a28b43 # v4.37.5
