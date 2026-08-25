@@ -1179,12 +1179,12 @@ fn json_writer_opt_outs() -> BTreeMap<String, String> {
     rows
 }
 
-/// Every production command file that serializes JSON is named by a document row or an opt-out.
+/// Every production command file that serializes JSON is accounted for: a document row or an opt-out.
 ///
 /// The older guard only followed rows to writers. A file that writes JSON without being named
 /// stayed green — which is how `assay.runner.observation_health.v0` shipped unrecorded.
 #[test]
-fn json_serializing_command_files_are_named_by_a_row() {
+fn json_serializing_command_files_are_accounted_for() {
     let writers = json_serializing_command_files();
     assert!(
         !writers.is_empty(),

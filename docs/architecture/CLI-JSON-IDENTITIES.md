@@ -251,7 +251,8 @@ removed — must be named by a `cli-documents` writer/namer, an `unnamed-documen
 listed here with a non-empty motive that names the emit or helper role. Paths are the exact
 workspace-relative POSIX path; a basename does not match. A stale opt-out (missing path, file that
 no longer serializes, or path already named by a document row) is a failure. The motive is a
-reviewable declaration, not mechanical proof.
+reviewable declaration, not mechanical proof. The machine block is a `text` fence of
+`path | motive` lines — pipe-delimited text, not JSON.
 
 <!-- machine-checked: json-writer-opt-outs -->
 ```text
