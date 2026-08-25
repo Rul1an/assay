@@ -820,6 +820,7 @@ if files_line is None:
 expected = (
     r"^(\.github/actions/setup-rust/action\.yml|"
     r"scripts/ci/test-setup-rust-composite-contract\.sh|"
+    r"scripts/ci/test-host-capability-proof-contract\.sh|"
     r"\.pre-commit-config\.yaml|"
     r"\.github/workflows/[^/]+\.ya?ml)$")
 if files_line != expected:
@@ -830,6 +831,7 @@ missed = [s for s in (
     ".github/workflows/demo.yml", ".github/workflows/docs-auto-update.yml",
     ".github/workflows/parity.yml", ".github/workflows/release.yml",
     ".github/workflows/ci.yml", ".github/workflows/kernel-matrix.yml",
+    "scripts/ci/test-host-capability-proof-contract.sh",
 ) if not cre.search(s)]
 if missed:
     raise SystemExit(f"pre-commit files regex must match exception workflows; missed {missed}")
