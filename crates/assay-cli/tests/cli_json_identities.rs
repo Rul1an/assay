@@ -26,7 +26,7 @@
 //! and never writes it.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const INVENTORY: &str = "docs/architecture/CLI-JSON-IDENTITIES.md";
 
@@ -1071,24 +1071,75 @@ fn posix_rel(path: &std::path::Path, root: &std::path::Path) -> String {
         .replace('\\', "/")
 }
 
-fn command_rs_files() -> Vec<PathBuf> {
-    let base = workspace_root().join(COMMANDS_DIR);
-    let mut stack = vec![base];
+/// One path component, admitted only if it is an ordinary name.
+///
+/// `read_dir` entries are untrusted input to a static analyser, and a symlink away from being
+/// untrusted in fact. The first fix would canonicalise `DirEntry::path()` and then require
+/// containment; CodeQL still flags that, which is fair: it is a check applied after an arbitrary
+/// path exists. This admits the component instead, so a traversal cannot be spelled. `.`, `..`,
+/// separators, and anything not in the allowed set are refused, and every path below is built
+/// from the walk root plus admitted names. Same rule `error_enums_non_exhaustive.rs` and
+/// `validate_baseline_key()` apply.
+fn safe_component(name: &std::ffi::OsStr) -> Option<String> {
+    let s = name.to_str()?;
+    let ordinary = !s.is_empty()
+        && s != "."
+        && s != ".."
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    ordinary.then(|| s.to_string())
+}
+
+/// Rust files under `root`, walked by admitting one component at a time.
+///
+/// Uses `DirEntry::file_type()` (does not follow) and never `DirEntry::path()`. A symlink is a
+/// hard failure, not a skip: skipping would leave a serializer on the other side of the link
+/// unaccounted without anyone noticing.
+fn collect_rs_under(root: &Path) -> Vec<PathBuf> {
+    let mut stack = vec![root.to_path_buf()];
     let mut files = Vec::new();
-    while let Some(path) = stack.pop() {
-        let entries = std::fs::read_dir(&path)
-            .unwrap_or_else(|e| panic!("unreadable command directory {}: {e}", path.display()));
+    while let Some(dir) = stack.pop() {
+        let entries = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("unreadable command directory {}: {e}", dir.display()));
         for entry in entries {
-            let p = entry.expect("dir entry").path();
-            if p.is_dir() {
+            let entry = entry.expect("dir entry");
+            let file_type = entry
+                .file_type()
+                .unwrap_or_else(|e| panic!("unreadable file type in {}: {e}", dir.display()));
+            assert!(
+                !file_type.is_symlink(),
+                "command tree must not contain symlinks: {} / {:?}",
+                dir.display(),
+                entry.file_name()
+            );
+            let Some(name) = safe_component(&entry.file_name()) else {
+                panic!(
+                    "command tree path component is not an ordinary ASCII name: {:?}",
+                    entry.file_name()
+                );
+            };
+            let p = dir.join(&name);
+            assert!(
+                p.starts_with(root),
+                "joined path {} escaped walk root {}",
+                p.display(),
+                root.display()
+            );
+            if file_type.is_dir() {
                 stack.push(p);
-            } else if p.extension().and_then(|e| e.to_str()) == Some("rs") {
+            } else if file_type.is_file() && name.ends_with(".rs") {
                 files.push(p);
+            } else if !file_type.is_file() {
+                panic!("command tree entry is not a regular file or directory: {name}");
             }
         }
     }
     files.sort();
     files
+}
+
+fn command_rs_files() -> Vec<PathBuf> {
+    collect_rs_under(&workspace_root().join(COMMANDS_DIR))
 }
 
 fn source_has_json_serializer(src: &str) -> bool {
@@ -1326,4 +1377,84 @@ fn strip_test_modules_removes_pub_crate_mod() {
         "visibility-prefixed test modules must strip like bare `mod tests`"
     );
     assert!(stripped.contains("fn prod"));
+}
+
+/// The component allowlist, which is the load-bearing half of the command-tree walk.
+#[test]
+fn command_tree_component_rule_refuses_anything_that_could_leave_the_directory() {
+    use std::ffi::OsStr;
+    for ok in ["mod.rs", "lint.rs", "skill_supply_chain.rs", "a.b-c_1"] {
+        assert_eq!(
+            safe_component(OsStr::new(ok)).as_deref(),
+            Some(ok),
+            "{ok} is an ordinary name"
+        );
+    }
+    for bad in ["", ".", "..", "../etc", "a/b", "a\\b", "a b", "naïve"] {
+        assert_eq!(
+            safe_component(OsStr::new(bad)),
+            None,
+            "{bad:?} must not be admitted as a component"
+        );
+    }
+}
+
+/// A newly added `.rs` file under the walk root is collected. The converse detector's
+/// unaccounted assertion is this property on the live tree: an unreferenced serializer file
+/// must appear, not be skipped because the walker only knows inventory paths.
+#[test]
+fn command_tree_walk_collects_a_new_unreferenced_rs_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let nested = dir.path().join("evidence");
+    std::fs::create_dir(&nested).expect("nested dir");
+    std::fs::write(dir.path().join("mod.rs"), "fn g() {}\n").expect("mod.rs");
+    std::fs::write(
+        nested.join("unreferenced.rs"),
+        "fn f() { let _ = serde_json::to_string(&1); }\n",
+    )
+    .expect("unreferenced.rs");
+    let files = collect_rs_under(dir.path());
+    let names: Vec<String> = files
+        .iter()
+        .map(|p| {
+            p.strip_prefix(dir.path())
+                .expect("under root")
+                .to_str()
+                .expect("utf-8")
+                .replace('\\', "/")
+        })
+        .collect();
+    assert!(
+        names.contains(&"mod.rs".to_string()),
+        "existing file must remain visible: {names:?}"
+    );
+    assert!(
+        names.contains(&"evidence/unreferenced.rs".to_string()),
+        "a newly added command file must be collected so the converse detector can fail it: {names:?}"
+    );
+    let with_idiom: Vec<_> = files
+        .iter()
+        .filter(|p| source_has_json_serializer(&std::fs::read_to_string(p).expect("read fixture")))
+        .collect();
+    assert_eq!(
+        with_idiom.len(),
+        1,
+        "the new file is the serializer the inventory has not named"
+    );
+}
+
+/// `DirEntry::path()` then `is_dir()` follows a symlink. The walk must refuse the link
+/// before a path is constructed, so a link cannot take the scan outside the root.
+#[cfg(unix)]
+#[test]
+fn command_tree_walk_rejects_symlinks_fail_closed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let outside = tempfile::tempdir().expect("outside");
+    std::fs::write(dir.path().join("ok.rs"), "fn x() {}\n").expect("ok.rs");
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("escape")).expect("symlink");
+    let result = std::panic::catch_unwind(|| collect_rs_under(dir.path()));
+    assert!(
+        result.is_err(),
+        "a symlink in the command tree must fail closed, not be followed or skipped"
+    );
 }
