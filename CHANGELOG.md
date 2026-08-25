@@ -9,7 +9,8 @@ All notable changes to this project will be documented in this file.
   `--output-format stream-json --verbose` and classifies the transcript through one
   validator, `classify_model_mediated_call`, that fixture replay and the live path both
   call. `model_mediated_tool_call=pass` requires exactly one
-  `mcp__assay__assay_policy_decide` tool_use in an assistant-role envelope, exactly one
+  `mcp__assay__assay_policy_decide` tool_use in an assistant-role envelope whose input is
+  exactly the pinned probe the live prompt asks for, exactly one
   matching non-error tool_result in a user-role envelope after it, a payload typed against
   the server's contract with every `matches` member a non-empty string, a later assistant
   message quoting a value the model could not have taken from its own request, and exactly

@@ -306,14 +306,14 @@ def drive_cached_manifest(installed: Path, consumer: Path, env: dict[str, str], 
     if Path(resolved).resolve() != expected_server.resolve():
         fail("binary_spawn", f"PATH resolved an unexpected server: {resolved}", "put the exact-SHA assay-mcp-server first on the isolated PATH")
 
-    policy = consumer / "install-surface-policy.yaml"
+    policy = consumer / PROBE_POLICY
     if (consumer / "policies").exists():
         fail(
             "policy_root_resolved_to_consumer",
             "consumer probe unexpectedly contains the server's default policies directory",
             "remove the default-path fixture so the probe discriminates `.` from `policies`",
         )
-    policy.write_text("blocklist:\n  - install_surface_probe\n", encoding="utf-8")
+    policy.write_text(f"blocklist:\n  - {PROBE_TOOL}\n", encoding="utf-8")
     requests = [
         {
             "jsonrpc": "2.0",
@@ -419,6 +419,12 @@ ASSAY_TOOL_PREFIX = "mcp__assay__"
 # The one production tool this proof invokes. Registered in EXPECTED_TOOLS and
 # implemented in crates/assay-mcp-server/src/tools/policy_decide.rs.
 ASSAY_DECIDE_TOOL = f"{ASSAY_TOOL_PREFIX}assay_policy_decide"
+# The pinned probe. The live prompt asks for exactly this decision and the
+# validator requires exactly it back, so the two cannot drift into asking for
+# one probe and accepting another.
+PROBE_TOOL = "install_surface_probe"
+PROBE_POLICY = "install-surface-policy.yaml"
+EXPECTED_DECIDE_INPUT = {"tool": PROBE_TOOL, "policy": PROBE_POLICY}
 # A dependency token shorter than this matches too much ordinary prose to
 # demonstrate that a later turn consumed the result.
 MIN_DEPENDENCY_TOKEN = 8
@@ -574,6 +580,11 @@ def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
     use_index, use_id, use_name, use_input = uses[0]
     if use_name != ASSAY_DECIDE_TOOL:
         return "unavailable", f"expected {ASSAY_DECIDE_TOOL}, transcript invoked {use_name}"
+    # Exact object, not a superset: this is a pinned probe, so a transcript that
+    # decided some other tool or policy did not run the probe the prompt asked
+    # for, and neither did one that carried extra arguments we never requested.
+    if use_input != EXPECTED_DECIDE_INPUT:
+        return "unavailable", f"{use_name} input is not the pinned probe {EXPECTED_DECIDE_INPUT}"
 
     matching = [entry for entry in results if entry[1] == use_id]
     if not matching:
@@ -727,9 +738,11 @@ def verify_workflow() -> None:
             [
                 str(claude),
                 "-p",
-                "Use the assay golden-path skill. Call the assay_policy_decide tool once for "
-                "tool install_surface_probe with policy install-surface-policy.yaml, "
-                "then report the first match string from its result verbatim.",
+                (
+                    "Use the assay golden-path skill. Call the assay_policy_decide tool "
+                    f"once for tool {PROBE_TOOL} with policy {PROBE_POLICY}, "
+                    "then report the first match string from its result verbatim."
+                ),
                 "--debug-file",
                 str(debug),
                 "--output-format",
@@ -1037,6 +1050,9 @@ STREAM_FIXTURE_EXPECTATIONS = (
     ("tool-result-is-error-not-bool.jsonl", "unavailable"),
     ("tool-result-is-error-zero.jsonl", "unavailable"),
     ("terminal-result-is-error-not-bool.jsonl", "unavailable"),
+    ("tool-use-null-input.jsonl", "unavailable"),
+    ("tool-use-wrong-probe-input.jsonl", "unavailable"),
+    ("tool-use-surplus-input-key.jsonl", "unavailable"),
 )
 
 
