@@ -26,6 +26,10 @@ All notable changes to this project will be documented in this file.
   `isError: true`, so a denied probe can never yield an accepted transcript; a self-test
   guard fails closed if the two are ever re-coupled. A denied decision is therefore
   evidence about policy routing, never about model-mediated tool use.
+  The live prompt is built by one function and asks for the field the allowed decision
+  actually carries (`reason`); `matches` exists only on a denial. The fake session refuses
+  a prompt that has dropped that output contract, so injected fixture bytes can no longer
+  mask prompt drift.
 
 - The CLI JSON identity guard now follows writers to rows as well as rows to writers. Every
   production file under `cli/commands` that serializes JSON through the six issue idioms must be

@@ -428,6 +428,26 @@ ASSAY_DECIDE_TOOL = f"{ASSAY_TOOL_PREFIX}assay_policy_decide"
 # one is the model-mediated record path and returns a clean result.
 PROBE_TOOL = "install_surface_probe"
 TRANSCRIPT_PROBE_TOOL = "install_surface_allowed_probe"
+# The field the allowed decision actually carries. `policy_decide` returns
+# `{"allowed": true, "reason": ...}` for an allow and `matches` only for a deny,
+# so the prompt must ask for the field the probe can produce.
+TRANSCRIPT_RESULT_FIELD = "reason"
+
+
+def transcript_prompt() -> str:
+    """The one live prompt. Built here so the fake can hold it to its contract."""
+    return (
+        "Use the assay golden-path skill. Call the assay_policy_decide tool "
+        f"once for tool {TRANSCRIPT_PROBE_TOOL} with policy {PROBE_POLICY}, "
+        f"then report its result field {TRANSCRIPT_RESULT_FIELD} verbatim."
+    )
+
+
+def transcript_prompt_contract() -> str:
+    """The substring the session must carry, so fixture bytes cannot mask drift."""
+    return f"result field {TRANSCRIPT_RESULT_FIELD} verbatim"
+
+
 PROBE_POLICY = "install-surface-policy.yaml"
 
 
@@ -750,11 +770,7 @@ def verify_workflow() -> None:
             [
                 str(claude),
                 "-p",
-                (
-                    "Use the assay golden-path skill. Call the assay_policy_decide tool "
-                    f"once for tool {TRANSCRIPT_PROBE_TOOL} with policy {PROBE_POLICY}, "
-                    "then report the first match string from its result verbatim."
-                ),
+                transcript_prompt(),
                 "--debug-file",
                 str(debug),
                 "--output-format",
@@ -800,6 +816,7 @@ def verify_workflow() -> None:
 
 def write_fake_tools(root: Path, cache_version: str) -> tuple[Path, Path]:
     fixtures_dir = str(STREAM_FIXTURES)
+    contract = transcript_prompt_contract()
     fake_bin = root / "fake-bin"
     fake_bin.mkdir()
     claude = fake_bin / "claude"
@@ -889,6 +906,12 @@ else:
     if "--verbose" not in args:
         print("stream-json under --print requires --verbose", file=sys.stderr)
         raise SystemExit(64)
+    # Injecting fixture bytes without reading the prompt is exactly how a live
+    # prompt asking for a field the probe cannot return stayed green. The fake
+    # holds the session to its own output contract before it replays anything.
+    if "-p" not in args or {contract!r} not in args[args.index("-p") + 1]:
+        print("session prompt must request the typed result field verbatim", file=sys.stderr)
+        raise SystemExit(64)
     fixture = os.environ.get("FAKE_STREAM_FIXTURE")
     if fixture:
         sys.stdout.write(pathlib.Path({fixtures_dir!r}, fixture).read_text(encoding="utf-8"))
@@ -942,6 +965,7 @@ def self_test() -> None:
     # First, because every later failure caused by a re-coupled probe would
     # surface as an unexplained fixture mismatch instead of the design error.
     assert_transcript_probe_is_not_denied()
+    assert_transcript_prompt_contract()
     script = WORKFLOW_SCRIPT
     source_root = SOURCE_ROOT
     git = run_bounded("self_test", ["git", "rev-parse", "HEAD"], cwd=source_root, env=clean_env())
@@ -1070,6 +1094,30 @@ STREAM_FIXTURE_EXPECTATIONS = (
     ("tool-use-wrong-probe-input.jsonl", "unavailable"),
     ("tool-use-surplus-input-key.jsonl", "unavailable"),
 )
+
+
+def assert_transcript_prompt_contract() -> None:
+    """The prompt must ask for a field the allowed probe actually returns.
+
+    `matches` exists only on a denial, and the denied probe is deliberately not
+    the transcript probe. A prompt asking for a match string therefore requests
+    data the live session can never produce, and fixture replay cannot see it
+    because the fake injects bytes without reading the prompt.
+    """
+    prompt = transcript_prompt()
+    if transcript_prompt_contract() not in prompt:
+        fail(
+            "transcript_prompt",
+            f"live prompt does not request {TRANSCRIPT_RESULT_FIELD!r} verbatim: {prompt!r}",
+            "ask for the field the allowed decision carries",
+        )
+    if "match" in prompt:
+        fail(
+            "transcript_prompt",
+            "live prompt asks for a match string, which only a denial carries",
+            "the transcript probe is allowed, so its result has no matches list",
+        )
+    print("transcript_prompt_contract=pass")
 
 
 def assert_transcript_probe_is_not_denied() -> None:
