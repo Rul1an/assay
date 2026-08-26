@@ -223,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn import_wraps_records_byte_faithful_in_declared_order() {
+    fn producer_lane_import_wraps_records_byte_faithful_in_declared_order() {
         let dir = tempfile::tempdir().unwrap();
         let decisions = write_ndjson(dir.path(), "dec.ndjson", &[decision("deny")]);
         let observations = write_ndjson(dir.path(), "obs.ndjson", &[observation()]);
@@ -244,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn import_does_not_enforce_profile_cardinality() {
+    fn producer_lane_import_does_not_enforce_profile_cardinality() {
         // Two decisions in one file must stay producible (the verifier, not the importer, rejects
         // them; the conformance corpus's two-decision vector depends on this split).
         let dir = tempfile::tempdir().unwrap();
@@ -260,7 +260,7 @@ mod tests {
     }
 
     #[test]
-    fn import_rejects_record_without_schema() {
+    fn producer_lane_import_rejects_record_without_schema() {
         let dir = tempfile::tempdir().unwrap();
         let decisions = write_ndjson(dir.path(), "dec.ndjson", &[json!({"decision": "deny"})]);
         let err = cmd_privileged_mcp_action(args(dir.path(), decisions)).unwrap_err();
@@ -268,7 +268,7 @@ mod tests {
     }
 
     #[test]
-    fn import_rejects_run_id_with_colon() {
+    fn producer_lane_import_rejects_run_id_with_colon() {
         let dir = tempfile::tempdir().unwrap();
         let decisions = write_ndjson(dir.path(), "dec.ndjson", &[decision("deny")]);
         let mut a = args(dir.path(), decisions);
@@ -278,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn import_rejects_empty_inputs() {
+    fn producer_lane_import_rejects_empty_inputs() {
         let dir = tempfile::tempdir().unwrap();
         let decisions = write_ndjson(dir.path(), "dec.ndjson", &[]);
         let err = cmd_privileged_mcp_action(args(dir.path(), decisions)).unwrap_err();
@@ -350,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_era_forms_round_trip_to_the_same_frozen_profile_report() {
+    fn e2e_lane_wire_era_forms_round_trip_to_the_same_frozen_profile_report() {
         use super::super::verify_privileged_mcp_action::verify_bundle_report;
 
         let vectors = [
@@ -470,7 +470,7 @@ mod tests {
     }
 
     #[test]
-    fn malformed_wire_input_is_refused_before_a_bundle_is_written() {
+    fn producer_lane_malformed_wire_input_is_refused_before_a_bundle_is_written() {
         let dir = tempfile::tempdir().unwrap();
         let decisions = write_ndjson(dir.path(), "dec.ndjson", &[profile_allow_decision()]);
         let mut import = args(dir.path(), decisions);
@@ -493,7 +493,7 @@ mod tests {
     }
 
     #[test]
-    fn deny_import_accepts_an_observed_jsonrpc_error_without_deriving_from_it() {
+    fn producer_lane_deny_import_accepts_an_observed_jsonrpc_error_without_deriving_from_it() {
         let dir = tempfile::tempdir().unwrap();
         let decisions = write_ndjson(dir.path(), "dec.ndjson", &[decision("deny")]);
         let transcript = r#"{"transport":"streamable-http","transport_context":{"headers":{"MCP-Protocol-Version":"2026-07-28"}},"entries":[{"request":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"github.add_deploy_key","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}},{"response":{"jsonrpc":"2.0","id":1,"error":{"code":-32042,"message":"ATTACKER_SENTINEL"}}}]}"#;
@@ -522,7 +522,7 @@ mod tests {
     }
 
     #[test]
-    fn transcript_and_format_must_be_supplied_together() {
+    fn producer_lane_transcript_and_format_must_be_supplied_together() {
         let dir = tempfile::tempdir().unwrap();
         let decisions = write_ndjson(dir.path(), "dec.ndjson", &[profile_allow_decision()]);
         let mut transcript_only = args(dir.path(), decisions.clone());

@@ -552,30 +552,81 @@ class PrivilegedMcpActionLanes(unittest.TestCase):
                 require_complete=True, completion_scope="required"),
             3)
 
+    def test_local_lanes_bind_to_cargo_not_source_inspection(self):
+        source = Path(run_all.__file__).read_text()
+        for banned in (
+            "def _fn_body", "def _local_producer", "def _local_verifier",
+            "def _local_e2e", "_LOCAL_RUNNERS",
+        ):
+            self.assertNotIn(banned, source, banned)
+        for ident in (self.PRODUCER, self.VERIFIER, self.E2E):
+            suite = next(s for s in run_all.SUITES if s["id"] == ident)
+            self.assertEqual(suite["kind"], "cargo", ident)
+            self.assertEqual(suite["policy"], "required", ident)
+            self.assertIs(suite["runner"], run_all._cargo, ident)
+            self.assertIsInstance(suite.get("test_filter"), str, ident)
+            self.assertTrue(suite["test_filter"], ident)
+
     def test_producer_assertions_are_independent_of_verifier(self):
         producer = next(s for s in run_all.SUITES if s["id"] == self.PRODUCER)
         verifier = next(s for s in run_all.SUITES if s["id"] == self.VERIFIER)
         self.assertNotEqual(producer["id"], verifier["id"])
-        self.assertNotEqual(producer.get("lane"), "verifier")
-        self.assertEqual(producer.get("lane"), "producer")
-        source = Path(run_all.__file__).read_text()
-        # Producer runner must not call the verifier runner or cargo 14/14 harness.
-        start = source.find("def _local_producer")
-        self.assertGreater(start, -1, "producer runner missing")
-        end = source.find("\ndef _local_verifier", start)
-        chunk = source[start:end if end > start else start + 2000]
-        self.assertNotIn("verify_bundle_report(", chunk)
-        self.assertNotIn("conformance_privileged_mcp_action", chunk)
-        self.assertIn("import_does_not_enforce_profile_cardinality", chunk)
-        self.assertIn("malformed_wire_input_is_refused_before_a_bundle_is_written", chunk)
-        self.assertNotIn("verify.report", chunk)
-        self.assertNotIn("REPORT_SCHEMA", chunk)
+        self.assertNotIn("lane", producer)
+        self.assertNotIn("lane", verifier)
+        self.assertEqual(producer["test_filter"], "producer_lane_")
+        self.assertNotEqual(producer["test_filter"], verifier.get("test_filter"))
+        src = (
+            run_all.REPO
+            / "crates/assay-cli/src/cli/commands/evidence/privileged_mcp_action.rs"
+        ).read_text()
+        # Every producer_lane_ test must exist and none may call the verifier.
+        self.assertIn("fn producer_lane_", src)
+        start = 0
+        found = 0
+        while True:
+            i = src.find("fn producer_lane_", start)
+            if i < 0:
+                break
+            nxt = src.find("\n    fn ", i + 1)
+            body = src[i:nxt if nxt > i else i + 2000]
+            self.assertNotIn("verify_bundle_report", body, body[:80])
+            found += 1
+            start = i + 1
+        self.assertGreaterEqual(found, 3, "producer_lane_ filter selected too few tests")
 
     def test_incomplete_projection_cannot_be_upgraded_to_confirmed(self):
         source = Path(run_all.__file__).read_text()
         self.assertIn("producer_reported", source)
         self.assertIn("incomplete", source)
         self.assertIn("cannot be upgraded to confirmed", source.lower() + source)
+
+
+    def test_plain_mode_does_not_invoke_cargo(self):
+        called = []
+        orig = run_all._cargo
+        def boom(suite):
+            called.append(suite["id"])
+            raise AssertionError("plain mode must not invoke cargo")
+        run_all._cargo = boom
+        orig_argv = sys.argv
+        sys.argv = ["run_all.py", "--json"]
+        try:
+            code = run_all.main()
+        finally:
+            run_all._cargo = orig
+            sys.argv = orig_argv
+        self.assertEqual(called, [])
+        self.assertEqual(code, 0)
+
+    def test_required_scope_without_with_cargo_exits_3(self):
+        orig_argv = sys.argv
+        sys.argv = ["run_all.py", "--json", "--require-complete",
+                    "--completion-scope", "required"]
+        try:
+            code = run_all.main()
+        finally:
+            sys.argv = orig_argv
+        self.assertEqual(code, 3)
 
     def test_self_score_is_not_the_independent_candidate(self):
         local = [s for s in run_all.SUITES if s["id"] in self.LOCAL]

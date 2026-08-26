@@ -28,7 +28,9 @@ sys.path.insert(0, str(REPO / "conformance/tests"))
 import registry  # noqa: E402
 import run_all  # noqa: E402
 from test_completion_scope import (  # noqa: E402
-    REQUIRED_RUN_ALL,
+    GATED_LINUX_JOB,
+    GATED_LINUX_STEP,
+    PLAIN_RUN_ALL,
     REVISION_WITNESS,
     assert_hard_run_command,
     named_job,
@@ -391,8 +393,8 @@ class ProductWorkflow(unittest.TestCase):
     def test_deleting_the_require_complete_callsite_fails_this_test(self):
         step = named_step(
             CI_YML.read_text(encoding="utf-8"),
-            "scope",
-            "Conformance inventory",
+            GATED_LINUX_JOB,
+            GATED_LINUX_STEP,
         )
         mutated = step.replace("--require-complete", "")
         self.assertNotEqual(mutated, step)
@@ -400,14 +402,14 @@ class ProductWorkflow(unittest.TestCase):
 
     def test_commented_run_all_command_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")
-        mutated = text.replace(REQUIRED_RUN_ALL, "# " + REQUIRED_RUN_ALL, 1)
+        mutated = text.replace(PLAIN_RUN_ALL, "# " + PLAIN_RUN_ALL, 1)
         with self.assertRaises(AssertionError):
             assert_hard_run_command(
                 mutated, "scope", "Conformance inventory")
 
     def test_softened_run_all_command_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")
-        mutated = text.replace(REQUIRED_RUN_ALL, REQUIRED_RUN_ALL + " || true", 1)
+        mutated = text.replace(PLAIN_RUN_ALL, PLAIN_RUN_ALL + " || true", 1)
         with self.assertRaises(AssertionError):
             assert_hard_run_command(
                 mutated, "scope", "Conformance inventory")
@@ -573,7 +575,7 @@ class ProductWorkflow(unittest.TestCase):
                 "          set -euo pipefail\n",
                 "          set -euo pipefail\n          set +o errexit\n",
                 1,
-            ).replace(REQUIRED_RUN_ALL, REQUIRED_RUN_ALL + "\n          true", 1),
+            ).replace(PLAIN_RUN_ALL, PLAIN_RUN_ALL + "\n          true", 1),
             step.replace(
                 "          set -euo pipefail\n",
                 "          set -euo pipefail\n          python3() { :; }\n",
@@ -589,11 +591,11 @@ class ProductWorkflow(unittest.TestCase):
 
     def test_relocated_run_all_command_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")
-        mutated = text.replace("          " + REQUIRED_RUN_ALL, "          :", 1).replace(
+        mutated = text.replace("          " + PLAIN_RUN_ALL, "          :", 1).replace(
             "      - name: Published-numbers projection contract\n",
             "      - name: Decorative completion-scope note\n"
             "        run: |\n"
-            f"          {REQUIRED_RUN_ALL}\n\n"
+            f"          {PLAIN_RUN_ALL}\n\n"
             "      - name: Published-numbers projection contract\n",
             1,
         )

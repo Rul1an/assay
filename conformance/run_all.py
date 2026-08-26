@@ -115,11 +115,13 @@ def _stdlib_jsonrpc(suite: dict) -> tuple[str, str]:
 def _cargo(suite: dict) -> tuple[str, str]:
     """Rust-driven corpora. Reports unproved when the toolchain is absent."""
     try:
-        p = _run_capped(
-            ["cargo", "test", "-p", suite["crate"], suite["cargo_target_flag"],
-             suite["cargo_target"], "--", "--nocapture"],
-            REPO, timeout=1800,
-        )
+        cmd = ["cargo", "test", "-p", suite["crate"], suite["cargo_target_flag"],
+               suite["cargo_target"]]
+        filt = suite.get("test_filter")
+        if isinstance(filt, str) and filt:
+            cmd.append(filt)
+        cmd += ["--", "--nocapture"]
+        p = _run_capped(cmd, REPO, timeout=1800)
     except FileNotFoundError:
         return UNPROVED, "cargo not on PATH"
     except _OutputTooLarge:
@@ -134,8 +136,10 @@ def _cargo(suite: dict) -> tuple[str, str]:
         ran = sum(int(m) for m in re.findall(r"^test result: ok\. (\d+) passed", out, re.M))
         if ran == 0:
             return UNPROVED, ("cargo exited 0 but selected NO tests for %r -- "
-                              "the target filter matches nothing" % suite["cargo_target"])
-        return PROVED, "cargo test %s passed (%d tests)" % (suite["cargo_target"], ran)
+                              "the target filter matches nothing" % (
+                                  suite.get("test_filter") or suite["cargo_target"]))
+        return PROVED, "cargo test %s passed (%d tests)" % (
+            suite.get("test_filter") or suite["cargo_target"], ran)
     tail = out.strip().splitlines()
     hit = [ln for ln in tail if "test result:" in ln or "error[" in ln or "panicked" in ln]
     detail = " | ".join(hit[-3:]) if hit else "exit %d" % p.returncode
@@ -145,81 +149,6 @@ def _cargo(suite: dict) -> tuple[str, str]:
         return UNPROVED, "did not build: %s" % detail[:200]
     return FALSE, detail[:200]
 
-
-def _fn_body(src: str, name: str) -> str:
-    start = src.find("fn %s" % name)
-    if start < 0:
-        return ""
-    rest = src[start:]
-    nxt = rest.find("\n    fn ", 1)
-    return rest if nxt < 0 else rest[:nxt]
-
-
-def _local_producer(suite: dict) -> tuple[str, str]:
-    """Importer writes record shape. Does not call the verifier."""
-    src_path = REPO / "crates/assay-cli/src/cli/commands/evidence/privileged_mcp_action.rs"
-    if not src_path.is_file():
-        return UNPROVED, "producer importer source missing"
-    src = src_path.read_text(encoding="utf-8")
-    one = _fn_body(src, "import_does_not_enforce_profile_cardinality")
-    malformed = _fn_body(src, "malformed_wire_input_is_refused_before_a_bundle_is_written")
-    if not one:
-        return FALSE, "producer does not keep two decisions importable"
-    if "verify_bundle_report" in one:
-        return FALSE, "producer cardinality test impersonates the verifier"
-    if not malformed:
-        return FALSE, "producer does not refuse malformed wire input before a bundle"
-    vectors = REPO / suite["path"] / "vectors"
-    one_file = vectors / "ok-001-deny-bound-observation.bundle.tar.gz"
-    two_file = vectors / "bad-103-two-decisions.bundle.tar.gz"
-    if not one_file.is_file() or not two_file.is_file():
-        return UNPROVED, "producer fixtures missing at %s" % suite["path"]
-    return PROVED, "one decision writes; two decisions stay producible; malformed refused before bundle"
-
-
-def _local_verifier(suite: dict) -> tuple[str, str]:
-    """In-tree Cargo 14/14 against the existing v0 MANIFEST. Distinct from #1840."""
-    if suite["id"] == "privileged-mcp-action-v0":
-        return FALSE, "in-tree verifier must not be named privileged-mcp-action-v0"
-    harness = REPO / "crates/assay-cli/tests/conformance_privileged_mcp_action.rs"
-    if not harness.is_file():
-        return UNPROVED, "in-tree verifier harness missing"
-    text = harness.read_text(encoding="utf-8")
-    if 'const REPORT_SCHEMA: &str = "assay.privileged_mcp_action.verify.report.v0"' not in text:
-        return FALSE, "verifier harness is not assay.privileged_mcp_action.verify.report.v0"
-    manifest_path = REPO / suite["path"] / "MANIFEST.json"
-    if not manifest_path.is_file():
-        return UNPROVED, "v0 MANIFEST missing"
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return UNPROVED, "v0 MANIFEST is not JSON"
-    n = len(manifest.get("vectors") or [])
-    if n != 14:
-        return FALSE, "MANIFEST is not 14 vectors (got %s)" % n
-    return PROVED, "in-tree verifier harness 14/14 against v0 MANIFEST; schema verify.report.v0"
-
-
-def _local_e2e(suite: dict) -> tuple[str, str]:
-    """One golden-path produced bundle then verifier. Not corpus 14/14."""
-    gp = REPO / "crates/assay-cli/tests/agent_golden_path_contract.rs"
-    if not gp.is_file():
-        return UNPROVED, "golden-path contract missing"
-    text = gp.read_text(encoding="utf-8")
-    if "conformance/privileged-mcp-action-v0/vectors" not in text:
-        return FALSE, "e2e does not produce-then-verify one v0 bundle"
-    if "ok-001-deny-bound-observation.bundle.tar.gz" not in text:
-        return FALSE, "e2e golden path is not one produced bundle"
-    if "conformance_privileged_mcp_action.rs" in text:
-        return FALSE, "e2e must not count corpus 14/14"
-    return PROVED, "one golden-path produced bundle then verifier; not corpus 14/14"
-
-
-_LOCAL_RUNNERS = {
-    "producer": _local_producer,
-    "verifier": _local_verifier,
-    "e2e": _local_e2e,
-}
 
 
 def _bind_runners(raw: list) -> list:
@@ -232,8 +161,6 @@ def _bind_runners(raw: list) -> list:
             suite["runner"] = _stdlib_jsonrpc
         elif kind == "cargo":
             suite["runner"] = _cargo
-        elif kind == "local":
-            suite["runner"] = _LOCAL_RUNNERS[suite["lane"]]
         bound.append(suite)
     return bound
 
