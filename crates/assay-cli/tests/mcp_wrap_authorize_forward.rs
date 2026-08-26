@@ -67,8 +67,9 @@ fn spawn_wrap(dir: &Path, mode: &str) -> (Conn, PathBuf, PathBuf, PathBuf) {
             "serve",
             mode,
         ])
-        .env("ORACLE_RAW_LOG", &raw)
-        .env("ORACLE_INTERPRET_LOG", &interpret)
+        .current_dir(dir)
+        .env("ORACLE_RAW_LOG", "raw.log")
+        .env("ORACLE_INTERPRET_LOG", "interpret.ndjson")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())

@@ -11,6 +11,7 @@ use serde_json::Value;
 
 /// Why a client line cannot be authorized.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum UniqueJsonError {
     DuplicateMember,
     Malformed,
