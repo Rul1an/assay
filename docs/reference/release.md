@@ -87,6 +87,28 @@ This document outlines the canonical checklist for releasing new versions of Ass
   - Step: `Check release asset preflight` (fails before publication unless the `release/` directory exactly matches the expected asset contract, every `.sha256` verifies, and `server.json` points at the generated MCPB checksum).
   - Step: `Create GitHub Release` (uploads only the preflighted files from `release/`).
 
+### Published binary installability
+
+`installer` means `scripts/install.sh` installs the component for that target.
+`manual_step` means a release archive exists but the installer does not install
+that component. `unsupported` means this release publishes no matching binary;
+it is not an installer failure.
+
+<!-- release-installability-matrix:start -->
+| Component | Target | Install status | Release asset |
+| --- | --- | --- | --- |
+| `assay` | `x86_64-unknown-linux-gnu` | `installer` | `assay-v5.4.0-x86_64-unknown-linux-gnu.tar.gz` |
+| `assay` | `aarch64-unknown-linux-gnu` | `installer` | `assay-v5.4.0-aarch64-unknown-linux-gnu.tar.gz` |
+| `assay` | `x86_64-apple-darwin` | `installer` | `assay-v5.4.0-x86_64-apple-darwin.tar.gz` |
+| `assay` | `aarch64-apple-darwin` | `installer` | `assay-v5.4.0-aarch64-apple-darwin.tar.gz` |
+| `assay` | `x86_64-pc-windows-msvc` | `installer` | `assay-v5.4.0-x86_64-pc-windows-msvc.zip` |
+| `assay-mcp-server` | `x86_64-unknown-linux-gnu` | `manual_step` | `assay-mcp-server-v5.4.0-x86_64-unknown-linux-gnu.tar.gz` |
+| `assay-mcp-server` | `aarch64-unknown-linux-gnu` | `manual_step` | `assay-mcp-server-v5.4.0-aarch64-unknown-linux-gnu.tar.gz` |
+| `assay-mcp-server` | `x86_64-apple-darwin` | `unsupported` | `-` |
+| `assay-mcp-server` | `aarch64-apple-darwin` | `unsupported` | `-` |
+| `assay-mcp-server` | `x86_64-pc-windows-msvc` | `unsupported` | `-` |
+<!-- release-installability-matrix:end -->
+
 ### 4. Verification
 - [ ] **Published MSRV Install Check**: use a fresh install root so Cargo cannot reuse an existing
   installation, then execute the resulting binary:

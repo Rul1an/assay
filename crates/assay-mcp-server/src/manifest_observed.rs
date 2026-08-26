@@ -108,7 +108,12 @@ fn field_digest(field: &str, value: &Value) -> String {
 /// `manifest_digest` over the manifest projection, with the projection id INSIDE the hashed preimage
 /// and entries sorted by `(name, tool_digest)` — order-independent, shape-pinned. NOTE: the preimage
 /// is `{name, tool_digest}` only; P60d-v2 `field_digests` are deliberately NOT included here.
-fn manifest_digest(name_digests: &[(String, String)]) -> String {
+///
+/// PUBLIC because the declared-v0 validator (`crate::declared_manifest`) and the P60d fixture guard
+/// must recompute a manifest digest by the SAME rule the observed producer uses. A second
+/// implementation of this sort+preimage is how observed and declared silently drift apart, so there
+/// is exactly one.
+pub fn manifest_digest(name_digests: &[(String, String)]) -> String {
     let mut entries: Vec<(String, String)> = name_digests.to_vec();
     entries.sort();
     let tools: Vec<Value> = entries

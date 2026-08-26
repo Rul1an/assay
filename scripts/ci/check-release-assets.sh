@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./scripts/ci/release_asset_contract.sh
+source "$SCRIPT_DIR/release_asset_contract.sh"
+
 VERSION="${VERSION:?VERSION is required, for example v3.10.0}"
 ASSETS_DIR="${ASSETS_DIR:-release}"
 JQ_BIN="${JQ_BIN:-jq}"
@@ -42,23 +46,15 @@ if [[ -n "$non_files" ]]; then
   exit 1
 fi
 
-checksum_targets=(
-  "assay-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-  "assay-${VERSION}-aarch64-unknown-linux-gnu.tar.gz"
-  "assay-${VERSION}-x86_64-apple-darwin.tar.gz"
-  "assay-${VERSION}-aarch64-apple-darwin.tar.gz"
-  "assay-${VERSION}-x86_64-pc-windows-msvc.zip"
-  "assay-mcp-server-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-  "assay-mcp-server-${VERSION}-aarch64-unknown-linux-gnu.tar.gz"
-  "assay-mcp-server-${VERSION}-linux.mcpb"
-  "assay-${VERSION}-sbom-cyclonedx.tar.gz"
-  "assay-${VERSION}-release-provenance.json"
-  "assay-${VERSION}-release-proof-kit.tar.gz"
-)
+checksum_targets=()
+while IFS= read -r asset; do
+  checksum_targets+=("$asset")
+done < <(release_checksum_targets "$VERSION")
 
-plain_assets=(
-  "server.json"
-)
+plain_assets=()
+while IFS= read -r asset; do
+  plain_assets+=("$asset")
+done < <(release_plain_assets)
 
 scratch_dir="$(mktemp -d)"
 trap 'rm -rf "$scratch_dir"' EXIT
