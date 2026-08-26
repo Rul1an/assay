@@ -16,7 +16,10 @@ All notable changes to this project will be documented in this file.
   the expected `{dist}-{version}-{tag}.whl`, no-index only-binary install,
   version + `assay._native`). Both macOS cells are native: x86_64 on
   macos-15-intel, arm64 on macos-15. There is no unsupported escape for a
-  declared pair. This does not change published 5.4.0 files (#2649).
+  declared pair. The published-release golden-path harness digest for
+  `.github/workflows/release.yml` was regenerated through the manifest
+  owner refresh after that wheels-job change. This does not change
+  published 5.4.0 files (#2649).
 
 ### Added
 - `assay policy resolve --input PATH --format json` emits one
