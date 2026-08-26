@@ -214,7 +214,12 @@ jobs:
           ARCHIVE_NAME="assay-${VERSION}-${{ matrix.target }}"
           mkdir -p "dist/${ARCHIVE_NAME}"
           cp "target/${{ matrix.target }}/release/${{ matrix.artifact }}" "dist/${ARCHIVE_NAME}/"
-          cp README.md LICENSE "dist/${ARCHIVE_NAME}/" 2>/dev/null || true
+          python3 scripts/ci/release_readme.py "$VERSION" > "dist/${ARCHIVE_NAME}/README.md"
+          cp LICENSE "dist/${ARCHIVE_NAME}/"
+          mkdir -p "dist/${ARCHIVE_NAME}/examples/mcp-quickstart"
+          cp examples/mcp-quickstart/policy.yaml "dist/${ARCHIVE_NAME}/examples/mcp-quickstart/"
+          cp examples/mcp-quickstart/run.py "dist/${ARCHIVE_NAME}/examples/mcp-quickstart/"
+          cp examples/mcp-quickstart/mock_server.py "dist/${ARCHIVE_NAME}/examples/mcp-quickstart/"
           cd dist
           tar -czvf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
 
@@ -228,7 +233,12 @@ jobs:
           $ARCHIVE_NAME = "assay-${VERSION}-${{ matrix.target }}"
           New-Item -ItemType Directory -Force -Path "dist\${ARCHIVE_NAME}"
           Copy-Item "target\${{ matrix.target }}\release\${{ matrix.artifact }}" "dist\${ARCHIVE_NAME}\"
-          Copy-Item README.md, LICENSE "dist\${ARCHIVE_NAME}\" -ErrorAction SilentlyContinue
+          python scripts/ci/release_readme.py "$VERSION" > "dist\${ARCHIVE_NAME}\README.md"
+          Copy-Item LICENSE "dist\${ARCHIVE_NAME}\"
+          New-Item -ItemType Directory -Force -Path "dist\${ARCHIVE_NAME}\examples\mcp-quickstart"
+          Copy-Item examples/mcp-quickstart/policy.yaml "dist\${ARCHIVE_NAME}\examples\mcp-quickstart\"
+          Copy-Item examples/mcp-quickstart/run.py "dist\${ARCHIVE_NAME}\examples\mcp-quickstart\"
+          Copy-Item examples/mcp-quickstart/mock_server.py "dist\${ARCHIVE_NAME}\examples\mcp-quickstart\"
           Compress-Archive -Path "dist\${ARCHIVE_NAME}" -DestinationPath "dist\${ARCHIVE_NAME}.zip"
 
       - name: Write archive checksum
