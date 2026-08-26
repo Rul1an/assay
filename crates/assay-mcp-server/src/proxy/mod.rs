@@ -29,6 +29,7 @@ mod io;
 mod observer;
 
 use anyhow::{Context, Result};
+use assay_core::mcp::parse_unique_json;
 use assay_mcp_server::manifest_observed::{self, Completeness};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -204,7 +205,7 @@ pub async fn run(
         if line.trim().is_empty() {
             continue;
         }
-        let v: Value = match serde_json::from_str(&line) {
+        let v: Value = match parse_unique_json(&line) {
             Ok(v) => v,
             Err(_) => {
                 let _ = tx.send(io::proxy_error_line(
