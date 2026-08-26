@@ -18,6 +18,15 @@ pub fn is_tools_call_method(method: &str) -> bool {
     method == "tools/call"
 }
 
+/// Whether a uniquely-parsed object carries a `method` member.
+///
+/// Presence on the parsed tree (not a raw-byte scan) distinguishes
+/// request-shaped frames from unique responses. A present `method` that
+/// cannot type as [`JsonRpcRequest`] is INVALID_REQUEST, not a pass-through.
+pub(crate) fn unique_value_has_method_member(value: &Value) -> bool {
+    value.get("method").is_some()
+}
+
 impl JsonRpcRequest {
     pub fn is_tool_call(&self) -> bool {
         is_tools_call_method(&self.method)

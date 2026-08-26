@@ -335,6 +335,56 @@ fn wrap_escaped_duplicate_object_is_not_forwarded() {
     }
 }
 
+/// Unique JSON with a `method` member that cannot type as `JsonRpcRequest`
+/// (missing `jsonrpc`). Abstract fixture only.
+const MISSING_JSONRPC_CALL: &str =
+    r#"{"id":1,"method":"tools/call","params":{"name":"danger","arguments":{}}}"#;
+
+#[test]
+fn wrap_method_bearing_typed_parse_fail_is_invalid_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut conn, raw, interpret, decisions) = spawn_wrap(dir.path(), "last");
+    conn.send_line(MISSING_JSONRPC_CALL);
+    let r = conn.read_json();
+    assert_eq!(
+        r["error"]["code"], -32600,
+        "method-bearing unique JSON that fails typed request parse must be INVALID_REQUEST: {r}"
+    );
+    assert_eq!(r["id"], 1, "INVALID_REQUEST must echo the request id: {r}");
+    conn.send_line(
+        r#"{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"echo","arguments":{}}}"#,
+    );
+    let follow = conn.read_response_for_id(12);
+    assert!(
+        follow.get("error").is_none(),
+        "follow-up unique call must still work: {follow}"
+    );
+    let _ = conn.shutdown();
+
+    let body = std::fs::read_to_string(&raw).unwrap_or_default();
+    assert!(
+        !body.contains(MISSING_JSONRPC_CALL),
+        "typed-parse-fail request must not reach the oracle: {body}"
+    );
+    assert!(
+        !body.contains("danger"),
+        "typed-parse-fail request must not reach the oracle: {body}"
+    );
+    if let Some(seen) = last_interpret(&interpret) {
+        assert_ne!(
+            seen["name"], "danger",
+            "oracle must not see a forwarded typed-parse-fail call: {seen}"
+        );
+    }
+    assert_eq!(
+        tool_decision_count(&decisions),
+        1,
+        "fixture must mint no decision; only the follow-up echo is authorized: {}",
+        std::fs::read_to_string(&decisions).unwrap_or_default()
+    );
+    assert_eq!(last_decision_tool(&decisions).as_deref(), Some("echo"));
+}
+
 #[test]
 fn wrap_unparsable_method_bearing_frame_is_not_forwarded() {
     let dir = tempfile::tempdir().unwrap();

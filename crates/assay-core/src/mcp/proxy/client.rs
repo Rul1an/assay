@@ -6,7 +6,7 @@ use super::{ProxyConfig, TdtProducer};
 use crate::mcp::audit::AuditLog;
 use crate::mcp::decision::DecisionEmitter;
 use crate::mcp::identity::ToolIdentity;
-use crate::mcp::jsonrpc::{error_codes, JsonRpcRequest};
+use crate::mcp::jsonrpc::{error_codes, unique_value_has_method_member, JsonRpcRequest};
 use crate::mcp::policy::{McpPolicy, PolicyState};
 use crate::mcp::tool_decision_truth as tdt;
 use crate::mcp::tool_definition::ToolDefinitionBinding;
@@ -43,97 +43,117 @@ pub(super) fn run_client_to_server(
         // 1. Try Parse as MCP Request. Unique-member parse first so the tree the
         // policy sees cannot diverge from a later read of the same bytes.
         match parse_unique_json(line.trim_end()) {
-            Ok(value) => match serde_json::from_value::<JsonRpcRequest>(value) {
-                Ok(req) if !req.is_tool_call() => {
-                    // Unique non-tools/call objects (initialize, tools/list,
-                    // notifications, ping) pass through byte-identically.
-                }
-                Ok(req) => {
-                    let tool_params = req.tool_params();
-                    let tool_name = tool_params
-                        .as_ref()
-                        .map(|params| params.name.as_str())
-                        .unwrap_or_default();
+            Ok(value) => {
+                let request_id = value.get("id").cloned().unwrap_or(serde_json::Value::Null);
+                let method_present = unique_value_has_method_member(&value);
+                match serde_json::from_value::<JsonRpcRequest>(value) {
+                    Ok(req) if !req.is_tool_call() => {
+                        // Unique non-tools/call objects (initialize, tools/list,
+                        // notifications, ping) pass through byte-identically.
+                    }
+                    Ok(req) => {
+                        let tool_params = req.tool_params();
+                        let tool_name = tool_params
+                            .as_ref()
+                            .map(|params| params.name.as_str())
+                            .unwrap_or_default();
 
-                    // 2. Check Policy with Identity (Phase 9)
-                    let (runtime_id, tool_definition_binding) = if req.is_tool_call() {
-                        let runtime_id = {
-                            let cache = identity_cache.lock().unwrap();
-                            cache.get(tool_name).cloned()
+                        // 2. Check Policy with Identity (Phase 9)
+                        let (runtime_id, tool_definition_binding) = if req.is_tool_call() {
+                            let runtime_id = {
+                                let cache = identity_cache.lock().unwrap();
+                                cache.get(tool_name).cloned()
+                            };
+                            let tool_definition_binding = {
+                                let cache = tool_definition_cache.lock().unwrap();
+                                cache.get(tool_name).cloned()
+                            };
+                            (runtime_id, tool_definition_binding)
+                        } else {
+                            (None, None)
                         };
-                        let tool_definition_binding = {
-                            let cache = tool_definition_cache.lock().unwrap();
-                            cache.get(tool_name).cloned()
-                        };
-                        (runtime_id, tool_definition_binding)
-                    } else {
-                        (None, None)
-                    };
 
-                    let tool_call_id = extract_tool_call_id(&req, tool_params.as_ref());
-                    let null_arguments = serde_json::Value::Null;
-                    let tool_arguments = tool_params
-                        .as_ref()
-                        .map(|params| &params.arguments)
-                        .unwrap_or(&null_arguments);
+                        let tool_call_id = extract_tool_call_id(&req, tool_params.as_ref());
+                        let null_arguments = serde_json::Value::Null;
+                        let tool_arguments = tool_params
+                            .as_ref()
+                            .map(|params| &params.arguments)
+                            .unwrap_or(&null_arguments);
 
-                    let policy_eval = policy.evaluate_with_metadata(
-                        tool_name,
-                        tool_arguments,
-                        &mut state,
-                        runtime_id.as_ref(),
-                    );
+                        let policy_eval = policy.evaluate_with_metadata(
+                            tool_name,
+                            tool_arguments,
+                            &mut state,
+                            runtime_id.as_ref(),
+                        );
 
-                    // EXPERIMENTAL opt-in: mint a tool-decision-truth carrier for this evaluated tool call,
-                    // appended to its own NDJSON sink (separate from the decision log). Evidence-only — this
-                    // never alters the decision below and never blocks the call, including when the call is
-                    // about to be blocked: the carrier records that the decision was observed and classified.
-                    if req.is_tool_call() {
-                        if let Some(producer) = config.tdt_producer.as_ref() {
-                            emit_tdt_carrier(
-                                producer,
-                                &policy,
+                        // EXPERIMENTAL opt-in: mint a tool-decision-truth carrier for this evaluated tool call,
+                        // appended to its own NDJSON sink (separate from the decision log). Evidence-only — this
+                        // never alters the decision below and never blocks the call, including when the call is
+                        // about to be blocked: the carrier records that the decision was observed and classified.
+                        if req.is_tool_call() {
+                            if let Some(producer) = config.tdt_producer.as_ref() {
+                                emit_tdt_carrier(
+                                    producer,
+                                    &policy,
+                                    tool_name,
+                                    tool_arguments,
+                                    tdt_order,
+                                    &tool_call_id,
+                                    runtime_id.is_some(),
+                                );
+                                tdt_order += 1;
+                            }
+                        }
+
+                        let branch_outcome = handle_policy_decision(
+                            policy_eval.decision,
+                            PolicyBranchContext {
+                                req: &req,
+                                tool_params: tool_params.as_ref(),
                                 tool_name,
-                                tool_arguments,
-                                tdt_order,
-                                &tool_call_id,
-                                runtime_id.is_some(),
-                            );
-                            tdt_order += 1;
+                                tool_call_id: &tool_call_id,
+                                metadata: &policy_eval.metadata,
+                                tool_definition_binding: tool_definition_binding.as_ref(),
+                                config: &config,
+                                emitter: &emitter,
+                                event_source: &event_source,
+                                audit_log: &mut audit_log,
+                            },
+                            |response_json| {
+                                let mut out =
+                                    stdout.lock().map_err(|e| io::Error::other(e.to_string()))?;
+                                out.write_all(response_json.as_bytes())?;
+                                out.flush()
+                            },
+                        )?;
+
+                        if branch_outcome == BranchOutcome::Blocked {
+                            line.clear();
+                            continue;
                         }
                     }
-
-                    let branch_outcome = handle_policy_decision(
-                        policy_eval.decision,
-                        PolicyBranchContext {
-                            req: &req,
-                            tool_params: tool_params.as_ref(),
-                            tool_name,
-                            tool_call_id: &tool_call_id,
-                            metadata: &policy_eval.metadata,
-                            tool_definition_binding: tool_definition_binding.as_ref(),
-                            config: &config,
-                            emitter: &emitter,
-                            event_source: &event_source,
-                            audit_log: &mut audit_log,
-                        },
-                        |response_json| {
-                            let mut out =
-                                stdout.lock().map_err(|e| io::Error::other(e.to_string()))?;
-                            out.write_all(response_json.as_bytes())?;
-                            out.flush()
-                        },
-                    )?;
-
-                    if branch_outcome == BranchOutcome::Blocked {
+                    Err(_) if method_present => {
+                        let mut out = stdout.lock().map_err(|e| io::Error::other(e.to_string()))?;
+                        let response = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": request_id,
+                            "error": {
+                                "code": error_codes::INVALID_REQUEST,
+                                "message": "Invalid Request"
+                            }
+                        });
+                        out.write_all(response.to_string().as_bytes())?;
+                        out.write_all(b"\n")?;
+                        out.flush()?;
                         line.clear();
                         continue;
                     }
+                    Err(_) => {
+                        // Unique JSON with no method member: response / non-request, forward.
+                    }
                 }
-                Err(_) => {
-                    // Unique JSON that is not a request: forward as before.
-                }
-            },
+            }
             Err(_) => {
                 // Object-shaped lines that fail unique parse cannot be authorized.
                 // A raw token scan for "method"/"params"/"tool" misses JSON-escaped keys.
