@@ -10,7 +10,7 @@ use crate::mcp::jsonrpc::{error_codes, JsonRpcRequest};
 use crate::mcp::policy::{McpPolicy, PolicyState};
 use crate::mcp::tool_decision_truth as tdt;
 use crate::mcp::tool_definition::ToolDefinitionBinding;
-use crate::mcp::unique_json::{is_method_bearing_frame, parse_unique_json};
+use crate::mcp::unique_json::parse_unique_json;
 use std::{
     collections::HashMap,
     io::{self, BufRead, Write},
@@ -131,7 +131,9 @@ pub(super) fn run_client_to_server(
                 }
             },
             Err(_) => {
-                if is_method_bearing_frame(&line) {
+                // Object-shaped lines that fail unique parse cannot be authorized.
+                // A raw token scan for "method"/"params"/"tool" misses JSON-escaped keys.
+                if line.trim().starts_with('{') {
                     let mut out = stdout.lock().map_err(|e| io::Error::other(e.to_string()))?;
                     let response = serde_json::json!({
                         "jsonrpc": "2.0",

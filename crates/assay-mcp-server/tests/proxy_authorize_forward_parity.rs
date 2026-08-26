@@ -248,6 +248,50 @@ fn duplicate_params_name_is_not_forwarded_and_oracles_do_not_diverge() {
     }
 }
 
+/// Abstract duplicate-member fixture whose keys are JSON-escaped. It contains
+/// no literal `"method"` / `"params"` / `"tool"` token, so a raw method-bearing
+/// heuristic does not see it.
+const ESCAPED_DUPLICATE_OBJECT: &str = r#"{"jsonrpc":"2.0","id":1,"\u006dethod":"tools/list","\u006dethod":"tools/call","\u0070arams":{"name":"danger","arguments":{}}}"#;
+
+#[test]
+fn escaped_duplicate_object_is_not_forwarded() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let raw = dir.path().join("raw.log");
+    let decisions = dir.path().join("decisions.ndjson");
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut out = Conn::attach(spawn_enforce(&log, &raw, &policy, &decisions));
+    handshake(&mut out);
+
+    out.send_line(ESCAPED_DUPLICATE_OBJECT);
+    let r = out.read_response();
+    let _ = out.shutdown();
+
+    let body = std::fs::read_to_string(&raw).unwrap_or_default();
+    assert!(
+        !body.contains(ESCAPED_DUPLICATE_OBJECT),
+        "escaped duplicate object must not reach upstream: {body}"
+    );
+    assert!(
+        !body.contains(r#"\u006dethod"#),
+        "escaped duplicate object must not reach upstream: {body}"
+    );
+    assert!(
+        !body.contains("danger"),
+        "escaped duplicate object must not reach upstream: {body}"
+    );
+    assert_eq!(
+        r["error"]["code"], PROXY_FAILED,
+        "object-shaped unique-parse fail is an ingress refusal: {r}"
+    );
+    if let Some(rec) = last_decision(&decisions) {
+        assert_ne!(
+            rec["decision"], "allow",
+            "must not authorize a collapsed tree: {rec}"
+        );
+    }
+}
+
 #[test]
 fn duplicate_argument_member_is_not_forwarded_and_oracles_do_not_diverge() {
     let dir = tempfile::tempdir().unwrap();

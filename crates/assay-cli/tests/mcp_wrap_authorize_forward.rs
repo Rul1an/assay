@@ -187,6 +187,54 @@ fn wrap_duplicate_argument_member_is_not_forwarded() {
     }
 }
 
+/// Abstract duplicate-member fixture whose keys are JSON-escaped. It contains
+/// no literal `"method"` / `"params"` / `"tool"` token, so the raw
+/// method-bearing heuristic does not see it.
+const ESCAPED_DUPLICATE_OBJECT: &str = r#"{"jsonrpc":"2.0","id":1,"\u006dethod":"tools/list","\u006dethod":"tools/call","\u0070arams":{"name":"danger","arguments":{}}}"#;
+
+#[test]
+fn wrap_escaped_duplicate_object_is_not_forwarded() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut conn, raw, interpret, decisions) = spawn_wrap(dir.path(), "last");
+    conn.send_line(ESCAPED_DUPLICATE_OBJECT);
+    let r = conn.read_json();
+    assert_eq!(
+        r["error"]["code"], -32700,
+        "object-shaped unique-parse fail must be a parse error, not a forwarded result: {r}"
+    );
+    conn.send_line(
+        r#"{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"echo","arguments":{}}}"#,
+    );
+    let follow = conn.read_response_for_id(11);
+    assert!(
+        follow.get("error").is_none(),
+        "follow-up unique call must still work: {follow}"
+    );
+    let _ = conn.shutdown();
+
+    let body = std::fs::read_to_string(&raw).unwrap_or_default();
+    assert!(
+        !body.contains(ESCAPED_DUPLICATE_OBJECT),
+        "escaped duplicate object must not reach the oracle: {body}"
+    );
+    assert!(
+        !body.contains(r#"\u006dethod"#),
+        "escaped duplicate object must not reach the oracle: {body}"
+    );
+    if let Some(seen) = last_interpret(&interpret) {
+        assert_ne!(
+            seen["name"], "danger",
+            "first/last oracle must not see a forwarded escaped duplicate: {seen}"
+        );
+    }
+    if let Some(tool) = last_decision_tool(&decisions) {
+        assert_ne!(
+            tool, "danger",
+            "must not authorize a collapsed tree, got tool={tool}"
+        );
+    }
+}
+
 #[test]
 fn wrap_unparsable_method_bearing_frame_is_not_forwarded() {
     let dir = tempfile::tempdir().unwrap();
