@@ -88,7 +88,7 @@ fn released_quickstart_runs_from_an_empty_directory_and_records_what_happened() 
         raw_stdout,
         concat!(
             "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"assay-quickstart-mock\",\"version\":\"1\"}}}\n",
-            "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"read_file\",\"description\":\"Read one file from the local demo directory\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}}]}}\n",
+            "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"read_file\",\"description\":\"Read one file from the local demo directory\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]},\"tool_identity\":{\"server_id\":\"default-mcp-server\",\"tool_name\":\"read_file\",\"schema_hash\":\"39b714704935190561ed407980480b9a4a0b346b97346e0bff71fb9ace820194\",\"meta_hash\":\"f8d8a73543bf72a2225321124aa37b5af180214981824cdecb3fa24baccb7f18\"}}]}}\n",
             "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"mock-read-ok; no external effect\"}],\"isError\":false}}\n",
         )
     );
