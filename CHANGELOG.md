@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `assay policy resolve --format json` emits one `assay.policy.resolved.v0`
+  document after the same load and schema-compile path as `assay policy validate`.
+  The whole-policy digest is `McpPolicy::policy_digest()` under `jcs:mcp_policy`.
+  Validate stdout stays `assay.run_summary.v1` (#2510).
+
 - The Claude plugin workflow now runs its bounded model session with
   `--output-format stream-json --verbose` and classifies the transcript through one
   validator, `classify_model_mediated_call`, that fixture replay and the live path both

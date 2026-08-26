@@ -30,6 +30,9 @@ pub enum PolicyCommand {
 
     /// Format policy YAML (normalizes formatting)
     Fmt(PolicyFmtArgs),
+
+    /// Dump the resolved policy this Assay version would load
+    Resolve(PolicyResolveArgs),
 }
 
 #[derive(Args, Clone, Debug)]
@@ -81,4 +84,19 @@ pub struct PolicyFmtArgs {
     /// Output file (default: overwrite input)
     #[arg(short, long)]
     pub output: Option<PathBuf>,
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct PolicyResolveArgs {
+    /// Policy file path (YAML)
+    #[arg(short, long)]
+    pub input: PathBuf,
+
+    /// Fail if deprecated v1 policy format is detected
+    #[arg(long)]
+    pub deny_deprecations: bool,
+
+    /// Output format; only json emits a document
+    #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
+    pub format: OutputFormat,
 }

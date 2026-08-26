@@ -63,6 +63,7 @@ assay.mcp_preflight.v0 | crates/assay-cli/src/cli/commands/mcp/preflight.rs | -
 assay.mcp_server_inventory.v0 | crates/assay-cli/src/cli/commands/inventory.rs | crates/assay-core/src/discovery/inventory_carrier.rs
 assay.monitor.observed_peers.v0 | crates/assay-cli/src/cli/commands/monitor_next/observed_peers.rs | -
 assay.otel_projection.v0 | crates/assay-cli/src/cli/commands/project_otel.rs | crates/assay-core/src/otel/projection.rs
+assay.policy.resolved.v0 | crates/assay-cli/src/cli/commands/policy/resolve.rs | -
 assay.runner.observation_health.v0 | crates/assay-cli/src/cli/commands/monitor_next/observation_health.rs | crates/assay-runner-schema/src/health.rs
 assay.privileged_mcp_action.verify.report.v0 | crates/assay-cli/src/cli/commands/evidence/verify_privileged_mcp_action.rs | -
 assay.run_report.v1 | crates/assay-core/src/report/json.rs | -

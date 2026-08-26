@@ -142,6 +142,11 @@ pub enum ArgsCheck {
     Malformed,
 }
 
+/// Canonical JCS bytes of a loaded `McpPolicy`. Shared by `policy_digest`.
+pub(crate) fn canonical_mcp_policy_jcs(policy: &McpPolicy) -> anyhow::Result<String> {
+    jcs::to_string(policy)
+}
+
 impl McpPolicy {
     pub fn new() -> Self {
         Self::default()
@@ -223,7 +228,7 @@ impl McpPolicy {
     }
 
     pub fn policy_digest(&self) -> Option<String> {
-        let canonical = jcs::to_string(self).ok()?;
+        let canonical = canonical_mcp_policy_jcs(self).ok()?;
         Some(format!("sha256:{}", sha256_hex(&canonical)))
     }
 
@@ -542,5 +547,75 @@ mod declared_constraint_digest_experimental_tests {
         )
         .declared_constraint_digest_experimental();
         assert_ne!(explicit_only, legacy_new_tool);
+    }
+}
+
+#[cfg(test)]
+mod resolve_digest_tests {
+    use super::*;
+
+    const VALID: &str = r#"version: "2.0"
+name: resolve-fixture
+tools:
+  allow:
+    - echo
+"#;
+
+    const REORDERED: &str = r#"name: resolve-fixture
+tools:
+  allow:
+    - echo
+version: "2.0"
+"#;
+
+    const EFFECTIVE: &str = r#"version: "2.0"
+name: resolve-fixture
+tools:
+  allow:
+    - echo
+    - extra
+"#;
+
+    const LEGACY: &str = r#"version: "1.0"
+allow:
+  - echo
+"#;
+
+    const LEGACY_NORMALIZED: &str = r#"version: "1.0"
+tools:
+  allow:
+    - echo
+"#;
+
+    fn load(src: &str) -> McpPolicy {
+        McpPolicy::from_slice(src.as_bytes()).expect("load")
+    }
+
+    #[test]
+    fn canonical_helper_is_policy_digest_preimage() {
+        let p = load(VALID);
+        let via_helper = format!(
+            "sha256:{}",
+            sha256_hex(&canonical_mcp_policy_jcs(&p).expect("jcs"))
+        );
+        assert_eq!(p.policy_digest().as_deref(), Some(via_helper.as_str()));
+    }
+
+    #[test]
+    fn reordered_mapping_does_not_move_digest() {
+        assert_eq!(load(VALID).policy_digest(), load(REORDERED).policy_digest());
+    }
+
+    #[test]
+    fn effective_change_moves_digest() {
+        assert_ne!(load(VALID).policy_digest(), load(EFFECTIVE).policy_digest());
+    }
+
+    #[test]
+    fn legacy_and_normalized_share_digest() {
+        assert_eq!(
+            load(LEGACY).policy_digest(),
+            load(LEGACY_NORMALIZED).policy_digest()
+        );
     }
 }
