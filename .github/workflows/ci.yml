@@ -57,7 +57,7 @@ jobs:
           python3 -W error::ResourceWarning conformance/tests/test_bounded_run.py
           python3 -W error::ResourceWarning conformance/tests/test_run_all.py
           python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py
-          python3 conformance/run_all.py --require-complete --completion-scope required
+          python3 conformance/run_all.py
 
       - name: Public-run projection
         shell: bash
@@ -715,6 +715,13 @@ jobs:
         # dedicated step below. It used to need an explicit --skip because it compiled everywhere
         # and shelled out to its own feature-enabled cargo build.
         run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it
+
+      - name: Conformance required cargo lanes (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 conformance/run_all.py --with-cargo --require-complete --completion-scope required
 
       # E6a.3 no-pass-through: E2E invariant test (requires test-outbound feature).
       #

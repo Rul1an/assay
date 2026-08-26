@@ -30,6 +30,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "conformance/tests"))
 
 from test_completion_scope import (  # noqa: E402
+    assert_gated_linux_required_run,
     assert_hard_run_command,
     assert_hard_run_successor,
     assert_host_schedule_invocation,
@@ -47,12 +48,18 @@ SCHEDULE_FLAG = "--required-aggregator-schedule"
 
 
 def conformance_inventory_callsite_problems(text: str) -> list[str]:
+    problems = []
     try:
         assert_hard_run_command(text, JOB, INVENTORY_STEP)
     except AssertionError as exc:
-        message = str(exc).strip() or "conformance inventory callsite contract failed"
-        return [message]
-    return []
+        problems.append(
+            str(exc).strip() or "conformance inventory callsite contract failed")
+    try:
+        assert_gated_linux_required_run(text)
+    except AssertionError as exc:
+        problems.append(
+            str(exc).strip() or "gated linux required-run contract failed")
+    return problems
 
 
 def hardening_guard_callsite_problems(text: str) -> list[str]:

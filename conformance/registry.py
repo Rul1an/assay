@@ -20,7 +20,12 @@ REPO = Path(__file__).resolve().parent.parent
 REGISTRY_PATH = Path(__file__).resolve().parent / "registry.json"
 SCHEMA = "assay.conformance.registry.v1"
 MAX_REGISTRY_BYTES = 256 * 1024
-KINDS = frozenset(("needs_candidate", "stdlib", "cargo", "external"))
+KINDS = frozenset(("needs_candidate", "stdlib", "cargo", "external", "not_selected"))
+REQUIRED_LOCAL_LANE_IDS = frozenset((
+    "privileged-mcp-action-producer",
+    "privileged-mcp-action-verifier",
+    "privileged-mcp-action-e2e",
+))
 POLICIES = frozenset(("required", "optional", "external-candidate"))
 INDEX_FIELDS = ("index_corpus", "index_vectors", "index_runner", "index_maturity")
 REQUIRED_FIELDS = ("id", "path", "kind", "policy", "maturity") + INDEX_FIELDS
@@ -50,6 +55,14 @@ def _reject_path_symlink_escape(path: str, repo: Path = REPO) -> None:
         resolved.relative_to(repo.resolve())
     except ValueError:
         raise RegistryError("suite path symlink escapes the repository: %r" % path)
+
+
+def usable_test_filter(filt: object) -> str | None:
+    """Shared strip truth. Empty, missing, non-string, and whitespace-only are unusable."""
+    if not isinstance(filt, str):
+        return None
+    stripped = filt.strip()
+    return stripped or None
 
 
 def _validate_suite(suite: object, seen: set[str]) -> dict:
@@ -88,7 +101,14 @@ def _validate_suite(suite: object, seen: set[str]) -> dict:
         for field in ("crate", "cargo_target_flag", "cargo_target"):
             if not isinstance(suite.get(field), str):
                 raise RegistryError("%s: cargo suite needs string %s" % (ident, field))
-    if kind in ("needs_candidate", "external") and not isinstance(suite.get("note"), str):
+        filt = suite.get("test_filter")
+        if suite["policy"] == "required":
+            if usable_test_filter(filt) is None:
+                raise RegistryError(
+                    "%s: required cargo lane needs a non-empty test_filter" % ident)
+        elif filt is not None and not isinstance(filt, str):
+            raise RegistryError("%s: test_filter must be a string" % ident)
+    if kind in ("needs_candidate", "external", "not_selected") and not isinstance(suite.get("note"), str):
         raise RegistryError("%s: %s suite needs a string note" % (ident, kind))
     return suite
 
@@ -206,6 +226,15 @@ def registry_completeness_reasons(
     if not suites:
         return ["registry declares no suites"]
     reasons: list[str] = []
+    present = {s["id"] for s in suites}
+    for ident in sorted(REQUIRED_LOCAL_LANE_IDS):
+        if ident not in present:
+            reasons.append("required local lane missing: %s" % ident)
+        else:
+            row = next(s for s in suites if s["id"] == ident)
+            if row["kind"] != "cargo" or row["policy"] != "required":
+                reasons.append(
+                    "required local lane %s must be kind=cargo policy=required" % ident)
     registered: set[str] = set()
     for suite in suites:
         rel = suite["path"]

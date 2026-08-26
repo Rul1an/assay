@@ -156,8 +156,9 @@ class ProcessTreeContainment(unittest.TestCase):
 
 
 class CargoClassification(unittest.TestCase):
-    def _run(self, child):
+    def _run(self, child, **suite_kw):
         suite = {"crate": "c", "cargo_target_flag": "--test", "cargo_target": "t"}
+        suite.update(suite_kw)
         orig, run_all._run_capped = run_all._run_capped, child
         try:
             return run_all._cargo(suite)
@@ -189,6 +190,48 @@ class CargoClassification(unittest.TestCase):
         g, d = self._run(_Child(raises=FileNotFoundError()))
         self.assertEqual(g, run_all.UNPROVED)
         self.assertIn("cargo", d)
+
+    def test_empty_required_filter_does_not_run_whole_target(self):
+        called = []
+        def boom(cmd, cwd, timeout):
+            called.append(list(cmd))
+            raise AssertionError("empty required filter must not start cargo")
+        g, d = self._run(
+            boom, policy="required", test_filter="",
+            id="privileged-mcp-action-producer")
+        self.assertEqual(called, [])
+        self.assertEqual(g, run_all.UNPROVED)
+        self.assertIn("test_filter", d)
+        self.assertNotIn("623", d)
+
+    def test_missing_required_filter_does_not_run_whole_target(self):
+        called = []
+        def boom(cmd, cwd, timeout):
+            called.append(list(cmd))
+            raise AssertionError("missing required filter must not start cargo")
+        g, d = self._run(boom, policy="required", id="privileged-mcp-action-producer")
+        self.assertEqual(called, [])
+        self.assertEqual(g, run_all.UNPROVED)
+        self.assertIn("test_filter", d)
+
+    def test_whitespace_required_filter_does_not_run_whole_target(self):
+        for filt in (" ", "\t", " \t\n"):
+            with self.subTest(repr(filt)):
+                called = []
+                def boom(cmd, cwd, timeout):
+                    called.append(list(cmd))
+                    raise AssertionError("whitespace required filter must not start cargo")
+                g, d = self._run(
+                    boom, policy="required", test_filter=filt,
+                    id="privileged-mcp-action-producer")
+                self.assertEqual(called, [])
+                self.assertEqual(g, run_all.UNPROVED)
+                self.assertIn("test_filter", d)
+                self.assertNotIn("623", d)
+
+    def test_cargo_uses_registry_usable_test_filter(self):
+        import registry
+        self.assertIs(run_all.usable_test_filter, registry.usable_test_filter)
 
 
 class ExitCodePrecedence(unittest.TestCase):
@@ -489,6 +532,198 @@ class DocumentationTruth(unittest.TestCase):
             self.assertNotIn("badge a run earns", text, path)
         index = documents[0].read_text()
         self.assertNotIn("shipped vectors is *Functional*", index)
+
+
+class PrivilegedMcpActionLanes(unittest.TestCase):
+    """Four in-tree lanes are independent registry rows, not one cargo id."""
+
+    PRODUCER = "privileged-mcp-action-producer"
+    VERIFIER = "privileged-mcp-action-verifier"
+    PROJECTION = "privileged-mcp-action-projection"
+    E2E = "privileged-mcp-action-e2e"
+    CANDIDATE = "privileged-mcp-action-v0"
+    LOCAL = (PRODUCER, VERIFIER, PROJECTION, E2E)
+
+    def test_four_lane_ids_are_registered_and_distinct_from_the_candidate(self):
+        ids = [s["id"] for s in run_all.SUITES]
+        for ident in self.LOCAL:
+            self.assertIn(ident, ids, ident)
+        self.assertEqual(len(set(self.LOCAL)), 4)
+        self.assertNotIn(self.CANDIDATE, self.LOCAL)
+        self.assertIn(self.CANDIDATE, ids)
+
+    def test_candidate_lane_stays_needs_candidate(self):
+        suite = next(s for s in run_all.SUITES if s["id"] == self.CANDIDATE)
+        self.assertEqual(suite["kind"], run_all.NEEDS_CANDIDATE)
+
+    def test_in_tree_verifier_is_not_named_privileged_mcp_action_v0(self):
+        verifier = next(s for s in run_all.SUITES if s["id"] == self.VERIFIER)
+        self.assertNotEqual(verifier["id"], self.CANDIDATE)
+        self.assertNotEqual(verifier.get("cargo_target"), "privileged-mcp-action-v0")
+
+    def test_projection_is_not_selected_with_a_reason_and_never_passed(self):
+        suite = next(s for s in run_all.SUITES if s["id"] == self.PROJECTION)
+        self.assertEqual(suite["kind"], run_all.NOT_SELECTED)
+        self.assertTrue(suite.get("note"), "projection must print why it is not selected")
+        self.assertNotEqual(suite["kind"], run_all.PROVED)
+
+    def test_v1_descriptor_still_shares_verify_report_v0(self):
+        path = run_all.REPO / "conformance/privileged-mcp-action-v1/descriptor.json"
+        descriptor = json.loads(path.read_text())
+        dumped = json.dumps(descriptor)
+        self.assertIn("assay.privileged_mcp_action.verify.report.v0", dumped)
+        self.assertNotIn("assay.privileged_mcp_action.verify.report.v1", dumped)
+
+    def test_exit_status_stays_the_single_authority(self):
+        self.assertFalse(hasattr(run_all, "OUTCOME_EXIT"))
+        source = Path(run_all.__file__).read_text()
+        self.assertNotIn("OUTCOME_EXIT", source)
+        self.assertEqual(run_all.exit_status([{"grade": run_all.FALSE}]), 1)
+        self.assertEqual(run_all.exit_status([{"grade": run_all.UNPROVED}]), 2)
+        self.assertEqual(
+            run_all.exit_status(
+                [{"grade": run_all.PROVED}, {"grade": run_all.NOT_SELECTED}]),
+            0)
+        self.assertEqual(
+            run_all.exit_status(
+                [{"grade": run_all.PROVED}, {"grade": run_all.NOT_SELECTED}],
+                require_complete=True),
+            3)
+        self.assertEqual(
+            run_all.exit_status(
+                [{"id": "r", "grade": run_all.NOT_SELECTED, "policy": "required"}],
+                require_complete=True, completion_scope="required"),
+            3)
+
+    def test_local_lanes_bind_to_cargo_not_source_inspection(self):
+        source = Path(run_all.__file__).read_text()
+        for banned in (
+            "def _fn_body", "def _local_producer", "def _local_verifier",
+            "def _local_e2e", "_LOCAL_RUNNERS",
+        ):
+            self.assertNotIn(banned, source, banned)
+        for ident in (self.PRODUCER, self.VERIFIER, self.E2E):
+            suite = next(s for s in run_all.SUITES if s["id"] == ident)
+            self.assertEqual(suite["kind"], "cargo", ident)
+            self.assertEqual(suite["policy"], "required", ident)
+            self.assertIs(suite["runner"], run_all._cargo, ident)
+            self.assertIsInstance(suite.get("test_filter"), str, ident)
+            self.assertTrue(suite["test_filter"], ident)
+        cargo_src = Path(run_all.__file__).read_text()
+        start = cargo_src.index("def _cargo")
+        end = cargo_src.index("\ndef _bind_runners", start)
+        self.assertIn('"--locked"', cargo_src[start:end])
+        self.assertEqual(cargo_src[start:end].count("cmd = ["), 1)
+
+    def test_producer_assertions_are_independent_of_verifier(self):
+        producer = next(s for s in run_all.SUITES if s["id"] == self.PRODUCER)
+        verifier = next(s for s in run_all.SUITES if s["id"] == self.VERIFIER)
+        self.assertNotEqual(producer["id"], verifier["id"])
+        self.assertNotIn("lane", producer)
+        self.assertNotIn("lane", verifier)
+        self.assertEqual(producer["test_filter"], "producer_lane_")
+        self.assertNotEqual(producer["test_filter"], verifier.get("test_filter"))
+        src = (
+            run_all.REPO
+            / "crates/assay-cli/src/cli/commands/evidence/privileged_mcp_action.rs"
+        ).read_text()
+        # Every producer_lane_ test must exist and none may call the verifier.
+        self.assertIn("fn producer_lane_", src)
+        start = 0
+        found = 0
+        while True:
+            i = src.find("fn producer_lane_", start)
+            if i < 0:
+                break
+            nxt = src.find("\n    fn ", i + 1)
+            body = src[i:nxt if nxt > i else i + 2000]
+            self.assertNotIn("verify_bundle_report", body, body[:80])
+            found += 1
+            start = i + 1
+        self.assertGreaterEqual(found, 3, "producer_lane_ filter selected too few tests")
+
+    def test_incomplete_projection_cannot_be_upgraded_to_confirmed(self):
+        source = Path(run_all.__file__).read_text()
+        self.assertIn("producer_reported", source)
+        self.assertIn("incomplete", source)
+        self.assertIn("cannot be upgraded to confirmed", source.lower() + source)
+
+
+    def test_plain_mode_does_not_invoke_cargo(self):
+        called = []
+        def boom(suite):
+            called.append(suite["id"])
+            raise AssertionError("plain mode must not invoke cargo")
+        originals = []
+        for suite in run_all.SUITES:
+            if suite.get("kind") == "cargo":
+                originals.append((suite, suite["runner"]))
+                suite["runner"] = boom
+        orig_argv = sys.argv
+        sys.argv = ["run_all.py", "--json"]
+        try:
+            code = run_all.main()
+        finally:
+            for suite, runner in originals:
+                suite["runner"] = runner
+            sys.argv = orig_argv
+        self.assertTrue(originals, "expected bound cargo runners to replace")
+        self.assertEqual(called, [])
+        self.assertEqual(code, 0)
+
+    def test_removing_the_cargo_skip_is_red_without_starting_cargo(self):
+        import importlib.util
+        source = Path(run_all.__file__).read_text()
+        skip = (
+            '        elif kind == "cargo" and not args.with_cargo:\n'
+            '            grade, detail = NOT_SELECTED, "rerun with --with-cargo"\n'
+        )
+        self.assertEqual(source.count(skip), 1)
+        mutated_src = source.replace(skip, "", 1)
+        here = Path(run_all.__file__).resolve().parent
+        path = here / "_run_all_skip_mutation.py"
+        called = []
+
+        def boom(suite):
+            called.append(suite["id"])
+            raise AssertionError("plain mode must not invoke cargo")
+
+        orig_argv = sys.argv
+        sys.argv = ["run_all.py", "--json"]
+        try:
+            path.write_text(mutated_src)
+            spec = importlib.util.spec_from_file_location(
+                "run_all_skip_mutation", path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            for suite in mod.SUITES:
+                if suite.get("kind") == "cargo":
+                    suite["runner"] = boom
+            with self.assertRaises(AssertionError) as ctx:
+                mod.main()
+            self.assertIn("plain mode must not invoke cargo", str(ctx.exception))
+            self.assertTrue(called)
+        finally:
+            sys.argv = orig_argv
+            if path.exists():
+                path.unlink()
+
+    def test_required_scope_without_with_cargo_exits_3(self):
+        orig_argv = sys.argv
+        sys.argv = ["run_all.py", "--json", "--require-complete",
+                    "--completion-scope", "required"]
+        try:
+            code = run_all.main()
+        finally:
+            sys.argv = orig_argv
+        self.assertEqual(code, 3)
+
+    def test_self_score_is_not_the_independent_candidate(self):
+        local = [s for s in run_all.SUITES if s["id"] in self.LOCAL]
+        self.assertFalse(any(s["kind"] == run_all.NEEDS_CANDIDATE for s in local))
+        candidate = next(s for s in run_all.SUITES if s["id"] == self.CANDIDATE)
+        self.assertEqual(candidate["kind"], run_all.NEEDS_CANDIDATE)
+        self.assertIn("1840", candidate.get("maturity", "") + candidate.get("note", ""))
 
 
 if __name__ == "__main__":

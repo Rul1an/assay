@@ -27,8 +27,17 @@ import run_all  # noqa: E402
 REPO = Path(__file__).resolve().parents[2]
 CI_YML = REPO / ".github/workflows/ci.yml"
 STANDALONE = REPO / ".github/workflows/conformance-inventory.yml"
-REQUIRED_RUN_ALL = (
-    "python3 conformance/run_all.py --require-complete --completion-scope required"
+PLAIN_RUN_ALL = "python3 conformance/run_all.py"
+GATED_REQUIRED_RUN_ALL = (
+    "python3 conformance/run_all.py --with-cargo --require-complete --completion-scope required"
+)
+GATED_LINUX_JOB = "test"
+GATED_LINUX_STEP = "Conformance required cargo lanes (Linux)"
+GATED_LINUX_PREDECESSOR = "Test Workspace (Linux)"
+GATED_LINUX_IF = "runner.os == 'Linux'"
+GATED_LINUX_RUN_SCRIPT = (
+    "set -euo pipefail",
+    GATED_REQUIRED_RUN_ALL,
 )
 REVISION_WITNESS = 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"'
 CONFORMANCE_YML = REPO / ".github/workflows/privileged-mcp-action-conformance.yml"
@@ -48,7 +57,7 @@ INVENTORY_RUN_SCRIPT = (
     "python3 -W error::ResourceWarning conformance/tests/test_bounded_run.py",
     "python3 -W error::ResourceWarning conformance/tests/test_run_all.py",
     "python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py",
-    REQUIRED_RUN_ALL,
+    PLAIN_RUN_ALL,
 )
 HARDENING_RUN_SCRIPT = (
     "set -euo pipefail",
@@ -334,12 +343,13 @@ def _assert_trusted_prefix(text: str, job_name: str, step_name: str) -> None:
         raise AssertionError(f"no trusted-prefix contract for {job_name}/{step_name}")
     steps = _ordered_job_steps(text, job_name)
     target = named_step(text, job_name, step_name)
-    if len(steps) < 3 or steps[2] != target:
+    prefix_len = len(contracts)
+    if len(steps) <= prefix_len or steps[prefix_len] != target:
         raise AssertionError(
-            f"{step_name} must be the third step after pinned checkout and setup")
+            f"{step_name} must follow the pinned trusted prefix")
 
     for step, (expected_keys, expected_values, expected_with) in zip(
-            steps[:2], contracts, strict=True):
+            steps[:prefix_len], contracts, strict=True):
         entries = _direct_mapping(step)
         actual_keys = frozenset(entries)
         if actual_keys != expected_keys:
@@ -554,6 +564,39 @@ def assert_hard_run_successor(
     return step
 
 
+def assert_gated_linux_required_run(text: str) -> str:
+    """Pin the Linux-only required+cargo step after Test Workspace."""
+    steps = _ordered_job_steps(text, GATED_LINUX_JOB)
+    before = named_step(text, GATED_LINUX_JOB, GATED_LINUX_PREDECESSOR)
+    step = named_step(text, GATED_LINUX_JOB, GATED_LINUX_STEP)
+    try:
+        index = steps.index(before)
+    except ValueError as error:
+        raise AssertionError(
+            f"{GATED_LINUX_PREDECESSOR} is not a direct step in {GATED_LINUX_JOB}"
+        ) from error
+    if index + 1 >= len(steps) or steps[index + 1] != step:
+        raise AssertionError(
+            f"{GATED_LINUX_STEP} must immediately follow {GATED_LINUX_PREDECESSOR}")
+    _assert_hard_run_step(
+        step,
+        GATED_LINUX_JOB,
+        GATED_LINUX_STEP,
+        frozenset({"name", "if", "shell", "run"}),
+        GATED_LINUX_RUN_SCRIPT,
+    )
+    entries = _direct_mapping(step)
+    actual_if = entries["if"].strip()
+    if actual_if != GATED_LINUX_IF:
+        raise AssertionError(
+            f"{GATED_LINUX_STEP} if differs: expected {GATED_LINUX_IF}, got {actual_if}")
+    return step
+
+
+def _gated_linux_step(text: str) -> str:
+    return named_step(text, GATED_LINUX_JOB, GATED_LINUX_STEP)
+
+
 def _load_activation_kit():
     spec = importlib.util.spec_from_file_location(
         "pma_activation_kit_required_ci", ACTIVATION_KIT)
@@ -667,8 +710,12 @@ def trusted_prefix_mutations(
 
 POLICIES = {
     "mcp-jsonrpc-id-conformance": "required",
+    "privileged-mcp-action-producer": "required",
+    "privileged-mcp-action-verifier": "required",
+    "privileged-mcp-action-e2e": "required",
     "rfc8785-canonicalization": "optional",
     "mcp-era-parity-v0": "optional",
+    "privileged-mcp-action-projection": "optional",
     "privileged-mcp-action-v0": "external-candidate",
     "privileged-mcp-action-v1": "external-candidate",
     "observed-effect-v0": "external-candidate",
@@ -802,27 +849,30 @@ class RealTreeScopes(unittest.TestCase):
         self.assertEqual(p.returncode, 3)
         d = json.loads(p.stdout)
         self.assertIs(d["complete"], False)
-        self.assertEqual(d["declared"], 6)
+        self.assertEqual(d["declared"], 10)
         self.assertEqual(d["completion_scope"], "all")
-        self.assertEqual(d["required_declared"], 1)
+        self.assertEqual(d["required_declared"], 4)
         self.assertEqual(d["required_executed"], 1)
-        self.assertIs(d["required_complete"], True)
-        self.assertEqual(len(d["suites"]), 6)
+        self.assertIs(d["required_complete"], False)
+        self.assertEqual(len(d["suites"]), 10)
 
-    def test_required_scope_is_green_on_the_real_tree_without_calling_that_complete(self):
+    def test_required_scope_without_with_cargo_exits_3_on_the_real_tree(self):
         p = subprocess.run(
             [sys.executable, str(run_all.__file__), "--json",
              "--require-complete", "--completion-scope", "required"],
             capture_output=True, text=True, timeout=300)
-        self.assertEqual(p.returncode, 0)
+        self.assertEqual(p.returncode, 3)
         d = json.loads(p.stdout)
         self.assertIs(d["complete"], False)
         self.assertEqual(d["completion_scope"], "required")
-        self.assertIs(d["required_complete"], True)
-        self.assertEqual(d["declared"], 6)
+        self.assertIs(d["required_complete"], False)
+        self.assertEqual(d["declared"], 10)
         self.assertLess(d["executed"], d["declared"])
         grades = {s["id"]: s["grade"] for s in d["suites"]}
         self.assertEqual(grades["mcp-jsonrpc-id-conformance"], run_all.PROVED)
+        self.assertEqual(grades["privileged-mcp-action-producer"], run_all.NOT_SELECTED)
+        self.assertEqual(grades["privileged-mcp-action-verifier"], run_all.NOT_SELECTED)
+        self.assertEqual(grades["privileged-mcp-action-e2e"], run_all.NOT_SELECTED)
         self.assertEqual(grades["privileged-mcp-action-v0"], run_all.NEEDS_CANDIDATE)
         self.assertEqual(grades["observed-effect-v0"], run_all.EXTERNAL)
 
@@ -832,7 +882,7 @@ class RealTreeScopes(unittest.TestCase):
             capture_output=True, text=True, timeout=300)
         d = json.loads(p.stdout)
         self.assertEqual(d["completion_scope"], "all")
-        self.assertEqual(d["required_declared"], 1)
+        self.assertEqual(d["required_declared"], 4)
         self.assertIn("required_executed", d)
         self.assertIn("required_complete", d)
         self.assertIs(d["complete"], False)
@@ -902,20 +952,29 @@ class ProductCallsite(unittest.TestCase):
         with self.assertRaises(AssertionError):
             _direct_mapping(block)
 
-    def test_scope_job_invokes_both_flags_and_does_not_map_3_to_0(self):
+    def test_scope_job_invokes_plain_run_all_without_completeness_or_cargo(self):
         text = CI_YML.read_text(encoding="utf-8")
         step = assert_hard_run_command(
             text, "scope", "Conformance inventory")
         lines = _active_run_lines(step)
         self.assertEqual(tuple(lines), INVENTORY_RUN_SCRIPT)
+        self.assertNotIn("--require-complete", "\n".join(lines))
+        self.assertNotIn("--with-cargo", "\n".join(lines))
+        self.assertNotIn("--completion-scope required", "\n".join(lines))
 
-    def test_commented_or_colon_run_all_line_is_not_an_active_callsite(self):
-        step = _inventory_step(CI_YML.read_text(encoding="utf-8"))
-        commented = step.replace(REQUIRED_RUN_ALL, "# " + REQUIRED_RUN_ALL)
-        self.assertNotIn(REQUIRED_RUN_ALL, _active_run_lines(commented))
-        replaced = step.replace(REQUIRED_RUN_ALL, ":")
-        self.assertNotIn(REQUIRED_RUN_ALL, _active_run_lines(replaced))
-        self.assertIn(REQUIRED_RUN_ALL, _active_run_lines(step))
+    def test_gated_linux_step_invokes_required_complete_with_cargo(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        step = assert_gated_linux_required_run(text)
+        self.assertEqual(tuple(_active_run_lines(step)), GATED_LINUX_RUN_SCRIPT)
+
+    def test_commented_or_colon_gated_run_all_is_not_an_active_callsite(self):
+        step = _gated_linux_step(CI_YML.read_text(encoding="utf-8"))
+        commented = step.replace(
+            GATED_REQUIRED_RUN_ALL, "# " + GATED_REQUIRED_RUN_ALL)
+        self.assertNotIn(GATED_REQUIRED_RUN_ALL, _active_run_lines(commented))
+        replaced = step.replace(GATED_REQUIRED_RUN_ALL, ":")
+        self.assertNotIn(GATED_REQUIRED_RUN_ALL, _active_run_lines(replaced))
+        self.assertIn(GATED_REQUIRED_RUN_ALL, _active_run_lines(step))
 
     def test_deleting_the_scope_job_callsite_fails(self):
         text = CI_YML.read_text(encoding="utf-8")
@@ -927,13 +986,37 @@ class ProductCallsite(unittest.TestCase):
         with self.assertRaises(AssertionError):
             _inventory_step(mutated)
 
+    def test_linux_step_if_never_true_fails(self):
+        text = CI_YML.read_text(encoding="utf-8")
+        for replacement in (
+            "        if: false\n",
+            "        if: runner.os == 'Windows'\n",
+            "        if: runner.os != 'Linux'\n",
+        ):
+            with self.subTest(replacement=replacement.strip()):
+                mutated = text.replace(
+                    "        if: runner.os == 'Linux'\n",
+                    replacement,
+                    1,
+                )
+                # first match is Test Workspace; force the gated step
+                gated = _gated_linux_step(text)
+                mutated_step = gated.replace(
+                    "        if: runner.os == 'Linux'\n",
+                    replacement,
+                    1,
+                )
+                mutated = text.replace(gated, mutated_step, 1)
+                with self.assertRaises(AssertionError):
+                    assert_gated_linux_required_run(mutated)
+
     def test_deleting_require_complete_callsite_fails(self):
-        step = _inventory_step(CI_YML.read_text(encoding="utf-8"))
+        step = _gated_linux_step(CI_YML.read_text(encoding="utf-8"))
         self.assertIn("--require-complete", step)
         self.assertNotIn("--require-complete", step.replace("--require-complete", ""))
 
     def test_deleting_completion_scope_required_callsite_fails(self):
-        step = _inventory_step(CI_YML.read_text(encoding="utf-8"))
+        step = _gated_linux_step(CI_YML.read_text(encoding="utf-8"))
         self.assertIn("--completion-scope required", step)
         self.assertNotIn("--completion-scope required",
                          step.replace("--completion-scope required", ""))

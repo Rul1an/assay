@@ -28,7 +28,9 @@ sys.path.insert(0, str(REPO / "conformance/tests"))
 import registry  # noqa: E402
 import run_all  # noqa: E402
 from test_completion_scope import (  # noqa: E402
-    REQUIRED_RUN_ALL,
+    GATED_LINUX_JOB,
+    GATED_LINUX_STEP,
+    PLAIN_RUN_ALL,
     REVISION_WITNESS,
     assert_hard_run_command,
     named_job,
@@ -53,7 +55,7 @@ class CanonicalFile(unittest.TestCase):
         loaded = [s["id"] for s in registry.load_suites()]
         bound = [s["id"] for s in run_all.SUITES]
         self.assertEqual(bound, loaded)
-        self.assertEqual(len(bound), 6)
+        self.assertEqual(len(bound), 10)
 
     def test_adequacy_manifests_are_a_different_id_space(self):
         manifests = sorted(
@@ -63,7 +65,7 @@ class CanonicalFile(unittest.TestCase):
         suite_ids = sorted(s["id"] for s in registry.load_suites())
         self.assertNotEqual(manifests, suite_ids)
         self.assertEqual(len(manifests), 5)
-        self.assertEqual(len(suite_ids), 6)
+        self.assertEqual(len(suite_ids), 10)
 
 
 class PolicyAndMachineOutput(unittest.TestCase):
@@ -91,28 +93,61 @@ class PolicyAndMachineOutput(unittest.TestCase):
 class CompletenessMutations(unittest.TestCase):
     """Presence markers are an independent oracle. Registry stays the metadata source."""
 
-    def test_each_local_suite_delete_is_caught_while_its_marker_remains(self):
+    def test_each_local_root_delete_is_caught_while_its_marker_remains(self):
         suites = registry.load_suites()
         local = [s for s in suites if not s["path"].startswith(("http://", "https://"))]
-        self.assertEqual(len(local), 5, [s["id"] for s in local])
-        for suite in local:
-            with self.subTest(suite["id"]):
-                marker = REPO / registry.sidecar_rel(suite["path"])
+        paths = sorted({s["path"] for s in local})
+        self.assertEqual(len(paths), 5, paths)
+        for path in paths:
+            with self.subTest(path):
+                marker = REPO / registry.sidecar_rel(path)
                 self.assertTrue(marker.is_file(), marker)
                 self.assertFalse(marker.is_symlink(), marker)
-                self.assertFalse((REPO / suite["path"] / ".assay-conformance-root").exists())
+                self.assertFalse((REPO / path / ".assay-conformance-root").exists())
                 doc = registry.load_registry()
-                doc["suites"] = [s for s in doc["suites"] if s["id"] != suite["id"]]
+                doc["suites"] = [s for s in doc["suites"] if s["path"] != path]
                 with tempfile.TemporaryDirectory() as raw:
                     mutated = Path(raw) / "registry.json"
                     mutated.write_text(json.dumps(doc), encoding="utf-8")
                     reasons = registry.registry_completeness_reasons(
                         REPO, registry_path=mutated)
-                self.assertTrue(reasons, "deleting %s must not stay clean" % suite["id"])
+                self.assertTrue(reasons, "deleting root %s must not stay clean" % path)
                 self.assertTrue(
-                    any("unregistered published root" in r and suite["path"] in r
+                    any("unregistered published root" in r and path in r
                         for r in reasons),
                     reasons)
+
+    def test_required_local_lane_ids_are_an_independent_registry_contract(self):
+        pinned = frozenset((
+            "privileged-mcp-action-producer",
+            "privileged-mcp-action-verifier",
+            "privileged-mcp-action-e2e",
+        ))
+        self.assertEqual(registry.REQUIRED_LOCAL_LANE_IDS, pinned)
+        loaded = {s["id"] for s in registry.load_suites()}
+        bound = {s["id"] for s in run_all.SUITES}
+        self.assertEqual(pinned & loaded, pinned)
+        self.assertEqual(pinned & bound, pinned)
+        self.assertNotIn("privileged-mcp-action-projection", pinned)
+        self.assertNotIn("privileged-mcp-action-v0", pinned)
+
+    def test_deleting_a_required_local_lane_row_is_a_registry_contract_error(self):
+        doc = registry.load_registry()
+        doc["suites"] = [
+            s for s in doc["suites"] if s["id"] != "privileged-mcp-action-producer"
+        ]
+        with tempfile.TemporaryDirectory() as raw:
+            mutated = Path(raw) / "registry.json"
+            mutated.write_text(json.dumps(doc), encoding="utf-8")
+            reasons = registry.registry_completeness_reasons(
+                REPO, registry_path=mutated)
+        self.assertTrue(
+            any("required local lane missing: privileged-mcp-action-producer" in r
+                for r in reasons),
+            reasons)
+        self.assertFalse(
+            any("unproved" in r.lower() for r in reasons),
+            reasons)
 
     def test_adding_an_unregistered_marker_fails_the_gate(self):
         sidecar = REPO / registry.sidecar_rel("conformance/_unpublished_mutation_root_")
@@ -174,8 +209,8 @@ class CompletenessMutations(unittest.TestCase):
         self.assertEqual(registry.registry_completeness_reasons(REPO), [])
         self.assertEqual(
             sorted(registry.discover_published_roots(REPO)),
-            sorted(s["path"] for s in registry.load_suites()
-                   if not s["path"].startswith(("http://", "https://"))))
+            sorted({s["path"] for s in registry.load_suites()
+                    if not s["path"].startswith(("http://", "https://"))}))
 
 
 class IndexProjection(unittest.TestCase):
@@ -191,6 +226,14 @@ class IndexProjection(unittest.TestCase):
     def test_index_does_not_advertise_a_corpus_the_registry_omits(self):
         reasons = registry.index_reasons(REPO, registry.load_suites())
         self.assertEqual(reasons, [])
+
+    def test_index_does_not_call_declared_inventory_all_six(self):
+        declared = len(registry.load_suites())
+        self.assertEqual(declared, 10)
+        for rel in ("conformance/INDEX.md.in", "conformance/INDEX.md"):
+            text = (REPO / rel).read_text(encoding="utf-8")
+            self.assertNotIn("all-six fact", text, rel)
+            self.assertIn("(10)", text, rel)
 
 
 class HostileLoader(unittest.TestCase):
@@ -250,6 +293,55 @@ class HostileLoader(unittest.TestCase):
         with self.assertRaises(registry.RegistryError) as ctx:
             registry.load_registry(path)
         self.assertIn("policy", str(ctx.exception))
+
+    def test_empty_test_filter_on_required_cargo_is_rejected(self):
+        """Canonical mutation: required cargo test_filter="" must go red."""
+        suites = [dict(s) for s in registry.load_suites()]
+        producer = next(s for s in suites if s["id"] == "privileged-mcp-action-producer")
+        producer["test_filter"] = ""
+        path = self._write({"schema": registry.SCHEMA, "suites": suites})
+        with self.assertRaises(registry.RegistryError) as ctx:
+            registry.load_registry(path)
+        self.assertIn("test_filter", str(ctx.exception))
+        reasons = registry.registry_completeness_reasons(REPO, registry_path=path)
+        self.assertTrue(reasons, "empty required test_filter must not stay clean")
+        self.assertTrue(any("test_filter" in r for r in reasons), reasons)
+
+    def test_missing_test_filter_on_required_cargo_is_rejected(self):
+        suites = [dict(s) for s in registry.load_suites()]
+        producer = next(s for s in suites if s["id"] == "privileged-mcp-action-producer")
+        producer.pop("test_filter", None)
+        path = self._write({"schema": registry.SCHEMA, "suites": suites})
+        with self.assertRaises(registry.RegistryError) as ctx:
+            registry.load_registry(path)
+        self.assertIn("test_filter", str(ctx.exception))
+
+    def test_optional_cargo_may_omit_test_filter(self):
+        suite = next(s for s in registry.load_suites() if s["id"] == "rfc8785-canonicalization")
+        self.assertEqual(suite["kind"], "cargo")
+        self.assertEqual(suite["policy"], "optional")
+        self.assertNotIn("test_filter", suite)
+
+    def test_whitespace_only_test_filter_on_required_cargo_is_rejected(self):
+        for filt in (" ", "\t", " \t\n"):
+            with self.subTest(repr(filt)):
+                suites = [dict(s) for s in registry.load_suites()]
+                producer = next(s for s in suites if s["id"] == "privileged-mcp-action-producer")
+                producer["test_filter"] = filt
+                path = self._write({"schema": registry.SCHEMA, "suites": suites})
+                with self.assertRaises(registry.RegistryError) as ctx:
+                    registry.load_registry(path)
+                self.assertIn("test_filter", str(ctx.exception))
+
+    def test_usable_test_filter_is_the_shared_strip_truth(self):
+        self.assertIsNone(registry.usable_test_filter(None))
+        self.assertIsNone(registry.usable_test_filter(""))
+        self.assertIsNone(registry.usable_test_filter(" "))
+        self.assertIsNone(registry.usable_test_filter("\t"))
+        self.assertIsNone(registry.usable_test_filter(" \t\n"))
+        self.assertIsNone(registry.usable_test_filter(1))
+        self.assertEqual(registry.usable_test_filter("producer_lane_"), "producer_lane_")
+        self.assertEqual(registry.usable_test_filter("  producer_lane_  "), "producer_lane_")
 
     def test_path_escape_is_rejected(self):
         suite = dict(registry.load_suites()[0])
@@ -358,8 +450,8 @@ class ProductWorkflow(unittest.TestCase):
     def test_deleting_the_require_complete_callsite_fails_this_test(self):
         step = named_step(
             CI_YML.read_text(encoding="utf-8"),
-            "scope",
-            "Conformance inventory",
+            GATED_LINUX_JOB,
+            GATED_LINUX_STEP,
         )
         mutated = step.replace("--require-complete", "")
         self.assertNotEqual(mutated, step)
@@ -367,14 +459,14 @@ class ProductWorkflow(unittest.TestCase):
 
     def test_commented_run_all_command_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")
-        mutated = text.replace(REQUIRED_RUN_ALL, "# " + REQUIRED_RUN_ALL, 1)
+        mutated = text.replace(PLAIN_RUN_ALL, "# " + PLAIN_RUN_ALL, 1)
         with self.assertRaises(AssertionError):
             assert_hard_run_command(
                 mutated, "scope", "Conformance inventory")
 
     def test_softened_run_all_command_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")
-        mutated = text.replace(REQUIRED_RUN_ALL, REQUIRED_RUN_ALL + " || true", 1)
+        mutated = text.replace(PLAIN_RUN_ALL, PLAIN_RUN_ALL + " || true", 1)
         with self.assertRaises(AssertionError):
             assert_hard_run_command(
                 mutated, "scope", "Conformance inventory")
@@ -540,7 +632,7 @@ class ProductWorkflow(unittest.TestCase):
                 "          set -euo pipefail\n",
                 "          set -euo pipefail\n          set +o errexit\n",
                 1,
-            ).replace(REQUIRED_RUN_ALL, REQUIRED_RUN_ALL + "\n          true", 1),
+            ).replace(PLAIN_RUN_ALL, PLAIN_RUN_ALL + "\n          true", 1),
             step.replace(
                 "          set -euo pipefail\n",
                 "          set -euo pipefail\n          python3() { :; }\n",
@@ -556,11 +648,11 @@ class ProductWorkflow(unittest.TestCase):
 
     def test_relocated_run_all_command_fails_the_inventory_guard(self):
         text = CI_YML.read_text(encoding="utf-8")
-        mutated = text.replace("          " + REQUIRED_RUN_ALL, "          :", 1).replace(
+        mutated = text.replace("          " + PLAIN_RUN_ALL, "          :", 1).replace(
             "      - name: Published-numbers projection contract\n",
             "      - name: Decorative completion-scope note\n"
             "        run: |\n"
-            f"          {REQUIRED_RUN_ALL}\n\n"
+            f"          {PLAIN_RUN_ALL}\n\n"
             "      - name: Published-numbers projection contract\n",
             1,
         )

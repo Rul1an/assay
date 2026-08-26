@@ -47,7 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bounded_run import (  # noqa: E402
     OUTPUT_CAP_BYTES, _OutputTooLarge, _run_capped,
 )
-from registry import load_suites  # noqa: E402
+from registry import load_suites, usable_test_filter  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -114,12 +114,18 @@ def _stdlib_jsonrpc(suite: dict) -> tuple[str, str]:
 
 def _cargo(suite: dict) -> tuple[str, str]:
     """Rust-driven corpora. Reports unproved when the toolchain is absent."""
+    filt = usable_test_filter(suite.get("test_filter"))
+    if suite.get("policy") == "required" and filt is None:
+        return UNPROVED, (
+            "required cargo lane has empty/missing test_filter; "
+            "refusing whole-target execution")
     try:
-        p = _run_capped(
-            ["cargo", "test", "-p", suite["crate"], suite["cargo_target_flag"],
-             suite["cargo_target"], "--", "--nocapture"],
-            REPO, timeout=1800,
-        )
+        cmd = ["cargo", "test", "--locked", "-p", suite["crate"],
+               suite["cargo_target_flag"], suite["cargo_target"]]
+        if filt:
+            cmd.append(filt)
+        cmd += ["--", "--nocapture"]
+        p = _run_capped(cmd, REPO, timeout=1800)
     except FileNotFoundError:
         return UNPROVED, "cargo not on PATH"
     except _OutputTooLarge:
@@ -134,8 +140,10 @@ def _cargo(suite: dict) -> tuple[str, str]:
         ran = sum(int(m) for m in re.findall(r"^test result: ok\. (\d+) passed", out, re.M))
         if ran == 0:
             return UNPROVED, ("cargo exited 0 but selected NO tests for %r -- "
-                              "the target filter matches nothing" % suite["cargo_target"])
-        return PROVED, "cargo test %s passed (%d tests)" % (suite["cargo_target"], ran)
+                              "the target filter matches nothing" % (
+                                  suite.get("test_filter") or suite["cargo_target"]))
+        return PROVED, "cargo test %s passed (%d tests)" % (
+            suite.get("test_filter") or suite["cargo_target"], ran)
     tail = out.strip().splitlines()
     hit = [ln for ln in tail if "test result:" in ln or "error[" in ln or "panicked" in ln]
     detail = " | ".join(hit[-3:]) if hit else "exit %d" % p.returncode
@@ -144,6 +152,7 @@ def _cargo(suite: dict) -> tuple[str, str]:
     if "error[" in out or "could not compile" in out:
         return UNPROVED, "did not build: %s" % detail[:200]
     return FALSE, detail[:200]
+
 
 
 def _bind_runners(raw: list) -> list:
@@ -240,7 +249,9 @@ def main() -> int:
     results = []
     for suite in SUITES:
         kind = suite["kind"]
-        if kind in (NEEDS_CANDIDATE, EXTERNAL):
+        # Declared not_selected (projection) is a non-run state, not an executed
+        # unproved. producer_reported / incomplete cannot be upgraded to confirmed.
+        if kind in (NEEDS_CANDIDATE, EXTERNAL, NOT_SELECTED):
             grade, detail = kind, suite["note"]
         elif kind == "cargo" and not args.with_cargo:
             grade, detail = NOT_SELECTED, "rerun with --with-cargo"

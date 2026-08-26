@@ -74,7 +74,18 @@ REQUIRED_INVENTORY_COMMANDS = (
     "python3 -W error::ResourceWarning conformance/tests/test_bounded_run.py",
     "python3 -W error::ResourceWarning conformance/tests/test_run_all.py",
     "python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py",
-    "python3 conformance/run_all.py --require-complete --completion-scope required",
+    "python3 conformance/run_all.py",
+)
+# Independent of the completion-scope gated-run tuple.
+GATED_LINUX_JOB = "test"
+GATED_LINUX_STEP = "Conformance required cargo lanes (Linux)"
+GATED_LINUX_IF = "runner.os == 'Linux'"
+GATED_LINUX_COMMAND = (
+    "python3 conformance/run_all.py --with-cargo --require-complete --completion-scope required"
+)
+GATED_LINUX_COMMANDS = (
+    "set -euo pipefail",
+    GATED_LINUX_COMMAND,
 )
 HARDENING_GUARD_COMMANDS = (
     "python3 scripts/ci/check-conformance-inventory-callsite.py",
@@ -611,6 +622,8 @@ class ConformanceInventoryCallsite(unittest.TestCase):
         joined = "\n".join(imported)
         self.assertNotIn("INVENTORY_" + "RUN_SCRIPT", joined)
         self.assertNotIn("REQUIRED_" + "RUN_ALL", joined)
+        self.assertNotIn("GATED_" + "REQUIRED_RUN_ALL", joined)
+        self.assertNotIn("GATED_" + "LINUX_RUN_SCRIPT", joined)
         self.assertNotIn("HARDENING_" + "RUN_SCRIPT", joined)
         self.assertNotIn("FINALE_" + "RUN_SCRIPT", joined)
 
@@ -630,6 +643,39 @@ class ConformanceInventoryCallsite(unittest.TestCase):
     def test_live_inventory_step_matches_independent_literals(self) -> None:
         step = named_step(self.live, JOB, INVENTORY_STEP)
         self.assertEqual(tuple(_active_run_lines(step)), REQUIRED_INVENTORY_COMMANDS)
+
+    def test_live_gated_linux_step_matches_independent_literals(self) -> None:
+        step = named_step(self.live, GATED_LINUX_JOB, GATED_LINUX_STEP)
+        self.assertEqual(tuple(_active_run_lines(step)), GATED_LINUX_COMMANDS)
+        self.assertIn(f"        if: {GATED_LINUX_IF}\n", step)
+
+    def test_linux_step_if_never_true_fails_the_checker(self) -> None:
+        self.assertEqual(self.problems_fn(self.live), [])
+        live_step = named_step(self.live, GATED_LINUX_JOB, GATED_LINUX_STEP)
+        for replacement in (
+            "        if: false\n",
+            "        if: runner.os == 'Windows'\n",
+            "        if: runner.os != 'Linux'\n",
+        ):
+            with self.subTest(replacement=replacement.strip()):
+                mutated_step = live_step.replace(
+                    f"        if: {GATED_LINUX_IF}\n", replacement, 1)
+                mutated = self.live.replace(live_step, mutated_step, 1)
+                self.assertTrue(
+                    self.problems_fn(mutated),
+                    f"{replacement!r} must fail the later checker")
+        self.assertEqual(self.problems_fn(self.live), [])
+
+    def test_gated_command_neutralization_fails(self) -> None:
+        self.assertEqual(self.problems_fn(self.live), [])
+        for mode in ("remove", "comment", "colon"):
+            with self.subTest(mode=mode):
+                problems = self.problems_fn(
+                    neutralize(self.live, GATED_LINUX_COMMAND, mode))
+                self.assertTrue(
+                    problems,
+                    f"{mode} {GATED_LINUX_COMMAND!r} must fail the later checker")
+        self.assertEqual(self.problems_fn(self.live), [])
 
     def test_structural_mutations_fail_independently(self) -> None:
         self.assertEqual(self.problems_fn(self.live), [])
