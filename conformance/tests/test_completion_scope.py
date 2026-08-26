@@ -667,8 +667,12 @@ def trusted_prefix_mutations(
 
 POLICIES = {
     "mcp-jsonrpc-id-conformance": "required",
+    "privileged-mcp-action-producer": "required",
+    "privileged-mcp-action-verifier": "required",
+    "privileged-mcp-action-e2e": "required",
     "rfc8785-canonicalization": "optional",
     "mcp-era-parity-v0": "optional",
+    "privileged-mcp-action-projection": "optional",
     "privileged-mcp-action-v0": "external-candidate",
     "privileged-mcp-action-v1": "external-candidate",
     "observed-effect-v0": "external-candidate",
@@ -802,12 +806,12 @@ class RealTreeScopes(unittest.TestCase):
         self.assertEqual(p.returncode, 3)
         d = json.loads(p.stdout)
         self.assertIs(d["complete"], False)
-        self.assertEqual(d["declared"], 6)
+        self.assertEqual(d["declared"], 10)
         self.assertEqual(d["completion_scope"], "all")
-        self.assertEqual(d["required_declared"], 1)
-        self.assertEqual(d["required_executed"], 1)
+        self.assertEqual(d["required_declared"], 4)
+        self.assertEqual(d["required_executed"], 4)
         self.assertIs(d["required_complete"], True)
-        self.assertEqual(len(d["suites"]), 6)
+        self.assertEqual(len(d["suites"]), 10)
 
     def test_required_scope_is_green_on_the_real_tree_without_calling_that_complete(self):
         p = subprocess.run(
@@ -819,7 +823,7 @@ class RealTreeScopes(unittest.TestCase):
         self.assertIs(d["complete"], False)
         self.assertEqual(d["completion_scope"], "required")
         self.assertIs(d["required_complete"], True)
-        self.assertEqual(d["declared"], 6)
+        self.assertEqual(d["declared"], 10)
         self.assertLess(d["executed"], d["declared"])
         grades = {s["id"]: s["grade"] for s in d["suites"]}
         self.assertEqual(grades["mcp-jsonrpc-id-conformance"], run_all.PROVED)
@@ -832,7 +836,7 @@ class RealTreeScopes(unittest.TestCase):
             capture_output=True, text=True, timeout=300)
         d = json.loads(p.stdout)
         self.assertEqual(d["completion_scope"], "all")
-        self.assertEqual(d["required_declared"], 1)
+        self.assertEqual(d["required_declared"], 4)
         self.assertIn("required_executed", d)
         self.assertIn("required_complete", d)
         self.assertIs(d["complete"], False)

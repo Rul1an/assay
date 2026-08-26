@@ -491,5 +491,99 @@ class DocumentationTruth(unittest.TestCase):
         self.assertNotIn("shipped vectors is *Functional*", index)
 
 
+class PrivilegedMcpActionLanes(unittest.TestCase):
+    """Four in-tree lanes are independent registry rows, not one cargo id."""
+
+    PRODUCER = "privileged-mcp-action-producer"
+    VERIFIER = "privileged-mcp-action-verifier"
+    PROJECTION = "privileged-mcp-action-projection"
+    E2E = "privileged-mcp-action-e2e"
+    CANDIDATE = "privileged-mcp-action-v0"
+    LOCAL = (PRODUCER, VERIFIER, PROJECTION, E2E)
+
+    def test_four_lane_ids_are_registered_and_distinct_from_the_candidate(self):
+        ids = [s["id"] for s in run_all.SUITES]
+        for ident in self.LOCAL:
+            self.assertIn(ident, ids, ident)
+        self.assertEqual(len(set(self.LOCAL)), 4)
+        self.assertNotIn(self.CANDIDATE, self.LOCAL)
+        self.assertIn(self.CANDIDATE, ids)
+
+    def test_candidate_lane_stays_needs_candidate(self):
+        suite = next(s for s in run_all.SUITES if s["id"] == self.CANDIDATE)
+        self.assertEqual(suite["kind"], run_all.NEEDS_CANDIDATE)
+
+    def test_in_tree_verifier_is_not_named_privileged_mcp_action_v0(self):
+        verifier = next(s for s in run_all.SUITES if s["id"] == self.VERIFIER)
+        self.assertNotEqual(verifier["id"], self.CANDIDATE)
+        self.assertNotEqual(verifier.get("cargo_target"), "privileged-mcp-action-v0")
+
+    def test_projection_is_not_selected_with_a_reason_and_never_passed(self):
+        suite = next(s for s in run_all.SUITES if s["id"] == self.PROJECTION)
+        self.assertEqual(suite["kind"], run_all.NOT_SELECTED)
+        self.assertTrue(suite.get("note"), "projection must print why it is not selected")
+        self.assertNotEqual(suite["kind"], run_all.PROVED)
+
+    def test_v1_descriptor_still_shares_verify_report_v0(self):
+        path = run_all.REPO / "conformance/privileged-mcp-action-v1/descriptor.json"
+        descriptor = json.loads(path.read_text())
+        dumped = json.dumps(descriptor)
+        self.assertIn("assay.privileged_mcp_action.verify.report.v0", dumped)
+        self.assertNotIn("assay.privileged_mcp_action.verify.report.v1", dumped)
+
+    def test_exit_status_stays_the_single_authority(self):
+        self.assertFalse(hasattr(run_all, "OUTCOME_EXIT"))
+        source = Path(run_all.__file__).read_text()
+        self.assertNotIn("OUTCOME_EXIT", source)
+        self.assertEqual(run_all.exit_status([{"grade": run_all.FALSE}]), 1)
+        self.assertEqual(run_all.exit_status([{"grade": run_all.UNPROVED}]), 2)
+        self.assertEqual(
+            run_all.exit_status(
+                [{"grade": run_all.PROVED}, {"grade": run_all.NOT_SELECTED}]),
+            0)
+        self.assertEqual(
+            run_all.exit_status(
+                [{"grade": run_all.PROVED}, {"grade": run_all.NOT_SELECTED}],
+                require_complete=True),
+            3)
+        self.assertEqual(
+            run_all.exit_status(
+                [{"id": "r", "grade": run_all.NOT_SELECTED, "policy": "required"}],
+                require_complete=True, completion_scope="required"),
+            3)
+
+    def test_producer_assertions_are_independent_of_verifier(self):
+        producer = next(s for s in run_all.SUITES if s["id"] == self.PRODUCER)
+        verifier = next(s for s in run_all.SUITES if s["id"] == self.VERIFIER)
+        self.assertNotEqual(producer["id"], verifier["id"])
+        self.assertNotEqual(producer.get("lane"), "verifier")
+        self.assertEqual(producer.get("lane"), "producer")
+        source = Path(run_all.__file__).read_text()
+        # Producer runner must not call the verifier runner or cargo 14/14 harness.
+        start = source.find("def _local_producer")
+        self.assertGreater(start, -1, "producer runner missing")
+        end = source.find("\ndef _local_verifier", start)
+        chunk = source[start:end if end > start else start + 2000]
+        self.assertNotIn("verify_bundle_report(", chunk)
+        self.assertNotIn("conformance_privileged_mcp_action", chunk)
+        self.assertIn("import_does_not_enforce_profile_cardinality", chunk)
+        self.assertIn("malformed_wire_input_is_refused_before_a_bundle_is_written", chunk)
+        self.assertNotIn("verify.report", chunk)
+        self.assertNotIn("REPORT_SCHEMA", chunk)
+
+    def test_incomplete_projection_cannot_be_upgraded_to_confirmed(self):
+        source = Path(run_all.__file__).read_text()
+        self.assertIn("producer_reported", source)
+        self.assertIn("incomplete", source)
+        self.assertIn("cannot be upgraded to confirmed", source.lower() + source)
+
+    def test_self_score_is_not_the_independent_candidate(self):
+        local = [s for s in run_all.SUITES if s["id"] in self.LOCAL]
+        self.assertFalse(any(s["kind"] == run_all.NEEDS_CANDIDATE for s in local))
+        candidate = next(s for s in run_all.SUITES if s["id"] == self.CANDIDATE)
+        self.assertEqual(candidate["kind"], run_all.NEEDS_CANDIDATE)
+        self.assertIn("1840", candidate.get("maturity", "") + candidate.get("note", ""))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

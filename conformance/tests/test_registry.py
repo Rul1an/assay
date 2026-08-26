@@ -53,7 +53,7 @@ class CanonicalFile(unittest.TestCase):
         loaded = [s["id"] for s in registry.load_suites()]
         bound = [s["id"] for s in run_all.SUITES]
         self.assertEqual(bound, loaded)
-        self.assertEqual(len(bound), 6)
+        self.assertEqual(len(bound), 10)
 
     def test_adequacy_manifests_are_a_different_id_space(self):
         manifests = sorted(
@@ -63,7 +63,7 @@ class CanonicalFile(unittest.TestCase):
         suite_ids = sorted(s["id"] for s in registry.load_suites())
         self.assertNotEqual(manifests, suite_ids)
         self.assertEqual(len(manifests), 5)
-        self.assertEqual(len(suite_ids), 6)
+        self.assertEqual(len(suite_ids), 10)
 
 
 class PolicyAndMachineOutput(unittest.TestCase):
@@ -91,28 +91,61 @@ class PolicyAndMachineOutput(unittest.TestCase):
 class CompletenessMutations(unittest.TestCase):
     """Presence markers are an independent oracle. Registry stays the metadata source."""
 
-    def test_each_local_suite_delete_is_caught_while_its_marker_remains(self):
+    def test_each_local_root_delete_is_caught_while_its_marker_remains(self):
         suites = registry.load_suites()
         local = [s for s in suites if not s["path"].startswith(("http://", "https://"))]
-        self.assertEqual(len(local), 5, [s["id"] for s in local])
-        for suite in local:
-            with self.subTest(suite["id"]):
-                marker = REPO / registry.sidecar_rel(suite["path"])
+        paths = sorted({s["path"] for s in local})
+        self.assertEqual(len(paths), 5, paths)
+        for path in paths:
+            with self.subTest(path):
+                marker = REPO / registry.sidecar_rel(path)
                 self.assertTrue(marker.is_file(), marker)
                 self.assertFalse(marker.is_symlink(), marker)
-                self.assertFalse((REPO / suite["path"] / ".assay-conformance-root").exists())
+                self.assertFalse((REPO / path / ".assay-conformance-root").exists())
                 doc = registry.load_registry()
-                doc["suites"] = [s for s in doc["suites"] if s["id"] != suite["id"]]
+                doc["suites"] = [s for s in doc["suites"] if s["path"] != path]
                 with tempfile.TemporaryDirectory() as raw:
                     mutated = Path(raw) / "registry.json"
                     mutated.write_text(json.dumps(doc), encoding="utf-8")
                     reasons = registry.registry_completeness_reasons(
                         REPO, registry_path=mutated)
-                self.assertTrue(reasons, "deleting %s must not stay clean" % suite["id"])
+                self.assertTrue(reasons, "deleting root %s must not stay clean" % path)
                 self.assertTrue(
-                    any("unregistered published root" in r and suite["path"] in r
+                    any("unregistered published root" in r and path in r
                         for r in reasons),
                     reasons)
+
+    def test_required_local_lane_ids_are_an_independent_registry_contract(self):
+        pinned = frozenset((
+            "privileged-mcp-action-producer",
+            "privileged-mcp-action-verifier",
+            "privileged-mcp-action-e2e",
+        ))
+        self.assertEqual(registry.REQUIRED_LOCAL_LANE_IDS, pinned)
+        loaded = {s["id"] for s in registry.load_suites()}
+        bound = {s["id"] for s in run_all.SUITES}
+        self.assertEqual(pinned & loaded, pinned)
+        self.assertEqual(pinned & bound, pinned)
+        self.assertNotIn("privileged-mcp-action-projection", pinned)
+        self.assertNotIn("privileged-mcp-action-v0", pinned)
+
+    def test_deleting_a_required_local_lane_row_is_a_registry_contract_error(self):
+        doc = registry.load_registry()
+        doc["suites"] = [
+            s for s in doc["suites"] if s["id"] != "privileged-mcp-action-producer"
+        ]
+        with tempfile.TemporaryDirectory() as raw:
+            mutated = Path(raw) / "registry.json"
+            mutated.write_text(json.dumps(doc), encoding="utf-8")
+            reasons = registry.registry_completeness_reasons(
+                REPO, registry_path=mutated)
+        self.assertTrue(
+            any("required local lane missing: privileged-mcp-action-producer" in r
+                for r in reasons),
+            reasons)
+        self.assertFalse(
+            any("unproved" in r.lower() for r in reasons),
+            reasons)
 
     def test_adding_an_unregistered_marker_fails_the_gate(self):
         sidecar = REPO / registry.sidecar_rel("conformance/_unpublished_mutation_root_")
@@ -174,8 +207,8 @@ class CompletenessMutations(unittest.TestCase):
         self.assertEqual(registry.registry_completeness_reasons(REPO), [])
         self.assertEqual(
             sorted(registry.discover_published_roots(REPO)),
-            sorted(s["path"] for s in registry.load_suites()
-                   if not s["path"].startswith(("http://", "https://"))))
+            sorted({s["path"] for s in registry.load_suites()
+                    if not s["path"].startswith(("http://", "https://"))}))
 
 
 class IndexProjection(unittest.TestCase):

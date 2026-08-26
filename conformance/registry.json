@@ -29,6 +29,58 @@
       "index_maturity": "published profile corpus; no candidate-neutral runner registered"
     },
     {
+      "id": "privileged-mcp-action-producer",
+      "path": "conformance/privileged-mcp-action-v0",
+      "vectors": 2,
+      "maturity": "in-tree importer: one decision writes; two decisions stay producible; malformed refused before a bundle",
+      "kind": "local",
+      "lane": "producer",
+      "policy": "required",
+      "index_corpus": "[`privileged-mcp-action-producer`](privileged-mcp-action-v0/)",
+      "index_vectors": "one-decision write + two-decision still importable",
+      "index_runner": "in-tree local (always-run)",
+      "index_maturity": "producer writes record shape; does not call the verifier"
+    },
+    {
+      "id": "privileged-mcp-action-verifier",
+      "path": "conformance/privileged-mcp-action-v0",
+      "vectors": 14,
+      "maturity": "in-tree Cargo 14/14 against existing v0 MANIFEST; distinct from privileged-mcp-action-v0",
+      "kind": "local",
+      "lane": "verifier",
+      "policy": "required",
+      "index_corpus": "[`privileged-mcp-action-verifier`](privileged-mcp-action-v0/)",
+      "index_vectors": "14 (5 accept, 9 reject)",
+      "index_runner": "in-tree local (always-run); Cargo 14/14 harness named separately",
+      "index_maturity": "distinct id from `privileged-mcp-action-v0` ([#1840](https://github.com/Rul1an/assay/issues/1840))"
+    },
+    {
+      "id": "privileged-mcp-action-projection",
+      "path": "conformance/privileged-mcp-action-v0",
+      "vectors": null,
+      "maturity": "no projector; not_selected by declaration",
+      "kind": "not_selected",
+      "policy": "optional",
+      "note": "no projector is registered. producer_reported / incomplete cannot be upgraded to confirmed. never report passed.",
+      "index_corpus": "[`privileged-mcp-action-projection`](privileged-mcp-action-v0/)",
+      "index_vectors": "-",
+      "index_runner": "**not selected**",
+      "index_maturity": "no projector; producer_reported/incomplete cannot be upgraded to confirmed"
+    },
+    {
+      "id": "privileged-mcp-action-e2e",
+      "path": "conformance/privileged-mcp-action-v0",
+      "vectors": 1,
+      "maturity": "one golden-path produced bundle then verifier; not corpus 14/14",
+      "kind": "local",
+      "lane": "e2e",
+      "policy": "required",
+      "index_corpus": "[`privileged-mcp-action-e2e`](privileged-mcp-action-v0/)",
+      "index_vectors": "1 golden path",
+      "index_runner": "in-tree local (always-run)",
+      "index_maturity": "one produced bundle then verifier; not corpus 14/14"
+    },
+    {
       "id": "mcp-jsonrpc-id-conformance",
       "path": "examples/mcp-jsonrpc-id-conformance",
       "vectors": 3,
@@ -69,7 +121,7 @@
       "index_corpus": "[`mcp-era-parity-v0`](../crates/assay-core/tests/fixtures/mcp-era-parity-v0/)",
       "index_vectors": "18 (+2 equivalence pairs)",
       "index_runner": "`cargo test -p assay-core --lib mcp::era_parity_tests`",
-      "index_maturity": "**exploratory** — deliberately lower than the frozen corpus"
+      "index_maturity": "**exploratory** \u2014 deliberately lower than the frozen corpus"
     },
     {
       "id": "observed-effect-v0",
@@ -82,7 +134,7 @@
       "index_corpus": "[`observed-effect-v0`](https://github.com/Rul1an/observed-effect-v0)",
       "index_vectors": "14 cases",
       "index_runner": "its own repository",
-      "index_maturity": "published separately; stdlib recompute + `corpusDigest`. Adequacy measured — see below"
+      "index_maturity": "published separately; stdlib recompute + `corpusDigest`. Adequacy measured \u2014 see below"
     }
   ]
 }

@@ -20,7 +20,13 @@ REPO = Path(__file__).resolve().parent.parent
 REGISTRY_PATH = Path(__file__).resolve().parent / "registry.json"
 SCHEMA = "assay.conformance.registry.v1"
 MAX_REGISTRY_BYTES = 256 * 1024
-KINDS = frozenset(("needs_candidate", "stdlib", "cargo", "external"))
+KINDS = frozenset(("needs_candidate", "stdlib", "cargo", "external", "local", "not_selected"))
+LOCAL_LANES = frozenset(("producer", "verifier", "e2e"))
+REQUIRED_LOCAL_LANE_IDS = frozenset((
+    "privileged-mcp-action-producer",
+    "privileged-mcp-action-verifier",
+    "privileged-mcp-action-e2e",
+))
 POLICIES = frozenset(("required", "optional", "external-candidate"))
 INDEX_FIELDS = ("index_corpus", "index_vectors", "index_runner", "index_maturity")
 REQUIRED_FIELDS = ("id", "path", "kind", "policy", "maturity") + INDEX_FIELDS
@@ -88,8 +94,12 @@ def _validate_suite(suite: object, seen: set[str]) -> dict:
         for field in ("crate", "cargo_target_flag", "cargo_target"):
             if not isinstance(suite.get(field), str):
                 raise RegistryError("%s: cargo suite needs string %s" % (ident, field))
-    if kind in ("needs_candidate", "external") and not isinstance(suite.get("note"), str):
+    if kind in ("needs_candidate", "external", "not_selected") and not isinstance(suite.get("note"), str):
         raise RegistryError("%s: %s suite needs a string note" % (ident, kind))
+    if kind == "local":
+        lane = suite.get("lane")
+        if lane not in LOCAL_LANES:
+            raise RegistryError("%s: local suite needs lane in %s" % (ident, sorted(LOCAL_LANES)))
     return suite
 
 
@@ -206,6 +216,15 @@ def registry_completeness_reasons(
     if not suites:
         return ["registry declares no suites"]
     reasons: list[str] = []
+    present = {s["id"] for s in suites}
+    for ident in sorted(REQUIRED_LOCAL_LANE_IDS):
+        if ident not in present:
+            reasons.append("required local lane missing: %s" % ident)
+        else:
+            row = next(s for s in suites if s["id"] == ident)
+            if row["kind"] != "local" or row["policy"] != "required":
+                reasons.append(
+                    "required local lane %s must be kind=local policy=required" % ident)
     registered: set[str] = set()
     for suite in suites:
         rel = suite["path"]

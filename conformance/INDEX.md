@@ -31,6 +31,10 @@ inventory coverage, not semantic completeness of any corpus.
 |---|---|---|---|
 | [`privileged-mcp-action-v0`](privileged-mcp-action-v0/) | 14 (5 accept, 9 reject) | **needs a candidate** | frozen, digest-pinned, open reproduction request ([#1840](https://github.com/Rul1an/assay/issues/1840)) |
 | [`privileged-mcp-action-v1`](privileged-mcp-action-v1/) | 7 (4 accept, 3 reject) | **needs a candidate** | published profile corpus; no candidate-neutral runner registered |
+| [`privileged-mcp-action-producer`](privileged-mcp-action-v0/) | one-decision write + two-decision still importable | in-tree local (always-run) | producer writes record shape; does not call the verifier |
+| [`privileged-mcp-action-verifier`](privileged-mcp-action-v0/) | 14 (5 accept, 9 reject) | in-tree local (always-run); Cargo 14/14 harness named separately | distinct id from `privileged-mcp-action-v0` ([#1840](https://github.com/Rul1an/assay/issues/1840)) |
+| [`privileged-mcp-action-projection`](privileged-mcp-action-v0/) | - | **not selected** | no projector; producer_reported/incomplete cannot be upgraded to confirmed |
+| [`privileged-mcp-action-e2e`](privileged-mcp-action-v0/) | 1 golden path | in-tree local (always-run) | one produced bundle then verifier; not corpus 14/14 |
 | [`mcp-jsonrpc-id-conformance`](../examples/mcp-jsonrpc-id-conformance/) | 3 | stdlib, `check.py reproduce` | published pack; carries a positive control |
 | [`rfc8785` canonicalization](../crates/assay-canonical/tests/vectors/rfc8785.json) | 31 | `cargo test -p assay-canonical --test rfc8785_conformance` | prerequisite vectors; vendored byte-identical into the clean-room pack |
 | [`mcp-era-parity-v0`](../crates/assay-core/tests/fixtures/mcp-era-parity-v0/) | 18 (+2 equivalence pairs) | `cargo test -p assay-core --lib mcp::era_parity_tests` | **exploratory** — deliberately lower than the frozen corpus |
