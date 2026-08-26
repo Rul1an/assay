@@ -41,6 +41,8 @@ Install the SDK and pytest plugin:
 pip install assay-it
 ```
 
+CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
+
 See [Python Quickstart](getting-started/python-quickstart.md) for details.
 
 ### Baseline Management

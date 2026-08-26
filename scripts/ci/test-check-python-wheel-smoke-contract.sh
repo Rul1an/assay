@@ -172,6 +172,21 @@ path.write_text(text)
 PY
 expect_fail "smoke script without assay._native" python3 "$CONTRACT" --root "$CASE"
 
+cp "$ROOT/scripts/ci/smoke-python-wheel.py" "$CASE/scripts/ci/smoke-python-wheel.py"
+echo "=== mutation: drop production install_and_import call ==="
+python3 - "$CASE/scripts/ci/smoke-python-wheel.py" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+old = "    install_and_import(args.python, wheel, version)\n"
+if old not in text:
+    raise SystemExit("production install_and_import call not found")
+path.write_text(text.replace(old, "", 1))
+PY
+expect_fail "drop production install_and_import call" python3 "$CONTRACT" --root "$CASE"
+cp "$ROOT/scripts/ci/smoke-python-wheel.py" "$CASE/scripts/ci/smoke-python-wheel.py"
+
 echo "=== no-op restore ==="
 cp "$ROOT/.github/workflows/release.yml" "$CASE/.github/workflows/release.yml"
 cp "$ROOT/assay-python-sdk/python-artifact-matrix.v0.json" "$CASE/assay-python-sdk/python-artifact-matrix.v0.json"

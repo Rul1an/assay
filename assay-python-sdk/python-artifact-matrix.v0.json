@@ -40,6 +40,7 @@
     "docs/getting-started/index.md",
     "docs/guides/troubleshooting.md",
     "docs/AIcontext/user-flows.md",
+    "docs/migration-v1.2.md",
     "llms.txt"
   ]
 }

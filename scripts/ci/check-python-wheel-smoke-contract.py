@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -106,6 +107,18 @@ def check_wheels_pairs(job: str, matrix: dict, errors: list[str]) -> None:
         fail(errors, f"{RELEASE_REL}: wheel (os, target) pairs {actual} != matrix {expected}")
 
 
+def main_calls_install_and_import(tree: ast.AST) -> bool:
+    for node in tree.body if isinstance(tree, ast.Module) else []:
+        if isinstance(node, ast.FunctionDef) and node.name == "main":
+            for child in ast.walk(node):
+                if isinstance(child, ast.Call):
+                    func = child.func
+                    if isinstance(func, ast.Name) and func.id == "install_and_import":
+                        return True
+            return False
+    return False
+
+
 def check_smoke_script(root: Path, errors: list[str]) -> None:
     path = root / SMOKE_REL
     if not path.is_file():
@@ -122,6 +135,13 @@ def check_smoke_script(root: Path, errors: list[str]) -> None:
             fail(errors, f"{SMOKE_REL}: missing {label}")
     if re.search(r"pypi\.org|extra-index-url", text):
         fail(errors, f"{SMOKE_REL}: must not talk to PyPI")
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:
+        fail(errors, f"{SMOKE_REL}: cannot parse: {exc}")
+        return
+    if not main_calls_install_and_import(tree):
+        fail(errors, f"{SMOKE_REL}: main must invoke install_and_import")
 
 
 def main(argv: list[str] | None = None) -> int:

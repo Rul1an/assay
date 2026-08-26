@@ -28,6 +28,7 @@ ARTIFACT_TRUTH_PR_PATHS = (
     "llms.txt",
     "docs/python-sdk/**",
     "docs/getting-started/**",
+    "docs/migration-v1.2.md",
 )
 PIP_INSTALL_RE = re.compile(
     r"""(?:python(?:3(?:\.\d+)?)?\s+-m\s+)?pip(?:3|x)?\s+install(?:\s+(?:-U|--upgrade|--user))*\s+["']?assay-it\b""",
@@ -138,6 +139,59 @@ def check_docs(root: Path, matrix: dict, errors: list[str]) -> None:
             fail(errors, f"{rel}: sdist claim is out of scope")
         if ABI3_CLAIM_RE.search(text):
             fail(errors, f"{rel}: abi3 claim is out of scope")
+
+
+DOC_SUFFIXES = {".md", ".txt"}
+# Live install-doc surfaces (current inventory dirs + top-level docs/*.md).
+# Do not crawl tests/, CHANGELOG, archive, plans, or architecture specs.
+INSTALL_DOC_SCAN_DIRS = (
+    "docs/python-sdk",
+    "docs/getting-started",
+    "docs/guides",
+    "docs/AIcontext",
+    "assay-python-sdk",
+)
+
+
+def iter_install_doc_candidates(root: Path) -> list[str]:
+    rels: list[str] = []
+    docs = root / "docs"
+    if docs.is_dir():
+        for child in sorted(docs.iterdir()):
+            if child.is_file() and child.suffix in DOC_SUFFIXES:
+                rels.append(child.relative_to(root).as_posix())
+    for rel_dir in INSTALL_DOC_SCAN_DIRS:
+        base = root / rel_dir
+        if not base.is_dir():
+            continue
+        for child in sorted(base.rglob("*")):
+            if child.is_file() and child.suffix in DOC_SUFFIXES:
+                rels.append(child.relative_to(root).as_posix())
+    llms = root / "llms.txt"
+    if llms.is_file():
+        rels.append("llms.txt")
+    seen: set[str] = set()
+    out: list[str] = []
+    for rel in rels:
+        if rel not in seen:
+            seen.add(rel)
+            out.append(rel)
+    return out
+
+
+def check_install_docs_inventory(root: Path, matrix: dict, errors: list[str]) -> None:
+    listed = set(matrix.get("install_docs") or [])
+    for rel in iter_install_doc_candidates(root):
+        path = root / rel
+        try:
+            page = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if PIP_INSTALL_RE.search(page) and rel not in listed:
+            fail(
+                errors,
+                f"{rel}: active pip install assay-it is omitted from install_docs",
+            )
 
 
 def tag_abi(tag: str) -> str:
@@ -278,6 +332,7 @@ def main(argv: list[str] | None = None) -> int:
     check_cargo(root, errors)
     check_release_workflow(root, matrix, errors)
     check_docs(root, matrix, errors)
+    check_install_docs_inventory(root, matrix, errors)
     check_kernel_matrix_paths(root, errors)
     published = None
     if args.published_files:

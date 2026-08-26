@@ -91,6 +91,7 @@ Path(sys.argv[1]).write_text(
                 "docs/getting-started/index.md",
                 "docs/guides/troubleshooting.md",
                 "docs/AIcontext/user-flows.md",
+                "docs/migration-v1.2.md",
                 "llms.txt",
             ],
         },
@@ -153,6 +154,7 @@ YML
     docs/getting-started/index.md \
     docs/guides/troubleshooting.md \
     docs/AIcontext/user-flows.md \
+    docs/migration-v1.2.md \
     llms.txt
   do
     printf 'pip install assay-it\n%s\n' "$bound" > "$dest/$rel"
@@ -307,6 +309,36 @@ path.write_text(text.replace(old, "", 1))
 PY
 expect_fail "dropped kernel-matrix artifact-truth path" --root "$GREEN"
 rm -f "$GREEN/.github/workflows/kernel-matrix.yml"
+
+echo "=== mutation: drop migration-v1.2.md from install_docs ==="
+cp "$GREEN/assay-python-sdk/python-artifact-matrix.v0.json" "$TMP/matrix.bak"
+python3 - "$GREEN/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+data = json.loads(path.read_text())
+data["install_docs"] = [rel for rel in data["install_docs"] if rel != "docs/migration-v1.2.md"]
+path.write_text(json.dumps(data, indent=2) + "\n")
+PY
+expect_fail "drop migration-v1.2.md from install_docs" --root "$GREEN"
+mv "$TMP/matrix.bak" "$GREEN/assay-python-sdk/python-artifact-matrix.v0.json"
+
+echo "=== live install_docs includes migration-v1.2.md ==="
+python3 - "$ROOT/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text())
+if "docs/migration-v1.2.md" not in data.get("install_docs", []):
+    raise SystemExit("live install_docs missing docs/migration-v1.2.md")
+PY
+if [ $? -ne 0 ]; then
+  fail_test "live install_docs missing docs/migration-v1.2.md"
+fi
+pass "live install_docs includes docs/migration-v1.2.md"
 
 echo "=== no-op restore ==="
 expect_pass "restored green fixture" --root "$GREEN"
