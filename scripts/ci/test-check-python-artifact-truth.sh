@@ -203,6 +203,29 @@ PY
 expect_fail "widened Requires-Python" --root "$GREEN"
 mv "$TMP/pyproject.bak" "$GREEN/assay-python-sdk/pyproject.toml"
 
+echo "=== mutation: coordinated Requires-Python widen ==="
+cp "$GREEN/assay-python-sdk/pyproject.toml" "$TMP/pyproject.bak"
+cp "$GREEN/assay-python-sdk/python-artifact-matrix.v0.json" "$TMP/matrix.bak"
+python3 - "$GREEN/assay-python-sdk/pyproject.toml" "$GREEN/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+pyproject = Path(sys.argv[1])
+pyproject.write_text(
+    pyproject.read_text().replace(
+        'requires-python = "==3.12.*"', 'requires-python = ">=3.9"'
+    )
+)
+matrix = Path(sys.argv[2])
+data = json.loads(matrix.read_text())
+data["requires_python"] = ">=3.9"
+matrix.write_text(json.dumps(data, indent=2) + "\n")
+PY
+expect_fail "coordinated Requires-Python widen" --root "$GREEN"
+mv "$TMP/pyproject.bak" "$GREEN/assay-python-sdk/pyproject.toml"
+mv "$TMP/matrix.bak" "$GREEN/assay-python-sdk/python-artifact-matrix.v0.json"
+
 echo "=== mutation: PyPy without wheel ==="
 cp "$GREEN/assay-python-sdk/pyproject.toml" "$TMP/pyproject.bak"
 python3 - "$GREEN/assay-python-sdk/pyproject.toml" <<'PY'
@@ -218,6 +241,30 @@ path.write_text(text.replace(needle, insert, 1))
 PY
 expect_fail "PyPy classifier without wheel" --root "$GREEN"
 mv "$TMP/pyproject.bak" "$GREEN/assay-python-sdk/pyproject.toml"
+
+echo "=== mutation: coordinated PyPy with empty forbidden_classifiers ==="
+cp "$GREEN/assay-python-sdk/pyproject.toml" "$TMP/pyproject.bak"
+cp "$GREEN/assay-python-sdk/python-artifact-matrix.v0.json" "$TMP/matrix.bak"
+python3 - "$GREEN/assay-python-sdk/pyproject.toml" "$GREEN/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+pyproject = Path(sys.argv[1])
+text = pyproject.read_text()
+needle = '"Programming Language :: Python :: Implementation :: CPython",'
+insert = needle + '\n    "Programming Language :: Python :: Implementation :: PyPy",'
+if needle not in text:
+    raise SystemExit("classifier insert point missing")
+pyproject.write_text(text.replace(needle, insert, 1))
+matrix = Path(sys.argv[2])
+data = json.loads(matrix.read_text())
+data["forbidden_classifiers"] = []
+matrix.write_text(json.dumps(data, indent=2) + "\n")
+PY
+expect_fail "coordinated PyPy with empty forbidden_classifiers" --root "$GREEN"
+mv "$TMP/pyproject.bak" "$GREEN/assay-python-sdk/pyproject.toml"
+mv "$TMP/matrix.bak" "$GREEN/assay-python-sdk/python-artifact-matrix.v0.json"
 
 echo "=== mutation: sdist claim ==="
 python3 - "$TMP/sdist.json" <<'PY'
@@ -244,6 +291,22 @@ cp "$GREEN/docs/python-sdk/index.md" "$TMP/docs.bak"
 printf 'pip install assay-it\n' > "$GREEN/docs/python-sdk/index.md"
 expect_fail "bare pip install docs" --root "$GREEN"
 mv "$TMP/docs.bak" "$GREEN/docs/python-sdk/index.md"
+
+echo "=== mutation: drop one kernel-matrix artifact-truth path ==="
+cp "$ROOT/.github/workflows/kernel-matrix.yml" "$GREEN/.github/workflows/kernel-matrix.yml"
+python3 - "$GREEN/.github/workflows/kernel-matrix.yml" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old = '      - "llms.txt"\n'
+if old not in text:
+    raise SystemExit("llms.txt path entry missing")
+path.write_text(text.replace(old, "", 1))
+PY
+expect_fail "dropped kernel-matrix artifact-truth path" --root "$GREEN"
+rm -f "$GREEN/.github/workflows/kernel-matrix.yml"
 
 echo "=== no-op restore ==="
 expect_pass "restored green fixture" --root "$GREEN"

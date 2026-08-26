@@ -81,27 +81,13 @@ echo "=== mutation: empty dist / no produced wheel ==="
 mkdir -p "$CASE/assay-python-sdk/dist"
 expect_fail "empty dist native cell" python3 "$SMOKE" --root "$ROOT" --dist-dir "$CASE/assay-python-sdk/dist" --target x86_64-unknown-linux-gnu
 
-echo "=== mutation: two matching wheels ==="
+echo "=== mutation: extra wheel beside expected ==="
 write_dummy_wheel "$CASE/assay-python-sdk/dist" "assay_it-5.4.0-cp312-cp312-macosx_10_12_x86_64.whl"
-cp "$CASE/assay-python-sdk/dist/assay_it-5.4.0-cp312-cp312-macosx_10_12_x86_64.whl" \
-  "$CASE/assay-python-sdk/dist/assay_it-5.4.0-cp312-cp312-macosx_10_12_x86_64.whl.bak"
-# two files with the same expected name cannot coexist; write a second unexpected extra plus the expected, then duplicate via copy to a second matching path using a temp dir listing
-# The smoke matches exact filename, so two exact names need two dirs. Instead drop the expected name and leave nothing, already covered. Create two exact files by running find against a dir that has the expected plus a renamed duplicate that still matches glob+name.
-python3 - "$CASE/assay-python-sdk/dist" <<'PY'
-from pathlib import Path
-import sys
-dist = Path(sys.argv[1])
-expected = dist / "assay_it-5.4.0-cp312-cp312-macosx_10_12_x86_64.whl"
-# A second file with a different name must not satisfy the exact-name check; prove extra files are ignored.
-(expected.with_name("noise-not-the-cell.whl")).write_bytes(expected.read_bytes())
-print("extra non-matching wheel present")
-PY
-# Extra non-matching wheel stays as setup; the skip-path PASS is gone.
+write_dummy_wheel "$CASE/assay-python-sdk/dist" "noise-not-the-cell.whl"
+expect_fail "extra wheel beside expected" python3 "$SMOKE" --root "$ROOT" --dist-dir "$CASE/assay-python-sdk/dist" --target x86_64-apple-darwin
+rm -f "$CASE/assay-python-sdk/dist/noise-not-the-cell.whl"
 
-# two exact matches: copy into a listing that smoke sees as two same names via a wrapper dir is impossible. Simulate by editing find to... instead write two files where the second has the same name in a way glob returns both — can't. Use a subdirectory? glob is dist.glob("*.whl") so only top-level.
-# Create two files that both equal expected name after we patch? Simpler: write expected twice by using a second identical tag file that the code treats as match — it matches path.name == expected, so only exact name.
-# Reproduce "two wheels" by temporarily making find_wheel count all *.whl when names collide via hardlink? Two hardlinks same name is one file.
-# I'll drop the expected file (rename) while leaving only noise — that's empty for that cell.
+echo "=== mutation: renamed produced wheel ==="
 mv "$CASE/assay-python-sdk/dist/assay_it-5.4.0-cp312-cp312-macosx_10_12_x86_64.whl" \
   "$CASE/assay-python-sdk/dist/renamed-away.whl"
 expect_fail "renamed produced wheel" python3 "$SMOKE" --root "$ROOT" --dist-dir "$CASE/assay-python-sdk/dist" --target x86_64-apple-darwin

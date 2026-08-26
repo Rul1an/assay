@@ -44,6 +44,12 @@ on:
       - "docs/contributing/REFACTOR-WAVE-STATUS.md"
       - ".github/rulesets/main-required-ci-contexts.json"
       - ".github/workflows/kernel-matrix.yml"
+      # python-artifact-truth hook runs under Lint (pre-commit) here. scripts/**
+      # covers a guard change; a metadata/docs-only PR never starts this workflow.
+      - "assay-python-sdk/**"
+      - "llms.txt"
+      - "docs/python-sdk/**"
+      - "docs/getting-started/**"
       # S1b coverage-gate hook runs under Lint (pre-commit) in this workflow.
       - ".github/workflows/monitor-attach-smoke.yml"
       # The lane self-test pins guards inside this workflow file; run the

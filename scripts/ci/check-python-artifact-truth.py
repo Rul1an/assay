@@ -14,7 +14,21 @@ PYPROJECT_REL = "assay-python-sdk/pyproject.toml"
 CARGO_REL = "assay-python-sdk/Cargo.toml"
 RELEASE_REL = ".github/workflows/release.yml"
 WORKSPACE_REL = "Cargo.toml"
+KERNEL_MATRIX_REL = ".github/workflows/kernel-matrix.yml"
 SCHEMA = "assay.python_artifact_matrix.v0"
+PYPY_CLASSIFIER = "Programming Language :: Python :: Implementation :: PyPy"
+REQUIRES_CPYTHON_312 = "==3.12.*"
+CP312_ABI = "cp312"
+PP_ABI_RE = re.compile(r"^pp\d+$")
+# python-artifact-truth runs under kernel-matrix Lint. scripts/** already
+# fires; these remaining surfaces must stay listed or a metadata/docs-only
+# PR never starts the workflow.
+ARTIFACT_TRUTH_PR_PATHS = (
+    "assay-python-sdk/**",
+    "llms.txt",
+    "docs/python-sdk/**",
+    "docs/getting-started/**",
+)
 PIP_INSTALL_RE = re.compile(
     r"""(?:python(?:3(?:\.\d+)?)?\s+-m\s+)?pip(?:3|x)?\s+install(?:\s+(?:-U|--upgrade|--user))*\s+["']?assay-it\b""",
     re.IGNORECASE,
@@ -126,6 +140,91 @@ def check_docs(root: Path, matrix: dict, errors: list[str]) -> None:
             fail(errors, f"{rel}: abi3 claim is out of scope")
 
 
+def tag_abi(tag: str) -> str:
+    """Wheel ABI/impl is the first '-' separated tag component."""
+    return tag.split("-", 1)[0]
+
+
+def check_tag_anchor(root: Path, matrix: dict, errors: list[str]) -> None:
+    """Anchor Requires-Python / PyPy metadata to declared wheel tags."""
+    wheels = matrix.get("wheels") or []
+    tags = [str(wheel.get("tag") or "") for wheel in wheels]
+    abis = [tag_abi(tag) for tag in tags]
+    requires = matrix.get("requires_python")
+    pyproject = (root / PYPROJECT_REL).read_text(encoding="utf-8")
+    py_req = re.search(r'(?m)^requires-python\s*=\s*"([^"]+)"', pyproject)
+    py_requires = py_req.group(1) if py_req else None
+
+    if requires == REQUIRES_CPYTHON_312:
+        for tag, abi in zip(tags, abis, strict=False):
+            if abi != CP312_ABI:
+                fail(
+                    errors,
+                    f"{MATRIX_REL}: requires_python {REQUIRES_CPYTHON_312!r} "
+                    f"requires every declared tag ABI to be {CP312_ABI}, got {tag!r}",
+                )
+
+    # Inverse: every declared tag is cp312-... (no other CPython ABI, no pp*).
+    if tags and all(abi == CP312_ABI for abi in abis):
+        if requires != REQUIRES_CPYTHON_312:
+            fail(
+                errors,
+                f"{MATRIX_REL}: all declared tags are {CP312_ABI}-only; "
+                f"requires_python must be {REQUIRES_CPYTHON_312!r}, got {requires!r}",
+            )
+        if py_requires != REQUIRES_CPYTHON_312:
+            fail(
+                errors,
+                f"{PYPROJECT_REL}: all declared tags are {CP312_ABI}-only; "
+                f"requires-python must be {REQUIRES_CPYTHON_312!r}, got {py_requires!r}",
+            )
+
+    required = matrix.get("required_classifiers") or []
+    has_pypy = PYPY_CLASSIFIER in pyproject or PYPY_CLASSIFIER in required
+    has_pp_tag = any(PP_ABI_RE.fullmatch(abi) for abi in abis)
+    if has_pypy and not has_pp_tag:
+        fail(
+            errors,
+            f"{MATRIX_REL}: {PYPY_CLASSIFIER!r} is forbidden unless a "
+            f"declared tag ABI matches pp\\d+",
+        )
+
+
+def pull_request_paths(text: str) -> list[str]:
+    in_pr = in_paths = False
+    paths: list[str] = []
+    for line in text.splitlines():
+        if re.match(r"^  pull_request:\s*$", line):
+            in_pr, in_paths = True, False
+            continue
+        if in_pr and re.match(r"^  \S", line):
+            in_pr = in_paths = False
+        if in_pr and re.match(r"^    paths:\s*$", line):
+            in_paths = True
+            continue
+        if in_pr and in_paths and re.match(r"^    \S", line):
+            in_paths = False
+        if in_paths:
+            match = re.match(r'^      - "([^"]+)"\s*(?:#.*)?$', line)
+            if match:
+                paths.append(match.group(1))
+    return paths
+
+
+def check_kernel_matrix_paths(root: Path, errors: list[str]) -> None:
+    path = root / KERNEL_MATRIX_REL
+    if not path.is_file():
+        return
+    paths = pull_request_paths(path.read_text(encoding="utf-8"))
+    for required in ARTIFACT_TRUTH_PR_PATHS:
+        if required not in paths:
+            fail(
+                errors,
+                f"{KERNEL_MATRIX_REL}: pull_request.paths must include {required!r} "
+                f"(python-artifact-truth hook runs here)",
+            )
+
+
 def expected_wheel_names(matrix: dict, version: str) -> list[str]:
     dist = matrix["package"].replace("-", "_")
     return [f"{dist}-{version}-{wheel['tag']}.whl" for wheel in matrix["wheels"]]
@@ -175,9 +274,11 @@ def main(argv: list[str] | None = None) -> int:
             fail(errors, f"{MATRIX_REL}: {target}: import_smoke must be native")
     version = workspace_version(root, errors)
     check_pyproject(root, matrix, errors)
+    check_tag_anchor(root, matrix, errors)
     check_cargo(root, errors)
     check_release_workflow(root, matrix, errors)
     check_docs(root, matrix, errors)
+    check_kernel_matrix_paths(root, errors)
     published = None
     if args.published_files:
         published = json.loads(Path(args.published_files).read_text(encoding="utf-8"))

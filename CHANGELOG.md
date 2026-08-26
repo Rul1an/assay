@@ -7,11 +7,16 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - `assay-it` metadata, release wheel targets, and install docs now share one
   `assay.python_artifact_matrix.v0` that pins/parity-checks those surfaces.
-  Each wheels-job cell smokes the locally produced wheel (exact one file,
-  no-index only-binary install, version + `assay._native`). Both macOS cells
-  are native: x86_64 on macos-15-intel, arm64 on macos-15. There is no
-  unsupported escape for a declared pair. This does not change published
-  5.4.0 files (#2649).
+  Metadata is anchored to the declared wheel tags (`==3.12.*` requires every
+  tag ABI `cp312`; cp312-only tags require `==3.12.*` in the matrix and
+  pyproject; PyPy is forbidden without a `pp*` tag). kernel-matrix
+  `pull_request.paths` cover the SDK and install docs so the
+  python-artifact-truth hook runs on metadata-only PRs. Each wheels-job
+  cell smokes the locally produced wheel (exactly one `.whl` whose name is
+  the expected `{dist}-{version}-{tag}.whl`, no-index only-binary install,
+  version + `assay._native`). Both macOS cells are native: x86_64 on
+  macos-15-intel, arm64 on macos-15. There is no unsupported escape for a
+  declared pair. This does not change published 5.4.0 files (#2649).
 
 ### Added
 - `assay policy resolve --input PATH --format json` emits one

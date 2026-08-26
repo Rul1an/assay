@@ -36,9 +36,9 @@ def load_cell(root: Path, target: str) -> dict:
 
 def find_wheel(dist: Path, package: str, version: str, tag: str) -> Path:
     expected = f"{package.replace('-', '_')}-{version}-{tag}.whl"
-    found = sorted(path for path in dist.glob("*.whl") if path.name == expected)
-    if len(found) != 1:
-        names = [path.name for path in sorted(dist.glob("*.whl"))]
+    found = sorted(dist.glob("*.whl"))
+    if len(found) != 1 or found[0].name != expected:
+        names = [path.name for path in found]
         raise SystemExit(
             f"expected exactly one {expected} in {dist}, found {len(found)}: {names}"
         )

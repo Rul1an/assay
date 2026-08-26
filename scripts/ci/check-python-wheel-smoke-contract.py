@@ -96,8 +96,6 @@ def check_matrix(root: Path, errors: list[str]) -> dict | None:
             fail(errors, f"{MATRIX_REL}: {target}: unexpected declared target")
         elif os_label != expected_os:
             fail(errors, f"{MATRIX_REL}: {target}: os must be {expected_os}, got {os_label}")
-        if target == "x86_64-apple-darwin" and os_label == "macos-15":
-            fail(errors, f"{MATRIX_REL}: {target}: os must be macos-15-intel, not macos-15")
     return matrix
 
 
