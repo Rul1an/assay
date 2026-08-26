@@ -100,6 +100,8 @@ def check_release_workflow(root: Path, matrix: dict, errors: list[str]) -> None:
     expected = [wheel["target"] for wheel in matrix["wheels"]]
     if targets != expected:
         fail(errors, f"{RELEASE_REL}: wheel targets {targets} != matrix {expected}")
+    if "Smoke the produced wheel" not in job or "scripts/ci/smoke-python-wheel.py" not in job:
+        fail(errors, f"{RELEASE_REL}: wheels job must bind the produced-wheel smoke")
 
 
 def check_docs(root: Path, matrix: dict, errors: list[str]) -> None:
@@ -143,8 +145,10 @@ def evaluate_published_files(matrix: dict, version: str, filenames: list[str]) -
 def check_pip_download_contract(
     matrix: dict, version: str, errors: list[str], published: list[str] | None
 ) -> None:
-    names = published if published is not None else expected_wheel_names(matrix, version)
-    errors.extend(evaluate_published_files(matrix, version, names))
+    if published is None:
+        # Existence is the producer smoke, not a matrix-vs-itself compare.
+        return
+    errors.extend(evaluate_published_files(matrix, version, published))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -158,6 +162,9 @@ def main(argv: list[str] | None = None) -> int:
     if matrix is None:
         print("\n".join(errors), file=sys.stderr)
         return 1
+    for wheel in matrix.get("wheels") or []:
+        if wheel.get("import_smoke") not in {"native", "unsupported"}:
+            fail(errors, f"{MATRIX_REL}: {wheel.get('target')}: import_smoke must be native or unsupported")
     version = workspace_version(root, errors)
     check_pyproject(root, matrix, errors)
     check_cargo(root, errors)

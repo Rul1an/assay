@@ -16,17 +16,20 @@
     {
       "os": "ubuntu-latest",
       "target": "x86_64-unknown-linux-gnu",
-      "tag": "cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64"
+      "tag": "cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64",
+      "import_smoke": "native"
     },
     {
       "os": "macos-15",
       "target": "x86_64-apple-darwin",
-      "tag": "cp312-cp312-macosx_10_12_x86_64"
+      "tag": "cp312-cp312-macosx_10_12_x86_64",
+      "import_smoke": "unsupported"
     },
     {
       "os": "macos-15",
       "target": "aarch64-apple-darwin",
-      "tag": "cp312-cp312-macosx_11_0_arm64"
+      "tag": "cp312-cp312-macosx_11_0_arm64",
+      "import_smoke": "native"
     }
   ],
   "install_docs": [

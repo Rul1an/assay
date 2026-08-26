@@ -363,7 +363,7 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-push]
-        files: ^scripts/ci/(lib/clear-git-repository-env|test-(check-release-surface|check-python-artifact-truth|git-fixture-env-isolation|perf-pr-event-provenance-contract))\.sh$
+        files: ^scripts/ci/(lib/clear-git-repository-env|test-(check-release-surface|check-python-artifact-truth|check-python-wheel-smoke-contract|git-fixture-env-isolation|perf-pr-event-provenance-contract))\.sh$
 
       - id: release-surface
         name: Release surface matches source and published versions
@@ -378,10 +378,10 @@ repos:
 
       - id: python-artifact-truth
         name: assay-it metadata matches the published wheel matrix
-        entry: bash -c 'bash scripts/ci/test-check-python-artifact-truth.sh && python3 scripts/ci/check-python-artifact-truth.py'
+        entry: bash -c 'bash scripts/ci/test-check-python-artifact-truth.sh && python3 scripts/ci/check-python-artifact-truth.py && bash scripts/ci/test-check-python-wheel-smoke-contract.sh && python3 scripts/ci/check-python-wheel-smoke-contract.py'
         language: system
         pass_filenames: false
-        files: ^(assay-python-sdk/(python-artifact-matrix\.v0\.json|pyproject\.toml|Cargo\.toml|README\.md)|scripts/ci/(check-python-artifact-truth\.py|test-check-python-artifact-truth\.sh)|\.github/workflows/release\.yml|docs/(python-sdk/index\.md|getting-started/(index|installation|python-quickstart)\.md|guides/troubleshooting\.md|AIcontext/user-flows\.md)|llms\.txt|CHANGELOG\.md|\.pre-commit-config\.yaml)$
+        files: ^(assay-python-sdk/(python-artifact-matrix\.v0\.json|pyproject\.toml|Cargo\.toml|README\.md)|scripts/ci/(check-python-artifact-truth\.py|test-check-python-artifact-truth\.sh|check-python-wheel-smoke-contract\.py|test-check-python-wheel-smoke-contract\.sh|smoke-python-wheel\.py)|\.github/workflows/release\.yml|docs/(python-sdk/index\.md|getting-started/(index|installation|python-quickstart)\.md|guides/troubleshooting\.md|AIcontext/user-flows\.md)|llms\.txt|CHANGELOG\.md|\.pre-commit-config\.yaml)$
 
       - id: osv-scanner-scheduled-lockstep
         name: OSV scanner/reporter lockstep and count bind

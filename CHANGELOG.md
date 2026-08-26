@@ -6,9 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - `assay-it` metadata, release wheel targets, and install docs now share one
-  `assay.python_artifact_matrix.v0`. Declared support is CPython 3.12 on the
-  three existing wheel targets. This does not change published 5.4.0 files
-  (#2649).
+  `assay.python_artifact_matrix.v0` that pins/parity-checks those surfaces.
+  Each wheels-job cell smokes the locally produced wheel (exact one file,
+  no-index only-binary install, version + `assay._native` on native runners;
+  macos x86_64 is unsupported for import). This does not change published
+  5.4.0 files (#2649).
 
 ### Added
 - `assay policy resolve --input PATH --format json` emits one

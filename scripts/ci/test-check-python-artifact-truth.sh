@@ -68,16 +68,19 @@ Path(sys.argv[1]).write_text(
                     "os": "ubuntu-latest",
                     "target": "x86_64-unknown-linux-gnu",
                     "tag": "cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64",
+                    "import_smoke": "native",
                 },
                 {
                     "os": "macos-15",
                     "target": "x86_64-apple-darwin",
                     "tag": "cp312-cp312-macosx_10_12_x86_64",
+                    "import_smoke": "unsupported",
                 },
                 {
                     "os": "macos-15",
                     "target": "aarch64-apple-darwin",
                     "tag": "cp312-cp312-macosx_11_0_arm64",
+                    "import_smoke": "native",
                 },
             ],
             "install_docs": [
@@ -131,6 +134,10 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           args: --release --out dist --locked -i python3.12 --compatibility pypi
+      - name: Smoke the produced wheel
+        env:
+          ASSAY_WHEEL_TARGET: ${{ matrix.target }}
+        run: python3 scripts/ci/smoke-python-wheel.py --dist-dir assay-python-sdk/dist
       - name: Upload wheels
         with:
           path: assay-python-sdk/dist/*.whl

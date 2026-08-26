@@ -55,5 +55,6 @@ run_isolated() {
 run_isolated scripts/ci/test-perf-pr-event-provenance-contract.sh --no-mutations
 run_isolated scripts/ci/test-check-release-surface.sh
 run_isolated scripts/ci/test-check-python-artifact-truth.sh
+run_isolated scripts/ci/test-check-python-wheel-smoke-contract.sh
 
 echo "ok: fixture tests isolate inherited linked-worktree Git state"

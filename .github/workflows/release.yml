@@ -847,6 +847,12 @@ jobs:
           sccache: 'false'
           manylinux: auto
 
+      - name: Smoke the produced wheel
+        shell: bash
+        env:
+          ASSAY_WHEEL_TARGET: ${{ matrix.target }}
+        run: python3 scripts/ci/smoke-python-wheel.py --dist-dir assay-python-sdk/dist
+
       - name: Upload wheels
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
