@@ -5,6 +5,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ORACLE="${ROOT}/scripts/ci/verify-release.sh"
+ASSET_CONTRACT="${ROOT}/scripts/ci/release_asset_contract.sh"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -20,6 +21,7 @@ expect_status() {
 }
 
 [[ -f "$ORACLE" ]] || fail "release oracle is missing: $ORACLE"
+[[ -f "$ASSET_CONTRACT" ]] || fail "shared release asset contract is missing: $ASSET_CONTRACT"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -30,6 +32,32 @@ printf '%s\n' "$expected_assets" | grep -qxF 'assay-v5.3.0-release-proof-kit.tar
   || fail "asset generator omitted proof kit"
 if printf '%s\n' "$expected_assets" | grep -qxF 'latest.json'; then
   fail "asset generator must not accept latest.json"
+fi
+
+expected_mcp_installability=$(cat <<'EOF'
+assay-mcp-server	x86_64-unknown-linux-gnu	manual_step	assay-mcp-server-v5.4.0-x86_64-unknown-linux-gnu.tar.gz
+assay-mcp-server	aarch64-unknown-linux-gnu	manual_step	assay-mcp-server-v5.4.0-aarch64-unknown-linux-gnu.tar.gz
+assay-mcp-server	x86_64-apple-darwin	unsupported	-
+assay-mcp-server	aarch64-apple-darwin	unsupported	-
+assay-mcp-server	x86_64-pc-windows-msvc	unsupported	-
+EOF
+)
+actual_mcp_installability="$($ORACLE --unit-installability-matrix 5.4.0 | grep '^assay-mcp-server')"
+[[ "$actual_mcp_installability" == "$expected_mcp_installability" ]] \
+  || fail "MCP server installability matrix is not the measured release surface"
+
+release_doc="$ROOT/docs/reference/release.md"
+documented_matrix="$(sed -n \
+  '/<!-- release-installability-matrix:start -->/,/<!-- release-installability-matrix:end -->/p' \
+  "$release_doc" | sed '1d;$d')"
+generated_matrix="$($ORACLE --unit-installability-markdown 5.4.0)"
+[[ -n "$documented_matrix" && "$documented_matrix" == "$generated_matrix" ]] \
+  || fail "release documentation did not come from the installability contract"
+
+# Both release consumers must call the shared contract. Reintroducing a local
+# expected_assets function would create a second release truth.
+if grep -Eq '^expected_assets\(\)' "$ORACLE"; then
+  fail "release verifier carries a local expected_assets implementation"
 fi
 
 # Abbreviated identifiers are never resolved or expanded.

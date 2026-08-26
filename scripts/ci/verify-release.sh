@@ -3,6 +3,10 @@
 # 2=infra (missing tools, API/network failure, timeout, or unreadable input).
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./scripts/ci/release_asset_contract.sh
+source "$SCRIPT_DIR/release_asset_contract.sh"
+
 REPO="${REPO:-Rul1an/assay}"
 GH="${GH:-$(command -v gh)}"
 PYTHON="${PYTHON:-$(command -v python3)}"
@@ -20,34 +24,6 @@ finding() { printf 'FINDING: %s\n' "$*" >&2; exit 1; }
 infra() { printf 'INFRA: %s\n' "$*" >&2; exit 2; }
 
 valid_sha() { [[ "${1:-}" =~ ^[0-9a-f]{40}$ ]]; }
-
-expected_assets() {
-  local version="$1"
-  printf '%s\n' \
-    "assay-mcp-server-v${version}-aarch64-unknown-linux-gnu.tar.gz" \
-    "assay-mcp-server-v${version}-aarch64-unknown-linux-gnu.tar.gz.sha256" \
-    "assay-mcp-server-v${version}-linux.mcpb" \
-    "assay-mcp-server-v${version}-linux.mcpb.sha256" \
-    "assay-mcp-server-v${version}-x86_64-unknown-linux-gnu.tar.gz" \
-    "assay-mcp-server-v${version}-x86_64-unknown-linux-gnu.tar.gz.sha256" \
-    "assay-v${version}-aarch64-apple-darwin.tar.gz" \
-    "assay-v${version}-aarch64-apple-darwin.tar.gz.sha256" \
-    "assay-v${version}-aarch64-unknown-linux-gnu.tar.gz" \
-    "assay-v${version}-aarch64-unknown-linux-gnu.tar.gz.sha256" \
-    "assay-v${version}-release-proof-kit.tar.gz" \
-    "assay-v${version}-release-proof-kit.tar.gz.sha256" \
-    "assay-v${version}-release-provenance.json" \
-    "assay-v${version}-release-provenance.json.sha256" \
-    "assay-v${version}-sbom-cyclonedx.tar.gz" \
-    "assay-v${version}-sbom-cyclonedx.tar.gz.sha256" \
-    "assay-v${version}-x86_64-apple-darwin.tar.gz" \
-    "assay-v${version}-x86_64-apple-darwin.tar.gz.sha256" \
-    "assay-v${version}-x86_64-pc-windows-msvc.zip" \
-    "assay-v${version}-x86_64-pc-windows-msvc.zip.sha256" \
-    "assay-v${version}-x86_64-unknown-linux-gnu.tar.gz" \
-    "assay-v${version}-x86_64-unknown-linux-gnu.tar.gz.sha256" \
-    "server.json"
-}
 
 expected_absent_attestation() {
   case "$1" in
@@ -346,7 +322,7 @@ post_publish() {
     || infra "could not fetch release JSON"
   parse_release "$release" >"$WORK/assets.tsv" || finding "release JSON is malformed"
   awk -F '\t' '$1 != "TARGET" { print $1 }' "$WORK/assets.tsv" | LC_ALL=C sort >"$WORK/actual"
-  expected_assets "$VERSION" | LC_ALL=C sort >"$WORK/expected"
+  release_expected_assets "$VERSION" | LC_ALL=C sort >"$WORK/expected"
   cmp -s "$WORK/actual" "$WORK/expected" || finding "release asset names do not exactly match the expected set"
 
   mkdir -p "$WORK/assets"
@@ -430,7 +406,9 @@ PY
 
 usage() { printf 'usage: verify-release.sh [--pre-tag [PIN_SHA]|--self-test]\n' >&2; exit 2; }
 case "${1:-}" in
-  --unit-expected-assets) [[ $# -eq 2 ]] || usage; expected_assets "$2"; exit 0 ;;
+  --unit-expected-assets) [[ $# -eq 2 ]] || usage; release_expected_assets "$2"; exit 0 ;;
+  --unit-installability-matrix) [[ $# -eq 2 ]] || usage; release_installability_matrix "$2"; exit 0 ;;
+  --unit-installability-markdown) [[ $# -eq 2 ]] || usage; release_installability_markdown "$2"; exit 0 ;;
   --unit-validate-sha) [[ $# -eq 2 ]] || usage; valid_sha "$2" || exit 1; exit 0 ;;
   --unit-verify-attestation-json) [[ $# -eq 2 ]] || usage; verify_attestation_json "$2"; exit $? ;;
   --unit-classify-attestation)

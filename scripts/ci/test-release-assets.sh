@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CHECK_SCRIPT="${REPO_ROOT}/scripts/ci/check-release-assets.sh"
+ASSET_CONTRACT="${REPO_ROOT}/scripts/ci/release_asset_contract.sh"
 CHECKSUM_WRITER="${REPO_ROOT}/scripts/ci/write_sha256_sidecar.sh"
 VERSION="v9.9.9"
 SEMVER="${VERSION#v}"
@@ -15,6 +16,25 @@ compute_sha256() {
   else
     shasum -a 256 "$file" | awk '{print $1}'
   fi
+}
+
+[[ -f "$ASSET_CONTRACT" ]] || {
+  echo "shared release asset contract is missing: $ASSET_CONTRACT" >&2
+  exit 1
+}
+# shellcheck disable=SC2016
+grep -Fq 'source "$SCRIPT_DIR/release_asset_contract.sh"' "$CHECK_SCRIPT" || {
+  echo "release preflight does not source the shared asset contract" >&2
+  exit 1
+}
+# shellcheck disable=SC2016
+grep -Fq 'done < <(release_checksum_targets "$VERSION")' "$CHECK_SCRIPT" || {
+  echo "release preflight does not consume shared checksum targets" >&2
+  exit 1
+}
+grep -Fq 'done < <(release_plain_assets)' "$CHECK_SCRIPT" || {
+  echo "release preflight does not consume shared plain assets" >&2
+  exit 1
 }
 
 write_asset() {
