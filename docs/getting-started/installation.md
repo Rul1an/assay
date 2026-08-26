@@ -36,6 +36,8 @@ Assay does not currently document Homebrew, Scoop, or a public GHCR image as ver
 python -m pip install assay-it
 ```
 
+CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
+
 `assay-it` installs the Python SDK and pytest plugin. It does not install the `assay` CLI. The package named `assay` on PyPI is unrelated to this project.
 
 ## Verify the CLI

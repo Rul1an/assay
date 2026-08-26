@@ -1,0 +1,42 @@
+{
+  "schema": "assay.python_artifact_matrix.v0",
+  "package": "assay-it",
+  "requires_python": "==3.12.*",
+  "required_classifiers": [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython"
+  ],
+  "forbidden_classifiers": [
+    "Programming Language :: Python :: Implementation :: PyPy"
+  ],
+  "publish_sdist": false,
+  "support_bound": "CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.",
+  "wheels": [
+    {
+      "os": "ubuntu-latest",
+      "target": "x86_64-unknown-linux-gnu",
+      "tag": "cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64"
+    },
+    {
+      "os": "macos-15",
+      "target": "x86_64-apple-darwin",
+      "tag": "cp312-cp312-macosx_10_12_x86_64"
+    },
+    {
+      "os": "macos-15",
+      "target": "aarch64-apple-darwin",
+      "tag": "cp312-cp312-macosx_11_0_arm64"
+    }
+  ],
+  "install_docs": [
+    "assay-python-sdk/README.md",
+    "docs/python-sdk/index.md",
+    "docs/getting-started/python-quickstart.md",
+    "docs/getting-started/installation.md",
+    "docs/getting-started/index.md",
+    "docs/guides/troubleshooting.md",
+    "docs/AIcontext/user-flows.md",
+    "llms.txt"
+  ]
+}

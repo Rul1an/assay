@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- `assay-it` metadata, release wheel targets, and install docs now share one
+  `assay.python_artifact_matrix.v0`. Declared support is CPython 3.12 on the
+  three existing wheel targets. This does not change published 5.4.0 files
+  (#2649).
+
 ### Added
 - `assay policy resolve --input PATH --format json` emits one
   `assay.policy.resolved.v0` document after the same load and schema-compile

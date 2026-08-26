@@ -6,7 +6,7 @@ build-backend = "maturin"
 name = "assay-it"
 description = "Python bindings for Assay trace capture, policy coverage, and explanation helpers."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = "==3.12.*"
 license = { text = "MIT" }
 authors = [{ name = "Assay" }]
 classifiers = [
@@ -15,8 +15,8 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Rust",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
     "Topic :: Software Development :: Quality Assurance",
 ]
 keywords = ["assay", "policy", "testing", "coverage", "tracing", "mcp", "ai-agents", "agent-security", "evidence"]

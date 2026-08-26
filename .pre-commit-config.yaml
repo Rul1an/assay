@@ -363,7 +363,7 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-push]
-        files: ^scripts/ci/(lib/clear-git-repository-env|test-(check-release-surface|git-fixture-env-isolation|perf-pr-event-provenance-contract))\.sh$
+        files: ^scripts/ci/(lib/clear-git-repository-env|test-(check-release-surface|check-python-artifact-truth|git-fixture-env-isolation|perf-pr-event-provenance-contract))\.sh$
 
       - id: release-surface
         name: Release surface matches source and published versions
@@ -374,6 +374,14 @@ repos:
         # no `target/` build it still verifies source and published-release truth independently.
         files: ^(scripts/ci/((check|test-check)-release-surface|read-assay-release-tag)\.sh|\.github/assay-release-tag|Cargo\.toml|README\.md|llms\.txt|docs/(index\.md|getting-started/(index|installation|quickstart|ci-integration)\.md|reference/cli/index\.md|python-sdk/index\.md|use-cases/(air-gapped|ci-gate)\.md|AIcontext/user-flows\.md|migration-v1\.2\.md|guides/editor-mcp-recipe\.md)|\.pre-commit-config\.yaml)$
 
+
+
+      - id: python-artifact-truth
+        name: assay-it metadata matches the published wheel matrix
+        entry: bash -c 'bash scripts/ci/test-check-python-artifact-truth.sh && python3 scripts/ci/check-python-artifact-truth.py'
+        language: system
+        pass_filenames: false
+        files: ^(assay-python-sdk/(python-artifact-matrix\.v0\.json|pyproject\.toml|Cargo\.toml|README\.md)|scripts/ci/(check-python-artifact-truth\.py|test-check-python-artifact-truth\.sh)|\.github/workflows/release\.yml|docs/(python-sdk/index\.md|getting-started/(index|installation|python-quickstart)\.md|guides/troubleshooting\.md|AIcontext/user-flows\.md)|llms\.txt|CHANGELOG\.md|\.pre-commit-config\.yaml)$
 
       - id: osv-scanner-scheduled-lockstep
         name: OSV scanner/reporter lockstep and count bind
