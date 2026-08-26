@@ -44,6 +44,10 @@ pub(super) fn run_client_to_server(
         // policy sees cannot diverge from a later read of the same bytes.
         match parse_unique_json(line.trim_end()) {
             Ok(value) => match serde_json::from_value::<JsonRpcRequest>(value) {
+                Ok(req) if !req.is_tool_call() => {
+                    // Unique non-tools/call objects (initialize, tools/list,
+                    // notifications, ping) pass through byte-identically.
+                }
                 Ok(req) => {
                     let tool_params = req.tool_params();
                     let tool_name = tool_params

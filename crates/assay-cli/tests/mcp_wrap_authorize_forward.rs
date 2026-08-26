@@ -107,6 +107,16 @@ fn raw_contains_tools_call(path: &Path) -> bool {
         .contains("tools/call")
 }
 
+fn tool_decision_count(path: &Path) -> usize {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v.get("type").and_then(Value::as_str) == Some("assay.tool.decision"))
+        .count()
+}
+
 #[test]
 fn wrap_unique_key_control_authorized_equals_forwarded() {
     let dir = tempfile::tempdir().unwrap();
@@ -130,6 +140,96 @@ fn wrap_unique_key_control_authorized_equals_forwarded() {
     assert_eq!(seen["name"], "echo");
     assert_eq!(seen["arguments"], serde_json::json!({"msg": "ok"}));
     assert_eq!(last_decision_tool(&decisions).as_deref(), Some("echo"));
+}
+
+const INIT_LINE: &str = r#"{"jsonrpc":"2.0","id":21,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}"#;
+const LIST_LINE: &str = r#"{"jsonrpc":"2.0","id":22,"method":"tools/list"}"#;
+const NOTE_LINE: &str = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
+const NON_REQUEST_LINE: &str = r#"{"jsonrpc":"2.0","id":23,"result":{"passthrough":true}}"#;
+const PING_LINE: &str = r#"{"jsonrpc":"2.0","id":24,"method":"ping"}"#;
+
+#[test]
+fn wrap_protocol_control_is_forwarded_without_tool_decision() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut conn, raw, _, decisions) = spawn_wrap(dir.path(), "last");
+
+    conn.send_line(INIT_LINE);
+    let init = conn.read_response_for_id(21);
+    assert!(
+        init.get("error").is_none(),
+        "initialize must be forwarded, not policy-denied: {init}"
+    );
+    assert_eq!(
+        init["result"]["protocolVersion"], "2024-11-05",
+        "initialize must reach the oracle: {init}"
+    );
+    assert_eq!(
+        tool_decision_count(&decisions),
+        0,
+        "initialize must not mint assay.tool.decision: {}",
+        std::fs::read_to_string(&decisions).unwrap_or_default()
+    );
+
+    conn.send_line(LIST_LINE);
+    let listed = conn.read_response_for_id(22);
+    assert!(
+        listed.get("error").is_none(),
+        "tools/list must be forwarded, not policy-denied: {listed}"
+    );
+    assert_eq!(
+        tool_decision_count(&decisions),
+        0,
+        "tools/list must not mint assay.tool.decision: {}",
+        std::fs::read_to_string(&decisions).unwrap_or_default()
+    );
+
+    conn.send_line(NOTE_LINE);
+    conn.send_line(NON_REQUEST_LINE);
+    conn.send_line(PING_LINE);
+    let ping = conn.read_response_for_id(24);
+    assert!(
+        ping.get("error").is_none(),
+        "ping must be forwarded, not policy-denied: {ping}"
+    );
+    assert_eq!(
+        tool_decision_count(&decisions),
+        0,
+        "non-tools/call unique objects must not mint assay.tool.decision: {}",
+        std::fs::read_to_string(&decisions).unwrap_or_default()
+    );
+
+    conn.send_line(
+        r#"{"jsonrpc":"2.0","id":25,"method":"tools/call","params":{"name":"echo","arguments":{"msg":"ok"}}}"#,
+    );
+    let call = conn.read_response_for_id(25);
+    assert!(
+        call.get("error").is_none(),
+        "tools/call must still authorize the exact parsed value: {call}"
+    );
+    let _ = conn.shutdown();
+
+    let body = std::fs::read_to_string(&raw).unwrap_or_default();
+    for line in [INIT_LINE, LIST_LINE, NOTE_LINE, NON_REQUEST_LINE, PING_LINE] {
+        assert!(
+            body.contains(line),
+            "protocol-control line must be forwarded byte-identically: missing {line} in {body}"
+        );
+    }
+    assert!(
+        body.contains("\"method\":\"tools/call\""),
+        "tools/call must still reach upstream: {body}"
+    );
+    assert_eq!(
+        last_decision_tool(&decisions).as_deref(),
+        Some("echo"),
+        "only the tools/call is authorized"
+    );
+    assert_eq!(
+        tool_decision_count(&decisions),
+        1,
+        "exactly one assay.tool.decision, for the tools/call: {}",
+        std::fs::read_to_string(&decisions).unwrap_or_default()
+    );
 }
 
 #[test]

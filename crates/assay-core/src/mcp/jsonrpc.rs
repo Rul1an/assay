@@ -10,9 +10,17 @@ pub struct JsonRpcRequest {
     pub params: Value,
 }
 
+/// Whether a uniquely-parsed JSON-RPC method is a `tools/call`.
+///
+/// Protocol-control methods (`initialize`, `tools/list`, notifications, `ping`)
+/// are not. One function so wrap and proxy-enforce cannot drift.
+pub fn is_tools_call_method(method: &str) -> bool {
+    method == "tools/call"
+}
+
 impl JsonRpcRequest {
     pub fn is_tool_call(&self) -> bool {
-        self.method == "tools/call"
+        is_tools_call_method(&self.method)
     }
 
     pub fn tool_params(&self) -> Option<CallToolParams> {

@@ -15,6 +15,7 @@ pub mod jcs;
 pub(crate) mod json_depth;
 pub mod jsonrpc;
 pub mod unique_json;
+pub use jsonrpc::is_tools_call_method;
 pub use unique_json::{is_method_bearing_frame, parse_unique_json, UniqueJsonError};
 pub mod lifecycle;
 pub mod mapper_v2;

@@ -29,7 +29,7 @@ mod io;
 mod observer;
 
 use anyhow::{Context, Result};
-use assay_core::mcp::parse_unique_json;
+use assay_core::mcp::{is_tools_call_method, parse_unique_json};
 use assay_mcp_server::manifest_observed::{self, Completeness};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -229,22 +229,7 @@ pub async fn run(
         }
 
         match v.get("method").and_then(|m| m.as_str()) {
-            Some(method) if ALLOWLIST.contains(&method) => {
-                if method == "tools/list" {
-                    let had_cursor = v
-                        .pointer("/params/cursor")
-                        .map(|c| !c.is_null())
-                        .unwrap_or(false);
-                    observer
-                        .lock()
-                        .await
-                        .on_client_tools_list(v.get("id"), had_cursor);
-                }
-                if io::forward_line(&mut child_stdin, &line).await.is_err() {
-                    break;
-                }
-            }
-            Some(method) if mode == Mode::Enforce && method == "tools/call" => {
+            Some(method) if mode == Mode::Enforce && is_tools_call_method(method) => {
                 let policy = policy
                     .as_ref()
                     .expect("enforce mode without a loaded policy is a startup bug");
@@ -268,6 +253,21 @@ pub async fn run(
                     .await
                     .is_err()
                 {
+                    break;
+                }
+            }
+            Some(method) if ALLOWLIST.contains(&method) => {
+                if method == "tools/list" {
+                    let had_cursor = v
+                        .pointer("/params/cursor")
+                        .map(|c| !c.is_null())
+                        .unwrap_or(false);
+                    observer
+                        .lock()
+                        .await
+                        .on_client_tools_list(v.get("id"), had_cursor);
+                }
+                if io::forward_line(&mut child_stdin, &line).await.is_err() {
                     break;
                 }
             }

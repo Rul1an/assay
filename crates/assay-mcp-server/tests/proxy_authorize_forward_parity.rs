@@ -128,6 +128,14 @@ fn forwarded_calls(raw: &Path) -> Vec<String> {
         .collect()
 }
 
+fn enforcement_decision_count(path: &Path) -> usize {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .count()
+}
+
 fn last_decision(path: &Path) -> Option<Value> {
     std::fs::read_to_string(path)
         .unwrap_or_default()
@@ -154,6 +162,79 @@ fn assert_oracles_match_authorized(authorized_name: &str, authorized_args: &Valu
             "{mode} oracle arguments diverged from the authorized arguments"
         );
     }
+}
+
+const INIT_LINE: &str = r#"{"jsonrpc":"2.0","id":21,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}"#;
+const LIST_LINE: &str = r#"{"jsonrpc":"2.0","id":22,"method":"tools/list"}"#;
+const NOTE_LINE: &str = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
+const NON_REQUEST_LINE: &str = r#"{"jsonrpc":"2.0","id":23,"result":{"passthrough":true}}"#;
+const PING_LINE: &str = r#"{"jsonrpc":"2.0","id":24,"method":"ping"}"#;
+
+#[test]
+fn protocol_control_is_forwarded_without_enforcement_decision() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let raw = dir.path().join("raw.log");
+    let decisions = dir.path().join("decisions.ndjson");
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut out = Conn::attach(spawn_enforce(&log, &raw, &policy, &decisions));
+
+    out.send_line(INIT_LINE);
+    let init = out.read_response_for_id(21);
+    assert!(
+        init.get("error").is_none(),
+        "initialize must be forwarded, not policy-denied: {init}"
+    );
+    out.send_line(LIST_LINE);
+    let listed = out.read_response_for_id(22);
+    assert!(
+        listed.get("error").is_none(),
+        "tools/list must be forwarded, not policy-denied: {listed}"
+    );
+    out.send_line(NOTE_LINE);
+    out.send_line(NON_REQUEST_LINE);
+    out.send_line(PING_LINE);
+    let ping = out.read_response_for_id(24);
+    assert!(
+        ping.get("error").is_none(),
+        "ping must be forwarded, not policy-denied: {ping}"
+    );
+    assert_eq!(
+        enforcement_decision_count(&decisions),
+        0,
+        "non-tools/call unique objects must not mint an enforcement decision: {}",
+        std::fs::read_to_string(&decisions).unwrap_or_default()
+    );
+
+    let call = r#"{"jsonrpc":"2.0","id":25,"method":"tools/call","params":{"name":"github.add_deploy_key","arguments":{"owner":"acme","repo":"prod-app"}}}"#;
+    out.send_line(call);
+    let r = out.read_response_for_id(25);
+    assert!(
+        r.get("error").is_none(),
+        "tools/call must still authorize the exact parsed value: {r}"
+    );
+    let _ = out.shutdown();
+
+    let body = std::fs::read_to_string(&raw).unwrap_or_default();
+    for line in [INIT_LINE, LIST_LINE, NOTE_LINE, NON_REQUEST_LINE, PING_LINE] {
+        assert!(
+            body.contains(line),
+            "protocol-control line must be forwarded byte-identically: missing {line} in {body}"
+        );
+    }
+    assert_eq!(
+        forwarded_calls(&raw).len(),
+        1,
+        "tools/call must still reach upstream once"
+    );
+    let rec = last_decision(&decisions).expect("tools/call decision");
+    assert_eq!(rec["decision"], "allow");
+    assert_eq!(rec["tool"]["name"], "github.add_deploy_key");
+    assert_eq!(
+        enforcement_decision_count(&decisions),
+        1,
+        "exactly one enforcement decision, for the tools/call"
+    );
 }
 
 #[test]
