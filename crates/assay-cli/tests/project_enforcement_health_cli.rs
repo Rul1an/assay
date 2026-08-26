@@ -3,8 +3,8 @@
 //! `assay project-enforcement-health --format json --input PATH`
 //!
 //! Success bytes are exact. Fail-closed paths are nonzero with empty stdout.
-//! Valid `active` fixtures are constructor-legal (v0 attach+strong; v1 both
-//! Landlock confirmations, strong, no failure). Forged `active` fails closed.
+//! Valid `active` fixtures are constructor-legal (v0 attach+strong; committed
+//! v1 `active_no_probe`). Each near-miss violates exactly one producer arm.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -43,6 +43,12 @@ fn v0(status: &str) -> String {
     )
 }
 
+fn v0_active_near(attach: bool, class: &str) -> String {
+    format!(
+        r#"{{"schema":"{V0}","scope":"ipv4_tcp_connect","network_enforcement":"active","attach_confirmed":{attach},"blocked_count":0,"allowed_count":0,"enforcement_class":"{class}"}}"#
+    )
+}
+
 fn v1(status: &str) -> String {
     let (nnp, restrict, class) = if status == "active" {
         ("true", "true", "strong")
@@ -52,6 +58,24 @@ fn v1(status: &str) -> String {
     format!(
         r#"{{"schema":"{V1}","status":"{status}","mechanism":"landlock","scope":"tcp_connect_landlock_port","policy_semantics":"allowlist","enforcement_class":"{class}","landlock":{{"abi":4,"no_new_privs_confirmed":{nnp},"restrict_self_confirmed":{restrict}}},"probe":null,"non_claims":[]}}"#
     )
+}
+
+/// Producer-legal v1 `active` except the named arm. Remaining fields match
+/// the committed `active_no_probe` shape plus an optional typed `failure`.
+fn v1_active_near(class: &str, nnp: bool, restrict: bool, with_failure: bool) -> String {
+    let failure = if with_failure {
+        r#","failure":{"reason_code":"landlock_abi_too_old","detail":"Landlock ABI 4 is required for TCP connect port allowlists"}"#
+    } else {
+        ""
+    };
+    format!(
+        r#"{{"schema":"{V1}","status":"active","mechanism":"landlock","scope":"tcp_connect_landlock_port","policy_semantics":"allowlist","enforcement_class":"{class}"{failure},"landlock":{{"abi":4,"handled_access_net":["connect_tcp"],"allowed_connect_tcp_ports":[443],"no_new_privs_confirmed":{nnp},"restrict_self_confirmed":{restrict}}},"probe":null,"non_claims":["no ip or cidr enforcement","no hostname enforcement","no destination identity enforcement","no udp or quic enforcement","no http or tls route policy","not a replacement for cgroup/connect4 endpoint enforcement"]}}"#
+    )
+}
+
+fn committed_v1_active_no_probe() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/enforcement_health/v1/active_no_probe.json")
 }
 
 fn expected(source_schema: &str, observation: &str) -> String {
@@ -91,6 +115,18 @@ fn assert_fail_args(args: &[&str]) {
     );
 }
 
+fn assert_fail_body(name: &str, body: &str) {
+    let dir = tmp();
+    let path = write(dir.path(), name, body);
+    assert_fail_args(&[
+        "project-enforcement-health",
+        "--format",
+        "json",
+        "--input",
+        path.to_str().unwrap(),
+    ]);
+}
+
 #[test]
 fn v0_active_maps_to_applied() {
     let dir = tmp();
@@ -114,9 +150,7 @@ fn v0_absent_maps_to_not_requested() {
 
 #[test]
 fn v1_active_maps_to_applied() {
-    let dir = tmp();
-    let path = write(dir.path(), "v1-active.json", &v1("active"));
-    assert_exact_ok(&path, V1, "applied");
+    assert_exact_ok(&committed_v1_active_no_probe(), V1, "applied");
 }
 
 #[test]
@@ -224,35 +258,46 @@ fn v0_not_applicable_is_nonzero_empty_stdout() {
 }
 
 #[test]
-fn v0_active_without_confirmed_attach_is_nonzero_empty_stdout() {
-    let dir = tmp();
-    let path = write(
-        dir.path(),
-        "v0-forged-active.json",
-        r#"{"schema":"assay.enforcement_health.v0","scope":"ipv4_tcp_connect","network_enforcement":"active","attach_confirmed":false,"blocked_count":0,"allowed_count":0,"enforcement_class":"basic"}"#,
+fn v0_active_attach_false_strong_is_nonzero_empty_stdout() {
+    assert_fail_body(
+        "v0-attach-false-strong.json",
+        &v0_active_near(false, "strong"),
     );
-    assert_fail_args(&[
-        "project-enforcement-health",
-        "--format",
-        "json",
-        "--input",
-        path.to_str().unwrap(),
-    ]);
 }
 
 #[test]
-fn v1_active_without_restrict_confirmations_is_nonzero_empty_stdout() {
-    let dir = tmp();
-    let path = write(
-        dir.path(),
-        "v1-forged-active.json",
-        r#"{"schema":"assay.enforcement_health.v1","status":"active","mechanism":"landlock","scope":"tcp_connect_landlock_port","policy_semantics":"allowlist","enforcement_class":"basic","landlock":{"abi":4,"no_new_privs_confirmed":false,"restrict_self_confirmed":false},"probe":null,"non_claims":[]}"#,
+fn v0_active_attach_true_basic_is_nonzero_empty_stdout() {
+    assert_fail_body("v0-attach-true-basic.json", &v0_active_near(true, "basic"));
+}
+
+#[test]
+fn v1_active_with_failure_is_nonzero_empty_stdout() {
+    assert_fail_body(
+        "v1-active-failure.json",
+        &v1_active_near("strong", true, true, true),
     );
-    assert_fail_args(&[
-        "project-enforcement-health",
-        "--format",
-        "json",
-        "--input",
-        path.to_str().unwrap(),
-    ]);
+}
+
+#[test]
+fn v1_active_basic_class_is_nonzero_empty_stdout() {
+    assert_fail_body(
+        "v1-active-basic.json",
+        &v1_active_near("basic", true, true, false),
+    );
+}
+
+#[test]
+fn v1_active_no_new_privs_false_is_nonzero_empty_stdout() {
+    assert_fail_body(
+        "v1-active-nnp-false.json",
+        &v1_active_near("strong", false, true, false),
+    );
+}
+
+#[test]
+fn v1_active_restrict_self_false_is_nonzero_empty_stdout() {
+    assert_fail_body(
+        "v1-active-restrict-false.json",
+        &v1_active_near("strong", true, false, false),
+    );
 }

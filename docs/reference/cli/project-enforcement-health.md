@@ -37,3 +37,6 @@ input exit nonzero with empty stdout.
 
 Absence of a projection is **no claim**. It is never a pass. This command does
 not prove enforcement efficacy, egress absence, or a sealed sandbox.
+
+The projection checks coherence of an already-typed document, not authenticity
+or provenance. A coherent handwritten carrier can therefore project.
