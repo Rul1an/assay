@@ -59,6 +59,7 @@ assay.init_report.v0 | crates/assay-cli/src/cli/commands/init_report.rs | -
 assay.mcp.execution-record-pairing.report.v0 | crates/assay-cli/src/cli/commands/evidence/mcp_execution_records.rs | -
 assay.mcp.execution-record-supersession.report.v0 | crates/assay-cli/src/cli/commands/evidence/mcp_supersession.rs | -
 assay.mcp.tunnel-observed.report.v0 | crates/assay-cli/src/cli/commands/evidence/mcp_tunnel_observed.rs | -
+assay.mcp_manifest_candidate.v0 | crates/assay-cli/src/cli/commands/mcp.rs | crates/assay-mcp-server/src/manifest_promotion.rs
 assay.mcp_preflight.v0 | crates/assay-cli/src/cli/commands/mcp/preflight.rs | -
 assay.mcp_server_inventory.v0 | crates/assay-cli/src/cli/commands/inventory.rs | crates/assay-core/src/discovery/inventory_carrier.rs
 assay.monitor.observed_peers.v0 | crates/assay-cli/src/cli/commands/monitor_next/observed_peers.rs | -
@@ -100,7 +101,6 @@ revision, when this block was a bare list.
 ```text
 assay.coding_agent.evidence_pack.v0 | declared in assay-evidence as a bundle pack schema; no CLI write opened
 assay.declared_mcp_manifest.v0 | operator-authored approval baseline read by assay-mcp-server at startup; no command writes it
-assay.mcp_manifest_candidate.v0 | assay-mcp-server promotion candidate returned by an MCP tool; no CLI command writes it
 assay.mandate.v1 | mandate event carried in evidence, not written by a command
 assay.mcp_manifest_observed.v0 | assay-mcp-server observation event inside a bundle
 assay.mcp_manifest_projection.v0 | assay-mcp-server projection event inside a bundle
