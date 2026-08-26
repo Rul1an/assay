@@ -33,16 +33,20 @@ assay/                         # Version 2.18.0 (post-RFC-003)
 
 ## GitHub Action
 
-**Repository:** https://github.com/Rul1an/assay/tree/main/assay-action
+**Repository:** https://github.com/Rul1an/assay-action
 
-The GitHub Action lives in this monorepo under `assay-action/` and is referenced from workflows as:
+The published GitHub Action is `Rul1an/assay-action`. Assay consumes the commit
+in `.github/assay-action-pin`. The in-tree `assay-action/` helpers are not that
+Action.
 
 **Usage:**
 ```yaml
-- uses: Rul1an/assay/assay-action@v2
+- uses: Rul1an/assay-action@v3
 ```
 
-**Note:** The `assay-action/action.yml` file in this repository is the source action definition.
+**Note:** Published `action.yml` bytes for the pin are recorded under
+`scripts/ci/fixtures/assay-action-pin/`. They are evidence, not a second
+implementation.
 
 ## Core Crate (`assay-core`)
 
@@ -325,9 +329,9 @@ The GitHub Action lives in this monorepo under `assay-action/` and is referenced
 - **`action-v2-test.yml`**: GitHub Action v2 tests
 
 ### GitHub Action (Separate Repo)
-- **Repository:** https://github.com/Rul1an/assay/tree/main/assay-action
+- **Repository:** https://github.com/Rul1an/assay-action
 - **Marketplace:** https://github.com/marketplace/actions/assay-ai-agent-security
-- **Usage:** `Rul1an/assay/assay-action@v2`
+- **Usage:** `Rul1an/assay-action@v3`
 
 ## Key Data Structures
 

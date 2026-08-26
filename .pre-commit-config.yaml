@@ -14,7 +14,8 @@ repos:
         exclude: |
           (?x)^(
             tests/fixtures/mcp/malformed\.yaml|
-            tests/fixtures/golden/eval_broken\.yaml
+            tests/fixtures/golden/eval_broken\.yaml|
+            scripts/ci/fixtures/assay-action-pin/action\.yml
           )$
       - id: check-toml
       - id: end-of-file-fixer
@@ -35,6 +36,7 @@ repos:
             docs/experiments/.+/archive-contents/.+
             |crates/assay-core/tests/fixtures/mcp-era-parity-v0/schema-.+\.json
             |third_party/serde_jcs-0\.2\.0/.+
+            |scripts/ci/fixtures/assay-action-pin/action\.yml
           )$
       - id: trailing-whitespace
         exclude: |
@@ -42,6 +44,7 @@ repos:
             docs/experiments/.+/archive-contents/.+
             |crates/assay-core/tests/fixtures/mcp-era-parity-v0/schema-.+\.json
             |third_party/serde_jcs-0\.2\.0/.+
+            |scripts/ci/fixtures/assay-action-pin/action\.yml
           )$
 
   # GitGuardian secrets detection (manual/local opt-in; requires GITGUARDIAN_API_KEY)
@@ -396,6 +399,13 @@ repos:
         language: system
         pass_filenames: false
         files: ^(\.github/workflows/.*\.ya?ml|scripts/ci/(check-codeql-upload-sarif-lockstep\.py|test-codeql-upload-sarif-lockstep\.sh)|\.pre-commit-config\.yaml)$
+
+      - id: assay-action-consumer-pin
+        name: Assay Action consumer pin
+        entry: bash -c 'bash scripts/ci/test-check-assay-action-pin.sh && bash scripts/ci/check-assay-action-pin.sh'
+        language: system
+        pass_filenames: false
+        files: ^(\.github/(assay-action-pin|workflows/(assay|action-v2-test)\.yml)|scripts/ci/(read|check|test-check)-assay-action-pin\.sh|scripts/ci/fixtures/assay-action-pin/.*|docs/(AIcontext/user-flows|getting-started/ci-integration)\.md|\.pre-commit-config\.yaml)$
 
       - id: workflow-continue-on-error-policy
         name: Workflow continue-on-error policy

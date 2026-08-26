@@ -253,9 +253,12 @@ check_action_refs_pinned() {
   local refs invalid
   refs="$(grep -E 'uses:[[:space:]]+' "$file" || true)"
   [ -n "$refs" ] || return
-  invalid="$(printf '%s\n' "$refs" | grep -Ev 'uses:[[:space:]]+[^[:space:]]+@[0-9a-f]{40}([[:space:]]+#.*)?$' || true)"
+  # Third-party actions stay SHA-pinned. Rul1an/assay-action@v3 is the documented
+  # floating line; the executable consumer pin lives in .github/assay-action-pin.
+  invalid="$(printf '%s\n' "$refs" | grep -Ev \
+    'uses:[[:space:]]+(Rul1an/assay-action@v3|[^[:space:]]+@[0-9a-f]{40})([[:space:]]+#.*)?$' || true)"
   if [ -n "$invalid" ]; then
-    fail "$file: GitHub Action references must use full immutable commit SHAs"
+    fail "$file: GitHub Action references must use a full commit SHA (or Rul1an/assay-action@v3)"
   fi
 }
 

@@ -12,8 +12,7 @@ the callsites (see #2223).
 Callsite surfaces in this repository include:
 
 - workflow files under `.github/workflows/**/*.yml`
-- composite/action manifests such as `assay-action/action.yml` and
-  `.github/actions/**/action.yml`
+- composite/action manifests such as `.github/actions/**/action.yml`
 
 A surface can be empty of external `uses:` today (for example
 `.github/actions/**` may have none) and still belongs in the scan set: new
@@ -24,7 +23,6 @@ To inspect the pins currently in use across those surfaces:
 ```bash
 rg -n --pcre2 'uses:\s*[^\s]+@[0-9a-f]{40}' \
   .github/workflows \
-  assay-action/action.yml \
   .github/actions
 ```
 
@@ -65,7 +63,7 @@ When updating SHAs manually:
 1. Resolve new SHA: `gh api repos/OWNER/REPO/commits/REF --jq .sha`
 2. Update every callsite YAML that invokes the action (workflows under
    `.github/workflows/`, plus composite/action manifests such as
-   `assay-action/action.yml` and `.github/actions/**/action.yml`)
+   `.github/actions/**/action.yml`)
 3. Commit with message: `chore(ci): pin OWNER/REPO to SHA (was vX)`
 
 Do not add the SHA back into this document.

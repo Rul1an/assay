@@ -7,8 +7,6 @@ on:
       - "CHANGELOG.md"
       - "CI-CONTRACT.md"
       - "docs/**"
-      - "assay-action/action.yml"
-      - "assay-action/action.yaml"
       - "scripts/ci/check-claims-boundary.py"
       - "scripts/ci/check-required-contexts.py"
       - ".github/rulesets/**"

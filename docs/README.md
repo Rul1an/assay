@@ -68,7 +68,7 @@ assay init --ci github
 Or use the GitHub Action directly:
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay-action@v3
 ```
 
 This uploads SARIF to the Security tab and posts a PR comment with results.

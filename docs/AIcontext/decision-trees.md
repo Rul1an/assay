@@ -111,7 +111,7 @@ flowchart TD
 flowchart TD
     START[Add CI?] --> METHOD{Preferred method?}
 
-    METHOD -->|GitHub Action| ACTION["Rul1an/assay/assay-action@v2"]
+    METHOD -->|GitHub Action| ACTION["Rul1an/assay-action@v3"]
     ACTION --> FEATURES{Need baseline?}
     FEATURES -->|Yes| BASELINE[Add baseline_key input]
     FEATURES -->|No| SIMPLE[Basic action config]
@@ -225,7 +225,7 @@ flowchart TD
 - **Coverage gaps**: `assay coverage`
 
 ### For CI Integration
-- **GitHub Action** (recommended): `Rul1an/assay/assay-action@v2`
+- **GitHub Action** (recommended): `Rul1an/assay-action@v3`
 - **CLI only**: `assay ci` with `--sarif` flag
 - **Custom**: `assay run` with manual report handling
 

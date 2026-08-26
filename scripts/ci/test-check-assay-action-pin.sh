@@ -1,0 +1,278 @@
+#!/usr/bin/env bash
+# Mutation battery for the Assay consumer Action pin.
+#
+# The pin file is the only mutable execution authority. This test reads that
+# file, copies the live tree into scratch, and mutates the copy. It does not
+# restate the consumed commit as a second expected constant.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CHECKER="${ROOT}/scripts/ci/check-assay-action-pin.sh"
+READER="${ROOT}/scripts/ci/read-assay-action-pin.sh"
+PIN_FILE="${ROOT}/.github/assay-action-pin"
+FIXTURE="${ROOT}/scripts/ci/fixtures/assay-action-pin/action.yml"
+PROVENANCE="${ROOT}/scripts/ci/fixtures/assay-action-pin/PROVENANCE"
+ASSAY_WF="${ROOT}/.github/workflows/assay.yml"
+ACTION_WF="${ROOT}/.github/workflows/action-v2-test.yml"
+USER_FLOWS="${ROOT}/docs/AIcontext/user-flows.md"
+CI_INTEGRATION="${ROOT}/docs/getting-started/ci-integration.md"
+PRECOMMIT="${ROOT}/.pre-commit-config.yaml"
+ASSAY_COMMIT="e65394d572d3fad649624ab3fa413be934b1d9fa"
+
+scratch="$(mktemp -d)"
+trap 'rm -rf "${scratch}"' EXIT
+
+require_exists() {
+  local path="$1"
+  if [[ ! -f "${path}" ]]; then
+    echo "missing required path: ${path}" >&2
+    exit 1
+  fi
+}
+
+copy_into() {
+  local dest="$1"
+  mkdir -p \
+    "${dest}/.github/workflows" \
+    "${dest}/scripts/ci/fixtures/assay-action-pin" \
+    "${dest}/docs/AIcontext" \
+    "${dest}/docs/getting-started"
+  cp "${PIN_FILE}" "${dest}/.github/assay-action-pin"
+  cp "${FIXTURE}" "${dest}/scripts/ci/fixtures/assay-action-pin/action.yml"
+  cp "${PROVENANCE}" "${dest}/scripts/ci/fixtures/assay-action-pin/PROVENANCE"
+  cp "${ASSAY_WF}" "${dest}/.github/workflows/assay.yml"
+  cp "${ACTION_WF}" "${dest}/.github/workflows/action-v2-test.yml"
+  cp "${USER_FLOWS}" "${dest}/docs/AIcontext/user-flows.md"
+  cp "${CI_INTEGRATION}" "${dest}/docs/getting-started/ci-integration.md"
+}
+
+run_checker_at() {
+  local tree="$1"
+  ASSAY_ACTION_PIN_FILE="${tree}/.github/assay-action-pin" \
+    ASSAY_ACTION_FIXTURE_FILE="${tree}/scripts/ci/fixtures/assay-action-pin/action.yml" \
+    ASSAY_ACTION_PROVENANCE_FILE="${tree}/scripts/ci/fixtures/assay-action-pin/PROVENANCE" \
+    ASSAY_ACTION_WORKFLOW_ASSAY="${tree}/.github/workflows/assay.yml" \
+    ASSAY_ACTION_WORKFLOW_V2="${tree}/.github/workflows/action-v2-test.yml" \
+    ASSAY_ACTION_DOC_USER_FLOWS="${tree}/docs/AIcontext/user-flows.md" \
+    ASSAY_ACTION_DOC_CI_INTEGRATION="${tree}/docs/getting-started/ci-integration.md" \
+    "${CHECKER}"
+}
+
+expect_fail() {
+  local name="$1"
+  local expected="$2"
+  local tree="$3"
+  if run_checker_at "${tree}" >"${scratch}/out" 2>"${scratch}/err"; then
+    echo "FAIL: ${name} stayed green; expected failure containing: ${expected}" >&2
+    cat "${scratch}/err" >&2
+    exit 1
+  fi
+  if ! grep -Fq -- "${expected}" "${scratch}/err"; then
+    echo "FAIL: ${name} did not contain '${expected}':" >&2
+    cat "${scratch}/err" >&2
+    exit 1
+  fi
+  echo "ok    ${name} (owner gate failed)"
+}
+
+expect_ok() {
+  local name="$1"
+  shift
+  if ! "$@" >"${scratch}/out" 2>"${scratch}/err"; then
+    echo "FAIL: ${name} exited non-zero:" >&2
+    cat "${scratch}/out" >&2
+    cat "${scratch}/err" >&2
+    exit 1
+  fi
+  echo "ok    ${name}"
+}
+
+mutate_once() {
+  local path="$1" old="$2" new="$3"
+  python3 - "$path" "$old" "$new" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+old, new = sys.argv[2], sys.argv[3]
+text = path.read_text(encoding="utf-8")
+count = text.count(old)
+if count != 1:
+    raise SystemExit(f"mutation subject count is {count}, want 1: {old!r}")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+}
+
+check_hook_invokes_gate() {
+  python3 - "${PRECOMMIT}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+if "- id: assay-action-consumer-pin" not in text:
+    raise SystemExit("pre-commit is missing assay-action-consumer-pin")
+block = text.split("- id: assay-action-consumer-pin", 1)[1].split("\n      - id:", 1)[0]
+if "scripts/ci/check-assay-action-pin.sh" not in block:
+    raise SystemExit("pre-commit hook does not call scripts/ci/check-assay-action-pin.sh")
+if "scripts/ci/test-check-assay-action-pin.sh" not in block:
+    raise SystemExit("pre-commit hook does not call scripts/ci/test-check-assay-action-pin.sh")
+match = re.search(r"^[ \t]*files:[ \t]*(.+)$", block, re.MULTILINE)
+if match is None:
+    raise SystemExit("assay-action-consumer-pin hook has no files selector")
+pattern = match.group(1).strip()
+required = (
+    ".github/assay-action-pin",
+    ".github/workflows/assay.yml",
+    ".github/workflows/action-v2-test.yml",
+    "scripts/ci/read-assay-action-pin.sh",
+    "scripts/ci/check-assay-action-pin.sh",
+    "scripts/ci/test-check-assay-action-pin.sh",
+    "scripts/ci/fixtures/assay-action-pin/action.yml",
+    "scripts/ci/fixtures/assay-action-pin/PROVENANCE",
+    "docs/AIcontext/user-flows.md",
+    "docs/getting-started/ci-integration.md",
+    ".pre-commit-config.yaml",
+)
+missing = [path for path in required if re.search(pattern, path) is None]
+if missing:
+    raise SystemExit(f"assay-action-consumer-pin hook does not trigger for: {', '.join(missing)}")
+PY
+}
+
+require_exists "${CHECKER}"
+require_exists "${READER}"
+require_exists "${PIN_FILE}"
+require_exists "${FIXTURE}"
+require_exists "${PROVENANCE}"
+require_exists "${ASSAY_WF}"
+require_exists "${ACTION_WF}"
+require_exists "${USER_FLOWS}"
+require_exists "${CI_INTEGRATION}"
+require_exists "${PRECOMMIT}"
+
+PIN="$("${READER}")"
+if [[ ! "${PIN}" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "reader did not return a 40-hex pin" >&2
+  exit 1
+fi
+EXPECTED_USES="Rul1an/assay-action@${PIN}"
+
+echo "== no-op control =="
+expect_ok "control-is-green" "${CHECKER}"
+expect_ok "reader-returns-pin" bash -c "test \"\$(\"${READER}\")\" = '${PIN}'"
+python3 - "${FIXTURE}" "${PROVENANCE}" "${PIN}" <<'PY'
+import hashlib
+import sys
+from pathlib import Path
+
+fixture = Path(sys.argv[1]).read_bytes()
+provenance = Path(sys.argv[2]).read_text(encoding="utf-8")
+pin = sys.argv[3]
+digest = hashlib.sha256(fixture).hexdigest()
+commit = None
+recorded = None
+for line in provenance.splitlines():
+    line = line.strip()
+    if line.startswith("commit="):
+        commit = line.split("=", 1)[1].strip()
+    elif line.startswith("sha256="):
+        recorded = line.split("=", 1)[1].strip()
+if commit != pin:
+    raise SystemExit(f"provenance commit {commit} != pin {pin}")
+if recorded != digest:
+    raise SystemExit(f"provenance sha256 {recorded} != fixture {digest}")
+PY
+echo "ok    fixture-digest-matches-provenance"
+
+python3 - "${ASSAY_WF}" "${ACTION_WF}" "${PIN}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+pin = sys.argv[3]
+expected = f"Rul1an/assay-action@{pin}"
+local = re.compile(r"uses:\s*\./assay-action")
+expr = re.compile(r"uses:\s*\$\{\{")
+for path in (Path(sys.argv[1]), Path(sys.argv[2])):
+    text = path.read_text(encoding="utf-8")
+    if local.search(text):
+        raise SystemExit(f"{path}: still uses ./assay-action")
+    if expr.search(text):
+        raise SystemExit(f"{path}: uses is derived from an expression")
+    if f"uses: {expected}" not in text:
+        raise SystemExit(f"{path}: missing literal uses: {expected}")
+PY
+echo "ok    live-workflow-uses-are-literal-pin"
+
+expect_ok "pre-commit-calls-owner-gate" check_hook_invokes_gate
+
+echo "== nonexistent / non-40 pin =="
+copy_into "${scratch}/non40"
+printf '%s\n' 'v3.1.0' >"${scratch}/non40/.github/assay-action-pin"
+expect_fail "non-40-pin" "want exactly one ^[0-9a-f]{40}$ line" "${scratch}/non40"
+
+copy_into "${scratch}/short"
+printf '%s\n' "${PIN:0:39}" >"${scratch}/short/.github/assay-action-pin"
+expect_fail "short-pin" "want exactly one ^[0-9a-f]{40}$ line" "${scratch}/short"
+
+echo "== snippet ref drift =="
+copy_into "${scratch}/drift"
+mutate_once \
+  "${scratch}/drift/.github/workflows/assay.yml" \
+  "uses: ${EXPECTED_USES}" \
+  "uses: Rul1an/assay-action@0000000000000000000000000000000000000000"
+expect_fail "snippet-ref-drift" "does not equal pin ${PIN}" "${scratch}/drift"
+
+echo "== undeclared with: input =="
+copy_into "${scratch}/undeclared"
+mutate_once \
+  "${scratch}/undeclared/.github/workflows/assay.yml" \
+  "          version: \${{ steps.assay_tag.outputs.version }}" \
+  "          version: \${{ steps.assay_tag.outputs.version }}
+          undeclared_input: true"
+expect_fail "undeclared-with-input" "undeclared input 'undeclared_input'" "${scratch}/undeclared"
+
+echo "== local ./assay-action substitution =="
+copy_into "${scratch}/local"
+mutate_once \
+  "${scratch}/local/.github/workflows/action-v2-test.yml" \
+  "      - name: Test action with no bundles
+        uses: ${EXPECTED_USES}" \
+  "      - name: Test action with no bundles
+        uses: ./assay-action"
+expect_fail "local-assay-action-substitution" "uses: ./assay-action" "${scratch}/local"
+
+echo "== wrong-repo SHA (Assay commit as if assay-action) =="
+copy_into "${scratch}/wrong-repo"
+mutate_once \
+  "${scratch}/wrong-repo/docs/AIcontext/user-flows.md" \
+  "        uses: Rul1an/assay-action@v3" \
+  "        uses: Rul1an/assay/assay-action@${ASSAY_COMMIT} # v2"
+expect_fail "wrong-repo-assay-commit" "${ASSAY_COMMIT}" "${scratch}/wrong-repo"
+
+echo "== provenance commit drift with pin intact =="
+copy_into "${scratch}/prov"
+mutate_once \
+  "${scratch}/prov/scripts/ci/fixtures/assay-action-pin/PROVENANCE" \
+  "commit=${PIN}" \
+  "commit=0000000000000000000000000000000000000000"
+expect_fail "provenance-commit-drift" "does not equal pin" "${scratch}/prov"
+
+echo "== pinned fixture byte drift =="
+copy_into "${scratch}/bytes"
+python3 - "${scratch}/bytes/scripts/ci/fixtures/assay-action-pin/action.yml" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+data = bytearray(path.read_bytes())
+data[0] ^= 0x01
+path.write_bytes(bytes(data))
+PY
+expect_fail "fixture-byte-drift" "pinned fixture digest" "${scratch}/bytes"
+
+echo "== no-op control after mutations =="
+expect_ok "control-stays-green-after-scratch-mutations" "${CHECKER}"
+
+echo "assay action consumer pin contract: PASS"

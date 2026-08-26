@@ -109,8 +109,8 @@ Seeds are **decimal strings or null** (no JSON number) for JS/TS precision safet
 ## GitHub Action Usage
 
 ```yaml
-# Recommended (v2 action)
-- uses: Rul1an/assay/assay-action@v2
+# Recommended (v3 action)
+- uses: Rul1an/assay-action@v3
   with:
     fail_on: error      # error | warn | info | none
     sarif: true         # Upload to Security tab

@@ -74,7 +74,7 @@ For source installation in CI:
   run: cargo install assay-cli --version 5.4.0 --locked
 ```
 
-The GitHub Action is available as `Rul1an/assay-action@v2`; follow the [CI integration guide](ci-integration.md) for the repository's current permissions and pinning policy.
+The GitHub Action is available as `Rul1an/assay-action@v3`; follow the [CI integration guide](ci-integration.md) for the repository's current permissions and pinning policy.
 
 ## Uninstall
 

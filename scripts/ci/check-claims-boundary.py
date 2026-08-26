@@ -113,8 +113,6 @@ def is_scoped_public_prose(path: Path, root: Path) -> bool:
         return True
     if rel.parts and rel.parts[0] == "docs":
         return path.suffix.lower() in {".md", ".mdx", ".rst", ".txt"}
-    if rel_posix in {"assay-action/action.yml", "assay-action/action.yaml"}:
-        return True
     return False
 
 

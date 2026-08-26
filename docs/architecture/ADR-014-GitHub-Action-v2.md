@@ -225,6 +225,23 @@ Reusable workflows are powerful for enterprise standardization but:
 | Noisy PR comments | Only comment if findings or delta |
 | Slow binary download | Cache binary in toolcache pattern |
 
+## Addendum (2026-08-26): consumer pin and frozen v2
+
+This addendum does not rewrite the decision above.
+
+v2 of the published Action stays frozen at
+`f0c2125a73621830bcdf0b98355382c810df058b`. Assay does not move that tag.
+
+Assay's executable consumer identity is the single 40-hex commit in
+`.github/assay-action-pin`. Workflows may repeat that SHA only under the owner
+parity gate in `scripts/ci/check-assay-action-pin.sh`. Release tags such as
+`v3.1.0` are verified provenance for that commit; they are not a second
+executable pin. The documented floating line for new consumers is
+`Rul1an/assay-action@v3`.
+
+The in-tree `assay-action/` directory is not publication authority and must not
+be used as `./assay-action` in place of `Rul1an/assay-action@<pin>`.
+
 ## References
 
 - [GitHub SARIF Support](https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/sarif-support-for-code-scanning)
