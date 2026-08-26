@@ -242,6 +242,9 @@ executable pin. The documented floating line for new consumers is
 The in-tree `assay-action/` directory is not publication authority and must not
 be used as `./assay-action` in place of `Rul1an/assay-action@<pin>`.
 
+Safe rollback is Assay-side only: restore `.github/assay-action-pin` and the
+parity-bound `uses:` literals. Do not move floating `v3` or frozen `v2`.
+
 ## References
 
 - [GitHub SARIF Support](https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/sarif-support-for-code-scanning)

@@ -6,6 +6,8 @@
 
 Canonical public action slug: `Rul1an/assay-action@v3`.
 This repository executes the commit in `.github/assay-action-pin`; `./assay-action` is not a substitute.
+v3.1.0 is a mixed Action migration (see CHANGELOG.md). Rollback is Assay-side
+only (see [PINNED-ACTIONS.md](../PINNED-ACTIONS.md)).
 
 ---
 

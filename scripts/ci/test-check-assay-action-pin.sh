@@ -16,6 +16,11 @@ ASSAY_WF="${ROOT}/.github/workflows/assay.yml"
 ACTION_WF="${ROOT}/.github/workflows/action-v2-test.yml"
 USER_FLOWS="${ROOT}/docs/AIcontext/user-flows.md"
 CI_INTEGRATION="${ROOT}/docs/getting-started/ci-integration.md"
+GITHUB_ACTION_DOC="${ROOT}/docs/guides/github-action.md"
+PINNED_ACTIONS="${ROOT}/docs/PINNED-ACTIONS.md"
+CHANGELOG="${ROOT}/CHANGELOG.md"
+DEPENDABOT="${ROOT}/.github/dependabot.yml"
+CI_YML="${ROOT}/.github/workflows/ci.yml"
 PRECOMMIT="${ROOT}/.pre-commit-config.yaml"
 ASSAY_COMMIT="e65394d572d3fad649624ab3fa413be934b1d9fa"
 
@@ -36,33 +41,42 @@ copy_into() {
     "${dest}/.github/workflows" \
     "${dest}/scripts/ci/fixtures/assay-action-pin" \
     "${dest}/docs/AIcontext" \
-    "${dest}/docs/getting-started"
+    "${dest}/docs/getting-started" \
+    "${dest}/docs/guides"
   cp "${PIN_FILE}" "${dest}/.github/assay-action-pin"
   cp "${FIXTURE}" "${dest}/scripts/ci/fixtures/assay-action-pin/action.yml"
   cp "${PROVENANCE}" "${dest}/scripts/ci/fixtures/assay-action-pin/PROVENANCE"
-  cp "${ASSAY_WF}" "${dest}/.github/workflows/assay.yml"
-  cp "${ACTION_WF}" "${dest}/.github/workflows/action-v2-test.yml"
-  cp "${USER_FLOWS}" "${dest}/docs/AIcontext/user-flows.md"
-  cp "${CI_INTEGRATION}" "${dest}/docs/getting-started/ci-integration.md"
+  if [[ -x "${CHECKER}" ]] && "${CHECKER}" --list-paths >/dev/null 2>&1; then
+    while IFS= read -r rel; do
+      [[ -z "${rel}" ]] && continue
+      mkdir -p "${dest}/$(dirname "${rel}")"
+      cp "${ROOT}/${rel}" "${dest}/${rel}"
+    done < <("${CHECKER}" --list-paths)
+  else
+    cp "${ASSAY_WF}" "${dest}/.github/workflows/assay.yml"
+    cp "${ACTION_WF}" "${dest}/.github/workflows/action-v2-test.yml"
+    cp "${USER_FLOWS}" "${dest}/docs/AIcontext/user-flows.md"
+    cp "${CI_INTEGRATION}" "${dest}/docs/getting-started/ci-integration.md"
+    cp "${GITHUB_ACTION_DOC}" "${dest}/docs/guides/github-action.md"
+  fi
 }
 
 run_checker_at() {
   local tree="$1"
-  ASSAY_ACTION_PIN_FILE="${tree}/.github/assay-action-pin" \
+  shift
+  ASSAY_ACTION_TREE="${tree}" \
+    ASSAY_ACTION_PIN_FILE="${tree}/.github/assay-action-pin" \
     ASSAY_ACTION_FIXTURE_FILE="${tree}/scripts/ci/fixtures/assay-action-pin/action.yml" \
     ASSAY_ACTION_PROVENANCE_FILE="${tree}/scripts/ci/fixtures/assay-action-pin/PROVENANCE" \
-    ASSAY_ACTION_WORKFLOW_ASSAY="${tree}/.github/workflows/assay.yml" \
-    ASSAY_ACTION_WORKFLOW_V2="${tree}/.github/workflows/action-v2-test.yml" \
-    ASSAY_ACTION_DOC_USER_FLOWS="${tree}/docs/AIcontext/user-flows.md" \
-    ASSAY_ACTION_DOC_CI_INTEGRATION="${tree}/docs/getting-started/ci-integration.md" \
-    "${CHECKER}"
+    "${CHECKER}" "$@"
 }
 
 expect_fail() {
   local name="$1"
   local expected="$2"
   local tree="$3"
-  if run_checker_at "${tree}" >"${scratch}/out" 2>"${scratch}/err"; then
+  shift 3
+  if run_checker_at "${tree}" "$@" >"${scratch}/out" 2>"${scratch}/err"; then
     echo "FAIL: ${name} stayed green; expected failure containing: ${expected}" >&2
     cat "${scratch}/err" >&2
     exit 1
@@ -125,6 +139,7 @@ required = (
     ".github/assay-action-pin",
     ".github/workflows/assay.yml",
     ".github/workflows/action-v2-test.yml",
+    ".github/workflows/release.yml",
     "scripts/ci/read-assay-action-pin.sh",
     "scripts/ci/check-assay-action-pin.sh",
     "scripts/ci/test-check-assay-action-pin.sh",
@@ -132,6 +147,13 @@ required = (
     "scripts/ci/fixtures/assay-action-pin/PROVENANCE",
     "docs/AIcontext/user-flows.md",
     "docs/getting-started/ci-integration.md",
+    "docs/guides/github-action.md",
+    "docs/guides/rollout-template.md",
+    "docs/index.md",
+    "docs/PINNED-ACTIONS.md",
+    "CHANGELOG.md",
+    ".github/dependabot.yml",
+    "crates/assay-cli/src/templates.rs",
     ".pre-commit-config.yaml",
 )
 missing = [path for path in required if re.search(pattern, path) is None]
@@ -149,7 +171,50 @@ require_exists "${ASSAY_WF}"
 require_exists "${ACTION_WF}"
 require_exists "${USER_FLOWS}"
 require_exists "${CI_INTEGRATION}"
+require_exists "${GITHUB_ACTION_DOC}"
+require_exists "${PINNED_ACTIONS}"
+require_exists "${CHANGELOG}"
+require_exists "${DEPENDABOT}"
+require_exists "${CI_YML}"
 require_exists "${PRECOMMIT}"
+
+check_consumer_compat() {
+  python3 - "$1" "$2" "$3" <<'PY'
+import sys
+from pathlib import Path
+
+dependabot = Path(sys.argv[1]).read_text(encoding="utf-8")
+pinned = Path(sys.argv[2]).read_text(encoding="utf-8")
+changelog = Path(sys.argv[3]).read_text(encoding="utf-8")
+errors = []
+if 'assay-dev/assay-action' in dependabot:
+    errors.append("Dependabot ignore names assay-dev/assay-action; want Rul1an/assay-action")
+if 'dependency-name: "Rul1an/assay-action"' not in dependabot:
+    errors.append("Dependabot does not ignore Rul1an/assay-action")
+if ".github/assay-action-pin" not in pinned or "not a second place to change" not in pinned:
+    errors.append("PINNED-ACTIONS.md does not record the pin-file exception")
+if "Do not move floating `v3`" not in pinned or "Do not move frozen `v2`" not in pinned:
+    errors.append("PINNED-ACTIONS.md does not record Assay-side rollback")
+start = changelog.find("## [Unreleased]")
+if start < 0:
+    errors.append("CHANGELOG.md has no Unreleased section")
+else:
+    rest = changelog[start:]
+    nxt = rest.find("\n## [", 1)
+    unreleased = rest if nxt < 0 else rest[:nxt]
+    for needle in (
+        "mixed Action migration",
+        "literal `false`",
+        "sandbox-command",
+        "v3.0.1 to v3.0.2",
+        "not measured",
+    ):
+        if needle not in unreleased:
+            errors.append(f"CHANGELOG Unreleased does not name {needle!r}")
+if errors:
+    raise SystemExit("; ".join(errors))
+PY
+}
 
 PIN="$("${READER}")"
 if [[ ! "${PIN}" =~ ^[0-9a-f]{40}$ ]]; then
@@ -206,6 +271,13 @@ PY
 echo "ok    live-workflow-uses-are-literal-pin"
 
 expect_ok "pre-commit-calls-owner-gate" check_hook_invokes_gate
+if ! grep -Fq 'bash scripts/ci/check-assay-action-pin.sh --published' "${CI_YML}"; then
+  echo "ci.yml does not invoke check-assay-action-pin.sh --published" >&2
+  exit 1
+fi
+echo "ok    ci-invokes-live-published-byte-check"
+expect_ok "consumer-compat-live" check_consumer_compat \
+  "${DEPENDABOT}" "${PINNED_ACTIONS}" "${CHANGELOG}"
 
 echo "== nonexistent / non-40 pin =="
 copy_into "${scratch}/non40"
@@ -271,6 +343,176 @@ data[0] ^= 0x01
 path.write_bytes(bytes(data))
 PY
 expect_fail "fixture-byte-drift" "pinned fixture digest" "${scratch}/bytes"
+
+echo "== coordinated fixture+digest drift vs published bytes =="
+copy_into "${scratch}/coord"
+cp "${FIXTURE}" "${scratch}/published-oracle.yml"
+python3 - "${scratch}/coord/scripts/ci/fixtures/assay-action-pin/action.yml" \
+  "${scratch}/coord/scripts/ci/fixtures/assay-action-pin/PROVENANCE" <<'PY'
+from pathlib import Path
+import hashlib
+import sys
+
+fixture = Path(sys.argv[1])
+provenance = Path(sys.argv[2])
+data = bytearray(fixture.read_bytes())
+data[0] ^= 0x01
+fixture.write_bytes(bytes(data))
+digest = hashlib.sha256(bytes(data)).hexdigest()
+text = provenance.read_text(encoding="utf-8")
+old = None
+for line in text.splitlines():
+    if line.startswith("sha256="):
+        old = line.split("=", 1)[1].strip()
+        break
+if not old:
+    raise SystemExit("provenance missing sha256=")
+provenance.write_text(text.replace(f"sha256={old}", f"sha256={digest}", 1), encoding="utf-8")
+PY
+if run_checker_at "${scratch}/coord" >"${scratch}/out" 2>"${scratch}/err"; then
+  echo "ok    coordinated-offline-is-blind-without-published-bytes"
+else
+  echo "FAIL: coordinated fixture+digest should stay green offline" >&2
+  cat "${scratch}/err" >&2
+  exit 1
+fi
+if ASSAY_ACTION_PUBLISHED_FILE="${scratch}/coord/scripts/ci/fixtures/assay-action-pin/action.yml" \
+  run_checker_at "${scratch}/coord" --published >"${scratch}/out" 2>"${scratch}/err"; then
+  echo "FAIL: published check accepted the fixture as its own published bytes" >&2
+  exit 1
+fi
+if ! grep -Fq "must not be the fixture file" "${scratch}/err"; then
+  echo "FAIL: self-compare did not refuse fixture-as-published:" >&2
+  cat "${scratch}/err" >&2
+  exit 1
+fi
+echo "ok    published-bytes-must-not-be-the-fixture"
+ASSAY_ACTION_PUBLISHED_FILE="${scratch}/published-oracle.yml" \
+  expect_fail "coordinated-fixture-digest-vs-published" "does not match published action.yml" "${scratch}/coord" --published
+
+echo "== snippet deletion from allowlisted doc =="
+copy_into "${scratch}/delete-doc"
+mutate_once \
+  "${scratch}/delete-doc/docs/AIcontext/user-flows.md" \
+  "        uses: Rul1an/assay-action@v3" \
+  "        run: echo skipped"
+expect_fail "doc-snippet-deleted" "no Rul1an/assay-action@v3 uses found" "${scratch}/delete-doc"
+
+echo "== undeclared with: input on floating @v3 doc snippet =="
+copy_into "${scratch}/doc-input"
+mutate_once \
+  "${scratch}/doc-input/docs/AIcontext/user-flows.md" \
+  "          fail_on: error" \
+  "          fail_on: error
+          undeclared_doc_input: true"
+expect_fail "doc-undeclared-with-input" "undeclared input 'undeclared_doc_input'" "${scratch}/doc-input"
+
+echo "== undeclared with: input outside the original two-doc allowlist =="
+copy_into "${scratch}/scope"
+mutate_once \
+  "${scratch}/scope/docs/guides/github-action.md" \
+  "      - name: Verify evidence
+        uses: Rul1an/assay-action@v3
+        with:
+          fail_on: error
+          baseline_key: \${{ github.event.repository.name }}" \
+  "      - name: Verify evidence
+        uses: Rul1an/assay-action@v3
+        with:
+          fail_on: error
+          undeclared_doc_input: true
+          baseline_key: \${{ github.event.repository.name }}"
+expect_fail "scope-outside-two-docs" "undeclared input 'undeclared_doc_input'" "${scratch}/scope"
+
+echo "== unlisted active snippet outside the owner list =="
+copy_into "${scratch}/unlisted"
+mkdir -p "${scratch}/unlisted/docs/getting-started"
+printf '%s\n' '- uses: Rul1an/assay-action@v3' \
+  >"${scratch}/unlisted/docs/getting-started/installation.md"
+expect_fail "unlisted-snippet-file" "is not on the owner snippet list" "${scratch}/unlisted"
+
+echo "== Dependabot owner drift =="
+cp "${DEPENDABOT}" "${scratch}/dependabot.yml"
+mutate_once \
+  "${scratch}/dependabot.yml" \
+  'dependency-name: "Rul1an/assay-action"' \
+  'dependency-name: "assay-dev/assay-action"'
+if check_consumer_compat "${scratch}/dependabot.yml" "${PINNED_ACTIONS}" "${CHANGELOG}" \
+  >"${scratch}/out" 2>"${scratch}/err"; then
+  echo "FAIL: dependabot-wrong-owner stayed green" >&2
+  exit 1
+fi
+if ! grep -Fq "assay-dev/assay-action" "${scratch}/err"; then
+  echo "FAIL: dependabot-wrong-owner did not name assay-dev/assay-action:" >&2
+  cat "${scratch}/err" >&2
+  exit 1
+fi
+echo "ok    dependabot-wrong-owner (owner gate failed)"
+
+echo "== PINNED-ACTIONS pin-file exception dropped =="
+cp "${PINNED_ACTIONS}" "${scratch}/PINNED-ACTIONS.md"
+python3 - "${scratch}/PINNED-ACTIONS.md" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = "not a second place to change"
+if text.count(old) != 1:
+    raise SystemExit(f"PINNED-ACTIONS exception subject count is {text.count(old)}")
+path.write_text(text.replace(old, "the callsite remains the only pin", 1), encoding="utf-8")
+PY
+if check_consumer_compat "${DEPENDABOT}" "${scratch}/PINNED-ACTIONS.md" "${CHANGELOG}" \
+  >"${scratch}/out" 2>"${scratch}/err"; then
+  echo "FAIL: pinned-actions-exception-dropped stayed green" >&2
+  exit 1
+fi
+if ! grep -Fq "pin-file exception" "${scratch}/err"; then
+  echo "FAIL: pinned-actions-exception-dropped did not name pin-file exception:" >&2
+  cat "${scratch}/err" >&2
+  exit 1
+fi
+echo "ok    pinned-actions-exception-dropped (owner gate failed)"
+
+echo "== PINNED-ACTIONS rollback dropped =="
+cp "${PINNED_ACTIONS}" "${scratch}/PINNED-ACTIONS-rollback.md"
+mutate_once \
+  "${scratch}/PINNED-ACTIONS-rollback.md" \
+  "Do not move floating \`v3\`." \
+  "Floating v3 may be moved."
+if check_consumer_compat "${DEPENDABOT}" "${scratch}/PINNED-ACTIONS-rollback.md" "${CHANGELOG}" \
+  >"${scratch}/out" 2>"${scratch}/err"; then
+  echo "FAIL: pinned-actions-rollback-dropped stayed green" >&2
+  exit 1
+fi
+if ! grep -Fq "Assay-side rollback" "${scratch}/err"; then
+  echo "FAIL: pinned-actions-rollback-dropped did not name Assay-side rollback:" >&2
+  cat "${scratch}/err" >&2
+  exit 1
+fi
+echo "ok    pinned-actions-rollback-dropped (owner gate failed)"
+
+echo "== CHANGELOG mixed-migration paragraph dropped =="
+cp "${CHANGELOG}" "${scratch}/CHANGELOG.md"
+python3 - "${scratch}/CHANGELOG.md" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+path.write_text(text.replace("mixed Action migration", "additive Action update", 1), encoding="utf-8")
+PY
+if check_consumer_compat "${DEPENDABOT}" "${PINNED_ACTIONS}" "${scratch}/CHANGELOG.md" \
+  >"${scratch}/out" 2>"${scratch}/err"; then
+  echo "FAIL: changelog-mixed-dropped stayed green" >&2
+  exit 1
+fi
+if ! grep -Fq "mixed Action migration" "${scratch}/err"; then
+  echo "FAIL: changelog-mixed-dropped did not name mixed Action migration:" >&2
+  cat "${scratch}/err" >&2
+  exit 1
+fi
+echo "ok    changelog-mixed-dropped (owner gate failed)"
 
 echo "== no-op control after mutations =="
 expect_ok "control-stays-green-after-scratch-mutations" "${CHECKER}"

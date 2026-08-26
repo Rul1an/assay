@@ -1,45 +1,93 @@
 #!/usr/bin/env bash
 # One-rule gate for the Assay consumer Action pin.
 #
-# Parses the pin, the vendored published action.yml inputs, and the allowlisted
-# consumer workflows/docs in one check. Offline: no live GitHub fetch.
+# Parses the pin, the vendored published action.yml inputs, and every owner-listed
+# snippet in one check. Offline by default. --published fetches the pin's
+# action.yml and requires byte identity with the fixture.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+MODE="${1:-}"
 READER="${ROOT}/scripts/ci/read-assay-action-pin.sh"
-PIN="$(ASSAY_ACTION_PIN_FILE="${ASSAY_ACTION_PIN_FILE:-${ROOT}/.github/assay-action-pin}" "${READER}")"
-FIXTURE="${ASSAY_ACTION_FIXTURE_FILE:-${ROOT}/scripts/ci/fixtures/assay-action-pin/action.yml}"
-PROVENANCE="${ASSAY_ACTION_PROVENANCE_FILE:-${ROOT}/scripts/ci/fixtures/assay-action-pin/PROVENANCE}"
-WORKFLOW_ASSAY="${ASSAY_ACTION_WORKFLOW_ASSAY:-${ROOT}/.github/workflows/assay.yml}"
-WORKFLOW_V2="${ASSAY_ACTION_WORKFLOW_V2:-${ROOT}/.github/workflows/action-v2-test.yml}"
-DOC_USER_FLOWS="${ASSAY_ACTION_DOC_USER_FLOWS:-${ROOT}/docs/AIcontext/user-flows.md}"
-DOC_CI_INTEGRATION="${ASSAY_ACTION_DOC_CI_INTEGRATION:-${ROOT}/docs/getting-started/ci-integration.md}"
+TREE="${ASSAY_ACTION_TREE:-${ROOT}}"
 
-python3 - "${PIN}" "${FIXTURE}" "${PROVENANCE}" \
-  "${WORKFLOW_ASSAY}" "${WORKFLOW_V2}" \
-  "${DOC_USER_FLOWS}" "${DOC_CI_INTEGRATION}" <<'PY'
+if [[ -n "${MODE}" && "${MODE}" != "--published" && "${MODE}" != "--list-paths" ]]; then
+  echo "usage: $0 [--published|--list-paths]" >&2
+  exit 2
+fi
+
+PIN=""
+FIXTURE=""
+PROVENANCE=""
+if [[ "${MODE}" != "--list-paths" ]]; then
+  PIN_FILE="${ASSAY_ACTION_PIN_FILE:-${TREE}/.github/assay-action-pin}"
+  PIN="$(ASSAY_ACTION_PIN_FILE="${PIN_FILE}" "${READER}")"
+  FIXTURE="${ASSAY_ACTION_FIXTURE_FILE:-${TREE}/scripts/ci/fixtures/assay-action-pin/action.yml}"
+  PROVENANCE="${ASSAY_ACTION_PROVENANCE_FILE:-${TREE}/scripts/ci/fixtures/assay-action-pin/PROVENANCE}"
+fi
+
+python3 - "${MODE}" "${PIN}" "${FIXTURE}" "${PROVENANCE}" "${TREE}" <<'PY'
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import sys
 from pathlib import Path
 
-PIN = sys.argv[1]
-FIXTURE = Path(sys.argv[2])
-PROVENANCE = Path(sys.argv[3])
-WORKFLOWS = (Path(sys.argv[4]), Path(sys.argv[5]))
-DOCS = (Path(sys.argv[6]), Path(sys.argv[7]))
-EXPECTED_USES = f"Rul1an/assay-action@{PIN}"
+MODE = sys.argv[1]
+PIN = sys.argv[2]
+FIXTURE = Path(sys.argv[3]) if sys.argv[3] else Path()
+PROVENANCE = Path(sys.argv[4]) if sys.argv[4] else Path()
+TREE = Path(sys.argv[5])
+WORKFLOWS = (
+    ".github/workflows/assay.yml",
+    ".github/workflows/action-v2-test.yml",
+)
+SNIPPETS = (
+    "docs/AIcontext/user-flows.md",
+    "docs/AIcontext/quick-reference.md",
+    "docs/AIcontext/entry-points.md",
+    "docs/AIcontext/code-map.md",
+    "docs/AIcontext/codebase-overview.md",
+    "docs/getting-started/ci-integration.md",
+    "docs/getting-started/quickstart.md",
+    "docs/guides/github-action.md",
+    "docs/guides/rollout-template.md",
+    "docs/index.md",
+    "docs/README.md",
+    "docs/mcp/quickstart.md",
+    "docs/use-cases/ci-gate.md",
+    "docs/DISTRIBUTION-SUBMISSION-GUIDE.md",
+    "crates/assay-cli/src/templates.rs",
+    ".github/workflows/release.yml",
+)
+OWNED = frozenset(WORKFLOWS + SNIPPETS)
+SKIP_PREFIXES = (
+    "docs/archive/",
+    "scripts/ci/fixtures/",
+    "demo/",
+    "packs/",
+    "third_party/",
+)
+SCAN_SUFFIXES = {".md", ".yml", ".yaml", ".rs"}
 DOC_FLOATING = "Rul1an/assay-action@v3"
 USES_LINE = re.compile(
     r"""^[ \t]*(?:-[ \t]+)?["']?uses["']?[ \t]*:[ \t]*(?P<rest>.+)$"""
 )
-SHA_REF = re.compile(r"^[0-9a-f]{40}$")
 
 
 def fail(message: str) -> None:
     raise SystemExit(message)
+
+
+if MODE == "--list-paths":
+    for path in WORKFLOWS + SNIPPETS:
+        print(path)
+    raise SystemExit(0)
+
+
+EXPECTED_USES = f"Rul1an/assay-action@{PIN}"
 
 
 def parse_provenance(text: str) -> tuple[str, str]:
@@ -117,6 +165,15 @@ def is_assay_action_ref(ref: str) -> bool:
     )
 
 
+def is_active_consumer_ref(ref: str) -> bool:
+    lowered = ref.casefold()
+    return (
+        lowered == "./assay-action"
+        or lowered.startswith("./assay-action/")
+        or lowered.startswith("rul1an/assay-action@")
+    )
+
+
 def with_keys_after(lines: list[str], start: int, uses_indent: int) -> list[str]:
     keys: list[str] = []
     in_with = False
@@ -175,11 +232,40 @@ def check_file(path: Path, allowed_inputs: set[str], *, require_pin: bool) -> in
             continue
         found += 1
         check_ref(path, ref, require_pin=require_pin)
-        if require_pin:
-            for key in with_keys_after(lines, index, len(line) - len(line.lstrip())):
-                if key not in allowed_inputs:
-                    fail(f"{path}: undeclared input {key!r} is not in the pinned action.yml")
+        for key in with_keys_after(lines, index, len(line) - len(line.lstrip())):
+            if key not in allowed_inputs:
+                fail(
+                    f"{path}: undeclared input {key!r} is not in the pinned action.yml"
+                )
     return found
+
+
+def rel_posix(path: Path) -> str:
+    return path.relative_to(TREE).as_posix()
+
+
+def should_skip(rel: str) -> bool:
+    return any(rel.startswith(prefix) for prefix in SKIP_PREFIXES)
+
+
+def walk_unlisted() -> None:
+    for dirpath, dirnames, filenames in os.walk(TREE):
+        dirnames[:] = [name for name in dirnames if name not in {".git", "target"}]
+        for name in filenames:
+            path = Path(dirpath) / name
+            if path.suffix.lower() not in SCAN_SUFFIXES:
+                continue
+            rel = rel_posix(path)
+            if rel in OWNED or should_skip(rel):
+                continue
+            text = path.read_text(encoding="utf-8")
+            for line in text.splitlines():
+                if not line.strip() or line.lstrip().startswith("#"):
+                    continue
+                ref = parse_uses_value(line)
+                if ref is None or not is_active_consumer_ref(ref):
+                    continue
+                fail(f"{rel}: assay-action uses is not on the owner snippet list")
 
 
 def main() -> None:
@@ -197,15 +283,18 @@ def main() -> None:
         fail(f"pinned fixture digest {actual} != {digest}")
 
     allowed = declared_inputs(fixture_bytes.decode("utf-8"))
-    for workflow in WORKFLOWS:
-        found = check_file(workflow, allowed, require_pin=True)
+    for rel in WORKFLOWS:
+        found = check_file(TREE / rel, allowed, require_pin=True)
         if found == 0:
-            fail(f"{workflow}: no {EXPECTED_USES} uses found")
-    for doc in DOCS:
-        check_file(doc, allowed, require_pin=False)
+            fail(f"{TREE / rel}: no {EXPECTED_USES} uses found")
+    for rel in SNIPPETS:
+        found = check_file(TREE / rel, allowed, require_pin=False)
+        if found == 0:
+            fail(f"{TREE / rel}: no {DOC_FLOATING} uses found")
+    walk_unlisted()
     print(
         f"assay action consumer pin: {PIN} "
-        f"(fixture sha256 {digest}; {len(WORKFLOWS)} workflows, {len(DOCS)} docs)"
+        f"(fixture sha256 {digest}; {len(WORKFLOWS)} workflows, {len(SNIPPETS)} snippets)"
     )
 
 
@@ -217,4 +306,56 @@ if __name__ == "__main__":
             print(str(error), file=sys.stderr)
             raise SystemExit(1)
         raise
+PY
+
+if [[ "${MODE}" != "--published" ]]; then
+  exit 0
+fi
+
+PUBLISHED="${ASSAY_ACTION_PUBLISHED_FILE:-}"
+cleanup_published=""
+if [[ -n "${PUBLISHED}" ]]; then
+  if [[ ! -f "${PUBLISHED}" ]]; then
+    echo "published action.yml override is missing: ${PUBLISHED}" >&2
+    exit 1
+  fi
+else
+  PUBLISHED="$(mktemp)"
+  cleanup_published="${PUBLISHED}"
+  url="https://raw.githubusercontent.com/Rul1an/assay-action/${PIN}/action.yml"
+  python3 - "${url}" "${PUBLISHED}" <<'PY'
+from pathlib import Path
+import sys
+import urllib.request
+
+url, dest = sys.argv[1], sys.argv[2]
+request = urllib.request.Request(url, headers={"User-Agent": "assay-action-pin-live"})
+with urllib.request.urlopen(request, timeout=30) as response:
+    data = response.read(1048576 + 1)
+if len(data) > 1048576:
+    raise SystemExit("published action.yml exceeds 1048576-byte limit")
+if not data:
+    raise SystemExit(f"published action.yml fetch was empty: {url}")
+Path(dest).write_bytes(data)
+PY
+fi
+if [[ -n "${cleanup_published}" ]]; then
+  trap 'rm -f "${cleanup_published}"' EXIT
+fi
+
+python3 - "${FIXTURE}" "${PUBLISHED}" "${PIN}" <<'PY'
+from pathlib import Path
+import sys
+
+fixture = Path(sys.argv[1]).resolve()
+published = Path(sys.argv[2]).resolve()
+pin = sys.argv[3]
+if fixture == published:
+    raise SystemExit("published action.yml must not be the fixture file itself")
+if fixture.read_bytes() != published.read_bytes():
+    raise SystemExit(
+        f"fixture action.yml does not match published action.yml for {pin} "
+        f"(https://raw.githubusercontent.com/Rul1an/assay-action/{pin}/action.yml)"
+    )
+print(f"published action.yml bytes match pin {pin}")
 PY

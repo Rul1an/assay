@@ -18,8 +18,9 @@ updates:
       # Major version bumps need manual review (breaking changes)
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
-      # assay-dev/assay-action: custom action, Dependabot may fail to fetch metadata
-      - dependency-name: "assay-dev/assay-action"
+      # Rul1an/assay-action: pin file is the execution authority; Dependabot
+      # must not bump uses: SHAs independently of .github/assay-action-pin.
+      - dependency-name: "Rul1an/assay-action"
       # bencherdev/bencher: pinned to @main SHA, can cause update conflicts
       - dependency-name: "bencherdev/bencher"
 

@@ -405,7 +405,7 @@ repos:
         entry: bash -c 'bash scripts/ci/test-check-assay-action-pin.sh && bash scripts/ci/check-assay-action-pin.sh'
         language: system
         pass_filenames: false
-        files: ^(\.github/(assay-action-pin|workflows/(assay|action-v2-test)\.yml)|scripts/ci/(read|check|test-check)-assay-action-pin\.sh|scripts/ci/fixtures/assay-action-pin/.*|docs/(AIcontext/user-flows|getting-started/ci-integration)\.md|\.pre-commit-config\.yaml)$
+        files: ^(\.github/(assay-action-pin|dependabot\.yml|workflows/.*\.ya?ml)|scripts/ci/(read|check|test-check)-assay-action-pin\.sh|scripts/ci/fixtures/assay-action-pin/.*|docs/.*\.md|CHANGELOG\.md|crates/assay-cli/src/templates\.rs|\.pre-commit-config\.yaml)$
 
       - id: workflow-continue-on-error-policy
         name: Workflow continue-on-error policy

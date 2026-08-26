@@ -9,6 +9,15 @@ that invokes it. This page does not restate those SHAs or tag refs. A duplicated
 table was a second literal that Dependabot never updated and that drifted from
 the callsites (see #2223).
 
+`Rul1an/assay-action` is the exception. `.github/assay-action-pin` is the
+execution authority for that published Action. Workflow `uses:` SHA literals
+for it are parity-bound to the pin file; they are not a second place to change
+the consumed commit. This page still does not restate the SHA.
+
+Safe rollback is Assay-side only: restore the pin file and the parity-bound
+`uses:` literals to an earlier immutable commit. Do not move floating `v3`.
+Do not move frozen `v2`.
+
 Callsite surfaces in this repository include:
 
 - workflow files under `.github/workflows/**/*.yml`
@@ -27,8 +36,9 @@ rg -n --pcre2 'uses:\s*[^\s]+@[0-9a-f]{40}' \
 ```
 
 Nothing in this repository regenerates or verifies this page against the
-callsite YAML. Treat the callsites as authoritative; treat this page as
-procedure only.
+callsite YAML. Treat third-party `uses:` callsites as authoritative. For
+`Rul1an/assay-action`, treat `.github/assay-action-pin` as authoritative and
+the workflow SHA literals as parity-bound.
 
 ## Resolving SHAs
 
@@ -61,9 +71,11 @@ same tag. Dependabot does not maintain this document.
 When updating SHAs manually:
 
 1. Resolve new SHA: `gh api repos/OWNER/REPO/commits/REF --jq .sha`
-2. Update every callsite YAML that invokes the action (workflows under
-   `.github/workflows/`, plus composite/action manifests such as
-   `.github/actions/**/action.yml`)
+2. For third-party actions, update every callsite YAML that invokes the action
+   (workflows under `.github/workflows/`, plus composite/action manifests such
+   as `.github/actions/**/action.yml`). For `Rul1an/assay-action`, change
+   `.github/assay-action-pin` first; then copy that SHA into the parity-bound
+   `uses:` literals.
 3. Commit with message: `chore(ci): pin OWNER/REPO to SHA (was vX)`
 
 Do not add the SHA back into this document.
