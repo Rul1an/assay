@@ -19,8 +19,8 @@ This guide covers:
 ## Prerequisites
 
 - **Rust 1.96** for repository development, **Rust 1.89+** for public-crate
-  source installs, or **Python 3.9+** for Python SDK use (**Python 3.10+** for
-  SDK development)
+  source installs, or CPython 3.12 for Python SDK use
+- CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
 - An MCP session log (or use our example)
 - 5 minutes ☕
 

@@ -287,6 +287,8 @@ pip uninstall assay
 pip install assay-it
 ```
 
+CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
+
 ### Module Not Found
 ```
 ModuleNotFoundError: No module named 'assay'
@@ -296,6 +298,8 @@ ModuleNotFoundError: No module named 'assay'
 ```bash
 pip install assay-it
 ```
+
+CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
 
 ### Trace Recording Empty
 If your trace file is created but has no events:

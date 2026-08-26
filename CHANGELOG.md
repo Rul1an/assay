@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- `assay-it` metadata, release wheel targets, and install docs share one
+  `assay.python_artifact_matrix.v0`. That matrix is the sole mutable
+  authority for CPython version, package, target, and tag. A plan job
+  reads it and emits the wheels JSON plus `==X.Y.*` → X.Y / cpXY;
+  release.yml and smoke consume those outputs (no hardcoded interpreter).
+  Requires-Python is exact `==X.Y.*` bound to `cpXY` and to
+  `Programming Language :: Python :: X.Y`. `support_bound` is derived
+  from the declared wheels and that X.Y, not free prose. Requires-Python
+  changed from `>=3.9` to `==3.12.*`. This does not break any previously
+  working 3.9–3.11 install: those wheels never existed. Only the error
+  becomes explicitly unsupported. The remedy is CPython 3.12. Pinning
+  5.4.0 does not restore support. kernel-matrix `pull_request.paths` now
+  include the remaining install-doc pages
+  (`docs/guides/troubleshooting.md`, `docs/AIcontext/user-flows.md`) so
+  those docs-only PRs start the hook; this does not claim every
+  install-doc PR was already covered. Each wheels-job cell smokes the
+  locally produced wheel (exactly one `.whl` whose name is the expected
+  `{dist}-{version}-{tag}.whl`, no-index only-binary install, version +
+  `assay._native`). Both macOS cells are native: x86_64 on
+  macos-15-intel, arm64 on macos-15. There is no unsupported escape for a
+  declared pair. The published-release golden-path harness digest for
+  `.github/workflows/release.yml` was regenerated through the manifest
+  owner refresh after that wheels-job change. This does not change
+  published 5.4.0 files. The smoke contract witnesses the production
+  `install_and_import` invocation; the smoke self-test spies that
+  production call (importlib + monkeypatch); install_docs includes
+  `docs/migration-v1.2.md` and active pip-install pages cannot be omitted
+  (#2649).
+
 ### Added
 - `assay policy resolve --input PATH --format json` emits one
   `assay.policy.resolved.v0` document after the same load and schema-compile
