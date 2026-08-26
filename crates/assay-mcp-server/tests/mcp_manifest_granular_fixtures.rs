@@ -5,9 +5,7 @@
 //! documented per-tool finding matrix + validity checks are executable. P60d explains which tool digest
 //! drifted; it does not explain which field changed or whether the change is malicious.
 
-use assay_core::mcp::jcs;
-use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
+use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::PathBuf;
@@ -19,10 +17,13 @@ fn fx(name: &str) -> Value {
     serde_json::from_str(&fs::read_to_string(&p).unwrap()).unwrap()
 }
 
-/// Recompute a manifest_digest from per-tool {name, tool_digest} entries via the documented JCS
-/// canonicalization (projection id inside the hashed preimage, entries sorted by name then digest).
+/// Recompute a manifest_digest from per-tool {name, tool_digest} entries.
+///
+/// #2654: this delegates to the production rule instead of restating it. The previous local copy of
+/// the JCS preimage and the entry sort was a second implementation of the same rule, free to drift
+/// from the producer it was supposed to be anchored to.
 fn recompute_manifest_digest(tools: &[Value]) -> String {
-    let mut entries: Vec<(String, String)> = tools
+    let entries: Vec<(String, String)> = tools
         .iter()
         .map(|t| {
             (
@@ -31,17 +32,7 @@ fn recompute_manifest_digest(tools: &[Value]) -> String {
             )
         })
         .collect();
-    entries.sort();
-    let arr: Vec<Value> = entries
-        .into_iter()
-        .map(|(n, d)| json!({"name": n, "tool_digest": d}))
-        .collect();
-    let bytes = jcs::to_vec(&json!({
-        "projection": "assay.mcp_manifest_projection.v0",
-        "tools": arr,
-    }))
-    .unwrap();
-    format!("sha256:{}", hex::encode(Sha256::digest(&bytes)))
+    assay_mcp_server::manifest_observed::manifest_digest(&entries)
 }
 
 fn dup_names(tools: &[Value]) -> bool {

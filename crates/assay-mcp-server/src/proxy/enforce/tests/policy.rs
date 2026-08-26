@@ -30,13 +30,14 @@ fn manifest_from(json: &str) -> Result<DeclaredManifest> {
 
 #[test]
 fn valid_baseline_loads() {
-    let m = manifest_from(
-        r#"{"schema":"assay.declared_mcp_manifest.v0","tools":[{"name":"github.add_deploy_key","tool_digest":"sha256:abc"}]}"#,
-    )
+    let m = manifest_from(&super::fixtures::declared_json(
+        "github.add_deploy_key",
+        super::fixtures::APPROVED,
+    ))
     .unwrap();
     assert_eq!(
         m.tool_digest_for("github.add_deploy_key"),
-        Some("sha256:abc")
+        Some(super::fixtures::APPROVED)
     );
     assert_eq!(m.tool_digest_for("nope"), None);
 }

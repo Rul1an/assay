@@ -32,15 +32,31 @@ pub(super) fn acme_call() -> Value {
 }
 
 pub(super) const TOOL: &str = "github.add_deploy_key";
-pub(super) const APPROVED: &str = "sha256:approved-digest";
+/// A well-formed approved digest. #2654: the declared model requires `sha256:` + 64 lowercase hex,
+/// so this fixture states a real digest shape. Its VALUE is arbitrary — the drift gate compares
+/// declared against observed as exact bytes, and these tests supply both sides.
+pub(super) const APPROVED: &str =
+    "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 
 /// A single-tool declared baseline (loaded + strictly validated like at startup).
+///
+/// #2654: builds a COMPLETE declared-v0 document, with the manifest digest recomputed through the
+/// same shared rule production validates against — a helper that hand-wrote a digest would be the
+/// second implementation this slice exists to remove.
+pub(super) fn declared_json(name: &str, digest: &str) -> String {
+    let manifest_digest = assay_mcp_server::manifest_observed::manifest_digest(&[(
+        name.to_string(),
+        digest.to_string(),
+    )]);
+    format!(
+        r#"{{"schema":"assay.declared_mcp_manifest.v0","canonicalization":"{canon}","manifest_digest":"{manifest_digest}","tools":[{{"name":"{name}","tool_digest":"{digest}"}}]}}"#,
+        canon = assay_mcp_server::manifest_observed::CANONICALIZATION,
+    )
+}
+
 pub(super) fn baseline_with(name: &str, digest: &str) -> DeclaredManifest {
-    let j = format!(
-        r#"{{"schema":"assay.declared_mcp_manifest.v0","tools":[{{"name":"{name}","tool_digest":"{digest}"}}]}}"#
-    );
     let mut f = tempfile::NamedTempFile::new().unwrap();
-    f.write_all(j.as_bytes()).unwrap();
+    f.write_all(declared_json(name, digest).as_bytes()).unwrap();
     load_declared_manifest(f.path()).unwrap()
 }
 
