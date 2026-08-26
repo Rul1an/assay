@@ -108,21 +108,45 @@ if MODE == "--list-paths":
 EXPECTED_USES = f"Rul1an/assay-action@{PIN}"
 
 
+SCAN_TOKEN = b"assay-action"
+STREAM_CHUNK = 65536
+
+
+def contains_scan_token(data: bytes) -> bool:
+    return re.search(SCAN_TOKEN, data, re.IGNORECASE) is not None
+
+
+def stream_rest_contains_token(handle, *, tail: bytes) -> bool:
+    overlap = max(len(SCAN_TOKEN) - 1, 0)
+    prev = tail[-overlap:] if overlap else b""
+    while True:
+        chunk = handle.read(STREAM_CHUNK)
+        if not chunk:
+            return False
+        window = prev + chunk
+        if contains_scan_token(window):
+            return True
+        prev = window[-overlap:] if len(window) >= overlap else window
+
+
 def bounded_read(
     path: Path, *, allow_empty: bool = False, skip_overflow: bool = False
 ) -> bytes | None:
     try:
         with path.open("rb") as handle:
             data = handle.read(READ_LIMIT + 1)
+            if len(data) > READ_LIMIT:
+                hit = contains_scan_token(data)
+                if not hit:
+                    hit = stream_rest_contains_token(handle, tail=data)
+                if skip_overflow and not hit:
+                    return None
+                fail(f"{path}: exceeds {READ_LIMIT}-byte limit")
+            if not data and not allow_empty:
+                fail(f"{path}: file is empty")
+            return data
     except OSError as exc:
         fail(f"{path}: read failed: {exc}")
-    if len(data) > READ_LIMIT:
-        if skip_overflow and b"assay-action" not in data.lower():
-            return None
-        fail(f"{path}: exceeds {READ_LIMIT}-byte limit")
-    if not data and not allow_empty:
-        fail(f"{path}: file is empty")
-    return data
 
 
 def decode_utf8(path: Path, data: bytes) -> str:

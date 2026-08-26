@@ -440,6 +440,22 @@ printf '%s\n' '- uses: Rul1an/assay-action@v3' \
   >"${scratch}/unlisted/docs/getting-started/installation.md"
 expect_fail "unlisted-snippet-file" "is not on the owner snippet list" "${scratch}/unlisted"
 
+echo "== unlisted oversize file with snippet after 1 MiB =="
+copy_into "${scratch}/oversize"
+mkdir -p "${scratch}/oversize/docs/getting-started"
+python3 - "${scratch}/oversize/docs/getting-started/installation.md" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+limit = 1048576
+snippet = b"```yaml\n- uses: Rul1an/assay-action@v3\n```\n"
+path.write_bytes(b"x" * limit + snippet)
+if path.stat().st_size <= limit:
+    raise SystemExit("oversize mutation did not exceed 1048576 bytes")
+PY
+expect_fail "unlisted-oversize-post-limit-snippet" "exceeds 1048576-byte limit" "${scratch}/oversize"
+
 echo "== Dependabot owner drift =="
 cp "${DEPENDABOT}" "${scratch}/dependabot.yml"
 mutate_once \
