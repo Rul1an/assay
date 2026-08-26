@@ -12,12 +12,12 @@
 //!   an approval. The known-optional members below are the ones the committed baselines already
 //!   carry; they are declared so they stay checkable, not so they stay ignorable.
 //! - **Exact canonicalization id.** A baseline must name
-//!   [`manifest_observed::CANONICALIZATION`]. A digest is only comparable to another digest computed
+//!   [`crate::manifest_observed::CANONICALIZATION`]. A digest is only comparable to another digest computed
 //!   the same way, so a baseline that will not say how it was computed cannot be compared.
 //! - **Full digest syntax.** `sha256:` plus exactly 64 lowercase hex. A prefix check accepts
 //!   `sha256:` alone, and the drift gate compares digests as exact bytes.
 //! - **Recomputed manifest digest.** `manifest_digest` must recompute from the declared
-//!   `(name, tool_digest)` pairs through [`manifest_observed::manifest_digest`] — the same function
+//!   `(name, tool_digest)` pairs through [`crate::manifest_observed::manifest_digest`] — the same function
 //!   the observed producer uses. This is what makes a per-tool digest un-editable in isolation.
 //! - **Order independence.** That shared function sorts its entries, so a baseline's validity does
 //!   not depend on the order tools appear in the file. The committed baselines are not name-sorted,
