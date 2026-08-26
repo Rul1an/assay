@@ -34,22 +34,32 @@ Agents got real tool access through MCP — and tool poisoning, rug pulls, and c
 ### Quickstart
 
 ```bash
+# Fast path: verified release installer for Linux and macOS.
+curl -fsSL https://getassay.dev/install.sh | sh
+
+# Source-build alternative (requires Rust):
 cargo install assay-cli --version 5.4.0 --locked
 
-mkdir -p /tmp/assay-demo && echo "safe content" > /tmp/assay-demo/safe.txt
-assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
-  -- npx @modelcontextprotocol/server-filesystem /tmp/assay-demo
+python3 examples/mcp-quickstart/run.py
 ```
 
+Run the last command from a source checkout or the root of an extracted CLI
+release archive. The installer installs the binary; the archive carries the
+bounded quickstart assets.
+
+Captured runner output (the bundled local mock performs no external action):
+
 ```text
-✅ ALLOW  read_file  path=/tmp/assay-demo/safe.txt  reason=policy_allow
-❌ DENY   read_file  path=/tmp/outside-demo.txt      reason=path_constraint_violation
-❌ DENY   exec       cmd=ls                          reason=tool_denied
+assay quickstart: PASS
+mcp_requests=initialize,tools/list,tools/call
+decision=allow tool=read_file
+decision_artifact=.assay/quickstart/decisions.ndjson
+non_claim=forwarded_to_local_mock_only
 ```
 
 ![Assay decides each MCP tool call before it runs, fail-closed, with the reason](demo/output/screenshots/mcp-wrap-demo.svg)
 
-Project manifests are shipped for Claude Code and Cursor; Codex uses the equivalent TOML entry documented in the [editor MCP recipe](docs/guides/editor-mcp-recipe.md). `assay mcp config-path` supports Claude and Cursor only. Python SDK: `pip install assay-it`. CI: [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-security). No hosted backend and no API keys for core flows. New to the threat model? The [OWASP MCP Top 10 mapping](docs/security/OWASP-MCP-TOP10-MAPPING.md) lays out, per risk, what Assay covers and what it deliberately does not.
+Static project manifests are shipped for Claude Code and Cursor; Codex uses the equivalent TOML entry documented in the [editor MCP recipe](docs/guides/editor-mcp-recipe.md). Manifest presence is not host-discovery proof. `assay mcp config-path` supports Claude and Cursor only. The `v5.4.0` Python wheels cover CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed. Published `assay-mcp-server` archives cover Linux x86_64/arm64; the local quickstart above needs only the CLI archive and Python 3. CI: [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-security). No hosted backend and no API keys for core flows. New to the threat model? The [OWASP MCP Top 10 mapping](docs/security/OWASP-MCP-TOP10-MAPPING.md) lays out, per risk, what Assay covers and what it deliberately does not.
 
 ## What ships
 

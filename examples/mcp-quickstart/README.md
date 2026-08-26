@@ -1,38 +1,46 @@
 # MCP Quickstart
 
-See Assay block an unsafe tool call in under 2 minutes.
+Run one local, bounded MCP tool call through Assay in under 2 minutes.
 
 ## What this does
 
-Wraps a filesystem MCP server with Assay policy enforcement. The included policy
-allows `read_file` and `list_dir` within `/tmp/assay-demo/` but denies everything
-else. You'll see a clear ALLOW/DENY for every tool call.
+Wraps the included local MCP mock with Assay policy enforcement. The mock performs
+no network request and no external effect. The runner retains the raw MCP streams
+and one `assay.tool.decision` record under `.assay/quickstart/`.
 
 ## Prerequisites
 
-- [Assay CLI](https://crates.io/crates/assay-cli): `cargo install assay-cli`
-- Node.js (for the MCP filesystem server): `npm install -g @modelcontextprotocol/server-filesystem`
+- Assay CLI via the verified release installer: `curl -fsSL https://getassay.dev/install.sh | sh`
+- Python 3
+
+Source-build alternative (requires Rust):
+
+```bash
+cargo install assay-cli --version 5.4.0 --locked
+```
 
 ## Run it
 
 ```bash
-# 1. Set up a demo workspace
-mkdir -p /tmp/assay-demo
-echo "Hello from Assay" > /tmp/assay-demo/safe.txt
-
-# 2. Wrap the MCP server with Assay policy
-assay mcp wrap \
-  --policy examples/mcp-quickstart/policy.yaml \
-  -- npx @modelcontextprotocol/server-filesystem /tmp/assay-demo
+python3 examples/mcp-quickstart/run.py
 ```
 
-You'll see decisions for every tool call:
+Run this from a source checkout or the root of an extracted CLI release archive.
+The installer installs the binary; the archive carries this bounded quickstart.
 
+Captured runner output:
+
+```text
+assay quickstart: PASS
+mcp_requests=initialize,tools/list,tools/call
+decision=allow tool=read_file
+decision_artifact=.assay/quickstart/decisions.ndjson
+non_claim=forwarded_to_local_mock_only
 ```
-✅ ALLOW  read_file   path=/tmp/assay-demo/safe.txt   reason=policy_allow
-❌ DENY   read_file   path=/tmp/outside-demo.txt       reason=path_constraint_violation
-❌ DENY   exec        cmd=ls                           reason=tool_denied
-```
+
+The summary is emitted only after `initialize`, `tools/list`, and `tools/call`
+all return, Assay exits cleanly on EOF, and the decision record is readable. A
+timeout, missing child, unreadable record, or non-zero exit fails the runner.
 
 ## What's in the policy
 
