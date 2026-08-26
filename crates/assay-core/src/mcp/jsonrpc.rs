@@ -10,9 +10,26 @@ pub struct JsonRpcRequest {
     pub params: Value,
 }
 
+/// Whether a uniquely-parsed JSON-RPC method is a `tools/call`.
+///
+/// Protocol-control methods (`initialize`, `tools/list`, notifications, `ping`)
+/// are not. One function so wrap and proxy-enforce cannot drift.
+pub fn is_tools_call_method(method: &str) -> bool {
+    method == "tools/call"
+}
+
+/// Whether a uniquely-parsed object carries a `method` member.
+///
+/// Presence on the parsed tree (not a raw-byte scan) distinguishes
+/// request-shaped frames from unique responses. A present `method` that
+/// cannot type as [`JsonRpcRequest`] is INVALID_REQUEST, not a pass-through.
+pub(crate) fn unique_value_has_method_member(value: &Value) -> bool {
+    value.get("method").is_some()
+}
+
 impl JsonRpcRequest {
     pub fn is_tool_call(&self) -> bool {
-        self.method == "tools/call"
+        is_tools_call_method(&self.method)
     }
 
     pub fn tool_params(&self) -> Option<CallToolParams> {
