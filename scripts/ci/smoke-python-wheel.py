@@ -109,14 +109,8 @@ def main(argv: list[str] | None = None) -> int:
     if len(natives) != 1:
         raise SystemExit(f"{wheel.name}: expected one assay._native extension, found {natives}")
     mode = cell.get("import_smoke")
-    if mode == "unsupported":
-        print(
-            f"import_smoke=unsupported target={args.target} wheel={wheel.name} "
-            f"native={natives[0]} no native load claimed"
-        )
-        return 0
     if mode != "native":
-        raise SystemExit(f"{args.target}: import_smoke must be native or unsupported")
+        raise SystemExit(f"{args.target}: import_smoke must be native")
     install_and_import(args.python, wheel, version)
     return 0
 

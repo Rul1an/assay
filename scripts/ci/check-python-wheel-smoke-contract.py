@@ -17,6 +17,12 @@ BUILD_STEP = "Build wheels"
 UPLOAD_STEP = "Upload wheels"
 NATIVE = "native"
 UNSUPPORTED = "unsupported"
+EXPECTED_OS = {
+    "x86_64-unknown-linux-gnu": "ubuntu-latest",
+    "x86_64-apple-darwin": "macos-15-intel",
+    "aarch64-apple-darwin": "macos-15",
+}
+INCLUDE_PAIR_RE = re.compile(r"(?m)^\s+-\s+os:\s+(\S+)\s*\n\s+target:\s+(\S+)\s*$")
 
 
 def fail(errors: list[str], msg: str) -> None:
@@ -80,16 +86,26 @@ def check_matrix(root: Path, errors: list[str]) -> dict | None:
     for wheel in wheels:
         target = wheel.get("target")
         mode = wheel.get("import_smoke")
+        os_label = wheel.get("os")
         if mode not in {NATIVE, UNSUPPORTED}:
             fail(errors, f"{MATRIX_REL}: {target}: import_smoke must be {NATIVE} or {UNSUPPORTED}")
-        if target == "x86_64-apple-darwin" and mode != UNSUPPORTED:
-            fail(
-                errors,
-                f"{MATRIX_REL}: {target} is cross on macos-15; import_smoke must be {UNSUPPORTED}",
-            )
-        if target in {"x86_64-unknown-linux-gnu", "aarch64-apple-darwin"} and mode != NATIVE:
-            fail(errors, f"{MATRIX_REL}: {target} is native on its runner; import_smoke must be {NATIVE}")
+        elif mode != NATIVE:
+            fail(errors, f"{MATRIX_REL}: {target}: declared pair cannot be unsupported")
+        expected_os = EXPECTED_OS.get(target)
+        if expected_os is None:
+            fail(errors, f"{MATRIX_REL}: {target}: unexpected declared target")
+        elif os_label != expected_os:
+            fail(errors, f"{MATRIX_REL}: {target}: os must be {expected_os}, got {os_label}")
+        if target == "x86_64-apple-darwin" and os_label == "macos-15":
+            fail(errors, f"{MATRIX_REL}: {target}: os must be macos-15-intel, not macos-15")
     return matrix
+
+
+def check_wheels_pairs(job: str, matrix: dict, errors: list[str]) -> None:
+    actual = INCLUDE_PAIR_RE.findall(job)
+    expected = [(wheel["os"], wheel["target"]) for wheel in matrix.get("wheels") or []]
+    if actual != expected:
+        fail(errors, f"{RELEASE_REL}: wheel (os, target) pairs {actual} != matrix {expected}")
 
 
 def check_smoke_script(root: Path, errors: list[str]) -> None:
@@ -103,7 +119,6 @@ def check_smoke_script(root: Path, errors: list[str]) -> None:
         ("--only-binary", "only-binary install"),
         ("assay._native", "native import"),
         ("import_smoke", "import_smoke branch"),
-        (UNSUPPORTED, "unsupported honesty"),
     ):
         if needle not in text:
             fail(errors, f"{SMOKE_REL}: missing {label}")
@@ -117,8 +132,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()
     errors: list[str] = []
-    check_matrix(root, errors)
-    check_workflow(root, errors)
+    matrix = check_matrix(root, errors)
+    job = check_workflow(root, errors)
+    if matrix is not None and job:
+        check_wheels_pairs(job, matrix, errors)
     check_smoke_script(root, errors)
     if errors:
         print("python-wheel-smoke-contract FAIL", file=sys.stderr)

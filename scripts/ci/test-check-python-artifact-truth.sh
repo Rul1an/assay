@@ -71,10 +71,10 @@ Path(sys.argv[1]).write_text(
                     "import_smoke": "native",
                 },
                 {
-                    "os": "macos-15",
+                    "os": "macos-15-intel",
                     "target": "x86_64-apple-darwin",
                     "tag": "cp312-cp312-macosx_10_12_x86_64",
-                    "import_smoke": "unsupported",
+                    "import_smoke": "native",
                 },
                 {
                     "os": "macos-15",
@@ -122,7 +122,7 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          - os: macos-15
+          - os: macos-15-intel
             target: x86_64-apple-darwin
           - os: macos-15
             target: aarch64-apple-darwin

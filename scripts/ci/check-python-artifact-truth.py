@@ -100,6 +100,10 @@ def check_release_workflow(root: Path, matrix: dict, errors: list[str]) -> None:
     expected = [wheel["target"] for wheel in matrix["wheels"]]
     if targets != expected:
         fail(errors, f"{RELEASE_REL}: wheel targets {targets} != matrix {expected}")
+    os_labels = re.findall(r"(?m)^\s+-\s+os:\s+(\S+)$", job)
+    expected_os = [wheel["os"] for wheel in matrix["wheels"]]
+    if os_labels != expected_os:
+        fail(errors, f"{RELEASE_REL}: wheel os labels {os_labels} != matrix {expected_os}")
     if "Smoke the produced wheel" not in job or "scripts/ci/smoke-python-wheel.py" not in job:
         fail(errors, f"{RELEASE_REL}: wheels job must bind the produced-wheel smoke")
 
@@ -163,8 +167,12 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(errors), file=sys.stderr)
         return 1
     for wheel in matrix.get("wheels") or []:
-        if wheel.get("import_smoke") not in {"native", "unsupported"}:
-            fail(errors, f"{MATRIX_REL}: {wheel.get('target')}: import_smoke must be native or unsupported")
+        mode = wheel.get("import_smoke")
+        target = wheel.get("target")
+        if mode == "unsupported":
+            fail(errors, f"{MATRIX_REL}: {target}: declared pair cannot be unsupported")
+        elif mode != "native":
+            fail(errors, f"{MATRIX_REL}: {target}: import_smoke must be native")
     version = workspace_version(root, errors)
     check_pyproject(root, matrix, errors)
     check_cargo(root, errors)

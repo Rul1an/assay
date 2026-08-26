@@ -96,7 +96,7 @@ expected = dist / "assay_it-5.4.0-cp312-cp312-macosx_10_12_x86_64.whl"
 (expected.with_name("noise-not-the-cell.whl")).write_bytes(expected.read_bytes())
 print("extra non-matching wheel present")
 PY
-expect_pass "unsupported cell with one matching wheel" python3 "$SMOKE" --root "$ROOT" --dist-dir "$CASE/assay-python-sdk/dist" --target x86_64-apple-darwin
+# Extra non-matching wheel stays as setup; the skip-path PASS is gone.
 
 # two exact matches: copy into a listing that smoke sees as two same names via a wrapper dir is impossible. Simulate by editing find to... instead write two files where the second has the same name in a way glob returns both — can't. Use a subdirectory? glob is dist.glob("*.whl") so only top-level.
 # Create two files that both equal expected name after we patch? Simpler: write expected twice by using a second identical tag file that the code treats as match — it matches path.name == expected, so only exact name.
@@ -106,7 +106,7 @@ mv "$CASE/assay-python-sdk/dist/assay_it-5.4.0-cp312-cp312-macosx_10_12_x86_64.w
   "$CASE/assay-python-sdk/dist/renamed-away.whl"
 expect_fail "renamed produced wheel" python3 "$SMOKE" --root "$ROOT" --dist-dir "$CASE/assay-python-sdk/dist" --target x86_64-apple-darwin
 
-echo "=== mutation: native import_smoke on cross macos x86_64 ==="
+echo "=== mutation: restore old x86 macos-15 + unsupported ==="
 python3 - "$CASE/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
 import json
 from pathlib import Path
@@ -115,11 +115,66 @@ path = Path(sys.argv[1])
 data = json.loads(path.read_text())
 for wheel in data["wheels"]:
     if wheel["target"] == "x86_64-apple-darwin":
+        wheel["os"] = "macos-15"
+        wheel["import_smoke"] = "unsupported"
+path.write_text(json.dumps(data, indent=2) + "\n")
+PY
+expect_fail "old x86 macos-15 unsupported row" python3 "$CONTRACT" --root "$CASE"
+cp "$ROOT/assay-python-sdk/python-artifact-matrix.v0.json" "$CASE/assay-python-sdk/python-artifact-matrix.v0.json"
+
+echo "=== mutation: declared pair import_smoke=unsupported ==="
+python3 - "$CASE/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+data = json.loads(path.read_text())
+data["wheels"][0]["import_smoke"] = "unsupported"
+path.write_text(json.dumps(data, indent=2) + "\n")
+PY
+expect_fail "declared pair import_smoke unsupported" python3 "$CONTRACT" --root "$CASE"
+cp "$ROOT/assay-python-sdk/python-artifact-matrix.v0.json" "$CASE/assay-python-sdk/python-artifact-matrix.v0.json"
+
+echo "=== mutation: x86 os macos-15 even if native ==="
+python3 - "$CASE/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+data = json.loads(path.read_text())
+for wheel in data["wheels"]:
+    if wheel["target"] == "x86_64-apple-darwin":
+        wheel["os"] = "macos-15"
         wheel["import_smoke"] = "native"
 path.write_text(json.dumps(data, indent=2) + "\n")
 PY
-expect_fail "cross cell claimed native" python3 "$CONTRACT" --root "$CASE"
+expect_fail "x86 os macos-15 with native smoke" python3 "$CONTRACT" --root "$CASE"
 cp "$ROOT/assay-python-sdk/python-artifact-matrix.v0.json" "$CASE/assay-python-sdk/python-artifact-matrix.v0.json"
+
+echo "=== mutation: release.yml wheels x86 left on macos-15 ==="
+python3 - "$CASE/.github/workflows/release.yml" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+start = text.find("\n  wheels:")
+end = text.find("\n  publish-pypi:", start)
+if start < 0 or end < 0:
+    raise SystemExit("wheels job bounds missing")
+job = text[start:end]
+old = """          - os: macos-15-intel
+            target: x86_64-apple-darwin
+"""
+new = """          - os: macos-15
+            target: x86_64-apple-darwin
+"""
+if old not in job:
+    raise SystemExit("wheels x86 intel row not found")
+job = job.replace(old, new, 1)
+path.write_text(text[:start] + job + text[end:])
+PY
+expect_fail "release.yml wheels x86 os macos-15 vs matrix intel" python3 "$CONTRACT" --root "$CASE"
+cp "$ROOT/.github/workflows/release.yml" "$CASE/.github/workflows/release.yml"
 
 echo "=== mutation: drop native import from smoke script ==="
 python3 - "$CASE/scripts/ci/smoke-python-wheel.py" <<'PY'
