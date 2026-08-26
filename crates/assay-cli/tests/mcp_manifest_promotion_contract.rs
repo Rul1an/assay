@@ -276,6 +276,20 @@ fn candidate_refuses_sources_that_do_not_strictly_describe_their_own_bytes() {
         duplicated_status.as_bytes(),
         "duplicate member",
     );
+
+    let nested_duplicate =
+        String::from_utf8(serde_json::to_vec_pretty(&promotable_observed()).unwrap())
+            .unwrap()
+            .replacen(
+                "\"description\": \"sha256:",
+                "\"description\": \"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\n            \"description\": \"sha256:",
+                1,
+            );
+    assert_candidate_failure(
+        "nested-duplicate-field-digest",
+        nested_duplicate.as_bytes(),
+        "duplicate member",
+    );
 }
 
 #[test]

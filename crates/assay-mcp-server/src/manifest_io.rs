@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use assay_common::limits::{LimitKind, LimitReader};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -8,16 +9,15 @@ pub const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
 pub fn read_bounded_bytes(path: &Path) -> Result<Vec<u8>> {
     let file = File::open(path).with_context(|| format!("reading {}", path.display()))?;
     let mut bytes = Vec::new();
-    file.take((MAX_MANIFEST_BYTES + 1) as u64)
+    LimitReader::new(file, MAX_MANIFEST_BYTES as u64, LimitKind::SourceBytes)
         .read_to_end(&mut bytes)
-        .with_context(|| format!("reading {}", path.display()))?;
-    if bytes.len() > MAX_MANIFEST_BYTES {
-        bail!(
-            "{} exceeds the {}-byte manifest limit",
-            path.display(),
-            MAX_MANIFEST_BYTES
-        );
-    }
+        .with_context(|| {
+            format!(
+                "reading {} within the {}-byte manifest limit",
+                path.display(),
+                MAX_MANIFEST_BYTES
+            )
+        })?;
     Ok(bytes)
 }
 
@@ -59,6 +59,7 @@ fn usable_parent(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assay_common::limits::LimitExceeded;
     use serde_json::json;
 
     #[test]
@@ -87,5 +88,24 @@ mod tests {
         assert!(error.to_string().contains("manifest limit"));
         assert!(!out.exists());
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn oversized_read_preserves_the_shared_typed_limit_cause() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("oversized.json");
+        std::fs::write(&input, vec![b'x'; MAX_MANIFEST_BYTES + 1]).unwrap();
+
+        let error = read_bounded_bytes(&input)
+            .expect_err("an oversized manifest must fail through LimitReader");
+        assert!(
+            error.chain().any(|cause| {
+                cause
+                    .downcast_ref::<std::io::Error>()
+                    .and_then(LimitExceeded::from_io)
+                    .is_some()
+            }),
+            "manifest limit failure lost its typed LimitExceeded cause: {error:#}"
+        );
     }
 }

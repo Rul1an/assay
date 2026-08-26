@@ -88,7 +88,7 @@ impl DeclaredManifest {
 }
 
 /// `sha256:` + exactly 64 lowercase hex. Exact bytes, because the drift gate compares exact bytes.
-fn is_canonical_sha256(s: &str) -> bool {
+pub(crate) fn is_canonical_sha256(s: &str) -> bool {
     match s.strip_prefix("sha256:") {
         Some(hex) => {
             hex.len() == 64
@@ -211,4 +211,17 @@ fn validate_declared_manifest(manifest: DeclaredManifest) -> Result<DeclaredMani
     }
 
     Ok(manifest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_canonical_sha256;
+
+    #[test]
+    fn canonical_sha256_syntax_is_closed_and_shared() {
+        assert!(is_canonical_sha256(&format!("sha256:{}", "a".repeat(64))));
+        assert!(!is_canonical_sha256(&format!("sha256:{}", "a".repeat(63))));
+        assert!(!is_canonical_sha256(&format!("sha256:{}", "A".repeat(64))));
+        assert!(!is_canonical_sha256(&format!("sha512:{}", "a".repeat(64))));
+    }
 }

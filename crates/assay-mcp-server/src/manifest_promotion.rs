@@ -1,6 +1,6 @@
 use crate::declared_manifest::{
-    construct_declared_manifest, parse_declared_manifest, BaselineTool, DeclaredManifest,
-    DeclaredServer,
+    construct_declared_manifest, is_canonical_sha256, parse_declared_manifest, BaselineTool,
+    DeclaredManifest, DeclaredServer,
 };
 use crate::manifest_io::{read_bounded_bytes, write_json_create_new};
 use crate::manifest_observed::{manifest_digest, CANONICALIZATION, NON_CLAIMS, SCHEMA};
@@ -211,7 +211,7 @@ fn validate_candidate(candidate: ManifestCandidate) -> Result<ManifestCandidate>
     {
         bail!("candidate non_claims do not match the closed candidate contract");
     }
-    if !is_sha256(&candidate.source_sha256) {
+    if !is_canonical_sha256(&candidate.source_sha256) {
         bail!("candidate source_sha256 is not canonical sha256");
     }
     declared_from_candidate(&candidate)?;
@@ -225,13 +225,4 @@ fn declared_from_candidate(candidate: &ManifestCandidate) -> Result<DeclaredMani
         candidate.tools.clone(),
         Some(candidate.server.clone()),
     )
-}
-
-fn is_sha256(value: &str) -> bool {
-    value.strip_prefix("sha256:").is_some_and(|hex| {
-        hex.len() == 64
-            && hex
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    })
 }
