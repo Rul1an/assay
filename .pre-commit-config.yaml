@@ -382,6 +382,13 @@ repos:
         pass_filenames: false
         files: ^(\.github/workflows/.*\.ya?ml|scripts/ci/(check-codeql-upload-sarif-lockstep\.py|test-codeql-upload-sarif-lockstep\.sh)|\.pre-commit-config\.yaml)$
 
+      - id: assay-action-consumer-pin
+        name: Assay Action consumer pin
+        entry: bash -c 'bash scripts/ci/test-check-assay-action-pin.sh && bash scripts/ci/check-assay-action-pin.sh'
+        language: system
+        pass_filenames: false
+        files: ^(\.github/(assay-action-pin|workflows/(assay|action-v2-test)\.yml)|scripts/ci/(read|check|test-check)-assay-action-pin\.sh|scripts/ci/fixtures/assay-action-pin/.*|\.pre-commit-config\.yaml)$
+
       - id: workflow-continue-on-error-policy
         name: Workflow continue-on-error policy
         entry: bash scripts/ci/test-check-workflow-continue-on-error.sh

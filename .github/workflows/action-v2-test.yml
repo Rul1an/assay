@@ -81,7 +81,7 @@ jobs:
         run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
 
       - name: Test action with no bundles
-        uses: ./assay-action
+        uses: Rul1an/assay-action@5ba5daf781c229445ea8607060a08770b6f01e14
 
   test-with-bundle:
     name: Test (with valid bundle)
@@ -123,7 +123,7 @@ jobs:
 
       - name: Test action with bundle
         id: assay
-        uses: ./assay-action
+        uses: Rul1an/assay-action@5ba5daf781c229445ea8607060a08770b6f01e14
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -202,7 +202,7 @@ jobs:
 
       - name: Test action with compliance pack
         id: assay_pack
-        uses: ./assay-action
+        uses: Rul1an/assay-action@5ba5daf781c229445ea8607060a08770b6f01e14
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -269,7 +269,7 @@ jobs:
       - name: Run action with missing pack (expected failure)
         id: assay_missing_pack
         continue-on-error: true
-        uses: ./assay-action
+        uses: Rul1an/assay-action@5ba5daf781c229445ea8607060a08770b6f01e14
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -352,7 +352,7 @@ jobs:
       - name: Run action with invalid pack (expected failure)
         id: assay_invalid_pack
         continue-on-error: true
-        uses: ./assay-action
+        uses: Rul1an/assay-action@5ba5daf781c229445ea8607060a08770b6f01e14
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none

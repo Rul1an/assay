@@ -225,6 +225,15 @@ Reusable workflows are powerful for enterprise standardization but:
 | Noisy PR comments | Only comment if findings or delta |
 | Slow binary download | Cache binary in toolcache pattern |
 
+## Current consumer identity (2026-08-26)
+
+This note records the present consumer pin. It does not rewrite the decision
+above. Assay's two active integration workflows (`.github/workflows/assay.yml`
+and `.github/workflows/action-v2-test.yml`) now name the published Marketplace
+action at the immutable 40-hex pin in `.github/assay-action-pin`
+(`5ba5daf781c229445ea8607060a08770b6f01e14`, peeled `v3.0.2`). The in-tree
+`assay-action/` copy is not the consumed Action identity.
+
 ## References
 
 - [GitHub SARIF Support](https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/sarif-support-for-code-scanning)

@@ -1,0 +1,5 @@
+# Pinned fixture for the Assay consumer Action surface. Not a second implementation.
+# Fetched once from the published repository at the peeled v3.0.2 commit.
+# source: https://raw.githubusercontent.com/Rul1an/assay-action/5ba5daf781c229445ea8607060a08770b6f01e14/action.yml
+commit=5ba5daf781c229445ea8607060a08770b6f01e14
+sha256=12dd5eab7feb8aef3921b9a39dead7c341d1e019444fced9dcab3b1565b3a1d1
