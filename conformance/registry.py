@@ -94,7 +94,11 @@ def _validate_suite(suite: object, seen: set[str]) -> dict:
             if not isinstance(suite.get(field), str):
                 raise RegistryError("%s: cargo suite needs string %s" % (ident, field))
         filt = suite.get("test_filter")
-        if filt is not None and not isinstance(filt, str):
+        if suite["policy"] == "required":
+            if not isinstance(filt, str) or not filt:
+                raise RegistryError(
+                    "%s: required cargo lane needs a non-empty test_filter" % ident)
+        elif filt is not None and not isinstance(filt, str):
             raise RegistryError("%s: test_filter must be a string" % ident)
     if kind in ("needs_candidate", "external", "not_selected") and not isinstance(suite.get("note"), str):
         raise RegistryError("%s: %s suite needs a string note" % (ident, kind))

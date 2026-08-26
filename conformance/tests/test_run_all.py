@@ -156,8 +156,9 @@ class ProcessTreeContainment(unittest.TestCase):
 
 
 class CargoClassification(unittest.TestCase):
-    def _run(self, child):
+    def _run(self, child, **suite_kw):
         suite = {"crate": "c", "cargo_target_flag": "--test", "cargo_target": "t"}
+        suite.update(suite_kw)
         orig, run_all._run_capped = run_all._run_capped, child
         try:
             return run_all._cargo(suite)
@@ -189,6 +190,29 @@ class CargoClassification(unittest.TestCase):
         g, d = self._run(_Child(raises=FileNotFoundError()))
         self.assertEqual(g, run_all.UNPROVED)
         self.assertIn("cargo", d)
+
+    def test_empty_required_filter_does_not_run_whole_target(self):
+        called = []
+        def boom(cmd, cwd, timeout):
+            called.append(list(cmd))
+            raise AssertionError("empty required filter must not start cargo")
+        g, d = self._run(
+            boom, policy="required", test_filter="",
+            id="privileged-mcp-action-producer")
+        self.assertEqual(called, [])
+        self.assertEqual(g, run_all.UNPROVED)
+        self.assertIn("test_filter", d)
+        self.assertNotIn("623", d)
+
+    def test_missing_required_filter_does_not_run_whole_target(self):
+        called = []
+        def boom(cmd, cwd, timeout):
+            called.append(list(cmd))
+            raise AssertionError("missing required filter must not start cargo")
+        g, d = self._run(boom, policy="required", id="privileged-mcp-action-producer")
+        self.assertEqual(called, [])
+        self.assertEqual(g, run_all.UNPROVED)
+        self.assertIn("test_filter", d)
 
 
 class ExitCodePrecedence(unittest.TestCase):

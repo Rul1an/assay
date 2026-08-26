@@ -114,10 +114,14 @@ def _stdlib_jsonrpc(suite: dict) -> tuple[str, str]:
 
 def _cargo(suite: dict) -> tuple[str, str]:
     """Rust-driven corpora. Reports unproved when the toolchain is absent."""
+    filt = suite.get("test_filter")
+    if suite.get("policy") == "required" and not (isinstance(filt, str) and filt):
+        return UNPROVED, (
+            "required cargo lane has empty/missing test_filter; "
+            "refusing whole-target execution")
     try:
         cmd = ["cargo", "test", "--locked", "-p", suite["crate"],
                suite["cargo_target_flag"], suite["cargo_target"]]
-        filt = suite.get("test_filter")
         if isinstance(filt, str) and filt:
             cmd.append(filt)
         cmd += ["--", "--nocapture"]

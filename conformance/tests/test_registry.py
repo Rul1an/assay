@@ -227,6 +227,14 @@ class IndexProjection(unittest.TestCase):
         reasons = registry.index_reasons(REPO, registry.load_suites())
         self.assertEqual(reasons, [])
 
+    def test_index_does_not_call_declared_inventory_all_six(self):
+        declared = len(registry.load_suites())
+        self.assertEqual(declared, 10)
+        for rel in ("conformance/INDEX.md.in", "conformance/INDEX.md"):
+            text = (REPO / rel).read_text(encoding="utf-8")
+            self.assertNotIn("all-six fact", text, rel)
+            self.assertIn("(10)", text, rel)
+
 
 class HostileLoader(unittest.TestCase):
     def _write(self, payload, *, size=None):
@@ -285,6 +293,34 @@ class HostileLoader(unittest.TestCase):
         with self.assertRaises(registry.RegistryError) as ctx:
             registry.load_registry(path)
         self.assertIn("policy", str(ctx.exception))
+
+    def test_empty_test_filter_on_required_cargo_is_rejected(self):
+        """Canonical mutation: required cargo test_filter="" must go red."""
+        suites = [dict(s) for s in registry.load_suites()]
+        producer = next(s for s in suites if s["id"] == "privileged-mcp-action-producer")
+        producer["test_filter"] = ""
+        path = self._write({"schema": registry.SCHEMA, "suites": suites})
+        with self.assertRaises(registry.RegistryError) as ctx:
+            registry.load_registry(path)
+        self.assertIn("test_filter", str(ctx.exception))
+        reasons = registry.registry_completeness_reasons(REPO, registry_path=path)
+        self.assertTrue(reasons, "empty required test_filter must not stay clean")
+        self.assertTrue(any("test_filter" in r for r in reasons), reasons)
+
+    def test_missing_test_filter_on_required_cargo_is_rejected(self):
+        suites = [dict(s) for s in registry.load_suites()]
+        producer = next(s for s in suites if s["id"] == "privileged-mcp-action-producer")
+        producer.pop("test_filter", None)
+        path = self._write({"schema": registry.SCHEMA, "suites": suites})
+        with self.assertRaises(registry.RegistryError) as ctx:
+            registry.load_registry(path)
+        self.assertIn("test_filter", str(ctx.exception))
+
+    def test_optional_cargo_may_omit_test_filter(self):
+        suite = next(s for s in registry.load_suites() if s["id"] == "rfc8785-canonicalization")
+        self.assertEqual(suite["kind"], "cargo")
+        self.assertEqual(suite["policy"], "optional")
+        self.assertNotIn("test_filter", suite)
 
     def test_path_escape_is_rejected(self):
         suite = dict(registry.load_suites()[0])

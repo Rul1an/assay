@@ -12,7 +12,7 @@ python3 conformance/run_all.py --require-complete --completion-scope required --
     # required CI (Linux test job after Test Workspace)
 ```
 
-Plain inventory mode — `python3 conformance/run_all.py`, with or without `--json` — is **not a completeness gate**. Exit 0 means no executed suite graded `false` or `unproved`. It does not mean every declared suite ran. `--require-complete` without a scope still uses global `complete` (`executed == declared` over every declared suite). `--completion-scope required` is only valid together with `--require-complete` and exits 3 on `required_complete`. Global `complete` stays the all-six fact and is still false on this tree. That is repository execution coverage, not semantic completeness of any corpus.
+Plain inventory mode — `python3 conformance/run_all.py`, with or without `--json` — is **not a completeness gate**. Exit 0 means no executed suite graded `false` or `unproved`. It does not mean every declared suite ran. `--require-complete` without a scope still uses global `complete` (`executed == declared` over every declared suite). `--completion-scope required` is only valid together with `--require-complete` and exits 3 on `required_complete`. Global `complete` stays the all-declared (10) fact and is still false on this tree. That is repository execution coverage, not semantic completeness of any corpus.
 
 Standard library only. No Assay import, no pip install, no network.
 
