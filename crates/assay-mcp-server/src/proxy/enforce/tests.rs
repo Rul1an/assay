@@ -5,6 +5,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::io::Write;
 
+mod declared_manifest;
 mod drift;
 mod fixtures;
 mod pdp;

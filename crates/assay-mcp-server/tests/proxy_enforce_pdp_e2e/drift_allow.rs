@@ -24,7 +24,10 @@ fn tool_absent_from_baseline_denies_baseline_missing() {
     let baseline = write_file(
         dir.path(),
         "baseline.json",
-        r#"{"schema":"assay.declared_mcp_manifest.v0","tools":[{"name":"search","tool_digest":"sha256:abc"}]}"#,
+        &declared_baseline_json(
+            "search",
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        ),
     );
     let mut out = Conn::attach(spawn_enforce(&log, &policy, &baseline, "p60a"));
 
@@ -52,7 +55,10 @@ fn observed_digest_differs_from_baseline_denies_drifted() {
     let baseline = write_file(
         dir.path(),
         "baseline.json",
-        r#"{"schema":"assay.declared_mcp_manifest.v0","tools":[{"name":"github.add_deploy_key","tool_digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}]}"#,
+        &declared_baseline_json(
+            "github.add_deploy_key",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        ),
     );
     let mut out = Conn::attach(spawn_enforce(&log, &policy, &baseline, "p60a"));
 

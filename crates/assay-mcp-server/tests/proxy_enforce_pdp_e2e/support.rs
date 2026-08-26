@@ -338,3 +338,19 @@ pub(crate) fn run_startup_output(extra: &[&str]) -> std::process::Output {
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     startup_output(&arg_refs)
 }
+
+/// A COMPLETE, strictly-valid declared-v0 baseline for one tool.
+///
+/// #2654: the declared model requires a canonicalization id and a `manifest_digest` that recomputes,
+/// so an e2e baseline is built through the same shared rule production validates against rather than
+/// hand-written. A minimal two-key document is no longer a baseline the proxy will start on.
+pub fn declared_baseline_json(name: &str, tool_digest: &str) -> String {
+    let manifest_digest = assay_mcp_server::manifest_observed::manifest_digest(&[(
+        name.to_string(),
+        tool_digest.to_string(),
+    )]);
+    format!(
+        r#"{{"schema":"assay.declared_mcp_manifest.v0","canonicalization":"{canon}","manifest_digest":"{manifest_digest}","tools":[{{"name":"{name}","tool_digest":"{tool_digest}"}}]}}"#,
+        canon = assay_mcp_server::manifest_observed::CANONICALIZATION,
+    )
+}
