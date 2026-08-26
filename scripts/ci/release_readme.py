@@ -13,6 +13,7 @@ RELEASE_RE = re.compile(
     r"\(https://github\.com/Rul1an/assay/releases/tag/v\1\)\."
 )
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def render_release_readme(source: str, version: str) -> str:
@@ -40,13 +41,13 @@ def render_release_readme(source: str, version: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    if len(args) != 3:
-        print("usage: release_readme.py SOURCE VERSION OUTPUT", file=sys.stderr)
+    if len(args) != 1:
+        print("usage: release_readme.py VERSION", file=sys.stderr)
         return 2
-    source_path, version, output_path = Path(args[0]), args[1], Path(args[2])
-    rendered = render_release_readme(source_path.read_text(encoding="utf-8"), version)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(rendered, encoding="utf-8")
+    rendered = render_release_readme(
+        (ROOT / "README.md").read_text(encoding="utf-8"), args[0]
+    )
+    sys.stdout.write(rendered)
     return 0
 
 

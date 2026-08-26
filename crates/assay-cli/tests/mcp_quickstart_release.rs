@@ -42,10 +42,20 @@ fn copy_quickstart(source: &Path, destination: &Path) -> Result<()> {
 
 fn run_quickstart(root: &Path) -> Result<Output> {
     let script = root.join("mcp-quickstart/run.py");
+    let bin_dir = root.join("bin");
+    fs::create_dir_all(&bin_dir)?;
+    let binary_name = if cfg!(windows) { "assay.exe" } else { "assay" };
+    fs::copy(env!("CARGO_BIN_EXE_assay"), bin_dir.join(binary_name))?;
+    let mut paths = vec![bin_dir];
+    if let Some(existing) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&existing));
+    }
+    let path = std::env::join_paths(paths)?;
     Command::new(python())
         .arg(&script)
         .current_dir(root)
-        .env("ASSAY_BIN", env!("CARGO_BIN_EXE_assay"))
+        .env("PATH", path)
+        .env("ASSAY_BIN", root.join("must-not-be-executed"))
         .env("ASSAY_QUICKSTART_TIMEOUT_SECONDS", "10")
         .output()
         .with_context(|| format!("failed to run {}", script.display()))
@@ -80,7 +90,8 @@ fn released_quickstart_runs_from_an_empty_directory_and_records_what_happened() 
     let invocation: Value =
         serde_json::from_slice(&fs::read(evidence.join("mock-invocation.json"))?)?;
     let source = staged.canonicalize()?;
-    assert_eq!(invocation["cwd"], source.to_string_lossy().as_ref());
+    let root = temp.path().canonicalize()?;
+    assert_eq!(invocation["cwd"], root.to_string_lossy().as_ref());
     assert_eq!(invocation["argv"], serde_json::json!([]));
 
     let raw_stdout = fs::read_to_string(evidence.join("mcp.stdout.ndjson"))?;

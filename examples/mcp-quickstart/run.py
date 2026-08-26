@@ -42,6 +42,11 @@ def terminate(proc: subprocess.Popen[bytes]) -> None:
     proc.wait(timeout=5)
 
 
+def resolve_assay() -> str | None:
+    """Return the released command name without accepting a command override."""
+    return "assay" if shutil.which("assay") is not None else None
+
+
 def main() -> int:
     source = Path(__file__).resolve().parent
     policy = source / "policy.yaml"
@@ -49,7 +54,7 @@ def main() -> int:
     if not policy.is_file() or not mock.is_file():
         return fail("release quickstart assets are incomplete")
 
-    assay = os.environ.get("ASSAY_BIN") or shutil.which("assay")
+    assay = resolve_assay()
     if not assay:
         return fail("assay is not on PATH; install the released CLI first")
     try:
@@ -82,13 +87,9 @@ def main() -> int:
         "-u",
         str(mock),
     ]
-    env = os.environ.copy()
-    env["ASSAY_QUICKSTART_INVOCATION_LOG"] = str(invocation_log)
     creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
     proc = subprocess.Popen(
         command,
-        cwd=source,
-        env=env,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

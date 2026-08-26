@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -27,12 +26,10 @@ def send(value: dict) -> None:
 
 
 def record_invocation() -> None:
-    destination = os.environ.get("ASSAY_QUICKSTART_INVOCATION_LOG")
-    if destination:
-        Path(destination).write_text(
-            json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd()}, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+    Path(".assay/quickstart/mock-invocation.json").write_text(
+        json.dumps({"argv": sys.argv[1:], "cwd": str(Path.cwd())}, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def main() -> int:
