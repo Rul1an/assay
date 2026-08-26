@@ -214,6 +214,25 @@ class CargoClassification(unittest.TestCase):
         self.assertEqual(g, run_all.UNPROVED)
         self.assertIn("test_filter", d)
 
+    def test_whitespace_required_filter_does_not_run_whole_target(self):
+        for filt in (" ", "\t", " \t\n"):
+            with self.subTest(repr(filt)):
+                called = []
+                def boom(cmd, cwd, timeout):
+                    called.append(list(cmd))
+                    raise AssertionError("whitespace required filter must not start cargo")
+                g, d = self._run(
+                    boom, policy="required", test_filter=filt,
+                    id="privileged-mcp-action-producer")
+                self.assertEqual(called, [])
+                self.assertEqual(g, run_all.UNPROVED)
+                self.assertIn("test_filter", d)
+                self.assertNotIn("623", d)
+
+    def test_cargo_uses_registry_usable_test_filter(self):
+        import registry
+        self.assertIs(run_all.usable_test_filter, registry.usable_test_filter)
+
 
 class ExitCodePrecedence(unittest.TestCase):
     """false outranks unproved, and non-run states never set an exit code."""

@@ -47,7 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bounded_run import (  # noqa: E402
     OUTPUT_CAP_BYTES, _OutputTooLarge, _run_capped,
 )
-from registry import load_suites  # noqa: E402
+from registry import load_suites, usable_test_filter  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -114,15 +114,15 @@ def _stdlib_jsonrpc(suite: dict) -> tuple[str, str]:
 
 def _cargo(suite: dict) -> tuple[str, str]:
     """Rust-driven corpora. Reports unproved when the toolchain is absent."""
-    filt = suite.get("test_filter")
-    if suite.get("policy") == "required" and not (isinstance(filt, str) and filt):
+    filt = usable_test_filter(suite.get("test_filter"))
+    if suite.get("policy") == "required" and filt is None:
         return UNPROVED, (
             "required cargo lane has empty/missing test_filter; "
             "refusing whole-target execution")
     try:
         cmd = ["cargo", "test", "--locked", "-p", suite["crate"],
                suite["cargo_target_flag"], suite["cargo_target"]]
-        if isinstance(filt, str) and filt:
+        if filt:
             cmd.append(filt)
         cmd += ["--", "--nocapture"]
         p = _run_capped(cmd, REPO, timeout=1800)

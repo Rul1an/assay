@@ -57,6 +57,14 @@ def _reject_path_symlink_escape(path: str, repo: Path = REPO) -> None:
         raise RegistryError("suite path symlink escapes the repository: %r" % path)
 
 
+def usable_test_filter(filt: object) -> str | None:
+    """Shared strip truth. Empty, missing, non-string, and whitespace-only are unusable."""
+    if not isinstance(filt, str):
+        return None
+    stripped = filt.strip()
+    return stripped or None
+
+
 def _validate_suite(suite: object, seen: set[str]) -> dict:
     if not isinstance(suite, dict):
         raise RegistryError("suite is %s, not an object" % type(suite).__name__)
@@ -95,7 +103,7 @@ def _validate_suite(suite: object, seen: set[str]) -> dict:
                 raise RegistryError("%s: cargo suite needs string %s" % (ident, field))
         filt = suite.get("test_filter")
         if suite["policy"] == "required":
-            if not isinstance(filt, str) or not filt:
+            if usable_test_filter(filt) is None:
                 raise RegistryError(
                     "%s: required cargo lane needs a non-empty test_filter" % ident)
         elif filt is not None and not isinstance(filt, str):

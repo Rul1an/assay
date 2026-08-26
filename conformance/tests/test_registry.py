@@ -322,6 +322,27 @@ class HostileLoader(unittest.TestCase):
         self.assertEqual(suite["policy"], "optional")
         self.assertNotIn("test_filter", suite)
 
+    def test_whitespace_only_test_filter_on_required_cargo_is_rejected(self):
+        for filt in (" ", "\t", " \t\n"):
+            with self.subTest(repr(filt)):
+                suites = [dict(s) for s in registry.load_suites()]
+                producer = next(s for s in suites if s["id"] == "privileged-mcp-action-producer")
+                producer["test_filter"] = filt
+                path = self._write({"schema": registry.SCHEMA, "suites": suites})
+                with self.assertRaises(registry.RegistryError) as ctx:
+                    registry.load_registry(path)
+                self.assertIn("test_filter", str(ctx.exception))
+
+    def test_usable_test_filter_is_the_shared_strip_truth(self):
+        self.assertIsNone(registry.usable_test_filter(None))
+        self.assertIsNone(registry.usable_test_filter(""))
+        self.assertIsNone(registry.usable_test_filter(" "))
+        self.assertIsNone(registry.usable_test_filter("\t"))
+        self.assertIsNone(registry.usable_test_filter(" \t\n"))
+        self.assertIsNone(registry.usable_test_filter(1))
+        self.assertEqual(registry.usable_test_filter("producer_lane_"), "producer_lane_")
+        self.assertEqual(registry.usable_test_filter("  producer_lane_  "), "producer_lane_")
+
     def test_path_escape_is_rejected(self):
         suite = dict(registry.load_suites()[0])
         suite["path"] = "../../../etc/passwd"
