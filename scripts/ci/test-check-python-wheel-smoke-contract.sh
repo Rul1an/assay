@@ -31,6 +31,85 @@ expect_pass() {
   pass "$label GREEN"
 }
 
+
+run_install_spy() {
+  local smoke_path="$1"
+  local spy_root="$TMP/spy-root"
+  local spy_dist="$TMP/spy-dist"
+  mkdir -p "$spy_root" "$spy_dist"
+  python3 - "$smoke_path" "$spy_root" "$spy_dist" <<'PY'
+import importlib.util
+import sys
+from pathlib import Path
+
+smoke_path = Path(sys.argv[1])
+root = sys.argv[2]
+dist = sys.argv[3]
+
+spec = importlib.util.spec_from_file_location("smoke_python_wheel_spy", smoke_path)
+if spec is None or spec.loader is None:
+    raise SystemExit("cannot load smoke script")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+
+sentinel_version = "9.9.9-sentinel"
+sentinel_wheel = Path("/sentinel/wheel.whl")
+spy_calls = []
+
+
+def load_cell(root, target):
+    return {"import_smoke": "native", "tag": "cp312-cp312-manylinux_2_17_x86_64"}
+
+
+def workspace_version(root):
+    return sentinel_version
+
+
+def find_wheel(dist, package, version, tag):
+    return sentinel_wheel
+
+
+def native_members(wheel):
+    return ["assay/_native.so"]
+
+
+def install_and_import(python, wheel, version):
+    spy_calls.append((python, wheel, version))
+
+
+mod.load_cell = load_cell
+mod.workspace_version = workspace_version
+mod.find_wheel = find_wheel
+mod.native_members = native_members
+mod.install_and_import = install_and_import
+
+try:
+    rc = mod.main(
+        [
+            "--root",
+            root,
+            "--dist-dir",
+            dist,
+            "--target",
+            "x86_64-unknown-linux-gnu",
+            "--python",
+            "/sentinel/python",
+        ]
+    )
+except SystemExit as exc:
+    print(f"main raised SystemExit: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+expected = [("/sentinel/python", sentinel_wheel, sentinel_version)]
+if rc != 0 or spy_calls != expected:
+    print(f"rc={rc!r} spy_calls={spy_calls!r} expected {expected!r}", file=sys.stderr)
+    raise SystemExit(1)
+raise SystemExit(0)
+PY
+}
+
+expect_pass "production install_and_import spy" run_install_spy "$SMOKE"
+
 expect_pass "live smoke contract" python3 "$CONTRACT" --root "$ROOT"
 
 write_dummy_wheel() {
@@ -185,6 +264,66 @@ if old not in text:
 path.write_text(text.replace(old, "", 1))
 PY
 expect_fail "drop production install_and_import call" python3 "$CONTRACT" --root "$CASE"
+cp "$ROOT/scripts/ci/smoke-python-wheel.py" "$CASE/scripts/ci/smoke-python-wheel.py"
+
+
+echo "=== mutation: drop production install_and_import call (spy) ==="
+python3 - "$CASE/scripts/ci/smoke-python-wheel.py" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+old = "    install_and_import(args.python, wheel, version)\n"
+if old not in text:
+    raise SystemExit("production install_and_import call not found")
+path.write_text(text.replace(old, "", 1))
+PY
+expect_fail "drop production install_and_import call (spy)" run_install_spy "$CASE/scripts/ci/smoke-python-wheel.py"
+cp "$ROOT/scripts/ci/smoke-python-wheel.py" "$CASE/scripts/ci/smoke-python-wheel.py"
+
+echo "=== mutation: wrap production install_and_import in if False ==="
+python3 - "$CASE/scripts/ci/smoke-python-wheel.py" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+old = "    install_and_import(args.python, wheel, version)\n"
+new = "    if False:\n        install_and_import(args.python, wheel, version)\n"
+if old not in text:
+    raise SystemExit("production install_and_import call not found")
+path.write_text(text.replace(old, new, 1))
+PY
+expect_fail "wrap production install_and_import in if False" run_install_spy "$CASE/scripts/ci/smoke-python-wheel.py"
+cp "$ROOT/scripts/ci/smoke-python-wheel.py" "$CASE/scripts/ci/smoke-python-wheel.py"
+
+echo "=== mutation: wrong python/wheel/version args to install_and_import ==="
+python3 - "$CASE/scripts/ci/smoke-python-wheel.py" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+old = "    install_and_import(args.python, wheel, version)\n"
+new = '    install_and_import("/wrong/python", wheel, version)\n'
+if old not in text:
+    raise SystemExit("production install_and_import call not found")
+path.write_text(text.replace(old, new, 1))
+PY
+expect_fail "wrong python/wheel/version args to install_and_import" run_install_spy "$CASE/scripts/ci/smoke-python-wheel.py"
+cp "$ROOT/scripts/ci/smoke-python-wheel.py" "$CASE/scripts/ci/smoke-python-wheel.py"
+
+echo "=== mutation: return 0 before production install_and_import ==="
+python3 - "$CASE/scripts/ci/smoke-python-wheel.py" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+old = "    install_and_import(args.python, wheel, version)\n"
+new = "    return 0\n    install_and_import(args.python, wheel, version)\n"
+if old not in text:
+    raise SystemExit("production install_and_import call not found")
+path.write_text(text.replace(old, new, 1))
+PY
+expect_fail "return 0 before production install_and_import" run_install_spy "$CASE/scripts/ci/smoke-python-wheel.py"
 cp "$ROOT/scripts/ci/smoke-python-wheel.py" "$CASE/scripts/ci/smoke-python-wheel.py"
 
 echo "=== no-op restore ==="

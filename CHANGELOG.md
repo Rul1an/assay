@@ -20,7 +20,8 @@ All notable changes to this project will be documented in this file.
   `.github/workflows/release.yml` was regenerated through the manifest
   owner refresh after that wheels-job change. This does not change
   published 5.4.0 files. The smoke contract now witnesses the production
-  `install_and_import` invocation; install_docs includes
+  `install_and_import` invocation; the smoke self-test now spies that
+  production call (importlib + monkeypatch); install_docs includes
   `docs/migration-v1.2.md` and active pip-install pages cannot be omitted
   (#2649).
 
