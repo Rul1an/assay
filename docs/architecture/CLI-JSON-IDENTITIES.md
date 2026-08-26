@@ -100,6 +100,7 @@ revision, when this block was a bare list.
 ```text
 assay.coding_agent.evidence_pack.v0 | declared in assay-evidence as a bundle pack schema; no CLI write opened
 assay.declared_mcp_manifest.v0 | operator-authored approval baseline read by assay-mcp-server at startup; no command writes it
+assay.mcp_manifest_candidate.v0 | assay-mcp-server promotion candidate returned by an MCP tool; no CLI command writes it
 assay.mandate.v1 | mandate event carried in evidence, not written by a command
 assay.mcp_manifest_observed.v0 | assay-mcp-server observation event inside a bundle
 assay.mcp_manifest_projection.v0 | assay-mcp-server projection event inside a bundle
