@@ -566,6 +566,11 @@ class PrivilegedMcpActionLanes(unittest.TestCase):
             self.assertIs(suite["runner"], run_all._cargo, ident)
             self.assertIsInstance(suite.get("test_filter"), str, ident)
             self.assertTrue(suite["test_filter"], ident)
+        cargo_src = Path(run_all.__file__).read_text()
+        start = cargo_src.index("def _cargo")
+        end = cargo_src.index("\ndef _bind_runners", start)
+        self.assertIn('"--locked"', cargo_src[start:end])
+        self.assertEqual(cargo_src[start:end].count("cmd = ["), 1)
 
     def test_producer_assertions_are_independent_of_verifier(self):
         producer = next(s for s in run_all.SUITES if s["id"] == self.PRODUCER)
@@ -603,20 +608,62 @@ class PrivilegedMcpActionLanes(unittest.TestCase):
 
     def test_plain_mode_does_not_invoke_cargo(self):
         called = []
-        orig = run_all._cargo
         def boom(suite):
             called.append(suite["id"])
             raise AssertionError("plain mode must not invoke cargo")
-        run_all._cargo = boom
+        originals = []
+        for suite in run_all.SUITES:
+            if suite.get("kind") == "cargo":
+                originals.append((suite, suite["runner"]))
+                suite["runner"] = boom
         orig_argv = sys.argv
         sys.argv = ["run_all.py", "--json"]
         try:
             code = run_all.main()
         finally:
-            run_all._cargo = orig
+            for suite, runner in originals:
+                suite["runner"] = runner
             sys.argv = orig_argv
+        self.assertTrue(originals, "expected bound cargo runners to replace")
         self.assertEqual(called, [])
         self.assertEqual(code, 0)
+
+    def test_removing_the_cargo_skip_is_red_without_starting_cargo(self):
+        import importlib.util
+        source = Path(run_all.__file__).read_text()
+        skip = (
+            '        elif kind == "cargo" and not args.with_cargo:\n'
+            '            grade, detail = NOT_SELECTED, "rerun with --with-cargo"\n'
+        )
+        self.assertEqual(source.count(skip), 1)
+        mutated_src = source.replace(skip, "", 1)
+        here = Path(run_all.__file__).resolve().parent
+        path = here / "_run_all_skip_mutation.py"
+        called = []
+
+        def boom(suite):
+            called.append(suite["id"])
+            raise AssertionError("plain mode must not invoke cargo")
+
+        orig_argv = sys.argv
+        sys.argv = ["run_all.py", "--json"]
+        try:
+            path.write_text(mutated_src)
+            spec = importlib.util.spec_from_file_location(
+                "run_all_skip_mutation", path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            for suite in mod.SUITES:
+                if suite.get("kind") == "cargo":
+                    suite["runner"] = boom
+            with self.assertRaises(AssertionError) as ctx:
+                mod.main()
+            self.assertIn("plain mode must not invoke cargo", str(ctx.exception))
+            self.assertTrue(called)
+        finally:
+            sys.argv = orig_argv
+            if path.exists():
+                path.unlink()
 
     def test_required_scope_without_with_cargo_exits_3(self):
         orig_argv = sys.argv
