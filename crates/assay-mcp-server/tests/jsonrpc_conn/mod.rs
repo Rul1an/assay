@@ -154,6 +154,16 @@ impl Conn {
         stdin.flush().expect("flush request");
     }
 
+    /// Write one already-serialized JSON-RPC line. Used for frames whose member
+    /// order or duplicate members cannot be produced by [`Value`] serialization.
+    pub fn send_line(&mut self, line: &str) {
+        let preview: String = line.chars().take(80).collect();
+        self.last_sent = Some(preview);
+        let stdin = self.stdin.as_mut().expect("stdin is still open");
+        writeln!(stdin, "{line}").expect("write request");
+        stdin.flush().expect("flush request");
+    }
+
     /// Send a request and read the response to it.
     ///
     /// Reads with [`Conn::read_response`] and not [`Conn::read_json`]: the name promises the
