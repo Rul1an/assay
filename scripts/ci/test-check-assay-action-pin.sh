@@ -17,6 +17,7 @@ ACTION_WF="${ROOT}/.github/workflows/action-v2-test.yml"
 USER_FLOWS="${ROOT}/docs/AIcontext/user-flows.md"
 CI_INTEGRATION="${ROOT}/docs/getting-started/ci-integration.md"
 GITHUB_ACTION_DOC="${ROOT}/docs/guides/github-action.md"
+CICD_STARTER="${ROOT}/packs/open/cicd-starter/README.md"
 PINNED_ACTIONS="${ROOT}/docs/PINNED-ACTIONS.md"
 CHANGELOG="${ROOT}/CHANGELOG.md"
 DEPENDABOT="${ROOT}/.github/dependabot.yml"
@@ -153,6 +154,7 @@ required = (
     "docs/PINNED-ACTIONS.md",
     "CHANGELOG.md",
     ".github/dependabot.yml",
+    "packs/open/cicd-starter/README.md",
     "crates/assay-cli/src/templates.rs",
     ".pre-commit-config.yaml",
 )
@@ -172,6 +174,7 @@ require_exists "${ACTION_WF}"
 require_exists "${USER_FLOWS}"
 require_exists "${CI_INTEGRATION}"
 require_exists "${GITHUB_ACTION_DOC}"
+require_exists "${CICD_STARTER}"
 require_exists "${PINNED_ACTIONS}"
 require_exists "${CHANGELOG}"
 require_exists "${DEPENDABOT}"
@@ -278,6 +281,11 @@ fi
 echo "ok    ci-invokes-live-published-byte-check"
 expect_ok "consumer-compat-live" check_consumer_compat \
   "${DEPENDABOT}" "${PINNED_ACTIONS}" "${CHANGELOG}"
+if ! "${CHECKER}" --list-paths | grep -Fxq 'packs/open/cicd-starter/README.md'; then
+  echo "owner snippet list omits packs/open/cicd-starter/README.md" >&2
+  exit 1
+fi
+echo "ok    cicd-starter-readme-is-inventoried"
 
 echo "== nonexistent / non-40 pin =="
 copy_into "${scratch}/non40"
@@ -355,10 +363,11 @@ import sys
 
 fixture = Path(sys.argv[1])
 provenance = Path(sys.argv[2])
-data = bytearray(fixture.read_bytes())
-data[0] ^= 0x01
-fixture.write_bytes(bytes(data))
-digest = hashlib.sha256(bytes(data)).hexdigest()
+# Keep YAML parseable so offline consistency can stay green; only the
+# published-byte compare should catch coordinated digest+fixture drift.
+data = fixture.read_bytes() + b"\n# coordinated-fixture-digest-drift\n"
+fixture.write_bytes(data)
+digest = hashlib.sha256(data).hexdigest()
 text = provenance.read_text(encoding="utf-8")
 old = None
 for line in text.splitlines():
@@ -513,6 +522,93 @@ if ! grep -Fq "mixed Action migration" "${scratch}/err"; then
   exit 1
 fi
 echo "ok    changelog-mixed-dropped (owner gate failed)"
+
+echo "== flow-style with: mapping undeclared input =="
+copy_into "${scratch}/flow-with"
+mutate_once \
+  "${scratch}/flow-with/.github/workflows/assay.yml" \
+  "        with:
+          version: \${{ steps.assay_tag.outputs.version }}" \
+  "        with: { version: v5.4.0, undeclared_inline: true }"
+expect_fail "flow-style-with-mapping" "undeclared input 'undeclared_inline'" "${scratch}/flow-with"
+
+echo "== flow-style uses mapping undeclared input =="
+copy_into "${scratch}/flow-uses"
+mutate_once \
+  "${scratch}/flow-uses/.github/workflows/assay.yml" \
+  "      - name: Setup Assay
+        uses: ${EXPECTED_USES}
+        with:
+          version: \${{ steps.assay_tag.outputs.version }}" \
+  "      - name: Setup Assay
+        uses: ${EXPECTED_USES}
+        with:
+          version: \${{ steps.assay_tag.outputs.version }}
+      - { uses: ${EXPECTED_USES}, with: { undeclared_inline: true } }"
+expect_fail "flow-style-uses-mapping" "undeclared input 'undeclared_inline'" "${scratch}/flow-uses"
+
+echo "== fixture replacement between digest validation and published compare =="
+copy_into "${scratch}/toctou"
+cp "${FIXTURE}" "${scratch}/toctou-oracle.yml"
+python3 - "${scratch}/toctou/scripts/ci/fixtures/assay-action-pin/action.yml" \
+  "${scratch}/toctou/scripts/ci/fixtures/assay-action-pin/PROVENANCE" \
+  "${scratch}/toctou/.github/workflows/assay.yml" <<'PY'
+from pathlib import Path
+import hashlib
+import sys
+
+fixture = Path(sys.argv[1])
+provenance = Path(sys.argv[2])
+workflow = Path(sys.argv[3])
+text = fixture.read_text(encoding="utf-8")
+needle = "inputs:\n  bundles:"
+if text.count(needle) != 1:
+    raise SystemExit(f"fixture inputs subject count is {text.count(needle)}")
+fixture.write_text(
+    text.replace(
+        needle,
+        "inputs:\n  evil_between_reads:\n    description: toctou\n    required: false\n    default: ''\n  bundles:",
+        1,
+    ),
+    encoding="utf-8",
+)
+digest = hashlib.sha256(fixture.read_bytes()).hexdigest()
+prov = provenance.read_text(encoding="utf-8")
+old = None
+for line in prov.splitlines():
+    if line.startswith("sha256="):
+        old = line.split("=", 1)[1].strip()
+        break
+if not old:
+    raise SystemExit("provenance missing sha256=")
+provenance.write_text(prov.replace(f"sha256={old}", f"sha256={digest}", 1), encoding="utf-8")
+wf = workflow.read_text(encoding="utf-8")
+old_wf = "          version: ${{ steps.assay_tag.outputs.version }}"
+if wf.count(old_wf) != 1:
+    raise SystemExit("workflow version subject count is %s" % wf.count(old_wf))
+workflow.write_text(
+    wf.replace(old_wf, old_wf + "\n          evil_between_reads: true", 1),
+    encoding="utf-8",
+)
+PY
+if run_checker_at "${scratch}/toctou" >"${scratch}/out" 2>"${scratch}/err"; then
+  echo "ok    toctou-offline-accepts-coordinated-fixture"
+else
+  echo "FAIL: coordinated toctou fixture should stay green offline" >&2
+  cat "${scratch}/err" >&2
+  exit 1
+fi
+ASSAY_ACTION_FIXTURE_SWAP_FILE="${scratch}/toctou-oracle.yml" \
+  ASSAY_ACTION_PUBLISHED_FILE="${scratch}/toctou-oracle.yml" \
+  expect_fail "toctou-between-phase-swap" "does not match published action.yml" "${scratch}/toctou" --published
+
+echo "== cicd-starter monorepo action snippet =="
+copy_into "${scratch}/cicd"
+mutate_once \
+  "${scratch}/cicd/packs/open/cicd-starter/README.md" \
+  "- uses: Rul1an/assay-action@v3" \
+  "- uses: Rul1an/assay/assay-action@${ASSAY_COMMIT}"
+expect_fail "cicd-starter-monorepo-snippet" "is the monorepo path" "${scratch}/cicd"
 
 echo "== no-op control after mutations =="
 expect_ok "control-stays-green-after-scratch-mutations" "${CHECKER}"

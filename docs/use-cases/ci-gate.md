@@ -235,12 +235,14 @@ For the Assay repo, required status checks are: **CI**, **Smoke Install (E2E)**,
 jobs:
   fast-tests:
     # Assay (milliseconds, free)
-    - uses: Rul1an/assay-action@v3
+    steps:
+      - uses: Rul1an/assay-action@v3
 
   slow-tests:
     needs: fast-tests  # Only if fast tests pass
     # Real LLM tests (minutes, paid)
-    - run: pytest tests/integration
+    steps:
+      - run: pytest tests/integration
 ```
 
 ---
