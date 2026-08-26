@@ -71,6 +71,12 @@ def check_workflow(root: Path, errors: list[str]) -> str:
         fail(errors, f"{RELEASE_REL}: smoke must bind ASSAY_WHEEL_TARGET to matrix.target")
     if re.search(r"pypi\.org|pip index|extra-index-url", job, re.IGNORECASE):
         fail(errors, f"{RELEASE_REL}: wheels job must not use a PyPI network index")
+    if not re.search(r"--python\b|PYTHON_BIN", job):
+        fail(errors, f"{RELEASE_REL}: smoke must pass --python or PYTHON_BIN explicitly")
+    if "plan-python-artifact-matrix.py" not in text:
+        fail(errors, f"{RELEASE_REL}: plan job must invoke plan-python-artifact-matrix.py")
+    if "fromJSON(needs.plan-python-artifact.outputs.wheels)" not in job:
+        fail(errors, f"{RELEASE_REL}: wheels include must consume needs.plan-python-artifact.outputs.wheels")
     return job
 
 
@@ -101,10 +107,12 @@ def check_matrix(root: Path, errors: list[str]) -> dict | None:
 
 
 def check_wheels_pairs(job: str, matrix: dict, errors: list[str]) -> None:
-    actual = INCLUDE_PAIR_RE.findall(job)
-    expected = [(wheel["os"], wheel["target"]) for wheel in matrix.get("wheels") or []]
-    if actual != expected:
-        fail(errors, f"{RELEASE_REL}: wheel (os, target) pairs {actual} != matrix {expected}")
+    if "fromJSON(needs.plan-python-artifact.outputs.wheels)" not in job:
+        fail(
+            errors,
+            f"{RELEASE_REL}: wheels include must consume needs.plan-python-artifact.outputs.wheels",
+        )
+    del matrix
 
 
 def main_calls_install_and_import(tree: ast.AST) -> bool:
@@ -142,6 +150,13 @@ def check_smoke_script(root: Path, errors: list[str]) -> None:
         return
     if not main_calls_install_and_import(tree):
         fail(errors, f"{SMOKE_REL}: main must invoke install_and_import")
+    if re.search(r"python3\.12", text) and re.search(r"default\s*=", text):
+        if re.search(r'default=os\.environ\.get\("PYTHON_BIN",\s*"python3\.12"\)', text):
+            fail(errors, f"{SMOKE_REL}: --python must not default to python3.12")
+    if re.search(r'default=.*["\']assay-it["\']', text):
+        fail(errors, f"{SMOKE_REL}: --package must not default to assay-it")
+    if 'find_wheel(dist, "assay-it"' in text or "find_wheel(dist, 'assay-it'" in text:
+        fail(errors, f"{SMOKE_REL}: find_wheel must take package from the matrix/CLI, not hardcoded assay-it")
 
 
 def main(argv: list[str] | None = None) -> int:

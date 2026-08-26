@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import sys
@@ -15,10 +16,10 @@ CARGO_REL = "assay-python-sdk/Cargo.toml"
 RELEASE_REL = ".github/workflows/release.yml"
 WORKSPACE_REL = "Cargo.toml"
 KERNEL_MATRIX_REL = ".github/workflows/kernel-matrix.yml"
+PRECOMMIT_REL = ".pre-commit-config.yaml"
+PLANNER_REL = "scripts/ci/plan-python-artifact-matrix.py"
 SCHEMA = "assay.python_artifact_matrix.v0"
 PYPY_CLASSIFIER = "Programming Language :: Python :: Implementation :: PyPy"
-REQUIRES_CPYTHON_312 = "==3.12.*"
-CP312_ABI = "cp312"
 PP_ABI_RE = re.compile(r"^pp\d+$")
 # python-artifact-truth runs under kernel-matrix Lint. scripts/** already
 # fires; these remaining surfaces must stay listed or a metadata/docs-only
@@ -29,18 +30,47 @@ ARTIFACT_TRUTH_PR_PATHS = (
     "docs/python-sdk/**",
     "docs/getting-started/**",
     "docs/migration-v1.2.md",
+    "docs/guides/troubleshooting.md",
+    "docs/AIcontext/user-flows.md",
+)
+PRECOMMIT_REQUIRED_PATHS = (
+    "docs/migration-v1.2.md",
+    ".github/workflows/kernel-matrix.yml",
 )
 PIP_INSTALL_RE = re.compile(
     r"""(?:python(?:3(?:\.\d+)?)?\s+-m\s+)?pip(?:3|x)?\s+install(?:\s+(?:-U|--upgrade|--user))*\s+["']?assay-it\b""",
     re.IGNORECASE,
 )
-BROADER_PYTHON_RE = re.compile(r"Python\s+3\.(?:[0-9]|1[01])\+|PyPy", re.IGNORECASE)
+BROADER_PYTHON_RE = re.compile(
+    r"(?:(?:CPython|Python)\s+)?3\.\d+\+|3\.\d+\s+(?:and|or)\s+later|PyPy",
+    re.IGNORECASE,
+)
 SDIST_CLAIM_RE = re.compile(r"\bsdist\b|source distribution", re.IGNORECASE)
 ABI3_CLAIM_RE = re.compile(r"\babi3(?:-py\d+)?\b", re.IGNORECASE)
+STRAY_PYTHON_VERSION_RE = re.compile(
+    r"""python-version:\s*['\"]?\d+\.\d+['\"]?"""
+)
+STRAY_MATURIN_INTERPRETER_RE = re.compile(r"-i\s+python\d+\.\d+")
+FAMILY_ORDER = ("macOS", "Linux")
+TARGET_FAMILY_ARCH = {
+    "x86_64-apple-darwin": ("macOS", "x86_64"),
+    "aarch64-apple-darwin": ("macOS", "arm64"),
+    "x86_64-unknown-linux-gnu": ("Linux", "x86_64"),
+}
 
 
 def fail(errors: list[str], msg: str) -> None:
     errors.append(msg)
+
+
+def load_planner():
+    path = Path(__file__).resolve().parent / "plan-python-artifact-matrix.py"
+    spec = importlib.util.spec_from_file_location("plan_python_artifact_matrix", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {PLANNER_REL}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def load_matrix(root: Path, errors: list[str]) -> dict | None:
@@ -65,6 +95,9 @@ def workspace_version(root: Path, errors: list[str]) -> str | None:
 
 def check_pyproject(root: Path, matrix: dict, errors: list[str]) -> None:
     text = (root / PYPROJECT_REL).read_text(encoding="utf-8")
+    name = re.search(r'(?m)^name\s*=\s*"([^"]+)"', text)
+    if not name or name.group(1) != matrix["package"]:
+        fail(errors, f"{PYPROJECT_REL}: name must be {matrix['package']!r}")
     req = re.search(r'(?m)^requires-python\s*=\s*"([^"]+)"', text)
     if not req or req.group(1) != matrix["requires_python"]:
         fail(errors, f"{PYPROJECT_REL}: requires-python must be {matrix['requires_python']!r}")
@@ -96,31 +129,75 @@ def wheels_job(text: str) -> str:
     return text[start:end]
 
 
-def check_release_workflow(root: Path, matrix: dict, errors: list[str]) -> None:
+def plan_job(text: str) -> str:
+    start = text.find("\n  plan-python-artifact:")
+    if start < 0:
+        raise ValueError("plan-python-artifact job missing")
+    end = text.find("\n  wheels:", start)
+    if end < 0:
+        end = len(text)
+    return text[start:end]
+
+
+def check_release_workflow(root: Path, matrix: dict, plan: dict, errors: list[str]) -> None:
     text = (root / RELEASE_REL).read_text(encoding="utf-8")
     try:
+        planned = plan_job(text)
         job = wheels_job(text)
     except ValueError as exc:
         fail(errors, f"{RELEASE_REL}: {exc}")
         return
-    if "python-version: '3.12'" not in job and 'python-version: "3.12"' not in job:
-        fail(errors, f"{RELEASE_REL}: wheels job must pin Python 3.12")
-    if "-i python3.12" not in job:
-        fail(errors, f"{RELEASE_REL}: maturin must use -i python3.12")
+    if PLANNER_REL not in planned:
+        fail(errors, f"{RELEASE_REL}: plan job must invoke {PLANNER_REL}")
+    if "fromJSON(needs.plan-python-artifact.outputs.wheels)" not in job:
+        fail(
+            errors,
+            f"{RELEASE_REL}: wheels include must consume needs.plan-python-artifact.outputs.wheels",
+        )
+    if "needs.plan-python-artifact.outputs.python" not in job:
+        fail(errors, f"{RELEASE_REL}: setup-python and maturin -i must consume needs.plan-python-artifact.outputs.python")
+    if STRAY_PYTHON_VERSION_RE.search(job):
+        fail(errors, f"{RELEASE_REL}: wheels job must not pin a literal python-version")
+    if STRAY_MATURIN_INTERPRETER_RE.search(job):
+        fail(errors, f"{RELEASE_REL}: maturin must not use a literal -i pythonX.Y")
     if "*.tar.gz" in job or "sdist" in job.lower():
         fail(errors, f"{RELEASE_REL}: sdist publish is out of scope")
     if "dist/*.whl" not in job:
         fail(errors, f"{RELEASE_REL}: upload glob must stay wheel-only")
-    targets = re.findall(r"(?m)^\s+target:\s+(\S+)$", job)
-    expected = [wheel["target"] for wheel in matrix["wheels"]]
-    if targets != expected:
-        fail(errors, f"{RELEASE_REL}: wheel targets {targets} != matrix {expected}")
-    os_labels = re.findall(r"(?m)^\s+-\s+os:\s+(\S+)$", job)
-    expected_os = [wheel["os"] for wheel in matrix["wheels"]]
-    if os_labels != expected_os:
-        fail(errors, f"{RELEASE_REL}: wheel os labels {os_labels} != matrix {expected_os}")
     if "Smoke the produced wheel" not in job or "scripts/ci/smoke-python-wheel.py" not in job:
         fail(errors, f"{RELEASE_REL}: wheels job must bind the produced-wheel smoke")
+    if not re.search(r"--python\b|PYTHON_BIN", job):
+        fail(errors, f"{RELEASE_REL}: smoke must pass --python or PYTHON_BIN explicitly")
+    if "plan-python-artifact" not in job:
+        fail(errors, f"{RELEASE_REL}: wheels job must need the plan job")
+    del matrix, plan
+
+
+def expected_support_bound(python: str, wheels: list) -> str:
+    """Bind support_bound to parsed X.Y and the declared os/target/tag set."""
+    families: dict[str, list[str]] = {}
+    for wheel in wheels:
+        target = wheel.get("target")
+        mapped = TARGET_FAMILY_ARCH.get(target)
+        if mapped is None:
+            raise ValueError(f"cannot derive support_bound from target {target!r}")
+        family, arch = mapped
+        families.setdefault(family, [])
+        if arch not in families[family]:
+            families[family].append(arch)
+    parts: list[str] = []
+    for family in FAMILY_ORDER:
+        if family in families:
+            parts.append(f"{family} {'/'.join(families[family])}")
+    for family, archs in families.items():
+        if family not in FAMILY_ORDER:
+            parts.append(f"{family} {'/'.join(archs)}")
+    if not parts:
+        raise ValueError("cannot derive support_bound from an empty wheels list")
+    return (
+        f"CPython {python} on {' and '.join(parts)}; "
+        "other interpreters and platforms are not claimed."
+    )
 
 
 def check_docs(root: Path, matrix: dict, errors: list[str]) -> None:
@@ -194,46 +271,37 @@ def check_install_docs_inventory(root: Path, matrix: dict, errors: list[str]) ->
             )
 
 
-def tag_abi(tag: str) -> str:
-    """Wheel ABI/impl is the first '-' separated tag component."""
-    return tag.split("-", 1)[0]
+def check_tag_anchor(root: Path, matrix: dict, planner, errors: list[str]) -> dict | None:
+    """Anchor Requires-Python / classifiers / tag ABI to the planner."""
+    try:
+        plan = planner.build_plan(matrix)
+    except ValueError as exc:
+        fail(errors, f"{MATRIX_REL}: {exc}")
+        return None
 
-
-def check_tag_anchor(root: Path, matrix: dict, errors: list[str]) -> None:
-    """Anchor Requires-Python / PyPy metadata to declared wheel tags."""
-    wheels = matrix.get("wheels") or []
-    tags = [str(wheel.get("tag") or "") for wheel in wheels]
-    abis = [tag_abi(tag) for tag in tags]
-    requires = matrix.get("requires_python")
-    pyproject = (root / PYPROJECT_REL).read_text(encoding="utf-8")
-    py_req = re.search(r'(?m)^requires-python\s*=\s*"([^"]+)"', pyproject)
-    py_requires = py_req.group(1) if py_req else None
-
-    if requires == REQUIRES_CPYTHON_312:
-        for tag, abi in zip(tags, abis, strict=False):
-            if abi != CP312_ABI:
-                fail(
-                    errors,
-                    f"{MATRIX_REL}: requires_python {REQUIRES_CPYTHON_312!r} "
-                    f"requires every declared tag ABI to be {CP312_ABI}, got {tag!r}",
-                )
-
-    # Inverse: every declared tag is cp312-... (no other CPython ABI, no pp*).
-    if tags and all(abi == CP312_ABI for abi in abis):
-        if requires != REQUIRES_CPYTHON_312:
-            fail(
-                errors,
-                f"{MATRIX_REL}: all declared tags are {CP312_ABI}-only; "
-                f"requires_python must be {REQUIRES_CPYTHON_312!r}, got {requires!r}",
-            )
-        if py_requires != REQUIRES_CPYTHON_312:
-            fail(
-                errors,
-                f"{PYPROJECT_REL}: all declared tags are {CP312_ABI}-only; "
-                f"requires-python must be {REQUIRES_CPYTHON_312!r}, got {py_requires!r}",
-            )
-
+    classifier = f"Programming Language :: Python :: {plan['python']}"
     required = matrix.get("required_classifiers") or []
+    if classifier not in required:
+        fail(
+            errors,
+            f"{MATRIX_REL}: required_classifiers must include {classifier!r}",
+        )
+    pyproject = (root / PYPROJECT_REL).read_text(encoding="utf-8")
+    if classifier not in pyproject:
+        fail(errors, f"{PYPROJECT_REL}: missing classifier {classifier!r}")
+    try:
+        expected_bound = expected_support_bound(plan["python"], matrix.get("wheels") or [])
+    except ValueError as exc:
+        fail(errors, f"{MATRIX_REL}: {exc}")
+    else:
+        if matrix.get("support_bound") != expected_bound:
+            fail(
+                errors,
+                f"{MATRIX_REL}: support_bound must match declared wheels and "
+                f"CPython {plan['python']}, expected {expected_bound!r}",
+            )
+
+    abis = [planner.tag_abi(str(wheel.get("tag") or "")) for wheel in matrix.get("wheels") or []]
     has_pypy = PYPY_CLASSIFIER in pyproject or PYPY_CLASSIFIER in required
     has_pp_tag = any(PP_ABI_RE.fullmatch(abi) for abi in abis)
     if has_pypy and not has_pp_tag:
@@ -242,6 +310,7 @@ def check_tag_anchor(root: Path, matrix: dict, errors: list[str]) -> None:
             f"{MATRIX_REL}: {PYPY_CLASSIFIER!r} is forbidden unless a "
             f"declared tag ABI matches pp\\d+",
         )
+    return plan
 
 
 def pull_request_paths(text: str) -> list[str]:
@@ -276,6 +345,42 @@ def check_kernel_matrix_paths(root: Path, errors: list[str]) -> None:
                 errors,
                 f"{KERNEL_MATRIX_REL}: pull_request.paths must include {required!r} "
                 f"(python-artifact-truth hook runs here)",
+            )
+
+
+def hook_files_regex(text: str, hook_id: str) -> str | None:
+    in_hook = False
+    for line in text.splitlines():
+        if re.match(rf"^\s+- id: {re.escape(hook_id)}\s*$", line):
+            in_hook = True
+            continue
+        if in_hook and re.match(r"^\s+- id:", line):
+            break
+        if in_hook:
+            match = re.match(r"^\s+files:\s+(\S+)\s*$", line)
+            if match:
+                return match.group(1)
+    return None
+
+
+def check_precommit_selector(root: Path, errors: list[str]) -> None:
+    path = root / PRECOMMIT_REL
+    if not path.is_file():
+        return
+    regex = hook_files_regex(path.read_text(encoding="utf-8"), "python-artifact-truth")
+    if not regex:
+        fail(errors, f"{PRECOMMIT_REL}: python-artifact-truth files: selector missing")
+        return
+    try:
+        compiled = re.compile(regex)
+    except re.error as exc:
+        fail(errors, f"{PRECOMMIT_REL}: python-artifact-truth files: invalid regex: {exc}")
+        return
+    for required in PRECOMMIT_REQUIRED_PATHS:
+        if compiled.search(required) is None:
+            fail(
+                errors,
+                f"{PRECOMMIT_REL}: python-artifact-truth files: must match {required!r}",
             )
 
 
@@ -315,6 +420,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()
     errors: list[str] = []
+    try:
+        planner = load_planner()
+    except RuntimeError as exc:
+        print(f"python-artifact-truth FAIL\n  {exc}", file=sys.stderr)
+        return 1
     matrix = load_matrix(root, errors)
     if matrix is None:
         print("\n".join(errors), file=sys.stderr)
@@ -328,12 +438,14 @@ def main(argv: list[str] | None = None) -> int:
             fail(errors, f"{MATRIX_REL}: {target}: import_smoke must be native")
     version = workspace_version(root, errors)
     check_pyproject(root, matrix, errors)
-    check_tag_anchor(root, matrix, errors)
+    plan = check_tag_anchor(root, matrix, planner, errors)
     check_cargo(root, errors)
-    check_release_workflow(root, matrix, errors)
+    if plan is not None:
+        check_release_workflow(root, matrix, plan, errors)
     check_docs(root, matrix, errors)
     check_install_docs_inventory(root, matrix, errors)
     check_kernel_matrix_paths(root, errors)
+    check_precommit_selector(root, errors)
     published = None
     if args.published_files:
         published = json.loads(Path(args.published_files).read_text(encoding="utf-8"))

@@ -51,6 +51,8 @@ on:
       - "docs/python-sdk/**"
       - "docs/getting-started/**"
       - "docs/migration-v1.2.md"
+      - "docs/guides/troubleshooting.md"
+      - "docs/AIcontext/user-flows.md"
       # S1b coverage-gate hook runs under Lint (pre-commit) in this workflow.
       - ".github/workflows/monitor-attach-smoke.yml"
       # The lane self-test pins guards inside this workflow file; run the

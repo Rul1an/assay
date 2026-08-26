@@ -381,7 +381,7 @@ repos:
         entry: bash -c 'bash scripts/ci/test-check-python-artifact-truth.sh && python3 scripts/ci/check-python-artifact-truth.py && bash scripts/ci/test-check-python-wheel-smoke-contract.sh && python3 scripts/ci/check-python-wheel-smoke-contract.py'
         language: system
         pass_filenames: false
-        files: ^(assay-python-sdk/(python-artifact-matrix\.v0\.json|pyproject\.toml|Cargo\.toml|README\.md)|scripts/ci/(check-python-artifact-truth\.py|test-check-python-artifact-truth\.sh|check-python-wheel-smoke-contract\.py|test-check-python-wheel-smoke-contract\.sh|smoke-python-wheel\.py)|\.github/workflows/release\.yml|docs/(python-sdk/index\.md|getting-started/(index|installation|python-quickstart)\.md|guides/troubleshooting\.md|AIcontext/user-flows\.md)|llms\.txt|CHANGELOG\.md|\.pre-commit-config\.yaml)$
+        files: ^(assay-python-sdk/(python-artifact-matrix\.v0\.json|pyproject\.toml|Cargo\.toml|README\.md)|scripts/ci/(check-python-artifact-truth\.py|test-check-python-artifact-truth\.sh|check-python-wheel-smoke-contract\.py|test-check-python-wheel-smoke-contract\.sh|smoke-python-wheel\.py|plan-python-artifact-matrix\.py)|\.github/workflows/(release|kernel-matrix)\.yml|docs/(python-sdk/index\.md|getting-started/(index|installation|python-quickstart)\.md|guides/troubleshooting\.md|AIcontext/user-flows\.md|migration-v1\.2\.md)|llms\.txt|CHANGELOG\.md|\.pre-commit-config\.yaml)$
 
       - id: osv-scanner-scheduled-lockstep
         name: OSV scanner/reporter lockstep and count bind

@@ -809,23 +809,38 @@ jobs:
           bash scripts/ci/record-mcp-registry-result.sh
 
   # ============================================================
+  # Plan Python wheels from the artifact matrix (sole authority)
+  # ============================================================
+  plan-python-artifact:
+    name: Plan Python artifact matrix
+    needs: release-contract
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      python: ${{ steps.plan.outputs.python }}
+      abi: ${{ steps.plan.outputs.abi }}
+      wheels: ${{ steps.plan.outputs.wheels }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Plan wheels from the artifact matrix
+        id: plan
+        run: python3 scripts/ci/plan-python-artifact-matrix.py >> "$GITHUB_OUTPUT"
+
+  # ============================================================
   # Build and Publish Python Wheels (PyPI)
   # ============================================================
   wheels:
     name: Build Wheels
-    needs: release-contract
+    needs: [release-contract, plan-python-artifact]
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
     strategy:
       matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-          - os: macos-15
-            target: aarch64-apple-darwin
+        include: ${{ fromJSON(needs.plan-python-artifact.outputs.wheels) }}
 
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -833,17 +848,16 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: '3.12'
+          python-version: ${{ needs.plan-python-artifact.outputs.python }}
 
       - name: Build wheels
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           working-directory: assay-python-sdk
           target: ${{ matrix.target }}
-          # Keep the interpreter explicit for all wheel targets. This is
-          # required inside the manylinux container and harmless on macOS,
-          # where setup-python provides the same Python version.
-          args: --release --out dist --locked -i python3.12 --compatibility pypi
+          # Interpreter comes from the artifact-matrix plan (==X.Y.* -> X.Y).
+          # Required inside the manylinux container; setup-python provides it on macOS.
+          args: --release --out dist --locked -i python${{ needs.plan-python-artifact.outputs.python }} --compatibility pypi
           sccache: 'false'
           manylinux: auto
 
@@ -851,7 +865,7 @@ jobs:
         shell: bash
         env:
           ASSAY_WHEEL_TARGET: ${{ matrix.target }}
-        run: python3 scripts/ci/smoke-python-wheel.py --dist-dir assay-python-sdk/dist
+        run: python3 scripts/ci/smoke-python-wheel.py --dist-dir assay-python-sdk/dist --python "python${{ needs.plan-python-artifact.outputs.python }}"
 
       - name: Upload wheels
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

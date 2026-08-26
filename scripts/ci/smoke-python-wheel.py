@@ -26,12 +26,29 @@ def workspace_version(root: Path) -> str:
     return match.group(1)
 
 
+def load_matrix(root: Path) -> dict:
+    return json.loads((root / MATRIX_REL).read_text(encoding="utf-8"))
+
+
 def load_cell(root: Path, target: str) -> dict:
-    matrix = json.loads((root / MATRIX_REL).read_text(encoding="utf-8"))
+    matrix = load_matrix(root)
     matches = [row for row in matrix["wheels"] if row["target"] == target]
     if len(matches) != 1:
         raise SystemExit(f"matrix has {len(matches)} cells for target {target}")
     return matches[0]
+
+
+def resolve_package(root: Path, explicit: str | None) -> str:
+    package = explicit or os.environ.get("ASSAY_WHEEL_PACKAGE")
+    if package:
+        return package
+    try:
+        package = load_matrix(root).get("package")
+    except (OSError, json.JSONDecodeError, KeyError):
+        package = None
+    if not isinstance(package, str) or not package.strip():
+        raise SystemExit("--package, ASSAY_WHEEL_PACKAGE, or matrix.package is required")
+    return package.strip()
 
 
 def find_wheel(dist: Path, package: str, version: str, tag: str) -> Path:
@@ -51,6 +68,9 @@ def native_members(wheel: Path) -> list[str]:
 
 
 def install_and_import(python: str, wheel: Path, version: str) -> None:
+    package = os.environ.get("ASSAY_WHEEL_PACKAGE")
+    if not package:
+        raise SystemExit("ASSAY_WHEEL_PACKAGE is required")
     if shutil.which(python) is None and not Path(python).exists():
         raise SystemExit(f"native import_smoke requires {python}")
     scratch = Path(tempfile.mkdtemp(prefix="assay-it-wheel-smoke-"))
@@ -74,15 +94,15 @@ def install_and_import(python: str, wheel: Path, version: str) -> None:
                 ":all:",
                 "--find-links",
                 str(wheel.parent),
-                f"assay-it=={version}",
+                f"{package}=={version}",
             ],
             check=True,
             env=env,
         )
         probe = (
             "import importlib.metadata as m, assay, assay._native\n"
-            f"assert m.version('assay-it') == {version!r}, m.version('assay-it')\n"
-            "print('import_smoke=native version=' + m.version('assay-it'))\n"
+            f"assert m.version({package!r}) == {version!r}, m.version({package!r})\n"
+            f"print('import_smoke=native version=' + m.version({package!r}))\n"
         )
         subprocess.run([str(pip), "-c", probe], check=True, env=env)
     finally:
@@ -94,17 +114,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", default=".")
     parser.add_argument("--dist-dir", default="assay-python-sdk/dist")
     parser.add_argument("--target", default=os.environ.get("ASSAY_WHEEL_TARGET", ""))
-    parser.add_argument("--python", default=os.environ.get("PYTHON_BIN", "python3.12"))
+    parser.add_argument("--python", default=os.environ.get("PYTHON_BIN"))
+    parser.add_argument("--package", default=os.environ.get("ASSAY_WHEEL_PACKAGE"))
     args = parser.parse_args(argv)
     if not args.target:
         raise SystemExit("ASSAY_WHEEL_TARGET or --target is required")
+    if not args.python:
+        raise SystemExit("--python or PYTHON_BIN is required")
     root = Path(args.root).resolve()
     dist = Path(args.dist_dir)
     if not dist.is_absolute():
         dist = root / dist
     cell = load_cell(root, args.target)
     version = workspace_version(root)
-    wheel = find_wheel(dist, "assay-it", version, cell["tag"])
+    package = resolve_package(root, args.package)
+    os.environ["ASSAY_WHEEL_PACKAGE"] = package
+    wheel = find_wheel(dist, package, version, cell["tag"])
     natives = native_members(wheel)
     if len(natives) != 1:
         raise SystemExit(f"{wheel.name}: expected one assay._native extension, found {natives}")

@@ -94,6 +94,8 @@ try:
             "x86_64-unknown-linux-gnu",
             "--python",
             "/sentinel/python",
+            "--package",
+            "assay-it",
         ]
     )
 except SystemExit as exc:
@@ -146,7 +148,7 @@ old = """      - name: Smoke the produced wheel
         shell: bash
         env:
           ASSAY_WHEEL_TARGET: ${{ matrix.target }}
-        run: python3 scripts/ci/smoke-python-wheel.py --dist-dir assay-python-sdk/dist
+        run: python3 scripts/ci/smoke-python-wheel.py --dist-dir assay-python-sdk/dist --python "python${{ needs.plan-python-artifact.outputs.python }}"
 
 """
 if old not in text:
@@ -158,18 +160,18 @@ cp "$ROOT/.github/workflows/release.yml" "$CASE/.github/workflows/release.yml"
 
 echo "=== mutation: empty dist / no produced wheel ==="
 mkdir -p "$CASE/assay-python-sdk/dist"
-expect_fail "empty dist native cell" python3 "$SMOKE" --root "$ROOT" --dist-dir "$CASE/assay-python-sdk/dist" --target x86_64-unknown-linux-gnu
+expect_fail "empty dist native cell" python3 "$SMOKE" --root "$ROOT" --dist-dir "$CASE/assay-python-sdk/dist" --target x86_64-unknown-linux-gnu --python python3 --package assay-it
 
 echo "=== mutation: extra wheel beside expected ==="
 write_dummy_wheel "$CASE/assay-python-sdk/dist" "assay_it-5.4.0-cp312-cp312-macosx_10_12_x86_64.whl"
 write_dummy_wheel "$CASE/assay-python-sdk/dist" "noise-not-the-cell.whl"
-expect_fail "extra wheel beside expected" python3 "$SMOKE" --root "$ROOT" --dist-dir "$CASE/assay-python-sdk/dist" --target x86_64-apple-darwin
+expect_fail "extra wheel beside expected" python3 "$SMOKE" --root "$ROOT" --dist-dir "$CASE/assay-python-sdk/dist" --target x86_64-apple-darwin --python python3 --package assay-it
 rm -f "$CASE/assay-python-sdk/dist/noise-not-the-cell.whl"
 
 echo "=== mutation: renamed produced wheel ==="
 mv "$CASE/assay-python-sdk/dist/assay_it-5.4.0-cp312-cp312-macosx_10_12_x86_64.whl" \
   "$CASE/assay-python-sdk/dist/renamed-away.whl"
-expect_fail "renamed produced wheel" python3 "$SMOKE" --root "$ROOT" --dist-dir "$CASE/assay-python-sdk/dist" --target x86_64-apple-darwin
+expect_fail "renamed produced wheel" python3 "$SMOKE" --root "$ROOT" --dist-dir "$CASE/assay-python-sdk/dist" --target x86_64-apple-darwin --python python3 --package assay-it
 
 echo "=== mutation: restore old x86 macos-15 + unsupported ==="
 python3 - "$CASE/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
@@ -227,14 +229,17 @@ end = text.find("\n  publish-pypi:", start)
 if start < 0 or end < 0:
     raise SystemExit("wheels job bounds missing")
 job = text[start:end]
-old = """          - os: macos-15-intel
+old = "include: ${{ fromJSON(needs.plan-python-artifact.outputs.wheels) }}"
+new = """include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-15
             target: x86_64-apple-darwin
-"""
-new = """          - os: macos-15
-            target: x86_64-apple-darwin
+          - os: macos-15
+            target: aarch64-apple-darwin
 """
 if old not in job:
-    raise SystemExit("wheels x86 intel row not found")
+    raise SystemExit("wheels plan include not found")
 job = job.replace(old, new, 1)
 path.write_text(text[:start] + job + text[end:])
 PY
