@@ -80,9 +80,9 @@ Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0)
         with self.assertRaisesRegex(ValueError, "exactly one release-pinned install command"):
             module.render_release_readme(source, "5.5.0")
 
-    def test_cli_reads_the_fixed_repository_readme_and_writes_stdout(self):
+    def test_cli_accepts_the_release_contract_tag_and_writes_stdout(self):
         completed = subprocess.run(
-            [sys.executable, str(MODULE_PATH), "5.5.0"],
+            [sys.executable, str(MODULE_PATH), "v5.5.0"],
             cwd=ROOT,
             check=False,
             capture_output=True,
@@ -91,6 +91,28 @@ Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("--version 5.5.0", completed.stdout)
         self.assertIn("releases/tag/v5.5.0", completed.stdout)
+
+    def test_cli_refuses_a_bare_version_that_the_release_contract_never_emits(self):
+        completed = subprocess.run(
+            [sys.executable, str(MODULE_PATH), "5.5.0"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 2)
+
+    def test_cli_preserves_the_release_contract_prerelease_suffix(self):
+        completed = subprocess.run(
+            [sys.executable, str(MODULE_PATH), "v5.5.0-rc.1"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("--version 5.5.0-rc.1", completed.stdout)
+        self.assertIn("releases/tag/v5.5.0-rc.1", completed.stdout)
 
     def test_cli_refuses_caller_selected_source_and_output_paths(self):
         completed = subprocess.run(
