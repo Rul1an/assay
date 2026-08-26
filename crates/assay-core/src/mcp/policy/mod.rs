@@ -144,7 +144,8 @@ pub enum ArgsCheck {
 
 /// Canonical JCS bytes of a loaded `McpPolicy`. Shared by `policy_digest`.
 pub(crate) fn canonical_mcp_policy_jcs(policy: &McpPolicy) -> anyhow::Result<String> {
-    jcs::to_string(policy)
+    let value = serde_json::to_value(policy)?;
+    jcs::to_string(&value)
 }
 
 impl McpPolicy {
@@ -589,6 +590,56 @@ tools:
 
     fn load(src: &str) -> McpPolicy {
         McpPolicy::from_slice(src.as_bytes()).expect("load")
+    }
+
+    const V1_CONSTRAINTS: &str = r#"version: "1.0"
+name: resolve-legacy
+allow:
+  - read_file
+constraints:
+  - tool: "read_file"
+    params:
+      path:
+        matches: "^/app/.*"
+"#;
+
+    #[test]
+    fn helper_serializer_is_rfc8785_jcs_of_policy_value() {
+        let p = load(VALID);
+        let value = serde_json::to_value(&p).expect("value");
+        let via_jcs = crate::mcp::jcs::to_string(&value).expect("jcs");
+        let helper = canonical_mcp_policy_jcs(&p).expect("helper");
+        assert_eq!(
+            helper, via_jcs,
+            "helper must be RFC8785/JCS of the policy Value"
+        );
+        let via_json = serde_json::to_string(&p).expect("json");
+        assert_ne!(
+            helper, via_json,
+            "fixture must distinguish JCS from serde_json so a helper-serializer mutation bites"
+        );
+    }
+
+    #[test]
+    fn v1_constraints_normalized_digest_differs_from_raw_yaml_jcs() {
+        let loaded = load(V1_CONSTRAINTS);
+        assert!(loaded.constraints.is_empty());
+        assert!(loaded.schemas.contains_key("read_file"));
+        let normalized = canonical_mcp_policy_jcs(&loaded).expect("normalized jcs");
+        let raw = serde_json::json!({
+            "version": "1.0",
+            "name": "resolve-legacy",
+            "allow": ["read_file"],
+            "constraints": [{
+                "tool": "read_file",
+                "params": {"path": {"matches": "^/app/.*"}}
+            }]
+        });
+        let raw_jcs = crate::mcp::jcs::to_string(&raw).expect("raw jcs");
+        assert_ne!(
+            normalized, raw_jcs,
+            "raw-parse JCS must not be the normalized digest preimage"
+        );
     }
 
     #[test]

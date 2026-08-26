@@ -92,10 +92,6 @@ pub struct PolicyResolveArgs {
     #[arg(short, long)]
     pub input: PathBuf,
 
-    /// Fail if deprecated v1 policy format is detected
-    #[arg(long)]
-    pub deny_deprecations: bool,
-
     /// Output format; only json emits a document
     #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
     pub format: OutputFormat,

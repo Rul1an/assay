@@ -1,17 +1,16 @@
 //! #2510: `assay policy resolve --input PATH --format json`
 //!
 //! Success stdout is one `assay.policy.resolved.v0` document. Fail-closed
-//! paths are nonzero with empty stdout. Validate JSON stays `assay.run_summary.v1`.
+//! paths keep empty stdout. Validate JSON stays `assay.run_summary.v1`.
 
-use std::fs;
-use std::path::{Path, PathBuf};
-
+use assay_core::fingerprint::sha256_hex;
+use assay_core::mcp::decision::POLICY_SNAPSHOT_CANONICALIZATION_JCS_MCP_POLICY;
+use assay_core::mcp::jcs;
 use assay_core::mcp::policy::McpPolicy;
 use assert_cmd::Command;
 use serde_json::Value;
 
 const SCHEMA: &str = "assay.policy.resolved.v0";
-const PROFILE: &str = "jcs:mcp_policy";
 const MAX_INPUT_BYTES: usize = 1_000_000;
 
 const VALID: &str = r#"version: "2.0"
@@ -47,6 +46,17 @@ tools:
     - echo
 "#;
 
+const V1_CONSTRAINTS: &str = r#"version: "1.0"
+name: resolve-legacy
+allow:
+  - read_file
+constraints:
+  - tool: "read_file"
+    params:
+      path:
+        matches: "^/app/.*"
+"#;
+
 const BAD_SCHEMA: &str = r#"version: "2.0"
 tools:
   allow: [demo]
@@ -67,13 +77,13 @@ fn tmp() -> tempfile::TempDir {
     tempfile::tempdir().expect("tempdir")
 }
 
-fn write(dir: &Path, name: &str, body: &str) -> PathBuf {
+fn write(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
     let path = dir.join(name);
-    fs::write(&path, body).expect("write fixture");
+    std::fs::write(&path, body).expect("write fixture");
     path
 }
 
-fn resolve(path: &Path) -> assert_cmd::assert::Assert {
+fn resolve(path: &std::path::Path) -> assert_cmd::assert::Assert {
     assay()
         .args([
             "policy",
@@ -86,17 +96,30 @@ fn resolve(path: &Path) -> assert_cmd::assert::Assert {
         .assert()
 }
 
-fn parse_ok(path: &Path) -> Value {
+fn parse_ok(path: &std::path::Path) -> Value {
     let out = resolve(path).success().get_output().clone();
     serde_json::from_slice(&out.stdout).expect("resolved json")
 }
 
-fn assert_fail_empty(path: &Path) {
-    let out = resolve(path).failure().get_output().clone();
+fn assert_empty_stdout_failure(output: &std::process::Output) {
     assert!(
-        out.stdout.is_empty(),
+        output.stdout.is_empty(),
         "fail-closed stdout must be empty, got {:?}",
-        String::from_utf8_lossy(&out.stdout)
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+fn assert_reconstructable(v: &Value) {
+    assert_eq!(v["schema"], SCHEMA);
+    assert_eq!(
+        v["canonicalization_profile"],
+        POLICY_SNAPSHOT_CANONICALIZATION_JCS_MCP_POLICY
+    );
+    let canonical = jcs::to_string(&v["policy"]).expect("jcs of emitted policy");
+    let digest = format!("sha256:{}", sha256_hex(&canonical));
+    assert_eq!(
+        v["policy_digest"], digest,
+        "RFC8785/JCS of emitted policy must hash to policy_digest"
     );
 }
 
@@ -105,8 +128,7 @@ fn valid_policy_emits_resolved_v0() {
     let dir = tmp();
     let path = write(dir.path(), "ok.yaml", VALID);
     let v = parse_ok(&path);
-    assert_eq!(v["schema"], SCHEMA);
-    assert_eq!(v["canonicalization_profile"], PROFILE);
+    assert_reconstructable(&v);
     assert_eq!(v["assay_version"], env!("CARGO_PKG_VERSION"));
     assert!(
         v["input_sha256"]
@@ -114,13 +136,6 @@ fn valid_policy_emits_resolved_v0() {
             .is_some_and(|s| s.starts_with("sha256:")),
         "input_sha256 {v:?}"
     );
-    assert!(
-        v["policy_digest"]
-            .as_str()
-            .is_some_and(|s| s.starts_with("sha256:")),
-        "policy_digest {v:?}"
-    );
-    assert!(v.get("policy").is_some(), "policy object required");
     assert!(v.get("schema_version").is_none());
     assert!(v.get("path").is_none());
     assert!(v.get("input").is_none());
@@ -132,6 +147,33 @@ fn valid_policy_emits_resolved_v0() {
         loaded.policy_digest().expect("digest"),
         "document digest must be McpPolicy::policy_digest()"
     );
+}
+
+#[test]
+fn emitted_policy_jcs_reconstructs_digest_for_legacy_v1() {
+    let dir = tmp();
+    assert_reconstructable(&parse_ok(&write(dir.path(), "legacy.yaml", LEGACY)));
+    assert_reconstructable(&parse_ok(&write(
+        dir.path(),
+        "constraints.yaml",
+        V1_CONSTRAINTS,
+    )));
+}
+
+#[test]
+fn v1_constraints_are_normalized_into_schemas() {
+    let dir = tmp();
+    let v = parse_ok(&write(dir.path(), "v1.yaml", V1_CONSTRAINTS));
+    assert!(
+        v["policy"]["schemas"]["read_file"].is_object(),
+        "v1 constraints must become schemas: {v:?}"
+    );
+    assert_eq!(
+        v["policy"]["constraints"],
+        serde_json::json!([]),
+        "migrated constraints must be empty"
+    );
+    assert_reconstructable(&v);
 }
 
 #[test]
@@ -178,13 +220,52 @@ fn legacy_normalized_form_is_digested() {
 #[test]
 fn schema_compilation_failure_emits_no_document() {
     let dir = tmp();
-    assert_fail_empty(&write(dir.path(), "bad-schema.yaml", BAD_SCHEMA));
+    let out = resolve(&write(dir.path(), "bad-schema.yaml", BAD_SCHEMA))
+        .failure()
+        .get_output()
+        .clone();
+    assert_empty_stdout_failure(&out);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("policy schemas failed to compile"),
+        "schema failure must stay honest stderr-only: {stderr}"
+    );
+    assert!(
+        !stderr.contains("E_POLICY_PARSE"),
+        "schema compile must not be typed as parse: {stderr}"
+    );
 }
 
 #[test]
 fn malformed_yaml_emits_no_document() {
     let dir = tmp();
-    assert_fail_empty(&write(dir.path(), "bad.yaml", ":\n  -"));
+    let out = resolve(&write(dir.path(), "bad.yaml", ":\n  -"))
+        .failure()
+        .get_output()
+        .clone();
+    assert_empty_stdout_failure(&out);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("E_POLICY_PARSE"),
+        "malformed policy must retain typed E_POLICY_PARSE: {stderr}"
+    );
+}
+
+#[test]
+fn missing_policy_file_is_untyped_stderr() {
+    let dir = tmp();
+    let path = dir.path().join("missing.yaml");
+    let out = resolve(&path).failure().get_output().clone();
+    assert_empty_stdout_failure(&out);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("failed to load policy") || stderr.contains("fatal:"),
+        "missing file must stay honest stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("E_POLICY_PARSE"),
+        "missing file must not be typed as parse: {stderr}"
+    );
 }
 
 #[test]
@@ -193,7 +274,11 @@ fn oversized_input_emits_no_document() {
     let mut body = VALID.to_string();
     body.push_str(&" ".repeat(MAX_INPUT_BYTES));
     assert!(body.len() > MAX_INPUT_BYTES);
-    assert_fail_empty(&write(dir.path(), "huge.yaml", &body));
+    let out = resolve(&write(dir.path(), "huge.yaml", &body))
+        .failure()
+        .get_output()
+        .clone();
+    assert_empty_stdout_failure(&out);
 }
 
 #[test]
@@ -205,6 +290,23 @@ fn missing_input_is_clap_nonzero_empty_stdout() {
         .get_output()
         .clone();
     assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn deny_deprecations_is_not_a_resolve_flag() {
+    let out = assay()
+        .args(["policy", "resolve", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("deny-deprecations"),
+        "resolve must not expose --deny-deprecations: {stdout}"
+    );
+    assert!(stdout.contains("--input"));
+    assert!(stdout.contains("--format"));
 }
 
 #[test]
