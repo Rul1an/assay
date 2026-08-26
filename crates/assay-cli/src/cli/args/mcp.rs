@@ -25,6 +25,34 @@ pub enum McpSub {
     Tool(ToolArgs),
     /// Check whether assay-mcp-server on PATH can start with this policy root
     Preflight(PreflightArgs),
+    /// Review and explicitly promote observed MCP manifests
+    Manifest(ManifestArgs),
+}
+
+#[derive(Parser, Debug)]
+pub struct ManifestArgs {
+    #[command(subcommand)]
+    pub cmd: ManifestSub,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ManifestSub {
+    /// Export a non-approved candidate from a complete observed manifest
+    Candidate {
+        #[arg(long)]
+        from_observed: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Promote a reviewed candidate after rereading its exact observed source
+    Promote {
+        #[arg(long)]
+        candidate: PathBuf,
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]

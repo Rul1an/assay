@@ -27,14 +27,15 @@
 //! approval. It performs no candidate generation, no promotion, and no first-observation trust.
 
 use crate::manifest_observed::{manifest_digest, CANONICALIZATION};
-use anyhow::{bail, Result};
-use serde::Deserialize;
+use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::path::Path;
 
 pub const DECLARED_MANIFEST_SCHEMA: &str = "assay.declared_mcp_manifest.v0";
 
 /// The declaring server's identity. Carried for operator provenance; not part of any digest.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct DeclaredServer {
     pub id: String,
@@ -42,7 +43,7 @@ pub struct DeclaredServer {
 
 /// One approved tool. `name` and `tool_digest` are the approval; the rest is attribution the
 /// producer also emits, declared here so it is validated rather than ignored.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct BaselineTool {
     pub name: String,
@@ -62,7 +63,7 @@ pub struct BaselineTool {
 
 /// The operator-pinned approval-time baseline. The ONLY source of the approval baseline — never the
 /// first observed session manifest (spec §16-B).
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct DeclaredManifest {
     pub schema: String,
@@ -104,8 +105,36 @@ fn is_canonical_sha256(s: &str) -> bool {
 /// Every failure is a hard error for the caller to turn into a startup failure: in enforcing mode a
 /// proxy that would forward privileged calls without a valid baseline must not start.
 pub fn parse_declared_manifest(text: &str) -> Result<DeclaredManifest> {
-    let manifest: DeclaredManifest = serde_json::from_str(text)?;
+    let value = assay_core::mcp::parse_unique_json(text)?;
+    let manifest: DeclaredManifest = serde_json::from_value(value)?;
+    validate_declared_manifest(manifest)
+}
 
+/// Read and validate a declared baseline through the shared manifest byte ceiling.
+pub fn load_declared_manifest(path: &Path) -> Result<DeclaredManifest> {
+    let bytes = crate::manifest_io::read_bounded_bytes(path)?;
+    let text = std::str::from_utf8(&bytes)
+        .with_context(|| format!("declared manifest {} is not UTF-8", path.display()))?;
+    parse_declared_manifest(text)
+}
+
+pub fn construct_declared_manifest(
+    canonicalization: String,
+    manifest_digest: String,
+    tools: Vec<BaselineTool>,
+    server: Option<DeclaredServer>,
+) -> Result<DeclaredManifest> {
+    validate_declared_manifest(DeclaredManifest {
+        schema: DECLARED_MANIFEST_SCHEMA.to_string(),
+        canonicalization,
+        manifest_digest,
+        tools,
+        note: None,
+        server,
+    })
+}
+
+fn validate_declared_manifest(manifest: DeclaredManifest) -> Result<DeclaredManifest> {
     if manifest.schema != DECLARED_MANIFEST_SCHEMA {
         bail!(
             "schema must be {DECLARED_MANIFEST_SCHEMA}, got {:?}",
@@ -142,6 +171,9 @@ pub fn parse_declared_manifest(text: &str) -> Result<DeclaredManifest> {
         }
         if let Some(fields) = &t.field_digests {
             for (field, digest) in fields {
+                if !crate::manifest_observed::FIELD_NAMES.contains(&field.as_str()) {
+                    bail!("tool {:?} has unknown field_digest key {:?}", t.name, field);
+                }
                 if !is_canonical_sha256(digest) {
                     bail!(
                         "tool {:?} field_digest {:?} must be sha256: plus 64 lowercase hex, got {:?}",

@@ -30,11 +30,17 @@ pub const CANONICALIZATION: &str = "assay.mcp_manifest_projection.v0";
 pub const FIELD_PROJECTION: &str = "assay.mcp_tool_field.v0";
 /// The four mutable per-tool fields P60d-v2 attributes. A name change is a remove+add, not a field
 /// change, so name is not among them.
-const FIELD_NAMES: [&str; 4] = [
+pub const FIELD_NAMES: [&str; 4] = [
     "description",
     "input_schema",
     "output_schema",
     "annotations",
+];
+pub const NON_CLAIMS: [&str; 4] = [
+    "does not judge whether a manifest change is malicious",
+    "does not infer tools outside the observed tools/list",
+    "does not detect behavior drift under identical metadata",
+    "privileged is classifier-derived, not the server's own annotations",
 ];
 
 /// Completeness of the observed `tools/list`. Never guessed: `complete` is only legitimate when the
@@ -169,12 +175,7 @@ fn tool_digest_entry(tool: &Value) -> (String, String, Value) {
 }
 
 fn non_claims() -> Value {
-    json!([
-        "does not judge whether a manifest change is malicious",
-        "does not infer tools outside the observed tools/list",
-        "does not detect behavior drift under identical metadata",
-        "privileged is classifier-derived, not the server's own annotations"
-    ])
+    json!(NON_CLAIMS)
 }
 
 /// Emit the record for an unobserved `tools/list`. An artifact state, never a missing file: a consumer
