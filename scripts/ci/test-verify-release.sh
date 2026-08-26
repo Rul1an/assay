@@ -5,6 +5,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ORACLE="${ROOT}/scripts/ci/verify-release.sh"
+ASSET_CONTRACT="${ROOT}/scripts/ci/release_asset_contract.sh"
+RELEASE_TAG_READER="${ROOT}/scripts/ci/read-assay-release-tag.sh"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -20,8 +22,12 @@ expect_status() {
 }
 
 [[ -f "$ORACLE" ]] || fail "release oracle is missing: $ORACLE"
+[[ -f "$ASSET_CONTRACT" ]] || fail "shared release asset contract is missing: $ASSET_CONTRACT"
+[[ -f "$RELEASE_TAG_READER" ]] || fail "release tag reader is missing: $RELEASE_TAG_READER"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+
+release_tag="$(bash "$RELEASE_TAG_READER")"
 
 expected_assets="$("$ORACLE" --unit-expected-assets 5.3.0)"
 [[ "$(printf '%s\n' "$expected_assets" | wc -l | tr -d ' ')" -eq 23 ]] \
@@ -30,6 +36,32 @@ printf '%s\n' "$expected_assets" | grep -qxF 'assay-v5.3.0-release-proof-kit.tar
   || fail "asset generator omitted proof kit"
 if printf '%s\n' "$expected_assets" | grep -qxF 'latest.json'; then
   fail "asset generator must not accept latest.json"
+fi
+
+expected_mcp_installability=$(cat <<EOF
+assay-mcp-server	x86_64-unknown-linux-gnu	manual_step	assay-mcp-server-${release_tag}-x86_64-unknown-linux-gnu.tar.gz
+assay-mcp-server	aarch64-unknown-linux-gnu	manual_step	assay-mcp-server-${release_tag}-aarch64-unknown-linux-gnu.tar.gz
+assay-mcp-server	x86_64-apple-darwin	unsupported	-
+assay-mcp-server	aarch64-apple-darwin	unsupported	-
+assay-mcp-server	x86_64-pc-windows-msvc	unsupported	-
+EOF
+)
+actual_mcp_installability="$($ORACLE --unit-installability-matrix "$release_tag" | grep '^assay-mcp-server')"
+[[ "$actual_mcp_installability" == "$expected_mcp_installability" ]] \
+  || fail "MCP server installability matrix is not the measured release surface"
+
+release_doc="$ROOT/docs/reference/release.md"
+documented_matrix="$(sed -n \
+  '/<!-- release-installability-matrix:start -->/,/<!-- release-installability-matrix:end -->/p' \
+  "$release_doc" | sed '1d;$d')"
+generated_matrix="$($ORACLE --unit-installability-markdown "$release_tag")"
+[[ -n "$documented_matrix" && "$documented_matrix" == "$generated_matrix" ]] \
+  || fail "release documentation did not come from the installability contract"
+
+# Both release consumers must call the shared contract. Reintroducing a local
+# expected_assets function would create a second release truth.
+if grep -Eq '^expected_assets\(\)' "$ORACLE"; then
+  fail "release verifier carries a local expected_assets implementation"
 fi
 
 # Abbreviated identifiers are never resolved or expanded.
