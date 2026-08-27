@@ -35,7 +35,10 @@ pub async fn run(args: McpArgs) -> anyhow::Result<i32> {
                     candidate,
                     source,
                     out,
-                } => assay_mcp_server::manifest_promotion::promote(&candidate, &source, &out)?,
+                } => {
+                    let _declared: assay_mcp_server::declared_manifest::DeclaredManifest =
+                        assay_mcp_server::manifest_promotion::promote(&candidate, &source, &out)?;
+                }
             }
             Ok(0)
         }

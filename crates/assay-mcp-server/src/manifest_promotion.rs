@@ -77,7 +77,7 @@ pub fn export_candidate(from_observed: &Path, out: &Path) -> Result<()> {
     write_json_create_new(out, &candidate)
 }
 
-pub fn promote(candidate_path: &Path, source_path: &Path, out: &Path) -> Result<()> {
+pub fn promote(candidate_path: &Path, source_path: &Path, out: &Path) -> Result<DeclaredManifest> {
     let candidate_bytes = read_bounded_bytes(candidate_path)?;
     let candidate = parse_candidate(&candidate_bytes)?;
     let source_bytes = read_bounded_bytes(source_path)?;
@@ -90,7 +90,8 @@ pub fn promote(candidate_path: &Path, source_path: &Path, out: &Path) -> Result<
     let rendered = serde_json::to_string_pretty(&declared)?;
     parse_declared_manifest(&rendered)
         .context("promotion produced an invalid declared manifest")?;
-    write_json_create_new(out, &declared)
+    write_json_create_new(out, &declared)?;
+    Ok(declared)
 }
 
 fn parse_candidate(bytes: &[u8]) -> Result<ManifestCandidate> {
