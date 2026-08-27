@@ -42,6 +42,21 @@ EXPECTED_NUMBER_WIRING_VECTORS = frozenset(
         "rfc8785_appendix_mixed",
     }
 )
+STRING_WIRING_ANCHOR = "self.scope(writer).write_all(fragment.as_bytes())"
+# ensure_ascii-style over-escape: literal ASCII (including solidus), \uXXXX for
+# non-ASCII BMP, UTF-16 surrogate pairs for non-BMP. Compile-valid plausible
+# mutant of RFC 8785 section 3.2.2.2 (unescaped UTF-8 emission).
+STRING_WIRING_REPLACEMENT = '{ let mut escaped = String::new(); for ch in fragment.chars() { let cp = ch as u32; if cp < 0x80 { escaped.push(ch); } else if cp <= 0xFFFF { escaped.push_str(&format!("\\\\u{:04x}", cp)); } else { let u = cp - 0x10000; escaped.push_str(&format!("\\\\u{:04x}\\\\u{:04x}", 0xD800 + (u >> 10), 0xDC00 + (u & 0x3FF))); } } self.scope(writer).write_all(escaped.as_bytes()) }'
+EXPECTED_STRING_WIRING_VECTORS = frozenset(
+    {
+        "keyorder_latin1",
+        "keyorder_utf16_vs_codepoint",
+        "nfc_precomposed_vs_decomposed",
+        "rfc8785_appendix_mixed",
+        "string_del_and_high_ascii",
+        "string_high_unicode",
+    }
+)
 EXPECTED_SLICE_B_RULES = {
     "RFC 8785 section 3.2.3 UTF-16 object-key ordering": (
         "self.tag.cmp(&other.tag)",
@@ -51,8 +66,12 @@ EXPECTED_SLICE_B_RULES = {
         NUMBER_WIRING_ANCHOR,
         NUMBER_WIRING_REPLACEMENT,
     ),
+    "RFC 8785 section 3.2.2.2 Unicode string emission": (
+        STRING_WIRING_ANCHOR,
+        STRING_WIRING_REPLACEMENT,
+    ),
 }
-EXPECTED_SLICE_B_WITNESSES = frozenset({"utf16", "number"})
+EXPECTED_SLICE_B_WITNESSES = frozenset({"utf16", "number", "string"})
 VECTOR_FAIL_RE = re.compile(r"^\[([a-z0-9_]+)\]\s*$")
 EXPECTED_FILES = frozenset(
     {
@@ -462,6 +481,10 @@ def _mutate_number_wiring(root: Path) -> None:
     _mutate_exact(root, NUMBER_WIRING_ANCHOR, NUMBER_WIRING_REPLACEMENT, "number")
 
 
+def _mutate_string_wiring(root: Path) -> None:
+    _mutate_exact(root, STRING_WIRING_ANCHOR, STRING_WIRING_REPLACEMENT, "string")
+
+
 def _run_conformance(root: Path, *, patch: bool) -> subprocess.CompletedProcess[str]:
     cmd = [
         "cargo",
@@ -731,6 +754,12 @@ def self_test(root: Path) -> None:
                 name="number",
                 mutate=_mutate_number_wiring,
                 expected_vectors=EXPECTED_NUMBER_WIRING_VECTORS,
+            ),
+            _wiring_witness(
+                root,
+                name="string",
+                mutate=_mutate_string_wiring,
+                expected_vectors=EXPECTED_STRING_WIRING_VECTORS,
             ),
         }
     )
