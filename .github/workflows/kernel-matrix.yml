@@ -96,7 +96,8 @@ jobs:
   lint:
     name: Lint (pre-commit)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 40: witness self-test rebuilds three assay-canonical mutants via the existing entrypoint.
+    timeout-minutes: 40
     permissions:
       contents: read
     steps:
