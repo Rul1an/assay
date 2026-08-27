@@ -202,6 +202,10 @@ jobs:
         with:
           cache-workspaces: "."
 
+      - name: serde_jcs witness self-test
+        if: contains(needs.plan.outputs.relevant_corpora, 'rfc8785-canonicalization')
+        run: python3 scripts/ci/adequacy_serde_jcs.py self-test
+
       - name: Self-test bounded cleanup target
         run: python3 scripts/ci/test_adequacy_cleanup.py
 
