@@ -431,15 +431,7 @@ repos:
         language: system
         pass_filenames: false
         # Committed vendor bytes only. build/test allow corpus mutants on lib.rs and
-        # run in the corpus tool's isolated copy. Witness-set self-test is the sibling hook.
-        files: ^(third_party/serde_jcs-0\.2\.0(\.crate|\.provenance\.json|/.*)|scripts/ci/adequacy_serde_jcs\.py|\.pre-commit-config\.yaml)$
-
-      - id: adequacy-serde-jcs-self-test
-        name: Vendored serde_jcs witness self-test
-        entry: python3 scripts/ci/adequacy_serde_jcs.py self-test
-        language: system
-        pass_filenames: false
-        # Calls the existing self-test entrypoint. No duplicate witness logic.
+        # run in the corpus tool's isolated copy; self-test stays out of pre-commit.
         files: ^(third_party/serde_jcs-0\.2\.0(\.crate|\.provenance\.json|/.*)|scripts/ci/adequacy_serde_jcs\.py|\.pre-commit-config\.yaml)$
 
       - id: tag-tree-outward-truth

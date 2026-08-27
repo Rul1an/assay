@@ -439,5 +439,85 @@ class MeasurementWorkspaceHygiene(unittest.TestCase):
         self.assertLess(clean, measure)
 
 
+ENTRYPOINT = "python3 scripts/ci/adequacy_serde_jcs.py self-test"
+CORPUS = "rfc8785-canonicalization"
+
+
+def _measure_job(workflow: str) -> str:
+    start = workflow.index("\n  measure:\n")
+    end = workflow.index("\n  check-drift:\n")
+    return workflow[start:end]
+
+
+def _step_containing(job: str, needle: str) -> str:
+    for part in job.split("\n      - "):
+        if needle in part:
+            return part
+    raise AssertionError("no measure-job step contains %r" % (needle,))
+
+
+def assert_rfc8785_self_test_wire(workflow: str) -> None:
+    """The measure job must call the existing self-test, gated on rfc8785, after rust."""
+    job = _measure_job(workflow)
+    if ENTRYPOINT not in job:
+        raise AssertionError("measure job must call the existing self-test entrypoint")
+    setup = job.index("uses: ./.github/actions/setup-rust")
+    entry = job.index(ENTRYPOINT)
+    measure = job.index("python3 conformance/adequacy/measure_all.py")
+    if not (setup < entry < measure):
+        raise AssertionError("self-test must sit after setup-rust and before re-derive")
+    step = _step_containing(job, ENTRYPOINT)
+    if "if:" not in step:
+        raise AssertionError("self-test step must be conditioned")
+    if CORPUS not in step:
+        raise AssertionError("self-test condition must select rfc8785-canonicalization")
+
+
+class Rfc8785SelfTestWire(unittest.TestCase):
+    """Witness self-test is relevance-gated inside measure, not a global lint cost."""
+
+    WORKFLOW = REPO_ROOT / ".github/workflows/adequacy-drift.yml"
+
+    def test_live_workflow_wires_self_test(self):
+        assert_rfc8785_self_test_wire(self.WORKFLOW.read_text(encoding="utf-8"))
+
+    def test_removing_the_step_fails(self):
+        text = self.WORKFLOW.read_text(encoding="utf-8")
+        mutated = text.replace(ENTRYPOINT, "python3 scripts/ci/adequacy_serde_jcs.py verify-vendor")
+        # stronger: drop the entrypoint entirely
+        mutated = text.replace("        run: %s\n" % ENTRYPOINT, "")
+        with self.assertRaisesRegex(AssertionError, "existing self-test entrypoint"):
+            assert_rfc8785_self_test_wire(mutated)
+
+    def test_missing_corpus_condition_fails(self):
+        text = self.WORKFLOW.read_text(encoding="utf-8")
+        job = _measure_job(text)
+        step = _step_containing(job, ENTRYPOINT)
+        stripped = "\n".join(line for line in step.splitlines() if "if:" not in line)
+        mutated = text.replace(step, stripped)
+        with self.assertRaisesRegex(AssertionError, "must be conditioned"):
+            assert_rfc8785_self_test_wire(mutated)
+
+    def test_wrong_corpus_condition_fails(self):
+        text = self.WORKFLOW.read_text(encoding="utf-8")
+        mutated = text.replace(CORPUS, "mcp-jsonrpc-id")
+        with self.assertRaisesRegex(AssertionError, "rfc8785-canonicalization"):
+            assert_rfc8785_self_test_wire(mutated)
+
+    def test_changed_entrypoint_fails(self):
+        text = self.WORKFLOW.read_text(encoding="utf-8")
+        mutated = text.replace(ENTRYPOINT, "python3 scripts/ci/adequacy_serde_jcs.py verify-vendor")
+        with self.assertRaisesRegex(AssertionError, "existing self-test entrypoint"):
+            assert_rfc8785_self_test_wire(mutated)
+
+    def test_comment_only_noop_stays_green(self):
+        text = self.WORKFLOW.read_text(encoding="utf-8")
+        mutated = text.replace(
+            "      - name: serde_jcs witness self-test\n",
+            "      # no-op comment\n      - name: serde_jcs witness self-test\n",
+        )
+        assert_rfc8785_self_test_wire(mutated)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
