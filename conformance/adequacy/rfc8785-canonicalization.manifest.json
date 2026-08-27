@@ -11,7 +11,7 @@
     0,
     101
   ],
-  "_about": "Mutation adequacy for the RFC 8785 (JCS) conformance corpus. The scored denominator is exactly two author-declared rules in the pinned serde_jcs dependency: RFC 8785 UTF-16 object-key ordering and ECMAScript-compatible number serialization. It is not RFC certification, corpus coverage, or full implementation adequacy. The existing wrapper swap remains a separate control proving the runner, mutation and scorer are connected. ryu-js is the pinned transitive number-formatting oracle, not a mutable subject.",
+  "_about": "Mutation adequacy for the RFC 8785 (JCS) conformance corpus. The scored denominator is exactly three author-declared rules in the pinned serde_jcs dependency: RFC 8785 UTF-16 object-key ordering, ECMAScript-compatible number serialization, and section 3.2.2.2 Unicode string emission. It is not RFC certification, corpus coverage, or full implementation adequacy. The existing wrapper swap remains a separate control proving the runner, mutation and scorer are connected. ryu-js is the pinned transitive number-formatting oracle, not a mutable subject.",
   "repo_root": "../..",
   "implementation_sources": [
     "../../crates/assay-canonical/src/jcs.rs",
@@ -53,6 +53,11 @@
         "label": "RFC 8785 section 3.2.2.3 and Appendix B ECMAScript-compatible number serialization",
         "anchor": "buffer.format_finite(value)",
         "replacement": "({ let _ = &mut buffer; value.to_string() })"
+      },
+      {
+        "label": "RFC 8785 section 3.2.2.2 Unicode string emission",
+        "anchor": "self.scope(writer).write_all(fragment.as_bytes())",
+        "replacement": "{ let mut escaped = String::new(); for ch in fragment.chars() { let cp = ch as u32; if cp < 0x80 { escaped.push(ch); } else if cp <= 0xFFFF { escaped.push_str(&format!(\"\\\\u{:04x}\", cp)); } else { let u = cp - 0x10000; escaped.push_str(&format!(\"\\\\u{:04x}\\\\u{:04x}\", 0xD800 + (u >> 10), 0xDC00 + (u & 0x3FF))); } } self.scope(writer).write_all(escaped.as_bytes()) }"
       }
     ]
   },
