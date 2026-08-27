@@ -32,6 +32,7 @@ assay-metrics.workspace = true
 sha2.workspace = true
 hex.workspace = true
 moka = { version = "0.12", features = ["sync"] }
+tempfile.workspace = true
 
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "time"] }
@@ -48,7 +49,6 @@ anyhow.workspace = true
 assay-evidence = { workspace = true }
 serde_json = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["full"] }
-tempfile.workspace = true
 wiremock = "0.6"
 jsonwebtoken = { version = "11.0", default-features = false, features = ["aws_lc_rs", "use_pem"] }
 base64 = "0.22"

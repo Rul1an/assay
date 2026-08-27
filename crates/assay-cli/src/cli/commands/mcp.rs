@@ -1,4 +1,4 @@
-use super::super::args::{McpArgs, McpSub, McpWrapArgs};
+use super::super::args::{ManifestSub, McpArgs, McpSub, McpWrapArgs};
 use super::coverage;
 use super::session_state_window;
 use anyhow::Context;
@@ -26,6 +26,21 @@ pub async fn run(args: McpArgs) -> anyhow::Result<i32> {
         McpSub::Kill(kill_args) => super::kill::run(kill_args).await,
         McpSub::Tool(tool_args) => Ok(super::tool::cmd_tool(tool_args.cmd)),
         McpSub::Preflight(preflight_args) => preflight::run(preflight_args),
+        McpSub::Manifest(manifest_args) => {
+            match manifest_args.cmd {
+                ManifestSub::Candidate { from_observed, out } => {
+                    assay_mcp_server::manifest_promotion::export_candidate(&from_observed, &out)?;
+                }
+                ManifestSub::Promote {
+                    candidate,
+                    source,
+                    out,
+                } => {
+                    assay_mcp_server::manifest_promotion::promote(&candidate, &source, &out)?;
+                }
+            }
+            Ok(0)
+        }
     }
 }
 

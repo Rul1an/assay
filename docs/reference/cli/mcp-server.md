@@ -10,6 +10,7 @@ This page documents the current MCP runtime entry points in Assay.
 
 - `assay mcp wrap`
 - `assay mcp preflight`
+- `assay mcp manifest candidate|promote`
 - `assay mcp discover`
 - `assay mcp kill`
 - `assay mcp config-path`
@@ -120,7 +121,46 @@ host-discovery document.
 
 ---
 
-## 4) `assay-mcp-server` (separate binary)
+## 4) `assay mcp manifest` (CLI)
+
+Turn one complete observed MCP tool manifest into an operator-reviewable
+candidate, then explicitly promote that candidate into a new declared-v0
+baseline.
+
+```bash
+assay mcp manifest candidate \
+  --from-observed observed.json \
+  --out candidate.json
+
+# Review or diff candidate.json before running promotion.
+assay mcp manifest promote \
+  --candidate candidate.json \
+  --source observed.json \
+  --out declared.json
+```
+
+Candidate export accepts only a complete, unambiguous
+`assay.mcp_manifest_observed.v0` artifact with a reproducible manifest digest
+and at least one tool. The candidate records the SHA-256 of the exact source
+bytes and always carries `status: candidate` plus `approval: not_approved`.
+
+Promotion rereads the source, reconstructs the candidate, compares every
+field, and mints a fresh `assay.declared_mcp_manifest.v0` document. Byte-identical
+source at another path is accepted; any source or candidate content drift is
+refused. Outputs use create-new semantics and never overwrite an existing
+candidate or approval baseline.
+
+Observed, candidate, and declared files share an inclusive 1 MiB ceiling for
+both reads and generated output. Exactly 1 MiB is accepted; one additional
+byte is refused before output creation.
+
+A candidate is not an approval. A successful promotion proves an explicit
+operator action and byte parity, not that the operator understood the diff,
+that the observed server was honest, or that any tool is safe.
+
+---
+
+## 5) `assay-mcp-server` (separate binary)
 
 Run the MCP server binary directly.
 

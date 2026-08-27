@@ -595,6 +595,38 @@ fn every_production_identity_is_classified() {
     let _ = &recorded;
 }
 
+/// Both artifacts created by `assay mcp manifest` are caller-named CLI documents.
+///
+/// The total-partition guard cannot infer this semantic distinction: recording an identity in the
+/// non-document block still satisfies totality. Pin these two command outputs explicitly so a
+/// future reason cannot claim that either one is only an input or nested carrier.
+#[test]
+fn manifest_promotion_outputs_are_cli_documents() {
+    let documents = document_rows();
+    let non_documents = non_document_rows();
+
+    const WRITER: &str = "crates/assay-mcp-server/src/manifest_promotion.rs";
+
+    for identity in [
+        "assay.mcp_manifest_candidate.v0",
+        "assay.declared_mcp_manifest.v0",
+    ] {
+        assert!(
+            documents.contains_key(identity),
+            "{identity} is written by `assay mcp manifest` to a caller-named path and must be in the cli-documents block"
+        );
+        assert!(
+            !non_documents.contains_key(identity),
+            "{identity} cannot also be classified as a non-document"
+        );
+        assert_eq!(
+            documents.get(identity).map(|(writer, _)| writer.as_str()),
+            Some(WRITER),
+            "{identity} must name the module that serializes and creates the document, not the CLI dispatcher"
+        );
+    }
+}
+
 /// Documents with no identity string are required rows, and each row still names something real.
 ///
 /// Without this, the guard is satisfied by a source scan — and a source scan cannot see any of the
