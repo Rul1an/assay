@@ -143,7 +143,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: Rul1an/assay-action@v2
+      - uses: Rul1an/assay-action@v3
 ```
 
 Or run manually:

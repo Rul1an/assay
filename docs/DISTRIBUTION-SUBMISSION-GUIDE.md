@@ -86,7 +86,7 @@ assay mcp wrap --policy policy.yaml -- your-mcp-server
 
 ## CI integration
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay-action@v3
 ```
 SARIF results in GitHub Security tab.
 

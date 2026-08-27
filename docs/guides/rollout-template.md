@@ -9,9 +9,9 @@ We have released **Assay v0.3.4**, which focuses on "Adoption Hardening" — mak
 ### 🚀 Upgrade Instructions
 Update your GitHub Action to use **v0.3.4**:
 ```yaml
-- uses: Rul1an/assay-action@v2 # or pin to an exact v2.x.y tag / commit SHA
+- uses: Rul1an/assay-action@v3 # or pin to an exact v3.x.y tag / commit SHA
   with:
-    assay_version: v0.3.4
+    version: v0.3.4
     # ... other inputs ...
 ```
 

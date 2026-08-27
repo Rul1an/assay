@@ -52,6 +52,13 @@ inputs:
     description: 'Fail threshold: error, warn (or warning), info, none. Validated by the CLI, so an unrecognized value fails the run instead of disabling the gate.'
     required: false
     default: 'error'
+  evidence_mode:
+    description: |
+      Whether discovery must find at least one evidence bundle: optional or required.
+      Default remains optional and is declared only here. Empty, whitespace-only,
+      and unrecognized values fail closed.
+    required: false
+    default: 'optional'
   sarif:
     description: 'Upload SARIF to GitHub Security tab'
     required: false
@@ -165,8 +172,19 @@ inputs:
 
 outputs:
   verified:
-    description: 'true if all bundles passed verification'
-    value: ${{ steps.process.outputs.verified }}
+    description: 'true if all indexed bundles passed integrity verification'
+    value: ${{ steps.finalize-evidence.outputs.verified }}
+  evidence_state:
+    description: |
+      absent, discovered, verified, or rejected. Empty when discovery produced no
+      determination — it never ran, or it failed before indexing completed.
+    value: ${{ steps.finalize-evidence.outputs.evidence_state }}
+  evidence_index_path:
+    description: 'Workspace-relative path to the bounded evidence index'
+    value: ${{ steps.finalize-evidence.outputs.evidence_index_path }}
+  evidence_index_digest:
+    description: 'SHA-256 of the exact evidence-index bytes'
+    value: ${{ steps.finalize-evidence.outputs.evidence_index_digest }}
   findings_error:
     description: 'Count of error-level findings'
     value: ${{ steps.process.outputs.findings_error }}
@@ -303,12 +321,20 @@ runs:
         ARCHIVE_PATH="${TEMP_DIR}/assay.tar.gz"
         CHECKSUM_PATH="${TEMP_DIR}/assay.tar.gz.sha256"
 
-        if ! curl -fsSL "$DOWNLOAD_URL" -o "$ARCHIVE_PATH"; then
+        CURL_ARGS=(
+          --retry 3
+          --retry-delay 2
+          --retry-all-errors
+          -fsSL
+          -H "User-Agent: assay-action-installer"
+        )
+
+        if ! curl "${CURL_ARGS[@]}" "$DOWNLOAD_URL" -o "$ARCHIVE_PATH"; then
           echo "::error::Failed to download Assay archive from $DOWNLOAD_URL"
           rm -rf "$TEMP_DIR"
           exit 1
         fi
-        if ! curl -fsSL "$CHECKSUM_URL" -o "$CHECKSUM_PATH"; then
+        if ! curl "${CURL_ARGS[@]}" "$CHECKSUM_URL" -o "$CHECKSUM_PATH"; then
           echo "::error::Failed to download checksum from $CHECKSUM_URL"
           rm -rf "$TEMP_DIR"
           exit 1
@@ -397,43 +423,45 @@ runs:
       shell: bash
       env:
         BUNDLES_PATTERN: ${{ inputs.bundles }}
+        EVIDENCE_MODE: ${{ inputs.evidence_mode }}
+        SANDBOX_BUNDLE: ${{ steps.sandbox-governance.outputs.coding_agent_bundle }}
         RUNNER_TEMP: ${{ runner.temp }}
       run: |
         set -euo pipefail
 
         # Use RUNNER_TEMP for cross-platform compatibility (Windows support)
         TEMP_DIR="${RUNNER_TEMP:-/tmp}"
+        RAW="$TEMP_DIR/assay-bundles-raw.txt"
+        : > "$RAW"
 
-        # Auto-discover if no pattern provided
+        # Auto-discover if no pattern provided. Do not truncate; the index
+        # script owns the 100-bundle cap and fails closed on the 101st.
         if [ -z "$BUNDLES_PATTERN" ]; then
-          # Use find with explicit paths (safer than glob expansion)
-          BUNDLES=$(find . \( -path './.assay/evidence/*.tar.gz' -o -path './evidence/*.tar.gz' \) -type f 2>/dev/null | head -100 || true)
+          find . \( -path './.assay/evidence/*.tar.gz' -o -path './evidence/*.tar.gz' \) -type f 2>/dev/null >> "$RAW"
         else
           # Glob expansion: use compgen for safe pattern matching
           # shellcheck disable=SC2086
           if compgen -G "$BUNDLES_PATTERN" > /dev/null 2>&1; then
-            BUNDLES=$(compgen -G "$BUNDLES_PATTERN" | head -100)
-          else
-            BUNDLES=""
+            compgen -G "$BUNDLES_PATTERN" >> "$RAW"
           fi
         fi
 
-        if [ -z "$BUNDLES" ]; then
+        mkdir -p "${GITHUB_WORKSPACE}/.assay-reports"
+        WORKSPACE="${GITHUB_WORKSPACE}" \
+          EVIDENCE_MODE="${EVIDENCE_MODE}" \
+          BUNDLES_FILE="$RAW" \
+          SANDBOX_BUNDLE="${SANDBOX_BUNDLE:-}" \
+          INDEX_PATH="${GITHUB_WORKSPACE}/.assay-reports/evidence-index.json" \
+          LIST_PATH="$TEMP_DIR/assay-bundles.txt" \
+          bash "$GITHUB_ACTION_PATH/scripts/build_evidence_index.sh" index
+
+        COUNT="$(grep -E '^count=' "$GITHUB_OUTPUT" | tail -n1 | cut -d= -f2)"
+        FOUND="$(grep -E '^found=' "$GITHUB_OUTPUT" | tail -n1 | cut -d= -f2)"
+        if [ "${FOUND:-false}" != "true" ]; then
           echo "::notice::No evidence bundles found. Run 'assay run' to generate them."
-          echo "found=false" >> $GITHUB_OUTPUT
-          echo "count=0" >> $GITHUB_OUTPUT
-          exit 0
+        else
+          echo "Found $COUNT evidence bundle(s)"
         fi
-
-        COUNT=$(echo "$BUNDLES" | wc -l | tr -d ' ')
-        echo "Found $COUNT evidence bundle(s)"
-        echo "$BUNDLES"
-
-        # Save to file for later steps (use RUNNER_TEMP for Windows compat)
-        echo "$BUNDLES" > "$TEMP_DIR/assay-bundles.txt"
-        echo "bundles_file=$TEMP_DIR/assay-bundles.txt" >> $GITHUB_OUTPUT
-        echo "found=true" >> $GITHUB_OUTPUT
-        echo "count=$COUNT" >> $GITHUB_OUTPUT
 
     - name: Process bundles (verify + lint)
       id: process
@@ -442,6 +470,7 @@ runs:
       env:
         FAIL_ON: ${{ inputs.fail_on }}
         BUNDLES_FILE: ${{ steps.discover.outputs.bundles_file }}
+        INDEX_PATH: ${{ steps.discover.outputs.evidence_index_path }}
         RUNNER_TEMP: ${{ runner.temp }}
       run: |
         set -euo pipefail
@@ -452,24 +481,39 @@ runs:
         echo "reports_dir=$REPORTS_DIR" >> $GITHUB_OUTPUT
 
         TEMP_DIR="${RUNNER_TEMP:-/tmp}"
-        BUNDLES=$(cat "$BUNDLES_FILE")
+        RESULTS="$TEMP_DIR/integrity-results.tsv"
+        : > "$RESULTS"
+
+        WORKSPACE="${GITHUB_WORKSPACE}" \
+          INDEX_PATH="$INDEX_PATH" \
+          bash "$GITHUB_ACTION_PATH/scripts/build_evidence_index.sh" assert
 
         # Verify all bundles
         VERIFIED=0
         FAILED=0
-        for bundle in $BUNDLES; do
+        while IFS= read -r bundle || [ -n "$bundle" ]; do
+          [ -z "$bundle" ] && continue
           if assay evidence verify "$bundle" 2>/dev/null; then
+            printf '%s\t%s\n' "$bundle" "verified" >> "$RESULTS"
             ((VERIFIED++)) || true
           else
+            printf '%s\t%s\n' "$bundle" "rejected" >> "$RESULTS"
             ((FAILED++)) || true
             echo "::error file=$bundle::Bundle verification failed"
           fi
-        done
+        done < "$BUNDLES_FILE"
+
+        WORKSPACE="${GITHUB_WORKSPACE}" \
+          INDEX_PATH="$INDEX_PATH" \
+          INTEGRITY_RESULTS="$RESULTS" \
+          bash "$GITHUB_ACTION_PATH/scripts/build_evidence_index.sh" seal
 
         echo "verified_count=$VERIFIED" >> $GITHUB_OUTPUT
         echo "failed_count=$FAILED" >> $GITHUB_OUTPUT
 
-        if [ "$FAILED" -gt 0 ]; then
+        if ! WORKSPACE="${GITHUB_WORKSPACE}" \
+          INDEX_PATH="$INDEX_PATH" \
+          bash "$GITHUB_ACTION_PATH/scripts/build_evidence_index.sh" sealed-ok; then
           echo "verified=false" >> $GITHUB_OUTPUT
           exit 2  # Distinct exit code for verification failure
         fi
@@ -481,19 +525,11 @@ runs:
         GATE_HITS=0
         echo '{"findings":[]}' > "$REPORTS_DIR/lint.json"
 
-        for bundle in $BUNDLES; do
+        while IFS= read -r bundle || [ -n "$bundle" ]; do
+          [ -z "$bundle" ] && continue
           echo "Linting: $bundle"
 
-          # Lint to JSON for counting, and let the CLI decide the threshold.
-          #
-          # $FAIL_ON goes to the CLI unmodified so the vocabulary has one definition, the one clap
-          # validates. This replaces a bash `case` that had no default arm: any value it did not
-          # recognize gated nothing and exited 0, so `fail_on: warning` (which the cicd-starter
-          # README tells users to set) silently disabled the gate, as did any typo or casing.
-          #
-          # One invocation still serves both jobs. `assay evidence lint` writes its report first and
-          # decides the gate last, so the JSON below is produced whether or not the gate trips.
-          # `--fail-on none` is honoured by the CLI, so no case for it is needed here.
+          # $FAIL_ON goes to the CLI unmodified so the vocabulary has one definition.
           set +e
           LINT_JSON=$(assay evidence lint --format json --fail-on "$FAIL_ON" "$bundle" 2>"$TEMP_DIR/lint.err")
           LINT_CODE=$?
@@ -503,8 +539,6 @@ runs:
             0) ;;
             1) GATE_HITS=$((GATE_HITS + 1)) ;;
             *)
-              # 2 = verification failure, 3 = pack fault, 2 also = a fail_on the CLI does not accept.
-              # A threshold that could not be applied must not read as a threshold that passed.
               echo "::error::Could not apply fail_on='$FAIL_ON' to $bundle (assay exited $LINT_CODE)"
               cat "$TEMP_DIR/lint.err" >&2 || true
               exit 2
@@ -526,7 +560,7 @@ runs:
           # Generate SARIF for this bundle
           assay evidence lint --format sarif "$bundle" > "$REPORTS_DIR/lint-$(basename "$bundle" .tar.gz).sarif" 2>/dev/null || true
 
-        done
+        done < "$BUNDLES_FILE"
 
         # Merge SARIF files if multiple
         FIRST_SARIF=$(ls "$REPORTS_DIR"/*.sarif 2>/dev/null | head -1)
@@ -550,15 +584,25 @@ runs:
         echo "findings_error=$ERRORS" >> $GITHUB_OUTPUT
         echo "findings_warn=$WARNS" >> $GITHUB_OUTPUT
 
-        # The counters above stay: they feed findings_error, findings_warn and diff_summary. Only the
-        # deciding moved, to the per-bundle `--fail-on` exit code collected in $GATE_HITS. The
-        # summary is written before the gate so a gated run still reports what it found.
         echo "diff_summary=Verified: $VERIFIED, Errors: $ERRORS, Warnings: $WARNS" >> $GITHUB_OUTPUT
 
         if [ "$GATE_HITS" -gt 0 ]; then
           echo "::error::$GATE_HITS bundle(s) have findings at or above '$FAIL_ON' ($ERRORS errors, $WARNS warnings)"
           exit 1
         fi
+
+    - name: Finalize evidence outputs
+      id: finalize-evidence
+      if: always()
+      shell: bash
+      env:
+        DISCOVER_OUTCOME: ${{ steps.discover.outcome }}
+        DISCOVER_FOUND: ${{ steps.discover.outputs.found }}
+        PROCESS_VERIFIED: ${{ steps.process.outputs.verified }}
+        INDEX_PATH: ${{ steps.process.outputs.evidence_index_path || steps.discover.outputs.evidence_index_path }}
+        INDEX_DIGEST: ${{ steps.process.outputs.evidence_index_digest || steps.discover.outputs.evidence_index_digest }}
+      run: |
+        bash "$GITHUB_ACTION_PATH/scripts/build_evidence_index.sh" finalize
 
     # =========================================================================
     # E3: SARIF Upload
@@ -969,19 +1013,6 @@ runs:
         echo "pack_status=success" >> $GITHUB_OUTPUT
         echo "pack_error_kind=" >> $GITHUB_OUTPUT
 
-        # Gate on compliance-pack findings.
-        #
-        # The lint loop above passes --fail-on none deliberately, so that a non-zero exit there
-        # means a pack-loading or runtime fault and never a policy finding. That left pack findings
-        # gating nothing at all: the ERRORS/WARNS counters feeding the fail_on case are computed by
-        # an un-packed lint, so a compliance finding never reached a threshold.
-        #
-        # This runs after the outputs above so a gate failure still leaves pack_score, pack_applied
-        # and pack_status readable by later steps, and exits 1 -- a policy failure, distinct from
-        # the exit 3 this step uses for pack faults.
-        #
-        # $FAIL_ON goes to the CLI unmodified, as it now does on the non-pack path too. The CLI
-        # accepts "warning" as an alias of "warn", so both paths honour it.
         if [ "$FAIL_ON" != "none" ]; then
           PACK_GATE_HITS=0
           while IFS= read -r bundle || [ -n "$bundle" ]; do
@@ -993,6 +1024,9 @@ runs:
             if [ "$GATE_CODE" -eq 1 ]; then
               echo "::error::Compliance pack findings at or above '$FAIL_ON' in $bundle"
               PACK_GATE_HITS=$((PACK_GATE_HITS + 1))
+            elif [ "$GATE_CODE" -ne 0 ]; then
+              echo "::error::Could not apply fail_on='$FAIL_ON' to pack lint of $bundle (assay exited $GATE_CODE)"
+              exit 2
             fi
           done < "$BUNDLES_FILE"
           if [ "$PACK_GATE_HITS" -gt 0 ]; then

@@ -37,7 +37,7 @@ assay init --ci github
   - `ci-eval.yaml` — smoke suite (regex, json_schema, semantic_similarity).
   - `schemas/ci_answer.schema.json` — JSON Schema voor ci_smoke_schema.
   - `traces/ci.jsonl` — voorbeeldtrace voor replay.
-  - `.github/workflows/assay.yml` — template gebruikt `Rul1an/assay/assay-action@v2` (zie [guides/github-action](getting-started/ci-integration.md)).
+  - `.github/workflows/assay.yml` — template gebruikt `Rul1an/assay-action@v3` (zie [guides/github-action](getting-started/ci-integration.md)).
 
 **Defaults (veiligheid en bruikbaarheid):**
 
@@ -65,7 +65,7 @@ assay init --ci github
 cd /tmp && mkdir assay-dx-demo && cd assay-dx-demo
 git init
 assay init --ci github
-# Aanpassen: .github/workflows/assay.yml → uses: Rul1an/assay/assay-action@v2, en config/trace_file pad controleren
+# Aanpassen: .github/workflows/assay.yml → uses: Rul1an/assay-action@v3, en config/trace_file pad controleren
 assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl --junit junit.xml --sarif sarif.json
 # Lokaal: junit.xml + SARIF in output-dir; in CI: zelfde command + upload SARIF/JUnit.
 ```
@@ -88,7 +88,7 @@ assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl --junit junit.xml --
 ### B.2 SARIF — findings in GitHub Security tab
 
 - **CLI:** `assay ci --sarif <path>` (of `assay evidence lint --format sarif`) produceert SARIF; Action uploadt SARIF via `github/codeql-action/upload-sarif`.
-- **Action:** [assay-action/action.yml](https://github.com/Rul1an/assay/blob/main/assay-action/action.yml) — step `upload-sarif`, alleen bij same-repo PR/push (geen upload op fork PR).
+- **Action:** [Rul1an/assay-action](https://github.com/Rul1an/assay-action) — step `upload-sarif`, alleen bij same-repo PR/push (geen upload op fork PR).
 - **Review:** PR met findings → Security tab toont code scanning alerts; geen findings → geen alerts. Vergelijk met [REVIEW-MATERIALS](REVIEW-MATERIALS.md) Set A/B: run met failing trace en controleer of de bijbehorende finding in SARIF en in de Security tab verschijnt.
 
 ### B.3 PR comment — alleen bij findings

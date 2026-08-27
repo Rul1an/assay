@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- Assay's GitHub Action consumer pin is a mixed Action migration to published
+  `Rul1an/assay-action` v3.1.0, not a purely additive one. Completed
+  zero-evidence runs now emit output `verified` as the literal `false`
+  instead of an empty string. `sandbox-command` evidence now enters verify
+  and `fail_on` lint, so a run can fail where the previous unverified sandbox
+  route completed, and it writes a sandbox bundle into the workspace. The
+  user-observable delta from Action v3.0.1 to v3.0.2 was not measured here
+  (#2651).
 - `assay-it` metadata, release wheel targets, and install docs share one
   `assay.python_artifact_matrix.v0`. That matrix is the sole mutable
   authority for CPython version, package, target, and tag. A plan job

@@ -4,8 +4,10 @@
 
 **GitHub Marketplace:** [assay-ai-agent-security](https://github.com/marketplace/actions/assay-ai-agent-security)
 
-Canonical public action slug: `Rul1an/assay-action@v2`.
-Monorepo-internal workflow tests may use `./assay-action`; that local path is not the recommended external reference.
+Canonical public action slug: `Rul1an/assay-action@v3`.
+This repository executes the commit in `.github/assay-action-pin`; `./assay-action` is not a substitute.
+v3.1.0 is a mixed Action migration (see CHANGELOG.md). Rollback is Assay-side
+only (see [PINNED-ACTIONS.md](../PINNED-ACTIONS.md)).
 
 ---
 
@@ -25,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: Rul1an/assay-action@v2
+      - uses: Rul1an/assay-action@v3
 ```
 
 Copy, paste, done. The action auto-discovers evidence bundles and reports findings to the Security tab.
@@ -35,7 +37,7 @@ Copy, paste, done. The action auto-discovers evidence bundles and reports findin
 ## Quick Start
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay-action@v3
 ```
 
 Zero config. Discovers evidence bundles, verifies integrity, uploads SARIF.
@@ -76,7 +78,7 @@ jobs:
           assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml --sarif .assay/reports/sarif.json
 
       - name: Verify evidence
-        uses: Rul1an/assay-action@v2
+        uses: Rul1an/assay-action@v3
         with:
           fail_on: error
           baseline_key: ${{ github.event.repository.name }}
@@ -164,7 +166,7 @@ permissions:
 Lint evidence against regulatory requirements:
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay-action@v3
   with:
     pack: eu-ai-act-baseline
 ```
@@ -181,7 +183,7 @@ SARIF output includes article references (`Article 12(1)`, etc.) for audit trail
 Custom packs:
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay-action@v3
   with:
     pack: ./my-org-rules.yaml
 ```
@@ -201,7 +203,7 @@ jobs:
   assay:
     runs-on: ubuntu-latest
     steps:
-      - uses: Rul1an/assay-action@v2
+      - uses: Rul1an/assay-action@v3
         with:
           store: s3://my-bucket/evidence
           store_provider: aws
@@ -213,7 +215,7 @@ Requires IAM trust policy for `token.actions.githubusercontent.com`.
 ### GCP Cloud Storage
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay-action@v3
   with:
     store: gs://my-bucket/evidence
     store_provider: gcp
@@ -230,7 +232,7 @@ permissions:
   id-token: write
 
 steps:
-  - uses: Rul1an/assay-action@v2
+  - uses: Rul1an/assay-action@v3
     with:
       attest: true
 ```
@@ -267,7 +269,7 @@ jobs:
       - name: Run tests
         run: pytest tests/
 
-      - uses: Rul1an/assay-action@v2
+      - uses: Rul1an/assay-action@v3
         with:
           fail_on: error
           baseline_key: ${{ github.event.repository.name }}
@@ -279,7 +281,7 @@ jobs:
 EU AI Act Article 12 compliance checks with SARIF output:
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay-action@v3
   with:
     pack: eu-ai-act-baseline
     fail_on: warn  # Fail on warnings too
@@ -314,7 +316,7 @@ jobs:
           curl -fsSL https://getassay.dev/install.sh | sh
           assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml --sarif .assay/reports/sarif.json
 
-      - uses: Rul1an/assay-action@v2
+      - uses: Rul1an/assay-action@v3
         with:
           pack: eu-ai-act-baseline
           store: s3://my-bucket/evidence
@@ -333,7 +335,7 @@ jobs:
 Detect regressions against your default branch:
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay-action@v3
   with:
     baseline_key: unit-tests
     write_baseline: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
@@ -355,7 +357,7 @@ jobs:
       - name: Run ${{ matrix.suite }} tests
         run: assay ci --config eval.yaml --trace-file traces/${{ matrix.suite }}.jsonl --strict --junit .assay/reports/${{ matrix.suite }}.junit.xml --sarif .assay/reports/${{ matrix.suite }}.sarif.json
 
-      - uses: Rul1an/assay-action@v2
+      - uses: Rul1an/assay-action@v3
         with:
           bundles: '.assay/evidence/${{ matrix.suite }}/*.tar.gz'
 ```
@@ -389,7 +391,7 @@ jobs:
           assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml --sarif .assay/reports/sarif.json
 
       - name: Verify with compliance pack
-        uses: Rul1an/assay-action@v2
+        uses: Rul1an/assay-action@v3
         with:
           pack: eu-ai-act-baseline
           store: s3://my-bucket/evidence

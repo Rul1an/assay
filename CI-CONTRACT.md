@@ -243,9 +243,11 @@ term list is involved.
 Scope:
 
 - root `README.md`, `CHANGELOG.md`, and `CI-CONTRACT.md`;
-- `docs/**` prose files;
-- the action marketplace metadata in `assay-action/action.yml` or
-  `assay-action/action.yaml`.
+- `docs/**` prose files.
+
+The published Action's `action.yml` lives in `Rul1an/assay-action` and is not
+scanned here. Pin-bound published bytes under
+`scripts/ci/fixtures/assay-action-pin/` are evidence, not public-prose claims.
 
 The workflow trigger should also include the checker and workflow files
 themselves so self-test and review changes exercise the guard, but code,

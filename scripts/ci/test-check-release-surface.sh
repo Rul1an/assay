@@ -259,16 +259,16 @@ mutate_and_expect_failure wrong-air-gap-extraction docs/use-cases/air-gapped.md 
   'current Linux release archive extraction drift'
 mutate_and_expect_failure mutable-action-ci docs/getting-started/ci-integration.md \
   's/actions\/upload-artifact@[0-9a-f]*/actions\/upload-artifact@v7/' \
-  'GitHub Action references must use full immutable commit SHAs'
+  'GitHub Action references must use a full commit SHA (or Rul1an/assay-action@v3)'
 mutate_and_expect_failure mutable-action-ci-gate docs/use-cases/ci-gate.md \
   's/github\/codeql-action\/upload-sarif@[0-9a-f]*/github\/codeql-action\/upload-sarif@v4/' \
-  'GitHub Action references must use full immutable commit SHAs'
+  'GitHub Action references must use a full commit SHA (or Rul1an/assay-action@v3)'
 mutate_and_expect_failure mutable-action-quickstart docs/getting-started/quickstart.md \
   's/Rul1an\/assay-action@[0-9a-f]*/Rul1an\/assay-action@main/' \
-  'GitHub Action references must use full immutable commit SHAs'
+  'GitHub Action references must use a full commit SHA (or Rul1an/assay-action@v3)'
 mutate_and_expect_failure mutable-action-user-flow docs/AIcontext/user-flows.md \
   's/github\/codeql-action\/upload-sarif@[0-9a-f]*/github\/codeql-action\/upload-sarif@latest/' \
-  'GitHub Action references must use full immutable commit SHAs'
+  'GitHub Action references must use a full commit SHA (or Rul1an/assay-action@v3)'
 mutate_and_expect_failure missing-air-gap-archive docs/use-cases/air-gapped.md \
   's#curl -fLO https://github.com/Rul1an/assay/releases/download/v5.1.0/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz$#archive download omitted#' \
   'current Linux release archive URL drift'

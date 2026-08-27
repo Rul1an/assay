@@ -237,7 +237,7 @@ Minimal traceability for CI pipelines — compatibility floor for adoption.
 
 ## Quickstart (copy/paste)
 
-    - uses: Rul1an/assay/assay-action@v2   # Pin to commit SHA in production
+    - uses: Rul1an/assay-action@v3
       with:
         pack: cicd-starter
         fail_on: error   # Use 'warning' to enforce CICD-002/003 in CI
