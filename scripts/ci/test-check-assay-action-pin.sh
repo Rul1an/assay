@@ -456,6 +456,30 @@ if path.stat().st_size <= limit:
 PY
 expect_fail "unlisted-oversize-post-limit-snippet" "exceeds 1048576-byte limit" "${scratch}/oversize"
 
+echo "== unlisted oversize file without assay-action token =="
+copy_into "${scratch}/oversize-notoken"
+mkdir -p "${scratch}/oversize-notoken/docs/getting-started"
+python3 - "${scratch}/oversize-notoken/docs/getting-started/notes.md" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+limit = 1048576
+path.write_bytes(b"x" * (limit + 1))
+if path.stat().st_size <= limit:
+    raise SystemExit("oversize-notoken mutation did not exceed 1048576 bytes")
+if b"assay-action" in path.read_bytes():
+    raise SystemExit("oversize-notoken mutation contains assay-action")
+PY
+expect_fail "unlisted-oversize-without-token" "exceeds 1048576-byte limit" "${scratch}/oversize-notoken"
+
+echo "== small irrelevant unlisted file remains allowed =="
+copy_into "${scratch}/small"
+mkdir -p "${scratch}/small/docs/getting-started"
+printf '%s\n' 'irrelevant notes without a consumer action snippet' \
+  >"${scratch}/small/docs/getting-started/notes.md"
+expect_ok "small-irrelevant-unlisted-file" run_checker_at "${scratch}/small"
+
 echo "== Dependabot owner drift =="
 cp "${DEPENDABOT}" "${scratch}/dependabot.yml"
 mutate_once \
