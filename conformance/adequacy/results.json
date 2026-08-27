@@ -142,7 +142,7 @@
       "manifest": "conformance/adequacy/rfc8785-canonicalization.manifest.json",
       "manifest_sha256": "sha256:7538d5503cba87bcfe8ddb0aa01bb1b660effb5ec3310da5363e223923156c8e",
       "measured_at": {
-        "commit": "c8ef3fc87143581868ed4d87998e2c807e9a5bdd",
+        "commit": "116c2e0fa5edf4f59c66c4587076ce370fd32549",
         "depends_on": [
           "conformance/adequacy/rfc8785-canonicalization.manifest.json",
           "crates/assay-canonical/src/jcs.rs",
