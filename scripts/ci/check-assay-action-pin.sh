@@ -74,7 +74,11 @@ SKIP_PREFIXES = (
     "scripts/ci/fixtures/",
     "demo/",
     "third_party/",
-    "crates/assay-ebpf/",
+)
+SKIP_PATHS = frozenset(
+    {
+        "crates/assay-ebpf/src/vmlinux.rs",
+    }
 )
 SCAN_SUFFIXES = {".md", ".yml", ".yaml", ".rs"}
 DOC_FLOATING = "Rul1an/assay-action@v3"
@@ -320,6 +324,8 @@ def rel_posix(path: Path) -> str:
 
 
 def should_skip(rel: str) -> bool:
+    if rel in SKIP_PATHS:
+        return True
     return any(rel.startswith(prefix) for prefix in SKIP_PREFIXES)
 
 

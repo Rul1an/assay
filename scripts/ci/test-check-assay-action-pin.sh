@@ -480,6 +480,28 @@ printf '%s\n' 'irrelevant notes without a consumer action snippet' \
   >"${scratch}/small/docs/getting-started/notes.md"
 expect_ok "small-irrelevant-unlisted-file" run_checker_at "${scratch}/small"
 
+echo "== oversized generated vmlinux.rs remains allowed =="
+copy_into "${scratch}/ebpf-vmlinux"
+mkdir -p "${scratch}/ebpf-vmlinux/crates/assay-ebpf/src"
+python3 - "${scratch}/ebpf-vmlinux/crates/assay-ebpf/src/vmlinux.rs" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+limit = 1048576
+path.write_bytes(b"x" * (limit + 1))
+if path.stat().st_size <= limit:
+    raise SystemExit("generated vmlinux mutation did not exceed 1048576 bytes")
+PY
+expect_ok "generated-vmlinux-oversize-allowed" run_checker_at "${scratch}/ebpf-vmlinux"
+
+echo "== assay-ebpf README action snippet is still inventoried =="
+copy_into "${scratch}/ebpf-readme"
+mkdir -p "${scratch}/ebpf-readme/crates/assay-ebpf"
+printf '%s\n' '```yaml' '- uses: Rul1an/assay-action@v3' '```' \
+  >"${scratch}/ebpf-readme/crates/assay-ebpf/README.md"
+expect_fail "ebpf-readme-action-snippet" "is not on the owner snippet list" "${scratch}/ebpf-readme"
+
 echo "== Dependabot owner drift =="
 cp "${DEPENDABOT}" "${scratch}/dependabot.yml"
 mutate_once \
