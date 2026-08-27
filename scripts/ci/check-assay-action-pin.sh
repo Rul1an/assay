@@ -83,7 +83,7 @@ SKIP_PATHS = frozenset(
 SCAN_SUFFIXES = {".md", ".yml", ".yaml", ".rs"}
 DOC_FLOATING = "Rul1an/assay-action@v3"
 FENCE = re.compile(
-    r"^[ \t]*(?P<fence>`{3,}|~{3,})(?P<lang>ya?ml)[^\n]*\n(?P<body>.*?)^[ \t]*(?P=fence)",
+    r"^[ \t]*(?P<fence>(?P<mark>`|~)(?P=mark){2,})(?P<lang>ya?ml)[^\n]*\n(?P<body>.*?)^[ \t]*(?P=fence)(?P=mark)*[ \t]*$",
     re.IGNORECASE | re.MULTILINE | re.DOTALL,
 )
 RAW_STRING = re.compile(r'r#"(.*?)"#', re.DOTALL)
@@ -345,8 +345,17 @@ def walk_unlisted() -> None:
             text = decode_utf8(path, data)
             if "assay-action" not in text.casefold():
                 continue
-            for doc in parsed_docs(path, text):
-                for ref, _with_value in iter_steps(doc):
+            for source, body, required in yaml_texts(path, text):
+                loaded = load_yaml(body, source=source, required=False)
+                if loaded is None:
+                    if (
+                        required
+                        and "uses:" in body
+                        and "rul1an/assay-action@" in body.casefold()
+                    ):
+                        fail(f"{rel}: assay-action uses is not on the owner snippet list")
+                    continue
+                for ref, _with_value in iter_steps(loaded):
                     if is_active_consumer_ref(ref):
                         fail(f"{rel}: assay-action uses is not on the owner snippet list")
 

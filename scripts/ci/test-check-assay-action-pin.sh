@@ -502,6 +502,32 @@ steps:
 MD
 expect_fail "listed-tilde-fence-undeclared-input" "undeclared input 'undeclared_tilde_input'" "${scratch}/listed-tilde-input"
 
+echo "== unlisted tilde content line is not a closing fence =="
+copy_into "${scratch}/unlisted-tilde-prefix"
+mkdir -p "${scratch}/unlisted-tilde-prefix/docs/getting-started"
+cat >"${scratch}/unlisted-tilde-prefix/docs/getting-started/prefix-close.md" <<'MD'
+~~~yaml
+~~~not-a-close
+steps:
+  - uses: Rul1an/assay-action@v3
+    with:
+      evidence_mode: required
+~~~
+MD
+expect_fail "unlisted-tilde-prefix-not-close" "is not on the owner snippet list" "${scratch}/unlisted-tilde-prefix"
+
+echo "== listed tilde longer closing run remains accepted =="
+copy_into "${scratch}/listed-tilde-longer"
+cat >"${scratch}/listed-tilde-longer/docs/guides/github-action.md" <<'MD'
+~~~yaml
+steps:
+  - uses: Rul1an/assay-action@v3
+    with:
+      evidence_mode: required
+~~~~
+MD
+expect_ok "listed-tilde-longer-close-accepted" run_checker_at "${scratch}/listed-tilde-longer"
+
 echo "== unlisted oversize file with snippet after 1 MiB =="
 copy_into "${scratch}/oversize"
 mkdir -p "${scratch}/oversize/docs/getting-started"
