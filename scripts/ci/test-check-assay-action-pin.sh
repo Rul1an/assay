@@ -440,6 +440,68 @@ printf '%s\n' '- uses: Rul1an/assay-action@v3' \
   >"${scratch}/unlisted/docs/getting-started/installation.md"
 expect_fail "unlisted-snippet-file" "is not on the owner snippet list" "${scratch}/unlisted"
 
+echo "== unlisted tilde-fence YAML snippet is inventoried =="
+copy_into "${scratch}/unlisted-tilde"
+mkdir -p "${scratch}/unlisted-tilde/docs/getting-started"
+cat >"${scratch}/unlisted-tilde/docs/getting-started/tilde-fence.md" <<'MD'
+~~~yaml
+steps:
+  - uses: Rul1an/assay-action@v3
+    with:
+      evidence_mode: required
+~~~
+MD
+expect_fail "unlisted-tilde-fence" "is not on the owner snippet list" "${scratch}/unlisted-tilde"
+
+echo "== listed tilde-fence YAML snippets remain accepted =="
+copy_into "${scratch}/listed-tilde"
+python3 - "${scratch}/listed-tilde/docs/guides/github-action.md" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+open_fence = re.compile(r"^[ \t]*```(ya?ml)[^\n`]*$", re.IGNORECASE | re.MULTILINE)
+close_fence = re.compile(r"^[ \t]*```[ \t]*$", re.MULTILINE)
+out = []
+index = 0
+converted = 0
+while True:
+    match = open_fence.search(text, index)
+    if match is None:
+        out.append(text[index:])
+        break
+    closer = close_fence.search(text, match.end())
+    if closer is None:
+        raise SystemExit("listed yaml fence is unclosed")
+    out.append(text[index:match.start()])
+    out.append(match.group(0).replace("```", "~~~", 1))
+    out.append(text[match.end() : closer.start()])
+    out.append(closer.group(0).replace("```", "~~~", 1))
+    index = closer.end()
+    converted += 1
+if converted < 1:
+    raise SystemExit("listed tilde conversion found no yaml fences")
+path.write_text("".join(out), encoding="utf-8")
+if "```yaml" in path.read_text(encoding="utf-8"):
+    raise SystemExit("listed tilde conversion left a backtick yaml fence")
+PY
+expect_ok "listed-tilde-fence-accepted" run_checker_at "${scratch}/listed-tilde"
+
+echo "== listed tilde-fence YAML snippet still checks with: inputs =="
+copy_into "${scratch}/listed-tilde-input"
+cat >"${scratch}/listed-tilde-input/docs/guides/github-action.md" <<'MD'
+~~~yaml
+steps:
+  - uses: Rul1an/assay-action@v3
+    with:
+      evidence_mode: required
+      undeclared_tilde_input: true
+~~~
+MD
+expect_fail "listed-tilde-fence-undeclared-input" "undeclared input 'undeclared_tilde_input'" "${scratch}/listed-tilde-input"
+
 echo "== unlisted oversize file with snippet after 1 MiB =="
 copy_into "${scratch}/oversize"
 mkdir -p "${scratch}/oversize/docs/getting-started"

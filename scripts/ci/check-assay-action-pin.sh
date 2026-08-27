@@ -83,7 +83,7 @@ SKIP_PATHS = frozenset(
 SCAN_SUFFIXES = {".md", ".yml", ".yaml", ".rs"}
 DOC_FLOATING = "Rul1an/assay-action@v3"
 FENCE = re.compile(
-    r"^[ \t]*```(?P<lang>ya?ml)[^\n`]*\n(?P<body>.*?)^[ \t]*```",
+    r"^[ \t]*(?P<fence>`{3,}|~{3,})(?P<lang>ya?ml)[^\n]*\n(?P<body>.*?)^[ \t]*(?P=fence)",
     re.IGNORECASE | re.MULTILINE | re.DOTALL,
 )
 RAW_STRING = re.compile(r'r#"(.*?)"#', re.DOTALL)
