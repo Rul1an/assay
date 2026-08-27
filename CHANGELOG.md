@@ -43,6 +43,15 @@ All notable changes to this project will be documented in this file.
   (#2649).
 
 ### Added
+- `assay mcp manifest candidate --from-observed ... --out ...` exports a
+  deterministic, non-approved review candidate only from a complete,
+  unambiguous `assay.mcp_manifest_observed.v0` artifact. `assay mcp manifest
+  promote --candidate ... --source ... --out ...` rereads the exact observed
+  bytes, reconstructs and compares every candidate field, then creates a new
+  strict declared-v0 baseline without overwriting an existing file. A
+  candidate is not approval, provenance, a safety verdict, or proof that an
+  operator understood the change (#2655).
+
 - `assay policy resolve --input PATH --format json` emits one
   `assay.policy.resolved.v0` document after the same load and schema-compile
   path as `assay policy validate`. The whole-policy digest is
@@ -125,6 +134,12 @@ All notable changes to this project will be documented in this file.
   revision (#2482).
 
 ### Changed
+- Observed, candidate, and declared MCP manifest files now share one inclusive
+  1 MiB read and write ceiling. Existing `--declared-mcp-manifest` startup is
+  therefore stricter: a file above that limit is refused instead of being
+  materialized and parsed. Duplicate JSON members and unknown
+  `field_digests` keys are also refused through the shared strict loader
+  (#2655).
 - One strict bounded loader now reads every hostile JSON input in the conformance corpus.
   `strict_json.load_strict_object` calls the existing regular-file reader and JSON parser and
   adds the two bounds they did not carry: nesting depth, scanned before `json.loads` sees the

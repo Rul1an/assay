@@ -26,11 +26,9 @@ pub enum ObservedToolDigest {
 /// is a STARTUP failure (non-zero exit), never a runtime deny: in enforcing mode an approval baseline
 /// is required, and a proxy that would forward privileged calls without a valid baseline must not start.
 ///
-/// The validation itself is `crate::declared_manifest::parse_declared_manifest`; this function adds
-/// only the file read and the caller-facing flag name.
+/// The bounded read and validation live in `crate::declared_manifest::load_declared_manifest`;
+/// this function adds only the caller-facing flag name.
 pub fn load_declared_manifest(path: &Path) -> Result<DeclaredManifest> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("reading --declared-mcp-manifest {}", path.display()))?;
-    assay_mcp_server::declared_manifest::parse_declared_manifest(&text)
+    assay_mcp_server::declared_manifest::load_declared_manifest(path)
         .with_context(|| format!("--declared-mcp-manifest {}", path.display()))
 }

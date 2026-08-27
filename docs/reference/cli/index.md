@@ -137,6 +137,10 @@ assay mcp wrap --policy assay.yaml --dry-run -- <real-mcp-command> [args...]
 # Discover local MCP servers
 assay mcp discover --format json
 
+# Review and explicitly promote one complete observed tool manifest
+assay mcp manifest candidate --from-observed observed.json --out candidate.json
+assay mcp manifest promote --candidate candidate.json --source observed.json --out declared.json
+
 # Sign or verify MCP tool definitions
 assay mcp tool sign tool.json --key private.pem --out signed.json
 ```
