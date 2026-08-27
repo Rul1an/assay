@@ -605,6 +605,8 @@ fn manifest_promotion_outputs_are_cli_documents() {
     let documents = document_rows();
     let non_documents = non_document_rows();
 
+    const WRITER: &str = "crates/assay-mcp-server/src/manifest_promotion.rs";
+
     for identity in [
         "assay.mcp_manifest_candidate.v0",
         "assay.declared_mcp_manifest.v0",
@@ -616,6 +618,11 @@ fn manifest_promotion_outputs_are_cli_documents() {
         assert!(
             !non_documents.contains_key(identity),
             "{identity} cannot also be classified as a non-document"
+        );
+        assert_eq!(
+            documents.get(identity).map(|(writer, _)| writer.as_str()),
+            Some(WRITER),
+            "{identity} must name the module that serializes and creates the document, not the CLI dispatcher"
         );
     }
 }

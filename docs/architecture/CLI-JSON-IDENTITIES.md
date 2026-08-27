@@ -59,8 +59,8 @@ assay.init_report.v0 | crates/assay-cli/src/cli/commands/init_report.rs | -
 assay.mcp.execution-record-pairing.report.v0 | crates/assay-cli/src/cli/commands/evidence/mcp_execution_records.rs | -
 assay.mcp.execution-record-supersession.report.v0 | crates/assay-cli/src/cli/commands/evidence/mcp_supersession.rs | -
 assay.mcp.tunnel-observed.report.v0 | crates/assay-cli/src/cli/commands/evidence/mcp_tunnel_observed.rs | -
-assay.declared_mcp_manifest.v0 | crates/assay-cli/src/cli/commands/mcp.rs | crates/assay-mcp-server/src/declared_manifest.rs
-assay.mcp_manifest_candidate.v0 | crates/assay-cli/src/cli/commands/mcp.rs | crates/assay-mcp-server/src/manifest_promotion.rs
+assay.declared_mcp_manifest.v0 | crates/assay-mcp-server/src/manifest_promotion.rs | crates/assay-mcp-server/src/declared_manifest.rs
+assay.mcp_manifest_candidate.v0 | crates/assay-mcp-server/src/manifest_promotion.rs | crates/assay-mcp-server/src/manifest_promotion.rs
 assay.mcp_preflight.v0 | crates/assay-cli/src/cli/commands/mcp/preflight.rs | -
 assay.mcp_server_inventory.v0 | crates/assay-cli/src/cli/commands/inventory.rs | crates/assay-core/src/discovery/inventory_carrier.rs
 assay.monitor.observed_peers.v0 | crates/assay-cli/src/cli/commands/monitor_next/observed_peers.rs | -
