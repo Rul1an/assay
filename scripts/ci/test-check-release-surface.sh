@@ -10,7 +10,8 @@ trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/scripts/ci" "$TMP/.github" "$TMP/docs/getting-started" "$TMP/docs/reference/cli" \
   "$TMP/docs/python-sdk" "$TMP/docs/use-cases" "$TMP/docs/AIcontext" "$TMP/docs/guides" \
-  "$TMP/examples/mcp-quickstart" "$TMP/crates/assay-x" "$TMP/bin"
+  "$TMP/examples/mcp-quickstart" "$TMP/crates/assay-x" "$TMP/bin" "$TMP/.devcontainer" \
+  "$TMP/demo"
 cp "$ROOT/scripts/ci/check-release-surface.sh" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/read-assay-release-tag.sh" "$TMP/scripts/ci/"
 cp "$ROOT/.pre-commit-config.yaml" "$TMP/"
@@ -97,10 +98,16 @@ For v5.4.0, run this from a source checkout. Published CLI archives do not carry
 DOC
 printf '%s\n' 'Current release: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0)' > "$TMP/docs/index.md"
 printf '%s\n' 'Codex uses .codex/config.toml.' > "$TMP/docs/guides/editor-mcp-recipe.md"
+printf '%s\n' 'Docs: https://docs.getassay.dev' > "$TMP/.devcontainer/welcome.sh"
+cat > "$TMP/demo/CODESPACES-PLAYBOOK.md" <<'DOC'
+Docs: https://docs.getassay.dev
+curl -fsSL https://getassay.dev/install.sh | sh
+DOC
 (
   cd "$TMP"
   git init -q
-  git add -- .github/assay-release-tag Cargo.toml Cargo.lock crates docs examples scripts
+  git add -- .github/assay-release-tag Cargo.toml Cargo.lock crates docs examples scripts \
+    .devcontainer demo
 )
 
 run_check() {
@@ -128,6 +135,8 @@ for path in (
     "docs/getting-started/ci-integration.md",
     "docs/use-cases/air-gapped.md",
     "docs/use-cases/ci-gate.md",
+    ".devcontainer/welcome.sh",
+    "demo/CODESPACES-PLAYBOOK.md",
 ):
     if not pattern.search(path):
         raise SystemExit(f"release-surface hook omits {path}")
@@ -340,8 +349,15 @@ echo "PASS: duplicate-release"
 mutate_and_expect_failure stale-cli-version docs/reference/cli/index.md \
   's/# assay 5.1.0/# assay 5.0.0/' 'documented CLI version drift'
 
-if [ "$mutation_count" -ne 47 ]; then
-  echo "FAIL: expected 47 release-surface mutations, observed $mutation_count" >&2
+mutate_and_expect_failure stale-devcontainer-host .devcontainer/welcome.sh \
+  's#https://docs.getassay.dev#https://assay.dev/docs#' \
+  'unrelated assay.dev onboarding URL'
+mutate_and_expect_failure stale-codespaces-host demo/CODESPACES-PLAYBOOK.md \
+  's#https://getassay.dev/install.sh#https://assay.dev/install.sh#' \
+  'unrelated assay.dev onboarding URL'
+
+if [ "$mutation_count" -ne 49 ]; then
+  echo "FAIL: expected 49 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

@@ -8,19 +8,7 @@ pub fn cmd_init_ci(args: InitCiArgs) -> anyhow::Result<i32> {
             crate::templates::CI_WORKFLOW_YML,
             ".github/workflows/assay.yml",
         ),
-        "gitlab" => (
-            r#"stages:
-  - test
-
-assay-check:
-  stage: test
-  image: ubuntu:latest
-  script:
-    - curl -sSL https://assay.dev/install.sh | sh
-    - assay validate --config assay.yaml --trace-file traces.jsonl
-"#,
-            ".gitlab-ci.yml",
-        ),
+        "gitlab" => (crate::templates::GITLAB_CI_YML, ".gitlab-ci.yml"),
         _ => anyhow::bail!(
             "Unknown provider: {}. Supported: github, gitlab",
             args.provider
