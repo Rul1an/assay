@@ -549,6 +549,8 @@ case "$MODE" in
       fail "tmp prefix sibling owned without RUNNER_TEMP: $sib3"
     fi
     rm -rf "$sib" "$rt" "$sib3"
+    remove_owned_workdir "$WORKDIR"
+    [[ ! -e "$assigned" ]] || fail "assigned WORKDIR leftover $assigned"
     WORKDIR=""
     echo "ok: cleanup-collision-selftest" ;;
   cleanup-busy-leaf-selftest)

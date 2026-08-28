@@ -767,6 +767,43 @@ mc2_ec=$?
 set -e
 [[ "$mc_ec" -eq 0 ]] || fail "comment-only mutant failed collision err=$(cat "$tmp/mut-c.err")"
 [[ "$mc2_ec" -eq 0 ]] || fail "comment-only mutant failed busy-leaf err=$(cat "$tmp/mut-c2.err")"
+
+python3 - "$DRIVER" "$tmp/mut-collision-remove.sh" <<'MUT5'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = '    remove_owned_workdir "$WORKDIR"\n    [[ ! -e "$assigned" ]] || fail "assigned WORKDIR leftover $assigned"\n'
+new = '    [[ ! -e "$assigned" ]] || fail "assigned WORKDIR leftover $assigned"\n'
+if old not in text:
+    raise SystemExit("collision production remove missing")
+dst.write_text(text.replace(old, new, 1))
+MUT5
+set +e
+run_bounded 12 bash "$tmp/mut-collision-remove.sh" cleanup-collision-selftest >"$tmp/mut-crem.out" 2>"$tmp/mut-crem.err"
+mcr_ec=$?
+set -e
+[[ "$mcr_ec" -ne 0 ]] || fail "bypassing collision assigned cleanup left selftest green"
+if grep -q 'ok: cleanup-collision-selftest' "$tmp/mut-crem.out"; then
+  fail "assigned-cleanup mutant printed collision ok"
+fi
+
+python3 - "$DRIVER" "$tmp/mut-collision-comment.sh" <<'MUT6'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = '    remove_owned_workdir "$WORKDIR"\n'
+new = '    # comment-only: keep production assigned cleanup\n    remove_owned_workdir "$WORKDIR"\n'
+if old not in text:
+    raise SystemExit("collision production remove missing")
+dst.write_text(text.replace(old, new, 1))
+MUT6
+set +e
+run_bounded 12 bash "$tmp/mut-collision-comment.sh" cleanup-collision-selftest >"$tmp/mut-cc.out" 2>"$tmp/mut-cc.err"
+mcc_ec=$?
+set -e
+[[ "$mcc_ec" -eq 0 ]] || fail "comment-only assigned-cleanup mutant failed err=$(cat "$tmp/mut-cc.err")"
 echo "ok: s1b cleanup ownership mutations"
 
 wf="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/monitor-attach-smoke.yml"
