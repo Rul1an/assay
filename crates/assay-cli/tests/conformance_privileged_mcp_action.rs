@@ -156,6 +156,10 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// Corpus: committed `conformance/privileged-mcp-action-v0/vectors/` (byte-identical
 /// to that commit). Digest is SHA-256 of raw stdout with no trailing-newline strip.
 /// Three unique forms: ok-001; shared ok-002/003/004; ok-005.
+///
+/// After #2574 the live report gained additive `profile_selection` /
+/// `input_profile` / `input_profile_status` members. Those members stay outside
+/// this pin: compare the projection with them removed, not a post-change hash.
 fn prechange_success_stdout_pin(id: &str) -> (usize, &'static str) {
     match id {
         "ok-001-deny-bound-observation" => (
@@ -174,6 +178,42 @@ fn prechange_success_stdout_pin(id: &str) -> (usize, &'static str) {
         ),
         other => panic!("no pre-change stdout pin for {other}"),
     }
+}
+
+const ADDITIVE_PROJECTION_MEMBERS: [&str; 3] =
+    ["profile_selection", "input_profile", "input_profile_status"];
+
+fn stdout_without_additive_projection(stdout: &[u8]) -> Vec<u8> {
+    let report: Value = serde_json::from_slice(stdout).expect("success stdout JSON");
+    let obj = report.as_object().expect("success stdout JSON object");
+    for key in ADDITIVE_PROJECTION_MEMBERS {
+        assert!(
+            obj.contains_key(key),
+            "additive member {key} must be present before the pre-change comparison"
+        );
+    }
+    // Pre-change Report field order, before the three additive members existed.
+    // Map::remove is swap-remove and cannot be used to recover that surface.
+    let mut projected = serde_json::Map::new();
+    for key in [
+        "schema",
+        "profile",
+        "bundle_integrity",
+        "verdict",
+        "claims",
+        "findings",
+        "non_claims",
+        "reason_code",
+        "next_step",
+    ] {
+        if let Some(value) = obj.get(key) {
+            projected.insert(key.to_string(), value.clone());
+        }
+    }
+    let mut out =
+        serde_json::to_vec_pretty(&Value::Object(projected)).expect("re-serialize stripped report");
+    out.push(b'\n');
+    out
 }
 
 #[test]
@@ -294,12 +334,17 @@ fn success_json_stdout_is_byte_identical_to_prechange() {
         let bundle = corpus.join(format!("vectors/{id}.bundle.tar.gz"));
         let (stdout, exit_code) = verify_raw(&bundle);
         assert_eq!(exit_code, 0, "{id}: success exits 0");
+        let comparable = stdout_without_additive_projection(&stdout);
         let (len, digest) = prechange_success_stdout_pin(id);
-        assert_eq!(stdout.len(), len, "{id}: raw stdout length vs pre-change");
         assert_eq!(
-            sha256_hex(&stdout),
+            comparable.len(),
+            len,
+            "{id}: stripped stdout length vs pre-change"
+        );
+        assert_eq!(
+            sha256_hex(&comparable),
             digest,
-            "{id}: raw stdout sha256 vs pre-change"
+            "{id}: stripped stdout sha256 vs pre-change"
         );
     }
 }

@@ -182,6 +182,49 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("duplicate JSON object key: run_id", result.stderr)
 
+    def test_profile_readers_pin_policy_links_and_both_versions(self) -> None:
+        manifest = json.loads(
+            (REPO_ROOT / "docs/data/product-capabilities.v0.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        capabilities = {entry["id"]: entry for entry in manifest["capabilities"]}
+        capability = capabilities["privileged-mcp-action-profile-readers"]
+        claim = capability["claims"][0]
+        compatibility = (
+            REPO_ROOT / "docs/profiles/compatibility.md"
+        ).read_text(encoding="utf-8")
+        v0 = (
+            REPO_ROOT / "docs/profiles/privileged-mcp-action/v0.md"
+        ).read_text(encoding="utf-8")
+        v1 = (
+            REPO_ROOT / "docs/profiles/privileged-mcp-action/v1.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertEqual(capability["maturity"], "verifier-only")
+        self.assertEqual(capability["introduced_release"], "5.4.0")
+        self.assertIsNone(capability["target_release"])
+        self.assertEqual(capability["enforcement_points"], ["cli"])
+        self.assertEqual(
+            capability["profile_versions"],
+            [
+                {"profile": "privileged-mcp-action", "version": "v0"},
+                {"profile": "privileged-mcp-action", "version": "v1"},
+            ],
+        )
+        self.assertNotIn("proofs", claim)
+        self.assertEqual(claim["gap"], {"issue": "2574"})
+        self.assertIn("[`../compatibility.md`](../compatibility.md)", v0)
+        self.assertIn("[`../compatibility.md`](../compatibility.md)", v1)
+        self.assertIn("`CHANGELOG.md` is the single announcement surface", compatibility)
+        self.assertIn(
+            "Announcement and removal MUST NOT be in the same release",
+            compatibility,
+        )
+        self.assertIn("#2487", compatibility)
+        self.assertNotRegex(compatibility, r"current\s*\+\s*previous")
+        self.assertNotRegex(compatibility, r"(?i)calendar (year|month|quarter|window)")
+
     def test_published_mcp_capabilities_list_all_shipped_protocol_versions(self) -> None:
         manifest = json.loads(
             (REPO_ROOT / "docs/data/product-capabilities.v0.json").read_text(

@@ -143,6 +143,44 @@
           ]
         }
       ]
+    },
+    {
+      "id": "privileged-mcp-action-profile-readers",
+      "label": "Privileged MCP action profile readers",
+      "summary": "Released 5.4 admits privileged-mcp-action/v0 and privileged-mcp-action/v1 as selected interpreters. Default selection is v0; v1 requires --profile-version v1. This is reader admission only.",
+      "maturity": "verifier-only",
+      "introduced_release": "5.4.0",
+      "target_release": null,
+      "protocol_versions": [],
+      "profile_versions": [
+        {"profile": "privileged-mcp-action", "version": "v0"},
+        {"profile": "privileged-mcp-action", "version": "v1"}
+      ],
+      "platforms": [
+        "darwin-aarch64",
+        "darwin-x86_64",
+        "linux-aarch64",
+        "linux-x86_64",
+        "windows-x86_64"
+      ],
+      "enforcement_points": ["cli"],
+      "limitations": [
+        "Reader admission is supported only where a release test exercises that reader.",
+        "This row is reader-admission vocabulary, not a published-archive or golden-path proof."
+      ],
+      "non_claims": [
+        "Does not claim producer input identity, producer identity, producer release, migration, upgrade, rollback, or autodetect.",
+        "Does not promise a rolling pair of releases or support by date.",
+        "Unexercised historical readers are unsupported.",
+        "Upgrade and rollback remain issue 2487."
+      ],
+      "claims": [
+        {
+          "id": "privileged-mcp-action-v0-v1-reader-admission",
+          "axis": "observation",
+          "gap": {"issue": "2574"}
+        }
+      ]
     }
   ]
 }

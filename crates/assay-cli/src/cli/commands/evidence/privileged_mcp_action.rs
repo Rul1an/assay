@@ -1,12 +1,12 @@
 //! EXPERIMENTAL: import privileged-mcp-action producer NDJSON records into one evidence bundle.
 //!
-//! Inputs are the shipped enforcing-proxy carriers of the `privileged-mcp-action/v0` open profile:
-//! `assay.enforcement_decision.v0` records (required file), plus optional
-//! `assay.denied_call_observation.v0` and `assay.manifest_establish.v0` files. Every record is
-//! wrapped byte-faithful as an evidence event whose type is the record's own `schema` member. The
-//! importer deliberately enforces NO profile semantics (cardinality, vocabularies, binding): those
-//! belong to the separate `evidence verify-privileged-mcp-action` verifier, and the conformance
-//! corpus requires that semantically invalid bundles (for example two decisions) stay producible.
+//! Inputs are the shipped enforcing-proxy carriers: `assay.enforcement_decision.v0` records
+//! (required file), plus optional denied-observation and `assay.manifest_establish.v0` files.
+//! Every record is wrapped byte-faithful as an evidence event whose type is the record's own
+//! `schema` member. The importer is profile-agnostic: it does not select a profile version, does
+//! not autodetect one, and does not stamp a profile id onto the bundle. Cardinality, vocabularies,
+//! and binding belong to `evidence verify-privileged-mcp-action`. The conformance corpus requires
+//! that semantically invalid bundles (for example two decisions) stay producible.
 
 use crate::exit_codes;
 use anyhow::{bail, Context, Result};
@@ -30,7 +30,7 @@ pub struct PrivilegedMcpActionArgs {
     #[arg(long, value_name = "PATH")]
     pub decisions: PathBuf,
 
-    /// Optional NDJSON file of assay.denied_call_observation.v0 records
+    /// Optional NDJSON file of denied-call observation records (byte-faithful)
     #[arg(long, value_name = "PATH")]
     pub denied_observations: Option<PathBuf>,
 
@@ -322,6 +322,9 @@ mod tests {
         json!({
             "schema": "assay.privileged_mcp_action.verify.report.v0",
             "profile": "privileged-mcp-action/v0",
+            "profile_selection": "default",
+            "input_profile": null,
+            "input_profile_status": "undeclared_legacy",
             "bundle_integrity": "pass",
             "verdict": "valid",
             "claims": {
