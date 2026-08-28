@@ -16,11 +16,13 @@
 ### 2. Discord (Secondary)
 **Purpose:** Real-time chat, "watercooler", community bonding, rapid debugging.
 **Why:** High engagement, lower barrier to entry for casual chat.
+**Join:** [Assay on Discord](https://discord.gg/sK5U8VfSHV).
 **Channels:**
 - `#announcements` (Read-only, release notes)
 - `#general` (Chat)
-- `#support` (Community help)
-- `#contributing` (Dev coordination)
+- `#help-and-feedback` (Forum for setup, bugs, MCP, docs, and CI)
+- `#showcase` (Workflows and results)
+- `#contributors` (Code, docs, and test coordination)
 
 ## Governance
 

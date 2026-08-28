@@ -29,8 +29,16 @@ DOC
 cat > "$TMP/docs/COMMUNITY.md" <<'DOC'
 # Community Strategy
 
+Join the Assay Discord: https://discord.gg/sK5U8VfSHV
+
 For project or Discord conduct reports, send a private DM to an Assay maintainer in Discord.
 DOC
+cat > "$TMP/mkdocs.yml" <<'YAML'
+extra:
+  social:
+    - icon: fontawesome/brands/discord
+      link: https://discord.gg/sK5U8VfSHV
+YAML
 cat > "$TMP/Cargo.toml" <<'TOML'
 [workspace]
 members = ["crates/assay-x"]
@@ -146,6 +154,7 @@ for path in (
     "docs/use-cases/ci-gate.md",
     "SECURITY.md",
     "docs/COMMUNITY.md",
+    "mkdocs.yml",
 ):
     if not pattern.search(path):
         raise SystemExit(f"release-surface hook omits {path}")
@@ -166,6 +175,25 @@ mutate_and_expect_failure() {
   cp "$original" "$backup"
   sed -i.bak -e "$sed_expr" "$original"
   rm -f "$original.bak"
+  if run_check >"$TMP/$name.out" 2>&1; then
+    echo "FAIL: mutation $name was not observed" >&2
+    exit 1
+  fi
+  grep -Fq "$diagnostic" "$TMP/$name.out" || {
+    echo "FAIL: mutation $name missed diagnostic: $diagnostic" >&2
+    cat "$TMP/$name.out" >&2
+    exit 1
+  }
+  mv "$backup" "$original"
+  mutation_count=$((mutation_count + 1))
+  echo "PASS: $name"
+}
+
+append_and_expect_failure() {
+  local name="$1" file="$2" line="$3" diagnostic="$4"
+  local original="$TMP/$file" backup="$TMP/$file.$name"
+  cp "$original" "$backup"
+  printf '\n%s\n' "$line" >> "$original"
   if run_check >"$TMP/$name.out" 2>&1; then
     echo "FAIL: mutation $name was not observed" >&2
     exit 1
@@ -267,9 +295,18 @@ mutate_and_expect_failure missing-security-report-route SECURITY.md \
 mutate_and_expect_failure missing-project-conduct-route docs/COMMUNITY.md \
   's/send a private DM to an Assay maintainer in Discord/use the platform abuse form/' \
   'community policy must retain a project-operated conduct route'
-mutate_and_expect_failure stale-security-supported-line SECURITY.md \
-  's/Assay supports the current published release, \*\*v5.1.0\*\*\./| **v2.x** | Supported |/' \
-  'supported release must match v5.1.0'
+mutate_and_expect_failure stale-discord-vanity mkdocs.yml \
+  's#https://discord.gg/sK5U8VfSHV#https://discord.gg/assay#' \
+  'Discord invite drift'
+mutate_and_expect_failure missing-community-discord-invite docs/COMMUNITY.md \
+  's#Join the Assay Discord: https://discord.gg/sK5U8VfSHV#Discord is secondary.#' \
+  'Discord invite drift'
+mutate_and_expect_failure mismatched-community-discord-invite docs/COMMUNITY.md \
+  's#https://discord.gg/sK5U8VfSHV#https://discord.gg/not-assay#' \
+  'Discord invite drift'
+append_and_expect_failure stale-security-supported-line SECURITY.md \
+  '| **v2.x** | Supported |' \
+  'historical support-table row'
 mutate_and_expect_failure extracted-archive-claim examples/mcp-quickstart/README.md \
   's/run this from a source checkout/run this from the root of an extracted CLI release archive/' \
   'quickstart must not claim assets exist in published CLI archives'
@@ -333,6 +370,28 @@ mv "$selector_backup" "$TMP/.pre-commit-config.yaml"
 mutation_count=$((mutation_count + 1))
 echo "PASS: release-surface selector covers ci-gate"
 
+selector_backup="$TMP/.pre-commit-config.yaml.mkdocs-selector"
+cp "$TMP/.pre-commit-config.yaml" "$selector_backup"
+python3 - "$TMP/.pre-commit-config.yaml" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = "|mkdocs\\.yml"
+if text.count(old) != 1:
+    raise SystemExit(f"expected one mkdocs selector, found {text.count(old)}")
+path.write_text(text.replace(old, "", 1), encoding="utf-8")
+PY
+if check_release_hook_selector >"$TMP/mkdocs-selector.out" 2>&1; then
+  echo "FAIL: release-surface mkdocs selector mutation was not observed" >&2
+  exit 1
+fi
+grep -Fq 'release-surface hook omits mkdocs.yml' "$TMP/mkdocs-selector.out"
+mv "$selector_backup" "$TMP/.pre-commit-config.yaml"
+mutation_count=$((mutation_count + 1))
+echo "PASS: release-surface selector covers mkdocs"
+
 for row in \
   'README.md|stale-version-readme' \
   'docs/getting-started/index.md|stale-version-getting-started' \
@@ -373,8 +432,8 @@ echo "PASS: duplicate-release"
 mutate_and_expect_failure stale-cli-version docs/reference/cli/index.md \
   's/# assay 5.1.0/# assay 5.0.0/' 'documented CLI version drift'
 
-if [ "$mutation_count" -ne 52 ]; then
-  echo "FAIL: expected 52 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 56 ]; then
+  echo "FAIL: expected 56 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"
