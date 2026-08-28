@@ -757,6 +757,61 @@ assert_tracks_gone "$tmp/inherit.out"
 rm -rf "$inherit"
 [[ ! -e "$inherit" ]] || fail "inherit fixture leftover $inherit"
 
+run_rebind_selftest() {
+  local driver="$1" out="$2" err="$3"
+  local foreign harness report
+  foreign=$(mktemp -d /tmp/ruley-rebind-foreign-XXXXXX)
+  printf 'keep\n' >"$foreign/keep"
+  report=$(mktemp /tmp/ruley-rebind-report-XXXXXX)
+  harness=$(mktemp /tmp/ruley-rebind-harness-XXXXXX)
+  cat >"$harness" <<'HARNESS'
+#!/usr/bin/env bash
+set -euo pipefail
+fifo=${1:?}
+wd=$(dirname "$fifo")
+leak=$(mktemp -d /tmp/ruley-rebind-leak-XXXXXX)
+rmdir "$leak"
+mv "$wd" "$leak"
+mv "$S1B_REBIND_FOREIGN" "$wd"
+printf 'LEAKED=%s\n' "$leak" >"${S1B_REBIND_REPORT:?}"
+HARNESS
+  chmod +x "$harness"
+  set +e
+  S1B_REBIND_FOREIGN=$foreign S1B_REBIND_REPORT=$report \
+    HARNESS_BIN=$harness run_bounded 12 bash "$driver" cleanup-rebind-selftest \
+    >"$out" 2>"$err"
+  local ec=$?
+  set -e
+  printf '%s\n' "$ec" >"${out}.ec"
+  printf '%s\n' "$foreign" >"${out}.foreign"
+  if [[ -s "$report" ]]; then
+    cat "$report" >"${out}.report"
+  fi
+  rm -f "$harness" "$report"
+}
+
+run_rebind_selftest "$DRIVER" "$tmp/rebind.out" "$tmp/rebind.err"
+rebind_ec=$(cat "$tmp/rebind.out.ec")
+rebind_foreign=$(cat "$tmp/rebind.out.foreign")
+rebind_created=$(sed -n 's/^CREATED=//p' "$tmp/rebind.out" | head -1)
+rebind_leaked=$(sed -n 's/^LEAKED=//p' "$tmp/rebind.out.report" 2>/dev/null | head -1)
+[[ -n "$rebind_created" ]] || fail "rebind selftest did not report CREATED"
+[[ -n "$rebind_leaked" ]] || fail "rebind harness did not report LEAKED"
+[[ "$rebind_ec" -ne 0 ]] || fail "rebind selftest stayed 0 after pathname swap"
+grep -q 'ok: cleanup-rebind-selftest about to exit 0' "$tmp/rebind.out" \
+  || fail "rebind selftest missing ok line"
+grep -Fq 'FAIL: WORKDIR pathname does not name the owned object:' "$tmp/rebind.err" \
+  || fail "rebind must diagnose pathname/object mismatch: $(cat "$tmp/rebind.err")"
+[[ -f "$rebind_created/keep" ]] || fail "rebind deleted foreign keep at $rebind_created"
+[[ ! -e "$rebind_created/owned-marker" && ! -e "$rebind_leaked/owned-marker" ]] \
+  || fail "rebind left created contents: created=$rebind_created leaked=$rebind_leaked"
+# bounded residue: empty renamed object + foreign now at the recorded pathname
+rm -rf "$rebind_leaked" "$rebind_created" "$rebind_foreign"
+[[ ! -e "$rebind_foreign" ]] || fail "rebind foreign leftover $rebind_foreign"
+[[ ! -e "$rebind_leaked" ]] || fail "rebind leak leftover $rebind_leaked"
+[[ ! -e "$rebind_created" ]] || fail "rebind created-path leftover $rebind_created"
+assert_tracks_gone "$tmp/rebind.out"
+
 python3 - "$DRIVER" "$tmp/mut-prefix.sh" <<'MUT1'
 from pathlib import Path
 import sys
@@ -1047,6 +1102,139 @@ set -e
 [[ -f "$inherit3/keep" ]] || fail "comment-only wipe mutant swept inherited $inherit3"
 rm -rf "$inherit3"
 assert_tracks_gone "$tmp/mut-f.out"
+
+python3 - "$DRIVER" "$tmp/mut-rebind-rmrf.sh" <<'MUTG'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = "  find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +\n"
+new = "  rm -rf \"$wd\"\n  find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +\n"
+if old not in text:
+    raise SystemExit("object-anchored find missing")
+dst.write_text(text.replace(old, new, 1))
+MUTG
+run_rebind_selftest "$tmp/mut-rebind-rmrf.sh" "$tmp/mut-g.out" "$tmp/mut-g.err"
+mg_foreign=$(cat "$tmp/mut-g.out.foreign")
+mg_created=$(sed -n 's/^CREATED=//p' "$tmp/mut-g.out" | head -1)
+mg_leaked=$(sed -n 's/^LEAKED=//p' "$tmp/mut-g.out.report" 2>/dev/null | head -1)
+if [[ -n "$mg_created" && -f "$mg_created/keep" ]]; then
+  rm -rf "$mg_foreign" "$mg_created" ${mg_leaked:+"$mg_leaked"}
+  fail "pathname rm -rf fallback left rebind-selftest green"
+fi
+rm -rf "$mg_foreign" ${mg_created:+"$mg_created"} ${mg_leaked:+"$mg_leaked"}
+assert_tracks_gone "$tmp/mut-g.out"
+
+python3 - "$DRIVER" "$tmp/mut-rebind-drop-id.sh" <<'MUTH'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = "  if s1b_path_is_owned_object \"$wd\"; then\n"
+new = "  if ! s1b_path_is_owned_object \"$wd\"; then\n    rm -rf \"$wd\"\n    s1b_release_owned_cwd\n    return 0\n  fi\n  if s1b_path_is_owned_object \"$wd\"; then\n"
+if old not in text:
+    raise SystemExit("object-identity check missing")
+if text.count(old) != 1:
+    raise SystemExit("object-identity check not unique")
+dst.write_text(text.replace(old, new, 1))
+MUTH
+run_rebind_selftest "$tmp/mut-rebind-drop-id.sh" "$tmp/mut-h.out" "$tmp/mut-h.err"
+mh_foreign=$(cat "$tmp/mut-h.out.foreign")
+mh_created=$(sed -n 's/^CREATED=//p' "$tmp/mut-h.out" | head -1)
+mh_leaked=$(sed -n 's/^LEAKED=//p' "$tmp/mut-h.out.report" 2>/dev/null | head -1)
+if [[ -n "$mh_created" && -f "$mh_created/keep" ]]; then
+  rm -rf "$mh_foreign" "$mh_created" ${mh_leaked:+"$mh_leaked"}
+  fail "dropping object-identity check left rebind-selftest green"
+fi
+rm -rf "$mh_foreign" ${mh_created:+"$mh_created"} ${mh_leaked:+"$mh_leaked"}
+assert_tracks_gone "$tmp/mut-h.out"
+
+python3 - "$DRIVER" "$tmp/mut-rebind-between.sh" <<'MUTRB'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = (
+    "  if s1b_path_is_owned_object \"$wd\"; then\n"
+    "    s1b_release_owned_cwd\n"
+    "    rmdir \"$wd\" 2>/dev/null || true\n"
+)
+new = (
+    "  if s1b_path_is_owned_object \"$wd\"; then\n"
+    "    true\n"
+    "  fi\n"
+    "  s1b_release_owned_cwd\n"
+    "  rm -rf \"$wd\"\n"
+    "  rmdir \"$wd\" 2>/dev/null || true\n"
+    "  if false; then\n"
+)
+if old not in text:
+    raise SystemExit("identity-then-rmdir block missing")
+dst.write_text(text.replace(old, new, 1))
+MUTRB
+run_rebind_selftest "$tmp/mut-rebind-between.sh" "$tmp/mut-i.out" "$tmp/mut-i.err"
+mi_foreign=$(cat "$tmp/mut-i.out.foreign")
+mi_created=$(sed -n 's/^CREATED=//p' "$tmp/mut-i.out" | head -1)
+mi_leaked=$(sed -n 's/^LEAKED=//p' "$tmp/mut-i.out.report" 2>/dev/null | head -1)
+if [[ -n "$mi_created" && -f "$mi_created/keep" ]]; then
+  rm -rf "$mi_foreign" "$mi_created" ${mi_leaked:+"$mi_leaked"}
+  fail "rebind-between-check-and-delete left rebind-selftest green"
+fi
+rm -rf "$mi_foreign" ${mi_created:+"$mi_created"} ${mi_leaked:+"$mi_leaked"}
+assert_tracks_gone "$tmp/mut-i.out"
+
+python3 - "$DRIVER" "$tmp/mut-rebind-suppress.sh" <<'MUTJ'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = (
+    "    echo \"FAIL: WORKDIR pathname does not name the owned object: $wd\" >&2\n"
+    "    CLEANUP_LEAF_RC=1\n"
+    "    echo \"FAIL: owned WORKDIR object leftover after rebind\" >&2\n"
+)
+new = (
+    "    echo \"FAIL: WORKDIR pathname does not name the owned object: $wd\" >&2\n"
+    "    CLEANUP_LEAF_RC=0\n"
+    "    echo \"FAIL: owned WORKDIR object leftover after rebind\" >&2\n"
+)
+if old not in text:
+    raise SystemExit("rebind CLEANUP_LEAF_RC diagnose missing")
+dst.write_text(text.replace(old, new, 1))
+MUTJ
+run_rebind_selftest "$tmp/mut-rebind-suppress.sh" "$tmp/mut-j.out" "$tmp/mut-j.err"
+mj_ec=$(cat "$tmp/mut-j.out.ec")
+mj_foreign=$(cat "$tmp/mut-j.out.foreign")
+mj_created=$(sed -n 's/^CREATED=//p' "$tmp/mut-j.out" | head -1)
+mj_leaked=$(sed -n 's/^LEAKED=//p' "$tmp/mut-j.out.report" 2>/dev/null | head -1)
+[[ -n "$mj_created" && -f "$mj_created/keep" ]] || fail "suppress mutant deleted foreign keep"
+rm -rf "$mj_foreign" ${mj_created:+"$mj_created"} ${mj_leaked:+"$mj_leaked"}
+[[ "$mj_ec" -eq 0 ]] || fail "suppress cleanup-failure mutant did not stay 0 (ec=$mj_ec)"
+assert_tracks_gone "$tmp/mut-j.out"
+
+python3 - "$DRIVER" "$tmp/mut-rebind-comment.sh" <<'MUTK'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = "  if s1b_path_is_owned_object \"$wd\"; then\n"
+new = "  # comment-only: keep object-identity unlink\n  if s1b_path_is_owned_object \"$wd\"; then\n"
+if old not in text:
+    raise SystemExit("object-identity check missing")
+dst.write_text(text.replace(old, new, 1))
+MUTK
+run_rebind_selftest "$tmp/mut-rebind-comment.sh" "$tmp/mut-k.out" "$tmp/mut-k.err"
+mk_ec=$(cat "$tmp/mut-k.out.ec")
+mk_foreign=$(cat "$tmp/mut-k.out.foreign")
+mk_created=$(sed -n 's/^CREATED=//p' "$tmp/mut-k.out" | head -1)
+mk_leaked=$(sed -n 's/^LEAKED=//p' "$tmp/mut-k.out.report" 2>/dev/null | head -1)
+[[ "$mk_ec" -ne 0 ]] || fail "comment-only object-identity mutant stayed 0"
+[[ -n "$mk_created" && -f "$mk_created/keep" ]] || fail "comment-only object-identity mutant swept foreign $mk_created"
+grep -Fq 'FAIL: WORKDIR pathname does not name the owned object:' "$tmp/mut-k.err" \
+  || fail "comment-only object-identity mutant lost mismatch diagnose"
+rm -rf ${mk_leaked:+"$mk_leaked"} ${mk_created:+"$mk_created"} "$mk_foreign"
+assert_tracks_gone "$tmp/mut-k.out"
+
 echo "ok: s1b cleanup ownership mutations"
 
 wf="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/monitor-attach-smoke.yml"

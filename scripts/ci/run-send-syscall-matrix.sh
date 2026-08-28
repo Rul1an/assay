@@ -102,8 +102,42 @@ reap_pid() {
   kill -0 "$pid" 2>/dev/null && fail "pid $pid still alive after SIGKILL bound; hang is not clean"
 }
 
+s1b_stat_id() {
+  local p="$1"
+  case "$(uname -s)" in
+    Linux) stat -c '%d:%i' "$p" ;;
+    *) stat -f '%d:%i' "$p" ;;
+  esac
+}
+
+s1b_path_is_owned_object() {
+  local wd="$1" path_id
+  [[ -n "${S1B_OWNED_ID:-}" && -n "$wd" ]] || return 1
+  path_id=$(s1b_stat_id "$wd") || return 1
+  [[ "$path_id" == "$S1B_OWNED_ID" ]]
+}
+
+s1b_release_owned_cwd() {
+  if [[ -n "${S1B_OWNED_SAVED_PWD:-}" && -d "$S1B_OWNED_SAVED_PWD" ]]; then
+    cd "$S1B_OWNED_SAVED_PWD" || cd /
+  else
+    cd / || true
+  fi
+}
+
 record_owned_workdir() {
-  S1B_OWNED_WORKDIR="$1"
+  local wd="$1"
+  if [[ -n "${S1B_OWNED_SAVED_PWD:-}" ]]; then
+    cd "$S1B_OWNED_SAVED_PWD" 2>/dev/null || cd /
+  else
+    S1B_OWNED_SAVED_PWD=$PWD
+  fi
+  S1B_OWNED_WORKDIR="$wd"
+  S1B_OWNED_ID=
+  if [[ -d "$wd" ]]; then
+    S1B_OWNED_ID=$(s1b_stat_id "$wd") || fail "stat owned WORKDIR $wd"
+    cd "$wd" || fail "cd owned WORKDIR $wd"
+  fi
 }
 
 s1b_hygiene_track() {
@@ -162,7 +196,7 @@ s1b_owned_workdir() {
 }
 
 remove_owned_workdir() {
-  local wd="${1:-}"
+  local wd="${1:-}" cwd_id
   [[ -n "$wd" && -d "$wd" ]] || return 0
   if ! s1b_owned_workdir "$wd"; then
     if [[ "${S1B_CLEANUP:-}" == 1 ]]; then
@@ -172,14 +206,36 @@ remove_owned_workdir() {
     fi
     fail "refusing to remove unowned WORKDIR=$wd"
   fi
-  rm -rf "$wd"
-  if [[ -e "$wd" ]]; then
+  cwd_id=$(s1b_stat_id .)
+  if [[ -z "${S1B_OWNED_ID:-}" || "$cwd_id" != "$S1B_OWNED_ID" ]]; then
+    echo "FAIL: lost owned WORKDIR object handle" >&2
+    CLEANUP_LEAF_RC=1
     if [[ "${S1B_CLEANUP:-}" == 1 ]]; then
-      echo "FAIL: WORKDIR leftover $wd" >&2
-      CLEANUP_LEAF_RC=1
       return 1
     fi
-    fail "WORKDIR leftover $wd"
+    fail "lost owned WORKDIR object handle"
+  fi
+  find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+  if s1b_path_is_owned_object "$wd"; then
+    s1b_release_owned_cwd
+    rmdir "$wd" 2>/dev/null || true
+    if [[ -e "$wd" ]]; then
+      if [[ "${S1B_CLEANUP:-}" == 1 ]]; then
+        echo "FAIL: WORKDIR leftover $wd" >&2
+        CLEANUP_LEAF_RC=1
+        return 1
+      fi
+      fail "WORKDIR leftover $wd"
+    fi
+  else
+    echo "FAIL: WORKDIR pathname does not name the owned object: $wd" >&2
+    CLEANUP_LEAF_RC=1
+    echo "FAIL: owned WORKDIR object leftover after rebind" >&2
+    s1b_release_owned_cwd
+    if [[ "${S1B_CLEANUP:-}" == 1 ]]; then
+      return 1
+    fi
+    fail "WORKDIR pathname does not name the owned object: $wd"
   fi
 }
 
@@ -211,6 +267,7 @@ on_exit() {
   trap - EXIT
   set +e
   cleanup_work
+  s1b_release_owned_cwd
   s1b_hygiene_sweep
   set -e
   if (( rc != 0 )); then
@@ -727,6 +784,22 @@ case "$MODE" in
     echo "LEAF=$LEAF"
     echo "ok: cleanup-zero-status-leaf-selftest about to exit 0"
     exit 0 ;;
+  cleanup-rebind-selftest)
+    [[ -x "${HARNESS_BIN:-}" ]] || fail "cleanup-rebind-selftest requires HARNESS_BIN"
+    WORKDIR=""
+    create_owned_workdir || fail "owned WORKDIR create failed"
+    echo "CREATED=$WORKDIR"
+    printf 'owned\n' >"$WORKDIR/owned-marker"
+    FIFO="$WORKDIR/go.fifo"
+    LOG="$WORKDIR/monitor.log"
+    HOUT="$WORKDIR/harness.out"
+    OH="$WORKDIR/observation-health.json"
+    rm -f "$FIFO" "$LOG" "$HOUT" "$OH"
+    mkfifo "$FIFO"
+    echo "kernel=$(uname -r) host=$(uname -n) mode=$MODE"
+    "$HARNESS_BIN" "$FIFO" >"$HOUT" 2>&1
+    echo "ok: cleanup-rebind-selftest about to exit 0"
+    exit 0 ;;
   cleanup-hygiene-inherit-selftest)
     own=$(mktemp -d /tmp/s1b-hyg-own-XXXXXX)
     s1b_hygiene_track "$own"
@@ -761,5 +834,5 @@ case "$MODE" in
     LOG="${2:?}"
     HOUT="${3:?}"
     fail "diagnostics-selftest" ;;
-  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|cleanup-collision-selftest|cleanup-busy-leaf-selftest|cleanup-preserve-rc-selftest|cleanup-create-selftest|cleanup-zero-status-leaf-selftest|cleanup-hygiene-inherit-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest|diagnostics-selftest" ;;
+  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|cleanup-collision-selftest|cleanup-busy-leaf-selftest|cleanup-preserve-rc-selftest|cleanup-create-selftest|cleanup-zero-status-leaf-selftest|cleanup-hygiene-inherit-selftest|cleanup-rebind-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest|diagnostics-selftest" ;;
 esac
