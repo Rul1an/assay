@@ -219,7 +219,10 @@ jobs:
           cp examples/mcp-quickstart/policy.yaml "dist/${ARCHIVE_NAME}/examples/mcp-quickstart/"
           cp examples/mcp-quickstart/run.py "dist/${ARCHIVE_NAME}/examples/mcp-quickstart/"
           cp examples/mcp-quickstart/mock_server.py "dist/${ARCHIVE_NAME}/examples/mcp-quickstart/"
-          python3 scripts/ci/release_readme.py "$VERSION" "dist/${ARCHIVE_NAME}" > "dist/${ARCHIVE_NAME}/README.md"
+          (
+            cd "dist/${ARCHIVE_NAME}"
+            python3 "$GITHUB_WORKSPACE/scripts/ci/release_readme.py" "$VERSION" --assembled-cwd > README.md
+          )
           cd dist
           tar -czvf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
 
@@ -238,7 +241,12 @@ jobs:
           Copy-Item examples/mcp-quickstart/policy.yaml "dist\${ARCHIVE_NAME}\examples\mcp-quickstart\"
           Copy-Item examples/mcp-quickstart/run.py "dist\${ARCHIVE_NAME}\examples\mcp-quickstart\"
           Copy-Item examples/mcp-quickstart/mock_server.py "dist\${ARCHIVE_NAME}\examples\mcp-quickstart\"
-          python scripts/ci/release_readme.py "$VERSION" "dist\${ARCHIVE_NAME}" > "dist\${ARCHIVE_NAME}\README.md"
+          Push-Location "dist\${ARCHIVE_NAME}"
+          try {
+            python "$env:GITHUB_WORKSPACE\scripts\ci\release_readme.py" "$VERSION" --assembled-cwd > README.md
+          } finally {
+            Pop-Location
+          }
           Compress-Archive -Path "dist\${ARCHIVE_NAME}" -DestinationPath "dist\${ARCHIVE_NAME}.zip"
 
       - name: Write archive checksum

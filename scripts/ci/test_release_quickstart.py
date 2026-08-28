@@ -7,6 +7,8 @@ import sys
 import tempfile
 import time
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest import mock
 
@@ -169,7 +171,7 @@ class ReleaseArchiveShape(unittest.TestCase):
     def test_all_cli_archives_carry_the_bounded_quickstart(self):
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         required_twice = [
-            'scripts/ci/release_readme.py "$VERSION"',
+            'release_readme.py" "$VERSION" --assembled-cwd',
             "examples/mcp-quickstart/policy.yaml",
             "examples/mcp-quickstart/run.py",
             "examples/mcp-quickstart/mock_server.py",
@@ -236,8 +238,8 @@ class ReleaseArchiveMemberInventory(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         unix = package_step(workflow, "Package (Unix)")
         windows = package_step(workflow, "Package (Windows)")
-        self.assertIn('scripts/ci/release_readme.py "$VERSION"', unix)
-        self.assertIn('scripts/ci/release_readme.py "$VERSION"', windows)
+        self.assertIn('release_readme.py" "$VERSION" --assembled-cwd', unix)
+        self.assertIn('release_readme.py" "$VERSION" --assembled-cwd', windows)
         for name, fragment in PACKED_SOURCE_MEMBERS:
             with self.subTest(platform="unix", member=name):
                 self.assertIn(fragment, unix)
@@ -514,6 +516,34 @@ class ReleaseArchiveReadmeFollowOn(unittest.TestCase):
                 copy_at = step.find(fragment)
                 self.assertGreater(copy_at, -1, f"{heading} missing {name}")
                 self.assertLess(copy_at, render_at, f"{heading} {name} copied after render")
+
+    def test_renderer_cli_rejects_arbitrary_archive_path_before_filesystem_access(self):
+        module = load_module()
+        with mock.patch.object(module, "list_archive_members") as list_members:
+            with redirect_stderr(StringIO()):
+                result = module.main(["v5.5.0", "/tmp/attacker-selected-archive"])
+        self.assertEqual(result, 2)
+        list_members.assert_not_called()
+
+    def test_renderer_cli_assembled_mode_reads_only_the_current_directory(self):
+        module = load_module()
+        cwd = Path("/assembled/archive")
+        members = module.default_packed_members()
+        with mock.patch.object(module.Path, "cwd", return_value=cwd), mock.patch.object(
+            module, "list_archive_members", return_value=members
+        ) as list_members, redirect_stdout(StringIO()):
+            result = module.main(["v5.5.0", "--assembled-cwd"])
+        self.assertEqual(result, 0)
+        list_members.assert_called_once_with(cwd)
+
+    def test_package_steps_enter_the_assembled_directory_for_rendering(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        unix = package_step(workflow, "Package (Unix)")
+        windows = package_step(workflow, "Package (Windows)")
+        self.assertIn('cd "dist/${ARCHIVE_NAME}"', unix)
+        self.assertIn("--assembled-cwd", unix)
+        self.assertIn('Push-Location "dist\\${ARCHIVE_NAME}"', windows)
+        self.assertIn("--assembled-cwd", windows)
 
     def test_unix_and_windows_assembled_member_sets_render(self):
         module = load_module()

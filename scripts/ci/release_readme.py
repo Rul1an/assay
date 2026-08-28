@@ -282,7 +282,7 @@ def render_release_readme(
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     if len(args) not in {1, 2}:
-        print("usage: release_readme.py TAG [ARCHIVE_ROOT]", file=sys.stderr)
+        print("usage: release_readme.py TAG [--assembled-cwd]", file=sys.stderr)
         return 2
     tag = TAG_RE.fullmatch(args[0])
     if tag is None:
@@ -291,8 +291,11 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    if len(args) == 2 and args[1] != "--assembled-cwd":
+        print("second argument must be --assembled-cwd", file=sys.stderr)
+        return 2
     members = (
-        list_archive_members(Path(args[1])) if len(args) == 2 else default_packed_members()
+        list_archive_members(Path.cwd()) if len(args) == 2 else default_packed_members()
     )
     rendered = render_release_readme(
         (ROOT / "README.md").read_text(encoding="utf-8"), tag.group(1), members=members
