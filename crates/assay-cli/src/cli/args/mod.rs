@@ -105,7 +105,7 @@ pub enum Command {
     Coverage(CoverageArgs),
     /// Project assay evidence into the OTel GenAI + OpenInference view (`assay.otel_projection.v0`)
     ProjectOtel(ProjectOtelArgs),
-    /// Project one existing enforcement-health document (`assay.enforcement_health_projection.v0`)
+    /// Project one health document or verified degradation bundle
     ProjectEnforcementHealth(ProjectEnforcementHealthArgs),
     /// Explain a test result or trace decision
     Explain(super::commands::explain::ExplainArgs),

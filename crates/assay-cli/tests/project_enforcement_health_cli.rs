@@ -7,9 +7,16 @@
 //! v1 `active_no_probe`). Each near-miss violates exactly one producer arm.
 
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use assay_evidence::{BundleReader, BundleWriter, EvidenceEvent, VerifyLimits};
 use assert_cmd::Command;
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
+use flate2::Compression;
+use serde_json::json;
+use tar::{Archive, Builder, Header};
 
 const SCHEMA: &str = "assay.enforcement_health_projection.v0";
 const V0: &str = "assay.enforcement_health.v0";
@@ -94,6 +101,80 @@ fn project(path: &Path) -> assert_cmd::assert::Assert {
             path.to_str().expect("utf8"),
         ])
         .assert()
+}
+
+fn write_bundle(dir: &Path, name: &str, events: Vec<EvidenceEvent>) -> PathBuf {
+    let path = dir.join(name);
+    let file = fs::File::create(&path).expect("create bundle");
+    let mut writer = BundleWriter::new(file);
+    for event in events {
+        writer.add_event(event);
+    }
+    writer.finish().expect("finish bundle");
+    path
+}
+
+fn bundle_event(type_: &str, seq: u64, payload: serde_json::Value) -> EvidenceEvent {
+    EvidenceEvent::new(type_, "urn:assay:test:sandbox", "sandbox-run", seq, payload)
+}
+
+fn tamper_events_member_without_updating_manifest(path: &Path) {
+    let file = fs::File::open(path).unwrap();
+    let mut archive = Archive::new(GzDecoder::new(file));
+    let mut members = Vec::new();
+    for entry in archive.entries().unwrap() {
+        let mut entry = entry.unwrap();
+        let member_path = entry.path().unwrap().into_owned();
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes).unwrap();
+        if member_path == Path::new("events.ndjson") {
+            let before = b"Landlock unavailable";
+            let after = b"Landlock unavailablE";
+            let offset = bytes
+                .windows(before.len())
+                .position(|window| window == before)
+                .expect("fixture detail in events member");
+            bytes[offset..offset + before.len()].copy_from_slice(after);
+        }
+        members.push((member_path, bytes));
+    }
+
+    let file = fs::File::create(path).unwrap();
+    let encoder = GzEncoder::new(file, Compression::default());
+    let mut builder = Builder::new(encoder);
+    for (member_path, bytes) in members {
+        let mut header = Header::new_gnu();
+        header.set_mode(0o644);
+        header.set_size(bytes.len() as u64);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, member_path, bytes.as_slice())
+            .unwrap();
+    }
+    let encoder = builder.into_inner().unwrap();
+    encoder.finish().unwrap();
+}
+
+fn degradation_payload() -> serde_json::Value {
+    json!({
+        "reason_code": "backend_unavailable",
+        "degradation_mode": "audit_fallback",
+        "component": "landlock",
+        "detail": "Landlock unavailable"
+    })
+}
+
+fn deterministic_noise(seed: u64, len: usize) -> String {
+    let mut state = seed;
+    let alphabet = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    (0..len)
+        .map(|_| {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
+            alphabet[(state as usize) % alphabet.len()] as char
+        })
+        .collect()
 }
 
 fn assert_exact_ok(path: &Path, source_schema: &str, observation: &str) {
@@ -300,4 +381,232 @@ fn v1_active_restrict_self_false_is_nonzero_empty_stdout() {
         "v1-active-restrict-false.json",
         &v1_active_near("strong", true, false, false),
     );
+}
+
+#[test]
+fn verified_sandbox_degradation_bundle_maps_to_degraded() {
+    let dir = tmp();
+    let path = write_bundle(
+        dir.path(),
+        "sandbox-degraded.tar.gz",
+        vec![bundle_event(
+            "assay.sandbox.degraded",
+            0,
+            degradation_payload(),
+        )],
+    );
+    assert_exact_ok(&path, "assay.sandbox.degraded", "degraded");
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+#[test]
+fn sandbox_audit_fallback_bundle_reaches_the_same_projection() {
+    let dir = tmp();
+    let profile = dir.path().join("sandbox-profile.yaml");
+    let bundle = dir.path().join("sandbox-bundle.tar.gz");
+    let data_home = dir.path().join("data-home");
+    assay()
+        .env("XDG_DATA_HOME", &data_home)
+        .args([
+            "sandbox",
+            "--enforce",
+            "--enforce-net",
+            "--profile",
+            profile.to_str().unwrap(),
+            "--bundle",
+            bundle.to_str().unwrap(),
+            "--",
+            "echo",
+            "sandbox-degradation-control",
+        ])
+        .assert()
+        .success();
+    assert!(profile.is_file(), "sandbox must write the source profile");
+    assert!(bundle.is_file(), "sandbox must write the canonical bundle");
+    assert_exact_ok(&bundle, "assay.sandbox.degraded", "degraded");
+}
+
+#[test]
+fn bundle_without_sandbox_degradation_is_no_claim() {
+    let dir = tmp();
+    let path = write_bundle(
+        dir.path(),
+        "sandbox-summary-only.tar.gz",
+        vec![bundle_event(
+            "assay.sandbox.summary",
+            0,
+            json!({"degradation_count": 0}),
+        )],
+    );
+    let path = path.to_str().unwrap();
+    assert_fail_args(&[
+        "project-enforcement-health",
+        "--format",
+        "json",
+        "--input",
+        path,
+    ]);
+}
+
+#[test]
+fn degradation_payload_under_another_event_type_is_no_claim() {
+    let dir = tmp();
+    let path = write_bundle(
+        dir.path(),
+        "wrong-event-type.tar.gz",
+        vec![bundle_event(
+            "assay.profile.finished",
+            0,
+            degradation_payload(),
+        )],
+    );
+    let path = path.to_str().unwrap();
+    assert_fail_args(&[
+        "project-enforcement-health",
+        "--format",
+        "json",
+        "--input",
+        path,
+    ]);
+}
+
+#[test]
+fn unknown_degradation_identity_fails_closed() {
+    let dir = tmp();
+    let path = write_bundle(
+        dir.path(),
+        "unknown-degradation.tar.gz",
+        vec![bundle_event(
+            "assay.sandbox.degraded",
+            0,
+            json!({
+                "reason_code": "backend_unavailable",
+                "degradation_mode": "best_effort",
+                "component": "landlock"
+            }),
+        )],
+    );
+    let path = path.to_str().unwrap();
+    assert_fail_args(&[
+        "project-enforcement-health",
+        "--format",
+        "json",
+        "--input",
+        path,
+    ]);
+}
+
+#[test]
+fn duplicate_degradation_events_fail_closed() {
+    let dir = tmp();
+    let path = write_bundle(
+        dir.path(),
+        "duplicate-degradation.tar.gz",
+        vec![
+            bundle_event("assay.sandbox.degraded", 0, degradation_payload()),
+            bundle_event("assay.sandbox.degraded", 1, degradation_payload()),
+        ],
+    );
+    let path = path.to_str().unwrap();
+    assert_fail_args(&[
+        "project-enforcement-health",
+        "--format",
+        "json",
+        "--input",
+        path,
+    ]);
+}
+
+#[test]
+fn active_health_and_degradation_in_one_bundle_fail_closed() {
+    let dir = tmp();
+    let active: serde_json::Value = serde_json::from_str(&v0("active")).unwrap();
+    let path = write_bundle(
+        dir.path(),
+        "contradictory-health.tar.gz",
+        vec![
+            bundle_event("assay.sandbox.degraded", 0, degradation_payload()),
+            bundle_event(V0, 1, active),
+        ],
+    );
+    let path = path.to_str().unwrap();
+    assert_fail_args(&[
+        "project-enforcement-health",
+        "--format",
+        "json",
+        "--input",
+        path,
+    ]);
+}
+
+#[test]
+fn tampered_degradation_bundle_fails_closed() {
+    let dir = tmp();
+    let path = write_bundle(
+        dir.path(),
+        "tampered-degradation.tar.gz",
+        vec![bundle_event(
+            "assay.sandbox.degraded",
+            0,
+            degradation_payload(),
+        )],
+    );
+    tamper_events_member_without_updating_manifest(&path);
+    let path = path.to_str().unwrap();
+    assert_fail_args(&[
+        "project-enforcement-health",
+        "--format",
+        "json",
+        "--input",
+        path,
+    ]);
+}
+
+#[test]
+fn oversized_degradation_bundle_fails_closed() {
+    let dir = tmp();
+    let mut events = vec![bundle_event(
+        "assay.sandbox.degraded",
+        0,
+        degradation_payload(),
+    )];
+    for seq in 1..=240 {
+        events.push(bundle_event(
+            "assay.sandbox.summary",
+            seq,
+            json!({"notes": deterministic_noise(seq, 512)}),
+        ));
+    }
+    let path = write_bundle(dir.path(), "oversized-degradation.tar.gz", events);
+    let bundle_len = fs::metadata(&path).unwrap().len() as usize;
+    assert!(
+        bundle_len > MAX_INPUT_BYTES,
+        "bundle was only {bundle_len} bytes"
+    );
+    assert!(
+        bundle_len < MAX_INPUT_BYTES * 2,
+        "fixture must isolate the 64 KiB source cap: {bundle_len} bytes"
+    );
+    BundleReader::open_with_limits(
+        fs::File::open(&path).unwrap(),
+        VerifyLimits {
+            max_bundle_bytes: (MAX_INPUT_BYTES * 2) as u64,
+            max_decode_bytes: 1024 * 1024,
+            max_manifest_bytes: MAX_INPUT_BYTES as u64,
+            max_events_bytes: 512 * 1024,
+            max_events: 1_000,
+            max_line_bytes: MAX_INPUT_BYTES,
+            max_path_len: 256,
+            max_json_depth: 64,
+        },
+    )
+    .expect("fixture must verify when only the source cap is relaxed");
+    let path = path.to_str().unwrap();
+    assert_fail_args(&[
+        "project-enforcement-health",
+        "--format",
+        "json",
+        "--input",
+        path,
+    ]);
 }

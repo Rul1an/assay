@@ -42,7 +42,7 @@ assay --version
 | [`assay watch`](watch.md) | Re-run on config/policy/trace changes |
 | [`assay monitor`](../../guides/runtime-monitor.md) | **Runtime Security** (Linux Kernel Enforcement) |
 | [`assay mcp`](mcp-server.md) | MCP runtime commands: wrap, preflight, discover, kill, config-path, and tool signing |
-| [`assay project-enforcement-health`](project-enforcement-health.md) | Project one existing enforcement-health document (lossy observation) |
+| [`assay project-enforcement-health`](project-enforcement-health.md) | Project one health document or verified degradation bundle (lossy observation) |
 | [CLI Command Grouping RFC](command-grouping-rfc.md) | Selective command grouping direction and compatibility contract |
 
 ---
