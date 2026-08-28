@@ -437,6 +437,8 @@ jobs:
     name: Publish-shape guardrail (assay-cli)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      RUSTUP_TOOLCHAIN: stable
     permissions:
       contents: read
     steps:
@@ -444,18 +446,16 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
       - name: Verify no non-optional publish=false deps in assay-cli
         shell: bash
         run: ./scripts/ci/check_assay_cli_publish_shape.sh
       - name: Verify assay-cli crate-owned README mutations
         shell: bash
-        env:
-          RUSTUP_TOOLCHAIN: stable
         run: ./scripts/ci/test_assay_cli_crate_readme.sh
       - name: Verify assay-cli crate-owned README
         shell: bash
-        env:
-          RUSTUP_TOOLCHAIN: stable
         run: ./scripts/ci/check_assay_cli_crate_readme.sh
 
   public-crate-policy:

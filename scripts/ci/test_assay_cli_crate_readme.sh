@@ -16,20 +16,29 @@ SELECTED_CASE="${ASSAY_CLI_CRATE_README_CASE:-}"
 CASES=(
   relative-unpackaged-docs
   reference-unpackaged-docs
+  escaped-label-relative
+  nested-label-relative
+  autolink-mutable
   html-unquoted-relative
   html-unquoted-mutable
+  html-entity-mutable
+  srcset-relative
   blob-HEAD
   blob-main
   blob-refs-heads-main
   workspace-readme-fallback
   version-pinned-install
   version-pinned-package-id
+  version-pinned-option-first
+  version-pinned-version-first
   package-grew-docs
   green-control
   hostile-bracket-bound
   scanner-structural-bound
   oversize-readme
+  oversize-archive-member
   packaged-manifest-source
+  toolchain-single-source
   restore-preexisting-docs
 )
 EXPECTED_CASES="${#CASES[@]}"
@@ -193,25 +202,23 @@ if "MD_LINK" in ns:
     raise SystemExit("polynomial MD_LINK regex still bound in extract_links")
 
 
-def measure(n: int) -> tuple[float, list[str]]:
-    text = "[" * n + "\n[ok](evidence_demo_profile.yaml)\n"
+def measure(n: int) -> float:
+    text = "[" * n
     started = time.perf_counter()
-    links = extract(text)
-    return time.perf_counter() - started, links
+    try:
+        extract(text)
+    except SystemExit:
+        return time.perf_counter() - started
+    raise SystemExit("hostile unmatched-label input did not fail closed")
 
 
-small_n, large_n = 4000, 16000
-t_small, _ = measure(small_n)
-t_large, links = measure(large_n)
-ratio = t_large / t_small if t_small > 0 else float("inf")
-print(f"hostile-bracket-bound 4k={t_small:.4f}s 16k={t_large:.4f}s ratio={ratio:.2f}")
-# 16k is 4x 4k. Linear is ~4x; the old MD_LINK was ~4x per doubling (~16x here).
-if ratio > 8:
-    raise SystemExit(
-        f"extract_links is not linear/bounded: 4k={t_small:.4f}s 16k={t_large:.4f}s ratio={ratio:.2f}"
-    )
+elapsed = measure(1024 * 1024)
+links = extract("[ok](evidence_demo_profile.yaml)")
+print(f"hostile-bracket-bound 1MiB={elapsed:.4f}s")
+if elapsed > 1.0:
+    raise SystemExit(f"extract_links did not reject hostile input promptly: {elapsed:.4f}s")
 if "evidence_demo_profile.yaml" not in links:
-    raise SystemExit(f"hostile prefix hid the real packaged link: {links!r}")
+    raise SystemExit(f"strict scanner hid the real packaged link: {links!r}")
 PY
 }
 
@@ -228,22 +235,112 @@ if "MAX_README_BYTES" not in checker or "read_bounded_utf8" not in checker:
 PY
 }
 
+write_fake_cargo() {
+  local destination="$1"
+  local oversized="${2:-false}"
+  cat >"$destination" <<SH
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "\$CARGO_TARGET_DIR/package"
+python3 - "\$CARGO_TARGET_DIR/package/assay-cli-5.5.0.crate" \\
+  "\$FAKE_MANIFEST" "\$FAKE_README" "\$FAKE_PROFILE" "$oversized" <<'PY'
+from pathlib import Path
+import gzip
+import io
+import sys
+import tarfile
+
+files = {
+    "Cargo.toml.orig": Path(sys.argv[2]).read_bytes(),
+    "README.md": Path(sys.argv[3]).read_bytes(),
+    "evidence_demo_profile.yaml": Path(sys.argv[4]).read_bytes(),
+}
+if sys.argv[5] == "true":
+    # A valid gzip stream with a deliberately truncated tar payload is enough:
+    # the checker must reject the declared size as soon as it reads the header.
+    with gzip.open(sys.argv[1], "wb") as stream:
+        for relative, data in files.items():
+            info = tarfile.TarInfo(f"assay-cli-5.5.0/{relative}")
+            info.size = len(data)
+            stream.write(info.tobuf())
+            stream.write(data)
+            stream.write(b"\0" * ((-len(data)) % 512))
+        oversized = tarfile.TarInfo("assay-cli-5.5.0/src/oversized.bin")
+        oversized.size = 64 * 1024 * 1024 + 1
+        stream.write(oversized.tobuf())
+else:
+    with tarfile.open(sys.argv[1], "w:gz") as archive:
+        for relative, data in files.items():
+            info = tarfile.TarInfo(f"assay-cli-5.5.0/{relative}")
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+PY
+SH
+  chmod +x "$destination"
+}
+
 run_packaged_manifest_source() {
-  python3 - "$CHECK" <<'PY'
+  local fakebin="$SCRATCH/packaged-manifest-source-bin"
+  local out="$SCRATCH/packaged-manifest-source.out"
+  mkdir -p "$fakebin"
+  write_fake_cargo "$fakebin/cargo"
+
+  python3 - "$MANIFEST" <<'PY'
 from pathlib import Path
 import sys
 
-checker = Path(sys.argv[1]).read_text(encoding="utf-8")
-required = ("cargo package -p assay-cli --no-verify", "tarfile.open", "load_packaged_crate")
-missing = [token for token in required if token not in checker]
-if missing:
-    raise SystemExit(f"checker does not derive README from built crate: {missing}")
-for forbidden in (
-    'ROOT / "crates" / "assay-cli" / "Cargo.toml"',
-    "cargo metadata --format-version",
-):
-    if forbidden in checker:
-        raise SystemExit(f"checkout metadata remains authoritative: {forbidden}")
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = 'readme = "README.md"'
+if text.count(old) != 1:
+    raise SystemExit("expected one crate-owned readme assignment")
+path.write_text(text.replace(old, "readme.workspace = true", 1), encoding="utf-8")
+PY
+
+  if ! PATH="$fakebin:$PATH" \
+    FAKE_MANIFEST="$SCRATCH/Cargo.toml" \
+    FAKE_README="$SCRATCH/README.md" \
+    FAKE_PROFILE="$ROOT/crates/assay-cli/evidence_demo_profile.yaml" \
+    bash "$CHECK" >"$out" 2>&1; then
+    echo "FAIL: packaged manifest did not override disagreeing checkout manifest" >&2
+    cat "$out" >&2
+    return 1
+  fi
+}
+
+run_oversize_archive_member() {
+  local fakebin="$SCRATCH/oversize-archive-bin"
+  local out="$SCRATCH/oversize-archive.out"
+  mkdir -p "$fakebin"
+  write_fake_cargo "$fakebin/cargo" true
+  if PATH="$fakebin:$PATH" \
+    FAKE_MANIFEST="$SCRATCH/Cargo.toml" \
+    FAKE_README="$SCRATCH/README.md" \
+    FAKE_PROFILE="$ROOT/crates/assay-cli/evidence_demo_profile.yaml" \
+    bash "$CHECK" >"$out" 2>&1; then
+    echo "FAIL: oversized declared archive member was accepted" >&2
+    return 1
+  fi
+  if ! grep -Fq "declared uncompressed size exceeds" "$out"; then
+    echo "FAIL: oversized archive member missed size diagnostic" >&2
+    cat "$out" >&2
+    return 1
+  fi
+}
+
+run_toolchain_single_source() {
+  python3 - "$ROOT/.github/workflows/ci.yml" <<'PY'
+from pathlib import Path
+import sys
+
+workflow = Path(sys.argv[1]).read_text(encoding="utf-8")
+start = workflow.index("  publish-shape-cli:")
+end = workflow.index("\n  public-crate-policy:", start)
+job = workflow[start:end]
+if job.count("RUSTUP_TOOLCHAIN: stable") != 1:
+    raise SystemExit("publish-shape toolchain must have one literal source")
+if "toolchain: ${{ env.RUSTUP_TOOLCHAIN }}" not in job:
+    raise SystemExit("rust-toolchain action does not consume the job toolchain pin")
 PY
 }
 
@@ -301,15 +398,35 @@ for name in "${CASES[@]}"; do
       ;;
     reference-unpackaged-docs)
       printf '\n[x][missing]\n\n[missing]: docs/guides/github-action.md\n' >>"$README"
-      expect_fail "$name" "member-list miss"
+      expect_fail "$name" "unsupported link syntax"
+      ;;
+    escaped-label-relative)
+      printf '\n[x\\]](docs/guides/github-action.md)\n' >>"$README"
+      expect_fail "$name" "unsupported link syntax"
+      ;;
+    nested-label-relative)
+      printf '\n[a [b]](docs/guides/github-action.md)\n' >>"$README"
+      expect_fail "$name" "unsupported link syntax"
+      ;;
+    autolink-mutable)
+      printf '\n<https://github.com/Rul1an/assay/blob/main/README.md>\n' >>"$README"
+      expect_fail "$name" "unsupported link syntax"
       ;;
     html-unquoted-relative)
       printf '\n<a href=docs/guides/github-action.md>missing</a>\n' >>"$README"
-      expect_fail "$name" "member-list miss"
+      expect_fail "$name" "unsupported link syntax"
       ;;
     html-unquoted-mutable)
       printf '\n<img src=https://github.com/Rul1an/assay/blob/refs/heads/main/x.png>\n' >>"$README"
-      expect_fail "$name" "mutable git ref"
+      expect_fail "$name" "unsupported link syntax"
+      ;;
+    html-entity-mutable)
+      printf '\n[x](https://github.com/Rul1an/assay/blob&#47;main/README.md)\n' >>"$README"
+      expect_fail "$name" "unsupported link syntax"
+      ;;
+    srcset-relative)
+      printf '\n<img srcset="evidence_demo_profile.yaml 1x, docs/missing.png 2x">\n' >>"$README"
+      expect_fail "$name" "unsupported link syntax"
       ;;
     blob-HEAD)
       rewrite_repo_link "https://github.com/Rul1an/assay/blob/HEAD/"
@@ -346,12 +463,20 @@ PY
       rewrite_install "cargo install assay-cli@5.4.0 --locked"
       expect_fail "$name" "version pin"
       ;;
+    version-pinned-option-first)
+      rewrite_install "cargo install --locked assay-cli@5.4.0"
+      expect_fail "$name" "version pin"
+      ;;
+    version-pinned-version-first)
+      rewrite_install "cargo install --version 5.4.0 assay-cli --locked"
+      expect_fail "$name" "version pin"
+      ;;
     package-grew-docs)
       create_docs_sentinel
       expect_fail "$name" "forbidden prefix"
       ;;
     green-control)
-      printf '\n<!-- green-control: comment-only no-op -->\n' >>"$README"
+      printf '\nGreen control: prose-only no-op.\n' >>"$README"
       expect_pass "$name"
       ;;
     hostile-bracket-bound)
@@ -373,8 +498,16 @@ with path.open("a", encoding="utf-8") as stream:
 PY
       expect_fail "$name" "exceeds 1048576 bytes"
       ;;
+    oversize-archive-member)
+      run_oversize_archive_member
+      echo "PASS: $name"
+      ;;
     packaged-manifest-source)
       run_packaged_manifest_source
+      echo "PASS: $name"
+      ;;
+    toolchain-single-source)
+      run_toolchain_single_source
       echo "PASS: $name"
       ;;
     restore-preexisting-docs)

@@ -37,6 +37,7 @@ python3 -u - "$ROOT" "${archives[0]}" <<'PY'
 from __future__ import annotations
 
 import re
+import shlex
 import sys
 import tarfile
 from pathlib import Path
@@ -50,10 +51,10 @@ ADR042_SENTENCES = (
 )
 FORBIDDEN_PREFIXES = ("docs/", "examples/", "demo/")
 MUTABLE_GIT_REF = re.compile(r"/(?:blob|tree)/(?:HEAD|main|master|refs/heads/[^/?#]+)(?:/|$)")
-VERSION_PIN = re.compile(r"cargo\s+install\s+assay-cli(?:\s+--version\b|@[0-9])")
 MAX_README_BYTES = 1024 * 1024
 MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_CRATE_BYTES = 64 * 1024 * 1024
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 4096
 MAX_MEMBER_NAME = 4096
 MAX_LINK_LABEL = 512
@@ -121,12 +122,21 @@ def load_packaged_crate(path: Path) -> tuple[list[str], str, str, str]:
         roots: set[str] = set()
         by_relative: dict[str, tarfile.TarInfo] = {}
         member_count = 0
+        uncompressed_bytes = 0
         for member in archive:
             member_count += 1
             if member_count > MAX_ARCHIVE_MEMBERS:
                 fail(f"packaged crate has more than {MAX_ARCHIVE_MEMBERS} members")
             if len(member.name) > MAX_MEMBER_NAME:
                 fail("packaged crate member name exceeds ceiling")
+            if member.size < 0:
+                fail("packaged crate member has a negative size")
+            uncompressed_bytes += member.size
+            if uncompressed_bytes > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                fail(
+                    "packaged crate declared uncompressed size exceeds "
+                    f"{MAX_ARCHIVE_UNCOMPRESSED_BYTES} bytes"
+                )
             parts = Path(member.name).parts
             if not parts or member.name.startswith("/") or ".." in parts:
                 fail(f"unsafe packaged crate member: {member.name!r}")
@@ -170,83 +180,42 @@ def _scan_delimited(source: str, start: int, closer: str, ceiling: int) -> int |
     return None if found == -1 else found
 
 
-def _html_attr_url(source: str, index: int) -> tuple[str, int] | None:
-    prefix = source[index : index + 4].lower()
-    name_len = 4 if prefix == "href" else 3 if prefix.startswith("src") else 0
-    if name_len == 0:
-        return None
-    cursor = index + name_len
-    length = len(source)
-    while cursor < length and source[cursor] in " \t\r\n":
-        cursor += 1
-    if cursor >= length or source[cursor] != "=":
-        return None
-    cursor += 1
-    while cursor < length and source[cursor] in " \t\r\n":
-        cursor += 1
-    if cursor >= length:
-        return None
-    if source[cursor] in "'\"":
-        quote = source[cursor]
-        end = _scan_delimited(source, cursor + 1, quote, MAX_LINK_URL)
-        if end is None:
-            fail("HTML attribute URL exceeds ceiling or lacks a closing quote")
-        return source[cursor + 1 : end].strip(), end + 1
-    end = cursor
-    ceiling = min(length, cursor + MAX_LINK_URL + 1)
-    while end < ceiling and source[end] not in " \t\r\n>":
-        end += 1
-    if end - cursor > MAX_LINK_URL:
-        fail("unquoted HTML attribute URL exceeds ceiling")
-    if end == cursor:
-        return None
-    return source[cursor:end].strip(), end
-
-
-def extract_reference_definitions(text: str) -> list[str]:
-    found: list[str] = []
+def reject_unsupported_link_syntax(text: str) -> None:
+    # This crate README intentionally supports one auditable profile: plain
+    # inline Markdown links/images. Unsupported CommonMark/HTML forms fail
+    # closed instead of becoming invisible to the membership check.
+    if "\\" in text:
+        fail("unsupported link syntax: backslash escapes are not allowed")
+    if "<" in text or ">" in text:
+        fail("unsupported link syntax: HTML and autolinks are not allowed")
     for line in text.splitlines():
         content = line.lstrip(" ")
         if len(line) - len(content) > 3 or not content.startswith("["):
             continue
         label_end = _scan_delimited(content, 1, "]", MAX_LINK_LABEL)
-        if label_end is None or content[label_end + 1 : label_end + 2] != ":":
-            continue
-        cursor = label_end + 2
-        while cursor < len(content) and content[cursor] in " \t":
-            cursor += 1
-        if cursor >= len(content):
-            continue
-        if content[cursor] == "<":
-            end = _scan_delimited(content, cursor + 1, ">", MAX_LINK_URL)
-            if end is not None:
-                found.append(content[cursor + 1 : end].strip())
-            continue
-        end = cursor
-        ceiling = min(len(content), cursor + MAX_LINK_URL)
-        while end < ceiling and content[end] not in " \t\r\n":
-            end += 1
-        if end > cursor:
-            found.append(content[cursor:end].strip())
-    return found
+        if label_end is not None and content[label_end + 1 : label_end + 2] == ":":
+            fail("unsupported link syntax: reference definitions are not allowed")
 
 
 def extract_links(text: str) -> list[str]:
-    # Bounded single-pass extract for crate README links only.
+    # Bounded single-pass extract for the crate README's strict link profile.
     # Not Ruley's #2677 archive rewriter: no version argument, no tag rewrite.
-    found = extract_reference_definitions(text)
+    reject_unsupported_link_syntax(text)
+    found: list[str] = []
     index = 0
     length = len(text)
     while index < length:
-        html = _html_attr_url(text, index)
-        if html is not None:
-            found.append(html[0])
-            index = html[1]
-            continue
         bang = text[index] == "!"
         open_at = index + 1 if bang else index
         if open_at < length and text[open_at] == "[":
             label_end = _scan_delimited(text, open_at + 1, "]", MAX_LINK_LABEL)
+            if label_end is None:
+                fail("unsupported link syntax: label exceeds ceiling or lacks a closing bracket")
+            nested = text.find("[", open_at + 1, label_end if label_end is not None else length)
+            if nested != -1:
+                fail("unsupported link syntax: nested labels are not allowed")
+            if label_end is not None and text[label_end + 1 : label_end + 2] == "[":
+                fail("unsupported link syntax: reference links are not allowed")
             if (
                 label_end is not None
                 and label_end + 1 < length
@@ -254,12 +223,37 @@ def extract_links(text: str) -> list[str]:
             ):
                 url_end = _scan_delimited(text, label_end + 2, ")", MAX_LINK_URL)
                 url = text[label_end + 2 : url_end] if url_end is not None else ""
-                if url_end is not None and "[" not in url and "]" not in url:
+                if url_end is None:
+                    fail("unsupported link syntax: URL exceeds ceiling or lacks a closing parenthesis")
+                if any(char in url for char in "[]()&%") or any(char.isspace() for char in url):
+                    fail("unsupported link syntax: URL escapes, nesting, and titles are not allowed")
+                if "[" not in url and "]" not in url:
                     found.append(url.strip())
                     index = url_end + 1
                     continue
         index += 1
     return found
+
+
+def has_version_pinned_install(text: str) -> bool:
+    for line in text.splitlines():
+        if "cargo" not in line or "install" not in line or "assay-cli" not in line:
+            continue
+        try:
+            words = shlex.split(line)
+        except ValueError as error:
+            fail(f"could not parse assay-cli install command: {error}")
+        if not words or words[0] != "cargo" or "install" not in words:
+            continue
+        tail = words[words.index("install") + 1 :]
+        package_tokens = [word for word in tail if word == "assay-cli" or word.startswith("assay-cli@")]
+        if not package_tokens:
+            continue
+        if any(word.startswith("assay-cli@") for word in package_tokens):
+            return True
+        if any(word == "--version" or word.startswith("--version=") for word in tail):
+            return True
+    return False
 
 
 def classify_relative(raw: str) -> str | None:
@@ -312,7 +306,7 @@ root_sentences = extract_adr042(root_readme, "workspace README")
 if crate_sentences != root_sentences:
     fail("ADR-042 sentence parity mismatch between crate README and workspace README")
 
-if VERSION_PIN.search(readme_text):
+if has_version_pinned_install(readme_text):
     fail("version pin in crate README install command")
 
 links = extract_links(readme_text)
