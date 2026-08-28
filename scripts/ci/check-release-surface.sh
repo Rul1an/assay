@@ -427,6 +427,10 @@ for file in README.md docs/guides/editor-mcp-recipe.md; do
   check_absent_regex "$file" 'assay mcp config-path (codex|<editor>)' \
     'config-path does not support Codex'
 done
+for file in .devcontainer/welcome.sh demo/CODESPACES-PLAYBOOK.md; do
+  check_absent_regex "$file" 'https://assay\.dev/' \
+    'unrelated assay.dev onboarding URL'
+done
 
 # ---------------------------------------------------------------------------
 note ""
