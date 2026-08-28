@@ -3,6 +3,8 @@ set -e
 
 # Setup test jar
 TEST_DIR="test-init-ci-$(date +%s)"
+ROOT_DIR="$(pwd)"
+trap 'cd "$ROOT_DIR" && rm -rf "$TEST_DIR"' EXIT
 mkdir -p "$TEST_DIR"
 cd "$TEST_DIR"
 PATH="$PATH:$(pwd)/../target/debug"
@@ -32,6 +34,22 @@ else
     exit 1
 fi
 
+owned_install='    - curl -fsSL https://getassay.dev/install.sh | sh'
+if [ "$(grep -Fxc "$owned_install" .gitlab-ci.yml || true)" -ne 1 ]; then
+    echo "FAIL: GitLab workflow must contain exactly one owned fail-closed installer command"
+    cat .gitlab-ci.yml
+    exit 1
+fi
+if grep -Fq 'https://assay.dev/install.sh' .gitlab-ci.yml; then
+    echo "FAIL: GitLab workflow contains the unrelated assay.dev installer URL"
+    exit 1
+fi
+if grep -Fq 'curl -sSL' .gitlab-ci.yml; then
+    echo "FAIL: GitLab workflow installer does not fail on HTTP errors"
+    exit 1
+fi
+echo "PASS: GitLab workflow uses the owned fail-closed installer command"
+
 # Verify content (spot check)
 if grep -q "assay" .github/workflows/assay.yml; then
     echo "PASS: GitHub workflow contains assay"
@@ -44,5 +62,3 @@ else
 fi
 
 echo "All tests passed!"
-cd ..
-rm -rf "$TEST_DIR"
