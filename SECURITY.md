@@ -4,21 +4,17 @@ Assay is security-critical infrastructure for AI agents. We take vulnerabilities
 
 ## Supported Versions
 
-| Version | Status |
-|---------|--------|
-| **v2.x** | ✅ Supported |
-| v1.x | ⚠️ Maintenance only |
-| v0.x | ❌ EOL |
+Assay supports the current published release, **v5.4.0**.
+
+Older releases do not carry a maintenance or end-of-life commitment unless a release note says so
+explicitly.
 
 ## Reporting Vulnerabilities
 
 **Do not report security issues through public GitHub issues.**
 
-Report privately:
-- **Email**: security@assay.dev
-- **GitHub**: Use "Report a vulnerability" tab
-
-Response time: 24 hours acknowledgment, 72 hours triage.
+Use GitHub's [private vulnerability reporting](https://github.com/Rul1an/assay/security/advisories/new)
+form. Do not include secrets in a public issue.
 
 ## Threat Model
 

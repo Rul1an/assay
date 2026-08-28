@@ -30,8 +30,10 @@
 - **Maintainer:** Triage rights, commit access (after sustained contribution).
 
 ### Code of Conduct
-We adhere to the [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
-Violations should be reported to `safety@assay.dev` (or private DM to maintainers).
+We follow the [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
+For conduct on GitHub, use GitHub's [private abuse-reporting flow](https://support.github.com/contact/report-abuse).
+Security vulnerabilities belong in the repository's private vulnerability-reporting form, not in a
+public issue.
 
 ## "Help Wanted" Strategy
 We label issues with `good first issue` and `help wanted`.

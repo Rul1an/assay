@@ -15,6 +15,22 @@ cp "$ROOT/scripts/ci/check-release-surface.sh" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/read-assay-release-tag.sh" "$TMP/scripts/ci/"
 cp "$ROOT/.pre-commit-config.yaml" "$TMP/"
 printf '%s\n' 'v5.1.0' > "$TMP/.github/assay-release-tag"
+cat > "$TMP/SECURITY.md" <<'DOC'
+# Security Policy
+
+## Supported Versions
+
+Assay supports the current published release, **v5.1.0**.
+
+## Reporting Vulnerabilities
+
+Report vulnerabilities through GitHub private vulnerability reporting.
+DOC
+cat > "$TMP/docs/COMMUNITY.md" <<'DOC'
+# Community Strategy
+
+Conduct reports use the repository's documented private maintainer channel.
+DOC
 cat > "$TMP/Cargo.toml" <<'TOML'
 [workspace]
 members = ["crates/assay-x"]
@@ -128,6 +144,8 @@ for path in (
     "docs/getting-started/ci-integration.md",
     "docs/use-cases/air-gapped.md",
     "docs/use-cases/ci-gate.md",
+    "SECURITY.md",
+    "docs/COMMUNITY.md",
 ):
     if not pattern.search(path):
         raise SystemExit(f"release-surface hook omits {path}")
@@ -237,6 +255,15 @@ mutate_and_expect_failure misleading-installer-verification README.md \
 mutate_and_expect_failure misleading-example-installer examples/mcp-quickstart/README.md \
   's/release installer/verified release installer/' \
   'quickstart installer wording must not imply checksum or provenance verification'
+mutate_and_expect_failure third-party-security-mailbox SECURITY.md \
+  's/Report vulnerabilities through GitHub private vulnerability reporting\./Email: security@assay.dev/' \
+  'third-party reporting address'
+mutate_and_expect_failure third-party-conduct-mailbox docs/COMMUNITY.md \
+  's/repository.s documented private maintainer channel/safety@assay.dev/' \
+  'third-party reporting address'
+mutate_and_expect_failure stale-security-supported-line SECURITY.md \
+  's/Assay supports the current published release, \*\*v5.1.0\*\*\./| **v2.x** | Supported |/' \
+  'supported release must match v5.1.0'
 mutate_and_expect_failure extracted-archive-claim examples/mcp-quickstart/README.md \
   's/run this from a source checkout/run this from the root of an extracted CLI release archive/' \
   'quickstart must not claim assets exist in published CLI archives'
@@ -340,8 +367,8 @@ echo "PASS: duplicate-release"
 mutate_and_expect_failure stale-cli-version docs/reference/cli/index.md \
   's/# assay 5.1.0/# assay 5.0.0/' 'documented CLI version drift'
 
-if [ "$mutation_count" -ne 47 ]; then
-  echo "FAIL: expected 47 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 50 ]; then
+  echo "FAIL: expected 50 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

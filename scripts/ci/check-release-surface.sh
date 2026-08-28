@@ -346,6 +346,14 @@ check_current_release_link README.md "$release_link"
 check_current_release_link docs/index.md "$release_link"
 check_rge_bench_claims
 
+check_absent_regex SECURITY.md '@assay\.dev' \
+  'third-party reporting address'
+check_absent_regex docs/COMMUNITY.md '@assay\.dev' \
+  'third-party reporting address'
+check_contains_line SECURITY.md \
+  "Assay supports the current published release, **$PUBLISHED_TAG**." \
+  "supported release must match $PUBLISHED_TAG"
+
 for file in \
   docs/getting-started/index.md \
   docs/getting-started/installation.md \
