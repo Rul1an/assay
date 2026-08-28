@@ -255,7 +255,11 @@ check_single_discord_invite() {
     fail "$file: checked outward document is missing"
     return
   fi
-  invites="$(grep -Eo 'https://(discord\.gg|discord\.com/invite)/[[:alnum:]_-]+' "$file" || true)"
+  invites="$(
+    grep -Eo 'https://[^[:space:]<>()"]+' "$file" \
+      | grep -E 'discord\.gg/|discord\.com/invite/' \
+      || true
+  )"
   if [ "$invites" != "$expected" ]; then
     fail "$file: Discord invite drift"
   fi
@@ -375,7 +379,7 @@ check_contains_line SECURITY.md \
   "Assay supports the current published release, **$PUBLISHED_TAG**." \
   "supported release must match $PUBLISHED_TAG"
 check_absent_regex SECURITY.md \
-  '^\|[[:space:]]*\*\*v[0-9]+\.x\*\*[[:space:]]*\|[^|]*Supported[^|]*\|' \
+  '^[[:space:]]*\|[[:space:]]*\*\*v[0-9]+\.x\*\*[[:space:]]*\|[^|]*Supported[^|]*\|' \
   'historical support-table row'
 
 for file in \

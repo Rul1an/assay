@@ -307,8 +307,17 @@ mutate_and_expect_failure mismatched-community-discord-invite docs/COMMUNITY.md 
 mutate_and_expect_failure extended-community-discord-invite docs/COMMUNITY.md \
   's#https://discord.gg/sK5U8VfSHV#https://discord.gg/sK5U8VfSHVevil#' \
   'Discord invite drift'
+mutate_and_expect_failure wrapped-community-discord-invite docs/COMMUNITY.md \
+  's#https://discord.gg/sK5U8VfSHV#https://example.invalid/https://discord.gg/sK5U8VfSHV#' \
+  'Discord invite drift'
+mutate_and_expect_failure suffixed-community-discord-invite docs/COMMUNITY.md \
+  's#https://discord.gg/sK5U8VfSHV#https://discord.gg/sK5U8VfSHV/extra#' \
+  'Discord invite drift'
 append_and_expect_failure stale-security-supported-line SECURITY.md \
   '| **v2.x** | ✅ Supported |' \
+  'historical support-table row'
+append_and_expect_failure indented-stale-security-supported-line SECURITY.md \
+  ' | **v2.x** | ✅ Supported |' \
   'historical support-table row'
 mutate_and_expect_failure extracted-archive-claim examples/mcp-quickstart/README.md \
   's/run this from a source checkout/run this from the root of an extracted CLI release archive/' \
@@ -435,8 +444,8 @@ echo "PASS: duplicate-release"
 mutate_and_expect_failure stale-cli-version docs/reference/cli/index.md \
   's/# assay 5.1.0/# assay 5.0.0/' 'documented CLI version drift'
 
-if [ "$mutation_count" -ne 57 ]; then
-  echo "FAIL: expected 57 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 60 ]; then
+  echo "FAIL: expected 60 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"
