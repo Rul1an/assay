@@ -185,6 +185,21 @@ class ReleaseArchiveShape(unittest.TestCase):
             fenced_block_after(example_readme, "Captured runner output"), CAPTURED_OUTPUT
         )
 
+    def test_root_readme_matches_the_published_archive_shape(self):
+        root_readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        published_tag = (ROOT / ".github/assay-release-tag").read_text(
+            encoding="utf-8"
+        ).strip()
+
+        if published_tag == "v5.4.0":
+            self.assertIn(
+                "For v5.4.0, run the last command from a source checkout.",
+                root_readme,
+            )
+            self.assertNotIn("root of an extracted CLI release archive", root_readme)
+        else:
+            self.assertIn("root of an extracted CLI release archive", root_readme)
+
 
 if __name__ == "__main__":
     unittest.main()

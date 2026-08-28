@@ -82,7 +82,7 @@ Install the SDK with pip install assay-it.
 uses: github/codeql-action/upload-sarif@d1ba80a13dd99fba24a470575428917156a28b43
 DOC
 printf '%s\n' 'Historical correction: pip install assay-it.' > "$TMP/docs/migration-v1.2.md"
-rge_claim='reproduction is digest-scoped and does not carry forward: v1 71-vector digest `sha256:1111111111111111111111111111111111111111111111111111111111111111` was independently implemented; current v2-candidate digest `sha256:2222222222222222222222222222222222222222222222222222222222222222` (95 vectors) has **not** been reproduced by anyone but the author.'
+rge_claim='reproduction is digest-scoped and does not carry forward: v1 71-vector digest `sha256:1111111111111111111111111111111111111111111111111111111111111111` and current v2 digest `sha256:2222222222222222222222222222222222222222222222222222222222222222` (95 vectors) each carry one reported **independent implementation**; JM-Lab reported the v2 95/95 reproduction on 2026-08-24.'
 broad_rge_claim='neutral, externally reproduced conformance kit for evidence reviewability'
 cat > "$TMP/README.md" <<'DOC'
 cargo install assay-cli --version 5.1.0 --locked
@@ -226,6 +226,9 @@ mutate_and_expect_failure unsupported-codex-config-path README.md \
 mutate_and_expect_failure unsupported-codex-literal README.md \
   's/Claude and Cursor config-path only./assay mcp config-path codex/' \
   'config-path does not support Codex'
+mutate_and_expect_failure misleading-installer-verification README.md \
+  's/Claude and Cursor config-path only./Claude and Cursor config-path only. Fast path: verified release installer./' \
+  'installer wording must not imply checksum or provenance verification'
 mutate_and_expect_failure unsupported-codex-guide docs/guides/editor-mcp-recipe.md \
   's/Codex uses .codex\/config.toml./assay mcp config-path codex/' \
   'config-path does not support Codex'
@@ -326,8 +329,8 @@ echo "PASS: duplicate-release"
 mutate_and_expect_failure stale-cli-version docs/reference/cli/index.md \
   's/# assay 5.1.0/# assay 5.0.0/' 'documented CLI version drift'
 
-if [ "$mutation_count" -ne 44 ]; then
-  echo "FAIL: expected 44 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 45 ]; then
+  echo "FAIL: expected 45 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"
