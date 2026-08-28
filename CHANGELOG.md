@@ -43,6 +43,13 @@ All notable changes to this project will be documented in this file.
   (#2649).
 
 ### Added
+- `assay project-enforcement-health` accepts a bounded, verified evidence bundle
+  carrying exactly one typed `assay.sandbox.degraded` event and projects it as
+  `observation: degraded`. Missing, duplicate, unknown, tampered, oversized, or
+  contradictory active-health input fails closed with empty stdout. Bundle
+  verification establishes integrity, not producer authenticity or enforcement
+  efficacy (#2641).
+
 - `assay mcp manifest candidate --from-observed ... --out ...` exports a
   deterministic, non-approved review candidate only from a complete,
   unambiguous `assay.mcp_manifest_observed.v0` artifact. `assay mcp manifest
