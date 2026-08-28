@@ -62,10 +62,25 @@ if not job:
 block = job.group(1)
 mutation = "./scripts/ci/test_assay_cli_crate_readme.sh"
 checker = "./scripts/ci/check_assay_cli_crate_readme.sh"
-if block.count(mutation) != 1 or block.count(checker) != 1:
-    raise SystemExit("publish-shape-cli must call mutation suite and checker exactly once")
-if block.index(mutation) > block.index(checker):
+
+
+def active_run(candidate: str, command: str) -> list[re.Match[str]]:
+    return list(
+        re.finditer(rf"(?m)^\s+run:\s*{re.escape(command)}\s*$", candidate)
+    )
+
+
+mutation_runs = active_run(block, mutation)
+checker_runs = active_run(block, checker)
+if len(mutation_runs) != 1 or len(checker_runs) != 1:
+    raise SystemExit("publish-shape-cli must actively call mutation suite and checker exactly once")
+if mutation_runs[0].start() > checker_runs[0].start():
     raise SystemExit("README mutation suite must run before the green checker")
+commented = block.replace(
+    f"        run: {mutation}", f"        # run: {mutation}", 1
+)
+if active_run(commented, mutation):
+    raise SystemExit("commented mutation-suite invocation counted as active")
 print("ok   assay-cli README mutation suite runs before checker")
 PY
 

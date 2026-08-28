@@ -10,7 +10,6 @@ cd "$ROOT"
 CHECK="$ROOT/scripts/ci/check_assay_cli_crate_readme.sh"
 MANIFEST="$ROOT/crates/assay-cli/Cargo.toml"
 README="$ROOT/crates/assay-cli/README.md"
-DOCS_ROOT="$ROOT/crates/assay-cli/docs"
 SELECTED_CASE="${ASSAY_CLI_CRATE_README_CASE:-}"
 
 CASES=(
@@ -23,6 +22,7 @@ CASES=(
   html-unquoted-mutable
   html-entity-mutable
   srcset-relative
+  scheme-relative-external
   blob-HEAD
   blob-main
   blob-main-fragment
@@ -45,6 +45,8 @@ CASES=(
   version-pinned-package-id
   version-pinned-option-first
   version-pinned-version-first
+  version-pinned-shell-prompt
+  version-pinned-env-prefix
   package-grew-docs
   green-control
   hostile-bracket-bound
@@ -54,7 +56,6 @@ CASES=(
   oversized-gnu-longname
   packaged-manifest-source
   toolchain-single-source
-  restore-preexisting-docs
 )
 EXPECTED_CASES="${#CASES[@]}"
 
@@ -80,54 +81,14 @@ if [[ ! -f "$README" ]]; then
   exit 1
 fi
 
-if [[ -e "$DOCS_ROOT" ]]; then
-  echo "FAIL: $DOCS_ROOT already exists; refusing to mutate" >&2
-  exit 1
-fi
-
 SCRATCH="$(mktemp -d)"
-CREATED_PATHS=()
 trap 'restore_tree; rm -rf "$SCRATCH"' EXIT
 cp "$MANIFEST" "$SCRATCH/Cargo.toml"
 cp "$README" "$SCRATCH/README.md"
 
-restore_owned_paths() {
-  local p
-  local sorted
-  if [[ "${#CREATED_PATHS[@]}" -eq 0 ]]; then
-    return 0
-  fi
-  # Deepest owned paths first so files go before their parent dirs.
-  while IFS= read -r p; do
-    sorted+=("$p")
-  done < <(printf '%s\n' "${CREATED_PATHS[@]}" | awk '{ print length, $0 }' | sort -nr | cut -d' ' -f2-)
-  for p in "${sorted[@]}"; do
-    if [[ -f "$p" ]]; then
-      rm -f "$p"
-    elif [[ -d "$p" ]]; then
-      rmdir "$p" 2>/dev/null || {
-        echo "FAIL: owned directory not empty, not blanket-deleting: $p" >&2
-        return 1
-      }
-    fi
-  done
-  CREATED_PATHS=()
-}
-
 restore_tree() {
   cp "$SCRATCH/Cargo.toml" "$MANIFEST"
   cp "$SCRATCH/README.md" "$README"
-  restore_owned_paths
-}
-
-create_docs_sentinel() {
-  mkdir -p "$DOCS_ROOT/guides"
-  printf '%s\n' "appease" >"$DOCS_ROOT/guides/github-action.md"
-  CREATED_PATHS+=(
-    "$DOCS_ROOT/guides/github-action.md"
-    "$DOCS_ROOT/guides"
-    "$DOCS_ROOT"
-  )
 }
 
 run_check() {
@@ -279,6 +240,8 @@ files = {
     "README.md": Path(sys.argv[3]).read_bytes(),
     "evidence_demo_profile.yaml": Path(sys.argv[4]).read_bytes(),
 }
+if sys.argv[5] == "forbidden-doc":
+    files["docs/guides/github-action.md"] = b"must not ship\n"
 if sys.argv[5] == "oversized-member":
     # A valid gzip stream with a deliberately truncated tar payload is enough:
     # the checker must reject the declared size as soon as it reads the header.
@@ -369,6 +332,26 @@ run_oversize_archive_member() {
   fi
 }
 
+run_forbidden_package_member() {
+  local fakebin="$SCRATCH/forbidden-package-member-bin"
+  local out="$SCRATCH/forbidden-package-member.out"
+  mkdir -p "$fakebin"
+  write_fake_cargo "$fakebin/cargo" forbidden-doc
+  if PATH="$fakebin:$PATH" \
+    FAKE_MANIFEST="$SCRATCH/Cargo.toml" \
+    FAKE_README="$SCRATCH/README.md" \
+    FAKE_PROFILE="$ROOT/crates/assay-cli/evidence_demo_profile.yaml" \
+    bash "$CHECK" >"$out" 2>&1; then
+    echo "FAIL: forbidden docs member was accepted" >&2
+    return 1
+  fi
+  if ! grep -Fq "forbidden prefix" "$out"; then
+    echo "FAIL: forbidden docs member missed prefix diagnostic" >&2
+    cat "$out" >&2
+    return 1
+  fi
+}
+
 run_oversized_gnu_longname() {
   local fakebin="$SCRATCH/oversized-gnu-longname-bin"
   local out="$SCRATCH/oversized-gnu-longname.out"
@@ -392,6 +375,7 @@ run_oversized_gnu_longname() {
 run_toolchain_single_source() {
   python3 - "$ROOT/.github/workflows/ci.yml" <<'PY'
 from pathlib import Path
+import re
 import sys
 
 workflow = Path(sys.argv[1]).read_text(encoding="utf-8")
@@ -403,7 +387,11 @@ job = workflow[start:end]
 def validate(candidate: str) -> None:
     if candidate.count("RUSTUP_TOOLCHAIN:") != 1 or candidate.count("RUSTUP_TOOLCHAIN: stable") != 1:
         raise ValueError("publish-shape toolchain must have one literal source")
-    if "toolchain: ${{ env.RUSTUP_TOOLCHAIN }}" not in candidate:
+    active_toolchain = re.findall(
+        r"(?m)^\s+toolchain:\s*\$\{\{\s*env\.RUSTUP_TOOLCHAIN\s*\}\}\s*$",
+        candidate,
+    )
+    if len(active_toolchain) != 1:
         raise ValueError("rust-toolchain action does not consume the job toolchain pin")
     forbidden = ("cargo +", "RUSTUP_TOOLCHAIN=", "rustup run", "rustup override", "rustup default")
     if any(token in candidate for token in forbidden):
@@ -417,6 +405,11 @@ mutations = {
     "shell-env": job + "\n      run: RUSTUP_TOOLCHAIN=nightly cargo package\n",
     "rustup-run": job + "\n      run: rustup run nightly cargo package\n",
     "rustup-override": job + "\n      run: rustup override set nightly\n",
+    "commented-action-input": job.replace(
+        "          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}",
+        "          # toolchain: ${{ env.RUSTUP_TOOLCHAIN }}",
+        1,
+    ),
 }
 for name, mutation in mutations.items():
     try:
@@ -425,47 +418,6 @@ for name, mutation in mutations.items():
         continue
     raise SystemExit(f"toolchain mutation survived: {name}")
 PY
-}
-
-run_restore_preexisting_docs() {
-  local root="$SCRATCH/restore-preexisting-docs"
-  local docs="$root/docs"
-  mkdir -p "$docs/guides"
-  printf 'keep\n' >"$docs/user-owned.md"
-  printf 'keep nested\n' >"$docs/guides/user-owned.md"
-  printf 'owned\n' >"$docs/guides/github-action.md"
-  (
-    eval "$(sed -n '/^restore_owned_paths()/,/^}/p' "$0")"
-    CREATED_PATHS=(
-      "$docs/guides/github-action.md"
-      "$docs/guides"
-      "$docs"
-    )
-    set +e
-    restore_output="$(restore_owned_paths 2>&1)"
-    restore_rc=$?
-    set -e
-    if [[ "$restore_rc" -eq 0 ]]; then
-      echo "FAIL: actual restore_owned_paths did not refuse a non-empty owned parent" >&2
-      exit 1
-    fi
-    if [[ "$restore_output" != *"owned directory not empty, not blanket-deleting"* ]]; then
-      echo "FAIL: actual restore_owned_paths missed its refusal diagnostic" >&2
-      exit 1
-    fi
-  )
-  if [[ ! -f "$docs/user-owned.md" ]]; then
-    echo "FAIL: actual restore_owned_paths destroyed pre-existing content" >&2
-    return 1
-  fi
-  if [[ -e "$docs/guides/github-action.md" ]]; then
-    echo "FAIL: actual restore_owned_paths left its owned sentinel" >&2
-    return 1
-  fi
-  if [[ ! -f "$docs/guides/user-owned.md" ]]; then
-    echo "FAIL: actual restore_owned_paths destroyed nested pre-existing content" >&2
-    return 1
-  fi
 }
 
 baseline_out="$SCRATCH/baseline.out"
@@ -517,6 +469,10 @@ for name in "${CASES[@]}"; do
     srcset-relative)
       printf '\n<img srcset="evidence_demo_profile.yaml 1x, docs/missing.png 2x">\n' >>"$README"
       expect_fail "$name" "unsupported link syntax"
+      ;;
+    scheme-relative-external)
+      rewrite_repo_link "//crates.io/crates/assay-cli"
+      expect_fail "$name" "external link must be absolute"
       ;;
     blob-HEAD)
       rewrite_repo_link "https://github.com/Rul1an/assay/blob/HEAD/"
@@ -617,9 +573,17 @@ PY
       rewrite_install "cargo install --version 5.4.0 assay-cli --locked"
       expect_fail "$name" "version pin"
       ;;
+    version-pinned-shell-prompt)
+      rewrite_install '$ cargo install assay-cli@5.4.0 --locked'
+      expect_fail "$name" "version pin"
+      ;;
+    version-pinned-env-prefix)
+      rewrite_install "env CARGO_HOME=/tmp cargo install assay-cli@5.4.0 --locked"
+      expect_fail "$name" "version pin"
+      ;;
     package-grew-docs)
-      create_docs_sentinel
-      expect_fail "$name" "forbidden prefix"
+      run_forbidden_package_member
+      echo "PASS: $name"
       ;;
     green-control)
       printf '\nGreen control: prose-only no-op.\n' >>"$README"
@@ -660,10 +624,6 @@ PY
       run_toolchain_single_source
       echo "PASS: $name"
       ;;
-    restore-preexisting-docs)
-      run_restore_preexisting_docs
-      echo "PASS: $name"
-      ;;
     *)
       echo "FAIL: unhandled case $name" >&2
       exit 1
@@ -673,11 +633,6 @@ PY
 done
 
 restore_tree
-
-if [[ -e "$DOCS_ROOT" ]]; then
-  echo "FAIL: docs sentinel leaked: $DOCS_ROOT" >&2
-  exit 1
-fi
 
 if [[ -n "$SELECTED_CASE" ]]; then
   if [[ "$mutation_count" -ne 1 ]]; then

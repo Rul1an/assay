@@ -297,7 +297,25 @@ def has_version_pinned_install(text: str) -> bool:
             words = shlex.split(line)
         except ValueError as error:
             fail(f"could not parse assay-cli install command: {error}")
-        if not words or words[0] != "cargo" or "install" not in words:
+        index = 0
+        if words and words[0] in ("$", "%"):
+            index += 1
+        if index < len(words) and words[index] == "env":
+            index += 1
+            while index < len(words) and (
+                words[index].startswith("-")
+                or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[index]) is not None
+            ):
+                index += 1
+        else:
+            while index < len(words) and re.fullmatch(
+                r"[A-Za-z_][A-Za-z0-9_]*=.*", words[index]
+            ) is not None:
+                index += 1
+        if index >= len(words) or words[index] != "cargo":
+            continue
+        words = words[index:]
+        if "install" not in words:
             continue
         tail = words[words.index("install") + 1 :]
         package_tokens = [word for word in tail if word == "assay-cli" or word.startswith("assay-cli@")]
@@ -366,6 +384,8 @@ if has_version_pinned_install(readme_text):
 links = extract_links(readme_text)
 for raw in links:
     reject_mutable_github_content_link(raw)
+    if raw.startswith("//"):
+        fail(f"external link must be absolute in {raw}")
 
 packaged_relatives: list[str] = []
 for raw in links:
