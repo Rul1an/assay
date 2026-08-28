@@ -16,6 +16,8 @@ SELECTED_CASE="${ASSAY_CLI_CRATE_README_CASE:-}"
 CASES=(
   relative-unpackaged-docs
   reference-unpackaged-docs
+  html-unquoted-relative
+  html-unquoted-mutable
   blob-HEAD
   blob-main
   blob-refs-heads-main
@@ -27,6 +29,7 @@ CASES=(
   hostile-bracket-bound
   scanner-structural-bound
   oversize-readme
+  packaged-manifest-source
   restore-preexisting-docs
 )
 EXPECTED_CASES="${#CASES[@]}"
@@ -224,6 +227,25 @@ if "MAX_README_BYTES" not in checker or "read_bounded_utf8" not in checker:
 PY
 }
 
+run_packaged_manifest_source() {
+  python3 - "$CHECK" <<'PY'
+from pathlib import Path
+import sys
+
+checker = Path(sys.argv[1]).read_text(encoding="utf-8")
+required = ("cargo package -p assay-cli --no-verify", "tarfile.open", "load_packaged_crate")
+missing = [token for token in required if token not in checker]
+if missing:
+    raise SystemExit(f"checker does not derive README from built crate: {missing}")
+for forbidden in (
+    'ROOT / "crates" / "assay-cli" / "Cargo.toml"',
+    "cargo metadata --format-version",
+):
+    if forbidden in checker:
+        raise SystemExit(f"checkout metadata remains authoritative: {forbidden}")
+PY
+}
+
 run_restore_preexisting_docs() {
   python3 - "$SCRATCH" <<'PY'
 from pathlib import Path
@@ -279,6 +301,14 @@ for name in "${CASES[@]}"; do
     reference-unpackaged-docs)
       printf '\n[x][missing]\n\n[missing]: docs/guides/github-action.md\n' >>"$README"
       expect_fail "$name" "member-list miss"
+      ;;
+    html-unquoted-relative)
+      printf '\n<a href=docs/guides/github-action.md>missing</a>\n' >>"$README"
+      expect_fail "$name" "member-list miss"
+      ;;
+    html-unquoted-mutable)
+      printf '\n<img src=https://github.com/Rul1an/assay/blob/refs/heads/main/x.png>\n' >>"$README"
+      expect_fail "$name" "mutable git ref"
       ;;
     blob-HEAD)
       rewrite_repo_link "https://github.com/Rul1an/assay/blob/HEAD/"
@@ -341,6 +371,10 @@ with path.open("a", encoding="utf-8") as stream:
     stream.write("x" * (1024 * 1024))
 PY
       expect_fail "$name" "exceeds 1048576 bytes"
+      ;;
+    packaged-manifest-source)
+      run_packaged_manifest_source
+      echo "PASS: $name"
       ;;
     restore-preexisting-docs)
       run_restore_preexisting_docs

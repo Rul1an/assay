@@ -13,35 +13,36 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-LIST_FILE="$(mktemp)"
-META_FILE="$(mktemp)"
-trap 'rm -f "$LIST_FILE" "$META_FILE"' EXIT
+PACKAGE_DIR="$(mktemp -d)"
+cleanup() {
+  find "$PACKAGE_DIR" -depth -delete
+}
+trap cleanup EXIT
 
-# --list --no-verify is the membership contract. Do not resolve link
-# targets against the checkout, Path.exists(), or git ls-files.
-if ! cargo package -p assay-cli --list --no-verify --allow-dirty >"$LIST_FILE"; then
-  echo "ERROR: cargo package -p assay-cli --list --no-verify --allow-dirty failed" >&2
+# Build the publish artifact without compiling it. The packaged manifest and
+# README are authoritative; never substitute checkout metadata or paths.
+if ! CARGO_TARGET_DIR="$PACKAGE_DIR" cargo package -p assay-cli --no-verify --allow-dirty >/dev/null; then
+  echo "ERROR: cargo package -p assay-cli --no-verify --allow-dirty failed" >&2
   exit 1
 fi
 
-if ! cargo metadata --format-version 1 --no-deps --offline --manifest-path crates/assay-cli/Cargo.toml >"$META_FILE"; then
-  echo "ERROR: cargo metadata for assay-cli failed" >&2
+shopt -s nullglob
+archives=("$PACKAGE_DIR"/package/assay-cli-*.crate)
+if [[ "${#archives[@]}" -ne 1 ]]; then
+  echo "ERROR: expected one built assay-cli .crate, found ${#archives[@]}" >&2
   exit 1
 fi
 
-echo "assay-cli cargo package --list:"
-cat "$LIST_FILE"
-
-python3 -u - "$ROOT" "$LIST_FILE" "$META_FILE" <<'PY'
+python3 -u - "$ROOT" "${archives[0]}" <<'PY'
 from __future__ import annotations
 
 import re
 import sys
+import tarfile
 from pathlib import Path
 
 ROOT = Path(sys.argv[1])
-LIST_PATH = Path(sys.argv[2])
-META_PATH = Path(sys.argv[3])
+ARCHIVE_PATH = Path(sys.argv[2])
 
 ADR042_SENTENCES = (
     "Assay ships no single safety score and never claims more than it can prove.",
@@ -51,6 +52,10 @@ FORBIDDEN_PREFIXES = ("docs/", "examples/", "demo/")
 MUTABLE_GIT_REF = re.compile(r"/(?:blob|tree)/(?:HEAD|main|master|refs/heads/[^/?#]+)(?:/|$)")
 VERSION_PIN = re.compile(r"cargo\s+install\s+assay-cli(?:\s+--version\b|@[0-9])")
 MAX_README_BYTES = 1024 * 1024
+MAX_MANIFEST_BYTES = 1024 * 1024
+MAX_CRATE_BYTES = 64 * 1024 * 1024
+MAX_ARCHIVE_MEMBERS = 4096
+MAX_MEMBER_NAME = 4096
 MAX_LINK_LABEL = 512
 MAX_LINK_URL = 2048
 
@@ -60,22 +65,19 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-def read_bounded_utf8(path: Path, label: str) -> str:
-    with path.open("rb") as stream:
-        data = stream.read(MAX_README_BYTES + 1)
-    if len(data) > MAX_README_BYTES:
-        fail(f"{label} exceeds {MAX_README_BYTES} bytes")
+def decode_bounded_utf8(data: bytes, ceiling: int, label: str) -> str:
+    if len(data) > ceiling:
+        fail(f"{label} exceeds {ceiling} bytes")
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError as error:
         fail(f"{label} is not UTF-8: {error}")
 
 
-def load_members(path: Path) -> list[str]:
-    members = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    if not members:
-        fail("empty inventory from cargo package --list")
-    return members
+def read_bounded_utf8(path: Path, label: str) -> str:
+    with path.open("rb") as stream:
+        data = stream.read(MAX_README_BYTES + 1)
+    return decode_bounded_utf8(data, MAX_README_BYTES, label)
 
 
 def package_section(text: str) -> str:
@@ -96,17 +98,71 @@ def crate_readme_selection(manifest_text: str) -> str:
     return local.group(1)
 
 
-def metadata_readme() -> str:
-    import json
+def archive_member_bytes(
+    archive: tarfile.TarFile, member: tarfile.TarInfo, ceiling: int, label: str
+) -> bytes:
+    if not member.isfile():
+        fail(f"{label} is not a regular file in packaged crate")
+    if member.size > ceiling:
+        fail(f"{label} exceeds {ceiling} bytes")
+    stream = archive.extractfile(member)
+    if stream is None:
+        fail(f"could not read {label} from packaged crate")
+    data = stream.read(ceiling + 1)
+    if len(data) > ceiling:
+        fail(f"{label} exceeds {ceiling} bytes")
+    return data
 
-    meta = json.loads(META_PATH.read_text(encoding="utf-8"))
-    for package in meta.get("packages", []):
-        if package.get("name") == "assay-cli":
-            readme = package.get("readme")
-            if not readme:
-                fail("not crate-owned README (cargo metadata readme is empty)")
-            return str(readme)
-    fail("missing package assay-cli in cargo metadata")
+
+def load_packaged_crate(path: Path) -> tuple[list[str], str, str, str]:
+    if path.stat().st_size > MAX_CRATE_BYTES:
+        fail(f"built .crate exceeds {MAX_CRATE_BYTES} bytes")
+    with tarfile.open(path, mode="r:gz") as archive:
+        roots: set[str] = set()
+        by_relative: dict[str, tarfile.TarInfo] = {}
+        member_count = 0
+        for member in archive:
+            member_count += 1
+            if member_count > MAX_ARCHIVE_MEMBERS:
+                fail(f"packaged crate has more than {MAX_ARCHIVE_MEMBERS} members")
+            if len(member.name) > MAX_MEMBER_NAME:
+                fail("packaged crate member name exceeds ceiling")
+            parts = Path(member.name).parts
+            if not parts or member.name.startswith("/") or ".." in parts:
+                fail(f"unsafe packaged crate member: {member.name!r}")
+            roots.add(parts[0])
+            if len(parts) == 1 or not member.isfile():
+                continue
+            relative = "/".join(parts[1:])
+            if relative in by_relative:
+                fail(f"duplicate packaged crate member: {relative}")
+            by_relative[relative] = member
+        if member_count == 0:
+            fail("packaged crate has no members")
+        if len(roots) != 1:
+            fail(f"packaged crate must have one root, found {sorted(roots)!r}")
+        manifest_member = by_relative.get("Cargo.toml.orig")
+        if manifest_member is None:
+            fail("packaged crate is missing Cargo.toml.orig")
+        manifest_text = decode_bounded_utf8(
+            archive_member_bytes(
+                archive, manifest_member, MAX_MANIFEST_BYTES, "packaged Cargo.toml.orig"
+            ),
+            MAX_MANIFEST_BYTES,
+            "packaged Cargo.toml.orig",
+        )
+        readme_name = crate_readme_selection(manifest_text)
+        readme_member = by_relative.get(readme_name)
+        if readme_member is None:
+            fail(f"member-list miss: packaged {readme_name} is absent")
+        readme_text = decode_bounded_utf8(
+            archive_member_bytes(
+                archive, readme_member, MAX_README_BYTES, "packaged README"
+            ),
+            MAX_README_BYTES,
+            "packaged README",
+        )
+        return sorted(by_relative), manifest_text, readme_name, readme_text
 
 
 def _scan_delimited(source: str, start: int, closer: str, ceiling: int) -> int | None:
@@ -128,13 +184,23 @@ def _html_attr_url(source: str, index: int) -> tuple[str, int] | None:
     cursor += 1
     while cursor < length and source[cursor] in " \t\r\n":
         cursor += 1
-    if cursor >= length or source[cursor] not in "'\"":
+    if cursor >= length:
         return None
-    quote = source[cursor]
-    end = _scan_delimited(source, cursor + 1, quote, MAX_LINK_URL)
-    if end is None:
+    if source[cursor] in "'\"":
+        quote = source[cursor]
+        end = _scan_delimited(source, cursor + 1, quote, MAX_LINK_URL)
+        if end is None:
+            fail("HTML attribute URL exceeds ceiling or lacks a closing quote")
+        return source[cursor + 1 : end].strip(), end + 1
+    end = cursor
+    ceiling = min(length, cursor + MAX_LINK_URL + 1)
+    while end < ceiling and source[end] not in " \t\r\n>":
+        end += 1
+    if end - cursor > MAX_LINK_URL:
+        fail("unquoted HTML attribute URL exceeds ceiling")
+    if end == cursor:
         return None
-    return source[cursor + 1 : end].strip(), end + 1
+    return source[cursor:end].strip(), end
 
 
 def extract_reference_definitions(text: str) -> list[str]:
@@ -225,7 +291,9 @@ def extract_adr042(text: str, source: str) -> list[str]:
     return found
 
 
-members = load_members(LIST_PATH)
+members, manifest_text, readme_name, readme_text = load_packaged_crate(ARCHIVE_PATH)
+print("assay-cli built .crate members:")
+print("\n".join(members))
 print(f"package members: {len(members)}")
 
 forbidden = [member for member in members if member.startswith(FORBIDDEN_PREFIXES)]
@@ -233,15 +301,8 @@ if forbidden:
     shown = ", ".join(forbidden[:8])
     fail(f"forbidden prefix in cargo package --list: {shown}")
 
-manifest_text = (ROOT / "crates" / "assay-cli" / "Cargo.toml").read_text(encoding="utf-8")
-readme_name = crate_readme_selection(manifest_text)
-resolved = metadata_readme()
-if resolved != readme_name:
-    fail(f"not crate-owned README (cargo metadata readme={resolved!r})")
 if "README.md" not in members:
-    fail("member-list miss: packaged README.md is not in cargo package --list")
-
-readme_text = read_bounded_utf8(ROOT / "crates" / "assay-cli" / readme_name, "crate README")
+    fail("member-list miss: packaged README.md is not in built .crate")
 if not readme_text.strip():
     fail("crate-owned README is empty")
 
