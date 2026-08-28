@@ -4,6 +4,23 @@
 This matrix states bounded product support and explicit evidence gaps. A row is not certification or universal host compatibility.
 Proof identities are shape-checked offline; generation does not fetch or verify proof content, URLs, artifacts, or issue state.
 
+## Privileged MCP action profile readers (`privileged-mcp-action-profile-readers`)
+
+Released 5.4 admits privileged-mcp-action/v0 and privileged-mcp-action/v1 as selected interpreters. Default selection is v0; v1 requires --profile-version v1. This is reader admission only.
+
+- Maturity: `verifier-only`
+- Introduced: `5.4.0`
+- Platforms: darwin-aarch64, darwin-x86_64, linux-aarch64, linux-x86_64, windows-x86_64
+- Protocol versions: None declared
+- Profile versions: privileged-mcp-action/v0, privileged-mcp-action/v1
+- Enforcement points: cli
+- Limitations: Reader admission is supported only where a release test exercises that reader., This row is reader-admission vocabulary, not a published-archive or golden-path proof.
+- Non-claims: Does not claim producer input identity, producer identity, producer release, migration, upgrade, rollback, or autodetect., Does not promise a rolling pair of releases or support by date., Unexercised historical readers are unsupported., Upgrade and rollback remain issue 2487.
+
+| Claim | Axis | Evidence state |
+|---|---|---|
+| `privileged-mcp-action-v0-v1-reader-admission` | `observation` | [gap #2574](https://github.com/Rul1an/assay/issues/2574) |
+
 ## Published v5.3.0 Assay CLI archives (`published-cli`)
 
 Attested Assay CLI release archives are published for the listed targets.

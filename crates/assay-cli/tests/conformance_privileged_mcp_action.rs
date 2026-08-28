@@ -157,29 +157,63 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// to that commit). Digest is SHA-256 of raw stdout with no trailing-newline strip.
 /// Three unique forms: ok-001; shared ok-002/003/004; ok-005.
 ///
-/// After #2574 the same command was remeasured because the report gained additive
-/// `profile_selection` / `input_profile` / `input_profile_status` members. Digests
-/// below are those post-remeasure pins. The three members are report-shape
-/// requirements outside the corpus comparison surface; corpus vectors do not
-/// discriminate them.
+/// After #2574 the live report gained additive `profile_selection` /
+/// `input_profile` / `input_profile_status` members. Those members stay outside
+/// this pin: compare the projection with them removed, not a post-change hash.
 fn prechange_success_stdout_pin(id: &str) -> (usize, &'static str) {
     match id {
         "ok-001-deny-bound-observation" => (
-            888,
-            "de7b3fb37440b8e65e92b62fb6ca1d457cb6349c3d38f183824e9ed8c3fc9a16",
+            782,
+            "9832de15214edcb07ff9006897b95bdbd202a256918b5dd8086617e6afb85329",
         ),
         "ok-002-deny-observation-missing"
         | "ok-003-allow-no-outcome-observation"
         | "ok-004-allow-with-diagnostic-establish" => (
-            846,
-            "fa8f8d7f6b3759befe44be4c6e395eafe29b035857374a3359c3d5f265846ca4",
+            740,
+            "6a861a7c406eafb4ce450e1755c5c645e3ad4d97e5ca2fec618c123432cf4132",
         ),
         "ok-005-allow-contradicted-by-denial" => (
-            1106,
-            "07bcfeb3798f6e6a946f00e3bb64f681c231e33b69c4bdc13fa1101325413f2b",
+            1000,
+            "f949e7f2332fdc993eb361020cf2fcfaaba85cb5c14aa28f9ac34a811f4d5392",
         ),
         other => panic!("no pre-change stdout pin for {other}"),
     }
+}
+
+const ADDITIVE_PROJECTION_MEMBERS: [&str; 3] =
+    ["profile_selection", "input_profile", "input_profile_status"];
+
+fn stdout_without_additive_projection(stdout: &[u8]) -> Vec<u8> {
+    let report: Value = serde_json::from_slice(stdout).expect("success stdout JSON");
+    let obj = report.as_object().expect("success stdout JSON object");
+    for key in ADDITIVE_PROJECTION_MEMBERS {
+        assert!(
+            obj.contains_key(key),
+            "additive member {key} must be present before the pre-change comparison"
+        );
+    }
+    // Pre-change Report field order, before the three additive members existed.
+    // Map::remove is swap-remove and cannot be used to recover that surface.
+    let mut projected = serde_json::Map::new();
+    for key in [
+        "schema",
+        "profile",
+        "bundle_integrity",
+        "verdict",
+        "claims",
+        "findings",
+        "non_claims",
+        "reason_code",
+        "next_step",
+    ] {
+        if let Some(value) = obj.get(key) {
+            projected.insert(key.to_string(), value.clone());
+        }
+    }
+    let mut out =
+        serde_json::to_vec_pretty(&Value::Object(projected)).expect("re-serialize stripped report");
+    out.push(b'\n');
+    out
 }
 
 #[test]
@@ -300,12 +334,17 @@ fn success_json_stdout_is_byte_identical_to_prechange() {
         let bundle = corpus.join(format!("vectors/{id}.bundle.tar.gz"));
         let (stdout, exit_code) = verify_raw(&bundle);
         assert_eq!(exit_code, 0, "{id}: success exits 0");
+        let comparable = stdout_without_additive_projection(&stdout);
         let (len, digest) = prechange_success_stdout_pin(id);
-        assert_eq!(stdout.len(), len, "{id}: raw stdout length vs pre-change");
         assert_eq!(
-            sha256_hex(&stdout),
+            comparable.len(),
+            len,
+            "{id}: stripped stdout length vs pre-change"
+        );
+        assert_eq!(
+            sha256_hex(&comparable),
             digest,
-            "{id}: raw stdout sha256 vs pre-change"
+            "{id}: stripped stdout sha256 vs pre-change"
         );
     }
 }

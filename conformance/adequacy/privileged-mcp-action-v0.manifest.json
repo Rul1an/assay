@@ -214,7 +214,7 @@
       },
       {
         "label": "47 an unrecognised in-namespace payload schema fails closed (Stage 2)",
-        "anchor": "                    other => violations.push(finding(\n                        \"unknown_profile_schema\",\n                        format!(\n                            \"payload schema {other:?} is inside the profile namespace but is not a recognized {} record; unknown fails closed\",\n                            profile_version.as_profile_id()\n                        ),\n                    )),",
+        "anchor": "                    other => violations.push(unknown_schema_finding(\n                        other,\n                        format!(\n                            \"payload schema {other:?} is inside the profile namespace but is not a recognized {} record; unknown fails closed\",\n                            profile_version.as_profile_id()\n                        ),\n                    )),",
         "replacement": "                    other => { let _ = other; }",
         "reason": "v0 Stage 2. Declared mutant 0 mutates the Stage 3 classifier and is out of scope for exactly this reason -- 'to measure that promise, mutate the Stage 2 match instead'. This is that mutant. bad-104 should kill it."
       },

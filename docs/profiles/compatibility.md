@@ -51,9 +51,20 @@ NOT be retrofitted into frozen v0/v1.
 
 ## Deprecation and support
 
-Support is only what release tests prove. This policy does not promise that every
-historical Assay release remains supported, and it does not claim a "current +
-previous release" window.
+`CHANGELOG.md` is the single announcement surface. This policy does not promise
+a rolling pair of releases, and it does not promise support by date.
+
+A released reader MUST be announced deprecated in `CHANGELOG.md` before the
+release that stops accepting it. Announcement and removal MUST NOT be in the same release.
+Between those two releases, acceptance is supported only where a release test
+exercises that reader. Unexercised historical readers are unsupported, not promised.
+
+Upgrade and rollback remain [#2487](https://github.com/Rul1an/assay/issues/2487).
+
+Released 5.4 admits `privileged-mcp-action/v0` and `privileged-mcp-action/v1`
+by explicit `--profile-version` (default `v0`) as reader admission only. That
+admission is not input identity, producer identity, producer release,
+migration, upgrade, rollback, or autodetect.
 
 ## Migration
 
