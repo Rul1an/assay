@@ -3,9 +3,12 @@
 # against `cargo package -p assay-cli --list`, not the workspace README.
 #
 # Archive README (release tarball / #2677) must pin a version. This crate
-# page must not. Do not share a version-rewriting classifier with that
-# issue. A narrow local primitive extracts MD+HTML href/src, requires
-# relative targets ⊆ package members, and rejects mutable git refs.
+# page must not. #2679 is still a blocked draft on Ruley's
+# ruley/2677-release-archive-readme; its scanner lives inside
+# release_readme.py and rewrites to tag-bound pins. Wait/handoff: do not
+# import that rewriter. Local extract-only linear scan (label 512 / URL
+# 2048) for crate README links. Relative targets ⊆ package members;
+# reject mutable git refs and version pins including package-id syntax.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -47,9 +50,9 @@ ADR042_SENTENCES = (
 )
 FORBIDDEN_PREFIXES = ("docs/", "examples/", "demo/")
 MUTABLE_GIT_REF = re.compile(r"/blob/(?:HEAD|main|master)(?:/|$)")
-VERSION_PIN = re.compile(r"cargo\s+install\s+assay-cli\s+--version\b")
-MD_LINK = re.compile(r"!\[[^\]]*\]\(([^)]+)\)|\[[^\]]*\]\(([^)]+)\)")
-HTML_LINK = re.compile(r"""(?i)(?:href|src)\s*=\s*["']([^"']+)["']""")
+VERSION_PIN = re.compile(r"cargo\s+install\s+assay-cli(?:\s+--version\b|@[0-9])")
+MAX_LINK_LABEL = 512
+MAX_LINK_URL = 2048
 
 
 def fail(message: str) -> None:
@@ -95,14 +98,63 @@ def metadata_readme() -> str:
     fail("missing package assay-cli in cargo metadata")
 
 
+def _scan_delimited(source: str, start: int, closer: str, ceiling: int) -> int | None:
+    found = source.find(closer, start, start + ceiling)
+    return None if found == -1 else found
+
+
+def _html_attr_url(source: str, index: int) -> tuple[str, int] | None:
+    remaining = source[index:]
+    prefix = remaining[:4].lower()
+    name_len = 4 if prefix == "href" else 3 if prefix.startswith("src") and remaining[:3].lower() == "src" else 0
+    if name_len == 0:
+        return None
+    cursor = index + name_len
+    length = len(source)
+    while cursor < length and source[cursor] in " \t\r\n":
+        cursor += 1
+    if cursor >= length or source[cursor] != "=":
+        return None
+    cursor += 1
+    while cursor < length and source[cursor] in " \t\r\n":
+        cursor += 1
+    if cursor >= length or source[cursor] not in "'\"":
+        return None
+    quote = source[cursor]
+    end = _scan_delimited(source, cursor + 1, quote, MAX_LINK_URL)
+    if end is None:
+        return None
+    return source[cursor + 1 : end].strip(), end + 1
+
+
 def extract_links(text: str) -> list[str]:
+    # Bounded single-pass extract for crate README links only.
+    # Not Ruley's #2677 archive rewriter: no version argument, no tag rewrite.
     found: list[str] = []
-    for match in MD_LINK.finditer(text):
-        target = match.group(1) or match.group(2)
-        if target:
-            found.append(target.strip())
-    for match in HTML_LINK.finditer(text):
-        found.append(match.group(1).strip())
+    index = 0
+    length = len(text)
+    while index < length:
+        html = _html_attr_url(text, index)
+        if html is not None:
+            found.append(html[0])
+            index = html[1]
+            continue
+        bang = text[index] == "!"
+        open_at = index + 1 if bang else index
+        if open_at < length and text[open_at] == "[":
+            label_end = _scan_delimited(text, open_at + 1, "]", MAX_LINK_LABEL)
+            if (
+                label_end is not None
+                and label_end + 1 < length
+                and text[label_end + 1] == "("
+            ):
+                url_end = _scan_delimited(text, label_end + 2, ")", MAX_LINK_URL)
+                url = text[label_end + 2 : url_end] if url_end is not None else ""
+                if url_end is not None and "[" not in url and "]" not in url:
+                    found.append(url.strip())
+                    index = url_end + 1
+                    continue
+        index += 1
     return found
 
 
