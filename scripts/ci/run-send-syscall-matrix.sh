@@ -101,38 +101,76 @@ reap_pid() {
   kill -0 "$pid" 2>/dev/null && fail "pid $pid still alive after SIGKILL bound; hang is not clean"
 }
 
+record_owned_workdir() {
+  S1B_OWNED_WORKDIR="$1"
+}
+
 s1b_owned_workdir() {
   local wd="$1"
   [[ -n "$wd" && "$wd" == /* ]] || return 1
   case "$wd" in
     *'/../'*|*/..|..) return 1 ;;
   esac
-  if [[ -n "${RUNNER_TEMP:-}" && "$wd" == "${RUNNER_TEMP}/s1b-"* ]]; then
-    return 0
-  fi
-  [[ "$wd" == /tmp/s1b-* ]]
+  [[ -n "${S1B_OWNED_WORKDIR:-}" && "$wd" == "$S1B_OWNED_WORKDIR" ]]
 }
 
 remove_owned_workdir() {
   local wd="${1:-}"
   [[ -n "$wd" && -d "$wd" ]] || return 0
-  s1b_owned_workdir "$wd" || fail "refusing to remove unowned WORKDIR=$wd"
+  if ! s1b_owned_workdir "$wd"; then
+    if [[ "${S1B_CLEANUP:-}" == 1 ]]; then
+      echo "FAIL: refusing to remove unowned WORKDIR=$wd" >&2
+      CLEANUP_LEAF_RC=1
+      return 1
+    fi
+    fail "refusing to remove unowned WORKDIR=$wd"
+  fi
   rm -rf "$wd"
-  [[ ! -e "$wd" ]] || fail "WORKDIR leftover $wd"
+  if [[ -e "$wd" ]]; then
+    if [[ "${S1B_CLEANUP:-}" == 1 ]]; then
+      echo "FAIL: WORKDIR leftover $wd" >&2
+      CLEANUP_LEAF_RC=1
+      return 1
+    fi
+    fail "WORKDIR leftover $wd"
+  fi
 }
 
-cleanup() {
+cleanup_work() {
   local pid
+  CLEANUP_LEAF_RC=0
+  S1B_CLEANUP=1
   for pid in "${MONITOR_PID:-}" "${HARNESS_PID:-}"; do
     reap_pid "$pid"
   done
   [[ -z "${FIFO:-}" ]] || rm -f "$FIFO"
   if [[ -n "${LEAF:-}" && -d "$LEAF" ]]; then
-    rmdir "$LEAF" 2>/dev/null || true
+    if ! rmdir "$LEAF" 2>/dev/null; then
+      echo "FAIL: unremovable LEAF=$LEAF" >&2
+      CLEANUP_LEAF_RC=1
+    fi
   fi
   remove_owned_workdir "${WORKDIR:-}"
+  S1B_CLEANUP=
+  return "$CLEANUP_LEAF_RC"
 }
-trap cleanup EXIT
+
+cleanup() {
+  cleanup_work
+}
+
+on_exit() {
+  local rc="$1"
+  trap - EXIT
+  set +e
+  cleanup_work
+  set -e
+  if (( rc != 0 )); then
+    exit "$rc"
+  fi
+  exit "${CLEANUP_LEAF_RC:-0}"
+}
+trap 'on_exit $?' EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 
@@ -227,6 +265,7 @@ isolate_pid() {
 run_matrix() {
   local expect_send="$1" n=0 hpid="" hc=0 mc=0 p2 p3
   mkdir -p "$WORKDIR"
+  record_owned_workdir "$WORKDIR"
   FIFO="$WORKDIR/go.fifo"
   LOG="$WORKDIR/monitor.log"
   HOUT="$WORKDIR/harness.out"
@@ -431,6 +470,7 @@ case "$MODE" in
     run_matrix no ;;
   cleanup-selftest)
     WORKDIR=$(mktemp -d /tmp/s1b-cleanup-selftest-XXXXXX)
+    record_owned_workdir "$WORKDIR"
     s1b_owned_workdir "$WORKDIR" || fail "cleanup-selftest WORKDIR is not an owned S1b path: $WORKDIR"
     FIFO=$WORKDIR/go.fifo
     mkfifo "$FIFO"
@@ -473,6 +513,70 @@ case "$MODE" in
     rm -rf "$bad"
     WORKDIR=""
     echo "ok: cleanup-selftest" ;;
+  cleanup-collision-selftest)
+    assigned=$(mktemp -d /tmp/s1b-XXXXXX)
+    WORKDIR=$assigned
+    record_owned_workdir "$WORKDIR"
+    sib=$(mktemp -d /tmp/s1b-XXXXXX)
+    printf 'keep\n' >"$sib/keep"
+    if s1b_owned_workdir "$sib"; then
+      fail "prefix sibling considered owned: $sib"
+    fi
+    set +e
+    ( remove_owned_workdir "$sib" )
+    rec=$?
+    set -e
+    [[ "$rec" -ne 0 ]] || fail "prefix sibling was deleted"
+    [[ -f "$sib/keep" ]] || fail "prefix sibling keep missing: $sib"
+    rt=$(mktemp -d)
+    sib2=$(mktemp -d "$rt/s1b-XXXXXX")
+    printf 'keep\n' >"$sib2/keep"
+    RUNNER_TEMP=$rt
+    if s1b_owned_workdir "$sib2"; then
+      fail "RUNNER_TEMP prefix sibling considered owned: $sib2"
+    fi
+    set +e
+    ( remove_owned_workdir "$sib2" )
+    rec2=$?
+    set -e
+    [[ "$rec2" -ne 0 ]] || fail "RUNNER_TEMP prefix sibling was deleted"
+    [[ -f "$sib2/keep" ]] || fail "RUNNER_TEMP sibling keep missing"
+    unset RUNNER_TEMP
+    s1b_owned_workdir "$WORKDIR" || fail "assigned WORKDIR not owned after stripping RUNNER_TEMP"
+    sib3=$(mktemp -d /tmp/s1b-XXXXXX)
+    printf 'keep\n' >"$sib3/keep"
+    if s1b_owned_workdir "$sib3"; then
+      fail "tmp prefix sibling owned without RUNNER_TEMP: $sib3"
+    fi
+    rm -rf "$sib" "$rt" "$sib3"
+    WORKDIR=""
+    echo "ok: cleanup-collision-selftest" ;;
+  cleanup-busy-leaf-selftest)
+    LEAF=$(mktemp -d)
+    printf 'stuck\n' >"$LEAF/stuck"
+    WORKDIR=""
+    FIFO=""
+    MONITOR_PID=""
+    HARNESS_PID=""
+    set +e
+    cleanup
+    crc=$?
+    set -e
+    [[ "$crc" -ne 0 ]] || fail "nonempty LEAF cleanup returned 0"
+    [[ -d "$LEAF" ]] || fail "nonempty LEAF was removed"
+    [[ -f "$LEAF/stuck" ]] || fail "nonempty LEAF contents were removed"
+    rm -rf "$LEAF"
+    LEAF=""
+    echo "ok: cleanup-busy-leaf-selftest" ;;
+  cleanup-preserve-rc-selftest)
+    LEAF=$(mktemp -d)
+    printf 'stuck\n' >"$LEAF/stuck"
+    WORKDIR=""
+    FIFO=""
+    MONITOR_PID=""
+    HARNESS_PID=""
+    echo "ok: cleanup-preserve-rc-selftest about to exit 7"
+    exit 7 ;;
   coverage-gate) coverage_gate "${2:?coverage-gate requires a JSON path}" ;;
   mutation-selftest) mutation_selftest ;;
   endpoint-line-selftest)
@@ -501,5 +605,5 @@ case "$MODE" in
     LOG="${2:?}"
     HOUT="${3:?}"
     fail "diagnostics-selftest" ;;
-  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest|diagnostics-selftest" ;;
+  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|cleanup-collision-selftest|cleanup-busy-leaf-selftest|cleanup-preserve-rc-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest|diagnostics-selftest" ;;
 esac

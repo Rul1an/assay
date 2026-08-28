@@ -292,6 +292,7 @@ want_run_matrix=$(cat <<'EOF'
 run_matrix() {
 local expect_send="$1" n=0 hpid="" hc=0 mc=0 p2 p3
 mkdir -p "$WORKDIR"
+record_owned_workdir "$WORKDIR"
 FIFO="$WORKDIR/go.fifo"
 LOG="$WORKDIR/monitor.log"
 HOUT="$WORKDIR/harness.out"
@@ -642,6 +643,131 @@ set -e
 [[ "$cec" -eq 0 ]] || fail "cleanup-selftest ec=$cec err=$(cat "$tmp/cleanup.err")"
 grep -q 'ok: cleanup-selftest' "$tmp/cleanup.out" || fail "cleanup-selftest missing ok"
 echo "ok: mutation-selftest and cleanup-selftest"
+
+owned_active=$(fn_active s1b_owned_workdir)
+[[ -n "$owned_active" ]] || fail "s1b_owned_workdir missing"
+assert_nl_snippet "$owned_active" '[[ -n "${S1B_OWNED_WORKDIR:-}" && "$wd" == "$S1B_OWNED_WORKDIR" ]]' \
+  "s1b_owned_workdir must use exact assigned-path equality"
+if grep -Eq '== /tmp/s1b-\*|\$\{RUNNER_TEMP\}/s1b-' <<<"$(fn_active s1b_owned_workdir)"; then
+  fail "s1b_owned_workdir still accepts a prefix"
+fi
+if grep -Fq 'rmdir "$LEAF" 2>/dev/null || true' "$DRIVER"; then
+  fail "LEAF rmdir failure is still suppressed"
+fi
+if grep -Eq 'fail ' <<<"$(fn_active cleanup_work)"; then
+  fail "cleanup_work must not call fail"
+fi
+if grep -Eq 'fail ' <<<"$(fn_active on_exit)"; then
+  fail "on_exit must not call fail"
+fi
+
+set +e
+run_bounded 12 bash "$DRIVER" cleanup-collision-selftest >"$tmp/coll.out" 2>"$tmp/coll.err"
+coll_ec=$?
+set -e
+[[ "$coll_ec" -eq 0 ]] || fail "cleanup-collision-selftest ec=$coll_ec err=$(cat "$tmp/coll.err")"
+grep -q 'ok: cleanup-collision-selftest' "$tmp/coll.out" || fail "collision selftest missing ok"
+
+set +e
+run_bounded 12 bash "$DRIVER" cleanup-busy-leaf-selftest >"$tmp/busy.out" 2>"$tmp/busy.err"
+busy_ec=$?
+set -e
+[[ "$busy_ec" -eq 0 ]] || fail "cleanup-busy-leaf-selftest ec=$busy_ec err=$(cat "$tmp/busy.err")"
+grep -q 'ok: cleanup-busy-leaf-selftest' "$tmp/busy.out" || fail "busy-leaf selftest missing ok"
+grep -Fq 'FAIL: unremovable LEAF=' "$tmp/busy.err" || fail "busy-leaf must report unremovable LEAF"
+
+set +e
+run_bounded 12 bash "$DRIVER" cleanup-preserve-rc-selftest >"$tmp/prc.out" 2>"$tmp/prc.err"
+prc_ec=$?
+set -e
+[[ "$prc_ec" -eq 7 ]] || fail "cleanup-preserve-rc-selftest ec=$prc_ec want 7 err=$(cat "$tmp/prc.err")"
+grep -q 'ok: cleanup-preserve-rc-selftest about to exit 7' "$tmp/prc.out" \
+  || fail "preserve-rc selftest missing ok line"
+
+python3 - "$DRIVER" "$tmp/mut-prefix.sh" <<'MUT1'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = '  [[ -n "${S1B_OWNED_WORKDIR:-}" && "$wd" == "$S1B_OWNED_WORKDIR" ]]\n'
+new = (
+    '  if [[ -n "${RUNNER_TEMP:-}" && "$wd" == "${RUNNER_TEMP}/s1b-"* ]]; then\n'
+    '    return 0\n'
+    '  fi\n'
+    '  [[ "$wd" == /tmp/s1b-* ]]\n'
+)
+if old not in text:
+    raise SystemExit("exact ownership line missing")
+dst.write_text(text.replace(old, new, 1))
+MUT1
+set +e
+run_bounded 12 bash "$tmp/mut-prefix.sh" cleanup-collision-selftest >"$tmp/mut-prefix.out" 2>"$tmp/mut-prefix.err"
+mp_ec=$?
+set -e
+[[ "$mp_ec" -ne 0 ]] || fail "restored prefix ownership left collision-selftest green"
+if grep -q 'ok: cleanup-collision-selftest' "$tmp/mut-prefix.out"; then
+  fail "prefix mutant printed collision ok"
+fi
+
+python3 - "$DRIVER" "$tmp/mut-bypass.sh" <<'MUT2'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = '  [[ -n "${S1B_OWNED_WORKDIR:-}" && "$wd" == "$S1B_OWNED_WORKDIR" ]]\n'
+new = '  [[ -n "${S1B_OWNED_WORKDIR:-}" && "$wd" == "$S1B_OWNED_WORKDIR" || "$wd" == /tmp/s1b-* ]]\n'
+if old not in text:
+    raise SystemExit("exact ownership line missing")
+dst.write_text(text.replace(old, new, 1))
+MUT2
+set +e
+run_bounded 12 bash "$tmp/mut-bypass.sh" cleanup-collision-selftest >"$tmp/mut-bypass.out" 2>"$tmp/mut-bypass.err"
+mb_ec=$?
+set -e
+[[ "$mb_ec" -ne 0 ]] || fail "shared-guard bypass left collision-selftest green"
+
+python3 - "$DRIVER" "$tmp/mut-rmdir.sh" <<'MUT3'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = (
+    '    if ! rmdir "$LEAF" 2>/dev/null; then\n'
+    '      echo "FAIL: unremovable LEAF=$LEAF" >&2\n'
+    '      CLEANUP_LEAF_RC=1\n'
+    '    fi\n'
+)
+new = '    rmdir "$LEAF" 2>/dev/null || true\n'
+if old not in text:
+    raise SystemExit("fail-closed rmdir block missing")
+dst.write_text(text.replace(old, new, 1))
+MUT3
+set +e
+run_bounded 12 bash "$tmp/mut-rmdir.sh" cleanup-busy-leaf-selftest >"$tmp/mut-rmdir.out" 2>"$tmp/mut-rmdir.err"
+mr_ec=$?
+set -e
+[[ "$mr_ec" -ne 0 ]] || fail "suppressed rmdir left busy-leaf-selftest green"
+
+python3 - "$DRIVER" "$tmp/mut-comment.sh" <<'MUT4'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = 's1b_owned_workdir() {\n'
+new = 's1b_owned_workdir() {\n  # no-op comment must not change ownership\n'
+if old not in text:
+    raise SystemExit("s1b_owned_workdir header missing")
+dst.write_text(text.replace(old, new, 1))
+MUT4
+set +e
+run_bounded 12 bash "$tmp/mut-comment.sh" cleanup-collision-selftest >"$tmp/mut-c.out" 2>"$tmp/mut-c.err"
+mc_ec=$?
+run_bounded 12 bash "$tmp/mut-comment.sh" cleanup-busy-leaf-selftest >"$tmp/mut-c2.out" 2>"$tmp/mut-c2.err"
+mc2_ec=$?
+set -e
+[[ "$mc_ec" -eq 0 ]] || fail "comment-only mutant failed collision err=$(cat "$tmp/mut-c.err")"
+[[ "$mc2_ec" -eq 0 ]] || fail "comment-only mutant failed busy-leaf err=$(cat "$tmp/mut-c2.err")"
+echo "ok: s1b cleanup ownership mutations"
 
 wf="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/monitor-attach-smoke.yml"
 named_step() {
