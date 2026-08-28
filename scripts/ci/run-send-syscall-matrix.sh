@@ -113,7 +113,7 @@ s1b_stat_id() {
 s1b_path_is_owned_object() {
   local wd="$1" path_id
   [[ -n "${S1B_OWNED_ID:-}" && -n "$wd" ]] || return 1
-  path_id=$(s1b_stat_id "$wd") || return 1
+  path_id=$(s1b_stat_id "$wd" 2>/dev/null) || return 1
   [[ "$path_id" == "$S1B_OWNED_ID" ]]
 }
 
@@ -197,8 +197,9 @@ s1b_owned_workdir() {
 
 remove_owned_workdir() {
   local wd="${1:-}" cwd_id
-  [[ -n "$wd" && -d "$wd" ]] || return 0
+  [[ -n "$wd" ]] || return 0
   if ! s1b_owned_workdir "$wd"; then
+    [[ -d "$wd" ]] || return 0
     if [[ "${S1B_CLEANUP:-}" == 1 ]]; then
       echo "FAIL: refusing to remove unowned WORKDIR=$wd" >&2
       CLEANUP_LEAF_RC=1
@@ -216,8 +217,8 @@ remove_owned_workdir() {
     fail "lost owned WORKDIR object handle"
   fi
   find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+  s1b_release_owned_cwd
   if s1b_path_is_owned_object "$wd"; then
-    s1b_release_owned_cwd
     rmdir "$wd" 2>/dev/null || true
     if [[ -e "$wd" ]]; then
       if [[ "${S1B_CLEANUP:-}" == 1 ]]; then
@@ -231,7 +232,6 @@ remove_owned_workdir() {
     echo "FAIL: WORKDIR pathname does not name the owned object: $wd" >&2
     CLEANUP_LEAF_RC=1
     echo "FAIL: owned WORKDIR object leftover after rebind" >&2
-    s1b_release_owned_cwd
     if [[ "${S1B_CLEANUP:-}" == 1 ]]; then
       return 1
     fi
@@ -246,7 +246,6 @@ cleanup_work() {
   for pid in "${MONITOR_PID:-}" "${HARNESS_PID:-}"; do
     reap_pid "$pid"
   done
-  [[ -z "${FIFO:-}" ]] || rm -f "$FIFO"
   if [[ -n "${LEAF:-}" && -d "$LEAF" ]]; then
     if ! rmdir "$LEAF" 2>/dev/null; then
       echo "FAIL: unremovable LEAF=$LEAF" >&2
@@ -800,6 +799,17 @@ case "$MODE" in
     "$HARNESS_BIN" "$FIFO" >"$HOUT" 2>&1
     echo "ok: cleanup-rebind-selftest about to exit 0"
     exit 0 ;;
+  cleanup-rename-away-selftest)
+    WORKDIR=""
+    create_owned_workdir || fail "owned WORKDIR create failed"
+    echo "CREATED=$WORKDIR"
+    printf 'owned\n' >"$WORKDIR/owned-marker"
+    leak=$(mktemp -d /tmp/s1b-rename-away-XXXXXX)
+    rmdir "$leak"
+    mv "$WORKDIR" "$leak"
+    echo "LEAKED=$leak"
+    echo "ok: cleanup-rename-away-selftest about to exit 0"
+    exit 0 ;;
   cleanup-hygiene-inherit-selftest)
     own=$(mktemp -d /tmp/s1b-hyg-own-XXXXXX)
     s1b_hygiene_track "$own"
@@ -834,5 +844,5 @@ case "$MODE" in
     LOG="${2:?}"
     HOUT="${3:?}"
     fail "diagnostics-selftest" ;;
-  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|cleanup-collision-selftest|cleanup-busy-leaf-selftest|cleanup-preserve-rc-selftest|cleanup-create-selftest|cleanup-zero-status-leaf-selftest|cleanup-hygiene-inherit-selftest|cleanup-rebind-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest|diagnostics-selftest" ;;
+  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|cleanup-collision-selftest|cleanup-busy-leaf-selftest|cleanup-preserve-rc-selftest|cleanup-create-selftest|cleanup-zero-status-leaf-selftest|cleanup-hygiene-inherit-selftest|cleanup-rebind-selftest|cleanup-rename-away-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest|diagnostics-selftest" ;;
 esac

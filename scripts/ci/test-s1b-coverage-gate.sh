@@ -762,6 +762,7 @@ run_rebind_selftest() {
   local foreign harness report
   foreign=$(mktemp -d /tmp/ruley-rebind-foreign-XXXXXX)
   printf 'keep\n' >"$foreign/keep"
+  printf 'fifo\n' >"$foreign/go.fifo"
   report=$(mktemp /tmp/ruley-rebind-report-XXXXXX)
   harness=$(mktemp /tmp/ruley-rebind-harness-XXXXXX)
   cat >"$harness" <<'HARNESS'
@@ -803,6 +804,7 @@ grep -q 'ok: cleanup-rebind-selftest about to exit 0' "$tmp/rebind.out" \
 grep -Fq 'FAIL: WORKDIR pathname does not name the owned object:' "$tmp/rebind.err" \
   || fail "rebind must diagnose pathname/object mismatch: $(cat "$tmp/rebind.err")"
 [[ -f "$rebind_created/keep" ]] || fail "rebind deleted foreign keep at $rebind_created"
+[[ -f "$rebind_created/go.fifo" ]] || fail "rebind deleted replacement fifo at $rebind_created"
 [[ ! -e "$rebind_created/owned-marker" && ! -e "$rebind_leaked/owned-marker" ]] \
   || fail "rebind left created contents: created=$rebind_created leaked=$rebind_leaked"
 # bounded residue: empty renamed object + foreign now at the recorded pathname
@@ -811,6 +813,27 @@ rm -rf "$rebind_leaked" "$rebind_created" "$rebind_foreign"
 [[ ! -e "$rebind_leaked" ]] || fail "rebind leak leftover $rebind_leaked"
 [[ ! -e "$rebind_created" ]] || fail "rebind created-path leftover $rebind_created"
 assert_tracks_gone "$tmp/rebind.out"
+
+set +e
+run_bounded 12 bash "$DRIVER" cleanup-rename-away-selftest >"$tmp/away.out" 2>"$tmp/away.err"
+away_ec=$?
+set -e
+away_created=$(sed -n 's/^CREATED=//p' "$tmp/away.out" | head -1)
+away_leaked=$(sed -n 's/^LEAKED=//p' "$tmp/away.out" | head -1)
+[[ -n "$away_created" ]] || fail "rename-away selftest did not report CREATED"
+[[ -n "$away_leaked" ]] || fail "rename-away selftest did not report LEAKED"
+[[ "$away_ec" -ne 0 ]] || fail "rename-away stayed 0 after pathname loss"
+grep -q 'ok: cleanup-rename-away-selftest about to exit 0' "$tmp/away.out" \
+  || fail "rename-away selftest missing ok line"
+grep -Fq 'FAIL: WORKDIR pathname does not name the owned object:' "$tmp/away.err" \
+  || fail "rename-away must diagnose pathname/object loss: $(cat "$tmp/away.err")"
+[[ ! -e "$away_leaked/owned-marker" ]] || fail "rename-away left created marker in $away_leaked"
+[[ -d "$away_leaked" ]] || fail "rename-away unlinked the renamed object without its new name"
+rmdir "$away_leaked" || fail "rename-away residue was not an empty leftover object"
+[[ ! -e "$away_created" ]] || fail "rename-away created-path leftover $away_created"
+[[ ! -e "$away_leaked" ]] || fail "rename-away leak leftover $away_leaked"
+assert_tracks_gone "$tmp/away.out"
+
 
 python3 - "$DRIVER" "$tmp/mut-prefix.sh" <<'MUT1'
 from pathlib import Path
@@ -1155,18 +1178,15 @@ import sys
 src, dst = Path(sys.argv[1]), Path(sys.argv[2])
 text = src.read_text()
 old = (
+    "  s1b_release_owned_cwd\n"
     "  if s1b_path_is_owned_object \"$wd\"; then\n"
-    "    s1b_release_owned_cwd\n"
     "    rmdir \"$wd\" 2>/dev/null || true\n"
 )
 new = (
-    "  if s1b_path_is_owned_object \"$wd\"; then\n"
-    "    true\n"
-    "  fi\n"
     "  s1b_release_owned_cwd\n"
     "  rm -rf \"$wd\"\n"
-    "  rmdir \"$wd\" 2>/dev/null || true\n"
     "  if false; then\n"
+    "    rmdir \"$wd\" 2>/dev/null || true\n"
 )
 if old not in text:
     raise SystemExit("identity-then-rmdir block missing")
@@ -1234,6 +1254,96 @@ grep -Fq 'FAIL: WORKDIR pathname does not name the owned object:' "$tmp/mut-k.er
   || fail "comment-only object-identity mutant lost mismatch diagnose"
 rm -rf ${mk_leaked:+"$mk_leaked"} ${mk_created:+"$mk_created"} "$mk_foreign"
 assert_tracks_gone "$tmp/mut-k.out"
+
+python3 - "$DRIVER" "$tmp/mut-fifo-path.sh" <<'MUTL'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = (
+    "  for pid in \"${MONITOR_PID:-}\" \"${HARNESS_PID:-}\"; do\n"
+    "    reap_pid \"$pid\"\n"
+    "  done\n"
+)
+new = (
+    "  for pid in \"${MONITOR_PID:-}\" \"${HARNESS_PID:-}\"; do\n"
+    "    reap_pid \"$pid\"\n"
+    "  done\n"
+    "  [[ -z \"${FIFO:-}\" ]] || rm -f \"$FIFO\"\n"
+)
+if old not in text:
+    raise SystemExit("cleanup_work reap loop missing")
+dst.write_text(text.replace(old, new, 1))
+MUTL
+run_rebind_selftest "$tmp/mut-fifo-path.sh" "$tmp/mut-l.out" "$tmp/mut-l.err"
+ml_ec=$(cat "$tmp/mut-l.out.ec")
+ml_foreign=$(cat "$tmp/mut-l.out.foreign")
+ml_created=$(sed -n 's/^CREATED=//p' "$tmp/mut-l.out" | head -1)
+ml_leaked=$(sed -n 's/^LEAKED=//p' "$tmp/mut-l.out.report" 2>/dev/null | head -1)
+[[ -n "$ml_created" && -f "$ml_created/keep" ]] || fail "fifo-path mutant deleted foreign keep"
+[[ ! -e "$ml_created/go.fifo" ]] || fail "fifo-path mutant left replacement fifo (expected pathname delete)"
+rm -rf "$ml_foreign" ${ml_created:+"$ml_created"} ${ml_leaked:+"$ml_leaked"}
+[[ "$ml_ec" -ne 0 ]] || fail "fifo-path mutant stayed 0"
+assert_tracks_gone "$tmp/mut-l.out"
+
+python3 - "$DRIVER" "$tmp/mut-d-early.sh" <<'MUTM'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = '  [[ -n "$wd" ]] || return 0\n'
+new = '  [[ -n "$wd" && -d "$wd" ]] || return 0\n'
+if old not in text:
+    raise SystemExit("non-d early return missing")
+dst.write_text(text.replace(old, new, 1))
+MUTM
+set +e
+run_bounded 12 bash "$tmp/mut-d-early.sh" cleanup-rename-away-selftest >"$tmp/mut-m.out" 2>"$tmp/mut-m.err"
+mm_ec=$?
+set -e
+mm_created=$(sed -n 's/^CREATED=//p' "$tmp/mut-m.out" | head -1)
+mm_leaked=$(sed -n 's/^LEAKED=//p' "$tmp/mut-m.out" | head -1)
+[[ -n "$mm_created" && -n "$mm_leaked" ]] || fail "d-early mutant did not report CREATED/LEAKED"
+[[ "$mm_ec" -eq 0 ]] || fail "d-early mutant did not stay 0 (ec=$mm_ec)"
+if grep -Fq 'FAIL: WORKDIR pathname does not name the owned object:' "$tmp/mut-m.err"; then
+  fail "d-early mutant still diagnosed pathname loss"
+fi
+[[ -f "$mm_leaked/owned-marker" ]] || fail "d-early mutant cleaned renamed marker"
+rm -rf ${mm_leaked:+"$mm_leaked"} ${mm_created:+"$mm_created"}
+assert_tracks_gone "$tmp/mut-m.out"
+
+python3 - "$DRIVER" "$tmp/mut-fifo-comment.sh" <<'MUTN'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = (
+    "  for pid in \"${MONITOR_PID:-}\" \"${HARNESS_PID:-}\"; do\n"
+    "    reap_pid \"$pid\"\n"
+    "  done\n"
+)
+new = (
+    "  for pid in \"${MONITOR_PID:-}\" \"${HARNESS_PID:-}\"; do\n"
+    "    reap_pid \"$pid\"\n"
+    "  done\n"
+    "  # comment-only: no pathname FIFO deletion\n"
+)
+if old not in text:
+    raise SystemExit("cleanup_work reap loop missing for comment")
+dst.write_text(text.replace(old, new, 1))
+MUTN
+run_rebind_selftest "$tmp/mut-fifo-comment.sh" "$tmp/mut-n.out" "$tmp/mut-n.err"
+mn_ec=$(cat "$tmp/mut-n.out.ec")
+mn_foreign=$(cat "$tmp/mut-n.out.foreign")
+mn_created=$(sed -n 's/^CREATED=//p' "$tmp/mut-n.out" | head -1)
+mn_leaked=$(sed -n 's/^LEAKED=//p' "$tmp/mut-n.out.report" 2>/dev/null | head -1)
+[[ "$mn_ec" -ne 0 ]] || fail "comment-only fifo mutant stayed 0"
+[[ -n "$mn_created" && -f "$mn_created/keep" ]] || fail "comment-only fifo mutant swept foreign keep"
+[[ -f "$mn_created/go.fifo" ]] || fail "comment-only fifo mutant deleted replacement fifo"
+grep -Fq 'FAIL: WORKDIR pathname does not name the owned object:' "$tmp/mut-n.err" \
+  || fail "comment-only fifo mutant lost mismatch diagnose"
+rm -rf ${mn_leaked:+"$mn_leaked"} ${mn_created:+"$mn_created"} "$mn_foreign"
+assert_tracks_gone "$tmp/mut-n.out"
 
 echo "ok: s1b cleanup ownership mutations"
 
