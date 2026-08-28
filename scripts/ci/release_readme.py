@@ -17,7 +17,63 @@ RELEASE_RE = re.compile(
 )
 VERSION_RE = re.compile(rf"^{VERSION_PATTERN}$")
 TAG_RE = re.compile(rf"^v({VERSION_PATTERN})$")
+CHECKOUT_RE = re.compile(
+    r"For v5\.4\.0, run the last command from a source checkout\.\s+"
+    r"The installer and the\s+published v5\.4\.0 CLI archive install the binary "
+    r"but do not carry the bounded\s+quickstart assets\."
+)
+MARKDOWN_LINK_RE = re.compile(r"(!?\[[^\]]*\]\()([^)]+)(\))")
+HREF_RE = re.compile(r'(href=")([^"]+)(")')
 ROOT = Path(__file__).resolve().parents[2]
+ARCHIVE_QUICKSTART = (
+    "From the root of this extracted CLI archive, with `assay` on PATH "
+    "(this archive's binary directory), run `python3 examples/mcp-quickstart/run.py`. "
+    "This archive packs LICENSE plus examples/mcp-quickstart/policy.yaml, "
+    "examples/mcp-quickstart/run.py, and examples/mcp-quickstart/mock_server.py."
+)
+
+
+def _is_external_or_fragment(url: str) -> bool:
+    return url.startswith(("http://", "https://", "mailto:", "#", "//"))
+
+
+def _is_archive_relative(url: str) -> bool:
+    path = url.split("#", 1)[0]
+    if path == "LICENSE":
+        return True
+    return path == "examples/mcp-quickstart" or path.startswith(
+        "examples/mcp-quickstart/"
+    )
+
+
+def _github_url(url: str, version: str) -> str:
+    path, _, fragment = url.partition("#")
+    path = path.lstrip("./")
+    last = path.rstrip("/").rsplit("/", 1)[-1]
+    kind = "tree" if path.endswith("/") or "." not in last else "blob"
+    rewritten = f"https://github.com/Rul1an/assay/{kind}/v{version}/{path}"
+    return f"{rewritten}#{fragment}" if fragment else rewritten
+
+
+def _rewrite_target(url: str, version: str) -> str:
+    if _is_external_or_fragment(url) or _is_archive_relative(url):
+        return url
+    return _github_url(url, version)
+
+
+def _rewrite_repo_links(source: str, version: str) -> str:
+    rewritten = MARKDOWN_LINK_RE.sub(
+        lambda match: match.group(1)
+        + _rewrite_target(match.group(2), version)
+        + match.group(3),
+        source,
+    )
+    return HREF_RE.sub(
+        lambda match: match.group(1)
+        + _rewrite_target(match.group(2), version)
+        + match.group(3),
+        rewritten,
+    )
 
 
 def render_release_readme(source: str, version: str) -> str:
@@ -29,6 +85,9 @@ def render_release_readme(source: str, version: str) -> str:
     releases = RELEASE_RE.findall(source)
     if len(releases) != 1:
         raise ValueError("README must carry exactly one current-release link")
+    checkouts = CHECKOUT_RE.findall(source)
+    if len(checkouts) > 1:
+        raise ValueError("README must carry exactly one published-checkout sentence")
 
     rendered = INSTALL_RE.sub(
         f"cargo install assay-cli --version {version} --locked", source, count=1
@@ -38,6 +97,9 @@ def render_release_readme(source: str, version: str) -> str:
         rendered,
         count=1,
     )
+    if checkouts:
+        rendered = CHECKOUT_RE.sub(ARCHIVE_QUICKSTART, rendered, count=1)
+    rendered = _rewrite_repo_links(rendered, version)
     if INSTALL_RE.findall(rendered) != [version] or RELEASE_RE.findall(rendered) != [version]:
         raise ValueError("rendered README release claims did not converge")
     return rendered

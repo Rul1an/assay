@@ -200,5 +200,130 @@ class ReleaseArchiveShape(unittest.TestCase):
             self.assertNotIn("archive carries this bounded quickstart", readme)
 
 
+
+
+PACKED_SOURCE_MEMBERS = (
+    ("binary", "${{ matrix.artifact }}"),
+    ("license", "LICENSE"),
+    ("quickstart-policy", "examples/mcp-quickstart/policy.yaml"),
+    ("quickstart-run", "examples/mcp-quickstart/run.py"),
+    ("quickstart-mock", "examples/mcp-quickstart/mock_server.py"),
+)
+CHECKOUT_SENTENCE = "For v5.4.0, run the last command from a source checkout."
+ARCHIVE_ROOT_CLAIM = "From the root of this extracted CLI archive"
+QUICKSTART_COMMAND = "python3 examples/mcp-quickstart/run.py"
+
+
+def package_step(workflow: str, heading: str) -> str:
+    marker = f"      - name: {heading}\n"
+    parts = workflow.split(marker)
+    if len(parts) != 2:
+        raise AssertionError(f"expected one {heading!r} step")
+    rest = parts[1]
+    nxt = rest.find("\n      - name: ")
+    if nxt == -1:
+        raise AssertionError(f"{heading!r} step was not followed by another named step")
+    return rest[:nxt]
+
+
+class ReleaseArchiveMemberInventory(unittest.TestCase):
+    def test_unix_and_windows_package_steps_copy_five_packed_source_classes(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        unix = package_step(workflow, "Package (Unix)")
+        windows = package_step(workflow, "Package (Windows)")
+        self.assertIn('scripts/ci/release_readme.py "$VERSION"', unix)
+        self.assertIn('scripts/ci/release_readme.py "$VERSION"', windows)
+        for name, fragment in PACKED_SOURCE_MEMBERS:
+            with self.subTest(platform="unix", member=name):
+                self.assertIn(fragment, unix)
+            with self.subTest(platform="windows", member=name):
+                self.assertIn(fragment, windows)
+
+
+class ReleaseArchiveReadmeContract(unittest.TestCase):
+    def test_source_readme_keeps_published_v54_checkout_wording(self):
+        source = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn(CHECKOUT_SENTENCE, source)
+        self.assertNotIn(ARCHIVE_ROOT_CLAIM, source)
+
+    def test_rendered_readme_rewrites_absent_links_and_states_packed_quickstart(self):
+        module = load_module()
+        source = (ROOT / "README.md").read_text(encoding="utf-8")
+        rendered = module.render_release_readme(source, "5.5.0")
+        self.assertNotIn(CHECKOUT_SENTENCE, rendered)
+        self.assertIn(ARCHIVE_ROOT_CLAIM, rendered)
+        self.assertIn(QUICKSTART_COMMAND, rendered)
+        self.assertIn("examples/mcp-quickstart/policy.yaml", rendered)
+        self.assertIn("examples/mcp-quickstart/run.py", rendered)
+        self.assertIn("examples/mcp-quickstart/mock_server.py", rendered)
+        self.assertIn("assay` on PATH", rendered)
+        self.assertIn("[MIT](LICENSE)", rendered)
+        self.assertIn("[MCP Quick Start](examples/mcp-quickstart/)", rendered)
+        self.assertIn("[MCP Quickstart](examples/mcp-quickstart/)", rendered)
+        self.assertIn('href="examples/mcp-quickstart/"', rendered)
+        self.assertIn(
+            "[CHANGELOG.md](https://github.com/Rul1an/assay/blob/v5.5.0/CHANGELOG.md)",
+            rendered,
+        )
+        self.assertIn(
+            "[release-pinned agent journey](https://github.com/Rul1an/assay/blob/v5.5.0/docs/guides/agent-golden-path.md)",
+            rendered,
+        )
+        self.assertIn(
+            "(https://github.com/Rul1an/assay/tree/v5.5.0/examples/privileged-action-gate/)",
+            rendered,
+        )
+        self.assertIn(
+            "(https://github.com/Rul1an/assay/blob/v5.5.0/demo/output/screenshots/mcp-wrap-demo.svg)",
+            rendered,
+        )
+        self.assertIn(
+            'href="https://github.com/Rul1an/assay/blob/v5.5.0/docs/security/OWASP-MCP-TOP10-MAPPING.md"',
+            rendered,
+        )
+        self.assertNotIn("(docs/guides/agent-golden-path.md)", rendered)
+        self.assertNotIn("(CHANGELOG.md)", rendered)
+        self.assertNotIn("[MIT](https://github.com/Rul1an/assay/blob/v5.5.0/LICENSE)", rendered)
+
+    def test_renderer_keeps_https_and_hash_targets(self):
+        module = load_module()
+        source = """# Assay
+
+```bash
+cargo install assay-cli --version 5.4.0 --locked
+```
+
+Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
+
+For v5.4.0, run the last command from a source checkout. The installer and the
+published v5.4.0 CLI archive install the binary but do not carry the bounded
+quickstart assets.
+
+See [scope](docs/concepts/scope.md) and [license](LICENSE) and [quickstart](examples/mcp-quickstart/run.py) and [here](#quickstart) and [action](https://github.com/marketplace/actions/assay-ai-agent-security).
+"""
+        rendered = module.render_release_readme(source, "5.5.0")
+        self.assertIn("[scope](https://github.com/Rul1an/assay/blob/v5.5.0/docs/concepts/scope.md)", rendered)
+        self.assertIn("[license](LICENSE)", rendered)
+        self.assertIn("[quickstart](examples/mcp-quickstart/run.py)", rendered)
+        self.assertIn("[here](#quickstart)", rendered)
+        self.assertIn("[action](https://github.com/marketplace/actions/assay-ai-agent-security)", rendered)
+        self.assertIn(ARCHIVE_ROOT_CLAIM, rendered)
+        self.assertNotIn(CHECKOUT_SENTENCE, rendered)
+
+    def test_renderer_refuses_ambiguous_checkout_sentence(self):
+        module = load_module()
+        source = """cargo install assay-cli --version 5.4.0 --locked
+Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
+For v5.4.0, run the last command from a source checkout. The installer and the
+published v5.4.0 CLI archive install the binary but do not carry the bounded
+quickstart assets.
+For v5.4.0, run the last command from a source checkout. The installer and the
+published v5.4.0 CLI archive install the binary but do not carry the bounded
+quickstart assets.
+"""
+        with self.assertRaisesRegex(ValueError, "exactly one published-checkout sentence"):
+            module.render_release_readme(source, "5.5.0")
+
+
 if __name__ == "__main__":
     unittest.main()
