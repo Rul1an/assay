@@ -16,11 +16,13 @@
 ### 2. Discord (Secondary)
 **Purpose:** Real-time chat, "watercooler", community bonding, rapid debugging.
 **Why:** High engagement, lower barrier to entry for casual chat.
+**Join:** [Assay on Discord](https://discord.gg/sK5U8VfSHV).
 **Channels:**
 - `#announcements` (Read-only, release notes)
 - `#general` (Chat)
-- `#support` (Community help)
-- `#contributing` (Dev coordination)
+- `#help-and-feedback` (Forum for setup, bugs, MCP, docs, and CI)
+- `#showcase` (Workflows and results)
+- `#contributors` (Code, docs, and test coordination)
 
 ## Governance
 
@@ -30,8 +32,13 @@
 - **Maintainer:** Triage rights, commit access (after sustained contribution).
 
 ### Code of Conduct
-We adhere to the [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
-Violations should be reported to `safety@assay.dev` (or private DM to maintainers).
+We follow the [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
+For project or Discord conduct reports, send a private DM to an Assay maintainer in Discord; do not
+post report details publicly. For abusive GitHub-hosted content, use GitHub's
+[in-product reporting flow](https://docs.github.com/en/communities/maintaining-your-safety-on-github/reporting-abuse-or-spam)
+and choose **Report to repository admins** when GitHub offers that option.
+Security vulnerabilities belong in the repository's private vulnerability-reporting form, not in a
+public issue.
 
 ## "Help Wanted" Strategy
 We label issues with `good first issue` and `help wanted`.
