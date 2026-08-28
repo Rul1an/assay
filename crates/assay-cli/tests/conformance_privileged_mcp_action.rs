@@ -149,28 +149,24 @@ fn sha256_hex(bytes: &[u8]) -> String {
         })
 }
 
-/// Pre-change success stdout pins measured 2026-08-16 from the assay binary built at
-/// `656e692ff02a00052d833d0676e229452c3f23fe` in a detached temporary sibling
-/// worktree (`cargo build -p assay-cli`). Command:
-/// `assay evidence verify-privileged-mcp-action --format json <bundle>`.
-/// Corpus: committed `conformance/privileged-mcp-action-v0/vectors/` (byte-identical
-/// to that commit). Digest is SHA-256 of raw stdout with no trailing-newline strip.
-/// Three unique forms: ok-001; shared ok-002/003/004; ok-005.
+/// Success JSON stdout pins after #2574 projection members (`profile_selection`,
+/// `input_profile`, `input_profile_status`). Digest is SHA-256 of raw stdout with
+/// no trailing-newline strip. Three unique forms: ok-001; shared ok-002/003/004; ok-005.
 fn prechange_success_stdout_pin(id: &str) -> (usize, &'static str) {
     match id {
         "ok-001-deny-bound-observation" => (
-            782,
-            "9832de15214edcb07ff9006897b95bdbd202a256918b5dd8086617e6afb85329",
+            888,
+            "de7b3fb37440b8e65e92b62fb6ca1d457cb6349c3d38f183824e9ed8c3fc9a16",
         ),
         "ok-002-deny-observation-missing"
         | "ok-003-allow-no-outcome-observation"
         | "ok-004-allow-with-diagnostic-establish" => (
-            740,
-            "6a861a7c406eafb4ce450e1755c5c645e3ad4d97e5ca2fec618c123432cf4132",
+            846,
+            "fa8f8d7f6b3759befe44be4c6e395eafe29b035857374a3359c3d5f265846ca4",
         ),
         "ok-005-allow-contradicted-by-denial" => (
-            1000,
-            "f949e7f2332fdc993eb361020cf2fcfaaba85cb5c14aa28f9ac34a811f4d5392",
+            1106,
+            "07bcfeb3798f6e6a946f00e3bb64f681c231e33b69c4bdc13fa1101325413f2b",
         ),
         other => panic!("no pre-change stdout pin for {other}"),
     }

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- `assay evidence verify-privileged-mcp-action` still emits
+  `assay.privileged_mcp_action.verify.report.v0` and keeps `profile` as the
+  selected interpreter. The report now always projects `profile_selection`
+  (`default` or `explicit`), `input_profile` (JSON `null` on frozen v0/v1),
+  and `input_profile_status` (`undeclared_legacy`). Unknown in-namespace
+  schema findings retain the exact schema on `observed_schema`. This does
+  not add autodetect, migration, or a v0/v1 identity retrofit (#2574).
 - Assay's GitHub Action consumer pin is a mixed Action migration to published
   `Rul1an/assay-action` v3.1.0, not a purely additive one. Completed
   zero-evidence runs now emit output `verified` as the literal `false`
