@@ -15,14 +15,18 @@ SELECTED_CASE="${ASSAY_CLI_CRATE_README_CASE:-}"
 
 CASES=(
   relative-unpackaged-docs
+  reference-unpackaged-docs
   blob-HEAD
   blob-main
+  blob-refs-heads-main
   workspace-readme-fallback
   version-pinned-install
   version-pinned-package-id
   package-grew-docs
   green-control
   hostile-bracket-bound
+  scanner-structural-bound
+  oversize-readme
   restore-preexisting-docs
 )
 EXPECTED_CASES="${#CASES[@]}"
@@ -207,6 +211,19 @@ if "evidence_demo_profile.yaml" not in links:
 PY
 }
 
+run_scanner_structural_bound() {
+  python3 - "$CHECK" <<'PY'
+from pathlib import Path
+import sys
+
+checker = Path(sys.argv[1]).read_text(encoding="utf-8")
+if "source[index:]" in checker or "source[index :]" in checker:
+    raise SystemExit("unbounded suffix copy remains in scanner")
+if "MAX_README_BYTES" not in checker or "read_bounded_utf8" not in checker:
+    raise SystemExit("README is materialized without an explicit byte ceiling")
+PY
+}
+
 run_restore_preexisting_docs() {
   python3 - "$SCRATCH" <<'PY'
 from pathlib import Path
@@ -259,12 +276,20 @@ for name in "${CASES[@]}"; do
       printf '\n[x](docs/guides/github-action.md)\n' >>"$README"
       expect_fail "$name" "member-list miss"
       ;;
+    reference-unpackaged-docs)
+      printf '\n[x][missing]\n\n[missing]: docs/guides/github-action.md\n' >>"$README"
+      expect_fail "$name" "member-list miss"
+      ;;
     blob-HEAD)
       rewrite_repo_link "https://github.com/Rul1an/assay/blob/HEAD/"
       expect_fail "$name" "mutable git ref"
       ;;
     blob-main)
       rewrite_repo_link "https://github.com/Rul1an/assay/blob/main/"
+      expect_fail "$name" "mutable git ref"
+      ;;
+    blob-refs-heads-main)
+      rewrite_repo_link "https://github.com/Rul1an/assay/blob/refs/heads/main/"
       expect_fail "$name" "mutable git ref"
       ;;
     workspace-readme-fallback)
@@ -301,6 +326,21 @@ PY
     hostile-bracket-bound)
       run_hostile_bracket_bound
       echo "PASS: $name"
+      ;;
+    scanner-structural-bound)
+      run_scanner_structural_bound
+      echo "PASS: $name"
+      ;;
+    oversize-readme)
+      python3 - "$README" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+with path.open("a", encoding="utf-8") as stream:
+    stream.write("x" * (1024 * 1024))
+PY
+      expect_fail "$name" "exceeds 1048576 bytes"
       ;;
     restore-preexisting-docs)
       run_restore_preexisting_docs

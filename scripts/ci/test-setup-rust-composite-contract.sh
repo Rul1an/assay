@@ -48,6 +48,27 @@ trap 'abort_is_failure "$?"' ERR
 [[ -f "${CI_YML}" ]] || fail "missing .github/workflows/ci.yml"
 [[ -f "${KERNEL_MATRIX}" ]] || fail "missing .github/workflows/kernel-matrix.yml"
 
+python3 - "${CI_YML}" <<'PY' || fail "assay-cli README mutation wiring contract failed"
+import re
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+job = re.search(
+    r"(?ms)^  publish-shape-cli:\n(.*?)(?=^  [A-Za-z0-9_-]+:|\Z)", text
+)
+if not job:
+    raise SystemExit("ci.yml missing publish-shape-cli job")
+block = job.group(1)
+mutation = "./scripts/ci/test_assay_cli_crate_readme.sh"
+checker = "./scripts/ci/check_assay_cli_crate_readme.sh"
+if block.count(mutation) != 1 or block.count(checker) != 1:
+    raise SystemExit("publish-shape-cli must call mutation suite and checker exactly once")
+if block.index(mutation) > block.index(checker):
+    raise SystemExit("README mutation suite must run before the green checker")
+print("ok   assay-cli README mutation suite runs before checker")
+PY
+
 grep -qE '^[[:space:]]*using:[[:space:]]*composite[[:space:]]*$' "${ACTION}" \
   || fail "action must declare runs.using: composite"
 ok "composite action present"

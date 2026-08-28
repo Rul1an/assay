@@ -447,6 +447,11 @@ jobs:
       - name: Verify no non-optional publish=false deps in assay-cli
         shell: bash
         run: ./scripts/ci/check_assay_cli_publish_shape.sh
+      - name: Verify assay-cli crate-owned README mutations
+        shell: bash
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: ./scripts/ci/test_assay_cli_crate_readme.sh
       - name: Verify assay-cli crate-owned README
         shell: bash
         env:

@@ -3,11 +3,10 @@
 # against `cargo package -p assay-cli --list`, not the workspace README.
 #
 # Archive README (release tarball / #2677) must pin a version. This crate
-# page must not. #2679 is still a blocked draft on Ruley's
-# ruley/2677-release-archive-readme; its scanner lives inside
-# release_readme.py and rewrites to tag-bound pins. Wait/handoff: do not
-# import that rewriter. Local extract-only linear scan (label 512 / URL
-# 2048) for crate README links. Relative targets ⊆ package members;
+# page must not. The release archive scanner rewrites to tag-bound pins;
+# do not import that different contract here. Local extract-only linear
+# scan (README 1 MiB / label 512 / URL 2048) for crate README links.
+# Relative targets ⊆ package members;
 # reject mutable git refs and version pins including package-id syntax.
 set -euo pipefail
 
@@ -49,8 +48,9 @@ ADR042_SENTENCES = (
     "A deny is fail-closed caution, not a verdict on intent; an allow is the decision to forward, never proof the action happened.",
 )
 FORBIDDEN_PREFIXES = ("docs/", "examples/", "demo/")
-MUTABLE_GIT_REF = re.compile(r"/blob/(?:HEAD|main|master)(?:/|$)")
+MUTABLE_GIT_REF = re.compile(r"/(?:blob|tree)/(?:HEAD|main|master|refs/heads/[^/?#]+)(?:/|$)")
 VERSION_PIN = re.compile(r"cargo\s+install\s+assay-cli(?:\s+--version\b|@[0-9])")
+MAX_README_BYTES = 1024 * 1024
 MAX_LINK_LABEL = 512
 MAX_LINK_URL = 2048
 
@@ -58,6 +58,17 @@ MAX_LINK_URL = 2048
 def fail(message: str) -> None:
     print(f"assay-cli crate README check failed: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+def read_bounded_utf8(path: Path, label: str) -> str:
+    with path.open("rb") as stream:
+        data = stream.read(MAX_README_BYTES + 1)
+    if len(data) > MAX_README_BYTES:
+        fail(f"{label} exceeds {MAX_README_BYTES} bytes")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        fail(f"{label} is not UTF-8: {error}")
 
 
 def load_members(path: Path) -> list[str]:
@@ -104,9 +115,8 @@ def _scan_delimited(source: str, start: int, closer: str, ceiling: int) -> int |
 
 
 def _html_attr_url(source: str, index: int) -> tuple[str, int] | None:
-    remaining = source[index:]
-    prefix = remaining[:4].lower()
-    name_len = 4 if prefix == "href" else 3 if prefix.startswith("src") and remaining[:3].lower() == "src" else 0
+    prefix = source[index : index + 4].lower()
+    name_len = 4 if prefix == "href" else 3 if prefix.startswith("src") else 0
     if name_len == 0:
         return None
     cursor = index + name_len
@@ -127,10 +137,38 @@ def _html_attr_url(source: str, index: int) -> tuple[str, int] | None:
     return source[cursor + 1 : end].strip(), end + 1
 
 
+def extract_reference_definitions(text: str) -> list[str]:
+    found: list[str] = []
+    for line in text.splitlines():
+        content = line.lstrip(" ")
+        if len(line) - len(content) > 3 or not content.startswith("["):
+            continue
+        label_end = _scan_delimited(content, 1, "]", MAX_LINK_LABEL)
+        if label_end is None or content[label_end + 1 : label_end + 2] != ":":
+            continue
+        cursor = label_end + 2
+        while cursor < len(content) and content[cursor] in " \t":
+            cursor += 1
+        if cursor >= len(content):
+            continue
+        if content[cursor] == "<":
+            end = _scan_delimited(content, cursor + 1, ">", MAX_LINK_URL)
+            if end is not None:
+                found.append(content[cursor + 1 : end].strip())
+            continue
+        end = cursor
+        ceiling = min(len(content), cursor + MAX_LINK_URL)
+        while end < ceiling and content[end] not in " \t\r\n":
+            end += 1
+        if end > cursor:
+            found.append(content[cursor:end].strip())
+    return found
+
+
 def extract_links(text: str) -> list[str]:
     # Bounded single-pass extract for crate README links only.
     # Not Ruley's #2677 archive rewriter: no version argument, no tag rewrite.
-    found: list[str] = []
+    found = extract_reference_definitions(text)
     index = 0
     length = len(text)
     while index < length:
@@ -203,11 +241,11 @@ if resolved != readme_name:
 if "README.md" not in members:
     fail("member-list miss: packaged README.md is not in cargo package --list")
 
-readme_text = (ROOT / "crates" / "assay-cli" / readme_name).read_text(encoding="utf-8")
+readme_text = read_bounded_utf8(ROOT / "crates" / "assay-cli" / readme_name, "crate README")
 if not readme_text.strip():
     fail("crate-owned README is empty")
 
-root_readme = (ROOT / "README.md").read_text(encoding="utf-8")
+root_readme = read_bounded_utf8(ROOT / "README.md", "workspace README")
 crate_sentences = extract_adr042(readme_text, "crate README")
 root_sentences = extract_adr042(root_readme, "workspace README")
 if crate_sentences != root_sentences:
