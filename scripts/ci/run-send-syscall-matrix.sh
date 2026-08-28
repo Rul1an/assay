@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # S1b driver: cgroup/PID isolate, start monitor, GO, assert effects + telemetry.
 set -euo pipefail
+S1B_HYGIENE=
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MODE="${1:-}"
@@ -726,6 +727,12 @@ case "$MODE" in
     echo "LEAF=$LEAF"
     echo "ok: cleanup-zero-status-leaf-selftest about to exit 0"
     exit 0 ;;
+  cleanup-hygiene-inherit-selftest)
+    own=$(mktemp -d /tmp/s1b-hyg-own-XXXXXX)
+    s1b_hygiene_track "$own"
+    printf 'own\n' >"$own/own"
+    echo "OWN=$own"
+    echo "ok: cleanup-hygiene-inherit-selftest" ;;
   coverage-gate) coverage_gate "${2:?coverage-gate requires a JSON path}" ;;
   mutation-selftest) mutation_selftest ;;
   endpoint-line-selftest)
@@ -754,5 +761,5 @@ case "$MODE" in
     LOG="${2:?}"
     HOUT="${3:?}"
     fail "diagnostics-selftest" ;;
-  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|cleanup-collision-selftest|cleanup-busy-leaf-selftest|cleanup-preserve-rc-selftest|cleanup-create-selftest|cleanup-zero-status-leaf-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest|diagnostics-selftest" ;;
+  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|cleanup-collision-selftest|cleanup-busy-leaf-selftest|cleanup-preserve-rc-selftest|cleanup-create-selftest|cleanup-zero-status-leaf-selftest|cleanup-hygiene-inherit-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest|diagnostics-selftest" ;;
 esac

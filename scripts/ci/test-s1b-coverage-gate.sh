@@ -731,6 +731,32 @@ zleaf=$(sed -n 's/^LEAF=//p' "$tmp/zsl.out" | head -1)
 grep -Fq 'FAIL: unremovable LEAF=' "$tmp/zsl.err" || fail "zero-status must report unremovable LEAF"
 assert_tracks_gone "$tmp/zsl.out"
 
+if ! grep -Eq '^S1B_HYGIENE=$' "$DRIVER"; then
+  fail "driver must wipe inherited S1B_HYGIENE before any mode"
+fi
+wipe_n=$(grep -n '^S1B_HYGIENE=$' "$DRIVER" | head -1 | cut -d: -f1)
+trap_n=$(grep -n "trap 'on_exit" "$DRIVER" | head -1 | cut -d: -f1)
+[[ -n "$wipe_n" && -n "$trap_n" && "$wipe_n" -lt "$trap_n" ]] \
+  || fail "S1B_HYGIENE wipe must precede EXIT trap"
+
+inherit=$(mktemp -d /tmp/ruley-inherit-XXXXXX)
+printf 'keep\n' >"$inherit/keep"
+set +e
+S1B_HYGIENE=$inherit run_bounded 12 bash "$DRIVER" cleanup-hygiene-inherit-selftest \
+  >"$tmp/inherit.out" 2>"$tmp/inherit.err"
+inherit_ec=$?
+set -e
+[[ "$inherit_ec" -eq 0 ]] || fail "cleanup-hygiene-inherit-selftest ec=$inherit_ec err=$(cat "$tmp/inherit.err")"
+grep -q 'ok: cleanup-hygiene-inherit-selftest' "$tmp/inherit.out" \
+  || fail "inherit selftest missing ok"
+[[ -f "$inherit/keep" ]] || fail "inherited S1B_HYGIENE swept $inherit"
+if grep -Fq "S1B_HYGIENE_TRACK=$inherit" "$tmp/inherit.out"; then
+  fail "selftest tracked inherited hygiene path $inherit"
+fi
+assert_tracks_gone "$tmp/inherit.out"
+rm -rf "$inherit"
+[[ ! -e "$inherit" ]] || fail "inherit fixture leftover $inherit"
+
 python3 - "$DRIVER" "$tmp/mut-prefix.sh" <<'MUT1'
 from pathlib import Path
 import sys
@@ -974,6 +1000,53 @@ set -e
 [[ "$md2_ec" -eq 1 ]] || fail "comment-only create mutant zero-status ec=$md2_ec want 1 err=$(cat "$tmp/mut-d2.err")"
 assert_tracks_gone "$tmp/mut-d.out"
 assert_tracks_gone "$tmp/mut-d2.out"
+
+python3 - "$DRIVER" "$tmp/mut-inherit-wipe.sh" <<'MUTE'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = "set -euo pipefail\nS1B_HYGIENE=\n"
+new = "set -euo pipefail\n"
+if old not in text:
+    raise SystemExit("S1B_HYGIENE wipe missing")
+dst.write_text(text.replace(old, new, 1))
+MUTE
+inherit2=$(mktemp -d /tmp/ruley-inherit-XXXXXX)
+printf 'keep\n' >"$inherit2/keep"
+set +e
+S1B_HYGIENE=$inherit2 run_bounded 12 bash "$tmp/mut-inherit-wipe.sh" cleanup-hygiene-inherit-selftest \
+  >"$tmp/mut-e.out" 2>"$tmp/mut-e.err"
+set -e
+if [[ -f "$inherit2/keep" ]]; then
+  rm -rf "$inherit2"
+  fail "removing S1B_HYGIENE wipe left inherit-selftest green"
+fi
+rm -rf "$inherit2"
+assert_tracks_gone "$tmp/mut-e.out"
+
+python3 - "$DRIVER" "$tmp/mut-inherit-comment.sh" <<'MUTF'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = "set -euo pipefail\nS1B_HYGIENE=\n"
+new = "set -euo pipefail\n# wipe inherited tracker; do not sweep caller paths\nS1B_HYGIENE=\n"
+if old not in text:
+    raise SystemExit("S1B_HYGIENE wipe missing")
+dst.write_text(text.replace(old, new, 1))
+MUTF
+inherit3=$(mktemp -d /tmp/ruley-inherit-XXXXXX)
+printf 'keep\n' >"$inherit3/keep"
+set +e
+S1B_HYGIENE=$inherit3 run_bounded 12 bash "$tmp/mut-inherit-comment.sh" cleanup-hygiene-inherit-selftest \
+  >"$tmp/mut-f.out" 2>"$tmp/mut-f.err"
+mf_ec=$?
+set -e
+[[ "$mf_ec" -eq 0 ]] || fail "comment-only wipe mutant failed err=$(cat "$tmp/mut-f.err")"
+[[ -f "$inherit3/keep" ]] || fail "comment-only wipe mutant swept inherited $inherit3"
+rm -rf "$inherit3"
+assert_tracks_gone "$tmp/mut-f.out"
 echo "ok: s1b cleanup ownership mutations"
 
 wf="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/monitor-attach-smoke.yml"
