@@ -750,6 +750,7 @@ ALLOWED = [
     (".github/workflows/ci.yml", "public-msrv", TC, "dynamic ASSAY_PUBLIC_MSRV toolchain; no composite Swatinem key"),
     (".github/workflows/ci.yml", "public-msrv", RC, "Swatinem key public-msrv-${{ env.ASSAY_PUBLIC_MSRV }}; no composite key"),
     (".github/workflows/ci.yml", "public-crate-policy", TC, "no-cache policy validation; composite always caches"),
+    (".github/workflows/ci.yml", "publish-shape-cli", TC, "cargo package --list for crate-owned README; composite always caches"),
     (".github/workflows/ci.yml", "perf", RC, "Swatinem id/output cache-hit; composite has no step id / fixed order"),
     (".github/workflows/ci.yml", "perf", TC, "paired with direct Swatinem id/output; composite forces toolchain-then-cache"),
     (".github/workflows/ci.yml", "test", TC, "paired with sccache cache-directories + cache-on-failure"),
