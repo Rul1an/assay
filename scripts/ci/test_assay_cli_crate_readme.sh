@@ -182,7 +182,7 @@ if "MD_LINK = re.compile" in checker:
 # Exec only the extract helper from the crate checker heredoc, not the cargo gate.
 start = checker.index("MAX_LINK_LABEL")
 end = checker.index("\ndef classify_relative")
-ns: dict = {}
+ns: dict = {"Path": Path}
 exec(checker[start:end], ns)
 extract = ns["extract_links"]
 if "MD_LINK" in ns:
