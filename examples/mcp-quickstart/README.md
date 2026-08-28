@@ -10,7 +10,7 @@ and one `assay.tool.decision` record under `.assay/quickstart/`.
 
 ## Prerequisites
 
-- Assay CLI via the verified release installer: `curl -fsSL https://getassay.dev/install.sh | sh`
+- Assay CLI via the release installer: `curl -fsSL https://getassay.dev/install.sh | sh`
 - Python 3
 
 Source-build alternative (requires Rust):
@@ -25,8 +25,9 @@ cargo install assay-cli --version 5.4.0 --locked
 python3 examples/mcp-quickstart/run.py
 ```
 
-Run this from a source checkout or the root of an extracted CLI release archive.
-The installer installs the binary; the archive carries this bounded quickstart.
+For v5.4.0, run this from a source checkout. The installer and the published
+v5.4.0 CLI archives install the binary but do not carry this bounded quickstart.
+The installer does not consume the published checksum or provenance sidecars.
 
 Captured runner output:
 

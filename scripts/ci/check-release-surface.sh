@@ -328,6 +328,11 @@ check_rge_bench_claims() {
 check_rust_cli_installs README.md 1
 check_absent_regex README.md 'verified release installer' \
   'installer wording must not imply checksum or provenance verification'
+check_absent_regex examples/mcp-quickstart/README.md 'verified release installer' \
+  'quickstart installer wording must not imply checksum or provenance verification'
+check_absent_regex examples/mcp-quickstart/README.md \
+  'root of an extracted CLI release archive|archive carries this bounded quickstart' \
+  'quickstart must not claim assets exist in published CLI archives'
 check_rust_cli_installs docs/getting-started/index.md 1
 check_rust_cli_installs docs/getting-started/installation.md 2
 check_rust_cli_installs docs/getting-started/quickstart.md 1
