@@ -279,9 +279,17 @@ class ReleaseArchiveReadmeContract(unittest.TestCase):
             rendered,
         )
         self.assertIn(
-            "(https://github.com/Rul1an/assay/blob/v5.5.0/demo/output/screenshots/mcp-wrap-demo.svg)",
+            "(https://raw.githubusercontent.com/Rul1an/assay/v5.5.0/demo/output/screenshots/mcp-wrap-demo.svg)",
             rendered,
         )
+        self.assertNotIn(
+            "github.com/Rul1an/assay/blob/v5.5.0/demo/output/screenshots/mcp-wrap-demo.svg",
+            rendered,
+        )
+        self.assertNotIn("github.com/Rul1an/assay/blob/main/", rendered)
+        self.assertNotIn("github.com/Rul1an/assay/tree/main/", rendered)
+        self.assertNotIn("github.com/Rul1an/assay/raw/main/", rendered)
+        self.assertIn('href="LICENSE"', rendered)
         self.assertIn(
             'href="https://github.com/Rul1an/assay/blob/v5.5.0/docs/security/OWASP-MCP-TOP10-MAPPING.md"',
             rendered,
@@ -379,6 +387,164 @@ quickstart assets.
             rendered,
         )
         self.assertNotIn(CHECKOUT_SENTENCE, rendered)
+
+PINNED_SOURCE = (
+    "cargo install assay-cli --version 5.4.0 --locked\n"
+    "Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).\n"
+    "For v5.4.0, run the last command from a source checkout. The installer and the\n"
+    "published v5.4.0 CLI archive install the binary but do not carry the bounded\n"
+    "quickstart assets.\n"
+)
+PACKED_MEMBER_PATHS = frozenset(
+    {
+        "LICENSE",
+        "examples/mcp-quickstart",
+        "examples/mcp-quickstart/",
+        "examples/mcp-quickstart/policy.yaml",
+        "examples/mcp-quickstart/run.py",
+        "examples/mcp-quickstart/mock_server.py",
+    }
+)
+
+
+class ReleaseArchiveReadmeFollowOn(unittest.TestCase):
+    def test_renderer_rewrites_first_party_mutable_main_ref(self):
+        module = load_module()
+        source = PINNED_SOURCE + (
+            '<a href="https://github.com/Rul1an/assay/blob/main/LICENSE">'
+            "license</a>\n"
+            "[tree](https://github.com/Rul1an/assay/tree/HEAD/docs/)\n"
+            "[raw](https://raw.githubusercontent.com/Rul1an/assay/master/CHANGELOG.md)\n"
+        )
+        rendered = module.render_release_readme(source, "5.5.0")
+        self.assertNotIn("/blob/main/", rendered)
+        self.assertNotIn("/tree/HEAD/", rendered)
+        self.assertNotIn("/master/", rendered)
+        self.assertIn('href="LICENSE"', rendered)
+        self.assertIn(
+            "[tree](https://github.com/Rul1an/assay/tree/v5.5.0/docs/)",
+            rendered,
+        )
+        self.assertIn(
+            "[raw](https://github.com/Rul1an/assay/blob/v5.5.0/CHANGELOG.md)",
+            rendered,
+        )
+
+    def test_renderer_uses_raw_tag_urls_for_media(self):
+        module = load_module()
+        source = PINNED_SOURCE + (
+            "![demo](demo/output/screenshots/mcp-wrap-demo.svg)\n"
+            "![gif](examples/privileged-action-gate/demo.gif)\n"
+        )
+        rendered = module.render_release_readme(source, "5.5.0")
+        self.assertIn(
+            "![demo](https://raw.githubusercontent.com/Rul1an/assay/v5.5.0/demo/output/screenshots/mcp-wrap-demo.svg)",
+            rendered,
+        )
+        self.assertIn(
+            "![gif](https://raw.githubusercontent.com/Rul1an/assay/v5.5.0/examples/privileged-action-gate/demo.gif)",
+            rendered,
+        )
+        self.assertNotIn("github.com/Rul1an/assay/blob/", rendered)
+
+    def test_renderer_refuses_a_nonexistent_quickstart_member(self):
+        module = load_module()
+        source = PINNED_SOURCE + "[missing](examples/mcp-quickstart/not-packed.py)\n"
+        with self.assertRaisesRegex(ValueError, "assembled archive member"):
+            module.render_release_readme(source, "5.5.0")
+
+    def test_renderer_refuses_a_github_workflow_path(self):
+        module = load_module()
+        source = PINNED_SOURCE + "[ci](.github/workflows/ci.yml)\n"
+        with self.assertRaisesRegex(ValueError, "unclassifiable"):
+            module.render_release_readme(source, "5.5.0")
+
+    def test_renderer_refuses_a_reference_style_link(self):
+        module = load_module()
+        source = PINNED_SOURCE + "[see][docs]\n\n[docs]: docs/concepts/scope.md\n"
+        with self.assertRaisesRegex(ValueError, "unclassifiable"):
+            module.render_release_readme(source, "5.5.0")
+
+    def test_renderer_refuses_an_overlong_link_label(self):
+        module = load_module()
+        source = PINNED_SOURCE + "[" + ("A" * 600) + "](docs/concepts/scope.md)\n"
+        with self.assertRaisesRegex(ValueError, "unclassifiable"):
+            module.render_release_readme(source, "5.5.0")
+
+    def test_renderer_rewrites_html_img_src(self):
+        module = load_module()
+        source = PINNED_SOURCE + (
+            '<img src="demo/output/screenshots/mcp-wrap-demo.svg" alt="demo">\n'
+        )
+        rendered = module.render_release_readme(source, "5.5.0")
+        self.assertIn(
+            'src="https://raw.githubusercontent.com/Rul1an/assay/v5.5.0/demo/output/screenshots/mcp-wrap-demo.svg"',
+            rendered,
+        )
+
+    def test_renderer_rewrites_single_quoted_href(self):
+        module = load_module()
+        source = PINNED_SOURCE + "<a href='docs/concepts/scope.md'>scope</a>\n"
+        rendered = module.render_release_readme(source, "5.5.0")
+        self.assertIn(
+            "href='https://github.com/Rul1an/assay/blob/v5.5.0/docs/concepts/scope.md'",
+            rendered,
+        )
+
+    def test_renderer_peels_dot_slash_and_rejects_traversal(self):
+        module = load_module()
+        source = PINNED_SOURCE + "[ok](./LICENSE)\n"
+        rendered = module.render_release_readme(source, "5.5.0")
+        self.assertIn("[ok](LICENSE)", rendered)
+        self.assertNotIn("lstrip(", (ROOT / "scripts/ci/release_readme.py").read_text(encoding="utf-8"))
+        for hostile in ("../LICENSE", "/LICENSE", ".../LICENSE"):
+            with self.subTest(path=hostile):
+                with self.assertRaisesRegex(ValueError, "traversal|unclassifiable"):
+                    module.render_release_readme(
+                        PINNED_SOURCE + f"[x]({hostile})\n", "5.5.0"
+                    )
+
+    def test_package_steps_assemble_members_before_rendering(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        for heading in ("Package (Unix)", "Package (Windows)"):
+            step = package_step(workflow, heading)
+            render_at = step.find("release_readme.py")
+            self.assertGreater(render_at, 0, heading)
+            for name, fragment in PACKED_SOURCE_MEMBERS:
+                copy_at = step.find(fragment)
+                self.assertGreater(copy_at, -1, f"{heading} missing {name}")
+                self.assertLess(copy_at, render_at, f"{heading} {name} copied after render")
+
+    def test_unix_and_windows_assembled_member_sets_render(self):
+        module = load_module()
+        source = (ROOT / "README.md").read_text(encoding="utf-8")
+        members = module.expand_archive_members(
+            {
+                "assay",
+                "LICENSE",
+                "examples/mcp-quickstart/policy.yaml",
+                "examples/mcp-quickstart/run.py",
+                "examples/mcp-quickstart/mock_server.py",
+            }
+        )
+        self.assertTrue(PACKED_MEMBER_PATHS <= members)
+        rendered = module.render_release_readme(source, "5.5.0", members=members)
+        self.assertIn("[MIT](LICENSE)", rendered)
+        self.assertIn(
+            "https://raw.githubusercontent.com/Rul1an/assay/v5.5.0/demo/output/screenshots/mcp-wrap-demo.svg",
+            rendered,
+        )
+        self.assertNotRegex(rendered, r"github\.com/Rul1an/assay/(blob|tree|raw)/(HEAD|main|master)/")
+        self.assertNotRegex(
+            rendered, r"raw\.githubusercontent\.com/Rul1an/assay/(HEAD|main|master)/"
+        )
+
+    def test_kernel_matrix_paths_include_readme(self):
+        workflow = (ROOT / ".github/workflows/kernel-matrix.yml").read_text(encoding="utf-8")
+        paths = workflow.split("paths:", 1)[1].split("workflow_dispatch", 1)[0]
+        self.assertIn('"README.md"', paths)
+
+
 
 
 if __name__ == "__main__":

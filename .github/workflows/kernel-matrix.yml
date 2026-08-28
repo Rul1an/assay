@@ -32,6 +32,7 @@ on:
       # Candidate source identity is checked by the pre-commit leg below.
       - "Cargo.toml"
       - "CHANGELOG.md"
+      - "README.md"
       - "docs/reference/release.md"
       # The editor MCP recipe is judged by the editor-mcp-recipe-truth hook, which runs
       # under Lint (pre-commit) here. `scripts/**` covers a guard change; a recipe-only drift
