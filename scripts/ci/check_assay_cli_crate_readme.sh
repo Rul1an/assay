@@ -204,7 +204,8 @@ def load_packaged_crate(path: Path) -> tuple[list[str], str, str, str]:
 
 def reject_mutable_github_content_link(raw: str) -> None:
     parsed = urlsplit(raw)
-    if parsed.hostname != "github.com":
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if hostname not in ("github.com", "www.github.com"):
         return
     parts = parsed.path.split("/")
     if len(parts) < 4 or not parts[1] or not parts[2]:

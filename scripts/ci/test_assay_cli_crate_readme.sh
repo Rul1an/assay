@@ -32,6 +32,8 @@ CASES=(
   blob-userinfo-main
   blob-port-main
   blob-scheme-relative-main
+  blob-www-main
+  blob-trailing-dot-main
   blob-commit
   blob-refs-heads-main
   workspace-readme-fallback
@@ -546,6 +548,14 @@ for name in "${CASES[@]}"; do
       ;;
     blob-scheme-relative-main)
       rewrite_repo_link "//github.com/Rul1an/assay/blob/main/README.md"
+      expect_fail "$name" "mutable git ref"
+      ;;
+    blob-www-main)
+      rewrite_repo_link "https://www.github.com/Rul1an/assay/blob/main/README.md"
+      expect_fail "$name" "mutable git ref"
+      ;;
+    blob-trailing-dot-main)
+      rewrite_repo_link "https://github.com./Rul1an/assay/blob/main/README.md"
       expect_fail "$name" "mutable git ref"
       ;;
     blob-commit)
