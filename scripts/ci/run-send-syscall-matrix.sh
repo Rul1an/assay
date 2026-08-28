@@ -229,6 +229,8 @@ remove_owned_workdir() {
     if ! s1b_path_is_owned_object "$wd"; then
       true
     else
+      echo "WORKDIR_RESIDUE=$wd"
+      S1B_WORKDIR_RESIDUE=$wd
       return 0
     fi
   fi
@@ -605,11 +607,10 @@ case "$MODE" in
     [[ ! -e "$fifo" ]] || fail "FIFO leftover $fifo"
     [[ ! -d "$leaf" ]] || fail "leaf leftover $leaf"
     wd=$WORKDIR
-    if [[ -e "$wd" ]]; then
-      [[ -d "$wd" ]] || fail "WORKDIR leftover is not a dir $wd"
-      [[ -z "$(find "$wd" -mindepth 1 -maxdepth 1)" ]] || fail "WORKDIR leftover contents $wd"
-      rmdir "$wd" || fail "WORKDIR residue $wd"
-    fi
+    [[ "${S1B_WORKDIR_RESIDUE:-}" == "$wd" ]] || fail "cleanup omitted WORKDIR_RESIDUE contract for $wd"
+    [[ -d "$wd" ]] || fail "owned WORKDIR residue missing $wd"
+    [[ -z "$(find "$wd" -mindepth 1 -maxdepth 1)" ]] || fail "WORKDIR leftover contents $wd"
+    rmdir "$wd" || fail "WORKDIR residue $wd"
     bad=$(mktemp -d)
     s1b_hygiene_track "$bad"
     printf 'keep\n' >"$bad/keep"
@@ -667,11 +668,12 @@ case "$MODE" in
     fi
     rm -rf "$sib" "$rt" "$sib3"
     printf 'owned\n' >"$WORKDIR/owned-marker"
+    S1B_WORKDIR_RESIDUE=
     remove_owned_workdir "$WORKDIR"
-    if [[ -e "$assigned" ]]; then
-      [[ -z "$(find "$assigned" -mindepth 1 -maxdepth 1)" ]] || fail "assigned WORKDIR leftover contents $assigned"
-      rmdir "$assigned" || fail "assigned WORKDIR residue $assigned"
-    fi
+    [[ "${S1B_WORKDIR_RESIDUE:-}" == "$assigned" ]] || fail "cleanup omitted WORKDIR_RESIDUE contract for $assigned"
+    [[ -d "$assigned" ]] || fail "assigned WORKDIR residue missing $assigned"
+    [[ -z "$(find "$assigned" -mindepth 1 -maxdepth 1)" ]] || fail "assigned WORKDIR leftover contents $assigned"
+    rmdir "$assigned" || fail "assigned WORKDIR residue $assigned"
     WORKDIR=""
     echo "ok: cleanup-collision-selftest" ;;
   cleanup-busy-leaf-selftest)

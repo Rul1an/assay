@@ -652,6 +652,8 @@ cec=$?
 set -e
 [[ "$cec" -eq 0 ]] || fail "cleanup-selftest ec=$cec err=$(cat "$tmp/cleanup.err")"
 grep -q 'ok: cleanup-selftest' "$tmp/cleanup.out" || fail "cleanup-selftest missing ok"
+grep -Eq '^WORKDIR_RESIDUE=/tmp/s1b-cleanup-selftest-' "$tmp/cleanup.out" \
+  || fail "cleanup-selftest missing WORKDIR_RESIDUE contract"
 echo "ok: mutation-selftest and cleanup-selftest"
 
 owned_active=$(fn_active s1b_owned_workdir)
@@ -667,6 +669,14 @@ fi
 if grep -Fq 'rmdir "$wd" 2>/dev/null' "$DRIVER"; then
   fail "suppressed pathname rmdir of WORKDIR is still present"
 fi
+if grep -Fq 's1b_hygiene_track "$wd"' "$DRIVER"; then
+  fail "remove path hygiene-tracks the WORKDIR pathname"
+fi
+if grep -Fq 's1b_hygiene_track "$WORKDIR"' <<<"$(fn_active create_owned_workdir)$(fn_active remove_owned_workdir)$(fn_active run_matrix)"; then
+  fail "create/remove/run_matrix hygiene-tracks WORKDIR"
+fi
+assert_nl_snippet "$(fn_active remove_owned_workdir)" 'echo "WORKDIR_RESIDUE=$wd"' \
+  "remove_owned_workdir must announce WORKDIR_RESIDUE"
 if grep -Eq 'fail ' <<<"$(fn_active cleanup_work)"; then
   fail "cleanup_work must not call fail"
 fi
@@ -857,6 +867,12 @@ grep -q 'ok: cleanup-empty-swap-selftest about to exit 0' "$tmp/es.out" \
   || fail "empty-swap selftest missing ok line"
 grep -Fq 'FAIL: WORKDIR pathname does not name the owned object:' "$tmp/es.err" \
   || fail "empty-swap must diagnose pathname/object mismatch: $(cat "$tmp/es.err")"
+if grep -q '^WORKDIR_RESIDUE=' "$tmp/es.out"; then
+  fail "empty-swap announced WORKDIR_RESIDUE after post-check replacement"
+fi
+if grep -Fxq "S1B_HYGIENE_TRACK=$es_created" "$tmp/es.out"; then
+  fail "empty-swap hygiene-tracked the created pathname $es_created"
+fi
 [[ -d "$es_created" ]] || fail "empty-swap deleted the replacement at $es_created"
 [[ ! -e "$es_created/owned-marker" ]] || fail "empty-swap left marker in replacement $es_created"
 [[ -d "$es_leaked" ]] || fail "empty-swap lost the renamed owned object $es_leaked"
@@ -958,18 +974,19 @@ src, dst = Path(sys.argv[1]), Path(sys.argv[2])
 text = src.read_text()
 old = (
     "    printf 'owned\\n' >\"$WORKDIR/owned-marker\"\n"
+    "    S1B_WORKDIR_RESIDUE=\n"
     "    remove_owned_workdir \"$WORKDIR\"\n"
-    "    if [[ -e \"$assigned\" ]]; then\n"
-    "      [[ -z \"$(find \"$assigned\" -mindepth 1 -maxdepth 1)\" ]] || fail \"assigned WORKDIR leftover contents $assigned\"\n"
-    "      rmdir \"$assigned\" || fail \"assigned WORKDIR residue $assigned\"\n"
-    "    fi\n"
+    "    [[ \"${S1B_WORKDIR_RESIDUE:-}\" == \"$assigned\" ]] || fail \"cleanup omitted WORKDIR_RESIDUE contract for $assigned\"\n"
+    "    [[ -d \"$assigned\" ]] || fail \"assigned WORKDIR residue missing $assigned\"\n"
+    "    [[ -z \"$(find \"$assigned\" -mindepth 1 -maxdepth 1)\" ]] || fail \"assigned WORKDIR leftover contents $assigned\"\n"
+    "    rmdir \"$assigned\" || fail \"assigned WORKDIR residue $assigned\"\n"
 )
 new = (
     "    printf 'owned\\n' >\"$WORKDIR/owned-marker\"\n"
-    "    if [[ -e \"$assigned\" ]]; then\n"
-    "      [[ -z \"$(find \"$assigned\" -mindepth 1 -maxdepth 1)\" ]] || fail \"assigned WORKDIR leftover contents $assigned\"\n"
-    "      rmdir \"$assigned\" || fail \"assigned WORKDIR residue $assigned\"\n"
-    "    fi\n"
+    "    [[ \"${S1B_WORKDIR_RESIDUE:-}\" == \"$assigned\" ]] || fail \"cleanup omitted WORKDIR_RESIDUE contract for $assigned\"\n"
+    "    [[ -d \"$assigned\" ]] || fail \"assigned WORKDIR residue missing $assigned\"\n"
+    "    [[ -z \"$(find \"$assigned\" -mindepth 1 -maxdepth 1)\" ]] || fail \"assigned WORKDIR leftover contents $assigned\"\n"
+    "    rmdir \"$assigned\" || fail \"assigned WORKDIR residue $assigned\"\n"
 )
 if old not in text:
     raise SystemExit("collision production remove missing")
@@ -1397,6 +1414,8 @@ old = (
     "    if ! s1b_path_is_owned_object \"$wd\"; then\n"
     "      true\n"
     "    else\n"
+    "      echo \"WORKDIR_RESIDUE=$wd\"\n"
+    "      S1B_WORKDIR_RESIDUE=$wd\n"
     "      return 0\n"
     "    fi\n"
 )
@@ -1422,10 +1441,68 @@ mo_created=$(sed -n 's/^CREATED=//p' "$tmp/mut-o.out" | head -1)
 mo_leaked=$(sed -n 's/^LEAKED=//p' "$tmp/mut-o.out" | head -1)
 [[ -n "$mo_created" && -n "$mo_leaked" ]] || fail "rmdir-restore mutant did not report CREATED/LEAKED"
 [[ "$mo_ec" -eq 0 ]] || fail "rmdir-restore mutant did not stay 0 (ec=$mo_ec)"
+if grep -q '^WORKDIR_RESIDUE=' "$tmp/mut-o.out"; then
+  fail "rmdir-restore mutant announced WORKDIR_RESIDUE"
+fi
 [[ ! -e "$mo_created" ]] || fail "rmdir-restore mutant left replacement $mo_created"
 [[ -d "$mo_leaked" ]] || fail "rmdir-restore mutant lost leaked object $mo_leaked"
 rm -rf ${mo_leaked:+"$mo_leaked"} ${mo_created:+"$mo_created"}
 assert_tracks_gone "$tmp/mut-o.out"
+
+python3 - "$DRIVER" "$tmp/mut-silent-residue.sh" <<'MUTR'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = (
+    "      echo \"WORKDIR_RESIDUE=$wd\"\n"
+    "      S1B_WORKDIR_RESIDUE=$wd\n"
+    "      return 0\n"
+)
+new = (
+    "      return 0\n"
+)
+if old not in text:
+    raise SystemExit("WORKDIR_RESIDUE contract missing")
+dst.write_text(text.replace(old, new, 1))
+MUTR
+set +e
+run_bounded 12 bash "$tmp/mut-silent-residue.sh" cleanup-selftest >"$tmp/mut-r.out" 2>"$tmp/mut-r.err"
+mr_ec=$?
+set -e
+[[ "$mr_ec" -ne 0 ]] || fail "silent WORKDIR_RESIDUE mutant left cleanup-selftest green"
+if grep -q 'ok: cleanup-selftest' "$tmp/mut-r.out"; then
+  fail "silent residue mutant printed cleanup ok"
+fi
+assert_tracks_gone "$tmp/mut-r.out"
+
+python3 - "$DRIVER" "$tmp/mut-hygiene-wd.sh" <<'MUTY'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = (
+    "  find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +\n"
+    "  s1b_release_owned_cwd\n"
+)
+new = (
+    "  find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +\n"
+    "  s1b_release_owned_cwd\n"
+    "  s1b_hygiene_track \"$wd\"\n"
+)
+if old not in text:
+    raise SystemExit("cwd clean + release missing")
+dst.write_text(text.replace(old, new, 1))
+MUTY
+run_empty_swap_selftest "$tmp/mut-hygiene-wd.sh" "$tmp/mut-y.out" "$tmp/mut-y.err"
+my_ec=$(cat "$tmp/mut-y.out.ec")
+[[ "$my_ec" -ne 0 ]] || fail "hygiene-track mutant stayed 0 (rmdir-restore is the zero fail-mode)"
+my_created=$(sed -n 's/^CREATED=//p' "$tmp/mut-y.out" | head -1)
+my_leaked=$(sed -n 's/^LEAKED=//p' "$tmp/mut-y.out" | head -1)
+[[ -n "$my_created" && -n "$my_leaked" ]] || fail "hygiene-track mutant did not report CREATED/LEAKED"
+[[ ! -e "$my_created" ]] || fail "hygiene-track mutant left replacement $my_created"
+rm -rf ${my_leaked:+"$my_leaked"} ${my_created:+"$my_created"}
+assert_tracks_gone "$tmp/mut-y.out"
 
 echo "ok: s1b cleanup ownership mutations"
 
