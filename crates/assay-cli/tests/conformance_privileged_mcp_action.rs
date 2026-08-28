@@ -149,9 +149,19 @@ fn sha256_hex(bytes: &[u8]) -> String {
         })
 }
 
-/// Success JSON stdout pins after #2574 projection members (`profile_selection`,
-/// `input_profile`, `input_profile_status`). Digest is SHA-256 of raw stdout with
-/// no trailing-newline strip. Three unique forms: ok-001; shared ok-002/003/004; ok-005.
+/// Pre-change success stdout pins measured 2026-08-16 from the assay binary built at
+/// `656e692ff02a00052d833d0676e229452c3f23fe` in a detached temporary sibling
+/// worktree (`cargo build -p assay-cli`). Command:
+/// `assay evidence verify-privileged-mcp-action --format json <bundle>`.
+/// Corpus: committed `conformance/privileged-mcp-action-v0/vectors/` (byte-identical
+/// to that commit). Digest is SHA-256 of raw stdout with no trailing-newline strip.
+/// Three unique forms: ok-001; shared ok-002/003/004; ok-005.
+///
+/// After #2574 the same command was remeasured because the report gained additive
+/// `profile_selection` / `input_profile` / `input_profile_status` members. Digests
+/// below are those post-remeasure pins. The three members are report-shape
+/// requirements outside the corpus comparison surface; corpus vectors do not
+/// discriminate them.
 fn prechange_success_stdout_pin(id: &str) -> (usize, &'static str) {
     match id {
         "ok-001-deny-bound-observation" => (

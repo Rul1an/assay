@@ -44,12 +44,25 @@ fn verify(bundle: &Path, profile_version: Option<&str>) -> (Value, i32) {
 }
 
 fn assert_undeclared_legacy_input(report: &Value) {
-    assert!(
-        report["input_profile"].is_null(),
-        "v0/v1 carry no profile id, got {}",
-        report["input_profile"]
+    assert_eq!(
+        report.get("input_profile"),
+        Some(&Value::Null),
+        "input_profile must be present as JSON null, not omitted"
     );
-    assert_eq!(report["input_profile_status"], "undeclared_legacy");
+    assert_eq!(
+        report.get("input_profile_status"),
+        Some(&Value::String("undeclared_legacy".into())),
+        "input_profile_status must be present"
+    );
+}
+
+fn assert_projection_members(report: &Value, selection: &str) {
+    assert_eq!(
+        report.get("profile_selection"),
+        Some(&Value::String(selection.into())),
+        "profile_selection must be present"
+    );
+    assert_undeclared_legacy_input(report);
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -78,10 +91,9 @@ fn report_always_projects_undeclared_legacy_input_identity() {
             "profile remains for compatibility"
         );
         match version {
-            None => assert_eq!(report["profile_selection"], "default"),
-            Some(_) => assert_eq!(report["profile_selection"], "explicit"),
+            None => assert_projection_members(&report, "default"),
+            Some(_) => assert_projection_members(&report, "explicit"),
         }
-        assert_undeclared_legacy_input(&report);
     }
 }
 
@@ -96,10 +108,13 @@ fn identical_bytes_change_selected_profile_not_input_identity() {
     assert_ne!(v0["profile"], v1["profile"]);
     assert_eq!(v0["profile_selection"], "explicit");
     assert_eq!(v1["profile_selection"], "explicit");
-    assert_eq!(v0["input_profile"], v1["input_profile"]);
-    assert_eq!(v0["input_profile_status"], v1["input_profile_status"]);
-    assert_undeclared_legacy_input(&v0);
-    assert_undeclared_legacy_input(&v1);
+    assert_eq!(v0.get("input_profile"), v1.get("input_profile"));
+    assert_eq!(
+        v0.get("input_profile_status"),
+        v1.get("input_profile_status")
+    );
+    assert_projection_members(&v0, "explicit");
+    assert_projection_members(&v1, "explicit");
     assert_eq!(v0["verdict"], v1["verdict"]);
     assert_eq!(v0["claims"], v1["claims"]);
 }
@@ -112,13 +127,11 @@ fn default_v0_versus_explicit_v0_distinguishes_selection_not_verdict() {
     assert_eq!(ee, 0);
     assert_eq!(default["profile"], PROFILE_V0);
     assert_eq!(explicit["profile"], PROFILE_V0);
-    assert_eq!(default["profile_selection"], "default");
-    assert_eq!(explicit["profile_selection"], "explicit");
+    assert_projection_members(&default, "default");
+    assert_projection_members(&explicit, "explicit");
     assert_ne!(default["profile_selection"], explicit["profile_selection"]);
     assert_eq!(default["verdict"], explicit["verdict"]);
     assert_eq!(default["claims"], explicit["claims"]);
-    assert_undeclared_legacy_input(&default);
-    assert_undeclared_legacy_input(&explicit);
 }
 
 #[test]
@@ -176,4 +189,25 @@ fn in_namespace_envelope_without_payload_schema_omits_observed_schema() {
         "missing payload schema must not publish the envelope type as observed_schema, got {}",
         finding
     );
+}
+
+#[test]
+fn stage1_failure_report_projects_undeclared_legacy_input() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let missing = dir.path().join("missing.bundle.tar.gz");
+    let (report, exit) = verify(&missing, None);
+    assert_eq!(exit, 2);
+    assert_eq!(report["bundle_integrity"], "fail");
+    assert!(report.get("verdict").is_none());
+    assert_projection_members(&report, "default");
+}
+
+#[test]
+fn invalid_verdict_report_projects_undeclared_legacy_input() {
+    let bundle = v1_corpus().join("vectors/ok-001-deny-bound-v1-observation.bundle.tar.gz");
+    let (report, exit) = verify(&bundle, None);
+    assert_eq!(exit, 2);
+    assert_eq!(report["verdict"], "invalid");
+    assert!(report.get("claims").is_none(), "claims must stay absent");
+    assert_projection_members(&report, "default");
 }

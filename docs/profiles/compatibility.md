@@ -20,6 +20,9 @@ Frozen `privileged-mcp-action/v0` and `privileged-mcp-action/v1` bundles carry
 | `input_profile` | JSON `null` |
 | `input_profile_status` | `undeclared_legacy` |
 
+These three members are report-shape requirements outside the corpus comparison
+surface; corpus vectors do not discriminate them.
+
 Consumers MUST NOT infer producer profile, producer release, migration, rollback,
 or profile provenance from `report.profile`. Changing `--profile-version` MAY
 change the selected interpreter and MUST NOT create evidence of input profile
