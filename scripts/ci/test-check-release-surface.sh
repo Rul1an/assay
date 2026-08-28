@@ -24,12 +24,12 @@ Assay supports the current published release, **v5.1.0**.
 
 ## Reporting Vulnerabilities
 
-Report vulnerabilities through GitHub private vulnerability reporting.
+Report vulnerabilities through https://github.com/Rul1an/assay/security/advisories/new.
 DOC
 cat > "$TMP/docs/COMMUNITY.md" <<'DOC'
 # Community Strategy
 
-Conduct reports use the repository's documented private maintainer channel.
+For project or Discord conduct reports, send a private DM to an Assay maintainer in Discord.
 DOC
 cat > "$TMP/Cargo.toml" <<'TOML'
 [workspace]
@@ -256,11 +256,17 @@ mutate_and_expect_failure misleading-example-installer examples/mcp-quickstart/R
   's/release installer/verified release installer/' \
   'quickstart installer wording must not imply checksum or provenance verification'
 mutate_and_expect_failure third-party-security-mailbox SECURITY.md \
-  's/Report vulnerabilities through GitHub private vulnerability reporting\./Email: security@assay.dev/' \
+  's#https://github.com/Rul1an/assay/security/advisories/new#security@assay.dev#' \
   'third-party reporting address'
 mutate_and_expect_failure third-party-conduct-mailbox docs/COMMUNITY.md \
-  's/repository.s documented private maintainer channel/safety@assay.dev/' \
+  's/send a private DM to an Assay maintainer in Discord/safety@assay.dev/' \
   'third-party reporting address'
+mutate_and_expect_failure missing-security-report-route SECURITY.md \
+  's#https://github.com/Rul1an/assay/security/advisories/new#https://github.com/Rul1an/assay/security#' \
+  'security policy must publish the private vulnerability-reporting route'
+mutate_and_expect_failure missing-project-conduct-route docs/COMMUNITY.md \
+  's/send a private DM to an Assay maintainer in Discord/use the platform abuse form/' \
+  'community policy must retain a project-operated conduct route'
 mutate_and_expect_failure stale-security-supported-line SECURITY.md \
   's/Assay supports the current published release, \*\*v5.1.0\*\*\./| **v2.x** | Supported |/' \
   'supported release must match v5.1.0'
@@ -367,8 +373,8 @@ echo "PASS: duplicate-release"
 mutate_and_expect_failure stale-cli-version docs/reference/cli/index.md \
   's/# assay 5.1.0/# assay 5.0.0/' 'documented CLI version drift'
 
-if [ "$mutation_count" -ne 50 ]; then
-  echo "FAIL: expected 50 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 52 ]; then
+  echo "FAIL: expected 52 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

@@ -31,7 +31,10 @@
 
 ### Code of Conduct
 We follow the [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
-For conduct on GitHub, use GitHub's [private abuse-reporting flow](https://support.github.com/contact/report-abuse).
+For project or Discord conduct reports, send a private DM to an Assay maintainer in Discord; do not
+post report details publicly. For abusive GitHub-hosted content, use GitHub's
+[in-product reporting flow](https://docs.github.com/en/communities/maintaining-your-safety-on-github/reporting-abuse-or-spam)
+and choose **Report to repository admins** when GitHub offers that option.
 Security vulnerabilities belong in the repository's private vulnerability-reporting form, not in a
 public issue.
 
