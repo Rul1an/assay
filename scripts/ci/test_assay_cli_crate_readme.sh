@@ -176,6 +176,7 @@ run_hostile_bracket_bound() {
 from pathlib import Path
 import re
 import sys
+import tarfile
 import time
 
 checker = Path(sys.argv[1]).read_text(encoding="utf-8")
@@ -185,7 +186,7 @@ if "MD_LINK = re.compile" in checker:
 # Exec only the extract helper from the crate checker heredoc, not the cargo gate.
 start = checker.index("MAX_LINK_LABEL")
 end = checker.index("\ndef classify_relative")
-ns: dict = {"Path": Path}
+ns: dict = {"Path": Path, "re": re, "sys": sys, "tarfile": tarfile}
 exec(checker[start:end], ns)
 extract = ns["extract_links"]
 if "MD_LINK" in ns:
