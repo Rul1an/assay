@@ -205,20 +205,26 @@ def load_packaged_crate(path: Path) -> tuple[list[str], str, str, str]:
 def reject_mutable_github_content_link(raw: str) -> None:
     parsed = urlsplit(raw)
     hostname = (parsed.hostname or "").lower().rstrip(".")
-    if hostname not in ("github.com", "www.github.com"):
-        return
     parts = parsed.path.split("/")
-    if len(parts) < 4 or not parts[1] or not parts[2]:
-        return
-    if parts[3] not in ("blob", "tree"):
+    ref: str | None = None
+    if hostname in ("github.com", "www.github.com"):
+        if len(parts) < 5 or not parts[1] or not parts[2]:
+            return
+        if parts[3] not in ("blob", "tree", "raw"):
+            return
+        ref = parts[4]
+    elif hostname == "raw.githubusercontent.com":
+        if len(parts) < 4 or not parts[1] or not parts[2]:
+            return
+        ref = parts[3]
+    else:
         return
     if (
         parsed.scheme != "https"
         or parsed.username is not None
         or parsed.password is not None
         or parsed.port is not None
-        or len(parts) < 5
-        or re.fullmatch(r"[0-9a-fA-F]{40}", parts[4]) is None
+        or re.fullmatch(r"[0-9a-fA-F]{40}", ref) is None
     ):
         fail(f"mutable git ref in {raw}")
 

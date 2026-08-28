@@ -36,6 +36,10 @@ CASES=(
   blob-trailing-dot-main
   blob-commit
   blob-refs-heads-main
+  raw-github-main
+  raw-github-commit
+  github-raw-main
+  github-raw-commit
   workspace-readme-fallback
   version-pinned-install
   version-pinned-package-id
@@ -565,6 +569,22 @@ for name in "${CASES[@]}"; do
     blob-refs-heads-main)
       rewrite_repo_link "https://github.com/Rul1an/assay/blob/refs/heads/main/"
       expect_fail "$name" "mutable git ref"
+      ;;
+    raw-github-main)
+      rewrite_repo_link "https://raw.githubusercontent.com/Rul1an/assay/main/README.md"
+      expect_fail "$name" "mutable git ref"
+      ;;
+    raw-github-commit)
+      rewrite_repo_link "https://raw.githubusercontent.com/Rul1an/assay/0123456789abcdef0123456789abcdef01234567/README.md"
+      expect_pass "$name"
+      ;;
+    github-raw-main)
+      rewrite_repo_link "https://github.com/Rul1an/assay/raw/main/README.md"
+      expect_fail "$name" "mutable git ref"
+      ;;
+    github-raw-commit)
+      rewrite_repo_link "https://github.com/Rul1an/assay/raw/0123456789abcdef0123456789abcdef01234567/README.md"
+      expect_pass "$name"
       ;;
     workspace-readme-fallback)
       python3 - "$MANIFEST" <<'PY'
