@@ -291,8 +291,7 @@ run_matrix_active=$(fn_active run_matrix)
 want_run_matrix=$(cat <<'EOF'
 run_matrix() {
 local expect_send="$1" n=0 hpid="" hc=0 mc=0 p2 p3
-mkdir -p "$WORKDIR"
-record_owned_workdir "$WORKDIR"
+create_owned_workdir || fail "owned WORKDIR create failed"
 FIFO="$WORKDIR/go.fifo"
 LOG="$WORKDIR/monitor.log"
 HOUT="$WORKDIR/harness.out"
@@ -344,6 +343,17 @@ EOF
 )
 [[ "$run_matrix_active" == "$want_run_matrix" ]] \
   || fail "run_matrix active body must be the closed startup-then-assert shape"
+n_create=$(count_active_fn_sigs "$driver_active" create_owned_workdir)
+[[ "$n_create" -eq 1 ]] || fail "driver must define create_owned_workdir() exactly once"
+if grep -Fq 'S1B_HYGIENE' <<<"$(fn_active run_matrix)$(fn_active create_owned_workdir)"; then
+  fail "production run_matrix/create_owned_workdir must not set S1B_HYGIENE"
+fi
+if grep -Fq 's1b-send-matrix' <<<"$(fn_active create_owned_workdir)"; then
+  fail "create_owned_workdir must not use the historical s1b-send-matrix default"
+fi
+if grep -Eq '^WORKDIR=.*s1b-send-matrix' "$DRIVER"; then
+  fail "WORKDIR must not default to s1b-send-matrix"
+fi
 wait_ep_block=$(printf '%s\n' \
   'wait_endpoint "$hpid" sendto "127.0.0.1" "$p2"' \
   'wait_endpoint "$hpid" sendmsg "127.0.0.1" "$p3"')
@@ -683,6 +693,43 @@ set -e
 [[ "$prc_ec" -eq 7 ]] || fail "cleanup-preserve-rc-selftest ec=$prc_ec want 7 err=$(cat "$tmp/prc.err")"
 grep -q 'ok: cleanup-preserve-rc-selftest about to exit 7' "$tmp/prc.out" \
   || fail "preserve-rc selftest missing ok line"
+prc_leaf=$(sed -n 's/^LEAF=//p' "$tmp/prc.out" | head -1)
+[[ -n "$prc_leaf" ]] || fail "preserve-rc did not report LEAF"
+[[ ! -e "$prc_leaf" ]] || fail "preserve-rc leaked LEAF=$prc_leaf"
+
+assert_tracks_gone() {
+  local file="$1" line p
+  while IFS= read -r line; do
+    p="${line#S1B_HYGIENE_TRACK=}"
+    [[ -n "$p" ]] || continue
+    [[ ! -e "$p" ]] || fail "$file leaked $p"
+  done < <(grep '^S1B_HYGIENE_TRACK=' "$file" || true)
+}
+assert_tracks_gone "$tmp/cleanup.out"
+assert_tracks_gone "$tmp/coll.out"
+assert_tracks_gone "$tmp/busy.out"
+assert_tracks_gone "$tmp/prc.out"
+
+set +e
+run_bounded 12 bash "$DRIVER" cleanup-create-selftest >"$tmp/create.out" 2>"$tmp/create.err"
+create_ec=$?
+set -e
+[[ "$create_ec" -eq 0 ]] || fail "cleanup-create-selftest ec=$create_ec err=$(cat "$tmp/create.err")"
+grep -q 'ok: cleanup-create-selftest' "$tmp/create.out" || fail "create selftest missing ok"
+assert_tracks_gone "$tmp/create.out"
+
+set +e
+run_bounded 12 bash "$DRIVER" cleanup-zero-status-leaf-selftest >"$tmp/zsl.out" 2>"$tmp/zsl.err"
+zsl_ec=$?
+set -e
+[[ "$zsl_ec" -eq 1 ]] || fail "cleanup-zero-status-leaf-selftest ec=$zsl_ec want 1 err=$(cat "$tmp/zsl.err")"
+grep -q 'ok: cleanup-zero-status-leaf-selftest about to exit 0' "$tmp/zsl.out" \
+  || fail "zero-status selftest missing ok line"
+zleaf=$(sed -n 's/^LEAF=//p' "$tmp/zsl.out" | head -1)
+[[ -n "$zleaf" ]] || fail "zero-status did not report LEAF"
+[[ ! -e "$zleaf" ]] || fail "zero-status leaked LEAF=$zleaf"
+grep -Fq 'FAIL: unremovable LEAF=' "$tmp/zsl.err" || fail "zero-status must report unremovable LEAF"
+assert_tracks_gone "$tmp/zsl.out"
 
 python3 - "$DRIVER" "$tmp/mut-prefix.sh" <<'MUT1'
 from pathlib import Path
@@ -804,6 +851,129 @@ run_bounded 12 bash "$tmp/mut-collision-comment.sh" cleanup-collision-selftest >
 mcc_ec=$?
 set -e
 [[ "$mcc_ec" -eq 0 ]] || fail "comment-only assigned-cleanup mutant failed err=$(cat "$tmp/mut-cc.err")"
+assert_tracks_gone "$tmp/mut-prefix.out"
+assert_tracks_gone "$tmp/mut-bypass.out"
+assert_tracks_gone "$tmp/mut-rmdir.out"
+assert_tracks_gone "$tmp/mut-c.out"
+assert_tracks_gone "$tmp/mut-c2.out"
+assert_tracks_gone "$tmp/mut-crem.out"
+assert_tracks_gone "$tmp/mut-cc.out"
+
+python3 - "$DRIVER" "$tmp/mut-fixed-default.sh" <<'MUTA'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = (
+    '    wd="$(mktemp -d "${RUNNER_TEMP:-/tmp}/s1b-XXXXXX")" || fail "mktemp owned WORKDIR"\n'
+    '    WORKDIR="$wd"\n'
+    '    record_owned_workdir "$WORKDIR"\n'
+    '    return 0\n'
+)
+new = (
+    '    WORKDIR="${WORKDIR:-${RUNNER_TEMP:-/tmp}/s1b-send-matrix}"\n'
+    '    mkdir -p "$WORKDIR"\n'
+    '    record_owned_workdir "$WORKDIR"\n'
+    '    return 0\n'
+)
+if old not in text:
+    raise SystemExit("default mktemp branch missing")
+dst.write_text(text.replace(old, new, 1))
+MUTA
+set +e
+run_bounded 12 bash "$tmp/mut-fixed-default.sh" cleanup-create-selftest >"$tmp/mut-a.out" 2>"$tmp/mut-a.err"
+ma_ec=$?
+set -e
+[[ "$ma_ec" -ne 0 ]] || fail "restored fixed s1b-send-matrix default left create-selftest green"
+if grep -q 'ok: cleanup-create-selftest' "$tmp/mut-a.out"; then
+  fail "fixed-default mutant printed create ok"
+fi
+assert_tracks_gone "$tmp/mut-a.out"
+
+python3 - "$DRIVER" "$tmp/mut-bless-existing.sh" <<'MUTB'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = (
+    '  wd="$WORKDIR"\n'
+    '  case "$wd" in\n'
+    "    *'/../'*|*/..|..)\n"
+    '      echo "FAIL: refusing WORKDIR with traversal: $wd" >&2\n'
+    '      return 1\n'
+    '      ;;\n'
+    '  esac\n'
+    '  [[ "$wd" == /* ]] || { echo "FAIL: refusing relative WORKDIR=$wd" >&2; return 1; }\n'
+    '  base="${wd##*/}"\n'
+    '  dir="${wd%/*}"\n'
+    '  [[ -n "$dir" ]] || dir=/\n'
+    '  if [[ "$base" != s1b-* ]] || { [[ "$dir" != /tmp ]] && [[ -z "${RUNNER_TEMP:-}" || "$dir" != "$RUNNER_TEMP" ]]; }; then\n'
+    '    echo "FAIL: refusing WORKDIR outside namespace: $wd" >&2\n'
+    '    return 1\n'
+    '  fi\n'
+    '  if [[ -e "$wd" ]]; then\n'
+    '    echo "FAIL: refusing existing WORKDIR=$wd" >&2\n'
+    '    return 1\n'
+    '  fi\n'
+    '  mkdir "$wd" || fail "mkdir WORKDIR=$wd"\n'
+    '  record_owned_workdir "$WORKDIR"\n'
+)
+new = '  mkdir -p "$WORKDIR"\n  record_owned_workdir "$WORKDIR"\n'
+if old not in text:
+    raise SystemExit("caller-provided create branch missing")
+dst.write_text(text.replace(old, new, 1))
+MUTB
+set +e
+run_bounded 12 bash "$tmp/mut-bless-existing.sh" cleanup-create-selftest >"$tmp/mut-b.out" 2>"$tmp/mut-b.err"
+mbx_ec=$?
+set -e
+[[ "$mbx_ec" -ne 0 ]] || fail "mkdir -p bless-existing left create-selftest green"
+if grep -q 'ok: cleanup-create-selftest' "$tmp/mut-b.out"; then
+  fail "bless-existing mutant printed create ok"
+fi
+assert_tracks_gone "$tmp/mut-b.out"
+
+python3 - "$DRIVER" "$tmp/mut-zero-exit.sh" <<'MUTC'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = '  exit "${CLEANUP_LEAF_RC:-0}"\n'
+new = '  exit 0\n'
+if old not in text:
+    raise SystemExit("CLEANUP_LEAF_RC exit missing")
+if text.count(old) != 1:
+    raise SystemExit("CLEANUP_LEAF_RC exit not unique")
+dst.write_text(text.replace(old, new, 1))
+MUTC
+set +e
+run_bounded 12 bash "$tmp/mut-zero-exit.sh" cleanup-zero-status-leaf-selftest >"$tmp/mut-c-zero.out" 2>"$tmp/mut-c-zero.err"
+mz_ec=$?
+set -e
+[[ "$mz_ec" -eq 0 ]] || fail "zero-status exit-0 mutant did not drop escalation (ec=$mz_ec)"
+assert_tracks_gone "$tmp/mut-c-zero.out"
+
+python3 - "$DRIVER" "$tmp/mut-create-comment.sh" <<'MUTD'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = 'create_owned_workdir() {\n'
+new = 'create_owned_workdir() {\n  # comment-only: keep create ownership\n'
+if old not in text:
+    raise SystemExit("create_owned_workdir header missing")
+dst.write_text(text.replace(old, new, 1))
+MUTD
+set +e
+run_bounded 12 bash "$tmp/mut-create-comment.sh" cleanup-create-selftest >"$tmp/mut-d.out" 2>"$tmp/mut-d.err"
+md_ec=$?
+run_bounded 12 bash "$tmp/mut-create-comment.sh" cleanup-zero-status-leaf-selftest >"$tmp/mut-d2.out" 2>"$tmp/mut-d2.err"
+md2_ec=$?
+set -e
+[[ "$md_ec" -eq 0 ]] || fail "comment-only create mutant failed create-selftest err=$(cat "$tmp/mut-d.err")"
+[[ "$md2_ec" -eq 1 ]] || fail "comment-only create mutant zero-status ec=$md2_ec want 1 err=$(cat "$tmp/mut-d2.err")"
+assert_tracks_gone "$tmp/mut-d.out"
+assert_tracks_gone "$tmp/mut-d2.out"
 echo "ok: s1b cleanup ownership mutations"
 
 wf="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/monitor-attach-smoke.yml"

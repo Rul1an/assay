@@ -7,7 +7,7 @@ MODE="${1:-}"
 ASSAY_BIN="${ASSAY_BIN:-$ROOT/target/release/assay}"
 ASSAY_EBPF="${ASSAY_EBPF:-$ROOT/target/assay-ebpf.o}"
 HARNESS_BIN="${HARNESS_BIN:-}"
-WORKDIR="${WORKDIR:-${RUNNER_TEMP:-/tmp}/s1b-send-matrix}"
+WORKDIR="${WORKDIR:-}"
 # Bound: C GO_FIFO_TIMEOUT_MS >= WAIT_LOG_MAX_BEFORE_GO * WAIT_LOG_ITERS * WAIT_LOG_SLEEP_S * 1000 + GO_TIMEOUT_MARGIN_MS
 WAIT_LOG_ITERS=60
 WAIT_LOG_SLEEP_S=0.5
@@ -105,6 +105,52 @@ record_owned_workdir() {
   S1B_OWNED_WORKDIR="$1"
 }
 
+s1b_hygiene_track() {
+  local p="$1"
+  [[ -n "$p" ]] || return 0
+  S1B_HYGIENE+="${S1B_HYGIENE:+$'\n'}$p"
+  echo "S1B_HYGIENE_TRACK=$p"
+}
+
+s1b_hygiene_sweep() {
+  local p
+  [[ -n "${S1B_HYGIENE:-}" ]] || return 0
+  while IFS= read -r p; do
+    [[ -n "$p" ]] || continue
+    rm -rf "$p"
+  done <<<"$S1B_HYGIENE"
+}
+
+create_owned_workdir() {
+  local wd base dir
+  if [[ -z "${WORKDIR:-}" ]]; then
+    wd="$(mktemp -d "${RUNNER_TEMP:-/tmp}/s1b-XXXXXX")" || fail "mktemp owned WORKDIR"
+    WORKDIR="$wd"
+    record_owned_workdir "$WORKDIR"
+    return 0
+  fi
+  wd="$WORKDIR"
+  case "$wd" in
+    *'/../'*|*/..|..)
+      echo "FAIL: refusing WORKDIR with traversal: $wd" >&2
+      return 1
+      ;;
+  esac
+  [[ "$wd" == /* ]] || { echo "FAIL: refusing relative WORKDIR=$wd" >&2; return 1; }
+  base="${wd##*/}"
+  dir="${wd%/*}"
+  [[ -n "$dir" ]] || dir=/
+  if [[ "$base" != s1b-* ]] || { [[ "$dir" != /tmp ]] && [[ -z "${RUNNER_TEMP:-}" || "$dir" != "$RUNNER_TEMP" ]]; }; then
+    echo "FAIL: refusing WORKDIR outside namespace: $wd" >&2
+    return 1
+  fi
+  if [[ -e "$wd" ]]; then
+    echo "FAIL: refusing existing WORKDIR=$wd" >&2
+    return 1
+  fi
+  mkdir "$wd" || fail "mkdir WORKDIR=$wd"
+  record_owned_workdir "$WORKDIR"
+}
 s1b_owned_workdir() {
   local wd="$1"
   [[ -n "$wd" && "$wd" == /* ]] || return 1
@@ -164,6 +210,7 @@ on_exit() {
   trap - EXIT
   set +e
   cleanup_work
+  s1b_hygiene_sweep
   set -e
   if (( rc != 0 )); then
     exit "$rc"
@@ -264,8 +311,7 @@ isolate_pid() {
 
 run_matrix() {
   local expect_send="$1" n=0 hpid="" hc=0 mc=0 p2 p3
-  mkdir -p "$WORKDIR"
-  record_owned_workdir "$WORKDIR"
+  create_owned_workdir || fail "owned WORKDIR create failed"
   FIFO="$WORKDIR/go.fifo"
   LOG="$WORKDIR/monitor.log"
   HOUT="$WORKDIR/harness.out"
@@ -470,6 +516,7 @@ case "$MODE" in
     run_matrix no ;;
   cleanup-selftest)
     WORKDIR=$(mktemp -d /tmp/s1b-cleanup-selftest-XXXXXX)
+    s1b_hygiene_track "$WORKDIR"
     record_owned_workdir "$WORKDIR"
     s1b_owned_workdir "$WORKDIR" || fail "cleanup-selftest WORKDIR is not an owned S1b path: $WORKDIR"
     FIFO=$WORKDIR/go.fifo
@@ -483,6 +530,7 @@ case "$MODE" in
       fail "TERM-ignoring children died before cleanup"
     fi
     LEAF=$(mktemp -d)
+    s1b_hygiene_track "$LEAF"
     mp=$MONITOR_PID hp=$HARNESS_PID fifo=$FIFO leaf=$LEAF
     start=$(date +%s)
     cleanup
@@ -500,6 +548,7 @@ case "$MODE" in
     wd=$WORKDIR
     [[ ! -e "$wd" ]] || fail "WORKDIR leftover $wd"
     bad=$(mktemp -d)
+    s1b_hygiene_track "$bad"
     printf 'keep\n' >"$bad/keep"
     if s1b_owned_workdir "$bad"; then
       fail "unowned path was accepted: $bad"
@@ -515,9 +564,11 @@ case "$MODE" in
     echo "ok: cleanup-selftest" ;;
   cleanup-collision-selftest)
     assigned=$(mktemp -d /tmp/s1b-XXXXXX)
+    s1b_hygiene_track "$assigned"
     WORKDIR=$assigned
     record_owned_workdir "$WORKDIR"
     sib=$(mktemp -d /tmp/s1b-XXXXXX)
+    s1b_hygiene_track "$sib"
     printf 'keep\n' >"$sib/keep"
     if s1b_owned_workdir "$sib"; then
       fail "prefix sibling considered owned: $sib"
@@ -529,7 +580,9 @@ case "$MODE" in
     [[ "$rec" -ne 0 ]] || fail "prefix sibling was deleted"
     [[ -f "$sib/keep" ]] || fail "prefix sibling keep missing: $sib"
     rt=$(mktemp -d)
+    s1b_hygiene_track "$rt"
     sib2=$(mktemp -d "$rt/s1b-XXXXXX")
+    s1b_hygiene_track "$sib2"
     printf 'keep\n' >"$sib2/keep"
     RUNNER_TEMP=$rt
     if s1b_owned_workdir "$sib2"; then
@@ -544,6 +597,7 @@ case "$MODE" in
     unset RUNNER_TEMP
     s1b_owned_workdir "$WORKDIR" || fail "assigned WORKDIR not owned after stripping RUNNER_TEMP"
     sib3=$(mktemp -d /tmp/s1b-XXXXXX)
+    s1b_hygiene_track "$sib3"
     printf 'keep\n' >"$sib3/keep"
     if s1b_owned_workdir "$sib3"; then
       fail "tmp prefix sibling owned without RUNNER_TEMP: $sib3"
@@ -555,6 +609,7 @@ case "$MODE" in
     echo "ok: cleanup-collision-selftest" ;;
   cleanup-busy-leaf-selftest)
     LEAF=$(mktemp -d)
+    s1b_hygiene_track "$LEAF"
     printf 'stuck\n' >"$LEAF/stuck"
     WORKDIR=""
     FIFO=""
@@ -572,13 +627,105 @@ case "$MODE" in
     echo "ok: cleanup-busy-leaf-selftest" ;;
   cleanup-preserve-rc-selftest)
     LEAF=$(mktemp -d)
+    s1b_hygiene_track "$LEAF"
     printf 'stuck\n' >"$LEAF/stuck"
     WORKDIR=""
     FIFO=""
     MONITOR_PID=""
     HARNESS_PID=""
+    echo "LEAF=$LEAF"
     echo "ok: cleanup-preserve-rc-selftest about to exit 7"
     exit 7 ;;
+  cleanup-create-selftest)
+    if ! declare -F create_owned_workdir >/dev/null; then
+      fail "create_owned_workdir missing"
+    fi
+    victim=$(mktemp -d /tmp/ruley-keep-XXXXXX)
+    s1b_hygiene_track "$victim"
+    printf 'keep\n' >"$victim/keep"
+    WORKDIR=$victim
+    if create_owned_workdir; then
+      fail "create_owned_workdir accepted foreign existing $victim"
+    fi
+    [[ -f "$victim/keep" ]] || fail "foreign WORKDIR was deleted: $victim"
+    sib=$(mktemp -d /tmp/s1b-XXXXXX)
+    s1b_hygiene_track "$sib"
+    printf 'keep\n' >"$sib/keep"
+    WORKDIR=$sib
+    if create_owned_workdir; then
+      fail "create_owned_workdir accepted existing in-namespace $sib"
+    fi
+    [[ -f "$sib/keep" ]] || fail "existing in-namespace keep missing: $sib"
+    historical="${RUNNER_TEMP:-/tmp}/s1b-send-matrix"
+    historical_preexisted=0
+    if [[ -e "$historical" ]]; then
+      historical_preexisted=1
+    else
+      mkdir "$historical"
+      s1b_hygiene_track "$historical"
+      printf 'keep\n' >"$historical/keep"
+      WORKDIR=$historical
+      if create_owned_workdir; then
+        fail "create_owned_workdir accepted existing historical $historical"
+      fi
+      [[ -f "$historical/keep" ]] || fail "historical keep missing: $historical"
+    fi
+    trav_int="/tmp/s1b-trav-$$"
+    trav_tgt="/tmp/s1b-trav-tgt-$$"
+    s1b_hygiene_track "$trav_int"
+    s1b_hygiene_track "$trav_tgt"
+    WORKDIR="$trav_int/../$(basename "$trav_tgt")"
+    if create_owned_workdir; then
+      fail "create_owned_workdir accepted traversal WORKDIR=$WORKDIR"
+    fi
+    [[ ! -e "$trav_int" ]] || fail "traversal created intermediate $trav_int"
+    [[ ! -e "$trav_tgt" ]] || fail "traversal created target $trav_tgt"
+    WORKDIR=""
+    create_owned_workdir || fail "first default create refused"
+    wd1=$WORKDIR
+    if [[ "$wd1" == "$historical" && "$historical_preexisted" -eq 1 ]]; then
+      WORKDIR=""
+      S1B_OWNED_WORKDIR=""
+      fail "default create used pre-existing historical name $historical"
+    fi
+    s1b_hygiene_track "$wd1"
+    [[ "$wd1" != "$historical" ]] || fail "first default create used historical name $historical"
+    WORKDIR=""
+    create_owned_workdir || fail "second default create refused"
+    wd2=$WORKDIR
+    if [[ "$wd2" == "$historical" && "$historical_preexisted" -eq 1 ]]; then
+      WORKDIR=""
+      S1B_OWNED_WORKDIR=""
+      fail "second default create used pre-existing historical name $historical"
+    fi
+    s1b_hygiene_track "$wd2"
+    [[ "$wd2" != "$historical" ]] || fail "second default create used historical name $historical"
+    [[ "$wd1" != "$wd2" ]] || fail "two default creates produced the same path $wd1"
+    if s1b_owned_workdir "$wd1"; then
+      fail "first default still owned after second create"
+    fi
+    s1b_owned_workdir "$wd2" || fail "second default not owned"
+    rt="${RUNNER_TEMP:-/tmp}"
+    probe="$rt/s1b-positive-probe-$$"
+    [[ ! -e "$probe" ]] || fail "probe already exists: $probe"
+    WORKDIR=$probe
+    create_owned_workdir || fail "caller-provided missing in-namespace refused: $probe"
+    s1b_hygiene_track "$probe"
+    s1b_owned_workdir "$probe" || fail "caller-provided create not owned: $probe"
+    [[ -d "$probe" ]] || fail "caller-provided create did not mkdir: $probe"
+    WORKDIR=""
+    echo "ok: cleanup-create-selftest" ;;
+  cleanup-zero-status-leaf-selftest)
+    LEAF=$(mktemp -d)
+    s1b_hygiene_track "$LEAF"
+    printf 'stuck\n' >"$LEAF/stuck"
+    WORKDIR=""
+    FIFO=""
+    MONITOR_PID=""
+    HARNESS_PID=""
+    echo "LEAF=$LEAF"
+    echo "ok: cleanup-zero-status-leaf-selftest about to exit 0"
+    exit 0 ;;
   coverage-gate) coverage_gate "${2:?coverage-gate requires a JSON path}" ;;
   mutation-selftest) mutation_selftest ;;
   endpoint-line-selftest)
@@ -607,5 +754,5 @@ case "$MODE" in
     LOG="${2:?}"
     HOUT="${3:?}"
     fail "diagnostics-selftest" ;;
-  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|cleanup-collision-selftest|cleanup-busy-leaf-selftest|cleanup-preserve-rc-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest|diagnostics-selftest" ;;
+  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|cleanup-collision-selftest|cleanup-busy-leaf-selftest|cleanup-preserve-rc-selftest|cleanup-create-selftest|cleanup-zero-status-leaf-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest|diagnostics-selftest" ;;
 esac
