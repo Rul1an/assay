@@ -193,7 +193,7 @@ cat << 'EOF'
   ║     assay run --config eval.yaml \                           ║
   ║       --trace-file traces/safe.jsonl                         ║
   ║                                                              ║
-  ║   Docs:  https://assay.dev/docs                              ║
+  ║   Docs:  https://docs.getassay.dev                           ║
   ║   Repo:  https://github.com/...                              ║
   ║                                                              ║
   ╚══════════════════════════════════════════════════════════════╝
@@ -445,7 +445,7 @@ devpod up https://github.com/OWNER/assay
 Voor developers die lokaal willen installeren zonder Rust toolchain:
 
 ```bash
-curl -sSf https://assay.dev/install.sh | sh
+curl -fsSL https://getassay.dev/install.sh | sh
 ```
 
 **Vereist:**

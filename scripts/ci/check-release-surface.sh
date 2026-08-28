@@ -248,6 +248,23 @@ check_contains_line() {
   fi
 }
 
+check_single_discord_invite() {
+  local file="$1" expected="$2"
+  local invites
+  if [ ! -f "$file" ]; then
+    fail "$file: checked outward document is missing"
+    return
+  fi
+  invites="$(
+    grep -Eo 'https://[^[:space:]<>()"]+' "$file" \
+      | grep -E 'discord\.gg/|discord\.com/invite/' \
+      || true
+  )"
+  if [ "$invites" != "$expected" ]; then
+    fail "$file: Discord invite drift"
+  fi
+}
+
 check_action_refs_pinned() {
   local file="$1"
   local refs invalid
@@ -346,6 +363,25 @@ check_current_release_link README.md "$release_link"
 check_current_release_link docs/index.md "$release_link"
 check_rge_bench_claims
 
+check_absent_regex SECURITY.md '@assay\.dev' \
+  'third-party reporting address'
+check_absent_regex docs/COMMUNITY.md '@assay\.dev' \
+  'third-party reporting address'
+security_report_url='https://github.com/Rul1an/assay/security/advisories/new'
+check_contains_fixed SECURITY.md "$security_report_url" \
+  'security policy must publish the private vulnerability-reporting route'
+check_contains_fixed docs/COMMUNITY.md 'send a private DM to an Assay maintainer in Discord' \
+  'community policy must retain a project-operated conduct route'
+discord_invite='https://discord.gg/sK5U8VfSHV'
+check_single_discord_invite docs/COMMUNITY.md "$discord_invite"
+check_single_discord_invite mkdocs.yml "$discord_invite"
+check_contains_line SECURITY.md \
+  "Assay supports the current published release, **$PUBLISHED_TAG**." \
+  "supported release must match $PUBLISHED_TAG"
+check_absent_regex SECURITY.md \
+  '^[[:space:]]*\|[[:space:]]*\*\*v[0-9]+\.x\*\*[[:space:]]*\|[^|]*Supported[^|]*\|' \
+  'historical support-table row'
+
 for file in \
   docs/getting-started/index.md \
   docs/getting-started/installation.md \
@@ -390,6 +426,10 @@ fi
 for file in README.md docs/guides/editor-mcp-recipe.md; do
   check_absent_regex "$file" 'assay mcp config-path (codex|<editor>)' \
     'config-path does not support Codex'
+done
+for file in .devcontainer/welcome.sh demo/CODESPACES-PLAYBOOK.md; do
+  check_absent_regex "$file" 'https://assay\.dev/' \
+    'unrelated assay.dev onboarding URL'
 done
 
 # ---------------------------------------------------------------------------

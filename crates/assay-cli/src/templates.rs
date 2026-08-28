@@ -116,12 +116,13 @@ jobs:
 
 "#;
 
-/// GitLab CI template for assay gate. Written to `.gitlab-ci.yml` by `assay init --ci gitlab`.
+/// GitLab CI template for assay gate. Written by `assay init --ci gitlab` and
+/// `assay init-ci --provider gitlab`.
 pub const GITLAB_CI_YML: &str = r#"assay:
   image: rust:1-bookworm
   script:
     - apt-get update -qq && apt-get install -y -qq curl
-    - curl -sSfL https://raw.githubusercontent.com/Rul1an/assay/main/scripts/install.sh | sh
+    - curl -fsSL https://getassay.dev/install.sh | sh
     - assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl --sarif .assay/reports/sarif.json --junit .assay/reports/junit.xml
   artifacts:
     when: always
@@ -143,3 +144,34 @@ tests:
       pattern: ".*"
       flags: ["s"]
 "#;
+
+#[cfg(test)]
+mod gitlab_tests {
+    use super::GITLAB_CI_YML;
+
+    const INIT_CI_SOURCE: &str = include_str!("cli/commands/init_ci.rs");
+
+    #[test]
+    fn gitlab_template_uses_the_owned_fail_closed_installer_once() {
+        const INSTALL: &str = "curl -fsSL https://getassay.dev/install.sh | sh";
+
+        assert_eq!(GITLAB_CI_YML.matches(INSTALL).count(), 1);
+        assert!(!GITLAB_CI_YML.contains("https://assay.dev/install.sh"));
+        assert!(!GITLAB_CI_YML.contains("curl -sSL"));
+    }
+
+    #[test]
+    fn init_ci_reuses_the_gitlab_template_instead_of_copying_it() {
+        assert!(INIT_CI_SOURCE
+            .contains("\"gitlab\" => (crate::templates::GITLAB_CI_YML, \".gitlab-ci.yml\"),"));
+        assert_eq!(
+            INIT_CI_SOURCE
+                .matches("crate::templates::GITLAB_CI_YML")
+                .count(),
+            1
+        );
+        assert!(!INIT_CI_SOURCE.contains("getassay.dev/install.sh"));
+        assert!(!INIT_CI_SOURCE.contains("assay.dev/install.sh"));
+        assert!(!INIT_CI_SOURCE.contains("curl -"));
+    }
+}

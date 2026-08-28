@@ -31,7 +31,7 @@ cat << 'EOF'
   ║     assay run --config eval.yaml \                           ║
   ║       --trace-file traces/safe.jsonl                         ║
   ║                                                              ║
-  ║   Docs:  https://assay.dev/docs                              ║
+  ║   Docs:  https://docs.getassay.dev                           ║
   ║   Repo:  https://github.com/Rul1an/assay                     ║
   ║                                                              ║
   ╚══════════════════════════════════════════════════════════════╝
