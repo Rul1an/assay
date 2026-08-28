@@ -10,7 +10,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/scripts/ci" "$TMP/.github" "$TMP/docs/getting-started" "$TMP/docs/reference/cli" \
   "$TMP/docs/python-sdk" "$TMP/docs/use-cases" "$TMP/docs/AIcontext" "$TMP/docs/guides" \
-  "$TMP/crates/assay-x" "$TMP/bin"
+  "$TMP/examples/mcp-quickstart" "$TMP/crates/assay-x" "$TMP/bin"
 cp "$ROOT/scripts/ci/check-release-surface.sh" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/read-assay-release-tag.sh" "$TMP/scripts/ci/"
 cp "$ROOT/.pre-commit-config.yaml" "$TMP/"
@@ -82,7 +82,7 @@ Install the SDK with pip install assay-it.
 uses: github/codeql-action/upload-sarif@d1ba80a13dd99fba24a470575428917156a28b43
 DOC
 printf '%s\n' 'Historical correction: pip install assay-it.' > "$TMP/docs/migration-v1.2.md"
-rge_claim='reproduction is digest-scoped and does not carry forward: v1 71-vector digest `sha256:1111111111111111111111111111111111111111111111111111111111111111` was independently implemented; current v2-candidate digest `sha256:2222222222222222222222222222222222222222222222222222222222222222` (95 vectors) has **not** been reproduced by anyone but the author.'
+rge_claim='reproduction is digest-scoped and does not carry forward: v1 71-vector digest `sha256:1111111111111111111111111111111111111111111111111111111111111111` and current v2 digest `sha256:2222222222222222222222222222222222222222222222222222222222222222` (95 vectors) each carry one reported **independent implementation**; JM-Lab reported the v2 95/95 reproduction on 2026-08-24.'
 broad_rge_claim='neutral, externally reproduced conformance kit for evidence reviewability'
 cat > "$TMP/README.md" <<'DOC'
 cargo install assay-cli --version 5.1.0 --locked
@@ -91,12 +91,16 @@ Claude and Cursor config-path only.
 DOC
 printf '%s\n' "- [RGE-Bench](https://github.com/rge-bench/rge-bench) — $rge_claim" >> "$TMP/README.md"
 printf '%s\n' "- [RGE-Bench](https://github.com/rge-bench/rge-bench): $rge_claim" > "$TMP/llms.txt"
+cat > "$TMP/examples/mcp-quickstart/README.md" <<'DOC'
+Assay CLI via the release installer.
+For v5.4.0, run this from a source checkout. Published CLI archives do not carry this quickstart.
+DOC
 printf '%s\n' 'Current release: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0)' > "$TMP/docs/index.md"
 printf '%s\n' 'Codex uses .codex/config.toml.' > "$TMP/docs/guides/editor-mcp-recipe.md"
 (
   cd "$TMP"
   git init -q
-  git add -- .github/assay-release-tag Cargo.toml Cargo.lock crates docs scripts
+  git add -- .github/assay-release-tag Cargo.toml Cargo.lock crates docs examples scripts
 )
 
 run_check() {
@@ -120,6 +124,7 @@ for path in (
     ".github/assay-release-tag",
     "scripts/ci/read-assay-release-tag.sh",
     "llms.txt",
+    "examples/mcp-quickstart/README.md",
     "docs/getting-started/ci-integration.md",
     "docs/use-cases/air-gapped.md",
     "docs/use-cases/ci-gate.md",
@@ -226,6 +231,15 @@ mutate_and_expect_failure unsupported-codex-config-path README.md \
 mutate_and_expect_failure unsupported-codex-literal README.md \
   's/Claude and Cursor config-path only./assay mcp config-path codex/' \
   'config-path does not support Codex'
+mutate_and_expect_failure misleading-installer-verification README.md \
+  's/Claude and Cursor config-path only./Claude and Cursor config-path only. Fast path: verified release installer./' \
+  'installer wording must not imply checksum or provenance verification'
+mutate_and_expect_failure misleading-example-installer examples/mcp-quickstart/README.md \
+  's/release installer/verified release installer/' \
+  'quickstart installer wording must not imply checksum or provenance verification'
+mutate_and_expect_failure extracted-archive-claim examples/mcp-quickstart/README.md \
+  's/run this from a source checkout/run this from the root of an extracted CLI release archive/' \
+  'quickstart must not claim assets exist in published CLI archives'
 mutate_and_expect_failure unsupported-codex-guide docs/guides/editor-mcp-recipe.md \
   's/Codex uses .codex\/config.toml./assay mcp config-path codex/' \
   'config-path does not support Codex'
@@ -326,8 +340,8 @@ echo "PASS: duplicate-release"
 mutate_and_expect_failure stale-cli-version docs/reference/cli/index.md \
   's/# assay 5.1.0/# assay 5.0.0/' 'documented CLI version drift'
 
-if [ "$mutation_count" -ne 44 ]; then
-  echo "FAIL: expected 44 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 47 ]; then
+  echo "FAIL: expected 47 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

@@ -185,6 +185,20 @@ class ReleaseArchiveShape(unittest.TestCase):
             fenced_block_after(example_readme, "Captured runner output"), CAPTURED_OUTPUT
         )
 
+    def test_readmes_do_not_claim_the_quickstart_is_in_cli_archives(self):
+        root_readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        example_readme = (ROOT / "examples/mcp-quickstart/README.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            "For v5.4.0, run the last command from a source checkout.",
+            root_readme,
+        )
+        for readme in (root_readme, example_readme):
+            self.assertNotIn("root of an extracted CLI release archive", readme)
+            self.assertNotIn("archive carries this bounded quickstart", readme)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -34,8 +34,11 @@ Agents got real tool access through MCP — and tool poisoning, rug pulls, and c
 ### Quickstart
 
 ```bash
-# Fast path: verified release installer for Linux and macOS.
+# Fast path: release installer for Linux and macOS.
 curl -fsSL https://getassay.dev/install.sh | sh
+
+# Confirm the command resolves; if setup fails, run `assay doctor`.
+assay --version
 
 # Source-build alternative (requires Rust):
 cargo install assay-cli --version 5.4.0 --locked
@@ -43,9 +46,10 @@ cargo install assay-cli --version 5.4.0 --locked
 python3 examples/mcp-quickstart/run.py
 ```
 
-Run the last command from a source checkout or the root of an extracted CLI
-release archive. The installer installs the binary; the archive carries the
-bounded quickstart assets.
+For v5.4.0, run the last command from a source checkout. The installer and the
+published v5.4.0 CLI archive install the binary but do not carry the bounded
+quickstart assets. The installer downloads over HTTPS but does not consume the
+published checksum or provenance sidecars.
 
 Captured runner output (the bundled local mock performs no external action):
 
@@ -59,7 +63,12 @@ non_claim=forwarded_to_local_mock_only
 
 ![Assay decides each MCP tool call before it runs, fail-closed, with the reason](demo/output/screenshots/mcp-wrap-demo.svg)
 
-Static project manifests are shipped for Claude Code and Cursor; Codex uses the equivalent TOML entry documented in the [editor MCP recipe](docs/guides/editor-mcp-recipe.md). Manifest presence is not host-discovery proof. `assay mcp config-path` supports Claude and Cursor only. The `v5.4.0` Python wheels cover CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed. Published `assay-mcp-server` archives cover Linux x86_64/arm64; the local quickstart above needs only the CLI archive and Python 3. CI: [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-security). No hosted backend and no API keys for core flows. New to the threat model? The [OWASP MCP Top 10 mapping](docs/security/OWASP-MCP-TOP10-MAPPING.md) lays out, per risk, what Assay covers and what it deliberately does not.
+Released surfaces:
+
+- Static project manifests are shipped for Claude Code and Cursor; Codex uses the equivalent TOML entry documented in the [editor MCP recipe](docs/guides/editor-mcp-recipe.md). Manifest presence is not host-discovery proof. `assay mcp config-path` supports Claude and Cursor only.
+- Published v5.4.0 CLI archives cover Linux x86_64/arm64, macOS x86_64/arm64, and Windows x86_64. The Python wheels cover CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
+- Published `assay-mcp-server` archives cover Linux x86_64/arm64. MCPB and `server.json` package descriptors are also published; their presence is not host-discovery proof.
+- CI: [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-security). Core flows need no hosted backend or API key. New to the threat model? The [OWASP MCP Top 10 mapping](docs/security/OWASP-MCP-TOP10-MAPPING.md) states, per risk, what Assay covers and deliberately does not.
 
 ## What ships
 
@@ -170,7 +179,7 @@ Repositories that compose with Assay's evidence layer:
 - [Assay-Harness](https://github.com/Rul1an/Assay-Harness) — recipe, gate, and report layer over canonical evidence artifacts.
 - [observed-effect-v0](https://github.com/Rul1an/observed-effect-v0) — worked examples of the bounded observed-effect evidence record and its neutral carriers (in-toto, SCITT, MCP evidenceRef).
 - [gateway-evidence-replay](https://github.com/Rul1an/gateway-evidence-replay) — deterministic offline replay verifier for gateway-path evidence bundles.
-- [RGE-Bench](https://github.com/rge-bench/rge-bench) — a conformance kit for evidence reviewability, maintained separately under its own machine-checked neutrality guard. Reproduction there is **digest-scoped and does not carry forward**: the v1 71-vector digest `sha256:e769822bc6c9e31085da7b1a17b163b9747fe0d04314fbb8685d4e612087c7cb` carries one reported **independent implementation** by a second author on a different stack ([JM-Lab/rge-bench-java](https://github.com/JM-Lab/rge-bench-java), written from the contract text importing nothing from the kit, recomputing every `expected` from `inputs`) against author-supplied vectors, while the current v2-candidate digest `sha256:ba0e3795d75c788fa48313ab462493f22d78759851d1b3275d8117051bb22fd0` (95 vectors) has **not** been reproduced by anyone but the author. See its [REPRODUCTIONS.md](https://github.com/rge-bench/rge-bench/blob/main/REPRODUCTIONS.md).
+- [RGE-Bench](https://github.com/rge-bench/rge-bench) — a conformance kit for evidence reviewability, maintained separately under its own machine-checked neutrality guard. Reproduction there is **digest-scoped and does not carry forward**: the v1 71-vector digest `sha256:e769822bc6c9e31085da7b1a17b163b9747fe0d04314fbb8685d4e612087c7cb` and the current v2 digest `sha256:ba0e3795d75c788fa48313ab462493f22d78759851d1b3275d8117051bb22fd0` (95 vectors) each carry one reported **independent implementation** by a second author on a different stack. JM-Lab reported the v2 95/95 reproduction on 2026-08-24, from the contract text and author-supplied inputs without reading `expected`. See its [REPRODUCTIONS.md](https://github.com/rge-bench/rge-bench/blob/main/REPRODUCTIONS.md).
 
 ## Open profile: privileged-mcp-action/v0
 
