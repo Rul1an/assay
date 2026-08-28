@@ -22,8 +22,8 @@ CHECKOUT_RE = re.compile(
     r"The installer and the\s+published v5\.4\.0 CLI archive install the binary "
     r"but do not carry the bounded\s+quickstart assets\."
 )
-MARKDOWN_LINK_RE = re.compile(r"(!?\[[^\]]*\]\()([^)]+)(\))")
-HREF_RE = re.compile(r'(href=")([^"]+)(")')
+MAX_LINK_LABEL = 512
+MAX_LINK_URL = 2048
 ROOT = Path(__file__).resolve().parents[2]
 ARCHIVE_QUICKSTART = (
     "From the root of this extracted CLI archive, with `assay` on PATH "
@@ -61,19 +61,49 @@ def _rewrite_target(url: str, version: str) -> str:
     return _github_url(url, version)
 
 
+def _scan_delimited(source: str, start: int, closer: str, ceiling: int) -> int | None:
+    found = source.find(closer, start, start + ceiling)
+    return None if found == -1 else found
+
+
 def _rewrite_repo_links(source: str, version: str) -> str:
-    rewritten = MARKDOWN_LINK_RE.sub(
-        lambda match: match.group(1)
-        + _rewrite_target(match.group(2), version)
-        + match.group(3),
-        source,
-    )
-    return HREF_RE.sub(
-        lambda match: match.group(1)
-        + _rewrite_target(match.group(2), version)
-        + match.group(3),
-        rewritten,
-    )
+    out: list[str] = []
+    index = 0
+    length = len(source)
+    while index < length:
+        if source.startswith('href="', index):
+            url_start = index + 6
+            url_end = _scan_delimited(source, url_start, '"', MAX_LINK_URL)
+            if url_end is not None:
+                out.append('href="')
+                out.append(_rewrite_target(source[url_start:url_end], version))
+                out.append('"')
+                index = url_end + 1
+                continue
+        bang = source[index] == "!"
+        open_at = index + 1 if bang else index
+        if open_at < length and source[open_at] == "[":
+            label_end = _scan_delimited(source, open_at + 1, "]", MAX_LINK_LABEL)
+            if (
+                label_end is not None
+                and label_end + 1 < length
+                and source[label_end + 1] == "("
+            ):
+                url_end = _scan_delimited(source, label_end + 2, ")", MAX_LINK_URL)
+                url = source[label_end + 2 : url_end] if url_end is not None else ""
+                if url_end is not None and "[" not in url and "]" not in url:
+                    if bang:
+                        out.append("!")
+                    out.append("[")
+                    out.append(source[open_at + 1 : label_end])
+                    out.append("](")
+                    out.append(_rewrite_target(url, version))
+                    out.append(")")
+                    index = url_end + 1
+                    continue
+        out.append(source[index])
+        index += 1
+    return "".join(out)
 
 
 def render_release_readme(source: str, version: str) -> str:
@@ -86,7 +116,7 @@ def render_release_readme(source: str, version: str) -> str:
     if len(releases) != 1:
         raise ValueError("README must carry exactly one current-release link")
     checkouts = CHECKOUT_RE.findall(source)
-    if len(checkouts) > 1:
+    if len(checkouts) != 1:
         raise ValueError("README must carry exactly one published-checkout sentence")
 
     rendered = INSTALL_RE.sub(
@@ -97,8 +127,7 @@ def render_release_readme(source: str, version: str) -> str:
         rendered,
         count=1,
     )
-    if checkouts:
-        rendered = CHECKOUT_RE.sub(ARCHIVE_QUICKSTART, rendered, count=1)
+    rendered = CHECKOUT_RE.sub(ARCHIVE_QUICKSTART, rendered, count=1)
     rendered = _rewrite_repo_links(rendered, version)
     if INSTALL_RE.findall(rendered) != [version] or RELEASE_RE.findall(rendered) != [version]:
         raise ValueError("rendered README release claims did not converge")

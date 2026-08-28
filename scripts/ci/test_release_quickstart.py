@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -59,6 +60,10 @@ cargo install assay-cli --version 5.4.0 --locked
 ```
 
 Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
+
+For v5.4.0, run the last command from a source checkout. The installer and the
+published v5.4.0 CLI archive install the binary but do not carry the bounded
+quickstart assets.
 
 Historical note: v5.3.0 shipped earlier.
 """
@@ -310,6 +315,16 @@ See [scope](docs/concepts/scope.md) and [license](LICENSE) and [quickstart](exam
         self.assertIn(ARCHIVE_ROOT_CLAIM, rendered)
         self.assertNotIn(CHECKOUT_SENTENCE, rendered)
 
+    def test_renderer_refuses_a_source_with_zero_checkout_matches(self):
+        module = load_module()
+        source = """cargo install assay-cli --version 5.4.0 --locked
+Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
+"""
+        with self.assertRaisesRegex(ValueError, "exactly one published-checkout sentence"):
+            rendered = module.render_release_readme(source, "5.5.0")
+            returned_without_archive_truth = ARCHIVE_ROOT_CLAIM not in rendered
+            self.fail(f"returned_without_archive_truth={returned_without_archive_truth}")
+
     def test_renderer_refuses_ambiguous_checkout_sentence(self):
         module = load_module()
         source = """cargo install assay-cli --version 5.4.0 --locked
@@ -323,6 +338,47 @@ quickstart assets.
 """
         with self.assertRaisesRegex(ValueError, "exactly one published-checkout sentence"):
             module.render_release_readme(source, "5.5.0")
+
+    def test_renderer_rejects_the_polynomial_markdown_link_regex(self):
+        source = MODULE_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("MARKDOWN_LINK_RE", source)
+        self.assertNotIn(r"(!?\[[^\]]*\]\()", source)
+
+    def test_renderer_rewrites_hostile_bracket_input_in_bounded_time(self):
+        module = load_module()
+        hostile = "[" * 20_000 + "[](" * 20_000
+        source = (
+            "cargo install assay-cli --version 5.4.0 --locked\n"
+            "Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).\n"
+            "For v5.4.0, run the last command from a source checkout. The installer and the\n"
+            "published v5.4.0 CLI archive install the binary but do not carry the bounded\n"
+            "quickstart assets.\n"
+            + hostile
+            + "\nSee [scope](docs/concepts/scope.md) and [license](LICENSE) and "
+            "[quickstart](examples/mcp-quickstart/run.py) and [here](#quickstart) and "
+            "[action](https://github.com/marketplace/actions/assay-ai-agent-security).\n"
+            '<a href="docs/concepts/scope.md">scope</a>\n'
+        )
+        started = time.perf_counter()
+        rendered = module.render_release_readme(source, "5.5.0")
+        elapsed = time.perf_counter() - started
+        self.assertLess(elapsed, 0.25, f"rewrite exceeded linear ceiling: {elapsed:.3f}s")
+        self.assertIn(
+            "[scope](https://github.com/Rul1an/assay/blob/v5.5.0/docs/concepts/scope.md)",
+            rendered,
+        )
+        self.assertIn("[license](LICENSE)", rendered)
+        self.assertIn("[quickstart](examples/mcp-quickstart/run.py)", rendered)
+        self.assertIn("[here](#quickstart)", rendered)
+        self.assertIn(
+            "[action](https://github.com/marketplace/actions/assay-ai-agent-security)",
+            rendered,
+        )
+        self.assertIn(
+            'href="https://github.com/Rul1an/assay/blob/v5.5.0/docs/concepts/scope.md"',
+            rendered,
+        )
+        self.assertNotIn(CHECKOUT_SENTENCE, rendered)
 
 
 if __name__ == "__main__":
