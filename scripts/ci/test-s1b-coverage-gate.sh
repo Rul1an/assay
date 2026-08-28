@@ -664,6 +664,9 @@ fi
 if grep -Fq 'rmdir "$LEAF" 2>/dev/null || true' "$DRIVER"; then
   fail "LEAF rmdir failure is still suppressed"
 fi
+if grep -Fq 'rmdir "$wd" 2>/dev/null' "$DRIVER"; then
+  fail "suppressed pathname rmdir of WORKDIR is still present"
+fi
 if grep -Eq 'fail ' <<<"$(fn_active cleanup_work)"; then
   fail "cleanup_work must not call fail"
 fi
@@ -834,6 +837,35 @@ rmdir "$away_leaked" || fail "rename-away residue was not an empty leftover obje
 [[ ! -e "$away_leaked" ]] || fail "rename-away leak leftover $away_leaked"
 assert_tracks_gone "$tmp/away.out"
 
+run_empty_swap_selftest() {
+  local driver="$1" out="$2" err="$3"
+  set +e
+  run_bounded 12 bash "$driver" cleanup-empty-swap-selftest >"$out" 2>"$err"
+  local ec=$?
+  set -e
+  printf '%s\n' "$ec" >"${out}.ec"
+}
+
+run_empty_swap_selftest "$DRIVER" "$tmp/es.out" "$tmp/es.err"
+es_ec=$(cat "$tmp/es.out.ec")
+es_created=$(sed -n 's/^CREATED=//p' "$tmp/es.out" | head -1)
+es_leaked=$(sed -n 's/^LEAKED=//p' "$tmp/es.out" | head -1)
+[[ -n "$es_created" ]] || fail "empty-swap selftest did not report CREATED"
+[[ -n "$es_leaked" ]] || fail "empty-swap selftest did not report LEAKED"
+[[ "$es_ec" -ne 0 ]] || fail "empty-swap stayed 0 after post-identity replacement"
+grep -q 'ok: cleanup-empty-swap-selftest about to exit 0' "$tmp/es.out" \
+  || fail "empty-swap selftest missing ok line"
+grep -Fq 'FAIL: WORKDIR pathname does not name the owned object:' "$tmp/es.err" \
+  || fail "empty-swap must diagnose pathname/object mismatch: $(cat "$tmp/es.err")"
+[[ -d "$es_created" ]] || fail "empty-swap deleted the replacement at $es_created"
+[[ ! -e "$es_created/owned-marker" ]] || fail "empty-swap left marker in replacement $es_created"
+[[ -d "$es_leaked" ]] || fail "empty-swap lost the renamed owned object $es_leaked"
+[[ ! -e "$es_leaked/owned-marker" ]] || fail "empty-swap left marker in leaked $es_leaked"
+rmdir "$es_created" || fail "empty-swap replacement was not empty $es_created"
+rmdir "$es_leaked" || fail "empty-swap leaked object was not empty $es_leaked"
+[[ ! -e "$es_created" ]] || fail "empty-swap created-path leftover $es_created"
+[[ ! -e "$es_leaked" ]] || fail "empty-swap leak leftover $es_leaked"
+assert_tracks_gone "$tmp/es.out"
 
 python3 - "$DRIVER" "$tmp/mut-prefix.sh" <<'MUT1'
 from pathlib import Path
@@ -924,8 +956,21 @@ from pathlib import Path
 import sys
 src, dst = Path(sys.argv[1]), Path(sys.argv[2])
 text = src.read_text()
-old = '    remove_owned_workdir "$WORKDIR"\n    [[ ! -e "$assigned" ]] || fail "assigned WORKDIR leftover $assigned"\n'
-new = '    [[ ! -e "$assigned" ]] || fail "assigned WORKDIR leftover $assigned"\n'
+old = (
+    "    printf 'owned\\n' >\"$WORKDIR/owned-marker\"\n"
+    "    remove_owned_workdir \"$WORKDIR\"\n"
+    "    if [[ -e \"$assigned\" ]]; then\n"
+    "      [[ -z \"$(find \"$assigned\" -mindepth 1 -maxdepth 1)\" ]] || fail \"assigned WORKDIR leftover contents $assigned\"\n"
+    "      rmdir \"$assigned\" || fail \"assigned WORKDIR residue $assigned\"\n"
+    "    fi\n"
+)
+new = (
+    "    printf 'owned\\n' >\"$WORKDIR/owned-marker\"\n"
+    "    if [[ -e \"$assigned\" ]]; then\n"
+    "      [[ -z \"$(find \"$assigned\" -mindepth 1 -maxdepth 1)\" ]] || fail \"assigned WORKDIR leftover contents $assigned\"\n"
+    "      rmdir \"$assigned\" || fail \"assigned WORKDIR residue $assigned\"\n"
+    "    fi\n"
+)
 if old not in text:
     raise SystemExit("collision production remove missing")
 dst.write_text(text.replace(old, new, 1))
@@ -1180,13 +1225,11 @@ text = src.read_text()
 old = (
     "  s1b_release_owned_cwd\n"
     "  if s1b_path_is_owned_object \"$wd\"; then\n"
-    "    rmdir \"$wd\" 2>/dev/null || true\n"
 )
 new = (
     "  s1b_release_owned_cwd\n"
     "  rm -rf \"$wd\"\n"
-    "  if false; then\n"
-    "    rmdir \"$wd\" 2>/dev/null || true\n"
+    "  if s1b_path_is_owned_object \"$wd\"; then\n"
 )
 if old not in text:
     raise SystemExit("identity-then-rmdir block missing")
@@ -1209,14 +1252,14 @@ import sys
 src, dst = Path(sys.argv[1]), Path(sys.argv[2])
 text = src.read_text()
 old = (
-    "    echo \"FAIL: WORKDIR pathname does not name the owned object: $wd\" >&2\n"
-    "    CLEANUP_LEAF_RC=1\n"
-    "    echo \"FAIL: owned WORKDIR object leftover after rebind\" >&2\n"
+    "  echo \"FAIL: WORKDIR pathname does not name the owned object: $wd\" >&2\n"
+    "  CLEANUP_LEAF_RC=1\n"
+    "  echo \"FAIL: owned WORKDIR object leftover after rebind\" >&2\n"
 )
 new = (
-    "    echo \"FAIL: WORKDIR pathname does not name the owned object: $wd\" >&2\n"
-    "    CLEANUP_LEAF_RC=0\n"
-    "    echo \"FAIL: owned WORKDIR object leftover after rebind\" >&2\n"
+    "  echo \"FAIL: WORKDIR pathname does not name the owned object: $wd\" >&2\n"
+    "  CLEANUP_LEAF_RC=0\n"
+    "  echo \"FAIL: owned WORKDIR object leftover after rebind\" >&2\n"
 )
 if old not in text:
     raise SystemExit("rebind CLEANUP_LEAF_RC diagnose missing")
@@ -1344,6 +1387,45 @@ grep -Fq 'FAIL: WORKDIR pathname does not name the owned object:' "$tmp/mut-n.er
   || fail "comment-only fifo mutant lost mismatch diagnose"
 rm -rf ${mn_leaked:+"$mn_leaked"} ${mn_created:+"$mn_created"} "$mn_foreign"
 assert_tracks_gone "$tmp/mut-n.out"
+
+python3 - "$DRIVER" "$tmp/mut-empty-rmdir.sh" <<'MUTO'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = (
+    "    if ! s1b_path_is_owned_object \"$wd\"; then\n"
+    "      true\n"
+    "    else\n"
+    "      return 0\n"
+    "    fi\n"
+)
+new = (
+    "    rmdir \"$wd\" 2>/dev/null || true\n"
+    "    if [[ -e \"$wd\" ]]; then\n"
+    "      if [[ \"${S1B_CLEANUP:-}\" == 1 ]]; then\n"
+    "        echo \"FAIL: WORKDIR leftover $wd\" >&2\n"
+    "        CLEANUP_LEAF_RC=1\n"
+    "        return 1\n"
+    "      fi\n"
+    "      fail \"WORKDIR leftover $wd\"\n"
+    "    fi\n"
+    "    return 0\n"
+)
+if old not in text:
+    raise SystemExit("fail-closed identity residue missing")
+dst.write_text(text.replace(old, new, 1))
+MUTO
+run_empty_swap_selftest "$tmp/mut-empty-rmdir.sh" "$tmp/mut-o.out" "$tmp/mut-o.err"
+mo_ec=$(cat "$tmp/mut-o.out.ec")
+mo_created=$(sed -n 's/^CREATED=//p' "$tmp/mut-o.out" | head -1)
+mo_leaked=$(sed -n 's/^LEAKED=//p' "$tmp/mut-o.out" | head -1)
+[[ -n "$mo_created" && -n "$mo_leaked" ]] || fail "rmdir-restore mutant did not report CREATED/LEAKED"
+[[ "$mo_ec" -eq 0 ]] || fail "rmdir-restore mutant did not stay 0 (ec=$mo_ec)"
+[[ ! -e "$mo_created" ]] || fail "rmdir-restore mutant left replacement $mo_created"
+[[ -d "$mo_leaked" ]] || fail "rmdir-restore mutant lost leaked object $mo_leaked"
+rm -rf ${mo_leaked:+"$mo_leaked"} ${mo_created:+"$mo_created"}
+assert_tracks_gone "$tmp/mut-o.out"
 
 echo "ok: s1b cleanup ownership mutations"
 

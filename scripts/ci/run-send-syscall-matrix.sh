@@ -196,7 +196,7 @@ s1b_owned_workdir() {
 }
 
 remove_owned_workdir() {
-  local wd="${1:-}" cwd_id
+  local wd="${1:-}" cwd_id leak
   [[ -n "$wd" ]] || return 0
   if ! s1b_owned_workdir "$wd"; then
     [[ -d "$wd" ]] || return 0
@@ -219,24 +219,26 @@ remove_owned_workdir() {
   find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
   s1b_release_owned_cwd
   if s1b_path_is_owned_object "$wd"; then
-    rmdir "$wd" 2>/dev/null || true
-    if [[ -e "$wd" ]]; then
-      if [[ "${S1B_CLEANUP:-}" == 1 ]]; then
-        echo "FAIL: WORKDIR leftover $wd" >&2
-        CLEANUP_LEAF_RC=1
-        return 1
-      fi
-      fail "WORKDIR leftover $wd"
+    if [[ -n "${S1B_EMPTY_SWAP:-}" ]]; then
+      leak=$(mktemp -d /tmp/s1b-empty-swap-XXXXXX)
+      rmdir "$leak"
+      mv "$wd" "$leak"
+      mkdir "$wd"
+      echo "LEAKED=$leak"
     fi
-  else
-    echo "FAIL: WORKDIR pathname does not name the owned object: $wd" >&2
-    CLEANUP_LEAF_RC=1
-    echo "FAIL: owned WORKDIR object leftover after rebind" >&2
-    if [[ "${S1B_CLEANUP:-}" == 1 ]]; then
-      return 1
+    if ! s1b_path_is_owned_object "$wd"; then
+      true
+    else
+      return 0
     fi
-    fail "WORKDIR pathname does not name the owned object: $wd"
   fi
+  echo "FAIL: WORKDIR pathname does not name the owned object: $wd" >&2
+  CLEANUP_LEAF_RC=1
+  echo "FAIL: owned WORKDIR object leftover after rebind" >&2
+  if [[ "${S1B_CLEANUP:-}" == 1 ]]; then
+    return 1
+  fi
+  fail "WORKDIR pathname does not name the owned object: $wd"
 }
 
 cleanup_work() {
@@ -603,7 +605,11 @@ case "$MODE" in
     [[ ! -e "$fifo" ]] || fail "FIFO leftover $fifo"
     [[ ! -d "$leaf" ]] || fail "leaf leftover $leaf"
     wd=$WORKDIR
-    [[ ! -e "$wd" ]] || fail "WORKDIR leftover $wd"
+    if [[ -e "$wd" ]]; then
+      [[ -d "$wd" ]] || fail "WORKDIR leftover is not a dir $wd"
+      [[ -z "$(find "$wd" -mindepth 1 -maxdepth 1)" ]] || fail "WORKDIR leftover contents $wd"
+      rmdir "$wd" || fail "WORKDIR residue $wd"
+    fi
     bad=$(mktemp -d)
     s1b_hygiene_track "$bad"
     printf 'keep\n' >"$bad/keep"
@@ -660,8 +666,12 @@ case "$MODE" in
       fail "tmp prefix sibling owned without RUNNER_TEMP: $sib3"
     fi
     rm -rf "$sib" "$rt" "$sib3"
+    printf 'owned\n' >"$WORKDIR/owned-marker"
     remove_owned_workdir "$WORKDIR"
-    [[ ! -e "$assigned" ]] || fail "assigned WORKDIR leftover $assigned"
+    if [[ -e "$assigned" ]]; then
+      [[ -z "$(find "$assigned" -mindepth 1 -maxdepth 1)" ]] || fail "assigned WORKDIR leftover contents $assigned"
+      rmdir "$assigned" || fail "assigned WORKDIR residue $assigned"
+    fi
     WORKDIR=""
     echo "ok: cleanup-collision-selftest" ;;
   cleanup-busy-leaf-selftest)
@@ -810,6 +820,14 @@ case "$MODE" in
     echo "LEAKED=$leak"
     echo "ok: cleanup-rename-away-selftest about to exit 0"
     exit 0 ;;
+  cleanup-empty-swap-selftest)
+    WORKDIR=""
+    create_owned_workdir || fail "owned WORKDIR create failed"
+    echo "CREATED=$WORKDIR"
+    printf 'owned\n' >"$WORKDIR/owned-marker"
+    S1B_EMPTY_SWAP=1
+    echo "ok: cleanup-empty-swap-selftest about to exit 0"
+    exit 0 ;;
   cleanup-hygiene-inherit-selftest)
     own=$(mktemp -d /tmp/s1b-hyg-own-XXXXXX)
     s1b_hygiene_track "$own"
@@ -844,5 +862,5 @@ case "$MODE" in
     LOG="${2:?}"
     HOUT="${3:?}"
     fail "diagnostics-selftest" ;;
-  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|cleanup-collision-selftest|cleanup-busy-leaf-selftest|cleanup-preserve-rc-selftest|cleanup-create-selftest|cleanup-zero-status-leaf-selftest|cleanup-hygiene-inherit-selftest|cleanup-rebind-selftest|cleanup-rename-away-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest|diagnostics-selftest" ;;
+  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|cleanup-collision-selftest|cleanup-busy-leaf-selftest|cleanup-preserve-rc-selftest|cleanup-create-selftest|cleanup-zero-status-leaf-selftest|cleanup-hygiene-inherit-selftest|cleanup-rebind-selftest|cleanup-rename-away-selftest|cleanup-empty-swap-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest|diagnostics-selftest" ;;
 esac
