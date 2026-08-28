@@ -25,6 +25,14 @@ CASES=(
   srcset-relative
   blob-HEAD
   blob-main
+  blob-main-fragment
+  blob-main-query
+  blob-feature-branch
+  blob-other-repo-main
+  blob-userinfo-main
+  blob-port-main
+  blob-scheme-relative-main
+  blob-commit
   blob-refs-heads-main
   workspace-readme-fallback
   version-pinned-install
@@ -37,6 +45,7 @@ CASES=(
   scanner-structural-bound
   oversize-readme
   oversize-archive-member
+  oversized-gnu-longname
   packaged-manifest-source
   toolchain-single-source
   restore-preexisting-docs
@@ -183,10 +192,12 @@ PY
 run_hostile_bracket_bound() {
   python3 - "$CHECK" <<'PY'
 from pathlib import Path
+import gzip
 import re
 import sys
 import tarfile
 import time
+from urllib.parse import urlsplit
 
 checker = Path(sys.argv[1]).read_text(encoding="utf-8")
 if "MD_LINK = re.compile" in checker:
@@ -195,7 +206,14 @@ if "MD_LINK = re.compile" in checker:
 # Exec only the extract helper from the crate checker heredoc, not the cargo gate.
 start = checker.index("MAX_LINK_LABEL")
 end = checker.index("\ndef classify_relative")
-ns: dict = {"Path": Path, "re": re, "sys": sys, "tarfile": tarfile}
+ns: dict = {
+    "Path": Path,
+    "gzip": gzip,
+    "re": re,
+    "sys": sys,
+    "tarfile": tarfile,
+    "urlsplit": urlsplit,
+}
 exec(checker[start:end], ns)
 extract = ns["extract_links"]
 if "MD_LINK" in ns:
@@ -237,13 +255,13 @@ PY
 
 write_fake_cargo() {
   local destination="$1"
-  local oversized="${2:-false}"
+  local mode="${2:-normal}"
   cat >"$destination" <<SH
 #!/usr/bin/env bash
 set -euo pipefail
 mkdir -p "\$CARGO_TARGET_DIR/package"
 python3 - "\$CARGO_TARGET_DIR/package/assay-cli-5.5.0.crate" \\
-  "\$FAKE_MANIFEST" "\$FAKE_README" "\$FAKE_PROFILE" "$oversized" <<'PY'
+  "\$FAKE_MANIFEST" "\$FAKE_README" "\$FAKE_PROFILE" "$mode" <<'PY'
 from pathlib import Path
 import gzip
 import io
@@ -255,7 +273,7 @@ files = {
     "README.md": Path(sys.argv[3]).read_bytes(),
     "evidence_demo_profile.yaml": Path(sys.argv[4]).read_bytes(),
 }
-if sys.argv[5] == "true":
+if sys.argv[5] == "oversized-member":
     # A valid gzip stream with a deliberately truncated tar payload is enough:
     # the checker must reject the declared size as soon as it reads the header.
     with gzip.open(sys.argv[1], "wb") as stream:
@@ -268,6 +286,23 @@ if sys.argv[5] == "true":
         oversized = tarfile.TarInfo("assay-cli-5.5.0/src/oversized.bin")
         oversized.size = 64 * 1024 * 1024 + 1
         stream.write(oversized.tobuf())
+elif sys.argv[5] == "gnu-longname":
+    # GNU longname metadata is consumed by tarfile before it yields the next
+    # member. The checker must cap the decompressed stream around tarfile, not
+    # merely sum the regular members tarfile eventually yields.
+    with gzip.open(sys.argv[1], "wb") as stream:
+        longname = tarfile.TarInfo("././@LongLink")
+        longname.type = tarfile.GNUTYPE_LONGNAME
+        longname.size = 16 * 1024 * 1024 + 1
+        stream.write(longname.tobuf(format=tarfile.GNU_FORMAT))
+        remaining = longname.size
+        chunk = b"\0" * (1024 * 1024)
+        while remaining:
+            part = chunk[: min(remaining, len(chunk))]
+            stream.write(part)
+            remaining -= len(part)
+        stream.write(b"\0" * ((-longname.size) % 512))
+        stream.write(b"\0" * 1024)
 else:
     with tarfile.open(sys.argv[1], "w:gz") as archive:
         for relative, data in files.items():
@@ -312,7 +347,7 @@ run_oversize_archive_member() {
   local fakebin="$SCRATCH/oversize-archive-bin"
   local out="$SCRATCH/oversize-archive.out"
   mkdir -p "$fakebin"
-  write_fake_cargo "$fakebin/cargo" true
+  write_fake_cargo "$fakebin/cargo" oversized-member
   if PATH="$fakebin:$PATH" \
     FAKE_MANIFEST="$SCRATCH/Cargo.toml" \
     FAKE_README="$SCRATCH/README.md" \
@@ -328,6 +363,26 @@ run_oversize_archive_member() {
   fi
 }
 
+run_oversized_gnu_longname() {
+  local fakebin="$SCRATCH/oversized-gnu-longname-bin"
+  local out="$SCRATCH/oversized-gnu-longname.out"
+  mkdir -p "$fakebin"
+  write_fake_cargo "$fakebin/cargo" gnu-longname
+  if PATH="$fakebin:$PATH" \
+    FAKE_MANIFEST="$SCRATCH/Cargo.toml" \
+    FAKE_README="$SCRATCH/README.md" \
+    FAKE_PROFILE="$ROOT/crates/assay-cli/evidence_demo_profile.yaml" \
+    bash "$CHECK" >"$out" 2>&1; then
+    echo "FAIL: oversized GNU longname metadata was accepted" >&2
+    return 1
+  fi
+  if ! grep -Fq "decompressed stream exceeds" "$out"; then
+    echo "FAIL: oversized GNU longname missed stream diagnostic" >&2
+    cat "$out" >&2
+    return 1
+  fi
+}
+
 run_toolchain_single_source() {
   python3 - "$ROOT/.github/workflows/ci.yml" <<'PY'
 from pathlib import Path
@@ -337,45 +392,74 @@ workflow = Path(sys.argv[1]).read_text(encoding="utf-8")
 start = workflow.index("  publish-shape-cli:")
 end = workflow.index("\n  public-crate-policy:", start)
 job = workflow[start:end]
-if job.count("RUSTUP_TOOLCHAIN: stable") != 1:
-    raise SystemExit("publish-shape toolchain must have one literal source")
-if "toolchain: ${{ env.RUSTUP_TOOLCHAIN }}" not in job:
-    raise SystemExit("rust-toolchain action does not consume the job toolchain pin")
+
+
+def validate(candidate: str) -> None:
+    if candidate.count("RUSTUP_TOOLCHAIN:") != 1 or candidate.count("RUSTUP_TOOLCHAIN: stable") != 1:
+        raise ValueError("publish-shape toolchain must have one literal source")
+    if "toolchain: ${{ env.RUSTUP_TOOLCHAIN }}" not in candidate:
+        raise ValueError("rust-toolchain action does not consume the job toolchain pin")
+    forbidden = ("cargo +", "RUSTUP_TOOLCHAIN=", "rustup run", "rustup override", "rustup default")
+    if any(token in candidate for token in forbidden):
+        raise ValueError("publish-shape invocation overrides the pinned toolchain")
+
+
+validate(job)
+mutations = {
+    "step-env": job + "\n      env:\n        RUSTUP_TOOLCHAIN: nightly\n",
+    "cargo-plus": job + "\n      run: cargo +nightly package\n",
+    "shell-env": job + "\n      run: RUSTUP_TOOLCHAIN=nightly cargo package\n",
+    "rustup-run": job + "\n      run: rustup run nightly cargo package\n",
+    "rustup-override": job + "\n      run: rustup override set nightly\n",
+}
+for name, mutation in mutations.items():
+    try:
+        validate(mutation)
+    except ValueError:
+        continue
+    raise SystemExit(f"toolchain mutation survived: {name}")
 PY
 }
 
 run_restore_preexisting_docs() {
-  python3 - "$SCRATCH" <<'PY'
-from pathlib import Path
-import shutil
-import sys
-
-scratch = Path(sys.argv[1]) / "restore-preexisting-docs"
-old = scratch / "old-restore"
-new = scratch / "new-restore"
-for root in (old, new):
-    docs = root / "docs"
-    docs.mkdir(parents=True)
-    (docs / "user-owned.md").write_text("keep\n", encoding="utf-8")
-
-# Old contract: unconditional rm -rf docs.
-shutil.rmtree(old / "docs")
-if (old / "docs" / "user-owned.md").exists():
-    raise SystemExit("old-restore fixture did not model blanket delete")
-
-# New contract: restore only an owned sentinel; preexisting docs stay.
-owned = new / "docs" / "guides" / "github-action.md"
-owned.parent.mkdir(parents=True)
-owned.write_text("appease\n", encoding="utf-8")
-owned.unlink()
-owned.parent.rmdir()
-# do not rmdir docs — it still holds user-owned.md
-if not (new / "docs" / "user-owned.md").exists():
-    raise SystemExit("new restore destroyed a preexisting docs file")
-if (new / "docs" / "guides").exists():
-    raise SystemExit("owned sentinel directory was not removed")
-print("restore-preexisting-docs: old rm -rf destroyed user-owned.md; new restore kept it")
-PY
+  local root="$SCRATCH/restore-preexisting-docs"
+  local docs="$root/docs"
+  mkdir -p "$docs/guides"
+  printf 'keep\n' >"$docs/user-owned.md"
+  printf 'keep nested\n' >"$docs/guides/user-owned.md"
+  printf 'owned\n' >"$docs/guides/github-action.md"
+  (
+    eval "$(sed -n '/^restore_owned_paths()/,/^}/p' "$0")"
+    CREATED_PATHS=(
+      "$docs/guides/github-action.md"
+      "$docs/guides"
+      "$docs"
+    )
+    set +e
+    restore_output="$(restore_owned_paths 2>&1)"
+    restore_rc=$?
+    set -e
+    if [[ "$restore_rc" -eq 0 ]]; then
+      echo "FAIL: actual restore_owned_paths did not refuse a non-empty owned parent" >&2
+      exit 1
+    fi
+    if [[ "$restore_output" != *"owned directory not empty, not blanket-deleting"* ]]; then
+      echo "FAIL: actual restore_owned_paths missed its refusal diagnostic" >&2
+      exit 1
+    fi
+  )
+  if [[ ! -f "$docs/user-owned.md" ]]; then
+    echo "FAIL: actual restore_owned_paths destroyed pre-existing content" >&2
+    return 1
+  fi
+  if [[ -e "$docs/guides/github-action.md" ]]; then
+    echo "FAIL: actual restore_owned_paths left its owned sentinel" >&2
+    return 1
+  fi
+  if [[ ! -f "$docs/guides/user-owned.md" ]]; then
+    echo "FAIL: actual restore_owned_paths destroyed nested pre-existing content" >&2
+    return 1
+  fi
 }
 
 baseline_out="$SCRATCH/baseline.out"
@@ -435,6 +519,38 @@ for name in "${CASES[@]}"; do
     blob-main)
       rewrite_repo_link "https://github.com/Rul1an/assay/blob/main/"
       expect_fail "$name" "mutable git ref"
+      ;;
+    blob-main-fragment)
+      rewrite_repo_link "https://github.com/Rul1an/assay/blob/main#readme"
+      expect_fail "$name" "mutable git ref"
+      ;;
+    blob-main-query)
+      rewrite_repo_link "https://github.com/Rul1an/assay/blob/main?plain=1"
+      expect_fail "$name" "mutable git ref"
+      ;;
+    blob-feature-branch)
+      rewrite_repo_link "https://github.com/Rul1an/assay/blob/feature/README.md"
+      expect_fail "$name" "mutable git ref"
+      ;;
+    blob-other-repo-main)
+      rewrite_repo_link "https://github.com/example/project/blob/main/README.md"
+      expect_fail "$name" "mutable git ref"
+      ;;
+    blob-userinfo-main)
+      rewrite_repo_link "https://user@github.com/Rul1an/assay/blob/main/README.md"
+      expect_fail "$name" "mutable git ref"
+      ;;
+    blob-port-main)
+      rewrite_repo_link "https://github.com:443/Rul1an/assay/blob/main/README.md"
+      expect_fail "$name" "mutable git ref"
+      ;;
+    blob-scheme-relative-main)
+      rewrite_repo_link "//github.com/Rul1an/assay/blob/main/README.md"
+      expect_fail "$name" "mutable git ref"
+      ;;
+    blob-commit)
+      rewrite_repo_link "https://github.com/Rul1an/assay/blob/0123456789abcdef0123456789abcdef01234567/README.md"
+      expect_pass "$name"
       ;;
     blob-refs-heads-main)
       rewrite_repo_link "https://github.com/Rul1an/assay/blob/refs/heads/main/"
@@ -500,6 +616,10 @@ PY
       ;;
     oversize-archive-member)
       run_oversize_archive_member
+      echo "PASS: $name"
+      ;;
+    oversized-gnu-longname)
+      run_oversized_gnu_longname
       echo "PASS: $name"
       ;;
     packaged-manifest-source)

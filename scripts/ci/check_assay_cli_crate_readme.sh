@@ -36,11 +36,13 @@ fi
 python3 -u - "$ROOT" "${archives[0]}" <<'PY'
 from __future__ import annotations
 
+import gzip
 import re
 import shlex
 import sys
 import tarfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(sys.argv[1])
 ARCHIVE_PATH = Path(sys.argv[2])
@@ -50,10 +52,10 @@ ADR042_SENTENCES = (
     "A deny is fail-closed caution, not a verdict on intent; an allow is the decision to forward, never proof the action happened.",
 )
 FORBIDDEN_PREFIXES = ("docs/", "examples/", "demo/")
-MUTABLE_GIT_REF = re.compile(r"/(?:blob|tree)/(?:HEAD|main|master|refs/heads/[^/?#]+)(?:/|$)")
 MAX_README_BYTES = 1024 * 1024
 MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_CRATE_BYTES = 64 * 1024 * 1024
+MAX_DECOMPRESSED_STREAM_BYTES = 16 * 1024 * 1024
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 4096
 MAX_MEMBER_NAME = 4096
@@ -64,6 +66,22 @@ MAX_LINK_URL = 2048
 def fail(message: str) -> None:
     print(f"assay-cli crate README check failed: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+class BoundedReader:
+    def __init__(self, stream: gzip.GzipFile, ceiling: int) -> None:
+        self.stream = stream
+        self.ceiling = ceiling
+        self.consumed = 0
+
+    def read(self, size: int = -1) -> bytes:
+        remaining = self.ceiling - self.consumed
+        requested = remaining + 1 if size < 0 else min(size, remaining + 1)
+        data = self.stream.read(requested)
+        self.consumed += len(data)
+        if self.consumed > self.ceiling:
+            fail(f"packaged crate decompressed stream exceeds {self.ceiling} bytes")
+        return data
 
 
 def decode_bounded_utf8(data: bytes, ceiling: int, label: str) -> str:
@@ -118,61 +136,90 @@ def archive_member_bytes(
 def load_packaged_crate(path: Path) -> tuple[list[str], str, str, str]:
     if path.stat().st_size > MAX_CRATE_BYTES:
         fail(f"built .crate exceeds {MAX_CRATE_BYTES} bytes")
-    with tarfile.open(path, mode="r:gz") as archive:
+    with path.open("rb") as compressed:
+        decompressed = gzip.GzipFile(fileobj=compressed)
+        bounded = BoundedReader(decompressed, MAX_DECOMPRESSED_STREAM_BYTES)
+        archive = tarfile.open(fileobj=bounded, mode="r|")
         roots: set[str] = set()
-        by_relative: dict[str, tarfile.TarInfo] = {}
+        members: set[str] = set()
+        selected: dict[str, bytes] = {}
         member_count = 0
         uncompressed_bytes = 0
-        for member in archive:
-            member_count += 1
-            if member_count > MAX_ARCHIVE_MEMBERS:
-                fail(f"packaged crate has more than {MAX_ARCHIVE_MEMBERS} members")
-            if len(member.name) > MAX_MEMBER_NAME:
-                fail("packaged crate member name exceeds ceiling")
-            if member.size < 0:
-                fail("packaged crate member has a negative size")
-            uncompressed_bytes += member.size
-            if uncompressed_bytes > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
-                fail(
-                    "packaged crate declared uncompressed size exceeds "
-                    f"{MAX_ARCHIVE_UNCOMPRESSED_BYTES} bytes"
-                )
-            parts = Path(member.name).parts
-            if not parts or member.name.startswith("/") or ".." in parts:
-                fail(f"unsafe packaged crate member: {member.name!r}")
-            roots.add(parts[0])
-            if len(parts) == 1 or not member.isfile():
-                continue
-            relative = "/".join(parts[1:])
-            if relative in by_relative:
-                fail(f"duplicate packaged crate member: {relative}")
-            by_relative[relative] = member
+        with archive:
+            for member in archive:
+                member_count += 1
+                if member_count > MAX_ARCHIVE_MEMBERS:
+                    fail(f"packaged crate has more than {MAX_ARCHIVE_MEMBERS} members")
+                if len(member.name) > MAX_MEMBER_NAME:
+                    fail("packaged crate member name exceeds ceiling")
+                if member.size < 0:
+                    fail("packaged crate member has a negative size")
+                uncompressed_bytes += member.size
+                if uncompressed_bytes > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                    fail(
+                        "packaged crate declared uncompressed size exceeds "
+                        f"{MAX_ARCHIVE_UNCOMPRESSED_BYTES} bytes"
+                    )
+                parts = Path(member.name).parts
+                if not parts or member.name.startswith("/") or ".." in parts:
+                    fail(f"unsafe packaged crate member: {member.name!r}")
+                roots.add(parts[0])
+                if len(parts) == 1 or not member.isfile():
+                    continue
+                relative = "/".join(parts[1:])
+                if relative in members:
+                    fail(f"duplicate packaged crate member: {relative}")
+                members.add(relative)
+                if relative == "Cargo.toml.orig":
+                    selected[relative] = archive_member_bytes(
+                        archive, member, MAX_MANIFEST_BYTES, "packaged Cargo.toml.orig"
+                    )
+                elif relative == "README.md":
+                    selected[relative] = archive_member_bytes(
+                        archive, member, MAX_README_BYTES, "packaged README"
+                    )
         if member_count == 0:
             fail("packaged crate has no members")
         if len(roots) != 1:
             fail(f"packaged crate must have one root, found {sorted(roots)!r}")
-        manifest_member = by_relative.get("Cargo.toml.orig")
-        if manifest_member is None:
+        manifest_bytes = selected.get("Cargo.toml.orig")
+        if manifest_bytes is None:
             fail("packaged crate is missing Cargo.toml.orig")
         manifest_text = decode_bounded_utf8(
-            archive_member_bytes(
-                archive, manifest_member, MAX_MANIFEST_BYTES, "packaged Cargo.toml.orig"
-            ),
+            manifest_bytes,
             MAX_MANIFEST_BYTES,
             "packaged Cargo.toml.orig",
         )
         readme_name = crate_readme_selection(manifest_text)
-        readme_member = by_relative.get(readme_name)
-        if readme_member is None:
+        readme_bytes = selected.get(readme_name)
+        if readme_bytes is None:
             fail(f"member-list miss: packaged {readme_name} is absent")
         readme_text = decode_bounded_utf8(
-            archive_member_bytes(
-                archive, readme_member, MAX_README_BYTES, "packaged README"
-            ),
+            readme_bytes,
             MAX_README_BYTES,
             "packaged README",
         )
-        return sorted(by_relative), manifest_text, readme_name, readme_text
+        return sorted(members), manifest_text, readme_name, readme_text
+
+
+def reject_mutable_github_content_link(raw: str) -> None:
+    parsed = urlsplit(raw)
+    if parsed.hostname != "github.com":
+        return
+    parts = parsed.path.split("/")
+    if len(parts) < 4 or not parts[1] or not parts[2]:
+        return
+    if parts[3] not in ("blob", "tree"):
+        return
+    if (
+        parsed.scheme != "https"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.port is not None
+        or len(parts) < 5
+        or re.fullmatch(r"[0-9a-fA-F]{40}", parts[4]) is None
+    ):
+        fail(f"mutable git ref in {raw}")
 
 
 def _scan_delimited(source: str, start: int, closer: str, ceiling: int) -> int | None:
@@ -311,8 +358,7 @@ if has_version_pinned_install(readme_text):
 
 links = extract_links(readme_text)
 for raw in links:
-    if MUTABLE_GIT_REF.search(raw):
-        fail(f"mutable git ref in {raw}")
+    reject_mutable_github_content_link(raw)
 
 packaged_relatives: list[str] = []
 for raw in links:
