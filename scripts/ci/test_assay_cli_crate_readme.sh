@@ -419,7 +419,7 @@ job = workflow[start:end]
 
 
 def validate(candidate: str) -> None:
-    if candidate.count("RUSTUP_TOOLCHAIN:") != 1 or candidate.count("RUSTUP_TOOLCHAIN: stable") != 1:
+    if candidate.count("RUSTUP_TOOLCHAIN:") != 1 or candidate.count('RUSTUP_TOOLCHAIN: "1.96.0"') != 1:
         raise ValueError("publish-shape toolchain must have one literal source")
     active_toolchain = re.findall(
         r"(?m)^\s+toolchain:\s*\$\{\{\s*env\.RUSTUP_TOOLCHAIN\s*\}\}\s*$",
@@ -434,6 +434,7 @@ def validate(candidate: str) -> None:
 
 validate(job)
 mutations = {
+    "moving-stable": job.replace('RUSTUP_TOOLCHAIN: "1.96.0"', "RUSTUP_TOOLCHAIN: stable", 1),
     "step-env": job + "\n      env:\n        RUSTUP_TOOLCHAIN: nightly\n",
     "cargo-plus": job + "\n      run: cargo +nightly package\n",
     "shell-env": job + "\n      run: RUSTUP_TOOLCHAIN=nightly cargo package\n",
