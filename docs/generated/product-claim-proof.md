@@ -3,6 +3,16 @@
 
 Proof identities are checked for shape offline; this generator does not fetch them.
 
+## `privileged-mcp-action-profile-readers`
+
+- Protocol versions: None declared
+- Profile versions: privileged-mcp-action/v0, privileged-mcp-action/v1
+- Non-claims: Does not claim producer input identity, producer identity, producer release, migration, upgrade, rollback, or autodetect., Does not promise a rolling pair of releases or support by date., Unexercised historical readers are unsupported., Upgrade and rollback remain issue 2487.
+
+<a id="claim-privileged-mcp-action-v0-v1-reader-admission"></a>
+### `privileged-mcp-action-v0-v1-reader-admission` (`observation`)
+- Gap issue: `#2574`
+
 ## `published-cli`
 
 - Protocol versions: None declared

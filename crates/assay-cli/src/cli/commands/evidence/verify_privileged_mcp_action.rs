@@ -109,9 +109,11 @@ pub struct VerifyPrivilegedMcpActionArgs {
     #[arg(long, value_enum, default_value_t = VerifyFormat::Table)]
     pub format: VerifyFormat,
 
-    /// Selected privileged-mcp-action profile. Default `v0`. No autodetect from bundle contents.
-    #[arg(long, value_enum, default_value_t = ProfileVersion::V0)]
-    pub profile_version: ProfileVersion,
+    /// Selected privileged-mcp-action interpreter. Omit for default v0; passing
+    /// the flag is explicit. No autodetect from bundle contents. Does not name
+    /// a carried input profile id (v0/v1 declare none).
+    #[arg(long, value_enum)]
+    pub profile_version: Option<ProfileVersion>,
 }
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum, PartialEq, Eq)]
@@ -121,6 +123,43 @@ pub enum ProfileVersion {
     V0,
     #[value(name = "v1")]
     V1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProfileSelection {
+    Default,
+    Explicit,
+}
+
+impl ProfileSelection {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Explicit => "explicit",
+        }
+    }
+}
+
+struct ProfileProjection {
+    profile: &'static str,
+    profile_selection: ProfileSelection,
+    input_profile: Option<&'static str>,
+    input_profile_status: &'static str,
+}
+
+/// One projection rule: selected interpreter is not input identity.
+/// Frozen v0/v1 carry no profile id; do not infer one from `--profile-version`.
+fn project_profile(
+    selected: ProfileVersion,
+    profile_selection: ProfileSelection,
+) -> ProfileProjection {
+    ProfileProjection {
+        profile: selected.as_profile_id(),
+        profile_selection,
+        input_profile: None,
+        input_profile_status: "undeclared_legacy",
+    }
 }
 
 impl ProfileVersion {
@@ -155,7 +194,12 @@ pub enum VerifyFormat {
 #[derive(Debug, Serialize)]
 pub struct Report {
     pub schema: &'static str,
+    /// Selected interpreter. Never detected or carried input identity.
     pub profile: &'static str,
+    pub profile_selection: ProfileSelection,
+    /// Frozen v0/v1 always serialize JSON null.
+    pub input_profile: Option<&'static str>,
+    pub input_profile_status: &'static str,
     pub bundle_integrity: &'static str,
     /// Present only when `bundle_integrity` is `pass`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -215,10 +259,18 @@ impl ClaimCell {
 pub struct Finding {
     pub id: String,
     pub detail: String,
+    /// Exact in-namespace payload schema when one was observed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_schema: Option<String>,
 }
 
 pub fn cmd_verify_privileged_mcp_action(args: VerifyPrivilegedMcpActionArgs) -> Result<i32> {
-    let report = verify_bundle_report_for(&args.bundle, args.profile_version);
+    let profile_selection = match args.profile_version {
+        None => ProfileSelection::Default,
+        Some(_) => ProfileSelection::Explicit,
+    };
+    let profile_version = args.profile_version.unwrap_or(ProfileVersion::V0);
+    let report = verify_bundle_report_for(&args.bundle, profile_version, profile_selection);
     match args.format {
         VerifyFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
         VerifyFormat::Table => print_table(&report),
@@ -234,13 +286,17 @@ pub fn cmd_verify_privileged_mcp_action(args: VerifyPrivilegedMcpActionArgs) -> 
 /// shell-free caller-argv via `ReasonCode::next_step`, not a second remediation.
 #[cfg(test)]
 pub fn verify_bundle_report(bundle: &Path) -> Report {
-    verify_bundle_report_for(bundle, ProfileVersion::V0)
+    verify_bundle_report_for(bundle, ProfileVersion::V0, ProfileSelection::Default)
 }
 
-pub fn verify_bundle_report_for(bundle: &Path, profile_version: ProfileVersion) -> Report {
+pub fn verify_bundle_report_for(
+    bundle: &Path,
+    profile_version: ProfileVersion,
+    profile_selection: ProfileSelection,
+) -> Report {
     match read_bundle_events(bundle) {
-        Ok(events) => profile_report_for(&events, profile_version),
-        Err(err) => integrity_fail_report(&err, bundle, profile_version),
+        Ok(events) => profile_report_for_selection(&events, profile_version, profile_selection),
+        Err(err) => integrity_fail_report(&err, bundle, profile_version, profile_selection),
     }
 }
 
@@ -257,34 +313,68 @@ fn read_bundle_events(bundle: &Path) -> anyhow::Result<Vec<EvidenceEvent>> {
         .with_context(|| format!("failed to read events from bundle {}", bundle.display()))
 }
 
+struct ReportBody {
+    bundle_integrity: &'static str,
+    verdict: Option<&'static str>,
+    claims: Option<Claims>,
+    findings: Vec<Finding>,
+    reason_code: Option<&'static str>,
+    next_step: Option<String>,
+}
+
+fn emit_report(
+    profile_version: ProfileVersion,
+    profile_selection: ProfileSelection,
+    body: ReportBody,
+) -> Report {
+    let projected = project_profile(profile_version, profile_selection);
+    Report {
+        schema: REPORT_SCHEMA,
+        profile: projected.profile,
+        profile_selection: projected.profile_selection,
+        input_profile: projected.input_profile,
+        input_profile_status: projected.input_profile_status,
+        bundle_integrity: body.bundle_integrity,
+        verdict: body.verdict,
+        claims: body.claims,
+        findings: body.findings,
+        non_claims: REPORT_NON_CLAIMS,
+        reason_code: body.reason_code,
+        next_step: body.next_step,
+    }
+}
+
 fn stage1_fail_report(
     detail: String,
     reason: ReasonCode,
     bundle: &Path,
     profile_version: ProfileVersion,
+    profile_selection: ProfileSelection,
 ) -> Report {
     // Caller argv is safe to republish shell-free, unlike discovered host paths.
-    Report {
-        schema: REPORT_SCHEMA,
-        profile: profile_version.as_profile_id(),
-        bundle_integrity: "fail",
-        verdict: None,
-        claims: None,
-        findings: vec![Finding {
-            id: "bundle_integrity".to_string(),
-            detail,
-        }],
-        non_claims: REPORT_NON_CLAIMS,
-        reason_code: Some(reason.as_str()),
-        // Non-UTF-8 `bundle.to_str() == None` is #2264, not this slice.
-        next_step: Some(reason.next_step(bundle.to_str())),
-    }
+    emit_report(
+        profile_version,
+        profile_selection,
+        ReportBody {
+            bundle_integrity: "fail",
+            verdict: None,
+            claims: None,
+            findings: vec![Finding {
+                id: "bundle_integrity".to_string(),
+                detail,
+                observed_schema: None,
+            }],
+            reason_code: Some(reason.as_str()),
+            next_step: Some(reason.next_step(bundle.to_str())),
+        },
+    )
 }
 
 fn integrity_fail_report(
     err: &anyhow::Error,
     bundle: &Path,
     profile_version: ProfileVersion,
+    profile_selection: ProfileSelection,
 ) -> Report {
     let reason = reason_code_for_evidence_error(err)
         .expect("stage-1 evidence errors must map to a ReasonCode");
@@ -294,18 +384,34 @@ fn integrity_fail_report(
             .any(|(_, owned)| *owned == reason),
         "stage-1 reason must be one of the binary-owned profile codes"
     );
-    stage1_fail_report(format!("{err:#}"), reason, bundle, profile_version)
+    stage1_fail_report(
+        format!("{err:#}"),
+        reason,
+        bundle,
+        profile_version,
+        profile_selection,
+    )
 }
 
 /// Stages 2-4 over the events of a bundle that already passed stage 1.
-/// Default profile is v0 (explicit selection lives on `profile_report_for`).
+/// Default profile is v0 (explicit selection lives on `profile_report_for_selection`).
 #[cfg(test)]
 pub fn profile_report(events: &[EvidenceEvent]) -> Report {
     profile_report_for(events, ProfileVersion::V0)
 }
 
-/// Stages 2-4 for an explicitly selected profile version. No autodetect.
+/// Stages 2-4 for a selected profile version. No autodetect.
+/// Unit tests that do not go through clap use `ProfileSelection::Default`.
+#[cfg(test)]
 pub fn profile_report_for(events: &[EvidenceEvent], profile_version: ProfileVersion) -> Report {
+    profile_report_for_selection(events, profile_version, ProfileSelection::Default)
+}
+
+fn profile_report_for_selection(
+    events: &[EvidenceEvent],
+    profile_version: ProfileVersion,
+    profile_selection: ProfileSelection,
+) -> Report {
     let mut violations: Vec<Finding> = Vec::new();
 
     // Select profile events by the exact schema member of their payload.
@@ -331,8 +437,8 @@ pub fn profile_report_for(events: &[EvidenceEvent], profile_version: ProfileVers
                     other if other == profile_version.observation_schema() => {
                         observations.push(&ev.payload)
                     }
-                    other => violations.push(finding(
-                        "unknown_profile_schema",
+                    other => violations.push(unknown_schema_finding(
+                        other,
                         format!(
                             "payload schema {other:?} is inside the profile namespace but is not a recognized {} record; unknown fails closed",
                             profile_version.as_profile_id()
@@ -449,17 +555,18 @@ pub fn profile_report_for(events: &[EvidenceEvent], profile_version: ProfileVers
     }
 
     if !violations.is_empty() {
-        return Report {
-            schema: REPORT_SCHEMA,
-            profile: profile_version.as_profile_id(),
-            bundle_integrity: "pass",
-            verdict: Some("invalid"),
-            claims: None,
-            findings: violations,
-            non_claims: REPORT_NON_CLAIMS,
-            reason_code: Some(ReasonCode::EEvidenceProfileInvalid.as_str()),
-            next_step: Some(ReasonCode::EEvidenceProfileInvalid.next_step(None)),
-        };
+        return emit_report(
+            profile_version,
+            profile_selection,
+            ReportBody {
+                bundle_integrity: "pass",
+                verdict: Some("invalid"),
+                claims: None,
+                findings: violations,
+                reason_code: Some(ReasonCode::EEvidenceProfileInvalid.as_str()),
+                next_step: Some(ReasonCode::EEvidenceProfileInvalid.next_step(None)),
+            },
+        );
     }
 
     // Stage 4: claim recompute. From here the records are validated; the matrix is a deterministic
@@ -505,22 +612,23 @@ pub fn profile_report_for(events: &[EvidenceEvent], profile_version: ProfileVers
         }
     }
 
-    Report {
-        schema: REPORT_SCHEMA,
-        profile: profile_version.as_profile_id(),
-        bundle_integrity: "pass",
-        verdict: Some("valid"),
-        claims: Some(Claims {
-            policy_decision_recorded: ClaimCell::confirmed(),
-            caller_visible_denial,
-            upstream_delivery: ClaimCell::incomplete(),
-            external_side_effect: ClaimCell::incomplete(),
-        }),
-        findings: notes,
-        non_claims: REPORT_NON_CLAIMS,
-        reason_code: None,
-        next_step: None,
-    }
+    emit_report(
+        profile_version,
+        profile_selection,
+        ReportBody {
+            bundle_integrity: "pass",
+            verdict: Some("valid"),
+            claims: Some(Claims {
+                policy_decision_recorded: ClaimCell::confirmed(),
+                caller_visible_denial,
+                upstream_delivery: ClaimCell::incomplete(),
+                external_side_effect: ClaimCell::incomplete(),
+            }),
+            findings: notes,
+            reason_code: None,
+            next_step: None,
+        },
+    )
 }
 
 fn check_decision(dec: &Value, violations: &mut Vec<Finding>) {
@@ -708,12 +816,30 @@ fn finding(id: &str, detail: String) -> Finding {
     Finding {
         id: id.to_string(),
         detail,
+        observed_schema: None,
+    }
+}
+
+fn unknown_schema_finding(observed_schema: &str, detail: String) -> Finding {
+    Finding {
+        id: "unknown_profile_schema".to_string(),
+        detail,
+        observed_schema: Some(observed_schema.to_string()),
     }
 }
 
 fn print_table(report: &Report) {
     println!("Privileged MCP Action Verification ({})", report.profile);
     println!("=====================================================");
+    println!("Profile selection: {}", report.profile_selection.as_str());
+    println!(
+        "Input profile:     {} ({})",
+        report.input_profile_status,
+        match report.input_profile {
+            None => "none",
+            Some(id) => id,
+        }
+    );
     println!("Bundle integrity: {}", report.bundle_integrity);
     if let Some(verdict) = report.verdict {
         println!("Verdict:          {verdict}");
@@ -894,10 +1020,15 @@ mod tests {
             ),
         ]);
         assert_eq!(report.verdict, Some("invalid"));
-        assert!(report
+        let unknown = report
             .findings
             .iter()
-            .any(|f| f.id == "unknown_profile_schema"));
+            .find(|f| f.id == "unknown_profile_schema")
+            .expect("unknown_profile_schema");
+        assert_eq!(
+            unknown.observed_schema.as_deref(),
+            Some("assay.enforcement_decision.v1")
+        );
     }
 
     #[test]
@@ -1010,6 +1141,7 @@ mod tests {
                 &err,
                 Path::new("synthetic.bundle"),
                 ProfileVersion::V0,
+                ProfileSelection::Default,
             ))
             .unwrap();
             assert_eq!(value["reason_code"], "E_EVIDENCE_LIMIT_EXCEEDED", "{code}");
@@ -1032,6 +1164,7 @@ mod tests {
             &path_err,
             Path::new("synthetic.bundle"),
             ProfileVersion::V0,
+            ProfileSelection::Default,
         ))
         .unwrap();
         assert_eq!(path_value["reason_code"], "E_EVIDENCE_PATH_REJECTED");
@@ -1141,10 +1274,15 @@ mod tests {
         ]);
         assert_eq!(report.profile, PROFILE_ID);
         assert_eq!(report.verdict, Some("invalid"));
-        assert!(report
+        let unknown = report
             .findings
             .iter()
-            .any(|f| f.id == "unknown_profile_schema"));
+            .find(|f| f.id == "unknown_profile_schema")
+            .expect("unknown_profile_schema");
+        assert_eq!(
+            unknown.observed_schema.as_deref(),
+            Some("assay.denied_call_observation.v1")
+        );
     }
 
     #[test]
