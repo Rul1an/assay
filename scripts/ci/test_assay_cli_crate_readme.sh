@@ -47,6 +47,9 @@ CASES=(
   version-pinned-version-first
   version-pinned-shell-prompt
   version-pinned-env-prefix
+  version-pinned-sudo-prefix
+  version-pinned-command-prefix
+  version-pinned-path-cargo
   package-grew-docs
   green-control
   hostile-bracket-bound
@@ -55,6 +58,8 @@ CASES=(
   oversize-archive-member
   oversized-gnu-longname
   packaged-manifest-source
+  missing-consumer-manifest
+  disagreeing-consumer-manifest
   toolchain-single-source
 )
 EXPECTED_CASES="${#CASES[@]}"
@@ -236,10 +241,17 @@ import sys
 import tarfile
 
 files = {
+    "Cargo.toml": Path(sys.argv[2]).read_bytes(),
     "Cargo.toml.orig": Path(sys.argv[2]).read_bytes(),
     "README.md": Path(sys.argv[3]).read_bytes(),
     "evidence_demo_profile.yaml": Path(sys.argv[4]).read_bytes(),
 }
+if sys.argv[5] == "missing-consumer-manifest":
+    del files["Cargo.toml"]
+elif sys.argv[5] == "disagreeing-consumer-manifest":
+    files["Cargo.toml"] = files["Cargo.toml"].replace(
+        b'readme = "README.md"', b"readme.workspace = true", 1
+    )
 if sys.argv[5] == "forbidden-doc":
     files["docs/guides/github-action.md"] = b"must not ship\n"
 if sys.argv[5] == "oversized-member":
@@ -307,6 +319,28 @@ PY
     FAKE_PROFILE="$ROOT/crates/assay-cli/evidence_demo_profile.yaml" \
     bash "$CHECK" >"$out" 2>&1; then
     echo "FAIL: packaged manifest did not override disagreeing checkout manifest" >&2
+    cat "$out" >&2
+    return 1
+  fi
+}
+
+run_consumer_manifest_failure() {
+  local mode="$1"
+  local needle="$2"
+  local fakebin="$SCRATCH/$mode-bin"
+  local out="$SCRATCH/$mode.out"
+  mkdir -p "$fakebin"
+  write_fake_cargo "$fakebin/cargo" "$mode"
+  if PATH="$fakebin:$PATH" \
+    FAKE_MANIFEST="$SCRATCH/Cargo.toml" \
+    FAKE_README="$SCRATCH/README.md" \
+    FAKE_PROFILE="$ROOT/crates/assay-cli/evidence_demo_profile.yaml" \
+    bash "$CHECK" >"$out" 2>&1; then
+    echo "FAIL: $mode was accepted" >&2
+    return 1
+  fi
+  if ! grep -Fq "$needle" "$out"; then
+    echo "FAIL: $mode missed diagnostic: $needle" >&2
     cat "$out" >&2
     return 1
   fi
@@ -581,6 +615,18 @@ PY
       rewrite_install "env CARGO_HOME=/tmp cargo install assay-cli@5.4.0 --locked"
       expect_fail "$name" "version pin"
       ;;
+    version-pinned-sudo-prefix)
+      rewrite_install "sudo cargo install assay-cli@5.4.0 --locked"
+      expect_fail "$name" "version pin"
+      ;;
+    version-pinned-command-prefix)
+      rewrite_install "command cargo install assay-cli@5.4.0 --locked"
+      expect_fail "$name" "version pin"
+      ;;
+    version-pinned-path-cargo)
+      rewrite_install "/usr/bin/cargo install assay-cli@5.4.0 --locked"
+      expect_fail "$name" "version pin"
+      ;;
     package-grew-docs)
       run_forbidden_package_member
       echo "PASS: $name"
@@ -618,6 +664,14 @@ PY
       ;;
     packaged-manifest-source)
       run_packaged_manifest_source
+      echo "PASS: $name"
+      ;;
+    missing-consumer-manifest)
+      run_consumer_manifest_failure "$name" "missing Cargo.toml"
+      echo "PASS: $name"
+      ;;
+    disagreeing-consumer-manifest)
+      run_consumer_manifest_failure "$name" "not crate-owned README"
       echo "PASS: $name"
       ;;
     toolchain-single-source)

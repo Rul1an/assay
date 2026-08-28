@@ -170,7 +170,11 @@ def load_packaged_crate(path: Path) -> tuple[list[str], str, str, str]:
                 if relative in members:
                     fail(f"duplicate packaged crate member: {relative}")
                 members.add(relative)
-                if relative == "Cargo.toml.orig":
+                if relative == "Cargo.toml":
+                    selected[relative] = archive_member_bytes(
+                        archive, member, MAX_MANIFEST_BYTES, "packaged Cargo.toml"
+                    )
+                elif relative == "Cargo.toml.orig":
                     selected[relative] = archive_member_bytes(
                         archive, member, MAX_MANIFEST_BYTES, "packaged Cargo.toml.orig"
                     )
@@ -182,15 +186,25 @@ def load_packaged_crate(path: Path) -> tuple[list[str], str, str, str]:
             fail("packaged crate has no members")
         if len(roots) != 1:
             fail(f"packaged crate must have one root, found {sorted(roots)!r}")
-        manifest_bytes = selected.get("Cargo.toml.orig")
-        if manifest_bytes is None:
+        consumer_manifest_bytes = selected.get("Cargo.toml")
+        if consumer_manifest_bytes is None:
+            fail("packaged crate is missing Cargo.toml")
+        original_manifest_bytes = selected.get("Cargo.toml.orig")
+        if original_manifest_bytes is None:
             fail("packaged crate is missing Cargo.toml.orig")
         manifest_text = decode_bounded_utf8(
-            manifest_bytes,
+            consumer_manifest_bytes,
+            MAX_MANIFEST_BYTES,
+            "packaged Cargo.toml",
+        )
+        original_manifest_text = decode_bounded_utf8(
+            original_manifest_bytes,
             MAX_MANIFEST_BYTES,
             "packaged Cargo.toml.orig",
         )
         readme_name = crate_readme_selection(manifest_text)
+        if crate_readme_selection(original_manifest_text) != readme_name:
+            fail("packaged manifest README selection mismatch")
         readme_bytes = selected.get(readme_name)
         if readme_bytes is None:
             fail(f"member-list miss: packaged {readme_name} is absent")
@@ -297,24 +311,17 @@ def has_version_pinned_install(text: str) -> bool:
             words = shlex.split(line)
         except ValueError as error:
             fail(f"could not parse assay-cli install command: {error}")
-        index = 0
-        if words and words[0] in ("$", "%"):
-            index += 1
-        if index < len(words) and words[index] == "env":
-            index += 1
-            while index < len(words) and (
-                words[index].startswith("-")
-                or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[index]) is not None
-            ):
-                index += 1
-        else:
-            while index < len(words) and re.fullmatch(
-                r"[A-Za-z_][A-Za-z0-9_]*=.*", words[index]
-            ) is not None:
-                index += 1
-        if index >= len(words) or words[index] != "cargo":
+        cargo_index = next(
+            (
+                index
+                for index, word in enumerate(words)
+                if word.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] == "cargo"
+            ),
+            None,
+        )
+        if cargo_index is None:
             continue
-        words = words[index:]
+        words = words[cargo_index:]
         if "install" not in words:
             continue
         tail = words[words.index("install") + 1 :]
