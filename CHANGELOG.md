@@ -10,7 +10,9 @@ All notable changes to this project will be documented in this file.
   selected interpreter. The report now always projects `profile_selection`
   (`default` or `explicit`), `input_profile` (JSON `null` on frozen v0/v1),
   and `input_profile_status` (`undeclared_legacy`). Unknown in-namespace
-  schema findings retain the exact schema on `observed_schema`. This does
+  payload-schema findings retain that exact string on `observed_schema`.
+  An in-namespace envelope type whose payload declares no schema omits
+  `observed_schema` rather than republishing the envelope type. This does
   not add autodetect, migration, or a v0/v1 identity retrofit (#2574).
 - Assay's GitHub Action consumer pin is a mixed Action migration to published
   `Rul1an/assay-action` v3.1.0, not a purely additive one. Completed

@@ -32,9 +32,11 @@ NOT be retrofitted into frozen v0/v1.
 
 - **Canonical bytes.** A profile version names the records it recognizes. Additive
   optional records that stay outside a selected profile's namespace are ignored
-  after bundle integrity. An unrecognized **in-namespace** schema is invalid
-  (fail closed). The exact observed schema is retained on the finding as
-  `observed_schema`, not only in prose.
+  after bundle integrity. An unrecognized **in-namespace payload schema** is
+  invalid (fail closed). That exact schema string is retained on the finding as
+  `observed_schema`, not only in prose. An in-namespace envelope type whose
+  payload declares no schema is also invalid, but `observed_schema` is omitted
+  so the envelope type is not published as a payload schema.
 - **Claim meaning.** v0 and v1 share the v0 claim matrix and report schema
   `assay.privileged_mcp_action.verify.report.v0`. Selecting v1 does not change
   claim vocabulary.

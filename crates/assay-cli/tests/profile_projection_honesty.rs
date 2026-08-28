@@ -3,10 +3,12 @@
 //! Frozen v0/v1 bundles do not carry a profile id. Changing `--profile-version` may
 //! change the selected interpreter and MUST NOT invent input-profile provenance.
 
+use assay_evidence::{BundleWriter, EvidenceEvent};
 use assert_cmd::Command;
-use serde_json::Value;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::fmt::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 const REPORT_SCHEMA: &str = "assay.privileged_mcp_action.verify.report.v0";
@@ -138,5 +140,40 @@ fn unknown_in_namespace_schema_is_retained_on_the_finding() {
     assert!(
         finding.get("observed_schema").is_some(),
         "exact schema must be a finding field, not only prose"
+    );
+}
+
+fn write_in_namespace_envelope_without_payload_schema(path: &Path) {
+    let file = fs::File::create(path).expect("create bundle");
+    let mut writer = BundleWriter::new(file);
+    writer.add_event(EvidenceEvent::new(
+        "assay.enforcement_decision.v0",
+        "urn:assay:test:profile-honesty",
+        "run",
+        0,
+        json!({"decision": "deny"}),
+    ));
+    writer.finish().expect("finish bundle");
+}
+
+#[test]
+fn in_namespace_envelope_without_payload_schema_omits_observed_schema() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let bundle = dir.path().join("no-payload-schema.bundle.tar.gz");
+    write_in_namespace_envelope_without_payload_schema(&bundle);
+
+    let (report, exit) = verify(&bundle, None);
+    assert_eq!(exit, 2);
+    assert!(report.get("claims").is_none(), "claims must stay absent");
+    let finding = report["findings"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|f| f["id"] == "unknown_profile_schema")
+        .expect("unknown_profile_schema finding");
+    assert!(
+        finding.get("observed_schema").is_none(),
+        "missing payload schema must not publish the envelope type as observed_schema, got {}",
+        finding
     );
 }

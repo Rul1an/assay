@@ -259,7 +259,7 @@ impl ClaimCell {
 pub struct Finding {
     pub id: String,
     pub detail: String,
-    /// Exact in-namespace schema when `id` is `unknown_profile_schema`.
+    /// Exact in-namespace payload schema when one was observed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub observed_schema: Option<String>,
 }
@@ -449,8 +449,8 @@ fn profile_report_for_selection(
             // In-namespace event TYPE without an in-namespace payload schema: the profile selects
             // by the payload's schema member, so an envelope claiming a profile type that its
             // payload does not declare is not an ignorable outside-the-profile event. Fail closed.
-            _ if in_namespace(&ev.type_) => violations.push(unknown_schema_finding(
-                &ev.type_,
+            _ if in_namespace(&ev.type_) => violations.push(finding(
+                "unknown_profile_schema",
                 format!(
                     "event {} has profile-namespace type {:?} but its payload does not declare that profile schema",
                     ev.id, ev.type_
