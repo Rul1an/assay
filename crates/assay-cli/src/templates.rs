@@ -149,6 +149,8 @@ tests:
 mod gitlab_tests {
     use super::GITLAB_CI_YML;
 
+    const INIT_CI_SOURCE: &str = include_str!("cli/commands/init_ci.rs");
+
     #[test]
     fn gitlab_template_uses_the_owned_fail_closed_installer_once() {
         const INSTALL: &str = "curl -fsSL https://getassay.dev/install.sh | sh";
@@ -156,5 +158,20 @@ mod gitlab_tests {
         assert_eq!(GITLAB_CI_YML.matches(INSTALL).count(), 1);
         assert!(!GITLAB_CI_YML.contains("https://assay.dev/install.sh"));
         assert!(!GITLAB_CI_YML.contains("curl -sSL"));
+    }
+
+    #[test]
+    fn init_ci_reuses_the_gitlab_template_instead_of_copying_it() {
+        assert!(INIT_CI_SOURCE
+            .contains("\"gitlab\" => (crate::templates::GITLAB_CI_YML, \".gitlab-ci.yml\"),"));
+        assert_eq!(
+            INIT_CI_SOURCE
+                .matches("crate::templates::GITLAB_CI_YML")
+                .count(),
+            1
+        );
+        assert!(!INIT_CI_SOURCE.contains("getassay.dev/install.sh"));
+        assert!(!INIT_CI_SOURCE.contains("assay.dev/install.sh"));
+        assert!(!INIT_CI_SOURCE.contains("curl -"));
     }
 }
