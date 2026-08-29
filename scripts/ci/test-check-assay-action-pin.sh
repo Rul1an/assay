@@ -286,16 +286,17 @@ import sys
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 needle = "## [Unreleased]\n\n### Changed"
-if text.count(needle) != 1:
-    raise SystemExit("expected one Unreleased Changed heading")
-path.write_text(
-    text.replace(
-        needle,
-        "## [Unreleased]\n\n## [5.5.0] - 2026-08-30\n\n### Changed",
-        1,
-    ),
-    encoding="utf-8",
-)
+released = "## [99.99.99-test] - 2099-12-31"
+for _ in range(2):
+    if text.count(needle) == 1:
+        text = text.replace(
+            needle,
+            f"## [Unreleased]\n\n{released}\n\n### Changed",
+            1,
+        )
+    elif text.count(released) != 1:
+        raise SystemExit("expected active or already released CHANGELOG history")
+path.write_text(text, encoding="utf-8")
 PY
 expect_ok "consumer-compat-released-history" check_consumer_compat \
   "${DEPENDABOT}" "${PINNED_ACTIONS}" "${scratch}/CHANGELOG-released.md"
