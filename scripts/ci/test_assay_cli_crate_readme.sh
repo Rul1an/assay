@@ -46,6 +46,7 @@ CASES=(
   codeload-commit
   codeload-legacy-main
   codeload-legacy-commit
+  codeload-unknown-route
   workspace-readme-fallback
   version-pinned-install
   version-pinned-package-id
@@ -611,6 +612,10 @@ for name in "${CASES[@]}"; do
     codeload-legacy-commit)
       rewrite_repo_link "https://codeload.github.com/Rul1an/assay/legacy.tar.gz/0123456789abcdef0123456789abcdef01234567"
       expect_pass "$name"
+      ;;
+    codeload-unknown-route)
+      rewrite_repo_link "https://codeload.github.com/Rul1an/assay/legacy.tar.bz2/main"
+      expect_fail "$name" "mutable git ref"
       ;;
     workspace-readme-fallback)
       python3 - "$MANIFEST" <<'PY'
