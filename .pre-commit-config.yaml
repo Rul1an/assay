@@ -212,7 +212,7 @@ repos:
         # costs several seconds warm. Keep commit-time feedback fast; the same hook is
         # installed and enforced before push, where end-to-end workflow proof belongs.
         stages: [pre-push]
-        files: ^(scripts/ci/(test-claude-plugin-install\.sh|claude_plugin_install_workflow\.py)|docs/guides/editor-mcp-recipe\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.pre-commit-config\.yaml)$
+        files: ^(CHANGELOG\.md|scripts/ci/(test-claude-plugin-install\.sh|claude_plugin_install_workflow\.py)|docs/guides/editor-mcp-recipe\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.pre-commit-config\.yaml)$
 
       - id: docs-auto-update-reconcile-self-test
         name: Docs auto-update reconciliation self-test
