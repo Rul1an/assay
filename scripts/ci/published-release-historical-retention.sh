@@ -93,8 +93,15 @@ for relative in relatives:
         raise SystemExit("required retained artifact path is invalid")
     if relative in seen:
         raise SystemExit(f"required retained artifact path is duplicated: {relative}")
+    if "\\" in relative:
+        raise SystemExit(f"unsafe required retained artifact path: {relative}")
     posix = pathlib.PurePosixPath(relative)
-    if posix.is_absolute() or "." in posix.parts or ".." in posix.parts:
+    if (
+        not posix.parts
+        or posix.is_absolute()
+        or ".." in posix.parts
+        or posix.as_posix() != relative
+    ):
         raise SystemExit(f"unsafe required retained artifact path: {relative}")
     seen.append(relative)
 print(from_tag)
@@ -243,8 +250,15 @@ for relative in relatives:
         raise SystemExit("required retained artifact path is invalid")
     if relative in seen:
         raise SystemExit(f"required retained artifact path is duplicated: {relative}")
+    if "\\" in relative:
+        raise SystemExit(f"unsafe required retained artifact path: {relative}")
     posix = pathlib.PurePosixPath(relative)
-    if posix.is_absolute() or "." in posix.parts or ".." in posix.parts:
+    if (
+        not posix.parts
+        or posix.is_absolute()
+        or ".." in posix.parts
+        or posix.as_posix() != relative
+    ):
         raise SystemExit(f"unsafe required retained artifact path: {relative}")
     seen.append(relative)
     path = run_root_path.joinpath(*posix.parts)

@@ -707,5 +707,18 @@ expect_path_safety_parity \
   "artifact-dotdot" "artifact" "../../outside" "unsafe required retained artifact path: ../../outside"
 expect_path_safety_parity \
   "artifact-duplicate" "duplicate_artifact" unused "required retained artifact path is duplicated"
+expect_driver_unsafe_manifest \
+  "unsafe-artifact-dot" "artifact" "." \
+  "unsafe required retained artifact path: ."
+expect_path_safety_parity \
+  "artifact-dot" "artifact" "." "unsafe required retained artifact path: ."
+expect_path_safety_parity \
+  "artifact-dot-slash" "artifact" "./x" "unsafe required retained artifact path: ./x"
+expect_path_safety_parity \
+  "artifact-double-separator" "artifact" "session//eval.yaml" \
+  "unsafe required retained artifact path: session//eval.yaml"
+expect_path_safety_parity \
+  "artifact-backslash" "artifact" "session\\eval.yaml" \
+  "unsafe required retained artifact path: session\\eval.yaml"
 
 echo "ok: published-release historical-retention contract"

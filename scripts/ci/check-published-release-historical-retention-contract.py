@@ -200,6 +200,26 @@ def last_successful_activation(
     return after_activate[ref]
 
 
+def unsafe_required_artifact_path_reason(item: str) -> str | None:
+    """Reject anything that is not a canonical POSIX relative file path.
+
+    Backslash is refused explicitly so a Windows path cannot be a second
+    encoding of the same artifact. PurePosixPath(".") has empty parts, so a
+    parts-only denylist of "." never sees it.
+    """
+    if "\\" in item:
+        return f"unsafe required retained artifact path: {item}"
+    relative = PurePosixPath(item)
+    if (
+        not relative.parts
+        or relative.is_absolute()
+        or ".." in relative.parts
+        or relative.as_posix() != item
+    ):
+        return f"unsafe required retained artifact path: {item}"
+    return None
+
+
 def required_retained_artifacts(manifest: dict, problems: list[str]) -> list[str]:
     items = manifest.get("required_retained_artifacts")
     if not isinstance(items, list) or not items:
@@ -213,9 +233,9 @@ def required_retained_artifacts(manifest: dict, problems: list[str]) -> list[str
         if item in paths:
             problems.append(f"required retained artifact path is duplicated: {item}")
             continue
-        relative = PurePosixPath(item)
-        if relative.is_absolute() or "." in relative.parts or ".." in relative.parts:
-            problems.append(f"unsafe required retained artifact path: {item}")
+        reason = unsafe_required_artifact_path_reason(item)
+        if reason:
+            problems.append(reason)
             continue
         paths.append(item)
     return paths
@@ -347,6 +367,18 @@ def validate_source_contract(
         driver_text,
         "unsafe required retained artifact path",
         "driver must reject unsafe required retained artifact paths before materialization",
+        problems,
+    )
+    require(
+        driver_text,
+        "as_posix() != relative",
+        "driver must require authored artifact paths to be canonical POSIX",
+        problems,
+    )
+    require(
+        driver_text,
+        '"\\\\" in relative',
+        "driver must refuse backslash artifact paths",
         problems,
     )
     require(
