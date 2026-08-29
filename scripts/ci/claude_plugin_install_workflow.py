@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import selectors
 import shutil
 import signal
@@ -415,10 +416,22 @@ def drive_cached_manifest(installed: Path, consumer: Path, env: dict[str, str], 
 # a second parser is how the two would drift while each kept its own tests green.
 # The byte ceiling is MAX_BYTES, the same one `run_bounded` and `read_bounded`
 # already apply, because a second larger ceiling here would be unreachable.
-ASSAY_TOOL_PREFIX = "mcp__assay__"
-# The one production tool this proof invokes. Registered in EXPECTED_TOOLS and
-# implemented in crates/assay-mcp-server/src/tools/policy_decide.rs.
-ASSAY_DECIDE_TOOL = f"{ASSAY_TOOL_PREFIX}assay_policy_decide"
+# Released Claude hosts expose decide under exactly these two names. Classification
+# is exact equality through classify_decide_tool_route; a prefix/suffix/contains
+# stand-in would accept near-misses the host never listed.
+DECIDE_TOOL_PROJECT = "mcp__assay__assay_policy_decide"
+DECIDE_TOOL_PLUGIN = "mcp__plugin_assay_assay__assay_policy_decide"
+DECIDE_TOOL_ROUTES = {
+    DECIDE_TOOL_PROJECT: "project",
+    DECIDE_TOOL_PLUGIN: "plugin",
+}
+
+
+def classify_decide_tool_route(name: str) -> str | None:
+    """Map one tool name to observed_route. The one classifier."""
+    return DECIDE_TOOL_ROUTES.get(name)
+
+
 # The pinned probe. The live prompt asks for exactly this decision and the
 # validator requires exactly it back, so the two cannot drift into asking for
 # one probe and accepting another.
@@ -559,14 +572,18 @@ def _envelope_role(envelope: dict[str, object]) -> str | None:
 def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
     """Classify one Claude stream-json transcript.
 
-    Returns ``pass`` only when the transcript shows exactly one
-    ``mcp__assay__assay_policy_decide`` tool_use, exactly one matching non-error
-    tool_result carried by a user envelope after it, a payload typed against the
-    tool's own contract, a later assistant message quoting a value the model
-    could not have taken from its own request, and exactly one terminal result
-    envelope after that turn reporting success. Every one of those envelopes must
-    share one non-empty session id. Absence is ``not_exercised``; every other
-    shape is ``unavailable``. An incomplete observation never becomes clean.
+    Returns ``pass`` only when the transcript shows exactly one accepted
+    decide tool_use across the project and plugin names, exactly one matching
+    non-error tool_result carried by a user envelope after it, a payload typed
+    against the tool's own contract, a later assistant message quoting a value
+    the model could not have taken from its own request, and exactly one
+    terminal result envelope after that turn reporting success. The pass detail
+    reports ``observed_route=project`` or ``observed_route=plugin``. Every one of
+    those envelopes must share one non-empty session id. Absence of an
+    accepted decide name, including a wrong Assay tool that is not decide,
+    is ``not_exercised`` and keeps the invoked name in the detail; every
+    other shape is ``unavailable``. An incomplete observation never becomes
+    clean.
 
     Envelope types this rule does not name are ignored, so a future CLI may add
     them without turning an otherwise valid transcript into a refusal.
@@ -576,7 +593,8 @@ def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
     except ValueError as error:
         return "unavailable", str(error)
 
-    uses: list[tuple[int, str, str, object]] = []
+    uses: list[tuple[int, str, str, str, object]] = []
+    other_uses: list[str] = []
     results: list[tuple[int, str, dict[str, object]]] = []
     texts: list[tuple[int, str]] = []
     terminals: list[tuple[int, dict[str, object]]] = []
@@ -590,10 +608,13 @@ def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
             block_type = block.get("type")
             if kind == "assistant" and role == "assistant" and block_type == "tool_use":
                 name, identifier = block.get("name"), block.get("id")
-                if isinstance(name, str) and name.startswith(ASSAY_TOOL_PREFIX):
+                route = classify_decide_tool_route(name) if isinstance(name, str) else None
+                if route is not None:
                     if not isinstance(identifier, str) or not identifier:
                         return "unavailable", f"{name} tool_use has no id"
-                    uses.append((index, identifier, name, block.get("input")))
+                    uses.append((index, identifier, name, route, block.get("input")))
+                elif isinstance(name, str):
+                    other_uses.append(name)
             elif kind == "assistant" and role == "assistant" and block_type == "text":
                 value = block.get("text")
                 if isinstance(value, str):
@@ -604,14 +625,18 @@ def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
                     results.append((index, identifier, block))
 
     if not uses:
-        return "not_exercised", f"no {ASSAY_TOOL_PREFIX} tool_use in transcript"
+        if other_uses:
+            invoked = ", ".join(sorted(other_uses))
+            return (
+                "not_exercised",
+                f"no accepted assay_policy_decide tool_use in transcript; invoked {invoked}",
+            )
+        return "not_exercised", "no accepted assay_policy_decide tool_use in transcript"
     if len(uses) > 1:
-        names = ", ".join(sorted(name for _i, _d, name, _in in uses))
-        return "unavailable", f"expected exactly one Assay tool_use, found {len(uses)}: {names}"
+        names = ", ".join(sorted(name for _i, _d, name, _r, _in in uses))
+        return "unavailable", f"expected exactly one Assay decide tool_use across routes, found {len(uses)}: {names}"
 
-    use_index, use_id, use_name, use_input = uses[0]
-    if use_name != ASSAY_DECIDE_TOOL:
-        return "unavailable", f"expected {ASSAY_DECIDE_TOOL}, transcript invoked {use_name}"
+    use_index, use_id, use_name, route, use_input = uses[0]
     # Exact object, not a superset: this is a pinned probe, so a transcript that
     # decided some other tool or policy did not run the probe the prompt asked
     # for, and neither did one that carried extra arguments we never requested.
@@ -679,7 +704,10 @@ def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
     if not isinstance(session, str) or not session:
         return "unavailable", "transcript envelopes carry no non-empty session id"
 
-    return "pass", f"{use_name} invoked once in session {session} and its result quoted before a successful close"
+    return (
+        "pass",
+        f"observed_route={route} {use_name} invoked once in session {session} and its result quoted before a successful close",
+    )
 
 
 def verify_workflow() -> None:
@@ -966,6 +994,11 @@ def self_test() -> None:
     # surface as an unexplained fixture mismatch instead of the design error.
     assert_transcript_probe_is_not_denied()
     assert_transcript_prompt_contract()
+    assert_changelog_contract()
+    assert_hook_files_include_changelog()
+    assert_stream_fixture_table()
+    assert_wrong_assay_tool_keeps_invoked_name()
+    assert_companion_non_decide_does_not_invalidate()
     script = WORKFLOW_SCRIPT
     source_root = SOURCE_ROOT
     git = run_bounded("self_test", ["git", "rev-parse", "HEAD"], cwd=source_root, env=clean_env())
@@ -1035,7 +1068,9 @@ def self_test() -> None:
         # session replaying each checked-in transcript, and must report exactly
         # what `classify_model_mediated_call` returns for the same bytes. This is
         # what makes "one validator" checkable rather than asserted.
-        for name, expected in STREAM_FIXTURE_EXPECTATIONS:
+        replayed = 0
+        for name, expected, route in STREAM_FIXTURE_EXPECTATIONS:
+            replayed += 1
             live_env = dict(base_env)
             live_env["FAKE_STREAM_FIXTURE"] = name
             live = run_bounded(
@@ -1052,48 +1087,320 @@ def self_test() -> None:
                     f"live replay of {name} did not report {expected}: {live_text[-400:]}",
                     "route the live session through classify_model_mediated_call",
                 )
+            if expected == "pass":
+                if f"observed_route={route}" not in live_text:
+                    fail(
+                        "self_test",
+                        f"live replay of {name} omitted observed_route={route}: {live_text[-400:]}",
+                        "report observed_route from classify_decide_tool_route",
+                    )
+            elif "observed_route=" in live_text:
+                fail(
+                    "self_test",
+                    f"live replay of {name} reported a route on {expected}: {live_text[-400:]}",
+                    "only a pass transcript reports observed_route",
+                )
+        if replayed != len(STREAM_FIXTURE_EXPECTATIONS):
+            fail(
+                "self_test",
+                f"live parity covered {replayed} fixtures, expected {len(STREAM_FIXTURE_EXPECTATIONS)}",
+                "iterate STREAM_FIXTURE_EXPECTATIONS, not a hardcoded subset",
+            )
 
     replay_stream_fixtures()
-
-
+    assert_plugin_prefix_parity()
 
     print("claude_plugin_install_self_test=pass")
 
 
 STREAM_FIXTURES = DRIVER.parent / "fixtures" / "claude-stream"
 STREAM_FIXTURE_EXPECTATIONS = (
-    ("valid-allow.jsonl", "pass"),
-    ("deny-probe-arrives-as-error.jsonl", "unavailable"),
-    ("no-call.jsonl", "not_exercised"),
-    ("assistant-envelope-user-role.jsonl", "not_exercised"),
-    ("duplicate-call.jsonl", "unavailable"),
-    ("mismatched-id.jsonl", "unavailable"),
-    ("error-result.jsonl", "unavailable"),
-    ("malformed.jsonl", "unavailable"),
-    ("independent-final.jsonl", "unavailable"),
-    ("dependency-echoes-input.jsonl", "unavailable"),
-    ("result-before-use.jsonl", "unavailable"),
-    ("duplicate-result.jsonl", "unavailable"),
-    ("untyped-payload.jsonl", "unavailable"),
-    ("allow-without-reason.jsonl", "unavailable"),
-    ("deny-without-matches.jsonl", "unavailable"),
-    ("matches-mixed-types.jsonl", "unavailable"),
-    ("wrong-assay-tool.jsonl", "unavailable"),
-    ("missing-terminal-result.jsonl", "unavailable"),
-    ("terminal-result-error.jsonl", "unavailable"),
-    ("terminal-result-not-success.jsonl", "unavailable"),
-    ("duplicate-terminal-result.jsonl", "unavailable"),
-    ("terminal-result-wrong-session.jsonl", "unavailable"),
-    ("terminal-result-before-dependency.jsonl", "unavailable"),
-    ("tool-result-in-assistant-envelope.jsonl", "unavailable"),
-    ("quote-in-user-role-envelope.jsonl", "unavailable"),
-    ("tool-result-is-error-not-bool.jsonl", "unavailable"),
-    ("tool-result-is-error-zero.jsonl", "unavailable"),
-    ("terminal-result-is-error-not-bool.jsonl", "unavailable"),
-    ("tool-use-null-input.jsonl", "unavailable"),
-    ("tool-use-wrong-probe-input.jsonl", "unavailable"),
-    ("tool-use-surplus-input-key.jsonl", "unavailable"),
+    ("valid-allow.jsonl", "pass", "project"),
+    ("valid-allow-plugin.jsonl", "pass", "plugin"),
+    ("valid-allow-companion-non-decide.jsonl", "pass", "project"),
+    ("deny-probe-arrives-as-error.jsonl", "unavailable", None),
+    ("no-call.jsonl", "not_exercised", None),
+    ("assistant-envelope-user-role.jsonl", "not_exercised", None),
+    ("duplicate-call.jsonl", "unavailable", None),
+    ("mismatched-id.jsonl", "unavailable", None),
+    ("error-result.jsonl", "unavailable", None),
+    ("malformed.jsonl", "unavailable", None),
+    ("independent-final.jsonl", "unavailable", None),
+    ("dependency-echoes-input.jsonl", "unavailable", None),
+    ("result-before-use.jsonl", "unavailable", None),
+    ("duplicate-result.jsonl", "unavailable", None),
+    ("untyped-payload.jsonl", "unavailable", None),
+    ("allow-without-reason.jsonl", "unavailable", None),
+    ("deny-without-matches.jsonl", "unavailable", None),
+    ("matches-mixed-types.jsonl", "unavailable", None),
+    ("wrong-assay-tool.jsonl", "not_exercised", None),
+    ("dual-route.jsonl", "unavailable", None),
+    ("near-miss-project-prefix.jsonl", "not_exercised", None),
+    ("malformed-plugin-prefix.jsonl", "not_exercised", None),
+    ("missing-terminal-result.jsonl", "unavailable", None),
+    ("terminal-result-error.jsonl", "unavailable", None),
+    ("terminal-result-not-success.jsonl", "unavailable", None),
+    ("duplicate-terminal-result.jsonl", "unavailable", None),
+    ("terminal-result-wrong-session.jsonl", "unavailable", None),
+    ("terminal-result-before-dependency.jsonl", "unavailable", None),
+    ("tool-result-in-assistant-envelope.jsonl", "unavailable", None),
+    ("quote-in-user-role-envelope.jsonl", "unavailable", None),
+    ("tool-result-is-error-not-bool.jsonl", "unavailable", None),
+    ("tool-result-is-error-zero.jsonl", "unavailable", None),
+    ("terminal-result-is-error-not-bool.jsonl", "unavailable", None),
+    ("tool-use-null-input.jsonl", "unavailable", None),
+    ("tool-use-wrong-probe-input.jsonl", "unavailable", None),
+    ("tool-use-surplus-input-key.jsonl", "unavailable", None),
 )
+
+
+def _unreleased_changelog() -> str:
+    """The current Unreleased section. One reader for the changelog contract."""
+    text = (SOURCE_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    start = text.find("## [Unreleased]")
+    if start < 0:
+        fail("changelog", "CHANGELOG.md has no Unreleased section", "restore the Unreleased heading")
+    rest = text[start:]
+    nxt = rest.find("\n## [", 1)
+    return rest if nxt < 0 else rest[:nxt]
+
+
+def assert_changelog_contract() -> None:
+    """Unreleased text must match the two-name union and wrong-tool class.
+
+    The classifier accepts exactly the project and plugin decide names and
+    treats a wrong Assay tool as ``not_exercised``. The changelog is the
+    public contract; a one-name or wrong-tool-unavailable sentence is a
+    contradiction, not a comment.
+    """
+    unreleased = _unreleased_changelog()
+    for needle in (DECIDE_TOOL_PROJECT, DECIDE_TOOL_PLUGIN, "observed_route"):
+        if needle not in unreleased:
+            fail(
+                "changelog",
+                f"CHANGELOG Unreleased does not name {needle!r}",
+                "record the two exact decide names and observed_route",
+            )
+    if "wrong-tool," in unreleased and "stay `unavailable`" in unreleased:
+        fail(
+            "changelog",
+            "CHANGELOG Unreleased still lists wrong-tool among unavailable shapes",
+            "record the not_exercised reclassification for a wrong Assay tool",
+        )
+    marker = "wrong Assay tool"
+    idx = unreleased.find(marker)
+    if idx < 0:
+        fail(
+            "changelog",
+            "CHANGELOG Unreleased does not name the wrong Assay tool reclassification",
+            "say a wrong Assay tool stays not_exercised",
+        )
+    if "not_exercised" not in unreleased[idx : idx + 240]:
+        fail(
+            "changelog",
+            "CHANGELOG Unreleased does not classify a wrong Assay tool as not_exercised",
+            "land the reclassification next to the wrong Assay tool wording",
+        )
+    print("changelog_contract=pass")
+
+
+CLAUDE_PLUGIN_HOOK_ID = "claude-plugin-install-workflow-self-test"
+
+
+def _claude_plugin_hook_block(config: str) -> str:
+    marker = f"id: {CLAUDE_PLUGIN_HOOK_ID}"
+    start = config.find(marker)
+    if start < 0:
+        fail(
+            "hook_files",
+            "pre-commit config lost claude-plugin-install-workflow-self-test",
+            "restore the Claude plugin install self-test hook",
+        )
+    nxt = config.find("\n      - id:", start + len(marker))
+    return config[start:] if nxt < 0 else config[start:nxt]
+
+
+def _hook_files_selector(block: str) -> str:
+    """The hook's files: regex. Comments are not the selector."""
+    for line in block.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#") or not stripped.startswith("files:"):
+            continue
+        value = stripped[len("files:") :].strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        if not value:
+            fail(
+                "hook_files",
+                "claude-plugin-install-workflow-self-test files selector is empty",
+                "restore the files regex that includes CHANGELOG.md",
+            )
+        return value
+    fail(
+        "hook_files",
+        "claude-plugin-install-workflow-self-test has no files: selector",
+        "restore the files regex that includes CHANGELOG.md",
+    )
+
+
+def _hook_files_selects_changelog(pattern: str) -> bool:
+    try:
+        compiled = re.compile(pattern)
+    except re.error as error:
+        fail(
+            "hook_files",
+            f"claude-plugin-install-workflow-self-test files selector is not a regex: {error}",
+            "keep a valid files regex that matches CHANGELOG.md",
+        )
+    return compiled.search("CHANGELOG.md") is not None
+
+
+def _changelog_comment_decoy(config: str) -> str:
+    """Drop CHANGELOG.md from the files regex and leave a CHANGELOG comment."""
+    block = _claude_plugin_hook_block(config)
+    start = config.find(block)
+    decoy_lines: list[str] = []
+    replaced = False
+    for line in block.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("files:") and not stripped.startswith("#"):
+            dropped = (
+                line.replace("CHANGELOG\\.md|", "")
+                .replace("|CHANGELOG\\.md", "")
+                .replace("CHANGELOG\\.md", "")
+            )
+            if dropped == line:
+                fail(
+                    "hook_files",
+                    "could not drop CHANGELOG.md from the files selector for the decoy",
+                    "keep CHANGELOG.md in the files regex so the decoy can remove it",
+                )
+            decoy_lines.append(dropped)
+            decoy_lines.append("        # CHANGELOG remains in comments only")
+            replaced = True
+        else:
+            decoy_lines.append(line)
+    if not replaced:
+        fail(
+            "hook_files",
+            "could not build a CHANGELOG comment decoy",
+            "keep a files: selector on the Claude plugin install hook",
+        )
+    return config[:start] + "\n".join(decoy_lines) + config[start + len(block) :]
+
+
+def assert_hook_files_include_changelog() -> None:
+    """The pre-push hook must run when CHANGELOG.md changes.
+
+    The files: regex is the selector. A comment that mentions CHANGELOG is
+    not, so a token search over the hook block is not the contract.
+    """
+    config = (SOURCE_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    pattern = _hook_files_selector(_claude_plugin_hook_block(config))
+    if not _hook_files_selects_changelog(pattern):
+        fail(
+            "hook_files",
+            "claude-plugin-install-workflow-self-test files regex does not match CHANGELOG.md",
+            "add CHANGELOG.md to the hook files contract",
+        )
+    decoy = _changelog_comment_decoy(config)
+    decoy_pattern = _hook_files_selector(_claude_plugin_hook_block(decoy))
+    if _hook_files_selects_changelog(decoy_pattern):
+        fail(
+            "hook_files",
+            "CHANGELOG comment decoy still matched the files selector",
+            "inspect the files: regex, not a CHANGELOG token in the hook block",
+        )
+    print("hook_files_include_changelog=pass")
+
+
+def assert_stream_fixture_table() -> None:
+    """One table owns status and route. A side map can be emptied and skipped."""
+    on_disk = {path.name for path in STREAM_FIXTURES.glob("*.jsonl")}
+    named: set[str] = set()
+    if not STREAM_FIXTURE_EXPECTATIONS:
+        fail(
+            "stream_fixture",
+            "STREAM_FIXTURE_EXPECTATIONS is empty",
+            "keep one row per checked-in stream fixture",
+        )
+    for index, row in enumerate(STREAM_FIXTURE_EXPECTATIONS):
+        if not isinstance(row, tuple) or len(row) != 3:
+            fail(
+                "stream_fixture",
+                f"expectation {index} must be (name, status, route), got {row!r}",
+                "fold observed_route into STREAM_FIXTURE_EXPECTATIONS",
+            )
+        name, expected, route = row
+        named.add(name)
+        if expected == "pass":
+            if route not in ("project", "plugin"):
+                fail(
+                    "stream_fixture",
+                    f"{name}: pass row must name observed_route project or plugin, got {route!r}",
+                    "put the route on the same row as the status",
+                )
+        elif route is not None:
+            fail(
+                "stream_fixture",
+                f"{name}: non-pass row must not claim a route, got {route!r}",
+                "use None for fixtures that cannot report observed_route",
+            )
+    if on_disk != named:
+        fail(
+            "stream_fixture",
+            f"fixture table drifted from disk: extra={sorted(named - on_disk)} missing={sorted(on_disk - named)}",
+            "keep one STREAM_FIXTURE_EXPECTATIONS row per claude-stream jsonl",
+        )
+    named_project = next((row for row in STREAM_FIXTURE_EXPECTATIONS if row[0] == "valid-allow.jsonl"), None)
+    named_plugin = next((row for row in STREAM_FIXTURE_EXPECTATIONS if row[0] == "valid-allow-plugin.jsonl"), None)
+    if named_project != ("valid-allow.jsonl", "pass", "project"):
+        fail(
+            "stream_fixture",
+            "named project-route PASS fixture valid-allow.jsonl is required",
+            "keep valid-allow.jsonl as pass/project; any other project mention is not that pin",
+        )
+    if named_plugin != ("valid-allow-plugin.jsonl", "pass", "plugin"):
+        fail(
+            "stream_fixture",
+            "named plugin-route PASS fixture valid-allow-plugin.jsonl is required",
+            "keep valid-allow-plugin.jsonl as pass/plugin; any other plugin mention is not that pin",
+        )
+    print("stream_fixture_table=pass")
+
+
+def assert_wrong_assay_tool_keeps_invoked_name() -> None:
+    """A wrong Assay tool is not_exercised and still names what was invoked."""
+    status, detail = classify_model_mediated_call(
+        read_bounded(STREAM_FIXTURES / "wrong-assay-tool.jsonl", "stream_fixture")
+    )
+    if status != "not_exercised":
+        fail(
+            "stream_fixture",
+            f"wrong-assay-tool.jsonl: expected not_exercised, got {status} ({detail})",
+            "keep an unaccepted Assay name as not_exercised",
+        )
+    if "mcp__assay__assay_check_args" not in detail:
+        fail(
+            "stream_fixture",
+            f"wrong-assay-tool.jsonl lost the invoked-name diagnostic: {detail!r}",
+            "keep the invoked tool name in the not_exercised detail",
+        )
+    print("wrong_assay_tool_keeps_invoked_name=pass")
+
+
+def assert_companion_non_decide_does_not_invalidate() -> None:
+    """An unrelated non-decide tool_use does not break exactly one accepted decide."""
+    status, detail = classify_model_mediated_call(
+        read_bounded(STREAM_FIXTURES / "valid-allow-companion-non-decide.jsonl", "stream_fixture")
+    )
+    if status != "pass" or "observed_route=project" not in detail:
+        fail(
+            "stream_fixture",
+            f"companion non-decide must stay pass/project, got {status} ({detail})",
+            "count only accepted decide names toward the exactly-one rule",
+        )
+    print("companion_non_decide_does_not_invalidate=pass")
 
 
 def assert_transcript_prompt_contract() -> None:
@@ -1148,13 +1455,74 @@ def assert_transcript_probe_is_not_denied() -> None:
     print("transcript_probe_is_not_denied=pass")
 
 
+def assert_plugin_prefix_parity() -> None:
+    """Every STREAM_FIXTURE_EXPECTATIONS entry that carries the project prefix.
+
+    Fixtures whose bytes contain the exact project namespace are rewritten to
+    the plugin namespace and must keep the same status. A passing mirror must
+    also report observed_route=plugin. Fixtures without that exact prefix are
+    skipped, so near-miss and already-plugin transcripts do not invent a second
+    allowlist.
+    """
+    short = "assay_policy_decide"
+    project_prefix = DECIDE_TOOL_PROJECT.removesuffix(short).encode()
+    plugin_prefix = DECIDE_TOOL_PLUGIN.removesuffix(short).encode()
+    if not project_prefix or project_prefix == plugin_prefix:
+        fail(
+            "plugin_prefix_parity",
+            "could not derive distinct project/plugin prefixes from the accepted names",
+            "keep classify_decide_tool_route on two exact names",
+        )
+    eligible = [
+        name
+        for name, _expected, _route in STREAM_FIXTURE_EXPECTATIONS
+        if project_prefix in read_bounded(STREAM_FIXTURES / name, "stream_fixture")
+    ]
+    mirrored = 0
+    for name, expected, _route in STREAM_FIXTURE_EXPECTATIONS:
+        original = read_bounded(STREAM_FIXTURES / name, "stream_fixture")
+        if project_prefix not in original:
+            continue
+        mirrored += 1
+        status, detail = classify_model_mediated_call(
+            original.replace(project_prefix, plugin_prefix)
+        )
+        if status != expected:
+            fail(
+                "plugin_prefix_parity",
+                f"{name} plugin mirror: expected {expected}, got {status} ({detail})",
+                "classify both exact decide names through classify_decide_tool_route",
+            )
+        if expected == "pass" and "observed_route=plugin" not in detail:
+            fail(
+                "plugin_prefix_parity",
+                f"{name} plugin mirror omitted observed_route=plugin: {detail!r}",
+                "report observed_route from classify_decide_tool_route",
+            )
+    if not eligible:
+        fail(
+            "plugin_prefix_parity",
+            "no STREAM_FIXTURE_EXPECTATIONS entry carried the project prefix",
+            "keep at least one project-route fixture in the expectation table",
+        )
+    if mirrored != len(eligible):
+        fail(
+            "plugin_prefix_parity",
+            f"plugin-prefix parity covered {mirrored} fixtures, expected {len(eligible)}",
+            "iterate STREAM_FIXTURE_EXPECTATIONS, not a hardcoded subset",
+        )
+    print("plugin_prefix_parity=pass")
+
+
 def replay_stream_fixtures() -> None:
     """Replay checked-in transcripts through the one production validator.
 
     Fixture replay and the live workflow call `classify_model_mediated_call`;
     a second parser here would let the two drift while both stayed green.
     """
-    for name, expected in STREAM_FIXTURE_EXPECTATIONS:
+    replayed = 0
+    for name, expected, route in STREAM_FIXTURE_EXPECTATIONS:
+        replayed += 1
         path = STREAM_FIXTURES / name
         status, detail = classify_model_mediated_call(read_bounded(path, "stream_fixture"))
         if status != expected:
@@ -1163,6 +1531,25 @@ def replay_stream_fixtures() -> None:
                 f"{name}: expected {expected}, got {status} ({detail})",
                 "repair the transcript validator or the fixture it is measured against",
             )
+        if expected == "pass":
+            if f"observed_route={route}" not in detail:
+                fail(
+                    "stream_fixture",
+                    f"{name}: expected observed_route={route} in {detail!r}",
+                    "report observed_route from classify_decide_tool_route",
+                )
+        elif "observed_route=" in detail:
+            fail(
+                "stream_fixture",
+                f"{name}: {expected} detail must not report a route: {detail!r}",
+                "only a pass transcript reports observed_route",
+            )
+    if replayed != len(STREAM_FIXTURE_EXPECTATIONS):
+        fail(
+            "stream_fixture",
+            f"fixture replay covered {replayed} fixtures, expected {len(STREAM_FIXTURE_EXPECTATIONS)}",
+            "iterate STREAM_FIXTURE_EXPECTATIONS, not a hardcoded subset",
+        )
     # A literal, not a multiple of the ceiling under test: a fixture sized from
     # MAX_BYTES would grow with a raised ceiling and never observe it.
     oversize = b'{"type":"system"}\n' * 200_000
