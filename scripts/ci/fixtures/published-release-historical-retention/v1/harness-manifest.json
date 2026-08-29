@@ -69,7 +69,7 @@
     },
     {
       "path": "scripts/ci/published-release-historical-retention.sh",
-      "sha256": "618e21de5f8f049adfebab6c561ce2e23db76f40b586e2ce87c7f2cbbeb9276e"
+      "sha256": "8081b121120f3d0ed38605994d3c1509d7e6f8e20e6f8c7de9d52f2ce77ac424"
     },
     {
       "path": "scripts/ci/release_attestation_enforce.sh",

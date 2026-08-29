@@ -19,6 +19,18 @@ fail() {
 [[ -f "$WORKFLOW" ]] || fail "missing historical-retention workflow"
 [[ -f "$DRIVER" ]] || fail "missing historical-retention driver"
 [[ -f "$MANIFEST" ]] || fail "missing historical-retention harness manifest"
+V54_TAG="$(python3 - "$MANIFEST" <<'PY'
+import json
+import pathlib
+import sys
+
+tag = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))["to_tag"]
+if not isinstance(tag, str) or not tag.startswith("v") or not tag[1:]:
+    raise SystemExit("historical-retention to_tag must be a version tag")
+print(tag)
+PY
+)"
+V54_VERSION="${V54_TAG#v}"
 
 python3 - "$CHECKER" <<'PY'
 import importlib.util
@@ -66,6 +78,18 @@ python3 "$CHECKER" \
 
 scratch="$(mktemp -d)"
 trap 'chmod -R u+w "$scratch" 2>/dev/null || true; rm -rf "$scratch"' EXIT
+V54_DECISION_B64="$(python3 - "$ROOT/crates/assay-mcp-server/tests/fixtures/enforcement_decision_contract.v0.json" <<'PY'
+import base64
+import json
+import pathlib
+import sys
+
+fixture = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+record = fixture["records"][1]["record"]
+canonical = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+print(base64.b64encode(canonical.encode("utf-8")).decode("ascii"))
+PY
+)"
 
 write_stub_assay() {
   local dest="$1" version="$2"
@@ -130,32 +154,92 @@ case "\$cmd" in
     shift || true
     out=""
     profile=""
+    decisions=""
+    bundle=""
+    format=""
+    profile_version=""
+    mode=""
+    out_seen=0
+    profile_seen=0
+    decisions_seen=0
+    format_seen=0
+    profile_version_seen=0
     prev=""
     for arg in "\$@"; do
-      if [[ "\$prev" == "-o" || "\$prev" == "--out" || "\$prev" == "--bundle-out" ]]; then
-        out="\$arg"
-      elif [[ "\$prev" == "--profile" ]]; then
-        profile="\$arg"
-      fi
-      prev="\$arg"
+      [[ -z "\$prev" || "\$arg" != --* ]] || exit 2
+      case "\$prev" in
+        out) out="\$arg"; prev=""; continue ;;
+        profile) profile="\$arg"; prev=""; continue ;;
+        decisions) decisions="\$arg"; prev=""; continue ;;
+        format) format="\$arg"; prev=""; continue ;;
+        profile_version) profile_version="\$arg"; prev=""; continue ;;
+      esac
+      case "\$arg" in
+        -o|--out|--bundle-out)
+          [[ "\$out_seen" -eq 0 ]] || exit 2
+          out_seen=1
+          prev="out"
+          ;;
+        --profile)
+          [[ "\$profile_seen" -eq 0 ]] || exit 2
+          profile_seen=1
+          prev="profile"
+          ;;
+        --decisions)
+          [[ "\$decisions_seen" -eq 0 ]] || exit 2
+          decisions_seen=1
+          prev="decisions"
+          ;;
+        --format)
+          [[ "\$format_seen" -eq 0 ]] || exit 2
+          format_seen=1
+          prev="format"
+          ;;
+        --profile-version)
+          [[ "\$profile_version_seen" -eq 0 ]] || exit 2
+          profile_version_seen=1
+          prev="profile_version"
+          ;;
+        --*) exit 2 ;;
+        privileged-mcp-action)
+          [[ "\$sub" == "import" && -z "\$mode" ]] || exit 2
+          mode="\$arg"
+          ;;
+        *)
+          [[ -z "\$bundle" ]] || exit 2
+          bundle="\$arg"
+          ;;
+      esac
     done
+    [[ -z "\$prev" ]] || exit 2
     case "\$sub" in
       export)
-        [[ -n "\$out" && -f "\$profile" ]] || exit 2
+        [[ -n "\$out" && -f "\$profile" && -z "\$decisions\$bundle\$format\$profile_version\$mode" ]] || exit 2
         grep -F 'version: "1.0"' "\$profile" >/dev/null || exit 2
         grep -F 'updated: true' "\$profile" >/dev/null || exit 2
         grep -F 'profile_entry: retained-v5.3-profile-event' "\$profile" >/dev/null || exit 2
         printf 'v0-bundle\\n' >"\$out"
         ;;
       verify)
+        [[ -f "\$bundle" && -z "\$out\$profile\$decisions\$format\$profile_version\$mode" ]] || exit 2
         exit 0
         ;;
       import)
-        [[ -n "\$out" ]] || exit 2
-        printf 'v1-bundle\\n' >"\$out"
+        [[ -n "\$out" && -f "\$decisions" && "\$mode" == "privileged-mcp-action" && -z "\$profile\$bundle\$format\$profile_version" ]] || exit 2
+        cp "\$decisions" "\$out"
         ;;
       verify-privileged-mcp-action)
-        exit 0
+        [[ "\$VERSION" == "$V54_VERSION" && -f "\$bundle" && "\$format" == "json" && "\$profile_version" == "v1" && -z "\$out\$profile\$decisions\$mode" ]] || exit 2
+        python3 - "\$bundle" <<'PY'
+import base64
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    rows = [json.loads(line) for line in stream if line.strip()]
+expected = json.loads(base64.b64decode("$V54_DECISION_B64").decode("utf-8"))
+raise SystemExit(0 if rows == [expected] else 2)
+PY
         ;;
       *)
         exit 2
@@ -173,7 +257,7 @@ STUB
 build_fixture_root() {
   local fixture="$1"
   write_stub_assay "$fixture/v5.3.0/bin/assay" "5.3.0"
-  write_stub_assay "$fixture/v5.4.0/bin/assay" "5.4.0"
+  write_stub_assay "$fixture/$V54_TAG/bin/assay" "$V54_VERSION"
 }
 
 expect_fixture_rejects_profile_event() {
@@ -203,6 +287,62 @@ run_driver() {
     --workflow-run-attempt 1 \
     --run-root "$run_root" \
     --fixture-root "$fixture"
+}
+
+expect_v1_decision_fixture_failure() {
+  local name="$1" old="$2" new="$3"
+  local case_root="$scratch/$name"
+  local repo_root="$case_root/repo"
+  mkdir -p "$repo_root/scripts/ci" "$repo_root/.github/workflows"
+  ln -s "$WORKFLOW" "$repo_root/.github/workflows/published-release-historical-retention.yml"
+  ln -s "$ROOT/scripts/ci/release_attestation_enforce.sh" "$repo_root/scripts/ci/release_attestation_enforce.sh"
+  ln -s "$ROOT/scripts/ci/release_archive_inventory.sh" "$repo_root/scripts/ci/release_archive_inventory.sh"
+  ln -s "$ROOT/scripts/ci/safe_extract_release_archive.py" "$repo_root/scripts/ci/safe_extract_release_archive.py"
+  ln -s "$ROOT/scripts/ci/bounded_download.py" "$repo_root/scripts/ci/bounded_download.py"
+  cp "$DRIVER" "$repo_root/scripts/ci/published-release-historical-retention.sh"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$repo_root/scripts/ci/published-release-historical-retention.sh" \
+    "$case_root/manifest.json" "$old" "$new" <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+driver, manifest_path = map(pathlib.Path, sys.argv[1:3])
+old, new = sys.argv[3:]
+text = driver.read_text(encoding="utf-8")
+if text.count(old) != 1:
+    raise SystemExit(f"decision fixture mutation anchor count: {text.count(old)}")
+driver.write_text(text.replace(old, new, 1), encoding="utf-8")
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+for row in manifest["files"]:
+    if row["path"] == "scripts/ci/published-release-historical-retention.sh":
+        row["sha256"] = hashlib.sha256(driver.read_bytes()).hexdigest()
+        break
+else:
+    raise SystemExit("driver row missing from manifest")
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  if IMAGE_OS=ubuntu24 IMAGE_VERSION=20260824.1.0 RUNNER_OS=Linux RUNNER_ARCH=X64 \
+    bash "$repo_root/scripts/ci/published-release-historical-retention.sh" \
+      --manifest "$case_root/manifest.json" \
+      --harness-sha "$EXPECTED_HEAD_SHA" \
+      --workflow-run-id test-historical \
+      --workflow-run-attempt 1 \
+      --run-root "$case_root/run" \
+      --fixture-root "$fixture" >"$case_root/output" 2>&1; then
+    fail "v1 decision fixture mutation stayed green: $name"
+  fi
+  grep -F "FAIL: verify-v1-under-v5.4 exited 2, expected 0" "$case_root/output" >/dev/null \
+    || fail "v1 decision fixture mutation $name missed the v5.4 verifier"
+}
+
+expect_v54_verify_argv_failure() {
+  local name="$1"
+  shift
+  if "$V54_ASSAY" evidence verify-privileged-mcp-action "$@"; then
+    fail "v5.4 fixture parser accepted malformed argv: $name"
+  fi
 }
 
 hosted_consumer_check() {
@@ -730,6 +870,7 @@ PY
 
 fixture="$scratch/fixture"
 build_fixture_root "$fixture"
+V54_ASSAY="$fixture/$V54_TAG/bin/assay"
 expect_fixture_rejects_profile_event \
   "unknown-profile-event" \
   '{"type":"unknown_event","path":"retained-v5.3-profile-event","timestamp":1}'
@@ -749,6 +890,53 @@ good_root="$scratch/good"
 run_driver "$good_root" "$fixture"
 check_results "$good_root"
 expect_materialized_helper_modes
+"$V54_ASSAY" evidence verify-privileged-mcp-action \
+  --format json "$good_root/results/v1.bundle" --profile-version v1 \
+  || fail "v5.4 fixture parser treated an option value as the positional bundle"
+expect_v54_verify_argv_failure \
+  "format-missing-value" \
+  --format --profile-version "$good_root/results/v1.bundle"
+expect_v54_verify_argv_failure \
+  "profile-version-missing-value" \
+  --profile-version --format "$good_root/results/v1.bundle"
+expect_v54_verify_argv_failure \
+  "unknown-option" \
+  --bogus "$good_root/results/v1.bundle"
+expect_v54_verify_argv_failure \
+  "duplicate-positional-bundle" \
+  "$good_root/results/v1.bundle" "$good_root/results/v1.bundle" --format json --profile-version v1
+expect_v54_verify_argv_failure \
+  "foreign-subcommand-option" \
+  --bundle-out ignored "$good_root/results/v1.bundle" --format json --profile-version v1
+expect_v54_verify_argv_failure \
+  "wrong-format-value" \
+  "$good_root/results/v1.bundle" --format markdown --profile-version v1
+expect_v54_verify_argv_failure \
+  "wrong-profile-version" \
+  "$good_root/results/v1.bundle" --format json --profile-version v2
+expect_v54_verify_argv_failure \
+  "duplicate-format-option" \
+  "$good_root/results/v1.bundle" --format json --format json --profile-version v1
+expect_v54_verify_argv_failure \
+  "duplicate-profile-version-option" \
+  "$good_root/results/v1.bundle" --format json --profile-version v1 --profile-version v1
+cp "$good_root/results/v1.bundle" "$scratch/v1-extra-record.bundle"
+printf '%s\n' '{}' >>"$scratch/v1-extra-record.bundle"
+expect_v54_verify_argv_failure \
+  "trailing-v1-record" \
+  "$scratch/v1-extra-record.bundle" --format json --profile-version v1
+expect_v1_decision_fixture_failure \
+  "v1-null-target-digest" \
+  '"target_digest":"sha256:df4be9dfaa840f625ba03f5d577e6276a732f565c9527521138cfee1874546cf"' \
+  '"target_digest":null'
+expect_v1_decision_fixture_failure \
+  "v1-missing-producer-non-claim" \
+  'not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)' \
+  'not the observation or mechanism artifact'
+expect_v1_decision_fixture_failure \
+  "v1-invalid-decision-enum" \
+  '"decision":"deny"' \
+  '"decision":"approve"'
 if python3 "$CHECKER" --results "$good_root/results" --manifest "$MANIFEST" \
     >"$scratch/missing-expected-head.out" 2>&1; then
   fail "results mutation stayed green: missing-expected-head-sha"
@@ -776,6 +964,7 @@ python3 - "$MANIFEST" "$good_root/results" "$scratch" <<'PY'
 import json, pathlib, shutil, sys
 manifest_path, src, scratch = map(pathlib.Path, sys.argv[1:])
 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+to_version = manifest["to_tag"].removeprefix("v")
 required = manifest.get("required_retained_artifacts")
 if not isinstance(required, list) or not required:
     raise SystemExit("manifest must declare required_retained_artifacts")
@@ -822,7 +1011,7 @@ retargeted = []
 for row in ledger:
     item = dict(row)
     if item.get("boundary") == "failed-v5.4-activation":
-        item["activation_target"] = "v5.4.0"
+        item["activation_target"] = to_version
     retargeted.append(item)
 dump(failed_target / "journey-ledger.ndjson", retargeted)
 
