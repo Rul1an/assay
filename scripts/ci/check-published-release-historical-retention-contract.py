@@ -206,8 +206,22 @@ def validate_source_contract(
         "artifact upload action must be SHA-pinned",
         problems,
     )
-    require(workflow_text, "IMAGE_OS:", "workflow must bind ubuntu image provenance", problems)
-    require(workflow_text, "IMAGE_VERSION:", "workflow must bind ubuntu image version provenance", problems)
+    require(
+        workflow_text,
+        'IMAGE_OS="${ImageOS:?image os provenance is empty}"',
+        "workflow must bind non-empty ImageOS at runtime",
+        problems,
+    )
+    require(
+        workflow_text,
+        'IMAGE_VERSION="${ImageVersion:?image version provenance is empty}"',
+        "workflow must bind non-empty ImageVersion at runtime",
+        problems,
+    )
+    if "IMAGE_OS: ${{ env.ImageOS }}" in workflow_text:
+        problems.append("workflow must not bind ImageOS through the empty env context")
+    if "IMAGE_VERSION: ${{ env.ImageVersion }}" in workflow_text:
+        problems.append("workflow must not bind ImageVersion through the empty env context")
     if "continue-on-error:" in workflow_text:
         problems.append("historical journey must not continue on error")
     if "releases/latest" in workflow_text.lower():
@@ -221,12 +235,13 @@ def validate_source_contract(
         "env:",
         "GH_TOKEN: ${{ github.token }}",
         "RUN_ROOT: ${{ runner.temp }}/assay-published-release-historical-retention",
-        "IMAGE_OS: ${{ env.ImageOS }}",
-        "IMAGE_VERSION: ${{ env.ImageVersion }}",
         "RUNNER_OS: ${{ runner.os }}",
         "RUNNER_ARCH: ${{ runner.arch }}",
         "run: |",
         "set -euo pipefail",
+        'IMAGE_OS="${ImageOS:?image os provenance is empty}"',
+        'IMAGE_VERSION="${ImageVersion:?image version provenance is empty}"',
+        "export IMAGE_OS IMAGE_VERSION",
         "bash scripts/ci/published-release-historical-retention.sh \\",
         "--from-tag v5.3.0 \\",
         "--to-tag v5.4.0 \\",
@@ -365,6 +380,12 @@ def validate_results(results: Path, manifest_path: Path) -> list[str]:
     if not isinstance(state_producing, list) or not state_producing:
         problems.append("harness manifest has no state_producing command class")
         return problems
+    optional_classes = manifest.get("optional_command_classes")
+    if optional_classes is None:
+        optional_classes = []
+    if not isinstance(optional_classes, list):
+        problems.append("optional_command_classes must be a list when present")
+        optional_classes = []
 
     commands = ndjson_rows(results / "commands.ndjson", problems, "commands.ndjson")
     ledger = ndjson_rows(results / "journey-ledger.ndjson", problems, "journey-ledger.ndjson")
@@ -408,10 +429,16 @@ def validate_results(results: Path, manifest_path: Path) -> list[str]:
         return problems
 
     names = [row.get("name") for row in commands]
-    for name in list(state_producing) + list(activate_names):
-        count = names.count(name)
-        if count != 1:
-            problems.append(f"exact-once class {name} occurred {count} times")
+    for class_name, class_names in classes.items():
+        if class_name in optional_classes:
+            continue
+        if not isinstance(class_names, list):
+            problems.append(f"command class {class_name} must be a list")
+            continue
+        for name in class_names:
+            count = names.count(name)
+            if count != 1:
+                problems.append(f"exact-once class {name} occurred {count} times")
 
     executed_fields = (
         "name",
@@ -488,7 +515,7 @@ def validate_results(results: Path, manifest_path: Path) -> list[str]:
     canaries = [row.get("canary_sha256") for row in ledger]
     if not canaries or any(item != canaries[0] or not isinstance(item, str) or len(item) != 64 for item in canaries):
         problems.append("canary continuity failed")
-    first_files: dict[str, str] = {}
+    seen_files: dict[str, str] = {}
     created_binary = None
     preceding = {
         "v5.3-created": "__start__",
@@ -507,19 +534,22 @@ def validate_results(results: Path, manifest_path: Path) -> list[str]:
             problems.append(f"ledger activation_target must match last successful activation at {boundary}")
         files = _file_map(row)
         if boundary == "v5.3-created":
-            first_files = files
             created_binary = row.get("active_binary_sha256")
         if boundary == "failed-v5.4-activation":
             if row.get("activation_target") != "v5.3.0":
                 problems.append("failed-v5.4-activation must keep active on v5.3.0")
             if row.get("active_binary_sha256") != created_binary:
                 problems.append("failed activation must keep the staged v5.3 binary digest")
-        if first_files:
-            for path, digest in first_files.items():
-                if path not in files:
-                    problems.append(f"later boundary omitted retained file {path} at {boundary}")
-                elif files[path] != digest:
-                    problems.append(f"pairwise byte continuity failed for {path} at {boundary}")
+        for path, digest in seen_files.items():
+            if path not in files:
+                problems.append(f"later boundary omitted retained file {path} at {boundary}")
+            elif files[path] != digest:
+                problems.append(f"pairwise byte continuity failed for {path} at {boundary}")
+        for path, digest in files.items():
+            if path not in seen_files:
+                seen_files[path] = digest
+            elif seen_files[path] != digest:
+                problems.append(f"pairwise byte continuity failed for {path} at {boundary}")
     if post_fail and created_binary and post_fail[0].get("executed_binary_sha256") != created_binary:
         problems.append("post-failed-activation executed binary must match staged v5.3")
     return problems

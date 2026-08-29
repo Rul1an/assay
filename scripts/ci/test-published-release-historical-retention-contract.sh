@@ -264,6 +264,17 @@ last["files"] = kept
 deleted_rows[-1] = last
 dump(deleted / "journey-ledger.ndjson", deleted_rows)
 
+deleted_v1 = scratch / "later-v1-bundle-deletion"
+shutil.copytree(src, deleted_v1)
+v1_rows = list(ledger)
+v1_last = dict(v1_rows[-1])
+v1_kept = [dict(row) for row in v1_last["files"] if row.get("path") != "results/v1.bundle"]
+if len(v1_kept) == len(v1_last["files"]):
+    raise SystemExit("later-v1-bundle-deletion could not omit results/v1.bundle")
+v1_last["files"] = v1_kept
+v1_rows[-1] = v1_last
+dump(deleted_v1 / "journey-ledger.ndjson", v1_rows)
+
 false_stage = scratch / "false-stage-executed"
 shutil.copytree(src, false_stage)
 false_stage_rows = []
@@ -289,6 +300,20 @@ shutil.copytree(src, dropped_activate)
 dump(
     dropped_activate / "commands.ndjson",
     [row for row in commands if row.get("name") != "failed-activate-v5.4"],
+)
+
+dropped_verify_v1 = scratch / "dropped-verify-v1"
+shutil.copytree(src, dropped_verify_v1)
+dump(
+    dropped_verify_v1 / "commands.ndjson",
+    [row for row in commands if row.get("name") != "verify-v1-under-v5.4"],
+)
+
+dropped_migrate_v54 = scratch / "dropped-migrate-v54"
+shutil.copytree(src, dropped_migrate_v54)
+dump(
+    dropped_migrate_v54 / "commands.ndjson",
+    [row for row in commands if row.get("name") != "migrate-check-v5.4"],
 )
 
 empty_prov = scratch / "empty-provenance"
@@ -322,9 +347,12 @@ expect_results_failure "missing-boundary" "$scratch/missing-boundary" "required 
 expect_results_failure "failed-v54-points-at-v54" "$scratch/failed-points-v54" "failed-v5.4-activation must keep active on v5.3.0"
 expect_results_failure "self-attested-verdict" "$scratch/self-attested" "run-pin contains self-attested verdict continuity_matched"
 expect_results_failure "later-boundary-deletion" "$scratch/later-boundary-deletion" "later boundary omitted retained file session/eval.yaml at v5.3-reactivated"
+expect_results_failure "later-v1-bundle-deletion" "$scratch/later-v1-bundle-deletion" "later boundary omitted retained file results/v1.bundle at v5.3-reactivated"
 expect_results_failure "false-stage-executed" "$scratch/false-stage-executed" "staging row must not claim executed_binary_sha256"
 expect_results_failure "false-activate-executed" "$scratch/false-activate-executed" "failed-activate-v5.4 must not claim executed_binary_sha256"
 expect_results_failure "dropped-activate" "$scratch/dropped-activate" "exact-once class failed-activate-v5.4 occurred 0 times"
+expect_results_failure "dropped-verify-v1" "$scratch/dropped-verify-v1" "exact-once class verify-v1-under-v5.4 occurred 0 times"
+expect_results_failure "dropped-migrate-v54" "$scratch/dropped-migrate-v54" "exact-once class migrate-check-v5.4 occurred 0 times"
 expect_results_failure "empty-provenance" "$scratch/empty-provenance" "run-pin provenance must be non-empty: image_os"
 expect_results_failure "missing-recorded-exit" "$scratch/missing-recorded-exit" "v0 cross-version verify recorded_exit must be an integer"
 expect_results_failure "paraphrased-canary" "$scratch/paraphrased-canary" "canary row must record the argv that actually ran"
@@ -393,6 +421,16 @@ expect_source_failure \
   "missing-runner-os" "workflow.yml" \
   "RUNNER_OS: \${{ runner.os }}" "IMAGE_OS: \${{ env.ImageOS }}" \
   "workflow must bind runner OS provenance"
+expect_source_failure \
+  "empty-image-os-runtime" "workflow.yml" \
+  'IMAGE_OS="${ImageOS:?image os provenance is empty}"' \
+  'IMAGE_OS=""' \
+  "workflow must bind non-empty ImageOS at runtime"
+expect_source_failure \
+  "empty-image-version-runtime" "workflow.yml" \
+  'IMAGE_VERSION="${ImageVersion:?image version provenance is empty}"' \
+  'IMAGE_VERSION=""' \
+  "workflow must bind non-empty ImageVersion at runtime"
 expect_source_failure \
   "hosted-consumer-checker-commented" "workflow.yml" \
   "$workflow_checker_call" \

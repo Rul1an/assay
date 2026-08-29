@@ -30,12 +30,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ROOT: ${{ runner.temp }}/assay-published-release-historical-retention
-          IMAGE_OS: ${{ env.ImageOS }}
-          IMAGE_VERSION: ${{ env.ImageVersion }}
           RUNNER_OS: ${{ runner.os }}
           RUNNER_ARCH: ${{ runner.arch }}
         run: |
           set -euo pipefail
+          IMAGE_OS="${ImageOS:?image os provenance is empty}"
+          IMAGE_VERSION="${ImageVersion:?image version provenance is empty}"
+          export IMAGE_OS IMAGE_VERSION
           bash scripts/ci/published-release-historical-retention.sh \
             --from-tag v5.3.0 \
             --to-tag v5.4.0 \

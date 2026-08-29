@@ -43,7 +43,7 @@
   "files": [
     {
       "path": ".github/workflows/published-release-historical-retention.yml",
-      "sha256": "7182ba406c58aaa6d1dbddf97130f3a46d36d30e87d2e01cd61a2aa5fc0f65b8"
+      "sha256": "5c3e27edeb2583f42d4741e2a31d9fa36a705aa99fa6c635d20f759079700924"
     },
     {
       "path": "scripts/ci/published-release-historical-retention.sh",
