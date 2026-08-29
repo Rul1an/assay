@@ -294,8 +294,12 @@ for _ in range(2):
             f"## [Unreleased]\n\n{released}\n\n### Changed",
             1,
         )
-    elif text.count(released) != 1:
-        raise SystemExit("expected active or already released CHANGELOG history")
+    else:
+        unreleased = text.find("## [Unreleased]")
+        first_release = text.find("\n## [", unreleased + 1)
+        migration = text.find("mixed Action migration")
+        if unreleased < 0 or first_release < 0 or migration < first_release:
+            raise SystemExit("expected active or already released CHANGELOG history")
 path.write_text(text, encoding="utf-8")
 PY
 expect_ok "consumer-compat-released-history" check_consumer_compat \
