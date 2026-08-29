@@ -402,6 +402,7 @@ expect_driver_report_digest_lie() {
   local case_root="$scratch/report-digest-lie"
   local run_root="$case_root/run"
   local repo_root="$case_root/repo"
+  local report="$run_root/results/harness-files.json"
   local expected="harness files observation drifted"
   mkdir -p "$repo_root/scripts/ci" "$repo_root/.github/workflows"
   ln -s "$ROOT/.github/workflows/published-release-historical-retention.yml" \
@@ -441,9 +442,10 @@ PY
       --workflow-run-attempt 1 \
       --run-root "$run_root" \
       --fixture-root "$fixture" >"$case_root/driver.out" 2>&1 || driver_rc=$?
-  local checker_rc=1
-  if [[ -f "$run_root/results/harness-files.json" ]]; then
-    python3 - "$run_root/results/harness-files.json" <<'PY' || fail "report-digest-lie did not write the zeroed report digest"
+  [[ "$driver_rc" -eq 0 ]] \
+    || fail "report-digest-lie driver prerequisite failed rc=$driver_rc"
+  [[ -f "$report" ]] || fail "report-digest-lie did not write harness-files.json"
+  python3 - "$report" <<'PY' || fail "report-digest-lie did not write the zeroed report digest"
 import json, pathlib, sys
 report = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 helper = "scripts/ci/release_archive_inventory.sh"
@@ -456,19 +458,14 @@ for row in report.get("files") or []:
 if not found:
     raise SystemExit("retained report missing inventory helper")
 PY
-    checker_rc=0
-    python3 "$CHECKER" \
-      --results "$run_root/results" \
-      --manifest "$case_root/manifest.json" \
-      --expected-head-sha "$EXPECTED_HEAD_SHA" >"$case_root/checker.out" 2>&1 || checker_rc=$?
-  fi
-  if [[ "$driver_rc" -eq 0 && "$checker_rc" -eq 0 ]]; then
-    fail "driver mutation stayed green: report-digest-lie"
-  fi
-  if [[ "$driver_rc" -eq 0 ]]; then
-    grep -F "$expected" "$case_root/checker.out" >/dev/null \
-      || fail "report-digest-lie missed expected checker guard: $expected"
-  fi
+  local checker_rc=0
+  python3 "$CHECKER" \
+    --results "$run_root/results" \
+    --manifest "$case_root/manifest.json" \
+    --expected-head-sha "$EXPECTED_HEAD_SHA" >"$case_root/checker.out" 2>&1 || checker_rc=$?
+  [[ "$checker_rc" -ne 0 ]] || fail "driver mutation stayed green: report-digest-lie"
+  grep -F "$expected" "$case_root/checker.out" >/dev/null \
+    || fail "report-digest-lie missed expected checker guard: $expected"
 }
 
 
