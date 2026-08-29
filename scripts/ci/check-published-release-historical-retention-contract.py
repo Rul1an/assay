@@ -436,6 +436,7 @@ def validate_manifest_files(
         ".github/workflows/published-release-historical-retention.yml",
         DRIVER_REL,
         "scripts/ci/release_attestation_enforce.sh",
+        "scripts/ci/release_archive_inventory.sh",
         "scripts/ci/safe_extract_release_archive.py",
         "scripts/ci/bounded_download.py",
     ]

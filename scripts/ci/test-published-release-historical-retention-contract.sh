@@ -315,6 +315,30 @@ PY
     || fail "hook-decoy $helper_path missed expected guard: $expected"
 }
 
+expect_omitted_reviewed_inventory_helper() {
+  local case_root="$scratch/omitted-release-archive-inventory"
+  local expected="harness manifest must list exactly the reviewed harness inputs"
+  mkdir -p "$case_root"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$case_root/manifest.json" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+manifest = json.loads(path.read_text(encoding="utf-8"))
+helper = "scripts/ci/release_archive_inventory.sh"
+manifest["files"] = [row for row in manifest.get("files") or [] if row.get("path") != helper]
+path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  if python3 "$CHECKER" \
+      --workflow "$WORKFLOW" \
+      --driver "$DRIVER" \
+      --manifest "$case_root/manifest.json" \
+      --source-root "$ROOT" >"$case_root/output" 2>&1; then
+    fail "source mutation stayed green: omitted-release-archive-inventory"
+  fi
+  grep -F "$expected" "$case_root/output" >/dev/null \
+    || fail "omitted-release-archive-inventory missed expected guard: $expected"
+}
+
 expect_coordinated_assay_version_v54_removal() {
   local case_root="$scratch/coordinated-drop-assay-version-v54"
   mkdir -p "$case_root"
@@ -908,6 +932,8 @@ expect_path_safety_parity \
 expect_path_safety_parity \
   "v1-release-pair" "release_pair" "v9.9.7,v9.9.8" \
   "harness manifest release pair drifted from the v1 denominator"
+
+expect_omitted_reviewed_inventory_helper
 
 while IFS= read -r helper; do
   expect_precommit_helper_decoy "$helper"
