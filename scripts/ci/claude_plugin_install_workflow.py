@@ -593,7 +593,7 @@ def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
     except ValueError as error:
         return "unavailable", str(error)
 
-    uses: list[tuple[int, str, str, object]] = []
+    uses: list[tuple[int, str, str, str, object]] = []
     other_uses: list[str] = []
     results: list[tuple[int, str, dict[str, object]]] = []
     texts: list[tuple[int, str]] = []
@@ -608,10 +608,11 @@ def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
             block_type = block.get("type")
             if kind == "assistant" and role == "assistant" and block_type == "tool_use":
                 name, identifier = block.get("name"), block.get("id")
-                if isinstance(name, str) and classify_decide_tool_route(name) is not None:
+                route = classify_decide_tool_route(name) if isinstance(name, str) else None
+                if route is not None:
                     if not isinstance(identifier, str) or not identifier:
                         return "unavailable", f"{name} tool_use has no id"
-                    uses.append((index, identifier, name, block.get("input")))
+                    uses.append((index, identifier, name, route, block.get("input")))
                 elif isinstance(name, str):
                     other_uses.append(name)
             elif kind == "assistant" and role == "assistant" and block_type == "text":
@@ -632,13 +633,10 @@ def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
             )
         return "not_exercised", "no accepted assay_policy_decide tool_use in transcript"
     if len(uses) > 1:
-        names = ", ".join(sorted(name for _i, _d, name, _in in uses))
+        names = ", ".join(sorted(name for _i, _d, name, _r, _in in uses))
         return "unavailable", f"expected exactly one Assay decide tool_use across routes, found {len(uses)}: {names}"
 
-    use_index, use_id, use_name, use_input = uses[0]
-    route = classify_decide_tool_route(use_name)
-    if route is None:
-        return "unavailable", f"expected an accepted decide name, transcript invoked {use_name}"
+    use_index, use_id, use_name, route, use_input = uses[0]
     # Exact object, not a superset: this is a pinned probe, so a transcript that
     # decided some other tool or policy did not run the probe the prompt asked
     # for, and neither did one that carried extra arguments we never requested.
@@ -1000,6 +998,7 @@ def self_test() -> None:
     assert_hook_files_include_changelog()
     assert_stream_fixture_table()
     assert_wrong_assay_tool_keeps_invoked_name()
+    assert_companion_non_decide_does_not_invalidate()
     script = WORKFLOW_SCRIPT
     source_root = SOURCE_ROOT
     git = run_bounded("self_test", ["git", "rev-parse", "HEAD"], cwd=source_root, env=clean_env())
@@ -1118,6 +1117,7 @@ STREAM_FIXTURES = DRIVER.parent / "fixtures" / "claude-stream"
 STREAM_FIXTURE_EXPECTATIONS = (
     ("valid-allow.jsonl", "pass", "project"),
     ("valid-allow-plugin.jsonl", "pass", "plugin"),
+    ("valid-allow-companion-non-decide.jsonl", "pass", "project"),
     ("deny-probe-arrives-as-error.jsonl", "unavailable", None),
     ("no-call.jsonl", "not_exercised", None),
     ("assistant-envelope-user-role.jsonl", "not_exercised", None),
@@ -1352,6 +1352,20 @@ def assert_stream_fixture_table() -> None:
             f"fixture table drifted from disk: extra={sorted(named - on_disk)} missing={sorted(on_disk - named)}",
             "keep one STREAM_FIXTURE_EXPECTATIONS row per claude-stream jsonl",
         )
+    named_project = next((row for row in STREAM_FIXTURE_EXPECTATIONS if row[0] == "valid-allow.jsonl"), None)
+    named_plugin = next((row for row in STREAM_FIXTURE_EXPECTATIONS if row[0] == "valid-allow-plugin.jsonl"), None)
+    if named_project != ("valid-allow.jsonl", "pass", "project"):
+        fail(
+            "stream_fixture",
+            "named project-route PASS fixture valid-allow.jsonl is required",
+            "keep valid-allow.jsonl as pass/project; any other project mention is not that pin",
+        )
+    if named_plugin != ("valid-allow-plugin.jsonl", "pass", "plugin"):
+        fail(
+            "stream_fixture",
+            "named plugin-route PASS fixture valid-allow-plugin.jsonl is required",
+            "keep valid-allow-plugin.jsonl as pass/plugin; any other plugin mention is not that pin",
+        )
     print("stream_fixture_table=pass")
 
 
@@ -1373,6 +1387,20 @@ def assert_wrong_assay_tool_keeps_invoked_name() -> None:
             "keep the invoked tool name in the not_exercised detail",
         )
     print("wrong_assay_tool_keeps_invoked_name=pass")
+
+
+def assert_companion_non_decide_does_not_invalidate() -> None:
+    """An unrelated non-decide tool_use does not break exactly one accepted decide."""
+    status, detail = classify_model_mediated_call(
+        read_bounded(STREAM_FIXTURES / "valid-allow-companion-non-decide.jsonl", "stream_fixture")
+    )
+    if status != "pass" or "observed_route=project" not in detail:
+        fail(
+            "stream_fixture",
+            f"companion non-decide must stay pass/project, got {status} ({detail})",
+            "count only accepted decide names toward the exactly-one rule",
+        )
+    print("companion_non_decide_does_not_invalidate=pass")
 
 
 def assert_transcript_prompt_contract() -> None:
