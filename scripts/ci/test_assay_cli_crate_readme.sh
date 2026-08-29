@@ -40,6 +40,10 @@ CASES=(
   raw-github-commit
   github-raw-main
   github-raw-commit
+  archive-main
+  archive-commit
+  codeload-main
+  codeload-commit
   workspace-readme-fallback
   version-pinned-install
   version-pinned-package-id
@@ -50,6 +54,11 @@ CASES=(
   version-pinned-sudo-prefix
   version-pinned-command-prefix
   version-pinned-path-cargo
+  version-pinned-inline-code
+  version-unpinned-followed-by-cargo-version
+  install-command-missing
+  install-command-wrong-package
+  install-command-unlocked
   package-grew-docs
   green-control
   hostile-bracket-bound
@@ -577,6 +586,22 @@ for name in "${CASES[@]}"; do
       rewrite_repo_link "https://github.com/Rul1an/assay/raw/0123456789abcdef0123456789abcdef01234567/README.md"
       expect_pass "$name"
       ;;
+    archive-main)
+      rewrite_repo_link "https://github.com/Rul1an/assay/archive/refs/heads/main.zip"
+      expect_fail "$name" "mutable git ref"
+      ;;
+    archive-commit)
+      rewrite_repo_link "https://github.com/Rul1an/assay/archive/0123456789abcdef0123456789abcdef01234567.zip"
+      expect_pass "$name"
+      ;;
+    codeload-main)
+      rewrite_repo_link "https://codeload.github.com/Rul1an/assay/tar.gz/refs/heads/main"
+      expect_fail "$name" "mutable git ref"
+      ;;
+    codeload-commit)
+      rewrite_repo_link "https://codeload.github.com/Rul1an/assay/tar.gz/0123456789abcdef0123456789abcdef01234567"
+      expect_pass "$name"
+      ;;
     workspace-readme-fallback)
       python3 - "$MANIFEST" <<'PY'
 from pathlib import Path
@@ -627,6 +652,26 @@ PY
     version-pinned-path-cargo)
       rewrite_install "/usr/bin/cargo install assay-cli@5.4.0 --locked"
       expect_fail "$name" "version pin"
+      ;;
+    version-pinned-inline-code)
+      rewrite_install "Use \`cargo install assay-cli@5.4.0 --locked\`."
+      expect_fail "$name" "version pin"
+      ;;
+    version-unpinned-followed-by-cargo-version)
+      rewrite_install "cargo install assay-cli --locked && cargo --version"
+      expect_pass "$name"
+      ;;
+    install-command-missing)
+      rewrite_install "Install assay-cli from crates.io."
+      expect_fail "$name" "required unpinned install command"
+      ;;
+    install-command-wrong-package)
+      rewrite_install "cargo install assay --locked"
+      expect_fail "$name" "required unpinned install command"
+      ;;
+    install-command-unlocked)
+      rewrite_install "cargo install assay-cli"
+      expect_fail "$name" "required unpinned install command"
       ;;
     package-grew-docs)
       run_forbidden_package_member

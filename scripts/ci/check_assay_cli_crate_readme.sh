@@ -224,13 +224,24 @@ def reject_mutable_github_content_link(raw: str) -> None:
     if hostname in ("github.com", "www.github.com"):
         if len(parts) < 5 or not parts[1] or not parts[2]:
             return
-        if parts[3] not in ("blob", "tree", "raw"):
+        if parts[3] in ("blob", "tree", "raw"):
+            ref = parts[4]
+        elif parts[3] == "archive":
+            ref = "/".join(parts[4:])
+            for suffix in (".tar.gz", ".zip"):
+                if ref.endswith(suffix):
+                    ref = ref[: -len(suffix)]
+                    break
+        else:
             return
-        ref = parts[4]
     elif hostname == "raw.githubusercontent.com":
         if len(parts) < 4 or not parts[1] or not parts[2]:
             return
         ref = parts[3]
+    elif hostname == "codeload.github.com":
+        if len(parts) < 5 or not parts[1] or not parts[2] or parts[3] not in ("tar.gz", "zip"):
+            return
+        ref = "/".join(parts[4:])
     else:
         return
     if (
@@ -303,36 +314,51 @@ def extract_links(text: str) -> list[str]:
     return found
 
 
-def has_version_pinned_install(text: str) -> bool:
+def assay_cli_install_contract(text: str) -> tuple[bool, bool]:
+    required = False
+    pinned = False
     for line in text.splitlines():
-        if "cargo" not in line or "install" not in line or "assay-cli" not in line:
+        if "cargo" not in line or "install" not in line:
             continue
         try:
-            words = shlex.split(line)
+            lexer = shlex.shlex(line.replace("`", " "), posix=True, punctuation_chars=";&|")
+            lexer.whitespace_split = True
+            lexer.commenters = ""
+            words = list(lexer)
         except ValueError as error:
             fail(f"could not parse assay-cli install command: {error}")
-        cargo_index = next(
-            (
-                index
-                for index, word in enumerate(words)
-                if word.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] == "cargo"
-            ),
-            None,
-        )
-        if cargo_index is None:
-            continue
-        words = words[cargo_index:]
-        if "install" not in words:
-            continue
-        tail = words[words.index("install") + 1 :]
-        package_tokens = [word for word in tail if word == "assay-cli" or word.startswith("assay-cli@")]
-        if not package_tokens:
-            continue
-        if any(word.startswith("assay-cli@") for word in package_tokens):
-            return True
-        if any(word == "--version" or word.startswith("--version=") for word in tail):
-            return True
-    return False
+        start = 0
+        for end in range(len(words) + 1):
+            if end < len(words) and not all(char in ";&|" for char in words[end]):
+                continue
+            command = words[start:end]
+            start = end + 1
+            cargo_index = next(
+                (
+                    index
+                    for index, word in enumerate(command)
+                    if word.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] == "cargo"
+                ),
+                None,
+            )
+            if cargo_index is None:
+                continue
+            command = command[cargo_index:]
+            if "install" not in command:
+                continue
+            tail = command[command.index("install") + 1 :]
+            package_tokens = [
+                word for word in tail if word == "assay-cli" or word.startswith("assay-cli@")
+            ]
+            if not package_tokens:
+                continue
+            if any(word.startswith("assay-cli@") for word in package_tokens):
+                pinned = True
+            if any(word == "--version" or word.startswith("--version=") for word in tail):
+                pinned = True
+            if "assay-cli" in package_tokens and "--locked" in tail and not pinned:
+                required = True
+    return required, pinned
 
 
 def classify_relative(raw: str) -> str | None:
@@ -385,8 +411,11 @@ root_sentences = extract_adr042(root_readme, "workspace README")
 if crate_sentences != root_sentences:
     fail("ADR-042 sentence parity mismatch between crate README and workspace README")
 
-if has_version_pinned_install(readme_text):
+has_required_install, has_pinned_install = assay_cli_install_contract(readme_text)
+if has_pinned_install:
     fail("version pin in crate README install command")
+if not has_required_install:
+    fail("required unpinned install command is missing: cargo install assay-cli --locked")
 
 links = extract_links(readme_text)
 for raw in links:
