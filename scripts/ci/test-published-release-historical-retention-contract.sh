@@ -19,6 +19,18 @@ fail() {
 [[ -f "$WORKFLOW" ]] || fail "missing historical-retention workflow"
 [[ -f "$DRIVER" ]] || fail "missing historical-retention driver"
 [[ -f "$MANIFEST" ]] || fail "missing historical-retention harness manifest"
+V54_TAG="$(python3 - "$MANIFEST" <<'PY'
+import json
+import pathlib
+import sys
+
+tag = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))["to_tag"]
+if not isinstance(tag, str) or not tag.startswith("v") or not tag[1:]:
+    raise SystemExit("historical-retention to_tag must be a version tag")
+print(tag)
+PY
+)"
+V54_VERSION="${V54_TAG#v}"
 
 python3 - "$CHECKER" <<'PY'
 import importlib.util
@@ -217,7 +229,7 @@ case "\$cmd" in
         cp "\$decisions" "\$out"
         ;;
       verify-privileged-mcp-action)
-        [[ "\$VERSION" == "5.4.0" && -f "\$bundle" && "\$format" == "json" && "\$profile_version" == "v1" && -z "\$out\$profile\$decisions\$mode" ]] || exit 2
+        [[ "\$VERSION" == "$V54_VERSION" && -f "\$bundle" && "\$format" == "json" && "\$profile_version" == "v1" && -z "\$out\$profile\$decisions\$mode" ]] || exit 2
         python3 - "\$bundle" <<'PY'
 import base64
 import json
@@ -245,7 +257,7 @@ STUB
 build_fixture_root() {
   local fixture="$1"
   write_stub_assay "$fixture/v5.3.0/bin/assay" "5.3.0"
-  write_stub_assay "$fixture/v5.4.0/bin/assay" "5.4.0"
+  write_stub_assay "$fixture/$V54_TAG/bin/assay" "$V54_VERSION"
 }
 
 expect_fixture_rejects_profile_event() {
@@ -328,7 +340,7 @@ PY
 expect_v54_verify_argv_failure() {
   local name="$1"
   shift
-  if "$fixture/v5.4.0/bin/assay" evidence verify-privileged-mcp-action "$@"; then
+  if "$V54_ASSAY" evidence verify-privileged-mcp-action "$@"; then
     fail "v5.4 fixture parser accepted malformed argv: $name"
   fi
 }
@@ -858,6 +870,7 @@ PY
 
 fixture="$scratch/fixture"
 build_fixture_root "$fixture"
+V54_ASSAY="$fixture/$V54_TAG/bin/assay"
 expect_fixture_rejects_profile_event \
   "unknown-profile-event" \
   '{"type":"unknown_event","path":"retained-v5.3-profile-event","timestamp":1}'
@@ -877,7 +890,7 @@ good_root="$scratch/good"
 run_driver "$good_root" "$fixture"
 check_results "$good_root"
 expect_materialized_helper_modes
-"$fixture/v5.4.0/bin/assay" evidence verify-privileged-mcp-action \
+"$V54_ASSAY" evidence verify-privileged-mcp-action \
   --format json "$good_root/results/v1.bundle" --profile-version v1 \
   || fail "v5.4 fixture parser treated an option value as the positional bundle"
 expect_v54_verify_argv_failure \
@@ -951,6 +964,7 @@ python3 - "$MANIFEST" "$good_root/results" "$scratch" <<'PY'
 import json, pathlib, shutil, sys
 manifest_path, src, scratch = map(pathlib.Path, sys.argv[1:])
 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+to_version = manifest["to_tag"].removeprefix("v")
 required = manifest.get("required_retained_artifacts")
 if not isinstance(required, list) or not required:
     raise SystemExit("manifest must declare required_retained_artifacts")
@@ -997,7 +1011,7 @@ retargeted = []
 for row in ledger:
     item = dict(row)
     if item.get("boundary") == "failed-v5.4-activation":
-        item["activation_target"] = "v5.4.0"
+        item["activation_target"] = to_version
     retargeted.append(item)
 dump(failed_target / "journey-ledger.ndjson", retargeted)
 
