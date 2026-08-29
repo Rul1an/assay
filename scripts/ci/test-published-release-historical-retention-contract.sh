@@ -130,12 +130,18 @@ case "\$cmd" in
     shift || true
     out=""
     profile=""
+    decisions=""
+    bundle=""
     prev=""
     for arg in "\$@"; do
       if [[ "\$prev" == "-o" || "\$prev" == "--out" || "\$prev" == "--bundle-out" ]]; then
         out="\$arg"
       elif [[ "\$prev" == "--profile" ]]; then
         profile="\$arg"
+      elif [[ "\$prev" == "--decisions" ]]; then
+        decisions="\$arg"
+      elif [[ -z "\$bundle" && "\$arg" != --* ]]; then
+        bundle="\$arg"
       fi
       prev="\$arg"
     done
@@ -151,11 +157,34 @@ case "\$cmd" in
         exit 0
         ;;
       import)
-        [[ -n "\$out" ]] || exit 2
-        printf 'v1-bundle\\n' >"\$out"
+        [[ -n "\$out" && -f "\$decisions" ]] || exit 2
+        cp "\$decisions" "\$out"
         ;;
       verify-privileged-mcp-action)
-        exit 0
+        [[ "\$VERSION" == "5.4.0" && -f "\$bundle" ]] || exit 2
+        python3 - "\$bundle" <<'PY'
+import json
+import re
+import sys
+
+row = json.loads(open(sys.argv[1], encoding="utf-8").readline())
+required_non_claims = {
+    "policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)",
+    "an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)",
+    "credential referenced by alias only, never the token or declared scopes",
+    "deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict",
+    "not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)",
+}
+digest = row.get("action", {}).get("target_digest")
+non_claims = row.get("non_claims")
+valid = (
+    isinstance(digest, str)
+    and re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is not None
+    and isinstance(non_claims, list)
+    and required_non_claims.issubset(non_claims)
+)
+raise SystemExit(0 if valid else 2)
+PY
         ;;
       *)
         exit 2
@@ -203,6 +232,54 @@ run_driver() {
     --workflow-run-attempt 1 \
     --run-root "$run_root" \
     --fixture-root "$fixture"
+}
+
+expect_v1_decision_fixture_failure() {
+  local name="$1" old="$2" new="$3"
+  local case_root="$scratch/$name"
+  local repo_root="$case_root/repo"
+  mkdir -p "$repo_root/scripts/ci" "$repo_root/.github/workflows"
+  ln -s "$WORKFLOW" "$repo_root/.github/workflows/published-release-historical-retention.yml"
+  ln -s "$ROOT/scripts/ci/release_attestation_enforce.sh" "$repo_root/scripts/ci/release_attestation_enforce.sh"
+  ln -s "$ROOT/scripts/ci/release_archive_inventory.sh" "$repo_root/scripts/ci/release_archive_inventory.sh"
+  ln -s "$ROOT/scripts/ci/safe_extract_release_archive.py" "$repo_root/scripts/ci/safe_extract_release_archive.py"
+  ln -s "$ROOT/scripts/ci/bounded_download.py" "$repo_root/scripts/ci/bounded_download.py"
+  cp "$DRIVER" "$repo_root/scripts/ci/published-release-historical-retention.sh"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$repo_root/scripts/ci/published-release-historical-retention.sh" \
+    "$case_root/manifest.json" "$old" "$new" <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+driver, manifest_path = map(pathlib.Path, sys.argv[1:3])
+old, new = sys.argv[3:]
+text = driver.read_text(encoding="utf-8")
+if text.count(old) != 1:
+    raise SystemExit(f"decision fixture mutation anchor count: {text.count(old)}")
+driver.write_text(text.replace(old, new, 1), encoding="utf-8")
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+for row in manifest["files"]:
+    if row["path"] == "scripts/ci/published-release-historical-retention.sh":
+        row["sha256"] = hashlib.sha256(driver.read_bytes()).hexdigest()
+        break
+else:
+    raise SystemExit("driver row missing from manifest")
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  if IMAGE_OS=ubuntu24 IMAGE_VERSION=20260824.1.0 RUNNER_OS=Linux RUNNER_ARCH=X64 \
+    bash "$repo_root/scripts/ci/published-release-historical-retention.sh" \
+      --manifest "$case_root/manifest.json" \
+      --harness-sha "$EXPECTED_HEAD_SHA" \
+      --workflow-run-id test-historical \
+      --workflow-run-attempt 1 \
+      --run-root "$case_root/run" \
+      --fixture-root "$fixture" >"$case_root/output" 2>&1; then
+    fail "v1 decision fixture mutation stayed green: $name"
+  fi
+  grep -F "FAIL: verify-v1-under-v5.4 exited 2, expected 0" "$case_root/output" >/dev/null \
+    || fail "v1 decision fixture mutation $name missed the v5.4 verifier"
 }
 
 hosted_consumer_check() {
@@ -749,6 +826,14 @@ good_root="$scratch/good"
 run_driver "$good_root" "$fixture"
 check_results "$good_root"
 expect_materialized_helper_modes
+expect_v1_decision_fixture_failure \
+  "v1-null-target-digest" \
+  '"target_digest":"sha256:df4be9dfaa840f625ba03f5d577e6276a732f565c9527521138cfee1874546cf"' \
+  '"target_digest":null'
+expect_v1_decision_fixture_failure \
+  "v1-missing-producer-non-claim" \
+  'not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)' \
+  'not the observation or mechanism artifact'
 if python3 "$CHECKER" --results "$good_root/results" --manifest "$MANIFEST" \
     >"$scratch/missing-expected-head.out" 2>&1; then
   fail "results mutation stayed green: missing-expected-head-sha"
