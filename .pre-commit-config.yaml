@@ -194,7 +194,7 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-push]
-        files: ^(scripts/ci/(published-release-historical-retention\.sh|check-published-release-historical-retention-contract\.py|test-published-release-historical-retention-contract\.sh|fixtures/published-release-historical-retention/.*)|\.github/workflows/published-release-historical-retention\.yml|\.pre-commit-config\.yaml)$
+        files: ^(scripts/ci/(published-release-historical-retention\.sh|check-published-release-historical-retention-contract\.py|test-published-release-historical-retention-contract\.sh|release_attestation_enforce\.sh|safe_extract_release_archive\.py|bounded_download\.py|fixtures/published-release-historical-retention/.*)|\.github/workflows/published-release-historical-retention\.yml|\.pre-commit-config\.yaml)$
 
       - id: release-quickstart-contract
         name: Released quickstart is self-contained and byte-true

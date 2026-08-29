@@ -17,10 +17,37 @@ from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_REL = "scripts/ci/fixtures/published-release-historical-retention/v1/harness-manifest.json"
+PRECOMMIT_REL = ".pre-commit-config.yaml"
+HOOK_ID = "published-release-historical-retention-contract"
 SCHEMA = "assay.published_release_historical_retention.harness.v1"
 PIN_SCHEMA = "assay.published_release_historical_retention.run_pin.v1"
 INITIAL_ACTIVATION_REF = "initial"
 SAFE_RELEASE_TAG = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
+V1_COMMAND_CLASSES = {
+    "state_producing": [
+        "create-journey-canary",
+        "init",
+        "export-v0-bundle",
+        "import-v1-bundle",
+        "stage-prefix-v5.3.0",
+        "stage-prefix-v5.4.0",
+    ],
+    "observe": [
+        "migrate-check-v5.3",
+        "migrate-check-v5.4",
+        "explicit-v1-v5.3",
+        "verify-v0-under-v5.4",
+        "verify-v1-under-v5.4",
+        "assay-version-v5.4",
+        "post-failed-activation-active",
+        "post-reactivation-active",
+    ],
+    "activate": [
+        "failed-activate-v5.4",
+        "activate-v5.4",
+        "reactivate-v5.3",
+    ],
+}
 FORBIDDEN_VERDICT_KEYS = (
     "continuity_matched",
     "exact_once_ok",
@@ -153,6 +180,45 @@ def command_name_classes(classes: object, problems: list[str]) -> dict[str, str]
                 continue
             mapping[name] = class_name
     return mapping
+
+
+def require_v1_command_classes(manifest: dict, problems: list[str]) -> dict[str, str]:
+    if manifest.get("command_classes") != V1_COMMAND_CLASSES:
+        problems.append("harness manifest command_classes drifted from the v1 denominator")
+    return command_name_classes(V1_COMMAND_CLASSES, problems)
+
+
+def hook_files_regex(text: str, hook_id: str) -> str | None:
+    in_hook = False
+    for line in text.splitlines():
+        if re.match(rf"^\s+- id: {re.escape(hook_id)}\s*$", line):
+            in_hook = True
+            continue
+        if in_hook and re.match(r"^\s+- id:", line):
+            break
+        if in_hook:
+            match = re.match(r"^\s+files:\s+(\S+)\s*$", line)
+            if match:
+                return match.group(1)
+    return None
+
+
+def validate_hook_selects_manifest_files(precommit_text: str, manifest: dict, problems: list[str]) -> None:
+    selector = hook_files_regex(precommit_text, HOOK_ID)
+    if not selector:
+        problems.append("historical-retention pre-commit files selector is missing")
+        return
+    try:
+        compiled = re.compile(selector)
+    except re.error as error:
+        problems.append(f"historical-retention pre-commit files selector is invalid: {error}")
+        return
+    for row in manifest.get("files") or []:
+        if not isinstance(row, dict) or not isinstance(row.get("path"), str):
+            continue
+        path = row["path"]
+        if compiled.search(path) is None:
+            problems.append(f"historical-retention pre-commit files selector must match {path!r}")
 
 
 def boundary_specs(manifest: dict, problems: list[str]) -> list[tuple[str, str, str]]:
@@ -330,11 +396,13 @@ def validate_source_contract(
     driver: Path,
     manifest_path: Path,
     source_root: Path,
+    pre_commit: Path,
 ) -> list[str]:
     problems: list[str] = []
     try:
         workflow_text = workflow.read_text(encoding="utf-8")
         driver_text = driver.read_text(encoding="utf-8")
+        precommit_text = pre_commit.read_text(encoding="utf-8")
     except OSError as error:
         return [f"contract input is missing: {error}"]
     manifest = load_manifest(manifest_path, problems)
@@ -394,7 +462,7 @@ def validate_source_contract(
         problems,
     )
     required_retained_artifacts(manifest, problems)
-    name_classes = command_name_classes(manifest.get("command_classes"), problems)
+    name_classes = require_v1_command_classes(manifest, problems)
     for _, target_ref, last_ref in boundary_specs(manifest, problems):
         resolve_release_ref(from_tag, to_tag, target_ref, problems, "activation_targets")
         if last_ref != INITIAL_ACTIVATION_REF and last_ref not in name_classes:
@@ -574,6 +642,7 @@ def validate_source_contract(
             problems.append("activation must check digest and version before switching the symlink")
 
     validate_manifest_files(manifest, source_root, workflow, driver, problems)
+    validate_hook_selects_manifest_files(precommit_text, manifest, problems)
     return problems
 
 
@@ -595,18 +664,11 @@ def validate_results(results: Path, manifest_path: Path) -> list[str]:
         return problems
     from_tag, to_tag = release_pair(manifest, problems)
     specs = boundary_specs(manifest, problems)
-    classes = manifest.get("command_classes")
-    name_classes = command_name_classes(classes, problems)
+    name_classes = require_v1_command_classes(manifest, problems)
     required_files = required_retained_artifacts(manifest, problems)
     if not specs or from_tag is None or to_tag is None:
         return problems
-    if not isinstance(classes, dict):
-        problems.append("harness manifest vocabulary is unusable")
-        return problems
-    state_producing = classes.get("state_producing")
-    if not isinstance(state_producing, list) or not state_producing:
-        problems.append("harness manifest has no state_producing command class")
-        return problems
+    classes = V1_COMMAND_CLASSES
     boundaries = [name for name, _, _ in specs]
 
     commands = ndjson_rows(results / "commands.ndjson", problems, "commands.ndjson")
@@ -649,10 +711,7 @@ def validate_results(results: Path, manifest_path: Path) -> list[str]:
     if pin.get("runner_os") != "Linux" or pin.get("runner_arch") != "X64":
         problems.append("run-pin must bind Linux/X64 runner truth")
 
-    activate_names = classes.get("activate")
-    if not isinstance(activate_names, list) or not activate_names:
-        problems.append("harness manifest has no activate command class")
-        return problems
+    activate_names = classes["activate"]
 
     names = [row.get("name") for row in commands]
     for name, class_name in name_classes.items():
@@ -807,12 +866,15 @@ def main() -> int:
         default=ROOT / MANIFEST_REL,
     )
     parser.add_argument("--source-root", type=Path, default=ROOT)
+    parser.add_argument("--pre-commit", type=Path, default=ROOT / PRECOMMIT_REL)
     parser.add_argument("--results", type=Path)
     args = parser.parse_args()
     if args.results is not None:
         problems = validate_results(args.results, args.manifest)
     else:
-        problems = validate_source_contract(args.workflow, args.driver, args.manifest, args.source_root)
+        problems = validate_source_contract(
+            args.workflow, args.driver, args.manifest, args.source_root, args.pre_commit
+        )
     if problems:
         for problem in problems:
             print(f"FAIL: {problem}")

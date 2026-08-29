@@ -253,6 +253,124 @@ expect_path_safety_parity() {
   expect_driver_unsafe_manifest "parity-driver-$name" "$kind" "$value" "$expected"
 }
 
+expect_precommit_helper_decoy() {
+  local helper_path="$1"
+  local case_root="$scratch/hook-decoy-${helper_path//\//_}"
+  local expected="historical-retention pre-commit files selector must match '${helper_path}'"
+  mkdir -p "$case_root"
+  cp "$ROOT/.pre-commit-config.yaml" "$case_root/pre-commit.yaml"
+  python3 - "$case_root/pre-commit.yaml" "$helper_path" <<'PY'
+import pathlib, re, sys
+path, helper = pathlib.Path(sys.argv[1]), sys.argv[2]
+escaped = re.escape(pathlib.Path(helper).name)
+text = path.read_text(encoding="utf-8")
+lines = text.splitlines(keepends=True)
+in_hook = False
+for index, line in enumerate(lines):
+    if re.match(r"^\s+- id: published-release-historical-retention-contract\s*$", line):
+        in_hook = True
+        continue
+    if in_hook and re.match(r"^\s+- id:", line):
+        break
+    if not in_hook:
+        continue
+    match = re.match(r"^(\s+files:\s+)(\S+)\s*$", line)
+    if not match:
+        continue
+    prefix, selector = match.group(1), match.group(2)
+    updated = selector.replace(f"|{escaped}", "", 1)
+    if updated == selector:
+        updated = selector.replace(f"{escaped}|", "", 1)
+    if updated == selector:
+        raise SystemExit(f"historical-retention files: regex does not contain {escaped}")
+    try:
+        compiled = re.compile(updated)
+    except re.error as error:
+        raise SystemExit(f"mutated files: selector is invalid: {error}") from error
+    if compiled.search(helper) is not None:
+        raise SystemExit(f"decoy setup still matches {helper}")
+    indent = re.match(r"^(\s*)", line).group(1)
+    lines[index] = f"{prefix}{updated}\n"
+    lines.insert(index + 1, f"{indent}# {helper}\n")
+    path.write_text("".join(lines), encoding="utf-8")
+    raise SystemExit
+raise SystemExit("historical-retention files: selector not found")
+PY
+  if python3 "$CHECKER" \
+      --workflow "$WORKFLOW" \
+      --driver "$DRIVER" \
+      --manifest "$MANIFEST" \
+      --source-root "$ROOT" \
+      --pre-commit "$case_root/pre-commit.yaml" >"$case_root/output" 2>&1; then
+    fail "source mutation stayed green: hook-decoy $helper_path"
+  fi
+  grep -F "$expected" "$case_root/output" >/dev/null \
+    || fail "hook-decoy $helper_path missed expected guard: $expected"
+}
+
+expect_coordinated_assay_version_v54_removal() {
+  local case_root="$scratch/coordinated-drop-assay-version-v54"
+  mkdir -p "$case_root"
+  cp "$WORKFLOW" "$case_root/workflow.yml"
+  cp "$DRIVER" "$case_root/driver.sh"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$case_root/driver.sh" "$case_root/manifest.json" <<'PY'
+import hashlib, json, pathlib, sys
+driver, manifest_path = map(pathlib.Path, sys.argv[1:])
+text = driver.read_text(encoding="utf-8")
+old = (
+    'run_capture "assay-version-v5.4" "observe" 0 "$results/assay-version-v54.txt" '
+    '"$results/assay-version-v54.stderr" \\\n'
+    '  "$active_link/bin/assay" version\n'
+    '[[ "$(tr -d \'\\r\\n\' <"$results/assay-version-v54.txt")" == "$to_version" ]] '
+    '|| fail "active version after v5.4 activation must be $to_version"\n'
+)
+if text.count(old) != 1:
+    raise SystemExit(f"assay-version-v5.4 driver anchor count: {text.count(old)}")
+driver.write_text(text.replace(old, "", 1), encoding="utf-8")
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+manifest["command_classes"]["observe"].remove("assay-version-v5.4")
+for row in manifest["files"]:
+    if row["path"] == "scripts/ci/published-release-historical-retention.sh":
+        row["sha256"] = hashlib.sha256(driver.read_bytes()).hexdigest()
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  if python3 "$CHECKER" \
+      --workflow "$case_root/workflow.yml" \
+      --driver "$case_root/driver.sh" \
+      --manifest "$case_root/manifest.json" \
+      --source-root "$ROOT" >"$case_root/source.out" 2>&1; then
+    fail "source mutation stayed green: coordinated-drop-assay-version-v54"
+  fi
+  grep -F "harness manifest command_classes drifted from the v1 denominator" \
+    "$case_root/source.out" >/dev/null \
+    || fail "coordinated-drop-assay-version-v54 missed v1 denominator guard"
+  python3 - "$MANIFEST" "$good_root/results" "$case_root" <<'PY'
+import json, pathlib, shutil, sys
+manifest_src, results_src, dest = map(pathlib.Path, sys.argv[1:])
+results = dest / "results"
+shutil.copytree(results_src, results)
+manifest = json.loads(manifest_src.read_text(encoding="utf-8"))
+manifest["command_classes"]["observe"].remove("assay-version-v5.4")
+(dest / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+rows = [json.loads(line) for line in (results / "commands.ndjson").read_text(encoding="utf-8").splitlines() if line]
+kept = [row for row in rows if row.get("name") != "assay-version-v5.4"]
+if len(kept) != len(rows) - 1:
+    raise SystemExit("coordinated-drop-assay-version-v54 could not drop the observe row")
+(results / "commands.ndjson").write_text(
+    "".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in kept),
+    encoding="utf-8",
+)
+PY
+  if python3 "$CHECKER" \
+      --results "$case_root/results" \
+      --manifest "$case_root/manifest.json" >"$case_root/results.out" 2>&1; then
+    fail "results mutation stayed green: coordinated-drop-assay-version-v54"
+  fi
+  grep -F "exact-once class assay-version-v5.4 occurred 0 times" "$case_root/results.out" >/dev/null \
+    || fail "coordinated-drop-assay-version-v54 missed exact-once reject"
+}
+
 fixture="$scratch/fixture"
 build_fixture_root "$fixture"
 good_root="$scratch/good"
@@ -573,8 +691,8 @@ if python3 "$CHECKER" --results "$good_root/results" --manifest "$scratch/blind-
     >"$scratch/blind-class.out" 2>&1; then
   fail "checker-blindness mutation stayed green: removed state_producing"
 fi
-grep -F "harness manifest has no state_producing command class" "$scratch/blind-class.out" >/dev/null \
-  || fail "checker-blindness missed state_producing removal"
+grep -F "harness manifest command_classes drifted from the v1 denominator" "$scratch/blind-class.out" >/dev/null \
+  || fail "checker-blindness missed v1 denominator guard"
 
 expect_source_failure \
   "canary-write-removed" "driver.sh" \
@@ -720,5 +838,22 @@ expect_path_safety_parity \
 expect_path_safety_parity \
   "artifact-backslash" "artifact" "session\\eval.yaml" \
   "unsafe required retained artifact path: session\\eval.yaml"
+
+while IFS= read -r helper; do
+  expect_precommit_helper_decoy "$helper"
+done < <(python3 - "$MANIFEST" <<'PY'
+import json, pathlib, sys
+manifest = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+skip = {
+    ".github/workflows/published-release-historical-retention.yml",
+    "scripts/ci/published-release-historical-retention.sh",
+}
+for row in manifest["files"]:
+    path = row["path"]
+    if path not in skip:
+        print(path)
+PY
+)
+expect_coordinated_assay_version_v54_removal
 
 echo "ok: published-release historical-retention contract"
