@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import selectors
 import shutil
 import signal
@@ -1203,14 +1204,11 @@ def assert_changelog_contract() -> None:
     print("changelog_contract=pass")
 
 
-def assert_hook_files_include_changelog() -> None:
-    """The pre-push hook must run when CHANGELOG.md changes.
+CLAUDE_PLUGIN_HOOK_ID = "claude-plugin-install-workflow-self-test"
 
-    Otherwise the Unreleased contract can drift from the classifier while
-    this self-test stays green.
-    """
-    config = (SOURCE_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
-    marker = "id: claude-plugin-install-workflow-self-test"
+
+def _claude_plugin_hook_block(config: str) -> str:
+    marker = f"id: {CLAUDE_PLUGIN_HOOK_ID}"
     start = config.find(marker)
     if start < 0:
         fail(
@@ -1219,12 +1217,99 @@ def assert_hook_files_include_changelog() -> None:
             "restore the Claude plugin install self-test hook",
         )
     nxt = config.find("\n      - id:", start + len(marker))
-    block = config[start:] if nxt < 0 else config[start:nxt]
-    if "CHANGELOG" not in block:
+    return config[start:] if nxt < 0 else config[start:nxt]
+
+
+def _hook_files_selector(block: str) -> str:
+    """The hook's files: regex. Comments are not the selector."""
+    for line in block.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#") or not stripped.startswith("files:"):
+            continue
+        value = stripped[len("files:") :].strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        if not value:
+            fail(
+                "hook_files",
+                "claude-plugin-install-workflow-self-test files selector is empty",
+                "restore the files regex that includes CHANGELOG.md",
+            )
+        return value
+    fail(
+        "hook_files",
+        "claude-plugin-install-workflow-self-test has no files: selector",
+        "restore the files regex that includes CHANGELOG.md",
+    )
+
+
+def _hook_files_selects_changelog(pattern: str) -> bool:
+    try:
+        compiled = re.compile(pattern)
+    except re.error as error:
         fail(
             "hook_files",
-            "claude-plugin-install-workflow-self-test files regex omits CHANGELOG.md",
+            f"claude-plugin-install-workflow-self-test files selector is not a regex: {error}",
+            "keep a valid files regex that matches CHANGELOG.md",
+        )
+    return compiled.search("CHANGELOG.md") is not None
+
+
+def _changelog_comment_decoy(config: str) -> str:
+    """Drop CHANGELOG.md from the files regex and leave a CHANGELOG comment."""
+    block = _claude_plugin_hook_block(config)
+    start = config.find(block)
+    decoy_lines: list[str] = []
+    replaced = False
+    for line in block.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("files:") and not stripped.startswith("#"):
+            dropped = (
+                line.replace("CHANGELOG\\.md|", "")
+                .replace("|CHANGELOG\\.md", "")
+                .replace("CHANGELOG\\.md", "")
+            )
+            if dropped == line:
+                fail(
+                    "hook_files",
+                    "could not drop CHANGELOG.md from the files selector for the decoy",
+                    "keep CHANGELOG.md in the files regex so the decoy can remove it",
+                )
+            decoy_lines.append(dropped)
+            decoy_lines.append("        # CHANGELOG remains in comments only")
+            replaced = True
+        else:
+            decoy_lines.append(line)
+    if not replaced:
+        fail(
+            "hook_files",
+            "could not build a CHANGELOG comment decoy",
+            "keep a files: selector on the Claude plugin install hook",
+        )
+    return config[:start] + "\n".join(decoy_lines) + config[start + len(block) :]
+
+
+def assert_hook_files_include_changelog() -> None:
+    """The pre-push hook must run when CHANGELOG.md changes.
+
+    The files: regex is the selector. A comment that mentions CHANGELOG is
+    not, so a token search over the hook block is not the contract.
+    """
+    config = (SOURCE_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    pattern = _hook_files_selector(_claude_plugin_hook_block(config))
+    if not _hook_files_selects_changelog(pattern):
+        fail(
+            "hook_files",
+            "claude-plugin-install-workflow-self-test files regex does not match CHANGELOG.md",
             "add CHANGELOG.md to the hook files contract",
+        )
+    decoy = _changelog_comment_decoy(config)
+    decoy_pattern = _hook_files_selector(_claude_plugin_hook_block(decoy))
+    if _hook_files_selects_changelog(decoy_pattern):
+        fail(
+            "hook_files",
+            "CHANGELOG comment decoy still matched the files selector",
+            "inspect the files: regex, not a CHANGELOG token in the hook block",
         )
     print("hook_files_include_changelog=pass")
 
