@@ -415,10 +415,22 @@ def drive_cached_manifest(installed: Path, consumer: Path, env: dict[str, str], 
 # a second parser is how the two would drift while each kept its own tests green.
 # The byte ceiling is MAX_BYTES, the same one `run_bounded` and `read_bounded`
 # already apply, because a second larger ceiling here would be unreachable.
-ASSAY_TOOL_PREFIX = "mcp__assay__"
-# The one production tool this proof invokes. Registered in EXPECTED_TOOLS and
-# implemented in crates/assay-mcp-server/src/tools/policy_decide.rs.
-ASSAY_DECIDE_TOOL = f"{ASSAY_TOOL_PREFIX}assay_policy_decide"
+# Released Claude hosts expose decide under exactly these two names. Classification
+# is exact equality through classify_decide_tool_route; a prefix/suffix/contains
+# stand-in would accept near-misses the host never listed.
+DECIDE_TOOL_PROJECT = "mcp__assay__assay_policy_decide"
+DECIDE_TOOL_PLUGIN = "mcp__plugin_assay_assay__assay_policy_decide"
+DECIDE_TOOL_ROUTES = {
+    DECIDE_TOOL_PROJECT: "project",
+    DECIDE_TOOL_PLUGIN: "plugin",
+}
+
+
+def classify_decide_tool_route(name: str) -> str | None:
+    """Map one tool name to observed_route. The one classifier."""
+    return DECIDE_TOOL_ROUTES.get(name)
+
+
 # The pinned probe. The live prompt asks for exactly this decision and the
 # validator requires exactly it back, so the two cannot drift into asking for
 # one probe and accepting another.
@@ -559,14 +571,16 @@ def _envelope_role(envelope: dict[str, object]) -> str | None:
 def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
     """Classify one Claude stream-json transcript.
 
-    Returns ``pass`` only when the transcript shows exactly one
-    ``mcp__assay__assay_policy_decide`` tool_use, exactly one matching non-error
-    tool_result carried by a user envelope after it, a payload typed against the
-    tool's own contract, a later assistant message quoting a value the model
-    could not have taken from its own request, and exactly one terminal result
-    envelope after that turn reporting success. Every one of those envelopes must
-    share one non-empty session id. Absence is ``not_exercised``; every other
-    shape is ``unavailable``. An incomplete observation never becomes clean.
+    Returns ``pass`` only when the transcript shows exactly one accepted
+    decide tool_use across the project and plugin names, exactly one matching
+    non-error tool_result carried by a user envelope after it, a payload typed
+    against the tool's own contract, a later assistant message quoting a value
+    the model could not have taken from its own request, and exactly one
+    terminal result envelope after that turn reporting success. The pass detail
+    reports ``observed_route=project`` or ``observed_route=plugin``. Every one of
+    those envelopes must share one non-empty session id. Absence is
+    ``not_exercised``; every other shape is ``unavailable``. An incomplete
+    observation never becomes clean.
 
     Envelope types this rule does not name are ignored, so a future CLI may add
     them without turning an otherwise valid transcript into a refusal.
@@ -590,7 +604,7 @@ def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
             block_type = block.get("type")
             if kind == "assistant" and role == "assistant" and block_type == "tool_use":
                 name, identifier = block.get("name"), block.get("id")
-                if isinstance(name, str) and name.startswith(ASSAY_TOOL_PREFIX):
+                if isinstance(name, str) and classify_decide_tool_route(name) is not None:
                     if not isinstance(identifier, str) or not identifier:
                         return "unavailable", f"{name} tool_use has no id"
                     uses.append((index, identifier, name, block.get("input")))
@@ -604,14 +618,15 @@ def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
                     results.append((index, identifier, block))
 
     if not uses:
-        return "not_exercised", f"no {ASSAY_TOOL_PREFIX} tool_use in transcript"
+        return "not_exercised", "no accepted assay_policy_decide tool_use in transcript"
     if len(uses) > 1:
         names = ", ".join(sorted(name for _i, _d, name, _in in uses))
-        return "unavailable", f"expected exactly one Assay tool_use, found {len(uses)}: {names}"
+        return "unavailable", f"expected exactly one Assay decide tool_use across routes, found {len(uses)}: {names}"
 
     use_index, use_id, use_name, use_input = uses[0]
-    if use_name != ASSAY_DECIDE_TOOL:
-        return "unavailable", f"expected {ASSAY_DECIDE_TOOL}, transcript invoked {use_name}"
+    route = classify_decide_tool_route(use_name)
+    if route is None:
+        return "unavailable", f"expected an accepted decide name, transcript invoked {use_name}"
     # Exact object, not a superset: this is a pinned probe, so a transcript that
     # decided some other tool or policy did not run the probe the prompt asked
     # for, and neither did one that carried extra arguments we never requested.
@@ -679,7 +694,10 @@ def classify_model_mediated_call(stream: bytes) -> tuple[str, str]:
     if not isinstance(session, str) or not session:
         return "unavailable", "transcript envelopes carry no non-empty session id"
 
-    return "pass", f"{use_name} invoked once in session {session} and its result quoted before a successful close"
+    return (
+        "pass",
+        f"observed_route={route} {use_name} invoked once in session {session} and its result quoted before a successful close",
+    )
 
 
 def verify_workflow() -> None:
@@ -1052,10 +1070,16 @@ def self_test() -> None:
                     f"live replay of {name} did not report {expected}: {live_text[-400:]}",
                     "route the live session through classify_model_mediated_call",
                 )
+            route = STREAM_FIXTURE_ROUTES.get(name)
+            if route is not None and f"observed_route={route}" not in live_text:
+                fail(
+                    "self_test",
+                    f"live replay of {name} omitted observed_route={route}: {live_text[-400:]}",
+                    "report observed_route from classify_decide_tool_route",
+                )
 
     replay_stream_fixtures()
-
-
+    assert_plugin_prefix_parity()
 
     print("claude_plugin_install_self_test=pass")
 
@@ -1063,6 +1087,7 @@ def self_test() -> None:
 STREAM_FIXTURES = DRIVER.parent / "fixtures" / "claude-stream"
 STREAM_FIXTURE_EXPECTATIONS = (
     ("valid-allow.jsonl", "pass"),
+    ("valid-allow-plugin.jsonl", "pass"),
     ("deny-probe-arrives-as-error.jsonl", "unavailable"),
     ("no-call.jsonl", "not_exercised"),
     ("assistant-envelope-user-role.jsonl", "not_exercised"),
@@ -1078,7 +1103,10 @@ STREAM_FIXTURE_EXPECTATIONS = (
     ("allow-without-reason.jsonl", "unavailable"),
     ("deny-without-matches.jsonl", "unavailable"),
     ("matches-mixed-types.jsonl", "unavailable"),
-    ("wrong-assay-tool.jsonl", "unavailable"),
+    ("wrong-assay-tool.jsonl", "not_exercised"),
+    ("dual-route.jsonl", "unavailable"),
+    ("near-miss-project-prefix.jsonl", "not_exercised"),
+    ("malformed-plugin-prefix.jsonl", "not_exercised"),
     ("missing-terminal-result.jsonl", "unavailable"),
     ("terminal-result-error.jsonl", "unavailable"),
     ("terminal-result-not-success.jsonl", "unavailable"),
@@ -1094,6 +1122,10 @@ STREAM_FIXTURE_EXPECTATIONS = (
     ("tool-use-wrong-probe-input.jsonl", "unavailable"),
     ("tool-use-surplus-input-key.jsonl", "unavailable"),
 )
+STREAM_FIXTURE_ROUTES = {
+    "valid-allow.jsonl": "project",
+    "valid-allow-plugin.jsonl": "plugin",
+}
 
 
 def assert_transcript_prompt_contract() -> None:
@@ -1148,6 +1180,54 @@ def assert_transcript_probe_is_not_denied() -> None:
     print("transcript_probe_is_not_denied=pass")
 
 
+def assert_plugin_prefix_parity() -> None:
+    """Every STREAM_FIXTURE_EXPECTATIONS entry that carries the project prefix.
+
+    Fixtures whose bytes contain the exact project namespace are rewritten to
+    the plugin namespace and must keep the same status. A passing mirror must
+    also report observed_route=plugin. Fixtures without that exact prefix are
+    skipped, so near-miss and already-plugin transcripts do not invent a second
+    allowlist.
+    """
+    short = "assay_policy_decide"
+    project_prefix = DECIDE_TOOL_PROJECT.removesuffix(short).encode()
+    plugin_prefix = DECIDE_TOOL_PLUGIN.removesuffix(short).encode()
+    if not project_prefix or project_prefix == plugin_prefix:
+        fail(
+            "plugin_prefix_parity",
+            "could not derive distinct project/plugin prefixes from the accepted names",
+            "keep classify_decide_tool_route on two exact names",
+        )
+    mirrored_any = False
+    for name, expected in STREAM_FIXTURE_EXPECTATIONS:
+        original = read_bounded(STREAM_FIXTURES / name, "stream_fixture")
+        if project_prefix not in original:
+            continue
+        mirrored_any = True
+        status, detail = classify_model_mediated_call(
+            original.replace(project_prefix, plugin_prefix)
+        )
+        if status != expected:
+            fail(
+                "plugin_prefix_parity",
+                f"{name} plugin mirror: expected {expected}, got {status} ({detail})",
+                "classify both exact decide names through classify_decide_tool_route",
+            )
+        if expected == "pass" and f"observed_route=plugin" not in detail:
+            fail(
+                "plugin_prefix_parity",
+                f"{name} plugin mirror omitted observed_route=plugin: {detail!r}",
+                "report observed_route from classify_decide_tool_route",
+            )
+    if not mirrored_any:
+        fail(
+            "plugin_prefix_parity",
+            "no STREAM_FIXTURE_EXPECTATIONS entry carried the project prefix",
+            "keep at least one project-route fixture in the expectation table",
+        )
+    print("plugin_prefix_parity=pass")
+
+
 def replay_stream_fixtures() -> None:
     """Replay checked-in transcripts through the one production validator.
 
@@ -1162,6 +1242,13 @@ def replay_stream_fixtures() -> None:
                 "stream_fixture",
                 f"{name}: expected {expected}, got {status} ({detail})",
                 "repair the transcript validator or the fixture it is measured against",
+            )
+        route = STREAM_FIXTURE_ROUTES.get(name)
+        if route is not None and f"observed_route={route}" not in detail:
+            fail(
+                "stream_fixture",
+                f"{name}: expected observed_route={route} in {detail!r}",
+                "report observed_route from classify_decide_tool_route",
             )
     # A literal, not a multiple of the ceiling under test: a fixture sized from
     # MAX_BYTES would grow with a raised ceiling and never observe it.
