@@ -96,20 +96,55 @@ case "\$cmd" in
     echo "Config eval.yaml is clean (already migrated)."
     exit 0
     ;;
+  profile)
+    sub="\${1:-}"
+    shift || true
+    profile=""
+    input=""
+    prev=""
+    for arg in "\$@"; do
+      if [[ "\$prev" == "--output" || "\$prev" == "--profile" ]]; then
+        profile="\$arg"
+      elif [[ "\$prev" == "--input" || "\$prev" == "-i" ]]; then
+        input="\$arg"
+      fi
+      prev="\$arg"
+    done
+    case "\$sub" in
+      init)
+        [[ -n "\$profile" ]] || exit 2
+        printf 'version: "1.0"\nname: historical-retention\ntotal_runs: 0\nentries: {}\n' >"\$profile"
+        ;;
+      update)
+        [[ -f "\$profile" && -f "\$input" ]] || exit 2
+        event_path="\$(python3 -c 'import json,sys; row=json.loads(open(sys.argv[1], encoding="utf-8").readline()); timestamp=row.get("timestamp", 0); valid=row.get("type") == "file_open" and isinstance(row.get("path"), str) and bool(row["path"]) and type(timestamp) is int and 0 <= timestamp <= 2**64 - 1; sys.exit(2) if not valid else print(row["path"])' "\$input")" || exit 2
+        printf 'updated: true\nprofile_entry: %s\n' "\$event_path" >>"\$profile"
+        ;;
+      *)
+        exit 2
+        ;;
+    esac
+    ;;
   evidence)
     sub="\${1:-}"
     shift || true
     out=""
+    profile=""
     prev=""
     for arg in "\$@"; do
       if [[ "\$prev" == "-o" || "\$prev" == "--out" || "\$prev" == "--bundle-out" ]]; then
         out="\$arg"
+      elif [[ "\$prev" == "--profile" ]]; then
+        profile="\$arg"
       fi
       prev="\$arg"
     done
     case "\$sub" in
       export)
-        [[ -n "\$out" ]] || exit 2
+        [[ -n "\$out" && -f "\$profile" ]] || exit 2
+        grep -F 'version: "1.0"' "\$profile" >/dev/null || exit 2
+        grep -F 'updated: true' "\$profile" >/dev/null || exit 2
+        grep -F 'profile_entry: retained-v5.3-profile-event' "\$profile" >/dev/null || exit 2
         printf 'v0-bundle\\n' >"\$out"
         ;;
       verify)
@@ -139,6 +174,23 @@ build_fixture_root() {
   local fixture="$1"
   write_stub_assay "$fixture/v5.3.0/bin/assay" "5.3.0"
   write_stub_assay "$fixture/v5.4.0/bin/assay" "5.4.0"
+}
+
+expect_fixture_rejects_profile_event() {
+  local name="$1" event="$2"
+  local case_root="$scratch/$name"
+  local assay="$case_root/bin/assay"
+  mkdir -p "$case_root/run"
+  write_stub_assay "$assay" "5.3.0"
+  (
+    cd "$case_root/run"
+    printf '%s\n' "$event" >profile-events.jsonl
+    "$assay" profile init --output v0-profile.yaml --name historical-retention
+    if "$assay" profile update --profile v0-profile.yaml --input profile-events.jsonl \
+        --run-id v5.3.0-initial --strict; then
+      fail "fixture accepted an invalid profile event: $name"
+    fi
+  )
 }
 
 run_driver() {
@@ -678,6 +730,21 @@ PY
 
 fixture="$scratch/fixture"
 build_fixture_root "$fixture"
+expect_fixture_rejects_profile_event \
+  "unknown-profile-event" \
+  '{"type":"unknown_event","path":"retained-v5.3-profile-event","timestamp":1}'
+expect_fixture_rejects_profile_event \
+  "string-profile-timestamp" \
+  '{"type":"file_open","path":"retained-v5.3-profile-event","timestamp":"1"}'
+expect_fixture_rejects_profile_event \
+  "negative-profile-timestamp" \
+  '{"type":"file_open","path":"retained-v5.3-profile-event","timestamp":-1}'
+expect_fixture_rejects_profile_event \
+  "boolean-profile-timestamp" \
+  '{"type":"file_open","path":"retained-v5.3-profile-event","timestamp":true}'
+expect_fixture_rejects_profile_event \
+  "overflow-profile-timestamp" \
+  '{"type":"file_open","path":"retained-v5.3-profile-event","timestamp":18446744073709551616}'
 good_root="$scratch/good"
 run_driver "$good_root" "$fixture"
 check_results "$good_root"
@@ -1324,6 +1391,31 @@ expect_source_failure \
   '"executable": true' \
   '"executable": "true"' \
   "invalid executable flag"
+expect_source_failure \
+  "profile-init-target-drift" "driver.sh" \
+  "profile init --output v0-profile.yaml --name historical-retention" \
+  "profile init --output eval.yaml --name historical-retention" \
+  "driver must initialize the v5.3 evidence profile through the published CLI"
+expect_source_failure \
+  "profile-update-target-drift" "driver.sh" \
+  "profile update --profile v0-profile.yaml" \
+  "profile update --profile eval.yaml" \
+  "driver must update the v5.3 evidence profile through the published CLI"
+expect_source_failure \
+  "profile-export-target-drift" "driver.sh" \
+  "evidence export --profile v0-profile.yaml" \
+  "evidence export --profile eval.yaml" \
+  "driver must export the initialized v5.3 evidence profile"
+expect_source_failure \
+  "profile-event-type-drift" "driver.sh" \
+  '{\"type\":\"file_open\",\"path\":\"retained-v5.3-profile-event\",\"timestamp\":1}' \
+  '{\"type\":\"unknown_event\",\"path\":\"retained-v5.3-profile-event\",\"timestamp\":1}' \
+  "driver must create the declared v5.3 profile event"
+expect_source_failure \
+  "profile-event-timestamp-drift" "driver.sh" \
+  '{\"type\":\"file_open\",\"path\":\"retained-v5.3-profile-event\",\"timestamp\":1}' \
+  '{\"type\":\"file_open\",\"path\":\"retained-v5.3-profile-event\",\"timestamp\":\"1\"}' \
+  "driver must create the declared v5.3 profile event"
 
 while IFS= read -r helper; do
   expect_precommit_helper_decoy "$helper"

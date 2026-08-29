@@ -26,7 +26,10 @@
   "command_classes": {
     "state_producing": [
       "create-journey-canary",
+      "create-profile-event-v5.3",
       "init",
+      "profile-init-v5.3",
+      "profile-update-v5.3",
       "export-v0-bundle",
       "import-v1-bundle",
       "stage-prefix-v5.3.0",
@@ -53,6 +56,8 @@
     "home/.config/assay/config.toml",
     "session/policy.yaml",
     "session/eval.yaml",
+    "session/profile-events.jsonl",
+    "session/v0-profile.yaml",
     "session/traces/hello.jsonl",
     "results/v0.bundle",
     "results/v1.bundle"
@@ -64,7 +69,7 @@
     },
     {
       "path": "scripts/ci/published-release-historical-retention.sh",
-      "sha256": "af4facc845b2c76450e263d81cf475ae0a89b25e67dc78fd671e97cb670b942b"
+      "sha256": "618e21de5f8f049adfebab6c561ce2e23db76f40b586e2ce87c7f2cbbeb9276e"
     },
     {
       "path": "scripts/ci/release_attestation_enforce.sh",
