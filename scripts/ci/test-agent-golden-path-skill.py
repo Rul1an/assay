@@ -777,6 +777,41 @@ def validate_lint_executor(contract: WorkflowContract) -> None:
             fail("kernel-matrix lint pre-commit command is noncanonical")
 
 
+CLAUDE_PLUGIN_SELF_TEST = "bash scripts/ci/test-claude-plugin-install.sh --self-test"
+
+
+def lint_step_self_test_lines(step: WorkflowStepContract) -> tuple[str, ...]:
+    return tuple(
+        line.strip()
+        for line in step.shell_lines
+        if line.strip() and line.strip() != "set -euo pipefail"
+    )
+
+
+def lint_step_is_claude_plugin_self_test(step: WorkflowStepContract) -> bool:
+    return CLAUDE_PLUGIN_SELF_TEST in lint_step_self_test_lines(step)
+
+
+def validate_hosted_claude_plugin_self_test(contract: WorkflowContract) -> None:
+    matches = [
+        (index, step)
+        for index, step in enumerate(contract.lint_steps)
+        if lint_step_is_claude_plugin_self_test(step)
+    ]
+    if len(matches) != 1:
+        fail("kernel-matrix lint job must run exactly one active Claude plugin install self-test")
+    index, step = matches[0]
+    if index == 0:
+        fail("kernel-matrix Claude plugin install self-test must run after setup")
+    if step.condition is not None:
+        fail("kernel-matrix Claude plugin install self-test must not be conditional")
+    if step.continue_on_error is True:
+        fail("kernel-matrix Claude plugin install self-test must fail closed")
+    if lint_step_self_test_lines(step) != (CLAUDE_PLUGIN_SELF_TEST,):
+        fail("kernel-matrix Claude plugin install self-test command is noncanonical")
+
+
+
 def precommit_line_indentation(line: str, line_number: int) -> int:
     prefix = line[: len(line) - len(line.lstrip())]
     if "\t" in prefix:
@@ -1239,6 +1274,7 @@ def main() -> None:
     workflow = read_bounded_evidence(WORKFLOW_PATH, "workflow evidence").decode("utf-8")
     workflow_contract = parse_kernel_matrix_workflow(workflow)
     validate_lint_executor(workflow_contract)
+    validate_hosted_claude_plugin_self_test(workflow_contract)
     workflow_paths = set(workflow_contract.pull_request_paths)
     if "main" not in workflow_contract.pull_request_branches:
         fail("kernel-matrix pull_request does not cover main")
@@ -1257,6 +1293,7 @@ def main() -> None:
         '.github/assay-release-tag',
         'docs/generated/**',
         'docs/guides/agent-golden-path.md',
+        'docs/guides/editor-mcp-recipe.md',
         '.github/workflows/kernel-matrix.yml',
     )
     for path in required_workflow_paths:
