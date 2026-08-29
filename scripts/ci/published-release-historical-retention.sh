@@ -8,7 +8,6 @@ REPO="${GITHUB_REPOSITORY:-Rul1an/assay}"
 GH_BIN="${GH_BIN:-gh}"
 JQ_BIN="${JQ_BIN:-jq}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-HARNESS_MANIFEST="${ROOT}/scripts/ci/fixtures/published-release-historical-retention/v1/harness-manifest.json"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -16,12 +15,11 @@ fail() {
 }
 
 usage() {
-  echo "usage: published-release-historical-retention.sh --from-tag v5.3.0 --to-tag v5.4.0 --harness-sha <40-hex> --workflow-run-id <id> --workflow-run-attempt <n> --run-root <abs-path> [--fixture-root <abs-path>]" >&2
+  echo "usage: published-release-historical-retention.sh --manifest <path> --harness-sha <40-hex> --workflow-run-id <id> --workflow-run-attempt <n> --run-root <abs-path> [--fixture-root <abs-path>]" >&2
   exit 2
 }
 
-from_tag=""
-to_tag=""
+manifest=""
 harness_sha=""
 run_root=""
 workflow_run_id=""
@@ -29,14 +27,9 @@ workflow_run_attempt=""
 fixture_root=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
-    --from-tag)
+    --manifest)
       [[ "$#" -ge 2 ]] || usage
-      from_tag="$2"
-      shift 2
-      ;;
-    --to-tag)
-      [[ "$#" -ge 2 ]] || usage
-      to_tag="$2"
+      manifest="$2"
       shift 2
       ;;
     --harness-sha)
@@ -68,13 +61,33 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-[[ "$from_tag" == "v5.3.0" && "$to_tag" == "v5.4.0" ]] || fail "historical pair must be v5.3.0 -> v5.4.0"
+[[ -n "$manifest" ]] || fail "manifest is required"
+[[ "$manifest" = /* ]] || manifest="$ROOT/$manifest"
+[[ -f "$manifest" ]] || fail "harness manifest is missing"
 [[ "$harness_sha" =~ ^[0-9a-f]{40}$ ]] || fail "harness SHA must be exactly 40 lowercase hex characters"
 [[ "$workflow_run_id" =~ ^[A-Za-z0-9_.-]+$ ]] || fail "workflow run id has an unsafe shape"
 [[ "$workflow_run_attempt" =~ ^[0-9]+$ ]] || fail "workflow run attempt must be numeric"
 [[ "$run_root" = /* ]] || fail "run root must be absolute"
 [[ ! -e "$run_root" ]] || fail "run root already exists; refusing to reuse prior evidence: $run_root"
-[[ -f "$HARNESS_MANIFEST" ]] || fail "harness manifest is missing"
+mapfile -t _release_pair < <(
+  "$PYTHON_BIN" - "$manifest" <<'PY'
+import json, pathlib, sys
+manifest = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+from_tag = manifest["from_tag"]
+to_tag = manifest["to_tag"]
+if not isinstance(from_tag, str) or not from_tag.strip():
+    raise SystemExit("harness manifest missing from_tag")
+if not isinstance(to_tag, str) or not to_tag.strip():
+    raise SystemExit("harness manifest missing to_tag")
+print(from_tag)
+print(to_tag)
+PY
+)
+from_tag="${_release_pair[0]:-}"
+to_tag="${_release_pair[1]:-}"
+[[ -n "$from_tag" && -n "$to_tag" ]] || fail "harness manifest release pair is empty"
+from_version="${from_tag#v}"
+to_version="${to_tag#v}"
 if [[ -n "$fixture_root" ]]; then
   [[ "$fixture_root" = /* ]] || fail "fixture root must be absolute"
 fi
@@ -95,7 +108,7 @@ mkdir -p "$install_root" "$harness_root" "$session_root" "$results" "$run_root/h
 : >"$commands_file"
 : >"$ledger_file"
 
-"$PYTHON_BIN" - "$HARNESS_MANIFEST" "$ROOT" "$harness_root" "$results/harness-files.json" <<'PY'
+"$PYTHON_BIN" - "$manifest" "$ROOT" "$harness_root" "$results/harness-files.json" <<'PY'
 import hashlib, json, pathlib, shutil, sys
 manifest_path, root_path, output_path, report_path = map(pathlib.Path, sys.argv[1:])
 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -196,22 +209,18 @@ run_capture() {
 
 write_ledger() {
   local boundary="$1"
-  "$PYTHON_BIN" - "$ledger_file" "$boundary" "$active_link" "$canary_path" "$run_root" "$results" <<'PY'
+  "$PYTHON_BIN" - "$ledger_file" "$boundary" "$active_link" "$canary_path" "$run_root" "$results" "$manifest" <<'PY'
 import hashlib, json, os, pathlib, sys
-ledger, boundary, active, canary, run_root, results = sys.argv[1:]
+ledger, boundary, active, canary, run_root, results, manifest_path = sys.argv[1:]
 active_path = pathlib.Path(active).resolve()
 run_root_path = pathlib.Path(run_root)
-candidates = [
-    pathlib.Path(canary),
-    run_root_path / "home/.config/assay/config.toml",
-    run_root_path / "session/policy.yaml",
-    run_root_path / "session/eval.yaml",
-    run_root_path / "session/traces/hello.jsonl",
-    pathlib.Path(results) / "v0.bundle",
-    pathlib.Path(results) / "v1.bundle",
-]
+manifest = json.loads(pathlib.Path(manifest_path).read_text(encoding="utf-8"))
+relatives = manifest["required_retained_artifacts"]
+if not isinstance(relatives, list) or not relatives:
+    raise SystemExit("harness manifest missing required_retained_artifacts")
 files = []
-for path in candidates:
+for relative in relatives:
+    path = run_root_path.joinpath(*pathlib.PurePosixPath(relative).parts)
     if not path.is_file():
         continue
     stat = path.stat()
@@ -321,7 +330,7 @@ fi
 
 digest_530="$(digest_file "$install_root/$from_tag/bin/assay")"
 digest_540="$(digest_file "$install_root/$to_tag/bin/assay")"
-activate_prefix "$install_root/$from_tag" "5.3.0" "$digest_530" || fail "v5.3 activation failed"
+activate_prefix "$install_root/$from_tag" "$from_version" "$digest_530" || fail "v5.3 activation failed"
 
 export HOME="$run_root/home"
 export PATH="$active_link/bin:/usr/bin:/bin"
@@ -348,7 +357,7 @@ record_command "explicit-v1-v5.3" "observe" "$explicit_status" "$results/explici
 popd >/dev/null
 write_ledger "v5.3-created"
 
-corrupt="$run_root/corrupt-v5.4.0"
+corrupt="$run_root/corrupt-$to_tag"
 mkdir -p "$corrupt/bin"
 cp "$install_root/$to_tag/bin/assay" "$corrupt/bin/assay"
 "$PYTHON_BIN" - "$corrupt/bin/assay" <<'PY'
@@ -362,18 +371,18 @@ failed_status=0
 activate_prefix "$corrupt" "5.4.0" "$digest_540" \
   >"$results/failed-activate.stdout" 2>"$results/failed-activate.stderr" || failed_status=$?
 [[ "$failed_status" -ne 0 ]] || fail "corrupt v5.4 activation must fail"
-record_activate "failed-activate-v5.4" "$failed_status" "v5.4.0" "$corrupt/bin/assay" \
+record_activate "failed-activate-v5.4" "$failed_status" "$to_tag" "$corrupt/bin/assay" \
   "$(tr -d '\r\n' <"$results/failed-activate.stderr")"
 run_capture "post-failed-activation-active" "observe" 0 "$results/post-fail-version.txt" "$results/post-fail-version.stderr" \
   "$active_link/bin/assay" version
-[[ "$(tr -d '\r\n' <"$results/post-fail-version.txt")" == "5.3.0" ]] || fail "active version after failed activation must remain 5.3.0"
+[[ "$(tr -d '\r\n' <"$results/post-fail-version.txt")" == "$from_version" ]] || fail "active version after failed activation must remain $from_version"
 write_ledger "failed-v5.4-activation"
 
-activate_prefix "$install_root/$to_tag" "5.4.0" "$digest_540" || fail "v5.4 activation failed"
-record_activate "activate-v5.4" 0 "v5.4.0" "$install_root/$to_tag/bin/assay"
+activate_prefix "$install_root/$to_tag" "$to_version" "$digest_540" || fail "v5.4 activation failed"
+record_activate "activate-v5.4" 0 "$to_tag" "$install_root/$to_tag/bin/assay"
 run_capture "assay-version-v5.4" "observe" 0 "$results/assay-version-v54.txt" "$results/assay-version-v54.stderr" \
   "$active_link/bin/assay" version
-[[ "$(tr -d '\r\n' <"$results/assay-version-v54.txt")" == "5.4.0" ]] || fail "active version after v5.4 activation must be 5.4.0"
+[[ "$(tr -d '\r\n' <"$results/assay-version-v54.txt")" == "$to_version" ]] || fail "active version after v5.4 activation must be $to_version"
 write_ledger "v5.4-activated"
 
 pushd "$session_root" >/dev/null
@@ -392,11 +401,11 @@ run_capture "verify-v1-under-v5.4" "observe" 0 "$results/verify-v1.json" "$resul
 popd >/dev/null
 write_ledger "v5.4-v0-verified-v1-created"
 
-activate_prefix "$install_root/$from_tag" "5.3.0" "$digest_530" || fail "v5.3 reactivation failed"
-record_activate "reactivate-v5.3" 0 "v5.3.0" "$install_root/$from_tag/bin/assay"
+activate_prefix "$install_root/$from_tag" "$from_version" "$digest_530" || fail "v5.3 reactivation failed"
+record_activate "reactivate-v5.3" 0 "$from_tag" "$install_root/$from_tag/bin/assay"
 run_capture "post-reactivation-active" "observe" 0 "$results/reactivate-version.txt" "$results/reactivate-version.stderr" \
   "$active_link/bin/assay" version
-[[ "$(tr -d '\r\n' <"$results/reactivate-version.txt")" == "5.3.0" ]] || fail "reactivated active version must be 5.3.0"
+[[ "$(tr -d '\r\n' <"$results/reactivate-version.txt")" == "$from_version" ]] || fail "reactivated active version must be $from_version"
 write_ledger "v5.3-reactivated"
 
 driver_digest="$(digest_file "$ROOT/scripts/ci/published-release-historical-retention.sh")"
@@ -425,7 +434,7 @@ document = {
     "runner_arch": os.environ.get("RUNNER_ARCH", ""),
     "claim_ceiling": (
         "the harness observed single-creation byte continuity for the instrumented "
-        "Linux x86_64 published pair v5.3.0 -> v5.4.0 -> retained v5.3.0. The claim is "
+        f"Linux x86_64 published pair {from_tag} -> {to_tag} -> retained {from_tag}. The claim is "
         "limited to recorded harness operations. Hosted published-binary outcomes remain "
         "a separate dispatch. A byte-identical copy-aside/restore is outside the claim. "
         "Cross-version v0 verify remains unmeasured pending hosted dispatch."
@@ -434,4 +443,4 @@ document = {
 pathlib.Path(output).write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 
-echo "PASS: historical retention harness recorded v5.3.0 -> v5.4.0 -> retained v5.3.0"
+echo "PASS: historical retention harness recorded $from_tag -> $to_tag -> retained $from_tag"

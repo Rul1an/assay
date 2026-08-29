@@ -15,8 +15,10 @@ from pathlib import Path, PurePosixPath
 
 
 ROOT = Path(__file__).resolve().parents[2]
+MANIFEST_REL = "scripts/ci/fixtures/published-release-historical-retention/v1/harness-manifest.json"
 SCHEMA = "assay.published_release_historical_retention.harness.v1"
 PIN_SCHEMA = "assay.published_release_historical_retention.run_pin.v1"
+INITIAL_ACTIVATION_REF = "initial"
 FORBIDDEN_VERDICT_KEYS = (
     "continuity_matched",
     "exact_once_ok",
@@ -73,10 +75,141 @@ def load_manifest(path: Path, problems: list[str]) -> dict:
         return {}
     if manifest.get("schema") != SCHEMA:
         problems.append("harness manifest schema drifted")
-    for key in ("boundaries", "activation_targets", "command_classes", "files"):
+    for key in (
+        "from_tag",
+        "to_tag",
+        "boundaries",
+        "activation_targets",
+        "boundary_activation_refs",
+        "command_classes",
+        "required_retained_artifacts",
+        "files",
+    ):
         if key not in manifest:
             problems.append(f"harness manifest missing {key}")
     return manifest
+
+
+def release_pair(manifest: dict, problems: list[str]) -> tuple[str | None, str | None]:
+    from_tag = manifest.get("from_tag")
+    to_tag = manifest.get("to_tag")
+    if not isinstance(from_tag, str) or not from_tag.strip():
+        problems.append("harness manifest missing from_tag")
+        from_tag = None
+    if not isinstance(to_tag, str) or not to_tag.strip():
+        problems.append("harness manifest missing to_tag")
+        to_tag = None
+    return from_tag, to_tag
+
+
+def resolve_release_ref(from_tag: str | None, to_tag: str | None, ref: str, problems: list[str], where: str) -> str | None:
+    if ref == "from_tag":
+        if from_tag is None:
+            problems.append(f"{where}: from_tag is missing")
+        return from_tag
+    if ref == "to_tag":
+        if to_tag is None:
+            problems.append(f"{where}: to_tag is missing")
+        return to_tag
+    problems.append(f"{where}: unknown release pair reference {ref!r}")
+    return None
+
+
+def command_name_classes(classes: object, problems: list[str]) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    if not isinstance(classes, dict):
+        problems.append("harness manifest vocabulary is unusable")
+        return mapping
+    for class_name, names in classes.items():
+        if not isinstance(names, list):
+            problems.append(f"command class {class_name} must be a list")
+            continue
+        for name in names:
+            if not isinstance(name, str):
+                problems.append(f"command class {class_name} has a non-string name")
+                continue
+            if name in mapping:
+                problems.append(f"command {name} declared in multiple classes")
+                continue
+            mapping[name] = class_name
+    return mapping
+
+
+def boundary_specs(manifest: dict, problems: list[str]) -> list[tuple[str, str, str]]:
+    names = manifest.get("boundaries")
+    targets = manifest.get("activation_targets")
+    refs = manifest.get("boundary_activation_refs")
+    if not isinstance(names, list) or not names:
+        problems.append("harness manifest missing boundaries")
+        return []
+    if not isinstance(targets, dict) or not isinstance(refs, dict):
+        problems.append("harness manifest missing boundary activation maps")
+        return []
+    if list(targets) != names or list(refs) != names:
+        problems.append("boundary activation refs must list every boundary exactly once")
+        return []
+    specs: list[tuple[str, str, str]] = []
+    for name in names:
+        if not isinstance(name, str):
+            problems.append("boundary name must be a string")
+            return []
+        target_ref = targets.get(name)
+        last_ref = refs.get(name)
+        if not isinstance(target_ref, str) or not target_ref or not isinstance(last_ref, str) or not last_ref:
+            problems.append(f"boundary {name} missing activation reference")
+            return []
+        specs.append((name, target_ref, last_ref))
+    return specs
+
+
+def last_successful_activation(
+    ref: str,
+    after_activate: dict[str, str],
+    from_tag: str | None,
+    problems: list[str],
+    boundary: str,
+) -> str | None:
+    if ref == INITIAL_ACTIVATION_REF:
+        if not from_tag:
+            problems.append(f"initial activation reference missing from_tag at {boundary}")
+            return None
+        return from_tag
+    if ref not in after_activate:
+        problems.append(f"unknown activation reference {ref!r} at {boundary}")
+        return None
+    return after_activate[ref]
+
+
+def required_retained_artifacts(manifest: dict, problems: list[str]) -> list[str]:
+    items = manifest.get("required_retained_artifacts")
+    if not isinstance(items, list) or not items:
+        problems.append("harness manifest missing required_retained_artifacts")
+        return []
+    paths: list[str] = []
+    for item in items:
+        if not isinstance(item, str) or not item:
+            problems.append("required retained artifact path is invalid")
+            continue
+        relative = PurePosixPath(item)
+        if relative.is_absolute() or "." in relative.parts or ".." in relative.parts:
+            problems.append(f"unsafe required retained artifact path: {item}")
+            continue
+        paths.append(item)
+    return paths
+
+
+def workflow_on_mapping(text: str) -> str:
+    if text.startswith("on:"):
+        start = 0
+    else:
+        idx = text.find("\non:")
+        if idx < 0:
+            return ""
+        start = idx + 1
+    end = text.find("\npermissions:", start)
+    if end < 0:
+        return text[start:]
+    return text[start:end]
 
 
 def sha256_file(path: Path) -> str:
@@ -165,14 +298,33 @@ def validate_source_contract(
     if not manifest:
         return problems
 
+    from_tag, to_tag = release_pair(manifest, problems)
     require(workflow_text, "workflow_dispatch:", "workflow must support an explicit replay", problems)
     if "workflow_call:" in workflow_text:
         problems.append("historical workflow must not be a reusable caller surface")
-    if "pull_request:" in workflow_text or "\non:\n  push:" in workflow_text or workflow_text.startswith("on:\n  push:"):
+    if workflow_on_mapping(workflow_text).rstrip("\n") != "on:\n  workflow_dispatch:":
         problems.append("historical workflow must be workflow_dispatch only")
-    on_block = workflow_text.split("on:", 1)[-1].split("permissions:", 1)[0]
-    if "push:" in on_block or "pull_request:" in on_block:
-        problems.append("historical workflow must not trigger on push or pull_request")
+    require(
+        workflow_text,
+        f"--manifest {MANIFEST_REL}",
+        "workflow must pass the harness manifest path",
+        problems,
+    )
+    if "--from-tag" in workflow_text or "--to-tag" in workflow_text:
+        problems.append("workflow must not pass a second release-pair source")
+    require(driver_text, 'manifest["from_tag"]', "driver must load from_tag from the harness manifest", problems)
+    require(driver_text, 'manifest["to_tag"]', "driver must load to_tag from the harness manifest", problems)
+    require(
+        driver_text,
+        'manifest["required_retained_artifacts"]',
+        "driver must record required retained artifacts from the harness manifest",
+        problems,
+    )
+    name_classes = command_name_classes(manifest.get("command_classes"), problems)
+    for _, target_ref, last_ref in boundary_specs(manifest, problems):
+        resolve_release_ref(from_tag, to_tag, target_ref, problems, "activation_targets")
+        if last_ref != INITIAL_ACTIVATION_REF and last_ref not in name_classes:
+            problems.append(f"unknown activation reference {last_ref!r}")
     require(workflow_text, "timeout-minutes: 30", "live job must have a bounded timeout", problems)
     require(workflow_text, "runs-on: ubuntu-latest", "historical job must be Linux x86_64", problems)
     require(
@@ -189,8 +341,6 @@ def validate_source_contract(
         "workflow must execute the reviewed driver",
         problems,
     )
-    require(workflow_text, "--from-tag v5.3.0", "workflow must pin the published from-tag", problems)
-    require(workflow_text, "--to-tag v5.4.0", "workflow must pin the published to-tag", problems)
     require(workflow_text, 'if: always()', "workflow must retain partial failure evidence", problems)
     require(workflow_text, "retention-days: 90", "workflow must retain hosted artifacts for 90 days", problems)
     require(workflow_text, "if-no-files-found: error", "missing replay evidence must fail closed", problems)
@@ -243,8 +393,7 @@ def validate_source_contract(
         'IMAGE_VERSION="${ImageVersion:?image version provenance is empty}"',
         "export IMAGE_OS IMAGE_VERSION",
         "bash scripts/ci/published-release-historical-retention.sh \\",
-        "--from-tag v5.3.0 \\",
-        "--to-tag v5.4.0 \\",
+        f"--manifest {MANIFEST_REL} \\",
         '--harness-sha "$GITHUB_SHA" \\',
         '--workflow-run-id "$GITHUB_RUN_ID" \\',
         '--workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\',
@@ -370,16 +519,21 @@ def validate_results(results: Path, manifest_path: Path) -> list[str]:
     manifest = load_manifest(manifest_path, problems)
     if not manifest:
         return problems
-    boundaries = manifest.get("boundaries")
-    targets = manifest.get("activation_targets")
+    from_tag, to_tag = release_pair(manifest, problems)
+    specs = boundary_specs(manifest, problems)
     classes = manifest.get("command_classes")
-    if not isinstance(boundaries, list) or not isinstance(targets, dict) or not isinstance(classes, dict):
+    name_classes = command_name_classes(classes, problems)
+    required_files = required_retained_artifacts(manifest, problems)
+    if not specs or from_tag is None or to_tag is None:
+        return problems
+    if not isinstance(classes, dict):
         problems.append("harness manifest vocabulary is unusable")
         return problems
     state_producing = classes.get("state_producing")
     if not isinstance(state_producing, list) or not state_producing:
         problems.append("harness manifest has no state_producing command class")
         return problems
+    boundaries = [name for name, _, _ in specs]
 
     commands = ndjson_rows(results / "commands.ndjson", problems, "commands.ndjson")
     ledger = ndjson_rows(results / "journey-ledger.ndjson", problems, "journey-ledger.ndjson")
@@ -391,6 +545,10 @@ def validate_results(results: Path, manifest_path: Path) -> list[str]:
 
     if pin.get("schema") != PIN_SCHEMA:
         problems.append("run-pin schema drifted")
+    if pin.get("from_tag") != from_tag:
+        problems.append("run-pin from_tag must match the harness manifest")
+    if pin.get("to_tag") != to_tag:
+        problems.append("run-pin to_tag must match the harness manifest")
     for key in FORBIDDEN_VERDICT_KEYS:
         if key in pin:
             problems.append(f"run-pin contains self-attested verdict {key}")
@@ -423,14 +581,10 @@ def validate_results(results: Path, manifest_path: Path) -> list[str]:
         return problems
 
     names = [row.get("name") for row in commands]
-    for class_name, class_names in classes.items():
-        if not isinstance(class_names, list):
-            problems.append(f"command class {class_name} must be a list")
-            continue
-        for name in class_names:
-            count = names.count(name)
-            if count != 1:
-                problems.append(f"exact-once class {name} occurred {count} times")
+    for name, class_name in name_classes.items():
+        count = names.count(name)
+        if count != 1:
+            problems.append(f"exact-once class {name} occurred {count} times")
 
     executed_fields = (
         "name",
@@ -442,10 +596,17 @@ def validate_results(results: Path, manifest_path: Path) -> list[str]:
         "executed_binary_sha256",
         "selected_profile",
     )
-    last_successful = "v5.3.0"
-    after_activate = {"__start__": "v5.3.0"}
+    last_successful = from_tag
+    after_activate: dict[str, str] = {}
     for row in commands:
         name = row.get("name")
+        if isinstance(name, str) and name not in name_classes:
+            problems.append(f"undeclared command: {name}")
+            continue
+        if isinstance(name, str) and row.get("class") != name_classes[name]:
+            problems.append(
+                f"command {name} class {row.get('class')} does not match manifest class {name_classes[name]}"
+            )
         if isinstance(name, str) and (name in activate_names or row.get("class") == "activate"):
             if row.get("class") != "activate":
                 problems.append(f"{name} must have class activate")
@@ -509,27 +670,29 @@ def validate_results(results: Path, manifest_path: Path) -> list[str]:
         problems.append("canary continuity failed")
     seen_files: dict[str, str] = {}
     created_binary = None
-    preceding = {
-        "v5.3-created": "__start__",
-        "failed-v5.4-activation": "failed-activate-v5.4",
-        "v5.4-activated": "activate-v5.4",
-        "v5.4-v0-verified-v1-created": "activate-v5.4",
-        "v5.3-reactivated": "reactivate-v5.3",
-    }
+    target_by_name = {name: target_ref for name, target_ref, _ in specs}
+    last_ref_by_name = {name: last_ref for name, _, last_ref in specs}
     for row in ledger:
         boundary = row.get("boundary")
-        expected_target = targets.get(boundary)
-        last_before = after_activate.get(preceding.get(boundary, ""), expected_target)
+        if not isinstance(boundary, str) or boundary not in target_by_name:
+            problems.append(f"required boundaries drifted: {observed}")
+            continue
+        expected_target = resolve_release_ref(
+            from_tag, to_tag, target_by_name[boundary], problems, f"activation_targets.{boundary}"
+        )
+        last_before = last_successful_activation(
+            last_ref_by_name[boundary], after_activate, from_tag, problems, boundary
+        )
         if row.get("activation_target") != expected_target:
             problems.append(f"activation target drifted at {boundary}")
-        if row.get("activation_target") != last_before:
+        if last_before is None or row.get("activation_target") != last_before:
             problems.append(f"ledger activation_target must match last successful activation at {boundary}")
         files = _file_map(row)
         if boundary == "v5.3-created":
             created_binary = row.get("active_binary_sha256")
         if boundary == "failed-v5.4-activation":
-            if row.get("activation_target") != "v5.3.0":
-                problems.append("failed-v5.4-activation must keep active on v5.3.0")
+            if row.get("activation_target") != from_tag:
+                problems.append(f"failed-v5.4-activation must keep active on {from_tag}")
             if row.get("active_binary_sha256") != created_binary:
                 problems.append("failed activation must keep the staged v5.3 binary digest")
         for path, digest in seen_files.items():
@@ -544,6 +707,11 @@ def validate_results(results: Path, manifest_path: Path) -> list[str]:
                 problems.append(f"pairwise byte continuity failed for {path} at {boundary}")
     if post_fail and created_binary and post_fail[0].get("executed_binary_sha256") != created_binary:
         problems.append("post-failed-activation executed binary must match staged v5.3")
+    if ledger:
+        last_files = _file_map(ledger[-1])
+        for path in required_files:
+            if path not in last_files:
+                problems.append(f"required retained artifact missing: {path}")
     return problems
 
 
@@ -562,7 +730,7 @@ def main() -> int:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=ROOT / "scripts/ci/fixtures/published-release-historical-retention/v1/harness-manifest.json",
+        default=ROOT / MANIFEST_REL,
     )
     parser.add_argument("--source-root", type=Path, default=ROOT)
     parser.add_argument("--results", type=Path)

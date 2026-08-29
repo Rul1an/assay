@@ -10,11 +10,18 @@
     "v5.3-reactivated"
   ],
   "activation_targets": {
-    "v5.3-created": "v5.3.0",
-    "failed-v5.4-activation": "v5.3.0",
-    "v5.4-activated": "v5.4.0",
-    "v5.4-v0-verified-v1-created": "v5.4.0",
-    "v5.3-reactivated": "v5.3.0"
+    "v5.3-created": "from_tag",
+    "failed-v5.4-activation": "from_tag",
+    "v5.4-activated": "to_tag",
+    "v5.4-v0-verified-v1-created": "to_tag",
+    "v5.3-reactivated": "from_tag"
+  },
+  "boundary_activation_refs": {
+    "v5.3-created": "initial",
+    "failed-v5.4-activation": "failed-activate-v5.4",
+    "v5.4-activated": "activate-v5.4",
+    "v5.4-v0-verified-v1-created": "activate-v5.4",
+    "v5.3-reactivated": "reactivate-v5.3"
   },
   "command_classes": {
     "state_producing": [
@@ -31,6 +38,7 @@
       "explicit-v1-v5.3",
       "verify-v0-under-v5.4",
       "verify-v1-under-v5.4",
+      "assay-version-v5.4",
       "post-failed-activation-active",
       "post-reactivation-active"
     ],
@@ -40,14 +48,23 @@
       "reactivate-v5.3"
     ]
   },
+  "required_retained_artifacts": [
+    "journey/.journey-canary",
+    "home/.config/assay/config.toml",
+    "session/policy.yaml",
+    "session/eval.yaml",
+    "session/traces/hello.jsonl",
+    "results/v0.bundle",
+    "results/v1.bundle"
+  ],
   "files": [
     {
       "path": ".github/workflows/published-release-historical-retention.yml",
-      "sha256": "5c3e27edeb2583f42d4741e2a31d9fa36a705aa99fa6c635d20f759079700924"
+      "sha256": "797a2a7c5962f949fc6fccb0dae95421692fcf8a887a56d8e2c42c5d88bf15f5"
     },
     {
       "path": "scripts/ci/published-release-historical-retention.sh",
-      "sha256": "2590a24dcdd42f1a139e0f4f44f23a06ef04f97279f01b87c0736f9a2d64ede4"
+      "sha256": "68040c8a0a5c967ec7d8195ef3f118ecde48c4dbafdaada6f8c66ab19fdd8c52"
     },
     {
       "path": "scripts/ci/release_attestation_enforce.sh",

@@ -106,8 +106,7 @@ run_driver() {
   local run_root="$1" fixture="$2"
   IMAGE_OS=ubuntu24 IMAGE_VERSION=20260824.1.0 RUNNER_OS=Linux RUNNER_ARCH=X64 \
   bash "$DRIVER" \
-    --from-tag v5.3.0 \
-    --to-tag v5.4.0 \
+    --manifest "$MANIFEST" \
     --harness-sha 6704d0bc4029f893f9558ab669ffc60918971943 \
     --workflow-run-id test-historical \
     --workflow-run-attempt 1 \
@@ -128,7 +127,12 @@ check_results() {
 
 expect_results_failure() {
   local name="$1" results="$2" expected="$3"
-  if python3 "$CHECKER" --results "$results" --manifest "$MANIFEST" >"$scratch/$name.out" 2>&1; then
+  expect_results_failure_with_manifest "$name" "$results" "$MANIFEST" "$expected"
+}
+
+expect_results_failure_with_manifest() {
+  local name="$1" results="$2" manifest="$3" expected="$4"
+  if python3 "$CHECKER" --results "$results" --manifest "$manifest" >"$scratch/$name.out" 2>&1; then
     fail "results mutation stayed green: $name"
   fi
   grep -F "$expected" "$scratch/$name.out" >/dev/null \
@@ -197,9 +201,13 @@ rm -rf "$copy_root/restored-journey"
 cp -R "$copy_root/aside-journey" "$copy_root/restored-journey"
 python3 "$CHECKER" --results "$copy_root/results" --manifest "$MANIFEST"
 
-python3 - "$good_root/results" "$scratch" <<'PY'
+python3 - "$MANIFEST" "$good_root/results" "$scratch" <<'PY'
 import json, pathlib, shutil, sys
-src, scratch = map(pathlib.Path, sys.argv[1:])
+manifest_path, src, scratch = map(pathlib.Path, sys.argv[1:])
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+required = manifest.get("required_retained_artifacts")
+if not isinstance(required, list) or not required:
+    raise SystemExit("manifest must declare required_retained_artifacts")
 
 def load(path):
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
@@ -338,6 +346,51 @@ for row in commands:
         item["argv"] = [item.get("argv", ["python3"])[0], "-c", "os.urandom", "journey/.journey-canary"]
     paraphrased_rows.append(item)
 dump(paraphrased / "commands.ndjson", paraphrased_rows)
+
+undeclared = scratch / "undeclared-command"
+shutil.copytree(src, undeclared)
+dump(
+    undeclared / "commands.ndjson",
+    commands
+    + [
+        {
+            "name": "arbitrary-undeclared",
+            "class": "observe",
+            "exit_code": 0,
+            "argv": ["true"],
+            "stdout_sha256": "aa" * 32,
+            "stderr_sha256": "bb" * 32,
+            "executed_binary_sha256": "cc" * 32,
+            "selected_profile": "v0",
+        }
+    ],
+)
+
+class_mismatch = scratch / "class-mismatch"
+shutil.copytree(src, class_mismatch)
+mismatched = []
+for row in commands:
+    item = dict(row)
+    if item.get("name") == "init":
+        item["class"] = "observe"
+    mismatched.append(item)
+dump(class_mismatch / "commands.ndjson", mismatched)
+
+for path in required:
+    dest = scratch / ("deleted-required-" + path.replace("/", "_"))
+    shutil.copytree(src, dest)
+    stripped = []
+    removed = False
+    for row in ledger:
+        item = dict(row)
+        kept = [dict(file_row) for file_row in item.get("files", []) if file_row.get("path") != path]
+        if len(kept) != len(item.get("files", [])):
+            removed = True
+        item["files"] = kept
+        stripped.append(item)
+    if not removed:
+        raise SystemExit(f"deleted-required could not omit {path}")
+    dump(dest / "journey-ledger.ndjson", stripped)
 PY
 
 expect_results_failure "same-class-different-argv" "$scratch/dup-class" "exact-once class init occurred 2 times"
@@ -356,6 +409,56 @@ expect_results_failure "dropped-migrate-v54" "$scratch/dropped-migrate-v54" "exa
 expect_results_failure "empty-provenance" "$scratch/empty-provenance" "run-pin provenance must be non-empty: image_os"
 expect_results_failure "missing-recorded-exit" "$scratch/missing-recorded-exit" "v0 cross-version verify recorded_exit must be an integer"
 expect_results_failure "paraphrased-canary" "$scratch/paraphrased-canary" "canary row must record the argv that actually ran"
+expect_results_failure "undeclared-command" "$scratch/undeclared-command" "undeclared command: arbitrary-undeclared"
+expect_results_failure "class-mismatch" "$scratch/class-mismatch" "command init class observe does not match manifest class state_producing"
+expect_results_failure "deleted-required-v0-bundle" "$scratch/deleted-required-results_v0.bundle" "required retained artifact missing: results/v0.bundle"
+expect_results_failure "deleted-required-v1-bundle" "$scratch/deleted-required-results_v1.bundle" "required retained artifact missing: results/v1.bundle"
+expect_results_failure "deleted-required-canary" "$scratch/deleted-required-journey_.journey-canary" "required retained artifact missing: journey/.journey-canary"
+expect_results_failure "deleted-required-config" "$scratch/deleted-required-home_.config_assay_config.toml" "required retained artifact missing: home/.config/assay/config.toml"
+expect_results_failure "deleted-required-policy" "$scratch/deleted-required-session_policy.yaml" "required retained artifact missing: session/policy.yaml"
+expect_results_failure "deleted-required-eval" "$scratch/deleted-required-session_eval.yaml" "required retained artifact missing: session/eval.yaml"
+expect_results_failure "deleted-required-trace" "$scratch/deleted-required-session_traces_hello.jsonl" "required retained artifact missing: session/traces/hello.jsonl"
+
+python3 - "$MANIFEST" "$good_root/results" "$scratch" <<'PY'
+import json, pathlib, shutil, sys
+manifest_src, results_src, scratch = map(pathlib.Path, sys.argv[1:])
+
+def write_manifest(dest, document):
+    dest.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+
+src_manifest = json.loads(manifest_src.read_text(encoding="utf-8"))
+
+from_tag = scratch / "from-tag-drift.json"
+from_doc = dict(src_manifest)
+from_doc["from_tag"] = "v9.9.9"
+write_manifest(from_tag, from_doc)
+
+to_tag = scratch / "to-tag-drift.json"
+to_doc = dict(src_manifest)
+to_doc["to_tag"] = "v9.9.8"
+write_manifest(to_tag, to_doc)
+
+omitted = scratch / "omitted-boundary-mapping.json"
+omitted_doc = dict(src_manifest)
+refs = dict(omitted_doc.get("boundary_activation_refs") or {})
+names = list(omitted_doc.get("boundaries") or [])
+if not refs:
+    refs = {name: "activate-v5.4" for name in names}
+if names:
+    refs.pop(names[0], None)
+omitted_doc["boundary_activation_refs"] = refs
+write_manifest(omitted, omitted_doc)
+PY
+
+expect_results_failure_with_manifest \
+  "from-tag-drift" "$good_root/results" "$scratch/from-tag-drift.json" \
+  "run-pin from_tag must match the harness manifest"
+expect_results_failure_with_manifest \
+  "to-tag-drift" "$good_root/results" "$scratch/to-tag-drift.json" \
+  "run-pin to_tag must match the harness manifest"
+expect_results_failure_with_manifest \
+  "omitted-boundary-mapping" "$good_root/results" "$scratch/omitted-boundary-mapping.json" \
+  "boundary activation refs must list every boundary exactly once"
 
 python3 - "$MANIFEST" "$good_root/results" "$scratch" <<'PY'
 import json, pathlib, shutil, sys
@@ -466,6 +569,26 @@ expect_source_failure \
   "$workflow_checker_call" \
   "$workflow_checker_decoy" \
   "workflow must execute only the exact reviewed consumer-checker invocation"
+expect_source_failure \
+  "trigger-schedule" "workflow.yml" \
+  "  workflow_dispatch:" \
+  $'  workflow_dispatch:\n  schedule:\n    - cron: "0 0 * * *"' \
+  "historical workflow must be workflow_dispatch only"
+expect_source_failure \
+  "trigger-repository-dispatch" "workflow.yml" \
+  "  workflow_dispatch:" \
+  $'  workflow_dispatch:\n  repository_dispatch:' \
+  "historical workflow must be workflow_dispatch only"
+expect_source_failure \
+  "trigger-workflow-run" "workflow.yml" \
+  "  workflow_dispatch:" \
+  $'  workflow_dispatch:\n  workflow_run:\n    types: [completed]' \
+  "historical workflow must be workflow_dispatch only"
+expect_source_failure \
+  "harness-digest-drift" "manifest.json" \
+  "08eff32101003614a9d5de93507c2d26ec087d1417179d34bea41a70ee4bafaa" \
+  "18eff32101003614a9d5de93507c2d26ec087d1417179d34bea41a70ee4bafaa" \
+  "harness digest drifted"
 
 if hosted_consumer_check "$scratch/self-attested"; then
   fail "forged retained record kept hosted consumer-checker green"
