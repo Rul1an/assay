@@ -147,6 +147,11 @@ case "\$cmd" in
     format=""
     profile_version=""
     mode=""
+    out_seen=0
+    profile_seen=0
+    decisions_seen=0
+    format_seen=0
+    profile_version_seen=0
     prev=""
     for arg in "\$@"; do
       [[ -z "\$prev" || "\$arg" != --* ]] || exit 2
@@ -158,11 +163,31 @@ case "\$cmd" in
         profile_version) profile_version="\$arg"; prev=""; continue ;;
       esac
       case "\$arg" in
-        -o|--out|--bundle-out) prev="out" ;;
-        --profile) prev="profile" ;;
-        --decisions) prev="decisions" ;;
-        --format) prev="format" ;;
-        --profile-version) prev="profile_version" ;;
+        -o|--out|--bundle-out)
+          [[ "\$out_seen" -eq 0 ]] || exit 2
+          out_seen=1
+          prev="out"
+          ;;
+        --profile)
+          [[ "\$profile_seen" -eq 0 ]] || exit 2
+          profile_seen=1
+          prev="profile"
+          ;;
+        --decisions)
+          [[ "\$decisions_seen" -eq 0 ]] || exit 2
+          decisions_seen=1
+          prev="decisions"
+          ;;
+        --format)
+          [[ "\$format_seen" -eq 0 ]] || exit 2
+          format_seen=1
+          prev="format"
+          ;;
+        --profile-version)
+          [[ "\$profile_version_seen" -eq 0 ]] || exit 2
+          profile_version_seen=1
+          prev="profile_version"
+          ;;
         --*) exit 2 ;;
         privileged-mcp-action)
           [[ "\$sub" == "import" && -z "\$mode" ]] || exit 2
@@ -198,9 +223,10 @@ import base64
 import json
 import sys
 
-row = json.loads(open(sys.argv[1], encoding="utf-8").readline())
+with open(sys.argv[1], encoding="utf-8") as stream:
+    rows = [json.loads(line) for line in stream if line.strip()]
 expected = json.loads(base64.b64decode("$V54_DECISION_B64").decode("utf-8"))
-raise SystemExit(0 if row == expected else 2)
+raise SystemExit(0 if rows == [expected] else 2)
 PY
         ;;
       *)
@@ -875,6 +901,17 @@ expect_v54_verify_argv_failure \
 expect_v54_verify_argv_failure \
   "wrong-profile-version" \
   "$good_root/results/v1.bundle" --format json --profile-version v2
+expect_v54_verify_argv_failure \
+  "duplicate-format-option" \
+  "$good_root/results/v1.bundle" --format json --format json --profile-version v1
+expect_v54_verify_argv_failure \
+  "duplicate-profile-version-option" \
+  "$good_root/results/v1.bundle" --format json --profile-version v1 --profile-version v1
+cp "$good_root/results/v1.bundle" "$scratch/v1-extra-record.bundle"
+printf '%s\n' '{}' >>"$scratch/v1-extra-record.bundle"
+expect_v54_verify_argv_failure \
+  "trailing-v1-record" \
+  "$scratch/v1-extra-record.bundle" --format json --profile-version v1
 expect_v1_decision_fixture_failure \
   "v1-null-target-digest" \
   '"target_digest":"sha256:df4be9dfaa840f625ba03f5d577e6276a732f565c9527521138cfee1874546cf"' \
