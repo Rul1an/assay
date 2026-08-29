@@ -144,6 +144,9 @@ case "\$cmd" in
     profile=""
     decisions=""
     bundle=""
+    format=""
+    profile_version=""
+    mode=""
     prev=""
     for arg in "\$@"; do
       [[ -z "\$prev" || "\$arg" != --* ]] || exit 2
@@ -151,36 +154,45 @@ case "\$cmd" in
         out) out="\$arg"; prev=""; continue ;;
         profile) profile="\$arg"; prev=""; continue ;;
         decisions) decisions="\$arg"; prev=""; continue ;;
-        skip) prev=""; continue ;;
+        format) format="\$arg"; prev=""; continue ;;
+        profile_version) profile_version="\$arg"; prev=""; continue ;;
       esac
       case "\$arg" in
         -o|--out|--bundle-out) prev="out" ;;
         --profile) prev="profile" ;;
         --decisions) prev="decisions" ;;
-        --format|--profile-version) prev="skip" ;;
+        --format) prev="format" ;;
+        --profile-version) prev="profile_version" ;;
         --*) exit 2 ;;
-        privileged-mcp-action) ;;
-        *) [[ -n "\$bundle" ]] || bundle="\$arg" ;;
+        privileged-mcp-action)
+          [[ "\$sub" == "import" && -z "\$mode" ]] || exit 2
+          mode="\$arg"
+          ;;
+        *)
+          [[ -z "\$bundle" ]] || exit 2
+          bundle="\$arg"
+          ;;
       esac
     done
     [[ -z "\$prev" ]] || exit 2
     case "\$sub" in
       export)
-        [[ -n "\$out" && -f "\$profile" ]] || exit 2
+        [[ -n "\$out" && -f "\$profile" && -z "\$decisions\$bundle\$format\$profile_version\$mode" ]] || exit 2
         grep -F 'version: "1.0"' "\$profile" >/dev/null || exit 2
         grep -F 'updated: true' "\$profile" >/dev/null || exit 2
         grep -F 'profile_entry: retained-v5.3-profile-event' "\$profile" >/dev/null || exit 2
         printf 'v0-bundle\\n' >"\$out"
         ;;
       verify)
+        [[ -f "\$bundle" && -z "\$out\$profile\$decisions\$format\$profile_version\$mode" ]] || exit 2
         exit 0
         ;;
       import)
-        [[ -n "\$out" && -f "\$decisions" ]] || exit 2
+        [[ -n "\$out" && -f "\$decisions" && "\$mode" == "privileged-mcp-action" && -z "\$profile\$bundle\$format\$profile_version" ]] || exit 2
         cp "\$decisions" "\$out"
         ;;
       verify-privileged-mcp-action)
-        [[ "\$VERSION" == "5.4.0" && -f "\$bundle" ]] || exit 2
+        [[ "\$VERSION" == "5.4.0" && -f "\$bundle" && "\$format" == "json" && "\$profile_version" == "v1" && -z "\$out\$profile\$decisions\$mode" ]] || exit 2
         python3 - "\$bundle" <<'PY'
 import base64
 import json
@@ -851,6 +863,18 @@ expect_v54_verify_argv_failure \
 expect_v54_verify_argv_failure \
   "unknown-option" \
   --bogus "$good_root/results/v1.bundle"
+expect_v54_verify_argv_failure \
+  "duplicate-positional-bundle" \
+  "$good_root/results/v1.bundle" "$good_root/results/v1.bundle" --format json --profile-version v1
+expect_v54_verify_argv_failure \
+  "foreign-subcommand-option" \
+  --bundle-out ignored "$good_root/results/v1.bundle" --format json --profile-version v1
+expect_v54_verify_argv_failure \
+  "wrong-format-value" \
+  "$good_root/results/v1.bundle" --format markdown --profile-version v1
+expect_v54_verify_argv_failure \
+  "wrong-profile-version" \
+  "$good_root/results/v1.bundle" --format json --profile-version v2
 expect_v1_decision_fixture_failure \
   "v1-null-target-digest" \
   '"target_digest":"sha256:df4be9dfaa840f625ba03f5d577e6276a732f565c9527521138cfee1874546cf"' \
