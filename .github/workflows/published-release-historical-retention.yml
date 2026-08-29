@@ -1,0 +1,65 @@
+name: Published Release Historical Retention
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-x86_64:
+    name: Linux x86_64 historical retention
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Require dispatch from main
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "historical retention must be dispatched from main, got $GITHUB_REF" >&2
+            exit 2
+          fi
+
+      - name: Checkout the exact harness
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Exercise historical retention
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ROOT: ${{ runner.temp }}/assay-published-release-historical-retention
+          RUNNER_OS: ${{ runner.os }}
+          RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          set -euo pipefail
+          IMAGE_OS="${ImageOS:?image os provenance is empty}"
+          IMAGE_VERSION="${ImageVersion:?image version provenance is empty}"
+          export IMAGE_OS IMAGE_VERSION
+          bash scripts/ci/published-release-historical-retention.sh \
+            --manifest scripts/ci/fixtures/published-release-historical-retention/v1/harness-manifest.json \
+            --harness-sha "$GITHUB_SHA" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --run-root "$RUN_ROOT"
+
+      - name: Check retained historical retention
+        shell: bash
+        env:
+          RUN_ROOT: ${{ runner.temp }}/assay-published-release-historical-retention
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/check-published-release-historical-retention-contract.py \
+            --results "$RUN_ROOT/results" \
+            --manifest scripts/ci/fixtures/published-release-historical-retention/v1/harness-manifest.json \
+            --expected-head-sha "$GITHUB_SHA"
+
+      - name: Retain the replayable journey evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: published-release-historical-retention-${{ github.sha }}
+          path: ${{ runner.temp }}/assay-published-release-historical-retention/results/
+          if-no-files-found: error
+          retention-days: 90

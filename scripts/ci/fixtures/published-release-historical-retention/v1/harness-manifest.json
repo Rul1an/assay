@@ -1,0 +1,82 @@
+{
+  "schema": "assay.published_release_historical_retention.harness.v1",
+  "from_tag": "v5.3.0",
+  "to_tag": "v5.4.0",
+  "boundaries": [
+    "v5.3-created",
+    "failed-v5.4-activation",
+    "v5.4-activated",
+    "v5.4-v0-verified-v1-created",
+    "v5.3-reactivated"
+  ],
+  "activation_targets": {
+    "v5.3-created": "from_tag",
+    "failed-v5.4-activation": "from_tag",
+    "v5.4-activated": "to_tag",
+    "v5.4-v0-verified-v1-created": "to_tag",
+    "v5.3-reactivated": "from_tag"
+  },
+  "boundary_activation_refs": {
+    "v5.3-created": "initial",
+    "failed-v5.4-activation": "failed-activate-v5.4",
+    "v5.4-activated": "activate-v5.4",
+    "v5.4-v0-verified-v1-created": "activate-v5.4",
+    "v5.3-reactivated": "reactivate-v5.3"
+  },
+  "command_classes": {
+    "state_producing": [
+      "create-journey-canary",
+      "init",
+      "export-v0-bundle",
+      "import-v1-bundle",
+      "stage-prefix-v5.3.0",
+      "stage-prefix-v5.4.0"
+    ],
+    "observe": [
+      "migrate-check-v5.3",
+      "migrate-check-v5.4",
+      "explicit-v1-v5.3",
+      "verify-v0-under-v5.4",
+      "verify-v1-under-v5.4",
+      "assay-version-v5.4",
+      "post-failed-activation-active",
+      "post-reactivation-active"
+    ],
+    "activate": [
+      "failed-activate-v5.4",
+      "activate-v5.4",
+      "reactivate-v5.3"
+    ]
+  },
+  "required_retained_artifacts": [
+    "journey/.journey-canary",
+    "home/.config/assay/config.toml",
+    "session/policy.yaml",
+    "session/eval.yaml",
+    "session/traces/hello.jsonl",
+    "results/v0.bundle",
+    "results/v1.bundle"
+  ],
+  "files": [
+    {
+      "path": ".github/workflows/published-release-historical-retention.yml",
+      "sha256": "b915130760efdb40cc2a82b142efefa765024a9062e46bff64ccaabd31cf3d75"
+    },
+    {
+      "path": "scripts/ci/published-release-historical-retention.sh",
+      "sha256": "96ce8f143caf835de61446d9a795f36cb80a56c59b6c763839a4c3b3eb16667e"
+    },
+    {
+      "path": "scripts/ci/release_attestation_enforce.sh",
+      "sha256": "01bfa586b826fa74838c58e765f40982537f8ea14325b803fc9183fcf4e8277f"
+    },
+    {
+      "path": "scripts/ci/safe_extract_release_archive.py",
+      "sha256": "0d0c4462d2373cfd29fb6424ac6cba26e8218a3cdbe4cf93055362b19acdaef9"
+    },
+    {
+      "path": "scripts/ci/bounded_download.py",
+      "sha256": "08eff32101003614a9d5de93507c2d26ec087d1417179d34bea41a70ee4bafaa"
+    }
+  ]
+}
