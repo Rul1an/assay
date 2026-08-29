@@ -207,6 +207,8 @@ class PrecommitHookContract:
 class WorkflowStepContract:
     condition: str | None
     continue_on_error: bool | None
+    shell: str | None
+    uses: str | None
     shell_lines: tuple[str, ...]
 
 
@@ -615,6 +617,8 @@ def parse_lint_step(
             fields.get("continue-on-error", ""),
             "kernel-matrix lint step continue-on-error",
         ),
+        shell=fields.get("shell"),
+        uses=fields.get("uses"),
         shell_lines=shell_lines,
     )
 
@@ -778,6 +782,9 @@ def validate_lint_executor(contract: WorkflowContract) -> None:
 
 
 CLAUDE_PLUGIN_SELF_TEST = "bash scripts/ci/test-claude-plugin-install.sh --self-test"
+CANONICAL_LINT_SHELL = "bash"
+SETUP_RUST_USES = "./.github/actions/setup-rust"
+SETUP_PYTHON_USES_PREFIX = "actions/setup-python@"
 
 
 def lint_step_self_test_lines(step: WorkflowStepContract) -> tuple[str, ...]:
@@ -792,6 +799,21 @@ def lint_step_is_claude_plugin_self_test(step: WorkflowStepContract) -> bool:
     return CLAUDE_PLUGIN_SELF_TEST in lint_step_self_test_lines(step)
 
 
+def lint_step_uses(step: WorkflowStepContract) -> str | None:
+    if step.uses is None:
+        return None
+    return step.uses.split("#", 1)[0].strip() or None
+
+
+def lint_step_is_setup_rust(step: WorkflowStepContract) -> bool:
+    return lint_step_uses(step) == SETUP_RUST_USES
+
+
+def lint_step_is_setup_python(step: WorkflowStepContract) -> bool:
+    uses = lint_step_uses(step)
+    return uses is not None and uses.startswith(SETUP_PYTHON_USES_PREFIX)
+
+
 def validate_hosted_claude_plugin_self_test(contract: WorkflowContract) -> None:
     matches = [
         (index, step)
@@ -801,12 +823,26 @@ def validate_hosted_claude_plugin_self_test(contract: WorkflowContract) -> None:
     if len(matches) != 1:
         fail("kernel-matrix lint job must run exactly one active Claude plugin install self-test")
     index, step = matches[0]
-    if index == 0:
-        fail("kernel-matrix Claude plugin install self-test must run after setup")
+    rust_indices = [
+        rust_index
+        for rust_index, candidate in enumerate(contract.lint_steps)
+        if lint_step_is_setup_rust(candidate)
+    ]
+    python_indices = [
+        python_index
+        for python_index, candidate in enumerate(contract.lint_steps)
+        if lint_step_is_setup_python(candidate)
+    ]
+    if len(rust_indices) != 1 or len(python_indices) != 1:
+        fail("kernel-matrix lint job must run setup-rust and setup-python before the Claude plugin install self-test")
+    if index <= rust_indices[0] or index <= python_indices[0]:
+        fail("kernel-matrix Claude plugin install self-test must run after setup-rust and setup-python")
     if step.condition is not None:
         fail("kernel-matrix Claude plugin install self-test must not be conditional")
     if step.continue_on_error is True:
         fail("kernel-matrix Claude plugin install self-test must fail closed")
+    if step.shell != CANONICAL_LINT_SHELL:
+        fail("kernel-matrix Claude plugin install self-test must use canonical bash")
     if lint_step_self_test_lines(step) != (CLAUDE_PLUGIN_SELF_TEST,):
         fail("kernel-matrix Claude plugin install self-test command is noncanonical")
 

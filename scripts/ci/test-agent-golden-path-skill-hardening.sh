@@ -13,7 +13,7 @@ trap 'rm -rf "$SCRATCH"' EXIT
 # the 58-case durability boundary established by PR B0.
 # CI-5C (#2196): +3 skill generator-destination omissions and +3 packaged-resource
 # destination drifts beyond the original baseline-only packaged drift case.
-EXPECTED_CASES=108
+EXPECTED_CASES=110
 # Parser-layer follow-ups stay outside the approved cumulative case chain. The
 # The 23 probes are 4 workflow-key, 1 stages-key, 14 selector, 1 trigger-mode,
 # 1 release-split, and 2 inline-parser checks; pin them so deletion cannot leave
@@ -519,6 +519,40 @@ replacements = {
         '      - name: Cache pre-commit\n',
         '      # comment outside the Claude plugin install self-test step\n'
         '      - name: Cache pre-commit\n',
+    ),
+    "claude-self-test-shell-decoy": (
+        '      - name: Claude plugin install self-test\n        shell: bash\n',
+        '      - name: Claude plugin install self-test\n        shell: echo {0}\n',
+    ),
+    "claude-self-test-before-setup": (
+        '      - uses: ./.github/actions/setup-rust\n'
+        '        with:\n'
+        '          components: rustfmt, clippy\n'
+        '\n'
+        '      - name: Set up Python\n'
+        '        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0\n'
+        '        with:\n'
+        '          python-version: "3.12"\n'
+        '\n'
+        '      - name: Claude plugin install self-test\n'
+        '        shell: bash\n'
+        '        run: |\n'
+        '          set -euo pipefail\n'
+        '          bash scripts/ci/test-claude-plugin-install.sh --self-test\n',
+        '      - name: Claude plugin install self-test\n'
+        '        shell: bash\n'
+        '        run: |\n'
+        '          set -euo pipefail\n'
+        '          bash scripts/ci/test-claude-plugin-install.sh --self-test\n'
+        '\n'
+        '      - uses: ./.github/actions/setup-rust\n'
+        '        with:\n'
+        '          components: rustfmt, clippy\n'
+        '\n'
+        '      - name: Set up Python\n'
+        '        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0\n'
+        '        with:\n'
+        '          python-version: "3.12"\n',
     ),
 }
 
@@ -1384,6 +1418,8 @@ declare -a claude_self_test_mutations=(
   "argv-claude-self-test|noncanonical Claude plugin self-test argv|kernel-matrix lint job must run exactly one active Claude plugin install self-test"
   "claude-self-test-if-false|conditional Claude plugin self-test|kernel-matrix Claude plugin install self-test must not be conditional"
   "claude-self-test-continue-on-error|fail-open Claude plugin self-test|kernel-matrix Claude plugin install self-test must fail closed"
+  "claude-self-test-shell-decoy|shell-decoy Claude plugin self-test|kernel-matrix Claude plugin install self-test must use canonical bash"
+  "claude-self-test-before-setup|Claude plugin self-test before setup|kernel-matrix Claude plugin install self-test must run after setup-rust and setup-python"
 )
 
 for claude_case in "${claude_self_test_mutations[@]}"; do
