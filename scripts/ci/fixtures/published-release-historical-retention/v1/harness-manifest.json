@@ -64,11 +64,16 @@
     },
     {
       "path": "scripts/ci/published-release-historical-retention.sh",
-      "sha256": "96ce8f143caf835de61446d9a795f36cb80a56c59b6c763839a4c3b3eb16667e"
+      "sha256": "af4facc845b2c76450e263d81cf475ae0a89b25e67dc78fd671e97cb670b942b"
     },
     {
       "path": "scripts/ci/release_attestation_enforce.sh",
       "sha256": "01bfa586b826fa74838c58e765f40982537f8ea14325b803fc9183fcf4e8277f"
+    },
+    {
+      "path": "scripts/ci/release_archive_inventory.sh",
+      "sha256": "3ac3604dc26b843066751a50d9c25c8e780ac6e5e8bcf9645b672af27f161afb",
+      "executable": true
     },
     {
       "path": "scripts/ci/safe_extract_release_archive.py",

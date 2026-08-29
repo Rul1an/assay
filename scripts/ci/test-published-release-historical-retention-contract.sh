@@ -20,6 +20,44 @@ fail() {
 [[ -f "$DRIVER" ]] || fail "missing historical-retention driver"
 [[ -f "$MANIFEST" ]] || fail "missing historical-retention harness manifest"
 
+python3 - "$CHECKER" <<'PY'
+import importlib.util
+import pathlib
+import sys
+
+checker = pathlib.Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location("historical_retention_checker", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+limit = module.MAX_HARNESS_FILES_BYTES
+requested = []
+
+class GuardedStream:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self, size=-1):
+        requested.append(size)
+        if size != limit + 1:
+            raise AssertionError(f"bounded JSON reader requested {size}, expected {limit + 1}")
+        return b"{}"
+
+class ProbePath:
+    def open(self, mode):
+        if mode != "rb":
+            raise AssertionError(f"bounded JSON reader opened in {mode!r}")
+        return GuardedStream()
+
+if module.read_bounded_json(ProbePath(), "probe.json", limit) != {}:
+    raise SystemExit("bounded JSON reader changed the valid object")
+if requested != [limit + 1]:
+    raise SystemExit(f"bounded JSON reader issued unexpected reads: {requested}")
+PY
+
 python3 "$CHECKER" \
   --workflow "$WORKFLOW" \
   --driver "$DRIVER" \
@@ -315,6 +353,265 @@ PY
     || fail "hook-decoy $helper_path missed expected guard: $expected"
 }
 
+expect_materialized_helper_modes() {
+  local helper="$good_root/harness/scripts/ci/release_archive_inventory.sh"
+  local control="$good_root/harness/scripts/ci/bounded_download.py"
+  local report="$good_root/results/harness-files.json"
+  [[ -f "$helper" ]] || fail "materialized inventory helper is missing"
+  [[ -f "$control" ]] || fail "materialized non-executable control is missing"
+  [[ -f "$report" ]] || fail "harness-files.json is missing"
+  [[ -x "$helper" ]] || fail "declared executable helper materialized non-executable"
+  [[ ! -x "$control" ]] || fail "non-executable control became executable"
+  python3 - "$report" <<'PY'
+import json, pathlib, sys
+report = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+files = report.get("files")
+if not isinstance(files, list):
+    raise SystemExit("harness-files.json has no files")
+by_path = {row.get("path"): row for row in files if isinstance(row, dict)}
+helper = by_path.get("scripts/ci/release_archive_inventory.sh")
+control = by_path.get("scripts/ci/bounded_download.py")
+if not helper or helper.get("executable") is not True:
+    raise SystemExit("inventory helper executable report drifted")
+if not control or control.get("executable") is not False:
+    raise SystemExit("non-executable control executable report drifted")
+PY
+}
+
+expect_driver_neutralized_chmod() {
+  local case_root="$scratch/neutralized-chmod"
+  local run_root="$case_root/run"
+  local repo_root="$case_root/repo"
+  local expected="harness executable observation drifted"
+  mkdir -p "$repo_root/scripts/ci" "$repo_root/.github/workflows"
+  ln -s "$ROOT/.github/workflows/published-release-historical-retention.yml" \
+    "$repo_root/.github/workflows/published-release-historical-retention.yml"
+  ln -s "$ROOT/scripts/ci/release_attestation_enforce.sh" "$repo_root/scripts/ci/release_attestation_enforce.sh"
+  ln -s "$ROOT/scripts/ci/release_archive_inventory.sh" "$repo_root/scripts/ci/release_archive_inventory.sh"
+  ln -s "$ROOT/scripts/ci/safe_extract_release_archive.py" "$repo_root/scripts/ci/safe_extract_release_archive.py"
+  ln -s "$ROOT/scripts/ci/bounded_download.py" "$repo_root/scripts/ci/bounded_download.py"
+  cp "$DRIVER" "$repo_root/scripts/ci/published-release-historical-retention.sh"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$repo_root/scripts/ci/published-release-historical-retention.sh" "$case_root/manifest.json" <<'PY'
+import hashlib, json, pathlib, sys
+driver, manifest_path = map(pathlib.Path, sys.argv[1:])
+text = driver.read_text(encoding="utf-8")
+old = "    if executable:\n"
+new = "    if executable and False:\n"
+if text.count(old) != 1:
+    raise SystemExit(f"chmod guard count: {text.count(old)}")
+driver.write_text(text.replace(old, new, 1), encoding="utf-8")
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+digest = hashlib.sha256(driver.read_bytes()).hexdigest()
+found = False
+for row in manifest.get("files") or []:
+    if row.get("path") == "scripts/ci/published-release-historical-retention.sh":
+        row["sha256"] = digest
+        found = True
+if not found:
+    raise SystemExit("driver row missing from manifest")
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  if IMAGE_OS=ubuntu24 IMAGE_VERSION=20260824.1.0 RUNNER_OS=Linux RUNNER_ARCH=X64 \
+    bash "$repo_root/scripts/ci/published-release-historical-retention.sh" \
+      --manifest "$case_root/manifest.json" \
+      --harness-sha "$EXPECTED_HEAD_SHA" \
+      --workflow-run-id test-historical \
+      --workflow-run-attempt 1 \
+      --run-root "$run_root" \
+      --fixture-root "$fixture" >"$case_root/driver.out" 2>&1; then
+    fail "driver mutation stayed green: neutralized-chmod"
+  fi
+  grep -F "$expected" "$case_root/driver.out" >/dev/null \
+    || fail "neutralized-chmod missed expected driver guard: $expected"
+  if [[ -f "$run_root/results/harness-files.json" ]]; then
+    python3 - "$run_root/results/harness-files.json" <<'PY' || fail "neutralized-chmod wrote a false executable report"
+import json, pathlib, sys
+report = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+for row in report.get("files") or []:
+    if row.get("path") == "scripts/ci/release_archive_inventory.sh" and row.get("executable") is True:
+        raise SystemExit("retained report repeated the declaration")
+PY
+  fi
+}
+
+
+expect_driver_report_digest_lie() {
+  local case_root="$scratch/report-digest-lie"
+  local run_root="$case_root/run"
+  local repo_root="$case_root/repo"
+  local report="$run_root/results/harness-files.json"
+  local expected="harness files observation drifted"
+  mkdir -p "$repo_root/scripts/ci" "$repo_root/.github/workflows"
+  ln -s "$ROOT/.github/workflows/published-release-historical-retention.yml" \
+    "$repo_root/.github/workflows/published-release-historical-retention.yml"
+  ln -s "$ROOT/scripts/ci/release_attestation_enforce.sh" "$repo_root/scripts/ci/release_attestation_enforce.sh"
+  ln -s "$ROOT/scripts/ci/release_archive_inventory.sh" "$repo_root/scripts/ci/release_archive_inventory.sh"
+  ln -s "$ROOT/scripts/ci/safe_extract_release_archive.py" "$repo_root/scripts/ci/safe_extract_release_archive.py"
+  ln -s "$ROOT/scripts/ci/bounded_download.py" "$repo_root/scripts/ci/bounded_download.py"
+  cp "$DRIVER" "$repo_root/scripts/ci/published-release-historical-retention.sh"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$repo_root/scripts/ci/published-release-historical-retention.sh" "$case_root/manifest.json" <<'PY'
+import hashlib, json, pathlib, sys
+driver, manifest_path = map(pathlib.Path, sys.argv[1:])
+text = driver.read_text(encoding="utf-8")
+old = '"sha256": digest'
+new = '"sha256": "0000000000000000000000000000000000000000000000000000000000000000"'
+if text.count(old) != 1:
+    raise SystemExit(f"report digest field count: {text.count(old)}")
+driver.write_text(text.replace(old, new, 1), encoding="utf-8")
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+digest = hashlib.sha256(driver.read_bytes()).hexdigest()
+found = False
+for row in manifest.get("files") or []:
+    if row.get("path") == "scripts/ci/published-release-historical-retention.sh":
+        row["sha256"] = digest
+        found = True
+if not found:
+    raise SystemExit("driver row missing from manifest")
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  local driver_rc=0
+  IMAGE_OS=ubuntu24 IMAGE_VERSION=20260824.1.0 RUNNER_OS=Linux RUNNER_ARCH=X64 \
+    bash "$repo_root/scripts/ci/published-release-historical-retention.sh" \
+      --manifest "$case_root/manifest.json" \
+      --harness-sha "$EXPECTED_HEAD_SHA" \
+      --workflow-run-id test-historical \
+      --workflow-run-attempt 1 \
+      --run-root "$run_root" \
+      --fixture-root "$fixture" >"$case_root/driver.out" 2>&1 || driver_rc=$?
+  [[ "$driver_rc" -eq 0 ]] \
+    || fail "report-digest-lie driver prerequisite failed rc=$driver_rc"
+  [[ -f "$report" ]] || fail "report-digest-lie did not write harness-files.json"
+  python3 - "$report" <<'PY' || fail "report-digest-lie did not write the zeroed report digest"
+import json, pathlib, sys
+report = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+helper = "scripts/ci/release_archive_inventory.sh"
+found = False
+for row in report.get("files") or []:
+    if row.get("path") == helper:
+        found = True
+        if row.get("sha256") != "0" * 64:
+            raise SystemExit("retained report kept the observed digest")
+if not found:
+    raise SystemExit("retained report missing inventory helper")
+PY
+  local checker_rc=0
+  python3 "$CHECKER" \
+    --results "$run_root/results" \
+    --manifest "$case_root/manifest.json" \
+    --expected-head-sha "$EXPECTED_HEAD_SHA" >"$case_root/checker.out" 2>&1 || checker_rc=$?
+  [[ "$checker_rc" -ne 0 ]] || fail "driver mutation stayed green: report-digest-lie"
+  grep -F "$expected" "$case_root/checker.out" >/dev/null \
+    || fail "report-digest-lie missed expected checker guard: $expected"
+}
+
+
+expect_inventory_executable_flag_removed() {
+  local case_root="$scratch/inventory-executable-flag-removed"
+  local expected="harness executable surface drifted"
+  mkdir -p "$case_root"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$case_root/manifest.json" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+manifest = json.loads(path.read_text(encoding="utf-8"))
+helper = "scripts/ci/release_archive_inventory.sh"
+found = False
+for row in manifest.get("files") or []:
+    if row.get("path") == helper:
+        row["executable"] = False
+        found = True
+if not found:
+    raise SystemExit("inventory helper row missing from manifest")
+path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  if python3 "$CHECKER" \
+      --workflow "$WORKFLOW" \
+      --driver "$DRIVER" \
+      --manifest "$case_root/manifest.json" \
+      --source-root "$ROOT" >"$case_root/output" 2>&1; then
+    fail "source mutation stayed green: inventory-executable-flag-removed"
+  fi
+  grep -F "$expected" "$case_root/output" >/dev/null \
+    || fail "inventory-executable-flag-removed missed expected guard: $expected"
+}
+
+expect_coordinated_executable_escape() {
+  local case_root="$scratch/coordinated-executable-escape"
+  local expected="harness executable surface drifted"
+  mkdir -p "$case_root"
+  cp "$WORKFLOW" "$case_root/workflow.yml"
+  cp "$DRIVER" "$case_root/driver.sh"
+  cp "$CHECKER" "$case_root/checker.py"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$case_root/manifest.json" "$case_root/checker.py" <<'PY'
+import json, pathlib, sys
+manifest_path, checker_path = map(pathlib.Path, sys.argv[1:])
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+helper = "scripts/ci/release_archive_inventory.sh"
+found = False
+for row in manifest.get("files") or []:
+    if row.get("path") == helper:
+        row["executable"] = False
+        found = True
+if not found:
+    raise SystemExit("inventory helper row missing from manifest")
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+text = checker_path.read_text(encoding="utf-8")
+old = 'V1_EXECUTABLE_PATHS = ["scripts/ci/release_archive_inventory.sh"]'
+new = "V1_EXECUTABLE_PATHS = []"
+if old in text:
+    if text.count(old) != 1:
+        raise SystemExit(f"executable_paths pin count: {text.count(old)}")
+    text = text.replace(old, new, 1)
+checker_path.write_text(text, encoding="utf-8")
+PY
+  if python3 "$CHECKER" \
+      --workflow "$case_root/workflow.yml" \
+      --driver "$case_root/driver.sh" \
+      --manifest "$case_root/manifest.json" \
+      --source-root "$ROOT" >"$case_root/live-checker.out" 2>&1; then
+    fail "source mutation stayed green: coordinated-executable-escape live-checker"
+  fi
+  grep -F "$expected" "$case_root/live-checker.out" >/dev/null \
+    || fail "coordinated-executable-escape live-checker missed expected guard: $expected"
+  if python3 "$case_root/checker.py" \
+      --workflow "$WORKFLOW" \
+      --driver "$DRIVER" \
+      --manifest "$MANIFEST" \
+      --source-root "$ROOT" \
+      --pre-commit "$ROOT/.pre-commit-config.yaml" >"$case_root/mutated-checker.out" 2>&1; then
+    fail "source mutation stayed green: coordinated-executable-escape mutated-checker"
+  fi
+  grep -F "$expected" "$case_root/mutated-checker.out" >/dev/null \
+    || fail "coordinated-executable-escape mutated-checker missed expected guard: $expected"
+}
+
+expect_omitted_reviewed_inventory_helper() {
+  local case_root="$scratch/omitted-release-archive-inventory"
+  local expected="harness manifest must list exactly the reviewed harness inputs"
+  mkdir -p "$case_root"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$case_root/manifest.json" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+manifest = json.loads(path.read_text(encoding="utf-8"))
+helper = "scripts/ci/release_archive_inventory.sh"
+manifest["files"] = [row for row in manifest.get("files") or [] if row.get("path") != helper]
+path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  if python3 "$CHECKER" \
+      --workflow "$WORKFLOW" \
+      --driver "$DRIVER" \
+      --manifest "$case_root/manifest.json" \
+      --source-root "$ROOT" >"$case_root/output" 2>&1; then
+    fail "source mutation stayed green: omitted-release-archive-inventory"
+  fi
+  grep -F "$expected" "$case_root/output" >/dev/null \
+    || fail "omitted-release-archive-inventory missed expected guard: $expected"
+}
+
 expect_coordinated_assay_version_v54_removal() {
   local case_root="$scratch/coordinated-drop-assay-version-v54"
   mkdir -p "$case_root"
@@ -384,6 +681,7 @@ build_fixture_root "$fixture"
 good_root="$scratch/good"
 run_driver "$good_root" "$fixture"
 check_results "$good_root"
+expect_materialized_helper_modes
 if python3 "$CHECKER" --results "$good_root/results" --manifest "$MANIFEST" \
     >"$scratch/missing-expected-head.out" 2>&1; then
   fail "results mutation stayed green: missing-expected-head-sha"
@@ -668,6 +966,113 @@ expect_results_failure "deleted-required-policy" "$scratch/deleted-required-sess
 expect_results_failure "deleted-required-eval" "$scratch/deleted-required-session_eval.yaml" "required retained artifact missing: session/eval.yaml"
 expect_results_failure "deleted-required-trace" "$scratch/deleted-required-session_traces_hello.jsonl" "required retained artifact missing: session/traces/hello.jsonl"
 
+python3 - "$good_root/results" "$scratch" <<'PY'
+import json, pathlib, shutil, sys
+src, scratch = map(pathlib.Path, sys.argv[1:])
+HELPER = "scripts/ci/release_archive_inventory.sh"
+CONTROL = "scripts/ci/bounded_download.py"
+
+def copy_results(name):
+    dest = scratch / name
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(src, dest)
+    return dest
+
+def load_report(dest):
+    path = dest / "harness-files.json"
+    return path, json.loads(path.read_text(encoding="utf-8"))
+
+def write_report(path, report):
+    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+def set_flag(report, path, value):
+    found = False
+    for row in report.get("files") or []:
+        if row.get("path") == path:
+            row["executable"] = value
+            found = True
+    if not found:
+        raise SystemExit(f"missing harness-files row: {path}")
+
+dest = copy_results("harness-files-true-to-false")
+path, report = load_report(dest)
+set_flag(report, HELPER, False)
+write_report(path, report)
+
+dest = copy_results("harness-files-false-to-true")
+path, report = load_report(dest)
+set_flag(report, CONTROL, True)
+write_report(path, report)
+
+dest = copy_results("harness-files-missing")
+(dest / "harness-files.json").unlink()
+
+dest = copy_results("harness-files-over-limit")
+(dest / "harness-files.json").write_bytes(b" " * (1_048_576 + 1))
+
+dest = copy_results("harness-files-invalid-utf8")
+(dest / "harness-files.json").write_bytes(b"\xff")
+
+dest = copy_results("harness-files-malformed-flag")
+path, report = load_report(dest)
+set_flag(report, HELPER, "true")
+write_report(path, report)
+
+dest = copy_results("harness-files-duplicate-path")
+path, report = load_report(dest)
+files = list(report.get("files") or [])
+helper = next(row for row in files if row.get("path") == HELPER)
+files.append(dict(helper))
+report["files"] = files
+write_report(path, report)
+
+dest = copy_results("harness-files-unknown-path")
+path, report = load_report(dest)
+files = list(report.get("files") or [])
+files.append({"path": "scripts/ci/not-in-manifest.sh", "sha256": "0" * 64, "executable": False})
+report["files"] = files
+write_report(path, report)
+
+dest = copy_results("harness-files-missing-path")
+path, report = load_report(dest)
+report["files"] = [row for row in report.get("files") or [] if row.get("path") != HELPER]
+write_report(path, report)
+
+dest = copy_results("harness-files-helper-digest-zeroed")
+path, report = load_report(dest)
+found = False
+for row in report.get("files") or []:
+    if row.get("path") == HELPER:
+        row["sha256"] = "0" * 64
+        found = True
+if not found:
+    raise SystemExit("missing helper row for digest tamper")
+write_report(path, report)
+PY
+
+expect_results_failure "harness-files-true-to-false" "$scratch/harness-files-true-to-false" \
+  "harness files observation drifted"
+expect_results_failure "harness-files-false-to-true" "$scratch/harness-files-false-to-true" \
+  "harness files observation drifted"
+expect_results_failure "harness-files-missing" "$scratch/harness-files-missing" \
+  "harness-files.json is unreadable"
+expect_results_failure "harness-files-over-limit" "$scratch/harness-files-over-limit" \
+  "harness-files.json exceeds 1048576-byte limit"
+expect_results_failure "harness-files-invalid-utf8" "$scratch/harness-files-invalid-utf8" \
+  "harness-files.json is unreadable: invalid UTF-8"
+expect_results_failure "harness-files-malformed-flag" "$scratch/harness-files-malformed-flag" \
+  "invalid executable flag"
+expect_results_failure "harness-files-duplicate-path" "$scratch/harness-files-duplicate-path" \
+  "harness-files.json path is duplicated"
+expect_results_failure "harness-files-unknown-path" "$scratch/harness-files-unknown-path" \
+  "harness-files.json path is unknown"
+expect_results_failure "harness-files-missing-path" "$scratch/harness-files-missing-path" \
+  "harness-files.json missing path"
+expect_results_failure "harness-files-helper-digest-zeroed" "$scratch/harness-files-helper-digest-zeroed" \
+  "harness files observation drifted"
+
+
 python3 - "$MANIFEST" "$good_root/results" "$scratch" <<'PY'
 import json, pathlib, shutil, sys
 manifest_src, results_src, scratch = map(pathlib.Path, sys.argv[1:])
@@ -908,6 +1313,17 @@ expect_path_safety_parity \
 expect_path_safety_parity \
   "v1-release-pair" "release_pair" "v9.9.7,v9.9.8" \
   "harness manifest release pair drifted from the v1 denominator"
+
+expect_omitted_reviewed_inventory_helper
+expect_inventory_executable_flag_removed
+expect_coordinated_executable_escape
+expect_driver_neutralized_chmod
+expect_driver_report_digest_lie
+expect_source_failure \
+  "inventory-executable-flag-string" "manifest.json" \
+  '"executable": true' \
+  '"executable": "true"' \
+  "invalid executable flag"
 
 while IFS= read -r helper; do
   expect_precommit_helper_decoy "$helper"

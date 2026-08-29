@@ -137,7 +137,7 @@ mkdir -p "$install_root" "$harness_root" "$session_root" "$results" "$run_root/h
 : >"$ledger_file"
 
 "$PYTHON_BIN" - "$manifest" "$ROOT" "$harness_root" "$results/harness-files.json" <<'PY'
-import hashlib, json, pathlib, shutil, sys
+import hashlib, json, pathlib, shutil, stat, sys
 manifest_path, root_path, output_path, report_path = map(pathlib.Path, sys.argv[1:])
 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 if manifest.get("schema") != "assay.published_release_historical_retention.harness.v1":
@@ -155,7 +155,15 @@ for item in manifest["files"]:
     destination = output_path.joinpath(*relative.parts)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(data)
-    report.append({"path": str(relative), "sha256": digest})
+    executable = item.get("executable", False)
+    if not isinstance(executable, bool):
+        raise SystemExit(f"invalid executable flag: {relative}")
+    if executable:
+        destination.chmod(0o755)
+    observed_executable = bool(destination.stat().st_mode & stat.S_IXUSR)
+    if observed_executable != executable:
+        raise SystemExit(f"harness executable observation drifted: {relative}")
+    report.append({"path": str(relative), "sha256": digest, "executable": observed_executable})
 report_path.write_text(json.dumps({"schema": manifest["schema"], "files": report}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 
