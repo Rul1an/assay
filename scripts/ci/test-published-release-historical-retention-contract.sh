@@ -109,8 +109,7 @@ case "\$cmd" in
     printf '%s\\n' "\$VERSION"
     ;;
   init)
-    mkdir -p "\$HOME/.config/assay" traces
-    printf 'home-config\\n' >"\$HOME/.config/assay/config.toml"
+    mkdir -p traces
     printf 'policy\\n' >policy.yaml
     printf 'config\\n' >eval.yaml
     printf 'trace\\n' >traces/hello.jsonl
@@ -888,6 +887,20 @@ expect_fixture_rejects_profile_event \
   '{"type":"file_open","path":"retained-v5.3-profile-event","timestamp":18446744073709551616}'
 good_root="$scratch/good"
 run_driver "$good_root" "$fixture"
+[[ -f "$good_root/home/.config/assay/config.toml" ]] \
+  || fail "driver did not create the retained home config independently of assay init"
+python3 - "$good_root/results/commands.ndjson" <<'PY' \
+  || fail "driver did not record the retained home config creation exactly once"
+import json, pathlib, sys
+rows = [
+    json.loads(line)
+    for line in pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+    if line
+]
+matches = [row for row in rows if row.get("name") == "create-home-config"]
+if len(matches) != 1 or matches[0].get("class") != "state_producing":
+    raise SystemExit(1)
+PY
 check_results "$good_root"
 expect_materialized_helper_modes
 "$V54_ASSAY" evidence verify-privileged-mcp-action \
@@ -1141,6 +1154,16 @@ for row in commands:
     paraphrased_rows.append(item)
 dump(paraphrased / "commands.ndjson", paraphrased_rows)
 
+false_home_config_argv = scratch / "false-home-config-argv"
+shutil.copytree(src, false_home_config_argv)
+false_home_config_rows = []
+for row in commands:
+    item = dict(row)
+    if item.get("name") == "create-home-config":
+        item["argv"] = ["-c", 'print("decoy")', item.get("argv", ["", "", ""])[-1]]
+    false_home_config_rows.append(item)
+dump(false_home_config_argv / "commands.ndjson", false_home_config_rows)
+
 undeclared = scratch / "undeclared-command"
 shutil.copytree(src, undeclared)
 dump(
@@ -1212,6 +1235,8 @@ expect_results_failure "empty-workflow-run-id" "$scratch/empty-workflow-run-id" 
 expect_results_failure "zero-workflow-run-attempt" "$scratch/zero-workflow-run-attempt" \
   "run-pin harness.workflow_run_attempt must be a positive integer"
 expect_results_failure "paraphrased-canary" "$scratch/paraphrased-canary" "canary row must record the argv that actually ran"
+expect_results_failure "false-home-config-argv" "$scratch/false-home-config-argv" \
+  "home config row must record the exact argv that actually ran"
 expect_results_failure "undeclared-command" "$scratch/undeclared-command" "undeclared command: arbitrary-undeclared"
 expect_results_failure "class-mismatch" "$scratch/class-mismatch" "command init class observe does not match manifest class state_producing"
 expect_results_failure "deleted-required-v0-bundle" "$scratch/deleted-required-results_v0.bundle" "required retained artifact missing: results/v0.bundle"
