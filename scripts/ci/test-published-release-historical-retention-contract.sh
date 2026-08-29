@@ -146,6 +146,7 @@ case "\$cmd" in
     bundle=""
     prev=""
     for arg in "\$@"; do
+      [[ -z "\$prev" || "\$arg" != --* ]] || exit 2
       case "\$prev" in
         out) out="\$arg"; prev=""; continue ;;
         profile) profile="\$arg"; prev=""; continue ;;
@@ -157,7 +158,7 @@ case "\$cmd" in
         --profile) prev="profile" ;;
         --decisions) prev="decisions" ;;
         --format|--profile-version) prev="skip" ;;
-        --*) ;;
+        --*) exit 2 ;;
         privileged-mcp-action) ;;
         *) [[ -n "\$bundle" ]] || bundle="\$arg" ;;
       esac
@@ -284,6 +285,14 @@ PY
   fi
   grep -F "FAIL: verify-v1-under-v5.4 exited 2, expected 0" "$case_root/output" >/dev/null \
     || fail "v1 decision fixture mutation $name missed the v5.4 verifier"
+}
+
+expect_v54_verify_argv_failure() {
+  local name="$1"
+  shift
+  if "$fixture/v5.4.0/bin/assay" evidence verify-privileged-mcp-action "$@"; then
+    fail "v5.4 fixture parser accepted malformed argv: $name"
+  fi
 }
 
 hosted_consumer_check() {
@@ -833,6 +842,15 @@ expect_materialized_helper_modes
 "$fixture/v5.4.0/bin/assay" evidence verify-privileged-mcp-action \
   --format json "$good_root/results/v1.bundle" --profile-version v1 \
   || fail "v5.4 fixture parser treated an option value as the positional bundle"
+expect_v54_verify_argv_failure \
+  "format-missing-value" \
+  --format --profile-version "$good_root/results/v1.bundle"
+expect_v54_verify_argv_failure \
+  "profile-version-missing-value" \
+  --profile-version --format "$good_root/results/v1.bundle"
+expect_v54_verify_argv_failure \
+  "unknown-option" \
+  --bogus "$good_root/results/v1.bundle"
 expect_v1_decision_fixture_failure \
   "v1-null-target-digest" \
   '"target_digest":"sha256:df4be9dfaa840f625ba03f5d577e6276a732f565c9527521138cfee1874546cf"' \
