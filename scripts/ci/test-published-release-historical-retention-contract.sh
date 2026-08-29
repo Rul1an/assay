@@ -450,8 +450,8 @@ if not found:
     raise SystemExit("inventory helper row missing from manifest")
 manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 text = checker_path.read_text(encoding="utf-8")
-old = 'if executable_paths != ["scripts/ci/release_archive_inventory.sh"]:'
-new = "if executable_paths != []:"
+old = 'V1_EXECUTABLE_PATHS = ["scripts/ci/release_archive_inventory.sh"]'
+new = "V1_EXECUTABLE_PATHS = []"
 if old in text:
     if text.count(old) != 1:
         raise SystemExit(f"executable_paths pin count: {text.count(old)}")
@@ -856,6 +856,90 @@ expect_results_failure "deleted-required-config" "$scratch/deleted-required-home
 expect_results_failure "deleted-required-policy" "$scratch/deleted-required-session_policy.yaml" "required retained artifact missing: session/policy.yaml"
 expect_results_failure "deleted-required-eval" "$scratch/deleted-required-session_eval.yaml" "required retained artifact missing: session/eval.yaml"
 expect_results_failure "deleted-required-trace" "$scratch/deleted-required-session_traces_hello.jsonl" "required retained artifact missing: session/traces/hello.jsonl"
+
+python3 - "$good_root/results" "$scratch" <<'PY'
+import json, pathlib, shutil, sys
+src, scratch = map(pathlib.Path, sys.argv[1:])
+HELPER = "scripts/ci/release_archive_inventory.sh"
+CONTROL = "scripts/ci/bounded_download.py"
+
+def copy_results(name):
+    dest = scratch / name
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(src, dest)
+    return dest
+
+def load_report(dest):
+    path = dest / "harness-files.json"
+    return path, json.loads(path.read_text(encoding="utf-8"))
+
+def write_report(path, report):
+    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+def set_flag(report, path, value):
+    found = False
+    for row in report.get("files") or []:
+        if row.get("path") == path:
+            row["executable"] = value
+            found = True
+    if not found:
+        raise SystemExit(f"missing harness-files row: {path}")
+
+dest = copy_results("harness-files-true-to-false")
+path, report = load_report(dest)
+set_flag(report, HELPER, False)
+write_report(path, report)
+
+dest = copy_results("harness-files-false-to-true")
+path, report = load_report(dest)
+set_flag(report, CONTROL, True)
+write_report(path, report)
+
+dest = copy_results("harness-files-missing")
+(dest / "harness-files.json").unlink()
+
+dest = copy_results("harness-files-malformed-flag")
+path, report = load_report(dest)
+set_flag(report, HELPER, "true")
+write_report(path, report)
+
+dest = copy_results("harness-files-duplicate-path")
+path, report = load_report(dest)
+files = list(report.get("files") or [])
+helper = next(row for row in files if row.get("path") == HELPER)
+files.append(dict(helper))
+report["files"] = files
+write_report(path, report)
+
+dest = copy_results("harness-files-unknown-path")
+path, report = load_report(dest)
+files = list(report.get("files") or [])
+files.append({"path": "scripts/ci/not-in-manifest.sh", "sha256": "0" * 64, "executable": False})
+report["files"] = files
+write_report(path, report)
+
+dest = copy_results("harness-files-missing-path")
+path, report = load_report(dest)
+report["files"] = [row for row in report.get("files") or [] if row.get("path") != HELPER]
+write_report(path, report)
+PY
+
+expect_results_failure "harness-files-true-to-false" "$scratch/harness-files-true-to-false" \
+  "harness executable observation drifted"
+expect_results_failure "harness-files-false-to-true" "$scratch/harness-files-false-to-true" \
+  "harness executable observation drifted"
+expect_results_failure "harness-files-missing" "$scratch/harness-files-missing" \
+  "harness-files.json is unreadable"
+expect_results_failure "harness-files-malformed-flag" "$scratch/harness-files-malformed-flag" \
+  "invalid executable flag"
+expect_results_failure "harness-files-duplicate-path" "$scratch/harness-files-duplicate-path" \
+  "harness-files.json path is duplicated"
+expect_results_failure "harness-files-unknown-path" "$scratch/harness-files-unknown-path" \
+  "harness-files.json path is unknown"
+expect_results_failure "harness-files-missing-path" "$scratch/harness-files-missing-path" \
+  "harness-files.json missing path"
+
 
 python3 - "$MANIFEST" "$good_root/results" "$scratch" <<'PY'
 import json, pathlib, shutil, sys

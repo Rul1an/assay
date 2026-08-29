@@ -25,6 +25,7 @@ INITIAL_ACTIVATION_REF = "initial"
 SAFE_RELEASE_TAG = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
 HEAD_SHA = re.compile(r"^[0-9a-f]{40}$")
 DRIVER_REL = "scripts/ci/published-release-historical-retention.sh"
+V1_EXECUTABLE_PATHS = ["scripts/ci/release_archive_inventory.sh"]
 V1_RELEASE_PAIR = ("v5.3.0", "v5.4.0")
 V1_COMMAND_CLASSES = {
     "state_producing": [
@@ -399,6 +400,83 @@ def ndjson_rows(path: Path, problems: list[str], label: str) -> list[dict]:
     return rows
 
 
+
+def executable_mapping(
+    files,
+    problems: list[str],
+    *,
+    origin: str,
+    allowed_paths: list[str] | None = None,
+    require_boolean: bool = False,
+) -> dict[str, bool] | None:
+    """Normalize path -> executable bool. One mapping for source and results."""
+    if not isinstance(files, list) or not files:
+        problems.append(f"{origin} has no files")
+        return None
+    mapping: dict[str, bool] = {}
+    for row in files:
+        if not isinstance(row, dict) or not isinstance(row.get("path"), str):
+            problems.append(f"{origin} row has no path")
+            continue
+        path = row["path"]
+        if path in mapping:
+            problems.append(f"{origin} path is duplicated: {path}")
+            continue
+        if allowed_paths is not None and path not in allowed_paths:
+            problems.append(f"{origin} path is unknown: {path}")
+            continue
+        flag = row.get("executable", False)
+        if "executable" in row and not isinstance(row.get("executable"), bool):
+            problems.append(f"invalid executable flag: {path}")
+            continue
+        if require_boolean and "executable" not in row:
+            problems.append(f"invalid executable flag: {path}")
+            continue
+        if require_boolean and not isinstance(flag, bool):
+            problems.append(f"invalid executable flag: {path}")
+            continue
+        mapping[path] = flag is True
+    if allowed_paths is not None:
+        for path in allowed_paths:
+            if path not in mapping:
+                problems.append(f"{origin} missing path: {path}")
+    return mapping
+
+
+def require_declared_executable_surface(mapping: dict[str, bool], problems: list[str]) -> None:
+    observed = [path for path, flag in mapping.items() if flag]
+    if observed != V1_EXECUTABLE_PATHS:
+        problems.append("harness executable surface drifted")
+
+
+def validate_harness_files_observation(results: Path, manifest: dict, problems: list[str]) -> None:
+    files = manifest.get("files")
+    declared = executable_mapping(files, problems, origin="harness manifest")
+    allowed = [
+        row["path"]
+        for row in files
+        if isinstance(files, list) and isinstance(row, dict) and isinstance(row.get("path"), str)
+    ] if isinstance(files, list) else []
+    report_path = results / "harness-files.json"
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        problems.append(f"harness-files.json is unreadable: {error}")
+        return
+    if not isinstance(report, dict):
+        problems.append("harness-files.json is not an object")
+        return
+    observed = executable_mapping(
+        report.get("files"),
+        problems,
+        origin="harness-files.json",
+        allowed_paths=allowed or None,
+        require_boolean=True,
+    )
+    if declared is not None and observed is not None and declared != observed:
+        problems.append("harness executable observation drifted")
+
+
 def validate_manifest_files(
     manifest: dict,
     source_root: Path,
@@ -442,16 +520,9 @@ def validate_manifest_files(
     ]
     if paths != expected:
         problems.append("harness manifest must list exactly the reviewed harness inputs")
-    for row in files:
-        if isinstance(row, dict) and "executable" in row and not isinstance(row.get("executable"), bool):
-            problems.append(f"invalid executable flag: {row.get('path')}")
-    executable_paths = [
-        row.get("path")
-        for row in files
-        if isinstance(row, dict) and row.get("executable") is True
-    ]
-    if executable_paths != ["scripts/ci/release_archive_inventory.sh"]:
-        problems.append("harness executable surface drifted")
+    declared = executable_mapping(files, problems, origin="harness manifest")
+    if declared is not None:
+        require_declared_executable_surface(declared, problems)
 
 
 def validate_source_contract(
@@ -796,6 +867,8 @@ def validate_results(results: Path, manifest_path: Path, expected_head_sha: str)
         bind_run_pin_harness(pin, expected_head_sha, driver_digest, problems)
     if driver_digest is None or len(problems) > binding_problems:
         return problems
+
+    validate_harness_files_observation(results, manifest, problems)
 
     if not specs or from_tag is None or to_tag is None:
         return problems
