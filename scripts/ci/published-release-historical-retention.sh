@@ -137,7 +137,7 @@ mkdir -p "$install_root" "$harness_root" "$session_root" "$results" "$run_root/h
 : >"$ledger_file"
 
 "$PYTHON_BIN" - "$manifest" "$ROOT" "$harness_root" "$results/harness-files.json" <<'PY'
-import hashlib, json, pathlib, shutil, sys
+import hashlib, json, pathlib, shutil, stat, sys
 manifest_path, root_path, output_path, report_path = map(pathlib.Path, sys.argv[1:])
 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 if manifest.get("schema") != "assay.published_release_historical_retention.harness.v1":
@@ -155,7 +155,15 @@ for item in manifest["files"]:
     destination = output_path.joinpath(*relative.parts)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(data)
-    report.append({"path": str(relative), "sha256": digest})
+    executable = item.get("executable", False)
+    if not isinstance(executable, bool):
+        raise SystemExit(f"invalid executable flag: {relative}")
+    if executable:
+        destination.chmod(0o755)
+    observed_executable = bool(destination.stat().st_mode & stat.S_IXUSR)
+    if observed_executable != executable:
+        raise SystemExit(f"harness executable observation drifted: {relative}")
+    report.append({"path": str(relative), "sha256": digest, "executable": observed_executable})
 report_path.write_text(json.dumps({"schema": manifest["schema"], "files": report}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 
@@ -381,6 +389,15 @@ export PATH="$active_link/bin:/usr/bin:/bin"
 
 canary_python="$(command -v "$PYTHON_BIN")"
 [[ -n "$canary_python" ]] || fail "python interpreter is missing"
+home_config="$HOME/.config/assay/config.toml"
+home_config_argv=(
+  "$canary_python" -c \
+  'import pathlib,sys; path=pathlib.Path(sys.argv[1]); path.parent.mkdir(parents=True, exist_ok=True); path.write_text("# historical-retention harness input\n", encoding="utf-8")' \
+  "$home_config"
+)
+"${home_config_argv[@]}"
+record_command "create-home-config" "state_producing" 0 /dev/null /dev/null "" \
+  "${home_config_argv[@]}"
 "$canary_python" -c 'import os,pathlib,sys; pathlib.Path(sys.argv[1]).write_bytes(os.urandom(32))' "$canary_path"
 record_command "create-journey-canary" "state_producing" 0 /dev/null /dev/null "" \
   "$canary_python" -c 'import os,pathlib,sys; pathlib.Path(sys.argv[1]).write_bytes(os.urandom(32))' "$canary_path"
@@ -390,8 +407,20 @@ run_capture "init" "state_producing" 0 "$results/init.json" "$results/init.stder
   "$active_link/bin/assay" init --preset dev --hello-trace --format json
 run_capture "migrate-check-v5.3" "observe" 0 "$results/migrate-v53.txt" "$results/migrate-v53.stderr" \
   "$active_link/bin/assay" migrate --check --config eval.yaml
+run_capture "create-profile-event-v5.3" "state_producing" 0 \
+  "$results/create-profile-event-v53.stdout" "$results/create-profile-event-v53.stderr" \
+  "$canary_python" -c \
+  'import pathlib,sys; pathlib.Path(sys.argv[1]).write_text("{\"type\":\"file_open\",\"path\":\"retained-v5.3-profile-event\",\"timestamp\":1}\n", encoding="utf-8")' \
+  profile-events.jsonl
+run_capture "profile-init-v5.3" "state_producing" 0 \
+  "$results/profile-init-v53.stdout" "$results/profile-init-v53.stderr" \
+  "$active_link/bin/assay" profile init --output v0-profile.yaml --name historical-retention
+run_capture "profile-update-v5.3" "state_producing" 0 \
+  "$results/profile-update-v53.stdout" "$results/profile-update-v53.stderr" \
+  "$active_link/bin/assay" profile update --profile v0-profile.yaml \
+  --input profile-events.jsonl --run-id v5.3.0-initial --strict
 run_capture "export-v0-bundle" "state_producing" 0 "$results/export-v0.stdout" "$results/export-v0.stderr" \
-  "$active_link/bin/assay" evidence export --profile eval.yaml -o "$results/v0.bundle"
+  "$active_link/bin/assay" evidence export --profile v0-profile.yaml -o "$results/v0.bundle"
 explicit_status=0
 "$active_link/bin/assay" evidence verify-privileged-mcp-action "$results/v0.bundle" --format json --profile-version v1 \
   >"$results/explicit-v1.json" 2>"$results/explicit-v1.stderr" || explicit_status=$?
@@ -437,7 +466,7 @@ v0_status=0
   >"$results/verify-v0-v54.json" 2>"$results/verify-v0-v54.stderr" || v0_status=$?
 record_command "verify-v0-under-v5.4" "observe" "$v0_status" "$results/verify-v0-v54.json" "$results/verify-v0-v54.stderr" "" \
   "$active_link/bin/assay" evidence verify "$results/v0.bundle"
-printf '%s\n' '{"schema":"assay.enforcement_decision.v0","caller":{"id":"historical"},"tool":{"name":"github.add_deploy_key","action_class":"github_deploy_key"},"action":{"verb":"create","resource_type":"github_deploy_key","target":null,"target_digest":null},"decision":"deny","reason":"no_declared_allowance","fail_closed":true,"drift_state":"not_evaluated","credential_alias":"gh-deploy","non_claims":[]}' >"$results/decisions.ndjson"
+printf '%s\n' '{"schema":"assay.enforcement_decision.v0","caller":{"id":"ci-agent"},"tool":{"name":"github.add_deploy_key","action_class":"github_deploy_key"},"action":{"verb":"create","resource_type":"github_deploy_key","target":{"provider":"github","owner":"acme"},"target_digest":"sha256:df4be9dfaa840f625ba03f5d577e6276a732f565c9527521138cfee1874546cf"},"decision":"deny","reason":"classification_incomplete","fail_closed":true,"drift_state":"not_evaluated","credential_alias":"gh-deploy","non_claims":["policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)","an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)","credential referenced by alias only, never the token or declared scopes","deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict","not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)"]}' >"$results/decisions.ndjson"
 run_capture "import-v1-bundle" "state_producing" 0 "$results/import-v1.stdout" "$results/import-v1.stderr" \
   "$active_link/bin/assay" evidence import privileged-mcp-action --decisions "$results/decisions.ndjson" --bundle-out "$results/v1.bundle"
 run_capture "verify-v1-under-v5.4" "observe" 0 "$results/verify-v1.json" "$results/verify-v1.stderr" \

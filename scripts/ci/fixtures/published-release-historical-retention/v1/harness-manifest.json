@@ -25,8 +25,12 @@
   },
   "command_classes": {
     "state_producing": [
+      "create-home-config",
       "create-journey-canary",
+      "create-profile-event-v5.3",
       "init",
+      "profile-init-v5.3",
+      "profile-update-v5.3",
       "export-v0-bundle",
       "import-v1-bundle",
       "stage-prefix-v5.3.0",
@@ -53,6 +57,8 @@
     "home/.config/assay/config.toml",
     "session/policy.yaml",
     "session/eval.yaml",
+    "session/profile-events.jsonl",
+    "session/v0-profile.yaml",
     "session/traces/hello.jsonl",
     "results/v0.bundle",
     "results/v1.bundle"
@@ -64,11 +70,16 @@
     },
     {
       "path": "scripts/ci/published-release-historical-retention.sh",
-      "sha256": "96ce8f143caf835de61446d9a795f36cb80a56c59b6c763839a4c3b3eb16667e"
+      "sha256": "96d96f7fa39a244697f6575f16c924721503f2cfa7415d13f863a4da0308916b"
     },
     {
       "path": "scripts/ci/release_attestation_enforce.sh",
       "sha256": "01bfa586b826fa74838c58e765f40982537f8ea14325b803fc9183fcf4e8277f"
+    },
+    {
+      "path": "scripts/ci/release_archive_inventory.sh",
+      "sha256": "3ac3604dc26b843066751a50d9c25c8e780ac6e5e8bcf9645b672af27f161afb",
+      "executable": true
     },
     {
       "path": "scripts/ci/safe_extract_release_archive.py",

@@ -19,6 +19,56 @@ fail() {
 [[ -f "$WORKFLOW" ]] || fail "missing historical-retention workflow"
 [[ -f "$DRIVER" ]] || fail "missing historical-retention driver"
 [[ -f "$MANIFEST" ]] || fail "missing historical-retention harness manifest"
+V54_TAG="$(python3 - "$MANIFEST" <<'PY'
+import json
+import pathlib
+import sys
+
+tag = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))["to_tag"]
+if not isinstance(tag, str) or not tag.startswith("v") or not tag[1:]:
+    raise SystemExit("historical-retention to_tag must be a version tag")
+print(tag)
+PY
+)"
+V54_VERSION="${V54_TAG#v}"
+
+python3 - "$CHECKER" <<'PY'
+import importlib.util
+import pathlib
+import sys
+
+checker = pathlib.Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location("historical_retention_checker", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+limit = module.MAX_HARNESS_FILES_BYTES
+requested = []
+
+class GuardedStream:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self, size=-1):
+        requested.append(size)
+        if size != limit + 1:
+            raise AssertionError(f"bounded JSON reader requested {size}, expected {limit + 1}")
+        return b"{}"
+
+class ProbePath:
+    def open(self, mode):
+        if mode != "rb":
+            raise AssertionError(f"bounded JSON reader opened in {mode!r}")
+        return GuardedStream()
+
+if module.read_bounded_json(ProbePath(), "probe.json", limit) != {}:
+    raise SystemExit("bounded JSON reader changed the valid object")
+if requested != [limit + 1]:
+    raise SystemExit(f"bounded JSON reader issued unexpected reads: {requested}")
+PY
 
 python3 "$CHECKER" \
   --workflow "$WORKFLOW" \
@@ -28,6 +78,18 @@ python3 "$CHECKER" \
 
 scratch="$(mktemp -d)"
 trap 'chmod -R u+w "$scratch" 2>/dev/null || true; rm -rf "$scratch"' EXIT
+V54_DECISION_B64="$(python3 - "$ROOT/crates/assay-mcp-server/tests/fixtures/enforcement_decision_contract.v0.json" <<'PY'
+import base64
+import json
+import pathlib
+import sys
+
+fixture = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+record = fixture["records"][1]["record"]
+canonical = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+print(base64.b64encode(canonical.encode("utf-8")).decode("ascii"))
+PY
+)"
 
 write_stub_assay() {
   local dest="$1" version="$2"
@@ -47,8 +109,7 @@ case "\$cmd" in
     printf '%s\\n' "\$VERSION"
     ;;
   init)
-    mkdir -p "\$HOME/.config/assay" traces
-    printf 'home-config\\n' >"\$HOME/.config/assay/config.toml"
+    mkdir -p traces
     printf 'policy\\n' >policy.yaml
     printf 'config\\n' >eval.yaml
     printf 'trace\\n' >traces/hello.jsonl
@@ -58,31 +119,126 @@ case "\$cmd" in
     echo "Config eval.yaml is clean (already migrated)."
     exit 0
     ;;
-  evidence)
+  profile)
     sub="\${1:-}"
     shift || true
-    out=""
+    profile=""
+    input=""
     prev=""
     for arg in "\$@"; do
-      if [[ "\$prev" == "-o" || "\$prev" == "--out" || "\$prev" == "--bundle-out" ]]; then
-        out="\$arg"
+      if [[ "\$prev" == "--output" || "\$prev" == "--profile" ]]; then
+        profile="\$arg"
+      elif [[ "\$prev" == "--input" || "\$prev" == "-i" ]]; then
+        input="\$arg"
       fi
       prev="\$arg"
     done
     case "\$sub" in
+      init)
+        [[ -n "\$profile" ]] || exit 2
+        printf 'version: "1.0"\nname: historical-retention\ntotal_runs: 0\nentries: {}\n' >"\$profile"
+        ;;
+      update)
+        [[ -f "\$profile" && -f "\$input" ]] || exit 2
+        event_path="\$(python3 -c 'import json,sys; row=json.loads(open(sys.argv[1], encoding="utf-8").readline()); timestamp=row.get("timestamp", 0); valid=row.get("type") == "file_open" and isinstance(row.get("path"), str) and bool(row["path"]) and type(timestamp) is int and 0 <= timestamp <= 2**64 - 1; sys.exit(2) if not valid else print(row["path"])' "\$input")" || exit 2
+        printf 'updated: true\nprofile_entry: %s\n' "\$event_path" >>"\$profile"
+        ;;
+      *)
+        exit 2
+        ;;
+    esac
+    ;;
+  evidence)
+    sub="\${1:-}"
+    shift || true
+    out=""
+    profile=""
+    decisions=""
+    bundle=""
+    format=""
+    profile_version=""
+    mode=""
+    out_seen=0
+    profile_seen=0
+    decisions_seen=0
+    format_seen=0
+    profile_version_seen=0
+    prev=""
+    for arg in "\$@"; do
+      [[ -z "\$prev" || "\$arg" != --* ]] || exit 2
+      case "\$prev" in
+        out) out="\$arg"; prev=""; continue ;;
+        profile) profile="\$arg"; prev=""; continue ;;
+        decisions) decisions="\$arg"; prev=""; continue ;;
+        format) format="\$arg"; prev=""; continue ;;
+        profile_version) profile_version="\$arg"; prev=""; continue ;;
+      esac
+      case "\$arg" in
+        -o|--out|--bundle-out)
+          [[ "\$out_seen" -eq 0 ]] || exit 2
+          out_seen=1
+          prev="out"
+          ;;
+        --profile)
+          [[ "\$profile_seen" -eq 0 ]] || exit 2
+          profile_seen=1
+          prev="profile"
+          ;;
+        --decisions)
+          [[ "\$decisions_seen" -eq 0 ]] || exit 2
+          decisions_seen=1
+          prev="decisions"
+          ;;
+        --format)
+          [[ "\$format_seen" -eq 0 ]] || exit 2
+          format_seen=1
+          prev="format"
+          ;;
+        --profile-version)
+          [[ "\$profile_version_seen" -eq 0 ]] || exit 2
+          profile_version_seen=1
+          prev="profile_version"
+          ;;
+        --*) exit 2 ;;
+        privileged-mcp-action)
+          [[ "\$sub" == "import" && -z "\$mode" ]] || exit 2
+          mode="\$arg"
+          ;;
+        *)
+          [[ -z "\$bundle" ]] || exit 2
+          bundle="\$arg"
+          ;;
+      esac
+    done
+    [[ -z "\$prev" ]] || exit 2
+    case "\$sub" in
       export)
-        [[ -n "\$out" ]] || exit 2
+        [[ -n "\$out" && -f "\$profile" && -z "\$decisions\$bundle\$format\$profile_version\$mode" ]] || exit 2
+        grep -F 'version: "1.0"' "\$profile" >/dev/null || exit 2
+        grep -F 'updated: true' "\$profile" >/dev/null || exit 2
+        grep -F 'profile_entry: retained-v5.3-profile-event' "\$profile" >/dev/null || exit 2
         printf 'v0-bundle\\n' >"\$out"
         ;;
       verify)
+        [[ -f "\$bundle" && -z "\$out\$profile\$decisions\$format\$profile_version\$mode" ]] || exit 2
         exit 0
         ;;
       import)
-        [[ -n "\$out" ]] || exit 2
-        printf 'v1-bundle\\n' >"\$out"
+        [[ -n "\$out" && -f "\$decisions" && "\$mode" == "privileged-mcp-action" && -z "\$profile\$bundle\$format\$profile_version" ]] || exit 2
+        cp "\$decisions" "\$out"
         ;;
       verify-privileged-mcp-action)
-        exit 0
+        [[ "\$VERSION" == "$V54_VERSION" && -f "\$bundle" && "\$format" == "json" && "\$profile_version" == "v1" && -z "\$out\$profile\$decisions\$mode" ]] || exit 2
+        python3 - "\$bundle" <<'PY'
+import base64
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    rows = [json.loads(line) for line in stream if line.strip()]
+expected = json.loads(base64.b64decode("$V54_DECISION_B64").decode("utf-8"))
+raise SystemExit(0 if rows == [expected] else 2)
+PY
         ;;
       *)
         exit 2
@@ -100,7 +256,24 @@ STUB
 build_fixture_root() {
   local fixture="$1"
   write_stub_assay "$fixture/v5.3.0/bin/assay" "5.3.0"
-  write_stub_assay "$fixture/v5.4.0/bin/assay" "5.4.0"
+  write_stub_assay "$fixture/$V54_TAG/bin/assay" "$V54_VERSION"
+}
+
+expect_fixture_rejects_profile_event() {
+  local name="$1" event="$2"
+  local case_root="$scratch/$name"
+  local assay="$case_root/bin/assay"
+  mkdir -p "$case_root/run"
+  write_stub_assay "$assay" "5.3.0"
+  (
+    cd "$case_root/run"
+    printf '%s\n' "$event" >profile-events.jsonl
+    "$assay" profile init --output v0-profile.yaml --name historical-retention
+    if "$assay" profile update --profile v0-profile.yaml --input profile-events.jsonl \
+        --run-id v5.3.0-initial --strict; then
+      fail "fixture accepted an invalid profile event: $name"
+    fi
+  )
 }
 
 run_driver() {
@@ -113,6 +286,62 @@ run_driver() {
     --workflow-run-attempt 1 \
     --run-root "$run_root" \
     --fixture-root "$fixture"
+}
+
+expect_v1_decision_fixture_failure() {
+  local name="$1" old="$2" new="$3"
+  local case_root="$scratch/$name"
+  local repo_root="$case_root/repo"
+  mkdir -p "$repo_root/scripts/ci" "$repo_root/.github/workflows"
+  ln -s "$WORKFLOW" "$repo_root/.github/workflows/published-release-historical-retention.yml"
+  ln -s "$ROOT/scripts/ci/release_attestation_enforce.sh" "$repo_root/scripts/ci/release_attestation_enforce.sh"
+  ln -s "$ROOT/scripts/ci/release_archive_inventory.sh" "$repo_root/scripts/ci/release_archive_inventory.sh"
+  ln -s "$ROOT/scripts/ci/safe_extract_release_archive.py" "$repo_root/scripts/ci/safe_extract_release_archive.py"
+  ln -s "$ROOT/scripts/ci/bounded_download.py" "$repo_root/scripts/ci/bounded_download.py"
+  cp "$DRIVER" "$repo_root/scripts/ci/published-release-historical-retention.sh"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$repo_root/scripts/ci/published-release-historical-retention.sh" \
+    "$case_root/manifest.json" "$old" "$new" <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+driver, manifest_path = map(pathlib.Path, sys.argv[1:3])
+old, new = sys.argv[3:]
+text = driver.read_text(encoding="utf-8")
+if text.count(old) != 1:
+    raise SystemExit(f"decision fixture mutation anchor count: {text.count(old)}")
+driver.write_text(text.replace(old, new, 1), encoding="utf-8")
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+for row in manifest["files"]:
+    if row["path"] == "scripts/ci/published-release-historical-retention.sh":
+        row["sha256"] = hashlib.sha256(driver.read_bytes()).hexdigest()
+        break
+else:
+    raise SystemExit("driver row missing from manifest")
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  if IMAGE_OS=ubuntu24 IMAGE_VERSION=20260824.1.0 RUNNER_OS=Linux RUNNER_ARCH=X64 \
+    bash "$repo_root/scripts/ci/published-release-historical-retention.sh" \
+      --manifest "$case_root/manifest.json" \
+      --harness-sha "$EXPECTED_HEAD_SHA" \
+      --workflow-run-id test-historical \
+      --workflow-run-attempt 1 \
+      --run-root "$case_root/run" \
+      --fixture-root "$fixture" >"$case_root/output" 2>&1; then
+    fail "v1 decision fixture mutation stayed green: $name"
+  fi
+  grep -F "FAIL: verify-v1-under-v5.4 exited 2, expected 0" "$case_root/output" >/dev/null \
+    || fail "v1 decision fixture mutation $name missed the v5.4 verifier"
+}
+
+expect_v54_verify_argv_failure() {
+  local name="$1"
+  shift
+  if "$V54_ASSAY" evidence verify-privileged-mcp-action "$@"; then
+    fail "v5.4 fixture parser accepted malformed argv: $name"
+  fi
 }
 
 hosted_consumer_check() {
@@ -315,6 +544,265 @@ PY
     || fail "hook-decoy $helper_path missed expected guard: $expected"
 }
 
+expect_materialized_helper_modes() {
+  local helper="$good_root/harness/scripts/ci/release_archive_inventory.sh"
+  local control="$good_root/harness/scripts/ci/bounded_download.py"
+  local report="$good_root/results/harness-files.json"
+  [[ -f "$helper" ]] || fail "materialized inventory helper is missing"
+  [[ -f "$control" ]] || fail "materialized non-executable control is missing"
+  [[ -f "$report" ]] || fail "harness-files.json is missing"
+  [[ -x "$helper" ]] || fail "declared executable helper materialized non-executable"
+  [[ ! -x "$control" ]] || fail "non-executable control became executable"
+  python3 - "$report" <<'PY'
+import json, pathlib, sys
+report = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+files = report.get("files")
+if not isinstance(files, list):
+    raise SystemExit("harness-files.json has no files")
+by_path = {row.get("path"): row for row in files if isinstance(row, dict)}
+helper = by_path.get("scripts/ci/release_archive_inventory.sh")
+control = by_path.get("scripts/ci/bounded_download.py")
+if not helper or helper.get("executable") is not True:
+    raise SystemExit("inventory helper executable report drifted")
+if not control or control.get("executable") is not False:
+    raise SystemExit("non-executable control executable report drifted")
+PY
+}
+
+expect_driver_neutralized_chmod() {
+  local case_root="$scratch/neutralized-chmod"
+  local run_root="$case_root/run"
+  local repo_root="$case_root/repo"
+  local expected="harness executable observation drifted"
+  mkdir -p "$repo_root/scripts/ci" "$repo_root/.github/workflows"
+  ln -s "$ROOT/.github/workflows/published-release-historical-retention.yml" \
+    "$repo_root/.github/workflows/published-release-historical-retention.yml"
+  ln -s "$ROOT/scripts/ci/release_attestation_enforce.sh" "$repo_root/scripts/ci/release_attestation_enforce.sh"
+  ln -s "$ROOT/scripts/ci/release_archive_inventory.sh" "$repo_root/scripts/ci/release_archive_inventory.sh"
+  ln -s "$ROOT/scripts/ci/safe_extract_release_archive.py" "$repo_root/scripts/ci/safe_extract_release_archive.py"
+  ln -s "$ROOT/scripts/ci/bounded_download.py" "$repo_root/scripts/ci/bounded_download.py"
+  cp "$DRIVER" "$repo_root/scripts/ci/published-release-historical-retention.sh"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$repo_root/scripts/ci/published-release-historical-retention.sh" "$case_root/manifest.json" <<'PY'
+import hashlib, json, pathlib, sys
+driver, manifest_path = map(pathlib.Path, sys.argv[1:])
+text = driver.read_text(encoding="utf-8")
+old = "    if executable:\n"
+new = "    if executable and False:\n"
+if text.count(old) != 1:
+    raise SystemExit(f"chmod guard count: {text.count(old)}")
+driver.write_text(text.replace(old, new, 1), encoding="utf-8")
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+digest = hashlib.sha256(driver.read_bytes()).hexdigest()
+found = False
+for row in manifest.get("files") or []:
+    if row.get("path") == "scripts/ci/published-release-historical-retention.sh":
+        row["sha256"] = digest
+        found = True
+if not found:
+    raise SystemExit("driver row missing from manifest")
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  if IMAGE_OS=ubuntu24 IMAGE_VERSION=20260824.1.0 RUNNER_OS=Linux RUNNER_ARCH=X64 \
+    bash "$repo_root/scripts/ci/published-release-historical-retention.sh" \
+      --manifest "$case_root/manifest.json" \
+      --harness-sha "$EXPECTED_HEAD_SHA" \
+      --workflow-run-id test-historical \
+      --workflow-run-attempt 1 \
+      --run-root "$run_root" \
+      --fixture-root "$fixture" >"$case_root/driver.out" 2>&1; then
+    fail "driver mutation stayed green: neutralized-chmod"
+  fi
+  grep -F "$expected" "$case_root/driver.out" >/dev/null \
+    || fail "neutralized-chmod missed expected driver guard: $expected"
+  if [[ -f "$run_root/results/harness-files.json" ]]; then
+    python3 - "$run_root/results/harness-files.json" <<'PY' || fail "neutralized-chmod wrote a false executable report"
+import json, pathlib, sys
+report = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+for row in report.get("files") or []:
+    if row.get("path") == "scripts/ci/release_archive_inventory.sh" and row.get("executable") is True:
+        raise SystemExit("retained report repeated the declaration")
+PY
+  fi
+}
+
+
+expect_driver_report_digest_lie() {
+  local case_root="$scratch/report-digest-lie"
+  local run_root="$case_root/run"
+  local repo_root="$case_root/repo"
+  local report="$run_root/results/harness-files.json"
+  local expected="harness files observation drifted"
+  mkdir -p "$repo_root/scripts/ci" "$repo_root/.github/workflows"
+  ln -s "$ROOT/.github/workflows/published-release-historical-retention.yml" \
+    "$repo_root/.github/workflows/published-release-historical-retention.yml"
+  ln -s "$ROOT/scripts/ci/release_attestation_enforce.sh" "$repo_root/scripts/ci/release_attestation_enforce.sh"
+  ln -s "$ROOT/scripts/ci/release_archive_inventory.sh" "$repo_root/scripts/ci/release_archive_inventory.sh"
+  ln -s "$ROOT/scripts/ci/safe_extract_release_archive.py" "$repo_root/scripts/ci/safe_extract_release_archive.py"
+  ln -s "$ROOT/scripts/ci/bounded_download.py" "$repo_root/scripts/ci/bounded_download.py"
+  cp "$DRIVER" "$repo_root/scripts/ci/published-release-historical-retention.sh"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$repo_root/scripts/ci/published-release-historical-retention.sh" "$case_root/manifest.json" <<'PY'
+import hashlib, json, pathlib, sys
+driver, manifest_path = map(pathlib.Path, sys.argv[1:])
+text = driver.read_text(encoding="utf-8")
+old = '"sha256": digest'
+new = '"sha256": "0000000000000000000000000000000000000000000000000000000000000000"'
+if text.count(old) != 1:
+    raise SystemExit(f"report digest field count: {text.count(old)}")
+driver.write_text(text.replace(old, new, 1), encoding="utf-8")
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+digest = hashlib.sha256(driver.read_bytes()).hexdigest()
+found = False
+for row in manifest.get("files") or []:
+    if row.get("path") == "scripts/ci/published-release-historical-retention.sh":
+        row["sha256"] = digest
+        found = True
+if not found:
+    raise SystemExit("driver row missing from manifest")
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  local driver_rc=0
+  IMAGE_OS=ubuntu24 IMAGE_VERSION=20260824.1.0 RUNNER_OS=Linux RUNNER_ARCH=X64 \
+    bash "$repo_root/scripts/ci/published-release-historical-retention.sh" \
+      --manifest "$case_root/manifest.json" \
+      --harness-sha "$EXPECTED_HEAD_SHA" \
+      --workflow-run-id test-historical \
+      --workflow-run-attempt 1 \
+      --run-root "$run_root" \
+      --fixture-root "$fixture" >"$case_root/driver.out" 2>&1 || driver_rc=$?
+  [[ "$driver_rc" -eq 0 ]] \
+    || fail "report-digest-lie driver prerequisite failed rc=$driver_rc"
+  [[ -f "$report" ]] || fail "report-digest-lie did not write harness-files.json"
+  python3 - "$report" <<'PY' || fail "report-digest-lie did not write the zeroed report digest"
+import json, pathlib, sys
+report = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+helper = "scripts/ci/release_archive_inventory.sh"
+found = False
+for row in report.get("files") or []:
+    if row.get("path") == helper:
+        found = True
+        if row.get("sha256") != "0" * 64:
+            raise SystemExit("retained report kept the observed digest")
+if not found:
+    raise SystemExit("retained report missing inventory helper")
+PY
+  local checker_rc=0
+  python3 "$CHECKER" \
+    --results "$run_root/results" \
+    --manifest "$case_root/manifest.json" \
+    --expected-head-sha "$EXPECTED_HEAD_SHA" >"$case_root/checker.out" 2>&1 || checker_rc=$?
+  [[ "$checker_rc" -ne 0 ]] || fail "driver mutation stayed green: report-digest-lie"
+  grep -F "$expected" "$case_root/checker.out" >/dev/null \
+    || fail "report-digest-lie missed expected checker guard: $expected"
+}
+
+
+expect_inventory_executable_flag_removed() {
+  local case_root="$scratch/inventory-executable-flag-removed"
+  local expected="harness executable surface drifted"
+  mkdir -p "$case_root"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$case_root/manifest.json" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+manifest = json.loads(path.read_text(encoding="utf-8"))
+helper = "scripts/ci/release_archive_inventory.sh"
+found = False
+for row in manifest.get("files") or []:
+    if row.get("path") == helper:
+        row["executable"] = False
+        found = True
+if not found:
+    raise SystemExit("inventory helper row missing from manifest")
+path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  if python3 "$CHECKER" \
+      --workflow "$WORKFLOW" \
+      --driver "$DRIVER" \
+      --manifest "$case_root/manifest.json" \
+      --source-root "$ROOT" >"$case_root/output" 2>&1; then
+    fail "source mutation stayed green: inventory-executable-flag-removed"
+  fi
+  grep -F "$expected" "$case_root/output" >/dev/null \
+    || fail "inventory-executable-flag-removed missed expected guard: $expected"
+}
+
+expect_coordinated_executable_escape() {
+  local case_root="$scratch/coordinated-executable-escape"
+  local expected="harness executable surface drifted"
+  mkdir -p "$case_root"
+  cp "$WORKFLOW" "$case_root/workflow.yml"
+  cp "$DRIVER" "$case_root/driver.sh"
+  cp "$CHECKER" "$case_root/checker.py"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$case_root/manifest.json" "$case_root/checker.py" <<'PY'
+import json, pathlib, sys
+manifest_path, checker_path = map(pathlib.Path, sys.argv[1:])
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+helper = "scripts/ci/release_archive_inventory.sh"
+found = False
+for row in manifest.get("files") or []:
+    if row.get("path") == helper:
+        row["executable"] = False
+        found = True
+if not found:
+    raise SystemExit("inventory helper row missing from manifest")
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+text = checker_path.read_text(encoding="utf-8")
+old = 'V1_EXECUTABLE_PATHS = ["scripts/ci/release_archive_inventory.sh"]'
+new = "V1_EXECUTABLE_PATHS = []"
+if old in text:
+    if text.count(old) != 1:
+        raise SystemExit(f"executable_paths pin count: {text.count(old)}")
+    text = text.replace(old, new, 1)
+checker_path.write_text(text, encoding="utf-8")
+PY
+  if python3 "$CHECKER" \
+      --workflow "$case_root/workflow.yml" \
+      --driver "$case_root/driver.sh" \
+      --manifest "$case_root/manifest.json" \
+      --source-root "$ROOT" >"$case_root/live-checker.out" 2>&1; then
+    fail "source mutation stayed green: coordinated-executable-escape live-checker"
+  fi
+  grep -F "$expected" "$case_root/live-checker.out" >/dev/null \
+    || fail "coordinated-executable-escape live-checker missed expected guard: $expected"
+  if python3 "$case_root/checker.py" \
+      --workflow "$WORKFLOW" \
+      --driver "$DRIVER" \
+      --manifest "$MANIFEST" \
+      --source-root "$ROOT" \
+      --pre-commit "$ROOT/.pre-commit-config.yaml" >"$case_root/mutated-checker.out" 2>&1; then
+    fail "source mutation stayed green: coordinated-executable-escape mutated-checker"
+  fi
+  grep -F "$expected" "$case_root/mutated-checker.out" >/dev/null \
+    || fail "coordinated-executable-escape mutated-checker missed expected guard: $expected"
+}
+
+expect_omitted_reviewed_inventory_helper() {
+  local case_root="$scratch/omitted-release-archive-inventory"
+  local expected="harness manifest must list exactly the reviewed harness inputs"
+  mkdir -p "$case_root"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$case_root/manifest.json" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+manifest = json.loads(path.read_text(encoding="utf-8"))
+helper = "scripts/ci/release_archive_inventory.sh"
+manifest["files"] = [row for row in manifest.get("files") or [] if row.get("path") != helper]
+path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  if python3 "$CHECKER" \
+      --workflow "$WORKFLOW" \
+      --driver "$DRIVER" \
+      --manifest "$case_root/manifest.json" \
+      --source-root "$ROOT" >"$case_root/output" 2>&1; then
+    fail "source mutation stayed green: omitted-release-archive-inventory"
+  fi
+  grep -F "$expected" "$case_root/output" >/dev/null \
+    || fail "omitted-release-archive-inventory missed expected guard: $expected"
+}
+
 expect_coordinated_assay_version_v54_removal() {
   local case_root="$scratch/coordinated-drop-assay-version-v54"
   mkdir -p "$case_root"
@@ -381,9 +869,87 @@ PY
 
 fixture="$scratch/fixture"
 build_fixture_root "$fixture"
+V54_ASSAY="$fixture/$V54_TAG/bin/assay"
+expect_fixture_rejects_profile_event \
+  "unknown-profile-event" \
+  '{"type":"unknown_event","path":"retained-v5.3-profile-event","timestamp":1}'
+expect_fixture_rejects_profile_event \
+  "string-profile-timestamp" \
+  '{"type":"file_open","path":"retained-v5.3-profile-event","timestamp":"1"}'
+expect_fixture_rejects_profile_event \
+  "negative-profile-timestamp" \
+  '{"type":"file_open","path":"retained-v5.3-profile-event","timestamp":-1}'
+expect_fixture_rejects_profile_event \
+  "boolean-profile-timestamp" \
+  '{"type":"file_open","path":"retained-v5.3-profile-event","timestamp":true}'
+expect_fixture_rejects_profile_event \
+  "overflow-profile-timestamp" \
+  '{"type":"file_open","path":"retained-v5.3-profile-event","timestamp":18446744073709551616}'
 good_root="$scratch/good"
 run_driver "$good_root" "$fixture"
+[[ -f "$good_root/home/.config/assay/config.toml" ]] \
+  || fail "driver did not create the retained home config independently of assay init"
+python3 - "$good_root/results/commands.ndjson" <<'PY' \
+  || fail "driver did not record the retained home config creation exactly once"
+import json, pathlib, sys
+rows = [
+    json.loads(line)
+    for line in pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+    if line
+]
+matches = [row for row in rows if row.get("name") == "create-home-config"]
+if len(matches) != 1 or matches[0].get("class") != "state_producing":
+    raise SystemExit(1)
+PY
 check_results "$good_root"
+expect_materialized_helper_modes
+"$V54_ASSAY" evidence verify-privileged-mcp-action \
+  --format json "$good_root/results/v1.bundle" --profile-version v1 \
+  || fail "v5.4 fixture parser treated an option value as the positional bundle"
+expect_v54_verify_argv_failure \
+  "format-missing-value" \
+  --format --profile-version "$good_root/results/v1.bundle"
+expect_v54_verify_argv_failure \
+  "profile-version-missing-value" \
+  --profile-version --format "$good_root/results/v1.bundle"
+expect_v54_verify_argv_failure \
+  "unknown-option" \
+  --bogus "$good_root/results/v1.bundle"
+expect_v54_verify_argv_failure \
+  "duplicate-positional-bundle" \
+  "$good_root/results/v1.bundle" "$good_root/results/v1.bundle" --format json --profile-version v1
+expect_v54_verify_argv_failure \
+  "foreign-subcommand-option" \
+  --bundle-out ignored "$good_root/results/v1.bundle" --format json --profile-version v1
+expect_v54_verify_argv_failure \
+  "wrong-format-value" \
+  "$good_root/results/v1.bundle" --format markdown --profile-version v1
+expect_v54_verify_argv_failure \
+  "wrong-profile-version" \
+  "$good_root/results/v1.bundle" --format json --profile-version v2
+expect_v54_verify_argv_failure \
+  "duplicate-format-option" \
+  "$good_root/results/v1.bundle" --format json --format json --profile-version v1
+expect_v54_verify_argv_failure \
+  "duplicate-profile-version-option" \
+  "$good_root/results/v1.bundle" --format json --profile-version v1 --profile-version v1
+cp "$good_root/results/v1.bundle" "$scratch/v1-extra-record.bundle"
+printf '%s\n' '{}' >>"$scratch/v1-extra-record.bundle"
+expect_v54_verify_argv_failure \
+  "trailing-v1-record" \
+  "$scratch/v1-extra-record.bundle" --format json --profile-version v1
+expect_v1_decision_fixture_failure \
+  "v1-null-target-digest" \
+  '"target_digest":"sha256:df4be9dfaa840f625ba03f5d577e6276a732f565c9527521138cfee1874546cf"' \
+  '"target_digest":null'
+expect_v1_decision_fixture_failure \
+  "v1-missing-producer-non-claim" \
+  'not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)' \
+  'not the observation or mechanism artifact'
+expect_v1_decision_fixture_failure \
+  "v1-invalid-decision-enum" \
+  '"decision":"deny"' \
+  '"decision":"approve"'
 if python3 "$CHECKER" --results "$good_root/results" --manifest "$MANIFEST" \
     >"$scratch/missing-expected-head.out" 2>&1; then
   fail "results mutation stayed green: missing-expected-head-sha"
@@ -411,6 +977,7 @@ python3 - "$MANIFEST" "$good_root/results" "$scratch" <<'PY'
 import json, pathlib, shutil, sys
 manifest_path, src, scratch = map(pathlib.Path, sys.argv[1:])
 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+to_version = manifest["to_tag"].removeprefix("v")
 required = manifest.get("required_retained_artifacts")
 if not isinstance(required, list) or not required:
     raise SystemExit("manifest must declare required_retained_artifacts")
@@ -457,7 +1024,7 @@ retargeted = []
 for row in ledger:
     item = dict(row)
     if item.get("boundary") == "failed-v5.4-activation":
-        item["activation_target"] = "v5.4.0"
+        item["activation_target"] = to_version
     retargeted.append(item)
 dump(failed_target / "journey-ledger.ndjson", retargeted)
 
@@ -587,6 +1154,16 @@ for row in commands:
     paraphrased_rows.append(item)
 dump(paraphrased / "commands.ndjson", paraphrased_rows)
 
+false_home_config_argv = scratch / "false-home-config-argv"
+shutil.copytree(src, false_home_config_argv)
+false_home_config_rows = []
+for row in commands:
+    item = dict(row)
+    if item.get("name") == "create-home-config":
+        item["argv"] = ["-c", 'print("decoy")', item.get("argv", ["", "", ""])[-1]]
+    false_home_config_rows.append(item)
+dump(false_home_config_argv / "commands.ndjson", false_home_config_rows)
+
 undeclared = scratch / "undeclared-command"
 shutil.copytree(src, undeclared)
 dump(
@@ -658,6 +1235,8 @@ expect_results_failure "empty-workflow-run-id" "$scratch/empty-workflow-run-id" 
 expect_results_failure "zero-workflow-run-attempt" "$scratch/zero-workflow-run-attempt" \
   "run-pin harness.workflow_run_attempt must be a positive integer"
 expect_results_failure "paraphrased-canary" "$scratch/paraphrased-canary" "canary row must record the argv that actually ran"
+expect_results_failure "false-home-config-argv" "$scratch/false-home-config-argv" \
+  "home config row must record the exact argv that actually ran"
 expect_results_failure "undeclared-command" "$scratch/undeclared-command" "undeclared command: arbitrary-undeclared"
 expect_results_failure "class-mismatch" "$scratch/class-mismatch" "command init class observe does not match manifest class state_producing"
 expect_results_failure "deleted-required-v0-bundle" "$scratch/deleted-required-results_v0.bundle" "required retained artifact missing: results/v0.bundle"
@@ -667,6 +1246,113 @@ expect_results_failure "deleted-required-config" "$scratch/deleted-required-home
 expect_results_failure "deleted-required-policy" "$scratch/deleted-required-session_policy.yaml" "required retained artifact missing: session/policy.yaml"
 expect_results_failure "deleted-required-eval" "$scratch/deleted-required-session_eval.yaml" "required retained artifact missing: session/eval.yaml"
 expect_results_failure "deleted-required-trace" "$scratch/deleted-required-session_traces_hello.jsonl" "required retained artifact missing: session/traces/hello.jsonl"
+
+python3 - "$good_root/results" "$scratch" <<'PY'
+import json, pathlib, shutil, sys
+src, scratch = map(pathlib.Path, sys.argv[1:])
+HELPER = "scripts/ci/release_archive_inventory.sh"
+CONTROL = "scripts/ci/bounded_download.py"
+
+def copy_results(name):
+    dest = scratch / name
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(src, dest)
+    return dest
+
+def load_report(dest):
+    path = dest / "harness-files.json"
+    return path, json.loads(path.read_text(encoding="utf-8"))
+
+def write_report(path, report):
+    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+def set_flag(report, path, value):
+    found = False
+    for row in report.get("files") or []:
+        if row.get("path") == path:
+            row["executable"] = value
+            found = True
+    if not found:
+        raise SystemExit(f"missing harness-files row: {path}")
+
+dest = copy_results("harness-files-true-to-false")
+path, report = load_report(dest)
+set_flag(report, HELPER, False)
+write_report(path, report)
+
+dest = copy_results("harness-files-false-to-true")
+path, report = load_report(dest)
+set_flag(report, CONTROL, True)
+write_report(path, report)
+
+dest = copy_results("harness-files-missing")
+(dest / "harness-files.json").unlink()
+
+dest = copy_results("harness-files-over-limit")
+(dest / "harness-files.json").write_bytes(b" " * (1_048_576 + 1))
+
+dest = copy_results("harness-files-invalid-utf8")
+(dest / "harness-files.json").write_bytes(b"\xff")
+
+dest = copy_results("harness-files-malformed-flag")
+path, report = load_report(dest)
+set_flag(report, HELPER, "true")
+write_report(path, report)
+
+dest = copy_results("harness-files-duplicate-path")
+path, report = load_report(dest)
+files = list(report.get("files") or [])
+helper = next(row for row in files if row.get("path") == HELPER)
+files.append(dict(helper))
+report["files"] = files
+write_report(path, report)
+
+dest = copy_results("harness-files-unknown-path")
+path, report = load_report(dest)
+files = list(report.get("files") or [])
+files.append({"path": "scripts/ci/not-in-manifest.sh", "sha256": "0" * 64, "executable": False})
+report["files"] = files
+write_report(path, report)
+
+dest = copy_results("harness-files-missing-path")
+path, report = load_report(dest)
+report["files"] = [row for row in report.get("files") or [] if row.get("path") != HELPER]
+write_report(path, report)
+
+dest = copy_results("harness-files-helper-digest-zeroed")
+path, report = load_report(dest)
+found = False
+for row in report.get("files") or []:
+    if row.get("path") == HELPER:
+        row["sha256"] = "0" * 64
+        found = True
+if not found:
+    raise SystemExit("missing helper row for digest tamper")
+write_report(path, report)
+PY
+
+expect_results_failure "harness-files-true-to-false" "$scratch/harness-files-true-to-false" \
+  "harness files observation drifted"
+expect_results_failure "harness-files-false-to-true" "$scratch/harness-files-false-to-true" \
+  "harness files observation drifted"
+expect_results_failure "harness-files-missing" "$scratch/harness-files-missing" \
+  "harness-files.json is unreadable"
+expect_results_failure "harness-files-over-limit" "$scratch/harness-files-over-limit" \
+  "harness-files.json exceeds 1048576-byte limit"
+expect_results_failure "harness-files-invalid-utf8" "$scratch/harness-files-invalid-utf8" \
+  "harness-files.json is unreadable: invalid UTF-8"
+expect_results_failure "harness-files-malformed-flag" "$scratch/harness-files-malformed-flag" \
+  "invalid executable flag"
+expect_results_failure "harness-files-duplicate-path" "$scratch/harness-files-duplicate-path" \
+  "harness-files.json path is duplicated"
+expect_results_failure "harness-files-unknown-path" "$scratch/harness-files-unknown-path" \
+  "harness-files.json path is unknown"
+expect_results_failure "harness-files-missing-path" "$scratch/harness-files-missing-path" \
+  "harness-files.json missing path"
+expect_results_failure "harness-files-helper-digest-zeroed" "$scratch/harness-files-helper-digest-zeroed" \
+  "harness files observation drifted"
+
 
 python3 - "$MANIFEST" "$good_root/results" "$scratch" <<'PY'
 import json, pathlib, shutil, sys
@@ -908,6 +1594,42 @@ expect_path_safety_parity \
 expect_path_safety_parity \
   "v1-release-pair" "release_pair" "v9.9.7,v9.9.8" \
   "harness manifest release pair drifted from the v1 denominator"
+
+expect_omitted_reviewed_inventory_helper
+expect_inventory_executable_flag_removed
+expect_coordinated_executable_escape
+expect_driver_neutralized_chmod
+expect_driver_report_digest_lie
+expect_source_failure \
+  "inventory-executable-flag-string" "manifest.json" \
+  '"executable": true' \
+  '"executable": "true"' \
+  "invalid executable flag"
+expect_source_failure \
+  "profile-init-target-drift" "driver.sh" \
+  "profile init --output v0-profile.yaml --name historical-retention" \
+  "profile init --output eval.yaml --name historical-retention" \
+  "driver must initialize the v5.3 evidence profile through the published CLI"
+expect_source_failure \
+  "profile-update-target-drift" "driver.sh" \
+  "profile update --profile v0-profile.yaml" \
+  "profile update --profile eval.yaml" \
+  "driver must update the v5.3 evidence profile through the published CLI"
+expect_source_failure \
+  "profile-export-target-drift" "driver.sh" \
+  "evidence export --profile v0-profile.yaml" \
+  "evidence export --profile eval.yaml" \
+  "driver must export the initialized v5.3 evidence profile"
+expect_source_failure \
+  "profile-event-type-drift" "driver.sh" \
+  '{\"type\":\"file_open\",\"path\":\"retained-v5.3-profile-event\",\"timestamp\":1}' \
+  '{\"type\":\"unknown_event\",\"path\":\"retained-v5.3-profile-event\",\"timestamp\":1}' \
+  "driver must create the declared v5.3 profile event"
+expect_source_failure \
+  "profile-event-timestamp-drift" "driver.sh" \
+  '{\"type\":\"file_open\",\"path\":\"retained-v5.3-profile-event\",\"timestamp\":1}' \
+  '{\"type\":\"file_open\",\"path\":\"retained-v5.3-profile-event\",\"timestamp\":\"1\"}' \
+  "driver must create the declared v5.3 profile event"
 
 while IFS= read -r helper; do
   expect_precommit_helper_decoy "$helper"

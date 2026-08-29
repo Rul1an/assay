@@ -25,11 +25,21 @@ INITIAL_ACTIVATION_REF = "initial"
 SAFE_RELEASE_TAG = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
 HEAD_SHA = re.compile(r"^[0-9a-f]{40}$")
 DRIVER_REL = "scripts/ci/published-release-historical-retention.sh"
+V1_EXECUTABLE_PATHS = ["scripts/ci/release_archive_inventory.sh"]
 V1_RELEASE_PAIR = ("v5.3.0", "v5.4.0")
+HOME_CONFIG_SCRIPT = (
+    'import pathlib,sys; path=pathlib.Path(sys.argv[1]); '
+    'path.parent.mkdir(parents=True, exist_ok=True); '
+    'path.write_text("# historical-retention harness input\\n", encoding="utf-8")'
+)
 V1_COMMAND_CLASSES = {
     "state_producing": [
+        "create-home-config",
         "create-journey-canary",
+        "create-profile-event-v5.3",
         "init",
+        "profile-init-v5.3",
+        "profile-update-v5.3",
         "export-v0-bundle",
         "import-v1-bundle",
         "stage-prefix-v5.3.0",
@@ -72,6 +82,7 @@ FORBIDDEN_CLAIM_WORDS = (
     "retroactive",
 )
 SELF_ATTEST_NEEDLE = "continuity_matched"
+MAX_HARNESS_FILES_BYTES = 1024 * 1024
 
 
 def require(text: str, needle: str, message: str, problems: list[str]) -> None:
@@ -399,6 +410,116 @@ def ndjson_rows(path: Path, problems: list[str], label: str) -> list[dict]:
     return rows
 
 
+
+def harness_files_snapshot(
+    files,
+    problems: list[str],
+    *,
+    origin: str,
+    schema: object = None,
+    allowed_paths: list[str] | None = None,
+    require_boolean: bool = False,
+) -> tuple[object, tuple[tuple[str, str, bool], ...]] | None:
+    """Normalize files[] to (schema, ((path, sha256, executable), ...)).
+
+    One snapshot for harness manifest files[] and results/harness-files.json.
+    Comparison is exact path, sha256, executable, schema, count, and order.
+    """
+    if not isinstance(files, list) or not files:
+        problems.append(f"{origin} has no files")
+        return None
+    rows: list[tuple[str, str, bool]] = []
+    seen: dict[str, int] = {}
+    for row in files:
+        if not isinstance(row, dict) or not isinstance(row.get("path"), str):
+            problems.append(f"{origin} row has no path")
+            continue
+        path = row["path"]
+        if path in seen:
+            problems.append(f"{origin} path is duplicated: {path}")
+            continue
+        seen[path] = len(rows)
+        if allowed_paths is not None and path not in allowed_paths:
+            problems.append(f"{origin} path is unknown: {path}")
+            continue
+        digest = row.get("sha256")
+        if not isinstance(digest, str) or len(digest) != 64:
+            problems.append(f"{origin} digest is unusable: {path}")
+            continue
+        flag = row.get("executable", False)
+        if "executable" in row and not isinstance(row.get("executable"), bool):
+            problems.append(f"invalid executable flag: {path}")
+            continue
+        if require_boolean and "executable" not in row:
+            problems.append(f"invalid executable flag: {path}")
+            continue
+        if require_boolean and not isinstance(flag, bool):
+            problems.append(f"invalid executable flag: {path}")
+            continue
+        rows.append((path, digest, flag is True))
+    if allowed_paths is not None:
+        for path in allowed_paths:
+            if path not in seen:
+                problems.append(f"{origin} missing path: {path}")
+    return (schema, tuple(rows))
+
+
+def require_declared_executable_surface(
+    rows: tuple[tuple[str, str, bool], ...],
+    problems: list[str],
+) -> None:
+    observed = [path for path, _digest, flag in rows if flag]
+    if observed != V1_EXECUTABLE_PATHS:
+        problems.append("harness executable surface drifted")
+
+
+def read_bounded_json(path: Path, label: str, max_bytes: int) -> object:
+    try:
+        with path.open("rb") as stream:
+            raw = stream.read(max_bytes + 1)
+    except OSError as error:
+        raise ValueError(f"{label} is unreadable: {error}") from error
+    if len(raw) > max_bytes:
+        raise ValueError(f"{label} exceeds {max_bytes}-byte limit")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError(f"{label} is unreadable: invalid UTF-8") from error
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{label} is unreadable: {error}") from error
+
+
+def validate_harness_files_observation(results: Path, manifest: dict, problems: list[str]) -> None:
+    files = manifest.get("files")
+    declared = harness_files_snapshot(files, problems, origin="harness manifest", schema=manifest.get("schema"))
+    allowed = [
+        row["path"]
+        for row in files
+        if isinstance(files, list) and isinstance(row, dict) and isinstance(row.get("path"), str)
+    ] if isinstance(files, list) else []
+    report_path = results / "harness-files.json"
+    try:
+        report = read_bounded_json(report_path, "harness-files.json", MAX_HARNESS_FILES_BYTES)
+    except ValueError as error:
+        problems.append(str(error))
+        return
+    if not isinstance(report, dict):
+        problems.append("harness-files.json is not an object")
+        return
+    observed = harness_files_snapshot(
+        report.get("files"),
+        problems,
+        origin="harness-files.json",
+        schema=report.get("schema"),
+        allowed_paths=allowed or None,
+        require_boolean=True,
+    )
+    if declared is not None and observed is not None and declared != observed:
+        problems.append("harness files observation drifted")
+
+
 def validate_manifest_files(
     manifest: dict,
     source_root: Path,
@@ -436,11 +557,15 @@ def validate_manifest_files(
         ".github/workflows/published-release-historical-retention.yml",
         DRIVER_REL,
         "scripts/ci/release_attestation_enforce.sh",
+        "scripts/ci/release_archive_inventory.sh",
         "scripts/ci/safe_extract_release_archive.py",
         "scripts/ci/bounded_download.py",
     ]
     if paths != expected:
         problems.append("harness manifest must list exactly the reviewed harness inputs")
+    declared = harness_files_snapshot(files, problems, origin="harness manifest", schema=manifest.get("schema"))
+    if declared is not None:
+        require_declared_executable_surface(declared[1], problems)
 
 
 def validate_source_contract(
@@ -524,6 +649,42 @@ def validate_source_contract(
         driver_text,
         "harness manifest release pair drifted from the v1 denominator",
         "driver must reject a drifted v1 release pair before materialization",
+        problems,
+    )
+    require(
+        driver_text,
+        "destination.chmod(0o755)",
+        "driver must chmod executable harness files",
+        problems,
+    )
+    require(
+        driver_text,
+        "invalid executable flag",
+        "driver must reject a non-boolean executable flag",
+        problems,
+    )
+    require(
+        driver_text,
+        "destination.stat().st_mode",
+        "driver must observe materialized executable mode",
+        problems,
+    )
+    require(
+        driver_text,
+        "stat.S_IXUSR",
+        "driver must use the user-execute bit",
+        problems,
+    )
+    require(
+        driver_text,
+        "harness executable observation drifted",
+        "driver must fail closed when observed mode differs from the declaration",
+        problems,
+    )
+    require(
+        driver_text,
+        '"executable": observed_executable',
+        "driver must report observed executable in harness-files.json",
         problems,
     )
     required_retained_artifacts(manifest, problems)
@@ -646,6 +807,36 @@ def validate_source_contract(
         problems,
     )
     require(driver_text, "flag_unavailable", "driver must classify v5.3 explicit v1 as flag_unavailable", problems)
+    require(
+        driver_text,
+        "profile init --output v0-profile.yaml --name historical-retention",
+        "driver must initialize the v5.3 evidence profile through the published CLI",
+        problems,
+    )
+    require(
+        driver_text,
+        "profile update --profile v0-profile.yaml",
+        "driver must update the v5.3 evidence profile through the published CLI",
+        problems,
+    )
+    require(
+        driver_text,
+        "--input profile-events.jsonl --run-id v5.3.0-initial --strict",
+        "driver must populate the v5.3 evidence profile from the retained event",
+        problems,
+    )
+    require(
+        driver_text,
+        '\\"type\\":\\"file_open\\",\\"path\\":\\"retained-v5.3-profile-event\\",\\"timestamp\\":1}',
+        "driver must create the declared v5.3 profile event",
+        problems,
+    )
+    require(
+        driver_text,
+        "evidence export --profile v0-profile.yaml",
+        "driver must export the initialized v5.3 evidence profile",
+        problems,
+    )
     if "value_rejected" in driver_text:
         problems.append("v5.3 explicit v1 must not be classified as value_rejected")
     require(driver_text, '"migration_required": False', "driver must record migration_required false", problems)
@@ -749,6 +940,8 @@ def validate_results(results: Path, manifest_path: Path, expected_head_sha: str)
         bind_run_pin_harness(pin, expected_head_sha, driver_digest, problems)
     if driver_digest is None or len(problems) > binding_problems:
         return problems
+
+    validate_harness_files_observation(results, manifest, problems)
 
     if not specs or from_tag is None or to_tag is None:
         return problems
@@ -859,6 +1052,31 @@ def validate_results(results: Path, manifest_path: Path, expected_head_sha: str)
         str(part) for part in canary_cmd[0].get("argv", [])
     ):
         problems.append("canary row must record the argv that actually ran")
+
+    home_config_cmd = [row for row in commands if row.get("name") == "create-home-config"]
+    if len(home_config_cmd) != 1:
+        problems.append("create-home-config must be recorded exactly once")
+    elif len(canary_cmd) == 1:
+        canary_argv = canary_cmd[0].get("argv")
+        interpreter = canary_argv[0] if isinstance(canary_argv, list) and canary_argv else None
+        canary_path = (
+            PurePosixPath(canary_argv[-1])
+            if isinstance(canary_argv, list) and canary_argv and isinstance(canary_argv[-1], str)
+            else PurePosixPath()
+        )
+        run_root = canary_path.parents[1] if canary_path.is_absolute() and len(canary_path.parents) > 1 else None
+        expected_home_config_argv = [
+            interpreter,
+            "-c",
+            HOME_CONFIG_SCRIPT,
+            str(run_root / "home/.config/assay/config.toml") if run_root is not None else None,
+        ]
+        if home_config_cmd[0].get("argv") != expected_home_config_argv:
+            problems.append("home config row must record the exact argv that actually ran")
+        if home_config_cmd[0].get("executed_binary_sha256") != canary_cmd[0].get(
+            "executed_binary_sha256"
+        ):
+            problems.append("home config row must bind the same interpreter as the canary")
 
     explicit = [row for row in commands if row.get("name") == "explicit-v1-v5.3"]
     if len(explicit) != 1:
