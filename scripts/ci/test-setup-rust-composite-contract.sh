@@ -48,6 +48,42 @@ trap 'abort_is_failure "$?"' ERR
 [[ -f "${CI_YML}" ]] || fail "missing .github/workflows/ci.yml"
 [[ -f "${KERNEL_MATRIX}" ]] || fail "missing .github/workflows/kernel-matrix.yml"
 
+python3 - "${CI_YML}" <<'PY' || fail "assay-cli README mutation wiring contract failed"
+import re
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+job = re.search(
+    r"(?ms)^  publish-shape-cli:\n(.*?)(?=^  [A-Za-z0-9_-]+:|\Z)", text
+)
+if not job:
+    raise SystemExit("ci.yml missing publish-shape-cli job")
+block = job.group(1)
+mutation = "./scripts/ci/test_assay_cli_crate_readme.sh"
+checker = "./scripts/ci/check_assay_cli_crate_readme.sh"
+
+
+def active_run(candidate: str, command: str) -> list[re.Match[str]]:
+    return list(
+        re.finditer(rf"(?m)^\s+run:\s*{re.escape(command)}\s*$", candidate)
+    )
+
+
+mutation_runs = active_run(block, mutation)
+checker_runs = active_run(block, checker)
+if len(mutation_runs) != 1 or len(checker_runs) != 1:
+    raise SystemExit("publish-shape-cli must actively call mutation suite and checker exactly once")
+if mutation_runs[0].start() > checker_runs[0].start():
+    raise SystemExit("README mutation suite must run before the green checker")
+commented = block.replace(
+    f"        run: {mutation}", f"        # run: {mutation}", 1
+)
+if active_run(commented, mutation):
+    raise SystemExit("commented mutation-suite invocation counted as active")
+print("ok   assay-cli README mutation suite runs before checker")
+PY
+
 grep -qE '^[[:space:]]*using:[[:space:]]*composite[[:space:]]*$' "${ACTION}" \
   || fail "action must declare runs.using: composite"
 ok "composite action present"
@@ -750,6 +786,7 @@ ALLOWED = [
     (".github/workflows/ci.yml", "public-msrv", TC, "dynamic ASSAY_PUBLIC_MSRV toolchain; no composite Swatinem key"),
     (".github/workflows/ci.yml", "public-msrv", RC, "Swatinem key public-msrv-${{ env.ASSAY_PUBLIC_MSRV }}; no composite key"),
     (".github/workflows/ci.yml", "public-crate-policy", TC, "no-cache policy validation; composite always caches"),
+    (".github/workflows/ci.yml", "publish-shape-cli", TC, "cargo package --list for crate-owned README; composite always caches"),
     (".github/workflows/ci.yml", "perf", RC, "Swatinem id/output cache-hit; composite has no step id / fixed order"),
     (".github/workflows/ci.yml", "perf", TC, "paired with direct Swatinem id/output; composite forces toolchain-then-cache"),
     (".github/workflows/ci.yml", "test", TC, "paired with sccache cache-directories + cache-on-failure"),
