@@ -30,7 +30,10 @@ V1_RELEASE_PAIR = ("v5.3.0", "v5.4.0")
 V1_COMMAND_CLASSES = {
     "state_producing": [
         "create-journey-canary",
+        "create-profile-event-v5.3",
         "init",
+        "profile-init-v5.3",
+        "profile-update-v5.3",
         "export-v0-bundle",
         "import-v1-bundle",
         "stage-prefix-v5.3.0",
@@ -798,6 +801,30 @@ def validate_source_contract(
         problems,
     )
     require(driver_text, "flag_unavailable", "driver must classify v5.3 explicit v1 as flag_unavailable", problems)
+    require(
+        driver_text,
+        "profile init --output v0-profile.yaml --name historical-retention",
+        "driver must initialize the v5.3 evidence profile through the published CLI",
+        problems,
+    )
+    require(
+        driver_text,
+        "profile update --profile v0-profile.yaml",
+        "driver must update the v5.3 evidence profile through the published CLI",
+        problems,
+    )
+    require(
+        driver_text,
+        "--input profile-events.jsonl --run-id v5.3.0-initial --strict",
+        "driver must populate the v5.3 evidence profile from the retained event",
+        problems,
+    )
+    require(
+        driver_text,
+        "evidence export --profile v0-profile.yaml",
+        "driver must export the initialized v5.3 evidence profile",
+        problems,
+    )
     if "value_rejected" in driver_text:
         problems.append("v5.3 explicit v1 must not be classified as value_rejected")
     require(driver_text, '"migration_required": False', "driver must record migration_required false", problems)

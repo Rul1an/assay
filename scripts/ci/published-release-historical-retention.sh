@@ -398,8 +398,20 @@ run_capture "init" "state_producing" 0 "$results/init.json" "$results/init.stder
   "$active_link/bin/assay" init --preset dev --hello-trace --format json
 run_capture "migrate-check-v5.3" "observe" 0 "$results/migrate-v53.txt" "$results/migrate-v53.stderr" \
   "$active_link/bin/assay" migrate --check --config eval.yaml
+run_capture "create-profile-event-v5.3" "state_producing" 0 \
+  "$results/create-profile-event-v53.stdout" "$results/create-profile-event-v53.stderr" \
+  "$canary_python" -c \
+  'import pathlib,sys; pathlib.Path(sys.argv[1]).write_text("{\"type\":\"file_open\",\"path\":\"retained-v5.3-profile-event\",\"timestamp\":1}\n", encoding="utf-8")' \
+  profile-events.jsonl
+run_capture "profile-init-v5.3" "state_producing" 0 \
+  "$results/profile-init-v53.stdout" "$results/profile-init-v53.stderr" \
+  "$active_link/bin/assay" profile init --output v0-profile.yaml --name historical-retention
+run_capture "profile-update-v5.3" "state_producing" 0 \
+  "$results/profile-update-v53.stdout" "$results/profile-update-v53.stderr" \
+  "$active_link/bin/assay" profile update --profile v0-profile.yaml \
+  --input profile-events.jsonl --run-id v5.3.0-initial --strict
 run_capture "export-v0-bundle" "state_producing" 0 "$results/export-v0.stdout" "$results/export-v0.stderr" \
-  "$active_link/bin/assay" evidence export --profile eval.yaml -o "$results/v0.bundle"
+  "$active_link/bin/assay" evidence export --profile v0-profile.yaml -o "$results/v0.bundle"
 explicit_status=0
 "$active_link/bin/assay" evidence verify-privileged-mcp-action "$results/v0.bundle" --format json --profile-version v1 \
   >"$results/explicit-v1.json" 2>"$results/explicit-v1.stderr" || explicit_status=$?

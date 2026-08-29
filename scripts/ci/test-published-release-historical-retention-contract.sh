@@ -96,20 +96,53 @@ case "\$cmd" in
     echo "Config eval.yaml is clean (already migrated)."
     exit 0
     ;;
+  profile)
+    sub="\${1:-}"
+    shift || true
+    profile=""
+    input=""
+    prev=""
+    for arg in "\$@"; do
+      if [[ "\$prev" == "--output" || "\$prev" == "--profile" ]]; then
+        profile="\$arg"
+      elif [[ "\$prev" == "--input" || "\$prev" == "-i" ]]; then
+        input="\$arg"
+      fi
+      prev="\$arg"
+    done
+    case "\$sub" in
+      init)
+        [[ -n "\$profile" ]] || exit 2
+        printf 'version: "1.0"\nname: historical-retention\ntotal_runs: 0\nentries: {}\n' >"\$profile"
+        ;;
+      update)
+        [[ -f "\$profile" && -f "\$input" ]] || exit 2
+        printf 'updated: true\n' >>"\$profile"
+        ;;
+      *)
+        exit 2
+        ;;
+    esac
+    ;;
   evidence)
     sub="\${1:-}"
     shift || true
     out=""
+    profile=""
     prev=""
     for arg in "\$@"; do
       if [[ "\$prev" == "-o" || "\$prev" == "--out" || "\$prev" == "--bundle-out" ]]; then
         out="\$arg"
+      elif [[ "\$prev" == "--profile" ]]; then
+        profile="\$arg"
       fi
       prev="\$arg"
     done
     case "\$sub" in
       export)
-        [[ -n "\$out" ]] || exit 2
+        [[ -n "\$out" && -f "\$profile" ]] || exit 2
+        grep -F 'version: "1.0"' "\$profile" >/dev/null || exit 2
+        grep -F 'updated: true' "\$profile" >/dev/null || exit 2
         printf 'v0-bundle\\n' >"\$out"
         ;;
       verify)
@@ -1324,6 +1357,21 @@ expect_source_failure \
   '"executable": true' \
   '"executable": "true"' \
   "invalid executable flag"
+expect_source_failure \
+  "profile-init-target-drift" "driver.sh" \
+  "profile init --output v0-profile.yaml --name historical-retention" \
+  "profile init --output eval.yaml --name historical-retention" \
+  "driver must initialize the v5.3 evidence profile through the published CLI"
+expect_source_failure \
+  "profile-update-target-drift" "driver.sh" \
+  "profile update --profile v0-profile.yaml" \
+  "profile update --profile eval.yaml" \
+  "driver must update the v5.3 evidence profile through the published CLI"
+expect_source_failure \
+  "profile-export-target-drift" "driver.sh" \
+  "evidence export --profile v0-profile.yaml" \
+  "evidence export --profile eval.yaml" \
+  "driver must export the initialized v5.3 evidence profile"
 
 while IFS= read -r helper; do
   expect_precommit_helper_decoy "$helper"
