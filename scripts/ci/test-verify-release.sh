@@ -70,8 +70,10 @@ fixture_gh="$tmp/fixture-gh"
 cat >"$fixture_gh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "${1:-}" == api && "${2:-}" =~ /contents/(.*)\?ref= ]] || exit 64
+[[ "${1:-}" == api && "${2:-}" =~ ^repos/Rul1an/assay/contents/(.*)\?ref=([0-9a-f]{40})$ ]] \
+  || exit 64
 path="${BASH_REMATCH[1]}"
+[[ "${BASH_REMATCH[2]}" == "${PIN_SHA:-}" ]] || exit 65
 python3 - "$FIXTURE_ROOT/$path" <<'PY'
 import base64
 import json
@@ -133,6 +135,27 @@ PY
 expect_status 1 env FIXTURE_ROOT="$current_candidate" GH="$fixture_gh" \
   VERSION=5.4.0 PIN_SHA="$(git -C "$ROOT" rev-parse HEAD)" \
   "$pin_mutant_dir/verify-release.sh" --pre-tag
+
+# Mutation proof: the source fetch must stay bound to the requested candidate
+# commit, not merely to the expected repository path.
+ref_mutant_dir="$tmp/ref-mutant"
+mkdir -p "$ref_mutant_dir"
+cp "$ORACLE" "$ASSET_CONTRACT" "$RELEASE_TAG_READER" "$ref_mutant_dir/"
+python3 - "$ref_mutant_dir/verify-release.sh" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+anchor = 'repos/$REPO/contents/$path?ref=$sha'
+if text.count(anchor) != 1:
+    raise SystemExit("candidate source ref anchor moved")
+text = text.replace(anchor, f"repos/$REPO/contents/$path?ref={'0' * 40}", 1)
+path.write_text(text, encoding="utf-8")
+PY
+expect_status 2 env FIXTURE_ROOT="$current_candidate" GH="$fixture_gh" \
+  VERSION=5.4.0 PIN_SHA="$(git -C "$ROOT" rev-parse HEAD)" \
+  "$ref_mutant_dir/verify-release.sh" --pre-tag
 
 expected_assets="$("$ORACLE" --unit-expected-assets 5.3.0)"
 [[ "$(printf '%s\n' "$expected_assets" | wc -l | tr -d ' ')" -eq 23 ]] \
