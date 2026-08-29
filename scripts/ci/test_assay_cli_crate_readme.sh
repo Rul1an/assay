@@ -44,6 +44,8 @@ CASES=(
   archive-commit
   codeload-main
   codeload-commit
+  codeload-legacy-main
+  codeload-legacy-commit
   workspace-readme-fallback
   version-pinned-install
   version-pinned-package-id
@@ -600,6 +602,14 @@ for name in "${CASES[@]}"; do
       ;;
     codeload-commit)
       rewrite_repo_link "https://codeload.github.com/Rul1an/assay/tar.gz/0123456789abcdef0123456789abcdef01234567"
+      expect_pass "$name"
+      ;;
+    codeload-legacy-main)
+      rewrite_repo_link "https://codeload.github.com/Rul1an/assay/legacy.tar.gz/main"
+      expect_fail "$name" "mutable git ref"
+      ;;
+    codeload-legacy-commit)
+      rewrite_repo_link "https://codeload.github.com/Rul1an/assay/legacy.tar.gz/0123456789abcdef0123456789abcdef01234567"
       expect_pass "$name"
       ;;
     workspace-readme-fallback)

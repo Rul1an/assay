@@ -239,7 +239,8 @@ def reject_mutable_github_content_link(raw: str) -> None:
             return
         ref = parts[3]
     elif hostname == "codeload.github.com":
-        if len(parts) < 5 or not parts[1] or not parts[2] or parts[3] not in ("tar.gz", "zip"):
+        codeload_routes = ("tar.gz", "zip", "legacy.tar.gz", "legacy.zip")
+        if len(parts) < 5 or not parts[1] or not parts[2] or parts[3] not in codeload_routes:
             return
         ref = "/".join(parts[4:])
     else:
