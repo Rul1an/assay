@@ -821,7 +821,7 @@ def validate_source_contract(
     )
     require(
         driver_text,
-        '\\"type\\":\\"file_open\\",\\"path\\":\\"retained-v5.3-profile-event\\"',
+        '\\"type\\":\\"file_open\\",\\"path\\":\\"retained-v5.3-profile-event\\",\\"timestamp\\":1}',
         "driver must create the declared v5.3 profile event",
         problems,
     )
