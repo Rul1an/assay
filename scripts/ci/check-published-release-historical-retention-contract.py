@@ -27,6 +27,11 @@ HEAD_SHA = re.compile(r"^[0-9a-f]{40}$")
 DRIVER_REL = "scripts/ci/published-release-historical-retention.sh"
 V1_EXECUTABLE_PATHS = ["scripts/ci/release_archive_inventory.sh"]
 V1_RELEASE_PAIR = ("v5.3.0", "v5.4.0")
+HOME_CONFIG_SCRIPT = (
+    'import pathlib,sys; path=pathlib.Path(sys.argv[1]); '
+    'path.parent.mkdir(parents=True, exist_ok=True); '
+    'path.write_text("# historical-retention harness input\\n", encoding="utf-8")'
+)
 V1_COMMAND_CLASSES = {
     "state_producing": [
         "create-home-config",
@@ -1047,6 +1052,31 @@ def validate_results(results: Path, manifest_path: Path, expected_head_sha: str)
         str(part) for part in canary_cmd[0].get("argv", [])
     ):
         problems.append("canary row must record the argv that actually ran")
+
+    home_config_cmd = [row for row in commands if row.get("name") == "create-home-config"]
+    if len(home_config_cmd) != 1:
+        problems.append("create-home-config must be recorded exactly once")
+    elif len(canary_cmd) == 1:
+        canary_argv = canary_cmd[0].get("argv")
+        interpreter = canary_argv[0] if isinstance(canary_argv, list) and canary_argv else None
+        canary_path = (
+            PurePosixPath(canary_argv[-1])
+            if isinstance(canary_argv, list) and canary_argv and isinstance(canary_argv[-1], str)
+            else PurePosixPath()
+        )
+        run_root = canary_path.parents[1] if canary_path.is_absolute() and len(canary_path.parents) > 1 else None
+        expected_home_config_argv = [
+            interpreter,
+            "-c",
+            HOME_CONFIG_SCRIPT,
+            str(run_root / "home/.config/assay/config.toml") if run_root is not None else None,
+        ]
+        if home_config_cmd[0].get("argv") != expected_home_config_argv:
+            problems.append("home config row must record the exact argv that actually ran")
+        if home_config_cmd[0].get("executed_binary_sha256") != canary_cmd[0].get(
+            "executed_binary_sha256"
+        ):
+            problems.append("home config row must bind the same interpreter as the canary")
 
     explicit = [row for row in commands if row.get("name") == "explicit-v1-v5.3"]
     if len(explicit) != 1:
