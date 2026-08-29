@@ -52,7 +52,8 @@ jobs:
           set -euo pipefail
           python3 scripts/ci/check-published-release-historical-retention-contract.py \
             --results "$RUN_ROOT/results" \
-            --manifest scripts/ci/fixtures/published-release-historical-retention/v1/harness-manifest.json
+            --manifest scripts/ci/fixtures/published-release-historical-retention/v1/harness-manifest.json \
+            --expected-head-sha "$GITHUB_SHA"
 
       - name: Retain the replayable journey evidence
         if: always()

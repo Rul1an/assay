@@ -60,11 +60,11 @@
   "files": [
     {
       "path": ".github/workflows/published-release-historical-retention.yml",
-      "sha256": "797a2a7c5962f949fc6fccb0dae95421692fcf8a887a56d8e2c42c5d88bf15f5"
+      "sha256": "b915130760efdb40cc2a82b142efefa765024a9062e46bff64ccaabd31cf3d75"
     },
     {
       "path": "scripts/ci/published-release-historical-retention.sh",
-      "sha256": "9e13481d3d60fabe3fa5eebc6df3b2c40e2a0aa94ce6d0ed9d25cf0d2294b560"
+      "sha256": "96ce8f143caf835de61446d9a795f36cb80a56c59b6c763839a4c3b3eb16667e"
     },
     {
       "path": "scripts/ci/release_attestation_enforce.sh",

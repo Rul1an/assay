@@ -23,6 +23,9 @@ SCHEMA = "assay.published_release_historical_retention.harness.v1"
 PIN_SCHEMA = "assay.published_release_historical_retention.run_pin.v1"
 INITIAL_ACTIVATION_REF = "initial"
 SAFE_RELEASE_TAG = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
+HEAD_SHA = re.compile(r"^[0-9a-f]{40}$")
+DRIVER_REL = "scripts/ci/published-release-historical-retention.sh"
+V1_RELEASE_PAIR = ("v5.3.0", "v5.4.0")
 V1_COMMAND_CLASSES = {
     "state_producing": [
         "create-journey-canary",
@@ -147,6 +150,55 @@ def release_pair(manifest: dict, problems: list[str]) -> tuple[str | None, str |
             problems.append(reason)
             to_tag = None
     return from_tag, to_tag
+
+
+def require_v1_release_pair(from_tag: str | None, to_tag: str | None, problems: list[str]) -> None:
+    if from_tag is None or to_tag is None:
+        return
+    if (from_tag, to_tag) != V1_RELEASE_PAIR:
+        problems.append("harness manifest release pair drifted from the v1 denominator")
+
+
+def require_expected_head_sha(value: object, problems: list[str]) -> str | None:
+    if not isinstance(value, str) or HEAD_SHA.fullmatch(value) is None:
+        problems.append("--expected-head-sha must be exactly 40 lowercase hex characters")
+        return None
+    return value
+
+
+def manifest_driver_digest(manifest: dict, problems: list[str]) -> str | None:
+    for row in manifest.get("files") or []:
+        if not isinstance(row, dict) or row.get("path") != DRIVER_REL:
+            continue
+        digest = row.get("sha256")
+        if isinstance(digest, str) and len(digest) == 64:
+            return digest
+        problems.append("harness manifest driver digest is unusable")
+        return None
+    problems.append("harness manifest missing driver digest")
+    return None
+
+
+def bind_run_pin_harness(
+    pin: dict,
+    expected_head_sha: str,
+    driver_digest: str,
+    problems: list[str],
+) -> None:
+    harness = pin.get("harness")
+    if not isinstance(harness, dict):
+        problems.append("run-pin harness is missing")
+        return
+    if harness.get("head_sha") != expected_head_sha:
+        problems.append("run-pin harness.head_sha must match --expected-head-sha")
+    if harness.get("driver_sha256") != driver_digest:
+        problems.append("run-pin harness.driver_sha256 must match the harness manifest driver digest")
+    run_id = harness.get("workflow_run_id")
+    if not isinstance(run_id, str) or not run_id.strip():
+        problems.append("run-pin harness.workflow_run_id must be a nonempty string")
+    attempt = harness.get("workflow_run_attempt")
+    if type(attempt) is not int or attempt < 1:
+        problems.append("run-pin harness.workflow_run_attempt must be a positive integer")
 
 
 def resolve_release_ref(from_tag: str | None, to_tag: str | None, ref: str, problems: list[str], where: str) -> str | None:
@@ -382,7 +434,7 @@ def validate_manifest_files(
             problems.append(f"harness digest drifted: {relative}")
     expected = [
         ".github/workflows/published-release-historical-retention.yml",
-        "scripts/ci/published-release-historical-retention.sh",
+        DRIVER_REL,
         "scripts/ci/release_attestation_enforce.sh",
         "scripts/ci/safe_extract_release_archive.py",
         "scripts/ci/bounded_download.py",
@@ -410,6 +462,7 @@ def validate_source_contract(
         return problems
 
     from_tag, to_tag = release_pair(manifest, problems)
+    require_v1_release_pair(from_tag, to_tag, problems)
     require(workflow_text, "workflow_dispatch:", "workflow must support an explicit replay", problems)
     if "workflow_call:" in workflow_text:
         problems.append("historical workflow must not be a reusable caller surface")
@@ -459,6 +512,18 @@ def validate_source_contract(
         driver_text,
         "unsafe to_tag path component",
         "driver must reject an unsafe to_tag before materialization",
+        problems,
+    )
+    require(
+        driver_text,
+        'V1_RELEASE_PAIR = ("v5.3.0", "v5.4.0")',
+        "driver must embed the v1 release pair before materialization",
+        problems,
+    )
+    require(
+        driver_text,
+        "harness manifest release pair drifted from the v1 denominator",
+        "driver must reject a drifted v1 release pair before materialization",
         problems,
     )
     required_retained_artifacts(manifest, problems)
@@ -552,7 +617,8 @@ def validate_source_contract(
         "set -euo pipefail",
         "python3 scripts/ci/check-published-release-historical-retention-contract.py \\",
         '--results "$RUN_ROOT/results" \\',
-        "--manifest scripts/ci/fixtures/published-release-historical-retention/v1/harness-manifest.json",
+        "--manifest scripts/ci/fixtures/published-release-historical-retention/v1/harness-manifest.json \\",
+        '--expected-head-sha "$GITHUB_SHA"',
     ]
     check_lines = named_step_lines(workflow_text, "Check retained historical retention", problems)
     if check_lines != expected_check:
@@ -657,15 +723,33 @@ def _file_map(entry: dict) -> dict[str, str]:
     return mapping
 
 
-def validate_results(results: Path, manifest_path: Path) -> list[str]:
+def validate_results(results: Path, manifest_path: Path, expected_head_sha: str) -> list[str]:
     problems: list[str] = []
+    if require_expected_head_sha(expected_head_sha, problems) is None:
+        return problems
     manifest = load_manifest(manifest_path, problems)
     if not manifest:
         return problems
     from_tag, to_tag = release_pair(manifest, problems)
+    require_v1_release_pair(from_tag, to_tag, problems)
+    driver_digest = manifest_driver_digest(manifest, problems)
     specs = boundary_specs(manifest, problems)
     name_classes = require_v1_command_classes(manifest, problems)
     required_files = required_retained_artifacts(manifest, problems)
+    try:
+        pin = json.loads((results / "run-pin.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        problems.append(f"run-pin.json is unreadable: {error}")
+        return problems
+    if not isinstance(pin, dict):
+        problems.append("run-pin.json is not an object")
+        return problems
+    binding_problems = len(problems)
+    if driver_digest is not None:
+        bind_run_pin_harness(pin, expected_head_sha, driver_digest, problems)
+    if driver_digest is None or len(problems) > binding_problems:
+        return problems
+
     if not specs or from_tag is None or to_tag is None:
         return problems
     classes = V1_COMMAND_CLASSES
@@ -673,11 +757,6 @@ def validate_results(results: Path, manifest_path: Path) -> list[str]:
 
     commands = ndjson_rows(results / "commands.ndjson", problems, "commands.ndjson")
     ledger = ndjson_rows(results / "journey-ledger.ndjson", problems, "journey-ledger.ndjson")
-    try:
-        pin = json.loads((results / "run-pin.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        problems.append(f"run-pin.json is unreadable: {error}")
-        pin = {}
 
     if pin.get("schema") != PIN_SCHEMA:
         problems.append("run-pin schema drifted")
@@ -868,9 +947,13 @@ def main() -> int:
     parser.add_argument("--source-root", type=Path, default=ROOT)
     parser.add_argument("--pre-commit", type=Path, default=ROOT / PRECOMMIT_REL)
     parser.add_argument("--results", type=Path)
+    parser.add_argument("--expected-head-sha")
     args = parser.parse_args()
     if args.results is not None:
-        problems = validate_results(args.results, args.manifest)
+        if args.expected_head_sha is None:
+            print("FAIL: --expected-head-sha is required for --results")
+            return 1
+        problems = validate_results(args.results, args.manifest, args.expected_head_sha)
     else:
         problems = validate_source_contract(
             args.workflow, args.driver, args.manifest, args.source_root, args.pre_commit

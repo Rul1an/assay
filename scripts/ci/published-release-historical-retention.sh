@@ -84,6 +84,9 @@ if SAFE_RELEASE_TAG.fullmatch(from_tag) is None:
     raise SystemExit("unsafe from_tag path component")
 if SAFE_RELEASE_TAG.fullmatch(to_tag) is None:
     raise SystemExit("unsafe to_tag path component")
+V1_RELEASE_PAIR = ("v5.3.0", "v5.4.0")
+if (from_tag, to_tag) != V1_RELEASE_PAIR:
+    raise SystemExit("harness manifest release pair drifted from the v1 denominator")
 relatives = manifest.get("required_retained_artifacts")
 if not isinstance(relatives, list) or not relatives:
     raise SystemExit("harness manifest missing required_retained_artifacts")

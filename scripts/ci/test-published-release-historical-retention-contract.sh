@@ -8,6 +8,7 @@ WORKFLOW="${WORKFLOW:-${ROOT}/.github/workflows/published-release-historical-ret
 DRIVER="${DRIVER:-${ROOT}/scripts/ci/published-release-historical-retention.sh}"
 MANIFEST="${MANIFEST:-${ROOT}/scripts/ci/fixtures/published-release-historical-retention/v1/harness-manifest.json}"
 CHECKER="${ROOT}/scripts/ci/check-published-release-historical-retention-contract.py"
+EXPECTED_HEAD_SHA="${EXPECTED_HEAD_SHA:-6704d0bc4029f893f9558ab669ffc60918971943}"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -107,7 +108,7 @@ run_driver() {
   IMAGE_OS=ubuntu24 IMAGE_VERSION=20260824.1.0 RUNNER_OS=Linux RUNNER_ARCH=X64 \
   bash "$DRIVER" \
     --manifest "$MANIFEST" \
-    --harness-sha 6704d0bc4029f893f9558ab669ffc60918971943 \
+    --harness-sha "$EXPECTED_HEAD_SHA" \
     --workflow-run-id test-historical \
     --workflow-run-attempt 1 \
     --run-root "$run_root" \
@@ -118,7 +119,8 @@ hosted_consumer_check() {
   # Must stay identical to the hosted workflow consumer-checker argv.
   python3 "$CHECKER" \
     --results "$1" \
-    --manifest "$MANIFEST"
+    --manifest "$MANIFEST" \
+    --expected-head-sha "$EXPECTED_HEAD_SHA"
 }
 
 check_results() {
@@ -132,7 +134,8 @@ expect_results_failure() {
 
 expect_results_failure_with_manifest() {
   local name="$1" results="$2" manifest="$3" expected="$4"
-  if python3 "$CHECKER" --results "$results" --manifest "$manifest" >"$scratch/$name.out" 2>&1; then
+  if python3 "$CHECKER" --results "$results" --manifest "$manifest" \
+      --expected-head-sha "$EXPECTED_HEAD_SHA" >"$scratch/$name.out" 2>&1; then
     fail "results mutation stayed green: $name"
   fi
   grep -F "$expected" "$scratch/$name.out" >/dev/null \
@@ -200,6 +203,10 @@ elif kind == "duplicate_artifact":
     artifacts = list(manifest["required_retained_artifacts"])
     artifacts.insert(0, artifacts[0])
     manifest["required_retained_artifacts"] = artifacts
+elif kind == "release_pair":
+    from_tag, to_tag = value.split(",", 1)
+    manifest["from_tag"] = from_tag
+    manifest["to_tag"] = to_tag
 else:
     raise SystemExit(f"unknown manifest mutation {kind}")
 dest.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -216,7 +223,7 @@ expect_driver_unsafe_manifest() {
   if IMAGE_OS=ubuntu24 IMAGE_VERSION=20260824.1.0 RUNNER_OS=Linux RUNNER_ARCH=X64 \
     bash "$DRIVER" \
       --manifest "$mutated" \
-      --harness-sha 6704d0bc4029f893f9558ab669ffc60918971943 \
+      --harness-sha "$EXPECTED_HEAD_SHA" \
       --workflow-run-id test-historical \
       --workflow-run-attempt 1 \
       --run-root "$run_root" \
@@ -364,7 +371,8 @@ if len(kept) != len(rows) - 1:
 PY
   if python3 "$CHECKER" \
       --results "$case_root/results" \
-      --manifest "$case_root/manifest.json" >"$case_root/results.out" 2>&1; then
+      --manifest "$case_root/manifest.json" \
+      --expected-head-sha "$EXPECTED_HEAD_SHA" >"$case_root/results.out" 2>&1; then
     fail "results mutation stayed green: coordinated-drop-assay-version-v54"
   fi
   grep -F "exact-once class assay-version-v5.4 occurred 0 times" "$case_root/results.out" >/dev/null \
@@ -376,11 +384,18 @@ build_fixture_root "$fixture"
 good_root="$scratch/good"
 run_driver "$good_root" "$fixture"
 check_results "$good_root"
+if python3 "$CHECKER" --results "$good_root/results" --manifest "$MANIFEST" \
+    >"$scratch/missing-expected-head.out" 2>&1; then
+  fail "results mutation stayed green: missing-expected-head-sha"
+fi
+grep -F -- "--expected-head-sha is required for --results" "$scratch/missing-expected-head.out" >/dev/null \
+  || fail "missing-expected-head-sha missed required flag"
 
 # no-op GREEN
 cp -R "$good_root/results" "$scratch/noop-results"
 check_results "$good_root"
-python3 "$CHECKER" --results "$scratch/noop-results" --manifest "$MANIFEST"
+python3 "$CHECKER" --results "$scratch/noop-results" --manifest "$MANIFEST" \
+  --expected-head-sha "$EXPECTED_HEAD_SHA"
 
 # byte-identical copy-aside/restore GREEN (explicit control, outside the claim)
 copy_root="$scratch/copy-restore"
@@ -389,7 +404,8 @@ cp -R "$good_root/results" "$copy_root/results"
 cp -R "$good_root/journey" "$copy_root/aside-journey"
 rm -rf "$copy_root/restored-journey"
 cp -R "$copy_root/aside-journey" "$copy_root/restored-journey"
-python3 "$CHECKER" --results "$copy_root/results" --manifest "$MANIFEST"
+python3 "$CHECKER" --results "$copy_root/results" --manifest "$MANIFEST" \
+  --expected-head-sha "$EXPECTED_HEAD_SHA"
 
 python3 - "$MANIFEST" "$good_root/results" "$scratch" <<'PY'
 import json, pathlib, shutil, sys
@@ -527,6 +543,40 @@ exit_pin["v0_cross_version_verify"] = dict(exit_pin.get("v0_cross_version_verify
 exit_pin["v0_cross_version_verify"].pop("recorded_exit", None)
 (missing_exit / "run-pin.json").write_text(json.dumps(exit_pin, indent=2) + "\n", encoding="utf-8")
 
+missing_harness = scratch / "missing-harness"
+shutil.copytree(src, missing_harness)
+missing_pin = json.loads((src / "run-pin.json").read_text(encoding="utf-8"))
+missing_pin.pop("harness", None)
+(missing_harness / "run-pin.json").write_text(json.dumps(missing_pin, indent=2) + "\n", encoding="utf-8")
+
+forged_driver = scratch / "forged-driver-sha256"
+shutil.copytree(src, forged_driver)
+forged_pin = json.loads((src / "run-pin.json").read_text(encoding="utf-8"))
+forged_pin["harness"] = dict(forged_pin.get("harness") or {})
+forged_pin["harness"]["driver_sha256"] = "ab" * 32
+(forged_driver / "run-pin.json").write_text(json.dumps(forged_pin, indent=2) + "\n", encoding="utf-8")
+
+wrong_head = scratch / "wrong-head-sha"
+shutil.copytree(src, wrong_head)
+wrong_pin = json.loads((src / "run-pin.json").read_text(encoding="utf-8"))
+wrong_pin["harness"] = dict(wrong_pin.get("harness") or {})
+wrong_pin["harness"]["head_sha"] = "aa" * 20
+(wrong_head / "run-pin.json").write_text(json.dumps(wrong_pin, indent=2) + "\n", encoding="utf-8")
+
+empty_run_id = scratch / "empty-workflow-run-id"
+shutil.copytree(src, empty_run_id)
+empty_id_pin = json.loads((src / "run-pin.json").read_text(encoding="utf-8"))
+empty_id_pin["harness"] = dict(empty_id_pin.get("harness") or {})
+empty_id_pin["harness"]["workflow_run_id"] = ""
+(empty_run_id / "run-pin.json").write_text(json.dumps(empty_id_pin, indent=2) + "\n", encoding="utf-8")
+
+zero_attempt = scratch / "zero-workflow-run-attempt"
+shutil.copytree(src, zero_attempt)
+zero_pin = json.loads((src / "run-pin.json").read_text(encoding="utf-8"))
+zero_pin["harness"] = dict(zero_pin.get("harness") or {})
+zero_pin["harness"]["workflow_run_attempt"] = 0
+(zero_attempt / "run-pin.json").write_text(json.dumps(zero_pin, indent=2) + "\n", encoding="utf-8")
+
 paraphrased = scratch / "paraphrased-canary"
 shutil.copytree(src, paraphrased)
 paraphrased_rows = []
@@ -598,6 +648,15 @@ expect_results_failure "dropped-verify-v1" "$scratch/dropped-verify-v1" "exact-o
 expect_results_failure "dropped-migrate-v54" "$scratch/dropped-migrate-v54" "exact-once class migrate-check-v5.4 occurred 0 times"
 expect_results_failure "empty-provenance" "$scratch/empty-provenance" "run-pin provenance must be non-empty: image_os"
 expect_results_failure "missing-recorded-exit" "$scratch/missing-recorded-exit" "v0 cross-version verify recorded_exit must be an integer"
+expect_results_failure "missing-harness" "$scratch/missing-harness" "run-pin harness is missing"
+expect_results_failure "forged-driver-sha256" "$scratch/forged-driver-sha256" \
+  "run-pin harness.driver_sha256 must match the harness manifest driver digest"
+expect_results_failure "wrong-head-sha" "$scratch/wrong-head-sha" \
+  "run-pin harness.head_sha must match --expected-head-sha"
+expect_results_failure "empty-workflow-run-id" "$scratch/empty-workflow-run-id" \
+  "run-pin harness.workflow_run_id must be a nonempty string"
+expect_results_failure "zero-workflow-run-attempt" "$scratch/zero-workflow-run-attempt" \
+  "run-pin harness.workflow_run_attempt must be a positive integer"
 expect_results_failure "paraphrased-canary" "$scratch/paraphrased-canary" "canary row must record the argv that actually ran"
 expect_results_failure "undeclared-command" "$scratch/undeclared-command" "undeclared command: arbitrary-undeclared"
 expect_results_failure "class-mismatch" "$scratch/class-mismatch" "command init class observe does not match manifest class state_producing"
@@ -673,7 +732,9 @@ if len(kept) != len(rows) - 4:
     encoding="utf-8",
 )
 PY
-if python3 "$CHECKER" --results "$scratch/optional-observe-escape" --manifest "$scratch/optional-observe-escape/manifest.json" \
+if python3 "$CHECKER" --results "$scratch/optional-observe-escape" \
+    --manifest "$scratch/optional-observe-escape/manifest.json" \
+    --expected-head-sha "$EXPECTED_HEAD_SHA" \
     >"$scratch/optional-observe-escape.out" 2>&1; then
   fail "results mutation stayed green: optional-observe-escape"
 fi
@@ -688,6 +749,7 @@ manifest["command_classes"] = {"observe": ["init"]}
 dest.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 PY
 if python3 "$CHECKER" --results "$good_root/results" --manifest "$scratch/blind-manifest.json" \
+    --expected-head-sha "$EXPECTED_HEAD_SHA" \
     >"$scratch/blind-class.out" 2>&1; then
   fail "checker-blindness mutation stayed green: removed state_producing"
 fi
@@ -758,6 +820,11 @@ expect_source_failure \
   "hosted-consumer-checker-commented" "workflow.yml" \
   "$workflow_checker_call" \
   "$workflow_checker_decoy" \
+  "workflow must execute only the exact reviewed consumer-checker invocation"
+expect_source_failure \
+  "missing-expected-head-sha" "workflow.yml" \
+  $'            --manifest scripts/ci/fixtures/published-release-historical-retention/v1/harness-manifest.json \\\n            --expected-head-sha "$GITHUB_SHA"' \
+  "            --manifest scripts/ci/fixtures/published-release-historical-retention/v1/harness-manifest.json" \
   "workflow must execute only the exact reviewed consumer-checker invocation"
 expect_source_failure \
   "trigger-schedule" "workflow.yml" \
@@ -838,6 +905,9 @@ expect_path_safety_parity \
 expect_path_safety_parity \
   "artifact-backslash" "artifact" "session\\eval.yaml" \
   "unsafe required retained artifact path: session\\eval.yaml"
+expect_path_safety_parity \
+  "v1-release-pair" "release_pair" "v9.9.7,v9.9.8" \
+  "harness manifest release pair drifted from the v1 denominator"
 
 while IFS= read -r helper; do
   expect_precommit_helper_decoy "$helper"
