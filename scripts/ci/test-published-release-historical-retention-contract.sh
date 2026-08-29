@@ -117,7 +117,10 @@ case "\$cmd" in
         ;;
       update)
         [[ -f "\$profile" && -f "\$input" ]] || exit 2
-        printf 'updated: true\n' >>"\$profile"
+        event_type="\$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1], encoding="utf-8").readline())["type"])' "\$input")" || exit 2
+        event_path="\$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1], encoding="utf-8").readline())["path"])' "\$input")" || exit 2
+        [[ "\$event_type" == "file_open" && -n "\$event_path" ]] || exit 2
+        printf 'updated: true\nprofile_entry: %s\n' "\$event_path" >>"\$profile"
         ;;
       *)
         exit 2
@@ -143,6 +146,7 @@ case "\$cmd" in
         [[ -n "\$out" && -f "\$profile" ]] || exit 2
         grep -F 'version: "1.0"' "\$profile" >/dev/null || exit 2
         grep -F 'updated: true' "\$profile" >/dev/null || exit 2
+        grep -F 'profile_entry: retained-v5.3-profile-event' "\$profile" >/dev/null || exit 2
         printf 'v0-bundle\\n' >"\$out"
         ;;
       verify)
@@ -172,6 +176,22 @@ build_fixture_root() {
   local fixture="$1"
   write_stub_assay "$fixture/v5.3.0/bin/assay" "5.3.0"
   write_stub_assay "$fixture/v5.4.0/bin/assay" "5.4.0"
+}
+
+expect_fixture_rejects_unknown_profile_event() {
+  local case_root="$scratch/unknown-profile-event"
+  local assay="$case_root/bin/assay"
+  mkdir -p "$case_root/run"
+  write_stub_assay "$assay" "5.3.0"
+  (
+    cd "$case_root/run"
+    printf '%s\n' '{"type":"unknown_event","path":"retained-v5.3-profile-event","timestamp":1}' >profile-events.jsonl
+    "$assay" profile init --output v0-profile.yaml --name historical-retention
+    if "$assay" profile update --profile v0-profile.yaml --input profile-events.jsonl \
+        --run-id v5.3.0-initial --strict; then
+      fail "fixture accepted an unknown profile event"
+    fi
+  )
 }
 
 run_driver() {
@@ -711,6 +731,7 @@ PY
 
 fixture="$scratch/fixture"
 build_fixture_root "$fixture"
+expect_fixture_rejects_unknown_profile_event
 good_root="$scratch/good"
 run_driver "$good_root" "$fixture"
 check_results "$good_root"
@@ -1372,6 +1393,11 @@ expect_source_failure \
   "evidence export --profile v0-profile.yaml" \
   "evidence export --profile eval.yaml" \
   "driver must export the initialized v5.3 evidence profile"
+expect_source_failure \
+  "profile-event-type-drift" "driver.sh" \
+  '{\"type\":\"file_open\",\"path\":\"retained-v5.3-profile-event\"' \
+  '{\"type\":\"unknown_event\",\"path\":\"retained-v5.3-profile-event\"' \
+  "driver must create the declared v5.3 profile event"
 
 while IFS= read -r helper; do
   expect_precommit_helper_decoy "$helper"

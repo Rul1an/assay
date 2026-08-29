@@ -821,6 +821,12 @@ def validate_source_contract(
     )
     require(
         driver_text,
+        '\\"type\\":\\"file_open\\",\\"path\\":\\"retained-v5.3-profile-event\\"',
+        "driver must create the declared v5.3 profile event",
+        problems,
+    )
+    require(
+        driver_text,
         "evidence export --profile v0-profile.yaml",
         "driver must export the initialized v5.3 evidence profile",
         problems,
