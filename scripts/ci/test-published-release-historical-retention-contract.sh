@@ -357,6 +357,36 @@ expect_results_failure "empty-provenance" "$scratch/empty-provenance" "run-pin p
 expect_results_failure "missing-recorded-exit" "$scratch/missing-recorded-exit" "v0 cross-version verify recorded_exit must be an integer"
 expect_results_failure "paraphrased-canary" "$scratch/paraphrased-canary" "canary row must record the argv that actually ran"
 
+python3 - "$MANIFEST" "$good_root/results" "$scratch" <<'PY'
+import json, pathlib, shutil, sys
+manifest_src, results_src, scratch = map(pathlib.Path, sys.argv[1:])
+exempt = scratch / "optional-observe-escape"
+shutil.copytree(results_src, exempt)
+manifest = json.loads(manifest_src.read_text(encoding="utf-8"))
+manifest["optional_command_classes"] = ["observe"]
+(exempt / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+dropped = {
+    "migrate-check-v5.3",
+    "migrate-check-v5.4",
+    "verify-v1-under-v5.4",
+    "post-reactivation-active",
+}
+rows = [json.loads(line) for line in (exempt / "commands.ndjson").read_text(encoding="utf-8").splitlines() if line]
+kept = [row for row in rows if row.get("name") not in dropped]
+if len(kept) != len(rows) - 4:
+    raise SystemExit("optional-observe-escape could not drop the four observe rows")
+(exempt / "commands.ndjson").write_text(
+    "".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in kept),
+    encoding="utf-8",
+)
+PY
+if python3 "$CHECKER" --results "$scratch/optional-observe-escape" --manifest "$scratch/optional-observe-escape/manifest.json" \
+    >"$scratch/optional-observe-escape.out" 2>&1; then
+  fail "results mutation stayed green: optional-observe-escape"
+fi
+grep -F "exact-once class migrate-check-v5.4 occurred 0 times" "$scratch/optional-observe-escape.out" >/dev/null \
+  || fail "optional-observe-escape missed exact-once reject for observe"
+
 python3 - "$MANIFEST" "$scratch/blind-manifest.json" <<'PY'
 import json, pathlib, sys
 src, dest = map(pathlib.Path, sys.argv[1:])

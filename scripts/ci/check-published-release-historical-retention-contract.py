@@ -380,12 +380,6 @@ def validate_results(results: Path, manifest_path: Path) -> list[str]:
     if not isinstance(state_producing, list) or not state_producing:
         problems.append("harness manifest has no state_producing command class")
         return problems
-    optional_classes = manifest.get("optional_command_classes")
-    if optional_classes is None:
-        optional_classes = []
-    if not isinstance(optional_classes, list):
-        problems.append("optional_command_classes must be a list when present")
-        optional_classes = []
 
     commands = ndjson_rows(results / "commands.ndjson", problems, "commands.ndjson")
     ledger = ndjson_rows(results / "journey-ledger.ndjson", problems, "journey-ledger.ndjson")
@@ -430,8 +424,6 @@ def validate_results(results: Path, manifest_path: Path) -> list[str]:
 
     names = [row.get("name") for row in commands]
     for class_name, class_names in classes.items():
-        if class_name in optional_classes:
-            continue
         if not isinstance(class_names, list):
             problems.append(f"command class {class_name} must be a list")
             continue
