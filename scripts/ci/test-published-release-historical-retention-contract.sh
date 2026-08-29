@@ -340,6 +340,64 @@ if not control or control.get("executable") is not False:
 PY
 }
 
+expect_driver_neutralized_chmod() {
+  local case_root="$scratch/neutralized-chmod"
+  local run_root="$case_root/run"
+  local repo_root="$case_root/repo"
+  local expected="harness executable observation drifted"
+  mkdir -p "$repo_root/scripts/ci" "$repo_root/.github/workflows"
+  ln -s "$ROOT/.github/workflows/published-release-historical-retention.yml" \
+    "$repo_root/.github/workflows/published-release-historical-retention.yml"
+  ln -s "$ROOT/scripts/ci/release_attestation_enforce.sh" "$repo_root/scripts/ci/release_attestation_enforce.sh"
+  ln -s "$ROOT/scripts/ci/release_archive_inventory.sh" "$repo_root/scripts/ci/release_archive_inventory.sh"
+  ln -s "$ROOT/scripts/ci/safe_extract_release_archive.py" "$repo_root/scripts/ci/safe_extract_release_archive.py"
+  ln -s "$ROOT/scripts/ci/bounded_download.py" "$repo_root/scripts/ci/bounded_download.py"
+  cp "$DRIVER" "$repo_root/scripts/ci/published-release-historical-retention.sh"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$repo_root/scripts/ci/published-release-historical-retention.sh" "$case_root/manifest.json" <<'PY'
+import hashlib, json, pathlib, sys
+driver, manifest_path = map(pathlib.Path, sys.argv[1:])
+text = driver.read_text(encoding="utf-8")
+old = "    if executable:\n"
+new = "    if executable and False:\n"
+if text.count(old) != 1:
+    raise SystemExit(f"chmod guard count: {text.count(old)}")
+driver.write_text(text.replace(old, new, 1), encoding="utf-8")
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+digest = hashlib.sha256(driver.read_bytes()).hexdigest()
+found = False
+for row in manifest.get("files") or []:
+    if row.get("path") == "scripts/ci/published-release-historical-retention.sh":
+        row["sha256"] = digest
+        found = True
+if not found:
+    raise SystemExit("driver row missing from manifest")
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  if IMAGE_OS=ubuntu24 IMAGE_VERSION=20260824.1.0 RUNNER_OS=Linux RUNNER_ARCH=X64 \
+    bash "$repo_root/scripts/ci/published-release-historical-retention.sh" \
+      --manifest "$case_root/manifest.json" \
+      --harness-sha "$EXPECTED_HEAD_SHA" \
+      --workflow-run-id test-historical \
+      --workflow-run-attempt 1 \
+      --run-root "$run_root" \
+      --fixture-root "$fixture" >"$case_root/driver.out" 2>&1; then
+    fail "driver mutation stayed green: neutralized-chmod"
+  fi
+  grep -F "$expected" "$case_root/driver.out" >/dev/null \
+    || fail "neutralized-chmod missed expected driver guard: $expected"
+  if [[ -f "$run_root/results/harness-files.json" ]]; then
+    python3 - "$run_root/results/harness-files.json" <<'PY' || fail "neutralized-chmod wrote a false executable report"
+import json, pathlib, sys
+report = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+for row in report.get("files") or []:
+    if row.get("path") == "scripts/ci/release_archive_inventory.sh" and row.get("executable") is True:
+        raise SystemExit("retained report repeated the declaration")
+PY
+  fi
+}
+
+
 expect_inventory_executable_flag_removed() {
   local case_root="$scratch/inventory-executable-flag-removed"
   local expected="harness executable surface drifted"
@@ -1043,6 +1101,7 @@ expect_path_safety_parity \
 expect_omitted_reviewed_inventory_helper
 expect_inventory_executable_flag_removed
 expect_coordinated_executable_escape
+expect_driver_neutralized_chmod
 expect_source_failure \
   "inventory-executable-flag-string" "manifest.json" \
   '"executable": true' \

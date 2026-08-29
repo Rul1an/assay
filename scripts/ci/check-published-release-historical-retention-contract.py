@@ -551,8 +551,26 @@ def validate_source_contract(
     )
     require(
         driver_text,
-        '"executable": executable',
-        "driver must report executable in harness-files.json",
+        "destination.stat().st_mode",
+        "driver must observe materialized executable mode",
+        problems,
+    )
+    require(
+        driver_text,
+        "stat.S_IXUSR",
+        "driver must use the user-execute bit",
+        problems,
+    )
+    require(
+        driver_text,
+        "harness executable observation drifted",
+        "driver must fail closed when observed mode differs from the declaration",
+        problems,
+    )
+    require(
+        driver_text,
+        '"executable": observed_executable',
+        "driver must report observed executable in harness-files.json",
         problems,
     )
     required_retained_artifacts(manifest, problems)
