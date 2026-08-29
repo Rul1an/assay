@@ -29,6 +29,7 @@ V1_EXECUTABLE_PATHS = ["scripts/ci/release_archive_inventory.sh"]
 V1_RELEASE_PAIR = ("v5.3.0", "v5.4.0")
 V1_COMMAND_CLASSES = {
     "state_producing": [
+        "create-home-config",
         "create-journey-canary",
         "create-profile-event-v5.3",
         "init",

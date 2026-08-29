@@ -389,6 +389,15 @@ export PATH="$active_link/bin:/usr/bin:/bin"
 
 canary_python="$(command -v "$PYTHON_BIN")"
 [[ -n "$canary_python" ]] || fail "python interpreter is missing"
+home_config="$HOME/.config/assay/config.toml"
+home_config_argv=(
+  "$canary_python" -c \
+  'import pathlib,sys; path=pathlib.Path(sys.argv[1]); path.parent.mkdir(parents=True, exist_ok=True); path.write_text("# historical-retention harness input\n", encoding="utf-8")' \
+  "$home_config"
+)
+"${home_config_argv[@]}"
+record_command "create-home-config" "state_producing" 0 /dev/null /dev/null "" \
+  "${home_config_argv[@]}"
 "$canary_python" -c 'import os,pathlib,sys; pathlib.Path(sys.argv[1]).write_bytes(os.urandom(32))' "$canary_path"
 record_command "create-journey-canary" "state_producing" 0 /dev/null /dev/null "" \
   "$canary_python" -c 'import os,pathlib,sys; pathlib.Path(sys.argv[1]).write_bytes(os.urandom(32))' "$canary_path"

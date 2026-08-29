@@ -109,8 +109,7 @@ case "\$cmd" in
     printf '%s\\n' "\$VERSION"
     ;;
   init)
-    mkdir -p "\$HOME/.config/assay" traces
-    printf 'home-config\\n' >"\$HOME/.config/assay/config.toml"
+    mkdir -p traces
     printf 'policy\\n' >policy.yaml
     printf 'config\\n' >eval.yaml
     printf 'trace\\n' >traces/hello.jsonl
@@ -888,6 +887,20 @@ expect_fixture_rejects_profile_event \
   '{"type":"file_open","path":"retained-v5.3-profile-event","timestamp":18446744073709551616}'
 good_root="$scratch/good"
 run_driver "$good_root" "$fixture"
+[[ -f "$good_root/home/.config/assay/config.toml" ]] \
+  || fail "driver did not create the retained home config independently of assay init"
+python3 - "$good_root/results/commands.ndjson" <<'PY' \
+  || fail "driver did not record the retained home config creation exactly once"
+import json, pathlib, sys
+rows = [
+    json.loads(line)
+    for line in pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+    if line
+]
+matches = [row for row in rows if row.get("name") == "create-home-config"]
+if len(matches) != 1 or matches[0].get("class") != "state_producing":
+    raise SystemExit(1)
+PY
 check_results "$good_root"
 expect_materialized_helper_modes
 "$V54_ASSAY" evidence verify-privileged-mcp-action \
