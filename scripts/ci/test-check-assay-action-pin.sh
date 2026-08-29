@@ -198,22 +198,17 @@ if ".github/assay-action-pin" not in pinned or "not a second place to change" no
     errors.append("PINNED-ACTIONS.md does not record the pin-file exception")
 if "Do not move floating `v3`" not in pinned or "Do not move frozen `v2`" not in pinned:
     errors.append("PINNED-ACTIONS.md does not record Assay-side rollback")
-start = changelog.find("## [Unreleased]")
-if start < 0:
+if "## [Unreleased]" not in changelog:
     errors.append("CHANGELOG.md has no Unreleased section")
-else:
-    rest = changelog[start:]
-    nxt = rest.find("\n## [", 1)
-    unreleased = rest if nxt < 0 else rest[:nxt]
-    for needle in (
-        "mixed Action migration",
-        "literal `false`",
-        "sandbox-command",
-        "v3.0.1 to v3.0.2",
-        "not measured",
-    ):
-        if needle not in unreleased:
-            errors.append(f"CHANGELOG Unreleased does not name {needle!r}")
+for needle in (
+    "mixed Action migration",
+    "literal `false`",
+    "sandbox-command",
+    "v3.0.1 to v3.0.2",
+    "not measured",
+):
+    if needle not in changelog:
+        errors.append(f"CHANGELOG history does not name {needle!r}")
 if errors:
     raise SystemExit("; ".join(errors))
 PY
@@ -281,6 +276,29 @@ fi
 echo "ok    ci-invokes-live-published-byte-check"
 expect_ok "consumer-compat-live" check_consumer_compat \
   "${DEPENDABOT}" "${PINNED_ACTIONS}" "${CHANGELOG}"
+
+echo "== released CHANGELOG history remains authoritative =="
+cp "${CHANGELOG}" "${scratch}/CHANGELOG-released.md"
+python3 - "${scratch}/CHANGELOG-released.md" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+needle = "## [Unreleased]\n\n### Changed"
+if text.count(needle) != 1:
+    raise SystemExit("expected one Unreleased Changed heading")
+path.write_text(
+    text.replace(
+        needle,
+        "## [Unreleased]\n\n## [5.5.0] - 2026-08-30\n\n### Changed",
+        1,
+    ),
+    encoding="utf-8",
+)
+PY
+expect_ok "consumer-compat-released-history" check_consumer_compat \
+  "${DEPENDABOT}" "${PINNED_ACTIONS}" "${scratch}/CHANGELOG-released.md"
 if ! "${CHECKER}" --list-paths | grep -Fxq 'packs/open/cicd-starter/README.md'; then
   echo "owner snippet list omits packs/open/cicd-starter/README.md" >&2
   exit 1
