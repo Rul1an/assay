@@ -401,29 +401,40 @@ def ndjson_rows(path: Path, problems: list[str], label: str) -> list[dict]:
 
 
 
-def executable_mapping(
+def harness_files_snapshot(
     files,
     problems: list[str],
     *,
     origin: str,
+    schema: object = None,
     allowed_paths: list[str] | None = None,
     require_boolean: bool = False,
-) -> dict[str, bool] | None:
-    """Normalize path -> executable bool. One mapping for source and results."""
+) -> tuple[object, tuple[tuple[str, str, bool], ...]] | None:
+    """Normalize files[] to (schema, ((path, sha256, executable), ...)).
+
+    One snapshot for harness manifest files[] and results/harness-files.json.
+    Comparison is exact path, sha256, executable, schema, count, and order.
+    """
     if not isinstance(files, list) or not files:
         problems.append(f"{origin} has no files")
         return None
-    mapping: dict[str, bool] = {}
+    rows: list[tuple[str, str, bool]] = []
+    seen: dict[str, int] = {}
     for row in files:
         if not isinstance(row, dict) or not isinstance(row.get("path"), str):
             problems.append(f"{origin} row has no path")
             continue
         path = row["path"]
-        if path in mapping:
+        if path in seen:
             problems.append(f"{origin} path is duplicated: {path}")
             continue
+        seen[path] = len(rows)
         if allowed_paths is not None and path not in allowed_paths:
             problems.append(f"{origin} path is unknown: {path}")
+            continue
+        digest = row.get("sha256")
+        if not isinstance(digest, str) or len(digest) != 64:
+            problems.append(f"{origin} digest is unusable: {path}")
             continue
         flag = row.get("executable", False)
         if "executable" in row and not isinstance(row.get("executable"), bool):
@@ -435,23 +446,26 @@ def executable_mapping(
         if require_boolean and not isinstance(flag, bool):
             problems.append(f"invalid executable flag: {path}")
             continue
-        mapping[path] = flag is True
+        rows.append((path, digest, flag is True))
     if allowed_paths is not None:
         for path in allowed_paths:
-            if path not in mapping:
+            if path not in seen:
                 problems.append(f"{origin} missing path: {path}")
-    return mapping
+    return (schema, tuple(rows))
 
 
-def require_declared_executable_surface(mapping: dict[str, bool], problems: list[str]) -> None:
-    observed = [path for path, flag in mapping.items() if flag]
+def require_declared_executable_surface(
+    rows: tuple[tuple[str, str, bool], ...],
+    problems: list[str],
+) -> None:
+    observed = [path for path, _digest, flag in rows if flag]
     if observed != V1_EXECUTABLE_PATHS:
         problems.append("harness executable surface drifted")
 
 
 def validate_harness_files_observation(results: Path, manifest: dict, problems: list[str]) -> None:
     files = manifest.get("files")
-    declared = executable_mapping(files, problems, origin="harness manifest")
+    declared = harness_files_snapshot(files, problems, origin="harness manifest", schema=manifest.get("schema"))
     allowed = [
         row["path"]
         for row in files
@@ -466,15 +480,16 @@ def validate_harness_files_observation(results: Path, manifest: dict, problems: 
     if not isinstance(report, dict):
         problems.append("harness-files.json is not an object")
         return
-    observed = executable_mapping(
+    observed = harness_files_snapshot(
         report.get("files"),
         problems,
         origin="harness-files.json",
+        schema=report.get("schema"),
         allowed_paths=allowed or None,
         require_boolean=True,
     )
     if declared is not None and observed is not None and declared != observed:
-        problems.append("harness executable observation drifted")
+        problems.append("harness files observation drifted")
 
 
 def validate_manifest_files(
@@ -520,9 +535,9 @@ def validate_manifest_files(
     ]
     if paths != expected:
         problems.append("harness manifest must list exactly the reviewed harness inputs")
-    declared = executable_mapping(files, problems, origin="harness manifest")
+    declared = harness_files_snapshot(files, problems, origin="harness manifest", schema=manifest.get("schema"))
     if declared is not None:
-        require_declared_executable_surface(declared, problems)
+        require_declared_executable_surface(declared[1], problems)
 
 
 def validate_source_contract(
