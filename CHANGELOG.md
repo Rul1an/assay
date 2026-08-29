@@ -83,18 +83,22 @@ All notable changes to this project will be documented in this file.
 - The Claude plugin workflow now runs its bounded model session with
   `--output-format stream-json --verbose` and classifies the transcript through one
   validator, `classify_model_mediated_call`, that fixture replay and the live path both
-  call. `model_mediated_tool_call=pass` requires exactly one
-  `mcp__assay__assay_policy_decide` tool_use in an assistant-role envelope whose input is
-  exactly the pinned probe the live prompt asks for, exactly one
+  call. `model_mediated_tool_call=pass` requires exactly one decide tool_use whose name
+  is exactly `mcp__assay__assay_policy_decide` or exactly
+  `mcp__plugin_assay_assay__assay_policy_decide` in an assistant-role envelope whose
+  input is exactly the pinned probe the live prompt asks for, exactly one
   matching non-error tool_result in a user-role envelope after it, a payload typed against
   the server's contract with every `matches` member a non-empty string, a later assistant
   message quoting a value the model could not have taken from its own request, and exactly
   one terminal result envelope after that turn reporting `subtype: success` with
   `is_error` absent or the literal boolean `false` — checked by identity at both
-  `is_error` sites, so `0`, `"false"` and other stand-ins are refused. All of those envelopes must share one non-empty session id. Absence
-  stays `not_exercised`; malformed, oversized, duplicated, out-of-order, wrong-tool,
-  wrong-session, incomplete and error transcripts stay `unavailable`. Process exit is never
-  the evidence, and an incomplete observation never becomes clean (#2632, child of #2194).
+  `is_error` sites, so `0`, `"false"` and other stand-ins are refused. The pass detail
+  reports `observed_route=project` or `observed_route=plugin`. All of those envelopes must share one non-empty session id. Absence
+  of an accepted decide name, including a wrong Assay tool that is not decide, stays
+  `not_exercised` and keeps the invoked name in the detail. Malformed, oversized,
+  duplicated, out-of-order, wrong-session, incomplete and error transcripts stay
+  `unavailable`. Process exit is never
+  the evidence, and an incomplete observation never becomes clean (#2632, #2688, child of #2194).
 
   The record path uses its own **allowed** probe, separate from the blocked probe that
   proves policy-root resolution. `assay-mcp-server` maps a policy denial to MCP
