@@ -71,7 +71,8 @@ done
 [[ ! -e "$run_root" ]] || fail "run root already exists; refusing to reuse prior evidence: $run_root"
 mapfile -t _release_pair < <(
   "$PYTHON_BIN" - "$manifest" <<'PY'
-import json, pathlib, sys
+import json, pathlib, re, sys
+SAFE_RELEASE_TAG = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
 manifest = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 from_tag = manifest["from_tag"]
 to_tag = manifest["to_tag"]
@@ -79,6 +80,23 @@ if not isinstance(from_tag, str) or not from_tag.strip():
     raise SystemExit("harness manifest missing from_tag")
 if not isinstance(to_tag, str) or not to_tag.strip():
     raise SystemExit("harness manifest missing to_tag")
+if SAFE_RELEASE_TAG.fullmatch(from_tag) is None:
+    raise SystemExit("unsafe from_tag path component")
+if SAFE_RELEASE_TAG.fullmatch(to_tag) is None:
+    raise SystemExit("unsafe to_tag path component")
+relatives = manifest.get("required_retained_artifacts")
+if not isinstance(relatives, list) or not relatives:
+    raise SystemExit("harness manifest missing required_retained_artifacts")
+seen = []
+for relative in relatives:
+    if not isinstance(relative, str) or not relative:
+        raise SystemExit("required retained artifact path is invalid")
+    if relative in seen:
+        raise SystemExit(f"required retained artifact path is duplicated: {relative}")
+    posix = pathlib.PurePosixPath(relative)
+    if posix.is_absolute() or "." in posix.parts or ".." in posix.parts:
+        raise SystemExit(f"unsafe required retained artifact path: {relative}")
+    seen.append(relative)
 print(from_tag)
 print(to_tag)
 PY
@@ -219,8 +237,17 @@ relatives = manifest["required_retained_artifacts"]
 if not isinstance(relatives, list) or not relatives:
     raise SystemExit("harness manifest missing required_retained_artifacts")
 files = []
+seen = []
 for relative in relatives:
-    path = run_root_path.joinpath(*pathlib.PurePosixPath(relative).parts)
+    if not isinstance(relative, str) or not relative:
+        raise SystemExit("required retained artifact path is invalid")
+    if relative in seen:
+        raise SystemExit(f"required retained artifact path is duplicated: {relative}")
+    posix = pathlib.PurePosixPath(relative)
+    if posix.is_absolute() or "." in posix.parts or ".." in posix.parts:
+        raise SystemExit(f"unsafe required retained artifact path: {relative}")
+    seen.append(relative)
+    path = run_root_path.joinpath(*posix.parts)
     if not path.is_file():
         continue
     stat = path.stat()

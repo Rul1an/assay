@@ -26,7 +26,7 @@ python3 "$CHECKER" \
   --source-root "$ROOT"
 
 scratch="$(mktemp -d)"
-trap 'rm -rf "$scratch"' EXIT
+trap 'chmod -R u+w "$scratch" 2>/dev/null || true; rm -rf "$scratch"' EXIT
 
 write_stub_assay() {
   local dest="$1" version="$2"
@@ -179,6 +179,78 @@ PY
   fi
   grep -F "$expected" "$case_root/output" >/dev/null \
     || fail "source mutation $name missed expected guard: $expected"
+}
+
+write_mutated_manifest() {
+  local dest="$1"
+  python3 - "$MANIFEST" "$dest" "$2" "$3" <<'PY'
+import json, pathlib, sys
+src, dest = map(pathlib.Path, sys.argv[1:3])
+kind, value = sys.argv[3], sys.argv[4]
+manifest = json.loads(src.read_text(encoding="utf-8"))
+if kind == "from_tag":
+    manifest["from_tag"] = value
+elif kind == "to_tag":
+    manifest["to_tag"] = value
+elif kind == "artifact":
+    artifacts = list(manifest["required_retained_artifacts"])
+    artifacts[0] = value
+    manifest["required_retained_artifacts"] = artifacts
+elif kind == "duplicate_artifact":
+    artifacts = list(manifest["required_retained_artifacts"])
+    artifacts.insert(0, artifacts[0])
+    manifest["required_retained_artifacts"] = artifacts
+else:
+    raise SystemExit(f"unknown manifest mutation {kind}")
+dest.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+}
+
+expect_driver_unsafe_manifest() {
+  local name="$1" kind="$2" value="$3" expected="$4"
+  local case_root="$scratch/$name"
+  local run_root="$case_root/run"
+  local mutated="$case_root/manifest.json"
+  mkdir -p "$case_root"
+  write_mutated_manifest "$mutated" "$kind" "$value"
+  if IMAGE_OS=ubuntu24 IMAGE_VERSION=20260824.1.0 RUNNER_OS=Linux RUNNER_ARCH=X64 \
+    bash "$DRIVER" \
+      --manifest "$mutated" \
+      --harness-sha 6704d0bc4029f893f9558ab669ffc60918971943 \
+      --workflow-run-id test-historical \
+      --workflow-run-attempt 1 \
+      --run-root "$run_root" \
+      --fixture-root "$fixture" >"$case_root/driver.out" 2>&1; then
+    fail "driver mutation stayed green: $name"
+  fi
+  grep -F "$expected" "$case_root/driver.out" >/dev/null \
+    || fail "driver mutation $name missed expected guard: $expected"
+  if [[ -e "$run_root/results/journey-ledger.ndjson" ]]; then
+    if [[ -s "$run_root/results/journey-ledger.ndjson" ]]; then
+      fail "driver mutation $name wrote a ledger row"
+    fi
+  fi
+  if [[ -e "$run_root" ]]; then
+    fail "driver mutation $name materialized run_root"
+  fi
+}
+
+expect_path_safety_parity() {
+  local name="$1" kind="$2" value="$3" expected="$4"
+  local case_root="$scratch/parity-$name"
+  local mutated="$case_root/manifest.json"
+  mkdir -p "$case_root"
+  write_mutated_manifest "$mutated" "$kind" "$value"
+  if python3 "$CHECKER" \
+      --workflow "$WORKFLOW" \
+      --driver "$DRIVER" \
+      --manifest "$mutated" \
+      --source-root "$ROOT" >"$case_root/checker.out" 2>&1; then
+    fail "parity checker stayed green: $name"
+  fi
+  grep -F "$expected" "$case_root/checker.out" >/dev/null \
+    || fail "parity checker $name missed expected guard: $expected"
+  expect_driver_unsafe_manifest "parity-driver-$name" "$kind" "$value" "$expected"
 }
 
 fixture="$scratch/fixture"
@@ -593,5 +665,47 @@ expect_source_failure \
 if hosted_consumer_check "$scratch/self-attested"; then
   fail "forged retained record kept hosted consumer-checker green"
 fi
+
+outside_readable="$scratch/outside-readable-sentinel"
+printf 'SHOULD-NOT-READ\n' >"$outside_readable"
+outside_unreadable="$scratch/outside-unreadable-sentinel"
+printf 'SHOULD-NOT-READ\n' >"$outside_unreadable"
+chmod 000 "$outside_unreadable"
+escaped_tag="$scratch/escaped-tag-prefix"
+
+expect_driver_unsafe_manifest \
+  "unsafe-artifact-absolute" "artifact" "$outside_readable" \
+  "unsafe required retained artifact path: $outside_readable"
+expect_driver_unsafe_manifest \
+  "unsafe-artifact-unreadable" "artifact" "$outside_unreadable" \
+  "unsafe required retained artifact path: $outside_unreadable"
+expect_driver_unsafe_manifest \
+  "unsafe-artifact-dotdot" "artifact" "../../outside" \
+  "unsafe required retained artifact path: ../../outside"
+expect_driver_unsafe_manifest \
+  "unsafe-from-tag-dotdot" "from_tag" "../escape" \
+  "unsafe from_tag path component"
+expect_driver_unsafe_manifest \
+  "unsafe-from-tag-absolute" "from_tag" "$escaped_tag" \
+  "unsafe from_tag path component"
+[[ ! -e "$escaped_tag" ]] || fail "unsafe from_tag materialized an escaped prefix"
+expect_driver_unsafe_manifest \
+  "unsafe-to-tag-absolute" "to_tag" "$escaped_tag" \
+  "unsafe to_tag path component"
+[[ ! -e "$escaped_tag" ]] || fail "unsafe to_tag materialized an escaped prefix"
+expect_driver_unsafe_manifest \
+  "duplicate-required-artifact" "duplicate_artifact" unused \
+  "required retained artifact path is duplicated"
+
+expect_path_safety_parity \
+  "from-tag-dotdot" "from_tag" "../escape" "unsafe from_tag path component"
+expect_path_safety_parity \
+  "to-tag-absolute" "to_tag" "/tmp/historical-retention-escape" "unsafe to_tag path component"
+expect_path_safety_parity \
+  "artifact-absolute" "artifact" "/etc/passwd" "unsafe required retained artifact path: /etc/passwd"
+expect_path_safety_parity \
+  "artifact-dotdot" "artifact" "../../outside" "unsafe required retained artifact path: ../../outside"
+expect_path_safety_parity \
+  "artifact-duplicate" "duplicate_artifact" unused "required retained artifact path is duplicated"
 
 echo "ok: published-release historical-retention contract"

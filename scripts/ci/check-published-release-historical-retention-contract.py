@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path, PurePosixPath
 
 
@@ -19,6 +20,7 @@ MANIFEST_REL = "scripts/ci/fixtures/published-release-historical-retention/v1/ha
 SCHEMA = "assay.published_release_historical_retention.harness.v1"
 PIN_SCHEMA = "assay.published_release_historical_retention.run_pin.v1"
 INITIAL_ACTIVATION_REF = "initial"
+SAFE_RELEASE_TAG = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
 FORBIDDEN_VERDICT_KEYS = (
     "continuity_matched",
     "exact_once_ok",
@@ -90,15 +92,33 @@ def load_manifest(path: Path, problems: list[str]) -> dict:
     return manifest
 
 
+def unsafe_release_tag_reason(value: object, field: str) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    if SAFE_RELEASE_TAG.fullmatch(value) is None:
+        return f"unsafe {field} path component"
+    return None
+
+
 def release_pair(manifest: dict, problems: list[str]) -> tuple[str | None, str | None]:
     from_tag = manifest.get("from_tag")
     to_tag = manifest.get("to_tag")
     if not isinstance(from_tag, str) or not from_tag.strip():
         problems.append("harness manifest missing from_tag")
         from_tag = None
+    else:
+        reason = unsafe_release_tag_reason(from_tag, "from_tag")
+        if reason:
+            problems.append(reason)
+            from_tag = None
     if not isinstance(to_tag, str) or not to_tag.strip():
         problems.append("harness manifest missing to_tag")
         to_tag = None
+    else:
+        reason = unsafe_release_tag_reason(to_tag, "to_tag")
+        if reason:
+            problems.append(reason)
+            to_tag = None
     return from_tag, to_tag
 
 
@@ -189,6 +209,9 @@ def required_retained_artifacts(manifest: dict, problems: list[str]) -> list[str
     for item in items:
         if not isinstance(item, str) or not item:
             problems.append("required retained artifact path is invalid")
+            continue
+        if item in paths:
+            problems.append(f"required retained artifact path is duplicated: {item}")
             continue
         relative = PurePosixPath(item)
         if relative.is_absolute() or "." in relative.parts or ".." in relative.parts:
@@ -320,6 +343,25 @@ def validate_source_contract(
         "driver must record required retained artifacts from the harness manifest",
         problems,
     )
+    require(
+        driver_text,
+        "unsafe required retained artifact path",
+        "driver must reject unsafe required retained artifact paths before materialization",
+        problems,
+    )
+    require(
+        driver_text,
+        "unsafe from_tag path component",
+        "driver must reject an unsafe from_tag before materialization",
+        problems,
+    )
+    require(
+        driver_text,
+        "unsafe to_tag path component",
+        "driver must reject an unsafe to_tag before materialization",
+        problems,
+    )
+    required_retained_artifacts(manifest, problems)
     name_classes = command_name_classes(manifest.get("command_classes"), problems)
     for _, target_ref, last_ref in boundary_specs(manifest, problems):
         resolve_release_ref(from_tag, to_tag, target_ref, problems, "activation_targets")
