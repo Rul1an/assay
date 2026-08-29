@@ -29,6 +29,111 @@ trap 'rm -rf "$tmp"' EXIT
 
 release_tag="$(bash "$RELEASE_TAG_READER")"
 
+candidate_paths=(
+  Cargo.toml .github/assay-release-tag README.md docs/index.md
+  docs/getting-started/index.md docs/getting-started/installation.md
+  docs/getting-started/quickstart.md docs/getting-started/ci-integration.md
+  docs/reference/cli/index.md docs/AIcontext/user-flows.md docs/use-cases/ci-gate.md
+)
+
+make_candidate() {
+  local destination="$1" version="$2"
+  local path
+  for path in "${candidate_paths[@]}"; do
+    mkdir -p "$destination/$(dirname "$path")"
+    cp "$ROOT/$path" "$destination/$path"
+  done
+  python3 - "$destination/Cargo.toml" "$version" <<'PY'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+section = re.search(r"(?ms)^\[workspace\.package\]$(.*?)(?=^\[|\Z)", text)
+if not section:
+    raise SystemExit("workspace.package section is missing")
+replacement = re.sub(
+    r'^version\s*=\s*"[^"]+"\s*$',
+    f'version = "{sys.argv[2]}"',
+    section.group(1),
+    count=1,
+    flags=re.M,
+)
+if not re.search(r'^version\s*=\s*"[^"]+"\s*$', section.group(1), re.M):
+    raise SystemExit("workspace.package version is missing")
+path.write_text(text[: section.start(1)] + replacement + text[section.end(1) :], encoding="utf-8")
+PY
+}
+
+fixture_gh="$tmp/fixture-gh"
+cat >"$fixture_gh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "${1:-}" == api && "${2:-}" =~ /contents/(.*)\?ref= ]] || exit 64
+path="${BASH_REMATCH[1]}"
+python3 - "$FIXTURE_ROOT/$path" <<'PY'
+import base64
+import json
+import pathlib
+import sys
+
+print(json.dumps({"content": base64.b64encode(pathlib.Path(sys.argv[1]).read_bytes()).decode()}))
+PY
+SH
+chmod +x "$fixture_gh"
+
+# Candidate source version and last-published install truth are independent.
+# A release-prep tree may lead the install pin until the new release exists.
+current_candidate="$tmp/current-candidate"
+make_candidate "$current_candidate" 5.4.0
+expect_status 0 env FIXTURE_ROOT="$current_candidate" GH="$fixture_gh" \
+  VERSION=5.4.0 PIN_SHA="$(git -C "$ROOT" rev-parse HEAD)" "$ORACLE" --pre-tag
+
+next_candidate="$tmp/next-candidate"
+make_candidate "$next_candidate" 5.5.0
+expect_status 0 env FIXTURE_ROOT="$next_candidate" GH="$fixture_gh" \
+  VERSION=5.5.0 PIN_SHA="$(git -C "$ROOT" rev-parse HEAD)" "$ORACLE" --pre-tag
+
+drift_candidate="$tmp/drift-candidate"
+cp -R "$current_candidate" "$drift_candidate"
+printf 'v5.3.0\n' >"$drift_candidate/.github/assay-release-tag"
+expect_status 1 env FIXTURE_ROOT="$drift_candidate" GH="$fixture_gh" \
+  VERSION=5.4.0 PIN_SHA="$(git -C "$ROOT" rev-parse HEAD)" "$ORACLE" --pre-tag
+
+malformed_candidate="$tmp/malformed-candidate"
+cp -R "$current_candidate" "$malformed_candidate"
+printf 'latest\n' >"$malformed_candidate/.github/assay-release-tag"
+expect_status 1 env FIXTURE_ROOT="$malformed_candidate" GH="$fixture_gh" \
+  VERSION=5.4.0 PIN_SHA="$(git -C "$ROOT" rev-parse HEAD)" "$ORACLE" --pre-tag
+
+# Mutation proof: restoring the old release-specific literal must fail on the
+# current candidate instead of turning the next release into another edit site.
+pin_mutant_dir="$tmp/pin-mutant"
+mkdir -p "$pin_mutant_dir"
+cp "$ORACLE" "$ASSET_CONTRACT" "$RELEASE_TAG_READER" "$pin_mutant_dir/"
+python3 - "$pin_mutant_dir/verify-release.sh" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+dynamic_pin = 'pin = f"cargo install assay-cli --version {published_version} --locked"'
+dynamic_link = 'link = f"Current release: [`{published_tag}`](https://github.com/Rul1an/assay/releases/tag/{published_tag})"'
+if text.count(dynamic_pin) != 1 or text.count(dynamic_link) != 1:
+    raise SystemExit("published release derivation anchors moved")
+text = text.replace(dynamic_pin, 'pin = "cargo install assay-cli --version 5.3.0 --locked"', 1)
+text = text.replace(
+    dynamic_link,
+    'link = "Current release: [`v5.3.0`](https://github.com/Rul1an/assay/releases/tag/v5.3.0)"',
+    1,
+)
+path.write_text(text, encoding="utf-8")
+PY
+expect_status 1 env FIXTURE_ROOT="$current_candidate" GH="$fixture_gh" \
+  VERSION=5.4.0 PIN_SHA="$(git -C "$ROOT" rev-parse HEAD)" \
+  "$pin_mutant_dir/verify-release.sh" --pre-tag
+
 expected_assets="$("$ORACLE" --unit-expected-assets 5.3.0)"
 [[ "$(printf '%s\n' "$expected_assets" | wc -l | tr -d ' ')" -eq 23 ]] \
   || fail "asset generator did not produce 23 names"

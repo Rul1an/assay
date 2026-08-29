@@ -263,7 +263,7 @@ PY
 }
 
 check_tag_tree() {
-  local sha="$1" tree="$2"
+  local sha="$1" tree="$2" published_tag
   valid_sha "$sha" || finding "refused non-canonical or abbreviated tag commit SHA: $sha"
   mkdir -p "$tree"
   local path
@@ -273,31 +273,34 @@ check_tag_tree() {
     docs/reference/cli/index.md docs/AIcontext/user-flows.md docs/use-cases/ci-gate.md; do
     copy_tag_file "$sha" "$path" "$tree/$path" || infra "could not materialize tag tree file: $path"
   done
-  "$PYTHON" - "$tree" "$VERSION" <<'PY'
+  published_tag="$(
+    ASSAY_RELEASE_TAG_FILE="$tree/.github/assay-release-tag" \
+      bash "$SCRIPT_DIR/read-assay-release-tag.sh"
+  )" || finding "candidate tree has an invalid published release pin"
+  "$PYTHON" - "$tree" "$VERSION" "$published_tag" <<'PY'
 import pathlib
 import re
 import sys
 
-root, version = pathlib.Path(sys.argv[1]), sys.argv[2]
+root, version, published_tag = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+published_version = published_tag.removeprefix("v")
 cargo = (root / "Cargo.toml").read_text(encoding="utf-8")
 section = re.search(r"(?ms)^\[workspace\.package\]$(.*?)(?=^\[|\Z)", cargo)
 if not section or not re.search(rf'^version\s*=\s*"{re.escape(version)}"\s*$', section.group(1), re.M):
     raise SystemExit("workspace.package.version does not equal release version")
-if (root / ".github/assay-release-tag").read_bytes() != b"v5.3.0\n":
-    raise SystemExit("assay-release-tag is not exactly the separate v5.3.0 install pin")
 install_counts = {
     "README.md": 1, "docs/getting-started/index.md": 1,
     "docs/getting-started/installation.md": 2, "docs/getting-started/quickstart.md": 1,
     "docs/getting-started/ci-integration.md": 4, "docs/reference/cli/index.md": 1,
     "docs/AIcontext/user-flows.md": 1, "docs/use-cases/ci-gate.md": 1,
 }
-pin = "cargo install assay-cli --version 5.3.0 --locked"
+pin = f"cargo install assay-cli --version {published_version} --locked"
 for path, count in install_counts.items():
     text = (root / path).read_text(encoding="utf-8")
     commands = re.findall(r"cargo install assay-cli --version \S+ --locked", text)
     if len(commands) != count or commands.count(pin) != count:
         raise SystemExit(f"{path}: install pin drift")
-link = "Current release: [`v5.3.0`](https://github.com/Rul1an/assay/releases/tag/v5.3.0)"
+link = f"Current release: [`{published_tag}`](https://github.com/Rul1an/assay/releases/tag/{published_tag})"
 for path in ("README.md", "docs/index.md"):
     text = (root / path).read_text(encoding="utf-8")
     if text.count("Current release:") != 1 or text.count(link) != 1:
