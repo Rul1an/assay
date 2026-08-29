@@ -73,6 +73,7 @@ FORBIDDEN_CLAIM_WORDS = (
     "retroactive",
 )
 SELF_ATTEST_NEEDLE = "continuity_matched"
+MAX_HARNESS_FILES_BYTES = 1024 * 1024
 
 
 def require(text: str, needle: str, message: str, problems: list[str]) -> None:
@@ -463,6 +464,24 @@ def require_declared_executable_surface(
         problems.append("harness executable surface drifted")
 
 
+def read_bounded_json(path: Path, label: str, max_bytes: int) -> object:
+    try:
+        with path.open("rb") as stream:
+            raw = stream.read(max_bytes + 1)
+    except OSError as error:
+        raise ValueError(f"{label} is unreadable: {error}") from error
+    if len(raw) > max_bytes:
+        raise ValueError(f"{label} exceeds {max_bytes}-byte limit")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError(f"{label} is unreadable: invalid UTF-8") from error
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{label} is unreadable: {error}") from error
+
+
 def validate_harness_files_observation(results: Path, manifest: dict, problems: list[str]) -> None:
     files = manifest.get("files")
     declared = harness_files_snapshot(files, problems, origin="harness manifest", schema=manifest.get("schema"))
@@ -473,9 +492,9 @@ def validate_harness_files_observation(results: Path, manifest: dict, problems: 
     ] if isinstance(files, list) else []
     report_path = results / "harness-files.json"
     try:
-        report = json.loads(report_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        problems.append(f"harness-files.json is unreadable: {error}")
+        report = read_bounded_json(report_path, "harness-files.json", MAX_HARNESS_FILES_BYTES)
+    except ValueError as error:
+        problems.append(str(error))
         return
     if not isinstance(report, dict):
         problems.append("harness-files.json is not an object")

@@ -970,6 +970,12 @@ write_report(path, report)
 dest = copy_results("harness-files-missing")
 (dest / "harness-files.json").unlink()
 
+dest = copy_results("harness-files-over-limit")
+(dest / "harness-files.json").write_bytes(b" " * (1_048_576 + 1))
+
+dest = copy_results("harness-files-invalid-utf8")
+(dest / "harness-files.json").write_bytes(b"\xff")
+
 dest = copy_results("harness-files-malformed-flag")
 path, report = load_report(dest)
 set_flag(report, HELPER, "true")
@@ -1013,6 +1019,10 @@ expect_results_failure "harness-files-false-to-true" "$scratch/harness-files-fal
   "harness files observation drifted"
 expect_results_failure "harness-files-missing" "$scratch/harness-files-missing" \
   "harness-files.json is unreadable"
+expect_results_failure "harness-files-over-limit" "$scratch/harness-files-over-limit" \
+  "harness-files.json exceeds 1048576-byte limit"
+expect_results_failure "harness-files-invalid-utf8" "$scratch/harness-files-invalid-utf8" \
+  "harness-files.json is unreadable: invalid UTF-8"
 expect_results_failure "harness-files-malformed-flag" "$scratch/harness-files-malformed-flag" \
   "invalid executable flag"
 expect_results_failure "harness-files-duplicate-path" "$scratch/harness-files-duplicate-path" \
