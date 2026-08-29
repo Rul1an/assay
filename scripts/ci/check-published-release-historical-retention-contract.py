@@ -442,6 +442,16 @@ def validate_manifest_files(
     ]
     if paths != expected:
         problems.append("harness manifest must list exactly the reviewed harness inputs")
+    for row in files:
+        if isinstance(row, dict) and "executable" in row and not isinstance(row.get("executable"), bool):
+            problems.append(f"invalid executable flag: {row.get('path')}")
+    executable_paths = [
+        row.get("path")
+        for row in files
+        if isinstance(row, dict) and row.get("executable") is True
+    ]
+    if executable_paths != ["scripts/ci/release_archive_inventory.sh"]:
+        problems.append("harness executable surface drifted")
 
 
 def validate_source_contract(
@@ -525,6 +535,24 @@ def validate_source_contract(
         driver_text,
         "harness manifest release pair drifted from the v1 denominator",
         "driver must reject a drifted v1 release pair before materialization",
+        problems,
+    )
+    require(
+        driver_text,
+        "destination.chmod(0o755)",
+        "driver must chmod executable harness files",
+        problems,
+    )
+    require(
+        driver_text,
+        "invalid executable flag",
+        "driver must reject a non-boolean executable flag",
+        problems,
+    )
+    require(
+        driver_text,
+        '"executable": executable',
+        "driver must report executable in harness-files.json",
         problems,
     )
     required_retained_artifacts(manifest, problems)

@@ -315,6 +315,112 @@ PY
     || fail "hook-decoy $helper_path missed expected guard: $expected"
 }
 
+expect_materialized_helper_modes() {
+  local helper="$good_root/harness/scripts/ci/release_archive_inventory.sh"
+  local control="$good_root/harness/scripts/ci/bounded_download.py"
+  local report="$good_root/results/harness-files.json"
+  [[ -f "$helper" ]] || fail "materialized inventory helper is missing"
+  [[ -f "$control" ]] || fail "materialized non-executable control is missing"
+  [[ -f "$report" ]] || fail "harness-files.json is missing"
+  [[ -x "$helper" ]] || fail "declared executable helper materialized non-executable"
+  [[ ! -x "$control" ]] || fail "non-executable control became executable"
+  python3 - "$report" <<'PY'
+import json, pathlib, sys
+report = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+files = report.get("files")
+if not isinstance(files, list):
+    raise SystemExit("harness-files.json has no files")
+by_path = {row.get("path"): row for row in files if isinstance(row, dict)}
+helper = by_path.get("scripts/ci/release_archive_inventory.sh")
+control = by_path.get("scripts/ci/bounded_download.py")
+if not helper or helper.get("executable") is not True:
+    raise SystemExit("inventory helper executable report drifted")
+if not control or control.get("executable") is not False:
+    raise SystemExit("non-executable control executable report drifted")
+PY
+}
+
+expect_inventory_executable_flag_removed() {
+  local case_root="$scratch/inventory-executable-flag-removed"
+  local expected="harness executable surface drifted"
+  mkdir -p "$case_root"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$case_root/manifest.json" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+manifest = json.loads(path.read_text(encoding="utf-8"))
+helper = "scripts/ci/release_archive_inventory.sh"
+found = False
+for row in manifest.get("files") or []:
+    if row.get("path") == helper:
+        row["executable"] = False
+        found = True
+if not found:
+    raise SystemExit("inventory helper row missing from manifest")
+path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  if python3 "$CHECKER" \
+      --workflow "$WORKFLOW" \
+      --driver "$DRIVER" \
+      --manifest "$case_root/manifest.json" \
+      --source-root "$ROOT" >"$case_root/output" 2>&1; then
+    fail "source mutation stayed green: inventory-executable-flag-removed"
+  fi
+  grep -F "$expected" "$case_root/output" >/dev/null \
+    || fail "inventory-executable-flag-removed missed expected guard: $expected"
+}
+
+expect_coordinated_executable_escape() {
+  local case_root="$scratch/coordinated-executable-escape"
+  local expected="harness executable surface drifted"
+  mkdir -p "$case_root"
+  cp "$WORKFLOW" "$case_root/workflow.yml"
+  cp "$DRIVER" "$case_root/driver.sh"
+  cp "$CHECKER" "$case_root/checker.py"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$case_root/manifest.json" "$case_root/checker.py" <<'PY'
+import json, pathlib, sys
+manifest_path, checker_path = map(pathlib.Path, sys.argv[1:])
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+helper = "scripts/ci/release_archive_inventory.sh"
+found = False
+for row in manifest.get("files") or []:
+    if row.get("path") == helper:
+        row["executable"] = False
+        found = True
+if not found:
+    raise SystemExit("inventory helper row missing from manifest")
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+text = checker_path.read_text(encoding="utf-8")
+old = 'if executable_paths != ["scripts/ci/release_archive_inventory.sh"]:'
+new = "if executable_paths != []:"
+if old in text:
+    if text.count(old) != 1:
+        raise SystemExit(f"executable_paths pin count: {text.count(old)}")
+    text = text.replace(old, new, 1)
+checker_path.write_text(text, encoding="utf-8")
+PY
+  if python3 "$CHECKER" \
+      --workflow "$case_root/workflow.yml" \
+      --driver "$case_root/driver.sh" \
+      --manifest "$case_root/manifest.json" \
+      --source-root "$ROOT" >"$case_root/live-checker.out" 2>&1; then
+    fail "source mutation stayed green: coordinated-executable-escape live-checker"
+  fi
+  grep -F "$expected" "$case_root/live-checker.out" >/dev/null \
+    || fail "coordinated-executable-escape live-checker missed expected guard: $expected"
+  if python3 "$case_root/checker.py" \
+      --workflow "$WORKFLOW" \
+      --driver "$DRIVER" \
+      --manifest "$MANIFEST" \
+      --source-root "$ROOT" \
+      --pre-commit "$ROOT/.pre-commit-config.yaml" >"$case_root/mutated-checker.out" 2>&1; then
+    fail "source mutation stayed green: coordinated-executable-escape mutated-checker"
+  fi
+  grep -F "$expected" "$case_root/mutated-checker.out" >/dev/null \
+    || fail "coordinated-executable-escape mutated-checker missed expected guard: $expected"
+}
+
 expect_omitted_reviewed_inventory_helper() {
   local case_root="$scratch/omitted-release-archive-inventory"
   local expected="harness manifest must list exactly the reviewed harness inputs"
@@ -408,6 +514,7 @@ build_fixture_root "$fixture"
 good_root="$scratch/good"
 run_driver "$good_root" "$fixture"
 check_results "$good_root"
+expect_materialized_helper_modes
 if python3 "$CHECKER" --results "$good_root/results" --manifest "$MANIFEST" \
     >"$scratch/missing-expected-head.out" 2>&1; then
   fail "results mutation stayed green: missing-expected-head-sha"
@@ -934,6 +1041,13 @@ expect_path_safety_parity \
   "harness manifest release pair drifted from the v1 denominator"
 
 expect_omitted_reviewed_inventory_helper
+expect_inventory_executable_flag_removed
+expect_coordinated_executable_escape
+expect_source_failure \
+  "inventory-executable-flag-string" "manifest.json" \
+  '"executable": true' \
+  '"executable": "true"' \
+  "invalid executable flag"
 
 while IFS= read -r helper; do
   expect_precommit_helper_decoy "$helper"

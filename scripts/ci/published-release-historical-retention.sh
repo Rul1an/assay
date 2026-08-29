@@ -155,7 +155,12 @@ for item in manifest["files"]:
     destination = output_path.joinpath(*relative.parts)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(data)
-    report.append({"path": str(relative), "sha256": digest})
+    executable = item.get("executable", False)
+    if not isinstance(executable, bool):
+        raise SystemExit(f"invalid executable flag: {relative}")
+    if executable:
+        destination.chmod(0o755)
+    report.append({"path": str(relative), "sha256": digest, "executable": executable})
 report_path.write_text(json.dumps({"schema": manifest["schema"], "files": report}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 
