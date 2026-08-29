@@ -66,6 +66,18 @@ python3 "$CHECKER" \
 
 scratch="$(mktemp -d)"
 trap 'chmod -R u+w "$scratch" 2>/dev/null || true; rm -rf "$scratch"' EXIT
+V54_DECISION_B64="$(python3 - "$ROOT/crates/assay-mcp-server/tests/fixtures/enforcement_decision_contract.v0.json" <<'PY'
+import base64
+import json
+import pathlib
+import sys
+
+fixture = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+record = fixture["records"][1]["record"]
+canonical = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+print(base64.b64encode(canonical.encode("utf-8")).decode("ascii"))
+PY
+)"
 
 write_stub_assay() {
   local dest="$1" version="$2"
@@ -134,17 +146,23 @@ case "\$cmd" in
     bundle=""
     prev=""
     for arg in "\$@"; do
-      if [[ "\$prev" == "-o" || "\$prev" == "--out" || "\$prev" == "--bundle-out" ]]; then
-        out="\$arg"
-      elif [[ "\$prev" == "--profile" ]]; then
-        profile="\$arg"
-      elif [[ "\$prev" == "--decisions" ]]; then
-        decisions="\$arg"
-      elif [[ -z "\$bundle" && "\$arg" != --* ]]; then
-        bundle="\$arg"
-      fi
-      prev="\$arg"
+      case "\$prev" in
+        out) out="\$arg"; prev=""; continue ;;
+        profile) profile="\$arg"; prev=""; continue ;;
+        decisions) decisions="\$arg"; prev=""; continue ;;
+        skip) prev=""; continue ;;
+      esac
+      case "\$arg" in
+        -o|--out|--bundle-out) prev="out" ;;
+        --profile) prev="profile" ;;
+        --decisions) prev="decisions" ;;
+        --format|--profile-version) prev="skip" ;;
+        --*) ;;
+        privileged-mcp-action) ;;
+        *) [[ -n "\$bundle" ]] || bundle="\$arg" ;;
+      esac
     done
+    [[ -z "\$prev" ]] || exit 2
     case "\$sub" in
       export)
         [[ -n "\$out" && -f "\$profile" ]] || exit 2
@@ -163,27 +181,13 @@ case "\$cmd" in
       verify-privileged-mcp-action)
         [[ "\$VERSION" == "5.4.0" && -f "\$bundle" ]] || exit 2
         python3 - "\$bundle" <<'PY'
+import base64
 import json
-import re
 import sys
 
 row = json.loads(open(sys.argv[1], encoding="utf-8").readline())
-required_non_claims = {
-    "policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)",
-    "an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)",
-    "credential referenced by alias only, never the token or declared scopes",
-    "deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict",
-    "not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)",
-}
-digest = row.get("action", {}).get("target_digest")
-non_claims = row.get("non_claims")
-valid = (
-    isinstance(digest, str)
-    and re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is not None
-    and isinstance(non_claims, list)
-    and required_non_claims.issubset(non_claims)
-)
-raise SystemExit(0 if valid else 2)
+expected = json.loads(base64.b64decode("$V54_DECISION_B64").decode("utf-8"))
+raise SystemExit(0 if row == expected else 2)
 PY
         ;;
       *)
@@ -826,6 +830,9 @@ good_root="$scratch/good"
 run_driver "$good_root" "$fixture"
 check_results "$good_root"
 expect_materialized_helper_modes
+"$fixture/v5.4.0/bin/assay" evidence verify-privileged-mcp-action \
+  --format json "$good_root/results/v1.bundle" --profile-version v1 \
+  || fail "v5.4 fixture parser treated an option value as the positional bundle"
 expect_v1_decision_fixture_failure \
   "v1-null-target-digest" \
   '"target_digest":"sha256:df4be9dfaa840f625ba03f5d577e6276a732f565c9527521138cfee1874546cf"' \
@@ -834,6 +841,10 @@ expect_v1_decision_fixture_failure \
   "v1-missing-producer-non-claim" \
   'not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)' \
   'not the observation or mechanism artifact'
+expect_v1_decision_fixture_failure \
+  "v1-invalid-decision-enum" \
+  '"decision":"deny"' \
+  '"decision":"approve"'
 if python3 "$CHECKER" --results "$good_root/results" --manifest "$MANIFEST" \
     >"$scratch/missing-expected-head.out" 2>&1; then
   fail "results mutation stayed green: missing-expected-head-sha"
