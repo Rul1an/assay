@@ -20,6 +20,44 @@ fail() {
 [[ -f "$DRIVER" ]] || fail "missing historical-retention driver"
 [[ -f "$MANIFEST" ]] || fail "missing historical-retention harness manifest"
 
+python3 - "$CHECKER" <<'PY'
+import importlib.util
+import pathlib
+import sys
+
+checker = pathlib.Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location("historical_retention_checker", checker)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+limit = module.MAX_HARNESS_FILES_BYTES
+requested = []
+
+class GuardedStream:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self, size=-1):
+        requested.append(size)
+        if size != limit + 1:
+            raise AssertionError(f"bounded JSON reader requested {size}, expected {limit + 1}")
+        return b"{}"
+
+class ProbePath:
+    def open(self, mode):
+        if mode != "rb":
+            raise AssertionError(f"bounded JSON reader opened in {mode!r}")
+        return GuardedStream()
+
+if module.read_bounded_json(ProbePath(), "probe.json", limit) != {}:
+    raise SystemExit("bounded JSON reader changed the valid object")
+if requested != [limit + 1]:
+    raise SystemExit(f"bounded JSON reader issued unexpected reads: {requested}")
+PY
+
 python3 "$CHECKER" \
   --workflow "$WORKFLOW" \
   --driver "$DRIVER" \
