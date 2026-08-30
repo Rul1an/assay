@@ -21,10 +21,14 @@ trap cleanup EXIT
 
 # Build the publish artifact without compiling it. The packaged manifest and
 # README are authoritative; never substitute checkout metadata or paths.
-if ! CARGO_TARGET_DIR="$PACKAGE_DIR" cargo package -p assay-cli --no-verify --allow-dirty >/dev/null; then
-  echo "ERROR: cargo package -p assay-cli --no-verify --allow-dirty failed" >&2
+# --exclude-lockfile lets cargo emit a real .crate before unpublished workspace
+# deps exist on crates.io. That is README-shape only: not installability proof
+# and not lockfile proof.
+if ! CARGO_TARGET_DIR="$PACKAGE_DIR" cargo package -p assay-cli --exclude-lockfile --no-verify --allow-dirty >/dev/null; then
+  echo "ERROR: cargo package -p assay-cli --exclude-lockfile --no-verify --allow-dirty failed" >&2
   exit 1
 fi
+echo "NOTE: --exclude-lockfile is README-shape only; not installability proof and not lockfile proof."
 
 shopt -s nullglob
 archives=("$PACKAGE_DIR"/package/assay-cli-*.crate)
