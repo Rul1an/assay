@@ -1,6 +1,6 @@
 # Installation
 
-The current release is Assay `5.4.0` (`v5.4.0`). Install the CLI from one of the verified channels below.
+The current release is Assay `5.5.1` (`v5.5.1`). Install the CLI from one of the verified channels below.
 
 ## CLI
 
@@ -13,19 +13,19 @@ curl -fsSL https://getassay.dev/install.sh | sh
 ### Cargo
 
 ```bash
-cargo install assay-cli --version 5.4.0 --locked
+cargo install assay-cli --version 5.5.1 --locked
 ```
 
 The crate is `assay-cli`; the installed binary is `assay`. Releases starting with 3.36.0 declare Rust 1.89 as their MSRV. Repository development currently uses Rust 1.96.
 
 ### GitHub release assets
 
-Download the asset for [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0), verify its published checksum, and place the binary on `PATH`.
+Download the asset for [`v5.5.1`](https://github.com/Rul1an/assay/releases/tag/v5.5.1), verify its published checksum, and place the binary on `PATH`.
 
 Windows x86-64 uses:
 
 ```text
-assay-v5.4.0-x86_64-pc-windows-msvc.zip
+assay-v5.5.1-x86_64-pc-windows-msvc.zip
 ```
 
 Assay does not currently document Homebrew, Scoop, or a public GHCR image as verified release channels.
@@ -49,14 +49,14 @@ assay --version
 Expected output:
 
 ```text
-assay 5.4.0
+assay 5.5.1
 ```
 
-The generated [agent golden path](../guides/agent-golden-path.md) additionally uses `assay version`, whose release-pinned output is `5.4.0`.
+The generated [agent golden path](../guides/agent-golden-path.md) additionally uses `assay version`, whose release-pinned output is `5.5.1`.
 
 ## Development build
 
-Behavior merged after `v5.4.0` is `Unreleased` and is not part of the release claim above.
+Behavior merged after `v5.5.1` is `Unreleased` and is not part of the release claim above.
 
 ```bash
 git clone https://github.com/Rul1an/assay.git
@@ -71,7 +71,7 @@ For source installation in CI:
 
 ```yaml
 - name: Install Assay
-  run: cargo install assay-cli --version 5.4.0 --locked
+  run: cargo install assay-cli --version 5.5.1 --locked
 ```
 
 The GitHub Action is available as `Rul1an/assay-action@v3`; follow the [CI integration guide](ci-integration.md) for the repository's current permissions and pinning policy.

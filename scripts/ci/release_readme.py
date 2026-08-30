@@ -18,9 +18,9 @@ RELEASE_RE = re.compile(
 VERSION_RE = re.compile(rf"^{VERSION_PATTERN}$")
 TAG_RE = re.compile(rf"^v({VERSION_PATTERN})$")
 CHECKOUT_RE = re.compile(
-    r"For v5\.4\.0, run the last command from a source checkout\.\s+"
-    r"The installer and the\s+published v5\.4\.0 CLI archive install the binary "
-    r"but do not carry the bounded\s+quickstart assets\."
+    r"For v5\.5\.1, run the last command from a source checkout or an extracted published CLI archive\.\s+"
+    r"The installer is binary-only and does not carry the bounded\s+"
+    r"quickstart assets\."
 )
 FIRST_PARTY_GITHUB_RE = re.compile(
     r"^https://github\.com/Rul1an/assay/(blob|tree|raw)/([^/]+)(?:/(.*))?$"
