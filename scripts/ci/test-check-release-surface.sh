@@ -118,7 +118,7 @@ printf '%s\n' "- [RGE-Bench](https://github.com/rge-bench/rge-bench) — $rge_cl
 printf '%s\n' "- [RGE-Bench](https://github.com/rge-bench/rge-bench): $rge_claim" > "$TMP/llms.txt"
 cat > "$TMP/examples/mcp-quickstart/README.md" <<'DOC'
 Assay CLI via the release installer.
-For v5.4.0, run this from a source checkout. Published CLI archives do not carry this quickstart.
+For v5.5.1, run this from a source checkout or an extracted published CLI archive. The installer is binary-only and does not carry this bounded quickstart.
 DOC
 printf '%s\n' 'Current release: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0)' > "$TMP/docs/index.md"
 printf '%s\n' 'Codex uses .codex/config.toml.' > "$TMP/docs/guides/editor-mcp-recipe.md"
@@ -328,9 +328,15 @@ append_and_expect_failure stale-security-supported-line SECURITY.md \
 append_and_expect_failure indented-stale-security-supported-line SECURITY.md \
   ' | **v2.x** | ✅ Supported |' \
   'historical support-table row'
-mutate_and_expect_failure extracted-archive-claim examples/mcp-quickstart/README.md \
-  's/run this from a source checkout/run this from the root of an extracted CLI release archive/' \
-  'quickstart must not claim assets exist in published CLI archives'
+mutate_and_expect_failure missing-archive-run-root examples/mcp-quickstart/README.md \
+  's/source checkout or an extracted published CLI archive/source checkout/' \
+  'quickstart must name source checkout or extracted published CLI archive as the run root'
+mutate_and_expect_failure installer-carries-quickstart examples/mcp-quickstart/README.md \
+  's/The installer is binary-only and does not carry this bounded quickstart/The installer carries this bounded quickstart/' \
+  'quickstart must keep the installer binary-only'
+append_and_expect_failure packed-archive-root-claim examples/mcp-quickstart/README.md \
+  'From the root of this extracted CLI archive' \
+  'packed-archive-only root claim belongs in the assembled README'
 mutate_and_expect_failure unsupported-codex-guide docs/guides/editor-mcp-recipe.md \
   's/Codex uses .codex\/config.toml./assay mcp config-path codex/' \
   'config-path does not support Codex'
@@ -460,8 +466,8 @@ mutate_and_expect_failure stale-codespaces-host demo/CODESPACES-PLAYBOOK.md \
   's#https://getassay.dev/install.sh#https://assay.dev/install.sh#' \
   'unrelated assay.dev onboarding URL'
 
-if [ "$mutation_count" -ne 62 ]; then
-  echo "FAIL: expected 62 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 64 ]; then
+  echo "FAIL: expected 64 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

@@ -347,9 +347,15 @@ check_absent_regex README.md 'verified release installer' \
   'installer wording must not imply checksum or provenance verification'
 check_absent_regex examples/mcp-quickstart/README.md 'verified release installer' \
   'quickstart installer wording must not imply checksum or provenance verification'
+check_contains_fixed examples/mcp-quickstart/README.md \
+  'source checkout or an extracted published CLI archive' \
+  'quickstart must name source checkout or extracted published CLI archive as the run root'
+check_contains_fixed examples/mcp-quickstart/README.md \
+  'The installer is binary-only and does not carry this bounded quickstart' \
+  'quickstart must keep the installer binary-only'
 check_absent_regex examples/mcp-quickstart/README.md \
-  'root of an extracted CLI release archive|archive carries this bounded quickstart' \
-  'quickstart must not claim assets exist in published CLI archives'
+  'From the root of this extracted CLI archive' \
+  'packed-archive-only root claim belongs in the assembled README'
 check_rust_cli_installs docs/getting-started/index.md 1
 check_rust_cli_installs docs/getting-started/installation.md 2
 check_rust_cli_installs docs/getting-started/quickstart.md 1

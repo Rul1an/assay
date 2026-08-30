@@ -63,9 +63,8 @@ cargo install assay-cli --version 5.4.0 --locked
 
 Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
 
-For v5.4.0, run the last command from a source checkout. The installer and the
-published v5.4.0 CLI archive install the binary but do not carry the bounded
-quickstart assets.
+For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.
+The installer is binary-only and does not carry the bounded quickstart assets.
 
 Historical note: v5.3.0 shipped earlier.
 """
@@ -196,19 +195,34 @@ class ReleaseArchiveShape(unittest.TestCase):
             fenced_block_after(example_readme, "Captured runner output"), CAPTURED_OUTPUT
         )
 
-    def test_readmes_do_not_claim_the_quickstart_is_in_cli_archives(self):
+    def test_readmes_split_installer_from_published_cli_archives(self):
         root_readme = (ROOT / "README.md").read_text(encoding="utf-8")
         example_readme = (ROOT / "examples/mcp-quickstart/README.md").read_text(
             encoding="utf-8"
         )
+        module = load_module()
 
+        self.assertIn(CHECKOUT_SENTENCE, root_readme)
         self.assertIn(
-            "For v5.4.0, run the last command from a source checkout.",
+            "The installer is binary-only and does not carry the bounded quickstart assets.",
             root_readme,
         )
-        for readme in (root_readme, example_readme):
-            self.assertNotIn("root of an extracted CLI release archive", readme)
-            self.assertNotIn("archive carries this bounded quickstart", readme)
+        self.assertNotIn(
+            "published v5.4.0 CLI archive install the binary but do not carry",
+            root_readme,
+        )
+        self.assertNotIn(ARCHIVE_ROOT_CLAIM, root_readme)
+        self.assertNotIn(ARCHIVE_ROOT_CLAIM, example_readme)
+        self.assertIn(
+            "source checkout or an extracted published CLI archive",
+            example_readme,
+        )
+        self.assertIn(
+            "The installer is binary-only and does not carry this bounded quickstart",
+            example_readme,
+        )
+        self.assertEqual(len(module.CHECKOUT_RE.findall(root_readme)), 1)
+        self.assertEqual(len(module.CHECKOUT_RE.findall(example_readme)), 0)
 
 
 
@@ -220,7 +234,9 @@ PACKED_SOURCE_MEMBERS = (
     ("quickstart-run", "examples/mcp-quickstart/run.py"),
     ("quickstart-mock", "examples/mcp-quickstart/mock_server.py"),
 )
-CHECKOUT_SENTENCE = "For v5.4.0, run the last command from a source checkout."
+CHECKOUT_SENTENCE = (
+    "For v5.5.1, run the last command from a source checkout or an extracted published CLI archive."
+)
 ARCHIVE_ROOT_CLAIM = "From the root of this extracted CLI archive"
 QUICKSTART_COMMAND = "python3 examples/mcp-quickstart/run.py"
 
@@ -252,16 +268,21 @@ class ReleaseArchiveMemberInventory(unittest.TestCase):
 
 
 class ReleaseArchiveReadmeContract(unittest.TestCase):
-    def test_source_readme_keeps_published_v54_checkout_wording(self):
+    def test_source_readme_keeps_checkout_or_extracted_archive_wording(self):
         source = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn(CHECKOUT_SENTENCE, source)
         self.assertNotIn(ARCHIVE_ROOT_CLAIM, source)
+        self.assertIn(
+            "The installer is binary-only and does not carry the bounded quickstart assets.",
+            source,
+        )
 
     def test_rendered_readme_rewrites_absent_links_and_states_packed_quickstart(self):
         module = load_module()
         source = (ROOT / "README.md").read_text(encoding="utf-8")
         rendered = module.render_release_readme(source, "5.5.0")
         self.assertNotIn(CHECKOUT_SENTENCE, rendered)
+        self.assertIn(module.ARCHIVE_QUICKSTART, rendered)
         self.assertIn(ARCHIVE_ROOT_CLAIM, rendered)
         self.assertIn(QUICKSTART_COMMAND, rendered)
         self.assertIn("examples/mcp-quickstart/policy.yaml", rendered)
@@ -314,9 +335,8 @@ cargo install assay-cli --version 5.4.0 --locked
 
 Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
 
-For v5.4.0, run the last command from a source checkout. The installer and the
-published v5.4.0 CLI archive install the binary but do not carry the bounded
-quickstart assets.
+For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.
+The installer is binary-only and does not carry the bounded quickstart assets.
 
 See [scope](docs/concepts/scope.md) and [license](LICENSE) and [quickstart](examples/mcp-quickstart/run.py) and [here](#quickstart) and [action](https://github.com/marketplace/actions/assay-ai-agent-security).
 """
@@ -343,12 +363,10 @@ Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0)
         module = load_module()
         source = """cargo install assay-cli --version 5.4.0 --locked
 Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
-For v5.4.0, run the last command from a source checkout. The installer and the
-published v5.4.0 CLI archive install the binary but do not carry the bounded
-quickstart assets.
-For v5.4.0, run the last command from a source checkout. The installer and the
-published v5.4.0 CLI archive install the binary but do not carry the bounded
-quickstart assets.
+For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.
+The installer is binary-only and does not carry the bounded quickstart assets.
+For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.
+The installer is binary-only and does not carry the bounded quickstart assets.
 """
         with self.assertRaisesRegex(ValueError, "exactly one published-checkout sentence"):
             module.render_release_readme(source, "5.5.0")
@@ -364,9 +382,8 @@ quickstart assets.
         source = (
             "cargo install assay-cli --version 5.4.0 --locked\n"
             "Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).\n"
-            "For v5.4.0, run the last command from a source checkout. The installer and the\n"
-            "published v5.4.0 CLI archive install the binary but do not carry the bounded\n"
-            "quickstart assets.\n"
+            "For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.\n"
+            "The installer is binary-only and does not carry the bounded quickstart assets.\n"
             + hostile
             + "\nSee [scope](docs/concepts/scope.md) and [license](LICENSE) and "
             "[quickstart](examples/mcp-quickstart/run.py) and [here](#quickstart) and "
@@ -397,9 +414,8 @@ quickstart assets.
 PINNED_SOURCE = (
     "cargo install assay-cli --version 5.4.0 --locked\n"
     "Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).\n"
-    "For v5.4.0, run the last command from a source checkout. The installer and the\n"
-    "published v5.4.0 CLI archive install the binary but do not carry the bounded\n"
-    "quickstart assets.\n"
+    "For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.\n"
+    "The installer is binary-only and does not carry the bounded quickstart assets.\n"
 )
 PACKED_MEMBER_PATHS = frozenset(
     {

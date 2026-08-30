@@ -33,7 +33,7 @@ candidate_paths=(
   Cargo.toml .github/assay-release-tag README.md docs/index.md
   docs/getting-started/index.md docs/getting-started/installation.md
   docs/getting-started/quickstart.md docs/getting-started/ci-integration.md
-  docs/reference/cli/index.md docs/AIcontext/user-flows.md docs/use-cases/ci-gate.md
+  docs/reference/cli/index.md docs/reference/release.md docs/AIcontext/user-flows.md docs/use-cases/ci-gate.md
 )
 
 make_candidate() {
