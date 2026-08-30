@@ -1,7 +1,7 @@
 # Decision Trees
 
 > **Purpose**: Help AI agents decide which command, approach, or pattern to use.
-> **Version**: 3.9.0 (April 2026)
+> **Authority**: [Product Support](../reference/product-support.md) for capabilities; the selected command's [CLI reference](../reference/cli/index.md) for its result contract.
 
 ## Decision Tree 1: Which Command Should I Use?
 
@@ -35,6 +35,13 @@ flowchart TD
 
 ## Decision Tree 2: Exit Code Handling
 
+Use this for evaluation commands, not as a universal interpretation of MCP
+request results or `doctor` capability reports. Process exit zero alone is not a
+policy-allow, executed action, or enforcement claim. A trace explanation requires
+both `--trace` and `--policy`; it does not accept a positional test ID.
+Use inputs compatible with the explanation parser, not an assumed conversion of
+an arbitrary wrapper policy. See the [quick-reference limitation](quick-reference.md).
+
 ```mermaid
 flowchart TD
     EXIT[Exit code?] --> E0{Code 0?}
@@ -44,8 +51,8 @@ flowchart TD
     E1 -->|Yes| TEST_FAIL[Test/Policy or Judge uncertain]
     TEST_FAIL --> REASON{reason_code?}
     REASON -->|E_JUDGE_UNCERTAIN| JUDGE_ABSTAIN[Judge abstain — review borderline / adjust threshold]
-    REASON -->|Other| EXPLAIN[Run: assay explain]
-    JUDGE_ABSTAIN --> EXPLAIN
+    REASON -->|Other| EXPLAIN[For trace decisions: assay explain --trace traces.jsonl --policy policy.yaml]
+    JUDGE_ABSTAIN --> FIX_AGENT
     EXPLAIN --> FIX_AGENT[Fix agent or relax policy]
 
     E1 -->|No| E2{Code 2?}
@@ -137,7 +144,7 @@ flowchart TD
     SYNTAX -->|Yes| PATHS[Check file paths]
 
     TYPE -->|Test failure| TEST_DEBUG[Test failure]
-    TEST_DEBUG --> EXPLAIN[assay explain]
+    TEST_DEBUG --> EXPLAIN[For trace decisions: assay explain --trace traces.jsonl --policy policy.yaml]
     EXPLAIN --> VIOLATION{Violation type?}
     VIOLATION -->|Policy| POLICY_FIX[Adjust policy or fix agent]
     VIOLATION -->|Metric| METRIC_FIX[Adjust threshold or fix output]

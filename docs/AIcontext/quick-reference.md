@@ -1,14 +1,14 @@
 # Quick Reference
 
 > **Purpose**: Fast lookup for AI agents - commands, patterns, exit codes, and common operations.
-> **Version**: 3.9.0 (April 2026)
+> **Support and version authority**: [Product Support](../reference/product-support.md) and [installation](../getting-started/installation.md).
 
 ## TL;DR - What is Assay?
 
-**Assay** = CI-native evidence and trust compiler for agent systems
-- **Input**: Agent runtime signals, evidence bundles, and bounded external receipt inputs
-- **Output**: Evidence bundles, Trust Basis, Trust Card, SARIF/JUnit/CI projections
-- **Key insight**: deterministic policy and bounded evidence claims, not trust scores or dashboards
+**Assay** = an open evidence profile for privileged MCP tool actions, with a reference enforcing proxy.
+- **Input**: Policy decisions, observations, evidence bundles and bounded external receipts
+- **Output**: Offline-verifiable evidence and derived Trust Basis/Card, SARIF/JUnit/CI projections
+- **Boundary**: An allow is not proof of a provider action; imported claims do not become verified outcomes. See [ADR-042](../architecture/ADR-042-evidence-first-positioning.md).
 
 ## Most Common Commands
 
@@ -35,7 +35,16 @@ assay doctor                  # Diagnose common issues
 assay explain --trace traces.jsonl --policy policy.yaml  # Explain violations
 ```
 
-## Exit Codes
+The `explain` example requires inputs accepted by that command's trace and policy
+parser. It is not a drop-in recovery for every wrapper policy: the MCP quickstart
+policy's `schemas` section is not accepted by `explain`. Do not remove constraints
+to make a policy parse or infer that this reproduces the wrapper's decision.
+
+## Evaluation Exit Codes
+
+This is an evaluation-oriented summary, not a universal interpretation of every
+command's process status. Read the command's typed result as well: `doctor` can
+exit zero with unavailable capabilities; MCP request errors are not process exits.
 
 | Code | Name | Reason Code Pattern | When |
 |------|------|---------------------|------|
@@ -74,8 +83,8 @@ caller-controlled path elements into a shell command.
 ### Test Failures (exit 1)
 | Code | Meaning | Next Step |
 |------|---------|-----------|
-| `E_TEST_FAILED` | Test assertion failed | `assay explain <test-id>` |
-| `E_JUDGE_UNCERTAIN` | Judge returned abstain (could not decide) | Review borderline result; `assay explain <test-id>`; adjust threshold |
+| `E_TEST_FAILED` | Test assertion failed | Inspect the test result; for a trace decision use `assay explain --trace traces.jsonl --policy policy.yaml` |
+| `E_JUDGE_UNCERTAIN` | Judge returned abstain (could not decide) | Review the judge result and uncertainty; `explain` evaluates trace/policy decisions, not a positional test ID |
 | `E_POLICY_VIOLATION` | Policy rule violated | Review policy or fix agent |
 | `E_SEQUENCE_VIOLATION` | Wrong tool call order | Check sequence rules |
 
