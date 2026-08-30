@@ -94,6 +94,7 @@ Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0)
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("--version 5.5.0", completed.stdout)
@@ -106,6 +107,7 @@ Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0)
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         self.assertEqual(completed.returncode, 2)
 
@@ -116,6 +118,7 @@ Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0)
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("--version 5.5.0-rc.1", completed.stdout)
@@ -128,6 +131,7 @@ Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0)
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         self.assertEqual(completed.returncode, 2)
 
@@ -575,6 +579,51 @@ class ReleaseArchiveReadmeFollowOn(unittest.TestCase):
         self.assertIn('"README.md"', paths)
 
 
+# Present in the source README and outside Latin-1 / cp1252.
+OUTSIDE_LATIN1 = ("—", "✅", "📋")
+
+
+def _assemble_packed_cwd(directory: Path) -> Path:
+    for relative in load_module().PACKED_SOURCE_PATHS:
+        source = ROOT / relative
+        destination = directory / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(source.read_bytes())
+    return directory
+
+
+def _render_assembled_readme(encoding: str) -> tuple[int, bytes, bytes]:
+    with tempfile.TemporaryDirectory() as raw:
+        assembled = _assemble_packed_cwd(Path(raw))
+        readme = assembled / "README.md"
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = encoding
+        env["PYTHONUTF8"] = "0"
+        with readme.open("wb") as stdout:
+            completed = subprocess.run(
+                [sys.executable, str(MODULE_PATH), "v5.5.0", "--assembled-cwd"],
+                cwd=assembled,
+                env=env,
+                stdout=stdout,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        return completed.returncode, readme.read_bytes(), completed.stderr
+
+
+class ReleaseReadmeStdoutEncoding(unittest.TestCase):
+    def test_assembled_cwd_emits_complete_utf8_under_inherited_stdout_encodings(self):
+        for encoding in ("cp1252", "ascii", "utf-8"):
+            with self.subTest(encoding=encoding):
+                code, raw, stderr = _render_assembled_readme(encoding)
+                self.assertEqual(code, 0, stderr)
+                self.assertGreater(len(raw), 0)
+                rendered = raw.decode("utf-8")
+                self.assertIn(ARCHIVE_ROOT_CLAIM, rendered)
+                self.assertIn(QUICKSTART_COMMAND, rendered)
+                for marker in OUTSIDE_LATIN1:
+                    self.assertIn(marker, rendered)
+                self.assertNotIn("\ufffd", rendered)
 
 
 if __name__ == "__main__":

@@ -279,6 +279,17 @@ def render_release_readme(
     return rendered
 
 
+def emit_utf8(text: str) -> None:
+    """Write complete UTF-8 regardless of inherited stdout encoding."""
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is None:
+        sys.stdout.write(text)
+        return
+    sys.stdout.flush()
+    buffer.write(text.encode("utf-8"))
+    buffer.flush()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     if len(args) not in {1, 2}:
@@ -300,7 +311,7 @@ def main(argv: list[str] | None = None) -> int:
     rendered = render_release_readme(
         (ROOT / "README.md").read_text(encoding="utf-8"), tag.group(1), members=members
     )
-    sys.stdout.write(rendered)
+    emit_utf8(rendered)
     return 0
 
 
