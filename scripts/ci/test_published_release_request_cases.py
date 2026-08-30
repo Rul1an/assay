@@ -57,7 +57,8 @@ if mode == "wrong-error": reply["error"]["code"] = -32601
 if mode == "wrong-origin": reply["error"]["data"]["origin"] = "other"
 if mode == "wrong-reason": reply["error"]["data"]["reason"] = "other"
 if mode == "string-is-error": reply["result"]["isError"] = "false"
-print(json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}))
+if any(r.get("method") == "initialize" for r in requests):
+    print(json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}))
 print(json.dumps(reply))
 if mode == "duplicate-reply": print(json.dumps(reply))
 if mode == "junk": print("not JSON")
@@ -78,7 +79,7 @@ class ReleasedRequestCases(unittest.TestCase):
             "jsonrpc": "2.0", "id": 9, "method": "unsupported_for_probe"}
         process = subprocess.run(
             [sys.executable, "-I", str(HELPER), "--policy", "deny" if case == "deny" else "allow",
-             "--expect", case], input=json.dumps(INIT) + "\n" + json.dumps(request) + "\n",
+             "--expect", case], input=(json.dumps(INIT) + "\n" if case == "allow" else "") + json.dumps(request) + "\n",
             cwd=result_dir, env={**os.environ, "PATH": f"{root}:/usr/bin:/bin"},
             capture_output=True, text=True, timeout=10)
         observed = json.loads((root / "observed.jsonl").read_text())
@@ -168,6 +169,8 @@ else:
         self.assertTrue((results / "allow/produced.bundle.tar.gz").is_file())
         self.assertTrue((results / "allow/verify.json").is_file())
         self.assertTrue((results / "unsupported/proxy.jsonl").is_file())
+        wire = [json.loads(line) for line in (results / "unsupported/proxy.jsonl").read_text().splitlines()]
+        self.assertEqual([row["id"] for row in wire], [9])
         self.assertFalse((results / "unsupported/decisions.ndjson").exists())
         observed = [json.loads(line) for line in (root / "observed.jsonl").read_text().splitlines()]
         self.assertEqual([row["cwd"] for row in observed],

@@ -91,12 +91,14 @@ def validate_case(results: Path, expected: str) -> None:
             raise ValueError(message)
 
     wire = read_records(results / "proxy.jsonl")
-    require(len(wire) == 2, "expected exactly initialize and request replies")
-    for record, request_id in zip(wire, (1, 9)):
+    request_ids = (1, 9) if expected == "allow" else (9,)
+    require(len(wire) == len(request_ids), "unexpected response cardinality for request case")
+    for record, request_id in zip(wire, request_ids):
         require(record.get("jsonrpc") == "2.0" and type(record.get("id")) is int
                 and record["id"] == request_id, "wire request identity drifted")
-    require(isinstance(wire[0].get("result"), dict) and "error" not in wire[0], "initialize failed")
-    reply = wire[1]
+    if expected == "allow":
+        require(isinstance(wire[0].get("result"), dict) and "error" not in wire[0], "initialize failed")
+    reply = wire[-1]
     if expected == "allow":
         require("error" not in reply and isinstance(reply.get("result"), dict), "allow request failed")
         require(reply["result"].get("isError") is False and reply["result"].get("content") == [

@@ -31,11 +31,11 @@
     },
     {
       "path": "scripts/ci/lib/published-release-capture.sh",
-      "sha256": "ea96d52165943a1ee4a414229bc3f2d1661be6bb09debf9f465badbc94078ad0"
+      "sha256": "a59c206132a87212abd92bab146d8d0a8f72ac73e7b1d0692ff657dbe83e0e8d"
     },
     {
       "path": "scripts/ci/published_release_proxy_phase.py",
-      "sha256": "81aacec5f1ea38f085ab223739aedd24802356dfb5091c42f4be9bc490a27866"
+      "sha256": "d2a48a4771ad722914635bd99961013d4693cae8a84bcb3662eedf4317c69032"
     },
     {
       "path": "scripts/ci/release_attestation_enforce.sh",

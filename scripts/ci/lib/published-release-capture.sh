@@ -31,12 +31,13 @@ run_published_release_extra_request_cases() {
   local scenario request proxy_status
   for scenario in allow unsupported; do
     mkdir "$results/$scenario" || fail "$scenario result directory must be fresh"
-    request="$call_request"
+    request="$init_request"$'\n'"$call_request"
     if [[ "$scenario" == unsupported ]]; then
+      # A local method rejection needs no upstream handshake; closing stdin must not race it.
       request='{"jsonrpc":"2.0","id":9,"method":"unsupported_for_probe"}'
     fi
     proxy_status=0
-    printf '%s\n%s\n' "$init_request" "$request" \
+    printf '%s\n' "$request" \
       | (cd "$results/$scenario" && \
           "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" \
             --timeout-seconds 60 --policy allow --expect "$scenario") || proxy_status=$?
