@@ -122,6 +122,7 @@ check_hook_invokes_gate() {
   python3 - "${PRECOMMIT}" <<'PY'
 import re
 import sys
+import re
 from pathlib import Path
 
 text = Path(sys.argv[1]).read_text(encoding="utf-8")
@@ -183,6 +184,7 @@ require_exists "${PRECOMMIT}"
 
 check_consumer_compat() {
   python3 - "$1" "$2" "$3" <<'PY'
+import re
 import sys
 from pathlib import Path
 
@@ -198,17 +200,40 @@ if ".github/assay-action-pin" not in pinned or "not a second place to change" no
     errors.append("PINNED-ACTIONS.md does not record the pin-file exception")
 if "Do not move floating `v3`" not in pinned or "Do not move frozen `v2`" not in pinned:
     errors.append("PINNED-ACTIONS.md does not record Assay-side rollback")
-if "## [Unreleased]" not in changelog:
+unreleased_start = changelog.find("## [Unreleased]")
+if unreleased_start < 0:
     errors.append("CHANGELOG.md has no Unreleased section")
-for needle in (
+next_h2 = re.search(r"^## .+$", changelog[unreleased_start + 1 :], re.MULTILINE)
+first_release = -1
+if next_h2 is not None:
+    first_release = unreleased_start + 1 + next_h2.start()
+    release_heading = next_h2.group(0)
+    if re.fullmatch(
+        r"## \[(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\] - [0-9]{4}-[0-9]{2}-[0-9]{2}",
+        release_heading,
+    ) is None:
+        errors.append("CHANGELOG Unreleased is not followed by a dated semver release")
+claims = (
     "mixed Action migration",
     "literal `false`",
     "sandbox-command",
     "v3.0.1 to v3.0.2",
     "not measured",
-):
-    if needle not in changelog:
+)
+claim_positions = []
+for needle in claims:
+    position = changelog.find(needle)
+    claim_positions.append(position)
+    if position < 0:
         errors.append(f"CHANGELOG history does not name {needle!r}")
+if first_release < 0:
+    errors.append("CHANGELOG.md has no numbered release history")
+elif all(position >= 0 for position in claim_positions):
+    active = [unreleased_start < position < first_release for position in claim_positions]
+    if any(active) and not all(active):
+        errors.append("CHANGELOG Action migration claims are split across active and released history")
+    elif not any(active) and any(position < first_release for position in claim_positions):
+        errors.append("CHANGELOG Action migration claims precede active and released history")
 if errors:
     raise SystemExit("; ".join(errors))
 PY
@@ -286,7 +311,7 @@ import sys
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 needle = "## [Unreleased]\n\n### Changed"
-released = "## [99.99.99-test] - 2099-12-31"
+released = "## [99.99.99] - 2099-12-31"
 for _ in range(2):
     if text.count(needle) == 1:
         text = text.replace(
@@ -294,12 +319,101 @@ for _ in range(2):
             f"## [Unreleased]\n\n{released}\n\n### Changed",
             1,
         )
-    elif text.count(released) != 1:
-        raise SystemExit("expected active or already released CHANGELOG history")
+    else:
+        unreleased = text.find("## [Unreleased]")
+        first_release = text.find("\n## [", unreleased + 1)
+        if unreleased < 0 or first_release < 0:
+            raise SystemExit("expected active or already released CHANGELOG history")
 path.write_text(text, encoding="utf-8")
 PY
 expect_ok "consumer-compat-released-history" check_consumer_compat \
   "${DEPENDABOT}" "${PINNED_ACTIONS}" "${scratch}/CHANGELOG-released.md"
+for claim in \
+  'mixed Action migration' \
+  'literal `false`' \
+  'sandbox-command' \
+  'v3.0.1 to v3.0.2' \
+  'not measured'; do
+  cp "${scratch}/CHANGELOG-released.md" "${scratch}/CHANGELOG-split.md"
+  python3 - "${scratch}/CHANGELOG-split.md" "${claim}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+claim = sys.argv[2]
+text = path.read_text(encoding="utf-8")
+if text.count(claim) != 1:
+    raise SystemExit(f"expected one claim occurrence: {claim}")
+text = text.replace(claim, "", 1)
+text = text.replace("## [Unreleased]\n", f"## [Unreleased]\n\n{claim}\n", 1)
+path.write_text(text, encoding="utf-8")
+PY
+  if check_consumer_compat "${DEPENDABOT}" "${PINNED_ACTIONS}" \
+    "${scratch}/CHANGELOG-split.md" >"${scratch}/out" 2>"${scratch}/err"; then
+    echo "FAIL: split released claim stayed green: ${claim}" >&2
+    exit 1
+  fi
+  if ! grep -Fq "split across active and released history" "${scratch}/err"; then
+    echo "FAIL: split released claim did not name placement drift: ${claim}" >&2
+    cat "${scratch}/err" >&2
+    exit 1
+  fi
+done
+echo "ok    released-history-placement (five owner-gate failures)"
+
+cp "${CHANGELOG}" "${scratch}/CHANGELOG-preamble.md"
+python3 - "${scratch}/CHANGELOG-preamble.md" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+claims = (
+    "mixed Action migration",
+    "literal `false`",
+    "sandbox-command",
+    "v3.0.1 to v3.0.2",
+    "not measured",
+)
+for claim in claims:
+    if text.count(claim) != 1:
+        raise SystemExit(f"expected one claim occurrence: {claim}")
+    text = text.replace(claim, "", 1)
+text = "\n".join(claims) + "\n" + text
+path.write_text(text, encoding="utf-8")
+PY
+if check_consumer_compat "${DEPENDABOT}" "${PINNED_ACTIONS}" \
+  "${scratch}/CHANGELOG-preamble.md" >"${scratch}/out" 2>"${scratch}/err"; then
+  echo "FAIL: coordinated preamble claims stayed green" >&2
+  exit 1
+fi
+grep -Fq "precede active and released history" "${scratch}/err" \
+  || { cat "${scratch}/err" >&2; exit 1; }
+echo "ok    coordinated-preamble-placement (owner gate failed)"
+
+cp "${CHANGELOG}" "${scratch}/CHANGELOG-nonversion.md"
+python3 - "${scratch}/CHANGELOG-nonversion.md" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+needle = "## [Unreleased]\n\n"
+if text.count(needle) != 1:
+    raise SystemExit("expected one Unreleased heading")
+path.write_text(
+    text.replace(needle, f"{needle}## [Migration Notes]\n\n", 1),
+    encoding="utf-8",
+)
+PY
+if check_consumer_compat "${DEPENDABOT}" "${PINNED_ACTIONS}" \
+  "${scratch}/CHANGELOG-nonversion.md" >"${scratch}/out" 2>"${scratch}/err"; then
+  echo "FAIL: non-version heading stayed green" >&2
+  exit 1
+fi
+grep -Fq "not followed by a dated semver release" "${scratch}/err" \
+  || { cat "${scratch}/err" >&2; exit 1; }
+echo "ok    non-version-heading-placement (owner gate failed)"
 if ! "${CHECKER}" --list-paths | grep -Fxq 'packs/open/cicd-starter/README.md'; then
   echo "owner snippet list omits packs/open/cicd-starter/README.md" >&2
   exit 1
