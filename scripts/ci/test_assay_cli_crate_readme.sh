@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # Named mutations for scripts/ci/check_assay_cli_crate_readme.sh.
-# Scratch mutations against the real crate files; restore only what this
-# script created. Do not blanket-delete crates/assay-cli/docs.
+# Scratch mutations against the real crate files plus, for unpublished
+# workspace-dep fixtures, root Cargo.toml / Cargo.lock / the checker.
+# Restore only what this script created. Do not blanket-delete
+# crates/assay-cli/docs. Do not git checkout -- the whole tree.
+# Unpublished fixtures rewrite assay-* path+version workspace.dependencies
+# to the never-published sentinel 0.0.0-unpublished (any current
+# workspace.package version). Do not require a successor crates.io version.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -10,6 +15,8 @@ cd "$ROOT"
 CHECK="$ROOT/scripts/ci/check_assay_cli_crate_readme.sh"
 MANIFEST="$ROOT/crates/assay-cli/Cargo.toml"
 README="$ROOT/crates/assay-cli/README.md"
+ROOT_MANIFEST="$ROOT/Cargo.toml"
+ROOT_LOCK="$ROOT/Cargo.lock"
 SELECTED_CASE="${ASSAY_CLI_CRATE_README_CASE:-}"
 
 CASES=(
@@ -72,6 +79,8 @@ CASES=(
   packaged-manifest-source
   missing-consumer-manifest
   disagreeing-consumer-manifest
+  unpublished-workspace-dep
+  unpublished-workspace-dep-requires-exclude-lockfile
   toolchain-single-source
 )
 EXPECTED_CASES="${#CASES[@]}"
@@ -102,10 +111,16 @@ SCRATCH="$(mktemp -d)"
 trap 'restore_tree; rm -rf "$SCRATCH"' EXIT
 cp "$MANIFEST" "$SCRATCH/Cargo.toml"
 cp "$README" "$SCRATCH/README.md"
+cp "$ROOT_MANIFEST" "$SCRATCH/root-Cargo.toml"
+cp "$ROOT_LOCK" "$SCRATCH/Cargo.lock"
+cp "$CHECK" "$SCRATCH/check_assay_cli_crate_readme.sh"
 
 restore_tree() {
   cp "$SCRATCH/Cargo.toml" "$MANIFEST"
   cp "$SCRATCH/README.md" "$README"
+  cp "$SCRATCH/root-Cargo.toml" "$ROOT_MANIFEST"
+  cp "$SCRATCH/Cargo.lock" "$ROOT_LOCK"
+  cp "$SCRATCH/check_assay_cli_crate_readme.sh" "$CHECK"
 }
 
 run_check() {
@@ -414,6 +429,103 @@ run_oversized_gnu_longname() {
   if ! grep -Fq "decompressed stream exceeds" "$out"; then
     echo "FAIL: oversized GNU longname missed stream diagnostic" >&2
     cat "$out" >&2
+    return 1
+  fi
+}
+
+bump_unpublished_workspace() {
+  python3 - "$ROOT_MANIFEST" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+SENTINEL = "0.0.0-unpublished"
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+pkg = re.search(r"(?ms)^\[workspace\.package\]\s*$(.+?)(?=^\[|\Z)", text)
+if not pkg:
+    raise SystemExit("could not read [workspace.package] for unpublished fixture")
+ver = re.search(r'(?m)^\s*version\s*=\s*"([^"]+)"\s*$', pkg.group(1))
+if not ver:
+    raise SystemExit("could not read workspace.package version for unpublished fixture")
+if ver.group(1) == SENTINEL:
+    raise SystemExit("workspace.package version is already the unpublished sentinel")
+
+changed = [0]
+
+def repl_dep(match: re.Match[str]) -> str:
+    if match.group(2) == SENTINEL:
+        return match.group(0)
+    changed[0] += 1
+    return f'{match.group(1)}"{SENTINEL}"'
+
+text, _ = re.subn(
+    r'(?m)^(assay-[\w-]+ = \{ path = "[^"]+", version = )"([^"]+)"',
+    repl_dep,
+    text,
+)
+if changed[0] < 1:
+    raise SystemExit(
+        "expected assay-* workspace.dependencies path+version to rewrite to unpublished sentinel"
+    )
+path.write_text(text, encoding="utf-8")
+PY
+}
+
+strip_exclude_lockfile_from_checker() {
+  python3 - "$CHECK" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+token = " --exclude-lockfile"
+if token not in text:
+    raise SystemExit("checker is missing --exclude-lockfile to strip")
+if "cargo package -p assay-cli --exclude-lockfile --no-verify --allow-dirty" not in text:
+    raise SystemExit("expected the real cargo package invocation to carry --exclude-lockfile")
+path.write_text(text.replace(token, ""), encoding="utf-8")
+PY
+}
+
+run_unpublished_workspace_dep() {
+  local out="$SCRATCH/unpublished-workspace-dep.out"
+  bump_unpublished_workspace
+  if ! run_check "$out"; then
+    echo "FAIL: unpublished-workspace-dep must stay green" >&2
+    cat "$out" >&2
+    return 1
+  fi
+  if ! grep -Fq "assay-cli crate-owned README OK" "$out"; then
+    echo "FAIL: unpublished-workspace-dep missed packaged README OK" >&2
+    cat "$out" >&2
+    return 1
+  fi
+  if ! grep -Fq "evidence_demo_profile.yaml" "$out"; then
+    echo "FAIL: unpublished-workspace-dep missed real cargo package member" >&2
+    cat "$out" >&2
+    return 1
+  fi
+  if ! grep -Fq "not installability proof" "$out"; then
+    echo "FAIL: unpublished-workspace-dep missed installability non-claim" >&2
+    cat "$out" >&2
+    return 1
+  fi
+  if ! grep -Fq "not lockfile proof" "$out"; then
+    echo "FAIL: unpublished-workspace-dep missed lockfile non-claim" >&2
+    cat "$out" >&2
+    return 1
+  fi
+}
+
+run_unpublished_workspace_dep_requires_exclude_lockfile() {
+  local name="unpublished-workspace-dep-requires-exclude-lockfile"
+  bump_unpublished_workspace
+  strip_exclude_lockfile_from_checker
+  expect_fail "$name" "failed to select a version"
+  if ! grep -Fq "assay-canonical" "$SCRATCH/$name.out"; then
+    echo "FAIL: mutation $name missed diagnostic: assay-canonical" >&2
+    cat "$SCRATCH/$name.out" >&2
     return 1
   fi
 }
@@ -735,6 +847,13 @@ PY
       run_consumer_manifest_failure "$name" "not crate-owned README"
       echo "PASS: $name"
       ;;
+    unpublished-workspace-dep)
+      run_unpublished_workspace_dep
+      echo "PASS: $name"
+      ;;
+    unpublished-workspace-dep-requires-exclude-lockfile)
+      run_unpublished_workspace_dep_requires_exclude_lockfile
+      ;;
     toolchain-single-source)
       run_toolchain_single_source
       echo "PASS: $name"
@@ -761,3 +880,4 @@ fi
 
 echo "mutation_count=$mutation_count expected=$EXPECTED_CASES"
 echo "assay-cli crate README mutations OK"
+
