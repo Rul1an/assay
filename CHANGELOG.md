@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [5.5.0] - 2026-08-30
+
+This release collects the post-`v5.4.0` main line: bounded evidence and
+candidate-capture surfaces, generated release and Python-artifact contracts,
+model-mediated Claude host evidence, and stricter machine-readable identity
+and policy interfaces. The MCP `2026-07-28` adapter remains behind its closed
+gate; this release does not advertise or accept that revision. Install pins
+and GitHub release assets stay on `v5.4.0` until this tag is published.
+
 ### Changed
 - `assay evidence verify-privileged-mcp-action` still emits
   `assay.privileged_mcp_action.verify.report.v0` and keeps `profile` as the
