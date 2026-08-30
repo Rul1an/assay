@@ -1168,7 +1168,11 @@ RELEASE_HEADING = re.compile(
 
 
 def _changelog_claim_section(text: str) -> str:
-    """Return the one active or released section carrying every Claude claim."""
+    """Return the section carrying the newest occurrence of every Claude claim.
+
+    The changelog is newest-first. Older releases may repeat a tool name; they
+    cannot substitute for a newest claim that moves out of its owner section.
+    """
     headings = list(re.finditer(r"^## .+$", text, re.MULTILINE))
     unreleased = [match for match in headings if match.group(0) == "## [Unreleased]"]
     if len(unreleased) != 1:
@@ -1185,6 +1189,7 @@ def _changelog_claim_section(text: str) -> str:
 
     owners: list[int] = []
     for marker in CHANGELOG_CLAIM_MARKERS:
+        # The first occurrence is the newest one in this newest-first history.
         position = text.find(marker)
         if position < 0:
             fail(
@@ -1256,8 +1261,29 @@ def assert_changelog_contract() -> None:
 
 def assert_changelog_history_self_test() -> None:
     """Pin active, released, split, preamble, and non-version section bounds."""
-    active = (SOURCE_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    _changelog_claim_section(active)
+    source = (SOURCE_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    _changelog_claim_section(source)
+    headings = list(re.finditer(r"^## .+$", source, re.MULTILINE))
+    unreleased = next(match for match in headings if match.group(0) == "## [Unreleased]")
+    owner_position = source.find(CHANGELOG_CLAIM_MARKERS[0])
+    owner_index = next(
+        index for index in range(len(headings) - 1, -1, -1) if headings[index].start() < owner_position
+    )
+    if owner_index == headings.index(unreleased):
+        active = source
+    else:
+        owner = headings[owner_index]
+        owner_end = headings[owner_index + 1].start() if owner_index + 1 < len(headings) else len(source)
+        unreleased_body = source.find("\n", unreleased.start()) + 1
+        owner_body = source.find("\n", owner.start()) + 1
+        active = (
+            source[:unreleased_body]
+            + source[owner_body:owner_end]
+            + source[unreleased_body:owner.start()]
+            + source[owner.start():owner_body]
+            + source[owner_end:]
+        )
+        _changelog_claim_section(active)
     headings = list(re.finditer(r"^## .+$", active, re.MULTILINE))
     unreleased = next(match for match in headings if match.group(0) == "## [Unreleased]")
     first_release = headings[headings.index(unreleased) + 1]
@@ -1282,6 +1308,27 @@ def assert_changelog_history_self_test() -> None:
         else:
             fail("changelog_self_test", f"split marker stayed green: {marker}", "restore section closure")
 
+        older_duplicate = active.replace(
+            first_release.group(0), f"{first_release.group(0)}\n{marker}", 1
+        )
+        _changelog_claim_section(older_duplicate)
+        newest_removed = (
+            active[: first_release.start()].replace(marker, "")
+            + active[first_release.start() :]
+        ).replace(
+            first_release.group(0), f"{first_release.group(0)}\n{marker}", 1
+        )
+        try:
+            _changelog_claim_section(newest_removed)
+        except WorkflowError:
+            pass
+        else:
+            fail(
+                "changelog_self_test",
+                f"older duplicate replaced the newest owner: {marker}",
+                "keep newest-first claim ownership",
+            )
+
     preamble = released
     for marker in CHANGELOG_CLAIM_MARKERS:
         preamble = preamble.replace(marker, "", 1)
@@ -1293,9 +1340,7 @@ def assert_changelog_history_self_test() -> None:
     else:
         fail("changelog_self_test", "preamble claims stayed green", "restore section lower bound")
 
-    nonversion = active.replace(
-        "## [Unreleased]\n", "## [Unreleased]\n\n## [Migration Notes]\n", 1
-    )
+    nonversion = active[: first_release.start()] + "## [Migration Notes]" + active[first_release.end() :]
     try:
         _changelog_claim_section(nonversion)
     except WorkflowError:
