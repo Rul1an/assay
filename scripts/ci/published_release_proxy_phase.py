@@ -12,6 +12,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 
 
 MAX_REQUEST_BYTES = 1_048_576
@@ -85,13 +86,45 @@ def read_records(path: Path) -> list[dict]:
     return records
 
 
+def case_request_ids(expected: str) -> tuple[int, ...]:
+    return (1, 9) if expected == "allow" else (9,)
+
+
+def exchange_case(process: subprocess.Popen[bytes], request: bytes, output: Path,
+                  expected: str, timeout: int) -> int:
+    # communicate() closes stdin immediately. Keep it open until the proxy has drained replies.
+    # stdout stays file-backed with RLIMIT_FSIZE; nonblocking writes share the same deadline.
+    deadline = time.monotonic() + timeout
+    pending = memoryview(request)
+    os.set_blocking(process.stdin.fileno(), False)
+    lines = 0
+    with output.open("rb") as reader:
+        while True:
+            if pending:
+                try:
+                    pending = pending[os.write(process.stdin.fileno(), pending):]
+                except BlockingIOError:
+                    pass
+                except BrokenPipeError:
+                    break
+            lines += reader.read(65536).count(b"\n")
+            if (not pending and lines >= len(case_request_ids(expected))) or process.poll() is not None:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(process.args, timeout)
+            time.sleep(min(0.01, remaining))
+    process.stdin.close()
+    return process.wait(timeout=max(0.001, deadline - time.monotonic()))
+
+
 def validate_case(results: Path, expected: str) -> None:
     def require(condition, message):
         if not condition:
             raise ValueError(message)
 
     wire = read_records(results / "proxy.jsonl")
-    request_ids = (1, 9) if expected == "allow" else (9,)
+    request_ids = case_request_ids(expected)
     require(len(wire) == len(request_ids), "unexpected response cardinality for request case")
     for record, request_id in zip(wire, request_ids):
         require(record.get("jsonrpc") == "2.0" and type(record.get("id")) is int
@@ -186,8 +219,12 @@ def main() -> int:
                 start_new_session=True,
             )
             try:
-                process.communicate(input=request, timeout=args.timeout_seconds)
-                status = process.returncode
+                if args.expect:
+                    status = exchange_case(process, request, results / "proxy.jsonl", args.expect,
+                                           args.timeout_seconds)
+                else:
+                    process.communicate(input=request, timeout=args.timeout_seconds)
+                    status = process.returncode
             except subprocess.TimeoutExpired:
                 status = 124
             finally:

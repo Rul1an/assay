@@ -29,7 +29,17 @@ policy = arg("--enforce-policy")
 with (root / "observed.jsonl").open("a") as h:
     h.write(json.dumps({"argv": sys.argv, "cwd": str(pathlib.Path.cwd()),
                         "policy": policy.name}) + "\n")
-requests = [json.loads(line) for line in sys.stdin if line.strip()]
+requests = [json.loads(sys.stdin.readline())]
+if requests[0]["method"] == "initialize":
+    requests.append(json.loads(sys.stdin.readline()))
+if mode == "needs-open-input":
+    import select
+    if select.select([sys.stdin], [], [], 0.1)[0]:
+        print(json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}))
+        raise SystemExit(0)
+if mode == "stall":
+    import time
+    time.sleep(5)
 unsupported = requests[-1]["method"] == "unsupported_for_probe"
 allow = policy.name == "allow.yaml" and mode != "allow-to-deny"
 decision = {"schema": "assay.enforcement_decision.v0", "decision": "allow" if allow else "deny",
@@ -79,13 +89,13 @@ class ReleasedRequestCases(unittest.TestCase):
             "jsonrpc": "2.0", "id": 9, "method": "unsupported_for_probe"}
         process = subprocess.run(
             [sys.executable, "-I", str(HELPER), "--policy", "deny" if case == "deny" else "allow",
-             "--expect", case], input=(json.dumps(INIT) + "\n" if case == "allow" else "") + json.dumps(request) + "\n",
+             "--expect", case, "--timeout-seconds", "2"], input=(json.dumps(INIT) + "\n" if case == "allow" else "") + json.dumps(request) + "\n",
             cwd=result_dir, env={**os.environ, "PATH": f"{root}:/usr/bin:/bin"},
             capture_output=True, text=True, timeout=10)
         observed = json.loads((root / "observed.jsonl").read_text())
         recorded = json.loads((result_dir / "commands.ndjson").read_text())
         self.assertEqual(recorded["argv"], observed["argv"])
-        self.assertEqual(recorded["exit_code"], 23 if mode == "nonzero" else 0)
+        self.assertEqual(recorded["exit_code"], {"nonzero": 23, "stall": 124}.get(mode, 0))
         return process, result_dir, observed
 
     def test_three_outcomes_and_actual_policy_selection(self):
@@ -103,6 +113,14 @@ class ReleasedRequestCases(unittest.TestCase):
     def test_allow_to_deny_is_not_a_successful_allow_probe(self):
         p, _, _ = self.run_case("allow", "allow-to-deny")
         self.assertNotEqual(p.returncode, 0, "policy denial satisfied the allow gate")
+
+    def test_waits_for_the_response_before_closing_stdin(self):
+        p, _, _ = self.run_case("allow", "needs-open-input")
+        self.assertEqual(p.returncode, 0, p.stderr)
+
+    def test_missing_response_still_has_a_bounded_deadline(self):
+        p, _, _ = self.run_case("allow", "stall")
+        self.assertEqual(p.returncode, 124, p.stderr)
 
     def test_unsupported_must_not_leave_any_evidence_artifact(self):
         for mode in ("unsupported-decision", "empty-decision", "empty-observation"):
