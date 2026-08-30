@@ -4,6 +4,9 @@
 # workspace-dep fixtures, root Cargo.toml / Cargo.lock / the checker.
 # Restore only what this script created. Do not blanket-delete
 # crates/assay-cli/docs. Do not git checkout -- the whole tree.
+# Unpublished fixtures rewrite assay-* path+version workspace.dependencies
+# to the never-published sentinel 0.0.0-unpublished (any current
+# workspace.package version). Do not require a successor crates.io version.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -105,7 +108,16 @@ if [[ ! -f "$README" ]]; then
 fi
 
 SCRATCH="$(mktemp -d)"
-trap 'restore_tree; rm -rf "$SCRATCH"' EXIT
+REPLAY_SCRATCHES=()
+cleanup_all() {
+  restore_tree
+  rm -rf "$SCRATCH"
+  local d
+  for d in "${REPLAY_SCRATCHES[@]+"${REPLAY_SCRATCHES[@]}"}"; do
+    rm -rf "$d" "${d}.tar"
+  done
+}
+trap cleanup_all EXIT
 cp "$MANIFEST" "$SCRATCH/Cargo.toml"
 cp "$README" "$SCRATCH/README.md"
 cp "$ROOT_MANIFEST" "$SCRATCH/root-Cargo.toml"
@@ -430,24 +442,140 @@ run_oversized_gnu_longname() {
   fi
 }
 
+run_consumer_replay() {
+  if [[ -n "$SELECTED_CASE" ]]; then
+    return 0
+  fi
+  if [[ "${ASSAY_CLI_CRATE_README_REPLAY:-}" == "1" ]]; then
+    return 0
+  fi
+
+  local rc_sha="31335cc3a2c33c2621fd1cbf100e48e07dedbea6"
+  local main_sha=""
+  if git -C "$ROOT" rev-parse --verify origin/main >/dev/null 2>&1; then
+    main_sha="$(git -C "$ROOT" rev-parse origin/main)"
+  elif git -C "$ROOT" rev-parse --verify refs/remotes/origin/main >/dev/null 2>&1; then
+    main_sha="$(git -C "$ROOT" rev-parse refs/remotes/origin/main)"
+  else
+    main_sha="$(git -C "$ROOT" rev-parse HEAD^)"
+  fi
+  echo "consumer-replay main_sha=$main_sha rc_sha=$rc_sha"
+
+  materialize_replay_tree() {
+    local sha="$1"
+    local dest="$2"
+    local tarball="${dest}.tar"
+    if ! git -C "$ROOT" archive --format=tar -o "$tarball" "$sha" 2>/dev/null; then
+      if ! git -C "$ROOT" fetch --no-filter origin "$sha"; then
+        echo "FAIL: could not fetch $sha for crate-README consumer replay" >&2
+        rm -f "$tarball"
+        return 1
+      fi
+      if ! git -C "$ROOT" archive --format=tar -o "$tarball" "$sha"; then
+        echo "FAIL: git archive $sha failed for crate-README consumer replay" >&2
+        rm -f "$tarball"
+        return 1
+      fi
+    fi
+    mkdir -p "$dest"
+    tar -xf "$tarball" -C "$dest"
+    rm -f "$tarball"
+  }
+
+  replay_one() {
+    local label="$1"
+    local sha="$2"
+    local dest out packaged case_name case_out needle
+    dest="$(mktemp -d "/tmp/ruley-cli-crate-readme-replay-${label}-XXXXXX")"
+    REPLAY_SCRATCHES+=("$dest")
+    echo "consumer-replay $label materializing $sha into $dest"
+    if ! materialize_replay_tree "$sha" "$dest"; then
+      echo "FAIL: consumer replay $label could not materialize $sha" >&2
+      return 1
+    fi
+    mkdir -p "$dest/scripts/ci"
+    cp "$CHECK" "$dest/scripts/ci/check_assay_cli_crate_readme.sh"
+    cp "$ROOT/scripts/ci/test_assay_cli_crate_readme.sh" "$dest/scripts/ci/test_assay_cli_crate_readme.sh"
+    chmod +x "$dest/scripts/ci/check_assay_cli_crate_readme.sh" \
+      "$dest/scripts/ci/test_assay_cli_crate_readme.sh"
+
+    out="$SCRATCH/replay-${label}-unmodified.out"
+    if ! (cd "$dest" && bash ./scripts/ci/check_assay_cli_crate_readme.sh >"$out" 2>&1); then
+      echo "FAIL: consumer replay $label unmodified checker failed" >&2
+      cat "$out" >&2
+      return 1
+    fi
+    for needle in \
+      "assay-cli crate-owned README OK" \
+      "not installability proof" \
+      "not lockfile proof"; do
+      if ! grep -Fq "$needle" "$out"; then
+        echo "FAIL: consumer replay $label unmodified checker missed: $needle" >&2
+        cat "$out" >&2
+        return 1
+      fi
+    done
+    packaged="$(grep -E '^[[:space:]]*Packaging assay-cli ' "$out" | head -n 1 || true)"
+    echo "consumer-replay $label unmodified OK ${packaged:-}"
+
+    for case_name in unpublished-workspace-dep unpublished-workspace-dep-requires-exclude-lockfile; do
+      case_out="$SCRATCH/replay-${label}-${case_name}.out"
+      if ! (
+        cd "$dest"
+        ASSAY_CLI_CRATE_README_CASE="$case_name" \
+          ASSAY_CLI_CRATE_README_REPLAY=1 \
+          bash ./scripts/ci/test_assay_cli_crate_readme.sh >"$case_out" 2>&1
+      ); then
+        echo "FAIL: consumer replay $label $case_name" >&2
+        cat "$case_out" >&2
+        return 1
+      fi
+      echo "consumer-replay $label $case_name OK"
+    done
+
+    rm -rf "$dest" "${dest}.tar"
+  }
+
+  # RC pin first so a fetch failure fails the test without skipping.
+  replay_one "rc" "$rc_sha"
+  replay_one "main" "$main_sha"
+}
+
 bump_unpublished_workspace() {
   python3 - "$ROOT_MANIFEST" <<'PY'
 from pathlib import Path
 import re
 import sys
 
+SENTINEL = "0.0.0-unpublished"
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
-if text.count('version = "5.4.0"') < 1:
-    raise SystemExit("expected workspace.package version 5.4.0 for unpublished fixture")
-text = text.replace('version = "5.4.0"', 'version = "5.5.0"', 1)
-text, n = re.subn(
-    r'(?m)^(assay-[\w-]+ = \{ path = "[^"]+", version = )"5\.4\.0"',
-    r'\g<1>"5.5.0"',
+pkg = re.search(r"(?ms)^\[workspace\.package\]\s*$(.+?)(?=^\[|\Z)", text)
+if not pkg:
+    raise SystemExit("could not read [workspace.package] for unpublished fixture")
+ver = re.search(r'(?m)^\s*version\s*=\s*"([^"]+)"\s*$', pkg.group(1))
+if not ver:
+    raise SystemExit("could not read workspace.package version for unpublished fixture")
+if ver.group(1) == SENTINEL:
+    raise SystemExit("workspace.package version is already the unpublished sentinel")
+
+changed = [0]
+
+def repl_dep(match: re.Match[str]) -> str:
+    if match.group(2) == SENTINEL:
+        return match.group(0)
+    changed[0] += 1
+    return f'{match.group(1)}"{SENTINEL}"'
+
+text, _ = re.subn(
+    r'(?m)^(assay-[\w-]+ = \{ path = "[^"]+", version = )"([^"]+)"',
+    repl_dep,
     text,
 )
-if n < 1:
-    raise SystemExit("expected assay-* workspace.dependencies versions to bump")
+if changed[0] < 1:
+    raise SystemExit(
+        "expected assay-* workspace.dependencies path+version to rewrite to unpublished sentinel"
+    )
 path.write_text(text, encoding="utf-8")
 PY
 }
@@ -860,3 +988,5 @@ fi
 
 echo "mutation_count=$mutation_count expected=$EXPECTED_CASES"
 echo "assay-cli crate README mutations OK"
+
+run_consumer_replay
