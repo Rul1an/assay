@@ -10,40 +10,55 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from types import ModuleType
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / "scripts/ci/claude_plugin_install_workflow.py"
 GUARD = 'if __name__ == "__main__":'
 MAIN_LINE = "raise SystemExit(main())"
 AUTH_ENV_PREFIXES = ("ANTHROPIC_", "CLAUDE_CODE_OAUTH_", "ASSAY_AUTH_")
+SYNTHETIC_AUTH = {
+    "ANTHROPIC_API_KEY": "synthetic-canary-2690-anthropic",
+    "CLAUDE_CODE_OAUTH_TOKEN": "synthetic-canary-2690-oauth",
+    "ASSAY_AUTH_TOKEN": "synthetic-canary-2690-assay",
+}
 
 
 class LaunchAttempt(RuntimeError):
     """A trapped external launch. Never forwarded to a real process."""
 
 
-def _auth_env() -> dict[str, str]:
-    return {
+def _synthetic_environ() -> dict[str, str]:
+    env = {
         key: value
         for key, value in os.environ.items()
-        if key.upper().startswith(AUTH_ENV_PREFIXES)
+        if not key.upper().startswith(AUTH_ENV_PREFIXES)
     }
+    env.update(SYNTHETIC_AUTH)
+    return env
+
+
+def _auth_keys() -> tuple[str, ...]:
+    return tuple(sorted(key for key in os.environ if key.upper().startswith(AUTH_ENV_PREFIXES)))
+
+
+def auth_drift_message(before_keys: tuple[str, ...], after_keys: tuple[str, ...], changed: list[str]) -> str:
+    """Name drifted keys only. Never interpolate credential values."""
+    added = sorted(set(after_keys) - set(before_keys))
+    removed = sorted(set(before_keys) - set(after_keys))
+    return (
+        "synthetic auth env drifted: "
+        f"added={added} removed={removed} changed={changed}"
+    )
 
 
 class ImportTraps:
     def __init__(self) -> None:
-        self.launches: list[object] = []
-        self._original_popen = subprocess.Popen
-        self._original_run = subprocess.run
-        self._original_call = subprocess.call
-        self._original_check_call = subprocess.check_call
-        self._original_check_output = subprocess.check_output
-        self._original_system = os.system
-        self._original_execv = os.execv
-        self._original_execve = os.execve
-        self._original_which = shutil.which
+        self.launches: list[tuple[str, object]] = []
+        self._stack = ExitStack()
 
     def _trap(self, channel: str, payload: object) -> None:
         self.launches.append((channel, payload))
@@ -74,33 +89,26 @@ class ImportTraps:
         def execve(*args: object, **kwargs: object) -> None:
             self._trap("execve", args[0] if args else kwargs)
 
+        real_which = shutil.which
+
         def which(cmd: str, *args: object, **kwargs: object) -> str | None:
-            # Never hand a real Claude/MCP binary to an accidental import-time verify.
             if cmd in {"claude", "assay-mcp-server"}:
                 return None
-            return self._original_which(cmd, *args, **kwargs)
+            return real_which(cmd, *args, **kwargs)
 
-        subprocess.Popen = popen  # type: ignore[assignment]
-        subprocess.run = run  # type: ignore[assignment]
-        subprocess.call = call  # type: ignore[assignment]
-        subprocess.check_call = check_call  # type: ignore[assignment]
-        subprocess.check_output = check_output  # type: ignore[assignment]
-        os.system = system  # type: ignore[assignment]
-        os.execv = execv  # type: ignore[assignment]
-        os.execve = execve  # type: ignore[assignment]
-        shutil.which = which  # type: ignore[assignment]
+        self._stack.enter_context(patch.object(subprocess, "Popen", popen))
+        self._stack.enter_context(patch.object(subprocess, "run", run))
+        self._stack.enter_context(patch.object(subprocess, "call", call))
+        self._stack.enter_context(patch.object(subprocess, "check_call", check_call))
+        self._stack.enter_context(patch.object(subprocess, "check_output", check_output))
+        self._stack.enter_context(patch.object(os, "system", system))
+        self._stack.enter_context(patch.object(os, "execv", execv))
+        self._stack.enter_context(patch.object(os, "execve", execve))
+        self._stack.enter_context(patch.object(shutil, "which", which))
         return self
 
-    def __exit__(self, *exc: object) -> None:
-        subprocess.Popen = self._original_popen
-        subprocess.run = self._original_run
-        subprocess.call = self._original_call
-        subprocess.check_call = self._original_check_call
-        subprocess.check_output = self._original_check_output
-        os.system = self._original_system
-        os.execv = self._original_execv
-        os.execve = self._original_execve
-        shutil.which = self._original_which
+    def __exit__(self, *exc: object) -> bool | None:
+        return self._stack.__exit__(*exc)
 
 
 def load_workflow(path: Path, module_name: str) -> ModuleType:
@@ -114,8 +122,21 @@ def load_workflow(path: Path, module_name: str) -> ModuleType:
 
 
 class ClaudePluginInstallImportTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.enterContext(patch.dict(os.environ, _synthetic_environ(), clear=True))
+
+    def _assert_synthetic_auth_unchanged(self) -> None:
+        after_keys = _auth_keys()
+        expected_keys = tuple(sorted(SYNTHETIC_AUTH))
+        changed = [
+            key
+            for key in SYNTHETIC_AUTH
+            if os.environ.get(key) != SYNTHETIC_AUTH[key]
+        ]
+        if after_keys != expected_keys or changed:
+            self.fail(auth_drift_message(expected_keys, after_keys, changed))
+
     def test_import_does_not_execute_workflow(self) -> None:
-        auth_before = _auth_env()
         traps = ImportTraps()
         with traps:
             try:
@@ -129,11 +150,11 @@ class ClaudePluginInstallImportTests(unittest.TestCase):
                 )
             except LaunchAttempt as error:
                 self.fail(
-                    f"import attempted an external launch before any process started: "
+                    "import attempted an external launch before any process started: "
                     f"{error}; launches={traps.launches}"
                 )
         self.assertEqual(traps.launches, [])
-        self.assertEqual(_auth_env(), auth_before)
+        self._assert_synthetic_auth_unchanged()
         self.assertTrue(callable(module.main))
         self.assertTrue(callable(module.verify_workflow))
         self.assertTrue(callable(module.self_test))
@@ -156,9 +177,42 @@ class ClaudePluginInstallImportTests(unittest.TestCase):
                 with self.assertRaises((SystemExit, LaunchAttempt)) as raised:
                     load_workflow(mutant, "claude_plugin_install_workflow_unguarded")
             self.assertIsInstance(raised.exception, (SystemExit, LaunchAttempt))
-            # External launch must not have escaped the trap.
             for channel, _payload in traps.launches:
-                self.assertIn(channel, {"Popen", "run", "call", "check_call", "check_output", "system", "execv", "execve"})
+                self.assertIn(
+                    channel,
+                    {
+                        "Popen",
+                        "run",
+                        "call",
+                        "check_call",
+                        "check_output",
+                        "system",
+                        "execv",
+                        "execve",
+                    },
+                )
+            self._assert_synthetic_auth_unchanged()
+
+    def test_auth_drift_diagnostic_omits_values(self) -> None:
+        message = auth_drift_message(
+            ("ANTHROPIC_API_KEY",),
+            ("ANTHROPIC_API_KEY", "ASSAY_AUTH_TOKEN"),
+            ["ANTHROPIC_API_KEY"],
+        )
+        self.assertEqual(
+            message,
+            "synthetic auth env drifted: added=['ASSAY_AUTH_TOKEN'] "
+            "removed=[] changed=['ANTHROPIC_API_KEY']",
+        )
+        for value in SYNTHETIC_AUTH.values():
+            self.assertNotIn(value, message)
+        os.environ["ANTHROPIC_API_KEY"] = "synthetic-canary-2690-mutated"
+        with self.assertRaises(AssertionError) as raised:
+            self._assert_synthetic_auth_unchanged()
+        diagnostic = str(raised.exception)
+        self.assertIn("changed=['ANTHROPIC_API_KEY']", diagnostic)
+        self.assertNotIn("synthetic-canary-2690-mutated", diagnostic)
+        self.assertNotIn(SYNTHETIC_AUTH["ANTHROPIC_API_KEY"], diagnostic)
 
 
 if __name__ == "__main__":
