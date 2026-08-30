@@ -23,7 +23,11 @@
     },
     {
       "path": "scripts/ci/published-release-golden-path.sh",
-      "sha256": "98308c2305e037ce50bb448708690edde4dd7dd4bad6f782827fc18189dbfb00"
+      "sha256": "2ab22cec7503be0950fbc529a5a87b3b1036c617c4fd32c6090981111dbc0864"
+    },
+    {
+      "path": "scripts/ci/lib/published-release-capture.sh",
+      "sha256": "1306f274c73561c9d23932d477cb558c13af3aab579c3105587f657baec068ad"
     },
     {
       "path": "scripts/ci/published_release_proxy_phase.py",

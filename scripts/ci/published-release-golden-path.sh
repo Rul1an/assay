@@ -78,30 +78,6 @@ mkdir -p "$downloads" "$install_root/bin" "$harness_root" "$session_root" "$resu
 commands_file="$results/commands.ndjson"
 : >"$commands_file"
 
-record_command() {
-  local name="$1" status="$2"
-  shift 2
-  "$PYTHON_BIN" - "$commands_file" "$name" "$status" "$@" <<'PY'
-import json, pathlib, sys
-path = pathlib.Path(sys.argv[1])
-record = {"name": sys.argv[2], "exit_code": int(sys.argv[3]), "argv": sys.argv[4:]}
-with path.open("a", encoding="utf-8") as handle:
-    handle.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
-PY
-}
-
-run_capture() {
-  local name="$1" expected="$2" stdout_path="$3" stderr_path="$4"
-  shift 4
-  local status=0
-  "$@" >"$stdout_path" 2>"$stderr_path" || status=$?
-  record_command "$name" "$status" "$@"
-  [[ "$status" -eq "$expected" ]] || {
-    cat "$stderr_path" >&2
-    fail "$name exited $status, expected $expected"
-  }
-}
-
 # Stage only manifest-listed harness bytes, verify each digest first, and retain what was used.
 "$PYTHON_BIN" - "$HARNESS_MANIFEST" "$ROOT" "$harness_root" "$results/harness-files.json" <<'PY'
 import hashlib, json, pathlib, shutil, sys
@@ -137,6 +113,10 @@ report_path.write_text(
     encoding="utf-8",
 )
 PY
+
+# Source only the manifest-verified copy, not an unrecorded helper.
+# shellcheck source=scripts/ci/lib/published-release-capture.sh
+source "$harness_root/scripts/ci/lib/published-release-capture.sh"
 
 version="${release_tag#v}"
 release_api="$results/release-api.json"
@@ -238,8 +218,7 @@ run_capture "mcp-version" 0 "$results/mcp-version.txt" "$results/mcp-version.std
   || fail "assay-mcp-server version differs from pinned release"
 
 pushd "$session_root" >/dev/null
-run_capture "init" 0 "$results/init.json" "$results/init.stderr" assay init --preset dev --hello-trace --format json
-"$JQ_BIN" -e '.schema == "assay.init_report.v0"' "$results/init.json" >/dev/null || fail "init output identity drifted"
+run_published_release_session_product
 run_capture "policy-validate" 0 "$results/policy-validate.json" "$results/policy-validate.stderr" \
   assay policy validate --input policy.yaml --format json
 "$JQ_BIN" -e '.schema == "assay.run_summary.v1"' "$results/policy-validate.json" >/dev/null || fail "policy validation output identity drifted"
@@ -346,7 +325,8 @@ document = {
     "commands": commands,
     "claim_ceiling": (
         "The attested release binaries completed the bounded Linux x86_64 journey under the "
-        "recorded harness head and fixture digests; the harness is not a shipped release asset."
+        "recorded harness head and fixture digests; the harness is not a shipped release asset. "
+        "Doctor reports host capabilities, not kernel enforcement performed by this journey."
     ),
 }
 pathlib.Path(output_path).write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -356,7 +336,7 @@ PY
 import hashlib, json, pathlib, sys
 root, output = map(pathlib.Path, sys.argv[1:])
 required = [
-    "run-pin.json", "commands.ndjson", "produced.bundle.tar.gz", "decisions.ndjson",
+    "run-pin.json", "commands.ndjson", "doctor.json", "produced.bundle.tar.gz", "decisions.ndjson",
     "inspect.json", "verify.json", "tamper-verify.json", "enforcement.sarif",
     "release-api.json", "tag-ref.json", "attestation-summary.json",
 ]
