@@ -512,12 +512,19 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
       - name: Verify portable checksum production and flat download layout
         shell: bash
         run: |
           set -euo pipefail
           bash scripts/ci/test-write-sha256-sidecar.sh
           bash scripts/ci/test-release-assets.sh
+      - name: Verify release README renderer contract
+        shell: bash
+        run: python3 scripts/ci/test_release_quickstart.py
 
   mcp-registry-foundation:
     name: MCP Registry foundation smoke
