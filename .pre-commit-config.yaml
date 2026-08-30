@@ -214,6 +214,13 @@ repos:
         stages: [pre-push]
         files: ^(CHANGELOG\.md|scripts/ci/(test-claude-plugin-install\.sh|claude_plugin_install_workflow\.py)|docs/guides/editor-mcp-recipe\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.pre-commit-config\.yaml)$
 
+      - id: claude-plugin-install-import-safe
+        name: Claude plugin install workflow is import-safe
+        entry: python3 scripts/ci/test_claude_plugin_install_import.py
+        language: system
+        pass_filenames: false
+        files: ^(scripts/ci/(claude_plugin_install_workflow|test_claude_plugin_install_import)\.py|\.pre-commit-config\.yaml)$
+
       - id: docs-auto-update-reconcile-self-test
         name: Docs auto-update reconciliation self-test
         entry: bash scripts/ci/test-reconcile-docs-auto-pr.sh
