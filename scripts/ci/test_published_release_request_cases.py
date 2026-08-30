@@ -47,6 +47,9 @@ decision = {"schema": "assay.enforcement_decision.v0", "decision": "allow" if al
             "tool": {"name": "github.add_deploy_key", "action_class": "github_deploy_key"},
             "action": {"target": {"provider": "github", "owner": "acme", "repo": "prod-app"}}}
 if not unsupported or mode == "unsupported-decision":
+    if mode == "wrong-decision": decision["decision"] = "deny"
+    if mode == "wrong-decision-reason": decision["reason"] = "no_declared_allowance"
+    if mode == "wrong-decision-schema": decision["schema"] = "other"
     if mode == "wrong-tool": decision["tool"]["name"] = "other"
     if mode == "wrong-target": decision["action"]["target"]["repo"] = "other"
     decisions.write_text(json.dumps(decision) + "\n")
@@ -131,6 +134,7 @@ class ReleasedRequestCases(unittest.TestCase):
     def test_wire_and_policy_records_must_match_the_single_fixture_call(self):
         for case, modes in (
             ("allow", ("wrong-id", "duplicate-reply", "duplicate-decision", "wrong-tool",
+                       "wrong-decision", "wrong-decision-reason", "wrong-decision-schema",
                        "wrong-target", "allow-observation", "string-is-error", "junk", "nonzero")),
             ("unsupported", ("wrong-id", "duplicate-reply", "wrong-error", "wrong-origin", "wrong-reason", "junk")),
         ):
