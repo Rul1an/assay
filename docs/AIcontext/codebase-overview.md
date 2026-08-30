@@ -1,21 +1,20 @@
 # Assay Codebase Overview
 
-> **Version**: 3.9.0 (April 2026)
-> **SOTA Status**: Trust Compiler line (MCP governance, Trust Basis, receipt portability)
+> **Authority**: [ADR-042](../architecture/ADR-042-evidence-first-positioning.md) defines product scope; [Product Support](../reference/product-support.md) records capability status. This page is a navigation map, not release proof.
 
 ## What is Assay?
 
-**Assay** is a CI-native evidence and trust compiler for agent systems. It
-compiles agent runtime signals and selected external outcomes into verifiable
-evidence and bounded Trust Basis claims. It provides:
+**Assay** publishes an open evidence profile for privileged MCP tool actions.
+The enforcing proxy is its reference producer. Decisions, observations and
+external outcomes retain their distinct evidence boundaries. Supporting surfaces include:
 
 - **Protocol policy enforcement**: Deterministic MCP tool decisions without LLM calls in CI
 - **Evidence bundles**: Offline-verifiable artifacts for audit, review, and replay
 - **Trust compiler artifacts**: Trust Basis and Trust Card outputs with explicit evidence levels
 - **External receipt lanes**: Bounded receipt imports for selected eval, decision, inventory, and score-event surfaces
 
-Policy-as-code remains an important wedge, but the current product surface is
-broader: verified evidence, bounded claims, and portable receipt contracts.
+Derived reports and imported receipts do not establish provider-side execution,
+an aggregate trust score, compliance or a safe-agent claim.
 
 ## High-Level Architecture
 
@@ -28,7 +27,7 @@ Assay is a **Rust monorepo** with multiple crates, a **Python SDK**, and compreh
 | `assay-core` | Central evaluation engine | Runner, storage, metrics API, MCP integration, trace handling, baseline/quarantine, providers |
 | `assay-cli` | Command line interface | Config loading, Runner construction, test suite execution, reporting |
 | `assay-metrics` | Standard metrics library | MustContain, SemanticSimilarity, RegexMatch, JsonSchema, ArgsValid, SequenceValid, ToolBlocklist |
-| `assay-mcp-server` | MCP server/proxy | Streaming/online policy enforcement via JSON-RPC over stdio |
+| `assay-mcp-server` | MCP server/proxy | Plain stdio exposes five review tools; separate proxy modes mediate upstream traffic. Installing the server alone does not enforce target calls. |
 | `assay-monitor` | Runtime monitoring | eBPF/LSM integration, kernel-level enforcement |
 | `assay-policy` | Policy compilation | Compiles policies into Tier 1 (kernel/LSM) and Tier 2 (userspace) |
 | `assay-evidence` | Evidence management | Generates verifiable evidence artifacts for audit/compliance (CloudEvents v1.0, JCS canonicalization, content-addressed IDs) |
@@ -209,23 +208,19 @@ Report (console/JSON/JUnit/SARIF; SARIF truncation at 25k results by default, wi
 
 ## Key Design Principles
 
-1. **Determinism**: Same input + same policy = same result (zero flakiness)
+1. **Deterministic policy**: Explicit policy evaluation is separate from judge, host and provider variability
 2. **Statelessness**: Validation requires only policy file + trace list
 3. **Deterministic policy**: Uses explicit logic, not LLMs, for policy decisions
 4. **Separation of Concerns**: CLI handles UX/config, core handles evaluation logic
 5. **Extensibility**: Metrics, providers, and policies are pluggable via traits
 
-## SOTA Features (January 2026)
+## Capability Status
 
-| Feature | Status | Description |
-|---------|--------|-------------|
-| **Judge Reliability** | ✅ Audit Grade | Randomized order default, borderline band [0.4-0.6], Adaptive Majority (2-of-3), per-suite policies, E7 Audit Evidence |
-| **E2.3 SARIF limits** | ✅ PR #160 | Deterministic truncation (default 25k), runs[0].properties.assay, sarif.omitted in run/summary; consumers use summary/run for counts |
-| **MCP Auth Hardening** | 🔄 P1 | RFC 8707 resource indicators, alg/typ/crit JWT hardening, JWKS rotation, DPoP (optional) |
-| **OTel GenAI** | 🔄 P1 | Semconv version gating, low-cardinality metrics, composable redaction policies |
-| **Replay Bundle** | ✅ In Progress (E9.1–E9.3) | Manifest, container writer, toolchain capture, path validation, provenance. Module: `assay-core/src/replay/` |
-| **CI Optimization** | ✅ Implemented | Skip kernel matrix for pure dep bumps, auto-cancel superseded runs |
-| **Self-Healing Runner** | ✅ Implemented | Health check with cache auto-heal, stale job cleanup, PR prioritization |
+Use the [support reference](../reference/product-support.md), rather than a second
+roadmap table here. The local stdio server and proxies reject unsupported
+transport-auth configuration; a historical OAuth/JWKS plan is not a supported mode.
+See the [editor recipe](../guides/editor-mcp-recipe.md) before choosing between
+review-tool installation and enforcement of a target server.
 
 ## Exit Codes & Reason Codes
 

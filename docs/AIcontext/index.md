@@ -1,20 +1,24 @@
 # AI Context Documentation
 
-> **Version**: 3.9.0 (April 2026)
-> **Last Updated**: 2026-04-29
-> **SOTA Status**: Trust Compiler line with Trust Basis, receipt portability, and schema registry
+This directory helps agents navigate the Assay codebase. It is not a release
+support matrix or an execution ledger. Start with the checked-in
+[agent contract](../../AGENTS.md), then the
+[evidence-first scope](../architecture/ADR-042-evidence-first-positioning.md) and
+[integrity boundaries](../architecture/ADR-043-evidence-chain-integrity-invariants.md).
 
-This directory contains documentation designed specifically for AI agents
-(LLMs) to understand and work with the Assay codebase. The highest-priority
-files now describe Assay as a CI-native evidence and trust compiler, not just
-as the older policy-as-code wedge.
+Assay's contract is the open evidence profile for privileged MCP tool actions.
+Its enforcing proxy is a reference producer. Policy decisions, observations and
+provider outcomes remain distinct; installation or a successful command does not
+prove that an external action occurred.
 
 ## Quick Start for AI Agents
 
 **Most Important Files to Read First:**
-1. [Quick Reference](quick-reference.md) - Command cheat sheet and common patterns
-2. [Decision Trees](decision-trees.md) - Which command/approach to use when
-3. [Codebase Overview](codebase-overview.md) - What Assay is and how it works
+1. [Product Support](../reference/product-support.md) - Capability status and explicit limits
+2. [Agent Golden Path](../guides/agent-golden-path.md) - Install-to-evidence journey
+3. [Quick Reference](quick-reference.md) - Command cheat sheet and common patterns
+4. [Decision Trees](decision-trees.md) - Which command/approach to use when
+5. [Codebase Overview](codebase-overview.md) - What Assay is and how it works
 
 ## Purpose
 
@@ -42,19 +46,17 @@ These documents provide:
 | [CI Infrastructure](ci-infrastructure.md) | **NEW** Self-hosted runner, health checks, CI optimization | Low |
 | [Run Output](run-output.md) | **NEW** run.json / summary.json contract: seeds, judge_metrics, reason_code (PR gate) | Medium |
 
-## SOTA Features (January 2026)
+## Capability And Release Truth
 
-| Feature | Status | Description |
-|---------|--------|-------------|
-| **Generate Decomposition** | ✅ Complete (RFC-003) | G1-G6 all merged. `generate.rs` split into args/model/ingest/profile/diff modules. |
-| **Code Health** | ✅ Complete (RFC-002) | E1-E5 all delivered. Store, metrics, registry, comments cleaned up. |
-| **Judge Reliability** | ✅ Audit Grade (PR #159) | E_JUDGE_UNCERTAIN (exit 1), seeds (string\|null) in run/summary/console, judge_metrics (flip_rate, abstain_rate). Randomized order, 2-of-3, per-suite policies. |
-| **E2.3 SARIF limits** | ✅ PR #160 | Deterministic truncation (default 25k results); runs[0].properties.assay when truncated; sarif.omitted in run.json/summary.json. Consumers use summary/run for authoritative counts. |
-| **MCP Auth Hardening** | 🔄 P1 | RFC 8707, alg/typ/crit, JWKS rotation, DPoP (optional) |
-| **OTel GenAI** | 🔄 P1 | Semconv versioning, low-cardinality metrics, composable redaction |
-| **Replay Bundle** | ✅ In Progress (E9.1–E9.3) | Manifest, container writer, toolchain capture, path validation, provenance |
-| **CI Optimization** | ✅ Implemented | Skip matrix tests for pure dep bumps, auto-cancel superseded runs |
-| **Self-Healing Runner** | ✅ Implemented | Health check, cache auto-heal, stale job cleanup |
+Use [Product Support](../reference/product-support.md) for capability status,
+[installation](../getting-started/installation.md) for the published install pin,
+and [Cargo.toml](../../Cargo.toml) for the workspace version. A release-preparation
+tree can legitimately lead the published version; do not duplicate those values here.
+
+The [editor recipe](../guides/editor-mcp-recipe.md) distinguishes the five local
+MCP review tools from wrapping a target server for enforcement. Plain stdio mode
+does not implement transport authentication. Host discovery and authenticated
+model use require their own evidence; static manifests do not prove either.
 
 ## Best Practices Applied
 
@@ -94,14 +96,13 @@ This documentation follows 2026 best practices for AI codebase understanding:
 - Check [User Flows](user-flows.md) Flow 2 for CI integration
 - See [Entry Points](entry-points.md) for GitHub Action configuration
 
-## Exit Code Quick Reference
+## Command Results
 
-| Code | Meaning | Common Causes |
-|------|---------|---------------|
-| 0 | Success | All tests pass |
-| 1 | Test failure | Policy violation, metric failure; **judge uncertain** → `E_JUDGE_UNCERTAIN` |
-| 2 | Config error | Invalid YAML, missing file, parse error |
-| 3 | Infra error | Judge unavailable, rate limit, timeout |
+Use the selected command's [CLI reference](../reference/cli/index.md) and typed
+output contract. Exit zero is not a universal policy-allow or enforcement result:
+`doctor` may report unavailable capabilities, and an MCP server can exit cleanly
+after returning a request-level error. Do not apply the evaluation exit table to
+every command or infer a successful provider action from process completion.
 
 **Run output (PR #159, #160):** `run.json` and `summary.json` include `seeds` (order_seed, judge_seed as string or null), `judge_metrics`, `reason_code`, and when SARIF was truncated `sarif.omitted`. Console: `Seeds: seed_version=1 order_seed=… judge_seed=…`. See [Run Output](run-output.md).
 
