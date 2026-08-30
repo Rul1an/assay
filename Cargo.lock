@@ -167,7 +167,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-a2a"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "assay-adapter-api",
  "assay-evidence",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-acp"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "assay-adapter-api",
  "assay-evidence",
@@ -195,7 +195,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-api"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "assay-evidence",
  "hex",
@@ -207,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-ucp"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "assay-adapter-api",
  "assay-evidence",
@@ -221,7 +221,7 @@ dependencies = [
 
 [[package]]
 name = "assay-canonical"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "hex",
  "serde",
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "assay-cli"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "anyhow",
  "assay-canonical",
@@ -295,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "assay-common"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "aya",
  "chrono",
@@ -307,7 +307,7 @@ dependencies = [
 
 [[package]]
 name = "assay-core"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "anyhow",
  "assay-adapter-api",
@@ -357,7 +357,7 @@ dependencies = [
 
 [[package]]
 name = "assay-ebpf"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "assay-common",
  "aya-ebpf",
@@ -366,7 +366,7 @@ dependencies = [
 
 [[package]]
 name = "assay-evidence"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "anyhow",
  "assay-canonical",
@@ -403,7 +403,7 @@ dependencies = [
 
 [[package]]
 name = "assay-it"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "assay-core",
  "pyo3",
@@ -415,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "assay-mcp-server"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -445,7 +445,7 @@ dependencies = [
 
 [[package]]
 name = "assay-metrics"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -465,7 +465,7 @@ dependencies = [
 
 [[package]]
 name = "assay-monitor"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -480,7 +480,7 @@ dependencies = [
 
 [[package]]
 name = "assay-policy"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "anyhow",
  "ipnet",
@@ -492,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "assay-registry"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -529,7 +529,7 @@ dependencies = [
 
 [[package]]
 name = "assay-runner-core"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "assay-common",
  "assay-monitor",
@@ -547,7 +547,7 @@ dependencies = [
 
 [[package]]
 name = "assay-runner-linux"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "anyhow",
  "libc",
@@ -556,7 +556,7 @@ dependencies = [
 
 [[package]]
 name = "assay-runner-schema"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -565,7 +565,7 @@ dependencies = [
 
 [[package]]
 name = "assay-sim"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "anyhow",
  "assay-adapter-api",
@@ -586,7 +586,7 @@ dependencies = [
 
 [[package]]
 name = "assay-xtask"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1791,7 +1791,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2073,7 +2073,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-evidence-replay"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4414,7 +4414,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4472,7 +4472,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5058,10 +5058,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5845,7 +5845,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

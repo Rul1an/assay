@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [5.5.0] - 2026-08-30
+
+This release collects the post-`v5.4.0` main line: bounded evidence and
+candidate-capture surfaces, generated release and Python-artifact contracts,
+validation of model-mediated Claude transcripts, and stricter machine-readable
+identity and policy interfaces. The MCP `2026-07-28` adapter remains behind its closed
+gate; this release does not advertise or accept that revision. Install pins
+and GitHub release assets stay on `v5.4.0` until this tag is published.
+Authenticated model-mediated Claude host proof remains post-publication work
+(#2194); transcript validation is not evidence that this journey has passed.
+
 ### Changed
 - `assay evidence verify-privileged-mcp-action` still emits
   `assay.privileged_mcp_action.verify.report.v0` and keeps `profile` as the
@@ -57,6 +68,11 @@ All notable changes to this project will be documented in this file.
   (#2649).
 
 ### Added
+- The RFC 8785 conformance exercise declares three near-miss rules in pinned
+  `serde_jcs`: UTF-16 key ordering, ECMAScript-compatible number rendering,
+  and Unicode string emission (Slice C). The wrapper replacement remains a
+  separate control, not a fourth scored rule. This is not RFC certification,
+  specification completeness, or full implementation adequacy.
 - `assay project-enforcement-health` accepts a bounded, verified evidence bundle
   carrying exactly one typed `assay.sandbox.degraded` event and projects it as
   `observation: degraded`. Missing, duplicate, unknown, tampered, oversized, or
