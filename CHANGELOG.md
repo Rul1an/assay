@@ -66,6 +66,11 @@ and GitHub release assets stay on `v5.4.0` until this tag is published.
   (#2649).
 
 ### Added
+- The RFC 8785 conformance exercise declares three near-miss rules in pinned
+  `serde_jcs`: UTF-16 key ordering, ECMAScript-compatible number rendering,
+  and Unicode string emission (Slice C). The wrapper replacement remains a
+  separate control, not a fourth scored rule. This is not RFC certification,
+  specification completeness, or full implementation adequacy.
 - `assay project-enforcement-health` accepts a bounded, verified evidence bundle
   carrying exactly one typed `assay.sandbox.degraded` event and projects it as
   `observation: degraded`. Missing, duplicate, unknown, tampered, oversized, or
