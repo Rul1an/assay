@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -53,6 +54,36 @@ def fenced_block_after(document: str, marker: str) -> str:
 
 
 class ReleaseReadmeTruth(unittest.TestCase):
+    def test_platform_coverage_tracks_archive_version_not_source_pin(self):
+        module = load_module()
+        source = (ROOT / "README.md").read_text(encoding="utf-8")
+        source = re.sub(
+            r"Published v[^ ]+ CLI archives cover",
+            "Published v5.4.0 CLI archives cover",
+            source,
+        )
+        source += "\nHistorical note: v5.4.0 shipped earlier.\n"
+        for version in ("5.5.1", "5.6.0-rc.1"):
+            with self.subTest(version=version):
+                rendered = module.render_release_readme(source, version)
+                self.assertIn(f"Published v{version} CLI archives cover", rendered)
+                self.assertNotIn("Published v5.4.0 CLI archives cover", rendered)
+                self.assertIn("Historical note: v5.4.0 shipped earlier.", rendered)
+                self.assertEqual(
+                    module.render_release_readme(source + "\n", version), rendered + "\n"
+                )
+
+    def test_renderer_refuses_missing_or_duplicate_platform_coverage(self):
+        module = load_module()
+        source = (ROOT / "README.md").read_text(encoding="utf-8")
+        coverage = next(
+            line for line in source.splitlines(True) if " CLI archives cover " in line
+        )
+        for altered in (source.replace(coverage, ""), source + coverage):
+            with self.subTest(altered=altered[-120:]):
+                with self.assertRaisesRegex(ValueError, "exactly one platform-coverage sentence"):
+                    module.render_release_readme(altered, "5.6.0")
+
     def test_renderer_moves_only_active_release_claims_to_assembled_version(self):
         module = load_module()
         source = """# Assay
@@ -62,6 +93,7 @@ cargo install assay-cli --version 5.4.0 --locked
 ```
 
 Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
+- Published v5.4.0 CLI archives cover Linux x86_64/arm64.
 
 For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.
 The installer is binary-only and does not carry the bounded quickstart assets.
@@ -82,6 +114,7 @@ Historical note: v5.3.0 shipped earlier.
         source = """cargo install assay-cli --version 5.4.0 --locked
 cargo install assay-cli --version 5.4.0 --locked
 Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
+- Published v5.4.0 CLI archives cover Linux x86_64/arm64.
 """
         with self.assertRaisesRegex(ValueError, "exactly one release-pinned install command"):
             module.render_release_readme(source, "5.5.0")
@@ -98,6 +131,7 @@ Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("--version 5.5.0", completed.stdout)
         self.assertIn("releases/tag/v5.5.0", completed.stdout)
+        self.assertIn("Published v5.5.0 CLI archives cover", completed.stdout)
 
     def test_cli_refuses_a_bare_version_that_the_release_contract_never_emits(self):
         completed = subprocess.run(
@@ -334,6 +368,7 @@ cargo install assay-cli --version 5.4.0 --locked
 ```
 
 Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
+- Published v5.4.0 CLI archives cover Linux x86_64/arm64.
 
 For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.
 The installer is binary-only and does not carry the bounded quickstart assets.
@@ -353,6 +388,7 @@ See [scope](docs/concepts/scope.md) and [license](LICENSE) and [quickstart](exam
         module = load_module()
         source = """cargo install assay-cli --version 5.4.0 --locked
 Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
+- Published v5.4.0 CLI archives cover Linux x86_64/arm64.
 """
         with self.assertRaisesRegex(ValueError, "exactly one published-checkout sentence"):
             rendered = module.render_release_readme(source, "5.5.0")
@@ -363,6 +399,7 @@ Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0)
         module = load_module()
         source = """cargo install assay-cli --version 5.4.0 --locked
 Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
+- Published v5.4.0 CLI archives cover Linux x86_64/arm64.
 For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.
 The installer is binary-only and does not carry the bounded quickstart assets.
 For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.
@@ -382,6 +419,7 @@ The installer is binary-only and does not carry the bounded quickstart assets.
         source = (
             "cargo install assay-cli --version 5.4.0 --locked\n"
             "Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).\n"
+            "- Published v5.4.0 CLI archives cover Linux x86_64/arm64.\n"
             "For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.\n"
             "The installer is binary-only and does not carry the bounded quickstart assets.\n"
             + hostile
@@ -414,6 +452,7 @@ The installer is binary-only and does not carry the bounded quickstart assets.
 PINNED_SOURCE = (
     "cargo install assay-cli --version 5.4.0 --locked\n"
     "Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).\n"
+    "- Published v5.4.0 CLI archives cover Linux x86_64/arm64.\n"
     "For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.\n"
     "The installer is binary-only and does not carry the bounded quickstart assets.\n"
 )

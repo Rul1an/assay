@@ -223,17 +223,17 @@ check_contains_fixed() {
   fi
 }
 
-check_current_release_link() {
-  local file="$1" expected="$2"
+check_single_claim() {
+  local file="$1" expected="$2" marker="$3" label="$4"
   local claim_count expected_count
   if [ ! -f "$file" ]; then
     fail "$file: checked outward document is missing"
     return
   fi
-  claim_count="$(grep -Fc 'Current release:' "$file" || true)"
+  claim_count="$(grep -Fc -- "$marker" "$file" || true)"
   expected_count="$(grep -Fc -- "$expected" "$file" || true)"
   if [ "$claim_count" -ne 1 ] || [ "$expected_count" -ne 1 ]; then
-    fail "$file: current release link drift"
+    fail "$file: $label"
   fi
 }
 
@@ -365,8 +365,10 @@ check_rust_cli_installs docs/AIcontext/user-flows.md 1
 check_rust_cli_installs docs/use-cases/ci-gate.md 1
 
 release_link="Current release: [\`$PUBLISHED_TAG\`](https://github.com/Rul1an/assay/releases/tag/$PUBLISHED_TAG)"
-check_current_release_link README.md "$release_link"
-check_current_release_link docs/index.md "$release_link"
+check_single_claim README.md "$release_link" 'Current release:' 'current release link drift'
+check_single_claim README.md "- Published $PUBLISHED_TAG CLI archives cover " \
+  'CLI archives cover' 'platform-coverage version drift'
+check_single_claim docs/index.md "$release_link" 'Current release:' 'current release link drift'
 check_rge_bench_claims
 
 check_absent_regex SECURITY.md '@assay\.dev' \
