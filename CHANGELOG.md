@@ -4,9 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [5.5.1] - 2026-08-30
+
+Recovery release for the unpublished `v5.5.0` attempt. It includes the changes
+listed under 5.5.0 below. The `v5.5.0` tag remains unchanged: Windows README
+packaging failed before GitHub Release creation and downstream package
+publication. Published installation pins remain on `v5.4.0` until the recovery
+release assets have been verified.
+
+### Fixed
+- Release archive README output uses explicit UTF-8 rather than the inherited
+  stdout encoding. Regression tests exercise assembled-archive output under
+  cp1252, ASCII, and UTF-8 in the existing Windows and Ubuntu release-asset
+  contract job (#2705).
+
 ## [5.5.0] - 2026-08-30
 
-This release collects the post-`v5.4.0` main line: bounded evidence and
+Tagged release attempt; not published because Windows README packaging failed.
+The following changes are retained in the v5.5.1 recovery release.
+
+This version collects the post-`v5.4.0` main line: bounded evidence and
 candidate-capture surfaces, generated release and Python-artifact contracts,
 validation of model-mediated Claude transcripts, and stricter machine-readable
 identity and policy interfaces. The MCP `2026-07-28` adapter remains behind its closed
