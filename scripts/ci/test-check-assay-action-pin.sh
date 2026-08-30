@@ -198,17 +198,29 @@ if ".github/assay-action-pin" not in pinned or "not a second place to change" no
     errors.append("PINNED-ACTIONS.md does not record the pin-file exception")
 if "Do not move floating `v3`" not in pinned or "Do not move frozen `v2`" not in pinned:
     errors.append("PINNED-ACTIONS.md does not record Assay-side rollback")
-if "## [Unreleased]" not in changelog:
+unreleased_start = changelog.find("## [Unreleased]")
+if unreleased_start < 0:
     errors.append("CHANGELOG.md has no Unreleased section")
-for needle in (
+first_release = changelog.find("\n## [", unreleased_start + 1)
+claims = (
     "mixed Action migration",
     "literal `false`",
     "sandbox-command",
     "v3.0.1 to v3.0.2",
     "not measured",
-):
-    if needle not in changelog:
+)
+claim_positions = []
+for needle in claims:
+    position = changelog.find(needle)
+    claim_positions.append(position)
+    if position < 0:
         errors.append(f"CHANGELOG history does not name {needle!r}")
+if first_release < 0:
+    errors.append("CHANGELOG.md has no numbered release history")
+elif all(position >= 0 for position in claim_positions):
+    active = [position < first_release for position in claim_positions]
+    if any(active) and not all(active):
+        errors.append("CHANGELOG Action migration claims are split across active and released history")
 if errors:
     raise SystemExit("; ".join(errors))
 PY
@@ -297,13 +309,44 @@ for _ in range(2):
     else:
         unreleased = text.find("## [Unreleased]")
         first_release = text.find("\n## [", unreleased + 1)
-        migration = text.find("mixed Action migration")
-        if unreleased < 0 or first_release < 0 or migration < first_release:
+        if unreleased < 0 or first_release < 0:
             raise SystemExit("expected active or already released CHANGELOG history")
 path.write_text(text, encoding="utf-8")
 PY
 expect_ok "consumer-compat-released-history" check_consumer_compat \
   "${DEPENDABOT}" "${PINNED_ACTIONS}" "${scratch}/CHANGELOG-released.md"
+for claim in \
+  'mixed Action migration' \
+  'literal `false`' \
+  'sandbox-command' \
+  'v3.0.1 to v3.0.2' \
+  'not measured'; do
+  cp "${scratch}/CHANGELOG-released.md" "${scratch}/CHANGELOG-split.md"
+  python3 - "${scratch}/CHANGELOG-split.md" "${claim}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+claim = sys.argv[2]
+text = path.read_text(encoding="utf-8")
+if text.count(claim) != 1:
+    raise SystemExit(f"expected one claim occurrence: {claim}")
+text = text.replace(claim, "", 1)
+text = text.replace("## [Unreleased]\n", f"## [Unreleased]\n\n{claim}\n", 1)
+path.write_text(text, encoding="utf-8")
+PY
+  if check_consumer_compat "${DEPENDABOT}" "${PINNED_ACTIONS}" \
+    "${scratch}/CHANGELOG-split.md" >"${scratch}/out" 2>"${scratch}/err"; then
+    echo "FAIL: split released claim stayed green: ${claim}" >&2
+    exit 1
+  fi
+  if ! grep -Fq "split across active and released history" "${scratch}/err"; then
+    echo "FAIL: split released claim did not name placement drift: ${claim}" >&2
+    cat "${scratch}/err" >&2
+    exit 1
+  fi
+done
+echo "ok    released-history-placement (five owner-gate failures)"
 if ! "${CHECKER}" --list-paths | grep -Fxq 'packs/open/cicd-starter/README.md'; then
   echo "owner snippet list omits packs/open/cicd-starter/README.md" >&2
   exit 1
