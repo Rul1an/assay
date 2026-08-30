@@ -112,6 +112,8 @@ broad_rge_claim='neutral, externally reproduced conformance kit for evidence rev
 cat > "$TMP/README.md" <<'DOC'
 cargo install assay-cli --version 5.1.0 --locked
 Current release: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0)
+- Published v5.1.0 CLI archives cover Linux x86_64/arm64.
+Historical note: v5.0.0 shipped earlier.
 Claude and Cursor config-path only.
 DOC
 printf '%s\n' "- [RGE-Bench](https://github.com/rge-bench/rge-bench) — $rge_claim" >> "$TMP/README.md"
@@ -176,6 +178,12 @@ if ! run_check >"$TMP/baseline.out" 2>&1; then
   exit 1
 fi
 check_release_hook_selector
+
+# Non-claim prose must not change the active published-version decision.
+cp "$TMP/README.md" "$TMP/readme-noop.backup"
+printf '\n<!-- release coverage control: no active claim changed -->\n' >> "$TMP/README.md"
+run_check >"$TMP/noop.out" 2>&1
+mv "$TMP/readme-noop.backup" "$TMP/README.md"
 
 mutation_count=0
 mutate_and_expect_failure() {
@@ -253,6 +261,15 @@ mutate_rge_pair_and_expect_failure() {
   mutation_count=$((mutation_count + 1))
   echo "PASS: $name"
 }
+
+mutate_and_expect_failure stale-platform-coverage README.md \
+  's/Published v5.1.0 CLI/Published v5.0.0 CLI/' 'platform-coverage version drift'
+mutate_and_expect_failure workspace-platform-coverage README.md \
+  's/Published v5.1.0 CLI/Published v5.2.0 CLI/' 'platform-coverage version drift'
+mutate_and_expect_failure missing-platform-coverage README.md \
+  '/CLI archives cover/d' 'platform-coverage version drift'
+append_and_expect_failure duplicate-platform-coverage README.md \
+  '- Published v5.0.0 CLI archives cover Linux x86_64/arm64.' 'platform-coverage version drift'
 
 mutate_and_expect_failure wrong-python-package docs/getting-started/index.md \
   's/pip install assay-it/pip install assay/' 'unsupported Python package'
@@ -466,8 +483,8 @@ mutate_and_expect_failure stale-codespaces-host demo/CODESPACES-PLAYBOOK.md \
   's#https://getassay.dev/install.sh#https://assay.dev/install.sh#' \
   'unrelated assay.dev onboarding URL'
 
-if [ "$mutation_count" -ne 64 ]; then
-  echo "FAIL: expected 64 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 68 ]; then
+  echo "FAIL: expected 68 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

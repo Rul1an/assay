@@ -16,6 +16,7 @@ RELEASE_RE = re.compile(
     r"\(https://github\.com/Rul1an/assay/releases/tag/v\1\)\."
 )
 VERSION_RE = re.compile(rf"^{VERSION_PATTERN}$")
+COVERAGE_RE = re.compile(rf"^- Published v({VERSION_PATTERN}) CLI archives cover ", re.MULTILINE)
 TAG_RE = re.compile(rf"^v({VERSION_PATTERN})$")
 CHECKOUT_RE = re.compile(
     r"For v5\.5\.1, run the last command from a source checkout or an extracted published CLI archive\.\s+"
@@ -261,6 +262,8 @@ def render_release_readme(
     checkouts = CHECKOUT_RE.findall(source)
     if len(checkouts) != 1:
         raise ValueError("README must carry exactly one published-checkout sentence")
+    if len(COVERAGE_RE.findall(source)) != 1:
+        raise ValueError("README must carry exactly one platform-coverage sentence")
 
     rendered = INSTALL_RE.sub(
         f"cargo install assay-cli --version {version} --locked", source, count=1
@@ -271,6 +274,7 @@ def render_release_readme(
         count=1,
     )
     rendered = CHECKOUT_RE.sub(ARCHIVE_QUICKSTART, rendered, count=1)
+    rendered = COVERAGE_RE.sub(f"- Published v{version} CLI archives cover ", rendered, count=1)
     rendered = _rewrite_repo_links(rendered, version, assembled)
     if INSTALL_RE.findall(rendered) != [version] or RELEASE_RE.findall(rendered) != [version]:
         raise ValueError("rendered README release claims did not converge")
