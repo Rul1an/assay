@@ -880,4 +880,3 @@ fi
 
 echo "mutation_count=$mutation_count expected=$EXPECTED_CASES"
 echo "assay-cli crate README mutations OK"
-
