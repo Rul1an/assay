@@ -1347,6 +1347,17 @@ def assert_changelog_history_self_test() -> None:
         pass
     else:
         fail("changelog_self_test", "non-version heading stayed green", "require dated semver history")
+    invalid_owner = released.replace(
+        "## [99.99.99] - 2099-12-31\n",
+        "## [99.99.99] - 2099-12-31\n\n## [Migration Notes]\n",
+        1,
+    )
+    try:
+        _changelog_claim_section(invalid_owner)
+    except WorkflowError:
+        pass
+    else:
+        fail("changelog_self_test", "non-version owner stayed green", "require an eligible claim owner")
     print("changelog_history_self_test=pass")
 
 
