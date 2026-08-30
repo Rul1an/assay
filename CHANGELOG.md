@@ -8,10 +8,12 @@ All notable changes to this project will be documented in this file.
 
 This release collects the post-`v5.4.0` main line: bounded evidence and
 candidate-capture surfaces, generated release and Python-artifact contracts,
-model-mediated Claude host evidence, and stricter machine-readable identity
-and policy interfaces. The MCP `2026-07-28` adapter remains behind its closed
+validation of model-mediated Claude transcripts, and stricter machine-readable
+identity and policy interfaces. The MCP `2026-07-28` adapter remains behind its closed
 gate; this release does not advertise or accept that revision. Install pins
 and GitHub release assets stay on `v5.4.0` until this tag is published.
+Authenticated model-mediated Claude host proof remains post-publication work
+(#2194); transcript validation is not evidence that this journey has passed.
 
 ### Changed
 - `assay evidence verify-privileged-mcp-action` still emits
