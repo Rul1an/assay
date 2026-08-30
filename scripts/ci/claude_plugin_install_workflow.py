@@ -994,6 +994,7 @@ def self_test() -> None:
     # surface as an unexplained fixture mismatch instead of the design error.
     assert_transcript_probe_is_not_denied()
     assert_transcript_prompt_contract()
+    assert_changelog_history_self_test()
     assert_changelog_contract()
     assert_hook_files_include_changelog()
     assert_stream_fixture_table()
@@ -1154,54 +1155,154 @@ STREAM_FIXTURE_EXPECTATIONS = (
 )
 
 
-def _unreleased_changelog() -> str:
-    """The current Unreleased section. One reader for the changelog contract."""
-    text = (SOURCE_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    start = text.find("## [Unreleased]")
-    if start < 0:
-        fail("changelog", "CHANGELOG.md has no Unreleased section", "restore the Unreleased heading")
-    rest = text[start:]
-    nxt = rest.find("\n## [", 1)
-    return rest if nxt < 0 else rest[:nxt]
+CHANGELOG_CLAIM_MARKERS = (
+    DECIDE_TOOL_PROJECT,
+    DECIDE_TOOL_PLUGIN,
+    "observed_route",
+    "wrong Assay tool",
+)
+RELEASE_HEADING = re.compile(
+    r"## \[(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\]"
+    r" - [0-9]{4}-[0-9]{2}-[0-9]{2}"
+)
+
+
+def _changelog_claim_section(text: str) -> str:
+    """Return the one active or released section carrying every Claude claim."""
+    headings = list(re.finditer(r"^## .+$", text, re.MULTILINE))
+    unreleased = [match for match in headings if match.group(0) == "## [Unreleased]"]
+    if len(unreleased) != 1:
+        fail("changelog", "CHANGELOG.md must have one Unreleased section", "restore the Unreleased heading")
+    unreleased_index = headings.index(unreleased[0])
+    if unreleased_index + 1 >= len(headings) or RELEASE_HEADING.fullmatch(
+        headings[unreleased_index + 1].group(0)
+    ) is None:
+        fail(
+            "changelog",
+            "CHANGELOG Unreleased is not followed by a dated semver release",
+            "restore numbered release history immediately after Unreleased",
+        )
+
+    owners: list[int] = []
+    for marker in CHANGELOG_CLAIM_MARKERS:
+        position = text.find(marker)
+        if position < 0:
+            fail(
+                "changelog",
+                f"CHANGELOG history does not name {marker!r}",
+                "record the two exact decide names, observed_route, and wrong-tool class",
+            )
+        owner = next(
+            (index for index in range(len(headings) - 1, -1, -1) if headings[index].start() < position),
+            -1,
+        )
+        owners.append(owner)
+    if len(set(owners)) != 1 or owners[0] < 0:
+        fail(
+            "changelog",
+            "CHANGELOG Claude host claims are split across sections",
+            "keep the complete claim set in one active or released section",
+        )
+    owner = owners[0]
+    heading = headings[owner].group(0)
+    if heading != "## [Unreleased]" and RELEASE_HEADING.fullmatch(heading) is None:
+        fail(
+            "changelog",
+            "CHANGELOG Claude host claims are outside active or released history",
+            "move the complete claim set under Unreleased or a dated semver release",
+        )
+    end = headings[owner + 1].start() if owner + 1 < len(headings) else len(text)
+    return text[headings[owner].start() : end]
 
 
 def assert_changelog_contract() -> None:
-    """Unreleased text must match the two-name union and wrong-tool class.
+    """Active or released text must match the two-name union and wrong-tool class.
 
     The classifier accepts exactly the project and plugin decide names and
     treats a wrong Assay tool as ``not_exercised``. The changelog is the
     public contract; a one-name or wrong-tool-unavailable sentence is a
     contradiction, not a comment.
     """
-    unreleased = _unreleased_changelog()
+    section = _changelog_claim_section((SOURCE_ROOT / "CHANGELOG.md").read_text(encoding="utf-8"))
     for needle in (DECIDE_TOOL_PROJECT, DECIDE_TOOL_PLUGIN, "observed_route"):
-        if needle not in unreleased:
+        if needle not in section:
             fail(
                 "changelog",
-                f"CHANGELOG Unreleased does not name {needle!r}",
+                f"CHANGELOG claim section does not name {needle!r}",
                 "record the two exact decide names and observed_route",
             )
-    if "wrong-tool," in unreleased and "stay `unavailable`" in unreleased:
+    if "wrong-tool," in section and "stay `unavailable`" in section:
         fail(
             "changelog",
             "CHANGELOG Unreleased still lists wrong-tool among unavailable shapes",
             "record the not_exercised reclassification for a wrong Assay tool",
         )
     marker = "wrong Assay tool"
-    idx = unreleased.find(marker)
+    idx = section.find(marker)
     if idx < 0:
         fail(
             "changelog",
-            "CHANGELOG Unreleased does not name the wrong Assay tool reclassification",
+            "CHANGELOG claim section does not name the wrong Assay tool reclassification",
             "say a wrong Assay tool stays not_exercised",
         )
-    if "not_exercised" not in unreleased[idx : idx + 240]:
+    if "not_exercised" not in section[idx : idx + 240]:
         fail(
             "changelog",
             "CHANGELOG Unreleased does not classify a wrong Assay tool as not_exercised",
             "land the reclassification next to the wrong Assay tool wording",
         )
     print("changelog_contract=pass")
+
+
+def assert_changelog_history_self_test() -> None:
+    """Pin active, released, split, preamble, and non-version section bounds."""
+    active = (SOURCE_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    _changelog_claim_section(active)
+    headings = list(re.finditer(r"^## .+$", active, re.MULTILINE))
+    unreleased = next(match for match in headings if match.group(0) == "## [Unreleased]")
+    first_release = headings[headings.index(unreleased) + 1]
+    body_start = active.find("\n", unreleased.start()) + 1
+    body = active[body_start : first_release.start()]
+    released = (
+        active[:body_start]
+        + "\n## [99.99.99] - 2099-12-31\n"
+        + body
+        + active[first_release.start() :]
+    )
+    _changelog_claim_section(released)
+
+    for marker in CHANGELOG_CLAIM_MARKERS:
+        split = released.replace(marker, "", 1).replace(
+            "## [Unreleased]\n", f"## [Unreleased]\n\n{marker}\n", 1
+        )
+        try:
+            _changelog_claim_section(split)
+        except WorkflowError:
+            pass
+        else:
+            fail("changelog_self_test", f"split marker stayed green: {marker}", "restore section closure")
+
+    preamble = released
+    for marker in CHANGELOG_CLAIM_MARKERS:
+        preamble = preamble.replace(marker, "", 1)
+    preamble = "\n".join(CHANGELOG_CLAIM_MARKERS) + "\n" + preamble
+    try:
+        _changelog_claim_section(preamble)
+    except WorkflowError:
+        pass
+    else:
+        fail("changelog_self_test", "preamble claims stayed green", "restore section lower bound")
+
+    nonversion = active.replace(
+        "## [Unreleased]\n", "## [Unreleased]\n\n## [Migration Notes]\n", 1
+    )
+    try:
+        _changelog_claim_section(nonversion)
+    except WorkflowError:
+        pass
+    else:
+        fail("changelog_self_test", "non-version heading stayed green", "require dated semver history")
+    print("changelog_history_self_test=pass")
 
 
 CLAUDE_PLUGIN_HOOK_ID = "claude-plugin-install-workflow-self-test"
