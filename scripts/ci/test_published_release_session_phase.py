@@ -130,7 +130,7 @@ run_published_release_session_product
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual([row["argv"][0] for row in observed], ["doctor"])
 
-    def run_recording(self, results, *, driver=None):
+    def run_recording(self, results, *, driver=None, omit=None):
         # Execute the production encoder/retention block with synthetic preceding artifacts.
         # These placeholders are not release or attestation proof.
         for name in ("produced.bundle.tar.gz", "decisions.ndjson", "inspect.json",
@@ -139,6 +139,13 @@ run_published_release_session_product
             (results / name).write_text("fixture")
         (results / "attestation-summary.json").write_text('{"assets":[]}')
         (results / "harness-files.json").write_text('{"files":[]}')
+        for name in ("allow/proxy.jsonl", "allow/decisions.ndjson", "allow/produced.bundle.tar.gz",
+                     "allow/verify.json", "unsupported/proxy.jsonl"):
+            path = results / name
+            path.parent.mkdir(exist_ok=True)
+            path.write_text("fixture")
+        if omit:
+            (results / omit).unlink()
         for directory, suffix in (("release-assets", ".tar.gz"), ("attestation-raw", ".json")):
             folder = results / directory
             folder.mkdir(exist_ok=True)
@@ -154,6 +161,20 @@ run_published_release_session_product
                "harness_manifest_digest": "d" * 64}
         return subprocess.run(["bash", "-euc", driver[start:end]], env=env,
                               capture_output=True, text=True, timeout=15)
+
+    def test_request_case_artifacts_are_required_and_content_hashed(self):
+        _, _, _, results, _ = self.run_phase()
+        for name in ("allow/proxy.jsonl", "allow/decisions.ndjson", "allow/produced.bundle.tar.gz",
+                     "allow/verify.json", "unsupported/proxy.jsonl"):
+            with self.subTest(name=name):
+                complete = self.run_recording(results)
+                self.assertEqual(complete.returncode, 0, complete.stderr)
+                rows = json.loads((results / "retained-artifacts.json").read_text())["files"]
+                row = next(row for row in rows if row["path"] == name)
+                self.assertEqual(row["sha256"], hashlib.sha256((results / name).read_bytes()).hexdigest())
+                missing = self.run_recording(results, omit=name)
+                self.assertNotEqual(missing.returncode, 0)
+                self.assertIn("required retained artifact is missing or empty: " + name, missing.stderr)
 
     def test_doctor_is_required_retained_and_content_hashed(self):
         result, _, _, results, _ = self.run_phase()

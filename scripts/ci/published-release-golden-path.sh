@@ -260,6 +260,8 @@ run_capture "verify-produced-bundle" 0 "$results/verify.json" "$results/verify.s
 "$JQ_BIN" -e '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "pass" and .verdict == "valid"' "$results/verify.json" >/dev/null \
   || fail "profile verification did not validate the produced bundle"
 
+run_published_release_extra_request_cases
+
 run_capture "export-sarif" 0 "$results/sarif.stdout" "$results/sarif.stderr" \
   assay-mcp-server enforcement-sarif --input "$decisions" --output "$results/enforcement.sarif"
 "$JQ_BIN" -e '.version == "2.1.0" and (.runs[0].results | length == 1)' "$results/enforcement.sarif" >/dev/null \
@@ -339,6 +341,8 @@ required = [
     "run-pin.json", "commands.ndjson", "doctor.json", "produced.bundle.tar.gz", "decisions.ndjson",
     "inspect.json", "verify.json", "tamper-verify.json", "enforcement.sarif",
     "release-api.json", "tag-ref.json", "attestation-summary.json",
+    "allow/proxy.jsonl", "allow/decisions.ndjson", "allow/produced.bundle.tar.gz",
+    "allow/verify.json", "unsupported/proxy.jsonl",
 ]
 for name in required:
     path = root / name

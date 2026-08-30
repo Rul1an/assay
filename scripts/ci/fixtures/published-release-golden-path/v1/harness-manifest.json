@@ -10,6 +10,10 @@
       "sha256": "2f7ae26b2d172b291f0d98b3724c729cccd52f7bfc1b9003df96a92c8434f1d2"
     },
     {
+      "path": "examples/privileged-action-gate/policies/allow.yaml",
+      "sha256": "84c0d25f57e9a28f100c50286b03c4e7350301be6c2c0999f440028c7c9d3684"
+    },
+    {
       "path": "examples/privileged-action-gate/baseline-approved.json",
       "sha256": "db210a8f7d7e5850322eddf18ffbef268b1d19595f568e7b3b7a4ec8e50326c3"
     },
@@ -23,15 +27,15 @@
     },
     {
       "path": "scripts/ci/published-release-golden-path.sh",
-      "sha256": "2ab22cec7503be0950fbc529a5a87b3b1036c617c4fd32c6090981111dbc0864"
+      "sha256": "f69a8340735f00e627beaf25c26ca4444c034f7f8b24d5450ecf3b7281e8f8d9"
     },
     {
       "path": "scripts/ci/lib/published-release-capture.sh",
-      "sha256": "1306f274c73561c9d23932d477cb558c13af3aab579c3105587f657baec068ad"
+      "sha256": "ea96d52165943a1ee4a414229bc3f2d1661be6bb09debf9f465badbc94078ad0"
     },
     {
       "path": "scripts/ci/published_release_proxy_phase.py",
-      "sha256": "487e630413335a0698f5ce89ea6bbc366ab25389731f802e47c7f3d035fee352"
+      "sha256": "81aacec5f1ea38f085ab223739aedd24802356dfb5091c42f4be9bc490a27866"
     },
     {
       "path": "scripts/ci/release_attestation_enforce.sh",
