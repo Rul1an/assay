@@ -1742,4 +1742,5 @@ def main() -> int:
     return 0
 
 
-raise SystemExit(main())
+if __name__ == "__main__":
+    raise SystemExit(main())
