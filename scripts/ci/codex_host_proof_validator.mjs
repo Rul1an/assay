@@ -45,6 +45,59 @@ export const CELLS = Object.freeze([
   "driverCompleted",
 ]);
 
+export function decidePrompt() {
+  return `Invoke ${DECIDE_TOOL} with ${JSON.stringify(DECIDE_INPUT)}`;
+}
+
+export function finitePositiveInt(name, value) {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a finite positive integer`);
+  }
+  return value;
+}
+
+const CREDENTIAL_ARGV_NAME =
+  /^--(api-key|token|authorization|password|secret)$/i;
+
+export function credentialArgvReason(argv) {
+  for (const arg of argv) {
+    if (typeof arg !== "string") {
+      continue;
+    }
+    const name = arg.includes("=") ? arg.slice(0, arg.indexOf("=")) : arg;
+    if (CREDENTIAL_ARGV_NAME.test(name)) {
+      return "credential-bearing argv is rejected before spawn";
+    }
+  }
+  return null;
+}
+
+export function persistableArgv(argv) {
+  const out = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (typeof arg !== "string") {
+      out.push(arg);
+      continue;
+    }
+    if (arg.includes("=")) {
+      const name = arg.slice(0, arg.indexOf("="));
+      out.push(CREDENTIAL_ARGV_NAME.test(name) ? `${name}=[redacted]` : arg);
+      continue;
+    }
+    if (CREDENTIAL_ARGV_NAME.test(arg)) {
+      out.push(arg);
+      if (i + 1 < argv.length) {
+        i += 1;
+        out.push("[redacted]");
+      }
+      continue;
+    }
+    out.push(arg);
+  }
+  return out;
+}
+
 const STATUSES = new Set(["pass", "fail", "unavailable", "not_applicable"]);
 const MAX_DEPTH = 32;
 const CREDENTIAL_KEY =
@@ -147,10 +200,27 @@ function mcpToolCalls(events) {
     }
     const item = event.params?.item;
     if (item?.type === "mcpToolCall") {
-      calls.push(item);
+      calls.push({
+        item,
+        threadId: event.params?.threadId,
+        turnId: event.params?.turnId,
+      });
     }
   }
   return calls;
+}
+
+function primaryThreadId(starts) {
+  const id = starts[0]?.result?.thread?.id;
+  return typeof id === "string" && id.length > 0 ? id : null;
+}
+
+function actualTurnId(events) {
+  const reply = events.find(
+    (event) => event.method === "turn/start" && event.direction === "server",
+  );
+  const id = reply?.result?.turn?.id;
+  return typeof id === "string" && id.length > 0 ? id : null;
 }
 
 function toolNames(status) {
@@ -246,9 +316,12 @@ function classifyTools(statuses) {
   return cell("pass", "exact release tools listed");
 }
 
-function classifyInvocation(calls, expected) {
+function classifyInvocation(calls, expected, threadId, turnId) {
   if (calls.length === 0) {
     return cell("unavailable", "no mcpToolCall item/completed");
+  }
+  if (typeof threadId !== "string" || typeof turnId !== "string") {
+    return cell("unavailable", "primary thread or turn id absent");
   }
   if (calls.length !== 1) {
     return cell(
@@ -257,13 +330,23 @@ function classifyInvocation(calls, expected) {
     );
   }
   const call = calls[0];
-  if (call.tool !== expected.toolName) {
-    return cell("fail", `wrong tool ${call.tool}`);
+  const item = call.item;
+  if (item.server !== "assay") {
+    return cell("fail", `wrong server ${item.server}`);
   }
-  if (call.status !== "completed") {
-    return cell("fail", `tool status ${call.status}`);
+  if (call.threadId !== threadId) {
+    return cell("fail", `tool thread ${call.threadId} != ${threadId}`);
   }
-  if (!sameJson(call.arguments, expected.toolArguments)) {
+  if (call.turnId !== turnId) {
+    return cell("fail", `tool turn ${call.turnId} != ${turnId}`);
+  }
+  if (item.tool !== expected.toolName) {
+    return cell("fail", `wrong tool ${item.tool}`);
+  }
+  if (item.status !== "completed") {
+    return cell("fail", `tool status ${item.status}`);
+  }
+  if (!sameJson(item.arguments, expected.toolArguments)) {
     return cell("fail", "tool arguments are not the pinned probe");
   }
   return cell("pass", `invoked ${expected.toolName}`);
@@ -273,7 +356,7 @@ function classifyPayload(calls, invocationCell) {
   if (invocationCell.status !== "pass") {
     return cell("unavailable", "invocation cell did not pass");
   }
-  const payload = payloadFromCall(calls[0]);
+  const payload = payloadFromCall(calls[0].item);
   if (!payload) {
     return cell("fail", "tool result is not typed JSON");
   }
@@ -334,11 +417,13 @@ export function classifyCells(events, meta, expected) {
   const starts = threadStarts(events);
   const statuses = mcpStatuses(events);
   const calls = mcpToolCalls(events);
+  const threadId = primaryThreadId(starts);
+  const turnId = actualTurnId(events);
   const skillDiscovered = classifySkill(skills, expected);
   const cwdObserved = classifyCwd(starts, expected);
   const mcpStarted = classifyMcp(statuses);
   const exactToolsListed = classifyTools(statuses);
-  const oneToolInvoked = classifyInvocation(calls, expected);
+  const oneToolInvoked = classifyInvocation(calls, expected, threadId, turnId);
   const structuredResultValidated = classifyPayload(calls, oneToolInvoked);
   return {
     skillDiscovered,
@@ -445,6 +530,21 @@ export function scrub(value) {
 
 const DEFAULT_MAX_BYTES = 1_048_576;
 
+export function readBoundedFile(file, maxBytes) {
+  finitePositiveInt("maxBytes", maxBytes);
+  const fd = fs.openSync(file, "r");
+  try {
+    const buf = Buffer.alloc(maxBytes + 1);
+    const n = fs.readSync(fd, buf, 0, maxBytes + 1, 0);
+    if (n > maxBytes) {
+      throw new Error("input exceeds byte bound");
+    }
+    return buf.subarray(0, n);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 export function parseArgs(argv) {
   const out = { proofRoot: null, maxBytes: DEFAULT_MAX_BYTES };
   for (let i = 0; i < argv.length; i += 1) {
@@ -453,7 +553,7 @@ export function parseArgs(argv) {
       out.proofRoot = argv[i];
     } else if (argv[i] === "--max-bytes") {
       i += 1;
-      out.maxBytes = Number(argv[i]);
+      out.maxBytes = finitePositiveInt("maxBytes", Number(argv[i]));
     } else {
       throw new Error(`unknown argument ${argv[i]}`);
     }
@@ -466,21 +566,22 @@ function namesIn(proofRoot) {
 }
 
 export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
+  finitePositiveInt("maxBytes", maxBytes);
   const reasons = [];
   let manifest;
   let events;
   let stored;
   try {
     manifest = parseJsonBytes(
-      fs.readFileSync(path.join(proofRoot, "manifest.json")),
+      readBoundedFile(path.join(proofRoot, "manifest.json"), maxBytes),
       maxBytes,
     );
     events = parseJsonBytes(
-      fs.readFileSync(path.join(proofRoot, "events.json")),
+      readBoundedFile(path.join(proofRoot, "events.json"), maxBytes),
       maxBytes,
     );
     stored = parseJsonBytes(
-      fs.readFileSync(path.join(proofRoot, "classification.json")),
+      readBoundedFile(path.join(proofRoot, "classification.json"), maxBytes),
       maxBytes,
     );
   } catch (error) {

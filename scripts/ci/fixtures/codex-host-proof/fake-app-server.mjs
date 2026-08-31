@@ -4,6 +4,7 @@
  */
 import readline from "node:readline";
 import path from "node:path";
+import { DECIDE_INPUT, DECIDE_TOOL } from "../../codex_host_proof_validator.mjs";
 
 const FAKE_USER_AGENT = "assay-codex-host-proof-fake/1";
 const TOOLS = {
@@ -191,7 +192,12 @@ function handle(message) {
       });
       return;
     }
-    write({ id, result: { turnId: "turn-1" } });
+    write({
+      id,
+      result: {
+        turn: { id: "turn-1", items: [], status: "inProgress" },
+      },
+    });
     if (scenario === "truncated") {
       process.stdout.write('{"method":"item/completed","params":');
       return;
@@ -200,50 +206,81 @@ function handle(message) {
       process.exit(0);
       return;
     }
+    if (scenario === "turn-failed") {
+      write({
+        method: "turn/completed",
+        params: {
+          threadId,
+          turn: { id: "turn-1", items: [], status: "failed" },
+        },
+      });
+      return;
+    }
     write({
       id: "elicit-1",
       method: "mcpServer/elicitation/request",
       params: {
         serverName: "assay",
         threadId,
-        message: "approve assay_policy_decide",
+        message: `approve ${DECIDE_TOOL}`,
         mode: "form",
         requestedSchema: { type: "object", properties: {} },
       },
     });
-    const tool = scenario === "wrong-tool" ? "assay_check_args" : "assay_policy_decide";
+    const tool = scenario === "wrong-tool" ? "assay_check_args" : DECIDE_TOOL;
     const argumentsPayload =
       scenario === "wrong-tool"
         ? { tool: "other" }
-        : {
-            tool: "install_surface_allowed_probe",
-            policy: "install-surface-policy.yaml",
-          };
-    write({
-      method: "item/completed",
-      params: {
-        completedAtMs: 1,
-        threadId,
-        turnId: "turn-1",
-        item: {
-          type: "mcpToolCall",
-          id: "call-1",
-          server: "assay",
-          tool,
-          arguments: argumentsPayload,
-          status: "completed",
-          result: {
-            content: [
-              { type: "text", text: JSON.stringify({ allowed: true, reason: "Allowed by policy" }) },
-            ],
-            structuredContent: null,
+        : { ...DECIDE_INPUT };
+    const emitTool = () => {
+      write({
+        method: "item/completed",
+        params: {
+          completedAtMs: 1,
+          threadId,
+          turnId: "turn-1",
+          item: {
+            type: "mcpToolCall",
+            id: "call-1",
+            server: "assay",
+            tool,
+            arguments: argumentsPayload,
+            status: "completed",
+            result: {
+              content: [
+                { type: "text", text: JSON.stringify({ allowed: true, reason: "Allowed by policy" }) },
+              ],
+              structuredContent: null,
+            },
           },
         },
-      },
-    });
-    if (scenario === "exit-1-after-success") {
-      setImmediate(() => process.exit(1));
+      });
+      if (scenario === "exit-1-after-success") {
+        setImmediate(() => process.exit(1));
+      }
+    };
+    if (scenario === "early-user-then-tool") {
+      write({
+        method: "item/completed",
+        params: {
+          completedAtMs: 1,
+          threadId,
+          turnId: "turn-1",
+          item: {
+            type: "userMessage",
+            id: "um-1",
+            content: [{ type: "text", text: "user" }],
+          },
+        },
+      });
+      setTimeout(emitTool, 100);
+      return;
     }
+    if (scenario === "delayed-tool") {
+      setTimeout(emitTool, 100);
+      return;
+    }
+    emitTool();
     return;
   }
 }
@@ -254,4 +291,9 @@ rl.on("line", (line) => {
     return;
   }
   handle(JSON.parse(line));
+});
+rl.on("close", () => {
+  if (scenario === "delayed-tool" || scenario === "early-user-then-tool") {
+    process.exit(0);
+  }
 });

@@ -3,6 +3,10 @@
  * Bounded Codex app-server host-proof driver. Spawns a stdio child, records
  * sanitized events, and classifies them with the validator's shared function.
  * Does not copy profiles or start a live model turn unless explicitly allowed.
+ *
+ * Byte cap applies before parse/retention. On cap or parse failure, stdin is
+ * ended and the child is SIGTERM'd, then SIGKILL after 1s if still alive.
+ * That is process cleanup, not a sandbox.
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -16,10 +20,15 @@ import {
   SCHEMA,
   SKILL_NAME,
   classifyRecord,
+  credentialArgvReason,
+  decidePrompt,
+  finitePositiveInt,
   forbiddenProofRoot,
+  persistableArgv,
   scrub,
   sha256Utf8,
   stableStringify,
+  walkDepth,
 } from "./codex_host_proof_validator.mjs";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -118,12 +127,70 @@ class BoundBuffer {
   }
 }
 
-function parseLine(line) {
+function parseLine(line, maxBytes) {
+  if (Buffer.byteLength(line, "utf8") > maxBytes) {
+    const error = new Error("rpc line exceeds byte bound");
+    error.truncated = true;
+    throw error;
+  }
   const value = JSON.parse(line);
+  walkDepth(value);
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("rpc line is not an object");
   }
   return value;
+}
+
+function writeProofFiles(options, pack) {
+  const initialize = pack.events.find(
+    (event) => event.method === "initialize" && event.direction === "server",
+  );
+  const record = {
+    schema: SCHEMA,
+    provenance: options.provenance,
+    driverExitCode: pack.childExit,
+    truncated: pack.truncated,
+    streamUnavailable: pack.streamUnavailable,
+    initialize: {
+      codexHome: initialize?.result?.codexHome ?? null,
+      userAgent: initialize?.result?.userAgent ?? null,
+    },
+    expected: {
+      projectRoot: options.projectRoot,
+      skillName: SKILL_NAME,
+      tools: [...EXPECTED_TOOLS],
+      toolName: DECIDE_TOOL,
+      toolArguments: DECIDE_INPUT,
+    },
+    events: pack.events,
+  };
+  const classified = classifyRecord(record);
+  const eventsText = stableStringify(pack.events);
+  const manifest = {
+    schema: SCHEMA,
+    provenance: options.provenance,
+    driverExitCode: pack.childExit,
+    truncated: pack.truncated,
+    streamUnavailable: pack.streamUnavailable,
+    bounds: {
+      timeoutMs: options.timeoutMs,
+      maxBytes: options.maxBytes,
+      stdoutBytes: pack.stdoutBytes,
+      stderrBytes: pack.stderrBytes,
+    },
+    invocation: {
+      argv: persistableArgv(options.childArgv),
+      envNames: ["PATH", "HOME", "CODEX_HOME"],
+    },
+    initialize: record.initialize,
+    expected: record.expected,
+    hashes: { events: sha256Utf8(eventsText) },
+    allowlist: [...ALLOWLIST],
+  };
+  writeJson(path.join(options.proofRoot, "manifest.json"), manifest);
+  writeJson(path.join(options.proofRoot, "events.json"), pack.events);
+  writeJson(path.join(options.proofRoot, "classification.json"), classified);
+  return { manifest, events: pack.events, classified, driverExitCode: pack.childExit };
 }
 
 export async function runProof(options) {
@@ -140,13 +207,34 @@ export async function runProof(options) {
   if (options.provenance !== "synthetic" && options.provenance !== "live") {
     throw new Error("provenance must be synthetic or live");
   }
+  finitePositiveInt("timeoutMs", options.timeoutMs);
+  finitePositiveInt("maxBytes", options.maxBytes);
 
   fs.mkdirSync(options.proofRoot, { recursive: true, mode: 0o700 });
+  const credential = credentialArgvReason(options.childArgv);
+  if (credential) {
+    return writeProofFiles(options, {
+      events: [
+        {
+          direction: "driver",
+          method: "error",
+          params: { message: credential },
+        },
+      ],
+      childExit: 1,
+      truncated: false,
+      streamUnavailable: true,
+      stdoutBytes: 0,
+      stderrBytes: 0,
+    });
+  }
+
   const events = [];
   const stdout = new BoundBuffer(options.maxBytes);
   const stderr = new BoundBuffer(options.maxBytes);
   let nextId = 1;
   let streamUnavailable = false;
+  let stopped = false;
   let childExit = null;
   const pending = new Map();
 
@@ -163,14 +251,36 @@ export async function runProof(options) {
       resolve(code ?? (signal ? 1 : 0));
     });
   });
-  child.stderr.on("data", (chunk) => stderr.push(chunk));
+  const stopChild = () => {
+    if (stopped) {
+      return;
+    }
+    stopped = true;
+    try {
+      child.stdin.end();
+    } catch {
+      /* already closed */
+    }
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      /* already exited */
+    }
+  };
+  child.stderr.on("data", (chunk) => {
+    stderr.push(chunk);
+    if (stderr.truncated) {
+      stopChild();
+    }
+  });
   child.on("error", () => {
     streamUnavailable = true;
+    stopChild();
   });
 
   let buffer = "";
   const onLine = (line) => {
-    const message = parseLine(line);
+    const message = parseLine(line, options.maxBytes);
     if (Object.prototype.hasOwnProperty.call(message, "id") && pending.has(message.id)) {
       const method = pending.get(message.id);
       pending.delete(message.id);
@@ -194,7 +304,7 @@ export async function runProof(options) {
           params: message.params ?? null,
         }),
       );
-      if (message.method === "mcpServer/elicitation/request" && message.id != null) {
+      if (message.method === "mcpServer/elicitation/request" && message.id != null && !stopped) {
         const accept = {
           id: message.id,
           result: { action: "accept", content: {} },
@@ -207,15 +317,43 @@ export async function runProof(options) {
 
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk) => {
+    if (stopped) {
+      return;
+    }
     stdout.push(Buffer.from(chunk, "utf8"));
+    if (stdout.truncated) {
+      buffer = "";
+      stopChild();
+      return;
+    }
     buffer += chunk;
-    let idx;
-    while ((idx = buffer.indexOf("\n")) >= 0) {
-      const line = buffer.slice(0, idx).trim();
-      buffer = buffer.slice(idx + 1);
-      if (line) {
-        onLine(line);
+    try {
+      let idx;
+      while ((idx = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, idx).trim();
+        buffer = buffer.slice(idx + 1);
+        if (line) {
+          onLine(line);
+        }
       }
+      if (Buffer.byteLength(buffer, "utf8") > options.maxBytes) {
+        stdout.truncated = true;
+        buffer = "";
+        stopChild();
+      }
+    } catch (error) {
+      buffer = "";
+      if (error.truncated) {
+        stdout.truncated = true;
+      } else {
+        streamUnavailable = true;
+      }
+      events.push({
+        direction: "driver",
+        method: "error",
+        params: { message: "stdio parse failed" },
+      });
+      stopChild();
     }
   });
 
@@ -224,9 +362,14 @@ export async function runProof(options) {
     nextId += 1;
     pending.set(id, method);
     events.push(scrub({ direction: "client", method, id, params }));
-    child.stdin.write(encode({ id, method, params }));
+    if (!stopped) {
+      child.stdin.write(encode({ id, method, params }));
+    }
     return id;
   };
+
+  const blocked = () =>
+    stdout.truncated || stderr.truncated || streamUnavailable || stopped;
 
   const waitFor = async (id) => {
     const deadline = Date.now() + options.timeoutMs;
@@ -234,7 +377,7 @@ export async function runProof(options) {
       if (events.some((event) => event.direction === "server" && event.id === id)) {
         return;
       }
-      if (stdout.truncated || stderr.truncated) {
+      if (blocked()) {
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -242,15 +385,37 @@ export async function runProof(options) {
     throw new Error(`timeout waiting for ${id}`);
   };
 
-  const waitNotify = async (method) => {
+  const waitForExpectedTool = async (threadId, turnId) => {
     const deadline = Date.now() + options.timeoutMs;
     while (Date.now() < deadline) {
-      if (events.some((event) => event.method === method && event.direction === "server" && event.id == null)) {
+      if (blocked()) {
+        return;
+      }
+      const matched = events.some(
+        (event) =>
+          event.method === "item/completed" &&
+          event.direction === "server" &&
+          event.params?.threadId === threadId &&
+          event.params?.turnId === turnId &&
+          event.params?.item?.type === "mcpToolCall",
+      );
+      if (matched) {
+        return;
+      }
+      const failedTurn = events.some(
+        (event) =>
+          event.method === "turn/completed" &&
+          event.direction === "server" &&
+          event.params?.threadId === threadId &&
+          event.params?.turn?.id === turnId &&
+          event.params?.turn?.status === "failed",
+      );
+      if (failedTurn) {
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    throw new Error(`timeout waiting for ${method}`);
+    throw new Error("timeout waiting for expected tool completion");
   };
 
   try {
@@ -260,7 +425,9 @@ export async function runProof(options) {
     });
     await waitFor(1);
     events.push({ direction: "client", method: "initialized", params: {} });
-    child.stdin.write(encode({ method: "initialized" }));
+    if (!stopped) {
+      child.stdin.write(encode({ method: "initialized" }));
+    }
     send("skills/list", { forceReload: true, cwds: [options.projectRoot] });
     await waitFor(2);
 
@@ -314,78 +481,55 @@ export async function runProof(options) {
         );
       }
       if (options.journey === "tool") {
-        send("turn/start", {
+        const turnReq = send("turn/start", {
           threadId,
-          input: [{ type: "text", text: "invoke the pinned Assay decide probe" }],
+          input: [{ type: "text", text: decidePrompt() }],
         });
-        await waitNotify("item/completed");
+        await waitFor(turnReq);
+        const turnResponse = events.find(
+          (event) => event.direction === "server" && event.id === turnReq,
+        );
+        if (turnResponse?.error) {
+          throw new Error("turn/start failed");
+        }
+        const turnId = turnResponse?.result?.turn?.id;
+        if (typeof turnId !== "string" || turnId.length === 0) {
+          throw new Error("no turn id in server response result.turn.id");
+        }
+        await waitForExpectedTool(threadId, turnId);
       }
     }
   } catch (error) {
     streamUnavailable = streamUnavailable || /timeout|unavailable/i.test(String(error));
     events.push({ direction: "driver", method: "error", params: { message: String(error) } });
+    stopChild();
   }
 
-  try {
-    child.stdin.end();
-  } catch {
-    /* already closed */
+  if (!stopped) {
+    try {
+      child.stdin.end();
+    } catch {
+      /* already closed */
+    }
   }
   const killer = setTimeout(() => {
-    child.kill("SIGKILL");
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      /* already exited */
+    }
   }, 1000);
   childExit = await childClosed;
   clearTimeout(killer);
 
-  const initialize = events.find(
-    (event) => event.method === "initialize" && event.direction === "server",
-  );
-  const record = {
-    schema: SCHEMA,
-    provenance: options.provenance,
-    driverExitCode: childExit,
+  return writeProofFiles(options, {
+    events,
+    childExit,
     truncated: stdout.truncated || stderr.truncated,
     streamUnavailable,
-    initialize: {
-      codexHome: initialize?.result?.codexHome ?? null,
-      userAgent: initialize?.result?.userAgent ?? null,
-    },
-    expected: {
-      projectRoot: options.projectRoot,
-      skillName: SKILL_NAME,
-      tools: [...EXPECTED_TOOLS],
-      toolName: DECIDE_TOOL,
-      toolArguments: DECIDE_INPUT,
-    },
-    events,
-  };
-  const classified = classifyRecord(record);
-  const eventsText = stableStringify(events);
-  const manifest = {
-    schema: SCHEMA,
-    provenance: options.provenance,
-    driverExitCode: childExit,
-    truncated: record.truncated,
-    streamUnavailable,
-    bounds: {
-      timeoutMs: options.timeoutMs,
-      maxBytes: options.maxBytes,
-      stdoutBytes: stdout.size,
-      stderrBytes: stderr.size,
-    },
-    invocation: {
-      argv: options.childArgv,
-      envNames: ["PATH", "HOME", "CODEX_HOME"],
-    },
-    initialize: record.initialize,
-    expected: record.expected,
-    hashes: { events: sha256Utf8(eventsText) },
-    allowlist: [...ALLOWLIST],
-  };
-  writeJson(path.join(options.proofRoot, "manifest.json"), manifest);
-  writeJson(path.join(options.proofRoot, "events.json"), events);
-  writeJson(path.join(options.proofRoot, "classification.json"), classified);
-  return { manifest, events, classified, driverExitCode: childExit };
+    stdoutBytes: stdout.size,
+    stderrBytes: stderr.size,
+  });
 }
 
 function main() {
