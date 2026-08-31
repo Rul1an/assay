@@ -84,6 +84,44 @@ class ReleaseReadmeTruth(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "exactly one platform-coverage sentence"):
                     module.render_release_readme(altered, "5.6.0")
 
+    def test_cli_refuses_two_coverage_claims_on_one_line(self):
+        source = (ROOT / "README.md").read_text(encoding="utf-8")
+        coverage = next(line for line in source.splitlines() if " CLI archives cover " in line)
+        current = re.search(r"Published v([^ ]+)", coverage).group(1)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / "scripts/ci/release_readme.py"
+            script.parent.mkdir(parents=True)
+            script.write_bytes(MODULE_PATH.read_bytes())
+            for relative in load_module().PACKED_SOURCE_PATHS:
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((ROOT / relative).read_bytes())
+            for control in (source, source + "\nHistorical note: v5.0.0 shipped earlier.\n"):
+                (root / "README.md").write_text(control, encoding="utf-8")
+                result = subprocess.run(
+                    [sys.executable, str(script), "v5.6.0", "--assembled-cwd"],
+                    cwd=root, capture_output=True, text=True, timeout=10,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("Published v5.6.0 CLI archives cover", result.stdout)
+            for second_version in (current, "5.0.0"):
+                with self.subTest(second_version=second_version):
+                    (root / "README.md").write_text(
+                        source.replace(
+                            coverage,
+                            coverage + f" Published v{second_version} CLI archives cover obsolete.",
+                        ),
+                        encoding="utf-8",
+                    )
+                    result = subprocess.run(
+                        [sys.executable, str(script), "v5.6.0", "--assembled-cwd"],
+                        cwd=root, capture_output=True, text=True, timeout=10,
+                    )
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+                    self.assertIn("exactly one platform-coverage sentence", result.stderr)
+                    self.assertEqual(result.stdout, "")
+
     def test_renderer_moves_only_active_release_claims_to_assembled_version(self):
         module = load_module()
         source = """# Assay
