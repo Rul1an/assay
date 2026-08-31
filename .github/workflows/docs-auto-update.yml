@@ -50,6 +50,11 @@ jobs:
           chmod +x scripts/docs/generate-module-map.sh
           scripts/docs/generate-module-map.sh
 
+      - name: Generate configuration vocabulary crosswalk
+        run: |
+          chmod +x scripts/docs/generate-configuration-vocabulary-crosswalk.py
+          scripts/docs/generate-configuration-vocabulary-crosswalk.py
+
       - name: Update architecture diagrams
         run: |
           chmod +x scripts/docs/update-architecture-docs.sh
