@@ -20,6 +20,8 @@ use std::process::{Command, Output, Stdio};
 
 const SERVER_SRC: &str = include_str!("../src/server.rs");
 const LATEST_LEGACY_VERSION: &str = ACCEPTED_PROTOCOL_VERSIONS[2];
+const ACTIVATION_GUIDANCE: &str =
+    "#2483 requires release-bound activation evidence; preserve historical release observations";
 
 fn modern_params() -> Value {
     json!({
@@ -114,10 +116,175 @@ fn assert_cacheable(result: &Value) {
 
 #[test]
 fn shipping_accepted_set_excludes_the_modern_revision() {
-    assert!(!ACCEPTED_PROTOCOL_VERSIONS.is_empty());
-    assert!(!ACCEPTED_PROTOCOL_VERSIONS.contains(&MODERN_PROTOCOL_VERSION));
+    closed_gate(ACCEPTED_PROTOCOL_VERSIONS, &public_capabilities()).unwrap();
     assert_eq!(ERROR_UNSUPPORTED_PROTOCOL_VERSION, -32022);
     assert_eq!(ERROR_METHOD_NOT_FOUND, -32601);
+}
+
+fn public_capabilities() -> Value {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../docs/data/product-capabilities.v0.json");
+    let source = std::fs::read_to_string(path).unwrap_or_else(|error| {
+        panic!("checked-in public capability data: {error}; {ACTIVATION_GUIDANCE}")
+    });
+    serde_json::from_str(&source)
+        .unwrap_or_else(|error| panic!("public capability JSON: {error}; {ACTIVATION_GUIDANCE}"))
+}
+
+// Historical release evidence is a closed-era ceiling, not a mirror of future HEAD support.
+fn closed_gate(accepted: &[&str], capabilities: &Value) -> Result<(), String> {
+    let fail = |reason: &str| format!("{reason}; {ACTIVATION_GUIDANCE}");
+    if accepted.is_empty() || accepted.contains(&MODERN_PROTOCOL_VERSION) {
+        return Err(fail(
+            "production accepted-version set must be nonempty and exclude modern",
+        ));
+    }
+    let rows = capabilities
+        .get("capabilities")
+        .and_then(Value::as_array)
+        .ok_or_else(|| fail("capabilities must be an array"))?;
+    for id in ["published-mcp-server", "published-release-golden-path"] {
+        let mut matches = rows.iter().filter(|row| row["id"] == id);
+        let row = matches
+            .next()
+            .ok_or_else(|| fail(&format!("missing {id}")))?;
+        if matches.next().is_some() {
+            return Err(fail(&format!("duplicate {id}")));
+        }
+        let versions = row
+            .get("protocol_versions")
+            .and_then(Value::as_array)
+            .filter(|versions| !versions.is_empty())
+            .ok_or_else(|| fail(&format!("{id}: protocol_versions must be a nonempty array")))?;
+        for version in versions {
+            for field in ["protocol", "version", "transport"] {
+                if version
+                    .get(field)
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                    .is_none()
+                {
+                    return Err(fail(&format!("{id}: {field} must be a nonempty string")));
+                }
+            }
+            if version["version"] == MODERN_PROTOCOL_VERSION {
+                return Err(fail(&format!("{id}: public support must exclude modern")));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn assert_closed_gate_rejects(accepted: &[&str], capabilities: &Value, reason: &str) {
+    let error = closed_gate(accepted, capabilities).expect_err("invalid closed-era claim accepted");
+    assert!(error.contains(reason), "{error}");
+    assert!(error.contains("#2483"), "{error}");
+    assert!(
+        error.contains("release-bound activation evidence"),
+        "{error}"
+    );
+}
+
+#[test]
+fn closed_gate_rejects_production_only_activation_with_owner_diagnostic() {
+    let mut accepted = ACCEPTED_PROTOCOL_VERSIONS.to_vec();
+    accepted.push(MODERN_PROTOCOL_VERSION);
+    assert_closed_gate_rejects(&accepted, &public_capabilities(), "production");
+    assert_closed_gate_rejects(&[], &public_capabilities(), "production");
+}
+
+#[test]
+fn closed_gate_rejects_public_only_activation_in_either_row() {
+    for id in ["published-mcp-server", "published-release-golden-path"] {
+        let mut capabilities = public_capabilities();
+        let row = capabilities["capabilities"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|row| row["id"] == id)
+            .unwrap();
+        row["protocol_versions"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({
+                "protocol": "mcp", "version": MODERN_PROTOCOL_VERSION, "transport": "stdio"
+            }));
+        assert_closed_gate_rejects(ACCEPTED_PROTOCOL_VERSIONS, &capabilities, id);
+    }
+}
+
+#[test]
+fn closed_gate_requires_each_public_row_and_typed_version_collection() {
+    for id in ["published-mcp-server", "published-release-golden-path"] {
+        let original = public_capabilities();
+        let mut missing = original.clone();
+        missing["capabilities"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|row| row["id"] != id);
+        assert_closed_gate_rejects(ACCEPTED_PROTOCOL_VERSIONS, &missing, id);
+
+        let mut duplicate = original.clone();
+        let row = original["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == id)
+            .unwrap()
+            .clone();
+        duplicate["capabilities"].as_array_mut().unwrap().push(row);
+        assert_closed_gate_rejects(ACCEPTED_PROTOCOL_VERSIONS, &duplicate, id);
+
+        let mut absent_versions = original.clone();
+        let row = absent_versions["capabilities"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|row| row["id"] == id)
+            .unwrap();
+        row.as_object_mut().unwrap().remove("protocol_versions");
+        assert_closed_gate_rejects(ACCEPTED_PROTOCOL_VERSIONS, &absent_versions, id);
+
+        for versions in [
+            Value::Null,
+            json!({}),
+            json!([]),
+            json!([{}]),
+            json!(["2025-11-25"]),
+            json!([{"protocol":"mcp","version":42,"transport":"stdio"}]),
+            json!([{"protocol":"mcp","version":"2025-11-25"}]),
+        ] {
+            let mut malformed = original.clone();
+            let row = malformed["capabilities"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|row| row["id"] == id)
+                .unwrap();
+            row["protocol_versions"] = versions;
+            assert_closed_gate_rejects(ACCEPTED_PROTOCOL_VERSIONS, &malformed, id);
+        }
+        for field in ["protocol", "version", "transport"] {
+            for value in [Value::Null, json!(42), json!(""), json!([])] {
+                let mut malformed = original.clone();
+                let row = malformed["capabilities"]
+                    .as_array_mut()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|row| row["id"] == id)
+                    .unwrap();
+                row["protocol_versions"][0][field] = value;
+                assert_closed_gate_rejects(ACCEPTED_PROTOCOL_VERSIONS, &malformed, id);
+            }
+        }
+    }
+    for capabilities in [
+        json!({}),
+        json!({"capabilities":null}),
+        json!({"capabilities":{}}),
+    ] {
+        assert_closed_gate_rejects(ACCEPTED_PROTOCOL_VERSIONS, &capabilities, "capabilities");
+    }
 }
 
 #[test]
