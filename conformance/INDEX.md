@@ -343,13 +343,17 @@ reproduction target. Whether that is answered by an addendum corpus at a second
 digest or by leaving v0 pinned and honest is a contract decision rather than a
 tooling one.
 
-### Why `rfc8785` has a control and no declared rules
+### RFC 8785: dependency rules and wrapper control
 
-`crates/assay-canonical/src/jcs.rs` is a thin wrapper: it delegates to `serde_jcs`
-and declares almost no rules of its own. Rule-deletion mutation therefore does not
-apply the way it does to a corpus with its own logic — there is nothing of ours to
-delete. The question for a delegating wrapper is different: **does the corpus catch
-a wrong delegate?**
+`crates/assay-canonical/src/jcs.rs` is a thin wrapper that delegates to `serde_jcs`.
+The wrapper declares no independent serialization rules. The measured rules belong
+to the pinned `serde_jcs` dependency: UTF-16 object-key ordering,
+ECMAScript-compatible number serialization, and section 3.2.2.2 Unicode string
+emission. The result row above reports that bounded declaration, not the wrapper
+or every rule in RFC 8785.
+
+The wrapper swap is a separate control, not a scored rule. It asks a different
+question: **does the corpus catch a wrong delegate?**
 
 That control was not invented for this measurement. `tests/rfc8785_conformance.rs`
 documents it in prose at the top of the file: swap `serde_jcs::to_vec` for
@@ -363,9 +367,10 @@ exactly: `8 of 31 RFC 8785 vectors diverged`, and the named vector is among them
 That is now executable rather than a paragraph.
 
 What the control does **not** establish is coverage of RFC 8785 itself. It shows
-the corpus bites against **one** wrong implementation. Whether it bites against the
-other plausible ones is a question about RFC coverage rather than about our code,
-and it is open.
+the corpus bites against **one** wrong implementation. The dependency measurement
+separately exercises its declared near-misses; neither result establishes RFC
+certification, full corpus coverage, or implementation-wide adequacy. Other
+plausible changes outside that declaration remain unmeasured.
 
 Every manifest must declare at least one **control** — a mutation on the same
 path that MUST be killed. All-survivors because a corpus is weak and

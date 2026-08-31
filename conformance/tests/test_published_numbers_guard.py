@@ -166,6 +166,17 @@ class ProjectionTemplateContract(unittest.TestCase):
         errata = REPO / "conformance/privileged-mcp-action-v0/ERRATA.md"
         self.assertEqual(rendered[errata], errata.read_text(encoding="utf-8"))
 
+    def test_rfc_dependency_rules_are_distinct_from_the_wrapper_control(self):
+        rendered = project.render_documents(REPO)[REPO / "conformance/INDEX.md"]
+        template = (REPO / "conformance/INDEX.md.in").read_text(encoding="utf-8")
+        for label, document in (("template", template), ("rendered", rendered)):
+            with self.subTest(document=label):
+                self.assertNotIn("### Why `rfc8785` has a control and no declared rules", document)
+                prose = " ".join(document.split())
+                self.assertIn("The wrapper declares no independent serialization rules.", prose)
+                self.assertIn("The measured rules belong to the pinned `serde_jcs` dependency", prose)
+                self.assertIn("The wrapper swap is a separate control, not a scored rule.", prose)
+
     def test_expression_dsl_does_not_return_through_templates_or_checker(self):
         sources = [
             REPO / "conformance/adequacy/check_published_numbers.py",
