@@ -14,9 +14,21 @@ tool decision was made, under different field names. Nothing else says how they 
 a reader who meets one of them can reasonably assume the others mean the same thing. They
 do not.
 
-**No claim in this codebase depends on configuration** — the claim gate knows
-`PositiveExistence`, `ExhaustiveSet` and `BoundedNegative`, all about observation coverage.
-This is a legibility map, not a correctness mechanism, and it justifies no code change.
+**The claim gate does not take configuration as an input.** Its claim kinds are
+`PositiveExistence`, `ExhaustiveSet` and `BoundedNegative`, and all three are about
+observation coverage.
+
+That is a statement about the gate, not about the codebase, and an earlier version of this
+page generalised it into "no claim in this codebase depends on configuration". That is
+false. ADR-043 conditions an enforcement statement on configuration — *a capability that
+cannot bind `declared_policy_digest` makes no enforcement statement in evidence* — and the
+decision identity in the table below is the pair `(observed_input_digest,
+declared_policy_digest)`, which takes configuration as an input by construction. The false
+generalisation mattered because it was what licensed the next sentence.
+
+This page is a legibility map rather than a mechanism: it adds no check and changes no
+behaviour. That is a claim about **this page**, and nothing follows from it about what else
+in the tree depends on configuration.
 
 Field subjects below are read from the producing code, never inferred from the field name.
 Inferring from names is exactly the error this page prevents.
@@ -29,12 +41,17 @@ never by substring, because `declared_manifest_digest` is a prefix of
 `declared_manifest_digest_mismatch` and a loose match reports one field's count beside
 another field's name.
 
-| schema | documents | configuration key | populated | what it is a statement about |
-|---|---|---|---|---|
-| `assay.tool_decision_surface.v0` | 10 | `server.declared_manifest_digest` | 10/10 | The **declared, baselined** tool manifest. `docs/reference/mcp-manifest-drift.md` defines *observed* as the latest fully observed `tools/list` — what the server advertised — and *declared* as the baseline it is compared against, so this names the baseline side. The related finding `declared_manifest_digest_mismatch` is a self-consistency check on that side alone (`recompute(declared.tools) != declared.manifest_digest`), belongs to the manifest-drift records rather than to this schema, and is emitted today only by a test-local reference verifier. |
-| `assay.tool_decision_truth.otel_projection.v0` | 1 | `spans[].attributes.assay.tdt.declared_policy_digest` | 2/2 | The same fact as `assay.tool_decision_truth.v0`, carried as OpenTelemetry span attributes. |
-| `assay.tool_decision_truth.v0` | 1 | `declared_policy_digest` | 2/2 | The declared constraint set the decision was taken under: `McpPolicy::declared_constraint_digest_experimental`, binding tool name, args schema, identity, classes, approval, scope and redaction. Decision identity is the pair `(observed_input_digest, declared_policy_digest)`. |
-| `assay.tool_decision_truth.vectors.v0` | 1 | `policies.<name>.version` | 4/4 | A named policy variant a vector exercises. A version label, not a digest over content: comparable for identity between records sharing a naming scheme, not recomputable from bytes. |
+| schema | documents | curated key | populated | other keys it carries | what it is a statement about |
+|---|---|---|---|---|---|
+| `assay.tool_decision_surface.v0` | 10 | `server.declared_manifest_digest` | 10/10 | `observed_tool_decisions[].correlation.source_class`, `observed_tool_decisions[].response.side_effect.verification_subject_digest` | The **declared, baselined** tool manifest. `docs/reference/mcp-manifest-drift.md` defines *observed* as the latest fully observed `tools/list` — what the server advertised — and *declared* as the baseline it is compared against, so this names the baseline side. The related finding `declared_manifest_digest_mismatch` is a self-consistency check on that side alone (`recompute(declared.tools) != declared.manifest_digest`), belongs to the manifest-drift records rather than to this schema, and is emitted today only by a test-local reference verifier. |
+| `assay.tool_decision_truth.otel_projection.v0` | 1 | `spans[].attributes.assay.tdt.declared_policy_digest` | 2/2 | `spans[].attributes.assay.tdt.carrier_content_digest`, `spans[].attributes.assay.tdt.decision_identity_digest`, `spans[].attributes.assay.tdt.observed_input_digest`, `spans[].attributes.assay.tdt.source_class` | The same fact as `assay.tool_decision_truth.v0`, carried as OpenTelemetry span attributes. |
+| `assay.tool_decision_truth.v0` | 1 | `declared_policy_digest` | 2/2 | `args_digest`, `decision_identity`, `decision_identity.observed_input_digest`, `identity_state`, and 2 more | The declared constraint set the decision was taken under: `McpPolicy::declared_constraint_digest_experimental`, binding tool name, args schema, identity, classes, approval, scope and redaction. Decision identity is the pair `(observed_input_digest, declared_policy_digest)`. |
+| `assay.tool_decision_truth.vectors.v0` | 1 | `policies.<name>.version` | 4/4 | `carriers[].carrier.args_digest`, `carriers[].carrier.decision_identity`, `carriers[].carrier.decision_identity.declared_policy_digest`, `carriers[].carrier.decision_identity.observed_input_digest`, and 16 more | A named policy variant a vector exercises. A version label, not a digest over content: comparable for identity between records sharing a naming scheme, not recomputable from bytes. |
+
+The **other keys** column exists because curating one field must not delete the rest from
+view. Without it, moving a row into this table would turn every one of its other
+configuration keys from a stated finding into a silent gap, which inverts this page's own
+first rule.
 
 ## Carrying configuration, semantics not stated
 
@@ -53,16 +70,74 @@ No relation is asserted for anything here. A shared field name is not evidence.
 | schema | documents | configuration keys it carries |
 |---|---|---|
 | `assay.coverage_aware_drift.annotation.v0` | 5 | `source_report_schema` |
+| `assay.enforcement_decision.v0` | 2 | `consumer_negative_controls[].enforcement_decision.action.target_digest`, `consumer_negative_controls[].manifest_establish`, `records[].enforcement_decision.action.target_digest`, `records[].manifest_establish`, and 2 more |
+| `assay.enforcement_health.v0` | 1 | `capability_surface.policy_decisions`, `observation_health.policy_layer` |
 | `assay.experiment.evidenceref_recompute_consumer.v0` | 1 | `canonicalization_profiles.cbor-deterministic-v1.digest_encoding`, `canonicalization_profiles.cbor-deterministic-v1.digest_prefix`, `canonicalization_profiles.jcs-json-v1.digest_encoding`, `canonicalization_profiles.jcs-json-v1.digest_prefix`, and 5 more |
 | `assay.experiment.runner_vs_otel.field_matrix.v0` | 16 | `runner_observation.capability_surface.policy_decisions`, `runner_observation.manifest_digest`, `runner_observation.observation_health.policy_layer`, `summary.manifest_digest_binding`, and 2 more |
-| `assay.mcp.tunnel_observed.v0` | 3 | `auth_context.authorization_header_digest`, `evidence_refs[].digest`, `evidence_refs[].request_envelope_digest`, `provider_context.component_version`, and 3 more |
+| `assay.mcp.tunnel_observed.v0` | 4 | `auth_context.authorization_header_digest`, `data.observed.auth_context.authorization_header_digest`, `data.observed.evidence_refs[].digest`, `data.observed.evidence_refs[].request_envelope_digest`, and 11 more |
+| `assay.privileged_mcp_action.verify.report.v0` | 2 | `corpus.manifest`, `descriptor_schema`, `records.required[].constraints.action.target_digest`, `report.source_class_vocabulary` |
+| `assay.receipt.openfeature.evaluation_details.v1` | 1 | `events[].data.reducer_version`, `events[].data.source_artifact_digest`, `manifest`, `manifest.producer.version` |
 | `assay.runner.capability_diff.v0` | 1 | `policy_outcomes`, `surface.policy_decisions`, `unbound.policy_decisions` |
-| `assay.runner.capability_surface.v0` | 16 | `policy_decisions` |
+| `assay.runner.capability_surface.v0` | 18 | `capability_surface.policy_decisions`, `observation_health.policy_layer`, `policy_decisions` |
 | `assay.runner.correlation_report.v0` | 1 | `bindings[].policy_decision` |
 | `assay.runner.cross_runtime_diff.v0` | 1 | `canonicalization.policy_decisions`, `policy_outcomes`, `sdk_metadata.base.sdk_version`, `sdk_metadata.head.sdk_version`, and 2 more |
-| `example.placeholder.agt-policy-decision` | 1 | `assayproducerversion`, `data.external_schema` |
-| `example.placeholder.mcp-tunnel-observed` | 1 | `assayproducerversion`, `data.external_schema`, `data.observed.auth_context.authorization_header_digest`, `data.observed.evidence_refs[].digest`, and 6 more |
 | `protectmcp:decision` | 3 | `payload.policy_digest` |
+
+## Outside this page's scope
+
+The scope rule, stated here rather than left in the generator: a record is in scope when
+it carries a configuration-ish key **and** is about a decision — by naming one in its own
+type, by carrying a `decision` key, or by a configuration key that names one.
+
+**43 further record types** carry configuration-ish keys and fall outside it.
+They are counted here so the denominator is visible: "a new schema cannot go unnoticed"
+is only true inside a declared scope, and an undeclared one hides its own misses.
+
+| schema | files |
+|---|---|
+| `a2a.task.lifecycle.export.v1` | 5 |
+| `assay.agent_golden_path.v1` | 3 |
+| `assay.conformance.adequacy.results.v0` | 1 |
+| `assay.conformance.registry.v1` | 1 |
+| `assay.coverage_aware_drift.annotation.v0` | 2 |
+| `assay.declared_mcp_manifest.v0` | 7 |
+| `assay.denied_call_observation.v0` | 1 |
+| `assay.docs.evidence-receipts-in-action.manifest.v1` | 1 |
+| `assay.enforcement_health.v1` | 5 |
+| `assay.experiment.agent_observability_fidelity.redaction_manifest.v0` | 2 |
+| `assay.experiment.evidence_mutation_matrix.v0` | 1 |
+| `assay.experiment.evidenceref_recompute_consumer.v0` | 1 |
+| `assay.experiment.mcp_tool_evidence_binding.binding_cell.v0` | 6 |
+| `assay.experiment.otel_span_event_limit.v0` | 1 |
+| `assay.manifest_establish.v0` | 1 |
+| `assay.mcp-jsonrpc-id-conformance.provenance.v2` | 1 |
+| `assay.mcp_server_inventory.v0` | 1 |
+| `assay.observability.claim_class_cell.v0` | 1 |
+| `assay.otel_projection.v0` | 1 |
+| `assay.privileged_mcp_action.candidate_release.v0` | 1 |
+| `assay.product-capabilities.v0` | 1 |
+| `assay.provider_audit_record.v0` | 2 |
+| `assay.receipt-family-matrix.v1` | 1 |
+| `assay.receipt.cyclonedx.mlbom-model-component.v1` | 1 |
+| `assay.receipt.promptfoo.assertion-component.v1` | 1 |
+| `assay.render_safety_conformance.v0` | 1 |
+| `assay.runner.archive_manifest.v0` | 13 |
+| `assay.runner.kernel_event.v0` | 1 |
+| `assay.runner.observation_health.v0` | 16 |
+| `assay.runner.runtime_drift.v0.2` | 4 |
+| `assay.runner.sdk_event.v0` | 18 |
+| `assay.supply_chain_conformance.input.v0` | 2 |
+| `assay.tool_annotation_conformance.v0` | 1 |
+| `assay.trust-basis.diff.v1` | 3 |
+| `browser-use.agent-history.export.v1` | 5 |
+| `corpus-adequacy.manifest.v0` | 2 |
+| `langfuse.experiment-item-result.export.v1` | 4 |
+| `langgraph.stream.tasks.export.v1` | 4 |
+| `livekit.function-tools-executed.export.v1` | 2 |
+| `mastra.scorer-result.export.v1` | 4 |
+| `openai.agents.trace.export.v1` | 5 |
+| `ucp.checkout.lifecycle.export.v1` | 5 |
+| `x402.requirement-verification.export.v1` | 5 |
 
 ## How they relate
 
@@ -80,13 +155,13 @@ Stated as relations with a **direction**, not as equality. Only one pair below e
 
 ## Declared in a type, populated by no fixture
 
-**PayloadToolDecision (assay-evidence)** — `policy_digest, policy_snapshot_digest (+_alg/_canonicalization/_schema), tool_definition_digest (+_alg/_canonicalization/_schema/_source), args_schema_hash`
+**PayloadToolDecision (assay-evidence)** — `args_schema_hash, policy_digest, policy_snapshot_digest, policy_snapshot_digest_alg, policy_snapshot_canonicalization, policy_snapshot_schema, tool_definition_digest, tool_definition_digest_alg, tool_definition_canonicalization, tool_definition_schema, tool_definition_source`
 
 No `.json` or `.ndjson` fixture in the tree populates these, which is why they do not appear in the table above. That absence says nothing about their meaning.
 
-**Instances exist.** `crates/assay-evidence/tests/verify_strict_test.rs` and `crates/assay-evidence/src/types/tests.rs` construct the type with every one of these fields populated and run it through verification.
+**Instances exist.** `crates/assay-evidence/tests/verify_strict_test.rs` builds the payload with these fields populated and runs it through `verify_single_event`; `crates/assay-evidence/src/types/tests.rs` deserializes the same cluster.
 
-**The semantics are stated**, in prose, outside the corpus this generator reads: `docs/architecture/PLAN-P56A-POLICY-SNAPSHOT-DIGEST-VISIBILITY-2026q2.md` (Status: Implemented) for the `policy_snapshot_*` cluster, `PLAN-P56B-TOOL-DEFINITION-DIGEST-BINDING-2026q2.md` for `tool_definition_*`, and `docs/architecture/evidence-metrics-mapping.md` for `args_schema_hash`.
+**The semantics are stated**, in prose, outside the corpus this generator reads: `docs/architecture/PLAN-P56A-POLICY-SNAPSHOT-DIGEST-VISIBILITY-2026q2.md` (Status: Implemented) for the `policy_snapshot_*` cluster, `PLAN-P56B-TOOL-DEFINITION-DIGEST-BINDING-2026q2.md` for `tool_definition_*`. Both are Status: Implemented and carry per-field MUSTs. `args_schema_hash` is weaker: the only prose on it is one row of `docs/architecture/evidence-metrics-mapping.md` saying how a metric consumes it, not what is hashed or under what canonicalization. That one **is** close to unstated, and saying so is the point — the three citations do not carry equal weight and the page should not imply they do.
 
 The lesson is this page's own rule turned on itself. Searching for populated JSON fixtures and finding none is evidence about **fixtures**, not about semantics. Reading that absence as a gap is the same mistake as reading a field name as a meaning.
 

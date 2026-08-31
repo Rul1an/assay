@@ -612,6 +612,17 @@ printf '%s\n' '- uses: Rul1an/assay-action@v3' \
 git -c init.defaultBranch=main -C "${scratch}/empty-index" init -q .
 expect_fail "empty-index-falls-back" "is not on the owner snippet list" "${scratch}/empty-index"
 
+echo "== a tree inside a repo but not at its root falls back rather than trusting a partial listing =="
+mkdir -p "${scratch}/inside-repo"
+git -c init.defaultBranch=main -C "${scratch}/inside-repo" init -q .
+copy_into "${scratch}/inside-repo/subtree"
+mkdir -p "${scratch}/inside-repo/subtree/docs/getting-started"
+git -C "${scratch}/inside-repo" add subtree/.github/assay-action-pin
+printf '%s\n' '- uses: Rul1an/assay-action@v3' \
+  >"${scratch}/inside-repo/subtree/docs/getting-started/installation.md"
+expect_fail "subtree-of-repo-falls-back" "is not on the owner snippet list" \
+  "${scratch}/inside-repo/subtree"
+
 echo "== unlisted tilde-fence YAML snippet is inventoried =="
 copy_into "${scratch}/unlisted-tilde"
 mkdir -p "${scratch}/unlisted-tilde/docs/getting-started"

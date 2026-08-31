@@ -71,6 +71,7 @@ GENERATED=(
 # them absent proves that each destination is still owned by a generator; otherwise removing one
 # output path from a generator would leave a stale tracked file and make the drift check pass.
 FRESH_GENERATED=(
+  docs/architecture/CONFIGURATION-VOCABULARY-CROSSWALK.md
   .agents/skills/assay-golden-path/SKILL.md
   .claude/skills/assay-golden-path/SKILL.md
   packaging/claude-plugin/skills/assay-golden-path/SKILL.md

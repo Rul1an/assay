@@ -23,13 +23,19 @@ import argparse
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 # Keys that plausibly pin what was in force. Deliberately broad: the point is discovery, and a
 # false positive is visible in the output while a false negative is not.
 CONFIGISH = re.compile(r"(digest|policy|manifest|version|schema|source_class|identity)", re.I)
 # Keys describing the record's own format rather than the agent's configuration.
-NOT_CONFIG = {"schema", "schema_version", "specversion", "digest_alg", "canonicalization"}
+# Matched on the key's FINAL SEGMENT, so `data.external_schema` is excluded the same way a
+# top-level `schema` is. Whole-key equality missed every nested occurrence.
+NOT_CONFIG = {
+    "schema", "schema_version", "specversion", "digest_alg", "canonicalization",
+    "external_schema", "assayproducerversion", "producerversion",
+}
 
 # CURATED. Each subject is read from the producing code, never inferred from the field name;
 # inferring from names is the error this document exists to prevent.
@@ -100,19 +106,28 @@ RELATIONS = [
 # than quietly dropped.
 PAYLOAD_FIELDS = {
     "type": "PayloadToolDecision (assay-evidence)",
-    "fields": "policy_digest, policy_snapshot_digest (+_alg/_canonicalization/_schema), "
-    "tool_definition_digest (+_alg/_canonicalization/_schema/_source), args_schema_hash",
+    # Spelled out rather than abbreviated. A `(+_alg/_canonicalization/_schema)` shorthand reads as
+    # `policy_snapshot_digest_canonicalization`, which does not exist: only `_alg` keeps the `digest`
+    # infix. Inventing field names by pattern is the error this page is about.
+    "fields": "args_schema_hash, policy_digest, policy_snapshot_digest, policy_snapshot_digest_alg, "
+    "policy_snapshot_canonicalization, policy_snapshot_schema, tool_definition_digest, "
+    "tool_definition_digest_alg, tool_definition_canonicalization, tool_definition_schema, "
+    "tool_definition_source",
     "note": [
         "No `.json` or `.ndjson` fixture in the tree populates these, which is why they do not "
         "appear in the table above. That absence says nothing about their meaning.",
-        "**Instances exist.** `crates/assay-evidence/tests/verify_strict_test.rs` and "
-        "`crates/assay-evidence/src/types/tests.rs` construct the type with every one of these "
-        "fields populated and run it through verification.",
+        "**Instances exist.** `crates/assay-evidence/tests/verify_strict_test.rs` builds the "
+        "payload with these fields populated and runs it through `verify_single_event`; "
+        "`crates/assay-evidence/src/types/tests.rs` deserializes the same cluster.",
         "**The semantics are stated**, in prose, outside the corpus this generator reads: "
         "`docs/architecture/PLAN-P56A-POLICY-SNAPSHOT-DIGEST-VISIBILITY-2026q2.md` (Status: "
         "Implemented) for the `policy_snapshot_*` cluster, `PLAN-P56B-TOOL-DEFINITION-DIGEST-"
-        "BINDING-2026q2.md` for `tool_definition_*`, and "
-        "`docs/architecture/evidence-metrics-mapping.md` for `args_schema_hash`.",
+        "BINDING-2026q2.md` for `tool_definition_*`. Both are Status: Implemented and carry "
+        "per-field MUSTs. `args_schema_hash` is weaker: the only prose on it is one row of "
+        "`docs/architecture/evidence-metrics-mapping.md` saying how a metric consumes it, not what "
+        "is hashed or under what canonicalization. That one **is** close to unstated, and saying so "
+        "is the point — the three citations do not carry equal weight and the page should not "
+        "imply they do.",
         "The lesson is this page's own rule turned on itself. Searching for populated JSON "
         "fixtures and finding none is evidence about **fixtures**, not about semantics. Reading "
         "that absence as a gap is the same mistake as reading a field name as a meaning.",
@@ -129,12 +144,36 @@ def collect(node, prefix: str, out: dict[str, list]) -> None:
     if isinstance(node, dict):
         for k, v in node.items():
             path = f"{prefix}.{k}" if prefix else k
-            if CONFIGISH.search(k) and k not in NOT_CONFIG:
+            if CONFIGISH.search(k) and k.split(".")[-1] not in NOT_CONFIG:
                 out.setdefault(path, []).append(v)
             collect(v, path, out)
     elif isinstance(node, list):
         for v in node:
             collect(v, f"{prefix}[]", out)
+
+
+def tracked_paths(root: Path) -> "set[str] | None":
+    """Tracked paths, or None when `root` is not a worktree root and everything should be read.
+
+    The drift gate seeds its scratch copy from `git ls-files` and deletes the `.git` directory,
+    "so a stray target/ or an untracked scratch file cannot change what the generators see". A
+    generator that reads the worktree indiscriminately does not honour that: an untracked JSON
+    scratch file adds a row locally that the gate can never reproduce, and the developer gets a
+    drift failure that re-running cannot clear. Reading the tracked set makes the two agree.
+
+    None is the strict direction and is what the gate itself needs -- its scratch tree has no
+    `.git`, and there everything present is exactly the tracked set already.
+    """
+    try:
+        top = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+                             capture_output=True, check=True).stdout
+        if os.path.realpath(top.decode().strip()) != os.path.realpath(root):
+            return None
+        out = subprocess.run(["git", "-C", str(root), "ls-files", "-z"],
+                             capture_output=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {n.decode("utf-8", "surrogateescape") for n in out.split(b"\0") if n} or None
 
 
 def discover(root: Path) -> dict[str, dict]:
@@ -151,6 +190,8 @@ def discover(root: Path) -> dict[str, dict]:
     The walk is sorted at every level so the output does not depend on directory order.
     """
     found: dict[str, dict] = {}
+    outside: dict[str, set] = {}
+    tracked = tracked_paths(root)
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(
             d for d in dirnames if d not in PRUNE and not (Path(dirpath) / d / ".git").exists()
@@ -160,12 +201,18 @@ def discover(root: Path) -> dict[str, dict]:
                 continue
             path = Path(dirpath) / name
             rel = path.relative_to(root).as_posix()
+            if tracked is not None and rel not in tracked:
+                continue
             try:
                 blob = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
-            if "decision" not in blob.lower():
-                continue  # cheap pre-filter; the structural test below is what decides
+            # No lexical pre-filter. An earlier version skipped any file whose bytes lacked the
+            # word "decision", which ran BEFORE the out-of-scope accounting below and so hid
+            # records from the very count that exists to show what was excluded -- including
+            # `assay.declared_mcp_manifest.v0`, the declared baseline that the first row of this
+            # page is defined against. A denominator computed after a silent filter is not a
+            # denominator.
             for raw in ([blob] if name.endswith(".json") else
                         [x for x in blob.splitlines() if x.strip()]):
                 try:
@@ -184,6 +231,8 @@ def discover(root: Path) -> dict[str, dict]:
                     or "decision" in label.lower()
                     or any("decision" in key.lower() for key in keys)
                 )
+                if keys and label and not in_scope:
+                    outside.setdefault(label, set()).add(rel)
                 if not keys or not in_scope:
                     # Scope, stated rather than guessed: a record is in scope when it carries a
                     # configuration key AND is about a decision -- by its own type name, by a
@@ -193,11 +242,12 @@ def discover(root: Path) -> dict[str, dict]:
                     # whose `type` is the word "object", and requiring a literal `decision` key
                     # dropped the four truth schemas, which name it `decision_identity`.
                     continue
-                entry = found.setdefault(label, {"files": set(), "keys": {}})
+                entry = found.setdefault(label, {"files": set(), "documents": 0, "keys": {}})
                 entry["files"].add(rel)
+                entry["documents"] += 1
                 for key, values in keys.items():
                     entry["keys"].setdefault(key, []).extend(values)
-    return found
+    return found, outside
 
 
 def has_key(node, name: str) -> bool:
@@ -209,20 +259,40 @@ def has_key(node, name: str) -> bool:
     return False
 
 
-def schema_label(doc: dict) -> str:
-    """What this record calls its own type.
+def declared_schemas(node, depth: int = 0, out: "list[tuple[int, str]] | None" = None):
+    """Every `schema` / `external_schema` value in the record, with its depth."""
+    out = [] if out is None else out
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in ("schema", "external_schema") and isinstance(value, str):
+                if "." in value or ":" in value:
+                    out.append((depth, value))
+            declared_schemas(value, depth + 1, out)
+    elif isinstance(node, list):
+        for value in node:
+            declared_schemas(value, depth + 1, out)
+    return out
 
-    Not every decision record in the tree announces itself under `schema`. The signed receipts in
-    `tests/fixtures/interop/` carry `type` inside a `payload`, and reading only `schema` made a
-    whole vocabulary invisible -- one that carries its own `policy_digest`. A map that misses a
-    vocabulary because it looked under one key is the failure this page is about.
+
+def schema_label(doc: dict) -> str:
+    """What this record calls itself, preferring its own schema over its envelope's type.
+
+    Not every record announces itself under a top-level `schema`. Signed receipts carry `type`
+    inside a `payload`, and reading only `schema` made a whole vocabulary invisible -- one with its
+    own `policy_digest`.
+
+    A record's declared schema outranks the envelope's `type`. A CloudEvent wrapping an observation
+    carries a placeholder `type` and the real schema inside `data`, and preferring the envelope
+    listed one vocabulary twice under two names, the second of them literally called
+    `example.placeholder.*`. Two rows for one thing is the confusion this page exists to remove.
+
+    `type` is accepted only when it reads as a namespaced identifier. A bare word is JSON Schema's
+    own vocabulary -- `"type": "object"` -- and treating that as a record type invents a schema.
     """
+    declared = declared_schemas(doc)
+    if declared:
+        return min(declared)[1]
     for holder in (doc, doc.get("payload") if isinstance(doc.get("payload"), dict) else {}):
-        value = holder.get("schema")
-        if isinstance(value, str) and value.strip():
-            return value
-        # `type` only when it reads as a namespaced identifier. A bare word is JSON Schema's own
-        # vocabulary -- `"type": "object"` -- and treating that as a record type invents a schema.
         value = holder.get("type")
         if isinstance(value, str) and (":" in value or "." in value):
             return value
@@ -251,7 +321,15 @@ def populated_ratio(entry: dict, field: str) -> str:
     return f"{filled}/{total}" if total else "—"
 
 
-def render(found: dict[str, dict]) -> str:
+def key_list(keys, limit: int = 4) -> str:
+    keys = sorted(keys)
+    shown = ", ".join(f"`{k}`" for k in keys[:limit])
+    if len(keys) > limit:
+        shown += f", and {len(keys) - limit} more"
+    return shown or "—"
+
+
+def render(found: dict[str, dict], outside: dict[str, set]) -> str:
     lines: list[str] = []
     add = lines.append
 
@@ -271,9 +349,21 @@ def render(found: dict[str, dict]) -> str:
     add("a reader who meets one of them can reasonably assume the others mean the same thing. They")
     add("do not.")
     add("")
-    add("**No claim in this codebase depends on configuration** — the claim gate knows")
-    add("`PositiveExistence`, `ExhaustiveSet` and `BoundedNegative`, all about observation coverage.")
-    add("This is a legibility map, not a correctness mechanism, and it justifies no code change.")
+    add("**The claim gate does not take configuration as an input.** Its claim kinds are")
+    add("`PositiveExistence`, `ExhaustiveSet` and `BoundedNegative`, and all three are about")
+    add("observation coverage.")
+    add("")
+    add("That is a statement about the gate, not about the codebase, and an earlier version of this")
+    add("page generalised it into \"no claim in this codebase depends on configuration\". That is")
+    add("false. ADR-043 conditions an enforcement statement on configuration — *a capability that")
+    add("cannot bind `declared_policy_digest` makes no enforcement statement in evidence* — and the")
+    add("decision identity in the table below is the pair `(observed_input_digest,")
+    add("declared_policy_digest)`, which takes configuration as an input by construction. The false")
+    add("generalisation mattered because it was what licensed the next sentence.")
+    add("")
+    add("This page is a legibility map rather than a mechanism: it adds no check and changes no")
+    add("behaviour. That is a claim about **this page**, and nothing follows from it about what else")
+    add("in the tree depends on configuration.")
     add("")
     add("Field subjects below are read from the producing code, never inferred from the field name.")
     add("Inferring from names is exactly the error this page prevents.")
@@ -289,12 +379,20 @@ def render(found: dict[str, dict]) -> str:
     add("`declared_manifest_digest_mismatch` and a loose match reports one field's count beside")
     add("another field's name.")
     add("")
-    add("| schema | documents | configuration key | populated | what it is a statement about |")
-    add("|---|---|---|---|---|")
+    add("| schema | documents | curated key | populated | other keys it carries | what it is a statement about |")
+    add("|---|---|---|---|---|---|")
     for schema in mapped:
         entry, curated = found[schema], SUBJECTS[schema]
-        add(f"| `{schema}` | {len(entry['files'])} | `{curated['_field']}` | "
-            f"{populated_ratio(entry, curated['_field'])} | {curated['_subject']} |")
+        tail = curated["_field"].split(".")[-1]
+        others = [k for k in entry["keys"] if k.split(".")[-1] != tail]
+        add(f"| `{schema}` | {entry['documents']} | `{curated['_field']}` | "
+            f"{populated_ratio(entry, curated['_field'])} | {key_list(others)} | "
+            f"{curated['_subject']} |")
+    add("")
+    add("The **other keys** column exists because curating one field must not delete the rest from")
+    add("view. Without it, moving a row into this table would turn every one of its other")
+    add("configuration keys from a stated finding into a silent gap, which inverts this page's own")
+    add("first rule.")
     add("")
     add("## Carrying configuration, semantics not stated")
     add("")
@@ -314,11 +412,22 @@ def render(found: dict[str, dict]) -> str:
     add("|---|---|---|")
     for schema in unmapped:
         entry = found[schema]
-        keys = sorted(entry["keys"])
-        shown = ", ".join(f"`{k}`" for k in keys[:4])
-        if len(keys) > 4:
-            shown += f", and {len(keys) - 4} more"
-        add(f"| `{schema}` | {len(entry['files'])} | {shown} |")
+        add(f"| `{schema}` | {entry['documents']} | {key_list(entry['keys'])} |")
+    add("")
+    add("## Outside this page's scope")
+    add("")
+    add("The scope rule, stated here rather than left in the generator: a record is in scope when")
+    add("it carries a configuration-ish key **and** is about a decision — by naming one in its own")
+    add("type, by carrying a `decision` key, or by a configuration key that names one.")
+    add("")
+    add(f"**{len(outside)} further record types** carry configuration-ish keys and fall outside it.")
+    add("They are counted here so the denominator is visible: \"a new schema cannot go unnoticed\"")
+    add("is only true inside a declared scope, and an undeclared one hides its own misses.")
+    add("")
+    add("| schema | files |")
+    add("|---|---|")
+    for schema in sorted(outside):
+        add(f"| `{schema}` | {len(outside[schema])} |")
     add("")
     add("## How they relate")
     add("")
@@ -360,7 +469,7 @@ def main() -> int:
     args = ap.parse_args()
 
     root = args.repo_root.resolve()
-    text = render(discover(root))
+    text = render(*discover(root))
     out = root / args.out
     if args.check:
         current = out.read_text() if out.exists() else ""
