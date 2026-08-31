@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The executable editor MCP recipe may only describe the transport Assay actually ships.
+# The executable editor MCP recipe must retain its prerequisites and shipped transport boundary.
 #
 # WHY THIS EXISTS (#2360)
 #
@@ -115,9 +115,37 @@ fi
 require 'local stdio wrap claim retained' '(assay mcp wrap|`assay mcp wrap`)'
 require 'proxy-enforce claim retained' 'proxy-enforce'
 
+# Keep these as standalone commands in this recipe, not a general shell/Markdown grammar.
+# Comments, prose, and commands in a different H2 section cannot satisfy plugin prerequisites.
+plugin_commands="$(awk '
+  /^## / {
+    section = ($0 == "## Install the Claude Code plugin")
+    fence = 0
+    next
+  }
+  section && /^```/ {
+    if (fence) fence = 0
+    else if ($0 == "```bash") fence = 1
+    next
+  }
+  section && fence {
+    sub(/^[ \t]+/, "")
+    sub(/[ \t]+$/, "")
+    print
+  }
+' "$RECIPE")"
+for command in 'cargo install assay-cli --locked' 'cargo install assay-mcp-server --locked' \
+  'assay version' 'assay-mcp-server --version'; do
+  if printf '%s\n' "$plugin_commands" | grep -Fxq -- "$command"; then
+    ok "plugin prerequisite command present: $command"
+  else
+    fail "$RECIPE: plugin prerequisite command missing: $command"
+  fi
+done
+
 printf '\n'
 if [ "$failures" -gt 0 ]; then
-  printf 'editor MCP recipe truth: %s drift(s) from shipped transport\n' "$failures"
+  printf 'editor MCP recipe truth: %s prerequisite or shipped-transport drift(s)\n' "$failures"
   printf '\n'
   printf 'The executable recipe describes what a reader can run against a real editor today.\n'
   printf 'Assay ships the legacy stdio handshake; it does not ship remote HTTP, OAuth/OIDC or\n'

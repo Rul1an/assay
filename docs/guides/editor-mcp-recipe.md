@@ -8,14 +8,18 @@ server command in the agent's standard MCP config.
 ## Install the Claude Code plugin
 
 The marketplace plugin packages Assay's five MCP review tools and the
-`assay-golden-path` skill. It does **not** package the server binary, invoke a target
-tool, or enforce another MCP server by itself.
+`assay-golden-path` skill. It does **not** package either required binary: the skill
+uses the `assay` CLI, and the review tools use `assay-mcp-server`. The plugin does
+not invoke a target tool or enforce another MCP server by itself.
 
 From the project where Claude Code should use Assay:
 
 ```bash
-# 1. Install the local stdio server prerequisite.
+# 1. Install both prerequisites and confirm they are on PATH.
+cargo install assay-cli --locked
 cargo install assay-mcp-server --locked
+assay version
+assay-mcp-server --version
 
 # 2. Add Assay's marketplace and install the plugin for this project.
 claude plugin marketplace add Rul1an/assay
@@ -54,6 +58,7 @@ shows old bytes, remove and reinstall `assay@assay` rather than modifying the ca
 | Observation | Layer | Next step |
 |---|---|---|
 | `assay@assay` is absent from `claude plugin list --json` | Plugin installation | Add/update the `assay` marketplace, then install the local-scope plugin. |
+| The skill cannot run `assay version` | CLI prerequisite | Run `command -v assay`, install `assay-cli` on `PATH`, then restart Claude Code. |
 | `claude mcp list` reports a spawn or command failure | Binary prerequisite | Run `command -v assay-mcp-server`, install it on `PATH`, then restart Claude Code. |
 | The server connects but reports a missing policy | Project policy root | Start Claude Code from the project or configure an explicit absolute `--policy-root`. |
 | `assay_policy_decide` returns `allowed=false` | Assay policy verdict | Inspect the matched rule and change the proposed action or the reviewed policy. This is not an installation failure. |
