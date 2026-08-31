@@ -93,9 +93,12 @@ RELATIONS = [
      "A baselined tool manifest is the surface a server was expected to expose; a declared "
      "constraint set is the rule the decision was measured against. Both answer \"what was in "
      "force\", about different things."),
-    ("`assay.tool_decision_truth.vectors.v0` ↔ any digest field", "different kind of statement",
+    ("`McpPolicy::version` ↔ any digest field here", "not a configuration basis at all",
      "no derivation",
-     "A version names a variant; a digest commits to content."),
+     "`version` is the **policy document format** version — `crates/assay-core/src/mcp/policy/"
+     "legacy.rs` reads it to detect a v1 shape — and it is the constant `1` across the fixture. An "
+     "earlier row called it a name for a policy variant, which it is not: the variant is named by "
+     "the map key. It pins no configuration and nothing here derives from it."),
     ("`policy_digest` → `policy_snapshot_digest`", "self-describing projection",
      "same value, stated as a MUST",
      "PLAN-P56A (Status: Implemented): `policy_snapshot_digest` is the self-describing projection "
@@ -137,11 +140,12 @@ PAYLOAD_FIELDS = {
         "Implemented) for the `policy_snapshot_*` cluster, "
         "`docs/architecture/PLAN-P56B-TOOL-DEFINITION-DIGEST-"
         "BINDING-2026q2.md` for `tool_definition_*`. Both are Status: Implemented and carry "
-        "per-field MUSTs. `args_schema_hash` is weaker: the only prose on it is one row of "
-        "`docs/architecture/evidence-metrics-mapping.md` saying how a metric consumes it, not what "
-        "is hashed or under what canonicalization. That one **is** close to unstated, and saying so "
-        "is the point — the three citations do not carry equal weight and the page should not "
-        "imply they do.",
+        "per-field MUSTs. `args_schema_hash` is weaker, and the weakness is specific rather than "
+        "total: what it is **for** is stated — `docs/architecture/evidence-metrics-mapping.md` has "
+        "a metric consume it — while **what is hashed and under which canonicalization** is not. "
+        "An earlier version of this paragraph said that row was the only prose on the field, which "
+        "was not checked and is not true. The three citations do not carry equal weight and the "
+        "page should not imply they do.",
         "The lesson is this page's own rule turned on itself. Searching for populated JSON "
         "fixtures and finding none is evidence about **fixtures**, not about semantics. Reading "
         "that absence as a gap is the same mistake as reading a field name as a meaning.",
@@ -157,9 +161,7 @@ PAYLOAD_FIELDS = {
 # nested checkouts at all. It is kept for the case the fallback exists for -- a tree read from
 # somewhere that is not a worktree root -- and not because it guards the normal path.
 PRUNE = {".git", "target", "node_modules", ".venv"}
-# Ceiling applied before materialisation, per the repository's rule for hostile input. A tracked
-# record larger than this is not a decision record worth mapping, and reading it to find that out
-# is the cost this avoids.
+# Ceiling applied before materialisation, per the repository's rule for hostile input.
 MAX_RECORD_BYTES = 8 * 1024 * 1024
 
 
@@ -254,6 +256,16 @@ def discover(root: Path) -> dict[str, dict]:
             rel = path.relative_to(root).as_posix()
             if tracked is not None and rel not in tracked:
                 continue
+            # Ceiling before materialisation. Refusing is the point: whether an oversize record is
+            # in scope cannot be known without reading it, so skipping it would drop a candidate
+            # from the corpus in silence -- the exact failure the out-of-scope section argues
+            # against, committed by the code that renders it.
+            if path.stat().st_size > MAX_RECORD_BYTES:
+                raise SystemExit(
+                    f"error: {rel} is {path.stat().st_size} bytes, over the "
+                    f"{MAX_RECORD_BYTES}-byte record ceiling; refusing to read it, and refusing to "
+                    f"drop it silently from the corpus"
+                )
             try:
                 blob = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
@@ -450,18 +462,24 @@ def render(found: dict[str, dict], outside: dict[str, set], unlabelled: set,
 
     add("## The mapped vocabularies")
     add("")
-    add("`populated` counts **occurrences, not documents**: one record can carry the field several")
-    add("times, and each is counted. It is matched on the field's final path segment by equality,")
-    add("never by substring, because `declared_manifest_digest` is a prefix of")
-    add("`declared_manifest_digest_mismatch` and a loose match reports one field's count beside")
-    add("another field's name.")
+    add("`populated` counts **occurrences of one whole path, not documents**: a record can carry")
+    add("that path several times and each is counted, but a different path is never folded in. The")
+    add("match is exact whole-path equality. Matching the final segment instead merged")
+    add("`carriers[].carrier.declared_policy_digest` with")
+    add("`carriers[].carrier.decision_identity.declared_policy_digest` and reported the sum under")
+    add("one name; matching a substring was worse still, binding `declared_manifest_digest` to")
+    add("`declared_manifest_digest_mismatch`. Both report one field's count beside another field's")
+    add("name, which is the error this column exists to avoid.")
     add("")
     add("| schema | documents | curated key | populated | other keys it carries | what it is a statement about |")
     add("|---|---|---|---|---|---|")
     for schema in mapped:
         entry, curated = found[schema], SUBJECTS[schema]
-        tail = curated["_field"].split(".")[-1]
-        others = [k for k in entry["keys"] if k.split(".")[-1] != tail]
+        # Exclude the curated path itself and nothing else. Excluding by tail hid
+        # `carriers[].carrier.decision_identity.declared_policy_digest`, a different key that merely
+        # ends alike, from the column whose whole purpose is that curating one field must not delete
+        # the others from view.
+        others = [k for k in entry["keys"] if k != curated["_field"]]
         add(f"| `{schema}` | {entry['documents']} | `{curated['_field']}` | "
             f"{populated_ratio(entry, curated['_field'])} | {key_list(others)} | "
             f"{curated['_subject']} |")

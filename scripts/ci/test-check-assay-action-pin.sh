@@ -605,6 +605,25 @@ sgit -c init.defaultBranch=main -C "${scratch}/untracked-violation" init -q .
 sgit -C "${scratch}/untracked-violation" add .github/assay-action-pin
 expect_ok "untracked-violation-in-worktree" run_checker_at "${scratch}/untracked-violation"
 
+# The same tree, interrogated with a poisoned git environment. Scrubbed, git answers about THIS
+# tree, the violating file is untracked and is ignored. Unscrubbed, git answers about the poisoned
+# repository instead, its toplevel is not this tree, the checker falls back to scanning everything
+# and the untracked violation turns it red -- so this case is what makes git_env() load-bearing
+# rather than decorative. GIT_DIR and GIT_INDEX_FILE are set by pre-commit and by git hooks, so the
+# poisoned shape here is the ordinary one, not a contrived one.
+echo "== a poisoned git environment does not redirect the tracked-set question =="
+mkdir -p "${scratch}/pin-poison"
+sgit -c init.defaultBranch=main -C "${scratch}/pin-poison" init -q .
+printf 'seed\n' >"${scratch}/pin-poison/seed.txt"
+sgit -C "${scratch}/pin-poison" add seed.txt
+poisoned_checker() {
+  GIT_DIR="${scratch}/pin-poison/.git" \
+  GIT_INDEX_FILE="${scratch}/pin-poison/.git/index" \
+  GIT_WORK_TREE="${scratch}/pin-poison" \
+    run_checker_at "${scratch}/untracked-violation"
+}
+expect_ok "poisoned-git-env-does-not-redirect-the-tracked-set" poisoned_checker
+
 echo "== nested checkout: a copy at a path this tree does not own is pruned =="
 copy_into "${scratch}/nested-checkout"
 mkdir -p "${scratch}/nested-checkout/worktrees/inner/docs/getting-started"
