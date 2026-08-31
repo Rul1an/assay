@@ -329,21 +329,48 @@ def should_skip(rel: str) -> bool:
     return any(rel.startswith(prefix) for prefix in SKIP_PREFIXES)
 
 
-def tracked_paths() -> "set[str] | None":
-    """Paths git has under version control in TREE, or None if TREE is not a worktree.
+def note(reason: str) -> None:
+    """Announce a fallback to scanning every file. Silence here is how a check goes blind."""
+    print(f"note: {reason}; scanning every file under {TREE}", file=sys.stderr)
 
-    None means "scan everything", which is what the self-test needs: it runs the checker against
-    a synthetic tree assembled in a scratch directory that is deliberately not a git repository.
-    Enumerating from git unconditionally would leave every planted violation there invisible and
-    quietly turn the negative cases green.
+
+def tracked_paths() -> "set[str] | None":
+    """Paths git has under version control in TREE, or None to scan every file instead.
+
+    None is the strict direction and every uncertainty resolves to it. The self-test depends on
+    that: it assembles a synthetic tree in a scratch directory that is deliberately not a
+    repository, and enumerating from git there would leave every violation it plants invisible.
+
+    TREE must be a worktree *root*, not merely a path inside one. `git -C <untracked subdirectory>
+    ls-files` exits 0 with empty output, and an empty set is not None -- it would skip every file
+    and report a silent pass. mktemp honours TMPDIR, so a scratch tree can land inside a repository
+    without anyone choosing it, which makes that reachable rather than theoretical. Requiring the
+    toplevel to be TREE rules it out, and an empty listing falls back rather than trusting itself.
+
+    Every fallback says so on stderr. Both directions were invisible before: the silent-green one
+    is the dangerous half, and the scan-everything one produces a violation report for a file the
+    developer cannot fix by committing it, with no hint of the cause.
     """
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(TREE), "ls-files", "-z"],
-            capture_output=True,
-            check=True,
-        ).stdout
-    except (OSError, subprocess.CalledProcessError):
+
+    def ask(*args: str) -> "bytes | None":
+        try:
+            return subprocess.run(
+                ["git", "-C", str(TREE), *args], capture_output=True, check=True
+            ).stdout
+        except (OSError, subprocess.CalledProcessError) as exc:
+            detail = (getattr(exc, "stderr", b"") or b"").decode("utf-8", "replace").strip()
+            note(f"git {' '.join(args)} failed in {TREE} ({detail or exc})")
+            return None
+
+    top = ask("rev-parse", "--show-toplevel")
+    if top is None:
+        return None
+    if os.path.realpath(top.decode("utf-8", "surrogateescape").strip()) != os.path.realpath(TREE):
+        note(f"{TREE} is not a worktree root")
+        return None
+    out = ask("ls-files", "-z")
+    if not out:
+        note(f"git lists no tracked file in {TREE}")
         return None
     return {name.decode("utf-8", "surrogateescape") for name in out.split(b"\0") if name}
 

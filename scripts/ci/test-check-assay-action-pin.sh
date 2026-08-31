@@ -573,6 +573,45 @@ printf '%s\n' '- uses: Rul1an/assay-action@v3' \
   >"${scratch}/unlisted/docs/getting-started/installation.md"
 expect_fail "unlisted-snippet-file" "is not on the owner snippet list" "${scratch}/unlisted"
 
+# The three cases below cover the git branch of the walk. Every other negative case in this file
+# runs against a scratch tree that is not a repository, so they all exercise the "scan everything"
+# fallback. Without these, mutating the tracked filter into an unconditional skip leaves the whole
+# battery green while the checker scans nothing on any real checkout.
+echo "== git worktree: a tracked violation is still caught =="
+copy_into "${scratch}/tracked-violation"
+mkdir -p "${scratch}/tracked-violation/docs/getting-started"
+printf '%s\n' '- uses: Rul1an/assay-action@v3' \
+  >"${scratch}/tracked-violation/docs/getting-started/installation.md"
+git -c init.defaultBranch=main -C "${scratch}/tracked-violation" init -q .
+git -C "${scratch}/tracked-violation" add docs/getting-started/installation.md
+expect_fail "tracked-violation-in-worktree" "is not on the owner snippet list" \
+  "${scratch}/tracked-violation"
+
+echo "== git worktree: an untracked file is not repository content =="
+copy_into "${scratch}/untracked-violation"
+mkdir -p "${scratch}/untracked-violation/docs/getting-started"
+printf '%s\n' '- uses: Rul1an/assay-action@v3' \
+  >"${scratch}/untracked-violation/docs/getting-started/installation.md"
+git -c init.defaultBranch=main -C "${scratch}/untracked-violation" init -q .
+git -C "${scratch}/untracked-violation" add .github/assay-action-pin
+expect_ok "untracked-violation-in-worktree" run_checker_at "${scratch}/untracked-violation"
+
+echo "== nested checkout: a copy at a path this tree does not own is pruned =="
+copy_into "${scratch}/nested-checkout"
+mkdir -p "${scratch}/nested-checkout/worktrees/inner/docs/getting-started"
+printf '%s\n' '- uses: Rul1an/assay-action@v3' \
+  >"${scratch}/nested-checkout/worktrees/inner/docs/getting-started/installation.md"
+git -c init.defaultBranch=main -C "${scratch}/nested-checkout/worktrees/inner" init -q .
+expect_ok "nested-checkout-pruned" run_checker_at "${scratch}/nested-checkout"
+
+echo "== git worktree with nothing tracked falls back rather than trusting an empty listing =="
+copy_into "${scratch}/empty-index"
+mkdir -p "${scratch}/empty-index/docs/getting-started"
+printf '%s\n' '- uses: Rul1an/assay-action@v3' \
+  >"${scratch}/empty-index/docs/getting-started/installation.md"
+git -c init.defaultBranch=main -C "${scratch}/empty-index" init -q .
+expect_fail "empty-index-falls-back" "is not on the owner snippet list" "${scratch}/empty-index"
+
 echo "== unlisted tilde-fence YAML snippet is inventoried =="
 copy_into "${scratch}/unlisted-tilde"
 mkdir -p "${scratch}/unlisted-tilde/docs/getting-started"

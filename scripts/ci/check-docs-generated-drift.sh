@@ -36,6 +36,7 @@ cd "$repo_root"
 GENERATORS=(
   scripts/docs/generate-agent-golden-path.py
   scripts/docs/generate-product-capabilities.py
+  scripts/docs/generate-configuration-vocabulary-crosswalk.py
   scripts/docs/generate-crate-deps.sh
   scripts/docs/generate-module-map.sh
   scripts/docs/update-architecture-docs.sh
@@ -58,6 +59,7 @@ GENERATED=(
   packaging/agent-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/no-allowance.yaml
   docs/generated/agent-golden-path.json
   docs/generated/crate-deps.mermaid
+  docs/architecture/CONFIGURATION-VOCABULARY-CROSSWALK.md
   docs/generated/module-map.mermaid
   docs/AIcontext/architecture-diagrams.md
   docs/guides/agent-golden-path.md
