@@ -366,8 +366,22 @@ check_rust_cli_installs docs/use-cases/ci-gate.md 1
 
 release_link="Current release: [\`$PUBLISHED_TAG\`](https://github.com/Rul1an/assay/releases/tag/$PUBLISHED_TAG)"
 check_single_claim README.md "$release_link" 'Current release:' 'current release link drift'
-check_single_claim README.md "- Published $PUBLISHED_TAG CLI archives cover " \
-  'CLI archives cover' 'platform-coverage version drift'
+if ! python3 - "$PUBLISHED_VERSION" <<'PY'
+from pathlib import Path
+import sys
+from scripts.ci.release_readme import platform_coverage_version
+
+try:
+    actual = platform_coverage_version(Path("README.md").read_text(encoding="utf-8"))
+    if actual != sys.argv[1]:
+        raise ValueError(f"coverage version {actual} differs from published {sys.argv[1]}")
+except (ValueError, OSError) as error:
+    print(error, file=sys.stderr)
+    raise SystemExit(1)
+PY
+then
+  fail 'README.md: platform-coverage version drift'
+fi
 check_single_claim docs/index.md "$release_link" 'Current release:' 'current release link drift'
 check_rge_bench_claims
 

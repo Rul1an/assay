@@ -13,6 +13,7 @@ mkdir -p "$TMP/scripts/ci" "$TMP/.github" "$TMP/docs/getting-started" "$TMP/docs
   "$TMP/examples/mcp-quickstart" "$TMP/crates/assay-x" "$TMP/bin" "$TMP/.devcontainer" \
   "$TMP/demo"
 cp "$ROOT/scripts/ci/check-release-surface.sh" "$TMP/scripts/ci/"
+cp "$ROOT/scripts/ci/release_readme.py" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/read-assay-release-tag.sh" "$TMP/scripts/ci/"
 cp "$ROOT/.pre-commit-config.yaml" "$TMP/"
 printf '%s\n' 'v5.1.0' > "$TMP/.github/assay-release-tag"
@@ -156,6 +157,8 @@ pattern = re.compile(files_lines[0])
 for path in (
     ".github/assay-release-tag",
     "scripts/ci/read-assay-release-tag.sh",
+    "scripts/ci/release_readme.py",
+    "scripts/ci/test_release_quickstart.py",
     "llms.txt",
     "examples/mcp-quickstart/README.md",
     "docs/getting-started/ci-integration.md",
@@ -182,6 +185,7 @@ check_release_hook_selector
 # Non-claim prose must not change the active published-version decision.
 cp "$TMP/README.md" "$TMP/readme-noop.backup"
 printf '\n<!-- release coverage control: no active claim changed -->\n' >> "$TMP/README.md"
+printf '\nHistorical note: v5.0.0 shipped earlier.\n' >> "$TMP/README.md"
 run_check >"$TMP/noop.out" 2>&1
 mv "$TMP/readme-noop.backup" "$TMP/README.md"
 
@@ -270,6 +274,10 @@ mutate_and_expect_failure missing-platform-coverage README.md \
   '/CLI archives cover/d' 'platform-coverage version drift'
 append_and_expect_failure duplicate-platform-coverage README.md \
   '- Published v5.0.0 CLI archives cover Linux x86_64/arm64.' 'platform-coverage version drift'
+mutate_and_expect_failure same-line-current-platform-coverage README.md \
+  '/CLI archives cover/s/$/ Published v5.1.0 CLI archives cover obsolete./' 'platform-coverage version drift'
+mutate_and_expect_failure same-line-stale-platform-coverage README.md \
+  '/CLI archives cover/s/$/ Published v5.0.0 CLI archives cover obsolete./' 'platform-coverage version drift'
 
 mutate_and_expect_failure wrong-python-package docs/getting-started/index.md \
   's/pip install assay-it/pip install assay/' 'unsupported Python package'
@@ -483,8 +491,8 @@ mutate_and_expect_failure stale-codespaces-host demo/CODESPACES-PLAYBOOK.md \
   's#https://getassay.dev/install.sh#https://assay.dev/install.sh#' \
   'unrelated assay.dev onboarding URL'
 
-if [ "$mutation_count" -ne 68 ]; then
-  echo "FAIL: expected 68 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 70 ]; then
+  echo "FAIL: expected 70 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

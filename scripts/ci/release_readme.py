@@ -247,6 +247,17 @@ def _rewrite_repo_links(source: str, version: str, members: frozenset[str]) -> s
     return "".join(out)
 
 
+def platform_coverage_version(source: str) -> str:
+    """Require one canonical bullet and one reserved marker, including same-line occurrences.
+
+    This recognizes the literal 'CLI archives cover', not arbitrary prose claims.
+    """
+    versions = COVERAGE_RE.findall(source)
+    if len(versions) != 1 or source.count("CLI archives cover") != 1:
+        raise ValueError("README must carry exactly one platform-coverage sentence")
+    return versions[0]
+
+
 def render_release_readme(
     source: str, version: str, members: frozenset[str] | None = None
 ) -> str:
@@ -262,8 +273,7 @@ def render_release_readme(
     checkouts = CHECKOUT_RE.findall(source)
     if len(checkouts) != 1:
         raise ValueError("README must carry exactly one published-checkout sentence")
-    if len(COVERAGE_RE.findall(source)) != 1:
-        raise ValueError("README must carry exactly one platform-coverage sentence")
+    platform_coverage_version(source)
 
     rendered = INSTALL_RE.sub(
         f"cargo install assay-cli --version {version} --locked", source, count=1
