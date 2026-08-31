@@ -121,6 +121,7 @@ def validate_manifest(
     expected = [
         "examples/privileged-action-gate/mock_github_mcp.py",
         "examples/privileged-action-gate/policies/no-allowance.yaml",
+        "examples/privileged-action-gate/policies/allow.yaml",
         "examples/privileged-action-gate/baseline-approved.json",
         ".github/workflows/published-release-golden-path.yml",
         ".github/workflows/release.yml",
@@ -522,11 +523,18 @@ def validate_contract(
         "release-api.json",
         "tag-ref.json",
         "attestation-summary.json",
+        "allow/proxy.jsonl",
+        "allow/decisions.ndjson",
+        "allow/produced.bundle.tar.gz",
+        "allow/verify.json",
+        "unsupported/proxy.jsonl",
     ]
     for name in required_artifacts:
         if f'"{name}"' not in driver_text:
             problems.append(f"driver no longer requires retained artifact: {name}")
 
+    if active_lines(driver_text).count("run_published_release_extra_request_cases") != 1:
+        problems.append("driver must execute the allow and unsupported request cases exactly once")
     validate_manifest(manifest, source_root, workflow, release_workflow, driver, problems)
     return problems
 
