@@ -37,6 +37,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 RECIPE="${ASSAY_EDITOR_RECIPE:-docs/guides/editor-mcp-recipe.md}"
+MAX_RECIPE_BYTES=65536
 MODERN_REVISION='2026-07-28'
 IMPL_ISSUE='2358'
 
@@ -49,6 +50,12 @@ ok() { printf 'ok   %s\n' "$*"; }
 
 if [ ! -f "$RECIPE" ]; then
   printf 'FAIL: executable editor recipe missing: %s\n' "$RECIPE"
+  exit 1
+fi
+
+# Bound all subsequent captures, including grep diagnostics and extracted commands.
+if [ "$(wc -c < "$RECIPE")" -gt "$MAX_RECIPE_BYTES" ]; then
+  printf 'FAIL: recipe exceeds %s-byte limit: %s\n' "$MAX_RECIPE_BYTES" "$RECIPE"
   exit 1
 fi
 
@@ -118,17 +125,32 @@ require 'proxy-enforce claim retained' 'proxy-enforce'
 # Keep these as standalone commands in this recipe, not a general shell/Markdown grammar.
 # Comments, prose, and commands in a different H2 section cannot satisfy plugin prerequisites.
 plugin_commands="$(awk '
-  /^## / {
+  {
+    fence_line = $0
+    sub(/^ ? ? ?/, "", fence_line)
+  }
+  match(fence_line, /^(```+|~~~+)/) {
+    width = RLENGTH
+    mark = substr(fence_line, 1, 1)
+    rest = substr(fence_line, width + 1)
+    if (fence) {
+      if (mark == fence_mark && width >= fence_width && rest ~ /^[ \t]*$/) {
+        fence = 0
+        bash_fence = 0
+      }
+    } else {
+      fence = 1
+      fence_mark = mark
+      fence_width = width
+      bash_fence = (fence_line == "```bash")
+    }
+    next
+  }
+  !fence && /^## / {
     section = ($0 == "## Install the Claude Code plugin")
-    fence = 0
     next
   }
-  section && /^```/ {
-    if (fence) fence = 0
-    else if ($0 == "```bash") fence = 1
-    next
-  }
-  section && fence {
+  section && fence && bash_fence {
     sub(/^[ \t]+/, "")
     sub(/[ \t]+$/, "")
     print

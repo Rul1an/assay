@@ -108,6 +108,34 @@ write_clean
 printf '\n<!-- unchanged executable recipe -->\n' >> "$TMP/recipe.md"
 expect_pass 'comment-only no-op preserves prerequisites'
 
+echo '== fenced examples cannot impersonate the plugin section =='
+for fence in '```' '````' '~~~' '   ~~~'; do
+  write_clean
+  awk -v fence="$fence" '
+    /^## Install the Claude Code plugin$/ { print fence "text" }
+    /^## The wrap command$/ { print fence }
+    { print }
+  ' "$TMP/recipe.md" > "$TMP/edited.md"
+  mv "$TMP/edited.md" "$TMP/recipe.md"
+  expect_fail "plugin section inside $fence example" \
+    'plugin prerequisite command missing: cargo install assay-cli --locked'
+done
+for heading in '## shell comment' '### subheading-shaped shell comment'; do
+  write_clean
+  awk -v heading="$heading" '{ print } /^```bash$/ { print heading }' \
+    "$TMP/recipe.md" > "$TMP/edited.md"
+  mv "$TMP/edited.md" "$TMP/recipe.md"
+  expect_pass "$heading does not end the bash fence"
+done
+
+echo '== recipe byte ceiling has an acceptance boundary =='
+write_clean
+bytes="$(wc -c < "$TMP/recipe.md")"
+printf '%*s' "$((65536 - bytes))" '' >> "$TMP/recipe.md"
+expect_pass 'recipe at 65536 bytes accepted'
+printf ' ' >> "$TMP/recipe.md"
+expect_fail 'recipe over 65536 bytes rejected' 'recipe exceeds 65536-byte limit'
+
 echo '== drift 1: stale release-candidate copy =='
 write_clean
 printf 'This section is provisional against the release candidate.\n' >> "$TMP/recipe.md"
