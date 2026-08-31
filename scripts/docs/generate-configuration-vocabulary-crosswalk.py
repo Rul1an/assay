@@ -26,6 +26,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 # Keys that plausibly pin what was in force. Deliberately broad: the point is discovery, and a
 # false positive is visible in the output while a false negative is not.
@@ -283,8 +284,7 @@ def discover(root: Path) -> dict[str, dict]:
                 )
                 if keys and not label:
                     unlabelled.add(rel)
-                    meta = doc.get("$schema")
-                    if isinstance(meta, str) and "json-schema.org" in meta:
+                    if declares_meta_schema(doc.get("$schema")):
                         unlabelled_jsonschema.add(rel)
                 if keys and label and not in_scope:
                     outside.setdefault(label, set()).add(rel)
@@ -303,6 +303,19 @@ def discover(root: Path) -> dict[str, dict]:
                 for key, values in keys.items():
                     entry["keys"].setdefault(key, []).extend(values)
     return found, outside, unlabelled, unlabelled_jsonschema
+
+
+def declares_meta_schema(value) -> bool:
+    """Whether `$schema` points at the JSON Schema meta-schema, matched on the URL's host.
+
+    A substring test accepts the host appearing anywhere in the URL, so
+    `https://example.invalid/json-schema.org/x` would count as a meta-schema. The host is the only
+    part that identifies who defined the vocabulary, so it is the part compared.
+    """
+    if not isinstance(value, str):
+        return False
+    host = (urlsplit(value).hostname or "").lower()
+    return host == "json-schema.org" or host.endswith(".json-schema.org")
 
 
 def has_key(node, name: str) -> bool:
