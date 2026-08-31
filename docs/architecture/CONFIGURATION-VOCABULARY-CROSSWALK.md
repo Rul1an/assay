@@ -33,6 +33,11 @@ in the tree depends on configuration.
 Field subjects below are read from the producing code, never inferred from the field name.
 Inferring from names is exactly the error this page prevents.
 
+A row labelled `A + B` is **one record declaring two schemas at the same depth**, not a
+schema called "A + B". Reporting both is deliberate: taking one by alphabetical order
+silently dropped `assay.mcp_manifest_observed.v0`, a vocabulary this page cites a reference
+document for. The joined string is a rendering of two declarations, not a new name.
+
 ## The mapped vocabularies
 
 `populated` counts **occurrences, not documents**: one record can carry the field several
@@ -43,10 +48,10 @@ another field's name.
 
 | schema | documents | curated key | populated | other keys it carries | what it is a statement about |
 |---|---|---|---|---|---|
-| `assay.tool_decision_surface.v0` | 10 | `server.declared_manifest_digest` | 10/10 | `observed_tool_decisions[].correlation.source_class`, `observed_tool_decisions[].response.side_effect.verification_subject_digest` | The **declared, baselined** tool manifest. `docs/reference/mcp-manifest-drift.md` defines *observed* as the latest fully observed `tools/list` — what the server advertised — and *declared* as the baseline it is compared against, so this names the baseline side. The related finding `declared_manifest_digest_mismatch` is a self-consistency check on that side alone (`recompute(declared.tools) != declared.manifest_digest`), belongs to the manifest-drift records rather than to this schema, and is emitted today only by a test-local reference verifier. |
+| `assay.tool_decision_surface.v0` | 10 | `observed_tool_decisions[].server.declared_manifest_digest` | 10/10 | `observed_tool_decisions[].correlation.source_class`, `observed_tool_decisions[].response.side_effect.verification_subject_digest` | The **declared, baselined** tool manifest. `docs/reference/mcp-manifest-drift.md` defines *observed* as the latest fully observed `tools/list` — what the server advertised — and *declared* as the baseline it is compared against, so this names the baseline side. The related finding `declared_manifest_digest_mismatch` is a self-consistency check on that side alone (`recompute(declared.tools) != declared.manifest_digest`), belongs to the manifest-drift records rather than to this schema, and is emitted today only by a test-local reference verifier. |
 | `assay.tool_decision_truth.otel_projection.v0` | 1 | `spans[].attributes.assay.tdt.declared_policy_digest` | 2/2 | `spans[].attributes.assay.tdt.carrier_content_digest`, `spans[].attributes.assay.tdt.decision_identity_digest`, `spans[].attributes.assay.tdt.observed_input_digest`, `spans[].attributes.assay.tdt.source_class` | The same fact as `assay.tool_decision_truth.v0`, carried as OpenTelemetry span attributes. |
-| `assay.tool_decision_truth.v0` | 1 | `declared_policy_digest` | 2/2 | `args_digest`, `decision_identity`, `decision_identity.observed_input_digest`, `identity_state`, and 2 more | The declared constraint set the decision was taken under, digested by `McpPolicy::declared_constraint_digest_experimental`. **What it covers is defined by `project_and_normalize_declared`** in `crates/assay-core/src/mcp/policy/mod.rs`; read it there rather than trusting a summary. Two things worth knowing before you do: it does **not** cover identity — `tool_pins`, the only tool identity in the policy, is excluded by name — and it does cover `version` and `enforcement`. An earlier version of this row enumerated the surface from a module doc comment instead of from the projection, claimed identity was bound, and omitted both of those. Decision identity is a separate thing: the pair `(observed_input_digest, declared_policy_digest)`. |
-| `assay.tool_decision_truth.vectors.v0` | 1 | `policies.<name>.version` | 4/4 | `carriers[].carrier.args_digest`, `carriers[].carrier.decision_identity`, `carriers[].carrier.decision_identity.declared_policy_digest`, `carriers[].carrier.decision_identity.observed_input_digest`, and 16 more | A named policy variant a vector exercises. A version label, not a digest over content: comparable for identity between records sharing a naming scheme, not recomputable from bytes. |
+| `assay.tool_decision_truth.v0` | 1 | `declared_policy_digest` | 2/2 | `args_digest`, `decision_identity`, `decision_identity.observed_input_digest`, `identity_state`, and 2 more | The declared constraint set the decision was taken under, digested by `McpPolicy::declared_constraint_digest_experimental`. **What it covers is defined by `project_and_normalize_declared`** in `crates/assay-core/src/mcp/policy/mod.rs`; read it there rather than trusting a summary. Two things worth knowing before you do: it does **not** cover identity: the projection is an allowlist, copying `version`, `enforcement`, ten `tools.*` list keys and `schemas`, and `tool_pins` — the only tool identity in the policy — is simply not among them. It does cover `version` and `enforcement`. An earlier version of this row enumerated the surface from a module doc comment instead of from the projection, claimed identity was bound, and omitted both of those. Decision identity is a separate thing: the pair `(observed_input_digest, declared_policy_digest)`. |
+| `assay.tool_decision_truth.vectors.v0` | 1 | `carriers[].carrier.declared_policy_digest` | 6/6 | `carriers[].carrier.args_digest`, `carriers[].carrier.decision_identity`, `carriers[].carrier.decision_identity.observed_input_digest`, `carriers[].carrier.identity_state`, and 18 more | The same declared constraint set as `assay.tool_decision_truth.v0`, carried per vector. An earlier version of this row pointed at `policies.<name>.version` instead and called it "a named policy variant". That was read off the key path rather than off the type: `McpPolicy::version` is the **policy document format** version, used at `crates/assay-core/src/mcp/policy/legacy.rs` to detect a v1 shape, and it is the constant `1` for all four variants in the fixture — so it names no variant and can compare nothing. The variant is named by the map key, not by the field. |
 
 The **other keys** column exists because curating one field must not delete the rest from
 view. Without it, moving a row into this table would turn every one of its other
@@ -59,8 +64,9 @@ These records reached the same scope test and carry keys the generator's filter 
 configuration-ish, and nobody has written down what those keys are a statement about. They
 are listed rather than omitted: **not stated is a finding, not a gap.**
 
-The filter is deliberately broad, so expect false positives here — a `policy_decisions`
-count is not a configuration basis. That direction is the intended one: a false positive is
+The filter is deliberately broad, so expect false positives here — `policy_decisions`
+holds a list of decisions taken, which is not a configuration basis. That direction is the
+intended one: a false positive is
 visible in this table, while a false negative is a vocabulary nobody ever learns about.
 Adding a curated subject moves a row up into the table above, and deciding a row does not
 belong is equally good, once the reason is written down somewhere.
@@ -93,14 +99,16 @@ and **is about a decision** — by naming one in its type, by carrying a `decisi
 by a configuration key that names one. All three are required; an earlier version of this
 page stated only the last two, so the first excluded records silently.
 
-Scope is decided per document, while both tables above are keyed per schema. **2 schemas** had documents on both sides and are counted above rather than below, so nothing is listed twice: `assay.coverage_aware_drift.annotation.v0`, `assay.experiment.evidenceref_recompute_consumer.v0`
+Scope is decided per document, while both tables above are keyed per schema. **4 schemas** had documents on both sides and are counted above rather than below, so nothing is listed twice: `assay.coverage_aware_drift.annotation.v0`, `assay.experiment.evidenceref_recompute_consumer.v0`, `assay.manifest_establish.v0`, `assay.runner.observation_health.v0`
 
 **196 further records** carry a configuration-ish key and declare no schema
 and no namespaced type, so they fail the first conjunct and appear nowhere on this page.
-Most are JSON Schema documents. They are counted because a rule that excludes silently is
-the thing this section exists to prevent.
+62 of them carry a `$schema` key, so they are JSON Schema
+documents rather than records. The rest are counted the same way regardless: a rule that
+excludes silently is the thing this section exists to prevent, and an earlier version of
+this line guessed at the breakdown instead of counting it.
 
-**42 further record types** carry configuration-ish keys and fall outside it.
+**40 further record types** carry configuration-ish keys and fall outside it.
 They are counted here so the denominator is visible: "a new schema cannot go unnoticed"
 is only true inside a declared scope, and an undeclared one hides its own misses.
 
@@ -119,7 +127,6 @@ is only true inside a declared scope, and an undeclared one hides its own misses
 | `assay.experiment.evidence_mutation_matrix.v0` | 1 |
 | `assay.experiment.mcp_tool_evidence_binding.binding_cell.v0` | 6 |
 | `assay.experiment.otel_span_event_limit.v0` | 1 |
-| `assay.manifest_establish.v0` | 1 |
 | `assay.mcp-jsonrpc-id-conformance.provenance.v2` | 1 |
 | `assay.mcp_server_inventory.v0` | 1 |
 | `assay.observability.claim_class_cell.v0` | 1 |
@@ -133,7 +140,6 @@ is only true inside a declared scope, and an undeclared one hides its own misses
 | `assay.render_safety_conformance.v0` | 1 |
 | `assay.runner.archive_manifest.v0` | 13 |
 | `assay.runner.kernel_event.v0` | 1 |
-| `assay.runner.observation_health.v0` | 16 |
 | `assay.runner.runtime_drift.v0.2` | 4 |
 | `assay.runner.sdk_event.v0` | 18 |
 | `assay.supply_chain_conformance.input.v0` | 2 |
@@ -151,8 +157,9 @@ is only true inside a declared scope, and an undeclared one hides its own misses
 
 ## How they relate
 
-Stated as relations with a **direction**, not as equality. Only one pair below earns
-"equivalent", and only one way.
+Stated as relations with a **direction**, not as equality. Read the direction column: most
+rows are one-way projections, and the one row asserting equal values says so — equality of
+value is symmetric, which is a different claim from a projection being reversible.
 
 | pair | relation | direction | note |
 |---|---|---|---|

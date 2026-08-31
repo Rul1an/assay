@@ -42,7 +42,7 @@ NOT_CONFIG = {
 # inferring from names is the error this document exists to prevent.
 SUBJECTS: dict[str, dict[str, str]] = {
     "assay.tool_decision_surface.v0": {
-        "_field": "server.declared_manifest_digest",
+        "_field": "observed_tool_decisions[].server.declared_manifest_digest",
         "_subject": "The **declared, baselined** tool manifest. `docs/reference/mcp-manifest-drift.md` "
         "defines *observed* as the latest fully observed `tools/list` — what the server advertised — "
         "and *declared* as the baseline it is compared against, so this names the baseline side. The "
@@ -57,8 +57,9 @@ SUBJECTS: dict[str, dict[str, str]] = {
         "`McpPolicy::declared_constraint_digest_experimental`. **What it covers is defined by "
         "`project_and_normalize_declared`** in `crates/assay-core/src/mcp/policy/mod.rs`; read it "
         "there rather than trusting a summary. Two things worth knowing before you do: it does "
-        "**not** cover identity — `tool_pins`, the only tool identity in the policy, is excluded by "
-        "name — and it does cover `version` and `enforcement`. An earlier version of this row "
+        "**not** cover identity: the projection is an allowlist, copying `version`, `enforcement`, ten "
+        "`tools.*` list keys and `schemas`, and `tool_pins` — the only tool identity in the "
+        "policy — is simply not among them. It does cover `version` and `enforcement`. An earlier version of this row "
         "enumerated the surface from a module doc comment instead of from the projection, claimed "
         "identity was bound, and omitted both of those. Decision identity is a separate thing: the "
         "pair `(observed_input_digest, declared_policy_digest)`.",
@@ -69,10 +70,14 @@ SUBJECTS: dict[str, dict[str, str]] = {
         "attributes.",
     },
     "assay.tool_decision_truth.vectors.v0": {
-        "_field": "policies.<name>.version",
-        "_subject": "A named policy variant a vector exercises. A version label, not a digest over "
-        "content: comparable for identity between records sharing a naming scheme, not "
-        "recomputable from bytes.",
+        "_field": "carriers[].carrier.declared_policy_digest",
+        "_subject": "The same declared constraint set as `assay.tool_decision_truth.v0`, carried per "
+        "vector. An earlier version of this row pointed at `policies.<name>.version` instead and "
+        "called it \"a named policy variant\". That was read off the key path rather than off the "
+        "type: `McpPolicy::version` is the **policy document format** version, used at "
+        "`crates/assay-core/src/mcp/policy/legacy.rs` to detect a v1 shape, and it is the constant "
+        "`1` for all four variants in the fixture — so it names no variant and can compare nothing. "
+        "The variant is named by the map key, not by the field.",
     },
 }
 
@@ -144,6 +149,11 @@ PAYLOAD_FIELDS = {
 
 # Directories that are not this tree's own content: build output, dependency caches, and any
 # directory carrying its own .git, which is a nested checkout whose files are copies.
+#
+# The .git prune only matters on the fallback path. When the tracked set is available a nested
+# checkout's files are already excluded as untracked, and the drift gate's scratch tree has no
+# nested checkouts at all. It is kept for the case the fallback exists for -- a tree read from
+# somewhere that is not a worktree root -- and not because it guards the normal path.
 PRUNE = {".git", "target", "node_modules", ".venv"}
 
 
@@ -213,6 +223,7 @@ def discover(root: Path) -> dict[str, dict]:
     found: dict[str, dict] = {}
     outside: dict[str, set] = {}
     unlabelled: set = set()
+    unlabelled_jsonschema: set = set()
     tracked = tracked_paths(root)
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(
@@ -255,6 +266,8 @@ def discover(root: Path) -> dict[str, dict]:
                 )
                 if keys and not label:
                     unlabelled.add(rel)
+                    if "$schema" in doc:
+                        unlabelled_jsonschema.add(rel)
                 if keys and label and not in_scope:
                     outside.setdefault(label, set()).add(rel)
                 if not keys or not in_scope:
@@ -271,7 +284,7 @@ def discover(root: Path) -> dict[str, dict]:
                 entry["documents"] += 1
                 for key, values in keys.items():
                     entry["keys"].setdefault(key, []).extend(values)
-    return found, outside, unlabelled
+    return found, outside, unlabelled, unlabelled_jsonschema
 
 
 def has_key(node, name: str) -> bool:
@@ -359,7 +372,8 @@ def key_list(keys, limit: int = 4) -> str:
     return shown or "—"
 
 
-def render(found: dict[str, dict], outside: dict[str, set], unlabelled: set) -> str:
+def render(found: dict[str, dict], outside: dict[str, set], unlabelled: set,
+           unlabelled_jsonschema: set) -> str:
     lines: list[str] = []
     add = lines.append
 
@@ -398,6 +412,11 @@ def render(found: dict[str, dict], outside: dict[str, set], unlabelled: set) -> 
     add("Field subjects below are read from the producing code, never inferred from the field name.")
     add("Inferring from names is exactly the error this page prevents.")
     add("")
+    add("A row labelled `A + B` is **one record declaring two schemas at the same depth**, not a")
+    add("schema called \"A + B\". Reporting both is deliberate: taking one by alphabetical order")
+    add("silently dropped `assay.mcp_manifest_observed.v0`, a vocabulary this page cites a reference")
+    add("document for. The joined string is a rendering of two declarations, not a new name.")
+    add("")
     mapped = sorted(k for k in found if k in SUBJECTS)
     unmapped = sorted(k for k in found if k not in SUBJECTS)
 
@@ -430,8 +449,9 @@ def render(found: dict[str, dict], outside: dict[str, set], unlabelled: set) -> 
     add("configuration-ish, and nobody has written down what those keys are a statement about. They")
     add("are listed rather than omitted: **not stated is a finding, not a gap.**")
     add("")
-    add("The filter is deliberately broad, so expect false positives here — a `policy_decisions`")
-    add("count is not a configuration basis. That direction is the intended one: a false positive is")
+    add("The filter is deliberately broad, so expect false positives here — `policy_decisions`")
+    add("holds a list of decisions taken, which is not a configuration basis. That direction is the")
+    add("intended one: a false positive is")
     add("visible in this table, while a false negative is a vocabulary nobody ever learns about.")
     add("Adding a curated subject moves a row up into the table above, and deciding a row does not")
     add("belong is equally good, once the reason is written down somewhere.")
@@ -444,8 +464,15 @@ def render(found: dict[str, dict], outside: dict[str, set], unlabelled: set) -> 
         entry = found[schema]
         add(f"| `{schema}` | {entry['documents']} | {key_list(entry['keys'])} |")
     add("")
-    both = sorted(set(outside) & set(found))
-    outside = {k: v for k, v in outside.items() if k not in found}
+    # A composite label is several schemas. Comparing label strings let a schema appear in both
+    # tables whenever it reached one side only inside an `A + B` row, which is exactly what the
+    # sentence below promises does not happen.
+    def parts(label: str) -> set:
+        return {p.strip() for p in label.split(" + ")}
+
+    in_scope_schemas = {s for label in found for s in parts(label)}
+    both = sorted({s for label in outside for s in parts(label) if s in in_scope_schemas})
+    outside = {k: v for k, v in outside.items() if not (parts(k) & in_scope_schemas)}
     add("## Outside this page's scope")
     add("")
     add("The scope rule, stated here rather than left in the generator. A record is in scope when")
@@ -461,8 +488,10 @@ def render(found: dict[str, dict], outside: dict[str, set], unlabelled: set) -> 
     add("")
     add(f"**{len(unlabelled)} further records** carry a configuration-ish key and declare no schema")
     add("and no namespaced type, so they fail the first conjunct and appear nowhere on this page.")
-    add("Most are JSON Schema documents. They are counted because a rule that excludes silently is")
-    add("the thing this section exists to prevent.")
+    add(f"{len(unlabelled_jsonschema)} of them carry a `$schema` key, so they are JSON Schema")
+    add("documents rather than records. The rest are counted the same way regardless: a rule that")
+    add("excludes silently is the thing this section exists to prevent, and an earlier version of")
+    add("this line guessed at the breakdown instead of counting it.")
     add("")
     add(f"**{len(outside)} further record types** carry configuration-ish keys and fall outside it.")
     add("They are counted here so the denominator is visible: \"a new schema cannot go unnoticed\"")
@@ -475,8 +504,9 @@ def render(found: dict[str, dict], outside: dict[str, set], unlabelled: set) -> 
     add("")
     add("## How they relate")
     add("")
-    add("Stated as relations with a **direction**, not as equality. Only one pair below earns")
-    add("\"equivalent\", and only one way.")
+    add("Stated as relations with a **direction**, not as equality. Read the direction column: most")
+    add("rows are one-way projections, and the one row asserting equal values says so — equality of")
+    add("value is symmetric, which is a different claim from a projection being reversible.")
     add("")
     add("| pair | relation | direction | note |")
     add("|---|---|---|---|")
@@ -512,6 +542,41 @@ CITATION = re.compile(
 )
 
 
+SYMBOL = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)`")
+SEARCHED = ("crates", "docs", "scripts")
+SEARCHED_SUFFIXES = {".rs", ".md", ".py", ".sh", ".json", ".yml", ".yaml", ".toml"}
+
+
+def verify_symbols(text: str, root: Path) -> list:
+    """Symbols the page names in backticks must appear somewhere in the tree.
+
+    Paths were already checked; symbols were not, and the load-bearing claim on this page now hangs
+    on one. The row for `declared_policy_digest` deliberately stops paraphrasing and points at a
+    function instead, which is only an improvement while the function still has that name.
+
+    Filesystem search rather than `git grep`: the drift gate runs generators in a scratch copy with
+    no `.git`, and a check that quietly stops working there is worse than no check. Same reason the
+    tracked-set lookup falls back rather than failing.
+    """
+    wanted = {c for c in SYMBOL.findall(text) if len(c) >= 8 and ("_" in c or "::" in c)}
+    if not wanted:
+        return []
+    needles = {c: c.split("::")[-1] for c in wanted}
+    for base in SEARCHED:
+        for path in sorted((root / base).rglob("*")):
+            if not path.is_file() or path.suffix not in SEARCHED_SUFFIXES:
+                continue
+            try:
+                blob = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            for name in [c for c, n in needles.items() if n in blob]:
+                needles.pop(name, None)
+            if not needles:
+                return []
+    return sorted(needles)
+
+
 def verify_citations(text: str, root: Path) -> list:
     """Every repo path this page cites must exist. Returns the ones that do not.
 
@@ -539,6 +604,11 @@ def main() -> int:
     if missing:
         for path in missing:
             print(f"error: cited path does not exist: {path}", file=sys.stderr)
+        return 1
+    unknown = verify_symbols(text, root)
+    if unknown:
+        for name in unknown:
+            print(f"error: cited symbol appears nowhere in the tree: {name}", file=sys.stderr)
         return 1
     out = root / args.out
     if args.check:

@@ -78,7 +78,7 @@ run_checker_at() {
 # ".git/index: index file open failed: Not a directory".
 sgit() {
   env -u GIT_INDEX_FILE -u GIT_DIR -u GIT_WORK_TREE -u GIT_OBJECT_DIRECTORY \
-      -u GIT_COMMON_DIR -u GIT_CONFIG_PARAMETERS git "$@"
+      -u GIT_COMMON_DIR -u GIT_CONFIG_PARAMETERS -u GIT_ALTERNATE_OBJECT_DIRECTORIES git "$@"
 }
 
 expect_fail() {

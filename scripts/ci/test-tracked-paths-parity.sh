@@ -40,7 +40,11 @@ checker_fell_back() {
     ASSAY_ACTION_PIN_FILE="${tree}/.github/assay-action-pin" \
     ASSAY_ACTION_FIXTURE_FILE="${tree}/scripts/ci/fixtures/assay-action-pin/action.yml" \
     ASSAY_ACTION_PROVENANCE_FILE="${tree}/scripts/ci/fixtures/assay-action-pin/PROVENANCE" \
-    "${CHECKER}" 2>&1 >/dev/null | grep -q '^note:' && echo yes || echo no
+    "${CHECKER}" 2>"${scratch}/note" >/dev/null || true
+  # Read the note from a file rather than a pipeline. Under `set -o pipefail` the pipeline's status
+  # is the checker's, not grep's, so a non-zero checker exit reported "did not fall back" whatever
+  # the diagnostic actually said. Every tree here exits 0 today, which is what kept it latent.
+  if grep -q '^note:' "${scratch}/note"; then echo yes; else echo no; fi
 }
 
 generator_fell_back() {
