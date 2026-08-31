@@ -329,15 +329,47 @@ def should_skip(rel: str) -> bool:
     return any(rel.startswith(prefix) for prefix in SKIP_PREFIXES)
 
 
+def tracked_paths() -> "set[str] | None":
+    """Paths git has under version control in TREE, or None if TREE is not a worktree.
+
+    None means "scan everything", which is what the self-test needs: it runs the checker against
+    a synthetic tree assembled in a scratch directory that is deliberately not a git repository.
+    Enumerating from git unconditionally would leave every planted violation there invisible and
+    quietly turn the negative cases green.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(TREE), "ls-files", "-z"],
+            capture_output=True,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {name.decode("utf-8", "surrogateescape") for name in out.split(b"\0") if name}
+
+
 def walk_unlisted() -> None:
+    tracked = tracked_paths()
     for dirpath, dirnames, filenames in os.walk(TREE):
         dirnames[:] = [name for name in dirnames if name not in {".git", "target"}]
+        # A directory carrying its own .git is a nested checkout: a git worktree, a vendored
+        # clone. Its files are copies sitting at paths this tree does not own, so scanning them
+        # reports a violation nobody can fix here -- and because the self-test's green control
+        # runs the same walk, the failure surfaces as a broken control rather than as a finding.
+        dirnames[:] = [
+            name for name in dirnames if not (Path(dirpath) / name / ".git").exists()
+        ]
         for name in filenames:
             path = Path(dirpath) / name
             if path.suffix.lower() not in SCAN_SUFFIXES:
                 continue
             rel = rel_posix(path)
             if rel in OWNED or should_skip(rel):
+                continue
+            # Untracked working-tree files are not repository content. Local drafts and scratch
+            # survive pre-commit's stash, so scanning them charges the commit with a violation it
+            # is not introducing. Staged additions are in the index and still reach this check.
+            if tracked is not None and rel not in tracked:
                 continue
             data = bounded_read(path, allow_empty=True)
             if not data:
