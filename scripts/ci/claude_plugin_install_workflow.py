@@ -1611,10 +1611,12 @@ def assert_clean_env_strips_storage_override() -> None:
     for label, inherited in cases:
         overlay = {"ANTHROPIC_API_KEY": "synthetic-canary-2194-anthropic"}
         if inherited is not None:
-            overlay[STORAGE_OVERRIDE_ENV] = inherited
+            # Literal host name, not STORAGE_OVERRIDE_ENV: a renamed constant
+            # must not keep this assertion green.
+            overlay["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = inherited
         with patch.dict(os.environ, overlay, clear=True):
             cleaned = clean_env(extra)
-        if STORAGE_OVERRIDE_ENV in cleaned:
+        if "CLAUDE_SECURESTORAGE_CONFIG_DIR" in cleaned:
             leaked.append(label)
             continue
         if cleaned.get("CLAUDE_CONFIG_DIR") != disposable:
@@ -1633,7 +1635,7 @@ def assert_clean_env_strips_storage_override() -> None:
         fail(
             "clean_env",
             "inherited "
-            f"{STORAGE_OVERRIDE_ENV} must be unset, not present "
+            "CLAUDE_SECURESTORAGE_CONFIG_DIR must be unset, not present "
             f"(leaked for: {', '.join(leaked)})",
             "pop the inherited storage override; leave it unset rather than empty",
         )
