@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, NoReturn
+from unittest.mock import patch
 
 MAX_BYTES = 1_048_576
 DEFAULT_TIMEOUT_SECONDS = 30.0
@@ -27,6 +28,7 @@ EXPECTED_TOOLS = [
     "assay_policy_decide",
 ]
 AUTH_ENV_PREFIXES = ("ANTHROPIC_", "CLAUDE_CODE_OAUTH_", "ASSAY_AUTH_")
+STORAGE_OVERRIDE_ENV = "CLAUDE_SECURESTORAGE_CONFIG_DIR"
 DRIVER = Path(__file__).resolve()
 SOURCE_ROOT = DRIVER.parents[2]
 WORKFLOW_SCRIPT = DRIVER.with_name("test-claude-plugin-install.sh")
@@ -81,6 +83,9 @@ def clean_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     env.pop("CLAUDE_PROJECT_DIR", None)
     if extra:
         env.update(extra)
+    # Unset, not empty: Claude Code 2.1.247 treats a present empty override as the
+    # default service name, ignoring the disposable CLAUDE_CONFIG_DIR (#2194).
+    env.pop(STORAGE_OVERRIDE_ENV, None)
     return env
 
 
@@ -992,6 +997,7 @@ for line in sys.stdin:
 def self_test() -> None:
     # First, because every later failure caused by a re-coupled probe would
     # surface as an unexplained fixture mismatch instead of the design error.
+    assert_clean_env_strips_storage_override()
     assert_transcript_probe_is_not_denied()
     assert_transcript_prompt_contract()
     assert_changelog_history_self_test()
@@ -1582,6 +1588,58 @@ def assert_transcript_prompt_contract() -> None:
             "the transcript probe is allowed, so its result has no matches list",
         )
     print("transcript_prompt_contract=pass")
+
+
+def assert_clean_env_strips_storage_override() -> None:
+    """Disposable child env must not inherit CLAUDE_SECURESTORAGE_CONFIG_DIR.
+
+    Claude Code 2.1.247 prefers this override over CLAUDE_CONFIG_DIR. Empty
+    selects the default service name; nonempty selects that directory's
+    namespace. Unset is not empty. See #2194.
+    """
+    disposable = "/tmp/assay-disposable-claude-config"
+    extra = {
+        "CLAUDE_CONFIG_DIR": disposable,
+        "PATH": "/tmp/assay-isolated-bin",
+    }
+    cases = (
+        ("absent", None),
+        ("empty", ""),
+        ("nonempty", "/tmp/assay-inherited-securestorage"),
+    )
+    leaked: list[str] = []
+    for label, inherited in cases:
+        overlay = {"ANTHROPIC_API_KEY": "synthetic-canary-2194-anthropic"}
+        if inherited is not None:
+            # Literal host name, not STORAGE_OVERRIDE_ENV: a renamed constant
+            # must not keep this assertion green.
+            overlay["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = inherited
+        with patch.dict(os.environ, overlay, clear=True):
+            cleaned = clean_env(extra)
+        if "CLAUDE_SECURESTORAGE_CONFIG_DIR" in cleaned:
+            leaked.append(label)
+            continue
+        if cleaned.get("CLAUDE_CONFIG_DIR") != disposable:
+            fail(
+                "clean_env",
+                f"{label}: disposable CLAUDE_CONFIG_DIR was not preserved",
+                "keep the supplied CLAUDE_CONFIG_DIR extra after sanitizing inheritance",
+            )
+        if any(key.upper().startswith(AUTH_ENV_PREFIXES) for key in cleaned):
+            fail(
+                "clean_env",
+                f"{label}: auth overrides leaked into the disposable environment",
+                "keep stripping ANTHROPIC_, CLAUDE_CODE_OAUTH_, and ASSAY_AUTH_ prefixes",
+            )
+    if leaked:
+        fail(
+            "clean_env",
+            "inherited "
+            "CLAUDE_SECURESTORAGE_CONFIG_DIR must be unset, not present "
+            f"(leaked for: {', '.join(leaked)})",
+            "pop the inherited storage override; leave it unset rather than empty",
+        )
+    print("clean_env_storage_override=pass")
 
 
 def assert_transcript_probe_is_not_denied() -> None:
