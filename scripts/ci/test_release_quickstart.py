@@ -101,7 +101,7 @@ class ReleaseReadmeTruth(unittest.TestCase):
                 (root / "README.md").write_text(control, encoding="utf-8")
                 result = subprocess.run(
                     [sys.executable, str(script), "v5.6.0", "--assembled-cwd"],
-                    cwd=root, capture_output=True, text=True, timeout=10,
+                    cwd=root, capture_output=True, text=True, encoding="utf-8", timeout=10,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("Published v5.6.0 CLI archives cover", result.stdout)
@@ -116,7 +116,7 @@ class ReleaseReadmeTruth(unittest.TestCase):
                     )
                     result = subprocess.run(
                         [sys.executable, str(script), "v5.6.0", "--assembled-cwd"],
-                        cwd=root, capture_output=True, text=True, timeout=10,
+                        cwd=root, capture_output=True, text=True, encoding="utf-8", timeout=10,
                     )
                     self.assertNotEqual(result.returncode, 0, result.stdout)
                     self.assertIn("exactly one platform-coverage sentence", result.stderr)
