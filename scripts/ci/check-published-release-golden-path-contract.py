@@ -121,10 +121,12 @@ def validate_manifest(
     expected = [
         "examples/privileged-action-gate/mock_github_mcp.py",
         "examples/privileged-action-gate/policies/no-allowance.yaml",
+        "examples/privileged-action-gate/policies/allow.yaml",
         "examples/privileged-action-gate/baseline-approved.json",
         ".github/workflows/published-release-golden-path.yml",
         ".github/workflows/release.yml",
         "scripts/ci/published-release-golden-path.sh",
+        "scripts/ci/lib/published-release-capture.sh",
         "scripts/ci/published_release_proxy_phase.py",
         "scripts/ci/release_attestation_enforce.sh",
         "scripts/ci/release_archive_inventory.sh",
@@ -363,9 +365,20 @@ def validate_contract(
         "tamper failure code": 'reason_code == "E_EVIDENCE_INTEGRITY"',
         "artifact manifest": '"assay.published_release_golden_path.artifacts.v1"',
         "claim ceiling": "the harness is not a shipped release asset",
+        "diagnostic claim boundary": "Doctor reports host capabilities, not kernel enforcement performed by this journey.",
     }
     for label, fragment in required_driver_fragments.items():
         require(driver_text, fragment, f"driver lost {label}", problems)
+    session_lines = lines_between(
+        driver_text, 'pushd "$session_root"', 'run_capture "policy-validate"', problems
+    )
+    if (
+        session_lines != ['pushd "$session_root" >/dev/null', 'run_published_release_session_product']
+        or driver_lines.count('run_published_release_session_product') != 1
+    ):
+        problems.append("driver must execute the tested pre-init session in the session cwd")
+    if driver_lines.count('source "$harness_root/scripts/ci/lib/published-release-capture.sh"') != 1:
+        problems.append("driver must source the manifest-verified capture library exactly once")
     if "unset GH_TOKEN GITHUB_TOKEN PYTHONPATH" not in driver_lines:
         problems.append("release binaries must not inherit GitHub credentials")
     if "|| true" in driver_text or "set +e" in driver_text:
@@ -500,6 +513,7 @@ def validate_contract(
     required_artifacts = [
         "run-pin.json",
         "commands.ndjson",
+        "doctor.json",
         "produced.bundle.tar.gz",
         "decisions.ndjson",
         "inspect.json",
@@ -509,11 +523,18 @@ def validate_contract(
         "release-api.json",
         "tag-ref.json",
         "attestation-summary.json",
+        "allow/proxy.jsonl",
+        "allow/decisions.ndjson",
+        "allow/produced.bundle.tar.gz",
+        "allow/verify.json",
+        "unsupported/proxy.jsonl",
     ]
     for name in required_artifacts:
         if f'"{name}"' not in driver_text:
             problems.append(f"driver no longer requires retained artifact: {name}")
 
+    if active_lines(driver_text).count("run_published_release_extra_request_cases") != 1:
+        problems.append("driver must execute the allow and unsupported request cases exactly once")
     validate_manifest(manifest, source_root, workflow, release_workflow, driver, problems)
     return problems
 

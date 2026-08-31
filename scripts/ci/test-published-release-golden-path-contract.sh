@@ -33,6 +33,8 @@ bash "$ROOT/scripts/ci/test-release-attestation-enforce.sh"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_safe_extract_release_archive.py"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_bounded_download.py"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_published_release_proxy_phase.py"
+PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_published_release_session_phase.py"
+PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_published_release_request_cases.py"
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
@@ -126,6 +128,19 @@ PY
     fail "proxy helper mutation stayed green: $name"
   fi
 }
+
+expect_mutation_failure \
+  "preflight-call-commented" "driver.sh" \
+  'run_published_release_session_product' '# run_published_release_session_product' \
+  "driver must execute the tested pre-init session in the session cwd" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "preflight-uses-unverified-library" "driver.sh" \
+  'source "$harness_root/scripts/ci/lib/published-release-capture.sh"' \
+  'source "$ROOT/scripts/ci/lib/published-release-capture.sh"' \
+  "driver must source the manifest-verified capture library exactly once" \
+  "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "attestation-removed" "driver.sh" \
