@@ -33,7 +33,8 @@ in the tree depends on configuration.
 Field subjects below are read from the producing code, never inferred from the field name.
 Inferring from names is exactly the error this page prevents.
 
-A row labelled `A + B` is **one record declaring two schemas at the same depth**, not a
+A row labelled `A + B` is **one record declaring two or more schemas at the same depth**,
+not a
 schema called "A + B". Reporting both is deliberate: taking one by alphabetical order
 silently dropped `assay.mcp_manifest_observed.v0`, a vocabulary this page cites a reference
 document for. The joined string is a rendering of two declarations, not a new name.
@@ -50,8 +51,8 @@ another field's name.
 |---|---|---|---|---|---|
 | `assay.tool_decision_surface.v0` | 10 | `observed_tool_decisions[].server.declared_manifest_digest` | 10/10 | `observed_tool_decisions[].correlation.source_class`, `observed_tool_decisions[].response.side_effect.verification_subject_digest` | The **declared, baselined** tool manifest. `docs/reference/mcp-manifest-drift.md` defines *observed* as the latest fully observed `tools/list` — what the server advertised — and *declared* as the baseline it is compared against, so this names the baseline side. The related finding `declared_manifest_digest_mismatch` is a self-consistency check on that side alone (`recompute(declared.tools) != declared.manifest_digest`), belongs to the manifest-drift records rather than to this schema, and is emitted today only by a test-local reference verifier. |
 | `assay.tool_decision_truth.otel_projection.v0` | 1 | `spans[].attributes.assay.tdt.declared_policy_digest` | 2/2 | `spans[].attributes.assay.tdt.carrier_content_digest`, `spans[].attributes.assay.tdt.decision_identity_digest`, `spans[].attributes.assay.tdt.observed_input_digest`, `spans[].attributes.assay.tdt.source_class` | The same fact as `assay.tool_decision_truth.v0`, carried as OpenTelemetry span attributes. |
-| `assay.tool_decision_truth.v0` | 1 | `declared_policy_digest` | 2/2 | `args_digest`, `decision_identity`, `decision_identity.observed_input_digest`, `identity_state`, and 2 more | The declared constraint set the decision was taken under, digested by `McpPolicy::declared_constraint_digest_experimental`. **What it covers is defined by `project_and_normalize_declared`** in `crates/assay-core/src/mcp/policy/mod.rs`; read it there rather than trusting a summary. Two things worth knowing before you do: it does **not** cover identity: the projection is an allowlist, copying `version`, `enforcement`, ten `tools.*` list keys and `schemas`, and `tool_pins` — the only tool identity in the policy — is simply not among them. It does cover `version` and `enforcement`. An earlier version of this row enumerated the surface from a module doc comment instead of from the projection, claimed identity was bound, and omitted both of those. Decision identity is a separate thing: the pair `(observed_input_digest, declared_policy_digest)`. |
-| `assay.tool_decision_truth.vectors.v0` | 1 | `carriers[].carrier.declared_policy_digest` | 6/6 | `carriers[].carrier.args_digest`, `carriers[].carrier.decision_identity`, `carriers[].carrier.decision_identity.observed_input_digest`, `carriers[].carrier.identity_state`, and 18 more | The same declared constraint set as `assay.tool_decision_truth.v0`, carried per vector. An earlier version of this row pointed at `policies.<name>.version` instead and called it "a named policy variant". That was read off the key path rather than off the type: `McpPolicy::version` is the **policy document format** version, used at `crates/assay-core/src/mcp/policy/legacy.rs` to detect a v1 shape, and it is the constant `1` for all four variants in the fixture — so it names no variant and can compare nothing. The variant is named by the map key, not by the field. |
+| `assay.tool_decision_truth.v0` | 1 | `declared_policy_digest` | 1/1 | `args_digest`, `decision_identity`, `decision_identity.observed_input_digest`, `identity_state`, and 2 more | The declared constraint set the decision was taken under, digested by `McpPolicy::declared_constraint_digest_experimental`. **What it covers is defined by `project_and_normalize_declared`** in `crates/assay-core/src/mcp/policy/mod.rs`; read it there rather than trusting a summary. Two things worth knowing before you do: it does **not** cover identity. The projection is an allowlist, and it copies exactly four things: `version`, `enforcement`, ten `tools.*` list keys, and `schemas`. `tool_pins`, which is the only tool identity in the policy, is **not** one of them and is therefore outside the digest. An earlier version of this row enumerated the surface from a module doc comment instead of from the projection, claimed identity was bound, and omitted both of those. Decision identity is a separate thing: the pair `(observed_input_digest, declared_policy_digest)`. |
+| `assay.tool_decision_truth.vectors.v0` | 1 | `carriers[].carrier.declared_policy_digest` | 3/3 | `carriers[].carrier.args_digest`, `carriers[].carrier.decision_identity`, `carriers[].carrier.decision_identity.observed_input_digest`, `carriers[].carrier.identity_state`, and 18 more | The same declared constraint set as `assay.tool_decision_truth.v0`, carried per vector. An earlier version of this row pointed at `policies.<name>.version` instead and called it "a named policy variant". That was read off the key path rather than off the type: `McpPolicy::version` is the **policy document format** version, used at `crates/assay-core/src/mcp/policy/legacy.rs` to detect a v1 shape, and it is the constant `1` for all four variants in the fixture — so it names no variant and can compare nothing. The variant is named by the map key, not by the field. |
 
 The **other keys** column exists because curating one field must not delete the rest from
 view. Without it, moving a row into this table would turn every one of its other
@@ -103,10 +104,12 @@ Scope is decided per document, while both tables above are keyed per schema. **4
 
 **196 further records** carry a configuration-ish key and declare no schema
 and no namespaced type, so they fail the first conjunct and appear nowhere on this page.
-62 of them carry a `$schema` key, so they are JSON Schema
-documents rather than records. The rest are counted the same way regardless: a rule that
-excludes silently is the thing this section exists to prevent, and an earlier version of
-this line guessed at the breakdown instead of counting it.
+55 of them declare a **meta-schema** under `$schema`, so they
+are schemas rather than records. The rest are records this rule drops, including some that
+name their own format under the same key — SARIF reports, CycloneDX BOMs — which is why
+this counts the `$schema` **value** and not the presence of the key. An earlier version of
+this line read the key name and called all of them schemas, which is the one inference this
+page forbids, committed by the page against its own denominator.
 
 **40 further record types** carry configuration-ish keys and fall outside it.
 They are counted here so the denominator is visible: "a new schema cannot go unnoticed"

@@ -336,10 +336,17 @@ def should_skip(rel: str) -> bool:
 GIT_ENV = (
     "GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY",
     "GIT_COMMON_DIR", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CEILING_DIRECTORIES",
 )
 
 
 def git_env() -> dict:
+    """The environment with git's own configuration knobs removed.
+
+    GIT_CONFIG_COUNT is the load-bearing one beyond the directory variables: without it git ignores
+    the numbered GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n pairs entirely, so dropping the count drops
+    the injected configuration with it.
+    """
     return {k: v for k, v in os.environ.items() if k not in GIT_ENV}
 
 

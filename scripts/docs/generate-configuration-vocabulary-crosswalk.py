@@ -57,9 +57,10 @@ SUBJECTS: dict[str, dict[str, str]] = {
         "`McpPolicy::declared_constraint_digest_experimental`. **What it covers is defined by "
         "`project_and_normalize_declared`** in `crates/assay-core/src/mcp/policy/mod.rs`; read it "
         "there rather than trusting a summary. Two things worth knowing before you do: it does "
-        "**not** cover identity: the projection is an allowlist, copying `version`, `enforcement`, ten "
-        "`tools.*` list keys and `schemas`, and `tool_pins` — the only tool identity in the "
-        "policy — is simply not among them. It does cover `version` and `enforcement`. An earlier version of this row "
+        "**not** cover identity. The projection is an allowlist, and it copies exactly four things: "
+        "`version`, `enforcement`, ten `tools.*` list keys, and `schemas`. `tool_pins`, which is the "
+        "only tool identity in the policy, is **not** one of them and is therefore outside the "
+        "digest. An earlier version of this row "
         "enumerated the surface from a module doc comment instead of from the projection, claimed "
         "identity was bound, and omitted both of those. Decision identity is a separate thing: the "
         "pair `(observed_input_digest, declared_policy_digest)`.",
@@ -155,6 +156,10 @@ PAYLOAD_FIELDS = {
 # nested checkouts at all. It is kept for the case the fallback exists for -- a tree read from
 # somewhere that is not a worktree root -- and not because it guards the normal path.
 PRUNE = {".git", "target", "node_modules", ".venv"}
+# Ceiling applied before materialisation, per the repository's rule for hostile input. A tracked
+# record larger than this is not a decision record worth mapping, and reading it to find that out
+# is the cost this avoids.
+MAX_RECORD_BYTES = 8 * 1024 * 1024
 
 
 def collect(node, prefix: str, out: dict[str, list]) -> None:
@@ -176,10 +181,17 @@ def collect(node, prefix: str, out: dict[str, list]) -> None:
 GIT_ENV = (
     "GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY",
     "GIT_COMMON_DIR", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CEILING_DIRECTORIES",
 )
 
 
 def git_env() -> dict:
+    """The environment with git's own configuration knobs removed.
+
+    GIT_CONFIG_COUNT is the load-bearing one beyond the directory variables: without it git ignores
+    the numbered GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n pairs entirely, so dropping the count drops
+    the injected configuration with it.
+    """
     return {k: v for k, v in os.environ.items() if k not in GIT_ENV}
 
 
@@ -204,7 +216,12 @@ def tracked_paths(root: Path) -> "set[str] | None":
                              capture_output=True, check=True, env=git_env()).stdout
     except (OSError, subprocess.CalledProcessError):
         return None
-    return {n.decode("utf-8", "surrogateescape") for n in out.split(b"\0") if n} or None
+    # An empty listing here is an answer, not a failure: git succeeded and said nothing is tracked,
+    # so the corpus is empty. The checker treats the same input as a reason to fall back and scan
+    # everything, because for a supply-chain check scanning more is the safe direction. For this
+    # generator the safe direction is the opposite -- falling back would read untracked files and
+    # produce a page the drift gate, which seeds from `git ls-files`, could never reproduce.
+    return {n.decode("utf-8", "surrogateescape") for n in out.split(b"\0") if n}
 
 
 def discover(root: Path) -> dict[str, dict]:
@@ -266,7 +283,8 @@ def discover(root: Path) -> dict[str, dict]:
                 )
                 if keys and not label:
                     unlabelled.add(rel)
-                    if "$schema" in doc:
+                    meta = doc.get("$schema")
+                    if isinstance(meta, str) and "json-schema.org" in meta:
                         unlabelled_jsonschema.add(rel)
                 if keys and label and not in_scope:
                     outside.setdefault(label, set()).add(rel)
@@ -345,23 +363,19 @@ def schema_label(doc: dict) -> str:
 def populated_ratio(entry: dict, field: str) -> str:
     """How many occurrences of the curated field carry a value, over how many occur at all.
 
-    Matched on the final path segment by EQUALITY, never by substring. A substring match binds to
-    the wrong key silently: `declared_manifest_digest` is a prefix of `declared_manifest_digest_
-    mismatch`, and reporting one field's count beside another field's name is the exact error this
-    page exists to prevent, committed by the page itself.
+    Matched on the WHOLE path, not on its final segment. Matching the tail merged keys that merely
+    end alike: `carriers[].carrier.declared_policy_digest` was summed with
+    `carriers[].carrier.decision_identity.declared_policy_digest` and reported as one number, which
+    is a milder form of the error the column exists to avoid -- a count beside a name it does not
+    belong to. Substring matching was worse still and came first, binding
+    `declared_manifest_digest` to `declared_manifest_digest_mismatch`.
 
-    Summed over every matching key rather than stopping at the first. One document can carry the
-    field many times -- four named policy variants, two spans -- and stopping early silently
-    discards the rest. The count is occurrences, not documents, and the column says so.
+    The count is occurrences of that one path, not documents, and the column says so.
     """
-    tail = field.split(".")[-1]
-    total = filled = 0
-    for key, values in entry["keys"].items():
-        if key.split(".")[-1] != tail:
-            continue
-        total += len(values)
-        filled += sum(1 for v in values if v is not None)
-    return f"{filled}/{total}" if total else "—"
+    values = entry["keys"].get(field, [])
+    if not values:
+        return "—"
+    return f"{sum(1 for v in values if v is not None)}/{len(values)}"
 
 
 def key_list(keys, limit: int = 4) -> str:
@@ -412,7 +426,8 @@ def render(found: dict[str, dict], outside: dict[str, set], unlabelled: set,
     add("Field subjects below are read from the producing code, never inferred from the field name.")
     add("Inferring from names is exactly the error this page prevents.")
     add("")
-    add("A row labelled `A + B` is **one record declaring two schemas at the same depth**, not a")
+    add("A row labelled `A + B` is **one record declaring two or more schemas at the same depth**,")
+    add("not a")
     add("schema called \"A + B\". Reporting both is deliberate: taking one by alphabetical order")
     add("silently dropped `assay.mcp_manifest_observed.v0`, a vocabulary this page cites a reference")
     add("document for. The joined string is a rendering of two declarations, not a new name.")
@@ -488,10 +503,12 @@ def render(found: dict[str, dict], outside: dict[str, set], unlabelled: set,
     add("")
     add(f"**{len(unlabelled)} further records** carry a configuration-ish key and declare no schema")
     add("and no namespaced type, so they fail the first conjunct and appear nowhere on this page.")
-    add(f"{len(unlabelled_jsonschema)} of them carry a `$schema` key, so they are JSON Schema")
-    add("documents rather than records. The rest are counted the same way regardless: a rule that")
-    add("excludes silently is the thing this section exists to prevent, and an earlier version of")
-    add("this line guessed at the breakdown instead of counting it.")
+    add(f"{len(unlabelled_jsonschema)} of them declare a **meta-schema** under `$schema`, so they")
+    add("are schemas rather than records. The rest are records this rule drops, including some that")
+    add("name their own format under the same key — SARIF reports, CycloneDX BOMs — which is why")
+    add("this counts the `$schema` **value** and not the presence of the key. An earlier version of")
+    add("this line read the key name and called all of them schemas, which is the one inference this")
+    add("page forbids, committed by the page against its own denominator.")
     add("")
     add(f"**{len(outside)} further record types** carry configuration-ish keys and fall outside it.")
     add("They are counted here so the denominator is visible: \"a new schema cannot go unnoticed\"")
@@ -542,35 +559,70 @@ CITATION = re.compile(
 )
 
 
+DEFAULT_OUT = "docs/architecture/CONFIGURATION-VOCABULARY-CROSSWALK.md"
 SYMBOL = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)`")
 SEARCHED = ("crates", "docs", "scripts")
 SEARCHED_SUFFIXES = {".rs", ".md", ".py", ".sh", ".json", ".yml", ".yaml", ".toml"}
 
 
-def verify_symbols(text: str, root: Path) -> list:
-    """Symbols the page names in backticks must appear somewhere in the tree.
+def curated_text() -> str:
+    """Only the hand-written half of the page is checked for symbols.
+
+    The other half is discovered from data, and a discovered JSON key is not a code symbol: keys
+    like `descriptor_schema` live in fixtures under `tests/` and legitimately appear nowhere in
+    `crates`, `docs` or `scripts`. Checking them reported a citation failure for a fact the
+    generator had just read off disk. The curated half is where prose asserts what code does, which
+    is the only thing this check is for.
+    """
+    parts = [v["_subject"] for v in SUBJECTS.values()]
+    parts += [note for _, _, _, note in RELATIONS]
+    parts += PAYLOAD_FIELDS["note"] + [PAYLOAD_FIELDS["fields"], PAYLOAD_FIELDS["type"]]
+    return "\n".join(parts)
+
+
+def verify_symbols(text: str, root: Path, out: Path) -> list:
+    """Symbols the page names in backticks must appear somewhere in the tree's own code.
 
     Paths were already checked; symbols were not, and the load-bearing claim on this page now hangs
     on one. The row for `declared_policy_digest` deliberately stops paraphrasing and points at a
-    function instead, which is only an improvement while the function still has that name.
+    function instead, which is only an improvement while the function still carries that name.
+
+    The page's own toolchain is excluded, and that exclusion is the whole check. Without it the
+    citation validates itself: the name lives in SUBJECTS here, in the rendered page, and in the
+    test that mutates this file, so renaming the real Rust function leaves every one of those three
+    copies behind and the check green. Verified by renaming it and watching this pass.
+
+    Matched on exact token boundaries. A substring match would accept a symbol that survives only as
+    part of a longer, different name.
 
     Filesystem search rather than `git grep`: the drift gate runs generators in a scratch copy with
-    no `.git`, and a check that quietly stops working there is worse than no check. Same reason the
-    tracked-set lookup falls back rather than failing.
+    no `.git`, and a check that quietly stops working there is worse than no check.
     """
     wanted = {c for c in SYMBOL.findall(text) if len(c) >= 8 and ("_" in c or "::" in c)}
     if not wanted:
         return []
-    needles = {c: c.split("::")[-1] for c in wanted}
+    # The committed page is excluded by its canonical path, not by whatever --out happens to be.
+    # Excluding only the destination left the in-tree copy readable, so a control run writing to
+    # /tmp still found the symbol in the page that cites it, and the check passed while the real
+    # declaration had been renamed away.
+    excluded = {
+        Path(__file__).resolve(),
+        out.resolve(),
+        (root / DEFAULT_OUT).resolve(),
+        (root / "scripts/ci/test-crosswalk-generator.sh").resolve(),
+    }
+    needles = {c: re.compile(rf"\b{re.escape(c.split('::')[-1])}\b") for c in wanted}
     for base in SEARCHED:
         for path in sorted((root / base).rglob("*")):
             if not path.is_file() or path.suffix not in SEARCHED_SUFFIXES:
+                continue
+            if path.resolve() in excluded:
                 continue
             try:
                 blob = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
-            for name in [c for c, n in needles.items() if n in blob]:
+            for name in [c for c, rx in needles.items() if rx.search(blob)]:
                 needles.pop(name, None)
             if not needles:
                 return []
@@ -593,24 +645,24 @@ def verify_citations(text: str, root: Path) -> list:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo-root", default=".", type=Path)
-    ap.add_argument("--out", default="docs/architecture/CONFIGURATION-VOCABULARY-CROSSWALK.md")
+    ap.add_argument("--out", default=DEFAULT_OUT)
     ap.add_argument("--check", action="store_true",
                     help="fail if the committed doc differs from freshly generated output")
     args = ap.parse_args()
 
     root = args.repo_root.resolve()
+    out = root / args.out
     text = render(*discover(root))
     missing = verify_citations(text, root)
     if missing:
         for path in missing:
             print(f"error: cited path does not exist: {path}", file=sys.stderr)
         return 1
-    unknown = verify_symbols(text, root)
+    unknown = verify_symbols(curated_text(), root, out)
     if unknown:
         for name in unknown:
             print(f"error: cited symbol appears nowhere in the tree: {name}", file=sys.stderr)
         return 1
-    out = root / args.out
     if args.check:
         current = out.read_text(encoding="utf-8") if out.exists() else ""
         if current != text:

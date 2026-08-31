@@ -16,6 +16,11 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 CHECKER="${ROOT}/scripts/ci/check-assay-action-pin.sh"
 GENERATOR="${ROOT}/scripts/docs/generate-configuration-vocabulary-crosswalk.py"
+sgit() {
+  env -u GIT_INDEX_FILE -u GIT_DIR -u GIT_WORK_TREE -u GIT_OBJECT_DIRECTORY -u GIT_COMMON_DIR \
+      -u GIT_CONFIG_PARAMETERS -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_CONFIG_COUNT git "$@"
+}
+
 scratch="$(mktemp -d)"
 trap 'rm -rf "${scratch}"' EXIT
 
@@ -76,20 +81,31 @@ expect_parity() {
 
 # 1. A worktree root with tracked files: read the tracked set, no fallback.
 build_tree "${scratch}/root"
-git -c init.defaultBranch=main -C "${scratch}/root" init -q .
-git -C "${scratch}/root" add .github/assay-action-pin
+sgit -c init.defaultBranch=main -C "${scratch}/root" init -q .
+sgit -C "${scratch}/root" add .github/assay-action-pin
 expect_parity "worktree-root-with-tracked-files" "${scratch}/root" no
 
-# 2. A worktree root with nothing tracked: an empty listing is not a licence to skip everything.
+# 2. A worktree root with nothing tracked. Here the two DIVERGE, on purpose, and the divergence is
+#    asserted rather than left to drift. Git succeeded and said nothing is tracked. The checker
+#    treats that as a reason to scan everything, because for a supply-chain check the safe direction
+#    is to look at more. The generator treats it as an empty corpus, because for it the fallback
+#    would read untracked files and emit a page the drift gate could never reproduce. Same input,
+#    opposite safe directions, so parity here would encode a bug rather than prevent one.
 build_tree "${scratch}/empty"
-git -c init.defaultBranch=main -C "${scratch}/empty" init -q .
-expect_parity "worktree-root-empty-index" "${scratch}/empty" yes
+sgit -c init.defaultBranch=main -C "${scratch}/empty" init -q .
+a="$(checker_fell_back "${scratch}/empty")"
+b="$(generator_fell_back "${scratch}/empty")"
+if [[ "${a}" != "yes" || "${b}" != "no" ]]; then
+  echo "FAIL: worktree-root-empty-index: expected checker=yes generator=no, got ${a}/${b}" >&2
+  exit 1
+fi
+echo "ok    worktree-root-empty-index (documented divergence: checker falls back, generator does not)"
 
 # 3. Inside a repository but below its root: a partial listing must not be trusted.
 mkdir -p "${scratch}/outer"
-git -c init.defaultBranch=main -C "${scratch}/outer" init -q .
+sgit -c init.defaultBranch=main -C "${scratch}/outer" init -q .
 build_tree "${scratch}/outer/subtree"
-git -C "${scratch}/outer" add subtree/.github/assay-action-pin
+sgit -C "${scratch}/outer" add subtree/.github/assay-action-pin
 expect_parity "subtree-of-a-repository" "${scratch}/outer/subtree" yes
 
 # 4. No repository at all -- what the drift gate's scratch copy looks like.

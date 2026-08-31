@@ -9,8 +9,12 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 GEN="${ROOT}/scripts/docs/generate-configuration-vocabulary-crosswalk.py"
 scratch="$(mktemp -d)"
-probe="${ROOT}/zz-crosswalk-generator-probe.json"
-trap 'rm -rf "${scratch}" "${probe}"' EXIT
+# The probe lives in a unique directory under the repository root, and only that directory is
+# removed. A fixed filename would overwrite a pre-existing untracked file of the same name and then
+# delete it -- destroying someone's work to test that untracked work is ignored.
+probe_dir="$(mktemp -d "${ROOT}/zz-crosswalk-probe.XXXXXX")"
+probe="${probe_dir}/record.json"
+trap 'rm -rf "${scratch}" "${probe_dir}"' EXIT
 
 run_gen() { python3 "${GEN}" --repo-root "${ROOT}" --out "$1" >/dev/null; }
 
@@ -30,7 +34,7 @@ fi
 grep -q 'zz.probe.decision.v0' "${scratch}/untracked.md" &&
   { echo "FAIL: the probe schema is on the page" >&2; exit 1; }
 echo "ok    untracked-record-does-not-reach-the-page"
-rm -f "${probe}"
+rm -rf "${probe_dir}"
 
 # 2. The tracked set must come from THIS tree. An inherited GIT_DIR or GIT_INDEX_FILE -- which
 #    pre-commit and git hooks routinely set -- otherwise makes ls-files answer about another
@@ -77,5 +81,49 @@ fi
 grep -q 'cited symbol appears nowhere' "${scratch}/err" ||
   { echo "FAIL: generation failed for the wrong reason:" >&2; cat "${scratch}/err" >&2; exit 1; }
 echo "ok    unresolvable-symbol-blocks-the-write"
+
+# 5. The symbol check must not be satisfied by the page's own toolchain. Every symbol the curated
+#    prose cites also appears in the generator's SUBJECTS, in the rendered page, and in this script.
+#    Without excluding those three, renaming the real declaration leaves all of them behind and the
+#    check stays green -- verified by renaming `project_and_normalize_declared` in the Rust source
+#    and watching it pass. Here the whole tree IS those excluded files and nothing else, so every
+#    citation must be reported missing.
+self_root="${scratch}/self-only"
+mkdir -p "${self_root}/docs/architecture" "${self_root}/scripts/docs" "${self_root}/crates"
+cp "${ROOT}/docs/architecture/CONFIGURATION-VOCABULARY-CROSSWALK.md" \
+   "${self_root}/docs/architecture/CONFIGURATION-VOCABULARY-CROSSWALK.md"
+cp "${GEN}" "${self_root}/scripts/docs/"
+# Every cited PATH must exist here as an empty file, or the path check fires first and the case
+# would pass for a reason that has nothing to do with symbols.
+grep -oE '`(crates|docs|scripts|tests|packaging|conformance|\.github)(/[A-Za-z0-9_.-]+)+/?`' \
+  "${ROOT}/docs/architecture/CONFIGURATION-VOCABULARY-CROSSWALK.md" |
+  tr -d '`' | sort -u |
+  while IFS= read -r cited; do
+    case "${cited}" in
+      */) mkdir -p "${self_root}/${cited}" ;;
+      *)  mkdir -p "${self_root}/$(dirname "${cited}")"; : >"${self_root}/${cited}" ;;
+    esac
+  done
+if python3 "${GEN}" --repo-root "${self_root}" --out "${scratch}/self.md" \
+     >"${scratch}/out" 2>"${scratch}/err"; then
+  echo "FAIL: symbols validated themselves against the page and the generator" >&2
+  exit 1
+fi
+grep -q 'cited symbol appears nowhere' "${scratch}/err" ||
+  { echo "FAIL: refused for the wrong reason:" >&2; cat "${scratch}/err" >&2; exit 1; }
+echo "ok    symbols-are-not-validated-by-the-pages-own-toolchain"
+
+# 6. The populated column must count one path, not every key that ends alike. Two keys in the
+#    vectors record end in `declared_policy_digest`; matching the tail reported their sum as though
+#    it belonged to the curated one.
+copy_tail="${scratch}/tail-match.py"
+sed 's|    values = entry\["keys"\].get(field, \[\])|    values = [v for k, vs in entry["keys"].items() if k.split(".")[-1] == field.split(".")[-1] for v in vs]|' \
+  "${GEN}" >"${copy_tail}"
+python3 "${copy_tail}" --repo-root "${ROOT}" --out "${scratch}/tail.md" >/dev/null
+if diff -q "${scratch}/baseline.md" "${scratch}/tail.md" >/dev/null; then
+  echo "FAIL: tail matching produced identical output, so the whole-path rule is unpinned" >&2
+  exit 1
+fi
+echo "ok    populated-counts-one-path-not-every-key-ending-alike"
 
 echo "crosswalk generator contract: PASS"
