@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The executable editor MCP recipe may only describe the transport Assay actually ships.
+# The executable editor MCP recipe must retain its prerequisites and shipped transport boundary.
 #
 # WHY THIS EXISTS (#2360)
 #
@@ -37,6 +37,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 RECIPE="${ASSAY_EDITOR_RECIPE:-docs/guides/editor-mcp-recipe.md}"
+MAX_RECIPE_BYTES=65536
 MODERN_REVISION='2026-07-28'
 IMPL_ISSUE='2358'
 
@@ -49,6 +50,12 @@ ok() { printf 'ok   %s\n' "$*"; }
 
 if [ ! -f "$RECIPE" ]; then
   printf 'FAIL: executable editor recipe missing: %s\n' "$RECIPE"
+  exit 1
+fi
+
+# Bound all subsequent captures, including grep diagnostics and extracted commands.
+if [ "$(wc -c < "$RECIPE")" -gt "$MAX_RECIPE_BYTES" ]; then
+  printf 'FAIL: recipe exceeds %s-byte limit: %s\n' "$MAX_RECIPE_BYTES" "$RECIPE"
   exit 1
 fi
 
@@ -115,9 +122,52 @@ fi
 require 'local stdio wrap claim retained' '(assay mcp wrap|`assay mcp wrap`)'
 require 'proxy-enforce claim retained' 'proxy-enforce'
 
+# Keep these as standalone commands in this recipe, not a general shell/Markdown grammar.
+# Comments, prose, and commands in a different H2 section cannot satisfy plugin prerequisites.
+plugin_commands="$(awk '
+  {
+    fence_line = $0
+    sub(/^ ? ? ?/, "", fence_line)
+  }
+  match(fence_line, /^(```+|~~~+)/) {
+    width = RLENGTH
+    mark = substr(fence_line, 1, 1)
+    rest = substr(fence_line, width + 1)
+    if (fence) {
+      if (mark == fence_mark && width >= fence_width && rest ~ /^[ \t]*$/) {
+        fence = 0
+        bash_fence = 0
+      }
+    } else {
+      fence = 1
+      fence_mark = mark
+      fence_width = width
+      bash_fence = (fence_line == "```bash")
+    }
+    next
+  }
+  !fence && /^## / {
+    section = ($0 == "## Install the Claude Code plugin")
+    next
+  }
+  section && fence && bash_fence {
+    sub(/^[ \t]+/, "")
+    sub(/[ \t]+$/, "")
+    print
+  }
+' "$RECIPE")"
+for command in 'cargo install assay-cli --locked' 'cargo install assay-mcp-server --locked' \
+  'assay version' 'assay-mcp-server --version'; do
+  if printf '%s\n' "$plugin_commands" | grep -Fxq -- "$command"; then
+    ok "plugin prerequisite command present: $command"
+  else
+    fail "$RECIPE: plugin prerequisite command missing: $command"
+  fi
+done
+
 printf '\n'
 if [ "$failures" -gt 0 ]; then
-  printf 'editor MCP recipe truth: %s drift(s) from shipped transport\n' "$failures"
+  printf 'editor MCP recipe truth: %s prerequisite or shipped-transport drift(s)\n' "$failures"
   printf '\n'
   printf 'The executable recipe describes what a reader can run against a real editor today.\n'
   printf 'Assay ships the legacy stdio handshake; it does not ship remote HTTP, OAuth/OIDC or\n'

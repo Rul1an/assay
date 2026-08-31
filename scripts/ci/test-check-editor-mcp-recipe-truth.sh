@@ -28,6 +28,15 @@ write_clean() {
   cat > "$TMP/recipe.md" <<'MD'
 # Editor MCP Recipe
 
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --locked
+cargo install assay-mcp-server --locked
+assay version
+assay-mcp-server --version
+```
+
 ## The wrap command
 
 Run `assay mcp wrap` to enforce policy at the protocol boundary.
@@ -74,6 +83,58 @@ expect_fail() {
 echo '== baseline: a truthful recipe passes =='
 write_clean
 expect_pass 'clean fixture passes'
+
+echo '== plugin prerequisites must be commands in the plugin installation section =='
+for command in 'cargo install assay-cli --locked' 'cargo install assay-mcp-server --locked' \
+  'assay version' 'assay-mcp-server --version'; do
+  for mode in delete comment prose elsewhere; do
+    write_clean
+    awk -v command="$command" -v mode="$mode" '
+      /^```bash$/ && mode == "prose" { print command }
+      $0 == command {
+        if (mode == "comment") print "# " $0
+        next
+      }
+      { print }
+      /^## The wrap command$/ {
+        if (mode == "elsewhere") print "\n```bash\n" command "\n```"
+      }
+    ' "$TMP/recipe.md" > "$TMP/edited.md"
+    mv "$TMP/edited.md" "$TMP/recipe.md"
+    expect_fail "$mode: $command" "plugin prerequisite command missing: $command"
+  done
+done
+write_clean
+printf '\n<!-- unchanged executable recipe -->\n' >> "$TMP/recipe.md"
+expect_pass 'comment-only no-op preserves prerequisites'
+
+echo '== fenced examples cannot impersonate the plugin section =='
+for fence in '```' '````' '~~~' '   ~~~'; do
+  write_clean
+  awk -v fence="$fence" '
+    /^## Install the Claude Code plugin$/ { print fence "text" }
+    /^## The wrap command$/ { print fence }
+    { print }
+  ' "$TMP/recipe.md" > "$TMP/edited.md"
+  mv "$TMP/edited.md" "$TMP/recipe.md"
+  expect_fail "plugin section inside $fence example" \
+    'plugin prerequisite command missing: cargo install assay-cli --locked'
+done
+for heading in '## shell comment' '### subheading-shaped shell comment'; do
+  write_clean
+  awk -v heading="$heading" '{ print } /^```bash$/ { print heading }' \
+    "$TMP/recipe.md" > "$TMP/edited.md"
+  mv "$TMP/edited.md" "$TMP/recipe.md"
+  expect_pass "$heading does not end the bash fence"
+done
+
+echo '== recipe byte ceiling has an acceptance boundary =='
+write_clean
+bytes="$(wc -c < "$TMP/recipe.md")"
+printf '%*s' "$((65536 - bytes))" '' >> "$TMP/recipe.md"
+expect_pass 'recipe at 65536 bytes accepted'
+printf ' ' >> "$TMP/recipe.md"
+expect_fail 'recipe over 65536 bytes rejected' 'recipe exceeds 65536-byte limit'
 
 echo '== drift 1: stale release-candidate copy =='
 write_clean
