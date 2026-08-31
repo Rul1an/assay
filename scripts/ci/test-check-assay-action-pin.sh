@@ -72,6 +72,15 @@ run_checker_at() {
     "${CHECKER}" "$@"
 }
 
+# Scratch repositories must not inherit this process's git environment. Under pre-commit,
+# GIT_INDEX_FILE (and friends) point at the outer repository's temporary index, so a plain
+# `git -C <scratch>` writes there instead, and `git worktree add` then fails with
+# ".git/index: index file open failed: Not a directory".
+sgit() {
+  env -u GIT_INDEX_FILE -u GIT_DIR -u GIT_WORK_TREE -u GIT_OBJECT_DIRECTORY \
+      -u GIT_COMMON_DIR -u GIT_CONFIG_PARAMETERS git "$@"
+}
+
 expect_fail() {
   local name="$1"
   local expected="$2"
@@ -582,8 +591,8 @@ copy_into "${scratch}/tracked-violation"
 mkdir -p "${scratch}/tracked-violation/docs/getting-started"
 printf '%s\n' '- uses: Rul1an/assay-action@v3' \
   >"${scratch}/tracked-violation/docs/getting-started/installation.md"
-git -c init.defaultBranch=main -C "${scratch}/tracked-violation" init -q .
-git -C "${scratch}/tracked-violation" add docs/getting-started/installation.md
+sgit -c init.defaultBranch=main -C "${scratch}/tracked-violation" init -q .
+sgit -C "${scratch}/tracked-violation" add docs/getting-started/installation.md
 expect_fail "tracked-violation-in-worktree" "is not on the owner snippet list" \
   "${scratch}/tracked-violation"
 
@@ -592,8 +601,8 @@ copy_into "${scratch}/untracked-violation"
 mkdir -p "${scratch}/untracked-violation/docs/getting-started"
 printf '%s\n' '- uses: Rul1an/assay-action@v3' \
   >"${scratch}/untracked-violation/docs/getting-started/installation.md"
-git -c init.defaultBranch=main -C "${scratch}/untracked-violation" init -q .
-git -C "${scratch}/untracked-violation" add .github/assay-action-pin
+sgit -c init.defaultBranch=main -C "${scratch}/untracked-violation" init -q .
+sgit -C "${scratch}/untracked-violation" add .github/assay-action-pin
 expect_ok "untracked-violation-in-worktree" run_checker_at "${scratch}/untracked-violation"
 
 echo "== nested checkout: a copy at a path this tree does not own is pruned =="
@@ -601,7 +610,7 @@ copy_into "${scratch}/nested-checkout"
 mkdir -p "${scratch}/nested-checkout/worktrees/inner/docs/getting-started"
 printf '%s\n' '- uses: Rul1an/assay-action@v3' \
   >"${scratch}/nested-checkout/worktrees/inner/docs/getting-started/installation.md"
-git -c init.defaultBranch=main -C "${scratch}/nested-checkout/worktrees/inner" init -q .
+sgit -c init.defaultBranch=main -C "${scratch}/nested-checkout/worktrees/inner" init -q .
 expect_ok "nested-checkout-pruned" run_checker_at "${scratch}/nested-checkout"
 
 echo "== git worktree with nothing tracked falls back rather than trusting an empty listing =="
@@ -609,19 +618,43 @@ copy_into "${scratch}/empty-index"
 mkdir -p "${scratch}/empty-index/docs/getting-started"
 printf '%s\n' '- uses: Rul1an/assay-action@v3' \
   >"${scratch}/empty-index/docs/getting-started/installation.md"
-git -c init.defaultBranch=main -C "${scratch}/empty-index" init -q .
+sgit -c init.defaultBranch=main -C "${scratch}/empty-index" init -q .
 expect_fail "empty-index-falls-back" "is not on the owner snippet list" "${scratch}/empty-index"
 
 echo "== a tree inside a repo but not at its root falls back rather than trusting a partial listing =="
 mkdir -p "${scratch}/inside-repo"
-git -c init.defaultBranch=main -C "${scratch}/inside-repo" init -q .
+sgit -c init.defaultBranch=main -C "${scratch}/inside-repo" init -q .
 copy_into "${scratch}/inside-repo/subtree"
 mkdir -p "${scratch}/inside-repo/subtree/docs/getting-started"
-git -C "${scratch}/inside-repo" add subtree/.github/assay-action-pin
+sgit -C "${scratch}/inside-repo" add subtree/.github/assay-action-pin
 printf '%s\n' '- uses: Rul1an/assay-action@v3' \
   >"${scratch}/inside-repo/subtree/docs/getting-started/installation.md"
 expect_fail "subtree-of-repo-falls-back" "is not on the owner snippet list" \
   "${scratch}/inside-repo/subtree"
+
+# The fallback must say why. Silence is how a check goes blind, and without this the note can be
+# emptied out with no test noticing.
+expect_fail "fallback-announces-itself" "is not a worktree root" \
+  "${scratch}/inside-repo/subtree"
+
+# A LINKED worktree's .git is a regular file, not a directory. Every case above builds its nested
+# checkout with `git init`, whose .git is a directory, so `.exists()` could be weakened to
+# `.is_dir()` and nothing would notice -- while the motivating case in this repository is exactly
+# a linked worktree under .claude/worktrees/.
+echo "== nested LINKED worktree, whose .git is a file, is pruned =="
+copy_into "${scratch}/linked-worktree"
+mkdir -p "${scratch}/linked-wt-origin"
+sgit -c init.defaultBranch=main -C "${scratch}/linked-wt-origin" init -q .
+printf 'seed\n' >"${scratch}/linked-wt-origin/seed.txt"
+sgit -C "${scratch}/linked-wt-origin" add seed.txt
+sgit -C "${scratch}/linked-wt-origin" -c user.email=t@e -c user.name=t commit -q -m seed
+sgit -C "${scratch}/linked-wt-origin" worktree add -q "${scratch}/linked-worktree/inner" -b probe
+mkdir -p "${scratch}/linked-worktree/inner/docs/getting-started"
+printf '%s\n' '- uses: Rul1an/assay-action@v3' \
+  >"${scratch}/linked-worktree/inner/docs/getting-started/installation.md"
+test -f "${scratch}/linked-worktree/inner/.git" ||
+  { echo "FAIL: linked worktree .git is not a regular file; case is vacuous" >&2; exit 1; }
+expect_ok "linked-worktree-pruned" run_checker_at "${scratch}/linked-worktree"
 
 echo "== unlisted tilde-fence YAML snippet is inventoried =="
 copy_into "${scratch}/unlisted-tilde"

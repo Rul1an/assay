@@ -329,6 +329,20 @@ def should_skip(rel: str) -> bool:
     return any(rel.startswith(prefix) for prefix in SKIP_PREFIXES)
 
 
+# Interrogating a tree must not inherit this process's git environment. GIT_DIR / GIT_INDEX_FILE
+# point somewhere else entirely under pre-commit and inside hooks, and `git -C <tree> ls-files`
+# would then answer about that other repository -- a wrong tracked set, arrived at in silence,
+# which is the failure mode these guards exist to prevent.
+GIT_ENV = (
+    "GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY",
+    "GIT_COMMON_DIR", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG_PARAMETERS",
+)
+
+
+def git_env() -> dict:
+    return {k: v for k, v in os.environ.items() if k not in GIT_ENV}
+
+
 def note(reason: str) -> None:
     """Announce a fallback to scanning every file. Silence here is how a check goes blind."""
     print(f"note: {reason}; scanning every file under {TREE}", file=sys.stderr)
@@ -355,7 +369,8 @@ def tracked_paths() -> "set[str] | None":
     def ask(*args: str) -> "bytes | None":
         try:
             return subprocess.run(
-                ["git", "-C", str(TREE), *args], capture_output=True, check=True
+                ["git", "-C", str(TREE), *args], capture_output=True, check=True,
+                env=git_env()
             ).stdout
         except (OSError, subprocess.CalledProcessError) as exc:
             detail = (getattr(exc, "stderr", b"") or b"").decode("utf-8", "replace").strip()

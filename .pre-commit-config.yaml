@@ -415,6 +415,15 @@ repos:
         pass_filenames: false
         files: ^(\.github/workflows/.*\.ya?ml|scripts/ci/(check-codeql-upload-sarif-lockstep\.py|test-codeql-upload-sarif-lockstep\.sh)|\.pre-commit-config\.yaml)$
 
+      - id: tracked-paths-parity
+        name: Tracked-paths rule parity (checker vs crosswalk generator)
+        entry: bash scripts/ci/test-tracked-paths-parity.sh
+        language: system
+        pass_filenames: false
+        # Both files encode the same rule and cannot share a function, so they are pinned against
+        # each other. Either one changing must re-run this.
+        files: ^scripts/(ci/(check-assay-action-pin|test-tracked-paths-parity)\.sh|docs/generate-configuration-vocabulary-crosswalk\.py)$
+
       - id: assay-action-consumer-pin
         name: Assay Action consumer pin
         entry: bash -c 'bash scripts/ci/test-check-assay-action-pin.sh && bash scripts/ci/check-assay-action-pin.sh'

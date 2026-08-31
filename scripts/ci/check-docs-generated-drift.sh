@@ -33,13 +33,18 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# ORDER MATTERS for one entry. This script deletes every FRESH_GENERATED path from the scratch seed
+# before running anything, and generate-configuration-vocabulary-crosswalk.py discovers its corpus by
+# reading *.json across the tree -- including outputs other generators in this list produce. It must
+# therefore run after them, which it does by sitting last. Reordering this array would change its
+# output and surface as a drift failure with no visible cause.
 GENERATORS=(
   scripts/docs/generate-agent-golden-path.py
   scripts/docs/generate-product-capabilities.py
-  scripts/docs/generate-configuration-vocabulary-crosswalk.py
   scripts/docs/generate-crate-deps.sh
   scripts/docs/generate-module-map.sh
   scripts/docs/update-architecture-docs.sh
+  scripts/docs/generate-configuration-vocabulary-crosswalk.py
 )
 
 # The files the generators own. Anything outside this list is not compared, so a hand-written doc

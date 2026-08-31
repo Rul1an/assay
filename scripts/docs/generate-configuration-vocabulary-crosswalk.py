@@ -24,6 +24,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 # Keys that plausibly pin what was in force. Deliberately broad: the point is discovery, and a
@@ -52,10 +53,15 @@ SUBJECTS: dict[str, dict[str, str]] = {
     },
     "assay.tool_decision_truth.v0": {
         "_field": "declared_policy_digest",
-        "_subject": "The declared constraint set the decision was taken under: "
-        "`McpPolicy::declared_constraint_digest_experimental`, binding tool name, args schema, "
-        "identity, classes, approval, scope and redaction. Decision identity is the pair "
-        "`(observed_input_digest, declared_policy_digest)`.",
+        "_subject": "The declared constraint set the decision was taken under, digested by "
+        "`McpPolicy::declared_constraint_digest_experimental`. **What it covers is defined by "
+        "`project_and_normalize_declared`** in `crates/assay-core/src/mcp/policy/mod.rs`; read it "
+        "there rather than trusting a summary. Two things worth knowing before you do: it does "
+        "**not** cover identity — `tool_pins`, the only tool identity in the policy, is excluded by "
+        "name — and it does cover `version` and `enforcement`. An earlier version of this row "
+        "enumerated the surface from a module doc comment instead of from the projection, claimed "
+        "identity was bound, and omitted both of those. Decision identity is a separate thing: the "
+        "pair `(observed_input_digest, declared_policy_digest)`.",
     },
     "assay.tool_decision_truth.otel_projection.v0": {
         "_field": "spans[].attributes.assay.tdt.declared_policy_digest",
@@ -121,7 +127,8 @@ PAYLOAD_FIELDS = {
         "`crates/assay-evidence/src/types/tests.rs` deserializes the same cluster.",
         "**The semantics are stated**, in prose, outside the corpus this generator reads: "
         "`docs/architecture/PLAN-P56A-POLICY-SNAPSHOT-DIGEST-VISIBILITY-2026q2.md` (Status: "
-        "Implemented) for the `policy_snapshot_*` cluster, `PLAN-P56B-TOOL-DEFINITION-DIGEST-"
+        "Implemented) for the `policy_snapshot_*` cluster, "
+        "`docs/architecture/PLAN-P56B-TOOL-DEFINITION-DIGEST-"
         "BINDING-2026q2.md` for `tool_definition_*`. Both are Status: Implemented and carry "
         "per-field MUSTs. `args_schema_hash` is weaker: the only prose on it is one row of "
         "`docs/architecture/evidence-metrics-mapping.md` saying how a metric consumes it, not what "
@@ -152,6 +159,20 @@ def collect(node, prefix: str, out: dict[str, list]) -> None:
             collect(v, f"{prefix}[]", out)
 
 
+# Interrogating a tree must not inherit this process's git environment. GIT_DIR / GIT_INDEX_FILE
+# point somewhere else entirely under pre-commit and inside hooks, and `git -C <tree> ls-files`
+# would then answer about that other repository -- a wrong tracked set, arrived at in silence,
+# which is the failure mode these guards exist to prevent.
+GIT_ENV = (
+    "GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY",
+    "GIT_COMMON_DIR", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG_PARAMETERS",
+)
+
+
+def git_env() -> dict:
+    return {k: v for k, v in os.environ.items() if k not in GIT_ENV}
+
+
 def tracked_paths(root: Path) -> "set[str] | None":
     """Tracked paths, or None when `root` is not a worktree root and everything should be read.
 
@@ -166,11 +187,11 @@ def tracked_paths(root: Path) -> "set[str] | None":
     """
     try:
         top = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"],
-                             capture_output=True, check=True).stdout
+                             capture_output=True, check=True, env=git_env()).stdout
         if os.path.realpath(top.decode().strip()) != os.path.realpath(root):
             return None
         out = subprocess.run(["git", "-C", str(root), "ls-files", "-z"],
-                             capture_output=True, check=True).stdout
+                             capture_output=True, check=True, env=git_env()).stdout
     except (OSError, subprocess.CalledProcessError):
         return None
     return {n.decode("utf-8", "surrogateescape") for n in out.split(b"\0") if n} or None
@@ -191,6 +212,7 @@ def discover(root: Path) -> dict[str, dict]:
     """
     found: dict[str, dict] = {}
     outside: dict[str, set] = {}
+    unlabelled: set = set()
     tracked = tracked_paths(root)
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(
@@ -231,6 +253,8 @@ def discover(root: Path) -> dict[str, dict]:
                     or "decision" in label.lower()
                     or any("decision" in key.lower() for key in keys)
                 )
+                if keys and not label:
+                    unlabelled.add(rel)
                 if keys and label and not in_scope:
                     outside.setdefault(label, set()).add(rel)
                 if not keys or not in_scope:
@@ -247,7 +271,7 @@ def discover(root: Path) -> dict[str, dict]:
                 entry["documents"] += 1
                 for key, values in keys.items():
                     entry["keys"].setdefault(key, []).extend(values)
-    return found, outside
+    return found, outside, unlabelled
 
 
 def has_key(node, name: str) -> bool:
@@ -291,7 +315,13 @@ def schema_label(doc: dict) -> str:
     """
     declared = declared_schemas(doc)
     if declared:
-        return min(declared)[1]
+        shallowest = min(d for d, _ in declared)
+        names = sorted({v for d, v in declared if d == shallowest})
+        # A tie is two vocabularies declared at the same level, not one winner. Taking min() dropped
+        # `assay.mcp_manifest_observed.v0` -- the record this page's own cited reference is titled
+        # after -- purely because "d" sorts before "m". A rule that silently discards a co-equal
+        # schema cannot also claim that a new schema cannot go unnoticed.
+        return names[0] if len(names) == 1 else " + ".join(names)
     for holder in (doc, doc.get("payload") if isinstance(doc.get("payload"), dict) else {}):
         value = holder.get("type")
         if isinstance(value, str) and (":" in value or "." in value):
@@ -329,7 +359,7 @@ def key_list(keys, limit: int = 4) -> str:
     return shown or "—"
 
 
-def render(found: dict[str, dict], outside: dict[str, set]) -> str:
+def render(found: dict[str, dict], outside: dict[str, set], unlabelled: set) -> str:
     lines: list[str] = []
     add = lines.append
 
@@ -414,11 +444,25 @@ def render(found: dict[str, dict], outside: dict[str, set]) -> str:
         entry = found[schema]
         add(f"| `{schema}` | {entry['documents']} | {key_list(entry['keys'])} |")
     add("")
+    both = sorted(set(outside) & set(found))
+    outside = {k: v for k, v in outside.items() if k not in found}
     add("## Outside this page's scope")
     add("")
-    add("The scope rule, stated here rather than left in the generator: a record is in scope when")
-    add("it carries a configuration-ish key **and** is about a decision — by naming one in its own")
-    add("type, by carrying a `decision` key, or by a configuration key that names one.")
+    add("The scope rule, stated here rather than left in the generator. A record is in scope when")
+    add("it **declares its own schema or a namespaced type**, **carries a configuration-ish key**,")
+    add("and **is about a decision** — by naming one in its type, by carrying a `decision` key, or")
+    add("by a configuration key that names one. All three are required; an earlier version of this")
+    add("page stated only the last two, so the first excluded records silently.")
+    add("")
+    add(f"Scope is decided per document, while both tables above are keyed per schema. "
+        f"**{len(both)} schema{'' if len(both) == 1 else 's'}** had documents on both sides and "
+        f"{'is' if len(both) == 1 else 'are'} counted above rather than below, so nothing is listed "
+        f"twice: " + (", ".join(f"`{b}`" for b in both) if both else "none"))
+    add("")
+    add(f"**{len(unlabelled)} further records** carry a configuration-ish key and declare no schema")
+    add("and no namespaced type, so they fail the first conjunct and appear nowhere on this page.")
+    add("Most are JSON Schema documents. They are counted because a rule that excludes silently is")
+    add("the thing this section exists to prevent.")
     add("")
     add(f"**{len(outside)} further record types** carry configuration-ish keys and fall outside it.")
     add("They are counted here so the denominator is visible: \"a new schema cannot go unnoticed\"")
@@ -460,6 +504,27 @@ def render(found: dict[str, dict], outside: dict[str, set]) -> str:
     return "\n".join(lines) + "\n"
 
 
+# Anchored on the repository's real top-level directories. An unanchored "contains a slash" rule
+# also matched `tools/list`, which is an MCP method name, not a path.
+CITATION = re.compile(
+    r"`((?:crates|docs|scripts|tests|packaging|conformance|\.github)"
+    r"(?:/[A-Za-z0-9_.\-]+)+/?)`"
+)
+
+
+def verify_citations(text: str, root: Path) -> list:
+    """Every repo path this page cites must exist. Returns the ones that do not.
+
+    Three review rounds found this page asserting things about code that the code does not say:
+    an enumeration copied from a doc comment instead of the projection, a relation inverted from a
+    field name, a finding attributed to production code that only a test emits. Prose cannot be
+    checked mechanically, but the pointers it hangs on can, and a citation that has rotted is the
+    cheapest signal that the sentence around it has too. This does not verify that a citation
+    supports what the sentence claims -- nothing here can -- so it is a floor, not a guarantee.
+    """
+    return [c for c in sorted(set(CITATION.findall(text))) if not (root / c.rstrip("/")).exists()]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo-root", default=".", type=Path)
@@ -470,16 +535,23 @@ def main() -> int:
 
     root = args.repo_root.resolve()
     text = render(*discover(root))
+    missing = verify_citations(text, root)
+    if missing:
+        for path in missing:
+            print(f"error: cited path does not exist: {path}", file=sys.stderr)
+        return 1
     out = root / args.out
     if args.check:
-        current = out.read_text() if out.exists() else ""
+        current = out.read_text(encoding="utf-8") if out.exists() else ""
         if current != text:
             print(f"{args.out} is stale; re-run this generator")
             return 1
         print(f"{args.out} is current")
         return 0
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(text)
+    # encoding pinned: the page contains em dashes and arrows, and on a non-UTF-8 locale
+    # an unpinned write_text raises mid-call and leaves the committed file truncated to 0 bytes.
+    out.write_text(text, encoding="utf-8")
     print(f"wrote {args.out}")
     return 0
 
