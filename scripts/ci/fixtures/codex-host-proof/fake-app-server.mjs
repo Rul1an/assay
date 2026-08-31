@@ -171,12 +171,26 @@ function handle(message) {
     return;
   }
   if (method === "mcpServerStatus/list") {
-    const thread = threads.get(params?.threadId) ?? { kind: "primary" };
-    write({ id, result: { data: [assayStatus(thread)] } });
+    const threadId = params?.threadId;
+    if (typeof threadId !== "string" || threadId.length === 0 || !threads.has(threadId)) {
+      write({
+        id,
+        error: { code: -32602, message: "unknown or missing threadId for mcpServerStatus/list" },
+      });
+      return;
+    }
+    write({ id, result: { data: [assayStatus(threads.get(threadId))] } });
     return;
   }
   if (method === "turn/start") {
-    const threadId = params.threadId;
+    const threadId = params?.threadId;
+    if (typeof threadId !== "string" || threadId.length === 0 || !threads.has(threadId)) {
+      write({
+        id,
+        error: { code: -32602, message: "unknown or missing threadId for turn/start" },
+      });
+      return;
+    }
     write({ id, result: { turnId: "turn-1" } });
     if (scenario === "truncated") {
       process.stdout.write('{"method":"item/completed","params":');

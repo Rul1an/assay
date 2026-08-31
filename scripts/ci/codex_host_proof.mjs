@@ -276,10 +276,21 @@ export async function runProof(options) {
       });
     };
 
+    const serverThreadId = (requestId) => {
+      const response = events.find(
+        (event) => event.direction === "server" && event.id === requestId,
+      );
+      const threadId = response?.result?.thread?.id;
+      if (typeof threadId !== "string" || threadId.length === 0) {
+        throw new Error(`no thread id in server response ${requestId}`);
+      }
+      return threadId;
+    };
+
     if (options.journey !== "discovery") {
       const primary = startThread(options.mcpCommand, ["--policy-root", "."]);
       await waitFor(primary);
-      const threadId = events.find((event) => event.id === primary)?.result?.thread?.id ?? null;
+      const threadId = serverThreadId(primary);
       const statusId = send("mcpServerStatus/list", { threadId, detail: "toolsAndAuthOnly" });
       await waitFor(statusId);
       if (options.journey === "tool" || options.journey === "failures") {
@@ -288,7 +299,7 @@ export async function runProof(options) {
           ["--policy-root", "."],
         );
         await waitFor(missing);
-        const missingThread = events.find((event) => event.id === missing)?.result?.thread?.id ?? null;
+        const missingThread = serverThreadId(missing);
         await waitFor(
           send("mcpServerStatus/list", { threadId: missingThread, detail: "toolsAndAuthOnly" }),
         );
@@ -297,7 +308,7 @@ export async function runProof(options) {
           path.join(options.projectRoot, "missing-policy-root"),
         ]);
         await waitFor(invalid);
-        const invalidThread = events.find((event) => event.id === invalid)?.result?.thread?.id ?? null;
+        const invalidThread = serverThreadId(invalid);
         await waitFor(
           send("mcpServerStatus/list", { threadId: invalidThread, detail: "toolsAndAuthOnly" }),
         );
@@ -393,6 +404,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         driverExitCode: result.driverExitCode,
         liveAcceptance: result.classified.liveAcceptance,
       }));
+      if (result.driverExitCode !== 0) {
+        process.exitCode = result.driverExitCode;
+      }
     })
     .catch((error) => {
       process.stderr.write(`${error.message}\n`);

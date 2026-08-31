@@ -493,11 +493,12 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   if (manifest.schema !== SCHEMA) {
     reasons.push(`unexpected schema ${manifest.schema}`);
   }
-  const present = namesIn(proofRoot);
-  for (const name of ALLOWLIST) {
-    if (!present.includes(name)) {
-      reasons.push(`missing allowlisted file ${name}`);
-    }
+  const present = namesIn(proofRoot).sort();
+  const allowed = [...ALLOWLIST].sort();
+  if (stableStringify(present) !== stableStringify(allowed)) {
+    reasons.push(
+      `proof membership ${present.join(",")} is not the exact allowlist ${allowed.join(",")}`,
+    );
   }
   const eventsText = stableStringify(events);
   const actual = sha256Utf8(eventsText);
