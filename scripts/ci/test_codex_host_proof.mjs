@@ -3256,6 +3256,47 @@ test("review closeout: host subjects are proof-owned and independently revalidat
   }
 });
 
+test("verifyLiveIdentity requires an explicit private proof root", {
+  skip: process.platform === "win32",
+}, () => {
+  const proofRoot = portableLiveProofRoot();
+  let observed;
+  try {
+    observed = driveCli("valid", "tool", {
+      captureMode: "synthetic-fixture",
+      proofRoot,
+    });
+    const manifest = JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8"));
+    const events = JSON.parse(fs.readFileSync(path.join(proofRoot, "events.json"), "utf8"));
+    const topology = consumeJourneyTopology(events, manifest.journey);
+    const verify = (root) =>
+      verifyLiveIdentity(
+        manifest.hostIdentity,
+        manifest.invocation,
+        topology,
+        root,
+        manifest.journey,
+      );
+
+    assert.equal(verify(proofRoot), true, "private explicit root is the positive control");
+    assert.equal(
+      verifyLiveIdentity(manifest.hostIdentity, manifest.invocation, topology),
+      false,
+      "an omitted root must not bypass subject containment",
+    );
+    assert.equal(verify(null), false, "a null root must not bypass subject containment");
+    fs.chmodSync(proofRoot, 0o755);
+    assert.equal(verify(proofRoot), false, "a public root must not bind live identity");
+  } finally {
+    fs.chmodSync(proofRoot, 0o700);
+    if (observed) {
+      fs.rmSync(path.dirname(observed.codexBin), { recursive: true, force: true });
+      fs.rmSync(path.dirname(observed.mcpBin), { recursive: true, force: true });
+    }
+    fs.rmSync(proofRoot, { recursive: true, force: true });
+  }
+});
+
 test("review closeout: proof-owned subject mutations fail closed", () => {
   const proofRoot = portableLiveProofRoot();
   let observed;

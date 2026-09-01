@@ -349,27 +349,25 @@ export function verifyLiveIdentity(
   identity,
   invocation,
   topology,
-  proofRoot = null,
+  proofRoot,
   journey = "tool",
 ) {
   if (!liveIdentityBound(identity)) {
     return false;
   }
-  if (proofRoot != null) {
-    let canonicalRoot;
-    try {
-      canonicalRoot = requirePrivateProofRoot(proofRoot);
-    } catch {
-      return false;
-    }
-    const expectedCodex = path.join(canonicalRoot, HOST_SUBJECTS[0]);
-    const expectedMcp = path.join(canonicalRoot, HOST_SUBJECTS[1]);
-    if (
-      path.resolve(identity.codex.path) !== expectedCodex ||
-      path.resolve(identity.assayMcp.path) !== expectedMcp
-    ) {
-      return false;
-    }
+  let canonicalRoot;
+  try {
+    canonicalRoot = requirePrivateProofRoot(proofRoot);
+  } catch {
+    return false;
+  }
+  const expectedCodex = path.join(canonicalRoot, HOST_SUBJECTS[0]);
+  const expectedMcp = path.join(canonicalRoot, HOST_SUBJECTS[1]);
+  if (
+    path.resolve(identity.codex.path) !== expectedCodex ||
+    path.resolve(identity.assayMcp.path) !== expectedMcp
+  ) {
+    return false;
   }
   if (!verifyObservedBinary(identity.codex) || !verifyObservedBinary(identity.assayMcp)) {
     return false;
@@ -396,7 +394,7 @@ export function liveInvocationBound(identity, invocation) {
   );
 }
 
-export function observedIdentityBound(identity, invocation, topology, proofRoot = null, journey = "tool") {
+export function observedIdentityBound(identity, invocation, topology, proofRoot, journey = "tool") {
   return verifyLiveIdentity(identity, invocation, topology, proofRoot, journey);
 }
 
