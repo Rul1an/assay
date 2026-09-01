@@ -39,6 +39,7 @@ export const HOST_SUBJECTS = Object.freeze([
 ]);
 export const HOST_ALLOWLIST = Object.freeze([...ALLOWLIST, ...HOST_SUBJECTS]);
 export const EXTERNAL_ATTESTATION = "not_provided";
+export const HOST_ENV_NAMES = Object.freeze(["PATH", "HOME", "CODEX_HOME"]);
 
 export function proofAllowlist(hasHostIdentity) {
   return hasHostIdentity ? HOST_ALLOWLIST : ALLOWLIST;
@@ -72,6 +73,10 @@ export const HARD_MAX_DIR_ENTRIES = 64;
 export const HARD_MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024;
 export const RECORD_CONSISTENCY_NONCLAIM =
   "record consistency does not authenticate origin, authorship, signature, or attestation";
+
+export function hostSubjectsRequired(captureMode, identity) {
+  return captureMode === "host-observation" || identity != null;
+}
 
 export function finitePositiveInt(name, value) {
   if (!Number.isInteger(value) || value <= 0) {
@@ -350,8 +355,19 @@ export function verifyLiveIdentity(
       return false;
     }
   }
-  const argv = invocation?.argv;
-  return Array.isArray(argv) && argv[0] === identity.codex.path && argv[1] === "app-server";
+  return liveInvocationBound(identity, invocation);
+}
+
+export function liveInvocationBound(identity, invocation) {
+  return (
+    liveIdentityBound(identity) &&
+    exactKeys(invocation, ["argv", "envNames"]) &&
+    Array.isArray(invocation.argv) &&
+    invocation.argv.length === 2 &&
+    invocation.argv[0] === identity.codex.path &&
+    invocation.argv[1] === "app-server" &&
+    sameJson(invocation.envNames, HOST_ENV_NAMES)
+  );
 }
 
 export function observedIdentityBound(identity, invocation, topology, proofRoot = null, journey = "tool") {
@@ -751,6 +767,26 @@ function threadRoleFromStartParams(params) {
   return "primary";
 }
 
+function canonicalThreadRoleReason(role, pair, primaryCommand) {
+  const params = pair?.request?.params;
+  const assay = params?.config?.mcp_servers?.assay;
+  if (typeof params?.cwd !== "string" || !isPlainObject(assay)) {
+    return `${role} thread/start is missing its canonical MCP configuration`;
+  }
+  const expectedCommand =
+    role === "missing"
+      ? path.join(params.cwd, "missing-assay-mcp-server")
+      : primaryCommand;
+  const expectedArgs =
+    role === "invalid"
+      ? ["--policy-root", path.join(params.cwd, "missing-policy-root")]
+      : ["--policy-root", "."];
+  if (assay.command !== expectedCommand || !sameJson(assay.args, expectedArgs)) {
+    return `${role} thread/start command or argv is not canonical`;
+  }
+  return null;
+}
+
 function rememberRequestId(ctx, id) {
   if (!isProofRpcId(id)) {
     ctx.reasons.push("invalid retained-proof rpc id");
@@ -913,6 +949,18 @@ export function consumeJourneyTopology(events, journey) {
     for (const role of ["primary", "missing", "invalid"]) {
       if (!roles.has(role)) {
         reasons.push(`missing ${role} thread/start`);
+      }
+    }
+    const primaryCommand =
+      roles.get("primary")?.request?.params?.config?.mcp_servers?.assay?.command;
+    for (const role of ["primary", "missing", "invalid"]) {
+      const pair = roles.get(role);
+      if (!pair) {
+        continue;
+      }
+      const reason = canonicalThreadRoleReason(role, pair, primaryCommand);
+      if (reason) {
+        reasons.push(reason);
       }
     }
   }
@@ -1712,6 +1760,14 @@ function projectStringArray(value) {
   return Array.isArray(value) ? value.map(projectedScalar) : invalidProjection(value);
 }
 
+function projectMcpArgv(value) {
+  if (!Array.isArray(value)) {
+    return invalidProjection(value);
+  }
+  const reason = credentialArgvReason(value);
+  return reason == null ? value.map(projectedScalar) : { __credentialArgv: reason };
+}
+
 function projectAssayServer(value) {
   if (!isPlainObject(value)) {
     return invalidProjection(value);
@@ -1719,7 +1775,7 @@ function projectAssayServer(value) {
   return withUnexpectedKeys(
     {
       command: projectedScalar(value.command),
-      args: projectStringArray(value.args),
+      args: projectMcpArgv(value.args),
     },
     value,
     ["command", "args"],
@@ -1844,6 +1900,7 @@ function containsProjectionViolation(value) {
   if (
     hasOwn(value, "__invalidType") ||
     hasOwn(value, "__unexpectedKeys") ||
+    hasOwn(value, "__credentialArgv") ||
     hasOwn(value, "__unretainedRequest")
   ) {
     return true;
@@ -2156,8 +2213,20 @@ function manifestShapeReason(manifest) {
   if (!exactKeys(manifest.initialize, ["codexHome", "userAgent", "platformFamily", "platformOs"])) {
     return "manifest initialize is not the closed projection";
   }
+  if (
+    hostSubjectsRequired(manifest.captureMode, null) &&
+    !liveIdentityBound(manifest.hostIdentity)
+  ) {
+    return "host-observation requires the closed binary identity binding";
+  }
   if (manifest.hostIdentity != null && !liveIdentityBound(manifest.hostIdentity)) {
     return "manifest hostIdentity is not the closed binary binding";
+  }
+  if (
+    manifest.hostIdentity != null &&
+    !liveInvocationBound(manifest.hostIdentity, manifest.invocation)
+  ) {
+    return "manifest invocation is not bound to the observed Codex binary";
   }
   if (
     !exactKeys(manifest.expected, [
@@ -2244,7 +2313,9 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
     }
   }
   const present = namesIn(proofRoot).sort();
-  const allowed = [...proofAllowlist(manifest.hostIdentity != null)].sort();
+  const allowed = [
+    ...proofAllowlist(hostSubjectsRequired(manifest.captureMode, manifest.hostIdentity)),
+  ].sort();
   try {
     assertAllowlistedRegularFiles(proofRoot, allowed);
   } catch (error) {
@@ -2336,7 +2407,7 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   if (manifest.captureMode === "host-observation" && manifest.initialize?.userAgent === FAKE_USER_AGENT) {
     reasons.push("host observation with fake stdio child userAgent");
   }
-  if (manifest.hostIdentity != null) {
+  if (hostSubjectsRequired(manifest.captureMode, manifest.hostIdentity)) {
     let topology = null;
     try {
       topology = consumeJourneyTopology(events, manifest.journey ?? "tool");

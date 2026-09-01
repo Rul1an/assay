@@ -28,6 +28,7 @@ import {
   decidePrompt,
   elicitationAcceptable,
   forbiddenProofRoot,
+  projectClientRequestParams,
   sha256File,
   sha256Utf8,
   stableStringify,
@@ -2330,7 +2331,10 @@ function liveBoundRecord(manifest, events) {
       captureMode: "host-observation",
       events: patched,
       hostIdentity: identity,
-      invocation: { argv: [identity.codex.path, "app-server"] },
+      invocation: {
+        argv: [identity.codex.path, "app-server"],
+        envNames: ["PATH", "HOME", "CODEX_HOME"],
+      },
       childExitCode: 0,
       driverOutcome: { exitCode: 0, status: "pass" },
       truncated: false,
@@ -2646,7 +2650,7 @@ test("successful initialize result is required; initialize error cannot clean th
   assert.equal(validateProofRoot(control.proofRoot).ok, true);
 });
 
-test("live identity binds the canonical primary pair; schema-valid decoy rows cannot hide a wrong command", async () => {
+test("canonical topology and live identity both reject a wrong primary command", async () => {
   const { events, manifest, classified } = await drive("valid");
   assert.equal(allIntendedCellsPass(classified), true);
   const bound = liveBoundRecord(manifest, events);
@@ -2656,16 +2660,15 @@ test("live identity binds the canonical primary pair; schema-valid decoy rows ca
   const primary = pairedPrimaryClientStart(bound.events);
   assert.ok(primary, "valid pack must have a paired primary thread/start");
   assert.equal(primary.params.config.mcp_servers.assay.command, observed);
-  // Keep every existing pair schema-valid. The missing/invalid thread/start
-  // rows stay as decoys; only the canonical primary command changes. An
-  // id-less insert would fail topology first and hide removal of ~303.
+  // Keep every RPC envelope valid. The missing/invalid thread/start rows stay
+  // as decoys; only the canonical primary command changes.
   primary.params.config.mcp_servers.assay.command = "/wrong/canonical/assay-mcp-server";
 
   const hidden = classifyRecord(bound);
   assert.equal(
     allIntendedCellsPass(hidden),
-    true,
-    "identity decoy must keep every retained row schema-valid",
+    false,
+    "canonical topology must reject a wrong primary command",
   );
   assert.notEqual(
     hidden.externalAttestation,
@@ -3336,4 +3339,143 @@ test("independent review closeout: client request params are a closed projection
   fs.writeFileSync(path.join(proofRoot, "classification.json"), stableStringify(classified));
   const checked = validateProofRoot(proofRoot);
   assert.equal(checked.ok, false, "unexpected nested client fields must fail closed");
+});
+
+test("review repair: host-observation cannot omit proof-owned identity subjects", () => {
+  const proofRoot = portableLiveProofRoot();
+  let observed;
+  try {
+    observed = driveCli("valid", "tool", {
+      captureMode: "synthetic-fixture",
+      proofRoot,
+    });
+    assert.equal(validateProofRoot(proofRoot).ok, true, "identity-bound control must validate");
+
+    const manifest = JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8"));
+    const events = JSON.parse(fs.readFileSync(path.join(proofRoot, "events.json"), "utf8"));
+    const initialize = events.find(
+      (event) => event.direction === "server" && event.method === "initialize",
+    );
+    assert.ok(initialize?.result);
+    initialize.result.userAgent = "[observed-host]";
+    manifest.captureMode = "host-observation";
+    manifest.initialize.userAgent = "[observed-host]";
+    manifest.hashes = { events: sha256Utf8(stableStringify(events)) };
+    const hostClassified = classifyRecord({ ...manifest, events });
+    rewriteProof(proofRoot, manifest, events, hostClassified);
+    const hostControl = validateProofRoot(proofRoot);
+    assert.equal(hostControl.ok, true, hostControl.reasons.join("; "));
+
+    manifest.hostIdentity = null;
+    manifest.allowlist = ["classification.json", "events.json", "manifest.json"];
+    for (const subject of ["codex.snapshot", "assay-mcp-server.snapshot"]) {
+      fs.rmSync(path.join(proofRoot, subject));
+    }
+    const identityFree = classifyRecord({ ...manifest, events });
+    rewriteProof(proofRoot, manifest, events, identityFree);
+    assert.equal(
+      validateProofRoot(proofRoot).ok,
+      false,
+      "host-observation without identity subjects must fail closed",
+    );
+  } finally {
+    if (observed) {
+      fs.rmSync(path.dirname(observed.codexBin), { recursive: true, force: true });
+      fs.rmSync(path.dirname(observed.mcpBin), { recursive: true, force: true });
+    }
+    fs.rmSync(proofRoot, { recursive: true, force: true });
+  }
+});
+
+test("review repair: nested MCP argv is credential-free", async () => {
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true, "unchanged control must pass");
+  const marker = "nested_probe_secret_2737";
+  const primary = control.events.find(
+    (event) =>
+      event.direction === "client" &&
+      event.method === "thread/start" &&
+      !String(event.params?.config?.mcp_servers?.assay?.command ?? "").includes(
+        "missing-assay-mcp-server",
+      ) &&
+      !event.params?.config?.mcp_servers?.assay?.args?.some((arg) =>
+        String(arg).includes("missing-policy-root"),
+      ),
+  );
+  assert.ok(primary?.params?.config?.mcp_servers?.assay);
+
+  const credentialParams = structuredClone(primary.params);
+  credentialParams.config.mcp_servers.assay.args = ["--token", marker];
+  const projected = projectClientRequestParams("thread/start", credentialParams);
+  assert.doesNotMatch(
+    JSON.stringify(projected),
+    new RegExp(marker),
+    "credential values must not enter the retained projection",
+  );
+  const credentialEvents = structuredClone(control.events);
+  credentialEvents[control.events.indexOf(primary)].params = credentialParams;
+  assert.equal(
+    allIntendedCellsPass(classifyRecord({ ...control.manifest, events: credentialEvents })),
+    false,
+    "credential-bearing primary argv must not classify clean",
+  );
+
+});
+
+test("review repair: each MCP thread role has one canonical command and argv", async () => {
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true, "unchanged control must pass");
+  const extraArgEvents = structuredClone(control.events);
+  const primary = extraArgEvents.find(
+    (event) =>
+      event.direction === "client" &&
+      event.method === "thread/start" &&
+      !String(event.params?.config?.mcp_servers?.assay?.command ?? "").includes(
+        "missing-assay-mcp-server",
+      ) &&
+      !event.params?.config?.mcp_servers?.assay?.args?.some((arg) =>
+        String(arg).includes("missing-policy-root"),
+      ),
+  );
+  assert.ok(primary?.params?.config?.mcp_servers?.assay?.args);
+  primary.params.config.mcp_servers.assay.args.push("--verbose");
+  assert.equal(
+    allIntendedCellsPass(classifyRecord({ ...control.manifest, events: extraArgEvents })),
+    false,
+    "a noncanonical primary role argv must not classify clean",
+  );
+});
+
+test("review repair: host manifest invocation is exact and credential-free", () => {
+  const proofRoot = portableLiveProofRoot();
+  let observed;
+  try {
+    observed = driveCli("valid", "tool", {
+      captureMode: "synthetic-fixture",
+      proofRoot,
+    });
+    assert.equal(validateProofRoot(proofRoot).ok, true, "unchanged control must validate");
+    const manifest = JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8"));
+    const events = JSON.parse(fs.readFileSync(path.join(proofRoot, "events.json"), "utf8"));
+    for (const [label, mutate] of [
+      ["argv addition", (candidate) => {
+        candidate.invocation.argv.push("--token", "sensitive-test-value");
+      }],
+      ["environment-name addition", (candidate) => {
+        candidate.invocation.envNames.push("ANTHROPIC_API_KEY");
+      }],
+    ]) {
+      const candidate = structuredClone(manifest);
+      mutate(candidate);
+      const classified = classifyRecord({ ...candidate, events });
+      rewriteProof(proofRoot, candidate, events, classified);
+      assert.equal(validateProofRoot(proofRoot).ok, false, `${label} must fail closed`);
+    }
+  } finally {
+    if (observed) {
+      fs.rmSync(path.dirname(observed.codexBin), { recursive: true, force: true });
+      fs.rmSync(path.dirname(observed.mcpBin), { recursive: true, force: true });
+    }
+    fs.rmSync(proofRoot, { recursive: true, force: true });
+  }
 });

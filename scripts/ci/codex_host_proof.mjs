@@ -23,6 +23,7 @@ import {
   HARD_MAX_RETAINED_BYTES,
   HARD_MAX_SNAPSHOT_BYTES,
   HARD_MAX_TIMEOUT_MS,
+  HOST_ENV_NAMES,
   SCHEMA,
   SKILL_NAME,
   boundedPositiveInt,
@@ -36,6 +37,7 @@ import {
   elicitationAcceptable,
   forbiddenProofRoot,
   initializeFromEvents,
+  hostSubjectsRequired,
   runtimeProofRoots,
   isMainModule,
   persistableArgv,
@@ -416,7 +418,7 @@ function writeProofFiles(options, pack) {
     streamUnavailable: pack.streamUnavailable,
     initialize,
     hostIdentity,
-    invocation: { argv: invocationArgv, envNames: ["PATH", "HOME", "CODEX_HOME"] },
+    invocation: { argv: invocationArgv, envNames: [...HOST_ENV_NAMES] },
     expected: {
       projectRoot: options.projectRoot,
       skillName: SKILL_NAME,
@@ -463,7 +465,9 @@ function writeProofFiles(options, pack) {
     hostIdentity,
     expected: record.expected,
     hashes: { events: sha256Utf8(eventsText) },
-    allowlist: [...proofAllowlist(options.hostIdentity != null)].sort(),
+    allowlist: [
+      ...proofAllowlist(hostSubjectsRequired(options.captureMode, options.hostIdentity)),
+    ].sort(),
   };
   writeJson(path.join(options.proofRoot, "manifest.json"), manifest);
   writeJson(path.join(options.proofRoot, "events.json"), pack.events);
