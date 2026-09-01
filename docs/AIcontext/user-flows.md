@@ -27,7 +27,7 @@ flowchart TD
 ```
 
 **Steps:**
-1. **Install**: `cargo install assay-cli --version 5.5.1 --locked` or use a verified release asset; install the Python SDK separately with `pip install assay-it`. CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
+1. **Install**: `cargo install assay-cli --version 5.5.2 --locked` or use a verified release asset; install the Python SDK separately with `pip install assay-it`. CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
 2. **Initialize**: `assay init` - auto-detects project, generates secure defaults
 3. **Capture traces**: Use `AssayClient` or `assay import` to record tool calls
 4. **Validate**: `assay validate --config eval.yaml --trace-file traces.jsonl`
