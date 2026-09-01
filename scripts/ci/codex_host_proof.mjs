@@ -311,11 +311,9 @@ function probeVersion(binary, name) {
   try {
     // This executes the fixed-name, O_EXCL-created proof snapshot with fixed
     // argv and no shell. Choosing the PATH subject is the host measurement.
-    return firstVersionLine(
-      // codeql[js/command-line-injection]
-      { stdout: execFileSync(binary, ["--version"], VERSION_PROBE) },
-      name,
-    );
+    // codeql[js/command-line-injection]
+    const stdout = execFileSync(binary, ["--version"], VERSION_PROBE);
+    return firstVersionLine({ stdout }, name);
   } catch (error) {
     throw new Error(`${name} version probe failed`, { cause: error });
   }
