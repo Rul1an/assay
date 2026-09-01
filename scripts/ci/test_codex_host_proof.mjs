@@ -2257,6 +2257,37 @@ test("host snapshots require a private proof root owned by the current user", {
   }
 });
 
+test("validator rejects a proof root that is no longer private", {
+  skip: process.platform === "win32",
+}, async () => {
+  const { proofRoot } = await drive("valid");
+  assert.equal(validateProofRoot(proofRoot).ok, true, "private control must validate");
+  fs.chmodSync(proofRoot, 0o755);
+  try {
+    const checked = validateProofRoot(proofRoot);
+    assert.equal(checked.ok, false, "a public proof root must not validate cleanly");
+    assert.match(checked.reasons.join(" "), /private|owner|permission|mode/i);
+  } finally {
+    fs.chmodSync(proofRoot, 0o700);
+  }
+});
+
+test("production CLI canonicalizes the macOS tmp alias before binding host subjects", {
+  skip:
+    process.platform === "win32" ||
+    !fs.existsSync("/tmp") ||
+    fs.realpathSync("/tmp") === path.resolve("/tmp"),
+}, () => {
+  const proofRoot = fs.mkdtempSync(path.join("/tmp", "assay-2684-alias-"));
+  const result = driveCli("valid", "discovery", { proofRoot });
+  assert.equal(
+    result.status,
+    0,
+    `a proof written through /tmp must validate through its canonical path: ${result.stderr}`,
+  );
+  assert.equal(validateProofRoot(proofRoot).ok, true);
+});
+
 test("F5 PATH snapshot copy enforces a binary ceiling and running growth bound; control stays green", () => {
   assert.equal(HARD_MAX_SNAPSHOT_BYTES, 536870912, "documented 512 MiB per-binary ceiling");
   assert.match(DRIVER_SRC, /HARD_MAX_SNAPSHOT_BYTES/);

@@ -41,6 +41,26 @@ export const HOST_ALLOWLIST = Object.freeze([...ALLOWLIST, ...HOST_SUBJECTS]);
 export const EXTERNAL_ATTESTATION = "not_provided";
 export const HOST_ENV_NAMES = Object.freeze(["PATH", "HOME", "CODEX_HOME"]);
 
+export function requirePrivateProofRoot(proofRoot) {
+  if (typeof proofRoot !== "string" || proofRoot.length === 0) {
+    throw new Error("proof root must be a non-empty path");
+  }
+  const resolved = path.resolve(proofRoot);
+  const st = fs.lstatSync(resolved);
+  if (st.isSymbolicLink() || !st.isDirectory()) {
+    throw new Error("proof root must be a real directory");
+  }
+  if (process.platform !== "win32") {
+    if (typeof process.getuid === "function" && st.uid !== process.getuid()) {
+      throw new Error("proof root must be owned by the current user");
+    }
+    if ((st.mode & 0o077) !== 0) {
+      throw new Error("proof root must be private to its owner (mode 0700)");
+    }
+  }
+  return fs.realpathSync(resolved);
+}
+
 export function proofAllowlist(hasHostIdentity) {
   return hasHostIdentity ? HOST_ALLOWLIST : ALLOWLIST;
 }
@@ -336,8 +356,14 @@ export function verifyLiveIdentity(
     return false;
   }
   if (proofRoot != null) {
-    const expectedCodex = path.join(path.resolve(proofRoot), HOST_SUBJECTS[0]);
-    const expectedMcp = path.join(path.resolve(proofRoot), HOST_SUBJECTS[1]);
+    let canonicalRoot;
+    try {
+      canonicalRoot = requirePrivateProofRoot(proofRoot);
+    } catch {
+      return false;
+    }
+    const expectedCodex = path.join(canonicalRoot, HOST_SUBJECTS[0]);
+    const expectedMcp = path.join(canonicalRoot, HOST_SUBJECTS[1]);
     if (
       path.resolve(identity.codex.path) !== expectedCodex ||
       path.resolve(identity.assayMcp.path) !== expectedMcp
@@ -2262,6 +2288,11 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   const earlyForbidden = forbiddenProofRoot(proofRoot, "synthetic-fixture");
   if (earlyForbidden) {
     return unavailableProof(earlyForbidden);
+  }
+  try {
+    proofRoot = requirePrivateProofRoot(proofRoot);
+  } catch (error) {
+    return unavailableProof(`unavailable proof root: ${error.message}`);
   }
   let manifest;
   let events;
