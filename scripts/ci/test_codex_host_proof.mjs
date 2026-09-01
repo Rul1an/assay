@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { runProof } from "./codex_host_proof.mjs";
+import { parseArgs, resolveHostIdentity, runProof } from "./codex_host_proof.mjs";
 import {
   CELLS,
   DECIDE_INPUT,
@@ -118,6 +118,9 @@ function driveCli(scenario, journey = "tool", extra = {}) {
   const projectRoot = seedProject();
   const proofRoot = extra.proofRoot ?? scratch();
   const mcpBin = extra.assayMcpBin ?? writeShadowMcp();
+  const codexBin =
+    extra.codexBin ??
+    writeShadowCodex(["node", FAKE, "--scenario", scenario, "--project-root", projectRoot]);
   const args = [
     path.join(HERE, "codex_host_proof.mjs"),
     "--provenance",
@@ -126,11 +129,6 @@ function driveCli(scenario, journey = "tool", extra = {}) {
     proofRoot,
     "--project-root",
     projectRoot,
-    "--codex-bin",
-    extra.codexBin ??
-      writeShadowCodex(["node", FAKE, "--scenario", scenario, "--project-root", projectRoot]),
-    extra.mcpFlag ?? "--assay-mcp-bin",
-    mcpBin,
     "--journey",
     journey,
     "--timeout-ms",
@@ -145,8 +143,12 @@ function driveCli(scenario, journey = "tool", extra = {}) {
   const result = spawnSync(process.execPath, args, {
     encoding: "utf8",
     timeout: 15_000,
+    env: {
+      ...process.env,
+      PATH: `${path.dirname(codexBin)}${path.delimiter}${path.dirname(mcpBin)}${path.delimiter}${process.env.PATH}`,
+    },
   });
-  return { ...result, proofRoot, projectRoot, mcpBin };
+  return { ...result, proofRoot, projectRoot, mcpBin, codexBin };
 }
 
 function clientParams(events, method) {
@@ -411,6 +413,8 @@ function driveInline(childArgv, extra = {}) {
 function driveCliInline(childArgv, extra = {}) {
   const projectRoot = seedProject();
   const proofRoot = scratch();
+  const mcpBin = extra.assayMcpBin ?? writeShadowMcp();
+  const codexBin = writeShadowCodex(childArgv);
   const args = [
     path.join(HERE, "codex_host_proof.mjs"),
     "--provenance",
@@ -419,10 +423,6 @@ function driveCliInline(childArgv, extra = {}) {
     proofRoot,
     "--project-root",
     projectRoot,
-    "--codex-bin",
-    writeShadowCodex(childArgv),
-    "--assay-mcp-bin",
-    extra.assayMcpBin ?? writeShadowMcp(),
     "--journey",
     extra.journey ?? "tool",
     "--timeout-ms",
@@ -434,6 +434,10 @@ function driveCliInline(childArgv, extra = {}) {
   const result = spawnSync(process.execPath, args, {
     encoding: "utf8",
     timeout: 15_000,
+    env: {
+      ...process.env,
+      PATH: `${path.dirname(codexBin)}${path.delimiter}${path.dirname(mcpBin)}${path.delimiter}${process.env.PATH}`,
+    },
   });
   return { ...result, proofRoot, projectRoot };
 }
@@ -931,7 +935,6 @@ test("production live identity is observed from binaries and required before liv
       provenance: "live",
       allowLiveTurn: true,
       assayMcpBin: mcpBin,
-      mcpFlag: "--assay-mcp-bin",
       proofRoot,
     });
     const manifestPath = path.join(live.proofRoot, "manifest.json");
@@ -1043,19 +1046,23 @@ fs.writeFileSync(${JSON.stringify(marker)}, "spawned\\n");
     "--project-root",
     projectRoot,
   ]);
-  await runProof({
-    provenance: "synthetic",
-    timeoutMs: 4000,
-    maxBytes: 1_048_576,
-    journey: "discovery",
-    allowLiveTurn: false,
-    childArgv: [evil, "should-not-run"],
-    codexBin: shadow,
-    proofRoot,
-    projectRoot,
-    mcpCommand: "/tmp/should-not-be-used-as-mcp",
-    assayMcpBin: writeShadowMcp(),
-  });
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${path.dirname(shadow)}${path.delimiter}${previousPath}`;
+  try {
+    await runProof({
+      provenance: "synthetic",
+      timeoutMs: 4000,
+      maxBytes: 1_048_576,
+      journey: "discovery",
+      allowLiveTurn: false,
+      childArgv: [evil, "should-not-run"],
+      proofRoot,
+      projectRoot,
+      mcpCommand: "/tmp/should-not-be-used-as-mcp",
+    });
+  } finally {
+    process.env.PATH = previousPath;
+  }
   assert.equal(
     fs.existsSync(marker),
     false,
@@ -1066,7 +1073,7 @@ fs.writeFileSync(${JSON.stringify(marker)}, "spawned\\n");
   });
   assert.notEqual(rejected.status, 0, "production CLI must reject arbitrary --mcp-command");
   assert.match(`${rejected.stderr}${rejected.stdout}`, /mcp-command|unknown argument/i);
-  const accepted = driveCli("valid", "discovery", { mcpFlag: "--assay-mcp-bin" });
+  const accepted = driveCli("valid", "discovery");
   assert.equal(typeof accepted.status, "number");
 });
 
@@ -1240,4 +1247,211 @@ test("hosted CI catalogue runs the exact focused Node suite", () => {
   );
   const control = fs.readFileSync(path.join(HERE, "../../.github/workflows/ci.yml"), "utf8");
   assert.match(control, /bash scripts\/ci\/test-evidence-vocabulary\.sh/);
+});
+
+function productionChildCommands(src) {
+  const commands = [];
+  const re = /\bspawn(?:Sync)?\s*\(\s*([^,\n]+)/g;
+  let match;
+  while ((match = re.exec(src))) {
+    commands.push(match[1].trim());
+  }
+  return commands;
+}
+
+function writeMarkedBin(name, marker, version) {
+  const bin = path.join(scratch(), name);
+  fs.writeFileSync(
+    bin,
+    `#!/usr/bin/env node
+import fs from "node:fs";
+fs.writeFileSync(${JSON.stringify(marker)}, "ran\\n");
+if (process.argv.includes("--version")) {
+  process.stdout.write(${JSON.stringify(version)} + "\\n");
+  process.exit(0);
+}
+process.stdin.resume();
+`,
+    { mode: 0o755 },
+  );
+  return bin;
+}
+
+test("production CLI refuses --codex-bin and --assay-mcp-bin before spawn", () => {
+  assert.throws(() => parseArgs(["--codex-bin", "/tmp/not-a-codex"]), /unknown argument|--codex-bin/);
+  assert.throws(
+    () => parseArgs(["--assay-mcp-bin", "/tmp/not-an-mcp"]),
+    /unknown argument|--assay-mcp-bin/,
+  );
+  const parsed = parseArgs(["--journey", "discovery"]);
+  assert.equal(Object.hasOwn(parsed, "codexBin"), false);
+  assert.equal(Object.hasOwn(parsed, "assayMcpBin"), false);
+
+  const projectRoot = seedProject();
+  const refuseFlag = (flag, binName, version) => {
+    const marker = path.join(scratch(), `must-not-run-${binName}`);
+    const evil = writeMarkedBin(binName, marker, version);
+    const proofRoot = scratch();
+    const cli = spawnSync(
+      process.execPath,
+      [
+        path.join(HERE, "codex_host_proof.mjs"),
+        "--provenance",
+        "synthetic",
+        "--proof-root",
+        proofRoot,
+        "--project-root",
+        projectRoot,
+        flag,
+        evil,
+        "--journey",
+        "discovery",
+        "--timeout-ms",
+        "2000",
+      ],
+      { encoding: "utf8", timeout: 10_000 },
+    );
+    assert.notEqual(cli.status, 0, `production CLI must refuse ${flag}`);
+    assert.match(`${cli.stderr}${cli.stdout}`, /unknown argument|codex-bin|assay-mcp-bin/i);
+    assert.equal(
+      fs.existsSync(marker),
+      false,
+      `refused ${flag} must not spawn or probe the provided path`,
+    );
+    assert.equal(
+      fs.existsSync(path.join(proofRoot, "manifest.json")),
+      false,
+      `refused ${flag} must not write a proof pack`,
+    );
+  };
+  refuseFlag("--codex-bin", "codex", "codex-flag/9.9.9");
+  refuseFlag("--assay-mcp-bin", "assay-mcp-server", "assay-mcp-flag/9.9.9");
+});
+
+test("PATH shadows drive observed Codex and Assay MCP identities", () => {
+  const projectRoot = seedProject();
+  const mcpBin = writeShadowMcp();
+  const codexBin = writeShadowCodex([
+    "node",
+    FAKE,
+    "--scenario",
+    "valid",
+    "--project-root",
+    projectRoot,
+  ]);
+  const flagCodex = writeMarkedBin("codex", path.join(scratch(), "flag-codex"), "codex-flag/9.9.9");
+  const flagMcp = writeMarkedBin(
+    "assay-mcp-server",
+    path.join(scratch(), "flag-mcp"),
+    "assay-mcp-flag/9.9.9",
+  );
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${path.dirname(codexBin)}${path.delimiter}${path.dirname(mcpBin)}${path.delimiter}${previousPath}`;
+  try {
+    const ignored = resolveHostIdentity({
+      codexBin: flagCodex,
+      assayMcpBin: flagMcp,
+    });
+    assert.equal(ignored.codex.path, fs.realpathSync(codexBin));
+    assert.equal(ignored.assayMcp.path, fs.realpathSync(mcpBin));
+    assert.equal(ignored.codex.installSource, "PATH");
+    assert.equal(ignored.assayMcp.installSource, "PATH");
+    assert.match(ignored.codex.version, /codex-shadow/);
+    assert.match(ignored.assayMcp.version, /assay-mcp-server-shadow/);
+    assert.notEqual(ignored.codex.path, fs.realpathSync(flagCodex));
+    assert.notEqual(ignored.assayMcp.path, fs.realpathSync(flagMcp));
+  } finally {
+    process.env.PATH = previousPath;
+  }
+
+  const proofRoot = scratch();
+  const cli = spawnSync(
+    process.execPath,
+    [
+      path.join(HERE, "codex_host_proof.mjs"),
+      "--provenance",
+      "synthetic",
+      "--proof-root",
+      proofRoot,
+      "--project-root",
+      projectRoot,
+      "--journey",
+      "tool",
+      "--timeout-ms",
+      "4000",
+    ],
+    {
+      encoding: "utf8",
+      timeout: 15_000,
+      env: {
+        ...process.env,
+        PATH: `${path.dirname(codexBin)}${path.delimiter}${path.dirname(mcpBin)}${path.delimiter}${process.env.PATH}`,
+      },
+    },
+  );
+  assert.equal(typeof cli.status, "number");
+  const manifest = JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8"));
+  assert.equal(manifest.hostIdentity.codex.path, fs.realpathSync(codexBin));
+  assert.equal(manifest.hostIdentity.assayMcp.path, fs.realpathSync(mcpBin));
+  assert.equal(manifest.hostIdentity.codex.installSource, "PATH");
+  assert.equal(manifest.hostIdentity.assayMcp.installSource, "PATH");
+  const events = JSON.parse(fs.readFileSync(path.join(proofRoot, "events.json"), "utf8"));
+  const start = events.find(
+    (event) => event.direction === "client" && event.method === "thread/start",
+  );
+  assert.equal(start.params.config.mcp_servers.assay.command, manifest.hostIdentity.assayMcp.path);
+});
+
+test("production spawn and probe use PATH names; options.codexBin is not executed", async () => {
+  const flagMarker = path.join(scratch(), "flag-codex-ran");
+  const pathMarker = path.join(scratch(), "path-codex-ran");
+  const flagCodex = writeMarkedBin("codex", flagMarker, "codex-flag/9.9.9");
+  const pathDir = scratch();
+  const pathCodex = path.join(pathDir, "codex");
+  fs.writeFileSync(
+    pathCodex,
+    `#!/usr/bin/env node
+import fs from "node:fs";
+import { spawn } from "node:child_process";
+fs.writeFileSync(${JSON.stringify(pathMarker)}, "ran\\n");
+if (process.argv.includes("--version")) {
+  process.stdout.write("codex-path/0.0.0\\n");
+  process.exit(0);
+}
+const child = spawn(${JSON.stringify(process.execPath)}, ${JSON.stringify([FAKE, "--scenario", "valid", "--project-root", "unused"])}, { stdio: "inherit" });
+child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+`,
+    { mode: 0o755 },
+  );
+  const mcpBin = writeShadowMcp();
+  const projectRoot = seedProject();
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${pathDir}${path.delimiter}${path.dirname(mcpBin)}${path.delimiter}${previousPath}`;
+  try {
+    await runProof({
+      provenance: "synthetic",
+      timeoutMs: 4000,
+      maxBytes: 1_048_576,
+      journey: "discovery",
+      allowLiveTurn: false,
+      codexBin: flagCodex,
+      assayMcpBin: flagCodex,
+      proofRoot: scratch(),
+      projectRoot,
+    });
+  } finally {
+    process.env.PATH = previousPath;
+  }
+  assert.equal(fs.existsSync(flagMarker), false, "options.codexBin must not be spawned or probed");
+  assert.equal(fs.existsSync(pathMarker), true, "PATH shadow named codex must run");
+
+  const commands = productionChildCommands(DRIVER_SRC);
+  assert.ok(commands.length >= 2, "production must probe and spawn");
+  for (const command of commands) {
+    assert.match(
+      command,
+      /^"(?:codex|assay-mcp-server)"$/,
+      `production spawn/probe command must be a fixed name, got ${command}`,
+    );
+  }
 });

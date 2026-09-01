@@ -55,10 +55,8 @@ export function parseArgs(argv) {
     journey: "tool",
     allowLiveTurn: false,
     childArgv: null,
-    codexBin: null,
     proofRoot: null,
     projectRoot: null,
-    assayMcpBin: null,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -75,12 +73,6 @@ export function parseArgs(argv) {
         break;
       case "--project-root":
         out.projectRoot = next();
-        break;
-      case "--codex-bin":
-        out.codexBin = next();
-        break;
-      case "--assay-mcp-bin":
-        out.assayMcpBin = next();
         break;
       case "--journey":
         out.journey = next();
@@ -208,10 +200,6 @@ function resolveRegularBinary(binPath, label) {
   return fs.realpathSync(resolved);
 }
 
-export function resolveCodexBin(codexBin) {
-  return resolveRegularBinary(codexBin, "codex");
-}
-
 function findOnPath(name) {
   for (const dir of (process.env.PATH || "").split(path.delimiter)) {
     if (!dir) {
@@ -237,26 +225,34 @@ function findOnPath(name) {
   return null;
 }
 
-function findCodexOnPath() {
-  return findOnPath("codex");
-}
+const VERSION_PROBE = Object.freeze({
+  encoding: "utf8",
+  timeout: 2000,
+  maxBuffer: 4096,
+});
 
-function probeVersion(bin) {
-  const result = spawnSync(bin, ["--version"], {
-    encoding: "utf8",
-    timeout: 2000,
-    maxBuffer: 4096,
-  });
+function firstVersionLine(result, name) {
   const text = `${result.stdout || ""}${result.stderr || ""}`.trim().split(/\r?\n/)[0] || "";
   if (!text) {
-    throw new Error(`could not observe version from ${bin}`);
+    throw new Error(`could not observe version from ${name}`);
   }
   return text.slice(0, 200);
 }
 
-export function resolveHostIdentity(options) {
-  const codexPath = options.codexBin ?? findCodexOnPath();
-  const mcpPath = options.assayMcpBin ?? findOnPath("assay-mcp-server");
+function probeCodexVersion() {
+  return firstVersionLine(spawnSync("codex", ["--version"], VERSION_PROBE), "codex");
+}
+
+function probeAssayMcpVersion() {
+  return firstVersionLine(
+    spawnSync("assay-mcp-server", ["--version"], VERSION_PROBE),
+    "assay-mcp-server",
+  );
+}
+
+export function resolveHostIdentity() {
+  const codexPath = findOnPath("codex");
+  const mcpPath = findOnPath("assay-mcp-server");
   if (!codexPath) {
     throw new Error("codex binary was not resolved");
   }
@@ -270,30 +266,33 @@ export function resolveHostIdentity(options) {
     arch: os.arch(),
     codex: {
       path: codex,
-      version: probeVersion(codex),
+      version: probeCodexVersion(),
       sha256: sha256File(codex),
-      installSource: options.codexBin ? "codex-bin-flag" : "PATH",
+      installSource: "PATH",
     },
     assayMcp: {
       path: mcp,
-      version: probeVersion(mcp),
+      version: probeAssayMcpVersion(),
       sha256: sha256File(mcp),
-      installSource: options.assayMcpBin ? "assay-mcp-bin-flag" : "PATH",
+      installSource: "PATH",
     },
   };
-}
-
-export function resolveProductionChildArgv(options) {
-  const bin = resolveCodexBin(options.codexBin ?? findCodexOnPath());
-  return [bin, "app-server"];
 }
 
 function resolvedMcpCommand(options) {
   if (options.hostIdentity?.assayMcp?.path) {
     return options.hostIdentity.assayMcp.path;
   }
-  if (typeof options.assayMcpBin === "string" && options.assayMcpBin.length > 0) {
+  if (
+    options.testOnlyChild &&
+    typeof options.assayMcpBin === "string" &&
+    options.assayMcpBin.length > 0
+  ) {
     return path.resolve(options.assayMcpBin);
+  }
+  const fromPath = findOnPath("assay-mcp-server");
+  if (fromPath) {
+    return fromPath;
   }
   throw new Error("assay MCP binary was not resolved");
 }
@@ -303,11 +302,9 @@ function writeProofFiles(options, pack) {
   const invocationArgv = persistableArgv(
     options.hostIdentity?.codex?.path
       ? [options.hostIdentity.codex.path, "app-server"]
-      : options.codexBin
-        ? [path.resolve(options.codexBin), "app-server"]
-        : Array.isArray(options.childArgv)
-          ? options.childArgv
-          : ["<test-only-child>"],
+      : Array.isArray(options.childArgv)
+        ? options.childArgv
+        : ["<test-only-child>"],
   );
   const record = {
     schema: SCHEMA,
@@ -453,7 +450,7 @@ export async function runProof(options) {
   };
   const child = options.testOnlyChild
     ? options.testOnlyChild
-    : spawn(resolveCodexBin(options.codexBin ?? findCodexOnPath()), ["app-server"], spawnOpts);
+    : spawn("codex", ["app-server"], spawnOpts);
   const childClosed = new Promise((resolve) => {
     child.on("close", (code, signal) => {
       childAlive = false;
@@ -757,9 +754,7 @@ function main() {
   if (!options.proofRoot || !options.projectRoot) {
     throw new Error("--proof-root and --project-root are required");
   }
-  options.hostIdentity = resolveHostIdentity(options);
-  options.codexBin = options.hostIdentity.codex.path;
-  options.assayMcpBin = options.hostIdentity.assayMcp.path;
+  options.hostIdentity = resolveHostIdentity();
   return runProof(options);
 }
 
