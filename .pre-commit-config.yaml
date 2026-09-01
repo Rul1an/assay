@@ -415,6 +415,24 @@ repos:
         pass_filenames: false
         files: ^(\.github/workflows/.*\.ya?ml|scripts/ci/(check-codeql-upload-sarif-lockstep\.py|test-codeql-upload-sarif-lockstep\.sh)|\.pre-commit-config\.yaml)$
 
+      - id: crosswalk-generator-contract
+        name: Configuration crosswalk generator contract
+        entry: bash scripts/ci/test-crosswalk-generator.sh
+        language: system
+        pass_filenames: false
+        # The drift gate only round-trips the generator against its own output, so every guard in
+        # it could be removed and that gate would stay green. These pin the guards themselves.
+        files: ^scripts/(docs/generate-configuration-vocabulary-crosswalk\.py|ci/test-crosswalk-generator\.sh)$
+
+      - id: tracked-paths-parity
+        name: Tracked-paths rule parity (checker vs crosswalk generator)
+        entry: bash scripts/ci/test-tracked-paths-parity.sh
+        language: system
+        pass_filenames: false
+        # Both files encode the same rule and cannot share a function, so they are pinned against
+        # each other. Either one changing must re-run this.
+        files: ^scripts/(ci/(check-assay-action-pin|test-tracked-paths-parity)\.sh|docs/generate-configuration-vocabulary-crosswalk\.py)$
+
       - id: assay-action-consumer-pin
         name: Assay Action consumer pin
         entry: bash -c 'bash scripts/ci/test-check-assay-action-pin.sh && bash scripts/ci/check-assay-action-pin.sh'
