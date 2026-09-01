@@ -1197,7 +1197,11 @@ export function stableStringify(value) {
 
 function stringifySorted(value) {
   if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
+    const token = JSON.stringify(value);
+    if (token === undefined) {
+      throw new Error(`stable stringify cannot encode ${typeof value} as JSON`);
+    }
+    return token;
   }
   if (Array.isArray(value)) {
     return `[${value.map(stringifySorted).join(",")}]`;
@@ -1785,7 +1789,7 @@ function invalidProjection(value) {
 }
 
 function projectedScalar(value) {
-  return value == null || ["string", "number", "boolean"].includes(typeof value)
+  return value === null || ["string", "number", "boolean"].includes(typeof value)
     ? value
     : invalidProjection(value);
 }
@@ -2168,7 +2172,7 @@ export function projectRetainedEvent(event) {
   if (!isPlainObject(event)) {
     return invalidProjection(event);
   }
-  const out = { direction: event.direction, method: event.method };
+  const out = { direction: projectedScalar(event.direction), method: projectedScalar(event.method) };
   if (hasOwn(event, "id")) {
     out.id = event.id;
   }
