@@ -425,6 +425,16 @@ function toolCompleted(events) {
   );
 }
 
+function syncTerminalToolItem(events) {
+  const item = toolCompleted(events)?.params?.item;
+  const terminal = events.find(
+    (event) => event.direction === "server" && event.method === "turn/completed",
+  );
+  assert.ok(item);
+  assert.ok(terminal?.params?.turn);
+  terminal.params.turn.items = [structuredClone(item)];
+}
+
 function driveInline(childArgv, extra = {}) {
   const projectRoot = extra.projectRoot ?? seedProject();
   const proofRoot = extra.proofRoot ?? scratch();
@@ -976,13 +986,11 @@ test("production host identity is observed from proof-owned binaries before CLI 
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
     const identity = manifest.hostIdentity;
     assert.ok(identity && typeof identity === "object", "production CLI must construct hostIdentity");
-    assert.equal(typeof identity.os, "string");
-    assert.equal(typeof identity.arch, "string");
+    assert.deepEqual(Object.keys(identity).sort(), ["assayMcp", "codex"]);
     for (const role of ["codex", "assayMcp"]) {
+      assert.deepEqual(Object.keys(identity[role]).sort(), ["path", "sha256"]);
       assert.equal(path.isAbsolute(identity[role].path), true, `${role} path must be absolute`);
       assert.match(identity[role].sha256, /^[a-f0-9]{64}$/);
-      assert.ok(identity[role].version.length > 0, `${role} version must be observed`);
-      assert.ok(identity[role].installSource.length > 0, `${role} install source must be recorded`);
       assert.equal(fs.lstatSync(identity[role].path).isFile(), true);
     }
     assert.equal(identity.assayMcp.sha256, sha256File(mcpBin));
@@ -1415,8 +1423,9 @@ test("PATH shadows drive observed Codex and Assay MCP identities", () => {
   assert.equal(manifest.hostIdentity.assayMcp.sha256, sha256File(mcpBin));
   assert.equal(sha256File(manifest.hostIdentity.codex.path), sha256File(codexBin));
   assert.equal(sha256File(manifest.hostIdentity.assayMcp.path), sha256File(mcpBin));
-  assert.equal(manifest.hostIdentity.codex.installSource, "PATH");
-  assert.equal(manifest.hostIdentity.assayMcp.installSource, "PATH");
+  assert.deepEqual(Object.keys(manifest.hostIdentity).sort(), ["assayMcp", "codex"]);
+  assert.deepEqual(Object.keys(manifest.hostIdentity.codex).sort(), ["path", "sha256"]);
+  assert.deepEqual(Object.keys(manifest.hostIdentity.assayMcp).sort(), ["path", "sha256"]);
   const events = JSON.parse(fs.readFileSync(path.join(proofRoot, "events.json"), "utf8"));
   const start = events.find(
     (event) => event.direction === "client" && event.method === "thread/start",
@@ -2961,6 +2970,7 @@ test("review false-green: lifecycle rows and contradictory result projections", 
     { type: "text", text: "not-json" },
     { type: "image", data: "unsupported" },
   ];
+  syncTerminalToolItem(contradictoryResult);
   candidates.push({
     label: "structuredContent masks contradictory content",
     events: contradictoryResult,
@@ -2971,6 +2981,7 @@ test("review false-green: lifecycle rows and contradictory result projections", 
   const unsupportedBlock = structuredClone(events);
   const unsupportedCall = toolCompleted(unsupportedBlock);
   unsupportedCall.params.item.result.content.push({ type: "image", data: "unsupported" });
+  syncTerminalToolItem(unsupportedBlock);
   candidates.push({
     label: "valid text plus unsupported content block",
     events: unsupportedBlock,
@@ -2981,6 +2992,7 @@ test("review false-green: lifecycle rows and contradictory result projections", 
   const scalarStructured = structuredClone(events);
   const scalarStructuredCall = toolCompleted(scalarStructured);
   scalarStructuredCall.params.item.result.structuredContent = "scalar";
+  syncTerminalToolItem(scalarStructured);
   candidates.push({
     label: "valid text masks scalar structuredContent",
     events: scalarStructured,
@@ -3000,6 +3012,7 @@ test("review false-green: lifecycle rows and contradictory result projections", 
       text: JSON.stringify({ allowed: false, reason: "Different projection" }),
     },
   ];
+  syncTerminalToolItem(disagreeingProjections);
   candidates.push({
     label: "valid projections disagree",
     events: disagreeingProjections,
@@ -3064,6 +3077,7 @@ test("review closeout: present isError must be Boolean", async () => {
   const { events, manifest } = await drive("valid");
   const malformedIsError = structuredClone(events);
   toolCompleted(malformedIsError).params.item.result.isError = "true";
+  syncTerminalToolItem(malformedIsError);
   const malformed = classifyRecord({ ...manifest, events: malformedIsError });
   assert.equal(
     malformed.cells.structuredResultValidated.status,
@@ -3239,4 +3253,87 @@ test("review closeout: identity acquisition does not manufacture executability",
       }
     }
   }
+});
+
+test("independent review closeout: manifest cannot add attestation or mutable identity claims", () => {
+  const proofRoot = portableLiveProofRoot();
+  let observed;
+  try {
+    observed = driveCli("valid", "tool", {
+      captureMode: "synthetic-fixture",
+      proofRoot,
+    });
+    assert.equal(validateProofRoot(proofRoot).ok, true, "unaltered control must validate");
+    const manifestPath = path.join(proofRoot, "manifest.json");
+    const control = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    for (const [label, mutate] of [
+      ["self-attested top-level claims", (manifest) => {
+        manifest.externalAttestation = "verified";
+        manifest.liveAcceptance = { status: "pass" };
+        manifest.authenticatedOrigin = { provider: "self-authored" };
+      }],
+      ["mutable identity metadata", (manifest) => {
+        manifest.hostIdentity.os = "forged-os";
+        manifest.hostIdentity.arch = "forged-arch";
+        manifest.hostIdentity.codex.version = "forged-version";
+        manifest.hostIdentity.codex.installSource = "forged-source";
+      }],
+    ]) {
+      const manifest = structuredClone(control);
+      mutate(manifest);
+      fs.writeFileSync(manifestPath, stableStringify(manifest));
+      const checked = validateProofRoot(proofRoot);
+      assert.equal(checked.ok, false, `${label} must fail closed`);
+    }
+  } finally {
+    if (observed) {
+      fs.rmSync(path.dirname(observed.codexBin), { recursive: true, force: true });
+      fs.rmSync(path.dirname(observed.mcpBin), { recursive: true, force: true });
+    }
+    fs.rmSync(proofRoot, { recursive: true, force: true });
+  }
+});
+
+test("independent review closeout: terminal must contain the one canonical tool item", async () => {
+  const { events, manifest } = await drive("valid");
+  const completed = toolCompleted(events).params.item;
+  for (const [label, items] of [
+    ["omitted", []],
+    ["different id", [{ ...structuredClone(completed), id: "different-call" }]],
+  ]) {
+    const mutated = structuredClone(events);
+    const terminal = mutated.find(
+      (event) => event.direction === "server" && event.method === "turn/completed",
+    );
+    assert.ok(terminal?.params?.turn);
+    terminal.params.turn.items = items;
+    const classified = classifyRecord({ ...manifest, events: mutated });
+    assert.notEqual(
+      classified.cells.oneToolInvoked.status,
+      "pass",
+      `${label} terminal tool item must not pass`,
+    );
+  }
+});
+
+test("independent review closeout: client request params are a closed projection", async () => {
+  const { events, manifest, proofRoot } = await drive("valid");
+  const mutated = structuredClone(events);
+  const start = mutated.find(
+    (event) => event.direction === "client" && event.method === "thread/start",
+  );
+  assert.ok(start?.params?.config?.mcp_servers?.assay);
+  start.params.config.mcp_servers.assay.description =
+    "ghp_0123456789abcdefghijklmnopqrstuvwxyz";
+  const eventsText = stableStringify(mutated);
+  const rewrittenManifest = {
+    ...manifest,
+    hashes: { events: sha256Utf8(eventsText) },
+  };
+  const classified = classifyRecord({ ...rewrittenManifest, events: mutated });
+  fs.writeFileSync(path.join(proofRoot, "events.json"), eventsText);
+  fs.writeFileSync(path.join(proofRoot, "manifest.json"), stableStringify(rewrittenManifest));
+  fs.writeFileSync(path.join(proofRoot, "classification.json"), stableStringify(classified));
+  const checked = validateProofRoot(proofRoot);
+  assert.equal(checked.ok, false, "unexpected nested client fields must fail closed");
 });

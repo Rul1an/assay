@@ -300,26 +300,27 @@ function handle(message) {
         ? { tool: "other" }
         : { ...DECIDE_INPUT };
     const emitTool = () => {
+      const completedItem = {
+        type: "mcpToolCall",
+        id: "call-1",
+        server: "assay",
+        tool,
+        arguments: argumentsPayload,
+        status: "completed",
+        result: {
+          content: [
+            { type: "text", text: JSON.stringify({ allowed: true, reason: "Allowed by policy" }) },
+          ],
+          structuredContent: null,
+        },
+      };
       write({
         method: "item/completed",
         params: {
           completedAtMs: 1,
           threadId,
           turnId: "turn-1",
-          item: {
-            type: "mcpToolCall",
-            id: "call-1",
-            server: "assay",
-            tool,
-            arguments: argumentsPayload,
-            status: "completed",
-            result: {
-              content: [
-                { type: "text", text: JSON.stringify({ allowed: true, reason: "Allowed by policy" }) },
-              ],
-              structuredContent: null,
-            },
-          },
+          item: completedItem,
         },
       });
       if (scenario === "tool-then-failed-turn") {
@@ -346,7 +347,7 @@ function handle(message) {
         method: "turn/completed",
         params: {
           threadId,
-          turn: { id: "turn-1", items: [], status: "completed" },
+          turn: { id: "turn-1", items: [completedItem], status: "completed" },
         },
       });
       if (scenario === "exit-1-after-success") {

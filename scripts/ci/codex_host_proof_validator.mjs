@@ -211,29 +211,44 @@ export function pathInsideRoot(root, candidate) {
   return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
 }
 
+function exactKeys(value, expected) {
+  return (
+    value != null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    sameJson(Object.keys(value).sort(), [...expected].sort())
+  );
+}
+
+function projectBoundBinary(bin) {
+  return {
+    path: bin?.path,
+    sha256: bin?.sha256,
+  };
+}
+
+export function projectHostIdentity(identity) {
+  if (identity == null) {
+    return null;
+  }
+  return {
+    codex: projectBoundBinary(identity.codex),
+    assayMcp: projectBoundBinary(identity.assayMcp),
+  };
+}
+
 function boundBinary(bin) {
   return (
-    Boolean(bin) &&
-    typeof bin === "object" &&
+    exactKeys(bin, ["path", "sha256"]) &&
     typeof bin.path === "string" &&
     path.isAbsolute(bin.path) &&
-    typeof bin.version === "string" &&
-    bin.version.length > 0 &&
     typeof bin.sha256 === "string" &&
-    /^[a-f0-9]{64}$/.test(bin.sha256) &&
-    typeof bin.installSource === "string" &&
-    bin.installSource.length > 0
+    /^[a-f0-9]{64}$/.test(bin.sha256)
   );
 }
 
 export function liveIdentityBound(identity) {
-  if (!identity || typeof identity !== "object") {
-    return false;
-  }
-  if (typeof identity.os !== "string" || identity.os.length === 0) {
-    return false;
-  }
-  if (typeof identity.arch !== "string" || identity.arch.length === 0) {
+  if (!exactKeys(identity, ["codex", "assayMcp"])) {
     return false;
   }
   return boundBinary(identity.codex) && boundBinary(identity.assayMcp);
@@ -652,6 +667,10 @@ export function classifyStoredEvent(event) {
       return { type: "unclassified", reason: "unclassified driver event" };
     case "client":
       if (hasValidId && method && !hasResult && !hasError) {
+        const payloadReason = retainedClientRequestParamsReason(method, event.params);
+        if (payloadReason) {
+          return { type: "unclassified", reason: payloadReason };
+        }
         return { type: "client-request", method, id: event.id };
       }
       if (
@@ -1300,15 +1319,12 @@ function classifyInvocation(calls, expected, threadId, turnId, topology) {
   const call = calls[0];
   const item = call.item;
   const terminalItems = terminal.params.turn.items.filter(
-    (candidate) => candidate?.type === "mcpToolCall" && candidate?.id === item.id,
+    (candidate) => candidate?.type === "mcpToolCall",
   );
-  if (terminalItems.length > 1) {
-    return cell("fail", "matching terminal contains duplicate tool items");
+  if (terminalItems.length !== 1 || terminalItems[0]?.id !== item.id) {
+    return cell("fail", "matching terminal must contain exactly the canonical tool item");
   }
-  if (
-    terminalItems.length === 1 &&
-    !sameJson(projectRetainedItem(terminalItems[0]), projectRetainedItem(item))
-  ) {
+  if (!sameJson(projectRetainedItem(terminalItems[0]), projectRetainedItem(item))) {
     return cell("fail", "matching terminal tool item contradicts item/completed");
   }
   if (item.server !== "assay") {
@@ -1682,6 +1698,167 @@ function projectArguments(value) {
   return out;
 }
 
+function withUnexpectedKeys(out, value, allowed) {
+  const unexpected = Object.keys(value)
+    .filter((key) => !allowed.includes(key))
+    .sort();
+  if (unexpected.length > 0) {
+    out.__unexpectedKeys = unexpected;
+  }
+  return out;
+}
+
+function projectStringArray(value) {
+  return Array.isArray(value) ? value.map(projectedScalar) : invalidProjection(value);
+}
+
+function projectAssayServer(value) {
+  if (!isPlainObject(value)) {
+    return invalidProjection(value);
+  }
+  return withUnexpectedKeys(
+    {
+      command: projectedScalar(value.command),
+      args: projectStringArray(value.args),
+    },
+    value,
+    ["command", "args"],
+  );
+}
+
+function projectThreadConfig(value) {
+  if (!isPlainObject(value)) {
+    return invalidProjection(value);
+  }
+  const servers = value.mcp_servers;
+  const projectedServers = !isPlainObject(servers)
+    ? invalidProjection(servers)
+    : withUnexpectedKeys(
+        { assay: projectAssayServer(servers.assay) },
+        servers,
+        ["assay"],
+      );
+  return withUnexpectedKeys(
+    { mcp_servers: projectedServers },
+    value,
+    ["mcp_servers"],
+  );
+}
+
+function projectTurnInput(value) {
+  if (!Array.isArray(value)) {
+    return invalidProjection(value);
+  }
+  return value.map((item) => {
+    if (!isPlainObject(item)) {
+      return invalidProjection(item);
+    }
+    return withUnexpectedKeys(
+      {
+        type: projectedScalar(item.type),
+        text: projectedScalar(item.text),
+      },
+      item,
+      ["type", "text"],
+    );
+  });
+}
+
+export function projectClientRequestParams(method, params) {
+  if (!isPlainObject(params)) {
+    return invalidProjection(params);
+  }
+  switch (method) {
+    case "initialize": {
+      const clientInfo = params.clientInfo;
+      const capabilities = params.capabilities;
+      return withUnexpectedKeys(
+        {
+          clientInfo: isPlainObject(clientInfo)
+            ? withUnexpectedKeys(
+                {
+                  name: projectedScalar(clientInfo.name),
+                  version: projectedScalar(clientInfo.version),
+                },
+                clientInfo,
+                ["name", "version"],
+              )
+            : invalidProjection(clientInfo),
+          capabilities: isPlainObject(capabilities)
+            ? withUnexpectedKeys({}, capabilities, [])
+            : invalidProjection(capabilities),
+        },
+        params,
+        ["clientInfo", "capabilities"],
+      );
+    }
+    case "skills/list":
+      return withUnexpectedKeys(
+        {
+          forceReload: projectedScalar(params.forceReload),
+          cwds: projectStringArray(params.cwds),
+        },
+        params,
+        ["forceReload", "cwds"],
+      );
+    case "thread/start":
+      return withUnexpectedKeys(
+        {
+          cwd: projectedScalar(params.cwd),
+          approvalPolicy: projectedScalar(params.approvalPolicy),
+          config: projectThreadConfig(params.config),
+        },
+        params,
+        ["cwd", "approvalPolicy", "config"],
+      );
+    case "mcpServerStatus/list":
+      return withUnexpectedKeys(
+        {
+          threadId: projectedScalar(params.threadId),
+          detail: projectedScalar(params.detail),
+        },
+        params,
+        ["threadId", "detail"],
+      );
+    case "turn/start":
+      return withUnexpectedKeys(
+        {
+          threadId: projectedScalar(params.threadId),
+          input: projectTurnInput(params.input),
+        },
+        params,
+        ["threadId", "input"],
+      );
+    default:
+      return { __unretainedRequest: true };
+  }
+}
+
+function containsProjectionViolation(value) {
+  if (Array.isArray(value)) {
+    return value.some(containsProjectionViolation);
+  }
+  if (!isPlainObject(value)) {
+    return false;
+  }
+  if (
+    hasOwn(value, "__invalidType") ||
+    hasOwn(value, "__unexpectedKeys") ||
+    hasOwn(value, "__unretainedRequest")
+  ) {
+    return true;
+  }
+  return Object.values(value).some(containsProjectionViolation);
+}
+
+function retainedClientRequestParamsReason(method, params) {
+  const projected = projectClientRequestParams(method, params);
+  if (!sameJson(params, projected) || containsProjectionViolation(projected)) {
+    return `${method} params are not the closed retained projection`;
+  }
+  return null;
+}
+
 function projectRetainedItem(item) {
   if (!isPlainObject(item)) {
     return invalidProjection(item);
@@ -1829,10 +2006,17 @@ export function projectRetainedEvent(event) {
     return out;
   }
   if (hasOwn(event, "params")) {
-    out.params =
-      event.direction === "server" || event.method === "initialized"
-        ? projectNotificationParams(event.method, event.params)
-        : event.params;
+    if (event.direction === "server" || event.method === "initialized") {
+      out.params = projectNotificationParams(event.method, event.params);
+    } else if (
+      event.direction === "client" &&
+      hasOwn(event, "id") &&
+      !hasOwn(event, "result")
+    ) {
+      out.params = projectClientRequestParams(event.method, event.params);
+    } else {
+      out.params = event.params;
+    }
   }
   if (event.direction === "client" && hasOwn(event, "result")) {
     out.result = {
@@ -1939,6 +2123,60 @@ function canonicalManifestExpected(expected) {
   return null;
 }
 
+function manifestShapeReason(manifest) {
+  if (
+    !exactKeys(manifest, [
+      "schema",
+      "captureMode",
+      "journey",
+      "childExitCode",
+      "driverOutcome",
+      "truncated",
+      "streamUnavailable",
+      "bounds",
+      "invocation",
+      "initialize",
+      "hostIdentity",
+      "expected",
+      "hashes",
+      "allowlist",
+    ])
+  ) {
+    return "manifest is not the closed v3 projection";
+  }
+  if (!exactKeys(manifest.bounds, ["timeoutMs", "maxBytes", "stdoutBytes", "stderrBytes"])) {
+    return "manifest bounds are not the closed projection";
+  }
+  if (!exactKeys(manifest.driverOutcome, ["exitCode", "status"])) {
+    return "manifest driverOutcome is not the closed projection";
+  }
+  if (!exactKeys(manifest.invocation, ["argv", "envNames"])) {
+    return "manifest invocation is not the closed projection";
+  }
+  if (!exactKeys(manifest.initialize, ["codexHome", "userAgent", "platformFamily", "platformOs"])) {
+    return "manifest initialize is not the closed projection";
+  }
+  if (manifest.hostIdentity != null && !liveIdentityBound(manifest.hostIdentity)) {
+    return "manifest hostIdentity is not the closed binary binding";
+  }
+  if (
+    !exactKeys(manifest.expected, [
+      "projectRoot",
+      "skillName",
+      "tools",
+      "toolName",
+      "toolArguments",
+    ]) ||
+    !exactKeys(manifest.expected?.toolArguments, ["tool", "policy"])
+  ) {
+    return "manifest expected is not the closed projection";
+  }
+  if (!exactKeys(manifest.hashes, ["events"])) {
+    return "manifest hashes are not the closed projection";
+  }
+  return null;
+}
+
 function unavailableProof(reason) {
   return {
     ok: false,
@@ -1986,6 +2224,10 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
         break;
       }
     }
+  }
+  const shapeReason = manifestShapeReason(manifest);
+  if (shapeReason) {
+    reasons.push(shapeReason);
   }
   if (manifest.schema !== SCHEMA) {
     reasons.push(`unexpected schema ${manifest.schema}`);

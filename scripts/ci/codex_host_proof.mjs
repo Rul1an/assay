@@ -40,6 +40,7 @@ import {
   isMainModule,
   persistableArgv,
   projectRetainedEvent,
+  projectHostIdentity,
   proofAllowlist,
   requiredCellsForJourney,
   resolvePendingResponse,
@@ -397,6 +398,7 @@ function resolvedMcpCommand(options) {
 
 function writeProofFiles(options, pack) {
   const initialize = initializeFromEvents(pack.events, options.journey);
+  const hostIdentity = projectHostIdentity(options.hostIdentity ?? null);
   const invocationArgv = persistableArgv(
     options.hostIdentity?.codex?.path
       ? [options.hostIdentity.codex.path, "app-server"]
@@ -413,7 +415,7 @@ function writeProofFiles(options, pack) {
     truncated: pack.truncated,
     streamUnavailable: pack.streamUnavailable,
     initialize,
-    hostIdentity: options.hostIdentity ?? null,
+    hostIdentity,
     invocation: { argv: invocationArgv, envNames: ["PATH", "HOME", "CODEX_HOME"] },
     expected: {
       projectRoot: options.projectRoot,
@@ -458,7 +460,7 @@ function writeProofFiles(options, pack) {
     },
     invocation: record.invocation,
     initialize,
-    hostIdentity: options.hostIdentity ?? null,
+    hostIdentity,
     expected: record.expected,
     hashes: { events: sha256Utf8(eventsText) },
     allowlist: [...proofAllowlist(options.hostIdentity != null)].sort(),
