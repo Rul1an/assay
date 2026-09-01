@@ -220,7 +220,7 @@ function handle(message) {
       id: "elicit-1",
       method: "mcpServer/elicitation/request",
       params: {
-        serverName: "assay",
+        serverName: scenario === "foreign-elicit" ? "not-assay" : "assay",
         threadId,
         message: `approve ${DECIDE_TOOL}`,
         mode: "form",

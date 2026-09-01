@@ -19,6 +19,8 @@ import {
   DECIDE_TOOL,
   classifyRecord,
   decidePrompt,
+  forbiddenProofRoot,
+  stableStringify,
   validateProofRoot,
 } from "./codex_host_proof_validator.mjs";
 
@@ -67,6 +69,18 @@ function seedProject() {
   return projectRoot;
 }
 
+function writeShadowCodex(childArgv) {
+  const binDir = scratch();
+  const bin = path.join(binDir, "codex");
+  const script = `#!/usr/bin/env node
+import { spawn } from "node:child_process";
+const child = spawn(${JSON.stringify(childArgv[0])}, ${JSON.stringify(childArgv.slice(1))}, { stdio: "inherit" });
+child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+`;
+  fs.writeFileSync(bin, script, { mode: 0o755 });
+  return bin;
+}
+
 function driveCli(scenario, journey = "tool") {
   const projectRoot = seedProject();
   const proofRoot = scratch();
@@ -80,8 +94,8 @@ function driveCli(scenario, journey = "tool") {
       proofRoot,
       "--project-root",
       projectRoot,
-      "--child-argv",
-      JSON.stringify(["node", FAKE, "--scenario", scenario, "--project-root", projectRoot]),
+      "--codex-bin",
+      writeShadowCodex(["node", FAKE, "--scenario", scenario, "--project-root", projectRoot]),
       "--mcp-command",
       path.join(projectRoot, "install/bin/assay-mcp-server"),
       "--journey",
@@ -108,9 +122,13 @@ test("driver calls the validator classification function; no extra classify modu
 });
 
 test("synthetic positive control: every intended cell passes; liveAcceptance must not", async () => {
-  const { classified, manifest, proofRoot, driverExitCode, events } = await drive("valid");
+  const { classified, manifest, proofRoot, driverOutcome, childExitCode, events } = await drive("valid");
   assert.equal(manifest.provenance, "synthetic");
-  assert.equal(driverExitCode, 0);
+  assert.equal(manifest.schema, "assay.codex-host-proof.v2");
+  assert.equal(childExitCode, 0);
+  assert.equal(driverOutcome.exitCode, 0);
+  assert.equal(manifest.childExitCode, 0);
+  assert.equal(manifest.driverOutcome.exitCode, 0);
   for (const name of CELLS) {
     assert.equal(
       classified.cells[name].status,
@@ -140,12 +158,14 @@ test("no-op discovery control does not invent tool or MCP passes", async () => {
 });
 
 test("successful tool output plus nonzero child exit: CLI process is nonzero", async () => {
-  const { classified, manifest, proofRoot, driverExitCode } = await drive(
+  const { classified, manifest, proofRoot, childExitCode, driverOutcome } = await drive(
     "exit-1-after-success",
   );
-  assert.notEqual(driverExitCode, 0);
+  assert.equal(childExitCode, 1);
+  assert.notEqual(driverOutcome.exitCode, 0);
+  assert.equal(manifest.childExitCode, 1);
+  assert.notEqual(manifest.driverOutcome.exitCode, 0);
   assert.equal(classified.cells.oneToolInvoked.status, "pass");
-  assert.equal(manifest.driverExitCode, driverExitCode);
   assert.notEqual(classified.liveAcceptance.status, "pass");
   const checked = validateProofRoot(proofRoot);
   assert.equal(checked.ok, true);
@@ -153,7 +173,8 @@ test("successful tool output plus nonzero child exit: CLI process is nonzero", a
   const relabeled = classifyRecord({
     ...manifest,
     events: JSON.parse(fs.readFileSync(path.join(proofRoot, "events.json"), "utf8")),
-    driverExitCode: 0,
+    childExitCode: 0,
+    driverOutcome: { exitCode: 0, status: "pass" },
     provenance: "live",
   });
   assert.notEqual(
@@ -163,7 +184,7 @@ test("successful tool output plus nonzero child exit: CLI process is nonzero", a
   );
   const cli = driveCli("exit-1-after-success");
   assert.notEqual(cli.status, 0, "driver CLI must not exit 0 when the child exits 1");
-  assert.match(cli.stdout, /"driverExitCode":1/);
+  assert.match(cli.stdout, /"exitCode":1/);
 });
 
 test("synthetic events never validate as actual-host proof", async () => {
@@ -359,8 +380,8 @@ function driveCliInline(childArgv, extra = {}) {
     proofRoot,
     "--project-root",
     projectRoot,
-    "--child-argv",
-    JSON.stringify(childArgv),
+    "--codex-bin",
+    writeShadowCodex(childArgv),
     "--mcp-command",
     path.join(projectRoot, "install/bin/assay-mcp-server"),
     "--journey",
@@ -588,4 +609,261 @@ test("maxBytes and timeoutMs must be finite positive integers; reversal restores
   await assert.rejects(() => runProof({ ...base, timeoutMs: Number.POSITIVE_INFINITY }), /finite positive/);
   const control = await drive("valid");
   assert.equal(control.classified.cells.driverCompleted.status, "pass");
+});
+
+test("forged live provenance and initialize cannot mint a live pass from synthetic events", async () => {
+  const { manifest, proofRoot, events, classified } = await drive("valid");
+  assert.notEqual(classified.liveAcceptance.status, "pass");
+  const forged = {
+    ...JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8")),
+    provenance: "live",
+    initialize: {
+      codexHome: "/opt/codex-home",
+      userAgent: "codex_cli/0.50.0",
+      platformFamily: "unix",
+      platformOs: "linux",
+    },
+  };
+  const relabeled = classifyRecord({
+    ...forged,
+    events,
+    childExitCode: 0,
+    driverOutcome: { exitCode: 0, status: "pass" },
+    truncated: false,
+    streamUnavailable: false,
+  });
+  assert.notEqual(
+    relabeled.liveAcceptance.status,
+    "pass",
+    "mutable initialize/userAgent must not relabel synthetic events as live",
+  );
+  fs.writeFileSync(path.join(proofRoot, "manifest.json"), stableStringify(forged));
+  fs.writeFileSync(
+    path.join(proofRoot, "classification.json"),
+    stableStringify(relabeled),
+  );
+  const checked = validateProofRoot(proofRoot);
+  assert.equal(checked.ok, false);
+  assert.match(
+    checked.reasons.join(" "),
+    /initialize|parity|identity|fake|synthetic|userAgent|binary/i,
+  );
+  assert.notEqual(checked.classified?.liveAcceptance?.status, "pass");
+});
+
+test("production CLI rejects --child-argv; credential name variants are rejected before spawn", async () => {
+  const projectRoot = seedProject();
+  const proofRoot = scratch();
+  const cli = spawnSync(
+    process.execPath,
+    [
+      path.join(HERE, "codex_host_proof.mjs"),
+      "--provenance",
+      "synthetic",
+      "--proof-root",
+      proofRoot,
+      "--project-root",
+      projectRoot,
+      "--child-argv",
+      JSON.stringify(["node", FAKE, "--scenario", "valid", "--project-root", projectRoot]),
+    ],
+    { encoding: "utf8", timeout: 10_000 },
+  );
+  assert.notEqual(cli.status, 0, "production CLI must not accept free-form --child-argv");
+  assert.match(`${cli.stderr}${cli.stdout}`, /child-argv|unknown argument/i);
+  const marker = "NONSECRET_UNDERSCORE_KEY";
+  for (const flag of [`--api_key=${marker}`, `--API_KEY=${marker}`, `--api-key=${marker}`]) {
+    const result = await runProof({
+      provenance: "synthetic",
+      timeoutMs: 4000,
+      maxBytes: 1_048_576,
+      journey: "tool",
+      allowLiveTurn: false,
+      childArgv: ["node", FAKE, "--scenario", "valid", "--project-root", projectRoot, flag],
+      proofRoot: scratch(),
+      projectRoot,
+      mcpCommand: path.join(projectRoot, "install/bin/assay-mcp-server"),
+    });
+    assert.equal(
+      result.events.some((event) => event.method === "initialize"),
+      false,
+      `${flag} must be rejected before spawn`,
+    );
+    assert.equal(
+      JSON.stringify(result.manifest).includes(marker),
+      false,
+      `${flag} must not persist the credential value`,
+    );
+  }
+});
+
+test("hard maxima and one shared deadline bound frames, bytes, events, and waits", async () => {
+  const projectRoot = seedProject();
+  const base = {
+    provenance: "synthetic",
+    journey: "discovery",
+    allowLiveTurn: false,
+    childArgv: ["node", FAKE, "--scenario", "valid", "--project-root", projectRoot],
+    proofRoot: scratch(),
+    projectRoot,
+    mcpCommand: path.join(projectRoot, "install/bin/assay-mcp-server"),
+    timeoutMs: 4000,
+    maxBytes: 1_048_576,
+  };
+  await assert.rejects(
+    () => runProof({ ...base, proofRoot: scratch(), maxBytes: 50 * 1024 * 1024 }),
+    /hard maximum|exceeds/,
+  );
+  const flood = await driveInline(
+    [
+      process.execPath,
+      "-e",
+      `for (let i = 0; i < 5000; i += 1) process.stdout.write(JSON.stringify({method:"flood",params:{i}})+"\\n");process.stdin.resume();`,
+    ],
+    { maxBytes: 1_048_576, timeoutMs: 2000, journey: "discovery" },
+  );
+  assert.ok(
+    flood.manifest.truncated ||
+      flood.manifest.streamUnavailable ||
+      flood.events.length <= 4096,
+    `cumulative events ${flood.events.length} must hit a hard operation cap`,
+  );
+  assert.notEqual(flood.classified.liveAcceptance.status, "pass");
+  const slow = await driveInline(
+    [
+      process.execPath,
+      "-e",
+      `let buf="";const reply=(o)=>setTimeout(()=>process.stdout.write(JSON.stringify(o)+"\\n"),150);process.stdin.on("data",(c)=>{buf+=c;let i;while((i=buf.indexOf("\\n"))>=0){const line=buf.slice(0,i);buf=buf.slice(i+1);if(!line.trim())continue;const m=JSON.parse(line);if(m.method==="initialize")reply({id:m.id,result:{userAgent:"assay-codex-host-proof-fake/1",codexHome:"/tmp/x"}});else if(m.method==="skills/list")reply({id:m.id,result:{data:[]}});}});process.stdin.resume();`,
+    ],
+    { timeoutMs: 200, journey: "discovery" },
+  );
+  assert.ok(
+    slow.manifest.streamUnavailable ||
+      slow.events.some((event) => /timeout/i.test(String(event.params?.message ?? ""))),
+    "one absolute deadline must expire across wait phases; phases must not reset it",
+  );
+});
+
+test("proof root rejects CODEX_HOME equality and outside-root events.json symlink", async () => {
+  const { proofRoot } = await drive("valid");
+  assert.equal(validateProofRoot(proofRoot).ok, true);
+  const previousHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = proofRoot;
+  try {
+    const reason = forbiddenProofRoot(proofRoot, "synthetic");
+    assert.equal(typeof reason, "string");
+    assert.match(reason, /CODEX_HOME|runtime|profile|auth/i);
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.CODEX_HOME;
+    } else {
+      process.env.CODEX_HOME = previousHome;
+    }
+  }
+  const outside = path.join(os.tmpdir(), `assay-2684-outside-${process.pid}.json`);
+  fs.renameSync(path.join(proofRoot, "events.json"), outside);
+  fs.symlinkSync(outside, path.join(proofRoot, "events.json"));
+  const linked = validateProofRoot(proofRoot);
+  assert.equal(linked.ok, false, "outside-root events.json symlink must fail");
+  assert.match(linked.reasons.join(" "), /symlink|regular file|nofollow|ELOOP|allowlist|unavailable/i);
+  try {
+    fs.unlinkSync(path.join(proofRoot, "events.json"));
+  } catch {
+    /* already removed */
+  }
+  try {
+    fs.unlinkSync(outside);
+  } catch {
+    /* leftover */
+  }
+});
+
+test("driver exits nonzero for truncated or unavailable streams even when the child exits 0", async () => {
+  const unavailable = await drive("unavailable-stream");
+  assert.equal(unavailable.childExitCode, 0);
+  assert.notEqual(
+    unavailable.driverOutcome.exitCode,
+    0,
+    "unavailable stream must not inherit a clean child exit",
+  );
+  assert.equal(unavailable.manifest.childExitCode, 0);
+  assert.notEqual(unavailable.manifest.driverOutcome.exitCode, 0);
+  const parseExit = await driveInline(
+    [
+      process.execPath,
+      "-e",
+      "process.stdout.write('{not json}\\n');process.exit(0);",
+    ],
+    { timeoutMs: 800, journey: "discovery" },
+  );
+  assert.notEqual(parseExit.driverOutcome.exitCode, 0);
+  assert.notEqual(parseExit.manifest.driverOutcome.exitCode, 0);
+  const failedValidation = await drive("missing-skill");
+  assert.equal(failedValidation.childExitCode, 0);
+  assert.notEqual(
+    failedValidation.driverOutcome.exitCode,
+    0,
+    "failed validation must not inherit a clean child exit",
+  );
+  const cli = driveCliInline(
+    [process.execPath, "-e", "process.stdout.write('{not json}\\n');process.exit(0);"],
+    { timeoutMs: 800, journey: "discovery" },
+  );
+  assert.notEqual(cli.status, 0, "CLI must exit nonzero when the proof journey failed");
+});
+
+test("live mode declines elicitation that is not from the assay server", async () => {
+  const { events } = await drive("foreign-elicit");
+  const replies = events.filter(
+    (event) =>
+      event.direction === "client" && event.method === "mcpServer/elicitation/request",
+  );
+  assert.ok(replies.length >= 1, "foreign elicitation must be recorded");
+  assert.equal(replies[0].result.action, "decline");
+  const control = await drive("valid");
+  const accepted = control.events.filter(
+    (event) =>
+      event.direction === "client" && event.method === "mcpServer/elicitation/request",
+  );
+  assert.equal(accepted[0].result.action, "accept");
+});
+
+test("skill path containment rejects a project-root-sibling prefix", async () => {
+  const { events, manifest } = await drive("valid");
+  const sibling = `${manifest.expected.projectRoot}-sibling`;
+  const mutated = structuredClone({ ...manifest, events });
+  for (const event of mutated.events) {
+    if (event.method !== "skills/list" || event.direction !== "server") {
+      continue;
+    }
+    for (const entry of event.result?.data ?? []) {
+      for (const skill of entry.skills ?? []) {
+        skill.path = path.join(sibling, ".agents/skills/assay-golden-path/SKILL.md");
+      }
+    }
+  }
+  const result = classifyRecord(mutated);
+  assert.notEqual(
+    result.cells.skillDiscovered.status,
+    "pass",
+    "string-prefix sibling of projectRoot must not count as contained",
+  );
+});
+
+test("CLI entrypoint compares canonical realpaths so aliased tmp is not a no-op", () => {
+  const realDir = fs.mkdtempSync(path.join(os.tmpdir(), "assay-2684-cli-real-"));
+  fs.copyFileSync(path.join(HERE, "codex_host_proof.mjs"), path.join(realDir, "codex_host_proof.mjs"));
+  fs.copyFileSync(
+    path.join(HERE, "codex_host_proof_validator.mjs"),
+    path.join(realDir, "codex_host_proof_validator.mjs"),
+  );
+  const linkDir = `${realDir}-link`;
+  fs.symlinkSync(realDir, linkDir);
+  const aliased = path.join(linkDir, "codex_host_proof.mjs");
+  const result = spawnSync(process.execPath, [aliased], {
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  assert.notEqual(result.status, 0, "aliased CLI path must still enter main()");
+  assert.match(result.stderr, /proof-root|project-root/i);
 });

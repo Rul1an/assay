@@ -11,19 +11,26 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   ALLOWLIST,
   DECIDE_INPUT,
   DECIDE_TOOL,
   EXPECTED_TOOLS,
+  HARD_MAX_BYTES,
+  HARD_MAX_EVENTS,
+  HARD_MAX_FRAMES,
+  HARD_MAX_RETAINED_BYTES,
+  HARD_MAX_TIMEOUT_MS,
   SCHEMA,
   SKILL_NAME,
+  boundedPositiveInt,
   classifyRecord,
   credentialArgvReason,
   decidePrompt,
-  finitePositiveInt,
+  driverOutcomeFrom,
   forbiddenProofRoot,
+  initializeFromEvents,
+  isMainModule,
   persistableArgv,
   scrub,
   sha256Utf8,
@@ -42,6 +49,7 @@ export function parseArgs(argv) {
     journey: "tool",
     allowLiveTurn: false,
     childArgv: null,
+    codexBin: null,
     proofRoot: null,
     projectRoot: null,
     mcpCommand: "/nonexistent/assay-mcp-server",
@@ -62,8 +70,8 @@ export function parseArgs(argv) {
       case "--project-root":
         out.projectRoot = next();
         break;
-      case "--child-argv":
-        out.childArgv = JSON.parse(next());
+      case "--codex-bin":
+        out.codexBin = next();
         break;
       case "--mcp-command":
         out.mcpCommand = next();
@@ -141,20 +149,55 @@ function parseLine(line, maxBytes) {
   return value;
 }
 
+export function resolveCodexBin(codexBin) {
+  if (typeof codexBin !== "string" || codexBin.length === 0) {
+    throw new Error("codex binary must be an absolute path");
+  }
+  const resolved = path.resolve(codexBin);
+  if (!path.isAbsolute(resolved)) {
+    throw new Error("codex binary must be an absolute path");
+  }
+  const st = fs.lstatSync(resolved);
+  if (st.isSymbolicLink() || !st.isFile()) {
+    throw new Error("codex binary must be a non-symlink regular file");
+  }
+  return resolved;
+}
+
+function findCodexOnPath() {
+  for (const dir of (process.env.PATH || "").split(path.delimiter)) {
+    if (!dir) {
+      continue;
+    }
+    const candidate = path.join(dir, "codex");
+    try {
+      const st = fs.statSync(candidate);
+      if (st.isFile()) {
+        return fs.realpathSync(candidate);
+      }
+    } catch {
+      /* next */
+    }
+  }
+  return null;
+}
+
+export function resolveProductionChildArgv(options) {
+  const bin = resolveCodexBin(options.codexBin ?? findCodexOnPath());
+  return [bin, "app-server"];
+}
+
 function writeProofFiles(options, pack) {
-  const initialize = pack.events.find(
-    (event) => event.method === "initialize" && event.direction === "server",
-  );
+  const initialize = initializeFromEvents(pack.events);
   const record = {
     schema: SCHEMA,
     provenance: options.provenance,
-    driverExitCode: pack.childExit,
+    childExitCode: pack.childExit,
+    driverOutcome: null,
     truncated: pack.truncated,
     streamUnavailable: pack.streamUnavailable,
-    initialize: {
-      codexHome: initialize?.result?.codexHome ?? null,
-      userAgent: initialize?.result?.userAgent ?? null,
-    },
+    initialize,
+    hostIdentity: options.hostIdentity ?? null,
     expected: {
       projectRoot: options.projectRoot,
       skillName: SKILL_NAME,
@@ -164,12 +207,16 @@ function writeProofFiles(options, pack) {
     },
     events: pack.events,
   };
+  const preliminary = classifyRecord(record);
+  const driverOutcome = driverOutcomeFrom(pack, preliminary.cells, options.journey);
+  record.driverOutcome = driverOutcome;
   const classified = classifyRecord(record);
   const eventsText = stableStringify(pack.events);
   const manifest = {
     schema: SCHEMA,
     provenance: options.provenance,
-    driverExitCode: pack.childExit,
+    childExitCode: pack.childExit,
+    driverOutcome,
     truncated: pack.truncated,
     streamUnavailable: pack.streamUnavailable,
     bounds: {
@@ -182,7 +229,8 @@ function writeProofFiles(options, pack) {
       argv: persistableArgv(options.childArgv),
       envNames: ["PATH", "HOME", "CODEX_HOME"],
     },
-    initialize: record.initialize,
+    initialize,
+    hostIdentity: options.hostIdentity ?? null,
     expected: record.expected,
     hashes: { events: sha256Utf8(eventsText) },
     allowlist: [...ALLOWLIST],
@@ -190,7 +238,13 @@ function writeProofFiles(options, pack) {
   writeJson(path.join(options.proofRoot, "manifest.json"), manifest);
   writeJson(path.join(options.proofRoot, "events.json"), pack.events);
   writeJson(path.join(options.proofRoot, "classification.json"), classified);
-  return { manifest, events: pack.events, classified, driverExitCode: pack.childExit };
+  return {
+    manifest,
+    events: pack.events,
+    classified,
+    childExitCode: pack.childExit,
+    driverOutcome,
+  };
 }
 
 export async function runProof(options) {
@@ -207,9 +261,10 @@ export async function runProof(options) {
   if (options.provenance !== "synthetic" && options.provenance !== "live") {
     throw new Error("provenance must be synthetic or live");
   }
-  finitePositiveInt("timeoutMs", options.timeoutMs);
-  finitePositiveInt("maxBytes", options.maxBytes);
+  boundedPositiveInt("timeoutMs", options.timeoutMs, HARD_MAX_TIMEOUT_MS);
+  boundedPositiveInt("maxBytes", options.maxBytes, HARD_MAX_BYTES);
 
+  const runDeadline = Date.now() + options.timeoutMs;
   fs.mkdirSync(options.proofRoot, { recursive: true, mode: 0o700 });
   const credential = credentialArgvReason(options.childArgv);
   if (credential) {
@@ -235,19 +290,41 @@ export async function runProof(options) {
   let nextId = 1;
   let streamUnavailable = false;
   let stopped = false;
+  let childAlive = true;
+  let frames = 0;
+  let retainedBytes = 0;
   let childExit = null;
   const pending = new Map();
 
-  const child = spawn(options.childArgv[0], options.childArgv.slice(1), {
+  const retainEvent = (event) => {
+    const encoded = Buffer.byteLength(JSON.stringify(event), "utf8");
+    if (
+      events.length >= HARD_MAX_EVENTS ||
+      retainedBytes + encoded > HARD_MAX_RETAINED_BYTES
+    ) {
+      stdout.truncated = true;
+      stopChild();
+      return false;
+    }
+    events.push(event);
+    retainedBytes += encoded;
+    return true;
+  };
+
+  const spawnOpts = {
     stdio: ["pipe", "pipe", "pipe"],
     env: {
       PATH: process.env.PATH,
       HOME: options.projectRoot,
       CODEX_HOME: path.join(options.projectRoot, ".codex-home"),
     },
-  });
+  };
+  const child = Array.isArray(options.childArgv) && options.childArgv.length > 0
+    ? spawn(options.childArgv[0], options.childArgv.slice(1), spawnOpts)
+    : spawn(resolveCodexBin(options.codexBin), ["app-server"], spawnOpts);
   const childClosed = new Promise((resolve) => {
     child.on("close", (code, signal) => {
+      childAlive = false;
       resolve(code ?? (signal ? 1 : 0));
     });
   });
@@ -280,11 +357,17 @@ export async function runProof(options) {
 
   let buffer = "";
   const onLine = (line) => {
+    frames += 1;
+    if (frames > HARD_MAX_FRAMES) {
+      stdout.truncated = true;
+      stopChild();
+      return;
+    }
     const message = parseLine(line, options.maxBytes);
     if (Object.prototype.hasOwnProperty.call(message, "id") && pending.has(message.id)) {
       const method = pending.get(message.id);
       pending.delete(message.id);
-      events.push(
+      retainEvent(
         scrub({
           direction: "server",
           method,
@@ -296,7 +379,7 @@ export async function runProof(options) {
       return;
     }
     if (typeof message.method === "string") {
-      events.push(
+      retainEvent(
         scrub({
           direction: "server",
           method: message.method,
@@ -305,12 +388,23 @@ export async function runProof(options) {
         }),
       );
       if (message.method === "mcpServer/elicitation/request" && message.id != null && !stopped) {
-        const accept = {
+        const accepted = message.params?.serverName === "assay";
+        const reply = {
           id: message.id,
-          result: { action: "accept", content: {} },
+          result: {
+            action: accepted ? "accept" : "decline",
+            content: {},
+          },
         };
-        child.stdin.write(encode(accept));
-        events.push(scrub({ direction: "client", method: message.method, id: message.id, result: accept.result }));
+        child.stdin.write(encode(reply));
+        retainEvent(
+          scrub({
+            direction: "client",
+            method: message.method,
+            id: message.id,
+            result: reply.result,
+          }),
+        );
       }
     }
   };
@@ -348,7 +442,7 @@ export async function runProof(options) {
       } else {
         streamUnavailable = true;
       }
-      events.push({
+      retainEvent({
         direction: "driver",
         method: "error",
         params: { message: "stdio parse failed" },
@@ -361,7 +455,7 @@ export async function runProof(options) {
     const id = nextId;
     nextId += 1;
     pending.set(id, method);
-    events.push(scrub({ direction: "client", method, id, params }));
+    retainEvent(scrub({ direction: "client", method, id, params }));
     if (!stopped) {
       child.stdin.write(encode({ id, method, params }));
     }
@@ -369,11 +463,10 @@ export async function runProof(options) {
   };
 
   const blocked = () =>
-    stdout.truncated || stderr.truncated || streamUnavailable || stopped;
+    stdout.truncated || stderr.truncated || streamUnavailable || stopped || !childAlive;
 
   const waitFor = async (id) => {
-    const deadline = Date.now() + options.timeoutMs;
-    while (Date.now() < deadline) {
+    while (Date.now() < runDeadline) {
       if (events.some((event) => event.direction === "server" && event.id === id)) {
         return;
       }
@@ -386,8 +479,7 @@ export async function runProof(options) {
   };
 
   const waitForExpectedTool = async (threadId, turnId) => {
-    const deadline = Date.now() + options.timeoutMs;
-    while (Date.now() < deadline) {
+    while (Date.now() < runDeadline) {
       if (blocked()) {
         return;
       }
@@ -424,7 +516,7 @@ export async function runProof(options) {
       capabilities: {},
     });
     await waitFor(1);
-    events.push({ direction: "client", method: "initialized", params: {} });
+    retainEvent({ direction: "client", method: "initialized", params: {} });
     if (!stopped) {
       child.stdin.write(encode({ method: "initialized" }));
     }
@@ -501,7 +593,7 @@ export async function runProof(options) {
     }
   } catch (error) {
     streamUnavailable = streamUnavailable || /timeout|unavailable/i.test(String(error));
-    events.push({ direction: "driver", method: "error", params: { message: String(error) } });
+    retainEvent({ direction: "driver", method: "error", params: { message: String(error) } });
     stopChild();
   }
 
@@ -537,19 +629,21 @@ function main() {
   if (!options.proofRoot || !options.projectRoot) {
     throw new Error("--proof-root and --project-root are required");
   }
+  options.childArgv = resolveProductionChildArgv(options);
   return runProof(options);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMainModule(process.argv[1], import.meta.url)) {
   main()
     .then((result) => {
       process.stdout.write(stableStringify({
         provenance: result.manifest.provenance,
-        driverExitCode: result.driverExitCode,
+        childExitCode: result.childExitCode,
+        driverOutcome: result.driverOutcome,
         liveAcceptance: result.classified.liveAcceptance,
       }));
-      if (result.driverExitCode !== 0) {
-        process.exitCode = result.driverExitCode;
+      if (result.driverOutcome.exitCode !== 0) {
+        process.exitCode = result.driverOutcome.exitCode;
       }
     })
     .catch((error) => {

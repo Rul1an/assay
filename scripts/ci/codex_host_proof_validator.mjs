@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const SCHEMA = "assay.codex-host-proof.v1";
+export const SCHEMA = "assay.codex-host-proof.v2";
 export const FAKE_USER_AGENT = "assay-codex-host-proof-fake/1";
 export const SKILL_NAME = "assay-golden-path";
 export const DECIDE_TOOL = "assay_policy_decide";
@@ -49,6 +49,13 @@ export function decidePrompt() {
   return `Invoke ${DECIDE_TOOL} with ${JSON.stringify(DECIDE_INPUT)}`;
 }
 
+export const HARD_MAX_BYTES = 4 * 1024 * 1024;
+export const HARD_MAX_TIMEOUT_MS = 120_000;
+export const HARD_MAX_EVENTS = 4096;
+export const HARD_MAX_FRAMES = 8192;
+export const HARD_MAX_RETAINED_BYTES = 4 * 1024 * 1024;
+export const HARD_MAX_DIR_ENTRIES = 64;
+
 export function finitePositiveInt(name, value) {
   if (!Number.isInteger(value) || value <= 0) {
     throw new Error(`${name} must be a finite positive integer`);
@@ -56,16 +63,38 @@ export function finitePositiveInt(name, value) {
   return value;
 }
 
+export function boundedPositiveInt(name, value, hardMax) {
+  const n = finitePositiveInt(name, value);
+  if (n > hardMax) {
+    throw new Error(`${name} exceeds hard maximum ${hardMax}`);
+  }
+  return n;
+}
+
 const CREDENTIAL_ARGV_NAME =
   /^--(api-key|token|authorization|password|secret)$/i;
+
+export function normalizeOptionName(arg) {
+  if (typeof arg !== "string") {
+    return "";
+  }
+  const raw = arg.includes("=") ? arg.slice(0, arg.indexOf("=")) : arg;
+  if (!raw.startsWith("-")) {
+    return raw;
+  }
+  return raw.toLowerCase().replaceAll("_", "-");
+}
+
+function isCredentialOption(arg) {
+  return CREDENTIAL_ARGV_NAME.test(normalizeOptionName(arg));
+}
 
 export function credentialArgvReason(argv) {
   for (const arg of argv) {
     if (typeof arg !== "string") {
       continue;
     }
-    const name = arg.includes("=") ? arg.slice(0, arg.indexOf("=")) : arg;
-    if (CREDENTIAL_ARGV_NAME.test(name)) {
+    if (isCredentialOption(arg)) {
       return "credential-bearing argv is rejected before spawn";
     }
   }
@@ -82,10 +111,10 @@ export function persistableArgv(argv) {
     }
     if (arg.includes("=")) {
       const name = arg.slice(0, arg.indexOf("="));
-      out.push(CREDENTIAL_ARGV_NAME.test(name) ? `${name}=[redacted]` : arg);
+      out.push(isCredentialOption(arg) ? `${name}=[redacted]` : arg);
       continue;
     }
-    if (CREDENTIAL_ARGV_NAME.test(arg)) {
+    if (isCredentialOption(arg)) {
       out.push(arg);
       if (i + 1 < argv.length) {
         i += 1;
@@ -96,6 +125,106 @@ export function persistableArgv(argv) {
     out.push(arg);
   }
   return out;
+}
+
+export function initializeFromEvents(events) {
+  const event = Array.isArray(events)
+    ? events.find((row) => row.method === "initialize" && row.direction === "server")
+    : null;
+  const result = event?.result && typeof event.result === "object" ? event.result : {};
+  return {
+    codexHome: result.codexHome ?? null,
+    userAgent: result.userAgent ?? null,
+    platformFamily: result.platformFamily ?? null,
+    platformOs: result.platformOs ?? null,
+  };
+}
+
+export function pathInsideRoot(root, candidate) {
+  if (typeof root !== "string" || typeof candidate !== "string") {
+    return false;
+  }
+  const rel = path.relative(path.resolve(root), path.resolve(candidate));
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+function boundBinary(bin) {
+  return (
+    Boolean(bin) &&
+    typeof bin === "object" &&
+    typeof bin.path === "string" &&
+    path.isAbsolute(bin.path) &&
+    typeof bin.version === "string" &&
+    bin.version.length > 0 &&
+    typeof bin.sha256 === "string" &&
+    /^[a-f0-9]{64}$/.test(bin.sha256) &&
+    typeof bin.installSource === "string" &&
+    bin.installSource.length > 0
+  );
+}
+
+export function liveIdentityBound(identity) {
+  if (!identity || typeof identity !== "object") {
+    return false;
+  }
+  if (typeof identity.os !== "string" || identity.os.length === 0) {
+    return false;
+  }
+  if (typeof identity.arch !== "string" || identity.arch.length === 0) {
+    return false;
+  }
+  return boundBinary(identity.codex) && boundBinary(identity.assayMcp);
+}
+
+export function driverOutcomeExit(pack, cells, journey) {
+  const child = pack.childExit;
+  const fail = child && child !== 0 ? child : 1;
+  if (pack.truncated || pack.streamUnavailable) {
+    return fail;
+  }
+  if (cells?.driverCompleted?.status === "unavailable") {
+    return fail;
+  }
+  if (journey === "tool" || journey === "failures") {
+    for (const name of CELLS) {
+      if (name === "driverCompleted") {
+        continue;
+      }
+      if (cells?.[name]?.status !== "pass") {
+        return fail;
+      }
+    }
+  }
+  if (journey === "discovery" && cells?.skillDiscovered?.status === "unavailable") {
+    return fail;
+  }
+  if (child !== 0) {
+    return fail;
+  }
+  return 0;
+}
+
+export function driverOutcomeFrom(pack, cells, journey) {
+  const exitCode = driverOutcomeExit(pack, cells, journey);
+  let status = "pass";
+  if (pack.truncated || pack.streamUnavailable) {
+    status = "unavailable";
+  } else if (exitCode !== 0) {
+    status = "fail";
+  }
+  return { exitCode, status };
+}
+
+export function isMainModule(argv1, moduleUrl) {
+  if (typeof argv1 !== "string" || argv1.length === 0) {
+    return false;
+  }
+  const modulePath = fileURLToPath(moduleUrl);
+  try {
+    return fs.realpathSync(path.resolve(argv1)) === fs.realpathSync(modulePath);
+  } catch {
+    return path.resolve(argv1) === path.resolve(modulePath);
+  }
 }
 
 const STATUSES = new Set(["pass", "fail", "unavailable", "not_applicable"]);
@@ -266,7 +395,7 @@ function classifySkill(skills, expected) {
     (skill) =>
       skill.enabled === true &&
       typeof skill.path === "string" &&
-      skill.path.startsWith(expected.projectRoot),
+      pathInsideRoot(expected.projectRoot, skill.path),
   );
   if (!enabled) {
     return cell("fail", "skill present but not enabled under project root");
@@ -396,10 +525,20 @@ function classifyDriver(meta) {
   if (meta.truncated) {
     return cell("unavailable", "stdio truncated at bound");
   }
-  if (meta.driverExitCode === 0) {
-    return cell("pass", "driver exited 0");
+  const outcome = meta.driverOutcome;
+  if (outcome && typeof outcome === "object") {
+    if (outcome.status === "unavailable") {
+      return cell("unavailable", "driver outcome unavailable");
+    }
+    if (outcome.exitCode === 0) {
+      return cell("pass", "driver outcome exit 0");
+    }
+    return cell("fail", `driver outcome exit ${outcome.exitCode}`);
   }
-  return cell("fail", `driver exited ${meta.driverExitCode}`);
+  if (meta.childExitCode === 0) {
+    return cell("pass", "child exited 0 pending driver outcome");
+  }
+  return cell("fail", `child exited ${meta.childExitCode}`);
 }
 
 export function classifyCells(events, meta, expected) {
@@ -450,12 +589,17 @@ export function liveAcceptance(cells, meta) {
   if (meta.userAgent === FAKE_USER_AGENT) {
     reasons.push("fake stdio child userAgent cannot be live");
   }
+  if (!liveIdentityBound(meta.hostIdentity)) {
+    reasons.push(
+      "live record requires bound Codex and Assay/MCP binary paths, versions, hashes, install source, OS, and architecture",
+    );
+  }
   if (meta.truncated || meta.streamUnavailable) {
     reasons.push("host stream was truncated or unavailable");
   }
-  if (meta.driverExitCode !== 0) {
+  if ((meta.driverOutcome?.exitCode ?? 1) !== 0) {
     reasons.push(
-      `original driver exit ${meta.driverExitCode} is preserved; not rewritten to 0`,
+      `driver outcome exit ${meta.driverOutcome?.exitCode ?? 1} is preserved; not rewritten to 0`,
     );
   }
   for (const name of CELLS) {
@@ -474,12 +618,15 @@ export function classifyRecord(record) {
   if (!Array.isArray(events)) {
     throw new Error("events must be an array");
   }
+  const derived = initializeFromEvents(events);
   const meta = {
     provenance: record.provenance,
-    driverExitCode: record.driverExitCode,
+    childExitCode: record.childExitCode,
+    driverOutcome: record.driverOutcome ?? null,
     truncated: Boolean(record.truncated),
     streamUnavailable: Boolean(record.streamUnavailable),
-    userAgent: record.initialize?.userAgent,
+    userAgent: derived.userAgent,
+    hostIdentity: record.hostIdentity ?? null,
   };
   const cells = classifyCells(events, meta, record.expected);
   return {
@@ -489,18 +636,38 @@ export function classifyRecord(record) {
   };
 }
 
+function canonicalResolved(value) {
+  const resolved = path.resolve(value);
+  try {
+    return fs.realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+function pathEqualsOrInside(root, candidate) {
+  const rel = path.relative(root, candidate);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
 export function forbiddenProofRoot(proofRoot, provenance) {
-  const resolved = path.resolve(proofRoot);
+  const resolved = canonicalResolved(proofRoot);
   const temps = [os.tmpdir(), "/tmp", "/private/tmp", "/var/tmp"];
-  const underTmp = temps.some(
-    (temp) => resolved === path.resolve(temp) || resolved.startsWith(`${path.resolve(temp)}${path.sep}`),
-  );
+  const underTmp = temps.some((temp) => pathEqualsOrInside(canonicalResolved(temp), resolved));
   if (provenance === "live" && underTmp) {
     return "live proof root must not be temporary storage";
   }
-  const home = process.env.CODEX_HOME;
-  if (home && resolved.startsWith(`${path.resolve(home)}${path.sep}`)) {
-    return "proof root must not be inside CODEX_HOME runtime";
+  const runtimeRoots = [];
+  if (process.env.CODEX_HOME) {
+    runtimeRoots.push(process.env.CODEX_HOME);
+  }
+  if (process.env.HOME) {
+    runtimeRoots.push(path.join(process.env.HOME, ".codex"));
+  }
+  for (const root of runtimeRoots) {
+    if (pathEqualsOrInside(canonicalResolved(root), resolved)) {
+      return "proof root must not be equal to or inside CODEX_HOME, auth, or profile roots";
+    }
   }
   if (resolved.endsWith(`${path.sep}auth.json`) || resolved.includes(`${path.sep}auth.json${path.sep}`)) {
     return "proof root must not be a credential path";
@@ -531,12 +698,18 @@ export function scrub(value) {
 const DEFAULT_MAX_BYTES = 1_048_576;
 
 export function readBoundedFile(file, maxBytes) {
-  finitePositiveInt("maxBytes", maxBytes);
-  const fd = fs.openSync(file, "r");
+  const requested = boundedPositiveInt("maxBytes", maxBytes, HARD_MAX_BYTES);
+  const limit = Math.min(requested, HARD_MAX_BYTES);
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0);
+  const fd = fs.openSync(file, flags);
   try {
-    const buf = Buffer.alloc(maxBytes + 1);
-    const n = fs.readSync(fd, buf, 0, maxBytes + 1, 0);
-    if (n > maxBytes) {
+    const st = fs.fstatSync(fd);
+    if (!st.isFile()) {
+      throw new Error("input is not a regular file");
+    }
+    const buf = Buffer.alloc(limit + 1);
+    const n = fs.readSync(fd, buf, 0, limit + 1, 0);
+    if (n > limit) {
       throw new Error("input exceeds byte bound");
     }
     return buf.subarray(0, n);
@@ -553,7 +726,7 @@ export function parseArgs(argv) {
       out.proofRoot = argv[i];
     } else if (argv[i] === "--max-bytes") {
       i += 1;
-      out.maxBytes = finitePositiveInt("maxBytes", Number(argv[i]));
+      out.maxBytes = boundedPositiveInt("maxBytes", Number(argv[i]), HARD_MAX_BYTES);
     } else {
       throw new Error(`unknown argument ${argv[i]}`);
     }
@@ -562,16 +735,34 @@ export function parseArgs(argv) {
 }
 
 function namesIn(proofRoot) {
-  return fs.readdirSync(proofRoot).filter((name) => name !== "." && name !== "..");
+  const names = fs.readdirSync(proofRoot).filter((name) => name !== "." && name !== "..");
+  if (names.length > HARD_MAX_DIR_ENTRIES) {
+    throw new Error("proof root directory listing exceeds bound");
+  }
+  return names;
+}
+
+function assertAllowlistedRegularFiles(proofRoot) {
+  for (const name of ALLOWLIST) {
+    const st = fs.lstatSync(path.join(proofRoot, name));
+    if (st.isSymbolicLink()) {
+      throw new Error(`${name} is a symlink`);
+    }
+    if (!st.isFile()) {
+      throw new Error(`${name} is not a regular file`);
+    }
+  }
 }
 
 export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
-  finitePositiveInt("maxBytes", maxBytes);
+  boundedPositiveInt("maxBytes", maxBytes, HARD_MAX_BYTES);
   const reasons = [];
   let manifest;
   let events;
   let stored;
   try {
+    namesIn(proofRoot);
+    assertAllowlistedRegularFiles(proofRoot);
     manifest = parseJsonBytes(
       readBoundedFile(path.join(proofRoot, "manifest.json"), maxBytes),
       maxBytes,
@@ -606,13 +797,26 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   if (manifest.hashes?.events !== actual) {
     reasons.push("events hash mismatch");
   }
+  const derivedInitialize = initializeFromEvents(events);
+  if (!sameJson(manifest.initialize, derivedInitialize)) {
+    reasons.push("manifest initialize does not match captured initialize event");
+  }
+  if (
+    typeof manifest.childExitCode !== "number" ||
+    !manifest.driverOutcome ||
+    typeof manifest.driverOutcome.exitCode !== "number"
+  ) {
+    reasons.push("v2 record requires childExitCode and driverOutcome");
+  }
   const record = {
     schema: manifest.schema,
     provenance: manifest.provenance,
-    driverExitCode: manifest.driverExitCode,
+    childExitCode: manifest.childExitCode,
+    driverOutcome: manifest.driverOutcome,
     truncated: manifest.truncated,
     streamUnavailable: manifest.streamUnavailable,
-    initialize: manifest.initialize,
+    initialize: derivedInitialize,
+    hostIdentity: manifest.hostIdentity ?? null,
     expected: manifest.expected,
     events,
   };
@@ -632,8 +836,12 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
     reasons.push("live provenance with fake stdio child userAgent");
   }
   if (manifest.provenance === "live" && classified.liveAcceptance.status === "pass") {
-    if (manifest.truncated || manifest.streamUnavailable || manifest.driverExitCode !== 0) {
-      reasons.push("live pass is incompatible with truncated, unavailable, or nonzero driver exit");
+    if (
+      manifest.truncated ||
+      manifest.streamUnavailable ||
+      manifest.driverOutcome?.exitCode !== 0
+    ) {
+      reasons.push("live pass is incompatible with truncated, unavailable, or nonzero driver outcome");
     }
   }
   return {
@@ -663,7 +871,7 @@ function main() {
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMainModule(process.argv[1], import.meta.url)) {
   try {
     main();
   } catch (error) {
