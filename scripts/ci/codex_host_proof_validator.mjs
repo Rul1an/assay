@@ -542,6 +542,11 @@ function retainedItemReason(item) {
 
 function retainedMethodParamsReason(method, params) {
   switch (method) {
+    case "initialized":
+      if (!isPlainObject(params) || Object.keys(params).length !== 0) {
+        return "initialized params must be the recorder's empty object";
+      }
+      return null;
     case "item/completed": {
       if (!isPlainObject(params)) {
         return "item/completed params must be an object";
@@ -624,6 +629,10 @@ export function classifyStoredEvent(event) {
         !hasResult &&
         !hasError
       ) {
+        const payloadReason = retainedMethodParamsReason(method, event.params);
+        if (payloadReason) {
+          return { type: "unclassified", reason: payloadReason };
+        }
         return { type: "client-notification", method };
       }
       if (
@@ -752,6 +761,7 @@ function consumeClassifiedEvent(classified, event, ctx) {
       ctx.notifications.push(event);
       return;
     case "client-notification":
+      ctx.clientNotifications.push(event);
       return;
     case "client-response": {
       const expected = ctx.pendingServer.get(event.id);
@@ -791,6 +801,7 @@ export function consumeJourneyTopology(events, journey) {
   const notifications = [];
   const serverRequests = [];
   const clientResponses = [];
+  const clientNotifications = [];
   const driverErrors = [];
   if (!Array.isArray(events)) {
     return { ok: false, reasons: ["events must be an array"], pairs, counts };
@@ -805,6 +816,7 @@ export function consumeJourneyTopology(events, journey) {
     notifications,
     serverRequests,
     clientResponses,
+    clientNotifications,
     driverErrors,
   };
   for (const event of events) {
@@ -886,6 +898,20 @@ export function consumeJourneyTopology(events, journey) {
       reasons.push("turn/start is not bound to the primary thread");
     }
   }
+  const terminalRows = notifications.filter((event) => event.method === "turn/completed");
+  if (counts["turn/start"] === 1 && turnPairs.length === 1) {
+    const primaryId = roles.get("primary")?.response?.result?.thread?.id;
+    const turnId = turnPairs[0].response?.result?.turn?.id;
+    if (
+      terminalRows.length !== 1 ||
+      terminalRows[0].params?.threadId !== primaryId ||
+      terminalRows[0].params?.turn?.id !== turnId
+    ) {
+      reasons.push("turn/completed must be unique and bound to the primary turn");
+    }
+  } else if (terminalRows.length !== 0) {
+    reasons.push("turn/completed is unexpected without a turn/start journey");
+  }
   const initializePairs = byMethod("initialize");
   if (counts.initialize === 1) {
     if (
@@ -894,6 +920,14 @@ export function consumeJourneyTopology(events, journey) {
       !successfulInitializeResult(initializePairs[0].response?.result)
     ) {
       reasons.push("initialize must be one successful result with required live fields");
+    }
+    const initialized = clientNotifications.filter((event) => event.method === "initialized");
+    if (
+      initialized.length !== 1 ||
+      initializePairs.length !== 1 ||
+      events.indexOf(initialized[0]) <= events.indexOf(initializePairs[0].response)
+    ) {
+      reasons.push("initialized must occur exactly once after the initialize response");
     }
   }
   return {
@@ -912,6 +946,7 @@ export function consumeJourneyTopology(events, journey) {
     notifications,
     serverRequests,
     clientResponses,
+    clientNotifications,
     driverErrors,
   };
 }
@@ -1009,6 +1044,53 @@ function skillsFromEvents(events) {
   return listed;
 }
 
+function classifyToolResultEnvelope(result) {
+  if (!isPlainObject(result)) {
+    return { ok: false, reason: "tool result envelope is not an object", payload: null };
+  }
+  if (result["isError"] === true) {
+    return { ok: false, reason: "MCP result isError is true", payload: null };
+  }
+  if (result.error != null) {
+    return { ok: false, reason: "MCP result is error-bearing", payload: null };
+  }
+
+  let structured = null;
+  if (hasOwn(result, "structuredContent") && result.structuredContent != null) {
+    if (!isPlainObject(result.structuredContent)) {
+      return { ok: false, reason: "structuredContent is not an object", payload: null };
+    }
+    structured = result.structuredContent;
+  }
+
+  let content = null;
+  if (hasOwn(result, "content")) {
+    if (!Array.isArray(result.content) || result.content.length !== 1) {
+      return { ok: false, reason: "content must contain exactly one text block", payload: null };
+    }
+    const block = result.content[0];
+    if (!isPlainObject(block) || block.type !== "text" || typeof block.text !== "string") {
+      return { ok: false, reason: "content contains an unsupported block", payload: null };
+    }
+    try {
+      content = JSON.parse(block.text);
+    } catch {
+      return { ok: false, reason: "content text is not JSON", payload: null };
+    }
+    if (!isPlainObject(content)) {
+      return { ok: false, reason: "content JSON is not an object", payload: null };
+    }
+  }
+
+  if (structured == null && content == null) {
+    return { ok: false, reason: "tool result has no typed projection", payload: null };
+  }
+  if (structured != null && content != null && !sameJson(structured, content)) {
+    return { ok: false, reason: "structuredContent contradicts content", payload: null };
+  }
+  return { ok: true, reason: null, payload: structured ?? content };
+}
+
 function mcpToolCalls(rows) {
   const calls = [];
   for (const event of rows) {
@@ -1021,6 +1103,7 @@ function mcpToolCalls(rows) {
         item,
         threadId: event.params?.threadId,
         turnId: event.params?.turnId,
+        resultEnvelope: classifyToolResultEnvelope(item.result),
       });
     }
   }
@@ -1047,28 +1130,6 @@ function toolNames(status) {
     return [];
   }
   return Object.keys(tools).sort();
-}
-
-function payloadFromCall(call) {
-  const structured = call?.result?.structuredContent;
-  if (structured && typeof structured === "object") {
-    return structured;
-  }
-  const content = call?.result?.content;
-  if (!Array.isArray(content)) {
-    return null;
-  }
-  const texts = content
-    .filter((block) => block && typeof block.text === "string")
-    .map((block) => block.text);
-  if (texts.length !== 1) {
-    return null;
-  }
-  try {
-    return JSON.parse(texts[0]);
-  } catch {
-    return null;
-  }
 }
 
 function sameJson(left, right) {
@@ -1234,19 +1295,11 @@ function classifyPayload(calls, invocationCell) {
   if (invocationCell.status !== "pass") {
     return cell("unavailable", "invocation cell did not pass");
   }
-  const result = calls[0].item?.result;
-  if (result && typeof result === "object") {
-    if (result["isError"] === true) {
-      return cell("fail", "MCP result isError is true");
-    }
-    if (result.error != null) {
-      return cell("fail", "MCP result is error-bearing");
-    }
+  const envelope = calls[0].resultEnvelope;
+  if (!envelope?.ok) {
+    return cell("fail", envelope?.reason ?? "tool result is not typed JSON");
   }
-  const payload = payloadFromCall(calls[0].item);
-  if (!payload) {
-    return cell("fail", "tool result is not typed JSON");
-  }
+  const payload = envelope.payload;
   if (!sameJson(payload, ALLOWED_PAYLOAD)) {
     return cell("fail", "typed result is not the pinned allow payload");
   }

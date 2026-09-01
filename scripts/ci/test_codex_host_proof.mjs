@@ -2919,3 +2919,128 @@ test("retained driver/error contradicts topology; all-pass and proof stay false;
   assert.equal(allIntendedCellsPass(control.classified), true);
   assert.equal(validateProofRoot(control.proofRoot).ok, true);
 });
+
+test("review false-green: lifecycle rows and contradictory result projections", async () => {
+  const { events, manifest, classified, proofRoot } = await drive("valid");
+  assert.equal(allIntendedCellsPass(classified), true);
+  assert.equal(validateProofRoot(proofRoot).ok, true);
+
+  const candidates = [];
+  candidates.push({ label: "missing initialized", events: events.filter((event) => !(event.direction === "client" && event.method === "initialized")), proofValid: false });
+
+  const invalidInitialized = structuredClone(events);
+  const invalidInitializedRow = invalidInitialized.find(
+    (event) => event.direction === "client" && event.method === "initialized",
+  );
+  assert.ok(invalidInitializedRow);
+  invalidInitializedRow.params = { unexpected: true };
+  candidates.push({
+    label: "invalid initialized params",
+    events: invalidInitialized,
+    proofValid: false,
+  });
+
+  const duplicateInitialized = structuredClone(events);
+  const initialized = duplicateInitialized.find((event) => event.direction === "client" && event.method === "initialized");
+  assert.ok(initialized);
+  duplicateInitialized.push(structuredClone(initialized));
+  candidates.push({ label: "duplicate initialized", events: duplicateInitialized, proofValid: false });
+
+  const unrelatedFailed = structuredClone(events);
+  const terminal = unrelatedFailed.find((event) => event.direction === "server" && event.method === "turn/completed");
+  assert.ok(terminal);
+  const extraTerminal = structuredClone(terminal);
+  extraTerminal.params.threadId = "unrelated-thread";
+  if (extraTerminal.params.turn && typeof extraTerminal.params.turn === "object") {
+    extraTerminal.params.turn.id = "unrelated-turn";
+    extraTerminal.params.turn.status = "failed";
+  }
+  extraTerminal.params.status = "failed";
+  unrelatedFailed.push(extraTerminal);
+  candidates.push({ label: "unrelated failed terminal", events: unrelatedFailed, proofValid: false });
+
+  const contradictoryResult = structuredClone(events);
+  const call = toolCompleted(contradictoryResult);
+  assert.ok(call?.params?.item?.result);
+  call.params.item.result.structuredContent = {
+    allowed: true,
+    reason: "Allowed by policy",
+  };
+  call.params.item.result.content = [
+    { type: "text", text: "not-json" },
+    { type: "image", data: "unsupported" },
+  ];
+  candidates.push({
+    label: "structuredContent masks contradictory content",
+    events: contradictoryResult,
+    proofValid: true,
+    structuredResultStatus: "fail",
+  });
+
+  const unsupportedBlock = structuredClone(events);
+  const unsupportedCall = toolCompleted(unsupportedBlock);
+  unsupportedCall.params.item.result.content.push({ type: "image", data: "unsupported" });
+  candidates.push({
+    label: "valid text plus unsupported content block",
+    events: unsupportedBlock,
+    proofValid: true,
+    structuredResultStatus: "fail",
+  });
+
+  const scalarStructured = structuredClone(events);
+  const scalarStructuredCall = toolCompleted(scalarStructured);
+  scalarStructuredCall.params.item.result.structuredContent = "scalar";
+  candidates.push({
+    label: "valid text masks scalar structuredContent",
+    events: scalarStructured,
+    proofValid: true,
+    structuredResultStatus: "fail",
+  });
+
+  const disagreeingProjections = structuredClone(events);
+  const disagreeingCall = toolCompleted(disagreeingProjections);
+  disagreeingCall.params.item.result.structuredContent = {
+    allowed: true,
+    reason: "Allowed by policy",
+  };
+  disagreeingCall.params.item.result.content = [
+    {
+      type: "text",
+      text: JSON.stringify({ allowed: false, reason: "Different projection" }),
+    },
+  ];
+  candidates.push({
+    label: "valid projections disagree",
+    events: disagreeingProjections,
+    proofValid: true,
+    structuredResultStatus: "fail",
+  });
+
+  const observed = [];
+  for (const candidate of candidates) {
+    const hostile = classifyRecord({ ...manifest, events: candidate.events });
+    const root = scratch();
+    fs.mkdirSync(root, { recursive: true });
+    rewriteProof(root, manifest, candidate.events, hostile);
+    observed.push({
+      label: candidate.label,
+      allPass: allIntendedCellsPass(hostile),
+      proofValid: validateProofRoot(root).ok,
+      expectedProofValid: candidate.proofValid,
+      structuredResultStatus: hostile.cells.structuredResultValidated.status,
+      expectedStructuredResultStatus: candidate.structuredResultStatus,
+    });
+  }
+  console.error(`REVIEW_OBSERVED ${JSON.stringify(observed)}`);
+  assert.equal(
+    observed.every(
+      (row) =>
+        row.allPass === false &&
+        row.proofValid === row.expectedProofValid &&
+        (row.expectedStructuredResultStatus == null ||
+          row.structuredResultStatus === row.expectedStructuredResultStatus),
+    ),
+    true,
+    "every hostile lifecycle/result row must match its bounded cell and proof expectations",
+  );
+});
