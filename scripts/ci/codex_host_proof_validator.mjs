@@ -768,6 +768,7 @@ function consumeClassifiedEvent(classified, event, ctx) {
       return;
     }
     case "driver":
+      ctx.driverErrors.push(event);
       return;
     case "unclassified":
       ctx.reasons.push(classified.reason);
@@ -790,6 +791,7 @@ export function consumeJourneyTopology(events, journey) {
   const notifications = [];
   const serverRequests = [];
   const clientResponses = [];
+  const driverErrors = [];
   if (!Array.isArray(events)) {
     return { ok: false, reasons: ["events must be an array"], pairs, counts };
   }
@@ -803,6 +805,7 @@ export function consumeJourneyTopology(events, journey) {
     notifications,
     serverRequests,
     clientResponses,
+    driverErrors,
   };
   for (const event of events) {
     consumeClassifiedEvent(classifyStoredEvent(event), event, ctx);
@@ -812,6 +815,9 @@ export function consumeJourneyTopology(events, journey) {
   }
   if (pendingServer.size > 0) {
     reasons.push("unresolved server requests");
+  }
+  if (driverErrors.length > 0) {
+    reasons.push("retained driver/error contradicts journey topology");
   }
   const byMethod = (method) => pairs.filter((pair) => pair.method === method);
   for (const [method, n] of Object.entries(counts)) {
@@ -906,6 +912,7 @@ export function consumeJourneyTopology(events, journey) {
     notifications,
     serverRequests,
     clientResponses,
+    driverErrors,
   };
 }
 
@@ -1266,7 +1273,10 @@ function classifyNegative(statuses, index, label) {
   );
 }
 
-function classifyDriver(meta) {
+function classifyDriver(meta, topology) {
+  if (Array.isArray(topology?.driverErrors) && topology.driverErrors.length > 0) {
+    return cell("fail", "retained driver/error contradicts a completed journey");
+  }
   const kind = closedDriverOutcomeStatus(meta);
   if (kind === "unavailable") {
     if (meta.streamUnavailable) {
@@ -1320,7 +1330,7 @@ export function classifyCells(events, meta, expected, journey = "tool", topology
       missingBinaryNotClean: cell("fail", reason),
       invalidPolicyRootNotClean: cell("fail", reason),
       cwdObserved: cell("fail", reason),
-      driverCompleted: classifyDriver(meta),
+      driverCompleted: classifyDriver(meta, resolved),
     };
   }
   const skills = skillsFromEvents(resolved.skills);
@@ -1348,7 +1358,7 @@ export function classifyCells(events, meta, expected, journey = "tool", topology
       "invalid-policy-root",
     ),
     cwdObserved,
-    driverCompleted: classifyDriver(meta),
+    driverCompleted: classifyDriver(meta, resolved),
   };
 }
 

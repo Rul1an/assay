@@ -2895,3 +2895,27 @@ test("explicit invalid RPC id on a retained notification is not the canonical no
   assert.equal(allIntendedCellsPass(control.classified), true);
   assert.equal(validateProofRoot(control.proofRoot).ok, true);
 });
+
+test("retained driver/error contradicts topology; all-pass and proof stay false; control stays green", async () => {
+  const { events, manifest, classified, proofRoot } = await drive("valid");
+  assert.equal(allIntendedCellsPass(classified), true);
+  assert.equal(validateProofRoot(proofRoot).ok, true);
+
+  const mutated = structuredClone(events);
+  mutated.push({
+    direction: "driver",
+    method: "error",
+    params: { message: "recorded failure" },
+  });
+  const hostile = classifyRecord({ ...manifest, events: mutated });
+  assert.equal(allIntendedCellsPass(hostile), false, "driver error must contradict 9/9");
+  assert.equal(hostile.cells.driverCompleted.status, "fail");
+  const hostileRoot = scratch();
+  fs.mkdirSync(hostileRoot, { recursive: true });
+  rewriteProof(hostileRoot, manifest, mutated, hostile);
+  assert.equal(validateProofRoot(hostileRoot).ok, false);
+
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true);
+  assert.equal(validateProofRoot(control.proofRoot).ok, true);
+});
