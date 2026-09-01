@@ -121,7 +121,7 @@ printf '%s\n' "- [RGE-Bench](https://github.com/rge-bench/rge-bench) — $rge_cl
 printf '%s\n' "- [RGE-Bench](https://github.com/rge-bench/rge-bench): $rge_claim" > "$TMP/llms.txt"
 cat > "$TMP/examples/mcp-quickstart/README.md" <<'DOC'
 Assay CLI via the release installer.
-For v5.5.1, run this from a source checkout or an extracted published CLI archive. The installer is binary-only and does not carry this bounded quickstart.
+For v5.5.2, run this from a source checkout or an extracted published CLI archive. The installer is binary-only and does not carry this bounded quickstart.
 DOC
 printf '%s\n' 'Current release: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0)' > "$TMP/docs/index.md"
 printf '%s\n' 'Codex uses .codex/config.toml.' > "$TMP/docs/guides/editor-mcp-recipe.md"
