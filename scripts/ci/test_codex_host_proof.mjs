@@ -649,6 +649,24 @@ child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
       );
       const checked = validateProofRoot(hostCli.proofRoot);
       preSpawnResults.push({ journey: row.journey, ok: checked.ok, reasons: checked.reasons });
+      if (row.journey !== "discovery") {
+        const manifest = JSON.parse(
+          fs.readFileSync(path.join(hostCli.proofRoot, "manifest.json"), "utf8"),
+        );
+        const genericEvents = JSON.parse(
+          fs.readFileSync(path.join(hostCli.proofRoot, "events.json"), "utf8"),
+        );
+        genericEvents[0].method = "error";
+        const genericClassified = classifyRecord({ ...manifest, events: genericEvents });
+        rewriteProof(hostCli.proofRoot, manifest, genericEvents, genericClassified);
+        const genericChecked = validateProofRoot(hostCli.proofRoot);
+        assert.equal(
+          genericChecked.ok,
+          false,
+          `generic driver/error must not unlock ${row.journey} missing-command validation`,
+        );
+        assert.match(genericChecked.reasons.join("; "), /host subjects.*commands/);
+      }
       assert.equal(
         fs.existsSync(path.join(hostProjectRoot, ".codex-app-server-started")),
         false,
