@@ -120,15 +120,31 @@ function handle(message) {
   }
   const { id, method, params } = message;
   if (method === "initialize") {
-    write({
-      id,
-      result: {
-        userAgent: FAKE_USER_AGENT,
-        platformFamily: "unix",
-        platformOs: "macos",
-        codexHome: path.join(projectRoot, ".codex-home"),
-      },
-    });
+    const result = {
+      userAgent: FAKE_USER_AGENT,
+      platformFamily: "unix",
+      platformOs: "macos",
+      codexHome: path.join(projectRoot, ".codex-home"),
+    };
+    if (scenario === "notification-impersonates-response") {
+      write({ id, method: "unrelated/notification", result });
+      return;
+    }
+    if (scenario === "result-and-error-response") {
+      write({ id, result, error: { code: -32603, message: "result and error" } });
+      return;
+    }
+    if (scenario === "duplicate-initialize-response") {
+      write({ id, result });
+      write({ id, result });
+      return;
+    }
+    if (scenario === "unknown-response-id") {
+      write({ id: 999, result: { unexpected: true } });
+      write({ id, result });
+      return;
+    }
+    write({ id, result });
     return;
   }
   if (method === "initialized") {

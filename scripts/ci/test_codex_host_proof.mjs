@@ -17,6 +17,8 @@ import {
   CELLS,
   DECIDE_INPUT,
   DECIDE_TOOL,
+  EXPECTED_TOOLS,
+  HARD_MAX_SNAPSHOT_BYTES,
   classifyRecord,
   decidePrompt,
   elicitationAcceptable,
@@ -1888,4 +1890,383 @@ test("duplicate Assay MCP-status rows fail closed in every consumer; no-op contr
   assert.equal(control.classified.cells.exactToolsListed.status, "pass");
   assert.equal(control.classified.cells.missingBinaryNotClean.status, "pass");
   assert.equal(control.classified.cells.invalidPolicyRootNotClean.status, "pass");
+});
+
+function allIntendedCellsPass(classified) {
+  return CELLS.every((name) => classified.cells[name].status === "pass");
+}
+
+function rewriteProof(proofRoot, manifest, events, classified) {
+  const next = structuredClone(manifest);
+  next.hashes = { events: sha256Utf8(stableStringify(events)) };
+  fs.writeFileSync(path.join(proofRoot, "manifest.json"), stableStringify(next));
+  fs.writeFileSync(path.join(proofRoot, "events.json"), stableStringify(events));
+  fs.writeFileSync(path.join(proofRoot, "classification.json"), stableStringify(classified));
+  return next;
+}
+
+function clientThreadStarts(events) {
+  return events.filter(
+    (event) => event.direction === "client" && event.method === "thread/start",
+  );
+}
+
+test("F1 strict JSON-RPC envelopes reject method+result, result+error, duplicate, and unknown ids; control stays green", async () => {
+  const impersonated = await drive("notification-impersonates-response");
+  assert.equal(
+    allIntendedCellsPass(impersonated.classified),
+    false,
+    "a notification carrying a pending id must not yield all-pass",
+  );
+  assert.notEqual(impersonated.classified.cells.driverCompleted.status, "pass");
+  assert.equal(validateProofRoot(impersonated.proofRoot).ok, true);
+
+  const both = await drive("result-and-error-response");
+  assert.equal(
+    allIntendedCellsPass(both.classified),
+    false,
+    "result+error must not resolve a pending id as all-pass",
+  );
+  assert.notEqual(both.classified.cells.driverCompleted.status, "pass");
+
+  const duplicate = await drive("duplicate-initialize-response");
+  assert.equal(
+    allIntendedCellsPass(duplicate.classified),
+    false,
+    "a duplicate response id must not yield all-pass",
+  );
+  assert.notEqual(duplicate.classified.cells.driverCompleted.status, "pass");
+
+  const unknown = await drive("unknown-response-id");
+  assert.equal(
+    allIntendedCellsPass(unknown.classified),
+    false,
+    "an unknown response id must not yield all-pass",
+  );
+  assert.notEqual(unknown.classified.cells.driverCompleted.status, "pass");
+
+  assert.match(DRIVER_SRC, /resolvePendingResponse/);
+  assert.match(VALIDATOR_SRC, /export function resolvePendingResponse/);
+
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true);
+  assert.equal(validateProofRoot(control.proofRoot).ok, true);
+});
+
+test("F2 closed driver-outcome rule rejects child/driver contradictions; control stays green", async () => {
+  const { events, manifest, classified, proofRoot } = await drive("valid");
+  assert.equal(allIntendedCellsPass(classified), true);
+
+  const deadChild = classifyRecord({
+    ...manifest,
+    events,
+    childExitCode: 9,
+    driverOutcome: { exitCode: 0, status: "pass" },
+  });
+  assert.notEqual(
+    deadChild.cells.driverCompleted.status,
+    "pass",
+    "childExitCode 9 plus driver pass/0 must not pass",
+  );
+  rewriteProof(
+    proofRoot,
+    { ...manifest, childExitCode: 9, driverOutcome: { exitCode: 0, status: "pass" } },
+    events,
+    deadChild,
+  );
+  assert.equal(
+    validateProofRoot(proofRoot).ok,
+    false,
+    "contradictory child 9 + driver pass must not validate cleanly",
+  );
+
+  for (const status of ["fail", "garbage", undefined]) {
+    const outcome =
+      status === undefined ? { exitCode: 0 } : { exitCode: 0, status };
+    const zeroExit = classifyRecord({
+      ...manifest,
+      events,
+      childExitCode: 0,
+      driverOutcome: outcome,
+    });
+    assert.notEqual(
+      zeroExit.cells.driverCompleted.status,
+      "pass",
+      `exit 0 with status ${String(status)} must not pass`,
+    );
+  }
+
+  const missing = classifyRecord({
+    ...manifest,
+    events,
+    childExitCode: 0,
+    driverOutcome: null,
+  });
+  assert.equal(
+    missing.cells.driverCompleted.status,
+    "pass",
+    "preliminary null outcome plus child 0 remains derivable",
+  );
+  const missingRoot = scratch();
+  fs.mkdirSync(missingRoot, { recursive: true });
+  rewriteProof(
+    missingRoot,
+    { ...manifest, childExitCode: 0, driverOutcome: null },
+    events,
+    missing,
+  );
+  assert.equal(
+    validateProofRoot(missingRoot).ok,
+    false,
+    "stored null driverOutcome must not validate as a pass pack",
+  );
+
+  assert.match(DRIVER_SRC, /closedDriverOutcomeStatus/);
+  assert.match(VALIDATOR_SRC, /export function closedDriverOutcomeStatus/);
+
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true);
+  assert.equal(control.childExitCode, 0);
+  assert.equal(control.driverOutcome.exitCode, 0);
+  assert.equal(control.driverOutcome.status, "pass");
+  assert.equal(validateProofRoot(control.proofRoot).ok, true);
+});
+
+test("F3 canonical tool contract rejects pack-mutated tools, unlisted_probe, and isError; control stays green", async () => {
+  const { events, manifest, classified, proofRoot } = await drive("valid");
+  assert.equal(allIntendedCellsPass(classified), true);
+  assert.deepEqual(manifest.expected.tools, [...EXPECTED_TOOLS]);
+  assert.equal(manifest.expected.toolName, DECIDE_TOOL);
+  assert.deepEqual(manifest.expected.toolArguments, DECIDE_INPUT);
+
+  const hostile = classifyMutated(
+    {
+      ...manifest,
+      expected: {
+        ...manifest.expected,
+        tools: [...EXPECTED_TOOLS, "unlisted_probe"],
+        toolName: "unlisted_probe",
+        toolArguments: { probe: true },
+      },
+    },
+    events,
+    (rows) => {
+      const call = toolCompleted(rows);
+      call.params.item.tool = "unlisted_probe";
+      call.params.item.arguments = { probe: true };
+    },
+  );
+  assert.notEqual(
+    hostile.cells.oneToolInvoked.status,
+    "pass",
+    "pack-mutated expected tools plus unlisted_probe must not pass invocation",
+  );
+  assert.notEqual(hostile.cells.structuredResultValidated.status, "pass");
+
+  const errorFlag = classifyMutated(manifest, events, (rows) => {
+    toolCompleted(rows).params.item.result.isError = true;
+  });
+  assert.notEqual(
+    errorFlag.cells.structuredResultValidated.status,
+    "pass",
+    "isError:true must not pass structured result validation",
+  );
+
+  const errorBearing = classifyMutated(manifest, events, (rows) => {
+    toolCompleted(rows).params.item.result.error = { message: "tool exploded" };
+  });
+  assert.notEqual(
+    errorBearing.cells.structuredResultValidated.status,
+    "pass",
+    "an error-bearing MCP result must not pass",
+  );
+
+  const hostileEvents = structuredClone(events);
+  toolCompleted(hostileEvents).params.item.tool = "unlisted_probe";
+  toolCompleted(hostileEvents).params.item.arguments = { probe: true };
+  const hostileManifest = {
+    ...manifest,
+    expected: {
+      ...manifest.expected,
+      tools: [...EXPECTED_TOOLS, "unlisted_probe"],
+      toolName: "unlisted_probe",
+      toolArguments: { probe: true },
+    },
+  };
+  rewriteProof(proofRoot, hostileManifest, hostileEvents, hostile);
+  assert.equal(
+    validateProofRoot(proofRoot).ok,
+    false,
+    "a pack that rewrites the expected tool set must not validate",
+  );
+
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true);
+  assert.equal(control.classified.cells.oneToolInvoked.status, "pass");
+  assert.equal(control.classified.cells.structuredResultValidated.status, "pass");
+  assert.equal(control.manifest.expected.projectRoot, control.projectRoot);
+  assert.equal(validateProofRoot(control.proofRoot).ok, true);
+});
+
+test("F4 id-pair topology rejects omitted status requests, extra contradictory rows, and unbound responses; control stays green", async () => {
+  const { events, manifest, classified } = await drive("valid");
+  assert.equal(allIntendedCellsPass(classified), true);
+  assert.equal(clientParams(events, "mcpServerStatus/list").length, 3);
+  assert.equal(clientThreadStarts(events).length, 3);
+
+  const stripped = classifyMutated(manifest, events, (rows) => {
+    for (let i = rows.length - 1; i >= 0; i -= 1) {
+      const row = rows[i];
+      if (row.method === "mcpServerStatus/list" && row.direction === "client") {
+        rows.splice(i, 1);
+        continue;
+      }
+      if (row.method !== "thread/start") {
+        continue;
+      }
+      const command = row.params?.config?.mcp_servers?.assay?.command ?? "";
+      const args = row.params?.config?.mcp_servers?.assay?.args ?? [];
+      const negative =
+        String(command).includes("missing-assay-mcp-server") ||
+        args.some((value) => String(value).includes("missing-policy-root"));
+      if (negative) {
+        rows.splice(i, 1);
+      }
+    }
+  });
+  assert.notEqual(
+    stripped.cells.mcpStarted.status,
+    "pass",
+    "removing status requests and negative thread pairs must not keep MCP cells passing",
+  );
+  assert.notEqual(stripped.cells.missingBinaryNotClean.status, "pass");
+  assert.notEqual(stripped.cells.invalidPolicyRootNotClean.status, "pass");
+
+  const extraStatus = classifyMutated(manifest, events, (rows) => {
+    rows.push({
+      direction: "server",
+      method: "mcpServerStatus/list",
+      id: 99,
+      result: { data: [{ name: "assay", runtimeStatus: "failed", tools: {} }] },
+    });
+  });
+  assert.notEqual(
+    extraStatus.cells.mcpStarted.status,
+    "pass",
+    "a fourth contradictory status response must fail closed",
+  );
+
+  const extraSkill = classifyMutated(manifest, events, (rows) => {
+    rows.push({
+      direction: "server",
+      method: "skills/list",
+      id: 98,
+      result: { data: [{ cwd: manifest.expected.projectRoot, errors: [], skills: [] }] },
+    });
+  });
+  assert.notEqual(
+    extraSkill.cells.skillDiscovered.status,
+    "pass",
+    "an extra contradictory skills response must fail closed",
+  );
+
+  const duplicateSkillRow = classifyMutated(manifest, events, (rows) => {
+    const listed = rows.find(
+      (event) => event.method === "skills/list" && event.direction === "server",
+    );
+    listed.result.data[0].skills.push({
+      name: "assay-golden-path",
+      enabled: false,
+      path: path.join(manifest.expected.projectRoot, "other", "SKILL.md"),
+    });
+  });
+  assert.notEqual(
+    duplicateSkillRow.cells.skillDiscovered.status,
+    "pass",
+    "a duplicate contradictory skills row must fail closed",
+  );
+
+  assert.match(DRIVER_SRC, /consumeJourneyTopology/);
+  assert.match(VALIDATOR_SRC, /export function consumeJourneyTopology/);
+
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true);
+  assert.equal(control.classified.cells.mcpStarted.status, "pass");
+  assert.equal(control.classified.cells.skillDiscovered.status, "pass");
+  const discovery = await drive("valid", "discovery");
+  assert.equal(discovery.classified.cells.skillDiscovered.status, "pass");
+  assert.notEqual(discovery.classified.cells.mcpStarted.status, "pass");
+});
+
+function writeVersionOnlyBin(name, version) {
+  const bin = path.join(scratch(), name);
+  writePortableNodeExecutable(
+    bin,
+    `if (process.argv.includes("--version")) {
+  process.stdout.write(${JSON.stringify(version)} + "\\n");
+  process.exit(0);
+}
+`,
+  );
+  return bin;
+}
+
+test("F5 PATH snapshot copy enforces a binary ceiling and running growth bound; control stays green", () => {
+  assert.equal(HARD_MAX_SNAPSHOT_BYTES, 536870912, "documented 512 MiB per-binary ceiling");
+  assert.match(DRIVER_SRC, /HARD_MAX_SNAPSHOT_BYTES/);
+  const previousPath = process.env.PATH;
+  const oversizedCodex = writeVersionOnlyBin("codex", "codex-oversize/0.0.0");
+  const oversizedMcp = writeVersionOnlyBin("assay-mcp-server", "assay-mcp-oversize/0.0.0");
+  assert.ok(fs.statSync(oversizedCodex).size > 16, "oversize fixture stays tiny and valid");
+  process.env.PATH = `${path.dirname(oversizedCodex)}${path.delimiter}${path.dirname(oversizedMcp)}${path.delimiter}${previousPath}`;
+  try {
+    assert.throws(
+      () => resolveHostIdentity({ testOnlySnapshotMaxBytes: 16 }),
+      /ceiling|exceeds|snapshot/i,
+      "a valid PATH binary above the injected ceiling must fail before materialization",
+    );
+  } finally {
+    process.env.PATH = previousPath;
+  }
+
+  const growCodex = writeVersionOnlyBin("codex", "codex-grow/0.0.0");
+  const growMcp = writeVersionOnlyBin("assay-mcp-server", "assay-mcp-grow/0.0.0");
+  const growSize = fs.statSync(growCodex).size;
+  process.env.PATH = `${path.dirname(growCodex)}${path.delimiter}${path.dirname(growMcp)}${path.delimiter}${previousPath}`;
+  try {
+    assert.throws(
+      () =>
+        resolveHostIdentity({
+          testOnlySnapshotMaxBytes: growSize,
+          testOnlyAfterSnapshotRead(copied, src, destName) {
+            if (destName === "codex" && copied === 0) {
+              fs.appendFileSync(src, `\n//${"y".repeat(32)}`);
+            }
+          },
+        }),
+      /ceiling|grew|exceeded|snapshot/i,
+      "a snapshot that grows past the ceiling while copying must fail",
+    );
+  } finally {
+    process.env.PATH = previousPath;
+  }
+
+  const controlCodex = writeShadowCodex([
+    "node",
+    FAKE,
+    "--scenario",
+    "valid",
+    "--project-root",
+    seedProject(),
+  ]);
+  const controlMcp = writeShadowMcp();
+  process.env.PATH = `${path.dirname(controlCodex)}${path.delimiter}${path.dirname(controlMcp)}${path.delimiter}${previousPath}`;
+  try {
+    const control = resolveHostIdentity();
+    assert.equal(control.codex.installSource, "PATH");
+    assert.equal(control.assayMcp.installSource, "PATH");
+    assert.match(control.codex.version, /codex-shadow/);
+  } finally {
+    process.env.PATH = previousPath;
+  }
 });

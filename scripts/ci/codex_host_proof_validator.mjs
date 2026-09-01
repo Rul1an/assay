@@ -55,6 +55,11 @@ export const HARD_MAX_EVENTS = 4096;
 export const HARD_MAX_FRAMES = 8192;
 export const HARD_MAX_RETAINED_BYTES = 4 * 1024 * 1024;
 export const HARD_MAX_DIR_ENTRIES = 64;
+// 512 MiB per-binary PATH snapshot ceiling (536870912). Prepared v5.5.2 host
+// assets: bundled Codex at /Applications/ChatGPT.app/Contents/Resources/codex
+// is 231,697,328 bytes; assay-mcp-server is 11,105,184 bytes. 256 MiB would
+// sit one routine host growth away from false-unavailable.
+export const HARD_MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024;
 export const LIVE_IDENTITY_NONCLAIM =
   "event-derived and internally consistent identity is not authenticated or tamper-evident";
 
@@ -290,6 +295,28 @@ export function driverOutcomeExit(pack, cells, journey) {
   return 0;
 }
 
+export function closedDriverOutcomeStatus(meta) {
+  if (meta.streamUnavailable || meta.truncated) {
+    return "unavailable";
+  }
+  const child = meta.childExitCode;
+  const outcome = meta.driverOutcome;
+  if (outcome == null) {
+    return child === 0 ? "preliminary" : "fail";
+  }
+  if (typeof outcome !== "object" || Array.isArray(outcome) || typeof outcome.exitCode !== "number") {
+    return "invalid";
+  }
+  if (child === 0 && outcome.exitCode === 0 && outcome.status === "pass") {
+    return "pass";
+  }
+  const nonzero = child !== 0 || outcome.exitCode !== 0;
+  if (nonzero && outcome.status === "fail") {
+    return "fail";
+  }
+  return "invalid";
+}
+
 export function driverOutcomeFrom(pack, cells, journey) {
   const exitCode = driverOutcomeExit(pack, cells, journey);
   let status = "pass";
@@ -298,7 +325,244 @@ export function driverOutcomeFrom(pack, cells, journey) {
   } else if (exitCode !== 0) {
     status = "fail";
   }
-  return { exitCode, status };
+  const draft = { exitCode, status };
+  const kind = closedDriverOutcomeStatus({
+    childExitCode: pack.childExit,
+    driverOutcome: draft,
+    truncated: pack.truncated,
+    streamUnavailable: pack.streamUnavailable,
+  });
+  if (kind === "invalid") {
+    return { exitCode: exitCode === 0 ? 1 : exitCode, status: "fail" };
+  }
+  return draft;
+}
+
+export function resolvePendingResponse(pending, frame) {
+  if (!frame || typeof frame !== "object" || Array.isArray(frame)) {
+    return { kind: "reject", reason: "rpc frame is not an object" };
+  }
+  const hasId = Object.prototype.hasOwnProperty.call(frame, "id");
+  const hasMethod = Object.prototype.hasOwnProperty.call(frame, "method");
+  const hasResult = Object.prototype.hasOwnProperty.call(frame, "result");
+  const hasError = Object.prototype.hasOwnProperty.call(frame, "error");
+  if (hasId && !hasMethod && (hasResult || hasError)) {
+    if (hasResult === hasError) {
+      return { kind: "reject", reason: "response must have exactly one of result or error" };
+    }
+    if (!pending.has(frame.id)) {
+      return { kind: "reject", reason: "unknown response id" };
+    }
+    const method = pending.get(frame.id);
+    pending.delete(frame.id);
+    return {
+      kind: "resolve",
+      method,
+      id: frame.id,
+      result: hasResult ? frame.result : undefined,
+      error: hasError ? frame.error : undefined,
+    };
+  }
+  if (hasId && !hasMethod && !hasResult && !hasError) {
+    return { kind: "reject", reason: "malformed response envelope" };
+  }
+  if (hasId && hasMethod && (hasResult || hasError)) {
+    return { kind: "reject", reason: "notification cannot resolve a pending id" };
+  }
+  return { kind: "skip" };
+}
+
+export function journeyPairCounts(journey) {
+  switch (journey) {
+    case "discovery":
+      return Object.freeze({
+        initialize: 1,
+        "skills/list": 1,
+        "thread/start": 0,
+        "mcpServerStatus/list": 0,
+        "turn/start": 0,
+      });
+    case "failures":
+      return Object.freeze({
+        initialize: 1,
+        "skills/list": 1,
+        "thread/start": 3,
+        "mcpServerStatus/list": 3,
+        "turn/start": 0,
+      });
+    case "tool":
+      return Object.freeze({
+        initialize: 1,
+        "skills/list": 1,
+        "thread/start": 3,
+        "mcpServerStatus/list": 3,
+        "turn/start": 1,
+      });
+    default:
+      throw new Error(`unknown journey ${journey}`);
+  }
+}
+
+function isClientRpcRequest(event) {
+  return (
+    event != null &&
+    event.direction === "client" &&
+    event.id != null &&
+    typeof event.method === "string" &&
+    !Object.prototype.hasOwnProperty.call(event, "result") &&
+    !Object.prototype.hasOwnProperty.call(event, "error")
+  );
+}
+
+function isServerRpcResponse(event) {
+  return (
+    event != null &&
+    event.direction === "server" &&
+    event.id != null &&
+    typeof event.method === "string" &&
+    event.method !== "mcpServer/elicitation/request" &&
+    (Object.prototype.hasOwnProperty.call(event, "result") ||
+      Object.prototype.hasOwnProperty.call(event, "error"))
+  );
+}
+
+function threadRoleFromStartParams(params) {
+  const assay = params?.config?.mcp_servers?.assay;
+  const command = assay?.command ?? "";
+  const args = assay?.args ?? [];
+  if (String(command).includes("missing-assay-mcp-server")) {
+    return "missing";
+  }
+  if (args.some((value) => String(value).includes("missing-policy-root"))) {
+    return "invalid";
+  }
+  return "primary";
+}
+
+export function consumeJourneyTopology(events, journey) {
+  const counts = journeyPairCounts(journey);
+  const pending = new Map();
+  const clientById = new Map();
+  const pairs = [];
+  const reasons = [];
+  if (!Array.isArray(events)) {
+    return { ok: false, reasons: ["events must be an array"], pairs, counts };
+  }
+  for (const event of events) {
+    if (isClientRpcRequest(event)) {
+      if (pending.has(event.id)) {
+        reasons.push(`duplicate client request id ${event.id}`);
+        continue;
+      }
+      pending.set(event.id, event.method);
+      clientById.set(event.id, event);
+      continue;
+    }
+    if (!isServerRpcResponse(event)) {
+      continue;
+    }
+    const expectedMethod = pending.get(event.id);
+    if (expectedMethod != null && event.method !== expectedMethod) {
+      reasons.push("notification cannot resolve a pending id");
+      continue;
+    }
+    const frame = { id: event.id };
+    if (Object.prototype.hasOwnProperty.call(event, "result")) {
+      frame.result = event.result;
+    }
+    if (Object.prototype.hasOwnProperty.call(event, "error")) {
+      frame.error = event.error;
+    }
+    const resolved = resolvePendingResponse(pending, frame);
+    if (resolved.kind === "reject") {
+      reasons.push(resolved.reason);
+      continue;
+    }
+    if (resolved.kind === "resolve") {
+      pairs.push({
+        method: resolved.method,
+        id: resolved.id,
+        request: clientById.get(resolved.id),
+        response: event,
+      });
+    }
+  }
+  if (pending.size > 0) {
+    reasons.push("unresolved client requests");
+  }
+  const byMethod = (method) => pairs.filter((pair) => pair.method === method);
+  for (const [method, n] of Object.entries(counts)) {
+    const found = byMethod(method).length;
+    if (found !== n) {
+      reasons.push(`expected ${n} ${method} pairs, found ${found}`);
+    }
+  }
+  for (const pair of pairs) {
+    if (!Object.prototype.hasOwnProperty.call(counts, pair.method)) {
+      reasons.push(`unexpected ${pair.method} pair`);
+    }
+  }
+  const skillPairs = byMethod("skills/list");
+  if (skillPairs.length === 1) {
+    const data = skillPairs[0].response.result?.data;
+    if (!Array.isArray(data) || data.length !== 1) {
+      reasons.push("skills/list must have exactly one data row");
+    }
+  }
+  const roles = new Map();
+  for (const pair of byMethod("thread/start")) {
+    const role = threadRoleFromStartParams(pair.request?.params);
+    if (roles.has(role)) {
+      reasons.push(`duplicate ${role} thread/start`);
+    }
+    roles.set(role, pair);
+  }
+  if (counts["thread/start"] === 3) {
+    for (const role of ["primary", "missing", "invalid"]) {
+      if (!roles.has(role)) {
+        reasons.push(`missing ${role} thread/start`);
+      }
+    }
+  }
+  const statusByRole = new Map();
+  for (const pair of byMethod("mcpServerStatus/list")) {
+    const threadId = pair.request?.params?.threadId;
+    let role = null;
+    for (const [name, thread] of roles) {
+      if (thread.response.result?.thread?.id === threadId) {
+        role = name;
+        break;
+      }
+    }
+    if (!role) {
+      reasons.push("status list is not bound to a thread/start pair");
+      continue;
+    }
+    if (statusByRole.has(role)) {
+      reasons.push(`duplicate ${role} status list`);
+    }
+    statusByRole.set(role, pair);
+  }
+  if (counts["mcpServerStatus/list"] === 3) {
+    for (const role of ["primary", "missing", "invalid"]) {
+      if (!statusByRole.has(role)) {
+        reasons.push(`missing ${role} status list`);
+      }
+    }
+  }
+  return {
+    ok: reasons.length === 0,
+    reasons,
+    pairs,
+    counts,
+    threads: ["primary", "missing", "invalid"]
+      .map((role) => roles.get(role)?.response)
+      .filter(Boolean),
+    statuses: ["primary", "missing", "invalid"]
+      .map((role) => statusByRole.get(role)?.response)
+      .filter(Boolean),
+    skills: skillPairs.map((pair) => pair.response),
+  };
 }
 
 export function isMainModule(argv1, moduleUrl) {
@@ -477,13 +741,15 @@ function classifySkill(skills, expected) {
   if (found.length === 0) {
     return cell("fail", `missing skill ${expected.skillName}`);
   }
-  const enabled = found.find(
-    (skill) =>
-      skill.enabled === true &&
-      typeof skill.path === "string" &&
-      pathInsideRoot(expected.projectRoot, skill.path),
-  );
-  if (!enabled) {
+  if (found.length !== 1) {
+    return cell("fail", "duplicate or contradictory skill rows");
+  }
+  const enabled = found[0];
+  if (
+    enabled.enabled !== true ||
+    typeof enabled.path !== "string" ||
+    !pathInsideRoot(expected.projectRoot, enabled.path)
+  ) {
     return cell("fail", "skill present but not enabled under project root");
   }
   return cell("pass", `discovered ${expected.skillName}`);
@@ -616,13 +882,16 @@ function classifyInvocation(calls, expected, threadId, turnId, events) {
   if (call.turnId !== turnId) {
     return cell("fail", `tool turn ${call.turnId} != ${turnId}`);
   }
-  if (item.tool !== expected.toolName) {
+  if (!EXPECTED_TOOLS.includes(item.tool)) {
+    return cell("fail", `tool ${item.tool} is not in the listed release set`);
+  }
+  if (item.tool !== DECIDE_TOOL) {
     return cell("fail", `wrong tool ${item.tool}`);
   }
   if (item.status !== "completed") {
     return cell("fail", `tool status ${item.status}`);
   }
-  if (!sameJson(item.arguments, expected.toolArguments)) {
+  if (!sameJson(item.arguments, DECIDE_INPUT)) {
     return cell("fail", "tool arguments are not the pinned probe");
   }
   if (!uniqueExpectedElicitationAccepted(events, threadId, turnId)) {
@@ -637,6 +906,15 @@ function classifyInvocation(calls, expected, threadId, turnId, events) {
 function classifyPayload(calls, invocationCell) {
   if (invocationCell.status !== "pass") {
     return cell("unavailable", "invocation cell did not pass");
+  }
+  const result = calls[0].item?.result;
+  if (result && typeof result === "object") {
+    if (result["isError"] === true) {
+      return cell("fail", "MCP result isError is true");
+    }
+    if (result.error != null) {
+      return cell("fail", "MCP result is error-bearing");
+    }
   }
   const payload = payloadFromCall(calls[0].item);
   if (!payload) {
@@ -669,29 +947,30 @@ function classifyNegative(statuses, index, label) {
 }
 
 function classifyDriver(meta) {
-  if (meta.streamUnavailable) {
-    return cell("unavailable", "stdio stream unavailable");
-  }
-  if (meta.truncated) {
-    return cell("unavailable", "stdio truncated at bound");
-  }
-  const outcome = meta.driverOutcome;
-  if (outcome && typeof outcome === "object") {
-    if (outcome.status === "unavailable") {
-      return cell("unavailable", "driver outcome unavailable");
+  const kind = closedDriverOutcomeStatus(meta);
+  if (kind === "unavailable") {
+    if (meta.streamUnavailable) {
+      return cell("unavailable", "stdio stream unavailable");
     }
-    if (outcome.exitCode === 0) {
-      return cell("pass", "driver outcome exit 0");
+    if (meta.truncated) {
+      return cell("unavailable", "stdio truncated at bound");
     }
-    return cell("fail", `driver outcome exit ${outcome.exitCode}`);
+    return cell("unavailable", "driver outcome unavailable");
   }
-  if (meta.childExitCode === 0) {
+  if (kind === "pass") {
+    return cell("pass", "child and driver exits 0 with status pass");
+  }
+  if (kind === "preliminary") {
     return cell("pass", "child exited 0 pending driver outcome");
   }
-  return cell("fail", `child exited ${meta.childExitCode}`);
+  if (kind === "fail") {
+    const exit = meta.driverOutcome?.exitCode ?? meta.childExitCode;
+    return cell("fail", `driver outcome exit ${exit}`);
+  }
+  return cell("fail", "contradictory or malformed driver outcome");
 }
 
-export function classifyCells(events, meta, expected) {
+export function classifyCells(events, meta, expected, journey = "tool") {
   if (meta.streamUnavailable || meta.truncated) {
     const blocked = classifyDriver(meta);
     const rest = Object.fromEntries(
@@ -702,9 +981,29 @@ export function classifyCells(events, meta, expected) {
     );
     return { ...rest, driverCompleted: blocked };
   }
-  const skills = skillsFromEvents(events);
-  const starts = threadStarts(events);
-  const statuses = mcpStatuses(events);
+  let topology;
+  try {
+    topology = consumeJourneyTopology(events, journey);
+  } catch (error) {
+    topology = { ok: false, reasons: [error.message] };
+  }
+  if (!topology.ok) {
+    const reason = `journey topology: ${topology.reasons?.[0] || "mismatch"}`;
+    return {
+      skillDiscovered: cell("fail", reason),
+      mcpStarted: cell("fail", reason),
+      exactToolsListed: cell("fail", reason),
+      oneToolInvoked: cell("fail", reason),
+      structuredResultValidated: cell("unavailable", reason),
+      missingBinaryNotClean: cell("fail", reason),
+      invalidPolicyRootNotClean: cell("fail", reason),
+      cwdObserved: cell("fail", reason),
+      driverCompleted: classifyDriver(meta),
+    };
+  }
+  const skills = skillsFromEvents(topology.skills);
+  const starts = topology.threads;
+  const statuses = topology.statuses;
   const calls = mcpToolCalls(events);
   const threadId = primaryThreadId(starts);
   const turnId = actualTurnId(events);
@@ -788,7 +1087,7 @@ export function classifyRecord(record) {
     invocation: record.invocation ?? null,
     events,
   };
-  const cells = classifyCells(events, meta, record.expected);
+  const cells = classifyCells(events, meta, record.expected, record.journey ?? "tool");
   return {
     schema: SCHEMA,
     cells,
@@ -962,6 +1261,31 @@ function assertAllowlistedRegularFiles(proofRoot) {
   }
 }
 
+function canonicalManifestExpected(expected) {
+  if (!expected || typeof expected !== "object") {
+    return "manifest expected is missing";
+  }
+  if (
+    !Array.isArray(expected.tools) ||
+    !sameJson([...expected.tools].sort(), [...EXPECTED_TOOLS].sort())
+  ) {
+    return "manifest expected tools are not the canonical release set";
+  }
+  if (expected.toolName !== DECIDE_TOOL) {
+    return "manifest expected toolName is not the canonical decide tool";
+  }
+  if (!sameJson(expected.toolArguments, DECIDE_INPUT)) {
+    return "manifest expected toolArguments are not the canonical decide input";
+  }
+  if (expected.skillName !== SKILL_NAME) {
+    return "manifest expected skillName is not canonical";
+  }
+  if (typeof expected.projectRoot !== "string" || expected.projectRoot.length === 0) {
+    return "manifest expected projectRoot must be a run-specific path";
+  }
+  return null;
+}
+
 export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   boundedPositiveInt("maxBytes", maxBytes, HARD_MAX_BYTES);
   const reasons = [];
@@ -1038,6 +1362,25 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
     typeof manifest.driverOutcome.exitCode !== "number"
   ) {
     reasons.push("v2 record requires childExitCode and driverOutcome");
+  }
+  const expectedReason = canonicalManifestExpected(manifest.expected);
+  if (expectedReason) {
+    reasons.push(expectedReason);
+  }
+  if (!manifest.truncated && !manifest.streamUnavailable) {
+    const topology = consumeJourneyTopology(events, manifest.journey ?? "tool");
+    if (!topology.ok) {
+      reasons.push(`journey topology: ${topology.reasons[0] || "mismatch"}`);
+    }
+  }
+  const outcomeKind = closedDriverOutcomeStatus({
+    childExitCode: manifest.childExitCode,
+    driverOutcome: manifest.driverOutcome,
+    truncated: Boolean(manifest.truncated),
+    streamUnavailable: Boolean(manifest.streamUnavailable),
+  });
+  if (outcomeKind === "invalid" || outcomeKind === "preliminary") {
+    reasons.push("childExitCode and driverOutcome violate the closed driver-outcome rule");
   }
   const record = {
     schema: manifest.schema,

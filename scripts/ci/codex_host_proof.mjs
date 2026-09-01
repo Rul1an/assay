@@ -22,11 +22,14 @@ import {
   HARD_MAX_EVENTS,
   HARD_MAX_FRAMES,
   HARD_MAX_RETAINED_BYTES,
+  HARD_MAX_SNAPSHOT_BYTES,
   HARD_MAX_TIMEOUT_MS,
   SCHEMA,
   SKILL_NAME,
   boundedPositiveInt,
   classifyRecord,
+  closedDriverOutcomeStatus,
+  consumeJourneyTopology,
   credentialArgvReason,
   decidePrompt,
   driverOutcomeFrom,
@@ -37,6 +40,7 @@ import {
   isMainModule,
   persistableArgv,
   requiredCellsForJourney,
+  resolvePendingResponse,
   scrub,
   sha256File,
   sha256Utf8,
@@ -242,33 +246,63 @@ function firstVersionLine(result, name) {
 
 const BOUND_EXEC = Symbol("boundExec");
 
-function snapshotNamedBinary(srcPath, destDir, destName) {
+function snapshotNamedBinary(srcPath, destDir, destName, options = {}) {
   fs.mkdirSync(destDir, { recursive: true, mode: 0o700 });
   const dest = path.join(destDir, destName);
   const src = resolveRegularBinary(srcPath, destName);
+  const maxBytes = options.testOnlySnapshotMaxBytes ?? HARD_MAX_SNAPSHOT_BYTES;
   const inFlags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0);
   const inFd = fs.openSync(src, inFlags);
+  let outFd = null;
   try {
     const st = fs.fstatSync(inFd);
     if (!st.isFile()) {
       throw new Error(`${destName} snapshot source is not a regular file`);
+    }
+    if (st.size > maxBytes) {
+      throw new Error(`${destName} snapshot source exceeds binary ceiling`);
     }
     const outFlags =
       fs.constants.O_CREAT |
       fs.constants.O_EXCL |
       fs.constants.O_WRONLY |
       (fs.constants.O_NOFOLLOW || 0);
-    const outFd = fs.openSync(dest, outFlags, 0o700);
-    try {
-      const buf = Buffer.alloc(64 * 1024);
-      let n;
-      while ((n = fs.readSync(inFd, buf, 0, buf.length, null)) > 0) {
-        fs.writeSync(outFd, buf, 0, n);
+    outFd = fs.openSync(dest, outFlags, 0o700);
+    const buf = Buffer.alloc(64 * 1024);
+    let copied = 0;
+    let n;
+    while ((n = fs.readSync(inFd, buf, 0, buf.length, null)) > 0) {
+      if (typeof options.testOnlyAfterSnapshotRead === "function") {
+        options.testOnlyAfterSnapshotRead(copied, src, destName);
       }
-    } finally {
+      copied += n;
+      if (copied > maxBytes) {
+        throw new Error(`${destName} snapshot copy exceeded binary ceiling`);
+      }
+      if (fs.fstatSync(inFd).size > maxBytes) {
+        throw new Error(`${destName} snapshot source grew past binary ceiling`);
+      }
+      fs.writeSync(outFd, buf, 0, n);
+    }
+  } catch (error) {
+    if (outFd != null) {
+      try {
+        fs.closeSync(outFd);
+      } catch {
+        /* already closed */
+      }
+      outFd = null;
+    }
+    try {
+      fs.unlinkSync(dest);
+    } catch {
+      /* dest may be absent */
+    }
+    throw error;
+  } finally {
+    if (outFd != null) {
       fs.closeSync(outFd);
     }
-  } finally {
     fs.closeSync(inFd);
   }
   fs.chmodSync(dest, 0o700);
@@ -289,7 +323,7 @@ function probeAssayMcpVersion(pathEnv) {
   );
 }
 
-export function resolveHostIdentity() {
+export function resolveHostIdentity(options = {}) {
   const codexPath = findOnPath("codex");
   const mcpPath = findOnPath("assay-mcp-server");
   if (!codexPath) {
@@ -301,8 +335,12 @@ export function resolveHostIdentity() {
   const snapRoot = fs.mkdtempSync(path.join(os.tmpdir(), "assay-host-snap-"));
   const codexDir = path.join(snapRoot, "codex");
   const mcpDir = path.join(snapRoot, "mcp");
-  const codexSnap = snapshotNamedBinary(codexPath, codexDir, "codex");
-  const mcpSnap = snapshotNamedBinary(mcpPath, mcpDir, "assay-mcp-server");
+  const snapOpts = {
+    testOnlySnapshotMaxBytes: options.testOnlySnapshotMaxBytes,
+    testOnlyAfterSnapshotRead: options.testOnlyAfterSnapshotRead,
+  };
+  const codexSnap = snapshotNamedBinary(codexPath, codexDir, "codex", snapOpts);
+  const mcpSnap = snapshotNamedBinary(mcpPath, mcpDir, "assay-mcp-server", snapOpts);
   const pathTail = process.env.PATH || "";
   const identity = {
     os: os.platform(),
@@ -371,8 +409,21 @@ function writeProofFiles(options, pack) {
     },
     events: pack.events,
   };
+  consumeJourneyTopology(pack.events, options.journey);
   const preliminary = classifyRecord(record);
   let driverOutcome = driverOutcomeFrom(pack, preliminary.cells, options.journey);
+  const outcomeKind = closedDriverOutcomeStatus({
+    childExitCode: pack.childExit,
+    driverOutcome,
+    truncated: pack.truncated,
+    streamUnavailable: pack.streamUnavailable,
+  });
+  if (outcomeKind === "invalid") {
+    driverOutcome = {
+      exitCode: driverOutcome.exitCode === 0 ? 1 : driverOutcome.exitCode,
+      status: "fail",
+    };
+  }
   record.driverOutcome = driverOutcome;
   let classified = classifyRecord(record);
   const eventsText = stableStringify(pack.events);
@@ -556,18 +607,30 @@ export async function runProof(options) {
       return;
     }
     const message = parseLine(line, options.maxBytes);
-    if (Object.prototype.hasOwnProperty.call(message, "id") && pending.has(message.id)) {
-      const method = pending.get(message.id);
-      pending.delete(message.id);
-      retainEvent(
-        scrub({
-          direction: "server",
-          method,
-          id: message.id,
-          result: message.result ?? null,
-          error: message.error ?? null,
-        }),
-      );
+    const resolved = resolvePendingResponse(pending, message);
+    if (resolved.kind === "resolve") {
+      const event = {
+        direction: "server",
+        method: resolved.method,
+        id: resolved.id,
+      };
+      if (resolved.result !== undefined) {
+        event.result = resolved.result;
+      }
+      if (resolved.error !== undefined) {
+        event.error = resolved.error;
+      }
+      retainEvent(scrub(event));
+      return;
+    }
+    if (resolved.kind === "reject") {
+      streamUnavailable = true;
+      retainEvent({
+        direction: "driver",
+        method: "error",
+        params: { message: resolved.reason },
+      });
+      stopChild();
       return;
     }
     if (typeof message.method === "string") {
