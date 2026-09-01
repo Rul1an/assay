@@ -490,6 +490,8 @@ case "$MODE" in
     echo "ok: cleanup-selftest" ;;
   cleanup-leaf-status-selftest)
     [[ -n "${2:-}" && -d "$2" ]] || fail "cleanup leaf selftest requires an existing leaf directory"
+    [[ -n "$(find "$2" -mindepth 1 -maxdepth 1 -print -quit)" ]] \
+      || fail "cleanup leaf selftest requires a non-empty leaf directory"
     [[ "${3:-}" =~ ^([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])$ ]] \
       || fail "cleanup leaf selftest requires an exit status in 0..255"
     LEAF="$2"

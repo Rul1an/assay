@@ -665,6 +665,18 @@ run_leaf_residue_case() {
 run_leaf_residue_case "$DRIVER" production 0 1
 run_leaf_residue_case "$DRIVER" production 23 23
 
+empty_leaf="$tmp/empty-selftest-leaf"
+mkdir "$empty_leaf"
+set +e
+run_bounded 12 bash "$DRIVER" cleanup-leaf-status-selftest "$empty_leaf" 0 \
+  >"$tmp/empty-leaf.out" 2>"$tmp/empty-leaf.err"
+empty_leaf_ec=$?
+set -e
+[[ "$empty_leaf_ec" -ne 0 ]] || fail "cleanup leaf selftest accepted an empty leaf"
+grep -Fq 'cleanup leaf selftest requires a non-empty leaf directory' "$tmp/empty-leaf.err" \
+  || fail "empty cleanup leaf refusal missing diagnostic"
+[[ -d "$empty_leaf" ]] || fail "cleanup leaf selftest removed an empty caller path"
+
 noop_cleanup_driver="$tmp/noop-cleanup-driver.sh"
 cp "$DRIVER" "$noop_cleanup_driver"
 printf '\n# comment-only cleanup control\n' >>"$noop_cleanup_driver"
