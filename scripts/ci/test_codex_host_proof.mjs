@@ -31,6 +31,7 @@ import {
   forbiddenProofRoot,
   preSpawnFailureState,
   projectClientRequestParams,
+  projectRetainedEvent,
   sha256File,
   sha256Utf8,
   stableStringify,
@@ -4002,4 +4003,234 @@ test("review repair: host manifest invocation is exact and credential-free", () 
     }
     fs.rmSync(proofRoot, { recursive: true, force: true });
   }
+});
+
+const OBSERVED_DRIFT_ITEMS = Object.freeze([
+  Object.freeze({ type: "reasoning", id: "item_0", text: "Considering the assay decide tool." }),
+  Object.freeze({ type: "agentMessage", id: "item_2", text: "The decision endpoint returned allow." }),
+]);
+
+test("stableStringify refuses non-JSON primitives; JSON null stays a valid token", () => {
+  assert.equal(stableStringify({ a: null }), '{"a":null}\n');
+  assert.equal(stableStringify([null, 1, "x", true]), '[null,1,"x",true]\n');
+  for (const bad of [
+    undefined,
+    { server: undefined },
+    [undefined],
+    { nested: { deep: undefined } },
+    { fn: () => {} },
+  ]) {
+    assert.throws(
+      () => stableStringify(bad),
+      /JSON/,
+      "a value JSON cannot encode must be rejected, never serialized as a bare token",
+    );
+  }
+});
+
+test("absent scalar fields project to explicit invalid markers, never undefined", () => {
+  const projected = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5,
+      threadId: "t",
+      turnId: "u",
+      item: OBSERVED_DRIFT_ITEMS[0],
+    },
+  });
+  const item = projected.params.item;
+  for (const key of ["server", "tool", "arguments", "status"]) {
+    assert.notEqual(typeof item[key], "undefined", `${key} must not project to undefined`);
+  }
+  const serialized = stableStringify(projected);
+  assert.doesNotMatch(
+    serialized,
+    /[:,[]undefined/,
+    "a bare undefined token must never appear; the quoted marker string is the valid form",
+  );
+  assert.equal(
+    serialized.includes(OBSERVED_DRIFT_ITEMS[0].text),
+    false,
+    "reasoning text must not be retained",
+  );
+  assert.deepEqual(JSON.parse(serialized), projected, "retained bytes must round-trip");
+  const withNull = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5,
+      threadId: "t",
+      turnId: "u",
+      item: { type: "userMessage", id: null, content: [] },
+    },
+  });
+  assert.equal(withNull.params.item.id, null, "JSON null must survive the scalar boundary");
+});
+
+test("observed Codex item drift retains valid JSON and classifies fail-closed", async () => {
+  const control = await drive("valid");
+  assert.equal(validateProofRoot(control.proofRoot).ok, true, "unchanged control must validate");
+  const events = structuredClone(control.events);
+  const toolIndex = events.findIndex(
+    (event) => event.method === "item/completed" && event.params?.item?.type === "mcpToolCall",
+  );
+  assert.notEqual(toolIndex, -1, "control run must contain the tool item to replace");
+  const toolRow = events[toolIndex];
+  const driftRows = OBSERVED_DRIFT_ITEMS.map((item) =>
+    projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: toolRow.params.completedAtMs,
+        threadId: toolRow.params.threadId,
+        turnId: toolRow.params.turnId,
+        item,
+      },
+    }),
+  );
+  events.splice(toolIndex, 1, ...driftRows);
+  const terminalIndex = events.findIndex((event) => event.method === "turn/completed");
+  assert.notEqual(terminalIndex, -1, "control run must contain the terminal turn");
+  const terminal = events[terminalIndex];
+  events[terminalIndex] = projectRetainedEvent({
+    direction: "server",
+    method: "turn/completed",
+    id: null,
+    params: {
+      threadId: terminal.params.threadId,
+      turn: {
+        id: terminal.params.turn.id,
+        status: terminal.params.turn.status,
+        items: [
+          ...terminal.params.turn.items.filter((item) => item?.type !== "mcpToolCall"),
+          ...OBSERVED_DRIFT_ITEMS,
+        ],
+      },
+    },
+  });
+  const serialized = stableStringify(events);
+  const parsed = JSON.parse(serialized);
+  assert.deepEqual(parsed, events, "retained drift events must round-trip through JSON");
+  for (const item of OBSERVED_DRIFT_ITEMS) {
+    assert.equal(serialized.includes(item.text), false, `${item.type} text must not be retained`);
+  }
+  const notificationItem = driftRows[0].params.item;
+  const terminalItems = events[terminalIndex].params.turn.items;
+  const terminalReasoning = terminalItems.find((item) => item.type === "reasoning");
+  assert.deepEqual(
+    terminalReasoning,
+    notificationItem,
+    "item/completed and terminal items must share one projection rule",
+  );
+  const classified = classifyRecord({ ...control.manifest, events });
+  assert.notEqual(classified.cells.oneToolInvoked.status, "pass");
+  assert.match(
+    Object.values(classified.cells)
+      .map((entry) => entry.reason)
+      .join("; "),
+    /unknown retained item type (reasoning|agentMessage)/,
+    "unknown item types must stay explicit protocol drift",
+  );
+  rewriteProof(control.proofRoot, control.manifest, events, classified);
+  const revalidated = validateProofRoot(control.proofRoot);
+  assert.equal(revalidated.ok, false, "a drift proof must not validate clean");
+  assert.ok(
+    revalidated.classified,
+    "a retained drift proof must still be classifiable, not unparsable",
+  );
+  assert.doesNotMatch(revalidated.reasons.join("; "), /unavailable allowlisted proof/);
+  assert.match(revalidated.reasons.join("; "), /unknown retained item type/);
+  assert.notEqual(revalidated.classified.cells.oneToolInvoked.status, "pass");
+});
+
+test("zero retained mcpToolCall rows keep oneToolInvoked non-pass", async () => {
+  const control = await drive("valid");
+  const events = structuredClone(control.events).filter(
+    (event) =>
+      !(event.method === "item/completed" && event.params?.item?.type === "mcpToolCall"),
+  );
+  const terminal = events.find((event) => event.method === "turn/completed");
+  assert.ok(terminal, "control run must contain the terminal turn");
+  terminal.params.turn.items = terminal.params.turn.items.filter(
+    (item) => item?.type !== "mcpToolCall",
+  );
+  const classified = classifyRecord({ ...control.manifest, events });
+  assert.notEqual(classified.cells.oneToolInvoked.status, "pass");
+  assert.match(classified.cells.oneToolInvoked.reason, /no mcpToolCall/);
+  assert.notEqual(classified.cells.structuredResultValidated.status, "pass");
+});
+
+test("projection-idempotent unknown terminal items are drift, not accepted topology", async () => {
+  const control = await drive("valid");
+  for (const type of ["reasoning", "agentMessage"]) {
+    const events = structuredClone(control.events);
+    const terminal = events.find((event) => event.method === "turn/completed");
+    assert.ok(terminal, "control run must contain the terminal turn");
+    const crafted = {
+      type,
+      id: `item_${type}`,
+      server: "assay",
+      tool: "unmapped",
+      arguments: { tool: "x", policy: "y" },
+      status: "completed",
+    };
+    terminal.params.turn.items.push(crafted);
+    assert.deepEqual(
+      projectRetainedEvent(terminal),
+      terminal,
+      `${type} fixture must be a projection fixed point, or this test stops probing past the round-trip check`,
+    );
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(
+      allIntendedCellsPass(classified),
+      false,
+      `a ${type} terminal item must not classify clean`,
+    );
+    assert.match(
+      Object.values(classified.cells)
+        .map((entry) => entry.reason)
+        .join("; "),
+      /unknown retained item type/,
+      `a ${type} terminal item must be explicit protocol drift`,
+    );
+    rewriteProof(control.proofRoot, control.manifest, events, classified);
+    const revalidated = validateProofRoot(control.proofRoot);
+    assert.equal(revalidated.ok, false, `a ${type} terminal item must not validate clean`);
+    assert.match(revalidated.reasons.join("; "), /unknown retained item type/);
+  }
+});
+
+test("non-finite numbers never silently become JSON null at either boundary", () => {
+  for (const bad of [NaN, Infinity, -Infinity]) {
+    assert.throws(
+      () => stableStringify({ completedAtMs: bad }),
+      /JSON/,
+      `${bad} must fail loud before persistence, never serialize as null`,
+    );
+    assert.throws(() => stableStringify([bad]), /JSON/);
+    const projected = projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: bad,
+        threadId: "t",
+        turnId: "u",
+        item: { type: "userMessage", id: "u1", content: [] },
+      },
+    });
+    assert.deepEqual(
+      projected.params.completedAtMs,
+      { __invalidType: "number" },
+      `${bad} must project to the explicit invalid marker, not travel as a number`,
+    );
+    const serialized = stableStringify(projected);
+    assert.deepEqual(JSON.parse(serialized), projected, "the marker form must round-trip");
+  }
+  assert.equal(stableStringify({ completedAtMs: 5 }), '{"completedAtMs":5}\n');
+  assert.equal(stableStringify([0, -1.5]), '[0,-1.5]\n');
 });

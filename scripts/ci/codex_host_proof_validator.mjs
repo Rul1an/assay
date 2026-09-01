@@ -680,9 +680,9 @@ export function isProofRpcId(id) {
   return Number.isSafeInteger(id);
 }
 
-function retainedItemReason(item) {
+function retainedItemReason(item, label = "item/completed") {
   if (!isPlainObject(item) || !isNonemptyString(item.type) || !isNonemptyString(item.id)) {
-    return "item/completed item is not a typed retained item";
+    return `${label} item is not a typed retained item`;
   }
   switch (item.type) {
     case "mcpToolCall":
@@ -695,12 +695,12 @@ function retainedItemReason(item) {
       ) {
         return null;
       }
-      return "item/completed mcpToolCall is missing required retained fields";
+      return `${label} mcpToolCall is missing required retained fields`;
     case "userMessage":
       if (Array.isArray(item.content)) {
         return null;
       }
-      return "item/completed userMessage is missing required retained fields";
+      return `${label} userMessage is missing required retained fields`;
     default:
       return `unknown retained item type ${item.type}`;
   }
@@ -748,6 +748,12 @@ function retainedMethodParamsReason(method, params) {
         !isNonemptyString(turn.status)
       ) {
         return "turn/completed turn must have typed id, items, and status";
+      }
+      for (const item of turn.items) {
+        const itemReason = retainedItemReason(item, "turn/completed");
+        if (itemReason) {
+          return itemReason;
+        }
       }
       return null;
     }
@@ -1195,8 +1201,24 @@ export function stableStringify(value) {
   return `${stringifySorted(value)}\n`;
 }
 
+// The one JSON scalar rule for both the projection and stringify boundaries:
+// null, string, boolean, and only finite numbers. NaN and the infinities are
+// not JSON and must never silently become a null token.
+function isJsonScalar(value) {
+  return (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  );
+}
+
 function stringifySorted(value) {
   if (value === null || typeof value !== "object") {
+    if (!isJsonScalar(value)) {
+      const shown = typeof value === "number" ? String(value) : typeof value;
+      throw new Error(`stable stringify cannot encode ${shown} as JSON`);
+    }
     return JSON.stringify(value);
   }
   if (Array.isArray(value)) {
@@ -1785,9 +1807,7 @@ function invalidProjection(value) {
 }
 
 function projectedScalar(value) {
-  return value == null || ["string", "number", "boolean"].includes(typeof value)
-    ? value
-    : invalidProjection(value);
+  return isJsonScalar(value) ? value : invalidProjection(value);
 }
 
 function projectDecisionObject(value) {
@@ -2168,7 +2188,7 @@ export function projectRetainedEvent(event) {
   if (!isPlainObject(event)) {
     return invalidProjection(event);
   }
-  const out = { direction: event.direction, method: event.method };
+  const out = { direction: projectedScalar(event.direction), method: projectedScalar(event.method) };
   if (hasOwn(event, "id")) {
     out.id = event.id;
   }
