@@ -41,7 +41,10 @@ function skillEntry() {
     skills: [
       {
         name: "assay-golden-path",
-        description: "golden path",
+        description:
+          scenario === "credential-shaped-description"
+            ? "ghp_0123456789abcdefghijklmnopqrstuvwxyz"
+            : "golden path",
         enabled: true,
         path: path.join(projectRoot, ".agents/skills/assay-golden-path/SKILL.md"),
         scope: "repo",
@@ -150,6 +153,12 @@ function handle(message) {
     return;
   }
   if (method === "initialized") {
+    if (
+      scenario === "strict-initialized-wire" &&
+      (!params || typeof params !== "object" || Array.isArray(params) || Object.keys(params).length !== 0)
+    ) {
+      process.exit(3);
+    }
     return;
   }
   if (method === "skills/list") {

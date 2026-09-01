@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Fail-closed Codex host-proof validator. Owns the single classification
- * function the driver must call. Synthetic records cannot become live proof.
+ * Fail-closed Codex host-observation validator. Owns the single classification
+ * function the driver must call. A retained record never authenticates itself.
  */
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const SCHEMA = "assay.codex-host-proof.v2";
+export const SCHEMA = "assay.codex-host-proof.v3";
 export const FAKE_USER_AGENT = "assay-codex-host-proof-fake/1";
 export const SKILL_NAME = "assay-golden-path";
 export const DECIDE_TOOL = "assay_policy_decide";
@@ -33,6 +33,16 @@ export const ALLOWLIST = Object.freeze([
   "events.json",
   "classification.json",
 ]);
+export const HOST_SUBJECTS = Object.freeze([
+  "codex.snapshot",
+  "assay-mcp-server.snapshot",
+]);
+export const HOST_ALLOWLIST = Object.freeze([...ALLOWLIST, ...HOST_SUBJECTS]);
+export const EXTERNAL_ATTESTATION = "not_provided";
+
+export function proofAllowlist(hasHostIdentity) {
+  return hasHostIdentity ? HOST_ALLOWLIST : ALLOWLIST;
+}
 export const CELLS = Object.freeze([
   "skillDiscovered",
   "mcpStarted",
@@ -60,8 +70,8 @@ export const HARD_MAX_DIR_ENTRIES = 64;
 // is 231,697,328 bytes; assay-mcp-server is 11,105,184 bytes. 256 MiB would
 // sit one routine host growth away from false-unavailable.
 export const HARD_MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024;
-export const LIVE_IDENTITY_NONCLAIM =
-  "event-derived and internally consistent identity is not authenticated or tamper-evident";
+export const RECORD_CONSISTENCY_NONCLAIM =
+  "record consistency does not authenticate origin, authorship, signature, or attestation";
 
 export function finitePositiveInt(name, value) {
   if (!Number.isInteger(value) || value <= 0) {
@@ -285,30 +295,52 @@ function verifyObservedBinary(bin) {
     if (st.isSymbolicLink() || !st.isFile()) {
       return false;
     }
+    if (process.platform !== "win32" && (st.mode & 0o111) === 0) {
+      return false;
+    }
+    fs.accessSync(bin.path, fs.constants.X_OK);
     return sha256File(bin.path) === bin.sha256;
   } catch {
     return false;
   }
 }
 
-export function verifyLiveIdentity(identity, invocation, topology) {
+export function verifyLiveIdentity(
+  identity,
+  invocation,
+  topology,
+  proofRoot = null,
+  journey = "tool",
+) {
   if (!liveIdentityBound(identity)) {
     return false;
+  }
+  if (proofRoot != null) {
+    const expectedCodex = path.join(path.resolve(proofRoot), HOST_SUBJECTS[0]);
+    const expectedMcp = path.join(path.resolve(proofRoot), HOST_SUBJECTS[1]);
+    if (
+      path.resolve(identity.codex.path) !== expectedCodex ||
+      path.resolve(identity.assayMcp.path) !== expectedMcp
+    ) {
+      return false;
+    }
   }
   if (!verifyObservedBinary(identity.codex) || !verifyObservedBinary(identity.assayMcp)) {
     return false;
   }
-  const command =
-    topology?.primaryThread?.request?.params?.config?.mcp_servers?.assay?.command;
-  if (command !== identity.assayMcp.path) {
-    return false;
+  if (journey !== "discovery") {
+    const command =
+      topology?.primaryThread?.request?.params?.config?.mcp_servers?.assay?.command;
+    if (command !== identity.assayMcp.path) {
+      return false;
+    }
   }
   const argv = invocation?.argv;
   return Array.isArray(argv) && argv[0] === identity.codex.path && argv[1] === "app-server";
 }
 
-export function observedIdentityBound(identity, invocation, topology) {
-  return verifyLiveIdentity(identity, invocation, topology);
+export function observedIdentityBound(identity, invocation, topology, proofRoot = null, journey = "tool") {
+  return verifyLiveIdentity(identity, invocation, topology, proofRoot, journey);
 }
 
 export function requiredCellsForJourney(journey) {
@@ -1048,6 +1080,9 @@ function classifyToolResultEnvelope(result) {
   if (!isPlainObject(result)) {
     return { ok: false, reason: "tool result envelope is not an object", payload: null };
   }
+  if (hasOwn(result, "isError") && typeof result.isError !== "boolean") {
+    return { ok: false, reason: "MCP result isError is not Boolean", payload: null };
+  }
   if (result["isError"] === true) {
     return { ok: false, reason: "MCP result isError is true", payload: null };
   }
@@ -1201,7 +1236,7 @@ function classifyTools(statuses) {
 
 // Notification/elicitation consumers read topology collections only.
 // They must not rescan raw events for initialize/thread/status/skills.
-function matchingTurnStatus(rows, threadId, turnId) {
+function matchingTurn(rows, threadId, turnId) {
   const matches = rows.filter(
     (row) =>
       row.method === "turn/completed" &&
@@ -1215,8 +1250,7 @@ function matchingTurnStatus(rows, threadId, turnId) {
   if (matches.length !== 1) {
     return "non-unique";
   }
-  const status = matches[0].params?.turn?.status;
-  return typeof status === "string" ? status : "";
+  return matches[0];
 }
 
 function uniqueExpectedElicitationAccepted(topology, threadId, turnId) {
@@ -1243,10 +1277,14 @@ function classifyInvocation(calls, expected, threadId, turnId, topology) {
   if (calls.length === 0) {
     return cell("unavailable", "no mcpToolCall item/completed");
   }
-  const terminalStatus = matchingTurnStatus(topology?.notifications ?? [], threadId, turnId);
-  if (terminalStatus === null) {
+  const terminal = matchingTurn(topology?.notifications ?? [], threadId, turnId);
+  if (terminal === null) {
     return cell("unavailable", "no matching turn/completed");
   }
+  if (terminal === "non-unique") {
+    return cell("fail", "matching turn/completed is non-unique");
+  }
+  const terminalStatus = terminal.params?.turn?.status;
   if (terminalStatus !== "completed") {
     return cell("fail", `matching turn/completed status ${terminalStatus} is not completed`);
   }
@@ -1261,6 +1299,18 @@ function classifyInvocation(calls, expected, threadId, turnId, topology) {
   }
   const call = calls[0];
   const item = call.item;
+  const terminalItems = terminal.params.turn.items.filter(
+    (candidate) => candidate?.type === "mcpToolCall" && candidate?.id === item.id,
+  );
+  if (terminalItems.length > 1) {
+    return cell("fail", "matching terminal contains duplicate tool items");
+  }
+  if (
+    terminalItems.length === 1 &&
+    !sameJson(projectRetainedItem(terminalItems[0]), projectRetainedItem(item))
+  ) {
+    return cell("fail", "matching terminal tool item contradicts item/completed");
+  }
   if (item.server !== "assay") {
     return cell("fail", `wrong server ${item.server}`);
   }
@@ -1415,46 +1465,6 @@ export function classifyCells(events, meta, expected, journey = "tool", topology
   };
 }
 
-export function liveAcceptance(cells, meta) {
-  const reasons = [];
-  if (meta.provenance !== "live") {
-    reasons.push("synthetic fixtures never become live proof");
-  }
-  if (meta.userAgent === FAKE_USER_AGENT) {
-    reasons.push("fake stdio child userAgent cannot be live");
-  }
-  if (!liveIdentityBound(meta.hostIdentity)) {
-    reasons.push(
-      "live record requires bound Codex and Assay/MCP binary paths, versions, hashes, install source, OS, and architecture",
-    );
-  } else if (
-    meta.provenance === "live" &&
-    !verifyLiveIdentity(meta.hostIdentity, meta.invocation, meta.topology)
-  ) {
-    reasons.push(
-      "live identity must be the observed binaries bound to the actual thread/start and spawn commands",
-    );
-  }
-  if (meta.truncated || meta.streamUnavailable) {
-    reasons.push("host stream was truncated or unavailable");
-  }
-  if ((meta.driverOutcome?.exitCode ?? 1) !== 0) {
-    reasons.push(
-      `driver outcome exit ${meta.driverOutcome?.exitCode ?? 1} is preserved; not rewritten to 0`,
-    );
-  }
-  for (const name of CELLS) {
-    if (cells[name]?.status !== "pass") {
-      reasons.push(`${name}=${cells[name]?.status}`);
-    }
-  }
-  reasons.push(LIVE_IDENTITY_NONCLAIM);
-  if (reasons.length > 1 || meta.provenance !== "live") {
-    return cell("fail", reasons.join("; "));
-  }
-  return cell("pass", `live host-event evidence and driver completion; ${LIVE_IDENTITY_NONCLAIM}`);
-}
-
 export function classifyRecord(record) {
   const events = record.events;
   if (!Array.isArray(events)) {
@@ -1469,7 +1479,7 @@ export function classifyRecord(record) {
   }
   const derived = initializeFromTopology(topology);
   const meta = {
-    provenance: record.provenance,
+    captureMode: record.captureMode,
     childExitCode: record.childExitCode,
     driverOutcome: record.driverOutcome ?? null,
     truncated: Boolean(record.truncated),
@@ -1484,7 +1494,7 @@ export function classifyRecord(record) {
   return {
     schema: SCHEMA,
     cells,
-    liveAcceptance: liveAcceptance(cells, meta),
+    externalAttestation: EXTERNAL_ATTESTATION,
   };
 }
 
@@ -1531,12 +1541,12 @@ export function runtimeProofRoots(projectRoot, initialize) {
   return roots;
 }
 
-export function forbiddenProofRoot(proofRoot, provenance, extraRoots = []) {
+export function forbiddenProofRoot(proofRoot, captureMode, extraRoots = []) {
   const resolved = resolveExistingAncestor(proofRoot);
   const temps = [os.tmpdir(), "/tmp", "/private/tmp", "/var/tmp"];
   const underTmp = temps.some((temp) => pathEqualsOrInside(canonicalResolved(temp), resolved));
-  if (provenance === "live" && underTmp) {
-    return "live proof root must not be temporary storage";
+  if (captureMode === "host-observation" && underTmp) {
+    return "host-observation root must not be temporary storage";
   }
   const runtimeRoots = [];
   if (process.env.CODEX_HOME) {
@@ -1581,6 +1591,256 @@ export function scrub(value) {
     return out;
   }
   return value;
+}
+
+function invalidProjection(value) {
+  return { __invalidType: Array.isArray(value) ? "array" : typeof value };
+}
+
+function projectedScalar(value) {
+  return value == null || ["string", "number", "boolean"].includes(typeof value)
+    ? value
+    : invalidProjection(value);
+}
+
+function projectDecisionObject(value) {
+  if (!isPlainObject(value)) {
+    return invalidProjection(value);
+  }
+  const out = {};
+  for (const key of ["allowed", "reason"]) {
+    if (hasOwn(value, key)) {
+      out[key] = projectedScalar(value[key]);
+    }
+  }
+  const unexpected = Object.keys(value)
+    .filter((key) => key !== "allowed" && key !== "reason")
+    .sort();
+  if (unexpected.length > 0) {
+    out.__unexpectedKeys = unexpected;
+  }
+  return out;
+}
+
+function projectToolResult(result) {
+  if (!isPlainObject(result)) {
+    return invalidProjection(result);
+  }
+  const out = {};
+  if (hasOwn(result, "isError")) {
+    out.isError = typeof result.isError === "boolean" ? result.isError : "[invalid]";
+  }
+  if (result.error != null) {
+    out.error = { present: true };
+  }
+  if (hasOwn(result, "structuredContent")) {
+    out.structuredContent =
+      result.structuredContent == null ? null : projectDecisionObject(result.structuredContent);
+  }
+  if (hasOwn(result, "content")) {
+    if (!Array.isArray(result.content)) {
+      out.content = invalidProjection(result.content);
+    } else {
+      out.content = result.content.map((block) => {
+        if (!isPlainObject(block) || block.type !== "text" || typeof block.text !== "string") {
+          return { type: typeof block?.type === "string" ? block.type : "[invalid]" };
+        }
+        try {
+          const parsed = JSON.parse(block.text);
+          return { type: "text", text: stableStringify(projectDecisionObject(parsed)) };
+        } catch {
+          return { type: "text", text: "[invalid-json]" };
+        }
+      });
+    }
+  }
+  const unexpected = Object.keys(result)
+    .filter((key) => !["isError", "error", "structuredContent", "content"].includes(key))
+    .sort();
+  if (unexpected.length > 0) {
+    out.__unexpectedKeys = unexpected;
+  }
+  return out;
+}
+
+function projectArguments(value) {
+  if (!isPlainObject(value)) {
+    return invalidProjection(value);
+  }
+  const out = {};
+  for (const key of ["tool", "policy"]) {
+    if (hasOwn(value, key)) {
+      out[key] = projectedScalar(value[key]);
+    }
+  }
+  const unexpected = Object.keys(value)
+    .filter((key) => key !== "tool" && key !== "policy")
+    .sort();
+  if (unexpected.length > 0) {
+    out.__unexpectedKeys = unexpected;
+  }
+  return out;
+}
+
+function projectRetainedItem(item) {
+  if (!isPlainObject(item)) {
+    return invalidProjection(item);
+  }
+  if (item.type === "userMessage") {
+    return { type: "userMessage", id: projectedScalar(item.id), content: [] };
+  }
+  const out = {
+    type: projectedScalar(item.type),
+    id: projectedScalar(item.id),
+    server: projectedScalar(item.server),
+    tool: projectedScalar(item.tool),
+    arguments: projectArguments(item.arguments),
+    status: projectedScalar(item.status),
+  };
+  if (hasOwn(item, "result")) {
+    out.result = item.result == null ? null : projectToolResult(item.result);
+  }
+  const unexpected = Object.keys(item)
+    .filter((key) => !["type", "id", "server", "tool", "arguments", "status", "result"].includes(key))
+    .sort();
+  if (unexpected.length > 0) {
+    out.__unexpectedKeys = unexpected;
+  }
+  return out;
+}
+
+function projectServerResult(method, result) {
+  if (!isPlainObject(result)) {
+    return invalidProjection(result);
+  }
+  if (method === "initialize") {
+    return {
+      userAgent: result.userAgent === FAKE_USER_AGENT ? FAKE_USER_AGENT : "[observed-host]",
+      codexHome: projectedScalar(result.codexHome),
+      platformFamily: projectedScalar(result.platformFamily),
+      platformOs: projectedScalar(result.platformOs),
+    };
+  }
+  if (method === "skills/list") {
+    return {
+      data: Array.isArray(result.data)
+        ? result.data.map((entry) => ({
+            cwd: projectedScalar(entry?.cwd),
+            skills: Array.isArray(entry?.skills)
+              ? entry.skills.map((skill) => ({
+                  name: projectedScalar(skill?.name),
+                  enabled: projectedScalar(skill?.enabled),
+                  path: projectedScalar(skill?.path),
+                  scope: projectedScalar(skill?.scope),
+                }))
+              : invalidProjection(entry?.skills),
+          }))
+        : invalidProjection(result.data),
+    };
+  }
+  if (method === "thread/start") {
+    return { cwd: projectedScalar(result.cwd), thread: { id: projectedScalar(result.thread?.id) } };
+  }
+  if (method === "mcpServerStatus/list") {
+    return {
+      data: Array.isArray(result.data)
+        ? result.data.map((row) => ({
+            name: projectedScalar(row?.name),
+            runtimeStatus: projectedScalar(row?.runtimeStatus),
+            tools: isPlainObject(row?.tools)
+              ? Object.fromEntries(Object.keys(row.tools).sort().map((name) => [name, {}]))
+              : invalidProjection(row?.tools),
+          }))
+        : invalidProjection(result.data),
+    };
+  }
+  if (method === "turn/start") {
+    return { turn: { id: projectedScalar(result.turn?.id) } };
+  }
+  return { __unretainedResponse: true };
+}
+
+function projectNotificationParams(method, params) {
+  if (!isPlainObject(params)) {
+    return invalidProjection(params);
+  }
+  if (method === "initialized") {
+    return {};
+  }
+  if (method === "item/completed") {
+    return {
+      completedAtMs: projectedScalar(params.completedAtMs),
+      threadId: projectedScalar(params.threadId),
+      turnId: projectedScalar(params.turnId),
+      item: projectRetainedItem(params.item),
+    };
+  }
+  if (method === "turn/completed") {
+    return {
+      threadId: projectedScalar(params.threadId),
+      turn: {
+        id: projectedScalar(params.turn?.id),
+        status: projectedScalar(params.turn?.status),
+        items: Array.isArray(params.turn?.items)
+          ? params.turn.items.map(projectRetainedItem)
+          : invalidProjection(params.turn?.items),
+      },
+    };
+  }
+  if (method === "mcpServer/elicitation/request") {
+    return {
+      serverName: projectedScalar(params.serverName),
+      threadId: projectedScalar(params.threadId),
+      turnId: projectedScalar(params.turnId),
+      message: projectedScalar(params.message),
+      mode: projectedScalar(params.mode),
+      requestedSchema: isPlainObject(params.requestedSchema)
+        ? {
+            type: projectedScalar(params.requestedSchema.type),
+            properties: isPlainObject(params.requestedSchema.properties)
+              ? Object.fromEntries(Object.keys(params.requestedSchema.properties).sort().map((key) => [key, {}]))
+              : invalidProjection(params.requestedSchema.properties),
+          }
+        : invalidProjection(params.requestedSchema),
+    };
+  }
+  return {};
+}
+
+export function projectRetainedEvent(event) {
+  if (!isPlainObject(event)) {
+    return invalidProjection(event);
+  }
+  const out = { direction: event.direction, method: event.method };
+  if (hasOwn(event, "id")) {
+    out.id = event.id;
+  }
+  if (event.direction === "driver") {
+    out.params = { message: "retained driver error" };
+    return out;
+  }
+  if (event.direction === "server" && (hasOwn(event, "result") || hasOwn(event, "error"))) {
+    if (hasOwn(event, "result")) {
+      out.result = projectServerResult(event.method, event.result);
+    }
+    if (hasOwn(event, "error")) {
+      out.error = { present: true };
+    }
+    return out;
+  }
+  if (hasOwn(event, "params")) {
+    out.params =
+      event.direction === "server" || event.method === "initialized"
+        ? projectNotificationParams(event.method, event.params)
+        : event.params;
+  }
+  if (event.direction === "client" && hasOwn(event, "result")) {
+    out.result = {
+      action: projectedScalar(event.result?.action),
+      content: {},
+    };
+  }
+  return out;
 }
 
 const DEFAULT_MAX_BYTES = 1_048_576;
@@ -1642,8 +1902,8 @@ function namesIn(proofRoot) {
   return names;
 }
 
-function assertAllowlistedRegularFiles(proofRoot) {
-  for (const name of ALLOWLIST) {
+function assertAllowlistedRegularFiles(proofRoot, allowlist) {
+  for (const name of allowlist) {
     const st = fs.lstatSync(path.join(proofRoot, name));
     if (st.isSymbolicLink()) {
       throw new Error(`${name} is a symlink`);
@@ -1679,19 +1939,29 @@ function canonicalManifestExpected(expected) {
   return null;
 }
 
+function unavailableProof(reason) {
+  return {
+    ok: false,
+    reasons: [reason],
+    classified: null,
+    recordConsistency: cell("unavailable", reason),
+    externalAttestation: EXTERNAL_ATTESTATION,
+  };
+}
+
 export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   boundedPositiveInt("maxBytes", maxBytes, HARD_MAX_BYTES);
   const reasons = [];
-  const earlyForbidden = forbiddenProofRoot(proofRoot, "synthetic");
+  const earlyForbidden = forbiddenProofRoot(proofRoot, "synthetic-fixture");
   if (earlyForbidden) {
-    return { ok: false, reasons: [earlyForbidden], classified: null };
+    return unavailableProof(earlyForbidden);
   }
   let manifest;
   let events;
   let stored;
   try {
     namesIn(proofRoot);
-    assertAllowlistedRegularFiles(proofRoot);
+    assertAllowlistedRegularFiles(proofRoot, ALLOWLIST);
     manifest = parseJsonBytes(
       readBoundedFile(path.join(proofRoot, "manifest.json"), maxBytes),
       maxBytes,
@@ -1705,11 +1975,17 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
       maxBytes,
     );
   } catch (error) {
-    return {
-      ok: false,
-      reasons: [`unavailable allowlisted proof: ${error.message}`],
-      classified: null,
-    };
+    return unavailableProof(`unavailable allowlisted proof: ${error.message}`);
+  }
+  if (!Array.isArray(events)) {
+    reasons.push("events payload is not an array");
+  } else {
+    for (const event of events) {
+      if (!sameJson(event, projectRetainedEvent(event))) {
+        reasons.push("events payload is not the closed retained projection");
+        break;
+      }
+    }
   }
   if (manifest.schema !== SCHEMA) {
     reasons.push(`unexpected schema ${manifest.schema}`);
@@ -1719,18 +1995,26 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   } catch (error) {
     reasons.push(error.message);
   }
-  if (manifest.provenance === "live") {
-    const liveForbidden = forbiddenProofRoot(proofRoot, "live");
+  if (manifest.captureMode === "host-observation") {
+    const liveForbidden = forbiddenProofRoot(proofRoot, "host-observation");
     if (liveForbidden) {
       reasons.push(liveForbidden);
     }
   }
   const present = namesIn(proofRoot).sort();
-  const allowed = [...ALLOWLIST].sort();
+  const allowed = [...proofAllowlist(manifest.hostIdentity != null)].sort();
+  try {
+    assertAllowlistedRegularFiles(proofRoot, allowed);
+  } catch (error) {
+    reasons.push(`unavailable allowlisted proof: ${error.message}`);
+  }
   if (stableStringify(present) !== stableStringify(allowed)) {
     reasons.push(
       `proof membership ${present.join(",")} is not the exact allowlist ${allowed.join(",")}`,
     );
+  }
+  if (!sameJson(manifest.allowlist, allowed)) {
+    reasons.push("manifest allowlist does not match capture membership");
   }
   const eventsText = stableStringify(events);
   const actual = sha256Utf8(eventsText);
@@ -1743,7 +2027,7 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   }
   const eventForbidden = forbiddenProofRoot(
     proofRoot,
-    manifest.provenance === "live" ? "live" : "synthetic",
+    manifest.captureMode === "host-observation" ? "host-observation" : "synthetic-fixture",
     runtimeProofRoots(manifest.expected?.projectRoot, derivedInitialize),
   );
   if (eventForbidden) {
@@ -1754,7 +2038,7 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
     !manifest.driverOutcome ||
     typeof manifest.driverOutcome.exitCode !== "number"
   ) {
-    reasons.push("v2 record requires childExitCode and driverOutcome");
+    reasons.push("v3 record requires childExitCode and driverOutcome");
   }
   const expectedReason = canonicalManifestExpected(manifest.expected);
   if (expectedReason) {
@@ -1777,7 +2061,7 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   }
   const record = {
     schema: manifest.schema,
-    provenance: manifest.provenance,
+    captureMode: manifest.captureMode,
     childExitCode: manifest.childExitCode,
     driverOutcome: manifest.driverOutcome,
     truncated: manifest.truncated,
@@ -1793,31 +2077,52 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   try {
     classified = classifyRecord(record);
   } catch (error) {
-    return { ok: false, reasons: [`classification failed: ${error.message}`], classified: null };
+    return unavailableProof(`classification failed: ${error.message}`);
   }
   if (stableStringify(stored) !== stableStringify(classified)) {
     reasons.push("stored classification disagrees with recomputed classification");
   }
-  if (manifest.provenance === "synthetic" && classified.liveAcceptance.status === "pass") {
-    reasons.push("synthetic fixture claimed live pass");
+  if (classified.externalAttestation !== EXTERNAL_ATTESTATION) {
+    reasons.push("retained classification invented external attestation");
   }
-  if (manifest.provenance === "live" && manifest.initialize?.userAgent === FAKE_USER_AGENT) {
-    reasons.push("live provenance with fake stdio child userAgent");
+  if (
+    manifest.captureMode !== "synthetic-fixture" &&
+    manifest.captureMode !== "host-observation"
+  ) {
+    reasons.push(`unexpected captureMode ${manifest.captureMode}`);
   }
-  if (manifest.provenance === "live" && classified.liveAcceptance.status === "pass") {
+  if (manifest.captureMode === "host-observation" && manifest.initialize?.userAgent === FAKE_USER_AGENT) {
+    reasons.push("host observation with fake stdio child userAgent");
+  }
+  if (manifest.hostIdentity != null) {
+    let topology = null;
+    try {
+      topology = consumeJourneyTopology(events, manifest.journey ?? "tool");
+    } catch {
+      topology = null;
+    }
     if (
-      manifest.truncated ||
-      manifest.streamUnavailable ||
-      manifest.driverOutcome?.exitCode !== 0
+      !verifyLiveIdentity(
+        manifest.hostIdentity,
+        manifest.invocation,
+        topology,
+        proofRoot,
+        manifest.journey,
+      )
     ) {
-      reasons.push("live pass is incompatible with truncated, unavailable, or nonzero driver outcome");
+      reasons.push("retained host subjects do not match their fixed paths, hashes, or commands");
     }
   }
+  const recordConsistency = reasons.length === 0
+    ? cell("pass", `retained bytes and derived classification agree; ${RECORD_CONSISTENCY_NONCLAIM}`)
+    : cell("fail", reasons.join("; "));
   return {
     ok: reasons.length === 0,
     reasons,
     classified,
     manifest,
+    recordConsistency,
+    externalAttestation: EXTERNAL_ATTESTATION,
   };
 }
 
@@ -1831,7 +2136,8 @@ function main() {
     stableStringify({
       ok: result.ok,
       reasons: result.reasons,
-      liveAcceptance: result.classified?.liveAcceptance ?? null,
+      recordConsistency: result.recordConsistency ?? null,
+      externalAttestation: result.externalAttestation ?? EXTERNAL_ATTESTATION,
       cells: result.classified?.cells ?? null,
     }),
   );

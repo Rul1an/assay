@@ -12,7 +12,11 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { parseArgs, resolveHostIdentity, runProof } from "./codex_host_proof.mjs";
+import {
+  parseArgs,
+  resolveHostIdentity as resolveHostIdentityProduction,
+  runProof,
+} from "./codex_host_proof.mjs";
 import {
   CELLS,
   DECIDE_INPUT,
@@ -20,6 +24,7 @@ import {
   EXPECTED_TOOLS,
   HARD_MAX_SNAPSHOT_BYTES,
   classifyRecord,
+  consumeJourneyTopology,
   decidePrompt,
   elicitationAcceptable,
   forbiddenProofRoot,
@@ -27,6 +32,7 @@ import {
   sha256Utf8,
   stableStringify,
   validateProofRoot,
+  verifyLiveIdentity,
 } from "./codex_host_proof_validator.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -36,6 +42,13 @@ const VALIDATOR_SRC = fs.readFileSync(path.join(HERE, "codex_host_proof_validato
 
 function scratch() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "assay-2684-"));
+}
+
+function resolveHostIdentity(options = {}) {
+  return resolveHostIdentityProduction({
+    proofRoot: options.proofRoot ?? scratch(),
+    ...options,
+  });
 }
 
 function spawnFakeChild(childArgv, projectRoot) {
@@ -61,7 +74,7 @@ async function drive(scenario, journey = "tool") {
   );
   const childArgv = ["node", FAKE, "--scenario", scenario, "--project-root", projectRoot];
   const result = await runProof({
-    provenance: "synthetic",
+    captureMode: "synthetic-fixture",
     timeoutMs: 4000,
     maxBytes: 1_048_576,
     journey,
@@ -143,8 +156,8 @@ function driveCli(scenario, journey = "tool", extra = {}) {
     writeShadowCodex(["node", FAKE, "--scenario", scenario, "--project-root", projectRoot]);
   const args = [
     path.join(HERE, "codex_host_proof.mjs"),
-    "--provenance",
-    extra.provenance ?? "synthetic",
+    "--capture-mode",
+    extra.captureMode ?? "synthetic-fixture",
     "--proof-root",
     proofRoot,
     "--project-root",
@@ -184,10 +197,10 @@ test("driver calls the validator classification function; no extra classify modu
   assert.equal(fs.existsSync(path.join(HERE, "codex_host_proof_classify.mjs")), false);
 });
 
-test("synthetic positive control: every intended cell passes; liveAcceptance must not", async () => {
+test("synthetic positive control: cells pass without inventing external attestation", async () => {
   const { classified, manifest, proofRoot, driverOutcome, childExitCode, events } = await drive("valid");
-  assert.equal(manifest.provenance, "synthetic");
-  assert.equal(manifest.schema, "assay.codex-host-proof.v2");
+  assert.equal(manifest.captureMode, "synthetic-fixture");
+  assert.equal(manifest.schema, "assay.codex-host-proof.v3");
   assert.equal(childExitCode, 0);
   assert.equal(driverOutcome.exitCode, 0);
   assert.equal(manifest.childExitCode, 0);
@@ -199,7 +212,7 @@ test("synthetic positive control: every intended cell passes; liveAcceptance mus
       `${name} must pass on the nominal synthetic pack`,
     );
   }
-  assert.notEqual(classified.liveAcceptance.status, "pass");
+  assert.equal(classified.externalAttestation, "not_provided");
   for (const event of clientParams(events, "mcpServerStatus/list")) {
     assert.equal(typeof event.params.threadId, "string");
     assert.notEqual(event.params.threadId, "");
@@ -210,14 +223,14 @@ test("synthetic positive control: every intended cell passes; liveAcceptance mus
   }
   const checked = validateProofRoot(proofRoot);
   assert.equal(checked.ok, true);
-  assert.notEqual(checked.classified.liveAcceptance.status, "pass");
+  assert.equal(checked.classified.externalAttestation, "not_provided");
 });
 
 test("no-op discovery control does not invent tool or MCP passes", async () => {
   const { classified } = await drive("valid", "discovery");
   assert.notEqual(classified.cells.oneToolInvoked.status, "pass");
   assert.notEqual(classified.cells.mcpStarted.status, "pass");
-  assert.notEqual(classified.liveAcceptance.status, "pass");
+  assert.notEqual(classified.externalAttestation, "pass");
 });
 
 test("successful tool output plus nonzero child exit: CLI process is nonzero", async () => {
@@ -229,19 +242,19 @@ test("successful tool output plus nonzero child exit: CLI process is nonzero", a
   assert.equal(manifest.childExitCode, 1);
   assert.notEqual(manifest.driverOutcome.exitCode, 0);
   assert.equal(classified.cells.oneToolInvoked.status, "pass");
-  assert.notEqual(classified.liveAcceptance.status, "pass");
+  assert.notEqual(classified.externalAttestation, "pass");
   const checked = validateProofRoot(proofRoot);
   assert.equal(checked.ok, true);
-  assert.notEqual(checked.classified.liveAcceptance.status, "pass");
+  assert.notEqual(checked.classified.externalAttestation, "pass");
   const relabeled = classifyRecord({
     ...manifest,
     events: JSON.parse(fs.readFileSync(path.join(proofRoot, "events.json"), "utf8")),
     childExitCode: 0,
     driverOutcome: { exitCode: 0, status: "pass" },
-    provenance: "live",
+    captureMode: "host-observation",
   });
   assert.notEqual(
-    relabeled.liveAcceptance.status,
+    relabeled.externalAttestation,
     "pass",
     "rewriting exit 0 on synthetic fake events must not mint live proof",
   );
@@ -252,64 +265,64 @@ test("successful tool output plus nonzero child exit: CLI process is nonzero", a
 
 test("synthetic events never validate as actual-host proof", async () => {
   const { manifest, proofRoot, classified } = await drive("valid");
-  assert.notEqual(classified.liveAcceptance.status, "pass");
+  assert.notEqual(classified.externalAttestation, "pass");
   const forged = JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8"));
-  forged.provenance = "live";
+  forged.captureMode = "host-observation";
   fs.writeFileSync(
     path.join(proofRoot, "manifest.json"),
     `${JSON.stringify(forged)}\n`,
   );
   const checked = validateProofRoot(proofRoot);
   assert.equal(checked.ok, false);
-  assert.match(checked.reasons.join(" "), /live provenance|fake|synthetic/i);
+  assert.match(checked.reasons.join(" "), /host observation|fake|synthetic/i);
 });
 
 test("missing skill is not pass", async () => {
   const { classified } = await drive("missing-skill");
   assert.notEqual(classified.cells.skillDiscovered.status, "pass");
-  assert.notEqual(classified.liveAcceptance.status, "pass");
+  assert.notEqual(classified.externalAttestation, "pass");
 });
 
 test("wrong cwd is not pass", async () => {
   const { classified } = await drive("wrong-cwd");
   assert.notEqual(classified.cells.cwdObserved.status, "pass");
-  assert.notEqual(classified.liveAcceptance.status, "pass");
+  assert.notEqual(classified.externalAttestation, "pass");
 });
 
 test("missing tool is not a clean tool list", async () => {
   const { classified } = await drive("missing-tool");
   assert.notEqual(classified.cells.exactToolsListed.status, "pass");
-  assert.notEqual(classified.liveAcceptance.status, "pass");
+  assert.notEqual(classified.externalAttestation, "pass");
 });
 
 test("wrong tool invocation is not pass", async () => {
   const { classified } = await drive("wrong-tool");
   assert.equal(classified.cells.oneToolInvoked.status, "fail");
   assert.notEqual(classified.cells.oneToolInvoked.status, "unavailable");
-  assert.notEqual(classified.liveAcceptance.status, "pass");
+  assert.notEqual(classified.externalAttestation, "pass");
 });
 
 test("clean missing-binary status is not a host-failure pass", async () => {
   const { classified } = await drive("clean-missing-binary");
   assert.notEqual(classified.cells.missingBinaryNotClean.status, "pass");
-  assert.notEqual(classified.liveAcceptance.status, "pass");
+  assert.notEqual(classified.externalAttestation, "pass");
 });
 
 test("clean invalid-policy-root status is not a host-failure pass", async () => {
   const { classified } = await drive("clean-invalid-root");
   assert.notEqual(classified.cells.invalidPolicyRootNotClean.status, "pass");
-  assert.notEqual(classified.liveAcceptance.status, "pass");
+  assert.notEqual(classified.externalAttestation, "pass");
 });
 
 test("truncated stream does not pass", async () => {
   const { classified } = await drive("truncated");
-  assert.notEqual(classified.liveAcceptance.status, "pass");
+  assert.notEqual(classified.externalAttestation, "pass");
   assert.notEqual(classified.cells.driverCompleted.status, "pass");
 });
 
 test("unavailable stream does not pass", async () => {
   const { classified } = await drive("unavailable-stream");
-  assert.notEqual(classified.liveAcceptance.status, "pass");
+  assert.notEqual(classified.externalAttestation, "pass");
 });
 
 test("hash mismatch fails the validator", async () => {
@@ -417,7 +430,7 @@ function driveInline(childArgv, extra = {}) {
   const proofRoot = extra.proofRoot ?? scratch();
   const testOnlyChild = extra.testOnlyChild ?? spawnFakeChild(childArgv, projectRoot);
   return runProof({
-    provenance: extra.provenance ?? "synthetic",
+    captureMode: extra.captureMode ?? "synthetic-fixture",
     timeoutMs: extra.timeoutMs ?? 4000,
     maxBytes: extra.maxBytes ?? 1_048_576,
     journey: extra.journey ?? "tool",
@@ -437,8 +450,8 @@ function driveCliInline(childArgv, extra = {}) {
   const codexBin = writeShadowCodex(childArgv);
   const args = [
     path.join(HERE, "codex_host_proof.mjs"),
-    "--provenance",
-    "synthetic",
+    "--capture-mode",
+    "synthetic-fixture",
     "--proof-root",
     proofRoot,
     "--project-root",
@@ -483,9 +496,9 @@ test("finite oversize line is bounded before parse; cells stay unavailable", asy
   );
   assert.notEqual(classified.cells.oneToolInvoked.status, "pass");
   assert.equal(classified.cells.oneToolInvoked.status, "unavailable");
-  assert.notEqual(classified.liveAcceptance.status, "pass");
+  assert.notEqual(classified.externalAttestation, "pass");
   const checked = validateProofRoot(proofRoot);
-  assert.notEqual(checked.classified.liveAcceptance.status, "pass");
+  assert.notEqual(checked.classified.externalAttestation, "pass");
 });
 
 test("malformed JSON line writes unavailable evidence; CLI proof root is not empty", async () => {
@@ -497,7 +510,9 @@ test("malformed JSON line writes unavailable evidence; CLI proof root is not emp
   const cli = driveCliInline(childArgv, { timeoutMs: 800 });
   assert.equal(cli.stderr.includes("SyntaxError"), false, "parse errors must not escape the data callback");
   assert.deepEqual(proofFiles(cli.proofRoot), [
+    "assay-mcp-server.snapshot",
     "classification.json",
+    "codex.snapshot",
     "events.json",
     "manifest.json",
   ]);
@@ -506,7 +521,7 @@ test("malformed JSON line writes unavailable evidence; CLI proof root is not emp
   );
   assert.equal(stored.cells.oneToolInvoked.status, "unavailable");
   assert.notEqual(stored.cells.oneToolInvoked.status, "pass");
-  assert.notEqual(stored.liveAcceptance.status, "pass");
+  assert.notEqual(stored.externalAttestation, "pass");
 });
 
 test("credential-bearing argv is rejected before spawn and not persisted", async () => {
@@ -514,7 +529,7 @@ test("credential-bearing argv is rejected before spawn and not persisted", async
   const proofRoot = scratch();
   const marker = "NONSECRET_PROBE_MARKER";
   const { classified, manifest, events } = await runProof({
-    provenance: "synthetic",
+    captureMode: "synthetic-fixture",
     timeoutMs: 4000,
     maxBytes: 1_048_576,
     journey: "tool",
@@ -544,7 +559,7 @@ test("credential-bearing argv is rejected before spawn and not persisted", async
     "credential argv must be rejected before spawn",
   );
   assert.equal(classified.cells.oneToolInvoked.status, "unavailable");
-  assert.notEqual(classified.liveAcceptance.status, "pass");
+  assert.notEqual(classified.externalAttestation, "pass");
   const control = await drive("valid");
   assert.equal(
     JSON.stringify(control.manifest.invocation.argv).includes(marker),
@@ -599,7 +614,7 @@ test("wrong server, thread, or turn cannot pass invocation or result cells", asy
 test("wait for expected tool, not an earlier userMessage; delayed control still passes", async () => {
   const delayed = await drive("delayed-tool");
   assert.equal(delayed.classified.cells.oneToolInvoked.status, "pass");
-  assert.notEqual(delayed.classified.liveAcceptance.status, "pass");
+  assert.notEqual(delayed.classified.externalAttestation, "pass");
   const interleaved = await drive("early-user-then-tool");
   assert.equal(
     interleaved.classified.cells.oneToolInvoked.status,
@@ -618,7 +633,7 @@ test("wait for expected tool, not an earlier userMessage; delayed control still 
   );
   assert.equal(failed.classified.cells.oneToolInvoked.status, "unavailable");
   assert.notEqual(failed.classified.cells.oneToolInvoked.status, "pass");
-  assert.notEqual(failed.classified.liveAcceptance.status, "pass");
+  assert.notEqual(failed.classified.externalAttestation, "pass");
 });
 
 test("turn/start prompt is derived from DECIDE_TOOL/DECIDE_INPUT; response uses result.turn.id", async () => {
@@ -635,7 +650,6 @@ test("turn/start prompt is derived from DECIDE_TOOL/DECIDE_INPUT; response uses 
   assert.equal(typeof reply.result.turn.id, "string");
   assert.equal(reply.result.turnId, undefined);
   assert.doesNotMatch(DRIVER_SRC, /result\?\.turnId|result\.turnId/);
-  assert.doesNotMatch(VALIDATOR_SRC, /\.isError\b/);
   assert.doesNotMatch(DRIVER_SRC, /\.isError\b/);
 });
 
@@ -658,7 +672,7 @@ test("maxBytes and timeoutMs must be finite positive integers; reversal restores
   const projectRoot = seedProject();
   const proofRoot = scratch();
   const base = {
-    provenance: "synthetic",
+    captureMode: "synthetic-fixture",
     journey: "tool",
     allowLiveTurn: false,
     childArgv: ["node", FAKE, "--scenario", "valid", "--project-root", projectRoot],
@@ -674,12 +688,12 @@ test("maxBytes and timeoutMs must be finite positive integers; reversal restores
   assert.equal(control.classified.cells.driverCompleted.status, "pass");
 });
 
-test("forged live provenance and initialize cannot mint a live pass from synthetic events", async () => {
+test("forged live captureMode and initialize cannot mint a live pass from synthetic events", async () => {
   const { manifest, proofRoot, events, classified } = await drive("valid");
-  assert.notEqual(classified.liveAcceptance.status, "pass");
+  assert.notEqual(classified.externalAttestation, "pass");
   const forged = {
     ...JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8")),
-    provenance: "live",
+    captureMode: "host-observation",
     initialize: {
       codexHome: "/opt/codex-home",
       userAgent: "codex_cli/0.50.0",
@@ -696,7 +710,7 @@ test("forged live provenance and initialize cannot mint a live pass from synthet
     streamUnavailable: false,
   });
   assert.notEqual(
-    relabeled.liveAcceptance.status,
+    relabeled.externalAttestation,
     "pass",
     "mutable initialize/userAgent must not relabel synthetic events as live",
   );
@@ -711,7 +725,7 @@ test("forged live provenance and initialize cannot mint a live pass from synthet
     checked.reasons.join(" "),
     /initialize|parity|identity|fake|synthetic|userAgent|binary/i,
   );
-  assert.notEqual(checked.classified?.liveAcceptance?.status, "pass");
+  assert.notEqual(checked.classified?.externalAttestation, "pass");
 });
 
 test("production CLI rejects --child-argv; credential name variants are rejected before spawn", async () => {
@@ -721,8 +735,8 @@ test("production CLI rejects --child-argv; credential name variants are rejected
     process.execPath,
     [
       path.join(HERE, "codex_host_proof.mjs"),
-      "--provenance",
-      "synthetic",
+      "--capture-mode",
+      "synthetic-fixture",
       "--proof-root",
       proofRoot,
       "--project-root",
@@ -737,7 +751,7 @@ test("production CLI rejects --child-argv; credential name variants are rejected
   const marker = "NONSECRET_UNDERSCORE_KEY";
   for (const flag of [`--api_key=${marker}`, `--API_KEY=${marker}`, `--api-key=${marker}`]) {
     const result = await runProof({
-      provenance: "synthetic",
+      captureMode: "synthetic-fixture",
       timeoutMs: 4000,
       maxBytes: 1_048_576,
       journey: "tool",
@@ -763,7 +777,7 @@ test("production CLI rejects --child-argv; credential name variants are rejected
 test("hard maxima and one shared deadline bound frames, bytes, events, and waits", async () => {
   const projectRoot = seedProject();
   const base = {
-    provenance: "synthetic",
+    captureMode: "synthetic-fixture",
     journey: "discovery",
     allowLiveTurn: false,
     childArgv: ["node", FAKE, "--scenario", "valid", "--project-root", projectRoot],
@@ -791,7 +805,7 @@ test("hard maxima and one shared deadline bound frames, bytes, events, and waits
       flood.events.length <= 4096,
     `cumulative events ${flood.events.length} must hit a hard operation cap`,
   );
-  assert.notEqual(flood.classified.liveAcceptance.status, "pass");
+  assert.notEqual(flood.classified.externalAttestation, "pass");
   const slow = await driveInline(
     [
       process.execPath,
@@ -813,7 +827,7 @@ test("proof root rejects CODEX_HOME equality and outside-root events.json symlin
   const previousHome = process.env.CODEX_HOME;
   process.env.CODEX_HOME = proofRoot;
   try {
-    const reason = forbiddenProofRoot(proofRoot, "synthetic");
+    const reason = forbiddenProofRoot(proofRoot, "synthetic-fixture");
     assert.equal(typeof reason, "string");
     assert.match(reason, /CODEX_HOME|runtime|profile|auth/i);
   } finally {
@@ -935,7 +949,7 @@ function portableLiveProofRoot() {
   const nest = path.join(os.userInfo().homedir, ".cache", "assay-ci-codex-host-proof");
   fs.mkdirSync(nest, { recursive: true });
   const root = fs.mkdtempSync(path.join(nest, `proof-${process.pid}-`));
-  const reason = forbiddenProofRoot(root, "live");
+  const reason = forbiddenProofRoot(root, "host-observation");
   if (reason) {
     fs.rmSync(root, { recursive: true, force: true });
     throw new Error(`test helper allocated a forbidden live proof root: ${reason}`);
@@ -943,16 +957,16 @@ function portableLiveProofRoot() {
   return root;
 }
 
-test("production live identity is observed from binaries and required before live CLI exit 0", () => {
+test("production host identity is observed from proof-owned binaries before CLI exit 0", () => {
   assert.equal(
-    forbiddenProofRoot(path.join("/tmp", `assay-live-reject-${process.pid}`), "live"),
-    "live proof root must not be temporary storage",
+    forbiddenProofRoot(path.join("/tmp", `assay-live-reject-${process.pid}`), "host-observation"),
+    "host-observation root must not be temporary storage",
   );
   const proofRoot = portableLiveProofRoot();
   try {
     const mcpBin = writeShadowMcp();
     const live = driveCli("valid", "tool", {
-      provenance: "live",
+      captureMode: "host-observation",
       allowLiveTurn: true,
       assayMcpBin: mcpBin,
       proofRoot,
@@ -985,15 +999,11 @@ test("production live identity is observed from binaries and required before liv
     const classified = JSON.parse(
       fs.readFileSync(path.join(live.proofRoot, "classification.json"), "utf8"),
     );
-    assert.notEqual(classified.liveAcceptance.status, "pass");
-    assert.match(
-      classified.liveAcceptance.reason,
-      /not authenticated|not tamper-evident|no-authentication/i,
-    );
+    assert.equal(classified.externalAttestation, "not_provided");
     assert.notEqual(
       live.status,
       0,
-      "live CLI must not exit 0 while liveAcceptance is not pass",
+      "a fake host-observation userAgent must keep the CLI nonzero",
     );
 
     const forgedRoot = scratch();
@@ -1002,7 +1012,7 @@ test("production live identity is observed from binaries and required before liv
     }
     const forgedEvents = JSON.parse(fs.readFileSync(path.join(forgedRoot, "events.json"), "utf8"));
     const forged = JSON.parse(fs.readFileSync(path.join(forgedRoot, "manifest.json"), "utf8"));
-    forged.provenance = "live";
+    forged.captureMode = "host-observation";
     forged.hostIdentity = {
       os: "linux",
       arch: "x64",
@@ -1029,7 +1039,7 @@ test("production live identity is observed from binaries and required before liv
       streamUnavailable: false,
     });
     assert.notEqual(
-      relabeled.liveAcceptance.status,
+      relabeled.externalAttestation,
       "pass",
       "self-attested nonexistent binary paths must not mint a live pass",
     );
@@ -1037,10 +1047,10 @@ test("production live identity is observed from binaries and required before liv
     fs.writeFileSync(path.join(forgedRoot, "classification.json"), stableStringify(relabeled));
     const checked = validateProofRoot(forgedRoot);
     assert.equal(checked.ok, false);
-    assert.notEqual(checked.classified?.liveAcceptance?.status, "pass");
+    assert.notEqual(checked.classified?.externalAttestation, "pass");
 
     const control = driveCli("valid", "discovery");
-    assert.ok(control.stdout.includes("synthetic") || control.status !== undefined);
+    assert.ok(control.stdout.includes("synthetic-fixture") || control.status !== undefined);
   } finally {
     fs.rmSync(proofRoot, { recursive: true, force: true });
   }
@@ -1070,7 +1080,7 @@ fs.writeFileSync(${JSON.stringify(marker)}, "spawned\\n");
   process.env.PATH = `${path.dirname(shadow)}${path.delimiter}${path.dirname(mcpBin)}${path.delimiter}${previousPath}`;
   try {
     await runProof({
-      provenance: "synthetic",
+      captureMode: "synthetic-fixture",
       timeoutMs: 4000,
       maxBytes: 1_048_576,
       journey: "discovery",
@@ -1120,7 +1130,7 @@ test("fresh proof directory and exclusive no-follow temps block predictable tmp 
   let threw = false;
   try {
     await runProof({
-      provenance: "synthetic",
+      captureMode: "synthetic-fixture",
       timeoutMs: 4000,
       maxBytes: 1_048_576,
       journey: "discovery",
@@ -1185,7 +1195,7 @@ test("one journey-to-required-cells function closes discovery, failures, tool, a
   await assert.rejects(
     () =>
       runProof({
-        provenance: "synthetic",
+        captureMode: "synthetic-fixture",
         timeoutMs: 4000,
         maxBytes: 1_048_576,
         journey: "unknown",
@@ -1228,7 +1238,7 @@ test("forbidden root resolves existing ancestors and dir ceiling stops at entry 
   const previousHome = process.env.HOME;
   process.env.HOME = isolatedHome;
   try {
-    const reason = forbiddenProofRoot(leaf, "synthetic");
+    const reason = forbiddenProofRoot(leaf, "synthetic-fixture");
     assert.equal(typeof reason, "string");
     assert.match(reason, /CODEX_HOME|profile|auth|forbidden/i);
     fs.mkdirSync(leaf);
@@ -1251,7 +1261,7 @@ test("forbidden root resolves existing ancestors and dir ceiling stops at entry 
   assert.ok(Date.now() - started < 2000, "directory ceiling must stop before materializing the full listing");
   assert.equal(listed.ok, false);
   assert.match(listed.reasons.join(" "), /exceeds bound|directory listing|unavailable/i);
-  const control = forbiddenProofRoot(scratch(), "synthetic");
+  const control = forbiddenProofRoot(scratch(), "synthetic-fixture");
   assert.equal(control, null);
 });
 
@@ -1268,16 +1278,6 @@ test("hosted CI catalogue runs the exact focused Node suite", () => {
   const control = fs.readFileSync(path.join(HERE, "../../.github/workflows/ci.yml"), "utf8");
   assert.match(control, /bash scripts\/ci\/test-evidence-vocabulary\.sh/);
 });
-
-function productionChildCommands(src) {
-  const commands = [];
-  const re = /\bspawn(?:Sync)?\s*\(\s*([^,\n]+)/g;
-  let match;
-  while ((match = re.exec(src))) {
-    commands.push(match[1].trim());
-  }
-  return commands;
-}
 
 function writeMarkedBin(name, marker, version) {
   const bin = path.join(scratch(), name);
@@ -1314,8 +1314,8 @@ test("production CLI refuses --codex-bin and --assay-mcp-bin before spawn", () =
       process.execPath,
       [
         path.join(HERE, "codex_host_proof.mjs"),
-        "--provenance",
-        "synthetic",
+        "--capture-mode",
+        "synthetic-fixture",
         "--proof-root",
         proofRoot,
         "--project-root",
@@ -1389,8 +1389,8 @@ test("PATH shadows drive observed Codex and Assay MCP identities", () => {
     process.execPath,
     [
       path.join(HERE, "codex_host_proof.mjs"),
-      "--provenance",
-      "synthetic",
+      "--capture-mode",
+      "synthetic-fixture",
       "--proof-root",
       proofRoot,
       "--project-root",
@@ -1424,7 +1424,7 @@ test("PATH shadows drive observed Codex and Assay MCP identities", () => {
   assert.equal(start.params.config.mcp_servers.assay.command, manifest.hostIdentity.assayMcp.path);
 });
 
-test("production spawn and probe use PATH names; options.codexBin is not executed", async () => {
+test("production selects PATH subjects once and executes proof-owned snapshots", async () => {
   const flagMarker = path.join(scratch(), "flag-codex-ran");
   const pathMarker = path.join(scratch(), "path-codex-ran");
   const flagCodex = writeMarkedBin("codex", flagMarker, "codex-flag/9.9.9");
@@ -1454,7 +1454,7 @@ child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
   process.env.PATH = `${pathDir}${path.delimiter}${path.dirname(mcpBin)}${path.delimiter}${previousPath}`;
   try {
     await runProof({
-      provenance: "synthetic",
+      captureMode: "synthetic-fixture",
       timeoutMs: 4000,
       maxBytes: 1_048_576,
       journey: "discovery",
@@ -1470,15 +1470,6 @@ child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
   assert.equal(fs.existsSync(flagMarker), false, "options.codexBin must not be spawned or probed");
   assert.equal(fs.existsSync(pathMarker), true, "PATH shadow named codex must run");
 
-  const commands = productionChildCommands(DRIVER_SRC);
-  assert.ok(commands.length >= 2, "production must probe and spawn");
-  for (const command of commands) {
-    assert.match(
-      command,
-      /^"(?:codex|assay-mcp-server)"$/,
-      `production spawn/probe command must be a fixed name, got ${command}`,
-    );
-  }
 });
 
 test("swap-and-restore after identity hash cannot change the spawned Codex bytes", async () => {
@@ -1515,7 +1506,7 @@ child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
     const identity = resolveHostIdentity();
     writeMarkedShadow(bMarker, "codex-swapped-b/9.9.9");
     const result = await runProof({
-      provenance: "synthetic",
+      captureMode: "synthetic-fixture",
       timeoutMs: 4000,
       maxBytes: 1_048_576,
       journey: "discovery",
@@ -1547,7 +1538,7 @@ test("proof root inside child CODEX_HOME or event-derived home is rejected", asy
     await assert.rejects(
       () =>
         runProof({
-          provenance: "synthetic",
+          captureMode: "synthetic-fixture",
           timeoutMs: 4000,
           maxBytes: 1_048_576,
           journey: "discovery",
@@ -1568,20 +1559,20 @@ test("proof root inside child CODEX_HOME or event-derived home is rejected", asy
   }
   const eventHome = scratch();
   assert.equal(
-    typeof forbiddenProofRoot(eventHome, "synthetic", [eventHome]),
+    typeof forbiddenProofRoot(eventHome, "synthetic-fixture", [eventHome]),
     "string",
     "event-derived canonical Codex home must be a forbidden extra root",
   );
   const outside = scratch();
   assert.equal(
-    forbiddenProofRoot(outside, "synthetic", [childHome, eventHome]),
+    forbiddenProofRoot(outside, "synthetic-fixture", [childHome, eventHome]),
     null,
     "a proof root outside configured and event-derived homes must stay accepted",
   );
   const control = await drive("valid", "discovery");
   assert.equal(validateProofRoot(control.proofRoot).ok, true);
   assert.equal(
-    forbiddenProofRoot(control.proofRoot, "synthetic", [
+    forbiddenProofRoot(control.proofRoot, "synthetic-fixture", [
       path.join(control.projectRoot, ".codex-home"),
     ]),
     null,
@@ -1919,7 +1910,7 @@ test("F1 strict JSON-RPC envelopes reject method+result, result+error, duplicate
     "a notification carrying a pending id must not yield all-pass",
   );
   assert.notEqual(impersonated.classified.cells.driverCompleted.status, "pass");
-  assert.equal(validateProofRoot(impersonated.proofRoot).ok, true);
+  assert.equal(validateProofRoot(impersonated.proofRoot).ok, false);
 
   const both = await drive("result-and-error-response");
   assert.equal(
@@ -2327,7 +2318,7 @@ function liveBoundRecord(manifest, events) {
     start.params.config.mcp_servers.assay.command = identity.assayMcp.path;
     return {
       ...manifest,
-      provenance: "live",
+      captureMode: "host-observation",
       events: patched,
       hostIdentity: identity,
       invocation: { argv: [identity.codex.path, "app-server"] },
@@ -2380,8 +2371,8 @@ test("P1 paired topology binds initialize and turn/start; control stays green", 
   assert.equal(allIntendedCellsPass(classified), true);
   const bound = liveBoundRecord(manifest, events);
   assert.equal(
-    classifyRecord(bound).liveAcceptance.status,
-    "fail",
+    classifyRecord(bound).externalAttestation,
+    "not_provided",
     "no-op live-bound control still cannot pass on fake events",
   );
 
@@ -2389,7 +2380,7 @@ test("P1 paired topology binds initialize and turn/start; control stays green", 
   hidden.events.unshift({ direction: "server", method: "initialize" });
   const hid = classifyRecord(hidden);
   assert.notEqual(
-    hid.liveAcceptance.status,
+    hid.externalAttestation,
     "pass",
     "a prepended method-only initialize must not hide the paired fake user-agent",
   );
@@ -2604,7 +2595,7 @@ test("closed-world server-row taxonomy refuses id-less response shapes; allowed 
   assert.equal(validateProofRoot(control.proofRoot).ok, true);
 });
 
-test("successful initialize result is required; initialize error cannot mint liveAcceptance", async () => {
+test("successful initialize result is required; initialize error cannot clean the record", async () => {
   const { events, manifest, classified } = await drive("valid");
   assert.equal(allIntendedCellsPass(classified), true);
   const mutated = structuredClone(events);
@@ -2623,9 +2614,9 @@ test("successful initialize result is required; initialize error cannot mint liv
   const bound = liveBoundRecord(manifest, mutated);
   const live = classifyRecord(bound);
   assert.notEqual(
-    live.liveAcceptance.status,
+    live.externalAttestation,
     "pass",
-    "initialize error converted to an empty record must not mint liveAcceptance pass",
+    "initialize error converted to an empty record must not invent attestation",
   );
   const errorRoot = scratch();
   fs.mkdirSync(errorRoot, { recursive: true });
@@ -2639,8 +2630,8 @@ test("successful initialize result is required; initialize error cannot mint liv
   const control = await drive("valid");
   assert.equal(allIntendedCellsPass(control.classified), true);
   assert.equal(
-    classifyRecord(liveBoundRecord(control.manifest, control.events)).liveAcceptance.status,
-    "fail",
+    classifyRecord(liveBoundRecord(control.manifest, control.events)).externalAttestation,
+    "not_provided",
     "no-op live-bound control still cannot pass on fake events",
   );
   assert.equal(validateProofRoot(control.proofRoot).ok, true);
@@ -2668,9 +2659,9 @@ test("live identity binds the canonical primary pair; schema-valid decoy rows ca
     "identity decoy must keep every retained row schema-valid",
   );
   assert.notEqual(
-    hidden.liveAcceptance.status,
+    hidden.externalAttestation,
     "pass",
-    "wrong canonical primary command must fail liveAcceptance while decoy rows stay valid",
+    "wrong canonical primary command must not invent attestation while decoy rows stay valid",
   );
   assert.match(
     VALIDATOR_SRC,
@@ -2685,8 +2676,8 @@ test("live identity binds the canonical primary pair; schema-valid decoy rows ca
   const control = await drive("valid");
   assert.equal(allIntendedCellsPass(control.classified), true);
   assert.equal(
-    classifyRecord(liveBoundRecord(control.manifest, control.events)).liveAcceptance.status,
-    "fail",
+    classifyRecord(liveBoundRecord(control.manifest, control.events)).externalAttestation,
+    "not_provided",
     "no-op live-bound control still cannot pass on fake events",
   );
   assert.equal(validateProofRoot(control.proofRoot).ok, true);
@@ -2973,7 +2964,7 @@ test("review false-green: lifecycle rows and contradictory result projections", 
   candidates.push({
     label: "structuredContent masks contradictory content",
     events: contradictoryResult,
-    proofValid: true,
+    proofValid: false,
     structuredResultStatus: "fail",
   });
 
@@ -2983,7 +2974,7 @@ test("review false-green: lifecycle rows and contradictory result projections", 
   candidates.push({
     label: "valid text plus unsupported content block",
     events: unsupportedBlock,
-    proofValid: true,
+    proofValid: false,
     structuredResultStatus: "fail",
   });
 
@@ -2993,7 +2984,7 @@ test("review false-green: lifecycle rows and contradictory result projections", 
   candidates.push({
     label: "valid text masks scalar structuredContent",
     events: scalarStructured,
-    proofValid: true,
+    proofValid: false,
     structuredResultStatus: "fail",
   });
 
@@ -3012,7 +3003,7 @@ test("review false-green: lifecycle rows and contradictory result projections", 
   candidates.push({
     label: "valid projections disagree",
     events: disagreeingProjections,
-    proofValid: true,
+    proofValid: false,
     structuredResultStatus: "fail",
   });
 
@@ -3043,4 +3034,209 @@ test("review false-green: lifecycle rows and contradictory result projections", 
     true,
     "every hostile lifecycle/result row must match its bounded cell and proof expectations",
   );
+});
+
+test("review closeout: terminal item must agree with item/completed", async () => {
+  const { events, manifest, classified } = await drive("valid");
+  assert.equal(allIntendedCellsPass(classified), true);
+
+  const contradictoryTerminal = structuredClone(events);
+  const completedCall = toolCompleted(contradictoryTerminal);
+  const terminal = contradictoryTerminal.find(
+    (event) => event.direction === "server" && event.method === "turn/completed",
+  );
+  assert.ok(completedCall?.params?.item);
+  assert.ok(terminal?.params?.turn);
+  const failedTerminalItem = structuredClone(completedCall.params.item);
+  failedTerminalItem.status = "failed";
+  failedTerminalItem.result.isError = true;
+  terminal.params.turn.items = [failedTerminalItem];
+  const contradicted = classifyRecord({ ...manifest, events: contradictoryTerminal });
+  assert.notEqual(
+    contradicted.cells.oneToolInvoked.status,
+    "pass",
+    "terminal tool item must agree with the canonical item/completed record",
+  );
+
+});
+
+test("review closeout: present isError must be Boolean", async () => {
+  const { events, manifest } = await drive("valid");
+  const malformedIsError = structuredClone(events);
+  toolCompleted(malformedIsError).params.item.result.isError = "true";
+  const malformed = classifyRecord({ ...manifest, events: malformedIsError });
+  assert.equal(
+    malformed.cells.structuredResultValidated.status,
+    "fail",
+    "present isError must be Boolean before its value is interpreted",
+  );
+
+});
+
+test("review closeout: retained host rows use a credential-free closed projection", async () => {
+  const credential = await drive("credential-shaped-description");
+  const retained = fs.readFileSync(path.join(credential.proofRoot, "events.json"), "utf8");
+  assert.doesNotMatch(
+    retained,
+    /ghp_0123456789abcdefghijklmnopqrstuvwxyz/,
+    "free-form host descriptions must not enter the retained closed projection",
+  );
+  assert.equal(allIntendedCellsPass(credential.classified), true);
+
+});
+
+test("review closeout: retained initialized is the exact wire notification", async () => {
+  const strictWire = await drive("strict-initialized-wire");
+  assert.equal(
+    allIntendedCellsPass(strictWire.classified),
+    true,
+    "the retained initialized notification must be the exact object written on the wire",
+  );
+});
+
+test("review closeout: a retained record cannot self-attest external origin", async () => {
+  const control = await drive("valid");
+  const relabeled = liveBoundRecord(control.manifest, control.events);
+  const initialize = relabeled.events.find(
+    (event) => event.direction === "server" && event.method === "initialize",
+  );
+  assert.ok(initialize?.result);
+  initialize.result.userAgent = "codex_cli/observed-host";
+
+  const classified = classifyRecord(relabeled);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(classified, "liveAcceptance"),
+    false,
+    "self-authored bytes must not expose a positive live-proof surface",
+  );
+  assert.equal(classified.externalAttestation, "not_provided");
+});
+
+test("review closeout: host subjects are proof-owned and independently revalidatable", () => {
+  const before = new Set(snapRoots());
+  const proofRoot = portableLiveProofRoot();
+  try {
+    const observed = driveCli("valid", "tool", {
+      captureMode: "synthetic-fixture",
+      proofRoot,
+    });
+    assert.equal(fs.existsSync(path.join(proofRoot, "manifest.json")), true);
+    const manifest = JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8"));
+    const leaked = snapRoots().filter((name) => !before.has(name));
+    assert.deepEqual(leaked, [], "successful capture must not leave an unowned temp snapshot");
+    for (const role of ["codex", "assayMcp"]) {
+      const relative = path.relative(proofRoot, manifest.hostIdentity[role].path);
+      assert.equal(relative.startsWith("..") || path.isAbsolute(relative), false);
+      assert.equal(fs.existsSync(manifest.hostIdentity[role].path), true);
+    }
+    fs.rmSync(path.dirname(observed.codexBin), { recursive: true, force: true });
+    fs.rmSync(path.dirname(observed.mcpBin), { recursive: true, force: true });
+    const events = JSON.parse(fs.readFileSync(path.join(proofRoot, "events.json"), "utf8"));
+    const topology = consumeJourneyTopology(events, manifest.journey);
+    assert.equal(sha256File(manifest.hostIdentity.codex.path), manifest.hostIdentity.codex.sha256);
+    assert.equal(sha256File(manifest.hostIdentity.assayMcp.path), manifest.hostIdentity.assayMcp.sha256);
+    assert.equal(
+      topology.primaryThread.request.params.config.mcp_servers.assay.command,
+      manifest.hostIdentity.assayMcp.path,
+    );
+    assert.equal(manifest.invocation.argv[0], manifest.hostIdentity.codex.path);
+    assert.equal(
+      verifyLiveIdentity(
+        manifest.hostIdentity,
+        manifest.invocation,
+        topology,
+        proofRoot,
+        manifest.journey,
+      ),
+      true,
+      JSON.stringify({ hostIdentity: manifest.hostIdentity, invocation: manifest.invocation }),
+    );
+    const checked = validateProofRoot(proofRoot);
+    assert.equal(checked.ok, true, checked.reasons.join("; "));
+  } finally {
+    for (const name of snapRoots()) {
+      if (!before.has(name)) {
+        fs.rmSync(path.join(os.tmpdir(), name), { recursive: true, force: true });
+      }
+    }
+    fs.rmSync(proofRoot, { recursive: true, force: true });
+  }
+});
+
+test("review closeout: proof-owned subject mutations fail closed", () => {
+  const proofRoot = portableLiveProofRoot();
+  let observed;
+  try {
+    observed = driveCli("valid", "tool", {
+      captureMode: "synthetic-fixture",
+      proofRoot,
+    });
+    const manifest = JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8"));
+    const codex = manifest.hostIdentity.codex.path;
+    const assayMcp = manifest.hostIdentity.assayMcp.path;
+    const original = fs.readFileSync(codex);
+    const originalMode = fs.statSync(codex).mode & 0o777;
+    const restore = () => {
+      fs.rmSync(codex, { force: true });
+      fs.writeFileSync(codex, original);
+      fs.chmodSync(codex, originalMode);
+    };
+    const rejects = (label) => {
+      const checked = validateProofRoot(proofRoot);
+      assert.equal(checked.ok, false, `${label} must invalidate the pack`);
+    };
+
+    assert.equal(validateProofRoot(proofRoot).ok, true, "unchanged control must validate");
+
+    fs.rmSync(codex);
+    rejects("missing subject");
+    restore();
+
+    fs.copyFileSync(assayMcp, codex);
+    rejects("replaced subject");
+    restore();
+
+    fs.appendFileSync(codex, "\nmutated\n");
+    rejects("altered subject");
+    restore();
+
+    if (process.platform !== "win32") {
+      fs.rmSync(codex);
+      fs.symlinkSync(assayMcp, codex);
+      rejects("symlink subject");
+      restore();
+
+      fs.chmodSync(codex, 0o600);
+      rejects("non-executable subject");
+      restore();
+    }
+
+    assert.equal(validateProofRoot(proofRoot).ok, true, "restored no-op control must validate");
+  } finally {
+    if (observed) {
+      fs.rmSync(path.dirname(observed.codexBin), { recursive: true, force: true });
+      fs.rmSync(path.dirname(observed.mcpBin), { recursive: true, force: true });
+    }
+    fs.rmSync(proofRoot, { recursive: true, force: true });
+  }
+});
+
+test("review closeout: identity acquisition does not manufacture executability", () => {
+  const before = new Set(snapRoots());
+  const codex = writeVersionOnlyBin("codex", "codex-nonexec/0.0.0");
+  const mcp = writeVersionOnlyBin("assay-mcp-server", "assay-mcp-nonexec/0.0.0");
+  fs.chmodSync(codex, 0o600);
+  fs.chmodSync(mcp, 0o600);
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${path.dirname(codex)}${path.delimiter}${path.dirname(mcp)}${path.delimiter}${previousPath}`;
+  try {
+    assert.throws(() => resolveHostIdentity(), /executable|execute access/i);
+  } finally {
+    process.env.PATH = previousPath;
+    for (const name of snapRoots()) {
+      if (!before.has(name)) {
+        fs.rmSync(path.join(os.tmpdir(), name), { recursive: true, force: true });
+      }
+    }
+  }
 });

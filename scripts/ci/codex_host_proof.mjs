@@ -14,7 +14,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  ALLOWLIST,
   DECIDE_INPUT,
   DECIDE_TOOL,
   EXPECTED_TOOLS,
@@ -40,9 +39,10 @@ import {
   runtimeProofRoots,
   isMainModule,
   persistableArgv,
+  projectRetainedEvent,
+  proofAllowlist,
   requiredCellsForJourney,
   resolvePendingResponse,
-  scrub,
   sha256File,
   sha256Utf8,
   stableStringify,
@@ -55,7 +55,7 @@ const DEFAULT_MAX_BYTES = 1_048_576;
 
 export function parseArgs(argv) {
   const out = {
-    provenance: "synthetic",
+    captureMode: "synthetic-fixture",
     timeoutMs: DEFAULT_TIMEOUT_MS,
     maxBytes: DEFAULT_MAX_BYTES,
     journey: "tool",
@@ -71,8 +71,8 @@ export function parseArgs(argv) {
       return argv[i];
     };
     switch (arg) {
-      case "--provenance":
-        out.provenance = next();
+      case "--capture-mode":
+        out.captureMode = next();
         break;
       case "--proof-root":
         out.proofRoot = next();
@@ -203,6 +203,10 @@ function resolveRegularBinary(binPath, label) {
   if (st.isSymbolicLink() || !st.isFile()) {
     throw new Error(`${label} binary must be a non-symlink regular file`);
   }
+  if (process.platform !== "win32" && (st.mode & 0o111) === 0) {
+    throw new Error(`${label} binary must be executable`);
+  }
+  fs.accessSync(resolved, fs.constants.X_OK);
   return fs.realpathSync(resolved);
 }
 
@@ -300,16 +304,16 @@ function snapshotNamedBinary(srcPath, destDir, destName, options = {}) {
   return dest;
 }
 
-function probeCodexVersion(pathEnv) {
+function probeCodexVersion(binary) {
   return firstVersionLine(
-    spawnSync("codex", ["--version"], { ...VERSION_PROBE, env: { PATH: pathEnv } }),
+    spawnSync(binary, ["--version"], VERSION_PROBE),
     "codex",
   );
 }
 
-function probeAssayMcpVersion(pathEnv) {
+function probeAssayMcpVersion(binary) {
   return firstVersionLine(
-    spawnSync("assay-mcp-server", ["--version"], { ...VERSION_PROBE, env: { PATH: pathEnv } }),
+    spawnSync(binary, ["--version"], VERSION_PROBE),
     "assay-mcp-server",
   );
 }
@@ -323,40 +327,51 @@ export function resolveHostIdentity(options = {}) {
   if (!mcpPath) {
     throw new Error("assay MCP binary was not resolved");
   }
-  const snapRoot = fs.mkdtempSync(path.join(os.tmpdir(), "assay-host-snap-"));
+  if (typeof options.proofRoot !== "string" || options.proofRoot.length === 0) {
+    throw new Error("proofRoot is required for proof-owned host subjects");
+  }
+  const snapRoot = path.resolve(options.proofRoot);
+  const rootStat = fs.lstatSync(snapRoot);
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    throw new Error("proofRoot must be a real directory");
+  }
+  const codexSnap = path.join(snapRoot, "codex.snapshot");
+  const mcpSnap = path.join(snapRoot, "assay-mcp-server.snapshot");
+  if (fs.existsSync(codexSnap) || fs.existsSync(mcpSnap)) {
+    throw new Error("proof-owned host subject already exists");
+  }
   try {
-    const codexDir = path.join(snapRoot, "codex");
-    const mcpDir = path.join(snapRoot, "mcp");
     const snapOpts = {
       testOnlySnapshotMaxBytes: options.testOnlySnapshotMaxBytes,
       testOnlyAfterSnapshotRead: options.testOnlyAfterSnapshotRead,
     };
-    const codexSnap = snapshotNamedBinary(codexPath, codexDir, "codex", snapOpts);
-    const mcpSnap = snapshotNamedBinary(mcpPath, mcpDir, "assay-mcp-server", snapOpts);
-    const pathTail = process.env.PATH || "";
+    snapshotNamedBinary(codexPath, snapRoot, "codex.snapshot", snapOpts);
+    snapshotNamedBinary(mcpPath, snapRoot, "assay-mcp-server.snapshot", snapOpts);
     const identity = {
       os: os.platform(),
       arch: os.arch(),
       codex: {
         path: fs.realpathSync(codexSnap),
-        version: probeCodexVersion(`${codexDir}${path.delimiter}${pathTail}`),
+        version: probeCodexVersion(codexSnap),
         sha256: sha256File(codexSnap),
         installSource: "PATH",
       },
       assayMcp: {
         path: fs.realpathSync(mcpSnap),
-        version: probeAssayMcpVersion(`${mcpDir}${path.delimiter}${pathTail}`),
+        version: probeAssayMcpVersion(mcpSnap),
         sha256: sha256File(mcpSnap),
         installSource: "PATH",
       },
     };
-    identity[BOUND_EXEC] = { codexDir, mcpDir };
+    identity[BOUND_EXEC] = { codexPath: codexSnap, mcpPath: mcpSnap };
     return identity;
   } catch (error) {
-    try {
-      fs.rmSync(snapRoot, { recursive: true, force: true });
-    } catch {
-      /* best-effort: the failure path must not leak the first snapshot */
+    for (const subject of [codexSnap, mcpSnap]) {
+      try {
+        fs.rmSync(subject, { force: true });
+      } catch {
+        /* acquisition failure must not leave a partial subject */
+      }
     }
     throw error;
   }
@@ -391,7 +406,7 @@ function writeProofFiles(options, pack) {
   );
   const record = {
     schema: SCHEMA,
-    provenance: options.provenance,
+    captureMode: options.captureMode,
     journey: options.journey,
     childExitCode: pack.childExit,
     driverOutcome: null,
@@ -429,7 +444,7 @@ function writeProofFiles(options, pack) {
   const eventsText = stableStringify(pack.events);
   const manifest = {
     schema: SCHEMA,
-    provenance: options.provenance,
+    captureMode: options.captureMode,
     journey: options.journey,
     childExitCode: pack.childExit,
     driverOutcome,
@@ -446,12 +461,12 @@ function writeProofFiles(options, pack) {
     hostIdentity: options.hostIdentity ?? null,
     expected: record.expected,
     hashes: { events: sha256Utf8(eventsText) },
-    allowlist: [...ALLOWLIST],
+    allowlist: [...proofAllowlist(options.hostIdentity != null)].sort(),
   };
   writeJson(path.join(options.proofRoot, "manifest.json"), manifest);
   writeJson(path.join(options.proofRoot, "events.json"), pack.events);
   writeJson(path.join(options.proofRoot, "classification.json"), classified);
-  const checked = validateProofRoot(options.proofRoot);
+  let checked = validateProofRoot(options.proofRoot);
   if (!checked.ok) {
     driverOutcome = {
       exitCode: driverOutcome.exitCode === 0 ? 1 : driverOutcome.exitCode,
@@ -462,13 +477,16 @@ function writeProofFiles(options, pack) {
     classified = classifyRecord(record);
     writeJson(path.join(options.proofRoot, "manifest.json"), manifest);
     writeJson(path.join(options.proofRoot, "classification.json"), classified);
+    checked = validateProofRoot(options.proofRoot);
   }
   return {
     manifest,
     events: pack.events,
-    classified: checked.ok ? checked.classified : classified,
+    classified: checked.classified ?? classified,
     childExitCode: pack.childExit,
     driverOutcome,
+    recordConsistency: checked.recordConsistency ?? null,
+    externalAttestation: checked.externalAttestation ?? "not_provided",
   };
 }
 
@@ -476,7 +494,7 @@ export async function runProof(options) {
   requiredCellsForJourney(options.journey);
   const forbidden = forbiddenProofRoot(
     options.proofRoot,
-    options.provenance,
+    options.captureMode,
     runtimeProofRoots(options.projectRoot),
   );
   if (forbidden) {
@@ -489,11 +507,11 @@ export async function runProof(options) {
     }
     throw new Error(forbidden);
   }
-  if (options.provenance === "live" && options.journey === "tool" && !options.allowLiveTurn) {
-    throw new Error("live tool journey requires --allow-live-turn; this slice does not authorize a model call");
+  if (options.captureMode === "host-observation" && options.journey === "tool" && !options.allowLiveTurn) {
+    throw new Error("host-observation tool journey requires --allow-live-turn; this slice does not authorize a model call");
   }
-  if (options.provenance !== "synthetic" && options.provenance !== "live") {
-    throw new Error("provenance must be synthetic or live");
+  if (options.captureMode !== "synthetic-fixture" && options.captureMode !== "host-observation") {
+    throw new Error("captureMode must be synthetic-fixture or host-observation");
   }
   boundedPositiveInt("timeoutMs", options.timeoutMs, HARD_MAX_TIMEOUT_MS);
   boundedPositiveInt("maxBytes", options.maxBytes, HARD_MAX_BYTES);
@@ -549,22 +567,20 @@ export async function runProof(options) {
   };
 
   if (!options.testOnlyChild && !options.hostIdentity) {
-    options.hostIdentity = resolveHostIdentity();
+    options.hostIdentity = resolveHostIdentity({ proofRoot: options.proofRoot });
   }
   const bound = options.hostIdentity?.[BOUND_EXEC];
   const spawnOpts = {
     stdio: ["pipe", "pipe", "pipe"],
     env: {
-      PATH: bound
-        ? `${bound.codexDir}${path.delimiter}${process.env.PATH || ""}`
-        : process.env.PATH,
+      PATH: process.env.PATH,
       HOME: options.projectRoot,
       CODEX_HOME: path.join(options.projectRoot, ".codex-home"),
     },
   };
   const child = options.testOnlyChild
     ? options.testOnlyChild
-    : spawn("codex", ["app-server"], spawnOpts);
+    : spawn(bound.codexPath, ["app-server"], spawnOpts);
   const childClosed = new Promise((resolve) => {
     child.on("close", (code, signal) => {
       childAlive = false;
@@ -620,7 +636,7 @@ export async function runProof(options) {
       if (resolved.error !== undefined) {
         event.error = resolved.error;
       }
-      retainEvent(scrub(event));
+      retainEvent(projectRetainedEvent(event));
       return;
     }
     if (resolved.kind === "reject") {
@@ -635,7 +651,7 @@ export async function runProof(options) {
     }
     if (typeof message.method === "string") {
       retainEvent(
-        scrub({
+        projectRetainedEvent({
           direction: "server",
           method: message.method,
           id: message.id ?? null,
@@ -665,7 +681,7 @@ export async function runProof(options) {
         };
         child.stdin.write(encode(reply));
         retainEvent(
-          scrub({
+          projectRetainedEvent({
             direction: "client",
             method: message.method,
             id: message.id,
@@ -722,7 +738,7 @@ export async function runProof(options) {
     const id = nextId;
     nextId += 1;
     pending.set(id, method);
-    retainEvent(scrub({ direction: "client", method, id, params }));
+    retainEvent(projectRetainedEvent({ direction: "client", method, id, params }));
     if (!stopped) {
       child.stdin.write(encode({ id, method, params }));
     }
@@ -771,9 +787,10 @@ export async function runProof(options) {
       capabilities: {},
     });
     await waitFor(1);
-    retainEvent({ direction: "client", method: "initialized", params: {} });
+    const initialized = { method: "initialized", params: {} };
+    retainEvent(projectRetainedEvent({ direction: "client", ...initialized }));
     if (!stopped) {
-      child.stdin.write(encode({ method: "initialized" }));
+      child.stdin.write(encode(initialized));
     }
     send("skills/list", { forceReload: true, cwds: [options.projectRoot] });
     await waitFor(2);
@@ -884,7 +901,6 @@ function main() {
   if (!options.proofRoot || !options.projectRoot) {
     throw new Error("--proof-root and --project-root are required");
   }
-  options.hostIdentity = resolveHostIdentity();
   return runProof(options);
 }
 
@@ -892,19 +908,13 @@ if (isMainModule(process.argv[1], import.meta.url)) {
   main()
     .then((result) => {
       process.stdout.write(stableStringify({
-        provenance: result.manifest.provenance,
+        captureMode: result.manifest.captureMode,
         childExitCode: result.childExitCode,
         driverOutcome: result.driverOutcome,
-        liveAcceptance: result.classified.liveAcceptance,
+        recordConsistency: result.recordConsistency,
+        externalAttestation: result.externalAttestation,
       }));
-      let exitCode = result.driverOutcome.exitCode;
-      if (
-        result.manifest.provenance === "live" &&
-        result.classified.liveAcceptance.status !== "pass" &&
-        exitCode === 0
-      ) {
-        exitCode = 1;
-      }
+      const exitCode = result.driverOutcome.exitCode;
       if (exitCode !== 0) {
         process.exitCode = exitCode;
       }
