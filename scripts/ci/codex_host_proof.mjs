@@ -311,8 +311,8 @@ function probeVersion(binary, name) {
   try {
     // This executes the fixed-name, O_EXCL-created proof snapshot with fixed
     // argv and no shell. Choosing the PATH subject is the host measurement.
-    // codeql[js/command-line-injection]
     return firstVersionLine(
+      // codeql[js/command-line-injection]
       { stdout: execFileSync(binary, ["--version"], VERSION_PROBE) },
       name,
     );
