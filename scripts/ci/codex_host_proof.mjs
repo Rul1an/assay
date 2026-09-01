@@ -556,6 +556,9 @@ export async function runProof(options) {
     return writePreSpawnFailure(options, credential);
   }
 
+  if (!options.testOnlyChild && !options.hostIdentity) {
+    options.hostIdentity = resolveHostIdentity({ proofRoot: options.proofRoot });
+  }
   let codexHome;
   try {
     codexHome = requireOrCreatePrivateCodexHome(options.projectRoot);
@@ -590,9 +593,6 @@ export async function runProof(options) {
     return true;
   };
 
-  if (!options.testOnlyChild && !options.hostIdentity) {
-    options.hostIdentity = resolveHostIdentity({ proofRoot: options.proofRoot });
-  }
   const bound = options.hostIdentity?.[BOUND_EXEC];
   const spawnOpts = {
     stdio: ["pipe", "pipe", "pipe"],

@@ -549,6 +549,13 @@ test("malformed JSON line writes unavailable evidence; CLI proof root is not emp
 test("production driver creates and verifies its disposable CODEX_HOME before spawn", () => {
   const projectRoot = seedProject();
   const codexHome = path.join(projectRoot, ".codex-home");
+  const retainedFilesWithIdentity = [
+    "assay-mcp-server.snapshot",
+    "classification.json",
+    "codex.snapshot",
+    "events.json",
+    "manifest.json",
+  ];
   assert.equal(fs.existsSync(codexHome), false, "control starts without CODEX_HOME");
 
   const binDir = scratch();
@@ -592,7 +599,7 @@ child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
   assert.notEqual(fileCli.status, 0);
   assert.deepEqual(
     proofFiles(fileCli.proofRoot),
-    ["classification.json", "events.json", "manifest.json"],
+    retainedFilesWithIdentity,
     "a rejected CODEX_HOME must still leave a complete retained failure record",
   );
   const fileEvents = JSON.parse(
@@ -615,6 +622,32 @@ child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
     false,
     "a non-directory CODEX_HOME must be rejected before app-server spawn",
   );
+
+  const hostProjectRoot = seedProject();
+  fs.writeFileSync(path.join(hostProjectRoot, ".codex-home"), "not a directory\n");
+  const hostProofRoot = portableLiveProofRoot();
+  try {
+    const hostCli = driveCli("valid", "discovery", {
+      captureMode: "host-observation",
+      projectRoot: hostProjectRoot,
+      proofRoot: hostProofRoot,
+      codexBin,
+    });
+    assert.notEqual(hostCli.status, 0);
+    assert.deepEqual(
+      proofFiles(hostCli.proofRoot),
+      retainedFilesWithIdentity,
+      `host-observation failure must retain its proof-owned subjects: ${hostCli.stderr || hostCli.stdout}`,
+    );
+    assert.equal(validateProofRoot(hostCli.proofRoot).ok, true);
+    assert.equal(
+      fs.existsSync(path.join(hostProjectRoot, ".codex-app-server-started")),
+      false,
+      "host-observation must reject unsafe CODEX_HOME before app-server spawn",
+    );
+  } finally {
+    fs.rmSync(hostProofRoot, { recursive: true, force: true });
+  }
 
   if (process.platform !== "win32") {
     const publicProjectRoot = seedProject();
