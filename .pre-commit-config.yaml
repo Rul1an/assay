@@ -422,6 +422,13 @@ repos:
         pass_filenames: false
         files: ^(\.github/workflows/.*\.ya?ml|scripts/ci/(check-codeql-upload-sarif-lockstep\.py|test-codeql-upload-sarif-lockstep\.sh)|\.pre-commit-config\.yaml)$
 
+      - id: actions-attest-lockstep
+        name: Direct actions/attest producer lockstep
+        entry: bash scripts/ci/test-actions-attest-lockstep.sh
+        language: system
+        pass_filenames: false
+        files: ^(\.github/workflows/.*\.ya?ml|scripts/ci/(check-actions-attest-lockstep\.py|test-actions-attest-lockstep\.sh)|\.pre-commit-config\.yaml)$
+
       - id: crosswalk-generator-contract
         name: Configuration crosswalk generator contract
         entry: bash scripts/ci/test-crosswalk-generator.sh
