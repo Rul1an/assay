@@ -33,12 +33,18 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# ORDER MATTERS for one entry. This script deletes every FRESH_GENERATED path from the scratch seed
+# before running anything, and generate-configuration-vocabulary-crosswalk.py discovers its corpus by
+# reading *.json across the tree -- including outputs other generators in this list produce. It must
+# therefore run after them, which it does by sitting last. Reordering this array would change its
+# output and surface as a drift failure with no visible cause.
 GENERATORS=(
   scripts/docs/generate-agent-golden-path.py
   scripts/docs/generate-product-capabilities.py
   scripts/docs/generate-crate-deps.sh
   scripts/docs/generate-module-map.sh
   scripts/docs/update-architecture-docs.sh
+  scripts/docs/generate-configuration-vocabulary-crosswalk.py
 )
 
 # The files the generators own. Anything outside this list is not compared, so a hand-written doc
@@ -58,6 +64,7 @@ GENERATED=(
   packaging/agent-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/no-allowance.yaml
   docs/generated/agent-golden-path.json
   docs/generated/crate-deps.mermaid
+  docs/architecture/CONFIGURATION-VOCABULARY-CROSSWALK.md
   docs/generated/module-map.mermaid
   docs/AIcontext/architecture-diagrams.md
   docs/guides/agent-golden-path.md
@@ -69,6 +76,7 @@ GENERATED=(
 # them absent proves that each destination is still owned by a generator; otherwise removing one
 # output path from a generator would leave a stale tracked file and make the drift check pass.
 FRESH_GENERATED=(
+  docs/architecture/CONFIGURATION-VOCABULARY-CROSSWALK.md
   .agents/skills/assay-golden-path/SKILL.md
   .claude/skills/assay-golden-path/SKILL.md
   packaging/claude-plugin/skills/assay-golden-path/SKILL.md

@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [5.5.2] - 2026-08-31
+
+Corrective patch release preparation. Published installation pins remain on
+`v5.5.1` until the new release assets and packages have been verified. Existing
+tags and published artifacts are not replaced.
+
+### Fixed
+- Update the locked `chacha20` dependency from yanked 0.10.0 to 0.10.2, which
+  repairs upstream's use of an SSE4.1 intrinsic in an SSE2-gated backend. The
+  dependency is reachable through `rand` and `object_store` in the evidence/MCP
+  dependency graph (#2728, #2729). This is not a claim of a reproduced Assay
+  crash or a newly discovered cryptographic weakness.
+- Bind assembled release README platform coverage to the release version and
+  reject duplicate coverage claims, including same-line duplicates (#2708,
+  #2711). Windows tests decode the generated text as UTF-8.
+- Keep the Claude plugin workflow safe to import and remove the inherited
+  credential-storage override when preparing a fresh configuration namespace
+  (#2690, #2727). This does not establish complete account isolation.
+
+### Documentation And Verification
+- The Claude plugin installation recipe includes both CLI and MCP prerequisites;
+  RFC 8785 adequacy documentation separates three declared dependency rules from
+  the wrapper control (#2723, #2666).
+- The published-release harness exercises doctor preflight, allowed requests,
+  unsupported wire requests and policy-record drift (#2670, #2669). A closed
+  protocol-gate test binds accepted revisions to public support claims (#2671).
+
+Authenticated Claude and Codex launch acceptance remains separate
+post-publication work (#2194, #2684). Synthetic transcripts and successful
+installation are not host-discovery or model-mediated invocation proof. MCP
+`2026-07-28` remains unaccepted; this patch does not activate it.
+
 ## [5.5.1] - 2026-08-30
 
 Recovery release for the unpublished `v5.5.0` attempt. It includes the changes
