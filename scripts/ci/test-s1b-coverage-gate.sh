@@ -641,6 +641,59 @@ cec=$?
 set -e
 [[ "$cec" -eq 0 ]] || fail "cleanup-selftest ec=$cec err=$(cat "$tmp/cleanup.err")"
 grep -q 'ok: cleanup-selftest' "$tmp/cleanup.out" || fail "cleanup-selftest missing ok"
+
+run_leaf_residue_case() {
+  local driver="$1" label="$2" incoming="$3" expected="$4"
+  local leaf="$tmp/leaf-$label-$incoming" out="$tmp/leaf-$label-$incoming.out" err="$tmp/leaf-$label-$incoming.err"
+  local actual workdir
+  mkdir "$leaf"
+  printf 'busy\n' >"$leaf/member"
+  set +e
+  run_bounded 12 bash "$driver" cleanup-leaf-status-selftest "$leaf" "$incoming" >"$out" 2>"$err"
+  actual=$?
+  set -e
+  [[ "$actual" -eq "$expected" ]] \
+    || fail "leaf residue incoming=$incoming returned $actual, expected $expected"
+  grep -qxF "S1B_LEAF_RESIDUE path=$leaf" "$err" \
+    || fail "leaf residue incoming=$incoming missing named diagnostic"
+  workdir=$(sed -n 's/^SELFTEST_WORKDIR=//p' "$out")
+  [[ -n "$workdir" ]] || fail "leaf residue incoming=$incoming missing selftest workdir"
+  [[ ! -e "$workdir" ]] || fail "leaf residue incoming=$incoming skipped workdir cleanup: $workdir"
+  [[ -f "$leaf/member" ]] || fail "leaf residue fixture unexpectedly disappeared: $leaf"
+}
+
+run_leaf_residue_case "$DRIVER" production 0 1
+run_leaf_residue_case "$DRIVER" production 23 23
+
+noop_cleanup_driver="$tmp/noop-cleanup-driver.sh"
+cp "$DRIVER" "$noop_cleanup_driver"
+printf '\n# comment-only cleanup control\n' >>"$noop_cleanup_driver"
+run_leaf_residue_case "$noop_cleanup_driver" noop 0 1
+
+silent_cleanup_driver="$tmp/silent-cleanup-driver.sh"
+cp "$DRIVER" "$silent_cleanup_driver"
+python3 - "$silent_cleanup_driver" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '''    if ! rmdir "$LEAF" 2>/dev/null; then
+      printf 'S1B_LEAF_RESIDUE path=%s\\n' "$LEAF" >&2
+      leaf_residue=1
+    fi'''
+new = '''    rmdir "$LEAF" 2>/dev/null || true'''
+if text.count(old) != 1:
+    raise SystemExit("silent cleanup mutation target must occur exactly once")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+set +e
+( run_leaf_residue_case "$silent_cleanup_driver" silent 0 1 ) \
+  >"$tmp/silent-contract.out" 2>"$tmp/silent-contract.err"
+silent_contract_ec=$?
+set -e
+[[ "$silent_contract_ec" -ne 0 ]] \
+  || fail "restoring silent leaf cleanup did not break the residue contract"
 echo "ok: mutation-selftest and cleanup-selftest"
 
 wf="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/monitor-attach-smoke.yml"

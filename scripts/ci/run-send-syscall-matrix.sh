@@ -122,17 +122,32 @@ remove_owned_workdir() {
 }
 
 cleanup() {
-  local pid
+  local incoming_status="${1:-0}" leaf_residue=0 pid
   for pid in "${MONITOR_PID:-}" "${HARNESS_PID:-}"; do
     reap_pid "$pid"
   done
   [[ -z "${FIFO:-}" ]] || rm -f "$FIFO"
   if [[ -n "${LEAF:-}" && -d "$LEAF" ]]; then
-    rmdir "$LEAF" 2>/dev/null || true
+    if ! rmdir "$LEAF" 2>/dev/null; then
+      printf 'S1B_LEAF_RESIDUE path=%s\n' "$LEAF" >&2
+      leaf_residue=1
+    fi
   fi
   remove_owned_workdir "${WORKDIR:-}"
+  [[ "$incoming_status" -eq 0 ]] || return "$incoming_status"
+  [[ "$leaf_residue" -eq 0 ]]
 }
-trap cleanup EXIT
+
+cleanup_on_exit() {
+  local incoming_status="$1" cleanup_status
+  trap - EXIT
+  set +e
+  cleanup "$incoming_status"
+  cleanup_status=$?
+  exit "$cleanup_status"
+}
+
+trap 'cleanup_on_exit "$?"' EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 
@@ -473,6 +488,14 @@ case "$MODE" in
     rm -rf "$bad"
     WORKDIR=""
     echo "ok: cleanup-selftest" ;;
+  cleanup-leaf-status-selftest)
+    [[ -n "${2:-}" && -d "$2" ]] || fail "cleanup leaf selftest requires an existing leaf directory"
+    [[ "${3:-}" =~ ^([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])$ ]] \
+      || fail "cleanup leaf selftest requires an exit status in 0..255"
+    LEAF="$2"
+    WORKDIR=$(mktemp -d /tmp/s1b-leaf-status-XXXXXX)
+    printf 'SELFTEST_WORKDIR=%s\n' "$WORKDIR"
+    exit "$3" ;;
   coverage-gate) coverage_gate "${2:?coverage-gate requires a JSON path}" ;;
   mutation-selftest) mutation_selftest ;;
   endpoint-line-selftest)
