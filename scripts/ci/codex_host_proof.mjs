@@ -119,6 +119,21 @@ function writeJson(file, value) {
   fs.renameSync(tmp, file);
 }
 
+function requirePrivateProofRoot(proofRoot) {
+  const st = fs.lstatSync(proofRoot);
+  if (st.isSymbolicLink() || !st.isDirectory()) {
+    throw new Error("proof root must be a real directory");
+  }
+  if (process.platform !== "win32") {
+    if (typeof process.getuid === "function" && st.uid !== process.getuid()) {
+      throw new Error("proof root must be owned by the current user");
+    }
+    if ((st.mode & 0o077) !== 0) {
+      throw new Error("proof root must be private to its owner (mode 0700)");
+    }
+  }
+}
+
 function requireFreshProofRoot(proofRoot) {
   if (fs.existsSync(proofRoot)) {
     const st = fs.lstatSync(proofRoot);
@@ -140,10 +155,7 @@ function requireFreshProofRoot(proofRoot) {
   } else {
     fs.mkdirSync(proofRoot, { recursive: true, mode: 0o700 });
   }
-  const st = fs.lstatSync(proofRoot);
-  if (st.isSymbolicLink() || !st.isDirectory()) {
-    throw new Error("proof root must be a real directory");
-  }
+  requirePrivateProofRoot(proofRoot);
 }
 
 function encode(message) {
@@ -311,7 +323,6 @@ function probeVersion(binary, name) {
   try {
     // This executes the fixed-name, O_EXCL-created proof snapshot with fixed
     // argv and no shell. Choosing the PATH subject is the host measurement.
-    // codeql[js/command-line-injection]
     const stdout = execFileSync(binary, ["--version"], VERSION_PROBE);
     return firstVersionLine({ stdout }, name);
   } catch (error) {
@@ -340,10 +351,7 @@ export function resolveHostIdentity(options = {}) {
     throw new Error("proofRoot is required for proof-owned host subjects");
   }
   const snapRoot = path.resolve(options.proofRoot);
-  const rootStat = fs.lstatSync(snapRoot);
-  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
-    throw new Error("proofRoot must be a real directory");
-  }
+  requirePrivateProofRoot(snapRoot);
   const codexSnap = path.join(snapRoot, "codex.snapshot");
   const mcpSnap = path.join(snapRoot, "assay-mcp-server.snapshot");
   if (fs.existsSync(codexSnap) || fs.existsSync(mcpSnap)) {

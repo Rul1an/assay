@@ -2236,6 +2236,27 @@ test("version observation rejects output from a failed probe", () => {
   }
 });
 
+test("host snapshots require a private proof root owned by the current user", {
+  skip: process.platform === "win32",
+}, () => {
+  const proofRoot = scratch();
+  fs.chmodSync(proofRoot, 0o777);
+  const codex = writeVersionOnlyBin("codex", "codex-control/0.0.0");
+  const mcp = writeVersionOnlyBin("assay-mcp-server", "assay-mcp-control/0.0.0");
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${path.dirname(codex)}${path.delimiter}${path.dirname(mcp)}${path.delimiter}${previousPath}`;
+  try {
+    assert.throws(
+      () => resolveHostIdentity({ proofRoot }),
+      /private|owner|permission|mode/i,
+      "a group/world-accessible proof root must fail before a snapshot executes",
+    );
+  } finally {
+    process.env.PATH = previousPath;
+    fs.chmodSync(proofRoot, 0o700);
+  }
+});
+
 test("F5 PATH snapshot copy enforces a binary ceiling and running growth bound; control stays green", () => {
   assert.equal(HARD_MAX_SNAPSHOT_BYTES, 536870912, "documented 512 MiB per-binary ceiling");
   assert.match(DRIVER_SRC, /HARD_MAX_SNAPSHOT_BYTES/);
