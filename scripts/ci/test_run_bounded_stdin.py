@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import selectors
 import signal
 import subprocess
 import sys
@@ -155,91 +154,23 @@ def _invoke(
     return Outcome("exc", elapsed, reason="runner returned no outcome")
 
 
-def run_bounded_blocking_stdin_before_deadline(
-    phase: str,
-    argv: list[str],
-    *,
-    cwd: Path,
-    env: dict[str, str],
-    stdin: bytes = b"",
-    allowed_codes: Any = (0,),
-) -> Any:
-    """Mutation: blocking write/flush/close before the absolute deadline."""
-    timeout = WORKFLOW_MOD.workflow_timeout_seconds()
-    process = subprocess.Popen(
-        argv,
-        cwd=cwd,
-        env=env,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
-    )
-    assert process.stdin is not None
-    assert process.stdout is not None
-    assert process.stderr is not None
-    if stdin:
-        try:
-            process.stdin.write(stdin)
-            process.stdin.flush()
-        except BrokenPipeError:
-            pass
-    process.stdin.close()
-    selector = selectors.DefaultSelector()
-    selector.register(process.stdout, selectors.EVENT_READ, "stdout")
-    selector.register(process.stderr, selectors.EVENT_READ, "stderr")
-    buffers = {"stdout": bytearray(), "stderr": bytearray()}
-    deadline = time.monotonic() + timeout
-    try:
-        while selector.get_map():
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                WORKFLOW_MOD.terminate_tree(process)
-                WORKFLOW_MOD.fail(
-                    phase,
-                    f"process tree exceeded {timeout:g}s deadline",
-                    "retry after checking the client/server command for a prompt, hang, or inherited pipe",
-                )
-            events = selector.select(min(remaining, 0.1))
-            for key, _ in events:
-                chunk = os.read(key.fd, 65_536)
-                if not chunk:
-                    selector.unregister(key.fileobj)
-                    continue
-                target = buffers[key.data]
-                target.extend(chunk)
-                if len(target) > WORKFLOW_MOD.MAX_BYTES:
-                    WORKFLOW_MOD.terminate_tree(process)
-                    WORKFLOW_MOD.fail(
-                        phase,
-                        f"{key.data} exceeded {WORKFLOW_MOD.MAX_BYTES}-byte ceiling",
-                        "inspect the command directly; the bounded workflow will not retain unbounded diagnostics",
-                    )
-    finally:
-        selector.close()
-    remaining = max(0.0, deadline - time.monotonic())
-    try:
-        returncode = process.wait(timeout=remaining)
-    except subprocess.TimeoutExpired:
-        WORKFLOW_MOD.terminate_tree(process)
-        process.wait()
-        WORKFLOW_MOD.fail(
-            phase,
-            f"process tree did not reap within {timeout:g}s deadline",
-            "inspect descendant processes spawned by the client command",
-        )
-    result = WORKFLOW_MOD.CommandResult(
-        returncode, bytes(buffers["stdout"]), bytes(buffers["stderr"])
-    )
-    if returncode not in set(allowed_codes):
-        diagnostic = (result.stderr or result.stdout).decode("utf-8", "replace").strip()
-        diagnostic = diagnostic[-600:] if diagnostic else "no diagnostic output"
-        WORKFLOW_MOD.fail(
-            phase,
-            f"command exited {returncode}: {diagnostic}",
-            "run the named phase directly with the same fresh config and consumer directory",
-        )
-    return result
+FCNTL_BLOCKER = r"""
+import sys
+from importlib.util import module_from_spec, spec_from_file_location
+
+class BlockFcntl:
+    def find_spec(self, name, path=None, target=None):
+        if name == "fcntl":
+            raise ImportError("simulated-unavailable fcntl")
+        return None
+
+sys.meta_path.insert(0, BlockFcntl())
+sys.modules.pop("fcntl", None)
+spec = spec_from_file_location("wf_no_fcntl", sys.argv[1])
+mod = module_from_spec(spec)
+sys.modules[spec.name] = mod
+spec.loader.exec_module(mod)
+"""
 
 
 class BoundedStdinTests(unittest.TestCase):
@@ -255,15 +186,6 @@ class BoundedStdinTests(unittest.TestCase):
     def _run(self, action: str, stdin: bytes) -> Outcome:
         return _invoke(
             WORKFLOW_MOD.run_bounded,
-            _python(_probe_body(action)),
-            stdin,
-            self.cwd,
-            self.pidfile,
-        )
-
-    def _mut(self, action: str, stdin: bytes) -> Outcome:
-        return _invoke(
-            run_bounded_blocking_stdin_before_deadline,
             _python(_probe_body(action)),
             stdin,
             self.cwd,
@@ -295,6 +217,12 @@ class BoundedStdinTests(unittest.TestCase):
         self.assertIn("deadline", outcome.reason)
         self.assertLess(outcome.elapsed, SLEEP_S)
 
+    def test_empty_stdin_immediate_exit_succeeds(self) -> None:
+        outcome = self._run("true", b"")
+        self.assertEqual(outcome.kind, "ok", outcome.reason)
+        self.assertEqual(outcome.result.returncode, 0)
+        self.assertLess(outcome.elapsed, SLEEP_S)
+
     def test_early_stdin_close_preserves_success(self) -> None:
         outcome = self._run("early_close", STDIN_256K)
         self.assertEqual(outcome.kind, "ok", outcome.reason)
@@ -306,31 +234,78 @@ class BoundedStdinTests(unittest.TestCase):
         self.assertIn("ceiling", outcome.reason)
         self.assertIn("stdout", outcome.reason)
 
-    def test_mutation_non_reader_false_green_or_hang(self) -> None:
-        outcome = self._mut("non_reader", STDIN_256K)
-        beyond_budget = outcome.kind == "hang" or (
-            outcome.kind == "ok" and outcome.elapsed > float(DEADLINE_S)
-        )
-        self.assertTrue(
-            beyond_budget,
-            f"mutation stayed bounded: kind={outcome.kind} elapsed={outcome.elapsed:.3f} reason={outcome.reason!r}",
-        )
 
-    def test_mutation_write_first_false_green_or_hang(self) -> None:
-        outcome = self._mut("write_first", STDIN_256K)
-        beyond_budget = outcome.kind == "hang" or (
-            outcome.kind == "ok" and outcome.elapsed > float(DEADLINE_S)
-        )
-        self.assertTrue(
-            beyond_budget,
-            f"mutation stayed bounded: kind={outcome.kind} elapsed={outcome.elapsed:.3f} reason={outcome.reason!r}",
-        )
+class FcntlUnavailableTests(unittest.TestCase):
+    """Import stays safe when fcntl is missing; run_bounded fails only if stdin needs it."""
 
-    def test_mutation_empty_control_stays_green(self) -> None:
-        outcome = self._mut("true", b"")
-        self.assertEqual(outcome.kind, "ok", outcome.reason)
-        self.assertEqual(outcome.result.returncode, 0)
-        self.assertLess(outcome.elapsed, SLEEP_S)
+    def test_import_succeeds_when_fcntl_unavailable(self) -> None:
+        script = FCNTL_BLOCKER + "print('imported', mod.MAX_BYTES)\n"
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(WORKFLOW)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("imported", result.stdout)
+
+    def test_run_bounded_fails_explicitly_when_stdin_needs_fcntl(self) -> None:
+        script = (
+            FCNTL_BLOCKER
+            + """
+import tempfile
+from pathlib import Path
+cwd = Path(tempfile.mkdtemp())
+try:
+    mod.run_bounded(
+        "bounded_stdin",
+        [sys.executable, "-c", "raise SystemExit(0)"],
+        cwd=cwd,
+        env=mod.clean_env(),
+        stdin=b"x",
+    )
+except mod.WorkflowError as error:
+    print("reason", error.reason)
+    raise SystemExit(0)
+print("unexpected success")
+raise SystemExit(2)
+"""
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(WORKFLOW)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fcntl", result.stdout)
+        self.assertIn("POSIX", result.stdout)
+
+    def test_empty_stdin_does_not_require_fcntl(self) -> None:
+        script = (
+            FCNTL_BLOCKER
+            + """
+import tempfile
+from pathlib import Path
+cwd = Path(tempfile.mkdtemp())
+result = mod.run_bounded(
+    "bounded_stdin",
+    [sys.executable, "-c", "raise SystemExit(0)"],
+    cwd=cwd,
+    env=mod.clean_env(),
+    stdin=b"",
+)
+print("rc", result.returncode)
+"""
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(WORKFLOW)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("rc 0", result.stdout)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import errno
-import fcntl
 import json
 import math
 import os
@@ -103,7 +102,15 @@ def terminate_tree(process: subprocess.Popen[bytes]) -> None:
         process.wait()
 
 
-def _set_nonblocking(fd: int) -> None:
+def _set_nonblocking(phase: str, fd: int) -> None:
+    try:
+        import fcntl
+    except ImportError:
+        fail(
+            phase,
+            "run_bounded needs POSIX nonblocking stdin; fcntl is unavailable on this host",
+            "run the Claude plugin workflow on a POSIX host; Windows process-tree semantics are a non-claim",
+        )
     flags = fcntl.fcntl(fd, fcntl.F_GETFL)
     fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
@@ -145,7 +152,7 @@ def run_bounded(
     if stdin_view is None:
         process.stdin.close()
     else:
-        _set_nonblocking(process.stdin.fileno())
+        _set_nonblocking(phase, process.stdin.fileno())
         selector.register(process.stdin, selectors.EVENT_WRITE, "stdin")
 
     try:
