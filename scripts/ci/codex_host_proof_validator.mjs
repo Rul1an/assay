@@ -242,21 +242,30 @@ export function requiredCellsForJourney(journey) {
   }
 }
 
+export const EXPECTED_ELICITATION = Object.freeze({
+  serverName: "assay",
+  mode: "form",
+  message: `approve ${DECIDE_TOOL}`,
+  requestedSchema: Object.freeze({
+    type: "object",
+    properties: Object.freeze({}),
+  }),
+});
+
 export function elicitationAcceptable(params, threadId, turnId) {
   return (
     params != null &&
     typeof params === "object" &&
-    params.serverName === "assay" &&
+    params.serverName === EXPECTED_ELICITATION.serverName &&
+    params.mode === EXPECTED_ELICITATION.mode &&
+    params.message === EXPECTED_ELICITATION.message &&
+    sameJson(params.requestedSchema, EXPECTED_ELICITATION.requestedSchema) &&
     typeof threadId === "string" &&
     threadId.length > 0 &&
     typeof turnId === "string" &&
     turnId.length > 0 &&
     params.threadId === threadId &&
-    params.turnId === turnId &&
-    params.mode === "form" &&
-    params.requestedSchema != null &&
-    typeof params.requestedSchema === "object" &&
-    !Array.isArray(params.requestedSchema)
+    params.turnId === turnId
   );
 }
 
@@ -522,23 +531,31 @@ function classifyTools(statuses) {
   return cell("pass", "exact release tools listed");
 }
 
-function matchingTurnFailed(events, threadId, turnId) {
-  return events.some(
-    (event) =>
-      event.method === "turn/completed" &&
-      event.direction === "server" &&
-      event.params?.threadId === threadId &&
-      event.params?.turn?.id === turnId &&
-      event.params?.turn?.status === "failed",
+function matchingTurnStatus(events, threadId, turnId) {
+  const event = events.find(
+    (row) =>
+      row.method === "turn/completed" &&
+      row.direction === "server" &&
+      row.params?.threadId === threadId &&
+      row.params?.turn?.id === turnId,
   );
+  if (!event) {
+    return null;
+  }
+  const status = event.params?.turn?.status;
+  return typeof status === "string" ? status : "";
 }
 
 function classifyInvocation(calls, expected, threadId, turnId, events) {
   if (calls.length === 0) {
     return cell("unavailable", "no mcpToolCall item/completed");
   }
-  if (matchingTurnFailed(events, threadId, turnId)) {
-    return cell("fail", "matching turn/completed failed dominates tool item");
+  const terminalStatus = matchingTurnStatus(events, threadId, turnId);
+  if (terminalStatus === null) {
+    return cell("unavailable", "no matching turn/completed");
+  }
+  if (terminalStatus !== "completed") {
+    return cell("fail", `matching turn/completed status ${terminalStatus} is not completed`);
   }
   if (typeof threadId !== "string" || typeof turnId !== "string") {
     return cell("unavailable", "primary thread or turn id absent");
@@ -769,7 +786,18 @@ function pathEqualsOrInside(root, candidate) {
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
-export function forbiddenProofRoot(proofRoot, provenance) {
+export function runtimeProofRoots(projectRoot, initialize) {
+  const roots = [];
+  if (typeof projectRoot === "string" && projectRoot.length > 0) {
+    roots.push(path.join(projectRoot, ".codex-home"));
+  }
+  if (typeof initialize?.codexHome === "string" && initialize.codexHome.length > 0) {
+    roots.push(initialize.codexHome);
+  }
+  return roots;
+}
+
+export function forbiddenProofRoot(proofRoot, provenance, extraRoots = []) {
   const resolved = resolveExistingAncestor(proofRoot);
   const temps = [os.tmpdir(), "/tmp", "/private/tmp", "/var/tmp"];
   const underTmp = temps.some((temp) => pathEqualsOrInside(canonicalResolved(temp), resolved));
@@ -782,6 +810,13 @@ export function forbiddenProofRoot(proofRoot, provenance) {
   }
   if (process.env.HOME) {
     runtimeRoots.push(path.join(process.env.HOME, ".codex"));
+  }
+  if (Array.isArray(extraRoots)) {
+    for (const root of extraRoots) {
+      if (typeof root === "string" && root.length > 0) {
+        runtimeRoots.push(root);
+      }
+    }
   }
   for (const root of runtimeRoots) {
     if (pathEqualsOrInside(canonicalResolved(root), resolved)) {
@@ -946,6 +981,14 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   const derivedInitialize = initializeFromEvents(events);
   if (!sameJson(manifest.initialize, derivedInitialize)) {
     reasons.push("manifest initialize does not match captured initialize event");
+  }
+  const eventForbidden = forbiddenProofRoot(
+    proofRoot,
+    manifest.provenance === "live" ? "live" : "synthetic",
+    runtimeProofRoots(manifest.expected?.projectRoot, derivedInitialize),
+  );
+  if (eventForbidden) {
+    reasons.push(eventForbidden);
   }
   if (
     typeof manifest.childExitCode !== "number" ||

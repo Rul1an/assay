@@ -19,7 +19,9 @@ import {
   DECIDE_TOOL,
   classifyRecord,
   decidePrompt,
+  elicitationAcceptable,
   forbiddenProofRoot,
+  sha256File,
   sha256Utf8,
   stableStringify,
   validateProofRoot,
@@ -92,6 +94,11 @@ if (process.argv.includes("--version")) {
   process.exit(0);
 }
 const child = spawn(${JSON.stringify(childArgv[0])}, ${JSON.stringify(childArgv.slice(1))}, { stdio: "inherit" });
+const stop = () => {
+  try { child.kill("SIGTERM"); } catch { /* already exited */ }
+};
+process.on("SIGTERM", stop);
+process.on("SIGINT", stop);
 child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
 `;
   fs.writeFileSync(bin, script, { mode: 0o755 });
@@ -951,7 +958,8 @@ test("production live identity is observed from binaries and required before liv
       assert.ok(identity[role].installSource.length > 0, `${role} install source must be recorded`);
       assert.equal(fs.lstatSync(identity[role].path).isFile(), true);
     }
-    assert.equal(identity.assayMcp.path, fs.realpathSync(mcpBin));
+    assert.equal(identity.assayMcp.sha256, sha256File(mcpBin));
+    assert.equal(sha256File(identity.assayMcp.path), sha256File(mcpBin));
     const events = JSON.parse(fs.readFileSync(path.join(live.proofRoot, "events.json"), "utf8"));
     const start = events.find(
       (event) => event.direction === "client" && event.method === "thread/start",
@@ -1352,8 +1360,10 @@ test("PATH shadows drive observed Codex and Assay MCP identities", () => {
       codexBin: flagCodex,
       assayMcpBin: flagMcp,
     });
-    assert.equal(ignored.codex.path, fs.realpathSync(codexBin));
-    assert.equal(ignored.assayMcp.path, fs.realpathSync(mcpBin));
+    assert.equal(ignored.codex.sha256, sha256File(codexBin));
+    assert.equal(ignored.assayMcp.sha256, sha256File(mcpBin));
+    assert.equal(sha256File(ignored.codex.path), sha256File(codexBin));
+    assert.equal(sha256File(ignored.assayMcp.path), sha256File(mcpBin));
     assert.equal(ignored.codex.installSource, "PATH");
     assert.equal(ignored.assayMcp.installSource, "PATH");
     assert.match(ignored.codex.version, /codex-shadow/);
@@ -1391,8 +1401,10 @@ test("PATH shadows drive observed Codex and Assay MCP identities", () => {
   );
   assert.equal(typeof cli.status, "number");
   const manifest = JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8"));
-  assert.equal(manifest.hostIdentity.codex.path, fs.realpathSync(codexBin));
-  assert.equal(manifest.hostIdentity.assayMcp.path, fs.realpathSync(mcpBin));
+  assert.equal(manifest.hostIdentity.codex.sha256, sha256File(codexBin));
+  assert.equal(manifest.hostIdentity.assayMcp.sha256, sha256File(mcpBin));
+  assert.equal(sha256File(manifest.hostIdentity.codex.path), sha256File(codexBin));
+  assert.equal(sha256File(manifest.hostIdentity.assayMcp.path), sha256File(mcpBin));
   assert.equal(manifest.hostIdentity.codex.installSource, "PATH");
   assert.equal(manifest.hostIdentity.assayMcp.installSource, "PATH");
   const events = JSON.parse(fs.readFileSync(path.join(proofRoot, "events.json"), "utf8"));
@@ -1419,6 +1431,11 @@ if (process.argv.includes("--version")) {
   process.exit(0);
 }
 const child = spawn(${JSON.stringify(process.execPath)}, ${JSON.stringify([FAKE, "--scenario", "valid", "--project-root", "unused"])}, { stdio: "inherit" });
+const stop = () => {
+  try { child.kill("SIGTERM"); } catch { /* already exited */ }
+};
+process.on("SIGTERM", stop);
+process.on("SIGINT", stop);
 child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
 `,
     { mode: 0o755 },
@@ -1454,4 +1471,175 @@ child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
       `production spawn/probe command must be a fixed name, got ${command}`,
     );
   }
+});
+
+test("swap-and-restore after identity hash cannot change the spawned Codex bytes", async () => {
+  const projectRoot = seedProject();
+  const aMarker = path.join(scratch(), "codex-snapshot-a-ran");
+  const bMarker = path.join(scratch(), "codex-swapped-b-ran");
+  const binDir = scratch();
+  const codexPath = path.join(binDir, "codex");
+  const writeMarkedShadow = (marker, version) => {
+    fs.writeFileSync(
+      codexPath,
+      `#!/usr/bin/env node
+import fs from "node:fs";
+import { spawn } from "node:child_process";
+fs.writeFileSync(${JSON.stringify(marker)}, "ran\\n");
+if (process.argv.includes("--version")) {
+  process.stdout.write(${JSON.stringify(version)} + "\\n");
+  process.exit(0);
+}
+const child = spawn(${JSON.stringify(process.execPath)}, ${JSON.stringify([FAKE, "--scenario", "valid", "--project-root", projectRoot])}, { stdio: "inherit" });
+const stop = () => {
+  try { child.kill("SIGTERM"); } catch { /* already exited */ }
+};
+process.on("SIGTERM", stop);
+process.on("SIGINT", stop);
+child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+`,
+      { mode: 0o755 },
+    );
+  };
+  writeMarkedShadow(aMarker, "codex-bound-a/1.0.0");
+  const mcpBin = writeShadowMcp();
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${binDir}${path.delimiter}${path.dirname(mcpBin)}${path.delimiter}${previousPath}`;
+  try {
+    const identity = resolveHostIdentity();
+    writeMarkedShadow(bMarker, "codex-swapped-b/9.9.9");
+    const result = await runProof({
+      provenance: "synthetic",
+      timeoutMs: 4000,
+      maxBytes: 1_048_576,
+      journey: "discovery",
+      allowLiveTurn: false,
+      hostIdentity: identity,
+      proofRoot: scratch(),
+      projectRoot,
+    });
+    assert.equal(fs.existsSync(bMarker), false, "swapped PATH binary must not be spawned or probed");
+    assert.equal(fs.existsSync(aMarker), true, "hashed snapshot of the original binary must run");
+    assert.equal(result.manifest.hostIdentity.codex.sha256, identity.codex.sha256);
+    assert.notEqual(identity.codex.sha256, sha256File(codexPath));
+  } finally {
+    process.env.PATH = previousPath;
+  }
+  const control = await drive("valid", "discovery");
+  assert.equal(control.classified.cells.skillDiscovered.status, "pass");
+});
+
+test("proof root inside child CODEX_HOME or event-derived home is rejected", async () => {
+  const projectRoot = seedProject();
+  const childHome = path.join(projectRoot, ".codex-home");
+  fs.mkdirSync(childHome, { recursive: true });
+  const leakedChild = spawnFakeChild(
+    ["node", FAKE, "--scenario", "valid", "--project-root", projectRoot],
+    projectRoot,
+  );
+  try {
+    await assert.rejects(
+      () =>
+        runProof({
+          provenance: "synthetic",
+          timeoutMs: 4000,
+          maxBytes: 1_048_576,
+          journey: "discovery",
+          allowLiveTurn: false,
+          testOnlyChild: leakedChild,
+          proofRoot: childHome,
+          projectRoot,
+          assayMcpBin: path.join(projectRoot, "install/bin/assay-mcp-server"),
+        }),
+      /CODEX_HOME|runtime|profile|auth/i,
+    );
+  } finally {
+    try {
+      leakedChild.kill("SIGTERM");
+    } catch {
+      /* already exited */
+    }
+  }
+  const eventHome = scratch();
+  assert.equal(
+    typeof forbiddenProofRoot(eventHome, "synthetic", [eventHome]),
+    "string",
+    "event-derived canonical Codex home must be a forbidden extra root",
+  );
+  const outside = scratch();
+  assert.equal(
+    forbiddenProofRoot(outside, "synthetic", [childHome, eventHome]),
+    null,
+    "a proof root outside configured and event-derived homes must stay accepted",
+  );
+  const control = await drive("valid", "discovery");
+  assert.equal(validateProofRoot(control.proofRoot).ok, true);
+  assert.equal(
+    forbiddenProofRoot(control.proofRoot, "synthetic", [
+      path.join(control.projectRoot, ".codex-home"),
+    ]),
+    null,
+  );
+});
+
+test("elicitation declines an unrelated same-turn Export profile data form", async () => {
+  const exportProfile = {
+    serverName: "assay",
+    threadId: "thread-1",
+    turnId: "turn-1",
+    message: "Export profile data",
+    mode: "form",
+    requestedSchema: { type: "object", properties: { confirm: { type: "boolean" } } },
+  };
+  assert.equal(
+    elicitationAcceptable(exportProfile, "thread-1", "turn-1"),
+    false,
+    "Export profile data must not be an acceptable Assay form",
+  );
+  const { events } = await drive("elicit-export-profile");
+  const replies = events.filter(
+    (event) =>
+      event.direction === "client" && event.method === "mcpServer/elicitation/request",
+  );
+  assert.ok(replies.length >= 1, "export-profile elicitation must be recorded");
+  assert.equal(replies[0].result.action, "decline");
+  const control = await drive("valid");
+  const accepted = control.events.filter(
+    (event) =>
+      event.direction === "client" && event.method === "mcpServer/elicitation/request",
+  );
+  assert.equal(accepted[0].result.action, "accept");
+});
+
+test("matching terminal turn must be completed; interrupted forces nonzero", async () => {
+  const interrupted = await drive("tool-then-interrupted-turn");
+  assert.equal(interrupted.childExitCode, 0);
+  assert.notEqual(
+    interrupted.classified.cells.oneToolInvoked.status,
+    "pass",
+    "interrupted turn/completed must not keep an earlier successful tool item",
+  );
+  assert.notEqual(
+    interrupted.driverOutcome.exitCode,
+    0,
+    "completed→interrupted must force nonzero driver exit",
+  );
+  const { events, manifest, classified } = await drive("valid");
+  assert.equal(classified.cells.oneToolInvoked.status, "pass");
+  assert.equal(classified.driverOutcome?.exitCode ?? manifest.driverOutcome.exitCode, 0);
+  const mutated = structuredClone({ ...manifest, events });
+  const terminal = mutated.events.find(
+    (event) => event.method === "turn/completed" && event.direction === "server",
+  );
+  assert.ok(terminal, "valid pack must have a matching turn/completed");
+  terminal.params.turn.status = "interrupted";
+  const relabeled = classifyRecord(mutated);
+  assert.notEqual(
+    relabeled.cells.oneToolInvoked.status,
+    "pass",
+    "classifyRecord completed→interrupted must fail oneToolInvoked",
+  );
+  const control = await drive("valid");
+  assert.equal(control.classified.cells.oneToolInvoked.status, "pass");
+  assert.equal(control.driverOutcome.exitCode, 0);
 });

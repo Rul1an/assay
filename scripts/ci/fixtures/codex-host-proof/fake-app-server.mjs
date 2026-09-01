@@ -240,6 +240,19 @@ function handle(message) {
       if (scenario === "elicit-assay-name-only") {
         return { serverName: "assay" };
       }
+      if (scenario === "elicit-export-profile") {
+        return {
+          serverName: "assay",
+          threadId,
+          turnId: "turn-1",
+          message: "Export profile data",
+          mode: "form",
+          requestedSchema: {
+            type: "object",
+            properties: { confirm: { type: "boolean" } },
+          },
+        };
+      }
       return {
         serverName: "assay",
         threadId,
@@ -288,6 +301,16 @@ function handle(message) {
           params: {
             threadId,
             turn: { id: "turn-1", items: [], status: "failed" },
+          },
+        });
+        return;
+      }
+      if (scenario === "tool-then-interrupted-turn") {
+        write({
+          method: "turn/completed",
+          params: {
+            threadId,
+            turn: { id: "turn-1", items: [], status: "interrupted" },
           },
         });
         return;

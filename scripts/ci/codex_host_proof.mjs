@@ -33,6 +33,7 @@ import {
   elicitationAcceptable,
   forbiddenProofRoot,
   initializeFromEvents,
+  runtimeProofRoots,
   isMainModule,
   persistableArgv,
   requiredCellsForJourney,
@@ -239,13 +240,51 @@ function firstVersionLine(result, name) {
   return text.slice(0, 200);
 }
 
-function probeCodexVersion() {
-  return firstVersionLine(spawnSync("codex", ["--version"], VERSION_PROBE), "codex");
+const BOUND_EXEC = Symbol("boundExec");
+
+function snapshotNamedBinary(srcPath, destDir, destName) {
+  fs.mkdirSync(destDir, { recursive: true, mode: 0o700 });
+  const dest = path.join(destDir, destName);
+  const src = resolveRegularBinary(srcPath, destName);
+  const inFlags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0);
+  const inFd = fs.openSync(src, inFlags);
+  try {
+    const st = fs.fstatSync(inFd);
+    if (!st.isFile()) {
+      throw new Error(`${destName} snapshot source is not a regular file`);
+    }
+    const outFlags =
+      fs.constants.O_CREAT |
+      fs.constants.O_EXCL |
+      fs.constants.O_WRONLY |
+      (fs.constants.O_NOFOLLOW || 0);
+    const outFd = fs.openSync(dest, outFlags, 0o700);
+    try {
+      const buf = Buffer.alloc(64 * 1024);
+      let n;
+      while ((n = fs.readSync(inFd, buf, 0, buf.length, null)) > 0) {
+        fs.writeSync(outFd, buf, 0, n);
+      }
+    } finally {
+      fs.closeSync(outFd);
+    }
+  } finally {
+    fs.closeSync(inFd);
+  }
+  fs.chmodSync(dest, 0o700);
+  return dest;
 }
 
-function probeAssayMcpVersion() {
+function probeCodexVersion(pathEnv) {
   return firstVersionLine(
-    spawnSync("assay-mcp-server", ["--version"], VERSION_PROBE),
+    spawnSync("codex", ["--version"], { ...VERSION_PROBE, env: { PATH: pathEnv } }),
+    "codex",
+  );
+}
+
+function probeAssayMcpVersion(pathEnv) {
+  return firstVersionLine(
+    spawnSync("assay-mcp-server", ["--version"], { ...VERSION_PROBE, env: { PATH: pathEnv } }),
     "assay-mcp-server",
   );
 }
@@ -259,24 +298,30 @@ export function resolveHostIdentity() {
   if (!mcpPath) {
     throw new Error("assay MCP binary was not resolved");
   }
-  const codex = resolveRegularBinary(codexPath, "codex");
-  const mcp = resolveRegularBinary(mcpPath, "assay MCP");
-  return {
+  const snapRoot = fs.mkdtempSync(path.join(os.tmpdir(), "assay-host-snap-"));
+  const codexDir = path.join(snapRoot, "codex");
+  const mcpDir = path.join(snapRoot, "mcp");
+  const codexSnap = snapshotNamedBinary(codexPath, codexDir, "codex");
+  const mcpSnap = snapshotNamedBinary(mcpPath, mcpDir, "assay-mcp-server");
+  const pathTail = process.env.PATH || "";
+  const identity = {
     os: os.platform(),
     arch: os.arch(),
     codex: {
-      path: codex,
-      version: probeCodexVersion(),
-      sha256: sha256File(codex),
+      path: fs.realpathSync(codexSnap),
+      version: probeCodexVersion(`${codexDir}${path.delimiter}${pathTail}`),
+      sha256: sha256File(codexSnap),
       installSource: "PATH",
     },
     assayMcp: {
-      path: mcp,
-      version: probeAssayMcpVersion(),
-      sha256: sha256File(mcp),
+      path: fs.realpathSync(mcpSnap),
+      version: probeAssayMcpVersion(`${mcpDir}${path.delimiter}${pathTail}`),
+      sha256: sha256File(mcpSnap),
       installSource: "PATH",
     },
   };
+  identity[BOUND_EXEC] = { codexDir, mcpDir };
+  return identity;
 }
 
 function resolvedMcpCommand(options) {
@@ -378,8 +423,19 @@ function writeProofFiles(options, pack) {
 
 export async function runProof(options) {
   requiredCellsForJourney(options.journey);
-  const forbidden = forbiddenProofRoot(options.proofRoot, options.provenance);
+  const forbidden = forbiddenProofRoot(
+    options.proofRoot,
+    options.provenance,
+    runtimeProofRoots(options.projectRoot),
+  );
   if (forbidden) {
+    if (options.testOnlyChild) {
+      try {
+        options.testOnlyChild.kill("SIGTERM");
+      } catch {
+        /* already exited */
+      }
+    }
     throw new Error(forbidden);
   }
   if (options.provenance === "live" && options.journey === "tool" && !options.allowLiveTurn) {
@@ -423,6 +479,7 @@ export async function runProof(options) {
   let frames = 0;
   let retainedBytes = 0;
   let childExit = null;
+  let acceptedElicitations = 0;
   const pending = new Map();
 
   const retainEvent = (event) => {
@@ -440,10 +497,16 @@ export async function runProof(options) {
     return true;
   };
 
+  if (!options.testOnlyChild && !options.hostIdentity) {
+    options.hostIdentity = resolveHostIdentity();
+  }
+  const bound = options.hostIdentity?.[BOUND_EXEC];
   const spawnOpts = {
     stdio: ["pipe", "pipe", "pipe"],
     env: {
-      PATH: process.env.PATH,
+      PATH: bound
+        ? `${bound.codexDir}${path.delimiter}${process.env.PATH || ""}`
+        : process.env.PATH,
       HOME: options.projectRoot,
       CODEX_HOME: path.join(options.projectRoot, ".codex-home"),
     },
@@ -525,7 +588,11 @@ export async function runProof(options) {
           (event) => event.method === "turn/start" && event.direction === "server",
         );
         const turnId = turnReply?.result?.turn?.id;
-        const accepted = elicitationAcceptable(message.params, threadId, turnId);
+        const accepted =
+          elicitationAcceptable(message.params, threadId, turnId) && acceptedElicitations === 0;
+        if (accepted) {
+          acceptedElicitations += 1;
+        }
         const reply = {
           id: message.id,
           result: {
