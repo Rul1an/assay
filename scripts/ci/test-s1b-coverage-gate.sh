@@ -645,7 +645,7 @@ grep -q 'ok: cleanup-selftest' "$tmp/cleanup.out" || fail "cleanup-selftest miss
 run_leaf_residue_case() {
   local driver="$1" label="$2" incoming="$3" expected="$4"
   local leaf="$tmp/leaf-$label-$incoming" out="$tmp/leaf-$label-$incoming.out" err="$tmp/leaf-$label-$incoming.err"
-  local actual workdir
+  local actual diagnostic_count workdir
   mkdir "$leaf"
   printf 'busy\n' >"$leaf/member"
   set +e
@@ -654,8 +654,9 @@ run_leaf_residue_case() {
   set -e
   [[ "$actual" -eq "$expected" ]] \
     || fail "leaf residue incoming=$incoming returned $actual, expected $expected"
-  grep -qxF "S1B_LEAF_RESIDUE path=$leaf" "$err" \
-    || fail "leaf residue incoming=$incoming missing named diagnostic"
+  diagnostic_count=$(grep -cFx "S1B_LEAF_RESIDUE path=$leaf" "$err" || true)
+  [[ "$diagnostic_count" -eq 1 ]] \
+    || fail "leaf residue incoming=$incoming emitted $diagnostic_count named diagnostics, expected 1"
   workdir=$(sed -n 's/^SELFTEST_WORKDIR=//p' "$out")
   [[ -n "$workdir" ]] || fail "leaf residue incoming=$incoming missing selftest workdir"
   [[ ! -e "$workdir" ]] || fail "leaf residue incoming=$incoming skipped workdir cleanup: $workdir"
@@ -682,6 +683,31 @@ cp "$DRIVER" "$noop_cleanup_driver"
 printf '\n# comment-only cleanup control\n' >>"$noop_cleanup_driver"
 run_leaf_residue_case "$noop_cleanup_driver" noop 0 1
 
+duplicate_cleanup_driver="$tmp/duplicate-cleanup-driver.sh"
+cp "$DRIVER" "$duplicate_cleanup_driver"
+python3 - "$duplicate_cleanup_driver" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '''      printf 'S1B_LEAF_RESIDUE path=%s\\n' "$LEAF" >&2'''
+new = old + "\n" + old
+if text.count(old) != 1:
+    raise SystemExit("duplicate cleanup mutation target must occur exactly once")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+set +e
+( run_leaf_residue_case "$duplicate_cleanup_driver" duplicate 0 1 ) \
+  >"$tmp/duplicate-contract.out" 2>"$tmp/duplicate-contract.err"
+duplicate_contract_ec=$?
+set -e
+[[ "$duplicate_contract_ec" -ne 0 ]] \
+  || fail "duplicate leaf residue diagnostic satisfied the contract"
+grep -qxF 'FAIL: leaf residue incoming=0 emitted 2 named diagnostics, expected 1' \
+  "$tmp/duplicate-contract.err" \
+  || fail "duplicate leaf residue mutation failed for an unrelated reason"
+
 silent_cleanup_driver="$tmp/silent-cleanup-driver.sh"
 cp "$DRIVER" "$silent_cleanup_driver"
 python3 - "$silent_cleanup_driver" <<'PY'
@@ -704,8 +730,16 @@ set +e
   >"$tmp/silent-contract.out" 2>"$tmp/silent-contract.err"
 silent_contract_ec=$?
 set -e
-[[ "$silent_contract_ec" -ne 0 ]] \
-  || fail "restoring silent leaf cleanup did not break the residue contract"
+[[ "$silent_contract_ec" -eq 1 ]] \
+  || fail "silent leaf cleanup contract returned $silent_contract_ec, expected 1"
+grep -qxF 'FAIL: leaf residue incoming=0 returned 0, expected 1' "$tmp/silent-contract.err" \
+  || fail "silent leaf cleanup mutation failed for an unrelated reason"
+[[ ! -s "$tmp/leaf-silent-0.err" ]] \
+  || fail "silent leaf cleanup mutation unexpectedly emitted a diagnostic"
+silent_workdir=$(sed -n 's/^SELFTEST_WORKDIR=//p' "$tmp/leaf-silent-0.out")
+[[ -n "$silent_workdir" ]] || fail "silent leaf cleanup mutation did not execute the selftest"
+[[ ! -e "$silent_workdir" ]] || fail "silent leaf cleanup mutation skipped workdir cleanup"
+[[ -f "$tmp/leaf-silent-0/member" ]] || fail "silent leaf cleanup mutation removed the residue fixture"
 echo "ok: mutation-selftest and cleanup-selftest"
 
 wf="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/monitor-attach-smoke.yml"
