@@ -44,6 +44,7 @@ import {
   projectRetainedEvent,
   projectHostIdentity,
   proofAllowlist,
+  requirePrivateDirectory,
   requirePrivateProofRoot,
   requiredCellsForJourney,
   resolvePendingResponse,
@@ -142,6 +143,14 @@ function requireFreshProofRoot(proofRoot) {
     fs.mkdirSync(proofRoot, { recursive: true, mode: 0o700 });
   }
   return requirePrivateProofRoot(proofRoot);
+}
+
+function requireOrCreatePrivateCodexHome(projectRoot) {
+  const codexHome = path.join(projectRoot, ".codex-home");
+  if (!fs.existsSync(codexHome)) {
+    fs.mkdirSync(codexHome, { mode: 0o700 });
+  }
+  return requirePrivateDirectory(codexHome, "CODEX_HOME");
 }
 
 function encode(message) {
@@ -529,11 +538,11 @@ export async function runProof(options) {
   if (credential) {
     return writeProofFiles(options, {
       events: [
-        {
+        projectRetainedEvent({
           direction: "driver",
           method: "error",
           params: { message: credential },
-        },
+        }),
       ],
       childExit: 1,
       truncated: false,
@@ -543,6 +552,7 @@ export async function runProof(options) {
     });
   }
 
+  const codexHome = requireOrCreatePrivateCodexHome(options.projectRoot);
   const events = [];
   const stdout = new BoundBuffer(options.maxBytes);
   const stderr = new BoundBuffer(options.maxBytes);
@@ -580,7 +590,7 @@ export async function runProof(options) {
     env: {
       PATH: process.env.PATH,
       HOME: options.projectRoot,
-      CODEX_HOME: path.join(options.projectRoot, ".codex-home"),
+      CODEX_HOME: codexHome,
     },
   };
   const child = options.testOnlyChild
@@ -646,11 +656,13 @@ export async function runProof(options) {
     }
     if (resolved.kind === "reject") {
       streamUnavailable = true;
-      retainEvent({
-        direction: "driver",
-        method: "error",
-        params: { message: resolved.reason },
-      });
+      retainEvent(
+        projectRetainedEvent({
+          direction: "driver",
+          method: "error",
+          params: { message: resolved.reason },
+        }),
+      );
       stopChild();
       return;
     }
@@ -730,11 +742,13 @@ export async function runProof(options) {
       } else {
         streamUnavailable = true;
       }
-      retainEvent({
-        direction: "driver",
-        method: "error",
-        params: { message: "stdio parse failed" },
-      });
+      retainEvent(
+        projectRetainedEvent({
+          direction: "driver",
+          method: "error",
+          params: { message: "stdio parse failed" },
+        }),
+      );
       stopChild();
     }
   });
@@ -870,7 +884,13 @@ export async function runProof(options) {
     }
   } catch (error) {
     streamUnavailable = streamUnavailable || /timeout|unavailable/i.test(String(error));
-    retainEvent({ direction: "driver", method: "error", params: { message: String(error) } });
+    retainEvent(
+      projectRetainedEvent({
+        direction: "driver",
+        method: "error",
+        params: { message: String(error) },
+      }),
+    );
     stopChild();
   }
 

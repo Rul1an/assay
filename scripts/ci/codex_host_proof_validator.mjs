@@ -41,24 +41,28 @@ export const HOST_ALLOWLIST = Object.freeze([...ALLOWLIST, ...HOST_SUBJECTS]);
 export const EXTERNAL_ATTESTATION = "not_provided";
 export const HOST_ENV_NAMES = Object.freeze(["PATH", "HOME", "CODEX_HOME"]);
 
-export function requirePrivateProofRoot(proofRoot) {
-  if (typeof proofRoot !== "string" || proofRoot.length === 0) {
-    throw new Error("proof root must be a non-empty path");
+export function requirePrivateDirectory(directory, label) {
+  if (typeof directory !== "string" || directory.length === 0) {
+    throw new Error(`${label} must be a non-empty path`);
   }
-  const resolved = path.resolve(proofRoot);
+  const resolved = path.resolve(directory);
   const st = fs.lstatSync(resolved);
   if (st.isSymbolicLink() || !st.isDirectory()) {
-    throw new Error("proof root must be a real directory");
+    throw new Error(`${label} must be a real directory`);
   }
   if (process.platform !== "win32") {
     if (typeof process.getuid === "function" && st.uid !== process.getuid()) {
-      throw new Error("proof root must be owned by the current user");
+      throw new Error(`${label} must be owned by the current user`);
     }
     if ((st.mode & 0o7777) !== 0o700) {
-      throw new Error("proof root must be private to its owner (mode 0700)");
+      throw new Error(`${label} must be private to its owner (mode 0700)`);
     }
   }
   return fs.realpathSync(resolved);
+}
+
+export function requirePrivateProofRoot(proofRoot) {
+  return requirePrivateDirectory(proofRoot, "proof root");
 }
 
 export function proofAllowlist(hasHostIdentity) {
@@ -449,7 +453,7 @@ export function driverOutcomeExit(pack, cells, journey) {
   if (pack.truncated || pack.streamUnavailable) {
     return fail;
   }
-  if (cells?.driverCompleted?.status === "unavailable") {
+  if (cells?.driverCompleted?.status !== "pass") {
     return fail;
   }
   const required = requiredCellsForJourney(journey);
@@ -576,7 +580,21 @@ export function journeyPairCounts(journey) {
 }
 
 export const ALLOWED_SERVER_REQUESTS = Object.freeze(["mcpServer/elicitation/request"]);
-export const ALLOWED_SERVER_NOTIFICATIONS = Object.freeze(["item/completed", "turn/completed"]);
+export const LIFECYCLE_SERVER_NOTIFICATIONS = Object.freeze([
+  "remoteControl/status/changed",
+  "thread/started",
+  "mcpServer/startupStatus/updated",
+  "thread/status/changed",
+  "turn/started",
+  "item/started",
+]);
+export const SERVER_DIAGNOSTIC_NOTIFICATIONS = Object.freeze(["warning", "error"]);
+export const ALLOWED_SERVER_NOTIFICATIONS = Object.freeze([
+  ...LIFECYCLE_SERVER_NOTIFICATIONS,
+  ...SERVER_DIAGNOSTIC_NOTIFICATIONS,
+  "item/completed",
+  "turn/completed",
+]);
 export const ALLOWED_CLIENT_NOTIFICATIONS = Object.freeze(["initialized"]);
 export const ALLOWED_CLIENT_RESPONSES = Object.freeze(["mcpServer/elicitation/request"]);
 export const ALLOWED_DRIVER_METHODS = Object.freeze(["error"]);
@@ -628,6 +646,14 @@ function retainedItemReason(item) {
 }
 
 function retainedMethodParamsReason(method, params) {
+  if (
+    LIFECYCLE_SERVER_NOTIFICATIONS.includes(method) ||
+    SERVER_DIAGNOSTIC_NOTIFICATIONS.includes(method)
+  ) {
+    return isPlainObject(params) && Object.keys(params).length === 0
+      ? null
+      : `${method} params must be the recorder's empty object`;
+  }
   switch (method) {
     case "initialized":
       if (!isPlainObject(params) || Object.keys(params).length !== 0) {
@@ -770,6 +796,9 @@ export function classifyStoredEvent(event) {
         if (payloadReason) {
           return { type: "unclassified", reason: payloadReason };
         }
+        if (SERVER_DIAGNOSTIC_NOTIFICATIONS.includes(method)) {
+          return { type: "server-diagnostic", method };
+        }
         return { type: "server-notification", method };
       }
       return { type: "unclassified", reason: "unclassified server event" };
@@ -871,6 +900,9 @@ function consumeClassifiedEvent(classified, event, ctx) {
     case "server-notification":
       ctx.notifications.push(event);
       return;
+    case "server-diagnostic":
+      ctx.serverDiagnostics.push(event);
+      return;
     case "client-notification":
       ctx.clientNotifications.push(event);
       return;
@@ -914,6 +946,7 @@ export function consumeJourneyTopology(events, journey) {
   const clientResponses = [];
   const clientNotifications = [];
   const driverErrors = [];
+  const serverDiagnostics = [];
   if (!Array.isArray(events)) {
     return { ok: false, reasons: ["events must be an array"], pairs, counts };
   }
@@ -929,6 +962,7 @@ export function consumeJourneyTopology(events, journey) {
     clientResponses,
     clientNotifications,
     driverErrors,
+    serverDiagnostics,
   };
   for (const event of events) {
     consumeClassifiedEvent(classifyStoredEvent(event), event, ctx);
@@ -1071,6 +1105,7 @@ export function consumeJourneyTopology(events, journey) {
     clientResponses,
     clientNotifications,
     driverErrors,
+    serverDiagnostics,
   };
 }
 
@@ -1467,6 +1502,9 @@ function classifyNegative(statuses, index, label) {
 function classifyDriver(meta, topology) {
   if (Array.isArray(topology?.driverErrors) && topology.driverErrors.length > 0) {
     return cell("fail", "retained driver/error contradicts a completed journey");
+  }
+  if (Array.isArray(topology?.serverDiagnostics) && topology.serverDiagnostics.length > 0) {
+    return cell("fail", "retained server diagnostic contradicts a completed journey");
   }
   const kind = closedDriverOutcomeStatus(meta);
   if (kind === "unavailable") {

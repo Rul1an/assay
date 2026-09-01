@@ -26,6 +26,7 @@ import {
   classifyRecord,
   consumeJourneyTopology,
   decidePrompt,
+  driverOutcomeFrom,
   elicitationAcceptable,
   forbiddenProofRoot,
   projectClientRequestParams,
@@ -149,7 +150,7 @@ process.stdout.write("assay-mcp-server-shadow/0.0.0\\n");
 }
 
 function driveCli(scenario, journey = "tool", extra = {}) {
-  const projectRoot = seedProject();
+  const projectRoot = extra.projectRoot ?? seedProject();
   const proofRoot = extra.proofRoot ?? scratch();
   const mcpBin = extra.assayMcpBin ?? writeShadowMcp();
   const codexBin =
@@ -533,6 +534,84 @@ test("malformed JSON line writes unavailable evidence; CLI proof root is not emp
   assert.equal(stored.cells.oneToolInvoked.status, "unavailable");
   assert.notEqual(stored.cells.oneToolInvoked.status, "pass");
   assert.notEqual(stored.externalAttestation, "pass");
+  const events = JSON.parse(fs.readFileSync(path.join(cli.proofRoot, "events.json"), "utf8"));
+  const driverErrors = events.filter(
+    (event) => event.direction === "driver" && event.method === "error",
+  );
+  assert.ok(driverErrors.length >= 1, "the failed run must retain a driver error witness");
+  assert.deepEqual(
+    [...new Set(driverErrors.map((event) => event.params?.message))],
+    ["retained driver error"],
+    "driver failures must be the same closed projection the validator recomputes",
+  );
+});
+
+test("production driver creates and verifies its disposable CODEX_HOME before spawn", () => {
+  const projectRoot = seedProject();
+  const codexHome = path.join(projectRoot, ".codex-home");
+  assert.equal(fs.existsSync(codexHome), false, "control starts without CODEX_HOME");
+
+  const binDir = scratch();
+  const codexBin = path.join(binDir, "codex");
+  writePortableNodeExecutable(
+    codexBin,
+    `import fs from "node:fs";
+import { spawn } from "node:child_process";
+if (process.argv.includes("--version")) {
+  process.stdout.write("codex-home-check/1.0.0\\n");
+  process.exit(0);
+}
+fs.writeFileSync(process.env.HOME + "/.codex-app-server-started", "1");
+const stat = fs.statSync(process.env.CODEX_HOME);
+if (!stat.isDirectory() || (process.platform !== "win32" && (stat.mode & 0o7777) !== 0o700)) {
+  process.exit(73);
+}
+const child = spawn(${JSON.stringify(process.execPath)}, ${JSON.stringify([FAKE, "--scenario", "valid", "--project-root", projectRoot])}, { stdio: "inherit" });
+const stop = () => { try { child.kill("SIGTERM"); } catch { /* already exited */ } };
+process.on("SIGTERM", stop);
+process.on("SIGINT", stop);
+child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+`,
+  );
+
+  const cli = driveCli("valid", "discovery", { projectRoot, codexBin });
+  assert.equal(cli.status, 0, cli.stderr || cli.stdout);
+  const stat = fs.lstatSync(codexHome);
+  assert.equal(stat.isSymbolicLink(), false);
+  assert.equal(stat.isDirectory(), true);
+  if (process.platform !== "win32") {
+    assert.equal(stat.mode & 0o7777, 0o700);
+  }
+
+  const fileProjectRoot = seedProject();
+  fs.writeFileSync(path.join(fileProjectRoot, ".codex-home"), "not a directory\n");
+  const fileCli = driveCli("valid", "discovery", {
+    projectRoot: fileProjectRoot,
+    codexBin,
+  });
+  assert.notEqual(fileCli.status, 0);
+  assert.equal(
+    fs.existsSync(path.join(fileProjectRoot, ".codex-app-server-started")),
+    false,
+    "a non-directory CODEX_HOME must be rejected before app-server spawn",
+  );
+
+  if (process.platform !== "win32") {
+    const publicProjectRoot = seedProject();
+    const publicCodexHome = path.join(publicProjectRoot, ".codex-home");
+    fs.mkdirSync(publicCodexHome, { mode: 0o755 });
+    fs.chmodSync(publicCodexHome, 0o755);
+    const publicCli = driveCli("valid", "discovery", {
+      projectRoot: publicProjectRoot,
+      codexBin,
+    });
+    assert.notEqual(publicCli.status, 0);
+    assert.equal(
+      fs.existsSync(path.join(publicProjectRoot, ".codex-app-server-started")),
+      false,
+      "a non-private CODEX_HOME must be rejected before app-server spawn",
+    );
+  }
 });
 
 test("credential-bearing argv is rejected before spawn and not persisted", async () => {
@@ -1920,7 +1999,16 @@ test("F1 strict JSON-RPC envelopes reject method+result, result+error, duplicate
     "a notification carrying a pending id must not yield all-pass",
   );
   assert.notEqual(impersonated.classified.cells.driverCompleted.status, "pass");
-  assert.equal(validateProofRoot(impersonated.proofRoot).ok, false);
+  assert.notEqual(
+    impersonated.manifest.driverOutcome.exitCode,
+    0,
+    "a rejected envelope must be retained as a non-clean driver outcome",
+  );
+  assert.equal(
+    validateProofRoot(impersonated.proofRoot).ok,
+    true,
+    "honest evidence of a failed journey remains a valid proof record",
+  );
 
   const both = await drive("result-and-error-response");
   assert.equal(
@@ -2686,6 +2774,94 @@ test("closed-world server-row taxonomy refuses id-less response shapes; allowed 
   const control = await drive("valid");
   assert.equal(allIntendedCellsPass(control.classified), true);
   assert.equal(validateProofRoot(control.proofRoot).ok, true);
+});
+
+test("current Codex lifecycle chatter is inert while diagnostics remain non-clean", async () => {
+  const { events, manifest, classified } = await drive("valid");
+  assert.equal(allIntendedCellsPass(classified), true);
+
+  const lifecycleMethods = [
+    "remoteControl/status/changed",
+    "thread/started",
+    "mcpServer/startupStatus/updated",
+    "thread/status/changed",
+    "turn/started",
+    "item/started",
+  ];
+  const withLifecycle = structuredClone(events);
+  const terminalIndex = withLifecycle.findIndex(
+    (event) => event.direction === "server" && event.method === "turn/completed",
+  );
+  withLifecycle.splice(
+    terminalIndex,
+    0,
+    ...lifecycleMethods.map((method) => ({ direction: "server", method, params: {} })),
+  );
+  const lifecycle = classifyRecord({ ...manifest, events: withLifecycle });
+  assert.equal(
+    allIntendedCellsPass(lifecycle),
+    true,
+    "known lifecycle notifications must not erase independently observed host cells",
+  );
+  const lifecycleRoot = scratch();
+  fs.mkdirSync(lifecycleRoot, { recursive: true });
+  rewriteProof(lifecycleRoot, manifest, withLifecycle, lifecycle);
+  assert.equal(validateProofRoot(lifecycleRoot).ok, true);
+
+  for (const method of ["warning", "error"]) {
+    const withDiagnostic = structuredClone(events);
+    withDiagnostic.splice(terminalIndex, 0, { direction: "server", method, params: {} });
+    const diagnostic = classifyRecord({ ...manifest, events: withDiagnostic });
+    assert.equal(
+      diagnostic.cells.skillDiscovered.status,
+      "pass",
+      `${method} must not relabel completed discovery as absent`,
+    );
+    assert.equal(
+      diagnostic.cells.exactToolsListed.status,
+      "pass",
+      `${method} must not relabel the observed tool list as absent`,
+    );
+    assert.equal(
+      diagnostic.cells.driverCompleted.status,
+      "fail",
+      `${method} must keep the overall proof non-clean`,
+    );
+    assert.notEqual(
+      driverOutcomeFrom(
+        { childExit: 0, truncated: false, streamUnavailable: false },
+        diagnostic.cells,
+        "tool",
+      ).exitCode,
+      0,
+      `${method} must keep the generated driver outcome nonzero`,
+    );
+    assert.equal(allIntendedCellsPass(diagnostic), false);
+  }
+
+  const malformedLifecycle = structuredClone(events);
+  malformedLifecycle.splice(terminalIndex, 0, {
+    direction: "server",
+    method: lifecycleMethods[0],
+    params: { unexpected: true },
+  });
+  assert.equal(
+    allIntendedCellsPass(classifyRecord({ ...manifest, events: malformedLifecycle })),
+    false,
+    "lifecycle payloads outside the retained empty projection must fail closed",
+  );
+
+  const unknown = structuredClone(events);
+  unknown.splice(terminalIndex, 0, {
+    direction: "server",
+    method: "future/unknown",
+    params: {},
+  });
+  assert.equal(
+    allIntendedCellsPass(classifyRecord({ ...manifest, events: unknown })),
+    false,
+    "future notification methods remain fail-closed",
+  );
 });
 
 test("successful initialize result is required; initialize error cannot clean the record", async () => {
