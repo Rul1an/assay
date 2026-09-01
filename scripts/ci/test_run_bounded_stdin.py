@@ -613,6 +613,61 @@ class RequiredHookTableTests(unittest.TestCase):
         config = self._config().replace(real, f"      # - id: {hook_id}\n{real}", 1)
         WORKFLOW_MOD.assert_required_claude_plugin_hooks(config)
 
+    def _scalar_decoy(self) -> str:
+        config = self._config()
+        blocks: list[str] = []
+        for hook_id, _entry in WORKFLOW_MOD.REQUIRED_CLAUDE_PLUGIN_HOOKS:
+            block = WORKFLOW_MOD._hook_block_by_id(config, hook_id)
+            blocks.append(block)
+            config = config.replace(block, "", 1)
+        body = "\n".join(blocks)
+        indented = "\n".join("    " + line for line in body.splitlines())
+        return config.rstrip() + "\n\ndecoy: |\n" + indented + "\n"
+
+    def _ruby_safe_load_ok(self, config: str) -> None:
+        script = (
+            "require \"yaml\"; YAML.safe_load(STDIN.read, aliases: false); "
+            "STDOUT.write(\"ok\")"
+        )
+        result = subprocess.run(
+            ["ruby", "-EUTF-8:UTF-8", "-e", script],
+            input=config,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "ok")
+
+    def test_mutation_scalar_decoy_goes_red(self) -> None:
+        config = self._scalar_decoy()
+        self._ruby_safe_load_ok(config)
+        self.assertIn("- id: claude-plugin-install-workflow-self-test", config)
+        self.assertIn("- id: claude-plugin-run-bounded-stdin", config)
+        with self.assertRaises(WORKFLOW_MOD.WorkflowError) as raised:
+            WORKFLOW_MOD.assert_required_claude_plugin_hooks(config)
+        self.assertIn("claude-plugin-install-workflow-self-test", raised.exception.reason)
+
+    def test_mutation_duplicate_real_hook_goes_red(self) -> None:
+        hook_id = "claude-plugin-run-bounded-stdin"
+        block = WORKFLOW_MOD._hook_block_by_id(self._config(), hook_id)
+        config = self._config().replace(block, block + block, 1)
+        self._ruby_safe_load_ok(config)
+        with self.assertRaises(WORKFLOW_MOD.WorkflowError) as raised:
+            WORKFLOW_MOD.assert_required_claude_plugin_hooks(config)
+        self.assertIn(hook_id, raised.exception.reason)
+
+    def test_missing_yaml_parser_fails_closed(self) -> None:
+        with patch.object(WORKFLOW_MOD.subprocess, "run", side_effect=FileNotFoundError):
+            with self.assertRaises(WORKFLOW_MOD.WorkflowError) as raised:
+                WORKFLOW_MOD.assert_required_claude_plugin_hooks()
+        self.assertIn("ruby", raised.exception.reason)
+
+    def test_invalid_yaml_fails_closed(self) -> None:
+        with self.assertRaises(WORKFLOW_MOD.WorkflowError) as raised:
+            WORKFLOW_MOD.assert_required_claude_plugin_hooks("repos: [\n")
+        self.assertIn("YAML", raised.exception.reason)
+
 
 if __name__ == "__main__":
     unittest.main()

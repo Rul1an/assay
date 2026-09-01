@@ -1504,15 +1504,119 @@ def _hook_entry(block: str) -> str:
     )
 
 
+# Same parser route as scripts/ci/check-assay-action-pin.sh: Ruby
+# YAML.safe_load, then JSON. Comments and scalar values are not hooks.
+RUBY_SAFE_LOAD = r"""
+require "json"
+require "yaml"
+begin
+  val = YAML.safe_load(STDIN.read, aliases: false)
+  STDOUT.write(JSON.generate(val))
+rescue Psych::SyntaxError, Psych::BadAlias, Psych::DisallowedClass => e
+  STDERR.write(e.message)
+  exit 2
+end
+"""
+
+
+def load_pre_commit_yaml(config: str) -> object:
+    try:
+        proc = subprocess.run(
+            ["ruby", "-EUTF-8:UTF-8", "-e", RUBY_SAFE_LOAD],
+            input=config,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except FileNotFoundError:
+        fail(
+            "hook_files",
+            "ruby is required to parse .pre-commit-config.yaml",
+            "install ruby with Psych YAML.safe_load",
+        )
+    except subprocess.TimeoutExpired:
+        fail(
+            "hook_files",
+            "YAML parse timed out",
+            "retry after checking .pre-commit-config.yaml",
+        )
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "yaml parse failed").strip()
+        fail(
+            "hook_files",
+            f"YAML parse failed: {err}",
+            "fix .pre-commit-config.yaml so YAML.safe_load accepts it",
+        )
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        fail(
+            "hook_files",
+            f"YAML JSON decode failed: {exc}",
+            "fix .pre-commit-config.yaml so YAML.safe_load emits JSON",
+        )
+
+
+def _required_hook_entries_from_repos(parsed: object) -> dict[str, list[str]]:
+    required = {hook_id: [] for hook_id, _entry in REQUIRED_CLAUDE_PLUGIN_HOOKS}
+    if not isinstance(parsed, dict):
+        fail(
+            "hook_files",
+            "pre-commit config root is not a mapping",
+            "keep a standard pre-commit YAML mapping with repos",
+        )
+    repos = parsed.get("repos")
+    if not isinstance(repos, list):
+        fail(
+            "hook_files",
+            "pre-commit config repos is not a list",
+            "keep repos as a YAML list of hook repositories",
+        )
+    for repo in repos:
+        if not isinstance(repo, dict):
+            continue
+        hooks = repo.get("hooks")
+        if not isinstance(hooks, list):
+            continue
+        for hook in hooks:
+            if not isinstance(hook, dict):
+                continue
+            hook_id = hook.get("id")
+            if hook_id not in required:
+                continue
+            entry = hook.get("entry")
+            if not isinstance(hook_id, str) or not isinstance(entry, str):
+                fail(
+                    "hook_files",
+                    f"hook {hook_id!r} is not a mapping with string id and entry",
+                    "restore the required Claude plugin hook as a real YAML mapping",
+                )
+            required[hook_id].append(entry)
+    return required
+
+
 def assert_required_claude_plugin_hooks(config: str | None = None) -> None:
     if config is None:
         config = (SOURCE_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    found = _required_hook_entries_from_repos(load_pre_commit_yaml(config))
     for hook_id, entry in REQUIRED_CLAUDE_PLUGIN_HOOKS:
-        got = _hook_entry(_hook_block_by_id(config, hook_id))
-        if got != entry:
+        entries = found[hook_id]
+        if not entries:
             fail(
                 "hook_files",
-                f"{hook_id} entry {got!r} is not {entry!r}",
+                f"pre-commit config lost {hook_id}",
+                "restore the Claude plugin required hook",
+            )
+        if len(entries) != 1:
+            fail(
+                "hook_files",
+                f"pre-commit config has {len(entries)} real list items for {hook_id}",
+                "keep exactly one uncommented YAML list item per required hook id",
+            )
+        if entries[0] != entry:
+            fail(
+                "hook_files",
+                f"{hook_id} entry {entries[0]!r} is not {entry!r}",
                 "restore the required Claude plugin hook entry",
             )
     print("required_claude_plugin_hooks=pass")
