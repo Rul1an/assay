@@ -197,6 +197,12 @@ jobs:
           python3 scripts/ci/check-evidence-vocabulary.py
           bash scripts/ci/test-cli-describe-contract.sh
 
+      - name: Codex host-proof Node contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter spec scripts/ci/test_codex_host_proof.mjs
+
   # --- Dependency security (advisories, licenses, sources) ---
   deps-security:
     name: Dependency Security (cargo-deny + audit)
