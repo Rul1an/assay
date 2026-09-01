@@ -2646,7 +2646,7 @@ test("successful initialize result is required; initialize error cannot mint liv
   assert.equal(validateProofRoot(control.proofRoot).ok, true);
 });
 
-test("live identity binds the canonical primary pair; raw events.find cannot hide a wrong command", async () => {
+test("live identity binds the canonical primary pair; schema-valid decoy rows cannot hide a wrong command", async () => {
   const { events, manifest, classified } = await drive("valid");
   assert.equal(allIntendedCellsPass(classified), true);
   const bound = liveBoundRecord(manifest, events);
@@ -2656,20 +2656,21 @@ test("live identity binds the canonical primary pair; raw events.find cannot hid
   const primary = pairedPrimaryClientStart(bound.events);
   assert.ok(primary, "valid pack must have a paired primary thread/start");
   assert.equal(primary.params.config.mcp_servers.assay.command, observed);
+  // Keep every existing pair schema-valid. The missing/invalid thread/start
+  // rows stay as decoys; only the canonical primary command changes. An
+  // id-less insert would fail topology first and hide removal of ~303.
   primary.params.config.mcp_servers.assay.command = "/wrong/canonical/assay-mcp-server";
-  bound.events.unshift({
-    direction: "client",
-    method: "thread/start",
-    params: {
-      config: { mcp_servers: { assay: { command: observed } } },
-    },
-  });
 
   const hidden = classifyRecord(bound);
+  assert.equal(
+    allIntendedCellsPass(hidden),
+    true,
+    "identity decoy must keep every retained row schema-valid",
+  );
   assert.notEqual(
     hidden.liveAcceptance.status,
     "pass",
-    "an ignored id-less thread/start must not hide a wrong canonical primary command",
+    "wrong canonical primary command must fail liveAcceptance while decoy rows stay valid",
   );
   assert.match(
     VALIDATOR_SRC,
@@ -2688,5 +2689,155 @@ test("live identity binds the canonical primary pair; raw events.find cannot hid
     "fail",
     "no-op live-bound control still cannot pass on fake events",
   );
+  assert.equal(validateProofRoot(control.proofRoot).ok, true);
+});
+
+function retargetPairId(events, method, fromId, toId) {
+  for (const event of events) {
+    if (event.method === method && event.id === fromId) {
+      event.id = toId;
+    }
+  }
+}
+
+function assertHostileProof(manifest, events, label) {
+  const hostile = classifyRecord({ ...manifest, events });
+  assert.equal(allIntendedCellsPass(hostile), false, `${label} must not yield 9/9`);
+  const hostileRoot = scratch();
+  fs.mkdirSync(hostileRoot, { recursive: true });
+  rewriteProof(hostileRoot, manifest, events, hostile);
+  assert.equal(validateProofRoot(hostileRoot).ok, false, `${label} must not validate as proof`);
+}
+
+test("retained-proof RPC IDs reject boolean/unsafe/fractional/null/object and sequential reuse; numeric/string controls stay green", async () => {
+  // Retained-proof contract only: IDs already recorded in this #2684 pack.
+  // Not a general JSON-RPC uniqueness or compatibility rule.
+  const { events, manifest, classified, proofRoot } = await drive("valid");
+  assert.equal(allIntendedCellsPass(classified), true);
+  assert.equal(validateProofRoot(proofRoot).ok, true);
+  const initialize = events.find(
+    (event) => event.direction === "client" && event.method === "initialize",
+  );
+  assert.equal(typeof initialize.id, "number");
+  assert.equal(Number.isSafeInteger(initialize.id), true);
+  const elicit = events.find(
+    (event) =>
+      event.direction === "server" && event.method === "mcpServer/elicitation/request",
+  );
+  assert.equal(typeof elicit.id, "string");
+  assert.ok(elicit.id.length > 0);
+
+  const forgedObject = { forged: true };
+  const cases = [
+    { label: "boolean id", id: true },
+    { label: "unsafe integer id", id: Number.MAX_SAFE_INTEGER + 1 },
+    { label: "fractional id", id: 1.5 },
+    { label: "null id", id: null },
+    { label: "object id", id: forgedObject },
+  ];
+  for (const { label, id } of cases) {
+    const mutated = structuredClone(events);
+    retargetPairId(mutated, "initialize", 1, id);
+    assertHostileProof(manifest, mutated, label);
+  }
+
+  const reused = structuredClone(events);
+  retargetPairId(reused, "skills/list", 2, 1);
+  assertHostileProof(manifest, reused, "sequential reuse of resolved id 1");
+
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true);
+  assert.equal(validateProofRoot(control.proofRoot).ok, true);
+});
+
+test("typed retained-method rows reject null/scalar params, unknown item type, and malformed/orphaned/duplicate elicitation; legitimate variants stay green", async () => {
+  const { events, manifest, classified, proofRoot } = await drive("valid");
+  assert.equal(allIntendedCellsPass(classified), true);
+  assert.equal(validateProofRoot(proofRoot).ok, true);
+  const item = events.find(
+    (event) => event.direction === "server" && event.method === "item/completed",
+  );
+  const turn = events.find(
+    (event) => event.direction === "server" && event.method === "turn/completed",
+  );
+  const elicit = events.find(
+    (event) =>
+      event.direction === "server" && event.method === "mcpServer/elicitation/request",
+  );
+  assert.ok(item && turn && elicit, "valid pack must retain the typed method rows");
+
+  const hostiles = [
+    {
+      label: "item/completed params=null",
+      row: { direction: "server", method: "item/completed", id: null, params: null },
+    },
+    {
+      label: "turn/completed scalar params",
+      row: { direction: "server", method: "turn/completed", id: null, params: "scalar" },
+    },
+    {
+      label: "unknown item type",
+      row: {
+        direction: "server",
+        method: "item/completed",
+        id: null,
+        params: {
+          ...structuredClone(item.params),
+          item: { type: "not-a-retained-item", id: "extra-1" },
+        },
+      },
+    },
+    {
+      label: "malformed elicitation",
+      row: {
+        direction: "server",
+        method: "mcpServer/elicitation/request",
+        id: "elicit-malformed",
+        params: { serverName: "assay" },
+      },
+    },
+    {
+      label: "orphaned elicitation",
+      row: {
+        direction: "server",
+        method: "mcpServer/elicitation/request",
+        id: "elicit-orphan",
+        params: {
+          serverName: "other",
+          threadId: "other-thread",
+          turnId: "other-turn",
+          message: "not the decide probe",
+          mode: "form",
+          requestedSchema: { type: "object", properties: {} },
+        },
+      },
+    },
+    {
+      label: "duplicate elicitation id",
+      row: {
+        ...structuredClone(elicit),
+        params: {
+          ...structuredClone(elicit.params),
+          message: "duplicate id, not the decide probe",
+        },
+      },
+    },
+  ];
+  for (const { label, row } of hostiles) {
+    const mutated = structuredClone(events);
+    mutated.push(row);
+    assertHostileProof(manifest, mutated, label);
+  }
+
+  const interleaved = await drive("early-user-then-tool");
+  assert.equal(interleaved.classified.cells.oneToolInvoked.status, "pass");
+  assert.equal(validateProofRoot(interleaved.proofRoot).ok, true);
+  const itemTypes = interleaved.events
+    .filter((event) => event.method === "item/completed")
+    .map((event) => event.params?.item?.type);
+  assert.deepEqual(itemTypes, ["userMessage", "mcpToolCall"]);
+
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true);
   assert.equal(validateProofRoot(control.proofRoot).ok, true);
 });

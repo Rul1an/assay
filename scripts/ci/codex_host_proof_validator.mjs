@@ -425,6 +425,9 @@ export function resolvePendingResponse(pending, frame) {
     return { kind: "reject", reason: "rpc frame is not an object" };
   }
   const hasId = Object.prototype.hasOwnProperty.call(frame, "id");
+  if (hasId && !isProofRpcId(frame.id)) {
+    return { kind: "reject", reason: "invalid retained-proof rpc id" };
+  }
   const hasMethod = Object.prototype.hasOwnProperty.call(frame, "method");
   const hasResult = Object.prototype.hasOwnProperty.call(frame, "result");
   const hasError = Object.prototype.hasOwnProperty.call(frame, "error");
@@ -495,12 +498,107 @@ function hasOwn(value, key) {
   return value != null && Object.prototype.hasOwnProperty.call(value, key);
 }
 
+function isNonemptyString(value) {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isPlainObject(value) {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+// Retained-proof ID domain only. Not a general JSON-RPC uniqueness rule.
+export function isProofRpcId(id) {
+  if (typeof id === "string") {
+    return id.length > 0;
+  }
+  return Number.isSafeInteger(id);
+}
+
+function retainedItemReason(item) {
+  if (!isPlainObject(item) || !isNonemptyString(item.type) || !isNonemptyString(item.id)) {
+    return "item/completed item is not a typed retained item";
+  }
+  switch (item.type) {
+    case "mcpToolCall":
+      if (
+        isNonemptyString(item.server) &&
+        isNonemptyString(item.tool) &&
+        isPlainObject(item.arguments) &&
+        isNonemptyString(item.status) &&
+        (item.result == null || isPlainObject(item.result))
+      ) {
+        return null;
+      }
+      return "item/completed mcpToolCall is missing required retained fields";
+    case "userMessage":
+      if (Array.isArray(item.content)) {
+        return null;
+      }
+      return "item/completed userMessage is missing required retained fields";
+    default:
+      return `unknown retained item type ${item.type}`;
+  }
+}
+
+function retainedMethodParamsReason(method, params) {
+  switch (method) {
+    case "item/completed": {
+      if (!isPlainObject(params)) {
+        return "item/completed params must be an object";
+      }
+      if (!Number.isFinite(params.completedAtMs)) {
+        return "item/completed completedAtMs must be finite";
+      }
+      if (!isNonemptyString(params.threadId) || !isNonemptyString(params.turnId)) {
+        return "item/completed threadId and turnId must be nonempty strings";
+      }
+      return retainedItemReason(params.item);
+    }
+    case "turn/completed": {
+      if (!isPlainObject(params)) {
+        return "turn/completed params must be an object";
+      }
+      if (!isNonemptyString(params.threadId)) {
+        return "turn/completed threadId must be a nonempty string";
+      }
+      const turn = params.turn;
+      if (
+        !isPlainObject(turn) ||
+        !isNonemptyString(turn.id) ||
+        !Array.isArray(turn.items) ||
+        !isNonemptyString(turn.status)
+      ) {
+        return "turn/completed turn must have typed id, items, and status";
+      }
+      return null;
+    }
+    case "mcpServer/elicitation/request": {
+      if (!isPlainObject(params)) {
+        return "elicitation params must be an object";
+      }
+      if (
+        !isNonemptyString(params.serverName) ||
+        !isNonemptyString(params.threadId) ||
+        !isNonemptyString(params.turnId) ||
+        !isNonemptyString(params.message) ||
+        !isNonemptyString(params.mode) ||
+        !isPlainObject(params.requestedSchema)
+      ) {
+        return "elicitation params must have typed schema, message, thread, and turn";
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
 export function classifyStoredEvent(event) {
   if (event == null || typeof event !== "object" || Array.isArray(event)) {
     return { type: "unclassified", reason: "event is not an object" };
   }
   const method = typeof event.method === "string" && event.method.length > 0 ? event.method : null;
-  const hasValidId = event.id != null;
+  const hasValidId = isProofRpcId(event.id);
   const hasResult = hasOwn(event, "result");
   const hasError = hasOwn(event, "error");
   switch (event.direction) {
@@ -549,6 +647,10 @@ export function classifyStoredEvent(event) {
         !hasError &&
         ALLOWED_SERVER_REQUESTS.includes(method)
       ) {
+        const payloadReason = retainedMethodParamsReason(method, event.params);
+        if (payloadReason) {
+          return { type: "unclassified", reason: payloadReason };
+        }
         return { type: "server-request", method, id: event.id };
       }
       if (
@@ -558,6 +660,10 @@ export function classifyStoredEvent(event) {
         !hasError &&
         ALLOWED_SERVER_NOTIFICATIONS.includes(method)
       ) {
+        const payloadReason = retainedMethodParamsReason(method, event.params);
+        if (payloadReason) {
+          return { type: "unclassified", reason: payloadReason };
+        }
         return { type: "server-notification", method };
       }
       return { type: "unclassified", reason: "unclassified server event" };
@@ -579,11 +685,23 @@ function threadRoleFromStartParams(params) {
   return "primary";
 }
 
+function rememberRequestId(ctx, id) {
+  if (!isProofRpcId(id)) {
+    ctx.reasons.push("invalid retained-proof rpc id");
+    return false;
+  }
+  if (ctx.seen.has(id)) {
+    ctx.reasons.push(`reused request id ${id}`);
+    return false;
+  }
+  ctx.seen.add(id);
+  return true;
+}
+
 function consumeClassifiedEvent(classified, event, ctx) {
   switch (classified.type) {
     case "client-request":
-      if (ctx.pending.has(event.id)) {
-        ctx.reasons.push(`duplicate client request id ${event.id}`);
+      if (!rememberRequestId(ctx, event.id)) {
         return;
       }
       ctx.pending.set(event.id, event.method);
@@ -618,6 +736,10 @@ function consumeClassifiedEvent(classified, event, ctx) {
       return;
     }
     case "server-request":
+      if (!rememberRequestId(ctx, event.id)) {
+        return;
+      }
+      ctx.pendingServer.set(event.id, event.method);
       ctx.serverRequests.push(event);
       return;
     case "server-notification":
@@ -625,9 +747,20 @@ function consumeClassifiedEvent(classified, event, ctx) {
       return;
     case "client-notification":
       return;
-    case "client-response":
+    case "client-response": {
+      const expected = ctx.pendingServer.get(event.id);
+      if (expected == null) {
+        ctx.reasons.push("unknown client response id");
+        return;
+      }
+      if (event.method !== expected) {
+        ctx.reasons.push("client response method does not match pending server request");
+        return;
+      }
+      ctx.pendingServer.delete(event.id);
       ctx.clientResponses.push(event);
       return;
+    }
     case "driver":
       return;
     case "unclassified":
@@ -643,6 +776,8 @@ function consumeClassifiedEvent(classified, event, ctx) {
 export function consumeJourneyTopology(events, journey) {
   const counts = journeyPairCounts(journey);
   const pending = new Map();
+  const pendingServer = new Map();
+  const seen = new Set();
   const clientById = new Map();
   const pairs = [];
   const reasons = [];
@@ -654,6 +789,8 @@ export function consumeJourneyTopology(events, journey) {
   }
   const ctx = {
     pending,
+    pendingServer,
+    seen,
     clientById,
     pairs,
     reasons,
@@ -666,6 +803,9 @@ export function consumeJourneyTopology(events, journey) {
   }
   if (pending.size > 0) {
     reasons.push("unresolved client requests");
+  }
+  if (pendingServer.size > 0) {
+    reasons.push("unresolved server requests");
   }
   const byMethod = (method) => pairs.filter((pair) => pair.method === method);
   for (const [method, n] of Object.entries(counts)) {
