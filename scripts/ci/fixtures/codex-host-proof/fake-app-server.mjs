@@ -4,7 +4,9 @@
  */
 import readline from "node:readline";
 import path from "node:path";
-import { DECIDE_INPUT, DECIDE_TOOL } from "../../codex_host_proof_validator.mjs";
+import { DECIDE_INPUT } from "../../codex_host_proof_validator.mjs";
+
+const RELEASE_DECIDE_TOOL = "assay_policy_decide";
 
 const FAKE_USER_AGENT = "assay-codex-host-proof-fake/1";
 const TOOLS = {
@@ -238,7 +240,7 @@ function handle(message) {
           serverName: "not-assay",
           threadId,
           turnId: "turn-1",
-          message: `approve ${DECIDE_TOOL}`,
+          message: `approve ${RELEASE_DECIDE_TOOL}`,
           mode: "form",
           requestedSchema: { type: "object", properties: {} },
         };
@@ -248,7 +250,7 @@ function handle(message) {
           serverName: "assay",
           threadId: "unrelated-thread",
           turnId: "turn-1",
-          message: `approve ${DECIDE_TOOL}`,
+          message: `approve ${RELEASE_DECIDE_TOOL}`,
           mode: "form",
           requestedSchema: { type: "object", properties: {} },
         };
@@ -273,7 +275,7 @@ function handle(message) {
         serverName: "assay",
         threadId,
         turnId: "turn-1",
-        message: `approve ${DECIDE_TOOL}`,
+        message: `approve ${RELEASE_DECIDE_TOOL}`,
         mode: "form",
         requestedSchema: { type: "object", properties: {} },
       };
@@ -283,7 +285,7 @@ function handle(message) {
       method: "mcpServer/elicitation/request",
       params: elicitParams(),
     });
-    const tool = scenario === "wrong-tool" ? "assay_check_args" : DECIDE_TOOL;
+    const tool = scenario === "wrong-tool" ? "assay_check_args" : RELEASE_DECIDE_TOOL;
     const argumentsPayload =
       scenario === "wrong-tool"
         ? { tool: "other" }

@@ -29,6 +29,7 @@ import {
   boundedPositiveInt,
   classifyRecord,
   closedDriverOutcomeStatus,
+  consumeBoundedBinary,
   consumeJourneyTopology,
   credentialArgvReason,
   decidePrompt,
@@ -251,39 +252,30 @@ function snapshotNamedBinary(srcPath, destDir, destName, options = {}) {
   const dest = path.join(destDir, destName);
   const src = resolveRegularBinary(srcPath, destName);
   const maxBytes = options.testOnlySnapshotMaxBytes ?? HARD_MAX_SNAPSHOT_BYTES;
-  const inFlags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0);
-  const inFd = fs.openSync(src, inFlags);
   let outFd = null;
   try {
-    const st = fs.fstatSync(inFd);
-    if (!st.isFile()) {
-      throw new Error(`${destName} snapshot source is not a regular file`);
-    }
-    if (st.size > maxBytes) {
-      throw new Error(`${destName} snapshot source exceeds binary ceiling`);
-    }
-    const outFlags =
-      fs.constants.O_CREAT |
-      fs.constants.O_EXCL |
-      fs.constants.O_WRONLY |
-      (fs.constants.O_NOFOLLOW || 0);
-    outFd = fs.openSync(dest, outFlags, 0o700);
-    const buf = Buffer.alloc(64 * 1024);
-    let copied = 0;
-    let n;
-    while ((n = fs.readSync(inFd, buf, 0, buf.length, null)) > 0) {
-      if (typeof options.testOnlyAfterSnapshotRead === "function") {
-        options.testOnlyAfterSnapshotRead(copied, src, destName);
-      }
-      copied += n;
-      if (copied > maxBytes) {
-        throw new Error(`${destName} snapshot copy exceeded binary ceiling`);
-      }
-      if (fs.fstatSync(inFd).size > maxBytes) {
-        throw new Error(`${destName} snapshot source grew past binary ceiling`);
-      }
-      fs.writeSync(outFd, buf, 0, n);
-    }
+    consumeBoundedBinary(
+      src,
+      maxBytes,
+      (chunk) => {
+        fs.writeSync(outFd, chunk);
+      },
+      {
+        afterStat() {
+          const outFlags =
+            fs.constants.O_CREAT |
+            fs.constants.O_EXCL |
+            fs.constants.O_WRONLY |
+            (fs.constants.O_NOFOLLOW || 0);
+          outFd = fs.openSync(dest, outFlags, 0o700);
+        },
+        testOnlyAfterRead(copied, file) {
+          if (typeof options.testOnlyAfterSnapshotRead === "function") {
+            options.testOnlyAfterSnapshotRead(copied, file, destName);
+          }
+        },
+      },
+    );
   } catch (error) {
     if (outFd != null) {
       try {
@@ -303,7 +295,6 @@ function snapshotNamedBinary(srcPath, destDir, destName, options = {}) {
     if (outFd != null) {
       fs.closeSync(outFd);
     }
-    fs.closeSync(inFd);
   }
   fs.chmodSync(dest, 0o700);
   return dest;
@@ -333,33 +324,42 @@ export function resolveHostIdentity(options = {}) {
     throw new Error("assay MCP binary was not resolved");
   }
   const snapRoot = fs.mkdtempSync(path.join(os.tmpdir(), "assay-host-snap-"));
-  const codexDir = path.join(snapRoot, "codex");
-  const mcpDir = path.join(snapRoot, "mcp");
-  const snapOpts = {
-    testOnlySnapshotMaxBytes: options.testOnlySnapshotMaxBytes,
-    testOnlyAfterSnapshotRead: options.testOnlyAfterSnapshotRead,
-  };
-  const codexSnap = snapshotNamedBinary(codexPath, codexDir, "codex", snapOpts);
-  const mcpSnap = snapshotNamedBinary(mcpPath, mcpDir, "assay-mcp-server", snapOpts);
-  const pathTail = process.env.PATH || "";
-  const identity = {
-    os: os.platform(),
-    arch: os.arch(),
-    codex: {
-      path: fs.realpathSync(codexSnap),
-      version: probeCodexVersion(`${codexDir}${path.delimiter}${pathTail}`),
-      sha256: sha256File(codexSnap),
-      installSource: "PATH",
-    },
-    assayMcp: {
-      path: fs.realpathSync(mcpSnap),
-      version: probeAssayMcpVersion(`${mcpDir}${path.delimiter}${pathTail}`),
-      sha256: sha256File(mcpSnap),
-      installSource: "PATH",
-    },
-  };
-  identity[BOUND_EXEC] = { codexDir, mcpDir };
-  return identity;
+  try {
+    const codexDir = path.join(snapRoot, "codex");
+    const mcpDir = path.join(snapRoot, "mcp");
+    const snapOpts = {
+      testOnlySnapshotMaxBytes: options.testOnlySnapshotMaxBytes,
+      testOnlyAfterSnapshotRead: options.testOnlyAfterSnapshotRead,
+    };
+    const codexSnap = snapshotNamedBinary(codexPath, codexDir, "codex", snapOpts);
+    const mcpSnap = snapshotNamedBinary(mcpPath, mcpDir, "assay-mcp-server", snapOpts);
+    const pathTail = process.env.PATH || "";
+    const identity = {
+      os: os.platform(),
+      arch: os.arch(),
+      codex: {
+        path: fs.realpathSync(codexSnap),
+        version: probeCodexVersion(`${codexDir}${path.delimiter}${pathTail}`),
+        sha256: sha256File(codexSnap),
+        installSource: "PATH",
+      },
+      assayMcp: {
+        path: fs.realpathSync(mcpSnap),
+        version: probeAssayMcpVersion(`${mcpDir}${path.delimiter}${pathTail}`),
+        sha256: sha256File(mcpSnap),
+        installSource: "PATH",
+      },
+    };
+    identity[BOUND_EXEC] = { codexDir, mcpDir };
+    return identity;
+  } catch (error) {
+    try {
+      fs.rmSync(snapRoot, { recursive: true, force: true });
+    } catch {
+      /* best-effort: the failure path must not leak the first snapshot */
+    }
+    throw error;
+  }
 }
 
 function resolvedMcpCommand(options) {
@@ -381,7 +381,7 @@ function resolvedMcpCommand(options) {
 }
 
 function writeProofFiles(options, pack) {
-  const initialize = initializeFromEvents(pack.events);
+  const initialize = initializeFromEvents(pack.events, options.journey);
   const invocationArgv = persistableArgv(
     options.hostIdentity?.codex?.path
       ? [options.hostIdentity.codex.path, "app-server"]

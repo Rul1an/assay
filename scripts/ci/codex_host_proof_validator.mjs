@@ -134,17 +134,43 @@ export function persistableArgv(argv) {
   return out;
 }
 
-export function initializeFromEvents(events) {
-  const event = Array.isArray(events)
-    ? events.find((row) => row.method === "initialize" && row.direction === "server")
-    : null;
-  const result = event?.result && typeof event.result === "object" ? event.result : {};
+function emptyInitialize() {
+  return {
+    codexHome: null,
+    userAgent: null,
+    platformFamily: null,
+    platformOs: null,
+  };
+}
+
+export function initializeFromTopology(topology) {
+  const pairs = Array.isArray(topology?.pairs)
+    ? topology.pairs.filter((pair) => pair.method === "initialize")
+    : [];
+  if (pairs.length !== 1) {
+    return emptyInitialize();
+  }
+  const result =
+    pairs[0].response?.result && typeof pairs[0].response.result === "object"
+      ? pairs[0].response.result
+      : {};
   return {
     codexHome: result.codexHome ?? null,
     userAgent: result.userAgent ?? null,
     platformFamily: result.platformFamily ?? null,
     platformOs: result.platformOs ?? null,
   };
+}
+
+export function initializeFromEvents(events, journey = "tool") {
+  if (!Array.isArray(events)) {
+    return emptyInitialize();
+  }
+  try {
+    return initializeFromTopology(consumeJourneyTopology(events, journey));
+  } catch {
+    return emptyInitialize();
+  }
 }
 
 export function pathInsideRoot(root, candidate) {
@@ -183,20 +209,54 @@ export function liveIdentityBound(identity) {
   return boundBinary(identity.codex) && boundBinary(identity.assayMcp);
 }
 
-export function sha256File(file) {
+export function consumeBoundedBinary(file, maxBytes, onChunk, options = {}) {
+  const ceiling = maxBytes ?? HARD_MAX_SNAPSHOT_BYTES;
   const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0);
   const fd = fs.openSync(file, flags);
   try {
-    const hash = createHash("sha256");
+    const st = fs.fstatSync(fd);
+    if (!st.isFile()) {
+      throw new Error("bounded binary is not a regular file");
+    }
+    if (st.size > ceiling) {
+      throw new Error("bounded binary exceeds binary ceiling");
+    }
+    if (typeof options.afterStat === "function") {
+      options.afterStat(st);
+    }
     const buf = Buffer.alloc(64 * 1024);
+    let copied = 0;
     let n;
     while ((n = fs.readSync(fd, buf, 0, buf.length, null)) > 0) {
-      hash.update(buf.subarray(0, n));
+      if (typeof options.testOnlyAfterRead === "function") {
+        options.testOnlyAfterRead(copied, file);
+      }
+      copied += n;
+      if (copied > ceiling) {
+        throw new Error("bounded binary copy exceeded binary ceiling");
+      }
+      if (fs.fstatSync(fd).size > ceiling) {
+        throw new Error("bounded binary grew past binary ceiling");
+      }
+      onChunk(buf.subarray(0, n));
     }
-    return hash.digest("hex");
+    return copied;
   } finally {
     fs.closeSync(fd);
   }
+}
+
+export function sha256File(file, options = {}) {
+  const hash = createHash("sha256");
+  consumeBoundedBinary(
+    file,
+    options.maxBytes ?? HARD_MAX_SNAPSHOT_BYTES,
+    (chunk) => {
+      hash.update(chunk);
+    },
+    options,
+  );
+  return hash.digest("hex");
 }
 
 function verifyObservedBinary(bin) {
@@ -414,16 +474,19 @@ function isClientRpcRequest(event) {
   );
 }
 
-function isServerRpcResponse(event) {
-  return (
-    event != null &&
-    event.direction === "server" &&
-    event.id != null &&
-    typeof event.method === "string" &&
-    event.method !== "mcpServer/elicitation/request" &&
-    (Object.prototype.hasOwnProperty.call(event, "result") ||
-      Object.prototype.hasOwnProperty.call(event, "error"))
-  );
+function isResponseShapedServerRow(event) {
+  if (event == null || event.direction !== "server" || event.id == null) {
+    return false;
+  }
+  const hasResult = Object.prototype.hasOwnProperty.call(event, "result");
+  const hasError = Object.prototype.hasOwnProperty.call(event, "error");
+  if (event.method === "mcpServer/elicitation/request" && !hasResult && !hasError) {
+    return false;
+  }
+  if (hasResult || hasError) {
+    return true;
+  }
+  return typeof event.method !== "string";
 }
 
 function threadRoleFromStartParams(params) {
@@ -458,7 +521,7 @@ export function consumeJourneyTopology(events, journey) {
       clientById.set(event.id, event);
       continue;
     }
-    if (!isServerRpcResponse(event)) {
+    if (!isResponseShapedServerRow(event)) {
       continue;
     }
     const expectedMethod = pending.get(event.id);
@@ -548,6 +611,13 @@ export function consumeJourneyTopology(events, journey) {
       if (!statusByRole.has(role)) {
         reasons.push(`missing ${role} status list`);
       }
+    }
+  }
+  const turnPairs = byMethod("turn/start");
+  if (counts["turn/start"] === 1 && turnPairs.length === 1) {
+    const primaryId = roles.get("primary")?.response?.result?.thread?.id;
+    if (turnPairs[0].request?.params?.threadId !== primaryId) {
+      reasons.push("turn/start is not bound to the primary thread");
     }
   }
   return {
@@ -694,11 +764,12 @@ function primaryThreadId(starts) {
   return typeof id === "string" && id.length > 0 ? id : null;
 }
 
-function actualTurnId(events) {
-  const reply = events.find(
-    (event) => event.method === "turn/start" && event.direction === "server",
-  );
-  const id = reply?.result?.turn?.id;
+function turnIdFromTopology(topology) {
+  const pairs = (topology.pairs || []).filter((pair) => pair.method === "turn/start");
+  if (pairs.length !== 1) {
+    return null;
+  }
+  const id = pairs[0].response?.result?.turn?.id;
   return typeof id === "string" && id.length > 0 ? id : null;
 }
 
@@ -1006,7 +1077,7 @@ export function classifyCells(events, meta, expected, journey = "tool") {
   const statuses = topology.statuses;
   const calls = mcpToolCalls(events);
   const threadId = primaryThreadId(starts);
-  const turnId = actualTurnId(events);
+  const turnId = turnIdFromTopology(topology);
   const skillDiscovered = classifySkill(skills, expected);
   const cwdObserved = classifyCwd(starts, expected);
   const mcpStarted = classifyMcp(statuses);
@@ -1075,7 +1146,7 @@ export function classifyRecord(record) {
   if (!Array.isArray(events)) {
     throw new Error("events must be an array");
   }
-  const derived = initializeFromEvents(events);
+  const derived = initializeFromEvents(events, record.journey ?? "tool");
   const meta = {
     provenance: record.provenance,
     childExitCode: record.childExitCode,
@@ -1344,7 +1415,7 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   if (manifest.hashes?.events !== actual) {
     reasons.push("events hash mismatch");
   }
-  const derivedInitialize = initializeFromEvents(events);
+  const derivedInitialize = initializeFromEvents(events, manifest.journey ?? "tool");
   if (!sameJson(manifest.initialize, derivedInitialize)) {
     reasons.push("manifest initialize does not match captured initialize event");
   }

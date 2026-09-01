@@ -2270,3 +2270,254 @@ test("F5 PATH snapshot copy enforces a binary ceiling and running growth bound; 
     process.env.PATH = previousPath;
   }
 });
+
+function writeSparseFile(filePath, size) {
+  const fd = fs.openSync(filePath, "w", 0o755);
+  try {
+    fs.ftruncateSync(fd, size);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.chmodSync(filePath, 0o755);
+  return filePath;
+}
+
+function writeSparseBin(name, size) {
+  return writeSparseFile(path.join(scratch(), name), size);
+}
+
+function snapRoots() {
+  return fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith("assay-host-snap-"));
+}
+
+function missingBinaryThreadId(events) {
+  const request = events.find(
+    (event) =>
+      event.direction === "client" &&
+      event.method === "thread/start" &&
+      String(event.params?.config?.mcp_servers?.assay?.command ?? "").includes(
+        "missing-assay-mcp-server",
+      ),
+  );
+  const response = events.find(
+    (event) => event.direction === "server" && event.id === request?.id,
+  );
+  return response?.result?.thread?.id;
+}
+
+function liveBoundRecord(manifest, events) {
+  const previousPath = process.env.PATH;
+  const mcp = writeShadowMcp();
+  const projectRoot = seedProject();
+  const codex = writeShadowCodex([
+    "node",
+    FAKE,
+    "--scenario",
+    "valid",
+    "--project-root",
+    projectRoot,
+  ]);
+  process.env.PATH = `${path.dirname(codex)}${path.delimiter}${path.dirname(mcp)}${path.delimiter}${previousPath}`;
+  try {
+    const identity = resolveHostIdentity();
+    const patched = structuredClone(events);
+    const start = patched.find(
+      (event) => event.direction === "client" && event.method === "thread/start",
+    );
+    start.params.config.mcp_servers.assay.command = identity.assayMcp.path;
+    return {
+      ...manifest,
+      provenance: "live",
+      events: patched,
+      hostIdentity: identity,
+      invocation: { argv: [identity.codex.path, "app-server"] },
+      childExitCode: 0,
+      driverOutcome: { exitCode: 0, status: "pass" },
+      truncated: false,
+      streamUnavailable: false,
+    };
+  } finally {
+    process.env.PATH = previousPath;
+  }
+}
+
+test("P1 stored response envelopes cannot ignore method-less server rows; control stays green", async () => {
+  const { events, manifest, classified } = await drive("valid");
+  assert.equal(allIntendedCellsPass(classified), true);
+
+  const hostiles = [
+    { direction: "server", id: 999, result: { unexpected: true } },
+    { direction: "server", id: 998, result: { ok: true }, error: { code: -1 } },
+    { direction: "server", id: 997 },
+    { direction: "server", id: 1, method: "initialize", result: { replay: true } },
+  ];
+  for (const row of hostiles) {
+    const mutated = structuredClone(events);
+    mutated.push(row);
+    const hostile = classifyRecord({ ...manifest, events: mutated });
+    assert.equal(
+      allIntendedCellsPass(hostile),
+      false,
+      `${JSON.stringify(row)} must not yield all-pass`,
+    );
+    const hostileRoot = scratch();
+    fs.mkdirSync(hostileRoot, { recursive: true });
+    rewriteProof(hostileRoot, manifest, mutated, hostile);
+    assert.equal(
+      validateProofRoot(hostileRoot).ok,
+      false,
+      `${JSON.stringify(row)} must not validate as proof`,
+    );
+  }
+
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true);
+  assert.equal(validateProofRoot(control.proofRoot).ok, true);
+});
+
+test("P1 paired topology binds initialize and turn/start; control stays green", async () => {
+  const { events, manifest, classified } = await drive("valid");
+  assert.equal(allIntendedCellsPass(classified), true);
+  const bound = liveBoundRecord(manifest, events);
+  assert.equal(
+    classifyRecord(bound).liveAcceptance.status,
+    "fail",
+    "no-op live-bound control still cannot pass on fake events",
+  );
+
+  const hidden = structuredClone(bound);
+  hidden.events.unshift({ direction: "server", method: "initialize" });
+  const hid = classifyRecord(hidden);
+  assert.notEqual(
+    hid.liveAcceptance.status,
+    "pass",
+    "a prepended method-only initialize must not hide the paired fake user-agent",
+  );
+
+  const missingThread = missingBinaryThreadId(events);
+  assert.equal(typeof missingThread, "string");
+  const rebound = classifyMutated(manifest, events, (rows) => {
+    const turn = rows.find(
+      (event) => event.direction === "client" && event.method === "turn/start",
+    );
+    turn.params.threadId = missingThread;
+  });
+  assert.equal(
+    allIntendedCellsPass(rebound),
+    false,
+    "turn/start rebound to the missing-binary thread must not stay all-pass",
+  );
+  const reboundRoot = scratch();
+  fs.mkdirSync(reboundRoot, { recursive: true });
+  const reboundEvents = structuredClone(events);
+  reboundEvents.find(
+    (event) => event.direction === "client" && event.method === "turn/start",
+  ).params.threadId = missingThread;
+  rewriteProof(reboundRoot, manifest, reboundEvents, rebound);
+  assert.equal(
+    validateProofRoot(reboundRoot).ok,
+    false,
+    "turn/start not on the primary thread must not validate as proof",
+  );
+
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true);
+  assert.equal(validateProofRoot(control.proofRoot).ok, true);
+});
+
+test("P1 shared 512 MiB ceiling rejects sparse hash and removes snap root; control stays green", () => {
+  const huge = writeSparseFile(path.join(scratch(), "identity.bin"), 536870912 + 1);
+  const origRead = fs.readSync;
+  let read = 0;
+  fs.readSync = function readSyncGuarded(...args) {
+    const n = origRead.apply(this, args);
+    read += n;
+    if (read > 64 * 1024) {
+      throw new Error("sha256File read past one chunk on a 512 MiB+1 sparse file");
+    }
+    return n;
+  };
+  try {
+    assert.throws(
+      () => sha256File(huge),
+      /ceiling|exceeds|binary/,
+      "validator hash must reject a sparse 512 MiB+1 file before reading it",
+    );
+  } finally {
+    fs.readSync = origRead;
+  }
+
+  const previousPath = process.env.PATH;
+  const before = new Set(snapRoots());
+  const small = writeVersionOnlyBin("codex", "codex-first/0.0.0");
+  const second = writeSparseBin("assay-mcp-server", 536870912 + 1);
+  process.env.PATH = `${path.dirname(small)}${path.delimiter}${path.dirname(second)}${path.delimiter}${previousPath}`;
+  try {
+    assert.throws(
+      () => resolveHostIdentity(),
+      /ceiling|exceeds|snapshot|binary/,
+      "second-binary ceiling failure must throw",
+    );
+    const leftovers = snapRoots().filter((name) => !before.has(name));
+    assert.deepEqual(
+      leftovers,
+      [],
+      "second-binary failure must remove the whole assay-host-snap root including the first snapshot",
+    );
+  } finally {
+    process.env.PATH = previousPath;
+  }
+
+  const controlCodex = writeShadowCodex([
+    "node",
+    FAKE,
+    "--scenario",
+    "valid",
+    "--project-root",
+    seedProject(),
+  ]);
+  const controlMcp = writeShadowMcp();
+  process.env.PATH = `${path.dirname(controlCodex)}${path.delimiter}${path.dirname(controlMcp)}${path.delimiter}${previousPath}`;
+  try {
+    const control = resolveHostIdentity();
+    assert.equal(control.codex.installSource, "PATH");
+    assert.equal(control.assayMcp.installSource, "PATH");
+  } finally {
+    process.env.PATH = previousPath;
+  }
+});
+
+test("P1 snapshot and decide-tool guards bite independently of overrides; control stays green", async () => {
+  const fakeSrc = fs.readFileSync(FAKE, "utf8");
+  assert.doesNotMatch(
+    fakeSrc,
+    /\bDECIDE_TOOL\b/,
+    "fake app-server must pin the release decide tool independently of DECIDE_TOOL",
+  );
+  assert.match(fakeSrc, /"assay_policy_decide"/);
+  assert.equal(DECIDE_TOOL, "assay_policy_decide");
+
+  const previousPath = process.env.PATH;
+  const oversized = writeSparseBin("codex", 536870912 + 1);
+  const mcp = writeVersionOnlyBin("assay-mcp-server", "assay-mcp-prod/0.0.0");
+  process.env.PATH = `${path.dirname(oversized)}${path.delimiter}${path.dirname(mcp)}${path.delimiter}${previousPath}`;
+  try {
+    assert.throws(
+      () =>
+        resolveHostIdentity({
+          testOnlyAfterSnapshotRead() {
+            throw new Error("must not materialize a production-default oversize PATH file");
+          },
+        }),
+      /ceiling|exceeds|snapshot|binary/,
+      "production-default 512 MiB ceiling must reject sparse 512 MiB+1 with no override",
+    );
+  } finally {
+    process.env.PATH = previousPath;
+  }
+
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true);
+  assert.equal(control.classified.cells.oneToolInvoked.status, "pass");
+  assert.equal(validateProofRoot(control.proofRoot).ok, true);
+});
