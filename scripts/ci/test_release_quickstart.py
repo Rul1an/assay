@@ -63,7 +63,7 @@ class ReleaseReadmeTruth(unittest.TestCase):
             source,
         )
         source += "\nHistorical note: v5.4.0 shipped earlier.\n"
-        for version in ("5.5.1", "5.6.0-rc.1"):
+        for version in ("5.5.2", "5.6.0-rc.1"):
             with self.subTest(version=version):
                 rendered = module.render_release_readme(source, version)
                 self.assertIn(f"Published v{version} CLI archives cover", rendered)
@@ -133,7 +133,7 @@ cargo install assay-cli --version 5.4.0 --locked
 Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
 - Published v5.4.0 CLI archives cover Linux x86_64/arm64.
 
-For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.
+For v5.5.2, run the last command from a source checkout or an extracted published CLI archive.
 The installer is binary-only and does not carry the bounded quickstart assets.
 
 Historical note: v5.3.0 shipped earlier.
@@ -307,7 +307,7 @@ PACKED_SOURCE_MEMBERS = (
     ("quickstart-mock", "examples/mcp-quickstart/mock_server.py"),
 )
 CHECKOUT_SENTENCE = (
-    "For v5.5.1, run the last command from a source checkout or an extracted published CLI archive."
+    "For v5.5.2, run the last command from a source checkout or an extracted published CLI archive."
 )
 ARCHIVE_ROOT_CLAIM = "From the root of this extracted CLI archive"
 QUICKSTART_COMMAND = "python3 examples/mcp-quickstart/run.py"
@@ -408,7 +408,7 @@ cargo install assay-cli --version 5.4.0 --locked
 Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
 - Published v5.4.0 CLI archives cover Linux x86_64/arm64.
 
-For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.
+For v5.5.2, run the last command from a source checkout or an extracted published CLI archive.
 The installer is binary-only and does not carry the bounded quickstart assets.
 
 See [scope](docs/concepts/scope.md) and [license](LICENSE) and [quickstart](examples/mcp-quickstart/run.py) and [here](#quickstart) and [action](https://github.com/marketplace/actions/assay-ai-agent-security).
@@ -438,9 +438,9 @@ Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0)
         source = """cargo install assay-cli --version 5.4.0 --locked
 Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
 - Published v5.4.0 CLI archives cover Linux x86_64/arm64.
-For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.
+For v5.5.2, run the last command from a source checkout or an extracted published CLI archive.
 The installer is binary-only and does not carry the bounded quickstart assets.
-For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.
+For v5.5.2, run the last command from a source checkout or an extracted published CLI archive.
 The installer is binary-only and does not carry the bounded quickstart assets.
 """
         with self.assertRaisesRegex(ValueError, "exactly one published-checkout sentence"):
@@ -458,7 +458,7 @@ The installer is binary-only and does not carry the bounded quickstart assets.
             "cargo install assay-cli --version 5.4.0 --locked\n"
             "Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).\n"
             "- Published v5.4.0 CLI archives cover Linux x86_64/arm64.\n"
-            "For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.\n"
+            "For v5.5.2, run the last command from a source checkout or an extracted published CLI archive.\n"
             "The installer is binary-only and does not carry the bounded quickstart assets.\n"
             + hostile
             + "\nSee [scope](docs/concepts/scope.md) and [license](LICENSE) and "
@@ -491,7 +491,7 @@ PINNED_SOURCE = (
     "cargo install assay-cli --version 5.4.0 --locked\n"
     "Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).\n"
     "- Published v5.4.0 CLI archives cover Linux x86_64/arm64.\n"
-    "For v5.5.1, run the last command from a source checkout or an extracted published CLI archive.\n"
+    "For v5.5.2, run the last command from a source checkout or an extracted published CLI archive.\n"
     "The installer is binary-only and does not carry the bounded quickstart assets.\n"
 )
 PACKED_MEMBER_PATHS = frozenset(
