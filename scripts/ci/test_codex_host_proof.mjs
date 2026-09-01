@@ -84,11 +84,24 @@ function seedProject() {
   return projectRoot;
 }
 
+function writePortableNodeExecutable(filePath, esmSource) {
+  const body = String(esmSource).replace(/^#![^\n]*\r?\n/, "");
+  fs.writeFileSync(
+    filePath,
+    `#!/usr/bin/env node
+void import(${JSON.stringify(`data:text/javascript,${encodeURIComponent(body)}`)});
+`,
+    { mode: 0o755 },
+  );
+  return filePath;
+}
+
 function writeShadowCodex(childArgv) {
   const binDir = scratch();
   const bin = path.join(binDir, "codex");
-  const script = `#!/usr/bin/env node
-import { spawn } from "node:child_process";
+  writePortableNodeExecutable(
+    bin,
+    `import { spawn } from "node:child_process";
 if (process.argv.includes("--version")) {
   process.stdout.write("codex-shadow/0.0.0\\n");
   process.exit(0);
@@ -100,23 +113,21 @@ const stop = () => {
 process.on("SIGTERM", stop);
 process.on("SIGINT", stop);
 child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
-`;
-  fs.writeFileSync(bin, script, { mode: 0o755 });
+`,
+  );
   return bin;
 }
 
 function writeShadowMcp() {
   const bin = path.join(scratch(), "assay-mcp-server");
-  fs.writeFileSync(
+  writePortableNodeExecutable(
     bin,
-    `#!/usr/bin/env node
-if (process.argv.includes("--version")) {
+    `if (process.argv.includes("--version")) {
   process.stdout.write("assay-mcp-server-shadow/0.0.0\\n");
   process.exit(0);
 }
 process.stdout.write("assay-mcp-server-shadow/0.0.0\\n");
 `,
-    { mode: 0o755 },
   );
   return bin;
 }
@@ -1036,13 +1047,11 @@ test("production live identity is observed from binaries and required before liv
 test("production spawn ignores user childArgv and rejects --mcp-command", async () => {
   const marker = path.join(scratch(), "spawned-from-child-argv");
   const evil = path.join(scratch(), "evil-child");
-  fs.writeFileSync(
+  writePortableNodeExecutable(
     evil,
-    `#!/usr/bin/env node
-import fs from "node:fs";
+    `import fs from "node:fs";
 fs.writeFileSync(${JSON.stringify(marker)}, "spawned\\n");
 `,
-    { mode: 0o755 },
   );
   const projectRoot = seedProject();
   const proofRoot = scratch();
@@ -1054,8 +1063,9 @@ fs.writeFileSync(${JSON.stringify(marker)}, "spawned\\n");
     "--project-root",
     projectRoot,
   ]);
+  const mcpBin = writeShadowMcp();
   const previousPath = process.env.PATH;
-  process.env.PATH = `${path.dirname(shadow)}${path.delimiter}${previousPath}`;
+  process.env.PATH = `${path.dirname(shadow)}${path.delimiter}${path.dirname(mcpBin)}${path.delimiter}${previousPath}`;
   try {
     await runProof({
       provenance: "synthetic",
@@ -1269,10 +1279,9 @@ function productionChildCommands(src) {
 
 function writeMarkedBin(name, marker, version) {
   const bin = path.join(scratch(), name);
-  fs.writeFileSync(
+  writePortableNodeExecutable(
     bin,
-    `#!/usr/bin/env node
-import fs from "node:fs";
+    `import fs from "node:fs";
 fs.writeFileSync(${JSON.stringify(marker)}, "ran\\n");
 if (process.argv.includes("--version")) {
   process.stdout.write(${JSON.stringify(version)} + "\\n");
@@ -1280,7 +1289,6 @@ if (process.argv.includes("--version")) {
 }
 process.stdin.resume();
 `,
-    { mode: 0o755 },
   );
   return bin;
 }
@@ -1420,10 +1428,9 @@ test("production spawn and probe use PATH names; options.codexBin is not execute
   const flagCodex = writeMarkedBin("codex", flagMarker, "codex-flag/9.9.9");
   const pathDir = scratch();
   const pathCodex = path.join(pathDir, "codex");
-  fs.writeFileSync(
+  writePortableNodeExecutable(
     pathCodex,
-    `#!/usr/bin/env node
-import fs from "node:fs";
+    `import fs from "node:fs";
 import { spawn } from "node:child_process";
 fs.writeFileSync(${JSON.stringify(pathMarker)}, "ran\\n");
 if (process.argv.includes("--version")) {
@@ -1438,7 +1445,6 @@ process.on("SIGTERM", stop);
 process.on("SIGINT", stop);
 child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
 `,
-    { mode: 0o755 },
   );
   const mcpBin = writeShadowMcp();
   const projectRoot = seedProject();
@@ -1480,10 +1486,9 @@ test("swap-and-restore after identity hash cannot change the spawned Codex bytes
   const binDir = scratch();
   const codexPath = path.join(binDir, "codex");
   const writeMarkedShadow = (marker, version) => {
-    fs.writeFileSync(
+    writePortableNodeExecutable(
       codexPath,
-      `#!/usr/bin/env node
-import fs from "node:fs";
+      `import fs from "node:fs";
 import { spawn } from "node:child_process";
 fs.writeFileSync(${JSON.stringify(marker)}, "ran\\n");
 if (process.argv.includes("--version")) {
@@ -1498,7 +1503,6 @@ process.on("SIGTERM", stop);
 process.on("SIGINT", stop);
 child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
 `,
-      { mode: 0o755 },
     );
   };
   writeMarkedShadow(aMarker, "codex-bound-a/1.0.0");
