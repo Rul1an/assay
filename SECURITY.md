@@ -4,7 +4,7 @@ Assay is security-critical infrastructure for AI agents. We take vulnerabilities
 
 ## Supported Versions
 
-Assay supports the current published release, **v5.5.1**.
+Assay supports the current published release, **v5.5.2**.
 
 Older releases do not carry a maintenance or end-of-life commitment unless a release note says so
 explicitly.
