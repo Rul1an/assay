@@ -249,6 +249,13 @@ repos:
         pass_filenames: false
         files: ^(scripts/ci/(check-evidence-vocabulary\.py|test-evidence-vocabulary\.sh)|\.pre-commit-config\.yaml)$
 
+      - id: codex-host-proof-node-contract
+        name: Codex host-proof Node contract
+        entry: node --test --test-reporter spec scripts/ci/test_codex_host_proof.mjs
+        language: system
+        pass_filenames: false
+        files: ^(scripts/ci/(codex_host_proof|codex_host_proof_validator|test_codex_host_proof)\.mjs|scripts/ci/fixtures/codex-host-proof/.*|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+
       - id: mcp-tool-error-publication-self-test
         name: MCP ToolError publication guard self-test
         entry: bash -c 'python3 scripts/ci/check-mcp-tool-error-publication.py && bash scripts/ci/test-check-mcp-tool-error-publication.sh'
