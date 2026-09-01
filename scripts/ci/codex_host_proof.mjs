@@ -504,6 +504,23 @@ function writeProofFiles(options, pack) {
   };
 }
 
+function writePreSpawnFailure(options, message) {
+  return writeProofFiles(options, {
+    events: [
+      projectRetainedEvent({
+        direction: "driver",
+        method: "error",
+        params: { message },
+      }),
+    ],
+    childExit: 1,
+    truncated: false,
+    streamUnavailable: true,
+    stdoutBytes: 0,
+    stderrBytes: 0,
+  });
+}
+
 export async function runProof(options) {
   requiredCellsForJourney(options.journey);
   const forbidden = forbiddenProofRoot(
@@ -536,23 +553,15 @@ export async function runProof(options) {
     ? credentialArgvReason(options.childArgv)
     : null;
   if (credential) {
-    return writeProofFiles(options, {
-      events: [
-        projectRetainedEvent({
-          direction: "driver",
-          method: "error",
-          params: { message: credential },
-        }),
-      ],
-      childExit: 1,
-      truncated: false,
-      streamUnavailable: true,
-      stdoutBytes: 0,
-      stderrBytes: 0,
-    });
+    return writePreSpawnFailure(options, credential);
   }
 
-  const codexHome = requireOrCreatePrivateCodexHome(options.projectRoot);
+  let codexHome;
+  try {
+    codexHome = requireOrCreatePrivateCodexHome(options.projectRoot);
+  } catch (error) {
+    return writePreSpawnFailure(options, String(error));
+  }
   const events = [];
   const stdout = new BoundBuffer(options.maxBytes);
   const stderr = new BoundBuffer(options.maxBytes);

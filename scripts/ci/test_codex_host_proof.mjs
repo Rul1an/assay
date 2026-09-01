@@ -590,6 +590,26 @@ child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
     codexBin,
   });
   assert.notEqual(fileCli.status, 0);
+  assert.deepEqual(
+    proofFiles(fileCli.proofRoot),
+    ["classification.json", "events.json", "manifest.json"],
+    "a rejected CODEX_HOME must still leave a complete retained failure record",
+  );
+  const fileEvents = JSON.parse(
+    fs.readFileSync(path.join(fileCli.proofRoot, "events.json"), "utf8"),
+  );
+  assert.deepEqual(fileEvents, [
+    {
+      direction: "driver",
+      method: "error",
+      params: { message: "retained driver error" },
+    },
+  ]);
+  const fileManifest = JSON.parse(
+    fs.readFileSync(path.join(fileCli.proofRoot, "manifest.json"), "utf8"),
+  );
+  assert.notEqual(fileManifest.driverOutcome.exitCode, 0);
+  assert.equal(validateProofRoot(fileCli.proofRoot).ok, true);
   assert.equal(
     fs.existsSync(path.join(fileProjectRoot, ".codex-app-server-started")),
     false,
@@ -2792,6 +2812,7 @@ test("current Codex lifecycle chatter is inert while diagnostics remain non-clea
   const terminalIndex = withLifecycle.findIndex(
     (event) => event.direction === "server" && event.method === "turn/completed",
   );
+  assert.notEqual(terminalIndex, -1, "control must contain the terminal turn insertion anchor");
   withLifecycle.splice(
     terminalIndex,
     0,
