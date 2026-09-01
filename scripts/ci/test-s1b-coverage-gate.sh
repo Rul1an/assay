@@ -645,7 +645,7 @@ grep -q 'ok: cleanup-selftest' "$tmp/cleanup.out" || fail "cleanup-selftest miss
 run_leaf_residue_case() {
   local driver="$1" label="$2" incoming="$3" expected="$4"
   local leaf="$tmp/leaf-$label-$incoming" out="$tmp/leaf-$label-$incoming.out" err="$tmp/leaf-$label-$incoming.err"
-  local actual diagnostic_count workdir
+  local actual diagnostic_count workdir_count workdir
   mkdir "$leaf"
   printf 'busy\n' >"$leaf/member"
   set +e
@@ -657,8 +657,10 @@ run_leaf_residue_case() {
   diagnostic_count=$(grep -cFx "S1B_LEAF_RESIDUE path=$leaf" "$err" || true)
   [[ "$diagnostic_count" -eq 1 ]] \
     || fail "leaf residue incoming=$incoming emitted $diagnostic_count named diagnostics, expected 1"
+  workdir_count=$(grep -c '^SELFTEST_WORKDIR=' "$out" || true)
+  [[ "$workdir_count" -eq 1 ]] \
+    || fail "leaf residue incoming=$incoming emitted $workdir_count selftest workdir markers, expected 1"
   workdir=$(sed -n 's/^SELFTEST_WORKDIR=//p' "$out")
-  [[ -n "$workdir" ]] || fail "leaf residue incoming=$incoming missing selftest workdir"
   [[ ! -e "$workdir" ]] || fail "leaf residue incoming=$incoming skipped workdir cleanup: $workdir"
   [[ -f "$leaf/member" ]] || fail "leaf residue fixture unexpectedly disappeared: $leaf"
 }
@@ -707,6 +709,31 @@ set -e
 grep -qxF 'FAIL: leaf residue incoming=0 emitted 2 named diagnostics, expected 1' \
   "$tmp/duplicate-contract.err" \
   || fail "duplicate leaf residue mutation failed for an unrelated reason"
+
+duplicate_workdir_driver="$tmp/duplicate-workdir-driver.sh"
+cp "$DRIVER" "$duplicate_workdir_driver"
+python3 - "$duplicate_workdir_driver" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '''    printf 'SELFTEST_WORKDIR=%s\\n' "$WORKDIR"'''
+new = old + "\n" + old
+if text.count(old) != 1:
+    raise SystemExit("duplicate workdir mutation target must occur exactly once")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+set +e
+( run_leaf_residue_case "$duplicate_workdir_driver" duplicate-workdir 0 1 ) \
+  >"$tmp/duplicate-workdir-contract.out" 2>"$tmp/duplicate-workdir-contract.err"
+duplicate_workdir_contract_ec=$?
+set -e
+[[ "$duplicate_workdir_contract_ec" -ne 0 ]] \
+  || fail "duplicate selftest workdir marker satisfied the contract"
+grep -qxF 'FAIL: leaf residue incoming=0 emitted 2 selftest workdir markers, expected 1' \
+  "$tmp/duplicate-workdir-contract.err" \
+  || fail "duplicate workdir mutation failed for an unrelated reason"
 
 silent_cleanup_driver="$tmp/silent-cleanup-driver.sh"
 cp "$DRIVER" "$silent_cleanup_driver"
