@@ -54,7 +54,7 @@ export function requirePrivateProofRoot(proofRoot) {
     if (typeof process.getuid === "function" && st.uid !== process.getuid()) {
       throw new Error("proof root must be owned by the current user");
     }
-    if ((st.mode & 0o077) !== 0) {
+    if ((st.mode & 0o7777) !== 0o700) {
       throw new Error("proof root must be private to its owner (mode 0700)");
     }
   }

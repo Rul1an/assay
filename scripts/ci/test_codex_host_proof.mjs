@@ -2240,17 +2240,19 @@ test("host snapshots require a private proof root owned by the current user", {
   skip: process.platform === "win32",
 }, () => {
   const proofRoot = scratch();
-  fs.chmodSync(proofRoot, 0o777);
   const codex = writeVersionOnlyBin("codex", "codex-control/0.0.0");
   const mcp = writeVersionOnlyBin("assay-mcp-server", "assay-mcp-control/0.0.0");
   const previousPath = process.env.PATH;
   process.env.PATH = `${path.dirname(codex)}${path.delimiter}${path.dirname(mcp)}${path.delimiter}${previousPath}`;
   try {
-    assert.throws(
-      () => resolveHostIdentity({ proofRoot }),
-      /private|owner|permission|mode/i,
-      "a group/world-accessible proof root must fail before a snapshot executes",
-    );
+    for (const mode of [0o777, 0o500]) {
+      fs.chmodSync(proofRoot, mode);
+      assert.throws(
+        () => resolveHostIdentity({ proofRoot }),
+        /proof root must be private to its owner \(mode 0700\)/i,
+        `proof-root mode ${mode.toString(8)} must fail before a snapshot executes`,
+      );
+    }
   } finally {
     process.env.PATH = previousPath;
     fs.chmodSync(proofRoot, 0o700);
@@ -2262,11 +2264,13 @@ test("validator rejects a proof root that is no longer private", {
 }, async () => {
   const { proofRoot } = await drive("valid");
   assert.equal(validateProofRoot(proofRoot).ok, true, "private control must validate");
-  fs.chmodSync(proofRoot, 0o755);
   try {
-    const checked = validateProofRoot(proofRoot);
-    assert.equal(checked.ok, false, "a public proof root must not validate cleanly");
-    assert.match(checked.reasons.join(" "), /private|owner|permission|mode/i);
+    for (const mode of [0o755, 0o500]) {
+      fs.chmodSync(proofRoot, mode);
+      const checked = validateProofRoot(proofRoot);
+      assert.equal(checked.ok, false, `proof-root mode ${mode.toString(8)} must not validate`);
+      assert.match(checked.reasons.join(" "), /private|owner|permission|mode/i);
+    }
   } finally {
     fs.chmodSync(proofRoot, 0o700);
   }
@@ -3287,6 +3291,8 @@ test("verifyLiveIdentity requires an explicit private proof root", {
     assert.equal(verify(null), false, "a null root must not bypass subject containment");
     fs.chmodSync(proofRoot, 0o755);
     assert.equal(verify(proofRoot), false, "a public root must not bind live identity");
+    fs.chmodSync(proofRoot, 0o500);
+    assert.equal(verify(proofRoot), false, "an owner-only non-0700 root must not bind live identity");
   } finally {
     fs.chmodSync(proofRoot, 0o700);
     if (observed) {
