@@ -143,6 +143,22 @@ function emptyInitialize() {
   };
 }
 
+export function successfulInitializeResult(result) {
+  return (
+    result != null &&
+    typeof result === "object" &&
+    !Array.isArray(result) &&
+    typeof result.userAgent === "string" &&
+    result.userAgent.length > 0 &&
+    typeof result.codexHome === "string" &&
+    result.codexHome.length > 0 &&
+    typeof result.platformFamily === "string" &&
+    result.platformFamily.length > 0 &&
+    typeof result.platformOs === "string" &&
+    result.platformOs.length > 0
+  );
+}
+
 export function initializeFromTopology(topology) {
   const pairs = Array.isArray(topology?.pairs)
     ? topology.pairs.filter((pair) => pair.method === "initialize")
@@ -150,15 +166,19 @@ export function initializeFromTopology(topology) {
   if (pairs.length !== 1) {
     return emptyInitialize();
   }
-  const result =
-    pairs[0].response?.result && typeof pairs[0].response.result === "object"
-      ? pairs[0].response.result
-      : {};
+  const response = pairs[0].response;
+  if (
+    response == null ||
+    Object.prototype.hasOwnProperty.call(response, "error") ||
+    !successfulInitializeResult(response.result)
+  ) {
+    return emptyInitialize();
+  }
   return {
-    codexHome: result.codexHome ?? null,
-    userAgent: result.userAgent ?? null,
-    platformFamily: result.platformFamily ?? null,
-    platformOs: result.platformOs ?? null,
+    codexHome: response.result.codexHome,
+    userAgent: response.result.userAgent,
+    platformFamily: response.result.platformFamily,
+    platformOs: response.result.platformOs,
   };
 }
 
@@ -271,22 +291,24 @@ function verifyObservedBinary(bin) {
   }
 }
 
-export function observedIdentityBound(identity, invocation, events) {
+export function verifyLiveIdentity(identity, invocation, topology) {
   if (!liveIdentityBound(identity)) {
     return false;
   }
   if (!verifyObservedBinary(identity.codex) || !verifyObservedBinary(identity.assayMcp)) {
     return false;
   }
-  const start = Array.isArray(events)
-    ? events.find((event) => event.method === "thread/start" && event.direction === "client")
-    : null;
-  const command = start?.params?.config?.mcp_servers?.assay?.command;
+  const command =
+    topology?.primaryThread?.request?.params?.config?.mcp_servers?.assay?.command;
   if (command !== identity.assayMcp.path) {
     return false;
   }
   const argv = invocation?.argv;
   return Array.isArray(argv) && argv[0] === identity.codex.path && argv[1] === "app-server";
+}
+
+export function observedIdentityBound(identity, invocation, topology) {
+  return verifyLiveIdentity(identity, invocation, topology);
 }
 
 export function requiredCellsForJourney(journey) {
@@ -463,30 +485,85 @@ export function journeyPairCounts(journey) {
   }
 }
 
-function isClientRpcRequest(event) {
-  return (
-    event != null &&
-    event.direction === "client" &&
-    event.id != null &&
-    typeof event.method === "string" &&
-    !Object.prototype.hasOwnProperty.call(event, "result") &&
-    !Object.prototype.hasOwnProperty.call(event, "error")
-  );
+export const ALLOWED_SERVER_REQUESTS = Object.freeze(["mcpServer/elicitation/request"]);
+export const ALLOWED_SERVER_NOTIFICATIONS = Object.freeze(["item/completed", "turn/completed"]);
+export const ALLOWED_CLIENT_NOTIFICATIONS = Object.freeze(["initialized"]);
+export const ALLOWED_CLIENT_RESPONSES = Object.freeze(["mcpServer/elicitation/request"]);
+export const ALLOWED_DRIVER_METHODS = Object.freeze(["error"]);
+
+function hasOwn(value, key) {
+  return value != null && Object.prototype.hasOwnProperty.call(value, key);
 }
 
-function isResponseShapedServerRow(event) {
-  if (event == null || event.direction !== "server" || event.id == null) {
-    return false;
+export function classifyStoredEvent(event) {
+  if (event == null || typeof event !== "object" || Array.isArray(event)) {
+    return { type: "unclassified", reason: "event is not an object" };
   }
-  const hasResult = Object.prototype.hasOwnProperty.call(event, "result");
-  const hasError = Object.prototype.hasOwnProperty.call(event, "error");
-  if (event.method === "mcpServer/elicitation/request" && !hasResult && !hasError) {
-    return false;
+  const method = typeof event.method === "string" && event.method.length > 0 ? event.method : null;
+  const hasValidId = event.id != null;
+  const hasResult = hasOwn(event, "result");
+  const hasError = hasOwn(event, "error");
+  switch (event.direction) {
+    case "driver":
+      if (method && ALLOWED_DRIVER_METHODS.includes(method) && !hasResult && !hasError) {
+        return { type: "driver", method };
+      }
+      return { type: "unclassified", reason: "unclassified driver event" };
+    case "client":
+      if (hasValidId && method && !hasResult && !hasError) {
+        return { type: "client-request", method, id: event.id };
+      }
+      if (
+        !hasValidId &&
+        method &&
+        ALLOWED_CLIENT_NOTIFICATIONS.includes(method) &&
+        !hasResult &&
+        !hasError
+      ) {
+        return { type: "client-notification", method };
+      }
+      if (
+        hasValidId &&
+        method &&
+        ALLOWED_CLIENT_RESPONSES.includes(method) &&
+        hasResult &&
+        !hasError
+      ) {
+        return { type: "client-response", method, id: event.id };
+      }
+      return { type: "unclassified", reason: "unclassified client event" };
+    case "server":
+      if (hasResult && hasError) {
+        return { type: "unclassified", reason: "mixed request/response shape" };
+      }
+      if (hasValidId && (hasResult || hasError)) {
+        return { type: "server-response", method, id: event.id };
+      }
+      if (!hasValidId && (hasResult || hasError)) {
+        return { type: "unclassified", reason: "response fields without valid paired id" };
+      }
+      if (
+        hasValidId &&
+        method &&
+        !hasResult &&
+        !hasError &&
+        ALLOWED_SERVER_REQUESTS.includes(method)
+      ) {
+        return { type: "server-request", method, id: event.id };
+      }
+      if (
+        !hasValidId &&
+        method &&
+        !hasResult &&
+        !hasError &&
+        ALLOWED_SERVER_NOTIFICATIONS.includes(method)
+      ) {
+        return { type: "server-notification", method };
+      }
+      return { type: "unclassified", reason: "unclassified server event" };
+    default:
+      return { type: "unclassified", reason: "unknown event direction" };
   }
-  if (hasResult || hasError) {
-    return true;
-  }
-  return typeof event.method !== "string";
 }
 
 function threadRoleFromStartParams(params) {
@@ -502,53 +579,90 @@ function threadRoleFromStartParams(params) {
   return "primary";
 }
 
+function consumeClassifiedEvent(classified, event, ctx) {
+  switch (classified.type) {
+    case "client-request":
+      if (ctx.pending.has(event.id)) {
+        ctx.reasons.push(`duplicate client request id ${event.id}`);
+        return;
+      }
+      ctx.pending.set(event.id, event.method);
+      ctx.clientById.set(event.id, event);
+      return;
+    case "server-response": {
+      const expectedMethod = ctx.pending.get(event.id);
+      if (expectedMethod != null && event.method !== expectedMethod) {
+        ctx.reasons.push("notification cannot resolve a pending id");
+        return;
+      }
+      const frame = { id: event.id };
+      if (hasOwn(event, "result")) {
+        frame.result = event.result;
+      }
+      if (hasOwn(event, "error")) {
+        frame.error = event.error;
+      }
+      const resolved = resolvePendingResponse(ctx.pending, frame);
+      if (resolved.kind === "reject") {
+        ctx.reasons.push(resolved.reason);
+        return;
+      }
+      if (resolved.kind === "resolve") {
+        ctx.pairs.push({
+          method: resolved.method,
+          id: resolved.id,
+          request: ctx.clientById.get(resolved.id),
+          response: event,
+        });
+      }
+      return;
+    }
+    case "server-request":
+      ctx.serverRequests.push(event);
+      return;
+    case "server-notification":
+      ctx.notifications.push(event);
+      return;
+    case "client-notification":
+      return;
+    case "client-response":
+      ctx.clientResponses.push(event);
+      return;
+    case "driver":
+      return;
+    case "unclassified":
+      ctx.reasons.push(classified.reason);
+      return;
+    default: {
+      const unexpected = classified.type;
+      ctx.reasons.push(`unknown event class ${unexpected}`);
+    }
+  }
+}
+
 export function consumeJourneyTopology(events, journey) {
   const counts = journeyPairCounts(journey);
   const pending = new Map();
   const clientById = new Map();
   const pairs = [];
   const reasons = [];
+  const notifications = [];
+  const serverRequests = [];
+  const clientResponses = [];
   if (!Array.isArray(events)) {
     return { ok: false, reasons: ["events must be an array"], pairs, counts };
   }
+  const ctx = {
+    pending,
+    clientById,
+    pairs,
+    reasons,
+    notifications,
+    serverRequests,
+    clientResponses,
+  };
   for (const event of events) {
-    if (isClientRpcRequest(event)) {
-      if (pending.has(event.id)) {
-        reasons.push(`duplicate client request id ${event.id}`);
-        continue;
-      }
-      pending.set(event.id, event.method);
-      clientById.set(event.id, event);
-      continue;
-    }
-    if (!isResponseShapedServerRow(event)) {
-      continue;
-    }
-    const expectedMethod = pending.get(event.id);
-    if (expectedMethod != null && event.method !== expectedMethod) {
-      reasons.push("notification cannot resolve a pending id");
-      continue;
-    }
-    const frame = { id: event.id };
-    if (Object.prototype.hasOwnProperty.call(event, "result")) {
-      frame.result = event.result;
-    }
-    if (Object.prototype.hasOwnProperty.call(event, "error")) {
-      frame.error = event.error;
-    }
-    const resolved = resolvePendingResponse(pending, frame);
-    if (resolved.kind === "reject") {
-      reasons.push(resolved.reason);
-      continue;
-    }
-    if (resolved.kind === "resolve") {
-      pairs.push({
-        method: resolved.method,
-        id: resolved.id,
-        request: clientById.get(resolved.id),
-        response: event,
-      });
-    }
+    consumeClassifiedEvent(classifyStoredEvent(event), event, ctx);
   }
   if (pending.size > 0) {
     reasons.push("unresolved client requests");
@@ -620,11 +734,22 @@ export function consumeJourneyTopology(events, journey) {
       reasons.push("turn/start is not bound to the primary thread");
     }
   }
+  const initializePairs = byMethod("initialize");
+  if (counts.initialize === 1) {
+    if (
+      initializePairs.length !== 1 ||
+      hasOwn(initializePairs[0].response, "error") ||
+      !successfulInitializeResult(initializePairs[0].response?.result)
+    ) {
+      reasons.push("initialize must be one successful result with required live fields");
+    }
+  }
   return {
     ok: reasons.length === 0,
     reasons,
     pairs,
     counts,
+    primaryThread: roles.get("primary") ?? null,
     threads: ["primary", "missing", "invalid"]
       .map((role) => roles.get(role)?.response)
       .filter(Boolean),
@@ -632,6 +757,9 @@ export function consumeJourneyTopology(events, journey) {
       .map((role) => statusByRole.get(role)?.response)
       .filter(Boolean),
     skills: skillPairs.map((pair) => pair.response),
+    notifications,
+    serverRequests,
+    clientResponses,
   };
 }
 
@@ -728,22 +856,9 @@ function skillsFromEvents(events) {
   return listed;
 }
 
-function threadStarts(events) {
-  return events.filter(
-    (event) => event.method === "thread/start" && event.direction === "server",
-  );
-}
-
-function mcpStatuses(events) {
-  return events.filter(
-    (event) =>
-      event.method === "mcpServerStatus/list" && event.direction === "server",
-  );
-}
-
-function mcpToolCalls(events) {
+function mcpToolCalls(rows) {
   const calls = [];
-  for (const event of events) {
+  for (const event of rows) {
     if (event.method !== "item/completed" || event.direction !== "server") {
       continue;
     }
@@ -870,8 +985,10 @@ function classifyTools(statuses) {
   return cell("pass", "exact release tools listed");
 }
 
-function matchingTurnStatus(events, threadId, turnId) {
-  const matches = events.filter(
+// Notification/elicitation consumers read topology collections only.
+// They must not rescan raw events for initialize/thread/status/skills.
+function matchingTurnStatus(rows, threadId, turnId) {
+  const matches = rows.filter(
     (row) =>
       row.method === "turn/completed" &&
       row.direction === "server" &&
@@ -888,14 +1005,9 @@ function matchingTurnStatus(events, threadId, turnId) {
   return typeof status === "string" ? status : "";
 }
 
-function uniqueExpectedElicitationAccepted(events, threadId, turnId) {
-  if (!Array.isArray(events)) {
-    return false;
-  }
-  const requests = events.filter(
-    (event) =>
-      event.method === "mcpServer/elicitation/request" && event.direction === "server",
-  );
+function uniqueExpectedElicitationAccepted(topology, threadId, turnId) {
+  const requests = Array.isArray(topology?.serverRequests) ? topology.serverRequests : [];
+  const replies = Array.isArray(topology?.clientResponses) ? topology.clientResponses : [];
   const acceptable = requests.filter((event) =>
     elicitationAcceptable(event.params, threadId, turnId),
   );
@@ -903,30 +1015,21 @@ function uniqueExpectedElicitationAccepted(events, threadId, turnId) {
     return false;
   }
   const requestId = acceptable[0].id;
-  const matchingAccepts = events.filter(
-    (event) =>
-      event.method === "mcpServer/elicitation/request" &&
-      event.direction === "client" &&
-      event.id === requestId &&
-      event.result?.action === "accept",
+  const matchingAccepts = replies.filter(
+    (event) => event.id === requestId && event.result?.action === "accept",
   );
   if (matchingAccepts.length !== 1) {
     return false;
   }
-  const allAccepts = events.filter(
-    (event) =>
-      event.method === "mcpServer/elicitation/request" &&
-      event.direction === "client" &&
-      event.result?.action === "accept",
-  );
+  const allAccepts = replies.filter((event) => event.result?.action === "accept");
   return allAccepts.length === 1;
 }
 
-function classifyInvocation(calls, expected, threadId, turnId, events) {
+function classifyInvocation(calls, expected, threadId, turnId, topology) {
   if (calls.length === 0) {
     return cell("unavailable", "no mcpToolCall item/completed");
   }
-  const terminalStatus = matchingTurnStatus(events, threadId, turnId);
+  const terminalStatus = matchingTurnStatus(topology?.notifications ?? [], threadId, turnId);
   if (terminalStatus === null) {
     return cell("unavailable", "no matching turn/completed");
   }
@@ -965,7 +1068,7 @@ function classifyInvocation(calls, expected, threadId, turnId, events) {
   if (!sameJson(item.arguments, DECIDE_INPUT)) {
     return cell("fail", "tool arguments are not the pinned probe");
   }
-  if (!uniqueExpectedElicitationAccepted(events, threadId, turnId)) {
+  if (!uniqueExpectedElicitationAccepted(topology, threadId, turnId)) {
     return cell(
       "fail",
       "oneToolInvoked requires exactly one expected elicitation request and one matching accept",
@@ -1041,7 +1144,7 @@ function classifyDriver(meta) {
   return cell("fail", "contradictory or malformed driver outcome");
 }
 
-export function classifyCells(events, meta, expected, journey = "tool") {
+export function classifyCells(events, meta, expected, journey = "tool", topology = null) {
   if (meta.streamUnavailable || meta.truncated) {
     const blocked = classifyDriver(meta);
     const rest = Object.fromEntries(
@@ -1052,14 +1155,16 @@ export function classifyCells(events, meta, expected, journey = "tool") {
     );
     return { ...rest, driverCompleted: blocked };
   }
-  let topology;
-  try {
-    topology = consumeJourneyTopology(events, journey);
-  } catch (error) {
-    topology = { ok: false, reasons: [error.message] };
+  let resolved = topology;
+  if (resolved == null) {
+    try {
+      resolved = consumeJourneyTopology(events, journey);
+    } catch (error) {
+      resolved = { ok: false, reasons: [error.message] };
+    }
   }
-  if (!topology.ok) {
-    const reason = `journey topology: ${topology.reasons?.[0] || "mismatch"}`;
+  if (!resolved.ok) {
+    const reason = `journey topology: ${resolved.reasons?.[0] || "mismatch"}`;
     return {
       skillDiscovered: cell("fail", reason),
       mcpStarted: cell("fail", reason),
@@ -1072,17 +1177,17 @@ export function classifyCells(events, meta, expected, journey = "tool") {
       driverCompleted: classifyDriver(meta),
     };
   }
-  const skills = skillsFromEvents(topology.skills);
-  const starts = topology.threads;
-  const statuses = topology.statuses;
-  const calls = mcpToolCalls(events);
+  const skills = skillsFromEvents(resolved.skills);
+  const starts = resolved.threads;
+  const statuses = resolved.statuses;
+  const calls = mcpToolCalls(resolved.notifications ?? []);
   const threadId = primaryThreadId(starts);
-  const turnId = turnIdFromTopology(topology);
+  const turnId = turnIdFromTopology(resolved);
   const skillDiscovered = classifySkill(skills, expected);
   const cwdObserved = classifyCwd(starts, expected);
   const mcpStarted = classifyMcp(statuses);
   const exactToolsListed = classifyTools(statuses);
-  const oneToolInvoked = classifyInvocation(calls, expected, threadId, turnId, events);
+  const oneToolInvoked = classifyInvocation(calls, expected, threadId, turnId, resolved);
   const structuredResultValidated = classifyPayload(calls, oneToolInvoked);
   return {
     skillDiscovered,
@@ -1115,7 +1220,7 @@ export function liveAcceptance(cells, meta) {
     );
   } else if (
     meta.provenance === "live" &&
-    !observedIdentityBound(meta.hostIdentity, meta.invocation, meta.events)
+    !verifyLiveIdentity(meta.hostIdentity, meta.invocation, meta.topology)
   ) {
     reasons.push(
       "live identity must be the observed binaries bound to the actual thread/start and spawn commands",
@@ -1146,7 +1251,14 @@ export function classifyRecord(record) {
   if (!Array.isArray(events)) {
     throw new Error("events must be an array");
   }
-  const derived = initializeFromEvents(events, record.journey ?? "tool");
+  const journey = record.journey ?? "tool";
+  let topology;
+  try {
+    topology = consumeJourneyTopology(events, journey);
+  } catch (error) {
+    topology = { ok: false, reasons: [error.message], pairs: [] };
+  }
+  const derived = initializeFromTopology(topology);
   const meta = {
     provenance: record.provenance,
     childExitCode: record.childExitCode,
@@ -1156,9 +1268,10 @@ export function classifyRecord(record) {
     userAgent: derived.userAgent,
     hostIdentity: record.hostIdentity ?? null,
     invocation: record.invocation ?? null,
+    topology,
     events,
   };
-  const cells = classifyCells(events, meta, record.expected, record.journey ?? "tool");
+  const cells = classifyCells(events, meta, record.expected, journey, topology);
   return {
     schema: SCHEMA,
     cells,

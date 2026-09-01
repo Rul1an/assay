@@ -2428,20 +2428,21 @@ test("P1 paired topology binds initialize and turn/start; control stays green", 
 test("P1 shared 512 MiB ceiling rejects sparse hash and removes snap root; control stays green", () => {
   const huge = writeSparseFile(path.join(scratch(), "identity.bin"), 536870912 + 1);
   const origRead = fs.readSync;
-  let read = 0;
+  let readCalls = 0;
   fs.readSync = function readSyncGuarded(...args) {
-    const n = origRead.apply(this, args);
-    read += n;
-    if (read > 64 * 1024) {
-      throw new Error("sha256File read past one chunk on a 512 MiB+1 sparse file");
-    }
-    return n;
+    readCalls += 1;
+    return origRead.apply(this, args);
   };
   try {
     assert.throws(
       () => sha256File(huge),
       /ceiling|exceeds|binary/,
       "validator hash must reject a sparse 512 MiB+1 file before reading it",
+    );
+    assert.equal(
+      readCalls,
+      0,
+      "production-default sparse 512 MiB+1 must not call readSync; initial fstat ceiling must reject first",
     );
   } finally {
     fs.readSync = origRead;
@@ -2519,5 +2520,173 @@ test("P1 snapshot and decide-tool guards bite independently of overrides; contro
   const control = await drive("valid");
   assert.equal(allIntendedCellsPass(control.classified), true);
   assert.equal(control.classified.cells.oneToolInvoked.status, "pass");
+  assert.equal(validateProofRoot(control.proofRoot).ok, true);
+});
+
+function pairedInitialize(events) {
+  return events.find(
+    (event) =>
+      event.direction === "server" && event.method === "initialize" && event.id != null,
+  );
+}
+
+function pairedPrimaryClientStart(events) {
+  return events.find(
+    (event) =>
+      event.direction === "client" &&
+      event.method === "thread/start" &&
+      event.id != null &&
+      !String(event.params?.config?.mcp_servers?.assay?.command ?? "").includes(
+        "missing-assay-mcp-server",
+      ) &&
+      !(event.params?.config?.mcp_servers?.assay?.args ?? []).some((value) =>
+        String(value).includes("missing-policy-root"),
+      ),
+  );
+}
+
+test("closed-world server-row taxonomy refuses id-less response shapes; allowed rows stay green", async () => {
+  const { events, manifest, classified, proofRoot } = await drive("valid");
+  assert.equal(allIntendedCellsPass(classified), true);
+  assert.equal(validateProofRoot(proofRoot).ok, true);
+  const allowed = {
+    elicitation: events.filter(
+      (event) =>
+        event.direction === "server" && event.method === "mcpServer/elicitation/request",
+    ),
+    items: events.filter(
+      (event) => event.direction === "server" && event.method === "item/completed",
+    ),
+    turns: events.filter(
+      (event) => event.direction === "server" && event.method === "turn/completed",
+    ),
+    initialize: events.filter(
+      (event) =>
+        event.direction === "server" &&
+        event.method === "initialize" &&
+        event.id != null &&
+        Object.prototype.hasOwnProperty.call(event, "result") &&
+        !Object.prototype.hasOwnProperty.call(event, "error"),
+    ),
+  };
+  assert.equal(allowed.elicitation.length, 1, "pin allowed elicitation request");
+  assert.ok(allowed.items.length >= 1, "pin allowed item/completed notification");
+  assert.equal(allowed.turns.length, 1, "pin allowed turn/completed notification");
+  assert.equal(allowed.initialize.length, 1, "pin allowed paired initialize result");
+
+  const hostiles = [
+    { direction: "server", result: { unexpected: true } },
+    { direction: "server", error: { code: -32000, message: "id-less error" } },
+    { direction: "server", result: { ok: true }, error: { code: -1 } },
+    { direction: "server", method: "initialize", result: { replay: true } },
+  ];
+  for (const row of hostiles) {
+    const mutated = structuredClone(events);
+    mutated.push(row);
+    const hostile = classifyRecord({ ...manifest, events: mutated });
+    assert.equal(
+      allIntendedCellsPass(hostile),
+      false,
+      `${JSON.stringify(row)} must not yield 9/9`,
+    );
+    const hostileRoot = scratch();
+    fs.mkdirSync(hostileRoot, { recursive: true });
+    rewriteProof(hostileRoot, manifest, mutated, hostile);
+    assert.equal(
+      validateProofRoot(hostileRoot).ok,
+      false,
+      `${JSON.stringify(row)} must not validate as proof`,
+    );
+  }
+
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true);
+  assert.equal(validateProofRoot(control.proofRoot).ok, true);
+});
+
+test("successful initialize result is required; initialize error cannot mint liveAcceptance", async () => {
+  const { events, manifest, classified } = await drive("valid");
+  assert.equal(allIntendedCellsPass(classified), true);
+  const mutated = structuredClone(events);
+  const initialize = pairedInitialize(mutated);
+  assert.ok(initialize, "valid pack must have a paired initialize result");
+  delete initialize.result;
+  initialize.error = { code: -32000, message: "initialize failed" };
+
+  const cellsOnly = classifyRecord({ ...manifest, events: mutated });
+  assert.equal(
+    allIntendedCellsPass(cellsOnly),
+    false,
+    "a uniquely paired initialize JSON-RPC error must not keep 9/9",
+  );
+
+  const bound = liveBoundRecord(manifest, mutated);
+  const live = classifyRecord(bound);
+  assert.notEqual(
+    live.liveAcceptance.status,
+    "pass",
+    "initialize error converted to an empty record must not mint liveAcceptance pass",
+  );
+  const errorRoot = scratch();
+  fs.mkdirSync(errorRoot, { recursive: true });
+  rewriteProof(errorRoot, bound, bound.events, live);
+  assert.equal(
+    validateProofRoot(errorRoot).ok,
+    false,
+    "initialize error pack must not validate as proof",
+  );
+
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true);
+  assert.equal(
+    classifyRecord(liveBoundRecord(control.manifest, control.events)).liveAcceptance.status,
+    "fail",
+    "no-op live-bound control still cannot pass on fake events",
+  );
+  assert.equal(validateProofRoot(control.proofRoot).ok, true);
+});
+
+test("live identity binds the canonical primary pair; raw events.find cannot hide a wrong command", async () => {
+  const { events, manifest, classified } = await drive("valid");
+  assert.equal(allIntendedCellsPass(classified), true);
+  const bound = liveBoundRecord(manifest, events);
+  const initialize = pairedInitialize(bound.events);
+  initialize.result.userAgent = "codex_cli/0.50.0";
+  const observed = bound.hostIdentity.assayMcp.path;
+  const primary = pairedPrimaryClientStart(bound.events);
+  assert.ok(primary, "valid pack must have a paired primary thread/start");
+  assert.equal(primary.params.config.mcp_servers.assay.command, observed);
+  primary.params.config.mcp_servers.assay.command = "/wrong/canonical/assay-mcp-server";
+  bound.events.unshift({
+    direction: "client",
+    method: "thread/start",
+    params: {
+      config: { mcp_servers: { assay: { command: observed } } },
+    },
+  });
+
+  const hidden = classifyRecord(bound);
+  assert.notEqual(
+    hidden.liveAcceptance.status,
+    "pass",
+    "an ignored id-less thread/start must not hide a wrong canonical primary command",
+  );
+  assert.match(
+    VALIDATOR_SRC,
+    /verifyLiveIdentity|observedIdentityBound/,
+  );
+  assert.doesNotMatch(
+    VALIDATOR_SRC,
+    /events\.find\(\s*\(?\s*event\s*\)?\s*=>\s*event\.method\s*===\s*"thread\/start"/,
+    "live identity must not rescan raw events for thread/start",
+  );
+
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true);
+  assert.equal(
+    classifyRecord(liveBoundRecord(control.manifest, control.events)).liveAcceptance.status,
+    "fail",
+    "no-op live-bound control still cannot pass on fake events",
+  );
   assert.equal(validateProofRoot(control.proofRoot).ok, true);
 });
