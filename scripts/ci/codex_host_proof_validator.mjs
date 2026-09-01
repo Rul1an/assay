@@ -41,24 +41,28 @@ export const HOST_ALLOWLIST = Object.freeze([...ALLOWLIST, ...HOST_SUBJECTS]);
 export const EXTERNAL_ATTESTATION = "not_provided";
 export const HOST_ENV_NAMES = Object.freeze(["PATH", "HOME", "CODEX_HOME"]);
 
-export function requirePrivateProofRoot(proofRoot) {
-  if (typeof proofRoot !== "string" || proofRoot.length === 0) {
-    throw new Error("proof root must be a non-empty path");
+export function requirePrivateDirectory(directory, label) {
+  if (typeof directory !== "string" || directory.length === 0) {
+    throw new Error(`${label} must be a non-empty path`);
   }
-  const resolved = path.resolve(proofRoot);
+  const resolved = path.resolve(directory);
   const st = fs.lstatSync(resolved);
   if (st.isSymbolicLink() || !st.isDirectory()) {
-    throw new Error("proof root must be a real directory");
+    throw new Error(`${label} must be a real directory`);
   }
   if (process.platform !== "win32") {
     if (typeof process.getuid === "function" && st.uid !== process.getuid()) {
-      throw new Error("proof root must be owned by the current user");
+      throw new Error(`${label} must be owned by the current user`);
     }
     if ((st.mode & 0o7777) !== 0o700) {
-      throw new Error("proof root must be private to its owner (mode 0700)");
+      throw new Error(`${label} must be private to its owner (mode 0700)`);
     }
   }
   return fs.realpathSync(resolved);
+}
+
+export function requirePrivateProofRoot(proofRoot) {
+  return requirePrivateDirectory(proofRoot, "proof root");
 }
 
 export function proofAllowlist(hasHostIdentity) {
@@ -345,12 +349,13 @@ function verifyObservedBinary(bin) {
   }
 }
 
-export function verifyLiveIdentity(
+function verifyLiveIdentityBound(
   identity,
   invocation,
   topology,
   proofRoot,
   journey = "tool",
+  allowMissingCommand = false,
 ) {
   if (!liveIdentityBound(identity)) {
     return false;
@@ -372,7 +377,7 @@ export function verifyLiveIdentity(
   if (!verifyObservedBinary(identity.codex) || !verifyObservedBinary(identity.assayMcp)) {
     return false;
   }
-  if (journey !== "discovery") {
+  if (journey !== "discovery" && !allowMissingCommand) {
     const command =
       topology?.primaryThread?.request?.params?.config?.mcp_servers?.assay?.command;
     if (command !== identity.assayMcp.path) {
@@ -380,6 +385,16 @@ export function verifyLiveIdentity(
     }
   }
   return liveInvocationBound(identity, invocation);
+}
+
+export function verifyLiveIdentity(
+  identity,
+  invocation,
+  topology,
+  proofRoot,
+  journey = "tool",
+) {
+  return verifyLiveIdentityBound(identity, invocation, topology, proofRoot, journey, false);
 }
 
 export function liveInvocationBound(identity, invocation) {
@@ -394,7 +409,13 @@ export function liveInvocationBound(identity, invocation) {
   );
 }
 
-export function observedIdentityBound(identity, invocation, topology, proofRoot, journey = "tool") {
+export function observedIdentityBound(
+  identity,
+  invocation,
+  topology,
+  proofRoot,
+  journey = "tool",
+) {
   return verifyLiveIdentity(identity, invocation, topology, proofRoot, journey);
 }
 
@@ -449,7 +470,7 @@ export function driverOutcomeExit(pack, cells, journey) {
   if (pack.truncated || pack.streamUnavailable) {
     return fail;
   }
-  if (cells?.driverCompleted?.status === "unavailable") {
+  if (cells?.driverCompleted?.status !== "pass") {
     return fail;
   }
   const required = requiredCellsForJourney(journey);
@@ -465,9 +486,6 @@ export function driverOutcomeExit(pack, cells, journey) {
 }
 
 export function closedDriverOutcomeStatus(meta) {
-  if (meta.streamUnavailable || meta.truncated) {
-    return "unavailable";
-  }
   const child = meta.childExitCode;
   const outcome = meta.driverOutcome;
   if (outcome == null) {
@@ -475,6 +493,11 @@ export function closedDriverOutcomeStatus(meta) {
   }
   if (typeof outcome !== "object" || Array.isArray(outcome) || typeof outcome.exitCode !== "number") {
     return "invalid";
+  }
+  if (meta.streamUnavailable || meta.truncated) {
+    return outcome.exitCode !== 0 && outcome.status === "unavailable"
+      ? "unavailable"
+      : "invalid";
   }
   if (child === 0 && outcome.exitCode === 0 && outcome.status === "pass") {
     return "pass";
@@ -576,10 +599,66 @@ export function journeyPairCounts(journey) {
 }
 
 export const ALLOWED_SERVER_REQUESTS = Object.freeze(["mcpServer/elicitation/request"]);
-export const ALLOWED_SERVER_NOTIFICATIONS = Object.freeze(["item/completed", "turn/completed"]);
+export const LIFECYCLE_SERVER_NOTIFICATIONS = Object.freeze([
+  "remoteControl/status/changed",
+  "thread/started",
+  "mcpServer/startupStatus/updated",
+  "thread/status/changed",
+  "turn/started",
+  "item/started",
+]);
+export const SERVER_DIAGNOSTIC_NOTIFICATIONS = Object.freeze(["warning", "error"]);
+export const ALLOWED_SERVER_NOTIFICATIONS = Object.freeze([
+  ...LIFECYCLE_SERVER_NOTIFICATIONS,
+  ...SERVER_DIAGNOSTIC_NOTIFICATIONS,
+  "item/completed",
+  "turn/completed",
+]);
 export const ALLOWED_CLIENT_NOTIFICATIONS = Object.freeze(["initialized"]);
 export const ALLOWED_CLIENT_RESPONSES = Object.freeze(["mcpServer/elicitation/request"]);
-export const ALLOWED_DRIVER_METHODS = Object.freeze(["error"]);
+export const ALLOWED_DRIVER_METHODS = Object.freeze(["error", "pre-spawn-error"]);
+
+export function preSpawnFailureState(events, manifest) {
+  const rows = Array.isArray(events)
+    ? events.filter(
+        (event) =>
+          isPlainObject(event) &&
+          event.direction === "driver" &&
+          event.method === "pre-spawn-error",
+      )
+    : [];
+  if (rows.length === 0) {
+    return { present: false, valid: false, reason: null };
+  }
+  const expectedEvent = {
+    direction: "driver",
+    method: "pre-spawn-error",
+    params: { message: "retained driver error" },
+  };
+  if (rows.length !== 1 || events.length !== 1 || !sameJson(rows[0], expectedEvent)) {
+    return {
+      present: true,
+      valid: false,
+      reason: "pre-spawn failure must be the one closed retained event",
+    };
+  }
+  if (
+    manifest?.childExitCode !== 1 ||
+    !sameJson(manifest?.driverOutcome, { exitCode: 1, status: "unavailable" }) ||
+    manifest?.truncated !== false ||
+    manifest?.streamUnavailable !== true ||
+    manifest?.bounds?.stdoutBytes !== 0 ||
+    manifest?.bounds?.stderrBytes !== 0 ||
+    !sameJson(manifest?.initialize, emptyInitialize())
+  ) {
+    return {
+      present: true,
+      valid: false,
+      reason: "pre-spawn failure metadata is not the closed unavailable state",
+    };
+  }
+  return { present: true, valid: true, reason: null };
+}
 
 function hasOwn(value, key) {
   return value != null && Object.prototype.hasOwnProperty.call(value, key);
@@ -628,6 +707,14 @@ function retainedItemReason(item) {
 }
 
 function retainedMethodParamsReason(method, params) {
+  if (
+    LIFECYCLE_SERVER_NOTIFICATIONS.includes(method) ||
+    SERVER_DIAGNOSTIC_NOTIFICATIONS.includes(method)
+  ) {
+    return isPlainObject(params) && Object.keys(params).length === 0
+      ? null
+      : `${method} params must be the recorder's empty object`;
+  }
   switch (method) {
     case "initialized":
       if (!isPlainObject(params) || Object.keys(params).length !== 0) {
@@ -770,6 +857,9 @@ export function classifyStoredEvent(event) {
         if (payloadReason) {
           return { type: "unclassified", reason: payloadReason };
         }
+        if (SERVER_DIAGNOSTIC_NOTIFICATIONS.includes(method)) {
+          return { type: "server-diagnostic", method };
+        }
         return { type: "server-notification", method };
       }
       return { type: "unclassified", reason: "unclassified server event" };
@@ -871,6 +961,9 @@ function consumeClassifiedEvent(classified, event, ctx) {
     case "server-notification":
       ctx.notifications.push(event);
       return;
+    case "server-diagnostic":
+      ctx.serverDiagnostics.push(event);
+      return;
     case "client-notification":
       ctx.clientNotifications.push(event);
       return;
@@ -914,6 +1007,7 @@ export function consumeJourneyTopology(events, journey) {
   const clientResponses = [];
   const clientNotifications = [];
   const driverErrors = [];
+  const serverDiagnostics = [];
   if (!Array.isArray(events)) {
     return { ok: false, reasons: ["events must be an array"], pairs, counts };
   }
@@ -929,6 +1023,7 @@ export function consumeJourneyTopology(events, journey) {
     clientResponses,
     clientNotifications,
     driverErrors,
+    serverDiagnostics,
   };
   for (const event of events) {
     consumeClassifiedEvent(classifyStoredEvent(event), event, ctx);
@@ -1071,6 +1166,7 @@ export function consumeJourneyTopology(events, journey) {
     clientResponses,
     clientNotifications,
     driverErrors,
+    serverDiagnostics,
   };
 }
 
@@ -1467,6 +1563,9 @@ function classifyNegative(statuses, index, label) {
 function classifyDriver(meta, topology) {
   if (Array.isArray(topology?.driverErrors) && topology.driverErrors.length > 0) {
     return cell("fail", "retained driver/error contradicts a completed journey");
+  }
+  if (Array.isArray(topology?.serverDiagnostics) && topology.serverDiagnostics.length > 0) {
+    return cell("fail", "retained server diagnostic contradicts a completed journey");
   }
   const kind = closedDriverOutcomeStatus(meta);
   if (kind === "unavailable") {
@@ -2327,6 +2426,10 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   if (shapeReason) {
     reasons.push(shapeReason);
   }
+  const preSpawn = preSpawnFailureState(events, manifest);
+  if (preSpawn.present && !preSpawn.valid) {
+    reasons.push(preSpawn.reason);
+  }
   if (manifest.schema !== SCHEMA) {
     reasons.push(`unexpected schema ${manifest.schema}`);
   }
@@ -2444,12 +2547,13 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
       topology = null;
     }
     if (
-      !verifyLiveIdentity(
+      !verifyLiveIdentityBound(
         manifest.hostIdentity,
         manifest.invocation,
         topology,
         proofRoot,
         manifest.journey,
+        preSpawn.valid,
       )
     ) {
       reasons.push("retained host subjects do not match their fixed paths, hashes, or commands");

@@ -26,8 +26,10 @@ import {
   classifyRecord,
   consumeJourneyTopology,
   decidePrompt,
+  driverOutcomeFrom,
   elicitationAcceptable,
   forbiddenProofRoot,
+  preSpawnFailureState,
   projectClientRequestParams,
   sha256File,
   sha256Utf8,
@@ -149,7 +151,7 @@ process.stdout.write("assay-mcp-server-shadow/0.0.0\\n");
 }
 
 function driveCli(scenario, journey = "tool", extra = {}) {
-  const projectRoot = seedProject();
+  const projectRoot = extra.projectRoot ?? seedProject();
   const proofRoot = extra.proofRoot ?? scratch();
   const mcpBin = extra.assayMcpBin ?? writeShadowMcp();
   const codexBin =
@@ -533,6 +535,270 @@ test("malformed JSON line writes unavailable evidence; CLI proof root is not emp
   assert.equal(stored.cells.oneToolInvoked.status, "unavailable");
   assert.notEqual(stored.cells.oneToolInvoked.status, "pass");
   assert.notEqual(stored.externalAttestation, "pass");
+  const events = JSON.parse(fs.readFileSync(path.join(cli.proofRoot, "events.json"), "utf8"));
+  const driverErrors = events.filter(
+    (event) => event.direction === "driver" && event.method === "error",
+  );
+  assert.ok(driverErrors.length >= 1, "the failed run must retain a driver error witness");
+  assert.deepEqual(
+    [...new Set(driverErrors.map((event) => event.params?.message))],
+    ["retained driver error"],
+    "driver failures must be the same closed projection the validator recomputes",
+  );
+});
+
+function preSpawnStateMutations(event, manifest) {
+  return [
+    { label: "extra event", events: [event, event], manifest },
+    {
+      label: "wrong child exit",
+      events: [event],
+      manifest: { ...manifest, childExitCode: 2 },
+    },
+    {
+      label: "wrong driver outcome",
+      events: [event],
+      manifest: { ...manifest, driverOutcome: { exitCode: 1, status: "fail" } },
+    },
+    {
+      label: "truncated stream",
+      events: [event],
+      manifest: { ...manifest, truncated: true },
+    },
+    {
+      label: "available stream",
+      events: [event],
+      manifest: { ...manifest, streamUnavailable: false },
+    },
+    {
+      label: "stdout bytes",
+      events: [event],
+      manifest: { ...manifest, bounds: { ...manifest.bounds, stdoutBytes: 1 } },
+    },
+    {
+      label: "stderr bytes",
+      events: [event],
+      manifest: { ...manifest, bounds: { ...manifest.bounds, stderrBytes: 1 } },
+    },
+    {
+      label: "initialize metadata",
+      events: [event],
+      manifest: { ...manifest, initialize: { ...manifest.initialize, userAgent: "spawned" } },
+    },
+  ];
+}
+
+test("production driver creates and verifies its disposable CODEX_HOME before spawn", () => {
+  const projectRoot = seedProject();
+  const codexHome = path.join(projectRoot, ".codex-home");
+  const retainedFilesWithIdentity = [
+    "assay-mcp-server.snapshot",
+    "classification.json",
+    "codex.snapshot",
+    "events.json",
+    "manifest.json",
+  ];
+  assert.equal(fs.existsSync(codexHome), false, "control starts without CODEX_HOME");
+
+  const binDir = scratch();
+  const codexBin = path.join(binDir, "codex");
+  writePortableNodeExecutable(
+    codexBin,
+    `import fs from "node:fs";
+import { spawn } from "node:child_process";
+if (process.argv.includes("--version")) {
+  process.stdout.write("codex-home-check/1.0.0\\n");
+  process.exit(0);
+}
+fs.writeFileSync(process.env.HOME + "/.codex-app-server-started", "1");
+const stat = fs.statSync(process.env.CODEX_HOME);
+if (!stat.isDirectory() || (process.platform !== "win32" && (stat.mode & 0o7777) !== 0o700)) {
+  process.exit(73);
+}
+const child = spawn(${JSON.stringify(process.execPath)}, ${JSON.stringify([FAKE, "--scenario", "valid", "--project-root", projectRoot])}, { stdio: "inherit" });
+const stop = () => { try { child.kill("SIGTERM"); } catch { /* already exited */ } };
+process.on("SIGTERM", stop);
+process.on("SIGINT", stop);
+child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+`,
+  );
+
+  const cli = driveCli("valid", "discovery", { projectRoot, codexBin });
+  assert.equal(cli.status, 0, cli.stderr || cli.stdout);
+  const stat = fs.lstatSync(codexHome);
+  assert.equal(stat.isSymbolicLink(), false);
+  assert.equal(stat.isDirectory(), true);
+  if (process.platform !== "win32") {
+    assert.equal(stat.mode & 0o7777, 0o700);
+  }
+
+  const fileProjectRoot = seedProject();
+  fs.writeFileSync(path.join(fileProjectRoot, ".codex-home"), "not a directory\n");
+  const fileCli = driveCli("valid", "discovery", {
+    projectRoot: fileProjectRoot,
+    codexBin,
+  });
+  assert.notEqual(fileCli.status, 0);
+  assert.deepEqual(
+    proofFiles(fileCli.proofRoot),
+    retainedFilesWithIdentity,
+    "a rejected CODEX_HOME must still leave a complete retained failure record",
+  );
+  const fileEvents = JSON.parse(
+    fs.readFileSync(path.join(fileCli.proofRoot, "events.json"), "utf8"),
+  );
+  assert.deepEqual(fileEvents, [
+    {
+      direction: "driver",
+      method: "pre-spawn-error",
+      params: { message: "retained driver error" },
+    },
+  ]);
+  const fileManifest = JSON.parse(
+    fs.readFileSync(path.join(fileCli.proofRoot, "manifest.json"), "utf8"),
+  );
+  assert.notEqual(fileManifest.driverOutcome.exitCode, 0);
+  assert.equal(validateProofRoot(fileCli.proofRoot).ok, true);
+  assert.equal(
+    fs.existsSync(path.join(fileProjectRoot, ".codex-app-server-started")),
+    false,
+    "a non-directory CODEX_HOME must be rejected before app-server spawn",
+  );
+
+  const preSpawnResults = [];
+  for (const row of [
+    { journey: "discovery", allowLiveTurn: false },
+    { journey: "failures", allowLiveTurn: false },
+    { journey: "tool", allowLiveTurn: true },
+  ]) {
+    const hostProjectRoot = seedProject();
+    fs.writeFileSync(path.join(hostProjectRoot, ".codex-home"), "not a directory\n");
+    const hostProofRoot = portableLiveProofRoot();
+    try {
+      const hostCli = driveCli("valid", row.journey, {
+        allowLiveTurn: row.allowLiveTurn,
+        captureMode: "host-observation",
+        projectRoot: hostProjectRoot,
+        proofRoot: hostProofRoot,
+        codexBin,
+      });
+      assert.notEqual(hostCli.status, 0);
+      assert.deepEqual(
+        proofFiles(hostCli.proofRoot),
+        retainedFilesWithIdentity,
+        `host-observation ${row.journey} failure must retain its proof-owned subjects: ${hostCli.stderr || hostCli.stdout}`,
+      );
+      const checked = validateProofRoot(hostCli.proofRoot);
+      preSpawnResults.push({ journey: row.journey, ok: checked.ok, reasons: checked.reasons });
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(hostCli.proofRoot, "manifest.json"), "utf8"),
+      );
+      const events = JSON.parse(
+        fs.readFileSync(path.join(hostCli.proofRoot, "events.json"), "utf8"),
+      );
+      if (row.journey === "discovery") {
+        const originalClassified = classifyRecord({ ...manifest, events });
+        for (const mutation of preSpawnStateMutations(events[0], manifest)) {
+          const mutatedClassified = classifyRecord({
+            ...mutation.manifest,
+            events: mutation.events,
+          });
+          rewriteProof(
+            hostCli.proofRoot,
+            mutation.manifest,
+            mutation.events,
+            mutatedClassified,
+          );
+          const mutatedChecked = validateProofRoot(hostCli.proofRoot);
+          assert.equal(
+            mutatedChecked.ok,
+            false,
+            `${mutation.label} must fail at the retained-proof validator funnel`,
+          );
+          rewriteProof(hostCli.proofRoot, manifest, events, originalClassified);
+        }
+      }
+      if (row.journey !== "discovery") {
+        const genericEvents = structuredClone(events);
+        genericEvents[0].method = "error";
+        const genericClassified = classifyRecord({ ...manifest, events: genericEvents });
+        rewriteProof(hostCli.proofRoot, manifest, genericEvents, genericClassified);
+        const genericChecked = validateProofRoot(hostCli.proofRoot);
+        assert.equal(
+          genericChecked.ok,
+          false,
+          `generic driver/error must not unlock ${row.journey} missing-command validation`,
+        );
+        assert.match(genericChecked.reasons.join("; "), /host subjects.*commands/);
+      }
+      assert.equal(
+        fs.existsSync(path.join(hostProjectRoot, ".codex-app-server-started")),
+        false,
+        `host-observation ${row.journey} must reject unsafe CODEX_HOME before app-server spawn`,
+      );
+    } finally {
+      fs.rmSync(hostProofRoot, { recursive: true, force: true });
+    }
+  }
+  assert.deepEqual(
+    preSpawnResults,
+    [
+      { journey: "discovery", ok: true, reasons: [] },
+      { journey: "failures", ok: true, reasons: [] },
+      { journey: "tool", ok: true, reasons: [] },
+    ],
+    JSON.stringify(preSpawnResults),
+  );
+
+  if (process.platform !== "win32") {
+    const publicProjectRoot = seedProject();
+    const publicCodexHome = path.join(publicProjectRoot, ".codex-home");
+    fs.mkdirSync(publicCodexHome, { mode: 0o755 });
+    fs.chmodSync(publicCodexHome, 0o755);
+    const publicCli = driveCli("valid", "discovery", {
+      projectRoot: publicProjectRoot,
+      codexBin,
+    });
+    assert.notEqual(publicCli.status, 0);
+    assert.equal(
+      fs.existsSync(path.join(publicProjectRoot, ".codex-app-server-started")),
+      false,
+      "a non-private CODEX_HOME must be rejected before app-server spawn",
+    );
+  }
+});
+
+test("pre-spawn failure is one closed unavailable state, not a generic stream exception", () => {
+  const event = {
+    direction: "driver",
+    method: "pre-spawn-error",
+    params: { message: "retained driver error" },
+  };
+  const manifest = {
+    childExitCode: 1,
+    driverOutcome: { exitCode: 1, status: "unavailable" },
+    truncated: false,
+    streamUnavailable: true,
+    bounds: { stdoutBytes: 0, stderrBytes: 0 },
+    initialize: {
+      codexHome: null,
+      userAgent: null,
+      platformFamily: null,
+      platformOs: null,
+    },
+  };
+  assert.deepEqual(preSpawnFailureState([event], manifest), {
+    present: true,
+    valid: true,
+    reason: null,
+  });
+
+  for (const mutation of preSpawnStateMutations(event, manifest)) {
+    const state = preSpawnFailureState(mutation.events, mutation.manifest);
+    assert.equal(state.present, true);
+    assert.equal(state.valid, false);
+    assert.match(state.reason, /^pre-spawn failure /);
+  }
 });
 
 test("credential-bearing argv is rejected before spawn and not persisted", async () => {
@@ -898,6 +1164,29 @@ test("driver exits nonzero for truncated or unavailable streams even when the ch
     { timeoutMs: 800, journey: "discovery" },
   );
   assert.notEqual(cli.status, 0, "CLI must exit nonzero when the proof journey failed");
+});
+
+test("unavailable stream cannot retain a clean driver outcome", async () => {
+  const { events, manifest, proofRoot } = await drive("valid");
+  assert.equal(validateProofRoot(proofRoot).ok, true, "unaltered control must validate");
+
+  const unavailable = {
+    ...structuredClone(manifest),
+    streamUnavailable: true,
+  };
+  const classified = classifyRecord({ ...unavailable, events });
+  rewriteProof(proofRoot, unavailable, events, classified);
+
+  const checked = validateProofRoot(proofRoot);
+  assert.equal(
+    checked.ok,
+    false,
+    "stream-unavailable evidence must reject a retained child/driver pass outcome",
+  );
+  assert.match(
+    checked.reasons.join(" "),
+    /childExitCode and driverOutcome violate the closed driver-outcome rule/,
+  );
 });
 
 test("live mode declines elicitation that is not from the assay server", async () => {
@@ -1920,7 +2209,16 @@ test("F1 strict JSON-RPC envelopes reject method+result, result+error, duplicate
     "a notification carrying a pending id must not yield all-pass",
   );
   assert.notEqual(impersonated.classified.cells.driverCompleted.status, "pass");
-  assert.equal(validateProofRoot(impersonated.proofRoot).ok, false);
+  assert.notEqual(
+    impersonated.manifest.driverOutcome.exitCode,
+    0,
+    "a rejected envelope must be retained as a non-clean driver outcome",
+  );
+  assert.equal(
+    validateProofRoot(impersonated.proofRoot).ok,
+    true,
+    "honest evidence of a failed journey remains a valid proof record",
+  );
 
   const both = await drive("result-and-error-response");
   assert.equal(
@@ -2688,6 +2986,95 @@ test("closed-world server-row taxonomy refuses id-less response shapes; allowed 
   assert.equal(validateProofRoot(control.proofRoot).ok, true);
 });
 
+test("current Codex lifecycle chatter is inert while diagnostics remain non-clean", async () => {
+  const { events, manifest, classified } = await drive("valid");
+  assert.equal(allIntendedCellsPass(classified), true);
+
+  const lifecycleMethods = [
+    "remoteControl/status/changed",
+    "thread/started",
+    "mcpServer/startupStatus/updated",
+    "thread/status/changed",
+    "turn/started",
+    "item/started",
+  ];
+  const withLifecycle = structuredClone(events);
+  const terminalIndex = withLifecycle.findIndex(
+    (event) => event.direction === "server" && event.method === "turn/completed",
+  );
+  assert.notEqual(terminalIndex, -1, "control must contain the terminal turn insertion anchor");
+  withLifecycle.splice(
+    terminalIndex,
+    0,
+    ...lifecycleMethods.map((method) => ({ direction: "server", method, params: {} })),
+  );
+  const lifecycle = classifyRecord({ ...manifest, events: withLifecycle });
+  assert.equal(
+    allIntendedCellsPass(lifecycle),
+    true,
+    "known lifecycle notifications must not erase independently observed host cells",
+  );
+  const lifecycleRoot = scratch();
+  fs.mkdirSync(lifecycleRoot, { recursive: true });
+  rewriteProof(lifecycleRoot, manifest, withLifecycle, lifecycle);
+  assert.equal(validateProofRoot(lifecycleRoot).ok, true);
+
+  for (const method of ["warning", "error"]) {
+    const withDiagnostic = structuredClone(events);
+    withDiagnostic.splice(terminalIndex, 0, { direction: "server", method, params: {} });
+    const diagnostic = classifyRecord({ ...manifest, events: withDiagnostic });
+    assert.equal(
+      diagnostic.cells.skillDiscovered.status,
+      "pass",
+      `${method} must not relabel completed discovery as absent`,
+    );
+    assert.equal(
+      diagnostic.cells.exactToolsListed.status,
+      "pass",
+      `${method} must not relabel the observed tool list as absent`,
+    );
+    assert.equal(
+      diagnostic.cells.driverCompleted.status,
+      "fail",
+      `${method} must keep the overall proof non-clean`,
+    );
+    assert.notEqual(
+      driverOutcomeFrom(
+        { childExit: 0, truncated: false, streamUnavailable: false },
+        diagnostic.cells,
+        "tool",
+      ).exitCode,
+      0,
+      `${method} must keep the generated driver outcome nonzero`,
+    );
+    assert.equal(allIntendedCellsPass(diagnostic), false);
+  }
+
+  const malformedLifecycle = structuredClone(events);
+  malformedLifecycle.splice(terminalIndex, 0, {
+    direction: "server",
+    method: lifecycleMethods[0],
+    params: { unexpected: true },
+  });
+  assert.equal(
+    allIntendedCellsPass(classifyRecord({ ...manifest, events: malformedLifecycle })),
+    false,
+    "lifecycle payloads outside the retained empty projection must fail closed",
+  );
+
+  const unknown = structuredClone(events);
+  unknown.splice(terminalIndex, 0, {
+    direction: "server",
+    method: "future/unknown",
+    params: {},
+  });
+  assert.equal(
+    allIntendedCellsPass(classifyRecord({ ...manifest, events: unknown })),
+    false,
+    "future notification methods remain fail-closed",
+  );
+});
+
 test("successful initialize result is required; initialize error cannot clean the record", async () => {
   const { events, manifest, classified } = await drive("valid");
   assert.equal(allIntendedCellsPass(classified), true);
@@ -3247,6 +3634,20 @@ test("review closeout: host subjects are proof-owned and independently revalidat
       ),
       true,
       JSON.stringify({ hostIdentity: manifest.hostIdentity, invocation: manifest.invocation }),
+    );
+    const wrongCommand = structuredClone(topology);
+    wrongCommand.primaryThread.request.params.config.mcp_servers.assay.command =
+      "/wrong/canonical/assay-mcp-server";
+    assert.equal(
+      verifyLiveIdentity(
+        manifest.hostIdentity,
+        manifest.invocation,
+        wrongCommand,
+        proofRoot,
+        manifest.journey,
+      ),
+      false,
+      "a normal journey cannot bypass the canonical MCP command binding",
     );
     const checked = validateProofRoot(proofRoot);
     assert.equal(checked.ok, true, checked.reasons.join("; "));
