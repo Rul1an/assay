@@ -1166,6 +1166,29 @@ test("driver exits nonzero for truncated or unavailable streams even when the ch
   assert.notEqual(cli.status, 0, "CLI must exit nonzero when the proof journey failed");
 });
 
+test("unavailable stream cannot retain a clean driver outcome", async () => {
+  const { events, manifest, proofRoot } = await drive("valid");
+  assert.equal(validateProofRoot(proofRoot).ok, true, "unaltered control must validate");
+
+  const unavailable = {
+    ...structuredClone(manifest),
+    streamUnavailable: true,
+  };
+  const classified = classifyRecord({ ...unavailable, events });
+  rewriteProof(proofRoot, unavailable, events, classified);
+
+  const checked = validateProofRoot(proofRoot);
+  assert.equal(
+    checked.ok,
+    false,
+    "stream-unavailable evidence must reject a retained child/driver pass outcome",
+  );
+  assert.match(
+    checked.reasons.join(" "),
+    /childExitCode and driverOutcome violate the closed driver-outcome rule/,
+  );
+});
+
 test("live mode declines elicitation that is not from the assay server", async () => {
   const { events } = await drive("foreign-elicit");
   const replies = events.filter(

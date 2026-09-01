@@ -486,9 +486,6 @@ export function driverOutcomeExit(pack, cells, journey) {
 }
 
 export function closedDriverOutcomeStatus(meta) {
-  if (meta.streamUnavailable || meta.truncated) {
-    return "unavailable";
-  }
   const child = meta.childExitCode;
   const outcome = meta.driverOutcome;
   if (outcome == null) {
@@ -496,6 +493,11 @@ export function closedDriverOutcomeStatus(meta) {
   }
   if (typeof outcome !== "object" || Array.isArray(outcome) || typeof outcome.exitCode !== "number") {
     return "invalid";
+  }
+  if (meta.streamUnavailable || meta.truncated) {
+    return outcome.exitCode !== 0 && outcome.status === "unavailable"
+      ? "unavailable"
+      : "invalid";
   }
   if (child === 0 && outcome.exitCode === 0 && outcome.status === "pass") {
     return "pass";
