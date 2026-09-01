@@ -281,6 +281,84 @@ raise SystemExit(2)
         self.assertIn("fcntl", result.stdout)
         self.assertIn("POSIX", result.stdout)
 
+    def test_fcntl_unavailable_child_is_reaped(self) -> None:
+        token = "bounded-fcntl-reap-probe"
+        inner = """
+import os, time, tempfile
+from pathlib import Path
+cwd = Path(tempfile.mkdtemp())
+pidfile = cwd / "child.pid"
+token = %r
+nl = chr(10)
+child = nl.join([
+    "import os, time",
+    "from pathlib import Path",
+    "Path(os.environ['BOUNDED_STDIN_PIDFILE']).write_text(str(os.getpid()))",
+    "time.sleep(30)",
+    "# " + token,
+])
+try:
+    mod.run_bounded(
+        "bounded_stdin",
+        [sys.executable, "-c", child],
+        cwd=cwd,
+        env=mod.clean_env({"BOUNDED_STDIN_PIDFILE": str(pidfile), "PYTHONUNBUFFERED": "1"}),
+        stdin=b"x",
+    )
+    print("unexpected success")
+    raise SystemExit(2)
+except mod.WorkflowError as error:
+    print("reason", error.reason)
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+
+pid = None
+deadline = time.monotonic() + 1.0
+while time.monotonic() < deadline:
+    if pidfile.exists():
+        raw = pidfile.read_text().strip()
+        if raw.isdigit():
+            pid = int(raw)
+            break
+    time.sleep(0.01)
+
+self_pid = os.getpid()
+leftover = []
+for entry in Path("/proc").iterdir():
+    if not entry.name.isdigit():
+        continue
+    pid_n = int(entry.name)
+    if pid_n == self_pid:
+        continue
+    try:
+        cmdline = (entry / "cmdline").read_bytes().replace(bytes([0]), b" ").decode("utf-8", "replace")
+    except OSError:
+        continue
+    if token in cmdline:
+        leftover.append(pid_n)
+
+if pid is not None and alive(pid):
+    print("still-live", pid)
+    raise SystemExit(3)
+print("leftover", leftover)
+if leftover:
+    raise SystemExit(4)
+print("reaped")
+""" % token
+        result = subprocess.run(
+            [sys.executable, "-c", FCNTL_BLOCKER + inner, str(WORKFLOW)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("reaped", result.stdout)
+
     def test_empty_stdin_does_not_require_fcntl(self) -> None:
         script = (
             FCNTL_BLOCKER

@@ -102,6 +102,16 @@ def terminate_tree(process: subprocess.Popen[bytes]) -> None:
         process.wait()
 
 
+def _close_bounded_pipes(process: subprocess.Popen[bytes]) -> None:
+    for stream in (process.stdin, process.stdout, process.stderr):
+        if stream is None:
+            continue
+        try:
+            stream.close()
+        except (BrokenPipeError, OSError):
+            pass
+
+
 def _set_nonblocking(phase: str, fd: int) -> None:
     try:
         import fcntl
@@ -143,96 +153,107 @@ def run_bounded(
     assert process.stderr is not None
 
     deadline = time.monotonic() + timeout
-    selector = selectors.DefaultSelector()
-    selector.register(process.stdout, selectors.EVENT_READ, "stdout")
-    selector.register(process.stderr, selectors.EVENT_READ, "stderr")
-    buffers = {"stdout": bytearray(), "stderr": bytearray()}
-    stdin_view = memoryview(stdin) if stdin else None
-    stdin_offset = 0
-    if stdin_view is None:
-        process.stdin.close()
-    else:
-        _set_nonblocking(phase, process.stdin.fileno())
-        selector.register(process.stdin, selectors.EVENT_WRITE, "stdin")
-
+    selector = None
     try:
-        while selector.get_map():
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                terminate_tree(process)
-                fail(
-                    phase,
-                    f"process tree exceeded {timeout:g}s deadline",
-                    "retry after checking the client/server command for a prompt, hang, or inherited pipe",
-                )
-            events = selector.select(min(remaining, 0.1))
-            for key, _ in events:
-                if key.data == "stdin":
-                    assert stdin_view is not None
-                    try:
-                        written = os.write(key.fd, stdin_view[stdin_offset:])
-                    except BlockingIOError:
-                        continue
-                    except BrokenPipeError:
-                        written = -1
-                    except OSError as exc:
-                        if exc.errno in (errno.EPIPE, errno.ECONNRESET):
-                            written = -1
-                        elif exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
-                            continue
-                        else:
-                            raise
-                    if written < 0 or stdin_offset + written >= len(stdin_view):
-                        selector.unregister(key.fileobj)
-                        try:
-                            process.stdin.close()
-                        except BrokenPipeError:
-                            pass
-                    if written > 0:
-                        stdin_offset += written
-                    continue
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+        selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+        buffers = {"stdout": bytearray(), "stderr": bytearray()}
+        stdin_view = memoryview(stdin) if stdin else None
+        stdin_offset = 0
+        if stdin_view is None:
+            process.stdin.close()
+        else:
+            _set_nonblocking(phase, process.stdin.fileno())
+            selector.register(process.stdin, selectors.EVENT_WRITE, "stdin")
 
-                chunk = os.read(key.fd, 65_536)
-                if not chunk:
-                    selector.unregister(key.fileobj)
-                    continue
-                target = buffers[key.data]
-                target.extend(chunk)
-                if len(target) > MAX_BYTES:
+        try:
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
                     terminate_tree(process)
                     fail(
                         phase,
-                        f"{key.data} exceeded {MAX_BYTES}-byte ceiling",
-                        "inspect the command directly; the bounded workflow will not retain unbounded diagnostics",
+                        f"process tree exceeded {timeout:g}s deadline",
+                        "retry after checking the client/server command for a prompt, hang, or inherited pipe",
                     )
+                events = selector.select(min(remaining, 0.1))
+                for key, _ in events:
+                    if key.data == "stdin":
+                        assert stdin_view is not None
+                        try:
+                            written = os.write(key.fd, stdin_view[stdin_offset:])
+                        except BlockingIOError:
+                            continue
+                        except BrokenPipeError:
+                            written = -1
+                        except OSError as exc:
+                            if exc.errno in (errno.EPIPE, errno.ECONNRESET):
+                                written = -1
+                            elif exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                                continue
+                            else:
+                                raise
+                        if written < 0 or stdin_offset + written >= len(stdin_view):
+                            selector.unregister(key.fileobj)
+                            try:
+                                process.stdin.close()
+                            except BrokenPipeError:
+                                pass
+                        if written > 0:
+                            stdin_offset += written
+                        continue
 
-            # Descendants can inherit a pipe after the direct child exits. The
-            # same absolute deadline continues to govern that drain.
+                    chunk = os.read(key.fd, 65_536)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    target = buffers[key.data]
+                    target.extend(chunk)
+                    if len(target) > MAX_BYTES:
+                        terminate_tree(process)
+                        fail(
+                            phase,
+                            f"{key.data} exceeded {MAX_BYTES}-byte ceiling",
+                            "inspect the command directly; the bounded workflow will not retain unbounded diagnostics",
+                        )
+
+                # Descendants can inherit a pipe after the direct child exits. The
+                # same absolute deadline continues to govern that drain.
+        finally:
+            selector.close()
+            selector = None
+
+        remaining = max(0.0, deadline - time.monotonic())
+        try:
+            returncode = process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            terminate_tree(process)
+            process.wait()
+            fail(
+                phase,
+                f"process tree did not reap within {timeout:g}s deadline",
+                "inspect descendant processes spawned by the client command",
+            )
+
+        result = CommandResult(returncode, bytes(buffers["stdout"]), bytes(buffers["stderr"]))
+        if returncode not in set(allowed_codes):
+            diagnostic = (result.stderr or result.stdout).decode("utf-8", "replace").strip()
+            diagnostic = diagnostic[-600:] if diagnostic else "no diagnostic output"
+            fail(
+                phase,
+                f"command exited {returncode}: {diagnostic}",
+                "run the named phase directly with the same fresh config and consumer directory",
+            )
+        return result
+    except BaseException:
+        if process.poll() is None:
+            terminate_tree(process)
+        raise
     finally:
-        selector.close()
-
-    remaining = max(0.0, deadline - time.monotonic())
-    try:
-        returncode = process.wait(timeout=remaining)
-    except subprocess.TimeoutExpired:
-        terminate_tree(process)
-        process.wait()
-        fail(
-            phase,
-            f"process tree did not reap within {timeout:g}s deadline",
-            "inspect descendant processes spawned by the client command",
-        )
-
-    result = CommandResult(returncode, bytes(buffers["stdout"]), bytes(buffers["stderr"]))
-    if returncode not in set(allowed_codes):
-        diagnostic = (result.stderr or result.stdout).decode("utf-8", "replace").strip()
-        diagnostic = diagnostic[-600:] if diagnostic else "no diagnostic output"
-        fail(
-            phase,
-            f"command exited {returncode}: {diagnostic}",
-            "run the named phase directly with the same fresh config and consumer directory",
-        )
-    return result
+        if selector is not None:
+            selector.close()
+        _close_bounded_pipes(process)
 
 
 def read_bounded(path: Path, phase: str) -> bytes:
