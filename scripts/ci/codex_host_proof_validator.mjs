@@ -349,12 +349,13 @@ function verifyObservedBinary(bin) {
   }
 }
 
-export function verifyLiveIdentity(
+function verifyLiveIdentityBound(
   identity,
   invocation,
   topology,
   proofRoot,
   journey = "tool",
+  allowMissingCommand = false,
 ) {
   if (!liveIdentityBound(identity)) {
     return false;
@@ -376,7 +377,7 @@ export function verifyLiveIdentity(
   if (!verifyObservedBinary(identity.codex) || !verifyObservedBinary(identity.assayMcp)) {
     return false;
   }
-  if (journey !== "discovery") {
+  if (journey !== "discovery" && !allowMissingCommand) {
     const command =
       topology?.primaryThread?.request?.params?.config?.mcp_servers?.assay?.command;
     if (command !== identity.assayMcp.path) {
@@ -384,6 +385,16 @@ export function verifyLiveIdentity(
     }
   }
   return liveInvocationBound(identity, invocation);
+}
+
+export function verifyLiveIdentity(
+  identity,
+  invocation,
+  topology,
+  proofRoot,
+  journey = "tool",
+) {
+  return verifyLiveIdentityBound(identity, invocation, topology, proofRoot, journey, false);
 }
 
 export function liveInvocationBound(identity, invocation) {
@@ -398,7 +409,13 @@ export function liveInvocationBound(identity, invocation) {
   );
 }
 
-export function observedIdentityBound(identity, invocation, topology, proofRoot, journey = "tool") {
+export function observedIdentityBound(
+  identity,
+  invocation,
+  topology,
+  proofRoot,
+  journey = "tool",
+) {
   return verifyLiveIdentity(identity, invocation, topology, proofRoot, journey);
 }
 
@@ -597,7 +614,49 @@ export const ALLOWED_SERVER_NOTIFICATIONS = Object.freeze([
 ]);
 export const ALLOWED_CLIENT_NOTIFICATIONS = Object.freeze(["initialized"]);
 export const ALLOWED_CLIENT_RESPONSES = Object.freeze(["mcpServer/elicitation/request"]);
-export const ALLOWED_DRIVER_METHODS = Object.freeze(["error"]);
+export const ALLOWED_DRIVER_METHODS = Object.freeze(["error", "pre-spawn-error"]);
+
+export function preSpawnFailureState(events, manifest) {
+  const rows = Array.isArray(events)
+    ? events.filter(
+        (event) =>
+          isPlainObject(event) &&
+          event.direction === "driver" &&
+          event.method === "pre-spawn-error",
+      )
+    : [];
+  if (rows.length === 0) {
+    return { present: false, valid: false, reason: null };
+  }
+  const expectedEvent = {
+    direction: "driver",
+    method: "pre-spawn-error",
+    params: { message: "retained driver error" },
+  };
+  if (rows.length !== 1 || events.length !== 1 || !sameJson(rows[0], expectedEvent)) {
+    return {
+      present: true,
+      valid: false,
+      reason: "pre-spawn failure must be the one closed retained event",
+    };
+  }
+  if (
+    manifest?.childExitCode !== 1 ||
+    !sameJson(manifest?.driverOutcome, { exitCode: 1, status: "unavailable" }) ||
+    manifest?.truncated !== false ||
+    manifest?.streamUnavailable !== true ||
+    manifest?.bounds?.stdoutBytes !== 0 ||
+    manifest?.bounds?.stderrBytes !== 0 ||
+    !sameJson(manifest?.initialize, emptyInitialize())
+  ) {
+    return {
+      present: true,
+      valid: false,
+      reason: "pre-spawn failure metadata is not the closed unavailable state",
+    };
+  }
+  return { present: true, valid: true, reason: null };
+}
 
 function hasOwn(value, key) {
   return value != null && Object.prototype.hasOwnProperty.call(value, key);
@@ -2365,6 +2424,10 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   if (shapeReason) {
     reasons.push(shapeReason);
   }
+  const preSpawn = preSpawnFailureState(events, manifest);
+  if (preSpawn.present && !preSpawn.valid) {
+    reasons.push(preSpawn.reason);
+  }
   if (manifest.schema !== SCHEMA) {
     reasons.push(`unexpected schema ${manifest.schema}`);
   }
@@ -2482,12 +2545,13 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
       topology = null;
     }
     if (
-      !verifyLiveIdentity(
+      !verifyLiveIdentityBound(
         manifest.hostIdentity,
         manifest.invocation,
         topology,
         proofRoot,
         manifest.journey,
+        preSpawn.valid,
       )
     ) {
       reasons.push("retained host subjects do not match their fixed paths, hashes, or commands");

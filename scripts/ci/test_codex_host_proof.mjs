@@ -29,6 +29,7 @@ import {
   driverOutcomeFrom,
   elicitationAcceptable,
   forbiddenProofRoot,
+  preSpawnFailureState,
   projectClientRequestParams,
   sha256File,
   sha256Utf8,
@@ -608,7 +609,7 @@ child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
   assert.deepEqual(fileEvents, [
     {
       direction: "driver",
-      method: "error",
+      method: "pre-spawn-error",
       params: { message: "retained driver error" },
     },
   ]);
@@ -623,31 +624,49 @@ child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
     "a non-directory CODEX_HOME must be rejected before app-server spawn",
   );
 
-  const hostProjectRoot = seedProject();
-  fs.writeFileSync(path.join(hostProjectRoot, ".codex-home"), "not a directory\n");
-  const hostProofRoot = portableLiveProofRoot();
-  try {
-    const hostCli = driveCli("valid", "discovery", {
-      captureMode: "host-observation",
-      projectRoot: hostProjectRoot,
-      proofRoot: hostProofRoot,
-      codexBin,
-    });
-    assert.notEqual(hostCli.status, 0);
-    assert.deepEqual(
-      proofFiles(hostCli.proofRoot),
-      retainedFilesWithIdentity,
-      `host-observation failure must retain its proof-owned subjects: ${hostCli.stderr || hostCli.stdout}`,
-    );
-    assert.equal(validateProofRoot(hostCli.proofRoot).ok, true);
-    assert.equal(
-      fs.existsSync(path.join(hostProjectRoot, ".codex-app-server-started")),
-      false,
-      "host-observation must reject unsafe CODEX_HOME before app-server spawn",
-    );
-  } finally {
-    fs.rmSync(hostProofRoot, { recursive: true, force: true });
+  const preSpawnResults = [];
+  for (const row of [
+    { journey: "discovery", allowLiveTurn: false },
+    { journey: "failures", allowLiveTurn: false },
+    { journey: "tool", allowLiveTurn: true },
+  ]) {
+    const hostProjectRoot = seedProject();
+    fs.writeFileSync(path.join(hostProjectRoot, ".codex-home"), "not a directory\n");
+    const hostProofRoot = portableLiveProofRoot();
+    try {
+      const hostCli = driveCli("valid", row.journey, {
+        allowLiveTurn: row.allowLiveTurn,
+        captureMode: "host-observation",
+        projectRoot: hostProjectRoot,
+        proofRoot: hostProofRoot,
+        codexBin,
+      });
+      assert.notEqual(hostCli.status, 0);
+      assert.deepEqual(
+        proofFiles(hostCli.proofRoot),
+        retainedFilesWithIdentity,
+        `host-observation ${row.journey} failure must retain its proof-owned subjects: ${hostCli.stderr || hostCli.stdout}`,
+      );
+      const checked = validateProofRoot(hostCli.proofRoot);
+      preSpawnResults.push({ journey: row.journey, ok: checked.ok, reasons: checked.reasons });
+      assert.equal(
+        fs.existsSync(path.join(hostProjectRoot, ".codex-app-server-started")),
+        false,
+        `host-observation ${row.journey} must reject unsafe CODEX_HOME before app-server spawn`,
+      );
+    } finally {
+      fs.rmSync(hostProofRoot, { recursive: true, force: true });
+    }
   }
+  assert.deepEqual(
+    preSpawnResults,
+    [
+      { journey: "discovery", ok: true, reasons: [] },
+      { journey: "failures", ok: true, reasons: [] },
+      { journey: "tool", ok: true, reasons: [] },
+    ],
+    JSON.stringify(preSpawnResults),
+  );
 
   if (process.platform !== "win32") {
     const publicProjectRoot = seedProject();
@@ -664,6 +683,61 @@ child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
       false,
       "a non-private CODEX_HOME must be rejected before app-server spawn",
     );
+  }
+});
+
+test("pre-spawn failure is one closed unavailable state, not a generic stream exception", () => {
+  const event = {
+    direction: "driver",
+    method: "pre-spawn-error",
+    params: { message: "retained driver error" },
+  };
+  const manifest = {
+    childExitCode: 1,
+    driverOutcome: { exitCode: 1, status: "unavailable" },
+    truncated: false,
+    streamUnavailable: true,
+    bounds: { stdoutBytes: 0, stderrBytes: 0 },
+    initialize: {
+      codexHome: null,
+      userAgent: null,
+      platformFamily: null,
+      platformOs: null,
+    },
+  };
+  assert.deepEqual(preSpawnFailureState([event], manifest), {
+    present: true,
+    valid: true,
+    reason: null,
+  });
+
+  const mutations = [
+    { events: [event, event], manifest },
+    { events: [event], manifest: { ...manifest, childExitCode: 2 } },
+    {
+      events: [event],
+      manifest: { ...manifest, driverOutcome: { exitCode: 1, status: "fail" } },
+    },
+    { events: [event], manifest: { ...manifest, truncated: true } },
+    { events: [event], manifest: { ...manifest, streamUnavailable: false } },
+    {
+      events: [event],
+      manifest: { ...manifest, bounds: { ...manifest.bounds, stdoutBytes: 1 } },
+    },
+    {
+      events: [event],
+      manifest: { ...manifest, bounds: { ...manifest.bounds, stderrBytes: 1 } },
+    },
+    {
+      events: [event],
+      manifest: { ...manifest, initialize: { ...manifest.initialize, userAgent: "spawned" } },
+    },
+  ];
+  for (const mutation of mutations) {
+    const state = preSpawnFailureState(mutation.events, mutation.manifest);
+    assert.equal(state.present, true);
+    assert.equal(state.valid, false);
+    assert.match(state.reason, /^pre-spawn failure /);
   }
 });
 
@@ -3477,6 +3551,20 @@ test("review closeout: host subjects are proof-owned and independently revalidat
       ),
       true,
       JSON.stringify({ hostIdentity: manifest.hostIdentity, invocation: manifest.invocation }),
+    );
+    const wrongCommand = structuredClone(topology);
+    wrongCommand.primaryThread.request.params.config.mcp_servers.assay.command =
+      "/wrong/canonical/assay-mcp-server";
+    assert.equal(
+      verifyLiveIdentity(
+        manifest.hostIdentity,
+        manifest.invocation,
+        wrongCommand,
+        proofRoot,
+        manifest.journey,
+      ),
+      false,
+      "a normal journey cannot bypass the canonical MCP command binding",
     );
     const checked = validateProofRoot(proofRoot);
     assert.equal(checked.ok, true, checked.reasons.join("; "));

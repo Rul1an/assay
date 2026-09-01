@@ -509,7 +509,7 @@ function writePreSpawnFailure(options, message) {
     events: [
       projectRetainedEvent({
         direction: "driver",
-        method: "error",
+        method: "pre-spawn-error",
         params: { message },
       }),
     ],
