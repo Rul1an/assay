@@ -547,6 +547,47 @@ test("malformed JSON line writes unavailable evidence; CLI proof root is not emp
   );
 });
 
+function preSpawnStateMutations(event, manifest) {
+  return [
+    { label: "extra event", events: [event, event], manifest },
+    {
+      label: "wrong child exit",
+      events: [event],
+      manifest: { ...manifest, childExitCode: 2 },
+    },
+    {
+      label: "wrong driver outcome",
+      events: [event],
+      manifest: { ...manifest, driverOutcome: { exitCode: 1, status: "fail" } },
+    },
+    {
+      label: "truncated stream",
+      events: [event],
+      manifest: { ...manifest, truncated: true },
+    },
+    {
+      label: "available stream",
+      events: [event],
+      manifest: { ...manifest, streamUnavailable: false },
+    },
+    {
+      label: "stdout bytes",
+      events: [event],
+      manifest: { ...manifest, bounds: { ...manifest.bounds, stdoutBytes: 1 } },
+    },
+    {
+      label: "stderr bytes",
+      events: [event],
+      manifest: { ...manifest, bounds: { ...manifest.bounds, stderrBytes: 1 } },
+    },
+    {
+      label: "initialize metadata",
+      events: [event],
+      manifest: { ...manifest, initialize: { ...manifest.initialize, userAgent: "spawned" } },
+    },
+  ];
+}
+
 test("production driver creates and verifies its disposable CODEX_HOME before spawn", () => {
   const projectRoot = seedProject();
   const codexHome = path.join(projectRoot, ".codex-home");
@@ -649,13 +690,36 @@ child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
       );
       const checked = validateProofRoot(hostCli.proofRoot);
       preSpawnResults.push({ journey: row.journey, ok: checked.ok, reasons: checked.reasons });
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(hostCli.proofRoot, "manifest.json"), "utf8"),
+      );
+      const events = JSON.parse(
+        fs.readFileSync(path.join(hostCli.proofRoot, "events.json"), "utf8"),
+      );
+      if (row.journey === "discovery") {
+        const originalClassified = classifyRecord({ ...manifest, events });
+        for (const mutation of preSpawnStateMutations(events[0], manifest)) {
+          const mutatedClassified = classifyRecord({
+            ...mutation.manifest,
+            events: mutation.events,
+          });
+          rewriteProof(
+            hostCli.proofRoot,
+            mutation.manifest,
+            mutation.events,
+            mutatedClassified,
+          );
+          const mutatedChecked = validateProofRoot(hostCli.proofRoot);
+          assert.equal(
+            mutatedChecked.ok,
+            false,
+            `${mutation.label} must fail at the retained-proof validator funnel`,
+          );
+          rewriteProof(hostCli.proofRoot, manifest, events, originalClassified);
+        }
+      }
       if (row.journey !== "discovery") {
-        const manifest = JSON.parse(
-          fs.readFileSync(path.join(hostCli.proofRoot, "manifest.json"), "utf8"),
-        );
-        const genericEvents = JSON.parse(
-          fs.readFileSync(path.join(hostCli.proofRoot, "events.json"), "utf8"),
-        );
+        const genericEvents = structuredClone(events);
         genericEvents[0].method = "error";
         const genericClassified = classifyRecord({ ...manifest, events: genericEvents });
         rewriteProof(hostCli.proofRoot, manifest, genericEvents, genericClassified);
@@ -729,29 +793,7 @@ test("pre-spawn failure is one closed unavailable state, not a generic stream ex
     reason: null,
   });
 
-  const mutations = [
-    { events: [event, event], manifest },
-    { events: [event], manifest: { ...manifest, childExitCode: 2 } },
-    {
-      events: [event],
-      manifest: { ...manifest, driverOutcome: { exitCode: 1, status: "fail" } },
-    },
-    { events: [event], manifest: { ...manifest, truncated: true } },
-    { events: [event], manifest: { ...manifest, streamUnavailable: false } },
-    {
-      events: [event],
-      manifest: { ...manifest, bounds: { ...manifest.bounds, stdoutBytes: 1 } },
-    },
-    {
-      events: [event],
-      manifest: { ...manifest, bounds: { ...manifest.bounds, stderrBytes: 1 } },
-    },
-    {
-      events: [event],
-      manifest: { ...manifest, initialize: { ...manifest.initialize, userAgent: "spawned" } },
-    },
-  ];
-  for (const mutation of mutations) {
+  for (const mutation of preSpawnStateMutations(event, manifest)) {
     const state = preSpawnFailureState(mutation.events, mutation.manifest);
     assert.equal(state.present, true);
     assert.equal(state.valid, false);
