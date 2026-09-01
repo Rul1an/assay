@@ -11,6 +11,8 @@ WORKFLOWS=(
 )
 OWNER_SHA="1e69f48acb82d1966a394da916b4c1698aa569d6"
 DRIFT_SHA="d1ba80a13dd99fba24a470575428917156a28b43"
+HOOK_ENTRY="bash scripts/ci/test-actions-attest-lockstep.sh"
+HOOK_FILES='^(\.github/workflows/.*\.ya?ml|scripts/ci/(assay_runner_delegated_proof_pack\.py|check-actions-attest-lockstep\.py|test-actions-attest-lockstep\.sh)|\.pre-commit-config\.yaml)$'
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
@@ -27,22 +29,37 @@ seed() {
 
 check_hook_scope() {
   local root="$1"
-  python3 - "$root/$PRECOMMIT" <<'PY'
+  python3 - "$root/$PRECOMMIT" "$HOOK_ENTRY" "$HOOK_FILES" <<'PY'
 import re
 import sys
 from pathlib import Path
 
 text = Path(sys.argv[1]).read_text(encoding="utf-8")
+expected_entry = sys.argv[2]
+expected_files = sys.argv[3]
 if "- id: actions-attest-lockstep" not in text:
     raise SystemExit("actions/attest lockstep hook is missing")
 block = text.split("- id: actions-attest-lockstep", 1)[1].split("\n      - id:", 1)[0]
+entry_match = re.search(r"^[ \t]*entry:[ \t]*(.+)$", block, re.MULTILINE)
+if entry_match is None:
+    raise SystemExit("actions/attest lockstep hook has no entry")
+entry = entry_match.group(1).strip()
+if entry != expected_entry:
+    raise SystemExit(
+        f"actions/attest lockstep hook entry {entry!r}, want {expected_entry!r}"
+    )
 match = re.search(r"^[ \t]*files:[ \t]*(.+)$", block, re.MULTILINE)
 if match is None:
     raise SystemExit("actions/attest lockstep hook has no files selector")
 pattern = match.group(1).strip()
+if pattern != expected_files:
+    raise SystemExit(
+        f"actions/attest lockstep hook files {pattern!r}, want {expected_files!r}"
+    )
 required = (
     ".github/workflows/third-attest.yml",
     ".github/workflows/third-attest.yaml",
+    "scripts/ci/assay_runner_delegated_proof_pack.py",
     "scripts/ci/check-actions-attest-lockstep.py",
     "scripts/ci/test-actions-attest-lockstep.sh",
     ".pre-commit-config.yaml",
@@ -95,12 +112,20 @@ seed "$case_root"
 run_case control-is-green "$case_root" 0
 run_hook_scope_case hook-scope-covers-all-workflows "$case_root" 0
 
+case_root="$scratch/hook-entry-true"
+seed "$case_root"
+mutate_once \
+  "$case_root/$PRECOMMIT" \
+  "        entry: ${HOOK_ENTRY}" \
+  "        entry: true"
+run_hook_scope_case hook-entry-true-is-refused "$case_root" 1
+
 case_root="$scratch/narrow-hook-scope"
 seed "$case_root"
 mutate_once \
   "$case_root/$PRECOMMIT" \
-  'files: ^(\.github/workflows/.*\.ya?ml|scripts/ci/(check-actions-attest-lockstep\.py|test-actions-attest-lockstep\.sh)|\.pre-commit-config\.yaml)$' \
-  'files: ^(\.github/workflows/(runner-spike-delegated|privileged-mcp-action-pack-release)\.yml|scripts/ci/(check-actions-attest-lockstep\.py|test-actions-attest-lockstep\.sh)|\.pre-commit-config\.yaml)$'
+  "files: ${HOOK_FILES}" \
+  'files: ^(\.github/workflows/(runner-spike-delegated|privileged-mcp-action-pack-release)\.yml|scripts/ci/(assay_runner_delegated_proof_pack\.py|check-actions-attest-lockstep\.py|test-actions-attest-lockstep\.sh)|\.pre-commit-config\.yaml)$'
 run_hook_scope_case narrow-hook-scope-is-refused "$case_root" 1
 
 case_root="$scratch/missing-hook"
@@ -378,5 +403,177 @@ Path(sys.argv[1]).write_text(
 )
 PY
 run_case escaped-line-break-action-is-refused "$case_root" 1
+
+case_root="$scratch/retarget-pack-sha256sum"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
+  "            sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS" \
+  "            sha256sum privileged-mcp-action-v0-clean-room.tar.gz > OTHERSUMS"
+run_case retarget-pack-sha256sum-is-refused "$case_root" 1
+
+case_root="$scratch/delete-pack-sha256sum"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
+  "            sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS
+" \
+  ""
+run_case delete-pack-sha256sum-is-refused "$case_root" 1
+
+case_root="$scratch/retarget-delegated-proof-pack"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/runner-spike-delegated.yml" \
+  "          python3 scripts/ci/assay_runner_delegated_proof_pack.py \\" \
+  "          python3 scripts/ci/other_delegated_proof_pack.py \\"
+run_case retarget-delegated-proof-pack-is-refused "$case_root" 1
+
+case_root="$scratch/delete-delegated-proof-pack"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/runner-spike-delegated.yml" \
+  "          python3 scripts/ci/assay_runner_delegated_proof_pack.py \\" \
+  "          true \\"
+run_case delete-delegated-proof-pack-is-refused "$case_root" 1
+
+case_root="$scratch/pack-consumer-comment"
+seed "$case_root"
+python3 - "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = """      - name: Retain attestation bundle
+        env:
+          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          test -n "$ATTESTATION_BUNDLE"
+          cp "$ATTESTATION_BUNDLE" release/attestation-bundle.json
+"""
+new = """      # Retain attestation bundle via steps.attest.outputs.bundle-path
+"""
+if text.count(old) != 1:
+    raise SystemExit("pack-consumer-comment subject missing")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+run_case pack-consumer-comment-is-refused "$case_root" 1
+
+case_root="$scratch/delegated-consumer-scalar"
+seed "$case_root"
+python3 - "$case_root/.github/workflows/runner-spike-delegated.yml" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = """      - name: Retain delegated proof attestation bundle
+        if: always() && steps.attest-proof-pack.outputs.bundle-path != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "${{ steps.attest-proof-pack.outputs.bundle-path }}" \\
+            "$ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD/attestation-bundle.json"
+          {
+            echo "- attestation-bundle: assay-runner-proof-upload/attestation-bundle.json"
+            echo "- attestation-url: ${{ steps.attest-proof-pack.outputs.attestation-url }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+"""
+new = """      - name: Retain delegated proof attestation bundle
+        NOTE: steps.attest-proof-pack.outputs.bundle-path
+"""
+if text.count(old) != 1:
+    raise SystemExit("delegated-consumer-scalar subject missing")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+run_case delegated-consumer-scalar-is-refused "$case_root" 1
+
+case_root="$scratch/pack-attest-if-false"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
+  "        id: attest
+        uses: actions/attest@${OWNER_SHA} # v4.2.2" \
+  "        id: attest
+        if: false
+        uses: actions/attest@${OWNER_SHA} # v4.2.2"
+run_case pack-attest-if-false-is-refused "$case_root" 1
+
+case_root="$scratch/delegated-consumer-if-false"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/runner-spike-delegated.yml" \
+  "        if: always() && steps.attest-proof-pack.outputs.bundle-path != ''" \
+  "        if: false"
+run_case delegated-consumer-if-false-is-refused "$case_root" 1
+
+case_root="$scratch/pack-consumer-other-job"
+seed "$case_root"
+python3 - "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+consumer = """      - name: Retain attestation bundle
+        env:
+          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          test -n "$ATTESTATION_BUNDLE"
+          cp "$ATTESTATION_BUNDLE" release/attestation-bundle.json
+
+"""
+if text.count(consumer) != 1:
+    raise SystemExit("pack-consumer-other-job subject missing")
+text = text.replace(consumer, "", 1)
+text += """
+  retain-elsewhere:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Retain attestation bundle
+        env:
+          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          test -n "$ATTESTATION_BUNDLE"
+          cp "$ATTESTATION_BUNDLE" release/attestation-bundle.json
+"""
+path.write_text(text, encoding="utf-8")
+PY
+run_case pack-consumer-other-job-is-refused "$case_root" 1
+
+case_root="$scratch/inert-note-census"
+seed "$case_root"
+cat >>"$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" <<YAML
+
+NOTE: "actions/attest@${OWNER_SHA}"
+YAML
+run_case inert-note-attest-is-not-a-callsite "$case_root" 0
+
+case_root="$scratch/missing-ruby"
+seed "$case_root"
+norb="$scratch/norb/bin"
+mkdir -p "$norb"
+ln -sfn "$(command -v python3)" "$norb/python3"
+if PATH="$norb" command -v ruby >/dev/null 2>&1; then
+  echo "FAIL: ruby-free PATH still locates ruby" >&2
+  exit 1
+fi
+status=0
+(cd "$case_root" && PATH="$norb" python3 "$CHECKER") >"$scratch/missing-ruby.log" 2>&1 || status=$?
+if [[ "$status" -ne 1 ]]; then
+  cat "$scratch/missing-ruby.log" >&2
+  echo "FAIL: missing-ruby exited $status, wanted 1" >&2
+  exit 1
+fi
+if ! grep -q "yaml parser unavailable" "$scratch/missing-ruby.log"; then
+  cat "$scratch/missing-ruby.log" >&2
+  echo "FAIL: missing-ruby did not fail-closed on parser unavailability" >&2
+  exit 1
+fi
+echo "ok    missing-ruby-is-refused (exit $status)"
 
 printf 'PASS: actions/attest lockstep battery\n'

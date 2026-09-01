@@ -427,7 +427,7 @@ repos:
         entry: bash scripts/ci/test-actions-attest-lockstep.sh
         language: system
         pass_filenames: false
-        files: ^(\.github/workflows/.*\.ya?ml|scripts/ci/(check-actions-attest-lockstep\.py|test-actions-attest-lockstep\.sh)|\.pre-commit-config\.yaml)$
+        files: ^(\.github/workflows/.*\.ya?ml|scripts/ci/(assay_runner_delegated_proof_pack\.py|check-actions-attest-lockstep\.py|test-actions-attest-lockstep\.sh)|\.pre-commit-config\.yaml)$
 
       - id: crosswalk-generator-contract
         name: Configuration crosswalk generator contract

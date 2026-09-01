@@ -13,24 +13,24 @@ from typing import NamedTuple
 EXPECTED_SHA = "1e69f48acb82d1966a394da916b4c1698aa569d6"
 EXPECTED_TAG = "v4.2.2"
 WORKFLOW_DIR = Path(".github/workflows")
-ATTEST_ACTION = "actions/attest@"
-YAML_HEX_ESCAPE_RE = re.compile(
-    r"\\(?:x([0-9a-fA-F]{2})|u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8}))"
-)
 USES_RE = re.compile(
     r"^[ \t]*(?:-[ \t]+)?uses:[ \t]+"
     r"(?P<quote>['\"]?)actions/attest@"
     r"(?P<sha>[0-9a-f]{40})(?P=quote)[ \t]+"
     r"#[ \t]+(?P<tag>v\d+\.\d+\.\d+)[ \t]*$"
 )
-DIRECT_USES_SHA_RE = re.compile(r"^actions/attest@([0-9a-f]{40})$")
+DIRECT_USES_SHA_RE = re.compile(r"^actions/attest@([0-9a-f]{40})$", re.IGNORECASE)
 
 
 class Producer(NamedTuple):
     path: Path
+    job_id: str
     step_id: str
     subject_checksums: str
+    subject_producer: str
     bundle_output: str
+    consumer_if: str | None
+    consumer_env: tuple[str, str] | None
 
 
 class WorkflowParseError(Exception):
@@ -40,25 +40,30 @@ class WorkflowParseError(Exception):
 PRODUCERS = (
     Producer(
         path=Path(".github/workflows/runner-spike-delegated.yml"),
+        job_id="phase1-delegated-gates",
         step_id="attest-proof-pack",
         subject_checksums="assay-runner-proof-upload/subject-checksums.txt",
+        subject_producer="python3 scripts/ci/assay_runner_delegated_proof_pack.py",
         bundle_output="steps.attest-proof-pack.outputs.bundle-path",
+        consumer_if="always() && steps.attest-proof-pack.outputs.bundle-path != ''",
+        consumer_env=None,
     ),
     Producer(
         path=Path(".github/workflows/privileged-mcp-action-pack-release.yml"),
+        job_id="release-pack",
         step_id="attest",
         subject_checksums="release/SHA256SUMS",
+        subject_producer=(
+            "sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS"
+        ),
         bundle_output="steps.attest.outputs.bundle-path",
+        consumer_if=None,
+        consumer_env=(
+            "ATTESTATION_BUNDLE",
+            "${{ steps.attest.outputs.bundle-path }}",
+        ),
     ),
 )
-
-
-def decode_hex_escape(match: re.Match[str]) -> str:
-    codepoint = next(group for group in match.groups() if group is not None)
-    try:
-        return chr(int(codepoint, 16))
-    except ValueError:
-        return "\N{REPLACEMENT CHARACTER}"
 
 
 def active_attest_pins(text: str) -> list[tuple[str, str]]:
@@ -71,23 +76,6 @@ def active_attest_pins(text: str) -> list[tuple[str, str]]:
         if match:
             pins.append((match.group("sha"), match.group("tag")))
     return pins
-
-
-def active_attest_references(text: str) -> int:
-    active_text = "\n".join(
-        line for line in text.splitlines() if not line.lstrip().startswith("#")
-    )
-    # GitHub resolves repository names case-insensitively, and YAML double-quoted
-    # scalars decode hexadecimal escapes and escaped line breaks before dispatch.
-    # Needle is actions/attest@, which does not match attest-build-provenance@.
-    normalized = re.sub(r"\\\r?\n[ \t]*", "", active_text)
-    normalized = YAML_HEX_ESCAPE_RE.sub(decode_hex_escape, normalized)
-    normalized = normalized.casefold()
-    return normalized.count(ATTEST_ACTION)
-
-
-def has_active_attest_callsite(text: str) -> bool:
-    return active_attest_references(text) > 0
 
 
 def load_workflow_mapping(path: Path) -> object:
@@ -120,44 +108,92 @@ def load_workflow_mapping(path: Path) -> object:
         ) from error
 
 
-def iter_steps(document: object) -> list[dict[str, object]]:
-    if not isinstance(document, dict):
-        raise WorkflowParseError("workflow root is not a mapping")
-    jobs = document.get("jobs")
-    if not isinstance(jobs, dict):
-        raise WorkflowParseError("workflow jobs is not a mapping")
-    steps: list[dict[str, object]] = []
-    for job in jobs.values():
-        if not isinstance(job, dict):
-            continue
-        raw_steps = job.get("steps") or []
-        if not isinstance(raw_steps, list):
-            continue
-        for step in raw_steps:
-            if isinstance(step, dict):
-                steps.append(step)
-    return steps
+def mapping(value: object, label: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise WorkflowParseError(f"{label} is not a mapping")
+    return value
 
 
-def direct_attest_steps(document: object) -> list[dict[str, object]]:
-    found: list[dict[str, object]] = []
-    for step in iter_steps(document):
-        uses = step.get("uses")
-        if isinstance(uses, str) and DIRECT_USES_SHA_RE.fullmatch(uses.strip()):
-            found.append(step)
+def job_steps(job: dict[str, object]) -> list[dict[str, object]]:
+    raw_steps = job.get("steps") or []
+    if not isinstance(raw_steps, list):
+        return []
+    return [step for step in raw_steps if isinstance(step, dict)]
+
+
+def iter_jobs(document: object) -> list[tuple[str, dict[str, object]]]:
+    root = mapping(document, "workflow root")
+    jobs = mapping(root.get("jobs"), "workflow jobs")
+    named: list[tuple[str, dict[str, object]]] = []
+    for name, job in jobs.items():
+        if isinstance(name, str) and isinstance(job, dict):
+            named.append((name, job))
+    return named
+
+
+def is_direct_attest_uses(uses: object) -> bool:
+    return isinstance(uses, str) and DIRECT_USES_SHA_RE.fullmatch(uses.strip()) is not None
+
+
+def structural_attest_steps(
+    document: object,
+) -> list[tuple[str, int, dict[str, object]]]:
+    found: list[tuple[str, int, dict[str, object]]] = []
+    for job_id, job in iter_jobs(document):
+        for index, step in enumerate(job_steps(job)):
+            if is_direct_attest_uses(step.get("uses")):
+                found.append((job_id, index, step))
     return found
 
 
-def producer_contract_errors(producer: Producer, text: str, document: object) -> list[str]:
+def condition_is_false(value: object) -> bool:
+    return value is False or (
+        isinstance(value, str) and value.strip().casefold() in {"false", "${{ false }}"}
+    )
+
+
+def is_reachable(node: dict[str, object]) -> bool:
+    return not condition_is_false(node.get("if"))
+
+
+def step_run_text(step: dict[str, object]) -> str:
+    run = step.get("run")
+    return run if isinstance(run, str) else ""
+
+
+def step_has_bundle_expression(step: dict[str, object], expression: str) -> bool:
+    if expression in step_run_text(step):
+        return True
+    env = step.get("env")
+    if not isinstance(env, dict):
+        return False
+    return any(isinstance(value, str) and expression in value for value in env.values())
+
+
+def producer_contract_errors(producer: Producer, document: object) -> list[str]:
     errors: list[str] = []
-    steps = direct_attest_steps(document)
-    if len(steps) != 1:
+    attest_steps = structural_attest_steps(document)
+    if len(attest_steps) != 1:
         errors.append(
             f"{producer.path}: want exactly one direct actions/attest step, "
-            f"found {len(steps)}"
+            f"found {len(attest_steps)}"
         )
         return errors
-    step = steps[0]
+    job_id, attest_index, step = attest_steps[0]
+    jobs = dict(iter_jobs(document))
+    job = jobs.get(producer.job_id)
+    if job_id != producer.job_id or job is None:
+        errors.append(
+            f"{producer.path}: attest step is in job {job_id!r}, "
+            f"want {producer.job_id!r}"
+        )
+        return errors
+    if not is_reachable(job):
+        errors.append(f"{producer.path}: job {producer.job_id!r} is not reachable")
+    if not is_reachable(step):
+        errors.append(
+            f"{producer.path}: attest step {producer.step_id!r} is not reachable"
+        )
     if step.get("id") != producer.step_id:
         errors.append(
             f"{producer.path}: attest step id {step.get('id')!r}, "
@@ -174,9 +210,36 @@ def producer_contract_errors(producer: Producer, text: str, document: object) ->
             f"{producer.path}: subject-checksums {with_block.get('subject-checksums')!r}, "
             f"want {producer.subject_checksums!r}"
         )
-    if producer.bundle_output not in text:
+    same_job_steps = job_steps(job)
+    earlier = same_job_steps[:attest_index]
+    if not any(producer.subject_producer in step_run_text(item) for item in earlier):
         errors.append(
-            f"{producer.path}: missing bundle consumer {producer.bundle_output}"
+            f"{producer.path}: subject {producer.subject_checksums} is not produced "
+            f"earlier in job {producer.job_id!r} by {producer.subject_producer!r}"
+        )
+    later = same_job_steps[attest_index + 1 :]
+    expression = "${{ " + producer.bundle_output + " }}"
+    found_consumer = False
+    for consumer in later:
+        if not is_reachable(consumer):
+            continue
+        if producer.consumer_if is not None and consumer.get("if") != producer.consumer_if:
+            continue
+        if producer.consumer_env is not None:
+            env = consumer.get("env")
+            key, value = producer.consumer_env
+            if not isinstance(env, dict) or env.get(key) != value:
+                continue
+        if not step_has_bundle_expression(consumer, expression):
+            continue
+        if not step_run_text(consumer):
+            continue
+        found_consumer = True
+        break
+    if not found_consumer:
+        errors.append(
+            f"{producer.path}: missing reachable same-job consumer "
+            f"{producer.bundle_output}"
         )
     return errors
 
@@ -186,13 +249,16 @@ def check() -> list[str]:
     expected = (EXPECTED_SHA, EXPECTED_TAG)
     expected_paths = {producer.path for producer in PRODUCERS}
 
-    discovered: set[Path] = set()
     for pattern in ("*.yml", "*.yaml"):
-        for workflow in WORKFLOW_DIR.glob(pattern):
-            if has_active_attest_callsite(workflow.read_text(encoding="utf-8")):
-                discovered.add(workflow)
-    for workflow in sorted(discovered - expected_paths):
-        errors.append(f"unexpected actions/attest workflow callsite: {workflow}")
+        for workflow in sorted(WORKFLOW_DIR.glob(pattern)):
+            if workflow in expected_paths:
+                continue
+            try:
+                document = load_workflow_mapping(workflow)
+            except WorkflowParseError:
+                continue
+            if structural_attest_steps(document):
+                errors.append(f"unexpected actions/attest workflow callsite: {workflow}")
 
     for producer in PRODUCERS:
         workflow = producer.path
@@ -201,12 +267,6 @@ def check() -> list[str]:
             continue
         text = workflow.read_text(encoding="utf-8")
         pins = active_attest_pins(text)
-        references = active_attest_references(text)
-        if references != len(pins):
-            errors.append(
-                f"{workflow}: found {references} actions/attest reference(s), "
-                f"but only {len(pins)} canonical pin(s)"
-            )
         if len(pins) != 1:
             errors.append(
                 f"{workflow}: want exactly one active actions/attest SHA pin, "
@@ -222,7 +282,7 @@ def check() -> list[str]:
         except WorkflowParseError as error:
             errors.append(str(error))
             continue
-        errors.extend(producer_contract_errors(producer, text, document))
+        errors.extend(producer_contract_errors(producer, document))
     return errors
 
 
