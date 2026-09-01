@@ -1647,3 +1647,245 @@ test("matching terminal turn must be completed; interrupted forces nonzero", asy
   assert.equal(control.classified.cells.oneToolInvoked.status, "pass");
   assert.equal(control.driverOutcome.exitCode, 0);
 });
+
+function classifyMutated(manifest, events, mutateEvents) {
+  const copy = structuredClone({ ...manifest, events });
+  mutateEvents(copy.events);
+  return classifyRecord(copy);
+}
+
+function elicitationRows(events, direction) {
+  return events.filter(
+    (event) =>
+      event.method === "mcpServer/elicitation/request" && event.direction === direction,
+  );
+}
+
+function serverMcpStatusRows(events) {
+  return events.filter(
+    (event) =>
+      event.method === "mcpServerStatus/list" && event.direction === "server",
+  );
+}
+
+function matchingTerminals(events, threadId, turnId) {
+  return events.filter(
+    (event) =>
+      event.method === "turn/completed" &&
+      event.direction === "server" &&
+      event.params?.threadId === threadId &&
+      event.params?.turn?.id === turnId,
+  );
+}
+
+test("oneToolInvoked requires exactly one expected elicitation accept; zero/export/duplicate/declined fail closed", async () => {
+  const { events, manifest, classified } = await drive("valid");
+  assert.equal(classified.cells.oneToolInvoked.status, "pass");
+  for (const name of CELLS) {
+    assert.equal(classified.cells[name].status, "pass", `${name} is the no-op control`);
+  }
+  const serverElicit = elicitationRows(events, "server");
+  const clientElicit = elicitationRows(events, "client");
+  assert.equal(serverElicit.length, 1);
+  assert.equal(clientElicit.length, 1);
+  assert.equal(clientElicit[0].result.action, "accept");
+  assert.equal(
+    elicitationAcceptable(
+      serverElicit[0].params,
+      serverElicit[0].params.threadId,
+      serverElicit[0].params.turnId,
+    ),
+    true,
+  );
+
+  const zero = classifyMutated(manifest, events, (rows) => {
+    for (let i = rows.length - 1; i >= 0; i -= 1) {
+      if (rows[i].method === "mcpServer/elicitation/request") {
+        rows.splice(i, 1);
+      }
+    }
+  });
+  assert.notEqual(
+    zero.cells.oneToolInvoked.status,
+    "pass",
+    "zero elicitations must not pass oneToolInvoked",
+  );
+
+  const exportParams = {
+    serverName: "assay",
+    threadId: serverElicit[0].params.threadId,
+    turnId: serverElicit[0].params.turnId,
+    message: "Export profile data",
+    mode: "form",
+    requestedSchema: { type: "object", properties: { confirm: { type: "boolean" } } },
+  };
+  const exportProfile = classifyMutated(manifest, events, (rows) => {
+    elicitationRows(rows, "server")[0].params = structuredClone(exportParams);
+  });
+  assert.notEqual(
+    exportProfile.cells.oneToolInvoked.status,
+    "pass",
+    "unrelated accepted Export profile data must not pass oneToolInvoked",
+  );
+  assert.equal(
+    elicitationAcceptable(
+      exportParams,
+      exportParams.threadId,
+      exportParams.turnId,
+    ),
+    false,
+    "Export profile data must stay declined by elicitationAcceptable",
+  );
+
+  const duplicates = classifyMutated(manifest, events, (rows) => {
+    const request = structuredClone(elicitationRows(rows, "server")[0]);
+    const accept = structuredClone(elicitationRows(rows, "client")[0]);
+    request.id = "elicit-duplicate";
+    accept.id = "elicit-duplicate";
+    rows.push(request, accept);
+  });
+  assert.notEqual(
+    duplicates.cells.oneToolInvoked.status,
+    "pass",
+    "duplicate accepted elicitations must not pass oneToolInvoked",
+  );
+
+  const declined = classifyMutated(manifest, events, (rows) => {
+    elicitationRows(rows, "client")[0].result.action = "decline";
+  });
+  assert.notEqual(
+    declined.cells.oneToolInvoked.status,
+    "pass",
+    "declined expected elicitation must not pass oneToolInvoked",
+  );
+
+  const control = await drive("valid");
+  assert.equal(control.classified.cells.oneToolInvoked.status, "pass");
+  for (const name of CELLS) {
+    assert.equal(control.classified.cells[name].status, "pass");
+  }
+});
+
+test("matching turn terminals require exactly one completed status; both orderings fail closed", async () => {
+  const { events, manifest, classified } = await drive("valid");
+  assert.equal(classified.cells.oneToolInvoked.status, "pass");
+  const completed = events.find(
+    (event) =>
+      event.method === "turn/completed" &&
+      event.direction === "server" &&
+      event.params?.turn?.status === "completed",
+  );
+  assert.ok(completed, "valid pack must have a completed turn/completed");
+  const threadId = completed.params.threadId;
+  const turnId = completed.params.turn.id;
+  const failedTwin = structuredClone(completed);
+  failedTwin.params.turn.status = "failed";
+
+  const completedThenFailedEvents = structuredClone(events);
+  completedThenFailedEvents.push(structuredClone(failedTwin));
+  assert.deepEqual(
+    matchingTerminals(completedThenFailedEvents, threadId, turnId).map(
+      (event) => event.params.turn.status,
+    ),
+    ["completed", "failed"],
+  );
+  const completedThenFailed = classifyRecord({
+    ...manifest,
+    events: completedThenFailedEvents,
+  });
+  assert.notEqual(
+    completedThenFailed.cells.oneToolInvoked.status,
+    "pass",
+    "completed→failed matching terminals must not pass oneToolInvoked",
+  );
+
+  const failedThenCompletedEvents = structuredClone(events);
+  const insertAt = failedThenCompletedEvents.findIndex(
+    (event) =>
+      event.method === "turn/completed" &&
+      event.direction === "server" &&
+      event.params?.threadId === threadId &&
+      event.params?.turn?.id === turnId,
+  );
+  failedThenCompletedEvents.splice(insertAt, 0, structuredClone(failedTwin));
+  assert.deepEqual(
+    matchingTerminals(failedThenCompletedEvents, threadId, turnId).map(
+      (event) => event.params.turn.status,
+    ),
+    ["failed", "completed"],
+  );
+  const failedThenCompleted = classifyRecord({
+    ...manifest,
+    events: failedThenCompletedEvents,
+  });
+  assert.notEqual(
+    failedThenCompleted.cells.oneToolInvoked.status,
+    "pass",
+    "failed→completed matching terminals must not pass oneToolInvoked",
+  );
+
+  const control = await drive("valid");
+  assert.equal(control.classified.cells.oneToolInvoked.status, "pass");
+  assert.equal(control.driverOutcome.exitCode, 0);
+});
+
+test("duplicate Assay MCP-status rows fail closed in every consumer; no-op control stays green", async () => {
+  const { events, manifest, classified } = await drive("valid");
+  assert.equal(classified.cells.mcpStarted.status, "pass");
+  assert.equal(classified.cells.exactToolsListed.status, "pass");
+  assert.equal(classified.cells.missingBinaryNotClean.status, "pass");
+  assert.equal(classified.cells.invalidPolicyRootNotClean.status, "pass");
+  const statuses = serverMcpStatusRows(events);
+  assert.ok(statuses.length >= 3, "valid pack must have primary plus two negative status lists");
+  const connected = structuredClone(statuses[0].result.data[0]);
+  const failed = structuredClone(statuses[1].result.data[0]);
+  assert.equal(connected.name, "assay");
+  assert.equal(connected.runtimeStatus, "connected");
+  assert.equal(failed.name, "assay");
+  assert.equal(failed.runtimeStatus, "failed");
+
+  const failedThenConnected = classifyMutated(manifest, events, (rows) => {
+    serverMcpStatusRows(rows)[1].result.data = [
+      structuredClone(failed),
+      structuredClone(connected),
+    ];
+  });
+  assert.notEqual(
+    failedThenConnected.cells.missingBinaryNotClean.status,
+    "pass",
+    "failed/0-tools plus connected/5-tools must not pass the negative cell",
+  );
+
+  const connectedThenFailed = classifyMutated(manifest, events, (rows) => {
+    serverMcpStatusRows(rows)[1].result.data = [
+      structuredClone(connected),
+      structuredClone(failed),
+    ];
+  });
+  assert.notEqual(
+    connectedThenFailed.cells.missingBinaryNotClean.status,
+    "pass",
+    "connected/5-tools plus failed/0-tools must not pass the negative cell",
+  );
+
+  const duplicatePrimary = classifyMutated(manifest, events, (rows) => {
+    const primary = serverMcpStatusRows(rows)[0];
+    primary.result.data = [structuredClone(connected), structuredClone(failed)];
+  });
+  assert.notEqual(
+    duplicatePrimary.cells.mcpStarted.status,
+    "pass",
+    "duplicate Assay rows must fail closed in classifyMcp",
+  );
+  assert.notEqual(
+    duplicatePrimary.cells.exactToolsListed.status,
+    "pass",
+    "duplicate Assay rows must fail closed in classifyTools",
+  );
+
+  const control = await drive("valid");
+  assert.equal(control.classified.cells.mcpStarted.status, "pass");
+  assert.equal(control.classified.cells.exactToolsListed.status, "pass");
+  assert.equal(control.classified.cells.missingBinaryNotClean.status, "pass");
+  assert.equal(control.classified.cells.invalidPolicyRootNotClean.status, "pass");
+});

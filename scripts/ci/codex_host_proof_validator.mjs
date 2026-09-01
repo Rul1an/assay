@@ -501,11 +501,16 @@ function classifyCwd(starts, expected) {
   return cell("pass", "thread cwd is project root");
 }
 
+function uniqueAssayRow(data) {
+  if (!Array.isArray(data)) {
+    return null;
+  }
+  const rows = data.filter((row) => row?.name === "assay");
+  return rows.length === 1 ? rows[0] : null;
+}
+
 function classifyMcp(statuses) {
-  const primary = statuses[0]?.result?.data;
-  const assay = Array.isArray(primary)
-    ? primary.find((row) => row?.name === "assay")
-    : null;
+  const assay = uniqueAssayRow(statuses[0]?.result?.data);
   if (!assay) {
     return cell("unavailable", "no assay mcpServerStatus row");
   }
@@ -516,10 +521,7 @@ function classifyMcp(statuses) {
 }
 
 function classifyTools(statuses) {
-  const primary = statuses[0]?.result?.data;
-  const assay = Array.isArray(primary)
-    ? primary.find((row) => row?.name === "assay")
-    : null;
+  const assay = uniqueAssayRow(statuses[0]?.result?.data);
   if (!assay) {
     return cell("unavailable", "no assay tools row");
   }
@@ -532,18 +534,55 @@ function classifyTools(statuses) {
 }
 
 function matchingTurnStatus(events, threadId, turnId) {
-  const event = events.find(
+  const matches = events.filter(
     (row) =>
       row.method === "turn/completed" &&
       row.direction === "server" &&
       row.params?.threadId === threadId &&
       row.params?.turn?.id === turnId,
   );
-  if (!event) {
+  if (matches.length === 0) {
     return null;
   }
-  const status = event.params?.turn?.status;
+  if (matches.length !== 1) {
+    return "non-unique";
+  }
+  const status = matches[0].params?.turn?.status;
   return typeof status === "string" ? status : "";
+}
+
+function uniqueExpectedElicitationAccepted(events, threadId, turnId) {
+  if (!Array.isArray(events)) {
+    return false;
+  }
+  const requests = events.filter(
+    (event) =>
+      event.method === "mcpServer/elicitation/request" && event.direction === "server",
+  );
+  const acceptable = requests.filter((event) =>
+    elicitationAcceptable(event.params, threadId, turnId),
+  );
+  if (acceptable.length !== 1 || acceptable[0].id == null) {
+    return false;
+  }
+  const requestId = acceptable[0].id;
+  const matchingAccepts = events.filter(
+    (event) =>
+      event.method === "mcpServer/elicitation/request" &&
+      event.direction === "client" &&
+      event.id === requestId &&
+      event.result?.action === "accept",
+  );
+  if (matchingAccepts.length !== 1) {
+    return false;
+  }
+  const allAccepts = events.filter(
+    (event) =>
+      event.method === "mcpServer/elicitation/request" &&
+      event.direction === "client" &&
+      event.result?.action === "accept",
+  );
+  return allAccepts.length === 1;
 }
 
 function classifyInvocation(calls, expected, threadId, turnId, events) {
@@ -586,6 +625,12 @@ function classifyInvocation(calls, expected, threadId, turnId, events) {
   if (!sameJson(item.arguments, expected.toolArguments)) {
     return cell("fail", "tool arguments are not the pinned probe");
   }
+  if (!uniqueExpectedElicitationAccepted(events, threadId, turnId)) {
+    return cell(
+      "fail",
+      "oneToolInvoked requires exactly one expected elicitation request and one matching accept",
+    );
+  }
   return cell("pass", `invoked ${expected.toolName}`);
 }
 
@@ -604,10 +649,7 @@ function classifyPayload(calls, invocationCell) {
 }
 
 function classifyNegative(statuses, index, label) {
-  const row = statuses[index]?.result?.data;
-  const assay = Array.isArray(row)
-    ? row.find((entry) => entry?.name === "assay")
-    : null;
+  const assay = uniqueAssayRow(statuses[index]?.result?.data);
   if (!assay) {
     return cell("unavailable", `${label}: no assay status`);
   }
