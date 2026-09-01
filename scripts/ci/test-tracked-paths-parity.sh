@@ -13,14 +13,12 @@
 # every one.
 set -euo pipefail
 
-ROOT="$(git rev-parse --show-toplevel)"
+# shellcheck source=scripts/ci/lib/git-env.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/git-env.sh"
+
+ROOT="$(sgit rev-parse --show-toplevel)"
 CHECKER="${ROOT}/scripts/ci/check-assay-action-pin.sh"
 GENERATOR="${ROOT}/scripts/docs/generate-configuration-vocabulary-crosswalk.py"
-sgit() {
-  env -u GIT_INDEX_FILE -u GIT_DIR -u GIT_WORK_TREE -u GIT_OBJECT_DIRECTORY -u GIT_COMMON_DIR \
-      -u GIT_CONFIG_PARAMETERS -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_CONFIG_COUNT git "$@"
-}
-
 scratch="$(mktemp -d)"
 trap 'rm -rf "${scratch}"' EXIT
 
@@ -111,5 +109,35 @@ expect_parity "subtree-of-a-repository" "${scratch}/outer/subtree" yes
 # 4. No repository at all -- what the drift gate's scratch copy looks like.
 build_tree "${scratch}/bare"
 expect_parity "not-a-repository" "${scratch}/bare" yes
+
+# The scrubbed-variable list exists three times: once in shell (lib/git-env.sh) and once in each of
+# the two Python guards. They cannot share a definition across the language boundary, so they are
+# pinned against each other here. This is not hypothetical drift: before the shell copies were
+# merged into one, each was missing a different subset of what Python removed.
+echo "== the git-environment lists agree across all three copies =="
+GIT_ENV_VARS="${GIT_ENV_VARS}" python3 - "${ROOT}" <<'PY'
+import os, re, sys, pathlib
+
+shell = sorted(os.environ["GIT_ENV_VARS"].split())
+root = pathlib.Path(sys.argv[1])
+sources = {
+    "generator": root / "scripts/docs/generate-configuration-vocabulary-crosswalk.py",
+    "checker": root / "scripts/ci/check-assay-action-pin.sh",
+}
+failed = False
+for name, path in sources.items():
+    text = path.read_text(encoding="utf-8")
+    block = re.search(r"GIT_ENV = \((.*?)\)", text, re.S)
+    if not block:
+        print(f"FAIL: no GIT_ENV tuple found in {name}", file=sys.stderr)
+        failed = True
+        continue
+    got = sorted(re.findall(r'"(GIT_[A-Z_]+)"', block.group(1)))
+    if got != shell:
+        print(f"FAIL: {name} scrubs {got}, shell scrubs {shell}", file=sys.stderr)
+        failed = True
+sys.exit(1 if failed else 0)
+PY
+echo "ok    git-environment-lists-agree"
 
 echo "tracked-paths parity: PASS"

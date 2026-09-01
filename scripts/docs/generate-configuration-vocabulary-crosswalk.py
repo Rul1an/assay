@@ -611,7 +611,7 @@ def curated_text() -> str:
     return "\n".join(parts)
 
 
-def verify_symbols(text: str, root: Path, out: Path) -> list:
+def verify_symbols(text: str, root: Path, out: Path, tracked: "set[str] | None") -> list:
     """Symbols the page names in backticks must appear somewhere in the tree's own code.
 
     Paths were already checked; symbols were not, and the load-bearing claim on this page now hangs
@@ -649,7 +649,14 @@ def verify_symbols(text: str, root: Path, out: Path) -> list:
                 continue
             if path.resolve() in excluded:
                 continue
+            # Same tracked-set rule the corpus walk uses. An untracked file carrying a symbol that
+            # had been removed from its real declaration would satisfy the check locally and fail
+            # in a clean checkout -- a green that does not survive being cloned.
+            if tracked is not None and path.relative_to(root).as_posix() not in tracked:
+                continue
             try:
+                if path.stat().st_size > MAX_RECORD_BYTES:
+                    continue  # (3) bounded before materialisation; too large to be a declaration
                 blob = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
@@ -661,7 +668,12 @@ def verify_symbols(text: str, root: Path, out: Path) -> list:
 
 
 def verify_citations(text: str, root: Path) -> list:
-    """Every repo path this page cites must exist. Returns the ones that do not.
+    """Every repo path the CURATED prose cites must exist. Returns the ones that do not.
+
+    Curated prose only, for the same reason the symbol check is: the rendered page also carries
+    keys discovered from the corpus, and a record whose key happens to read like a path -- a JSON
+    key containing slashes -- would be validated as a citation and fail generation for a path no
+    sentence ever claimed. Reproduced before this was narrowed.
 
     Three review rounds found this page asserting things about code that the code does not say:
     an enumeration copied from a doc comment instead of the projection, a relation inverted from a
@@ -684,12 +696,12 @@ def main() -> int:
     root = args.repo_root.resolve()
     out = root / args.out
     text = render(*discover(root))
-    missing = verify_citations(text, root)
+    missing = verify_citations(curated_text(), root)
     if missing:
         for path in missing:
             print(f"error: cited path does not exist: {path}", file=sys.stderr)
         return 1
-    unknown = verify_symbols(curated_text(), root, out)
+    unknown = verify_symbols(curated_text(), root, out, tracked_paths(root))
     if unknown:
         for name in unknown:
             print(f"error: cited symbol appears nowhere in the tree: {name}", file=sys.stderr)

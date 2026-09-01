@@ -177,4 +177,22 @@ if grep -q 'zz.nested.decision.v0' "${scratch}/nested.md"; then
 fi
 echo "ok    nested-checkout-pruned-on-the-fallback-path"
 
+# 9. A corpus value is not a citation. The page renders discovered key paths in backticks, so a
+#    record whose JSON key happens to contain slashes reads like a repository path -- and the
+#    citation check would fail generation for a path no sentence ever claimed. Both checks now run
+#    over curated prose only; this pins that the corpus half cannot trigger them.
+cit_root="${scratch}/corpus-citation"
+mkdir -p "${cit_root}/crates" "${cit_root}/scripts/docs"
+seed_citations "${cit_root}"
+cp "${GEN}" "${cit_root}/scripts/docs/symbol-source.py"
+printf '%s\n' \
+  '{"schema":"zz.citation.v0","decision":"allow","docs/nowhere/policy_digest":"sha256:c"}' \
+  >"${cit_root}/crates/record.json"
+python3 "${GEN}" --repo-root "${cit_root}" --out "${scratch}/cit.md" >/dev/null 2>"${scratch}/err" ||
+  { echo "FAIL: a corpus key was validated as a citation:" >&2; cat "${scratch}/err" >&2; exit 1; }
+grep -q 'docs/nowhere/policy_digest' "${scratch}/cit.md" ||
+  { echo "FAIL: the corpus key vanished from the page instead of merely not being validated" >&2
+    exit 1; }
+echo "ok    corpus-values-are-not-validated-as-citations"
+
 echo "crosswalk generator contract: PASS"

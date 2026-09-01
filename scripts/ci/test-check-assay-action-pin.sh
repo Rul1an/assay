@@ -75,11 +75,10 @@ run_checker_at() {
 # Scratch repositories must not inherit this process's git environment. Under pre-commit,
 # GIT_INDEX_FILE (and friends) point at the outer repository's temporary index, so a plain
 # `git -C <scratch>` writes there instead, and `git worktree add` then fails with
-# ".git/index: index file open failed: Not a directory".
-sgit() {
-  env -u GIT_INDEX_FILE -u GIT_DIR -u GIT_WORK_TREE -u GIT_OBJECT_DIRECTORY \
-      -u GIT_COMMON_DIR -u GIT_CONFIG_PARAMETERS -u GIT_ALTERNATE_OBJECT_DIRECTORIES git "$@"
-}
+# ".git/index: index file open failed: Not a directory". The variable list is shared rather
+# than repeated, because the two hand-written copies had already drifted apart.
+# shellcheck source=scripts/ci/lib/git-env.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/git-env.sh"
 
 expect_fail() {
   local name="$1"
