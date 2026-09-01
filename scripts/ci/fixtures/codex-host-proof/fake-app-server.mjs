@@ -216,16 +216,43 @@ function handle(message) {
       });
       return;
     }
-    write({
-      id: "elicit-1",
-      method: "mcpServer/elicitation/request",
-      params: {
-        serverName: scenario === "foreign-elicit" ? "not-assay" : "assay",
+    const elicitParams = () => {
+      if (scenario === "foreign-elicit") {
+        return {
+          serverName: "not-assay",
+          threadId,
+          turnId: "turn-1",
+          message: `approve ${DECIDE_TOOL}`,
+          mode: "form",
+          requestedSchema: { type: "object", properties: {} },
+        };
+      }
+      if (scenario === "elicit-wrong-thread") {
+        return {
+          serverName: "assay",
+          threadId: "unrelated-thread",
+          turnId: "turn-1",
+          message: `approve ${DECIDE_TOOL}`,
+          mode: "form",
+          requestedSchema: { type: "object", properties: {} },
+        };
+      }
+      if (scenario === "elicit-assay-name-only") {
+        return { serverName: "assay" };
+      }
+      return {
+        serverName: "assay",
         threadId,
+        turnId: "turn-1",
         message: `approve ${DECIDE_TOOL}`,
         mode: "form",
         requestedSchema: { type: "object", properties: {} },
-      },
+      };
+    };
+    write({
+      id: "elicit-1",
+      method: "mcpServer/elicitation/request",
+      params: elicitParams(),
     });
     const tool = scenario === "wrong-tool" ? "assay_check_args" : DECIDE_TOOL;
     const argumentsPayload =
@@ -253,6 +280,23 @@ function handle(message) {
               structuredContent: null,
             },
           },
+        },
+      });
+      if (scenario === "tool-then-failed-turn") {
+        write({
+          method: "turn/completed",
+          params: {
+            threadId,
+            turn: { id: "turn-1", items: [], status: "failed" },
+          },
+        });
+        return;
+      }
+      write({
+        method: "turn/completed",
+        params: {
+          threadId,
+          turn: { id: "turn-1", items: [], status: "completed" },
         },
       });
       if (scenario === "exit-1-after-success") {

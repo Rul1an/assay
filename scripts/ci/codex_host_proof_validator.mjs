@@ -55,6 +55,8 @@ export const HARD_MAX_EVENTS = 4096;
 export const HARD_MAX_FRAMES = 8192;
 export const HARD_MAX_RETAINED_BYTES = 4 * 1024 * 1024;
 export const HARD_MAX_DIR_ENTRIES = 64;
+export const LIVE_IDENTITY_NONCLAIM =
+  "event-derived and internally consistent identity is not authenticated or tamper-evident";
 
 export function finitePositiveInt(name, value) {
   if (!Number.isInteger(value) || value <= 0) {
@@ -176,6 +178,88 @@ export function liveIdentityBound(identity) {
   return boundBinary(identity.codex) && boundBinary(identity.assayMcp);
 }
 
+export function sha256File(file) {
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0);
+  const fd = fs.openSync(file, flags);
+  try {
+    const hash = createHash("sha256");
+    const buf = Buffer.alloc(64 * 1024);
+    let n;
+    while ((n = fs.readSync(fd, buf, 0, buf.length, null)) > 0) {
+      hash.update(buf.subarray(0, n));
+    }
+    return hash.digest("hex");
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function verifyObservedBinary(bin) {
+  try {
+    const st = fs.lstatSync(bin.path);
+    if (st.isSymbolicLink() || !st.isFile()) {
+      return false;
+    }
+    return sha256File(bin.path) === bin.sha256;
+  } catch {
+    return false;
+  }
+}
+
+export function observedIdentityBound(identity, invocation, events) {
+  if (!liveIdentityBound(identity)) {
+    return false;
+  }
+  if (!verifyObservedBinary(identity.codex) || !verifyObservedBinary(identity.assayMcp)) {
+    return false;
+  }
+  const start = Array.isArray(events)
+    ? events.find((event) => event.method === "thread/start" && event.direction === "client")
+    : null;
+  const command = start?.params?.config?.mcp_servers?.assay?.command;
+  if (command !== identity.assayMcp.path) {
+    return false;
+  }
+  const argv = invocation?.argv;
+  return Array.isArray(argv) && argv[0] === identity.codex.path && argv[1] === "app-server";
+}
+
+export function requiredCellsForJourney(journey) {
+  switch (journey) {
+    case "discovery":
+      return ["skillDiscovered"];
+    case "failures":
+      return CELLS.filter(
+        (name) =>
+          name !== "driverCompleted" &&
+          name !== "oneToolInvoked" &&
+          name !== "structuredResultValidated",
+      );
+    case "tool":
+      return CELLS.filter((name) => name !== "driverCompleted");
+    default:
+      throw new Error(`unknown journey ${journey}`);
+  }
+}
+
+export function elicitationAcceptable(params, threadId, turnId) {
+  return (
+    params != null &&
+    typeof params === "object" &&
+    params.serverName === "assay" &&
+    typeof threadId === "string" &&
+    threadId.length > 0 &&
+    typeof turnId === "string" &&
+    turnId.length > 0 &&
+    params.threadId === threadId &&
+    params.turnId === turnId &&
+    params.mode === "form" &&
+    params.requestedSchema != null &&
+    typeof params.requestedSchema === "object" &&
+    !Array.isArray(params.requestedSchema)
+  );
+}
+
 export function driverOutcomeExit(pack, cells, journey) {
   const child = pack.childExit;
   const fail = child && child !== 0 ? child : 1;
@@ -185,18 +269,11 @@ export function driverOutcomeExit(pack, cells, journey) {
   if (cells?.driverCompleted?.status === "unavailable") {
     return fail;
   }
-  if (journey === "tool" || journey === "failures") {
-    for (const name of CELLS) {
-      if (name === "driverCompleted") {
-        continue;
-      }
-      if (cells?.[name]?.status !== "pass") {
-        return fail;
-      }
+  const required = requiredCellsForJourney(journey);
+  for (const name of required) {
+    if (cells?.[name]?.status !== "pass") {
+      return fail;
     }
-  }
-  if (journey === "discovery" && cells?.skillDiscovered?.status === "unavailable") {
-    return fail;
   }
   if (child !== 0) {
     return fail;
@@ -445,9 +522,23 @@ function classifyTools(statuses) {
   return cell("pass", "exact release tools listed");
 }
 
-function classifyInvocation(calls, expected, threadId, turnId) {
+function matchingTurnFailed(events, threadId, turnId) {
+  return events.some(
+    (event) =>
+      event.method === "turn/completed" &&
+      event.direction === "server" &&
+      event.params?.threadId === threadId &&
+      event.params?.turn?.id === turnId &&
+      event.params?.turn?.status === "failed",
+  );
+}
+
+function classifyInvocation(calls, expected, threadId, turnId, events) {
   if (calls.length === 0) {
     return cell("unavailable", "no mcpToolCall item/completed");
+  }
+  if (matchingTurnFailed(events, threadId, turnId)) {
+    return cell("fail", "matching turn/completed failed dominates tool item");
   }
   if (typeof threadId !== "string" || typeof turnId !== "string") {
     return cell("unavailable", "primary thread or turn id absent");
@@ -562,7 +653,7 @@ export function classifyCells(events, meta, expected) {
   const cwdObserved = classifyCwd(starts, expected);
   const mcpStarted = classifyMcp(statuses);
   const exactToolsListed = classifyTools(statuses);
-  const oneToolInvoked = classifyInvocation(calls, expected, threadId, turnId);
+  const oneToolInvoked = classifyInvocation(calls, expected, threadId, turnId, events);
   const structuredResultValidated = classifyPayload(calls, oneToolInvoked);
   return {
     skillDiscovered,
@@ -593,6 +684,13 @@ export function liveAcceptance(cells, meta) {
     reasons.push(
       "live record requires bound Codex and Assay/MCP binary paths, versions, hashes, install source, OS, and architecture",
     );
+  } else if (
+    meta.provenance === "live" &&
+    !observedIdentityBound(meta.hostIdentity, meta.invocation, meta.events)
+  ) {
+    reasons.push(
+      "live identity must be the observed binaries bound to the actual thread/start and spawn commands",
+    );
   }
   if (meta.truncated || meta.streamUnavailable) {
     reasons.push("host stream was truncated or unavailable");
@@ -607,10 +705,11 @@ export function liveAcceptance(cells, meta) {
       reasons.push(`${name}=${cells[name]?.status}`);
     }
   }
-  if (reasons.length > 0) {
+  reasons.push(LIVE_IDENTITY_NONCLAIM);
+  if (reasons.length > 1 || meta.provenance !== "live") {
     return cell("fail", reasons.join("; "));
   }
-  return cell("pass", "live host-event evidence and driver completion");
+  return cell("pass", `live host-event evidence and driver completion; ${LIVE_IDENTITY_NONCLAIM}`);
 }
 
 export function classifyRecord(record) {
@@ -627,6 +726,8 @@ export function classifyRecord(record) {
     streamUnavailable: Boolean(record.streamUnavailable),
     userAgent: derived.userAgent,
     hostIdentity: record.hostIdentity ?? null,
+    invocation: record.invocation ?? null,
+    events,
   };
   const cells = classifyCells(events, meta, record.expected);
   return {
@@ -645,13 +746,31 @@ function canonicalResolved(value) {
   }
 }
 
+function resolveExistingAncestor(value) {
+  let current = path.resolve(value);
+  const seen = new Set();
+  while (!seen.has(current)) {
+    seen.add(current);
+    try {
+      return fs.realpathSync(current);
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) {
+        return current;
+      }
+      current = parent;
+    }
+  }
+  return path.resolve(value);
+}
+
 function pathEqualsOrInside(root, candidate) {
   const rel = path.relative(root, candidate);
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
 export function forbiddenProofRoot(proofRoot, provenance) {
-  const resolved = canonicalResolved(proofRoot);
+  const resolved = resolveExistingAncestor(proofRoot);
   const temps = [os.tmpdir(), "/tmp", "/private/tmp", "/var/tmp"];
   const underTmp = temps.some((temp) => pathEqualsOrInside(canonicalResolved(temp), resolved));
   if (provenance === "live" && underTmp) {
@@ -735,9 +854,21 @@ export function parseArgs(argv) {
 }
 
 function namesIn(proofRoot) {
-  const names = fs.readdirSync(proofRoot).filter((name) => name !== "." && name !== "..");
-  if (names.length > HARD_MAX_DIR_ENTRIES) {
-    throw new Error("proof root directory listing exceeds bound");
+  const dir = fs.opendirSync(proofRoot);
+  const names = [];
+  try {
+    let entry;
+    while ((entry = dir.readSync()) !== null) {
+      if (entry.name === "." || entry.name === "..") {
+        continue;
+      }
+      names.push(entry.name);
+      if (names.length > HARD_MAX_DIR_ENTRIES) {
+        throw new Error("proof root directory listing exceeds bound");
+      }
+    }
+  } finally {
+    dir.closeSync();
   }
   return names;
 }
@@ -757,6 +888,10 @@ function assertAllowlistedRegularFiles(proofRoot) {
 export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   boundedPositiveInt("maxBytes", maxBytes, HARD_MAX_BYTES);
   const reasons = [];
+  const earlyForbidden = forbiddenProofRoot(proofRoot, "synthetic");
+  if (earlyForbidden) {
+    return { ok: false, reasons: [earlyForbidden], classified: null };
+  }
   let manifest;
   let events;
   let stored;
@@ -784,6 +919,17 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   }
   if (manifest.schema !== SCHEMA) {
     reasons.push(`unexpected schema ${manifest.schema}`);
+  }
+  try {
+    requiredCellsForJourney(manifest.journey);
+  } catch (error) {
+    reasons.push(error.message);
+  }
+  if (manifest.provenance === "live") {
+    const liveForbidden = forbiddenProofRoot(proofRoot, "live");
+    if (liveForbidden) {
+      reasons.push(liveForbidden);
+    }
   }
   const present = namesIn(proofRoot).sort();
   const allowed = [...ALLOWLIST].sort();
@@ -817,8 +963,10 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
     streamUnavailable: manifest.streamUnavailable,
     initialize: derivedInitialize,
     hostIdentity: manifest.hostIdentity ?? null,
+    invocation: manifest.invocation ?? null,
     expected: manifest.expected,
     events,
+    journey: manifest.journey,
   };
   let classified;
   try {

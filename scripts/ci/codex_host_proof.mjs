@@ -8,8 +8,10 @@
  * ended and the child is SIGTERM'd, then SIGKILL after 1s if still alive.
  * That is process cleanup, not a sandbox.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   ALLOWLIST,
@@ -28,13 +30,17 @@ import {
   credentialArgvReason,
   decidePrompt,
   driverOutcomeFrom,
+  elicitationAcceptable,
   forbiddenProofRoot,
   initializeFromEvents,
   isMainModule,
   persistableArgv,
+  requiredCellsForJourney,
   scrub,
+  sha256File,
   sha256Utf8,
   stableStringify,
+  validateProofRoot,
   walkDepth,
 } from "./codex_host_proof_validator.mjs";
 
@@ -52,7 +58,7 @@ export function parseArgs(argv) {
     codexBin: null,
     proofRoot: null,
     projectRoot: null,
-    mcpCommand: "/nonexistent/assay-mcp-server",
+    assayMcpBin: null,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -73,8 +79,8 @@ export function parseArgs(argv) {
       case "--codex-bin":
         out.codexBin = next();
         break;
-      case "--mcp-command":
-        out.mcpCommand = next();
+      case "--assay-mcp-bin":
+        out.assayMcpBin = next();
         break;
       case "--journey":
         out.journey = next();
@@ -96,9 +102,47 @@ export function parseArgs(argv) {
 }
 
 function writeJson(file, value) {
-  const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, stableStringify(value));
+  const dir = path.dirname(file);
+  const tmp = path.join(dir, `.${randomBytes(16).toString("hex")}.tmp`);
+  const flags =
+    fs.constants.O_CREAT |
+    fs.constants.O_EXCL |
+    fs.constants.O_WRONLY |
+    (fs.constants.O_NOFOLLOW || 0);
+  const fd = fs.openSync(tmp, flags, 0o600);
+  try {
+    fs.writeFileSync(fd, stableStringify(value));
+  } finally {
+    fs.closeSync(fd);
+  }
   fs.renameSync(tmp, file);
+}
+
+function requireFreshProofRoot(proofRoot) {
+  if (fs.existsSync(proofRoot)) {
+    const st = fs.lstatSync(proofRoot);
+    if (st.isSymbolicLink() || !st.isDirectory()) {
+      throw new Error("proof root must be a fresh directory");
+    }
+    const dir = fs.opendirSync(proofRoot);
+    try {
+      let entry;
+      while ((entry = dir.readSync()) !== null) {
+        if (entry.name === "." || entry.name === "..") {
+          continue;
+        }
+        throw new Error("proof root must be a fresh empty directory");
+      }
+    } finally {
+      dir.closeSync();
+    }
+  } else {
+    fs.mkdirSync(proofRoot, { recursive: true, mode: 0o700 });
+  }
+  const st = fs.lstatSync(proofRoot);
+  if (st.isSymbolicLink() || !st.isDirectory()) {
+    throw new Error("proof root must be a real directory");
+  }
 }
 
 function encode(message) {
@@ -149,31 +193,42 @@ function parseLine(line, maxBytes) {
   return value;
 }
 
-export function resolveCodexBin(codexBin) {
-  if (typeof codexBin !== "string" || codexBin.length === 0) {
-    throw new Error("codex binary must be an absolute path");
+function resolveRegularBinary(binPath, label) {
+  if (typeof binPath !== "string" || binPath.length === 0) {
+    throw new Error(`${label} binary must be an absolute path`);
   }
-  const resolved = path.resolve(codexBin);
+  const resolved = path.resolve(binPath);
   if (!path.isAbsolute(resolved)) {
-    throw new Error("codex binary must be an absolute path");
+    throw new Error(`${label} binary must be an absolute path`);
   }
   const st = fs.lstatSync(resolved);
   if (st.isSymbolicLink() || !st.isFile()) {
-    throw new Error("codex binary must be a non-symlink regular file");
+    throw new Error(`${label} binary must be a non-symlink regular file`);
   }
-  return resolved;
+  return fs.realpathSync(resolved);
 }
 
-function findCodexOnPath() {
+export function resolveCodexBin(codexBin) {
+  return resolveRegularBinary(codexBin, "codex");
+}
+
+function findOnPath(name) {
   for (const dir of (process.env.PATH || "").split(path.delimiter)) {
     if (!dir) {
       continue;
     }
-    const candidate = path.join(dir, "codex");
+    const candidate = path.join(dir, name);
     try {
-      const st = fs.statSync(candidate);
+      const st = fs.lstatSync(candidate);
+      if (st.isSymbolicLink()) {
+        const real = fs.realpathSync(candidate);
+        if (fs.lstatSync(real).isFile()) {
+          return real;
+        }
+        continue;
+      }
       if (st.isFile()) {
-        return fs.realpathSync(candidate);
+        return candidate;
       }
     } catch {
       /* next */
@@ -182,22 +237,89 @@ function findCodexOnPath() {
   return null;
 }
 
+function findCodexOnPath() {
+  return findOnPath("codex");
+}
+
+function probeVersion(bin) {
+  const result = spawnSync(bin, ["--version"], {
+    encoding: "utf8",
+    timeout: 2000,
+    maxBuffer: 4096,
+  });
+  const text = `${result.stdout || ""}${result.stderr || ""}`.trim().split(/\r?\n/)[0] || "";
+  if (!text) {
+    throw new Error(`could not observe version from ${bin}`);
+  }
+  return text.slice(0, 200);
+}
+
+export function resolveHostIdentity(options) {
+  const codexPath = options.codexBin ?? findCodexOnPath();
+  const mcpPath = options.assayMcpBin ?? findOnPath("assay-mcp-server");
+  if (!codexPath) {
+    throw new Error("codex binary was not resolved");
+  }
+  if (!mcpPath) {
+    throw new Error("assay MCP binary was not resolved");
+  }
+  const codex = resolveRegularBinary(codexPath, "codex");
+  const mcp = resolveRegularBinary(mcpPath, "assay MCP");
+  return {
+    os: os.platform(),
+    arch: os.arch(),
+    codex: {
+      path: codex,
+      version: probeVersion(codex),
+      sha256: sha256File(codex),
+      installSource: options.codexBin ? "codex-bin-flag" : "PATH",
+    },
+    assayMcp: {
+      path: mcp,
+      version: probeVersion(mcp),
+      sha256: sha256File(mcp),
+      installSource: options.assayMcpBin ? "assay-mcp-bin-flag" : "PATH",
+    },
+  };
+}
+
 export function resolveProductionChildArgv(options) {
   const bin = resolveCodexBin(options.codexBin ?? findCodexOnPath());
   return [bin, "app-server"];
 }
 
+function resolvedMcpCommand(options) {
+  if (options.hostIdentity?.assayMcp?.path) {
+    return options.hostIdentity.assayMcp.path;
+  }
+  if (typeof options.assayMcpBin === "string" && options.assayMcpBin.length > 0) {
+    return path.resolve(options.assayMcpBin);
+  }
+  throw new Error("assay MCP binary was not resolved");
+}
+
 function writeProofFiles(options, pack) {
   const initialize = initializeFromEvents(pack.events);
+  const invocationArgv = persistableArgv(
+    options.hostIdentity?.codex?.path
+      ? [options.hostIdentity.codex.path, "app-server"]
+      : options.codexBin
+        ? [path.resolve(options.codexBin), "app-server"]
+        : Array.isArray(options.childArgv)
+          ? options.childArgv
+          : ["<test-only-child>"],
+  );
   const record = {
     schema: SCHEMA,
     provenance: options.provenance,
+    journey: options.journey,
     childExitCode: pack.childExit,
     driverOutcome: null,
     truncated: pack.truncated,
     streamUnavailable: pack.streamUnavailable,
     initialize,
     hostIdentity: options.hostIdentity ?? null,
+    invocation: { argv: invocationArgv, envNames: ["PATH", "HOME", "CODEX_HOME"] },
     expected: {
       projectRoot: options.projectRoot,
       skillName: SKILL_NAME,
@@ -208,13 +330,14 @@ function writeProofFiles(options, pack) {
     events: pack.events,
   };
   const preliminary = classifyRecord(record);
-  const driverOutcome = driverOutcomeFrom(pack, preliminary.cells, options.journey);
+  let driverOutcome = driverOutcomeFrom(pack, preliminary.cells, options.journey);
   record.driverOutcome = driverOutcome;
-  const classified = classifyRecord(record);
+  let classified = classifyRecord(record);
   const eventsText = stableStringify(pack.events);
   const manifest = {
     schema: SCHEMA,
     provenance: options.provenance,
+    journey: options.journey,
     childExitCode: pack.childExit,
     driverOutcome,
     truncated: pack.truncated,
@@ -225,10 +348,7 @@ function writeProofFiles(options, pack) {
       stdoutBytes: pack.stdoutBytes,
       stderrBytes: pack.stderrBytes,
     },
-    invocation: {
-      argv: persistableArgv(options.childArgv),
-      envNames: ["PATH", "HOME", "CODEX_HOME"],
-    },
+    invocation: record.invocation,
     initialize,
     hostIdentity: options.hostIdentity ?? null,
     expected: record.expected,
@@ -238,22 +358,32 @@ function writeProofFiles(options, pack) {
   writeJson(path.join(options.proofRoot, "manifest.json"), manifest);
   writeJson(path.join(options.proofRoot, "events.json"), pack.events);
   writeJson(path.join(options.proofRoot, "classification.json"), classified);
+  const checked = validateProofRoot(options.proofRoot);
+  if (!checked.ok) {
+    driverOutcome = {
+      exitCode: driverOutcome.exitCode === 0 ? 1 : driverOutcome.exitCode,
+      status: "fail",
+    };
+    manifest.driverOutcome = driverOutcome;
+    record.driverOutcome = driverOutcome;
+    classified = classifyRecord(record);
+    writeJson(path.join(options.proofRoot, "manifest.json"), manifest);
+    writeJson(path.join(options.proofRoot, "classification.json"), classified);
+  }
   return {
     manifest,
     events: pack.events,
-    classified,
+    classified: checked.ok ? checked.classified : classified,
     childExitCode: pack.childExit,
     driverOutcome,
   };
 }
 
 export async function runProof(options) {
+  requiredCellsForJourney(options.journey);
   const forbidden = forbiddenProofRoot(options.proofRoot, options.provenance);
   if (forbidden) {
     throw new Error(forbidden);
-  }
-  if (!Array.isArray(options.childArgv) || options.childArgv.length === 0) {
-    throw new Error("child argv is required; this driver does not spawn a default Codex binary");
   }
   if (options.provenance === "live" && options.journey === "tool" && !options.allowLiveTurn) {
     throw new Error("live tool journey requires --allow-live-turn; this slice does not authorize a model call");
@@ -265,8 +395,10 @@ export async function runProof(options) {
   boundedPositiveInt("maxBytes", options.maxBytes, HARD_MAX_BYTES);
 
   const runDeadline = Date.now() + options.timeoutMs;
-  fs.mkdirSync(options.proofRoot, { recursive: true, mode: 0o700 });
-  const credential = credentialArgvReason(options.childArgv);
+  requireFreshProofRoot(options.proofRoot);
+  const credential = Array.isArray(options.childArgv)
+    ? credentialArgvReason(options.childArgv)
+    : null;
   if (credential) {
     return writeProofFiles(options, {
       events: [
@@ -319,9 +451,9 @@ export async function runProof(options) {
       CODEX_HOME: path.join(options.projectRoot, ".codex-home"),
     },
   };
-  const child = Array.isArray(options.childArgv) && options.childArgv.length > 0
-    ? spawn(options.childArgv[0], options.childArgv.slice(1), spawnOpts)
-    : spawn(resolveCodexBin(options.codexBin), ["app-server"], spawnOpts);
+  const child = options.testOnlyChild
+    ? options.testOnlyChild
+    : spawn(resolveCodexBin(options.codexBin ?? findCodexOnPath()), ["app-server"], spawnOpts);
   const childClosed = new Promise((resolve) => {
     child.on("close", (code, signal) => {
       childAlive = false;
@@ -388,7 +520,15 @@ export async function runProof(options) {
         }),
       );
       if (message.method === "mcpServer/elicitation/request" && message.id != null && !stopped) {
-        const accepted = message.params?.serverName === "assay";
+        const started = events.filter(
+          (event) => event.method === "thread/start" && event.direction === "server",
+        );
+        const threadId = started[0]?.result?.thread?.id;
+        const turnReply = events.find(
+          (event) => event.method === "turn/start" && event.direction === "server",
+        );
+        const turnId = turnReply?.result?.turn?.id;
+        const accepted = elicitationAcceptable(message.params, threadId, turnId);
         const reply = {
           id: message.id,
           result: {
@@ -478,36 +618,24 @@ export async function runProof(options) {
     throw new Error(`timeout waiting for ${id}`);
   };
 
-  const waitForExpectedTool = async (threadId, turnId) => {
+  const waitForTerminalTurn = async (threadId, turnId) => {
     while (Date.now() < runDeadline) {
       if (blocked()) {
         return;
       }
-      const matched = events.some(
-        (event) =>
-          event.method === "item/completed" &&
-          event.direction === "server" &&
-          event.params?.threadId === threadId &&
-          event.params?.turnId === turnId &&
-          event.params?.item?.type === "mcpToolCall",
-      );
-      if (matched) {
-        return;
-      }
-      const failedTurn = events.some(
+      const terminal = events.some(
         (event) =>
           event.method === "turn/completed" &&
           event.direction === "server" &&
           event.params?.threadId === threadId &&
-          event.params?.turn?.id === turnId &&
-          event.params?.turn?.status === "failed",
+          event.params?.turn?.id === turnId,
       );
-      if (failedTurn) {
+      if (terminal) {
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    throw new Error("timeout waiting for expected tool completion");
+    throw new Error("timeout waiting for terminal turn");
   };
 
   try {
@@ -547,7 +675,7 @@ export async function runProof(options) {
     };
 
     if (options.journey !== "discovery") {
-      const primary = startThread(options.mcpCommand, ["--policy-root", "."]);
+      const primary = startThread(resolvedMcpCommand(options), ["--policy-root", "."]);
       await waitFor(primary);
       const threadId = serverThreadId(primary);
       const statusId = send("mcpServerStatus/list", { threadId, detail: "toolsAndAuthOnly" });
@@ -562,7 +690,7 @@ export async function runProof(options) {
         await waitFor(
           send("mcpServerStatus/list", { threadId: missingThread, detail: "toolsAndAuthOnly" }),
         );
-        const invalid = startThread(options.mcpCommand, [
+        const invalid = startThread(resolvedMcpCommand(options), [
           "--policy-root",
           path.join(options.projectRoot, "missing-policy-root"),
         ]);
@@ -588,7 +716,7 @@ export async function runProof(options) {
         if (typeof turnId !== "string" || turnId.length === 0) {
           throw new Error("no turn id in server response result.turn.id");
         }
-        await waitForExpectedTool(threadId, turnId);
+        await waitForTerminalTurn(threadId, turnId);
       }
     }
   } catch (error) {
@@ -629,7 +757,9 @@ function main() {
   if (!options.proofRoot || !options.projectRoot) {
     throw new Error("--proof-root and --project-root are required");
   }
-  options.childArgv = resolveProductionChildArgv(options);
+  options.hostIdentity = resolveHostIdentity(options);
+  options.codexBin = options.hostIdentity.codex.path;
+  options.assayMcpBin = options.hostIdentity.assayMcp.path;
   return runProof(options);
 }
 
@@ -642,8 +772,16 @@ if (isMainModule(process.argv[1], import.meta.url)) {
         driverOutcome: result.driverOutcome,
         liveAcceptance: result.classified.liveAcceptance,
       }));
-      if (result.driverOutcome.exitCode !== 0) {
-        process.exitCode = result.driverOutcome.exitCode;
+      let exitCode = result.driverOutcome.exitCode;
+      if (
+        result.manifest.provenance === "live" &&
+        result.classified.liveAcceptance.status !== "pass" &&
+        exitCode === 0
+      ) {
+        exitCode = 1;
+      }
+      if (exitCode !== 0) {
+        process.exitCode = exitCode;
       }
     })
     .catch((error) => {

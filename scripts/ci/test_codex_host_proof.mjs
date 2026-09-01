@@ -20,6 +20,7 @@ import {
   classifyRecord,
   decidePrompt,
   forbiddenProofRoot,
+  sha256Utf8,
   stableStringify,
   validateProofRoot,
 } from "./codex_host_proof_validator.mjs";
@@ -33,6 +34,17 @@ function scratch() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "assay-2684-"));
 }
 
+function spawnFakeChild(childArgv, projectRoot) {
+  return spawn(childArgv[0], childArgv.slice(1), {
+    stdio: ["pipe", "pipe", "pipe"],
+    env: {
+      PATH: process.env.PATH,
+      HOME: projectRoot,
+      CODEX_HOME: path.join(projectRoot, ".codex-home"),
+    },
+  });
+}
+
 async function drive(scenario, journey = "tool") {
   const projectRoot = scratch();
   const proofRoot = scratch();
@@ -43,16 +55,17 @@ async function drive(scenario, journey = "tool") {
     path.join(projectRoot, ".agents/skills/assay-golden-path/SKILL.md"),
     "# disposable canary\n",
   );
+  const childArgv = ["node", FAKE, "--scenario", scenario, "--project-root", projectRoot];
   const result = await runProof({
     provenance: "synthetic",
     timeoutMs: 4000,
     maxBytes: 1_048_576,
     journey,
     allowLiveTurn: false,
-    childArgv: ["node", FAKE, "--scenario", scenario, "--project-root", projectRoot],
+    testOnlyChild: spawnFakeChild(childArgv, projectRoot),
     proofRoot,
     projectRoot,
-    mcpCommand: path.join(projectRoot, "install/bin/assay-mcp-server"),
+    assayMcpBin: path.join(projectRoot, "install/bin/assay-mcp-server"),
   });
   return { ...result, proofRoot, projectRoot };
 }
@@ -74,6 +87,10 @@ function writeShadowCodex(childArgv) {
   const bin = path.join(binDir, "codex");
   const script = `#!/usr/bin/env node
 import { spawn } from "node:child_process";
+if (process.argv.includes("--version")) {
+  process.stdout.write("codex-shadow/0.0.0\\n");
+  process.exit(0);
+}
 const child = spawn(${JSON.stringify(childArgv[0])}, ${JSON.stringify(childArgv.slice(1))}, { stdio: "inherit" });
 child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
 `;
@@ -81,31 +98,55 @@ child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
   return bin;
 }
 
-function driveCli(scenario, journey = "tool") {
-  const projectRoot = seedProject();
-  const proofRoot = scratch();
-  const result = spawnSync(
-    process.execPath,
-    [
-      path.join(HERE, "codex_host_proof.mjs"),
-      "--provenance",
-      "synthetic",
-      "--proof-root",
-      proofRoot,
-      "--project-root",
-      projectRoot,
-      "--codex-bin",
-      writeShadowCodex(["node", FAKE, "--scenario", scenario, "--project-root", projectRoot]),
-      "--mcp-command",
-      path.join(projectRoot, "install/bin/assay-mcp-server"),
-      "--journey",
-      journey,
-      "--timeout-ms",
-      "4000",
-    ],
-    { encoding: "utf8", timeout: 15_000 },
+function writeShadowMcp() {
+  const bin = path.join(scratch(), "assay-mcp-server");
+  fs.writeFileSync(
+    bin,
+    `#!/usr/bin/env node
+if (process.argv.includes("--version")) {
+  process.stdout.write("assay-mcp-server-shadow/0.0.0\\n");
+  process.exit(0);
+}
+process.stdout.write("assay-mcp-server-shadow/0.0.0\\n");
+`,
+    { mode: 0o755 },
   );
-  return { ...result, proofRoot, projectRoot };
+  return bin;
+}
+
+function driveCli(scenario, journey = "tool", extra = {}) {
+  const projectRoot = seedProject();
+  const proofRoot = extra.proofRoot ?? scratch();
+  const mcpBin = extra.assayMcpBin ?? writeShadowMcp();
+  const args = [
+    path.join(HERE, "codex_host_proof.mjs"),
+    "--provenance",
+    extra.provenance ?? "synthetic",
+    "--proof-root",
+    proofRoot,
+    "--project-root",
+    projectRoot,
+    "--codex-bin",
+    extra.codexBin ??
+      writeShadowCodex(["node", FAKE, "--scenario", scenario, "--project-root", projectRoot]),
+    extra.mcpFlag ?? "--assay-mcp-bin",
+    mcpBin,
+    "--journey",
+    journey,
+    "--timeout-ms",
+    String(extra.timeoutMs ?? 4000),
+  ];
+  if (extra.allowLiveTurn) {
+    args.push("--allow-live-turn");
+  }
+  if (extra.extraArgs) {
+    args.push(...extra.extraArgs);
+  }
+  const result = spawnSync(process.execPath, args, {
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  return { ...result, proofRoot, projectRoot, mcpBin };
 }
 
 function clientParams(events, method) {
@@ -350,22 +391,20 @@ function toolCompleted(events) {
 }
 
 function driveInline(childArgv, extra = {}) {
-  const projectRoot = seedProject();
-  const proofRoot = scratch();
+  const projectRoot = extra.projectRoot ?? seedProject();
+  const proofRoot = extra.proofRoot ?? scratch();
+  const testOnlyChild = extra.testOnlyChild ?? spawnFakeChild(childArgv, projectRoot);
   return runProof({
-    provenance: "synthetic",
+    provenance: extra.provenance ?? "synthetic",
     timeoutMs: extra.timeoutMs ?? 4000,
     maxBytes: extra.maxBytes ?? 1_048_576,
     journey: extra.journey ?? "tool",
-    allowLiveTurn: false,
-    childArgv,
+    allowLiveTurn: extra.allowLiveTurn ?? false,
+    testOnlyChild,
     proofRoot,
     projectRoot,
-    mcpCommand: path.join(projectRoot, "install/bin/assay-mcp-server"),
-    ...extra,
-    childArgv,
-    proofRoot,
-    projectRoot,
+    assayMcpBin: extra.assayMcpBin ?? path.join(projectRoot, "install/bin/assay-mcp-server"),
+    hostIdentity: extra.hostIdentity,
   }).then((result) => ({ ...result, proofRoot, projectRoot }));
 }
 
@@ -382,8 +421,8 @@ function driveCliInline(childArgv, extra = {}) {
     projectRoot,
     "--codex-bin",
     writeShadowCodex(childArgv),
-    "--mcp-command",
-    path.join(projectRoot, "install/bin/assay-mcp-server"),
+    "--assay-mcp-bin",
+    extra.assayMcpBin ?? writeShadowMcp(),
     "--journey",
     extra.journey ?? "tool",
     "--timeout-ms",
@@ -467,7 +506,7 @@ test("credential-bearing argv is rejected before spawn and not persisted", async
     ],
     proofRoot,
     projectRoot,
-    mcpCommand: path.join(projectRoot, "install/bin/assay-mcp-server"),
+    assayMcpBin: path.join(projectRoot, "install/bin/assay-mcp-server"),
   });
   const packed = [
     JSON.stringify(manifest),
@@ -601,7 +640,7 @@ test("maxBytes and timeoutMs must be finite positive integers; reversal restores
     childArgv: ["node", FAKE, "--scenario", "valid", "--project-root", projectRoot],
     proofRoot,
     projectRoot,
-    mcpCommand: path.join(projectRoot, "install/bin/assay-mcp-server"),
+    assayMcpBin: path.join(projectRoot, "install/bin/assay-mcp-server"),
     timeoutMs: 4000,
     maxBytes: 1_048_576,
   };
@@ -682,7 +721,7 @@ test("production CLI rejects --child-argv; credential name variants are rejected
       childArgv: ["node", FAKE, "--scenario", "valid", "--project-root", projectRoot, flag],
       proofRoot: scratch(),
       projectRoot,
-      mcpCommand: path.join(projectRoot, "install/bin/assay-mcp-server"),
+      assayMcpBin: path.join(projectRoot, "install/bin/assay-mcp-server"),
     });
     assert.equal(
       result.events.some((event) => event.method === "initialize"),
@@ -706,7 +745,7 @@ test("hard maxima and one shared deadline bound frames, bytes, events, and waits
     childArgv: ["node", FAKE, "--scenario", "valid", "--project-root", projectRoot],
     proofRoot: scratch(),
     projectRoot,
-    mcpCommand: path.join(projectRoot, "install/bin/assay-mcp-server"),
+    assayMcpBin: path.join(projectRoot, "install/bin/assay-mcp-server"),
     timeoutMs: 4000,
     maxBytes: 1_048_576,
   };
@@ -866,4 +905,324 @@ test("CLI entrypoint compares canonical realpaths so aliased tmp is not a no-op"
   });
   assert.notEqual(result.status, 0, "aliased CLI path must still enter main()");
   assert.match(result.stderr, /proof-root|project-root/i);
+});
+
+function durableProofRoot() {
+  const nest = path.join(HERE, "../../target/codex-host-proof");
+  fs.mkdirSync(nest, { recursive: true });
+  return fs.mkdtempSync(path.join(nest, "proof-"));
+}
+
+test("production live identity is observed from binaries and required before live CLI exit 0", () => {
+  const mcpBin = writeShadowMcp();
+  const live = driveCli("valid", "tool", {
+    provenance: "live",
+    allowLiveTurn: true,
+    assayMcpBin: mcpBin,
+    mcpFlag: "--assay-mcp-bin",
+    proofRoot: durableProofRoot(),
+  });
+  const manifestPath = path.join(live.proofRoot, "manifest.json");
+  assert.equal(fs.existsSync(manifestPath), true, "live CLI must still write a pack");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const identity = manifest.hostIdentity;
+  assert.ok(identity && typeof identity === "object", "production CLI must construct hostIdentity");
+  assert.equal(typeof identity.os, "string");
+  assert.equal(typeof identity.arch, "string");
+  for (const role of ["codex", "assayMcp"]) {
+    assert.equal(path.isAbsolute(identity[role].path), true, `${role} path must be absolute`);
+    assert.match(identity[role].sha256, /^[a-f0-9]{64}$/);
+    assert.ok(identity[role].version.length > 0, `${role} version must be observed`);
+    assert.ok(identity[role].installSource.length > 0, `${role} install source must be recorded`);
+    assert.equal(fs.lstatSync(identity[role].path).isFile(), true);
+  }
+  assert.equal(identity.assayMcp.path, fs.realpathSync(mcpBin));
+  const events = JSON.parse(fs.readFileSync(path.join(live.proofRoot, "events.json"), "utf8"));
+  const start = events.find(
+    (event) => event.direction === "client" && event.method === "thread/start",
+  );
+  assert.equal(
+    start.params.config.mcp_servers.assay.command,
+    identity.assayMcp.path,
+    "thread/start must use the resolved Assay MCP binary, not an arbitrary command",
+  );
+  const classified = JSON.parse(
+    fs.readFileSync(path.join(live.proofRoot, "classification.json"), "utf8"),
+  );
+  assert.notEqual(classified.liveAcceptance.status, "pass");
+  assert.match(
+    classified.liveAcceptance.reason,
+    /not authenticated|not tamper-evident|no-authentication/i,
+  );
+  assert.notEqual(
+    live.status,
+    0,
+    "live CLI must not exit 0 while liveAcceptance is not pass",
+  );
+
+  const forgedRoot = scratch();
+  for (const name of ["manifest.json", "events.json", "classification.json"]) {
+    fs.copyFileSync(path.join(live.proofRoot, name), path.join(forgedRoot, name));
+  }
+  const forgedEvents = JSON.parse(fs.readFileSync(path.join(forgedRoot, "events.json"), "utf8"));
+  const forged = JSON.parse(fs.readFileSync(path.join(forgedRoot, "manifest.json"), "utf8"));
+  forged.provenance = "live";
+  forged.hostIdentity = {
+    os: "linux",
+    arch: "x64",
+    codex: {
+      path: "/nonexistent/codex",
+      version: "forged/1",
+      sha256: "a".repeat(64),
+      installSource: "self-attested",
+    },
+    assayMcp: {
+      path: "/nonexistent/assay-mcp-server",
+      version: "forged/1",
+      sha256: "b".repeat(64),
+      installSource: "self-attested",
+    },
+  };
+  forged.hashes = { events: sha256Utf8(stableStringify(forgedEvents)) };
+  const relabeled = classifyRecord({
+    ...forged,
+    events: forgedEvents,
+    childExitCode: 0,
+    driverOutcome: { exitCode: 0, status: "pass" },
+    truncated: false,
+    streamUnavailable: false,
+  });
+  assert.notEqual(
+    relabeled.liveAcceptance.status,
+    "pass",
+    "self-attested nonexistent binary paths must not mint a live pass",
+  );
+  fs.writeFileSync(path.join(forgedRoot, "manifest.json"), stableStringify(forged));
+  fs.writeFileSync(path.join(forgedRoot, "classification.json"), stableStringify(relabeled));
+  const checked = validateProofRoot(forgedRoot);
+  assert.equal(checked.ok, false);
+  assert.notEqual(checked.classified?.liveAcceptance?.status, "pass");
+
+  const control = driveCli("valid", "discovery");
+  assert.ok(control.stdout.includes("synthetic") || control.status !== undefined);
+});
+
+test("production spawn ignores user childArgv and rejects --mcp-command", async () => {
+  const marker = path.join(scratch(), "spawned-from-child-argv");
+  const evil = path.join(scratch(), "evil-child");
+  fs.writeFileSync(
+    evil,
+    `#!/usr/bin/env node
+import fs from "node:fs";
+fs.writeFileSync(${JSON.stringify(marker)}, "spawned\\n");
+`,
+    { mode: 0o755 },
+  );
+  const projectRoot = seedProject();
+  const proofRoot = scratch();
+  const shadow = writeShadowCodex([
+    "node",
+    FAKE,
+    "--scenario",
+    "valid",
+    "--project-root",
+    projectRoot,
+  ]);
+  await runProof({
+    provenance: "synthetic",
+    timeoutMs: 4000,
+    maxBytes: 1_048_576,
+    journey: "discovery",
+    allowLiveTurn: false,
+    childArgv: [evil, "should-not-run"],
+    codexBin: shadow,
+    proofRoot,
+    projectRoot,
+    mcpCommand: "/tmp/should-not-be-used-as-mcp",
+    assayMcpBin: writeShadowMcp(),
+  });
+  assert.equal(
+    fs.existsSync(marker),
+    false,
+    "user-provided childArgv must not reach production spawn",
+  );
+  const rejected = driveCli("valid", "discovery", {
+    extraArgs: ["--mcp-command", "/tmp/arbitrary-mcp"],
+  });
+  assert.notEqual(rejected.status, 0, "production CLI must reject arbitrary --mcp-command");
+  assert.match(`${rejected.stderr}${rejected.stdout}`, /mcp-command|unknown argument/i);
+  const accepted = driveCli("valid", "discovery", { mcpFlag: "--assay-mcp-bin" });
+  assert.equal(typeof accepted.status, "number");
+});
+
+test("matching failed terminal turn dominates an earlier successful tool item", async () => {
+  const { classified, driverOutcome, childExitCode } = await drive("tool-then-failed-turn");
+  assert.equal(childExitCode, 0);
+  assert.notEqual(
+    classified.cells.oneToolInvoked.status,
+    "pass",
+    "failed turn/completed must dominate an earlier successful tool item",
+  );
+  assert.notEqual(driverOutcome.exitCode, 0, "dominated tool item must force nonzero driver exit");
+  const control = await drive("valid");
+  assert.equal(control.classified.cells.oneToolInvoked.status, "pass");
+  assert.equal(control.driverOutcome.exitCode, 0);
+});
+
+test("fresh proof directory and exclusive no-follow temps block predictable tmp symlink overwrite", async () => {
+  const outside = path.join(os.tmpdir(), `assay-2684-sentinel-${process.pid}-${Date.now()}`);
+  fs.writeFileSync(outside, "SAFE_SENTINEL\n");
+  const projectRoot = seedProject();
+  const proofRoot = scratch();
+  fs.symlinkSync(outside, path.join(proofRoot, "manifest.json.tmp"));
+  let threw = false;
+  try {
+    await runProof({
+      provenance: "synthetic",
+      timeoutMs: 4000,
+      maxBytes: 1_048_576,
+      journey: "discovery",
+      allowLiveTurn: false,
+      childArgv: ["node", FAKE, "--scenario", "valid", "--project-root", projectRoot],
+      proofRoot,
+      projectRoot,
+      assayMcpBin: path.join(projectRoot, "install/bin/assay-mcp-server"),
+    });
+  } catch {
+    threw = true;
+  }
+  assert.equal(
+    fs.readFileSync(outside, "utf8"),
+    "SAFE_SENTINEL\n",
+    "predictable dest.tmp symlink must not overwrite an outside file",
+  );
+  const nonempty = validateProofRoot(proofRoot);
+  if (!threw) {
+    assert.notEqual(
+      nonempty.ok && fs.readFileSync(outside, "utf8") !== "SAFE_SENTINEL\n",
+      true,
+    );
+  }
+  const control = await drive("valid", "discovery");
+  assert.equal(validateProofRoot(control.proofRoot).ok, true);
+  try {
+    fs.unlinkSync(outside);
+  } catch {
+    /* leftover */
+  }
+});
+
+test("elicitation accepts only the expected Assay request bound to the primary thread and turn", async () => {
+  const wrongThread = await drive("elicit-wrong-thread");
+  const replies = (events) =>
+    events.filter(
+      (event) =>
+        event.direction === "client" && event.method === "mcpServer/elicitation/request",
+    );
+  assert.ok(replies(wrongThread.events).length >= 1);
+  assert.equal(replies(wrongThread.events)[0].result.action, "decline");
+  const nameOnly = await drive("elicit-assay-name-only");
+  assert.equal(replies(nameOnly.events)[0].result.action, "decline");
+  const control = await drive("valid");
+  assert.equal(replies(control.events)[0].result.action, "accept");
+});
+
+test("one journey-to-required-cells function closes discovery, failures, tool, and unknown", async () => {
+  const validator = await import("./codex_host_proof_validator.mjs");
+  assert.equal(typeof validator.requiredCellsForJourney, "function");
+  assert.deepEqual(validator.requiredCellsForJourney("discovery"), ["skillDiscovered"]);
+  const failureCells = validator.requiredCellsForJourney("failures");
+  assert.equal(failureCells.includes("oneToolInvoked"), false);
+  assert.equal(failureCells.includes("structuredResultValidated"), false);
+  assert.ok(failureCells.includes("missingBinaryNotClean"));
+  assert.deepEqual(
+    validator.requiredCellsForJourney("tool"),
+    CELLS.filter((name) => name !== "driverCompleted"),
+  );
+  assert.throws(() => validator.requiredCellsForJourney("unknown"), /unknown journey/);
+  await assert.rejects(
+    () =>
+      runProof({
+        provenance: "synthetic",
+        timeoutMs: 4000,
+        maxBytes: 1_048_576,
+        journey: "unknown",
+        allowLiveTurn: false,
+        childArgv: ["node", FAKE, "--scenario", "valid", "--project-root", seedProject()],
+        proofRoot: scratch(),
+        projectRoot: seedProject(),
+        assayMcpBin: "/tmp/x",
+      }),
+    /unknown journey/,
+  );
+  const missingDiscovery = await drive("missing-skill", "discovery");
+  assert.notEqual(
+    missingDiscovery.driverOutcome.exitCode,
+    0,
+    "discovery with missing skill must not inherit a clean child exit",
+  );
+  const failures = await drive("valid", "failures");
+  assert.notEqual(failures.classified.cells.oneToolInvoked.status, "pass");
+  assert.equal(
+    failures.driverOutcome.exitCode,
+    0,
+    "failures journey must be able to pass when its own cells pass",
+  );
+  const tool = await drive("valid", "tool");
+  assert.equal(tool.driverOutcome.exitCode, 0);
+  for (const name of validator.requiredCellsForJourney("tool")) {
+    assert.equal(tool.classified.cells[name].status, "pass");
+  }
+});
+
+test("forbidden root resolves existing ancestors and dir ceiling stops at entry 65", async () => {
+  const isolatedHome = scratch();
+  const codexHome = path.join(isolatedHome, ".codex");
+  fs.mkdirSync(codexHome, { recursive: true });
+  const linkRoot = scratch();
+  const link = path.join(linkRoot, "link-to-codex");
+  fs.symlinkSync(codexHome, link);
+  const leaf = path.join(link, "nonexistent-leaf");
+  const previousHome = process.env.HOME;
+  process.env.HOME = isolatedHome;
+  try {
+    const reason = forbiddenProofRoot(leaf, "synthetic");
+    assert.equal(typeof reason, "string");
+    assert.match(reason, /CODEX_HOME|profile|auth|forbidden/i);
+    fs.mkdirSync(leaf);
+    const checked = validateProofRoot(leaf);
+    assert.equal(checked.ok, false);
+    assert.match(checked.reasons.join(" "), /CODEX_HOME|profile|auth|forbidden/i);
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = previousHome;
+    }
+  }
+  const crowded = scratch();
+  for (let i = 0; i < 80; i += 1) {
+    fs.writeFileSync(path.join(crowded, `extra-${i}`), "x");
+  }
+  const started = Date.now();
+  const listed = validateProofRoot(crowded);
+  assert.ok(Date.now() - started < 2000, "directory ceiling must stop before materializing the full listing");
+  assert.equal(listed.ok, false);
+  assert.match(listed.reasons.join(" "), /exceeds bound|directory listing|unavailable/i);
+  const control = forbiddenProofRoot(scratch(), "synthetic");
+  assert.equal(control, null);
+});
+
+test("hosted CI catalogue runs the exact focused Node suite", () => {
+  const command = "node --test --test-reporter spec scripts/ci/test_codex_host_proof.mjs";
+  const ci = fs.readFileSync(path.join(HERE, "../../.github/workflows/ci.yml"), "utf8");
+  const precommit = fs.readFileSync(path.join(HERE, "../../.pre-commit-config.yaml"), "utf8");
+  const wired = [ci, precommit].some((text) => text.includes(command));
+  assert.equal(
+    wired,
+    true,
+    "removing the catalogue entry for the exact Node suite must go red",
+  );
+  const control = fs.readFileSync(path.join(HERE, "../../.github/workflows/ci.yml"), "utf8");
+  assert.match(control, /bash scripts\/ci\/test-evidence-vocabulary\.sh/);
 });
