@@ -1466,17 +1466,26 @@ REQUIRED_CLAUDE_PLUGIN_HOOKS: tuple[tuple[str, str], ...] = (
 )
 
 
+_REAL_HOOK_ID_LINE = re.compile(r"^([ \t]*)- id: (\S+)[ \t]*$", re.M)
+
+
 def _hook_block_by_id(config: str, hook_id: str) -> str:
-    marker = f"id: {hook_id}"
-    start = config.find(marker)
-    if start < 0:
+    matches = [m for m in _REAL_HOOK_ID_LINE.finditer(config) if m.group(2) == hook_id]
+    if not matches:
         fail(
             "hook_files",
             f"pre-commit config lost {hook_id}",
             "restore the Claude plugin required hook",
         )
-    nxt = config.find("\n      - id:", start + len(marker))
-    return config[start:] if nxt < 0 else config[start:nxt]
+    if len(matches) != 1:
+        fail(
+            "hook_files",
+            f"pre-commit config has {len(matches)} real list items for {hook_id}",
+            "keep exactly one uncommented YAML list item per required hook id",
+        )
+    start = matches[0].start()
+    nxt = _REAL_HOOK_ID_LINE.search(config, matches[0].end())
+    return config[start:] if nxt is None else config[start:nxt.start()]
 
 
 def _claude_plugin_hook_block(config: str) -> str:

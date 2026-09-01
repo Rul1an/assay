@@ -577,6 +577,42 @@ class RequiredHookTableTests(unittest.TestCase):
             WORKFLOW_MOD.assert_required_claude_plugin_hooks(config)
         self.assertIn("claude-plugin-install-workflow-self-test", str(raised.exception.reason))
 
+    def _comment_out_real_id_line(self, hook_id: str) -> str:
+        target = f"- id: {hook_id}"
+        found = 0
+        lines: list[str] = []
+        for line in self._config().splitlines(keepends=True):
+            stripped = line.lstrip(" \t")
+            indent = line[: len(line) - len(stripped)]
+            body = stripped.splitlines()[0]
+            if body == target:
+                newline = line[len(indent) + len(body) :]
+                lines.append(f"{indent}# {target}{newline}")
+                found += 1
+            else:
+                lines.append(line)
+        if found != 1:
+            self.fail(f"expected one real {target!r} line, got {found}")
+        return "".join(lines)
+
+    def test_mutation_comment_out_stdin_hook_id_goes_red(self) -> None:
+        config = self._comment_out_real_id_line("claude-plugin-run-bounded-stdin")
+        with self.assertRaises(WORKFLOW_MOD.WorkflowError) as raised:
+            WORKFLOW_MOD.assert_required_claude_plugin_hooks(config)
+        self.assertIn("claude-plugin-run-bounded-stdin", raised.exception.reason)
+
+    def test_mutation_comment_out_self_test_hook_id_goes_red(self) -> None:
+        config = self._comment_out_real_id_line("claude-plugin-install-workflow-self-test")
+        with self.assertRaises(WORKFLOW_MOD.WorkflowError) as raised:
+            WORKFLOW_MOD.assert_required_claude_plugin_hooks(config)
+        self.assertIn("claude-plugin-install-workflow-self-test", raised.exception.reason)
+
+    def test_commented_duplicate_id_does_not_replace_real_item(self) -> None:
+        hook_id = "claude-plugin-run-bounded-stdin"
+        real = f"      - id: {hook_id}"
+        config = self._config().replace(real, f"      # - id: {hook_id}\n{real}", 1)
+        WORKFLOW_MOD.assert_required_claude_plugin_hooks(config)
+
 
 if __name__ == "__main__":
     unittest.main()
