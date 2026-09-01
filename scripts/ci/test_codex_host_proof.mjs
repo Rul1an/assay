@@ -2212,6 +2212,30 @@ function writeVersionOnlyBin(name, version) {
   return bin;
 }
 
+test("version observation rejects output from a failed probe", () => {
+  const codex = path.join(scratch(), "codex");
+  writePortableNodeExecutable(
+    codex,
+    `if (process.argv.includes("--version")) {
+  process.stdout.write("codex-failed/0.0.0\\n");
+  process.exit(1);
+}
+`,
+  );
+  const mcp = writeVersionOnlyBin("assay-mcp-server", "assay-mcp-control/0.0.0");
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${path.dirname(codex)}${path.delimiter}${path.dirname(mcp)}${path.delimiter}${previousPath}`;
+  try {
+    assert.throws(
+      () => resolveHostIdentity(),
+      /version probe failed|nonzero|exit/i,
+      "version text from a failed executable must not become observed identity",
+    );
+  } finally {
+    process.env.PATH = previousPath;
+  }
+});
+
 test("F5 PATH snapshot copy enforces a binary ceiling and running growth bound; control stays green", () => {
   assert.equal(HARD_MAX_SNAPSHOT_BYTES, 536870912, "documented 512 MiB per-binary ceiling");
   assert.match(DRIVER_SRC, /HARD_MAX_SNAPSHOT_BYTES/);

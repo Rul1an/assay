@@ -8,7 +8,7 @@
  * ended and the child is SIGTERM'd, then SIGKILL after 1s if still alive.
  * That is process cleanup, not a sandbox.
  */
-import { spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -307,18 +307,23 @@ function snapshotNamedBinary(srcPath, destDir, destName, options = {}) {
   return dest;
 }
 
+function probeVersion(binary, name) {
+  try {
+    return firstVersionLine(
+      { stdout: execFileSync(binary, ["--version"], VERSION_PROBE) },
+      name,
+    );
+  } catch (error) {
+    throw new Error(`${name} version probe failed`, { cause: error });
+  }
+}
+
 function probeCodexVersion(binary) {
-  return firstVersionLine(
-    spawnSync(binary, ["--version"], VERSION_PROBE),
-    "codex",
-  );
+  return probeVersion(binary, "codex");
 }
 
 function probeAssayMcpVersion(binary) {
-  return firstVersionLine(
-    spawnSync(binary, ["--version"], VERSION_PROBE),
-    "assay-mcp-server",
-  );
+  return probeVersion(binary, "assay-mcp-server");
 }
 
 export function resolveHostIdentity(options = {}) {
