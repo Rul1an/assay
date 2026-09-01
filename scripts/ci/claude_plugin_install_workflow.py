@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import errno
+import fcntl
 import json
 import math
 import os
@@ -101,6 +103,15 @@ def terminate_tree(process: subprocess.Popen[bytes]) -> None:
         process.wait()
 
 
+def _set_nonblocking(fd: int) -> None:
+    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+    fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
+
+# Same bounded-process invariants as tests/support/bounded_process.rs
+# (#2189/#2190): one absolute deadline, separate stdout/stderr caps,
+# process-tree termination, descendant-held pipe/orphan drain, and stdin
+# supervision. POSIX-only. Not a cross-language abstraction.
 def run_bounded(
     phase: str,
     argv: list[str],
@@ -124,19 +135,18 @@ def run_bounded(
     assert process.stdout is not None
     assert process.stderr is not None
 
-    if stdin:
-        try:
-            process.stdin.write(stdin)
-            process.stdin.flush()
-        except BrokenPipeError:
-            pass
-    process.stdin.close()
-
+    deadline = time.monotonic() + timeout
     selector = selectors.DefaultSelector()
     selector.register(process.stdout, selectors.EVENT_READ, "stdout")
     selector.register(process.stderr, selectors.EVENT_READ, "stderr")
     buffers = {"stdout": bytearray(), "stderr": bytearray()}
-    deadline = time.monotonic() + timeout
+    stdin_view = memoryview(stdin) if stdin else None
+    stdin_offset = 0
+    if stdin_view is None:
+        process.stdin.close()
+    else:
+        _set_nonblocking(process.stdin.fileno())
+        selector.register(process.stdin, selectors.EVENT_WRITE, "stdin")
 
     try:
         while selector.get_map():
@@ -150,6 +160,31 @@ def run_bounded(
                 )
             events = selector.select(min(remaining, 0.1))
             for key, _ in events:
+                if key.data == "stdin":
+                    assert stdin_view is not None
+                    try:
+                        written = os.write(key.fd, stdin_view[stdin_offset:])
+                    except BlockingIOError:
+                        continue
+                    except BrokenPipeError:
+                        written = -1
+                    except OSError as exc:
+                        if exc.errno in (errno.EPIPE, errno.ECONNRESET):
+                            written = -1
+                        elif exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                            continue
+                        else:
+                            raise
+                    if written < 0 or stdin_offset + written >= len(stdin_view):
+                        selector.unregister(key.fileobj)
+                        try:
+                            process.stdin.close()
+                        except BrokenPipeError:
+                            pass
+                    if written > 0:
+                        stdin_offset += written
+                    continue
+
                 chunk = os.read(key.fd, 65_536)
                 if not chunk:
                     selector.unregister(key.fileobj)
