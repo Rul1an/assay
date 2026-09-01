@@ -598,7 +598,13 @@ export function classifyStoredEvent(event) {
     return { type: "unclassified", reason: "event is not an object" };
   }
   const method = typeof event.method === "string" && event.method.length > 0 ? event.method : null;
+  const hasId = hasOwn(event, "id");
   const hasValidId = isProofRpcId(event.id);
+  // Recorder no-id forms only: omitted field or explicit null. Not JSON-RPC generally.
+  const hasCanonicalNoId = !hasId || event.id === null;
+  if (hasId && !hasCanonicalNoId && !hasValidId) {
+    return { type: "unclassified", reason: "invalid retained-proof rpc id" };
+  }
   const hasResult = hasOwn(event, "result");
   const hasError = hasOwn(event, "error");
   switch (event.direction) {
@@ -612,7 +618,7 @@ export function classifyStoredEvent(event) {
         return { type: "client-request", method, id: event.id };
       }
       if (
-        !hasValidId &&
+        hasCanonicalNoId &&
         method &&
         ALLOWED_CLIENT_NOTIFICATIONS.includes(method) &&
         !hasResult &&
@@ -654,7 +660,7 @@ export function classifyStoredEvent(event) {
         return { type: "server-request", method, id: event.id };
       }
       if (
-        !hasValidId &&
+        hasCanonicalNoId &&
         method &&
         !hasResult &&
         !hasError &&

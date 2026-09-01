@@ -2841,3 +2841,57 @@ test("typed retained-method rows reject null/scalar params, unknown item type, a
   assert.equal(allIntendedCellsPass(control.classified), true);
   assert.equal(validateProofRoot(control.proofRoot).ok, true);
 });
+
+test("explicit invalid RPC id on a retained notification is not the canonical no-id form; control stays green", async () => {
+  // Retained-proof ID contract only. Not a general JSON-RPC uniqueness rule.
+  const { events, manifest, classified, proofRoot } = await drive("valid");
+  assert.equal(allIntendedCellsPass(classified), true);
+  assert.equal(validateProofRoot(proofRoot).ok, true);
+
+  const item = events.find(
+    (event) => event.direction === "server" && event.method === "item/completed",
+  );
+  assert.ok(item, "valid pack must retain item/completed");
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(item, "id"),
+    true,
+    "recorder stores item/completed with an explicit id field",
+  );
+  assert.equal(item.id, null, "canonical retained item/completed id is null");
+
+  const initialized = events.find(
+    (event) => event.direction === "client" && event.method === "initialized",
+  );
+  assert.ok(initialized, "valid pack must retain initialized");
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(initialized, "id"),
+    false,
+    "recorder stores initialized without an id field",
+  );
+
+  const forgedItem = structuredClone(events);
+  const forgedItemRow = forgedItem.find(
+    (event) => event.direction === "server" && event.method === "item/completed",
+  );
+  forgedItemRow.id = true;
+  assertHostileProof(
+    manifest,
+    forgedItem,
+    "explicit boolean id on item/completed must not equal absent id",
+  );
+
+  const forgedInit = structuredClone(events);
+  const forgedInitRow = forgedInit.find(
+    (event) => event.direction === "client" && event.method === "initialized",
+  );
+  forgedInitRow.id = true;
+  assertHostileProof(
+    manifest,
+    forgedInit,
+    "explicit boolean id on initialized must not equal absent id",
+  );
+
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true);
+  assert.equal(validateProofRoot(control.proofRoot).ok, true);
+});
