@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import signal
 import subprocess
@@ -667,6 +668,114 @@ class RequiredHookTableTests(unittest.TestCase):
         with self.assertRaises(WORKFLOW_MOD.WorkflowError) as raised:
             WORKFLOW_MOD.assert_required_claude_plugin_hooks("repos: [\n")
         self.assertIn("YAML", raised.exception.reason)
+
+    def _dump_yaml(self, parsed: object) -> str:
+        script = (
+            "require \"json\"; require \"yaml\"; "
+            "STDOUT.write(YAML.dump(JSON.parse(STDIN.read)))"
+        )
+        result = subprocess.run(
+            ["ruby", "-EUTF-8:UTF-8", "-e", script],
+            input=json.dumps(parsed),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def _mutate_required_hooks(self, mutator: Callable[[str, dict[str, Any], dict[str, Any]], None]) -> str:
+        parsed = WORKFLOW_MOD.load_pre_commit_yaml(self._config())
+        required = {hook_id for hook_id, _entry in WORKFLOW_MOD.REQUIRED_CLAUDE_PLUGIN_HOOKS}
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("repos"), list):
+            self.fail("pre-commit config root is not a mapping with repos")
+        for repo in parsed["repos"]:
+            if not isinstance(repo, dict) or not isinstance(repo.get("hooks"), list):
+                continue
+            for hook in repo["hooks"]:
+                if isinstance(hook, dict) and hook.get("id") in required:
+                    mutator(str(hook["id"]), repo, hook)
+        return self._dump_yaml(parsed)
+
+    def test_mutation_required_hooks_on_remote_repo_goes_red(self) -> None:
+        parsed = WORKFLOW_MOD.load_pre_commit_yaml(self._config())
+        required = {hook_id for hook_id, _entry in WORKFLOW_MOD.REQUIRED_CLAUDE_PLUGIN_HOOKS}
+        moved: list[dict[str, Any]] = []
+        assert isinstance(parsed, dict)
+        for repo in parsed["repos"]:
+            if not isinstance(repo, dict) or repo.get("repo") != "local":
+                continue
+            keep: list[Any] = []
+            for hook in repo.get("hooks") or []:
+                if isinstance(hook, dict) and hook.get("id") in required:
+                    moved.append(hook)
+                else:
+                    keep.append(hook)
+            repo["hooks"] = keep
+        parsed["repos"].append(
+            {
+                "repo": "https://github.com/pre-commit/pre-commit-hooks",
+                "rev": "v6.0.0",
+                "hooks": moved,
+            }
+        )
+        config = self._dump_yaml(parsed)
+        self._ruby_safe_load_ok(config)
+        with self.assertRaises(WORKFLOW_MOD.WorkflowError) as raised:
+            WORKFLOW_MOD.assert_required_claude_plugin_hooks(config)
+        self.assertIn("local", raised.exception.reason)
+
+    def test_mutation_self_test_manual_stage_goes_red(self) -> None:
+        def mutator(hook_id: str, _repo: dict[str, Any], hook: dict[str, Any]) -> None:
+            if hook_id == "claude-plugin-install-workflow-self-test":
+                hook["stages"] = ["manual"]
+        config = self._mutate_required_hooks(mutator)
+        with self.assertRaises(WORKFLOW_MOD.WorkflowError) as raised:
+            WORKFLOW_MOD.assert_required_claude_plugin_hooks(config)
+        self.assertIn("claude-plugin-install-workflow-self-test", raised.exception.reason)
+        self.assertIn("pre-push", raised.exception.reason)
+
+    def test_mutation_stdin_manual_stage_goes_red(self) -> None:
+        def mutator(hook_id: str, _repo: dict[str, Any], hook: dict[str, Any]) -> None:
+            if hook_id == "claude-plugin-run-bounded-stdin":
+                hook["stages"] = ["manual"]
+        config = self._mutate_required_hooks(mutator)
+        with self.assertRaises(WORKFLOW_MOD.WorkflowError) as raised:
+            WORKFLOW_MOD.assert_required_claude_plugin_hooks(config)
+        self.assertIn("claude-plugin-run-bounded-stdin", raised.exception.reason)
+        self.assertIn("pre-commit", raised.exception.reason)
+
+    def test_mutation_stdin_empty_files_selector_goes_red(self) -> None:
+        def mutator(hook_id: str, _repo: dict[str, Any], hook: dict[str, Any]) -> None:
+            if hook_id == "claude-plugin-run-bounded-stdin":
+                hook["files"] = "^$"
+        config = self._mutate_required_hooks(mutator)
+        with self.assertRaises(WORKFLOW_MOD.WorkflowError) as raised:
+            WORKFLOW_MOD.assert_required_claude_plugin_hooks(config)
+        self.assertIn("claude-plugin-run-bounded-stdin", raised.exception.reason)
+
+    def test_unrelated_local_hook_moved_remote_stays_green(self) -> None:
+        parsed = WORKFLOW_MOD.load_pre_commit_yaml(self._config())
+        assert isinstance(parsed, dict)
+        moved: list[dict[str, Any]] = []
+        for repo in parsed["repos"]:
+            if not isinstance(repo, dict) or repo.get("repo") != "local":
+                continue
+            keep: list[Any] = []
+            for hook in repo.get("hooks") or []:
+                if isinstance(hook, dict) and hook.get("id") == "claude-plugin-install-import-safe":
+                    moved.append(hook)
+                else:
+                    keep.append(hook)
+            repo["hooks"] = keep
+        parsed["repos"].append(
+            {
+                "repo": "https://github.com/pre-commit/pre-commit-hooks",
+                "rev": "v6.0.0",
+                "hooks": moved,
+            }
+        )
+        WORKFLOW_MOD.assert_required_claude_plugin_hooks(self._dump_yaml(parsed))
 
 
 if __name__ == "__main__":

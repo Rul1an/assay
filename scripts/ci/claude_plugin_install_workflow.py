@@ -1557,8 +1557,22 @@ def load_pre_commit_yaml(config: str) -> object:
         )
 
 
-def _required_hook_entries_from_repos(parsed: object) -> dict[str, list[str]]:
-    required = {hook_id: [] for hook_id, _entry in REQUIRED_CLAUDE_PLUGIN_HOOKS}
+REQUIRED_CLAUDE_PLUGIN_HOOK_STAGES: dict[str, list[str]] = {
+    "claude-plugin-install-workflow-self-test": ["pre-push"],
+    "claude-plugin-run-bounded-stdin": ["pre-commit", "pre-push"],
+}
+STDIN_HOOK_ID = "claude-plugin-run-bounded-stdin"
+STDIN_HOOK_FILE_PATHS: tuple[str, ...] = (
+    "scripts/ci/claude_plugin_install_workflow.py",
+    "scripts/ci/test_run_bounded_stdin.py",
+    ".pre-commit-config.yaml",
+)
+
+
+def _required_local_hooks(parsed: object) -> dict[str, list[dict[str, object]]]:
+    required: dict[str, list[dict[str, object]]] = {
+        hook_id: [] for hook_id, _entry in REQUIRED_CLAUDE_PLUGIN_HOOKS
+    }
     if not isinstance(parsed, dict):
         fail(
             "hook_files",
@@ -1573,7 +1587,7 @@ def _required_hook_entries_from_repos(parsed: object) -> dict[str, list[str]]:
             "keep repos as a YAML list of hook repositories",
         )
     for repo in repos:
-        if not isinstance(repo, dict):
+        if not isinstance(repo, dict) or repo.get("repo") != "local":
             continue
         hooks = repo.get("hooks")
         if not isinstance(hooks, list):
@@ -1591,34 +1605,75 @@ def _required_hook_entries_from_repos(parsed: object) -> dict[str, list[str]]:
                     f"hook {hook_id!r} is not a mapping with string id and entry",
                     "restore the required Claude plugin hook as a real YAML mapping",
                 )
-            required[hook_id].append(entry)
+            required[hook_id].append(hook)
     return required
+
+
+def _assert_hook_stages(hook_id: str, hook: dict[str, object]) -> None:
+    expected = REQUIRED_CLAUDE_PLUGIN_HOOK_STAGES[hook_id]
+    stages = hook.get("stages")
+    if stages != expected:
+        fail(
+            "hook_files",
+            f"{hook_id} stages {stages!r} is not {expected!r}",
+            "restore the required Claude plugin hook stages",
+        )
+
+
+def _assert_stdin_files_selector(hook: dict[str, object]) -> None:
+    pattern = hook.get("files")
+    if not isinstance(pattern, str) or not pattern:
+        fail(
+            "hook_files",
+            f"{STDIN_HOOK_ID} files selector is missing",
+            "restore the bounded-stdin files regex",
+        )
+    try:
+        compiled = re.compile(pattern)
+    except re.error as error:
+        fail(
+            "hook_files",
+            f"{STDIN_HOOK_ID} files selector is not a regex: {error}",
+            "keep a valid files regex for the bounded-stdin hook",
+        )
+    missing = [path for path in STDIN_HOOK_FILE_PATHS if compiled.search(path) is None]
+    if missing:
+        fail(
+            "hook_files",
+            f"{STDIN_HOOK_ID} files regex does not match {missing[0]}",
+            "keep workflow.py, the stdin test, and .pre-commit-config.yaml in the files regex",
+        )
 
 
 def assert_required_claude_plugin_hooks(config: str | None = None) -> None:
     if config is None:
         config = (SOURCE_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
-    found = _required_hook_entries_from_repos(load_pre_commit_yaml(config))
+    found = _required_local_hooks(load_pre_commit_yaml(config))
     for hook_id, entry in REQUIRED_CLAUDE_PLUGIN_HOOKS:
-        entries = found[hook_id]
-        if not entries:
+        hooks = found[hook_id]
+        if not hooks:
             fail(
                 "hook_files",
-                f"pre-commit config lost {hook_id}",
-                "restore the Claude plugin required hook",
+                f"pre-commit config lost {hook_id} under repo: local",
+                "restore the Claude plugin required hook under repo: local",
             )
-        if len(entries) != 1:
+        if len(hooks) != 1:
             fail(
                 "hook_files",
-                f"pre-commit config has {len(entries)} real list items for {hook_id}",
+                f"pre-commit config has {len(hooks)} real list items for {hook_id}",
                 "keep exactly one uncommented YAML list item per required hook id",
             )
-        if entries[0] != entry:
+        hook = hooks[0]
+        got = hook.get("entry")
+        if got != entry:
             fail(
                 "hook_files",
-                f"{hook_id} entry {entries[0]!r} is not {entry!r}",
+                f"{hook_id} entry {got!r} is not {entry!r}",
                 "restore the required Claude plugin hook entry",
             )
+        _assert_hook_stages(hook_id, hook)
+        if hook_id == STDIN_HOOK_ID:
+            _assert_stdin_files_selector(hook)
     print("required_claude_plugin_hooks=pass")
 
 
