@@ -125,6 +125,27 @@ def _set_nonblocking(phase: str, fd: int) -> None:
     fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
 
+def require_bounded_supervisor(phase: str) -> None:
+    """Refuse before spawn when killpg or fcntl cannot supervise the tree."""
+    missing: list[str] = []
+    if not callable(getattr(os, "killpg", None)):
+        missing.append("killpg")
+    try:
+        import fcntl as fcntl_mod
+    except ImportError:
+        missing.append("fcntl")
+    else:
+        if not callable(getattr(fcntl_mod, "fcntl", None)):
+            missing.append("fcntl")
+    if missing:
+        names = ", ".join(missing)
+        fail(
+            phase,
+            f"run_bounded needs POSIX supervisor; {names} unavailable on this host",
+            "run the Claude plugin workflow on a POSIX host; Windows process-tree semantics are a non-claim",
+        )
+
+
 # Same bounded-process invariants as tests/support/bounded_process.rs
 # (#2189/#2190): one absolute deadline, separate stdout/stderr caps,
 # process-tree termination, descendant-held pipe/orphan drain, and stdin
@@ -139,6 +160,7 @@ def run_bounded(
     allowed_codes: Iterable[int] = (0,),
 ) -> CommandResult:
     timeout = workflow_timeout_seconds()
+    require_bounded_supervisor(phase)
     process = subprocess.Popen(
         argv,
         cwd=cwd,
@@ -1066,6 +1088,7 @@ def self_test() -> None:
     assert_changelog_history_self_test()
     assert_changelog_contract()
     assert_hook_files_include_changelog()
+    assert_required_claude_plugin_hooks()
     assert_stream_fixture_table()
     assert_wrong_assay_tool_keeps_invoked_name()
     assert_companion_non_decide_does_not_invalidate()
@@ -1431,19 +1454,59 @@ def assert_changelog_history_self_test() -> None:
 
 
 CLAUDE_PLUGIN_HOOK_ID = "claude-plugin-install-workflow-self-test"
+REQUIRED_CLAUDE_PLUGIN_HOOKS: tuple[tuple[str, str], ...] = (
+    (
+        "claude-plugin-install-workflow-self-test",
+        "bash scripts/ci/test-claude-plugin-install.sh --self-test",
+    ),
+    (
+        "claude-plugin-run-bounded-stdin",
+        "python3 scripts/ci/test_run_bounded_stdin.py",
+    ),
+)
 
 
-def _claude_plugin_hook_block(config: str) -> str:
-    marker = f"id: {CLAUDE_PLUGIN_HOOK_ID}"
+def _hook_block_by_id(config: str, hook_id: str) -> str:
+    marker = f"id: {hook_id}"
     start = config.find(marker)
     if start < 0:
         fail(
             "hook_files",
-            "pre-commit config lost claude-plugin-install-workflow-self-test",
-            "restore the Claude plugin install self-test hook",
+            f"pre-commit config lost {hook_id}",
+            "restore the Claude plugin required hook",
         )
     nxt = config.find("\n      - id:", start + len(marker))
     return config[start:] if nxt < 0 else config[start:nxt]
+
+
+def _claude_plugin_hook_block(config: str) -> str:
+    return _hook_block_by_id(config, CLAUDE_PLUGIN_HOOK_ID)
+
+
+def _hook_entry(block: str) -> str:
+    for line in block.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("entry:"):
+            return stripped[len("entry:") :].strip()
+    fail(
+        "hook_files",
+        "required Claude plugin hook has no entry:",
+        "restore the hook entry",
+    )
+
+
+def assert_required_claude_plugin_hooks(config: str | None = None) -> None:
+    if config is None:
+        config = (SOURCE_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    for hook_id, entry in REQUIRED_CLAUDE_PLUGIN_HOOKS:
+        got = _hook_entry(_hook_block_by_id(config, hook_id))
+        if got != entry:
+            fail(
+                "hook_files",
+                f"{hook_id} entry {got!r} is not {entry!r}",
+                "restore the required Claude plugin hook entry",
+            )
+    print("required_claude_plugin_hooks=pass")
 
 
 def _hook_files_selector(block: str) -> str:
