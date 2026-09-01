@@ -907,104 +907,119 @@ test("CLI entrypoint compares canonical realpaths so aliased tmp is not a no-op"
   assert.match(result.stderr, /proof-root|project-root/i);
 });
 
-function durableProofRoot() {
-  const nest = path.join(HERE, "../../target/codex-host-proof");
+function portableLiveProofRoot() {
+  const nest = path.join(os.userInfo().homedir, ".cache", "assay-ci-codex-host-proof");
   fs.mkdirSync(nest, { recursive: true });
-  return fs.mkdtempSync(path.join(nest, "proof-"));
+  const root = fs.mkdtempSync(path.join(nest, `proof-${process.pid}-`));
+  const reason = forbiddenProofRoot(root, "live");
+  if (reason) {
+    fs.rmSync(root, { recursive: true, force: true });
+    throw new Error(`test helper allocated a forbidden live proof root: ${reason}`);
+  }
+  return root;
 }
 
 test("production live identity is observed from binaries and required before live CLI exit 0", () => {
-  const mcpBin = writeShadowMcp();
-  const live = driveCli("valid", "tool", {
-    provenance: "live",
-    allowLiveTurn: true,
-    assayMcpBin: mcpBin,
-    mcpFlag: "--assay-mcp-bin",
-    proofRoot: durableProofRoot(),
-  });
-  const manifestPath = path.join(live.proofRoot, "manifest.json");
-  assert.equal(fs.existsSync(manifestPath), true, "live CLI must still write a pack");
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-  const identity = manifest.hostIdentity;
-  assert.ok(identity && typeof identity === "object", "production CLI must construct hostIdentity");
-  assert.equal(typeof identity.os, "string");
-  assert.equal(typeof identity.arch, "string");
-  for (const role of ["codex", "assayMcp"]) {
-    assert.equal(path.isAbsolute(identity[role].path), true, `${role} path must be absolute`);
-    assert.match(identity[role].sha256, /^[a-f0-9]{64}$/);
-    assert.ok(identity[role].version.length > 0, `${role} version must be observed`);
-    assert.ok(identity[role].installSource.length > 0, `${role} install source must be recorded`);
-    assert.equal(fs.lstatSync(identity[role].path).isFile(), true);
-  }
-  assert.equal(identity.assayMcp.path, fs.realpathSync(mcpBin));
-  const events = JSON.parse(fs.readFileSync(path.join(live.proofRoot, "events.json"), "utf8"));
-  const start = events.find(
-    (event) => event.direction === "client" && event.method === "thread/start",
-  );
   assert.equal(
-    start.params.config.mcp_servers.assay.command,
-    identity.assayMcp.path,
-    "thread/start must use the resolved Assay MCP binary, not an arbitrary command",
+    forbiddenProofRoot(path.join("/tmp", `assay-live-reject-${process.pid}`), "live"),
+    "live proof root must not be temporary storage",
   );
-  const classified = JSON.parse(
-    fs.readFileSync(path.join(live.proofRoot, "classification.json"), "utf8"),
-  );
-  assert.notEqual(classified.liveAcceptance.status, "pass");
-  assert.match(
-    classified.liveAcceptance.reason,
-    /not authenticated|not tamper-evident|no-authentication/i,
-  );
-  assert.notEqual(
-    live.status,
-    0,
-    "live CLI must not exit 0 while liveAcceptance is not pass",
-  );
+  const proofRoot = portableLiveProofRoot();
+  try {
+    const mcpBin = writeShadowMcp();
+    const live = driveCli("valid", "tool", {
+      provenance: "live",
+      allowLiveTurn: true,
+      assayMcpBin: mcpBin,
+      mcpFlag: "--assay-mcp-bin",
+      proofRoot,
+    });
+    const manifestPath = path.join(live.proofRoot, "manifest.json");
+    assert.equal(fs.existsSync(manifestPath), true, "live CLI must still write a pack");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    const identity = manifest.hostIdentity;
+    assert.ok(identity && typeof identity === "object", "production CLI must construct hostIdentity");
+    assert.equal(typeof identity.os, "string");
+    assert.equal(typeof identity.arch, "string");
+    for (const role of ["codex", "assayMcp"]) {
+      assert.equal(path.isAbsolute(identity[role].path), true, `${role} path must be absolute`);
+      assert.match(identity[role].sha256, /^[a-f0-9]{64}$/);
+      assert.ok(identity[role].version.length > 0, `${role} version must be observed`);
+      assert.ok(identity[role].installSource.length > 0, `${role} install source must be recorded`);
+      assert.equal(fs.lstatSync(identity[role].path).isFile(), true);
+    }
+    assert.equal(identity.assayMcp.path, fs.realpathSync(mcpBin));
+    const events = JSON.parse(fs.readFileSync(path.join(live.proofRoot, "events.json"), "utf8"));
+    const start = events.find(
+      (event) => event.direction === "client" && event.method === "thread/start",
+    );
+    assert.equal(
+      start.params.config.mcp_servers.assay.command,
+      identity.assayMcp.path,
+      "thread/start must use the resolved Assay MCP binary, not an arbitrary command",
+    );
+    const classified = JSON.parse(
+      fs.readFileSync(path.join(live.proofRoot, "classification.json"), "utf8"),
+    );
+    assert.notEqual(classified.liveAcceptance.status, "pass");
+    assert.match(
+      classified.liveAcceptance.reason,
+      /not authenticated|not tamper-evident|no-authentication/i,
+    );
+    assert.notEqual(
+      live.status,
+      0,
+      "live CLI must not exit 0 while liveAcceptance is not pass",
+    );
 
-  const forgedRoot = scratch();
-  for (const name of ["manifest.json", "events.json", "classification.json"]) {
-    fs.copyFileSync(path.join(live.proofRoot, name), path.join(forgedRoot, name));
+    const forgedRoot = scratch();
+    for (const name of ["manifest.json", "events.json", "classification.json"]) {
+      fs.copyFileSync(path.join(live.proofRoot, name), path.join(forgedRoot, name));
+    }
+    const forgedEvents = JSON.parse(fs.readFileSync(path.join(forgedRoot, "events.json"), "utf8"));
+    const forged = JSON.parse(fs.readFileSync(path.join(forgedRoot, "manifest.json"), "utf8"));
+    forged.provenance = "live";
+    forged.hostIdentity = {
+      os: "linux",
+      arch: "x64",
+      codex: {
+        path: "/nonexistent/codex",
+        version: "forged/1",
+        sha256: "a".repeat(64),
+        installSource: "self-attested",
+      },
+      assayMcp: {
+        path: "/nonexistent/assay-mcp-server",
+        version: "forged/1",
+        sha256: "b".repeat(64),
+        installSource: "self-attested",
+      },
+    };
+    forged.hashes = { events: sha256Utf8(stableStringify(forgedEvents)) };
+    const relabeled = classifyRecord({
+      ...forged,
+      events: forgedEvents,
+      childExitCode: 0,
+      driverOutcome: { exitCode: 0, status: "pass" },
+      truncated: false,
+      streamUnavailable: false,
+    });
+    assert.notEqual(
+      relabeled.liveAcceptance.status,
+      "pass",
+      "self-attested nonexistent binary paths must not mint a live pass",
+    );
+    fs.writeFileSync(path.join(forgedRoot, "manifest.json"), stableStringify(forged));
+    fs.writeFileSync(path.join(forgedRoot, "classification.json"), stableStringify(relabeled));
+    const checked = validateProofRoot(forgedRoot);
+    assert.equal(checked.ok, false);
+    assert.notEqual(checked.classified?.liveAcceptance?.status, "pass");
+
+    const control = driveCli("valid", "discovery");
+    assert.ok(control.stdout.includes("synthetic") || control.status !== undefined);
+  } finally {
+    fs.rmSync(proofRoot, { recursive: true, force: true });
   }
-  const forgedEvents = JSON.parse(fs.readFileSync(path.join(forgedRoot, "events.json"), "utf8"));
-  const forged = JSON.parse(fs.readFileSync(path.join(forgedRoot, "manifest.json"), "utf8"));
-  forged.provenance = "live";
-  forged.hostIdentity = {
-    os: "linux",
-    arch: "x64",
-    codex: {
-      path: "/nonexistent/codex",
-      version: "forged/1",
-      sha256: "a".repeat(64),
-      installSource: "self-attested",
-    },
-    assayMcp: {
-      path: "/nonexistent/assay-mcp-server",
-      version: "forged/1",
-      sha256: "b".repeat(64),
-      installSource: "self-attested",
-    },
-  };
-  forged.hashes = { events: sha256Utf8(stableStringify(forgedEvents)) };
-  const relabeled = classifyRecord({
-    ...forged,
-    events: forgedEvents,
-    childExitCode: 0,
-    driverOutcome: { exitCode: 0, status: "pass" },
-    truncated: false,
-    streamUnavailable: false,
-  });
-  assert.notEqual(
-    relabeled.liveAcceptance.status,
-    "pass",
-    "self-attested nonexistent binary paths must not mint a live pass",
-  );
-  fs.writeFileSync(path.join(forgedRoot, "manifest.json"), stableStringify(forged));
-  fs.writeFileSync(path.join(forgedRoot, "classification.json"), stableStringify(relabeled));
-  const checked = validateProofRoot(forgedRoot);
-  assert.equal(checked.ok, false);
-  assert.notEqual(checked.classified?.liveAcceptance?.status, "pass");
-
-  const control = driveCli("valid", "discovery");
-  assert.ok(control.stdout.includes("synthetic") || control.status !== undefined);
 });
 
 test("production spawn ignores user childArgv and rejects --mcp-command", async () => {
