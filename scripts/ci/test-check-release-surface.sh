@@ -824,6 +824,31 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
+rewrite_and_expect_failure plugin-unclosed-bash-fence "$RECIPE_FILE" \
+  'plugin bash fence is not closed at its own boundary' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+
+### Update stale state
+
+```sh
+claude plugin update assay@assay --scope local
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+
 rewrite_and_expect_failure plugin-continued-cargo-install "$RECIPE_FILE" \
   'continued cargo install is not a published pin' <<'MD'
 Codex uses .codex/config.toml.
@@ -845,8 +870,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 93 ]; then
-  echo "FAIL: expected 93 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 94 ]; then
+  echo "FAIL: expected 94 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

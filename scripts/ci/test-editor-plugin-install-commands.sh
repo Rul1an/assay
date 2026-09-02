@@ -242,6 +242,34 @@ MD
 expect_fail 'split CLI/MCP commands across two bash fences' \
   'expected exactly one bash fence in the plugin section'
 
+echo '== the plugin bash fence must close before a later fenced block =='
+write_recipe <<'MD'
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+
+### Update stale state
+
+```sh
+claude plugin update assay@assay --scope local
+```
+MD
+expect_fail 'later fenced block cannot close the plugin bash fence' \
+  'plugin bash fence is not closed at its own boundary'
+
+write_recipe <<'MD'
+## Install the Claude Code plugin
+
+```bash
+assay version
+MD
+expect_fail 'plugin bash fence left open at end of file' \
+  'plugin bash fence is not closed at its own boundary'
+
 echo '== quoted and continued lines are emitted as standalone text =='
 write_recipe <<'MD'
 ## Install the Claude Code plugin

@@ -35,8 +35,11 @@ editor_plugin_install_commands() {
       rest = substr(fence_line, width + 1)
       if (fence) {
         if (mark == fence_mark && width >= fence_width && rest ~ /^[ \t]*$/) {
+          if (section && bash_fence) bash_fence_close_count++
           fence = 0
           bash_fence = 0
+        } else if (section && bash_fence) {
+          nested_fence_before_close = 1
         }
       } else {
         fence = 1
@@ -68,6 +71,10 @@ editor_plugin_install_commands() {
       }
       if (bash_fence_count != 1) {
         print "expected exactly one bash fence in the plugin section" > "/dev/stderr"
+        exit 1
+      }
+      if (bash_fence_close_count != 1 || nested_fence_before_close) {
+        print "plugin bash fence is not closed at its own boundary" > "/dev/stderr"
         exit 1
       }
       if (ncmds) print cmds
