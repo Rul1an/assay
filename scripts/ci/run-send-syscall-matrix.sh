@@ -305,15 +305,18 @@ isolate_pid() {
   echo "$leaf"
 }
 
+prepare_matrix_artifacts() {
+  FIFO=go.fifo
+  LOG=monitor.log
+  HOUT=harness.out
+  OH=observation-health.json
+  mkfifo "$FIFO"
+}
+
 run_matrix() {
   local expect_send="$1" n=0 hpid="" hc=0 mc=0 p2 p3
   create_owned_workdir
-  FIFO="$WORKDIR/go.fifo"
-  LOG="$WORKDIR/monitor.log"
-  HOUT="$WORKDIR/harness.out"
-  OH="$WORKDIR/observation-health.json"
-  rm -f "$FIFO" "$LOG" "$HOUT" "$OH"
-  mkfifo "$FIFO"
+  prepare_matrix_artifacts
 
   echo "kernel=$(uname -r) host=$(uname -n) mode=$MODE"
   echo "object=$(sha256sum "$ASSAY_EBPF" | awk '{print $1}')"
@@ -600,6 +603,20 @@ case "$MODE" in
     printf 'SELFTEST_WORKDIR=%s\n' "$owned"
     printf 'SELFTEST_REBOUND_WORKDIR=%s\n' "$moved"
     exit 0 ;;
+  workdir-startup-rebind-selftest)
+    create_owned_workdir
+    owned=$WORKDIR
+    moved="${WORKDIR}-moved"
+    [[ ! -e "$moved" ]] || fail "startup rebind target exists: $moved"
+    mv "$owned" "$moved"
+    mkdir "$owned"
+    for artifact in go.fifo monitor.log harness.out observation-health.json; do
+      printf 'foreign:%s\n' "$artifact" >"$owned/$artifact"
+    done
+    prepare_matrix_artifacts
+    printf 'SELFTEST_WORKDIR=%s\n' "$owned"
+    printf 'SELFTEST_REBOUND_WORKDIR=%s\n' "$moved"
+    exit 0 ;;
   coverage-gate) coverage_gate "${2:?coverage-gate requires a JSON path}" ;;
   mutation-selftest) mutation_selftest ;;
   endpoint-line-selftest)
@@ -628,5 +645,5 @@ case "$MODE" in
     LOG="${2:?}"
     HOUT="${3:?}"
     fail "diagnostics-selftest" ;;
-  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|cleanup-leaf-status-selftest|workdir-create-selftest|workdir-rebind-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest|diagnostics-selftest" ;;
+  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|cleanup-leaf-status-selftest|workdir-create-selftest|workdir-rebind-selftest|workdir-startup-rebind-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest|diagnostics-selftest" ;;
 esac

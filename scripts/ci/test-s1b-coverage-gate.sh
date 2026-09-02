@@ -292,12 +292,7 @@ want_run_matrix=$(cat <<'EOF'
 run_matrix() {
 local expect_send="$1" n=0 hpid="" hc=0 mc=0 p2 p3
 create_owned_workdir
-FIFO="$WORKDIR/go.fifo"
-LOG="$WORKDIR/monitor.log"
-HOUT="$WORKDIR/harness.out"
-OH="$WORKDIR/observation-health.json"
-rm -f "$FIFO" "$LOG" "$HOUT" "$OH"
-mkfifo "$FIFO"
+prepare_matrix_artifacts
 echo "kernel=$(uname -r) host=$(uname -n) mode=$MODE"
 echo "object=$(sha256sum "$ASSAY_EBPF" | awk '{print $1}')"
 "$HARNESS_BIN" "$FIFO" >"$HOUT" 2>&1 &
@@ -343,6 +338,19 @@ EOF
 )
 [[ "$run_matrix_active" == "$want_run_matrix" ]] \
   || fail "run_matrix active body must be the closed startup-then-assert shape"
+prepare_matrix_active=$(fn_active prepare_matrix_artifacts)
+want_prepare_matrix=$(cat <<'EOF'
+prepare_matrix_artifacts() {
+FIFO=go.fifo
+LOG=monitor.log
+HOUT=harness.out
+OH=observation-health.json
+mkfifo "$FIFO"
+}
+EOF
+)
+[[ "$prepare_matrix_active" == "$want_prepare_matrix" ]] \
+  || fail "prepare_matrix_artifacts active body must match the closed artifact setup"
 wait_ep_block=$(printf '%s\n' \
   'wait_endpoint "$hpid" sendto "127.0.0.1" "$p2"' \
   'wait_endpoint "$hpid" sendmsg "127.0.0.1" "$p3"')
@@ -866,6 +874,30 @@ rebind_residue_count=$(grep -cFx \
 [[ -d "$rebind_moved" ]] || fail "rebound owned object missing: $rebind_moved"
 [[ -z "$(find "$rebind_moved" -mindepth 1 -maxdepth 1 -print -quit)" ]] \
   || fail "rebound owned object contents were not cleaned"
+
+set +e
+RUNNER_TEMP="$ownership_rt" run_bounded 12 bash "$DRIVER" workdir-startup-rebind-selftest \
+  >"$tmp/workdir-startup-rebind.out" 2>"$tmp/workdir-startup-rebind.err"
+startup_rebind_ec=$?
+set -e
+[[ "$startup_rebind_ec" -eq 1 ]] \
+  || fail "workdir startup rebind returned $startup_rebind_ec, expected 1"
+startup_owned=$(sed -n 's/^SELFTEST_WORKDIR=//p' "$tmp/workdir-startup-rebind.out")
+startup_moved=$(sed -n 's/^SELFTEST_REBOUND_WORKDIR=//p' "$tmp/workdir-startup-rebind.out")
+startup_residue_count=$(grep -cFx \
+  "S1B_WORKDIR_RESIDUE path=$startup_owned reason=path_rebound" \
+  "$tmp/workdir-startup-rebind.err" || true)
+[[ "$startup_residue_count" -eq 1 ]] \
+  || fail "workdir startup rebind emitted $startup_residue_count named residue dispositions, expected 1"
+for artifact in go.fifo monitor.log harness.out observation-health.json; do
+  [[ -f "$startup_owned/$artifact" ]] \
+    || fail "startup cleanup deleted rebound foreign artifact: $artifact"
+  grep -qxF "foreign:$artifact" "$startup_owned/$artifact" \
+    || fail "startup cleanup replaced rebound foreign artifact: $artifact"
+done
+[[ -d "$startup_moved" ]] || fail "startup rebound owned object missing: $startup_moved"
+[[ -z "$(find "$startup_moved" -mindepth 1 -maxdepth 1 -print -quit)" ]] \
+  || fail "startup rebound owned object contents were not cleaned"
 
 prefix_owner_driver="$tmp/prefix-owner-driver.sh"
 cp "$DRIVER" "$prefix_owner_driver"
