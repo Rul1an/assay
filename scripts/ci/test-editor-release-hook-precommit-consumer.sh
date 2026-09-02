@@ -479,6 +479,22 @@ def main() -> None:
             raise SystemExit(1)
         return
 
+    if action == "check-trusted-prefix":
+        import importlib.util
+        checker_path = rest[0]
+        spec = importlib.util.spec_from_file_location(
+            "conformance_inventory_callsite", checker_path
+        )
+        if spec is None or spec.loader is None:
+            raise SystemExit(f"cannot load {checker_path}")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        problems = mod.hardening_guard_callsite_problems(src)
+        if problems:
+            sys.stderr.write("\n".join(problems) + "\n")
+            raise SystemExit(1)
+        return
+
     if action == "mutate-ci":
         kind = rest[0]
         if src.count(CI_CONSUMER_STEP) != 1:
@@ -519,6 +535,18 @@ def main() -> None:
                     CI_CONSUMER_STEP_HEAD + "        continue-on-error: true\n",
                     1,
                 ),
+                encoding="utf-8",
+            )
+            return
+        if kind == "before-hardening":
+            heading = "      - name: Verify CI hardening contracts\n"
+            if src.count(heading) != 1:
+                raise SystemExit("hardening step heading is not unique")
+            without = src.replace(CI_CONSUMER_STEP, "", 1)
+            if without.count(heading) != 1:
+                raise SystemExit("hardening heading lost after consumer removal")
+            Path(dest).write_text(
+                without.replace(heading, CI_CONSUMER_STEP + "\n" + heading, 1),
                 encoding="utf-8",
             )
             return
@@ -748,6 +776,22 @@ check_ci_producer() {
   cfg check-ci "$path" "$path" "$RULESET"
 }
 
+CALLSITE="$ROOT/scripts/ci/check-conformance-inventory-callsite.py"
+
+check_trusted_prefix() {
+  local path="$1"
+  cfg check-trusted-prefix "$path" "$path" "$CALLSITE"
+}
+
+expect_prefix_red() {
+  local label="$1" config="$2"
+  if check_trusted_prefix "$config" >"$TMP/$label.prefix" 2>&1; then
+    fail "$label — trusted-prefix checker stayed green"
+  else
+    ok "RED $label"
+  fi
+}
+
 expect_ci_red() {
   local label="$1" config="$2"
   if check_ci_producer "$config" >"$TMP/$label.ci" 2>&1; then
@@ -781,6 +825,13 @@ if check_ci_producer "$CI_WORKFLOW"; then
   ok 'live CI job direct consumer invocation reaches required context'
 else
   fail 'live CI job direct consumer invocation reaches required context'
+fi
+
+echo '== live trusted prefix =='
+if check_trusted_prefix "$CI_WORKFLOW"; then
+  ok 'live hardening step follows checkout + setup-python'
+else
+  fail 'live hardening step follows checkout + setup-python'
 fi
 
 echo '== pin behavior: unmutated consumer must fail closed =='
@@ -850,6 +901,10 @@ expect_ci_red 'if: false on required-CI consumer step' "$TMP/ci-if-false.yml"
 cfg mutate-ci "$CI_WORKFLOW" "$TMP/ci-continue.yml" continue-on-error
 expect_ci_red 'continue-on-error on required-CI consumer step' \
   "$TMP/ci-continue.yml"
+
+cfg mutate-ci "$CI_WORKFLOW" "$TMP/ci-before-hardening.yml" before-hardening
+expect_prefix_red 'consumer step between setup-python and hardening' \
+  "$TMP/ci-before-hardening.yml"
 
 cfg mutate "$CONFIG" "$TMP/flow-dup-editor.yaml" flow-duplicate "$EDITOR_ID"
 expect_wiring_red 'flow-mapping duplicate of editor-mcp-recipe-truth' \

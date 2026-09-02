@@ -1091,14 +1091,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Editor-release hook pre-commit consumer
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m pip install --user pre-commit==4.4.0
-          export PATH="$HOME/.local/bin:$PATH"
-          bash scripts/ci/test-editor-release-hook-precommit-consumer.sh
-
       - name: Verify CI hardening contracts
         shell: bash
         env:
@@ -1121,6 +1113,14 @@ jobs:
           set -euo pipefail
           python3 scripts/ci/check-ci-gate-coverage.py
           python3 scripts/ci/check-conformance-inventory-callsite.py
+
+      - name: Editor-release hook pre-commit consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --user pre-commit==4.4.0
+          export PATH="$HOME/.local/bin:$PATH"
+          bash scripts/ci/test-editor-release-hook-precommit-consumer.sh
 
       - name: Verify review-record workflow contract
         shell: bash

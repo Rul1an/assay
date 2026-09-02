@@ -43,7 +43,7 @@ the installed plugin cache.
 
 ### Update and inspect stale state
 
-Plugin updates require a restart to take effect:
+Plugin updates may activate immediately. If the current session still shows stale plugin state, run `/reload-plugins` in Claude Code or restart the session before inspecting.
 
 ```sh
 claude plugin marketplace update assay

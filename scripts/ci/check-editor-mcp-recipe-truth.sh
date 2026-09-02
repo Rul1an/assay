@@ -124,6 +124,10 @@ fi
 # recipe's real content.
 require 'local stdio wrap claim retained' '(assay mcp wrap|`assay mcp wrap`)'
 require 'proxy-enforce claim retained' 'proxy-enforce'
+# Plugin updates can take effect without a restart (`/reload-plugins`, some
+# installs). An unconditional restart claim is too strong for this recipe.
+forbid 'unconditional plugin-update restart claim' \
+  'plugin updates require a restart'
 
 # Keep these as standalone commands in this recipe, not a general shell/Markdown grammar.
 # Comments, prose, and commands in a different H2 section cannot satisfy plugin prerequisites.

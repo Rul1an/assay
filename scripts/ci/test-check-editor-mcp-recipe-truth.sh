@@ -250,6 +250,12 @@ write_clean
 printf 'It will be finalised once the spec is final.\n' >> "$TMP/recipe.md"
 expect_fail 'future-tense promise rejected' 'future-tense specification promise'
 
+echo '== plugin updates must not require an unconditional restart =='
+write_clean
+printf 'Plugin updates require a restart to take effect:\n' >> "$TMP/recipe.md"
+expect_fail 'unconditional restart wording rejected' \
+  'unconditional plugin-update restart claim'
+
 echo '== drift 3a: remote OAuth/OIDC instruction =='
 write_clean
 printf 'Align the wrapped server to that OAuth 2.1 / OIDC flow with PKCE.\n' >> "$TMP/recipe.md"
