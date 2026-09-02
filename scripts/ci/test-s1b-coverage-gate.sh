@@ -862,6 +862,7 @@ rebind_residue_count=$(grep -cFx \
 [[ "$rebind_residue_count" -eq 1 ]] \
   || fail "workdir rebind emitted $rebind_residue_count named residue dispositions, expected 1"
 [[ -f "$rebind_owned/foreign" ]] || fail "rebound foreign replacement was modified or deleted"
+[[ -p "$rebind_owned/go.fifo" ]] || fail "rebound foreign FIFO was modified or deleted"
 [[ -d "$rebind_moved" ]] || fail "rebound owned object missing: $rebind_moved"
 [[ -z "$(find "$rebind_moved" -mindepth 1 -maxdepth 1 -print -quit)" ]] \
   || fail "rebound owned object contents were not cleaned"

@@ -193,7 +193,6 @@ cleanup() {
   for pid in "${MONITOR_PID:-}" "${HARNESS_PID:-}"; do
     reap_pid "$pid"
   done
-  [[ -z "${FIFO:-}" ]] || rm -f "$FIFO"
   if [[ -n "${LEAF:-}" && -d "$LEAF" ]]; then
     if ! rmdir "$LEAF" 2>/dev/null; then
       printf 'S1B_LEAF_RESIDUE path=%s\n' "$LEAF" >&2
@@ -591,10 +590,13 @@ case "$MODE" in
     owned=$WORKDIR
     moved="${WORKDIR}-moved"
     [[ ! -e "$moved" ]] || fail "rebind target exists: $moved"
+    FIFO="$WORKDIR/go.fifo"
+    mkfifo "$FIFO"
     printf 'owned\n' >"$WORKDIR/selftest-owned"
     mv "$owned" "$moved"
     mkdir "$owned"
     printf 'foreign\n' >"$owned/foreign"
+    mkfifo "$owned/go.fifo"
     printf 'SELFTEST_WORKDIR=%s\n' "$owned"
     printf 'SELFTEST_REBOUND_WORKDIR=%s\n' "$moved"
     exit 0 ;;
