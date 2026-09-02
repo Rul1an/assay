@@ -16,8 +16,8 @@ From the project where Claude Code should use Assay:
 
 ```bash
 # 1. Install both prerequisites and confirm they are on PATH.
-cargo install assay-cli --locked
-cargo install assay-mcp-server --locked
+cargo install assay-cli --version 5.5.2 --locked
+cargo install assay-mcp-server --version 5.5.2 --locked
 assay version
 assay-mcp-server --version
 
@@ -27,6 +27,7 @@ claude plugin install assay@assay --scope local
 
 # 3. Verify that the installed plugin can start the server.
 claude mcp list
+# assay-editor-plugin-install-commands:end
 ```
 
 Restart Claude Code after installation, then ask it to use
@@ -42,9 +43,9 @@ the installed plugin cache.
 
 ### Update and inspect stale state
 
-Plugin updates require a restart to take effect:
+Plugin updates may activate immediately. If the current session still shows stale plugin state, run `/reload-plugins` in Claude Code or restart the session before inspecting.
 
-```bash
+```sh
 claude plugin marketplace update assay
 claude plugin update assay@assay --scope local
 claude plugin list --json
@@ -70,7 +71,7 @@ but installing it does not prove provider execution or external side effects.
 Maintainers can exercise the bounded, disposable installation contract without
 touching their normal Claude configuration:
 
-```bash
+```sh
 bash scripts/ci/test-claude-plugin-install.sh --self-test
 ```
 

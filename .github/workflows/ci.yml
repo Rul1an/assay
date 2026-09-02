@@ -1120,6 +1120,14 @@ jobs:
           set -euo pipefail
           python3 scripts/ci/check-review-record-workflow.py
 
+      - name: Editor-release hook pre-commit consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --user pre-commit==4.4.0
+          export PATH="$HOME/.local/bin:$PATH"
+          bash scripts/ci/test-editor-release-hook-precommit-consumer.sh
+
       - name: Evaluate required job results
         env:
           SCOPE_RESULT: ${{ needs.scope.result }}

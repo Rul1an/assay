@@ -35,6 +35,7 @@ cargo install assay-cli --locked
 cargo install assay-mcp-server --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## The wrap command
@@ -85,8 +86,7 @@ write_clean
 expect_pass 'clean fixture passes'
 
 echo '== plugin prerequisites must be commands in the plugin installation section =='
-for command in 'cargo install assay-cli --locked' 'cargo install assay-mcp-server --locked' \
-  'assay version' 'assay-mcp-server --version'; do
+for command in 'assay version' 'assay-mcp-server --version'; do
   for mode in delete comment prose elsewhere; do
     write_clean
     awk -v command="$command" -v mode="$mode" '
@@ -108,6 +108,110 @@ write_clean
 printf '\n<!-- unchanged executable recipe -->\n' >> "$TMP/recipe.md"
 expect_pass 'comment-only no-op preserves prerequisites'
 
+echo '== split version probes across duplicate H2 / fences must fail closed =='
+cat > "$TMP/recipe.md" <<'MD'
+# Editor MCP Recipe
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --locked
+assay version
+```
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-mcp-server --locked
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+```
+
+## The wrap command
+
+Run `assay mcp wrap` to enforce policy at the protocol boundary.
+Use `assay-mcp-server proxy-enforce` for the enforcing path.
+MD
+expect_fail 'split version probes across two plugin H2s' \
+  'expected exactly one plugin install heading'
+
+cat > "$TMP/recipe.md" <<'MD'
+# Editor MCP Recipe
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --locked
+assay version
+```
+
+```bash
+cargo install assay-mcp-server --locked
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+```
+
+## The wrap command
+
+Run `assay mcp wrap` to enforce policy at the protocol boundary.
+Use `assay-mcp-server proxy-enforce` for the enforcing path.
+MD
+expect_fail 'split version probes across two bash fences' \
+  'expected exactly one bash fence in the plugin section'
+
+cat > "$TMP/recipe.md" <<'MD'
+# Editor MCP Recipe
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --locked
+cargo install assay-mcp-server --locked
+assay version
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+
+### Update stale state
+
+```sh
+claude plugin update assay@assay --scope local
+```
+
+## The wrap command
+
+Run `assay mcp wrap` to enforce policy at the protocol boundary.
+Use `assay-mcp-server proxy-enforce` for the enforcing path.
+MD
+expect_fail 'later fenced block cannot close the plugin bash fence' \
+  'plugin bash fence is not closed at its own boundary'
+
+cat > "$TMP/recipe.md" <<'MD'
+# Editor MCP Recipe
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --locked
+cargo install assay-mcp-server --locked
+assay version
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+
+Continue with the verification notes below.
+
+## Verify the installation
+Run both version probes before continuing.
+```
+
+## The wrap command
+
+Run `assay mcp wrap` to enforce policy at the protocol boundary.
+Use `assay-mcp-server proxy-enforce` for the enforcing path.
+MD
+expect_fail 'later bare fence cannot close across an apparent next H2' \
+  'plugin bash fence end marker must immediately precede its close'
+
+
 echo '== fenced examples cannot impersonate the plugin section =='
 for fence in '```' '````' '~~~' '   ~~~'; do
   write_clean
@@ -118,7 +222,7 @@ for fence in '```' '````' '~~~' '   ~~~'; do
   ' "$TMP/recipe.md" > "$TMP/edited.md"
   mv "$TMP/edited.md" "$TMP/recipe.md"
   expect_fail "plugin section inside $fence example" \
-    'plugin prerequisite command missing: cargo install assay-cli --locked'
+    'expected exactly one plugin install heading'
 done
 for heading in '## shell comment' '### subheading-shaped shell comment'; do
   write_clean
@@ -145,6 +249,12 @@ echo '== drift 2: future-tense specification promise =='
 write_clean
 printf 'It will be finalised once the spec is final.\n' >> "$TMP/recipe.md"
 expect_fail 'future-tense promise rejected' 'future-tense specification promise'
+
+echo '== plugin updates must not require an unconditional restart =='
+write_clean
+printf 'Plugin updates require a restart to take effect:\n' >> "$TMP/recipe.md"
+expect_fail 'unconditional restart wording rejected' \
+  'unconditional plugin-update restart claim'
 
 echo '== drift 3a: remote OAuth/OIDC instruction =='
 write_clean
@@ -197,14 +307,64 @@ write_clean
 printf 'Rendered in a sandboxed-iframe host.\n' >> "$TMP/recipe.md"
 expect_fail 'hyphenated sandboxed-iframe rejected' 'MCP UI / sandboxed-iframe instruction'
 
-echo '== CI wiring: a recipe-only change must execute this guard =='
+echo '== CI wiring: recipe, extractor, and extractor self-test must reach this guard =='
 # The guard is only worth its rules if a drift actually reaches it. The pre-commit hook covers
 # the local path; CI coverage depends on the one workflow that runs `pre-commit run --all-files`
 # selecting the recipe, and `scripts/**` does not help because a recipe-only drift touches no
 # script. Asserted here rather than in a workflow-wide contract so the rule that judges this
 # file also owns the wiring that reaches it.
+#
+# files: and entry are mutation-pinned: a live-only assert already passes on this tree and
+# would not catch deleting the extractor path or dropping the extractor self-test from entry.
+
+EXTRACTOR_LIB='scripts/ci/lib/editor-plugin-install-commands.sh'
+EXTRACTOR_SELFTEST='scripts/ci/test-editor-plugin-install-commands.sh'
+RECIPE_PATH='docs/guides/editor-mcp-recipe.md'
+CONSUMER_CONTRACT='scripts/ci/test-editor-release-hook-precommit-consumer.sh'
+
+check_editor_hook_wiring() {
+  python3 - "$1" "$RECIPE_PATH" "$EXTRACTOR_LIB" "$EXTRACTOR_SELFTEST" "$CONSUMER_CONTRACT" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+cfg_path, recipe, extractor, selftest, contract = sys.argv[1:6]
+problems = []
+cfg = Path(cfg_path).read_text(encoding="utf-8")
+hook = re.search(
+    r"(?ms)^      - id: editor-mcp-recipe-truth\n(.*?)(?=^      - id: |\Z)",
+    cfg,
+)
+if not hook:
+    problems.append(".pre-commit-config.yaml: hook editor-mcp-recipe-truth not found")
+else:
+    files = re.search(r"^\s*files:\s*(\S+)\s*$", hook.group(1), re.M)
+    if not files:
+        problems.append("editor-mcp-recipe-truth: no files: selector")
+    else:
+        pattern = re.compile(files.group(1))
+        for path in (recipe, extractor, selftest, contract):
+            if not pattern.search(path):
+                problems.append(
+                    f"editor-mcp-recipe-truth: files: selector does not match {path}"
+                )
+    entry = re.search(r"^\s*entry:\s*(.+?)\s*$", hook.group(1), re.M)
+    if not entry:
+        problems.append("editor-mcp-recipe-truth: no entry:")
+    elif selftest not in entry.group(1):
+        problems.append(
+            f"editor-mcp-recipe-truth: entry does not invoke {selftest}"
+        )
+
+if problems:
+    print("\n".join(problems), file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 cases=$((cases + 1))
-if RECIPE_PATH='docs/guides/editor-mcp-recipe.md' python3 - "$ROOT" <<'PY'
+wf_ok=0
+if RECIPE_PATH="$RECIPE_PATH" python3 - "$ROOT" <<'PY'
 import os, re, sys
 
 root = sys.argv[1]
@@ -238,31 +398,100 @@ for name in runners:
             "a recipe-only drift would not execute the guard in CI"
         )
 
-# 3. The pre-commit hook that runs the guard must also select the recipe locally.
-cfg = open(os.path.join(root, ".pre-commit-config.yaml"), encoding="utf-8").read()
-hook = re.search(
-    r"(?ms)^      - id: editor-mcp-recipe-truth\n(.*?)(?=^      - id: |\Z)", cfg
-)
-if not hook:
-    problems.append(".pre-commit-config.yaml: hook editor-mcp-recipe-truth not found")
-else:
-    files = re.search(r"^\s*files:\s*(\S+)\s*$", hook.group(1), re.M)
-    if not files:
-        problems.append("editor-mcp-recipe-truth: no files: selector")
-    elif not re.search(files.group(1), recipe):
-        problems.append(
-            f"editor-mcp-recipe-truth: files: selector does not match {recipe}"
-        )
-
 if problems:
     print("\n".join(problems), file=sys.stderr)
     sys.exit(1)
 PY
 then
+  wf_ok=1
+fi
+if [ "$wf_ok" -eq 1 ] && check_editor_hook_wiring "$ROOT/.pre-commit-config.yaml"; then
   printf 'ok   a recipe-only change reaches the guard locally and in CI\n'
 else
   failures=$((failures + 1))
   printf 'FAIL: recipe-only change would not execute the guard\n'
+fi
+
+cases=$((cases + 1))
+cp "$ROOT/.pre-commit-config.yaml" "$TMP/pre-commit-drop-extractor.yaml"
+if python3 - "$TMP/pre-commit-drop-extractor.yaml" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+hook = re.search(
+    r"(?ms)^      - id: editor-mcp-recipe-truth\n(.*?)(?=^      - id: |\Z)",
+    text,
+)
+if not hook:
+    raise SystemExit("editor-mcp-recipe-truth hook not found")
+block = hook.group(0)
+needle = "lib/editor-plugin-install-commands|"
+if needle not in block:
+    raise SystemExit("extractor files: token not found in hook")
+new_block = block.replace(needle, "", 1)
+path.write_text(text[:hook.start()] + new_block + text[hook.end():], encoding="utf-8")
+PY
+then
+  if check_editor_hook_wiring "$TMP/pre-commit-drop-extractor.yaml" \
+    >"$TMP/drop-extractor.out" 2>&1
+  then
+    failures=$((failures + 1))
+    printf 'FAIL: dropping extractor from files: was not observed\n'
+  elif grep -Fq "files: selector does not match $EXTRACTOR_LIB" "$TMP/drop-extractor.out"
+  then
+    printf 'ok   files: mutation dropping extractor is observed\n'
+  else
+    failures=$((failures + 1))
+    printf 'FAIL: extractor files: mutation missed diagnostic\n%s\n' \
+      "$(cat "$TMP/drop-extractor.out")"
+  fi
+else
+  failures=$((failures + 1))
+  printf 'FAIL: could not drop extractor from files: selector\n'
+fi
+
+cases=$((cases + 1))
+cp "$ROOT/.pre-commit-config.yaml" "$TMP/pre-commit-drop-selftest.yaml"
+if python3 - "$TMP/pre-commit-drop-selftest.yaml" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+hook = re.search(
+    r"(?ms)^      - id: editor-mcp-recipe-truth\n(.*?)(?=^      - id: |\Z)",
+    text,
+)
+if not hook:
+    raise SystemExit("editor-mcp-recipe-truth hook not found")
+block = hook.group(0)
+needle = "bash scripts/ci/test-editor-plugin-install-commands.sh && "
+if needle not in block:
+    raise SystemExit("extractor self-test entry token not found in hook")
+new_block = block.replace(needle, "", 1)
+path.write_text(text[:hook.start()] + new_block + text[hook.end():], encoding="utf-8")
+PY
+then
+  if check_editor_hook_wiring "$TMP/pre-commit-drop-selftest.yaml" \
+    >"$TMP/drop-selftest.out" 2>&1
+  then
+    failures=$((failures + 1))
+    printf 'FAIL: dropping extractor self-test from entry was not observed\n'
+  elif grep -Fq "entry does not invoke $EXTRACTOR_SELFTEST" "$TMP/drop-selftest.out"
+  then
+    printf 'ok   entry mutation dropping extractor self-test is observed\n'
+  else
+    failures=$((failures + 1))
+    printf 'FAIL: extractor self-test entry mutation missed diagnostic\n%s\n' \
+      "$(cat "$TMP/drop-selftest.out")"
+  fi
+else
+  failures=$((failures + 1))
+  printf 'FAIL: could not drop extractor self-test from entry\n'
 fi
 
 echo '== a missing recipe fails closed =='

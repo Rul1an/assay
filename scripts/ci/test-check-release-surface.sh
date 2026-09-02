@@ -8,13 +8,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-mkdir -p "$TMP/scripts/ci" "$TMP/.github" "$TMP/docs/getting-started" "$TMP/docs/reference/cli" \
+mkdir -p "$TMP/scripts/ci/lib" "$TMP/.github" "$TMP/docs/getting-started" "$TMP/docs/reference/cli" \
   "$TMP/docs/python-sdk" "$TMP/docs/use-cases" "$TMP/docs/AIcontext" "$TMP/docs/guides" \
   "$TMP/examples/mcp-quickstart" "$TMP/crates/assay-x" "$TMP/bin" "$TMP/.devcontainer" \
   "$TMP/demo"
 cp "$ROOT/scripts/ci/check-release-surface.sh" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/release_readme.py" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/read-assay-release-tag.sh" "$TMP/scripts/ci/"
+cp "$ROOT/scripts/ci/lib/editor-plugin-install-commands.sh" "$TMP/scripts/ci/lib/"
 cp "$ROOT/.pre-commit-config.yaml" "$TMP/"
 printf '%s\n' 'v5.1.0' > "$TMP/.github/assay-release-tag"
 cat > "$TMP/SECURITY.md" <<'DOC'
@@ -126,7 +127,25 @@ Assay CLI via the release installer.
 For v5.5.2, run this from a source checkout or an extracted published CLI archive. The installer is binary-only and does not carry this bounded quickstart.
 DOC
 printf '%s\n' 'Current release: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0)' > "$TMP/docs/index.md"
-printf '%s\n' 'Codex uses .codex/config.toml.' > "$TMP/docs/guides/editor-mcp-recipe.md"
+cat > "$TMP/docs/guides/editor-mcp-recipe.md" <<'DOC'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+DOC
 printf '%s\n' 'Docs: https://docs.getassay.dev' > "$TMP/.devcontainer/welcome.sh"
 cat > "$TMP/demo/CODESPACES-PLAYBOOK.md" <<'DOC'
 Docs: https://docs.getassay.dev
@@ -171,6 +190,9 @@ for path in (
     "SECURITY.md",
     "docs/COMMUNITY.md",
     "mkdocs.yml",
+    "scripts/ci/lib/editor-plugin-install-commands.sh",
+    "docs/guides/editor-mcp-recipe.md",
+    "scripts/ci/test-editor-release-hook-precommit-consumer.sh",
 ):
     if not pattern.search(path):
         raise SystemExit(f"release-surface hook omits {path}")
@@ -217,6 +239,25 @@ append_and_expect_failure() {
   local original="$TMP/$file" backup="$TMP/$file.$name"
   cp "$original" "$backup"
   printf '\n%s\n' "$line" >> "$original"
+  if run_check >"$TMP/$name.out" 2>&1; then
+    echo "FAIL: mutation $name was not observed" >&2
+    exit 1
+  fi
+  grep -Fq "$diagnostic" "$TMP/$name.out" || {
+    echo "FAIL: mutation $name missed diagnostic: $diagnostic" >&2
+    cat "$TMP/$name.out" >&2
+    exit 1
+  }
+  mv "$backup" "$original"
+  mutation_count=$((mutation_count + 1))
+  echo "PASS: $name"
+}
+
+rewrite_and_expect_failure() {
+  local name="$1" file="$2" diagnostic="$3"
+  local original="$TMP/$file" backup="$TMP/$file.$name"
+  cp "$original" "$backup"
+  cat > "$original"
   if run_check >"$TMP/$name.out" 2>&1; then
     echo "FAIL: mutation $name was not observed" >&2
     exit 1
@@ -511,8 +552,389 @@ mutate_and_expect_failure stale-codespaces-host demo/CODESPACES-PLAYBOOK.md \
   's#https://getassay.dev/install.sh#https://assay.dev/install.sh#' \
   'unrelated assay.dev onboarding URL'
 
-if [ "$mutation_count" -ne 76 ]; then
-  echo "FAIL: expected 76 release-surface mutations, observed $mutation_count" >&2
+RECIPE_FILE=docs/guides/editor-mcp-recipe.md
+PINNED_CLI_DIAG='expected exactly one current release-pinned assay-cli plugin install'
+PINNED_MCP_DIAG='expected exactly one current release-pinned assay-mcp-server plugin install'
+
+mutate_and_expect_failure plugin-stale-version "$RECIPE_FILE" \
+  's/assay-cli --version 5.1.0/assay-cli --version 5.0.0/' \
+  "$PINNED_CLI_DIAG"
+mutate_and_expect_failure plugin-stale-mcp-version "$RECIPE_FILE" \
+  's/assay-mcp-server --version 5.1.0/assay-mcp-server --version 5.0.0/' \
+  "$PINNED_MCP_DIAG"
+mutate_and_expect_failure plugin-missing-version "$RECIPE_FILE" \
+  's/cargo install assay-cli --version 5.1.0 --locked/cargo install assay-cli --locked/' \
+  "$PINNED_CLI_DIAG"
+mutate_and_expect_failure plugin-duplicate-pinned "$RECIPE_FILE" \
+  '/cargo install assay-cli --version 5.1.0 --locked/p' \
+  "$PINNED_CLI_DIAG"
+mutate_and_expect_failure plugin-no-locked "$RECIPE_FILE" \
+  's/cargo install assay-cli --version 5.1.0 --locked/cargo install assay-cli --version 5.1.0/' \
+  "$PINNED_CLI_DIAG"
+mutate_and_expect_failure plugin-comment "$RECIPE_FILE" \
+  's/^cargo install assay-cli --version 5.1.0 --locked/# cargo install assay-cli --version 5.1.0 --locked/' \
+  "$PINNED_CLI_DIAG"
+mutate_and_expect_failure plugin-prose "$RECIPE_FILE" \
+  's/^cargo install assay-cli --version 5.1.0 --locked$/Run cargo install assay-cli --version 5.1.0 --locked before continuing./' \
+  "$PINNED_CLI_DIAG"
+rewrite_and_expect_failure plugin-path-in-plugin "$RECIPE_FILE" \
+  'source-path cargo install is not allowed' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+cargo install --path crates/assay-mcp-server --locked
+assay version
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+rewrite_and_expect_failure plugin-wrong-package "$RECIPE_FILE" \
+  'unsupported Rust CLI package; use assay-cli' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+cargo install assay --locked
+assay version
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+mutate_and_expect_failure plugin-missing-h2 "$RECIPE_FILE" \
+  '/^## Install the Claude Code plugin$/d' \
+  'expected exactly one plugin install heading'
+mutate_and_expect_failure plugin-wrong-h2 "$RECIPE_FILE" \
+  's/^## Install the Claude Code plugin$/## Install the Claude Code Plugin/' \
+  'expected exactly one plugin install heading'
+rewrite_and_expect_failure plugin-missing-fence "$RECIPE_FILE" \
+  'expected exactly one bash fence in the plugin section' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+rewrite_and_expect_failure plugin-wrong-fence "$RECIPE_FILE" \
+  'expected exactly one bash fence in the plugin section' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```sh
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+rewrite_and_expect_failure plugin-extra-cargo-install "$RECIPE_FILE" \
+  'unexpected cargo install' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+cargo install extra-crate --locked
+assay version
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+mutate_and_expect_failure plugin-quoted-cargo-install "$RECIPE_FILE" \
+  's/cargo install assay-cli --version 5.1.0 --locked/cargo install "assay-cli" --version 5.1.0 --locked/' \
+  'quoted cargo install is not a published pin'
+rewrite_and_expect_failure floating-outside-plugin "$RECIPE_FILE" \
+  'floating unpinned assay-cli install' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+cargo install assay-cli --locked
+```
+MD
+rewrite_and_expect_failure floating-mcp-outside-plugin "$RECIPE_FILE" \
+  'floating unpinned assay-mcp-server install' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+cargo install assay-mcp-server --locked
+```
+MD
+rewrite_and_expect_failure plugin-cargo-offline-install "$RECIPE_FILE" \
+  'unexpected cargo command' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+cargo --offline install extra-crate --locked
+assay version
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+
+rewrite_and_expect_failure plugin-duplicate-h2 "$RECIPE_FILE" \
+  'expected exactly one plugin install heading' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+```
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+
+rewrite_and_expect_failure plugin-second-bash-fence "$RECIPE_FILE" \
+  'expected exactly one bash fence in the plugin section' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+```
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+
+rewrite_and_expect_failure plugin-split-h2-commands "$RECIPE_FILE" \
+  'expected exactly one plugin install heading' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+assay version
+```
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+
+rewrite_and_expect_failure plugin-split-bash-fence-commands "$RECIPE_FILE" \
+  'expected exactly one bash fence in the plugin section' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+assay version
+```
+
+```bash
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+
+rewrite_and_expect_failure plugin-unclosed-bash-fence "$RECIPE_FILE" \
+  'plugin bash fence is not closed at its own boundary' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+
+### Update stale state
+
+```sh
+claude plugin update assay@assay --scope local
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+
+rewrite_and_expect_failure plugin-absorbed-next-h2 "$RECIPE_FILE" \
+  'plugin bash fence end marker must immediately precede its close' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+
+Continue with the verification notes below.
+
+## Verify the installation
+Run both version probes before continuing.
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+
+rewrite_and_expect_failure plugin-continued-cargo-install "$RECIPE_FILE" \
+  'continued cargo install is not a published pin' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli \
+  --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+
+if [ "$mutation_count" -ne 101 ]; then
+  echo "FAIL: expected 101 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

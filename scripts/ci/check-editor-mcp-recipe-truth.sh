@@ -36,6 +36,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
+# shellcheck source=scripts/ci/lib/editor-plugin-install-commands.sh
+source scripts/ci/lib/editor-plugin-install-commands.sh
+
 RECIPE="${ASSAY_EDITOR_RECIPE:-docs/guides/editor-mcp-recipe.md}"
 MAX_RECIPE_BYTES=65536
 MODERN_REVISION='2026-07-28'
@@ -121,49 +124,25 @@ fi
 # recipe's real content.
 require 'local stdio wrap claim retained' '(assay mcp wrap|`assay mcp wrap`)'
 require 'proxy-enforce claim retained' 'proxy-enforce'
+# Plugin updates can take effect without a restart (`/reload-plugins`, some
+# installs). An unconditional restart claim is too strong for this recipe.
+forbid 'unconditional plugin-update restart claim' \
+  'plugin updates require a restart'
 
 # Keep these as standalone commands in this recipe, not a general shell/Markdown grammar.
 # Comments, prose, and commands in a different H2 section cannot satisfy plugin prerequisites.
-plugin_commands="$(awk '
-  {
-    fence_line = $0
-    sub(/^ ? ? ?/, "", fence_line)
-  }
-  match(fence_line, /^(```+|~~~+)/) {
-    width = RLENGTH
-    mark = substr(fence_line, 1, 1)
-    rest = substr(fence_line, width + 1)
-    if (fence) {
-      if (mark == fence_mark && width >= fence_width && rest ~ /^[ \t]*$/) {
-        fence = 0
-        bash_fence = 0
-      }
-    } else {
-      fence = 1
-      fence_mark = mark
-      fence_width = width
-      bash_fence = (fence_line == "```bash")
-    }
-    next
-  }
-  !fence && /^## / {
-    section = ($0 == "## Install the Claude Code plugin")
-    next
-  }
-  section && fence && bash_fence {
-    sub(/^[ \t]+/, "")
-    sub(/[ \t]+$/, "")
-    print
-  }
-' "$RECIPE")"
-for command in 'cargo install assay-cli --locked' 'cargo install assay-mcp-server --locked' \
-  'assay version' 'assay-mcp-server --version'; do
-  if printf '%s\n' "$plugin_commands" | grep -Fxq -- "$command"; then
-    ok "plugin prerequisite command present: $command"
-  else
-    fail "$RECIPE: plugin prerequisite command missing: $command"
-  fi
-done
+# Version pinning of cargo install is owned by check-release-surface.sh, not this guard.
+if ! plugin_commands="$(editor_plugin_install_commands "$RECIPE" 2>&1)"; then
+  fail "$RECIPE: plugin install command extraction failed: $plugin_commands"
+else
+  for command in 'assay version' 'assay-mcp-server --version'; do
+    if printf '%s\n' "$plugin_commands" | grep -Fxq -- "$command"; then
+      ok "plugin prerequisite command present: $command"
+    else
+      fail "$RECIPE: plugin prerequisite command missing: $command"
+    fi
+  done
+fi
 
 printf '\n'
 if [ "$failures" -gt 0 ]; then

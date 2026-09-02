@@ -41,6 +41,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
+# shellcheck source=scripts/ci/lib/editor-plugin-install-commands.sh
+source scripts/ci/lib/editor-plugin-install-commands.sh
+
 failures=0
 fail() {
   failures=$((failures + 1))
@@ -72,6 +75,12 @@ note "workspace version: $WORKSPACE_VERSION"
 PUBLISHED_TAG="$(bash scripts/ci/read-assay-release-tag.sh)"
 PUBLISHED_VERSION="${PUBLISHED_TAG#v}"
 note "published release pin: $PUBLISHED_TAG"
+
+# One owner of the published pin strings and the floating-ban strings.
+PINNED_ASSAY_CLI="cargo install assay-cli --version $PUBLISHED_VERSION --locked"
+PINNED_ASSAY_MCP="cargo install assay-mcp-server --version $PUBLISHED_VERSION --locked"
+FLOATING_ASSAY_CLI="cargo install assay-cli --locked"
+FLOATING_ASSAY_MCP="cargo install assay-mcp-server --locked"
 
 # ---------------------------------------------------------------------------
 # 1. Internal dependency declarations, enumerated from the manifest.
@@ -279,12 +288,22 @@ check_action_refs_pinned() {
   fi
 }
 
+check_absent_fixed() {
+  local file="$1" needle="$2" label="$3"
+  if [ ! -f "$file" ]; then
+    fail "$file: checked outward document is missing"
+    return
+  fi
+  if grep -Fq -- "$needle" "$file"; then
+    fail "$file: $label"
+  fi
+}
+
 check_install_command_count() {
   local file="$1" expected_count="$2"
-  local expected="cargo install assay-cli --version $PUBLISHED_VERSION --locked"
   local all_count current_count
   all_count="$(grep -Ec 'cargo install assay-cli --version [^[:space:]]+ --locked' "$file" || true)"
-  current_count="$(grep -Fc "$expected" "$file" || true)"
+  current_count="$(grep -Fc "$PINNED_ASSAY_CLI" "$file" || true)"
   if [ "$all_count" -ne "$expected_count" ] || [ "$current_count" -ne "$expected_count" ]; then
     fail "$file: expected $expected_count current release-pinned install command(s)"
   fi
@@ -293,8 +312,67 @@ check_install_command_count() {
 check_rust_cli_installs() {
   local file="$1" expected_count="$2"
   check_install_command_count "$file" "$expected_count"
+  check_absent_fixed "$file" "$FLOATING_ASSAY_CLI" 'floating unpinned assay-cli install'
   check_absent_regex "$file" 'cargo install assay([^[:alnum:]_-]|$)' \
     'unsupported Rust CLI package; use assay-cli'
+}
+
+check_editor_plugin_published_installs() {
+  local recipe="docs/guides/editor-mcp-recipe.md"
+  local commands line cli_exact mcp_exact
+
+  if [ ! -f "$recipe" ]; then
+    fail "$recipe: checked outward document is missing"
+    return
+  fi
+  if ! commands="$(editor_plugin_install_commands "$recipe" 2>&1)"; then
+    fail "$recipe: plugin install command extraction failed: $commands"
+    return
+  fi
+
+  cli_exact="$(printf '%s\n' "$commands" | grep -Fxc -- "$PINNED_ASSAY_CLI" || true)"
+  mcp_exact="$(printf '%s\n' "$commands" | grep -Fxc -- "$PINNED_ASSAY_MCP" || true)"
+  if [ "$cli_exact" -ne 1 ]; then
+    fail "$recipe: expected exactly one current release-pinned assay-cli plugin install"
+  fi
+  if [ "$mcp_exact" -ne 1 ]; then
+    fail "$recipe: expected exactly one current release-pinned assay-mcp-server plugin install"
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    case "$line" in
+      "$PINNED_ASSAY_CLI"|"$PINNED_ASSAY_MCP") continue ;;
+    esac
+    case "$line" in
+      cargo\ install*) ;;
+      cargo\ *|cargo)
+        fail "$recipe: plugin section: unexpected cargo command"
+        continue
+        ;;
+      *) continue ;;
+    esac
+    if [[ "$line" == *\\ ]]; then
+      fail "$recipe: plugin section: continued cargo install is not a published pin"
+      continue
+    fi
+    if [[ "$line" == *\"* ]] || [[ "$line" == *"'"* ]]; then
+      fail "$recipe: plugin section: quoted cargo install is not a published pin"
+      continue
+    fi
+    if [[ "$line" == *--path* ]]; then
+      fail "$recipe: plugin section: source-path cargo install is not allowed"
+      continue
+    fi
+    if [[ "$line" =~ ^cargo\ install\ assay([^[:alnum:]_-]|$) ]]; then
+      fail "$recipe: plugin section: unsupported Rust CLI package; use assay-cli"
+      continue
+    fi
+    fail "$recipe: plugin section: unexpected cargo install"
+  done <<< "$commands"
+
+  check_absent_fixed "$recipe" "$FLOATING_ASSAY_CLI" 'floating unpinned assay-cli install'
+  check_absent_fixed "$recipe" "$FLOATING_ASSAY_MCP" 'floating unpinned assay-mcp-server install'
 }
 
 is_digest_scoped_rge_bench_claim() {
@@ -462,6 +540,7 @@ for file in README.md docs/guides/editor-mcp-recipe.md; do
   check_absent_regex "$file" 'assay mcp config-path (codex|<editor>)' \
     'config-path does not support Codex'
 done
+check_editor_plugin_published_installs
 for file in .devcontainer/welcome.sh demo/CODESPACES-PLAYBOOK.md; do
   check_absent_regex "$file" 'https://assay\.dev/' \
     'unrelated assay.dev onboarding URL'
