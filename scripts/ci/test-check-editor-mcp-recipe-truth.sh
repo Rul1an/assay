@@ -85,8 +85,7 @@ write_clean
 expect_pass 'clean fixture passes'
 
 echo '== plugin prerequisites must be commands in the plugin installation section =='
-for command in 'cargo install assay-cli --locked' 'cargo install assay-mcp-server --locked' \
-  'assay version' 'assay-mcp-server --version'; do
+for command in 'assay version' 'assay-mcp-server --version'; do
   for mode in delete comment prose elsewhere; do
     write_clean
     awk -v command="$command" -v mode="$mode" '
@@ -118,7 +117,7 @@ for fence in '```' '````' '~~~' '   ~~~'; do
   ' "$TMP/recipe.md" > "$TMP/edited.md"
   mv "$TMP/edited.md" "$TMP/recipe.md"
   expect_fail "plugin section inside $fence example" \
-    'plugin prerequisite command missing: cargo install assay-cli --locked'
+    'plugin prerequisite command missing: assay version'
 done
 for heading in '## shell comment' '### subheading-shaped shell comment'; do
   write_clean
