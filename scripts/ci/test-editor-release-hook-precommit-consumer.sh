@@ -495,6 +495,26 @@ def main() -> None:
             raise SystemExit(1)
         return
 
+    if action == "check-review-record-root":
+        import importlib.util
+        checker_path, workflow_path, host_path = rest[0], rest[1], rest[2]
+        spec = importlib.util.spec_from_file_location(
+            "review_record_workflow", checker_path
+        )
+        if spec is None or spec.loader is None:
+            raise SystemExit(f"cannot load {checker_path}")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        problems = mod.contract_problems(
+            Path(workflow_path).read_text(encoding="utf-8"),
+            src,
+            Path(host_path).read_text(encoding="utf-8"),
+        )
+        if problems:
+            sys.stderr.write("\n".join(problems) + "\n")
+            raise SystemExit(1)
+        return
+
     if action == "mutate-ci":
         kind = rest[0]
         if src.count(CI_CONSUMER_STEP) != 1:
@@ -545,6 +565,18 @@ def main() -> None:
             without = src.replace(CI_CONSUMER_STEP, "", 1)
             if without.count(heading) != 1:
                 raise SystemExit("hardening heading lost after consumer removal")
+            Path(dest).write_text(
+                without.replace(heading, CI_CONSUMER_STEP + "\n" + heading, 1),
+                encoding="utf-8",
+            )
+            return
+        if kind == "after-finale":
+            heading = "      - name: Verify review-record workflow contract\n"
+            if src.count(heading) != 1:
+                raise SystemExit("review-record root heading is not unique")
+            without = src.replace(CI_CONSUMER_STEP, "", 1)
+            if without.count(heading) != 1:
+                raise SystemExit("review-record heading lost after consumer removal")
             Path(dest).write_text(
                 without.replace(heading, CI_CONSUMER_STEP + "\n" + heading, 1),
                 encoding="utf-8",
@@ -777,6 +809,9 @@ check_ci_producer() {
 }
 
 CALLSITE="$ROOT/scripts/ci/check-conformance-inventory-callsite.py"
+REVIEW_RECORD_CHECKER="$ROOT/scripts/ci/check-review-record-workflow.py"
+REVIEW_RECORD_WORKFLOW="$ROOT/.github/workflows/review-record-check.yml"
+HOST_WORKFLOW="$ROOT/.github/workflows/host-capability-check.yml"
 
 check_trusted_prefix() {
   local path="$1"
@@ -787,6 +822,21 @@ expect_prefix_red() {
   local label="$1" config="$2"
   if check_trusted_prefix "$config" >"$TMP/$label.prefix" 2>&1; then
     fail "$label — trusted-prefix checker stayed green"
+  else
+    ok "RED $label"
+  fi
+}
+
+check_review_record_root() {
+  local path="$1"
+  cfg check-review-record-root "$path" "$path" \
+    "$REVIEW_RECORD_CHECKER" "$REVIEW_RECORD_WORKFLOW" "$HOST_WORKFLOW"
+}
+
+expect_review_record_red() {
+  local label="$1" config="$2"
+  if check_review_record_root "$config" >"$TMP/$label.review-record" 2>&1; then
+    fail "$label — review-record checker stayed green"
   else
     ok "RED $label"
   fi
@@ -832,6 +882,13 @@ if check_trusted_prefix "$CI_WORKFLOW"; then
   ok 'live hardening step follows checkout + setup-python'
 else
   fail 'live hardening step follows checkout + setup-python'
+fi
+
+echo '== live review-record root =='
+if check_review_record_root "$CI_WORKFLOW"; then
+  ok 'live review-record root immediately follows finale'
+else
+  fail 'live review-record root immediately follows finale'
 fi
 
 echo '== pin behavior: unmutated consumer must fail closed =='
@@ -905,6 +962,10 @@ expect_ci_red 'continue-on-error on required-CI consumer step' \
 cfg mutate-ci "$CI_WORKFLOW" "$TMP/ci-before-hardening.yml" before-hardening
 expect_prefix_red 'consumer step between setup-python and hardening' \
   "$TMP/ci-before-hardening.yml"
+
+cfg mutate-ci "$CI_WORKFLOW" "$TMP/ci-after-finale.yml" after-finale
+expect_review_record_red 'consumer step between finale and review-record root' \
+  "$TMP/ci-after-finale.yml"
 
 cfg mutate "$CONFIG" "$TMP/flow-dup-editor.yaml" flow-duplicate "$EDITOR_ID"
 expect_wiring_red 'flow-mapping duplicate of editor-mcp-recipe-truth' \
