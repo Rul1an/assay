@@ -682,6 +682,46 @@ cargo install --path crates/assay-mcp-server --locked
 cargo install assay-cli --locked
 ```
 MD
+rewrite_and_expect_failure floating-mcp-outside-plugin "$RECIPE_FILE" \
+  'floating unpinned assay-mcp-server install' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+cargo install assay-mcp-server --locked
+```
+MD
+rewrite_and_expect_failure plugin-cargo-offline-install "$RECIPE_FILE" \
+  'unexpected cargo command' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+cargo --offline install extra-crate --locked
+assay version
+assay-mcp-server --version
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
 
 rewrite_and_expect_failure plugin-duplicate-h2 "$RECIPE_FILE" \
   "$PINNED_CLI_DIAG" <<'MD'
@@ -757,8 +797,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 89 ]; then
-  echo "FAIL: expected 89 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 91 ]; then
+  echo "FAIL: expected 91 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

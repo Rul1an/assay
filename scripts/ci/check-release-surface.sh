@@ -346,6 +346,10 @@ check_editor_plugin_published_installs() {
     esac
     case "$line" in
       cargo\ install*) ;;
+      cargo\ *|cargo)
+        fail "$recipe: plugin section: unexpected cargo command"
+        continue
+        ;;
       *) continue ;;
     esac
     if [[ "$line" == *\\ ]]; then
