@@ -7,7 +7,10 @@
 # duplicate-key-rejecting PyYAML SafeLoader and counts both protected IDs from
 # repos[*].hooks[*] (flow mapping and reordered keys included). A producer hook
 # independently invokes this script so last-key-wins `entry: 'true'` on the
-# consumer hook cannot skip the contract.
+# consumer hook cannot skip the contract. Both producer and consumer live in the
+# yaml being validated, so last-key-wins `entry: 'true'` on BOTH is still a
+# paired no-op for pre-commit. Kernel Matrix lint invokes this script directly
+# outside that yaml so the contract still runs.
 set -euo pipefail
 
 # shellcheck source=scripts/ci/lib/clear-git-repository-env.sh
@@ -15,6 +18,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/clear-git-repository-e
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CONFIG="$ROOT/.pre-commit-config.yaml"
+KERNEL_MATRIX="$ROOT/.github/workflows/kernel-matrix.yml"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -304,6 +308,91 @@ def problems_for(
     return problems
 
 
+CI_CONSUMER_STEP = (
+    "      - name: Editor-release hook pre-commit consumer\n"
+    "        shell: bash\n"
+    "        run: |\n"
+    "          set -euo pipefail\n"
+    "          bash scripts/ci/test-editor-release-hook-precommit-consumer.sh\n"
+)
+CI_CONSUMER_STEP_HEAD = (
+    "      - name: Editor-release hook pre-commit consumer\n"
+    "        shell: bash\n"
+)
+CI_CONSUMER_RUN_LINE = (
+    "          bash scripts/ci/test-editor-release-hook-precommit-consumer.sh\n"
+)
+
+
+def problems_for_ci(src: str, *, contract_rel: str) -> list[str]:
+    problems: list[str] = []
+    try:
+        data = load_unique(src)
+    except yaml.YAMLError as exc:
+        problems.append(f"kernel-matrix.yml YAML rejected: {exc}")
+        return problems
+    if not isinstance(data, dict):
+        problems.append("kernel-matrix.yml: root is not a mapping")
+        return problems
+    jobs = data.get("jobs")
+    if not isinstance(jobs, dict):
+        problems.append("kernel-matrix.yml: jobs missing")
+        return problems
+    lint = jobs.get("lint")
+    if not isinstance(lint, dict):
+        problems.append("kernel-matrix.yml: lint job missing")
+        return problems
+    if lint.get("name") != "Lint (pre-commit)":
+        problems.append("kernel-matrix.yml: lint job name is not Lint (pre-commit)")
+    steps = lint.get("steps")
+    if not isinstance(steps, list):
+        problems.append("kernel-matrix.yml: lint job has no steps")
+        return problems
+
+    wanted = f"bash {contract_rel}"
+    install_idx = None
+    active: list[int] = []
+    for index, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        if step.get("name") == "Install pre-commit (pinned)":
+            install_idx = index
+        run = step.get("run")
+        if not isinstance(run, str):
+            continue
+        body = tuple(
+            line.strip()
+            for line in run.splitlines()
+            if line.strip()
+            and not line.strip().startswith("#")
+            and line.strip() != "set -euo pipefail"
+        )
+        if body != (wanted,):
+            continue
+        if step.get("continue-on-error") is True:
+            continue
+        if "if" in step:
+            continue
+        active.append(index)
+
+    if len(active) != 1:
+        problems.append(
+            f"kernel-matrix lint job: expected exactly one active direct "
+            f"invocation of {contract_rel}, found {len(active)}"
+        )
+        return problems
+    if install_idx is None:
+        problems.append(
+            "kernel-matrix lint job missing Install pre-commit (pinned)"
+        )
+    elif active[0] <= install_idx:
+        problems.append(
+            f"kernel-matrix lint job: direct invocation of {contract_rel} "
+            "must run after Install pre-commit (pinned)"
+        )
+    return problems
+
+
 def main() -> None:
     (
         editor_id,
@@ -337,6 +426,58 @@ def main() -> None:
             sys.stderr.write("\n".join(problems) + "\n")
             raise SystemExit(1)
         return
+
+    if action == "check-ci":
+        problems = problems_for_ci(src, contract_rel=contract_rel)
+        if problems:
+            sys.stderr.write("\n".join(problems) + "\n")
+            raise SystemExit(1)
+        return
+
+    if action == "mutate-ci":
+        kind = rest[0]
+        if src.count(CI_CONSUMER_STEP) != 1:
+            raise SystemExit("canonical CI consumer step is not unique")
+        if kind == "delete-step":
+            Path(dest).write_text(src.replace(CI_CONSUMER_STEP, "", 1), encoding="utf-8")
+            return
+        if kind == "comment-step":
+            if src.count(CI_CONSUMER_RUN_LINE) != 1:
+                raise SystemExit("canonical CI consumer run line is not unique")
+            Path(dest).write_text(
+                src.replace(
+                    CI_CONSUMER_RUN_LINE,
+                    "          # bash scripts/ci/test-editor-release-hook-precommit-consumer.sh\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            return
+        if kind == "if-false":
+            if src.count(CI_CONSUMER_STEP_HEAD) != 1:
+                raise SystemExit("canonical CI consumer step head is not unique")
+            Path(dest).write_text(
+                src.replace(
+                    CI_CONSUMER_STEP_HEAD,
+                    CI_CONSUMER_STEP_HEAD + "        if: false\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            return
+        if kind == "continue-on-error":
+            if src.count(CI_CONSUMER_STEP_HEAD) != 1:
+                raise SystemExit("canonical CI consumer step head is not unique")
+            Path(dest).write_text(
+                src.replace(
+                    CI_CONSUMER_STEP_HEAD,
+                    CI_CONSUMER_STEP_HEAD + "        continue-on-error: true\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            return
+        raise SystemExit(f"unknown ci mutation {kind}")
 
     if action == "extract-minimal":
         hook_id = rest[0]
@@ -524,6 +665,20 @@ expect_wiring_red() {
   fi
 }
 
+check_ci_producer() {
+  local path="$1"
+  cfg check-ci "$path" "$path"
+}
+
+expect_ci_red() {
+  local label="$1" config="$2"
+  if check_ci_producer "$config" >"$TMP/$label.ci" 2>&1; then
+    fail "$label — CI producer stayed green"
+  else
+    ok "RED $label"
+  fi
+}
+
 expect_consumer() {
   local label="$1" dest="$2" hook_id="$3" want="$4"
   local got
@@ -541,6 +696,13 @@ if check_wiring "$CONFIG"; then
   ok 'live unmutated tree wiring'
 else
   fail 'live unmutated tree wiring'
+fi
+
+echo '== live CI producer =='
+if check_ci_producer "$KERNEL_MATRIX"; then
+  ok 'live kernel-matrix lint job direct consumer invocation'
+else
+  fail 'live kernel-matrix lint job direct consumer invocation'
 fi
 
 echo '== pin behavior: unmutated consumer must fail closed =='
@@ -583,6 +745,24 @@ expect_wiring_red 'remove test-check-release-surface.sh from release-surface cha
 cfg mutate "$CONFIG" "$TMP/entry-true-consumer.yaml" entry-true "$CONSUMER_ID"
 expect_wiring_red "last-key-wins entry: 'true' on consumer hook" \
   "$TMP/entry-true-consumer.yaml"
+
+cfg mutate "$TMP/entry-true-consumer.yaml" "$TMP/entry-true-both.yaml" \
+  entry-true "$PRODUCER_ID"
+expect_wiring_red "paired last-key-wins entry: 'true' on producer and consumer" \
+  "$TMP/entry-true-both.yaml"
+
+cfg mutate-ci "$KERNEL_MATRIX" "$TMP/km-delete.yml" delete-step
+expect_ci_red 'deleting kernel-matrix lint consumer step' "$TMP/km-delete.yml"
+
+cfg mutate-ci "$KERNEL_MATRIX" "$TMP/km-comment.yml" comment-step
+expect_ci_red 'commenting kernel-matrix lint consumer step' "$TMP/km-comment.yml"
+
+cfg mutate-ci "$KERNEL_MATRIX" "$TMP/km-if-false.yml" if-false
+expect_ci_red 'if: false on kernel-matrix lint consumer step' "$TMP/km-if-false.yml"
+
+cfg mutate-ci "$KERNEL_MATRIX" "$TMP/km-continue.yml" continue-on-error
+expect_ci_red 'continue-on-error on kernel-matrix lint consumer step' \
+  "$TMP/km-continue.yml"
 
 cfg mutate "$CONFIG" "$TMP/flow-dup-editor.yaml" flow-duplicate "$EDITOR_ID"
 expect_wiring_red 'flow-mapping duplicate of editor-mcp-recipe-truth' \
