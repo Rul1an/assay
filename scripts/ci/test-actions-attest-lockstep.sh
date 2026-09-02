@@ -295,6 +295,19 @@ jobs:
 YAML
 run_case foreign-workflow-callsite-is-refused "$case_root" 1
 
+case_root="$scratch/tag-pinned-foreign-workflow"
+seed "$case_root"
+cat >"$case_root/.github/workflows/tagged-attest.yml" <<'YAML'
+name: Mutated tag-pinned actions/attest
+on: workflow_dispatch
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/attest@v4.2.2
+YAML
+run_case tag-pinned-foreign-workflow-is-refused "$case_root" 1
+
 case_root="$scratch/quoted-foreign-workflow"
 seed "$case_root"
 cat >"$case_root/.github/workflows/quoted-attest.yaml" <<YAML
@@ -421,6 +434,14 @@ mutate_once \
   ""
 run_case delete-pack-sha256sum-is-refused "$case_root" 1
 
+case_root="$scratch/comment-only-pack-sha256sum"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
+  "            sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS" \
+  "            # sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS"
+run_case comment-only-pack-sha256sum-is-refused "$case_root" 1
+
 case_root="$scratch/retarget-delegated-proof-pack"
 seed "$case_root"
 mutate_once \
@@ -461,6 +482,27 @@ path.write_text(text.replace(old, new, 1), encoding="utf-8")
 PY
 run_case pack-consumer-comment-is-refused "$case_root" 1
 
+case_root="$scratch/pack-consumer-inert"
+seed "$case_root"
+python3 - "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = """        run: |
+          set -euo pipefail
+          test -n "$ATTESTATION_BUNDLE"
+          cp "$ATTESTATION_BUNDLE" release/attestation-bundle.json
+"""
+new = """        run: echo inert
+"""
+if text.count(old) != 1:
+    raise SystemExit("pack-consumer-inert subject missing")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+run_case pack-consumer-inert-is-refused "$case_root" 1
+
 case_root="$scratch/delegated-consumer-scalar"
 seed "$case_root"
 python3 - "$case_root/.github/workflows/runner-spike-delegated.yml" <<'PY'
@@ -500,6 +542,48 @@ mutate_once \
         if: false
         uses: actions/attest@${OWNER_SHA} # v4.2.2"
 run_case pack-attest-if-false-is-refused "$case_root" 1
+
+case_root="$scratch/pack-attest-if-compound-false"
+seed "$case_root"
+python3 - "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = """        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+"""
+new = """        id: attest
+        if: ${{ false && always() }}
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+"""
+if text.count(old) != 1:
+    raise SystemExit("compound-false attest subject missing")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+run_case pack-attest-if-compound-false-is-refused "$case_root" 1
+
+case_root="$scratch/pack-attest-if-unsupported"
+seed "$case_root"
+python3 - "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = """        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+"""
+new = """        id: attest
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+"""
+if text.count(old) != 1:
+    raise SystemExit("unsupported attest condition subject missing")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+run_case pack-attest-if-unsupported-is-refused "$case_root" 1
 
 case_root="$scratch/delegated-consumer-if-false"
 seed "$case_root"
@@ -552,6 +636,14 @@ cat >>"$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" <<YA
 NOTE: "actions/attest@${OWNER_SHA}"
 YAML
 run_case inert-note-attest-is-not-a-callsite "$case_root" 0
+
+case_root="$scratch/comment-only-control"
+seed "$case_root"
+cat >>"$case_root/.github/workflows/runner-spike-delegated.yml" <<'YAML'
+
+# No-op mutation control: executable producer and consumer steps are unchanged.
+YAML
+run_case comment-only-control-is-green "$case_root" 0
 
 case_root="$scratch/missing-ruby"
 seed "$case_root"

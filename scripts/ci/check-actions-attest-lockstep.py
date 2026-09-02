@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -19,7 +20,14 @@ USES_RE = re.compile(
     r"(?P<sha>[0-9a-f]{40})(?P=quote)[ \t]+"
     r"#[ \t]+(?P<tag>v\d+\.\d+\.\d+)[ \t]*$"
 )
-DIRECT_USES_SHA_RE = re.compile(r"^actions/attest@([0-9a-f]{40})$", re.IGNORECASE)
+DIRECT_ATTEST_USES_RE = re.compile(r"^actions/attest@[^\s]+$", re.IGNORECASE)
+EXPRESSION_WRAPPER_RE = re.compile(r"^\$\{\{\s*(?P<body>.*?)\s*\}\}$")
+NONEMPTY_OUTPUT_TERM_RE = re.compile(
+    r"^(?:"
+    r"steps\.[A-Za-z0-9_-]+\.outputs\.[A-Za-z0-9_-]+|"
+    r"hashFiles\('[^'\r\n]+'\)"
+    r")\s*!=\s*''$"
+)
 
 
 class Producer(NamedTuple):
@@ -31,6 +39,7 @@ class Producer(NamedTuple):
     bundle_output: str
     consumer_if: str | None
     consumer_env: tuple[str, str] | None
+    consumer_copy: tuple[str, str]
 
 
 class WorkflowParseError(Exception):
@@ -47,6 +56,10 @@ PRODUCERS = (
         bundle_output="steps.attest-proof-pack.outputs.bundle-path",
         consumer_if="always() && steps.attest-proof-pack.outputs.bundle-path != ''",
         consumer_env=None,
+        consumer_copy=(
+            "${{ steps.attest-proof-pack.outputs.bundle-path }}",
+            "$ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD/attestation-bundle.json",
+        ),
     ),
     Producer(
         path=Path(".github/workflows/privileged-mcp-action-pack-release.yml"),
@@ -61,6 +74,10 @@ PRODUCERS = (
         consumer_env=(
             "ATTESTATION_BUNDLE",
             "${{ steps.attest.outputs.bundle-path }}",
+        ),
+        consumer_copy=(
+            "$ATTESTATION_BUNDLE",
+            "release/attestation-bundle.json",
         ),
     ),
 )
@@ -132,7 +149,10 @@ def iter_jobs(document: object) -> list[tuple[str, dict[str, object]]]:
 
 
 def is_direct_attest_uses(uses: object) -> bool:
-    return isinstance(uses, str) and DIRECT_USES_SHA_RE.fullmatch(uses.strip()) is not None
+    return (
+        isinstance(uses, str)
+        and DIRECT_ATTEST_USES_RE.fullmatch(uses.strip()) is not None
+    )
 
 
 def structural_attest_steps(
@@ -146,14 +166,38 @@ def structural_attest_steps(
     return found
 
 
-def condition_is_false(value: object) -> bool:
-    return value is False or (
-        isinstance(value, str) and value.strip().casefold() in {"false", "${{ false }}"}
-    )
+def condition_may_run(value: object) -> bool:
+    """Recognize only the small condition grammar used by these producers.
+
+    Missing conditions, true, always(), and conjunctions with a non-empty
+    step output or hashFiles result may run. False terms and every unsupported
+    expression fail closed rather than being mistaken for reachable workflow.
+    """
+    if value is None or value is True:
+        return True
+    if value is False or not isinstance(value, str):
+        return False
+    expression = value.strip()
+    wrapper = EXPRESSION_WRAPPER_RE.fullmatch(expression)
+    if wrapper is not None:
+        expression = wrapper.group("body").strip()
+    terms = [term.strip() for term in expression.split("&&")]
+    if not terms or any(not term for term in terms):
+        return False
+    for term in terms:
+        folded = term.casefold()
+        if folded == "false":
+            return False
+        if folded in {"true", "always()"}:
+            continue
+        if NONEMPTY_OUTPUT_TERM_RE.fullmatch(term) is not None:
+            continue
+        return False
+    return True
 
 
 def is_reachable(node: dict[str, object]) -> bool:
-    return not condition_is_false(node.get("if"))
+    return condition_may_run(node.get("if"))
 
 
 def step_run_text(step: dict[str, object]) -> str:
@@ -161,13 +205,46 @@ def step_run_text(step: dict[str, object]) -> str:
     return run if isinstance(run, str) else ""
 
 
-def step_has_bundle_expression(step: dict[str, object], expression: str) -> bool:
-    if expression in step_run_text(step):
-        return True
-    env = step.get("env")
-    if not isinstance(env, dict):
-        return False
-    return any(isinstance(value, str) and expression in value for value in env.values())
+def shell_command_tokens(run: str) -> list[list[str]]:
+    """Tokenize simple logical shell lines; this is not a shell evaluator."""
+    commands: list[list[str]] = []
+    logical_line = ""
+    for raw_line in run.splitlines():
+        stripped = raw_line.strip()
+        if not logical_line and (not stripped or stripped.startswith("#")):
+            continue
+        continued = stripped.endswith("\\")
+        fragment = stripped[:-1].rstrip() if continued else stripped
+        logical_line = f"{logical_line} {fragment}".strip()
+        if continued:
+            continue
+        try:
+            tokens = shlex.split(logical_line, comments=True, posix=True)
+        except ValueError:
+            tokens = []
+        if tokens:
+            commands.append(tokens)
+        logical_line = ""
+    if logical_line:
+        try:
+            tokens = shlex.split(logical_line, comments=True, posix=True)
+        except ValueError:
+            tokens = []
+        if tokens:
+            commands.append(tokens)
+    return commands
+
+
+def step_runs_command(step: dict[str, object], expected: str) -> bool:
+    expected_tokens = shlex.split(expected, comments=False, posix=True)
+    return any(
+        command[: len(expected_tokens)] == expected_tokens
+        for command in shell_command_tokens(step_run_text(step))
+    )
+
+
+def step_copies_value(step: dict[str, object], source: str, destination: str) -> bool:
+    return ["cp", source, destination] in shell_command_tokens(step_run_text(step))
 
 
 def producer_contract_errors(producer: Producer, document: object) -> list[str]:
@@ -212,7 +289,7 @@ def producer_contract_errors(producer: Producer, document: object) -> list[str]:
         )
     same_job_steps = job_steps(job)
     earlier = same_job_steps[:attest_index]
-    if not any(producer.subject_producer in step_run_text(item) for item in earlier):
+    if not any(step_runs_command(item, producer.subject_producer) for item in earlier):
         errors.append(
             f"{producer.path}: subject {producer.subject_checksums} is not produced "
             f"earlier in job {producer.job_id!r} by {producer.subject_producer!r}"
@@ -230,9 +307,10 @@ def producer_contract_errors(producer: Producer, document: object) -> list[str]:
             key, value = producer.consumer_env
             if not isinstance(env, dict) or env.get(key) != value:
                 continue
-        if not step_has_bundle_expression(consumer, expression):
+        source, destination = producer.consumer_copy
+        if producer.consumer_env is None and source != expression:
             continue
-        if not step_run_text(consumer):
+        if not step_copies_value(consumer, source, destination):
             continue
         found_consumer = True
         break
