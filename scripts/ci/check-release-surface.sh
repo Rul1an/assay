@@ -423,6 +423,19 @@ check_rge_bench_claims() {
 check_rust_cli_installs README.md 1
 check_absent_regex README.md 'verified release installer' \
   'installer wording must not imply checksum or provenance verification'
+check_contains_fixed README.md \
+  'verifies the selected archive against its published SHA-256 sidecar' \
+  'live installer verification contract drift'
+check_contains_fixed README.md 'ASSAY_REQUIRE_PROVENANCE=1' \
+  'live installer strict provenance selector drift'
+check_contains_fixed README.md 'provenance_not_requested' \
+  'live installer default verification state drift'
+check_contains_fixed README.md 'provenance_verified' \
+  'live installer strict verification state drift'
+check_contains_fixed README.md 'not producer identity' \
+  'live installer checksum non-claim drift'
+check_contains_fixed README.md 'not runtime safety or semantic correctness' \
+  'live installer provenance non-claim drift'
 check_absent_regex examples/mcp-quickstart/README.md 'verified release installer' \
   'quickstart installer wording must not imply checksum or provenance verification'
 check_contains_fixed examples/mcp-quickstart/README.md \

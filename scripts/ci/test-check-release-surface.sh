@@ -117,6 +117,8 @@ Current release: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0)
 - Published v5.1.0 CLI archives cover Linux x86_64/arm64.
 Historical note: v5.0.0 shipped earlier.
 Claude and Cursor config-path only.
+The live installer verifies the selected archive against its published SHA-256 sidecar before extraction. Set `ASSAY_REQUIRE_PROVENANCE=1` to additionally require GitHub artifact provenance; the default reports `provenance_not_requested` and strict success reports `provenance_verified`.
+A checksum proves byte equality with the published sidecar, not producer identity. Provenance identifies the source and build, not runtime safety or semantic correctness.
 DOC
 printf '%s\n' "- [RGE-Bench](https://github.com/rge-bench/rge-bench) — $rge_claim" >> "$TMP/README.md"
 printf '%s\n' "- [RGE-Bench](https://github.com/rge-bench/rge-bench): $rge_claim" > "$TMP/llms.txt"
@@ -355,6 +357,24 @@ mutate_and_expect_failure unsupported-codex-literal README.md \
 mutate_and_expect_failure misleading-installer-verification README.md \
   's/Claude and Cursor config-path only./Claude and Cursor config-path only. Fast path: verified release installer./' \
   'installer wording must not imply checksum or provenance verification'
+mutate_and_expect_failure stale-installer-verification-contract README.md \
+  's/verifies the selected archive against its published SHA-256 sidecar/downloads the selected archive over HTTPS/' \
+  'live installer verification contract drift'
+mutate_and_expect_failure stale-installer-provenance-selector README.md \
+  's/ASSAY_REQUIRE_PROVENANCE=1/ASSAY_PROVENANCE=1/' \
+  'live installer strict provenance selector drift'
+mutate_and_expect_failure stale-installer-default-state README.md \
+  's/provenance_not_requested/provenance_skipped/' \
+  'live installer default verification state drift'
+mutate_and_expect_failure stale-installer-strict-state README.md \
+  's/provenance_verified/provenance_checked/' \
+  'live installer strict verification state drift'
+mutate_and_expect_failure missing-installer-checksum-nonclaim README.md \
+  's/not producer identity/producer identity/' \
+  'live installer checksum non-claim drift'
+mutate_and_expect_failure missing-installer-provenance-nonclaim README.md \
+  's/not runtime safety or semantic correctness/runtime safety/' \
+  'live installer provenance non-claim drift'
 mutate_and_expect_failure misleading-example-installer examples/mcp-quickstart/README.md \
   's/release installer/verified release installer/' \
   'quickstart installer wording must not imply checksum or provenance verification'
@@ -913,8 +933,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 95 ]; then
-  echo "FAIL: expected 95 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 101 ]; then
+  echo "FAIL: expected 101 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"
