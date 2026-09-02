@@ -552,33 +552,133 @@ mutate_and_expect_failure plugin-comment "$RECIPE_FILE" \
 mutate_and_expect_failure plugin-prose "$RECIPE_FILE" \
   's/^cargo install assay-cli --version 5.1.0 --locked$/Run cargo install assay-cli --version 5.1.0 --locked before continuing./' \
   "$PINNED_CLI_DIAG"
-mutate_and_expect_failure plugin-path-in-plugin "$RECIPE_FILE" \
-  '/^assay version$/i cargo install --path crates/assay-mcp-server --locked' \
-  'source-path cargo install is not allowed'
-mutate_and_expect_failure plugin-wrong-package "$RECIPE_FILE" \
-  '/^assay version$/i cargo install assay --locked' \
-  'unsupported Rust CLI package; use assay-cli'
+rewrite_and_expect_failure plugin-path-in-plugin "$RECIPE_FILE" \
+  'source-path cargo install is not allowed' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+cargo install --path crates/assay-mcp-server --locked
+assay version
+assay-mcp-server --version
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+rewrite_and_expect_failure plugin-wrong-package "$RECIPE_FILE" \
+  'unsupported Rust CLI package; use assay-cli' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+cargo install assay --locked
+assay version
+assay-mcp-server --version
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
 mutate_and_expect_failure plugin-missing-h2 "$RECIPE_FILE" \
   '/^## Install the Claude Code plugin$/d' \
   "$PINNED_CLI_DIAG"
 mutate_and_expect_failure plugin-wrong-h2 "$RECIPE_FILE" \
   's/^## Install the Claude Code plugin$/## Install the Claude Code Plugin/' \
   "$PINNED_CLI_DIAG"
-mutate_and_expect_failure plugin-missing-fence "$RECIPE_FILE" \
-  '0,/^```bash$/s/^```bash$/```/' \
-  "$PINNED_CLI_DIAG"
-mutate_and_expect_failure plugin-wrong-fence "$RECIPE_FILE" \
-  '0,/^```bash$/s/^```bash$/```sh/' \
-  "$PINNED_CLI_DIAG"
-mutate_and_expect_failure plugin-extra-cargo-install "$RECIPE_FILE" \
-  '/^assay version$/i cargo install extra-crate --locked' \
-  'unexpected cargo install'
+rewrite_and_expect_failure plugin-missing-fence "$RECIPE_FILE" \
+  "$PINNED_CLI_DIAG" <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+rewrite_and_expect_failure plugin-wrong-fence "$RECIPE_FILE" \
+  "$PINNED_CLI_DIAG" <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```sh
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+rewrite_and_expect_failure plugin-extra-cargo-install "$RECIPE_FILE" \
+  'unexpected cargo install' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+cargo install extra-crate --locked
+assay version
+assay-mcp-server --version
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
 mutate_and_expect_failure plugin-quoted-cargo-install "$RECIPE_FILE" \
   's/cargo install assay-cli --version 5.1.0 --locked/cargo install "assay-cli" --version 5.1.0 --locked/' \
   'quoted cargo install is not a published pin'
-mutate_and_expect_failure floating-outside-plugin "$RECIPE_FILE" \
-  's/cargo install --path crates\/assay-mcp-server --locked/cargo install --path crates\/assay-mcp-server --locked\ncargo install assay-cli --locked/' \
-  'floating unpinned assay-cli install'
+rewrite_and_expect_failure floating-outside-plugin "$RECIPE_FILE" \
+  'floating unpinned assay-cli install' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+cargo install assay-cli --locked
+```
+MD
 
 rewrite_and_expect_failure plugin-duplicate-h2 "$RECIPE_FILE" \
   "$PINNED_CLI_DIAG" <<'MD'
