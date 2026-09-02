@@ -3,9 +3,9 @@
 #
 # One parser, sourced by the editor-transport guard and the release-surface guard.
 # This file does not judge cargo vs claude, quotes, or continuations. Cardinality
-# of matching H2s and ```bash fences in that section is this parser's job: not
-# exactly one of each fails closed and emits nothing. Semantic reject stays with
-# consumers.
+# of matching H2s, ```bash fences, and the explicit end marker in that section is
+# this parser's job: invalid structure fails closed and emits nothing. Semantic
+# reject stays with consumers.
 
 editor_plugin_install_commands() {
   local recipe="${1:-}"
@@ -35,11 +35,15 @@ editor_plugin_install_commands() {
       rest = substr(fence_line, width + 1)
       if (fence) {
         if (mark == fence_mark && width >= fence_width && rest ~ /^[ \t]*$/) {
-          if (section && bash_fence) bash_fence_close_count++
+          if (section && bash_fence) {
+            bash_fence_close_count++
+            if (marker_before_close) marker_close_count++
+          }
           fence = 0
           bash_fence = 0
         } else if (section && bash_fence) {
           nested_fence_before_close = 1
+          marker_before_close = 0
         }
       } else {
         fence = 1
@@ -48,8 +52,7 @@ editor_plugin_install_commands() {
         bash_fence = (fence_line == "```bash")
         if (section && bash_fence) {
           bash_fence_count++
-          previous_blank = 0
-          possible_next_h2 = 0
+          marker_before_close = 0
         }
       }
       next
@@ -60,12 +63,12 @@ editor_plugin_install_commands() {
       next
     }
     section && fence && bash_fence {
-      if (possible_next_h2) {
-        if ($0 ~ /^[ \t]*$/) next_h2_before_close = 1
-        possible_next_h2 = 0
+      marker_before_close = 0
+      if ($0 == "# assay-editor-plugin-install-commands:end") {
+        marker_count++
+        marker_before_close = 1
+        next
       }
-      if (previous_blank && $0 ~ /^## /) possible_next_h2 = 1
-      previous_blank = ($0 ~ /^[ \t]*$/)
       sub(/^[ \t]+/, "")
       sub(/[ \t]+$/, "")
       if ($0 != "" && $0 !~ /^#/) {
@@ -91,8 +94,12 @@ editor_plugin_install_commands() {
         print "plugin bash fence is not closed at its own boundary" > "/dev/stderr"
         exit 1
       }
-      if (next_h2_before_close) {
-        print "plugin bash fence absorbs a later H2" > "/dev/stderr"
+      if (marker_count != 1) {
+        print "expected exactly one plugin bash fence end marker" > "/dev/stderr"
+        exit 1
+      }
+      if (bash_fence_close_count == 1 && !nested_fence_before_close && marker_close_count != 1) {
+        print "plugin bash fence end marker must immediately precede its close" > "/dev/stderr"
         exit 1
       }
       if (ncmds) print cmds

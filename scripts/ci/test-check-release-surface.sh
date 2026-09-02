@@ -135,6 +135,7 @@ cargo install assay-cli --version 5.1.0 --locked
 cargo install assay-mcp-server --version 5.1.0 --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## Install Assay's review tools
@@ -567,6 +568,7 @@ cargo install assay-mcp-server --version 5.1.0 --locked
 cargo install --path crates/assay-mcp-server --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## Install Assay's review tools
@@ -587,6 +589,7 @@ cargo install assay-mcp-server --version 5.1.0 --locked
 cargo install assay --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## Install Assay's review tools
@@ -612,6 +615,7 @@ cargo install assay-cli --version 5.1.0 --locked
 cargo install assay-mcp-server --version 5.1.0 --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## Install Assay's review tools
@@ -631,6 +635,7 @@ cargo install assay-cli --version 5.1.0 --locked
 cargo install assay-mcp-server --version 5.1.0 --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## Install Assay's review tools
@@ -651,6 +656,7 @@ cargo install assay-mcp-server --version 5.1.0 --locked
 cargo install extra-crate --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## Install Assay's review tools
@@ -673,6 +679,7 @@ cargo install assay-cli --version 5.1.0 --locked
 cargo install assay-mcp-server --version 5.1.0 --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## Install Assay's review tools
@@ -693,6 +700,7 @@ cargo install assay-cli --version 5.1.0 --locked
 cargo install assay-mcp-server --version 5.1.0 --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## Install Assay's review tools
@@ -714,6 +722,7 @@ cargo install assay-mcp-server --version 5.1.0 --locked
 cargo --offline install extra-crate --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## Install Assay's review tools
@@ -734,6 +743,7 @@ cargo install assay-cli --version 5.1.0 --locked
 cargo install assay-mcp-server --version 5.1.0 --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## Install the Claude Code plugin
@@ -743,6 +753,7 @@ cargo install assay-cli --version 5.1.0 --locked
 cargo install assay-mcp-server --version 5.1.0 --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## Install Assay's review tools
@@ -763,6 +774,7 @@ cargo install assay-cli --version 5.1.0 --locked
 cargo install assay-mcp-server --version 5.1.0 --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ```bash
@@ -792,6 +804,7 @@ assay version
 ```bash
 cargo install assay-mcp-server --version 5.1.0 --locked
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## Install Assay's review tools
@@ -815,6 +828,7 @@ assay version
 ```bash
 cargo install assay-mcp-server --version 5.1.0 --locked
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## Install Assay's review tools
@@ -835,6 +849,7 @@ cargo install assay-cli --version 5.1.0 --locked
 cargo install assay-mcp-server --version 5.1.0 --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 
 ### Update stale state
 
@@ -850,7 +865,7 @@ cargo install --path crates/assay-mcp-server --locked
 MD
 
 rewrite_and_expect_failure plugin-absorbed-next-h2 "$RECIPE_FILE" \
-  'plugin bash fence absorbs a later H2' <<'MD'
+  'plugin bash fence end marker must immediately precede its close' <<'MD'
 Codex uses .codex/config.toml.
 
 ## Install the Claude Code plugin
@@ -860,11 +875,11 @@ cargo install assay-cli --version 5.1.0 --locked
 cargo install assay-mcp-server --version 5.1.0 --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 
 Continue with the verification notes below.
 
 ## Verify the installation
-
 Run both version probes before continuing.
 ```
 
@@ -887,6 +902,7 @@ cargo install assay-cli \
 cargo install assay-mcp-server --version 5.1.0 --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## Install Assay's review tools

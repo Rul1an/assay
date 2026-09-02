@@ -126,6 +126,7 @@ cargo install assay-mcp-server --version 5.1.0 --locked
 
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## Install Assay's review tools
@@ -146,6 +147,7 @@ write_recipe <<'MD'
    # indented comment
 
 cargo install assay-mcp-server --version 5.1.0 --locked
+# assay-editor-plugin-install-commands:end
 ```
 MD
 expect_stdout 'comment skip keeps only non-comment lines' \
@@ -203,6 +205,7 @@ write_recipe <<'MD'
 
 ```bash
 assay version
+# assay-editor-plugin-install-commands:end
 ```
 MD
 expect_stdout 'exact ```bash fence is extracted' 'assay version'
@@ -225,6 +228,7 @@ ignored
 
 ```bash
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 MD
 expect_fail 'duplicate plugin H2 concatenates both fences' \
@@ -244,6 +248,7 @@ assay version
 ```bash
 cargo install assay-mcp-server --version 5.1.0 --locked
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 MD
 expect_fail 'split CLI/MCP commands across two plugin H2s' \
@@ -261,6 +266,7 @@ assay version
 ```bash
 cargo install assay-mcp-server --version 5.1.0 --locked
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 MD
 expect_fail 'split CLI/MCP commands across two bash fences' \
@@ -275,6 +281,7 @@ cargo install assay-cli --version 5.1.0 --locked
 cargo install assay-mcp-server --version 5.1.0 --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 
 ### Update stale state
 
@@ -290,26 +297,60 @@ write_recipe <<'MD'
 
 ```bash
 assay version
+# assay-editor-plugin-install-commands:end
 MD
 expect_fail 'plugin bash fence left open at end of file' \
   'plugin bash fence is not closed at its own boundary'
 
-echo '== a blank-line-delimited next H2 cannot be absorbed by the bash fence =='
+echo '== only the explicit marker can establish the plugin bash fence boundary =='
 write_recipe <<'MD'
 ## Install the Claude Code plugin
 
 ```bash
 assay version
+# assay-editor-plugin-install-commands:end
 
 Continue with the verification notes below.
 
 ## Verify the installation
-
 Run both version probes before continuing.
 ```
 MD
 expect_fail 'later bare fence cannot close across an apparent next H2' \
-  'plugin bash fence absorbs a later H2'
+  'plugin bash fence end marker must immediately precede its close'
+
+write_recipe <<'MD'
+## Install the Claude Code plugin
+
+```bash
+assay version
+```
+MD
+expect_fail 'plugin bash fence end marker is required' \
+  'expected exactly one plugin bash fence end marker'
+
+write_recipe <<'MD'
+## Install the Claude Code plugin
+
+```bash
+assay version
+# assay-editor-plugin-install-commands:end
+# assay-editor-plugin-install-commands:end
+```
+MD
+expect_fail 'plugin bash fence end marker must be unique' \
+  'expected exactly one plugin bash fence end marker'
+
+write_recipe <<'MD'
+## Install the Claude Code plugin
+
+```bash
+# assay-editor-plugin-install-commands:end
+assay version
+```
+MD
+expect_fail 'plugin bash fence end marker cannot move away from close' \
+  'plugin bash fence end marker must immediately precede its close'
 
 write_recipe <<'MD'
 ## Install the Claude Code plugin
@@ -319,6 +360,7 @@ assay version
 
 ## shell comment
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 MD
 expect_stdout 'in-fence H2-shaped shell comment remains supported' \
@@ -332,6 +374,7 @@ write_recipe <<'MD'
 cargo install "assay-cli" --version 5.1.0 --locked
 cargo install assay-cli \
   --version 5.1.0 --locked
+# assay-editor-plugin-install-commands:end
 ```
 MD
 expect_stdout 'extractor does not join or unquote cargo lines' \
@@ -354,6 +397,7 @@ write_recipe <<'MD'
 
 ```bash
 assay version
+# assay-editor-plugin-install-commands:end
 ```
 MD
 bytes="$(wc -c < "$TMP/recipe.md")"

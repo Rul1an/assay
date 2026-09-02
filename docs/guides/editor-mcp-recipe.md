@@ -27,6 +27,7 @@ claude plugin install assay@assay --scope local
 
 # 3. Verify that the installed plugin can start the server.
 claude mcp list
+# assay-editor-plugin-install-commands:end
 ```
 
 Restart Claude Code after installation, then ask it to use

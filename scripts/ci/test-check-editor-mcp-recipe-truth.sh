@@ -35,6 +35,7 @@ cargo install assay-cli --locked
 cargo install assay-mcp-server --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## The wrap command
@@ -123,6 +124,7 @@ assay version
 ```bash
 cargo install assay-mcp-server --locked
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## The wrap command
@@ -146,6 +148,7 @@ assay version
 ```bash
 cargo install assay-mcp-server --locked
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 ```
 
 ## The wrap command
@@ -166,6 +169,7 @@ cargo install assay-cli --locked
 cargo install assay-mcp-server --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 
 ### Update stale state
 
@@ -191,11 +195,11 @@ cargo install assay-cli --locked
 cargo install assay-mcp-server --locked
 assay version
 assay-mcp-server --version
+# assay-editor-plugin-install-commands:end
 
 Continue with the verification notes below.
 
 ## Verify the installation
-
 Run both version probes before continuing.
 ```
 
@@ -205,7 +209,7 @@ Run `assay mcp wrap` to enforce policy at the protocol boundary.
 Use `assay-mcp-server proxy-enforce` for the enforcing path.
 MD
 expect_fail 'later bare fence cannot close across an apparent next H2' \
-  'plugin bash fence absorbs a later H2'
+  'plugin bash fence end marker must immediately precede its close'
 
 
 echo '== fenced examples cannot impersonate the plugin section =='
