@@ -47,8 +47,10 @@ python3 examples/mcp-quickstart/run.py
 ```
 
 For v5.5.2, run the last command from a source checkout or an extracted published CLI archive.
-The installer is binary-only and does not carry the bounded quickstart assets. The installer
-downloads over HTTPS but does not consume the published checksum or provenance sidecars.
+The installer is binary-only and does not carry the bounded quickstart assets. The live
+`getassay.dev` installer downloads over HTTPS but does not yet consume the published checksum or
+provenance sidecars. The verified source installer will replace it through the separately measured
+deployment tracked in `Rul1an/getassay-site#6`.
 
 Captured runner output (the bundled local mock performs no external action):
 
