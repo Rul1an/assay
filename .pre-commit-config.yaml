@@ -652,6 +652,22 @@ repos:
         pass_filenames: false
         files: ^(scripts/install\.sh|scripts/ci/test-install-version-normalization\.sh|\.pre-commit-config\.yaml)$
 
+      - id: install-release-verification-self-test
+        name: installer release verification contract
+        entry: bash scripts/ci/test-install-release-verification.sh
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+        files: ^(scripts/install\.sh|scripts/ci/(check-install-release-verification-hook|test-install-release-verification)\.sh|README\.md|\.pre-commit-config\.yaml)$
+
+      - id: install-release-verification-hook-contract
+        name: installer release verification hook contract
+        entry: bash scripts/ci/check-install-release-verification-hook.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
       - id: deps-security-toolchain-contract-self-test
         name: deps-security toolchain contract
         entry: bash scripts/ci/test-deps-security-toolchain-contract.sh
