@@ -135,12 +135,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install pre-commit==4.4.0
 
-      - name: Editor-release hook pre-commit consumer
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash scripts/ci/test-editor-release-hook-precommit-consumer.sh
-
       - name: Install cargo-deny (for pre-commit hook)
         run: ./scripts/ci/install-cargo-deny.sh
 

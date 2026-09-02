@@ -5,12 +5,11 @@
 # (`files: ^$`, `entry: 'true'`) and miss a second hook whose `id` is not written
 # as `      - id: <name>`. This contract loads `.pre-commit-config.yaml` with a
 # duplicate-key-rejecting PyYAML SafeLoader and counts both protected IDs from
-# repos[*].hooks[*] (flow mapping and reordered keys included). A producer hook
-# independently invokes this script so last-key-wins `entry: 'true'` on the
-# consumer hook cannot skip the contract. Both producer and consumer live in the
-# yaml being validated, so last-key-wins `entry: 'true'` on BOTH is still a
-# paired no-op for pre-commit. Kernel Matrix lint invokes this script directly
-# outside that yaml so the contract still runs.
+# repos[*].hooks[*] (flow mapping and reordered keys included). Required context
+# `CI` (the ci.yml aggregator) invokes this script directly; Kernel Matrix is
+# not a required context, so a lint-job invocation cannot close the merge gate.
+# One local consumer hook remains for pre-push feedback (`stages: [pre-push]`)
+# so default `pre-commit run --all-files` does not duplicate the heavy check.
 set -euo pipefail
 
 # shellcheck source=scripts/ci/lib/clear-git-repository-env.sh
@@ -18,14 +17,15 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/clear-git-repository-e
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CONFIG="$ROOT/.pre-commit-config.yaml"
-KERNEL_MATRIX="$ROOT/.github/workflows/kernel-matrix.yml"
+CI_WORKFLOW="$ROOT/.github/workflows/ci.yml"
+RULESET="$ROOT/.github/rulesets/main-required-ci-contexts.json"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 EDITOR_ID="editor-mcp-recipe-truth"
 RELEASE_ID="release-surface"
 CONSUMER_ID="editor-release-hook-precommit-consumer"
-PRODUCER_ID="editor-release-hook-precommit-producer"
+ABSENT_PRODUCER_ID="editor-release-hook-precommit-producer"
 CONTRACT_REL="scripts/ci/test-editor-release-hook-precommit-consumer.sh"
 
 EDITOR_ENTRY="bash -c 'bash scripts/ci/test-editor-plugin-install-commands.sh && bash scripts/ci/test-check-editor-mcp-recipe-truth.sh && bash scripts/ci/check-editor-mcp-recipe-truth.sh'"
@@ -212,7 +212,7 @@ def problems_for(
     editor_id: str,
     release_id: str,
     consumer_id: str,
-    producer_id: str,
+    absent_producer_id: str,
     editor_entry: str,
     release_entry: str,
     consumer_entry: str,
@@ -226,10 +226,15 @@ def problems_for(
         return problems
 
     counts = hook_id_counts(data)
-    for hook_id in (editor_id, release_id, consumer_id, producer_id):
+    for hook_id in (editor_id, release_id, consumer_id):
         n = counts.get(hook_id, 0)
         if n != 1:
             problems.append(f"{hook_id}: expected exactly one hook, found {n}")
+    n_prod = counts.get(absent_producer_id, 0)
+    if n_prod != 0:
+        problems.append(
+            f"{absent_producer_id}: expected no in-config producer, found {n_prod}"
+        )
 
     required = {
         editor_id: {
@@ -284,27 +289,31 @@ def problems_for(
         elif hook.get("entry") != spec["entry"]:
             problems.append(f"{hook_id}: entry is not the exact command chain")
 
-    for hook_id in (consumer_id, producer_id):
-        if counts.get(hook_id, 0) != 1:
-            continue
-        hook = hook_by_id(data, hook_id)
-        if hook is None:
-            continue
-        if hook.get("always_run") is not True:
-            problems.append(f"{hook_id}: must set always_run: true")
-        if hook.get("pass_filenames") is not False:
-            problems.append(f"{hook_id}: must set pass_filenames: false")
-        if hook.get("language") != "system":
-            problems.append(f"{hook_id}: must set language: system")
-        if "files" in hook:
-            problems.append(
-                f"{hook_id}: must not have a files: start-condition regex"
-            )
-        if hook.get("entry") != consumer_entry:
-            problems.append(f"{hook_id}: entry must invoke only {contract_rel}")
-        effective = hook.get("entry")
-        if effective in ("true", True) or effective == "/usr/bin/true":
-            problems.append(f"{hook_id}: effective entry is a no-op ({effective!r})")
+    if counts.get(consumer_id, 0) == 1:
+        hook = hook_by_id(data, consumer_id)
+        if hook is not None:
+            if hook.get("always_run") is not True:
+                problems.append(f"{consumer_id}: must set always_run: true")
+            if hook.get("pass_filenames") is not False:
+                problems.append(f"{consumer_id}: must set pass_filenames: false")
+            if hook.get("language") != "system":
+                problems.append(f"{consumer_id}: must set language: system")
+            if "files" in hook:
+                problems.append(
+                    f"{consumer_id}: must not have a files: start-condition regex"
+                )
+            stages = hook.get("stages")
+            if stages != ["pre-push"]:
+                problems.append(
+                    f"{consumer_id}: stages must be exactly [pre-push], found {stages!r}"
+                )
+            if hook.get("entry") != consumer_entry:
+                problems.append(f"{consumer_id}: entry must invoke only {contract_rel}")
+            effective = hook.get("entry")
+            if effective in ("true", True) or effective == "/usr/bin/true":
+                problems.append(
+                    f"{consumer_id}: effective entry is a no-op ({effective!r})"
+                )
     return problems
 
 
@@ -313,6 +322,8 @@ CI_CONSUMER_STEP = (
     "        shell: bash\n"
     "        run: |\n"
     "          set -euo pipefail\n"
+    "          python -m pip install --user pre-commit==4.4.0\n"
+    "          export PATH=\"$HOME/.local/bin:$PATH\"\n"
     "          bash scripts/ci/test-editor-release-hook-precommit-consumer.sh\n"
 )
 CI_CONSUMER_STEP_HEAD = (
@@ -323,72 +334,102 @@ CI_CONSUMER_RUN_LINE = (
     "          bash scripts/ci/test-editor-release-hook-precommit-consumer.sh\n"
 )
 
+ALLOWED_PRELUDE = (
+    "python -m pip install --user pre-commit==4.4.0",
+    'export PATH="$HOME/.local/bin:$PATH"',
+)
 
-def problems_for_ci(src: str, *, contract_rel: str) -> list[str]:
+
+def ruleset_contexts(ruleset_src: str) -> set[str]:
+    doc = yaml.safe_load(ruleset_src)
+    found: set[str] = set()
+    if not isinstance(doc, dict):
+        return found
+    for rule in doc.get("rules") or []:
+        if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
+            continue
+        params = rule.get("parameters")
+        if not isinstance(params, dict):
+            continue
+        for check in params.get("required_status_checks") or []:
+            if isinstance(check, dict) and isinstance(check.get("context"), str):
+                found.add(check["context"])
+    return found
+
+
+def step_uncommented_commands(run: str) -> tuple[str, ...]:
+    return tuple(
+        line.strip()
+        for line in run.splitlines()
+        if line.strip()
+        and not line.strip().startswith("#")
+        and line.strip() != "set -euo pipefail"
+    )
+
+
+def problems_for_ci(src: str, *, contract_rel: str, ruleset_src: str) -> list[str]:
     problems: list[str] = []
     try:
         data = load_unique(src)
     except yaml.YAMLError as exc:
-        problems.append(f"kernel-matrix.yml YAML rejected: {exc}")
+        problems.append(f"ci.yml YAML rejected: {exc}")
         return problems
     if not isinstance(data, dict):
-        problems.append("kernel-matrix.yml: root is not a mapping")
+        problems.append("ci.yml: root is not a mapping")
         return problems
     jobs = data.get("jobs")
     if not isinstance(jobs, dict):
-        problems.append("kernel-matrix.yml: jobs missing")
+        problems.append("ci.yml: jobs missing")
         return problems
-    lint = jobs.get("lint")
-    if not isinstance(lint, dict):
-        problems.append("kernel-matrix.yml: lint job missing")
-        return problems
-    if lint.get("name") != "Lint (pre-commit)":
-        problems.append("kernel-matrix.yml: lint job name is not Lint (pre-commit)")
-    steps = lint.get("steps")
-    if not isinstance(steps, list):
-        problems.append("kernel-matrix.yml: lint job has no steps")
+    contexts = ruleset_contexts(ruleset_src)
+    if "CI" not in contexts:
+        problems.append("ruleset missing required context CI")
         return problems
 
     wanted = f"bash {contract_rel}"
-    install_idx = None
-    active: list[int] = []
-    for index, step in enumerate(steps):
-        if not isinstance(step, dict):
+    active: list[tuple[str, str, bool]] = []
+    for job_id, job in jobs.items():
+        if not isinstance(job, dict):
             continue
-        if step.get("name") == "Install pre-commit (pinned)":
-            install_idx = index
-        run = step.get("run")
-        if not isinstance(run, str):
+        job_name = job.get("name") if isinstance(job.get("name"), str) else job_id
+        job_coe = job.get("continue-on-error") is True
+        steps = job.get("steps")
+        if not isinstance(steps, list):
             continue
-        body = tuple(
-            line.strip()
-            for line in run.splitlines()
-            if line.strip()
-            and not line.strip().startswith("#")
-            and line.strip() != "set -euo pipefail"
-        )
-        if body != (wanted,):
-            continue
-        if step.get("continue-on-error") is True:
-            continue
-        if "if" in step:
-            continue
-        active.append(index)
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            run = step.get("run")
+            if not isinstance(run, str):
+                continue
+            body = step_uncommented_commands(run)
+            if wanted not in body:
+                continue
+            extra = tuple(cmd for cmd in body if cmd != wanted)
+            if any(cmd not in ALLOWED_PRELUDE for cmd in extra):
+                continue
+            if step.get("continue-on-error") is True:
+                continue
+            if "if" in step:
+                continue
+            active.append((job_id, job_name, job_coe))
 
     if len(active) != 1:
         problems.append(
-            f"kernel-matrix lint job: expected exactly one active direct "
-            f"invocation of {contract_rel}, found {len(active)}"
+            f"ci.yml: expected exactly one active direct invocation of "
+            f"{contract_rel} in a required-context job, found {len(active)}"
         )
         return problems
-    if install_idx is None:
+    job_id, job_name, job_coe = active[0]
+    if job_name not in contexts:
         problems.append(
-            "kernel-matrix lint job missing Install pre-commit (pinned)"
+            f"ci.yml: invocation is in job {job_id!r} named {job_name!r}, "
+            f"which is not a required context {sorted(contexts)}"
         )
-    elif active[0] <= install_idx:
+    if job_coe:
         problems.append(
-            f"kernel-matrix lint job: direct invocation of {contract_rel} "
-            "must run after Install pre-commit (pinned)"
+            f"ci.yml: job {job_id!r} sets continue-on-error, so a consumer "
+            "failure would not redden the required context"
         )
     return problems
 
@@ -398,7 +439,7 @@ def main() -> None:
         editor_id,
         release_id,
         consumer_id,
-        producer_id,
+        absent_producer_id,
         editor_entry,
         release_entry,
         consumer_entry,
@@ -416,7 +457,7 @@ def main() -> None:
             editor_id=editor_id,
             release_id=release_id,
             consumer_id=consumer_id,
-            producer_id=producer_id,
+            absent_producer_id=absent_producer_id,
             editor_entry=editor_entry,
             release_entry=release_entry,
             consumer_entry=consumer_entry,
@@ -428,7 +469,11 @@ def main() -> None:
         return
 
     if action == "check-ci":
-        problems = problems_for_ci(src, contract_rel=contract_rel)
+        ruleset_path = rest[0] if rest else dest
+        ruleset_src = Path(ruleset_path).read_text(encoding="utf-8")
+        problems = problems_for_ci(
+            src, contract_rel=contract_rel, ruleset_src=ruleset_src
+        )
         if problems:
             sys.stderr.write("\n".join(problems) + "\n")
             raise SystemExit(1)
@@ -524,6 +569,35 @@ def main() -> None:
             )
             Path(dest).write_text(insert_after_span(src, hook_id, extra), encoding="utf-8")
             return
+        if kind == "drop-stages":
+            block = hook_block(src, hook_id)
+            lines = [
+                line
+                for line in block.splitlines(keepends=True)
+                if not line.split("#", 1)[0].strip().startswith("stages:")
+            ]
+            Path(dest).write_text(
+                replace_block(src, hook_id, "".join(lines)), encoding="utf-8"
+            )
+            return
+        if kind == "change-stages":
+            block = hook_block(src, hook_id)
+            replaced = 0
+            out = []
+            for line in block.splitlines(keepends=True):
+                code = line.split("#", 1)[0]
+                if code.strip().startswith("stages:"):
+                    indent = line[: len(line) - len(line.lstrip(" "))]
+                    out.append(f"{indent}stages: [commit]\n")
+                    replaced += 1
+                else:
+                    out.append(line)
+            if replaced != 1:
+                raise SystemExit(f"expected one stages: line in {hook_id}, found {replaced}")
+            Path(dest).write_text(
+                replace_block(src, hook_id, "".join(out)), encoding="utf-8"
+            )
+            return
         raise SystemExit(f"unknown mutation {kind}")
 
     raise SystemExit(f"unknown action {action}")
@@ -535,7 +609,7 @@ ENDPY
 
 cfg() {
   "$PYTHON_YAML" "$CFG_PY" \
-    "$EDITOR_ID" "$RELEASE_ID" "$CONSUMER_ID" "$PRODUCER_ID" \
+    "$EDITOR_ID" "$RELEASE_ID" "$CONSUMER_ID" "$ABSENT_PRODUCER_ID" \
     "$EDITOR_ENTRY" "$RELEASE_ENTRY" "$CONSUMER_ENTRY" \
     "$CONTRACT_REL" "$@"
 }
@@ -587,7 +661,7 @@ prepare_editor_tree() {
     scripts/ci/lib/editor-plugin-install-commands.sh \
     scripts/ci/lib/clear-git-repository-env.sh \
     docs/guides/editor-mcp-recipe.md \
-    .github/workflows/kernel-matrix.yml
+    .github/workflows/ci.yml
 }
 
 prepare_release_tree() {
@@ -637,7 +711,11 @@ consumer_status() {
   (
     cd "$dest"
     export PRE_COMMIT_HOME="$dest/pc-home"
-    pre-commit run "$hook_id" --color never --all-files
+    if [ "$hook_id" = "$CONSUMER_ID" ]; then
+      pre-commit run "$hook_id" --hook-stage pre-push --color never --all-files
+    else
+      pre-commit run "$hook_id" --color never --all-files
+    fi
   ) >"$out" 2>&1
   local rc=$?
   set -e
@@ -667,7 +745,7 @@ expect_wiring_red() {
 
 check_ci_producer() {
   local path="$1"
-  cfg check-ci "$path" "$path"
+  cfg check-ci "$path" "$path" "$RULESET"
 }
 
 expect_ci_red() {
@@ -698,11 +776,11 @@ else
   fail 'live unmutated tree wiring'
 fi
 
-echo '== live CI producer =='
-if check_ci_producer "$KERNEL_MATRIX"; then
-  ok 'live kernel-matrix lint job direct consumer invocation'
+echo '== live required-CI producer =='
+if check_ci_producer "$CI_WORKFLOW"; then
+  ok 'live CI job direct consumer invocation reaches required context'
 else
-  fail 'live kernel-matrix lint job direct consumer invocation'
+  fail 'live CI job direct consumer invocation reaches required context'
 fi
 
 echo '== pin behavior: unmutated consumer must fail closed =='
@@ -746,23 +824,32 @@ cfg mutate "$CONFIG" "$TMP/entry-true-consumer.yaml" entry-true "$CONSUMER_ID"
 expect_wiring_red "last-key-wins entry: 'true' on consumer hook" \
   "$TMP/entry-true-consumer.yaml"
 
-cfg mutate "$TMP/entry-true-consumer.yaml" "$TMP/entry-true-both.yaml" \
-  entry-true "$PRODUCER_ID"
-expect_wiring_red "paired last-key-wins entry: 'true' on producer and consumer" \
-  "$TMP/entry-true-both.yaml"
+cfg mutate "$TMP/entry-true-consumer.yaml" "$TMP/entry-true-editor-too.yaml" \
+  entry-true "$EDITOR_ID"
+cfg mutate "$TMP/entry-true-editor-too.yaml" "$TMP/entry-true-paired.yaml" \
+  entry-true "$RELEASE_ID"
+expect_wiring_red "paired last-key-wins entry: 'true' on consumer, editor, and release-surface" \
+  "$TMP/entry-true-paired.yaml"
 
-cfg mutate-ci "$KERNEL_MATRIX" "$TMP/km-delete.yml" delete-step
-expect_ci_red 'deleting kernel-matrix lint consumer step' "$TMP/km-delete.yml"
+cfg mutate "$CONFIG" "$TMP/drop-stages.yaml" drop-stages "$CONSUMER_ID"
+expect_wiring_red 'removing pre-push stage from consumer hook' "$TMP/drop-stages.yaml"
 
-cfg mutate-ci "$KERNEL_MATRIX" "$TMP/km-comment.yml" comment-step
-expect_ci_red 'commenting kernel-matrix lint consumer step' "$TMP/km-comment.yml"
+cfg mutate "$CONFIG" "$TMP/change-stages.yaml" change-stages "$CONSUMER_ID"
+expect_wiring_red 'changing consumer hook stage away from pre-push' \
+  "$TMP/change-stages.yaml"
 
-cfg mutate-ci "$KERNEL_MATRIX" "$TMP/km-if-false.yml" if-false
-expect_ci_red 'if: false on kernel-matrix lint consumer step' "$TMP/km-if-false.yml"
+cfg mutate-ci "$CI_WORKFLOW" "$TMP/ci-delete.yml" delete-step
+expect_ci_red 'deleting required-CI consumer step' "$TMP/ci-delete.yml"
 
-cfg mutate-ci "$KERNEL_MATRIX" "$TMP/km-continue.yml" continue-on-error
-expect_ci_red 'continue-on-error on kernel-matrix lint consumer step' \
-  "$TMP/km-continue.yml"
+cfg mutate-ci "$CI_WORKFLOW" "$TMP/ci-comment.yml" comment-step
+expect_ci_red 'commenting required-CI consumer step' "$TMP/ci-comment.yml"
+
+cfg mutate-ci "$CI_WORKFLOW" "$TMP/ci-if-false.yml" if-false
+expect_ci_red 'if: false on required-CI consumer step' "$TMP/ci-if-false.yml"
+
+cfg mutate-ci "$CI_WORKFLOW" "$TMP/ci-continue.yml" continue-on-error
+expect_ci_red 'continue-on-error on required-CI consumer step' \
+  "$TMP/ci-continue.yml"
 
 cfg mutate "$CONFIG" "$TMP/flow-dup-editor.yaml" flow-duplicate "$EDITOR_ID"
 expect_wiring_red 'flow-mapping duplicate of editor-mcp-recipe-truth' \
@@ -806,7 +893,30 @@ git_seed "$pair"
 expect_consumer 'stale pin 0.0.0 + entry: true on release-surface hook' \
   "$pair" "$RELEASE_ID" passed
 
-echo '== consumer last-key-wins entry: true cannot hide from the producer =='
+echo '== default pre-commit run --all-files skips the pre-push consumer =='
+skip="$TMP/all-files-skip"
+mkdir -p "$skip"
+install_hook_config "$CONFIG" "$CONSUMER_ID" "$skip"
+git_seed "$skip"
+set +e
+(
+  cd "$skip"
+  export PRE_COMMIT_HOME="$skip/pc-home"
+  pre-commit run --color never --all-files
+) >"$skip/precommit.out" 2>&1
+skip_rc=$?
+set -e
+if grep -Eq 'Passed|Failed' "$skip/precommit.out"; then
+  fail 'default pre-commit run --all-files ran the pre-push consumer'
+  sed 's/^/      /' "$skip/precommit.out" || true
+elif [ "$skip_rc" -eq 0 ]; then
+  ok 'default pre-commit run --all-files skips pre-push consumer'
+else
+  fail "default pre-commit run --all-files rc=$skip_rc"
+  sed 's/^/      /' "$skip/precommit.out" || true
+fi
+
+echo '== consumer last-key-wins entry: true is a local no-op =='
 pair="$TMP/pair-consumer-entry-true"
 mkdir -p "$pair"
 install_hook_config "$TMP/entry-true-consumer.yaml" "$CONSUMER_ID" "$pair"
