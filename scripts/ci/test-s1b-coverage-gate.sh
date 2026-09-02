@@ -803,8 +803,10 @@ created_workdir_count=$(grep -c '^SELFTEST_WORKDIR=' "$tmp/workdir-create.out" |
 created_workdir=$(sed -n 's/^SELFTEST_WORKDIR=//p' "$tmp/workdir-create.out")
 [[ "$created_workdir" == "$ownership_rt"/s1b-workdir-create-* ]] \
   || fail "workdir create escaped RUNNER_TEMP: $created_workdir"
-grep -qxF "S1B_WORKDIR_RETAINED path=$created_workdir" "$tmp/workdir-create.out" \
-  || fail "workdir create missing retained-root disposition"
+retained_count=$(grep -cFx "S1B_WORKDIR_RETAINED path=$created_workdir" \
+  "$tmp/workdir-create.out" || true)
+[[ "$retained_count" -eq 1 ]] \
+  || fail "workdir create emitted $retained_count retained-root dispositions, expected 1"
 [[ -d "$created_workdir" ]] || fail "retained workdir root missing: $created_workdir"
 [[ -z "$(find "$created_workdir" -mindepth 1 -maxdepth 1 -print -quit)" ]] \
   || fail "retained workdir root is not empty: $created_workdir"
@@ -854,9 +856,11 @@ rebind_moved_count=$(grep -c '^SELFTEST_REBOUND_WORKDIR=' "$tmp/workdir-rebind.o
   || fail "workdir rebind witness cardinality drifted"
 rebind_owned=$(sed -n 's/^SELFTEST_WORKDIR=//p' "$tmp/workdir-rebind.out")
 rebind_moved=$(sed -n 's/^SELFTEST_REBOUND_WORKDIR=//p' "$tmp/workdir-rebind.out")
-grep -qxF "S1B_WORKDIR_RESIDUE path=$rebind_owned reason=path_rebound" \
-  "$tmp/workdir-rebind.err" \
-  || fail "workdir rebind missing named residue disposition"
+rebind_residue_count=$(grep -cFx \
+  "S1B_WORKDIR_RESIDUE path=$rebind_owned reason=path_rebound" \
+  "$tmp/workdir-rebind.err" || true)
+[[ "$rebind_residue_count" -eq 1 ]] \
+  || fail "workdir rebind emitted $rebind_residue_count named residue dispositions, expected 1"
 [[ -f "$rebind_owned/foreign" ]] || fail "rebound foreign replacement was modified or deleted"
 [[ -d "$rebind_moved" ]] || fail "rebound owned object missing: $rebind_moved"
 [[ -z "$(find "$rebind_moved" -mindepth 1 -maxdepth 1 -print -quit)" ]] \
@@ -989,6 +993,71 @@ set -e
 grep -qxF 'FAIL: pathname cleanup deleted the foreign replacement' \
   "$tmp/mut-pathname-contract.err" \
   || fail "pathname cleanup mutant failed for an unrelated reason"
+
+duplicate_retained_driver="$tmp/duplicate-retained-driver.sh"
+cp "$DRIVER" "$duplicate_retained_driver"
+python3 - "$duplicate_retained_driver" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '''  printf 'S1B_WORKDIR_RETAINED path=%s\\n' "$wd"'''
+new = old + "\n" + old
+if text.count(old) != 1:
+    raise SystemExit("retained disposition mutation target must occur exactly once")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+set +e
+(
+  RUNNER_TEMP="$ownership_rt" run_bounded 12 bash "$duplicate_retained_driver" \
+    workdir-create-selftest >"$tmp/mut-retained.out" 2>"$tmp/mut-retained.err"
+  workdir=$(sed -n 's/^SELFTEST_WORKDIR=//p' "$tmp/mut-retained.out")
+  count=$(grep -cFx "S1B_WORKDIR_RETAINED path=$workdir" "$tmp/mut-retained.out" || true)
+  [[ "$count" -eq 1 ]] \
+    || fail "workdir create emitted $count retained-root dispositions, expected 1"
+) >"$tmp/mut-retained-contract.out" 2>"$tmp/mut-retained-contract.err"
+mut_retained_contract_ec=$?
+set -e
+[[ "$mut_retained_contract_ec" -ne 0 ]] || fail "duplicate retained disposition mutant survived"
+grep -qxF 'FAIL: workdir create emitted 2 retained-root dispositions, expected 1' \
+  "$tmp/mut-retained-contract.err" \
+  || fail "duplicate retained disposition mutant failed for an unrelated reason"
+
+duplicate_residue_driver="$tmp/duplicate-residue-driver.sh"
+cp "$DRIVER" "$duplicate_residue_driver"
+python3 - "$duplicate_residue_driver" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '''    printf 'S1B_WORKDIR_RESIDUE path=%s reason=path_rebound\\n' "$wd" >&2'''
+new = old + "\n" + old
+if text.count(old) != 1:
+    raise SystemExit("residue disposition mutation target must occur exactly once")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+set +e
+(
+  set +e
+  RUNNER_TEMP="$ownership_rt" run_bounded 12 bash "$duplicate_residue_driver" \
+    workdir-rebind-selftest >"$tmp/mut-residue.out" 2>"$tmp/mut-residue.err"
+  actual=$?
+  set -e
+  [[ "$actual" -eq 1 ]] || fail "workdir rebind returned $actual, expected 1"
+  workdir=$(sed -n 's/^SELFTEST_WORKDIR=//p' "$tmp/mut-residue.out")
+  count=$(grep -cFx "S1B_WORKDIR_RESIDUE path=$workdir reason=path_rebound" \
+    "$tmp/mut-residue.err" || true)
+  [[ "$count" -eq 1 ]] \
+    || fail "workdir rebind emitted $count named residue dispositions, expected 1"
+) >"$tmp/mut-residue-contract.out" 2>"$tmp/mut-residue-contract.err"
+mut_residue_contract_ec=$?
+set -e
+[[ "$mut_residue_contract_ec" -ne 0 ]] || fail "duplicate residue disposition mutant survived"
+grep -qxF 'FAIL: workdir rebind emitted 2 named residue dispositions, expected 1' \
+  "$tmp/mut-residue-contract.err" \
+  || fail "duplicate residue disposition mutant failed for an unrelated reason"
 
 ownership_noop_driver="$tmp/ownership-noop-driver.sh"
 cp "$DRIVER" "$ownership_noop_driver"
