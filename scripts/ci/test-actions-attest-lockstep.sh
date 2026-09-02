@@ -253,6 +253,11 @@ seed "$case_root"
 printf '\n{ [ }\n' >>"$case_root/.github/workflows/privileged-mcp-action-pack-release.yml"
 run_case malformed-pack-is-refused "$case_root" 1
 
+case_root="$scratch/malformed-foreign-workflow"
+seed "$case_root"
+printf '{ [ }\n' >"$case_root/.github/workflows/malformed-foreign.yml"
+run_case malformed-foreign-workflow-is-refused "$case_root" 1
+
 case_root="$scratch/provenance-is-not-attest"
 seed "$case_root"
 cat >"$case_root/.github/workflows/release-wrapper.yml" <<'YAML'
@@ -307,6 +312,21 @@ jobs:
       - uses: actions/attest@v4.2.2
 YAML
 run_case tag-pinned-foreign-workflow-is-refused "$case_root" 1
+
+case_root="$scratch/alias-foreign-workflow"
+seed "$case_root"
+cat >"$case_root/.github/workflows/alias-attest.yml" <<'YAML'
+name: Mutated alias actions/attest
+on: workflow_dispatch
+env:
+  ATTEST_ACTION: &attest-action actions/attest@v4.2.2
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: *attest-action
+YAML
+run_case alias-foreign-workflow-is-refused "$case_root" 1
 
 case_root="$scratch/quoted-foreign-workflow"
 seed "$case_root"
@@ -421,15 +441,36 @@ case_root="$scratch/retarget-pack-sha256sum"
 seed "$case_root"
 mutate_once \
   "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
-  "            sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS" \
-  "            sha256sum privileged-mcp-action-v0-clean-room.tar.gz > OTHERSUMS"
+  "          sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS" \
+  "          sha256sum privileged-mcp-action-v0-clean-room.tar.gz > OTHERSUMS"
 run_case retarget-pack-sha256sum-is-refused "$case_root" 1
+
+case_root="$scratch/pack-producer-if-false"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
+  "        id: build-release-checksums
+        working-directory: release" \
+  "        id: build-release-checksums
+        if: false
+        working-directory: release"
+run_case pack-producer-if-false-is-refused "$case_root" 1
+
+case_root="$scratch/pack-producer-never-called-function"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
+  "          sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS" \
+  "          make_checksums() {
+            sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS
+          }"
+run_case pack-producer-never-called-function-is-refused "$case_root" 1
 
 case_root="$scratch/delete-pack-sha256sum"
 seed "$case_root"
 mutate_once \
   "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
-  "            sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS
+  "          sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS
 " \
   ""
 run_case delete-pack-sha256sum-is-refused "$case_root" 1
@@ -438,8 +479,8 @@ case_root="$scratch/comment-only-pack-sha256sum"
 seed "$case_root"
 mutate_once \
   "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
-  "            sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS" \
-  "            # sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS"
+  "          sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS" \
+  "          # sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS"
 run_case comment-only-pack-sha256sum-is-refused "$case_root" 1
 
 case_root="$scratch/retarget-delegated-proof-pack"
@@ -449,6 +490,14 @@ mutate_once \
   "          python3 scripts/ci/assay_runner_delegated_proof_pack.py \\" \
   "          python3 scripts/ci/other_delegated_proof_pack.py \\"
 run_case retarget-delegated-proof-pack-is-refused "$case_root" 1
+
+case_root="$scratch/delegated-producer-help"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/runner-spike-delegated.yml" \
+  "          python3 scripts/ci/assay_runner_delegated_proof_pack.py \\" \
+  "          python3 scripts/ci/assay_runner_delegated_proof_pack.py --help \\"
+run_case delegated-producer-help-is-refused "$case_root" 1
 
 case_root="$scratch/delete-delegated-proof-pack"
 seed "$case_root"
@@ -467,6 +516,7 @@ import sys
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 old = """      - name: Retain attestation bundle
+        id: retain-release-attestation
         env:
           ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |
@@ -503,6 +553,26 @@ path.write_text(text.replace(old, new, 1), encoding="utf-8")
 PY
 run_case pack-consumer-inert-is-refused "$case_root" 1
 
+case_root="$scratch/pack-consumer-if-false"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
+  '          cp "$ATTESTATION_BUNDLE" release/attestation-bundle.json' \
+  '          if false; then
+            cp "$ATTESTATION_BUNDLE" release/attestation-bundle.json
+          fi'
+run_case pack-consumer-if-false-is-refused "$case_root" 1
+
+case_root="$scratch/pack-consumer-never-called-function"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
+  '          cp "$ATTESTATION_BUNDLE" release/attestation-bundle.json' \
+  '          retain_bundle() {
+            cp "$ATTESTATION_BUNDLE" release/attestation-bundle.json
+          }'
+run_case pack-consumer-never-called-function-is-refused "$case_root" 1
+
 case_root="$scratch/delegated-consumer-scalar"
 seed "$case_root"
 python3 - "$case_root/.github/workflows/runner-spike-delegated.yml" <<'PY'
@@ -512,16 +582,13 @@ import sys
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 old = """      - name: Retain delegated proof attestation bundle
+        id: retain-proof-attestation
         if: always() && steps.attest-proof-pack.outputs.bundle-path != ''
         shell: bash
         run: |
           set -euo pipefail
           cp "${{ steps.attest-proof-pack.outputs.bundle-path }}" \\
             "$ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD/attestation-bundle.json"
-          {
-            echo "- attestation-bundle: assay-runner-proof-upload/attestation-bundle.json"
-            echo "- attestation-url: ${{ steps.attest-proof-pack.outputs.attestation-url }}"
-          } >> "$GITHUB_STEP_SUMMARY"
 """
 new = """      - name: Retain delegated proof attestation bundle
         NOTE: steps.attest-proof-pack.outputs.bundle-path
@@ -589,8 +656,10 @@ case_root="$scratch/delegated-consumer-if-false"
 seed "$case_root"
 mutate_once \
   "$case_root/.github/workflows/runner-spike-delegated.yml" \
-  "        if: always() && steps.attest-proof-pack.outputs.bundle-path != ''" \
-  "        if: false"
+  "        id: retain-proof-attestation
+        if: always() && steps.attest-proof-pack.outputs.bundle-path != ''" \
+  "        id: retain-proof-attestation
+        if: false"
 run_case delegated-consumer-if-false-is-refused "$case_root" 1
 
 case_root="$scratch/pack-consumer-other-job"
@@ -602,6 +671,7 @@ import sys
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 consumer = """      - name: Retain attestation bundle
+        id: retain-release-attestation
         env:
           ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |
@@ -618,6 +688,7 @@ text += """
     runs-on: ubuntu-24.04
     steps:
       - name: Retain attestation bundle
+        id: retain-release-attestation
         env:
           ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |

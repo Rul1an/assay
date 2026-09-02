@@ -65,10 +65,13 @@ jobs:
             --source-commit "$source_commit" \
             --output /tmp/pack-second.tar.gz
           cmp release/privileged-mcp-action-v0-clean-room.tar.gz /tmp/pack-second.tar.gz
-          (
-            cd release
-            sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS
-          )
+
+      - name: Build release checksums
+        id: build-release-checksums
+        working-directory: release
+        run: |
+          set -euo pipefail
+          sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS
 
       - name: Run pack contract tests
         run: |
@@ -127,6 +130,7 @@ jobs:
           show-summary: true
 
       - name: Retain attestation bundle
+        id: retain-release-attestation
         env:
           ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |

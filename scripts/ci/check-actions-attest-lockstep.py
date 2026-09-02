@@ -35,11 +35,14 @@ class Producer(NamedTuple):
     job_id: str
     step_id: str
     subject_checksums: str
-    subject_producer: str
+    producer_step_id: str
+    producer_working_directory: str | None
+    producer_commands: tuple[str, ...]
     bundle_output: str
+    consumer_step_id: str
     consumer_if: str | None
     consumer_env: tuple[str, str] | None
-    consumer_copy: tuple[str, str]
+    consumer_commands: tuple[str, ...]
 
 
 class WorkflowParseError(Exception):
@@ -52,13 +55,39 @@ PRODUCERS = (
         job_id="phase1-delegated-gates",
         step_id="attest-proof-pack",
         subject_checksums="assay-runner-proof-upload/subject-checksums.txt",
-        subject_producer="python3 scripts/ci/assay_runner_delegated_proof_pack.py",
+        producer_step_id="build-proof-pack",
+        producer_working_directory=None,
+        producer_commands=(
+            "set -euo pipefail",
+            (
+                "python3 scripts/ci/assay_runner_delegated_proof_pack.py "
+                "--proof-root $ASSAY_RUNNER_DELEGATED_PROOF_ROOT "
+                "--gates '${{ inputs.gates }}' "
+                "--build-ebpf '${{ inputs.build_ebpf }}' "
+                "--run-id $GITHUB_RUN_ID "
+                "--run-attempt $GITHUB_RUN_ATTEMPT "
+                "--run-url "
+                "'${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/"
+                "${GITHUB_RUN_ID}' "
+                "--ref $GITHUB_REF "
+                "--head-sha $GITHUB_SHA "
+                "--workflow-sha '${GITHUB_WORKFLOW_SHA:-$GITHUB_SHA}' "
+                "--workflow-name '$GITHUB_WORKFLOW' "
+                "--workflow-path .github/workflows/runner-spike-delegated.yml "
+                "--repository $GITHUB_REPOSITORY "
+                "--retention-days 365"
+            ),
+        ),
         bundle_output="steps.attest-proof-pack.outputs.bundle-path",
+        consumer_step_id="retain-proof-attestation",
         consumer_if="always() && steps.attest-proof-pack.outputs.bundle-path != ''",
         consumer_env=None,
-        consumer_copy=(
-            "${{ steps.attest-proof-pack.outputs.bundle-path }}",
-            "$ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD/attestation-bundle.json",
+        consumer_commands=(
+            "set -euo pipefail",
+            (
+                "cp '${{ steps.attest-proof-pack.outputs.bundle-path }}' "
+                "'$ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD/attestation-bundle.json'"
+            ),
         ),
     ),
     Producer(
@@ -66,18 +95,23 @@ PRODUCERS = (
         job_id="release-pack",
         step_id="attest",
         subject_checksums="release/SHA256SUMS",
-        subject_producer=(
-            "sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS"
+        producer_step_id="build-release-checksums",
+        producer_working_directory="release",
+        producer_commands=(
+            "set -euo pipefail",
+            "sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS",
         ),
         bundle_output="steps.attest.outputs.bundle-path",
+        consumer_step_id="retain-release-attestation",
         consumer_if=None,
         consumer_env=(
             "ATTESTATION_BUNDLE",
             "${{ steps.attest.outputs.bundle-path }}",
         ),
-        consumer_copy=(
-            "$ATTESTATION_BUNDLE",
-            "release/attestation-bundle.json",
+        consumer_commands=(
+            "set -euo pipefail",
+            "test -n '$ATTESTATION_BUNDLE'",
+            "cp '$ATTESTATION_BUNDLE' release/attestation-bundle.json",
         ),
     ),
 )
@@ -103,7 +137,11 @@ def load_workflow_mapping(path: Path) -> object:
                 "-ryaml",
                 "-rjson",
                 "-e",
-                "puts JSON.generate(YAML.load_file(ARGV[0]))",
+                (
+                    "document = YAML.safe_load(File.read(ARGV[0]), "
+                    "permitted_classes: [], permitted_symbols: [], aliases: true); "
+                    "puts JSON.generate(document)"
+                ),
                 str(path),
             ],
             check=False,
@@ -235,16 +273,13 @@ def shell_command_tokens(run: str) -> list[list[str]]:
     return commands
 
 
-def step_runs_command(step: dict[str, object], expected: str) -> bool:
-    expected_tokens = shlex.split(expected, comments=False, posix=True)
-    return any(
-        command[: len(expected_tokens)] == expected_tokens
-        for command in shell_command_tokens(step_run_text(step))
-    )
-
-
-def step_copies_value(step: dict[str, object], source: str, destination: str) -> bool:
-    return ["cp", source, destination] in shell_command_tokens(step_run_text(step))
+def step_runs_exact_commands(
+    step: dict[str, object], expected: tuple[str, ...]
+) -> bool:
+    expected_tokens = [
+        shlex.split(command, comments=False, posix=True) for command in expected
+    ]
+    return shell_command_tokens(step_run_text(step)) == expected_tokens
 
 
 def producer_contract_errors(producer: Producer, document: object) -> list[str]:
@@ -288,37 +323,83 @@ def producer_contract_errors(producer: Producer, document: object) -> list[str]:
             f"want {producer.subject_checksums!r}"
         )
     same_job_steps = job_steps(job)
-    earlier = same_job_steps[:attest_index]
-    if not any(step_runs_command(item, producer.subject_producer) for item in earlier):
+    producer_steps = [
+        (index, item)
+        for index, item in enumerate(same_job_steps)
+        if item.get("id") == producer.producer_step_id
+    ]
+    if len(producer_steps) != 1:
         errors.append(
-            f"{producer.path}: subject {producer.subject_checksums} is not produced "
-            f"earlier in job {producer.job_id!r} by {producer.subject_producer!r}"
+            f"{producer.path}: want exactly one producer step "
+            f"{producer.producer_step_id!r}, found {len(producer_steps)}"
         )
-    later = same_job_steps[attest_index + 1 :]
-    expression = "${{ " + producer.bundle_output + " }}"
-    found_consumer = False
-    for consumer in later:
+    else:
+        producer_index, producer_step = producer_steps[0]
+        if producer_index >= attest_index:
+            errors.append(
+                f"{producer.path}: producer step {producer.producer_step_id!r} "
+                "does not precede attestation"
+            )
+        if not is_reachable(producer_step):
+            errors.append(
+                f"{producer.path}: producer step {producer.producer_step_id!r} "
+                "is not reachable"
+            )
+        if (
+            producer_step.get("working-directory")
+            != producer.producer_working_directory
+        ):
+            errors.append(
+                f"{producer.path}: producer working-directory "
+                f"{producer_step.get('working-directory')!r}, "
+                f"want {producer.producer_working_directory!r}"
+            )
+        if not step_runs_exact_commands(producer_step, producer.producer_commands):
+            errors.append(
+                f"{producer.path}: producer step {producer.producer_step_id!r} "
+                "does not run the exact command sequence"
+            )
+
+    consumer_steps = [
+        (index, item)
+        for index, item in enumerate(same_job_steps)
+        if item.get("id") == producer.consumer_step_id
+    ]
+    if len(consumer_steps) != 1:
+        errors.append(
+            f"{producer.path}: want exactly one consumer step "
+            f"{producer.consumer_step_id!r}, found {len(consumer_steps)}"
+        )
+    else:
+        consumer_index, consumer = consumer_steps[0]
+        if consumer_index <= attest_index:
+            errors.append(
+                f"{producer.path}: consumer step {producer.consumer_step_id!r} "
+                "does not follow attestation"
+            )
         if not is_reachable(consumer):
-            continue
-        if producer.consumer_if is not None and consumer.get("if") != producer.consumer_if:
-            continue
+            errors.append(
+                f"{producer.path}: consumer step {producer.consumer_step_id!r} "
+                "is not reachable"
+            )
+        if consumer.get("if") != producer.consumer_if:
+            errors.append(
+                f"{producer.path}: consumer condition {consumer.get('if')!r}, "
+                f"want {producer.consumer_if!r}"
+            )
         if producer.consumer_env is not None:
             env = consumer.get("env")
             key, value = producer.consumer_env
             if not isinstance(env, dict) or env.get(key) != value:
-                continue
-        source, destination = producer.consumer_copy
-        if producer.consumer_env is None and source != expression:
-            continue
-        if not step_copies_value(consumer, source, destination):
-            continue
-        found_consumer = True
-        break
-    if not found_consumer:
-        errors.append(
-            f"{producer.path}: missing reachable same-job consumer "
-            f"{producer.bundle_output}"
-        )
+                errors.append(
+                    f"{producer.path}: consumer env {key!r} is not bound to {value!r}"
+                )
+        if not step_runs_exact_commands(consumer, producer.consumer_commands):
+            errors.append(
+                f"{producer.path}: consumer step {producer.consumer_step_id!r} "
+                f"does not preserve {producer.bundle_output} with the exact "
+                "command sequence"
+            )
     return errors
 
 
@@ -333,7 +414,8 @@ def check() -> list[str]:
                 continue
             try:
                 document = load_workflow_mapping(workflow)
-            except WorkflowParseError:
+            except WorkflowParseError as error:
+                errors.append(str(error))
                 continue
             if structural_attest_steps(document):
                 errors.append(f"unexpected actions/attest workflow callsite: {workflow}")
