@@ -66,5 +66,5 @@ python3 -c 'import pathlib,sys; sys.exit(0 if b"s1b-cell7-disabled" in pathlib.P
   echo "FAIL: ASSAY_BIN is not the mutated rebuild (missing s1b-cell7-disabled)" >&2
   exit 1
 }
-sudo -E env HARNESS_BIN="$RUNNER_TEMP/s1b-harness" WORKDIR="$RUNNER_TEMP/s1b-disabled" \
+sudo -E env RUNNER_TEMP="$RUNNER_TEMP" HARNESS_BIN="$RUNNER_TEMP/s1b-harness" \
   bash scripts/ci/run-send-syscall-matrix.sh attach-disabled

@@ -291,13 +291,8 @@ run_matrix_active=$(fn_active run_matrix)
 want_run_matrix=$(cat <<'EOF'
 run_matrix() {
 local expect_send="$1" n=0 hpid="" hc=0 mc=0 p2 p3
-mkdir -p "$WORKDIR"
-FIFO="$WORKDIR/go.fifo"
-LOG="$WORKDIR/monitor.log"
-HOUT="$WORKDIR/harness.out"
-OH="$WORKDIR/observation-health.json"
-rm -f "$FIFO" "$LOG" "$HOUT" "$OH"
-mkfifo "$FIFO"
+create_owned_workdir
+prepare_matrix_artifacts
 echo "kernel=$(uname -r) host=$(uname -n) mode=$MODE"
 echo "object=$(sha256sum "$ASSAY_EBPF" | awk '{print $1}')"
 "$HARNESS_BIN" "$FIFO" >"$HOUT" 2>&1 &
@@ -343,6 +338,19 @@ EOF
 )
 [[ "$run_matrix_active" == "$want_run_matrix" ]] \
   || fail "run_matrix active body must be the closed startup-then-assert shape"
+prepare_matrix_active=$(fn_active prepare_matrix_artifacts)
+want_prepare_matrix=$(cat <<'EOF'
+prepare_matrix_artifacts() {
+FIFO=go.fifo
+LOG=monitor.log
+HOUT=harness.out
+OH=observation-health.json
+mkfifo "$FIFO"
+}
+EOF
+)
+[[ "$prepare_matrix_active" == "$want_prepare_matrix" ]] \
+  || fail "prepare_matrix_artifacts active body must match the closed artifact setup"
 wait_ep_block=$(printf '%s\n' \
   'wait_endpoint "$hpid" sendto "127.0.0.1" "$p2"' \
   'wait_endpoint "$hpid" sendmsg "127.0.0.1" "$p3"')
@@ -641,6 +649,461 @@ cec=$?
 set -e
 [[ "$cec" -eq 0 ]] || fail "cleanup-selftest ec=$cec err=$(cat "$tmp/cleanup.err")"
 grep -q 'ok: cleanup-selftest' "$tmp/cleanup.out" || fail "cleanup-selftest missing ok"
+
+run_leaf_residue_case() {
+  local driver="$1" label="$2" incoming="$3" expected="$4"
+  local leaf="$tmp/leaf-$label-$incoming" out="$tmp/leaf-$label-$incoming.out" err="$tmp/leaf-$label-$incoming.err"
+  local actual diagnostic_count workdir_count workdir
+  mkdir "$leaf"
+  printf 'busy\n' >"$leaf/member"
+  set +e
+  RUNNER_TEMP="$tmp" run_bounded 12 bash "$driver" cleanup-leaf-status-selftest \
+    "$leaf" "$incoming" >"$out" 2>"$err"
+  actual=$?
+  set -e
+  [[ "$actual" -eq "$expected" ]] \
+    || fail "leaf residue incoming=$incoming returned $actual, expected $expected"
+  diagnostic_count=$(grep -cFx "S1B_LEAF_RESIDUE path=$leaf" "$err" || true)
+  [[ "$diagnostic_count" -eq 1 ]] \
+    || fail "leaf residue incoming=$incoming emitted $diagnostic_count named diagnostics, expected 1"
+  workdir_count=$(grep -c '^SELFTEST_WORKDIR=' "$out" || true)
+  [[ "$workdir_count" -eq 1 ]] \
+    || fail "leaf residue incoming=$incoming emitted $workdir_count selftest workdir markers, expected 1"
+  workdir=$(sed -n 's/^SELFTEST_WORKDIR=//p' "$out")
+  grep -qxF "S1B_WORKDIR_RETAINED path=$workdir" "$out" \
+    || fail "leaf residue incoming=$incoming missing retained workdir disposition"
+  [[ -d "$workdir" ]] || fail "leaf residue incoming=$incoming retained root missing: $workdir"
+  [[ -z "$(find "$workdir" -mindepth 1 -maxdepth 1 -print -quit)" ]] \
+    || fail "leaf residue incoming=$incoming skipped workdir contents cleanup: $workdir"
+  rmdir "$workdir" || fail "leaf residue incoming=$incoming could not consume retained root: $workdir"
+  [[ -f "$leaf/member" ]] || fail "leaf residue fixture unexpectedly disappeared: $leaf"
+}
+
+run_leaf_residue_case "$DRIVER" production 0 1
+run_leaf_residue_case "$DRIVER" production 23 23
+
+empty_leaf="$tmp/empty-selftest-leaf"
+mkdir "$empty_leaf"
+set +e
+run_bounded 12 bash "$DRIVER" cleanup-leaf-status-selftest "$empty_leaf" 0 \
+  >"$tmp/empty-leaf.out" 2>"$tmp/empty-leaf.err"
+empty_leaf_ec=$?
+set -e
+[[ "$empty_leaf_ec" -ne 0 ]] || fail "cleanup leaf selftest accepted an empty leaf"
+grep -Fq 'cleanup leaf selftest requires a non-empty leaf directory' "$tmp/empty-leaf.err" \
+  || fail "empty cleanup leaf refusal missing diagnostic"
+[[ -d "$empty_leaf" ]] || fail "cleanup leaf selftest removed an empty caller path"
+
+noop_cleanup_driver="$tmp/noop-cleanup-driver.sh"
+cp "$DRIVER" "$noop_cleanup_driver"
+printf '\n# comment-only cleanup control\n' >>"$noop_cleanup_driver"
+run_leaf_residue_case "$noop_cleanup_driver" noop 0 1
+
+duplicate_cleanup_driver="$tmp/duplicate-cleanup-driver.sh"
+cp "$DRIVER" "$duplicate_cleanup_driver"
+python3 - "$duplicate_cleanup_driver" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '''      printf 'S1B_LEAF_RESIDUE path=%s\\n' "$LEAF" >&2'''
+new = old + "\n" + old
+if text.count(old) != 1:
+    raise SystemExit("duplicate cleanup mutation target must occur exactly once")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+set +e
+( run_leaf_residue_case "$duplicate_cleanup_driver" duplicate 0 1 ) \
+  >"$tmp/duplicate-contract.out" 2>"$tmp/duplicate-contract.err"
+duplicate_contract_ec=$?
+set -e
+[[ "$duplicate_contract_ec" -ne 0 ]] \
+  || fail "duplicate leaf residue diagnostic satisfied the contract"
+grep -qxF 'FAIL: leaf residue incoming=0 emitted 2 named diagnostics, expected 1' \
+  "$tmp/duplicate-contract.err" \
+  || fail "duplicate leaf residue mutation failed for an unrelated reason"
+
+duplicate_workdir_driver="$tmp/duplicate-workdir-driver.sh"
+cp "$DRIVER" "$duplicate_workdir_driver"
+python3 - "$duplicate_workdir_driver" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '''    LEAF="$2"
+    WORKDIR=""
+    create_owned_workdir
+    printf 'SELFTEST_WORKDIR=%s\\n' "$WORKDIR"
+    exit "$3" ;;'''
+new = old.replace(
+    '''    printf 'SELFTEST_WORKDIR=%s\\n' "$WORKDIR"''',
+    '''    printf 'SELFTEST_WORKDIR=%s\\n' "$WORKDIR"
+    printf 'SELFTEST_WORKDIR=%s\\n' "$WORKDIR"''',
+)
+if text.count(old) != 1:
+    raise SystemExit("duplicate workdir mutation target must occur exactly once")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+set +e
+( run_leaf_residue_case "$duplicate_workdir_driver" duplicate-workdir 0 1 ) \
+  >"$tmp/duplicate-workdir-contract.out" 2>"$tmp/duplicate-workdir-contract.err"
+duplicate_workdir_contract_ec=$?
+set -e
+[[ "$duplicate_workdir_contract_ec" -ne 0 ]] \
+  || fail "duplicate selftest workdir marker satisfied the contract"
+grep -qxF 'FAIL: leaf residue incoming=0 emitted 2 selftest workdir markers, expected 1' \
+  "$tmp/duplicate-workdir-contract.err" \
+  || fail "duplicate workdir mutation failed for an unrelated reason"
+
+silent_cleanup_driver="$tmp/silent-cleanup-driver.sh"
+cp "$DRIVER" "$silent_cleanup_driver"
+python3 - "$silent_cleanup_driver" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '''    if ! rmdir "$LEAF" 2>/dev/null; then
+      printf 'S1B_LEAF_RESIDUE path=%s\\n' "$LEAF" >&2
+      leaf_residue=1
+    fi'''
+new = '''    rmdir "$LEAF" 2>/dev/null || true'''
+if text.count(old) != 1:
+    raise SystemExit("silent cleanup mutation target must occur exactly once")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+set +e
+( run_leaf_residue_case "$silent_cleanup_driver" silent 0 1 ) \
+  >"$tmp/silent-contract.out" 2>"$tmp/silent-contract.err"
+silent_contract_ec=$?
+set -e
+[[ "$silent_contract_ec" -eq 1 ]] \
+  || fail "silent leaf cleanup contract returned $silent_contract_ec, expected 1"
+grep -qxF 'FAIL: leaf residue incoming=0 returned 0, expected 1' "$tmp/silent-contract.err" \
+  || fail "silent leaf cleanup mutation failed for an unrelated reason"
+[[ ! -s "$tmp/leaf-silent-0.err" ]] \
+  || fail "silent leaf cleanup mutation unexpectedly emitted a diagnostic"
+silent_workdir=$(sed -n 's/^SELFTEST_WORKDIR=//p' "$tmp/leaf-silent-0.out")
+[[ -n "$silent_workdir" ]] || fail "silent leaf cleanup mutation did not execute the selftest"
+grep -qxF "S1B_WORKDIR_RETAINED path=$silent_workdir" "$tmp/leaf-silent-0.out" \
+  || fail "silent leaf cleanup mutation missed retained workdir disposition"
+[[ -d "$silent_workdir" ]] || fail "silent leaf cleanup mutation lost retained workdir root"
+[[ -z "$(find "$silent_workdir" -mindepth 1 -maxdepth 1 -print -quit)" ]] \
+  || fail "silent leaf cleanup mutation skipped workdir contents cleanup"
+rmdir "$silent_workdir" || fail "silent leaf cleanup mutation retained root could not be consumed"
+[[ -f "$tmp/leaf-silent-0/member" ]] || fail "silent leaf cleanup mutation removed the residue fixture"
+
+ownership_rt="$tmp/runner-temp"
+mkdir "$ownership_rt"
+
+set +e
+RUNNER_TEMP="$ownership_rt" run_bounded 12 bash "$DRIVER" workdir-create-selftest \
+  >"$tmp/workdir-create.out" 2>"$tmp/workdir-create.err"
+workdir_create_ec=$?
+set -e
+[[ "$workdir_create_ec" -eq 0 ]] \
+  || fail "workdir create selftest returned $workdir_create_ec: $(cat "$tmp/workdir-create.err")"
+created_workdir_count=$(grep -c '^SELFTEST_WORKDIR=' "$tmp/workdir-create.out" || true)
+[[ "$created_workdir_count" -eq 1 ]] \
+  || fail "workdir create emitted $created_workdir_count workdir witnesses, expected 1"
+created_workdir=$(sed -n 's/^SELFTEST_WORKDIR=//p' "$tmp/workdir-create.out")
+[[ "$created_workdir" == "$ownership_rt"/s1b-workdir-create-* ]] \
+  || fail "workdir create escaped RUNNER_TEMP: $created_workdir"
+retained_count=$(grep -cFx "S1B_WORKDIR_RETAINED path=$created_workdir" \
+  "$tmp/workdir-create.out" || true)
+[[ "$retained_count" -eq 1 ]] \
+  || fail "workdir create emitted $retained_count retained-root dispositions, expected 1"
+[[ -d "$created_workdir" ]] || fail "retained workdir root missing: $created_workdir"
+[[ -z "$(find "$created_workdir" -mindepth 1 -maxdepth 1 -print -quit)" ]] \
+  || fail "retained workdir root is not empty: $created_workdir"
+foreign_workdir_count=$(grep -c '^SELFTEST_FOREIGN_WORKDIR=' "$tmp/workdir-create.out" || true)
+[[ "$foreign_workdir_count" -eq 1 ]] \
+  || fail "workdir create emitted $foreign_workdir_count foreign witnesses, expected 1"
+foreign_workdir=$(sed -n 's/^SELFTEST_FOREIGN_WORKDIR=//p' "$tmp/workdir-create.out")
+[[ "$foreign_workdir" == "$ownership_rt"/s1b-foreign-* ]] \
+  || fail "foreign workdir witness escaped RUNNER_TEMP: $foreign_workdir"
+[[ -f "$foreign_workdir/keep" ]] || fail "foreign S1b sibling was modified or deleted"
+
+collision="$ownership_rt/s1b-foreign"
+mkdir "$collision"
+printf 'keep\n' >"$collision/keep"
+set +e
+RUNNER_TEMP="$ownership_rt" WORKDIR="$collision" \
+  run_bounded 12 bash "$DRIVER" workdir-create-selftest \
+  >"$tmp/workdir-collision.out" 2>"$tmp/workdir-collision.err"
+collision_ec=$?
+set -e
+[[ "$collision_ec" -ne 0 ]] || fail "pre-existing S1b path was accepted as owned"
+grep -qxF "FAIL: refusing existing WORKDIR=$collision" "$tmp/workdir-collision.err" \
+  || fail "existing collision refusal missing exact diagnostic"
+[[ -f "$collision/keep" ]] || fail "pre-existing S1b collision was modified or deleted"
+
+stripped="$ownership_rt/s1b-stripped"
+set +e
+run_bounded 12 env -u RUNNER_TEMP WORKDIR="$stripped" \
+  bash "$DRIVER" workdir-create-selftest \
+  >"$tmp/workdir-stripped.out" 2>"$tmp/workdir-stripped.err"
+stripped_ec=$?
+set -e
+[[ "$stripped_ec" -ne 0 ]] || fail "workdir creation accepted stripped RUNNER_TEMP"
+grep -qxF 'FAIL: RUNNER_TEMP required for S1b workdir ownership' "$tmp/workdir-stripped.err" \
+  || fail "stripped RUNNER_TEMP refusal missing exact diagnostic"
+[[ ! -e "$stripped" ]] || fail "stripped RUNNER_TEMP path was created: $stripped"
+
+set +e
+RUNNER_TEMP="$ownership_rt" run_bounded 12 bash "$DRIVER" workdir-rebind-selftest \
+  >"$tmp/workdir-rebind.out" 2>"$tmp/workdir-rebind.err"
+rebind_ec=$?
+set -e
+[[ "$rebind_ec" -eq 1 ]] || fail "workdir rebind returned $rebind_ec, expected 1"
+rebind_owned_count=$(grep -c '^SELFTEST_WORKDIR=' "$tmp/workdir-rebind.out" || true)
+rebind_moved_count=$(grep -c '^SELFTEST_REBOUND_WORKDIR=' "$tmp/workdir-rebind.out" || true)
+[[ "$rebind_owned_count" -eq 1 && "$rebind_moved_count" -eq 1 ]] \
+  || fail "workdir rebind witness cardinality drifted"
+rebind_owned=$(sed -n 's/^SELFTEST_WORKDIR=//p' "$tmp/workdir-rebind.out")
+rebind_moved=$(sed -n 's/^SELFTEST_REBOUND_WORKDIR=//p' "$tmp/workdir-rebind.out")
+rebind_residue_count=$(grep -cFx \
+  "S1B_WORKDIR_RESIDUE path=$rebind_owned reason=path_rebound" \
+  "$tmp/workdir-rebind.err" || true)
+[[ "$rebind_residue_count" -eq 1 ]] \
+  || fail "workdir rebind emitted $rebind_residue_count named residue dispositions, expected 1"
+[[ -f "$rebind_owned/foreign" ]] || fail "rebound foreign replacement was modified or deleted"
+[[ -p "$rebind_owned/go.fifo" ]] || fail "rebound foreign FIFO was modified or deleted"
+[[ -d "$rebind_moved" ]] || fail "rebound owned object missing: $rebind_moved"
+[[ -z "$(find "$rebind_moved" -mindepth 1 -maxdepth 1 -print -quit)" ]] \
+  || fail "rebound owned object contents were not cleaned"
+
+set +e
+RUNNER_TEMP="$ownership_rt" run_bounded 12 bash "$DRIVER" workdir-startup-rebind-selftest \
+  >"$tmp/workdir-startup-rebind.out" 2>"$tmp/workdir-startup-rebind.err"
+startup_rebind_ec=$?
+set -e
+[[ "$startup_rebind_ec" -eq 1 ]] \
+  || fail "workdir startup rebind returned $startup_rebind_ec, expected 1"
+startup_owned=$(sed -n 's/^SELFTEST_WORKDIR=//p' "$tmp/workdir-startup-rebind.out")
+startup_moved=$(sed -n 's/^SELFTEST_REBOUND_WORKDIR=//p' "$tmp/workdir-startup-rebind.out")
+startup_residue_count=$(grep -cFx \
+  "S1B_WORKDIR_RESIDUE path=$startup_owned reason=path_rebound" \
+  "$tmp/workdir-startup-rebind.err" || true)
+[[ "$startup_residue_count" -eq 1 ]] \
+  || fail "workdir startup rebind emitted $startup_residue_count named residue dispositions, expected 1"
+for artifact in go.fifo monitor.log harness.out observation-health.json; do
+  [[ -f "$startup_owned/$artifact" ]] \
+    || fail "startup cleanup deleted rebound foreign artifact: $artifact"
+  grep -qxF "foreign:$artifact" "$startup_owned/$artifact" \
+    || fail "startup cleanup replaced rebound foreign artifact: $artifact"
+done
+[[ -d "$startup_moved" ]] || fail "startup rebound owned object missing: $startup_moved"
+[[ -z "$(find "$startup_moved" -mindepth 1 -maxdepth 1 -print -quit)" ]] \
+  || fail "startup rebound owned object contents were not cleaned"
+
+prefix_owner_driver="$tmp/prefix-owner-driver.sh"
+cp "$DRIVER" "$prefix_owner_driver"
+python3 - "$prefix_owner_driver" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '"$wd" == "${S1B_OWNED_WORKDIR:-}"'
+new = '"$wd" == "${RUNNER_TEMP}/s1b-"*'
+if text.count(old) != 1:
+    raise SystemExit("prefix ownership mutation target must occur exactly once")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+set +e
+RUNNER_TEMP="$ownership_rt" run_bounded 12 bash "$prefix_owner_driver" \
+  workdir-create-selftest >"$tmp/prefix-owner.out" 2>"$tmp/prefix-owner.err"
+prefix_owner_ec=$?
+set -e
+[[ "$prefix_owner_ec" -ne 0 ]] || fail "prefix ownership mutant survived"
+grep -Eq '^FAIL: foreign S1b sibling considered owned: ' "$tmp/prefix-owner.err" \
+  || fail "prefix ownership mutant failed for an unrelated reason"
+
+collision_owner_driver="$tmp/collision-owner-driver.sh"
+cp "$DRIVER" "$collision_owner_driver"
+python3 - "$collision_owner_driver" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '''    [[ ! -e "$wd" && ! -L "$wd" ]] || fail "refusing existing WORKDIR=$wd"
+    mkdir "$wd" || fail "mkdir WORKDIR=$wd"'''
+new = '''    mkdir -p "$wd" || fail "mkdir WORKDIR=$wd"'''
+if text.count(old) != 1:
+    raise SystemExit("collision ownership mutation target must occur exactly once")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+mut_collision="$ownership_rt/s1b-mut-collision"
+mkdir "$mut_collision"
+printf 'keep\n' >"$mut_collision/keep"
+set +e
+(
+  set +e
+  RUNNER_TEMP="$ownership_rt" WORKDIR="$mut_collision" \
+    run_bounded 12 bash "$collision_owner_driver" workdir-create-selftest \
+    >"$tmp/mut-collision.out" 2>"$tmp/mut-collision.err"
+  actual=$?
+  set -e
+  [[ "$actual" -ne 0 ]] || fail "pre-existing S1b path was accepted as owned"
+  grep -qxF "FAIL: refusing existing WORKDIR=$mut_collision" "$tmp/mut-collision.err" \
+    || fail "existing collision refusal missing exact diagnostic"
+  [[ -f "$mut_collision/keep" ]] || fail "pre-existing S1b collision was modified or deleted"
+) >"$tmp/mut-collision-contract.out" 2>"$tmp/mut-collision-contract.err"
+mut_collision_contract_ec=$?
+set -e
+[[ "$mut_collision_contract_ec" -ne 0 ]] || fail "collision ownership mutant satisfied the contract"
+grep -qxF 'FAIL: pre-existing S1b path was accepted as owned' \
+  "$tmp/mut-collision-contract.err" \
+  || fail "collision ownership mutant failed for an unrelated reason"
+
+rebind_guard_driver="$tmp/rebind-guard-driver.sh"
+cp "$DRIVER" "$rebind_guard_driver"
+python3 - "$rebind_guard_driver" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '''  if ! s1b_path_is_owned_object "$wd"; then
+    printf 'S1B_WORKDIR_RESIDUE path=%s reason=path_rebound\\n' "$wd" >&2
+    return 1
+  fi'''
+new = '''  if false; then
+    printf 'S1B_WORKDIR_RESIDUE path=%s reason=path_rebound\\n' "$wd" >&2
+    return 1
+  fi'''
+if text.count(old) != 1:
+    raise SystemExit("rebind guard mutation target must occur exactly once")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+set +e
+(
+  set +e
+  RUNNER_TEMP="$ownership_rt" run_bounded 12 bash "$rebind_guard_driver" \
+    workdir-rebind-selftest >"$tmp/mut-rebind.out" 2>"$tmp/mut-rebind.err"
+  actual=$?
+  set -e
+  [[ "$actual" -eq 1 ]] || fail "workdir rebind returned $actual, expected 1"
+) >"$tmp/mut-rebind-contract.out" 2>"$tmp/mut-rebind-contract.err"
+mut_rebind_contract_ec=$?
+set -e
+[[ "$mut_rebind_contract_ec" -ne 0 ]] || fail "rebind guard mutant satisfied the contract"
+grep -qxF 'FAIL: workdir rebind returned 0, expected 1' "$tmp/mut-rebind-contract.err" \
+  || fail "rebind guard mutant failed for an unrelated reason"
+
+pathname_cleanup_driver="$tmp/pathname-cleanup-driver.sh"
+cp "$DRIVER" "$pathname_cleanup_driver"
+python3 - "$pathname_cleanup_driver" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '''  find . -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + || contents_residue=1'''
+new = '''  rm -rf "$wd" || contents_residue=1'''
+if text.count(old) != 1:
+    raise SystemExit("pathname cleanup mutation target must occur exactly once")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+set +e
+(
+  set +e
+  RUNNER_TEMP="$ownership_rt" run_bounded 12 bash "$pathname_cleanup_driver" \
+    workdir-rebind-selftest >"$tmp/mut-pathname.out" 2>"$tmp/mut-pathname.err"
+  actual=$?
+  set -e
+  [[ "$actual" -eq 1 ]] || fail "pathname cleanup rebind returned $actual, expected 1"
+  rebound=$(sed -n 's/^SELFTEST_WORKDIR=//p' "$tmp/mut-pathname.out")
+  [[ -f "$rebound/foreign" ]] || fail "pathname cleanup deleted the foreign replacement"
+) >"$tmp/mut-pathname-contract.out" 2>"$tmp/mut-pathname-contract.err"
+mut_pathname_contract_ec=$?
+set -e
+[[ "$mut_pathname_contract_ec" -ne 0 ]] || fail "pathname cleanup mutant satisfied the contract"
+grep -qxF 'FAIL: pathname cleanup deleted the foreign replacement' \
+  "$tmp/mut-pathname-contract.err" \
+  || fail "pathname cleanup mutant failed for an unrelated reason"
+
+duplicate_retained_driver="$tmp/duplicate-retained-driver.sh"
+cp "$DRIVER" "$duplicate_retained_driver"
+python3 - "$duplicate_retained_driver" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '''  printf 'S1B_WORKDIR_RETAINED path=%s\\n' "$wd"'''
+new = old + "\n" + old
+if text.count(old) != 1:
+    raise SystemExit("retained disposition mutation target must occur exactly once")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+set +e
+(
+  RUNNER_TEMP="$ownership_rt" run_bounded 12 bash "$duplicate_retained_driver" \
+    workdir-create-selftest >"$tmp/mut-retained.out" 2>"$tmp/mut-retained.err"
+  workdir=$(sed -n 's/^SELFTEST_WORKDIR=//p' "$tmp/mut-retained.out")
+  count=$(grep -cFx "S1B_WORKDIR_RETAINED path=$workdir" "$tmp/mut-retained.out" || true)
+  [[ "$count" -eq 1 ]] \
+    || fail "workdir create emitted $count retained-root dispositions, expected 1"
+) >"$tmp/mut-retained-contract.out" 2>"$tmp/mut-retained-contract.err"
+mut_retained_contract_ec=$?
+set -e
+[[ "$mut_retained_contract_ec" -ne 0 ]] || fail "duplicate retained disposition mutant survived"
+grep -qxF 'FAIL: workdir create emitted 2 retained-root dispositions, expected 1' \
+  "$tmp/mut-retained-contract.err" \
+  || fail "duplicate retained disposition mutant failed for an unrelated reason"
+
+duplicate_residue_driver="$tmp/duplicate-residue-driver.sh"
+cp "$DRIVER" "$duplicate_residue_driver"
+python3 - "$duplicate_residue_driver" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '''    printf 'S1B_WORKDIR_RESIDUE path=%s reason=path_rebound\\n' "$wd" >&2'''
+new = old + "\n" + old
+if text.count(old) != 1:
+    raise SystemExit("residue disposition mutation target must occur exactly once")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+set +e
+(
+  set +e
+  RUNNER_TEMP="$ownership_rt" run_bounded 12 bash "$duplicate_residue_driver" \
+    workdir-rebind-selftest >"$tmp/mut-residue.out" 2>"$tmp/mut-residue.err"
+  actual=$?
+  set -e
+  [[ "$actual" -eq 1 ]] || fail "workdir rebind returned $actual, expected 1"
+  workdir=$(sed -n 's/^SELFTEST_WORKDIR=//p' "$tmp/mut-residue.out")
+  count=$(grep -cFx "S1B_WORKDIR_RESIDUE path=$workdir reason=path_rebound" \
+    "$tmp/mut-residue.err" || true)
+  [[ "$count" -eq 1 ]] \
+    || fail "workdir rebind emitted $count named residue dispositions, expected 1"
+) >"$tmp/mut-residue-contract.out" 2>"$tmp/mut-residue-contract.err"
+mut_residue_contract_ec=$?
+set -e
+[[ "$mut_residue_contract_ec" -ne 0 ]] || fail "duplicate residue disposition mutant survived"
+grep -qxF 'FAIL: workdir rebind emitted 2 named residue dispositions, expected 1' \
+  "$tmp/mut-residue-contract.err" \
+  || fail "duplicate residue disposition mutant failed for an unrelated reason"
+
+ownership_noop_driver="$tmp/ownership-noop-driver.sh"
+cp "$DRIVER" "$ownership_noop_driver"
+printf '\n# comment-only ownership control\n' >>"$ownership_noop_driver"
+RUNNER_TEMP="$ownership_rt" run_bounded 12 bash "$ownership_noop_driver" \
+  workdir-create-selftest >"$tmp/ownership-noop.out" 2>"$tmp/ownership-noop.err" \
+  || fail "comment-only ownership control went red: $(cat "$tmp/ownership-noop.err")"
+grep -q '^S1B_WORKDIR_RETAINED path=' "$tmp/ownership-noop.out" \
+  || fail "comment-only ownership control missed retained-root disposition"
+
+if grep -Fq 'S1B_EMPTY_SWAP' "$DRIVER"; then
+  fail "production driver contains the parked environment-controlled empty-swap seam"
+fi
 echo "ok: mutation-selftest and cleanup-selftest"
 
 wf="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/monitor-attach-smoke.yml"
@@ -744,7 +1207,7 @@ want_pos=$(printf '%s\n' \
   'ROOT="$(cd "$(dirname "$0")/../.." && pwd)"' \
   'cd "$ROOT"' \
   'test -f target/assay-ebpf.o' \
-  'exec sudo -E env HARNESS_BIN="${RUNNER_TEMP:?}/s1b-harness" WORKDIR="${RUNNER_TEMP:?}/s1b-positive" bash scripts/ci/run-send-syscall-matrix.sh positive')
+  'exec sudo -E env RUNNER_TEMP="${RUNNER_TEMP:?}" HARNESS_BIN="${RUNNER_TEMP:?}/s1b-harness" bash scripts/ci/run-send-syscall-matrix.sh positive')
 [[ "$pos_active" == "$want_pos" ]] \
   || fail "positive wrapper active lines must match the closed six-line shape ending in exec"
 COMPILE="$(cd "$(dirname "$0")" && pwd)/s1b-compile-and-contract.sh"
@@ -1055,7 +1518,7 @@ python3 -c 'import pathlib,sys; sys.exit(0 if b"s1b-cell7-disabled" in pathlib.P
 echo "FAIL: ASSAY_BIN is not the mutated rebuild (missing s1b-cell7-disabled)" >&2
 exit 1
 }
-sudo -E env HARNESS_BIN="$RUNNER_TEMP/s1b-harness" WORKDIR="$RUNNER_TEMP/s1b-disabled" \
+sudo -E env RUNNER_TEMP="$RUNNER_TEMP" HARNESS_BIN="$RUNNER_TEMP/s1b-harness" \
 bash scripts/ci/run-send-syscall-matrix.sh attach-disabled
 EOF
 )

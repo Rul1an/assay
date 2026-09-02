@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import math
 import os
@@ -101,6 +102,54 @@ def terminate_tree(process: subprocess.Popen[bytes]) -> None:
         process.wait()
 
 
+def _close_bounded_pipes(process: subprocess.Popen[bytes]) -> None:
+    for stream in (process.stdin, process.stdout, process.stderr):
+        if stream is None:
+            continue
+        try:
+            stream.close()
+        except (BrokenPipeError, OSError):
+            pass
+
+
+def _set_nonblocking(phase: str, fd: int) -> None:
+    try:
+        import fcntl
+    except ImportError:
+        fail(
+            phase,
+            "run_bounded needs POSIX nonblocking stdin; fcntl is unavailable on this host",
+            "run the Claude plugin workflow on a POSIX host; Windows process-tree semantics are a non-claim",
+        )
+    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+    fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
+
+def require_bounded_supervisor(phase: str) -> None:
+    """Refuse before spawn when killpg or fcntl cannot supervise the tree."""
+    missing: list[str] = []
+    if not callable(getattr(os, "killpg", None)):
+        missing.append("killpg")
+    try:
+        import fcntl as fcntl_mod
+    except ImportError:
+        missing.append("fcntl")
+    else:
+        if not callable(getattr(fcntl_mod, "fcntl", None)):
+            missing.append("fcntl")
+    if missing:
+        names = ", ".join(missing)
+        fail(
+            phase,
+            f"run_bounded needs POSIX supervisor; {names} unavailable on this host",
+            "run the Claude plugin workflow on a POSIX host; Windows process-tree semantics are a non-claim",
+        )
+
+
+# Same bounded-process invariants as tests/support/bounded_process.rs
+# (#2189/#2190): one absolute deadline, separate stdout/stderr caps,
+# process-tree termination, descendant-held pipe/orphan drain, and stdin
+# supervision. POSIX-only. Not a cross-language abstraction.
 def run_bounded(
     phase: str,
     argv: list[str],
@@ -111,6 +160,7 @@ def run_bounded(
     allowed_codes: Iterable[int] = (0,),
 ) -> CommandResult:
     timeout = workflow_timeout_seconds()
+    require_bounded_supervisor(phase)
     process = subprocess.Popen(
         argv,
         cwd=cwd,
@@ -124,73 +174,108 @@ def run_bounded(
     assert process.stdout is not None
     assert process.stderr is not None
 
-    if stdin:
-        try:
-            process.stdin.write(stdin)
-            process.stdin.flush()
-        except BrokenPipeError:
-            pass
-    process.stdin.close()
-
-    selector = selectors.DefaultSelector()
-    selector.register(process.stdout, selectors.EVENT_READ, "stdout")
-    selector.register(process.stderr, selectors.EVENT_READ, "stderr")
-    buffers = {"stdout": bytearray(), "stderr": bytearray()}
     deadline = time.monotonic() + timeout
-
+    selector = None
     try:
-        while selector.get_map():
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                terminate_tree(process)
-                fail(
-                    phase,
-                    f"process tree exceeded {timeout:g}s deadline",
-                    "retry after checking the client/server command for a prompt, hang, or inherited pipe",
-                )
-            events = selector.select(min(remaining, 0.1))
-            for key, _ in events:
-                chunk = os.read(key.fd, 65_536)
-                if not chunk:
-                    selector.unregister(key.fileobj)
-                    continue
-                target = buffers[key.data]
-                target.extend(chunk)
-                if len(target) > MAX_BYTES:
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+        selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+        buffers = {"stdout": bytearray(), "stderr": bytearray()}
+        stdin_view = memoryview(stdin) if stdin else None
+        stdin_offset = 0
+        if stdin_view is None:
+            process.stdin.close()
+        else:
+            _set_nonblocking(phase, process.stdin.fileno())
+            selector.register(process.stdin, selectors.EVENT_WRITE, "stdin")
+
+        try:
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
                     terminate_tree(process)
                     fail(
                         phase,
-                        f"{key.data} exceeded {MAX_BYTES}-byte ceiling",
-                        "inspect the command directly; the bounded workflow will not retain unbounded diagnostics",
+                        f"process tree exceeded {timeout:g}s deadline",
+                        "retry after checking the client/server command for a prompt, hang, or inherited pipe",
                     )
+                events = selector.select(min(remaining, 0.1))
+                for key, _ in events:
+                    if key.data == "stdin":
+                        assert stdin_view is not None
+                        try:
+                            written = os.write(key.fd, stdin_view[stdin_offset:])
+                        except BlockingIOError:
+                            continue
+                        except BrokenPipeError:
+                            written = -1
+                        except OSError as exc:
+                            if exc.errno in (errno.EPIPE, errno.ECONNRESET):
+                                written = -1
+                            elif exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                                continue
+                            else:
+                                raise
+                        if written < 0 or stdin_offset + written >= len(stdin_view):
+                            selector.unregister(key.fileobj)
+                            try:
+                                process.stdin.close()
+                            except BrokenPipeError:
+                                pass
+                        if written > 0:
+                            stdin_offset += written
+                        continue
 
-            # Descendants can inherit a pipe after the direct child exits. The
-            # same absolute deadline continues to govern that drain.
+                    chunk = os.read(key.fd, 65_536)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    target = buffers[key.data]
+                    target.extend(chunk)
+                    if len(target) > MAX_BYTES:
+                        terminate_tree(process)
+                        fail(
+                            phase,
+                            f"{key.data} exceeded {MAX_BYTES}-byte ceiling",
+                            "inspect the command directly; the bounded workflow will not retain unbounded diagnostics",
+                        )
+
+                # Descendants can inherit a pipe after the direct child exits. The
+                # same absolute deadline continues to govern that drain.
+        finally:
+            selector.close()
+            selector = None
+
+        remaining = max(0.0, deadline - time.monotonic())
+        try:
+            returncode = process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            terminate_tree(process)
+            process.wait()
+            fail(
+                phase,
+                f"process tree did not reap within {timeout:g}s deadline",
+                "inspect descendant processes spawned by the client command",
+            )
+
+        result = CommandResult(returncode, bytes(buffers["stdout"]), bytes(buffers["stderr"]))
+        if returncode not in set(allowed_codes):
+            diagnostic = (result.stderr or result.stdout).decode("utf-8", "replace").strip()
+            diagnostic = diagnostic[-600:] if diagnostic else "no diagnostic output"
+            fail(
+                phase,
+                f"command exited {returncode}: {diagnostic}",
+                "run the named phase directly with the same fresh config and consumer directory",
+            )
+        return result
+    except BaseException:
+        if process.poll() is None:
+            terminate_tree(process)
+        raise
     finally:
-        selector.close()
-
-    remaining = max(0.0, deadline - time.monotonic())
-    try:
-        returncode = process.wait(timeout=remaining)
-    except subprocess.TimeoutExpired:
-        terminate_tree(process)
-        process.wait()
-        fail(
-            phase,
-            f"process tree did not reap within {timeout:g}s deadline",
-            "inspect descendant processes spawned by the client command",
-        )
-
-    result = CommandResult(returncode, bytes(buffers["stdout"]), bytes(buffers["stderr"]))
-    if returncode not in set(allowed_codes):
-        diagnostic = (result.stderr or result.stdout).decode("utf-8", "replace").strip()
-        diagnostic = diagnostic[-600:] if diagnostic else "no diagnostic output"
-        fail(
-            phase,
-            f"command exited {returncode}: {diagnostic}",
-            "run the named phase directly with the same fresh config and consumer directory",
-        )
-    return result
+        if selector is not None:
+            selector.close()
+        _close_bounded_pipes(process)
 
 
 def read_bounded(path: Path, phase: str) -> bytes:
@@ -1003,6 +1088,7 @@ def self_test() -> None:
     assert_changelog_history_self_test()
     assert_changelog_contract()
     assert_hook_files_include_changelog()
+    assert_required_claude_plugin_hooks()
     assert_stream_fixture_table()
     assert_wrong_assay_tool_keeps_invoked_name()
     assert_companion_non_decide_does_not_invalidate()
@@ -1368,19 +1454,227 @@ def assert_changelog_history_self_test() -> None:
 
 
 CLAUDE_PLUGIN_HOOK_ID = "claude-plugin-install-workflow-self-test"
+REQUIRED_CLAUDE_PLUGIN_HOOKS: tuple[tuple[str, str], ...] = (
+    (
+        "claude-plugin-install-workflow-self-test",
+        "bash scripts/ci/test-claude-plugin-install.sh --self-test",
+    ),
+    (
+        "claude-plugin-run-bounded-stdin",
+        "python3 scripts/ci/test_run_bounded_stdin.py",
+    ),
+)
+
+
+_REAL_HOOK_ID_LINE = re.compile(r"^([ \t]*)- id: (\S+)[ \t]*$", re.M)
+
+
+def _hook_block_by_id(config: str, hook_id: str) -> str:
+    matches = [m for m in _REAL_HOOK_ID_LINE.finditer(config) if m.group(2) == hook_id]
+    if not matches:
+        fail(
+            "hook_files",
+            f"pre-commit config lost {hook_id}",
+            "restore the Claude plugin required hook",
+        )
+    if len(matches) != 1:
+        fail(
+            "hook_files",
+            f"pre-commit config has {len(matches)} real list items for {hook_id}",
+            "keep exactly one uncommented YAML list item per required hook id",
+        )
+    start = matches[0].start()
+    nxt = _REAL_HOOK_ID_LINE.search(config, matches[0].end())
+    return config[start:] if nxt is None else config[start:nxt.start()]
 
 
 def _claude_plugin_hook_block(config: str) -> str:
-    marker = f"id: {CLAUDE_PLUGIN_HOOK_ID}"
-    start = config.find(marker)
-    if start < 0:
+    return _hook_block_by_id(config, CLAUDE_PLUGIN_HOOK_ID)
+
+
+def _hook_entry(block: str) -> str:
+    for line in block.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("entry:"):
+            return stripped[len("entry:") :].strip()
+    fail(
+        "hook_files",
+        "required Claude plugin hook has no entry:",
+        "restore the hook entry",
+    )
+
+
+# Same parser route as scripts/ci/check-assay-action-pin.sh: Ruby
+# YAML.safe_load, then JSON. Comments and scalar values are not hooks.
+RUBY_SAFE_LOAD = r"""
+require "json"
+require "yaml"
+begin
+  val = YAML.safe_load(STDIN.read, aliases: false)
+  STDOUT.write(JSON.generate(val))
+rescue Psych::SyntaxError, Psych::BadAlias, Psych::DisallowedClass => e
+  STDERR.write(e.message)
+  exit 2
+end
+"""
+
+
+def load_pre_commit_yaml(config: str) -> object:
+    try:
+        proc = subprocess.run(
+            ["ruby", "-EUTF-8:UTF-8", "-e", RUBY_SAFE_LOAD],
+            input=config,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except FileNotFoundError:
         fail(
             "hook_files",
-            "pre-commit config lost claude-plugin-install-workflow-self-test",
-            "restore the Claude plugin install self-test hook",
+            "ruby is required to parse .pre-commit-config.yaml",
+            "install ruby with Psych YAML.safe_load",
         )
-    nxt = config.find("\n      - id:", start + len(marker))
-    return config[start:] if nxt < 0 else config[start:nxt]
+    except subprocess.TimeoutExpired:
+        fail(
+            "hook_files",
+            "YAML parse timed out",
+            "retry after checking .pre-commit-config.yaml",
+        )
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "yaml parse failed").strip()
+        fail(
+            "hook_files",
+            f"YAML parse failed: {err}",
+            "fix .pre-commit-config.yaml so YAML.safe_load accepts it",
+        )
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        fail(
+            "hook_files",
+            f"YAML JSON decode failed: {exc}",
+            "fix .pre-commit-config.yaml so YAML.safe_load emits JSON",
+        )
+
+
+REQUIRED_CLAUDE_PLUGIN_HOOK_STAGES: dict[str, list[str]] = {
+    "claude-plugin-install-workflow-self-test": ["pre-push"],
+    "claude-plugin-run-bounded-stdin": ["pre-commit", "pre-push"],
+}
+STDIN_HOOK_ID = "claude-plugin-run-bounded-stdin"
+STDIN_HOOK_FILE_PATHS: tuple[str, ...] = (
+    "scripts/ci/claude_plugin_install_workflow.py",
+    "scripts/ci/test_run_bounded_stdin.py",
+    ".pre-commit-config.yaml",
+)
+
+
+def _required_local_hooks(parsed: object) -> dict[str, list[dict[str, object]]]:
+    required: dict[str, list[dict[str, object]]] = {
+        hook_id: [] for hook_id, _entry in REQUIRED_CLAUDE_PLUGIN_HOOKS
+    }
+    if not isinstance(parsed, dict):
+        fail(
+            "hook_files",
+            "pre-commit config root is not a mapping",
+            "keep a standard pre-commit YAML mapping with repos",
+        )
+    repos = parsed.get("repos")
+    if not isinstance(repos, list):
+        fail(
+            "hook_files",
+            "pre-commit config repos is not a list",
+            "keep repos as a YAML list of hook repositories",
+        )
+    for repo in repos:
+        if not isinstance(repo, dict) or repo.get("repo") != "local":
+            continue
+        hooks = repo.get("hooks")
+        if not isinstance(hooks, list):
+            continue
+        for hook in hooks:
+            if not isinstance(hook, dict):
+                continue
+            hook_id = hook.get("id")
+            if hook_id not in required:
+                continue
+            entry = hook.get("entry")
+            if not isinstance(hook_id, str) or not isinstance(entry, str):
+                fail(
+                    "hook_files",
+                    f"hook {hook_id!r} is not a mapping with string id and entry",
+                    "restore the required Claude plugin hook as a real YAML mapping",
+                )
+            required[hook_id].append(hook)
+    return required
+
+
+def _assert_hook_stages(hook_id: str, hook: dict[str, object]) -> None:
+    expected = REQUIRED_CLAUDE_PLUGIN_HOOK_STAGES[hook_id]
+    stages = hook.get("stages")
+    if stages != expected:
+        fail(
+            "hook_files",
+            f"{hook_id} stages {stages!r} is not {expected!r}",
+            "restore the required Claude plugin hook stages",
+        )
+
+
+def _assert_stdin_files_selector(hook: dict[str, object]) -> None:
+    pattern = hook.get("files")
+    if not isinstance(pattern, str) or not pattern:
+        fail(
+            "hook_files",
+            f"{STDIN_HOOK_ID} files selector is missing",
+            "restore the bounded-stdin files regex",
+        )
+    try:
+        compiled = re.compile(pattern)
+    except re.error as error:
+        fail(
+            "hook_files",
+            f"{STDIN_HOOK_ID} files selector is not a regex: {error}",
+            "keep a valid files regex for the bounded-stdin hook",
+        )
+    missing = [path for path in STDIN_HOOK_FILE_PATHS if compiled.search(path) is None]
+    if missing:
+        fail(
+            "hook_files",
+            f"{STDIN_HOOK_ID} files regex does not match {missing[0]}",
+            "keep workflow.py, the stdin test, and .pre-commit-config.yaml in the files regex",
+        )
+
+
+def assert_required_claude_plugin_hooks(config: str | None = None) -> None:
+    if config is None:
+        config = (SOURCE_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    found = _required_local_hooks(load_pre_commit_yaml(config))
+    for hook_id, entry in REQUIRED_CLAUDE_PLUGIN_HOOKS:
+        hooks = found[hook_id]
+        if not hooks:
+            fail(
+                "hook_files",
+                f"pre-commit config lost {hook_id} under repo: local",
+                "restore the Claude plugin required hook under repo: local",
+            )
+        if len(hooks) != 1:
+            fail(
+                "hook_files",
+                f"pre-commit config has {len(hooks)} real list items for {hook_id}",
+                "keep exactly one uncommented YAML list item per required hook id",
+            )
+        hook = hooks[0]
+        got = hook.get("entry")
+        if got != entry:
+            fail(
+                "hook_files",
+                f"{hook_id} entry {got!r} is not {entry!r}",
+                "restore the required Claude plugin hook entry",
+            )
+        _assert_hook_stages(hook_id, hook)
+        if hook_id == STDIN_HOOK_ID:
+            _assert_stdin_files_selector(hook)
+    print("required_claude_plugin_hooks=pass")
 
 
 def _hook_files_selector(block: str) -> str:
