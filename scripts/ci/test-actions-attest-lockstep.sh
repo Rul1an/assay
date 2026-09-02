@@ -470,6 +470,20 @@ mutate_once \
         working-directory: release"
 run_case pack-producer-custom-shell-is-refused "$case_root" 1
 
+case_root="$scratch/pack-producer-extra-env"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
+  "        id: build-release-checksums
+        shell: bash
+        working-directory: release" \
+  "        id: build-release-checksums
+        shell: bash
+        env:
+          INERT: value
+        working-directory: release"
+run_case pack-producer-extra-env-is-refused "$case_root" 1
+
 case_root="$scratch/pack-producer-never-called-function"
 seed "$case_root"
 mutate_once \
@@ -524,6 +538,36 @@ mutate_once \
         if: always()
         shell: \"true {0}\""
 run_case delegated-producer-custom-shell-is-refused "$case_root" 1
+
+case_root="$scratch/delegated-producer-extra-env"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/runner-spike-delegated.yml" \
+  "        id: build-proof-pack
+        if: always()
+        shell: bash" \
+  "        id: build-proof-pack
+        if: always()
+        shell: bash
+        env:
+          ASSAY_RUNNER_DELEGATED_PROOF_ROOT: /tmp"
+run_case delegated-producer-extra-env-is-refused "$case_root" 1
+
+case_root="$scratch/delegated-job-root-env-retarget"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/runner-spike-delegated.yml" \
+  '      ASSAY_RUNNER_DELEGATED_PROOF_ROOT: /tmp/assay-runner-proof-${{ github.run_id }}' \
+  '      ASSAY_RUNNER_DELEGATED_PROOF_ROOT: /tmp'
+run_case delegated-job-root-env-retarget-is-refused "$case_root" 1
+
+case_root="$scratch/delegated-job-upload-env-retarget"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/runner-spike-delegated.yml" \
+  '      ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD: ${{ github.workspace }}/assay-runner-proof-upload' \
+  '      ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD: /tmp'
+run_case delegated-job-upload-env-retarget-is-refused "$case_root" 1
 
 case_root="$scratch/delete-delegated-proof-pack"
 seed "$case_root"
@@ -592,6 +636,15 @@ mutate_once \
         env:"
 run_case pack-consumer-custom-shell-is-refused "$case_root" 1
 
+case_root="$scratch/pack-consumer-extra-env"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
+  '          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}' \
+  '          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          INERT: value'
+run_case pack-consumer-extra-env-is-refused "$case_root" 1
+
 case_root="$scratch/pack-consumer-if-false"
 seed "$case_root"
 mutate_once \
@@ -649,6 +702,20 @@ mutate_once \
         if: always() && steps.attest-proof-pack.outputs.bundle-path != ''
         shell: \"true {0}\""
 run_case delegated-consumer-custom-shell-is-refused "$case_root" 1
+
+case_root="$scratch/delegated-consumer-step-env-retarget"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/runner-spike-delegated.yml" \
+  "        id: retain-proof-attestation
+        if: always() && steps.attest-proof-pack.outputs.bundle-path != ''
+        shell: bash" \
+  "        id: retain-proof-attestation
+        if: always() && steps.attest-proof-pack.outputs.bundle-path != ''
+        shell: bash
+        env:
+          ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD: /tmp"
+run_case delegated-consumer-step-env-retarget-is-refused "$case_root" 1
 
 case_root="$scratch/pack-attest-if-false"
 seed "$case_root"
@@ -767,6 +834,14 @@ cat >>"$case_root/.github/workflows/runner-spike-delegated.yml" <<'YAML'
 # No-op mutation control: executable producer and consumer steps are unchanged.
 YAML
 run_case comment-only-control-is-green "$case_root" 0
+
+case_root="$scratch/env-comment-only-control"
+seed "$case_root"
+cat >>"$case_root/.github/workflows/runner-spike-delegated.yml" <<'YAML'
+
+# ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD remains owned by the delegated job env.
+YAML
+run_case env-comment-only-control-is-green "$case_root" 0
 
 case_root="$scratch/missing-ruby"
 seed "$case_root"

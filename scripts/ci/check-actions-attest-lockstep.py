@@ -33,17 +33,19 @@ NONEMPTY_OUTPUT_TERM_RE = re.compile(
 class Producer(NamedTuple):
     path: Path
     job_id: str
+    job_env: tuple[tuple[str, str], ...]
     step_id: str
     subject_checksums: str
     producer_step_id: str
     producer_shell: str
+    producer_env: tuple[tuple[str, str], ...] | None
     producer_working_directory: str | None
     producer_commands: tuple[str, ...]
     bundle_output: str
     consumer_step_id: str
     consumer_shell: str
     consumer_if: str | None
-    consumer_env: tuple[str, str] | None
+    consumer_env: tuple[tuple[str, str], ...] | None
     consumer_commands: tuple[str, ...]
 
 
@@ -55,10 +57,21 @@ PRODUCERS = (
     Producer(
         path=Path(".github/workflows/runner-spike-delegated.yml"),
         job_id="phase1-delegated-gates",
+        job_env=(
+            (
+                "ASSAY_RUNNER_DELEGATED_PROOF_ROOT",
+                "/tmp/assay-runner-proof-${{ github.run_id }}",
+            ),
+            (
+                "ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD",
+                "${{ github.workspace }}/assay-runner-proof-upload",
+            ),
+        ),
         step_id="attest-proof-pack",
         subject_checksums="assay-runner-proof-upload/subject-checksums.txt",
         producer_step_id="build-proof-pack",
         producer_shell="bash",
+        producer_env=None,
         producer_working_directory=None,
         producer_commands=(
             "set -euo pipefail",
@@ -97,10 +110,12 @@ PRODUCERS = (
     Producer(
         path=Path(".github/workflows/privileged-mcp-action-pack-release.yml"),
         job_id="release-pack",
+        job_env=(),
         step_id="attest",
         subject_checksums="release/SHA256SUMS",
         producer_step_id="build-release-checksums",
         producer_shell="bash",
+        producer_env=None,
         producer_working_directory="release",
         producer_commands=(
             "set -euo pipefail",
@@ -111,8 +126,10 @@ PRODUCERS = (
         consumer_shell="bash",
         consumer_if=None,
         consumer_env=(
-            "ATTESTATION_BUNDLE",
-            "${{ steps.attest.outputs.bundle-path }}",
+            (
+                "ATTESTATION_BUNDLE",
+                "${{ steps.attest.outputs.bundle-path }}",
+            ),
         ),
         consumer_commands=(
             "set -euo pipefail",
@@ -133,6 +150,14 @@ def active_attest_pins(text: str) -> list[tuple[str, str]]:
         if match:
             pins.append((match.group("sha"), match.group("tag")))
     return pins
+
+
+def has_exact_step_env(
+    value: object, expected: tuple[tuple[str, str], ...] | None
+) -> bool:
+    if expected is None:
+        return value is None
+    return value == dict(expected)
 
 
 def load_workflow_mapping(path: Path) -> object:
@@ -308,6 +333,13 @@ def producer_contract_errors(producer: Producer, document: object) -> list[str]:
         return errors
     if not is_reachable(job):
         errors.append(f"{producer.path}: job {producer.job_id!r} is not reachable")
+    if producer.job_env:
+        job_env = job.get("env")
+        for key, value in producer.job_env:
+            if not isinstance(job_env, dict) or job_env.get(key) != value:
+                errors.append(
+                    f"{producer.path}: job env {key!r} is not bound to {value!r}"
+                )
     if not is_reachable(step):
         errors.append(
             f"{producer.path}: attest step {producer.step_id!r} is not reachable"
@@ -356,6 +388,16 @@ def producer_contract_errors(producer: Producer, document: object) -> list[str]:
                 f"{producer.path}: producer shell "
                 f"{producer_step.get('shell')!r}, want {producer.producer_shell!r}"
             )
+        if not has_exact_step_env(producer_step.get("env"), producer.producer_env):
+            expected_env = (
+                dict(producer.producer_env)
+                if producer.producer_env is not None
+                else None
+            )
+            errors.append(
+                f"{producer.path}: producer env {producer_step.get('env')!r}, "
+                f"want {expected_env!r}"
+            )
         if (
             producer_step.get("working-directory")
             != producer.producer_working_directory
@@ -403,13 +445,16 @@ def producer_contract_errors(producer: Producer, document: object) -> list[str]:
                 f"{producer.path}: consumer condition {consumer.get('if')!r}, "
                 f"want {producer.consumer_if!r}"
             )
-        if producer.consumer_env is not None:
-            env = consumer.get("env")
-            key, value = producer.consumer_env
-            if not isinstance(env, dict) or env.get(key) != value:
-                errors.append(
-                    f"{producer.path}: consumer env {key!r} is not bound to {value!r}"
-                )
+        if not has_exact_step_env(consumer.get("env"), producer.consumer_env):
+            expected_env = (
+                dict(producer.consumer_env)
+                if producer.consumer_env is not None
+                else None
+            )
+            errors.append(
+                f"{producer.path}: consumer env {consumer.get('env')!r}, "
+                f"want {expected_env!r}"
+            )
         if not step_runs_exact_commands(consumer, producer.consumer_commands):
             errors.append(
                 f"{producer.path}: consumer step {producer.consumer_step_id!r} "
