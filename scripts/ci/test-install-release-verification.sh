@@ -133,6 +133,10 @@ case "$url" in
         digest="$(cut -d' ' -f1 "$fixture_sidecar")"
         printf '%s  %s\n' "$digest" 'assay-v5.5.2-aarch64-unknown-linux-gnu.tar.gz' > "$out"
         ;;
+      trailing-garbage)
+        cat "$fixture_sidecar" > "$out"
+        printf '%s' 'garbage' >> "$out"
+        ;;
       mismatch)
         printf '%064d  %s\n' 0 "$asset_name" > "$out"
         ;;
@@ -256,10 +260,44 @@ file_mode() {
   fi
 }
 
-assert_exact_gh_argument() {
+assert_exact_gh_invocation() {
   local log="$1"
-  local expected="$2"
-  grep -Fx -- "$expected" "$log" >/dev/null || fail "missing exact gh argument: $expected"
+  shift
+  python3 - "$log" "$@" <<'PY'
+import sys
+from pathlib import Path
+
+lines = Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+expected = sys.argv[2:]
+invocations = []
+current = None
+for line in lines:
+    if line == "--- invocation ---":
+        if current is not None:
+            invocations.append(current)
+        current = []
+    elif current is not None:
+        current.append(line)
+if current is not None:
+    invocations.append(current)
+def matches(actual):
+    if len(actual) != len(expected):
+        return False
+    for observed, wanted in zip(actual, expected):
+        if wanted == "<ARCHIVE>":
+            if Path(observed).name != "assay-v5.5.2-x86_64-unknown-linux-gnu.tar.gz":
+                return False
+        elif observed != wanted:
+            return False
+    return True
+
+match_count = sum(matches(invocation) for invocation in invocations)
+if match_count != 1:
+    raise SystemExit(
+        f"expected exactly one gh invocation {expected!r}, found {match_count}; "
+        f"observed={invocations!r}"
+    )
+PY
 }
 
 assert_default_success() {
@@ -341,6 +379,7 @@ assert_checksum_failure_preserves_binary() {
     mismatch) expected_error='Archive checksum mismatch' ;;
     missing-sidecar) expected_error='Download failed' ;;
     malformed-sidecar|wrong-asset-sidecar) expected_error='Checksum sidecar does not name the selected archive' ;;
+    trailing-garbage) expected_error='Checksum sidecar must contain exactly one newline-terminated record' ;;
     *) fail "test bug: no expected error for checksum mode $mode" ;;
   esac
   local case_dir
@@ -389,13 +428,10 @@ assert_strict_success() {
     fail 'strict install reported provenance_not_requested'
   fi
 
-  local log="$case_dir/gh.log"
-  for expected in \
-    api \
-    repos/Rul1an/assay/git/ref/tags/v5.5.2 \
-    repos/Rul1an/assay/git/tags/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  assert_exact_gh_invocation "$case_dir/gh.log" \
     attestation \
     verify \
+    '<ARCHIVE>' \
     --repo \
     Rul1an/assay \
     --signer-workflow \
@@ -407,9 +443,6 @@ assert_strict_success() {
     --source-digest \
     bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
     --deny-self-hosted-runners
-  do
-    assert_exact_gh_argument "$log" "$expected"
-  done
 }
 
 assert_strict_failure_preserves_binary() {
@@ -445,7 +478,7 @@ main() {
 
   assert_default_success Linux linux
   assert_default_success Darwin macos
-  for mode in mismatch missing-sidecar malformed-sidecar wrong-asset-sidecar; do
+  for mode in mismatch missing-sidecar malformed-sidecar wrong-asset-sidecar trailing-garbage; do
     assert_checksum_failure_preserves_binary "$mode"
   done
   assert_invalid_provenance_mode_refuses_before_network 0 zero

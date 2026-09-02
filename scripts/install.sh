@@ -120,6 +120,11 @@ verify_archive_checksum() {
     if ! IFS= read -r _checksum_line < "$_sidecar_path"; then
         log_error "Checksum sidecar is empty."
     fi
+    _sidecar_bytes=$(wc -c < "$_sidecar_path" | tr -d '[:space:]')
+    _record_bytes=$(printf '%s\n' "$_checksum_line" | wc -c | tr -d '[:space:]')
+    if [ "$_sidecar_bytes" != "$_record_bytes" ]; then
+        log_error "Checksum sidecar must contain exactly one newline-terminated record."
+    fi
 
     _checksum_suffix="  $_archive_name"
     case "$_checksum_line" in

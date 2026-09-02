@@ -20,7 +20,10 @@ make_fake_gh() {
 #!/usr/bin/env bash
 set -euo pipefail
 
-printf '%s\n' "$*" >> "$FAKE_GH_LOG"
+{
+  printf '%s\n' '--- invocation ---'
+  printf '%s\n' "$@"
+} >> "$FAKE_GH_LOG"
 
 if [ "$#" -lt 3 ] || [ "$1" != "attestation" ] || [ "$2" != "verify" ]; then
   echo "unexpected gh invocation: $*" >&2
@@ -133,6 +136,34 @@ write_empty_verification_json() {
 EOF
 }
 
+assert_exact_gh_invocation() {
+  local log="$1"
+  shift
+  python3 - "$log" "$@" <<'PY'
+import sys
+from pathlib import Path
+
+lines = Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+expected = sys.argv[2:]
+invocations = []
+current = None
+for line in lines:
+    if line == "--- invocation ---":
+        if current is not None:
+            invocations.append(current)
+        current = []
+    elif current is not None:
+        current.append(line)
+if current is not None:
+    invocations.append(current)
+if invocations.count(expected) != 1:
+    raise SystemExit(
+        f"expected exactly one gh invocation {expected!r}, found {invocations.count(expected)}; "
+        f"observed={invocations!r}"
+    )
+PY
+}
+
 run_success_case() {
   local temp_dir="$1"
   local assets_dir="$temp_dir/assets-success"
@@ -165,13 +196,16 @@ run_success_case() {
   jq -e --arg digest "$digest" '.assets[0].sha256 == $digest' "$summary" >/dev/null
   jq -e '.assets[0].verified_timestamp_count == 1' "$summary" >/dev/null
   test -f "$raw_dir/test-asset.tar.gz.attestation.json"
-  grep -F -- '--source-digest abc123' "$log" >/dev/null
-  grep -F -- '--repo Rul1an/assay' "$log" >/dev/null
-  grep -F -- '--signer-workflow Rul1an/assay/.github/workflows/release.yml' "$log" >/dev/null
-  grep -F -- '--cert-oidc-issuer https://token.actions.githubusercontent.com' "$log" >/dev/null
-  grep -F -- '--predicate-type https://slsa.dev/provenance/v1' "$log" >/dev/null
-  grep -F -- '--source-ref refs/tags/v9.9.9' "$log" >/dev/null
-  grep -F -- '--deny-self-hosted-runners' "$log" >/dev/null
+  assert_exact_gh_invocation "$log" \
+    attestation verify "$assets_dir/test-asset.tar.gz" \
+    --repo Rul1an/assay \
+    --signer-workflow Rul1an/assay/.github/workflows/release.yml \
+    --cert-oidc-issuer https://token.actions.githubusercontent.com \
+    --predicate-type https://slsa.dev/provenance/v1 \
+    --source-digest abc123 \
+    --deny-self-hosted-runners \
+    --format json \
+    --source-ref refs/tags/v9.9.9
 }
 
 run_retry_success_case() {
@@ -240,11 +274,15 @@ run_digest_only_success_case() {
   bash "$SCRIPT"
 
   jq -e '.verification_policy.source_ref == null' "$summary" >/dev/null
-  grep -F -- '--source-digest abc123' "$log" >/dev/null
-  if grep -F -- '--source-ref' "$log" >/dev/null; then
-    echo "digest-only verification unexpectedly passed --source-ref" >&2
-    exit 1
-  fi
+  assert_exact_gh_invocation "$log" \
+    attestation verify "$assets_dir/test-asset.tar.gz" \
+    --repo Rul1an/assay \
+    --signer-workflow Rul1an/assay/.github/workflows/release.yml \
+    --cert-oidc-issuer https://token.actions.githubusercontent.com \
+    --predicate-type https://slsa.dev/provenance/v1 \
+    --source-digest abc123 \
+    --deny-self-hosted-runners \
+    --format json
 }
 
 run_missing_witness_case() {
