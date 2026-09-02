@@ -800,6 +800,36 @@ path.write_text(text.replace(old, new, 1), encoding="utf-8")
 PY
 run_case pack-attest-if-unsupported-is-refused "$case_root" 1
 
+case_root="$scratch/pack-attest-id-shadow"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
+  "      - name: Retain attestation bundle
+        id: retain-release-attestation" \
+  '      - name: Shadow release attestation output
+        id: attest
+        shell: bash
+        run: echo "bundle-path=/tmp/fake-bundle.json" >> "$GITHUB_OUTPUT"
+
+      - name: Retain attestation bundle
+        id: retain-release-attestation'
+run_case pack-attest-id-shadow-is-refused "$case_root" 1
+
+case_root="$scratch/delegated-attest-id-shadow"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/runner-spike-delegated.yml" \
+  "      - name: Retain delegated proof attestation bundle
+        id: retain-proof-attestation" \
+  '      - name: Shadow delegated attestation output
+        id: attest-proof-pack
+        shell: bash
+        run: echo "bundle-path=/tmp/fake-bundle.json" >> "$GITHUB_OUTPUT"
+
+      - name: Retain delegated proof attestation bundle
+        id: retain-proof-attestation'
+run_case delegated-attest-id-shadow-is-refused "$case_root" 1
+
 case_root="$scratch/delegated-consumer-if-false"
 seed "$case_root"
 mutate_once \
@@ -881,6 +911,21 @@ cat >>"$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" <<'Y
 # Retention commands remain explicitly workspace-bound.
 YAML
 run_case cwd-comment-only-control-is-green "$case_root" 0
+
+case_root="$scratch/unrelated-unique-step-id-control"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
+  "      - name: Retain attestation bundle
+        id: retain-release-attestation" \
+  '      - name: Emit unrelated output
+        id: unrelated-output
+        shell: bash
+        run: echo "value=irrelevant" >> "$GITHUB_OUTPUT"
+
+      - name: Retain attestation bundle
+        id: retain-release-attestation'
+run_case unrelated-unique-step-id-control-is-green "$case_root" 0
 
 case_root="$scratch/missing-ruby"
 seed "$case_root"

@@ -210,6 +210,16 @@ def job_steps(job: dict[str, object]) -> list[dict[str, object]]:
     return [step for step in raw_steps if isinstance(step, dict)]
 
 
+def steps_with_id(
+    steps: list[dict[str, object]], step_id: str
+) -> list[tuple[int, dict[str, object]]]:
+    return [
+        (index, step)
+        for index, step in enumerate(steps)
+        if step.get("id") == step_id
+    ]
+
+
 def iter_jobs(document: object) -> list[tuple[str, dict[str, object]]]:
     root = mapping(document, "workflow root")
     jobs = mapping(root.get("jobs"), "workflow jobs")
@@ -364,11 +374,13 @@ def producer_contract_errors(producer: Producer, document: object) -> list[str]:
             f"want {producer.subject_checksums!r}"
         )
     same_job_steps = job_steps(job)
-    producer_steps = [
-        (index, item)
-        for index, item in enumerate(same_job_steps)
-        if item.get("id") == producer.producer_step_id
-    ]
+    attest_id_steps = steps_with_id(same_job_steps, producer.step_id)
+    if len(attest_id_steps) != 1:
+        errors.append(
+            f"{producer.path}: want exactly one step owning attest id "
+            f"{producer.step_id!r}, found {len(attest_id_steps)}"
+        )
+    producer_steps = steps_with_id(same_job_steps, producer.producer_step_id)
     if len(producer_steps) != 1:
         errors.append(
             f"{producer.path}: want exactly one producer step "
@@ -416,11 +428,7 @@ def producer_contract_errors(producer: Producer, document: object) -> list[str]:
                 "does not run the exact command sequence"
             )
 
-    consumer_steps = [
-        (index, item)
-        for index, item in enumerate(same_job_steps)
-        if item.get("id") == producer.consumer_step_id
-    ]
+    consumer_steps = steps_with_id(same_job_steps, producer.consumer_step_id)
     if len(consumer_steps) != 1:
         errors.append(
             f"{producer.path}: want exactly one consumer step "
