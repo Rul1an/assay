@@ -37,6 +37,9 @@ Agents got real tool access through MCP — and tool poisoning, rug pulls, and c
 # Fast path: release installer for Linux and macOS.
 curl -fsSL https://getassay.dev/install.sh | sh
 
+# Strict mode also verifies the release attestation (requires GitHub CLI).
+curl -fsSL https://getassay.dev/install.sh | ASSAY_REQUIRE_PROVENANCE=1 sh
+
 # Confirm the command resolves; if setup fails, run `assay doctor`.
 assay --version
 
@@ -47,8 +50,12 @@ python3 examples/mcp-quickstart/run.py
 ```
 
 For v5.5.2, run the last command from a source checkout or an extracted published CLI archive.
-The installer is binary-only and does not carry the bounded quickstart assets. The installer
-downloads over HTTPS but does not consume the published checksum or provenance sidecars.
+The installer is binary-only and does not carry the bounded quickstart assets. Every install
+verifies the selected archive against its published SHA-256 sidecar before extraction. Strict mode
+additionally requires GitHub's attestation verifier and binds the archive to this repository, the
+release workflow, the GitHub Actions OIDC issuer, the SLSA v1 predicate, and the release tag's
+commit while refusing self-hosted provenance. These checks establish byte and producer-workflow
+identity under those bindings; they do not establish runtime safety or semantic correctness.
 
 Captured runner output (the bundled local mock performs no external action):
 

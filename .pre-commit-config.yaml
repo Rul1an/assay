@@ -652,6 +652,13 @@ repos:
         pass_filenames: false
         files: ^(scripts/install\.sh|scripts/ci/test-install-version-normalization\.sh|\.pre-commit-config\.yaml)$
 
+      - id: install-release-verification-self-test
+        name: installer release verification contract
+        entry: bash scripts/ci/test-install-release-verification.sh
+        language: system
+        pass_filenames: false
+        files: ^(scripts/install\.sh|scripts/ci/test-install-release-verification\.sh|README\.md|\.pre-commit-config\.yaml)$
+
       - id: deps-security-toolchain-contract-self-test
         name: deps-security toolchain contract
         entry: bash scripts/ci/test-deps-security-toolchain-contract.sh

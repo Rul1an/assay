@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SCRIPT="$ROOT/scripts/ci/release_attestation_enforce.sh"
+SCRIPT="${SCRIPT:-$ROOT/scripts/ci/release_attestation_enforce.sh}"
 TEST_TEMP_DIR=""
 
 compute_sha256() {
@@ -166,7 +166,10 @@ run_success_case() {
   jq -e '.assets[0].verified_timestamp_count == 1' "$summary" >/dev/null
   test -f "$raw_dir/test-asset.tar.gz.attestation.json"
   grep -F -- '--source-digest abc123' "$log" >/dev/null
+  grep -F -- '--repo Rul1an/assay' "$log" >/dev/null
   grep -F -- '--signer-workflow Rul1an/assay/.github/workflows/release.yml' "$log" >/dev/null
+  grep -F -- '--cert-oidc-issuer https://token.actions.githubusercontent.com' "$log" >/dev/null
+  grep -F -- '--predicate-type https://slsa.dev/provenance/v1' "$log" >/dev/null
   grep -F -- '--source-ref refs/tags/v9.9.9' "$log" >/dev/null
   grep -F -- '--deny-self-hosted-runners' "$log" >/dev/null
 }
