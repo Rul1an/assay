@@ -18,6 +18,10 @@ set -e
 GITHUB_REPO="Rul1an/assay"
 
 INSTALL_DIR="${ASSAY_INSTALL_DIR:-$HOME/.local/bin}"
+case "$INSTALL_DIR" in
+    /*) ;;
+    *) INSTALL_DIR="$(pwd)/$INSTALL_DIR" ;;
+esac
 # Unset defaults to latest. An explicitly empty value is malformed and must
 # not be rewritten to latest (that would hit the network).
 if [ -z "${ASSAY_VERSION+x}" ]; then
@@ -26,8 +30,8 @@ else
     VERSION="$ASSAY_VERSION"
 fi
 
-# Provenance verification is opt-in because it requires the GitHub CLI and
-# network access to the attestation service. Any explicitly set value other
+# Provenance verification is opt-in because it requires authenticated GitHub CLI
+# access (an authenticated session or GH_TOKEN) and the attestation service. Any explicitly set value other
 # than 1 is malformed; it must not silently become checksum-only mode.
 if [ -z "${ASSAY_REQUIRE_PROVENANCE+x}" ]; then
     REQUIRE_PROVENANCE=0
@@ -348,7 +352,7 @@ main() {
         fi
         INSTALL_CANDIDATE=$(mktemp "$INSTALL_DIR/.assay.install.XXXXXX")
         cp "$EXTRACTED_BINARY" "$INSTALL_CANDIDATE"
-        chmod +x "$INSTALL_CANDIDATE"
+        chmod 755 "$INSTALL_CANDIDATE"
         mv -f "$INSTALL_CANDIDATE" "$INSTALL_DIR/assay"
         INSTALL_CANDIDATE=""
     fi

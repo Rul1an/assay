@@ -164,7 +164,10 @@ make_gh_stub() {
   cat > "$bin_dir/gh" <<'EOF'
 #!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$GH_LOG"
+{
+  printf '%s\n' '--- invocation ---'
+  printf '%s\n' "$@"
+} >> "$GH_LOG"
 
 if [ "$1" = api ]; then
   case "$2" in
@@ -245,6 +248,20 @@ assert_old_binary() {
     fail "verification failure replaced the existing binary in $case_dir"
 }
 
+file_mode() {
+  if stat -f '%Lp' "$1" >/dev/null 2>&1; then
+    stat -f '%Lp' "$1"
+  else
+    stat -c '%a' "$1"
+  fi
+}
+
+assert_exact_gh_argument() {
+  local log="$1"
+  local expected="$2"
+  grep -Fx -- "$expected" "$log" >/dev/null || fail "missing exact gh argument: $expected"
+}
+
 assert_default_success() {
   local os="$1"
   local label="$2"
@@ -257,8 +274,20 @@ assert_default_success() {
     fail 'checksum-only install claimed provenance_verified'
   fi
   grep -F 'assay 5.5.2 fixture' "$case_dir/install/assay" >/dev/null || fail 'default install did not activate fixture'
+  test "$(file_mode "$case_dir/install/assay")" = 755 || fail 'activated binary mode is not exactly 0755'
   test "$(wc -l < "$case_dir/curl.log" | tr -d ' ')" -eq 2 || fail 'default install did not fetch exactly archive and sidecar'
   test ! -s "$case_dir/gh.log" || fail 'default install invoked gh'
+}
+
+assert_relative_install_dir_resolves_from_invocation_directory() {
+  local case_dir
+  case_dir="$(new_case relative-install-dir)"
+  (
+    cd "$case_dir"
+    run_installer "$case_dir" ASSAY_INSTALL_DIR=relative-install > "$case_dir/stdout" 2> "$case_dir/stderr"
+  )
+  grep -F 'assay 5.5.2 fixture' "$case_dir/relative-install/assay" >/dev/null || \
+    fail 'relative ASSAY_INSTALL_DIR did not resolve from the invocation directory'
 }
 
 assert_activation_failure_preserves_binary() {
@@ -361,15 +390,26 @@ assert_strict_success() {
   fi
 
   local log="$case_dir/gh.log"
-  grep -F 'api repos/Rul1an/assay/git/ref/tags/v5.5.2' "$log" >/dev/null
-  grep -F 'api repos/Rul1an/assay/git/tags/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "$log" >/dev/null
-  grep -F 'attestation verify' "$log" >/dev/null
-  grep -F -- '--repo Rul1an/assay' "$log" >/dev/null
-  grep -F -- '--signer-workflow Rul1an/assay/.github/workflows/release.yml' "$log" >/dev/null
-  grep -F -- '--cert-oidc-issuer https://token.actions.githubusercontent.com' "$log" >/dev/null
-  grep -F -- '--predicate-type https://slsa.dev/provenance/v1' "$log" >/dev/null
-  grep -F -- '--source-digest bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' "$log" >/dev/null
-  grep -F -- '--deny-self-hosted-runners' "$log" >/dev/null
+  for expected in \
+    api \
+    repos/Rul1an/assay/git/ref/tags/v5.5.2 \
+    repos/Rul1an/assay/git/tags/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+    attestation \
+    verify \
+    --repo \
+    Rul1an/assay \
+    --signer-workflow \
+    Rul1an/assay/.github/workflows/release.yml \
+    --cert-oidc-issuer \
+    https://token.actions.githubusercontent.com \
+    --predicate-type \
+    https://slsa.dev/provenance/v1 \
+    --source-digest \
+    bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+    --deny-self-hosted-runners
+  do
+    assert_exact_gh_argument "$log" "$expected"
+  done
 }
 
 assert_strict_failure_preserves_binary() {
@@ -417,6 +457,7 @@ main() {
   assert_invalid_tag_digest_refuses
   assert_signal_stops_before_next_network_step
   assert_activation_failure_preserves_binary
+  assert_relative_install_dir_resolves_from_invocation_directory
 
   echo 'install release verification: PASS'
 }
