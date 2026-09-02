@@ -36,10 +36,12 @@ class Producer(NamedTuple):
     step_id: str
     subject_checksums: str
     producer_step_id: str
+    producer_shell: str
     producer_working_directory: str | None
     producer_commands: tuple[str, ...]
     bundle_output: str
     consumer_step_id: str
+    consumer_shell: str
     consumer_if: str | None
     consumer_env: tuple[str, str] | None
     consumer_commands: tuple[str, ...]
@@ -56,6 +58,7 @@ PRODUCERS = (
         step_id="attest-proof-pack",
         subject_checksums="assay-runner-proof-upload/subject-checksums.txt",
         producer_step_id="build-proof-pack",
+        producer_shell="bash",
         producer_working_directory=None,
         producer_commands=(
             "set -euo pipefail",
@@ -80,6 +83,7 @@ PRODUCERS = (
         ),
         bundle_output="steps.attest-proof-pack.outputs.bundle-path",
         consumer_step_id="retain-proof-attestation",
+        consumer_shell="bash",
         consumer_if="always() && steps.attest-proof-pack.outputs.bundle-path != ''",
         consumer_env=None,
         consumer_commands=(
@@ -96,6 +100,7 @@ PRODUCERS = (
         step_id="attest",
         subject_checksums="release/SHA256SUMS",
         producer_step_id="build-release-checksums",
+        producer_shell="bash",
         producer_working_directory="release",
         producer_commands=(
             "set -euo pipefail",
@@ -103,6 +108,7 @@ PRODUCERS = (
         ),
         bundle_output="steps.attest.outputs.bundle-path",
         consumer_step_id="retain-release-attestation",
+        consumer_shell="bash",
         consumer_if=None,
         consumer_env=(
             "ATTESTATION_BUNDLE",
@@ -345,6 +351,11 @@ def producer_contract_errors(producer: Producer, document: object) -> list[str]:
                 f"{producer.path}: producer step {producer.producer_step_id!r} "
                 "is not reachable"
             )
+        if producer_step.get("shell") != producer.producer_shell:
+            errors.append(
+                f"{producer.path}: producer shell "
+                f"{producer_step.get('shell')!r}, want {producer.producer_shell!r}"
+            )
         if (
             producer_step.get("working-directory")
             != producer.producer_working_directory
@@ -381,6 +392,11 @@ def producer_contract_errors(producer: Producer, document: object) -> list[str]:
             errors.append(
                 f"{producer.path}: consumer step {producer.consumer_step_id!r} "
                 "is not reachable"
+            )
+        if consumer.get("shell") != producer.consumer_shell:
+            errors.append(
+                f"{producer.path}: consumer shell "
+                f"{consumer.get('shell')!r}, want {producer.consumer_shell!r}"
             )
         if consumer.get("if") != producer.consumer_if:
             errors.append(

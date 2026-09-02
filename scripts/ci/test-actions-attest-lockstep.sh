@@ -450,11 +450,25 @@ seed "$case_root"
 mutate_once \
   "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
   "        id: build-release-checksums
+        shell: bash
         working-directory: release" \
   "        id: build-release-checksums
         if: false
+        shell: bash
         working-directory: release"
 run_case pack-producer-if-false-is-refused "$case_root" 1
+
+case_root="$scratch/pack-producer-custom-shell"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
+  "        id: build-release-checksums
+        shell: bash
+        working-directory: release" \
+  "        id: build-release-checksums
+        shell: \"true {0}\"
+        working-directory: release"
+run_case pack-producer-custom-shell-is-refused "$case_root" 1
 
 case_root="$scratch/pack-producer-never-called-function"
 seed "$case_root"
@@ -499,6 +513,18 @@ mutate_once \
   "          python3 scripts/ci/assay_runner_delegated_proof_pack.py --help \\"
 run_case delegated-producer-help-is-refused "$case_root" 1
 
+case_root="$scratch/delegated-producer-custom-shell"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/runner-spike-delegated.yml" \
+  "        id: build-proof-pack
+        if: always()
+        shell: bash" \
+  "        id: build-proof-pack
+        if: always()
+        shell: \"true {0}\""
+run_case delegated-producer-custom-shell-is-refused "$case_root" 1
+
 case_root="$scratch/delete-delegated-proof-pack"
 seed "$case_root"
 mutate_once \
@@ -517,6 +543,7 @@ path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 old = """      - name: Retain attestation bundle
         id: retain-release-attestation
+        shell: bash
         env:
           ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |
@@ -552,6 +579,18 @@ if text.count(old) != 1:
 path.write_text(text.replace(old, new, 1), encoding="utf-8")
 PY
 run_case pack-consumer-inert-is-refused "$case_root" 1
+
+case_root="$scratch/pack-consumer-custom-shell"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
+  "        id: retain-release-attestation
+        shell: bash
+        env:" \
+  "        id: retain-release-attestation
+        shell: \"true {0}\"
+        env:"
+run_case pack-consumer-custom-shell-is-refused "$case_root" 1
 
 case_root="$scratch/pack-consumer-if-false"
 seed "$case_root"
@@ -598,6 +637,18 @@ if text.count(old) != 1:
 path.write_text(text.replace(old, new, 1), encoding="utf-8")
 PY
 run_case delegated-consumer-scalar-is-refused "$case_root" 1
+
+case_root="$scratch/delegated-consumer-custom-shell"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/runner-spike-delegated.yml" \
+  "        id: retain-proof-attestation
+        if: always() && steps.attest-proof-pack.outputs.bundle-path != ''
+        shell: bash" \
+  "        id: retain-proof-attestation
+        if: always() && steps.attest-proof-pack.outputs.bundle-path != ''
+        shell: \"true {0}\""
+run_case delegated-consumer-custom-shell-is-refused "$case_root" 1
 
 case_root="$scratch/pack-attest-if-false"
 seed "$case_root"
@@ -672,6 +723,7 @@ path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 consumer = """      - name: Retain attestation bundle
         id: retain-release-attestation
+        shell: bash
         env:
           ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |

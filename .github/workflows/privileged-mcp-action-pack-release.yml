@@ -68,6 +68,7 @@ jobs:
 
       - name: Build release checksums
         id: build-release-checksums
+        shell: bash
         working-directory: release
         run: |
           set -euo pipefail
@@ -131,6 +132,7 @@ jobs:
 
       - name: Retain attestation bundle
         id: retain-release-attestation
+        shell: bash
         env:
           ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |
