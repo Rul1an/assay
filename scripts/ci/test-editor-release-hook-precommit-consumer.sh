@@ -2,9 +2,12 @@
 # Pin editor-mcp-recipe-truth and release-surface through the pre-commit consumer.
 #
 # The 38/95 suites parse hook YAML themselves and miss last-key-wins duplicates
-# (`files: ^$`, `entry: 'true'`). pre-commit/PyYAML keeps the last key, so the
-# effective consumer Skips or runs `/usr/bin/true` while those suites stay green.
-# This contract owns both hook IDs independently and drives real `pre-commit run`.
+# (`files: ^$`, `entry: 'true'`) and miss a second hook whose `id` is not written
+# as `      - id: <name>`. This contract loads `.pre-commit-config.yaml` with a
+# duplicate-key-rejecting PyYAML SafeLoader and counts both protected IDs from
+# repos[*].hooks[*] (flow mapping and reordered keys included). A producer hook
+# independently invokes this script so last-key-wins `entry: 'true'` on the
+# consumer hook cannot skip the contract.
 set -euo pipefail
 
 # shellcheck source=scripts/ci/lib/clear-git-repository-env.sh
@@ -18,6 +21,7 @@ trap 'rm -rf "$TMP"' EXIT
 EDITOR_ID="editor-mcp-recipe-truth"
 RELEASE_ID="release-surface"
 CONSUMER_ID="editor-release-hook-precommit-consumer"
+PRODUCER_ID="editor-release-hook-precommit-producer"
 CONTRACT_REL="scripts/ci/test-editor-release-hook-precommit-consumer.sh"
 
 EDITOR_ENTRY="bash -c 'bash scripts/ci/test-editor-plugin-install-commands.sh && bash scripts/ci/test-check-editor-mcp-recipe-truth.sh && bash scripts/ci/check-editor-mcp-recipe-truth.sh'"
@@ -40,6 +44,17 @@ if ! command -v pre-commit >/dev/null 2>&1; then
   fail "pre-commit not on PATH (CI pin is pre-commit==4.4.0)"
   exit 1
 fi
+# Duplicate-key YAML load needs PyYAML. System python3 has it on Linux CI;
+# Darwin review machines may only expose it via the pre-commit interpreter.
+if python3 -c 'import yaml' >/dev/null 2>&1; then
+  PYTHON_YAML=python3
+else
+  PYTHON_YAML="$(sed -n '1s/^#!//p' "$(command -v pre-commit)")"
+  if ! "$PYTHON_YAML" -c 'import yaml' >/dev/null 2>&1; then
+    fail "PyYAML not importable from python3 or the pre-commit interpreter"
+    exit 1
+  fi
+fi
 CFG_PY="$TMP/editor_release_hook_precommit_consumer.py"
 cat > "$CFG_PY" << 'ENDPY'
 # Helper for test-editor-release-hook-precommit-consumer.sh (invoked via python3).
@@ -49,19 +64,49 @@ import re
 import sys
 from pathlib import Path
 
+import yaml
 
-def uncommented_items(src: str) -> list[tuple[str, str]]:
-    items: list[tuple[str, str]] = []
-    for line in src.splitlines():
-        code = line.split("#", 1)[0].rstrip()
-        if ":" not in code:
-            continue
-        key, val = code.strip().split(":", 1)
-        items.append((key, val.strip()))
-    return items
+
+class UniqueKeyLoader(yaml.SafeLoader):
+    """SafeLoader that rejects repeated keys in the same mapping."""
+
+
+def _construct_unique_mapping(loader, node, deep=False):
+    if not isinstance(node, yaml.MappingNode):
+        raise yaml.constructor.ConstructorError(
+            None,
+            None,
+            f"expected a mapping node, but found {node.id}",
+            node.start_mark,
+        )
+    loader.flatten_mapping(node)
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"found duplicate key {key!r}",
+                key_node.start_mark,
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_unique_mapping,
+)
+
+
+def load_unique(src: str):
+    return yaml.load(src, Loader=UniqueKeyLoader)
 
 
 def hook_starts(src: str, hook_id: str) -> list[int]:
+    # Canonical live blocks are `      - id: <id>`. Mutations of those blocks
+    # still use this locator; counting protected IDs does not.
     marker = f"      - id: {hook_id}\n"
     starts: list[int] = []
     i = 0
@@ -100,6 +145,13 @@ def replace_block(src: str, hook_id: str, new_block: str) -> str:
     return src[:start] + new_block.rstrip("\n") + "\n" + src[end:]
 
 
+def insert_after_span(src: str, hook_id: str, extra: str) -> str:
+    _, end = hook_span(src, hook_id)
+    if not extra.endswith("\n"):
+        extra += "\n"
+    return src[:end] + extra + src[end:]
+
+
 def insert_after_key(block: str, key: str, new_line: str) -> str:
     lines = block.splitlines(keepends=True)
     out: list[str] = []
@@ -116,18 +168,65 @@ def insert_after_key(block: str, key: str, new_line: str) -> str:
     return "".join(out)
 
 
+def iter_hooks(data: object):
+    if not isinstance(data, dict):
+        return
+    repos = data.get("repos")
+    if not isinstance(repos, list):
+        return
+    for repo in repos:
+        if not isinstance(repo, dict):
+            continue
+        hooks = repo.get("hooks")
+        if not isinstance(hooks, list):
+            continue
+        for hook in hooks:
+            if isinstance(hook, dict):
+                yield hook
+
+
+def hook_id_counts(data: object) -> dict[object, int]:
+    counts: dict[object, int] = {}
+    for hook in iter_hooks(data):
+        hid = hook.get("id")
+        if hid is None:
+            continue
+        counts[hid] = counts.get(hid, 0) + 1
+    return counts
+
+
+def hook_by_id(data: object, hook_id: str):
+    found = [hook for hook in iter_hooks(data) if hook.get("id") == hook_id]
+    if len(found) != 1:
+        return None
+    return found[0]
+
+
 def problems_for(
     src: str,
     *,
     editor_id: str,
     release_id: str,
     consumer_id: str,
+    producer_id: str,
     editor_entry: str,
     release_entry: str,
     consumer_entry: str,
     contract_rel: str,
 ) -> list[str]:
     problems: list[str] = []
+    try:
+        data = load_unique(src)
+    except yaml.YAMLError as exc:
+        problems.append(f"pre-commit config YAML rejected: {exc}")
+        return problems
+
+    counts = hook_id_counts(data)
+    for hook_id in (editor_id, release_id, consumer_id, producer_id):
+        n = counts.get(hook_id, 0)
+        if n != 1:
+            problems.append(f"{hook_id}: expected exactly one hook, found {n}")
+
     required = {
         editor_id: {
             "entry": editor_entry,
@@ -152,60 +251,56 @@ def problems_for(
         },
     }
     for hook_id, spec in required.items():
-        starts = hook_starts(src, hook_id)
-        if len(starts) != 1:
-            problems.append(
-                f"{hook_id}: expected exactly one hook block, found {len(starts)}"
-            )
+        if counts.get(hook_id, 0) != 1:
             continue
-        block = hook_block(src, hook_id)
-        items = uncommented_items(block)
-        files_vals = [val for key, val in items if key == "files"]
-        entry_vals = [val for key, val in items if key == "entry"]
-        if len(files_vals) != 1:
+        hook = hook_by_id(data, hook_id)
+        if hook is None:
+            continue
+        if "files" not in hook:
             problems.append(
-                f"{hook_id}: expected exactly one uncommented files: selector, found {len(files_vals)}"
+                f"{hook_id}: expected exactly one uncommented files: selector, found 0"
             )
         else:
-            if files_vals[0] == "^$":
+            files_val = hook.get("files")
+            if files_val == "^$":
                 problems.append(f"{hook_id}: files: selector is ^$")
+            elif not isinstance(files_val, str):
+                problems.append(f"{hook_id}: files: selector is not a string")
             else:
-                pattern = re.compile(files_vals[0])
+                pattern = re.compile(files_val)
                 for path in spec["paths"]:
                     if not pattern.search(path):
                         problems.append(
                             f"{hook_id}: files: selector does not match {path}"
                         )
-        if len(entry_vals) != 1:
+        if "entry" not in hook:
             problems.append(
-                f"{hook_id}: expected exactly one uncommented entry:, found {len(entry_vals)}"
+                f"{hook_id}: expected exactly one uncommented entry:, found 0"
             )
-        elif entry_vals[0] != spec["entry"]:
+        elif hook.get("entry") != spec["entry"]:
             problems.append(f"{hook_id}: entry is not the exact command chain")
 
-    starts = hook_starts(src, consumer_id)
-    if len(starts) != 1:
-        problems.append(
-            f"{consumer_id}: expected exactly one hook block, found {len(starts)}"
-        )
-        return problems
-    block = hook_block(src, consumer_id)
-    items = uncommented_items(block)
-    keys = [key for key, _ in items]
-    entry_vals = [val for key, val in items if key == "entry"]
-    files_vals = [val for key, val in items if key == "files"]
-    if "always_run" not in keys or "always_run: true" not in block:
-        problems.append(f"{consumer_id}: must set always_run: true")
-    if "pass_filenames" not in keys or "pass_filenames: false" not in block:
-        problems.append(f"{consumer_id}: must set pass_filenames: false")
-    if "language" not in keys or "language: system" not in block:
-        problems.append(f"{consumer_id}: must set language: system")
-    if files_vals:
-        problems.append(
-            f"{consumer_id}: must not have a files: start-condition regex"
-        )
-    if len(entry_vals) != 1 or entry_vals[0] != consumer_entry:
-        problems.append(f"{consumer_id}: entry must invoke only {contract_rel}")
+    for hook_id in (consumer_id, producer_id):
+        if counts.get(hook_id, 0) != 1:
+            continue
+        hook = hook_by_id(data, hook_id)
+        if hook is None:
+            continue
+        if hook.get("always_run") is not True:
+            problems.append(f"{hook_id}: must set always_run: true")
+        if hook.get("pass_filenames") is not False:
+            problems.append(f"{hook_id}: must set pass_filenames: false")
+        if hook.get("language") != "system":
+            problems.append(f"{hook_id}: must set language: system")
+        if "files" in hook:
+            problems.append(
+                f"{hook_id}: must not have a files: start-condition regex"
+            )
+        if hook.get("entry") != consumer_entry:
+            problems.append(f"{hook_id}: entry must invoke only {contract_rel}")
+        effective = hook.get("entry")
+        if effective in ("true", True) or effective == "/usr/bin/true":
+            problems.append(f"{hook_id}: effective entry is a no-op ({effective!r})")
     return problems
 
 
@@ -214,6 +309,7 @@ def main() -> None:
         editor_id,
         release_id,
         consumer_id,
+        producer_id,
         editor_entry,
         release_entry,
         consumer_entry,
@@ -231,6 +327,7 @@ def main() -> None:
             editor_id=editor_id,
             release_id=release_id,
             consumer_id=consumer_id,
+            producer_id=producer_id,
             editor_entry=editor_entry,
             release_entry=release_entry,
             consumer_entry=consumer_entry,
@@ -255,20 +352,38 @@ def main() -> None:
 
     if action == "mutate":
         kind, hook_id = rest[0], rest[1]
-        block = hook_block(src, hook_id)
         if kind == "second-files":
-            block = insert_after_key(block, "files", "files: ^$")
-        elif kind == "entry-true":
-            block = insert_after_key(block, "entry", "entry: 'true'")
-        elif kind == "drop-command":
+            block = insert_after_key(hook_block(src, hook_id), "files", "files: ^$")
+            Path(dest).write_text(replace_block(src, hook_id, block), encoding="utf-8")
+            return
+        if kind == "entry-true":
+            block = insert_after_key(hook_block(src, hook_id), "entry", "entry: 'true'")
+            Path(dest).write_text(replace_block(src, hook_id, block), encoding="utf-8")
+            return
+        if kind == "drop-command":
             token = rest[2]
+            block = hook_block(src, hook_id)
             if token not in block:
                 raise SystemExit(f"drop token not found in {hook_id}: {token!r}")
             block = block.replace(token, "", 1)
-        else:
-            raise SystemExit(f"unknown mutation {kind}")
-        Path(dest).write_text(replace_block(src, hook_id, block), encoding="utf-8")
-        return
+            Path(dest).write_text(replace_block(src, hook_id, block), encoding="utf-8")
+            return
+        if kind == "flow-duplicate":
+            extra = (
+                "      - {id: %s, entry: 'true', language: system}\n" % hook_id
+            )
+            Path(dest).write_text(insert_after_span(src, hook_id, extra), encoding="utf-8")
+            return
+        if kind == "reordered-duplicate":
+            extra = (
+                f"      - name: decoy {hook_id}\n"
+                f"        entry: 'true'\n"
+                f"        language: system\n"
+                f"        id: {hook_id}\n"
+            )
+            Path(dest).write_text(insert_after_span(src, hook_id, extra), encoding="utf-8")
+            return
+        raise SystemExit(f"unknown mutation {kind}")
 
     raise SystemExit(f"unknown action {action}")
 
@@ -278,8 +393,8 @@ if __name__ == "__main__":
 ENDPY
 
 cfg() {
-  python3 "$CFG_PY" \
-    "$EDITOR_ID" "$RELEASE_ID" "$CONSUMER_ID" \
+  "$PYTHON_YAML" "$CFG_PY" \
+    "$EDITOR_ID" "$RELEASE_ID" "$CONSUMER_ID" "$PRODUCER_ID" \
     "$EDITOR_ENTRY" "$RELEASE_ENTRY" "$CONSUMER_ENTRY" \
     "$CONTRACT_REL" "$@"
 }
@@ -465,6 +580,18 @@ cfg mutate "$CONFIG" "$TMP/drop-release.yaml" drop-command "$RELEASE_ID" "$RELEA
 expect_wiring_red 'remove test-check-release-surface.sh from release-surface chain' \
   "$TMP/drop-release.yaml"
 
+cfg mutate "$CONFIG" "$TMP/entry-true-consumer.yaml" entry-true "$CONSUMER_ID"
+expect_wiring_red "last-key-wins entry: 'true' on consumer hook" \
+  "$TMP/entry-true-consumer.yaml"
+
+cfg mutate "$CONFIG" "$TMP/flow-dup-editor.yaml" flow-duplicate "$EDITOR_ID"
+expect_wiring_red 'flow-mapping duplicate of editor-mcp-recipe-truth' \
+  "$TMP/flow-dup-editor.yaml"
+
+cfg mutate "$CONFIG" "$TMP/reordered-dup-release.yaml" reordered-duplicate "$RELEASE_ID"
+expect_wiring_red 'reordered-key duplicate of release-surface' \
+  "$TMP/reordered-dup-release.yaml"
+
 echo '== malformed recipe paired with editor bypasses =='
 pair="$TMP/pair-editor-second-files"
 prepare_editor_tree "$pair"
@@ -498,6 +625,14 @@ install_hook_config "$TMP/entry-true-release.yaml" "$RELEASE_ID" "$pair"
 git_seed "$pair"
 expect_consumer 'stale pin 0.0.0 + entry: true on release-surface hook' \
   "$pair" "$RELEASE_ID" passed
+
+echo '== consumer last-key-wins entry: true cannot hide from the producer =='
+pair="$TMP/pair-consumer-entry-true"
+mkdir -p "$pair"
+install_hook_config "$TMP/entry-true-consumer.yaml" "$CONSUMER_ID" "$pair"
+git_seed "$pair"
+expect_consumer "consumer hook last-key-wins entry: 'true' is a no-op" \
+  "$pair" "$CONSUMER_ID" passed
 
 printf '\n'
 if [ "$failures" -gt 0 ]; then

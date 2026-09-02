@@ -509,15 +509,26 @@ repos:
         files: ^(scripts/ci/((check|test-check)-editor-mcp-recipe-truth|lib/editor-plugin-install-commands|test-editor-plugin-install-commands|test-editor-release-hook-precommit-consumer)\.sh|docs/guides/editor-mcp-recipe\.md|\.pre-commit-config\.yaml)$
 
 
+      - id: editor-release-hook-precommit-producer
+        name: Editor and release-surface pre-commit producer
+        entry: bash scripts/ci/test-editor-release-hook-precommit-consumer.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        # Independent runner for the consumer contract. A last-key-wins
+        # entry: 'true' on editor-release-hook-precommit-consumer cannot
+        # skip this invocation.
+
       - id: editor-release-hook-precommit-consumer
         name: Editor and release-surface pre-commit consumer contract
         entry: bash scripts/ci/test-editor-release-hook-precommit-consumer.sh
         language: system
         pass_filenames: false
         always_run: true
-        # Independently owns hook wiring for editor-mcp-recipe-truth and
-        # release-surface. A last-key-wins files: ^$ skip or entry: 'true'
-        # bypass on those hooks cannot hide this contract.
+        # Owns hook wiring for editor-mcp-recipe-truth and release-surface.
+        # IDs are counted from semantic YAML (flow mapping, reordered keys,
+        # duplicate keys). The producer hook invokes this same contract
+        # independently so this hook's own entry cannot be no-op'd unnoticed.
 
       - id: ci-gate-expectations-self-test
         name: CI gate expectation contract
