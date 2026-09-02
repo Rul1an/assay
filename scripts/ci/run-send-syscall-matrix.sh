@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # S1b driver: cgroup/PID isolate, start monitor, GO, assert effects + telemetry.
 set -euo pipefail
+S1B_OWNED_WORKDIR=
+S1B_OWNED_ID=
+S1B_OWNED_SAVED_PWD=
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MODE="${1:-}"
 ASSAY_BIN="${ASSAY_BIN:-$ROOT/target/release/assay}"
 ASSAY_EBPF="${ASSAY_EBPF:-$ROOT/target/assay-ebpf.o}"
 HARNESS_BIN="${HARNESS_BIN:-}"
-WORKDIR="${WORKDIR:-${RUNNER_TEMP:-/tmp}/s1b-send-matrix}"
+WORKDIR="${WORKDIR:-}"
 # Bound: C GO_FIFO_TIMEOUT_MS >= WAIT_LOG_MAX_BEFORE_GO * WAIT_LOG_ITERS * WAIT_LOG_SLEEP_S * 1000 + GO_TIMEOUT_MARGIN_MS
 WAIT_LOG_ITERS=60
 WAIT_LOG_SLEEP_S=0.5
@@ -101,28 +104,92 @@ reap_pid() {
   kill -0 "$pid" 2>/dev/null && fail "pid $pid still alive after SIGKILL bound; hang is not clean"
 }
 
-s1b_owned_workdir() {
-  local wd="$1"
-  [[ -n "$wd" && "$wd" == /* ]] || return 1
-  case "$wd" in
-    *'/../'*|*/..|..) return 1 ;;
+s1b_stat_id() {
+  local target="$1"
+  case "$(uname -s)" in
+    Linux) stat -c '%d:%i' "$target" ;;
+    *) stat -f '%d:%i' "$target" ;;
   esac
-  if [[ -n "${RUNNER_TEMP:-}" && "$wd" == "${RUNNER_TEMP}/s1b-"* ]]; then
-    return 0
+}
+
+s1b_release_owned_cwd() {
+  if [[ -n "${S1B_OWNED_SAVED_PWD:-}" && -d "$S1B_OWNED_SAVED_PWD" ]]; then
+    cd "$S1B_OWNED_SAVED_PWD" || cd /
+  else
+    cd / || true
   fi
-  [[ "$wd" == /tmp/s1b-* ]]
+}
+
+s1b_path_is_owned_object() {
+  local wd="$1" path_id
+  [[ -n "${S1B_OWNED_ID:-}" && -n "$wd" ]] || return 1
+  path_id=$(s1b_stat_id "$wd" 2>/dev/null) || return 1
+  [[ "$path_id" == "$S1B_OWNED_ID" ]]
+}
+
+s1b_owned_workdir() {
+  local wd="$1" cwd_id
+  [[ -n "$wd" && "$wd" == "${S1B_OWNED_WORKDIR:-}" && -n "${S1B_OWNED_ID:-}" ]] \
+    || return 1
+  cwd_id=$(s1b_stat_id . 2>/dev/null) || return 1
+  [[ "$cwd_id" == "$S1B_OWNED_ID" ]]
+}
+
+create_owned_workdir() {
+  local rt="${RUNNER_TEMP:-}" wd="${WORKDIR:-}" base parent
+  [[ -n "$rt" ]] || fail "RUNNER_TEMP required for S1b workdir ownership"
+  [[ "$rt" == /* && -d "$rt" ]] || fail "invalid RUNNER_TEMP=$rt"
+  case "$rt" in
+    *'/../'*|*/..|..) fail "refusing RUNNER_TEMP with traversal: $rt" ;;
+  esac
+  if [[ -z "$wd" ]]; then
+    wd=$(mktemp -d "$rt/s1b-${MODE:-run}-XXXXXX") || fail "mktemp owned WORKDIR"
+  else
+    [[ "$wd" == /* ]] || fail "refusing relative WORKDIR=$wd"
+    case "$wd" in
+      *'/../'*|*/..|..) fail "refusing WORKDIR with traversal: $wd" ;;
+    esac
+    base="${wd##*/}"
+    parent="${wd%/*}"
+    [[ "$base" == s1b-* && "$parent" == "$rt" ]] \
+      || fail "refusing WORKDIR outside RUNNER_TEMP namespace: $wd"
+    [[ ! -e "$wd" && ! -L "$wd" ]] || fail "refusing existing WORKDIR=$wd"
+    mkdir "$wd" || fail "mkdir WORKDIR=$wd"
+  fi
+  WORKDIR="$wd"
+  S1B_OWNED_WORKDIR="$wd"
+  S1B_OWNED_ID=$(s1b_stat_id "$wd") || fail "stat owned WORKDIR=$wd"
+  S1B_OWNED_SAVED_PWD=$PWD
+  cd "$wd" || fail "enter owned WORKDIR=$wd"
 }
 
 remove_owned_workdir() {
-  local wd="${1:-}"
-  [[ -n "$wd" && -d "$wd" ]] || return 0
-  s1b_owned_workdir "$wd" || fail "refusing to remove unowned WORKDIR=$wd"
-  rm -rf "$wd"
-  [[ ! -e "$wd" ]] || fail "WORKDIR leftover $wd"
+  local wd="${1:-}" contents_residue=0
+  [[ -n "$wd" ]] || return 0
+  [[ -n "${S1B_OWNED_WORKDIR:-}" ]] || return 0
+  if ! s1b_owned_workdir "$wd"; then
+    s1b_release_owned_cwd
+    printf 'S1B_WORKDIR_RESIDUE path=%s reason=lost_object\n' "$wd" >&2
+    return 1
+  fi
+  find . -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + || contents_residue=1
+  if find . -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+    contents_residue=1
+  fi
+  s1b_release_owned_cwd
+  if [[ "$contents_residue" -ne 0 ]]; then
+    printf 'S1B_WORKDIR_RESIDUE path=%s reason=contents\n' "$wd" >&2
+    return 1
+  fi
+  if ! s1b_path_is_owned_object "$wd"; then
+    printf 'S1B_WORKDIR_RESIDUE path=%s reason=path_rebound\n' "$wd" >&2
+    return 1
+  fi
+  printf 'S1B_WORKDIR_RETAINED path=%s\n' "$wd"
 }
 
 cleanup() {
-  local incoming_status="${1:-0}" leaf_residue=0 pid
+  local incoming_status="${1:-0}" leaf_residue=0 workdir_residue=0 pid
   for pid in "${MONITOR_PID:-}" "${HARNESS_PID:-}"; do
     reap_pid "$pid"
   done
@@ -133,9 +200,9 @@ cleanup() {
       leaf_residue=1
     fi
   fi
-  remove_owned_workdir "${WORKDIR:-}"
+  remove_owned_workdir "${WORKDIR:-}" || workdir_residue=1
   [[ "$incoming_status" -eq 0 ]] || return "$incoming_status"
-  [[ "$leaf_residue" -eq 0 ]]
+  [[ "$leaf_residue" -eq 0 && "$workdir_residue" -eq 0 ]]
 }
 
 cleanup_on_exit() {
@@ -241,7 +308,7 @@ isolate_pid() {
 
 run_matrix() {
   local expect_send="$1" n=0 hpid="" hc=0 mc=0 p2 p3
-  mkdir -p "$WORKDIR"
+  create_owned_workdir
   FIFO="$WORKDIR/go.fifo"
   LOG="$WORKDIR/monitor.log"
   HOUT="$WORKDIR/harness.out"
@@ -445,7 +512,10 @@ case "$MODE" in
       "$ASSAY_BIN" || fail "ASSAY_BIN is not the mutated rebuild (missing s1b-cell7-disabled)"
     run_matrix no ;;
   cleanup-selftest)
-    WORKDIR=$(mktemp -d /tmp/s1b-cleanup-selftest-XXXXXX)
+    selftest_rt=$(mktemp -d)
+    RUNNER_TEMP="$selftest_rt"
+    WORKDIR="$RUNNER_TEMP/s1b-cleanup-selftest-$$"
+    create_owned_workdir
     s1b_owned_workdir "$WORKDIR" || fail "cleanup-selftest WORKDIR is not an owned S1b path: $WORKDIR"
     FIFO=$WORKDIR/go.fifo
     mkfifo "$FIFO"
@@ -473,7 +543,11 @@ case "$MODE" in
     [[ ! -e "$fifo" ]] || fail "FIFO leftover $fifo"
     [[ ! -d "$leaf" ]] || fail "leaf leftover $leaf"
     wd=$WORKDIR
-    [[ ! -e "$wd" ]] || fail "WORKDIR leftover $wd"
+    [[ -d "$wd" ]] || fail "retained WORKDIR root missing $wd"
+    [[ -z "$(find "$wd" -mindepth 1 -maxdepth 1 -print -quit)" ]] \
+      || fail "retained WORKDIR contents $wd"
+    rmdir "$wd" || fail "consume retained WORKDIR=$wd"
+    rmdir "$selftest_rt" || fail "consume cleanup selftest RUNNER_TEMP=$selftest_rt"
     bad=$(mktemp -d)
     printf 'keep\n' >"$bad/keep"
     if s1b_owned_workdir "$bad"; then
@@ -486,7 +560,7 @@ case "$MODE" in
     [[ "$rec" -ne 0 ]] || fail "remove_owned_workdir deleted unowned path $bad"
     [[ -f "$bad/keep" ]] || fail "unowned WORKDIR was deleted: $bad"
     rm -rf "$bad"
-    WORKDIR=""
+    WORKDIR="" S1B_OWNED_WORKDIR="" S1B_OWNED_ID="" S1B_OWNED_SAVED_PWD=""
     echo "ok: cleanup-selftest" ;;
   cleanup-leaf-status-selftest)
     [[ -n "${2:-}" && -d "$2" ]] || fail "cleanup leaf selftest requires an existing leaf directory"
@@ -495,9 +569,35 @@ case "$MODE" in
     [[ "${3:-}" =~ ^([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])$ ]] \
       || fail "cleanup leaf selftest requires an exit status in 0..255"
     LEAF="$2"
-    WORKDIR=$(mktemp -d /tmp/s1b-leaf-status-XXXXXX)
+    WORKDIR=""
+    create_owned_workdir
     printf 'SELFTEST_WORKDIR=%s\n' "$WORKDIR"
     exit "$3" ;;
+  workdir-create-selftest)
+    create_owned_workdir
+    printf 'SELFTEST_WORKDIR=%s\n' "$WORKDIR"
+    printf 'owned\n' >"$WORKDIR/selftest-owned"
+    foreign="$RUNNER_TEMP/s1b-foreign-$$"
+    [[ ! -e "$foreign" ]] || fail "foreign selftest path exists: $foreign"
+    mkdir "$foreign"
+    printf 'keep\n' >"$foreign/keep"
+    if s1b_owned_workdir "$foreign"; then
+      fail "foreign S1b sibling considered owned: $foreign"
+    fi
+    printf 'SELFTEST_FOREIGN_WORKDIR=%s\n' "$foreign"
+    exit 0 ;;
+  workdir-rebind-selftest)
+    create_owned_workdir
+    owned=$WORKDIR
+    moved="${WORKDIR}-moved"
+    [[ ! -e "$moved" ]] || fail "rebind target exists: $moved"
+    printf 'owned\n' >"$WORKDIR/selftest-owned"
+    mv "$owned" "$moved"
+    mkdir "$owned"
+    printf 'foreign\n' >"$owned/foreign"
+    printf 'SELFTEST_WORKDIR=%s\n' "$owned"
+    printf 'SELFTEST_REBOUND_WORKDIR=%s\n' "$moved"
+    exit 0 ;;
   coverage-gate) coverage_gate "${2:?coverage-gate requires a JSON path}" ;;
   mutation-selftest) mutation_selftest ;;
   endpoint-line-selftest)
@@ -526,5 +626,5 @@ case "$MODE" in
     LOG="${2:?}"
     HOUT="${3:?}"
     fail "diagnostics-selftest" ;;
-  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest|diagnostics-selftest" ;;
+  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|cleanup-leaf-status-selftest|workdir-create-selftest|workdir-rebind-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest|diagnostics-selftest" ;;
 esac
