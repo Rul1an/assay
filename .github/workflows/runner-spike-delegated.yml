@@ -267,26 +267,30 @@ jobs:
             "$PWD/scripts/ci/runner-spike-gemini-google-genai-three-run-determinism.sh"
 
       - name: Build delegated proof pack
+        id: build-proof-pack
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          workflow_sha="${GITHUB_WORKFLOW_SHA:-$GITHUB_SHA}"
           python3 scripts/ci/assay_runner_delegated_proof_pack.py \
             --proof-root "$ASSAY_RUNNER_DELEGATED_PROOF_ROOT" \
             --gates "${{ inputs.gates }}" \
             --build-ebpf "${{ inputs.build_ebpf }}" \
             --run-id "$GITHUB_RUN_ID" \
             --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --run-url "$run_url" \
+            --run-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
             --ref "$GITHUB_REF" \
             --head-sha "$GITHUB_SHA" \
-            --workflow-sha "$workflow_sha" \
+            --workflow-sha "${GITHUB_WORKFLOW_SHA:-$GITHUB_SHA}" \
             --workflow-name "$GITHUB_WORKFLOW" \
             --workflow-path ".github/workflows/runner-spike-delegated.yml" \
             --repository "$GITHUB_REPOSITORY" \
             --retention-days 365
+
+      - name: Summarize delegated proof pack
+        if: always() && steps.build-proof-pack.outcome == 'success'
+        shell: bash
+        run: |
           {
             echo "### Delegated proof pack"
             echo "- artifact: assay-runner-delegated-proof-pack-${GITHUB_RUN_ID}"
@@ -298,18 +302,25 @@ jobs:
       - name: Attest delegated proof pack subjects
         id: attest-proof-pack
         if: always() && hashFiles('assay-runner-proof-upload/subject-checksums.txt') != ''
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: assay-runner-proof-upload/subject-checksums.txt
           show-summary: true
 
       - name: Retain delegated proof attestation bundle
+        id: retain-proof-attestation
         if: always() && steps.attest-proof-pack.outputs.bundle-path != ''
         shell: bash
+        working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
           cp "${{ steps.attest-proof-pack.outputs.bundle-path }}" \
             "$ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD/attestation-bundle.json"
+
+      - name: Summarize delegated proof attestation
+        if: always() && steps.retain-proof-attestation.outcome == 'success'
+        shell: bash
+        run: |
           {
             echo "- attestation-bundle: assay-runner-proof-upload/attestation-bundle.json"
             echo "- attestation-url: ${{ steps.attest-proof-pack.outputs.attestation-url }}"
