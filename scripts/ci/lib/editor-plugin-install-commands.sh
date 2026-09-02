@@ -46,7 +46,11 @@ editor_plugin_install_commands() {
         fence_mark = mark
         fence_width = width
         bash_fence = (fence_line == "```bash")
-        if (section && bash_fence) bash_fence_count++
+        if (section && bash_fence) {
+          bash_fence_count++
+          previous_blank = 0
+          possible_next_h2 = 0
+        }
       }
       next
     }
@@ -56,6 +60,12 @@ editor_plugin_install_commands() {
       next
     }
     section && fence && bash_fence {
+      if (possible_next_h2) {
+        if ($0 ~ /^[ \t]*$/) next_h2_before_close = 1
+        possible_next_h2 = 0
+      }
+      if (previous_blank && $0 ~ /^## /) possible_next_h2 = 1
+      previous_blank = ($0 ~ /^[ \t]*$/)
       sub(/^[ \t]+/, "")
       sub(/[ \t]+$/, "")
       if ($0 != "" && $0 !~ /^#/) {
@@ -73,8 +83,16 @@ editor_plugin_install_commands() {
         print "expected exactly one bash fence in the plugin section" > "/dev/stderr"
         exit 1
       }
-      if (bash_fence_close_count != 1 || nested_fence_before_close) {
+      if (bash_fence_close_count != 1) {
         print "plugin bash fence is not closed at its own boundary" > "/dev/stderr"
+        exit 1
+      }
+      if (nested_fence_before_close) {
+        print "plugin bash fence is not closed at its own boundary" > "/dev/stderr"
+        exit 1
+      }
+      if (next_h2_before_close) {
+        print "plugin bash fence absorbs a later H2" > "/dev/stderr"
         exit 1
       }
       if (ncmds) print cmds

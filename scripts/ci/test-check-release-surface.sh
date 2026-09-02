@@ -849,6 +849,32 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
+rewrite_and_expect_failure plugin-absorbed-next-h2 "$RECIPE_FILE" \
+  'plugin bash fence absorbs a later H2' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay version
+assay-mcp-server --version
+
+Continue with the verification notes below.
+
+## Verify the installation
+
+Run both version probes before continuing.
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+
 rewrite_and_expect_failure plugin-continued-cargo-install "$RECIPE_FILE" \
   'continued cargo install is not a published pin' <<'MD'
 Codex uses .codex/config.toml.
@@ -870,8 +896,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 94 ]; then
-  echo "FAIL: expected 94 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 95 ]; then
+  echo "FAIL: expected 95 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

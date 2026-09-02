@@ -181,6 +181,32 @@ MD
 expect_fail 'later fenced block cannot close the plugin bash fence' \
   'plugin bash fence is not closed at its own boundary'
 
+cat > "$TMP/recipe.md" <<'MD'
+# Editor MCP Recipe
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --locked
+cargo install assay-mcp-server --locked
+assay version
+assay-mcp-server --version
+
+Continue with the verification notes below.
+
+## Verify the installation
+
+Run both version probes before continuing.
+```
+
+## The wrap command
+
+Run `assay mcp wrap` to enforce policy at the protocol boundary.
+Use `assay-mcp-server proxy-enforce` for the enforcing path.
+MD
+expect_fail 'later bare fence cannot close across an apparent next H2' \
+  'plugin bash fence absorbs a later H2'
+
 
 echo '== fenced examples cannot impersonate the plugin section =='
 for fence in '```' '````' '~~~' '   ~~~'; do

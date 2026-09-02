@@ -73,20 +73,44 @@ expect_empty() {
 
 expect_fail() {
   local label="$1" expected="$2"
+  local got case_failed=0
   cases=$((cases + 1))
   if got="$(run_exe)"; then
     failures=$((failures + 1))
+    case_failed=1
     printf 'FAIL: %s — executable extractor accepted input it should reject\n%s\n' \
       "$label" "$got"
-    return
-  fi
-  if ! grep -Fq -- "$expected" "$TMP/err"; then
+  elif [ -n "$got" ]; then
     failures=$((failures + 1))
-    printf 'FAIL: %s — rejected, but not for the stated reason (wanted %s)\n%s\n' \
+    case_failed=1
+    printf 'FAIL: %s — executable extractor emitted stdout before rejecting\n%s\n' \
+      "$label" "$got"
+  elif ! grep -Fq -- "$expected" "$TMP/err"; then
+    failures=$((failures + 1))
+    case_failed=1
+    printf 'FAIL: %s — executable rejected, but not for the stated reason (wanted %s)\n%s\n' \
       "$label" "$expected" "$(cat "$TMP/err")"
-    return
   fi
-  printf 'ok   %s\n' "$label"
+
+  if got="$(run_fn)"; then
+    failures=$((failures + 1))
+    case_failed=1
+    printf 'FAIL: %s — sourced extractor accepted input it should reject\n%s\n' \
+      "$label" "$got"
+  elif [ -n "$got" ]; then
+    failures=$((failures + 1))
+    case_failed=1
+    printf 'FAIL: %s — sourced extractor emitted stdout before rejecting\n%s\n' \
+      "$label" "$got"
+  elif ! grep -Fq -- "$expected" "$TMP/err"; then
+    failures=$((failures + 1))
+    case_failed=1
+    printf 'FAIL: %s — sourced function rejected, but not for the stated reason (wanted %s)\n%s\n' \
+      "$label" "$expected" "$(cat "$TMP/err")"
+  fi
+  if [ "$case_failed" -eq 0 ]; then
+    printf 'ok   %s\n' "$label"
+  fi
 }
 
 echo '== baseline: plugin bash fence commands are emitted =='
@@ -269,6 +293,36 @@ assay version
 MD
 expect_fail 'plugin bash fence left open at end of file' \
   'plugin bash fence is not closed at its own boundary'
+
+echo '== a blank-line-delimited next H2 cannot be absorbed by the bash fence =='
+write_recipe <<'MD'
+## Install the Claude Code plugin
+
+```bash
+assay version
+
+Continue with the verification notes below.
+
+## Verify the installation
+
+Run both version probes before continuing.
+```
+MD
+expect_fail 'later bare fence cannot close across an apparent next H2' \
+  'plugin bash fence absorbs a later H2'
+
+write_recipe <<'MD'
+## Install the Claude Code plugin
+
+```bash
+assay version
+
+## shell comment
+assay-mcp-server --version
+```
+MD
+expect_stdout 'in-fence H2-shaped shell comment remains supported' \
+  $'assay version\nassay-mcp-server --version'
 
 echo '== quoted and continued lines are emitted as standalone text =='
 write_recipe <<'MD'
