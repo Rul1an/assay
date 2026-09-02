@@ -48,9 +48,11 @@ python3 examples/mcp-quickstart/run.py
 
 For v5.5.2, run the last command from a source checkout or an extracted published CLI archive.
 The installer is binary-only and does not carry the bounded quickstart assets. The live
-`getassay.dev` installer downloads over HTTPS but does not yet consume the published checksum or
-provenance sidecars. The verified source installer will replace it through the separately measured
-deployment tracked in `Rul1an/getassay-site#6`.
+`getassay.dev` installer verifies the selected archive against its published SHA-256 sidecar before
+extraction. Set `ASSAY_REQUIRE_PROVENANCE=1` to additionally require GitHub artifact provenance;
+the default reports `provenance_not_requested` and strict success reports `provenance_verified`.
+A checksum proves byte equality with the published sidecar, not producer identity. Provenance
+identifies the source and build, not runtime safety or semantic correctness.
 
 Captured runner output (the bundled local mock performs no external action):
 
