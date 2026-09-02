@@ -47,12 +47,10 @@ python3 examples/mcp-quickstart/run.py
 ```
 
 For v5.5.2, run the last command from a source checkout or an extracted published CLI archive.
-The installer is binary-only and does not carry the bounded quickstart assets. Every install
-verifies the selected archive against its published SHA-256 sidecar before extraction. Strict mode
-additionally requires GitHub's attestation verifier and binds the archive to this repository, the
-release workflow, the GitHub Actions OIDC issuer, the SLSA v1 predicate, and the release tag's
-commit while refusing self-hosted provenance. These checks establish byte and producer-workflow
-identity under those bindings; they do not establish runtime safety or semantic correctness.
+The installer is binary-only and does not carry the bounded quickstart assets. The live
+`getassay.dev` installer downloads over HTTPS but does not yet consume the published checksum or
+provenance sidecars. The verified source installer will replace it through the separately measured
+deployment tracked in `Rul1an/getassay-site#6`.
 
 Captured runner output (the bundled local mock performs no external action):
 

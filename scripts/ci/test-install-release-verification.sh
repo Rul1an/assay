@@ -249,6 +249,12 @@ make_chmod_stub() {
 if [ "${CHMOD_MODE:-ok}" = fail ]; then
   exit 1
 fi
+if [ "${CHMOD_MODE:-ok}" = block-after-directory-change ]; then
+  : > "$SIGNAL_MARKER"
+  while :; do
+    sleep 1
+  done
+fi
 exec /bin/chmod "$@"
 EOF
   chmod +x "$bin_dir/chmod"
@@ -404,6 +410,21 @@ assert_relative_install_dir_resolves_from_invocation_directory() {
     fail 'relative ASSAY_INSTALL_DIR did not resolve from the invocation directory'
 }
 
+assert_relative_tmpdir_cleans_after_success() {
+  local case_dir
+  case_dir="$(new_case relative-tmpdir-success)"
+  mkdir -p "$case_dir/relative-tmp"
+  (
+    cd "$case_dir"
+    run_installer "$case_dir" TMPDIR=relative-tmp > "$case_dir/stdout" 2> "$case_dir/stderr"
+  )
+  grep -F 'assay 5.5.2 fixture' "$case_dir/install/assay" >/dev/null || \
+    fail 'relative TMPDIR install did not activate fixture'
+  if find "$case_dir/relative-tmp" -mindepth 1 -print -quit | grep -q .; then
+    fail 'successful install left scratch under relative TMPDIR'
+  fi
+}
+
 assert_activation_failure_preserves_binary() {
   local case_dir
   case_dir="$(new_case activation-failure)"
@@ -420,9 +441,26 @@ assert_signal_stops_before_next_network_step() {
   local signal="$1"
   local expected_rc="$2"
   local label="$3"
-  local case_dir marker rc
+  local tmp_mode="${4:-absolute}"
+  local signal_stage="${5:-download}"
+  local case_dir marker rc tmpdir_value tmpdir_path curl_mode chmod_mode expected_requests
   case_dir="$(new_case "signal-$label")"
   marker="$case_dir/archive-downloaded"
+  tmpdir_value="$case_dir/tmp"
+  tmpdir_path="$case_dir/tmp"
+  if [ "$tmp_mode" = relative ]; then
+    tmpdir_value=relative-tmp
+    tmpdir_path="$case_dir/relative-tmp"
+    mkdir -p "$tmpdir_path"
+  fi
+  curl_mode=block-after-archive
+  chmod_mode=ok
+  expected_requests=1
+  if [ "$signal_stage" = after-directory-change ]; then
+    curl_mode=ok
+    chmod_mode=block-after-directory-change
+    expected_requests=2
+  fi
 
   env \
     HOME="$case_dir/home" \
@@ -433,10 +471,11 @@ assert_signal_stops_before_next_network_step() {
     CURL_LOG="$case_dir/curl.log" \
     CURL_LIMIT_LOG="$case_dir/curl-limit.log" \
     GH_LOG="$case_dir/gh.log" \
-    CURL_MODE=block-after-archive \
+    CURL_MODE="$curl_mode" \
+    CHMOD_MODE="$chmod_mode" \
     SIGNAL_MARKER="$marker" \
-    TMPDIR="$case_dir/tmp" \
-    python3 - "$INSTALLER" "$marker" "$case_dir/stdout" "$case_dir/stderr" "$case_dir/rc" "$signal" <<'PY'
+    TMPDIR="$tmpdir_value" \
+    python3 - "$INSTALLER" "$marker" "$case_dir/stdout" "$case_dir/stderr" "$case_dir/rc" "$signal" "$case_dir" "$signal_stage" <<'PY'
 import os
 import signal
 import subprocess
@@ -444,9 +483,17 @@ import sys
 import time
 from pathlib import Path
 
-installer, marker, stdout_path, stderr_path, rc_path, signal_name = sys.argv[1:]
+installer, marker, stdout_path, stderr_path, rc_path, signal_name, cwd, stage = sys.argv[1:]
+signal_group = stage == "after-directory-change"
 with open(stdout_path, "wb") as stdout, open(stderr_path, "wb") as stderr:
-    proc = subprocess.Popen(["sh", installer], stdout=stdout, stderr=stderr, env=os.environ.copy())
+    proc = subprocess.Popen(
+        ["sh", installer],
+        stdout=stdout,
+        stderr=stderr,
+        env=os.environ.copy(),
+        cwd=cwd,
+        start_new_session=signal_group,
+    )
     for _ in range(100):
         if Path(marker).is_file():
             break
@@ -455,17 +502,21 @@ with open(stdout_path, "wb") as stdout, open(stderr_path, "wb") as stderr:
         proc.kill()
         proc.wait()
         raise SystemExit("signal test did not reach the bounded archive-download witness")
-    os.kill(proc.pid, getattr(signal, f"SIG{signal_name}"))
+    signal_number = getattr(signal, f"SIG{signal_name}")
+    if signal_group:
+        os.killpg(proc.pid, signal_number)
+    else:
+        os.kill(proc.pid, signal_number)
     rc = proc.wait(timeout=10)
 Path(rc_path).write_text(f"{rc}\n", encoding="utf-8")
 PY
   rc="$(cat "$case_dir/rc")"
   test "$rc" -eq "$expected_rc" || fail "$signal exited $rc, expected $expected_rc"
   assert_old_binary "$case_dir"
-  test "$(wc -l < "$case_dir/curl.log" | tr -d ' ')" -eq 1 || \
+  test "$(wc -l < "$case_dir/curl.log" | tr -d ' ')" -eq "$expected_requests" || \
     fail "$signal allowed the installer to continue to another network step"
-  if find "$case_dir/tmp" -mindepth 1 -print -quit | grep -q .; then
-    fail "$signal left installer scratch residue"
+  if find "$tmpdir_path" -mindepth 1 -print -quit | grep -q .; then
+    fail "$signal left installer scratch residue ($tmp_mode TMPDIR, $signal_stage stage)"
   fi
 }
 
@@ -590,8 +641,11 @@ main() {
   assert_signal_stops_before_next_network_step HUP 129 hup
   assert_signal_stops_before_next_network_step INT 130 int
   assert_signal_stops_before_next_network_step TERM 143 term
+  assert_signal_stops_before_next_network_step \
+    TERM 143 term-relative relative after-directory-change
   assert_activation_failure_preserves_binary
   assert_relative_install_dir_resolves_from_invocation_directory
+  assert_relative_tmpdir_cleans_after_success
 
   echo 'install release verification: PASS'
 }

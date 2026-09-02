@@ -16,11 +16,17 @@ set -e
 
 # --- Configuration ---
 GITHUB_REPO="Rul1an/assay"
+INVOCATION_DIR=$(pwd)
 
 INSTALL_DIR="${ASSAY_INSTALL_DIR:-$HOME/.local/bin}"
 case "$INSTALL_DIR" in
     /*) ;;
-    *) INSTALL_DIR="$(pwd)/$INSTALL_DIR" ;;
+    *) INSTALL_DIR="$INVOCATION_DIR/$INSTALL_DIR" ;;
+esac
+TMP_ROOT="${TMPDIR:-/tmp}"
+case "$TMP_ROOT" in
+    /*) ;;
+    *) TMP_ROOT="$INVOCATION_DIR/$TMP_ROOT" ;;
 esac
 # Unset defaults to latest. An explicitly empty value is malformed and must
 # not be rewritten to latest (that would hit the network).
@@ -292,7 +298,6 @@ main() {
     CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
 
     # 4. Download
-    TMP_ROOT="${TMPDIR:-/tmp}"
     TMP_DIR=$(mktemp -d "${TMP_ROOT%/}/assay-install.XXXXXX")
     INSTALL_CANDIDATE=""
     cleanup_install() {
