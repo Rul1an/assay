@@ -19,6 +19,46 @@ compute_sha256() {
   fi
 }
 
+assert_precommit_wiring() {
+  python3 - "$ROOT/.pre-commit-config.yaml" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+hook_id = "install-release-verification-self-test"
+matches = list(re.finditer(rf"^\s*- id: {re.escape(hook_id)}\s*$", text, re.MULTILINE))
+if len(matches) != 1:
+    raise SystemExit(f"expected exactly one {hook_id} hook, found {len(matches)}")
+
+start = matches[0].start()
+next_hook = re.search(r"^\s*- id: ", text[matches[0].end():], re.MULTILINE)
+end = matches[0].end() + next_hook.start() if next_hook else len(text)
+block = text[start:end]
+
+expected_entry = "entry: bash scripts/ci/test-install-release-verification.sh"
+if expected_entry not in block:
+    raise SystemExit(f"{hook_id} does not invoke the contract test")
+if not re.search(r"^\s*pass_filenames:\s*false\s*$", block, re.MULTILINE):
+    raise SystemExit(f"{hook_id} must set pass_filenames: false")
+
+files_match = re.search(r"^\s*files:\s*(.+?)\s*$", block, re.MULTILINE)
+if files_match is None:
+    raise SystemExit(f"{hook_id} has no files selector")
+selector = re.compile(files_match.group(1))
+required = (
+    "scripts/install.sh",
+    "scripts/ci/test-install-release-verification.sh",
+    "README.md",
+    ".pre-commit-config.yaml",
+)
+missed = [candidate for candidate in required if selector.fullmatch(candidate) is None]
+if missed:
+    raise SystemExit(f"{hook_id} files selector misses: {', '.join(missed)}")
+PY
+}
+
 make_fixture() {
   local root="$1"
   local target="$2"
@@ -321,6 +361,7 @@ assert_invalid_tag_digest_refuses() {
 }
 
 main() {
+  assert_precommit_wiring
   TEST_TMP="$(mktemp -d)"
   trap 'rm -rf "$TEST_TMP"' EXIT
   make_fixture "$TEST_TMP" x86_64-unknown-linux-gnu
