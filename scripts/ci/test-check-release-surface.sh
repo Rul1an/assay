@@ -537,6 +537,9 @@ PINNED_MCP_DIAG='expected exactly one current release-pinned assay-mcp-server pl
 mutate_and_expect_failure plugin-stale-version "$RECIPE_FILE" \
   's/assay-cli --version 5.1.0/assay-cli --version 5.0.0/' \
   "$PINNED_CLI_DIAG"
+mutate_and_expect_failure plugin-stale-mcp-version "$RECIPE_FILE" \
+  's/assay-mcp-server --version 5.1.0/assay-mcp-server --version 5.0.0/' \
+  "$PINNED_MCP_DIAG"
 mutate_and_expect_failure plugin-missing-version "$RECIPE_FILE" \
   's/cargo install assay-cli --version 5.1.0 --locked/cargo install assay-cli --locked/' \
   "$PINNED_CLI_DIAG"
@@ -754,8 +757,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 88 ]; then
-  echo "FAIL: expected 88 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 89 ]; then
+  echo "FAIL: expected 89 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

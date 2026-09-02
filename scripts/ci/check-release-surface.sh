@@ -345,7 +345,7 @@ check_editor_plugin_published_installs() {
       "$PINNED_ASSAY_CLI"|"$PINNED_ASSAY_MCP") continue ;;
     esac
     case "$line" in
-      cargo\ install*|cargo\ install) ;;
+      cargo\ install*) ;;
       *) continue ;;
     esac
     if [[ "$line" == *\\ ]]; then
