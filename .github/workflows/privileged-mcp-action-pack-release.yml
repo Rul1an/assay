@@ -133,6 +133,7 @@ jobs:
       - name: Retain attestation bundle
         id: retain-release-attestation
         shell: bash
+        working-directory: ${{ github.workspace }}
         env:
           ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |

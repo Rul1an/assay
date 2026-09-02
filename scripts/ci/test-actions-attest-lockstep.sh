@@ -588,6 +588,7 @@ text = path.read_text(encoding="utf-8")
 old = """      - name: Retain attestation bundle
         id: retain-release-attestation
         shell: bash
+        working-directory: ${{ github.workspace }}
         env:
           ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |
@@ -630,11 +631,25 @@ mutate_once \
   "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
   "        id: retain-release-attestation
         shell: bash
+        working-directory: \${{ github.workspace }}
         env:" \
   "        id: retain-release-attestation
         shell: \"true {0}\"
+        working-directory: \${{ github.workspace }}
         env:"
 run_case pack-consumer-custom-shell-is-refused "$case_root" 1
+
+case_root="$scratch/pack-consumer-cwd-retarget"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" \
+  "        id: retain-release-attestation
+        shell: bash
+        working-directory: \${{ github.workspace }}" \
+  "        id: retain-release-attestation
+        shell: bash
+        working-directory: /tmp"
+run_case pack-consumer-cwd-retarget-is-refused "$case_root" 1
 
 case_root="$scratch/pack-consumer-extra-env"
 seed "$case_root"
@@ -677,6 +692,7 @@ old = """      - name: Retain delegated proof attestation bundle
         id: retain-proof-attestation
         if: always() && steps.attest-proof-pack.outputs.bundle-path != ''
         shell: bash
+        working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
           cp "${{ steps.attest-proof-pack.outputs.bundle-path }}" \\
@@ -702,6 +718,20 @@ mutate_once \
         if: always() && steps.attest-proof-pack.outputs.bundle-path != ''
         shell: \"true {0}\""
 run_case delegated-consumer-custom-shell-is-refused "$case_root" 1
+
+case_root="$scratch/delegated-consumer-cwd-retarget"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/runner-spike-delegated.yml" \
+  "        id: retain-proof-attestation
+        if: always() && steps.attest-proof-pack.outputs.bundle-path != ''
+        shell: bash
+        working-directory: \${{ github.workspace }}" \
+  "        id: retain-proof-attestation
+        if: always() && steps.attest-proof-pack.outputs.bundle-path != ''
+        shell: bash
+        working-directory: /tmp"
+run_case delegated-consumer-cwd-retarget-is-refused "$case_root" 1
 
 case_root="$scratch/delegated-consumer-step-env-retarget"
 seed "$case_root"
@@ -791,6 +821,7 @@ text = path.read_text(encoding="utf-8")
 consumer = """      - name: Retain attestation bundle
         id: retain-release-attestation
         shell: bash
+        working-directory: ${{ github.workspace }}
         env:
           ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |
@@ -842,6 +873,14 @@ cat >>"$case_root/.github/workflows/runner-spike-delegated.yml" <<'YAML'
 # ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD remains owned by the delegated job env.
 YAML
 run_case env-comment-only-control-is-green "$case_root" 0
+
+case_root="$scratch/cwd-comment-only-control"
+seed "$case_root"
+cat >>"$case_root/.github/workflows/privileged-mcp-action-pack-release.yml" <<'YAML'
+
+# Retention commands remain explicitly workspace-bound.
+YAML
+run_case cwd-comment-only-control-is-green "$case_root" 0
 
 case_root="$scratch/missing-ruby"
 seed "$case_root"

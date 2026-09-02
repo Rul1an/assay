@@ -44,6 +44,7 @@ class Producer(NamedTuple):
     bundle_output: str
     consumer_step_id: str
     consumer_shell: str
+    consumer_working_directory: str
     consumer_if: str | None
     consumer_env: tuple[tuple[str, str], ...] | None
     consumer_commands: tuple[str, ...]
@@ -97,6 +98,7 @@ PRODUCERS = (
         bundle_output="steps.attest-proof-pack.outputs.bundle-path",
         consumer_step_id="retain-proof-attestation",
         consumer_shell="bash",
+        consumer_working_directory="${{ github.workspace }}",
         consumer_if="always() && steps.attest-proof-pack.outputs.bundle-path != ''",
         consumer_env=None,
         consumer_commands=(
@@ -124,6 +126,7 @@ PRODUCERS = (
         bundle_output="steps.attest.outputs.bundle-path",
         consumer_step_id="retain-release-attestation",
         consumer_shell="bash",
+        consumer_working_directory="${{ github.workspace }}",
         consumer_if=None,
         consumer_env=(
             (
@@ -439,6 +442,12 @@ def producer_contract_errors(producer: Producer, document: object) -> list[str]:
             errors.append(
                 f"{producer.path}: consumer shell "
                 f"{consumer.get('shell')!r}, want {producer.consumer_shell!r}"
+            )
+        if consumer.get("working-directory") != producer.consumer_working_directory:
+            errors.append(
+                f"{producer.path}: consumer working-directory "
+                f"{consumer.get('working-directory')!r}, "
+                f"want {producer.consumer_working_directory!r}"
             )
         if consumer.get("if") != producer.consumer_if:
             errors.append(

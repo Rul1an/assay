@@ -311,6 +311,7 @@ jobs:
         id: retain-proof-attestation
         if: always() && steps.attest-proof-pack.outputs.bundle-path != ''
         shell: bash
+        working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
           cp "${{ steps.attest-proof-pack.outputs.bundle-path }}" \
