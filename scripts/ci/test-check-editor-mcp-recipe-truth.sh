@@ -314,14 +314,15 @@ echo '== CI wiring: recipe, extractor, and extractor self-test must reach this g
 EXTRACTOR_LIB='scripts/ci/lib/editor-plugin-install-commands.sh'
 EXTRACTOR_SELFTEST='scripts/ci/test-editor-plugin-install-commands.sh'
 RECIPE_PATH='docs/guides/editor-mcp-recipe.md'
+CONSUMER_CONTRACT='scripts/ci/test-editor-release-hook-precommit-consumer.sh'
 
 check_editor_hook_wiring() {
-  python3 - "$1" "$RECIPE_PATH" "$EXTRACTOR_LIB" "$EXTRACTOR_SELFTEST" <<'PY'
+  python3 - "$1" "$RECIPE_PATH" "$EXTRACTOR_LIB" "$EXTRACTOR_SELFTEST" "$CONSUMER_CONTRACT" <<'PY'
 from pathlib import Path
 import re
 import sys
 
-cfg_path, recipe, extractor, selftest = sys.argv[1:5]
+cfg_path, recipe, extractor, selftest, contract = sys.argv[1:6]
 problems = []
 cfg = Path(cfg_path).read_text(encoding="utf-8")
 hook = re.search(
@@ -336,7 +337,7 @@ else:
         problems.append("editor-mcp-recipe-truth: no files: selector")
     else:
         pattern = re.compile(files.group(1))
-        for path in (recipe, extractor, selftest):
+        for path in (recipe, extractor, selftest, contract):
             if not pattern.search(path):
                 problems.append(
                     f"editor-mcp-recipe-truth: files: selector does not match {path}"

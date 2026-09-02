@@ -190,6 +190,7 @@ for path in (
     "mkdocs.yml",
     "scripts/ci/lib/editor-plugin-install-commands.sh",
     "docs/guides/editor-mcp-recipe.md",
+    "scripts/ci/test-editor-release-hook-precommit-consumer.sh",
 ):
     if not pattern.search(path):
         raise SystemExit(f"release-surface hook omits {path}")
