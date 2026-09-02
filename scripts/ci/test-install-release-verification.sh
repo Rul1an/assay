@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 INSTALLER="${INSTALLER:-$ROOT/scripts/install.sh}"
+HOOK_CHECKER="${HOOK_CHECKER:-$ROOT/scripts/ci/check-install-release-verification-hook.sh}"
 TEST_TMP=""
 
 fail() {
@@ -20,43 +21,64 @@ compute_sha256() {
 }
 
 assert_precommit_wiring() {
-  python3 - "$ROOT/.pre-commit-config.yaml" <<'PY'
-import re
+  bash "$HOOK_CHECKER"
+
+  local mutation_dir="$TEST_TMP/hook-mutations"
+  mkdir -p "$mutation_dir"
+  python3 - "$ROOT/.pre-commit-config.yaml" "$mutation_dir" <<'PY'
 import sys
 from pathlib import Path
 
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-hook_id = "install-release-verification-self-test"
-matches = list(re.finditer(rf"^\s*- id: {re.escape(hook_id)}\s*$", text, re.MULTILINE))
-if len(matches) != 1:
-    raise SystemExit(f"expected exactly one {hook_id} hook, found {len(matches)}")
-
-start = matches[0].start()
-next_hook = re.search(r"^\s*- id: ", text[matches[0].end():], re.MULTILINE)
-end = matches[0].end() + next_hook.start() if next_hook else len(text)
-block = text[start:end]
-
-expected_entry = "entry: bash scripts/ci/test-install-release-verification.sh"
-if expected_entry not in block:
-    raise SystemExit(f"{hook_id} does not invoke the contract test")
-if not re.search(r"^\s*pass_filenames:\s*false\s*$", block, re.MULTILINE):
-    raise SystemExit(f"{hook_id} must set pass_filenames: false")
-
-files_match = re.search(r"^\s*files:\s*(.+?)\s*$", block, re.MULTILINE)
-if files_match is None:
-    raise SystemExit(f"{hook_id} has no files selector")
-selector = re.compile(files_match.group(1))
-required = (
-    "scripts/install.sh",
-    "scripts/ci/test-install-release-verification.sh",
-    "README.md",
-    ".pre-commit-config.yaml",
+source = Path(sys.argv[1]).read_text(encoding="utf-8")
+dest = Path(sys.argv[2])
+hook_pos = source.index("      - id: install-release-verification-self-test\n")
+owner_pos = source.rfind("  - repo: local\n", 0, hook_pos)
+if owner_pos < 0:
+    raise SystemExit("test mutation wrong-owner could not find owning repo")
+wrong_owner = (
+    source[:owner_pos]
+    + "  - repo: https://example.invalid/hooks\n"
+    + source[owner_pos + len("  - repo: local\n"):]
 )
-missed = [candidate for candidate in required if selector.fullmatch(candidate) is None]
-if missed:
-    raise SystemExit(f"{hook_id} files selector misses: {', '.join(missed)}")
+mutations = {
+    "wrong-owner": wrong_owner,
+    "comment-decoy-entry": source.replace(
+        "entry: bash scripts/ci/test-install-release-verification.sh",
+        "entry: true # entry: bash scripts/ci/test-install-release-verification.sh",
+        1,
+    ),
+    "empty-selector": source.replace(
+        "files: ^(scripts/install\\.sh|scripts/ci/(check-install-release-verification-hook|test-install-release-verification)\\.sh|README\\.md|\\.pre-commit-config\\.yaml)$",
+        "files: ^$",
+        1,
+    ),
+    "manual-stage": source.replace(
+        "      - id: install-release-verification-self-test\n"
+        "        name: installer release verification contract\n"
+        "        entry: bash scripts/ci/test-install-release-verification.sh\n"
+        "        language: system\n"
+        "        pass_filenames: false\n"
+        "        stages: [pre-commit]\n",
+        "      - id: install-release-verification-self-test\n"
+        "        name: installer release verification contract\n"
+        "        entry: bash scripts/ci/test-install-release-verification.sh\n"
+        "        language: system\n"
+        "        pass_filenames: false\n"
+        "        stages: [manual]\n",
+        1,
+    ),
+}
+for name, text in mutations.items():
+    if text == source:
+        raise SystemExit(f"test mutation {name} did not apply")
+    (dest / f"{name}.yaml").write_text(text, encoding="utf-8")
 PY
+  local mutated
+  for mutated in "$mutation_dir"/*.yaml; do
+    if PRECOMMIT_CONFIG="$mutated" bash "$HOOK_CHECKER" >/dev/null 2>&1; then
+      fail "hook checker accepted mutation $(basename "$mutated")"
+    fi
+  done
 }
 
 make_fixture() {
@@ -99,6 +121,7 @@ set -eu
 
 out=""
 wants_status=0
+max_filesize=""
 url=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -108,6 +131,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     -w)
       wants_status=1
+      shift 2
+      ;;
+    --max-filesize)
+      max_filesize="$2"
       shift 2
       ;;
     -*)
@@ -126,6 +153,7 @@ case "$url" in
     asset_name="$(basename "${url%.sha256}")"
     fixture_archive="$FIXTURE_DIR/$asset_name"
     fixture_sidecar="${fixture_archive}.sha256"
+    printf '%s\n' "${max_filesize:-none}" >> "$CURL_LIMIT_LOG"
     case "${CURL_MODE:-ok}" in
       missing-sidecar) exit 22 ;;
       malformed-sidecar) printf '%s\n' 'not-a-sidecar' > "$out" ;;
@@ -136,6 +164,13 @@ case "$url" in
       trailing-garbage)
         cat "$fixture_sidecar" > "$out"
         printf '%s' 'garbage' >> "$out"
+        ;;
+      oversized-sidecar)
+        if [ -n "$max_filesize" ] && [ "$max_filesize" -lt 4096 ]; then
+          dd if=/dev/zero bs=1 count="$max_filesize" 2>/dev/null | tr '\000' a > "$out"
+          exit 63
+        fi
+        dd if=/dev/zero bs=1 count=4096 2>/dev/null | tr '\000' a > "$out"
         ;;
       mismatch)
         printf '%064d  %s\n' 0 "$asset_name" > "$out"
@@ -222,7 +257,7 @@ EOF
 new_case() {
   local name="$1"
   local case_dir="$TEST_TMP/$name"
-  mkdir -p "$case_dir/bin" "$case_dir/home" "$case_dir/install"
+  mkdir -p "$case_dir/bin" "$case_dir/home" "$case_dir/install" "$case_dir/tmp"
   make_uname_stub "$case_dir/bin"
   make_curl_stub "$case_dir/bin"
   make_gh_stub "$case_dir/bin"
@@ -241,6 +276,7 @@ run_installer() {
     ASSAY_INSTALL_DIR="$case_dir/install" \
     FIXTURE_DIR="$TEST_TMP" \
     CURL_LOG="$case_dir/curl.log" \
+    CURL_LIMIT_LOG="$case_dir/curl-limit.log" \
     GH_LOG="$case_dir/gh.log" \
     "$@" \
     sh "$INSTALLER"
@@ -291,8 +327,12 @@ def matches(actual):
             return False
     return True
 
-match_count = sum(matches(invocation) for invocation in invocations)
-if match_count != 1:
+attestation_invocations = [
+    invocation for invocation in invocations
+    if invocation[:2] == ["attestation", "verify"]
+]
+match_count = sum(matches(invocation) for invocation in attestation_invocations)
+if match_count != 1 or len(attestation_invocations) != 1:
     raise SystemExit(
         f"expected exactly one gh invocation {expected!r}, found {match_count}; "
         f"observed={invocations!r}"
@@ -300,9 +340,36 @@ if match_count != 1:
 PY
 }
 
+assert_extra_attestation_invocation_is_rejected() {
+  local source_log="$1"
+  local extra_log="$2"
+  cp "$source_log" "$extra_log"
+  cat >> "$extra_log" <<'EOF'
+--- invocation ---
+attestation
+verify
+/tmp/evil.tar.gz
+--repo
+evil/repo
+--signer-workflow
+evil/workflow
+EOF
+  if assert_exact_gh_invocation "$extra_log" \
+    attestation verify '<ARCHIVE>' \
+    --repo Rul1an/assay \
+    --signer-workflow Rul1an/assay/.github/workflows/release.yml \
+    --cert-oidc-issuer https://token.actions.githubusercontent.com \
+    --predicate-type https://slsa.dev/provenance/v1 \
+    --source-digest bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+    --deny-self-hosted-runners >/dev/null 2>&1; then
+    fail 'exact gh invocation guard accepted an additional attestation call'
+  fi
+}
+
 assert_default_success() {
   local os="$1"
   local label="$2"
+  local target archive_name expected_sidecar_bytes
   local case_dir
   case_dir="$(new_case "default-success-$label")"
   run_installer "$case_dir" FAKE_OS="$os" > "$case_dir/stdout" 2> "$case_dir/stderr"
@@ -314,6 +381,15 @@ assert_default_success() {
   grep -F 'assay 5.5.2 fixture' "$case_dir/install/assay" >/dev/null || fail 'default install did not activate fixture'
   test "$(file_mode "$case_dir/install/assay")" = 755 || fail 'activated binary mode is not exactly 0755'
   test "$(wc -l < "$case_dir/curl.log" | tr -d ' ')" -eq 2 || fail 'default install did not fetch exactly archive and sidecar'
+  case "$os" in
+    Linux) target=x86_64-unknown-linux-gnu ;;
+    Darwin) target=x86_64-apple-darwin ;;
+    *) fail "test bug: unsupported fixture OS $os" ;;
+  esac
+  archive_name="assay-v5.5.2-${target}.tar.gz"
+  expected_sidecar_bytes=$((64 + 2 + ${#archive_name} + 1))
+  grep -Fx "$expected_sidecar_bytes" "$case_dir/curl-limit.log" >/dev/null || \
+    fail 'sidecar download did not apply its exact pre-materialization byte ceiling'
   test ! -s "$case_dir/gh.log" || fail 'default install invoked gh'
 }
 
@@ -341,8 +417,11 @@ assert_activation_failure_preserves_binary() {
 }
 
 assert_signal_stops_before_next_network_step() {
-  local case_dir marker pid rc=0
-  case_dir="$(new_case signal-term)"
+  local signal="$1"
+  local expected_rc="$2"
+  local label="$3"
+  local case_dir marker rc
+  case_dir="$(new_case "signal-$label")"
   marker="$case_dir/archive-downloaded"
 
   env \
@@ -352,24 +431,42 @@ assert_signal_stops_before_next_network_step() {
     ASSAY_INSTALL_DIR="$case_dir/install" \
     FIXTURE_DIR="$TEST_TMP" \
     CURL_LOG="$case_dir/curl.log" \
+    CURL_LIMIT_LOG="$case_dir/curl-limit.log" \
     GH_LOG="$case_dir/gh.log" \
     CURL_MODE=block-after-archive \
     SIGNAL_MARKER="$marker" \
-    sh "$INSTALLER" > "$case_dir/stdout" 2> "$case_dir/stderr" &
-  pid=$!
+    TMPDIR="$case_dir/tmp" \
+    python3 - "$INSTALLER" "$marker" "$case_dir/stdout" "$case_dir/stderr" "$case_dir/rc" "$signal" <<'PY'
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
 
-  for _ in $(seq 1 100); do
-    test -f "$marker" && break
-    sleep 0.02
-  done
-  test -f "$marker" || fail 'signal test did not reach the bounded archive-download witness'
-
-  kill -TERM "$pid"
-  wait "$pid" || rc=$?
-  test "$rc" -ne 0 || fail 'TERM allowed the installer to report success'
+installer, marker, stdout_path, stderr_path, rc_path, signal_name = sys.argv[1:]
+with open(stdout_path, "wb") as stdout, open(stderr_path, "wb") as stderr:
+    proc = subprocess.Popen(["sh", installer], stdout=stdout, stderr=stderr, env=os.environ.copy())
+    for _ in range(100):
+        if Path(marker).is_file():
+            break
+        time.sleep(0.02)
+    else:
+        proc.kill()
+        proc.wait()
+        raise SystemExit("signal test did not reach the bounded archive-download witness")
+    os.kill(proc.pid, getattr(signal, f"SIG{signal_name}"))
+    rc = proc.wait(timeout=10)
+Path(rc_path).write_text(f"{rc}\n", encoding="utf-8")
+PY
+  rc="$(cat "$case_dir/rc")"
+  test "$rc" -eq "$expected_rc" || fail "$signal exited $rc, expected $expected_rc"
   assert_old_binary "$case_dir"
   test "$(wc -l < "$case_dir/curl.log" | tr -d ' ')" -eq 1 || \
-    fail 'TERM allowed the installer to continue to another network step'
+    fail "$signal allowed the installer to continue to another network step"
+  if find "$case_dir/tmp" -mindepth 1 -print -quit | grep -q .; then
+    fail "$signal left installer scratch residue"
+  fi
 }
 
 assert_checksum_failure_preserves_binary() {
@@ -377,9 +474,8 @@ assert_checksum_failure_preserves_binary() {
   local expected_error
   case "$mode" in
     mismatch) expected_error='Archive checksum mismatch' ;;
-    missing-sidecar) expected_error='Download failed' ;;
-    malformed-sidecar|wrong-asset-sidecar) expected_error='Checksum sidecar does not name the selected archive' ;;
-    trailing-garbage) expected_error='Checksum sidecar must contain exactly one newline-terminated record' ;;
+    missing-sidecar|oversized-sidecar) expected_error='Download failed' ;;
+    malformed-sidecar|wrong-asset-sidecar|trailing-garbage) expected_error='Checksum sidecar must contain exactly one newline-terminated record' ;;
     *) fail "test bug: no expected error for checksum mode $mode" ;;
   esac
   local case_dir
@@ -470,15 +566,15 @@ assert_invalid_tag_digest_refuses() {
 }
 
 main() {
-  assert_precommit_wiring
   TEST_TMP="$(mktemp -d)"
   trap 'rm -rf "$TEST_TMP"' EXIT
+  assert_precommit_wiring
   make_fixture "$TEST_TMP" x86_64-unknown-linux-gnu
   make_fixture "$TEST_TMP" x86_64-apple-darwin
 
   assert_default_success Linux linux
   assert_default_success Darwin macos
-  for mode in mismatch missing-sidecar malformed-sidecar wrong-asset-sidecar trailing-garbage; do
+  for mode in mismatch missing-sidecar malformed-sidecar wrong-asset-sidecar trailing-garbage oversized-sidecar; do
     assert_checksum_failure_preserves_binary "$mode"
   done
   assert_invalid_provenance_mode_refuses_before_network 0 zero
@@ -486,9 +582,14 @@ main() {
   assert_invalid_provenance_mode_refuses_before_network yes yes
   assert_missing_verifier_refuses
   assert_strict_success
+  assert_extra_attestation_invocation_is_rejected \
+    "$TEST_TMP/strict-success/gh.log" \
+    "$TEST_TMP/strict-success/gh-extra.log"
   assert_strict_failure_preserves_binary
   assert_invalid_tag_digest_refuses
-  assert_signal_stops_before_next_network_step
+  assert_signal_stops_before_next_network_step HUP 129 hup
+  assert_signal_stops_before_next_network_step INT 130 int
+  assert_signal_stops_before_next_network_step TERM 143 term
   assert_activation_failure_preserves_binary
   assert_relative_install_dir_resolves_from_invocation_directory
 

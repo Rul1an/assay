@@ -37,9 +37,6 @@ Agents got real tool access through MCP — and tool poisoning, rug pulls, and c
 # Fast path: release installer for Linux and macOS.
 curl -fsSL https://getassay.dev/install.sh | sh
 
-# Strict mode also verifies the release attestation (requires an authenticated GitHub CLI or GH_TOKEN).
-curl -fsSL https://getassay.dev/install.sh | ASSAY_REQUIRE_PROVENANCE=1 sh
-
 # Confirm the command resolves; if setup fails, run `assay doctor`.
 assay --version
 

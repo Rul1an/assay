@@ -100,7 +100,11 @@ compute_sha256() {
 download_file() {
     _download_url="$1"
     _download_path="$2"
-    if ! _http_code=$(curl -fsSL -w "%{http_code}" -o "$_download_path" "$_download_url"); then
+    _download_limit="${3:-}"
+    if [ -n "$_download_limit" ]; then
+        _http_code=$(curl -fsSL --max-filesize "$_download_limit" -w "%{http_code}" -o "$_download_path" "$_download_url") || \
+            log_error "Download failed. URL: $_download_url"
+    elif ! _http_code=$(curl -fsSL -w "%{http_code}" -o "$_download_path" "$_download_url"); then
         log_error "Download failed. URL: $_download_url"
     fi
     if [ "$_http_code" != "200" ]; then
@@ -113,6 +117,11 @@ verify_archive_checksum() {
     _sidecar_path="$2"
     _archive_name="$3"
 
+    _expected_record_bytes=$((64 + 2 + ${#_archive_name} + 1))
+    _sidecar_bytes=$(wc -c < "$_sidecar_path" | tr -d '[:space:]')
+    if [ "$_sidecar_bytes" != "$_expected_record_bytes" ]; then
+        log_error "Checksum sidecar must contain exactly one newline-terminated record."
+    fi
     _line_count=$(wc -l < "$_sidecar_path" | tr -d '[:space:]')
     if [ "$_line_count" != "1" ]; then
         log_error "Checksum sidecar must contain exactly one newline-terminated record."
@@ -120,7 +129,6 @@ verify_archive_checksum() {
     if ! IFS= read -r _checksum_line < "$_sidecar_path"; then
         log_error "Checksum sidecar is empty."
     fi
-    _sidecar_bytes=$(wc -c < "$_sidecar_path" | tr -d '[:space:]')
     _record_bytes=$(printf '%s\n' "$_checksum_line" | wc -c | tr -d '[:space:]')
     if [ "$_sidecar_bytes" != "$_record_bytes" ]; then
         log_error "Checksum sidecar must contain exactly one newline-terminated record."
@@ -284,7 +292,8 @@ main() {
     CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
 
     # 4. Download
-    TMP_DIR=$(mktemp -d)
+    TMP_ROOT="${TMPDIR:-/tmp}"
+    TMP_DIR=$(mktemp -d "${TMP_ROOT%/}/assay-install.XXXXXX")
     INSTALL_CANDIDATE=""
     cleanup_install() {
         rm -rf "$TMP_DIR"
@@ -300,7 +309,8 @@ main() {
     log_info "Downloading from $DOWNLOAD_URL ..."
     if command -v curl >/dev/null 2>&1; then
         download_file "$DOWNLOAD_URL" "$TMP_DIR/$ARCHIVE_NAME"
-        download_file "$CHECKSUM_URL" "$TMP_DIR/${ARCHIVE_NAME}.sha256"
+        CHECKSUM_MAX_BYTES=$((64 + 2 + ${#ARCHIVE_NAME} + 1))
+        download_file "$CHECKSUM_URL" "$TMP_DIR/${ARCHIVE_NAME}.sha256" "$CHECKSUM_MAX_BYTES"
     else
         log_error "curl is required but not found."
     fi

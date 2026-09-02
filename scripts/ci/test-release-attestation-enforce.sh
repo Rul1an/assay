@@ -156,7 +156,7 @@ for line in lines:
         current.append(line)
 if current is not None:
     invocations.append(current)
-if invocations.count(expected) != 1:
+if invocations != [expected]:
     raise SystemExit(
         f"expected exactly one gh invocation {expected!r}, found {invocations.count(expected)}; "
         f"observed={invocations!r}"
@@ -206,6 +206,32 @@ run_success_case() {
     --deny-self-hosted-runners \
     --format json \
     --source-ref refs/tags/v9.9.9
+
+  local extra_log="$temp_dir/gh-success-extra.log"
+  cp "$log" "$extra_log"
+  cat >> "$extra_log" <<'EOF'
+--- invocation ---
+attestation
+verify
+/tmp/evil.tar.gz
+--repo
+evil/repo
+--signer-workflow
+evil/workflow
+EOF
+  if assert_exact_gh_invocation "$extra_log" \
+    attestation verify "$assets_dir/test-asset.tar.gz" \
+    --repo Rul1an/assay \
+    --signer-workflow Rul1an/assay/.github/workflows/release.yml \
+    --cert-oidc-issuer https://token.actions.githubusercontent.com \
+    --predicate-type https://slsa.dev/provenance/v1 \
+    --source-digest abc123 \
+    --deny-self-hosted-runners \
+    --format json \
+    --source-ref refs/tags/v9.9.9 >/dev/null 2>&1; then
+    echo 'exact release gh invocation guard accepted an additional attestation call' >&2
+    exit 1
+  fi
 }
 
 run_retry_success_case() {
