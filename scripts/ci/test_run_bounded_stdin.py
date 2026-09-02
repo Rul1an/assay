@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -26,6 +27,16 @@ DEADLINE_S = "0.05"
 SLEEP_S = 0.35
 WALL_S = 1.0
 SUBPROCESS_ENV = {**os.environ, "ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS": DEADLINE_S}
+PRE_COMMIT_CONFIG = ROOT / ".pre-commit-config.yaml"
+TEST_OWNED_STDIN_HOOK_PATHS = {
+    PRE_COMMIT_CONFIG.relative_to(ROOT).as_posix(),
+    Path(__file__).resolve().relative_to(ROOT).as_posix(),
+    Path(__file__)
+    .resolve()
+    .with_name("claude_plugin_install_workflow.py")
+    .relative_to(ROOT)
+    .as_posix(),
+}
 
 
 def load_workflow() -> ModuleType:
@@ -50,12 +61,26 @@ def _python(body: str) -> list[str]:
 
 def _probe_body(action: str) -> str:
     preamble = (
-        "import os, sys, time\n"
+        "import json, os, subprocess, sys, time\n"
         "from pathlib import Path\n"
         "Path(os.environ['BOUNDED_STDIN_PIDFILE']).write_text(str(os.getpid()))\n"
+        "if os.environ.get('BOUNDED_STDIN_CHILD_RECORD'):\n"
+        "    Path(os.environ['BOUNDED_STDIN_CHILD_RECORD']).write_text(\n"
+        "        json.dumps({'pid': os.getpid(), 'pgid': os.getpgid(0)})\n"
+        "    )\n"
     )
     actions = {
         "non_reader": "time.sleep(0.35)\n",
+        "group_descendant": (
+            "descendant = subprocess.Popen(\n"
+            "    [sys.executable, '-c', 'import time; time.sleep(30)'],\n"
+            "    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,\n"
+            ")\n"
+            "Path(os.environ['BOUNDED_STDIN_DESCENDANT_RECORD']).write_text(\n"
+            "    json.dumps({'pid': descendant.pid, 'pgid': os.getpgid(descendant.pid)})\n"
+            ")\n"
+            "time.sleep(30)\n"
+        ),
         "write_first": (
             "sys.stdout.buffer.write(b'z' * 262144)\n"
             "sys.stdout.buffer.flush()\n"
@@ -115,16 +140,20 @@ def _invoke(
     cwd: Path,
     pidfile: Path,
     wall: float = WALL_S,
+    timeout_s: str = DEADLINE_S,
+    extra_env: dict[str, str] | None = None,
 ) -> Outcome:
     env = WORKFLOW_MOD.clean_env(
         {"BOUNDED_STDIN_PIDFILE": str(pidfile), "PYTHONUNBUFFERED": "1"}
     )
+    if extra_env:
+        env.update(extra_env)
     box: dict[str, Any] = {}
 
     def target() -> None:
         with patch.dict(
             os.environ,
-            {"ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS": DEADLINE_S},
+            {"ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS": timeout_s},
             clear=False,
         ):
             try:
@@ -185,18 +214,89 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def _wait_pidfile(pidfile: Path, timeout: float = 1.0) -> int | None:
+def _wait_process_record(path: Path, timeout: float = 1.0) -> tuple[int, int] | None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            raw = pidfile.read_text().strip()
-        except FileNotFoundError:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
             time.sleep(0.01)
             continue
-        if raw.isdigit():
-            return int(raw)
+        if isinstance(value, dict) and all(
+            isinstance(value.get(key), int) and value[key] > 0 for key in ("pid", "pgid")
+        ):
+            return value["pid"], value["pgid"]
         time.sleep(0.01)
     return None
+
+
+def _wait_pid_gone(pid: int, timeout: float = 1.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not _pid_alive(pid):
+            return True
+        time.sleep(0.01)
+    return not _pid_alive(pid)
+
+
+def _reap_process_records(records: list[tuple[int, int]]) -> None:
+    for pid, pgid in records:
+        if not _pid_alive(pid):
+            continue
+        for target in (
+            lambda: os.killpg(pgid, signal.SIGKILL),
+            lambda: os.kill(pid, signal.SIGKILL),
+        ):
+            try:
+                target()
+            except (ProcessLookupError, PermissionError):
+                pass
+    for pid, _pgid in records:
+        _wait_pid_gone(pid, timeout=1.0)
+
+
+def _load_pre_commit_yaml_independently(config: str) -> dict[str, Any]:
+    script = (
+        'require "json"; require "yaml"; '
+        'STDOUT.write(JSON.generate(YAML.safe_load(STDIN.read, aliases: false)))'
+    )
+    result = subprocess.run(
+        ["ruby", "-EUTF-8:UTF-8", "-e", script],
+        input=config,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise AssertionError(result.stderr)
+    parsed = json.loads(result.stdout)
+    if not isinstance(parsed, dict):
+        raise AssertionError("pre-commit config root is not a mapping")
+    return parsed
+
+
+def _test_owned_stdin_selector_paths(config: str) -> set[str]:
+    parsed = _load_pre_commit_yaml_independently(config)
+    matches: list[dict[str, Any]] = []
+    for repo in parsed.get("repos", []):
+        if not isinstance(repo, dict) or repo.get("repo") != "local":
+            continue
+        for hook in repo.get("hooks", []):
+            if isinstance(hook, dict) and hook.get("id") == "claude-plugin-run-bounded-stdin":
+                matches.append(hook)
+    if len(matches) != 1:
+        raise AssertionError(f"expected one real bounded-stdin hook, got {len(matches)}")
+    pattern = matches[0].get("files")
+    if not isinstance(pattern, str):
+        raise AssertionError("bounded-stdin hook files selector is not a string")
+    compiled = re.compile(pattern)
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=ROOT,
+        capture_output=True,
+        check=True,
+    ).stdout.decode("utf-8").split("\0")
+    return {path for path in tracked if path and compiled.search(path)}
 
 
 def _scan_live_by_proc(proc_root: Path, token: str) -> list[int]:
@@ -277,12 +377,51 @@ class BoundedStdinTests(unittest.TestCase):
         self.assertIn("ceiling", outcome.reason)
         self.assertIn("stdout", outcome.reason)
 
-    def test_deadline_reaps_child_via_pidfile(self) -> None:
-        outcome = self._run("non_reader", b"")
-        self.assertEqual(outcome.kind, "err", outcome.reason)
-        pid = _wait_pidfile(self.pidfile, timeout=0.2)
-        if pid is not None:
-            self.assertFalse(_pid_alive(pid), f"child {pid} survived deadline")
+    def test_deadline_reaps_direct_child_and_descendant(self) -> None:
+        child_record_path = self.cwd / "child-record.json"
+        descendant_record_path = self.cwd / "descendant-record.json"
+        records: list[tuple[int, int]] = []
+        try:
+            outcome = self._run(
+                "group_descendant",
+                b"",
+                timeout_s="0.4",
+                wall=2.0,
+                extra_env={
+                    "BOUNDED_STDIN_CHILD_RECORD": str(child_record_path),
+                    "BOUNDED_STDIN_DESCENDANT_RECORD": str(descendant_record_path),
+                },
+            )
+            self.assertEqual(outcome.kind, "err", outcome.reason)
+            self.assertIn("deadline", outcome.reason)
+
+            child = _wait_process_record(child_record_path, timeout=0.2)
+            descendant = _wait_process_record(descendant_record_path, timeout=0.2)
+            self.assertIsNotNone(child, "missing mandatory direct-child PID/PGID witness")
+            self.assertIsNotNone(descendant, "missing mandatory descendant PID/PGID witness")
+            assert child is not None
+            assert descendant is not None
+            records.extend((child, descendant))
+
+            child_pid, child_pgid = child
+            descendant_pid, descendant_pgid = descendant
+            self.assertEqual(child_pgid, child_pid, "direct child did not lead its new session")
+            self.assertEqual(
+                descendant_pgid,
+                child_pgid,
+                "descendant was not in the supervised process group",
+            )
+            self.assertTrue(_wait_pid_gone(child_pid), f"direct child {child_pid} survived deadline")
+            self.assertTrue(
+                _wait_pid_gone(descendant_pid),
+                f"descendant {descendant_pid} survived deadline",
+            )
+        finally:
+            for path in (child_record_path, descendant_record_path):
+                record = _wait_process_record(path, timeout=0.05)
+                if record is not None and record not in records:
+                    records.append(record)
+            _reap_process_records(records)
 
     def test_exit_7_rejected_preserves_sentinel(self) -> None:
         argv = _python(
@@ -544,6 +683,45 @@ class RequiredHookTableTests(unittest.TestCase):
 
     def _config(self) -> str:
         return (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+
+    def _assert_test_owned_stdin_selector(self, config: str) -> None:
+        self.assertEqual(
+            _test_owned_stdin_selector_paths(config),
+            TEST_OWNED_STDIN_HOOK_PATHS,
+        )
+
+    def _selector_mutation(self, old: str, new: str) -> str:
+        config = self._config()
+        block = WORKFLOW_MOD._hook_block_by_id(config, "claude-plugin-run-bounded-stdin")
+        self.assertEqual(block.count(old), 1, f"selector fragment count for {old!r}")
+        return config.replace(block, block.replace(old, new, 1), 1)
+
+    def test_stdin_files_selector_has_exact_test_owned_paths(self) -> None:
+        self._assert_test_owned_stdin_selector(self._config())
+
+    def test_mutation_stdin_selector_without_workflow_path_goes_red(self) -> None:
+        config = self._selector_mutation(
+            "(claude_plugin_install_workflow|test_run_bounded_stdin)",
+            "(test_run_bounded_stdin)",
+        )
+        with self.assertRaises(AssertionError):
+            self._assert_test_owned_stdin_selector(config)
+
+    def test_mutation_stdin_selector_without_test_path_goes_red(self) -> None:
+        config = self._selector_mutation(
+            "(claude_plugin_install_workflow|test_run_bounded_stdin)",
+            "(claude_plugin_install_workflow)",
+        )
+        with self.assertRaises(AssertionError):
+            self._assert_test_owned_stdin_selector(config)
+
+    def test_mutation_stdin_selector_without_config_path_goes_red(self) -> None:
+        config = self._selector_mutation(
+            "|\\.pre-commit-config\\.yaml",
+            "",
+        )
+        with self.assertRaises(AssertionError):
+            self._assert_test_owned_stdin_selector(config)
 
     def test_mutation_delete_stdin_hook_goes_red(self) -> None:
         config = self._config().replace("claude-plugin-run-bounded-stdin", "claude-plugin-run-bounded-gone")
