@@ -277,7 +277,16 @@ main() {
     # 4. Download
     TMP_DIR=$(mktemp -d)
     INSTALL_CANDIDATE=""
-    trap 'rm -rf "$TMP_DIR"; if [ -n "$INSTALL_CANDIDATE" ]; then rm -f "$INSTALL_CANDIDATE"; fi' EXIT HUP INT TERM
+    cleanup_install() {
+        rm -rf "$TMP_DIR"
+        if [ -n "$INSTALL_CANDIDATE" ]; then
+            rm -f "$INSTALL_CANDIDATE"
+        fi
+    }
+    trap cleanup_install EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
 
     log_info "Downloading from $DOWNLOAD_URL ..."
     if command -v curl >/dev/null 2>&1; then

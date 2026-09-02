@@ -141,6 +141,10 @@ case "$url" in
     ;;
   *.tar.gz)
     cp "$FIXTURE_DIR/$(basename "$url")" "$out"
+    if [ "${CURL_MODE:-ok}" = block-after-archive ]; then
+      : > "$SIGNAL_MARKER"
+      sleep 2
+    fi
     ;;
   *)
     echo "unexpected curl URL: $url" >&2
@@ -269,6 +273,38 @@ assert_activation_failure_preserves_binary() {
   fi
 }
 
+assert_signal_stops_before_next_network_step() {
+  local case_dir marker pid rc=0
+  case_dir="$(new_case signal-term)"
+  marker="$case_dir/archive-downloaded"
+
+  env \
+    HOME="$case_dir/home" \
+    PATH="$case_dir/bin:/usr/bin:/bin" \
+    ASSAY_VERSION=5.5.2 \
+    ASSAY_INSTALL_DIR="$case_dir/install" \
+    FIXTURE_DIR="$TEST_TMP" \
+    CURL_LOG="$case_dir/curl.log" \
+    GH_LOG="$case_dir/gh.log" \
+    CURL_MODE=block-after-archive \
+    SIGNAL_MARKER="$marker" \
+    sh "$INSTALLER" > "$case_dir/stdout" 2> "$case_dir/stderr" &
+  pid=$!
+
+  for _ in $(seq 1 100); do
+    test -f "$marker" && break
+    sleep 0.02
+  done
+  test -f "$marker" || fail 'signal test did not reach the bounded archive-download witness'
+
+  kill -TERM "$pid"
+  wait "$pid" || rc=$?
+  test "$rc" -ne 0 || fail 'TERM allowed the installer to report success'
+  assert_old_binary "$case_dir"
+  test "$(wc -l < "$case_dir/curl.log" | tr -d ' ')" -eq 1 || \
+    fail 'TERM allowed the installer to continue to another network step'
+}
+
 assert_checksum_failure_preserves_binary() {
   local mode="$1"
   local expected_error
@@ -379,6 +415,7 @@ main() {
   assert_strict_success
   assert_strict_failure_preserves_binary
   assert_invalid_tag_digest_refuses
+  assert_signal_stops_before_next_network_step
   assert_activation_failure_preserves_binary
 
   echo 'install release verification: PASS'
