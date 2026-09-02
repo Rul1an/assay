@@ -597,12 +597,12 @@ cargo install --path crates/assay-mcp-server --locked
 MD
 mutate_and_expect_failure plugin-missing-h2 "$RECIPE_FILE" \
   '/^## Install the Claude Code plugin$/d' \
-  "$PINNED_CLI_DIAG"
+  'expected exactly one plugin install heading'
 mutate_and_expect_failure plugin-wrong-h2 "$RECIPE_FILE" \
   's/^## Install the Claude Code plugin$/## Install the Claude Code Plugin/' \
-  "$PINNED_CLI_DIAG"
+  'expected exactly one plugin install heading'
 rewrite_and_expect_failure plugin-missing-fence "$RECIPE_FILE" \
-  "$PINNED_CLI_DIAG" <<'MD'
+  'expected exactly one bash fence in the plugin section' <<'MD'
 Codex uses .codex/config.toml.
 
 ## Install the Claude Code plugin
@@ -621,7 +621,7 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 rewrite_and_expect_failure plugin-wrong-fence "$RECIPE_FILE" \
-  "$PINNED_CLI_DIAG" <<'MD'
+  'expected exactly one bash fence in the plugin section' <<'MD'
 Codex uses .codex/config.toml.
 
 ## Install the Claude Code plugin
@@ -724,7 +724,7 @@ cargo install --path crates/assay-mcp-server --locked
 MD
 
 rewrite_and_expect_failure plugin-duplicate-h2 "$RECIPE_FILE" \
-  "$PINNED_CLI_DIAG" <<'MD'
+  'expected exactly one plugin install heading' <<'MD'
 Codex uses .codex/config.toml.
 
 ## Install the Claude Code plugin
@@ -753,7 +753,7 @@ cargo install --path crates/assay-mcp-server --locked
 MD
 
 rewrite_and_expect_failure plugin-second-bash-fence "$RECIPE_FILE" \
-  "$PINNED_CLI_DIAG" <<'MD'
+  'expected exactly one bash fence in the plugin section' <<'MD'
 Codex uses .codex/config.toml.
 
 ## Install the Claude Code plugin
@@ -767,6 +767,54 @@ assay-mcp-server --version
 
 ```bash
 cargo install assay-cli --version 5.1.0 --locked
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+
+rewrite_and_expect_failure plugin-split-h2-commands "$RECIPE_FILE" \
+  'expected exactly one plugin install heading' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+assay version
+```
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay-mcp-server --version
+```
+
+## Install Assay's review tools
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+MD
+
+rewrite_and_expect_failure plugin-split-bash-fence-commands "$RECIPE_FILE" \
+  'expected exactly one bash fence in the plugin section' <<'MD'
+Codex uses .codex/config.toml.
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+assay version
+```
+
+```bash
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay-mcp-server --version
 ```
 
 ## Install Assay's review tools
@@ -797,8 +845,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 91 ]; then
-  echo "FAIL: expected 91 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 93 ]; then
+  echo "FAIL: expected 93 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

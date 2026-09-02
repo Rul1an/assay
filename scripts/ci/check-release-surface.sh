@@ -325,8 +325,8 @@ check_editor_plugin_published_installs() {
     fail "$recipe: checked outward document is missing"
     return
   fi
-  if ! commands="$(editor_plugin_install_commands "$recipe")"; then
-    fail "$recipe: plugin install command extraction failed"
+  if ! commands="$(editor_plugin_install_commands "$recipe" 2>&1)"; then
+    fail "$recipe: plugin install command extraction failed: $commands"
     return
   fi
 

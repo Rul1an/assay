@@ -141,7 +141,8 @@ cargo install assay-cli --version 5.1.0 --locked
 cargo install assay-mcp-server --version 5.1.0 --locked
 ```
 MD
-expect_empty 'wrong H2 text emits nothing'
+expect_fail 'wrong H2 text is not exactly one plugin heading' \
+  'expected exactly one plugin install heading'
 
 write_recipe <<'MD'
 ## Something else
@@ -151,7 +152,8 @@ cargo install assay-cli --version 5.1.0 --locked
 assay version
 ```
 MD
-expect_empty 'other H2 does not emit plugin commands'
+expect_fail 'other H2 is not exactly one plugin heading' \
+  'expected exactly one plugin install heading'
 
 echo '== fence scoping: only the exact ```bash opener =='
 write_recipe <<'MD'
@@ -169,7 +171,8 @@ assay version
 assay-mcp-server --version
 ~~~
 MD
-expect_empty 'non-bash fences emit nothing'
+expect_fail 'non-bash fences are not exactly one bash fence' \
+  'expected exactly one bash fence in the plugin section'
 
 write_recipe <<'MD'
 ## Install the Claude Code plugin
@@ -180,7 +183,7 @@ assay version
 MD
 expect_stdout 'exact ```bash fence is extracted' 'assay version'
 
-echo '== duplicate matching H2: both sections emit =='
+echo '== duplicate matching H2 is not exactly one heading =='
 write_recipe <<'MD'
 ## Install the Claude Code plugin
 
@@ -200,8 +203,44 @@ ignored
 assay-mcp-server --version
 ```
 MD
-expect_stdout 'duplicate plugin H2 concatenates both fences' \
-  $'assay version\nassay-mcp-server --version'
+expect_fail 'duplicate plugin H2 concatenates both fences' \
+  'expected exactly one plugin install heading'
+
+echo '== split commands across two plugin H2s is a heading failure =='
+write_recipe <<'MD'
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+assay version
+```
+
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay-mcp-server --version
+```
+MD
+expect_fail 'split CLI/MCP commands across two plugin H2s' \
+  'expected exactly one plugin install heading'
+
+echo '== split commands across two bash fences is a fence failure =='
+write_recipe <<'MD'
+## Install the Claude Code plugin
+
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+assay version
+```
+
+```bash
+cargo install assay-mcp-server --version 5.1.0 --locked
+assay-mcp-server --version
+```
+MD
+expect_fail 'split CLI/MCP commands across two bash fences' \
+  'expected exactly one bash fence in the plugin section'
 
 echo '== quoted and continued lines are emitted as standalone text =='
 write_recipe <<'MD'
@@ -216,7 +255,7 @@ MD
 expect_stdout 'extractor does not join or unquote cargo lines' \
   $'cargo install "assay-cli" --version 5.1.0 --locked\ncargo install assay-cli \\\n--version 5.1.0 --locked'
 
-echo '== missing H2 or fence emits nothing; consumers fail =='
+echo '== missing plugin H2 is not exactly one heading =='
 write_recipe <<'MD'
 # no plugin heading
 
@@ -224,7 +263,8 @@ write_recipe <<'MD'
 cargo install assay-cli --version 5.1.0 --locked
 ```
 MD
-expect_empty 'missing plugin H2 emits nothing'
+expect_fail 'missing plugin H2 is not exactly one heading' \
+  'expected exactly one plugin install heading'
 
 echo '== recipe byte ceiling =='
 write_recipe <<'MD'

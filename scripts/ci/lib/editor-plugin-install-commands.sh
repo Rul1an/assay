@@ -2,8 +2,10 @@
 # Extract standalone command lines from the Claude Code plugin install section.
 #
 # One parser, sourced by the editor-transport guard and the release-surface guard.
-# This file does not judge cargo vs claude, quotes, or continuations. Missing or
-# wrong H2 / fence emit nothing; consumers own cardinality and semantic reject.
+# This file does not judge cargo vs claude, quotes, or continuations. Cardinality
+# of matching H2s and ```bash fences in that section is this parser's job: not
+# exactly one of each fails closed and emits nothing. Semantic reject stays with
+# consumers.
 
 editor_plugin_install_commands() {
   local recipe="${1:-}"
@@ -41,17 +43,34 @@ editor_plugin_install_commands() {
         fence_mark = mark
         fence_width = width
         bash_fence = (fence_line == "```bash")
+        if (section && bash_fence) bash_fence_count++
       }
       next
     }
     !fence && /^## / {
       section = ($0 == "## Install the Claude Code plugin")
+      if (section) h2_count++
       next
     }
     section && fence && bash_fence {
       sub(/^[ \t]+/, "")
       sub(/[ \t]+$/, "")
-      if ($0 != "" && $0 !~ /^#/) print
+      if ($0 != "" && $0 !~ /^#/) {
+        if (ncmds) cmds = cmds "\n" $0
+        else cmds = $0
+        ncmds++
+      }
+    }
+    END {
+      if (h2_count != 1) {
+        print "expected exactly one plugin install heading" > "/dev/stderr"
+        exit 1
+      }
+      if (bash_fence_count != 1) {
+        print "expected exactly one bash fence in the plugin section" > "/dev/stderr"
+        exit 1
+      }
+      if (ncmds) print cmds
     }
   ' "$recipe"
 }

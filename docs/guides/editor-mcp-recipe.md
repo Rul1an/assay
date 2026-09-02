@@ -44,7 +44,7 @@ the installed plugin cache.
 
 Plugin updates require a restart to take effect:
 
-```bash
+```sh
 claude plugin marketplace update assay
 claude plugin update assay@assay --scope local
 claude plugin list --json
@@ -70,7 +70,7 @@ but installing it does not prove provider execution or external side effects.
 Maintainers can exercise the bounded, disposable installation contract without
 touching their normal Claude configuration:
 
-```bash
+```sh
 bash scripts/ci/test-claude-plugin-install.sh --self-test
 ```
 

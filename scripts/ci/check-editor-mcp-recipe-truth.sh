@@ -128,14 +128,17 @@ require 'proxy-enforce claim retained' 'proxy-enforce'
 # Keep these as standalone commands in this recipe, not a general shell/Markdown grammar.
 # Comments, prose, and commands in a different H2 section cannot satisfy plugin prerequisites.
 # Version pinning of cargo install is owned by check-release-surface.sh, not this guard.
-plugin_commands="$(editor_plugin_install_commands "$RECIPE")"
-for command in 'assay version' 'assay-mcp-server --version'; do
-  if printf '%s\n' "$plugin_commands" | grep -Fxq -- "$command"; then
-    ok "plugin prerequisite command present: $command"
-  else
-    fail "$RECIPE: plugin prerequisite command missing: $command"
-  fi
-done
+if ! plugin_commands="$(editor_plugin_install_commands "$RECIPE" 2>&1)"; then
+  fail "$RECIPE: plugin install command extraction failed: $plugin_commands"
+else
+  for command in 'assay version' 'assay-mcp-server --version'; do
+    if printf '%s\n' "$plugin_commands" | grep -Fxq -- "$command"; then
+      ok "plugin prerequisite command present: $command"
+    else
+      fail "$RECIPE: plugin prerequisite command missing: $command"
+    fi
+  done
+fi
 
 printf '\n'
 if [ "$failures" -gt 0 ]; then
