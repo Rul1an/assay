@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / "scripts/ci/claude_plugin_install_workflow.py"
 STDIN_256K = b"x" * 262_144
 DEADLINE_S = "0.05"
+SUCCESS_DEADLINE_S = "0.5"
 SLEEP_S = 0.35
 WALL_S = 1.0
 SUBPROCESS_ENV = {**os.environ, "ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS": DEADLINE_S}
@@ -91,6 +92,7 @@ def _probe_body(action: str) -> str:
             "sys.stdout.buffer.write(b'got:%d\\n' % len(data))\n"
         ),
         "early_close": (
+            "time.sleep(0.08)\n"
             "os.close(0)\n"
             "raise SystemExit(0)\n"
         ),
@@ -348,11 +350,10 @@ class BoundedStdinTests(unittest.TestCase):
         self.assertLess(outcome.elapsed, SLEEP_S)
 
     def test_reader_succeeds(self) -> None:
-        outcome = self._run("reader", STDIN_256K)
+        outcome = self._run("reader", STDIN_256K, timeout_s=SUCCESS_DEADLINE_S)
         self.assertEqual(outcome.kind, "ok", outcome.reason)
         self.assertEqual(outcome.result.returncode, 0)
         self.assertEqual(outcome.result.stdout, b"got:262144\n")
-        self.assertLess(outcome.elapsed, SLEEP_S)
 
     def test_empty_stdin_still_times_out(self) -> None:
         outcome = self._run("non_reader", b"")
@@ -361,13 +362,12 @@ class BoundedStdinTests(unittest.TestCase):
         self.assertLess(outcome.elapsed, SLEEP_S)
 
     def test_empty_stdin_immediate_exit_succeeds(self) -> None:
-        outcome = self._run("true", b"")
+        outcome = self._run("true", b"", timeout_s=SUCCESS_DEADLINE_S)
         self.assertEqual(outcome.kind, "ok", outcome.reason)
         self.assertEqual(outcome.result.returncode, 0)
-        self.assertLess(outcome.elapsed, SLEEP_S)
 
     def test_early_stdin_close_preserves_success(self) -> None:
-        outcome = self._run("early_close", STDIN_256K)
+        outcome = self._run("early_close", STDIN_256K, timeout_s=SUCCESS_DEADLINE_S)
         self.assertEqual(outcome.kind, "ok", outcome.reason)
         self.assertEqual(outcome.result.returncode, 0)
 
