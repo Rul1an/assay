@@ -15,7 +15,10 @@ Wave 0 gates are the pre-refactor guardrails for:
 - Source of truth: the newest `v[0-9]*` release tag, resolved at job time
   (`git tag --list 'v[0-9]*' --sort=-v:refname`).
 - There is no pinned baseline SHA. A missing tag fails the job.
-- The contract is `scripts/ci/test-semver-gate.sh`.
+- Baseline selection and the real lint's ability to reject a planted API break are pinned by
+  `scripts/ci/test-semver-gate.sh`.
+- Change detection and the route from a touched crate to its semver invocation are pinned by
+  `scripts/ci/test-split-wave0-semver-routing.sh`.
 
 ## Runtime budget targets
 
@@ -47,6 +50,7 @@ crates.io contract:
 - `assay-core`
 - `assay-registry`
 - `assay-evidence`
+- `assay-runner-schema`
 
 Checks are still conditional on touched/global change detection.
 
@@ -62,10 +66,13 @@ The Assay-Runner substrate crates — `assay-runner-schema`,
 `v3.11.3`, but their package descriptions explicitly
 frame them as internal/experimental substrate (no standalone product
 guarantee, intentionally undocumented for third-party use, semver tracks
-the Assay workspace). They are intentionally **not** in the Wave 0 library
-semver allowlist; they exist on crates.io only because `assay-cli` depends
-on them and cargo publish requires every declared dep to be resolvable
-from crates.io.
+the Assay workspace). `assay-runner-schema` is the narrow exception in this
+allowlist: ADR-048 requires its existing public type paths to survive a move
+to shared definitions, so that migration needs a real semver check. This does
+not grant a standalone-product guarantee. `assay-runner-core` and
+`assay-runner-linux` remain outside the Wave 0 library semver allowlist; the
+substrate crates exist on crates.io because `assay-cli` depends on them and
+cargo publish requires every declared dependency to be resolvable there.
 
 As of `v3.11.3`, `check-public-crate-policy.sh` also runs as a PR-CI
 guardrail (job `Public crate policy` in `ci.yml`), so the policy gate
