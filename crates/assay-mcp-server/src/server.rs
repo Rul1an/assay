@@ -285,14 +285,16 @@ impl Server {
                     max=cfg.max_msg_bytes
                 );
 
-                let resp = JsonRpcResponse::ok(
+                // Pre-parse: Request id is unknown, so JSON-RPC requires id null. This is a
+                // transport refusal (-32000 server error), not CallToolResult / tool-domain
+                // E_LIMIT_EXCEEDED, and must not reflect the rejected line.
+                let resp = JsonRpcResponse::error_with_data(
                     None,
+                    -32000,
+                    "Message too large".to_string(),
                     serde_json::json!({
-                        "allowed": false,
-                        "error": {
-                            "code": "E_LIMIT_EXCEEDED",
-                            "message": format!("message bytes={} > max={}", line.len(), cfg.max_msg_bytes)
-                        }
+                        "kind": "transport_limit",
+                        "limit": cfg.max_msg_bytes,
                     }),
                 );
                 let resp_json = serde_json::to_string(&resp)?;
