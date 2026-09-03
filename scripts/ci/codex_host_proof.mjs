@@ -14,6 +14,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  CODEX_APP_SERVER_ARGS,
   DECIDE_INPUT,
   DECIDE_TOOL,
   EXPECTED_TOOLS,
@@ -411,7 +412,7 @@ function writeProofFiles(options, pack) {
   const hostIdentity = projectHostIdentity(options.hostIdentity ?? null);
   const invocationArgv = persistableArgv(
     options.hostIdentity?.codex?.path
-      ? [options.hostIdentity.codex.path, "app-server"]
+      ? [options.hostIdentity.codex.path, ...CODEX_APP_SERVER_ARGS]
       : Array.isArray(options.childArgv)
         ? options.childArgv
         : ["<test-only-child>"],
@@ -604,7 +605,7 @@ export async function runProof(options) {
   };
   const child = options.testOnlyChild
     ? options.testOnlyChild
-    : spawn(bound.codexPath, ["app-server"], spawnOpts);
+    : spawn(bound.codexPath, CODEX_APP_SERVER_ARGS, spawnOpts);
   const childClosed = new Promise((resolve) => {
     child.on("close", (code, signal) => {
       childAlive = false;

@@ -204,7 +204,7 @@ test("driver calls the validator classification function; no extra classify modu
 test("synthetic positive control: cells pass without inventing external attestation", async () => {
   const { classified, manifest, proofRoot, driverOutcome, childExitCode, events } = await drive("valid");
   assert.equal(manifest.captureMode, "synthetic-fixture");
-  assert.equal(manifest.schema, "assay.codex-host-proof.v3");
+  assert.equal(manifest.schema, "assay.codex-host-proof.v4");
   assert.equal(childExitCode, 0);
   assert.equal(driverOutcome.exitCode, 0);
   assert.equal(manifest.childExitCode, 0);
@@ -4005,9 +4005,85 @@ test("review repair: host manifest invocation is exact and credential-free", () 
   }
 });
 
-const OBSERVED_DRIFT_ITEMS = Object.freeze([
-  Object.freeze({ type: "reasoning", id: "item_0", text: "Considering the assay decide tool." }),
-  Object.freeze({ type: "agentMessage", id: "item_2", text: "The decision endpoint returned allow." }),
+test("host observation disables unrelated app and plugin surfaces before app-server", () => {
+  const proofRoot = portableLiveProofRoot();
+  const argvMarker = path.join(scratch(), "codex-argv.json");
+  const codexBin = path.join(scratch(), "codex");
+  const projectRoot = seedProject();
+  writePortableNodeExecutable(
+    codexBin,
+    `import fs from "node:fs";
+import { spawn } from "node:child_process";
+if (process.argv.includes("--version")) {
+  process.stdout.write("codex-shadow/0.0.0\\n");
+  process.exit(0);
+}
+fs.writeFileSync(${JSON.stringify(argvMarker)}, JSON.stringify(process.argv.slice(2)));
+const child = spawn(${JSON.stringify(process.execPath)}, ${JSON.stringify([
+      FAKE,
+      "--scenario",
+      "valid",
+      "--project-root",
+      projectRoot,
+    ])}, { stdio: "inherit" });
+const stop = () => { try { child.kill("SIGTERM"); } catch { /* already exited */ } };
+process.on("SIGTERM", stop);
+process.on("SIGINT", stop);
+child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+`,
+  );
+  const observed = driveCli("valid", "failures", {
+    captureMode: "host-observation",
+    proofRoot,
+    projectRoot,
+    codexBin,
+  });
+  try {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(observed.proofRoot, "manifest.json"), "utf8"),
+    );
+    assert.deepEqual(manifest.invocation.argv, [
+      manifest.hostIdentity.codex.path,
+      "--disable",
+      "apps",
+      "--disable",
+      "plugins",
+      "--disable",
+      "remote_plugin",
+      "app-server",
+    ]);
+    assert.deepEqual(JSON.parse(fs.readFileSync(argvMarker, "utf8")), [
+      "--disable",
+      "apps",
+      "--disable",
+      "plugins",
+      "--disable",
+      "remote_plugin",
+      "app-server",
+    ]);
+  } finally {
+    fs.rmSync(path.dirname(observed.codexBin), { recursive: true, force: true });
+    fs.rmSync(path.dirname(observed.mcpBin), { recursive: true, force: true });
+    fs.rmSync(observed.proofRoot, { recursive: true, force: true });
+    fs.rmSync(observed.projectRoot, { recursive: true, force: true });
+  }
+});
+
+const OBSERVED_NON_EVIDENTIARY_ITEMS = Object.freeze([
+  Object.freeze({
+    type: "reasoning",
+    id: "item_0",
+    summary: [],
+    content: [{ type: "text", text: "Considering the assay decide tool." }],
+  }),
+  Object.freeze({
+    type: "agentMessage",
+    id: "item_2",
+    phase: "final_answer",
+    text: "The decision endpoint returned allow.",
+    delivery: "final",
+    memoryCitation: null,
+  }),
 ]);
 
 test("stableStringify refuses non-JSON primitives; JSON null stays a valid token", () => {
@@ -4028,7 +4104,7 @@ test("stableStringify refuses non-JSON primitives; JSON null stays a valid token
   }
 });
 
-test("absent scalar fields project to explicit invalid markers, never undefined", () => {
+test("known non-evidentiary items project to a closed type and id only", () => {
   const projected = projectRetainedEvent({
     direction: "server",
     method: "item/completed",
@@ -4037,13 +4113,11 @@ test("absent scalar fields project to explicit invalid markers, never undefined"
       completedAtMs: 5,
       threadId: "t",
       turnId: "u",
-      item: OBSERVED_DRIFT_ITEMS[0],
+      item: OBSERVED_NON_EVIDENTIARY_ITEMS[0],
     },
   });
   const item = projected.params.item;
-  for (const key of ["server", "tool", "arguments", "status"]) {
-    assert.notEqual(typeof item[key], "undefined", `${key} must not project to undefined`);
-  }
+  assert.deepEqual(item, { type: "reasoning", id: "item_0" });
   const serialized = stableStringify(projected);
   assert.doesNotMatch(
     serialized,
@@ -4051,7 +4125,7 @@ test("absent scalar fields project to explicit invalid markers, never undefined"
     "a bare undefined token must never appear; the quoted marker string is the valid form",
   );
   assert.equal(
-    serialized.includes(OBSERVED_DRIFT_ITEMS[0].text),
+    serialized.includes("Considering the assay decide tool."),
     false,
     "reasoning text must not be retained",
   );
@@ -4070,7 +4144,7 @@ test("absent scalar fields project to explicit invalid markers, never undefined"
   assert.equal(withNull.params.item.id, null, "JSON null must survive the scalar boundary");
 });
 
-test("observed Codex item drift retains valid JSON and classifies fail-closed", async () => {
+test("current Codex non-evidentiary items are scrubbed and do not invalidate a real tool row", async () => {
   const control = await drive("valid");
   assert.equal(validateProofRoot(control.proofRoot).ok, true, "unchanged control must validate");
   const events = structuredClone(control.events);
@@ -4079,7 +4153,7 @@ test("observed Codex item drift retains valid JSON and classifies fail-closed", 
   );
   assert.notEqual(toolIndex, -1, "control run must contain the tool item to replace");
   const toolRow = events[toolIndex];
-  const driftRows = OBSERVED_DRIFT_ITEMS.map((item) =>
+  const chatterRows = OBSERVED_NON_EVIDENTIARY_ITEMS.map((item) =>
     projectRetainedEvent({
       direction: "server",
       method: "item/completed",
@@ -4092,7 +4166,7 @@ test("observed Codex item drift retains valid JSON and classifies fail-closed", 
       },
     }),
   );
-  events.splice(toolIndex, 1, ...driftRows);
+  events.splice(toolIndex, 0, ...chatterRows);
   const terminalIndex = events.findIndex((event) => event.method === "turn/completed");
   assert.notEqual(terminalIndex, -1, "control run must contain the terminal turn");
   const terminal = events[terminalIndex];
@@ -4106,8 +4180,8 @@ test("observed Codex item drift retains valid JSON and classifies fail-closed", 
         id: terminal.params.turn.id,
         status: terminal.params.turn.status,
         items: [
-          ...terminal.params.turn.items.filter((item) => item?.type !== "mcpToolCall"),
-          ...OBSERVED_DRIFT_ITEMS,
+          ...terminal.params.turn.items,
+          ...OBSERVED_NON_EVIDENTIARY_ITEMS,
         ],
       },
     },
@@ -4115,10 +4189,9 @@ test("observed Codex item drift retains valid JSON and classifies fail-closed", 
   const serialized = stableStringify(events);
   const parsed = JSON.parse(serialized);
   assert.deepEqual(parsed, events, "retained drift events must round-trip through JSON");
-  for (const item of OBSERVED_DRIFT_ITEMS) {
-    assert.equal(serialized.includes(item.text), false, `${item.type} text must not be retained`);
-  }
-  const notificationItem = driftRows[0].params.item;
+  assert.equal(serialized.includes("The decision endpoint returned allow."), false);
+  assert.equal(serialized.includes("Considering the assay decide tool."), false);
+  const notificationItem = chatterRows[0].params.item;
   const terminalItems = events[terminalIndex].params.turn.items;
   const terminalReasoning = terminalItems.find((item) => item.type === "reasoning");
   assert.deepEqual(
@@ -4127,24 +4200,11 @@ test("observed Codex item drift retains valid JSON and classifies fail-closed", 
     "item/completed and terminal items must share one projection rule",
   );
   const classified = classifyRecord({ ...control.manifest, events });
-  assert.notEqual(classified.cells.oneToolInvoked.status, "pass");
-  assert.match(
-    Object.values(classified.cells)
-      .map((entry) => entry.reason)
-      .join("; "),
-    /unknown retained item type (reasoning|agentMessage)/,
-    "unknown item types must stay explicit protocol drift",
-  );
+  assert.equal(classified.cells.oneToolInvoked.status, "pass");
+  assert.equal(classified.cells.structuredResultValidated.status, "pass");
   rewriteProof(control.proofRoot, control.manifest, events, classified);
   const revalidated = validateProofRoot(control.proofRoot);
-  assert.equal(revalidated.ok, false, "a drift proof must not validate clean");
-  assert.ok(
-    revalidated.classified,
-    "a retained drift proof must still be classifiable, not unparsable",
-  );
-  assert.doesNotMatch(revalidated.reasons.join("; "), /unavailable allowlisted proof/);
-  assert.match(revalidated.reasons.join("; "), /unknown retained item type/);
-  assert.notEqual(revalidated.classified.cells.oneToolInvoked.status, "pass");
+  assert.equal(revalidated.ok, true, "known scrubbed chatter must validate with the tool row");
 });
 
 test("zero retained mcpToolCall rows keep oneToolInvoked non-pass", async () => {
@@ -4166,7 +4226,7 @@ test("zero retained mcpToolCall rows keep oneToolInvoked non-pass", async () => 
 
 test("projection-idempotent unknown terminal items are drift, not accepted topology", async () => {
   const control = await drive("valid");
-  for (const type of ["reasoning", "agentMessage"]) {
+  for (const type of ["futureHostItem", "not-a-retained-item"]) {
     const events = structuredClone(control.events);
     const terminal = events.find((event) => event.method === "turn/completed");
     assert.ok(terminal, "control run must contain the terminal turn");

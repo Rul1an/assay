@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const SCHEMA = "assay.codex-host-proof.v3";
+export const SCHEMA = "assay.codex-host-proof.v4";
 export const FAKE_USER_AGENT = "assay-codex-host-proof-fake/1";
 export const SKILL_NAME = "assay-golden-path";
 export const DECIDE_TOOL = "assay_policy_decide";
@@ -40,6 +40,15 @@ export const HOST_SUBJECTS = Object.freeze([
 export const HOST_ALLOWLIST = Object.freeze([...ALLOWLIST, ...HOST_SUBJECTS]);
 export const EXTERNAL_ATTESTATION = "not_provided";
 export const HOST_ENV_NAMES = Object.freeze(["PATH", "HOME", "CODEX_HOME"]);
+export const CODEX_APP_SERVER_ARGS = Object.freeze([
+  "--disable",
+  "apps",
+  "--disable",
+  "plugins",
+  "--disable",
+  "remote_plugin",
+  "app-server",
+]);
 
 export function requirePrivateDirectory(directory, label) {
   if (typeof directory !== "string" || directory.length === 0) {
@@ -402,9 +411,7 @@ export function liveInvocationBound(identity, invocation) {
     liveIdentityBound(identity) &&
     exactKeys(invocation, ["argv", "envNames"]) &&
     Array.isArray(invocation.argv) &&
-    invocation.argv.length === 2 &&
-    invocation.argv[0] === identity.codex.path &&
-    invocation.argv[1] === "app-server" &&
+    sameJson(invocation.argv, [identity.codex.path, ...CODEX_APP_SERVER_ARGS]) &&
     sameJson(invocation.envNames, HOST_ENV_NAMES)
   );
 }
@@ -685,6 +692,12 @@ function retainedItemReason(item, label = "item/completed") {
     return `${label} item is not a typed retained item`;
   }
   switch (item.type) {
+    case "reasoning":
+    case "agentMessage":
+      if (exactKeys(item, ["type", "id"])) {
+        return null;
+      }
+      return `${label} ${item.type} is not the closed non-evidentiary projection`;
     case "mcpToolCall":
       if (
         isNonemptyString(item.server) &&
@@ -2065,6 +2078,9 @@ function projectRetainedItem(item) {
   }
   if (item.type === "userMessage") {
     return { type: "userMessage", id: projectedScalar(item.id), content: [] };
+  }
+  if (item.type === "reasoning" || item.type === "agentMessage") {
+    return { type: item.type, id: projectedScalar(item.id) };
   }
   const out = {
     type: projectedScalar(item.type),
