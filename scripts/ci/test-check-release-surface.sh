@@ -178,6 +178,7 @@ pattern = re.compile(files_lines[0])
 for path in (
     ".github/assay-release-tag",
     "scripts/ci/read-assay-release-tag.sh",
+    "scripts/ci/run-release-quickstart-contract.sh",
     "scripts/ci/release_readme.py",
     "scripts/ci/test_release_quickstart.py",
     "llms.txt",

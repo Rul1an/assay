@@ -311,14 +311,12 @@ PACKED_SOURCE_MEMBERS = (
     ("quickstart-run", "examples/mcp-quickstart/run.py"),
     ("quickstart-mock", "examples/mcp-quickstart/mock_server.py"),
 )
-PUBLISHED_TAG = subprocess.run(
-    ["bash", "scripts/ci/read-assay-release-tag.sh"],
-    cwd=ROOT,
-    check=True,
-    capture_output=True,
-    env={**os.environ, "GITHUB_OUTPUT": ""},
-    text=True,
-).stdout.strip()
+PUBLISHED_TAG = os.environ.get("ASSAY_QUICKSTART_PUBLISHED_TAG")
+if not PUBLISHED_TAG:
+    raise RuntimeError(
+        "ASSAY_QUICKSTART_PUBLISHED_TAG is missing; "
+        "run scripts/ci/run-release-quickstart-contract.sh"
+    )
 PUBLISHED_VERSION = PUBLISHED_TAG.removeprefix("v")
 CHECKOUT_SENTENCE = (
     f"For {PUBLISHED_TAG}, run the last command from a source checkout or an extracted published CLI archive."

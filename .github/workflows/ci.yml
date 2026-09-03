@@ -530,7 +530,7 @@ jobs:
           bash scripts/ci/test-release-assets.sh
       - name: Verify release README renderer contract
         shell: bash
-        run: python3 scripts/ci/test_release_quickstart.py
+        run: bash scripts/ci/run-release-quickstart-contract.sh
 
   mcp-registry-foundation:
     name: MCP Registry foundation smoke
