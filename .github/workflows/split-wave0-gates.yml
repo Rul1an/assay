@@ -38,6 +38,7 @@ jobs:
       assay_common_changed: ${{ steps.detect.outputs.assay_common_changed }}
       assay_policy_changed: ${{ steps.detect.outputs.assay_policy_changed }}
       assay_metrics_changed: ${{ steps.detect.outputs.assay_metrics_changed }}
+      assay_runner_schema_changed: ${{ steps.detect.outputs.assay_runner_schema_changed }}
       unmatched_assay_crate_changed: ${{ steps.detect.outputs.unmatched_assay_crate_changed }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -95,10 +96,11 @@ jobs:
           assay_common_changed="$(flag_from_prefix 'crates/assay-common/')"
           assay_policy_changed="$(flag_from_prefix 'crates/assay-policy/')"
           assay_metrics_changed="$(flag_from_prefix 'crates/assay-metrics/')"
+          assay_runner_schema_changed="$(flag_from_prefix 'crates/assay-runner-schema/')"
           if [[ "${run_all}" == "true" || "${global_changed}" == "true" ]]; then
             unmatched_assay_crate_changed=true
           elif grep -Eq '^crates/assay-[^/]+/' "$changed_file" && \
-               ! grep -Eq '^crates/(assay-core|assay-cli|assay-registry|assay-evidence|assay-common|assay-policy|assay-metrics)/' "$changed_file"; then
+               ! grep -Eq '^crates/(assay-core|assay-cli|assay-registry|assay-evidence|assay-common|assay-policy|assay-metrics|assay-runner-schema)/' "$changed_file"; then
             unmatched_assay_crate_changed=true
           else
             unmatched_assay_crate_changed=false
@@ -110,7 +112,7 @@ jobs:
             hotspot_changed=false
           fi
 
-          if [[ "${global_changed}" == "true" || "${hotspot_changed}" == "true" || "${assay_common_changed}" == "true" || "${assay_policy_changed}" == "true" || "${assay_metrics_changed}" == "true" || "${unmatched_assay_crate_changed}" == "true" ]]; then
+          if [[ "${global_changed}" == "true" || "${hotspot_changed}" == "true" || "${assay_common_changed}" == "true" || "${assay_policy_changed}" == "true" || "${assay_metrics_changed}" == "true" || "${assay_runner_schema_changed}" == "true" || "${unmatched_assay_crate_changed}" == "true" ]]; then
             any_relevant=true
             semver_relevant=true
           else
@@ -132,6 +134,7 @@ jobs:
             echo "assay_common_changed=${assay_common_changed}"
             echo "assay_policy_changed=${assay_policy_changed}"
             echo "assay_metrics_changed=${assay_metrics_changed}"
+            echo "assay_runner_schema_changed=${assay_runner_schema_changed}"
             echo "unmatched_assay_crate_changed=${unmatched_assay_crate_changed}"
           } >> "$GITHUB_OUTPUT"
 
@@ -150,6 +153,7 @@ jobs:
             echo "- hotspot_changed: ${hotspot_changed}"
             echo "- any_relevant: ${any_relevant}"
             echo "- semver_relevant: ${semver_relevant}"
+            echo "- assay_runner_schema_changed: ${assay_runner_schema_changed}"
             echo "- unmatched_assay_crate_changed: ${unmatched_assay_crate_changed}"
             if [[ "${run_all}" == "false" || -n "${simulated}" ]]; then
               echo ""
@@ -161,6 +165,9 @@ jobs:
               fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify split-wave semver routing
+        run: bash scripts/ci/test-split-wave0-semver-routing.sh
 
   feature-matrix:
     name: Wave 0 feature matrix
@@ -440,6 +447,7 @@ jobs:
           COMMON_CHANGED: ${{ needs.detect-changes.outputs.assay_common_changed }}
           POLICY_CHANGED: ${{ needs.detect-changes.outputs.assay_policy_changed }}
           METRICS_CHANGED: ${{ needs.detect-changes.outputs.assay_metrics_changed }}
+          RUNNER_SCHEMA_CHANGED: ${{ needs.detect-changes.outputs.assay_runner_schema_changed }}
         run: |
           set -euo pipefail
 
@@ -473,6 +481,9 @@ jobs:
           fi
           if [[ "${RUN_ALL}" == "true" || "${GLOBAL_CHANGED}" == "true" || "${EVIDENCE_CHANGED}" == "true" ]]; then
             run_semver_for assay-evidence
+          fi
+          if [[ "${RUN_ALL}" == "true" || "${GLOBAL_CHANGED}" == "true" || "${RUNNER_SCHEMA_CHANGED}" == "true" ]]; then
+            run_semver_for assay-runner-schema
           fi
 
   nightly-safety:
