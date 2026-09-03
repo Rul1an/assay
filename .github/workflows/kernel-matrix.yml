@@ -97,7 +97,10 @@ jobs:
   lint:
     name: Lint (pre-commit)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The all-files hook catalogue has measured warm runs above 9 minutes and cold
+    # cargo-deny setup adds about 2 minutes. Keep a bounded 15-minute class so
+    # healthy variance does not turn into a cancelled, false-red summary (#2760).
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
