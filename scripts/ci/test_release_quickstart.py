@@ -312,7 +312,7 @@ PACKED_SOURCE_MEMBERS = (
     ("quickstart-mock", "examples/mcp-quickstart/mock_server.py"),
 )
 PUBLISHED_TAG = subprocess.run(
-    ["bash", str(ROOT / "scripts/ci/read-assay-release-tag.sh")],
+    ["bash", "scripts/ci/read-assay-release-tag.sh"],
     cwd=ROOT,
     check=True,
     capture_output=True,
