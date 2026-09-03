@@ -120,6 +120,28 @@ fn caller_cannot_fail_open_handler_errors() {
     assert!(conn.shutdown().success());
 }
 
+fn assert_tools_call_protocol_fault(response: &Value, id: u64, kind: &str, message: &str) {
+    assert!(
+        response.get("result").is_none(),
+        "protocol fault must not use JSON-RPC result: {response}"
+    );
+    assert_eq!(response.get("id"), Some(&Value::from(id)), "{response}");
+    let err = response
+        .get("error")
+        .unwrap_or_else(|| panic!("expected top-level JSON-RPC error: {response}"));
+    assert_eq!(err.get("code"), Some(&Value::from(-32602)), "{response}");
+    assert_eq!(
+        err.get("message").and_then(Value::as_str),
+        Some(message),
+        "{response}"
+    );
+    assert_eq!(
+        err.get("data"),
+        Some(&serde_json::json!({ "kind": kind })),
+        "complete data equality: {response}"
+    );
+}
+
 #[test]
 fn unknown_names_are_value_free() {
     let (mut conn, _root) = spawn_server(None);
@@ -131,17 +153,114 @@ fn unknown_names_are_value_free() {
     );
 
     let unknown_tool = call_tool(&mut conn, &hostile, serde_json::json!({}), 2);
-    assert_fixed_failure(&unknown_tool, "E_INTERNAL", "Tool execution failed");
+    assert_tools_call_protocol_fault(&unknown_tool, 2, "unknown_tool", "Unknown tool");
 
     let unknown_method = conn.request(&hostile, serde_json::json!({}), 3);
     assert_eq!(unknown_method["error"]["code"], -32601);
     assert_eq!(unknown_method["error"]["message"], "Method not found");
+    assert!(
+        unknown_method
+            .get("error")
+            .and_then(|e| e.get("data"))
+            .is_none(),
+        "method-not-found stays data-free: {unknown_method}"
+    );
 
     for response in [&unknown_tool, &unknown_method] {
         let wire = serde_json::to_string(response).unwrap();
         for sentinel in [HEAD, MID, TAIL] {
             assert!(!wire.contains(sentinel), "response reflected {sentinel}");
         }
+        assert!(
+            !wire.contains("E_INTERNAL"),
+            "unknown tool must not collapse to E_INTERNAL: {wire}"
+        );
+    }
+    assert!(conn.shutdown().success());
+}
+
+#[test]
+fn tools_call_envelope_faults_are_distinct_protocol_errors() {
+    let (mut conn, _root) = spawn_server(None);
+    initialize(&mut conn);
+
+    // Missing params object entirely.
+    conn.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "id": 10
+    }));
+    let missing = conn.read_response();
+    assert_tools_call_protocol_fault(&missing, 10, "malformed_call", "Invalid params");
+
+    // Non-object params.
+    conn.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": 1,
+        "id": 11
+    }));
+    let non_object = conn.read_response();
+    assert_tools_call_protocol_fault(&non_object, 11, "malformed_call", "Invalid params");
+
+    // Object params but name missing / wrong type.
+    conn.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": { "arguments": {} },
+        "id": 12
+    }));
+    let missing_name = conn.read_response();
+    assert_tools_call_protocol_fault(&missing_name, 12, "malformed_call", "Invalid params");
+
+    conn.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": { "name": 7, "arguments": {} },
+        "id": 13
+    }));
+    let bad_name_type = conn.read_response();
+    assert_tools_call_protocol_fault(&bad_name_type, 13, "malformed_call", "Invalid params");
+
+    // arguments present but not an object.
+    conn.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": { "name": "assay_check_args", "arguments": "nope" },
+        "id": 14
+    }));
+    let bad_args = conn.read_response();
+    assert_tools_call_protocol_fault(&bad_args, 14, "malformed_call", "Invalid params");
+
+    // Unknown tool stays a distinct kind from malformed_call.
+    let unknown = call_tool(&mut conn, "not_a_real_tool", serde_json::json!({}), 15);
+    assert_tools_call_protocol_fault(&unknown, 15, "unknown_tool", "Unknown tool");
+    assert_ne!(
+        unknown["error"]["data"], missing["error"]["data"],
+        "unknown_tool and malformed_call must remain distinct"
+    );
+
+    // Selected known tool with input-domain failure remains CallToolResult isError.
+    let selected = call_tool(&mut conn, "assay_check_args", serde_json::json!({}), 16);
+    assert_fixed_failure(&selected, "E_INTERNAL", "Tool execution failed");
+
+    for response in [
+        &missing,
+        &non_object,
+        &missing_name,
+        &bad_name_type,
+        &bad_args,
+        &unknown,
+    ] {
+        let wire = serde_json::to_string(response).unwrap();
+        assert!(
+            !wire.contains("E_INTERNAL"),
+            "envelope faults must not use tool E_INTERNAL: {wire}"
+        );
+        assert!(
+            response.pointer("/result/isError").is_none(),
+            "envelope faults must not be CallToolResult: {response}"
+        );
     }
     assert!(conn.shutdown().success());
 }

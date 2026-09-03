@@ -80,7 +80,13 @@ pub async fn serve(request: &Value, ctx: Option<&ToolContext>) -> Value {
         Some("server/discover") => ok_response(id, discover_result()),
         Some("tools/list") => ok_response(id, list_tools_result()),
         Some("tools/call") => match ctx {
-            Some(ctx) => ok_response(id, call_tool(request, ctx).await),
+            Some(ctx) => match tools::classify_call_tool_params(request.get("params")) {
+                Ok(dispatch) => ok_response(
+                    id,
+                    execute_known_tool(ctx, &dispatch.name, &dispatch.arguments).await,
+                ),
+                Err(fault) => error_response(id, fault.code(), fault.message(), Some(fault.data())),
+            },
             None => error_response(id, ERROR_INVALID_PARAMS, "Invalid params", None),
         },
         _ => error_response(id, ERROR_METHOD_NOT_FOUND, "Method not found", None),
@@ -137,11 +143,7 @@ fn list_tools_result() -> Value {
     result
 }
 
-async fn call_tool(request: &Value, ctx: &ToolContext) -> Value {
-    let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
-    let name = params.get("name").and_then(Value::as_str).unwrap_or("");
-    let default_args = json!({});
-    let args = params.get("arguments").unwrap_or(&default_args);
+async fn execute_known_tool(ctx: &ToolContext, name: &str, args: &Value) -> Value {
     let payload = match tools::handle_call(ctx, name, args).await {
         Ok(value) => value,
         Err(_) => json!({
