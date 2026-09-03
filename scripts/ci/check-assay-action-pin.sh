@@ -158,18 +158,21 @@ def parse_provenance(text: str) -> tuple[str, str]:
 
 
 def load_yaml(text: str, *, source: str, required: bool = True):
-    try:
-        proc = subprocess.run(
-            ["ruby", "-EUTF-8:UTF-8", "-e", RUBY_SAFE_LOAD],
-            input=text,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except FileNotFoundError:
-        fail("ruby is required to parse GitHub Actions YAML")
-    except subprocess.TimeoutExpired:
-        fail(f"{source}: YAML parse timed out")
+    for attempt in range(2):
+        try:
+            proc = subprocess.run(
+                ["ruby", "-EUTF-8:UTF-8", "-e", RUBY_SAFE_LOAD],
+                input=text,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            break
+        except FileNotFoundError:
+            fail("ruby is required to parse GitHub Actions YAML")
+        except subprocess.TimeoutExpired:
+            if attempt == 1:
+                fail(f"{source}: YAML parse timed out")
     if proc.returncode != 0:
         if not required:
             return None

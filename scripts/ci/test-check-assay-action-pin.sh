@@ -110,6 +110,74 @@ expect_ok() {
   echo "ok    ${name}"
 }
 
+prepare_yaml_timeout_tree() {
+  local dest="$1"
+  copy_into "${dest}"
+  mkdir -p "${dest}/scripts/ci" "${dest}/fake-bin"
+  cp "${CHECKER}" "${dest}/scripts/ci/check-assay-action-pin.sh"
+  cp "${READER}" "${dest}/scripts/ci/read-assay-action-pin.sh"
+  python3 - "${dest}/scripts/ci/check-assay-action-pin.sh" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+needle = "            timeout=30,"
+if text.count(needle) != 1:
+    raise SystemExit("expected exactly one YAML parser timeout")
+path.write_text(
+    text.replace(
+        needle,
+        '            timeout=5 if source == "pinned action.yml" else 30,',
+    ),
+    encoding="utf-8",
+)
+PY
+  cat >"${dest}/fake-bin/ruby" <<'PY'
+#!/usr/bin/env python3
+import os
+from pathlib import Path
+import sys
+import time
+
+state = Path(os.environ["ASSAY_FAKE_RUBY_STATE"])
+attempt = int(state.read_text(encoding="utf-8")) + 1 if state.exists() else 1
+state.write_text(str(attempt), encoding="utf-8")
+mode = os.environ["ASSAY_FAKE_RUBY_MODE"]
+if mode == "persistent-timeout" or (mode == "transient-timeout" and attempt == 1):
+    time.sleep(6)
+elif mode == "parser-failure":
+    print("synthetic parser failure", file=sys.stderr)
+    raise SystemExit(2)
+os.execv(os.environ["ASSAY_REAL_RUBY"], [os.environ["ASSAY_REAL_RUBY"], *sys.argv[1:]])
+PY
+  chmod +x "${dest}/fake-bin/ruby"
+}
+
+run_yaml_timeout_checker() {
+  local tree="$1" mode="$2" state="$3"
+  PATH="${tree}/fake-bin:${PATH}" \
+    ASSAY_REAL_RUBY="${REAL_RUBY}" \
+    ASSAY_FAKE_RUBY_MODE="${mode}" \
+    ASSAY_FAKE_RUBY_STATE="${state}" \
+    ASSAY_ACTION_TREE="${tree}" \
+    ASSAY_ACTION_PIN_FILE="${tree}/.github/assay-action-pin" \
+    ASSAY_ACTION_FIXTURE_FILE="${tree}/scripts/ci/fixtures/assay-action-pin/action.yml" \
+    ASSAY_ACTION_PROVENANCE_FILE="${tree}/scripts/ci/fixtures/assay-action-pin/PROVENANCE" \
+    "${tree}/scripts/ci/check-assay-action-pin.sh"
+}
+
+expect_attempts() {
+  local name="$1" state="$2" expected="$3"
+  local actual
+  actual="$(cat "${state}")"
+  if [[ "${actual}" != "${expected}" ]]; then
+    echo "FAIL: ${name} made ${actual} parser attempts; expected ${expected}" >&2
+    exit 1
+  fi
+  echo "ok    ${name} (${actual} parser attempt(s))"
+}
+
 mutate_once() {
   local path="$1" old="$2" new="$3"
   python3 - "$path" "$old" "$new" <<'PY'
@@ -189,6 +257,11 @@ require_exists "${CHANGELOG}"
 require_exists "${DEPENDABOT}"
 require_exists "${CI_YML}"
 require_exists "${PRECOMMIT}"
+REAL_RUBY="$(command -v ruby)"
+if [[ -z "${REAL_RUBY}" ]]; then
+  echo "ruby is required to test YAML parser retries" >&2
+  exit 1
+fi
 
 check_consumer_compat() {
   python3 - "$1" "$2" "$3" <<'PY'
@@ -253,6 +326,46 @@ if [[ ! "${PIN}" =~ ^[0-9a-f]{40}$ ]]; then
   exit 1
 fi
 EXPECTED_USES="Rul1an/assay-action@${PIN}"
+
+echo "== bounded YAML parser timeout retry =="
+timeout_tree="${scratch}/yaml-timeout-tree"
+prepare_yaml_timeout_tree "${timeout_tree}"
+
+transient_state="${scratch}/transient-timeout-attempts"
+expect_ok "one transient timeout is retried" \
+  run_yaml_timeout_checker "${timeout_tree}" "transient-timeout" "${transient_state}"
+transient_attempts="$(cat "${transient_state}")"
+if (( transient_attempts < 2 )); then
+  echo "FAIL: transient timeout made ${transient_attempts} parser attempt(s); expected at least 2" >&2
+  exit 1
+fi
+echo "ok    transient timeout was retried"
+
+persistent_state="${scratch}/persistent-timeout-attempts"
+if run_yaml_timeout_checker "${timeout_tree}" "persistent-timeout" "${persistent_state}" \
+  >"${scratch}/out" 2>"${scratch}/err"; then
+  echo "FAIL: persistent YAML parser timeout stayed green" >&2
+  exit 1
+fi
+if ! grep -Fq -- "YAML parse timed out" "${scratch}/err"; then
+  echo "FAIL: persistent timeout lost the fail-closed diagnostic:" >&2
+  cat "${scratch}/err" >&2
+  exit 1
+fi
+expect_attempts "persistent timeout retry bound" "${persistent_state}" 2
+
+failure_state="${scratch}/parser-failure-attempts"
+if run_yaml_timeout_checker "${timeout_tree}" "parser-failure" "${failure_state}" \
+  >"${scratch}/out" 2>"${scratch}/err"; then
+  echo "FAIL: ordinary YAML parser failure stayed green" >&2
+  exit 1
+fi
+if ! grep -Fq -- "YAML parse failed: synthetic parser failure" "${scratch}/err"; then
+  echo "FAIL: ordinary parser failure lost its diagnostic:" >&2
+  cat "${scratch}/err" >&2
+  exit 1
+fi
+expect_attempts "ordinary parser failures are not retried" "${failure_state}" 1
 
 echo "== no-op control =="
 expect_ok "control-is-green" "${CHECKER}"
