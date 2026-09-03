@@ -1,7 +1,7 @@
 # ADR-048: The claim gate shares one lattice and one invariant across three tables that legitimately differ — the two enums move to `assay-common`, the tables and the fold stay home, and the policy/trace path already makes absence claims it cannot base
 
 - Status: Accepted
-- Date: 2026-09-02 (revised after six review passes through 2026-09-03;
+- Date: 2026-09-02 (revised after seven review passes through 2026-09-03;
   §"What the reviews corrected" lists every change)
 - Supersedes: none
 - Amends: none. ADR-046 governs when two vocabularies stay separate; §"Why ADR-046 does not decide this" states where its test lands the other way and where it does not.
@@ -294,8 +294,10 @@ this branch adds the ADR only and leaves both headers as they are.
 
 ### 6. Public names are preserved; the semver gate must be made to cover both crates first.
 
-All four crates are published. `ClaimGateDecision` and `CodingAgentGateDecision` are public. The
-migration keeps both paths resolving via re-exports or aliases onto `assay_common::claim`.
+The four existing enum types are public. The migration keeps all four paths resolving through
+re-exports or aliases onto `assay_common::claim`: `assay_runner_schema::ClaimGateDecision`,
+`assay_runner_schema::CoverageClaimKind`, `assay_evidence::CodingAgentGateDecision`, and
+`assay_evidence::CodingAgentClaimKind`.
 `cargo semver-checks` runs in `.github/workflows/split-wave0-gates.yml` (`check-release` against
 the last `v*` tag) for assay-common, policy, metrics, core, registry and evidence — and **not for
 `assay-runner-schema`** (`:459-476`, the `run_semver_for` allowlist). So the acceptance condition
@@ -403,6 +405,10 @@ still described the schema crate as a leaf and never authorised that edge. Decis
 that edge only and requires the migration to update both `CLAUDE.md` and the generated dependency
 graph. A sixth pass caught that the correction itself was missing from this supposedly complete
 review history; this paragraph closes that provenance gap without changing the decision.
+
+A seventh pass caught that decision 6 said "All four crates" without an antecedent and then named
+only the two public decision-enum paths. It now names all four public enum paths, including both
+claim-kind paths, so compatibility cannot be read as preserving only half of the moved surface.
 
 ### Left open, deliberately
 
