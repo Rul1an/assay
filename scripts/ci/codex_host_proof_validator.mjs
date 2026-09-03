@@ -35,6 +35,7 @@ export const ALLOWLIST = Object.freeze([
 ]);
 export const HOST_SUBJECTS = Object.freeze([
   "codex.snapshot",
+  process.platform === "win32" ? "codex-code-mode-host.exe" : "codex-code-mode-host",
   "assay-mcp-server.snapshot",
 ]);
 export const HOST_ALLOWLIST = Object.freeze([...ALLOWLIST, ...HOST_SUBJECTS]);
@@ -100,9 +101,9 @@ export const HARD_MAX_FRAMES = 8192;
 export const HARD_MAX_RETAINED_BYTES = 4 * 1024 * 1024;
 export const HARD_MAX_DIR_ENTRIES = 64;
 // 512 MiB per-binary PATH snapshot ceiling (536870912). Prepared v5.5.2 host
-// assets: bundled Codex at /Applications/ChatGPT.app/Contents/Resources/codex
-// is 231,697,328 bytes; assay-mcp-server is 11,105,184 bytes. 256 MiB would
-// sit one routine host growth away from false-unavailable.
+// assets: bundled Codex is 231,697,328 bytes, its code-mode host is 62,704,224
+// bytes, and assay-mcp-server is 11,105,184 bytes. 256 MiB would sit one
+// routine host growth away from false-unavailable.
 export const HARD_MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024;
 export const RECORD_CONSISTENCY_NONCLAIM =
   "record consistency does not authenticate origin, authorship, signature, or attestation";
@@ -271,6 +272,7 @@ export function projectHostIdentity(identity) {
   }
   return {
     codex: projectBoundBinary(identity.codex),
+    codexCodeModeHost: projectBoundBinary(identity.codexCodeModeHost),
     assayMcp: projectBoundBinary(identity.assayMcp),
   };
 }
@@ -286,10 +288,14 @@ function boundBinary(bin) {
 }
 
 export function liveIdentityBound(identity) {
-  if (!exactKeys(identity, ["codex", "assayMcp"])) {
+  if (!exactKeys(identity, ["codex", "codexCodeModeHost", "assayMcp"])) {
     return false;
   }
-  return boundBinary(identity.codex) && boundBinary(identity.assayMcp);
+  return (
+    boundBinary(identity.codex) &&
+    boundBinary(identity.codexCodeModeHost) &&
+    boundBinary(identity.assayMcp)
+  );
 }
 
 export function consumeBoundedBinary(file, maxBytes, onChunk, options = {}) {
@@ -376,14 +382,20 @@ function verifyLiveIdentityBound(
     return false;
   }
   const expectedCodex = path.join(canonicalRoot, HOST_SUBJECTS[0]);
-  const expectedMcp = path.join(canonicalRoot, HOST_SUBJECTS[1]);
+  const expectedCodeModeHost = path.join(canonicalRoot, HOST_SUBJECTS[1]);
+  const expectedMcp = path.join(canonicalRoot, HOST_SUBJECTS[2]);
   if (
     path.resolve(identity.codex.path) !== expectedCodex ||
+    path.resolve(identity.codexCodeModeHost.path) !== expectedCodeModeHost ||
     path.resolve(identity.assayMcp.path) !== expectedMcp
   ) {
     return false;
   }
-  if (!verifyObservedBinary(identity.codex) || !verifyObservedBinary(identity.assayMcp)) {
+  if (
+    !verifyObservedBinary(identity.codex) ||
+    !verifyObservedBinary(identity.codexCodeModeHost) ||
+    !verifyObservedBinary(identity.assayMcp)
+  ) {
     return false;
   }
   if (journey !== "discovery" && !allowMissingCommand) {

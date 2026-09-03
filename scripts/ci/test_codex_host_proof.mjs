@@ -23,6 +23,7 @@ import {
   DECIDE_TOOL,
   EXPECTED_TOOLS,
   HARD_MAX_SNAPSHOT_BYTES,
+  HOST_SUBJECTS,
   classifyRecord,
   classifyStoredEvent,
   consumeJourneyTopology,
@@ -113,7 +114,18 @@ void import(${JSON.stringify(`data:text/javascript,${encodeURIComponent(body)}`)
 `,
     { mode: 0o755 },
   );
+  if (path.basename(filePath) === "codex") {
+    writeCodeModeHostSibling(filePath);
+  }
   return filePath;
+}
+
+function writeCodeModeHostSibling(codexPath) {
+  const helperPath = path.join(path.dirname(codexPath), HOST_SUBJECTS[1]);
+  if (!fs.existsSync(helperPath)) {
+    fs.writeFileSync(helperPath, "#!/usr/bin/env node\n", { mode: 0o755 });
+  }
+  return helperPath;
 }
 
 function writeShadowCodex(childArgv) {
@@ -525,12 +537,11 @@ test("malformed JSON line writes unavailable evidence; CLI proof root is not emp
   const cli = driveCliInline(childArgv, { timeoutMs: 800 });
   assert.equal(cli.stderr.includes("SyntaxError"), false, "parse errors must not escape the data callback");
   assert.deepEqual(proofFiles(cli.proofRoot), [
-    "assay-mcp-server.snapshot",
     "classification.json",
-    "codex.snapshot",
     "events.json",
     "manifest.json",
-  ]);
+    ...HOST_SUBJECTS,
+  ].sort());
   const stored = JSON.parse(
     fs.readFileSync(path.join(cli.proofRoot, "classification.json"), "utf8"),
   );
@@ -594,12 +605,11 @@ test("production driver creates and verifies its disposable CODEX_HOME before sp
   const projectRoot = seedProject();
   const codexHome = path.join(projectRoot, ".codex-home");
   const retainedFilesWithIdentity = [
-    "assay-mcp-server.snapshot",
     "classification.json",
-    "codex.snapshot",
     "events.json",
     "manifest.json",
-  ];
+    ...HOST_SUBJECTS,
+  ].sort();
   assert.equal(fs.existsSync(codexHome), false, "control starts without CODEX_HOME");
 
   const binDir = scratch();
@@ -1278,8 +1288,8 @@ test("production host identity is observed from proof-owned binaries before CLI 
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
     const identity = manifest.hostIdentity;
     assert.ok(identity && typeof identity === "object", "production CLI must construct hostIdentity");
-    assert.deepEqual(Object.keys(identity).sort(), ["assayMcp", "codex"]);
-    for (const role of ["codex", "assayMcp"]) {
+    assert.deepEqual(Object.keys(identity).sort(), ["assayMcp", "codex", "codexCodeModeHost"]);
+    for (const role of ["codex", "codexCodeModeHost", "assayMcp"]) {
       assert.deepEqual(Object.keys(identity[role]).sort(), ["path", "sha256"]);
       assert.equal(path.isAbsolute(identity[role].path), true, `${role} path must be absolute`);
       assert.match(identity[role].sha256, /^[a-f0-9]{64}$/);
@@ -1670,9 +1680,12 @@ test("PATH shadows drive observed Codex and Assay MCP identities", () => {
       codexBin: flagCodex,
       assayMcpBin: flagMcp,
     });
+    const codeModeHost = path.join(path.dirname(codexBin), HOST_SUBJECTS[1]);
     assert.equal(ignored.codex.sha256, sha256File(codexBin));
+    assert.equal(ignored.codexCodeModeHost.sha256, sha256File(codeModeHost));
     assert.equal(ignored.assayMcp.sha256, sha256File(mcpBin));
     assert.equal(sha256File(ignored.codex.path), sha256File(codexBin));
+    assert.equal(sha256File(ignored.codexCodeModeHost.path), sha256File(codeModeHost));
     assert.equal(sha256File(ignored.assayMcp.path), sha256File(mcpBin));
     assert.equal(ignored.codex.installSource, "PATH");
     assert.equal(ignored.assayMcp.installSource, "PATH");
@@ -1711,12 +1724,21 @@ test("PATH shadows drive observed Codex and Assay MCP identities", () => {
   );
   assert.equal(typeof cli.status, "number");
   const manifest = JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8"));
+  const codeModeHost = path.join(path.dirname(codexBin), HOST_SUBJECTS[1]);
   assert.equal(manifest.hostIdentity.codex.sha256, sha256File(codexBin));
+  assert.equal(manifest.hostIdentity.codexCodeModeHost.sha256, sha256File(codeModeHost));
   assert.equal(manifest.hostIdentity.assayMcp.sha256, sha256File(mcpBin));
   assert.equal(sha256File(manifest.hostIdentity.codex.path), sha256File(codexBin));
   assert.equal(sha256File(manifest.hostIdentity.assayMcp.path), sha256File(mcpBin));
-  assert.deepEqual(Object.keys(manifest.hostIdentity).sort(), ["assayMcp", "codex"]);
+  assert.deepEqual(
+    Object.keys(manifest.hostIdentity).sort(),
+    ["assayMcp", "codex", "codexCodeModeHost"],
+  );
   assert.deepEqual(Object.keys(manifest.hostIdentity.codex).sort(), ["path", "sha256"]);
+  assert.deepEqual(
+    Object.keys(manifest.hostIdentity.codexCodeModeHost).sort(),
+    ["path", "sha256"],
+  );
   assert.deepEqual(Object.keys(manifest.hostIdentity.assayMcp).sort(), ["path", "sha256"]);
   const events = JSON.parse(fs.readFileSync(path.join(proofRoot, "events.json"), "utf8"));
   const start = events.find(
@@ -2512,6 +2534,23 @@ function writeVersionOnlyBin(name, version) {
   return bin;
 }
 
+test("host identity refuses a Codex installation without its code-mode host", () => {
+  const codex = writeVersionOnlyBin("codex", "codex-control/0.0.0");
+  fs.rmSync(path.join(path.dirname(codex), HOST_SUBJECTS[1]));
+  const mcp = writeVersionOnlyBin("assay-mcp-server", "assay-mcp-control/0.0.0");
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${path.dirname(codex)}${path.delimiter}${path.dirname(mcp)}${path.delimiter}${previousPath}`;
+  try {
+    assert.throws(
+      () => resolveHostIdentity(),
+      /codex-code-mode-host/i,
+      "the proof must refuse before Codex can resolve an unbound sibling helper",
+    );
+  } finally {
+    process.env.PATH = previousPath;
+  }
+});
+
 test("version observation rejects output from a failed probe", () => {
   const codex = path.join(scratch(), "codex");
   writePortableNodeExecutable(
@@ -2664,7 +2703,11 @@ function writeSparseFile(filePath, size) {
 }
 
 function writeSparseBin(name, size) {
-  return writeSparseFile(path.join(scratch(), name), size);
+  const bin = writeSparseFile(path.join(scratch(), name), size);
+  if (name === "codex") {
+    writeCodeModeHostSibling(bin);
+  }
+  return bin;
 }
 
 function snapRoots() {
@@ -3610,7 +3653,7 @@ test("review closeout: host subjects are proof-owned and independently revalidat
     const manifest = JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8"));
     const leaked = snapRoots().filter((name) => !before.has(name));
     assert.deepEqual(leaked, [], "successful capture must not leave an unowned temp snapshot");
-    for (const role of ["codex", "assayMcp"]) {
+    for (const role of ["codex", "codexCodeModeHost", "assayMcp"]) {
       const relative = path.relative(proofRoot, manifest.hostIdentity[role].path);
       assert.equal(relative.startsWith("..") || path.isAbsolute(relative), false);
       assert.equal(fs.existsSync(manifest.hostIdentity[role].path), true);
@@ -3620,6 +3663,10 @@ test("review closeout: host subjects are proof-owned and independently revalidat
     const events = JSON.parse(fs.readFileSync(path.join(proofRoot, "events.json"), "utf8"));
     const topology = consumeJourneyTopology(events, manifest.journey);
     assert.equal(sha256File(manifest.hostIdentity.codex.path), manifest.hostIdentity.codex.sha256);
+    assert.equal(
+      sha256File(manifest.hostIdentity.codexCodeModeHost.path),
+      manifest.hostIdentity.codexCodeModeHost.sha256,
+    );
     assert.equal(sha256File(manifest.hostIdentity.assayMcp.path), manifest.hostIdentity.assayMcp.sha256);
     assert.equal(
       topology.primaryThread.request.params.config.mcp_servers.assay.command,
@@ -3716,6 +3763,7 @@ test("review closeout: proof-owned subject mutations fail closed", () => {
     });
     const manifest = JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8"));
     const codex = manifest.hostIdentity.codex.path;
+    const codeModeHost = manifest.hostIdentity.codexCodeModeHost.path;
     const assayMcp = manifest.hostIdentity.assayMcp.path;
     const original = fs.readFileSync(codex);
     const originalMode = fs.statSync(codex).mode & 0o777;
@@ -3755,6 +3803,13 @@ test("review closeout: proof-owned subject mutations fail closed", () => {
     }
 
     assert.equal(validateProofRoot(proofRoot).ok, true, "restored no-op control must validate");
+
+    const helperOriginal = fs.readFileSync(codeModeHost);
+    fs.appendFileSync(codeModeHost, "\nmutated helper\n");
+    rejects("altered code-mode host subject");
+    fs.rmSync(codeModeHost, { force: true });
+    fs.writeFileSync(codeModeHost, helperOriginal, { mode: 0o700 });
+    assert.equal(validateProofRoot(proofRoot).ok, true, "restored helper control must validate");
   } finally {
     if (observed) {
       fs.rmSync(path.dirname(observed.codexBin), { recursive: true, force: true });
@@ -3894,7 +3949,7 @@ test("review repair: host-observation cannot omit proof-owned identity subjects"
 
     manifest.hostIdentity = null;
     manifest.allowlist = ["classification.json", "events.json", "manifest.json"];
-    for (const subject of ["codex.snapshot", "assay-mcp-server.snapshot"]) {
+    for (const subject of HOST_SUBJECTS) {
       fs.rmSync(path.join(proofRoot, subject));
     }
     const identityFree = classifyRecord({ ...manifest, events });
