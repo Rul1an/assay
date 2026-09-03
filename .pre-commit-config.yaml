@@ -537,6 +537,15 @@ repos:
         # 360-minute default; this hook rejects that, wrong classes, and eBPF drift.
         files: ^(scripts/ci/test-ci-job-timeouts-contract\.sh|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
 
+      - id: kernel-matrix-job-timeout-contract-self-test
+        name: Kernel matrix lint timeout contract
+        entry: bash scripts/ci/test-kernel-matrix-job-timeouts-contract.sh --self-test
+        language: system
+        pass_filenames: false
+        # The all-files catalogue regularly needs more than the old ten-minute ceiling.
+        # Pin the measured bounded class and the summary's cancelled/failure handling together.
+        files: ^(scripts/ci/test-kernel-matrix-job-timeouts-contract\.sh|\.github/workflows/kernel-matrix\.yml|\.pre-commit-config\.yaml)$
+
       - id: mcp-preflight-windows-contract-self-test
         name: Native Windows MCP preflight workflow contract
         entry: bash scripts/ci/test-mcp-preflight-windows-contract.sh --self-test
