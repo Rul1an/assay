@@ -23,7 +23,9 @@ import {
   DECIDE_TOOL,
   EXPECTED_TOOLS,
   HARD_MAX_SNAPSHOT_BYTES,
+  HOST_SUBJECTS,
   classifyRecord,
+  classifyStoredEvent,
   consumeJourneyTopology,
   decidePrompt,
   driverOutcomeFrom,
@@ -112,7 +114,18 @@ void import(${JSON.stringify(`data:text/javascript,${encodeURIComponent(body)}`)
 `,
     { mode: 0o755 },
   );
+  if (path.basename(filePath) === "codex") {
+    writeCodeModeHostSibling(filePath);
+  }
   return filePath;
+}
+
+function writeCodeModeHostSibling(codexPath) {
+  const helperPath = path.join(path.dirname(codexPath), HOST_SUBJECTS[1]);
+  if (!fs.existsSync(helperPath)) {
+    fs.writeFileSync(helperPath, "#!/usr/bin/env node\n", { mode: 0o755 });
+  }
+  return helperPath;
 }
 
 function writeShadowCodex(childArgv) {
@@ -204,7 +217,7 @@ test("driver calls the validator classification function; no extra classify modu
 test("synthetic positive control: cells pass without inventing external attestation", async () => {
   const { classified, manifest, proofRoot, driverOutcome, childExitCode, events } = await drive("valid");
   assert.equal(manifest.captureMode, "synthetic-fixture");
-  assert.equal(manifest.schema, "assay.codex-host-proof.v3");
+  assert.equal(manifest.schema, "assay.codex-host-proof.v4");
   assert.equal(childExitCode, 0);
   assert.equal(driverOutcome.exitCode, 0);
   assert.equal(manifest.childExitCode, 0);
@@ -524,12 +537,11 @@ test("malformed JSON line writes unavailable evidence; CLI proof root is not emp
   const cli = driveCliInline(childArgv, { timeoutMs: 800 });
   assert.equal(cli.stderr.includes("SyntaxError"), false, "parse errors must not escape the data callback");
   assert.deepEqual(proofFiles(cli.proofRoot), [
-    "assay-mcp-server.snapshot",
     "classification.json",
-    "codex.snapshot",
     "events.json",
     "manifest.json",
-  ]);
+    ...HOST_SUBJECTS,
+  ].sort());
   const stored = JSON.parse(
     fs.readFileSync(path.join(cli.proofRoot, "classification.json"), "utf8"),
   );
@@ -593,12 +605,11 @@ test("production driver creates and verifies its disposable CODEX_HOME before sp
   const projectRoot = seedProject();
   const codexHome = path.join(projectRoot, ".codex-home");
   const retainedFilesWithIdentity = [
-    "assay-mcp-server.snapshot",
     "classification.json",
-    "codex.snapshot",
     "events.json",
     "manifest.json",
-  ];
+    ...HOST_SUBJECTS,
+  ].sort();
   assert.equal(fs.existsSync(codexHome), false, "control starts without CODEX_HOME");
 
   const binDir = scratch();
@@ -1277,8 +1288,8 @@ test("production host identity is observed from proof-owned binaries before CLI 
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
     const identity = manifest.hostIdentity;
     assert.ok(identity && typeof identity === "object", "production CLI must construct hostIdentity");
-    assert.deepEqual(Object.keys(identity).sort(), ["assayMcp", "codex"]);
-    for (const role of ["codex", "assayMcp"]) {
+    assert.deepEqual(Object.keys(identity).sort(), ["assayMcp", "codex", "codexCodeModeHost"]);
+    for (const role of ["codex", "codexCodeModeHost", "assayMcp"]) {
       assert.deepEqual(Object.keys(identity[role]).sort(), ["path", "sha256"]);
       assert.equal(path.isAbsolute(identity[role].path), true, `${role} path must be absolute`);
       assert.match(identity[role].sha256, /^[a-f0-9]{64}$/);
@@ -1669,9 +1680,12 @@ test("PATH shadows drive observed Codex and Assay MCP identities", () => {
       codexBin: flagCodex,
       assayMcpBin: flagMcp,
     });
+    const codeModeHost = path.join(path.dirname(codexBin), HOST_SUBJECTS[1]);
     assert.equal(ignored.codex.sha256, sha256File(codexBin));
+    assert.equal(ignored.codexCodeModeHost.sha256, sha256File(codeModeHost));
     assert.equal(ignored.assayMcp.sha256, sha256File(mcpBin));
     assert.equal(sha256File(ignored.codex.path), sha256File(codexBin));
+    assert.equal(sha256File(ignored.codexCodeModeHost.path), sha256File(codeModeHost));
     assert.equal(sha256File(ignored.assayMcp.path), sha256File(mcpBin));
     assert.equal(ignored.codex.installSource, "PATH");
     assert.equal(ignored.assayMcp.installSource, "PATH");
@@ -1710,12 +1724,21 @@ test("PATH shadows drive observed Codex and Assay MCP identities", () => {
   );
   assert.equal(typeof cli.status, "number");
   const manifest = JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8"));
+  const codeModeHost = path.join(path.dirname(codexBin), HOST_SUBJECTS[1]);
   assert.equal(manifest.hostIdentity.codex.sha256, sha256File(codexBin));
+  assert.equal(manifest.hostIdentity.codexCodeModeHost.sha256, sha256File(codeModeHost));
   assert.equal(manifest.hostIdentity.assayMcp.sha256, sha256File(mcpBin));
   assert.equal(sha256File(manifest.hostIdentity.codex.path), sha256File(codexBin));
   assert.equal(sha256File(manifest.hostIdentity.assayMcp.path), sha256File(mcpBin));
-  assert.deepEqual(Object.keys(manifest.hostIdentity).sort(), ["assayMcp", "codex"]);
+  assert.deepEqual(
+    Object.keys(manifest.hostIdentity).sort(),
+    ["assayMcp", "codex", "codexCodeModeHost"],
+  );
   assert.deepEqual(Object.keys(manifest.hostIdentity.codex).sort(), ["path", "sha256"]);
+  assert.deepEqual(
+    Object.keys(manifest.hostIdentity.codexCodeModeHost).sort(),
+    ["path", "sha256"],
+  );
   assert.deepEqual(Object.keys(manifest.hostIdentity.assayMcp).sort(), ["path", "sha256"]);
   const events = JSON.parse(fs.readFileSync(path.join(proofRoot, "events.json"), "utf8"));
   const start = events.find(
@@ -2511,6 +2534,91 @@ function writeVersionOnlyBin(name, version) {
   return bin;
 }
 
+test("host identity refuses a Codex installation without its code-mode host", () => {
+  const codex = writeVersionOnlyBin("codex", "codex-control/0.0.0");
+  fs.rmSync(path.join(path.dirname(codex), HOST_SUBJECTS[1]));
+  const mcp = writeVersionOnlyBin("assay-mcp-server", "assay-mcp-control/0.0.0");
+  const proofRoot = scratch();
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${path.dirname(codex)}${path.delimiter}${path.dirname(mcp)}${path.delimiter}${previousPath}`;
+  try {
+    assert.throws(
+      () => resolveHostIdentity({ proofRoot }),
+      /codex-code-mode-host/i,
+      "the proof must refuse before Codex can resolve an unbound sibling helper",
+    );
+    for (const subject of HOST_SUBJECTS) {
+      assert.equal(
+        fs.existsSync(path.join(proofRoot, subject)),
+        false,
+        `missing helper must not leave ${subject}`,
+      );
+    }
+  } finally {
+    process.env.PATH = previousPath;
+    fs.rmSync(proofRoot, { recursive: true, force: true });
+  }
+});
+
+test("code-mode host subject uses the platform runtime name", () => {
+  assert.equal(
+    HOST_SUBJECTS[1],
+    process.platform === "win32" ? "codex-code-mode-host.exe" : "codex-code-mode-host",
+  );
+});
+
+test("pre-existing proof subjects are refused without being deleted", () => {
+  const proofRoot = scratch();
+  const sentinel = path.join(proofRoot, HOST_SUBJECTS[1]);
+  fs.writeFileSync(sentinel, "pre-existing\n", { mode: 0o700 });
+  const codex = writeVersionOnlyBin("codex", "codex-control/0.0.0");
+  const mcp = writeVersionOnlyBin("assay-mcp-server", "assay-mcp-control/0.0.0");
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${path.dirname(codex)}${path.delimiter}${path.dirname(mcp)}${path.delimiter}${previousPath}`;
+  try {
+    assert.throws(
+      () => resolveHostIdentity({ proofRoot }),
+      /already exists/i,
+      "acquisition must refuse before touching an existing proof subject",
+    );
+    assert.equal(fs.readFileSync(sentinel, "utf8"), "pre-existing\n");
+  } finally {
+    process.env.PATH = previousPath;
+    fs.rmSync(proofRoot, { recursive: true, force: true });
+  }
+});
+
+test("partial acquisition removes every proof-owned subject", () => {
+  const proofRoot = scratch();
+  const codex = writeVersionOnlyBin("codex", "codex-control/0.0.0");
+  const mcp = writeVersionOnlyBin("assay-mcp-server", "assay-mcp-control/0.0.0");
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${path.dirname(codex)}${path.delimiter}${path.dirname(mcp)}${path.delimiter}${previousPath}`;
+  try {
+    assert.throws(
+      () => resolveHostIdentity({
+        proofRoot,
+        testOnlyAfterSnapshotRead(copied, _src, destName) {
+          if (destName === "assay-mcp-server.snapshot" && copied === 0) {
+            throw new Error("injected third-subject failure");
+          }
+        },
+      }),
+      /injected third-subject failure/i,
+    );
+    for (const subject of HOST_SUBJECTS) {
+      assert.equal(
+        fs.existsSync(path.join(proofRoot, subject)),
+        false,
+        `partial acquisition must remove ${subject}`,
+      );
+    }
+  } finally {
+    process.env.PATH = previousPath;
+    fs.rmSync(proofRoot, { recursive: true, force: true });
+  }
+});
+
 test("version observation rejects output from a failed probe", () => {
   const codex = path.join(scratch(), "codex");
   writePortableNodeExecutable(
@@ -2663,7 +2771,11 @@ function writeSparseFile(filePath, size) {
 }
 
 function writeSparseBin(name, size) {
-  return writeSparseFile(path.join(scratch(), name), size);
+  const bin = writeSparseFile(path.join(scratch(), name), size);
+  if (name === "codex") {
+    writeCodeModeHostSibling(bin);
+  }
+  return bin;
 }
 
 function snapRoots() {
@@ -3609,7 +3721,7 @@ test("review closeout: host subjects are proof-owned and independently revalidat
     const manifest = JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8"));
     const leaked = snapRoots().filter((name) => !before.has(name));
     assert.deepEqual(leaked, [], "successful capture must not leave an unowned temp snapshot");
-    for (const role of ["codex", "assayMcp"]) {
+    for (const role of ["codex", "codexCodeModeHost", "assayMcp"]) {
       const relative = path.relative(proofRoot, manifest.hostIdentity[role].path);
       assert.equal(relative.startsWith("..") || path.isAbsolute(relative), false);
       assert.equal(fs.existsSync(manifest.hostIdentity[role].path), true);
@@ -3619,6 +3731,10 @@ test("review closeout: host subjects are proof-owned and independently revalidat
     const events = JSON.parse(fs.readFileSync(path.join(proofRoot, "events.json"), "utf8"));
     const topology = consumeJourneyTopology(events, manifest.journey);
     assert.equal(sha256File(manifest.hostIdentity.codex.path), manifest.hostIdentity.codex.sha256);
+    assert.equal(
+      sha256File(manifest.hostIdentity.codexCodeModeHost.path),
+      manifest.hostIdentity.codexCodeModeHost.sha256,
+    );
     assert.equal(sha256File(manifest.hostIdentity.assayMcp.path), manifest.hostIdentity.assayMcp.sha256);
     assert.equal(
       topology.primaryThread.request.params.config.mcp_servers.assay.command,
@@ -3715,6 +3831,7 @@ test("review closeout: proof-owned subject mutations fail closed", () => {
     });
     const manifest = JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8"));
     const codex = manifest.hostIdentity.codex.path;
+    const codeModeHost = manifest.hostIdentity.codexCodeModeHost.path;
     const assayMcp = manifest.hostIdentity.assayMcp.path;
     const original = fs.readFileSync(codex);
     const originalMode = fs.statSync(codex).mode & 0o777;
@@ -3754,10 +3871,68 @@ test("review closeout: proof-owned subject mutations fail closed", () => {
     }
 
     assert.equal(validateProofRoot(proofRoot).ok, true, "restored no-op control must validate");
+
+    const helperOriginal = fs.readFileSync(codeModeHost);
+    fs.appendFileSync(codeModeHost, "\nmutated helper\n");
+    rejects("altered code-mode host subject");
+    fs.rmSync(codeModeHost, { force: true });
+    fs.writeFileSync(codeModeHost, helperOriginal, { mode: 0o700 });
+    assert.equal(validateProofRoot(proofRoot).ok, true, "restored helper control must validate");
   } finally {
     if (observed) {
       fs.rmSync(path.dirname(observed.codexBin), { recursive: true, force: true });
       fs.rmSync(path.dirname(observed.mcpBin), { recursive: true, force: true });
+    }
+    fs.rmSync(proofRoot, { recursive: true, force: true });
+  }
+});
+
+test("review closeout: host identity is bound to the closed proof-root shape", () => {
+  const proofRoot = portableLiveProofRoot();
+  let observed;
+  let outsideRoot;
+  try {
+    observed = driveCli("valid", "tool", {
+      captureMode: "synthetic-fixture",
+      proofRoot,
+    });
+    assert.equal(validateProofRoot(proofRoot).ok, true, "unchanged control must validate");
+    const manifestPath = path.join(proofRoot, "manifest.json");
+    const control = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+
+    outsideRoot = scratch();
+    const outsideHelper = path.join(outsideRoot, HOST_SUBJECTS[1]);
+    fs.copyFileSync(control.hostIdentity.codexCodeModeHost.path, outsideHelper);
+    fs.chmodSync(outsideHelper, 0o700);
+    const rebound = structuredClone(control);
+    rebound.hostIdentity.codexCodeModeHost.path = fs.realpathSync(outsideHelper);
+    assert.equal(
+      sha256File(outsideHelper),
+      rebound.hostIdentity.codexCodeModeHost.sha256,
+      "the path mutation must preserve the helper digest",
+    );
+    fs.writeFileSync(manifestPath, stableStringify(rebound));
+    assert.equal(
+      validateProofRoot(proofRoot).ok,
+      false,
+      "an identical helper outside the proof root must not satisfy path binding",
+    );
+
+    const widened = structuredClone(control);
+    widened.hostIdentity.codexCodeModeHost.unexpected = true;
+    fs.writeFileSync(manifestPath, stableStringify(widened));
+    assert.equal(
+      validateProofRoot(proofRoot).ok,
+      false,
+      "the helper identity must remain the exact path+sha256 projection",
+    );
+  } finally {
+    if (observed) {
+      fs.rmSync(path.dirname(observed.codexBin), { recursive: true, force: true });
+      fs.rmSync(path.dirname(observed.mcpBin), { recursive: true, force: true });
+    }
+    if (outsideRoot) {
+      fs.rmSync(outsideRoot, { recursive: true, force: true });
     }
     fs.rmSync(proofRoot, { recursive: true, force: true });
   }
@@ -3893,7 +4068,7 @@ test("review repair: host-observation cannot omit proof-owned identity subjects"
 
     manifest.hostIdentity = null;
     manifest.allowlist = ["classification.json", "events.json", "manifest.json"];
-    for (const subject of ["codex.snapshot", "assay-mcp-server.snapshot"]) {
+    for (const subject of HOST_SUBJECTS) {
       fs.rmSync(path.join(proofRoot, subject));
     }
     const identityFree = classifyRecord({ ...manifest, events });
@@ -4005,9 +4180,91 @@ test("review repair: host manifest invocation is exact and credential-free", () 
   }
 });
 
-const OBSERVED_DRIFT_ITEMS = Object.freeze([
-  Object.freeze({ type: "reasoning", id: "item_0", text: "Considering the assay decide tool." }),
-  Object.freeze({ type: "agentMessage", id: "item_2", text: "The decision endpoint returned allow." }),
+test("host observation disables unrelated app and plugin surfaces before app-server", () => {
+  const proofRoot = portableLiveProofRoot();
+  const argvMarker = path.join(scratch(), "codex-argv.json");
+  const codexBin = path.join(scratch(), "codex");
+  const projectRoot = seedProject();
+  writePortableNodeExecutable(
+    codexBin,
+    `import fs from "node:fs";
+import { spawn } from "node:child_process";
+if (process.argv.includes("--version")) {
+  process.stdout.write("codex-shadow/0.0.0\\n");
+  process.exit(0);
+}
+fs.writeFileSync(${JSON.stringify(argvMarker)}, JSON.stringify(process.argv.slice(2)));
+const child = spawn(${JSON.stringify(process.execPath)}, ${JSON.stringify([
+      FAKE,
+      "--scenario",
+      "valid",
+      "--project-root",
+      projectRoot,
+    ])}, { stdio: "inherit" });
+const stop = () => { try { child.kill("SIGTERM"); } catch { /* already exited */ } };
+process.on("SIGTERM", stop);
+process.on("SIGINT", stop);
+child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+`,
+  );
+  const observed = driveCli("valid", "failures", {
+    captureMode: "host-observation",
+    proofRoot,
+    projectRoot,
+    codexBin,
+  });
+  try {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(observed.proofRoot, "manifest.json"), "utf8"),
+    );
+    assert.deepEqual(manifest.invocation.argv, [
+      manifest.hostIdentity.codex.path,
+      "--disable",
+      "apps",
+      "--disable",
+      "plugins",
+      "--disable",
+      "remote_plugin",
+      "app-server",
+    ]);
+    assert.deepEqual(JSON.parse(fs.readFileSync(argvMarker, "utf8")), [
+      "--disable",
+      "apps",
+      "--disable",
+      "plugins",
+      "--disable",
+      "remote_plugin",
+      "app-server",
+    ]);
+  } finally {
+    fs.rmSync(path.dirname(observed.codexBin), { recursive: true, force: true });
+    fs.rmSync(path.dirname(observed.mcpBin), { recursive: true, force: true });
+    fs.rmSync(observed.proofRoot, { recursive: true, force: true });
+    fs.rmSync(observed.projectRoot, { recursive: true, force: true });
+  }
+});
+
+const OBSERVED_NON_EVIDENTIARY_ITEMS = Object.freeze([
+  Object.freeze({
+    type: "reasoning",
+    id: "item_0",
+    summary: [],
+    content: [{ type: "text", text: "Considering the assay decide tool." }],
+  }),
+  Object.freeze({
+    type: "agentMessage",
+    id: "item_2",
+    phase: "final_answer",
+    text: "The decision endpoint returned allow.",
+    delivery: "final",
+    memoryCitation: null,
+  }),
+]);
+
+const OBSERVED_NON_EVIDENTIARY_NOTIFICATIONS = Object.freeze([
+  "account/rateLimits/updated",
+  "item/agentMessage/delta",
+  "thread/tokenUsage/updated",
 ]);
 
 test("stableStringify refuses non-JSON primitives; JSON null stays a valid token", () => {
@@ -4028,7 +4285,7 @@ test("stableStringify refuses non-JSON primitives; JSON null stays a valid token
   }
 });
 
-test("absent scalar fields project to explicit invalid markers, never undefined", () => {
+test("known non-evidentiary items project to a closed type and id only", () => {
   const projected = projectRetainedEvent({
     direction: "server",
     method: "item/completed",
@@ -4037,13 +4294,11 @@ test("absent scalar fields project to explicit invalid markers, never undefined"
       completedAtMs: 5,
       threadId: "t",
       turnId: "u",
-      item: OBSERVED_DRIFT_ITEMS[0],
+      item: OBSERVED_NON_EVIDENTIARY_ITEMS[0],
     },
   });
   const item = projected.params.item;
-  for (const key of ["server", "tool", "arguments", "status"]) {
-    assert.notEqual(typeof item[key], "undefined", `${key} must not project to undefined`);
-  }
+  assert.deepEqual(item, { type: "reasoning", id: "item_0" });
   const serialized = stableStringify(projected);
   assert.doesNotMatch(
     serialized,
@@ -4051,7 +4306,7 @@ test("absent scalar fields project to explicit invalid markers, never undefined"
     "a bare undefined token must never appear; the quoted marker string is the valid form",
   );
   assert.equal(
-    serialized.includes(OBSERVED_DRIFT_ITEMS[0].text),
+    serialized.includes("Considering the assay decide tool."),
     false,
     "reasoning text must not be retained",
   );
@@ -4070,7 +4325,7 @@ test("absent scalar fields project to explicit invalid markers, never undefined"
   assert.equal(withNull.params.item.id, null, "JSON null must survive the scalar boundary");
 });
 
-test("observed Codex item drift retains valid JSON and classifies fail-closed", async () => {
+test("current Codex non-evidentiary items are scrubbed and do not invalidate a real tool row", async () => {
   const control = await drive("valid");
   assert.equal(validateProofRoot(control.proofRoot).ok, true, "unchanged control must validate");
   const events = structuredClone(control.events);
@@ -4079,7 +4334,7 @@ test("observed Codex item drift retains valid JSON and classifies fail-closed", 
   );
   assert.notEqual(toolIndex, -1, "control run must contain the tool item to replace");
   const toolRow = events[toolIndex];
-  const driftRows = OBSERVED_DRIFT_ITEMS.map((item) =>
+  const chatterRows = OBSERVED_NON_EVIDENTIARY_ITEMS.map((item) =>
     projectRetainedEvent({
       direction: "server",
       method: "item/completed",
@@ -4092,7 +4347,19 @@ test("observed Codex item drift retains valid JSON and classifies fail-closed", 
       },
     }),
   );
-  events.splice(toolIndex, 1, ...driftRows);
+  const lifecycleRows = OBSERVED_NON_EVIDENTIARY_NOTIFICATIONS.map((method) =>
+    projectRetainedEvent({
+      direction: "server",
+      id: null,
+      method,
+      params: { sensitiveHostValue: "must-not-be-retained" },
+    }),
+  );
+  for (const row of lifecycleRows) {
+    assert.deepEqual(row.params, {}, `${row.method} payload must be scrubbed`);
+    assert.equal(classifyStoredEvent(row).type, "server-notification");
+  }
+  events.splice(toolIndex, 0, ...chatterRows, ...lifecycleRows);
   const terminalIndex = events.findIndex((event) => event.method === "turn/completed");
   assert.notEqual(terminalIndex, -1, "control run must contain the terminal turn");
   const terminal = events[terminalIndex];
@@ -4106,8 +4373,8 @@ test("observed Codex item drift retains valid JSON and classifies fail-closed", 
         id: terminal.params.turn.id,
         status: terminal.params.turn.status,
         items: [
-          ...terminal.params.turn.items.filter((item) => item?.type !== "mcpToolCall"),
-          ...OBSERVED_DRIFT_ITEMS,
+          ...terminal.params.turn.items,
+          ...OBSERVED_NON_EVIDENTIARY_ITEMS,
         ],
       },
     },
@@ -4115,10 +4382,9 @@ test("observed Codex item drift retains valid JSON and classifies fail-closed", 
   const serialized = stableStringify(events);
   const parsed = JSON.parse(serialized);
   assert.deepEqual(parsed, events, "retained drift events must round-trip through JSON");
-  for (const item of OBSERVED_DRIFT_ITEMS) {
-    assert.equal(serialized.includes(item.text), false, `${item.type} text must not be retained`);
-  }
-  const notificationItem = driftRows[0].params.item;
+  assert.equal(serialized.includes("The decision endpoint returned allow."), false);
+  assert.equal(serialized.includes("Considering the assay decide tool."), false);
+  const notificationItem = chatterRows[0].params.item;
   const terminalItems = events[terminalIndex].params.turn.items;
   const terminalReasoning = terminalItems.find((item) => item.type === "reasoning");
   assert.deepEqual(
@@ -4127,24 +4393,11 @@ test("observed Codex item drift retains valid JSON and classifies fail-closed", 
     "item/completed and terminal items must share one projection rule",
   );
   const classified = classifyRecord({ ...control.manifest, events });
-  assert.notEqual(classified.cells.oneToolInvoked.status, "pass");
-  assert.match(
-    Object.values(classified.cells)
-      .map((entry) => entry.reason)
-      .join("; "),
-    /unknown retained item type (reasoning|agentMessage)/,
-    "unknown item types must stay explicit protocol drift",
-  );
+  assert.equal(classified.cells.oneToolInvoked.status, "pass");
+  assert.equal(classified.cells.structuredResultValidated.status, "pass");
   rewriteProof(control.proofRoot, control.manifest, events, classified);
   const revalidated = validateProofRoot(control.proofRoot);
-  assert.equal(revalidated.ok, false, "a drift proof must not validate clean");
-  assert.ok(
-    revalidated.classified,
-    "a retained drift proof must still be classifiable, not unparsable",
-  );
-  assert.doesNotMatch(revalidated.reasons.join("; "), /unavailable allowlisted proof/);
-  assert.match(revalidated.reasons.join("; "), /unknown retained item type/);
-  assert.notEqual(revalidated.classified.cells.oneToolInvoked.status, "pass");
+  assert.equal(revalidated.ok, true, "known scrubbed chatter must validate with the tool row");
 });
 
 test("zero retained mcpToolCall rows keep oneToolInvoked non-pass", async () => {
@@ -4166,7 +4419,7 @@ test("zero retained mcpToolCall rows keep oneToolInvoked non-pass", async () => 
 
 test("projection-idempotent unknown terminal items are drift, not accepted topology", async () => {
   const control = await drive("valid");
-  for (const type of ["reasoning", "agentMessage"]) {
+  for (const type of ["futureHostItem", "not-a-retained-item"]) {
     const events = structuredClone(control.events);
     const terminal = events.find((event) => event.method === "turn/completed");
     assert.ok(terminal, "control run must contain the terminal turn");

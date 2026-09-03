@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const SCHEMA = "assay.codex-host-proof.v3";
+export const SCHEMA = "assay.codex-host-proof.v4";
 export const FAKE_USER_AGENT = "assay-codex-host-proof-fake/1";
 export const SKILL_NAME = "assay-golden-path";
 export const DECIDE_TOOL = "assay_policy_decide";
@@ -35,11 +35,21 @@ export const ALLOWLIST = Object.freeze([
 ]);
 export const HOST_SUBJECTS = Object.freeze([
   "codex.snapshot",
+  process.platform === "win32" ? "codex-code-mode-host.exe" : "codex-code-mode-host",
   "assay-mcp-server.snapshot",
 ]);
 export const HOST_ALLOWLIST = Object.freeze([...ALLOWLIST, ...HOST_SUBJECTS]);
 export const EXTERNAL_ATTESTATION = "not_provided";
 export const HOST_ENV_NAMES = Object.freeze(["PATH", "HOME", "CODEX_HOME"]);
+export const CODEX_APP_SERVER_ARGS = Object.freeze([
+  "--disable",
+  "apps",
+  "--disable",
+  "plugins",
+  "--disable",
+  "remote_plugin",
+  "app-server",
+]);
 
 export function requirePrivateDirectory(directory, label) {
   if (typeof directory !== "string" || directory.length === 0) {
@@ -91,9 +101,9 @@ export const HARD_MAX_FRAMES = 8192;
 export const HARD_MAX_RETAINED_BYTES = 4 * 1024 * 1024;
 export const HARD_MAX_DIR_ENTRIES = 64;
 // 512 MiB per-binary PATH snapshot ceiling (536870912). Prepared v5.5.2 host
-// assets: bundled Codex at /Applications/ChatGPT.app/Contents/Resources/codex
-// is 231,697,328 bytes; assay-mcp-server is 11,105,184 bytes. 256 MiB would
-// sit one routine host growth away from false-unavailable.
+// assets: bundled Codex is 231,697,328 bytes, its code-mode host is 62,704,224
+// bytes, and assay-mcp-server is 11,105,184 bytes. 256 MiB would sit one
+// routine host growth away from false-unavailable.
 export const HARD_MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024;
 export const RECORD_CONSISTENCY_NONCLAIM =
   "record consistency does not authenticate origin, authorship, signature, or attestation";
@@ -262,6 +272,7 @@ export function projectHostIdentity(identity) {
   }
   return {
     codex: projectBoundBinary(identity.codex),
+    codexCodeModeHost: projectBoundBinary(identity.codexCodeModeHost),
     assayMcp: projectBoundBinary(identity.assayMcp),
   };
 }
@@ -277,10 +288,14 @@ function boundBinary(bin) {
 }
 
 export function liveIdentityBound(identity) {
-  if (!exactKeys(identity, ["codex", "assayMcp"])) {
+  if (!exactKeys(identity, ["codex", "codexCodeModeHost", "assayMcp"])) {
     return false;
   }
-  return boundBinary(identity.codex) && boundBinary(identity.assayMcp);
+  return (
+    boundBinary(identity.codex) &&
+    boundBinary(identity.codexCodeModeHost) &&
+    boundBinary(identity.assayMcp)
+  );
 }
 
 export function consumeBoundedBinary(file, maxBytes, onChunk, options = {}) {
@@ -367,14 +382,20 @@ function verifyLiveIdentityBound(
     return false;
   }
   const expectedCodex = path.join(canonicalRoot, HOST_SUBJECTS[0]);
-  const expectedMcp = path.join(canonicalRoot, HOST_SUBJECTS[1]);
+  const expectedCodeModeHost = path.join(canonicalRoot, HOST_SUBJECTS[1]);
+  const expectedMcp = path.join(canonicalRoot, HOST_SUBJECTS[2]);
   if (
     path.resolve(identity.codex.path) !== expectedCodex ||
+    path.resolve(identity.codexCodeModeHost.path) !== expectedCodeModeHost ||
     path.resolve(identity.assayMcp.path) !== expectedMcp
   ) {
     return false;
   }
-  if (!verifyObservedBinary(identity.codex) || !verifyObservedBinary(identity.assayMcp)) {
+  if (
+    !verifyObservedBinary(identity.codex) ||
+    !verifyObservedBinary(identity.codexCodeModeHost) ||
+    !verifyObservedBinary(identity.assayMcp)
+  ) {
     return false;
   }
   if (journey !== "discovery" && !allowMissingCommand) {
@@ -402,9 +423,7 @@ export function liveInvocationBound(identity, invocation) {
     liveIdentityBound(identity) &&
     exactKeys(invocation, ["argv", "envNames"]) &&
     Array.isArray(invocation.argv) &&
-    invocation.argv.length === 2 &&
-    invocation.argv[0] === identity.codex.path &&
-    invocation.argv[1] === "app-server" &&
+    sameJson(invocation.argv, [identity.codex.path, ...CODEX_APP_SERVER_ARGS]) &&
     sameJson(invocation.envNames, HOST_ENV_NAMES)
   );
 }
@@ -600,10 +619,13 @@ export function journeyPairCounts(journey) {
 
 export const ALLOWED_SERVER_REQUESTS = Object.freeze(["mcpServer/elicitation/request"]);
 export const LIFECYCLE_SERVER_NOTIFICATIONS = Object.freeze([
+  "account/rateLimits/updated",
+  "item/agentMessage/delta",
   "remoteControl/status/changed",
   "thread/started",
   "mcpServer/startupStatus/updated",
   "thread/status/changed",
+  "thread/tokenUsage/updated",
   "turn/started",
   "item/started",
 ]);
@@ -685,6 +707,12 @@ function retainedItemReason(item, label = "item/completed") {
     return `${label} item is not a typed retained item`;
   }
   switch (item.type) {
+    case "reasoning":
+    case "agentMessage":
+      if (exactKeys(item, ["type", "id"])) {
+        return null;
+      }
+      return `${label} ${item.type} is not the closed non-evidentiary projection`;
     case "mcpToolCall":
       if (
         isNonemptyString(item.server) &&
@@ -2065,6 +2093,9 @@ function projectRetainedItem(item) {
   }
   if (item.type === "userMessage") {
     return { type: "userMessage", id: projectedScalar(item.id), content: [] };
+  }
+  if (item.type === "reasoning" || item.type === "agentMessage") {
+    return { type: item.type, id: projectedScalar(item.id) };
   }
   const out = {
     type: projectedScalar(item.type),

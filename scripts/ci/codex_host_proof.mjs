@@ -14,6 +14,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  CODEX_APP_SERVER_ARGS,
   DECIDE_INPUT,
   DECIDE_TOOL,
   EXPECTED_TOOLS,
@@ -24,6 +25,7 @@ import {
   HARD_MAX_SNAPSHOT_BYTES,
   HARD_MAX_TIMEOUT_MS,
   HOST_ENV_NAMES,
+  HOST_SUBJECTS,
   SCHEMA,
   SKILL_NAME,
   boundedPositiveInt,
@@ -345,10 +347,14 @@ export function resolveHostIdentity(options = {}) {
   if (typeof options.proofRoot !== "string" || options.proofRoot.length === 0) {
     throw new Error("proofRoot is required for proof-owned host subjects");
   }
+  const codexSource = resolveRegularBinary(codexPath, "codex");
+  const codeModeHostName = HOST_SUBJECTS[1];
+  const codeModeHostSource = path.join(path.dirname(codexSource), codeModeHostName);
   const snapRoot = requirePrivateProofRoot(options.proofRoot);
   const codexSnap = path.join(snapRoot, "codex.snapshot");
+  const codeModeHostSnap = path.join(snapRoot, codeModeHostName);
   const mcpSnap = path.join(snapRoot, "assay-mcp-server.snapshot");
-  if (fs.existsSync(codexSnap) || fs.existsSync(mcpSnap)) {
+  if (fs.existsSync(codexSnap) || fs.existsSync(codeModeHostSnap) || fs.existsSync(mcpSnap)) {
     throw new Error("proof-owned host subject already exists");
   }
   try {
@@ -356,7 +362,8 @@ export function resolveHostIdentity(options = {}) {
       testOnlySnapshotMaxBytes: options.testOnlySnapshotMaxBytes,
       testOnlyAfterSnapshotRead: options.testOnlyAfterSnapshotRead,
     };
-    snapshotNamedBinary(codexPath, snapRoot, "codex.snapshot", snapOpts);
+    snapshotNamedBinary(codexSource, snapRoot, "codex.snapshot", snapOpts);
+    snapshotNamedBinary(codeModeHostSource, snapRoot, codeModeHostName, snapOpts);
     snapshotNamedBinary(mcpPath, snapRoot, "assay-mcp-server.snapshot", snapOpts);
     const identity = {
       os: os.platform(),
@@ -367,6 +374,11 @@ export function resolveHostIdentity(options = {}) {
         sha256: sha256File(codexSnap),
         installSource: "PATH",
       },
+      codexCodeModeHost: {
+        path: fs.realpathSync(codeModeHostSnap),
+        sha256: sha256File(codeModeHostSnap),
+        installSource: "codex-sibling",
+      },
       assayMcp: {
         path: fs.realpathSync(mcpSnap),
         version: probeAssayMcpVersion(mcpSnap),
@@ -374,10 +386,13 @@ export function resolveHostIdentity(options = {}) {
         installSource: "PATH",
       },
     };
-    identity[BOUND_EXEC] = { codexPath: codexSnap, mcpPath: mcpSnap };
+    identity[BOUND_EXEC] = {
+      codexPath: codexSnap,
+      mcpPath: mcpSnap,
+    };
     return identity;
   } catch (error) {
-    for (const subject of [codexSnap, mcpSnap]) {
+    for (const subject of [codexSnap, codeModeHostSnap, mcpSnap]) {
       try {
         fs.rmSync(subject, { force: true });
       } catch {
@@ -411,7 +426,7 @@ function writeProofFiles(options, pack) {
   const hostIdentity = projectHostIdentity(options.hostIdentity ?? null);
   const invocationArgv = persistableArgv(
     options.hostIdentity?.codex?.path
-      ? [options.hostIdentity.codex.path, "app-server"]
+      ? [options.hostIdentity.codex.path, ...CODEX_APP_SERVER_ARGS]
       : Array.isArray(options.childArgv)
         ? options.childArgv
         : ["<test-only-child>"],
@@ -604,7 +619,7 @@ export async function runProof(options) {
   };
   const child = options.testOnlyChild
     ? options.testOnlyChild
-    : spawn(bound.codexPath, ["app-server"], spawnOpts);
+    : spawn(bound.codexPath, CODEX_APP_SERVER_ARGS, spawnOpts);
   const childClosed = new Promise((resolve) => {
     child.on("close", (code, signal) => {
       childAlive = false;
