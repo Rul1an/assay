@@ -43,6 +43,12 @@ unaffected — `EvidenceEvent::payload` is a raw `Value`, a consumer parses `Pay
 from it directly, and the enum was already documented as a convenience view rather than the
 contract.
 
+> Implementation note, 2026-09-03: the planned next-major step was taken in
+> [PR #2139](https://github.com/Rul1an/assay/pull/2139) (`c00b46bf7`, merged 2026-08-08) and
+> shipped in `v5.0.0`: `Payload` gained `SessionFinding(PayloadSessionFinding)` and
+> `#[non_exhaustive]` together. The two-step reasoning above is kept as written; it describes why
+> the break was paid once. Nothing about this kind is pending in a later major.
+
 **Why a distinct kind rather than a field on `assay.tool.decision`.** The defining property of this
 record is that it *spans* calls. A per-call payload has no honest place to put a span: whichever
 call carried it would be claiming a verdict it did not alone produce. `RuleEvaluation`
@@ -168,10 +174,10 @@ work that took one predicate.
 
 ## Consequences
 
-- `PayloadSessionFinding` is additive; `Payload` is unchanged until the next major, when it gains
-  the variant and `#[non_exhaustive]` together. Nothing in the workspace matches `Payload`
-  exhaustively today anyway — the one existing match is in a test and has a wildcard arm — and
-  `Unknown` never absorbed this class, as Decision 1 records.
+- `PayloadSessionFinding` was additive at this ADR's date; since `v5.0.0` (#2139) `Payload` carries
+  the `SessionFinding` variant and is `#[non_exhaustive]`, so later kinds cost no major. Nothing in
+  the workspace matched `Payload` exhaustively at the time — the one existing match was in a test
+  and had a wildcard arm — and `Unknown` never absorbed this class, as Decision 1 records.
 - Findings enter `run_root`, so they are covered by bundle verification with no new file and no
   change to `ALLOWED_FILES`.
 - The span is expressed as `u64` indices into the evaluated call sequence, which is what the

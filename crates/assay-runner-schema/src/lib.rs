@@ -29,6 +29,11 @@ mod health;
 mod sdk_event;
 mod surface;
 
+/// Shared claim vocabulary (ADR-048), re-exported under this crate's former names so
+/// `assay_runner_schema::ClaimGateDecision` and `assay_runner_schema::CoverageClaimKind` keep
+/// resolving. The tables that consume them stay in this crate.
+pub use assay_common::claim::{ClaimDecision as ClaimGateDecision, ClaimKind as CoverageClaimKind};
+
 pub use archive_manifest::{
     ArchiveFile, ArchiveManifest, ARCHIVE_MANIFEST_SCHEMA, CAPABILITY_SURFACE_PATH,
     CORRELATION_REPORT_PATH, EVENTS_PATH, KERNEL_LAYER_PATH, MANIFEST_PATH,
@@ -44,14 +49,13 @@ pub use correlation::{
     CorrelationStatus, CORRELATION_REPORT_SCHEMA,
 };
 pub use coverage::{
-    CoverageClaimDecision, CoverageClaimKind, CoverageCompleteness, CoverageDescriptor,
-    EffectDimension, COVERAGE_DESCRIPTOR_SCHEMA,
+    CoverageClaimDecision, CoverageCompleteness, CoverageDescriptor, EffectDimension,
+    COVERAGE_DESCRIPTOR_SCHEMA,
 };
 pub use fidelity::{
-    ClaimGateDecision, RunnerClaimGate, RunnerFidelityReason, RunnerFidelityVerdict,
-    RunnerFidelityVerdictReport, PROJECTION_CLAIM_LEVEL_INCONCLUSIVE,
-    PROJECTION_CLAIM_LEVEL_PROJECTED_EQUIVALENT, PROJECTION_CLAIM_LEVEL_RAW_OBSERVED,
-    RUNNER_FIDELITY_VERDICT_SCHEMA,
+    RunnerClaimGate, RunnerFidelityReason, RunnerFidelityVerdict, RunnerFidelityVerdictReport,
+    PROJECTION_CLAIM_LEVEL_INCONCLUSIVE, PROJECTION_CLAIM_LEVEL_PROJECTED_EQUIVALENT,
+    PROJECTION_CLAIM_LEVEL_RAW_OBSERVED, RUNNER_FIDELITY_VERDICT_SCHEMA,
 };
 pub use health::{
     CaptureOrigin, CgroupCorrelationStatus, KernelLayerStatus, NetworkEndpointClaimScope,

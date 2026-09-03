@@ -891,6 +891,7 @@ flowchart TB
     assay_runner_core --> assay_common
     assay_runner_core --> assay_monitor
     assay_runner_core --> assay_runner_schema
+    assay_runner_schema --> assay_common
     assay_sim --> assay_adapter_api
     assay_sim --> assay_core
     assay_sim --> assay_evidence

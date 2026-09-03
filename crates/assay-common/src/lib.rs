@@ -21,6 +21,9 @@ pub mod dsse;
 /// a `&str` method and nothing allocates.
 pub mod tool_pattern;
 
+/// Claim-gate lattice and claim-kind vocabulary. The domain-specific decision tables stay home.
+pub mod claim;
+
 /// Monitor object ABI digest (`KEY_*` descriptor); shared by eBPF bake + monitor verify.
 mod object_abi;
 pub use object_abi::{

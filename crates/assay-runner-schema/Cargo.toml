@@ -10,6 +10,7 @@ description = "Internal/experimental substrate for Assay measured-run workflows.
 readme.workspace = true
 
 [dependencies]
+assay-common = { workspace = true, default-features = false }
 serde = { workspace = true, features = ["derive", "std"] }
 thiserror = { workspace = true }
 

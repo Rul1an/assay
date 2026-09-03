@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{ClaimGateDecision, NetworkProtocolCoverageStatus};
+use crate::{ClaimGateDecision, CoverageClaimKind, NetworkProtocolCoverageStatus};
 
 pub const COVERAGE_DESCRIPTOR_SCHEMA: &str = "assay.runner.coverage_descriptor.v0";
 
@@ -21,14 +21,6 @@ pub enum CoverageCompleteness {
     DatagramPeerObserved,
     ConnectAndDatagramPeerObserved,
     ExecOnly,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CoverageClaimKind {
-    PositiveExistence,
-    ExhaustiveSet,
-    BoundedNegative,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

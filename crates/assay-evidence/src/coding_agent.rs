@@ -10,6 +10,13 @@ use crate::types::EvidenceEvent;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+/// The claim vocabulary is shared with the runner substrate (ADR-048): these are re-exports of
+/// `assay_common::claim`, kept under their former names so existing paths keep resolving. The
+/// decision table that consumes them, [`coding_agent_claim_decision`], stays in this crate.
+pub use assay_common::claim::{
+    ClaimDecision as CodingAgentGateDecision, ClaimKind as CodingAgentClaimKind,
+};
+
 /// Event type for the v0 coding-agent evidence pack payload.
 pub const CODING_AGENT_EVIDENCE_EVENT_TYPE: &str = "assay.coding_agent.evidence_pack.v0";
 
@@ -107,34 +114,6 @@ pub enum CodingAgentClaimCeiling {
     ObservedAtReceiver,
     ObservedInPath,
     IndependentlyConfirmed,
-}
-
-/// What kind of claim a consumer wants to make about one dimension.
-///
-/// Mirrors `assay_runner_schema::CoverageClaimKind` deliberately. The runner substrate has gated
-/// claims by kind since 2026-06-01 (`RunnerClaimGate`) and by coverage descriptor since 2026-06-04.
-/// The first draft of this module ignored the kind entirely, which made it **contradict** that rule
-/// rather than merely duplicate it: a positive claim under partial coverage is `Allowed` there and
-/// was `Incomplete` here. Keeping the vocabularies parallel is what lets
-/// `tests/claim_gate_parity.rs` assert the two agree.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum CodingAgentClaimKind {
-    /// "this effect happened" — seeing part of a run is enough to say what was seen.
-    PositiveExistence,
-    /// "these are all of them" — needs coverage of the whole dimension.
-    ExhaustiveSet,
-    /// "this did not happen" — the claim a blind spot silently destroys.
-    BoundedNegative,
-}
-
-/// Mirrors `assay_runner_schema::ClaimGateDecision`.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum CodingAgentGateDecision {
-    Allowed,
-    Degraded,
-    Blocked,
 }
 
 /// What a consumer may conclude about one dimension, for one kind of claim.

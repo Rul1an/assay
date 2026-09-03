@@ -558,6 +558,7 @@ dependencies = [
 name = "assay-runner-schema"
 version = "6.0.0"
 dependencies = [
+ "assay-common",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
