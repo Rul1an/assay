@@ -237,10 +237,9 @@ fn sandbox_degraded_payload_serde_shape_is_stable() {
 
 /// The record parses as a typed struct, and `Unknown` is not the fallback it looks like.
 ///
-/// `PayloadSessionFinding` ships without a `Payload` variant: adding one to that exhaustive public
-/// enum is a semver major (`cargo semver-checks`: `enum_variant_added`), which ADR-047 records as
-/// deferred to the next major together with `#[non_exhaustive]`, so the break is paid once for
-/// every kind that follows rather than once per kind.
+/// `Payload::SessionFinding` and `#[non_exhaustive]` shipped together in `v5.0.0` (#2139), the
+/// next-major step ADR-047 planned, so later event kinds cost no major. What this test pins is the
+/// no-fallback behaviour below, not the variant's presence.
 ///
 /// The control is what makes this worth pinning: **there is no fallback member at all**, so an
 /// unregistered kind is a deserialisation error and not an untyped landing. `Unknown(Value)` used

@@ -1,9 +1,11 @@
 //! The health half of the claim-support rule, held to its own contract.
 //!
-//! `assay-evidence`'s `tests/claim_gate_parity.rs` pins two Rust vocabularies against each other.
-//! This file pins one vocabulary against the thing it claims to be: a table that *derives* from
-//! `RunnerClaimGate` rather than restating it, is total over both enums, and carries the asymmetry
-//! that makes the rule worth having.
+//! `assay-evidence`'s `tests/claim_gate_parity.rs` pins the runner's descriptor table against the
+//! evidence gate. This file pins the fidelity table against the thing it claims to be: a
+//! `claim_support` projection that *derives* from `RunnerClaimGate` rather than restating it, is
+//! total over both enums, and carries the asymmetry that makes the rule worth having. Both enums
+//! are `assay_common::claim` re-exports since ADR-048; that ADR records, and this file does not
+//! close, the gap that nothing pins `RunnerClaimGate::for_verdict` against the evidence gate.
 //!
 //! The one substantive assertion here is `absence_is_never_more_permissive_than_occurrence`. It is
 //! true today by construction, and it was never checked. A gate that lets an absence claim through

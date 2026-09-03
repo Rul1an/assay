@@ -1,20 +1,22 @@
-//! Parity between this crate's claim gate and the runner substrate's.
+//! Parity between this crate's claim gate and the runner substrate's (ADR-048, decision 5).
 //!
-//! Two implementations of one rule always drift. `assay-runner-schema` has gated claims by kind
-//! since 2026-06-01 (`RunnerClaimGate`) and by coverage descriptor since 2026-06-04
-//! (`CoverageDescriptor::claim_decision`); `assay-evidence` re-states the same rule over a different
-//! vocabulary because its inputs are different (a per-dimension coverage state and a source class,
-//! rather than a runner fidelity verdict and a descriptor).
+//! ADR-048 moved the two shared enums into `assay_common::claim`, so the vocabulary can no longer
+//! drift and the enum-equality half of this file is retired: both sides now consume one type. The
+//! tables did not move. `CoverageDescriptor::claim_decision_for` (runner) and
+//! `coding_agent_claim_decision` (evidence) answer from different inputs — a coverage descriptor
+//! there, a per-dimension coverage state and a source class here — and this file keeps their
+//! overlapping readings from drifting, which a shared type cannot do on its own.
 //!
-//! Ideally one would call the other. It cannot today: the runner substrate is documented as
-//! internal and API-unstable, and its inputs are runner-domain vocabulary that an evidence pack does
-//! not have. Promoting the shared mechanism into `assay-common` is a real ADR question — the
-//! CLAUDE.md admission test ("a mechanism whose second implementation would silently mean something
-//! different") is arguably met, and this file is the evidence that it is met, since the first draft
-//! of the evidence-side rule *did* silently mean something different.
+//! Two gaps are known and deliberately left open, recorded in ADR-048 rather than fixed here:
 //!
-//! Until that decision is taken, this is the sanctioned fallback: run both over the states that
-//! correspond and require the same decision. `assay-runner-schema` is a dev-dependency only.
+//! * The fidelity table, `RunnerClaimGate::for_verdict`, is **not** pinned against the evidence
+//!   gate by this file or any other. `claim_support_parity.rs` pins it only to its own crate's
+//!   `claim_support` projection.
+//! * The complete-coverage leg below is dead: no shipped descriptor constructor satisfies the
+//!   runner's completeness rule, so that test prints a notice and skips.
+//!
+//! `assay-runner-schema` is a dev-dependency only; the production edge ADR-048 admitted runs the
+//! other way, `assay-runner-schema -> assay-common`.
 
 use assay_evidence::{
     coding_agent_claim_decision, CodingAgentClaimKind, CodingAgentCoverageState,
@@ -22,21 +24,12 @@ use assay_evidence::{
 };
 use assay_runner_schema::{ClaimGateDecision, CoverageClaimKind, CoverageDescriptor};
 
-/// The two claim-kind vocabularies, paired.
-fn kinds() -> Vec<(CodingAgentClaimKind, CoverageClaimKind)> {
+/// One vocabulary since ADR-048; `CoverageClaimKind` is the same type under the runner's name.
+fn kinds() -> Vec<CodingAgentClaimKind> {
     vec![
-        (
-            CodingAgentClaimKind::PositiveExistence,
-            CoverageClaimKind::PositiveExistence,
-        ),
-        (
-            CodingAgentClaimKind::ExhaustiveSet,
-            CoverageClaimKind::ExhaustiveSet,
-        ),
-        (
-            CodingAgentClaimKind::BoundedNegative,
-            CoverageClaimKind::BoundedNegative,
-        ),
+        CodingAgentClaimKind::PositiveExistence,
+        CodingAgentClaimKind::ExhaustiveSet,
+        CodingAgentClaimKind::BoundedNegative,
     ]
 }
 
@@ -48,18 +41,6 @@ fn allows_absence(descriptor: &CoverageDescriptor) -> bool {
         == ClaimGateDecision::Allowed
 }
 
-fn same(ours: CodingAgentGateDecision, theirs: ClaimGateDecision) -> bool {
-    matches!(
-        (ours, theirs),
-        (CodingAgentGateDecision::Allowed, ClaimGateDecision::Allowed)
-            | (
-                CodingAgentGateDecision::Degraded,
-                ClaimGateDecision::Degraded
-            )
-            | (CodingAgentGateDecision::Blocked, ClaimGateDecision::Blocked)
-    )
-}
-
 /// Nothing watched here, and no descriptor there: both must block every claim kind.
 #[test]
 fn no_observation_matches_missing_descriptor() {
@@ -67,17 +48,17 @@ fn no_observation_matches_missing_descriptor() {
         CodingAgentCoverageState::Absent,
         CodingAgentCoverageState::Unavailable,
     ] {
-        for (ours_kind, their_kind) in kinds() {
+        for kind in kinds() {
             let ours = coding_agent_claim_decision(
                 // The strongest source class, so any disagreement is about coverage and not vantage.
                 CodingAgentSourceClass::IndependentlyObserved,
                 coverage,
-                ours_kind,
+                kind,
             );
-            let theirs = CoverageDescriptor::claim_decision_for(None, their_kind);
+            let theirs = CoverageDescriptor::claim_decision_for(None, kind);
             assert!(
-                same(ours.decision, theirs.decision),
-                "{coverage:?}/{ours_kind:?}: evidence says {:?}, runner says {:?} ({})",
+                ours.decision == theirs.decision,
+                "{coverage:?}/{kind:?}: evidence says {:?}, runner says {:?} ({})",
                 ours.decision,
                 theirs.decision,
                 theirs.rule
@@ -100,16 +81,16 @@ fn partial_coverage_matches_partial_completeness() {
         "fixture must actually be partial, or this test proves nothing"
     );
 
-    for (ours_kind, their_kind) in kinds() {
+    for kind in kinds() {
         let ours = coding_agent_claim_decision(
             CodingAgentSourceClass::BoundaryObserved,
             CodingAgentCoverageState::Partial,
-            ours_kind,
+            kind,
         );
-        let theirs = descriptor.claim_decision(their_kind);
+        let theirs = descriptor.claim_decision(kind);
         assert!(
-            same(ours.decision, theirs.decision),
-            "partial/{ours_kind:?}: evidence says {:?}, runner says {:?} ({})",
+            ours.decision == theirs.decision,
+            "partial/{kind:?}: evidence says {:?}, runner says {:?} ({})",
             ours.decision,
             theirs.decision,
             theirs.rule
@@ -127,16 +108,16 @@ fn full_coverage_matches_complete_descriptor() {
         eprintln!("no shipped descriptor reports complete coverage; leg skipped deliberately");
         return;
     }
-    for (ours_kind, their_kind) in kinds() {
+    for kind in kinds() {
         let ours = coding_agent_claim_decision(
             CodingAgentSourceClass::BoundaryObserved,
             CodingAgentCoverageState::Observed,
-            ours_kind,
+            kind,
         );
-        let theirs = complete.claim_decision(their_kind);
+        let theirs = complete.claim_decision(kind);
         assert!(
-            same(ours.decision, theirs.decision),
-            "observed/{ours_kind:?}: evidence says {:?}, runner says {:?} ({})",
+            ours.decision == theirs.decision,
+            "observed/{kind:?}: evidence says {:?}, runner says {:?} ({})",
             ours.decision,
             theirs.decision,
             theirs.rule
@@ -195,4 +176,48 @@ fn self_reported_is_documented_as_out_of_parity_scope() {
     );
     assert_eq!(ours.decision, CodingAgentGateDecision::Degraded);
     assert_eq!(ours.rule, "self_reported_degrades_positive_claim");
+}
+
+/// The four public paths are re-exports of one shared type (ADR-048, decision 6): a value read
+/// through any of them is assignable through any other without conversion. Before the move this
+/// did not compile, which is the whole point of the move.
+#[test]
+fn public_claim_vocabulary_paths_are_reexports_of_one_type() {
+    let decision: assay_runner_schema::ClaimGateDecision =
+        assay_common::claim::ClaimDecision::Degraded;
+    let same_decision: assay_evidence::CodingAgentGateDecision = decision;
+    assert_eq!(same_decision, assay_common::claim::ClaimDecision::Degraded);
+
+    let kind: assay_runner_schema::CoverageClaimKind =
+        assay_common::claim::ClaimKind::BoundedNegative;
+    let same_kind: assay_evidence::CodingAgentClaimKind = kind;
+    assert_eq!(same_kind, assay_common::claim::ClaimKind::BoundedNegative);
+}
+
+/// Type identity, not just assignability: every former public path names the one shared type.
+/// This is the intentional ADR-048 break stated positively — a downstream `From` bridge or two
+/// local trait impls across the former pair now overlap, because there is no pair.
+#[test]
+fn every_former_path_is_the_same_type_id() {
+    use std::any::TypeId;
+    let decision = TypeId::of::<assay_common::claim::ClaimDecision>();
+    assert_eq!(
+        decision,
+        TypeId::of::<assay_runner_schema::ClaimGateDecision>()
+    );
+    assert_eq!(
+        decision,
+        TypeId::of::<assay_evidence::CodingAgentGateDecision>()
+    );
+    assert_eq!(
+        decision,
+        TypeId::of::<assay_evidence::coding_agent::CodingAgentGateDecision>()
+    );
+    let kind = TypeId::of::<assay_common::claim::ClaimKind>();
+    assert_eq!(kind, TypeId::of::<assay_runner_schema::CoverageClaimKind>());
+    assert_eq!(kind, TypeId::of::<assay_evidence::CodingAgentClaimKind>());
+    assert_eq!(
+        kind,
+        TypeId::of::<assay_evidence::coding_agent::CodingAgentClaimKind>()
+    );
 }

@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CgroupCorrelationStatus, KernelLayerStatus, ObservationHealth, ObservationHealthError,
-    OBSERVATION_HEALTH_SCHEMA,
+    CgroupCorrelationStatus, ClaimGateDecision, KernelLayerStatus, ObservationHealth,
+    ObservationHealthError, OBSERVATION_HEALTH_SCHEMA,
 };
 
 pub const RUNNER_FIDELITY_VERDICT_SCHEMA: &str = "assay.runner.fidelity_verdict.v0";
@@ -27,14 +27,6 @@ pub enum RunnerFidelityVerdict {
     CorrelationPartial,
     Failed,
     NotApplicable,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ClaimGateDecision {
-    Allowed,
-    Degraded,
-    Blocked,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

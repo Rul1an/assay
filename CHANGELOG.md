@@ -5,9 +5,18 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
-- Open the Assay 6.0 source line for the two bounded, already accepted breaking changes in
-  ADR-047 and ADR-048. Published installation instructions and the install pin remain on verified
-  `v5.5.2` until `v6.0.0` exists and its release artifacts have been verified (#2764).
+- Open the Assay 6.0 source line for one bounded, already accepted breaking change: ADR-048.
+  ADR-047's next-major step was already paid in `v5.0.0` (#2139) and is not part of 6.0. Published
+  installation instructions and the install pin remain on verified `v5.5.2` until `v6.0.0` exists
+  and its release artifacts have been verified (#2764).
+- ADR-048: the claim-gate vocabulary `ClaimDecision { allowed, degraded, blocked }` and
+  `ClaimKind { positive_existence, exhaustive_set, bounded_negative }` now lives once, in
+  `assay_common::claim`. `assay_runner_schema::{ClaimGateDecision, CoverageClaimKind}` and
+  `assay_evidence::{CodingAgentGateDecision, CodingAgentClaimKind}` are re-exports of those types
+  under their former names, so existing imports keep resolving and the serialised spelling is
+  unchanged and now pinned by tests. `assay-runner-schema` gains a normal dependency on
+  `assay-common` (`default-features = false`). The decision tables stay in their crates. Code that
+  bridged the two former enums with a `From` impl no longer compiles, because they are one type.
 
 ## [5.5.2] - 2026-08-31
 
