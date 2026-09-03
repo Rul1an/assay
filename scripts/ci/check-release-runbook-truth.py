@@ -11,6 +11,8 @@ WORKFLOW = REPO / ".github/workflows/release.yml"
 DOCS = REPO / "docs/reference/release.md"
 
 _LSM_SMOKE = "lsm-smoke-test"
+_LSM_ITEM_TITLE = "Optional LSM verification"
+_LOCAL_LSM_CMD = "scripts/verify_lsm_docker.sh --release-tag vX.Y.Z"
 _BEFORE_CLAIM = re.compile(
     r"GitHub Release is created before crates publication",
     re.IGNORECASE,
@@ -21,11 +23,6 @@ _REVERSE_CLAIM = re.compile(
 )
 _NEEDS_RELEASE_IN_DOCS = re.compile(
     r"needs `release`|needs:\s*release(?:\s|,|\]|$)",
-)
-_OPTIONAL_LSM = re.compile(r"optional", re.IGNORECASE)
-_NOT_STABLE_REQ = re.compile(
-    r"not a stable-release requirement",
-    re.IGNORECASE,
 )
 
 
@@ -137,6 +134,29 @@ def _watch_ci(docs: str) -> str:
     return rest if cut < 0 else rest[:cut]
 
 
+def _checklist_item(docs: str, title: str) -> str:
+    heading = f"**{title}**"
+    idx = docs.find(heading)
+    if idx < 0:
+        raise AssertionError(f"runbook is missing {title} checklist item")
+    line_start = docs.rfind("\n", 0, idx)
+    start = 0 if line_start < 0 else line_start + 1
+    prefix = docs[start:idx]
+    if not re.fullmatch(r"- \[[ x]\] ", prefix):
+        raise AssertionError(f"{title} is not a checklist item")
+    lines = docs[start:].splitlines(keepends=True)
+    collected = [lines[0]]
+    for line in lines[1:]:
+        if line.startswith("- ") or line.startswith("#"):
+            break
+        collected.append(line)
+    return "".join(collected)
+
+
+def _optional_lsm_item(docs: str) -> str:
+    return _checklist_item(docs, _LSM_ITEM_TITLE)
+
+
 def _bullet_mentions_github_release(line: str) -> bool:
     stripped = line.strip()
     return stripped.startswith("-") and "`Create GitHub Release`" in stripped
@@ -186,30 +206,39 @@ def _workflow_problems(workflow: str) -> list[str]:
     return problems
 
 
+def _lsm_item_problems(docs: str) -> list[str]:
+    try:
+        item = _optional_lsm_item(docs)
+    except AssertionError as exc:
+        return [str(exc)]
+    problems: list[str] = []
+    if not re.search(r"optional", item, re.IGNORECASE):
+        problems.append(
+            "Optional LSM verification item does not state LSM verification is optional"
+        )
+    if not re.search(r"not a stable-release requirement", item, re.IGNORECASE):
+        problems.append(
+            "Optional LSM verification item does not state LSM verification is not a stable-release requirement"
+        )
+    if "workflow_dispatch" not in item or "`verify_lsm`" not in item:
+        problems.append(
+            "Optional LSM verification item omits the workflow_dispatch verify_lsm alternative"
+        )
+    if _LOCAL_LSM_CMD not in item:
+        problems.append(
+            "Optional LSM verification item omits the local "
+            "scripts/verify_lsm_docker.sh --release-tag vX.Y.Z alternative"
+        )
+    return problems
+
+
 def _docs_problems(docs: str) -> list[str]:
     problems: list[str] = []
     if _LSM_SMOKE in docs:
         problems.append(
             "runbook names nonexistent workflow lsm-smoke-test"
         )
-    if not re.search(r"`verify_lsm`", docs):
-        problems.append(
-            "runbook does not name the release.yml workflow_dispatch input verify_lsm"
-        )
-    if "workflow_dispatch" not in docs:
-        problems.append(
-            "runbook does not name verify_lsm as a workflow_dispatch input"
-        )
-    if "scripts/verify_lsm_docker.sh" not in docs:
-        problems.append(
-            "runbook does not name the local scripts/verify_lsm_docker.sh path"
-        )
-    if not _OPTIONAL_LSM.search(docs):
-        problems.append("runbook does not state LSM verification is optional")
-    if not _NOT_STABLE_REQ.search(docs):
-        problems.append(
-            "runbook does not state LSM verification is not a stable-release requirement"
-        )
+    problems.extend(_lsm_item_problems(docs))
     if "publish-crates" not in docs or not _NEEDS_RELEASE_IN_DOCS.search(docs):
         problems.append(
             "runbook omits that publish-crates needs release"

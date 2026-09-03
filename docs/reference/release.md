@@ -120,7 +120,7 @@ it is not an installer failure.
   "$install_root/bin/assay" --version
   ```
   This exercises the lockfile shipped with the published CLI rather than the workspace lock.
-- [ ] **Optional LSM verification**: Not a stable-release requirement. Dispatch `release.yml` with the optional `workflow_dispatch` input `verify_lsm`, or run the supported local path `scripts/verify_lsm_docker.sh`.
+- [ ] **Optional LSM verification**: Not a stable-release requirement. Dispatch `release.yml` with the optional `workflow_dispatch` input `verify_lsm`, or run the supported local path `scripts/verify_lsm_docker.sh --release-tag vX.Y.Z`.
 - [ ] **SBOM Asset Check**: Confirm the GitHub release includes `assay-${VERSION}-sbom-cyclonedx.tar.gz` and `assay-${VERSION}-sbom-cyclonedx.tar.gz.sha256`.
 - [ ] **MCPB Asset Check**: Confirm the GitHub release includes `assay-mcp-server-${VERSION}-linux.mcpb` and `assay-mcp-server-${VERSION}-linux.mcpb.sha256`.
 - [ ] **Registry Metadata Check**: Confirm the GitHub release includes `server.json` generated from the MCPB asset and matching SHA-256.

@@ -108,6 +108,30 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
         )
         self.assertTrue(problems)
 
+    def test_docs_omit_release_tag_on_local_lsm_bites(self) -> None:
+        mutated = replace_once(
+            self.docs,
+            "scripts/verify_lsm_docker.sh --release-tag vX.Y.Z",
+            "scripts/verify_lsm_docker.sh",
+        )
+        problems = contract.contract_problems(self.workflow, mutated)
+        self.assertTrue(problems, "mutation survived")
+        self.assertTrue(
+            any("--release-tag" in problem for problem in problems),
+            problems,
+        )
+
+    def test_docs_move_lsm_phrase_outside_item_bites(self) -> None:
+        mutated = replace_once(
+            self.docs,
+            "Not a stable-release requirement. ",
+            "",
+        ) + "\nNot a stable-release requirement.\n"
+        self.assertIn("not a stable-release requirement", mutated.lower())
+        self.assert_mutation_bites(docs=mutated)
+        item = contract._optional_lsm_item(mutated)
+        self.assertNotIn("not a stable-release requirement", item.lower())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
