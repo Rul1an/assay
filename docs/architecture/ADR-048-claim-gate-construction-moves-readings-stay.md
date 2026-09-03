@@ -292,18 +292,20 @@ unaffected. Two gaps are recorded and not fixed here: the fidelity↔evidence pa
 the complete-coverage leg is dead. The migration slice must update both headers to name this ADR;
 this branch adds the ADR only and leaves both headers as they are.
 
-### 6. Public names are preserved; the semver gate must be made to cover both crates first.
+### 6. Public names are preserved; the semver gate covers both crates.
 
 The four existing enum types are public. The migration keeps all four paths resolving through
 re-exports or aliases onto `assay_common::claim`: `assay_runner_schema::ClaimGateDecision`,
 `assay_runner_schema::CoverageClaimKind`, `assay_evidence::CodingAgentGateDecision`, and
 `assay_evidence::CodingAgentClaimKind`.
 `cargo semver-checks` runs in `.github/workflows/split-wave0-gates.yml` (`check-release` against
-the last `v*` tag) for assay-common, policy, metrics, core, registry and evidence — and **not for
-`assay-runner-schema`** (`:459-476`, the `run_semver_for` allowlist). So the acceptance condition
-is un-runnable for one of the two crates today. Adding `assay-runner-schema` to that matrix is a
-prerequisite of the migration slice. If the check then reports a major, this follows ADR-047's
-precedent and waits for the next major.
+the highest version-sorted `v[0-9]*` tag, currently `v5.5.2`; this programme creates no prerelease
+tags) for `assay-common`, policy, metrics, core, registry, evidence and `assay-runner-schema`.
+PR #2758 added the schema crate and a routing test after this ADR identified
+the missing coverage. Checks against published `v5.5.2` classify the alias migration as a major
+change, so implementation proceeds on the Assay 6.0 source line tracked by issue #2764. This follows
+ADR-047's precedent: pay the accepted source break once in the next major rather than hiding it
+behind paths that still resolve.
 
 Neither enum is `#[non_exhaustive]`. The move is the one moment to decide whether the shared
 lattice should be; this ADR says **no** — a fourth member is a change to what every table means
@@ -347,12 +349,13 @@ when it has a basis, maps onto the lattice instead of authoring a sixth table.
 
 A published-crate migration across two crates, one new normal
 `assay-runner-schema -> assay-common` edge plus the corresponding dependency-map updates, gated on
-a semver check that must first be extended to cover one of them, for a mechanism that is currently
+the semver checks that now cover both affected public crates, for a mechanism that is currently
 correct and parity-pinned. Stated plainly: the argument is drift risk, not a live bug.
 
 ### What would reopen or block this
 
-- `cargo semver-checks` requiring a major for every alias shape → wait for the next major.
+- `cargo semver-checks` requiring a major for the alias migration → implement it only on the 6.0
+  source line.
 - A domain needing a fourth `ClaimDecision` member → amends this ADR; costs a major by decision 6.
 - `assay-mcp-server` acquiring a need to emit a claim → that is a basis question and reopens
   decision 3, not a wiring change.

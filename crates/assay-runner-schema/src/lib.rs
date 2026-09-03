@@ -16,9 +16,9 @@
 //!   claim kind, published as a table so a rule in another language can be
 //!   pinned against it rather than approximate it)
 //!
-//! The crate is `publish = false` until Slice 7 (repository extraction). It
-//! has no eBPF, monitor, CLI, fixture, filesystem-I/O, or projection-logic
-//! code; it is the data half of the runner v0 contract layer.
+//! The crate is published with the workspace release line. It has no eBPF,
+//! monitor, CLI, fixture, filesystem-I/O, or projection-logic code; it is the
+//! data half of the runner v0 contract layer.
 
 mod archive_manifest;
 mod claim_parity;
