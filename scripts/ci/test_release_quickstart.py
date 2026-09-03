@@ -289,6 +289,11 @@ class ReleaseArchiveShape(unittest.TestCase):
             "source checkout or an extracted published CLI archive",
             example_readme,
         )
+        self.assertIn(EXAMPLE_CHECKOUT_SENTENCE, example_readme)
+        self.assertIn(
+            f"cargo install assay-cli --version {PUBLISHED_VERSION} --locked",
+            example_readme,
+        )
         self.assertIn(
             "The installer is binary-only and does not carry this bounded quickstart",
             example_readme,
@@ -306,8 +311,18 @@ PACKED_SOURCE_MEMBERS = (
     ("quickstart-run", "examples/mcp-quickstart/run.py"),
     ("quickstart-mock", "examples/mcp-quickstart/mock_server.py"),
 )
+PUBLISHED_TAG = os.environ.get("ASSAY_QUICKSTART_PUBLISHED_TAG")
+if not PUBLISHED_TAG:
+    raise RuntimeError(
+        "ASSAY_QUICKSTART_PUBLISHED_TAG is missing; "
+        "run scripts/ci/run-release-quickstart-contract.sh"
+    )
+PUBLISHED_VERSION = PUBLISHED_TAG.removeprefix("v")
 CHECKOUT_SENTENCE = (
-    "For v5.5.2, run the last command from a source checkout or an extracted published CLI archive."
+    f"For {PUBLISHED_TAG}, run the last command from a source checkout or an extracted published CLI archive."
+)
+EXAMPLE_CHECKOUT_SENTENCE = (
+    f"For {PUBLISHED_TAG}, run this from a source checkout or an extracted published CLI archive."
 )
 ARCHIVE_ROOT_CLAIM = "From the root of this extracted CLI archive"
 QUICKSTART_COMMAND = "python3 examples/mcp-quickstart/run.py"

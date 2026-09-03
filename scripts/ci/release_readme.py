@@ -19,7 +19,7 @@ VERSION_RE = re.compile(rf"^{VERSION_PATTERN}$")
 COVERAGE_RE = re.compile(rf"^- Published v({VERSION_PATTERN}) CLI archives cover ", re.MULTILINE)
 TAG_RE = re.compile(rf"^v({VERSION_PATTERN})$")
 CHECKOUT_RE = re.compile(
-    r"For v5\.5\.2, run the last command from a source checkout or an extracted published CLI archive\.\s+"
+    rf"For v({VERSION_PATTERN}), run the last command from a source checkout or an extracted published CLI archive\.\s+"
     r"The installer is binary-only and does not carry the bounded\s+"
     r"quickstart assets\."
 )
