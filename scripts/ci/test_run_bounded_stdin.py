@@ -25,6 +25,8 @@ WORKFLOW = ROOT / "scripts/ci/claude_plugin_install_workflow.py"
 STDIN_256K = b"x" * 262_144
 DEADLINE_S = "0.05"
 SUCCESS_DEADLINE_S = "0.5"
+CEILING_DEADLINE_S = "0.5"
+EXIT_CLASSIFIER_DEADLINE_S = "0.5"
 SLEEP_S = 0.35
 WALL_S = 1.0
 SUBPROCESS_ENV = {**os.environ, "ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS": DEADLINE_S}
@@ -372,10 +374,16 @@ class BoundedStdinTests(unittest.TestCase):
         self.assertEqual(outcome.result.returncode, 0)
 
     def test_stdout_over_ceiling_terminates_tree(self) -> None:
-        outcome = self._run("flood", b"")
+        outcome = self._run("flood", b"", timeout_s=CEILING_DEADLINE_S)
         self.assertEqual(outcome.kind, "err", outcome.reason)
         self.assertIn("ceiling", outcome.reason)
         self.assertIn("stdout", outcome.reason)
+
+    def test_stdout_ceiling_probe_uses_its_classifier_budget(self) -> None:
+        ceiling = Outcome("err", 0.0, reason="stdout exceeded ceiling")
+        with patch.object(self, "_run", return_value=ceiling) as run:
+            self.test_stdout_over_ceiling_terminates_tree()
+        run.assert_called_once_with("flood", b"", timeout_s=CEILING_DEADLINE_S)
 
     def test_deadline_reaps_direct_child_and_descendant(self) -> None:
         child_record_path = self.cwd / "child-record.json"
@@ -427,10 +435,26 @@ class BoundedStdinTests(unittest.TestCase):
         argv = _python(
             "import sys\nsys.stderr.write('err-sentinel\\n')\nraise SystemExit(7)\n"
         )
-        outcome = _invoke(WORKFLOW_MOD.run_bounded, argv, b"", self.cwd, self.pidfile)
+        outcome = _invoke(
+            WORKFLOW_MOD.run_bounded,
+            argv,
+            b"",
+            self.cwd,
+            self.pidfile,
+            timeout_s=EXIT_CLASSIFIER_DEADLINE_S,
+        )
         self.assertEqual(outcome.kind, "err", outcome.reason)
         self.assertIn("exited 7", outcome.reason)
         self.assertIn("err-sentinel", outcome.reason)
+
+    def test_rejected_exit_probe_uses_its_classifier_budget(self) -> None:
+        classified = Outcome("err", 0.0, reason="command exited 7: err-sentinel")
+        with patch(__name__ + "._invoke", return_value=classified) as invoke:
+            self.test_exit_7_rejected_preserves_sentinel()
+        self.assertEqual(
+            invoke.call_args.kwargs.get("timeout_s"),
+            EXIT_CLASSIFIER_DEADLINE_S,
+        )
 
     def test_exit_7_allowed_preserves_rc_and_stderr(self) -> None:
         argv = _python(
@@ -441,7 +465,7 @@ class BoundedStdinTests(unittest.TestCase):
         )
         with patch.dict(
             os.environ,
-            {"ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS": DEADLINE_S},
+            {"ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS": EXIT_CLASSIFIER_DEADLINE_S},
             clear=False,
         ):
             result = WORKFLOW_MOD.run_bounded(
@@ -454,6 +478,19 @@ class BoundedStdinTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 7)
         self.assertIn(b"err-sentinel", result.stderr)
+
+    def test_allowed_exit_probe_uses_its_classifier_budget(self) -> None:
+        observed: dict[str, str | None] = {}
+
+        def classified(*_args: Any, **_kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+            observed["timeout"] = os.environ.get(
+                "ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS"
+            )
+            return subprocess.CompletedProcess([], 7, b"", b"err-sentinel\n")
+
+        with patch.object(WORKFLOW_MOD, "run_bounded", side_effect=classified):
+            self.test_exit_7_allowed_preserves_rc_and_stderr()
+        self.assertEqual(observed["timeout"], EXIT_CLASSIFIER_DEADLINE_S)
 
     def test_mutation_swallow_exit_7_goes_red(self) -> None:
         argv = _python(
