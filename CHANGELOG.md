@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-09-03
+
 ### Changed
 - Open the Assay 6.0 source line for one bounded, already accepted breaking change: ADR-048.
   ADR-047's next-major step was already paid in `v5.0.0` (#2139) and is not part of 6.0. Published
