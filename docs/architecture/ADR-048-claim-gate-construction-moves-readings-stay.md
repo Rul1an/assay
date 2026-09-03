@@ -1,7 +1,8 @@
 # ADR-048: The claim gate shares one lattice and one invariant across three tables that legitimately differ — the two enums move to `assay-common`, the tables and the fold stay home, and the policy/trace path already makes absence claims it cannot base
 
 - Status: Accepted
-- Date: 2026-09-02 (revised three times the same day — after an adversarial review of the first draft, an exact-head review of that revision, and a full-base review of the result — and once more on 2026-09-03 after two further independent exact-head reviews; §"What the reviews corrected" lists every change)
+- Date: 2026-09-02 (revised after six review passes through 2026-09-03;
+  §"What the reviews corrected" lists every change)
 - Supersedes: none
 - Amends: none. ADR-046 governs when two vocabularies stay separate; §"Why ADR-046 does not decide this" states where its test lands the other way and where it does not.
 
@@ -395,6 +396,13 @@ by `claim_support_parity.rs` — the same fact §"The parity tests pin less than
 already stated, contradicted three sections earlier. The other caught two things: the `cargo tree`
 edge syntax was one cargo rejects, and decision 2 rested a `no_std` compile claim on a scratch crate
 nobody can inspect; it is now a requirement on the migration slice.
+
+A fifth pass caught that preserving the published `assay-runner-schema` names through aliases or
+re-exports necessarily creates a normal `assay-runner-schema -> assay-common` edge, while the draft
+still described the schema crate as a leaf and never authorised that edge. Decision 2 now authorises
+that edge only and requires the migration to update both `CLAUDE.md` and the generated dependency
+graph. A sixth pass caught that the correction itself was missing from this supposedly complete
+review history; this paragraph closes that provenance gap without changing the decision.
 
 ### Left open, deliberately
 
