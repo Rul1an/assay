@@ -659,7 +659,8 @@ export async function runProof(options) {
         childAlive &&
         child.stdin &&
         !child.stdin.destroyed &&
-        child.stdin.writable,
+        child.stdin.writable &&
+        !child.stdin.writableEnded,
     );
 
   let stdinFailureNoted = false;
@@ -687,20 +688,54 @@ export async function runProof(options) {
     child.stdin.on("error", onChildStdinError);
   }
 
-  const writeChildStdin = (payload) => {
+  const dropClientWrite = (id) => {
+    if (id != null) {
+      pending.delete(id);
+    }
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const event = events[i];
+      if (event.direction !== "client") {
+        continue;
+      }
+      if (id != null ? event.id !== id : event.method !== "initialized") {
+        continue;
+      }
+      const encoded = Buffer.byteLength(JSON.stringify(event), "utf8");
+      events.splice(i, 1);
+      retainedBytes = Math.max(0, retainedBytes - encoded);
+      break;
+    }
+  };
+
+  let inFlightWrites = 0;
+  const writeChildStdin = (payload, onFailed) => {
     if (!childStdinIsWritable()) {
-      return noteStdinFailure("child stdin is not writable");
-    }
-    try {
-      child.stdin.write(encode(payload));
-    } catch {
-      return noteStdinFailure("child stdin write failed");
-    }
-    if (stdinFailureNoted) {
+      noteStdinFailure("child stdin is not writable");
+      onFailed?.();
       return false;
     }
-    if (!child.stdin || child.stdin.destroyed || !child.stdin.writable) {
-      return noteStdinFailure("child stdin is not writable");
+    let encoded;
+    try {
+      encoded = encode(payload);
+    } catch {
+      noteStdinFailure("child stdin write failed");
+      onFailed?.();
+      return false;
+    }
+    inFlightWrites += 1;
+    try {
+      child.stdin.write(encoded, (err) => {
+        inFlightWrites = Math.max(0, inFlightWrites - 1);
+        if (err) {
+          noteStdinFailure("child stdin error");
+          onFailed?.();
+        }
+      });
+    } catch {
+      inFlightWrites = Math.max(0, inFlightWrites - 1);
+      noteStdinFailure("child stdin write failed");
+      onFailed?.();
+      return false;
     }
     return true;
   };
@@ -769,7 +804,7 @@ export async function runProof(options) {
             content: {},
           },
         };
-        if (writeChildStdin(reply)) {
+        if (writeChildStdin(reply, () => dropClientWrite(message.id))) {
           if (accepted) {
             acceptedElicitations += 1;
           }
@@ -833,11 +868,11 @@ export async function runProof(options) {
   const send = (method, params) => {
     const id = nextId;
     nextId += 1;
-    if (!writeChildStdin({ id, method, params })) {
-      return id;
-    }
     pending.set(id, method);
     retainEvent(projectRetainedEvent({ direction: "client", method, id, params }));
+    if (!writeChildStdin({ id, method, params }, () => dropClientWrite(id))) {
+      dropClientWrite(id);
+    }
     return id;
   };
 
@@ -884,7 +919,7 @@ export async function runProof(options) {
     });
     await waitFor(1);
     const initialized = { method: "initialized", params: {} };
-    if (writeChildStdin(initialized)) {
+    if (writeChildStdin(initialized, () => dropClientWrite())) {
       retainEvent(projectRetainedEvent({ direction: "client", ...initialized }));
     }
     send("skills/list", { forceReload: true, cwds: [options.projectRoot] });
@@ -986,6 +1021,12 @@ export async function runProof(options) {
   }, 1000);
   childExit = await childClosed;
   clearTimeout(killer);
+  while (inFlightWrites > 0 && Date.now() < runDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  if (inFlightWrites > 0) {
+    noteStdinFailure("child stdin write incomplete");
+  }
 
   return writeProofFiles(options, {
     events,

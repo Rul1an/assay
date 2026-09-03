@@ -336,7 +336,8 @@ test("mutation: removing the child-stdin write guard writes the closed pipe", as
         childAlive &&
         child.stdin &&
         !child.stdin.destroyed &&
-        child.stdin.writable,
+        child.stdin.writable &&
+        !child.stdin.writableEnded,
     );`;
   const mutatedPath = writeMutatedDriver((src) => {
     assert.match(src, /const childStdinIsWritable = \(\) =>/);
@@ -367,10 +368,10 @@ test("mutation: removing the child-stdin write guard writes the closed pipe", as
 });
 
 test("mutation: retaining a client elicitation reply after a failed stdin write invents a sent event", async () => {
-  const replyNeedle = "if (writeChildStdin(reply)) {";
+  const replyNeedle = "if (writeChildStdin(reply, () => dropClientWrite(message.id))) {";
   const mutatedPath = writeMutatedDriver((src) => {
-    assert.match(src, /if \(writeChildStdin\(reply\)\) \{/);
-    return src.replace(replyNeedle, "if (writeChildStdin(reply) || true) {");
+    assert.match(src, /if \(writeChildStdin\(reply, \(\) => dropClientWrite\(message\.id\)\)\) \{/);
+    return src.replace(replyNeedle, "if (writeChildStdin(reply, () => {}) || true) {");
   });
   const { runProof: runMutated } = await import(pathToFileURL(mutatedPath).href);
   const { events } = await drive("close-stdin-then-elicit-exit-0", "tool", { run: runMutated });
@@ -447,6 +448,137 @@ await runProof({
   const result = spawnSync(process.execPath, [script], { encoding: "utf8", timeout: 15_000 });
   assert.notEqual(result.status, 0, "removing the stdin error handler must fail the process");
   assert.match(`${result.stderr}\n${result.stdout}`, /EPIPE/);
+});
+
+test("delayed async EPIPE after elicitation-accept stdin write does not retain a client accept", async () => {
+  const projectRoot = seedProject();
+  const proofRoot = scratch();
+  const child = spawnFakeChild(
+    ["node", FAKE, "--scenario", "valid", "--project-root", projectRoot],
+    projectRoot,
+  );
+  const stdin = child.stdin;
+  const nativeWrite = stdin.write.bind(stdin);
+  stdin.write = function delayedEpipeOnAccept(chunk, encoding, cb) {
+    const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+    let parsed = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+    const isAccept =
+      parsed &&
+      parsed.method == null &&
+      parsed.result &&
+      parsed.result.action === "accept";
+    if (!isAccept) {
+      return nativeWrite(chunk, encoding, cb);
+    }
+    const err = Object.assign(new Error("write EPIPE"), {
+      errno: -32,
+      code: "EPIPE",
+      syscall: "write",
+    });
+    const callback = typeof encoding === "function" ? encoding : cb;
+    queueMicrotask(() => {
+      if (typeof callback === "function") {
+        callback(err);
+      }
+      stdin.emit("error", err);
+    });
+    return true;
+  };
+  const result = await runProof({
+    captureMode: "synthetic-fixture",
+    timeoutMs: 4000,
+    maxBytes: 1_048_576,
+    journey: "tool",
+    allowLiveTurn: false,
+    testOnlyChild: child,
+    proofRoot,
+    projectRoot,
+    assayMcpBin: path.join(projectRoot, "install/bin/assay-mcp-server"),
+  });
+  assert.equal(
+    clientParams(result.events, "mcpServer/elicitation/request").length,
+    0,
+    "must not retain a client elicitation accept whose write later EPIPE'd",
+  );
+  assert.equal(result.manifest.streamUnavailable, true);
+  assert.equal(result.driverOutcome.status, "unavailable");
+  assert.notEqual(result.driverOutcome.exitCode, 0);
+  const driverErrors = result.events.filter(
+    (event) => event.direction === "driver" && event.method === "error",
+  );
+  assert.equal(driverErrors.length, 1, "callback-error and stdin error must share one idempotent sink");
+});
+
+test("stdin write() returning false (backpressure) is not unavailable", async () => {
+  const { EventEmitter } = await import("node:events");
+  const { PassThrough } = await import("node:stream");
+  const projectRoot = seedProject();
+  const proofRoot = scratch();
+  const stdin = new PassThrough();
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const child = new EventEmitter();
+  child.stdin = stdin;
+  child.stdout = stdout;
+  child.stderr = stderr;
+  let closed = false;
+  const closeChild = () => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    child.emit("close", 0, null);
+  };
+  child.kill = () => closeChild();
+  stdin.on("finish", closeChild);
+  stdin.write = function backpressureWrite(chunk, encoding, cb) {
+    const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+    for (const line of text.split("\n")) {
+      if (!line.trim()) {
+        continue;
+      }
+      let message;
+      try {
+        message = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (message.method === "initialize") {
+        stdout.write(
+          `${JSON.stringify({ id: message.id, result: { userAgent: "backpressure-test" } })}\n`,
+        );
+      } else if (message.method === "skills/list") {
+        stdout.write(`${JSON.stringify({ id: message.id, result: { data: [] } })}\n`);
+      }
+    }
+    const callback = typeof encoding === "function" ? encoding : cb;
+    if (typeof callback === "function") {
+      queueMicrotask(() => callback());
+    }
+    return false;
+  };
+  const result = await runProof({
+    captureMode: "synthetic-fixture",
+    timeoutMs: 4000,
+    maxBytes: 1_048_576,
+    journey: "discovery",
+    allowLiveTurn: false,
+    testOnlyChild: child,
+    proofRoot,
+    projectRoot,
+    assayMcpBin: path.join(projectRoot, "install/bin/assay-mcp-server"),
+  });
+  assert.notEqual(result.manifest.streamUnavailable, true);
+  assert.equal(
+    result.events.some((event) => event.direction === "driver" && event.method === "error"),
+    false,
+    "write() returning false must not invent a stdin-failure driver error",
+  );
 });
 
 test("synthetic events never validate as actual-host proof", async () => {
