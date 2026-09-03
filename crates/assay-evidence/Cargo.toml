@@ -55,12 +55,13 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
-# DEV-ONLY, and deliberately not a production edge. `assay-runner-schema` is a leaf (serde +
-# thiserror), so this cannot cycle. It exists for tests/claim_gate_parity.rs: the runner substrate has
-# gated claims by kind since 2026-06-01 and this crate re-states the same rule over a different
-# vocabulary, so the two are pinned against each other rather than left to drift. Per
-# [[one-rule-one-function]] a parity test is the sanctioned fallback when one rule cannot simply call
-# the other; promoting this to a real dependency is an ADR question, not a test fixture.
+# DEV-ONLY, and deliberately not a production edge. It cannot cycle: `assay-runner-schema` and this
+# crate both depend toward `assay-common`, which depends on neither (ADR-048 gave the schema crate its
+# one normal edge, `assay-common` with `default-features = false`). It exists for
+# tests/claim_gate_parity.rs, which compares two distinct domain tables — the runner's descriptor
+# gate and this crate's coding-agent gate — that now consume the one shared ADR-048 vocabulary,
+# `assay_common::claim`. Per [[one-rule-one-function]] a parity test is the sanctioned fallback when
+# one table cannot simply call the other; the tables stay apart by decision, not by omission.
 assay-runner-schema = { workspace = true }
 getrandom = { version = "0.4", features = ["sys_rng"] }
 jsonschema.workspace = true
