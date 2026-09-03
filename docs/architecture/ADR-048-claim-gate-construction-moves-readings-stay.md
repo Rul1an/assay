@@ -227,6 +227,15 @@ both `#[serde(rename_all = "snake_case")]`, both deriving what the existing pair
 **neither deriving `Ord`**. `claim_parity.rs`'s refusal stands as written: the one comparison the
 tree needs stays a free function next to the invariant that needs it.
 
+This move explicitly authorises one new normal workspace edge:
+`assay-runner-schema -> assay-common`. The runner-schema crate is a leaf today
+(`CLAUDE.md:132`), but keeping its published type paths while making the common definitions their
+single source requires that edge; an alias or re-export cannot exist without it. The migration must
+update `CLAUDE.md` and the generated dependency graph in the same slice so that neither continues to
+describe `assay-runner-schema` as a leaf. No other new dependency edge is authorised by this
+decision, and this edge does not authorise moving a runner-domain table or reading into
+`assay-common`.
+
 The fold stays in `assay-evidence`. It folds the ceiling ladder, which is a source-class reading,
 and it consumes a decision carrying a `String` rule — so moving it would move a domain reading and
 require `alloc`. The first draft claimed the opposite on both counts and was wrong.
@@ -333,9 +342,10 @@ when it has a basis, maps onto the lattice instead of authoring a sixth table.
 
 ### What it costs
 
-A published-crate migration across two crates, gated on a semver check that must first be extended
-to cover one of them, for a mechanism that is currently correct and parity-pinned. Stated
-plainly: the argument is drift risk, not a live bug.
+A published-crate migration across two crates, one new normal
+`assay-runner-schema -> assay-common` edge plus the corresponding dependency-map updates, gated on
+a semver check that must first be extended to cover one of them, for a mechanism that is currently
+correct and parity-pinned. Stated plainly: the argument is drift risk, not a live bug.
 
 ### What would reopen or block this
 
