@@ -379,9 +379,10 @@ async fn adapter_drives_all_five_tools_and_unknown_tool() {
         json!({"name": "not_a_release_tool", "arguments": {}}),
     );
     let response = serve(&unknown, Some(&ctx)).await;
-    assert!(response.get("error").is_none(), "{response}");
-    assert_eq!(response["result"]["isError"], true);
-    assert_eq!(response["result"]["resultType"], "complete");
+    assert_eq!(response["error"]["code"], ERROR_INVALID_PARAMS);
+    assert_eq!(response["error"]["message"], "Unknown tool");
+    assert_eq!(response["error"]["data"], json!({ "kind": "unknown_tool" }));
+    assert!(response.get("result").is_none(), "{response}");
 }
 
 #[tokio::test]

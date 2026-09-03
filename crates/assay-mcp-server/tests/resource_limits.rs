@@ -90,19 +90,14 @@ fn test_transport_limit_exceeded() -> Result<()> {
         Some("Message too large"),
         "{resp}"
     );
+    // Complete data equality: an added reflected length/body field must not survive.
     assert_eq!(
-        err.pointer("/data/kind").and_then(Value::as_str),
-        Some("transport_limit"),
+        err.get("data"),
+        Some(&serde_json::json!({
+            "kind": "transport_limit",
+            "limit": LIMIT,
+        })),
         "{resp}"
-    );
-    assert_eq!(
-        err.pointer("/data/limit").and_then(Value::as_u64),
-        Some(LIMIT as u64),
-        "{resp}"
-    );
-    assert!(
-        err.get("data").and_then(|d| d.get("content")).is_none(),
-        "must not look like CallToolResult: {resp}"
     );
     assert!(
         !wire.contains(SENTINEL),
