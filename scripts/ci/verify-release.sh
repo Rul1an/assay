@@ -35,19 +35,24 @@ expected_absent_attestation() {
 
 classify_attestation() {
   local name="$1" status="$2"
-  if [[ "$status" == 404 ]] && expected_absent_attestation "$name"; then
-    printf '%s\n' "expected-absent"
-    return 0
-  fi
-  [[ "$status" == 200 ]] || return 1
-  printf '%s\n' "present"
+  case "$status" in
+    200) printf '%s\n' "present" ;;
+    404)
+      if expected_absent_attestation "$name"; then
+        printf '%s\n' "expected-absent"
+      else
+        return 1
+      fi
+      ;;
+    *) return 2 ;;
+  esac
 }
 
-# Capture command stdout before it is materialized as JSON; stderr remains visible.
-bounded_capture() {
-  local output="$1"
-  shift
-  "$PYTHON" - "$output" "$@" <<'PY'
+# Capture command output and its status under one deadline and byte ceiling.
+bounded_capture_with_status() {
+  local output="$1" status_output="$2"
+  shift 2
+  "$PYTHON" - "$output" "$status_output" "$@" <<'PY'
 import math
 import os
 import pathlib
@@ -57,7 +62,9 @@ import subprocess
 import sys
 import time
 
-output, command = pathlib.Path(sys.argv[1]), sys.argv[2:]
+output = pathlib.Path(sys.argv[1])
+status_output = pathlib.Path(sys.argv[2])
+command = sys.argv[3:]
 limit = 1024 * 1024
 raw_timeout = os.environ.get("ASSAY_RELEASE_GH_TIMEOUT_SECONDS", "60")
 try:
@@ -163,10 +170,87 @@ finally:
         if not pipe.closed:
             pipe.close()
 
-if process.returncode:
-    raise SystemExit(f"{command[0]} exited {process.returncode}")
 output.write_bytes(stdout)
+status_output.write_text(f"{process.returncode}\n", encoding="ascii")
 PY
+}
+
+# Most GitHub calls require exit zero. Attestation lookup is the exception: its
+# authenticated 404 is part of the release contract and must remain observable.
+bounded_capture() {
+  local output="$1" command_name
+  shift
+  command_name="${1:-command}"
+  local status_output="$WORK/bounded-capture-status" command_status
+  bounded_capture_with_status "$output" "$status_output" "$@" || return
+  IFS= read -r command_status <"$status_output"
+  if [[ "$command_status" -ne 0 ]]; then
+    printf '%s exited %s\n' "$command_name" "$command_status" >&2
+    return 1
+  fi
+}
+
+parse_gh_api_response() {
+  local envelope="$1" response="$2"
+  "$PYTHON" - "$envelope" "$response" <<'PY'
+import pathlib
+import re
+import sys
+
+raw = pathlib.Path(sys.argv[1]).read_bytes()
+separator = b"\r\n\r\n" if b"\r\n\r\n" in raw else b"\n\n"
+if separator not in raw:
+    raise SystemExit("GitHub API response has no header boundary")
+headers, body = raw.split(separator, 1)
+status_line = headers.splitlines()[0] if headers else b""
+match = re.fullmatch(rb"HTTP/(?:1\.[01]|2(?:\.0)?) ([0-9]{3})(?: .*)?", status_line)
+if not match:
+    raise SystemExit("GitHub API response has no valid HTTP status line")
+pathlib.Path(sys.argv[2]).write_bytes(body)
+print(match.group(1).decode("ascii"))
+PY
+}
+
+query_attestation() {
+  local name="$1" digest="$2" response="$3"
+  local envelope="${response}.envelope" status_output="${response}.command-status"
+  local command_status http_status classification
+
+  # The current verifier consumes the inline bundle retained by this API version;
+  # 2026-03-10 replaces it with a separately encoded bundle_url.
+  bounded_capture_with_status "$envelope" "$status_output" \
+    "$GH" api --include \
+      -H 'Accept: application/vnd.github+json' \
+      -H 'X-GitHub-Api-Version: 2022-11-28' \
+      "repos/$REPO/attestations/$digest" || return 2
+  IFS= read -r command_status <"$status_output"
+  http_status="$(parse_gh_api_response "$envelope" "$response")" || return 2
+
+  if [[ "$http_status" == 200 ]]; then
+    [[ "$command_status" -eq 0 ]] || return 2
+  else
+    [[ "$command_status" -ne 0 ]] || return 2
+  fi
+
+  classification="$(classify_attestation "$name" "$http_status")" || return $?
+  printf '%s\n' "$classification"
+}
+
+check_asset_attestation() {
+  local name="$1" digest="$2" response="$3"
+  local classification query_status=0
+  classification="$(query_attestation "$name" "$digest" "$response")" || query_status=$?
+  case "$query_status" in
+    0) ;;
+    1) finding "required attestation is absent: $name" ;;
+    2) infra "could not query attestation: $name" ;;
+    *) infra "attestation query returned an unknown status: $name" ;;
+  esac
+  case "$classification" in
+    present) verify_attestation_json "$response" || finding "invalid attestation: $name" ;;
+    expected-absent) ;;
+    *) infra "attestation query returned an unknown classification: $name" ;;
+  esac
 }
 
 require_tools() {
@@ -348,12 +432,8 @@ post_publish() {
       actual="sha256:$(hash_file "$WORK/assets/$name")"
       [[ "$actual" == "$digest" ]] || finding "server.json bytes differ from API digest"
     fi
-    local response="$WORK/attestation-${name}.json" status
-    status="$("$CURL" --silent --show-error --location --max-time 60 --output "$response" --write-out '%{http_code}' \
-      -H 'Accept: application/vnd.github+json' \
-      "https://api.github.com/repos/$REPO/attestations/$digest")" || infra "could not query attestation: $name"
-    classify_attestation "$name" "$status" >/dev/null || finding "unexpected attestation status $status: $name"
-    [[ "$status" == 404 ]] || verify_attestation_json "$response" || finding "invalid attestation: $name"
+    local response="$WORK/attestation-${name}.json"
+    check_asset_attestation "$name" "$digest" "$response"
   done <"$WORK/assets.tsv"
 
   local crate response newest
@@ -418,6 +498,13 @@ case "${1:-}" in
     [[ $# -eq 3 && "$2" =~ v([0-9]+\.[0-9]+\.[0-9]+) ]] || usage
     VERSION="${BASH_REMATCH[1]}"
     classify_attestation "$2" "$3"
+    exit $?
+    ;;
+  --unit-check-attestation)
+    [[ $# -eq 4 && "$2" =~ v([0-9]+\.[0-9]+\.[0-9]+) ]] || usage
+    VERSION="${BASH_REMATCH[1]}"
+    [[ "$3" =~ ^sha256:[0-9a-f]{64}$ ]] || usage
+    check_asset_attestation "$2" "$3" "$4"
     exit $?
     ;;
   --pre-tag) MODE="pre-tag"; if [[ $# -eq 2 ]]; then PIN_SHA="$2"; elif [[ $# -ne 1 ]]; then usage; fi ;;

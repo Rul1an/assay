@@ -208,6 +208,117 @@ for name in \
     || fail "expected-absent attestation was not classified green: $name"
 done
 expect_status 1 "$ORACLE" --unit-classify-attestation assay-v5.3.0-x86_64-unknown-linux-gnu.tar.gz 404
+for status in 401 403 429 500; do
+  expect_status 2 "$ORACLE" --unit-classify-attestation \
+    assay-v5.3.0-x86_64-unknown-linux-gnu.tar.gz "$status"
+done
+
+# Attestation lookup must use the authenticated GitHub client while preserving
+# the HTTP status needed to distinguish expected absence from infrastructure.
+attestation_gh="$tmp/attestation-gh"
+attestation_gh_log="$tmp/attestation-gh.log"
+cat >"$attestation_gh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$FAKE_GH_LOG"
+[[ "${1:-}" == api && "${2:-}" == --include ]] || exit 64
+shift 2
+[[ " $* " == *" -H Accept: application/vnd.github+json "* ]] || exit 65
+[[ " $* " == *" -H X-GitHub-Api-Version: 2022-11-28 "* ]] || exit 66
+[[ "${*: -1}" == repos/Rul1an/assay/attestations/sha256:* ]] || exit 67
+[[ "${FAKE_HTTP_STATUS:-}" != transport ]] || exit 68
+if [[ "${FAKE_HTTP_STATUS:-}" == timeout ]]; then
+  sleep 30
+fi
+if [[ "${FAKE_HTTP_STATUS:-}" == oversize ]]; then
+  printf 'HTTP/2.0 200 Fixture\r\nContent-Type: application/json\r\n\r\n'
+  python3 - <<'PY'
+import sys
+sys.stdout.write("x" * (1024 * 1024 + 1))
+PY
+  sleep 30
+fi
+printf 'HTTP/2.0 %s Fixture\r\nContent-Type: application/json\r\n\r\n' "$FAKE_HTTP_STATUS"
+if [[ -v FAKE_HTTP_BODY ]]; then
+  printf '%s\n' "$FAKE_HTTP_BODY"
+else
+  printf '%s\n' '{}'
+fi
+[[ "$FAKE_HTTP_STATUS" == 200 ]] || exit 1
+SH
+chmod +x "$attestation_gh"
+
+dummy_digest="sha256:$(printf 'a%.0s' {1..64})"
+attestation_response="$tmp/attestation-response.json"
+valid_attestation='{"attestations":[{"bundle":{"dsseEnvelope":{"payloadType":"application/vnd.in-toto+json"}}}]}'
+
+expect_status 0 env FAKE_GH_LOG="$attestation_gh_log" FAKE_HTTP_STATUS=200 \
+  FAKE_HTTP_BODY="$valid_attestation" GH="$attestation_gh" \
+  "$ORACLE" --unit-check-attestation \
+  assay-v5.3.0-x86_64-unknown-linux-gnu.tar.gz "$dummy_digest" "$attestation_response"
+[[ "$(cat "$attestation_response")" == "$valid_attestation" ]] \
+  || fail "authenticated attestation query did not retain the response body"
+
+expect_status 0 env FAKE_GH_LOG="$attestation_gh_log" FAKE_HTTP_STATUS=404 \
+  GH="$attestation_gh" "$ORACLE" --unit-check-attestation \
+  assay-v5.3.0-release-proof-kit.tar.gz "$dummy_digest" "$attestation_response"
+expect_status 1 env FAKE_GH_LOG="$attestation_gh_log" FAKE_HTTP_STATUS=404 \
+  GH="$attestation_gh" "$ORACLE" --unit-check-attestation \
+  assay-v5.3.0-x86_64-unknown-linux-gnu.tar.gz "$dummy_digest" "$attestation_response"
+for status in 401 403 429; do
+  expect_status 2 env FAKE_GH_LOG="$attestation_gh_log" FAKE_HTTP_STATUS="$status" \
+    GH="$attestation_gh" "$ORACLE" --unit-check-attestation \
+    assay-v5.3.0-x86_64-unknown-linux-gnu.tar.gz "$dummy_digest" "$attestation_response"
+done
+
+attestation_stderr="$tmp/attestation-refusal.stderr"
+status=0
+env FAKE_GH_LOG="$attestation_gh_log" FAKE_HTTP_STATUS=403 GH="$attestation_gh" \
+  "$ORACLE" --unit-check-attestation \
+  assay-v5.3.0-x86_64-unknown-linux-gnu.tar.gz "$dummy_digest" "$attestation_response" \
+  >/dev/null 2>"$attestation_stderr" || status=$?
+[[ "$status" -eq 2 ]] || fail "attestation refusal was not infrastructure (got $status)"
+grep -q '^INFRA:' "$attestation_stderr" \
+  || fail "attestation refusal diagnostic is not infrastructure"
+if grep -q '^FINDING:' "$attestation_stderr"; then
+  fail "attestation refusal was mislabeled as a finding"
+fi
+
+expect_status 2 env FAKE_GH_LOG="$attestation_gh_log" FAKE_HTTP_STATUS=transport \
+  GH="$attestation_gh" "$ORACLE" --unit-check-attestation \
+  assay-v5.3.0-x86_64-unknown-linux-gnu.tar.gz "$dummy_digest" "$attestation_response"
+
+expect_status 1 env FAKE_GH_LOG="$attestation_gh_log" FAKE_HTTP_STATUS=200 \
+  FAKE_HTTP_BODY='{}' GH="$attestation_gh" "$ORACLE" --unit-check-attestation \
+  assay-v5.3.0-x86_64-unknown-linux-gnu.tar.gz "$dummy_digest" "$attestation_response"
+
+attestation_stderr="$tmp/attestation-timeout.stderr"
+status=0
+env FAKE_GH_LOG="$attestation_gh_log" FAKE_HTTP_STATUS=timeout \
+  ASSAY_RELEASE_GH_TIMEOUT_SECONDS=0.2 GH="$attestation_gh" \
+  "$ORACLE" --unit-check-attestation \
+  assay-v5.3.0-x86_64-unknown-linux-gnu.tar.gz "$dummy_digest" "$attestation_response" \
+  >/dev/null 2>"$attestation_stderr" || status=$?
+[[ "$status" -eq 2 ]] || fail "attestation timeout was not infrastructure (got $status)"
+grep -q 'deadline' "$attestation_stderr" \
+  || fail "attestation timeout diagnostic does not name the deadline"
+
+attestation_stderr="$tmp/attestation-oversize.stderr"
+status=0
+env FAKE_GH_LOG="$attestation_gh_log" FAKE_HTTP_STATUS=oversize \
+  ASSAY_RELEASE_GH_TIMEOUT_SECONDS=2 GH="$attestation_gh" \
+  "$ORACLE" --unit-check-attestation \
+  assay-v5.3.0-x86_64-unknown-linux-gnu.tar.gz "$dummy_digest" "$attestation_response" \
+  >/dev/null 2>"$attestation_stderr" || status=$?
+[[ "$status" -eq 2 ]] || fail "oversize attestation response was not infrastructure (got $status)"
+grep -q 'combined stdout+stderr' "$attestation_stderr" \
+  || fail "oversize attestation diagnostic does not name the byte ceiling"
+
+grep -Fq 'api --include' "$attestation_gh_log" \
+  || fail "attestation lookup did not use authenticated gh api"
+if grep -Eqi 'authorization|bearer|token' "$attestation_gh_log"; then
+  fail "attestation lookup exposed credential material in process arguments"
+fi
 
 # GitHub wraps the in-toto statement in a Sigstore bundle. The required
 # application/vnd.in-toto+json value belongs to dsseEnvelope.payloadType.
@@ -220,20 +331,44 @@ expect_status 0 "$ORACLE" --unit-verify-attestation-json "$attestation"
 
 # Mutation proof: treating expected 404s as failures must make the targeted
 # assertion red. This checks behavior through a copied oracle, not a mock.
-mutant="$tmp/verify-release.sh"
-cp "$ORACLE" "$mutant"
+mutant_dir="$tmp/expected-absent-mutant"
+mkdir -p "$mutant_dir"
+cp "$ORACLE" "$ASSET_CONTRACT" "$mutant_dir/"
+mutant="$mutant_dir/verify-release.sh"
 python3 - "$mutant" <<'PY'
 import pathlib
 import sys
 
 path = pathlib.Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
-needle = 'printf \'%s\\n\' "expected-absent"\n    return 0'
+needle = 'printf \'%s\\n\' "expected-absent"\n      else'
 if needle not in text:
     raise SystemExit("expected-absent implementation anchor moved")
-path.write_text(text.replace(needle, 'printf \'%s\\n\' "expected-absent"\n    return 1', 1), encoding="utf-8")
+path.write_text(text.replace(needle, 'return 1\n      else', 1), encoding="utf-8")
 PY
-expect_status 1 "$mutant" --unit-classify-attestation assay-v5.3.0-release-proof-kit.tar.gz 404
+expect_status 1 env FAKE_GH_LOG="$attestation_gh_log" FAKE_HTTP_STATUS=404 \
+  GH="$attestation_gh" "$mutant" --unit-check-attestation \
+  assay-v5.3.0-release-proof-kit.tar.gz "$dummy_digest" "$attestation_response"
+
+# Mutation proof: API refusal is infrastructure, never a release finding.
+infra_mutant_dir="$tmp/infra-mutant"
+mkdir -p "$infra_mutant_dir"
+cp "$ORACLE" "$ASSET_CONTRACT" "$infra_mutant_dir/"
+infra_mutant="$infra_mutant_dir/verify-release.sh"
+python3 - "$infra_mutant" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+needle = '    *) return 2 ;;'
+if text.count(needle) != 1:
+    raise SystemExit("attestation infrastructure classification anchor moved")
+path.write_text(text.replace(needle, '    *) return 1 ;;', 1), encoding="utf-8")
+PY
+expect_status 1 env FAKE_GH_LOG="$attestation_gh_log" FAKE_HTTP_STATUS=403 \
+  GH="$attestation_gh" "$infra_mutant" --unit-check-attestation \
+  assay-v5.3.0-x86_64-unknown-linux-gnu.tar.gz "$dummy_digest" "$attestation_response"
 
 # A heredoc supplies Python's stdin itself, so piping JSON into one silently
 # loses the JSON. Release and provenance JSON must be parsed from a path.
