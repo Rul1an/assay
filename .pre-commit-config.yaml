@@ -201,7 +201,7 @@ repos:
         entry: bash scripts/ci/run-release-quickstart-contract.sh
         language: system
         pass_filenames: false
-        files: ^(README\.md|examples/mcp-quickstart/(README\.md|policy\.yaml|run\.py|mock_server\.py)|scripts/ci/((release_readme|test_release_quickstart)\.py|run-release-quickstart-contract\.sh)|\.github/workflows/release\.yml|\.pre-commit-config\.yaml)$
+        files: ^(README\.md|examples/mcp-quickstart/(README\.md|policy\.yaml|run\.py|mock_server\.py)|scripts/ci/((release_readme|test_release_quickstart)\.py|(read-assay-release-tag|run-release-quickstart-contract)\.sh)|\.github/assay-release-tag|\.github/workflows/release\.yml|\.pre-commit-config\.yaml)$
 
       - id: claude-plugin-install-workflow-self-test
         name: Claude plugin install workflow self-test

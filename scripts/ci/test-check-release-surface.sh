@@ -169,12 +169,25 @@ import re
 import sys
 
 lines = Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
-start = next(i for i, line in enumerate(lines) if line.strip() == "- id: release-surface")
-end = next((i for i in range(start + 1, len(lines)) if lines[i].lstrip().startswith("- id:")), len(lines))
-files_lines = [line.strip().removeprefix("files: ") for line in lines[start:end] if line.strip().startswith("files: ")]
-if len(files_lines) != 1:
-    raise SystemExit("release-surface hook must have one files selector")
-pattern = re.compile(files_lines[0])
+
+
+def hook_pattern(hook_id: str) -> re.Pattern[str]:
+    start = next(i for i, line in enumerate(lines) if line.strip() == f"- id: {hook_id}")
+    end = next(
+        (i for i in range(start + 1, len(lines)) if lines[i].lstrip().startswith("- id:")),
+        len(lines),
+    )
+    files_lines = [
+        line.strip().removeprefix("files: ")
+        for line in lines[start:end]
+        if line.strip().startswith("files: ")
+    ]
+    if len(files_lines) != 1:
+        raise SystemExit(f"{hook_id} hook must have one files selector")
+    return re.compile(files_lines[0])
+
+
+pattern = hook_pattern("release-surface")
 for path in (
     ".github/assay-release-tag",
     "scripts/ci/read-assay-release-tag.sh",
@@ -197,6 +210,16 @@ for path in (
 ):
     if not pattern.search(path):
         raise SystemExit(f"release-surface hook omits {path}")
+
+quickstart_pattern = hook_pattern("release-quickstart-contract")
+for path in (
+    ".github/assay-release-tag",
+    "scripts/ci/read-assay-release-tag.sh",
+    "scripts/ci/run-release-quickstart-contract.sh",
+    "scripts/ci/test_release_quickstart.py",
+):
+    if not quickstart_pattern.search(path):
+        raise SystemExit(f"release-quickstart-contract hook omits {path}")
 PY
 }
 
