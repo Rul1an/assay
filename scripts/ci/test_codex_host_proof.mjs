@@ -2538,16 +2538,84 @@ test("host identity refuses a Codex installation without its code-mode host", ()
   const codex = writeVersionOnlyBin("codex", "codex-control/0.0.0");
   fs.rmSync(path.join(path.dirname(codex), HOST_SUBJECTS[1]));
   const mcp = writeVersionOnlyBin("assay-mcp-server", "assay-mcp-control/0.0.0");
+  const proofRoot = scratch();
   const previousPath = process.env.PATH;
   process.env.PATH = `${path.dirname(codex)}${path.delimiter}${path.dirname(mcp)}${path.delimiter}${previousPath}`;
   try {
     assert.throws(
-      () => resolveHostIdentity(),
+      () => resolveHostIdentity({ proofRoot }),
       /codex-code-mode-host/i,
       "the proof must refuse before Codex can resolve an unbound sibling helper",
     );
+    for (const subject of HOST_SUBJECTS) {
+      assert.equal(
+        fs.existsSync(path.join(proofRoot, subject)),
+        false,
+        `missing helper must not leave ${subject}`,
+      );
+    }
   } finally {
     process.env.PATH = previousPath;
+    fs.rmSync(proofRoot, { recursive: true, force: true });
+  }
+});
+
+test("code-mode host subject uses the platform runtime name", () => {
+  assert.equal(
+    HOST_SUBJECTS[1],
+    process.platform === "win32" ? "codex-code-mode-host.exe" : "codex-code-mode-host",
+  );
+});
+
+test("pre-existing proof subjects are refused without being deleted", () => {
+  const proofRoot = scratch();
+  const sentinel = path.join(proofRoot, HOST_SUBJECTS[1]);
+  fs.writeFileSync(sentinel, "pre-existing\n", { mode: 0o700 });
+  const codex = writeVersionOnlyBin("codex", "codex-control/0.0.0");
+  const mcp = writeVersionOnlyBin("assay-mcp-server", "assay-mcp-control/0.0.0");
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${path.dirname(codex)}${path.delimiter}${path.dirname(mcp)}${path.delimiter}${previousPath}`;
+  try {
+    assert.throws(
+      () => resolveHostIdentity({ proofRoot }),
+      /already exists/i,
+      "acquisition must refuse before touching an existing proof subject",
+    );
+    assert.equal(fs.readFileSync(sentinel, "utf8"), "pre-existing\n");
+  } finally {
+    process.env.PATH = previousPath;
+    fs.rmSync(proofRoot, { recursive: true, force: true });
+  }
+});
+
+test("partial acquisition removes every proof-owned subject", () => {
+  const proofRoot = scratch();
+  const codex = writeVersionOnlyBin("codex", "codex-control/0.0.0");
+  const mcp = writeVersionOnlyBin("assay-mcp-server", "assay-mcp-control/0.0.0");
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${path.dirname(codex)}${path.delimiter}${path.dirname(mcp)}${path.delimiter}${previousPath}`;
+  try {
+    assert.throws(
+      () => resolveHostIdentity({
+        proofRoot,
+        testOnlyAfterSnapshotRead(copied, _src, destName) {
+          if (destName === "assay-mcp-server.snapshot" && copied === 0) {
+            throw new Error("injected third-subject failure");
+          }
+        },
+      }),
+      /injected third-subject failure/i,
+    );
+    for (const subject of HOST_SUBJECTS) {
+      assert.equal(
+        fs.existsSync(path.join(proofRoot, subject)),
+        false,
+        `partial acquisition must remove ${subject}`,
+      );
+    }
+  } finally {
+    process.env.PATH = previousPath;
+    fs.rmSync(proofRoot, { recursive: true, force: true });
   }
 });
 
@@ -3814,6 +3882,57 @@ test("review closeout: proof-owned subject mutations fail closed", () => {
     if (observed) {
       fs.rmSync(path.dirname(observed.codexBin), { recursive: true, force: true });
       fs.rmSync(path.dirname(observed.mcpBin), { recursive: true, force: true });
+    }
+    fs.rmSync(proofRoot, { recursive: true, force: true });
+  }
+});
+
+test("review closeout: host identity is bound to the closed proof-root shape", () => {
+  const proofRoot = portableLiveProofRoot();
+  let observed;
+  let outsideRoot;
+  try {
+    observed = driveCli("valid", "tool", {
+      captureMode: "synthetic-fixture",
+      proofRoot,
+    });
+    assert.equal(validateProofRoot(proofRoot).ok, true, "unchanged control must validate");
+    const manifestPath = path.join(proofRoot, "manifest.json");
+    const control = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+
+    outsideRoot = scratch();
+    const outsideHelper = path.join(outsideRoot, HOST_SUBJECTS[1]);
+    fs.copyFileSync(control.hostIdentity.codexCodeModeHost.path, outsideHelper);
+    fs.chmodSync(outsideHelper, 0o700);
+    const rebound = structuredClone(control);
+    rebound.hostIdentity.codexCodeModeHost.path = fs.realpathSync(outsideHelper);
+    assert.equal(
+      sha256File(outsideHelper),
+      rebound.hostIdentity.codexCodeModeHost.sha256,
+      "the path mutation must preserve the helper digest",
+    );
+    fs.writeFileSync(manifestPath, stableStringify(rebound));
+    assert.equal(
+      validateProofRoot(proofRoot).ok,
+      false,
+      "an identical helper outside the proof root must not satisfy path binding",
+    );
+
+    const widened = structuredClone(control);
+    widened.hostIdentity.codexCodeModeHost.unexpected = true;
+    fs.writeFileSync(manifestPath, stableStringify(widened));
+    assert.equal(
+      validateProofRoot(proofRoot).ok,
+      false,
+      "the helper identity must remain the exact path+sha256 projection",
+    );
+  } finally {
+    if (observed) {
+      fs.rmSync(path.dirname(observed.codexBin), { recursive: true, force: true });
+      fs.rmSync(path.dirname(observed.mcpBin), { recursive: true, force: true });
+    }
+    if (outsideRoot) {
+      fs.rmSync(outsideRoot, { recursive: true, force: true });
     }
     fs.rmSync(proofRoot, { recursive: true, force: true });
   }

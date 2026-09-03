@@ -25,6 +25,7 @@ import {
   HARD_MAX_SNAPSHOT_BYTES,
   HARD_MAX_TIMEOUT_MS,
   HOST_ENV_NAMES,
+  HOST_SUBJECTS,
   SCHEMA,
   SKILL_NAME,
   boundedPositiveInt,
@@ -347,10 +348,8 @@ export function resolveHostIdentity(options = {}) {
     throw new Error("proofRoot is required for proof-owned host subjects");
   }
   const codexSource = resolveRegularBinary(codexPath, "codex");
-  const codeModeHostName =
-    process.platform === "win32" ? "codex-code-mode-host.exe" : "codex-code-mode-host";
+  const codeModeHostName = HOST_SUBJECTS[1];
   const codeModeHostSource = path.join(path.dirname(codexSource), codeModeHostName);
-  resolveRegularBinary(codeModeHostSource, "codex-code-mode-host");
   const snapRoot = requirePrivateProofRoot(options.proofRoot);
   const codexSnap = path.join(snapRoot, "codex.snapshot");
   const codeModeHostSnap = path.join(snapRoot, codeModeHostName);
