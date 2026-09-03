@@ -316,6 +316,7 @@ PUBLISHED_TAG = subprocess.run(
     cwd=ROOT,
     check=True,
     capture_output=True,
+    env={**os.environ, "GITHUB_OUTPUT": ""},
     text=True,
 ).stdout.strip()
 PUBLISHED_VERSION = PUBLISHED_TAG.removeprefix("v")
