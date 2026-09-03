@@ -1529,6 +1529,7 @@ seed_case "$case_root"
 CASE_ROOT="$case_root" python3 - <<'PY'
 import os
 from pathlib import Path
+import re
 
 path = Path(os.environ["CASE_ROOT"]) / ".github/workflows/kernel-matrix.yml"
 source = "run: ./scripts/ci/install-cargo-deny.sh"
@@ -1536,14 +1537,28 @@ replacement = "run: echo inline-parser-sentinel"
 text = path.read_text(encoding="utf-8")
 if text.count(source) != 1:
     raise SystemExit(f"inline run anchor is not unique: {source!r}")
-lint_steps_anchor = (
-    "  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n"
-    "    timeout-minutes: 10\n    permissions:\n      contents: read\n    steps:\n"
+lint_job_anchor = "  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n"
+if text.count(lint_job_anchor) != 1:
+    raise SystemExit(f"lint job anchor is not unique: {lint_job_anchor!r}")
+lint_start = text.index(lint_job_anchor)
+next_job = re.search(
+    r"^  [A-Za-z0-9_-]+:\n",
+    text[lint_start + len(lint_job_anchor) :],
+    re.MULTILINE,
 )
-if text.count(lint_steps_anchor) != 1:
-    raise SystemExit(f"lint steps anchor is not unique: {lint_steps_anchor!r}")
-text = text.replace(source, replacement, 1)
-text = text.replace(
+lint_end = (
+    lint_start + len(lint_job_anchor) + next_job.start()
+    if next_job is not None
+    else len(text)
+)
+lint_block = text[lint_start:lint_end]
+lint_steps_anchor = "    steps:\n"
+if lint_block.count(lint_steps_anchor) != 1:
+    raise SystemExit(f"lint steps anchor is not unique in lint job: {lint_steps_anchor!r}")
+if lint_block.count(source) != 1:
+    raise SystemExit(f"inline run anchor is not unique in lint job: {source!r}")
+lint_block = lint_block.replace(source, replacement, 1)
+lint_block = lint_block.replace(
     lint_steps_anchor,
     lint_steps_anchor.replace(
         "    steps:\n",
@@ -1551,6 +1566,7 @@ text = text.replace(
     ),
     1,
 )
+text = text[:lint_start] + lint_block + text[lint_end:]
 path.write_text(text, encoding="utf-8")
 PY
 inner_probe_count_path="$case_root/inner-structural-probe-count"
