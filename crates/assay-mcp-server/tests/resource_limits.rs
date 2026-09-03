@@ -45,52 +45,95 @@ fn extract_inner(resp: &Value) -> Value {
 
 #[test]
 fn test_transport_limit_exceeded() -> Result<()> {
-    // MAX_BYTES = 100
+    // Pre-parse max_msg_bytes rejection is a JSON-RPC protocol error (id null), not a
+    // CallToolResult / success result. Session must stay alive for a following in-limit request.
+    const LIMIT: usize = 100;
+    const SENTINEL: &str = "TRANSPORT_LIMIT_HOSTILE_SENTINEL";
     let mut conn = spawn_server_with_env(vec![("ASSAY_MCP_MAX_BYTES", "100")]);
 
-    // Create huge request
-    let huge_params = "x".repeat(200);
-    // Malformed params for tools/call but huge -> check if it hits limit first?
-    // Actually this test sends invalid params structure but huge payload.
+    let padding = "x".repeat(200);
     let req = serde_json::json!({
         "jsonrpc": "2.0",
         "method": "tools/call",
-        "params": { "huge": huge_params },
+        "params": { "huge": format!("{SENTINEL}{padding}") },
         "id": 1
     });
+    let req_wire = serde_json::to_string(&req).expect("serialize oversize request");
+    assert!(
+        req_wire.len() > LIMIT,
+        "fixture must exceed transport limit: len={} limit={LIMIT}",
+        req_wire.len()
+    );
+    assert!(
+        req_wire.contains(SENTINEL),
+        "fixture must embed sentinel for reflection check"
+    );
 
     let resp = send_req(&mut conn, req);
+    let wire = serde_json::to_string(&resp).expect("serialize response");
 
-    // If it hits transport limit in server.rs, it might return ToolError wrapping
-    // OR standard error.
-    // Given the previous test passed until unwrapping result, let's assume result exists.
+    assert!(
+        resp.get("result").is_none(),
+        "transport limit must not use JSON-RPC result: {resp}"
+    );
+    let err = resp
+        .get("error")
+        .unwrap_or_else(|| panic!("transport limit must be top-level JSON-RPC error: {resp}"));
+    assert_eq!(
+        resp.get("id"),
+        Some(&Value::Null),
+        "pre-parse refusal must use id null: {resp}"
+    );
+    assert_eq!(err.get("code"), Some(&Value::from(-32000)), "{resp}");
+    assert_eq!(
+        err.get("message").and_then(Value::as_str),
+        Some("Message too large"),
+        "{resp}"
+    );
+    assert_eq!(
+        err.pointer("/data/kind").and_then(Value::as_str),
+        Some("transport_limit"),
+        "{resp}"
+    );
+    assert_eq!(
+        err.pointer("/data/limit").and_then(Value::as_u64),
+        Some(LIMIT as u64),
+        "{resp}"
+    );
+    assert!(
+        err.get("data").and_then(|d| d.get("content")).is_none(),
+        "must not look like CallToolResult: {resp}"
+    );
+    assert!(
+        !wire.contains(SENTINEL),
+        "response must not reflect request body sentinel: {wire}"
+    );
+    assert!(
+        !wire.contains("E_LIMIT_EXCEEDED"),
+        "transport limit must not use tool-domain E_LIMIT_EXCEEDED: {wire}"
+    );
 
-    if let Some(_err) = resp.get("error") {
-        // Standard JSONRPC error?
-        return Ok(());
-    }
+    // Same session: a following in-limit request must still be answered.
+    let live = send_req(
+        &mut conn,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "tools/list",
+            "id": 2
+        }),
+    );
+    assert_eq!(live.get("id"), Some(&Value::from(2)), "liveness id: {live}");
+    assert!(
+        live.get("error").is_none(),
+        "session must continue after transport limit: {live}"
+    );
+    assert!(
+        live.pointer("/result/tools")
+            .map(Value::is_array)
+            .unwrap_or(false),
+        "expected tools/list result after oversize refusal: {live}"
+    );
 
-    let inner = extract_inner(&resp);
-    // If wrapping didn't happen (e.g. error before handler), inner is raw result?
-    // But extract_inner handles both.
-
-    // Check if we got E_LIMIT_EXCEEDED in error field (if present)
-    if let Some(err) = inner.get("error") {
-        if let Some(code) = err.get("code") {
-            if code.as_str() == Some("E_LIMIT_EXCEEDED") {
-                let allowed = inner
-                    .get("allowed")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                assert!(!allowed);
-                return Ok(());
-            }
-        }
-    }
-
-    // If we are here, test failed expectation?
-    // Not strictly failing if the server behavior regarding malformed vs huge changed.
-    // I'll leave basic check.
     conn.kill();
     Ok(())
 }
