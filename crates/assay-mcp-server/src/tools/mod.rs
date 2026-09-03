@@ -437,7 +437,7 @@ pub fn list_tools() -> Vec<Value> {
 }
 
 pub async fn handle_call(ctx: &ToolContext, name: &str, args: &Value) -> anyhow::Result<Value> {
-    // Membership is owned by `is_known_tool`; callers that skip
+    // Membership is owned by `list_tools` via `is_known_tool`; callers that skip
     // `classify_call_tool_params` still must not reflect `name`.
     if !is_known_tool(name) {
         return Err(anyhow::anyhow!("unknown tool"));
