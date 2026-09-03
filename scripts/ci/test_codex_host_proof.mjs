@@ -7,11 +7,13 @@
  */
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   parseArgs,
   resolveHostIdentity as resolveHostIdentityProduction,
@@ -21,7 +23,9 @@ import {
   CELLS,
   DECIDE_INPUT,
   DECIDE_TOOL,
+  EXPECTED_ELICITATION,
   EXPECTED_TOOLS,
+  FAKE_USER_AGENT,
   HARD_MAX_SNAPSHOT_BYTES,
   HOST_SUBJECTS,
   classifyRecord,
@@ -67,6 +71,268 @@ function spawnFakeChild(childArgv, projectRoot) {
     },
   });
 }
+
+function epipeError() {
+  return Object.assign(new Error("write EPIPE"), {
+    errno: -32,
+    code: "EPIPE",
+    syscall: "write",
+  });
+}
+
+function encodeLine(message) {
+  return `${JSON.stringify(message)}\n`;
+}
+
+function statusTools() {
+  return Object.fromEntries(EXPECTED_TOOLS.map((name) => [name, { name, inputSchema: {} }]));
+}
+
+function assayStatusRow(thread) {
+  if (thread.kind === "missing" || thread.kind === "invalid") {
+    return {
+      name: "assay",
+      authStatus: "unsupported",
+      resourceTemplates: [],
+      resources: [],
+      runtimeStatus: "failed",
+      tools: {},
+    };
+  }
+  return {
+    name: "assay",
+    authStatus: "unsupported",
+    resourceTemplates: [],
+    resources: [],
+    runtimeStatus: "connected",
+    tools: statusTools(),
+  };
+}
+
+function canonicalToolItem() {
+  return {
+    type: "mcpToolCall",
+    id: "call-1",
+    server: "assay",
+    tool: DECIDE_TOOL,
+    arguments: { ...DECIDE_INPUT },
+    status: "completed",
+    result: {
+      content: [{ type: "text", text: JSON.stringify({ allowed: true, reason: "Allowed by policy" }) }],
+      structuredContent: null,
+    },
+  };
+}
+
+function elicitAfterCloseChild(mode) {
+  const writesAfterClose = { count: 0 };
+  const stdin = new PassThrough();
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const child = new EventEmitter();
+  child.stdin = stdin;
+  child.stdout = stdout;
+  child.stderr = stderr;
+  let closed = false;
+  let stdinClosed = false;
+  const nativeWrite = stdin.write.bind(stdin);
+  stdin.write = function writeAfterClose(chunk, encoding, cb) {
+    if (stdinClosed) {
+      writesAfterClose.count += 1;
+      const err = epipeError();
+      queueMicrotask(() => stdin.emit("error", err));
+      if (typeof encoding === "function") {
+        encoding(err);
+      } else if (typeof cb === "function") {
+        cb(err);
+      }
+      return false;
+    }
+    return nativeWrite(chunk, encoding, cb);
+  };
+  const closeStdin = () => {
+    stdinClosed = true;
+    if (mode === "destroy") {
+      stdin.destroy();
+    }
+  };
+  const finish = (code) => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    child.emit("close", code, null);
+  };
+  child.kill = () => finish(1);
+  const threads = new Map();
+  let threadSeq = 0;
+  const emit = (message) => {
+    stdout.write(encodeLine(message));
+  };
+  const handle = (message) => {
+    const { id, method, params } = message;
+    if (method === "initialize") {
+      emit({
+        id,
+        result: {
+          userAgent: FAKE_USER_AGENT,
+          platformFamily: "unix",
+          platformOs: "linux",
+          codexHome: path.join(process.env.HOME || "/tmp", ".codex-home"),
+        },
+      });
+      return;
+    }
+    if (method === "initialized") {
+      return;
+    }
+    if (method === "skills/list") {
+      const projectRoot = params?.cwds?.[0] ?? "";
+      emit({
+        id,
+        result: {
+          data: [
+            {
+              cwd: projectRoot,
+              errors: [],
+              skills: [
+                {
+                  name: "assay-golden-path",
+                  description: "golden path",
+                  enabled: true,
+                  path: path.join(projectRoot, ".agents/skills/assay-golden-path/SKILL.md"),
+                  scope: "repo",
+                },
+              ],
+            },
+          ],
+        },
+      });
+      return;
+    }
+    if (method === "thread/start") {
+      threadSeq += 1;
+      const threadId = `thread-${threadSeq}`;
+      const assay = params?.config?.mcp_servers?.assay;
+      const command = assay?.command ?? "";
+      const args = assay?.args ?? [];
+      let kind = "primary";
+      if (String(command).includes("missing-assay-mcp-server")) {
+        kind = "missing";
+      } else if (args.some((value) => String(value).includes("missing-policy-root"))) {
+        kind = "invalid";
+      }
+      threads.set(threadId, { kind, cwd: params?.cwd ?? "" });
+      emit({
+        id,
+        result: {
+          cwd: params?.cwd ?? "",
+          approvalPolicy: "on-request",
+          approvalsReviewer: "user",
+          model: "none",
+          modelProvider: "none",
+          sandbox: { type: "readOnly" },
+          thread: {
+            id: threadId,
+            cwd: params?.cwd ?? "",
+            cliVersion: "fake",
+            createdAt: 0,
+            ephemeral: true,
+            modelProvider: "none",
+            preview: "",
+            projectId: null,
+            sessionId: "session-1",
+            source: "appServer",
+            status: { type: "idle" },
+            turns: [],
+            updatedAt: 0,
+          },
+        },
+      });
+      return;
+    }
+    if (method === "mcpServerStatus/list") {
+      const thread = threads.get(params?.threadId);
+      emit({ id, result: { data: [assayStatusRow(thread ?? { kind: "missing" })] } });
+      return;
+    }
+    if (method === "turn/start") {
+      const threadId = params?.threadId;
+      emit({
+        id,
+        result: { turn: { id: "turn-1", items: [], status: "inProgress" } },
+      });
+      closeStdin();
+      const item = canonicalToolItem();
+      emit({
+        id: "elicit-1",
+        method: "mcpServer/elicitation/request",
+        params: {
+          serverName: EXPECTED_ELICITATION.serverName,
+          threadId,
+          turnId: "turn-1",
+          message: EXPECTED_ELICITATION.message,
+          mode: EXPECTED_ELICITATION.mode,
+          requestedSchema: { type: "object", properties: {} },
+        },
+      });
+      emit({
+        method: "item/completed",
+        params: {
+          completedAtMs: 1,
+          threadId,
+          turnId: "turn-1",
+          item,
+        },
+      });
+      emit({
+        method: "turn/completed",
+        params: {
+          threadId,
+          turn: { id: "turn-1", items: [item], status: "completed" },
+        },
+      });
+      queueMicrotask(() => finish(1));
+    }
+  };
+  stdin.on("data", (chunk) => {
+    for (const line of String(chunk).split("\n")) {
+      if (line.trim()) {
+        handle(JSON.parse(line));
+      }
+    }
+  });
+  return { child, writesAfterClose };
+}
+
+function writeMutatedDriver(mutate) {
+  const dir = scratch();
+  fs.writeFileSync(path.join(dir, "codex_host_proof.mjs"), mutate(DRIVER_SRC));
+  fs.copyFileSync(
+    path.join(HERE, "codex_host_proof_validator.mjs"),
+    path.join(dir, "codex_host_proof_validator.mjs"),
+  );
+  return path.join(dir, "codex_host_proof.mjs");
+}
+
+async function runClosedStdinElicit(run, mode) {
+  const projectRoot = seedProject();
+  const proofRoot = scratch();
+  const { child, writesAfterClose } = elicitAfterCloseChild(mode);
+  const result = await run({
+    captureMode: "synthetic-fixture",
+    timeoutMs: 4000,
+    maxBytes: 1_048_576,
+    journey: "tool",
+    allowLiveTurn: false,
+    testOnlyChild: child,
+    proofRoot,
+    projectRoot,
+    assayMcpBin: path.join(projectRoot, "install/bin/assay-mcp-server"),
+  });
+  return { ...result, proofRoot, projectRoot, writesAfterClose };
+}
+
 
 async function drive(scenario, journey = "tool") {
   const projectRoot = scratch();
@@ -278,6 +544,96 @@ test("successful tool output plus nonzero child exit: CLI process is nonzero", a
   const cli = driveCli("exit-1-after-success");
   assert.notEqual(cli.status, 0, "driver CLI must not exit 0 when the child exits 1");
   assert.match(cli.stdout, /"exitCode":1/);
+});
+
+test("closed stdin then elicitation reply is fail-closed, not uncaught EPIPE", async () => {
+  const { classified, manifest, childExitCode, driverOutcome, writesAfterClose } =
+    await runClosedStdinElicit(runProof, "destroy");
+  assert.equal(writesAfterClose.count, 0, "guard must not write a destroyed stdin");
+  assert.equal(childExitCode, 1);
+  assert.notEqual(driverOutcome.exitCode, 0);
+  assert.equal(manifest.childExitCode, 1);
+  assert.notEqual(manifest.driverOutcome.exitCode, 0);
+  assert.equal(classified.cells.oneToolInvoked.status, "pass");
+  assert.notEqual(classified.externalAttestation, "pass");
+});
+
+test("mutation: removing the child-stdin write guard writes the closed pipe", async () => {
+  const guardNeedle = `const childStdinIsWritable = () =>
+    Boolean(
+      !stopped &&
+        childAlive &&
+        child.stdin &&
+        !child.stdin.destroyed &&
+        child.stdin.writable,
+    );`;
+  const mutatedPath = writeMutatedDriver((src) => {
+    assert.match(src, /const childStdinIsWritable = \(\) =>/);
+    return src.replace(guardNeedle, "const childStdinIsWritable = () => true;");
+  });
+  const { runProof: runMutated } = await import(pathToFileURL(mutatedPath).href);
+  const { writesAfterClose, childExitCode, driverOutcome, classified } =
+    await runClosedStdinElicit(runMutated, "destroy");
+  assert.ok(writesAfterClose.count > 0, "unguarded write must hit closed stdin");
+  assert.equal(childExitCode, 1);
+  assert.notEqual(driverOutcome.exitCode, 0);
+  assert.equal(classified.cells.oneToolInvoked.status, "pass");
+});
+
+test("mutation: removing the stdin error handler leaves EPIPE uncaught", () => {
+  const handlerNeedle = `  if (child.stdin) {
+    child.stdin.on("error", onChildStdinError);
+  }
+`;
+  const mutatedPath = writeMutatedDriver((src) => {
+    assert.match(src, /child\.stdin\.on\("error", onChildStdinError\)/);
+    return src.replace(handlerNeedle, "");
+  });
+  const script = path.join(scratch(), "run-handler-mutation.mjs");
+  fs.writeFileSync(
+    script,
+    `import { runProof } from ${JSON.stringify(pathToFileURL(mutatedPath).href)};
+import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { PassThrough } from "node:stream";
+
+const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "assay-2684-"));
+fs.mkdirSync(path.join(projectRoot, ".agents/skills/assay-golden-path"), { recursive: true });
+fs.writeFileSync(path.join(projectRoot, ".agents/skills/assay-golden-path/SKILL.md"), "# disposable canary\\n");
+const proofRoot = fs.mkdtempSync(path.join(os.tmpdir(), "assay-2684-"));
+const stdin = new PassThrough();
+const stdout = new PassThrough();
+const stderr = new PassThrough();
+const child = new EventEmitter();
+child.stdin = stdin;
+child.stdout = stdout;
+child.stderr = stderr;
+child.kill = () => child.emit("close", 1, null);
+stdin.write = (_chunk, encoding, cb) => {
+  const err = Object.assign(new Error("write EPIPE"), { errno: -32, code: "EPIPE", syscall: "write" });
+  queueMicrotask(() => stdin.emit("error", err));
+  if (typeof encoding === "function") encoding(err);
+  else if (typeof cb === "function") cb(err);
+  return false;
+};
+await runProof({
+  captureMode: "synthetic-fixture",
+  timeoutMs: 4000,
+  maxBytes: 1048576,
+  journey: "discovery",
+  allowLiveTurn: false,
+  testOnlyChild: child,
+  proofRoot,
+  projectRoot,
+  assayMcpBin: path.join(projectRoot, "install/bin/assay-mcp-server"),
+});
+`,
+  );
+  const result = spawnSync(process.execPath, [script], { encoding: "utf8", timeout: 15_000 });
+  assert.notEqual(result.status, 0, "removing the stdin error handler must fail the process");
+  assert.match(`${result.stderr}\n${result.stdout}`, /EPIPE/);
 });
 
 test("synthetic events never validate as actual-host proof", async () => {

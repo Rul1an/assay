@@ -653,6 +653,29 @@ export async function runProof(options) {
     stopChild();
   });
 
+  const childStdinIsWritable = () =>
+    Boolean(
+      !stopped &&
+        childAlive &&
+        child.stdin &&
+        !child.stdin.destroyed &&
+        child.stdin.writable,
+    );
+
+  const onChildStdinError = () => {
+    stopChild();
+  };
+  if (child.stdin) {
+    child.stdin.on("error", onChildStdinError);
+  }
+
+  const writeChildStdin = (payload) => {
+    if (!childStdinIsWritable()) {
+      return false;
+    }
+    return child.stdin.write(encode(payload));
+  };
+
   let buffer = "";
   const onLine = (line) => {
     frames += 1;
@@ -720,7 +743,7 @@ export async function runProof(options) {
             content: {},
           },
         };
-        child.stdin.write(encode(reply));
+        writeChildStdin(reply);
         retainEvent(
           projectRetainedEvent({
             direction: "client",
@@ -782,9 +805,7 @@ export async function runProof(options) {
     nextId += 1;
     pending.set(id, method);
     retainEvent(projectRetainedEvent({ direction: "client", method, id, params }));
-    if (!stopped) {
-      child.stdin.write(encode({ id, method, params }));
-    }
+    writeChildStdin({ id, method, params });
     return id;
   };
 
@@ -832,9 +853,7 @@ export async function runProof(options) {
     await waitFor(1);
     const initialized = { method: "initialized", params: {} };
     retainEvent(projectRetainedEvent({ direction: "client", ...initialized }));
-    if (!stopped) {
-      child.stdin.write(encode(initialized));
-    }
+    writeChildStdin(initialized);
     send("skills/list", { forceReload: true, cwds: [options.projectRoot] });
     await waitFor(2);
 
