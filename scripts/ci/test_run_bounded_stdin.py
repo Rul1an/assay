@@ -385,6 +385,12 @@ class BoundedStdinTests(unittest.TestCase):
             self.test_stdout_over_ceiling_terminates_tree()
         run.assert_called_once_with("flood", b"", timeout_s=CEILING_DEADLINE_S)
 
+    def test_classifier_probe_budgets_are_distinct_from_deadline_budget(self) -> None:
+        self.assertEqual(CEILING_DEADLINE_S, "0.5")
+        self.assertEqual(EXIT_CLASSIFIER_DEADLINE_S, "0.5")
+        self.assertGreater(float(CEILING_DEADLINE_S), float(DEADLINE_S))
+        self.assertGreater(float(EXIT_CLASSIFIER_DEADLINE_S), float(DEADLINE_S))
+
     def test_deadline_reaps_direct_child_and_descendant(self) -> None:
         child_record_path = self.cwd / "child-record.json"
         descendant_record_path = self.cwd / "descendant-record.json"
@@ -488,7 +494,14 @@ class BoundedStdinTests(unittest.TestCase):
             )
             return subprocess.CompletedProcess([], 7, b"", b"err-sentinel\n")
 
-        with patch.object(WORKFLOW_MOD, "run_bounded", side_effect=classified):
+        with (
+            patch.dict(
+                os.environ,
+                {"ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS": "ambient-sentinel"},
+                clear=False,
+            ),
+            patch.object(WORKFLOW_MOD, "run_bounded", side_effect=classified),
+        ):
             self.test_exit_7_allowed_preserves_rc_and_stderr()
         self.assertEqual(observed["timeout"], EXIT_CLASSIFIER_DEADLINE_S)
 
