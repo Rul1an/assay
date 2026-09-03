@@ -7,11 +7,9 @@
  */
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { PassThrough } from "node:stream";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -23,9 +21,7 @@ import {
   CELLS,
   DECIDE_INPUT,
   DECIDE_TOOL,
-  EXPECTED_ELICITATION,
   EXPECTED_TOOLS,
-  FAKE_USER_AGENT,
   HARD_MAX_SNAPSHOT_BYTES,
   HOST_SUBJECTS,
   classifyRecord,
@@ -72,237 +68,17 @@ function spawnFakeChild(childArgv, projectRoot) {
   });
 }
 
-function epipeError() {
-  return Object.assign(new Error("write EPIPE"), {
-    errno: -32,
-    code: "EPIPE",
-    syscall: "write",
-  });
-}
-
-function encodeLine(message) {
-  return `${JSON.stringify(message)}\n`;
-}
-
-function statusTools() {
-  return Object.fromEntries(EXPECTED_TOOLS.map((name) => [name, { name, inputSchema: {} }]));
-}
-
-function assayStatusRow(thread) {
-  if (thread.kind === "missing" || thread.kind === "invalid") {
-    return {
-      name: "assay",
-      authStatus: "unsupported",
-      resourceTemplates: [],
-      resources: [],
-      runtimeStatus: "failed",
-      tools: {},
-    };
-  }
-  return {
-    name: "assay",
-    authStatus: "unsupported",
-    resourceTemplates: [],
-    resources: [],
-    runtimeStatus: "connected",
-    tools: statusTools(),
-  };
-}
-
-function canonicalToolItem() {
-  return {
-    type: "mcpToolCall",
-    id: "call-1",
-    server: "assay",
-    tool: DECIDE_TOOL,
-    arguments: { ...DECIDE_INPUT },
-    status: "completed",
-    result: {
-      content: [{ type: "text", text: JSON.stringify({ allowed: true, reason: "Allowed by policy" }) }],
-      structuredContent: null,
-    },
-  };
-}
-
-function elicitAfterCloseChild(mode) {
+function wrapSpawnedStdinWrites(child) {
   const writesAfterClose = { count: 0 };
-  const stdin = new PassThrough();
-  const stdout = new PassThrough();
-  const stderr = new PassThrough();
-  const child = new EventEmitter();
-  child.stdin = stdin;
-  child.stdout = stdout;
-  child.stderr = stderr;
-  let closed = false;
-  let stdinClosed = false;
+  const stdin = child.stdin;
   const nativeWrite = stdin.write.bind(stdin);
   stdin.write = function writeAfterClose(chunk, encoding, cb) {
-    if (stdinClosed) {
+    if (!stdin.writable || stdin.destroyed) {
       writesAfterClose.count += 1;
-      const err = epipeError();
-      queueMicrotask(() => stdin.emit("error", err));
-      if (typeof encoding === "function") {
-        encoding(err);
-      } else if (typeof cb === "function") {
-        cb(err);
-      }
-      return false;
     }
     return nativeWrite(chunk, encoding, cb);
   };
-  const closeStdin = () => {
-    stdinClosed = true;
-    if (mode === "destroy") {
-      stdin.destroy();
-    }
-  };
-  const finish = (code) => {
-    if (closed) {
-      return;
-    }
-    closed = true;
-    child.emit("close", code, null);
-  };
-  child.kill = () => finish(1);
-  const threads = new Map();
-  let threadSeq = 0;
-  const emit = (message) => {
-    stdout.write(encodeLine(message));
-  };
-  const handle = (message) => {
-    const { id, method, params } = message;
-    if (method === "initialize") {
-      emit({
-        id,
-        result: {
-          userAgent: FAKE_USER_AGENT,
-          platformFamily: "unix",
-          platformOs: "linux",
-          codexHome: path.join(process.env.HOME || "/tmp", ".codex-home"),
-        },
-      });
-      return;
-    }
-    if (method === "initialized") {
-      return;
-    }
-    if (method === "skills/list") {
-      const projectRoot = params?.cwds?.[0] ?? "";
-      emit({
-        id,
-        result: {
-          data: [
-            {
-              cwd: projectRoot,
-              errors: [],
-              skills: [
-                {
-                  name: "assay-golden-path",
-                  description: "golden path",
-                  enabled: true,
-                  path: path.join(projectRoot, ".agents/skills/assay-golden-path/SKILL.md"),
-                  scope: "repo",
-                },
-              ],
-            },
-          ],
-        },
-      });
-      return;
-    }
-    if (method === "thread/start") {
-      threadSeq += 1;
-      const threadId = `thread-${threadSeq}`;
-      const assay = params?.config?.mcp_servers?.assay;
-      const command = assay?.command ?? "";
-      const args = assay?.args ?? [];
-      let kind = "primary";
-      if (String(command).includes("missing-assay-mcp-server")) {
-        kind = "missing";
-      } else if (args.some((value) => String(value).includes("missing-policy-root"))) {
-        kind = "invalid";
-      }
-      threads.set(threadId, { kind, cwd: params?.cwd ?? "" });
-      emit({
-        id,
-        result: {
-          cwd: params?.cwd ?? "",
-          approvalPolicy: "on-request",
-          approvalsReviewer: "user",
-          model: "none",
-          modelProvider: "none",
-          sandbox: { type: "readOnly" },
-          thread: {
-            id: threadId,
-            cwd: params?.cwd ?? "",
-            cliVersion: "fake",
-            createdAt: 0,
-            ephemeral: true,
-            modelProvider: "none",
-            preview: "",
-            projectId: null,
-            sessionId: "session-1",
-            source: "appServer",
-            status: { type: "idle" },
-            turns: [],
-            updatedAt: 0,
-          },
-        },
-      });
-      return;
-    }
-    if (method === "mcpServerStatus/list") {
-      const thread = threads.get(params?.threadId);
-      emit({ id, result: { data: [assayStatusRow(thread ?? { kind: "missing" })] } });
-      return;
-    }
-    if (method === "turn/start") {
-      const threadId = params?.threadId;
-      emit({
-        id,
-        result: { turn: { id: "turn-1", items: [], status: "inProgress" } },
-      });
-      closeStdin();
-      const item = canonicalToolItem();
-      emit({
-        id: "elicit-1",
-        method: "mcpServer/elicitation/request",
-        params: {
-          serverName: EXPECTED_ELICITATION.serverName,
-          threadId,
-          turnId: "turn-1",
-          message: EXPECTED_ELICITATION.message,
-          mode: EXPECTED_ELICITATION.mode,
-          requestedSchema: { type: "object", properties: {} },
-        },
-      });
-      emit({
-        method: "item/completed",
-        params: {
-          completedAtMs: 1,
-          threadId,
-          turnId: "turn-1",
-          item,
-        },
-      });
-      emit({
-        method: "turn/completed",
-        params: {
-          threadId,
-          turn: { id: "turn-1", items: [item], status: "completed" },
-        },
-      });
-      queueMicrotask(() => finish(1));
-    }
-  };
-  stdin.on("data", (chunk) => {
-    for (const line of String(chunk).split("\n")) {
-      if (line.trim()) {
-        handle(JSON.parse(line));
-      }
-    }
-  });
-  return { child, writesAfterClose };
+  return writesAfterClose;
 }
 
 function writeMutatedDriver(mutate) {
@@ -315,26 +91,8 @@ function writeMutatedDriver(mutate) {
   return path.join(dir, "codex_host_proof.mjs");
 }
 
-async function runClosedStdinElicit(run, mode) {
-  const projectRoot = seedProject();
-  const proofRoot = scratch();
-  const { child, writesAfterClose } = elicitAfterCloseChild(mode);
-  const result = await run({
-    captureMode: "synthetic-fixture",
-    timeoutMs: 4000,
-    maxBytes: 1_048_576,
-    journey: "tool",
-    allowLiveTurn: false,
-    testOnlyChild: child,
-    proofRoot,
-    projectRoot,
-    assayMcpBin: path.join(projectRoot, "install/bin/assay-mcp-server"),
-  });
-  return { ...result, proofRoot, projectRoot, writesAfterClose };
-}
-
-
-async function drive(scenario, journey = "tool") {
+async function drive(scenario, journey = "tool", options = {}) {
+  const run = options.run ?? runProof;
   const projectRoot = scratch();
   const proofRoot = scratch();
   fs.mkdirSync(path.join(projectRoot, ".agents/skills/assay-golden-path"), {
@@ -345,18 +103,20 @@ async function drive(scenario, journey = "tool") {
     "# disposable canary\n",
   );
   const childArgv = ["node", FAKE, "--scenario", scenario, "--project-root", projectRoot];
-  const result = await runProof({
+  const child = spawnFakeChild(childArgv, projectRoot);
+  const writesAfterClose = options.wrapStdin ? wrapSpawnedStdinWrites(child) : undefined;
+  const result = await run({
     captureMode: "synthetic-fixture",
     timeoutMs: 4000,
     maxBytes: 1_048_576,
     journey,
     allowLiveTurn: false,
-    testOnlyChild: spawnFakeChild(childArgv, projectRoot),
+    testOnlyChild: child,
     proofRoot,
     projectRoot,
     assayMcpBin: path.join(projectRoot, "install/bin/assay-mcp-server"),
   });
-  return { ...result, proofRoot, projectRoot };
+  return { ...result, proofRoot, projectRoot, writesAfterClose };
 }
 
 function seedProject() {
@@ -547,14 +307,25 @@ test("successful tool output plus nonzero child exit: CLI process is nonzero", a
 });
 
 test("closed stdin then elicitation reply is fail-closed, not uncaught EPIPE", async () => {
-  const { classified, manifest, childExitCode, driverOutcome, writesAfterClose } =
-    await runClosedStdinElicit(runProof, "destroy");
-  assert.equal(writesAfterClose.count, 0, "guard must not write a destroyed stdin");
-  assert.equal(childExitCode, 1);
+  const { classified, manifest, events, childExitCode, driverOutcome } = await drive(
+    "close-stdin-then-elicit-exit-0",
+  );
+  assert.equal(
+    clientParams(events, "mcpServer/elicitation/request").length,
+    0,
+    "must not retain a client elicitation reply that was not written",
+  );
+  assert.equal(manifest.streamUnavailable, true);
+  assert.equal(driverOutcome.status, "unavailable");
   assert.notEqual(driverOutcome.exitCode, 0);
-  assert.equal(manifest.childExitCode, 1);
-  assert.notEqual(manifest.driverOutcome.exitCode, 0);
-  assert.equal(classified.cells.oneToolInvoked.status, "pass");
+  assert.notEqual(driverOutcome.status, "pass");
+  assert.equal(childExitCode, 0, "child exit 0 must remain visible so the I/O break is not a kill-fail");
+  assert.notEqual(
+    driverOutcome.status,
+    "pass",
+    "childExitCode 0 must never make the driver pass when stdin closed before elicitation",
+  );
+  assert.notEqual(classified.cells.oneToolInvoked.status, "pass");
   assert.notEqual(classified.externalAttestation, "pass");
 });
 
@@ -572,12 +343,54 @@ test("mutation: removing the child-stdin write guard writes the closed pipe", as
     return src.replace(guardNeedle, "const childStdinIsWritable = () => true;");
   });
   const { runProof: runMutated } = await import(pathToFileURL(mutatedPath).href);
-  const { writesAfterClose, childExitCode, driverOutcome, classified } =
-    await runClosedStdinElicit(runMutated, "destroy");
+  const projectRoot = seedProject();
+  const proofRoot = scratch();
+  const child = spawnFakeChild(
+    ["node", FAKE, "--scenario", "valid", "--project-root", projectRoot],
+    projectRoot,
+  );
+  const writesAfterClose = wrapSpawnedStdinWrites(child);
+  child.stdin.destroy();
+  const result = await runMutated({
+    captureMode: "synthetic-fixture",
+    timeoutMs: 4000,
+    maxBytes: 1_048_576,
+    journey: "discovery",
+    allowLiveTurn: false,
+    testOnlyChild: child,
+    proofRoot,
+    projectRoot,
+    assayMcpBin: path.join(projectRoot, "install/bin/assay-mcp-server"),
+  });
   assert.ok(writesAfterClose.count > 0, "unguarded write must hit closed stdin");
-  assert.equal(childExitCode, 1);
-  assert.notEqual(driverOutcome.exitCode, 0);
-  assert.equal(classified.cells.oneToolInvoked.status, "pass");
+  assert.notEqual(result.driverOutcome.exitCode, 0);
+});
+
+test("mutation: retaining a client elicitation reply after a failed stdin write invents a sent event", async () => {
+  const replyNeedle = "if (writeChildStdin(reply)) {";
+  const mutatedPath = writeMutatedDriver((src) => {
+    assert.match(src, /if \(writeChildStdin\(reply\)\) \{/);
+    return src.replace(replyNeedle, "if (writeChildStdin(reply) || true) {");
+  });
+  const { runProof: runMutated } = await import(pathToFileURL(mutatedPath).href);
+  const { events } = await drive("close-stdin-then-elicit-exit-0", "tool", { run: runMutated });
+  assert.ok(
+    clientParams(events, "mcpServer/elicitation/request").length > 0,
+    "retaining a client elicitation after writeChildStdin false must invent a sent event",
+  );
+});
+
+test("mutation: omitting streamUnavailable on stdin failure hides the I/O break", async () => {
+  const noteNeedle = `    stdinFailureNoted = true;
+    streamUnavailable = true;`;
+  const mutatedPath = writeMutatedDriver((src) => {
+    assert.match(src, /stdinFailureNoted = true;\n    streamUnavailable = true;/);
+    return src.replace(noteNeedle, "    stdinFailureNoted = true;");
+  });
+  const { runProof: runMutated } = await import(pathToFileURL(mutatedPath).href);
+  const { manifest, driverOutcome } = await drive("close-stdin-then-elicit-exit-0", "tool", { run: runMutated });
+  assert.notEqual(manifest.streamUnavailable, true);
+  assert.notEqual(driverOutcome.status, "unavailable");
 });
 
 test("mutation: removing the stdin error handler leaves EPIPE uncaught", () => {

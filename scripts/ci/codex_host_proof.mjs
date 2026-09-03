@@ -662,8 +662,26 @@ export async function runProof(options) {
         child.stdin.writable,
     );
 
-  const onChildStdinError = () => {
+  let stdinFailureNoted = false;
+  const noteStdinFailure = (message) => {
+    if (stdinFailureNoted) {
+      return false;
+    }
+    stdinFailureNoted = true;
+    streamUnavailable = true;
+    retainEvent(
+      projectRetainedEvent({
+        direction: "driver",
+        method: "error",
+        params: { message },
+      }),
+    );
     stopChild();
+    return false;
+  };
+
+  const onChildStdinError = () => {
+    noteStdinFailure("child stdin error");
   };
   if (child.stdin) {
     child.stdin.on("error", onChildStdinError);
@@ -671,9 +689,20 @@ export async function runProof(options) {
 
   const writeChildStdin = (payload) => {
     if (!childStdinIsWritable()) {
+      return noteStdinFailure("child stdin is not writable");
+    }
+    try {
+      child.stdin.write(encode(payload));
+    } catch {
+      return noteStdinFailure("child stdin write failed");
+    }
+    if (stdinFailureNoted) {
       return false;
     }
-    return child.stdin.write(encode(payload));
+    if (!child.stdin || child.stdin.destroyed || !child.stdin.writable) {
+      return noteStdinFailure("child stdin is not writable");
+    }
+    return true;
   };
 
   let buffer = "";
@@ -733,9 +762,6 @@ export async function runProof(options) {
         const turnId = turnReply?.result?.turn?.id;
         const accepted =
           elicitationAcceptable(message.params, threadId, turnId) && acceptedElicitations === 0;
-        if (accepted) {
-          acceptedElicitations += 1;
-        }
         const reply = {
           id: message.id,
           result: {
@@ -743,15 +769,19 @@ export async function runProof(options) {
             content: {},
           },
         };
-        writeChildStdin(reply);
-        retainEvent(
-          projectRetainedEvent({
-            direction: "client",
-            method: message.method,
-            id: message.id,
-            result: reply.result,
-          }),
-        );
+        if (writeChildStdin(reply)) {
+          if (accepted) {
+            acceptedElicitations += 1;
+          }
+          retainEvent(
+            projectRetainedEvent({
+              direction: "client",
+              method: message.method,
+              id: message.id,
+              result: reply.result,
+            }),
+          );
+        }
       }
     }
   };
@@ -803,9 +833,11 @@ export async function runProof(options) {
   const send = (method, params) => {
     const id = nextId;
     nextId += 1;
+    if (!writeChildStdin({ id, method, params })) {
+      return id;
+    }
     pending.set(id, method);
     retainEvent(projectRetainedEvent({ direction: "client", method, id, params }));
-    writeChildStdin({ id, method, params });
     return id;
   };
 
@@ -852,8 +884,9 @@ export async function runProof(options) {
     });
     await waitFor(1);
     const initialized = { method: "initialized", params: {} };
-    retainEvent(projectRetainedEvent({ direction: "client", ...initialized }));
-    writeChildStdin(initialized);
+    if (writeChildStdin(initialized)) {
+      retainEvent(projectRetainedEvent({ direction: "client", ...initialized }));
+    }
     send("skills/list", { forceReload: true, cwds: [options.projectRoot] });
     await waitFor(2);
 

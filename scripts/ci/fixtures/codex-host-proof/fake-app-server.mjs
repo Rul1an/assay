@@ -3,6 +3,7 @@
  * Fake Codex app-server stdio child. Protocol-shaped replies only. Never a model.
  */
 import readline from "node:readline";
+import fs from "node:fs";
 import path from "node:path";
 import { DECIDE_INPUT } from "../../codex_host_proof_validator.mjs";
 
@@ -23,6 +24,9 @@ function argValue(flag, fallback) {
 }
 
 const scenario = argValue("--scenario", "valid");
+if (scenario === "close-stdin-then-elicit-exit-0") {
+  process.on("SIGTERM", () => {});
+}
 const projectRoot = argValue("--project-root", process.env.HOME || "/tmp/assay-fake-project");
 const threads = new Map();
 let threadSeq = 0;
@@ -289,6 +293,9 @@ function handle(message) {
         requestedSchema: { type: "object", properties: {} },
       };
     };
+    if (scenario === "close-stdin-then-elicit-exit-0") {
+      fs.closeSync(0);
+    }
     write({
       id: "elicit-1",
       method: "mcpServer/elicitation/request",
@@ -376,6 +383,9 @@ function handle(message) {
       return;
     }
     emitTool();
+    if (scenario === "close-stdin-then-elicit-exit-0") {
+      setImmediate(() => process.exit(0));
+    }
     return;
   }
 }
