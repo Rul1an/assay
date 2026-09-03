@@ -361,126 +361,137 @@ impl Server {
                     )
                 }
                 "tools/call" => {
-                    if let Some(params) = req.params {
-                        let name = params.get("name").and_then(|s| s.as_str()).unwrap_or("");
-                        let default_args = serde_json::json!({});
-                        let args = params.get("arguments").unwrap_or(&default_args);
+                    match tools::classify_call_tool_params(req.params.as_ref()) {
+                        Err(fault) => JsonRpcResponse::error_with_data(
+                            req.id.clone(),
+                            fault.code(),
+                            fault.message().to_string(),
+                            fault.data(),
+                        ),
+                        Ok(dispatch) => {
+                            let name = dispatch.name.as_str();
+                            let args = &dispatch.arguments;
 
-                        let bytes_in = line.len();
-                        let args_bytes = serde_json::to_vec(args).map(|b| b.len()).unwrap_or(0);
+                            let bytes_in = line.len();
+                            let args_bytes = serde_json::to_vec(args).map(|b| b.len()).unwrap_or(0);
 
-                        let start = std::time::Instant::now();
+                            let start = std::time::Instant::now();
 
-                        tracing::info!(
-                           event="tool_call_start",
-                           rid=%rid,
-                           rpc_id=?req.id,
-                           bytes_in=bytes_in,
-                           args_bytes=args_bytes,
-                        );
+                            tracing::info!(
+                               event="tool_call_start",
+                               rid=%rid,
+                               rpc_id=?req.id,
+                               bytes_in=bytes_in,
+                               args_bytes=args_bytes,
+                            );
 
-                        // Metered billing telemetry
-                        assay_metrics::usage::log_usage_event("policy_check", 1);
+                            // Metered billing telemetry
+                            assay_metrics::usage::log_usage_event("policy_check", 1);
 
-                        // Execute with timeout
-                        let fut = tools::handle_call(&ctx, name, args);
-                        let result = match timeout(Duration::from_millis(cfg.timeout_ms), fut).await
-                        {
-                            Ok(Ok(value)) => value,
-                            Ok(Err(_error)) => {
-                                tracing::error!(
-                                    event = "tool_execution_error",
+                            // Execute with timeout
+                            let fut = tools::handle_call(&ctx, name, args);
+                            let result = match timeout(Duration::from_millis(cfg.timeout_ms), fut)
+                                .await
+                            {
+                                Ok(Ok(value)) => value,
+                                Ok(Err(_error)) => {
+                                    tracing::error!(
+                                        event = "tool_execution_error",
+                                        rid = %rid,
+                                        rpc_id = ?req.id,
+                                        duration_ms = start.elapsed().as_millis() as u64,
+                                        code = "E_INTERNAL"
+                                    );
+                                    fail_closed_tool_result("E_INTERNAL", TOOL_EXECUTION_FAILED)?
+                                }
+                                Err(_) => {
+                                    let dur = start.elapsed().as_millis() as u64;
+                                    tracing::warn!(
+                                       event="tool_call_timeout",
+                                       rid=%rid,
+                                       rpc_id=?req.id,
+                                       duration_ms=dur,
+                                       code="E_TIMEOUT"
+                                    );
+                                    fail_closed_tool_result("E_TIMEOUT", TOOL_EXECUTION_TIMED_OUT)?
+                                }
+                            };
+
+                            let dur = start.elapsed().as_millis() as u64;
+                            // Log outcome
+                            let (allowed, is_error) = classify_tool_result(&result);
+                            if let Some(err) = result.get("error") {
+                                let code = err.get("code").and_then(|v| v.as_str()).unwrap_or("");
+                                tracing::info!(
+                                  event="tool_call_done",
+                                  rid=%rid,
+                                  rpc_id=?req.id,
+                                  duration_ms=dur,
+                                  outcome="app_error",
+                                  allowed=allowed,
+                                  code=code
+                                );
+                            } else {
+                                tracing::info!(
+                                  event="tool_call_done",
+                                  rid=%rid,
+                                  rpc_id=?req.id,
+                                  duration_ms=dur,
+                                  outcome="ok",
+                                  allowed=allowed
+                                );
+                            }
+
+                            // P57b: emit the observed tool decision (assay.tool_decision_surface.v0) as
+                            // its own structured event. Redaction and the asserted-vs-verified rule are
+                            // enforced inside build_decision; this site never has SaaS-verified evidence.
+                            {
+                                use crate::tool_decision::{build_decision, Effect, ObservedCall};
+                                let (effect, status) = if let Some(code) = result
+                                    .get("error")
+                                    .and_then(|e| e.get("code"))
+                                    .and_then(|v| v.as_str())
+                                {
+                                    (Effect::Error, code.to_string())
+                                } else if allowed {
+                                    (Effect::Allow, "success".to_string())
+                                } else {
+                                    (Effect::Deny, "blocked".to_string())
+                                };
+                                let decision = build_decision(&ObservedCall {
+                                    server_id: "mcp",
+                                    tool_name: name,
+                                    // Inspected transiently by the classifier to project named target
+                                    // fields (hashed); never copied into the record verbatim.
+                                    args,
+                                    effect,
+                                    status: &status,
+                                    rule_id: None,
+                                    // SEP-414 (MCP 2026-07-28): trace context travels in `_meta`.
+                                    // Validation and basis typing happen inside build_decision.
+                                    traceparent: crate::tool_decision::traceparent_from_params(
+                                        req.params
+                                            .as_ref()
+                                            .expect("classify_call_tool_params accepted params"),
+                                    ),
+                                });
+                                tracing::info!(
+                                    event = "tool_decision",
                                     rid = %rid,
                                     rpc_id = ?req.id,
-                                    duration_ms = start.elapsed().as_millis() as u64,
-                                    code = "E_INTERNAL"
+                                    decision = %serde_json::to_string(&decision).unwrap_or_default(),
                                 );
-                                fail_closed_tool_result("E_INTERNAL", TOOL_EXECUTION_FAILED)?
                             }
-                            Err(_) => {
-                                let dur = start.elapsed().as_millis() as u64;
-                                tracing::warn!(
-                                   event="tool_call_timeout",
-                                   rid=%rid,
-                                   rpc_id=?req.id,
-                                   duration_ms=dur,
-                                   code="E_TIMEOUT"
-                                );
-                                fail_closed_tool_result("E_TIMEOUT", TOOL_EXECUTION_TIMED_OUT)?
-                            }
-                        };
 
-                        let dur = start.elapsed().as_millis() as u64;
-                        // Log outcome
-                        let (allowed, is_error) = classify_tool_result(&result);
-                        if let Some(err) = result.get("error") {
-                            let code = err.get("code").and_then(|v| v.as_str()).unwrap_or("");
-                            tracing::info!(
-                              event="tool_call_done",
-                              rid=%rid,
-                              rpc_id=?req.id,
-                              duration_ms=dur,
-                              outcome="app_error",
-                              allowed=allowed,
-                              code=code
-                            );
-                        } else {
-                            tracing::info!(
-                              event="tool_call_done",
-                              rid=%rid,
-                              rpc_id=?req.id,
-                              duration_ms=dur,
-                              outcome="ok",
-                              allowed=allowed
-                            );
-                        }
-
-                        // P57b: emit the observed tool decision (assay.tool_decision_surface.v0) as
-                        // its own structured event. Redaction and the asserted-vs-verified rule are
-                        // enforced inside build_decision; this site never has SaaS-verified evidence.
-                        {
-                            use crate::tool_decision::{build_decision, Effect, ObservedCall};
-                            let (effect, status) = if let Some(code) = result
-                                .get("error")
-                                .and_then(|e| e.get("code"))
-                                .and_then(|v| v.as_str())
-                            {
-                                (Effect::Error, code.to_string())
-                            } else if allowed {
-                                (Effect::Allow, "success".to_string())
-                            } else {
-                                (Effect::Deny, "blocked".to_string())
-                            };
-                            let decision = build_decision(&ObservedCall {
-                                server_id: "mcp",
-                                tool_name: name,
-                                // Inspected transiently by the classifier to project named target
-                                // fields (hashed); never copied into the record verbatim.
-                                args,
-                                effect,
-                                status: &status,
-                                rule_id: None,
-                                // SEP-414 (MCP 2026-07-28): trace context travels in `_meta`.
-                                // Validation and basis typing happen inside build_decision.
-                                traceparent: crate::tool_decision::traceparent_from_params(&params),
+                            // MCP Compliance: wrap every tool outcome in CallToolResult.
+                            let json_text =
+                                serde_json::to_string_pretty(&result).unwrap_or_default();
+                            let mcp_result = serde_json::json!({
+                                "content": [{"type": "text", "text": json_text}],
+                                "isError": is_error
                             });
-                            tracing::info!(
-                                event = "tool_decision",
-                                rid = %rid,
-                                rpc_id = ?req.id,
-                                decision = %serde_json::to_string(&decision).unwrap_or_default(),
-                            );
+                            JsonRpcResponse::ok(req.id.clone(), mcp_result)
                         }
-
-                        // MCP Compliance: wrap every tool outcome in CallToolResult.
-                        let json_text = serde_json::to_string_pretty(&result).unwrap_or_default();
-                        let mcp_result = serde_json::json!({
-                            "content": [{"type": "text", "text": json_text}],
-                            "isError": is_error
-                        });
-                        JsonRpcResponse::ok(req.id.clone(), mcp_result)
-                    } else {
-                        JsonRpcResponse::error(req.id.clone(), -32602, "Missing params".to_string())
                     }
                 }
                 _ => JsonRpcResponse::error(

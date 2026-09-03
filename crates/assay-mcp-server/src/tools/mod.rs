@@ -4,6 +4,11 @@ use std::path::PathBuf;
 use crate::cache::PolicyCaches;
 use crate::config::ServerConfig;
 
+pub mod call_tool_request;
+pub use call_tool_request::{
+    classify_call_tool_params, is_known_tool, CallToolDispatch, CallToolProtocolFault,
+};
+
 pub struct ToolContext {
     pub policy_root: PathBuf,
     pub policy_root_canon: PathBuf,
@@ -432,6 +437,11 @@ pub fn list_tools() -> Vec<Value> {
 }
 
 pub async fn handle_call(ctx: &ToolContext, name: &str, args: &Value) -> anyhow::Result<Value> {
+    // Membership is owned by `list_tools` via `is_known_tool`; callers that skip
+    // `classify_call_tool_params` still must not reflect `name`.
+    if !is_known_tool(name) {
+        return Err(anyhow::anyhow!("unknown tool"));
+    }
     match name {
         "assay_check_args" => check_args::check_args(ctx, args).await,
         "assay_check_sequence" => check_sequence::check_sequence(ctx, args).await,
@@ -440,7 +450,7 @@ pub async fn handle_call(ctx: &ToolContext, name: &str, args: &Value) -> anyhow:
         "assay_explain_trace" => explain_trace::explain_trace(ctx, args).await,
         #[cfg(feature = "test-outbound")]
         "assay_test_outbound" => test_outbound::test_outbound(args).await,
-        _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
+        _ => unreachable!("is_known_tool accepted an unhandled name"),
     }
 }
 
