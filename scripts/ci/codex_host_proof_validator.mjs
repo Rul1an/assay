@@ -607,10 +607,13 @@ export function journeyPairCounts(journey) {
 
 export const ALLOWED_SERVER_REQUESTS = Object.freeze(["mcpServer/elicitation/request"]);
 export const LIFECYCLE_SERVER_NOTIFICATIONS = Object.freeze([
+  "account/rateLimits/updated",
+  "item/agentMessage/delta",
   "remoteControl/status/changed",
   "thread/started",
   "mcpServer/startupStatus/updated",
   "thread/status/changed",
+  "thread/tokenUsage/updated",
   "turn/started",
   "item/started",
 ]);

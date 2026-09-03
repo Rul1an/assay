@@ -24,6 +24,7 @@ import {
   EXPECTED_TOOLS,
   HARD_MAX_SNAPSHOT_BYTES,
   classifyRecord,
+  classifyStoredEvent,
   consumeJourneyTopology,
   decidePrompt,
   driverOutcomeFrom,
@@ -4086,6 +4087,12 @@ const OBSERVED_NON_EVIDENTIARY_ITEMS = Object.freeze([
   }),
 ]);
 
+const OBSERVED_NON_EVIDENTIARY_NOTIFICATIONS = Object.freeze([
+  "account/rateLimits/updated",
+  "item/agentMessage/delta",
+  "thread/tokenUsage/updated",
+]);
+
 test("stableStringify refuses non-JSON primitives; JSON null stays a valid token", () => {
   assert.equal(stableStringify({ a: null }), '{"a":null}\n');
   assert.equal(stableStringify([null, 1, "x", true]), '[null,1,"x",true]\n');
@@ -4166,7 +4173,19 @@ test("current Codex non-evidentiary items are scrubbed and do not invalidate a r
       },
     }),
   );
-  events.splice(toolIndex, 0, ...chatterRows);
+  const lifecycleRows = OBSERVED_NON_EVIDENTIARY_NOTIFICATIONS.map((method) =>
+    projectRetainedEvent({
+      direction: "server",
+      id: null,
+      method,
+      params: { sensitiveHostValue: "must-not-be-retained" },
+    }),
+  );
+  for (const row of lifecycleRows) {
+    assert.deepEqual(row.params, {}, `${row.method} payload must be scrubbed`);
+    assert.equal(classifyStoredEvent(row).type, "server-notification");
+  }
+  events.splice(toolIndex, 0, ...chatterRows, ...lifecycleRows);
   const terminalIndex = events.findIndex((event) => event.method === "turn/completed");
   assert.notEqual(terminalIndex, -1, "control run must contain the terminal turn");
   const terminal = events[terminalIndex];
