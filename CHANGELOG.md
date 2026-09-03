@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Open the Assay 6.0 source line for the two bounded, already accepted breaking changes in
+  ADR-047 and ADR-048. Published installation instructions and the install pin remain on verified
+  `v5.5.2` until `v6.0.0` exists and its release artifacts have been verified (#2764).
+
 ## [5.5.2] - 2026-08-31
 
 Corrective patch release preparation. Published installation pins remain on

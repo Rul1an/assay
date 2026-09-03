@@ -7,11 +7,10 @@ this contract.
 ## Canonical State
 
 - Repository truth is the checked-in code and documentation.
-- The public execution ledger for the active programme is named on this line. **No programme is
-  active.** The previous one, [issue #2388](https://github.com/Rul1an/assay/issues/2388), closed on
-  2026-08-15; name the new ledger here when one opens, and say so plainly here when none is. Keep
-  the number to this one line; everywhere else the contract names the role, so the next programme
-  costs one edit here rather than one in every section. Nothing enforces that, so it is an
+- The public execution ledger for the active programme is named on this line: [issue #2764](https://github.com/Rul1an/assay/issues/2764).
+- Keep the number to the ledger line; everywhere else the contract names the role, so the next
+  programme costs one edit here rather than one in every section. Name the new ledger there when
+  one opens, and say so plainly there when none is active. Nothing enforces that, so it is an
   instruction and not a guarantee — and the way it fails is quiet: the line kept pointing at a
   finished programme, which reads as an active ledger and sends handoffs to a closed issue.
 - Agent chats, local plans, memories, and unpushed branches are not authoritative project state.
