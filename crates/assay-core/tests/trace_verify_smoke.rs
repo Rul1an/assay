@@ -195,7 +195,6 @@ fn test_verify_coverage_distinct_long_prompts_sharing_prefix() {
         "must not emit 'tests matches': {}",
         msg
     );
-
 }
 
 #[test]
