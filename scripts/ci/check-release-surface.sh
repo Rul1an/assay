@@ -126,65 +126,26 @@ else
   note "  checked $checked root declaration(s)"
 fi
 
-# The same fact declared inside a crate manifest.
-#
-# Two counts, not one. The parser below reads the single-line inline-table shape every declaration
-# in this workspace uses; `declared_paths` counts sibling path dependencies in ANY shape. Comparing
-# them is what makes the enumeration total: a declaration rewritten as a multi-line inline table, a
-# `[dependencies.assay-x]` sub-table, an indented key, or a quoted key falls out of the parser, and
-# without the comparison it would leave the enumeration silently. A denominator that shrinks is
-# exactly how a check goes on passing while covering less, so the shrink itself is the failure.
-#
-# `[dev-dependencies]` is exempt from the versionless leg only: cargo strips those from a published
-# manifest, so a path dev-dependency may omit the version a published requirement has to keep
-# current. A versioned dev declaration is still checked. The flag resets on every section header
-# rather than latching, because a publishable section can follow a dev one -- assay-monitor already
-# puts `[target.'cfg(target_os = "linux")'.dependencies]` after `[dev-dependencies]`.
-crate_checked=0
-while IFS= read -r manifest; do
-  [ -n "$manifest" ] || continue
-  if [ ! -f "$manifest" ]; then
-    fail "$manifest: tracked crate manifest is missing"
-    continue
-  fi
-  declared_paths="$(grep -c 'path *= *"\.\./' "$manifest" || true)"
-  parsed=0
-  rows="$(
-    awk '
-      # The version is emitted LAST because it is the field that can be empty, and a tab IFS
-      # split drops an empty field anywhere but the end.
-      /^\[/ { dev = ($0 ~ /dev-dependencies\]$/); next }
-      /^[A-Za-z0-9_.-]+ *= *\{/ && /path *= *"\.\.\// {
-        v = ""
-        if (match($0, /version *= *"[^"]+"/)) {
-          v = substr($0, RSTART, RLENGTH)
-          gsub(/version *= *"|"/, "", v)
-        }
-        printf "%s\t%s\t%s\n", $1, dev + 0, v
-      }
-    ' "$manifest"
-  )"
-  if [ -n "$rows" ]; then
-    while IFS=$'\t' read -r name is_dev declared; do
-      [ -n "$name" ] || continue
-      parsed=$((parsed + 1))
-      crate_checked=$((crate_checked + 1))
-      if [ -n "$declared" ]; then
-        if [ "$declared" != "$WORKSPACE_VERSION" ]; then
-          fail "$manifest: $name declares version \"$declared\", workspace is \"$WORKSPACE_VERSION\""
-        fi
-      elif [ "$is_dev" != "1" ]; then
-        fail "$manifest: $name declares a path dependency with no version"
-      fi
-    done <<< "$rows"
-  fi
-  if [ "$parsed" -ne "$declared_paths" ]; then
-    fail "$manifest: $declared_paths sibling path dependency line(s) present, $parsed parsed; a declaration is written in a shape this check does not read"
-  fi
-done <<< "$(git ls-files 'crates/*/Cargo.toml' 'assay-python-sdk/Cargo.toml')"
+# The same fact declared inside a crate manifest, read from parsed TOML rather than matched by
+# line. scripts/ci/check_crate_path_deps.py carries the reasoning; the short version is that the
+# first attempt cross-checked one line pattern against a second line pattern, which is one
+# measurement with extra steps: both required a double quote and a literal `../`, so
+# `path = '../assay-x'` escaped both, they agreed at zero, and a stale version went unreported
+# while the count silently shrank.
+crate_checked=""
+while IFS=$'\t' read -r kind value; do
+  case "$kind" in
+    count) crate_checked="$value" ;;
+    fail)  fail "$value" ;;
+  esac
+# A `fail` here would run in the process substitution's subshell and never reach the counter, so
+# a checker that dies or goes quiet is caught by the missing count below instead.
+done < <(python3 scripts/ci/check_crate_path_deps.py . || true)
 
-if [ "$crate_checked" -eq 0 ]; then
-  fail "no crate-level path dependencies found in tracked crate manifests; the enumeration is broken"
+if [ -z "$crate_checked" ]; then
+  fail "crate path-dependency check reported no count; the enumeration is broken"
+elif [ "$crate_checked" -eq 0 ]; then
+  fail "no crate-level path dependencies on workspace members found; the enumeration is broken"
 else
   note "  checked $crate_checked crate-level declaration(s)"
 fi

@@ -14,6 +14,7 @@ mkdir -p "$TMP/scripts/ci/lib" "$TMP/.github" "$TMP/docs/getting-started" "$TMP/
   "$TMP/.devcontainer" "$TMP/demo"
 cp "$ROOT/scripts/ci/check-release-surface.sh" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/release_readme.py" "$TMP/scripts/ci/"
+cp "$ROOT/scripts/ci/check_crate_path_deps.py" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/read-assay-release-tag.sh" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/lib/editor-plugin-install-commands.sh" "$TMP/scripts/ci/lib/"
 cp "$ROOT/.pre-commit-config.yaml" "$TMP/"
@@ -229,6 +230,7 @@ for path in (
     "scripts/ci/test-editor-release-hook-precommit-consumer.sh",
     "crates/assay-core/Cargo.toml",
     "assay-python-sdk/Cargo.toml",
+    "scripts/ci/check_crate_path_deps.py",
 ):
     if not pattern.search(path):
         raise SystemExit(f"release-surface hook omits {path}")
@@ -591,18 +593,36 @@ done
 # root-manifest enumeration alone reports a clean sweep while they sit a release behind.
 mutate_and_expect_failure crate-path-dep-stale crates/assay-y/Cargo.toml \
   's/version = "5.2.0"/version = "5.1.0"/' \
-  'crates/assay-y/Cargo.toml: assay-x declares version "5.1.0", workspace is "5.2.0"'
+  'crates/assay-y/Cargo.toml: assay-x in [dependencies] declares version "5.1.0", workspace is "5.2.0"'
 mutate_and_expect_failure crate-path-dep-ahead crates/assay-y/Cargo.toml \
   's/version = "5.2.0"/version = "5.3.0"/' \
-  'crates/assay-y/Cargo.toml: assay-x declares version "5.3.0", workspace is "5.2.0"'
+  'crates/assay-y/Cargo.toml: assay-x in [dependencies] declares version "5.3.0", workspace is "5.2.0"'
 mutate_and_expect_failure crate-path-dep-versionless crates/assay-y/Cargo.toml \
   's/, version = "5.2.0" }/ }/' \
-  'crates/assay-y/Cargo.toml: assay-x declares a path dependency with no version'
+  'crates/assay-y/Cargo.toml: assay-x in [dependencies] is a path dependency on a workspace member with no version'
 mutate_and_expect_failure crate-path-dep-enumeration-broken crates/assay-y/Cargo.toml \
   '/^assay-x = { path = "..\/assay-x"/d' \
-  'no crate-level path dependencies found in tracked crate manifests; the enumeration is broken'
+  'no crate-level path dependencies on workspace members found; the enumeration is broken'
+
+# The parser has no line shape to be blind to. These two are the regression pins for the mechanism
+# this replaced, which matched one line pattern against a second line pattern: both required a
+# double quote and a literal `../`, so a single-quoted path escaped BOTH, they agreed at zero, and
+# a stale version passed while the count silently shrank.
+mutate_and_expect_failure crate-path-dep-single-quoted crates/assay-y/Cargo.toml \
+  "s|assay-x = { path = \"../assay-x\", version = \"5.2.0\" }|assay-x = { path = '../assay-x', version = '5.0.0' }|" \
+  'crates/assay-y/Cargo.toml: assay-x in [dependencies] declares version "5.0.0", workspace is "5.2.0"'
+rewrite_and_expect_failure crate-path-dep-sub-table crates/assay-y/Cargo.toml \
+  'crates/assay-y/Cargo.toml: assay-x in [dependencies] declares version "5.0.0", workspace is "5.2.0"' <<'TOML'
+[package]
+name = "assay-y"
+version.workspace = true
+
+[dependencies.assay-x]
+path = "../assay-x"
+version = "5.0.0"
+TOML
 rewrite_and_expect_failure crate-dev-path-dep-stale crates/assay-y/Cargo.toml \
-  'crates/assay-y/Cargo.toml: assay-x declares version "5.0.0", workspace is "5.2.0"' <<'TOML'
+  'crates/assay-y/Cargo.toml: assay-x in [dev-dependencies] declares version "5.0.0", workspace is "5.2.0"' <<'TOML'
 [package]
 name = "assay-y"
 version.workspace = true
@@ -619,7 +639,7 @@ TOML
 # `dev` treats the section as exempt and stays green while covering less.
 mutate_and_expect_failure crate-post-dev-section-versionless crates/assay-y/Cargo.toml \
   '/^\[target/,$ s/, version = "5.2.0" }/ }/' \
-  'crates/assay-y/Cargo.toml: assay-x declares a path dependency with no version'
+  'crates/assay-y/Cargo.toml: assay-x in [target.cfg(unix).dependencies] is a path dependency on a workspace member with no version'
 
 mutate_and_expect_failure wrong-workspace-binary bin/assay \
   's/assay 5.2.0/assay 5.1.0/' 'workspace is "assay 5.2.0"'
@@ -1035,8 +1055,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 108 ]; then
-  echo "FAIL: expected 108 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 110 ]; then
+  echo "FAIL: expected 110 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"
