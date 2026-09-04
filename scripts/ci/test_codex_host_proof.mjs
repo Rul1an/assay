@@ -341,6 +341,33 @@ test("nonzero-after-success fixture waits for the elicitation acknowledgement", 
   assert.notEqual(result.driverOutcome.exitCode, 0);
 });
 
+test("nonzero-after-success fixture rejects a declined elicitation response", async () => {
+  const projectRoot = seedProject();
+  const ackMarker = path.join(projectRoot, "elicitation-acknowledged");
+  const child = spawnFakeChild(
+    [
+      "node",
+      FAKE,
+      "--scenario",
+      "exit-1-after-success",
+      "--project-root",
+      projectRoot,
+      "--ack-marker",
+      ackMarker,
+    ],
+    projectRoot,
+  );
+  const send = (message) => child.stdin.write(`${JSON.stringify(message)}\n`);
+  send({ id: 1, method: "initialize", params: {} });
+  send({ id: 2, method: "thread/start", params: { cwd: projectRoot } });
+  send({ id: 3, method: "turn/start", params: { threadId: "thread-1", input: [] } });
+  send({ id: "elicit-1", result: { action: "decline" } });
+
+  const status = await new Promise((resolve) => child.on("close", resolve));
+  assert.equal(status, 4);
+  assert.equal(fs.existsSync(ackMarker), false);
+});
+
 test("closed stdin then elicitation reply is fail-closed, not uncaught EPIPE", async () => {
   const { classified, manifest, events, childExitCode, driverOutcome } = await drive(
     "close-stdin-then-elicit-exit-0",
