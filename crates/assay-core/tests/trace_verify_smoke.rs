@@ -237,3 +237,111 @@ fn test_verify_coverage_mixed_exact_shape_and_missing() {
         msg
     );
 }
+
+#[test]
+fn test_verify_coverage_over_ceiling_absent_truncated_form() {
+    // An over-4,096-byte prompt whose stage-local truncated form is ABSENT from the trace.
+    // This tests the second conjunct in verify.rs:
+    // `truncate_string(&mut expected, "prompt").is_some() && trace_prompts.contains(&expected)`
+    // Deleting `&& trace_prompts.contains(...)` would falsely diagnose this absent prompt
+    // as "matches stage-local truncation shape", when it is genuinely missing.
+    let chunk = "unrelated over-ceiling configured prompt text: ";
+    let repeat_count = (5000 / chunk.len()) + 1;
+    let long_prompt = chunk.repeat(repeat_count);
+    assert!(long_prompt.len() > 4096);
+
+    let cfg = make_config(vec![make_test_case(
+        "test-over-ceiling-absent",
+        &long_prompt,
+    )]);
+
+    // Trace contains an episode, but with a completely different prompt
+    let trace = create_trace_file(&[("ep-1", "A completely different short prompt")]);
+
+    let err = verify_coverage(trace.path(), &cfg)
+        .expect_err("Absent over-ceiling prompt must fail verification");
+    let msg = format!("{:#}", err);
+
+    // Must be reported as genuinely missing
+    assert!(
+        msg.contains("missing matching prompt in trace"),
+        "Must report missing prompt: {}",
+        msg
+    );
+    assert!(
+        msg.contains("test-over-ceiling-absent"),
+        "Must name the absent test: {}",
+        msg
+    );
+
+    // Must NOT be reported as matching truncation shape
+    assert!(
+        !msg.contains("matches stage-local truncation shape")
+            && !msg.contains("matches the truncation shape"),
+        "Absent prompt must not be claimed to match truncation shape: {}",
+        msg
+    );
+}
+
+#[test]
+fn test_verify_coverage_literal_marker_exact_match_control() {
+    // A prompt whose content literally contains or ends with `...[TRUNCATED]`,
+    // but is <= 4096 bytes and matches verbatim in the trace.
+    // Suffix presence alone must NOT reject an exact match; truncation history is not
+    // inferred from literal text.
+    let literal_marker_prompt = "Query regarding logs ending with ...[TRUNCATED]";
+    assert!(literal_marker_prompt.len() <= 4096);
+
+    let cfg = make_config(vec![make_test_case(
+        "test-literal-marker",
+        literal_marker_prompt,
+    )]);
+
+    let trace = create_trace_file(&[("ep-1", literal_marker_prompt)]);
+
+    let res = verify_coverage(trace.path(), &cfg);
+    assert!(
+        res.is_ok(),
+        "Literal marker exact match must be accepted: {:?}",
+        res.err()
+    );
+}
+
+#[test]
+fn test_verify_coverage_utf8_boundary_backoff() {
+    // Measured constants: MAX_STRING_LEN = 4096, marker "...[TRUNCATED]" = 14 bytes.
+    // Retained keep budget: 4096 - 14 = 4082 bytes.
+    // Place a 4-byte UTF-8 character ('🦀') across byte index 4082.
+    // 4081 ASCII bytes + '🦀' (bytes 4081..4085) + trailing bytes.
+    // At keep = 4082, index 4082 is NOT a char boundary.
+    // `truncate_string_to_byte_budget` must back off to byte 4081.
+    // Emitted shape has 4081 bytes + 14-byte marker = 4095 bytes.
+    let prefix = "a".repeat(4081);
+    let split_prompt = format!("{}🦀{}", prefix, "z".repeat(100));
+    assert!(split_prompt.len() > 4096);
+    assert!(!split_prompt.is_char_boundary(4082));
+    assert!(split_prompt.is_char_boundary(4081));
+
+    let cfg = make_config(vec![make_test_case("test-utf8-backoff", &split_prompt)]);
+
+    // Trace contains the un-truncated split_prompt. StreamUpgrader will truncate it
+    // using the exact same backoff rule to 4081 bytes + marker.
+    let trace = create_trace_file(&[("ep-utf8", &split_prompt)]);
+
+    let err = verify_coverage(trace.path(), &cfg).expect_err(
+        "Truncated shape match must fail coverage verification even with UTF-8 backoff",
+    );
+    let msg = format!("{:#}", err);
+
+    assert!(
+        msg.contains("matches stage-local truncation shape")
+            || msg.contains("matches the truncation shape"),
+        "Must diagnose truncation shape with UTF-8 backoff: {}",
+        msg
+    );
+    assert!(
+        msg.contains("test-utf8-backoff"),
+        "Must name the backoff test: {}",
+        msg
+    );
+}

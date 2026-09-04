@@ -83,7 +83,6 @@ pub fn verify_coverage(trace_path: &Path, cfg: &EvalConfig) -> anyhow::Result<()
             }
         }
 
-        eprint!("{}", report);
         anyhow::bail!("{}", report.trim_end());
     }
 
