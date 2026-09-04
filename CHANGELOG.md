@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Open the Assay 6.1 source line so post-`v6.0.0` minor-compatible public API work can declare
+  a version increment that covers it. The workspace version, internal dependency declarations,
+  both lockfiles, and the generated source-version surfaces now read `6.1.0`;
+  `.github/assay-release-tag` and every published installation instruction stay on verified
+  `v6.0.0` (#2789). This records a source-line state only: no `v6.1.0` tag, package publication,
+  installability, or host proof is claimed.
+
 ## [6.0.0] - 2026-09-03
 
 ### Changed
