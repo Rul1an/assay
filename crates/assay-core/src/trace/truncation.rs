@@ -191,6 +191,15 @@ mod tests {
     }
 
     #[test]
+    fn array_indices_emit_rfc6901_pointer_segments() {
+        let mut v = json!(["x".repeat(MAX_STRING_LEN + 1)]);
+        let metas = truncate_value_with_provenance(&mut v, "args");
+
+        assert_eq!(metas.len(), 1);
+        assert_eq!(metas[0].field, "/args/0");
+    }
+
+    #[test]
     fn rfc6901_escapes_tilde_and_slash_in_segment_order() {
         let big = "y".repeat(MAX_STRING_LEN + 1);
         let mut v = json!({
