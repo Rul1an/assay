@@ -113,6 +113,11 @@ version.workspace = true
 [dependencies]
 assay-x = { path = "../crates/assay-x", version = "5.2.0" }
 TOML
+# An in-root symlink pointing OUTSIDE the workspace root. Nothing legitimate references it; it
+# exists so a member glob can be pointed through it. Path.glob follows symlinked directories, so
+# expanding "escape-link/*" would list a directory outside the root -- the enumeration is itself
+# the read, which is why the refusal has to happen before expansion rather than after.
+ln -s .. "$TMP/escape-link"
 # Excluded by [workspace] exclude. Its stale declaration must never be reported.
 cat > "$TMP/crates/assay-excluded/Cargo.toml" <<'TOML'
 [package]
@@ -705,6 +710,14 @@ mutate_and_expect_failure root-dep-versionless Cargo.toml \
   's/assay-x = { version = "5.2.0", path = "crates\/assay-x" }/assay-x = { path = "crates\/assay-x" }/' \
   'Cargo.toml: assay-x in [workspace.dependencies] is a path dependency on a workspace member with no version'
 
+# --- containment: expansion must not read outside the root either ---
+mutate_and_expect_failure member-glob-through-symlink Cargo.toml \
+  's|"sdk-z"\]|"sdk-z", "escape-link/*"]|' \
+  'Cargo.toml: [workspace] members entry "escape-link/*" expands through a directory that is a symlink or lies outside the workspace root'
+mutate_and_expect_failure member-glob-not-final-segment Cargo.toml \
+  's|"sdk-z"\]|"sdk-z", "crates/*/nested"]|' \
+  'Cargo.toml: [workspace] members entry "crates/*/nested" places a wildcard outside the final path segment'
+
 # --- containment: repository-controlled paths must not reach outside the root ---
 # The fixture's `outside-fork` dependency is the standing negative control for the third case:
 # its path resolves above the root, so it must stay out of scope silently, and the baseline
@@ -1144,8 +1157,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 122 ]; then
-  echo "FAIL: expected 122 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 124 ]; then
+  echo "FAIL: expected 124 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

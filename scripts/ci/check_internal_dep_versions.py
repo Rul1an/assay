@@ -57,6 +57,7 @@ helper that dies or goes quiet cannot read as a clean sweep.
 
 from __future__ import annotations
 
+import fnmatch
 import sys
 import tomllib
 from pathlib import Path, PurePosixPath
@@ -74,13 +75,68 @@ def _within_root(root: Path, candidate: Path) -> Path | None:
 
 
 def _escapes_before_expansion(entry: str) -> bool:
-    """Whether a members/exclude entry could name a location outside the root once expanded.
+    """Whether an entry lexically names a location outside the root.
 
-    Checked on the raw entry because globbing is itself a read: `root.glob("../*")` lists
+    Checked on the raw entry because expansion is itself a read: `root.glob("../*")` lists
     directories outside the root, so discarding the matches afterwards is already too late.
     """
     pure = PurePosixPath(entry)
     return pure.is_absolute() or ".." in pure.parts
+
+
+def _safe_directory(root: Path, parts: tuple[str, ...]) -> Path | None:
+    """Walk `parts` down from `root`, refusing to traverse a symlink.
+
+    Lexical containment is not enough on its own. `Path.glob` follows symlinked directories, so a
+    repository-controlled `members = ["link/*"]` -- with `link` an in-root symlink pointing out --
+    enumerates outside the root before any match can be discarded. Enumeration IS the read, so the
+    directory has to be proven in-root by walking to it rather than by inspecting the results.
+    """
+    current = root
+    for part in parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            return None
+        current = current / part
+        if current.is_symlink() or not current.is_dir():
+            return None
+    return _within_root(root, current)
+
+
+def _expand_member_entry(root: Path, entry: str) -> tuple[list[Path], str | None]:
+    """Expand one `members` entry, bounded so expansion can never read outside the root.
+
+    Cargo expands globs in `members`, so that is preserved -- but only in the final path segment,
+    which is the shape that can be expanded with a single non-recursive listing of a directory
+    already proven in-root. A wildcard further left would need a traversal that decides at each
+    level whether to follow a symlink, and is refused instead of guessed at.
+    """
+    pure = PurePosixPath(entry)
+    wild = [i for i, part in enumerate(pure.parts) if any(c in part for c in "*?[")]
+    if not wild:
+        return [root / entry], None
+    if wild[0] != len(pure.parts) - 1:
+        return [], (
+            f'entry "{entry}" places a wildcard outside the final path segment, which cannot be '
+            f"expanded without deciding whether to follow symlinks"
+        )
+    parent = _safe_directory(root, pure.parts[:-1])
+    if parent is None:
+        return [], (
+            f'entry "{entry}" expands through a directory that is a symlink or lies outside the '
+            f"workspace root"
+        )
+    pattern = pure.parts[-1]
+    matches: list[Path] = []
+    for child in sorted(parent.iterdir()):
+        if not fnmatch.fnmatchcase(child.name, pattern):
+            continue
+        if child.is_symlink():
+            return [], f'entry "{entry}" matches "{child.name}", which is a symlink'
+        if child.is_dir():
+            matches.append(child)
+    return matches, None
 
 
 def _load_within(root: Path, path: Path) -> dict:
@@ -109,8 +165,14 @@ def _member_dirs(root: Path, workspace: dict) -> tuple[list[Path], list[str]]:
                 )
                 continue
             # Only `members` expands globs; cargo treats `exclude` entries as literal paths.
-            expand = key == "members" and any(c in entry for c in "*?[")
-            for match in sorted(root.glob(entry)) if expand else [root / entry]:
+            if key == "members":
+                candidates, problem = _expand_member_entry(root, entry)
+                if problem:
+                    problems.append(f"Cargo.toml: [workspace] members {problem}")
+                    continue
+            else:
+                candidates = [root / entry]
+            for match in candidates:
                 contained = _within_root(root, match)
                 if contained is None:
                     problems.append(
@@ -197,7 +259,9 @@ def check(root: Path) -> tuple[int, int, list[str]]:
 
     member_dirs, problems = _member_dirs(root, workspace)
     if not member_dirs:
-        raise SystemExit("[workspace] members resolved to nothing; the enumeration is broken")
+        # Reported rather than raised, so a refused entry still says WHY it was refused. Both
+        # counts are then zero and the caller's guards fail the run closed.
+        problems.append("Cargo.toml: [workspace] members resolved to nothing; the enumeration is broken")
     members = set(member_dirs)
 
     # Site 1: the root table. Its versions are what members inherit through `workspace = true`,
