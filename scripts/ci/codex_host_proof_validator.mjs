@@ -2230,6 +2230,7 @@ function projectAppContext(value) {
     return invalidProjection(value);
   }
   const out = {};
+  // connectorId is required and must be non-empty, so it does not share projectedPresence.
   if (typeof value.connectorId === "string" && value.connectorId.length > 0) {
     out.connectorId = PRESENT;
   } else {
@@ -2237,35 +2238,19 @@ function projectAppContext(value) {
   }
   if (hasOwn(value, "actionName")) {
     out.actionName =
-      value.actionName == null
-        ? null
-        : typeof value.actionName === "string"
-          ? PRESENT
-          : invalidProjection(value.actionName);
+      value.actionName == null ? null : projectedPresence(value.actionName);
   }
   if (hasOwn(value, "appName")) {
     out.appName =
-      value.appName == null
-        ? null
-        : typeof value.appName === "string"
-          ? PRESENT
-          : invalidProjection(value.appName);
+      value.appName == null ? null : projectedPresence(value.appName);
   }
   if (hasOwn(value, "linkId")) {
     out.linkId =
-      value.linkId == null
-        ? null
-        : typeof value.linkId === "string"
-          ? PRESENT
-          : invalidProjection(value.linkId);
+      value.linkId == null ? null : projectedPresence(value.linkId);
   }
   if (hasOwn(value, "resourceUri")) {
     out.resourceUri =
-      value.resourceUri == null
-        ? null
-        : typeof value.resourceUri === "string"
-          ? PRESENT
-          : invalidProjection(value.resourceUri);
+      value.resourceUri == null ? null : projectedPresence(value.resourceUri);
   }
   return withUnexpectedKeys(out, value, [
     "actionName",
@@ -2284,11 +2269,7 @@ function projectMcpToolCallError(value) {
     return invalidProjection(value);
   }
   const out = {};
-  if (typeof value.message === "string") {
-    out.message = PRESENT;
-  } else {
-    out.message = invalidProjection(value.message);
-  }
+  out.message = projectedPresence(value.message);
   return withUnexpectedKeys(out, value, ["message"]);
 }
 
@@ -2337,19 +2318,11 @@ function projectRetainedItem(item) {
   }
   if (hasOwn(item, "pluginId")) {
     out.pluginId =
-      item.pluginId == null
-        ? null
-        : typeof item.pluginId === "string"
-          ? PRESENT
-          : invalidProjection(item.pluginId);
+      item.pluginId == null ? null : projectedPresence(item.pluginId);
   }
   if (hasOwn(item, "mcpAppResourceUri")) {
     out.mcpAppResourceUri =
-      item.mcpAppResourceUri == null
-        ? null
-        : typeof item.mcpAppResourceUri === "string"
-          ? PRESENT
-          : invalidProjection(item.mcpAppResourceUri);
+      item.mcpAppResourceUri == null ? null : projectedPresence(item.mcpAppResourceUri);
   }
   if (hasOwn(item, "appContext")) {
     out.appContext = projectAppContext(item.appContext);
