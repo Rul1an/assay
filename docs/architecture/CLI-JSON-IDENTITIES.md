@@ -101,6 +101,7 @@ revision, when this block was a bare list.
 <!-- machine-checked: not-cli-documents -->
 ```text
 assay.coding_agent.evidence_pack.v0 | declared in assay-evidence as a bundle pack schema; no CLI write opened
+assay.content_hash_scope.v1 | nested object inside `assay evidence show --format json`; reader content_hash recomputation contract, not a top-level CLI document
 assay.mandate.v1 | mandate event carried in evidence, not written by a command
 assay.mcp_manifest_observed.v0 | assay-mcp-server observation event inside a bundle
 assay.mcp_manifest_projection.v0 | assay-mcp-server projection event inside a bundle
@@ -222,7 +223,7 @@ skill_supply_chain_cdx | crates/assay-cli/src/cli/commands/evidence/project_skil
 | `evidence_lint_sarif` | SARIF `2.1.0` | (g) | `assay evidence lint --format sarif` via `to_sarif_with_options`; **not** the `sarif` row, whose producer is `assay-core` run-report SARIF |
 | `evidence_list` | none | (d) | `assay evidence list --format json` without `--run-id` (`list_all`) |
 | `evidence_list_for_run` | none | (d) | `assay evidence list --run-id --format json` (`list_for_run`); different object keys than `evidence_list` |
-| `evidence_show` | none | (d) | `assay evidence show --format json` prints manifest + events |
+| `evidence_show` | none | (d) | `assay evidence show --format json` prints manifest + events + `content_hash_scope` |
 | `evidence_store_status` | none | (d) | `assay evidence store-status --format json` |
 | `explain_report` | none | (d) | `assay explain --format json` |
 | `generated_policy` | none | (d) | `assay generate --format json` writes a policy, not an `assay.*` document |

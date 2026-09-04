@@ -47,13 +47,17 @@ fn expected_outcome(step_id: &str, outcome_name: &str) -> ExpectedOutcome {
 /// Additive `content_hash_scope` on `assay evidence show --format json`.
 ///
 /// ADR-042 non-claims (explicit): this object states preimage scope only. It is not a producer
-/// identity, provenance, completeness, truthfulness, archive-verification, tamper-intent,
-/// trust-score, or whole-action verdict. Per-bundle verify state stays solely in `verify_mode`.
+/// Non-claims are attributed: ADR-042 §3 (trust score / whole-action verdict),
+/// `content_hash_field_inventory` UNBOUND (producer `source`), ADR-044 (archive verification),
+/// preimage scope itself (completeness / truthfulness / tamper intent). Per-bundle verify state
+/// stays solely in `verify_mode`.
 ///
 /// False-greens this helper must keep red:
 /// - missing `content_hash_scope`
-/// - CLI `bound_fields` / object diverging from `content_hash_scope()` (literal rebuild)
-/// - artifact/archive integrity mislabeled as content-hash coverage
+/// - CLI object diverging from `content_hash_scope()` (literal rebuild)
+/// - invented `digest_profile` / missing registered `schema`
+/// - `separate_integrity_layers` values that claim content_hash coverage (value-level, not keys)
+/// - implying reconciliation with hostile `manifest.algorithms`
 fn assert_content_hash_scope(show_json: &Value, label: &str) {
     let scope = show_json
         .get("content_hash_scope")
@@ -71,8 +75,21 @@ fn assert_content_hash_scope(show_json: &Value, label: &str) {
     );
 
     assert_eq!(
-        scope["digest_profile"], "assay-content-hash-v1",
-        "{label}: digest profile id"
+        scope["schema"],
+        assay_evidence::crypto::id::CONTENT_HASH_SCOPE_SCHEMA,
+        "{label}: registered schema assay.content_hash_scope.v1"
+    );
+    assert!(
+        scope.get("digest_profile").is_none(),
+        "{label}: invented digest_profile must not ship; use schema"
+    );
+    assert_eq!(
+        scope["applies_to"], "reader_content_hash_recompute",
+        "{label}: scope describes the local reader recompute contract"
+    );
+    assert_eq!(
+        scope["not_reconciled_with"], "manifest.algorithms",
+        "{label}: must refuse reconciliation with (possibly hostile) manifest.algorithms"
     );
     assert_eq!(scope["canon"], "jcs-rfc8785", "{label}: canon");
     assert_eq!(scope["hash"], "sha256", "{label}: hash alg");
@@ -81,11 +98,12 @@ fn assert_content_hash_scope(show_json: &Value, label: &str) {
     let bound = scope["bound_fields"]
         .as_array()
         .unwrap_or_else(|| panic!("{label}: bound_fields must be an array"));
-    let bound_names: Vec<&str> = bound
+    let bound_names: Vec<String> = bound
         .iter()
         .map(|v| {
             v.as_str()
                 .unwrap_or_else(|| panic!("{label}: bound_fields entries must be strings"))
+                .to_string()
         })
         .collect();
     assert_eq!(
@@ -94,26 +112,31 @@ fn assert_content_hash_scope(show_json: &Value, label: &str) {
     );
 
     assert_eq!(
-        scope["omitted_event_fields"], "not_bound_by_this_digest",
+        scope["omitted_event_fields_are"], "not_bound_by_this_digest",
         "{label}: must state that omitted event fields are outside this digest"
     );
 
-    // Separate integrity layers — pointers only; show must not claim it verified the archive.
     let layers = scope
         .get("separate_integrity_layers")
         .unwrap_or_else(|| panic!("{label}: separate_integrity_layers required"));
-    assert!(
-        layers.get("events_file_digest").is_some(),
-        "{label}: must point at the events-file digest in the manifest"
-    );
-    assert!(
-        layers.get("run_root").is_some(),
-        "{label}: must point at manifest.run_root under assay-run-root-v1"
-    );
-    assert!(
-        layers.get("archive_attestation_subject").is_some(),
-        "{label}: must point at the ADR-044 archive digest subject without computing it here"
-    );
+    for key in [
+        "events_file_digest",
+        "run_root",
+        "archive_attestation_subject",
+    ] {
+        let value = layers
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| panic!("{label}: separate_integrity_layers.{key} must be a string"));
+        assert!(
+            value.contains("not bound by content_hash"),
+            "{label}: {key}={value:?} must state semantic separation (key presence alone is a false-green)"
+        );
+        assert!(
+            !value.contains("covered by this content_hash"),
+            "{label}: {key} must not mislabel the layer as content_hash coverage"
+        );
+    }
 
     // False-green: labeling artifact/archive coverage as content-hash coverage.
     for banned in [
@@ -124,17 +147,19 @@ fn assert_content_hash_scope(show_json: &Value, label: &str) {
         "integrity_ok",
         "covers_archive",
         "covers_artifact",
+        "digest_profile",
     ] {
         assert!(
             scope.get(banned).is_none(),
-            "{label}: content_hash_scope must not carry {banned} (artifact/archive mislabel)"
+            "{label}: content_hash_scope must not carry {banned}"
         );
     }
     let scope_text = scope.to_string();
     assert!(
         !scope_text.contains("content_hash covers the archive")
-            && !scope_text.contains("content_hash covers the artifact"),
-        "{label}: must not mislabel artifact/archive integrity as content-hash scope"
+            && !scope_text.contains("content_hash covers the artifact")
+            && !scope_text.contains("covered by this content_hash"),
+        "{label}: must not mislabel other integrity layers as content-hash scope"
     );
 }
 
@@ -293,6 +318,66 @@ fn corpus_vector(vector: CorpusVector) -> std::path::PathBuf {
     workspace_root()
         .join("conformance/privileged-mcp-action-v0/vectors")
         .join(name)
+}
+
+/// Same-length byte substitution inside `manifest.json`, then retar+gzip.
+///
+/// Used to prove hostile `manifest.algorithms` under `--no-verify` cannot imply reconciliation
+/// with the reader `content_hash_scope` contract.
+fn rewrite_bundle_manifest_algorithms(src: &Path, dst: &Path, from: &[u8], to: &[u8]) {
+    use flate2::read::GzDecoder;
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::{Cursor, Read};
+
+    assert_eq!(from.len(), to.len(), "same-length substitution");
+    let bundle = std::fs::read(src).expect("read source bundle");
+    let mut tar_bytes = Vec::new();
+    GzDecoder::new(Cursor::new(&bundle))
+        .read_to_end(&mut tar_bytes)
+        .expect("gunzip");
+
+    let mut out = Vec::new();
+    {
+        let enc = GzEncoder::new(&mut out, Compression::default());
+        let mut builder = tar::Builder::new(enc);
+        let mut archive = tar::Archive::new(Cursor::new(&tar_bytes));
+        for entry in archive.entries().expect("tar entries") {
+            let mut entry = entry.expect("entry");
+            let path = entry.path().expect("path").into_owned();
+            let mut data = Vec::new();
+            entry.read_to_end(&mut data).expect("entry bytes");
+            if path.to_string_lossy() == "manifest.json" {
+                let before = data.clone();
+                data = replace_bytes(&data, from, to);
+                assert_ne!(data, before, "manifest.algorithms substitution must apply");
+            }
+            let mut header = tar::Header::new_gnu();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, &path, Cursor::new(data))
+                .expect("append");
+        }
+        builder.into_inner().expect("tar").finish().expect("gzip");
+    }
+    std::fs::write(dst, out).expect("write hostile bundle");
+}
+
+fn replace_bytes(haystack: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(haystack.len());
+    let mut i = 0;
+    while i < haystack.len() {
+        if haystack[i..].starts_with(from) {
+            out.extend_from_slice(to);
+            i += from.len();
+        } else {
+            out.push(haystack[i]);
+            i += 1;
+        }
+    }
+    out
 }
 
 fn invalid_contract_bundle() -> std::path::PathBuf {
@@ -636,6 +721,49 @@ fn bundle_inspection_json_publishes_typed_failures_on_stdout() {
         skipped_json["content_hash_scope"], success_json["content_hash_scope"],
         "content_hash_scope is construction metadata: identical for verified and tampered \
          --no-verify inputs; it must carry no per-bundle matched/verified state"
+    );
+
+    // Hostile manifest.algorithms under --no-verify must not imply reconciliation with the
+    // reader recompute contract (scope.canon/hash stay the local reader facts).
+    let hostile_algorithms = dir.path().join("hostile-algorithms.bundle.tar.gz");
+    rewrite_bundle_manifest_algorithms(
+        valid.as_path(),
+        &hostile_algorithms,
+        b"jcs-rfc8785",
+        b"attacker-xx",
+    );
+    let hostile = assay(
+        dir.path(),
+        &[
+            "evidence",
+            "show",
+            hostile_algorithms.to_str().expect("UTF-8 path"),
+            "--format",
+            "json",
+            "--no-verify",
+        ],
+    );
+    assert_eq!(
+        hostile.status.code(),
+        Some(0),
+        "hostile --no-verify must still open"
+    );
+    let hostile_json: Value =
+        serde_json::from_slice(&hostile.stdout).expect("hostile show stdout JSON");
+    assert_eq!(hostile_json["verify_mode"], "disabled");
+    assert_eq!(
+        hostile_json["manifest"]["algorithms"]["canon"], "attacker-xx",
+        "fixture must actually carry the conflicting manifest.algorithms"
+    );
+    assert_content_hash_scope(&hostile_json, "hostile algorithms --no-verify");
+    assert_eq!(
+        hostile_json["content_hash_scope"]["canon"], "jcs-rfc8785",
+        "reader contract must not adopt hostile manifest.algorithms.canon"
+    );
+    assert_ne!(
+        hostile_json["content_hash_scope"]["canon"],
+        hostile_json["manifest"]["algorithms"]["canon"],
+        "conflicting manifest.algorithms under --no-verify must not imply reconciliation"
     );
 
     let missing_unverified = assay(

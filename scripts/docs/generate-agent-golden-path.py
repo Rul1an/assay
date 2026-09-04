@@ -553,7 +553,8 @@ STEPS: list[dict[str, object]] = [
             ),
         ],
         "stdout_summary": (
-            "Success parses as an object containing `manifest`, `events`, and `verify_mode`; "
+            "Success parses as an object containing `manifest`, `events`, `verify_mode`, and "
+            "`content_hash_scope`; "
             "the registered values are `enabled` and `disabled`, with `--no-verify` producing "
             "`disabled`. A recorded-value "
             "mismatch parses as `assay.run_summary.v1` with `E_EVIDENCE_INTEGRITY`; an "

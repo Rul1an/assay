@@ -122,7 +122,10 @@ The obligation is a second, explicit step rather than an overload of the first:
   and not a success.
 - `verify_attestation_for_bundle(envelope, key, bundle_bytes)` recomputes the SHA-256 of those bytes,
   matches it against the single subject, validates the predicate version, and cross-checks the
-  derivable fields. Only this call can return a fully verified attestation.
+  derivable fields. Only this call can return a fully verified attestation. The named, per-field
+  refusal behaviour is pinned by `each_predicate_field_is_cross_checked_and_named` in
+  `crates/assay-evidence/src/attestation.rs` — each mutated predicate field must be refused by a
+  reason that names that field, not by an earlier unrelated check.
 
 Splitting them keeps the weaker outcome nameable in the type system. Folding the byte match into
 `verify_envelope` would make "I verified the attestation" mean two different things depending on

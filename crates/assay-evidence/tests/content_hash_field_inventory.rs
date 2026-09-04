@@ -23,7 +23,10 @@
 //! a test; and classifying it wrongly fails a different test. That is the property the prose could
 //! not carry — the list cannot silently disagree with the code.
 
-use assay_evidence::crypto::id::{compute_content_hash, content_hash_bound_field_names};
+use assay_evidence::crypto::id::{
+    compute_content_hash, content_hash_bound_field_names, content_hash_scope,
+    CONTENT_HASH_SCOPE_SCHEMA,
+};
 use assay_evidence::types::EvidenceEvent;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -275,17 +278,19 @@ const BOUND_JCS_ORDER: &[&str] = &["data", "datacontenttype", "specversion", "su
 
 /// Production projection ↔ human `BOUND` ↔ observed hash movers (three-way; one shared function).
 ///
-/// ADR-042: this proves preimage *scope* only. It establishes no producer identity, provenance,
-/// completeness, truthfulness, archive verification, tamper intent, or whole-action verdict.
+/// Non-claims (attributed): ADR-042 §3 (trust score / whole-action verdict);
+/// UNBOUND inventory (producer identity via `source`); ADR-044 (archive verification);
+/// preimage scope alone (completeness / truthfulness / tamper intent).
 #[test]
 fn production_bound_field_projection_matches_bound_and_observed_movers() {
     let projected = content_hash_bound_field_names();
+    let expected: Vec<String> = BOUND_JCS_ORDER.iter().map(|s| (*s).to_string()).collect();
     assert_eq!(
-        projected, BOUND_JCS_ORDER,
+        projected, expected,
         "public projection must emit bound names in JCS key order with subject present"
     );
 
-    let projected_set: BTreeSet<&str> = projected.iter().copied().collect();
+    let projected_set: BTreeSet<&str> = projected.iter().map(String::as_str).collect();
     let declared: BTreeSet<&str> = BOUND.iter().copied().collect();
     assert_eq!(
         projected_set, declared,
@@ -332,18 +337,52 @@ fn production_bound_field_projection_matches_bound_and_observed_movers() {
     );
 }
 
-/// False-green: introspection built with `subject: None` drops `subject` under
-/// `skip_serializing_if`, so a projection that omitted subject would still look like a “bound
-/// list” while disagreeing with the hash input that includes subject when present on events.
-///
-/// The shared constructor must populate subject for scope projection so `"subject"` stays in
-/// the bound set even when classifying the preimage shape.
+/// False-green: emitting bound names from `ContentHashInput` with `subject: None` drops
+/// `subject` under `skip_serializing_if`. The structural projection uses required fields so an
+/// optional bound field cannot disappear from the public list when a sentinel is `None`.
 #[test]
 fn content_hash_scope_projection_does_not_omit_subject() {
     let projected = content_hash_bound_field_names();
     assert!(
-        projected.contains(&"subject"),
+        projected.iter().any(|name| name == "subject"),
         "subject omitted during introspection is a false-green: the bound set must include subject"
     );
-    assert_eq!(projected, BOUND_JCS_ORDER);
+    let expected: Vec<String> = BOUND_JCS_ORDER.iter().map(|s| (*s).to_string()).collect();
+    assert_eq!(projected, expected);
+}
+
+/// Value-level bite: mislabeling a separate integrity layer as content_hash coverage must fail
+/// even when the key names look correct.
+#[test]
+fn separate_integrity_layers_state_semantic_separation() {
+    let layers = content_hash_scope().separate_integrity_layers;
+    for (name, value) in [
+        ("events_file_digest", layers.events_file_digest),
+        ("run_root", layers.run_root),
+        (
+            "archive_attestation_subject",
+            layers.archive_attestation_subject,
+        ),
+    ] {
+        assert!(
+            value.contains("not bound by content_hash"),
+            "{name}={value:?}: key presence alone is a false-green"
+        );
+        assert!(
+            !value.contains("covered by this content_hash"),
+            "{name} must not claim content_hash covers the layer"
+        );
+    }
+}
+
+/// Registered output identity — not an invented digest_profile string.
+#[test]
+fn content_hash_scope_uses_registered_schema_identity() {
+    let scope = content_hash_scope();
+    assert_eq!(scope.schema, CONTENT_HASH_SCOPE_SCHEMA);
+    assert_eq!(CONTENT_HASH_SCOPE_SCHEMA, "assay.content_hash_scope.v1");
+    assert_eq!(scope.applies_to, "reader_content_hash_recompute");
+    assert_eq!(scope.not_reconciled_with, "manifest.algorithms");
+    let json = serde_json::to_value(&scope).expect("serialize");
+    assert!(json.get("digest_profile").is_none());
 }
