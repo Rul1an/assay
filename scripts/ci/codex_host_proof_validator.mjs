@@ -707,6 +707,55 @@ export function isProofRpcId(id) {
   return Number.isSafeInteger(id);
 }
 
+function retainedAppContextReason(value) {
+  if (value == null) {
+    return null;
+  }
+  if (!isPlainObject(value)) {
+    return "appContext must be an object or null";
+  }
+  const allowed = ["actionName", "appName", "connectorId", "linkId", "resourceUri"];
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) {
+      return `appContext contains unexpected key ${key}`;
+    }
+  }
+  if (!isNonemptyString(value.connectorId)) {
+    return "appContext requires non-empty string connectorId";
+  }
+  if (hasOwn(value, "actionName") && value.actionName !== null && typeof value.actionName !== "string") {
+    return "appContext actionName must be a string or null";
+  }
+  if (hasOwn(value, "appName") && value.appName !== null && typeof value.appName !== "string") {
+    return "appContext appName must be a string or null";
+  }
+  if (hasOwn(value, "linkId") && value.linkId !== null && typeof value.linkId !== "string") {
+    return "appContext linkId must be a string or null";
+  }
+  if (hasOwn(value, "resourceUri") && value.resourceUri !== null && typeof value.resourceUri !== "string") {
+    return "appContext resourceUri must be a string or null";
+  }
+  return null;
+}
+
+function retainedMcpToolCallErrorReason(value) {
+  if (value == null) {
+    return null;
+  }
+  if (!isPlainObject(value)) {
+    return "error must be an object or null";
+  }
+  for (const key of Object.keys(value)) {
+    if (key !== "message") {
+      return `error contains unexpected key ${key}`;
+    }
+  }
+  if (typeof value.message !== "string") {
+    return "error requires string message";
+  }
+  return null;
+}
+
 function retainedItemReason(item, label = "item/completed") {
   if (!isPlainObject(item) || !isNonemptyString(item.type) || !isNonemptyString(item.id)) {
     return `${label} item is not a typed retained item`;
@@ -719,17 +768,78 @@ function retainedItemReason(item, label = "item/completed") {
         return null;
       }
       return `${label} ${item.type} is not the closed non-evidentiary projection`;
-    case "mcpToolCall":
-      if (
-        isNonemptyString(item.server) &&
-        isNonemptyString(item.tool) &&
-        isPlainObject(item.arguments) &&
-        isNonemptyString(item.status) &&
-        (item.result == null || isPlainObject(item.result))
-      ) {
-        return null;
+    case "mcpToolCall": {
+      const allowedKeys = [
+        "appContext",
+        "arguments",
+        "durationMs",
+        "error",
+        "id",
+        "mcpAppResourceUri",
+        "pluginId",
+        "readOnlyHint",
+        "result",
+        "server",
+        "status",
+        "tool",
+        "type",
+      ];
+      for (const key of Object.keys(item)) {
+        if (!allowedKeys.includes(key)) {
+          return `${label} mcpToolCall contains unexpected key ${key}`;
+        }
       }
-      return `${label} mcpToolCall is missing required retained fields`;
+      if (
+        !isNonemptyString(item.server) ||
+        !isNonemptyString(item.tool) ||
+        !isPlainObject(item.arguments) ||
+        !isNonemptyString(item.status) ||
+        (hasOwn(item, "result") && item.result !== null && !isPlainObject(item.result))
+      ) {
+        return `${label} mcpToolCall is missing required retained fields`;
+      }
+      if (
+        hasOwn(item, "durationMs") &&
+        item.durationMs !== null &&
+        !(typeof item.durationMs === "number" && Number.isSafeInteger(item.durationMs) && item.durationMs >= 0)
+      ) {
+        return `${label} mcpToolCall durationMs must be a non-negative integer or null`;
+      }
+      if (
+        hasOwn(item, "readOnlyHint") &&
+        item.readOnlyHint !== null &&
+        typeof item.readOnlyHint !== "boolean"
+      ) {
+        return `${label} mcpToolCall readOnlyHint must be a boolean or null`;
+      }
+      if (
+        hasOwn(item, "pluginId") &&
+        item.pluginId !== null &&
+        typeof item.pluginId !== "string"
+      ) {
+        return `${label} mcpToolCall pluginId must be a string or null`;
+      }
+      if (
+        hasOwn(item, "mcpAppResourceUri") &&
+        item.mcpAppResourceUri !== null &&
+        typeof item.mcpAppResourceUri !== "string"
+      ) {
+        return `${label} mcpToolCall mcpAppResourceUri must be a string or null`;
+      }
+      if (hasOwn(item, "appContext")) {
+        const appContextReason = retainedAppContextReason(item.appContext);
+        if (appContextReason) {
+          return `${label} mcpToolCall ${appContextReason}`;
+        }
+      }
+      if (hasOwn(item, "error")) {
+        const errorReason = retainedMcpToolCallErrorReason(item.error);
+        if (errorReason) {
+          return `${label} mcpToolCall ${errorReason}`;
+        }
+      }
+      return null;
+    }
     case "userMessage":
       if (Array.isArray(item.content)) {
         return null;
@@ -1566,6 +1676,9 @@ function classifyInvocation(calls, expected, threadId, turnId, topology) {
   if (item.tool !== DECIDE_TOOL) {
     return cell("fail", `wrong tool ${item.tool}`);
   }
+  if (item.error != null) {
+    return cell("fail", "mcpToolCall contains an error");
+  }
   if (item.status !== "completed") {
     return cell("fail", `tool status ${item.status}`);
   }
@@ -2101,16 +2214,50 @@ function projectAppContext(value) {
     return invalidProjection(value);
   }
   const out = {};
-  if (hasOwn(value, "connectorId")) {
+  if (typeof value.connectorId === "string" && value.connectorId.length > 0) {
     out.connectorId = projectedScalar(value.connectorId);
+  } else {
+    out.connectorId = invalidProjection(value.connectorId);
+  }
+  if (hasOwn(value, "actionName")) {
+    out.actionName =
+      value.actionName == null
+        ? null
+        : typeof value.actionName === "string"
+          ? projectedScalar(value.actionName)
+          : invalidProjection(value.actionName);
+  }
+  if (hasOwn(value, "appName")) {
+    out.appName =
+      value.appName == null
+        ? null
+        : typeof value.appName === "string"
+          ? projectedScalar(value.appName)
+          : invalidProjection(value.appName);
   }
   if (hasOwn(value, "linkId")) {
-    out.linkId = value.linkId == null ? null : projectedScalar(value.linkId);
+    out.linkId =
+      value.linkId == null
+        ? null
+        : typeof value.linkId === "string"
+          ? projectedScalar(value.linkId)
+          : invalidProjection(value.linkId);
   }
   if (hasOwn(value, "resourceUri")) {
-    out.resourceUri = value.resourceUri == null ? null : projectedScalar(value.resourceUri);
+    out.resourceUri =
+      value.resourceUri == null
+        ? null
+        : typeof value.resourceUri === "string"
+          ? projectedScalar(value.resourceUri)
+          : invalidProjection(value.resourceUri);
   }
-  return withUnexpectedKeys(out, value, ["connectorId", "linkId", "resourceUri"]);
+  return withUnexpectedKeys(out, value, [
+    "actionName",
+    "appName",
+    "connectorId",
+    "linkId",
+    "resourceUri",
+  ]);
 }
 
 function projectMcpToolCallError(value) {
@@ -2121,11 +2268,10 @@ function projectMcpToolCallError(value) {
     return invalidProjection(value);
   }
   const out = {};
-  if (hasOwn(value, "message")) {
-    out.message =
-      typeof value.message === "string"
-        ? projectedScalar(scrub(value.message))
-        : invalidProjection(value.message);
+  if (typeof value.message === "string") {
+    out.message = projectedScalar(scrub(value.message));
+  } else {
+    out.message = invalidProjection(value.message);
   }
   return withUnexpectedKeys(out, value, ["message"]);
 }
@@ -2156,17 +2302,38 @@ function projectRetainedItem(item) {
     out.result = item.result == null ? null : projectToolResult(item.result);
   }
   if (hasOwn(item, "durationMs")) {
-    out.durationMs = item.durationMs == null ? null : projectedScalar(item.durationMs);
+    out.durationMs =
+      item.durationMs == null
+        ? null
+        : typeof item.durationMs === "number" &&
+            Number.isSafeInteger(item.durationMs) &&
+            item.durationMs >= 0
+          ? item.durationMs
+          : invalidProjection(item.durationMs);
   }
   if (hasOwn(item, "readOnlyHint")) {
-    out.readOnlyHint = item.readOnlyHint == null ? null : projectedScalar(item.readOnlyHint);
+    out.readOnlyHint =
+      item.readOnlyHint == null
+        ? null
+        : typeof item.readOnlyHint === "boolean"
+          ? item.readOnlyHint
+          : invalidProjection(item.readOnlyHint);
   }
   if (hasOwn(item, "pluginId")) {
-    out.pluginId = item.pluginId == null ? null : projectedScalar(item.pluginId);
+    out.pluginId =
+      item.pluginId == null
+        ? null
+        : typeof item.pluginId === "string"
+          ? projectedScalar(item.pluginId)
+          : invalidProjection(item.pluginId);
   }
   if (hasOwn(item, "mcpAppResourceUri")) {
     out.mcpAppResourceUri =
-      item.mcpAppResourceUri == null ? null : projectedScalar(item.mcpAppResourceUri);
+      item.mcpAppResourceUri == null
+        ? null
+        : typeof item.mcpAppResourceUri === "string"
+          ? projectedScalar(item.mcpAppResourceUri)
+          : invalidProjection(item.mcpAppResourceUri);
   }
   if (hasOwn(item, "appContext")) {
     out.appContext = projectAppContext(item.appContext);

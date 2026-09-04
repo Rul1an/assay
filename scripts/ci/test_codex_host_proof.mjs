@@ -5045,3 +5045,73 @@ test("canonical Codex 0.153.1 elicitation prompt is accepted; unexpected prompt 
     "elicitation for an unpinned tool must be declined",
   );
 });
+
+test("classifyRecord rejects invalid 0.153.1 metadata types at the consumer boundary", async () => {
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true, "control must pass all cells");
+
+  const badMetadataVariants = [
+    { durationMs: "wrong" },
+    { durationMs: -1 },
+    { durationMs: 1.5 },
+    { readOnlyHint: 42 },
+    { readOnlyHint: "true" },
+    { pluginId: false },
+    { pluginId: 123 },
+    { mcpAppResourceUri: true },
+    { error: {} },
+    { error: { message: 123 } },
+    { appContext: {} },
+    { appContext: { connectorId: 123 } },
+    { durationMs: "wrong", readOnlyHint: 42, pluginId: false, error: {} },
+  ];
+
+  for (const badMeta of badMetadataVariants) {
+    const events = structuredClone(control.events);
+    const itemCompleted = events.find(
+      (e) => e.method === "item/completed" && e.params?.item?.type === "mcpToolCall",
+    );
+    assert.ok(itemCompleted);
+    Object.assign(itemCompleted.params.item, badMeta);
+
+    const terminal = events.find((e) => e.method === "turn/completed");
+    const terminalTool = terminal.params.turn.items.find(
+      (item) => item?.type === "mcpToolCall",
+    );
+    assert.ok(terminalTool);
+    Object.assign(terminalTool, badMeta);
+
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(
+      allIntendedCellsPass(classified),
+      false,
+      `metadata ${JSON.stringify(badMeta)} must not produce an all-pass classification`,
+    );
+  }
+});
+
+test("mcpToolCall with non-null error fails oneToolInvoked even if status claims completed", async () => {
+  const control = await drive("valid");
+  const events = structuredClone(control.events);
+  const itemCompleted = events.find(
+    (e) => e.method === "item/completed" && e.params?.item?.type === "mcpToolCall",
+  );
+  itemCompleted.params.item.error = { message: "unexpected error" };
+
+  const terminal = events.find((e) => e.method === "turn/completed");
+  const terminalTool = terminal.params.turn.items.find(
+    (item) => item?.type === "mcpToolCall",
+  );
+  terminalTool.error = { message: "unexpected error" };
+
+  const classified = classifyRecord({ ...control.manifest, events });
+  assert.notEqual(
+    classified.cells.oneToolInvoked.status,
+    "pass",
+    "mcpToolCall with error must not pass oneToolInvoked",
+  );
+  assert.equal(
+    classified.cells.structuredResultValidated.status,
+    "unavailable",
+  );
+});
