@@ -14,18 +14,25 @@
 //!
 //! This test derives it, in two layers, because one is not enough. An exhaustive destructure of
 //! `EvidenceEvent` breaks the *build* when a field is added, which is the only mechanism that
-//! reaches a field serde does not emit — seven of these carry `skip_serializing_if`, so a new
-//! optional left `None` in a fixture would otherwise be invisible to every runtime assertion here.
+//! reaches a field serde does not emit — several carry `skip_serializing_if`, so a new optional
+//! left `None` in a fixture would otherwise be invisible to BOUND/UNBOUND set checks. The same
+//! exhaustive invocation also yields the structural field count, and `fully_populated_event()`
+//! must serialize exactly that many keys: naming a new Option without populating it goes red.
 //! On top of that, each emitted field is classified by *observing* whether mutating it moves the
 //! content hash, and the observation is compared against a declaration a human has to write.
 //!
 //! So: adding a field fails compilation until it is named; naming it without classifying it fails
-//! a test; and classifying it wrongly fails a different test. That is the property the prose could
-//! not carry — the list cannot silently disagree with the code.
+//! a test; leaving a skippable Option `None` in the fixture fails the structural-count test; and
+//! classifying it wrongly fails a different test. That is the property the prose could not carry —
+//! the list cannot silently disagree with the code.
 
-use assay_evidence::crypto::id::compute_content_hash;
+use assay_evidence::crypto::id::{
+    compute_content_hash, content_hash_bound_field_names, content_hash_scope,
+    CONTENT_HASH_SCOPE_SCHEMA,
+};
 use assay_evidence::types::EvidenceEvent;
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 
 /// Fields the content hash covers. Mutating any of these MUST change the hash.
 const BOUND: &[&str] = &["specversion", "type", "datacontenttype", "subject", "data"];
@@ -105,19 +112,25 @@ fn mutate(key: &str, value: &Value) -> Value {
     }
 }
 
-/// Break the build when a field is added to `EvidenceEvent`.
+/// Exhaustive `EvidenceEvent` destructure and structural field count from one invocation.
 ///
-/// The behavioural loop below can only see what serde emits, and seven of these fields carry
-/// `skip_serializing_if`. A new optional field left `None` in the fixture — or one marked
-/// `#[serde(skip)]` — would be invisible to every runtime assertion in this file, including the
-/// arity check, because it changes neither side of that equation. So runtime coverage is not
-/// enough and no count can rescue it: the guarantee has to come from the compiler.
-///
-/// This destructure deliberately has no `..`. Adding a field to `EvidenceEvent` stops this test
-/// compiling until someone names it here and classifies it below.
-#[allow(unused_variables)]
-fn field_coverage_is_exhaustive(event: &EvidenceEvent) {
-    let EvidenceEvent {
+/// Adding a field to `EvidenceEvent` stops compilation until this call site names it. The returned
+/// length is the expected serialized key count for a fully populated event: a new
+/// `Option`+`skip_serializing_if` field named here but left `None` in `fully_populated_event()`
+/// drops below that count and fails the structural assertion below. No `..` rest pattern.
+macro_rules! evidence_event_structural_field_count {
+    ($event:expr; $($field:ident),+ $(,)?) => {{
+        #[allow(unused_variables)]
+        let EvidenceEvent {
+            $($field,)+
+        } = $event;
+        [$(stringify!($field)),+].len()
+    }};
+}
+
+fn structural_field_count(event: &EvidenceEvent) -> usize {
+    evidence_event_structural_field_count! {
+        event;
         specversion,
         type_,
         source,
@@ -139,18 +152,25 @@ fn field_coverage_is_exhaustive(event: &EvidenceEvent) {
         semantic_digest,
         digest_profile,
         payload,
-    } = event;
+    }
 }
 
 #[test]
 fn every_event_field_is_classified_and_behaves_as_classified() {
     let event = fully_populated_event();
-    field_coverage_is_exhaustive(&event);
+    let expected_keys = structural_field_count(&event);
 
     let serialized = serde_json::to_value(&event).expect("serialize");
     let object = serialized
         .as_object()
         .expect("event serializes to an object");
+    assert_eq!(
+        object.len(),
+        expected_keys,
+        "fully_populated_event() must serialize every EvidenceEvent field (structural count \
+         from the exhaustive destructure). An Option left None under skip_serializing_if is \
+         invisible to BOUND/UNBOUND set checks but drops this count"
+    );
 
     // Baseline from the round-tripped event, not the in-memory one. If deserialization normalizes
     // anything, an in-memory baseline makes every *other* field's verdict wrong rather than
@@ -241,7 +261,8 @@ fn every_event_field_is_classified_and_behaves_as_classified() {
 ///
 /// Set equality rather than a count: a rename plus a stale entry keeps the arity intact, and a
 /// cardinality check would call that agreement. This catches a name that no longer exists and a
-/// name that exists but is unlisted; fields serde never emits are the compiler's job, above.
+/// name that exists but is unlisted. Skippable Option fields left `None` in the fixture are
+/// caught by the structural-count assertion against the exhaustive destructure above.
 #[test]
 fn the_inventory_names_match_the_serialized_names() {
     use std::collections::BTreeSet;
@@ -264,4 +285,121 @@ fn the_inventory_names_match_the_serialized_names() {
         "inventory and event disagree.\n  serialized but unlisted: {missing:?}\n  \
          listed but not serialized: {stale:?}"
     );
+}
+
+/// JCS key order for `ContentHashInput` with `subject` populated (RFC 8785 object key sort).
+///
+/// This is the order the public projection must return. Declaration order in `BOUND` is an
+/// independent oracle, not the emission order.
+const BOUND_JCS_ORDER: &[&str] = &["data", "datacontenttype", "specversion", "subject", "type"];
+
+/// Production projection ↔ human `BOUND` ↔ observed hash movers (three-way; one shared function).
+///
+/// Non-claims (attributed): ADR-042 §3 (trust score / whole-action verdict);
+/// UNBOUND inventory (producer identity via `source`); ADR-044 (archive verification);
+/// preimage scope alone (completeness / truthfulness / tamper intent).
+#[test]
+fn production_bound_field_projection_matches_bound_and_observed_movers() {
+    let projected = content_hash_bound_field_names();
+    let expected: Vec<String> = BOUND_JCS_ORDER.iter().map(|s| (*s).to_string()).collect();
+    assert_eq!(
+        projected, expected,
+        "public projection must emit bound names in JCS key order with subject present"
+    );
+
+    let projected_set: BTreeSet<&str> = projected.iter().map(String::as_str).collect();
+    let declared: BTreeSet<&str> = BOUND.iter().copied().collect();
+    assert_eq!(
+        projected_set, declared,
+        "production projection must set-equal the independent BOUND declaration; \
+         deriving BOUND from the projection alone would make the oracle circular"
+    );
+
+    // Observed movers: same probe as the exhaustive classifier, restricted to BOUND names.
+    let event = fully_populated_event();
+    let serialized = serde_json::to_value(&event).expect("serialize");
+    let object = serialized
+        .as_object()
+        .expect("event serializes to an object");
+    let round_tripped: EvidenceEvent =
+        serde_json::from_value(serialized.clone()).expect("baseline round-trip");
+    let baseline = compute_content_hash(&round_tripped).expect("baseline hash");
+
+    let mut observed_movers: BTreeSet<&str> = BTreeSet::new();
+    for (key, value) in object {
+        let mut mutated_object = object.clone();
+        mutated_object.insert(key.clone(), mutate(key, value));
+        let mutated: EvidenceEvent = serde_json::from_value(Value::Object(mutated_object))
+            .unwrap_or_else(|e| {
+                panic!("mutating {key} produced an event that will not parse: {e}")
+            });
+        if mutated == round_tripped {
+            continue;
+        }
+        if compute_content_hash(&mutated).expect("mutated hash") != baseline {
+            // Leak to 'static via BOUND/UNBOUND tables only — keys are serialized names.
+            let name = BOUND
+                .iter()
+                .chain(UNBOUND.iter())
+                .copied()
+                .find(|n| *n == key.as_str())
+                .unwrap_or_else(|| panic!("mover {key} missing from inventory tables"));
+            observed_movers.insert(name);
+        }
+    }
+
+    assert_eq!(
+        observed_movers, declared,
+        "fields whose mutations move content_hash must set-equal BOUND and the production projection"
+    );
+}
+
+/// False-green: emitting bound names from `ContentHashInput` with `subject: None` drops
+/// `subject` under `skip_serializing_if`. The structural projection uses required fields so an
+/// optional bound field cannot disappear from the public list when a sentinel is `None`.
+#[test]
+fn content_hash_scope_projection_does_not_omit_subject() {
+    let projected = content_hash_bound_field_names();
+    assert!(
+        projected.iter().any(|name| name == "subject"),
+        "subject omitted during introspection is a false-green: the bound set must include subject"
+    );
+    let expected: Vec<String> = BOUND_JCS_ORDER.iter().map(|s| (*s).to_string()).collect();
+    assert_eq!(projected, expected);
+}
+
+/// Value-level bite: mislabeling a separate integrity layer as content_hash coverage must fail
+/// even when the key names look correct.
+#[test]
+fn separate_integrity_layers_state_semantic_separation() {
+    let layers = content_hash_scope().separate_integrity_layers;
+    for (name, value) in [
+        ("events_file_digest", layers.events_file_digest),
+        ("run_root", layers.run_root),
+        (
+            "archive_attestation_subject",
+            layers.archive_attestation_subject,
+        ),
+    ] {
+        assert!(
+            value.contains("not bound by content_hash"),
+            "{name}={value:?}: key presence alone is a false-green"
+        );
+        assert!(
+            !value.contains("covered by this content_hash"),
+            "{name} must not claim content_hash covers the layer"
+        );
+    }
+}
+
+/// Registered output identity — not an invented digest_profile string.
+#[test]
+fn content_hash_scope_uses_registered_schema_identity() {
+    let scope = content_hash_scope();
+    assert_eq!(scope.schema, CONTENT_HASH_SCOPE_SCHEMA);
+    assert_eq!(CONTENT_HASH_SCOPE_SCHEMA, "assay.content_hash_scope.v1");
+    assert_eq!(scope.applies_to, "reader_content_hash_recompute");
+    assert_eq!(scope.not_reconciled_with, "manifest.algorithms");
+    let json = serde_json::to_value(&scope).expect("serialize");
+    assert!(json.get("digest_profile").is_none());
 }

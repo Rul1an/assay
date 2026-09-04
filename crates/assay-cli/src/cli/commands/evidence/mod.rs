@@ -311,12 +311,14 @@ fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
     let manifest = br.manifest();
 
     if args.format == crate::cli::args::common::ShowFormat::Json {
-        // Output complete bundle as JSON: manifest + events
+        // Output complete bundle as JSON: manifest + events + additive content-hash scope.
+        // Embed `content_hash_scope()` unchanged — do not rebuild fields from CLI literals.
         let events = br.events().collect::<Result<Vec<_>>>()?;
         let bundle_json = serde_json::json!({
             "manifest": manifest,
             "events": events,
             "verify_mode": assay_core::report::summary::verification_mode(verified),
+            "content_hash_scope": assay_evidence::crypto::id::content_hash_scope(),
         });
         println!("{}", serde_json::to_string_pretty(&bundle_json)?);
         return Ok(0);

@@ -15,6 +15,10 @@ use crate::types::EvidenceEvent;
 use anyhow::{Context, Result};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::sync::OnceLock;
+
+/// Registered schema for the additive `content_hash_scope` object on `assay evidence show`.
+pub const CONTENT_HASH_SCOPE_SCHEMA: &str = "assay.content_hash_scope.v1";
 
 /// Input struct for content hash computation.
 ///
@@ -44,6 +48,128 @@ struct ContentHashInput<'a> {
     subject: Option<&'a str>,
     #[serde(rename = "data")]
     payload: &'a serde_json::Value,
+}
+
+/// One shared constructor for the content-hash preimage used by `compute_content_hash`.
+fn content_hash_input<'a>(event: &'a EvidenceEvent) -> ContentHashInput<'a> {
+    ContentHashInput {
+        specversion: &event.specversion,
+        type_: &event.type_,
+        data_content_type: &event.data_content_type,
+        subject: event.subject.as_deref(),
+        payload: &event.payload,
+    }
+}
+
+/// Structural projection of bound JSON names.
+///
+/// Every preimage field is a **required** field here — no `Option` and no
+/// `skip_serializing_if`. Emitting scope from `ContentHashInput` with a skipped `None` would let a
+/// new optional bound field disappear from the public projection while still hashing when present
+/// on real events. This type is the single declarative source for emitted bound names; keep it
+/// field-aligned with `ContentHashInput`'s serde renames.
+#[derive(Serialize)]
+struct ContentHashBoundProjection<'a> {
+    specversion: &'a str,
+    #[serde(rename = "type")]
+    type_: &'a str,
+    #[serde(rename = "datacontenttype")]
+    data_content_type: &'a str,
+    subject: &'a str,
+    #[serde(rename = "data")]
+    payload: &'a serde_json::Value,
+}
+
+fn content_hash_bound_projection() -> ContentHashBoundProjection<'static> {
+    static EMPTY_PAYLOAD: OnceLock<serde_json::Value> = OnceLock::new();
+    let payload = EMPTY_PAYLOAD.get_or_init(|| serde_json::json!({}));
+    ContentHashBoundProjection {
+        specversion: "1.0",
+        type_: "assay.content_hash_scope.projection",
+        data_content_type: "application/json",
+        subject: "urn:assay:content-hash-scope",
+        payload,
+    }
+}
+
+fn bound_field_names_from_projection() -> Vec<String> {
+    let value =
+        serde_json::to_value(content_hash_bound_projection()).expect("bound projection serializes");
+    let object = value
+        .as_object()
+        .expect("bound projection serializes to an object");
+    let mut names: Vec<String> = object.keys().cloned().collect();
+    // Flat ASCII object keys: UTF-8 byte order matches RFC 8785 UTF-16 code unit order.
+    names.sort();
+    names
+}
+
+/// Pointers to integrity layers that are *not* the content-hash preimage.
+///
+/// Value strings must state the separation semantically. Key presence alone is not enough: a
+/// mislabel that says a layer is "covered by this content_hash" must fail tests that read the
+/// values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ContentHashSeparateIntegrityLayers {
+    /// Manifest member digest over `events.ndjson` (bundle file integrity).
+    pub events_file_digest: &'static str,
+    /// `manifest.run_root` under profile `assay-run-root-v1`.
+    pub run_root: &'static str,
+    /// ADR-044 attestation subject is the archive digest, not the content-hash preimage.
+    pub archive_attestation_subject: &'static str,
+}
+
+/// Machine-readable content-hash preimage scope (`schema` = [`CONTENT_HASH_SCOPE_SCHEMA`]).
+///
+/// Describes **this reader's** `content_hash` recomputation/build contract. It is not reconciled
+/// with a bundle's `manifest.algorithms` (which may be hostile under `--no-verify`).
+///
+/// Non-claims (attributed):
+/// - aggregate trust score / whole-action verdict — ADR-042 §3
+/// - producer identity via unbound `source` — `content_hash_field_inventory` UNBOUND
+/// - archive / artifact verification — ADR-044
+/// - completeness, truthfulness, tamper intent — not established by preimage scope
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ContentHashScope {
+    pub schema: &'static str,
+    /// Always the local reader contract, never a per-bundle matched/verified state.
+    pub applies_to: &'static str,
+    /// Explicit non-reconciliation with the (possibly hostile) manifest field of the same algorithms.
+    pub not_reconciled_with: &'static str,
+    pub canon: &'static str,
+    pub hash: &'static str,
+    /// Bound JSON field names in sorted key order from the internal content-hash bound projection.
+    pub bound_fields: Vec<String>,
+    pub omitted_event_fields_are: &'static str,
+    pub separate_integrity_layers: ContentHashSeparateIntegrityLayers,
+}
+
+/// Single source for the additive `content_hash_scope` object.
+///
+/// Callers (including `assay evidence show --format json`) must embed this value unchanged rather
+/// than reconstructing fields from literals.
+pub fn content_hash_scope() -> ContentHashScope {
+    ContentHashScope {
+        schema: CONTENT_HASH_SCOPE_SCHEMA,
+        applies_to: "reader_content_hash_recompute",
+        not_reconciled_with: "manifest.algorithms",
+        canon: "jcs-rfc8785",
+        hash: "sha256",
+        bound_fields: bound_field_names_from_projection(),
+        omitted_event_fields_are: "not_bound_by_this_digest",
+        separate_integrity_layers: ContentHashSeparateIntegrityLayers {
+            events_file_digest:
+                "not bound by content_hash; see manifest.files digest for events.ndjson",
+            run_root: "not bound by content_hash; see manifest.run_root (assay-run-root-v1)",
+            archive_attestation_subject:
+                "not bound by content_hash; ADR-044 archive digest subject (show does not compute it)",
+        },
+    }
+}
+
+/// Bound field names from the structural projection (same source as [`content_hash_scope`]).
+pub fn content_hash_bound_field_names() -> Vec<String> {
+    content_hash_scope().bound_fields
 }
 
 /// Calculate the Content Hash (sha256 of canonical content).
@@ -88,15 +214,8 @@ struct ContentHashInput<'a> {
 /// assert!(hash.starts_with("sha256:"));
 /// ```
 pub fn compute_content_hash(event: &EvidenceEvent) -> Result<String> {
-    let input = ContentHashInput {
-        specversion: &event.specversion,
-        type_: &event.type_,
-        data_content_type: &event.data_content_type,
-        subject: event.subject.as_deref(),
-        payload: &event.payload,
-    };
-
-    assay_canonical::content_id(&input).context("failed to compute content hash")
+    assay_canonical::content_id(&content_hash_input(event))
+        .context("failed to compute content hash")
 }
 
 /// Calculate the Stream Identity ID.
@@ -359,6 +478,48 @@ mod tests {
             root,
             "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
+    }
+
+    /// Structural projection and hash-input serde keys must stay field-aligned when subject is
+    /// present. Two structs that can drift silently would reintroduce the optional-field false-green.
+    #[test]
+    fn bound_projection_keys_match_hash_input_when_subject_present() {
+        let event = create_test_event().with_subject("urn:assay:parity");
+        assert!(event.subject.is_some());
+        let input = content_hash_input(&event);
+        let input_value = serde_json::to_value(&input).expect("input serializes");
+        let projection_value =
+            serde_json::to_value(content_hash_bound_projection()).expect("projection serializes");
+        let mut input_keys: Vec<_> = input_value
+            .as_object()
+            .expect("object")
+            .keys()
+            .cloned()
+            .collect();
+        let mut projection_keys: Vec<_> = projection_value
+            .as_object()
+            .expect("object")
+            .keys()
+            .cloned()
+            .collect();
+        input_keys.sort();
+        projection_keys.sort();
+        assert_eq!(
+            input_keys, projection_keys,
+            "ContentHashBoundProjection must stay field-aligned with ContentHashInput serde renames"
+        );
+    }
+
+    #[test]
+    fn content_hash_scope_is_reader_contract_not_manifest_algorithms() {
+        let scope = content_hash_scope();
+        assert_eq!(scope.schema, CONTENT_HASH_SCOPE_SCHEMA);
+        assert_eq!(scope.applies_to, "reader_content_hash_recompute");
+        assert_eq!(scope.not_reconciled_with, "manifest.algorithms");
+        assert!(scope
+            .separate_integrity_layers
+            .events_file_digest
+            .contains("not bound by content_hash"));
     }
 
     fn create_test_event() -> EvidenceEvent {
