@@ -167,7 +167,9 @@ fn every_event_field_is_classified_and_behaves_as_classified() {
     assert_eq!(
         object.len(),
         expected_keys,
-        "fully_populated_event() must serialize every EvidenceEvent field (structural count          from the exhaustive destructure). An Option left None under skip_serializing_if is          invisible to BOUND/UNBOUND set checks but drops this count"
+        "fully_populated_event() must serialize every EvidenceEvent field (structural count \
+         from the exhaustive destructure). An Option left None under skip_serializing_if is \
+         invisible to BOUND/UNBOUND set checks but drops this count"
     );
 
     // Baseline from the round-tripped event, not the in-memory one. If deserialization normalizes
