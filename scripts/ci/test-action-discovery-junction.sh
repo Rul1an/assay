@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # #2778: pin + published nested sandbox recipe + required default-discovery journey.
-# Single recipe source: scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd
-# (bytes from the peeled Action commit). Workflows/docs must consume that file;
-# they must not restate the command or teach fixture-copy / `assay run` remediation.
+# Recipe source: scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd
+# Pin authority: scripts/ci/read-assay-action-pin.sh (no second hardcoded peel).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -12,13 +11,12 @@ RECIPE="${ROOT}/scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd"
 WORKFLOW="${ROOT}/.github/workflows/action-v2-test.yml"
 DOC="${ROOT}/docs/guides/github-action.md"
 READER="${ROOT}/scripts/ci/read-assay-action-pin.sh"
-EXPECTED_PIN="651c82109dc2200ba45e19775bf92cf68f7712ea"
 
 die() { echo "action-discovery-junction: $*" >&2; exit 1; }
 ok() { echo "ok    $*"; }
 
 PIN="$("${READER}")"
-[[ "${PIN}" == "${EXPECTED_PIN}" ]] || die "pin ${PIN} != peeled v3.2.0 ${EXPECTED_PIN}"
+[[ "${PIN}" =~ ^[0-9a-f]{40}$ ]] || die "reader pin malformed: ${PIN}"
 
 [[ -f "${RECIPE}" ]] || die "missing single-source recipe ${RECIPE}"
 RECIPE_BODY="$(cat "${RECIPE}")"
@@ -27,7 +25,6 @@ RECIPE_BODY="$(cat "${RECIPE}")"
 [[ "${RECIPE_BODY}" == *".assay/evidence/nested/"* ]] || die "recipe must write nested discovery path"
 [[ "${RECIPE_BODY}" != *"assay run"* ]] || die "recipe must not teach assay run"
 
-# Vendored action.yml must not revive stale remediation.
 if grep -Fq "Run 'assay run'" "${FIXTURE}"; then
   die "fixture action.yml still teaches Run 'assay run' (stale remediation)"
 fi
@@ -35,54 +32,268 @@ if grep -Fq "assay run --policy" "${FIXTURE}"; then
   die "fixture action.yml still teaches assay run --policy remediation"
 fi
 grep -Fq 'remediation_recipe.cmd' "${FIXTURE}" || die "fixture action.yml must load remediation_recipe.cmd"
+grep -Eq "^commit=${PIN}$" "${PROVENANCE}" || die "PROVENANCE commit does not equal reader pin"
 
-# PROVENANCE must name the same peel + v3.2.0.
-grep -Eq "^commit=${EXPECTED_PIN}$" "${PROVENANCE}" || die "PROVENANCE commit drift"
-grep -Eq "^tag=v3.2.0$" "${PROVENANCE}" || die "PROVENANCE tag must be v3.2.0"
-
-# Docs: troubleshooting must embed the exact recipe bytes (one source).
 DOC_TEXT="$(cat "${DOC}")"
 [[ "${DOC_TEXT}" == *"${RECIPE_BODY}"* ]] || die "docs/guides/github-action.md must embed remediation_recipe.cmd bytes exactly"
-if grep -n "Generate with:" -A6 "${DOC}" | grep -Fq "assay ci"; then
+if grep -n "Generate with:" -A8 "${DOC}" | grep -Fq "assay ci"; then
   die "docs troubleshooting still generates evidence via assay ci (stale)"
 fi
 if grep -Fq -- "--out evidence.tar.gz" "${DOC}"; then
   die "docs still export to evidence.tar.gz outside Action discovery roots"
 fi
 
-# Workflow junction job: consume recipe file, required mode, no bundles override, no fixture cp.
-WF="$(cat "${WORKFLOW}")"
-echo "${WF}" | grep -Fq 'default-discovery-sandbox-junction' || die "action-v2-test.yml missing default-discovery-sandbox-junction job"
-echo "${WF}" | grep -Fq 'scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd' || die "junction job must run recipe via fixture path (no duplicated literal)"
-# Required mode present near the junction uses block: extract job roughly
-python3 - "${WORKFLOW}" "${EXPECTED_PIN}" <<'PY'
-import re, sys
+python3 - "${WORKFLOW}" "${PIN}" <<'PY'
+import json, subprocess, sys
 from pathlib import Path
-wf = Path(sys.argv[1]).read_text(encoding="utf-8")
+
+wf_path = Path(sys.argv[1])
 pin = sys.argv[2]
-# Split on job keys at column 0 indent of 2 spaces
-m = re.search(
-    r"(?m)^  default-discovery-sandbox-junction:\n(.*?)(?=\n  [A-Za-z0-9_-]+:|\Z)",
-    wf,
-    re.S,
+text = wf_path.read_text(encoding="utf-8")
+
+RUBY = r'''
+require "json"
+require "yaml"
+begin
+  val = YAML.safe_load(STDIN.read, aliases: false)
+  STDOUT.write(JSON.generate(val))
+rescue Psych::SyntaxError, Psych::BadAlias, Psych::DisallowedClass => e
+  STDERR.write(e.message)
+  exit 2
+end
+'''
+
+def load_yaml(src: str):
+    proc = subprocess.run(
+        ["ruby", "-EUTF-8:UTF-8", "-e", RUBY],
+        input=src,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if proc.returncode != 0:
+        raise SystemExit(f"YAML parse failed: {(proc.stderr or proc.stdout).strip()}")
+    return json.loads(proc.stdout)
+
+def step_name(step: dict) -> str:
+    name = step.get("name")
+    return name.strip() if isinstance(name, str) else ""
+
+def reject_if(label: str, step: dict) -> None:
+    if "if" in step:
+        raise SystemExit(f"{label} must not set if: (skippable false-green)")
+
+def reject_skippable(label: str, step: dict) -> None:
+    reject_if(label, step)
+    if step.get("continue-on-error") is True:
+        raise SystemExit(f"{label} must not set continue-on-error: true")
+
+data = load_yaml(text)
+jobs = data.get("jobs")
+if not isinstance(jobs, dict):
+    raise SystemExit("workflow has no jobs mapping")
+
+for sibling in ("test-no-bundles", "required-no-bundles-fails", "corrupt-bundle-refused"):
+    if sibling not in jobs:
+        raise SystemExit(f"missing DoD sibling job {sibling}")
+
+# optional + absent soft path
+nb_uses = [
+    s for s in (jobs["test-no-bundles"].get("steps") or [])
+    if isinstance(s, dict) and isinstance(s.get("uses"), str) and "assay-action@" in s["uses"]
+]
+if len(nb_uses) != 1:
+    raise SystemExit("test-no-bundles must have exactly one assay-action uses")
+if nb_uses[0]["uses"] != f"Rul1an/assay-action@{pin}":
+    raise SystemExit("test-no-bundles uses must track reader pin")
+with_nb = nb_uses[0].get("with") or {}
+if isinstance(with_nb, dict) and with_nb.get("evidence_mode") == "required":
+    raise SystemExit("test-no-bundles must remain optional/default (absent soft path)")
+
+def require_required_fail_job(job_name: str, action_name_substr: str, assert_name: str) -> None:
+    job = jobs[job_name]
+    if job.get("timeout-minutes") in (None, 0):
+        raise SystemExit(f"{job_name} must set timeout-minutes")
+    action = assertion = None
+    for s in job.get("steps") or []:
+        if not isinstance(s, dict):
+            continue
+        uses = s.get("uses")
+        if isinstance(uses, str) and "assay-action@" in uses:
+            action = s
+        if step_name(s) == assert_name:
+            assertion = s
+    if action is None:
+        raise SystemExit(f"{job_name} missing Action step")
+    if action.get("uses") != f"Rul1an/assay-action@{pin}":
+        raise SystemExit(f"{job_name} uses must track reader pin")
+    with_val = action.get("with") or {}
+    if not isinstance(with_val, dict) or with_val.get("evidence_mode") != "required":
+        raise SystemExit(f"{job_name} must set evidence_mode: required")
+    if "bundles" in with_val and job_name == "required-no-bundles-fails":
+        raise SystemExit(f"{job_name} must omit bundles:")
+    if assertion is None or not isinstance(assertion.get("run"), str):
+        raise SystemExit(f"{job_name} missing assertion run")
+    reject_if(f"{job_name} action", action)
+    if action.get("continue-on-error") is not True:
+        raise SystemExit(f"{job_name} Action step must continue-on-error to reach assertion")
+    reject_skippable(f"{job_name} assertion", assertion)
+    joined = assertion["run"]
+    if "outcome" not in joined and "failure" not in joined:
+        raise SystemExit(f"{job_name} assertion must check failure/outcome")
+
+require_required_fail_job(
+    "required-no-bundles-fails",
+    "assay-action",
+    "Assert required mode fails without bundles",
 )
-if not m:
-    raise SystemExit("junction job block not found")
-job = m.group(0)
-if "evidence_mode: required" not in job:
-    raise SystemExit("junction job must set evidence_mode: required")
-if re.search(r"(?m)^\s+bundles:\s*", job):
-    raise SystemExit("junction job must omit bundles: (default discovery only)")
-if "cp tests/fixtures/evidence/" in job:
-    raise SystemExit("junction job must not copy fixture evidence (false-green producer)")
-if f"Rul1an/assay-action@{pin}" not in job:
-    raise SystemExit(f"junction job must uses: Rul1an/assay-action@{pin}")
-if "evidence_state" not in job or "evidence_index_digest" not in job:
-    raise SystemExit("junction job must assert evidence_state and evidence_index_digest")
-if "remediation_recipe.cmd" not in job:
-    raise SystemExit("junction job must reference remediation_recipe.cmd")
-print("ok    junction-job-shape")
+
+# corrupt job
+cj = jobs["corrupt-bundle-refused"]
+if cj.get("timeout-minutes") in (None, 0):
+    raise SystemExit("corrupt-bundle-refused must set timeout-minutes")
+plant = action = assertion = None
+for s in cj.get("steps") or []:
+    if not isinstance(s, dict):
+        continue
+    n = step_name(s)
+    if n == "Plant corrupted evidence bundle":
+        plant = s
+    uses = s.get("uses")
+    if isinstance(uses, str) and "assay-action@" in uses:
+        action = s
+    if n == "Assert corrupted bundle is refused":
+        assertion = s
+if plant is None or not isinstance(plant.get("run"), str):
+    raise SystemExit("corrupt-bundle-refused missing plant step")
+pr = plant["run"]
+if not any(x in pr for x in ("dd ", "truncate", "corrupt")):
+    raise SystemExit("corrupt plant step must actually corrupt bytes")
+if action is None or action.get("uses") != f"Rul1an/assay-action@{pin}":
+    raise SystemExit("corrupt-bundle-refused uses must track reader pin")
+with_c = action.get("with") or {}
+if not isinstance(with_c, dict) or with_c.get("evidence_mode") != "required":
+    raise SystemExit("corrupt-bundle-refused must set evidence_mode: required")
+if assertion is None or not isinstance(assertion.get("run"), str):
+    raise SystemExit("corrupt-bundle-refused missing assertion")
+reject_skippable("corrupt plant", plant)
+reject_if("corrupt action", action)
+if action.get("continue-on-error") is not True:
+    raise SystemExit("corrupt Action step must continue-on-error to reach assertion")
+reject_skippable("corrupt assertion", assertion)
+if "outcome" not in assertion["run"] and "failure" not in assertion["run"]:
+    raise SystemExit("corrupt assertion must check failure/outcome")
+
+job = jobs.get("default-discovery-sandbox-junction")
+if not isinstance(job, dict):
+    raise SystemExit("missing default-discovery-sandbox-junction job")
+if job.get("timeout-minutes") in (None, 0):
+    raise SystemExit("junction job must set timeout-minutes")
+
+producer = review = assertion = None
+for step in job.get("steps") or []:
+    if not isinstance(step, dict):
+        continue
+    n = step_name(step)
+    if n == "Produce evidence with published remediation recipe":
+        producer = step
+    elif n == "Review with required default discovery":
+        review = step
+    elif n == "Assert verified discovery and nonempty index digest":
+        assertion = step
+
+if producer is None or review is None or assertion is None:
+    raise SystemExit("junction missing producer/review/assertion step")
+
+for label, step in (("producer", producer), ("review", review), ("assertion", assertion)):
+    reject_skippable(f"junction {label}", step)
+
+run = producer.get("run")
+if not isinstance(run, str) or "scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd" not in run:
+    raise SystemExit("producer must invoke remediation_recipe.cmd via fixture path")
+if "cp tests/fixtures/evidence/" in run:
+    raise SystemExit("producer must not copy fixture evidence")
+
+if review.get("uses") != f"Rul1an/assay-action@{pin}":
+    raise SystemExit(f"review uses must be Rul1an/assay-action@{pin}")
+with_val = review.get("with")
+if not isinstance(with_val, dict):
+    raise SystemExit("review with: must be a mapping")
+if with_val.get("evidence_mode") != "required":
+    raise SystemExit("review must set evidence_mode: required")
+if "bundles" in with_val:
+    raise SystemExit("review must omit bundles: (default discovery only)")
+
+arun = assertion.get("run")
+env = assertion.get("env") if isinstance(assertion.get("env"), dict) else {}
+joined = arun if isinstance(arun, str) else ""
+joined += "\n" + "\n".join(f"{k}={v}" for k, v in env.items())
+if not isinstance(arun, str):
+    raise SystemExit("assertion must have a run script")
+if "verified" not in joined.lower():
+    raise SystemExit("assertion must check verified")
+if "INDEX_DIGEST" not in joined and "evidence_index_digest" not in joined:
+    raise SystemExit("assertion must check evidence_index_digest")
+if "nested/sandbox.tar.gz" not in arun:
+    raise SystemExit("assertion must pin nested sandbox path")
+
+print("ok    junction-job-parsed-contract")
+print("ok    sibling-dod-cells")
 PY
 
 ok "pin-recipe-doc-workflow-junction"
+
+run_contract_only() {
+  # Re-enter this script's checks without mutation section by stopping early:
+  # invoke via bash -c extracting is hard; instead duplicate call pattern:
+  ASSAY_JUNCTION_MUTATIONS=0 bash "$0" --contract-only
+}
+
+if [[ "${1:-}" == "--contract-only" ]]; then
+  echo "action discovery junction contract: PASS"
+  exit 0
+fi
+
+# --- Retained mutations (must RED) ---
+backup="$(mktemp)"
+cp "${WORKFLOW}" "${backup}"
+cleanup() { cp "${backup}" "${WORKFLOW}"; rm -f "${backup}"; }
+trap cleanup EXIT
+
+python3 - "${WORKFLOW}" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "      - name: Produce evidence with published remediation recipe\n"
+if needle not in text:
+    raise SystemExit("producer needle missing")
+wf.write_text(text.replace(needle, needle + "        if: ${{ false }}\n", 1), encoding="utf-8")
+PY
+if bash "$0" --contract-only >/tmp/2778-mut-if-prod.out 2>&1; then
+  die "producer if:false stayed green"
+fi
+ok "mutation-producer-if-false-red"
+cp "${backup}" "${WORKFLOW}"
+
+python3 - "${WORKFLOW}" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "      - name: Assert verified discovery and nonempty index digest\n"
+if needle not in text:
+    raise SystemExit("assertion needle missing")
+wf.write_text(text.replace(needle, needle + "        if: ${{ false }}\n", 1), encoding="utf-8")
+PY
+if bash "$0" --contract-only >/tmp/2778-mut-if-assert.out 2>&1; then
+  die "assertion if:false stayed green"
+fi
+ok "mutation-assertion-if-false-red"
+cp "${backup}" "${WORKFLOW}"
+
+trap - EXIT
+cp "${backup}" "${WORKFLOW}"
+rm -f "${backup}"
+
 echo "action discovery junction contract: PASS"

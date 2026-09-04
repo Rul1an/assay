@@ -385,9 +385,141 @@ jobs:
             exit 1
           fi
 
+
+  required-no-bundles-fails:
+    name: Required mode fails with zero bundles
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build-assay-cli
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Download CLI artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: assay-action-v2-cli-linux-x64-${{ github.sha }}
+          path: dist
+
+      - name: Install CLI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release
+          tar -xzf dist/assay-action-v2-cli-linux-x64.tar.gz -C target/release
+          (
+            cd target/release
+            sha256sum -c assay.sha256
+            ./assay --version
+          )
+
+      - name: Add CLI to PATH
+        run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
+      - name: Review with required mode and no bundles
+        id: review
+        continue-on-error: true
+        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
+        with:
+          evidence_mode: required
+          fail_on: error
+          sarif: false
+          comment_diff: false
+
+      - name: Assert required mode fails without bundles
+        shell: bash
+        env:
+          STEP_OUTCOME: ${{ steps.review.outcome }}
+          EVIDENCE_STATE: ${{ steps.review.outputs.evidence_state }}
+        run: |
+          set -euo pipefail
+          if [ "${STEP_OUTCOME}" != "failure" ]; then
+            echo "ERROR: expected required mode with zero bundles to fail"
+            exit 1
+          fi
+          if [ "${EVIDENCE_STATE}" = "verified" ]; then
+            echo "ERROR: zero bundles must not report verified"
+            exit 1
+          fi
+
+  corrupt-bundle-refused:
+    name: Corrupted bundle is refused
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build-assay-cli
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Download CLI artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: assay-action-v2-cli-linux-x64-${{ github.sha }}
+          path: dist
+
+      - name: Install CLI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release
+          tar -xzf dist/assay-action-v2-cli-linux-x64.tar.gz -C target/release
+          (
+            cd target/release
+            sha256sum -c assay.sha256
+            ./assay --version
+          )
+
+      - name: Add CLI to PATH
+        run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
+      - name: Plant corrupted evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .assay/evidence
+          cp tests/fixtures/evidence/test-bundle.tar.gz .assay/evidence/corrupt.tar.gz
+          dd if=/dev/zero of=.assay/evidence/corrupt.tar.gz bs=1 seek=64 count=16 conv=notrunc status=none
+          test -f .assay/evidence/corrupt.tar.gz
+
+      - name: Review corrupted bundle with required mode
+        id: review
+        continue-on-error: true
+        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
+        with:
+          evidence_mode: required
+          fail_on: error
+          sarif: false
+          comment_diff: false
+
+      - name: Assert corrupted bundle is refused
+        shell: bash
+        env:
+          STEP_OUTCOME: ${{ steps.review.outcome }}
+          EVIDENCE_STATE: ${{ steps.review.outputs.evidence_state }}
+          VERIFIED: ${{ steps.review.outputs.verified }}
+        run: |
+          set -euo pipefail
+          if [ "${STEP_OUTCOME}" != "failure" ]; then
+            echo "ERROR: expected corrupted bundle review to fail"
+            exit 1
+          fi
+          if [ "${VERIFIED}" = "true" ] || [ "${EVIDENCE_STATE}" = "verified" ]; then
+            echo "ERROR: corrupted bundle must not be verified"
+            exit 1
+          fi
+
   default-discovery-sandbox-junction:
     name: Default discovery (nested sandbox recipe)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: build-assay-cli
     permissions:
       contents: read

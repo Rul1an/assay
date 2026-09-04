@@ -15,7 +15,7 @@ repos:
           (?x)^(
             tests/fixtures/mcp/malformed\.yaml|
             tests/fixtures/golden/eval_broken\.yaml|
-            scripts/ci/fixtures/assay-action-pin/(action\.yml|remediation_recipe\.cmd)
+            scripts/ci/fixtures/assay-action-pin/action\.yml
           )$
       - id: check-toml
       - id: end-of-file-fixer

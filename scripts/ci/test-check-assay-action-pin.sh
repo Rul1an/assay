@@ -69,6 +69,7 @@ run_checker_at() {
     ASSAY_ACTION_PIN_FILE="${tree}/.github/assay-action-pin" \
     ASSAY_ACTION_FIXTURE_FILE="${tree}/scripts/ci/fixtures/assay-action-pin/action.yml" \
     ASSAY_ACTION_PROVENANCE_FILE="${tree}/scripts/ci/fixtures/assay-action-pin/PROVENANCE" \
+    ASSAY_ACTION_RECIPE_FILE="${tree}/scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd" \
     "${CHECKER}" "$@"
 }
 
@@ -1112,5 +1113,21 @@ expect_ok "control-stays-green-after-scratch-mutations" "${CHECKER}"
 
 echo "== action discovery junction (#2778) =="
 bash "${ROOT}/scripts/ci/test-action-discovery-junction.sh"
+
+echo "== published remediation_recipe.cmd drift =="
+copy_into "${scratch}/recipe-drift"
+printf 'x' >>"${scratch}/recipe-drift/scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd"
+if ! run_checker_at "${scratch}/recipe-drift" >"${scratch}/out" 2>"${scratch}/err"; then
+  echo "FAIL: offline pin check should stay green when only recipe drifts" >&2
+  cat "${scratch}/err" >&2
+  exit 1
+fi
+echo "ok    recipe-drift-offline-blind"
+cp "${FIXTURE}" "${scratch}/recipe-pub-action.yml"
+cp "${ROOT}/scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd" "${scratch}/recipe-pub-oracle.cmd"
+ASSAY_ACTION_PUBLISHED_FILE="${scratch}/recipe-pub-action.yml" \
+  ASSAY_ACTION_PUBLISHED_RECIPE_FILE="${scratch}/recipe-pub-oracle.cmd" \
+  expect_fail "published-recipe-drift" "does not match published recipe" "${scratch}/recipe-drift" --published
+
 
 echo "assay action consumer pin contract: PASS"
