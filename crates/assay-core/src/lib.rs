@@ -31,6 +31,7 @@ pub mod agent_assertions;
 
 pub mod agentic;
 pub mod fix;
+pub(crate) mod json_pointer;
 pub mod replay;
 pub mod report;
 pub mod runtime;

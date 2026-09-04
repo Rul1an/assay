@@ -50,8 +50,11 @@ pub struct EpisodeStart {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TruncationMeta {
+    /// Absolute RFC 6901 JSON Pointer to the truncated field.
     pub field: String,
+    /// Original UTF-8 byte length before truncation.
     pub original_len: usize,
+    /// UTF-8 byte length of the emitted (truncated) string; equals `emitted.len()`.
     pub kept_len: usize,
     pub sha256: String,
     pub strategy: String,
