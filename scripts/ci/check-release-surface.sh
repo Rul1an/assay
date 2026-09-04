@@ -21,13 +21,13 @@
 # A repo-wide "no old versions" check flags exactly those, gets suppressed, and then catches
 # nothing. So this script checks only facts it can DERIVE, and never scans for version-shaped text:
 #
-#   1. Internal dependency declarations, at both sites they occur. The root Cargo.toml
-#      `[workspace.dependencies]` table is enumerated from the manifest itself, and the crate
-#      manifests are enumerated from `git ls-files`, not from a list kept here, so a new workspace
-#      crate is covered the day it is added. The crate-level site is the one that was missed: a
-#      sibling declared directly as `{ path = "../assay-x", version = "..." }` never reaches the
-#      root table, so enumerating only the root table reported a clean sweep over nine declarations
-#      it had never looked at, and both release-line bumps updated them by hand.
+#   1. Internal dependency version declarations, at both sites they occur: the root
+#      `[workspace.dependencies]` table and the dependency tables of each member manifest. Both
+#      are checked by one rule in scripts/ci/check_internal_dep_versions.py, which parses TOML
+#      rather than matching lines -- two earlier line-matching mechanisms were blind in the same
+#      way, and a single-quoted path escaped both while the declaration count silently shrank.
+#      Scope comes from `[workspace] members` and `exclude`, so a new member is covered the day it
+#      is added and `fuzz` is out of scope because the workspace says so.
 #   2. The source binary against the workspace version, and the installation guide against the
 #      validated published-release pin. A release-prep branch may legitimately make them differ.
 #   3. Every tracked `Cargo.lock` that pins a workspace crate. The root lock is the obvious one and
@@ -99,51 +99,30 @@ FLOATING_ASSAY_MCP="cargo install assay-mcp-server --locked"
 note ""
 note "internal dependency declarations:"
 
-checked=0
-while IFS=$'\t' read -r name declared; do
-  checked=$((checked + 1))
-  if [ "$declared" != "$WORKSPACE_VERSION" ]; then
-    fail "Cargo.toml: $name declares version \"$declared\", workspace is \"$WORKSPACE_VERSION\""
-  fi
-done < <(
-  awk '
-    /^\[workspace\.dependencies\]/ { in_section = 1; next }
-    /^\[/                          { in_section = 0 }
-    in_section && /path *= *"(crates|assay-python-sdk)/ {
-      name = $1
-      if (match($0, /version *= *"[^"]+"/)) {
-        v = substr($0, RSTART, RLENGTH)
-        gsub(/version *= *"|"/, "", v)
-        printf "%s\t%s\n", name, v
-      }
-    }
-  ' Cargo.toml
-)
-
-if [ "$checked" -eq 0 ]; then
-  fail "no internal path dependencies found in [workspace.dependencies]; the enumeration is broken"
-else
-  note "  checked $checked root declaration(s)"
-fi
-
-# The same fact declared inside a crate manifest, read from parsed TOML rather than matched by
-# line. scripts/ci/check_crate_path_deps.py carries the reasoning; the short version is that the
-# first attempt cross-checked one line pattern against a second line pattern, which is one
-# measurement with extra steps: both required a double quote and a literal `../`, so
-# `path = '../assay-x'` escaped both, they agreed at zero, and a stale version went unreported
-# while the count silently shrank.
+# One helper reports both sites. The counts are consumed as data rather than trusted: a helper
+# that dies, or that stops emitting a count, must not read as a clean sweep. A `fail` inside the
+# process substitution below would run in its subshell and never reach the counter, which is why
+# the guards live out here instead.
+root_checked=""
 crate_checked=""
 while IFS=$'\t' read -r kind value; do
   case "$kind" in
-    count) crate_checked="$value" ;;
-    fail)  fail "$value" ;;
+    root_count)  root_checked="$value" ;;
+    crate_count) crate_checked="$value" ;;
+    fail)        fail "$value" ;;
   esac
-# A `fail` here would run in the process substitution's subshell and never reach the counter, so
-# a checker that dies or goes quiet is caught by the missing count below instead.
-done < <(python3 scripts/ci/check_crate_path_deps.py . || true)
+done < <(python3 scripts/ci/check_internal_dep_versions.py . || true)
+
+if [ -z "$root_checked" ]; then
+  fail "internal dependency check reported no root count; the enumeration is broken"
+elif [ "$root_checked" -eq 0 ]; then
+  fail "no internal path dependencies found in [workspace.dependencies]; the enumeration is broken"
+else
+  note "  checked $root_checked root declaration(s)"
+fi
 
 if [ -z "$crate_checked" ]; then
-  fail "crate path-dependency check reported no count; the enumeration is broken"
+  fail "internal dependency check reported no crate count; the enumeration is broken"
 elif [ "$crate_checked" -eq 0 ]; then
   fail "no crate-level path dependencies on workspace members found; the enumeration is broken"
 else
