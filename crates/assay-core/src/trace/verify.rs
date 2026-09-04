@@ -74,9 +74,14 @@ pub fn verify_coverage(trace_path: &Path, cfg: &EvalConfig) -> anyhow::Result<()
             } else {
                 format!("{} tests", truncated_shape.len())
             };
+            let verb = if truncated_shape.len() == 1 {
+                "matches"
+            } else {
+                "match"
+            };
             report.push_str(&format!(
-                "  • {} matches stage-local truncation shape (exact prompt coverage cannot be established):\n",
-                count_desc
+                "  • {} {} stage-local truncation shape (exact prompt coverage cannot be established):\n",
+                count_desc, verb
             ));
             for id in &truncated_shape {
                 report.push_str(&format!("     - {}\n", id));

@@ -93,7 +93,7 @@ fn test_verify_coverage_genuinely_missing_diagnostic() {
         msg
     );
     assert!(
-        !msg.contains("matches stage-local truncation shape")
+        !msg.contains("stage-local truncation shape")
             && !msg.contains("matches the truncation shape"),
         "Genuinely missing test must not be described as matching truncation shape: {}",
         msg
@@ -120,7 +120,7 @@ fn test_verify_coverage_truncation_shape_diagnostic() {
     let msg = format!("{:#}", err);
 
     assert!(
-        msg.contains("matches stage-local truncation shape")
+        msg.contains("stage-local truncation shape")
             || msg.contains("matches the truncation shape"),
         "Diagnostic must report truncation shape match: {}",
         msg
@@ -170,7 +170,7 @@ fn test_verify_coverage_distinct_long_prompts_sharing_prefix() {
     let msg = format!("{:#}", err);
 
     assert!(
-        msg.contains("matches stage-local truncation shape")
+        msg.contains("stage-local truncation shape")
             || msg.contains("matches the truncation shape"),
         "Must diagnose truncation shape match: {}",
         msg
@@ -185,6 +185,17 @@ fn test_verify_coverage_distinct_long_prompts_sharing_prefix() {
         "Both distinct tests sharing the truncated shape must be reported: {}",
         msg
     );
+    assert!(
+        msg.contains("2 tests match stage-local truncation shape"),
+        "plural grammar must be 'tests match', not 'tests matches': {}",
+        msg
+    );
+    assert!(
+        !msg.contains("2 tests matches stage-local truncation shape"),
+        "must not emit 'tests matches': {}",
+        msg
+    );
+
 }
 
 #[test]
@@ -219,7 +230,7 @@ fn test_verify_coverage_mixed_exact_shape_and_missing() {
 
     // Truncation shape reported
     assert!(
-        msg.contains("matches stage-local truncation shape")
+        msg.contains("stage-local truncation shape")
             || msg.contains("matches the truncation shape"),
         "Must report truncation shape section: {}",
         msg
@@ -276,7 +287,7 @@ fn test_verify_coverage_over_ceiling_absent_truncated_form() {
 
     // Must NOT be reported as matching truncation shape
     assert!(
-        !msg.contains("matches stage-local truncation shape")
+        !msg.contains("stage-local truncation shape")
             && !msg.contains("matches the truncation shape"),
         "Absent prompt must not be claimed to match truncation shape: {}",
         msg
@@ -334,7 +345,7 @@ fn test_verify_coverage_utf8_boundary_backoff() {
     let msg = format!("{:#}", err);
 
     assert!(
-        msg.contains("matches stage-local truncation shape")
+        msg.contains("stage-local truncation shape")
             || msg.contains("matches the truncation shape"),
         "Must diagnose truncation shape with UTF-8 backoff: {}",
         msg
@@ -343,5 +354,22 @@ fn test_verify_coverage_utf8_boundary_backoff() {
         msg.contains("test-utf8-backoff"),
         "Must name the backoff test: {}",
         msg
+    );
+}
+
+#[test]
+fn test_verify_coverage_exact_4096_through_stream_upgrader() {
+    // Exactly MAX_STRING_LEN (4096) bytes: StreamUpgrader/truncation uses `len > 4096`,
+    // so this prompt must remain verbatim and exact-match accept. A `>`→`>=` mutation
+    // would truncate on ingest and make this fail — proving the threshold is load-bearing.
+    let prompt = "E".repeat(4096);
+    assert_eq!(prompt.len(), 4096);
+    let cfg = make_config(vec![make_test_case("test-exact-4096", &prompt)]);
+    let trace = create_trace_file(&[("ep-exact-4096", prompt.as_str())]);
+    let res = verify_coverage(trace.path(), &cfg);
+    assert!(
+        res.is_ok(),
+        "exact 4096-byte prompt through StreamUpgrader must remain accepted: {:?}",
+        res.err()
     );
 }
