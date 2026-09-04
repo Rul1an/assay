@@ -313,6 +313,26 @@ run_check >"$TMP/noop.out" 2>&1
 mv "$TMP/readme-noop.backup" "$TMP/README.md"
 
 mutation_count=0
+control_count=0
+
+# A negative control: the mutated tree must still be accepted. Deleting the production guard it
+# names turns the acceptance into a rejection, which is how the control bites.
+mutate_and_expect_success() {
+  local name="$1" file="$2" sed_expr="$3"
+  local original="$TMP/$file" backup="$TMP/$file.$name"
+  cp "$original" "$backup"
+  sed -i.bak -e "$sed_expr" "$original"
+  rm -f "$original.bak"
+  if ! run_check >"$TMP/$name.out" 2>&1; then
+    echo "FAIL: control $name must be accepted, but the check reported:" >&2
+    grep '^FAIL' "$TMP/$name.out" >&2 || cat "$TMP/$name.out" >&2
+    exit 1
+  fi
+  mv "$backup" "$original"
+  control_count=$((control_count + 1))
+  echo "PASS: $name (accepted)"
+}
+
 mutate_and_expect_failure() {
   local name="$1" file="$2" sed_expr="$3" diagnostic="$4"
   local original="$TMP/$file" backup="$TMP/$file.$name"
@@ -709,6 +729,38 @@ TOML
 mutate_and_expect_failure root-dep-versionless Cargo.toml \
   's/assay-x = { version = "5.2.0", path = "crates\/assay-x" }/assay-x = { path = "crates\/assay-x" }/' \
   'Cargo.toml: assay-x in [workspace.dependencies] is a path dependency on a workspace member with no version'
+
+# --- #2798: the three residuals from the independent review of #2794 ---
+#
+# Each was reproduced on 6889ba765 by deleting its production guard in an isolated scratch copy and
+# observing the harness stay green at 124. These tests are what make that deletion visible.
+
+# 1. Literal zero counts, reached independently. The pre-existing count tests suppress the line
+# entirely and so exercise the empty-string branch; neither reaches the numeric `-eq 0` branch.
+# Emptying [workspace.dependencies] leaves the crate site untouched, and narrowing members to the
+# one crate that declares nothing leaves the root site untouched.
+mutate_and_expect_failure root-count-literal-zero Cargo.toml \
+  '/^assay-x = { version = "5.2.0", path = "crates\/assay-x" }$/d' \
+  'no internal path dependencies found in [workspace.dependencies]; the enumeration is broken'
+mutate_and_expect_failure crate-count-literal-zero Cargo.toml \
+  's|members = \["crates/assay-x", "crates/assay-y", "crates/assay-p", "sdk-z"\]|members = ["crates/assay-x"]|' \
+  'no crate-level path dependencies on workspace members found; the enumeration is broken'
+
+# 2. A member wildcard that actually selects the excluded crate. The explicit member list never
+# names crates/assay-excluded, so exclusion could stop working unobserved. "crates/*" selects it,
+# and the excluded crate carries a stale 5.0.0 declaration, so accepting this tree is only possible
+# if exclusion is still applied.
+mutate_and_expect_success member-glob-intersects-exclude Cargo.toml \
+  's|members = \["crates/assay-x", "crates/assay-y", "crates/assay-p", "sdk-z"\]|members = ["crates/*", "sdk-z"]|'
+
+# 3. Caret requirements through the shared checker, both directions. A correct caret must be
+# accepted -- that is the branch nothing exercised -- and a caret naming the wrong version must
+# still be reported, so compatibility is not bought by loosening the comparison.
+mutate_and_expect_success caret-correct-requirement crates/assay-y/Cargo.toml \
+  '/^\[dependencies\]/,/^\[build/ s/version = "5.2.0"/version = "^5.2.0"/'
+mutate_and_expect_failure caret-mismatched-requirement crates/assay-y/Cargo.toml \
+  '/^\[dependencies\]/,/^\[build/ s/version = "5.2.0"/version = "^5.0.0"/' \
+  'crates/assay-y/Cargo.toml: assay-x in [dependencies] declares version "^5.0.0", workspace is "5.2.0"'
 
 # --- containment: expansion must not read outside the root either ---
 mutate_and_expect_failure member-glob-through-symlink Cargo.toml \
@@ -1157,8 +1209,13 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 124 ]; then
-  echo "FAIL: expected 124 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 127 ]; then
+  echo "FAIL: expected 127 release-surface mutations, observed $mutation_count" >&2
+  exit 1
+fi
+if [ "$control_count" -ne 2 ]; then
+  echo "FAIL: expected 2 release-surface negative controls, observed $control_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"
+echo "release-surface negative controls: $control_count observed"
