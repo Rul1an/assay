@@ -77,8 +77,7 @@ This document outlines the canonical checklist for releasing new versions of Ass
   git push origin vX.Y.Z
   ```
 - [ ] **Watch CI**: Monitor the `release.yml` workflow.
-  - Step: `Publish to Crates.io` (uses `scripts/ci/publish_idempotent.sh`).
-  - Step: `Create GitHub Release` (upload binaries and release assets).
+  The GitHub Release is created before crates publication because `publish-crates` needs `release`.
   - Step: `Build assay-mcp-server MCPB` (produces `release/assay-mcp-server-${VERSION}-linux.mcpb` plus `.sha256`).
   - Step: `Render generated registry metadata` (produces `release/server.json` for later MCP registry submission).
   - Step: `Generate CycloneDX SBOM bundle` (produces `release/assay-${VERSION}-sbom-cyclonedx.tar.gz` plus `.sha256`).
@@ -86,6 +85,7 @@ This document outlines the canonical checklist for releasing new versions of Ass
   - Step: `Build release proof kit` (produces `release/assay-${VERSION}-release-proof-kit.tar.gz` plus `.sha256`).
   - Step: `Check release asset preflight` (fails before publication unless the `release/` directory exactly matches the expected asset contract, every `.sha256` verifies, and `server.json` points at the generated MCPB checksum).
   - Step: `Create GitHub Release` (uploads only the preflighted files from `release/`).
+  - Job: `publish-crates` (`Publish to crates.io`; uses `scripts/ci/publish_idempotent.sh`).
 
 ### Published binary installability
 
@@ -120,7 +120,7 @@ it is not an installer failure.
   "$install_root/bin/assay" --version
   ```
   This exercises the lockfile shipped with the published CLI rather than the workspace lock.
-- [ ] **LSM Smoke Test**: Manually dispatch the `lsm-smoke-test` workflow or run `scripts/verify_lsm_docker.sh --release-tag vX.Y.Z`.
+- [ ] **Optional LSM verification**: Not a stable-release requirement. Dispatch `release.yml` with the optional `workflow_dispatch` input `verify_lsm`, or run the supported local path `scripts/verify_lsm_docker.sh --release-tag vX.Y.Z`.
 - [ ] **SBOM Asset Check**: Confirm the GitHub release includes `assay-${VERSION}-sbom-cyclonedx.tar.gz` and `assay-${VERSION}-sbom-cyclonedx.tar.gz.sha256`.
 - [ ] **MCPB Asset Check**: Confirm the GitHub release includes `assay-mcp-server-${VERSION}-linux.mcpb` and `assay-mcp-server-${VERSION}-linux.mcpb.sha256`.
 - [ ] **Registry Metadata Check**: Confirm the GitHub release includes `server.json` generated from the MCPB asset and matching SHA-256.
