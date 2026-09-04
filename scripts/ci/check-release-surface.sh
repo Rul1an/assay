@@ -111,7 +111,7 @@ while IFS=$'\t' read -r kind value; do
     crate_count) crate_checked="$value" ;;
     fail)        fail "$value" ;;
   esac
-done < <(python3 scripts/ci/check_internal_dep_versions.py . || true)
+done < <(python3 scripts/ci/check_internal_dep_versions.py || true)
 
 if [ -z "$root_checked" ]; then
   fail "internal dependency check reported no root count; the enumeration is broken"

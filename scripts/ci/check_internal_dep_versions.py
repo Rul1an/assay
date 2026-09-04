@@ -33,6 +33,20 @@ from a published manifest -- per-target ones included -- and a crate that publis
 no requirement at all. A version that IS declared is checked in every case, because a declared
 version that disagrees with the truth is misleading wherever it sits.
 
+CONTAINMENT
+
+Every path this reads is repository-controlled but not trusted: `[workspace] members`, `exclude`
+and dependency `path` values all come from manifests. One rule, `_within_root`, decides whether a
+resolved path may be used at all, and `_load_within` re-applies it immediately before the open so
+the guarantee travels with the read rather than depending on each caller remembering it. Members
+and excludes are additionally refused BEFORE any glob expansion when the entry itself could leave
+the root, because expanding `../*` reads directories outside the root even if the matches are
+discarded afterwards.
+
+This is cargo's own rule, not an extra restriction invented here: cargo refuses a member that is
+"not hierarchically below the workspace root". Verified against cargo, as was the fact that
+`members` honours glob patterns while `exclude` does not.
+
 Output protocol, tab-separated on stdout:
     root_count\t<in-scope declarations in [workspace.dependencies]>
     crate_count\t<in-scope declarations across member manifests>
@@ -45,7 +59,7 @@ from __future__ import annotations
 
 import sys
 import tomllib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 # Cargo resolves these as dependencies of the package, paired with whether it strips the table
 # from a published manifest. `[patch]` and `[replace]` are deliberately absent: they redirect
@@ -53,26 +67,70 @@ from pathlib import Path
 BASE_TABLES = (("dependencies", False), ("dev-dependencies", True), ("build-dependencies", False))
 
 
-def _load(path: Path) -> dict:
-    with path.open("rb") as handle:
+def _within_root(root: Path, candidate: Path) -> Path | None:
+    """The one containment rule: a resolved path is usable only at or below `root`."""
+    resolved = candidate.resolve()
+    return resolved if resolved == root or resolved.is_relative_to(root) else None
+
+
+def _escapes_before_expansion(entry: str) -> bool:
+    """Whether a members/exclude entry could name a location outside the root once expanded.
+
+    Checked on the raw entry because globbing is itself a read: `root.glob("../*")` lists
+    directories outside the root, so discarding the matches afterwards is already too late.
+    """
+    pure = PurePosixPath(entry)
+    return pure.is_absolute() or ".." in pure.parts
+
+
+def _load_within(root: Path, path: Path) -> dict:
+    """Read a manifest, refusing any path not contained by `root`."""
+    contained = _within_root(root, path)
+    if contained is None:
+        raise ValueError(f"refusing to read outside the workspace root: {path}")
+    with contained.open("rb") as handle:
         return tomllib.load(handle)
 
 
-def _member_dirs(root: Path, workspace: dict) -> list[Path]:
-    """Directories named by `[workspace] members`, minus `[workspace] exclude`."""
-    excluded = {(root / entry).resolve() for entry in workspace.get("exclude", [])}
+def _member_dirs(root: Path, workspace: dict) -> tuple[list[Path], list[str]]:
+    """Directories named by `[workspace] members`, minus `[workspace] exclude`.
+
+    `exclude` is matched literally: cargo does not expand globs there, verified against cargo.
+    """
+    problems: list[str] = []
+
+    def contained_entries(key: str) -> list[Path]:
+        out: list[Path] = []
+        for entry in workspace.get(key, []):
+            if not isinstance(entry, str) or _escapes_before_expansion(entry):
+                problems.append(
+                    f'Cargo.toml: [workspace] {key} entry "{entry}" names a location outside '
+                    f"the workspace root"
+                )
+                continue
+            # Only `members` expands globs; cargo treats `exclude` entries as literal paths.
+            expand = key == "members" and any(c in entry for c in "*?[")
+            for match in sorted(root.glob(entry)) if expand else [root / entry]:
+                contained = _within_root(root, match)
+                if contained is None:
+                    problems.append(
+                        f'Cargo.toml: [workspace] {key} entry "{entry}" resolves outside '
+                        f"the workspace root"
+                    )
+                    continue
+                out.append(contained)
+        return out
+
+    excluded = set(contained_entries("exclude"))
     seen: set[Path] = set()
     dirs: list[Path] = []
-    for entry in workspace.get("members", []):
-        matches = sorted(root.glob(entry)) if any(c in entry for c in "*?[") else [root / entry]
-        for match in matches:
-            resolved = match.resolve()
-            if resolved in excluded or resolved in seen:
-                continue
-            if (resolved / "Cargo.toml").is_file():
-                seen.add(resolved)
-                dirs.append(resolved)
-    return dirs
+    for resolved in contained_entries("members"):
+        if resolved in excluded or resolved in seen:
+            continue
+        if (resolved / "Cargo.toml").is_file():
+            seen.add(resolved)
+            dirs.append(resolved)
+    return dirs, problems
 
 
 def _dependency_tables(manifest: dict):
@@ -97,13 +155,13 @@ def _dependency_tables(manifest: dict):
                     yield f"target.{cfg}.{name}", table, is_dev
 
 
-def _internal_target(base_dir: Path, spec: dict, members: set[Path]) -> Path | None:
+def _internal_target(root: Path, base_dir: Path, spec: dict, members: set[Path]) -> Path | None:
     """The member directory this spec points at, or None if it is not an internal path dependency."""
     declared = spec.get("path")
     if not isinstance(declared, str):
         return None
-    resolved = (base_dir / declared).resolve()
-    return resolved if resolved in members else None
+    contained = _within_root(root, base_dir / declared)
+    return contained if contained is not None and contained in members else None
 
 
 def _version_problem(where: str, spec: dict, workspace_version: str, require_version: bool) -> str | None:
@@ -128,8 +186,7 @@ def _publishes(manifest: dict) -> bool:
 
 
 def check(root: Path) -> tuple[int, int, list[str]]:
-    problems: list[str] = []
-    root_manifest = _load(root / "Cargo.toml")
+    root_manifest = _load_within(root, root / "Cargo.toml")
 
     workspace = root_manifest.get("workspace")
     if not isinstance(workspace, dict):
@@ -138,7 +195,7 @@ def check(root: Path) -> tuple[int, int, list[str]]:
     if not workspace_version:
         raise SystemExit("root Cargo.toml has no [workspace.package] version")
 
-    member_dirs = _member_dirs(root, workspace)
+    member_dirs, problems = _member_dirs(root, workspace)
     if not member_dirs:
         raise SystemExit("[workspace] members resolved to nothing; the enumeration is broken")
     members = set(member_dirs)
@@ -147,7 +204,7 @@ def check(root: Path) -> tuple[int, int, list[str]]:
     # so a version is always required here -- there is no dev table and no publish flag to consult.
     root_checked = 0
     for name, spec in workspace.get("dependencies", {}).items():
-        if not isinstance(spec, dict) or _internal_target(root, spec, members) is None:
+        if not isinstance(spec, dict) or _internal_target(root, root, spec, members) is None:
             continue
         root_checked += 1
         problem = _version_problem(
@@ -162,14 +219,14 @@ def check(root: Path) -> tuple[int, int, list[str]]:
         manifest_path = member_dir / "Cargo.toml"
         rel = manifest_path.relative_to(root)
         try:
-            manifest = _load(manifest_path)
+            manifest = _load_within(root, manifest_path)
         except tomllib.TOMLDecodeError as error:
             problems.append(f"{rel}: manifest does not parse as TOML: {error}")
             continue
         publishes = _publishes(manifest)
         for table_name, table, stripped_on_publish in _dependency_tables(manifest):
             for name, spec in table.items():
-                if not isinstance(spec, dict) or _internal_target(member_dir, spec, members) is None:
+                if not isinstance(spec, dict) or _internal_target(root, member_dir, spec, members) is None:
                     continue
                 crate_checked += 1
                 problem = _version_problem(
@@ -185,7 +242,9 @@ def check(root: Path) -> tuple[int, int, list[str]]:
 
 
 def main() -> int:
-    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    # The root is the working directory, never an argument: the caller already runs from the
+    # repository root, and an argv-controlled root is a path this program should not accept.
+    root = Path.cwd()
     try:
         root_checked, crate_checked, problems = check(root)
     except (OSError, tomllib.TOMLDecodeError) as error:

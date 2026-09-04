@@ -705,6 +705,20 @@ mutate_and_expect_failure root-dep-versionless Cargo.toml \
   's/assay-x = { version = "5.2.0", path = "crates\/assay-x" }/assay-x = { path = "crates\/assay-x" }/' \
   'Cargo.toml: assay-x in [workspace.dependencies] is a path dependency on a workspace member with no version'
 
+# --- containment: repository-controlled paths must not reach outside the root ---
+# The fixture's `outside-fork` dependency is the standing negative control for the third case:
+# its path resolves above the root, so it must stay out of scope silently, and the baseline
+# staying green is the assertion that nothing outside the root was read.
+mutate_and_expect_failure member-entry-escapes-root Cargo.toml \
+  's|"sdk-z"\]|"sdk-z", "../"]|' \
+  'Cargo.toml: [workspace] members entry "../" names a location outside the workspace root'
+mutate_and_expect_failure member-glob-escapes-root Cargo.toml \
+  's|"sdk-z"\]|"sdk-z", "../*"]|' \
+  'Cargo.toml: [workspace] members entry "../*" names a location outside the workspace root'
+mutate_and_expect_failure exclude-entry-escapes-root Cargo.toml \
+  's|exclude = \["crates/assay-excluded"\]|exclude = ["crates/assay-excluded", "../"]|' \
+  'Cargo.toml: [workspace] exclude entry "../" names a location outside the workspace root'
+
 # --- neither count may disappear: the shell fails closed when the helper goes quiet ---
 mutate_and_expect_failure root-count-cannot-disappear scripts/ci/check_internal_dep_versions.py \
   's/^    print(f"root_count/    0 and print(f"root_count/' \
@@ -1130,8 +1144,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 119 ]; then
-  echo "FAIL: expected 119 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 122 ]; then
+  echo "FAIL: expected 122 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"
