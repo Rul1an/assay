@@ -15,6 +15,7 @@ use crate::types::EvidenceEvent;
 use anyhow::{Context, Result};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::sync::OnceLock;
 
 /// Input struct for content hash computation.
 ///
@@ -44,6 +45,112 @@ struct ContentHashInput<'a> {
     subject: Option<&'a str>,
     #[serde(rename = "data")]
     payload: &'a serde_json::Value,
+}
+
+/// One shared constructor for the content-hash preimage.
+///
+/// Scope introspection and hashing must use this function so the bound-field projection cannot
+/// drift from what `compute_content_hash` actually digests.
+fn content_hash_input<'a>(event: &'a EvidenceEvent) -> ContentHashInput<'a> {
+    ContentHashInput {
+        specversion: &event.specversion,
+        type_: &event.type_,
+        data_content_type: &event.data_content_type,
+        subject: event.subject.as_deref(),
+        payload: &event.payload,
+    }
+}
+
+/// Preimage shape used only to project bound field names.
+///
+/// `subject` is always `Some` here: with `skip_serializing_if = "Option::is_none"`, omitting it
+/// would drop `subject` from the serialized key set and falsely green a scope that disagrees with
+/// events that carry a subject.
+fn content_hash_input_for_scope_projection() -> ContentHashInput<'static> {
+    static EMPTY_PAYLOAD: OnceLock<serde_json::Value> = OnceLock::new();
+    let payload = EMPTY_PAYLOAD.get_or_init(|| serde_json::json!({}));
+    ContentHashInput {
+        specversion: "1.0",
+        type_: "assay.content-hash.scope",
+        data_content_type: "application/json",
+        subject: Some("urn:assay:content-hash-scope"),
+        payload,
+    }
+}
+
+fn bound_field_names_from_input(input: &ContentHashInput<'_>) -> Vec<&'static str> {
+    let value = serde_json::to_value(input).expect("ContentHashInput serializes");
+    let object = value
+        .as_object()
+        .expect("ContentHashInput serializes to an object");
+    let mut names: Vec<&str> = object.keys().map(String::as_str).collect();
+    names.sort_unstable();
+    names
+        .into_iter()
+        .map(|name| match name {
+            "data" => "data",
+            "datacontenttype" => "datacontenttype",
+            "specversion" => "specversion",
+            "subject" => "subject",
+            "type" => "type",
+            other => panic!("unexpected ContentHashInput key in scope projection: {other}"),
+        })
+        .collect()
+}
+
+/// Pointers to integrity layers that are *not* the content-hash preimage.
+///
+/// These are construction facts, not per-bundle verification results. Emitting them does not mean
+/// `show` recomputed or verified the archive digest (ADR-044 subject), the events-file digest, or
+/// `run_root`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ContentHashSeparateIntegrityLayers {
+    /// Manifest member digest over `events.ndjson` (bundle file integrity).
+    pub events_file_digest: &'static str,
+    /// `manifest.run_root` under profile `assay-run-root-v1` (flat SHA-256 over newline-delimited content hashes).
+    pub run_root: &'static str,
+    /// ADR-044 attestation subject is the archive digest, not the content-hash preimage.
+    pub archive_attestation_subject: &'static str,
+}
+
+/// Machine-readable content-hash preimage scope.
+///
+/// ADR-042 non-claims: this object states what the digest binds. It is not producer identity,
+/// provenance, completeness, truthfulness, archive verification, tamper intent, a trust score, or
+/// a whole-action verdict. Per-bundle verify state stays outside this object (e.g. `verify_mode`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ContentHashScope {
+    pub digest_profile: &'static str,
+    pub canon: &'static str,
+    pub hash: &'static str,
+    /// Bound JSON field names in JCS key order, derived from the shared `ContentHashInput` shape.
+    pub bound_fields: Vec<&'static str>,
+    pub omitted_event_fields: &'static str,
+    pub separate_integrity_layers: ContentHashSeparateIntegrityLayers,
+}
+
+/// Single source for the additive `content_hash_scope` object.
+///
+/// Callers (including `assay evidence show --format json`) must embed this value unchanged rather
+/// than reconstructing fields from literals.
+pub fn content_hash_scope() -> ContentHashScope {
+    ContentHashScope {
+        digest_profile: "assay-content-hash-v1",
+        canon: "jcs-rfc8785",
+        hash: "sha256",
+        bound_fields: bound_field_names_from_input(&content_hash_input_for_scope_projection()),
+        omitted_event_fields: "not_bound_by_this_digest",
+        separate_integrity_layers: ContentHashSeparateIntegrityLayers {
+            events_file_digest: "manifest.files digest for events.ndjson",
+            run_root: "manifest.run_root (assay-run-root-v1)",
+            archive_attestation_subject: "ADR-044 archive digest subject (not computed by show)",
+        },
+    }
+}
+
+/// Bound field names in JCS key order from the same input shape `content_hash_scope` uses.
+pub fn content_hash_bound_field_names() -> Vec<&'static str> {
+    content_hash_scope().bound_fields
 }
 
 /// Calculate the Content Hash (sha256 of canonical content).
@@ -88,15 +195,8 @@ struct ContentHashInput<'a> {
 /// assert!(hash.starts_with("sha256:"));
 /// ```
 pub fn compute_content_hash(event: &EvidenceEvent) -> Result<String> {
-    let input = ContentHashInput {
-        specversion: &event.specversion,
-        type_: &event.type_,
-        data_content_type: &event.data_content_type,
-        subject: event.subject.as_deref(),
-        payload: &event.payload,
-    };
-
-    assay_canonical::content_id(&input).context("failed to compute content hash")
+    assay_canonical::content_id(&content_hash_input(event))
+        .context("failed to compute content hash")
 }
 
 /// Calculate the Stream Identity ID.

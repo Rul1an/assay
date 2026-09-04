@@ -23,9 +23,10 @@
 //! a test; and classifying it wrongly fails a different test. That is the property the prose could
 //! not carry — the list cannot silently disagree with the code.
 
-use assay_evidence::crypto::id::compute_content_hash;
+use assay_evidence::crypto::id::{compute_content_hash, content_hash_bound_field_names};
 use assay_evidence::types::EvidenceEvent;
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 
 /// Fields the content hash covers. Mutating any of these MUST change the hash.
 const BOUND: &[&str] = &["specversion", "type", "datacontenttype", "subject", "data"];
@@ -264,4 +265,85 @@ fn the_inventory_names_match_the_serialized_names() {
         "inventory and event disagree.\n  serialized but unlisted: {missing:?}\n  \
          listed but not serialized: {stale:?}"
     );
+}
+
+/// JCS key order for `ContentHashInput` with `subject` populated (RFC 8785 object key sort).
+///
+/// This is the order the public projection must return. Declaration order in `BOUND` is an
+/// independent oracle, not the emission order.
+const BOUND_JCS_ORDER: &[&str] = &["data", "datacontenttype", "specversion", "subject", "type"];
+
+/// Production projection ↔ human `BOUND` ↔ observed hash movers (three-way; one shared function).
+///
+/// ADR-042: this proves preimage *scope* only. It establishes no producer identity, provenance,
+/// completeness, truthfulness, archive verification, tamper intent, or whole-action verdict.
+#[test]
+fn production_bound_field_projection_matches_bound_and_observed_movers() {
+    let projected = content_hash_bound_field_names();
+    assert_eq!(
+        projected, BOUND_JCS_ORDER,
+        "public projection must emit bound names in JCS key order with subject present"
+    );
+
+    let projected_set: BTreeSet<&str> = projected.iter().copied().collect();
+    let declared: BTreeSet<&str> = BOUND.iter().copied().collect();
+    assert_eq!(
+        projected_set, declared,
+        "production projection must set-equal the independent BOUND declaration; \
+         deriving BOUND from the projection alone would make the oracle circular"
+    );
+
+    // Observed movers: same probe as the exhaustive classifier, restricted to BOUND names.
+    let event = fully_populated_event();
+    let serialized = serde_json::to_value(&event).expect("serialize");
+    let object = serialized
+        .as_object()
+        .expect("event serializes to an object");
+    let round_tripped: EvidenceEvent =
+        serde_json::from_value(serialized.clone()).expect("baseline round-trip");
+    let baseline = compute_content_hash(&round_tripped).expect("baseline hash");
+
+    let mut observed_movers: BTreeSet<&str> = BTreeSet::new();
+    for (key, value) in object {
+        let mut mutated_object = object.clone();
+        mutated_object.insert(key.clone(), mutate(key, value));
+        let mutated: EvidenceEvent = serde_json::from_value(Value::Object(mutated_object))
+            .unwrap_or_else(|e| {
+                panic!("mutating {key} produced an event that will not parse: {e}")
+            });
+        if mutated == round_tripped {
+            continue;
+        }
+        if compute_content_hash(&mutated).expect("mutated hash") != baseline {
+            // Leak to 'static via BOUND/UNBOUND tables only — keys are serialized names.
+            let name = BOUND
+                .iter()
+                .chain(UNBOUND.iter())
+                .copied()
+                .find(|n| *n == key.as_str())
+                .unwrap_or_else(|| panic!("mover {key} missing from inventory tables"));
+            observed_movers.insert(name);
+        }
+    }
+
+    assert_eq!(
+        observed_movers, declared,
+        "fields whose mutations move content_hash must set-equal BOUND and the production projection"
+    );
+}
+
+/// False-green: introspection built with `subject: None` drops `subject` under
+/// `skip_serializing_if`, so a projection that omitted subject would still look like a “bound
+/// list” while disagreeing with the hash input that includes subject when present on events.
+///
+/// The shared constructor must populate subject for scope projection so `"subject"` stays in
+/// the bound set even when classifying the preimage shape.
+#[test]
+fn content_hash_scope_projection_does_not_omit_subject() {
+    let projected = content_hash_bound_field_names();
+    assert!(
+        projected.contains(&"subject"),
+        "subject omitted during introspection is a false-green: the bound set must include subject"
+    );
+    assert_eq!(projected, BOUND_JCS_ORDER);
 }

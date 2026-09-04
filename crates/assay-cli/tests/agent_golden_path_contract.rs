@@ -44,6 +44,100 @@ fn expected_outcome(step_id: &str, outcome_name: &str) -> ExpectedOutcome {
     runtime_coverage::expected_outcome(&contract(), step_id, outcome_name)
 }
 
+/// Additive `content_hash_scope` on `assay evidence show --format json`.
+///
+/// ADR-042 non-claims (explicit): this object states preimage scope only. It is not a producer
+/// identity, provenance, completeness, truthfulness, archive-verification, tamper-intent,
+/// trust-score, or whole-action verdict. Per-bundle verify state stays solely in `verify_mode`.
+///
+/// False-greens this helper must keep red:
+/// - missing `content_hash_scope`
+/// - CLI `bound_fields` / object diverging from `content_hash_scope()` (literal rebuild)
+/// - artifact/archive integrity mislabeled as content-hash coverage
+fn assert_content_hash_scope(show_json: &Value, label: &str) {
+    let scope = show_json
+        .get("content_hash_scope")
+        .unwrap_or_else(|| panic!("{label}: missing content_hash_scope (false-green if absent)"));
+    assert!(
+        scope.is_object(),
+        "{label}: content_hash_scope must be an object"
+    );
+
+    let expected = serde_json::to_value(assay_evidence::crypto::id::content_hash_scope())
+        .expect("content_hash_scope serializes");
+    assert_eq!(
+        scope, &expected,
+        "{label}: CLI must embed content_hash_scope() unchanged (no diverging literal rebuild)"
+    );
+
+    assert_eq!(
+        scope["digest_profile"], "assay-content-hash-v1",
+        "{label}: digest profile id"
+    );
+    assert_eq!(scope["canon"], "jcs-rfc8785", "{label}: canon");
+    assert_eq!(scope["hash"], "sha256", "{label}: hash alg");
+
+    let projected = assay_evidence::crypto::id::content_hash_bound_field_names();
+    let bound = scope["bound_fields"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{label}: bound_fields must be an array"));
+    let bound_names: Vec<&str> = bound
+        .iter()
+        .map(|v| {
+            v.as_str()
+                .unwrap_or_else(|| panic!("{label}: bound_fields entries must be strings"))
+        })
+        .collect();
+    assert_eq!(
+        bound_names, projected,
+        "{label}: CLI bound_fields must call the shared producer projection, not a diverging literal"
+    );
+
+    assert_eq!(
+        scope["omitted_event_fields"], "not_bound_by_this_digest",
+        "{label}: must state that omitted event fields are outside this digest"
+    );
+
+    // Separate integrity layers — pointers only; show must not claim it verified the archive.
+    let layers = scope
+        .get("separate_integrity_layers")
+        .unwrap_or_else(|| panic!("{label}: separate_integrity_layers required"));
+    assert!(
+        layers.get("events_file_digest").is_some(),
+        "{label}: must point at the events-file digest in the manifest"
+    );
+    assert!(
+        layers.get("run_root").is_some(),
+        "{label}: must point at manifest.run_root under assay-run-root-v1"
+    );
+    assert!(
+        layers.get("archive_attestation_subject").is_some(),
+        "{label}: must point at the ADR-044 archive digest subject without computing it here"
+    );
+
+    // False-green: labeling artifact/archive coverage as content-hash coverage.
+    for banned in [
+        "archive_verified",
+        "artifact_verified",
+        "matched",
+        "verified",
+        "integrity_ok",
+        "covers_archive",
+        "covers_artifact",
+    ] {
+        assert!(
+            scope.get(banned).is_none(),
+            "{label}: content_hash_scope must not carry {banned} (artifact/archive mislabel)"
+        );
+    }
+    let scope_text = scope.to_string();
+    assert!(
+        !scope_text.contains("content_hash covers the archive")
+            && !scope_text.contains("content_hash covers the artifact"),
+        "{label}: must not mislabel artifact/archive integrity as content-hash scope"
+    );
+}
+
 #[test]
 fn cli_contract_steps_default_to_invocation_cwd() {
     for step in contract()["steps"]
@@ -521,6 +615,7 @@ fn bundle_inspection_json_publishes_typed_failures_on_stdout() {
     assert_eq!(success_json["manifest"]["event_count"], 2);
     assert!(success_json["events"].is_array());
     assert_eq!(success_json["verify_mode"], "enabled");
+    assert_content_hash_scope(&success_json, "verified show");
 
     let expected_skipped = expected_outcome("evidence-inspection", "verification-disabled");
     let skipped = assay_contract(
@@ -536,6 +631,12 @@ fn bundle_inspection_json_publishes_typed_failures_on_stdout() {
     assert_exit(&skipped, &expected_skipped, "evidence show --no-verify");
     let skipped_json = stdout_json(&skipped, &expected_skipped, "evidence show --no-verify");
     assert_eq!(skipped_json["verify_mode"], "disabled");
+    assert_content_hash_scope(&skipped_json, "tampered --no-verify show");
+    assert_eq!(
+        skipped_json["content_hash_scope"], success_json["content_hash_scope"],
+        "content_hash_scope is construction metadata: identical for verified and tampered \
+         --no-verify inputs; it must carry no per-bundle matched/verified state"
+    );
 
     let missing_unverified = assay(
         dir.path(),
