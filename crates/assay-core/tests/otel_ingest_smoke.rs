@@ -96,3 +96,84 @@ fn test_otel_ingest_logic() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_otel_gen_ai_prompt_multibyte_over_4096_nontruncation() {
+    // #2786 Slice B: Pin that an over-4096-byte multibyte OTel gen_ai.prompt
+    // remains byte-identical in the emitted Step content and meta.
+    //
+    // Note: OTel ingest does not run Assay's truncator (`truncate_value_with_provenance`
+    // or `apply_truncation`). The prompt remains byte-identical in both Step.content and
+    // Step.meta. The resulting Step.truncations vector is empty because no truncation was run,
+    // which reflects producer pass-through rather than a measured-clean guarantee.
+    // This test makes no claim of upstream completeness.
+    let chunk = "✨ otel gen_ai prompt with multibyte 日本語 and €uro ✨ ";
+    let repeat_count = (5000 / chunk.len()) + 1;
+    let long_prompt = chunk.repeat(repeat_count);
+    assert!(long_prompt.len() > 4096);
+    assert!(!long_prompt.is_ascii());
+
+    let mut attrs = std::collections::HashMap::new();
+    attrs.insert(
+        "gen_ai.operation.name".to_string(),
+        serde_json::json!("chat"),
+    );
+    attrs.insert(
+        "gen_ai.request.model".to_string(),
+        serde_json::json!("test-model"),
+    );
+    attrs.insert("gen_ai.prompt".to_string(), serde_json::json!(long_prompt));
+    attrs.insert(
+        "gen_ai.completion".to_string(),
+        serde_json::json!("completion response"),
+    );
+
+    let span = OtelSpan {
+        trace_id: "trace-otel-nontrunc-test".to_string(),
+        span_id: "span-model-1".to_string(),
+        parent_span_id: None,
+        name: "chat test-model".to_string(),
+        start_time_unix_nano: "1700000000000000000".to_string(),
+        end_time_unix_nano: "1700000001000000000".to_string(),
+        attributes: Some(attrs),
+    };
+
+    let events = convert_spans_to_episodes(vec![span]);
+
+    let model_step = events
+        .iter()
+        .find_map(|e| match e {
+            assay_core::trace::schema::TraceEvent::Step(s) if s.kind == "model" => Some(s),
+            _ => None,
+        })
+        .expect("Should emit model Step");
+
+    // Verify content contains byte-identical prompt
+    let content_raw = model_step
+        .content
+        .as_deref()
+        .expect("model step should have content");
+    let content_json: serde_json::Value =
+        serde_json::from_str(content_raw).expect("content should be valid json");
+    assert_eq!(
+        content_json["prompt"].as_str(),
+        Some(long_prompt.as_str()),
+        "Step content prompt must remain byte-identical without truncation"
+    );
+
+    // Verify meta contains byte-identical gen_ai.prompt
+    assert_eq!(
+        model_step
+            .meta
+            .get("gen_ai.prompt")
+            .and_then(|v| v.as_str()),
+        Some(long_prompt.as_str()),
+        "Step meta gen_ai.prompt must remain byte-identical without truncation"
+    );
+
+    // Verify truncations is empty (no truncator was run; absent/empty is producer pass-through)
+    assert!(
+        model_step.truncations.is_empty(),
+        "Producer did not invoke Assay's truncator, so truncations is empty (not measured-clean)"
+    );
+}
