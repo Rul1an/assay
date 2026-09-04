@@ -294,11 +294,18 @@ function handle(message) {
           },
         };
       }
+      // The default scenario keeps emitting the legacy prompt so legacy acceptance stays covered
+      // by every existing driven run. The canonical scenario emits the prompt the real 0.153.1 host
+      // sends, so the widened path this change exists for is exercised end-to-end and not only by a
+      // unit assertion.
       return {
         serverName: "assay",
         threadId,
         turnId: "turn-1",
-        message: `approve ${RELEASE_DECIDE_TOOL}`,
+        message:
+          scenario === "canonical-elicitation-prompt"
+            ? `Allow the assay MCP server to run tool "${RELEASE_DECIDE_TOOL}"?`
+            : `approve ${RELEASE_DECIDE_TOOL}`,
         mode: "form",
         requestedSchema: { type: "object", properties: {} },
       };

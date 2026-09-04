@@ -4704,7 +4704,7 @@ test("known non-evidentiary items project to a closed type and id only", () => {
   assert.equal(withNull.params.item.id, null, "JSON null must survive the scalar boundary");
 });
 
-test("current Codex non-evidentiary items are scrubbed and do not invalidate a real tool row", async () => {
+test("current Codex non-evidentiary items are dropped and do not invalidate a real tool row", async () => {
   const control = await drive("valid");
   assert.equal(validateProofRoot(control.proofRoot).ok, true, "unchanged control must validate");
   const events = structuredClone(control.events);
@@ -5209,5 +5209,197 @@ test("F2: a marked unexpected key is refused by the consumer, not merely marked"
     classifyStoredEvent(projected).type,
     "unclassified",
     "an item carrying an unexpected key must be refused by the consumer",
+  );
+});
+
+// --- F1: the PRODUCER half of every new type check must bite -------------------------------
+// The pre-existing consumer test injects malformed values onto ALREADY-PROJECTED bytes, so it
+// exercises retainedItemReason only and never projectRetainedItem. These cases start from what a
+// HOST would emit, run it through the producer, and assert the consumer refuses the result -- which
+// is the only way a producer-side type check can be pinned.
+for (const [label, item] of [
+  ["pluginId non-string", { pluginId: 123 }],
+  ["mcpAppResourceUri non-string", { mcpAppResourceUri: 7 }],
+  ["durationMs non-number", { durationMs: "120" }],
+  ["durationMs negative", { durationMs: -1 }],
+  ["readOnlyHint non-boolean", { readOnlyHint: "true" }],
+  ["appContext non-object", { appContext: 5 }],
+  ["appContext missing connectorId", { appContext: {} }],
+  ["appContext connectorId non-string", { appContext: { connectorId: 123 } }],
+  ["appContext connectorId empty", { appContext: { connectorId: "" } }],
+  ["appContext optional non-string", { appContext: { connectorId: "c", appName: 9 } }],
+  ["error non-object", { error: 5 }],
+  ["error message non-string", { error: { message: 9 } }],
+]) {
+  test(`F1 producer: host-emitted ${label} is refused after projection`, () => {
+    const projected = projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "install_surface_allowed_probe" },
+          result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+          ...item,
+        },
+      },
+    });
+    assert.equal(
+      classifyStoredEvent(projected).type,
+      "unclassified",
+      `${label}: producer must not coerce a malformed host value into an acceptable projection`,
+    );
+  });
+}
+
+// --- F2: nested unknown keys must be marked AND refused ------------------------------------
+// The refusal is indirect: the nested reason function rejects because the projection's
+// __unexpectedKeys marker is itself outside its allowed list. Nothing stated that coupling, so
+// deleting either half left the suite green. These pin both halves and the no-leak property.
+for (const [label, item, probe] of [
+  [
+    "appContext",
+    {
+      appContext: { connectorId: "c-1", unknownHostNested: "F2-APPCONTEXT-LEAK" },
+      result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+    },
+    "F2-APPCONTEXT-LEAK",
+  ],
+  [
+    "error",
+    {
+      error: { message: "boom", unknownHostNested: "F2-ERROR-LEAK" },
+      result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+    },
+    "F2-ERROR-LEAK",
+  ],
+]) {
+  test(`F2 nested: an unknown key inside ${label} is marked, refused, and never retained`, () => {
+    const projected = projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "install_surface_allowed_probe" },
+          ...item,
+        },
+      },
+    });
+    const nested = projected.params.item[label];
+    assert.deepEqual(
+      nested.__unexpectedKeys,
+      ["unknownHostNested"],
+      `${label}: the producer must mark the unknown nested key`,
+    );
+    assert.equal(
+      classifyStoredEvent(projected).type,
+      "unclassified",
+      `${label}: the consumer must refuse a marked nested key, not merely record it`,
+    );
+    assert.equal(
+      JSON.stringify(projected).includes(probe),
+      false,
+      `${label}: the unknown nested value must never reach retained bytes`,
+    );
+  });
+}
+
+// --- F5: the canonical 0.153.1 prompt is accepted end-to-end, and legacy still is ----------
+test("F5: the canonical elicitation prompt is accepted by a driven run", async () => {
+  const canonical = await drive("canonical-elicitation-prompt");
+  assert.equal(canonical.driverOutcome.exitCode, 0, "canonical prompt must drive to success");
+  assert.equal(canonical.driverOutcome.status, "pass");
+  const elicit = canonical.events.find(
+    (e) => e.method === "mcpServer/elicitation/request" && e.direction === "server",
+  );
+  assert.ok(elicit, "the driven run must contain an elicitation request");
+  assert.equal(
+    elicit.params.message,
+    'Allow the assay MCP server to run tool "assay_policy_decide"?',
+    "the driven run must carry the canonical prompt, not the legacy one",
+  );
+});
+
+// --- The closed whitelist must equal the 0.153.1 schema's mcpToolCall property set ----------
+// allowedKeys is a CLOSED whitelist: a real host field missing from it refuses the whole proof.
+// The generated protocol-0.153.1 schema is the only local statement of that set. It is a schema,
+// not a live invocation claim -- a field can be declared and never emitted, and emission is not
+// established here -- but a mismatch in either direction is actionable: a schema property absent
+// from allowedKeys is a guaranteed false refusal, and an allowedKey absent from the schema admits
+// something the host is not declared to send. Measured 2026-09-05 against
+// protocol-0.153.1/v2/ThreadStartResponse.json (sha256
+// 656f8fd0fe91f533126cbfdb9369cfab550927a229e48dd46460f6f015d2b186), definitions/ThreadItem/oneOf/8
+// (McpToolCallThreadItem, 13 properties, no allOf/anyOf/$ref composition, additionalProperties unset).
+// That file is not vendored here; this list is the pinned copy of what it declared when measured.
+test("mcpToolCall allowedKeys equals the 0.153.1 schema property set", () => {
+  const schemaProperties = [
+    "appContext",
+    "arguments",
+    "durationMs",
+    "error",
+    "id",
+    "mcpAppResourceUri",
+    "pluginId",
+    "readOnlyHint",
+    "result",
+    "server",
+    "status",
+    "tool",
+    "type",
+  ];
+  // Derived from behaviour, not from importing the constant: a key the whitelist accepts produces
+  // no top-level __unexpectedKeys marker, and one it rejects does.
+  const project = (extraKey) =>
+    projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "install_surface_allowed_probe" },
+          result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+          ...(extraKey === null ? {} : { [extraKey]: null }),
+        },
+      },
+    }).params.item;
+
+  for (const key of schemaProperties) {
+    const item = project(key);
+    assert.equal(
+      Object.hasOwn(item, "__unexpectedKeys"),
+      false,
+      `schema property ${key} must not be treated as unexpected: a closed whitelist that omits it refuses every real host record`,
+    );
+  }
+  const control = project("definitelyNotInTheSchema");
+  assert.deepEqual(
+    control.__unexpectedKeys,
+    ["definitelyNotInTheSchema"],
+    "control: a key outside the schema must still be marked",
   );
 });
