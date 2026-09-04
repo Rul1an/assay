@@ -14,14 +14,17 @@
 //!
 //! This test derives it, in two layers, because one is not enough. An exhaustive destructure of
 //! `EvidenceEvent` breaks the *build* when a field is added, which is the only mechanism that
-//! reaches a field serde does not emit — seven of these carry `skip_serializing_if`, so a new
-//! optional left `None` in a fixture would otherwise be invisible to every runtime assertion here.
+//! reaches a field serde does not emit — several carry `skip_serializing_if`, so a new optional
+//! left `None` in a fixture would otherwise be invisible to BOUND/UNBOUND set checks. The same
+//! exhaustive invocation also yields the structural field count, and `fully_populated_event()`
+//! must serialize exactly that many keys: naming a new Option without populating it goes red.
 //! On top of that, each emitted field is classified by *observing* whether mutating it moves the
 //! content hash, and the observation is compared against a declaration a human has to write.
 //!
 //! So: adding a field fails compilation until it is named; naming it without classifying it fails
-//! a test; and classifying it wrongly fails a different test. That is the property the prose could
-//! not carry — the list cannot silently disagree with the code.
+//! a test; leaving a skippable Option `None` in the fixture fails the structural-count test; and
+//! classifying it wrongly fails a different test. That is the property the prose could not carry —
+//! the list cannot silently disagree with the code.
 
 use assay_evidence::crypto::id::{
     compute_content_hash, content_hash_bound_field_names, content_hash_scope,
@@ -109,19 +112,25 @@ fn mutate(key: &str, value: &Value) -> Value {
     }
 }
 
-/// Break the build when a field is added to `EvidenceEvent`.
+/// Exhaustive `EvidenceEvent` destructure and structural field count from one invocation.
 ///
-/// The behavioural loop below can only see what serde emits, and seven of these fields carry
-/// `skip_serializing_if`. A new optional field left `None` in the fixture — or one marked
-/// `#[serde(skip)]` — would be invisible to every runtime assertion in this file, including the
-/// arity check, because it changes neither side of that equation. So runtime coverage is not
-/// enough and no count can rescue it: the guarantee has to come from the compiler.
-///
-/// This destructure deliberately has no `..`. Adding a field to `EvidenceEvent` stops this test
-/// compiling until someone names it here and classifies it below.
-#[allow(unused_variables)]
-fn field_coverage_is_exhaustive(event: &EvidenceEvent) {
-    let EvidenceEvent {
+/// Adding a field to `EvidenceEvent` stops compilation until this call site names it. The returned
+/// length is the expected serialized key count for a fully populated event: a new
+/// `Option`+`skip_serializing_if` field named here but left `None` in `fully_populated_event()`
+/// drops below that count and fails the structural assertion below. No `..` rest pattern.
+macro_rules! evidence_event_structural_field_count {
+    ($event:expr; $($field:ident),+ $(,)?) => {{
+        #[allow(unused_variables)]
+        let EvidenceEvent {
+            $($field,)+
+        } = $event;
+        [$(stringify!($field)),+].len()
+    }};
+}
+
+fn structural_field_count(event: &EvidenceEvent) -> usize {
+    evidence_event_structural_field_count! {
+        event;
         specversion,
         type_,
         source,
@@ -143,18 +152,23 @@ fn field_coverage_is_exhaustive(event: &EvidenceEvent) {
         semantic_digest,
         digest_profile,
         payload,
-    } = event;
+    }
 }
 
 #[test]
 fn every_event_field_is_classified_and_behaves_as_classified() {
     let event = fully_populated_event();
-    field_coverage_is_exhaustive(&event);
+    let expected_keys = structural_field_count(&event);
 
     let serialized = serde_json::to_value(&event).expect("serialize");
     let object = serialized
         .as_object()
         .expect("event serializes to an object");
+    assert_eq!(
+        object.len(),
+        expected_keys,
+        "fully_populated_event() must serialize every EvidenceEvent field (structural count          from the exhaustive destructure). An Option left None under skip_serializing_if is          invisible to BOUND/UNBOUND set checks but drops this count"
+    );
 
     // Baseline from the round-tripped event, not the in-memory one. If deserialization normalizes
     // anything, an in-memory baseline makes every *other* field's verdict wrong rather than
@@ -245,7 +259,8 @@ fn every_event_field_is_classified_and_behaves_as_classified() {
 ///
 /// Set equality rather than a count: a rename plus a stale entry keeps the arity intact, and a
 /// cardinality check would call that agreement. This catches a name that no longer exists and a
-/// name that exists but is unlisted; fields serde never emits are the compiler's job, above.
+/// name that exists but is unlisted. Skippable Option fields left `None` in the fixture are
+/// caught by the structural-count assertion against the exhaustive destructure above.
 #[test]
 fn the_inventory_names_match_the_serialized_names() {
     use std::collections::BTreeSet;

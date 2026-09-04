@@ -47,6 +47,7 @@ fn expected_outcome(step_id: &str, outcome_name: &str) -> ExpectedOutcome {
 /// Additive `content_hash_scope` on `assay evidence show --format json`.
 ///
 /// ADR-042 non-claims (explicit): this object states preimage scope only. It is not a producer
+/// identity or provenance claim.
 /// Non-claims are attributed: ADR-042 §3 (trust score / whole-action verdict),
 /// `content_hash_field_inventory` UNBOUND (producer `source`), ADR-044 (archive verification),
 /// preimage scope itself (completeness / truthfulness / tamper intent). Per-bundle verify state
