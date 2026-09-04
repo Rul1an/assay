@@ -237,6 +237,32 @@ def require_required_fail_job(job_name: str, assert_name: str) -> None:
             "(boolean true or string/expression) so the assertion runs"
         )
     reject_skippable(f"{job_name} assertion", assertion)
+    # Exact effective assertion body (early exit 0 is not equivalent to regex presence).
+    if job_name == "required-no-bundles-fails":
+        expected_run = """set -euo pipefail
+if [ "${STEP_OUTCOME}" != "failure" ]; then
+  echo "ERROR: expected required mode with zero bundles to fail"
+  exit 1
+fi
+if [ "${EVIDENCE_STATE}" = "verified" ]; then
+  echo "ERROR: zero bundles must not report verified"
+  exit 1
+fi
+"""
+        expected_env = {
+            "STEP_OUTCOME": "${{ steps.review.outcome }}",
+            "EVIDENCE_STATE": "${{ steps.review.outputs.evidence_state }}",
+        }
+    else:
+        raise SystemExit(f"no exact assertion contract for {job_name}")
+    if normalize_run(assertion["run"]) != normalize_run(expected_run):
+        raise SystemExit(
+            f"{job_name} assertion run must match exact effective body "
+            "(dead/early-exit assertion is not OK)"
+        )
+    aenv = assertion.get("env") if isinstance(assertion.get("env"), dict) else {}
+    if aenv != expected_env:
+        raise SystemExit(f"{job_name} assertion env must match exactly (got {aenv!r})")
     require_failure_outcome_binding(job_name, action, assertion)
 
 require_required_fail_job(
@@ -278,6 +304,29 @@ reject_if("corrupt action", action)
 if not continue_on_error_truthy(action):
     raise SystemExit("corrupt Action step must set truthy continue-on-error")
 reject_skippable("corrupt assertion", assertion)
+EXPECTED_CORRUPT_ASSERT_RUN = """set -euo pipefail
+if [ "${STEP_OUTCOME}" != "failure" ]; then
+  echo "ERROR: expected corrupted bundle review to fail"
+  exit 1
+fi
+if [ "${VERIFIED}" = "true" ] || [ "${EVIDENCE_STATE}" = "verified" ]; then
+  echo "ERROR: corrupted bundle must not be verified"
+  exit 1
+fi
+"""
+EXPECTED_CORRUPT_ASSERT_ENV = {
+    "STEP_OUTCOME": "${{ steps.review.outcome }}",
+    "EVIDENCE_STATE": "${{ steps.review.outputs.evidence_state }}",
+    "VERIFIED": "${{ steps.review.outputs.verified }}",
+}
+if normalize_run(assertion["run"]) != normalize_run(EXPECTED_CORRUPT_ASSERT_RUN):
+    raise SystemExit(
+        "corrupt-bundle-refused assertion run must match exact effective body "
+        "(dead/early-exit assertion is not OK)"
+    )
+caenv = assertion.get("env") if isinstance(assertion.get("env"), dict) else {}
+if caenv != EXPECTED_CORRUPT_ASSERT_ENV:
+    raise SystemExit(f"corrupt assertion env must match exactly (got {caenv!r})")
 require_failure_outcome_binding("corrupt-bundle-refused", action, assertion)
 
 job = jobs.get("default-discovery-sandbox-junction")
@@ -589,7 +638,57 @@ wf.write_text(
 PY
 expect_red "assertion-early-exit-0"
 
-# 8) negative assertion: words only, no real outcome env binding
+# 8) required-absent assertion early exit 0 (regex would still see failure compare)
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "      - name: Assert required mode fails without bundles\n        shell: bash\n        env:\n          STEP_OUTCOME: ${{ steps.review.outcome }}\n          EVIDENCE_STATE: ${{ steps.review.outputs.evidence_state }}\n        run: |\n          set -euo pipefail\n"
+if needle not in text:
+    raise SystemExit("required-absent assertion needle missing")
+wf.write_text(
+    text.replace(
+        needle,
+        needle.replace(
+            "          set -euo pipefail\n",
+            "          set -euo pipefail\n          exit 0\n",
+            1,
+        ),
+        1,
+    ),
+    encoding="utf-8",
+)
+PY
+expect_red "required-absent-assertion-early-exit-0"
+
+# 9) corrupt assertion early exit 0
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "      - name: Assert corrupted bundle is refused\n        shell: bash\n        env:\n          STEP_OUTCOME: ${{ steps.review.outcome }}\n          EVIDENCE_STATE: ${{ steps.review.outputs.evidence_state }}\n          VERIFIED: ${{ steps.review.outputs.verified }}\n        run: |\n          set -euo pipefail\n"
+if needle not in text:
+    raise SystemExit("corrupt assertion needle missing")
+wf.write_text(
+    text.replace(
+        needle,
+        needle.replace(
+            "          set -euo pipefail\n",
+            "          set -euo pipefail\n          exit 0\n",
+            1,
+        ),
+        1,
+    ),
+    encoding="utf-8",
+)
+PY
+expect_red "corrupt-assertion-early-exit-0"
+
+# 10) negative assertion: words only, no real outcome env binding
 seed_scratch
 python3 - "${SCRATCH}/wf.yml" <<'PY'
 from pathlib import Path
