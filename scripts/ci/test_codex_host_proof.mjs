@@ -4622,12 +4622,28 @@ const OBSERVED_NON_EVIDENTIARY_ITEMS = Object.freeze([
     delivery: "final",
     memoryCitation: null,
   }),
+  Object.freeze({
+    type: "commandExecution",
+    id: "exec_1",
+    command: "ls -la /private/tmp",
+    commandActions: [{ type: "read", path: "/private/tmp" }],
+    cwd: "/private/tmp",
+    status: "completed",
+    aggregatedOutput: "sensitive directory output",
+    durationMs: 42,
+    exitCode: 0,
+    pluginId: null,
+    processId: "1234",
+    scriptPath: null,
+    source: "agent",
+  }),
 ]);
 
 const OBSERVED_NON_EVIDENTIARY_NOTIFICATIONS = Object.freeze([
   "account/rateLimits/updated",
   "item/agentMessage/delta",
   "thread/tokenUsage/updated",
+  "serverRequest/resolved",
 ]);
 
 test("stableStringify refuses non-JSON primitives; JSON null stays a valid token", () => {
@@ -4849,4 +4865,183 @@ test("non-finite numbers never silently become JSON null at either boundary", ()
   }
   assert.equal(stableStringify({ completedAtMs: 5 }), '{"completedAtMs":5}\n');
   assert.equal(stableStringify([0, -1.5]), '[0,-1.5]\n');
+});
+
+test("commandExecution projects to closed type and id only; sensitive fields are scrubbed", () => {
+  const rawItem = OBSERVED_NON_EVIDENTIARY_ITEMS.find((item) => item.type === "commandExecution");
+  assert.ok(rawItem, "fixture must contain commandExecution");
+  const projected = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 12345,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: rawItem,
+    },
+  });
+  assert.deepEqual(projected.params.item, {
+    type: "commandExecution",
+    id: "exec_1",
+  });
+  const serialized = stableStringify(projected);
+  assert.equal(serialized.includes("sensitive directory output"), false);
+  assert.equal(serialized.includes("ls -la"), false);
+  assert.equal(serialized.includes("/private/tmp"), false);
+
+  const unprojectedRaw = {
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 12345,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: rawItem,
+    },
+  };
+  const classified = classifyStoredEvent(unprojectedRaw);
+  assert.equal(
+    classified.type,
+    "unclassified",
+    "unprojected commandExecution containing raw fields must fail closed",
+  );
+});
+
+test("Codex 0.153.1 mcpToolCall schema fields project cleanly; unexpected keys and credentials fail closed", () => {
+  const rawToolCall = {
+    type: "mcpToolCall",
+    id: "tool-1",
+    server: "assay",
+    tool: "assay_policy_decide",
+    status: "completed",
+    arguments: { tool: "install_surface_allowed_probe", policy: "install-surface-policy.yaml" },
+    durationMs: 120,
+    readOnlyHint: true,
+    pluginId: "plugin-assay",
+    mcpAppResourceUri: "resource://assay",
+    appContext: {
+      connectorId: "connector-1",
+      linkId: "link-1",
+      resourceUri: "uri://assay-policy",
+    },
+    error: {
+      message: "authorization failed for token sk-secret12345678",
+    },
+    result: {
+      isError: false,
+      structuredContent: { allowed: true, reason: "ok" },
+    },
+  };
+
+  const projected = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5000,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: rawToolCall,
+    },
+  });
+  const projectedItem = projected.params.item;
+  assert.equal(Object.hasOwn(projectedItem, "__unexpectedKeys"), false);
+  assert.equal(projectedItem.durationMs, 120);
+  assert.equal(projectedItem.readOnlyHint, true);
+  assert.equal(projectedItem.pluginId, "plugin-assay");
+  assert.equal(projectedItem.mcpAppResourceUri, "resource://assay");
+  assert.deepEqual(projectedItem.appContext, {
+    connectorId: "connector-1",
+    linkId: "link-1",
+    resourceUri: "uri://assay-policy",
+  });
+  assert.equal(
+    projectedItem.error.message,
+    "[redacted]",
+    "credential in error message must be scrubbed",
+  );
+
+  const unexpectedKeyCall = structuredClone(rawToolCall);
+  unexpectedKeyCall.unknownHostMetadata = "unexpected";
+  const projectedWithUnexpected = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5000,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: unexpectedKeyCall,
+    },
+  });
+  assert.deepEqual(projectedWithUnexpected.params.item.__unexpectedKeys, [
+    "unknownHostMetadata",
+  ]);
+});
+
+test("failed MCP tool status fails oneToolInvoked and structuredResultValidated", async () => {
+  const control = await drive("valid");
+  const events = structuredClone(control.events);
+  const toolIndex = events.findIndex(
+    (event) => event.method === "item/completed" && event.params?.item?.type === "mcpToolCall",
+  );
+  assert.notEqual(toolIndex, -1);
+  events[toolIndex].params.item.status = "failed";
+  events[toolIndex].params.item.result = null;
+
+  const terminal = events.find((event) => event.method === "turn/completed");
+  const terminalTool = terminal.params.turn.items.find(
+    (item) => item?.type === "mcpToolCall",
+  );
+  if (terminalTool) {
+    terminalTool.status = "failed";
+    terminalTool.result = null;
+  }
+
+  const classified = classifyRecord({ ...control.manifest, events });
+  assert.equal(classified.cells.oneToolInvoked.status, "fail");
+  assert.match(classified.cells.oneToolInvoked.reason, /tool status failed/);
+  assert.equal(classified.cells.structuredResultValidated.status, "unavailable");
+});
+
+test("canonical Codex 0.153.1 elicitation prompt is accepted; unexpected prompt is declined", () => {
+  const canonical01531 = {
+    serverName: "assay",
+    threadId: "t-1",
+    turnId: "u-1",
+    mode: "form",
+    message: 'Allow the assay MCP server to run tool "assay_policy_decide"?',
+    requestedSchema: { type: "object", properties: {} },
+  };
+  assert.equal(
+    elicitationAcceptable(canonical01531, "t-1", "u-1"),
+    true,
+    "canonical 0.153.1 elicitation message must be accepted",
+  );
+
+  const syntheticLegacy = {
+    serverName: "assay",
+    threadId: "t-1",
+    turnId: "u-1",
+    mode: "form",
+    message: "approve assay_policy_decide",
+    requestedSchema: { type: "object", properties: {} },
+  };
+  assert.equal(
+    elicitationAcceptable(syntheticLegacy, "t-1", "u-1"),
+    true,
+    "legacy synthetic elicitation message must remain accepted",
+  );
+
+  const unexpectedPrompt = {
+    ...canonical01531,
+    message: 'Allow the assay MCP server to run tool "unrelated_tool"?',
+  };
+  assert.equal(
+    elicitationAcceptable(unexpectedPrompt, "t-1", "u-1"),
+    false,
+    "elicitation for an unpinned tool must be declined",
+  );
 });

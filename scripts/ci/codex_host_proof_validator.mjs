@@ -459,7 +459,11 @@ export function requiredCellsForJourney(journey) {
 export const EXPECTED_ELICITATION = Object.freeze({
   serverName: "assay",
   mode: "form",
-  message: `approve ${DECIDE_TOOL}`,
+  messages: Object.freeze([
+    `Allow the assay MCP server to run tool "${DECIDE_TOOL}"?`,
+    `approve ${DECIDE_TOOL}`,
+  ]),
+  message: `Allow the assay MCP server to run tool "${DECIDE_TOOL}"?`,
   requestedSchema: Object.freeze({
     type: "object",
     properties: Object.freeze({}),
@@ -472,7 +476,7 @@ export function elicitationAcceptable(params, threadId, turnId) {
     typeof params === "object" &&
     params.serverName === EXPECTED_ELICITATION.serverName &&
     params.mode === EXPECTED_ELICITATION.mode &&
-    params.message === EXPECTED_ELICITATION.message &&
+    EXPECTED_ELICITATION.messages.includes(params.message) &&
     sameJson(params.requestedSchema, EXPECTED_ELICITATION.requestedSchema) &&
     typeof threadId === "string" &&
     threadId.length > 0 &&
@@ -628,6 +632,7 @@ export const LIFECYCLE_SERVER_NOTIFICATIONS = Object.freeze([
   "thread/tokenUsage/updated",
   "turn/started",
   "item/started",
+  "serverRequest/resolved",
 ]);
 export const SERVER_DIAGNOSTIC_NOTIFICATIONS = Object.freeze(["warning", "error"]);
 export const ALLOWED_SERVER_NOTIFICATIONS = Object.freeze([
@@ -709,6 +714,7 @@ function retainedItemReason(item, label = "item/completed") {
   switch (item.type) {
     case "reasoning":
     case "agentMessage":
+    case "commandExecution":
       if (exactKeys(item, ["type", "id"])) {
         return null;
       }
@@ -2087,6 +2093,43 @@ function retainedClientRequestParamsReason(method, params) {
   return null;
 }
 
+function projectAppContext(value) {
+  if (value == null) {
+    return null;
+  }
+  if (!isPlainObject(value)) {
+    return invalidProjection(value);
+  }
+  const out = {};
+  if (hasOwn(value, "connectorId")) {
+    out.connectorId = projectedScalar(value.connectorId);
+  }
+  if (hasOwn(value, "linkId")) {
+    out.linkId = value.linkId == null ? null : projectedScalar(value.linkId);
+  }
+  if (hasOwn(value, "resourceUri")) {
+    out.resourceUri = value.resourceUri == null ? null : projectedScalar(value.resourceUri);
+  }
+  return withUnexpectedKeys(out, value, ["connectorId", "linkId", "resourceUri"]);
+}
+
+function projectMcpToolCallError(value) {
+  if (value == null) {
+    return null;
+  }
+  if (!isPlainObject(value)) {
+    return invalidProjection(value);
+  }
+  const out = {};
+  if (hasOwn(value, "message")) {
+    out.message =
+      typeof value.message === "string"
+        ? projectedScalar(scrub(value.message))
+        : invalidProjection(value.message);
+  }
+  return withUnexpectedKeys(out, value, ["message"]);
+}
+
 function projectRetainedItem(item) {
   if (!isPlainObject(item)) {
     return invalidProjection(item);
@@ -2094,7 +2137,11 @@ function projectRetainedItem(item) {
   if (item.type === "userMessage") {
     return { type: "userMessage", id: projectedScalar(item.id), content: [] };
   }
-  if (item.type === "reasoning" || item.type === "agentMessage") {
+  if (
+    item.type === "reasoning" ||
+    item.type === "agentMessage" ||
+    item.type === "commandExecution"
+  ) {
     return { type: item.type, id: projectedScalar(item.id) };
   }
   const out = {
@@ -2108,8 +2155,44 @@ function projectRetainedItem(item) {
   if (hasOwn(item, "result")) {
     out.result = item.result == null ? null : projectToolResult(item.result);
   }
+  if (hasOwn(item, "durationMs")) {
+    out.durationMs = item.durationMs == null ? null : projectedScalar(item.durationMs);
+  }
+  if (hasOwn(item, "readOnlyHint")) {
+    out.readOnlyHint = item.readOnlyHint == null ? null : projectedScalar(item.readOnlyHint);
+  }
+  if (hasOwn(item, "pluginId")) {
+    out.pluginId = item.pluginId == null ? null : projectedScalar(item.pluginId);
+  }
+  if (hasOwn(item, "mcpAppResourceUri")) {
+    out.mcpAppResourceUri =
+      item.mcpAppResourceUri == null ? null : projectedScalar(item.mcpAppResourceUri);
+  }
+  if (hasOwn(item, "appContext")) {
+    out.appContext = projectAppContext(item.appContext);
+  }
+  if (hasOwn(item, "error")) {
+    out.error = projectMcpToolCallError(item.error);
+  }
   const unexpected = Object.keys(item)
-    .filter((key) => !["type", "id", "server", "tool", "arguments", "status", "result"].includes(key))
+    .filter(
+      (key) =>
+        ![
+          "type",
+          "id",
+          "server",
+          "tool",
+          "arguments",
+          "status",
+          "result",
+          "durationMs",
+          "readOnlyHint",
+          "pluginId",
+          "mcpAppResourceUri",
+          "appContext",
+          "error",
+        ].includes(key),
+    )
     .sort();
   if (unexpected.length > 0) {
     out.__unexpectedKeys = unexpected;
