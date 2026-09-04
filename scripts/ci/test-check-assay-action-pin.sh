@@ -1110,4 +1110,7 @@ expect_fail "cicd-starter-monorepo-snippet" "is the monorepo path" "${scratch}/c
 echo "== no-op control after mutations =="
 expect_ok "control-stays-green-after-scratch-mutations" "${CHECKER}"
 
+echo "== action discovery junction (#2778) =="
+bash "${ROOT}/scripts/ci/test-action-discovery-junction.sh"
+
 echo "assay action consumer pin contract: PASS"

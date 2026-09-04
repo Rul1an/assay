@@ -1,0 +1,1 @@
+mkdir -p .assay/sandbox .assay/evidence/nested && assay sandbox --dry-run --profile .assay/sandbox/profile.yaml --bundle .assay/evidence/nested/sandbox.tar.gz -- true

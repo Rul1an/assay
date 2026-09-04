@@ -6,31 +6,31 @@
 # (compliance packs, BYOS push, artifact attestation, coverage badges) and adds
 # `sandbox-command` (run a coding agent under `assay sandbox` and verify the
 # resulting evidence bundle) and `attest-key` (`assay evidence attest`,
-# in-toto/DSSE). It does NOT carry the legacy marketplace v2 "Evidence Artifacts"
-# `mode`/`run` inputs; pin `@v2` if you depend on those.
+# in-toto/DSSE). Historical commit d4bd4bf47f34bbcbca2067c430d1c732c41bbb5b
+# had `mode`/`run` inputs; neither current v2 nor current v3 carries them.
 #
 # Spec: https://github.com/Rul1an/assay/blob/main/docs/architecture/SPEC-GitHub-Action-v2.1.md
 # ADR:  https://github.com/Rul1an/assay/blob/main/docs/architecture/ADR-018-GitHub-Action-v2.1.md
 # Marketplace: https://github.com/marketplace/actions/assay-ai-agent-security
 #
 # Usage (zero-config):
-#   - uses: Rul1an/assay-action@v2
+#   - uses: Rul1an/assay-action@v3
 #
 # Usage (with compliance pack):
-#   - uses: Rul1an/assay-action@v2
+#   - uses: Rul1an/assay-action@v3
 #     with:
 #       pack: eu-ai-act-baseline
 #       sarif: true
 #
 # Usage (with BYOS push + attestation):
-#   - uses: Rul1an/assay-action@v2
+#   - uses: Rul1an/assay-action@v3
 #     with:
 #       store: s3://my-bucket/evidence
 #       store_role: arn:aws:iam::123456789012:role/AssayEvidence
 #       attest: true
 #
 # Usage (with coverage badge):
-#   - uses: Rul1an/assay-action@v2
+#   - uses: Rul1an/assay-action@v3
 #     with:
 #       badge_gist: abc123def456
 #       badge_token: ${{ secrets.GIST_TOKEN }}
@@ -458,7 +458,8 @@ runs:
         COUNT="$(grep -E '^count=' "$GITHUB_OUTPUT" | tail -n1 | cut -d= -f2)"
         FOUND="$(grep -E '^found=' "$GITHUB_OUTPUT" | tail -n1 | cut -d= -f2)"
         if [ "${FOUND:-false}" != "true" ]; then
-          echo "::notice::No evidence bundles found. Run 'assay run' to generate them."
+          RECIPE="$(cat "$GITHUB_ACTION_PATH/scripts/remediation_recipe.cmd")"
+          echo "::notice::No evidence bundles found. Generate sandbox evidence with the released CLI: $RECIPE"
         else
           echo "Found $COUNT evidence bundle(s)"
         fi
@@ -690,13 +691,15 @@ runs:
           if [ "$FOUND" != "true" ]; then
             echo "### No Evidence Bundles Found"
             echo ""
-            echo "To generate evidence bundles, run your tests with Assay:"
+            echo "To generate evidence bundles, use the released Assay CLI sandbox recipe:"
             echo ""
             echo "\`\`\`bash"
-            echo "assay run --policy policy.yaml -- pytest"
+            RECIPE="$(cat "$GITHUB_ACTION_PATH/scripts/remediation_recipe.cmd")"
+            echo "$RECIPE"
             echo "\`\`\`"
             echo ""
-            echo "Bundles will be created in \`.assay/evidence/\`"
+            echo "The bundle attests the sandbox command's observed effects, not that a test suite passed."
+            echo "Bundles are written under \`.assay/evidence/\`"
           else
             # Status badge
             if [ "$VERIFIED" = "true" ] && [ "${ERRORS:-0}" = "0" ]; then

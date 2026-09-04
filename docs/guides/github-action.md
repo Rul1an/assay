@@ -426,10 +426,10 @@ jobs:
         run: assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml --sarif .assay/reports/sarif.json
 
       - name: Export evidence
-        run: assay evidence export --profile assay-profile.yaml --out evidence.tar.gz
+        run: assay evidence export --profile assay-profile.yaml --out .assay/evidence/export.tar.gz
 
       - name: Lint with pack
-        run: assay evidence lint evidence.tar.gz --pack eu-ai-act-baseline --format sarif > results.sarif
+        run: assay evidence lint .assay/evidence/export.tar.gz --pack eu-ai-act-baseline --format sarif > results.sarif
         continue-on-error: true
 
       # Assay writes reports (JUnit/SARIF) as "Best Effort".
@@ -451,10 +451,11 @@ The action looks for:
 - `.assay/evidence/*.tar.gz`
 - `evidence/*.tar.gz`
 
-Generate with:
+Generate with the published Action remediation recipe (single source:
+`scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd`):
 
 ```bash
-assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml --sarif .assay/reports/sarif.json
+mkdir -p .assay/sandbox .assay/evidence/nested && assay sandbox --dry-run --profile .assay/sandbox/profile.yaml --bundle .assay/evidence/nested/sandbox.tar.gz -- true
 ```
 
 ### SARIF upload fails
