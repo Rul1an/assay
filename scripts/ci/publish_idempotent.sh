@@ -1,7 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "📦 Starting Idempotent Publisher..."
+# Closed CLI surface: validation-only or publish. Unknown arguments exit 2 before any
+# publish work. ASSAY_CRATES_INDEX_BASE (default https://index.crates.io) is the sparse
+# index root for clause 3; tests inject a local file:// fixture.
+CHECK_ORDER=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --check-order)
+      CHECK_ORDER=1
+      shift
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      echo "usage: $0 [--check-order]" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ "$CHECK_ORDER" -eq 1 ]]; then
+  echo "📦 Checking publish order (no publish)..."
+else
+  echo "📦 Starting Idempotent Publisher..."
+fi
 
 # Crates published in dependency order.
 #
@@ -71,7 +93,7 @@ CRATES=(
 # wrong at crate three has already put two crates on crates.io that cannot be taken back.
 validate_publish_order() {
   python3 - "${CRATES[@]}" <<'ORDER_CHECK'
-import json, pathlib, re, sys
+import json, os, pathlib, re, sys
 
 import urllib.error, urllib.request
 
@@ -79,21 +101,49 @@ order = sys.argv[1:]
 position = {name: i for i, name in enumerate(order)}
 problems = []
 unpublishable = []
+index_base = os.environ.get("ASSAY_CRATES_INDEX_BASE", "https://index.crates.io").rstrip("/")
 
 
-def requirement_for(manifest_text, dep):
-    """The version requirement a manifest states for `dep`, or None if it states none."""
-    for line in manifest_text.splitlines():
+def workspace_requirement(dep):
+    """Version requirement for `dep` from root [workspace.dependencies], or None."""
+    root = pathlib.Path("Cargo.toml")
+    if not root.is_file():
+        return None
+    text = root.read_text(encoding="utf-8")
+    match = re.search(
+        r"(?ms)^\[workspace\.dependencies\]\s*$(.*?)(?=^\[|\Z)",
+        text,
+    )
+    if not match:
+        return None
+    for line in match.group(1).splitlines():
         if line.startswith(f"{dep} ") or line.startswith(f"{dep}="):
             m = re.search(r'version\s*=\s*"([^"]+)"', line)
             return m.group(1) if m else None
     return None
 
 
+def requirement_for(manifest_text, dep):
+    """The version requirement a manifest states for `dep`, or None if it states none.
+
+    Inline `version = "..."` wins. `workspace = true` resolves from root
+    `[workspace.dependencies]` so clause 3 cannot silent-skip realistic inheritance.
+    """
+    for line in manifest_text.splitlines():
+        if line.startswith(f"{dep} ") or line.startswith(f"{dep}="):
+            m = re.search(r'version\s*=\s*"([^"]+)"', line)
+            if m:
+                return m.group(1)
+            if re.search(r"workspace\s*=\s*true", line):
+                return workspace_requirement(dep)
+            return None
+    return None
+
+
 def published_versions(crate):
-    """Versions of `crate` on crates.io, via the sparse index. Raises if it cannot be reached."""
+    """Versions of `crate` on the sparse index. Raises if it cannot be reached."""
     prefix = {1: "1", 2: "2", 3: f"3/{crate[0]}"}.get(len(crate), f"{crate[:2]}/{crate[2:4]}")
-    url = f"https://index.crates.io/{prefix}/{crate}"
+    url = f"{index_base}/{prefix}/{crate}"
     req = urllib.request.Request(url, headers={"User-Agent": "assay-publish-order-check"})
     with urllib.request.urlopen(req, timeout=30) as fh:
         body = fh.read().decode("utf-8")
@@ -128,6 +178,8 @@ for name in order:
             #
             # So the requirement is checked against what is actually published. Unreachable index
             # is a hard failure: "could not check" and "fine" must not be spelled the same way.
+            # Unresolved requirements (including unresolved workspace inheritance) are also hard
+            # failures: they must not silent-skip as green.
             unpublishable.append((name, dep, requirement_for(text, dep)))
             continue
         if position[dep] > position[name]:
@@ -138,6 +190,10 @@ for name in order:
 
 for name, dep, req in unpublishable:
     if req is None:
+        problems.append(
+            f"{name} depends on {dep}, which this script does not publish, and no version "
+            "requirement could be resolved from the crate manifest or [workspace.dependencies]"
+        )
         continue
     try:
         available = published_versions(dep)
@@ -165,6 +221,11 @@ ORDER_CHECK
 }
 
 validate_publish_order
+
+if [[ "$CHECK_ORDER" -eq 1 ]]; then
+  echo "publish order check complete (no publish)."
+  exit 0
+fi
 
 CRATESIO_PUBLISH_WAIT_ATTEMPTS="${CRATESIO_PUBLISH_WAIT_ATTEMPTS:-36}"
 CRATESIO_PUBLISH_WAIT_DELAY_SECONDS="${CRATESIO_PUBLISH_WAIT_DELAY_SECONDS:-10}"
