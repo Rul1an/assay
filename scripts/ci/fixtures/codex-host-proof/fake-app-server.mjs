@@ -24,6 +24,7 @@ function argValue(flag, fallback) {
 }
 
 const scenario = argValue("--scenario", "valid");
+const ackMarker = argValue("--ack-marker", "");
 if (scenario === "close-stdin-then-elicit-exit-0") {
   process.on("SIGTERM", () => {});
 }
@@ -127,7 +128,16 @@ function handle(message) {
   if (!message || typeof message !== "object") {
     return;
   }
-  const { id, method, params } = message;
+  const { id, method, params, result } = message;
+  if (scenario === "exit-1-after-success" && method == null && id === "elicit-1") {
+    if (result?.action !== "accept") {
+      process.exit(4);
+    }
+    if (ackMarker) {
+      fs.writeFileSync(ackMarker, "accept\n");
+    }
+    process.exit(1);
+  }
   if (method === "initialize") {
     const result = {
       userAgent: FAKE_USER_AGENT,
@@ -357,9 +367,6 @@ function handle(message) {
           turn: { id: "turn-1", items: [completedItem], status: "completed" },
         },
       });
-      if (scenario === "exit-1-after-success") {
-        setImmediate(() => process.exit(1));
-      }
     };
     if (scenario === "early-user-then-tool") {
       write({
