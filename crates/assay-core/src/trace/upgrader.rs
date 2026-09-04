@@ -63,8 +63,9 @@ fn apply_truncation(event: &mut TraceEvent) {
     };
     match event {
         TraceEvent::EpisodeStart(e) => {
-            truncate_value_with_provenance(&mut e.input, "input");
-            truncate_value_with_provenance(&mut e.meta, "meta");
+            // Provenance is intentionally discarded here; retaining it is #2787.
+            let _ = truncate_value_with_provenance(&mut e.input, "input");
+            let _ = truncate_value_with_provenance(&mut e.meta, "meta");
         }
         TraceEvent::Step(e) => {
             if let Some(c) = &mut e.content {

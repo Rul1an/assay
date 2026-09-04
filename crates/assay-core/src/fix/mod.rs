@@ -143,7 +143,7 @@ fn parse_ptr(ptr: &str) -> Result<Vec<String>> {
 }
 
 fn unescape_ptr_token(s: &str) -> String {
-    s.replace("~1", "/").replace("~0", "~")
+    crate::json_pointer::unescape_segment(s)
 }
 
 fn is_index_token(tok: &str) -> bool {
@@ -403,7 +403,7 @@ fn take(root: &mut JsonValue, ptr: &str) -> Result<JsonValue> {
 
 #[cfg(test)]
 fn escape_ptr_token(s: &str) -> String {
-    s.replace('~', "~0").replace('/', "~1")
+    crate::json_pointer::escape_segment(s)
 }
 
 #[cfg(test)]
