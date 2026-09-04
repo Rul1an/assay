@@ -122,10 +122,9 @@ pub(crate) fn yaml_ptr<'a>(doc: &'a serde_yaml::Value, ptr: &str) -> Option<&'a 
 }
 
 pub(crate) fn escape_pointer(s: &str) -> String {
-    // JSON Pointer escaping
-    s.replace('~', "~0").replace('/', "~1")
+    crate::json_pointer::escape_segment(s)
 }
 
 pub(crate) fn unescape_pointer(s: &str) -> String {
-    s.replace("~1", "/").replace("~0", "~")
+    crate::json_pointer::unescape_segment(s)
 }
