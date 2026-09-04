@@ -126,37 +126,62 @@ else
   note "  checked $checked root declaration(s)"
 fi
 
-# The same fact declared inside a crate manifest. A declaration that carries no version at all is
-# reported rather than skipped, because a skipped declaration leaves the enumeration silently and
-# a count that no longer includes it still reads as a clean sweep. The exception is
-# `[dev-dependencies]`: cargo strips those from a published manifest, so a path dev-dependency is
-# allowed to omit the version that a published requirement would have to keep current.
+# The same fact declared inside a crate manifest.
+#
+# Two counts, not one. The parser below reads the single-line inline-table shape every declaration
+# in this workspace uses; `declared_paths` counts sibling path dependencies in ANY shape. Comparing
+# them is what makes the enumeration total: a declaration rewritten as a multi-line inline table, a
+# `[dependencies.assay-x]` sub-table, an indented key, or a quoted key falls out of the parser, and
+# without the comparison it would leave the enumeration silently. A denominator that shrinks is
+# exactly how a check goes on passing while covering less, so the shrink itself is the failure.
+#
+# `[dev-dependencies]` is exempt from the versionless leg only: cargo strips those from a published
+# manifest, so a path dev-dependency may omit the version a published requirement has to keep
+# current. A versioned dev declaration is still checked. The flag resets on every section header
+# rather than latching, because a publishable section can follow a dev one -- assay-monitor already
+# puts `[target.'cfg(target_os = "linux")'.dependencies]` after `[dev-dependencies]`.
 crate_checked=0
-while IFS=$'\t' read -r manifest name declared; do
-  crate_checked=$((crate_checked + 1))
-  if [ -z "$declared" ]; then
-    fail "$manifest: $name declares a path dependency with no version"
-  elif [ "$declared" != "$WORKSPACE_VERSION" ]; then
-    fail "$manifest: $name declares version \"$declared\", workspace is \"$WORKSPACE_VERSION\""
+while IFS= read -r manifest; do
+  [ -n "$manifest" ] || continue
+  if [ ! -f "$manifest" ]; then
+    fail "$manifest: tracked crate manifest is missing"
+    continue
   fi
-done < <(
-  while IFS= read -r manifest; do
-    [ -f "$manifest" ] || continue
-    awk -v manifest="$manifest" '
+  declared_paths="$(grep -c 'path *= *"\.\./' "$manifest" || true)"
+  parsed=0
+  rows="$(
+    awk '
+      # The version is emitted LAST because it is the field that can be empty, and a tab IFS
+      # split drops an empty field anywhere but the end.
       /^\[/ { dev = ($0 ~ /dev-dependencies\]$/); next }
       /^[A-Za-z0-9_.-]+ *= *\{/ && /path *= *"\.\.\// {
-        name = $1
+        v = ""
         if (match($0, /version *= *"[^"]+"/)) {
           v = substr($0, RSTART, RLENGTH)
           gsub(/version *= *"|"/, "", v)
-          printf "%s\t%s\t%s\n", manifest, name, v
-        } else if (!dev) {
-          printf "%s\t%s\t\n", manifest, name
         }
+        printf "%s\t%s\t%s\n", $1, dev + 0, v
       }
     ' "$manifest"
-  done < <(git ls-files 'crates/*/Cargo.toml' 'assay-python-sdk/Cargo.toml')
-)
+  )"
+  if [ -n "$rows" ]; then
+    while IFS=$'\t' read -r name is_dev declared; do
+      [ -n "$name" ] || continue
+      parsed=$((parsed + 1))
+      crate_checked=$((crate_checked + 1))
+      if [ -n "$declared" ]; then
+        if [ "$declared" != "$WORKSPACE_VERSION" ]; then
+          fail "$manifest: $name declares version \"$declared\", workspace is \"$WORKSPACE_VERSION\""
+        fi
+      elif [ "$is_dev" != "1" ]; then
+        fail "$manifest: $name declares a path dependency with no version"
+      fi
+    done <<< "$rows"
+  fi
+  if [ "$parsed" -ne "$declared_paths" ]; then
+    fail "$manifest: $declared_paths sibling path dependency line(s) present, $parsed parsed; a declaration is written in a shape this check does not read"
+  fi
+done <<< "$(git ls-files 'crates/*/Cargo.toml' 'assay-python-sdk/Cargo.toml')"
 
 if [ "$crate_checked" -eq 0 ]; then
   fail "no crate-level path dependencies found in tracked crate manifests; the enumeration is broken"

@@ -411,7 +411,7 @@ repos:
         pass_filenames: false
         # Triggers on the files it can be wrong about, plus itself. It does not need a binary: with
         # no `target/` build it still verifies source and published-release truth independently.
-        files: ^(scripts/ci/((check|test-check)-release-surface|read-assay-release-tag|run-release-quickstart-contract|lib/editor-plugin-install-commands|test-editor-release-hook-precommit-consumer)\.sh|scripts/ci/(release_readme|test_release_quickstart)\.py|\.github/assay-release-tag|Cargo\.toml|crates/[^/]+/Cargo\.toml|assay-python-sdk/Cargo\.toml|README\.md|SECURITY\.md|llms\.txt|mkdocs\.yml|examples/mcp-quickstart/README\.md|docs/(COMMUNITY\.md|index\.md|getting-started/(index|installation|quickstart|ci-integration)\.md|reference/cli/index\.md|python-sdk/index\.md|use-cases/(air-gapped|ci-gate)\.md|AIcontext/user-flows\.md|migration-v1\.2\.md|guides/editor-mcp-recipe\.md)|\.devcontainer/welcome\.sh|demo/CODESPACES-PLAYBOOK\.md|\.pre-commit-config\.yaml)$
+        files: ^(scripts/ci/((check|test-check)-release-surface|read-assay-release-tag|run-release-quickstart-contract|lib/editor-plugin-install-commands|test-editor-release-hook-precommit-consumer)\.sh|scripts/ci/(release_readme|test_release_quickstart)\.py|\.github/assay-release-tag|Cargo\.toml|crates/.+/Cargo\.toml|assay-python-sdk/Cargo\.toml|README\.md|SECURITY\.md|llms\.txt|mkdocs\.yml|examples/mcp-quickstart/README\.md|docs/(COMMUNITY\.md|index\.md|getting-started/(index|installation|quickstart|ci-integration)\.md|reference/cli/index\.md|python-sdk/index\.md|use-cases/(air-gapped|ci-gate)\.md|AIcontext/user-flows\.md|migration-v1\.2\.md|guides/editor-mcp-recipe\.md)|\.devcontainer/welcome\.sh|demo/CODESPACES-PLAYBOOK\.md|\.pre-commit-config\.yaml)$
 
 
 

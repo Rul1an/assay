@@ -56,13 +56,23 @@ name = "assay-x"
 version.workspace = true
 TOML
 # A crate that declares its sibling directly rather than through [workspace.dependencies], which
-# is the shape the root-manifest enumeration cannot see.
+# is the shape the root-manifest enumeration cannot see. The versionless [dev-dependencies] entry
+# is a standing negative control: cargo allows it, so the baseline staying green on every run is
+# the assertion that the versionless leg is section-scoped rather than blanket. The publishable
+# section AFTER the dev one exists so the dev flag's reset is load-bearing here, as it is in
+# assay-monitor.
 cat > "$TMP/crates/assay-y/Cargo.toml" <<'TOML'
 [package]
 name = "assay-y"
 version.workspace = true
 
 [dependencies]
+assay-x = { path = "../assay-x", version = "5.2.0" }
+
+[dev-dependencies]
+assay-x = { path = "../assay-x" }
+
+[target.'cfg(unix)'.dependencies]
 assay-x = { path = "../assay-x", version = "5.2.0" }
 TOML
 cat > "$TMP/Cargo.lock" <<'LOCK'
@@ -527,7 +537,7 @@ import sys
 
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
-old = "|crates/[^/]+/Cargo\\.toml"
+old = "|crates/.+/Cargo\\.toml"
 if text.count(old) != 1:
     raise SystemExit(f"expected one crate-manifest selector, found {text.count(old)}")
 path.write_text(text.replace(old, "", 1), encoding="utf-8")
@@ -604,29 +614,12 @@ assay-x = { path = "../assay-x", version = "5.2.0" }
 assay-x = { path = "../assay-x", version = "5.0.0" }
 TOML
 
-# Negative control on the versionless rule, which is section-scoped rather than blanket: cargo
-# strips dev-dependencies from a published manifest, so a path dev-dependency is allowed to omit
-# the version it would otherwise have to keep current. Not a mutation; it must stay green.
-crate_dev_backup="$TMP/crates/assay-y/Cargo.toml.dev-versionless"
-cp "$TMP/crates/assay-y/Cargo.toml" "$crate_dev_backup"
-cat > "$TMP/crates/assay-y/Cargo.toml" <<'TOML'
-[package]
-name = "assay-y"
-version.workspace = true
-
-[dependencies]
-assay-x = { path = "../assay-x", version = "5.2.0" }
-
-[dev-dependencies]
-assay-x = { path = "../assay-x" }
-TOML
-if ! run_check >"$TMP/dev-versionless.out" 2>&1; then
-  cat "$TMP/dev-versionless.out" >&2
-  echo "FAIL: a versionless path dev-dependency must not be reported" >&2
-  exit 1
-fi
-mv "$crate_dev_backup" "$TMP/crates/assay-y/Cargo.toml"
-echo "PASS: versionless path dev-dependency stays green"
+# The dev exemption must not latch. Made versionless in the publishable section that FOLLOWS
+# [dev-dependencies], this is reported only if the flag reset; an implementation that latches
+# `dev` treats the section as exempt and stays green while covering less.
+mutate_and_expect_failure crate-post-dev-section-versionless crates/assay-y/Cargo.toml \
+  '/^\[target/,$ s/, version = "5.2.0" }/ }/' \
+  'crates/assay-y/Cargo.toml: assay-x declares a path dependency with no version'
 
 mutate_and_expect_failure wrong-workspace-binary bin/assay \
   's/assay 5.2.0/assay 5.1.0/' 'workspace is "assay 5.2.0"'
@@ -1042,8 +1035,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 107 ]; then
-  echo "FAIL: expected 107 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 108 ]; then
+  echo "FAIL: expected 108 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"
