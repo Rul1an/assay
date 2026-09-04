@@ -333,6 +333,8 @@ job = jobs.get("default-discovery-sandbox-junction")
 if not isinstance(job, dict):
     raise SystemExit("missing default-discovery-sandbox-junction job")
 reject_if("junction job", job)
+if continue_on_error_truthy(job):
+    raise SystemExit("junction job must not set truthy continue-on-error")
 if job.get("timeout-minutes") in (None, 0):
     raise SystemExit("junction job must set timeout-minutes")
 
@@ -543,6 +545,20 @@ if needle not in text:
 wf.write_text(text.replace(needle, needle + "    if: ${{ false }}\n", 1), encoding="utf-8")
 PY
 expect_red "job-if-false"
+
+# 1b) job-level continue-on-error: true (must refuse; step-level COE rules unchanged)
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "  default-discovery-sandbox-junction:\n"
+if needle not in text:
+    raise SystemExit("junction job needle missing")
+wf.write_text(text.replace(needle, needle + "    continue-on-error: true\n", 1), encoding="utf-8")
+PY
+expect_red "job-continue-on-error-true"
 
 # 2) producer step if: false
 seed_scratch

@@ -91,7 +91,7 @@ jobs:
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `bundles` | Auto-detect | Glob pattern for evidence bundles |
+| `bundles` | Auto-detect | Glob pattern for evidence bundles (explicit value is a shell glob; not recursive unless the pattern includes `**`. Omit for recursive default discovery under the evidence roots.) |
 | `fail_on` | `error` | Fail threshold: `error`, `warn`, `info`, `none` |
 | `sarif` | `true` | Upload to GitHub Security tab |
 | `comment_diff` | `true` | Post PR comment (only if findings) |
@@ -426,7 +426,9 @@ jobs:
         run: assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml --sarif .assay/reports/sarif.json
 
       - name: Export evidence
-        run: assay evidence export --profile assay-profile.yaml --out .assay/evidence/export.tar.gz
+        run: |
+          mkdir -p .assay/evidence
+          assay evidence export --profile assay-profile.yaml --out .assay/evidence/export.tar.gz
 
       - name: Lint with pack
         run: assay evidence lint .assay/evidence/export.tar.gz --pack eu-ai-act-baseline --format sarif > results.sarif
@@ -450,6 +452,13 @@ jobs:
 The action looks for:
 - `.assay/evidence/*.tar.gz`
 - `evidence/*.tar.gz`
+
+**Default discovery vs explicit `bundles`:** when `bundles` is omitted, default
+discovery is recursive under the evidence roots (nested paths such as
+`.assay/evidence/nested/*.tar.gz` are found). An explicit `bundles:` value is a
+shell glob and is **not** automatically recursive unless the pattern says so
+(for example with `**`). A nested default-scan example does not prove that a
+copied non-recursive glob would find nested files.
 
 Generate with the published Action remediation recipe (single source:
 `scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd`):

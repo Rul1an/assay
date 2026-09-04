@@ -1111,6 +1111,117 @@ expect_fail "cicd-starter-monorepo-snippet" "is the monorepo path" "${scratch}/c
 echo "== no-op control after mutations =="
 expect_ok "control-stays-green-after-scratch-mutations" "${CHECKER}"
 
+echo "== outer wiring: action discovery junction (#2778) =="
+# Outer effective-path check lives HERE (pin battery), not inside the removable
+# junction script: pin-battery job/script -> active shell line that executes
+# test-action-discovery-junction.sh -> that script must exist.
+assert_outer_junction_wiring() {
+  python3 - "$1" "$2" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+battery = Path(sys.argv[1])
+junction = Path(sys.argv[2])
+# Construct the relative path so this checker does not embed the full invoke line.
+rel = "scripts/ci/" + "test-action-discovery-junction" + ".sh"
+if not junction.is_file():
+    raise SystemExit(f"missing junction script (outer wiring): expected {rel}")
+text = battery.read_text(encoding="utf-8")
+invoke_re = re.compile(r'^bash\s+"\$\{ROOT\}/' + re.escape(rel) + r'"\s*$')
+found = False
+for raw in text.splitlines():
+    s = raw.strip()
+    if not s or s.startswith("#"):
+        continue
+    if invoke_re.match(s):
+        found = True
+        break
+if not found:
+    raise SystemExit(
+        "missing outer call to test-action-discovery-junction.sh "
+        "(pin-battery must invoke the junction script)"
+    )
+PY
+}
+
+JUNCTION_SCRIPT="${ROOT}/scripts/ci/test-action-discovery-junction.sh"
+BATTERY_SRC="${ROOT}/scripts/ci/test-check-assay-action-pin.sh"
+
+if ! assert_outer_junction_wiring "${BATTERY_SRC}" "${JUNCTION_SCRIPT}"; then
+  exit 1
+fi
+echo "ok    outer-junction-wiring-control"
+
+# RED: comment out the only active outer call (script still present)
+cp "${BATTERY_SRC}" "${scratch}/battery-no-outer-call.sh"
+python3 - "${scratch}/battery-no-outer-call.sh" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+# Exact active invoke line; assignment forms in heredocs do not match strip==invoke.
+invoke = 'bash "${ROOT}/' + 'scripts/ci/test-action-discovery-junction' + '.sh"'
+lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+out = []
+n = 0
+for line in lines:
+    if line.strip() == invoke:
+        out.append("# " + line)
+        n += 1
+    else:
+        out.append(line)
+if n != 1:
+    raise SystemExit(f"expected exactly one outer invoke line to comment, got {n}")
+p.write_text("".join(out), encoding="utf-8")
+PY
+if assert_outer_junction_wiring "${scratch}/battery-no-outer-call.sh" "${JUNCTION_SCRIPT}" \
+    >"${scratch}/outer-no-call.out" 2>"${scratch}/outer-no-call.err"; then
+  echo "FAIL: missing-outer-call stayed green" >&2
+  exit 1
+fi
+if ! grep -Fq "missing outer call to test-action-discovery-junction.sh" "${scratch}/outer-no-call.err"; then
+  echo "FAIL: missing-outer-call did not name removed behavior:" >&2
+  cat "${scratch}/outer-no-call.err" >&2
+  exit 1
+fi
+echo "ok    outer-junction-wiring-missing-call-red"
+
+# RED: delete the junction script (call still present in live battery source)
+mkdir -p "${scratch}/outer-missing-script/scripts/ci"
+if assert_outer_junction_wiring "${BATTERY_SRC}" \
+    "${scratch}/outer-missing-script/scripts/ci/test-action-discovery-junction.sh" \
+    >"${scratch}/outer-no-script.out" 2>"${scratch}/outer-no-script.err"; then
+  echo "FAIL: missing-junction-script stayed green" >&2
+  exit 1
+fi
+if ! grep -Fq "missing junction script" "${scratch}/outer-no-script.err"; then
+  echo "FAIL: missing-junction-script did not name removed behavior:" >&2
+  cat "${scratch}/outer-no-script.err" >&2
+  exit 1
+fi
+echo "ok    outer-junction-wiring-missing-script-red"
+
+# RED: both removed
+if assert_outer_junction_wiring "${scratch}/battery-no-outer-call.sh" \
+    "${scratch}/outer-missing-script/scripts/ci/test-action-discovery-junction.sh" \
+    >"${scratch}/outer-both.out" 2>"${scratch}/outer-both.err"; then
+  echo "FAIL: both-removed outer wiring stayed green" >&2
+  exit 1
+fi
+if ! grep -Eq "missing junction script|missing outer call" "${scratch}/outer-both.err"; then
+  echo "FAIL: both-removed did not name removed behavior:" >&2
+  cat "${scratch}/outer-both.err" >&2
+  exit 1
+fi
+echo "ok    outer-junction-wiring-both-removed-red"
+
+# No-op control after mutations (live paths unchanged)
+if ! assert_outer_junction_wiring "${BATTERY_SRC}" "${JUNCTION_SCRIPT}"; then
+  echo "FAIL: outer wiring no-op control went red" >&2
+  exit 1
+fi
+echo "ok    outer-junction-wiring-noop-control"
+
 echo "== action discovery junction (#2778) =="
 bash "${ROOT}/scripts/ci/test-action-discovery-junction.sh"
 

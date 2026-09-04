@@ -3,8 +3,9 @@
 #
 # One process reads the vendored action.yml once, derives digest and declared
 # inputs from those bytes, validates every owner-listed snippet against them,
-# and --published-compares the same retained action.yml and remediation_recipe.cmd
-# bytes to the live files at the pin.
+# and --published compares those retained action.yml bytes to the live file at
+# the pin. remediation_recipe.cmd is read freshly for the published comparison
+# (not retained from the initial action.yml read).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
