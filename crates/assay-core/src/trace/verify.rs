@@ -27,25 +27,64 @@ pub fn verify_coverage(trace_path: &Path, cfg: &EvalConfig) -> anyhow::Result<()
         }
     }
 
-    let mut missing = Vec::new();
+    let mut missing: Vec<String> = Vec::new();
+    let mut truncated_shape: Vec<String> = Vec::new();
 
     for tc in &cfg.tests {
-        if !trace_prompts.contains(&tc.input.prompt) {
-            // Heuristic: check if ID match exists, might be a prompt mismatch warning
+        if trace_prompts.contains(&tc.input.prompt) {
+            continue;
+        }
+
+        let mut expected_truncated = tc.input.prompt.clone();
+        if super::truncation::truncate_string(&mut expected_truncated, "prompt").is_some()
+            && trace_prompts.contains(&expected_truncated)
+        {
+            truncated_shape.push(tc.id.clone());
+        } else {
             missing.push(tc.id.clone());
         }
     }
 
-    if !missing.is_empty() {
-        // Pretty print missing
-        eprintln!(
-            "❌ Trace Verification Failed: {} tests missing matching prompt in trace.",
-            missing.len()
+    if !missing.is_empty() || !truncated_shape.is_empty() {
+        let total_unresolved = missing.len() + truncated_shape.len();
+        let mut report = format!(
+            "❌ Trace Verification Failed ({} unresolved test{}):\n",
+            total_unresolved,
+            if total_unresolved == 1 { "" } else { "s" }
         );
-        for id in missing {
-            eprintln!("   - {}", id);
+
+        if !missing.is_empty() {
+            let count_desc = if missing.len() == 1 {
+                "1 test".to_string()
+            } else {
+                format!("{} tests", missing.len())
+            };
+            report.push_str(&format!(
+                "  • {} missing matching prompt in trace:\n",
+                count_desc
+            ));
+            for id in &missing {
+                report.push_str(&format!("     - {}\n", id));
+            }
         }
-        anyhow::bail!("Trace coverage check failed");
+
+        if !truncated_shape.is_empty() {
+            let count_desc = if truncated_shape.len() == 1 {
+                "1 test".to_string()
+            } else {
+                format!("{} tests", truncated_shape.len())
+            };
+            report.push_str(&format!(
+                "  • {} matches stage-local truncation shape (exact prompt coverage cannot be established):\n",
+                count_desc
+            ));
+            for id in &truncated_shape {
+                report.push_str(&format!("     - {}\n", id));
+            }
+        }
+
+        eprint!("{}", report);
+        anyhow::bail!("{}", report.trim_end());
     }
 
     println!(
