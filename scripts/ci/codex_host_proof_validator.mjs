@@ -463,7 +463,6 @@ export const EXPECTED_ELICITATION = Object.freeze({
     `Allow the assay MCP server to run tool "${DECIDE_TOOL}"?`,
     `approve ${DECIDE_TOOL}`,
   ]),
-  message: `Allow the assay MCP server to run tool "${DECIDE_TOOL}"?`,
   requestedSchema: Object.freeze({
     type: "object",
     properties: Object.freeze({}),
@@ -1652,6 +1651,11 @@ function classifyInvocation(calls, expected, threadId, turnId, topology) {
   }
   const call = calls[0];
   const item = call.item;
+  // NON-CLAIM: the fake app-server populates turn.items with the completed tool item, so this
+  // requirement is exercised only against the fixture. The one real 0.153.1 capture available was
+  // a failed run whose turn/completed carried no mcpToolCall, so whether a SUCCESSFUL host turn
+  // populates turn.items is unmeasured. If it does not, this cell fails on the real host and that
+  // is a host-behaviour finding, not a defect in this check.
   const terminalItems = terminal.params.turn.items.filter(
     (candidate) => candidate?.type === "mcpToolCall",
   );
@@ -1957,6 +1961,18 @@ function projectedScalar(value) {
   return isJsonScalar(value) ? value : invalidProjection(value);
 }
 
+// Host-supplied free text is recorded as presence, never as content. These fields have no
+// evidentiary consumer -- no classification cell reads their value -- so retaining the value only
+// creates a way for host secrets to reach the proof bytes. The type check is unchanged: a wrong
+// type still yields invalidProjection and still fails closed, which is what the schema alignment
+// needs. scrub() is deliberately not used here: it is a keyword regex and cannot bound arbitrary
+// secret text, so it would license exactly the leak it appears to prevent.
+const PRESENT = "[present]";
+
+function projectedPresence(value) {
+  return typeof value === "string" ? PRESENT : invalidProjection(value);
+}
+
 function projectDecisionObject(value) {
   if (!isPlainObject(value)) {
     return invalidProjection(value);
@@ -2215,7 +2231,7 @@ function projectAppContext(value) {
   }
   const out = {};
   if (typeof value.connectorId === "string" && value.connectorId.length > 0) {
-    out.connectorId = projectedScalar(value.connectorId);
+    out.connectorId = PRESENT;
   } else {
     out.connectorId = invalidProjection(value.connectorId);
   }
@@ -2224,7 +2240,7 @@ function projectAppContext(value) {
       value.actionName == null
         ? null
         : typeof value.actionName === "string"
-          ? projectedScalar(value.actionName)
+          ? PRESENT
           : invalidProjection(value.actionName);
   }
   if (hasOwn(value, "appName")) {
@@ -2232,7 +2248,7 @@ function projectAppContext(value) {
       value.appName == null
         ? null
         : typeof value.appName === "string"
-          ? projectedScalar(value.appName)
+          ? PRESENT
           : invalidProjection(value.appName);
   }
   if (hasOwn(value, "linkId")) {
@@ -2240,7 +2256,7 @@ function projectAppContext(value) {
       value.linkId == null
         ? null
         : typeof value.linkId === "string"
-          ? projectedScalar(value.linkId)
+          ? PRESENT
           : invalidProjection(value.linkId);
   }
   if (hasOwn(value, "resourceUri")) {
@@ -2248,7 +2264,7 @@ function projectAppContext(value) {
       value.resourceUri == null
         ? null
         : typeof value.resourceUri === "string"
-          ? projectedScalar(value.resourceUri)
+          ? PRESENT
           : invalidProjection(value.resourceUri);
   }
   return withUnexpectedKeys(out, value, [
@@ -2269,7 +2285,7 @@ function projectMcpToolCallError(value) {
   }
   const out = {};
   if (typeof value.message === "string") {
-    out.message = projectedScalar(scrub(value.message));
+    out.message = PRESENT;
   } else {
     out.message = invalidProjection(value.message);
   }
@@ -2324,7 +2340,7 @@ function projectRetainedItem(item) {
       item.pluginId == null
         ? null
         : typeof item.pluginId === "string"
-          ? projectedScalar(item.pluginId)
+          ? PRESENT
           : invalidProjection(item.pluginId);
   }
   if (hasOwn(item, "mcpAppResourceUri")) {
@@ -2332,7 +2348,7 @@ function projectRetainedItem(item) {
       item.mcpAppResourceUri == null
         ? null
         : typeof item.mcpAppResourceUri === "string"
-          ? projectedScalar(item.mcpAppResourceUri)
+          ? PRESENT
           : invalidProjection(item.mcpAppResourceUri);
   }
   if (hasOwn(item, "appContext")) {

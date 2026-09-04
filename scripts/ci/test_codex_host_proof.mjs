@@ -4867,7 +4867,7 @@ test("non-finite numbers never silently become JSON null at either boundary", ()
   assert.equal(stableStringify([0, -1.5]), '[0,-1.5]\n');
 });
 
-test("commandExecution projects to closed type and id only; sensitive fields are scrubbed", () => {
+test("commandExecution projects to closed type and id only; sensitive fields are dropped, not scrubbed", () => {
   const rawItem = OBSERVED_NON_EVIDENTIARY_ITEMS.find((item) => item.type === "commandExecution");
   assert.ok(rawItem, "fixture must contain commandExecution");
   const projected = projectRetainedEvent({
@@ -4909,7 +4909,7 @@ test("commandExecution projects to closed type and id only; sensitive fields are
   );
 });
 
-test("Codex 0.153.1 mcpToolCall schema fields project cleanly; unexpected keys and credentials fail closed", () => {
+test("Codex 0.153.1 mcpToolCall schema fields type-check; free text is recorded as presence and unexpected keys are marked", () => {
   const rawToolCall = {
     type: "mcpToolCall",
     id: "tool-1",
@@ -4950,17 +4950,17 @@ test("Codex 0.153.1 mcpToolCall schema fields project cleanly; unexpected keys a
   assert.equal(Object.hasOwn(projectedItem, "__unexpectedKeys"), false);
   assert.equal(projectedItem.durationMs, 120);
   assert.equal(projectedItem.readOnlyHint, true);
-  assert.equal(projectedItem.pluginId, "plugin-assay");
-  assert.equal(projectedItem.mcpAppResourceUri, "resource://assay");
+  assert.equal(projectedItem.pluginId, "[present]");
+  assert.equal(projectedItem.mcpAppResourceUri, "[present]");
   assert.deepEqual(projectedItem.appContext, {
-    connectorId: "connector-1",
-    linkId: "link-1",
-    resourceUri: "uri://assay-policy",
+    connectorId: "[present]",
+    linkId: "[present]",
+    resourceUri: "[present]",
   });
   assert.equal(
     projectedItem.error.message,
-    "[redacted]",
-    "credential in error message must be scrubbed",
+    "[present]",
+    "error message must record presence, not content: scrub() is a keyword regex and cannot bound arbitrary secret text",
   );
 
   const unexpectedKeyCall = structuredClone(rawToolCall);
@@ -5113,5 +5113,101 @@ test("mcpToolCall with non-null error fails oneToolInvoked even if status claims
   assert.equal(
     classified.cells.structuredResultValidated.status,
     "unavailable",
+  );
+});
+
+test("F1: retained mcpToolCall metadata records presence, never host-supplied content", () => {
+  // The producer of retained bytes must not write free-text host metadata verbatim. These fields
+  // have no evidentiary consumer: no classification cell reads their content. Retaining presence
+  // preserves every check that does exist while removing the only reason secrets can land in the
+  // proof. scrub() is a keyword regex and cannot bound arbitrary secret text, so error.message is
+  // held to the same rule rather than scrubbed.
+  const secrets = {
+    connectorId: "conn-alice@corp.example",
+    actionName: "read /Users/alice/Documents/salary.xlsx",
+    appName: "Private App",
+    linkId: "https://example.invalid/cb?access_token=eyJhbGciOi.J9.sig",
+    resourceUri: "https://example.invalid/r?bearer=eyJhbGciOi.J9.sig",
+  };
+  const projected = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5000,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: {
+        type: "mcpToolCall",
+        id: "tool-1",
+        server: "assay",
+        tool: "assay_policy_decide",
+        status: "completed",
+        arguments: { tool: "install_surface_allowed_probe" },
+        pluginId: "/Users/alice/.config/plugins/private-plugin",
+        mcpAppResourceUri: "https://example.invalid/a?bearer=eyJhbGciOi.J9.sig",
+        appContext: secrets,
+        error: { message: "failed reading /Users/alice/Documents/salary.xlsx as alice@corp.example" },
+        result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+      },
+    },
+  });
+  const blob = JSON.stringify(projected);
+  for (const leaked of [
+    ...Object.values(secrets),
+    "/Users/alice/.config/plugins/private-plugin",
+    "https://example.invalid/a?bearer=eyJhbGciOi.J9.sig",
+    "/Users/alice/Documents/salary.xlsx",
+    "alice@corp.example",
+  ]) {
+    assert.equal(
+      blob.includes(leaked),
+      false,
+      `retained projection must not contain host-supplied content: ${leaked}`,
+    );
+  }
+  // Presence is still recorded, so the cells that count fields keep working.
+  const item = projected.params.item;
+  assert.equal(item.pluginId, "[present]");
+  assert.equal(item.mcpAppResourceUri, "[present]");
+  assert.deepEqual(item.appContext, {
+    connectorId: "[present]",
+    actionName: "[present]",
+    appName: "[present]",
+    linkId: "[present]",
+    resourceUri: "[present]",
+  });
+  assert.deepEqual(item.error, { message: "[present]" });
+});
+
+test("F2: a marked unexpected key is refused by the consumer, not merely marked", () => {
+  // Marking the key in the projection is not refusal. classifyRecord is the consumer that decides
+  // the nine cells; it must reject. Deleting the allowedKeys loop leaves the projection marking
+  // intact, so only a consumer-level assertion kills that deletion.
+  const projected = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5000,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: {
+        type: "mcpToolCall",
+        id: "tool-1",
+        server: "assay",
+        tool: "assay_policy_decide",
+        status: "completed",
+        arguments: { tool: "install_surface_allowed_probe" },
+        unknownHostMetadata: "leak-me",
+        result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+      },
+    },
+  });
+  assert.deepEqual(projected.params.item.__unexpectedKeys, ["unknownHostMetadata"]);
+  assert.equal(
+    classifyStoredEvent(projected).type,
+    "unclassified",
+    "an item carrying an unexpected key must be refused by the consumer",
   );
 });
