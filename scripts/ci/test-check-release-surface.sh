@@ -10,8 +10,8 @@ trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/scripts/ci/lib" "$TMP/.github" "$TMP/docs/getting-started" "$TMP/docs/reference/cli" \
   "$TMP/docs/python-sdk" "$TMP/docs/use-cases" "$TMP/docs/AIcontext" "$TMP/docs/guides" \
-  "$TMP/examples/mcp-quickstart" "$TMP/crates/assay-x" "$TMP/bin" "$TMP/.devcontainer" \
-  "$TMP/demo"
+  "$TMP/examples/mcp-quickstart" "$TMP/crates/assay-x" "$TMP/crates/assay-y" "$TMP/bin" \
+  "$TMP/.devcontainer" "$TMP/demo"
 cp "$ROOT/scripts/ci/check-release-surface.sh" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/release_readme.py" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/read-assay-release-tag.sh" "$TMP/scripts/ci/"
@@ -44,7 +44,7 @@ extra:
 YAML
 cat > "$TMP/Cargo.toml" <<'TOML'
 [workspace]
-members = ["crates/assay-x"]
+members = ["crates/assay-x", "crates/assay-y"]
 [workspace.package]
 version = "5.2.0"
 [workspace.dependencies]
@@ -54,6 +54,16 @@ cat > "$TMP/crates/assay-x/Cargo.toml" <<'TOML'
 [package]
 name = "assay-x"
 version.workspace = true
+TOML
+# A crate that declares its sibling directly rather than through [workspace.dependencies], which
+# is the shape the root-manifest enumeration cannot see.
+cat > "$TMP/crates/assay-y/Cargo.toml" <<'TOML'
+[package]
+name = "assay-y"
+version.workspace = true
+
+[dependencies]
+assay-x = { path = "../assay-x", version = "5.2.0" }
 TOML
 cat > "$TMP/Cargo.lock" <<'LOCK'
 [[package]]
@@ -207,6 +217,8 @@ for path in (
     "scripts/ci/lib/editor-plugin-install-commands.sh",
     "docs/guides/editor-mcp-recipe.md",
     "scripts/ci/test-editor-release-hook-precommit-consumer.sh",
+    "crates/assay-core/Cargo.toml",
+    "assay-python-sdk/Cargo.toml",
 ):
     if not pattern.search(path):
         raise SystemExit(f"release-surface hook omits {path}")
@@ -507,6 +519,28 @@ mv "$selector_backup" "$TMP/.pre-commit-config.yaml"
 mutation_count=$((mutation_count + 1))
 echo "PASS: release-surface selector covers ci-gate"
 
+selector_backup="$TMP/.pre-commit-config.yaml.crate-manifest-selector"
+cp "$TMP/.pre-commit-config.yaml" "$selector_backup"
+python3 - "$TMP/.pre-commit-config.yaml" <<'PYSEL'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = "|crates/[^/]+/Cargo\\.toml"
+if text.count(old) != 1:
+    raise SystemExit(f"expected one crate-manifest selector, found {text.count(old)}")
+path.write_text(text.replace(old, "", 1), encoding="utf-8")
+PYSEL
+if check_release_hook_selector >"$TMP/crate-manifest-selector.out" 2>&1; then
+  echo "FAIL: release-surface crate-manifest selector mutation was not observed" >&2
+  exit 1
+fi
+grep -Fq 'release-surface hook omits crates/assay-core/Cargo.toml' "$TMP/crate-manifest-selector.out"
+mv "$selector_backup" "$TMP/.pre-commit-config.yaml"
+mutation_count=$((mutation_count + 1))
+echo "PASS: release-surface selector covers crate manifests"
+
 selector_backup="$TMP/.pre-commit-config.yaml.mkdocs-selector"
 cp "$TMP/.pre-commit-config.yaml" "$selector_backup"
 python3 - "$TMP/.pre-commit-config.yaml" <<'PY'
@@ -542,6 +576,57 @@ for row in \
     's/assay-cli --version 5.1.0/assay-cli --version 5.0.0/g' \
     'current release-pinned install command(s)'
 done
+
+# Crate-level path dependencies. These never appear in [workspace.dependencies], so the
+# root-manifest enumeration alone reports a clean sweep while they sit a release behind.
+mutate_and_expect_failure crate-path-dep-stale crates/assay-y/Cargo.toml \
+  's/version = "5.2.0"/version = "5.1.0"/' \
+  'crates/assay-y/Cargo.toml: assay-x declares version "5.1.0", workspace is "5.2.0"'
+mutate_and_expect_failure crate-path-dep-ahead crates/assay-y/Cargo.toml \
+  's/version = "5.2.0"/version = "5.3.0"/' \
+  'crates/assay-y/Cargo.toml: assay-x declares version "5.3.0", workspace is "5.2.0"'
+mutate_and_expect_failure crate-path-dep-versionless crates/assay-y/Cargo.toml \
+  's/, version = "5.2.0" }/ }/' \
+  'crates/assay-y/Cargo.toml: assay-x declares a path dependency with no version'
+mutate_and_expect_failure crate-path-dep-enumeration-broken crates/assay-y/Cargo.toml \
+  '/^assay-x = { path = "..\/assay-x"/d' \
+  'no crate-level path dependencies found in tracked crate manifests; the enumeration is broken'
+rewrite_and_expect_failure crate-dev-path-dep-stale crates/assay-y/Cargo.toml \
+  'crates/assay-y/Cargo.toml: assay-x declares version "5.0.0", workspace is "5.2.0"' <<'TOML'
+[package]
+name = "assay-y"
+version.workspace = true
+
+[dependencies]
+assay-x = { path = "../assay-x", version = "5.2.0" }
+
+[dev-dependencies]
+assay-x = { path = "../assay-x", version = "5.0.0" }
+TOML
+
+# Negative control on the versionless rule, which is section-scoped rather than blanket: cargo
+# strips dev-dependencies from a published manifest, so a path dev-dependency is allowed to omit
+# the version it would otherwise have to keep current. Not a mutation; it must stay green.
+crate_dev_backup="$TMP/crates/assay-y/Cargo.toml.dev-versionless"
+cp "$TMP/crates/assay-y/Cargo.toml" "$crate_dev_backup"
+cat > "$TMP/crates/assay-y/Cargo.toml" <<'TOML'
+[package]
+name = "assay-y"
+version.workspace = true
+
+[dependencies]
+assay-x = { path = "../assay-x", version = "5.2.0" }
+
+[dev-dependencies]
+assay-x = { path = "../assay-x" }
+TOML
+if ! run_check >"$TMP/dev-versionless.out" 2>&1; then
+  cat "$TMP/dev-versionless.out" >&2
+  echo "FAIL: a versionless path dev-dependency must not be reported" >&2
+  exit 1
+fi
+mv "$crate_dev_backup" "$TMP/crates/assay-y/Cargo.toml"
+echo "PASS: versionless path dev-dependency stays green"
 
 mutate_and_expect_failure wrong-workspace-binary bin/assay \
   's/assay 5.2.0/assay 5.1.0/' 'workspace is "assay 5.2.0"'
@@ -957,8 +1042,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 101 ]; then
-  echo "FAIL: expected 101 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 107 ]; then
+  echo "FAIL: expected 107 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

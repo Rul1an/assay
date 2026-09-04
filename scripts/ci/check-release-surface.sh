@@ -21,8 +21,13 @@
 # A repo-wide "no old versions" check flags exactly those, gets suppressed, and then catches
 # nothing. So this script checks only facts it can DERIVE, and never scans for version-shaped text:
 #
-#   1. Internal dependency declarations. Enumerated from the root Cargo.toml itself, not from a
-#      list kept here, so a new workspace crate is covered the day it is added.
+#   1. Internal dependency declarations, at both sites they occur. The root Cargo.toml
+#      `[workspace.dependencies]` table is enumerated from the manifest itself, and the crate
+#      manifests are enumerated from `git ls-files`, not from a list kept here, so a new workspace
+#      crate is covered the day it is added. The crate-level site is the one that was missed: a
+#      sibling declared directly as `{ path = "../assay-x", version = "..." }` never reaches the
+#      root table, so enumerating only the root table reported a clean sweep over nine declarations
+#      it had never looked at, and both release-line bumps updated them by hand.
 #   2. The source binary against the workspace version, and the installation guide against the
 #      validated published-release pin. A release-prep branch may legitimately make them differ.
 #   3. Every tracked `Cargo.lock` that pins a workspace crate. The root lock is the obvious one and
@@ -118,7 +123,45 @@ done < <(
 if [ "$checked" -eq 0 ]; then
   fail "no internal path dependencies found in [workspace.dependencies]; the enumeration is broken"
 else
-  note "  checked $checked declaration(s)"
+  note "  checked $checked root declaration(s)"
+fi
+
+# The same fact declared inside a crate manifest. A declaration that carries no version at all is
+# reported rather than skipped, because a skipped declaration leaves the enumeration silently and
+# a count that no longer includes it still reads as a clean sweep. The exception is
+# `[dev-dependencies]`: cargo strips those from a published manifest, so a path dev-dependency is
+# allowed to omit the version that a published requirement would have to keep current.
+crate_checked=0
+while IFS=$'\t' read -r manifest name declared; do
+  crate_checked=$((crate_checked + 1))
+  if [ -z "$declared" ]; then
+    fail "$manifest: $name declares a path dependency with no version"
+  elif [ "$declared" != "$WORKSPACE_VERSION" ]; then
+    fail "$manifest: $name declares version \"$declared\", workspace is \"$WORKSPACE_VERSION\""
+  fi
+done < <(
+  while IFS= read -r manifest; do
+    [ -f "$manifest" ] || continue
+    awk -v manifest="$manifest" '
+      /^\[/ { dev = ($0 ~ /dev-dependencies\]$/); next }
+      /^[A-Za-z0-9_.-]+ *= *\{/ && /path *= *"\.\.\// {
+        name = $1
+        if (match($0, /version *= *"[^"]+"/)) {
+          v = substr($0, RSTART, RLENGTH)
+          gsub(/version *= *"|"/, "", v)
+          printf "%s\t%s\t%s\n", manifest, name, v
+        } else if (!dev) {
+          printf "%s\t%s\t\n", manifest, name
+        }
+      }
+    ' "$manifest"
+  done < <(git ls-files 'crates/*/Cargo.toml' 'assay-python-sdk/Cargo.toml')
+)
+
+if [ "$crate_checked" -eq 0 ]; then
+  fail "no crate-level path dependencies found in tracked crate manifests; the enumeration is broken"
+else
+  note "  checked $crate_checked crate-level declaration(s)"
 fi
 
 # ---------------------------------------------------------------------------
