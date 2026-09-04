@@ -488,6 +488,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - name: Verify public crate contract is consistent
         run: bash scripts/ci/check-public-crate-policy.sh
+      - name: Publish-order check mutations
+        run: bash scripts/ci/test-publish-idempotent-check-order.sh
+      - name: Verify publish order (check-only)
+        run: bash scripts/ci/publish_idempotent.sh --check-order
 
   vendored-packs:
     name: Vendored Pack Sync
