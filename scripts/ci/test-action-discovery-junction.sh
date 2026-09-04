@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 # #2778: pin + published nested sandbox recipe + required default-discovery journey.
 # Recipe source: scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd
+# Producer: scripts/ci/produce-default-discovery-sandbox-evidence.sh (owned; workflow invokes exactly)
 # Pin authority: scripts/ci/read-assay-action-pin.sh (no second hardcoded peel).
+# Mutations run only under mktemp; caller workflow/script bytes stay unchanged.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 FIXTURE="${ROOT}/scripts/ci/fixtures/assay-action-pin/action.yml"
 PROVENANCE="${ROOT}/scripts/ci/fixtures/assay-action-pin/PROVENANCE"
 RECIPE="${ROOT}/scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd"
-WORKFLOW="${ROOT}/.github/workflows/action-v2-test.yml"
+WORKFLOW="${ASSAY_JUNCTION_WORKFLOW:-${ROOT}/.github/workflows/action-v2-test.yml}"
+PRODUCER_SH="${ASSAY_JUNCTION_PRODUCER:-${ROOT}/scripts/ci/produce-default-discovery-sandbox-evidence.sh}"
 DOC="${ROOT}/docs/guides/github-action.md"
 READER="${ROOT}/scripts/ci/read-assay-action-pin.sh"
+
+EXPECTED_PRODUCER_RUN='bash scripts/ci/produce-default-discovery-sandbox-evidence.sh'
 
 die() { echo "action-discovery-junction: $*" >&2; exit 1; }
 ok() { echo "ok    $*"; }
@@ -43,12 +48,17 @@ if grep -Fq -- "--out evidence.tar.gz" "${DOC}"; then
   die "docs still export to evidence.tar.gz outside Action discovery roots"
 fi
 
-python3 - "${WORKFLOW}" "${PIN}" <<'PY'
-import json, subprocess, sys
+[[ -f "${PRODUCER_SH}" ]] || die "missing owned producer ${PRODUCER_SH}"
+[[ -x "${PRODUCER_SH}" ]] || die "owned producer must be executable: ${PRODUCER_SH}"
+
+python3 - "${WORKFLOW}" "${PIN}" "${PRODUCER_SH}" "${EXPECTED_PRODUCER_RUN}" <<'PY'
+import json, re, subprocess, sys
 from pathlib import Path
 
 wf_path = Path(sys.argv[1])
 pin = sys.argv[2]
+producer_sh = Path(sys.argv[3])
+expected_producer_run = sys.argv[4]
 text = wf_path.read_text(encoding="utf-8")
 
 RUBY = r'''
@@ -79,14 +89,59 @@ def step_name(step: dict) -> str:
     name = step.get("name")
     return name.strip() if isinstance(name, str) else ""
 
-def reject_if(label: str, step: dict) -> None:
-    if "if" in step:
+def continue_on_error_truthy(step: dict) -> bool:
+    """True for boolean true and expression/string forms YAML may yield as str."""
+    v = step.get("continue-on-error")
+    if v is True:
+        return True
+    if v is False or v is None:
+        return False
+    if isinstance(v, (int, float)) and v != 0:
+        return True
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in ("", "false", "0", "no"):
+            return False
+        # "true", "yes", "1", or any ${{ ... }} expression — treat as enabling continue
+        return True
+    return False
+
+def reject_if(label: str, node: dict) -> None:
+    if "if" in node:
         raise SystemExit(f"{label} must not set if: (skippable false-green)")
 
 def reject_skippable(label: str, step: dict) -> None:
     reject_if(label, step)
-    if step.get("continue-on-error") is True:
-        raise SystemExit(f"{label} must not set continue-on-error: true")
+    if continue_on_error_truthy(step):
+        raise SystemExit(f"{label} must not set truthy continue-on-error")
+
+def active_shell_lines(src: str) -> list[str]:
+    out = []
+    for line in src.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        out.append(s)
+    return out
+
+def normalize_run(run: str) -> str:
+    # Exact body contract: strip one trailing newline for compare stability.
+    return run.replace("\r\n", "\n").rstrip("\n")
+
+# --- owned producer: active invocation, not substring-in-comments ---
+producer_text = producer_sh.read_text(encoding="utf-8")
+active = active_shell_lines(producer_text)
+recipe_invokes = [
+    ln for ln in active
+    if ln.startswith("bash -c") and "remediation_recipe.cmd" in ln
+]
+if len(recipe_invokes) != 1:
+    raise SystemExit(
+        "owned producer must have exactly one active bash -c remediation_recipe.cmd invoke "
+        f"(found {len(recipe_invokes)}; comments do not count)"
+    )
+if not any(ln.startswith("test -f") and "nested/sandbox.tar.gz" in ln for ln in active):
+    raise SystemExit("owned producer must actively test nested/sandbox.tar.gz exists")
 
 data = load_yaml(text)
 jobs = data.get("jobs")
@@ -98,8 +153,10 @@ for sibling in ("test-no-bundles", "required-no-bundles-fails", "corrupt-bundle-
         raise SystemExit(f"missing DoD sibling job {sibling}")
 
 # optional + absent soft path
+nb_job = jobs["test-no-bundles"]
+reject_if("test-no-bundles job", nb_job)
 nb_uses = [
-    s for s in (jobs["test-no-bundles"].get("steps") or [])
+    s for s in (nb_job.get("steps") or [])
     if isinstance(s, dict) and isinstance(s.get("uses"), str) and "assay-action@" in s["uses"]
 ]
 if len(nb_uses) != 1:
@@ -110,8 +167,47 @@ with_nb = nb_uses[0].get("with") or {}
 if isinstance(with_nb, dict) and with_nb.get("evidence_mode") == "required":
     raise SystemExit("test-no-bundles must remain optional/default (absent soft path)")
 
-def require_required_fail_job(job_name: str, action_name_substr: str, assert_name: str) -> None:
+OUTCOME_COMPARE = re.compile(
+    r"""\[\s*"\$\{(?P<var>[A-Za-z_][A-Za-z0-9_]*)\}"\s*(?:!=|=|==)\s*"failure"\s*\]"""
+)
+
+def require_failure_outcome_binding(job_name: str, action: dict, assertion: dict) -> None:
+    aid = action.get("id")
+    if not isinstance(aid, str) or not aid.strip():
+        raise SystemExit(f"{job_name} Action step must set id: for outcome binding")
+    env = assertion.get("env")
+    if not isinstance(env, dict):
+        raise SystemExit(f"{job_name} assertion must set env: outcome binding")
+    expected = f"${{{{ steps.{aid}.outcome }}}}"
+    bound_vars = [
+        k for k, v in env.items()
+        if isinstance(k, str) and isinstance(v, str) and v.strip() == expected
+    ]
+    if not bound_vars:
+        raise SystemExit(
+            f"{job_name} assertion must bind an env var to exactly {expected} "
+            "(word presence of outcome/failure is not enough)"
+        )
+    run = assertion.get("run")
+    if not isinstance(run, str):
+        raise SystemExit(f"{job_name} assertion must have run:")
+    matched = False
+    for var in bound_vars:
+        for m in OUTCOME_COMPARE.finditer(run):
+            if m.group("var") == var:
+                matched = True
+                break
+        if matched:
+            break
+    if not matched:
+        raise SystemExit(
+            f"{job_name} assertion run must compare the bound outcome env var to "
+            '"failure" (e.g. [ "${STEP_OUTCOME}" != "failure" ])'
+        )
+
+def require_required_fail_job(job_name: str, assert_name: str) -> None:
     job = jobs[job_name]
+    reject_if(f"{job_name} job", job)
     if job.get("timeout-minutes") in (None, 0):
         raise SystemExit(f"{job_name} must set timeout-minutes")
     action = assertion = None
@@ -135,21 +231,22 @@ def require_required_fail_job(job_name: str, action_name_substr: str, assert_nam
     if assertion is None or not isinstance(assertion.get("run"), str):
         raise SystemExit(f"{job_name} missing assertion run")
     reject_if(f"{job_name} action", action)
-    if action.get("continue-on-error") is not True:
-        raise SystemExit(f"{job_name} Action step must continue-on-error to reach assertion")
+    if not continue_on_error_truthy(action):
+        raise SystemExit(
+            f"{job_name} Action step must set truthy continue-on-error "
+            "(boolean true or string/expression) so the assertion runs"
+        )
     reject_skippable(f"{job_name} assertion", assertion)
-    joined = assertion["run"]
-    if "outcome" not in joined and "failure" not in joined:
-        raise SystemExit(f"{job_name} assertion must check failure/outcome")
+    require_failure_outcome_binding(job_name, action, assertion)
 
 require_required_fail_job(
     "required-no-bundles-fails",
-    "assay-action",
     "Assert required mode fails without bundles",
 )
 
 # corrupt job
 cj = jobs["corrupt-bundle-refused"]
+reject_if("corrupt-bundle-refused job", cj)
 if cj.get("timeout-minutes") in (None, 0):
     raise SystemExit("corrupt-bundle-refused must set timeout-minutes")
 plant = action = assertion = None
@@ -178,15 +275,15 @@ if assertion is None or not isinstance(assertion.get("run"), str):
     raise SystemExit("corrupt-bundle-refused missing assertion")
 reject_skippable("corrupt plant", plant)
 reject_if("corrupt action", action)
-if action.get("continue-on-error") is not True:
-    raise SystemExit("corrupt Action step must continue-on-error to reach assertion")
+if not continue_on_error_truthy(action):
+    raise SystemExit("corrupt Action step must set truthy continue-on-error")
 reject_skippable("corrupt assertion", assertion)
-if "outcome" not in assertion["run"] and "failure" not in assertion["run"]:
-    raise SystemExit("corrupt assertion must check failure/outcome")
+require_failure_outcome_binding("corrupt-bundle-refused", action, assertion)
 
 job = jobs.get("default-discovery-sandbox-junction")
 if not isinstance(job, dict):
     raise SystemExit("missing default-discovery-sandbox-junction job")
+reject_if("junction job", job)
 if job.get("timeout-minutes") in (None, 0):
     raise SystemExit("junction job must set timeout-minutes")
 
@@ -209,10 +306,13 @@ for label, step in (("producer", producer), ("review", review), ("assertion", as
     reject_skippable(f"junction {label}", step)
 
 run = producer.get("run")
-if not isinstance(run, str) or "scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd" not in run:
-    raise SystemExit("producer must invoke remediation_recipe.cmd via fixture path")
-if "cp tests/fixtures/evidence/" in run:
-    raise SystemExit("producer must not copy fixture evidence")
+if not isinstance(run, str):
+    raise SystemExit("producer must have run:")
+if normalize_run(run) != expected_producer_run:
+    raise SystemExit(
+        "producer run body must be exactly the owned-script invoke "
+        f"{expected_producer_run!r} (got {normalize_run(run)!r})"
+    )
 
 if review.get("uses") != f"Rul1an/assay-action@{pin}":
     raise SystemExit(f"review uses must be Rul1an/assay-action@{pin}")
@@ -239,28 +339,70 @@ if "nested/sandbox.tar.gz" not in arun:
 
 print("ok    junction-job-parsed-contract")
 print("ok    sibling-dod-cells")
+print("ok    owned-producer-active-invoke")
 PY
 
 ok "pin-recipe-doc-workflow-junction"
-
-run_contract_only() {
-  # Re-enter this script's checks without mutation section by stopping early:
-  # invoke via bash -c extracting is hard; instead duplicate call pattern:
-  ASSAY_JUNCTION_MUTATIONS=0 bash "$0" --contract-only
-}
 
 if [[ "${1:-}" == "--contract-only" ]]; then
   echo "action discovery junction contract: PASS"
   exit 0
 fi
 
-# --- Retained mutations (must RED) ---
-backup="$(mktemp)"
-cp "${WORKFLOW}" "${backup}"
-cleanup() { cp "${backup}" "${WORKFLOW}"; rm -f "${backup}"; }
-trap cleanup EXIT
+# --- Retained mutations (must RED); all under mktemp — caller bytes untouched ---
+SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/2778-junction.XXXXXX")"
+cleanup_scratch() { rm -rf "${SCRATCH}"; }
+trap cleanup_scratch EXIT
 
-python3 - "${WORKFLOW}" <<'PY'
+CALLER_WF="${ROOT}/.github/workflows/action-v2-test.yml"
+CALLER_PROD="${ROOT}/scripts/ci/produce-default-discovery-sandbox-evidence.sh"
+CALLER_WF_HASH="$(sha256sum "${CALLER_WF}" | awk '{print $1}')"
+CALLER_PROD_HASH="$(sha256sum "${CALLER_PROD}" | awk '{print $1}')"
+
+expect_red() {
+  local name="$1"
+  if ASSAY_JUNCTION_WORKFLOW="${SCRATCH}/wf.yml" \
+     ASSAY_JUNCTION_PRODUCER="${SCRATCH}/producer.sh" \
+     bash "$0" --contract-only >"${SCRATCH}/${name}.out" 2>&1; then
+    die "mutation ${name} stayed green (see ${SCRATCH}/${name}.out)"
+  fi
+  ok "mutation-${name}-red"
+}
+
+# Baseline copies for each mutation
+seed_scratch() {
+  cp "${CALLER_WF}" "${SCRATCH}/wf.yml"
+  cp "${CALLER_PROD}" "${SCRATCH}/producer.sh"
+  chmod +x "${SCRATCH}/producer.sh"
+}
+
+seed_scratch
+# control: scratch copies must PASS
+if ! ASSAY_JUNCTION_WORKFLOW="${SCRATCH}/wf.yml" \
+     ASSAY_JUNCTION_PRODUCER="${SCRATCH}/producer.sh" \
+     bash "$0" --contract-only >"${SCRATCH}/control.out" 2>&1; then
+  cat "${SCRATCH}/control.out" >&2
+  die "scratch control stayed red"
+fi
+ok "scratch-control-pass"
+
+# 1) job-level if: false
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "  default-discovery-sandbox-junction:\n"
+if needle not in text:
+    raise SystemExit("junction job needle missing")
+wf.write_text(text.replace(needle, needle + "    if: ${{ false }}\n", 1), encoding="utf-8")
+PY
+expect_red "job-if-false"
+
+# 2) producer step if: false
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
 from pathlib import Path
 import sys
 wf = Path(sys.argv[1])
@@ -270,13 +412,11 @@ if needle not in text:
     raise SystemExit("producer needle missing")
 wf.write_text(text.replace(needle, needle + "        if: ${{ false }}\n", 1), encoding="utf-8")
 PY
-if bash "$0" --contract-only >/tmp/2778-mut-if-prod.out 2>&1; then
-  die "producer if:false stayed green"
-fi
-ok "mutation-producer-if-false-red"
-cp "${backup}" "${WORKFLOW}"
+expect_red "producer-if-false"
 
-python3 - "${WORKFLOW}" <<'PY'
+# 3) assertion step if: false
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
 from pathlib import Path
 import sys
 wf = Path(sys.argv[1])
@@ -286,14 +426,84 @@ if needle not in text:
     raise SystemExit("assertion needle missing")
 wf.write_text(text.replace(needle, needle + "        if: ${{ false }}\n", 1), encoding="utf-8")
 PY
-if bash "$0" --contract-only >/tmp/2778-mut-if-assert.out 2>&1; then
-  die "assertion if:false stayed green"
-fi
-ok "mutation-assertion-if-false-red"
-cp "${backup}" "${WORKFLOW}"
+expect_red "assertion-if-false"
+
+# 4) comment out active recipe invoke in owned producer (substring remains)
+seed_scratch
+python3 - "${SCRATCH}/producer.sh" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+text = p.read_text(encoding="utf-8")
+old = 'bash -c "$(cat "${ROOT}/scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd")"'
+if old not in text:
+    raise SystemExit("recipe invoke needle missing in producer")
+p.write_text(text.replace(old, '# ' + old, 1), encoding="utf-8")
+PY
+expect_red "producer-recipe-commented"
+
+# 5) continue-on-error as string "true" on junction review
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "      - name: Review with required default discovery\n        id: review\n"
+if needle not in text:
+    raise SystemExit("review needle missing")
+wf.write_text(
+    text.replace(needle, needle + '        continue-on-error: "true"\n', 1),
+    encoding="utf-8",
+)
+PY
+expect_red "review-continue-on-error-string"
+
+# 6) negative assertion: words only, no real outcome env binding
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+# Weaken required-no-bundles-fails assertion: drop env binding, keep words
+old = """      - name: Assert required mode fails without bundles
+        shell: bash
+        env:
+          STEP_OUTCOME: ${{ steps.review.outcome }}
+          EVIDENCE_STATE: ${{ steps.review.outputs.evidence_state }}
+        run: |
+          set -euo pipefail
+          if [ "${STEP_OUTCOME}" != "failure" ]; then
+            echo "ERROR: expected required mode with zero bundles to fail"
+            exit 1
+          fi
+          if [ "${EVIDENCE_STATE}" = "verified" ]; then
+            echo "ERROR: zero bundles must not report verified"
+            exit 1
+          fi
+"""
+new = """      - name: Assert required mode fails without bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "checking outcome failure mode"
+          true
+"""
+if old not in text:
+    raise SystemExit("required-no-bundles assertion block missing")
+wf.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+expect_red "weak-outcome-words-only"
+
+# Caller bytes must be unchanged even after mutations / interruption path
+AFTER_WF_HASH="$(sha256sum "${CALLER_WF}" | awk '{print $1}')"
+AFTER_PROD_HASH="$(sha256sum "${CALLER_PROD}" | awk '{print $1}')"
+[[ "${AFTER_WF_HASH}" == "${CALLER_WF_HASH}" ]] || die "caller workflow bytes changed during mutations"
+[[ "${AFTER_PROD_HASH}" == "${CALLER_PROD_HASH}" ]] || die "caller producer bytes changed during mutations"
+ok "caller-bytes-unchanged"
 
 trap - EXIT
-cp "${backup}" "${WORKFLOW}"
-rm -f "${backup}"
+cleanup_scratch
 
 echo "action discovery junction contract: PASS"

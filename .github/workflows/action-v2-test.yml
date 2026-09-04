@@ -552,11 +552,7 @@ jobs:
 
       - name: Produce evidence with published remediation recipe
         shell: bash
-        run: |
-          set -euo pipefail
-          # Single source of truth — do not restate the command here.
-          bash -c "$(cat scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd)"
-          test -f .assay/evidence/nested/sandbox.tar.gz
+        run: bash scripts/ci/produce-default-discovery-sandbox-evidence.sh
 
       - name: Review with required default discovery
         id: review
