@@ -138,7 +138,7 @@ pub struct ContentHashScope {
     pub not_reconciled_with: &'static str,
     pub canon: &'static str,
     pub hash: &'static str,
-    /// Bound JSON field names in sorted key order from [`ContentHashBoundProjection`].
+    /// Bound JSON field names in sorted key order from the internal content-hash bound projection.
     pub bound_fields: Vec<String>,
     pub omitted_event_fields_are: &'static str,
     pub separate_integrity_layers: ContentHashSeparateIntegrityLayers,
