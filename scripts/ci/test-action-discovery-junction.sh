@@ -128,20 +128,20 @@ def normalize_run(run: str) -> str:
     # Exact body contract: strip one trailing newline for compare stability.
     return run.replace("\r\n", "\n").rstrip("\n")
 
-# --- owned producer: active invocation, not substring-in-comments ---
+# --- owned producer: exact effective body (not mere line presence) ---
+EXPECTED_PRODUCER_ACTIVE = [
+    "set -euo pipefail",
+    'ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"',
+    'bash -c "$(cat "${ROOT}/scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd")"',
+    "test -f .assay/evidence/nested/sandbox.tar.gz",
+]
 producer_text = producer_sh.read_text(encoding="utf-8")
 active = active_shell_lines(producer_text)
-recipe_invokes = [
-    ln for ln in active
-    if ln.startswith("bash -c") and "remediation_recipe.cmd" in ln
-]
-if len(recipe_invokes) != 1:
+if active != EXPECTED_PRODUCER_ACTIVE:
     raise SystemExit(
-        "owned producer must have exactly one active bash -c remediation_recipe.cmd invoke "
-        f"(found {len(recipe_invokes)}; comments do not count)"
+        "owned producer effective body mismatch "
+        f"(got {active!r}; want {EXPECTED_PRODUCER_ACTIVE!r})"
     )
-if not any(ln.startswith("test -f") and "nested/sandbox.tar.gz" in ln for ln in active):
-    raise SystemExit("owned producer must actively test nested/sandbox.tar.gz exists")
 
 data = load_yaml(text)
 jobs = data.get("jobs")
@@ -337,12 +337,103 @@ if "INDEX_DIGEST" not in joined and "evidence_index_digest" not in joined:
 if "nested/sandbox.tar.gz" not in arun:
     raise SystemExit("assertion must pin nested sandbox path")
 
+EXPECTED_ASSERTION_RUN = """set -euo pipefail
+test "${EVIDENCE_STATE}" = "verified"
+test "${VERIFIED}" = "true"
+test -n "${INDEX_DIGEST}"
+test -f "${INDEX_PATH}"
+python3 -c '
+import hashlib, json, sys
+path, digest = sys.argv[1], sys.argv[2]
+raw = open(path, "rb").read()
+assert hashlib.sha256(raw).hexdigest() == digest
+data = json.loads(raw)
+assert data.get("complete") is True
+assert len(data.get("bundles") or []) >= 1
+row = data["bundles"][0]
+assert row["path"] == ".assay/evidence/nested/sandbox.tar.gz"
+assert row["source"] == "discovered"
+assert row["integrity"] == "verified"
+' "${INDEX_PATH}" "${INDEX_DIGEST}"
+"""
+if normalize_run(arun) != normalize_run(EXPECTED_ASSERTION_RUN):
+    raise SystemExit(
+        "junction assertion run body must match exact effective contract "
+        "(early exit / reordered checks are not equivalent)"
+    )
+EXPECTED_ASSERTION_ENV = {
+    "EVIDENCE_STATE": "${{ steps.review.outputs.evidence_state }}",
+    "VERIFIED": "${{ steps.review.outputs.verified }}",
+    "INDEX_DIGEST": "${{ steps.review.outputs.evidence_index_digest }}",
+    "INDEX_PATH": "${{ steps.review.outputs.evidence_index_path }}",
+}
+if env != EXPECTED_ASSERTION_ENV:
+    raise SystemExit(f"junction assertion env must match exactly (got {env!r})")
+
 print("ok    junction-job-parsed-contract")
 print("ok    sibling-dod-cells")
-print("ok    owned-producer-active-invoke")
+print("ok    owned-producer-effective-body")
+print("ok    junction-assertion-exact-body")
 PY
 
 ok "pin-recipe-doc-workflow-junction"
+
+# Behavioral producer: early exit 0 leaves lookalike lines but never runs assay.
+run_producer_behavior() {
+  local prod="$1"
+  local sand out rc
+  sand="$(mktemp -d "${TMPDIR:-/tmp}/2778-prod-behav.XXXXXX")"
+  mkdir -p "${sand}/bin" "${sand}/work"
+  cat >"${sand}/bin/assay" <<'MOCK'
+#!/usr/bin/env bash
+set -euo pipefail
+marker_dir="${ASSAY_JUNCTION_BEHAVIOR_DIR:?}"
+: >"${marker_dir}/assay-called"
+bundle=""
+prev=""
+for a in "$@"; do
+  if [[ "${prev}" == "--bundle" ]]; then
+    bundle="${a}"
+  fi
+  prev="${a}"
+done
+[[ -n "${bundle}" ]] || exit 1
+mkdir -p "$(dirname "${bundle}")"
+printf 'mock-bundle\n' >"${bundle}"
+exit 0
+MOCK
+  chmod +x "${sand}/bin/assay"
+  out="${sand}/out.txt"
+  rc=0
+  (
+    cd "${sand}/work"
+    export ASSAY_JUNCTION_BEHAVIOR_DIR="${sand}"
+    PATH="${sand}/bin:/usr/bin:/bin" bash "${prod}"
+  ) >"${out}" 2>&1 || rc=$?
+  if [[ "${rc}" -ne 0 ]]; then
+    echo "action-discovery-junction: producer behavioral run rc=${rc}" >&2
+    cat "${out}" >&2 || true
+    rm -rf "${sand}"
+    return 1
+  fi
+  if [[ ! -f "${sand}/assay-called" ]]; then
+    echo "action-discovery-junction: producer never invoked assay (non-executed body)" >&2
+    rm -rf "${sand}"
+    return 1
+  fi
+  if [[ ! -f "${sand}/work/.assay/evidence/nested/sandbox.tar.gz" ]]; then
+    echo "action-discovery-junction: producer did not create nested sandbox bundle" >&2
+    rm -rf "${sand}"
+    return 1
+  fi
+  rm -rf "${sand}"
+  return 0
+}
+
+if ! run_producer_behavior "${PRODUCER_SH}"; then
+  die "owned producer failed behavioral execution check"
+fi
+ok "owned-producer-behavioral"
 
 if [[ "${1:-}" == "--contract-only" ]]; then
   echo "action discovery junction contract: PASS"
@@ -362,7 +453,7 @@ CALLER_PROD_HASH="$(sha256sum "${CALLER_PROD}" | awk '{print $1}')"
 expect_red() {
   local name="$1"
   if ASSAY_JUNCTION_WORKFLOW="${SCRATCH}/wf.yml" \
-     ASSAY_JUNCTION_PRODUCER="${SCRATCH}/producer.sh" \
+     ASSAY_JUNCTION_PRODUCER="${SCRATCH}/repo/scripts/ci/produce-default-discovery-sandbox-evidence.sh" \
      bash "$0" --contract-only >"${SCRATCH}/${name}.out" 2>&1; then
     die "mutation ${name} stayed green (see ${SCRATCH}/${name}.out)"
   fi
@@ -371,15 +462,19 @@ expect_red() {
 
 # Baseline copies for each mutation
 seed_scratch() {
+  # Mini repo layout so owned producer ROOT=.../repo still finds fixtures.
+  rm -rf "${SCRATCH}/repo"
+  mkdir -p "${SCRATCH}/repo/scripts/ci/fixtures/assay-action-pin"
   cp "${CALLER_WF}" "${SCRATCH}/wf.yml"
-  cp "${CALLER_PROD}" "${SCRATCH}/producer.sh"
-  chmod +x "${SCRATCH}/producer.sh"
+  cp "${CALLER_PROD}" "${SCRATCH}/repo/scripts/ci/produce-default-discovery-sandbox-evidence.sh"
+  cp "${ROOT}/scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd"     "${SCRATCH}/repo/scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd"
+  chmod +x "${SCRATCH}/repo/scripts/ci/produce-default-discovery-sandbox-evidence.sh"
 }
 
 seed_scratch
 # control: scratch copies must PASS
 if ! ASSAY_JUNCTION_WORKFLOW="${SCRATCH}/wf.yml" \
-     ASSAY_JUNCTION_PRODUCER="${SCRATCH}/producer.sh" \
+     ASSAY_JUNCTION_PRODUCER="${SCRATCH}/repo/scripts/ci/produce-default-discovery-sandbox-evidence.sh" \
      bash "$0" --contract-only >"${SCRATCH}/control.out" 2>&1; then
   cat "${SCRATCH}/control.out" >&2
   die "scratch control stayed red"
@@ -430,7 +525,7 @@ expect_red "assertion-if-false"
 
 # 4) comment out active recipe invoke in owned producer (substring remains)
 seed_scratch
-python3 - "${SCRATCH}/producer.sh" <<'PY'
+python3 - "${SCRATCH}/repo/scripts/ci/produce-default-discovery-sandbox-evidence.sh" <<'PY'
 from pathlib import Path
 import sys
 p = Path(sys.argv[1])
@@ -459,7 +554,42 @@ wf.write_text(
 PY
 expect_red "review-continue-on-error-string"
 
-# 6) negative assertion: words only, no real outcome env binding
+# 6) early exit 0 after set -euo in owned producer
+seed_scratch
+python3 - "${SCRATCH}/repo/scripts/ci/produce-default-discovery-sandbox-evidence.sh" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+text = p.read_text(encoding="utf-8")
+needle = "set -euo pipefail\n"
+if needle not in text:
+    raise SystemExit("set -euo needle missing")
+p.write_text(text.replace(needle, needle + "exit 0\n", 1), encoding="utf-8")
+PY
+expect_red "producer-early-exit-0"
+
+# 7) non-executed junction assertion: exit 0 before real checks
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "          set -euo pipefail\n          test \"${EVIDENCE_STATE}\" = \"verified\"\n"
+if needle not in text:
+    raise SystemExit("assertion set -euo needle missing")
+wf.write_text(
+    text.replace(
+        needle,
+        "          set -euo pipefail\n          exit 0\n          test \"${EVIDENCE_STATE}\" = \"verified\"\n",
+        1,
+    ),
+    encoding="utf-8",
+)
+PY
+expect_red "assertion-early-exit-0"
+
+# 8) negative assertion: words only, no real outcome env binding
 seed_scratch
 python3 - "${SCRATCH}/wf.yml" <<'PY'
 from pathlib import Path
