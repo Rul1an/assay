@@ -10,10 +10,12 @@ trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/scripts/ci/lib" "$TMP/.github" "$TMP/docs/getting-started" "$TMP/docs/reference/cli" \
   "$TMP/docs/python-sdk" "$TMP/docs/use-cases" "$TMP/docs/AIcontext" "$TMP/docs/guides" \
-  "$TMP/examples/mcp-quickstart" "$TMP/crates/assay-x" "$TMP/bin" "$TMP/.devcontainer" \
-  "$TMP/demo"
+  "$TMP/examples/mcp-quickstart" "$TMP/crates/assay-x" "$TMP/crates/assay-y" \
+  "$TMP/crates/assay-p" "$TMP/crates/assay-excluded" "$TMP/sdk-z" "$TMP/bin" \
+  "$TMP/.devcontainer" "$TMP/demo"
 cp "$ROOT/scripts/ci/check-release-surface.sh" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/release_readme.py" "$TMP/scripts/ci/"
+cp "$ROOT/scripts/ci/check_internal_dep_versions.py" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/read-assay-release-tag.sh" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/lib/editor-plugin-install-commands.sh" "$TMP/scripts/ci/lib/"
 cp "$ROOT/.pre-commit-config.yaml" "$TMP/"
@@ -42,9 +44,17 @@ extra:
     - icon: fontawesome/brands/discord
       link: https://discord.gg/sK5U8VfSHV
 YAML
+# The fixture workspace exercises each leg of the one rule independently. Every entry below is a
+# BASELINE that must stay green; the mutations flip one property at a time.
+#
+# Two members sit outside `crates/` or are excluded on purpose. An implementation that globs
+# `crates/*/Cargo.toml` and skips membership resolution -- the plausible wrong implementation --
+# misses sdk-z (so its mutation stops firing) and reports crates/assay-excluded and the
+# out-of-workspace fork (so the baseline goes red). Either way the harness catches it.
 cat > "$TMP/Cargo.toml" <<'TOML'
 [workspace]
-members = ["crates/assay-x"]
+members = ["crates/assay-x", "crates/assay-y", "crates/assay-p", "sdk-z"]
+exclude = ["crates/assay-excluded"]
 [workspace.package]
 version = "5.2.0"
 [workspace.dependencies]
@@ -54,6 +64,68 @@ cat > "$TMP/crates/assay-x/Cargo.toml" <<'TOML'
 [package]
 name = "assay-x"
 version.workspace = true
+TOML
+# Each dependency table is visited, and cargo's own rules decide when a version is required:
+# it strips every dev-dependencies table on publish, per-target ones included, so those two
+# versionless entries are legitimate and must stay silent. The normal and build tables must not
+# be exempt. `outside-fork` points out of the workspace and is not this check's business.
+cat > "$TMP/crates/assay-y/Cargo.toml" <<'TOML'
+[package]
+name = "assay-y"
+version.workspace = true
+
+[dependencies]
+assay-x = { path = "../assay-x", version = "5.2.0" }
+outside-fork = { path = "../../vendor/forked", version = "0.1.0" }
+
+[build-dependencies]
+assay-x = { path = "../assay-x", version = "5.2.0" }
+
+[dev-dependencies]
+assay-x = { path = "../assay-x" }
+
+[target.'cfg(unix)'.dev-dependencies]
+assay-x = { path = "../assay-x" }
+
+[target.'cfg(unix)'.dependencies]
+assay-x = { path = "../assay-x", version = "5.2.0" }
+
+[target.'cfg(windows)'.build-dependencies]
+assay-x = { path = "../assay-x", version = "5.2.0" }
+TOML
+# publish = false emits no requirement, so a missing version is legitimate here. A version that IS
+# declared is still checked, which is what the publish-false-stale mutation pins.
+cat > "$TMP/crates/assay-p/Cargo.toml" <<'TOML'
+[package]
+name = "assay-p"
+version.workspace = true
+publish = false
+
+[dependencies]
+assay-x = { path = "../assay-x" }
+TOML
+# A member that does not live under crates/.
+cat > "$TMP/sdk-z/Cargo.toml" <<'TOML'
+[package]
+name = "sdk-z"
+version.workspace = true
+
+[dependencies]
+assay-x = { path = "../crates/assay-x", version = "5.2.0" }
+TOML
+# An in-root symlink pointing OUTSIDE the workspace root. Nothing legitimate references it; it
+# exists so a member glob can be pointed through it. Path.glob follows symlinked directories, so
+# expanding "escape-link/*" would list a directory outside the root -- the enumeration is itself
+# the read, which is why the refusal has to happen before expansion rather than after.
+ln -s .. "$TMP/escape-link"
+# Excluded by [workspace] exclude. Its stale declaration must never be reported.
+cat > "$TMP/crates/assay-excluded/Cargo.toml" <<'TOML'
+[package]
+name = "assay-excluded"
+version = "0.0.0"
+
+[dependencies]
+assay-x = { path = "../assay-x", version = "5.0.0" }
 TOML
 cat > "$TMP/Cargo.lock" <<'LOCK'
 [[package]]
@@ -154,7 +226,7 @@ DOC
 (
   cd "$TMP"
   git init -q
-  git add -- .github/assay-release-tag Cargo.toml Cargo.lock crates docs examples scripts \
+  git add -- .github/assay-release-tag Cargo.toml Cargo.lock crates sdk-z docs examples scripts \
     .devcontainer demo
 )
 
@@ -207,6 +279,9 @@ for path in (
     "scripts/ci/lib/editor-plugin-install-commands.sh",
     "docs/guides/editor-mcp-recipe.md",
     "scripts/ci/test-editor-release-hook-precommit-consumer.sh",
+    "crates/assay-core/Cargo.toml",
+    "assay-python-sdk/Cargo.toml",
+    "scripts/ci/check_internal_dep_versions.py",
 ):
     if not pattern.search(path):
         raise SystemExit(f"release-surface hook omits {path}")
@@ -507,6 +582,28 @@ mv "$selector_backup" "$TMP/.pre-commit-config.yaml"
 mutation_count=$((mutation_count + 1))
 echo "PASS: release-surface selector covers ci-gate"
 
+selector_backup="$TMP/.pre-commit-config.yaml.crate-manifest-selector"
+cp "$TMP/.pre-commit-config.yaml" "$selector_backup"
+python3 - "$TMP/.pre-commit-config.yaml" <<'PYSEL'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = "|crates/.+/Cargo\\.toml"
+if text.count(old) != 1:
+    raise SystemExit(f"expected one crate-manifest selector, found {text.count(old)}")
+path.write_text(text.replace(old, "", 1), encoding="utf-8")
+PYSEL
+if check_release_hook_selector >"$TMP/crate-manifest-selector.out" 2>&1; then
+  echo "FAIL: release-surface crate-manifest selector mutation was not observed" >&2
+  exit 1
+fi
+grep -Fq 'release-surface hook omits crates/assay-core/Cargo.toml' "$TMP/crate-manifest-selector.out"
+mv "$selector_backup" "$TMP/.pre-commit-config.yaml"
+mutation_count=$((mutation_count + 1))
+echo "PASS: release-surface selector covers crate manifests"
+
 selector_backup="$TMP/.pre-commit-config.yaml.mkdocs-selector"
 cp "$TMP/.pre-commit-config.yaml" "$selector_backup"
 python3 - "$TMP/.pre-commit-config.yaml" <<'PY'
@@ -542,6 +639,109 @@ for row in \
     's/assay-cli --version 5.1.0/assay-cli --version 5.0.0/g' \
     'current release-pinned install command(s)'
 done
+
+# Internal dependency version declarations, at both sites they occur. One rule, so each leg is
+# pinned separately rather than inferred from a neighbour passing.
+
+# --- crate site: the version itself ---
+mutate_and_expect_failure crate-path-dep-stale crates/assay-y/Cargo.toml \
+  '/^\[dependencies\]/,/^\[build/ s/version = "5.2.0"/version = "5.1.0"/' \
+  'crates/assay-y/Cargo.toml: assay-x in [dependencies] declares version "5.1.0", workspace is "5.2.0"'
+mutate_and_expect_failure crate-path-dep-ahead crates/assay-y/Cargo.toml \
+  '/^\[dependencies\]/,/^\[build/ s/version = "5.2.0"/version = "5.3.0"/' \
+  'crates/assay-y/Cargo.toml: assay-x in [dependencies] declares version "5.3.0", workspace is "5.2.0"'
+mutate_and_expect_failure crate-path-dep-versionless crates/assay-y/Cargo.toml \
+  '/^\[dependencies\]/,/^\[build/ s/, version = "5.2.0" }/ }/' \
+  'crates/assay-y/Cargo.toml: assay-x in [dependencies] is a path dependency on a workspace member with no version'
+
+# --- crate site: every dependency table is visited, and only dev tables are exempt ---
+mutate_and_expect_failure crate-build-dep-versionless crates/assay-y/Cargo.toml \
+  '/^\[build-dependencies\]/,/^\[dev/ s/, version = "5.2.0" }/ }/' \
+  'crates/assay-y/Cargo.toml: assay-x in [build-dependencies] is a path dependency on a workspace member with no version'
+mutate_and_expect_failure crate-target-dep-versionless crates/assay-y/Cargo.toml \
+  "/^\\[target.'cfg(unix)'.dependencies\\]/,/^\\[target.'cfg(windows)'/ s/, version = \"5.2.0\" }/ }/" \
+  'crates/assay-y/Cargo.toml: assay-x in [target.cfg(unix).dependencies] is a path dependency on a workspace member with no version'
+mutate_and_expect_failure crate-target-build-dep-versionless crates/assay-y/Cargo.toml \
+  "/^\\[target.'cfg(windows)'.build-dependencies\\]/,\$ s/, version = \"5.2.0\" }/ }/" \
+  'crates/assay-y/Cargo.toml: assay-x in [target.cfg(windows).build-dependencies] is a path dependency on a workspace member with no version'
+
+# --- crate site: a dev table is exempt from the MISSING-version rule only; a version that is
+# declared there is still checked. The versionless dev entries in the fixture are the other half
+# of this pair, and the baseline staying green is what asserts they are allowed.
+mutate_and_expect_failure crate-dev-dep-stale-version crates/assay-y/Cargo.toml \
+  "/^\\[dev-dependencies\\]/,/^\\[target/ s|path = \"../assay-x\" }|path = \"../assay-x\", version = \"5.0.0\" }|" \
+  'crates/assay-y/Cargo.toml: assay-x in [dev-dependencies] declares version "5.0.0", workspace is "5.2.0"'
+mutate_and_expect_failure crate-target-dev-dep-stale-version crates/assay-y/Cargo.toml \
+  "/^\\[target.'cfg(unix)'.dev-dependencies\\]/,/^\\[target.'cfg(unix)'.dependencies\\]/ s|path = \"../assay-x\" }|path = \"../assay-x\", version = \"5.0.0\" }|" \
+  'crates/assay-y/Cargo.toml: assay-x in [target.cfg(unix).dev-dependencies] declares version "5.0.0", workspace is "5.2.0"'
+
+# --- crate site: publish = false suppresses only the missing-version requirement ---
+mutate_and_expect_failure publish-false-stale-version crates/assay-p/Cargo.toml \
+  's|assay-x = { path = "../assay-x" }|assay-x = { path = "../assay-x", version = "5.0.0" }|' \
+  'crates/assay-p/Cargo.toml: assay-x in [dependencies] declares version "5.0.0", workspace is "5.2.0"'
+
+# --- membership: a member outside crates/ is enumerated; the wrong implementation misses it ---
+mutate_and_expect_failure member-outside-crates-stale sdk-z/Cargo.toml \
+  's/version = "5.2.0"/version = "5.0.0"/' \
+  'sdk-z/Cargo.toml: assay-x in [dependencies] declares version "5.0.0", workspace is "5.2.0"'
+
+# --- root site: the same rule, and the shapes the old line-matched root leg could not see ---
+mutate_and_expect_failure root-dep-stale Cargo.toml \
+  's/assay-x = { version = "5.2.0", path = "crates\/assay-x" }/assay-x = { version = "5.0.0", path = "crates\/assay-x" }/' \
+  'Cargo.toml: assay-x in [workspace.dependencies] declares version "5.0.0", workspace is "5.2.0"'
+mutate_and_expect_failure root-dep-single-quoted-stale Cargo.toml \
+  "s|assay-x = { version = \"5.2.0\", path = \"crates/assay-x\" }|assay-x = { version = '5.0.0', path = 'crates/assay-x' }|" \
+  'Cargo.toml: assay-x in [workspace.dependencies] declares version "5.0.0", workspace is "5.2.0"'
+# A multi-line INLINE table is not valid TOML 1.0 and cargo rejects it, so the real multi-line
+# declaration shape is the sub-table. The old line-matched root leg could not see it.
+rewrite_and_expect_failure root-dep-sub-table-stale Cargo.toml \
+  'Cargo.toml: assay-x in [workspace.dependencies] declares version "5.0.0", workspace is "5.2.0"' <<'TOML'
+[workspace]
+members = ["crates/assay-x", "crates/assay-y", "crates/assay-p", "sdk-z"]
+exclude = ["crates/assay-excluded"]
+[workspace.package]
+version = "5.2.0"
+
+[workspace.dependencies.assay-x]
+version = "5.0.0"
+path = "crates/assay-x"
+TOML
+mutate_and_expect_failure root-dep-versionless Cargo.toml \
+  's/assay-x = { version = "5.2.0", path = "crates\/assay-x" }/assay-x = { path = "crates\/assay-x" }/' \
+  'Cargo.toml: assay-x in [workspace.dependencies] is a path dependency on a workspace member with no version'
+
+# --- containment: expansion must not read outside the root either ---
+mutate_and_expect_failure member-glob-through-symlink Cargo.toml \
+  's|"sdk-z"\]|"sdk-z", "escape-link/*"]|' \
+  'Cargo.toml: [workspace] members entry "escape-link/*" expands through a directory that is a symlink or lies outside the workspace root'
+mutate_and_expect_failure member-glob-not-final-segment Cargo.toml \
+  's|"sdk-z"\]|"sdk-z", "crates/*/nested"]|' \
+  'Cargo.toml: [workspace] members entry "crates/*/nested" places a wildcard outside the final path segment'
+
+# --- containment: repository-controlled paths must not reach outside the root ---
+# The fixture's `outside-fork` dependency is the standing negative control for the third case:
+# its path resolves above the root, so it must stay out of scope silently, and the baseline
+# staying green is the assertion that nothing outside the root was read.
+mutate_and_expect_failure member-entry-escapes-root Cargo.toml \
+  's|"sdk-z"\]|"sdk-z", "../"]|' \
+  'Cargo.toml: [workspace] members entry "../" names a location outside the workspace root'
+mutate_and_expect_failure member-glob-escapes-root Cargo.toml \
+  's|"sdk-z"\]|"sdk-z", "../*"]|' \
+  'Cargo.toml: [workspace] members entry "../*" names a location outside the workspace root'
+mutate_and_expect_failure exclude-entry-escapes-root Cargo.toml \
+  's|exclude = \["crates/assay-excluded"\]|exclude = ["crates/assay-excluded", "../"]|' \
+  'Cargo.toml: [workspace] exclude entry "../" names a location outside the workspace root'
+
+# --- neither count may disappear: the shell fails closed when the helper goes quiet ---
+mutate_and_expect_failure root-count-cannot-disappear scripts/ci/check_internal_dep_versions.py \
+  's/^    print(f"root_count/    0 and print(f"root_count/' \
+  'internal dependency check reported no root count; the enumeration is broken'
+mutate_and_expect_failure crate-count-cannot-disappear scripts/ci/check_internal_dep_versions.py \
+  's/^    print(f"crate_count/    0 and print(f"crate_count/' \
+  'internal dependency check reported no crate count; the enumeration is broken'
+mutate_and_expect_failure helper-failure-is-closed scripts/ci/check_internal_dep_versions.py \
+  's/^import sys/import sys\nraise SystemExit(3)/' \
+  'internal dependency check reported no root count; the enumeration is broken'
 
 mutate_and_expect_failure wrong-workspace-binary bin/assay \
   's/assay 5.2.0/assay 5.1.0/' 'workspace is "assay 5.2.0"'
@@ -957,8 +1157,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 101 ]; then
-  echo "FAIL: expected 101 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 124 ]; then
+  echo "FAIL: expected 124 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"
