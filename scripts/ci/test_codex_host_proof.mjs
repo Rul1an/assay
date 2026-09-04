@@ -306,6 +306,41 @@ test("successful tool output plus nonzero child exit: CLI process is nonzero", a
   assert.match(cli.stdout, /"exitCode":1/);
 });
 
+test("nonzero-after-success fixture waits for the elicitation acknowledgement", async () => {
+  const projectRoot = seedProject();
+  const proofRoot = scratch();
+  const ackMarker = path.join(projectRoot, "elicitation-acknowledged");
+  const child = spawnFakeChild(
+    [
+      "node",
+      FAKE,
+      "--scenario",
+      "exit-1-after-success",
+      "--project-root",
+      projectRoot,
+      "--ack-marker",
+      ackMarker,
+    ],
+    projectRoot,
+  );
+  const result = await runProof({
+    captureMode: "synthetic-fixture",
+    timeoutMs: 4000,
+    maxBytes: 1_048_576,
+    journey: "tool",
+    allowLiveTurn: false,
+    testOnlyChild: child,
+    proofRoot,
+    projectRoot,
+    assayMcpBin: path.join(projectRoot, "install/bin/assay-mcp-server"),
+  });
+
+  assert.equal(fs.readFileSync(ackMarker, "utf8"), "accept\n");
+  assert.equal(result.childExitCode, 1);
+  assert.equal(result.classified.cells.oneToolInvoked.status, "pass");
+  assert.notEqual(result.driverOutcome.exitCode, 0);
+});
+
 test("closed stdin then elicitation reply is fail-closed, not uncaught EPIPE", async () => {
   const { classified, manifest, events, childExitCode, driverOutcome } = await drive(
     "close-stdin-then-elicit-exit-0",
