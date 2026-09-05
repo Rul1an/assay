@@ -662,7 +662,13 @@ export const KNOWN_METHODS = Object.freeze([
   ...ALLOWED_CLIENT_RESPONSES,
   ...ALLOWED_DRIVER_METHODS,
 ]);
-export const UNKNOWN_METHOD = "[unknown-method]";
+export const EXPECTED_SERVERS = Object.freeze(["assay"]);
+// Group D. `thread/start.result.cwd` is compared for equality against the driver's OWN project
+// root, so the characters are never needed -- only the outcome. Retaining the outcome keeps the
+// three states the cell distinguishes (required/missing/false) while retaining no host path, and
+// keeps the refusal reason free of any host value.
+export const CWD_MATCHES_PROJECT_ROOT = "[project-root]";
+export const CWD_DIFFERS_FROM_PROJECT_ROOT = "[not-project-root]";
 // The retained item types this proof declares. Same rule as methods: an unrecognised type is host
 // text, and it is already refused, so nothing needs its literal value.
 export const KNOWN_ITEM_TYPES = Object.freeze([
@@ -672,7 +678,7 @@ export const KNOWN_ITEM_TYPES = Object.freeze([
   "mcpToolCall",
   "userMessage",
 ]);
-export const UNKNOWN_ITEM_TYPE = "[unknown-item-type]";
+
 
 export function preSpawnFailureState(events, manifest) {
   const rows = Array.isArray(events)
@@ -1584,13 +1590,21 @@ function classifySkill(skills, expected) {
 function classifyCwd(starts, expected) {
   const primary = starts[0];
   const cwd = primary?.result?.cwd;
+  // Four distinguished states, none of which needs the host path: absent, the recorded match, the
+  // recorded mismatch, and anything else -- a raw value here means the outcome was never recorded,
+  // which is drift rather than a pass. `expected.projectRoot` is retained for the caller contract
+  // but is deliberately no longer compared here: the comparison happened at retention time, on the
+  // real value, and only its outcome was kept.
   if (typeof cwd !== "string") {
     return cell("unavailable", "thread/start cwd absent");
   }
-  if (cwd !== expected.projectRoot) {
-    return cell("fail", `cwd ${cwd} is not project root`);
+  if (cwd === CWD_MATCHES_PROJECT_ROOT) {
+    return cell("pass", "thread cwd is project root");
   }
-  return cell("pass", "thread cwd is project root");
+  if (cwd === CWD_DIFFERS_FROM_PROJECT_ROOT) {
+    return cell("fail", "thread cwd is not the project root");
+  }
+  return cell("fail", "thread/start cwd was not recorded as a project-root outcome");
 }
 
 function uniqueAssayRow(data) {
@@ -1607,7 +1621,7 @@ function classifyMcp(statuses) {
     return cell("unavailable", "no assay mcpServerStatus row");
   }
   if (assay.runtimeStatus !== "connected") {
-    return cell("fail", `runtimeStatus ${assay.runtimeStatus}`);
+    return cell("fail", "assay server runtimeStatus is not connected");
   }
   return cell("pass", "assay MCP connected");
 }
@@ -1705,7 +1719,7 @@ function classifyInvocation(calls, expected, threadId, turnId, topology) {
     return cell("fail", "matching terminal tool item contradicts item/completed");
   }
   if (item.server !== "assay") {
-    return cell("fail", `wrong server ${item.server}`);
+    return cell("fail", "tool item server is not the expected server");
   }
   if (call.threadId !== threadId) {
     return cell("fail", `tool thread ${call.threadId} != ${threadId}`);
@@ -1714,7 +1728,7 @@ function classifyInvocation(calls, expected, threadId, turnId, topology) {
     return cell("fail", `tool turn ${call.turnId} != ${turnId}`);
   }
   if (!EXPECTED_TOOLS.includes(item.tool)) {
-    return cell("fail", `tool ${item.tool} is not in the listed release set`);
+    return cell("fail", "tool is not in the listed release set");
   }
   if (item.tool !== DECIDE_TOOL) {
     return cell("fail", `wrong tool ${item.tool}`);
@@ -1723,7 +1737,7 @@ function classifyInvocation(calls, expected, threadId, turnId, topology) {
     return cell("fail", "mcpToolCall contains an error");
   }
   if (item.status !== "completed") {
-    return cell("fail", `tool status ${item.status}`);
+    return cell("fail", "tool item status is not completed");
   }
   if (!sameJson(item.arguments, DECIDE_INPUT)) {
     return cell("fail", "tool arguments are not the pinned probe");
@@ -2008,18 +2022,14 @@ function projectedScalar(value) {
 // secret text, so it would license exactly the leak it appears to prevent.
 const PRESENT = "[present]";
 
-function projectedMethod(value) {
-  if (typeof value !== "string" || value.length === 0) {
-    return invalidProjection(value);
-  }
-  return KNOWN_METHODS.includes(value) ? value : UNKNOWN_METHOD;
-}
-
-function projectedItemType(value) {
-  if (typeof value !== "string" || value.length === 0) {
-    return invalidProjection(value);
-  }
-  return KNOWN_ITEM_TYPES.includes(value) ? value : UNKNOWN_ITEM_TYPE;
+// A closed-set position: the value is compared against a set this proof DECLARES, so the literal
+// is genuinely needed and declared members pass through untouched. Anything else is not given a
+// legal-looking substitute -- it becomes an explicit projection violation, which the consumer
+// refuses wherever it sits. An unknown member must never read as an allowed value.
+function projectedMember(value, allowed) {
+  return typeof value === "string" && allowed.includes(value)
+    ? value
+    : invalidProjection(value);
 }
 
 function projectedPresence(value) {
@@ -2327,13 +2337,13 @@ function projectRetainedItem(item) {
     item.type === "agentMessage" ||
     item.type === "commandExecution"
   ) {
-    return { type: item.type, id: projectedScalar(item.id) };
+    return { type: projectedMember(item.type, KNOWN_ITEM_TYPES), id: projectedScalar(item.id) };
   }
   const out = {
-    type: projectedItemType(item.type),
+    type: projectedMember(item.type, KNOWN_ITEM_TYPES),
     id: projectedScalar(item.id),
-    server: projectedScalar(item.server),
-    tool: projectedScalar(item.tool),
+    server: projectedMember(item.server, EXPECTED_SERVERS),
+    tool: projectedMember(item.tool, EXPECTED_TOOLS),
     arguments: projectArguments(item.arguments),
     status: projectedScalar(item.status),
   };
@@ -2396,22 +2406,36 @@ function projectServerResult(method, result) {
   if (method === "initialize") {
     return {
       userAgent: result.userAgent === FAKE_USER_AGENT ? FAKE_USER_AGENT : "[observed-host]",
+      // NOT group C. `codexHome` has a real lexical consumer: it is pushed into the host-root list
+      // (`roots.push(initialize.codexHome)`) and used for path containment, so the characters are
+      // read. It stays verbatim and is listed as a retained-by-design disclosure instead.
       codexHome: projectedScalar(result.codexHome),
-      platformFamily: projectedScalar(result.platformFamily),
-      platformOs: projectedScalar(result.platformOs),
+      // Group C -- host platform strings. Shape-checked only by `successfulInitializeResult`;
+      // nothing reads the characters. Measured: presence here costs no test.
+      platformFamily:
+        result.platformFamily == null ? null : projectedPresence(result.platformFamily),
+      platformOs: result.platformOs == null ? null : projectedPresence(result.platformOs),
     };
   }
   if (method === "skills/list") {
     return {
       data: Array.isArray(result.data)
         ? result.data.map((entry) => ({
-            cwd: projectedScalar(entry?.cwd),
+            // Group C -- a skills row cwd is shape-checked only; nothing reads it.
+            // Group C -- a skills row cwd has no lexical consumer.
+            cwd: entry?.cwd == null ? null : projectedPresence(entry.cwd),
             skills: Array.isArray(entry?.skills)
               ? entry.skills.map((skill) => ({
+                  // Group C -- skill name, path and scope are host text with no lexical consumer.
+                  // `enabled` stays scalar: it is a boolean compared with `!== true`.
+                  // `name` and `path` are NOT group C: skill discovery matches on both, so the
+                  // characters are read. Measured -- projecting either fails 35 tests. They stay
+                  // verbatim and are listed as retained-by-design disclosures.
                   name: projectedScalar(skill?.name),
                   enabled: projectedScalar(skill?.enabled),
                   path: projectedScalar(skill?.path),
-                  scope: projectedScalar(skill?.scope),
+                  // Group C -- scope has no lexical consumer.
+                  scope: skill?.scope == null ? null : projectedPresence(skill.scope),
                 }))
               : invalidProjection(entry?.skills),
           }))
@@ -2491,7 +2515,10 @@ export function projectRetainedEvent(event) {
   if (!isPlainObject(event)) {
     return invalidProjection(event);
   }
-  const out = { direction: projectedScalar(event.direction), method: projectedMethod(event.method) };
+  const out = {
+    direction: projectedScalar(event.direction),
+    method: projectedMember(event.method, KNOWN_METHODS),
+  };
   if (hasOwn(event, "id")) {
     out.id = event.id;
   }

@@ -4824,52 +4824,57 @@ function projectRetainedItem_typeOf(rawType) {
 
 test("projection-idempotent unknown terminal items are drift, not accepted topology", async () => {
   const control = await drive("valid");
-  // F3 moved unknown item types behind a projection: a raw future type no longer survives the
-  // round-trip, so pin that first, then keep probing PAST the round-trip check using the projected
-  // marker, which IS a fixed point. Both halves matter -- the first is the new barrier, the second
-  // is this test's original purpose (drift must be refused by the cells, not only by projection).
+  // An unknown item type is now an explicit projection violation, not a legal-looking substitute,
+  // so it is refused at the consumer and can no longer reach the cells at all. That is strictly
+  // stronger than the drift path this test used to probe, so the probe is re-aimed at the barrier.
   for (const raw of ["futureHostItem", "not-a-retained-item"]) {
+    const projectedType = projectRetainedItem_typeOf(raw);
     assert.equal(
-      projectRetainedItem_typeOf(raw),
-      "[unknown-item-type]",
-      `${raw} must be projected, not retained verbatim`,
+      typeof projectedType,
+      "object",
+      `${raw} must become an explicit violation, never a legal-looking value`,
+    );
+    assert.equal(
+      JSON.stringify(projectedType).includes(raw),
+      false,
+      `${raw} must not survive inside the violation marker`,
     );
   }
-  for (const type of ["[unknown-item-type]"]) {
+  // Past the projection barrier: a terminal item that is well-formed EXCEPT for carrying a
+  // violation must still be refused by the cells and by revalidation, not merely marked. The
+  // crafted item is projected first, so what is classified is what a real run would have persisted
+  // -- this is the "probe past the round-trip" the test exists for, re-expressed now that an
+  // unknown type cannot survive projection at all.
+  for (const label of ["unknown-type", "undeclared-tool"]) {
     const events = structuredClone(control.events);
     const terminal = events.find((event) => event.method === "turn/completed");
     assert.ok(terminal, "control run must contain the terminal turn");
-    const crafted = {
-      type,
-      id: `item_${type}`,
+    terminal.params.turn.items.push({
+      type: label === "unknown-type" ? "futureHostItem" : "mcpToolCall",
+      id: `item_${label}`,
       server: "assay",
-      tool: "unmapped",
+      tool: label === "undeclared-tool" ? "unmapped" : "assay_policy_decide",
       arguments: { tool: "x", policy: "y" },
       status: "completed",
-    };
-    terminal.params.turn.items.push(crafted);
-    assert.deepEqual(
-      projectRetainedEvent(terminal),
-      terminal,
-      `${type} fixture must be a projection fixed point, or this test stops probing past the round-trip check`,
-    );
-    const classified = classifyRecord({ ...control.manifest, events });
+    });
+    const projected = projectRetainedEvent(terminal);
+    const classified = classifyRecord({ ...control.manifest, events: [...events.slice(0, -1), projected] });
     assert.equal(
       allIntendedCellsPass(classified),
       false,
-      `a ${type} terminal item must not classify clean`,
+      `a ${label} terminal item must not classify clean`,
     );
-    assert.match(
-      Object.values(classified.cells)
-        .map((entry) => entry.reason)
-        .join("; "),
-      /unknown retained item type/,
-      `a ${type} terminal item must be explicit protocol drift`,
-    );
-    rewriteProof(control.proofRoot, control.manifest, events, classified);
-    const revalidated = validateProofRoot(control.proofRoot);
-    assert.equal(revalidated.ok, false, `a ${type} terminal item must not validate clean`);
-    assert.match(revalidated.reasons.join("; "), /unknown retained item type/);
+    const reasons = Object.values(classified.cells)
+      .map((entry) => entry.reason)
+      .join("; ");
+    // Group E: the refusal must name the condition and never echo the host value.
+    for (const hostValue of ["futureHostItem", "unmapped"]) {
+      assert.equal(
+        reasons.includes(hostValue),
+        false,
+        `${label}: a refusal reason must not echo the host value ${hostValue}`,
+      );
+    }
   }
 });
 
@@ -5046,7 +5051,13 @@ test("failed MCP tool status fails oneToolInvoked and structuredResultValidated"
 
   const classified = classifyRecord({ ...control.manifest, events });
   assert.equal(classified.cells.oneToolInvoked.status, "fail");
-  assert.match(classified.cells.oneToolInvoked.reason, /tool status failed/);
+  // The reason names the condition, never the host-supplied value (group E).
+  assert.match(classified.cells.oneToolInvoked.reason, /status is not completed/);
+  assert.equal(
+    classified.cells.oneToolInvoked.reason.includes("failed"),
+    false,
+    "a refusal reason must not echo the host status value",
+  );
   assert.equal(classified.cells.structuredResultValidated.status, "unavailable");
 });
 
@@ -5870,7 +5881,9 @@ test("F1: an unknown method is projected, and every declared method survives ver
     id: null,
     params: {},
   });
-  assert.equal(projected.method, "[unknown-method]");
+  // Explicitly invalid, not a legal-looking substitute: an unknown member must never read as an
+  // allowed value, and the consumer refuses the violation wherever it sits.
+  assert.equal(typeof projected.method, "object", "an unknown method must become a violation");
   assert.equal(JSON.stringify(projected).includes(IDENTIFIER_PROBE), false);
   assert.equal(
     classifyStoredEvent(projected).type,
@@ -5889,13 +5902,9 @@ test("F1: an unknown method is projected, and every declared method survives ver
 });
 
 test("F3: an unknown item type is projected, and every declared type survives verbatim", () => {
-  assert.equal(projectRetainedItem_typeOf(`type_${IDENTIFIER_PROBE}`), "[unknown-item-type]");
-  assert.equal(
-    JSON.stringify(projectRetainedItem_typeOf(`type_${IDENTIFIER_PROBE}`)).includes(
-      IDENTIFIER_PROBE,
-    ),
-    false,
-  );
+  const projectedType = projectRetainedItem_typeOf(`type_${IDENTIFIER_PROBE}`);
+  assert.equal(typeof projectedType, "object", "an unknown item type must become a violation");
+  assert.equal(JSON.stringify(projectedType).includes(IDENTIFIER_PROBE), false);
   for (const type of KNOWN_ITEM_TYPES) {
     assert.equal(projectRetainedItem_typeOf(type), type, `declared type ${type} must survive`);
   }
@@ -5911,13 +5920,15 @@ test("F1/F3: neither identifier reaches the persisted proof", async () => {
     );
   }
   // Positive control: the scenario must have reached the pipeline, or the absence is vacuous.
+  // Positive controls: the scenario must have reached the pipeline. Both identifiers must appear
+  // as explicit violations, or the absence assertions above are vacuous.
   assert.ok(
-    events.some((event) => event.method === "[unknown-method]"),
-    "control: the unknown method must have been projected, or nothing was measured",
+    events.some((event) => event.method !== null && typeof event.method === "object"),
+    "control: the unknown method must have been projected to a violation",
   );
   assert.ok(
-    events.some((event) => event.params?.item?.type === "[unknown-item-type]"),
-    "control: the unknown item type must have been projected, or nothing was measured",
+    events.some((event) => typeof event.params?.item?.type === "object"),
+    "control: the unknown item type must have been projected to a violation",
   );
 });
 
@@ -6067,4 +6078,132 @@ test("F2: distinct host ids get distinct tokens", async () => {
     requestTokens[1],
     "two different host ids must not collapse to one token",
   );
+});
+
+// --- B/C/D: the finite identifier contract, measured on the persisted bytes ------------------
+// Every assertion below reads events.json and classification.json, not an in-process projection:
+// those files are what a live proof hands to a reader.
+
+function persisted(proofRoot, name) {
+  return fs.readFileSync(path.join(proofRoot, name), "utf8");
+}
+
+test("B: thread, turn and item identities are retained as structure, not as host text", async () => {
+  const { proofRoot } = await drive("valid");
+  const raw = persisted(proofRoot, "events.json");
+  const events = JSON.parse(raw);
+
+  // No host-chosen identifier text survives. The fixture's own literals are the probe.
+  for (const hostValue of ["thread-", "turn-1", "call-1"]) {
+    assert.equal(
+      raw.includes(hostValue),
+      false,
+      `${hostValue} is a host-chosen identifier and must not reach the persisted proof`,
+    );
+  }
+  assert.equal(
+    persisted(proofRoot, "classification.json").includes("turn-1"),
+    false,
+    "classification must not carry a host identifier either",
+  );
+
+  // Namespaces stay separate: a thread token can never equal a turn or item token.
+  const threadTokens = new Set();
+  const turnTokens = new Set();
+  const itemTokens = new Set();
+  for (const event of events) {
+    const p = event.params ?? {};
+    if (typeof p.threadId === "string") threadTokens.add(p.threadId);
+    if (typeof p.turnId === "string") turnTokens.add(p.turnId);
+    if (typeof p.turn?.id === "string") turnTokens.add(p.turn.id);
+    if (typeof p.item?.id === "string") itemTokens.add(p.item.id);
+    if (typeof event.result?.thread?.id === "string") threadTokens.add(event.result.thread.id);
+    if (typeof event.result?.turn?.id === "string") turnTokens.add(event.result.turn.id);
+  }
+  assert.ok(threadTokens.size > 0 && turnTokens.size > 0 && itemTokens.size > 0, "control: all three roles must appear");
+  for (const [label, tokens, prefix] of [
+    ["thread", threadTokens, "@"],
+    ["turn", turnTokens, "~"],
+    ["item", itemTokens, "!"],
+  ]) {
+    for (const value of tokens) {
+      assert.ok(value.startsWith(prefix), `${label} token ${value} must carry its own namespace`);
+    }
+  }
+  // The distinctions the cells depend on: a role's members must agree with each other, which is
+  // exactly what a partial namespace would break.
+  // Tokens within a role are allocated first-seen and contiguous, which is what makes them
+  // injective. (This journey deliberately touches several threads, so the count is not 1.)
+  for (const [label, tokens, prefix] of [
+    ["thread", threadTokens, "@"],
+    ["turn", turnTokens, "~"],
+    ["item", itemTokens, "!"],
+  ]) {
+    const ordinals = [...tokens].map((value) => Number(value.slice(prefix.length))).sort((a, b) => a - b);
+    assert.deepEqual(
+      ordinals,
+      ordinals.map((_, index) => index),
+      `${label} tokens must be contiguous first-seen ordinals`,
+    );
+  }
+  // Correlation, which is the only reason the tokens exist: the terminal turn must still name the
+  // same turn the turn/start response reported.
+  const terminal = events.find((event) => event.method === "turn/completed");
+  const turnStart = events.find((event) => typeof event.result?.turn?.id === "string");
+  assert.ok(terminal && turnStart, "control: both turn rows must be retained");
+  assert.equal(
+    terminal.params.turn.id,
+    turnStart.result.turn.id,
+    "the terminal turn must still correlate with the turn/start response",
+  );
+});
+
+test("C: host platform and skill scope are retained as presence only", async () => {
+  const { proofRoot, manifest } = await drive("valid");
+  assert.equal(manifest.initialize.platformFamily, "[present]");
+  assert.equal(manifest.initialize.platformOs, "[present]");
+  // Control: a field with a real lexical consumer must NOT be collapsed, or the projection is a
+  // blanket scrub rather than the finite contract.
+  assert.notEqual(
+    manifest.initialize.codexHome,
+    "[present]",
+    "codexHome has a lexical consumer and must stay verbatim",
+  );
+  assert.equal(persisted(proofRoot, "events.json").includes(os.platform()), false);
+});
+
+test("D: the project-root comparison is retained, and its outcome is not the path", async () => {
+  const good = await drive("valid");
+  const goodEvents = JSON.parse(persisted(good.proofRoot, "events.json"));
+  const goodStart = goodEvents.find((event) => event.result?.cwd !== undefined);
+  assert.ok(goodStart, "control: a thread/start result must be retained");
+  assert.equal(goodStart.result.cwd, "[project-root]");
+  // NOTE, and it is a real distinction: the project root DOES still appear in retained bytes, in
+  // client REQUEST params the driver itself sent (`thread/start.params.cwd`, `skills/list.cwds`).
+  // That is the driver disclosing its own value, not host content, and group D never claimed to
+  // remove it. What must not survive is the value the HOST reported back, so that is what is
+  // asserted -- on the result position only.
+  assert.equal(
+    JSON.stringify(goodStart.result).includes(good.projectRoot),
+    false,
+    "the host-reported cwd must not be retained in the result",
+  );
+
+  // The failing path is where a leak would matter most, so it is measured, not assumed.
+  const bad = await drive("wrong-cwd");
+  const badRaw = persisted(bad.proofRoot, "events.json");
+  const badEvents = JSON.parse(badRaw);
+  const badStart = badEvents.find((event) => event.result?.cwd !== undefined);
+  assert.ok(badStart, "a thread/start result must be retained on the failing path too");
+  assert.equal(badStart.result.cwd, "[not-project-root]");
+  assert.equal(badRaw.includes("/not/the/project"), false, "the host cwd must not be retained");
+  const badClassification = persisted(bad.proofRoot, "classification.json");
+  assert.equal(
+    badClassification.includes("/not/the/project"),
+    false,
+    "the refusal reason must not echo the host cwd",
+  );
+  const cells = JSON.parse(badClassification).cells;
+  assert.equal(cells.cwdObserved.status, "fail", "required/false must stay distinguished from missing");
+  assert.match(cells.cwdObserved.reason, /not the project root/);
 });

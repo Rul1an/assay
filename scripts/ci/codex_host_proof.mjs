@@ -43,6 +43,8 @@ import {
   runtimeProofRoots,
   isMainModule,
   persistableArgv,
+  CWD_DIFFERS_FROM_PROJECT_ROOT,
+  CWD_MATCHES_PROJECT_ROOT,
   projectRetainedEvent,
   projectHostIdentity,
   proofAllowlist,
@@ -421,7 +423,93 @@ function resolvedMcpCommand(options) {
   throw new Error("assay MCP binary was not resolved");
 }
 
+// Retention-only identity projection, applied at the ONE boundary where the proof is written.
+//
+// It cannot live at `retainEvent`: the driver reads its own live wire identities back out of that
+// array (`started[0].result.thread.id`, `response.result.thread.id`), so relabelling there would
+// put tokens on the wire. Here the in-memory array stays raw for the driver and only the persisted
+// copy is projected -- and because the manifest hash, the classification and all three files are
+// derived from the same projected copy, they cannot disagree.
+//
+// Roles are separate maps with separate prefixes, so two namespaces are never merged by accident.
+// Fields that ARE one identity deliberately share a role: `params.threadId` with
+// `result.thread.id`, and `params.turnId` with `params.turn.id`, because the cells compare exactly
+// those pairs. Every site is an explicit named path from the identifier disposition table -- never
+// a recursive walk, which would rename fields nobody enumerated.
+//
+// Every comparison downstream is an equality test, which is why a first-seen ordinal is
+// information-preserving for them: classifying the projected copy yields the same cells as
+// classifying the raw one.
+const RETAINED_ID_PREFIX = Object.freeze({ rpc: "#", thread: "@", turn: "~", item: "!" });
+
+function retainedIdentityProjection(events, projectRoot) {
+  const seen = new Map(Object.keys(RETAINED_ID_PREFIX).map((role) => [role, new Map()]));
+  const isObj = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+  const token = (role, value) => {
+    if (typeof value !== "string" || value.length === 0) {
+      return value;
+    }
+    const roleSeen = seen.get(role);
+    if (!roleSeen.has(value)) {
+      roleSeen.set(value, `${RETAINED_ID_PREFIX[role]}${roleSeen.size}`);
+    }
+    return roleSeen.get(value);
+  };
+  return events.map((original) => {
+    const event = structuredClone(original);
+    if (own(event, "id")) {
+      event.id = token("rpc", event.id);
+    }
+    const params = event.params;
+    if (isObj(params)) {
+      if (own(params, "threadId")) {
+        params.threadId = token("thread", params.threadId);
+      }
+      if (own(params, "turnId")) {
+        params.turnId = token("turn", params.turnId);
+      }
+      if (isObj(params.item) && own(params.item, "id")) {
+        params.item.id = token("item", params.item.id);
+      }
+      if (isObj(params.turn)) {
+        if (own(params.turn, "id")) {
+          params.turn.id = token("turn", params.turn.id);
+        }
+        if (Array.isArray(params.turn.items)) {
+          for (const entry of params.turn.items) {
+            if (isObj(entry) && own(entry, "id")) {
+              entry.id = token("item", entry.id);
+            }
+          }
+        }
+      }
+    }
+    const result = event.result;
+    if (isObj(result)) {
+      if (isObj(result.thread) && own(result.thread, "id")) {
+        result.thread.id = token("thread", result.thread.id);
+      }
+      // `result.turn.id` is the OTHER member of the turn namespace. Missing it is what a partial
+      // namespace looks like: `params.turn.id` becomes a token while this stays raw, and the cell
+      // that compares exactly those two stops matching. Every member of a role must be listed.
+      if (isObj(result.turn) && own(result.turn, "id")) {
+        result.turn.id = token("turn", result.turn.id);
+      }
+      // Group D: record the project-root COMPARISON outcome, never the host path.
+      if (typeof result.cwd === "string") {
+        result.cwd =
+          result.cwd === projectRoot
+            ? CWD_MATCHES_PROJECT_ROOT
+            : CWD_DIFFERS_FROM_PROJECT_ROOT;
+      }
+    }
+    return event;
+  });
+}
+
 function writeProofFiles(options, pack) {
+  pack = { ...pack, events: retainedIdentityProjection(pack.events, options.projectRoot) };
   const initialize = initializeFromEvents(pack.events, options.journey);
   const hostIdentity = projectHostIdentity(options.hostIdentity ?? null);
   const invocationArgv = persistableArgv(
@@ -612,21 +700,7 @@ export async function runProof(options) {
   // `nextId`, which is not the converse. They are preserved because the protocol requires numeric
   // ids to stay valid on the wire and an integer carries no text, not because their provenance is
   // known. Preserving them is also what keeps the client-generated integer response lookup working.
-  const retainedRpcIds = new Map();
-  const retainedRpcId = (id) => {
-    if (typeof id !== "string" || id.length === 0) {
-      return id;
-    }
-    if (!retainedRpcIds.has(id)) {
-      retainedRpcIds.set(id, `#${retainedRpcIds.size}`);
-    }
-    return retainedRpcIds.get(id);
-  };
-
   const retainEvent = (event) => {
-    if (Object.prototype.hasOwnProperty.call(event, "id")) {
-      event.id = retainedRpcId(event.id);
-    }
     const encoded = Buffer.byteLength(JSON.stringify(event), "utf8");
     if (
       events.length >= HARD_MAX_EVENTS ||
@@ -723,20 +797,15 @@ export async function runProof(options) {
 
   const dropClientWrite = (id) => {
     if (id != null) {
-      // Wire side: `pending` is keyed by the REAL id, so it is deleted by the real id.
       pending.delete(id);
     }
-    // Retention side: retained events carry the projected token, so the scan below must compare
-    // against that. `.get` rather than `retainedRpcId` on purpose -- looking up a write we are
-    // dropping must not mint a token for an id that was never retained.
-    const retained =
-      typeof id === "string" && retainedRpcIds.has(id) ? retainedRpcIds.get(id) : id;
+
     for (let i = events.length - 1; i >= 0; i -= 1) {
       const event = events[i];
       if (event.direction !== "client") {
         continue;
       }
-      if (id != null ? event.id !== retained : event.method !== "initialized") {
+      if (id != null ? event.id !== id : event.method !== "initialized") {
         continue;
       }
       const encoded = Buffer.byteLength(JSON.stringify(event), "utf8");
