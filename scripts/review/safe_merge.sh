@@ -47,6 +47,7 @@ if ! jq -e --arg record_author "$record_author" --arg reviewer_identity "$review
   any(.review_candidates[];
       .record_author == $record_author and
       .reviewer_identity == $reviewer_identity and
+      .verdict == "READY" and
       .current_head == true)
 ' <<<"$report" >/dev/null; then
   echo "BLOCKED: no matching current-head machine READY record for the declared author and reviewer" >&2
@@ -56,6 +57,7 @@ fi
 head="$(jq -r '.pr.headRefOid' <<<"$report")"
 python3 "$(dirname "$0")/verify_review_identity.py" \
   --repo "$repo" --pr "$pr" --head "$head" \
+  --branch-ref "$(jq -er '.pr.headRefName' <<<"$report")" \
   --record-author "$record_author" --reviewer-identity "$reviewer_identity" \
   --review-evidence-url "$review_evidence_url" \
   --pr-author "$(jq -er '.pr.author.login' <<<"$report")"

@@ -33,6 +33,13 @@ adapter. Do not rewrite somebody else's review, invent an identity, or generate 
 synthetic approval to satisfy this format. Unsupported records need an explicitly
 reviewed adapter, not a bypass.
 
+Record parsing and validation are imported from
+`scripts/ci/assay_review_record_check.py`; the landing helper does not maintain a
+second interpretation of the schema. A malformed current-head machine carrier is
+reported as BLOCKED rather than discarded. Dismissed GitHub reviews do not count,
+and a current-head `CHANGES_REQUESTED` review is a blocker even without verdict
+prose.
+
 This verifies the retrieved declaration, not the actual agent's independence or
 identity. The operator still disposes actionable findings. `pr_landing_readiness.py`
 is only a candidate report: its old candidate extraction alone is not merge
@@ -42,7 +49,7 @@ calling `gh pr merge --match-head-commit`. The old `--reviewer` and
 reinterpreted.
 
 Evidence retrieval is limited to a constructed GitHub API comment endpoint on the
-selected PR, with a 30-second timeout and a 256-KiB JSON materialization ceiling.
+selected PR, with a 30-second timeout and an 8-MiB JSON materialization ceiling.
 Subprocess output goes to temporary files; this is not a disk-quota guarantee.
 No evidence contents are executed. GitHub comments remain editable; this is not an
 immutable attestation or protection against subsequent evidence edits.
@@ -60,6 +67,11 @@ python3 scripts/review/test_review_relay.py
 python3 scripts/review/test_safe_merge_protocol.py
 python3 scripts/review/test_pr_landing_readiness.py
 ```
+
+The `review-relay-protocol-tests` pre-commit hook runs the complete set on the PR
+head through Kernel Matrix CI whenever this surface changes. The trusted-base
+`review-record-check` workflow continues to execute only the base checker and is
+not weakened to run pull-request code with its token.
 
 Deployment into the local skill requires independent review and an explicit
 byte-verified copy of these helpers together, plus updating the skill usage examples.

@@ -5,13 +5,19 @@ import re
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 from urllib.parse import quote, unquote
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ci"))
+from assay_review_record_check import (  # noqa: E402
+    GateError,
+    MARKER as REVIEW_RECORD_MARKER,
+    _loose_object,
+    extract_record,
+    validate_record,
+)
 
 SHA_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])", re.IGNORECASE)
-REVIEW_RECORD_MARKER = "<!-- assay-review-record -->"
-REVIEW_RECORD_FENCE = re.compile(r"^```(?:json)?\n(.*)\n```$", re.S)
-IDENTITY_COMPONENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}")
 REPO_COMPONENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 MAX_JSON_BYTES = 8 * 1024 * 1024
 COMMAND_TIMEOUT_SECONDS = 30
@@ -77,6 +83,13 @@ def validate_gh_command(args):
               and parts[3:5] == ["rules", "branches"]):
             encoded = parts[5]
             allowed_tail = ["--paginate", "--slurp"]
+        elif (len(parts) == 6 and parts[0] == "repos"
+              and parts[3:5] == ["issues", "comments"]
+              and parts[5].isdigit() and int(parts[5]) > 0):
+            parse_repo(f"{parts[1]}/{parts[2]}")
+            if args[3:]:
+                raise SystemExit("unsupported GitHub command shape")
+            return
         else:
             raise SystemExit("unsupported GitHub command shape")
         parse_repo(f"{parts[1]}/{parts[2]}")
@@ -127,79 +140,67 @@ def verdict(text):
         "QUOTA LIMIT",
         "QUOTA EXCEEDED",
     )
-    if any(marker in upper for marker in unavailable):
-        return None
     blocked = re.search(r"(?m)^\s*(?:#{1,6}\s*)?(?:\*\*)?(?:VERDICT\s*:\s*)?BLOCKED(?:\*\*)?\s*[.!]?\s*$", upper)
     ready = re.search(r"(?m)^\s*(?:#{1,6}\s*)?(?:\*\*)?(?:VERDICT\s*:\s*)?READY(?:\*\*)?\s*[.!]?\s*$", upper)
     if blocked:
         return "BLOCKED"
+    if any(marker in upper for marker in unavailable):
+        return None
     if ready:
         return "READY"
     return None
 
 
-def declared_reviewer_identity(reviewer):
-    if not isinstance(reviewer, dict):
-        return None
-    agent = reviewer.get("agent")
-    instance = reviewer.get("instance")
-    if (not isinstance(agent, str) or IDENTITY_COMPONENT_RE.fullmatch(agent) is None
-            or not isinstance(instance, str) or IDENTITY_COMPONENT_RE.fullmatch(instance) is None):
-        return None
-    return f"{agent}/{instance}"
-
-
-def machine_review_candidate(body, author):
-    stripped = body.strip()
-    if not stripped.startswith(REVIEW_RECORD_MARKER):
-        return None
-    fenced = stripped[len(REVIEW_RECORD_MARKER):].strip()
-    match = REVIEW_RECORD_FENCE.fullmatch(fenced)
-    if match is None or fenced.count("```") != 2:
+def machine_review_candidate(body, author, head=None, branch_ref=""):
+    if REVIEW_RECORD_MARKER not in body:
         return None
     try:
-        record = json.loads(match.group(1))
-    except json.JSONDecodeError:
+        record = extract_record(body)
+    except GateError as error:
+        loose = _loose_object(body)
+        bound = (loose or {}).get("head_sha")
+        if head and (bound == head or head.lower() in body.lower()):
+            return {
+                "verdict": "BLOCKED", "bound_sha": head,
+                "reviewer_identity": None, "validation_error": error.reason,
+            }
         return None
-    if not isinstance(record, dict) or record.get("schema") != "assay.review-record.v0":
+    if record is None:
         return None
     bound = record.get("head_sha")
-    result = record.get("verdict")
-    reviewer = record.get("reviewer")
-    independence = record.get("independence")
-    identity = declared_reviewer_identity(reviewer)
-    if (isinstance(bound, str) and SHA_RE.fullmatch(bound) is not None
-            and result == "BLOCKED" and record.get("review_completed") is True):
-        return {
-            "verdict": result,
-            "bound_sha": bound,
-            "reviewer_identity": identity,
-        }
-    if (
-        not isinstance(bound, str)
-        or SHA_RE.fullmatch(bound) is None
-        or result not in {"READY", "BLOCKED"}
-        or record.get("review_completed") is not True
-        or identity is None
-        or reviewer.get("github_login") != author
-        or not isinstance(independence, dict)
-        or independence.get("did_not_build") is not True
-        or independence.get("did_not_author_governing_spec") is not True
-    ):
+    if head and (not isinstance(bound, str) or bound.lower() != head.lower()):
+        return None
+    live_sha = head or bound
+    try:
+        validate_record(record, live_sha=live_sha, branch_ref=branch_ref, require_ready=False)
+        reviewer = record["reviewer"]
+        if reviewer.get("github_login") != author:
+            raise GateError("login_mismatch", str(author))
+    except (GateError, KeyError, TypeError) as error:
+        if head and isinstance(bound, str) and bound.lower() == head.lower():
+            reason = error.reason if isinstance(error, GateError) else "malformed_record"
+            return {
+                "verdict": "BLOCKED", "bound_sha": head,
+                "reviewer_identity": None, "validation_error": reason,
+            }
         return None
     return {
-        "verdict": result,
+        "verdict": record["verdict"],
         "bound_sha": bound,
-        "reviewer_identity": identity,
+        "reviewer_identity": f"{reviewer['agent']}/{reviewer['instance']}",
+        "validation_error": None,
     }
 
 
 def review_candidates(pr, head):
     rows = []
     for review in pr.get("reviews", []):
+        state = review.get("state")
+        if state == "DISMISSED":
+            continue
         body = review.get("body") or ""
         bound = (review.get("commit") or {}).get("oid") or next(iter(SHA_RE.findall(body)), None)
-        result = verdict(body)
+        result = "BLOCKED" if state == "CHANGES_REQUESTED" else verdict(body)
         if result:
             rows.append({
                 "record_author": review.get("author", {}).get("login"),
@@ -212,7 +213,7 @@ def review_candidates(pr, head):
     for comment in pr.get("comments", []):
         body = comment.get("body") or ""
         author = comment.get("author", {}).get("login")
-        machine = machine_review_candidate(body, author)
+        machine = machine_review_candidate(body, author, head, pr.get("headRefName") or "")
         if machine:
             rows.append({
                 "record_author": author,
@@ -220,7 +221,7 @@ def review_candidates(pr, head):
                 "verdict": machine["verdict"],
                 "bound_sha": machine["bound_sha"],
                 "current_head": machine["bound_sha"] == head,
-                "source": "machine-comment",
+                "source": "machine-comment" if machine["validation_error"] is None else "invalid-machine-comment",
             })
             continue
         if body.strip().startswith(REVIEW_RECORD_MARKER):
@@ -325,12 +326,13 @@ def main():
     current_blocked = [row for row in candidates if row["current_head"] and row["verdict"] == "BLOCKED"]
     failing = [check for check in required if check.get("bucket") == "fail"]
     pending = [check for check in required if check.get("bucket") in {"pending", "cancel"}]
-    required_green = bool(expected_required) and not missing_required and not failing and not pending
-    if explicit_checks:
-        required_green = required_green and all(
-            check.get("state") == "SUCCESS" and check.get("bucket") == "pass"
-            for check in required if check.get("name") in expected_required
-        )
+    required_green = (
+        bool(expected_required) and not missing_required and not failing and not pending
+        and all(any(
+            check.get("name") == name and check.get("state") == "SUCCESS"
+            and check.get("bucket") == "pass" for check in required
+        ) for name in expected_required)
+    )
     blockers = []
     if pr.get("state") != "OPEN":
         blockers.append(f"PR state is {pr.get('state')}")
@@ -367,7 +369,7 @@ def main():
         print()
         return
 
-    print(f"# PR #{pr['number']} landing readiness")
+    print(f"# PR #{markdown_atom(pr['number'])} landing readiness")
     print(f"- head: {markdown_atom(head)}")
     print(f"- base: {markdown_atom(pr['baseRefOid'])}")
     print(f"- draft: {markdown_atom(pr['isDraft'])}; mergeable: {markdown_atom(pr['mergeable'])}")
