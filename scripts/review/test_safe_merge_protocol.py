@@ -11,7 +11,9 @@ args=sys.argv[1:]
 head='b'*40
 case=os.environ['CASE']
 if args[:2]==['pr','view']:
- print(json.dumps(dict(number=30,author=dict(login='owner'),state='OPEN',isDraft=False,mergeable='MERGEABLE',headRefOid=head,baseRefOid='a'*40,baseRefName='main',body=head,comments=[] if case=='no-review' else [dict(author=dict(login='reviewer'),body='READY\\n'+head)])))
+ record=dict(schema='assay.review-record.v0',head_sha='a'*40 if case=='stale' else head,review_completed=True,verdict='BLOCKED' if case=='blocked' else 'READY',reviewer=dict(agent='claude',instance='other' if case=='identity-mismatch' else 'reviewer',github_login='reviewer'),independence=dict(did_not_build=True,did_not_author_governing_spec=True))
+ body='<!-- assay-review-record -->\\n```json\\n'+json.dumps(record)+'\\n```'
+ print(json.dumps(dict(number=30,author=dict(login='owner'),state='OPEN',isDraft=False,mergeable='MERGEABLE',headRefOid=head,baseRefOid='a'*40,baseRefName='main',body=head,comments=[] if case=='no-review' else [dict(author=dict(login='reviewer'),body=body)])))
 elif args[:2]==['pr','checks']:
  print(json.dumps([dict(name='reproduce',state='SKIPPED' if case=='skipped' else 'SUCCESS',bucket='pass')]))
 elif args[:2]==['pr','merge']:
@@ -30,7 +32,7 @@ elif args[-1].endswith('/branches/main'): print('{"protected":false}')
 else: raise SystemExit('unexpected gh arguments: '+repr(args))
 ''')
     gh.chmod(0o755)
-    for case, explicit in [('protected',False),('ruleset',False),('unprotected',True),('no-review',True),('skipped',True)]:
+    for case, explicit in [('protected',False),('ruleset',False),('unprotected',True),('no-review',True),('skipped',True),('blocked',True),('stale',True),('identity-mismatch',True)]:
         log=root/'merge.json'
         log.unlink(missing_ok=True)
         env=dict(os.environ, PATH=str(root)+':'+os.environ['PATH'], CASE=case, MERGE_LOG=str(log))

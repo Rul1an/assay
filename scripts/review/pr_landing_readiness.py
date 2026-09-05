@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from urllib.parse import quote
 
 
@@ -11,16 +12,66 @@ SHA_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])", re.IGNORECASE)
 REVIEW_RECORD_MARKER = "<!-- assay-review-record -->"
 REVIEW_RECORD_FENCE = re.compile(r"^```(?:json)?\n(.*)\n```$", re.S)
 IDENTITY_COMPONENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}")
+REPO_COMPONENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
+MAX_JSON_BYTES = 8 * 1024 * 1024
+COMMAND_TIMEOUT_SECONDS = 30
+
+
+def parse_repo(repo):
+    if not isinstance(repo, str) or repo.count("/") != 1:
+        raise SystemExit("repository must be OWNER/REPO")
+    owner, name = repo.split("/", 1)
+    if REPO_COMPONENT_RE.fullmatch(owner) is None or REPO_COMPONENT_RE.fullmatch(name) is None:
+        raise SystemExit("repository must be OWNER/REPO")
+    return owner, name
+
+
+def encoded_branch(branch):
+    forbidden = ("..", "@{", "//")
+    if (not isinstance(branch, str) or not branch or branch.startswith(("/", ".", "-"))
+            or branch.endswith(("/", ".", ".lock"))
+            or any(token in branch for token in forbidden)
+            or any(ord(char) < 32 or char in " ~^:?*[\\" for char in branch)):
+        raise SystemExit("branch name is not a supported Git ref")
+    return quote(branch, safe="")
+
+
+def validate_gh_command(args):
+    if (not isinstance(args, list) or len(args) < 3
+            or any(not isinstance(arg, str) or "\x00" in arg for arg in args)
+            or args[0] != "gh"):
+        raise SystemExit("unsupported GitHub command shape")
+    shape = tuple(args[1:3])
+    if shape not in {("pr", "view"), ("pr", "checks"), ("api", "graphql")}:
+        if args[1] != "api" or not args[2].startswith("repos/"):
+            raise SystemExit("unsupported GitHub command shape")
 
 
 def run_json(args, allowed_returncodes=(0,)):
-    result = subprocess.run(args, check=False, capture_output=True, text=True)
-    if result.returncode not in allowed_returncodes:
-        raise SystemExit(result.stderr.strip() or result.stdout.strip())
-    if not result.stdout.strip():
-        raise SystemExit(result.stderr.strip() or "command returned no JSON")
+    validate_gh_command(args)
     try:
-        return json.loads(result.stdout)
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            # argv is list-based and its command family is closed above; no shell is involved.
+            result = subprocess.run(  # lgtm[py/command-line-injection]
+                args, check=False, stdout=out, stderr=err,
+                timeout=COMMAND_TIMEOUT_SECONDS,
+            )
+            if out.tell() > MAX_JSON_BYTES:
+                raise SystemExit("command output exceeds byte limit")
+            err.seek(0)
+            error_text = err.read(262144).decode("utf-8", errors="replace").strip()
+            out.seek(0)
+            output = out.read().decode("utf-8", errors="strict")
+    except subprocess.TimeoutExpired as error:
+        raise SystemExit("GitHub command timed out") from error
+    except UnicodeDecodeError as error:
+        raise SystemExit("command returned non-UTF-8 output") from error
+    if result.returncode not in allowed_returncodes:
+        raise SystemExit(error_text or output.strip())
+    if not output.strip():
+        raise SystemExit(error_text or "command returned no JSON")
+    try:
+        return json.loads(output)
     except json.JSONDecodeError as error:
         raise SystemExit(f"command returned invalid JSON: {error}") from error
 
@@ -41,7 +92,7 @@ def verdict(text):
     ready = re.search(r"(?m)^\s*(?:#{1,6}\s*)?(?:\*\*)?(?:VERDICT\s*:\s*)?READY(?:\*\*)?\s*[.!]?\s*$", upper)
     if blocked:
         return "BLOCKED"
-    if "NOT READY" not in upper and ready:
+    if ready:
         return "READY"
     return None
 
@@ -76,6 +127,13 @@ def machine_review_candidate(body, author):
     reviewer = record.get("reviewer")
     independence = record.get("independence")
     identity = declared_reviewer_identity(reviewer)
+    if (isinstance(bound, str) and SHA_RE.fullmatch(bound) is not None
+            and result == "BLOCKED" and record.get("review_completed") is True):
+        return {
+            "verdict": result,
+            "bound_sha": bound,
+            "reviewer_identity": identity,
+        }
     if (
         not isinstance(bound, str)
         or SHA_RE.fullmatch(bound) is None
@@ -124,6 +182,8 @@ def review_candidates(pr, head):
                 "source": "machine-comment",
             })
             continue
+        if body.strip().startswith(REVIEW_RECORD_MARKER):
+            continue
         result = verdict(body)
         shas = SHA_RE.findall(body)
         if result and shas:
@@ -144,7 +204,8 @@ def missing_required_contexts(reported, expected):
 
 
 def required_contexts(repo, branch):
-    owner, name = repo.split("/", 1)
+    owner, name = parse_repo(repo)
+    branch_path = encoded_branch(branch)
     response = run_json([
         "gh", "api", "graphql", "-f",
         "query=query($owner:String!,$name:String!,$ref:String!){repository(owner:$owner,name:$name){ref(qualifiedName:$ref){branchProtectionRule{requiredStatusCheckContexts}}}}",
@@ -158,7 +219,7 @@ def required_contexts(repo, branch):
         if not isinstance(contexts, list):
             raise ValueError("invalid classic contexts")
         contexts = list(contexts)
-        pages = run_json(["gh", "api", f"repos/{repo}/rules/branches/{quote(branch, safe='')}",
+        pages = run_json(["gh", "api", f"repos/{repo}/rules/branches/{branch_path}",
                           "--paginate", "--slurp"])
         if not isinstance(pages, list) or not pages:
             raise ValueError("invalid rule pages")
@@ -188,6 +249,7 @@ def main():
     parser.add_argument("--unprotected-require-check", action="append", default=[], metavar="NAME",
                         help="Explicit check policy, only for a verified unprotected base with no active rules")
     args = parser.parse_args()
+    parse_repo(args.repo)
 
     pr = run_json([
         "gh", "pr", "view", str(args.pr), "--repo", args.repo, "--json",
@@ -199,8 +261,9 @@ def main():
     if explicit_checks:
         if any(not name.strip() for name in explicit_checks):
             raise SystemExit("check names must not be empty")
-        branch = run_json(["gh", "api", f"repos/{args.repo}/branches/{pr['baseRefName']}"])
-        rules = run_json(["gh", "api", f"repos/{args.repo}/rules/branches/{pr['baseRefName']}"])
+        branch_path = encoded_branch(pr["baseRefName"])
+        branch = run_json(["gh", "api", f"repos/{args.repo}/branches/{branch_path}"])
+        rules = run_json(["gh", "api", f"repos/{args.repo}/rules/branches/{branch_path}"])
         if not isinstance(branch, dict) or branch.get("protected") is not False or rules != []:
             raise SystemExit("explicit policy requires an unprotected branch and an empty active-rule list")
     required = run_json([
@@ -264,27 +327,35 @@ def main():
         return
 
     print(f"# PR #{pr['number']} landing readiness")
-    print(f"- head: `{head}`")
-    print(f"- base: `{pr['baseRefOid']}`")
-    print(f"- draft: `{pr['isDraft']}`; mergeable: `{pr['mergeable']}`")
-    print(f"- required green: `{required_green}`")
+    print(f"- head: {markdown_atom(head)}")
+    print(f"- base: {markdown_atom(pr['baseRefOid'])}")
+    print(f"- draft: {markdown_atom(pr['isDraft'])}; mergeable: {markdown_atom(pr['mergeable'])}")
+    print(f"- required green: {markdown_atom(required_green)}")
     for check in required:
-        print(f"  - `{check['name']}`: `{check['state']}` ({check['bucket']})")
+        print(f"  - {markdown_atom(check.get('name'))}: {markdown_atom(check.get('state'))} ({markdown_atom(check.get('bucket'))})")
     if missing_required:
-        print(f"  - not reported: `{', '.join(missing_required)}`")
-    print(f"- PR body names current head: `{body_mentions_head}`")
+        print(f"  - not reported: {markdown_atom(', '.join(missing_required))}")
+    print(f"- PR body names current head: {markdown_atom(body_mentions_head)}")
     print("- review candidates:")
     if not candidates:
         print("  - none")
     for row in candidates:
         identity = row["reviewer_identity"] or "not declared"
-        print(f"  - `{row['verdict']}` record by `{row['record_author']}`; reviewer `{identity}` on `{row['bound_sha']}`; current=`{row['current_head']}` ({row['source']})")
+        print(f"  - {markdown_atom(row['verdict'])} record by {markdown_atom(row['record_author'])}; reviewer {markdown_atom(identity)} on {markdown_atom(row['bound_sha'])}; current={markdown_atom(row['current_head'])} ({markdown_atom(row['source'])})")
     print("- blockers:")
     if not blockers:
         print("  - none from machine-verifiable state")
     for blocker in blockers:
-        print(f"  - {blocker}")
+        print(f"  - {markdown_atom(blocker)}")
     print("- non-claim: reviewer independence and finding disposition still require human verification")
+
+
+def markdown_atom(value):
+    """Render untrusted scalar data as one JSON-escaped Markdown-safe line."""
+    rendered = json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+    for delimiter in "`*_[]<>":
+        rendered = rendered.replace(delimiter, f"\\u{ord(delimiter):04x}")
+    return rendered
 
 
 if __name__ == "__main__":

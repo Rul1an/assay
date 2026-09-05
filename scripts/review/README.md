@@ -47,6 +47,12 @@ Subprocess output goes to temporary files; this is not a disk-quota guarantee.
 No evidence contents are executed. GitHub comments remain editable; this is not an
 immutable attestation or protection against subsequent evidence edits.
 
+The broader readiness queries accept only the fixed `gh pr` and `gh api` command
+families used by the reporter, validate repository and branch path components, and
+apply a 30-second timeout plus an 8-MiB JSON ceiling before parsing. Human-readable
+output JSON-escapes every API-provided scalar; it is a display, never a second
+machine-readable verdict channel.
+
 Run synthetic tests (fake gh, no live merges):
 
 ```

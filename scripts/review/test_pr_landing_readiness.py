@@ -4,6 +4,7 @@ import json
 import pathlib
 import unittest
 import io
+import subprocess
 from unittest.mock import patch
 
 
@@ -24,7 +25,7 @@ class VerdictTests(unittest.TestCase):
         self.assertIsNone(MODULE.verdict("Verdict: NOT READY"))
 
     def test_quota_comment_is_not_a_review(self):
-        body = "Review rate limited; unable to review. Mark READY when quota resets."
+        body = "Review rate limited; unable to review.\nREADY"
         self.assertIsNone(MODULE.verdict(body))
 
     def test_ready_in_prose_is_not_a_verdict(self):
@@ -105,6 +106,80 @@ class CandidateBindingTests(unittest.TestCase):
         body = "<!-- assay-review-record -->\n```json\n" + json.dumps(record) + "\n```"
         self.assertIsNone(MODULE.machine_review_candidate(body, "owner"))
 
+    def machine_body(self, verdict, instance):
+        record = {
+            "schema": "assay.review-record.v0",
+            "head_sha": "b" * 40,
+            "review_completed": True,
+            "verdict": verdict,
+            "reviewer": {
+                "agent": "claude",
+                "instance": instance,
+                "github_login": "owner",
+            },
+            "independence": {
+                "did_not_build": True,
+                "did_not_author_governing_spec": True,
+            },
+        }
+        return "<!-- assay-review-record -->\n```json\n" + json.dumps(record) + "\n```"
+
+    def test_invalid_identity_does_not_erase_a_blocked_record(self):
+        body = self.machine_body("BLOCKED", "session 42")
+        rows = MODULE.review_candidates({
+            "reviews": [],
+            "comments": [{"author": {"login": "owner"}, "body": body}],
+        }, "b" * 40)
+
+        self.assertEqual(rows[0]["verdict"], "BLOCKED")
+        self.assertTrue(rows[0]["current_head"])
+        self.assertIsNone(rows[0]["reviewer_identity"])
+
+    def test_invalid_machine_ready_cannot_fall_back_to_prose(self):
+        body = self.machine_body("READY", "session 42") + "\nREADY\n" + "b" * 40
+        rows = MODULE.review_candidates({
+            "reviews": [],
+            "comments": [{"author": {"login": "owner"}, "body": body}],
+        }, "b" * 40)
+
+        self.assertEqual(rows, [])
+
+    def test_markdown_atom_escapes_control_and_delimiter_characters(self):
+        rendered = MODULE.markdown_atom("CI`\n- blockers:\n  - none")
+        self.assertNotIn("\n", rendered)
+        self.assertNotIn("`", rendered)
+        self.assertIn("\\n", rendered)
+
+
+class GitHubCommandBoundaryTests(unittest.TestCase):
+    def test_repository_and_branch_inputs_are_validated(self):
+        self.assertEqual(MODULE.parse_repo("example/repo"), ("example", "repo"))
+        self.assertEqual(MODULE.encoded_branch("codex/review-fix"), "codex%2Freview-fix")
+        for repo in ("owner/repo/extra", "-owner/repo", "owner/repo\n--help"):
+            with self.subTest(repo=repo), self.assertRaises(SystemExit):
+                MODULE.parse_repo(repo)
+        for branch in ("../main", "refs//heads", "topic@{1}", "topic\n--help"):
+            with self.subTest(branch=branch), self.assertRaises(SystemExit):
+                MODULE.encoded_branch(branch)
+
+    def test_run_json_refuses_unknown_command_shape_before_execution(self):
+        with patch.object(MODULE.subprocess, "run") as run, self.assertRaises(SystemExit):
+            MODULE.run_json(["python3", "-c", "print('not gh')"])
+        run.assert_not_called()
+
+    def test_run_json_timeout_and_output_ceiling_fail_closed(self):
+        with patch.object(MODULE.subprocess, "run", side_effect=subprocess.TimeoutExpired("gh", 30)):
+            with self.assertRaisesRegex(SystemExit, "timed out"):
+                MODULE.run_json(["gh", "api", "graphql"])
+
+        def oversized(*args, **kwargs):
+            kwargs["stdout"].write(b"x" * (MODULE.MAX_JSON_BYTES + 1))
+            return subprocess.CompletedProcess(args[0], 0)
+
+        with patch.object(MODULE.subprocess, "run", side_effect=oversized):
+            with self.assertRaisesRegex(SystemExit, "byte limit"):
+                MODULE.run_json(["gh", "api", "graphql"])
+
 
 class RequiredContextTests(unittest.TestCase):
     def test_missing_required_context_is_reported(self):
@@ -160,11 +235,13 @@ class RulesetPolicyTests(unittest.TestCase):
 
 class UnprotectedPolicyTests(unittest.TestCase):
     def run_report(self, *, explicit=True, protected=False, rules=None, checks=None,
-                   review=True, blocked=False):
+                   review=True, blocked=False, state="OPEN", draft=False,
+                   mergeable="MERGEABLE", body_current=True):
         head = "b" * 40
-        pr = dict(number=30, title="test", state="OPEN", isDraft=False,
-                  mergeable="MERGEABLE", headRefOid=head, baseRefOid="a" * 40,
-                  baseRefName="main", body=head, reviews=[], comments=[])
+        pr = dict(number=30, title="test", state=state, isDraft=draft,
+                  mergeable=mergeable, headRefOid=head, baseRefOid="a" * 40,
+                  baseRefName="main", body=head if body_current else "no pinned head",
+                  reviews=[], comments=[])
         if review:
             pr["comments"] = [{"author": {"login": "reviewer"}, "body": f"READY\n{head}"}]
         if blocked:
@@ -208,6 +285,19 @@ class UnprotectedPolicyTests(unittest.TestCase):
         report, _ = self.run_report(blocked=True)
         self.assertFalse(report["landing_candidate"])
         self.assertIn("current-head BLOCKED review exists", report["blockers"])
+
+    def test_pr_state_draft_mergeability_and_body_pin_each_block(self):
+        cases = (
+            ({"state": "CLOSED"}, "PR state is CLOSED"),
+            ({"draft": True}, "PR is draft"),
+            ({"mergeable": "CONFLICTING"}, "mergeable=CONFLICTING"),
+            ({"body_current": False}, "PR body does not mention current head SHA"),
+        )
+        for kwargs, blocker in cases:
+            with self.subTest(kwargs=kwargs):
+                report, _ = self.run_report(**kwargs)
+                self.assertFalse(report["landing_candidate"])
+                self.assertIn(blocker, report["blockers"])
 
     def test_default_does_not_turn_absent_policy_into_unprotected(self):
         with self.assertRaisesRegex(SystemExit, "cannot establish required check policy"):

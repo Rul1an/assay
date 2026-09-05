@@ -10,11 +10,15 @@ from urllib.parse import urlsplit
 from pr_landing_readiness import (
     REVIEW_RECORD_FENCE,
     REVIEW_RECORD_MARKER,
-    declared_reviewer_identity,
+    machine_review_candidate,
+    parse_repo,
 )
 
 
 def verify(repo, pr, head, record_author, identity, evidence_url, pr_author):
+    parse_repo(repo)
+    if not re.fullmatch(r"[1-9][0-9]*", str(pr)):
+        raise ValueError('PR must be a positive decimal integer')
     url = urlsplit(evidence_url)
     expected_path = f'/{repo}/pull/{pr}'
     if (url.scheme != 'https' or url.netloc != 'github.com'
@@ -41,29 +45,20 @@ def verify(repo, pr, head, record_author, identity, evidence_url, pr_author):
             or comment.get('user', {}).get('login') != record_author):
         raise ValueError('review evidence publisher or PR does not match')
     body = comment.get('body', '').strip()
-    if not body.startswith(REVIEW_RECORD_MARKER):
-        raise ValueError('evidence is not a completed structured review record')
+    machine = machine_review_candidate(body, record_author)
+    if machine is None or machine['verdict'] != 'READY' or machine['bound_sha'] != head:
+        raise ValueError('review identity, head, verdict or independence declaration mismatch')
     match = REVIEW_RECORD_FENCE.fullmatch(body[len(REVIEW_RECORD_MARKER):].strip())
     if match is None:
         raise ValueError('review record envelope is malformed')
     record = json.loads(match.group(1))
     reviewer = record.get('reviewer', {})
-    independence = record.get('independence', {})
-    agent_identity = declared_reviewer_identity(reviewer)
     direct_human = (
         identity == record_author and record_author != pr_author
         and reviewer.get('agent') == 'human'
         and reviewer.get('instance') == record_author
     )
-    if (record.get('schema') != 'assay.review-record.v0'
-            or record.get('head_sha') != head
-            or record.get('verdict') != 'READY'
-            or record.get('review_completed') is not True
-            or reviewer.get('github_login') != record_author
-            or agent_identity is None
-            or not (agent_identity == identity or direct_human)
-            or independence.get('did_not_build') is not True
-            or independence.get('did_not_author_governing_spec') is not True):
+    if not (machine['reviewer_identity'] == identity or direct_human):
         raise ValueError('review identity, head, verdict or independence declaration mismatch')
     builder = record.get('builder', {})
     if (builder.get('agent'), builder.get('instance')) == (reviewer.get('agent'), reviewer.get('instance')):

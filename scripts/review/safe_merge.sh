@@ -43,11 +43,13 @@ if [[ "$(jq -r '.landing_candidate' <<<"$report")" != "true" ]]; then
   exit 1
 fi
 
-if ! jq -e --arg record_author "$record_author" '
+if ! jq -e --arg record_author "$record_author" --arg reviewer_identity "$reviewer_identity" '
   any(.review_candidates[];
-      .record_author == $record_author and .verdict == "READY" and .current_head == true)
+      .record_author == $record_author and
+      .reviewer_identity == $reviewer_identity and
+      .current_head == true)
 ' <<<"$report" >/dev/null; then
-  echo "BLOCKED: no current-head READY record by declared record author '$record_author'" >&2
+  echo "BLOCKED: no matching current-head machine READY record for the declared author and reviewer" >&2
   exit 1
 fi
 
