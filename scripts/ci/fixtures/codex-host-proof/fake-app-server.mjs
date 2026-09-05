@@ -313,11 +313,27 @@ function handle(message) {
     if (scenario === "close-stdin-then-elicit-exit-0") {
       fs.closeSync(0);
     }
+    // A host chooses its own request ids, and a string id is host text like any other. This
+    // scenario uses a secret-bearing one so the absence assertion is made against persisted bytes,
+    // while the request/response pairing must still survive.
+    const elicitId =
+      scenario === "host-rpc-id-leak" || scenario === "host-rpc-id-distinct"
+        ? "elicit_/Users/alice/.ssh/id_rsa?sk=RPCID_PROBE"
+        : "elicit-1";
     write({
-      id: "elicit-1",
+      id: elicitId,
       method: "mcpServer/elicitation/request",
       params: elicitParams(),
     });
+    // A second, DIFFERENT host id. Without two distinct ids in one run, injectivity is not
+    // observable at all, and a map that collapsed every id to one token would pass unnoticed.
+    if (scenario === "host-rpc-id-distinct") {
+      write({
+        id: "elicit_/Users/bob/.aws/credentials?sk=RPCID_PROBE_TWO",
+        method: "mcpServer/elicitation/request",
+        params: elicitParams(),
+      });
+    }
     const tool = scenario === "wrong-tool" ? "assay_check_args" : RELEASE_DECIDE_TOOL;
     const argumentsPayload =
       scenario === "wrong-tool"

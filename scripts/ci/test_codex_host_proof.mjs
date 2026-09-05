@@ -5971,3 +5971,100 @@ test("F4: a marker nested under result is refused, not carried into a green proo
   });
   assert.equal(classifyStoredEvent(clean).type, "server-notification", "control: clean must pass");
 });
+
+// --- F2: a host-chosen string rpc id is host text, and correlation is only equality -----------
+// The wire keeps the real id -- string ids stay fully supported on the protocol. Only what is
+// RETAINED is relabelled, by one per-run first-seen ordinal map at the single retention funnel.
+// These tests pin both halves: the id never reaches the proof, and the correlation it carries does.
+const RPC_ID_PROBE = "RPCID_PROBE";
+
+test("F2: a host-chosen string rpc id never reaches the persisted proof", async () => {
+  const { proofRoot, events, classified } = await drive("host-rpc-id-leak");
+  for (const name of ["events.json", "classification.json", "manifest.json"]) {
+    assert.equal(
+      fs.readFileSync(path.join(proofRoot, name), "utf8").includes(RPC_ID_PROBE),
+      false,
+      `${name} must not contain the host-chosen rpc id`,
+    );
+  }
+  // Positive control: the scenario must have reached the pipeline, or every absence above is
+  // vacuous. A projected token must be present where the host id was.
+  const serverRequest = events.find(
+    (event) => event.direction === "server" && event.method === "mcpServer/elicitation/request",
+  );
+  assert.ok(serverRequest, "control: the server request must have been retained");
+  assert.match(
+    String(serverRequest.id),
+    /^#\d+$/,
+    "control: the host id must have been projected to a token",
+  );
+  // The property the token exists for: the matching client response must still pair with it.
+  const clientResponse = events.find(
+    (event) => event.direction === "client" && event.method === "mcpServer/elicitation/request",
+  );
+  assert.ok(clientResponse, "the matching client response must be retained");
+  assert.equal(
+    clientResponse.id,
+    serverRequest.id,
+    "request and response must still correlate through the token",
+  );
+  // The strongest available control: with a secret-shaped host id, the proof must still pass every
+  // intended cell. If the token had broken correlation anywhere, this is where it would show.
+  assert.equal(
+    allIntendedCellsPass(classified),
+    true,
+    "relabelling the retained id must not cost the proof a single cell",
+  );
+});
+
+test("F2: the retained token preserves equality structure and leaves integers alone", async () => {
+  const { events } = await drive("host-rpc-id-leak");
+  const stringIds = events.filter((event) => typeof event.id === "string").map((e) => e.id);
+  const numericIds = events.filter((event) => Number.isSafeInteger(event.id)).map((e) => e.id);
+
+  // Every retained string id is a token; none is a raw host string.
+  for (const id of stringIds) {
+    assert.match(id, /^#\d+$/, `retained string id ${id} must be a token`);
+  }
+  // Repeated: the request and its response share one host id, so they share one token.
+  assert.ok(
+    stringIds.length > new Set(stringIds).size,
+    "a repeated host id must yield a repeated token, or correlation is not being exercised",
+  );
+  // NOTE: injectivity is deliberately NOT asserted here. This run carries one host id, so nothing
+  // in it could distinguish an injective map from one that collapses every id to a single token.
+  // The separate distinct-id test below is the only place that discriminates it.
+
+  // Numeric ids are driver-generated and pass through untouched, which is what keeps the
+  // client-generated integer response lookup working.
+  assert.ok(numericIds.length > 0, "the driver's integer request ids must still be retained");
+  for (const id of numericIds) {
+    assert.equal(typeof id, "number");
+  }
+});
+
+test("F2: distinct host ids get distinct tokens", async () => {
+  // The discriminating case. A map that returned one constant token would satisfy every other F2
+  // assertion -- absence, tokenisation, and even request/response pairing -- so without two
+  // distinct host ids in one run, injectivity is asserted but untested.
+  const { proofRoot, events } = await drive("host-rpc-id-distinct");
+  const raw = fs.readFileSync(path.join(proofRoot, "events.json"), "utf8");
+  for (const probe of ["RPCID_PROBE", "RPCID_PROBE_TWO"]) {
+    assert.equal(raw.includes(probe), false, `${probe} must not reach the persisted proof`);
+  }
+  const requestTokens = events
+    .filter(
+      (event) =>
+        event.direction === "server" && event.method === "mcpServer/elicitation/request",
+    )
+    .map((event) => event.id);
+  assert.equal(requestTokens.length, 2, "control: both server requests must have been retained");
+  for (const token of requestTokens) {
+    assert.match(String(token), /^#\d+$/);
+  }
+  assert.notEqual(
+    requestTokens[0],
+    requestTokens[1],
+    "two different host ids must not collapse to one token",
+  );
+});

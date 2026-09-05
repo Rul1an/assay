@@ -592,8 +592,38 @@ export async function runProof(options) {
   let childExit = null;
   let acceptedElicitations = 0;
   const pending = new Map();
+  // A STRING rpc id can only have come from the host: the driver's own requests take their ids from
+  // `nextId`, which is always an integer. So every retained string id is host text, exactly like a
+  // method name or a key name.
+  //
+  // The wire is untouched -- the child still sees, and we still answer with, the real id, so string
+  // ids remain fully supported on the protocol. Only what is RETAINED is relabelled, through one
+  // per-run map at `retainEvent`, the single funnel every retained event already passes through.
+  // (The one projection outside it, `writePreSpawnFailure`, carries no id and never contacts a host.)
+  //
+  // First-seen ordinal, deliberately NOT a hash. It preserves exactly the structure correlation
+  // needs -- the same id always yields the same token, distinct ids always yield distinct tokens --
+  // so a server request and its matching client response still pair, and a reused id is still
+  // visibly reused. It carries no preimage and is not offered as reversible redaction: what the
+  // proof retains is correlation structure, not identity.
+  //
+  // Integers pass through unchanged. They are driver-generated, which is what keeps the
+  // client-generated integer response lookup working untouched.
+  const retainedRpcIds = new Map();
+  const retainedRpcId = (id) => {
+    if (typeof id !== "string" || id.length === 0) {
+      return id;
+    }
+    if (!retainedRpcIds.has(id)) {
+      retainedRpcIds.set(id, `#${retainedRpcIds.size}`);
+    }
+    return retainedRpcIds.get(id);
+  };
 
   const retainEvent = (event) => {
+    if (Object.prototype.hasOwnProperty.call(event, "id")) {
+      event.id = retainedRpcId(event.id);
+    }
     const encoded = Buffer.byteLength(JSON.stringify(event), "utf8");
     if (
       events.length >= HARD_MAX_EVENTS ||
@@ -690,14 +720,20 @@ export async function runProof(options) {
 
   const dropClientWrite = (id) => {
     if (id != null) {
+      // Wire side: `pending` is keyed by the REAL id, so it is deleted by the real id.
       pending.delete(id);
     }
+    // Retention side: retained events carry the projected token, so the scan below must compare
+    // against that. `.get` rather than `retainedRpcId` on purpose -- looking up a write we are
+    // dropping must not mint a token for an id that was never retained.
+    const retained =
+      typeof id === "string" && retainedRpcIds.has(id) ? retainedRpcIds.get(id) : id;
     for (let i = events.length - 1; i >= 0; i -= 1) {
       const event = events[i];
       if (event.direction !== "client") {
         continue;
       }
-      if (id != null ? event.id !== id : event.method !== "initialized") {
+      if (id != null ? event.id !== retained : event.method !== "initialized") {
         continue;
       }
       const encoded = Buffer.byteLength(JSON.stringify(event), "utf8");
