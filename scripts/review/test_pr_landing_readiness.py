@@ -163,14 +163,31 @@ class GitHubCommandBoundaryTests(unittest.TestCase):
                 MODULE.encoded_branch(branch)
 
     def test_run_json_refuses_unknown_command_shape_before_execution(self):
-        with patch.object(MODULE.subprocess, "run") as run, self.assertRaises(SystemExit):
-            MODULE.run_json(["python3", "-c", "print('not gh')"])
-        run.assert_not_called()
+        MODULE.validate_gh_command([
+            "gh", "api", "repos/example/repo/rules/branches/codex%2Freview-fix",
+        ])
+        commands = (
+            ["python3", "-c", "print('not gh')"],
+            ["gh", "api", "repos/../x"],
+            ["gh", "api", "repos/onlyone"],
+            ["gh", "api", "repos/example/repo/branches/main", "--method", "DELETE"],
+            ["gh", "api", "graphql", "-f", "query=mutation{deleteRepository}"],
+            ["gh", "pr", "view", "30", "--repo", "example/repo", "--json", "url", "--web"],
+        )
+        for command in commands:
+            with self.subTest(command=command), patch.object(MODULE.subprocess, "run") as run:
+                with self.assertRaises(SystemExit):
+                    MODULE.run_json(command)
+                run.assert_not_called()
 
     def test_run_json_timeout_and_output_ceiling_fail_closed(self):
+        command = [
+            "gh", "api", "graphql", "-f", f"query={MODULE.REQUIRED_CONTEXT_QUERY}",
+            "-f", "owner=example", "-f", "name=repo", "-f", "ref=refs/heads/main",
+        ]
         with patch.object(MODULE.subprocess, "run", side_effect=subprocess.TimeoutExpired("gh", 30)):
             with self.assertRaisesRegex(SystemExit, "timed out"):
-                MODULE.run_json(["gh", "api", "graphql"])
+                MODULE.run_json(command)
 
         def oversized(*args, **kwargs):
             kwargs["stdout"].write(b"x" * (MODULE.MAX_JSON_BYTES + 1))
@@ -178,7 +195,7 @@ class GitHubCommandBoundaryTests(unittest.TestCase):
 
         with patch.object(MODULE.subprocess, "run", side_effect=oversized):
             with self.assertRaisesRegex(SystemExit, "byte limit"):
-                MODULE.run_json(["gh", "api", "graphql"])
+                MODULE.run_json(command)
 
 
 class RequiredContextTests(unittest.TestCase):

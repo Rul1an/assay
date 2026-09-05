@@ -5,7 +5,7 @@ import re
 import subprocess
 import sys
 import tempfile
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 
 SHA_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])", re.IGNORECASE)
@@ -15,6 +15,9 @@ IDENTITY_COMPONENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}")
 REPO_COMPONENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 MAX_JSON_BYTES = 8 * 1024 * 1024
 COMMAND_TIMEOUT_SECONDS = 30
+PR_VIEW_FIELDS = "number,title,url,state,author,isDraft,mergeable,mergeStateStatus,headRefName,headRefOid,baseRefName,baseRefOid,body,reviews,comments"
+PR_CHECK_FIELDS = "name,state,bucket,link,workflow,event"
+REQUIRED_CONTEXT_QUERY = "query($owner:String!,$name:String!,$ref:String!){repository(owner:$owner,name:$name){ref(qualifiedName:$ref){branchProtectionRule{requiredStatusCheckContexts}}}}"
 
 
 def parse_repo(repo):
@@ -42,9 +45,46 @@ def validate_gh_command(args):
             or args[0] != "gh"):
         raise SystemExit("unsupported GitHub command shape")
     shape = tuple(args[1:3])
-    if shape not in {("pr", "view"), ("pr", "checks"), ("api", "graphql")}:
-        if args[1] != "api" or not args[2].startswith("repos/"):
+    if shape == ("pr", "view"):
+        if (len(args) != 8 or not args[3].isdigit() or args[4] != "--repo"
+                or args[6:] != ["--json", PR_VIEW_FIELDS]):
             raise SystemExit("unsupported GitHub command shape")
+        parse_repo(args[5])
+        return
+    if shape == ("pr", "checks"):
+        if (len(args) not in {8, 9} or not args[3].isdigit() or args[4] != "--repo"):
+            raise SystemExit("unsupported GitHub command shape")
+        parse_repo(args[5])
+        if args[6:] not in (["--json", PR_CHECK_FIELDS],
+                            ["--required", "--json", PR_CHECK_FIELDS]):
+            raise SystemExit("unsupported GitHub command shape")
+        return
+    if shape == ("api", "graphql"):
+        if (len(args) != 11 or args[3::2] != ["-f", "-f", "-f", "-f"]
+                or args[4] != f"query={REQUIRED_CONTEXT_QUERY}"
+                or not args[6].startswith("owner=") or not args[8].startswith("name=")
+                or not args[10].startswith("ref=refs/heads/")):
+            raise SystemExit("unsupported GitHub command shape")
+        parse_repo(f"{args[6][6:]}/{args[8][5:]}")
+        encoded_branch(args[10][len("ref=refs/heads/"):])
+        return
+    if args[1] == "api":
+        parts = args[2].split("/")
+        if len(parts) == 5 and parts[0] == "repos" and parts[3] == "branches":
+            encoded = parts[4]
+            allowed_tail = []
+        elif (len(parts) == 6 and parts[0] == "repos"
+              and parts[3:5] == ["rules", "branches"]):
+            encoded = parts[5]
+            allowed_tail = ["--paginate", "--slurp"]
+        else:
+            raise SystemExit("unsupported GitHub command shape")
+        parse_repo(f"{parts[1]}/{parts[2]}")
+        if (encoded_branch(unquote(encoded)) != encoded
+                or args[3:] not in ([], allowed_tail)):
+            raise SystemExit("unsupported GitHub command shape")
+        return
+    raise SystemExit("unsupported GitHub command shape")
 
 
 def run_json(args, allowed_returncodes=(0,)):
@@ -209,7 +249,7 @@ def required_contexts(repo, branch):
     branch_path = encoded_branch(branch)
     response = run_json([
         "gh", "api", "graphql", "-f",
-        "query=query($owner:String!,$name:String!,$ref:String!){repository(owner:$owner,name:$name){ref(qualifiedName:$ref){branchProtectionRule{requiredStatusCheckContexts}}}}",
+        f"query={REQUIRED_CONTEXT_QUERY}",
         "-f", f"owner={owner}", "-f", f"name={name}", "-f", f"ref=refs/heads/{branch}",
     ])
     try:
@@ -254,7 +294,7 @@ def main():
 
     pr = run_json([
         "gh", "pr", "view", str(args.pr), "--repo", args.repo, "--json",
-        "number,title,url,state,author,isDraft,mergeable,mergeStateStatus,headRefName,headRefOid,baseRefName,baseRefOid,body,reviews,comments",
+        PR_VIEW_FIELDS,
     ])
     # gh exits 8 for pending checks and 1 for failed checks while still emitting
     # the JSON needed to report their actual state.
@@ -270,7 +310,7 @@ def main():
     required = run_json([
         "gh", "pr", "checks", str(args.pr), "--repo", args.repo,
         *([] if explicit_checks else ["--required"]), "--json",
-        "name,state,bucket,link,workflow,event",
+        PR_CHECK_FIELDS,
     ], allowed_returncodes=(0, 1, 8))
     if explicit_checks:
         expected_required = sorted(set(explicit_checks))
