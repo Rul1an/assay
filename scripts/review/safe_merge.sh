@@ -45,7 +45,7 @@ fi
 
 if ! jq -e --arg record_author "$record_author" '
   any(.review_candidates[];
-      .author == $record_author and .verdict == "READY" and .current_head == true)
+      .record_author == $record_author and .verdict == "READY" and .current_head == true)
 ' <<<"$report" >/dev/null; then
   echo "BLOCKED: no current-head READY record by declared record author '$record_author'" >&2
   exit 1

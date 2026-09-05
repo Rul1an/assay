@@ -77,7 +77,8 @@ class CandidateBindingTests(unittest.TestCase):
         }
 
         self.assertEqual(MODULE.review_candidates(pr, current), [{
-            "author": "Rul1an",
+            "record_author": "Rul1an",
+            "reviewer_identity": "claude/reviewer",
             "verdict": "READY",
             "bound_sha": current,
             "current_head": True,

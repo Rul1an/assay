@@ -75,7 +75,11 @@ def machine_review_candidate(body, author):
         or independence.get("did_not_author_governing_spec") is not True
     ):
         return None
-    return {"verdict": result, "bound_sha": bound}
+    return {
+        "verdict": result,
+        "bound_sha": bound,
+        "reviewer_identity": f"{reviewer.get('agent')}/{reviewer.get('instance')}",
+    }
 
 
 def review_candidates(pr, head):
@@ -86,7 +90,8 @@ def review_candidates(pr, head):
         result = verdict(body)
         if result:
             rows.append({
-                "author": review.get("author", {}).get("login"),
+                "record_author": review.get("author", {}).get("login"),
+                "reviewer_identity": None,
                 "verdict": result,
                 "bound_sha": bound,
                 "current_head": bound == head,
@@ -98,7 +103,8 @@ def review_candidates(pr, head):
         machine = machine_review_candidate(body, author)
         if machine:
             rows.append({
-                "author": author,
+                "record_author": author,
+                "reviewer_identity": machine["reviewer_identity"],
                 "verdict": machine["verdict"],
                 "bound_sha": machine["bound_sha"],
                 "current_head": machine["bound_sha"] == head,
@@ -109,7 +115,8 @@ def review_candidates(pr, head):
         shas = SHA_RE.findall(body)
         if result and shas:
             rows.append({
-                "author": author,
+                "record_author": author,
+                "reviewer_identity": None,
                 "verdict": result,
                 "bound_sha": shas[0],
                 "current_head": shas[0] == head,
@@ -257,7 +264,8 @@ def main():
     if not candidates:
         print("  - none")
     for row in candidates:
-        print(f"  - `{row['verdict']}` by `{row['author']}` on `{row['bound_sha']}`; current=`{row['current_head']}` ({row['source']})")
+        identity = row["reviewer_identity"] or "not declared"
+        print(f"  - `{row['verdict']}` record by `{row['record_author']}`; reviewer `{identity}` on `{row['bound_sha']}`; current=`{row['current_head']}` ({row['source']})")
     print("- blockers:")
     if not blockers:
         print("  - none from machine-verifiable state")
