@@ -9,8 +9,23 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const SCHEMA = "assay.codex-host-proof.v4";
+export const SCHEMA = "assay.codex-host-proof.v5";
 export const FAKE_USER_AGENT = "assay-codex-host-proof-fake/1";
+// Closed install-route vocabulary. "local-build" is recordable on purpose: a failed
+// provenance run must be retained as what it was, not omitted into a cleaner record.
+export const INSTALL_ROUTES = Object.freeze([
+  "github-release",
+  "crates-io",
+  "host-bundled",
+  "local-build",
+]);
+// Routes that satisfy #2684 DoD cell 2. A local build never does.
+export const PUBLISHED_INSTALL_ROUTES = Object.freeze([
+  "github-release",
+  "crates-io",
+  "host-bundled",
+]);
+export const MAX_INSTALL_REFERENCE = 200;
 export const SKILL_NAME = "assay-golden-path";
 export const DECIDE_TOOL = "assay_policy_decide";
 export const DECIDE_INPUT = {
@@ -259,11 +274,29 @@ function exactKeys(value, expected) {
   );
 }
 
+export function installSourceBound(source) {
+  return (
+    exactKeys(source, ["route", "reference"]) &&
+    INSTALL_ROUTES.includes(source.route) &&
+    typeof source.reference === "string" &&
+    source.reference.length > 0 &&
+    source.reference.length <= MAX_INSTALL_REFERENCE &&
+    // one line, printable, no credential-shaped content
+    !/[\u0000-\u001f\u007f]/.test(source.reference) &&
+    !CREDENTIAL_KEY.test(source.reference)
+  );
+}
+
 function projectBoundBinary(bin) {
-  return {
+  const projected = {
     path: bin?.path,
     sha256: bin?.sha256,
+    installSource: bin?.installSource,
   };
+  if (bin?.version !== undefined) {
+    projected.version = bin.version;
+  }
+  return projected;
 }
 
 export function projectHostIdentity(identity) {
@@ -271,6 +304,8 @@ export function projectHostIdentity(identity) {
     return null;
   }
   return {
+    os: identity.os,
+    arch: identity.arch,
     codex: projectBoundBinary(identity.codex),
     codexCodeModeHost: projectBoundBinary(identity.codexCodeModeHost),
     assayMcp: projectBoundBinary(identity.assayMcp),
@@ -278,17 +313,34 @@ export function projectHostIdentity(identity) {
 }
 
 function boundBinary(bin) {
+  const shape = bin?.version === undefined
+    ? ["path", "sha256", "installSource"]
+    : ["path", "sha256", "installSource", "version"];
   return (
-    exactKeys(bin, ["path", "sha256"]) &&
+    exactKeys(bin, shape) &&
     typeof bin.path === "string" &&
     path.isAbsolute(bin.path) &&
     typeof bin.sha256 === "string" &&
-    /^[a-f0-9]{64}$/.test(bin.sha256)
+    /^[a-f0-9]{64}$/.test(bin.sha256) &&
+    installSourceBound(bin.installSource) &&
+    (bin.version === undefined ||
+      (typeof bin.version === "string" &&
+        bin.version.length > 0 &&
+        bin.version.length <= MAX_INSTALL_REFERENCE &&
+        !/[\u0000-\u001f\u007f]/.test(bin.version)))
   );
 }
 
 export function liveIdentityBound(identity) {
-  if (!exactKeys(identity, ["codex", "codexCodeModeHost", "assayMcp"])) {
+  if (!exactKeys(identity, ["os", "arch", "codex", "codexCodeModeHost", "assayMcp"])) {
+    return false;
+  }
+  if (
+    typeof identity.os !== "string" ||
+    identity.os.length === 0 ||
+    typeof identity.arch !== "string" ||
+    identity.arch.length === 0
+  ) {
     return false;
   }
   return (

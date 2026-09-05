@@ -15,7 +15,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   parseArgs,
   resolveHostIdentity as resolveHostIdentityProduction,
-  runProof,
+  runProof as runProofProduction,
 } from "./codex_host_proof.mjs";
 import {
   ALLOWED_TURN_ITEMS_VIEWS,
@@ -25,6 +25,11 @@ import {
   EXPECTED_TOOLS,
   HARD_MAX_SNAPSHOT_BYTES,
   HOST_SUBJECTS,
+  INSTALL_ROUTES,
+  PUBLISHED_INSTALL_ROUTES,
+  installSourceBound,
+  liveIdentityBound,
+  projectHostIdentity,
   KNOWN_ITEM_TYPES,
   KNOWN_METHODS,
   classifyCells,
@@ -93,10 +98,36 @@ function scratch() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "assay-2684-"));
 }
 
+// Declared install sources for CLI-level tests. Refusal tests need these too, so a
+// refusal still proves the behaviour under test rather than the missing precondition.
+const CLI_INSTALL_SOURCE_ARGS = Object.freeze([
+  "--install-source", "codex", "host-bundled", "test-fixture-codex",
+  "--install-source", "codexCodeModeHost", "host-bundled", "test-fixture-code-mode-host",
+  "--install-source", "assayMcp", "crates-io", "assay-mcp-server@0.0.0-test",
+]);
+
+const TEST_INSTALL_SOURCES = Object.freeze({
+  codex: { route: "host-bundled", reference: "test-fixture-codex" },
+  codexCodeModeHost: { route: "host-bundled", reference: "test-fixture-code-mode-host" },
+  assayMcp: { route: "crates-io", reference: "assay-mcp-server@0.0.0-test" },
+});
+
+// The in-process API bypasses parseArgs, so declared install sources are injected
+// here the same way the CLI injects them through argv.
+function runProof(options = {}) {
+  const { installSources, ...rest } = options;
+  return runProofProduction({
+    ...rest,
+    installSources: installSources ?? TEST_INSTALL_SOURCES,
+  });
+}
+
 function resolveHostIdentity(options = {}) {
+  const { installSources, proofRoot, ...rest } = options;
   return resolveHostIdentityProduction({
-    proofRoot: options.proofRoot ?? scratch(),
-    ...options,
+    ...rest,
+    proofRoot: proofRoot ?? scratch(),
+    installSources: installSources ?? TEST_INSTALL_SOURCES,
   });
 }
 
@@ -252,6 +283,7 @@ function driveCli(scenario, journey = "tool", extra = {}) {
     journey,
     "--timeout-ms",
     String(extra.timeoutMs ?? 4000),
+    ...CLI_INSTALL_SOURCE_ARGS,
   ];
   if (extra.allowLiveTurn) {
     args.push("--allow-live-turn");
@@ -286,7 +318,7 @@ test("driver calls the validator classification function; no extra classify modu
 test("synthetic positive control: cells pass without inventing external attestation", async () => {
   const { classified, manifest, proofRoot, driverOutcome, childExitCode, events } = await drive("valid");
   assert.equal(manifest.captureMode, "synthetic-fixture");
-  assert.equal(manifest.schema, "assay.codex-host-proof.v4");
+  assert.equal(manifest.schema, "assay.codex-host-proof.v5");
   assert.equal(childExitCode, 0);
   assert.equal(driverOutcome.exitCode, 0);
   assert.equal(manifest.childExitCode, 0);
@@ -893,6 +925,7 @@ function driveCliInline(childArgv, extra = {}) {
     extra.journey ?? "tool",
     "--timeout-ms",
     String(extra.timeoutMs ?? 4000),
+    ...CLI_INSTALL_SOURCE_ARGS,
   ];
   if (extra.maxBytes != null) {
     args.push("--max-bytes", String(extra.maxBytes));
@@ -1436,6 +1469,7 @@ test("production CLI rejects --child-argv; credential name variants are rejected
       proofRoot,
       "--project-root",
       projectRoot,
+      ...CLI_INSTALL_SOURCE_ARGS,
       "--child-argv",
       JSON.stringify(["node", FAKE, "--scenario", "valid", "--project-root", projectRoot]),
     ],
@@ -1694,9 +1728,19 @@ test("production host identity is observed from proof-owned binaries before CLI 
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
     const identity = manifest.hostIdentity;
     assert.ok(identity && typeof identity === "object", "production CLI must construct hostIdentity");
-    assert.deepEqual(Object.keys(identity).sort(), ["assayMcp", "codex", "codexCodeModeHost"]);
+    assert.deepEqual(
+      Object.keys(identity).sort(),
+      ["arch", "assayMcp", "codex", "codexCodeModeHost", "os"],
+    );
     for (const role of ["codex", "codexCodeModeHost", "assayMcp"]) {
-      assert.deepEqual(Object.keys(identity[role]).sort(), ["path", "sha256"]);
+      const expectedKeys = role === "codexCodeModeHost"
+        ? ["installSource", "path", "sha256"]
+        : ["installSource", "path", "sha256", "version"];
+      assert.deepEqual(Object.keys(identity[role]).sort(), expectedKeys);
+      assert.deepEqual(
+        Object.keys(identity[role].installSource).sort(),
+        ["reference", "route"],
+      );
       assert.equal(path.isAbsolute(identity[role].path), true, `${role} path must be absolute`);
       assert.match(identity[role].sha256, /^[a-f0-9]{64}$/);
       assert.equal(fs.lstatSync(identity[role].path).isFile(), true);
@@ -2036,6 +2080,7 @@ test("production CLI refuses --codex-bin and --assay-mcp-bin before spawn", () =
         proofRoot,
         "--project-root",
         projectRoot,
+        ...CLI_INSTALL_SOURCE_ARGS,
         flag,
         evil,
         "--journey",
@@ -2093,8 +2138,8 @@ test("PATH shadows drive observed Codex and Assay MCP identities", () => {
     assert.equal(sha256File(ignored.codex.path), sha256File(codexBin));
     assert.equal(sha256File(ignored.codexCodeModeHost.path), sha256File(codeModeHost));
     assert.equal(sha256File(ignored.assayMcp.path), sha256File(mcpBin));
-    assert.equal(ignored.codex.installSource, "PATH");
-    assert.equal(ignored.assayMcp.installSource, "PATH");
+    assert.deepEqual(ignored.codex.installSource, TEST_INSTALL_SOURCES.codex);
+    assert.deepEqual(ignored.assayMcp.installSource, TEST_INSTALL_SOURCES.assayMcp);
     assert.match(ignored.codex.version, /codex-shadow/);
     assert.match(ignored.assayMcp.version, /assay-mcp-server-shadow/);
     assert.notEqual(ignored.codex.path, fs.realpathSync(flagCodex));
@@ -2118,6 +2163,7 @@ test("PATH shadows drive observed Codex and Assay MCP identities", () => {
       "tool",
       "--timeout-ms",
       "4000",
+      ...CLI_INSTALL_SOURCE_ARGS,
     ],
     {
       encoding: "utf8",
@@ -2138,14 +2184,20 @@ test("PATH shadows drive observed Codex and Assay MCP identities", () => {
   assert.equal(sha256File(manifest.hostIdentity.assayMcp.path), sha256File(mcpBin));
   assert.deepEqual(
     Object.keys(manifest.hostIdentity).sort(),
-    ["assayMcp", "codex", "codexCodeModeHost"],
+    ["arch", "assayMcp", "codex", "codexCodeModeHost", "os"],
   );
-  assert.deepEqual(Object.keys(manifest.hostIdentity.codex).sort(), ["path", "sha256"]);
+  assert.deepEqual(
+    Object.keys(manifest.hostIdentity.codex).sort(),
+    ["installSource", "path", "sha256", "version"],
+  );
   assert.deepEqual(
     Object.keys(manifest.hostIdentity.codexCodeModeHost).sort(),
-    ["path", "sha256"],
+    ["installSource", "path", "sha256"],
   );
-  assert.deepEqual(Object.keys(manifest.hostIdentity.assayMcp).sort(), ["path", "sha256"]);
+  assert.deepEqual(
+    Object.keys(manifest.hostIdentity.assayMcp).sort(),
+    ["installSource", "path", "sha256", "version"],
+  );
   const events = JSON.parse(fs.readFileSync(path.join(proofRoot, "events.json"), "utf8"));
   const start = events.find(
     (event) => event.direction === "client" && event.method === "thread/start",
@@ -3157,8 +3209,8 @@ test("F5 PATH snapshot copy enforces a binary ceiling and running growth bound; 
   process.env.PATH = `${path.dirname(controlCodex)}${path.delimiter}${path.dirname(controlMcp)}${path.delimiter}${previousPath}`;
   try {
     const control = resolveHostIdentity();
-    assert.equal(control.codex.installSource, "PATH");
-    assert.equal(control.assayMcp.installSource, "PATH");
+    assert.deepEqual(control.codex.installSource, TEST_INSTALL_SOURCES.codex);
+    assert.deepEqual(control.assayMcp.installSource, TEST_INSTALL_SOURCES.assayMcp);
     assert.match(control.codex.version, /codex-shadow/);
   } finally {
     process.env.PATH = previousPath;
@@ -3382,8 +3434,8 @@ test("P1 shared 512 MiB ceiling rejects sparse hash and removes snap root; contr
   process.env.PATH = `${path.dirname(controlCodex)}${path.delimiter}${path.dirname(controlMcp)}${path.delimiter}${previousPath}`;
   try {
     const control = resolveHostIdentity();
-    assert.equal(control.codex.installSource, "PATH");
-    assert.equal(control.assayMcp.installSource, "PATH");
+    assert.deepEqual(control.codex.installSource, TEST_INSTALL_SOURCES.codex);
+    assert.deepEqual(control.assayMcp.installSource, TEST_INSTALL_SOURCES.assayMcp);
   } finally {
     process.env.PATH = previousPath;
   }
@@ -6918,4 +6970,114 @@ test("#2812: failed or interrupted terminal status dominates across all itemsVie
       );
     }
   }
+});
+
+// --- #2684 cell 1: install source is declared, bounded, and survives to disk ---
+
+test("#2684: install source is required and never defaulted", () => {
+  // Positive control first: a complete declaration is accepted.
+  const ok = parseArgs([
+    "--install-source", "assayMcp", "crates-io", "assay-mcp-server@6.0.0",
+  ]);
+  assert.deepEqual(ok.installSources.assayMcp, {
+    route: "crates-io",
+    reference: "assay-mcp-server@6.0.0",
+  });
+
+  // An absent declaration must fail closed rather than read as a pass.
+  assert.throws(
+    () => resolveHostIdentityProduction({ proofRoot: scratch(), installSources: {} }),
+    /--install-source is required for: codex, codexCodeModeHost, assayMcp/,
+  );
+  assert.throws(
+    () => resolveHostIdentityProduction({ proofRoot: scratch() }),
+    /--install-source is required/,
+  );
+});
+
+test("#2684: install source vocabulary is closed and references are bounded", () => {
+  assert.deepEqual(
+    [...INSTALL_ROUTES].sort(),
+    ["crates-io", "github-release", "host-bundled", "local-build"],
+  );
+  // A local build is recordable but never counts as published.
+  assert.equal(PUBLISHED_INSTALL_ROUTES.includes("local-build"), false);
+  for (const route of PUBLISHED_INSTALL_ROUTES) {
+    assert.equal(INSTALL_ROUTES.includes(route), true);
+  }
+
+  assert.equal(installSourceBound({ route: "crates-io", reference: "a@1" }), true);
+  for (const [label, value] of [
+    ["unknown route", { route: "sideloaded", reference: "a" }],
+    ["empty reference", { route: "crates-io", reference: "" }],
+    ["newline injection", { route: "crates-io", reference: "a\nVERDICT: READY" }],
+    ["control character", { route: "crates-io", reference: "a\u0000b" }],
+    ["credential shaped", { route: "crates-io", reference: "api_key=AKIAIOSFODNN7EXAMPLE" }],
+    ["over length", { route: "crates-io", reference: "a".repeat(201) }],
+    ["extra key", { route: "crates-io", reference: "a", note: "x" }],
+    ["missing reference", { route: "crates-io" }],
+    ["not an object", "crates-io"],
+  ]) {
+    assert.equal(installSourceBound(value), false, `${label} must be refused`);
+  }
+});
+
+test("#2684: parseArgs refuses malformed or repeated install-source declarations", () => {
+  for (const [label, argv] of [
+    ["unknown subject", ["--install-source", "nope", "crates-io", "a"]],
+    ["unknown route", ["--install-source", "assayMcp", "sideloaded", "a"]],
+    ["newline in reference", ["--install-source", "assayMcp", "crates-io", "a\nREADY"]],
+    ["duplicate subject", [
+      "--install-source", "assayMcp", "crates-io", "a",
+      "--install-source", "assayMcp", "crates-io", "b",
+    ]],
+  ]) {
+    assert.throws(() => parseArgs(argv), /--install-source/, `${label} must be refused`);
+  }
+});
+
+test("#2684: the projection retains install source, version, os and arch", () => {
+  // This is the regression that lost cell 1: the producer probed version and
+  // installSource, and projectHostIdentity dropped both on the way to disk.
+  const identity = {
+    os: "darwin",
+    arch: "arm64",
+    codex: {
+      path: "/proof/codex.snapshot",
+      version: "codex 0.153.4",
+      sha256: "a".repeat(64),
+      installSource: { route: "host-bundled", reference: "Codex.app" },
+    },
+    codexCodeModeHost: {
+      path: "/proof/codex-code-mode-host",
+      sha256: "b".repeat(64),
+      installSource: { route: "host-bundled", reference: "Codex.app" },
+    },
+    assayMcp: {
+      path: "/proof/assay-mcp-server.snapshot",
+      version: "assay-mcp-server 6.0.0",
+      sha256: "c".repeat(64),
+      installSource: { route: "crates-io", reference: "assay-mcp-server@6.0.0" },
+    },
+  };
+  const projected = projectHostIdentity(identity);
+  assert.equal(projected.os, "darwin");
+  assert.equal(projected.arch, "arm64");
+  assert.equal(projected.codex.version, "codex 0.153.4");
+  assert.equal(projected.assayMcp.version, "assay-mcp-server 6.0.0");
+  assert.deepEqual(projected.assayMcp.installSource, {
+    route: "crates-io",
+    reference: "assay-mcp-server@6.0.0",
+  });
+  // A subject without a probed version keeps the shorter shape rather than a null.
+  assert.deepEqual(
+    Object.keys(projected.codexCodeModeHost).sort(),
+    ["installSource", "path", "sha256"],
+  );
+  // The projected identity must still satisfy the live binding contract.
+  assert.equal(liveIdentityBound(projected), true);
+  // ... and lose it if the install source is stripped, so the field is load bearing.
+  const stripped = JSON.parse(JSON.stringify(projected));
+  delete stripped.assayMcp.installSource;
+  assert.equal(liveIdentityBound(stripped), false);
 });
