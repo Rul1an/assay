@@ -2110,12 +2110,21 @@ function projectToolResult(result) {
   // `isError === true`, each with its own named reason, and those can only fire on a field the
   // projection carried through.
   //
-  // Two corrections from the independent review of this change, kept rather than quietly dropped:
-  // an earlier comment here named `retainedItemReason`, which never reads `isError` at all; and it
-  // claimed dropping these fields would "delete live refusals". It would not -- measured, the three
-  // cases are still refused, by the generic projection-violation gate, as `unclassified`. So the
-  // refusal would be RELOCATED to a coarser gate that reports a different reason, not deleted.
-  // That is still worth avoiding, but it is a weaker claim than the one first written here.
+  // Three corrections from independent review, kept rather than quietly dropped. An earlier
+  // comment named `retainedItemReason`, which never reads `isError` at all. It then claimed that
+  // dropping these fields would "delete live refusals", which a second review showed is imprecise
+  // in a way that depends entirely on WHICH variant is measured -- so the variant is named here:
+  //
+  //   - drop the retention bodies AND these two allow-list entries: the three cases are still
+  //     refused, as `unclassified`, by the generic projection-violation gate. Refusal RELOCATED to
+  //     a coarser gate reporting a different reason. But a legitimate `isError: false` result is
+  //     then refused too -- which is exactly the #2807 failure class, a schema-correct record
+  //     rejected by an incomplete allow list. That is worse than "relocated", not milder.
+  //   - drop only the retention bodies, keep the allow-list entries: all three cases become clean
+  //     `server-notification`. The refusal is DELETED outright.
+  //
+  // So both readings are bad, for opposite reasons, and neither is the mild "relocation" first
+  // written here. The fields stay.
   //
   // Precise about what pins what: the existing tests named around `isError` mutate ALREADY
   // PROJECTED events, so they pin the consumer, not the producer's `"[invalid]"` conversion above.
