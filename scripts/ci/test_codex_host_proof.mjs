@@ -7140,3 +7140,59 @@ test("#2822 F1: reference and version are printable ASCII, not merely control-fr
   assert.equal(withVersion("codex 0.153.4"), true);
   assert.equal(withVersion(`codex${cp(0x2028)}0.153.4`), false);
 });
+
+test("#2822 F1: the printable-ASCII contract is exactly U+0020-U+007E, swept", () => {
+  const cp = (n) => String.fromCodePoint(n);
+  // Completeness is proven rather than asserted: for every code point in the BMP the
+  // validator's answer must agree with the stated contract, in both directions. A
+  // blocklist cannot pass this; only an allowlist can.
+  let checked = 0;
+  for (let point = 0; point <= 0xffff; point += 1) {
+    if (point >= 0xd800 && point <= 0xdfff) {
+      continue; // lone surrogates are not scalar values
+    }
+    const inContract = point >= 0x20 && point <= 0x7e;
+    const value = `a${cp(point)}b`;
+    if (boundedPrintable(value) !== inContract) {
+      assert.fail(
+        `U+${point.toString(16).toUpperCase().padStart(4, "0")} disagrees with the contract: ` +
+        `expected ${inContract ? "accepted" : "refused"}`,
+      );
+    }
+    checked += 1;
+  }
+  assert.equal(checked, 0x10000 - 0x800, "the sweep must cover every BMP scalar value");
+
+  // Astral planes are outside the contract too, including emoji and tag characters.
+  for (const point of [0x1f600, 0xe0001, 0xe0041, 0x10ffff]) {
+    assert.equal(boundedPrintable(`a${cp(point)}b`), false, `U+${point.toString(16)} must be refused`);
+  }
+
+  // The full agreed bidi ranges, named so a regression reports which range returned.
+  for (const [label, lo, hi] of [
+    ["bidi embeddings and overrides U+202A-U+202E", 0x202a, 0x202e],
+    ["bidi isolates U+2066-U+2069", 0x2066, 0x2069],
+    ["zero-width and marks U+200B-U+200F", 0x200b, 0x200f],
+  ]) {
+    for (let point = lo; point <= hi; point += 1) {
+      const reference = `assay-mcp-server@6.0.0${cp(point)}`;
+      assert.equal(
+        installSourceBound({ route: "crates-io", reference }),
+        false,
+        `${label}: U+${point.toString(16).toUpperCase()} must be refused in a reference`,
+      );
+    }
+  }
+
+  // Positive controls: the vocabulary references actually used must all remain valid.
+  for (const reference of [
+    "assay-mcp-server@6.0.0",
+    "v6.0.0/assay-v6.0.0-aarch64-apple-darwin.tar.gz",
+    "Codex.app",
+    "assay-mcp-server-v6.0.0-x86_64-unknown-linux-gnu.tar.gz",
+    "a".repeat(200),
+  ]) {
+    assert.equal(installSourceBound({ route: "github-release", reference }), true, reference.slice(0, 40));
+  }
+  assert.equal(installSourceBound({ route: "github-release", reference: "a".repeat(201) }), false);
+});

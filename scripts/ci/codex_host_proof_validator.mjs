@@ -26,11 +26,25 @@ export const PUBLISHED_INSTALL_ROUTES = Object.freeze([
   "host-bundled",
 ]);
 export const MAX_INSTALL_REFERENCE = 200;
-// One line of printable ASCII. This is an allowlist on purpose. The first version of
-// this check blocked C0 and DEL, and that blocklist silently admitted U+2028, U+2029,
-// U+0085, U+200B, U+FEFF and the bidi overrides, every one of which can split or
-// reorder rendered output without failing closed. An allowlist cannot be defeated by
-// a code point nobody thought to list.
+// Contract: a reference or version is one line of printable ASCII, U+0020 to U+007E
+// inclusive. Everything else is refused. Stated as what that excludes, because the
+// review finding was about classes nobody enumerated:
+//
+//   U+0000-U+001F  C0 controls, including newline and tab
+//   U+007F-U+009F  DEL and the C1 controls, including U+0085 NEL
+//   U+00A0         no-break space, and every other non-ASCII space
+//   U+200B-U+200F  zero-width space, ZWNJ, ZWJ, LRM, RLM
+//   U+202A-U+202E  bidi embeddings and overrides
+//   U+2028, U+2029 line and paragraph separators
+//   U+2066-U+2069  bidi isolates
+//   U+FEFF         BOM / zero-width no-break space
+//   everything else outside U+0020-U+007E, including all astral planes
+//
+// This is an allowlist on purpose. The first version blocked C0 and DEL only, and that
+// blocklist silently admitted six of the classes above. A blocklist has to enumerate
+// every hostile code point; an allowlist cannot be defeated by one nobody listed. The
+// list above documents the contract, it does not implement it, so it cannot drift out
+// of sync with enforcement. `boundedPrintable` is the single validator for both fields.
 const PRINTABLE_ASCII_LINE = /^[\x20-\x7e]+$/;
 
 export function boundedPrintable(value, max = MAX_INSTALL_REFERENCE) {
