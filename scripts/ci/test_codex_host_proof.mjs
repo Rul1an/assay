@@ -5403,3 +5403,122 @@ test("mcpToolCall allowedKeys equals the 0.153.1 schema property set", () => {
     "control: a key outside the schema must still be marked",
   );
 });
+
+// --- F-A: the whitelist must equal the schema set, not merely contain it -------------------
+// The sibling test above asserts schemaProperties ⊆ allowedKeys. That leaves the other direction
+// open: adding a key the schema does not declare survives it. A closed whitelist that admits an
+// undeclared field is the mirror of one that omits a declared one -- it accepts something 0.153.1
+// never says the host sends, so the "equals" in that test's name has to be earned in both
+// directions or not claimed.
+test("mcpToolCall allowedKeys admits nothing the 0.153.1 schema does not declare", () => {
+  // Names deliberately outside the 13 declared properties, including several that are plausible
+  // near-misses of real fields elsewhere in the protocol.
+  const notInSchema = [
+    "reason",
+    "content",
+    "text",
+    "output",
+    "sessionId",
+    "aggregatedOutput",
+    "command",
+    "cwd",
+    "notInTheSchemaAtAll",
+  ];
+  for (const key of notInSchema) {
+    const item = projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "install_surface_allowed_probe" },
+          result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+          [key]: null,
+        },
+      },
+    }).params.item;
+    assert.deepEqual(
+      item.__unexpectedKeys,
+      [key],
+      `${key} is not declared by the 0.153.1 schema and must be marked unexpected`,
+    );
+  }
+  // Control: a declared property must still be accepted, so the assertion above cannot pass by
+  // marking everything.
+  const declared = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5000,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: {
+        type: "mcpToolCall",
+        id: "tool-1",
+        server: "assay",
+        tool: "assay_policy_decide",
+        status: "completed",
+        arguments: { tool: "install_surface_allowed_probe" },
+        result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+        durationMs: 120,
+      },
+    },
+  }).params.item;
+  assert.equal(Object.hasOwn(declared, "__unexpectedKeys"), false, "control: a declared property must be accepted");
+});
+
+// --- F-B: the producer's non-string barrier must hold for NON-SCALARS ----------------------
+// Every existing case at these positions uses a scalar non-string, and the consumer's own type
+// check catches scalars -- so the producer barrier is never the deciding check and its deletion
+// went unnoticed. An object or array is the input where the producer is the only thing standing
+// between host content and the retained bytes: without it the value is written verbatim BEFORE
+// the consumer refuses the record.
+for (const [label, patch, marker] of [
+  ["pluginId object", { pluginId: { secret: "FB-PLUGIN-OBJ" } }, "FB-PLUGIN-OBJ"],
+  ["mcpAppResourceUri array", { mcpAppResourceUri: ["FB-URI-ARR"] }, "FB-URI-ARR"],
+  ["appContext.actionName object", { appContext: { connectorId: "c-1", actionName: { s: "FB-ACTION-OBJ" } } }, "FB-ACTION-OBJ"],
+  ["appContext.resourceUri array", { appContext: { connectorId: "c-1", resourceUri: ["FB-RES-ARR"] } }, "FB-RES-ARR"],
+  ["error.message object", { error: { message: { s: "FB-ERRMSG-OBJ" } } }, "FB-ERRMSG-OBJ"],
+]) {
+  test(`F-B producer: a non-scalar at ${label} is refused and never retained`, () => {
+    const projected = projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "install_surface_allowed_probe" },
+          result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+          ...patch,
+        },
+      },
+    });
+    assert.equal(
+      JSON.stringify(projected).includes(marker),
+      false,
+      `${label}: host content must not reach retained bytes even though the consumer would refuse the record`,
+    );
+    assert.equal(
+      classifyStoredEvent(projected).type,
+      "unclassified",
+      `${label}: the record must still be refused`,
+    );
+  });
+}
