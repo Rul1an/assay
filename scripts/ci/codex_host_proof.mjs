@@ -594,7 +594,7 @@ export async function runProof(options) {
   const pending = new Map();
   // A STRING rpc id can only have come from the host: the driver's own requests take their ids from
   // `nextId`, which is always an integer. So every retained string id is host text, exactly like a
-  // method name or a key name.
+  // method name or a key name. The converse does NOT hold -- see the note on integers below.
   //
   // The wire is untouched -- the child still sees, and we still answer with, the real id, so string
   // ids remain fully supported on the protocol. Only what is RETAINED is relabelled, through one
@@ -607,8 +607,11 @@ export async function runProof(options) {
   // visibly reused. It carries no preimage and is not offered as reversible redaction: what the
   // proof retains is correlation structure, not identity.
   //
-  // Integers pass through unchanged. They are driver-generated, which is what keeps the
-  // client-generated integer response lookup working untouched.
+  // Integers pass through unchanged -- but NOT because they are ours. A host may choose a numeric
+  // id too; what is true is only that driver-ORIGINATED requests always take integers from
+  // `nextId`, which is not the converse. They are preserved because the protocol requires numeric
+  // ids to stay valid on the wire and an integer carries no text, not because their provenance is
+  // known. Preserving them is also what keeps the client-generated integer response lookup working.
   const retainedRpcIds = new Map();
   const retainedRpcId = (id) => {
     if (typeof id !== "string" || id.length === 0) {
