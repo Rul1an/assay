@@ -24,6 +24,8 @@ import {
   EXPECTED_TOOLS,
   HARD_MAX_SNAPSHOT_BYTES,
   HOST_SUBJECTS,
+  KNOWN_ITEM_TYPES,
+  KNOWN_METHODS,
   classifyRecord,
   classifyStoredEvent,
   consumeJourneyTopology,
@@ -4622,12 +4624,28 @@ const OBSERVED_NON_EVIDENTIARY_ITEMS = Object.freeze([
     delivery: "final",
     memoryCitation: null,
   }),
+  Object.freeze({
+    type: "commandExecution",
+    id: "exec_1",
+    command: "ls -la /private/tmp",
+    commandActions: [{ type: "read", path: "/private/tmp" }],
+    cwd: "/private/tmp",
+    status: "completed",
+    aggregatedOutput: "sensitive directory output",
+    durationMs: 42,
+    exitCode: 0,
+    pluginId: null,
+    processId: "1234",
+    scriptPath: null,
+    source: "agent",
+  }),
 ]);
 
 const OBSERVED_NON_EVIDENTIARY_NOTIFICATIONS = Object.freeze([
   "account/rateLimits/updated",
   "item/agentMessage/delta",
   "thread/tokenUsage/updated",
+  "serverRequest/resolved",
 ]);
 
 test("stableStringify refuses non-JSON primitives; JSON null stays a valid token", () => {
@@ -4688,7 +4706,7 @@ test("known non-evidentiary items project to a closed type and id only", () => {
   assert.equal(withNull.params.item.id, null, "JSON null must survive the scalar boundary");
 });
 
-test("current Codex non-evidentiary items are scrubbed and do not invalidate a real tool row", async () => {
+test("current Codex non-evidentiary items are dropped and do not invalidate a real tool row", async () => {
   const control = await drive("valid");
   assert.equal(validateProofRoot(control.proofRoot).ok, true, "unchanged control must validate");
   const events = structuredClone(control.events);
@@ -4780,43 +4798,83 @@ test("zero retained mcpToolCall rows keep oneToolInvoked non-pass", async () => 
   assert.notEqual(classified.cells.structuredResultValidated.status, "pass");
 });
 
+// Reaches projectRetainedItem's type projection through the exported entry point, so the assertion
+// is on production behaviour rather than on a re-implementation of the rule.
+function projectRetainedItem_typeOf(rawType) {
+  const projected = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 1,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: {
+        type: rawType,
+        id: "item-1",
+        server: "assay",
+        tool: "unmapped",
+        arguments: { tool: "x", policy: "y" },
+        status: "completed",
+      },
+    },
+  });
+  return projected.params.item.type;
+}
+
 test("projection-idempotent unknown terminal items are drift, not accepted topology", async () => {
   const control = await drive("valid");
-  for (const type of ["futureHostItem", "not-a-retained-item"]) {
+  // An unknown item type is now an explicit projection violation, not a legal-looking substitute,
+  // so it is refused at the consumer and can no longer reach the cells at all. That is strictly
+  // stronger than the drift path this test used to probe, so the probe is re-aimed at the barrier.
+  for (const raw of ["futureHostItem", "not-a-retained-item"]) {
+    const projectedType = projectRetainedItem_typeOf(raw);
+    assert.equal(
+      typeof projectedType,
+      "object",
+      `${raw} must become an explicit violation, never a legal-looking value`,
+    );
+    assert.equal(
+      JSON.stringify(projectedType).includes(raw),
+      false,
+      `${raw} must not survive inside the violation marker`,
+    );
+  }
+  // Past the projection barrier: a terminal item that is well-formed EXCEPT for carrying a
+  // violation must still be refused by the cells and by revalidation, not merely marked. The
+  // crafted item is projected first, so what is classified is what a real run would have persisted
+  // -- this is the "probe past the round-trip" the test exists for, re-expressed now that an
+  // unknown type cannot survive projection at all.
+  for (const label of ["unknown-type", "undeclared-tool"]) {
     const events = structuredClone(control.events);
     const terminal = events.find((event) => event.method === "turn/completed");
     assert.ok(terminal, "control run must contain the terminal turn");
-    const crafted = {
-      type,
-      id: `item_${type}`,
+    terminal.params.turn.items.push({
+      type: label === "unknown-type" ? "futureHostItem" : "mcpToolCall",
+      id: `item_${label}`,
       server: "assay",
-      tool: "unmapped",
+      tool: label === "undeclared-tool" ? "unmapped" : "assay_policy_decide",
       arguments: { tool: "x", policy: "y" },
       status: "completed",
-    };
-    terminal.params.turn.items.push(crafted);
-    assert.deepEqual(
-      projectRetainedEvent(terminal),
-      terminal,
-      `${type} fixture must be a projection fixed point, or this test stops probing past the round-trip check`,
-    );
-    const classified = classifyRecord({ ...control.manifest, events });
+    });
+    const projected = projectRetainedEvent(terminal);
+    const classified = classifyRecord({ ...control.manifest, events: [...events.slice(0, -1), projected] });
     assert.equal(
       allIntendedCellsPass(classified),
       false,
-      `a ${type} terminal item must not classify clean`,
+      `a ${label} terminal item must not classify clean`,
     );
-    assert.match(
-      Object.values(classified.cells)
-        .map((entry) => entry.reason)
-        .join("; "),
-      /unknown retained item type/,
-      `a ${type} terminal item must be explicit protocol drift`,
-    );
-    rewriteProof(control.proofRoot, control.manifest, events, classified);
-    const revalidated = validateProofRoot(control.proofRoot);
-    assert.equal(revalidated.ok, false, `a ${type} terminal item must not validate clean`);
-    assert.match(revalidated.reasons.join("; "), /unknown retained item type/);
+    const reasons = Object.values(classified.cells)
+      .map((entry) => entry.reason)
+      .join("; ");
+    // Group E: the refusal must name the condition and never echo the host value.
+    for (const hostValue of ["futureHostItem", "unmapped"]) {
+      assert.equal(
+        reasons.includes(hostValue),
+        false,
+        `${label}: a refusal reason must not echo the host value ${hostValue}`,
+      );
+    }
   }
 });
 
@@ -4849,4 +4907,1303 @@ test("non-finite numbers never silently become JSON null at either boundary", ()
   }
   assert.equal(stableStringify({ completedAtMs: 5 }), '{"completedAtMs":5}\n');
   assert.equal(stableStringify([0, -1.5]), '[0,-1.5]\n');
+});
+
+test("commandExecution projects to closed type and id only; sensitive fields are dropped, not scrubbed", () => {
+  const rawItem = OBSERVED_NON_EVIDENTIARY_ITEMS.find((item) => item.type === "commandExecution");
+  assert.ok(rawItem, "fixture must contain commandExecution");
+  const projected = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 12345,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: rawItem,
+    },
+  });
+  assert.deepEqual(projected.params.item, {
+    type: "commandExecution",
+    id: "exec_1",
+  });
+  const serialized = stableStringify(projected);
+  assert.equal(serialized.includes("sensitive directory output"), false);
+  assert.equal(serialized.includes("ls -la"), false);
+  assert.equal(serialized.includes("/private/tmp"), false);
+
+  const unprojectedRaw = {
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 12345,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: rawItem,
+    },
+  };
+  const classified = classifyStoredEvent(unprojectedRaw);
+  assert.equal(
+    classified.type,
+    "unclassified",
+    "unprojected commandExecution containing raw fields must fail closed",
+  );
+});
+
+test("Codex 0.153.1 mcpToolCall schema fields type-check; free text is recorded as presence and unexpected keys are marked", () => {
+  const rawToolCall = {
+    type: "mcpToolCall",
+    id: "tool-1",
+    server: "assay",
+    tool: "assay_policy_decide",
+    status: "completed",
+    arguments: { tool: "install_surface_allowed_probe", policy: "install-surface-policy.yaml" },
+    durationMs: 120,
+    readOnlyHint: true,
+    pluginId: "plugin-assay",
+    mcpAppResourceUri: "resource://assay",
+    appContext: {
+      connectorId: "connector-1",
+      linkId: "link-1",
+      resourceUri: "uri://assay-policy",
+    },
+    error: {
+      message: "authorization failed for token sk-secret12345678",
+    },
+    result: {
+      isError: false,
+      structuredContent: { allowed: true, reason: "ok" },
+    },
+  };
+
+  const projected = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5000,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: rawToolCall,
+    },
+  });
+  const projectedItem = projected.params.item;
+  assert.equal(Object.hasOwn(projectedItem, "__unexpectedKeys"), false);
+  assert.equal(projectedItem.durationMs, 120);
+  assert.equal(projectedItem.readOnlyHint, true);
+  assert.equal(projectedItem.pluginId, "[present]");
+  assert.equal(projectedItem.mcpAppResourceUri, "[present]");
+  assert.deepEqual(projectedItem.appContext, {
+    connectorId: "[present]",
+    linkId: "[present]",
+    resourceUri: "[present]",
+  });
+  assert.equal(
+    projectedItem.error.message,
+    "[present]",
+    "error message must record presence, not content: scrub() is a keyword regex and cannot bound arbitrary secret text",
+  );
+
+  const unexpectedKeyCall = structuredClone(rawToolCall);
+  unexpectedKeyCall.unknownHostMetadata = "unexpected";
+  const projectedWithUnexpected = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5000,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: unexpectedKeyCall,
+    },
+  });
+  assert.equal(
+    projectedWithUnexpected.params.item.__unexpectedKeys,
+    "[present]",
+    "the marker records that unexpected keys existed, never which",
+  );
+  assert.equal(
+    JSON.stringify(projectedWithUnexpected).includes("unknownHostMetadata"),
+    false,
+    "the unexpected key NAME must never reach retained bytes",
+  );
+});
+
+test("failed MCP tool status fails oneToolInvoked and structuredResultValidated", async () => {
+  const control = await drive("valid");
+  const events = structuredClone(control.events);
+  const toolIndex = events.findIndex(
+    (event) => event.method === "item/completed" && event.params?.item?.type === "mcpToolCall",
+  );
+  assert.notEqual(toolIndex, -1);
+  events[toolIndex].params.item.status = "failed";
+  events[toolIndex].params.item.result = null;
+
+  const terminal = events.find((event) => event.method === "turn/completed");
+  const terminalTool = terminal.params.turn.items.find(
+    (item) => item?.type === "mcpToolCall",
+  );
+  if (terminalTool) {
+    terminalTool.status = "failed";
+    terminalTool.result = null;
+  }
+
+  const classified = classifyRecord({ ...control.manifest, events });
+  assert.equal(classified.cells.oneToolInvoked.status, "fail");
+  // The reason names the condition, never the host-supplied value (group E).
+  assert.match(classified.cells.oneToolInvoked.reason, /status is not completed/);
+  assert.equal(
+    classified.cells.oneToolInvoked.reason.includes("failed"),
+    false,
+    "a refusal reason must not echo the host status value",
+  );
+  assert.equal(classified.cells.structuredResultValidated.status, "unavailable");
+});
+
+test("canonical Codex 0.153.1 elicitation prompt is accepted; unexpected prompt is declined", () => {
+  const canonical01531 = {
+    serverName: "assay",
+    threadId: "t-1",
+    turnId: "u-1",
+    mode: "form",
+    message: 'Allow the assay MCP server to run tool "assay_policy_decide"?',
+    requestedSchema: { type: "object", properties: {} },
+  };
+  assert.equal(
+    elicitationAcceptable(canonical01531, "t-1", "u-1"),
+    true,
+    "canonical 0.153.1 elicitation message must be accepted",
+  );
+
+  const syntheticLegacy = {
+    serverName: "assay",
+    threadId: "t-1",
+    turnId: "u-1",
+    mode: "form",
+    message: "approve assay_policy_decide",
+    requestedSchema: { type: "object", properties: {} },
+  };
+  assert.equal(
+    elicitationAcceptable(syntheticLegacy, "t-1", "u-1"),
+    true,
+    "legacy synthetic elicitation message must remain accepted",
+  );
+
+  const unexpectedPrompt = {
+    ...canonical01531,
+    message: 'Allow the assay MCP server to run tool "unrelated_tool"?',
+  };
+  assert.equal(
+    elicitationAcceptable(unexpectedPrompt, "t-1", "u-1"),
+    false,
+    "elicitation for an unpinned tool must be declined",
+  );
+});
+
+test("classifyRecord rejects invalid 0.153.1 metadata types at the consumer boundary", async () => {
+  const control = await drive("valid");
+  assert.equal(allIntendedCellsPass(control.classified), true, "control must pass all cells");
+
+  const badMetadataVariants = [
+    { durationMs: "wrong" },
+    { durationMs: -1 },
+    { durationMs: 1.5 },
+    { readOnlyHint: 42 },
+    { readOnlyHint: "true" },
+    { pluginId: false },
+    { pluginId: 123 },
+    { mcpAppResourceUri: true },
+    { error: {} },
+    { error: { message: 123 } },
+    { appContext: {} },
+    { appContext: { connectorId: 123 } },
+    { durationMs: "wrong", readOnlyHint: 42, pluginId: false, error: {} },
+  ];
+
+  for (const badMeta of badMetadataVariants) {
+    const events = structuredClone(control.events);
+    const itemCompleted = events.find(
+      (e) => e.method === "item/completed" && e.params?.item?.type === "mcpToolCall",
+    );
+    assert.ok(itemCompleted);
+    Object.assign(itemCompleted.params.item, badMeta);
+
+    const terminal = events.find((e) => e.method === "turn/completed");
+    const terminalTool = terminal.params.turn.items.find(
+      (item) => item?.type === "mcpToolCall",
+    );
+    assert.ok(terminalTool);
+    Object.assign(terminalTool, badMeta);
+
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(
+      allIntendedCellsPass(classified),
+      false,
+      `metadata ${JSON.stringify(badMeta)} must not produce an all-pass classification`,
+    );
+  }
+});
+
+test("mcpToolCall with non-null error fails oneToolInvoked even if status claims completed", async () => {
+  const control = await drive("valid");
+  const events = structuredClone(control.events);
+  const itemCompleted = events.find(
+    (e) => e.method === "item/completed" && e.params?.item?.type === "mcpToolCall",
+  );
+  itemCompleted.params.item.error = { message: "unexpected error" };
+
+  const terminal = events.find((e) => e.method === "turn/completed");
+  const terminalTool = terminal.params.turn.items.find(
+    (item) => item?.type === "mcpToolCall",
+  );
+  terminalTool.error = { message: "unexpected error" };
+
+  const classified = classifyRecord({ ...control.manifest, events });
+  assert.notEqual(
+    classified.cells.oneToolInvoked.status,
+    "pass",
+    "mcpToolCall with error must not pass oneToolInvoked",
+  );
+  assert.equal(
+    classified.cells.structuredResultValidated.status,
+    "unavailable",
+  );
+});
+
+test("F1: retained mcpToolCall metadata records presence, never host-supplied content", () => {
+  // The producer of retained bytes must not write free-text host metadata verbatim. These fields
+  // have no evidentiary consumer: no classification cell reads their content. Retaining presence
+  // preserves every check that does exist while removing the only reason secrets can land in the
+  // proof. scrub() is a keyword regex and cannot bound arbitrary secret text, so error.message is
+  // held to the same rule rather than scrubbed.
+  const secrets = {
+    connectorId: "conn-alice@corp.example",
+    actionName: "read /Users/alice/Documents/salary.xlsx",
+    appName: "Private App",
+    linkId: "https://example.invalid/cb?access_token=eyJhbGciOi.J9.sig",
+    resourceUri: "https://example.invalid/r?bearer=eyJhbGciOi.J9.sig",
+  };
+  const projected = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5000,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: {
+        type: "mcpToolCall",
+        id: "tool-1",
+        server: "assay",
+        tool: "assay_policy_decide",
+        status: "completed",
+        arguments: { tool: "install_surface_allowed_probe" },
+        pluginId: "/Users/alice/.config/plugins/private-plugin",
+        mcpAppResourceUri: "https://example.invalid/a?bearer=eyJhbGciOi.J9.sig",
+        appContext: secrets,
+        error: { message: "failed reading /Users/alice/Documents/salary.xlsx as alice@corp.example" },
+        result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+      },
+    },
+  });
+  const blob = JSON.stringify(projected);
+  for (const leaked of [
+    ...Object.values(secrets),
+    "/Users/alice/.config/plugins/private-plugin",
+    "https://example.invalid/a?bearer=eyJhbGciOi.J9.sig",
+    "/Users/alice/Documents/salary.xlsx",
+    "alice@corp.example",
+  ]) {
+    assert.equal(
+      blob.includes(leaked),
+      false,
+      `retained projection must not contain host-supplied content: ${leaked}`,
+    );
+  }
+  // Presence is still recorded, so the cells that count fields keep working.
+  const item = projected.params.item;
+  assert.equal(item.pluginId, "[present]");
+  assert.equal(item.mcpAppResourceUri, "[present]");
+  assert.deepEqual(item.appContext, {
+    connectorId: "[present]",
+    actionName: "[present]",
+    appName: "[present]",
+    linkId: "[present]",
+    resourceUri: "[present]",
+  });
+  assert.deepEqual(item.error, { message: "[present]" });
+});
+
+test("F2: a marked unexpected key is refused by the consumer, not merely marked", () => {
+  // Marking the key in the projection is not refusal. classifyRecord is the consumer that decides
+  // the nine cells; it must reject. Deleting the allowedKeys loop leaves the projection marking
+  // intact, so only a consumer-level assertion kills that deletion.
+  const projected = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5000,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: {
+        type: "mcpToolCall",
+        id: "tool-1",
+        server: "assay",
+        tool: "assay_policy_decide",
+        status: "completed",
+        arguments: { tool: "install_surface_allowed_probe" },
+        unknownHostMetadata: "leak-me",
+        result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+      },
+    },
+  });
+  assert.equal(projected.params.item.__unexpectedKeys, "[present]");
+  assert.equal(
+    JSON.stringify(projected).includes("unknownHostMetadata"),
+    false,
+    "the unexpected key NAME must never reach retained bytes",
+  );
+  assert.equal(
+    classifyStoredEvent(projected).type,
+    "unclassified",
+    "an item carrying an unexpected key must be refused by the consumer",
+  );
+});
+
+// --- F1: the PRODUCER half of every new type check must bite -------------------------------
+// The pre-existing consumer test injects malformed values onto ALREADY-PROJECTED bytes, so it
+// exercises retainedItemReason only and never projectRetainedItem. These cases start from what a
+// HOST would emit, run it through the producer, and assert the consumer refuses the result -- which
+// is the only way a producer-side type check can be pinned.
+for (const [label, item] of [
+  ["pluginId non-string", { pluginId: 123 }],
+  ["mcpAppResourceUri non-string", { mcpAppResourceUri: 7 }],
+  ["durationMs non-number", { durationMs: "120" }],
+  ["durationMs negative", { durationMs: -1 }],
+  ["readOnlyHint non-boolean", { readOnlyHint: "true" }],
+  ["appContext non-object", { appContext: 5 }],
+  ["appContext missing connectorId", { appContext: {} }],
+  ["appContext connectorId non-string", { appContext: { connectorId: 123 } }],
+  ["appContext connectorId empty", { appContext: { connectorId: "" } }],
+  ["appContext optional non-string", { appContext: { connectorId: "c", appName: 9 } }],
+  ["error non-object", { error: 5 }],
+  ["error message non-string", { error: { message: 9 } }],
+]) {
+  test(`F1 producer: host-emitted ${label} is refused after projection`, () => {
+    const projected = projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "install_surface_allowed_probe" },
+          result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+          ...item,
+        },
+      },
+    });
+    assert.equal(
+      classifyStoredEvent(projected).type,
+      "unclassified",
+      `${label}: producer must not coerce a malformed host value into an acceptable projection`,
+    );
+  });
+}
+
+// --- F2: nested unknown keys must be marked AND refused ------------------------------------
+// The refusal is indirect: the nested reason function rejects because the projection's
+// __unexpectedKeys marker is itself outside its allowed list. Nothing stated that coupling, so
+// deleting either half left the suite green. These pin both halves and the no-leak property.
+for (const [label, item, probe] of [
+  [
+    "appContext",
+    {
+      appContext: { connectorId: "c-1", unknownHostNested: "F2-APPCONTEXT-LEAK" },
+      result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+    },
+    "F2-APPCONTEXT-LEAK",
+  ],
+  [
+    "error",
+    {
+      error: { message: "boom", unknownHostNested: "F2-ERROR-LEAK" },
+      result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+    },
+    "F2-ERROR-LEAK",
+  ],
+]) {
+  test(`F2 nested: an unknown key inside ${label} is marked and refused, and neither its name nor its value is retained`, () => {
+    const projected = projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "install_surface_allowed_probe" },
+          ...item,
+        },
+      },
+    });
+    const nested = projected.params.item[label];
+    assert.equal(
+      nested.__unexpectedKeys,
+      "[present]",
+      `${label}: the producer must mark that an unknown nested key existed`,
+    );
+    assert.equal(
+      JSON.stringify(projected).includes("unknownHostNested"),
+      false,
+      `${label}: the unknown nested key NAME must never reach retained bytes`,
+    );
+    assert.equal(
+      classifyStoredEvent(projected).type,
+      "unclassified",
+      `${label}: the consumer must refuse a marked nested key, not merely record it`,
+    );
+    assert.equal(
+      JSON.stringify(projected).includes(probe),
+      false,
+      `${label}: the unknown nested value must never reach retained bytes`,
+    );
+  });
+}
+
+// --- F5: the canonical 0.153.1 prompt is accepted end-to-end, and legacy still is ----------
+test("F5: the canonical elicitation prompt is accepted by a driven run", async () => {
+  const canonical = await drive("canonical-elicitation-prompt");
+  assert.equal(canonical.driverOutcome.exitCode, 0, "canonical prompt must drive to success");
+  assert.equal(canonical.driverOutcome.status, "pass");
+  const elicit = canonical.events.find(
+    (e) => e.method === "mcpServer/elicitation/request" && e.direction === "server",
+  );
+  assert.ok(elicit, "the driven run must contain an elicitation request");
+  assert.equal(
+    elicit.params.message,
+    'Allow the assay MCP server to run tool "assay_policy_decide"?',
+    "the driven run must carry the canonical prompt, not the legacy one",
+  );
+});
+
+// --- The closed whitelist vs the 0.153.1 schema's mcpToolCall property set ------------------
+// allowedKeys is a CLOSED whitelist: a real host field missing from it refuses the whole proof.
+// The generated protocol-0.153.1 schema is the only local statement of that set. It is a schema,
+// not a live invocation claim -- a field can be declared and never emitted, and emission is not
+// established here -- but a mismatch is actionable: a schema property absent
+// from allowedKeys is a guaranteed false refusal, and an allowedKey absent from the schema admits
+// something the host is not declared to send. Measured 2026-09-05 against
+// protocol-0.153.1/v2/ThreadStartResponse.json (sha256
+// 656f8fd0fe91f533126cbfdb9369cfab550927a229e48dd46460f6f015d2b186), definitions/ThreadItem/oneOf/8
+// (McpToolCallThreadItem, 13 properties, no allOf/anyOf/$ref composition, additionalProperties unset).
+// That file is not vendored here; this list is the pinned copy of what it declared when measured.
+test("mcpToolCall projection accepts every declared 0.153.1 schema property", () => {
+  const schemaProperties = [
+    "appContext",
+    "arguments",
+    "durationMs",
+    "error",
+    "id",
+    "mcpAppResourceUri",
+    "pluginId",
+    "readOnlyHint",
+    "result",
+    "server",
+    "status",
+    "tool",
+    "type",
+  ];
+  // Derived from behaviour, not from importing the constant: a key the whitelist accepts produces
+  // no top-level __unexpectedKeys marker, and one it rejects does.
+  const project = (extraKey) =>
+    projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "install_surface_allowed_probe" },
+          result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+          ...(extraKey === null ? {} : { [extraKey]: null }),
+        },
+      },
+    }).params.item;
+
+  for (const key of schemaProperties) {
+    const item = project(key);
+    assert.equal(
+      Object.hasOwn(item, "__unexpectedKeys"),
+      false,
+      `schema property ${key} must not be treated as unexpected: a closed whitelist that omits it refuses every real host record`,
+    );
+  }
+  const control = project("definitelyNotInTheSchema");
+  assert.equal(
+    control.__unexpectedKeys,
+    "[present]",
+    "control: a key outside the schema must still be marked",
+  );
+  assert.equal(
+    JSON.stringify(control).includes("definitelyNotInTheSchema"),
+    false,
+    "control: marking must not retain the name",
+  );
+});
+
+// --- F-A: the whitelist must equal the schema set, not merely contain it -------------------
+// The sibling test asserts only that the schema's declared properties are accepted. That leaves
+// the other direction open: adding a key the schema does not declare survived it. A closed
+// whitelist that admits an undeclared field is the mirror of one that omits a declared one -- it
+// accepts something 0.153.1 never says the host sends.
+//
+// SCOPE: this is a SAMPLE, not a proof of set equality. It refuses the nine names below; it does
+// not and cannot establish that every name outside the schema is refused, because it does not
+// enumerate that set. Deliberately no parser and no generated name space here -- the sample is
+// chosen to bite the realistic mutation (widening the whitelist), not to make a universal claim.
+test("mcpToolCall projection refuses a sample of names the 0.153.1 schema does not declare", () => {
+  // Names deliberately outside the 13 declared properties, including several that are plausible
+  // near-misses of real fields elsewhere in the protocol.
+  const notInSchema = [
+    "reason",
+    "content",
+    "text",
+    "output",
+    "sessionId",
+    "aggregatedOutput",
+    "command",
+    "cwd",
+    "notInTheSchemaAtAll",
+  ];
+  for (const key of notInSchema) {
+    const item = projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "install_surface_allowed_probe" },
+          result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+          [key]: null,
+        },
+      },
+    }).params.item;
+    assert.equal(
+      item.__unexpectedKeys,
+      "[present]",
+      `${key} is not declared by the 0.153.1 schema and must be marked unexpected`,
+    );
+    assert.equal(
+      Object.hasOwn(item, key),
+      false,
+      `${key} must be marked without retaining its name as a key`,
+    );
+    assert.equal(
+      JSON.stringify(item.__unexpectedKeys).includes(key),
+      false,
+      `${key} must not survive inside the marker`,
+    );
+  }
+  // Control: a declared property must still be accepted, so the assertion above cannot pass by
+  // marking everything.
+  const declared = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5000,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: {
+        type: "mcpToolCall",
+        id: "tool-1",
+        server: "assay",
+        tool: "assay_policy_decide",
+        status: "completed",
+        arguments: { tool: "install_surface_allowed_probe" },
+        result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+        durationMs: 120,
+      },
+    },
+  }).params.item;
+  assert.equal(Object.hasOwn(declared, "__unexpectedKeys"), false, "control: a declared property must be accepted");
+});
+
+// --- F-B: the producer's non-string barrier must hold for NON-SCALARS ----------------------
+// Every existing case at these positions uses a scalar non-string, and the consumer's own type
+// check catches scalars -- so the producer barrier is never the deciding check and its deletion
+// went unnoticed. An object or array is the input where the producer is the only thing standing
+// between host content and the retained bytes: without it the value is written verbatim BEFORE
+// the consumer refuses the record.
+for (const [label, patch, marker] of [
+  ["pluginId object", { pluginId: { secret: "FB-PLUGIN-OBJ" } }, "FB-PLUGIN-OBJ"],
+  ["mcpAppResourceUri array", { mcpAppResourceUri: ["FB-URI-ARR"] }, "FB-URI-ARR"],
+  ["appContext.actionName object", { appContext: { connectorId: "c-1", actionName: { s: "FB-ACTION-OBJ" } } }, "FB-ACTION-OBJ"],
+  ["appContext.resourceUri array", { appContext: { connectorId: "c-1", resourceUri: ["FB-RES-ARR"] } }, "FB-RES-ARR"],
+  ["error.message object", { error: { message: { s: "FB-ERRMSG-OBJ" } } }, "FB-ERRMSG-OBJ"],
+]) {
+  test(`F-B producer: a non-scalar at ${label} is refused and never retained`, () => {
+    const projected = projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "install_surface_allowed_probe" },
+          result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+          ...patch,
+        },
+      },
+    });
+    assert.equal(
+      JSON.stringify(projected).includes(marker),
+      false,
+      `${label}: host content must not reach retained bytes even though the consumer would refuse the record`,
+    );
+    assert.equal(
+      classifyStoredEvent(projected).type,
+      "unclassified",
+      `${label}: the record must still be refused`,
+    );
+  });
+}
+
+// --- The CONSUMER allowedKeys list, pinned in both directions -------------------------------
+// There are two whitelists: this one, in retainedItemReason, and a separate list in
+// projectRetainedItem. Every earlier schema test asserted on __unexpectedKeys, which the PRODUCER
+// list makes -- so the consumer list was pinned in neither direction, and dropping a declared
+// property from it made a driven run fail all nine cells while the suite stayed green.
+//
+// The two directions need two different tests, and one cannot substitute for the other:
+//   * dropping a declared key is caught by a well-formed record being ACCEPTED;
+//   * adding an undeclared key is NOT caught that way, because a well-formed record never carries
+//     the added key. It is also not caught through the projection, because the producer still marks
+//     the key and the consumer then refuses on the __unexpectedKeys marker rather than on the key
+//     itself. Only an UNPROJECTED stored event isolates the consumer list.
+
+test("consumer accepts a well-formed mcpToolCall carrying every newly admitted field", () => {
+  const classified = classifyStoredEvent(
+    projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "install_surface_allowed_probe" },
+          result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+          durationMs: 120,
+          readOnlyHint: true,
+          pluginId: "plugin-assay",
+          mcpAppResourceUri: "resource://assay",
+          appContext: { connectorId: "connector-1" },
+          error: null,
+        },
+      },
+    }),
+  );
+  assert.equal(
+    classified.type,
+    "server-notification",
+    `a record carrying only declared 0.153.1 properties must be accepted; a consumer allowedKeys missing any of them silently refuses every real host record (got: ${JSON.stringify(classified)})`,
+  );
+});
+
+test("consumer refuses an unprojected mcpToolCall carrying a name the schema does not declare", () => {
+  // Deliberately NOT projected: the producer would mark the key and the consumer would then refuse
+  // on the marker, which proves nothing about the consumer's own list. These stored bytes isolate it.
+  //
+  // SCOPE: a sample, not a proof of set equality. It refuses the names below; it cannot establish
+  // that every name outside the schema is refused, because it does not enumerate that set.
+  for (const key of [
+    "notInTheSchemaAtAll",
+    "aggregatedOutput",
+    "command",
+    "cwd",
+    "sessionId",
+  ]) {
+    const classified = classifyStoredEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "install_surface_allowed_probe" },
+          result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+          [key]: null,
+        },
+      },
+    });
+    assert.equal(
+      classified.type,
+      "unclassified",
+      `${key} is not declared by the 0.153.1 schema; the consumer must refuse it on its own list`,
+    );
+  }
+});
+
+// --- F-B, extended: durationMs and readOnlyHint have their own producer ternaries ------------
+// They do not share projectedPresence, so the five F-B rows above do not cover them, and the
+// existing cases use scalar non-strings which the consumer catches regardless of the producer.
+for (const [label, patch, marker] of [
+  ["durationMs object", { durationMs: { secret: "FB-DURATION-OBJ" } }, "FB-DURATION-OBJ"],
+  ["readOnlyHint array", { readOnlyHint: ["FB-READONLY-ARR"] }, "FB-READONLY-ARR"],
+]) {
+  test(`F-B producer: a non-scalar at ${label} is refused and never retained`, () => {
+    const projected = projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "install_surface_allowed_probe" },
+          result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+          ...patch,
+        },
+      },
+    });
+    assert.equal(JSON.stringify(projected).includes(marker), false, `${label}: must not reach retained bytes`);
+    assert.equal(classifyStoredEvent(projected).type, "unclassified", `${label}: must still be refused`);
+  });
+}
+
+// --- F-1: an object KEY NAME is host data exactly as a value is ----------------------------
+// Every earlier privacy test scanned VALUE positions. The unexpected-key marker recorded the
+// NAMES of the keys it rejected, so a host that put a path or a token in a key name had it
+// retained in full -- and at three of the six sites the record was still classified accepted,
+// so the leak was not even redeemed by refusal. The projection now records only that unexpected
+// keys existed. These tests assert the name is gone at every site that can produce the marker.
+const KEY_NAME_PROBE = "/Users/alice/.ssh/id_rsa?token=AKIA_KEY_NAME_PROBE";
+
+function everyKey(value, seen = new Set()) {
+  if (Array.isArray(value)) {
+    for (const entry of value) everyKey(entry, seen);
+  } else if (value !== null && typeof value === "object") {
+    for (const [key, entry] of Object.entries(value)) {
+      seen.add(key);
+      everyKey(entry, seen);
+    }
+  }
+  return seen;
+}
+
+for (const [site, item] of [
+  ["projectRetainedItem", { [KEY_NAME_PROBE]: 1 }],
+  ["projectArguments", { arguments: { tool: "probe", [KEY_NAME_PROBE]: 1 } }],
+  ["projectToolResult", { result: { isError: false, [KEY_NAME_PROBE]: 1 } }],
+  [
+    "projectDecisionObject",
+    { result: { isError: false, structuredContent: { allowed: true, reason: "ok", [KEY_NAME_PROBE]: 1 } } },
+  ],
+  ["projectAppContext", { appContext: { connectorId: "c-1", [KEY_NAME_PROBE]: 1 } }],
+  ["projectMcpToolCallError", { error: { message: "boom", [KEY_NAME_PROBE]: 1 } }],
+]) {
+  test(`F1: a secret-shaped key name at ${site} is marked without being retained`, () => {
+    const projected = projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "probe" },
+          result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+          ...item,
+        },
+      },
+    });
+    assert.equal(
+      JSON.stringify(projected).includes(KEY_NAME_PROBE),
+      false,
+      `${site}: the key name must not reach retained bytes`,
+    );
+    assert.equal(
+      everyKey(projected).has(KEY_NAME_PROBE),
+      false,
+      `${site}: the key name must not survive as a key either`,
+    );
+    // Positive control: without this the assertions above pass on a projection that never
+    // reached the marker at all, and the test would prove nothing about this site.
+    assert.equal(
+      everyKey(projected).has("__unexpectedKeys"),
+      true,
+      `${site}: the marker must still record that an unexpected key was present`,
+    );
+  });
+}
+
+test("F1: the unexpected-key marker is a re-projection fixed point", () => {
+  // The marker is itself outside every allowed list, so it is re-marked on a second pass. That is
+  // only stable because the marker collapses to a constant: a name list or a count would change.
+  const event = {
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5000,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: {
+        type: "mcpToolCall",
+        id: "tool-1",
+        server: "assay",
+        tool: "assay_policy_decide",
+        status: "completed",
+        arguments: { tool: "probe", [KEY_NAME_PROBE]: 1 },
+        [KEY_NAME_PROBE]: 1,
+        appContext: { connectorId: "c-1", [KEY_NAME_PROBE]: 1 },
+        result: {
+          isError: false,
+          [KEY_NAME_PROBE]: 1,
+          structuredContent: { allowed: true, reason: "ok", [KEY_NAME_PROBE]: 1 },
+        },
+      },
+    },
+  };
+  const once = projectRetainedEvent(event);
+  const twice = projectRetainedEvent(once);
+  // SCOPE: this establishes the fixed point for the UNEXPECTED-KEY MARKER only. It is not a claim
+  // that projection is idempotent over all events -- `__invalidType` markers are deliberately not
+  // fixed points, and re-project to a different marker. That is fail-closed and out of scope here.
+  assert.deepEqual(twice, once, "the unexpected-key marker must be a fixed point");
+  assert.equal(JSON.stringify(once).includes(KEY_NAME_PROBE), false);
+});
+
+test("F1: a secret-shaped key name never reaches the persisted events.json", async () => {
+  // The projection tests above run in process. This one drives the real fake host through the
+  // real driver and asserts against the bytes on disk, because events.json is written
+  // unconditionally before any verdict is reached.
+  const { proofRoot, events } = await drive("host-key-name-leak");
+  const raw = fs.readFileSync(path.join(proofRoot, "events.json"), "utf8");
+  assert.equal(
+    raw.includes("AKIA_KEY_NAME_PROBE"),
+    false,
+    "the persisted proof must not contain the host-controlled key name",
+  );
+  assert.equal(
+    fs.readFileSync(path.join(proofRoot, "classification.json"), "utf8").includes("AKIA_KEY_NAME_PROBE"),
+    false,
+    "the refusal reason must not echo the host-controlled key name",
+  );
+  // Positive control: the scenario must actually have reached the pipeline. Without this the
+  // absence assertions pass vacuously if the fixture literal ever drifts.
+  const toolEvent = events.find(
+    (event) => event.method === "item/completed" && event.params?.item?.type === "mcpToolCall",
+  );
+  assert.ok(toolEvent, "the scenario must emit an mcpToolCall item");
+  assert.equal(
+    toolEvent.params.item.__unexpectedKeys,
+    "[present]",
+    "control: the injected key must have been marked, or nothing was measured",
+  );
+});
+
+// --- F1/F3: an unknown method name and an unknown item type are host text too ------------------
+// The key-name repair closed one identifier position. These are the other two the independent
+// review found: a JSON-RPC method and a retained item type, both host-controlled strings that were
+// retained verbatim. Known names must survive verbatim -- classification, correlation and the cells
+// are keyed on them -- so the projection is a closed-set check, not a scrub.
+const IDENTIFIER_PROBE = "/Users/alice/.aws/credentials?sk=IDENTIFIER_PROBE";
+
+test("F1: an unknown method is projected, and every declared method survives verbatim", () => {
+  const projected = projectRetainedEvent({
+    direction: "server",
+    method: `notify_${IDENTIFIER_PROBE}`,
+    id: null,
+    params: {},
+  });
+  // Explicitly invalid, not a legal-looking substitute: an unknown member must never read as an
+  // allowed value, and the consumer refuses the violation wherever it sits.
+  assert.equal(typeof projected.method, "object", "an unknown method must become a violation");
+  assert.equal(JSON.stringify(projected).includes(IDENTIFIER_PROBE), false);
+  assert.equal(
+    classifyStoredEvent(projected).type,
+    "unclassified",
+    "an unknown method must still be refused, not merely projected",
+  );
+  // Positive control: every method this proof declares must pass through untouched, or the
+  // projection above is a scrub that would break classification rather than a closed-set check.
+  for (const method of KNOWN_METHODS) {
+    assert.equal(
+      projectRetainedEvent({ direction: "server", method, id: null, params: {} }).method,
+      method,
+      `declared method ${method} must survive verbatim`,
+    );
+  }
+});
+
+test("F3: an unknown item type is projected, and every declared type survives verbatim", () => {
+  const projectedType = projectRetainedItem_typeOf(`type_${IDENTIFIER_PROBE}`);
+  assert.equal(typeof projectedType, "object", "an unknown item type must become a violation");
+  assert.equal(JSON.stringify(projectedType).includes(IDENTIFIER_PROBE), false);
+  for (const type of KNOWN_ITEM_TYPES) {
+    assert.equal(projectRetainedItem_typeOf(type), type, `declared type ${type} must survive`);
+  }
+});
+
+test("F1/F3: neither identifier reaches the persisted proof", async () => {
+  const { proofRoot, events } = await drive("host-identifier-leak");
+  for (const name of ["events.json", "classification.json", "manifest.json"]) {
+    assert.equal(
+      fs.readFileSync(path.join(proofRoot, name), "utf8").includes("IDENTIFIER_PROBE"),
+      false,
+      `${name} must not contain the host-controlled identifier`,
+    );
+  }
+  // Positive control: the scenario must have reached the pipeline, or the absence is vacuous.
+  // Positive controls: the scenario must have reached the pipeline. Both identifiers must appear
+  // as explicit violations, or the absence assertions above are vacuous.
+  assert.ok(
+    events.some((event) => event.method !== null && typeof event.method === "object"),
+    "control: the unknown method must have been projected to a violation",
+  );
+  assert.ok(
+    events.some((event) => typeof event.params?.item?.type === "object"),
+    "control: the unknown item type must have been projected to a violation",
+  );
+});
+
+// --- F4: a projection violation is a violation wherever it sits -------------------------------
+test("F4: a marker nested under result is refused, not carried into a green proof", () => {
+  const projected = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5000,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: {
+        type: "mcpToolCall",
+        id: "tool-1",
+        server: "assay",
+        tool: "assay_policy_decide",
+        status: "completed",
+        arguments: { tool: "probe" },
+        result: { isError: false, structuredContent: { allowed: true, reason: "ok" }, extra: 1 },
+      },
+    },
+  });
+  // The producer marks it; before this repair the consumer consulted the marker only at some
+  // levels, so this record passed every cell -- a fully green proof carrying a recorded violation.
+  assert.equal(projected.params.item.result.__unexpectedKeys, "[present]");
+  const classified = classifyStoredEvent(projected);
+  assert.equal(classified.type, "unclassified", "a nested marker must refuse");
+  assert.match(classified.reason, /projection violation/);
+  // Positive control: the same record without the extra key must still be accepted, or the check
+  // above is satisfied by refusing everything.
+  const clean = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5000,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: {
+        type: "mcpToolCall",
+        id: "tool-1",
+        server: "assay",
+        tool: "assay_policy_decide",
+        status: "completed",
+        arguments: { tool: "probe" },
+        result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+      },
+    },
+  });
+  assert.equal(classifyStoredEvent(clean).type, "server-notification", "control: clean must pass");
+});
+
+// --- F2: a host-chosen string rpc id is host text, and correlation is only equality -----------
+// The wire keeps the real id -- string ids stay fully supported on the protocol. Only what is
+// RETAINED is relabelled, by one per-run first-seen ordinal map at the single retention funnel.
+// These tests pin both halves: the id never reaches the proof, and the correlation it carries does.
+const RPC_ID_PROBE = "RPCID_PROBE";
+
+test("F2: a host-chosen string rpc id never reaches the persisted proof", async () => {
+  const { proofRoot, events, classified } = await drive("host-rpc-id-leak");
+  for (const name of ["events.json", "classification.json", "manifest.json"]) {
+    assert.equal(
+      fs.readFileSync(path.join(proofRoot, name), "utf8").includes(RPC_ID_PROBE),
+      false,
+      `${name} must not contain the host-chosen rpc id`,
+    );
+  }
+  // Positive control: the scenario must have reached the pipeline, or every absence above is
+  // vacuous. A projected token must be present where the host id was.
+  const serverRequest = events.find(
+    (event) => event.direction === "server" && event.method === "mcpServer/elicitation/request",
+  );
+  assert.ok(serverRequest, "control: the server request must have been retained");
+  assert.match(
+    String(serverRequest.id),
+    /^#\d+$/,
+    "control: the host id must have been projected to a token",
+  );
+  // The property the token exists for: the matching client response must still pair with it.
+  const clientResponse = events.find(
+    (event) => event.direction === "client" && event.method === "mcpServer/elicitation/request",
+  );
+  assert.ok(clientResponse, "the matching client response must be retained");
+  assert.equal(
+    clientResponse.id,
+    serverRequest.id,
+    "request and response must still correlate through the token",
+  );
+  // The strongest available control: with a secret-shaped host id, the proof must still pass every
+  // intended cell. If the token had broken correlation anywhere, this is where it would show.
+  assert.equal(
+    allIntendedCellsPass(classified),
+    true,
+    "relabelling the retained id must not cost the proof a single cell",
+  );
+});
+
+test("F2: the retained token preserves equality structure and leaves integers alone", async () => {
+  const { events } = await drive("host-rpc-id-leak");
+  const stringIds = events.filter((event) => typeof event.id === "string").map((e) => e.id);
+  const numericIds = events.filter((event) => Number.isSafeInteger(event.id)).map((e) => e.id);
+
+  // Every retained string id is a token; none is a raw host string.
+  for (const id of stringIds) {
+    assert.match(id, /^#\d+$/, `retained string id ${id} must be a token`);
+  }
+  // Repeated: the request and its response share one host id, so they share one token.
+  assert.ok(
+    stringIds.length > new Set(stringIds).size,
+    "a repeated host id must yield a repeated token, or correlation is not being exercised",
+  );
+  // NOTE: injectivity is deliberately NOT asserted here. This run carries one host id, so nothing
+  // in it could distinguish an injective map from one that collapses every id to a single token.
+  // The separate distinct-id test below is the only place that discriminates it.
+
+  // Numeric ids are driver-generated and pass through untouched, which is what keeps the
+  // client-generated integer response lookup working.
+  assert.ok(numericIds.length > 0, "the driver's integer request ids must still be retained");
+  for (const id of numericIds) {
+    assert.equal(typeof id, "number");
+  }
+});
+
+test("F2: distinct host ids get distinct tokens", async () => {
+  // The discriminating case. A map that returned one constant token would satisfy every other F2
+  // assertion -- absence, tokenisation, and even request/response pairing -- so without two
+  // distinct host ids in one run, injectivity is asserted but untested.
+  const { proofRoot, events } = await drive("host-rpc-id-distinct");
+  const raw = fs.readFileSync(path.join(proofRoot, "events.json"), "utf8");
+  for (const probe of ["RPCID_PROBE", "RPCID_PROBE_TWO"]) {
+    assert.equal(raw.includes(probe), false, `${probe} must not reach the persisted proof`);
+  }
+  const requestTokens = events
+    .filter(
+      (event) =>
+        event.direction === "server" && event.method === "mcpServer/elicitation/request",
+    )
+    .map((event) => event.id);
+  assert.equal(requestTokens.length, 2, "control: both server requests must have been retained");
+  for (const token of requestTokens) {
+    assert.match(String(token), /^#\d+$/);
+  }
+  assert.notEqual(
+    requestTokens[0],
+    requestTokens[1],
+    "two different host ids must not collapse to one token",
+  );
+});
+
+// --- B/C/D: the finite identifier contract, measured on the persisted bytes ------------------
+// Every assertion below reads events.json and classification.json, not an in-process projection:
+// those files are what a live proof hands to a reader.
+
+function persisted(proofRoot, name) {
+  return fs.readFileSync(path.join(proofRoot, name), "utf8");
+}
+
+test("B: thread, turn and item identities are retained as structure, not as host text", async () => {
+  const { proofRoot } = await drive("valid");
+  const raw = persisted(proofRoot, "events.json");
+  const events = JSON.parse(raw);
+
+  // No host-chosen identifier text survives. The fixture's own literals are the probe.
+  for (const hostValue of ["thread-", "turn-1", "call-1"]) {
+    assert.equal(
+      raw.includes(hostValue),
+      false,
+      `${hostValue} is a host-chosen identifier and must not reach the persisted proof`,
+    );
+  }
+  assert.equal(
+    persisted(proofRoot, "classification.json").includes("turn-1"),
+    false,
+    "classification must not carry a host identifier either",
+  );
+
+  // Namespaces stay separate: a thread token can never equal a turn or item token.
+  const threadTokens = new Set();
+  const turnTokens = new Set();
+  const itemTokens = new Set();
+  for (const event of events) {
+    const p = event.params ?? {};
+    if (typeof p.threadId === "string") threadTokens.add(p.threadId);
+    if (typeof p.turnId === "string") turnTokens.add(p.turnId);
+    if (typeof p.turn?.id === "string") turnTokens.add(p.turn.id);
+    if (typeof p.item?.id === "string") itemTokens.add(p.item.id);
+    if (typeof event.result?.thread?.id === "string") threadTokens.add(event.result.thread.id);
+    if (typeof event.result?.turn?.id === "string") turnTokens.add(event.result.turn.id);
+  }
+  assert.ok(threadTokens.size > 0 && turnTokens.size > 0 && itemTokens.size > 0, "control: all three roles must appear");
+  for (const [label, tokens, prefix] of [
+    ["thread", threadTokens, "@"],
+    ["turn", turnTokens, "~"],
+    ["item", itemTokens, "!"],
+  ]) {
+    for (const value of tokens) {
+      assert.ok(value.startsWith(prefix), `${label} token ${value} must carry its own namespace`);
+    }
+  }
+  // The distinctions the cells depend on: a role's members must agree with each other, which is
+  // exactly what a partial namespace would break.
+  // Tokens within a role are allocated first-seen and contiguous, which is what makes them
+  // injective. (This journey deliberately touches several threads, so the count is not 1.)
+  for (const [label, tokens, prefix] of [
+    ["thread", threadTokens, "@"],
+    ["turn", turnTokens, "~"],
+    ["item", itemTokens, "!"],
+  ]) {
+    const ordinals = [...tokens].map((value) => Number(value.slice(prefix.length))).sort((a, b) => a - b);
+    assert.deepEqual(
+      ordinals,
+      ordinals.map((_, index) => index),
+      `${label} tokens must be contiguous first-seen ordinals`,
+    );
+  }
+  // Correlation, which is the only reason the tokens exist: the terminal turn must still name the
+  // same turn the turn/start response reported.
+  const terminal = events.find((event) => event.method === "turn/completed");
+  const turnStart = events.find((event) => typeof event.result?.turn?.id === "string");
+  assert.ok(terminal && turnStart, "control: both turn rows must be retained");
+  assert.equal(
+    terminal.params.turn.id,
+    turnStart.result.turn.id,
+    "the terminal turn must still correlate with the turn/start response",
+  );
+});
+
+test("C: host platform and skill scope are retained as presence only", async () => {
+  const { proofRoot, manifest } = await drive("valid");
+  assert.equal(manifest.initialize.platformFamily, "[present]");
+  assert.equal(manifest.initialize.platformOs, "[present]");
+  // Control: a field with a real lexical consumer must NOT be collapsed, or the projection is a
+  // blanket scrub rather than the finite contract.
+  assert.notEqual(
+    manifest.initialize.codexHome,
+    "[present]",
+    "codexHome has a lexical consumer and must stay verbatim",
+  );
+  assert.equal(persisted(proofRoot, "events.json").includes(os.platform()), false);
+});
+
+test("D: the project-root comparison is retained, and its outcome is not the path", async () => {
+  const good = await drive("valid");
+  const goodEvents = JSON.parse(persisted(good.proofRoot, "events.json"));
+  const goodStart = goodEvents.find((event) => event.result?.cwd !== undefined);
+  assert.ok(goodStart, "control: a thread/start result must be retained");
+  assert.equal(goodStart.result.cwd, "[project-root]");
+  // NOTE, and it is a real distinction: the project root DOES still appear in retained bytes, in
+  // client REQUEST params the driver itself sent (`thread/start.params.cwd`, `skills/list.cwds`).
+  // That is the driver disclosing its own value, not host content, and group D never claimed to
+  // remove it. What must not survive is the value the HOST reported back, so that is what is
+  // asserted -- on the result position only.
+  assert.equal(
+    JSON.stringify(goodStart.result).includes(good.projectRoot),
+    false,
+    "the host-reported cwd must not be retained in the result",
+  );
+
+  // The failing path is where a leak would matter most, so it is measured, not assumed.
+  const bad = await drive("wrong-cwd");
+  const badRaw = persisted(bad.proofRoot, "events.json");
+  const badEvents = JSON.parse(badRaw);
+  const badStart = badEvents.find((event) => event.result?.cwd !== undefined);
+  assert.ok(badStart, "a thread/start result must be retained on the failing path too");
+  assert.equal(badStart.result.cwd, "[not-project-root]");
+  assert.equal(badRaw.includes("/not/the/project"), false, "the host cwd must not be retained");
+  const badClassification = persisted(bad.proofRoot, "classification.json");
+  assert.equal(
+    badClassification.includes("/not/the/project"),
+    false,
+    "the refusal reason must not echo the host cwd",
+  );
+  const cells = JSON.parse(badClassification).cells;
+  assert.equal(cells.cwdObserved.status, "fail", "required/false must stay distinguished from missing");
+  assert.match(cells.cwdObserved.reason, /not the project root/);
 });

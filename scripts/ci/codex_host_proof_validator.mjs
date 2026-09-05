@@ -459,7 +459,10 @@ export function requiredCellsForJourney(journey) {
 export const EXPECTED_ELICITATION = Object.freeze({
   serverName: "assay",
   mode: "form",
-  message: `approve ${DECIDE_TOOL}`,
+  messages: Object.freeze([
+    `Allow the assay MCP server to run tool "${DECIDE_TOOL}"?`,
+    `approve ${DECIDE_TOOL}`,
+  ]),
   requestedSchema: Object.freeze({
     type: "object",
     properties: Object.freeze({}),
@@ -472,7 +475,7 @@ export function elicitationAcceptable(params, threadId, turnId) {
     typeof params === "object" &&
     params.serverName === EXPECTED_ELICITATION.serverName &&
     params.mode === EXPECTED_ELICITATION.mode &&
-    params.message === EXPECTED_ELICITATION.message &&
+    EXPECTED_ELICITATION.messages.includes(params.message) &&
     sameJson(params.requestedSchema, EXPECTED_ELICITATION.requestedSchema) &&
     typeof threadId === "string" &&
     threadId.length > 0 &&
@@ -628,6 +631,7 @@ export const LIFECYCLE_SERVER_NOTIFICATIONS = Object.freeze([
   "thread/tokenUsage/updated",
   "turn/started",
   "item/started",
+  "serverRequest/resolved",
 ]);
 export const SERVER_DIAGNOSTIC_NOTIFICATIONS = Object.freeze(["warning", "error"]);
 export const ALLOWED_SERVER_NOTIFICATIONS = Object.freeze([
@@ -636,9 +640,45 @@ export const ALLOWED_SERVER_NOTIFICATIONS = Object.freeze([
   "item/completed",
   "turn/completed",
 ]);
+export const ALLOWED_CLIENT_REQUESTS = Object.freeze([
+  "initialize",
+  "skills/list",
+  "thread/start",
+  "mcpServerStatus/list",
+  "turn/start",
+]);
 export const ALLOWED_CLIENT_NOTIFICATIONS = Object.freeze(["initialized"]);
 export const ALLOWED_CLIENT_RESPONSES = Object.freeze(["mcpServer/elicitation/request"]);
 export const ALLOWED_DRIVER_METHODS = Object.freeze(["error", "pre-spawn-error"]);
+// A JSON-RPC method name is host-controlled text on every server-originated frame. Retaining an
+// unrecognised one verbatim puts host content in the proof, so only names this proof already
+// declares are kept; anything else becomes one constant. Known names must stay verbatim because
+// classification, correlation and the cells are all keyed on them.
+export const KNOWN_METHODS = Object.freeze([
+  ...ALLOWED_SERVER_NOTIFICATIONS,
+  ...ALLOWED_SERVER_REQUESTS,
+  ...ALLOWED_CLIENT_REQUESTS,
+  ...ALLOWED_CLIENT_NOTIFICATIONS,
+  ...ALLOWED_CLIENT_RESPONSES,
+  ...ALLOWED_DRIVER_METHODS,
+]);
+export const EXPECTED_SERVERS = Object.freeze(["assay"]);
+// Group D. `thread/start.result.cwd` is compared for equality against the driver's OWN project
+// root, so the characters are never needed -- only the outcome. Retaining the outcome keeps the
+// three states the cell distinguishes (required/missing/false) while retaining no host path, and
+// keeps the refusal reason free of any host value.
+export const CWD_MATCHES_PROJECT_ROOT = "[project-root]";
+export const CWD_DIFFERS_FROM_PROJECT_ROOT = "[not-project-root]";
+// The retained item types this proof declares. Same rule as methods: an unrecognised type is host
+// text, and it is already refused, so nothing needs its literal value.
+export const KNOWN_ITEM_TYPES = Object.freeze([
+  "reasoning",
+  "agentMessage",
+  "commandExecution",
+  "mcpToolCall",
+  "userMessage",
+]);
+
 
 export function preSpawnFailureState(events, manifest) {
   const rows = Array.isArray(events)
@@ -702,6 +742,55 @@ export function isProofRpcId(id) {
   return Number.isSafeInteger(id);
 }
 
+function retainedAppContextReason(value) {
+  if (value == null) {
+    return null;
+  }
+  if (!isPlainObject(value)) {
+    return "appContext must be an object or null";
+  }
+  const allowed = ["actionName", "appName", "connectorId", "linkId", "resourceUri"];
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) {
+      return `appContext contains unexpected key ${key}`;
+    }
+  }
+  if (!isNonemptyString(value.connectorId)) {
+    return "appContext requires non-empty string connectorId";
+  }
+  if (hasOwn(value, "actionName") && value.actionName !== null && typeof value.actionName !== "string") {
+    return "appContext actionName must be a string or null";
+  }
+  if (hasOwn(value, "appName") && value.appName !== null && typeof value.appName !== "string") {
+    return "appContext appName must be a string or null";
+  }
+  if (hasOwn(value, "linkId") && value.linkId !== null && typeof value.linkId !== "string") {
+    return "appContext linkId must be a string or null";
+  }
+  if (hasOwn(value, "resourceUri") && value.resourceUri !== null && typeof value.resourceUri !== "string") {
+    return "appContext resourceUri must be a string or null";
+  }
+  return null;
+}
+
+function retainedMcpToolCallErrorReason(value) {
+  if (value == null) {
+    return null;
+  }
+  if (!isPlainObject(value)) {
+    return "error must be an object or null";
+  }
+  for (const key of Object.keys(value)) {
+    if (key !== "message") {
+      return `error contains unexpected key ${key}`;
+    }
+  }
+  if (typeof value.message !== "string") {
+    return "error requires string message";
+  }
+  return null;
+}
+
 function retainedItemReason(item, label = "item/completed") {
   if (!isPlainObject(item) || !isNonemptyString(item.type) || !isNonemptyString(item.id)) {
     return `${label} item is not a typed retained item`;
@@ -709,21 +798,83 @@ function retainedItemReason(item, label = "item/completed") {
   switch (item.type) {
     case "reasoning":
     case "agentMessage":
+    case "commandExecution":
       if (exactKeys(item, ["type", "id"])) {
         return null;
       }
       return `${label} ${item.type} is not the closed non-evidentiary projection`;
-    case "mcpToolCall":
-      if (
-        isNonemptyString(item.server) &&
-        isNonemptyString(item.tool) &&
-        isPlainObject(item.arguments) &&
-        isNonemptyString(item.status) &&
-        (item.result == null || isPlainObject(item.result))
-      ) {
-        return null;
+    case "mcpToolCall": {
+      const allowedKeys = [
+        "appContext",
+        "arguments",
+        "durationMs",
+        "error",
+        "id",
+        "mcpAppResourceUri",
+        "pluginId",
+        "readOnlyHint",
+        "result",
+        "server",
+        "status",
+        "tool",
+        "type",
+      ];
+      for (const key of Object.keys(item)) {
+        if (!allowedKeys.includes(key)) {
+          return `${label} mcpToolCall contains unexpected key ${key}`;
+        }
       }
-      return `${label} mcpToolCall is missing required retained fields`;
+      if (
+        !isNonemptyString(item.server) ||
+        !isNonemptyString(item.tool) ||
+        !isPlainObject(item.arguments) ||
+        !isNonemptyString(item.status) ||
+        (hasOwn(item, "result") && item.result !== null && !isPlainObject(item.result))
+      ) {
+        return `${label} mcpToolCall is missing required retained fields`;
+      }
+      if (
+        hasOwn(item, "durationMs") &&
+        item.durationMs !== null &&
+        !(typeof item.durationMs === "number" && Number.isSafeInteger(item.durationMs) && item.durationMs >= 0)
+      ) {
+        return `${label} mcpToolCall durationMs must be a non-negative integer or null`;
+      }
+      if (
+        hasOwn(item, "readOnlyHint") &&
+        item.readOnlyHint !== null &&
+        typeof item.readOnlyHint !== "boolean"
+      ) {
+        return `${label} mcpToolCall readOnlyHint must be a boolean or null`;
+      }
+      if (
+        hasOwn(item, "pluginId") &&
+        item.pluginId !== null &&
+        typeof item.pluginId !== "string"
+      ) {
+        return `${label} mcpToolCall pluginId must be a string or null`;
+      }
+      if (
+        hasOwn(item, "mcpAppResourceUri") &&
+        item.mcpAppResourceUri !== null &&
+        typeof item.mcpAppResourceUri !== "string"
+      ) {
+        return `${label} mcpToolCall mcpAppResourceUri must be a string or null`;
+      }
+      if (hasOwn(item, "appContext")) {
+        const appContextReason = retainedAppContextReason(item.appContext);
+        if (appContextReason) {
+          return `${label} mcpToolCall ${appContextReason}`;
+        }
+      }
+      if (hasOwn(item, "error")) {
+        const errorReason = retainedMcpToolCallErrorReason(item.error);
+        if (errorReason) {
+          return `${label} mcpToolCall ${errorReason}`;
+        }
+      }
+      return null;
+    }
     case "userMessage":
       if (Array.isArray(item.content)) {
         return null;
@@ -809,6 +960,15 @@ function retainedMethodParamsReason(method, params) {
 export function classifyStoredEvent(event) {
   if (event == null || typeof event !== "object" || Array.isArray(event)) {
     return { type: "unclassified", reason: "event is not an object" };
+  }
+  // A projection violation is a violation wherever it sits. The markers were applied consistently
+  // by the producer but consulted only on some paths, so a marker nested under result/arguments
+  // passed every cell: a fully green proof carrying a recorded violation. The consumer's whole
+  // claim is a CLOSED retained projection, and this is the one check that makes that true rather
+  // than true-at-the-levels-someone-remembered. The reason names the marker class only, never the
+  // offending content.
+  if (containsProjectionViolation(event)) {
+    return { type: "unclassified", reason: "retained event carries a projection violation" };
   }
   const method = typeof event.method === "string" && event.method.length > 0 ? event.method : null;
   const hasId = hasOwn(event, "id");
@@ -1430,13 +1590,21 @@ function classifySkill(skills, expected) {
 function classifyCwd(starts, expected) {
   const primary = starts[0];
   const cwd = primary?.result?.cwd;
+  // Four distinguished states, none of which needs the host path: absent, the recorded match, the
+  // recorded mismatch, and anything else -- a raw value here means the outcome was never recorded,
+  // which is drift rather than a pass. `expected.projectRoot` is retained for the caller contract
+  // but is deliberately no longer compared here: the comparison happened at retention time, on the
+  // real value, and only its outcome was kept.
   if (typeof cwd !== "string") {
     return cell("unavailable", "thread/start cwd absent");
   }
-  if (cwd !== expected.projectRoot) {
-    return cell("fail", `cwd ${cwd} is not project root`);
+  if (cwd === CWD_MATCHES_PROJECT_ROOT) {
+    return cell("pass", "thread cwd is project root");
   }
-  return cell("pass", "thread cwd is project root");
+  if (cwd === CWD_DIFFERS_FROM_PROJECT_ROOT) {
+    return cell("fail", "thread cwd is not the project root");
+  }
+  return cell("fail", "thread/start cwd was not recorded as a project-root outcome");
 }
 
 function uniqueAssayRow(data) {
@@ -1453,7 +1621,7 @@ function classifyMcp(statuses) {
     return cell("unavailable", "no assay mcpServerStatus row");
   }
   if (assay.runtimeStatus !== "connected") {
-    return cell("fail", `runtimeStatus ${assay.runtimeStatus}`);
+    return cell("fail", "assay server runtimeStatus is not connected");
   }
   return cell("pass", "assay MCP connected");
 }
@@ -1536,6 +1704,11 @@ function classifyInvocation(calls, expected, threadId, turnId, topology) {
   }
   const call = calls[0];
   const item = call.item;
+  // NON-CLAIM: the fake app-server populates turn.items with the completed tool item, so this
+  // requirement is exercised only against the fixture. The one real 0.153.1 capture available was
+  // a failed run whose turn/completed carried no mcpToolCall, so whether a SUCCESSFUL host turn
+  // populates turn.items is unmeasured. If it does not, this cell fails on the real host and that
+  // is a host-behaviour finding, not a defect in this check.
   const terminalItems = terminal.params.turn.items.filter(
     (candidate) => candidate?.type === "mcpToolCall",
   );
@@ -1546,7 +1719,7 @@ function classifyInvocation(calls, expected, threadId, turnId, topology) {
     return cell("fail", "matching terminal tool item contradicts item/completed");
   }
   if (item.server !== "assay") {
-    return cell("fail", `wrong server ${item.server}`);
+    return cell("fail", "tool item server is not the expected server");
   }
   if (call.threadId !== threadId) {
     return cell("fail", `tool thread ${call.threadId} != ${threadId}`);
@@ -1555,13 +1728,16 @@ function classifyInvocation(calls, expected, threadId, turnId, topology) {
     return cell("fail", `tool turn ${call.turnId} != ${turnId}`);
   }
   if (!EXPECTED_TOOLS.includes(item.tool)) {
-    return cell("fail", `tool ${item.tool} is not in the listed release set`);
+    return cell("fail", "tool is not in the listed release set");
   }
   if (item.tool !== DECIDE_TOOL) {
     return cell("fail", `wrong tool ${item.tool}`);
   }
+  if (item.error != null) {
+    return cell("fail", "mcpToolCall contains an error");
+  }
   if (item.status !== "completed") {
-    return cell("fail", `tool status ${item.status}`);
+    return cell("fail", "tool item status is not completed");
   }
   if (!sameJson(item.arguments, DECIDE_INPUT)) {
     return cell("fail", "tool arguments are not the pinned probe");
@@ -1838,6 +2014,28 @@ function projectedScalar(value) {
   return isJsonScalar(value) ? value : invalidProjection(value);
 }
 
+// Host-supplied free text is recorded as presence, never as content. These fields have no
+// evidentiary consumer -- no classification cell reads their value -- so retaining the value only
+// creates a way for host secrets to reach the proof bytes. The type check is unchanged: a wrong
+// type still yields invalidProjection and still fails closed, which is what the schema alignment
+// needs. scrub() is deliberately not used here: it is a keyword regex and cannot bound arbitrary
+// secret text, so it would license exactly the leak it appears to prevent.
+const PRESENT = "[present]";
+
+// A closed-set position: the value is compared against a set this proof DECLARES, so the literal
+// is genuinely needed and declared members pass through untouched. Anything else is not given a
+// legal-looking substitute -- it becomes an explicit projection violation, which the consumer
+// refuses wherever it sits. An unknown member must never read as an allowed value.
+function projectedMember(value, allowed) {
+  return typeof value === "string" && allowed.includes(value)
+    ? value
+    : invalidProjection(value);
+}
+
+function projectedPresence(value) {
+  return typeof value === "string" ? PRESENT : invalidProjection(value);
+}
+
 function projectDecisionObject(value) {
   if (!isPlainObject(value)) {
     return invalidProjection(value);
@@ -1848,13 +2046,7 @@ function projectDecisionObject(value) {
       out[key] = projectedScalar(value[key]);
     }
   }
-  const unexpected = Object.keys(value)
-    .filter((key) => key !== "allowed" && key !== "reason")
-    .sort();
-  if (unexpected.length > 0) {
-    out.__unexpectedKeys = unexpected;
-  }
-  return out;
+  return withUnexpectedKeys(out, value, ["allowed", "reason"]);
 }
 
 function projectToolResult(result) {
@@ -1889,13 +2081,12 @@ function projectToolResult(result) {
       });
     }
   }
-  const unexpected = Object.keys(result)
-    .filter((key) => !["isError", "error", "structuredContent", "content"].includes(key))
-    .sort();
-  if (unexpected.length > 0) {
-    out.__unexpectedKeys = unexpected;
-  }
-  return out;
+  return withUnexpectedKeys(out, result, [
+    "isError",
+    "error",
+    "structuredContent",
+    "content",
+  ]);
 }
 
 function projectArguments(value) {
@@ -1908,21 +2099,17 @@ function projectArguments(value) {
       out[key] = projectedScalar(value[key]);
     }
   }
-  const unexpected = Object.keys(value)
-    .filter((key) => key !== "tool" && key !== "policy")
-    .sort();
-  if (unexpected.length > 0) {
-    out.__unexpectedKeys = unexpected;
-  }
-  return out;
+  return withUnexpectedKeys(out, value, ["tool", "policy"]);
 }
 
+// A key NAME is host-controlled data exactly as a value is, so retaining the names of
+// unexpected keys retains host content. Record only that unexpected keys were present,
+// never which. Collapsing to PRESENT is also what makes re-projection a fixed point: the
+// marker is itself outside every allowed list, so projecting an already-projected object
+// re-marks it to the same value. A name list or a count would change on the second pass.
 function withUnexpectedKeys(out, value, allowed) {
-  const unexpected = Object.keys(value)
-    .filter((key) => !allowed.includes(key))
-    .sort();
-  if (unexpected.length > 0) {
-    out.__unexpectedKeys = unexpected;
+  if (Object.keys(value).some((key) => !allowed.includes(key))) {
+    out.__unexpectedKeys = PRESENT;
   }
   return out;
 }
@@ -2087,6 +2274,57 @@ function retainedClientRequestParamsReason(method, params) {
   return null;
 }
 
+function projectAppContext(value) {
+  if (value == null) {
+    return null;
+  }
+  if (!isPlainObject(value)) {
+    return invalidProjection(value);
+  }
+  const out = {};
+  // connectorId is required and must be non-empty, so it does not share projectedPresence.
+  if (typeof value.connectorId === "string" && value.connectorId.length > 0) {
+    out.connectorId = PRESENT;
+  } else {
+    out.connectorId = invalidProjection(value.connectorId);
+  }
+  if (hasOwn(value, "actionName")) {
+    out.actionName =
+      value.actionName == null ? null : projectedPresence(value.actionName);
+  }
+  if (hasOwn(value, "appName")) {
+    out.appName =
+      value.appName == null ? null : projectedPresence(value.appName);
+  }
+  if (hasOwn(value, "linkId")) {
+    out.linkId =
+      value.linkId == null ? null : projectedPresence(value.linkId);
+  }
+  if (hasOwn(value, "resourceUri")) {
+    out.resourceUri =
+      value.resourceUri == null ? null : projectedPresence(value.resourceUri);
+  }
+  return withUnexpectedKeys(out, value, [
+    "actionName",
+    "appName",
+    "connectorId",
+    "linkId",
+    "resourceUri",
+  ]);
+}
+
+function projectMcpToolCallError(value) {
+  if (value == null) {
+    return null;
+  }
+  if (!isPlainObject(value)) {
+    return invalidProjection(value);
+  }
+  const out = {};
+  out.message = projectedPresence(value.message);
+  return withUnexpectedKeys(out, value, ["message"]);
+}
+
 function projectRetainedItem(item) {
   if (!isPlainObject(item)) {
     return invalidProjection(item);
@@ -2094,27 +2332,71 @@ function projectRetainedItem(item) {
   if (item.type === "userMessage") {
     return { type: "userMessage", id: projectedScalar(item.id), content: [] };
   }
-  if (item.type === "reasoning" || item.type === "agentMessage") {
-    return { type: item.type, id: projectedScalar(item.id) };
+  if (
+    item.type === "reasoning" ||
+    item.type === "agentMessage" ||
+    item.type === "commandExecution"
+  ) {
+    return { type: projectedMember(item.type, KNOWN_ITEM_TYPES), id: projectedScalar(item.id) };
   }
   const out = {
-    type: projectedScalar(item.type),
+    type: projectedMember(item.type, KNOWN_ITEM_TYPES),
     id: projectedScalar(item.id),
-    server: projectedScalar(item.server),
-    tool: projectedScalar(item.tool),
+    server: projectedMember(item.server, EXPECTED_SERVERS),
+    tool: projectedMember(item.tool, EXPECTED_TOOLS),
     arguments: projectArguments(item.arguments),
     status: projectedScalar(item.status),
   };
   if (hasOwn(item, "result")) {
     out.result = item.result == null ? null : projectToolResult(item.result);
   }
-  const unexpected = Object.keys(item)
-    .filter((key) => !["type", "id", "server", "tool", "arguments", "status", "result"].includes(key))
-    .sort();
-  if (unexpected.length > 0) {
-    out.__unexpectedKeys = unexpected;
+  if (hasOwn(item, "durationMs")) {
+    out.durationMs =
+      item.durationMs == null
+        ? null
+        : typeof item.durationMs === "number" &&
+            Number.isSafeInteger(item.durationMs) &&
+            item.durationMs >= 0
+          ? item.durationMs
+          : invalidProjection(item.durationMs);
   }
-  return out;
+  if (hasOwn(item, "readOnlyHint")) {
+    out.readOnlyHint =
+      item.readOnlyHint == null
+        ? null
+        : typeof item.readOnlyHint === "boolean"
+          ? item.readOnlyHint
+          : invalidProjection(item.readOnlyHint);
+  }
+  if (hasOwn(item, "pluginId")) {
+    out.pluginId =
+      item.pluginId == null ? null : projectedPresence(item.pluginId);
+  }
+  if (hasOwn(item, "mcpAppResourceUri")) {
+    out.mcpAppResourceUri =
+      item.mcpAppResourceUri == null ? null : projectedPresence(item.mcpAppResourceUri);
+  }
+  if (hasOwn(item, "appContext")) {
+    out.appContext = projectAppContext(item.appContext);
+  }
+  if (hasOwn(item, "error")) {
+    out.error = projectMcpToolCallError(item.error);
+  }
+  return withUnexpectedKeys(out, item, [
+    "type",
+    "id",
+    "server",
+    "tool",
+    "arguments",
+    "status",
+    "result",
+    "durationMs",
+    "readOnlyHint",
+    "pluginId",
+    "mcpAppResourceUri",
+    "appContext",
+    "error",
+  ]);
 }
 
 function projectServerResult(method, result) {
@@ -2124,22 +2406,36 @@ function projectServerResult(method, result) {
   if (method === "initialize") {
     return {
       userAgent: result.userAgent === FAKE_USER_AGENT ? FAKE_USER_AGENT : "[observed-host]",
+      // NOT group C. `codexHome` has a real lexical consumer: it is pushed into the host-root list
+      // (`roots.push(initialize.codexHome)`) and used for path containment, so the characters are
+      // read. It stays verbatim and is listed as a retained-by-design disclosure instead.
       codexHome: projectedScalar(result.codexHome),
-      platformFamily: projectedScalar(result.platformFamily),
-      platformOs: projectedScalar(result.platformOs),
+      // Group C -- host platform strings. Shape-checked only by `successfulInitializeResult`;
+      // nothing reads the characters. Measured: presence here costs no test.
+      platformFamily:
+        result.platformFamily == null ? null : projectedPresence(result.platformFamily),
+      platformOs: result.platformOs == null ? null : projectedPresence(result.platformOs),
     };
   }
   if (method === "skills/list") {
     return {
       data: Array.isArray(result.data)
         ? result.data.map((entry) => ({
-            cwd: projectedScalar(entry?.cwd),
+            // Group C -- a skills row cwd is shape-checked only; nothing reads it.
+            // Group C -- a skills row cwd has no lexical consumer.
+            cwd: entry?.cwd == null ? null : projectedPresence(entry.cwd),
             skills: Array.isArray(entry?.skills)
               ? entry.skills.map((skill) => ({
+                  // Group C -- skill name, path and scope are host text with no lexical consumer.
+                  // `enabled` stays scalar: it is a boolean compared with `!== true`.
+                  // `name` and `path` are NOT group C: skill discovery matches on both, so the
+                  // characters are read. Measured -- projecting either fails 35 tests. They stay
+                  // verbatim and are listed as retained-by-design disclosures.
                   name: projectedScalar(skill?.name),
                   enabled: projectedScalar(skill?.enabled),
                   path: projectedScalar(skill?.path),
-                  scope: projectedScalar(skill?.scope),
+                  // Group C -- scope has no lexical consumer.
+                  scope: skill?.scope == null ? null : projectedPresence(skill.scope),
                 }))
               : invalidProjection(entry?.skills),
           }))
@@ -2219,7 +2515,10 @@ export function projectRetainedEvent(event) {
   if (!isPlainObject(event)) {
     return invalidProjection(event);
   }
-  const out = { direction: projectedScalar(event.direction), method: projectedScalar(event.method) };
+  const out = {
+    direction: projectedScalar(event.direction),
+    method: projectedMember(event.method, KNOWN_METHODS),
+  };
   if (hasOwn(event, "id")) {
     out.id = event.id;
   }
