@@ -19,6 +19,11 @@ an agent identity. Direct human review can use the same login for both options o
 when it is not the PR author's login and the record names `agent: human` and that
 login as `instance`.
 
+Reviewer agent and instance components use a closed, single-line identifier syntax
+before they enter either JSON or human-readable output. A record cannot use control
+characters or Markdown delimiters to add apparent conclusions to the readiness
+report.
+
 The evidence must be an existing `assay.review-record.v0` JSON record in a comment
 on this exact PR. It must declare a completed READY review on the current head and
 both non-building and non-governing-spec authorship. The helper does not follow

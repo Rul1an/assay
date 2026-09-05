@@ -10,6 +10,7 @@ from urllib.parse import quote
 SHA_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])", re.IGNORECASE)
 REVIEW_RECORD_MARKER = "<!-- assay-review-record -->"
 REVIEW_RECORD_FENCE = re.compile(r"^```(?:json)?\n(.*)\n```$", re.S)
+IDENTITY_COMPONENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}")
 
 
 def run_json(args, allowed_returncodes=(0,)):
@@ -45,6 +46,17 @@ def verdict(text):
     return None
 
 
+def declared_reviewer_identity(reviewer):
+    if not isinstance(reviewer, dict):
+        return None
+    agent = reviewer.get("agent")
+    instance = reviewer.get("instance")
+    if (not isinstance(agent, str) or IDENTITY_COMPONENT_RE.fullmatch(agent) is None
+            or not isinstance(instance, str) or IDENTITY_COMPONENT_RE.fullmatch(instance) is None):
+        return None
+    return f"{agent}/{instance}"
+
+
 def machine_review_candidate(body, author):
     stripped = body.strip()
     if not stripped.startswith(REVIEW_RECORD_MARKER):
@@ -63,12 +75,13 @@ def machine_review_candidate(body, author):
     result = record.get("verdict")
     reviewer = record.get("reviewer")
     independence = record.get("independence")
+    identity = declared_reviewer_identity(reviewer)
     if (
         not isinstance(bound, str)
         or SHA_RE.fullmatch(bound) is None
         or result not in {"READY", "BLOCKED"}
         or record.get("review_completed") is not True
-        or not isinstance(reviewer, dict)
+        or identity is None
         or reviewer.get("github_login") != author
         or not isinstance(independence, dict)
         or independence.get("did_not_build") is not True
@@ -78,7 +91,7 @@ def machine_review_candidate(body, author):
     return {
         "verdict": result,
         "bound_sha": bound,
-        "reviewer_identity": f"{reviewer.get('agent')}/{reviewer.get('instance')}",
+        "reviewer_identity": identity,
     }
 
 

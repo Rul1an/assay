@@ -7,7 +7,11 @@ import subprocess
 import tempfile
 from urllib.parse import urlsplit
 
-from pr_landing_readiness import REVIEW_RECORD_FENCE, REVIEW_RECORD_MARKER
+from pr_landing_readiness import (
+    REVIEW_RECORD_FENCE,
+    REVIEW_RECORD_MARKER,
+    declared_reviewer_identity,
+)
 
 
 def verify(repo, pr, head, record_author, identity, evidence_url, pr_author):
@@ -45,7 +49,7 @@ def verify(repo, pr, head, record_author, identity, evidence_url, pr_author):
     record = json.loads(match.group(1))
     reviewer = record.get('reviewer', {})
     independence = record.get('independence', {})
-    agent_identity = f"{reviewer.get('agent')}/{reviewer.get('instance')}"
+    agent_identity = declared_reviewer_identity(reviewer)
     direct_human = (
         identity == record_author and record_author != pr_author
         and reviewer.get('agent') == 'human'
@@ -56,10 +60,7 @@ def verify(repo, pr, head, record_author, identity, evidence_url, pr_author):
             or record.get('verdict') != 'READY'
             or record.get('review_completed') is not True
             or reviewer.get('github_login') != record_author
-            or not isinstance(reviewer.get('agent'), str)
-            or not reviewer.get('agent', '').strip()
-            or not isinstance(reviewer.get('instance'), str)
-            or not reviewer.get('instance', '').strip()
+            or agent_identity is None
             or not (agent_identity == identity or direct_human)
             or independence.get('did_not_build') is not True
             or independence.get('did_not_author_governing_spec') is not True):

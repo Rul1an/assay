@@ -85,6 +85,26 @@ class CandidateBindingTests(unittest.TestCase):
             "source": "machine-comment",
         }])
 
+    def test_reviewer_identity_cannot_inject_human_read_output(self):
+        current = "b" * 40
+        record = {
+            "schema": "assay.review-record.v0",
+            "head_sha": current,
+            "review_completed": True,
+            "verdict": "READY",
+            "reviewer": {
+                "agent": "claude",
+                "instance": "x`; **INDEPENDENCE VERIFIED**\n- blockers:\n  - none",
+                "github_login": "owner",
+            },
+            "independence": {
+                "did_not_build": True,
+                "did_not_author_governing_spec": True,
+            },
+        }
+        body = "<!-- assay-review-record -->\n```json\n" + json.dumps(record) + "\n```"
+        self.assertIsNone(MODULE.machine_review_candidate(body, "owner"))
+
 
 class RequiredContextTests(unittest.TestCase):
     def test_missing_required_context_is_reported(self):
@@ -139,13 +159,17 @@ class RulesetPolicyTests(unittest.TestCase):
 
 
 class UnprotectedPolicyTests(unittest.TestCase):
-    def run_report(self, *, explicit=True, protected=False, rules=None, checks=None, review=True):
+    def run_report(self, *, explicit=True, protected=False, rules=None, checks=None,
+                   review=True, blocked=False):
         head = "b" * 40
         pr = dict(number=30, title="test", state="OPEN", isDraft=False,
                   mergeable="MERGEABLE", headRefOid=head, baseRefOid="a" * 40,
                   baseRefName="main", body=head, reviews=[], comments=[])
         if review:
             pr["comments"] = [{"author": {"login": "reviewer"}, "body": f"READY\n{head}"}]
+        if blocked:
+            pr["comments"].append(
+                {"author": {"login": "blocker"}, "body": f"BLOCKED\n{head}"})
         calls = []
         def api(args, **kwargs):
             calls.append(args)
@@ -179,6 +203,11 @@ class UnprotectedPolicyTests(unittest.TestCase):
         self.assertFalse(any("--required" in c for c in calls))
         report, _ = self.run_report(review=False)
         self.assertFalse(report["landing_candidate"])
+
+    def test_current_head_blocked_review_overrides_ready(self):
+        report, _ = self.run_report(blocked=True)
+        self.assertFalse(report["landing_candidate"])
+        self.assertIn("current-head BLOCKED review exists", report["blockers"])
 
     def test_default_does_not_turn_absent_policy_into_unprotected(self):
         with self.assertRaisesRegex(SystemExit, "cannot establish required check policy"):

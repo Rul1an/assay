@@ -27,7 +27,8 @@ if case=='carrier-only': body='READY\\n'+head+'\\nRelay: '+os.environ['URL']
 if args[:2]==['pr','view']:
  print(json.dumps(dict(number=30,author={'login':'owner'},state='OPEN',isDraft=False,
  mergeable='MERGEABLE',headRefOid=head,baseRefOid='a'*40,baseRefName='main',body=head,
- comments=[{'author':{'login':'owner'},'body':'READY\\n'+head}])))
+ comments=[{'author':{'login':'other' if case=='candidate-author-mismatch' else 'owner'},
+            'body':'READY\\n'+head}])))
 elif args[:2]==['pr','checks']:
  print(json.dumps([dict(name='CI',state='SUCCESS',bucket='pass')]))
 elif args[:2]==['pr','merge']:
@@ -48,7 +49,8 @@ class RelayProtocol(unittest.TestCase):
     def test_relay_acceptance_and_fail_closed_matrix(self):
         for case in ('valid', 'wrong-head', 'blocked', 'incomplete',
                      'no-independence', 'wrong-identity', 'carrier-only',
-                     'unavailable', 'wrong-author', 'missing-url', 'ambiguous'):
+                     'unavailable', 'wrong-author', 'missing-url', 'ambiguous',
+                     'candidate-author-mismatch'):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
                 root = pathlib.Path(directory)
                 gh = root / 'gh'
