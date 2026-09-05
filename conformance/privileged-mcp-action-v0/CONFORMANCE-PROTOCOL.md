@@ -66,20 +66,21 @@ verify it.
 A second provenance axis, orthogonal to the mode above. The mode says what was read and when; this
 says what wrote it. Both are self-declared, neither is a score, and the scorer cannot verify either.
 
-The labels are not ours. They are the trailers open source projects already converged on, so a
-contributor does not learn a private vocabulary to report here:
+The registry `authorship` object is canonical. These documentary trailers are a one-way projection
+from its `kind`; they do not replace the structured registry disclosure:
 
-| Label | Meaning |
+| Registry kind | Documentary trailer |
 |---|---|
-| `Authored-By: human` | No generative assistance in the implementation. |
-| `Assisted-By: <system> <version>` | A human directed the work and used a generative system for part of it. |
-| `Generated-By: <system> <version>` | The implementation was produced end to end by a generative system from the profile text. |
+| `human` | `Authored-By: human` |
+| `agent-assisted` | `Assisted-By: <model disclosure>` |
+| `agent-generated` | `Generated-By: <model disclosure>` |
 
 `Assisted-By:` and `Generated-By:` sit at two points on an autonomy spectrum; Apache originated the
 generated form and OpenInfra added the assisted one and made disclosure mandatory. Where assistance
-was used, the report states the system and version, which parts of the implementation it produced,
-and how the output was checked. That is the shape IEEE asks for, plus the verification note that
-recent policy guidance adds, and it is the part a reader actually needs.
+was used, `model` is copied as an exact opaque disclosure string: the projection does not infer,
+invent, or normalize a model or version. Produced-parts and checking-method details remain in the
+report. That is the shape IEEE asks for, plus the verification note that recent policy guidance adds,
+and it is the part a reader actually needs.
 
 ### Why this axis exists here
 
