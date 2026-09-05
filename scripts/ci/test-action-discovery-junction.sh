@@ -544,7 +544,7 @@ check_explicit_glob_and_pin_filter() {
   grep -Fq "attests the sandbox command's observed effects, not that a test suite" "${doc_path}" \
     || die "docs dry-run recipe must qualify observed-effects-only (not suite pass)"
 
-  local glob_scratch capture_default capture_star mock_action run_body pg_runner
+  local glob_scratch capture_default capture_star mock_action run_body pg_runner child_presence
   glob_scratch="$(mktemp -d "${TMPDIR:-/tmp}/2802-glob-depth.XXXXXX")"
   register_junction_temp "${glob_scratch}"
   mkdir -p "${glob_scratch}/.assay/evidence/mid/deep"
@@ -686,6 +686,52 @@ def main() -> int:
 if __name__ == "__main__":
     raise SystemExit(main())
 PYPG
+
+  # Shared probe predicate: os.kill(pid, 0) errno-aware. Only ESRCH == absent.
+  child_presence="$(mktemp "${TMPDIR:-/tmp}/2802-child-presence.XXXXXX.py")"
+  register_junction_temp "${child_presence}"
+  cat >"${child_presence}" <<'PYPRES'
+import errno
+import os
+import sys
+
+
+def classify_pid(pid: int) -> str:
+    """Return alive | absent | unavailable. Only ESRCH is absence."""
+    try:
+        os.kill(pid, 0)
+        return "alive"
+    except ProcessLookupError:
+        return "absent"
+    except PermissionError:
+        return "unavailable"
+    except OSError as exc:
+        if exc.errno == errno.ESRCH:
+            return "absent"
+        return "unavailable"
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print("usage: child_presence.py PID", file=sys.stderr)
+        return 2
+    try:
+        pid = int(sys.argv[1])
+    except ValueError:
+        print("unavailable", flush=True)
+        return 2
+    status = classify_pid(pid)
+    print(status, flush=True)
+    if status == "absent":
+        return 0
+    if status == "alive":
+        return 1
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+PYPRES
 
   cat >"${mock_action}/scripts/build_evidence_index.sh" <<'MOCK'
 #!/usr/bin/env bash
@@ -903,7 +949,46 @@ print("ok    mock-members-present-gets-kill")
 PYMOCK
 
 
-  # Owned-group teardown helper for probes: kill only the recorded child's pgid.
+  # RED mocks against the actual child-presence predicate (not kill -0 rc).
+  python3 - "${child_presence}" <<'PYPRESMOCK'
+import errno
+import importlib.util
+import os
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+path = Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location("child_presence", path)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+
+# alive
+with patch.object(os, "kill", return_value=None):
+    assert mod.classify_pid(1) == "alive", mod.classify_pid(1)
+print("ok    mock-child-presence-alive")
+
+# ESRCH / ProcessLookupError => absent
+with patch.object(os, "kill", side_effect=ProcessLookupError(errno.ESRCH, "No such process")):
+    assert mod.classify_pid(1) == "absent"
+print("ok    mock-child-presence-esrch-absent")
+
+# EPERM => unavailable (must NOT be treated as absent — weak kill -0 would)
+with patch.object(os, "kill", side_effect=PermissionError(errno.EPERM, "Operation not permitted")):
+    assert mod.classify_pid(1) == "unavailable"
+print("ok    mock-child-presence-eperm-unavailable")
+
+# Other OSError (not ESRCH) => unavailable
+with patch.object(os, "kill", side_effect=OSError(errno.EIO, "I/O error")):
+    assert mod.classify_pid(1) == "unavailable"
+print("ok    mock-child-presence-other-oserror-unavailable")
+
+# Weak predicate regression: nonzero kill rc must not imply absence.
+# classify_pid under EPERM is unavailable, so presence is not established.
+assert mod.classify_pid.__doc__ and "Only ESRCH" in mod.classify_pid.__doc__
+print("ok    mock-child-presence-only-esrch-is-absence")
+PYPRESMOCK
+
   # Teardown: signal only the probe-recorded child PID (never rediscover a pgid).
   reap_owned_probe_child() {
     local pid="${1:-}"
@@ -911,10 +996,32 @@ PYMOCK
     kill -KILL "${pid}" 2>/dev/null || true
   }
 
+  # Only ESRCH establishes absence; alive or EPERM/other => die (honest unavailable).
+  require_child_absent() {
+    local pid="$1"
+    local context="$2"
+    local status rc
+    set +e
+    status="$(python3 "${child_presence}" "${pid}" 2>/dev/null)"
+    rc=$?
+    set -e
+    status="${status//$'
+'/}"
+    if [[ "${status}" == "absent" && "${rc}" -eq 0 ]]; then
+      return 0
+    fi
+    if [[ "${status}" == "alive" || "${rc}" -eq 1 ]]; then
+      reap_owned_probe_child "${pid}"
+      die "${context}: child ${pid} still alive"
+    fi
+    reap_owned_probe_child "${pid}"
+    die "${context}: child ${pid} presence UNAVAILABLE (status=${status:-?} rc=${rc})"
+  }
+
   # Cooperative synthetic child: group TERM/KILL reaps a normal sleep descendant.
   # Without start_new_session+killpg, subprocess.run(timeout=) leaves this child alive.
   {
-    local probe_dir probe_sh child_pid_file alive_rc probe_rc child_pid
+    local probe_dir probe_sh child_pid_file probe_rc child_pid
     probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/2802-pg-child.XXXXXX")"
     register_junction_temp "${probe_dir}"
     child_pid_file="${probe_dir}/child.pid"
@@ -942,16 +1049,9 @@ PROBE
     [[ -n "${child_pid}" && "${child_pid}" =~ ^[0-9]+$ ]] \
       || { reap_owned_probe_child "${child_pid}"; die "synthetic child pid malformed: ${child_pid}"; }
     sleep 0.2
-    set +e
-    kill -0 "${child_pid}" 2>/dev/null
-    alive_rc=$?
-    set -e
-    if [[ "${alive_rc}" -eq 0 ]]; then
-      reap_owned_probe_child "${child_pid}"
-      die "synthetic child ${child_pid} still alive after process-group timeout (descendant cleanup failed)"
-    fi
+    require_child_absent "${child_pid}" "synthetic child probe"
     # 124 = killpg completed. 125 = EPERM unavailable after TERM wipe (host quirk);
-    # only accepted when child is already dead and stderr says UNAVAILABLE.
+    # only accepted when child absence was ESRCH-proven and stderr says UNAVAILABLE.
     if [[ "${probe_rc}" -eq 124 ]]; then
       :
     elif [[ "${probe_rc}" -eq 125 ]]; then
@@ -966,7 +1066,7 @@ PROBE
 
   # Parent exits on TERM; child ignores TERM — proves KILL escalation is not skipped on leader exit.
   {
-    local probe_dir probe_sh child_pid_file alive_rc probe_rc child_pid
+    local probe_dir probe_sh child_pid_file probe_rc child_pid
     probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/2802-pg-termign.XXXXXX")"
     register_junction_temp "${probe_dir}"
     child_pid_file="${probe_dir}/child.pid"
@@ -1006,14 +1106,7 @@ PROBE
     [[ -n "${child_pid}" && "${child_pid}" =~ ^[0-9]+$ ]] \
       || { reap_owned_probe_child "${child_pid}"; die "TERM-ignore child pid malformed: ${child_pid}"; }
     sleep 0.2
-    set +e
-    kill -0 "${child_pid}" 2>/dev/null
-    alive_rc=$?
-    set -e
-    if [[ "${alive_rc}" -eq 0 ]]; then
-      reap_owned_probe_child "${child_pid}"
-      die "TERM-ignore child ${child_pid} still alive (KILL escalation skipped after parent exit)"
-    fi
+    require_child_absent "${child_pid}" "TERM-ignore child probe"
     ok "process-group-kills-term-ignoring-child"
   }
 
