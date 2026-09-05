@@ -2060,6 +2060,29 @@ function projectToolResult(result) {
   if (result.error != null) {
     out.error = { present: true };
   }
+  if (hasOwn(result, "_meta")) {
+    // `_meta` is a DECLARED field of the app-server item result. From the pinned host schema
+    // (openai/codex rust-v0.153.1, codex-rs/app-server-protocol/src/protocol/v2/mcp.rs):
+    //
+    //   pub struct McpToolCallResult {
+    //       pub content: Vec<JsonValue>,
+    //       pub structured_content: Option<JsonValue>,
+    //       #[serde(rename = "_meta")] pub meta: Option<JsonValue>,
+    //   }
+    //
+    // No field carries skip_serializing_if, so a live host serializes `_meta: null` rather than
+    // omitting it. Marking it unexpected refused a schema-correct record (#2807).
+    //
+    // This is NOT `CallToolResult` and NOT `McpServerToolCallResponse`: those declare `isError`
+    // and DO skip `None`. The two shapes differ in both directions, so admitting this field here
+    // says nothing about them.
+    //
+    // Its value is arbitrary host JSON with no consumer in this proof, so only PRESENCE is
+    // retained -- never a key name, never a value. `null` stays null because the schema declares
+    // it and absent must stay distinguishable from present-and-empty. Idempotent: `PRESENT` is a
+    // non-null value, so re-projecting yields `PRESENT` again.
+    out._meta = result._meta == null ? null : PRESENT;
+  }
   if (hasOwn(result, "structuredContent")) {
     out.structuredContent =
       result.structuredContent == null ? null : projectDecisionObject(result.structuredContent);
@@ -2081,7 +2104,18 @@ function projectToolResult(result) {
       });
     }
   }
+  // `isError` and `error` are retained deliberately, and NOT because this item type declares them
+  // -- it does not. They stay because a host that sends either anyway must reach the consumer's
+  // refusals rather than be silently dropped: `retainedItemReason` refuses a non-Boolean `isError`
+  // and refuses `isError === true`, and those checks can only fire on a field the projection
+  // carried through. Removing them because one host type omits them would delete live refusals to
+  // tidy a list.
+  //
+  // Precise about what pins what: the existing tests named around `isError` mutate ALREADY
+  // PROJECTED events, so they pin the CONSUMER's refusal, not the producer's `"[invalid]"`
+  // conversion above. The producer-side barrier is pinned separately by the #2807 tests below.
   return withUnexpectedKeys(out, result, [
+    "_meta",
     "isError",
     "error",
     "structuredContent",

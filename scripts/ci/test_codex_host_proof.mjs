@@ -6207,3 +6207,157 @@ test("D: the project-root comparison is retained, and its outcome is not the pat
   assert.equal(cells.cwdObserved.status, "fail", "required/false must stay distinguished from missing");
   assert.match(cells.cwdObserved.reason, /not the project root/);
 });
+
+// --- #2807: the live 0.153.1 item result carries `_meta`, and it is schema-declared -----------
+// Measured against the pinned host schema
+// (openai/codex rust-v0.153.1, codex-rs/app-server-protocol/src/protocol/v2/mcp.rs):
+//
+//   pub struct McpToolCallResult {
+//       pub content: Vec<JsonValue>,
+//       pub structured_content: Option<JsonValue>,
+//       #[serde(rename = "_meta")] pub meta: Option<JsonValue>,
+//   }
+//
+// No field carries skip_serializing_if, so `structuredContent: null` AND `_meta: null` are both
+// always serialized. This is NOT CallToolResult and NOT McpServerToolCallResponse -- those declare
+// isError and DO skip None. The projection was missing `_meta`, so a schema-correct live record was
+// marked unexpected and the consumer refused it. The refusal was correct behaviour on an incomplete
+// allowed-field list, not a host fault.
+const LIVE_0153_RESULT = Object.freeze({
+  content: [{ type: "text", text: JSON.stringify({ allowed: true, reason: "Allowed by policy" }) }],
+  structuredContent: null,
+  _meta: null,
+});
+
+function liveToolEvent(result) {
+  return {
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5000,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: {
+        type: "mcpToolCall",
+        id: "tool-1",
+        server: "assay",
+        tool: "assay_policy_decide",
+        status: "completed",
+        arguments: { tool: "install_surface_allowed_probe" },
+        result,
+      },
+    },
+  };
+}
+
+test("#2807: a schema-shaped 0.153.1 result with _meta:null is accepted, not marked unexpected", () => {
+  const projected = projectRetainedEvent(liveToolEvent(LIVE_0153_RESULT));
+  assert.equal(
+    Object.hasOwn(projected.params.item.result, "__unexpectedKeys"),
+    false,
+    "_meta is a declared field of McpToolCallResult and must not be marked unexpected",
+  );
+  assert.equal(
+    classifyStoredEvent(projected).type,
+    "server-notification",
+    "the live host record must be accepted by the consumer",
+  );
+});
+
+test("#2807: _meta is retained as presence only, never as metadata content", () => {
+  const projected = projectRetainedEvent(
+    liveToolEvent({
+      ...LIVE_0153_RESULT,
+      _meta: { traceId: "/Users/alice/.ssh/id_rsa?tok=META_SECRET_CANARY", depth: 3 },
+    }),
+  );
+  const raw = JSON.stringify(projected);
+  assert.equal(raw.includes("META_SECRET_CANARY"), false, "a metadata value must not be retained");
+  assert.equal(raw.includes("traceId"), false, "a metadata key NAME must not be retained either");
+  assert.equal(
+    projected.params.item.result._meta,
+    "[present]",
+    "a non-null _meta is recorded as presence",
+  );
+});
+
+test("#2807: null and present _meta stay distinguishable, and absent stays absent", () => {
+  const withNull = projectRetainedEvent(liveToolEvent(LIVE_0153_RESULT)).params.item.result;
+  const withValue = projectRetainedEvent(
+    liveToolEvent({ ...LIVE_0153_RESULT, _meta: { a: 1 } }),
+  ).params.item.result;
+  const { _meta, ...withoutMeta } = LIVE_0153_RESULT;
+  const absent = projectRetainedEvent(liveToolEvent(withoutMeta)).params.item.result;
+  assert.equal(withNull._meta, null, "a declared null must stay null, not become presence");
+  assert.equal(withValue._meta, "[present]");
+  assert.equal(Object.hasOwn(absent, "_meta"), false, "an absent field must stay absent");
+});
+
+test("#2807: admitting _meta does not admit an undeclared sibling", () => {
+  const projected = projectRetainedEvent(
+    liveToolEvent({ ...LIVE_0153_RESULT, hostExtension: { anything: 1 } }),
+  );
+  assert.equal(
+    projected.params.item.result.__unexpectedKeys,
+    "[present]",
+    "an undeclared sibling must still be marked",
+  );
+  assert.equal(
+    classifyStoredEvent(projected).type,
+    "unclassified",
+    "and the consumer must still refuse it -- this is not a blanket unknown-key allowance",
+  );
+});
+
+test("#2807: the live shape stays a re-projection fixed point", () => {
+  const once = projectRetainedEvent(liveToolEvent(LIVE_0153_RESULT));
+  assert.deepEqual(projectRetainedEvent(once), once);
+});
+
+test("#2807: admitting _meta still carries error and isError to the consumer", () => {
+  // LAYER, stated because I first asserted the wrong one: `classifyStoredEvent` judges event
+  // SHAPE, and it accepts these -- the refusal for `isError: true` and for a non-Boolean lives in
+  // `classifyToolResultEnvelope`, reached through `classifyRecord` as a cell judgement, and the
+  // existing driven tests pin it there. What THIS layer can establish, and what the retention of
+  // these fields is actually for, is that the projection carries them through at all: a field the
+  // producer dropped could never reach the check that refuses it.
+  const withIsError = projectRetainedEvent(
+    liveToolEvent({ ...LIVE_0153_RESULT, isError: true }),
+  ).params.item.result;
+  assert.equal(withIsError.isError, true, "isError must survive projection to reach its refusal");
+  assert.equal(
+    Object.hasOwn(withIsError, "__unexpectedKeys"),
+    false,
+    "isError is an allowed field, not an unexpected one",
+  );
+
+  const withError = projectRetainedEvent(
+    liveToolEvent({ ...LIVE_0153_RESULT, error: { message: "tool exploded" } }),
+  ).params.item.result;
+  assert.deepEqual(withError.error, { present: true }, "error survives as presence, not content");
+  assert.equal(
+    JSON.stringify(withError).includes("tool exploded"),
+    false,
+    "an error message must not be retained",
+  );
+});
+
+test("#2807: the producer's isError type barrier is the deciding check for a non-Boolean", () => {
+  // Pins the PRODUCER. Deleting the `typeof === "boolean"` conversion in projectToolResult
+  // previously changed nothing observable, because the consumer refuses a non-Boolean
+  // independently -- the same shape as the F-B durationMs/readOnlyHint gap. Asserting the
+  // projected bytes makes the barrier the deciding check.
+  assert.equal(
+    projectRetainedEvent(liveToolEvent({ ...LIVE_0153_RESULT, isError: "true" })).params.item.result
+      .isError,
+    "[invalid]",
+    "a non-Boolean isError must be converted by the producer, not carried verbatim",
+  );
+  // Control: a real Boolean must survive unchanged, or the conversion is a blanket rewrite.
+  assert.equal(
+    projectRetainedEvent(liveToolEvent({ ...LIVE_0153_RESULT, isError: false })).params.item.result
+      .isError,
+    false,
+  );
+});
