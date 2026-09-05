@@ -121,7 +121,7 @@ impl Store {
         tx.execute(
             "INSERT INTO steps (id, episode_id, idx, kind, name, content, content_sha256, truncations_json, meta_json)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(id) DO UPDATE SET content=excluded.content, meta_json=excluded.meta_json",
+             ON CONFLICT(id) DO UPDATE SET content=excluded.content, content_sha256=excluded.content_sha256, truncations_json=excluded.truncations_json, meta_json=excluded.meta_json",
             (
                 &e.step_id,
                 &e.episode_id,
