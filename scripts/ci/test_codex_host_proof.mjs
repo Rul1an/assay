@@ -5526,3 +5526,125 @@ for (const [label, patch, marker] of [
     );
   });
 }
+
+// --- The CONSUMER allowedKeys list, pinned in both directions -------------------------------
+// There are two whitelists: this one, in retainedItemReason, and a separate list in
+// projectRetainedItem. Every earlier schema test asserted on __unexpectedKeys, which the PRODUCER
+// list makes -- so the consumer list was pinned in neither direction, and dropping a declared
+// property from it made a driven run fail all nine cells while the suite stayed green.
+//
+// The two directions need two different tests, and one cannot substitute for the other:
+//   * dropping a declared key is caught by a well-formed record being ACCEPTED;
+//   * adding an undeclared key is NOT caught that way, because a well-formed record never carries
+//     the added key. It is also not caught through the projection, because the producer still marks
+//     the key and the consumer then refuses on the __unexpectedKeys marker rather than on the key
+//     itself. Only an UNPROJECTED stored event isolates the consumer list.
+
+test("consumer accepts a well-formed mcpToolCall carrying every newly admitted field", () => {
+  const classified = classifyStoredEvent(
+    projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "install_surface_allowed_probe" },
+          result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+          durationMs: 120,
+          readOnlyHint: true,
+          pluginId: "plugin-assay",
+          mcpAppResourceUri: "resource://assay",
+          appContext: { connectorId: "connector-1" },
+          error: null,
+        },
+      },
+    }),
+  );
+  assert.equal(
+    classified.type,
+    "server-notification",
+    `a record carrying only declared 0.153.1 properties must be accepted; a consumer allowedKeys missing any of them silently refuses every real host record (got: ${JSON.stringify(classified)})`,
+  );
+});
+
+test("consumer refuses an unprojected mcpToolCall carrying a name the schema does not declare", () => {
+  // Deliberately NOT projected: the producer would mark the key and the consumer would then refuse
+  // on the marker, which proves nothing about the consumer's own list. These stored bytes isolate it.
+  //
+  // SCOPE: a sample, not a proof of set equality. It refuses the names below; it cannot establish
+  // that every name outside the schema is refused, because it does not enumerate that set.
+  for (const key of [
+    "notInTheSchemaAtAll",
+    "aggregatedOutput",
+    "command",
+    "cwd",
+    "sessionId",
+  ]) {
+    const classified = classifyStoredEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "install_surface_allowed_probe" },
+          result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+          [key]: null,
+        },
+      },
+    });
+    assert.equal(
+      classified.type,
+      "unclassified",
+      `${key} is not declared by the 0.153.1 schema; the consumer must refuse it on its own list`,
+    );
+  }
+});
+
+// --- F-B, extended: durationMs and readOnlyHint have their own producer ternaries ------------
+// They do not share projectedPresence, so the five F-B rows above do not cover them, and the
+// existing cases use scalar non-strings which the consumer catches regardless of the producer.
+for (const [label, patch, marker] of [
+  ["durationMs object", { durationMs: { secret: "FB-DURATION-OBJ" } }, "FB-DURATION-OBJ"],
+  ["readOnlyHint array", { readOnlyHint: ["FB-READONLY-ARR"] }, "FB-READONLY-ARR"],
+]) {
+  test(`F-B producer: a non-scalar at ${label} is refused and never retained`, () => {
+    const projected = projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "install_surface_allowed_probe" },
+          result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+          ...patch,
+        },
+      },
+    });
+    assert.equal(JSON.stringify(projected).includes(marker), false, `${label}: must not reach retained bytes`);
+    assert.equal(classifyStoredEvent(projected).type, "unclassified", `${label}: must still be refused`);
+  });
+}
