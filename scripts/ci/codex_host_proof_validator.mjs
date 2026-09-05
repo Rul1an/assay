@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const SCHEMA = "assay.codex-host-proof.v5";
+export const SCHEMA = "assay.codex-host-proof.v6";
 export const FAKE_USER_AGENT = "assay-codex-host-proof-fake/1";
 // Closed install-route vocabulary. "local-build" is recordable on purpose: a failed
 // provenance run must be retained as what it was, not omitted into a cleaner record.
@@ -19,12 +19,57 @@ export const INSTALL_ROUTES = Object.freeze([
   "host-bundled",
   "local-build",
 ]);
-// Routes that satisfy #2684 DoD cell 2. A local build never does.
+// Route admissibility is not package verification. Only crates-io has a
+// retained-package verifier in v6; other routes cannot claim that cell yet.
 export const PUBLISHED_INSTALL_ROUTES = Object.freeze([
   "github-release",
   "crates-io",
-  "host-bundled",
 ]);
+export const PACKAGE_SUBJECTS = Object.freeze([
+  "assay-package.crate", "assay-registry-row.json", "assay-install.json",
+]);
+export const PACKAGE_NONCLAIM = "Cargo installation metadata does not cryptographically bind the package to the binary or establish reproducibility or build integrity; retained registry bytes do not authenticate their origin";
+export const ASSAY_INDEX_SOURCE = "https://index.crates.io/as/sa/assay-mcp-server";
+
+// Both acquisition and offline consumption call this function over actual bytes.
+// This slice supports the crates.io route only. It does not infer an install route.
+export function assayPackageVersion(source) {
+  if (source?.route !== "crates-io") throw new Error("Assay package route is not supported by this verifier");
+  const match = /^assay-mcp-server@(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/.exec(source.reference);
+  if (!match) throw new Error("Assay package reference must pin its exact version");
+  return match[1];
+}
+
+export function verifyAssayPackage(files, source) {
+  const version = assayPackageVersion(source);
+  const bytes = readBoundedFile(files.package, HARD_MAX_BYTES);
+  const indexBytes = readBoundedFile(files.index, 256 * 1024);
+  const installBytes = readBoundedFile(files.installation, 16 * 1024);
+  const row = parseJsonBytes(indexBytes, 256 * 1024);
+  const install = parseJsonBytes(installBytes, 16 * 1024);
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  if (row?.name !== "assay-mcp-server" || row.vers !== version || row.yanked !== false ||
+      !/^[a-f0-9]{64}$/.test(row.cksum) || row.cksum !== digest || bytes.length === 0) {
+    throw new Error("Assay registry package name, version, checksum or availability mismatch");
+  }
+  if (!exactKeys(install, ["package", "version_req", "bins", "profile", "target", "rustc"]) ||
+      install.package !== `assay-mcp-server ${version} (registry+https://github.com/rust-lang/crates.io-index)` ||
+      install.version_req !== `=${version}` || !sameJson(install.bins, ["assay-mcp-server"]) ||
+      install.profile !== "release" || !boundedPrintable(install.target) || !boundedPrintable(install.rustc)) {
+    throw new Error("Assay Cargo installation metadata does not name the pinned registry package");
+  }
+  return {
+    method: "crates-io-sha256", packageName: "assay-mcp-server", version,
+    indexSource: ASSAY_INDEX_SOURCE, packageSha256: digest,
+    indexSha256: createHash("sha256").update(indexBytes).digest("hex"),
+    installationSha256: createHash("sha256").update(installBytes).digest("hex"),
+    limitation: PACKAGE_NONCLAIM,
+  };
+}
+
+export function packageFiles(root) {
+  return Object.fromEntries(["package", "index", "installation"].map((key, i) => [key, path.join(root, PACKAGE_SUBJECTS[i])]));
+}
 export const MAX_INSTALL_REFERENCE = 200;
 // Contract: a reference or version is one line of printable ASCII, U+0020 to U+007E
 // inclusive. Everything else is refused. Stated as what that excludes, because the
@@ -119,8 +164,8 @@ export function requirePrivateProofRoot(proofRoot) {
   return requirePrivateDirectory(proofRoot, "proof root");
 }
 
-export function proofAllowlist(hasHostIdentity) {
-  return hasHostIdentity ? HOST_ALLOWLIST : ALLOWLIST;
+export function proofAllowlist(hasHostIdentity, hasPackage = false) {
+  return [...(hasHostIdentity ? HOST_ALLOWLIST : ALLOWLIST), ...(hasPackage ? PACKAGE_SUBJECTS : [])];
 }
 export const CELLS = Object.freeze([
   "skillDiscovered",
@@ -511,19 +556,20 @@ export function observedIdentityBound(
   return verifyLiveIdentity(identity, invocation, topology, proofRoot, journey);
 }
 
-export function requiredCellsForJourney(journey) {
+export function requiredCellsForJourney(journey, captureMode = "synthetic-fixture") {
+  const packageCells = captureMode === "host-observation" ? ["installRouteAdmissible", "installPackageVerified"] : [];
   switch (journey) {
     case "discovery":
-      return ["skillDiscovered"];
+      return [...packageCells, "skillDiscovered"];
     case "failures":
-      return CELLS.filter(
+      return [...packageCells, ...CELLS.filter(
         (name) =>
           name !== "driverCompleted" &&
           name !== "oneToolInvoked" &&
           name !== "structuredResultValidated",
-      );
+      )];
     case "tool":
-      return CELLS.filter((name) => name !== "driverCompleted");
+      return [...packageCells, ...CELLS.filter((name) => name !== "driverCompleted")];
     default:
       throw new Error(`unknown journey ${journey}`);
   }
@@ -568,7 +614,7 @@ export function driverOutcomeExit(pack, cells, journey) {
   if (cells?.driverCompleted?.status !== "pass") {
     return fail;
   }
-  const required = requiredCellsForJourney(journey);
+  const required = requiredCellsForJourney(journey, pack.captureMode);
   for (const name of required) {
     if (cells?.[name]?.status !== "pass") {
       return fail;
@@ -2056,6 +2102,26 @@ export function classifyRecord(record) {
     events,
   };
   const cells = classifyCells(events, meta, record.expected, journey, topology);
+  const source = record.hostIdentity?.assayMcp?.installSource;
+  cells.installRouteAdmissible = cell(PUBLISHED_INSTALL_ROUTES.includes(source?.route) ? "pass" : "unavailable",
+    "declared Assay route only; not authenticated install provenance");
+  cells.installPackageVerified = cell("unavailable", "Assay package evidence absent");
+  if (record.packageVerification != null) {
+    try {
+      const recomputed = {
+        ...verifyAssayPackage(packageFiles(record.proofRoot), source),
+        binarySha256: sha256File(path.join(record.proofRoot, "assay-mcp-server.snapshot")),
+      };
+      if (!sameJson(record.packageVerification, recomputed) ||
+          recomputed.binarySha256 !== record.hostIdentity?.assayMcp?.sha256 ||
+          record.hostIdentity.assayMcp.version !== `assay-mcp-server ${recomputed.version}`) {
+        throw new Error("package verification record or installed binary binding disagrees");
+      }
+      cells.installPackageVerified = cell("pass", `retained package checksum and installation declaration agree; ${PACKAGE_NONCLAIM}`);
+    } catch {
+      cells.installPackageVerified = cell("fail", "retained Assay package verification failed");
+    }
+  }
   return {
     schema: SCHEMA,
     cells,
@@ -2780,7 +2846,7 @@ const DEFAULT_MAX_BYTES = 1_048_576;
 export function readBoundedFile(file, maxBytes) {
   const requested = boundedPositiveInt("maxBytes", maxBytes, HARD_MAX_BYTES);
   const limit = Math.min(requested, HARD_MAX_BYTES);
-  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0);
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0);
   const fd = fs.openSync(file, flags);
   try {
     const st = fs.fstatSync(fd);
@@ -2885,6 +2951,7 @@ function manifestShapeReason(manifest) {
       "invocation",
       "initialize",
       "hostIdentity",
+      "packageVerification",
       "expected",
       "hashes",
       "allowlist",
@@ -3014,7 +3081,7 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   }
   const present = namesIn(proofRoot).sort();
   const allowed = [
-    ...proofAllowlist(hostSubjectsRequired(manifest.captureMode, manifest.hostIdentity)),
+    ...proofAllowlist(hostSubjectsRequired(manifest.captureMode, manifest.hostIdentity), manifest.packageVerification != null),
   ].sort();
   try {
     assertAllowlistedRegularFiles(proofRoot, allowed);
@@ -3081,6 +3148,8 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
     streamUnavailable: manifest.streamUnavailable,
     initialize: derivedInitialize,
     hostIdentity: manifest.hostIdentity ?? null,
+    packageVerification: manifest.packageVerification,
+    proofRoot,
     invocation: manifest.invocation ?? null,
     expected: manifest.expected,
     events,
