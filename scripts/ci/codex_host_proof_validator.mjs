@@ -1983,13 +1983,7 @@ function projectDecisionObject(value) {
       out[key] = projectedScalar(value[key]);
     }
   }
-  const unexpected = Object.keys(value)
-    .filter((key) => key !== "allowed" && key !== "reason")
-    .sort();
-  if (unexpected.length > 0) {
-    out.__unexpectedKeys = unexpected;
-  }
-  return out;
+  return withUnexpectedKeys(out, value, ["allowed", "reason"]);
 }
 
 function projectToolResult(result) {
@@ -2024,13 +2018,12 @@ function projectToolResult(result) {
       });
     }
   }
-  const unexpected = Object.keys(result)
-    .filter((key) => !["isError", "error", "structuredContent", "content"].includes(key))
-    .sort();
-  if (unexpected.length > 0) {
-    out.__unexpectedKeys = unexpected;
-  }
-  return out;
+  return withUnexpectedKeys(out, result, [
+    "isError",
+    "error",
+    "structuredContent",
+    "content",
+  ]);
 }
 
 function projectArguments(value) {
@@ -2043,21 +2036,17 @@ function projectArguments(value) {
       out[key] = projectedScalar(value[key]);
     }
   }
-  const unexpected = Object.keys(value)
-    .filter((key) => key !== "tool" && key !== "policy")
-    .sort();
-  if (unexpected.length > 0) {
-    out.__unexpectedKeys = unexpected;
-  }
-  return out;
+  return withUnexpectedKeys(out, value, ["tool", "policy"]);
 }
 
+// A key NAME is host-controlled data exactly as a value is, so retaining the names of
+// unexpected keys retains host content. Record only that unexpected keys were present,
+// never which. Collapsing to PRESENT is also what makes re-projection a fixed point: the
+// marker is itself outside every allowed list, so projecting an already-projected object
+// re-marks it to the same value. A name list or a count would change on the second pass.
 function withUnexpectedKeys(out, value, allowed) {
-  const unexpected = Object.keys(value)
-    .filter((key) => !allowed.includes(key))
-    .sort();
-  if (unexpected.length > 0) {
-    out.__unexpectedKeys = unexpected;
+  if (Object.keys(value).some((key) => !allowed.includes(key))) {
+    out.__unexpectedKeys = PRESENT;
   }
   return out;
 }
@@ -2330,30 +2319,21 @@ function projectRetainedItem(item) {
   if (hasOwn(item, "error")) {
     out.error = projectMcpToolCallError(item.error);
   }
-  const unexpected = Object.keys(item)
-    .filter(
-      (key) =>
-        ![
-          "type",
-          "id",
-          "server",
-          "tool",
-          "arguments",
-          "status",
-          "result",
-          "durationMs",
-          "readOnlyHint",
-          "pluginId",
-          "mcpAppResourceUri",
-          "appContext",
-          "error",
-        ].includes(key),
-    )
-    .sort();
-  if (unexpected.length > 0) {
-    out.__unexpectedKeys = unexpected;
-  }
-  return out;
+  return withUnexpectedKeys(out, item, [
+    "type",
+    "id",
+    "server",
+    "tool",
+    "arguments",
+    "status",
+    "result",
+    "durationMs",
+    "readOnlyHint",
+    "pluginId",
+    "mcpAppResourceUri",
+    "appContext",
+    "error",
+  ]);
 }
 
 function projectServerResult(method, result) {

@@ -338,6 +338,18 @@ function handle(message) {
           structuredContent: null,
         },
       };
+      // A host that puts data in a KEY NAME leaks exactly as much as one that puts it in a
+      // value. This scenario drives such names through the real driver and the real persistence
+      // path, so the absence assertion can be made against the bytes written to events.json
+      // rather than against an in-process projection.
+      if (scenario === "host-key-name-leak") {
+        const probe = "/Users/alice/.ssh/id_rsa?token=AKIA_KEY_NAME_PROBE";
+        completedItem[probe] = 1;
+        completedItem.arguments = { ...argumentsPayload, [probe]: 1 };
+        completedItem.result = { ...completedItem.result, [probe]: 1 };
+        completedItem.appContext = { connectorId: "connector-1", [probe]: 1 };
+        completedItem.error = { message: "boom", [probe]: 1 };
+      }
       write({
         method: "item/completed",
         params: {

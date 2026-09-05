@@ -4976,9 +4976,16 @@ test("Codex 0.153.1 mcpToolCall schema fields type-check; free text is recorded 
       item: unexpectedKeyCall,
     },
   });
-  assert.deepEqual(projectedWithUnexpected.params.item.__unexpectedKeys, [
-    "unknownHostMetadata",
-  ]);
+  assert.equal(
+    projectedWithUnexpected.params.item.__unexpectedKeys,
+    "[present]",
+    "the marker records that unexpected keys existed, never which",
+  );
+  assert.equal(
+    JSON.stringify(projectedWithUnexpected).includes("unknownHostMetadata"),
+    false,
+    "the unexpected key NAME must never reach retained bytes",
+  );
 });
 
 test("failed MCP tool status fails oneToolInvoked and structuredResultValidated", async () => {
@@ -5204,7 +5211,12 @@ test("F2: a marked unexpected key is refused by the consumer, not merely marked"
       },
     },
   });
-  assert.deepEqual(projected.params.item.__unexpectedKeys, ["unknownHostMetadata"]);
+  assert.equal(projected.params.item.__unexpectedKeys, "[present]");
+  assert.equal(
+    JSON.stringify(projected).includes("unknownHostMetadata"),
+    false,
+    "the unexpected key NAME must never reach retained bytes",
+  );
   assert.equal(
     classifyStoredEvent(projected).type,
     "unclassified",
@@ -5282,7 +5294,7 @@ for (const [label, item, probe] of [
     "F2-ERROR-LEAK",
   ],
 ]) {
-  test(`F2 nested: an unknown key inside ${label} is marked, refused, and never retained`, () => {
+  test(`F2 nested: an unknown key inside ${label} is marked and refused, and neither its name nor its value is retained`, () => {
     const projected = projectRetainedEvent({
       direction: "server",
       method: "item/completed",
@@ -5303,10 +5315,15 @@ for (const [label, item, probe] of [
       },
     });
     const nested = projected.params.item[label];
-    assert.deepEqual(
+    assert.equal(
       nested.__unexpectedKeys,
-      ["unknownHostNested"],
-      `${label}: the producer must mark the unknown nested key`,
+      "[present]",
+      `${label}: the producer must mark that an unknown nested key existed`,
+    );
+    assert.equal(
+      JSON.stringify(projected).includes("unknownHostNested"),
+      false,
+      `${label}: the unknown nested key NAME must never reach retained bytes`,
     );
     assert.equal(
       classifyStoredEvent(projected).type,
@@ -5397,10 +5414,15 @@ test("mcpToolCall projection accepts every declared 0.153.1 schema property", ()
     );
   }
   const control = project("definitelyNotInTheSchema");
-  assert.deepEqual(
+  assert.equal(
     control.__unexpectedKeys,
-    ["definitelyNotInTheSchema"],
+    "[present]",
     "control: a key outside the schema must still be marked",
+  );
+  assert.equal(
+    JSON.stringify(control).includes("definitelyNotInTheSchema"),
+    false,
+    "control: marking must not retain the name",
   );
 });
 
@@ -5449,10 +5471,20 @@ test("mcpToolCall projection refuses a sample of names the 0.153.1 schema does n
         },
       },
     }).params.item;
-    assert.deepEqual(
+    assert.equal(
       item.__unexpectedKeys,
-      [key],
+      "[present]",
       `${key} is not declared by the 0.153.1 schema and must be marked unexpected`,
+    );
+    assert.equal(
+      Object.hasOwn(item, key),
+      false,
+      `${key} must be marked without retaining its name as a key`,
+    );
+    assert.equal(
+      JSON.stringify(item.__unexpectedKeys).includes(key),
+      false,
+      `${key} must not survive inside the marker`,
     );
   }
   // Control: a declared property must still be accepted, so the assertion above cannot pass by
@@ -5648,3 +5680,138 @@ for (const [label, patch, marker] of [
     assert.equal(classifyStoredEvent(projected).type, "unclassified", `${label}: must still be refused`);
   });
 }
+
+// --- F-1: an object KEY NAME is host data exactly as a value is ----------------------------
+// Every earlier privacy test scanned VALUE positions. The unexpected-key marker recorded the
+// NAMES of the keys it rejected, so a host that put a path or a token in a key name had it
+// retained in full -- and at three of the six sites the record was still classified accepted,
+// so the leak was not even redeemed by refusal. The projection now records only that unexpected
+// keys existed. These tests assert the name is gone at every site that can produce the marker.
+const KEY_NAME_PROBE = "/Users/alice/.ssh/id_rsa?token=AKIA_KEY_NAME_PROBE";
+
+function everyKey(value, seen = new Set()) {
+  if (Array.isArray(value)) {
+    for (const entry of value) everyKey(entry, seen);
+  } else if (value !== null && typeof value === "object") {
+    for (const [key, entry] of Object.entries(value)) {
+      seen.add(key);
+      everyKey(entry, seen);
+    }
+  }
+  return seen;
+}
+
+for (const [site, item] of [
+  ["projectRetainedItem", { [KEY_NAME_PROBE]: 1 }],
+  ["projectArguments", { arguments: { tool: "probe", [KEY_NAME_PROBE]: 1 } }],
+  ["projectToolResult", { result: { isError: false, [KEY_NAME_PROBE]: 1 } }],
+  [
+    "projectDecisionObject",
+    { result: { isError: false, structuredContent: { allowed: true, reason: "ok", [KEY_NAME_PROBE]: 1 } } },
+  ],
+  ["projectAppContext", { appContext: { connectorId: "c-1", [KEY_NAME_PROBE]: 1 } }],
+  ["projectMcpToolCallError", { error: { message: "boom", [KEY_NAME_PROBE]: 1 } }],
+]) {
+  test(`F1: a secret-shaped key name at ${site} is marked without being retained`, () => {
+    const projected = projectRetainedEvent({
+      direction: "server",
+      method: "item/completed",
+      id: null,
+      params: {
+        completedAtMs: 5000,
+        threadId: "t-1",
+        turnId: "u-1",
+        item: {
+          type: "mcpToolCall",
+          id: "tool-1",
+          server: "assay",
+          tool: "assay_policy_decide",
+          status: "completed",
+          arguments: { tool: "probe" },
+          result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+          ...item,
+        },
+      },
+    });
+    assert.equal(
+      JSON.stringify(projected).includes(KEY_NAME_PROBE),
+      false,
+      `${site}: the key name must not reach retained bytes`,
+    );
+    assert.equal(
+      everyKey(projected).has(KEY_NAME_PROBE),
+      false,
+      `${site}: the key name must not survive as a key either`,
+    );
+    // Positive control: without this the assertions above pass on a projection that never
+    // reached the marker at all, and the test would prove nothing about this site.
+    assert.equal(
+      everyKey(projected).has("__unexpectedKeys"),
+      true,
+      `${site}: the marker must still record that an unexpected key was present`,
+    );
+  });
+}
+
+test("F1: re-projecting an already-projected event is a fixed point", () => {
+  // The marker is itself outside every allowed list, so it is re-marked on a second pass. That is
+  // only stable because the marker collapses to a constant: a name list or a count would change.
+  const event = {
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5000,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: {
+        type: "mcpToolCall",
+        id: "tool-1",
+        server: "assay",
+        tool: "assay_policy_decide",
+        status: "completed",
+        arguments: { tool: "probe", [KEY_NAME_PROBE]: 1 },
+        [KEY_NAME_PROBE]: 1,
+        appContext: { connectorId: "c-1", [KEY_NAME_PROBE]: 1 },
+        result: {
+          isError: false,
+          [KEY_NAME_PROBE]: 1,
+          structuredContent: { allowed: true, reason: "ok", [KEY_NAME_PROBE]: 1 },
+        },
+      },
+    },
+  };
+  const once = projectRetainedEvent(event);
+  const twice = projectRetainedEvent(once);
+  assert.deepEqual(twice, once, "projection must be idempotent");
+  assert.equal(JSON.stringify(once).includes(KEY_NAME_PROBE), false);
+});
+
+test("F1: a secret-shaped key name never reaches the persisted events.json", async () => {
+  // The projection tests above run in process. This one drives the real fake host through the
+  // real driver and asserts against the bytes on disk, because events.json is written
+  // unconditionally before any verdict is reached.
+  const { proofRoot, events } = await drive("host-key-name-leak");
+  const raw = fs.readFileSync(path.join(proofRoot, "events.json"), "utf8");
+  assert.equal(
+    raw.includes("AKIA_KEY_NAME_PROBE"),
+    false,
+    "the persisted proof must not contain the host-controlled key name",
+  );
+  assert.equal(
+    fs.readFileSync(path.join(proofRoot, "classification.json"), "utf8").includes("AKIA_KEY_NAME_PROBE"),
+    false,
+    "the refusal reason must not echo the host-controlled key name",
+  );
+  // Positive control: the scenario must actually have reached the pipeline. Without this the
+  // absence assertions pass vacuously if the fixture literal ever drifts.
+  const toolEvent = events.find(
+    (event) => event.method === "item/completed" && event.params?.item?.type === "mcpToolCall",
+  );
+  assert.ok(toolEvent, "the scenario must emit an mcpToolCall item");
+  assert.equal(
+    toolEvent.params.item.__unexpectedKeys,
+    "[present]",
+    "control: the injected key must have been marked, or nothing was measured",
+  );
+});
