@@ -294,11 +294,18 @@ function handle(message) {
           },
         };
       }
+      // The default scenario keeps emitting the legacy prompt so legacy acceptance stays covered
+      // by every existing driven run. The canonical scenario emits the prompt the real 0.153.1 host
+      // sends, so the widened path this change exists for is exercised end-to-end and not only by a
+      // unit assertion.
       return {
         serverName: "assay",
         threadId,
         turnId: "turn-1",
-        message: `approve ${RELEASE_DECIDE_TOOL}`,
+        message:
+          scenario === "canonical-elicitation-prompt"
+            ? `Allow the assay MCP server to run tool "${RELEASE_DECIDE_TOOL}"?`
+            : `approve ${RELEASE_DECIDE_TOOL}`,
         mode: "form",
         requestedSchema: { type: "object", properties: {} },
       };
@@ -306,11 +313,27 @@ function handle(message) {
     if (scenario === "close-stdin-then-elicit-exit-0") {
       fs.closeSync(0);
     }
+    // A host chooses its own request ids, and a string id is host text like any other. This
+    // scenario uses a secret-bearing one so the absence assertion is made against persisted bytes,
+    // while the request/response pairing must still survive.
+    const elicitId =
+      scenario === "host-rpc-id-leak" || scenario === "host-rpc-id-distinct"
+        ? "elicit_/Users/alice/.ssh/id_rsa?sk=RPCID_PROBE"
+        : "elicit-1";
     write({
-      id: "elicit-1",
+      id: elicitId,
       method: "mcpServer/elicitation/request",
       params: elicitParams(),
     });
+    // A second, DIFFERENT host id. Without two distinct ids in one run, injectivity is not
+    // observable at all, and a map that collapsed every id to one token would pass unnoticed.
+    if (scenario === "host-rpc-id-distinct") {
+      write({
+        id: "elicit_/Users/bob/.aws/credentials?sk=RPCID_PROBE_TWO",
+        method: "mcpServer/elicitation/request",
+        params: elicitParams(),
+      });
+    }
     const tool = scenario === "wrong-tool" ? "assay_check_args" : RELEASE_DECIDE_TOOL;
     const argumentsPayload =
       scenario === "wrong-tool"
@@ -331,6 +354,41 @@ function handle(message) {
           structuredContent: null,
         },
       };
+      // A host that puts data in a KEY NAME leaks exactly as much as one that puts it in a
+      // value. This scenario drives such names through the real driver and the real persistence
+      // path, so the absence assertion can be made against the bytes written to events.json
+      // rather than against an in-process projection.
+      // A JSON-RPC method name and a retained item type are host-controlled text on the wire,
+      // exactly like a key name. This scenario emits both in secret-bearing form so the absence
+      // assertion is made against the persisted bytes.
+      if (scenario === "host-identifier-leak") {
+        const probe = "/Users/alice/.aws/credentials?sk=IDENTIFIER_PROBE";
+        write({ method: `notify_${probe}`, params: {} });
+        write({
+          method: "item/completed",
+          params: {
+            completedAtMs: 1,
+            threadId,
+            turnId: "turn-1",
+            item: {
+              type: `type_${probe}`,
+              id: "item-probe",
+              server: "assay",
+              tool: "unmapped",
+              arguments: { tool: "x", policy: "y" },
+              status: "completed",
+            },
+          },
+        });
+      }
+      if (scenario === "host-key-name-leak") {
+        const probe = "/Users/alice/.ssh/id_rsa?token=AKIA_KEY_NAME_PROBE";
+        completedItem[probe] = 1;
+        completedItem.arguments = { ...argumentsPayload, [probe]: 1 };
+        completedItem.result = { ...completedItem.result, [probe]: 1 };
+        completedItem.appContext = { connectorId: "connector-1", [probe]: 1 };
+        completedItem.error = { message: "boom", [probe]: 1 };
+      }
       write({
         method: "item/completed",
         params: {
