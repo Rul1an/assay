@@ -27,6 +27,7 @@ import {
   HOST_SUBJECTS,
   KNOWN_ITEM_TYPES,
   KNOWN_METHODS,
+  classifyCells,
   classifyRecord,
   classifyStoredEvent,
   consumeJourneyTopology,
@@ -48,6 +49,45 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FAKE = path.join(HERE, "fixtures/codex-host-proof/fake-app-server.mjs");
 const DRIVER_SRC = fs.readFileSync(path.join(HERE, "codex_host_proof.mjs"), "utf8");
 const VALIDATOR_SRC = fs.readFileSync(path.join(HERE, "codex_host_proof_validator.mjs"), "utf8");
+
+test("#2813: shared itemsView validation preserves the closed vocabulary and legacy absence", async () => {
+  const { turnItemsViewReason } = await import("./codex_host_proof_validator.mjs");
+  assert.equal(typeof turnItemsViewReason, "function");
+  for (const view of [undefined, "full", "summary", "notLoaded"]) {
+    assert.equal(turnItemsViewReason(view), null);
+  }
+  for (const view of [null, "", "partial", "Full", 0, false, [], {}, "PRIVATE_CANARY"]) {
+    assert.equal(
+      turnItemsViewReason(view),
+      "turn/completed itemsView must be full, summary, or notLoaded",
+    );
+  }
+});
+
+test("#2813: invocation classification refuses an unknown itemsView in resolved topology", async () => {
+  const control = await drive("valid");
+  const topology = structuredClone(
+    consumeJourneyTopology(control.events, control.manifest.journey),
+  );
+  assert.equal(topology.ok, true);
+  const terminal = topology.notifications.find(
+    (event) => event.method === "turn/completed" && event.direction === "server",
+  );
+  assert.ok(terminal, "resolved topology must contain the canonical terminal");
+  terminal.params.turn.itemsView = "unknown_view";
+
+  const cells = classifyCells(
+    control.events,
+    control.manifest,
+    control.manifest.expected,
+    control.manifest.journey,
+    topology,
+  );
+  assert.deepEqual(cells.oneToolInvoked, {
+    status: "fail",
+    reason: "turn/completed itemsView must be full, summary, or notLoaded",
+  });
+});
 
 function scratch() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "assay-2684-"));
