@@ -2126,6 +2126,19 @@ function projectToolResult(result) {
   // So both readings are bad, for opposite reasons, and neither is the mild "relocation" first
   // written here. The fields stay.
   //
+  // F4, resolved by citation rather than by widening anything. The RESULT-level declared set is
+  // exactly three names -- `content`, `structuredContent`, `_meta` -- per `McpToolCallResult` in
+  // the pinned host schema (openai/codex rust-v0.153.1,
+  // codex-rs/app-server-protocol/src/protocol/v2/mcp.rs). The list below therefore carries two
+  // names BEYOND the schema, `isError` and `error`, deliberately and for the reason above.
+  //
+  // The gap an independent review proved by execution: unlike the item level, nothing here pins
+  // the list against WIDENING -- adding an undeclared name such as `telemetryBlob` survives the
+  // whole suite. That is the class that allowed #2807 in the first direction (too narrow) and is
+  // still open in the other (too wide). It is recorded here and deferred to its own slice; adding
+  // an enumeration test inside a comment-only repair would be the scope creep this note exists to
+  // avoid.
+  //
   // Precise about what pins what: the existing tests named around `isError` mutate ALREADY
   // PROJECTED events, so they pin the consumer, not the producer's `"[invalid]"` conversion above.
   // The producer-side barrier is pinned separately by the #2807 tests.
