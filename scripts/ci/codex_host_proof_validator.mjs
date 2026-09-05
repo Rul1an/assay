@@ -9,8 +9,52 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const SCHEMA = "assay.codex-host-proof.v4";
+export const SCHEMA = "assay.codex-host-proof.v5";
 export const FAKE_USER_AGENT = "assay-codex-host-proof-fake/1";
+// Closed install-route vocabulary. "local-build" is recordable on purpose: a failed
+// provenance run must be retained as what it was, not omitted into a cleaner record.
+export const INSTALL_ROUTES = Object.freeze([
+  "github-release",
+  "crates-io",
+  "host-bundled",
+  "local-build",
+]);
+// Routes that satisfy #2684 DoD cell 2. A local build never does.
+export const PUBLISHED_INSTALL_ROUTES = Object.freeze([
+  "github-release",
+  "crates-io",
+  "host-bundled",
+]);
+export const MAX_INSTALL_REFERENCE = 200;
+// Contract: a reference or version is one line of printable ASCII, U+0020 to U+007E
+// inclusive. Everything else is refused. Stated as what that excludes, because the
+// review finding was about classes nobody enumerated:
+//
+//   U+0000-U+001F  C0 controls, including newline and tab
+//   U+007F-U+009F  DEL and the C1 controls, including U+0085 NEL
+//   U+00A0         no-break space, and every other non-ASCII space
+//   U+200B-U+200F  zero-width space, ZWNJ, ZWJ, LRM, RLM
+//   U+202A-U+202E  bidi embeddings and overrides
+//   U+2028, U+2029 line and paragraph separators
+//   U+2066-U+2069  bidi isolates
+//   U+FEFF         BOM / zero-width no-break space
+//   everything else outside U+0020-U+007E, including all astral planes
+//
+// This is an allowlist on purpose. The first version blocked C0 and DEL only, and that
+// blocklist silently admitted six of the classes above. A blocklist has to enumerate
+// every hostile code point; an allowlist cannot be defeated by one nobody listed. The
+// list above documents the contract, it does not implement it, so it cannot drift out
+// of sync with enforcement. `boundedPrintable` is the single validator for both fields.
+const PRINTABLE_ASCII_LINE = /^[\x20-\x7e]+$/;
+
+export function boundedPrintable(value, max = MAX_INSTALL_REFERENCE) {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= max &&
+    PRINTABLE_ASCII_LINE.test(value)
+  );
+}
 export const SKILL_NAME = "assay-golden-path";
 export const DECIDE_TOOL = "assay_policy_decide";
 export const DECIDE_INPUT = {
@@ -259,11 +303,25 @@ function exactKeys(value, expected) {
   );
 }
 
+export function installSourceBound(source) {
+  return (
+    exactKeys(source, ["route", "reference"]) &&
+    INSTALL_ROUTES.includes(source.route) &&
+    boundedPrintable(source.reference) &&
+    !CREDENTIAL_KEY.test(source.reference)
+  );
+}
+
 function projectBoundBinary(bin) {
-  return {
+  const projected = {
     path: bin?.path,
     sha256: bin?.sha256,
+    installSource: bin?.installSource,
   };
+  if (bin?.version !== undefined) {
+    projected.version = bin.version;
+  }
+  return projected;
 }
 
 export function projectHostIdentity(identity) {
@@ -271,6 +329,8 @@ export function projectHostIdentity(identity) {
     return null;
   }
   return {
+    os: identity.os,
+    arch: identity.arch,
     codex: projectBoundBinary(identity.codex),
     codexCodeModeHost: projectBoundBinary(identity.codexCodeModeHost),
     assayMcp: projectBoundBinary(identity.assayMcp),
@@ -278,17 +338,30 @@ export function projectHostIdentity(identity) {
 }
 
 function boundBinary(bin) {
+  const shape = bin?.version === undefined
+    ? ["path", "sha256", "installSource"]
+    : ["path", "sha256", "installSource", "version"];
   return (
-    exactKeys(bin, ["path", "sha256"]) &&
+    exactKeys(bin, shape) &&
     typeof bin.path === "string" &&
     path.isAbsolute(bin.path) &&
     typeof bin.sha256 === "string" &&
-    /^[a-f0-9]{64}$/.test(bin.sha256)
+    /^[a-f0-9]{64}$/.test(bin.sha256) &&
+    installSourceBound(bin.installSource) &&
+    (bin.version === undefined || boundedPrintable(bin.version))
   );
 }
 
 export function liveIdentityBound(identity) {
-  if (!exactKeys(identity, ["codex", "codexCodeModeHost", "assayMcp"])) {
+  if (!exactKeys(identity, ["os", "arch", "codex", "codexCodeModeHost", "assayMcp"])) {
+    return false;
+  }
+  if (
+    typeof identity.os !== "string" ||
+    identity.os.length === 0 ||
+    typeof identity.arch !== "string" ||
+    identity.arch.length === 0
+  ) {
     return false;
   }
   return (
@@ -650,6 +723,21 @@ export const ALLOWED_CLIENT_REQUESTS = Object.freeze([
 export const ALLOWED_CLIENT_NOTIFICATIONS = Object.freeze(["initialized"]);
 export const ALLOWED_CLIENT_RESPONSES = Object.freeze(["mcpServer/elicitation/request"]);
 export const ALLOWED_DRIVER_METHODS = Object.freeze(["error", "pre-spawn-error"]);
+export const ALLOWED_TURN_ITEMS_VIEWS = Object.freeze([
+  "full",
+  "summary",
+  "notLoaded",
+]);
+
+export function turnItemsViewReason(view) {
+  if (
+    view !== undefined &&
+    (!isNonemptyString(view) || !ALLOWED_TURN_ITEMS_VIEWS.includes(view))
+  ) {
+    return "turn/completed itemsView must be full, summary, or notLoaded";
+  }
+  return null;
+}
 // A JSON-RPC method name is host-controlled text on every server-originated frame. Retaining an
 // unrecognised one verbatim puts host content in the proof, so only names this proof already
 // declares are kept; anything else becomes one constant. Known names must stay verbatim because
@@ -927,6 +1015,10 @@ function retainedMethodParamsReason(method, params) {
         !isNonemptyString(turn.status)
       ) {
         return "turn/completed turn must have typed id, items, and status";
+      }
+      const viewReason = turnItemsViewReason(turn.itemsView);
+      if (viewReason) {
+        return viewReason;
       }
       for (const item of turn.items) {
         const itemReason = retainedItemReason(item, "turn/completed");
@@ -1361,6 +1453,7 @@ export function consumeJourneyTopology(events, journey) {
     clientNotifications,
     driverErrors,
     serverDiagnostics,
+    events,
   };
 }
 
@@ -1532,6 +1625,7 @@ function mcpToolCalls(rows) {
     const item = event.params?.item;
     if (item?.type === "mcpToolCall") {
       calls.push({
+        event,
         item,
         threadId: event.params?.threadId,
         turnId: event.params?.turnId,
@@ -1678,6 +1772,29 @@ function uniqueExpectedElicitationAccepted(topology, threadId, turnId) {
   return allAccepts.length === 1;
 }
 
+function terminalToolItemDiscrepancyReason(
+  terminalToolItems,
+  item,
+  { requirePresence = true } = {},
+) {
+  if (terminalToolItems.length > 1) {
+    return "matching terminal contains duplicate tool items";
+  }
+  if (terminalToolItems.length === 0) {
+    return requirePresence
+      ? "matching terminal must contain exactly the canonical tool item"
+      : null;
+  }
+  const candidate = terminalToolItems[0];
+  if (candidate?.id !== item?.id) {
+    return "matching terminal must contain exactly the canonical tool item";
+  }
+  if (!sameJson(projectRetainedItem(candidate), projectRetainedItem(item))) {
+    return "matching terminal tool item contradicts item/completed";
+  }
+  return null;
+}
+
 function classifyInvocation(calls, expected, threadId, turnId, topology) {
   if (calls.length === 0) {
     return cell("unavailable", "no mcpToolCall item/completed");
@@ -1704,19 +1821,54 @@ function classifyInvocation(calls, expected, threadId, turnId, topology) {
   }
   const call = calls[0];
   const item = call.item;
-  // NON-CLAIM: the fake app-server populates turn.items with the completed tool item, so this
-  // requirement is exercised only against the fixture. The one real 0.153.1 capture available was
-  // a failed run whose turn/completed carried no mcpToolCall, so whether a SUCCESSFUL host turn
-  // populates turn.items is unmeasured. If it does not, this cell fails on the real host and that
-  // is a host-behaviour finding, not a defect in this check.
-  const terminalItems = terminal.params.turn.items.filter(
-    (candidate) => candidate?.type === "mcpToolCall",
-  );
-  if (terminalItems.length !== 1 || terminalItems[0]?.id !== item.id) {
-    return cell("fail", "matching terminal must contain exactly the canonical tool item");
+
+  const eventList = Array.isArray(topology?.events)
+    ? topology.events
+    : Array.isArray(topology?.notifications)
+      ? topology.notifications
+      : [];
+  const callIndex = eventList.indexOf(call.event);
+  const terminalIndex = eventList.indexOf(terminal);
+  if (callIndex !== -1 && terminalIndex !== -1 && terminalIndex <= callIndex) {
+    return cell("fail", "matching turn/completed must follow item/completed in event stream");
   }
-  if (!sameJson(projectRetainedItem(terminalItems[0]), projectRetainedItem(item))) {
-    return cell("fail", "matching terminal tool item contradicts item/completed");
+
+  const terminalTurn = terminal.params?.turn;
+  const itemsView = terminalTurn?.itemsView;
+  const viewReason = turnItemsViewReason(itemsView);
+  if (viewReason) {
+    return cell("fail", viewReason);
+  }
+
+  const rawTerminalItems = Array.isArray(terminalTurn?.items) ? terminalTurn.items : null;
+  if (!rawTerminalItems) {
+    return cell("fail", "matching turn items must be an array");
+  }
+
+  if (itemsView === "notLoaded") {
+    if (rawTerminalItems.length !== 0) {
+      return cell("fail", "notLoaded turn items must be empty");
+    }
+  } else if (itemsView === "summary") {
+    const terminalToolItems = rawTerminalItems.filter(
+      (candidate) => candidate?.type === "mcpToolCall",
+    );
+    const discrepancy = terminalToolItemDiscrepancyReason(terminalToolItems, item, {
+      requirePresence: false,
+    });
+    if (discrepancy) {
+      return cell("fail", discrepancy);
+    }
+  } else {
+    const terminalToolItems = rawTerminalItems.filter(
+      (candidate) => candidate?.type === "mcpToolCall",
+    );
+    const discrepancy = terminalToolItemDiscrepancyReason(terminalToolItems, item, {
+      requirePresence: true,
+    });
+    if (discrepancy) {
+      return cell("fail", discrepancy);
+    }
   }
   if (item.server !== "assay") {
     return cell("fail", "tool item server is not the expected server");
@@ -2542,15 +2694,19 @@ function projectNotificationParams(method, params) {
     };
   }
   if (method === "turn/completed") {
+    const turn = {
+      id: projectedScalar(params.turn?.id),
+      status: projectedScalar(params.turn?.status),
+      items: Array.isArray(params.turn?.items)
+        ? params.turn.items.map(projectRetainedItem)
+        : invalidProjection(params.turn?.items),
+    };
+    if (params.turn?.itemsView !== undefined) {
+      turn.itemsView = projectedMember(params.turn.itemsView, ALLOWED_TURN_ITEMS_VIEWS);
+    }
     return {
       threadId: projectedScalar(params.threadId),
-      turn: {
-        id: projectedScalar(params.turn?.id),
-        status: projectedScalar(params.turn?.status),
-        items: Array.isArray(params.turn?.items)
-          ? params.turn.items.map(projectRetainedItem)
-          : invalidProjection(params.turn?.items),
-      },
+      turn,
     };
   }
   if (method === "mcpServer/elicitation/request") {

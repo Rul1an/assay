@@ -91,6 +91,12 @@ repos:
   # Assay-Runner proof consumer: runs on PR-head via pre-commit/Kernel Matrix lint.
   - repo: local
     hooks:
+      - id: review-relay-protocol-tests
+        name: Review relay protocol tests
+        entry: python3 -m unittest discover -s scripts/review -p test_*.py
+        language: system
+        pass_filenames: false
+        files: ^(scripts/review/.*|scripts/ci/assay_review_record_check\.py|\.pre-commit-config\.yaml)$
       - id: assay-review-record-self-test
         name: Review-record checker self-test
         entry: python3 scripts/ci/assay_review_record_check.py --self-test
