@@ -473,6 +473,9 @@ Generate with the published Action remediation recipe (single source:
 mkdir -p .assay/sandbox .assay/evidence/nested && assay sandbox --dry-run --profile .assay/sandbox/profile.yaml --bundle .assay/evidence/nested/sandbox.tar.gz -- true
 ```
 
+That recipe attests the sandbox command's observed effects, not that a test suite
+passed.
+
 ### SARIF upload fails
 
 Check `security-events: write` permission.

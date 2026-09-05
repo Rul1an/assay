@@ -144,6 +144,27 @@ if active != EXPECTED_PRODUCER_ACTIVE:
     )
 
 data = load_yaml(text)
+
+# Ruby YAML maps the workflow key `on:` to boolean true; JSON.generate then
+# stringifies that key as "true". This loader always sees data["true"], never "on".
+PRODUCER_PATH_ENTRY = "scripts/ci/produce-default-discovery-sandbox-evidence.sh"
+on_node = data.get("true")
+if not isinstance(on_node, dict):
+    raise SystemExit(
+        "workflow on: (parsed as key true) must be a mapping "
+        f"(got {type(on_node).__name__})"
+    )
+push = on_node.get("push")
+if not isinstance(push, dict):
+    raise SystemExit("workflow on.push must be a mapping")
+paths = push.get("paths")
+if not isinstance(paths, list) or PRODUCER_PATH_ENTRY not in paths:
+    raise SystemExit(
+        "on.push.paths must include owned producer script entry "
+        f"{PRODUCER_PATH_ENTRY!r} (got {paths!r})"
+    )
+print("ok    workflow-on-push-paths-include-producer")
+
 jobs = data.get("jobs")
 if not isinstance(jobs, dict):
     raise SystemExit("workflow has no jobs mapping")
@@ -486,9 +507,14 @@ if ! run_producer_behavior "${PRODUCER_SH}"; then
 fi
 ok "owned-producer-behavioral"
 
-# Explicit glob vs default find + pre-commit path filter (docs F1/F2).
+# Fixture Action discovery execution + pin filter + bounded doc/path contracts.
+# Executes the uniquely selected discover run body from the pinned fixture
+# action.yml (YAML-parsed). Host-orphan find/compgen demos are not a substitute.
+# This covers discovery candidate paths only — not the real indexer or earlier Action steps.
 check_explicit_glob_and_pin_filter() {
-  local action_yml="${ROOT}/scripts/ci/fixtures/assay-action-pin/action.yml"
+  local action_yml="${ASSAY_JUNCTION_ACTION_YML:-${ROOT}/scripts/ci/fixtures/assay-action-pin/action.yml}"
+  local doc_path="${ASSAY_JUNCTION_DOC:-${DOC}}"
+
   grep -Fq 'if [ -z "$BUNDLES_PATTERN" ]; then' "${action_yml}" \
     || die "pinned action.yml missing empty-bundles find branch"
   grep -Fq 'compgen -G "$BUNDLES_PATTERN"' "${action_yml}" \
@@ -496,35 +522,184 @@ check_explicit_glob_and_pin_filter() {
   grep -Fq './.assay/evidence/*.tar.gz' "${action_yml}" \
     || die "pinned action.yml missing find default discovery"
 
-  local glob_scratch
+  # Bounded doc contract (not a full prose snapshot).
+  grep -Fq 'does **not**' "${doc_path}" \
+    || die "docs must state explicit bundles does not (enable globstar)"
+  grep -Fq 'enable `globstar`' "${doc_path}" \
+    || die "docs must name globstar for explicit bundles"
+  grep -Fq 'omit `bundles` instead' "${doc_path}" \
+    || die "docs must tell readers to omit bundles for recursive default"
+  grep -Fq "attests the sandbox command's observed effects, not that a test suite" "${doc_path}" \
+    || die "docs dry-run recipe must qualify observed-effects-only (not suite pass)"
+
+  local glob_scratch capture_default capture_star mock_action run_body
   glob_scratch="$(mktemp -d "${TMPDIR:-/tmp}/2802-glob-depth.XXXXXX")"
   mkdir -p "${glob_scratch}/.assay/evidence/mid/deep"
   : >"${glob_scratch}/.assay/evidence/top.tar.gz"
   : >"${glob_scratch}/.assay/evidence/mid/nested.tar.gz"
   : >"${glob_scratch}/.assay/evidence/mid/deep/deeper.tar.gz"
 
-  (
-    cd "${glob_scratch}"
-    mapfile -t FIND_HITS < <(find . \( -path './.assay/evidence/*.tar.gz' -o -path './evidence/*.tar.gz' \) -type f | sort)
-    [[ "${#FIND_HITS[@]}" -eq 3 ]] || die "default find must hit top+mid+deep (got ${#FIND_HITS[@]})"
+  mock_action="$(mktemp -d "${TMPDIR:-/tmp}/2802-mock-action.XXXXXX")"
+  mkdir -p "${mock_action}/scripts"
+  capture_default="${glob_scratch}/captured-default.txt"
+  capture_star="${glob_scratch}/captured-star.txt"
 
-    shopt -u globstar 2>/dev/null || true
-    mapfile -t STAR_HITS < <(compgen -G '.assay/evidence/**/*.tar.gz' | sort || true)
-    [[ "${#STAR_HITS[@]}" -eq 1 ]] || die "compgen ** without globstar must hit exactly one mid-level path (got ${#STAR_HITS[@]})"
-    [[ "${STAR_HITS[0]}" == ".assay/evidence/mid/nested.tar.gz" ]] \
-      || die "compgen ** hit unexpected path: ${STAR_HITS[0]}"
-    for miss in ".assay/evidence/top.tar.gz" ".assay/evidence/mid/deep/deeper.tar.gz"; do
-      for h in "${STAR_HITS[@]}"; do
-        if [[ "${h}" == "${miss}" ]]; then
-          die "compgen ** falsely recursive; hit ${miss}"
-        fi
-      done
+  cat >"${mock_action}/scripts/build_evidence_index.sh" <<'MOCK'
+#!/usr/bin/env bash
+set -euo pipefail
+# Minimal stand-in: record the discover step's raw candidate paths. Not the real indexer.
+: "${BUNDLES_FILE:?}"
+: "${GITHUB_OUTPUT:?}"
+: "${ASSAY_DISCOVERY_CAPTURE:?}"
+cp "${BUNDLES_FILE}" "${ASSAY_DISCOVERY_CAPTURE}"
+n=0
+if [[ -s "${BUNDLES_FILE}" ]]; then
+  n="$(grep -c . "${BUNDLES_FILE}" || true)"
+fi
+{
+  echo "count=${n}"
+  if [[ "${n}" -gt 0 ]]; then
+    echo "found=true"
+  else
+    echo "found=false"
+  fi
+} >>"${GITHUB_OUTPUT}"
+MOCK
+  chmod +x "${mock_action}/scripts/build_evidence_index.sh"
+
+  run_body="$(
+    python3 - "${action_yml}" <<'PYDISC'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+RUBY = r"""
+require "json"
+require "yaml"
+begin
+  val = YAML.safe_load(STDIN.read, aliases: false)
+  STDOUT.write(JSON.generate(val))
+rescue Psych::SyntaxError, Psych::BadAlias, Psych::DisallowedClass => e
+  STDERR.write(e.message)
+  exit 2
+end
+"""
+
+path = Path(sys.argv[1])
+raw = path.read_text(encoding="utf-8")
+proc = subprocess.run(
+    ["ruby", "-EUTF-8:UTF-8", "-e", RUBY],
+    input=raw,
+    capture_output=True,
+    text=True,
+    timeout=30,
+)
+if proc.returncode != 0:
+    raise SystemExit(
+        "action.yml YAML parse failed: " + (proc.stderr or proc.stdout).strip()
+    )
+data = json.loads(proc.stdout)
+runs = data.get("runs") if isinstance(data, dict) else None
+steps = (runs or {}).get("steps") if isinstance(runs, dict) else None
+if not isinstance(steps, list):
+    raise SystemExit("action.yml runs.steps missing")
+discover = [s for s in steps if isinstance(s, dict) and s.get("id") == "discover"]
+if len(discover) == 0:
+    raise SystemExit("discover step absent")
+if len(discover) > 1:
+    raise SystemExit("discover step duplicated")
+step = discover[0]
+if step.get("shell") != "bash":
+    raise SystemExit("discover step shell must be bash")
+body = step.get("run")
+if not isinstance(body, str) or not body.strip():
+    raise SystemExit("discover run body missing")
+sys.stdout.write(body)
+PYDISC
+  )" || die "failed to extract unique fixture discover run body"
+
+  run_fixture_discover() {
+    local pattern="$1"
+    local capture="$2"
+    local ghub_out run_tmp
+    ghub_out="$(mktemp "${TMPDIR:-/tmp}/2802-ghout.XXXXXX")"
+    run_tmp="$(mktemp "${TMPDIR:-/tmp}/2802-discover-run.XXXXXX")"
+    printf '%s\n' "${run_body}" >"${run_tmp}"
+    mkdir -p "${glob_scratch}/runner-temp"
+    # Wall-clock bound + process cleanup for deliberate broken-fixture cases.
+    # Known fixture env only; no GitHub expression expansion.
+    if ! python3 - "${run_tmp}" "${glob_scratch}" "${pattern}" "${mock_action}"         "${ghub_out}" "${capture}" <<'PYRUN'
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+run_tmp, cwd, pattern, action_path, ghub_out, capture = sys.argv[1:7]
+env = os.environ.copy()
+env.update({
+    "BUNDLES_PATTERN": pattern,
+    "EVIDENCE_MODE": "optional",
+    "SANDBOX_BUNDLE": "",
+    "RUNNER_TEMP": str(Path(cwd) / "runner-temp"),
+    "GITHUB_WORKSPACE": cwd,
+    "GITHUB_ACTION_PATH": action_path,
+    "GITHUB_OUTPUT": ghub_out,
+    "ASSAY_DISCOVERY_CAPTURE": capture,
+})
+try:
+    subprocess.run(
+        ["bash", run_tmp],
+        cwd=cwd,
+        env=env,
+        check=True,
+        timeout=30,
+    )
+except subprocess.TimeoutExpired as exc:
+    raise SystemExit(f"fixture discover wall timeout: {exc}") from exc
+PYRUN
+    then
+      rm -f "${run_tmp}" "${ghub_out}"
+      return 1
+    fi
+    rm -f "${run_tmp}" "${ghub_out}"
+    return 0
+  }
+
+  run_fixture_discover "" "${capture_default}" \
+    || die "fixture discover (default) exited non-zero"
+  [[ -f "${capture_default}" ]] || die "default discover left no captured candidate list"
+  mapfile -t FIND_HITS < <(sort "${capture_default}")
+  [[ "${#FIND_HITS[@]}" -eq 3 ]] \
+    || die "default fixture discover must hit top+mid+deep (got ${#FIND_HITS[@]}: ${FIND_HITS[*]})"
+  [[ "${FIND_HITS[0]}" == "./.assay/evidence/mid/deep/deeper.tar.gz" ]] \
+    || die "default missing deeper path (got ${FIND_HITS[*]})"
+  [[ "${FIND_HITS[1]}" == "./.assay/evidence/mid/nested.tar.gz" ]] \
+    || die "default missing mid path (got ${FIND_HITS[*]})"
+  [[ "${FIND_HITS[2]}" == "./.assay/evidence/top.tar.gz" ]] \
+    || die "default missing top path (got ${FIND_HITS[*]})"
+
+  run_fixture_discover ".assay/evidence/**/*.tar.gz" "${capture_star}" \
+    || die "fixture discover (explicit **) exited non-zero"
+  [[ -f "${capture_star}" ]] || die "explicit discover left no captured candidate list"
+  mapfile -t STAR_HITS < <(sort "${capture_star}")
+  [[ "${#STAR_HITS[@]}" -eq 1 ]] \
+    || die "explicit ** without globstar must hit exactly one mid-level path (got ${#STAR_HITS[@]}: ${STAR_HITS[*]})"
+  [[ "${STAR_HITS[0]}" == ".assay/evidence/mid/nested.tar.gz" ]] \
+    || die "explicit ** hit unexpected path: ${STAR_HITS[0]}"
+  for miss in ".assay/evidence/top.tar.gz" ".assay/evidence/mid/deep/deeper.tar.gz" \
+              "./.assay/evidence/top.tar.gz" "./.assay/evidence/mid/deep/deeper.tar.gz"; do
+    for h in "${STAR_HITS[@]}"; do
+      if [[ "${h}" == "${miss}" ]]; then
+        die "explicit ** falsely recursive; hit ${miss}"
+      fi
     done
-    true
-  )
-  rm -rf "${glob_scratch}"
-  ok "explicit-glob-double-star-not-recursive"
-  ok "default-find-recursive-three-level"
+  done
+
+  rm -rf "${glob_scratch}" "${mock_action}"
+  ok "fixture-discover-default-three-level"
+  ok "fixture-discover-explicit-glob-bounded"
+  ok "docs-globstar-and-dry-run-qualifiers"
 
   python3 - "${ROOT}/.pre-commit-config.yaml" <<'PY2'
 import re
@@ -811,6 +986,149 @@ if old not in text:
 wf.write_text(text.replace(old, new, 1), encoding="utf-8")
 PY
 expect_red "weak-outcome-words-only"
+
+# --- Fixture discovery execution mutations (M1/M5 + doc/path deletion) ---
+seed_fixture_scratch() {
+  rm -rf "${SCRATCH}/fixture"
+  mkdir -p "${SCRATCH}/fixture"
+  cp "${ROOT}/scripts/ci/fixtures/assay-action-pin/action.yml" "${SCRATCH}/fixture/action.yml"
+  cp "${ROOT}/scripts/ci/fixtures/assay-action-pin/PROVENANCE" "${SCRATCH}/fixture/PROVENANCE"
+  cp "${DOC}" "${SCRATCH}/fixture/github-action.md"
+  cp "${CALLER_WF}" "${SCRATCH}/wf.yml"
+  mkdir -p "${SCRATCH}/repo/scripts/ci"
+  cp "${CALLER_PROD}" "${SCRATCH}/repo/scripts/ci/produce-default-discovery-sandbox-evidence.sh"
+  chmod +x "${SCRATCH}/repo/scripts/ci/produce-default-discovery-sandbox-evidence.sh"
+}
+
+coord_fixture_sha() {
+  local dig
+  dig="$(sha256sum "${SCRATCH}/fixture/action.yml" | awk '{print $1}')"
+  python3 - "${SCRATCH}/fixture/PROVENANCE" "${dig}" <<'PYSHA'
+from pathlib import Path
+import sys
+path, dig = Path(sys.argv[1]), sys.argv[2]
+lines = []
+for line in path.read_text().splitlines(True):
+    if line.startswith("sha256="):
+        lines.append(f"sha256={dig}\n")
+    else:
+        lines.append(line)
+path.write_text("".join(lines))
+PYSHA
+}
+
+expect_red_fixture() {
+  local name="$1"
+  if ASSAY_JUNCTION_WORKFLOW="${SCRATCH}/wf.yml" \
+     ASSAY_JUNCTION_PRODUCER="${SCRATCH}/repo/scripts/ci/produce-default-discovery-sandbox-evidence.sh" \
+     ASSAY_JUNCTION_ACTION_YML="${SCRATCH}/fixture/action.yml" \
+     ASSAY_JUNCTION_DOC="${SCRATCH}/fixture/github-action.md" \
+     bash "$0" --contract-only >"${SCRATCH}/${name}.out" 2>&1; then
+    die "mutation ${name} stayed green (see ${SCRATCH}/${name}.out)"
+  fi
+  ok "mutation-${name}-red"
+}
+
+# M1: fixture gains shopt -s globstar (+ coordinated PROVENANCE)
+seed_fixture_scratch
+python3 - "${SCRATCH}/fixture/action.yml" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+needle = "          # Glob expansion: use compgen for safe pattern matching\n"
+insert = needle + "          shopt -s globstar\n"
+if needle not in text:
+    raise SystemExit("M1 needle missing")
+path.write_text(text.replace(needle, insert, 1), encoding="utf-8")
+PY
+coord_fixture_sha
+expect_red_fixture "fixture-globstar-enabled"
+
+# M5: fixture find gains -maxdepth 3 (+ coordinated PROVENANCE)
+seed_fixture_scratch
+python3 - "${SCRATCH}/fixture/action.yml" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = "find . \\( -path './.assay/evidence/*.tar.gz' -o -path './evidence/*.tar.gz' \\) -type f"
+new = "find . -maxdepth 3 \\( -path './.assay/evidence/*.tar.gz' -o -path './evidence/*.tar.gz' \\) -type f"
+if old not in text:
+    raise SystemExit("M5 find needle missing")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+coord_fixture_sha
+expect_red_fixture "fixture-find-maxdepth"
+
+# Removal of effective default find command must bite
+seed_fixture_scratch
+python3 - "${SCRATCH}/fixture/action.yml" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = "          find . \\( -path './.assay/evidence/*.tar.gz' -o -path './evidence/*.tar.gz' \\) -type f 2>/dev/null >> \"$RAW\"\n"
+new = "          # find removed by mutation\n          true\n"
+if old not in text:
+    raise SystemExit("find removal needle missing")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+coord_fixture_sha
+expect_red_fixture "fixture-find-removed"
+
+# Docs: delete globstar qualifier paragraph
+seed_fixture_scratch
+python3 - "${SCRATCH}/fixture/github-action.md" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = (
+    "An explicit `bundles:` value is expanded with Bash `compgen -G` and does **not**\n"
+    "enable `globstar`. A pattern like `.assay/evidence/**/*.tar.gz` therefore does\n"
+    "**not** mean arbitrary-depth recursion: without `globstar`, `**` selects about\n"
+    "one intermediate directory level (for example `.assay/evidence/mid/*.tar.gz`),\n"
+    "misses top-level `.assay/evidence/*.tar.gz`, and misses deeper trees such as\n"
+    "`.assay/evidence/mid/deep/*.tar.gz`. Do not copy a `**` example expecting full\n"
+    "recursion; omit `bundles` instead.\n"
+)
+if old not in text:
+    raise SystemExit("globstar doc paragraph missing")
+path.write_text(text.replace(old, "", 1), encoding="utf-8")
+PY
+expect_red_fixture "docs-globstar-paragraph-deleted"
+
+# Docs: delete observed-effects dry-run qualification
+seed_fixture_scratch
+python3 - "${SCRATCH}/fixture/github-action.md" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = (
+    "\nThat recipe attests the sandbox command's observed effects, not that a test suite\n"
+    "passed.\n"
+)
+if old not in text:
+    raise SystemExit("dry-run qualification missing")
+path.write_text(text.replace(old, "\n", 1), encoding="utf-8")
+PY
+expect_red_fixture "docs-dry-run-qualifier-deleted"
+
+# Workflow paths: drop producer entry
+seed_fixture_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = "      - 'scripts/ci/produce-default-discovery-sandbox-evidence.sh'\n"
+if old not in text:
+    raise SystemExit("producer path entry missing")
+path.write_text(text.replace(old, "", 1), encoding="utf-8")
+PY
+expect_red_fixture "workflow-producer-path-deleted"
 
 # Caller bytes must be unchanged even after mutations / interruption path
 AFTER_WF_HASH="$(sha256sum "${CALLER_WF}" | awk '{print $1}')"

@@ -9,6 +9,7 @@ on:
       - 'tests/fixtures/evidence/**'
       - '.github/assay-action-pin'
       - 'scripts/ci/fixtures/assay-action-pin/**'
+      - 'scripts/ci/produce-default-discovery-sandbox-evidence.sh'
       - '.github/workflows/action-v2-test.yml'
 
 permissions:
