@@ -1129,15 +1129,42 @@ if not junction.is_file():
     raise SystemExit(f"missing junction script (outer wiring): expected {rel}")
 text = battery.read_text(encoding="utf-8")
 invoke_re = re.compile(r'^bash\s+"\$\{ROOT\}/' + re.escape(rel) + r'"\s*$')
-found = False
+# Bounded executable-call scan: skip bodies of no-op `: <<DELIM` heredocs only.
+# Not a general shell parser — named decoy is the Codex-reproduced `: <<EOF` form.
+noop_heredoc_start = re.compile(
+    r"^:\s*<<(-?)(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2\s*$"
+)
+active = False
+heredoc_decoy = False
+heredoc_end = None
+heredoc_strip_tabs = False
 for raw in text.splitlines():
+    if heredoc_end is not None:
+        end_cand = raw.lstrip("\t") if heredoc_strip_tabs else raw
+        if end_cand.rstrip("\r\n") == heredoc_end:
+            heredoc_end = None
+            continue
+        s_in = raw.strip()
+        if s_in and not s_in.startswith("#") and invoke_re.match(s_in):
+            heredoc_decoy = True
+        continue
     s = raw.strip()
     if not s or s.startswith("#"):
         continue
+    m = noop_heredoc_start.match(s)
+    if m:
+        heredoc_strip_tabs = m.group(1) == "-"
+        heredoc_end = m.group(3)
+        continue
     if invoke_re.match(s):
-        found = True
+        active = True
         break
-if not found:
+if not active:
+    if heredoc_decoy:
+        raise SystemExit(
+            "outer call only inside non-executing : << heredoc "
+            "(not an effective pin-battery invoke)"
+        )
     raise SystemExit(
         "missing outer call to test-action-discovery-junction.sh "
         "(pin-battery must invoke the junction script)"
@@ -1185,6 +1212,40 @@ if ! grep -Fq "missing outer call to test-action-discovery-junction.sh" "${scrat
   exit 1
 fi
 echo "ok    outer-junction-wiring-missing-call-red"
+
+# RED: exact invoke only inside non-executing `: <<EOF` (text present, nothing runs)
+cp "${BATTERY_SRC}" "${scratch}/battery-heredoc-decoy.sh"
+python3 - "${scratch}/battery-heredoc-decoy.sh" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+invoke = 'bash "${ROOT}/' + 'scripts/ci/test-action-discovery-junction' + '.sh"'
+lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+out = []
+n = 0
+for line in lines:
+    if line.strip() == invoke:
+        out.append(": <<EOF\n")
+        out.append(line)
+        out.append("EOF\n")
+        n += 1
+    else:
+        out.append(line)
+if n != 1:
+    raise SystemExit(f"expected exactly one outer invoke to wrap in : <<EOF, got {n}")
+p.write_text("".join(out), encoding="utf-8")
+PY
+if assert_outer_junction_wiring "${scratch}/battery-heredoc-decoy.sh" "${JUNCTION_SCRIPT}" \
+    >"${scratch}/outer-heredoc.out" 2>"${scratch}/outer-heredoc.err"; then
+  echo "FAIL: : <<EOF heredoc decoy stayed green" >&2
+  exit 1
+fi
+if ! grep -Fq "non-executing : << heredoc" "${scratch}/outer-heredoc.err"; then
+  echo "FAIL: heredoc decoy did not name refused behavior:" >&2
+  cat "${scratch}/outer-heredoc.err" >&2
+  exit 1
+fi
+echo "ok    outer-junction-wiring-heredoc-decoy-red"
 
 # RED: delete the junction script (call still present in live battery source)
 mkdir -p "${scratch}/outer-missing-script/scripts/ci"
