@@ -9,8 +9,52 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const SCHEMA = "assay.codex-host-proof.v4";
+export const SCHEMA = "assay.codex-host-proof.v5";
 export const FAKE_USER_AGENT = "assay-codex-host-proof-fake/1";
+// Closed install-route vocabulary. "local-build" is recordable on purpose: a failed
+// provenance run must be retained as what it was, not omitted into a cleaner record.
+export const INSTALL_ROUTES = Object.freeze([
+  "github-release",
+  "crates-io",
+  "host-bundled",
+  "local-build",
+]);
+// Routes that satisfy #2684 DoD cell 2. A local build never does.
+export const PUBLISHED_INSTALL_ROUTES = Object.freeze([
+  "github-release",
+  "crates-io",
+  "host-bundled",
+]);
+export const MAX_INSTALL_REFERENCE = 200;
+// Contract: a reference or version is one line of printable ASCII, U+0020 to U+007E
+// inclusive. Everything else is refused. Stated as what that excludes, because the
+// review finding was about classes nobody enumerated:
+//
+//   U+0000-U+001F  C0 controls, including newline and tab
+//   U+007F-U+009F  DEL and the C1 controls, including U+0085 NEL
+//   U+00A0         no-break space, and every other non-ASCII space
+//   U+200B-U+200F  zero-width space, ZWNJ, ZWJ, LRM, RLM
+//   U+202A-U+202E  bidi embeddings and overrides
+//   U+2028, U+2029 line and paragraph separators
+//   U+2066-U+2069  bidi isolates
+//   U+FEFF         BOM / zero-width no-break space
+//   everything else outside U+0020-U+007E, including all astral planes
+//
+// This is an allowlist on purpose. The first version blocked C0 and DEL only, and that
+// blocklist silently admitted six of the classes above. A blocklist has to enumerate
+// every hostile code point; an allowlist cannot be defeated by one nobody listed. The
+// list above documents the contract, it does not implement it, so it cannot drift out
+// of sync with enforcement. `boundedPrintable` is the single validator for both fields.
+const PRINTABLE_ASCII_LINE = /^[\x20-\x7e]+$/;
+
+export function boundedPrintable(value, max = MAX_INSTALL_REFERENCE) {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= max &&
+    PRINTABLE_ASCII_LINE.test(value)
+  );
+}
 export const SKILL_NAME = "assay-golden-path";
 export const DECIDE_TOOL = "assay_policy_decide";
 export const DECIDE_INPUT = {
@@ -259,11 +303,25 @@ function exactKeys(value, expected) {
   );
 }
 
+export function installSourceBound(source) {
+  return (
+    exactKeys(source, ["route", "reference"]) &&
+    INSTALL_ROUTES.includes(source.route) &&
+    boundedPrintable(source.reference) &&
+    !CREDENTIAL_KEY.test(source.reference)
+  );
+}
+
 function projectBoundBinary(bin) {
-  return {
+  const projected = {
     path: bin?.path,
     sha256: bin?.sha256,
+    installSource: bin?.installSource,
   };
+  if (bin?.version !== undefined) {
+    projected.version = bin.version;
+  }
+  return projected;
 }
 
 export function projectHostIdentity(identity) {
@@ -271,6 +329,8 @@ export function projectHostIdentity(identity) {
     return null;
   }
   return {
+    os: identity.os,
+    arch: identity.arch,
     codex: projectBoundBinary(identity.codex),
     codexCodeModeHost: projectBoundBinary(identity.codexCodeModeHost),
     assayMcp: projectBoundBinary(identity.assayMcp),
@@ -278,17 +338,30 @@ export function projectHostIdentity(identity) {
 }
 
 function boundBinary(bin) {
+  const shape = bin?.version === undefined
+    ? ["path", "sha256", "installSource"]
+    : ["path", "sha256", "installSource", "version"];
   return (
-    exactKeys(bin, ["path", "sha256"]) &&
+    exactKeys(bin, shape) &&
     typeof bin.path === "string" &&
     path.isAbsolute(bin.path) &&
     typeof bin.sha256 === "string" &&
-    /^[a-f0-9]{64}$/.test(bin.sha256)
+    /^[a-f0-9]{64}$/.test(bin.sha256) &&
+    installSourceBound(bin.installSource) &&
+    (bin.version === undefined || boundedPrintable(bin.version))
   );
 }
 
 export function liveIdentityBound(identity) {
-  if (!exactKeys(identity, ["codex", "codexCodeModeHost", "assayMcp"])) {
+  if (!exactKeys(identity, ["os", "arch", "codex", "codexCodeModeHost", "assayMcp"])) {
+    return false;
+  }
+  if (
+    typeof identity.os !== "string" ||
+    identity.os.length === 0 ||
+    typeof identity.arch !== "string" ||
+    identity.arch.length === 0
+  ) {
     return false;
   }
   return (

@@ -46,6 +46,7 @@ import {
   CWD_DIFFERS_FROM_PROJECT_ROOT,
   CWD_MATCHES_PROJECT_ROOT,
   projectRetainedEvent,
+  installSourceBound,
   projectHostIdentity,
   proofAllowlist,
   requirePrivateDirectory,
@@ -58,6 +59,8 @@ import {
   validateProofRoot,
   walkDepth,
 } from "./codex_host_proof_validator.mjs";
+
+const INSTALL_SUBJECTS = Object.freeze(["codex", "codexCodeModeHost", "assayMcp"]);
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BYTES = 1_048_576;
@@ -72,6 +75,7 @@ export function parseArgs(argv) {
     childArgv: null,
     proofRoot: null,
     projectRoot: null,
+    installSources: {},
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -101,6 +105,26 @@ export function parseArgs(argv) {
       case "--allow-live-turn":
         out.allowLiveTurn = true;
         break;
+      // Install source is declared, never inferred: how a binary got onto this
+      // machine is not observable from the binary the host launches. Each token is
+      // validated structurally here so nothing free-form reaches the record.
+      case "--install-source": {
+        const subject = next();
+        const route = next();
+        const reference = next();
+        if (!INSTALL_SUBJECTS.includes(subject)) {
+          throw new Error(`--install-source subject must be one of ${INSTALL_SUBJECTS.join(", ")}`);
+        }
+        if (Object.prototype.hasOwnProperty.call(out.installSources, subject)) {
+          throw new Error(`--install-source declared twice for ${subject}`);
+        }
+        const candidate = { route, reference };
+        if (!installSourceBound(candidate)) {
+          throw new Error(`--install-source for ${subject} is not a valid route and reference`);
+        }
+        out.installSources[subject] = candidate;
+        break;
+      }
       default:
         throw new Error(`unknown argument ${arg}`);
     }
@@ -338,6 +362,13 @@ function probeAssayMcpVersion(binary) {
 }
 
 export function resolveHostIdentity(options = {}) {
+  const declared = options.installSources ?? {};
+  const missing = INSTALL_SUBJECTS.filter((s) => !declared[s]);
+  if (missing.length > 0) {
+    // Fail closed. A record without a declared install source cannot satisfy the
+    // #2684 "record install source" cell, and an absent field must not read as a pass.
+    throw new Error(`--install-source is required for: ${missing.join(", ")}`);
+  }
   const codexPath = findOnPath("codex");
   const mcpPath = findOnPath("assay-mcp-server");
   if (!codexPath) {
@@ -374,18 +405,18 @@ export function resolveHostIdentity(options = {}) {
         path: fs.realpathSync(codexSnap),
         version: probeCodexVersion(codexSnap),
         sha256: sha256File(codexSnap),
-        installSource: "PATH",
+        installSource: declared.codex,
       },
       codexCodeModeHost: {
         path: fs.realpathSync(codeModeHostSnap),
         sha256: sha256File(codeModeHostSnap),
-        installSource: "codex-sibling",
+        installSource: declared.codexCodeModeHost,
       },
       assayMcp: {
         path: fs.realpathSync(mcpSnap),
         version: probeAssayMcpVersion(mcpSnap),
         sha256: sha256File(mcpSnap),
-        installSource: "PATH",
+        installSource: declared.assayMcp,
       },
     };
     identity[BOUND_EXEC] = {
@@ -660,7 +691,10 @@ export async function runProof(options) {
   }
 
   if (!options.testOnlyChild && !options.hostIdentity) {
-    options.hostIdentity = resolveHostIdentity({ proofRoot: options.proofRoot });
+    options.hostIdentity = resolveHostIdentity({
+      proofRoot: options.proofRoot,
+      installSources: options.installSources,
+    });
   }
   let codexHome;
   try {
