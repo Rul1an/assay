@@ -52,7 +52,8 @@ def run_json(args, allowed_returncodes=(0,)):
     try:
         with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
             # argv is list-based and its command family is closed above; no shell is involved.
-            result = subprocess.run(  # lgtm[py/command-line-injection]
+            # codeql[py/command-line-injection]
+            result = subprocess.run(
                 args, check=False, stdout=out, stderr=err,
                 timeout=COMMAND_TIMEOUT_SECONDS,
             )
