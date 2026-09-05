@@ -89,14 +89,35 @@
                 ],
                 "properties": {
                   "kind": {
-                    "enum": [
-                      "agent-assisted",
-                      "agent-generated"
-                    ]
+                    "const": "agent-assisted"
                   },
                   "model": {
                     "type": "string",
+                    "minLength": 1,
+                    "description": "Exact opaque disclosure string; no model or version normalization."
+                  },
+                  "prompt_strategy": {
+                    "type": "string",
                     "minLength": 1
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "model",
+                  "prompt_strategy"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "agent-generated"
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Exact opaque disclosure string; no model or version normalization."
                   },
                   "prompt_strategy": {
                     "type": "string",

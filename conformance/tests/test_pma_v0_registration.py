@@ -83,6 +83,7 @@ class CheckedInRow(unittest.TestCase):
         auth = row["authorship"]
         self.assertEqual(auth["kind"], "agent-assisted")
         self.assertEqual(auth["model"], MODEL)
+        self.assertEqual(implementations.authorship_trailer(auth), "Assisted-By: Grok Bot")
         strategy = auth["prompt_strategy"]
         self.assertIn(FREEZE_COMMIT, strategy)
         self.assertIn("other_disclosed", strategy)
