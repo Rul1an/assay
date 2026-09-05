@@ -169,6 +169,41 @@ test("#2823: retained package is rechecked by the consumer, including forged sto
   assert.equal(validateProofRoot(proofRoot).classified.cells.installPackageVerified.status, "fail");
 });
 
+test("#2823: a package changed by the version probe cannot reach host spawn", (t) => {
+  for (const changePackage of [false, true]) {
+    const proofRoot = portableLiveProofRoot();
+    const root = scratch();
+    t.after(() => fs.rmSync(proofRoot, { recursive: true, force: true }));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const marker = path.join(root, "host-spawned");
+    const codexBin = path.join(root, "codex");
+    const projectRoot = seedProject();
+    writePortableNodeExecutable(codexBin, `
+import fs from "node:fs";
+import { spawn } from "node:child_process";
+if (process.argv.includes("--version")) {
+  if (${changePackage}) fs.appendFileSync(${JSON.stringify(path.join(proofRoot, "assay-package.crate"))}, "changed after first check");
+  process.stdout.write("codex-shadow/0.0.0\\n");
+} else {
+  fs.writeFileSync(${JSON.stringify(marker)}, "host started");
+  const child = spawn(${JSON.stringify(process.execPath)}, ${JSON.stringify([FAKE, "--scenario", "valid", "--project-root", projectRoot])}, { stdio: "inherit" });
+  const stop = () => { try { child.kill("SIGTERM"); } catch {} };
+  process.on("SIGTERM", stop);
+  child.on("close", code => process.exit(code ?? 1));
+}
+`);
+    const run = driveCli("valid", "discovery", { captureMode: "host-observation", proofRoot, projectRoot, codexBin });
+    assert.equal(fs.existsSync(marker), !changePackage,
+      "the changed package must stop host spawn; the unchanged control must reach it");
+    if (changePackage) {
+      assert.notEqual(run.status, 0);
+      assert.match(run.stderr, /package.*checksum|checksum.*mismatch/i);
+    } else {
+      assert.equal(validateProofRoot(proofRoot).classified.cells.installPackageVerified.status, "pass");
+    }
+  }
+});
+
 test("#2813: shared itemsView validation preserves the closed vocabulary and legacy absence", async () => {
   const { turnItemsViewReason } = await import("./codex_host_proof_validator.mjs");
   assert.equal(typeof turnItemsViewReason, "function");
