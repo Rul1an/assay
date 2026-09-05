@@ -570,50 +570,33 @@ import subprocess
 import sys
 import time
 
-
-def pids_in_group(pgid: int) -> list:
-    """PIDs currently in pgid (macOS/Linux via ps). Empty if none or ps unavailable."""
-    try:
-        out = subprocess.check_output(
-            ["ps", "-axo", "pid=,pgid="],
-            text=True,
-            stderr=subprocess.DEVNULL,
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return []
-    pids = []
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) < 2:
-            continue
-        try:
-            pid_i, pgid_i = int(parts[0]), int(parts[1])
-        except ValueError:
-            continue
-        if pgid_i == pgid:
-            pids.append(pid_i)
-    return pids
+# Retained host evidence (2026-09-05, macOS, this worktree):
+#   After cooperative TERM wiped the group, bare
+#     os.killpg(pgid, signal.SIGKILL)
+#   raised PermissionError errno=1 strerror='Operation not permitted'
+#   (child already dead; parent.poll=-15). Same for os.killpg(pgid, 0).
+#   With a live TERM-ignoring child, killpg(0)/KILL returned ok and reaped it.
+# Policy: retained spawn pgid; TERM; full bounded grace (no membership poll);
+# always KILL same pgid. ESRCH=absence. EPERM=UNAVAILABLE (rc 125; do not claim
+# cleanup). No ps / no per-pid fallback.
 
 
-def group_has_members(pgid: int) -> bool:
-    """Group absence is empty membership — not direct-child proc.poll()."""
-    return bool(pids_in_group(pgid))
+class CleanupUnavailable(Exception):
+    """killpg returned EPERM; cleanup not proven."""
 
 
-def signal_group(pgid: int, sig: int) -> None:
-    """Best-effort group signal; on killpg EPERM/ESRCH fall back to per-pid."""
+def _killpg(pgid: int, sig: int) -> str:
+    """Return 'ok' or 'ESRCH'. Raise CleanupUnavailable on EPERM."""
     try:
         os.killpg(pgid, sig)
-        return
+        return "ok"
     except ProcessLookupError:
-        return
-    except PermissionError:
-        pass
-    for pid in pids_in_group(pgid):
-        try:
-            os.kill(pid, sig)
-        except (ProcessLookupError, PermissionError):
-            pass
+        return "ESRCH"
+    except PermissionError as exc:
+        raise CleanupUnavailable(
+            f"os.killpg({pgid}, {int(sig)}) EPERM errno={exc.errno} "
+            f"strerror={exc.strerror!r}"
+        ) from exc
 
 
 def terminate_process_group(
@@ -623,26 +606,16 @@ def terminate_process_group(
     term_grace_s: float = 2.0,
     kill_grace_s: float = 2.0,
 ) -> None:
-    """TERM the known process group, wait the full grace, then KILL remaining members.
+    """Retained spawn pgid: TERM, bounded grace, KILL same group; reap proc.
 
-    Direct-child exit (proc.poll() set) is NOT group absence: a TERM-ignoring
-    descendant can still be alive. Always escalate with the retained pgid from
-    start_new_session; reap the direct child handle separately.
+    Direct-child exit is not group absence. No ps. EPERM is never ignored.
     """
-    signal_group(pgid, signal.SIGTERM)
+    _killpg(pgid, signal.SIGTERM)
+    # Full grace — do not poll killpg(0) (can EPERM while members still dying).
+    time.sleep(term_grace_s)
+    # Always escalate KILL on the retained pgid (leader exit must not skip this).
+    _killpg(pgid, signal.SIGKILL)
 
-    # Bounded TERM grace — do not return early solely because the leader exited.
-    deadline = time.monotonic() + term_grace_s
-    while time.monotonic() < deadline:
-        if not group_has_members(pgid):
-            break
-        time.sleep(0.05)
-
-    # Escalate: signal remaining group members even if the session leader is gone.
-    if group_has_members(pgid):
-        signal_group(pgid, signal.SIGKILL)
-
-    # Reap the direct child handle separately from group membership.
     if proc.poll() is None:
         try:
             proc.wait(timeout=kill_grace_s)
@@ -680,7 +653,6 @@ def main() -> int:
         env=env,
         start_new_session=True,
     )
-    # Retain pgid at spawn (new session leader); do not re-query after leader exit.
     try:
         pgid = os.getpgid(proc.pid)
     except ProcessLookupError:
@@ -688,15 +660,23 @@ def main() -> int:
     try:
         proc.wait(timeout=timeout_s)
     except subprocess.TimeoutExpired:
-        terminate_process_group(
-            proc,
-            pgid,
-            term_grace_s=term_grace_s,
-            kill_grace_s=kill_grace_s,
-        )
+        try:
+            terminate_process_group(
+                proc,
+                pgid,
+                term_grace_s=term_grace_s,
+                kill_grace_s=kill_grace_s,
+            )
+        except CleanupUnavailable as exc:
+            print(
+                f"fixture discover wall timeout after {timeout_s}s: "
+                f"process-group cleanup UNAVAILABLE for pgid={pgid}: {exc}",
+                file=sys.stderr,
+            )
+            return 125
         print(
             f"fixture discover wall timeout after {timeout_s}s "
-            f"(process group TERM/KILL attempted for pgid={pgid})",
+            f"(process group TERM/KILL completed for pgid={pgid})",
             file=sys.stderr,
         )
         return 124
@@ -857,18 +837,78 @@ PYDISC
     ok "process-group-noop-control"
   }
 
+  # Mocked ESRCH/EPERM: ESRCH=absence; EPERM=unavailable; members still get KILL.
+  python3 - "${pg_runner}" <<'PYMOCK'
+import importlib.util
+import os
+import signal
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock
+
+path = Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location("pg_runner", path)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+
+calls = []
+
+def fake_killpg(pgid, sig):
+    calls.append((pgid, int(sig)))
+    mode = fake_killpg.mode
+    if mode == "esrch_on_kill":
+        if sig == signal.SIGTERM:
+            return None
+        if sig == signal.SIGKILL:
+            raise ProcessLookupError(3, "No such process")
+        raise AssertionError(sig)
+    if mode == "eperm_on_kill":
+        if sig == signal.SIGTERM:
+            return None
+        if sig == signal.SIGKILL:
+            raise PermissionError(1, "Operation not permitted")
+        raise AssertionError(sig)
+    if mode == "kill_ok":
+        if sig in (signal.SIGTERM, signal.SIGKILL):
+            return None
+        raise AssertionError(sig)
+    raise AssertionError(mode)
+
+os.killpg = fake_killpg
+proc = MagicMock()
+proc.poll.return_value = -15
+proc.wait.return_value = 0
+
+fake_killpg.mode = "esrch_on_kill"
+calls.clear()
+mod.terminate_process_group(proc, 4242, term_grace_s=0.05, kill_grace_s=0.05)
+assert [s for _, s in calls] == [int(signal.SIGTERM), int(signal.SIGKILL)], calls
+print("ok    mock-esrch-on-kill-is-absence")
+
+fake_killpg.mode = "eperm_on_kill"
+calls.clear()
+try:
+    mod.terminate_process_group(proc, 4242, term_grace_s=0.05, kill_grace_s=0.05)
+except mod.CleanupUnavailable as exc:
+    assert "EPERM" in str(exc) and "errno=1" in str(exc), exc
+    print("ok    mock-eperm-on-kill-is-unavailable")
+else:
+    raise SystemExit("eperm_on_kill should raise CleanupUnavailable")
+
+fake_killpg.mode = "kill_ok"
+calls.clear()
+mod.terminate_process_group(proc, 4242, term_grace_s=0.05, kill_grace_s=0.05)
+assert [s for _, s in calls] == [int(signal.SIGTERM), int(signal.SIGKILL)], calls
+print("ok    mock-members-present-gets-kill")
+PYMOCK
+
+
   # Owned-group teardown helper for probes: kill only the recorded child's pgid.
+  # Teardown: signal only the probe-recorded child PID (never rediscover a pgid).
   reap_owned_probe_child() {
-    local pid="${1:-}" pgid
-    [[ -n "${pid}" ]] || return 0
-    if kill -0 "${pid}" 2>/dev/null; then
-      pgid="$(ps -o pgid= -p "${pid}" 2>/dev/null | tr -d '[:space:]' || true)"
-      if [[ -n "${pgid}" && "${pgid}" =~ ^[0-9]+$ ]]; then
-        kill -KILL "-${pgid}" 2>/dev/null || true
-      else
-        kill -KILL "${pid}" 2>/dev/null || true
-      fi
-    fi
+    local pid="${1:-}"
+    [[ -n "${pid}" && "${pid}" =~ ^[0-9]+$ ]] || return 0
+    kill -KILL "${pid}" 2>/dev/null || true
   }
 
   # Cooperative synthetic child: group TERM/KILL reaps a normal sleep descendant.
@@ -891,16 +931,13 @@ wait
 PROBE
     chmod +x "${probe_sh}"
     set +e
-    python3 "${pg_runner}" 1 "${probe_dir}" '{"ASSAY_PG_TERM_GRACE_S":"0.4","ASSAY_PG_KILL_GRACE_S":"0.4"}' bash "${probe_sh}" "${child_pid_file}" >/dev/null 2>&1
+    probe_err="${probe_dir}/runner.err"
+    python3 "${pg_runner}" 1 "${probe_dir}" '{"ASSAY_PG_TERM_GRACE_S":"0.4","ASSAY_PG_KILL_GRACE_S":"0.4"}' bash "${probe_sh}" "${child_pid_file}" >/dev/null 2>"${probe_err}"
     probe_rc=$?
     set -e
     child_pid=""
     if [[ -f "${child_pid_file}" ]]; then
       child_pid="$(cat "${child_pid_file}" || true)"
-    fi
-    if [[ "${probe_rc}" -ne 124 ]]; then
-      reap_owned_probe_child "${child_pid}"
-      die "synthetic child probe expected timeout rc 124 (got ${probe_rc})"
     fi
     [[ -n "${child_pid}" && "${child_pid}" =~ ^[0-9]+$ ]] \
       || { reap_owned_probe_child "${child_pid}"; die "synthetic child pid malformed: ${child_pid}"; }
@@ -912,6 +949,17 @@ PROBE
     if [[ "${alive_rc}" -eq 0 ]]; then
       reap_owned_probe_child "${child_pid}"
       die "synthetic child ${child_pid} still alive after process-group timeout (descendant cleanup failed)"
+    fi
+    # 124 = killpg completed. 125 = EPERM unavailable after TERM wipe (host quirk);
+    # only accepted when child is already dead and stderr says UNAVAILABLE.
+    if [[ "${probe_rc}" -eq 124 ]]; then
+      :
+    elif [[ "${probe_rc}" -eq 125 ]]; then
+      grep -Fq "UNAVAILABLE" "${probe_err}" \
+        || { reap_owned_probe_child "${child_pid}"; die "rc 125 without UNAVAILABLE: $(cat "${probe_err}")"; }
+    else
+      reap_owned_probe_child "${child_pid}"
+      die "synthetic child probe expected rc 124 or honest 125 (got ${probe_rc})"
     fi
     ok "process-group-kills-synthetic-child"
   }
