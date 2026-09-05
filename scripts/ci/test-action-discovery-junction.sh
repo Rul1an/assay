@@ -20,6 +20,18 @@ EXPECTED_PRODUCER_RUN='bash scripts/ci/produce-default-discovery-sandbox-evidenc
 die() { echo "action-discovery-junction: $*" >&2; exit 1; }
 ok() { echo "ok    $*"; }
 
+# Outer-owned temps for fixture discover (and probes). Full-suite SCRATCH trap must chain this.
+JUNCTION_TEMPS=()
+register_junction_temp() { JUNCTION_TEMPS+=("$1"); }
+cleanup_junction_temps() {
+  local p
+  for p in "${JUNCTION_TEMPS[@]:-}"; do
+    rm -rf "${p}"
+  done
+  JUNCTION_TEMPS=()
+}
+trap cleanup_junction_temps EXIT
+
 PIN="$("${READER}")"
 [[ "${PIN}" =~ ^[0-9a-f]{40}$ ]] || die "reader pin malformed: ${PIN}"
 
@@ -532,17 +544,93 @@ check_explicit_glob_and_pin_filter() {
   grep -Fq "attests the sandbox command's observed effects, not that a test suite" "${doc_path}" \
     || die "docs dry-run recipe must qualify observed-effects-only (not suite pass)"
 
-  local glob_scratch capture_default capture_star mock_action run_body
+  local glob_scratch capture_default capture_star mock_action run_body pg_runner
   glob_scratch="$(mktemp -d "${TMPDIR:-/tmp}/2802-glob-depth.XXXXXX")"
+  register_junction_temp "${glob_scratch}"
   mkdir -p "${glob_scratch}/.assay/evidence/mid/deep"
   : >"${glob_scratch}/.assay/evidence/top.tar.gz"
   : >"${glob_scratch}/.assay/evidence/mid/nested.tar.gz"
   : >"${glob_scratch}/.assay/evidence/mid/deep/deeper.tar.gz"
 
   mock_action="$(mktemp -d "${TMPDIR:-/tmp}/2802-mock-action.XXXXXX")"
+  register_junction_temp "${mock_action}"
   mkdir -p "${mock_action}/scripts"
   capture_default="${glob_scratch}/captured-default.txt"
   capture_star="${glob_scratch}/captured-star.txt"
+
+  # Shared runner: new session/process group; on wall timeout TERM then KILL the group.
+  # Descendant cleanup is only claimed where the synthetic child probe below measures it.
+  pg_runner="$(mktemp "${TMPDIR:-/tmp}/2802-pg-runner.XXXXXX.py")"
+  register_junction_temp "${pg_runner}"
+  cat >"${pg_runner}" <<'PYPG'
+import os
+import signal
+import subprocess
+import sys
+import time
+
+
+def terminate_process_group(proc, *, term_grace_s: float = 2.0, kill_grace_s: float = 2.0) -> None:
+    """TERM the session/process group, then KILL if still alive. Best-effort only."""
+    if proc.poll() is not None:
+        return
+    try:
+        pgid = os.getpgid(proc.pid)
+    except ProcessLookupError:
+        return
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    deadline = time.monotonic() + term_grace_s
+    while proc.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=kill_grace_s)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def main() -> int:
+    if len(sys.argv) < 4:
+        print("usage: pg_runner.py TIMEOUT_S CWD ENV_JSON CMD...", file=sys.stderr)
+        return 2
+    timeout_s = float(sys.argv[1])
+    cwd = sys.argv[2]
+    import json
+
+    env_overlay = json.loads(sys.argv[3])
+    cmd = sys.argv[4:]
+    env = os.environ.copy()
+    env.update({str(k): str(v) for k, v in env_overlay.items()})
+    proc = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        env=env,
+        start_new_session=True,
+    )
+    try:
+        proc.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        terminate_process_group(proc)
+        print(
+            f"fixture discover wall timeout after {timeout_s}s "
+            f"(process group TERM/KILL attempted)",
+            file=sys.stderr,
+        )
+        return 124
+    return int(proc.returncode or 0)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+PYPG
 
   cat >"${mock_action}/scripts/build_evidence_index.sh" <<'MOCK'
 #!/usr/bin/env bash
@@ -622,47 +710,31 @@ PYDISC
   run_fixture_discover() {
     local pattern="$1"
     local capture="$2"
-    local ghub_out run_tmp
+    local ghub_out run_tmp env_json rc
     ghub_out="$(mktemp "${TMPDIR:-/tmp}/2802-ghout.XXXXXX")"
     run_tmp="$(mktemp "${TMPDIR:-/tmp}/2802-discover-run.XXXXXX")"
+    register_junction_temp "${ghub_out}"
+    register_junction_temp "${run_tmp}"
     printf '%s\n' "${run_body}" >"${run_tmp}"
     mkdir -p "${glob_scratch}/runner-temp"
-    # Wall-clock bound + process cleanup for deliberate broken-fixture cases.
     # Known fixture env only; no GitHub expression expansion.
-    if ! python3 - "${run_tmp}" "${glob_scratch}" "${pattern}" "${mock_action}"         "${ghub_out}" "${capture}" <<'PYRUN'
-import os
-import subprocess
-import sys
-from pathlib import Path
-
-run_tmp, cwd, pattern, action_path, ghub_out, capture = sys.argv[1:7]
-env = os.environ.copy()
-env.update({
-    "BUNDLES_PATTERN": pattern,
-    "EVIDENCE_MODE": "optional",
-    "SANDBOX_BUNDLE": "",
-    "RUNNER_TEMP": str(Path(cwd) / "runner-temp"),
-    "GITHUB_WORKSPACE": cwd,
-    "GITHUB_ACTION_PATH": action_path,
-    "GITHUB_OUTPUT": ghub_out,
-    "ASSAY_DISCOVERY_CAPTURE": capture,
-})
-try:
-    subprocess.run(
-        ["bash", run_tmp],
-        cwd=cwd,
-        env=env,
-        check=True,
-        timeout=30,
-    )
-except subprocess.TimeoutExpired as exc:
-    raise SystemExit(f"fixture discover wall timeout: {exc}") from exc
-PYRUN
-    then
-      rm -f "${run_tmp}" "${ghub_out}"
-      return 1
-    fi
+    # Wall-clock bound via process-group TERM/KILL (not bare subprocess.run timeout).
+    env_json="$(python3 -c 'import json,sys; print(json.dumps({
+      "BUNDLES_PATTERN": sys.argv[1],
+      "EVIDENCE_MODE": "optional",
+      "SANDBOX_BUNDLE": "",
+      "RUNNER_TEMP": sys.argv[2],
+      "GITHUB_WORKSPACE": sys.argv[3],
+      "GITHUB_ACTION_PATH": sys.argv[4],
+      "GITHUB_OUTPUT": sys.argv[5],
+      "ASSAY_DISCOVERY_CAPTURE": sys.argv[6],
+    }))' "${pattern}" "${glob_scratch}/runner-temp" "${glob_scratch}" "${mock_action}" "${ghub_out}" "${capture}")"
+    set +e
+    python3 "${pg_runner}" 30 "${glob_scratch}" "${env_json}" bash "${run_tmp}"
+    rc=$?
+    set -e
     rm -f "${run_tmp}" "${ghub_out}"
+    [[ "${rc}" -eq 0 ]] || return 1
     return 0
   }
 
@@ -696,7 +768,60 @@ PYRUN
     done
   done
 
-  rm -rf "${glob_scratch}" "${mock_action}"
+  # Positive / no-op control: short script exits 0 under the same process-group runner.
+  {
+    local noop_sh noop_rc
+    noop_sh="$(mktemp "${TMPDIR:-/tmp}/2802-noop.XXXXXX.sh")"
+    register_junction_temp "${noop_sh}"
+    printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'echo noop-ok' >"${noop_sh}"
+    set +e
+    python3 "${pg_runner}" 5 "${glob_scratch}" '{}' bash "${noop_sh}" >/dev/null
+    noop_rc=$?
+    set -e
+    [[ "${noop_rc}" -eq 0 ]] || die "process-group noop control exited ${noop_rc}"
+    ok "process-group-noop-control"
+  }
+
+  # Synthetic bounded child: prove group TERM/KILL reaps a descendant, not only direct bash.
+  # Without start_new_session+killpg, subprocess.run(timeout=) leaves this child alive.
+  {
+    local probe_dir probe_sh child_pid_file alive_rc probe_rc
+    probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/2802-pg-child.XXXXXX")"
+    register_junction_temp "${probe_dir}"
+    child_pid_file="${probe_dir}/child.pid"
+    probe_sh="${probe_dir}/parent.sh"
+    cat >"${probe_sh}" <<'PROBE'
+#!/usr/bin/env bash
+set -euo pipefail
+pidfile="${1:?}"
+# Descendant outside the direct bash argv; must share the new session to be reaped.
+sleep 120 &
+echo $! >"${pidfile}"
+# Parent blocks; wall timeout must kill the process group.
+wait
+PROBE
+    chmod +x "${probe_sh}"
+    set +e
+    python3 "${pg_runner}" 1 "${probe_dir}" '{}' bash "${probe_sh}" "${child_pid_file}" >/dev/null 2>&1
+    probe_rc=$?
+    set -e
+    [[ "${probe_rc}" -eq 124 ]] || die "synthetic child probe expected timeout rc 124 (got ${probe_rc})"
+    [[ -f "${child_pid_file}" ]] || die "synthetic child probe did not record child pid"
+    child_pid="$(cat "${child_pid_file}")"
+    [[ "${child_pid}" =~ ^[0-9]+$ ]] || die "synthetic child pid malformed: ${child_pid}"
+    # Brief settle after KILL grace inside the runner.
+    sleep 0.2
+    set +e
+    kill -0 "${child_pid}" 2>/dev/null
+    alive_rc=$?
+    set -e
+    [[ "${alive_rc}" -ne 0 ]] \
+      || die "synthetic child ${child_pid} still alive after process-group timeout (descendant cleanup failed)"
+    ok "process-group-kills-synthetic-child"
+  }
+
+  # Eager cleanup of discover scratches; EXIT trap remains as backstop.
+  cleanup_junction_temps
   ok "fixture-discover-default-three-level"
   ok "fixture-discover-explicit-glob-bounded"
   ok "docs-globstar-and-dry-run-qualifiers"
@@ -739,7 +864,7 @@ fi
 
 # --- Retained mutations (must RED); all under mktemp — caller bytes untouched ---
 SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/2778-junction.XXXXXX")"
-cleanup_scratch() { rm -rf "${SCRATCH}"; }
+cleanup_scratch() { cleanup_junction_temps; rm -rf "${SCRATCH}"; }
 trap cleanup_scratch EXIT
 
 CALLER_WF="${ROOT}/.github/workflows/action-v2-test.yml"
