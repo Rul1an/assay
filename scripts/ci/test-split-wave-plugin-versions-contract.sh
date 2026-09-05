@@ -96,7 +96,11 @@ semver_public_job() {
 install_step_run() {
   local wf="$1" step_name="$2"
   local job_fn="$3"
-  "${job_fn}" "${wf}" | awk -v step="${step_name}" '
+  local job
+  # Materialize first: under pipefail, producer|early-exit-awk SIGPIPEs when the job
+  # body continues after the named Install step (#2809). Do not weaken pipefail.
+  job="$("${job_fn}" "${wf}")"
+  awk -v step="${step_name}" '
     function emit_active(line,    tmp) {
       tmp = line
       sub(/^[[:space:]]+/, "", tmp)
@@ -113,7 +117,7 @@ install_step_run() {
     }
     in_run && /^        [^[:space:]]/ { exit }
     in_run { emit_active($0) }
-  '
+  ' <<<"${job}"
 }
 
 active_source_line() {
@@ -838,6 +842,67 @@ expect_stale_install_comment_red nobind "Install cargo-nextest and cargo-hack" <
       # Pins live in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). RUSTUP_TOOLCHAIN
       # is step-scoped for the install, while ordinary workspace cargo follows rust-toolchain.toml.
 EOF
+
+
+echo "== regression: large-tail job body must not SIGPIPE install extractor (#2809) =="
+# Same producer|early-exit-awk discriminator as the cargo-plugin contract; feature-matrix
+# job + nextest/hack install step. Synthetic only — hosted attribution stays inference.
+large_tail="$(mktemp "${SANDBOX_ROOT}/large-tail.XXXXXX.yml")"
+python3 - "${large_tail}" <<'PY'
+import pathlib, sys
+
+dst = pathlib.Path(sys.argv[1])
+pad = ("          # pad " + ("x" * 120) + "\n") * 55000
+body = (
+    "name: t\n"
+    "on: push\n"
+    "jobs:\n"
+    "  feature-matrix:\n"
+    "    runs-on: ubuntu-latest\n"
+    "    steps:\n"
+    "      - name: Install cargo-nextest and cargo-hack\n"
+    "        run: |\n"
+    '          source ./scripts/ci/cargo-plugin-versions.sh\n'
+    '          cargo install --locked --version "${CARGO_NEXTEST_VERSION}" cargo-nextest\n'
+    '          cargo install --locked --version "${CARGO_HACK_VERSION}" cargo-hack\n'
+    '          assert_cargo_plugin_version cargo-nextest "${CARGO_NEXTEST_VERSION}"\n'
+    '          assert_cargo_plugin_version cargo-hack "${CARGO_HACK_VERSION}"\n'
+    "      - name: Later step\n"
+    "        run: |\n"
+    "          echo later\n"
+    + pad
+    + "  other:\n"
+    "    runs-on: ubuntu-latest\n"
+    "    steps:\n"
+    "      - run: true\n"
+)
+dst.write_text(body)
+if dst.stat().st_size < 6_000_000:
+    raise SystemExit(f"large-tail fixture too small: {dst.stat().st_size}")
+PY
+large_rc=0
+large_run="$(install_step_run "${large_tail}" "Install cargo-nextest and cargo-hack" feature_matrix_job)" || large_rc=$?
+[[ "${large_rc}" -eq 0 ]] \
+  || fail "large-tail install extractor aborted (exit ${large_rc}); producer|early-exit-awk under pipefail"
+active_source_line "${large_run}" \
+  || fail "large-tail lost the source line:
+${large_run}"
+active_pinned_nextest_install "${large_run}" \
+  || fail "large-tail lost the pinned nextest install:
+${large_run}"
+active_pinned_hack_install "${large_run}" \
+  || fail "large-tail lost the pinned hack install:
+${large_run}"
+ok "large-tail install extraction survives (~7MiB post-step)"
+
+echo "== no-op: live workflow install extraction unchanged (#2809) =="
+noop_rc=0
+noop_run="$(install_step_run "${WORKFLOW}" "Install cargo-nextest and cargo-hack" feature_matrix_job)" || noop_rc=$?
+[[ "${noop_rc}" -eq 0 ]] || fail "noop install extractor aborted (exit ${noop_rc})"
+active_source_line "${noop_run}" || fail "noop lost the source line"
+active_pinned_nextest_install "${noop_run}" || fail "noop lost the pinned nextest install"
+active_pinned_hack_install "${noop_run}" || fail "noop lost the pinned hack install"
+ok "noop: live workflow install extraction unchanged"
 
 ok "split-wave plugin-versions contract mutations bite"
 echo "PASS: split-wave plugin-versions contract"

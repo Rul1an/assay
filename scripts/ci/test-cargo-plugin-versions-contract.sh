@@ -72,7 +72,11 @@ deps_security_job() {
 # source / --version / assert (#2317 review 4914059003). No shell comment parser.
 install_cargo_audit_run() {
   local wf="$1"
-  deps_security_job "${wf}" | awk '
+  local job
+  # Materialize first: under pipefail, producer|early-exit-awk SIGPIPEs when the job
+  # body continues after the Install step (#2809). Do not weaken pipefail.
+  job="$(deps_security_job "${wf}")"
+  awk '
     function emit_active(line,    tmp) {
       tmp = line
       sub(/^[[:space:]]+/, "", tmp)
@@ -90,7 +94,7 @@ install_cargo_audit_run() {
     }
     in_run && /^        [^[:space:]]/ { exit }
     in_run { emit_active($0) }
-  '
+  ' <<<"${job}"
 }
 
 # Complete active command lines only (optional leading/trailing blank). Trailing `# ghosts`
@@ -186,8 +190,9 @@ check_workflow "${WORKFLOW}"
 check_review_helper_cargo_deny "${REVIEW_HELPER}"
 ok "review helper uses direct cargo-deny"
 # Hook section: id line then files: must include the review script stem.
-grep -A8 '^[[:space:]]*- id:[[:space:]]*cargo-plugin-versions-contract-self-test[[:space:]]*$' "${PRECOMMIT}" \
-  | grep -qE '^[[:space:]]*files:.*review-dependency-perf-hygiene-pr4' \
+# Capture first: under pipefail, grep -A | grep -q can SIGPIPE on match (#2809).
+hook_snip="$(grep -A8 '^[[:space:]]*- id:[[:space:]]*cargo-plugin-versions-contract-self-test[[:space:]]*$' "${PRECOMMIT}")"
+grep -qE '^[[:space:]]*files:.*review-dependency-perf-hygiene-pr4' <<<"${hook_snip}" \
   || fail "cargo-plugin-versions-contract-self-test files: must watch review-dependency-perf-hygiene-pr4.sh"
 ok "D1 pre-commit hook watches the review helper"
 
@@ -571,6 +576,69 @@ if ( check_review_helper_cargo_deny "${deny_mut}" ) >/dev/null 2>&1; then
   fail "reverting review helper to cargo deny left the contract green"
 fi
 ok "reverting review helper to cargo deny turns the contract red"
+
+
+echo "== regression: large-tail job body must not SIGPIPE install extractor (#2809) =="
+# ~7 MiB after the *next* step name so the early-exit consumer closes while the job
+# producer would still be writing. Synthetic discriminator for the pipefail/SIGPIPE
+# mechanism — not a hosted-scheduler replay; hosted attribution stays inference.
+large_tail="$(mktemp "${SANDBOX_ROOT}/large-tail.XXXXXX.yml")"
+python3 - "${large_tail}" <<'PY'
+import pathlib, sys
+
+dst = pathlib.Path(sys.argv[1])
+pad = ("          # pad " + ("x" * 120) + "\n") * 55000
+body = (
+    "name: t\n"
+    "on: push\n"
+    "jobs:\n"
+    "  deps-security:\n"
+    "    runs-on: ubuntu-latest\n"
+    "    steps:\n"
+    "      - name: Install cargo-audit\n"
+    "        run: |\n"
+    '          source ./scripts/ci/cargo-plugin-versions.sh\n'
+    '          cargo install --locked --version "${CARGO_AUDIT_VERSION}" cargo-audit\n'
+    '          assert_cargo_plugin_version cargo-audit "${CARGO_AUDIT_VERSION}"\n'
+    "      - name: Later step\n"
+    "        run: |\n"
+    "          echo later\n"
+    + pad
+    + "  other:\n"
+    "    runs-on: ubuntu-latest\n"
+    "    steps:\n"
+    "      - run: true\n"
+)
+dst.write_text(body)
+if dst.stat().st_size < 6_000_000:
+    raise SystemExit(f"large-tail fixture too small: {dst.stat().st_size}")
+PY
+large_rc=0
+large_run="$(install_cargo_audit_run "${large_tail}")" || large_rc=$?
+[[ "${large_rc}" -eq 0 ]] \
+  || fail "large-tail install extractor aborted (exit ${large_rc}); producer|early-exit-awk under pipefail"
+active_source_line "${large_run}" \
+  || fail "large-tail lost the source line:
+${large_run}"
+active_pinned_install_line "${large_run}" \
+  || fail "large-tail lost the pinned install line:
+${large_run}"
+active_assert_line "${large_run}" \
+  || fail "large-tail lost the assert line:
+${large_run}"
+[[ "$(count_active_cargo_installs "${large_run}")" -eq 1 ]] \
+  || fail "large-tail expected one active cargo install; got:
+${large_run}"
+ok "large-tail install extraction survives (~7MiB post-step)"
+
+echo "== no-op: live workflow install extraction unchanged (#2809) =="
+noop_rc=0
+noop_run="$(install_cargo_audit_run "${WORKFLOW}")" || noop_rc=$?
+[[ "${noop_rc}" -eq 0 ]] || fail "noop install extractor aborted (exit ${noop_rc})"
+active_source_line "${noop_run}" || fail "noop lost the source line"
+active_pinned_install_line "${noop_run}" || fail "noop lost the pinned install line"
+active_assert_line "${noop_run}" || fail "noop lost the assert line"
+ok "noop: live workflow install extraction unchanged"
 
 ok "cargo-plugin-versions contract mutations bite"
 echo "PASS: cargo-plugin-versions contract"
