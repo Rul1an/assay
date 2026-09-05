@@ -6310,9 +6310,25 @@ test("#2807: admitting _meta does not admit an undeclared sibling", () => {
   );
 });
 
-test("#2807: the live shape stays a re-projection fixed point", () => {
-  const once = projectRetainedEvent(liveToolEvent(LIVE_0153_RESULT));
-  assert.deepEqual(projectRetainedEvent(once), once);
+test("#2807: both _meta branches stay re-projection fixed points", () => {
+  // The first version of this test used `_meta: null` only, so it never re-projected the PRESENT
+  // branch whose idempotence its own comment asserted -- a non-idempotent non-null branch survived
+  // it at 171/171. Both branches are exercised, because the null branch cannot discriminate the
+  // one that matters.
+  for (const [label, result] of [
+    ["null _meta", LIVE_0153_RESULT],
+    ["present _meta", { ...LIVE_0153_RESULT, _meta: { traceId: "x", nested: { deep: [1, 2] } } }],
+  ]) {
+    const once = projectRetainedEvent(liveToolEvent(result));
+    assert.deepEqual(projectRetainedEvent(once), once, `${label} must be a fixed point`);
+  }
+  // Control: the present branch must actually have reached PRESENT, or the loop above proved
+  // nothing about it.
+  assert.equal(
+    projectRetainedEvent(liveToolEvent({ ...LIVE_0153_RESULT, _meta: { a: 1 } })).params.item.result
+      ._meta,
+    "[present]",
+  );
 });
 
 test("#2807: admitting _meta still carries error and isError to the consumer", () => {

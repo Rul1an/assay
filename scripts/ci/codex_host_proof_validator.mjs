@@ -2105,15 +2105,21 @@ function projectToolResult(result) {
     }
   }
   // `isError` and `error` are retained deliberately, and NOT because this item type declares them
-  // -- it does not. They stay because a host that sends either anyway must reach the consumer's
-  // refusals rather than be silently dropped: `retainedItemReason` refuses a non-Boolean `isError`
-  // and refuses `isError === true`, and those checks can only fire on a field the projection
-  // carried through. Removing them because one host type omits them would delete live refusals to
-  // tidy a list.
+  // -- it does not. They stay so that a host sending either reaches the check written FOR it:
+  // `classifyToolResultEnvelope` (:1480-1484) refuses a non-Boolean `isError` and refuses
+  // `isError === true`, each with its own named reason, and those can only fire on a field the
+  // projection carried through.
+  //
+  // Two corrections from the independent review of this change, kept rather than quietly dropped:
+  // an earlier comment here named `retainedItemReason`, which never reads `isError` at all; and it
+  // claimed dropping these fields would "delete live refusals". It would not -- measured, the three
+  // cases are still refused, by the generic projection-violation gate, as `unclassified`. So the
+  // refusal would be RELOCATED to a coarser gate that reports a different reason, not deleted.
+  // That is still worth avoiding, but it is a weaker claim than the one first written here.
   //
   // Precise about what pins what: the existing tests named around `isError` mutate ALREADY
-  // PROJECTED events, so they pin the CONSUMER's refusal, not the producer's `"[invalid]"`
-  // conversion above. The producer-side barrier is pinned separately by the #2807 tests below.
+  // PROJECTED events, so they pin the consumer, not the producer's `"[invalid]"` conversion above.
+  // The producer-side barrier is pinned separately by the #2807 tests.
   return withUnexpectedKeys(out, result, [
     "_meta",
     "isError",
