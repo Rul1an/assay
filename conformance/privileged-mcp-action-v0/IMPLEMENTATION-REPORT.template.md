@@ -18,7 +18,7 @@
 - Materials first read after the implementation was frozen:
 - Prior relationship to the profile authors:
 - Funding or compensation, including whether payment depended on the result:
-- Authorship method: `Authored-By: human | Assisted-By: <system> <version> | Generated-By: <system> <version>`
+- Authorship method: `human -> Authored-By: human | agent-assisted -> Assisted-By: <model disclosure> | agent-generated -> Generated-By: <model disclosure>`
 - If assisted or generated: which parts of the implementation, and how the output was checked:
 
 ## Pinned inputs
