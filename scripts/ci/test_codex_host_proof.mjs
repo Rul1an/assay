@@ -27,6 +27,7 @@ import {
   HOST_SUBJECTS,
   KNOWN_ITEM_TYPES,
   KNOWN_METHODS,
+  classifyCells,
   classifyRecord,
   classifyStoredEvent,
   consumeJourneyTopology,
@@ -61,6 +62,31 @@ test("#2813: shared itemsView validation preserves the closed vocabulary and leg
       "turn/completed itemsView must be full, summary, or notLoaded",
     );
   }
+});
+
+test("#2813: invocation classification refuses an unknown itemsView in resolved topology", async () => {
+  const control = await drive("valid");
+  const topology = structuredClone(
+    consumeJourneyTopology(control.events, control.manifest.journey),
+  );
+  assert.equal(topology.ok, true);
+  const terminal = topology.notifications.find(
+    (event) => event.method === "turn/completed" && event.direction === "server",
+  );
+  assert.ok(terminal, "resolved topology must contain the canonical terminal");
+  terminal.params.turn.itemsView = "unknown_view";
+
+  const cells = classifyCells(
+    control.events,
+    control.manifest,
+    control.manifest.expected,
+    control.manifest.journey,
+    topology,
+  );
+  assert.deepEqual(cells.oneToolInvoked, {
+    status: "fail",
+    reason: "turn/completed itemsView must be full, summary, or notLoaded",
+  });
 });
 
 function scratch() {
