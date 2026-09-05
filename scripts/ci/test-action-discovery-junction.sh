@@ -563,6 +563,7 @@ check_explicit_glob_and_pin_filter() {
   pg_runner="$(mktemp "${TMPDIR:-/tmp}/2802-pg-runner.XXXXXX.py")"
   register_junction_temp "${pg_runner}"
   cat >"${pg_runner}" <<'PYPG'
+import json
 import os
 import signal
 import subprocess
@@ -570,31 +571,95 @@ import sys
 import time
 
 
-def terminate_process_group(proc, *, term_grace_s: float = 2.0, kill_grace_s: float = 2.0) -> None:
-    """TERM the session/process group, then KILL if still alive. Best-effort only."""
-    if proc.poll() is not None:
-        return
+def pids_in_group(pgid: int) -> list:
+    """PIDs currently in pgid (macOS/Linux via ps). Empty if none or ps unavailable."""
     try:
-        pgid = os.getpgid(proc.pid)
+        out = subprocess.check_output(
+            ["ps", "-axo", "pid=,pgid="],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return []
+    pids = []
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        try:
+            pid_i, pgid_i = int(parts[0]), int(parts[1])
+        except ValueError:
+            continue
+        if pgid_i == pgid:
+            pids.append(pid_i)
+    return pids
+
+
+def group_has_members(pgid: int) -> bool:
+    """Group absence is empty membership — not direct-child proc.poll()."""
+    return bool(pids_in_group(pgid))
+
+
+def signal_group(pgid: int, sig: int) -> None:
+    """Best-effort group signal; on killpg EPERM/ESRCH fall back to per-pid."""
+    try:
+        os.killpg(pgid, sig)
+        return
     except ProcessLookupError:
         return
-    try:
-        os.killpg(pgid, signal.SIGTERM)
-    except ProcessLookupError:
+    except PermissionError:
         pass
+    for pid in pids_in_group(pgid):
+        try:
+            os.kill(pid, sig)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
+def terminate_process_group(
+    proc,
+    pgid: int,
+    *,
+    term_grace_s: float = 2.0,
+    kill_grace_s: float = 2.0,
+) -> None:
+    """TERM the known process group, wait the full grace, then KILL remaining members.
+
+    Direct-child exit (proc.poll() set) is NOT group absence: a TERM-ignoring
+    descendant can still be alive. Always escalate with the retained pgid from
+    start_new_session; reap the direct child handle separately.
+    """
+    signal_group(pgid, signal.SIGTERM)
+
+    # Bounded TERM grace — do not return early solely because the leader exited.
     deadline = time.monotonic() + term_grace_s
-    while proc.poll() is None and time.monotonic() < deadline:
+    while time.monotonic() < deadline:
+        if not group_has_members(pgid):
+            break
         time.sleep(0.05)
-    if proc.poll() is not None:
-        return
-    try:
-        os.killpg(pgid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    try:
-        proc.wait(timeout=kill_grace_s)
-    except subprocess.TimeoutExpired:
-        pass
+
+    # Escalate: signal remaining group members even if the session leader is gone.
+    if group_has_members(pgid):
+        signal_group(pgid, signal.SIGKILL)
+
+    # Reap the direct child handle separately from group membership.
+    if proc.poll() is None:
+        try:
+            proc.wait(timeout=kill_grace_s)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except (ProcessLookupError, PermissionError):
+                pass
+            try:
+                proc.wait(timeout=kill_grace_s)
+            except subprocess.TimeoutExpired:
+                pass
+    else:
+        try:
+            proc.wait(timeout=0)
+        except subprocess.TimeoutExpired:
+            pass
 
 
 def main() -> int:
@@ -603,25 +668,35 @@ def main() -> int:
         return 2
     timeout_s = float(sys.argv[1])
     cwd = sys.argv[2]
-    import json
-
     env_overlay = json.loads(sys.argv[3])
     cmd = sys.argv[4:]
     env = os.environ.copy()
     env.update({str(k): str(v) for k, v in env_overlay.items()})
+    term_grace_s = float(env.get("ASSAY_PG_TERM_GRACE_S", "2.0"))
+    kill_grace_s = float(env.get("ASSAY_PG_KILL_GRACE_S", "2.0"))
     proc = subprocess.Popen(
         cmd,
         cwd=cwd,
         env=env,
         start_new_session=True,
     )
+    # Retain pgid at spawn (new session leader); do not re-query after leader exit.
+    try:
+        pgid = os.getpgid(proc.pid)
+    except ProcessLookupError:
+        pgid = proc.pid
     try:
         proc.wait(timeout=timeout_s)
     except subprocess.TimeoutExpired:
-        terminate_process_group(proc)
+        terminate_process_group(
+            proc,
+            pgid,
+            term_grace_s=term_grace_s,
+            kill_grace_s=kill_grace_s,
+        )
         print(
             f"fixture discover wall timeout after {timeout_s}s "
-            f"(process group TERM/KILL attempted)",
+            f"(process group TERM/KILL attempted for pgid={pgid})",
             file=sys.stderr,
         )
         return 124
@@ -782,10 +857,24 @@ PYDISC
     ok "process-group-noop-control"
   }
 
-  # Synthetic bounded child: prove group TERM/KILL reaps a descendant, not only direct bash.
+  # Owned-group teardown helper for probes: kill only the recorded child's pgid.
+  reap_owned_probe_child() {
+    local pid="${1:-}" pgid
+    [[ -n "${pid}" ]] || return 0
+    if kill -0 "${pid}" 2>/dev/null; then
+      pgid="$(ps -o pgid= -p "${pid}" 2>/dev/null | tr -d '[:space:]' || true)"
+      if [[ -n "${pgid}" && "${pgid}" =~ ^[0-9]+$ ]]; then
+        kill -KILL "-${pgid}" 2>/dev/null || true
+      else
+        kill -KILL "${pid}" 2>/dev/null || true
+      fi
+    fi
+  }
+
+  # Cooperative synthetic child: group TERM/KILL reaps a normal sleep descendant.
   # Without start_new_session+killpg, subprocess.run(timeout=) leaves this child alive.
   {
-    local probe_dir probe_sh child_pid_file alive_rc probe_rc
+    local probe_dir probe_sh child_pid_file alive_rc probe_rc child_pid
     probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/2802-pg-child.XXXXXX")"
     register_junction_temp "${probe_dir}"
     child_pid_file="${probe_dir}/child.pid"
@@ -802,22 +891,82 @@ wait
 PROBE
     chmod +x "${probe_sh}"
     set +e
-    python3 "${pg_runner}" 1 "${probe_dir}" '{}' bash "${probe_sh}" "${child_pid_file}" >/dev/null 2>&1
+    python3 "${pg_runner}" 1 "${probe_dir}" '{"ASSAY_PG_TERM_GRACE_S":"0.4","ASSAY_PG_KILL_GRACE_S":"0.4"}' bash "${probe_sh}" "${child_pid_file}" >/dev/null 2>&1
     probe_rc=$?
     set -e
-    [[ "${probe_rc}" -eq 124 ]] || die "synthetic child probe expected timeout rc 124 (got ${probe_rc})"
-    [[ -f "${child_pid_file}" ]] || die "synthetic child probe did not record child pid"
-    child_pid="$(cat "${child_pid_file}")"
-    [[ "${child_pid}" =~ ^[0-9]+$ ]] || die "synthetic child pid malformed: ${child_pid}"
-    # Brief settle after KILL grace inside the runner.
+    child_pid=""
+    if [[ -f "${child_pid_file}" ]]; then
+      child_pid="$(cat "${child_pid_file}" || true)"
+    fi
+    if [[ "${probe_rc}" -ne 124 ]]; then
+      reap_owned_probe_child "${child_pid}"
+      die "synthetic child probe expected timeout rc 124 (got ${probe_rc})"
+    fi
+    [[ -n "${child_pid}" && "${child_pid}" =~ ^[0-9]+$ ]] \
+      || { reap_owned_probe_child "${child_pid}"; die "synthetic child pid malformed: ${child_pid}"; }
     sleep 0.2
     set +e
     kill -0 "${child_pid}" 2>/dev/null
     alive_rc=$?
     set -e
-    [[ "${alive_rc}" -ne 0 ]] \
-      || die "synthetic child ${child_pid} still alive after process-group timeout (descendant cleanup failed)"
+    if [[ "${alive_rc}" -eq 0 ]]; then
+      reap_owned_probe_child "${child_pid}"
+      die "synthetic child ${child_pid} still alive after process-group timeout (descendant cleanup failed)"
+    fi
     ok "process-group-kills-synthetic-child"
+  }
+
+  # Parent exits on TERM; child ignores TERM — proves KILL escalation is not skipped on leader exit.
+  {
+    local probe_dir probe_sh child_pid_file alive_rc probe_rc child_pid
+    probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/2802-pg-termign.XXXXXX")"
+    register_junction_temp "${probe_dir}"
+    child_pid_file="${probe_dir}/child.pid"
+    probe_sh="${probe_dir}/parent.sh"
+    cat >"${probe_sh}" <<'PROBE'
+#!/usr/bin/env bash
+set -euo pipefail
+pidfile="${1:?}"
+# Child ignores SIGTERM and stays in the session; parent exits on TERM (default).
+python3 - "${pidfile}" <<'CHILD' &
+import os
+import signal
+import sys
+import time
+
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+Path = __import__("pathlib").Path
+Path(sys.argv[1]).write_text(str(os.getpid()), encoding="utf-8")
+time.sleep(120)
+CHILD
+# Parent waits; on group SIGTERM parent dies while child survives unless KILL follows.
+wait
+PROBE
+    chmod +x "${probe_sh}"
+    set +e
+    python3 "${pg_runner}" 1 "${probe_dir}" '{"ASSAY_PG_TERM_GRACE_S":"0.4","ASSAY_PG_KILL_GRACE_S":"0.4"}' bash "${probe_sh}" "${child_pid_file}" >/dev/null 2>&1
+    probe_rc=$?
+    set -e
+    child_pid=""
+    if [[ -f "${child_pid_file}" ]]; then
+      child_pid="$(cat "${child_pid_file}" || true)"
+    fi
+    if [[ "${probe_rc}" -ne 124 ]]; then
+      reap_owned_probe_child "${child_pid}"
+      die "TERM-ignore child probe expected timeout rc 124 (got ${probe_rc})"
+    fi
+    [[ -n "${child_pid}" && "${child_pid}" =~ ^[0-9]+$ ]] \
+      || { reap_owned_probe_child "${child_pid}"; die "TERM-ignore child pid malformed: ${child_pid}"; }
+    sleep 0.2
+    set +e
+    kill -0 "${child_pid}" 2>/dev/null
+    alive_rc=$?
+    set -e
+    if [[ "${alive_rc}" -eq 0 ]]; then
+      reap_owned_probe_child "${child_pid}"
+      die "TERM-ignore child ${child_pid} still alive (KILL escalation skipped after parent exit)"
+    fi
+    ok "process-group-kills-term-ignoring-child"
   }
 
   # Eager cleanup of discover scratches; EXIT trap remains as backstop.
