@@ -418,6 +418,36 @@ function handle(message) {
         });
         return;
       }
+      if (scenario === "terminal-summary") {
+        write({
+          method: "turn/completed",
+          params: {
+            threadId,
+            turn: {
+              id: "turn-1",
+              items: [{ id: "!5", type: "agentMessage" }],
+              itemsView: "summary",
+              status: "completed",
+            },
+          },
+        });
+        return;
+      }
+      if (scenario === "terminal-not-loaded") {
+        write({
+          method: "turn/completed",
+          params: {
+            threadId,
+            turn: {
+              id: "turn-1",
+              items: [],
+              itemsView: "notLoaded",
+              status: "completed",
+            },
+          },
+        });
+        return;
+      }
       write({
         method: "turn/completed",
         params: {

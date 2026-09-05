@@ -18,6 +18,7 @@ import {
   runProof,
 } from "./codex_host_proof.mjs";
 import {
+  ALLOWED_TURN_ITEMS_VIEWS,
   CELLS,
   DECIDE_INPUT,
   DECIDE_TOOL,
@@ -26,6 +27,7 @@ import {
   HOST_SUBJECTS,
   KNOWN_ITEM_TYPES,
   KNOWN_METHODS,
+  classifyCells,
   classifyRecord,
   classifyStoredEvent,
   consumeJourneyTopology,
@@ -47,6 +49,45 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FAKE = path.join(HERE, "fixtures/codex-host-proof/fake-app-server.mjs");
 const DRIVER_SRC = fs.readFileSync(path.join(HERE, "codex_host_proof.mjs"), "utf8");
 const VALIDATOR_SRC = fs.readFileSync(path.join(HERE, "codex_host_proof_validator.mjs"), "utf8");
+
+test("#2813: shared itemsView validation preserves the closed vocabulary and legacy absence", async () => {
+  const { turnItemsViewReason } = await import("./codex_host_proof_validator.mjs");
+  assert.equal(typeof turnItemsViewReason, "function");
+  for (const view of [undefined, "full", "summary", "notLoaded"]) {
+    assert.equal(turnItemsViewReason(view), null);
+  }
+  for (const view of [null, "", "partial", "Full", 0, false, [], {}, "PRIVATE_CANARY"]) {
+    assert.equal(
+      turnItemsViewReason(view),
+      "turn/completed itemsView must be full, summary, or notLoaded",
+    );
+  }
+});
+
+test("#2813: invocation classification refuses an unknown itemsView in resolved topology", async () => {
+  const control = await drive("valid");
+  const topology = structuredClone(
+    consumeJourneyTopology(control.events, control.manifest.journey),
+  );
+  assert.equal(topology.ok, true);
+  const terminal = topology.notifications.find(
+    (event) => event.method === "turn/completed" && event.direction === "server",
+  );
+  assert.ok(terminal, "resolved topology must contain the canonical terminal");
+  terminal.params.turn.itemsView = "unknown_view";
+
+  const cells = classifyCells(
+    control.events,
+    control.manifest,
+    control.manifest.expected,
+    control.manifest.journey,
+    topology,
+  );
+  assert.deepEqual(cells.oneToolInvoked, {
+    status: "fail",
+    reason: "turn/completed itemsView must be full, summary, or notLoaded",
+  });
+});
 
 function scratch() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "assay-2684-"));
@@ -6376,4 +6417,505 @@ test("#2807: the producer's isError type barrier is the deciding check for a non
       .isError,
     false,
   );
+});
+
+test("#2812: live-shaped terminal turn carrying itemsView: 'summary' omits tool item but passes oneToolInvoked", async () => {
+  const control = await drive("valid");
+  const events = structuredClone(control.events);
+  const terminal = events.find((e) => e.method === "turn/completed");
+  assert.ok(terminal, "control events must contain a matching turn/completed");
+
+  // In live Codex 0.153.1 captures, the streamed tool item is delivered via item/completed,
+  // while the terminal turn carries itemsView: "summary" and only contains the display
+  // agentMessage (omitting the tool item from turn.items).
+  terminal.params.turn.itemsView = "summary";
+  terminal.params.turn.items = [
+    {
+      id: "!5",
+      type: "agentMessage",
+    },
+  ];
+
+  const classified = classifyRecord({ ...control.manifest, events });
+  assert.equal(
+    classified.cells.oneToolInvoked.status,
+    "pass",
+    "summary view omitting tool item must pass oneToolInvoked when tool was canonically streamed",
+  );
+  assert.equal(
+    classified.cells.structuredResultValidated.status,
+    "pass",
+    "structuredResultValidated must pass when summary invocation passes",
+  );
+});
+
+test("#2812: driven test passes end-to-end with terminal-summary scenario", async () => {
+  const result = await drive("terminal-summary");
+  assert.equal(result.childExitCode, 0);
+  assert.equal(result.driverOutcome.exitCode, 0);
+  assert.equal(result.classified.cells.oneToolInvoked.status, "pass");
+  assert.equal(result.classified.cells.structuredResultValidated.status, "pass");
+  assert.equal(allIntendedCellsPass(result.classified), true);
+
+  const terminal = result.events.find((e) => e.method === "turn/completed");
+  assert.ok(terminal);
+  assert.equal(terminal.params.turn.itemsView, "summary");
+});
+
+test("#2812: driven test passes end-to-end with terminal-not-loaded scenario", async () => {
+  const result = await drive("terminal-not-loaded");
+  assert.equal(result.childExitCode, 0);
+  assert.equal(result.driverOutcome.exitCode, 0);
+  assert.equal(result.classified.cells.oneToolInvoked.status, "pass");
+  assert.equal(result.classified.cells.structuredResultValidated.status, "pass");
+  assert.equal(allIntendedCellsPass(result.classified), true);
+
+  const terminal = result.events.find((e) => e.method === "turn/completed");
+  assert.ok(terminal);
+  assert.equal(terminal.params.turn.itemsView, "notLoaded");
+});
+
+test("#2812: summary view behavioral matrix (omitted tool, matching tool, conflicting tool, duplicate tools)", async () => {
+  const control = await drive("valid");
+  const canonicalTool = control.events.find(
+    (e) => e.method === "item/completed" && e.params?.item?.type === "mcpToolCall",
+  ).params.item;
+
+  // Case 1: summary with matching tool item
+  {
+    const events = structuredClone(control.events);
+    const terminal = events.find((e) => e.method === "turn/completed");
+    terminal.params.turn.itemsView = "summary";
+    terminal.params.turn.items = [
+      { id: "!5", type: "agentMessage" },
+      structuredClone(canonicalTool),
+    ];
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(classified.cells.oneToolInvoked.status, "pass");
+  }
+
+  // Case 2: summary with conflicting tool item (contradicts canonical)
+  {
+    const events = structuredClone(control.events);
+    const terminal = events.find((e) => e.method === "turn/completed");
+    terminal.params.turn.itemsView = "summary";
+    const mutatedTool = structuredClone(canonicalTool);
+    mutatedTool.arguments = { tool: "wrong_probe", policy: "wrong.yaml" };
+    terminal.params.turn.items = [mutatedTool];
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(classified.cells.oneToolInvoked.status, "fail");
+    assert.equal(
+      classified.cells.oneToolInvoked.reason,
+      "matching terminal tool item contradicts item/completed",
+    );
+  }
+
+  // Case 3: summary with tool item carrying different id
+  {
+    const events = structuredClone(control.events);
+    const terminal = events.find((e) => e.method === "turn/completed");
+    terminal.params.turn.itemsView = "summary";
+    const mutatedTool = structuredClone(canonicalTool);
+    mutatedTool.id = "different-id";
+    terminal.params.turn.items = [mutatedTool];
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(classified.cells.oneToolInvoked.status, "fail");
+    assert.equal(
+      classified.cells.oneToolInvoked.reason,
+      "matching terminal must contain exactly the canonical tool item",
+    );
+  }
+
+  // Case 4: summary with duplicate tool items
+  {
+    const events = structuredClone(control.events);
+    const terminal = events.find((e) => e.method === "turn/completed");
+    terminal.params.turn.itemsView = "summary";
+    terminal.params.turn.items = [
+      structuredClone(canonicalTool),
+      structuredClone(canonicalTool),
+    ];
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(classified.cells.oneToolInvoked.status, "fail");
+    assert.equal(
+      classified.cells.oneToolInvoked.reason,
+      "matching terminal contains duplicate tool items",
+    );
+  }
+});
+
+test("#2812: full view behavioral matrix (matching tool required, missing tool, conflicting tool, duplicate tools)", async () => {
+  const control = await drive("valid");
+  const canonicalTool = control.events.find(
+    (e) => e.method === "item/completed" && e.params?.item?.type === "mcpToolCall",
+  ).params.item;
+
+  // Case 1: full view with matching tool item
+  {
+    const events = structuredClone(control.events);
+    const terminal = events.find((e) => e.method === "turn/completed");
+    terminal.params.turn.itemsView = "full";
+    terminal.params.turn.items = [structuredClone(canonicalTool)];
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(classified.cells.oneToolInvoked.status, "pass");
+  }
+
+  // Case 2: full view missing tool item (e.g. only agentMessage)
+  {
+    const events = structuredClone(control.events);
+    const terminal = events.find((e) => e.method === "turn/completed");
+    terminal.params.turn.itemsView = "full";
+    terminal.params.turn.items = [{ id: "!5", type: "agentMessage" }];
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(classified.cells.oneToolInvoked.status, "fail");
+    assert.equal(
+      classified.cells.oneToolInvoked.reason,
+      "matching terminal must contain exactly the canonical tool item",
+    );
+  }
+
+  // Case 3: full view with conflicting tool item
+  {
+    const events = structuredClone(control.events);
+    const terminal = events.find((e) => e.method === "turn/completed");
+    terminal.params.turn.itemsView = "full";
+    const mutatedTool = structuredClone(canonicalTool);
+    mutatedTool.arguments = { tool: "wrong_probe", policy: "wrong.yaml" };
+    terminal.params.turn.items = [mutatedTool];
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(classified.cells.oneToolInvoked.status, "fail");
+    assert.equal(
+      classified.cells.oneToolInvoked.reason,
+      "matching terminal tool item contradicts item/completed",
+    );
+  }
+
+  // Case 4: full view with duplicate tool items
+  {
+    const events = structuredClone(control.events);
+    const terminal = events.find((e) => e.method === "turn/completed");
+    terminal.params.turn.itemsView = "full";
+    terminal.params.turn.items = [
+      structuredClone(canonicalTool),
+      structuredClone(canonicalTool),
+    ];
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(classified.cells.oneToolInvoked.status, "fail");
+    assert.equal(
+      classified.cells.oneToolInvoked.reason,
+      "matching terminal contains duplicate tool items",
+    );
+  }
+});
+
+test("#2812: notLoaded view behavioral matrix (empty items required, non-empty items rejected)", async () => {
+  const control = await drive("valid");
+  const canonicalTool = control.events.find(
+    (e) => e.method === "item/completed" && e.params?.item?.type === "mcpToolCall",
+  ).params.item;
+
+  // Case 1: notLoaded with empty items
+  {
+    const events = structuredClone(control.events);
+    const terminal = events.find((e) => e.method === "turn/completed");
+    terminal.params.turn.itemsView = "notLoaded";
+    terminal.params.turn.items = [];
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(classified.cells.oneToolInvoked.status, "pass");
+  }
+
+  // Case 2: notLoaded with non-tool item (agentMessage)
+  {
+    const events = structuredClone(control.events);
+    const terminal = events.find((e) => e.method === "turn/completed");
+    terminal.params.turn.itemsView = "notLoaded";
+    terminal.params.turn.items = [{ id: "!5", type: "agentMessage" }];
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(classified.cells.oneToolInvoked.status, "fail");
+    assert.equal(
+      classified.cells.oneToolInvoked.reason,
+      "notLoaded turn items must be empty",
+    );
+  }
+
+  // Case 3: notLoaded with tool item
+  {
+    const events = structuredClone(control.events);
+    const terminal = events.find((e) => e.method === "turn/completed");
+    terminal.params.turn.itemsView = "notLoaded";
+    terminal.params.turn.items = [structuredClone(canonicalTool)];
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(classified.cells.oneToolInvoked.status, "fail");
+    assert.equal(
+      classified.cells.oneToolInvoked.reason,
+      "notLoaded turn items must be empty",
+    );
+  }
+});
+
+test("#2812: absent itemsView preserves exact legacy requirement (matching tool required)", async () => {
+  const control = await drive("valid");
+  const canonicalTool = control.events.find(
+    (e) => e.method === "item/completed" && e.params?.item?.type === "mcpToolCall",
+  ).params.item;
+
+  // Case 1: absent itemsView with matching tool item passes
+  {
+    const events = structuredClone(control.events);
+    const terminal = events.find((e) => e.method === "turn/completed");
+    delete terminal.params.turn.itemsView;
+    terminal.params.turn.items = [structuredClone(canonicalTool)];
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(classified.cells.oneToolInvoked.status, "pass");
+  }
+
+  // Case 2: absent itemsView missing tool item fails
+  {
+    const events = structuredClone(control.events);
+    const terminal = events.find((e) => e.method === "turn/completed");
+    delete terminal.params.turn.itemsView;
+    terminal.params.turn.items = [{ id: "!5", type: "agentMessage" }];
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(classified.cells.oneToolInvoked.status, "fail");
+    assert.equal(
+      classified.cells.oneToolInvoked.reason,
+      "matching terminal must contain exactly the canonical tool item",
+    );
+  }
+
+  // Case 3: absent itemsView with conflicting tool item fails
+  {
+    const events = structuredClone(control.events);
+    const terminal = events.find((e) => e.method === "turn/completed");
+    delete terminal.params.turn.itemsView;
+    const mutatedTool = structuredClone(canonicalTool);
+    mutatedTool.arguments = { tool: "wrong_probe", policy: "wrong.yaml" };
+    terminal.params.turn.items = [mutatedTool];
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(classified.cells.oneToolInvoked.status, "fail");
+    assert.equal(
+      classified.cells.oneToolInvoked.reason,
+      "matching terminal tool item contradicts item/completed",
+    );
+  }
+
+  // Case 4: absent itemsView with duplicate tool items fails
+  {
+    const events = structuredClone(control.events);
+    const terminal = events.find((e) => e.method === "turn/completed");
+    delete terminal.params.turn.itemsView;
+    terminal.params.turn.items = [
+      structuredClone(canonicalTool),
+      structuredClone(canonicalTool),
+    ];
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(classified.cells.oneToolInvoked.status, "fail");
+    assert.equal(
+      classified.cells.oneToolInvoked.reason,
+      "matching terminal contains duplicate tool items",
+    );
+  }
+});
+
+test("#2812: unknown, null, and non-string itemsView are refused closed without broad acceptance", async () => {
+  const control = await drive("valid");
+  const badViews = ["unknown_view", null, 123, "", {}, false, ["summary"]];
+
+  for (const badView of badViews) {
+    const events = structuredClone(control.events);
+    const terminal = events.find((e) => e.method === "turn/completed");
+    terminal.params.turn.itemsView = badView;
+
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(
+      classified.cells.oneToolInvoked.status,
+      "fail",
+      `bad itemsView ${JSON.stringify(badView)} must fail oneToolInvoked`,
+    );
+    assert.equal(
+      classified.cells.oneToolInvoked.reason,
+      "journey topology: turn/completed itemsView must be full, summary, or notLoaded",
+    );
+
+    const eventCheck = classifyStoredEvent(terminal);
+    assert.equal(
+      eventCheck.type,
+      "unclassified",
+      `bad itemsView ${JSON.stringify(badView)} must yield unclassified event`,
+    );
+    assert.equal(
+      eventCheck.reason,
+      "turn/completed itemsView must be full, summary, or notLoaded",
+    );
+  }
+});
+
+test("#2812: Refinement 1: hostile itemsView canary never leaks into retained reasons or projected events", () => {
+  const CANARY = "LEAK_SECRET_ITEMS_VIEW_987654";
+  const rawTerminalEvent = {
+    direction: "server",
+    id: null,
+    method: "turn/completed",
+    params: {
+      threadId: "@0",
+      turn: {
+        id: "~0",
+        items: [],
+        itemsView: CANARY,
+        status: "completed",
+      },
+    },
+  };
+
+  // 1. Structural reason check: must not echo hostile value
+  const classified = classifyStoredEvent(rawTerminalEvent);
+  assert.equal(classified.type, "unclassified");
+  assert.equal(
+    classified.reason.includes(CANARY),
+    false,
+    "retained reason must never interpolate hostile itemsView value",
+  );
+  assert.equal(
+    classified.reason,
+    "turn/completed itemsView must be full, summary, or notLoaded",
+  );
+
+  // 2. Projected event check: hostile string must be stripped to invalid projection marker
+  const projected = projectRetainedEvent(rawTerminalEvent);
+  const serialized = JSON.stringify(projected);
+  assert.equal(
+    serialized.includes(CANARY),
+    false,
+    "projected event must never retain hostile itemsView string",
+  );
+  assert.deepEqual(projected.params.turn.itemsView, { __invalidType: "string" });
+
+  // 3. Projected event carrying violation is refused closed
+  const postClassified = classifyStoredEvent(projected);
+  assert.equal(postClassified.type, "unclassified");
+  assert.equal(
+    postClassified.reason,
+    "retained event carries a projection violation",
+  );
+});
+
+test("#2812: itemsView re-projection fixed-point and absent-stays-absent guarantees", () => {
+  const baseTerminal = {
+    direction: "server",
+    id: null,
+    method: "turn/completed",
+    params: {
+      threadId: "@0",
+      turn: {
+        id: "~0",
+        items: [],
+        status: "completed",
+      },
+    },
+  };
+
+  for (const view of ALLOWED_TURN_ITEMS_VIEWS) {
+    const event = structuredClone(baseTerminal);
+    event.params.turn.itemsView = view;
+    const once = projectRetainedEvent(event);
+    assert.equal(once.params.turn.itemsView, view);
+    assert.deepEqual(
+      projectRetainedEvent(once),
+      once,
+      `${view} must be a re-projection fixed point`,
+    );
+  }
+
+  // Absent stays absent
+  const absentEvent = structuredClone(baseTerminal);
+  const projectedAbsent = projectRetainedEvent(absentEvent);
+  assert.equal(
+    Object.hasOwn(projectedAbsent.params.turn, "itemsView"),
+    false,
+    "absent itemsView must stay absent in projection",
+  );
+  assert.deepEqual(
+    projectRetainedEvent(projectedAbsent),
+    projectedAbsent,
+    "absent itemsView projection must be a fixed point",
+  );
+});
+
+test("#2812: Refinement 2: terminal-before-item temporal ordering refusal in event stream", async () => {
+  const control = await drive("valid");
+  const events = structuredClone(control.events);
+
+  const itemIndex = events.findIndex(
+    (e) => e.method === "item/completed" && e.params?.item?.type === "mcpToolCall",
+  );
+  const terminalIndex = events.findIndex((e) => e.method === "turn/completed");
+  assert.ok(itemIndex !== -1 && terminalIndex !== -1);
+  assert.ok(itemIndex < terminalIndex, "control must have item/completed before turn/completed");
+
+  // Move turn/completed to occur BEFORE item/completed in the event stream
+  const [terminal] = events.splice(terminalIndex, 1);
+  events.splice(itemIndex, 0, terminal);
+
+  const classified = classifyRecord({ ...control.manifest, events });
+  assert.equal(classified.cells.oneToolInvoked.status, "fail");
+  assert.equal(
+    classified.cells.oneToolInvoked.reason,
+    "matching turn/completed must follow item/completed in event stream",
+  );
+
+  // Control: original order passes
+  const controlClassified = classifyRecord({ ...control.manifest, events: control.events });
+  assert.equal(controlClassified.cells.oneToolInvoked.status, "pass");
+});
+
+test("#2812: no-item-without-stream refuses even if terminal carries a matching tool", async () => {
+  const control = await drive("valid");
+
+  for (const view of ["summary", "full", "notLoaded", undefined]) {
+    const events = structuredClone(control.events).filter(
+      (e) => !(e.method === "item/completed" && e.params?.item?.type === "mcpToolCall"),
+    );
+    const terminal = events.find((e) => e.method === "turn/completed");
+    if (view !== undefined) {
+      terminal.params.turn.itemsView = view;
+    } else {
+      delete terminal.params.turn.itemsView;
+    }
+
+    const classified = classifyRecord({ ...control.manifest, events });
+    assert.equal(
+      classified.cells.oneToolInvoked.status,
+      "unavailable",
+      `missing streamed item must make oneToolInvoked unavailable for view ${view}`,
+    );
+    assert.equal(classified.cells.oneToolInvoked.reason, "no mcpToolCall item/completed");
+  }
+});
+
+test("#2812: failed or interrupted terminal status dominates across all itemsView variants", async () => {
+  const control = await drive("valid");
+
+  for (const view of ["summary", "full", "notLoaded", undefined]) {
+    for (const badStatus of ["failed", "interrupted"]) {
+      const events = structuredClone(control.events);
+      const terminal = events.find((e) => e.method === "turn/completed");
+      if (view !== undefined) {
+        terminal.params.turn.itemsView = view;
+      } else {
+        delete terminal.params.turn.itemsView;
+      }
+      terminal.params.turn.status = badStatus;
+
+      const classified = classifyRecord({ ...control.manifest, events });
+      assert.equal(
+        classified.cells.oneToolInvoked.status,
+        "fail",
+        `${badStatus} status must fail oneToolInvoked for view ${view}`,
+      );
+      assert.equal(
+        classified.cells.oneToolInvoked.reason,
+        `matching turn/completed status ${badStatus} is not completed`,
+      );
+    }
+  }
 });

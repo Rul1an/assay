@@ -650,6 +650,21 @@ export const ALLOWED_CLIENT_REQUESTS = Object.freeze([
 export const ALLOWED_CLIENT_NOTIFICATIONS = Object.freeze(["initialized"]);
 export const ALLOWED_CLIENT_RESPONSES = Object.freeze(["mcpServer/elicitation/request"]);
 export const ALLOWED_DRIVER_METHODS = Object.freeze(["error", "pre-spawn-error"]);
+export const ALLOWED_TURN_ITEMS_VIEWS = Object.freeze([
+  "full",
+  "summary",
+  "notLoaded",
+]);
+
+export function turnItemsViewReason(view) {
+  if (
+    view !== undefined &&
+    (!isNonemptyString(view) || !ALLOWED_TURN_ITEMS_VIEWS.includes(view))
+  ) {
+    return "turn/completed itemsView must be full, summary, or notLoaded";
+  }
+  return null;
+}
 // A JSON-RPC method name is host-controlled text on every server-originated frame. Retaining an
 // unrecognised one verbatim puts host content in the proof, so only names this proof already
 // declares are kept; anything else becomes one constant. Known names must stay verbatim because
@@ -927,6 +942,10 @@ function retainedMethodParamsReason(method, params) {
         !isNonemptyString(turn.status)
       ) {
         return "turn/completed turn must have typed id, items, and status";
+      }
+      const viewReason = turnItemsViewReason(turn.itemsView);
+      if (viewReason) {
+        return viewReason;
       }
       for (const item of turn.items) {
         const itemReason = retainedItemReason(item, "turn/completed");
@@ -1361,6 +1380,7 @@ export function consumeJourneyTopology(events, journey) {
     clientNotifications,
     driverErrors,
     serverDiagnostics,
+    events,
   };
 }
 
@@ -1532,6 +1552,7 @@ function mcpToolCalls(rows) {
     const item = event.params?.item;
     if (item?.type === "mcpToolCall") {
       calls.push({
+        event,
         item,
         threadId: event.params?.threadId,
         turnId: event.params?.turnId,
@@ -1678,6 +1699,29 @@ function uniqueExpectedElicitationAccepted(topology, threadId, turnId) {
   return allAccepts.length === 1;
 }
 
+function terminalToolItemDiscrepancyReason(
+  terminalToolItems,
+  item,
+  { requirePresence = true } = {},
+) {
+  if (terminalToolItems.length > 1) {
+    return "matching terminal contains duplicate tool items";
+  }
+  if (terminalToolItems.length === 0) {
+    return requirePresence
+      ? "matching terminal must contain exactly the canonical tool item"
+      : null;
+  }
+  const candidate = terminalToolItems[0];
+  if (candidate?.id !== item?.id) {
+    return "matching terminal must contain exactly the canonical tool item";
+  }
+  if (!sameJson(projectRetainedItem(candidate), projectRetainedItem(item))) {
+    return "matching terminal tool item contradicts item/completed";
+  }
+  return null;
+}
+
 function classifyInvocation(calls, expected, threadId, turnId, topology) {
   if (calls.length === 0) {
     return cell("unavailable", "no mcpToolCall item/completed");
@@ -1704,19 +1748,54 @@ function classifyInvocation(calls, expected, threadId, turnId, topology) {
   }
   const call = calls[0];
   const item = call.item;
-  // NON-CLAIM: the fake app-server populates turn.items with the completed tool item, so this
-  // requirement is exercised only against the fixture. The one real 0.153.1 capture available was
-  // a failed run whose turn/completed carried no mcpToolCall, so whether a SUCCESSFUL host turn
-  // populates turn.items is unmeasured. If it does not, this cell fails on the real host and that
-  // is a host-behaviour finding, not a defect in this check.
-  const terminalItems = terminal.params.turn.items.filter(
-    (candidate) => candidate?.type === "mcpToolCall",
-  );
-  if (terminalItems.length !== 1 || terminalItems[0]?.id !== item.id) {
-    return cell("fail", "matching terminal must contain exactly the canonical tool item");
+
+  const eventList = Array.isArray(topology?.events)
+    ? topology.events
+    : Array.isArray(topology?.notifications)
+      ? topology.notifications
+      : [];
+  const callIndex = eventList.indexOf(call.event);
+  const terminalIndex = eventList.indexOf(terminal);
+  if (callIndex !== -1 && terminalIndex !== -1 && terminalIndex <= callIndex) {
+    return cell("fail", "matching turn/completed must follow item/completed in event stream");
   }
-  if (!sameJson(projectRetainedItem(terminalItems[0]), projectRetainedItem(item))) {
-    return cell("fail", "matching terminal tool item contradicts item/completed");
+
+  const terminalTurn = terminal.params?.turn;
+  const itemsView = terminalTurn?.itemsView;
+  const viewReason = turnItemsViewReason(itemsView);
+  if (viewReason) {
+    return cell("fail", viewReason);
+  }
+
+  const rawTerminalItems = Array.isArray(terminalTurn?.items) ? terminalTurn.items : null;
+  if (!rawTerminalItems) {
+    return cell("fail", "matching turn items must be an array");
+  }
+
+  if (itemsView === "notLoaded") {
+    if (rawTerminalItems.length !== 0) {
+      return cell("fail", "notLoaded turn items must be empty");
+    }
+  } else if (itemsView === "summary") {
+    const terminalToolItems = rawTerminalItems.filter(
+      (candidate) => candidate?.type === "mcpToolCall",
+    );
+    const discrepancy = terminalToolItemDiscrepancyReason(terminalToolItems, item, {
+      requirePresence: false,
+    });
+    if (discrepancy) {
+      return cell("fail", discrepancy);
+    }
+  } else {
+    const terminalToolItems = rawTerminalItems.filter(
+      (candidate) => candidate?.type === "mcpToolCall",
+    );
+    const discrepancy = terminalToolItemDiscrepancyReason(terminalToolItems, item, {
+      requirePresence: true,
+    });
+    if (discrepancy) {
+      return cell("fail", discrepancy);
+    }
   }
   if (item.server !== "assay") {
     return cell("fail", "tool item server is not the expected server");
@@ -2542,15 +2621,19 @@ function projectNotificationParams(method, params) {
     };
   }
   if (method === "turn/completed") {
+    const turn = {
+      id: projectedScalar(params.turn?.id),
+      status: projectedScalar(params.turn?.status),
+      items: Array.isArray(params.turn?.items)
+        ? params.turn.items.map(projectRetainedItem)
+        : invalidProjection(params.turn?.items),
+    };
+    if (params.turn?.itemsView !== undefined) {
+      turn.itemsView = projectedMember(params.turn.itemsView, ALLOWED_TURN_ITEMS_VIEWS);
+    }
     return {
       threadId: projectedScalar(params.threadId),
-      turn: {
-        id: projectedScalar(params.turn?.id),
-        status: projectedScalar(params.turn?.status),
-        items: Array.isArray(params.turn?.items)
-          ? params.turn.items.map(projectRetainedItem)
-          : invalidProjection(params.turn?.items),
-      },
+      turn,
     };
   }
   if (method === "mcpServer/elicitation/request") {
