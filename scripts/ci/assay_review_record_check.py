@@ -16,6 +16,7 @@ CHECKER = "scripts/ci/assay_review_record_check.py"
 HOOK_ID = "assay-review-record-self-test"
 PREFIXES = frozenset({"codex", "claude", "cursor", "ruley"})
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
+IDENTITY_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$")
 FENCE = re.compile(r"^```(?:json)?\n(.*)\n```$", re.S)
 HTTP_TIMEOUT_S = 30
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
@@ -106,10 +107,15 @@ def _need(obj: dict[str, Any], key: str, typ: type) -> Any:
 def _pair(obj: Any, label: str) -> tuple[str, str]:
     if not isinstance(obj, dict):
         raise GateError("missing_field", label)
-    return _need(obj, "agent", str), _need(obj, "instance", str)
+    agent, instance = _need(obj, "agent", str), _need(obj, "instance", str)
+    if not IDENTITY_COMPONENT.fullmatch(agent) or not IDENTITY_COMPONENT.fullmatch(instance):
+        raise GateError("malformed_record", label)
+    return agent, instance
 
 
-def validate_record(record: dict[str, Any], *, live_sha: str, branch_ref: str) -> None:
+def validate_record(
+    record: dict[str, Any], *, live_sha: str, branch_ref: str, require_ready: bool = True
+) -> None:
     if record.get("schema") != SCHEMA:
         raise GateError("missing_field", "schema")
     sha = _need(record, "head_sha", str).lower()
@@ -148,7 +154,7 @@ def validate_record(record: dict[str, Any], *, live_sha: str, branch_ref: str) -
     _need(reviewer, "github_login", str)
     if (builder_agent, builder_instance) == (reviewer_agent, reviewer_instance):
         raise GateError("identical_writer_reviewer", builder_instance)
-    if verdict != "READY":
+    if require_ready and verdict != "READY":
         raise GateError("blocked", verdict)
 
 
