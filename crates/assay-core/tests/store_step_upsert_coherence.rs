@@ -8,7 +8,7 @@
 //! - Drop `content_sha256=excluded.content_sha256` → `replacement_content_sha256_matches_row` fails
 //! - Drop `truncations_json=excluded.truncations_json` → `replacement_truncations_match_row`
 //!   and/or `empty_truncations_clear_prior_loss_metadata` fails
-//! - No-op control: first-insert path still persists both columns (`first_insert_persists_provenance`)
+//! - First-insert control: first-insert path still persists both columns (`first_insert_persists_provenance`)
 
 use assay_core::storage::store::Store;
 use assay_core::trace::schema::{EpisodeStart, StepEntry, TraceEvent, TruncationMeta};
