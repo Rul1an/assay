@@ -342,6 +342,29 @@ function handle(message) {
       // value. This scenario drives such names through the real driver and the real persistence
       // path, so the absence assertion can be made against the bytes written to events.json
       // rather than against an in-process projection.
+      // A JSON-RPC method name and a retained item type are host-controlled text on the wire,
+      // exactly like a key name. This scenario emits both in secret-bearing form so the absence
+      // assertion is made against the persisted bytes.
+      if (scenario === "host-identifier-leak") {
+        const probe = "/Users/alice/.aws/credentials?sk=IDENTIFIER_PROBE";
+        write({ method: `notify_${probe}`, params: {} });
+        write({
+          method: "item/completed",
+          params: {
+            completedAtMs: 1,
+            threadId,
+            turnId: "turn-1",
+            item: {
+              type: `type_${probe}`,
+              id: "item-probe",
+              server: "assay",
+              tool: "unmapped",
+              arguments: { tool: "x", policy: "y" },
+              status: "completed",
+            },
+          },
+        });
+      }
       if (scenario === "host-key-name-leak") {
         const probe = "/Users/alice/.ssh/id_rsa?token=AKIA_KEY_NAME_PROBE";
         completedItem[probe] = 1;

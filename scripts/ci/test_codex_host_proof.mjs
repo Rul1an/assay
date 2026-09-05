@@ -24,6 +24,8 @@ import {
   EXPECTED_TOOLS,
   HARD_MAX_SNAPSHOT_BYTES,
   HOST_SUBJECTS,
+  KNOWN_ITEM_TYPES,
+  KNOWN_METHODS,
   classifyRecord,
   classifyStoredEvent,
   consumeJourneyTopology,
@@ -4796,9 +4798,44 @@ test("zero retained mcpToolCall rows keep oneToolInvoked non-pass", async () => 
   assert.notEqual(classified.cells.structuredResultValidated.status, "pass");
 });
 
+// Reaches projectRetainedItem's type projection through the exported entry point, so the assertion
+// is on production behaviour rather than on a re-implementation of the rule.
+function projectRetainedItem_typeOf(rawType) {
+  const projected = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 1,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: {
+        type: rawType,
+        id: "item-1",
+        server: "assay",
+        tool: "unmapped",
+        arguments: { tool: "x", policy: "y" },
+        status: "completed",
+      },
+    },
+  });
+  return projected.params.item.type;
+}
+
 test("projection-idempotent unknown terminal items are drift, not accepted topology", async () => {
   const control = await drive("valid");
-  for (const type of ["futureHostItem", "not-a-retained-item"]) {
+  // F3 moved unknown item types behind a projection: a raw future type no longer survives the
+  // round-trip, so pin that first, then keep probing PAST the round-trip check using the projected
+  // marker, which IS a fixed point. Both halves matter -- the first is the new barrier, the second
+  // is this test's original purpose (drift must be refused by the cells, not only by projection).
+  for (const raw of ["futureHostItem", "not-a-retained-item"]) {
+    assert.equal(
+      projectRetainedItem_typeOf(raw),
+      "[unknown-item-type]",
+      `${raw} must be projected, not retained verbatim`,
+    );
+  }
+  for (const type of ["[unknown-item-type]"]) {
     const events = structuredClone(control.events);
     const terminal = events.find((event) => event.method === "turn/completed");
     assert.ok(terminal, "control run must contain the terminal turn");
@@ -5753,7 +5790,7 @@ for (const [site, item] of [
   });
 }
 
-test("F1: re-projecting an already-projected event is a fixed point", () => {
+test("F1: the unexpected-key marker is a re-projection fixed point", () => {
   // The marker is itself outside every allowed list, so it is re-marked on a second pass. That is
   // only stable because the marker collapses to a constant: a name list or a count would change.
   const event = {
@@ -5783,7 +5820,10 @@ test("F1: re-projecting an already-projected event is a fixed point", () => {
   };
   const once = projectRetainedEvent(event);
   const twice = projectRetainedEvent(once);
-  assert.deepEqual(twice, once, "projection must be idempotent");
+  // SCOPE: this establishes the fixed point for the UNEXPECTED-KEY MARKER only. It is not a claim
+  // that projection is idempotent over all events -- `__invalidType` markers are deliberately not
+  // fixed points, and re-project to a different marker. That is fail-closed and out of scope here.
+  assert.deepEqual(twice, once, "the unexpected-key marker must be a fixed point");
   assert.equal(JSON.stringify(once).includes(KEY_NAME_PROBE), false);
 });
 
@@ -5814,4 +5854,120 @@ test("F1: a secret-shaped key name never reaches the persisted events.json", asy
     "[present]",
     "control: the injected key must have been marked, or nothing was measured",
   );
+});
+
+// --- F1/F3: an unknown method name and an unknown item type are host text too ------------------
+// The key-name repair closed one identifier position. These are the other two the independent
+// review found: a JSON-RPC method and a retained item type, both host-controlled strings that were
+// retained verbatim. Known names must survive verbatim -- classification, correlation and the cells
+// are keyed on them -- so the projection is a closed-set check, not a scrub.
+const IDENTIFIER_PROBE = "/Users/alice/.aws/credentials?sk=IDENTIFIER_PROBE";
+
+test("F1: an unknown method is projected, and every declared method survives verbatim", () => {
+  const projected = projectRetainedEvent({
+    direction: "server",
+    method: `notify_${IDENTIFIER_PROBE}`,
+    id: null,
+    params: {},
+  });
+  assert.equal(projected.method, "[unknown-method]");
+  assert.equal(JSON.stringify(projected).includes(IDENTIFIER_PROBE), false);
+  assert.equal(
+    classifyStoredEvent(projected).type,
+    "unclassified",
+    "an unknown method must still be refused, not merely projected",
+  );
+  // Positive control: every method this proof declares must pass through untouched, or the
+  // projection above is a scrub that would break classification rather than a closed-set check.
+  for (const method of KNOWN_METHODS) {
+    assert.equal(
+      projectRetainedEvent({ direction: "server", method, id: null, params: {} }).method,
+      method,
+      `declared method ${method} must survive verbatim`,
+    );
+  }
+});
+
+test("F3: an unknown item type is projected, and every declared type survives verbatim", () => {
+  assert.equal(projectRetainedItem_typeOf(`type_${IDENTIFIER_PROBE}`), "[unknown-item-type]");
+  assert.equal(
+    JSON.stringify(projectRetainedItem_typeOf(`type_${IDENTIFIER_PROBE}`)).includes(
+      IDENTIFIER_PROBE,
+    ),
+    false,
+  );
+  for (const type of KNOWN_ITEM_TYPES) {
+    assert.equal(projectRetainedItem_typeOf(type), type, `declared type ${type} must survive`);
+  }
+});
+
+test("F1/F3: neither identifier reaches the persisted proof", async () => {
+  const { proofRoot, events } = await drive("host-identifier-leak");
+  for (const name of ["events.json", "classification.json", "manifest.json"]) {
+    assert.equal(
+      fs.readFileSync(path.join(proofRoot, name), "utf8").includes("IDENTIFIER_PROBE"),
+      false,
+      `${name} must not contain the host-controlled identifier`,
+    );
+  }
+  // Positive control: the scenario must have reached the pipeline, or the absence is vacuous.
+  assert.ok(
+    events.some((event) => event.method === "[unknown-method]"),
+    "control: the unknown method must have been projected, or nothing was measured",
+  );
+  assert.ok(
+    events.some((event) => event.params?.item?.type === "[unknown-item-type]"),
+    "control: the unknown item type must have been projected, or nothing was measured",
+  );
+});
+
+// --- F4: a projection violation is a violation wherever it sits -------------------------------
+test("F4: a marker nested under result is refused, not carried into a green proof", () => {
+  const projected = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5000,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: {
+        type: "mcpToolCall",
+        id: "tool-1",
+        server: "assay",
+        tool: "assay_policy_decide",
+        status: "completed",
+        arguments: { tool: "probe" },
+        result: { isError: false, structuredContent: { allowed: true, reason: "ok" }, extra: 1 },
+      },
+    },
+  });
+  // The producer marks it; before this repair the consumer consulted the marker only at some
+  // levels, so this record passed every cell -- a fully green proof carrying a recorded violation.
+  assert.equal(projected.params.item.result.__unexpectedKeys, "[present]");
+  const classified = classifyStoredEvent(projected);
+  assert.equal(classified.type, "unclassified", "a nested marker must refuse");
+  assert.match(classified.reason, /projection violation/);
+  // Positive control: the same record without the extra key must still be accepted, or the check
+  // above is satisfied by refusing everything.
+  const clean = projectRetainedEvent({
+    direction: "server",
+    method: "item/completed",
+    id: null,
+    params: {
+      completedAtMs: 5000,
+      threadId: "t-1",
+      turnId: "u-1",
+      item: {
+        type: "mcpToolCall",
+        id: "tool-1",
+        server: "assay",
+        tool: "assay_policy_decide",
+        status: "completed",
+        arguments: { tool: "probe" },
+        result: { isError: false, structuredContent: { allowed: true, reason: "ok" } },
+      },
+    },
+  });
+  assert.equal(classifyStoredEvent(clean).type, "server-notification", "control: clean must pass");
 });

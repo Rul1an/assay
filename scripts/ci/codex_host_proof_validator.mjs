@@ -640,9 +640,39 @@ export const ALLOWED_SERVER_NOTIFICATIONS = Object.freeze([
   "item/completed",
   "turn/completed",
 ]);
+export const ALLOWED_CLIENT_REQUESTS = Object.freeze([
+  "initialize",
+  "skills/list",
+  "thread/start",
+  "mcpServerStatus/list",
+  "turn/start",
+]);
 export const ALLOWED_CLIENT_NOTIFICATIONS = Object.freeze(["initialized"]);
 export const ALLOWED_CLIENT_RESPONSES = Object.freeze(["mcpServer/elicitation/request"]);
 export const ALLOWED_DRIVER_METHODS = Object.freeze(["error", "pre-spawn-error"]);
+// A JSON-RPC method name is host-controlled text on every server-originated frame. Retaining an
+// unrecognised one verbatim puts host content in the proof, so only names this proof already
+// declares are kept; anything else becomes one constant. Known names must stay verbatim because
+// classification, correlation and the cells are all keyed on them.
+export const KNOWN_METHODS = Object.freeze([
+  ...ALLOWED_SERVER_NOTIFICATIONS,
+  ...ALLOWED_SERVER_REQUESTS,
+  ...ALLOWED_CLIENT_REQUESTS,
+  ...ALLOWED_CLIENT_NOTIFICATIONS,
+  ...ALLOWED_CLIENT_RESPONSES,
+  ...ALLOWED_DRIVER_METHODS,
+]);
+export const UNKNOWN_METHOD = "[unknown-method]";
+// The retained item types this proof declares. Same rule as methods: an unrecognised type is host
+// text, and it is already refused, so nothing needs its literal value.
+export const KNOWN_ITEM_TYPES = Object.freeze([
+  "reasoning",
+  "agentMessage",
+  "commandExecution",
+  "mcpToolCall",
+  "userMessage",
+]);
+export const UNKNOWN_ITEM_TYPE = "[unknown-item-type]";
 
 export function preSpawnFailureState(events, manifest) {
   const rows = Array.isArray(events)
@@ -924,6 +954,15 @@ function retainedMethodParamsReason(method, params) {
 export function classifyStoredEvent(event) {
   if (event == null || typeof event !== "object" || Array.isArray(event)) {
     return { type: "unclassified", reason: "event is not an object" };
+  }
+  // A projection violation is a violation wherever it sits. The markers were applied consistently
+  // by the producer but consulted only on some paths, so a marker nested under result/arguments
+  // passed every cell: a fully green proof carrying a recorded violation. The consumer's whole
+  // claim is a CLOSED retained projection, and this is the one check that makes that true rather
+  // than true-at-the-levels-someone-remembered. The reason names the marker class only, never the
+  // offending content.
+  if (containsProjectionViolation(event)) {
+    return { type: "unclassified", reason: "retained event carries a projection violation" };
   }
   const method = typeof event.method === "string" && event.method.length > 0 ? event.method : null;
   const hasId = hasOwn(event, "id");
@@ -1969,6 +2008,20 @@ function projectedScalar(value) {
 // secret text, so it would license exactly the leak it appears to prevent.
 const PRESENT = "[present]";
 
+function projectedMethod(value) {
+  if (typeof value !== "string" || value.length === 0) {
+    return invalidProjection(value);
+  }
+  return KNOWN_METHODS.includes(value) ? value : UNKNOWN_METHOD;
+}
+
+function projectedItemType(value) {
+  if (typeof value !== "string" || value.length === 0) {
+    return invalidProjection(value);
+  }
+  return KNOWN_ITEM_TYPES.includes(value) ? value : UNKNOWN_ITEM_TYPE;
+}
+
 function projectedPresence(value) {
   return typeof value === "string" ? PRESENT : invalidProjection(value);
 }
@@ -2277,7 +2330,7 @@ function projectRetainedItem(item) {
     return { type: item.type, id: projectedScalar(item.id) };
   }
   const out = {
-    type: projectedScalar(item.type),
+    type: projectedItemType(item.type),
     id: projectedScalar(item.id),
     server: projectedScalar(item.server),
     tool: projectedScalar(item.tool),
@@ -2438,7 +2491,7 @@ export function projectRetainedEvent(event) {
   if (!isPlainObject(event)) {
     return invalidProjection(event);
   }
-  const out = { direction: projectedScalar(event.direction), method: projectedScalar(event.method) };
+  const out = { direction: projectedScalar(event.direction), method: projectedMethod(event.method) };
   if (hasOwn(event, "id")) {
     out.id = event.id;
   }
