@@ -2060,6 +2060,29 @@ function projectToolResult(result) {
   if (result.error != null) {
     out.error = { present: true };
   }
+  if (hasOwn(result, "_meta")) {
+    // `_meta` is a DECLARED field of the app-server item result. From the pinned host schema
+    // (openai/codex rust-v0.153.1, codex-rs/app-server-protocol/src/protocol/v2/mcp.rs):
+    //
+    //   pub struct McpToolCallResult {
+    //       pub content: Vec<JsonValue>,
+    //       pub structured_content: Option<JsonValue>,
+    //       #[serde(rename = "_meta")] pub meta: Option<JsonValue>,
+    //   }
+    //
+    // No field carries skip_serializing_if, so a live host serializes `_meta: null` rather than
+    // omitting it. Marking it unexpected refused a schema-correct record (#2807).
+    //
+    // This is NOT `CallToolResult` and NOT `McpServerToolCallResponse`: those declare `isError`
+    // and DO skip `None`. The two shapes differ in both directions, so admitting this field here
+    // says nothing about them.
+    //
+    // Its value is arbitrary host JSON with no consumer in this proof, so only PRESENCE is
+    // retained -- never a key name, never a value. `null` stays null because the schema declares
+    // it and absent must stay distinguishable from present-and-empty. Idempotent: `PRESENT` is a
+    // non-null value, so re-projecting yields `PRESENT` again.
+    out._meta = result._meta == null ? null : PRESENT;
+  }
   if (hasOwn(result, "structuredContent")) {
     out.structuredContent =
       result.structuredContent == null ? null : projectDecisionObject(result.structuredContent);
@@ -2081,7 +2104,46 @@ function projectToolResult(result) {
       });
     }
   }
+  // `isError` and `error` are retained deliberately, and NOT because this item type declares them
+  // -- it does not. They stay so that a host sending either reaches the check written FOR it:
+  // `classifyToolResultEnvelope` (:1480-1484) refuses a non-Boolean `isError` and refuses
+  // `isError === true`, each with its own named reason, and those can only fire on a field the
+  // projection carried through.
+  //
+  // Three corrections from independent review, kept rather than quietly dropped. An earlier
+  // comment named `retainedItemReason`, which never reads `isError` at all. It then claimed that
+  // dropping these fields would "delete live refusals", which a second review showed is imprecise
+  // in a way that depends entirely on WHICH variant is measured -- so the variant is named here:
+  //
+  //   - drop the retention bodies AND these two allow-list entries: the three cases are still
+  //     refused, as `unclassified`, by the generic projection-violation gate. Refusal RELOCATED to
+  //     a coarser gate reporting a different reason. But a legitimate `isError: false` result is
+  //     then refused too -- which is exactly the #2807 failure class, a schema-correct record
+  //     rejected by an incomplete allow list. That is worse than "relocated", not milder.
+  //   - drop only the retention bodies, keep the allow-list entries: all three cases become clean
+  //     `server-notification`. The refusal is DELETED outright.
+  //
+  // So both readings are bad, for opposite reasons, and neither is the mild "relocation" first
+  // written here. The fields stay.
+  //
+  // F4, resolved by citation rather than by widening anything. The RESULT-level declared set is
+  // exactly three names -- `content`, `structuredContent`, `_meta` -- per `McpToolCallResult` in
+  // the pinned host schema (openai/codex rust-v0.153.1,
+  // codex-rs/app-server-protocol/src/protocol/v2/mcp.rs). The list below therefore carries two
+  // names BEYOND the schema, `isError` and `error`, deliberately and for the reason above.
+  //
+  // The gap an independent review proved by execution: unlike the item level, nothing here pins
+  // the list against WIDENING -- adding an undeclared name such as `telemetryBlob` survives the
+  // whole suite. That is the class that allowed #2807 in the first direction (too narrow) and is
+  // still open in the other (too wide). It is recorded here and deferred to its own slice; adding
+  // an enumeration test inside a comment-only repair would be the scope creep this note exists to
+  // avoid.
+  //
+  // Precise about what pins what: the existing tests named around `isError` mutate ALREADY
+  // PROJECTED events, so they pin the consumer, not the producer's `"[invalid]"` conversion above.
+  // The producer-side barrier is pinned separately by the #2807 tests.
   return withUnexpectedKeys(out, result, [
+    "_meta",
     "isError",
     "error",
     "structuredContent",
