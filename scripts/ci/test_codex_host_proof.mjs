@@ -5337,18 +5337,18 @@ test("F5: the canonical elicitation prompt is accepted by a driven run", async (
   );
 });
 
-// --- The closed whitelist must equal the 0.153.1 schema's mcpToolCall property set ----------
+// --- The closed whitelist vs the 0.153.1 schema's mcpToolCall property set ------------------
 // allowedKeys is a CLOSED whitelist: a real host field missing from it refuses the whole proof.
 // The generated protocol-0.153.1 schema is the only local statement of that set. It is a schema,
 // not a live invocation claim -- a field can be declared and never emitted, and emission is not
-// established here -- but a mismatch in either direction is actionable: a schema property absent
+// established here -- but a mismatch is actionable: a schema property absent
 // from allowedKeys is a guaranteed false refusal, and an allowedKey absent from the schema admits
 // something the host is not declared to send. Measured 2026-09-05 against
 // protocol-0.153.1/v2/ThreadStartResponse.json (sha256
 // 656f8fd0fe91f533126cbfdb9369cfab550927a229e48dd46460f6f015d2b186), definitions/ThreadItem/oneOf/8
 // (McpToolCallThreadItem, 13 properties, no allOf/anyOf/$ref composition, additionalProperties unset).
 // That file is not vendored here; this list is the pinned copy of what it declared when measured.
-test("mcpToolCall allowedKeys equals the 0.153.1 schema property set", () => {
+test("mcpToolCall projection accepts every declared 0.153.1 schema property", () => {
   const schemaProperties = [
     "appContext",
     "arguments",
@@ -5405,12 +5405,16 @@ test("mcpToolCall allowedKeys equals the 0.153.1 schema property set", () => {
 });
 
 // --- F-A: the whitelist must equal the schema set, not merely contain it -------------------
-// The sibling test above asserts schemaProperties ⊆ allowedKeys. That leaves the other direction
-// open: adding a key the schema does not declare survives it. A closed whitelist that admits an
-// undeclared field is the mirror of one that omits a declared one -- it accepts something 0.153.1
-// never says the host sends, so the "equals" in that test's name has to be earned in both
-// directions or not claimed.
-test("mcpToolCall allowedKeys admits nothing the 0.153.1 schema does not declare", () => {
+// The sibling test asserts only that the schema's declared properties are accepted. That leaves
+// the other direction open: adding a key the schema does not declare survived it. A closed
+// whitelist that admits an undeclared field is the mirror of one that omits a declared one -- it
+// accepts something 0.153.1 never says the host sends.
+//
+// SCOPE: this is a SAMPLE, not a proof of set equality. It refuses the nine names below; it does
+// not and cannot establish that every name outside the schema is refused, because it does not
+// enumerate that set. Deliberately no parser and no generated name space here -- the sample is
+// chosen to bite the realistic mutation (widening the whitelist), not to make a universal claim.
+test("mcpToolCall projection refuses a sample of names the 0.153.1 schema does not declare", () => {
   // Names deliberately outside the 13 declared properties, including several that are plausible
   // near-misses of real fields elsewhere in the protocol.
   const notInSchema = [
