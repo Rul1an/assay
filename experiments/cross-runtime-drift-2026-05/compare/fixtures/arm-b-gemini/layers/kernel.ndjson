@@ -1,0 +1,2 @@
+{"schema":"assay.runner.kernel_event.v0","run_id":"drift_fixture_b_gemini_001","seq":0,"pid":2001,"event_type":1,"kind":"openat","value":"/tmp/work/fixture-input.txt","flags":0,"mode":0,"return_value":3,"access_mode":"read","status":"success"}
+{"schema":"assay.runner.kernel_event.v0","run_id":"drift_fixture_b_gemini_001","seq":1,"pid":2001,"event_type":1,"kind":"openat","value":"/tmp/work/fixture-output.txt","flags":577,"mode":420,"return_value":4,"access_mode":"write","operation_flags":["create","truncate"],"status":"success"}

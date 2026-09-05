@@ -1,0 +1,2 @@
+{"seq":1,"tool":"read_file","args":{"path":"/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114117Z_2/workdir/fixture-input.txt"}}
+{"seq":2,"tool":"write_file","args":{"path":"/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114117Z_2/workdir/fixture-output.txt","contents":"CROSS-RUNTIME DRIFT FIXTURE\n"}}
