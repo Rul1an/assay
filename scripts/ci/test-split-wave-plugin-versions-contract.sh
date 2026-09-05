@@ -99,7 +99,7 @@ install_step_run() {
   local job
   # Materialize first: under pipefail, producer|early-exit-awk SIGPIPEs when the job
   # body continues after the named Install step (#2809). Do not weaken pipefail.
-  job="$("${job_fn}" "${wf}")"
+  job="$("${job_fn}" "${wf}")" || return $?
   awk -v step="${step_name}" '
     function emit_active(line,    tmp) {
       tmp = line
@@ -843,6 +843,36 @@ expect_stale_install_comment_red nobind "Install cargo-nextest and cargo-hack" <
       # is step-scoped for the install, while ordinary workspace cargo follows rust-toolchain.toml.
 EOF
 
+
+
+echo "== helper: missing workflow must refuse with producer status (#2809) =="
+missing_rc=0
+if missing_out="$(install_step_run /nonexistent-assay-workflow-2809.yml "Install cargo-nextest and cargo-hack" feature_matrix_job)"; then
+  fail "missing workflow left install_step_run green (output=<${missing_out}>)"
+else
+  missing_rc=$?
+fi
+[[ "${missing_rc}" -eq 2 ]] \
+  || fail "missing workflow expected awk producer rc 2, got ${missing_rc}"
+ok "missing workflow refuses (rc ${missing_rc})"
+
+echo "== helper: failing job producer status must propagate (#2809) =="
+failing_feature_matrix_job() { return 7; }
+failing_rc="$(
+  set +e
+  install_step_run "${WORKFLOW}" "Install cargo-nextest and cargo-hack" failing_feature_matrix_job >/dev/null
+  printf '%s' "$?"
+)"
+[[ "${failing_rc}" -eq 7 ]] \
+  || fail "failing job producer expected rc 7, got ${failing_rc}"
+disc_rc=0
+if disc_out="$(install_step_run "${WORKFLOW}" "Install cargo-nextest and cargo-hack" failing_feature_matrix_job)"; then
+  fail "failing producer left install_step_run green under if/command-substitution (output=<${disc_out}>)"
+else
+  disc_rc=$?
+fi
+[[ "${disc_rc}" -eq 7 ]]   || fail "failing producer under if/command-substitution expected rc 7, got ${disc_rc}"
+ok "failing job producer status propagates (rc 7)"
 
 echo "== regression: large-tail job body must not SIGPIPE install extractor (#2809) =="
 # Same producer|early-exit-awk discriminator as the cargo-plugin contract; feature-matrix

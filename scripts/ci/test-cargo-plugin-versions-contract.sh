@@ -75,7 +75,7 @@ install_cargo_audit_run() {
   local job
   # Materialize first: under pipefail, producer|early-exit-awk SIGPIPEs when the job
   # body continues after the Install step (#2809). Do not weaken pipefail.
-  job="$(deps_security_job "${wf}")"
+  job="$(deps_security_job "${wf}")" || return $?
   awk '
     function emit_active(line,    tmp) {
       tmp = line
@@ -577,6 +577,41 @@ if ( check_review_helper_cargo_deny "${deny_mut}" ) >/dev/null 2>&1; then
 fi
 ok "reverting review helper to cargo deny turns the contract red"
 
+
+
+echo "== helper: missing workflow must refuse with producer status (#2809) =="
+# Same if/command-substitution context as the coordinator discriminator. Not a full-gate claim.
+missing_rc=0
+if missing_out="$(install_cargo_audit_run /nonexistent-assay-workflow-2809.yml)"; then
+  fail "missing workflow left install_cargo_audit_run green (output=<${missing_out}>)"
+else
+  missing_rc=$?
+fi
+[[ "${missing_rc}" -eq 2 ]] \
+  || fail "missing workflow expected awk producer rc 2, got ${missing_rc}"
+ok "missing workflow refuses (rc ${missing_rc})"
+
+echo "== helper: failing deps_security_job status must propagate (#2809) =="
+failing_rc="$(
+  deps_security_job() { return 7; }
+  set +e
+  install_cargo_audit_run "${WORKFLOW}" >/dev/null
+  printf '%s' "$?"
+)"
+[[ "${failing_rc}" -eq 7 ]] \
+  || fail "failing deps_security_job expected rc 7, got ${failing_rc}"
+# Discriminator shape: if out="$(helper)"; then ... (errexit does not save you)
+disc_rc=0
+if disc_out="$(
+  deps_security_job() { return 7; }
+  install_cargo_audit_run "${WORKFLOW}"
+)"; then
+  fail "failing producer left install_cargo_audit_run green under if/command-substitution (output=<${disc_out}>)"
+else
+  disc_rc=$?
+fi
+[[ "${disc_rc}" -eq 7 ]]   || fail "failing producer under if/command-substitution expected rc 7, got ${disc_rc}"
+ok "failing deps_security_job status propagates (rc 7)"
 
 echo "== regression: large-tail job body must not SIGPIPE install extractor (#2809) =="
 # ~7 MiB after the *next* step name so the early-exit consumer closes while the job
