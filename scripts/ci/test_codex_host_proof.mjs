@@ -27,6 +27,7 @@ import {
   HOST_SUBJECTS,
   INSTALL_ROUTES,
   PUBLISHED_INSTALL_ROUTES,
+  boundedPrintable,
   installSourceBound,
   liveIdentityBound,
   projectHostIdentity,
@@ -7080,4 +7081,62 @@ test("#2684: the projection retains install source, version, os and arch", () =>
   const stripped = JSON.parse(JSON.stringify(projected));
   delete stripped.assayMcp.installSource;
   assert.equal(liveIdentityBound(stripped), false);
+});
+
+test("#2822 F1: reference and version are printable ASCII, not merely control-free", () => {
+  const cp = (n) => String.fromCodePoint(n);
+  // Positive control: an ordinary reference stays acceptable.
+  assert.equal(installSourceBound({ route: "crates-io", reference: "assay-mcp-server@6.0.0" }), true);
+  assert.equal(boundedPrintable("codex 0.153.4"), true);
+
+  // The blocklist this replaced admitted every one of these. Named individually so a
+  // regression says which class came back rather than only that something did.
+  const hostile = [
+    ["U+0085 NEL", 0x85],
+    ["U+200B zero-width space", 0x200b],
+    ["U+200E left-to-right mark", 0x200e],
+    ["U+2028 line separator", 0x2028],
+    ["U+2029 paragraph separator", 0x2029],
+    ["U+202E right-to-left override", 0x202e],
+    ["U+2066 left-to-right isolate", 0x2066],
+    ["U+2069 pop directional isolate", 0x2069],
+    ["U+FEFF byte order mark", 0xfeff],
+    ["U+0000 NUL", 0x00],
+    ["U+000A newline", 0x0a],
+    ["U+007F DEL", 0x7f],
+  ];
+  for (const [label, point] of hostile) {
+    const reference = `a${cp(point)}b`;
+    assert.equal(
+      installSourceBound({ route: "crates-io", reference }),
+      false,
+      `${label} must be refused in an install reference`,
+    );
+    assert.equal(boundedPrintable(reference), false, `${label} must be refused in a version`);
+  }
+
+  // The same rule reaches version through the binding contract.
+  const withVersion = (version) => liveIdentityBound({
+    os: "darwin",
+    arch: "arm64",
+    codex: {
+      path: "/proof/codex.snapshot",
+      version,
+      sha256: "a".repeat(64),
+      installSource: { route: "host-bundled", reference: "Codex.app" },
+    },
+    codexCodeModeHost: {
+      path: "/proof/codex-code-mode-host",
+      sha256: "b".repeat(64),
+      installSource: { route: "host-bundled", reference: "Codex.app" },
+    },
+    assayMcp: {
+      path: "/proof/assay-mcp-server.snapshot",
+      version: "assay-mcp-server 6.0.0",
+      sha256: "c".repeat(64),
+      installSource: { route: "crates-io", reference: "assay-mcp-server@6.0.0" },
+    },
+  });
+  assert.equal(withVersion("codex 0.153.4"), true);
+  assert.equal(withVersion(`codex${cp(0x2028)}0.153.4`), false);
 });

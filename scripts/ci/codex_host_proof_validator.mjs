@@ -26,6 +26,21 @@ export const PUBLISHED_INSTALL_ROUTES = Object.freeze([
   "host-bundled",
 ]);
 export const MAX_INSTALL_REFERENCE = 200;
+// One line of printable ASCII. This is an allowlist on purpose. The first version of
+// this check blocked C0 and DEL, and that blocklist silently admitted U+2028, U+2029,
+// U+0085, U+200B, U+FEFF and the bidi overrides, every one of which can split or
+// reorder rendered output without failing closed. An allowlist cannot be defeated by
+// a code point nobody thought to list.
+const PRINTABLE_ASCII_LINE = /^[\x20-\x7e]+$/;
+
+export function boundedPrintable(value, max = MAX_INSTALL_REFERENCE) {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= max &&
+    PRINTABLE_ASCII_LINE.test(value)
+  );
+}
 export const SKILL_NAME = "assay-golden-path";
 export const DECIDE_TOOL = "assay_policy_decide";
 export const DECIDE_INPUT = {
@@ -278,11 +293,7 @@ export function installSourceBound(source) {
   return (
     exactKeys(source, ["route", "reference"]) &&
     INSTALL_ROUTES.includes(source.route) &&
-    typeof source.reference === "string" &&
-    source.reference.length > 0 &&
-    source.reference.length <= MAX_INSTALL_REFERENCE &&
-    // one line, printable, no credential-shaped content
-    !/[\u0000-\u001f\u007f]/.test(source.reference) &&
+    boundedPrintable(source.reference) &&
     !CREDENTIAL_KEY.test(source.reference)
   );
 }
@@ -323,11 +334,7 @@ function boundBinary(bin) {
     typeof bin.sha256 === "string" &&
     /^[a-f0-9]{64}$/.test(bin.sha256) &&
     installSourceBound(bin.installSource) &&
-    (bin.version === undefined ||
-      (typeof bin.version === "string" &&
-        bin.version.length > 0 &&
-        bin.version.length <= MAX_INSTALL_REFERENCE &&
-        !/[\u0000-\u001f\u007f]/.test(bin.version)))
+    (bin.version === undefined || boundedPrintable(bin.version))
   );
 }
 
