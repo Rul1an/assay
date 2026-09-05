@@ -844,7 +844,6 @@ expect_stale_install_comment_red nobind "Install cargo-nextest and cargo-hack" <
 EOF
 
 
-
 echo "== helper: missing workflow must refuse with producer status (#2809) =="
 missing_rc=0
 if missing_out="$(install_step_run /nonexistent-assay-workflow-2809.yml "Install cargo-nextest and cargo-hack" feature_matrix_job)"; then
@@ -923,16 +922,18 @@ ${large_run}"
 active_pinned_hack_install "${large_run}" \
   || fail "large-tail lost the pinned hack install:
 ${large_run}"
-ok "large-tail install extraction survives (~7MiB post-step)"
+! grep -qE '^[[:space:]]*echo[[:space:]]+later' <<<"${large_run}" \
+  || fail "large-tail install extractor leaked subsequent step into run block"
+ok "large-tail install extraction survives (~7MiB post-step) without step leakage"
 
-echo "== no-op: live workflow install extraction unchanged (#2809) =="
-noop_rc=0
-noop_run="$(install_step_run "${WORKFLOW}" "Install cargo-nextest and cargo-hack" feature_matrix_job)" || noop_rc=$?
-[[ "${noop_rc}" -eq 0 ]] || fail "noop install extractor aborted (exit ${noop_rc})"
-active_source_line "${noop_run}" || fail "noop lost the source line"
-active_pinned_nextest_install "${noop_run}" || fail "noop lost the pinned nextest install"
-active_pinned_hack_install "${noop_run}" || fail "noop lost the pinned hack install"
-ok "noop: live workflow install extraction unchanged"
+echo "== baseline re-check: live workflow extraction unchanged (#2809) =="
+baseline_rc=0
+baseline_run="$(install_step_run "${WORKFLOW}" "Install cargo-nextest and cargo-hack" feature_matrix_job)" || baseline_rc=$?
+[[ "${baseline_rc}" -eq 0 ]] || fail "baseline install extractor aborted (exit ${baseline_rc})"
+active_source_line "${baseline_run}" || fail "baseline lost the source line"
+active_pinned_nextest_install "${baseline_run}" || fail "baseline lost the pinned nextest install"
+active_pinned_hack_install "${baseline_run}" || fail "baseline lost the pinned hack install"
+ok "baseline re-check: live workflow extraction unchanged"
 
 ok "split-wave plugin-versions contract mutations bite"
 echo "PASS: split-wave plugin-versions contract"

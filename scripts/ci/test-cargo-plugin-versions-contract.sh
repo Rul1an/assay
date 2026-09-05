@@ -191,7 +191,8 @@ check_review_helper_cargo_deny "${REVIEW_HELPER}"
 ok "review helper uses direct cargo-deny"
 # Hook section: id line then files: must include the review script stem.
 # Capture first: under pipefail, grep -A | grep -q can SIGPIPE on match (#2809).
-hook_snip="$(grep -A8 '^[[:space:]]*- id:[[:space:]]*cargo-plugin-versions-contract-self-test[[:space:]]*$' "${PRECOMMIT}")"
+hook_snip="$(grep -A8 '^[[:space:]]*- id:[[:space:]]*cargo-plugin-versions-contract-self-test[[:space:]]*$' "${PRECOMMIT}")" \
+  || fail "cargo-plugin-versions-contract-self-test hook definition missing from ${PRECOMMIT#"${ROOT}"/}"
 grep -qE '^[[:space:]]*files:.*review-dependency-perf-hygiene-pr4' <<<"${hook_snip}" \
   || fail "cargo-plugin-versions-contract-self-test files: must watch review-dependency-perf-hygiene-pr4.sh"
 ok "D1 pre-commit hook watches the review helper"
@@ -578,7 +579,6 @@ fi
 ok "reverting review helper to cargo deny turns the contract red"
 
 
-
 echo "== helper: missing workflow must refuse with producer status (#2809) =="
 # Same if/command-substitution context as the coordinator discriminator. Not a full-gate claim.
 missing_rc=0
@@ -664,16 +664,18 @@ ${large_run}"
 [[ "$(count_active_cargo_installs "${large_run}")" -eq 1 ]] \
   || fail "large-tail expected one active cargo install; got:
 ${large_run}"
-ok "large-tail install extraction survives (~7MiB post-step)"
+! grep -qE '^[[:space:]]*echo[[:space:]]+later' <<<"${large_run}" \
+  || fail "large-tail install extractor leaked subsequent step into run block"
+ok "large-tail install extraction survives (~7MiB post-step) without step leakage"
 
-echo "== no-op: live workflow install extraction unchanged (#2809) =="
-noop_rc=0
-noop_run="$(install_cargo_audit_run "${WORKFLOW}")" || noop_rc=$?
-[[ "${noop_rc}" -eq 0 ]] || fail "noop install extractor aborted (exit ${noop_rc})"
-active_source_line "${noop_run}" || fail "noop lost the source line"
-active_pinned_install_line "${noop_run}" || fail "noop lost the pinned install line"
-active_assert_line "${noop_run}" || fail "noop lost the assert line"
-ok "noop: live workflow install extraction unchanged"
+echo "== baseline re-check: live workflow extraction unchanged (#2809) =="
+baseline_rc=0
+baseline_run="$(install_cargo_audit_run "${WORKFLOW}")" || baseline_rc=$?
+[[ "${baseline_rc}" -eq 0 ]] || fail "baseline install extractor aborted (exit ${baseline_rc})"
+active_source_line "${baseline_run}" || fail "baseline lost the source line"
+active_pinned_install_line "${baseline_run}" || fail "baseline lost the pinned install line"
+active_assert_line "${baseline_run}" || fail "baseline lost the assert line"
+ok "baseline re-check: live workflow extraction unchanged"
 
 ok "cargo-plugin-versions contract mutations bite"
 echo "PASS: cargo-plugin-versions contract"
