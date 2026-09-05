@@ -91,7 +91,7 @@ jobs:
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `bundles` | Auto-detect | Glob pattern for evidence bundles (explicit value is a shell glob; not recursive unless the pattern includes `**`. Omit for recursive default discovery under the evidence roots.) |
+| `bundles` | Auto-detect | Glob pattern for evidence bundles. Omit for recursive default discovery (`find` under the evidence roots). An explicit value uses Bash `compgen -G` without `globstar`, so `**` is not arbitrary recursion (typically one intermediate directory level; top-level bundles can be missed). |
 | `fail_on` | `error` | Fail threshold: `error`, `warn`, `info`, `none` |
 | `sarif` | `true` | Upload to GitHub Security tab |
 | `comment_diff` | `true` | Post PR comment (only if findings) |
@@ -453,12 +453,18 @@ The action looks for:
 - `.assay/evidence/*.tar.gz`
 - `evidence/*.tar.gz`
 
-**Default discovery vs explicit `bundles`:** when `bundles` is omitted, default
-discovery is recursive under the evidence roots (nested paths such as
-`.assay/evidence/nested/*.tar.gz` are found). An explicit `bundles:` value is a
-shell glob and is **not** automatically recursive unless the pattern says so
-(for example with `**`). A nested default-scan example does not prove that a
-copied non-recursive glob would find nested files.
+**Default discovery vs explicit `bundles`:** when `bundles` is omitted, the
+pinned Action discovers with `find` under `.assay/evidence/` and `evidence/`
+(recursive: nested paths such as `.assay/evidence/nested/sandbox.tar.gz` are
+found). Prefer omitting `bundles` when you want that recursive default.
+
+An explicit `bundles:` value is expanded with Bash `compgen -G` and does **not**
+enable `globstar`. A pattern like `.assay/evidence/**/*.tar.gz` therefore does
+**not** mean arbitrary-depth recursion: without `globstar`, `**` selects about
+one intermediate directory level (for example `.assay/evidence/mid/*.tar.gz`),
+misses top-level `.assay/evidence/*.tar.gz`, and misses deeper trees such as
+`.assay/evidence/mid/deep/*.tar.gz`. Do not copy a `**` example expecting full
+recursion; omit `bundles` instead.
 
 Generate with the published Action remediation recipe (single source:
 `scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd`):

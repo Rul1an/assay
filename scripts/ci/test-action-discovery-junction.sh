@@ -486,10 +486,81 @@ if ! run_producer_behavior "${PRODUCER_SH}"; then
 fi
 ok "owned-producer-behavioral"
 
+# Explicit glob vs default find + pre-commit path filter (docs F1/F2).
+check_explicit_glob_and_pin_filter() {
+  local action_yml="${ROOT}/scripts/ci/fixtures/assay-action-pin/action.yml"
+  grep -Fq 'if [ -z "$BUNDLES_PATTERN" ]; then' "${action_yml}" \
+    || die "pinned action.yml missing empty-bundles find branch"
+  grep -Fq 'compgen -G "$BUNDLES_PATTERN"' "${action_yml}" \
+    || die "pinned action.yml missing compgen -G explicit branch"
+  grep -Fq './.assay/evidence/*.tar.gz' "${action_yml}" \
+    || die "pinned action.yml missing find default discovery"
+
+  local glob_scratch
+  glob_scratch="$(mktemp -d "${TMPDIR:-/tmp}/2802-glob-depth.XXXXXX")"
+  mkdir -p "${glob_scratch}/.assay/evidence/mid/deep"
+  : >"${glob_scratch}/.assay/evidence/top.tar.gz"
+  : >"${glob_scratch}/.assay/evidence/mid/nested.tar.gz"
+  : >"${glob_scratch}/.assay/evidence/mid/deep/deeper.tar.gz"
+
+  (
+    cd "${glob_scratch}"
+    mapfile -t FIND_HITS < <(find . \( -path './.assay/evidence/*.tar.gz' -o -path './evidence/*.tar.gz' \) -type f | sort)
+    [[ "${#FIND_HITS[@]}" -eq 3 ]] || die "default find must hit top+mid+deep (got ${#FIND_HITS[@]})"
+
+    shopt -u globstar 2>/dev/null || true
+    mapfile -t STAR_HITS < <(compgen -G '.assay/evidence/**/*.tar.gz' | sort || true)
+    [[ "${#STAR_HITS[@]}" -eq 1 ]] || die "compgen ** without globstar must hit exactly one mid-level path (got ${#STAR_HITS[@]})"
+    [[ "${STAR_HITS[0]}" == ".assay/evidence/mid/nested.tar.gz" ]] \
+      || die "compgen ** hit unexpected path: ${STAR_HITS[0]}"
+    for miss in ".assay/evidence/top.tar.gz" ".assay/evidence/mid/deep/deeper.tar.gz"; do
+      for h in "${STAR_HITS[@]}"; do
+        if [[ "${h}" == "${miss}" ]]; then
+          die "compgen ** falsely recursive; hit ${miss}"
+        fi
+      done
+    done
+    true
+  )
+  rm -rf "${glob_scratch}"
+  ok "explicit-glob-double-star-not-recursive"
+  ok "default-find-recursive-three-level"
+
+  python3 - "${ROOT}/.pre-commit-config.yaml" <<'PY2'
+import re
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+block = None
+lines = text.splitlines()
+for i, line in enumerate(lines):
+    if line.strip() == "- id: assay-action-consumer-pin":
+        for j in range(i, min(i + 12, len(lines))):
+            s = lines[j].strip()
+            if s.startswith("files:"):
+                block = s.split("files:", 1)[1].strip()
+                break
+        break
+if not block:
+    raise SystemExit("assay-action-consumer-pin files: missing")
+rx = re.compile(block)
+for path in (
+    "scripts/ci/produce-default-discovery-sandbox-evidence.sh",
+    "scripts/ci/test-action-discovery-junction.sh",
+):
+    if not rx.search(path):
+        raise SystemExit(f"hook filter does not match {path}: {block}")
+print("ok    pre-commit-pin-filter-matches-producer-and-junction")
+PY2
+}
+
 if [[ "${1:-}" == "--contract-only" ]]; then
+  check_explicit_glob_and_pin_filter
   echo "action discovery junction contract: PASS"
   exit 0
 fi
+
 
 # --- Retained mutations (must RED); all under mktemp — caller bytes untouched ---
 SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/2778-junction.XXXXXX")"
@@ -751,4 +822,5 @@ ok "caller-bytes-unchanged"
 trap - EXIT
 cleanup_scratch
 
+check_explicit_glob_and_pin_filter
 echo "action discovery junction contract: PASS"
