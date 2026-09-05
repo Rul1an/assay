@@ -655,6 +655,16 @@ export const ALLOWED_TURN_ITEMS_VIEWS = Object.freeze([
   "summary",
   "notLoaded",
 ]);
+
+export function turnItemsViewReason(view) {
+  if (
+    view !== undefined &&
+    (!isNonemptyString(view) || !ALLOWED_TURN_ITEMS_VIEWS.includes(view))
+  ) {
+    return "turn/completed itemsView must be full, summary, or notLoaded";
+  }
+  return null;
+}
 // A JSON-RPC method name is host-controlled text on every server-originated frame. Retaining an
 // unrecognised one verbatim puts host content in the proof, so only names this proof already
 // declares are kept; anything else becomes one constant. Known names must stay verbatim because
@@ -933,11 +943,9 @@ function retainedMethodParamsReason(method, params) {
       ) {
         return "turn/completed turn must have typed id, items, and status";
       }
-      if (
-        turn.itemsView !== undefined &&
-        (!isNonemptyString(turn.itemsView) || !ALLOWED_TURN_ITEMS_VIEWS.includes(turn.itemsView))
-      ) {
-        return "turn/completed itemsView must be full, summary, or notLoaded";
+      const viewReason = turnItemsViewReason(turn.itemsView);
+      if (viewReason) {
+        return viewReason;
       }
       for (const item of turn.items) {
         const itemReason = retainedItemReason(item, "turn/completed");
@@ -1754,11 +1762,9 @@ function classifyInvocation(calls, expected, threadId, turnId, topology) {
 
   const terminalTurn = terminal.params?.turn;
   const itemsView = terminalTurn?.itemsView;
-  if (
-    itemsView !== undefined &&
-    (!isNonemptyString(itemsView) || !ALLOWED_TURN_ITEMS_VIEWS.includes(itemsView))
-  ) {
-    return cell("fail", "turn/completed itemsView must be full, summary, or notLoaded");
+  const viewReason = turnItemsViewReason(itemsView);
+  if (viewReason) {
+    return cell("fail", viewReason);
   }
 
   const rawTerminalItems = Array.isArray(terminalTurn?.items) ? terminalTurn.items : null;

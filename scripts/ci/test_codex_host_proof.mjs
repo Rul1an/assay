@@ -49,6 +49,20 @@ const FAKE = path.join(HERE, "fixtures/codex-host-proof/fake-app-server.mjs");
 const DRIVER_SRC = fs.readFileSync(path.join(HERE, "codex_host_proof.mjs"), "utf8");
 const VALIDATOR_SRC = fs.readFileSync(path.join(HERE, "codex_host_proof_validator.mjs"), "utf8");
 
+test("#2813: shared itemsView validation preserves the closed vocabulary and legacy absence", async () => {
+  const { turnItemsViewReason } = await import("./codex_host_proof_validator.mjs");
+  assert.equal(typeof turnItemsViewReason, "function");
+  for (const view of [undefined, "full", "summary", "notLoaded"]) {
+    assert.equal(turnItemsViewReason(view), null);
+  }
+  for (const view of [null, "", "partial", "Full", 0, false, [], {}, "PRIVATE_CANARY"]) {
+    assert.equal(
+      turnItemsViewReason(view),
+      "turn/completed itemsView must be full, summary, or notLoaded",
+    );
+  }
+});
+
 function scratch() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "assay-2684-"));
 }
