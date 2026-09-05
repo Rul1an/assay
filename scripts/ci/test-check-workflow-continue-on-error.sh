@@ -134,3 +134,14 @@ YAML
 run_case "unattributable-flag-fails-closed" "$c" 2
 
 printf 'PASS: workflow continue-on-error policy mutation battery (8 cases)\n'
+
+# Real-tree policy: the fixture battery blanks allowlists, so it cannot see live violations.
+# Run the checker against the repository itself so named exemptions stay honest.
+(
+  cd "$ROOT"
+  if ! python3 scripts/ci/check-workflow-continue-on-error.py; then
+    echo "FAIL: real-tree workflow continue-on-error policy violated" >&2
+    exit 1
+  fi
+)
+echo "ok    real-tree-continue-on-error-policy"

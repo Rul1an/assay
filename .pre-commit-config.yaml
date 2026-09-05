@@ -36,7 +36,7 @@ repos:
             docs/experiments/.+/archive-contents/.+
             |crates/assay-core/tests/fixtures/mcp-era-parity-v0/schema-.+\.json
             |third_party/serde_jcs-0\.2\.0/.+
-            |scripts/ci/fixtures/assay-action-pin/action\.yml
+            |scripts/ci/fixtures/assay-action-pin/(action\.yml|remediation_recipe\.cmd)
           )$
       - id: trailing-whitespace
         exclude: |
@@ -44,7 +44,7 @@ repos:
             docs/experiments/.+/archive-contents/.+
             |crates/assay-core/tests/fixtures/mcp-era-parity-v0/schema-.+\.json
             |third_party/serde_jcs-0\.2\.0/.+
-            |scripts/ci/fixtures/assay-action-pin/action\.yml
+            |scripts/ci/fixtures/assay-action-pin/(action\.yml|remediation_recipe\.cmd)
           )$
 
   # GitGuardian secrets detection (manual/local opt-in; requires GITGUARDIAN_API_KEY)
@@ -466,7 +466,7 @@ repos:
         entry: bash -c 'bash scripts/ci/test-check-assay-action-pin.sh && bash scripts/ci/check-assay-action-pin.sh'
         language: system
         pass_filenames: false
-        files: ^(\.github/(assay-action-pin|dependabot\.yml|workflows/.*\.ya?ml)|scripts/ci/(read|check|test-check)-assay-action-pin\.sh|scripts/ci/fixtures/assay-action-pin/.*|docs/.*\.md|CHANGELOG\.md|crates/assay-cli/src/templates\.rs|packs/open/cicd-starter/README\.md|\.pre-commit-config\.yaml)$
+        files: ^(\.github/(assay-action-pin|dependabot\.yml|workflows/.*\.ya?ml)|scripts/ci/(read|check|test-check)-assay-action-pin\.sh|scripts/ci/(produce-default-discovery-sandbox-evidence|test-action-discovery-junction)\.sh|scripts/ci/fixtures/assay-action-pin/.*|docs/.*\.md|CHANGELOG\.md|crates/assay-cli/src/templates\.rs|packs/open/cicd-starter/README\.md|\.pre-commit-config\.yaml)$
 
       - id: workflow-continue-on-error-policy
         name: Workflow continue-on-error policy

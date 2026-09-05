@@ -69,6 +69,7 @@ run_checker_at() {
     ASSAY_ACTION_PIN_FILE="${tree}/.github/assay-action-pin" \
     ASSAY_ACTION_FIXTURE_FILE="${tree}/scripts/ci/fixtures/assay-action-pin/action.yml" \
     ASSAY_ACTION_PROVENANCE_FILE="${tree}/scripts/ci/fixtures/assay-action-pin/PROVENANCE" \
+    ASSAY_ACTION_RECIPE_FILE="${tree}/scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd" \
     "${CHECKER}" "$@"
 }
 
@@ -1109,5 +1110,196 @@ expect_fail "cicd-starter-monorepo-snippet" "is the monorepo path" "${scratch}/c
 
 echo "== no-op control after mutations =="
 expect_ok "control-stays-green-after-scratch-mutations" "${CHECKER}"
+
+echo "== outer wiring: action discovery junction (#2778) =="
+# Outer effective-path check lives HERE (pin battery), not inside the removable
+# junction script: pin-battery job/script -> active shell line that executes
+# test-action-discovery-junction.sh -> that script must exist.
+assert_outer_junction_wiring() {
+  python3 - "$1" "$2" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+battery = Path(sys.argv[1])
+junction = Path(sys.argv[2])
+# Construct the relative path so this checker does not embed the full invoke line.
+rel = "scripts/ci/" + "test-action-discovery-junction" + ".sh"
+if not junction.is_file():
+    raise SystemExit(f"missing junction script (outer wiring): expected {rel}")
+text = battery.read_text(encoding="utf-8")
+invoke_re = re.compile(r'^bash\s+"\$\{ROOT\}/' + re.escape(rel) + r'"\s*$')
+# Bounded executable-call scan: skip bodies of no-op `: <<DELIM` heredocs only.
+# Not a general shell parser — named decoy is the Codex-reproduced `: <<EOF` form.
+noop_heredoc_start = re.compile(
+    r"^:\s*<<(-?)(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2\s*$"
+)
+active = False
+heredoc_decoy = False
+heredoc_end = None
+heredoc_strip_tabs = False
+for raw in text.splitlines():
+    if heredoc_end is not None:
+        end_cand = raw.lstrip("\t") if heredoc_strip_tabs else raw
+        if end_cand.rstrip("\r\n") == heredoc_end:
+            heredoc_end = None
+            continue
+        s_in = raw.strip()
+        if s_in and not s_in.startswith("#") and invoke_re.match(s_in):
+            heredoc_decoy = True
+        continue
+    s = raw.strip()
+    if not s or s.startswith("#"):
+        continue
+    m = noop_heredoc_start.match(s)
+    if m:
+        heredoc_strip_tabs = m.group(1) == "-"
+        heredoc_end = m.group(3)
+        continue
+    if invoke_re.match(s):
+        active = True
+        break
+if not active:
+    if heredoc_decoy:
+        raise SystemExit(
+            "outer call only inside non-executing : << heredoc "
+            "(not an effective pin-battery invoke)"
+        )
+    raise SystemExit(
+        "missing outer call to test-action-discovery-junction.sh "
+        "(pin-battery must invoke the junction script)"
+    )
+PY
+}
+
+JUNCTION_SCRIPT="${ROOT}/scripts/ci/test-action-discovery-junction.sh"
+BATTERY_SRC="${ROOT}/scripts/ci/test-check-assay-action-pin.sh"
+
+if ! assert_outer_junction_wiring "${BATTERY_SRC}" "${JUNCTION_SCRIPT}"; then
+  exit 1
+fi
+echo "ok    outer-junction-wiring-control"
+
+# RED: comment out the only active outer call (script still present)
+cp "${BATTERY_SRC}" "${scratch}/battery-no-outer-call.sh"
+python3 - "${scratch}/battery-no-outer-call.sh" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+# Exact active invoke line; assignment forms in heredocs do not match strip==invoke.
+invoke = 'bash "${ROOT}/' + 'scripts/ci/test-action-discovery-junction' + '.sh"'
+lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+out = []
+n = 0
+for line in lines:
+    if line.strip() == invoke:
+        out.append("# " + line)
+        n += 1
+    else:
+        out.append(line)
+if n != 1:
+    raise SystemExit(f"expected exactly one outer invoke line to comment, got {n}")
+p.write_text("".join(out), encoding="utf-8")
+PY
+if assert_outer_junction_wiring "${scratch}/battery-no-outer-call.sh" "${JUNCTION_SCRIPT}" \
+    >"${scratch}/outer-no-call.out" 2>"${scratch}/outer-no-call.err"; then
+  echo "FAIL: missing-outer-call stayed green" >&2
+  exit 1
+fi
+if ! grep -Fq "missing outer call to test-action-discovery-junction.sh" "${scratch}/outer-no-call.err"; then
+  echo "FAIL: missing-outer-call did not name removed behavior:" >&2
+  cat "${scratch}/outer-no-call.err" >&2
+  exit 1
+fi
+echo "ok    outer-junction-wiring-missing-call-red"
+
+# RED: exact invoke only inside non-executing `: <<EOF` (text present, nothing runs)
+cp "${BATTERY_SRC}" "${scratch}/battery-heredoc-decoy.sh"
+python3 - "${scratch}/battery-heredoc-decoy.sh" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+invoke = 'bash "${ROOT}/' + 'scripts/ci/test-action-discovery-junction' + '.sh"'
+lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+out = []
+n = 0
+for line in lines:
+    if line.strip() == invoke:
+        out.append(": <<EOF\n")
+        out.append(line)
+        out.append("EOF\n")
+        n += 1
+    else:
+        out.append(line)
+if n != 1:
+    raise SystemExit(f"expected exactly one outer invoke to wrap in : <<EOF, got {n}")
+p.write_text("".join(out), encoding="utf-8")
+PY
+if assert_outer_junction_wiring "${scratch}/battery-heredoc-decoy.sh" "${JUNCTION_SCRIPT}" \
+    >"${scratch}/outer-heredoc.out" 2>"${scratch}/outer-heredoc.err"; then
+  echo "FAIL: : <<EOF heredoc decoy stayed green" >&2
+  exit 1
+fi
+if ! grep -Fq "non-executing : << heredoc" "${scratch}/outer-heredoc.err"; then
+  echo "FAIL: heredoc decoy did not name refused behavior:" >&2
+  cat "${scratch}/outer-heredoc.err" >&2
+  exit 1
+fi
+echo "ok    outer-junction-wiring-heredoc-decoy-red"
+
+# RED: delete the junction script (call still present in live battery source)
+mkdir -p "${scratch}/outer-missing-script/scripts/ci"
+if assert_outer_junction_wiring "${BATTERY_SRC}" \
+    "${scratch}/outer-missing-script/scripts/ci/test-action-discovery-junction.sh" \
+    >"${scratch}/outer-no-script.out" 2>"${scratch}/outer-no-script.err"; then
+  echo "FAIL: missing-junction-script stayed green" >&2
+  exit 1
+fi
+if ! grep -Fq "missing junction script" "${scratch}/outer-no-script.err"; then
+  echo "FAIL: missing-junction-script did not name removed behavior:" >&2
+  cat "${scratch}/outer-no-script.err" >&2
+  exit 1
+fi
+echo "ok    outer-junction-wiring-missing-script-red"
+
+# RED: both removed
+if assert_outer_junction_wiring "${scratch}/battery-no-outer-call.sh" \
+    "${scratch}/outer-missing-script/scripts/ci/test-action-discovery-junction.sh" \
+    >"${scratch}/outer-both.out" 2>"${scratch}/outer-both.err"; then
+  echo "FAIL: both-removed outer wiring stayed green" >&2
+  exit 1
+fi
+if ! grep -Eq "missing junction script|missing outer call" "${scratch}/outer-both.err"; then
+  echo "FAIL: both-removed did not name removed behavior:" >&2
+  cat "${scratch}/outer-both.err" >&2
+  exit 1
+fi
+echo "ok    outer-junction-wiring-both-removed-red"
+
+# No-op control after mutations (live paths unchanged)
+if ! assert_outer_junction_wiring "${BATTERY_SRC}" "${JUNCTION_SCRIPT}"; then
+  echo "FAIL: outer wiring no-op control went red" >&2
+  exit 1
+fi
+echo "ok    outer-junction-wiring-noop-control"
+
+echo "== action discovery junction (#2778) =="
+bash "${ROOT}/scripts/ci/test-action-discovery-junction.sh"
+
+echo "== published remediation_recipe.cmd drift =="
+copy_into "${scratch}/recipe-drift"
+printf 'x' >>"${scratch}/recipe-drift/scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd"
+if ! run_checker_at "${scratch}/recipe-drift" >"${scratch}/out" 2>"${scratch}/err"; then
+  echo "FAIL: offline pin check should stay green when only recipe drifts" >&2
+  cat "${scratch}/err" >&2
+  exit 1
+fi
+echo "ok    recipe-drift-offline-blind"
+cp "${FIXTURE}" "${scratch}/recipe-pub-action.yml"
+cp "${ROOT}/scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd" "${scratch}/recipe-pub-oracle.cmd"
+ASSAY_ACTION_PUBLISHED_FILE="${scratch}/recipe-pub-action.yml" \
+  ASSAY_ACTION_PUBLISHED_RECIPE_FILE="${scratch}/recipe-pub-oracle.cmd" \
+  expect_fail "published-recipe-drift" "does not match published recipe" "${scratch}/recipe-drift" --published
+
 
 echo "assay action consumer pin contract: PASS"

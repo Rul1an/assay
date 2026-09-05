@@ -3,7 +3,9 @@
 #
 # One process reads the vendored action.yml once, derives digest and declared
 # inputs from those bytes, validates every owner-listed snippet against them,
-# and --published-compares the same retained bytes to the live file.
+# and --published compares those retained action.yml bytes to the live file at
+# the pin. remediation_recipe.cmd is read freshly for the published comparison
+# (not retained from the initial action.yml read).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -24,9 +26,10 @@ if [[ "${MODE}" != "--list-paths" ]]; then
   PIN="$(ASSAY_ACTION_PIN_FILE="${PIN_FILE}" "${READER}")"
   FIXTURE="${ASSAY_ACTION_FIXTURE_FILE:-${TREE}/scripts/ci/fixtures/assay-action-pin/action.yml}"
   PROVENANCE="${ASSAY_ACTION_PROVENANCE_FILE:-${TREE}/scripts/ci/fixtures/assay-action-pin/PROVENANCE}"
+  RECIPE="${ASSAY_ACTION_RECIPE_FILE:-${TREE}/scripts/ci/fixtures/assay-action-pin/remediation_recipe.cmd}"
 fi
 
-python3 - "${MODE}" "${PIN}" "${FIXTURE}" "${PROVENANCE}" "${TREE}" <<'PY'
+python3 - "${MODE}" "${PIN}" "${FIXTURE}" "${PROVENANCE}" "${TREE}" "${RECIPE:-}" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -43,6 +46,7 @@ PIN = sys.argv[2]
 FIXTURE = Path(sys.argv[3]) if sys.argv[3] else Path()
 PROVENANCE = Path(sys.argv[4]) if sys.argv[4] else Path()
 TREE = Path(sys.argv[5])
+RECIPE = Path(sys.argv[6]) if len(sys.argv) > 6 and sys.argv[6] else Path()
 READ_LIMIT = 1048576
 WORKFLOWS = (
     ".github/workflows/assay.yml",
@@ -444,6 +448,29 @@ def walk_unlisted() -> None:
                         fail(f"{rel}: assay-action uses is not on the owner snippet list")
 
 
+
+def published_recipe_bytes() -> bytes:
+    override = os.environ.get("ASSAY_ACTION_PUBLISHED_RECIPE_FILE", "")
+    if override:
+        published_path = Path(override)
+        if not published_path.is_file():
+            fail(f"published remediation_recipe.cmd override is missing: {published_path}")
+        if RECIPE.is_file() and published_path.resolve() == RECIPE.resolve():
+            fail("published remediation_recipe.cmd must not be the fixture file itself")
+        return bounded_read(published_path)
+    url = f"https://raw.githubusercontent.com/Rul1an/assay-action/{PIN}/scripts/remediation_recipe.cmd"
+    request = urllib.request.Request(url, headers={"User-Agent": "assay-action-pin-live"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            data = response.read(READ_LIMIT + 1)
+    except OSError as exc:
+        fail(f"published remediation_recipe.cmd fetch failed: {exc}")
+    if len(data) > READ_LIMIT:
+        fail("published remediation_recipe.cmd exceeds 1048576-byte limit")
+    if not data:
+        fail(f"published remediation_recipe.cmd fetch was empty: {url}")
+    return data
+
 def published_bytes() -> bytes:
     override = os.environ.get("ASSAY_ACTION_PUBLISHED_FILE", "")
     if override:
@@ -513,6 +540,16 @@ def main() -> None:
             f"(https://raw.githubusercontent.com/Rul1an/assay-action/{PIN}/action.yml)"
         )
     print(f"published action.yml bytes match pin {PIN}")
+    # Recipe byte-binding is part of --published (not incomplete offline scratches).
+    if not RECIPE.is_file():
+        fail(f"pinned remediation_recipe.cmd fixture missing: {RECIPE}")
+    recipe_bytes = bounded_read(RECIPE, allow_empty=False)
+    if recipe_bytes != published_recipe_bytes():
+        fail(
+            f"fixture remediation_recipe.cmd does not match published recipe for {PIN} "
+            f"(https://raw.githubusercontent.com/Rul1an/assay-action/{PIN}/scripts/remediation_recipe.cmd)"
+        )
+    print(f"published remediation_recipe.cmd bytes match pin {PIN}")
 
 
 if __name__ == "__main__":

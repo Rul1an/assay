@@ -64,6 +64,14 @@ ALLOWED_STEP_LEVEL: dict[tuple[str, str], str] = {
     ("action-v2-test.yml", "Run action with invalid pack (expected failure)"): (
         "The step failing IS the assertion; the following step checks the outcome."
     ),
+    ("action-v2-test.yml", "Review with required mode and no bundles"): (
+        "The step failing IS the assertion; the following step "
+        "'Assert required mode fails without bundles' checks the outcome."
+    ),
+    ("action-v2-test.yml", "Review corrupted bundle with required mode"): (
+        "The step failing IS the assertion; the following step "
+        "'Assert corrupted bundle is refused' checks the outcome."
+    ),
     ("adr025-nightly-evidence.yml", "Download current soak artifact"): (
         "A first run has no prior artifact to download; absence is expected, not a failure."
     ),

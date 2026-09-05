@@ -9,6 +9,7 @@ on:
       - 'tests/fixtures/evidence/**'
       - '.github/assay-action-pin'
       - 'scripts/ci/fixtures/assay-action-pin/**'
+      - 'scripts/ci/produce-default-discovery-sandbox-evidence.sh'
       - '.github/workflows/action-v2-test.yml'
 
 permissions:
@@ -83,7 +84,7 @@ jobs:
         run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
 
       - name: Test action with no bundles
-        uses: Rul1an/assay-action@184720a5cb051ebc2c1de7e52b113aa973f2c374
+        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
 
   test-with-bundle:
     name: Test (with valid bundle)
@@ -125,7 +126,7 @@ jobs:
 
       - name: Test action with bundle
         id: assay
-        uses: Rul1an/assay-action@184720a5cb051ebc2c1de7e52b113aa973f2c374
+        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -204,7 +205,7 @@ jobs:
 
       - name: Test action with compliance pack
         id: assay_pack
-        uses: Rul1an/assay-action@184720a5cb051ebc2c1de7e52b113aa973f2c374
+        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -271,7 +272,7 @@ jobs:
       - name: Run action with missing pack (expected failure)
         id: assay_missing_pack
         continue-on-error: true
-        uses: Rul1an/assay-action@184720a5cb051ebc2c1de7e52b113aa973f2c374
+        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -354,7 +355,7 @@ jobs:
       - name: Run action with invalid pack (expected failure)
         id: assay_invalid_pack
         continue-on-error: true
-        uses: Rul1an/assay-action@184720a5cb051ebc2c1de7e52b113aa973f2c374
+        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -384,3 +385,208 @@ jobs:
             echo "ERROR: expected pack_error_kind=invalid_pack"
             exit 1
           fi
+
+
+  required-no-bundles-fails:
+    name: Required mode fails with zero bundles
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build-assay-cli
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Download CLI artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: assay-action-v2-cli-linux-x64-${{ github.sha }}
+          path: dist
+
+      - name: Install CLI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release
+          tar -xzf dist/assay-action-v2-cli-linux-x64.tar.gz -C target/release
+          (
+            cd target/release
+            sha256sum -c assay.sha256
+            ./assay --version
+          )
+
+      - name: Add CLI to PATH
+        run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
+      - name: Review with required mode and no bundles
+        id: review
+        continue-on-error: true
+        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
+        with:
+          evidence_mode: required
+          fail_on: error
+          sarif: false
+          comment_diff: false
+
+      - name: Assert required mode fails without bundles
+        shell: bash
+        env:
+          STEP_OUTCOME: ${{ steps.review.outcome }}
+          EVIDENCE_STATE: ${{ steps.review.outputs.evidence_state }}
+        run: |
+          set -euo pipefail
+          if [ "${STEP_OUTCOME}" != "failure" ]; then
+            echo "ERROR: expected required mode with zero bundles to fail"
+            exit 1
+          fi
+          if [ "${EVIDENCE_STATE}" = "verified" ]; then
+            echo "ERROR: zero bundles must not report verified"
+            exit 1
+          fi
+
+  corrupt-bundle-refused:
+    name: Corrupted bundle is refused
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build-assay-cli
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Download CLI artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: assay-action-v2-cli-linux-x64-${{ github.sha }}
+          path: dist
+
+      - name: Install CLI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release
+          tar -xzf dist/assay-action-v2-cli-linux-x64.tar.gz -C target/release
+          (
+            cd target/release
+            sha256sum -c assay.sha256
+            ./assay --version
+          )
+
+      - name: Add CLI to PATH
+        run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
+      - name: Plant corrupted evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .assay/evidence
+          cp tests/fixtures/evidence/test-bundle.tar.gz .assay/evidence/corrupt.tar.gz
+          dd if=/dev/zero of=.assay/evidence/corrupt.tar.gz bs=1 seek=64 count=16 conv=notrunc status=none
+          test -f .assay/evidence/corrupt.tar.gz
+
+      - name: Review corrupted bundle with required mode
+        id: review
+        continue-on-error: true
+        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
+        with:
+          evidence_mode: required
+          fail_on: error
+          sarif: false
+          comment_diff: false
+
+      - name: Assert corrupted bundle is refused
+        shell: bash
+        env:
+          STEP_OUTCOME: ${{ steps.review.outcome }}
+          EVIDENCE_STATE: ${{ steps.review.outputs.evidence_state }}
+          VERIFIED: ${{ steps.review.outputs.verified }}
+        run: |
+          set -euo pipefail
+          if [ "${STEP_OUTCOME}" != "failure" ]; then
+            echo "ERROR: expected corrupted bundle review to fail"
+            exit 1
+          fi
+          if [ "${VERIFIED}" = "true" ] || [ "${EVIDENCE_STATE}" = "verified" ]; then
+            echo "ERROR: corrupted bundle must not be verified"
+            exit 1
+          fi
+
+  default-discovery-sandbox-junction:
+    name: Default discovery (nested sandbox recipe)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build-assay-cli
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Download CLI artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: assay-action-v2-cli-linux-x64-${{ github.sha }}
+          path: dist
+
+      - name: Install CLI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release
+          tar -xzf dist/assay-action-v2-cli-linux-x64.tar.gz -C target/release
+          (
+            cd target/release
+            sha256sum -c assay.sha256
+            ./assay --version
+          )
+
+      - name: Add CLI to PATH
+        run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
+      - name: Produce evidence with published remediation recipe
+        shell: bash
+        run: bash scripts/ci/produce-default-discovery-sandbox-evidence.sh
+
+      - name: Review with required default discovery
+        id: review
+        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
+        with:
+          evidence_mode: required
+          fail_on: error
+          sarif: false
+          comment_diff: false
+
+      - name: Assert verified discovery and nonempty index digest
+        shell: bash
+        env:
+          EVIDENCE_STATE: ${{ steps.review.outputs.evidence_state }}
+          VERIFIED: ${{ steps.review.outputs.verified }}
+          INDEX_DIGEST: ${{ steps.review.outputs.evidence_index_digest }}
+          INDEX_PATH: ${{ steps.review.outputs.evidence_index_path }}
+        run: |
+          set -euo pipefail
+          test "${EVIDENCE_STATE}" = "verified"
+          test "${VERIFIED}" = "true"
+          test -n "${INDEX_DIGEST}"
+          test -f "${INDEX_PATH}"
+          python3 -c '
+          import hashlib, json, sys
+          path, digest = sys.argv[1], sys.argv[2]
+          raw = open(path, "rb").read()
+          assert hashlib.sha256(raw).hexdigest() == digest
+          data = json.loads(raw)
+          assert data.get("complete") is True
+          assert len(data.get("bundles") or []) >= 1
+          row = data["bundles"][0]
+          assert row["path"] == ".assay/evidence/nested/sandbox.tar.gz"
+          assert row["source"] == "discovered"
+          assert row["integrity"] == "verified"
+          ' "${INDEX_PATH}" "${INDEX_DIGEST}"
