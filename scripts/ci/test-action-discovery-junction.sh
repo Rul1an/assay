@@ -982,11 +982,6 @@ print("ok    mock-child-presence-eperm-unavailable")
 with patch.object(os, "kill", side_effect=OSError(errno.EIO, "I/O error")):
     assert mod.classify_pid(1) == "unavailable"
 print("ok    mock-child-presence-other-oserror-unavailable")
-
-# Weak predicate regression: nonzero kill rc must not imply absence.
-# classify_pid under EPERM is unavailable, so presence is not established.
-assert mod.classify_pid.__doc__ and "Only ESRCH" in mod.classify_pid.__doc__
-print("ok    mock-child-presence-only-esrch-is-absence")
 PYPRESMOCK
 
   # Teardown: signal only the probe-recorded child PID (never rediscover a pgid).
@@ -1020,8 +1015,8 @@ PYPRESMOCK
 
   # Cooperative synthetic child: group TERM/KILL reaps a normal sleep descendant.
   # Without start_new_session+killpg, subprocess.run(timeout=) leaves this child alive.
-  {
-    local probe_dir probe_sh child_pid_file probe_rc child_pid
+  probe_cooperative_child() {
+    local probe_dir probe_sh child_pid_file probe_rc child_pid probe_err
     probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/2802-pg-child.XXXXXX")"
     register_junction_temp "${probe_dir}"
     child_pid_file="${probe_dir}/child.pid"
@@ -1065,7 +1060,7 @@ PROBE
   }
 
   # Parent exits on TERM; child ignores TERM — proves KILL escalation is not skipped on leader exit.
-  {
+  probe_term_ignoring_child() {
     local probe_dir probe_sh child_pid_file probe_rc child_pid
     probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/2802-pg-termign.XXXXXX")"
     register_junction_temp "${probe_dir}"
@@ -1109,6 +1104,62 @@ PROBE
     require_child_absent "${child_pid}" "TERM-ignore child probe"
     ok "process-group-kills-term-ignoring-child"
   }
+
+  # Exercise each actual probe's refusal path without launching a child or sending a signal.
+  # A helper-only errno test cannot notice a removed/unreachable require_child_absent call.
+  check_probe_acceptance() {
+    local probe="$1" acceptance_status expected rc out
+    out="$(mktemp "${TMPDIR:-/tmp}/2806-probe-acceptance.XXXXXX")"
+    register_junction_temp "${out}"
+    for acceptance_status in absent alive unavailable; do
+      set +e
+      (
+        set -e
+        # Own only this acceptance invocation's temporary probe files.
+        JUNCTION_TEMPS=()
+        trap cleanup_junction_temps EXIT
+        python3() {
+          if [[ "$1" == "${pg_runner}" ]]; then
+            # Do not execute the generated parent script; supply its numeric PID record.
+            printf '12345\n' >"${@: -1}"
+            return 124
+          fi
+          [[ "$1" == "${child_presence}" ]] || die "unexpected acceptance Python invocation"
+          printf '%s\n' "${acceptance_status}"
+          case "${acceptance_status}" in
+            absent) return 0 ;;
+            alive) return 1 ;;
+            unavailable) return 2 ;;
+          esac
+        }
+        sleep() { :; }
+        reap_owned_probe_child() { :; } # The PID is synthetic: never signal it.
+        "${probe}"
+      ) >"${out}" 2>&1
+      rc=$?
+      set -e
+      if [[ "${acceptance_status}" == absent ]]; then
+        [[ "${rc}" -eq 0 ]] || { cat "${out}" >&2; die "${probe}: absent acceptance failed"; }
+        grep -Fq 'ok    process-group-kills-' "${out}" \
+          || die "${probe}: absent acceptance did not reach success"
+      else
+        [[ "${rc}" -eq 1 ]] || die "${probe}: ${acceptance_status} acceptance failed to refuse (rc=${rc})"
+        expected='still alive'
+        [[ "${acceptance_status}" != unavailable ]] || expected='presence UNAVAILABLE'
+        grep -Fq "${expected}" "${out}" \
+          || { cat "${out}" >&2; die "${probe}: ${acceptance_status} acceptance lost refusal diagnostic"; }
+        if grep -Fq 'ok    process-group-kills-' "${out}"; then
+          die "${probe}: ${acceptance_status} acceptance reported cleanup success"
+        fi
+      fi
+      ok "${probe}-${acceptance_status}-acceptance"
+    done
+  }
+  check_probe_acceptance probe_cooperative_child
+  check_probe_acceptance probe_term_ignoring_child
+
+  probe_cooperative_child
+  probe_term_ignoring_child
 
   # Eager cleanup of discover scratches; EXIT trap remains as backstop.
   cleanup_junction_temps

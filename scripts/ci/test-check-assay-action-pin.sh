@@ -96,7 +96,7 @@ expect_fail() {
     cat "${scratch}/err" >&2
     exit 1
   fi
-  echo "ok    ${name} (owner gate failed)"
+  echo "ok    ${name}"
 }
 
 expect_ok() {
