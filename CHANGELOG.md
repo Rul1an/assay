@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay evidence show --format json` includes `content_hash_scope`, supplied by the
+  shared public `assay_evidence::crypto::id::content_hash_scope()` API. It describes
+  the reader's hash inputs and separates event-file, run-root and archive integrity
+  layers (#2777, #2785). It does not reconcile `manifest.algorithms`, authenticate a
+  producer or establish evidence completeness.
+
+### Fixed
+- `assay-mcp-server` reports a pre-parse message-size refusal as JSON-RPC error
+  `-32000`, with a null request id and `data.kind: transport_limit`, rather than a
+  tool result. The session remains available for subsequent requests (#2779).
+- `assay-mcp-server` classifies malformed `tools/call` envelopes and unknown tools
+  as JSON-RPC `-32602` errors before dispatch, with distinct fixed error kinds and
+  no reflected tool-name or argument values (#2776, #2780). These server changes
+  also apply when that binary is packaged in an MCP bundle; they do not establish
+  authenticated Claude or Codex host compatibility.
+- The `assay` CLI's trace path measures string truncation in UTF-8 bytes and records
+  escaped RFC 6901 field paths, including array indices. Trace verification reports
+  stage-local truncation shape separately from missing prompts, where exact prompt
+  coverage cannot be established (#2786, #2795, #2804).
+- Trace storage updates a Step's content hash and truncation metadata together with
+  its replacement content, preventing provenance from the previous value from
+  surviving an upsert (#2787, #2805). This is the bounded storage repair; it does
+  not introduce the separately planned trace-v7 schema.
+
 ### Changed
 - Open the Assay 6.1 source line so post-`v6.0.0` minor-compatible public API work can declare
   a version increment that covers it. The workspace version, internal dependency declarations,
