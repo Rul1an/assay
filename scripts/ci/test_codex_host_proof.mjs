@@ -56,6 +56,171 @@ const FAKE = path.join(HERE, "fixtures/codex-host-proof/fake-app-server.mjs");
 const DRIVER_SRC = fs.readFileSync(path.join(HERE, "codex_host_proof.mjs"), "utf8");
 const VALIDATOR_SRC = fs.readFileSync(path.join(HERE, "codex_host_proof_validator.mjs"), "utf8");
 
+test("#2823: package verification recomputes bytes and binds the declared package", async (t) => {
+  const validator = await import("./codex_host_proof_validator.mjs");
+  assert.equal(typeof validator.verifyAssayPackage, "function");
+  const root = scratch();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const bytes = Buffer.from("synthetic package bytes, not published evidence");
+  const { createHash } = await import("node:crypto");
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  const source = { route: "crates-io", reference: "assay-mcp-server@6.0.0" };
+  const row = { name: "assay-mcp-server", vers: "6.0.0", cksum: digest, yanked: false };
+  const metadata = {
+    package: "assay-mcp-server 6.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+    version_req: "=6.0.0", bins: ["assay-mcp-server"],
+    profile: "release", target: "aarch64-apple-darwin", rustc: "rustc test fixture",
+  };
+  const files = {
+    package: path.join(root, "package"),
+    index: path.join(root, "index"),
+    installation: path.join(root, "installation"),
+  };
+  const restore = () => {
+    fs.writeFileSync(files.package, bytes);
+    fs.writeFileSync(files.index, JSON.stringify(row));
+    fs.writeFileSync(files.installation, JSON.stringify(metadata));
+  };
+  restore();
+  const verify = (declared = source) => validator.verifyAssayPackage(files, declared);
+  assert.equal(verify().packageSha256, digest);
+  // Cargo's observed verbose layout, with a synthetic compiler commit identifier.
+  const verboseRustc = "rustc 1.92.0 (abcdef012 2025-12-08)\nbinary: rustc\ncommit-hash: abcdef0123456789abcdef0123456789abcdef0123\ncommit-date: 2025-12-08\nhost: aarch64-apple-darwin\nrelease: 1.92.0\nLLVM version: 21.1.3\n";
+  // Each line stays below the per-line ceiling, isolating the total ceiling.
+  const multilineAtLimit = [
+    "x".repeat(1023) + "\n" + "y".repeat(1024),
+    "x".repeat(1023) + "\r\n" + "y".repeat(1023),
+  ];
+  for (const rustc of [verboseRustc, verboseRustc.replaceAll("\n", "\r\n"), "x".repeat(2048), ...multilineAtLimit]) {
+    fs.writeFileSync(files.installation, JSON.stringify({ ...metadata, rustc }));
+    assert.equal(verify().packageSha256, digest, "bounded Cargo compiler metadata accepted");
+  }
+  const multilineOverLimit = multilineAtLimit.map((rustc) => rustc + "y");
+  for (const rustc of ["", "x".repeat(2049), ...multilineOverLimit, "rustc\rhidden", "rustc\u0000", "rustc\tvalue", "rustc\u0085", "rustc\u2028", "rustc\u202e", "rustc\ufeff"]) {
+    fs.writeFileSync(files.installation, JSON.stringify({ ...metadata, rustc }));
+    assert.throws(verify, /Cargo installation metadata/, "hostile or unbounded compiler metadata refused");
+  }
+  restore();
+  for (const [name, edit] of [
+    ["changed package", () => fs.appendFileSync(files.package, "changed")],
+    ["wrong checksum", () => fs.writeFileSync(files.index, JSON.stringify({ ...row, cksum: "0".repeat(64) }))],
+    ["wrong crate", () => fs.writeFileSync(files.index, JSON.stringify({ ...row, name: "other" }))],
+    ["wrong version", () => fs.writeFileSync(files.index, JSON.stringify({ ...row, vers: "6.0.1" }))],
+    ["yanked", () => fs.writeFileSync(files.index, JSON.stringify({ ...row, yanked: true }))],
+    ["wrong installation", () => fs.writeFileSync(files.installation, JSON.stringify({ ...metadata, version_req: "=6.0.1" }))],
+    ["missing bytes", () => fs.unlinkSync(files.package)],
+    ["oversized bytes", () => fs.writeFileSync(files.package, Buffer.alloc(4 * 1024 * 1024 + 1))],
+  ]) {
+    restore(); edit();
+    assert.throws(verify, undefined, name);
+    restore(); assert.equal(verify().packageSha256, digest, `${name} restored control`);
+  }
+  for (const route of ["local-build", "host-bundled", "github-release"]) {
+    assert.throws(() => verify({ ...source, route }), undefined, route);
+  }
+  fs.writeFileSync(files.index, JSON.stringify(row, null, 2));
+  assert.equal(verify().packageSha256, digest, "format-only no-op stays green");
+});
+
+test("#2823: live journeys require package evidence at the final outcome funnel", async () => {
+  const { requiredCellsForJourney, driverOutcomeExit } = await import("./codex_host_proof_validator.mjs");
+  for (const journey of ["discovery", "failures", "tool"]) {
+    const required = requiredCellsForJourney(journey, "host-observation");
+    assert.ok(required.includes("installRouteAdmissible"));
+    assert.ok(required.includes("installPackageVerified"));
+    const cells = Object.fromEntries([...CELLS, ...required].map((key) => [key, { status: "pass" }]));
+    const pack = { childExit: 0, truncated: false, streamUnavailable: false, captureMode: "host-observation" };
+    assert.equal(driverOutcomeExit(pack, cells, journey), 0);
+    for (const key of ["installRouteAdmissible", "installPackageVerified"]) {
+      for (const status of ["unavailable", "fail", "not_applicable"]) {
+        cells[key] = { status };
+        assert.notEqual(driverOutcomeExit(pack, cells, journey), 0, `${journey}/${key}/${status}`);
+      }
+      delete cells[key];
+      assert.notEqual(driverOutcomeExit(pack, cells, journey), 0);
+      cells[key] = { status: "pass" };
+    }
+  }
+});
+
+test("#2823: missing package prevents even the first version probe", (t) => {
+  const root = scratch();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const codexMarker = path.join(root, "codex-executed");
+  const assayMarker = path.join(root, "assay-executed");
+  const codex = writeMarkedBin("codex", codexMarker, "codex-fixture/0.0.0");
+  const assay = writeMarkedBin("assay-mcp-server", assayMarker, "assay-mcp-server 6.0.0");
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${path.dirname(codex)}${path.delimiter}${path.dirname(assay)}${path.delimiter}${oldPath}`;
+  try {
+    assert.throws(() => resolveHostIdentityProduction({
+      captureMode: "host-observation", proofRoot: root,
+      installSources: { ...TEST_INSTALL_SOURCES, assayMcp: { route: "crates-io", reference: "assay-mcp-server@6.0.0" } },
+    }), /package/i);
+    assert.equal(fs.existsSync(codexMarker), false);
+    assert.equal(fs.existsSync(assayMarker), false);
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("#2823: retained package is rechecked by the consumer, including forged stored results", (t) => {
+  const proofRoot = portableLiveProofRoot();
+  t.after(() => fs.rmSync(proofRoot, { recursive: true, force: true }));
+  const result = driveCli("valid", "failures", { captureMode: "host-observation", proofRoot });
+  const manifest = JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8"));
+  assert.equal(manifest.schema, "assay.codex-host-proof.v6");
+  const control = validateProofRoot(proofRoot);
+  assert.equal(control.classified.cells.installPackageVerified.status, "pass", result.stderr);
+  assert.equal(control.classified.cells.installRouteAdmissible.status, "pass");
+  assert.equal(control.externalAttestation, "not_provided");
+  const file = path.join(proofRoot, "assay-package.crate");
+  const bytes = fs.readFileSync(file);
+  fs.appendFileSync(file, "altered");
+  const changed = validateProofRoot(proofRoot);
+  assert.equal(changed.ok, false);
+  assert.equal(changed.classified.cells.installPackageVerified.status, "fail");
+  assert.ok(changed.reasons.includes("stored classification disagrees with recomputed classification"));
+  fs.writeFileSync(file, bytes);
+  assert.equal(validateProofRoot(proofRoot).classified.cells.installPackageVerified.status, "pass");
+  manifest.packageVerification.binarySha256 = "0".repeat(64);
+  fs.writeFileSync(path.join(proofRoot, "manifest.json"), stableStringify(manifest));
+  assert.equal(validateProofRoot(proofRoot).classified.cells.installPackageVerified.status, "fail");
+});
+
+test("#2823: a package changed by the version probe cannot reach host spawn", (t) => {
+  for (const changePackage of [false, true]) {
+    const proofRoot = portableLiveProofRoot();
+    const root = scratch();
+    t.after(() => fs.rmSync(proofRoot, { recursive: true, force: true }));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const marker = path.join(root, "host-spawned");
+    const codexBin = path.join(root, "codex");
+    const projectRoot = seedProject();
+    writePortableNodeExecutable(codexBin, `
+import fs from "node:fs";
+import { spawn } from "node:child_process";
+if (process.argv.includes("--version")) {
+  if (${changePackage}) fs.appendFileSync(${JSON.stringify(path.join(proofRoot, "assay-package.crate"))}, "changed after first check");
+  process.stdout.write("codex-shadow/0.0.0\\n");
+} else {
+  fs.writeFileSync(${JSON.stringify(marker)}, "host started");
+  const child = spawn(${JSON.stringify(process.execPath)}, ${JSON.stringify([FAKE, "--scenario", "valid", "--project-root", projectRoot])}, { stdio: "inherit" });
+  const stop = () => { try { child.kill("SIGTERM"); } catch {} };
+  process.on("SIGTERM", stop);
+  child.on("close", code => process.exit(code ?? 1));
+}
+`);
+    const run = driveCli("valid", "discovery", { captureMode: "host-observation", proofRoot, projectRoot, codexBin });
+    assert.equal(fs.existsSync(marker), !changePackage,
+      "the changed package must stop host spawn; the unchanged control must reach it");
+    if (changePackage) {
+      assert.notEqual(run.status, 0);
+      assert.match(run.stderr, /package.*checksum|checksum.*mismatch/i);
+    } else {
+      assert.equal(validateProofRoot(proofRoot).classified.cells.installPackageVerified.status, "pass");
+    }
+  }
+});
+
 test("#2813: shared itemsView validation preserves the closed vocabulary and legacy absence", async () => {
   const { turnItemsViewReason } = await import("./codex_host_proof_validator.mjs");
   assert.equal(typeof turnItemsViewReason, "function");
@@ -252,16 +417,29 @@ child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
 }
 
 function writeShadowMcp() {
-  const bin = path.join(scratch(), "assay-mcp-server");
+  const prefix = scratch();
+  fs.mkdirSync(path.join(prefix, "bin"));
+  const bin = path.join(prefix, "bin", "assay-mcp-server");
   writePortableNodeExecutable(
     bin,
     `if (process.argv.includes("--version")) {
-  process.stdout.write("assay-mcp-server-shadow/0.0.0\\n");
+  process.stdout.write("assay-mcp-server 0.0.0-test\\n");
   process.exit(0);
 }
-process.stdout.write("assay-mcp-server-shadow/0.0.0\\n");
+process.stdout.write("assay-mcp-server 0.0.0-test\\n");
 `,
   );
+  const bytes = "synthetic package, never a published installation";
+  fs.writeFileSync(path.join(prefix, "fixture.crate"), bytes);
+  fs.writeFileSync(path.join(prefix, "index.json"), JSON.stringify({
+    name: "assay-mcp-server", vers: "0.0.0-test", yanked: false, cksum: sha256Utf8(bytes),
+  }));
+  fs.writeFileSync(path.join(prefix, ".crates2.json"), JSON.stringify({ installs: {
+    "assay-mcp-server 0.0.0-test (registry+https://github.com/rust-lang/crates.io-index)": {
+      version_req: "=0.0.0-test", bins: ["assay-mcp-server"], profile: "release",
+      target: "fixture-target", rustc: "fixture-rustc",
+    },
+  } }));
   return bin;
 }
 
@@ -286,6 +464,12 @@ function driveCli(scenario, journey = "tool", extra = {}) {
     String(extra.timeoutMs ?? 4000),
     ...CLI_INSTALL_SOURCE_ARGS,
   ];
+  if (extra.captureMode === "host-observation") {
+    const prefix = path.dirname(path.dirname(mcpBin));
+    args.push("--assay-package", path.join(prefix, "fixture.crate"),
+      "--assay-index-row", path.join(prefix, "index.json"),
+      "--assay-cargo-metadata", path.join(prefix, ".crates2.json"));
+  }
   if (extra.allowLiveTurn) {
     args.push("--allow-live-turn");
   }
@@ -319,7 +503,7 @@ test("driver calls the validator classification function; no extra classify modu
 test("synthetic positive control: cells pass without inventing external attestation", async () => {
   const { classified, manifest, proofRoot, driverOutcome, childExitCode, events } = await drive("valid");
   assert.equal(manifest.captureMode, "synthetic-fixture");
-  assert.equal(manifest.schema, "assay.codex-host-proof.v5");
+  assert.equal(manifest.schema, "assay.codex-host-proof.v6");
   assert.equal(childExitCode, 0);
   assert.equal(driverOutcome.exitCode, 0);
   assert.equal(manifest.childExitCode, 0);
@@ -1137,7 +1321,7 @@ child.on("close", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
       assert.notEqual(hostCli.status, 0);
       assert.deepEqual(
         proofFiles(hostCli.proofRoot),
-        retainedFilesWithIdentity,
+        [...retainedFilesWithIdentity, "assay-package.crate", "assay-registry-row.json", "assay-install.json"].sort(),
         `host-observation ${row.journey} failure must retain its proof-owned subjects: ${hostCli.stderr || hostCli.stdout}`,
       );
       const checked = validateProofRoot(hostCli.proofRoot);
@@ -2142,7 +2326,7 @@ test("PATH shadows drive observed Codex and Assay MCP identities", () => {
     assert.deepEqual(ignored.codex.installSource, TEST_INSTALL_SOURCES.codex);
     assert.deepEqual(ignored.assayMcp.installSource, TEST_INSTALL_SOURCES.assayMcp);
     assert.match(ignored.codex.version, /codex-shadow/);
-    assert.match(ignored.assayMcp.version, /assay-mcp-server-shadow/);
+    assert.equal(ignored.assayMcp.version, "assay-mcp-server 0.0.0-test");
     assert.notEqual(ignored.codex.path, fs.realpathSync(flagCodex));
     assert.notEqual(ignored.assayMcp.path, fs.realpathSync(flagMcp));
   } finally {

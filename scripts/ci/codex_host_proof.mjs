@@ -26,6 +26,7 @@ import {
   HARD_MAX_TIMEOUT_MS,
   HOST_ENV_NAMES,
   HOST_SUBJECTS,
+  PACKAGE_SUBJECTS,
   SCHEMA,
   SKILL_NAME,
   boundedPositiveInt,
@@ -47,6 +48,11 @@ import {
   CWD_MATCHES_PROJECT_ROOT,
   projectRetainedEvent,
   installSourceBound,
+  assayPackageVersion,
+  packageFiles,
+  verifyAssayPackage,
+  readBoundedFile,
+  parseJsonBytes,
   projectHostIdentity,
   proofAllowlist,
   requirePrivateDirectory,
@@ -61,6 +67,7 @@ import {
 } from "./codex_host_proof_validator.mjs";
 
 const INSTALL_SUBJECTS = Object.freeze(["codex", "codexCodeModeHost", "assayMcp"]);
+const PACKAGE_VERIFICATION = Symbol("producer-package-verification");
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BYTES = 1_048_576;
@@ -105,6 +112,17 @@ export function parseArgs(argv) {
       case "--allow-live-turn":
         out.allowLiveTurn = true;
         break;
+      case "--assay-package":
+      case "--assay-index-row":
+      case "--assay-cargo-metadata": {
+        const key = { "--assay-package": "package", "--assay-index-row": "index", "--assay-cargo-metadata": "installation" }[arg];
+        out.packageInputs ??= {};
+        if (out.packageInputs[key]) throw new Error(`duplicate ${arg}`);
+        const value = next();
+        if (!value || !path.isAbsolute(value)) throw new Error(`${arg} requires an absolute file path`);
+        out.packageInputs[key] = value;
+        break;
+      }
       // Install source is declared, never inferred: how a binary got onto this
       // machine is not observable from the binary the host launches. Each token is
       // validated structurally here so nothing free-form reaches the record.
@@ -361,6 +379,37 @@ function probeAssayMcpVersion(binary) {
   return probeVersion(binary, "assay-mcp-server");
 }
 
+function retainAssayPackage(options, mcpPath, mcpSnapshot) {
+  const input = options.packageInputs;
+  if (!input?.package || !input.index || !input.installation) throw new Error("Assay package inputs are required before execution");
+  if (path.basename(input.installation) !== ".crates2.json" ||
+      fs.realpathSync(path.join(path.dirname(input.installation), "bin", "assay-mcp-server")) !== fs.realpathSync(mcpPath)) {
+    throw new Error("Assay package installation metadata must belong to the selected binary prefix");
+  }
+  const source = options.installSources.assayMcp;
+  const version = assayPackageVersion(source);
+  const key = `assay-mcp-server ${version} (registry+https://github.com/rust-lang/crates.io-index)`;
+  const cargo = parseJsonBytes(readBoundedFile(input.installation, HARD_MAX_BYTES), HARD_MAX_BYTES);
+  const entry = cargo?.installs?.[key];
+  if (!entry) throw new Error("Assay package is absent from Cargo installation metadata");
+  const installation = { package: key, version_req: entry.version_req, bins: entry.bins,
+    profile: entry.profile, target: entry.target, rustc: entry.rustc };
+  const chunks = [readBoundedFile(input.package, HARD_MAX_BYTES),
+    readBoundedFile(input.index, 256 * 1024), Buffer.from(stableStringify(installation))];
+  const created = [];
+  try {
+    for (let i = 0; i < PACKAGE_SUBJECTS.length; i += 1) {
+      const file = path.join(options.proofRoot, PACKAGE_SUBJECTS[i]);
+      fs.writeFileSync(file, chunks[i], { flag: "wx", mode: 0o600 });
+      created.push(file);
+    }
+    return { ...verifyAssayPackage(packageFiles(options.proofRoot), source), binarySha256: sha256File(mcpSnapshot) };
+  } catch (error) {
+    for (const file of created) fs.unlinkSync(file);
+    throw error;
+  }
+}
+
 export function resolveHostIdentity(options = {}) {
   const declared = options.installSources ?? {};
   const missing = INSTALL_SUBJECTS.filter((s) => !declared[s]);
@@ -398,6 +447,9 @@ export function resolveHostIdentity(options = {}) {
     snapshotNamedBinary(codexSource, snapRoot, "codex.snapshot", snapOpts);
     snapshotNamedBinary(codeModeHostSource, snapRoot, codeModeHostName, snapOpts);
     snapshotNamedBinary(mcpPath, snapRoot, "assay-mcp-server.snapshot", snapOpts);
+    // Before either --version probe: a host executable can itself start Assay.
+    const packageVerification = options.captureMode === "host-observation"
+      ? retainAssayPackage(options, mcpPath, mcpSnap) : null;
     const identity = {
       os: os.platform(),
       arch: os.arch(),
@@ -423,6 +475,10 @@ export function resolveHostIdentity(options = {}) {
       codexPath: codexSnap,
       mcpPath: mcpSnap,
     };
+    identity[PACKAGE_VERIFICATION] = packageVerification;
+    if (packageVerification && identity.assayMcp.version !== `assay-mcp-server ${packageVerification.version}`) {
+      throw new Error("Assay package version and probed binary version disagree");
+    }
     return identity;
   } catch (error) {
     for (const subject of [codexSnap, codeModeHostSnap, mcpSnap]) {
@@ -540,7 +596,7 @@ function retainedIdentityProjection(events, projectRoot) {
 }
 
 function writeProofFiles(options, pack) {
-  pack = { ...pack, events: retainedIdentityProjection(pack.events, options.projectRoot) };
+  pack = { ...pack, captureMode: options.captureMode, events: retainedIdentityProjection(pack.events, options.projectRoot) };
   const initialize = initializeFromEvents(pack.events, options.journey);
   const hostIdentity = projectHostIdentity(options.hostIdentity ?? null);
   const invocationArgv = persistableArgv(
@@ -560,6 +616,8 @@ function writeProofFiles(options, pack) {
     streamUnavailable: pack.streamUnavailable,
     initialize,
     hostIdentity,
+    packageVerification: options.hostIdentity?.[PACKAGE_VERIFICATION] ?? null,
+    proofRoot: options.proofRoot,
     invocation: { argv: invocationArgv, envNames: [...HOST_ENV_NAMES] },
     expected: {
       projectRoot: options.projectRoot,
@@ -605,10 +663,11 @@ function writeProofFiles(options, pack) {
     invocation: record.invocation,
     initialize,
     hostIdentity,
+    packageVerification: record.packageVerification,
     expected: record.expected,
     hashes: { events: sha256Utf8(eventsText) },
     allowlist: [
-      ...proofAllowlist(hostSubjectsRequired(options.captureMode, options.hostIdentity)),
+      ...proofAllowlist(hostSubjectsRequired(options.captureMode, options.hostIdentity), record.packageVerification != null),
     ].sort(),
   };
   writeJson(path.join(options.proofRoot, "manifest.json"), manifest);
@@ -694,7 +753,20 @@ export async function runProof(options) {
     options.hostIdentity = resolveHostIdentity({
       proofRoot: options.proofRoot,
       installSources: options.installSources,
+      captureMode: options.captureMode,
+      packageInputs: options.packageInputs,
     });
+  }
+  if (options.captureMode === "host-observation") {
+    // A supplied identity must not bypass the production acquisition gate.
+    const expected = options.hostIdentity?.[PACKAGE_VERIFICATION];
+    if (!expected || stableStringify({
+      ...verifyAssayPackage(packageFiles(options.proofRoot), options.hostIdentity.assayMcp.installSource),
+      binarySha256: sha256File(options.hostIdentity.assayMcp.path),
+    }) !== stableStringify(expected)) {
+      if (options.testOnlyChild) options.testOnlyChild.kill("SIGTERM");
+      throw new Error("Assay package verification is missing or changed before host execution");
+    }
   }
   let codexHome;
   try {
