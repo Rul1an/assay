@@ -1,0 +1,634 @@
+{
+  "schema": "assay.agent_golden_path.v1",
+  "schema_version": 1,
+  "generated_by": "scripts/docs/generate-agent-golden-path.py",
+  "source_version": "6.1.0",
+  "source_tag": "v6.1.0",
+  "release_version": "6.0.0",
+  "release_tag": "v6.0.0",
+  "source_issue": 2154,
+  "journey_issue": 1975,
+  "working_directory_resolver": {
+    "operation": "replace",
+    "canonical_root": "examples/privileged-action-gate",
+    "by_surface": {
+      "source": {
+        "kind": "repository_relative",
+        "value": "examples/privileged-action-gate"
+      },
+      "claude_plugin": {
+        "kind": "host_path_template",
+        "value": "${CLAUDE_PLUGIN_ROOT}/skills/assay-golden-path/assets/privileged-action-gate"
+      },
+      "agent_plugin": {
+        "kind": "skill_relative",
+        "value": "assets/privileged-action-gate"
+      }
+    }
+  },
+  "non_claims": [
+    "The contract records current behavior; gap rows are not clean results.",
+    "Schema identity conventions outside this narrow contract remain owned by issue #2167.",
+    "A passing evidence integrity check does not prove an external side effect.",
+    "An explicit config whose read returns NotFound is E_MISSING_CONFIG; PermissionDenied, IsADirectory, Other, and YAML failures stay E_CFG_PARSE. That class is taken from the config-read I/O kind, not from a second exists() probe. Windows EACCES kind parity is not claimed, and the permission fixture is skipped as root.",
+    "Read config_check.status before reading data_diagnostics: only the value checked means a config was read, and on skipped the absent data_diagnostics records an unchecked config rather than a clean one."
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "id": "install-check",
+      "label": "Install check",
+      "binary": "assay",
+      "outcomes": [
+        {
+          "name": "success",
+          "label": "Success",
+          "exit_code": 0,
+          "argv": [
+            "version"
+          ],
+          "stdout": {
+            "kind": "text",
+            "document": null
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null
+        }
+      ],
+      "stdout_summary": "One `MAJOR.MINOR.PATCH` line.",
+      "failure_summary": "A missing or unstartable binary is a host spawn failure: no Assay process runs, so Assay produces no stdout or exit code.",
+      "command": "assay version"
+    },
+    {
+      "step": 2,
+      "id": "preflight",
+      "label": "Preflight",
+      "binary": "assay",
+      "outcomes": [
+        {
+          "name": "success",
+          "label": "Success",
+          "exit_code": 0,
+          "argv": [
+            "doctor",
+            "--format",
+            "json",
+            "--config",
+            "<config>"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.doctor_report.v0"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null,
+          "config_check": "checked"
+        },
+        {
+          "name": "no-config",
+          "label": "no config examined",
+          "exit_code": 0,
+          "argv": [
+            "doctor",
+            "--format",
+            "json"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.doctor_report.v0"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null,
+          "config_check": "skipped"
+        },
+        {
+          "name": "diagnostics-error",
+          "label": "config examined, error-severity diagnostic",
+          "exit_code": 2,
+          "argv": [
+            "doctor",
+            "--format",
+            "json",
+            "--config",
+            "<config>",
+            "--trace-file",
+            "<trace>"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.doctor_report.v0"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null,
+          "config_check": "checked"
+        },
+        {
+          "name": "missing-config",
+          "label": "absent explicit config",
+          "exit_code": 2,
+          "argv": [
+            "doctor",
+            "--format",
+            "json",
+            "--config",
+            "<config>"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.doctor_report.v0"
+          },
+          "reason_code": "E_MISSING_CONFIG",
+          "next_step": "Run: assay init to create a config file",
+          "gap_issue": null,
+          "config_error_code": "E_MISSING_CONFIG"
+        },
+        {
+          "name": "invalid-config",
+          "label": "invalid explicit config",
+          "exit_code": 2,
+          "argv": [
+            "doctor",
+            "--format",
+            "json",
+            "--config",
+            "<config>"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.doctor_report.v0"
+          },
+          "reason_code": "E_CFG_PARSE",
+          "next_step": "Run argv: [\"assay\",\"doctor\",\"--config=<config>\",\"--format\",\"json\"]",
+          "gap_issue": null,
+          "config_error_code": "E_CFG_PARSE"
+        }
+      ],
+      "stdout_summary": "Parses as `assay.doctor_report.v0`. Every report carries `config_check.status`, one of `checked`, `skipped` or `failed`. Exit `0` on its own does not mean a config was examined: read `config_check.status` to tell a clean config from no config. A config that was examined and carries an error-severity `data_diagnostics[]` entry exits `2`, the class `decide_exit` gives that diagnostic for `assay validate` and `assay run` too; the text channel returns the same class for the same tree. A config failure remains JSON and carries the top-level `reason_code` and `next_step` alongside `config_error.code`.",
+      "failure_summary": "An explicit config that will not load exits `2`. `assay run` gives the same class for the same file. A proven-absent path publishes `E_MISSING_CONFIG` and `assay init`; an unloadable path publishes `E_CFG_PARSE` and the fused doctor argv.",
+      "command": "assay doctor --format json --config <config>"
+    },
+    {
+      "step": 3,
+      "id": "starter-files",
+      "label": "Starter files",
+      "binary": "assay",
+      "outcomes": [
+        {
+          "name": "success",
+          "label": "Success",
+          "exit_code": 0,
+          "argv": [
+            "init",
+            "--preset",
+            "dev",
+            "--hello-trace"
+          ],
+          "stdout": {
+            "kind": "text",
+            "document": null
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null
+        },
+        {
+          "name": "unknown-preset",
+          "label": "unknown preset",
+          "exit_code": 2,
+          "argv": [
+            "init",
+            "--preset",
+            "not-a-preset"
+          ],
+          "stdout": {
+            "kind": "text",
+            "document": null
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null
+        },
+        {
+          "name": "success-json",
+          "label": "success with `--format json`",
+          "exit_code": 0,
+          "argv": [
+            "init",
+            "--preset",
+            "dev",
+            "--hello-trace",
+            "--format",
+            "json"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.init_report.v0"
+          },
+          "reason_code": "",
+          "next_step": "Run argv: [\"assay\",\"validate\",\"--config=eval.yaml\",\"--trace-file=traces/hello.jsonl\",\"--format\",\"json\"]",
+          "gap_issue": null
+        },
+        {
+          "name": "unknown-preset-json",
+          "label": "unknown preset with `--format json`",
+          "exit_code": 2,
+          "argv": [
+            "init",
+            "--preset",
+            "not-a-preset",
+            "--format",
+            "json"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.init_report.v0"
+          },
+          "reason_code": "E_INVALID_ARGS",
+          "next_step": "Run: assay --help for usage",
+          "gap_issue": null
+        }
+      ],
+      "stdout_summary": "Default `text` is human progress; success ends with `Next: assay validate --config=eval.yaml --trace-file=traces/hello.jsonl --format json`, and a failing run writes partial progress text rather than the fatal diagnosis. `--format json` replaces that stream with one `assay.init_report.v0` document naming `reason_code`, `next_step`, and the files created and skipped.",
+      "failure_summary": "Under `--format json` a rejected `--preset` publishes `E_INVALID_ARGS` and a `next_step` on stdout. Failures the reason-code registry does not name, such as a filesystem write error, still produce no document: stdout is empty and the diagnosis stays on stderr.",
+      "command": "assay init --preset dev --hello-trace"
+    },
+    {
+      "step": 4,
+      "id": "policy-validation",
+      "label": "Policy validation",
+      "binary": "assay",
+      "outcomes": [
+        {
+          "name": "valid",
+          "label": "Valid",
+          "exit_code": 0,
+          "argv": [
+            "policy",
+            "validate",
+            "--input",
+            "<policy>",
+            "--format",
+            "json"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.run_summary.v1"
+          },
+          "reason_code": "",
+          "next_step": null,
+          "gap_issue": null
+        },
+        {
+          "name": "malformed",
+          "label": "malformed",
+          "exit_code": 2,
+          "argv": [
+            "policy",
+            "validate",
+            "--input",
+            "<policy>",
+            "--format",
+            "json"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.run_summary.v1"
+          },
+          "reason_code": "E_POLICY_PARSE",
+          "next_step": "Run argv: [\"assay\",\"policy\",\"validate\",\"--input=<policy>\",\"--format\",\"json\"]",
+          "gap_issue": null
+        }
+      ],
+      "stdout_summary": "Both paths parse as `assay.run_summary.v1`; valid has exit `0` and an empty reason, while malformed YAML carries `E_POLICY_PARSE`. Other load or schema failures remain stderr-only until they receive an honest reason code.",
+      "failure_summary": "Malformed policy is exit `2` and names the failing policy in a concrete JSON argv next step. Missing files and schema failures are not classified as parse failures.",
+      "command": "assay policy validate --input <policy> --format json"
+    },
+    {
+      "step": 5,
+      "id": "evaluation-result",
+      "label": "Evaluation result",
+      "binary": "assay",
+      "outcomes": [
+        {
+          "name": "success",
+          "label": "All tests pass",
+          "exit_code": 0,
+          "argv": [
+            "run",
+            "--config",
+            "eval.yaml",
+            "--trace-file",
+            "traces/hello.jsonl",
+            "--format",
+            "json"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.run_report.v1"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null
+        },
+        {
+          "name": "completed-test-failure",
+          "label": "completed run with failed tests",
+          "exit_code": 1,
+          "argv": [
+            "run",
+            "--config",
+            "<config>",
+            "--format",
+            "json"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.run_report.v1"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null,
+          "classification": "completed_test_failure"
+        }
+      ],
+      "stdout_summary": "Both completed outcomes parse as `assay.run_report.v1`; failed results carry `status: fail` inside `results`.",
+      "failure_summary": "Exit `1` is a completed results report, not an early-failure diagnosis; `reason_code` and `next_step` are absent by design.",
+      "command": "assay run --config eval.yaml --trace-file traces/hello.jsonl --format json"
+    },
+    {
+      "step": 6,
+      "id": "protected-action",
+      "label": "Protected action",
+      "binary": "assay-mcp-server",
+      "working_directory": "examples/privileged-action-gate",
+      "outcomes": [
+        {
+          "name": "policy-denied",
+          "label": "Policy-denied call after stdin closes",
+          "exit_code": 0,
+          "argv": [
+            "proxy-enforce",
+            "--upstream-command",
+            "<python>",
+            "--upstream-arg",
+            "-u",
+            "--upstream-arg",
+            "mock_github_mcp.py",
+            "--enforce-policy",
+            "policies/no-allowance.yaml",
+            "--declared-mcp-manifest",
+            "baseline-approved.json"
+          ],
+          "stdout": {
+            "kind": "json_lines",
+            "document": "jsonrpc-2.0"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null,
+          "jsonrpc_error_code": -31999,
+          "origin": "assay-proxy",
+          "reason": "no_declared_allowance"
+        },
+        {
+          "name": "startup-failure",
+          "label": "startup input failure",
+          "exit_code": 1,
+          "argv": [
+            "proxy-enforce",
+            "--upstream-command",
+            "<python>",
+            "--enforce-policy",
+            "missing.yaml",
+            "--declared-mcp-manifest",
+            "missing.json"
+          ],
+          "stdout": {
+            "kind": "empty",
+            "document": null
+          },
+          "reason_code": "proxy_enforce_policy_invalid",
+          "next_step": "Check --enforce-policy and retry proxy-enforce.",
+          "gap_issue": null
+        }
+      ],
+      "stdout_summary": "The denied `tools/call` response pins `error.code: -31999`, `error.data.origin: assay-proxy`, and `error.data.reason: no_declared_allowance`.",
+      "failure_summary": "Policy denial is not a process failure. A missing enforcement policy fails startup with empty stdout and one JSON `startup_failure` event on stderr, including `reason_code: proxy_enforce_policy_invalid` and an actionable `next_step`.",
+      "command": "assay-mcp-server proxy-enforce --upstream-command <python> --upstream-arg -u --upstream-arg mock_github_mcp.py --enforce-policy policies/no-allowance.yaml --declared-mcp-manifest baseline-approved.json"
+    },
+    {
+      "step": 7,
+      "id": "evidence-inspection",
+      "label": "Evidence inspection",
+      "binary": "assay",
+      "outcomes": [
+        {
+          "name": "valid",
+          "label": "Valid",
+          "exit_code": 0,
+          "argv": [
+            "evidence",
+            "show",
+            "--format",
+            "json",
+            "--",
+            "<bundle>"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": null
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null
+        },
+        {
+          "name": "verification-disabled",
+          "label": "Valid with verification disabled",
+          "exit_code": 0,
+          "argv": [
+            "evidence",
+            "show",
+            "--format",
+            "json",
+            "--no-verify",
+            "--",
+            "<bundle>"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": null
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null
+        },
+        {
+          "name": "tampered",
+          "label": "integrity failure",
+          "exit_code": 2,
+          "argv": [
+            "evidence",
+            "show",
+            "--format",
+            "json",
+            "--",
+            "<bundle>"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.run_summary.v1"
+          },
+          "reason_code": "E_EVIDENCE_INTEGRITY",
+          "next_step": "Obtain an undamaged bundle from its producer; the content this bundle carries does not match what it records",
+          "gap_issue": null
+        },
+        {
+          "name": "unreadable",
+          "label": "unreadable bundle",
+          "exit_code": 2,
+          "argv": [
+            "evidence",
+            "show",
+            "--format",
+            "json",
+            "--",
+            "<bundle>"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.run_summary.v1"
+          },
+          "reason_code": "E_EVIDENCE_UNREADABLE",
+          "next_step": "Run argv: [\"assay\",\"evidence\",\"show\",\"--format\",\"json\",\"--\",\"<bundle>\"]",
+          "gap_issue": null
+        },
+        {
+          "name": "format-contract-failure",
+          "label": "format-contract failure",
+          "exit_code": 2,
+          "argv": [
+            "evidence",
+            "show",
+            "--format",
+            "json",
+            "--",
+            "<bundle>"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.run_summary.v1"
+          },
+          "reason_code": "E_EVIDENCE_CONTRACT",
+          "next_step": "Obtain or reissue evidence that conforms to the declared bundle contract; this bundle was readable and does not satisfy that contract",
+          "gap_issue": null
+        }
+      ],
+      "stdout_summary": "Success parses as an object containing `manifest`, `events`, `verify_mode`, and `content_hash_scope`; the registered values are `enabled` and `disabled`, with `--no-verify` producing `disabled`. A recorded-value mismatch parses as `assay.run_summary.v1` with `E_EVIDENCE_INTEGRITY`; an unreadable path uses `E_EVIDENCE_UNREADABLE`; a typed `Contract*` defect uses `E_EVIDENCE_CONTRACT`.",
+      "failure_summary": "Only the four verifier codes that establish a recorded-value mismatch map to `E_EVIDENCE_INTEGRITY`; I/O, gzip, and tar failures use `E_EVIDENCE_UNREADABLE`. Typed `Contract*` failures encountered while opening the bundle publish `E_EVIDENCE_CONTRACT` with a bounded prose `next_step`. Event-line deserialization plus LIMIT/PATH and PROFILE, where they apply, remain exit `2` with empty stdout until typed on this command.",
+      "command": "assay evidence show --format json -- <bundle>"
+    },
+    {
+      "step": 8,
+      "id": "offline-profile-verification",
+      "label": "Offline profile verification",
+      "binary": "assay",
+      "outcomes": [
+        {
+          "name": "valid",
+          "label": "Valid",
+          "exit_code": 0,
+          "argv": [
+            "evidence",
+            "verify-privileged-mcp-action",
+            "<bundle>",
+            "--format",
+            "json"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.privileged_mcp_action.verify.report.v0"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null
+        },
+        {
+          "name": "tampered",
+          "label": "integrity or profile failure",
+          "exit_code": 2,
+          "argv": [
+            "evidence",
+            "verify-privileged-mcp-action",
+            "<bundle>",
+            "--format",
+            "json"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.privileged_mcp_action.verify.report.v0"
+          },
+          "reason_code": "E_EVIDENCE_INTEGRITY",
+          "next_step": "Obtain an undamaged bundle from its producer; the content this bundle carries does not match what it records",
+          "gap_issue": null
+        }
+      ],
+      "stdout_summary": "Both paths parse as `assay.privileged_mcp_action.verify.report.v0`. Success has `bundle_integrity: pass` and `verdict: valid` and omits diagnosis. Tamper has `bundle_integrity: fail`, a bounded finding, no verdict, and `E_EVIDENCE_INTEGRITY`.",
+      "failure_summary": "A recorded-value mismatch publishes `E_EVIDENCE_INTEGRITY`. A typed `Contract*` defect publishes `E_EVIDENCE_CONTRACT`. Untyped I/O and archive-read failures publish `E_EVIDENCE_UNREADABLE`. A stage-1 pass whose profile verdict is invalid publishes `E_EVIDENCE_PROFILE_INVALID`. Ceiling refusals and `SecurityPathTraversal` publish `E_EVIDENCE_LIMIT_EXCEEDED` and `E_EVIDENCE_PATH_REJECTED`. Success omits both diagnostic fields. `findings[].detail` may retain the caller argv path. Unreadable `next_step` is shell-free caller-argv (concrete JSON `Run argv` with `--` and the caller path), not a shell string. Other owned codes stay prose.",
+      "command": "assay evidence verify-privileged-mcp-action <bundle> --format json"
+    },
+    {
+      "step": 9,
+      "id": "sarif-projection",
+      "label": "SARIF projection",
+      "binary": "assay-mcp-server",
+      "outcomes": [
+        {
+          "name": "valid",
+          "label": "Valid input",
+          "exit_code": 0,
+          "argv": [
+            "enforcement-sarif",
+            "--input",
+            "-",
+            "--output",
+            "-"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "sarif-2.1.0"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null
+        },
+        {
+          "name": "malformed",
+          "label": "malformed non-empty NDJSON",
+          "exit_code": 1,
+          "argv": [
+            "enforcement-sarif",
+            "--input",
+            "-",
+            "--output",
+            "-"
+          ],
+          "stdout": {
+            "kind": "empty",
+            "document": null
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null
+        }
+      ],
+      "stdout_summary": "Valid input produces SARIF `2.1.0`. A malformed non-empty line produces no SARIF document.",
+      "failure_summary": "Malformed NDJSON fails before projection and names the invalid input line on stderr. Blank lines remain accepted.",
+      "command": "assay-mcp-server enforcement-sarif --input - --output -"
+    }
+  ]
+}

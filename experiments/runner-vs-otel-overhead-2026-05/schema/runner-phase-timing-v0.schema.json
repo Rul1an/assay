@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/docs/experiments/runner-vs-otel-overhead-2026-05/schema/runner-phase-timing-v0.schema.json",
+  "title": "Runner phase timing diagnostics v0",
+  "description": "Experiment-scoped phase timing side-log emitted by assay runner-spike run --phase-timing-log. This is not a Runner archive contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "run_id",
+    "agent_shim",
+    "phases_ms",
+    "exit_code",
+    "signal",
+    "error"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.experiment.runner_phase_timing.v0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "agent_shim": {
+      "type": "string",
+      "minLength": 1
+    },
+    "phases_ms": {
+      "$ref": "#/$defs/phase_timings"
+    },
+    "exit_code": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "signal": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "$defs": {
+    "phase_ms": {
+      "type": "number",
+      "minimum": 0
+    },
+    "phase_timings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preflight_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "cgroup_prepare_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "monitor_attach_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "child_spawn_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "child_runtime_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "event_flush_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "archive_write_ms": {
+          "$ref": "#/$defs/phase_ms"
+        }
+      }
+    }
+  }
+}

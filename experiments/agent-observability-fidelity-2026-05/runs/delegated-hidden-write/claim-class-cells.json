@@ -1,0 +1,78 @@
+[
+  {
+    "schema": "assay.observability.claim_class_cell.v0",
+    "claim_type": "reported_tool_intent",
+    "artifact_role": "external_receipt",
+    "claim_strength": "strong",
+    "claim_basis": "reported",
+    "evidence_refs": [
+      "payload/gates/openai-agents-hidden-write/run-1/extract/layers/sdk.ndjson#seq=0",
+      "payload/gates/openai-agents-hidden-write/run-1/extract/layers/sdk.ndjson#seq=1"
+    ],
+    "notes": [
+      "The OpenAI Agents fixture reports one read_file tool call with tool_call_id tc_runner_policy_001."
+    ],
+    "non_claims": [
+      "does_not_claim_malicious_behavior",
+      "does_not_claim_policy_failure"
+    ]
+  },
+  {
+    "schema": "assay.observability.claim_class_cell.v0",
+    "claim_type": "policy_allow_evidence",
+    "artifact_role": "external_receipt",
+    "claim_strength": "strong",
+    "claim_basis": "reported",
+    "evidence_refs": [
+      "payload/gates/openai-agents-hidden-write/run-1/extract/layers/policy.ndjson#seq=0"
+    ],
+    "notes": [
+      "The policy layer records allow:read_file for tc_runner_policy_001."
+    ],
+    "non_claims": [
+      "does_not_claim_policy_failure",
+      "does_not_claim_tool_safety"
+    ]
+  },
+  {
+    "schema": "assay.observability.claim_class_cell.v0",
+    "claim_type": "measured_filesystem_effect",
+    "artifact_role": "measured_run_archive",
+    "claim_strength": "strong",
+    "claim_basis": "measured",
+    "evidence_refs": [
+      "payload/gates/openai-agents-hidden-write/run-1/extract/layers/kernel.ndjson#seq=1",
+      "payload/gates/openai-agents-hidden-write/run-1/extract/capability-surface.json#/filesystem_paths/0",
+      "payload/gates/openai-agents-hidden-write/run-1/extract/observation-health.json"
+    ],
+    "notes": [
+      "The Runner archive measures a successful workdir-bounded create/truncate write to hidden-write-output.txt.",
+      "Observation health is clean: kernel_layer=complete, ringbuf_drops=0, cgroup_correlation=clean."
+    ],
+    "non_claims": [
+      "does_not_claim_malicious_behavior",
+      "does_not_claim_root_cause"
+    ]
+  },
+  {
+    "schema": "assay.observability.claim_class_cell.v0",
+    "claim_type": "joined_semantic_gap",
+    "artifact_role": "joined_artifacts",
+    "claim_strength": "strong",
+    "claim_basis": "derived",
+    "evidence_refs": [
+      "join-result.json",
+      "scenario-verdict.json",
+      "proof-pack-reference.json"
+    ],
+    "notes": [
+      "The delegated hidden_write run preserves a strong tool_call_id join between reported read_file intent, policy allow evidence, and a measured workdir-bounded filesystem write effect."
+    ],
+    "non_claims": [
+      "does_not_claim_malicious_behavior",
+      "does_not_claim_policy_failure",
+      "does_not_claim_root_cause",
+      "does_not_promote_experiment_schema_to_product_api"
+    ]
+  }
+]

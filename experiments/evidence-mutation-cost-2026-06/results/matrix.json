@@ -1,0 +1,164 @@
+{
+  "schema": "assay.experiment.evidence_mutation_matrix.v0",
+  "threat_model": "post-hoc mutation by a party without the signing key; the run anchor (run_root) is bound by an external signature the attacker cannot forge",
+  "non_goal": "tamper-proof; a host holding code-exec AND the signing key is out of scope and needs external anchoring (transparency log / TSA)",
+  "base_events": 64,
+  "classes": [
+    {
+      "class": "gzip_bitflip",
+      "layer": "internal-verifier",
+      "detected": 447,
+      "noop": 0,
+      "manifest_meta_only": 1,
+      "bypass": 0,
+      "dominant_code": "ContractInvalidJson",
+      "codes": {
+        "ContractInvalidJson": 201,
+        "ContractSchemaVersion": 1,
+        "ContractSequenceGap": 4,
+        "IntegrityEventHash": 88,
+        "IntegrityManifestHash": 1,
+        "IntegrityTar": 152
+      }
+    },
+    {
+      "class": "truncate",
+      "layer": "internal-verifier",
+      "detected": 9,
+      "noop": 0,
+      "manifest_meta_only": 0,
+      "bypass": 0,
+      "dominant_code": "IntegrityIo",
+      "codes": {
+        "IntegrityIo": 6,
+        "IntegrityTar": 3
+      }
+    },
+    {
+      "class": "inject_file",
+      "layer": "internal-verifier",
+      "detected": 1,
+      "noop": 0,
+      "manifest_meta_only": 0,
+      "bypass": 0,
+      "dominant_code": "ContractUnexpectedFile",
+      "codes": {
+        "ContractUnexpectedFile": 1
+      }
+    },
+    {
+      "class": "inject_path_traversal",
+      "layer": "internal-verifier",
+      "detected": 1,
+      "noop": 0,
+      "manifest_meta_only": 0,
+      "bypass": 0,
+      "dominant_code": "SecurityPathTraversal",
+      "codes": {
+        "SecurityPathTraversal": 1
+      }
+    },
+    {
+      "class": "inject_absolute_path",
+      "layer": "internal-verifier",
+      "detected": 1,
+      "noop": 0,
+      "manifest_meta_only": 0,
+      "bypass": 0,
+      "dominant_code": "SecurityPathTraversal",
+      "codes": {
+        "SecurityPathTraversal": 1
+      }
+    },
+    {
+      "class": "event_byte_edit",
+      "layer": "internal-verifier",
+      "detected": 32,
+      "noop": 0,
+      "manifest_meta_only": 0,
+      "bypass": 0,
+      "dominant_code": "ContractInvalidJson",
+      "codes": {
+        "ContractInvalidJson": 23,
+        "ContractRunIdMismatch": 1,
+        "ContractSchemaVersion": 2,
+        "IntegrityEventHash": 4,
+        "IntegrityManifestHash": 2
+      }
+    },
+    {
+      "class": "event_drop",
+      "layer": "internal-verifier",
+      "detected": 1,
+      "noop": 0,
+      "manifest_meta_only": 0,
+      "bypass": 0,
+      "dominant_code": "IntegrityFileSizeMismatch",
+      "codes": {
+        "IntegrityFileSizeMismatch": 1
+      }
+    },
+    {
+      "class": "event_reorder",
+      "layer": "internal-verifier",
+      "detected": 1,
+      "noop": 0,
+      "manifest_meta_only": 0,
+      "bypass": 0,
+      "dominant_code": "ContractSequenceStart",
+      "codes": {
+        "ContractSequenceStart": 1
+      }
+    },
+    {
+      "class": "ndjson_bom",
+      "layer": "internal-verifier",
+      "detected": 1,
+      "noop": 0,
+      "manifest_meta_only": 0,
+      "bypass": 0,
+      "dominant_code": "IntegrityFileSizeMismatch",
+      "codes": {
+        "IntegrityFileSizeMismatch": 1
+      }
+    },
+    {
+      "class": "ndjson_crlf",
+      "layer": "internal-verifier",
+      "detected": 1,
+      "noop": 0,
+      "manifest_meta_only": 0,
+      "bypass": 0,
+      "dominant_code": "IntegrityFileSizeMismatch",
+      "codes": {
+        "IntegrityFileSizeMismatch": 1
+      }
+    },
+    {
+      "class": "tar_duplicate",
+      "layer": "internal-verifier",
+      "detected": 1,
+      "noop": 0,
+      "manifest_meta_only": 0,
+      "bypass": 0,
+      "dominant_code": "ContractDuplicateFile",
+      "codes": {
+        "ContractDuplicateFile": 1
+      }
+    },
+    {
+      "class": "consistent_rewrite",
+      "layer": "run-anchor",
+      "internal_verifier_passed": true,
+      "detected_by_anchor": true,
+      "anchored_run_root": "sha256:907a4f0bc819ca63cdad0cb559a032af739c67cb97b839625ce4c0810f18f625",
+      "mutated_run_root": "sha256:59d9fb47bf279e7edd1ce9dfad6312d853791bbb87e144ec806ce1726071c3fe",
+      "note": "internal verifier alone is insufficient; the run anchor / external signature is what detects this"
+    }
+  ],
+  "gate": {
+    "total_bypass": 0,
+    "total_manifest_meta_only": 1
+  },
+  "documented_limitation": "manifest metadata not referenced by a verifier check is not individually hash-bound (manifest_meta_only); the event evidence (events.ndjson) and the run anchor (run_root) are always hash-checked"
+}
