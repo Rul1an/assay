@@ -86,11 +86,17 @@ test("#2823: package verification recomputes bytes and binds the declared packag
   assert.equal(verify().packageSha256, digest);
   // Cargo's observed verbose layout, with a synthetic compiler commit identifier.
   const verboseRustc = "rustc 1.92.0 (abcdef012 2025-12-08)\nbinary: rustc\ncommit-hash: abcdef0123456789abcdef0123456789abcdef0123\ncommit-date: 2025-12-08\nhost: aarch64-apple-darwin\nrelease: 1.92.0\nLLVM version: 21.1.3\n";
-  for (const rustc of [verboseRustc, verboseRustc.replaceAll("\n", "\r\n"), "x".repeat(2048)]) {
+  // Each line stays below the per-line ceiling, isolating the total ceiling.
+  const multilineAtLimit = [
+    "x".repeat(1023) + "\n" + "y".repeat(1024),
+    "x".repeat(1023) + "\r\n" + "y".repeat(1023),
+  ];
+  for (const rustc of [verboseRustc, verboseRustc.replaceAll("\n", "\r\n"), "x".repeat(2048), ...multilineAtLimit]) {
     fs.writeFileSync(files.installation, JSON.stringify({ ...metadata, rustc }));
     assert.equal(verify().packageSha256, digest, "bounded Cargo compiler metadata accepted");
   }
-  for (const rustc of ["", "x".repeat(2049), "rustc\rhidden", "rustc\u0000", "rustc\tvalue", "rustc\u0085", "rustc\u2028", "rustc\u202e", "rustc\ufeff"]) {
+  const multilineOverLimit = multilineAtLimit.map((rustc) => rustc + "y");
+  for (const rustc of ["", "x".repeat(2049), ...multilineOverLimit, "rustc\rhidden", "rustc\u0000", "rustc\tvalue", "rustc\u0085", "rustc\u2028", "rustc\u202e", "rustc\ufeff"]) {
     fs.writeFileSync(files.installation, JSON.stringify({ ...metadata, rustc }));
     assert.throws(verify, /Cargo installation metadata/, "hostile or unbounded compiler metadata refused");
   }
