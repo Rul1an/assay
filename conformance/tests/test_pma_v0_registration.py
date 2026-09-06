@@ -14,6 +14,7 @@ import re
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "conformance"))
@@ -83,6 +84,7 @@ class CheckedInRow(unittest.TestCase):
         auth = row["authorship"]
         self.assertEqual(auth["kind"], "agent-assisted")
         self.assertEqual(auth["model"], MODEL)
+        self.assertEqual(implementations.authorship_trailer(auth), "Assisted-By: Grok Bot")
         strategy = auth["prompt_strategy"]
         self.assertIn(FREEZE_COMMIT, strategy)
         self.assertIn("other_disclosed", strategy)
@@ -97,6 +99,47 @@ class CheckedInRow(unittest.TestCase):
             "certified conformant",
         ):
             self.assertNotIn(forbidden, blob)
+
+
+class RegistrationConsumerProjectsAuthorship(unittest.TestCase):
+    """Behavioral guard: the checked-in row must call authorship_trailer.
+
+    Line 86 is the only checked-in registry consumer of authorship_trailer for
+    the Grok row. Mapping-suite coverage alone stays green if that call is
+    deleted; this test runs the real consumer under a wrapped projector.
+    """
+
+    EXPECTED_TRAILER = "Assisted-By: Grok Bot"
+
+    def _run_checked_in_row(self) -> None:
+        CheckedInRow("test_row_pins_measured_facts").test_row_pins_measured_facts()
+
+    def test_checked_in_row_invokes_projector_with_grok_authorship(self) -> None:
+        calls: list[tuple[object, str]] = []
+        original = implementations.authorship_trailer
+
+        def wrapped(auth: object) -> str:
+            result = original(auth)
+            calls.append((auth, result))
+            return result
+
+        with mock.patch.object(implementations, "authorship_trailer", wrapped):
+            self._run_checked_in_row()
+
+        self.assertEqual(len(calls), 1, "checked-in row must invoke authorship_trailer once")
+        auth, result = calls[0]
+        self.assertIsInstance(auth, dict)
+        self.assertEqual(auth["kind"], "agent-assisted")
+        self.assertEqual(auth["model"], MODEL)
+        self.assertEqual(result, self.EXPECTED_TRAILER)
+
+    def test_wrong_projected_trailer_fails_checked_in_row(self) -> None:
+        def wrong(_auth: object) -> str:
+            return "Assisted-By: not-the-checked-in-grok-row"
+
+        with mock.patch.object(implementations, "authorship_trailer", wrong):
+            with self.assertRaises(AssertionError):
+                self._run_checked_in_row()
 
 
 class RequiredCi(unittest.TestCase):

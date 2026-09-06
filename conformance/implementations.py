@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent / "adequacy"))
@@ -27,8 +28,6 @@ REPRODUCTION_MODES = frozenset((
     "commissioned_clean_room",
     "other_disclosed",
 ))
-AUTHORSHIP_KINDS = frozenset(("human", "agent-assisted", "agent-generated"))
-AGENT_KINDS = frozenset(("agent-assisted", "agent-generated"))
 HUMAN_AUTHORSHIP_FIELDS = ("kind",)
 AGENT_AUTHORSHIP_FIELDS = ("kind", "model", "prompt_strategy")
 SOURCE_PATTERN = r"^https?://[^/?#\s]+(?:[/?#][^\s]*)?$"
@@ -49,6 +48,23 @@ ID_RE = re.compile(r"\A[a-z][a-z0-9]*(?:-[a-z0-9]+)*\Z")
 IMAGE_RE = re.compile(IMAGE_PATTERN)
 COMMIT_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 SOURCE_RE = re.compile(SOURCE_PATTERN)
+
+
+class AuthorshipRule(NamedTuple):
+    trailer: str
+    fields: tuple[str, ...]
+    value_field: str | None
+
+
+AUTHORSHIP_RULES = {
+    "human": AuthorshipRule("Authored-By", HUMAN_AUTHORSHIP_FIELDS, None),
+    "agent-assisted": AuthorshipRule("Assisted-By", AGENT_AUTHORSHIP_FIELDS, "model"),
+    "agent-generated": AuthorshipRule("Generated-By", AGENT_AUTHORSHIP_FIELDS, "model"),
+}
+AUTHORSHIP_KINDS = frozenset(AUTHORSHIP_RULES)
+AGENT_KINDS = frozenset(
+    kind for kind, rule in AUTHORSHIP_RULES.items() if rule.value_field == "model"
+)
 
 
 class ImplementationRegistryError(Exception):
@@ -94,21 +110,75 @@ def _require_text(value: object, field: str, ident: str) -> str:
     return value
 
 
+def _authorship_rule(kind: object, ident: str = "authorship") -> AuthorshipRule:
+    try:
+        return AUTHORSHIP_RULES[kind]
+    except (KeyError, TypeError) as exc:
+        raise ImplementationRegistryError(
+            "%s: unknown authorship kind %r" % (ident, kind)
+        ) from exc
+
+
 def _validate_authorship(value: object, ident: str) -> dict:
     if not isinstance(value, dict):
         raise ImplementationRegistryError("%s: authorship must be an object" % ident)
     kind = value.get("kind")
-    if kind == "human":
-        _reject_unknown_fields(value, HUMAN_AUTHORSHIP_FIELDS, what="%s authorship" % ident)
-        return value
-    if kind in AGENT_KINDS:
-        _reject_unknown_fields(
-            value, AGENT_AUTHORSHIP_FIELDS, what="%s authorship" % ident
+    rule = _authorship_rule(kind, ident)
+    _reject_unknown_fields(value, rule.fields, what="%s authorship" % ident)
+    for field in rule.fields:
+        if field != "kind":
+            _require_text(value[field], field, ident)
+    return value
+
+
+def authorship_trailer(value: object) -> str:
+    """Project canonical registry authorship to its documentary trailer."""
+    authorship = _validate_authorship(value, "authorship")
+    kind = authorship["kind"]
+    rule = _authorship_rule(kind)
+    trailer_value = kind if rule.value_field is None else authorship[rule.value_field]
+    return "%s: %s" % (rule.trailer, trailer_value)
+
+
+def _documentary_trailer(kind: str, rule: AuthorshipRule) -> str:
+    value = kind if rule.value_field is None else "<model disclosure>"
+    return "%s: %s" % (rule.trailer, value)
+
+
+def authorship_protocol_table() -> str:
+    """Render the protocol fragment checked against the canonical mapping."""
+    rows = ["| Registry kind | Documentary trailer |", "|---|---|"]
+    rows.extend(
+        "| `%s` | `%s` |" % (kind, _documentary_trailer(kind, rule))
+        for kind, rule in AUTHORSHIP_RULES.items()
+    )
+    return "\n".join(rows)
+
+
+def authorship_template_line() -> str:
+    """Render the report-template line checked against the canonical mapping."""
+    choices = " | ".join(
+        "%s -> %s" % (kind, _documentary_trailer(kind, rule))
+        for kind, rule in AUTHORSHIP_RULES.items()
+    )
+    return "- Authorship method: `%s`" % choices
+
+
+def _authorship_schema(kind: str, rule: AuthorshipRule) -> dict:
+    properties = {"kind": {"const": kind}}
+    for field in rule.fields:
+        if field != "kind":
+            properties[field] = {"type": "string", "minLength": 1}
+    if rule.value_field is not None:
+        properties[rule.value_field]["description"] = (
+            "Exact opaque disclosure string; no model or version normalization."
         )
-        _require_text(value.get("model"), "model", ident)
-        _require_text(value.get("prompt_strategy"), "prompt_strategy", ident)
-        return value
-    raise ImplementationRegistryError("%s: unknown authorship kind %r" % (ident, kind))
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": list(rule.fields),
+        "properties": properties,
+    }
 
 
 def _validate_row(row: object, seen: set[str]) -> dict:
@@ -185,22 +255,8 @@ def implementation_schema() -> dict:
                         "reproduction_mode": {"enum": sorted(REPRODUCTION_MODES)},
                         "authorship": {
                             "oneOf": [
-                                {
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "required": list(HUMAN_AUTHORSHIP_FIELDS),
-                                    "properties": {"kind": {"const": "human"}},
-                                },
-                                {
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "required": list(AGENT_AUTHORSHIP_FIELDS),
-                                    "properties": {
-                                        "kind": {"enum": sorted(AGENT_KINDS)},
-                                        "model": {"type": "string", "minLength": 1},
-                                        "prompt_strategy": {"type": "string", "minLength": 1},
-                                    },
-                                },
+                                _authorship_schema(kind, rule)
+                                for kind, rule in AUTHORSHIP_RULES.items()
                             ]
                         },
                     },

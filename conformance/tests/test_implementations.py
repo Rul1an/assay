@@ -50,6 +50,16 @@ ASSISTED_AUTHORSHIP = {
     "model": "claude-opus",
     "prompt_strategy": "spec-then-conformance",
 }
+GENERATED_AUTHORSHIP = {
+    "kind": "agent-generated",
+    "model": "generator/model-v1+BUILD.7",
+    "prompt_strategy": "profile-only",
+}
+PROTOCOL = REPO / "conformance/privileged-mcp-action-v0/CONFORMANCE-PROTOCOL.md"
+REPORT_TEMPLATE = (
+    REPO
+    / "conformance/privileged-mcp-action-v0/IMPLEMENTATION-REPORT.template.md"
+)
 
 
 def _scope_job(text: str) -> str:
@@ -198,6 +208,27 @@ class PositiveFixtureAndHostileMatrix(unittest.TestCase):
             ) as ctx:
                 self.module.load_implementations(path)
             self.assertIn("authorship", str(ctx.exception).lower())
+
+    def test_all_agent_kinds_require_current_structured_metadata(self):
+        for kind in ("agent-assisted", "agent-generated"):
+            complete = {
+                "kind": kind,
+                "model": "opaque/model-v1+BUILD.7",
+                "prompt_strategy": "spec-first",
+            }
+            path = self._write(_doc([_valid_row(id=kind, authorship=complete)]))
+            loaded = self.module.load_implementations(path)
+            self.assertEqual(loaded["implementations"][0]["authorship"], complete)
+            for field in ("model", "prompt_strategy"):
+                incomplete = dict(complete)
+                del incomplete[field]
+                path = self._write(
+                    _doc([_valid_row(id="%s-no-%s" % (kind, field), authorship=incomplete)])
+                )
+                with self.subTest(kind=kind, field=field), self.assertRaises(
+                    self.module.ImplementationRegistryError
+                ):
+                    self.module.load_implementations(path)
 
     def test_whitespace_in_source_url_is_rejected(self):
         path = self._write(_doc([_valid_row(source="https://exa mple.com/a")]))
@@ -464,20 +495,165 @@ class OneRuleNoNetwork(unittest.TestCase):
         self.assertEqual(frozenset(modes), frozenset(module.REPRODUCTION_MODES))
         authorship = items["properties"]["authorship"]
         branches = authorship["oneOf"]
-        self.assertEqual(len(branches), 2)
-        human = next(branch for branch in branches if branch["properties"]["kind"].get("const") == "human")
-        agent = next(branch for branch in branches if "enum" in branch["properties"]["kind"])
-        self.assertIs(human["additionalProperties"], False)
-        self.assertEqual(frozenset(human["required"]), frozenset(module.HUMAN_AUTHORSHIP_FIELDS))
-        self.assertEqual(frozenset(human["properties"]), frozenset(module.HUMAN_AUTHORSHIP_FIELDS))
-        self.assertNotIn("model", human["properties"])
-        self.assertNotIn("prompt_strategy", human["properties"])
-        self.assertIs(agent["additionalProperties"], False)
-        self.assertEqual(frozenset(agent["required"]), frozenset(module.AGENT_AUTHORSHIP_FIELDS))
-        self.assertEqual(frozenset(agent["properties"]), frozenset(module.AGENT_AUTHORSHIP_FIELDS))
-        self.assertEqual(frozenset(agent["properties"]["kind"]["enum"]), frozenset(module.AGENT_KINDS))
+        self.assertEqual(len(branches), len(module.AUTHORSHIP_RULES))
+        for branch, (kind, rule) in zip(branches, module.AUTHORSHIP_RULES.items()):
+            self.assertIs(branch["additionalProperties"], False)
+            self.assertEqual(branch["properties"]["kind"], {"const": kind})
+            self.assertEqual(frozenset(branch["required"]), frozenset(rule.fields))
+            self.assertEqual(frozenset(branch["properties"]), frozenset(rule.fields))
         self.assertEqual(items["properties"]["source"]["pattern"], module.SOURCE_PATTERN)
         self.assertEqual(items["properties"]["image"]["pattern"], module.IMAGE_PATTERN)
+
+
+class AuthorshipProjectionContract(unittest.TestCase):
+    EXPECTED_TRAILERS = {
+        "human": "Authored-By",
+        "agent-assisted": "Assisted-By",
+        "agent-generated": "Generated-By",
+    }
+
+    def setUp(self) -> None:
+        self.module = _require_module()
+
+    def _assert_unknown_is_rejected(self) -> None:
+        with self.assertRaises(self.module.ImplementationRegistryError):
+            self.module.authorship_trailer({"kind": "unknown"})
+
+    def _assert_document_parity(self, protocol: str, template: str) -> None:
+        self.assertEqual(protocol.count(self.module.authorship_protocol_table()), 1)
+        self.assertEqual(template.count(self.module.authorship_template_line()), 1)
+
+    def test_mapping_is_exact_and_exhaustive(self) -> None:
+        self.assertEqual(
+            {kind: rule.trailer for kind, rule in self.module.AUTHORSHIP_RULES.items()},
+            self.EXPECTED_TRAILERS,
+        )
+
+    def test_projection_is_exact_and_model_is_opaque(self) -> None:
+        self.assertEqual(
+            self.module.authorship_trailer(HUMAN_AUTHORSHIP),
+            "Authored-By: human",
+        )
+        cases = (
+            (ASSISTED_AUTHORSHIP, "Assisted-By: claude-opus"),
+            (GENERATED_AUTHORSHIP, "Generated-By: generator/model-v1+BUILD.7"),
+            (
+                {
+                    "kind": "agent-assisted",
+                    "model": "  Grok Bot/version? undisclosed  ",
+                    "prompt_strategy": "compatibility probe",
+                },
+                "Assisted-By:   Grok Bot/version? undisclosed  ",
+            ),
+        )
+        for authorship, expected in cases:
+            with self.subTest(kind=authorship["kind"], model=authorship["model"]):
+                self.assertEqual(self.module.authorship_trailer(authorship), expected)
+
+    def test_unknown_kind_has_no_fallback(self) -> None:
+        self._assert_unknown_is_rejected()
+
+    def test_schema_has_one_exact_branch_per_mapping_member(self) -> None:
+        branches = self.module.implementation_schema()["properties"]["implementations"][
+            "items"
+        ]["properties"]["authorship"]["oneOf"]
+        self.assertEqual(len(branches), len(self.module.AUTHORSHIP_RULES))
+        self.assertEqual(
+            [branch["properties"]["kind"]["const"] for branch in branches],
+            list(self.module.AUTHORSHIP_RULES),
+        )
+
+    def test_protocol_and_template_match_the_runtime_projection(self) -> None:
+        self._assert_document_parity(
+            PROTOCOL.read_text(encoding="utf-8"),
+            REPORT_TEMPLATE.read_text(encoding="utf-8"),
+        )
+
+    def test_mapping_mutations_break_document_parity(self) -> None:
+        protocol = PROTOCOL.read_text(encoding="utf-8")
+        template = REPORT_TEMPLATE.read_text(encoding="utf-8")
+        original = self.module.AUTHORSHIP_RULES
+        mutations = {}
+
+        deleted = dict(original)
+        del deleted["agent-generated"]
+        mutations["deleted"] = deleted
+
+        renamed = dict(original)
+        renamed["agent-created"] = renamed.pop("agent-generated")
+        mutations["renamed"] = renamed
+
+        swapped = dict(original)
+        assisted = swapped["agent-assisted"]
+        generated = swapped["agent-generated"]
+        swapped["agent-assisted"] = assisted._replace(trailer=generated.trailer)
+        swapped["agent-generated"] = generated._replace(trailer=assisted.trailer)
+        mutations["swapped"] = swapped
+
+        for name, mutation in mutations.items():
+            with self.subTest(mutation=name), mock.patch.object(
+                self.module, "AUTHORSHIP_RULES", mutation
+            ), self.assertRaises(AssertionError):
+                self._assert_document_parity(protocol, template)
+
+    def test_unknown_fallback_mutation_is_caught(self) -> None:
+        human_rule = self.module.AUTHORSHIP_RULES["human"]
+        with mock.patch.object(
+            self.module, "_authorship_rule", return_value=human_rule
+        ), self.assertRaises(AssertionError):
+            self._assert_unknown_is_rejected()
+
+    def test_missing_agent_metadata_mutation_is_caught(self) -> None:
+        original = self.module.AUTHORSHIP_RULES
+        mutation = dict(original)
+        mutation["agent-assisted"] = mutation["agent-assisted"]._replace(
+            fields=("kind",), value_field=None
+        )
+        with mock.patch.object(self.module, "AUTHORSHIP_RULES", mutation):
+            with self.assertRaises(AssertionError):
+                with self.assertRaises(self.module.ImplementationRegistryError):
+                    self.module._validate_authorship(
+                        {"kind": "agent-assisted"}, "missing-agent-metadata"
+                    )
+
+    def test_agent_only_metadata_on_human_mutation_is_caught(self) -> None:
+        original = self.module.AUTHORSHIP_RULES
+        mutation = dict(original)
+        mutation["human"] = mutation["human"]._replace(
+            fields=("kind", "model", "prompt_strategy"), value_field="model"
+        )
+        value = {
+            "kind": "human",
+            "model": "should-not-be-accepted",
+            "prompt_strategy": "should-not-be-accepted",
+        }
+        with mock.patch.object(self.module, "AUTHORSHIP_RULES", mutation):
+            with self.assertRaises(AssertionError):
+                with self.assertRaises(self.module.ImplementationRegistryError):
+                    self.module._validate_authorship(value, "human-agent-fields")
+
+    def test_model_normalization_mutation_is_caught(self) -> None:
+        original = self.module.authorship_trailer
+
+        def normalized(value: object) -> str:
+            return original(value).strip().lower()
+
+        value = {
+            "kind": "agent-assisted",
+            "model": "  Grok Bot/version? undisclosed  ",
+            "prompt_strategy": "compatibility probe",
+        }
+        with mock.patch.object(self.module, "authorship_trailer", normalized):
+            with self.assertRaises(AssertionError):
+                self.assertEqual(
+                    self.module.authorship_trailer(value),
+                    "Assisted-By:   Grok Bot/version? undisclosed  ",
+                )
+
+    def test_comment_only_control_stays_green(self) -> None:
+        protocol = PROTOCOL.read_text(encoding="utf-8") + "\n<!-- control comment -->\n"
+        template = REPORT_TEMPLATE.read_text(encoding="utf-8")
+        self._assert_document_parity(protocol, template)
 
 
 class PublicImageValidator(unittest.TestCase):
