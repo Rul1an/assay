@@ -25,7 +25,9 @@ Supply three explicit files; the driver never searches credentials or profiles:
   `assay-mcp-server` binary, and a release profile. The selected PATH binary
   must be in that prefix's `bin` directory. Only the selected package identity,
   version requirement, binary name, profile, target and rustc fields are retained,
-  not other installed packages or the original metadata file.
+  not other installed packages or the original metadata file. Cargo's verbose
+  `rustc` value may contain LF or CRLF line endings within a 2048-character bound;
+  its lines are printable ASCII. Versions and install references remain single-line.
 
 An operator must independently check acquisition of the index row and package.
 The offline validator does **not** fetch the index or authenticate copied index

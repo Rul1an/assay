@@ -84,6 +84,17 @@ test("#2823: package verification recomputes bytes and binds the declared packag
   restore();
   const verify = (declared = source) => validator.verifyAssayPackage(files, declared);
   assert.equal(verify().packageSha256, digest);
+  // Cargo's observed verbose layout, with a synthetic compiler commit identifier.
+  const verboseRustc = "rustc 1.92.0 (abcdef012 2025-12-08)\nbinary: rustc\ncommit-hash: abcdef0123456789abcdef0123456789abcdef0123\ncommit-date: 2025-12-08\nhost: aarch64-apple-darwin\nrelease: 1.92.0\nLLVM version: 21.1.3\n";
+  for (const rustc of [verboseRustc, verboseRustc.replaceAll("\n", "\r\n"), "x".repeat(2048)]) {
+    fs.writeFileSync(files.installation, JSON.stringify({ ...metadata, rustc }));
+    assert.equal(verify().packageSha256, digest, "bounded Cargo compiler metadata accepted");
+  }
+  for (const rustc of ["", "x".repeat(2049), "rustc\rhidden", "rustc\u0000", "rustc\tvalue", "rustc\u0085", "rustc\u2028", "rustc\u202e", "rustc\ufeff"]) {
+    fs.writeFileSync(files.installation, JSON.stringify({ ...metadata, rustc }));
+    assert.throws(verify, /Cargo installation metadata/, "hostile or unbounded compiler metadata refused");
+  }
+  restore();
   for (const [name, edit] of [
     ["changed package", () => fs.appendFileSync(files.package, "changed")],
     ["wrong checksum", () => fs.writeFileSync(files.index, JSON.stringify({ ...row, cksum: "0".repeat(64) }))],

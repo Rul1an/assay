@@ -55,7 +55,7 @@ export function verifyAssayPackage(files, source) {
   if (!exactKeys(install, ["package", "version_req", "bins", "profile", "target", "rustc"]) ||
       install.package !== `assay-mcp-server ${version} (registry+https://github.com/rust-lang/crates.io-index)` ||
       install.version_req !== `=${version}` || !sameJson(install.bins, ["assay-mcp-server"]) ||
-      install.profile !== "release" || !boundedPrintable(install.target) || !boundedPrintable(install.rustc)) {
+      install.profile !== "release" || !boundedPrintable(install.target) || !boundedCompilerMetadata(install.rustc)) {
     throw new Error("Assay Cargo installation metadata does not name the pinned registry package");
   }
   return {
@@ -99,6 +99,12 @@ export function boundedPrintable(value, max = MAX_INSTALL_REFERENCE) {
     value.length <= max &&
     PRINTABLE_ASCII_LINE.test(value)
   );
+}
+
+// Cargo retains rustc -vV, including line endings, rather than just its first line.
+function boundedCompilerMetadata(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= 2048 &&
+    value.split(/\r?\n/).every((line) => line === "" || boundedPrintable(line, 2048));
 }
 export const SKILL_NAME = "assay-golden-path";
 export const DECIDE_TOOL = "assay_policy_decide";
