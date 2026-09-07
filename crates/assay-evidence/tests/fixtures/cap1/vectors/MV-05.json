@@ -1,0 +1,46 @@
+{
+ "profile": "cap/1",
+ "producer": {
+  "name": "reference",
+  "version": "cap-1-ref/1.0.0",
+  "policy": "policy/1"
+ },
+ "subject": {
+  "kind": "artefact",
+  "ref": "subject-05",
+  "digest": {
+   "algorithm": "SHA-256",
+   "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+ },
+ "strata": [
+  {
+   "id": "detectors",
+   "population": "the examination",
+   "basis": {
+    "kind": "catalogue",
+    "catalogue_version": "1.0.0",
+    "catalogue_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+   },
+   "eligible": 1,
+   "examined": 1,
+   "unexamined": [],
+   "supports": [
+    "absence-of-detector-finding"
+   ]
+  }
+ ],
+ "absence_assertions": [
+  {
+   "assertion": "No manipulation indicator was observed.",
+   "stratum": "detectors"
+  }
+ ],
+ "integrity": {
+  "complete": true,
+  "uncapped_verdict": "pass",
+  "capped_to": null,
+  "unaccounted": [],
+  "statement": "Every dispatched unit reached a recorded outcome."
+ }
+}

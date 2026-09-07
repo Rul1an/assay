@@ -6529,6 +6529,56 @@ function liveToolEvent(result) {
   };
 }
 
+// #2810: test-owned wire names from openai/codex commit
+// 985641272869835d01d025ed2a218fbbce35fa9f (rust-v0.153.1),
+// codex-rs/app-server-protocol/src/protocol/v2/mcp.rs:199-213, McpToolCallResult.
+// Source SHA256: 1bee5c328abed26f76f492a36a2d627832c956da13e8df760317933135111755.
+// camelCase plus the explicit _meta rename yields these three properties.
+// isError/error are legacy compatibility fields, NOT members of that type;
+// their retention and refusal are covered separately by the existing error tests.
+for (const [key, value, expected] of [
+  ["content", [{ type: "text", text: '{"allowed":true,"reason":"ok"}' }],
+    [{ type: "text", text: '{"allowed":true,"reason":"ok"}\n' }]],
+  ["structuredContent", { allowed: true, reason: "ok" }, { allowed: true, reason: "ok" }],
+  ["_meta", { traceId: "RESULT_META_CANARY" }, "[present]"],
+]) {
+  test(`#2810: result projection accepts declared property ${key}`, () => {
+    // Isolate each property so removing its allow-list entry fails its own case.
+    // This is projection/event-shape acceptance, not a complete successful result.
+    const projected = projectRetainedEvent(liveToolEvent({ [key]: value }));
+    assert.equal(Object.hasOwn(projected.params.item.result, "__unexpectedKeys"), false,
+      `declared result property ${key} must not be marked unexpected`);
+    assert.deepEqual(projected.params.item.result, { [key]: expected },
+      `declared result property ${key} must survive with its bounded representation`);
+    assert.equal(classifyStoredEvent(projected).type, "server-notification");
+    assert.deepEqual(projectRetainedEvent(projected), projected);
+  });
+}
+
+test("#2810: result projection refuses a sample of undeclared properties", () => {
+  // A bounded sample, not universal schema-completeness evidence. telemetryBlob
+  // is the specific widening mutation that survived the previous full suite.
+  for (const key of ["telemetryBlob", "hostExtension", "structured_content", "meta"]) {
+    const projected = projectRetainedEvent(liveToolEvent({
+      ...LIVE_0153_RESULT, [key]: { payload: "UNDECLARED_RESULT_CANARY" },
+    }));
+    const result = projected.params.item.result;
+    assert.equal(result.__unexpectedKeys, "[present]",
+      `undeclared result property ${key} must be marked unexpected`);
+    assert.equal(Object.hasOwn(result, key), false);
+    assert.equal(JSON.stringify(result).includes(JSON.stringify(key)), false,
+      `undeclared result property ${key} must not survive in retained bytes`);
+    assert.equal(JSON.stringify(result).includes("UNDECLARED_RESULT_CANARY"), false);
+    assert.equal(classifyStoredEvent(projected).type, "unclassified",
+      `undeclared result property ${key} must be refused by the consumer`);
+    assert.deepEqual(projectRetainedEvent(projected), projected);
+  }
+  const control = projectRetainedEvent(liveToolEvent(LIVE_0153_RESULT));
+  assert.equal(Object.hasOwn(control.params.item.result, "__unexpectedKeys"), false);
+  assert.equal(classifyStoredEvent(control).type, "server-notification",
+    "the valid control must prevent blanket refusal from passing this test");
+});
+
 test("#2807: a schema-shaped 0.153.1 result with _meta:null is accepted, not marked unexpected", () => {
   const projected = projectRetainedEvent(liveToolEvent(LIVE_0153_RESULT));
   assert.equal(
