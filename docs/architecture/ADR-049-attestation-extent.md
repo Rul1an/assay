@@ -44,54 +44,84 @@ The extension is an optional top-level `predicate.extent` object under the same 
 revision 1.1 is not the current specification published with this ADR. No existing field changes
 meaning, and no `specVersion` payload field is introduced.
 
-An absent `extent` means **not stated** and follows the v1.0 path. An explicit null parent is
-malformed when recognized. A present extension has these required members:
+An absent or null optional `extent` means **not stated** and follows legacy field verification.
+Neither permits an extent-aware claim. New extent producers emit an object, never null. A
+malformed non-null extension is refused. Its two required members are:
 
 | Member | Value and meaning |
 | --- | --- |
-| `retained_events_by_type` | A sorted map from exact event-type strings to counts of every retained event. Only encountered types appear; absence is not synthesized as a zero-valued entry. |
-| `observed` | Null if there is no recognized summary; otherwise an object with required `files`, `network`, `processes`, and `sandbox_degradations` members. Each member is a count or null. Null means the selected summary does not state that dimension, never zero. |
-| `observed_source` | Null exactly when `observed` is null; otherwise the exact recognized summary event-type string. This names the source of the count assertion, not an authenticated producer identity. |
-| `support_ceiling` | Exactly the string `artifact_bound`, checked by equality. It names the existing attestation boundary and grants no additional support. |
+| `retained_events_by_type` | A sorted map from exact event-type strings to recomputed counts of every retained event. Only encountered types appear; absence is not synthesized as a zero-valued entry. |
+| `observed` | A required object with an explicit `basis`, as described below. It carries producer assertions from a recognized summary, or explicitly says they are not stated. |
+
+`observed` has two forms:
+
+- `basis: "not_stated"`: the producer emits only `basis`. No recognized count summary exists.
+  Known `source_type` or `counts` fields contradicting this basis are refused, rather than silently
+  treated as checked information.
+- `basis: "producer_reported"`: `source_type` and `counts` are required. `source_type` names the
+  selected recognized summary event type. `counts` contains the fields that source schema states,
+  using the mappings below. Null required structures, missing or unknown basis values, and
+  malformed required counts are refused.
 
 Unknown members of known structured objects remain ignored, consistent with ADR-044. Histogram
 keys are data, not schema extensions: every entry participates in comparison. Every present known
 field must agree with derivation from the verified artifact. A disagreement names a static field
-path without echoing attacker-provided values. Parent presence is checked separately from nested
-null values.
+path without echoing attacker-provided values. Optional parent presence is checked separately from
+the required tagged structures inside it.
+
+The claim boundary belongs in the specification's Parsing Rules, not an emitted `support_ceiling`
+field. No separate `observed_source` field is emitted; the source belongs to the producer-reported
+form. A reader that has only the Statement and does not consult its specification has no signed field naming the
+claim boundary. Any explanation of that boundary must distinguish specification interpretation
+from signed payload data.
 
 An older reader can accept a signed statement while ignoring this extension. Such acceptance
 means only that its known fields were checked. Admission that requires checked extent must require
-a reader that checks it; neither absent nor ignored extent is an affirmative extent claim.
+a reader that checks it; absent, null, or ignored extent is not an affirmative extent claim. The
+explicit basis avoids overloading a missing observation dimension; it does not assert that null
+or an empty object mathematically means zero.
 
-### 2. Recognize exactly two summary schemas
+### 2. Recognize and rank exactly two summary schemas
 
-Recognition in revision 1.1 is limited to the following event types and mappings:
+Recognition in revision 1.1 uses this closed ordered list, highest priority first:
 
 | Summary type | `files` | `network` | `processes` | `sandbox_degradations` |
 | --- | --- | --- | --- | --- |
 | `assay.profile.finished` | `files_count` | `network_count` | `processes_count` | `sandbox_degradation_count` |
-| `assay.sandbox.summary` | `fs_count` | null | `exec_count` | `degradation_count` |
+| `assay.sandbox.summary` | `fs_count` | omitted | `exec_count` | `degradation_count` |
+
+Selection order is deterministic, not a ranking of trust or measurement quality. Validate every
+recognized summary, including a lower-ranked one that will not be selected. Repeated instances of
+the same recognized type are refused, whether identical or conflicting. At most one of each type
+may exist. When both valid types exist, select `assay.profile.finished` regardless of input order.
+No recognized summary yields `observed: {"basis": "not_stated"}`.
 
 All listed source count fields are required and must pass the shared numeric validation below.
-The sandbox summary states no network count. Program-entry counts remain program-entry counts,
-not sums of per-program hits or syscall counts. More generally, these are assertions carried in
-retained summary events; verifying them against the artifact does not independently measure host
-activity or prove complete observations.
+The sandbox summary states no network count, so its generated `counts` omits `network`; omission
+means not stated, never zero. An attested sandbox `network` count is a known-field disagreement,
+not silently checked data. Required counts cannot be null, and producers emit no null inside
+extent. Program-entry counts remain program-entry counts, not sums of per-program hits or syscall
+counts. Profile counts concern aggregated profile entries, not independently measured activity of
+one run.
 
-No recognized summary yields `observed: null` and `observed_source: null`. More than one recognized
-summary is a refusal, including identical repeats, conflicting repeats, and a mixture of both
-families. The derivation never picks the first or last, sums summaries, or hides malformed data by
-turning it into null. A recognized summary with missing or malformed required counts is refused.
-Extending the recognition list requires a documented revision and compatibility assessment.
+Summary fields are producer assertions read from verified generic event payloads. Comparing them
+with the artifact does not independently establish their truth, host activity, or observation
+completeness. A recognized event type is not authentication of its producer. The existing typed
+profile-summary decoder does not match all actual producer keys and is not the derivation source.
 
-These summary refusals apply only when deriving an extent-aware statement or verifying a present
-extent. Ordinary bundle verification and absent-extent attestation verification retain their
-existing accepted input set.
+`assay.coding_agent.evidence_pack.v0` remains ordinary retained histogram data, never a count-summary
+candidate. A normal sandbox bundle containing that pack and `assay.sandbox.summary` therefore has
+one recognized summary. Extending the recognition list requires a documented revision and
+compatibility assessment.
+
+Malformed required counts and repeated recognized source types are refused only when deriving an
+extent-aware statement or verifying a present non-null extent. The derivation never picks the
+first or last row, sums summaries, or hides malformed data by turning it into not stated. Ordinary
+bundle verification and absent/null-extent attestation verification retain legacy acceptance.
 
 ### 3. Use one exact integer domain and bound aggregation
 
-Every non-null count, including histogram values, is an integer in the inclusive domain
+Every count, including histogram values, is an integer in the inclusive domain
 `0..9007199254740991` (`0..2^53-1`), represented internally as `u64`. This is an interoperability
 and representation ceiling, not a limit on host resources or a policy about observed activity.
 The current JCS serialization path uses IEEE 754 number representation; unrestricted `u64` values
@@ -131,7 +161,7 @@ Additive producer APIs are `statement_for_bundle_with_extent` and
 Additive `verify_attestation_for_bundle_with_extent` and
 `verify_attestation_for_bundle_with_extent_and_limits` APIs expose the original verified result
 plus optional checked extent. Existing verification APIs share the canonical internal verifier
-and discard only the new result projection: a recognized present extent is still checked.
+and discard only the new result projection: a recognized present non-null extent is still checked.
 
 Signature verification, bundle verification, raw archive matching, and extent derivation are not
 copied into a second consumer. Signature-only verification remains artifact-unmatched. The
@@ -142,13 +172,19 @@ judgment, or provider-outcome verification.
 
 The following are pending obligations, not results reported by this ADR:
 
-- Behavioral cases must distinguish retained type counts from summary entry counts, preserve
-  absent-extent acceptance, exercise unknown event types with no summary, and cover sandbox
-  network null and program-entry semantics.
+- Behavioral cases must distinguish recomputed retained counts from producer-reported summary
+  entry counts; preserve absent/null optional-parent equivalence; and cover unknown event types
+  with `basis: "not_stated"`, sandbox network omission, aggregated profile entries, and
+  program-entry rather than hit-count semantics. Inspect actual output bytes for no emitted null
+  inside extent.
 - False extent values must be signed after alteration so they reach named field comparison, not
-  merely fail signature verification. Each histogram, observed, source, and ceiling mismatch needs
-  its own refusal witness. Parent null, missing fields, invalid count types, repeated summaries,
-  and both recognized families must be covered.
+  merely fail signature verification. Histogram, basis, source type, and count mismatches need
+  their own refusal witnesses. Missing or unknown basis, null required structures, contradictory
+  known fields under not_stated, and an attested sandbox network count must be covered.
+- Exercise both input orders for the two valid recognized types, malformed lower-ranked input,
+  repeated instances of each recognized type, and the normal sandbox summary plus coding-agent
+  pack. Selection must not hide a malformed lower-ranked summary. The ordinary and absent/null
+  paths must retain their acceptance controls.
 - Downstream-style literals and exhaustive destructures must continue compiling for the existing
   public structs. Existing unknown-field acceptance stays covered. An immutable old-reader
   control must distinguish ignoring new fields from checking them.
@@ -159,10 +195,11 @@ The following are pending obligations, not results reported by this ADR:
   ordinary verification accepts it before testing extent refusal. A BundleWriter-only witness
   can round the number earlier and miss the public byte-input boundary.
 - Histogram cardinality and aggregate key-byte boundaries need accepted maximum controls and
-  maximum-plus-one refusals before insertion, with ordinary and absent-extent paths preserved.
+  maximum-plus-one refusals before insertion, with ordinary and absent/null-extent paths preserved.
   Generated Statement bytes must satisfy the consumer's strict parser.
 - Removing effective extent comparison, histogram accumulation, observed derivation, repeated-summary
-  refusal, numeric ceiling, or aggregate bounds must defeat the corresponding behavioral test.
+  refusal, source selection, numeric ceiling, or aggregate bounds must defeat the corresponding
+  behavioral test.
   A no-op control must pass. Successful setup or a failed signature is not a substitute for the
   intended refusal assertion.
 
@@ -173,6 +210,7 @@ Deployment still needs a fetch of the actual predicate Type URI; a local site bu
 that it resolves publicly. Implementation and publication evidence remain separate.
 
 The accepted extension adds derivable detail without changing what an artifact signature means.
-Producers may continue emitting v1.0, and absence remains not stated. The new behavior needs the
-implementation and verification evidence above before the specification describes it as current.
+Producers may continue emitting v1.0, and absent or null optional extent remains not stated. The
+new behavior needs the implementation and verification evidence above before the specification
+describes it as current.
 No CLI opt-in or extent-aware consumer is claimed by this documentation change.

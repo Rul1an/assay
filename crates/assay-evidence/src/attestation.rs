@@ -46,8 +46,8 @@ const STATEMENT_TYPE: &str = "https://in-toto.io/Statement/v1";
 const IN_TOTO_PAYLOAD_TYPE: &str = "application/vnd.in-toto+json";
 /// The v1 evidence-bundle predicate type.
 ///
-/// On `docs.getassay.dev`, where the contract surface actually resolves — the profile URIs under
-/// `docs/profiles/` already point there.
+/// Names the contract page on `docs.getassay.dev`. The local URI-to-page binding is tested;
+/// publication still requires a separate fetch of this URI after deployment.
 pub const EVIDENCE_BUNDLE_PREDICATE_TYPE_V1: &str =
     "https://docs.getassay.dev/attestation/evidence-bundle/v1";
 
@@ -611,6 +611,60 @@ mod tests {
     use crate::bundle::BundleWriter;
     use crate::types::{EvidenceEvent, ProducerMeta};
     use chrono::{DateTime, Utc};
+
+    /// Check the repository binding only; this cannot prove deployment or the prose's correctness.
+    fn check_predicate_page_binding(uri: &str, docs: &std::path::Path) -> Result<()> {
+        let relative = uri
+            .strip_prefix("https://docs.getassay.dev/")
+            .context("predicate URI must use the documentation host")?;
+        let page = docs.join(format!("{relative}.md"));
+        let text = std::fs::read_to_string(&page).context("predicate URI page must exist")?;
+        let declared: Vec<_> = text
+            .lines()
+            .filter_map(|line| line.strip_prefix("- Type URI: `")?.strip_suffix('`'))
+            .collect();
+        anyhow::ensure!(
+            declared == [uri],
+            "predicate page must declare its exact Type URI once"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn v1_predicate_uri_names_its_documented_page() {
+        let docs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs");
+        check_predicate_page_binding(EVIDENCE_BUNDLE_PREDICATE_TYPE_V1, &docs)
+            .expect("the emitted predicate URI must bind its repository page");
+    }
+
+    #[test]
+    fn v1_predicate_uri_binding_refuses_a_missing_page() {
+        let docs = tempfile::tempdir().expect("isolated docs directory");
+        let error = check_predicate_page_binding(EVIDENCE_BUNDLE_PREDICATE_TYPE_V1, docs.path())
+            .expect_err("an absent target must not satisfy the binding");
+        assert_eq!(error.to_string(), "predicate URI page must exist");
+    }
+
+    #[test]
+    fn v1_predicate_uri_binding_refuses_a_changed_constant() {
+        let docs = tempfile::tempdir().expect("isolated docs directory");
+        let changed = format!("{EVIDENCE_BUNDLE_PREDICATE_TYPE_V1}-changed");
+        let relative = changed.strip_prefix("https://docs.getassay.dev/").unwrap();
+        let page = docs.path().join(format!("{relative}.md"));
+        std::fs::create_dir_all(page.parent().unwrap()).expect("target directory");
+        // The changed URI reaches a real page, so only the declaration mismatch can refuse it.
+        std::fs::write(
+            page,
+            format!("- Type URI: `{EVIDENCE_BUNDLE_PREDICATE_TYPE_V1}`\n"),
+        )
+        .expect("page still declaring the original constant");
+        let error = check_predicate_page_binding(&changed, docs.path())
+            .expect_err("a changed constant must not agree with the original declaration");
+        assert_eq!(
+            error.to_string(),
+            "predicate page must declare its exact Type URI once"
+        );
+    }
 
     fn producer() -> ProducerMeta {
         ProducerMeta {
