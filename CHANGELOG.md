@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Optional artifact-derived attestation extent under the existing `evidence-bundle/v1` Type URI
+  (#2833): retained event-type counts and explicitly producer-reported or not-stated summary counts.
+  Additive library APIs opt producers in and expose checked extent; existing artifact verifiers
+  check present extent while legacy producers and public Rust result layouts remain unchanged.
+  Absent/null extent retains legacy semantics. Counts and histogram growth are bounded; verification
+  does not establish observation completeness, provider outcomes, or producer identity. CLI opt-in
+  and extent presentation remain separate.
 - `assay-mcp-server` mirrors typed errors from selected tool calls into
   `structuredContent`, preserving the existing JSON text and `isError` (#2815).
   Both placements use the same bounded error value, including optional details.

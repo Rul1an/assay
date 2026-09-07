@@ -42,6 +42,30 @@ use std::collections::BTreeMap;
 
 /// in-toto Statement type URI (v1).
 const STATEMENT_TYPE: &str = "https://in-toto.io/Statement/v1";
+pub(crate) mod extent;
+pub use extent::{EvidenceExtent, Observed, ObservedCounts};
+
+/// The original artifact match plus optional, checked extent. Private fields preserve evolution.
+#[derive(Debug)]
+pub struct AttestationVerifiedWithExtent {
+    verified: AttestationVerified,
+    extent: Option<EvidenceExtent>,
+}
+impl AttestationVerifiedWithExtent {
+    /// Signature and artifact match, preserving the original public result shape.
+    pub fn verified(&self) -> &AttestationVerified {
+        &self.verified
+    }
+    /// Checked extent; absent/null input remains not stated.
+    pub fn extent(&self) -> Option<&EvidenceExtent> {
+        self.extent.as_ref()
+    }
+    /// Consume the additive result without changing the legacy result type.
+    pub fn into_parts(self) -> (AttestationVerified, Option<EvidenceExtent>) {
+        (self.verified, self.extent)
+    }
+}
+
 /// DSSE payload type for in-toto statements.
 const IN_TOTO_PAYLOAD_TYPE: &str = "application/vnd.in-toto+json";
 /// The v1 evidence-bundle predicate type.
@@ -117,6 +141,38 @@ pub fn statement_for_bundle_with_limits(
         &verified.result.manifest.bundle_id,
         &predicate,
     ))
+}
+
+/// Explicitly opt into the artifact-derived extent projection (specification revision 1.1).
+pub fn statement_for_bundle_with_extent(bundle_bytes: &[u8]) -> Result<InTotoStatement> {
+    statement_for_bundle_with_extent_and_limits(bundle_bytes, VerifyLimits::default())
+}
+
+/// Extent-aware producer under the caller's existing bundle limits.
+pub fn statement_for_bundle_with_extent_and_limits(
+    bundle_bytes: &[u8],
+    limits: VerifyLimits,
+) -> Result<InTotoStatement> {
+    let verified =
+        crate::bundle::writer::verify_bundle_verbose_with_extent(bundle_bytes, limits, true)
+            .context("the bundle to attest does not verify")?;
+    let predicate = predicate_from_verified(&verified)?;
+    let mut statement = statement_from_parts(
+        bundle_bytes,
+        &verified.result.manifest.bundle_id,
+        &predicate,
+    );
+    let extent = verified
+        .extent
+        .context("requested extent was not derived")?;
+    statement.predicate["extent"] = serde_json::to_value(extent)?;
+    // Validate the actual canonical output, including variable legacy metadata and histogram keys.
+    // An in-memory object check alone cannot prove compatibility with the signed-payload parser.
+    let bytes = jcs::to_vec(&statement).context("canonicalize extent statement")?;
+    let text = std::str::from_utf8(&bytes).context("extent statement must be UTF-8")?;
+    crate::json_strict::from_str_strict::<InTotoStatement>(text)
+        .map_err(|_| anyhow::anyhow!("extent statement exceeds strict signed-payload bounds"))?;
+    Ok(statement)
 }
 
 /// Assemble the statement once every part is known to come from the same verified bytes.
@@ -463,6 +519,36 @@ pub fn verify_attestation_for_bundle_with_limits(
     bundle_bytes: &[u8],
     limits: VerifyLimits,
 ) -> Result<AttestationVerified> {
+    Ok(verify_attestation_for_bundle_with_extent_and_limits(
+        envelope,
+        trusted_key,
+        bundle_bytes,
+        limits,
+    )?
+    .verified)
+}
+
+/// Verify present extent while exposing its checked projection alongside the original result.
+pub fn verify_attestation_for_bundle_with_extent(
+    envelope: &DsseEnvelope,
+    trusted_key: &VerifyingKey,
+    bundle_bytes: &[u8],
+) -> Result<AttestationVerifiedWithExtent> {
+    verify_attestation_for_bundle_with_extent_and_limits(
+        envelope,
+        trusted_key,
+        bundle_bytes,
+        VerifyLimits::default(),
+    )
+}
+
+/// Canonical artifact-backed verifier. Legacy APIs discard only the new result projection.
+pub fn verify_attestation_for_bundle_with_extent_and_limits(
+    envelope: &DsseEnvelope,
+    trusted_key: &VerifyingKey,
+    bundle_bytes: &[u8],
+    limits: VerifyLimits,
+) -> Result<AttestationVerifiedWithExtent> {
     let verified = verify_envelope_signature(envelope, trusted_key)?;
     let statement = verified.statement;
 
@@ -501,6 +587,13 @@ pub fn verify_attestation_for_bundle_with_limits(
         .get("sha256")
         .context("subject digest has no sha256 entry")?;
 
+    let claimed_extent = statement
+        .predicate
+        .get("extent")
+        .filter(|value| !value.is_null())
+        .map(extent::parse)
+        .transpose()?;
+
     let predicate: EvidenceBundlePredicate =
         serde_json::from_value(statement.predicate.clone()).context("parse v1 predicate")?;
     if predicate.schema_version != 1 {
@@ -519,8 +612,12 @@ pub fn verify_attestation_for_bundle_with_limits(
     //
     // Everything above this line reads the statement the signature already covered; nothing above
     // it touches `bundle_bytes`.
-    let verified = crate::bundle::writer::verify_bundle_verbose_with_limits(bundle_bytes, limits)
-        .context("the attested bundle does not verify")?;
+    let verified = crate::bundle::writer::verify_bundle_verbose_with_extent(
+        bundle_bytes,
+        limits,
+        claimed_extent.is_some(),
+    )
+    .context("the attested bundle does not verify")?;
     let result = &verified.result;
 
     // Value-free: the holder has both the envelope and the bytes, so echoing the two digests adds
@@ -555,10 +652,22 @@ pub fn verify_attestation_for_bundle_with_limits(
         }
     }
 
-    Ok(AttestationVerified {
-        statement,
-        predicate,
-        artifact_sha256: actual,
+    if let Some(attested) = &claimed_extent {
+        extent::check(
+            attested,
+            verified
+                .extent
+                .as_ref()
+                .context("requested extent was not derived")?,
+        )?;
+    }
+    Ok(AttestationVerifiedWithExtent {
+        verified: AttestationVerified {
+            statement,
+            predicate,
+            artifact_sha256: actual,
+        },
+        extent: verified.extent,
     })
 }
 

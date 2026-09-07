@@ -254,6 +254,15 @@ pub(crate) fn verify_bundle_verbose_with_limits<R: Read>(
     writer_next::verify::verify_bundle_verbose_with_limits(reader, limits)
 }
 
+/// Internal opt-in projection through the same bounded verification pass.
+pub(crate) fn verify_bundle_verbose_with_extent<R: Read>(
+    reader: R,
+    limits: VerifyLimits,
+    with_extent: bool,
+) -> Result<VerifiedBundle> {
+    writer_next::verify::verify_bundle_verbose_with_extent(reader, limits, with_extent)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
