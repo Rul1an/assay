@@ -1,0 +1,72 @@
+{
+ "profile": "cap/1",
+ "producer": {
+  "name": "reference",
+  "version": "cap-1-ref/1.0.0",
+  "policy": "policy/1"
+ },
+ "subject": {
+  "kind": "artefact",
+  "ref": "subject-04",
+  "digest": {
+   "algorithm": "SHA-256",
+   "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+ },
+ "strata": [
+  {
+   "id": "detectors",
+   "population": "catalogued detector units",
+   "basis": {
+    "kind": "catalogue",
+    "catalogue_version": "1.0.0",
+    "catalogue_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+   },
+   "eligible": 7,
+   "examined": 2,
+   "unexamined": [
+    {
+     "unit": "video.ts",
+     "disposition": "withheld",
+     "withheld_digest": "6eba4ed548d118baeffa61e8ecc63524868e11b093c3abdea18c35d470a1e187"
+    },
+    {
+     "unit": "exif.ts",
+     "disposition": "withheld",
+     "withheld_digest": "131208726f04b3001b54cbad086eeaa25d17c6f9ac97498795fd8013b683648e"
+    },
+    {
+     "unit": "selector.ts",
+     "disposition": "withheld",
+     "withheld_digest": "27a9fc94e197681fe4c1d623f8bf1c9532f3c55a9c9ec846d361caa6df87cf10"
+    },
+    {
+     "unit": "quant.ts",
+     "disposition": "withheld",
+     "withheld_digest": "8c29d80953692dc3fa58ceda925c2d1659adf869232bc55c2b3d54911cb2635c"
+    },
+    {
+     "unit": "ela.ts",
+     "disposition": "withheld",
+     "withheld_digest": "d6076cbf8a082cf4bff7d91bc89e6991b26eda679a447c0db61c9c7e7e2f7e9a"
+    }
+   ],
+   "supports": [
+    "absence-of-detector-finding"
+   ]
+  }
+ ],
+ "absence_assertions": [
+  {
+   "assertion": "No manipulation indicator was observed.",
+   "stratum": "detectors"
+  }
+ ],
+ "integrity": {
+  "complete": true,
+  "uncapped_verdict": "pass",
+  "capped_to": null,
+  "unaccounted": [],
+  "statement": "Every dispatched unit reached a recorded outcome."
+ }
+}

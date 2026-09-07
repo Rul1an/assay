@@ -1,0 +1,184 @@
+{
+ "source": "runs/run.json of the Python reference, 2026-09-07",
+ "vectors": {
+  "EV-01a": {
+   "bounded_negative": "degraded",
+   "exhaustive_set": "degraded",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": [
+    "C1_denominator_precommitted"
+   ]
+  },
+  "EV-01b": {
+   "bounded_negative": "degraded",
+   "exhaustive_set": "degraded",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": [
+    "C1_denominator_precommitted"
+   ]
+  },
+  "EV-02": {
+   "bounded_negative": "blocked",
+   "exhaustive_set": "blocked",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": [
+    "C7_unit_identity_unique"
+   ]
+  },
+  "EV-02b": {
+   "bounded_negative": "degraded",
+   "exhaustive_set": "degraded",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": [
+    "C2_applicability_confirmable"
+   ]
+  },
+  "EV-05a": {
+   "bounded_negative": "blocked",
+   "exhaustive_set": "blocked",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": [
+    "C5_population_granularity"
+   ]
+  },
+  "EV-05b": {
+   "bounded_negative": "blocked",
+   "exhaustive_set": "blocked",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": [
+    "C5_population_granularity"
+   ]
+  },
+  "EV-05c": {
+   "bounded_negative": "blocked",
+   "exhaustive_set": "blocked",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": [
+    "C5_population_granularity"
+   ]
+  },
+  "EV-06": {
+   "bounded_negative": "degraded",
+   "exhaustive_set": "degraded",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": [
+    "C6_producer_independent_of_subject"
+   ]
+  },
+  "HV-01": {
+   "bounded_negative": "allowed",
+   "exhaustive_set": "allowed",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": []
+  },
+  "HV-02": {
+   "bounded_negative": "allowed",
+   "exhaustive_set": "allowed",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": []
+  },
+  "HV-03": {
+   "bounded_negative": "allowed",
+   "exhaustive_set": "allowed",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": []
+  },
+  "HV-04": {
+   "bounded_negative": "allowed",
+   "exhaustive_set": "allowed",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": []
+  },
+  "HV-05": {
+   "bounded_negative": "allowed",
+   "exhaustive_set": "allowed",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": []
+  },
+  "HV-06": {
+   "bounded_negative": "allowed",
+   "exhaustive_set": "allowed",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": []
+  },
+  "MV-01": {
+   "bounded_negative": "blocked",
+   "exhaustive_set": "blocked",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": [
+    "C1_denominator_precommitted"
+   ]
+  },
+  "MV-02": {
+   "bounded_negative": "degraded",
+   "exhaustive_set": "degraded",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": [
+    "C2_applicability_confirmable"
+   ]
+  },
+  "MV-03": {
+   "bounded_negative": "blocked",
+   "exhaustive_set": "degraded",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": [
+    "C3_absence_bounded_by_examined_units"
+   ]
+  },
+  "MV-04": {
+   "bounded_negative": "degraded",
+   "exhaustive_set": "degraded",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": [
+    "C4_withheld_resolvable"
+   ]
+  },
+  "MV-05": {
+   "bounded_negative": "blocked",
+   "exhaustive_set": "blocked",
+   "positive_existence": "allowed",
+   "rules_fired_bounded_negative": [
+    "C5_population_granularity"
+   ]
+  },
+  "MV-06": {
+   "bounded_negative": "blocked",
+   "exhaustive_set": "blocked",
+   "positive_existence": "degraded",
+   "rules_fired_bounded_negative": [
+    "C6_producer_independent_of_subject"
+   ]
+  }
+ },
+ "upstream_positive": {
+  "PV-01": {
+   "bounded_negative": "allowed",
+   "rules_fired_bounded_negative": []
+  },
+  "PV-02": {
+   "bounded_negative": "blocked",
+   "rules_fired_bounded_negative": [
+    "C2_applicability_confirmable",
+    "C3_absence_bounded_by_examined_units"
+   ]
+  },
+  "PV-03": {
+   "bounded_negative": "blocked",
+   "rules_fired_bounded_negative": [
+    "C3_absence_bounded_by_examined_units"
+   ]
+  },
+  "PV-04": {
+   "bounded_negative": "degraded",
+   "rules_fired_bounded_negative": [
+    "C4_withheld_resolvable"
+   ]
+  },
+  "PV-05": {
+   "bounded_negative": "degraded",
+   "rules_fired_bounded_negative": [
+    "C1_denominator_precommitted"
+   ]
+  }
+ }
+}
