@@ -111,6 +111,11 @@ fn assert_parse_error_with_policy(
     policy_root: &Path,
     policy_filename: Option<&str>,
 ) {
+    assert_eq!(
+        result.get("structuredContent"),
+        Some(body),
+        "{label}: typed structuredContent must equal the bounded text payload"
+    );
     let mut body_keys: Vec<&str> = body
         .as_object()
         .unwrap_or_else(|| panic!("{label}: decoded tool body must be an object; body={body}"))

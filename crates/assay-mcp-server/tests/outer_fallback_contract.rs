@@ -59,6 +59,15 @@ fn assert_fixed_failure(response: &Value, code: &str, message: &str) {
     let result = response.get("result").expect("CallToolResult response");
     assert_eq!(result["isError"], true, "response: {response}");
     let payload = tool_payload(response);
+    assert_eq!(
+        result.get("structuredContent"),
+        Some(&payload),
+        "selected failure must mirror the bounded text payload"
+    );
+    assert!(
+        payload["error"].get("details").is_none(),
+        "fixed fallback must not manufacture optional details"
+    );
     assert_eq!(payload["allowed"], false, "payload: {payload}");
     assert_eq!(payload["error"]["code"], code, "payload: {payload}");
     assert_eq!(payload["error"]["message"], message, "payload: {payload}");
@@ -97,8 +106,49 @@ fn report_tools_keep_successful_mcp_results() {
     for response in [&coverage, &explanation] {
         assert_eq!(response["result"]["isError"], false, "response: {response}");
         assert!(tool_payload(response).get("error").is_none());
+        assert!(response["result"].get("structuredContent").is_none());
     }
     assert!(conn.shutdown().success());
+}
+
+#[test]
+fn typed_error_projection_is_consistent_across_accepted_revisions() {
+    // Literal supported revisions: not derived from the implementation's list.
+    for version in ["2024-11-05", "2025-06-18", "2025-11-25"] {
+        let (mut conn, root) = spawn_server(None);
+        fs::write(root.path().join("policy.yaml"), "blocklist: [Blocked]\n")
+            .expect("write decision policy");
+        let initialized = conn.request(
+            "initialize",
+            serde_json::json!({
+                "protocolVersion": version,
+                "capabilities": {},
+                "clientInfo": {"name": "typed-error-contract", "version": "1"}
+            }),
+            1,
+        );
+        assert_eq!(initialized["result"]["protocolVersion"], version);
+
+        let failure = call_tool(&mut conn, "assay_check_args", serde_json::json!({}), 2);
+        assert_fixed_failure(&failure, "E_INTERNAL", "Tool execution failed");
+        for (id, tool, expected_allowed) in [(3, "Blocked", false), (4, "Allowed", true)] {
+            let response = call_tool(
+                &mut conn,
+                "assay_policy_decide",
+                serde_json::json!({"tool": tool, "policy": "policy.yaml"}),
+                id,
+            );
+            let payload = tool_payload(&response);
+            assert_eq!(payload["allowed"], expected_allowed);
+            assert!(payload.get("error").is_none());
+            assert_eq!(response["result"]["isError"], !expected_allowed);
+            assert!(
+                response["result"].get("structuredContent").is_none(),
+                "ordinary decision must not gain typed-error projection: {response}"
+            );
+        }
+        assert!(conn.shutdown().success());
+    }
 }
 
 #[test]
