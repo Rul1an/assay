@@ -7528,3 +7528,23 @@ test("#2838 historical v6 empty diagnostics stay consistent failed and never bac
   rewriteProof(run.proofRoot,manifest,events,classifyRecord({...manifest,events}));
   assert.equal(validateProofRoot(run.proofRoot).ok,false,"v6 cannot admit enriched diagnostics");
 });
+
+test("#2838 schema-aware classification rejects enriched v6 grammar without rewriting", () => {
+  const run = driveCli("closed-error-true");
+  const manifest = JSON.parse(fs.readFileSync(path.join(run.proofRoot, "manifest.json"), "utf8"));
+  const original = JSON.parse(fs.readFileSync(path.join(run.proofRoot, "events.json"), "utf8"));
+  for (const [schema, params, valid] of [
+    ["assay.codex-host-proof.v6", {}, true],
+    ["assay.codex-host-proof.v7", { error: { codexErrorInfo: "usageLimitExceeded" }, willRetry: true }, true],
+    ["assay.codex-host-proof.v6", { error: { codexErrorInfo: "usageLimitExceeded" }, willRetry: true }, false],
+  ]) {
+    const events = structuredClone(original);
+    events.find(e => e.direction === "server" && e.method === "error").params = params;
+    const before = stableStringify(events);
+    const classified = classifyRecord({ ...manifest, schema, events });
+    assert.equal(classified.cells.skillDiscovered.status, valid ? "pass" : "fail", `${schema} diagnostic grammar`);
+    if (!valid) assert.match(classified.cells.skillDiscovered.reason, /error params must be the closed diagnostic projection/);
+    assert.equal(classified.cells.driverCompleted.status, "fail", "diagnostics never become clean");
+    assert.equal(stableStringify(events), before, "classification must not normalize stored bytes");
+  }
+});

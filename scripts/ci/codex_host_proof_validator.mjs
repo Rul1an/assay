@@ -327,12 +327,12 @@ export function initializeFromTopology(topology) {
   };
 }
 
-export function initializeFromEvents(events, journey = "tool") {
+export function initializeFromEvents(events, journey = "tool", schema = SCHEMA) {
   if (!Array.isArray(events)) {
     return emptyInitialize();
   }
   try {
-    return initializeFromTopology(consumeJourneyTopology(events, journey));
+    return initializeFromTopology(consumeJourneyTopology(events, journey, schema));
   } catch {
     return emptyInitialize();
   }
@@ -1026,10 +1026,10 @@ function retainedItemReason(item, label = "item/completed") {
   }
 }
 
-function retainedMethodParamsReason(method, params) {
+function retainedMethodParamsReason(method, params, schema = SCHEMA) {
   if (method === "error") {
     return isPlainObject(params) && !containsProjectionViolation(params) &&
-      sameJson(params, projectNotificationParams(method, params))
+      sameJson(params, projectNotificationParams(method, params, schema))
       ? null : "error params must be the closed diagnostic projection";
   }
   if (
@@ -1107,7 +1107,7 @@ function retainedMethodParamsReason(method, params) {
   }
 }
 
-export function classifyStoredEvent(event) {
+export function classifyStoredEvent(event, schema = SCHEMA) {
   if (event == null || typeof event !== "object" || Array.isArray(event)) {
     return { type: "unclassified", reason: "event is not an object" };
   }
@@ -1151,7 +1151,7 @@ export function classifyStoredEvent(event) {
         !hasResult &&
         !hasError
       ) {
-        const payloadReason = retainedMethodParamsReason(method, event.params);
+        const payloadReason = retainedMethodParamsReason(method, event.params, schema);
         if (payloadReason) {
           return { type: "unclassified", reason: payloadReason };
         }
@@ -1184,7 +1184,7 @@ export function classifyStoredEvent(event) {
         !hasError &&
         ALLOWED_SERVER_REQUESTS.includes(method)
       ) {
-        const payloadReason = retainedMethodParamsReason(method, event.params);
+        const payloadReason = retainedMethodParamsReason(method, event.params, schema);
         if (payloadReason) {
           return { type: "unclassified", reason: payloadReason };
         }
@@ -1197,7 +1197,7 @@ export function classifyStoredEvent(event) {
         !hasError &&
         ALLOWED_SERVER_NOTIFICATIONS.includes(method)
       ) {
-        const payloadReason = retainedMethodParamsReason(method, event.params);
+        const payloadReason = retainedMethodParamsReason(method, event.params, schema);
         if (payloadReason) {
           return { type: "unclassified", reason: payloadReason };
         }
@@ -1338,7 +1338,7 @@ function consumeClassifiedEvent(classified, event, ctx) {
   }
 }
 
-export function consumeJourneyTopology(events, journey) {
+export function consumeJourneyTopology(events, journey, schema = SCHEMA) {
   const counts = journeyPairCounts(journey);
   const pending = new Map();
   const pendingServer = new Map();
@@ -1370,7 +1370,7 @@ export function consumeJourneyTopology(events, journey) {
     serverDiagnostics,
   };
   for (const event of events) {
-    consumeClassifiedEvent(classifyStoredEvent(event), event, ctx);
+    consumeClassifiedEvent(classifyStoredEvent(event, schema), event, ctx);
   }
   if (pending.size > 0) {
     reasons.push("unresolved client requests");
@@ -2040,7 +2040,7 @@ export function classifyCells(events, meta, expected, journey = "tool", topology
   let resolved = topology;
   if (resolved == null) {
     try {
-      resolved = consumeJourneyTopology(events, journey);
+      resolved = consumeJourneyTopology(events, journey, meta.schema);
     } catch (error) {
       resolved = { ok: false, reasons: [error.message] };
     }
@@ -2096,12 +2096,13 @@ export function classifyRecord(record) {
   const journey = record.journey ?? "tool";
   let topology;
   try {
-    topology = consumeJourneyTopology(events, journey);
+    topology = consumeJourneyTopology(events, journey, record.schema);
   } catch (error) {
     topology = { ok: false, reasons: [error.message], pairs: [] };
   }
   const derived = initializeFromTopology(topology);
   const meta = {
+    schema: record.schema,
     captureMode: record.captureMode,
     childExitCode: record.childExitCode,
     driverOutcome: record.driverOutcome ?? null,
@@ -3148,7 +3149,7 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   if (manifest.hashes?.events !== actual) {
     reasons.push("events hash mismatch");
   }
-  const derivedInitialize = initializeFromEvents(events, manifest.journey ?? "tool");
+  const derivedInitialize = initializeFromEvents(events, manifest.journey ?? "tool", manifest.schema);
   if (!sameJson(manifest.initialize, derivedInitialize)) {
     reasons.push("manifest initialize does not match captured initialize event");
   }
@@ -3172,7 +3173,7 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
     reasons.push(expectedReason);
   }
   if (!manifest.truncated && !manifest.streamUnavailable) {
-    const topology = consumeJourneyTopology(events, manifest.journey ?? "tool");
+    const topology = consumeJourneyTopology(events, manifest.journey ?? "tool", manifest.schema);
     if (!topology.ok) {
       reasons.push(`journey topology: ${topology.reasons[0] || "mismatch"}`);
     }
@@ -3226,7 +3227,7 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   if (hostSubjectsRequired(manifest.captureMode, manifest.hostIdentity)) {
     let topology = null;
     try {
-      topology = consumeJourneyTopology(events, manifest.journey ?? "tool");
+      topology = consumeJourneyTopology(events, manifest.journey ?? "tool", manifest.schema);
     } catch {
       topology = null;
     }
