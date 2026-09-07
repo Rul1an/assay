@@ -167,7 +167,7 @@ test("#2823: retained package is rechecked by the consumer, including forged sto
   t.after(() => fs.rmSync(proofRoot, { recursive: true, force: true }));
   const result = driveCli("valid", "failures", { captureMode: "host-observation", proofRoot });
   const manifest = JSON.parse(fs.readFileSync(path.join(proofRoot, "manifest.json"), "utf8"));
-  assert.equal(manifest.schema, "assay.codex-host-proof.v6");
+  assert.equal(manifest.schema, "assay.codex-host-proof.v7");
   const control = validateProofRoot(proofRoot);
   assert.equal(control.classified.cells.installPackageVerified.status, "pass", result.stderr);
   assert.equal(control.classified.cells.installRouteAdmissible.status, "pass");
@@ -503,7 +503,7 @@ test("driver calls the validator classification function; no extra classify modu
 test("synthetic positive control: cells pass without inventing external attestation", async () => {
   const { classified, manifest, proofRoot, driverOutcome, childExitCode, events } = await drive("valid");
   assert.equal(manifest.captureMode, "synthetic-fixture");
-  assert.equal(manifest.schema, "assay.codex-host-proof.v6");
+  assert.equal(manifest.schema, "assay.codex-host-proof.v7");
   assert.equal(childExitCode, 0);
   assert.equal(driverOutcome.exitCode, 0);
   assert.equal(manifest.childExitCode, 0);
@@ -7429,4 +7429,102 @@ test("#2822 F1: the printable-ASCII contract is exactly U+0020-U+007E, swept", (
     assert.equal(installSourceBound({ route: "github-release", reference }), true, reference.slice(0, 40));
   }
   assert.equal(installSourceBound({ route: "github-release", reference: "a".repeat(201) }), false);
+});
+
+
+test("#2838 actual producer retains closed cause and both retry intents without cleaning diagnostics", () => {
+  for (const willRetry of [true, false]) {
+    const result = driveCli(`closed-error-${willRetry}`);
+    const events = JSON.parse(fs.readFileSync(path.join(result.proofRoot, "events.json"), "utf8"));
+    const diagnostic = events.find((e) => e.direction === "server" && e.method === "error");
+    assert.ok(diagnostic, "synthetic host must emit a real diagnostic");
+    assert.deepEqual(diagnostic.params, { error: { codexErrorInfo: "usageLimitExceeded" }, willRetry });
+    assert.notEqual(result.status, 0, "diagnostics are non-clean even with a successful child");
+    assert.equal(JSON.stringify(events).includes("SECRET_DIAGNOSTIC"), false);
+    assert.equal(validateProofRoot(result.proofRoot).ok, true, "failed journey still forms a consistent proof");
+  }
+});
+
+
+const DIAGNOSTIC_UNIT_ORACLE = [
+  "contextWindowExceeded", "sessionBudgetExceeded", "usageLimitExceeded", "rateLimitExceeded",
+  "serverOverloaded", "cyberPolicy", "misalignmentPolicyViolation", "internalServerError",
+  "unauthorized", "badRequest", "threadRollbackFailed", "sandboxError", "other",
+];
+const DIAGNOSTIC_OBJECT_ORACLE = ["httpConnectionFailed", "responseStreamConnectionFailed",
+  "responseStreamDisconnected", "responseTooManyFailedAttempts", "activeTurnNotSteerable"];
+function diagnosticEvent(params) { return { direction: "server", method: "error", params }; }
+test("#2838 closed diagnostic grammar preserves missing/null and fixed points without payloads", () => {
+  const cases = [ [{}, {}], [{error:{}}, {error:{}}],
+    [{error:{codexErrorInfo:null}}, {error:{codexErrorInfo:null}}],
+    ...DIAGNOSTIC_UNIT_ORACLE.map(c => [{error:{codexErrorInfo:c}}, {error:{codexErrorInfo:c}}]),
+    ...DIAGNOSTIC_OBJECT_ORACLE.map(c => [{error:{codexErrorInfo:{[c]:{httpStatusCode:503,turnKind:"review",extra:"SECRET"}}}}, {error:{codexErrorInfo:c}}]),
+  ];
+  for (const [raw, expected] of cases) {
+    for (const retry of [undefined, false, true]) {
+      const input = {...raw, message:"SECRET", additionalDetails:"SECRET"};
+      const want = structuredClone(expected);
+      if (retry !== undefined) { input.willRetry=retry; want.willRetry=retry; }
+      const projected=projectRetainedEvent(diagnosticEvent(input));
+      assert.deepEqual(projected.params,want);
+      assert.deepEqual(projectRetainedEvent(projected),projected,"normalized cause must be a fixed point");
+      assert.equal(JSON.stringify(projected).includes("SECRET"),false);
+    }
+  }
+  assert.deepEqual(projectRetainedEvent({direction:"server",method:"warning",params:{message:"SECRET",willRetry:true,error:{codexErrorInfo:"other"}}}).params,{});
+});
+test("#2838 malformed diagnostic shapes refuse without retaining hostile labels", () => {
+  for (const cause of ["SECRET_UNKNOWN",1,false,[],{}, {unauthorized:{}},
+    {httpConnectionFailed:null}, {httpConnectionFailed:"SECRET"},
+    {httpConnectionFailed:{},other:{}}, {SECRET_UNKNOWN:{}}]) {
+    const out=projectRetainedEvent(diagnosticEvent({error:{codexErrorInfo:cause}}));
+    assert.match(JSON.stringify(out),/__invalidType/);
+    assert.equal(JSON.stringify(out).includes("SECRET"),false);
+  }
+  for (const willRetry of [null,0,"false",{},[]]) {
+    assert.match(JSON.stringify(projectRetainedEvent(diagnosticEvent({willRetry}))),/__invalidType/);
+  }
+});
+test("#2838 actual producer normalizes all five object variants and discards payload bytes", () => {
+  const result=driveCli("closed-error-objects");
+  const events=JSON.parse(fs.readFileSync(path.join(result.proofRoot,"events.json"),"utf8"));
+  const errors=events.filter(e=>e.direction==="server" && e.method==="error");
+  assert.deepEqual(errors.map(e=>e.params),DIAGNOSTIC_OBJECT_ORACLE.map(c=>({error:{codexErrorInfo:c},willRetry:false})));
+  assert.equal(JSON.stringify(events).includes("SECRET_DIAGNOSTIC"),false);
+  assert.notEqual(result.status,0);
+  assert.equal(validateProofRoot(result.proofRoot).ok,true);
+});
+test("#2838 persisted grammar refuses forged diagnostics after hashes and classification refresh", () => {
+  const run=driveCli("closed-error-true");
+  const manifest=JSON.parse(fs.readFileSync(path.join(run.proofRoot,"manifest.json"),"utf8"));
+  const original=JSON.parse(fs.readFileSync(path.join(run.proofRoot,"events.json"),"utf8"));
+  assert.equal(manifest.schema,"assay.codex-host-proof.v7");
+  for (const params of [ {willRetry:null}, {error:{codexErrorInfo:"SECRET_UNKNOWN"}},
+    {error:{codexErrorInfo:{httpConnectionFailed:{httpStatusCode:503}}}},
+    {error:{codexErrorInfo:"other",message:"SECRET"}}, {warning:"SECRET"},
+    {error:{codexErrorInfo:"usageLimitExceeded"},willRetry:true,extra:"SECRET"}]) {
+    const events=structuredClone(original);events.find(e=>e.direction==="server" && e.method==="error").params=params;
+    rewriteProof(run.proofRoot,manifest,events,classifyRecord({...manifest,events}));
+    const checked=validateProofRoot(run.proofRoot);
+    assert.equal(checked.ok,false);
+    assert.match(JSON.stringify(checked),/closed retained projection/);
+  }
+});
+test("#2838 historical v6 empty diagnostics stay consistent failed and never backfilled", () => {
+  const run=driveCli("closed-error-true");
+  const manifest=JSON.parse(fs.readFileSync(path.join(run.proofRoot,"manifest.json"),"utf8"));
+  const events=JSON.parse(fs.readFileSync(path.join(run.proofRoot,"events.json"),"utf8"));
+  manifest.schema="assay.codex-host-proof.v6";
+  const diag=events.find(e=>e.direction==="server" && e.method==="error");diag.params={};
+  const classified=classifyRecord({...manifest,events});
+  assert.equal(classified.schema,"assay.codex-host-proof.v6");
+  assert.equal(classified.cells.driverCompleted.status,"fail");
+  rewriteProof(run.proofRoot,manifest,events,classified);
+  const before=fs.readFileSync(path.join(run.proofRoot,"events.json"));
+  assert.equal(validateProofRoot(run.proofRoot).ok,true);
+  assert.deepEqual(fs.readFileSync(path.join(run.proofRoot,"events.json")),before);
+  assert.deepEqual(projectRetainedEvent(diagnosticEvent({error:{codexErrorInfo:"other"},willRetry:true}),manifest.schema).params,{});
+  diag.params={willRetry:false};
+  rewriteProof(run.proofRoot,manifest,events,classifyRecord({...manifest,events}));
+  assert.equal(validateProofRoot(run.proofRoot).ok,false,"v6 cannot admit enriched diagnostics");
 });

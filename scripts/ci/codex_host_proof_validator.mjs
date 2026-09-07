@@ -9,7 +9,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const SCHEMA = "assay.codex-host-proof.v6";
+export const SCHEMA = "assay.codex-host-proof.v7";
+const LEGACY_SCHEMA = "assay.codex-host-proof.v6";
 export const FAKE_USER_AGENT = "assay-codex-host-proof-fake/1";
 // Closed install-route vocabulary. "local-build" is recordable on purpose: a failed
 // provenance run must be retained as what it was, not omitted into a cleaner record.
@@ -1026,6 +1027,11 @@ function retainedItemReason(item, label = "item/completed") {
 }
 
 function retainedMethodParamsReason(method, params) {
+  if (method === "error") {
+    return isPlainObject(params) && !containsProjectionViolation(params) &&
+      sameJson(params, projectNotificationParams(method, params))
+      ? null : "error params must be the closed diagnostic projection";
+  }
   if (
     LIFECYCLE_SERVER_NOTIFICATIONS.includes(method) ||
     SERVER_DIAGNOSTIC_NOTIFICATIONS.includes(method)
@@ -2129,7 +2135,7 @@ export function classifyRecord(record) {
     }
   }
   return {
-    schema: SCHEMA,
+    schema: record.schema ?? SCHEMA,
     cells,
     externalAttestation: EXTERNAL_ATTESTATION,
   };
@@ -2750,9 +2756,44 @@ function projectServerResult(method, result) {
   return { __unretainedResponse: true };
 }
 
-function projectNotificationParams(method, params) {
+// Codex 0.153.4 protocol @3d2ee51ca2d5db578f328aa75e20aa22c0197c9a,
+// schema/typescript/v2/CodexErrorInfo.ts. Only these five variants carry payloads.
+const DIAGNOSTIC_OBJECT_CAUSES = Object.freeze([
+  "httpConnectionFailed", "responseStreamConnectionFailed", "responseStreamDisconnected",
+  "responseTooManyFailedAttempts", "activeTurnNotSteerable",
+]);
+const DIAGNOSTIC_CAUSES = Object.freeze([
+  "contextWindowExceeded", "sessionBudgetExceeded", "usageLimitExceeded", "rateLimitExceeded",
+  "serverOverloaded", "cyberPolicy", "misalignmentPolicyViolation", "internalServerError",
+  "unauthorized", "badRequest", "threadRollbackFailed", "sandboxError", "other",
+  ...DIAGNOSTIC_OBJECT_CAUSES,
+]);
+function projectDiagnosticCause(value) {
+  if (value === null) return null;
+  if (isPlainObject(value)) {
+    const keys = Object.keys(value);
+    if (keys.length !== 1 || !DIAGNOSTIC_OBJECT_CAUSES.includes(keys[0]) ||
+        !isPlainObject(value[keys[0]])) return invalidProjection(value);
+    return keys[0]; // Payload is intentionally discarded, including status and turn kind.
+  }
+  return projectedMember(value, DIAGNOSTIC_CAUSES);
+}
+function projectNotificationParams(method, params, schema = SCHEMA) {
   if (!isPlainObject(params)) {
     return invalidProjection(params);
+  }
+  if (method === "error" && schema !== LEGACY_SCHEMA) {
+    const out = {};
+    if (hasOwn(params, "error")) {
+      out.error = !isPlainObject(params.error) ? invalidProjection(params.error) :
+        hasOwn(params.error, "codexErrorInfo")
+          ? { codexErrorInfo: projectDiagnosticCause(params.error.codexErrorInfo) } : {};
+    }
+    if (hasOwn(params, "willRetry")) {
+      out.willRetry = typeof params.willRetry === "boolean"
+        ? params.willRetry : invalidProjection(params.willRetry);
+    }
+    return out;
   }
   if (method === "initialized") {
     return {};
@@ -2801,7 +2842,7 @@ function projectNotificationParams(method, params) {
   return {};
 }
 
-export function projectRetainedEvent(event) {
+export function projectRetainedEvent(event, schema = SCHEMA) {
   if (!isPlainObject(event)) {
     return invalidProjection(event);
   }
@@ -2827,7 +2868,7 @@ export function projectRetainedEvent(event) {
   }
   if (hasOwn(event, "params")) {
     if (event.direction === "server" || event.method === "initialized") {
-      out.params = projectNotificationParams(event.method, event.params);
+      out.params = projectNotificationParams(event.method, event.params, schema);
     } else if (
       event.direction === "client" &&
       hasOwn(event, "id") &&
@@ -3057,7 +3098,7 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
     reasons.push("events payload is not an array");
   } else {
     for (const event of events) {
-      if (!sameJson(event, projectRetainedEvent(event))) {
+      if (!sameJson(event, projectRetainedEvent(event, manifest.schema))) {
         reasons.push("events payload is not the closed retained projection");
         break;
       }
@@ -3071,7 +3112,7 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   if (preSpawn.present && !preSpawn.valid) {
     reasons.push(preSpawn.reason);
   }
-  if (manifest.schema !== SCHEMA) {
+  if (![SCHEMA, LEGACY_SCHEMA].includes(manifest.schema)) {
     reasons.push(`unexpected schema ${manifest.schema}`);
   }
   try {

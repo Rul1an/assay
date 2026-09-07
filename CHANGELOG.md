@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Codex host-proof v7 retains closed error cause discriminants and supplied retry
+  intent without diagnostic free text. Historical v6 empty diagnostics remain
+  supported without backfilling; diagnostics remain non-clean, and retry intent
+  is not retry execution or installed-host proof (#2838).
 - `assay-mcp-server` mirrors typed errors from selected tool calls into
   `structuredContent`, preserving the existing JSON text and `isError` (#2815).
   Both placements use the same bounded error value, including optional details.

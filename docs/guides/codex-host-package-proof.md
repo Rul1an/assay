@@ -1,6 +1,6 @@
 # Codex Host Package Proof
 
-The `assay.codex-host-proof.v6` driver requires retained Assay package evidence
+The `assay.codex-host-proof.v7` driver requires retained Assay package evidence
 before a `host-observation` run. This is not an installation recipe or release
 acceptance by itself. Synthetic fixtures remain synthetic, even if their package
 checks pass.
@@ -81,3 +81,17 @@ Previously retained v4/v5 packs remain immutable and use their pinned verifiers.
 The v6 validator rejects those schemas; do not retrofit new checks or fields into
 old packs. A newly recomputed package checksum says nothing about whether that
 check ran before an earlier host execution.
+
+## Closed diagnostics and historical records
+
+New v7 records retain only known Codex error cause discriminants, explicit null
+when supplied, and an actually supplied boolean `willRetry`. The five supported
+object variants are normalized to their discriminant; their payloads and all
+warning/error free text are discarded. Unknown or malformed causes refuse.
+`willRetry` states the host's intent, not an observed retry or request count;
+error and warning notifications still keep the journey non-clean.
+
+The current verifier also supports historical v6 records with empty diagnostic
+params. It does not enrich or rewrite those bytes or recover a discarded cause.
+Old pinned v6 readers are not claimed to accept v7 records. Neither schema
+establishes authentication or a successful installed-host journey by itself.
