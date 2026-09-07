@@ -33,6 +33,10 @@ All notable changes to this project will be documented in this file.
   producer or establish evidence completeness.
 
 ### Fixed
+- Failed or malformed `tools/list` pages no longer contribute tools or establish a complete
+  observed proxy catalogue (#2840). Admission requires an absent error member, an array-valued
+  tools result and an absent or string cursor. Successful empty catalogues remain complete;
+  a failed refresh preserves the earlier complete snapshot and records the incomplete refresh.
 - `assay-mcp-server` reports a pre-parse message-size refusal as JSON-RPC error
   `-32000`, with a null request id and `data.kind: transport_limit`, rather than a
   tool result. The session remains available for subsequent requests (#2779).

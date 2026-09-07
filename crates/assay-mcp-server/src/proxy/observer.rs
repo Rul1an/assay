@@ -115,13 +115,19 @@ impl Observer {
         if !self.list_req_ids.contains_key(&id) {
             return false;
         }
-        if let Some(tools) = v.pointer("/result/tools").and_then(|t| t.as_array()) {
-            self.acc.extend(tools.iter().cloned());
-        }
-        let has_next = v
-            .pointer("/result/nextCursor")
-            .map(|c| !c.is_null())
-            .unwrap_or(false);
+        // Only a successful, well-shaped page can contribute tools or complete a chain.
+        // Presence of error (including null) rejects mixed result/error responses.
+        let tools = match v.pointer("/result/tools").and_then(Value::as_array) {
+            Some(tools)
+                if v.get("error").is_none()
+                    && v.pointer("/result/nextCursor").is_none_or(Value::is_string) =>
+            {
+                tools
+            }
+            _ => return false,
+        };
+        self.acc.extend(tools.iter().cloned());
+        let has_next = v.pointer("/result/nextCursor").is_some();
         if has_next {
             self.outstanding_cursor = true;
             return false;
