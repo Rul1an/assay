@@ -565,3 +565,42 @@ To compare the resulting Trust Basis artifact against another run, use
 - [P45b OpenFeature decision receipt Trust Basis claim plan](../../architecture/PLAN-P45B-DECISION-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md)
 - [P41 OpenFeature decision receipt import plan](../../architecture/PLAN-P41-OPENFEATURE-EVALUATION-DETAILS-DECISION-RECEIPT-IMPORT-2026q2.md)
 - [P31 Promptfoo receipt import plan](../../architecture/PLAN-P31-PROMPTFOO-JSONL-COMPONENT-RESULT-RECEIPT-IMPORT-2026q2.md)
+
+## Verify an artifact attestation
+
+```bash
+assay evidence verify-attestation \
+  --bundle evidence.tar.gz \
+  --attestation attestation.json \
+  --key public-key.pem
+```
+
+The command verifies the DSSE signature with the explicitly supplied Ed25519 SPKI public
+PEM, then matches the complete compressed archive and every defined v1 predicate field
+through the canonical attestation verifier. It does not discover keys or accept a private
+key as a substitute. The v0 predicate and unknown predicate versions are refused.
+
+Successful stdout is one JSON document with schema `assay.evidence.attestation.verify.v1`,
+outcome `attestation_verified`, `signature_verified: true`, `subject_matched: true`,
+`artifact_sha256`, `predicate_type` and `subject_name`. The archive digest is lowercase
+SHA-256 hexadecimal without a prefix; it is distinct from the semantic run root.
+
+Exit 0 means the full attestation matched. Input, signature, integrity, version and resource
+refusals exit 2 with a bounded static explanation on stderr and no success JSON. A stdout
+write or flush failure exits 3. There is no signature-only fallback.
+
+Input streams are bounded before unbounded materialization or decoding: the encoded DSSE
+envelope is limited to 32 MiB (33,554,432 bytes), public PEM to 16 KiB (16,384 bytes), and
+archive source to the default 100 MiB (104,857,600 bytes). Default bundle-verification limits
+also apply to decoded contents, manifest, events, lines, paths and nesting. These are local
+refusal budgets, not a promise that every envelope below them is valid or accepted.
+
+Outer JSON is parsed once for syntax and nesting under the standard JSON recursion limit,
+then that temporary value is dropped and the original bytes are parsed as a typed DSSE
+envelope. This small double-parse cost preserves duplicate-known-field refusal without
+applying the decoded Statement's string ceiling to its base64 transport. The canonical
+verifier independently applies strict parsing to the decoded signed Statement.
+
+Key selection remains the caller's trust policy. Verification does not establish a trust
+root, transparency inclusion, observation completeness, provider outcomes or live host
+activity. See the [v1 predicate contract](../../attestation/evidence-bundle/v1.md).

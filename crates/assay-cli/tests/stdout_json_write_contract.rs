@@ -921,3 +921,45 @@ fn every_sink_case_reader_gone_is_exit_three() {
         offenders.join("; ")
     );
 }
+
+#[test]
+fn verify_attestation_success_document_reports_closed_stdout_as_exit_three() {
+    use assay_evidence::attestation::{sign_statement, statement_for_bundle};
+    use ed25519_dalek::pkcs8::{spki::der::pem::LineEnding, EncodePublicKey};
+    let dir = tempfile::tempdir().unwrap();
+    let bundle = skill_supply_chain_bundle(dir.path());
+    let bytes = std::fs::read(&bundle).unwrap();
+    let signing = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+    let envelope = sign_statement(&statement_for_bundle(&bytes).unwrap(), &signing).unwrap();
+    let attestation = dir.path().join("attestation.json");
+    let key = dir.path().join("public.pem");
+    std::fs::write(&attestation, serde_json::to_vec(&envelope).unwrap()).unwrap();
+    std::fs::write(
+        &key,
+        signing
+            .verifying_key()
+            .to_public_key_pem(LineEnding::LF)
+            .unwrap(),
+    )
+    .unwrap();
+    let command = || {
+        let mut cmd = assay_command(dir.path());
+        cmd.args(["evidence", "verify-attestation", "--bundle"])
+            .arg(&bundle)
+            .arg("--attestation")
+            .arg(&attestation)
+            .arg("--key")
+            .arg(&key);
+        cmd
+    };
+    let positive = run_bounded(command(), &[], LIMITS, "verify-attestation positive").unwrap();
+    assert!(
+        positive.status.success(),
+        "{}",
+        String::from_utf8_lossy(&positive.stderr)
+    );
+    let result: Value = serde_json::from_slice(&positive.stdout).unwrap();
+    assert_eq!(result["outcome"], "attestation_verified");
+    let closed = run_reader_already_gone(command(), "verify-attestation reader gone");
+    assert_infra_write_failure(&closed, "verify-attestation reader gone");
+}
