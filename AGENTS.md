@@ -7,7 +7,7 @@ restate or weaken this contract.
 ## Canonical State
 
 - Repository truth is the checked-in code and documentation.
-- The public execution ledger for the active programme is named on this line: [issue #2764](https://github.com/Rul1an/assay/issues/2764).
+- The public execution ledger for the active programme is named on this line. **No programme is active.** The previous one, [issue #2764](https://github.com/Rul1an/assay/issues/2764), closed on 2026-09-03.
 - Keep the number to the ledger line; everywhere else the contract names the role, so the next
   programme costs one edit here rather than one in every section. Name the new ledger there when
   one opens, and say so plainly there when none is active. Nothing enforces that, so it is an
