@@ -86,6 +86,7 @@ pub(crate) struct VerifiedBundle {
     /// first and a last event. Typed rather than rendered — the values are compared as instants
     /// and formatted once, at the edge that needs a string.
     pub(crate) time_window: (DateTime<Utc>, DateTime<Utc>),
+    pub(crate) extent: Option<crate::attestation::EvidenceExtent>,
 }
 
 /// Verify a bundle's integrity and contract compliance.
@@ -127,6 +128,14 @@ pub(crate) fn verify_bundle_verbose_with_limits<R: Read>(
     reader: R,
     limits: VerifyLimits,
 ) -> Result<VerifiedBundle> {
+    verify_bundle_verbose_with_extent(reader, limits, false)
+}
+
+pub(crate) fn verify_bundle_verbose_with_extent<R: Read>(
+    reader: R,
+    limits: VerifyLimits,
+    with_extent: bool,
+) -> Result<VerifiedBundle> {
     // Snapshot the whole source under the ceiling before parsing anything.
     //
     // Streaming the ceiling into the gzip/tar walker only bounds the prefix those layers choose
@@ -147,11 +156,16 @@ pub(crate) fn verify_bundle_verbose_with_limits<R: Read>(
             .with_context("Bundle source")
     })?;
 
-    verify_bundle_snapshot(&source, limits)
+    verify_bundle_snapshot(&source, limits, with_extent)
 }
 
 /// Verify a bundle from bytes already bounded and materialized by the caller.
-fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifiedBundle> {
+fn verify_bundle_snapshot(
+    source: &[u8],
+    limits: VerifyLimits,
+    with_extent: bool,
+) -> Result<VerifiedBundle> {
+    let mut extent = with_extent.then(crate::attestation::extent::Collector::default);
     let reader = std::io::Cursor::new(source);
 
     let decoder = GzDecoder::new(reader);
@@ -459,6 +473,9 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<Verifie
                     .into());
                 }
                 content_hashes.push(computed_hash);
+                if let Some(collector) = &mut extent {
+                    collector.observe(&event)?;
+                }
 
                 match prev_seq {
                     None => {
@@ -705,5 +722,6 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<Verifie
             computed_run_root,
         },
         time_window,
+        extent: extent.map(crate::attestation::extent::Collector::finish),
     })
 }
