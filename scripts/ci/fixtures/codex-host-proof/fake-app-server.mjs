@@ -239,6 +239,23 @@ function handle(message) {
         turn: { id: "turn-1", items: [], status: "inProgress" },
       },
     });
+    if (scenario === "closed-error-true" || scenario === "closed-error-false") {
+      write({ method: "error", params: {
+        error: { message: "SECRET_DIAGNOSTIC_TEXT", codexErrorInfo: "usageLimitExceeded", additionalDetails: "SECRET_DIAGNOSTIC_DETAIL" },
+        willRetry: scenario === "closed-error-true",
+        threadId, turnId: "turn-1",
+      } });
+    }
+    if (scenario === "closed-error-objects") {
+      for (const cause of ["httpConnectionFailed", "responseStreamConnectionFailed", "responseStreamDisconnected", "responseTooManyFailedAttempts", "activeTurnNotSteerable"]) {
+        write({ method: "error", params: { error: {
+          message: "SECRET_DIAGNOSTIC_TEXT",
+          codexErrorInfo: { [cause]: cause === "activeTurnNotSteerable"
+            ? { turnKind: "review", extra: "SECRET_DIAGNOSTIC_PAYLOAD" }
+            : { httpStatusCode: 503, extra: "SECRET_DIAGNOSTIC_PAYLOAD" } },
+        }, willRetry: false } });
+      }
+    }
     if (scenario === "truncated") {
       process.stdout.write('{"method":"item/completed","params":');
       return;

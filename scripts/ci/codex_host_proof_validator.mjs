@@ -9,7 +9,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const SCHEMA = "assay.codex-host-proof.v6";
+export const SCHEMA = "assay.codex-host-proof.v7";
+const LEGACY_SCHEMA = "assay.codex-host-proof.v6";
 export const FAKE_USER_AGENT = "assay-codex-host-proof-fake/1";
 // Closed install-route vocabulary. "local-build" is recordable on purpose: a failed
 // provenance run must be retained as what it was, not omitted into a cleaner record.
@@ -326,12 +327,12 @@ export function initializeFromTopology(topology) {
   };
 }
 
-export function initializeFromEvents(events, journey = "tool") {
+export function initializeFromEvents(events, journey = "tool", schema = SCHEMA) {
   if (!Array.isArray(events)) {
     return emptyInitialize();
   }
   try {
-    return initializeFromTopology(consumeJourneyTopology(events, journey));
+    return initializeFromTopology(consumeJourneyTopology(events, journey, schema));
   } catch {
     return emptyInitialize();
   }
@@ -1025,7 +1026,12 @@ function retainedItemReason(item, label = "item/completed") {
   }
 }
 
-function retainedMethodParamsReason(method, params) {
+function retainedMethodParamsReason(method, params, schema = SCHEMA) {
+  if (method === "error") {
+    return isPlainObject(params) && !containsProjectionViolation(params) &&
+      sameJson(params, projectNotificationParams(method, params, schema))
+      ? null : "error params must be the closed diagnostic projection";
+  }
   if (
     LIFECYCLE_SERVER_NOTIFICATIONS.includes(method) ||
     SERVER_DIAGNOSTIC_NOTIFICATIONS.includes(method)
@@ -1101,7 +1107,7 @@ function retainedMethodParamsReason(method, params) {
   }
 }
 
-export function classifyStoredEvent(event) {
+export function classifyStoredEvent(event, schema = SCHEMA) {
   if (event == null || typeof event !== "object" || Array.isArray(event)) {
     return { type: "unclassified", reason: "event is not an object" };
   }
@@ -1145,7 +1151,7 @@ export function classifyStoredEvent(event) {
         !hasResult &&
         !hasError
       ) {
-        const payloadReason = retainedMethodParamsReason(method, event.params);
+        const payloadReason = retainedMethodParamsReason(method, event.params, schema);
         if (payloadReason) {
           return { type: "unclassified", reason: payloadReason };
         }
@@ -1178,7 +1184,7 @@ export function classifyStoredEvent(event) {
         !hasError &&
         ALLOWED_SERVER_REQUESTS.includes(method)
       ) {
-        const payloadReason = retainedMethodParamsReason(method, event.params);
+        const payloadReason = retainedMethodParamsReason(method, event.params, schema);
         if (payloadReason) {
           return { type: "unclassified", reason: payloadReason };
         }
@@ -1191,7 +1197,7 @@ export function classifyStoredEvent(event) {
         !hasError &&
         ALLOWED_SERVER_NOTIFICATIONS.includes(method)
       ) {
-        const payloadReason = retainedMethodParamsReason(method, event.params);
+        const payloadReason = retainedMethodParamsReason(method, event.params, schema);
         if (payloadReason) {
           return { type: "unclassified", reason: payloadReason };
         }
@@ -1332,7 +1338,7 @@ function consumeClassifiedEvent(classified, event, ctx) {
   }
 }
 
-export function consumeJourneyTopology(events, journey) {
+export function consumeJourneyTopology(events, journey, schema = SCHEMA) {
   const counts = journeyPairCounts(journey);
   const pending = new Map();
   const pendingServer = new Map();
@@ -1364,7 +1370,7 @@ export function consumeJourneyTopology(events, journey) {
     serverDiagnostics,
   };
   for (const event of events) {
-    consumeClassifiedEvent(classifyStoredEvent(event), event, ctx);
+    consumeClassifiedEvent(classifyStoredEvent(event, schema), event, ctx);
   }
   if (pending.size > 0) {
     reasons.push("unresolved client requests");
@@ -2034,7 +2040,7 @@ export function classifyCells(events, meta, expected, journey = "tool", topology
   let resolved = topology;
   if (resolved == null) {
     try {
-      resolved = consumeJourneyTopology(events, journey);
+      resolved = consumeJourneyTopology(events, journey, meta.schema);
     } catch (error) {
       resolved = { ok: false, reasons: [error.message] };
     }
@@ -2090,12 +2096,13 @@ export function classifyRecord(record) {
   const journey = record.journey ?? "tool";
   let topology;
   try {
-    topology = consumeJourneyTopology(events, journey);
+    topology = consumeJourneyTopology(events, journey, record.schema);
   } catch (error) {
     topology = { ok: false, reasons: [error.message], pairs: [] };
   }
   const derived = initializeFromTopology(topology);
   const meta = {
+    schema: record.schema,
     captureMode: record.captureMode,
     childExitCode: record.childExitCode,
     driverOutcome: record.driverOutcome ?? null,
@@ -2129,7 +2136,7 @@ export function classifyRecord(record) {
     }
   }
   return {
-    schema: SCHEMA,
+    schema: record.schema ?? SCHEMA,
     cells,
     externalAttestation: EXTERNAL_ATTESTATION,
   };
@@ -2750,9 +2757,44 @@ function projectServerResult(method, result) {
   return { __unretainedResponse: true };
 }
 
-function projectNotificationParams(method, params) {
+// Codex 0.153.4 protocol @3d2ee51ca2d5db578f328aa75e20aa22c0197c9a,
+// schema/typescript/v2/CodexErrorInfo.ts. Only these five variants carry payloads.
+const DIAGNOSTIC_OBJECT_CAUSES = Object.freeze([
+  "httpConnectionFailed", "responseStreamConnectionFailed", "responseStreamDisconnected",
+  "responseTooManyFailedAttempts", "activeTurnNotSteerable",
+]);
+const DIAGNOSTIC_CAUSES = Object.freeze([
+  "contextWindowExceeded", "sessionBudgetExceeded", "usageLimitExceeded", "rateLimitExceeded",
+  "serverOverloaded", "cyberPolicy", "misalignmentPolicyViolation", "internalServerError",
+  "unauthorized", "badRequest", "threadRollbackFailed", "sandboxError", "other",
+  ...DIAGNOSTIC_OBJECT_CAUSES,
+]);
+function projectDiagnosticCause(value) {
+  if (value === null) return null;
+  if (isPlainObject(value)) {
+    const keys = Object.keys(value);
+    if (keys.length !== 1 || !DIAGNOSTIC_OBJECT_CAUSES.includes(keys[0]) ||
+        !isPlainObject(value[keys[0]])) return invalidProjection(value);
+    return keys[0]; // Payload is intentionally discarded, including status and turn kind.
+  }
+  return projectedMember(value, DIAGNOSTIC_CAUSES);
+}
+function projectNotificationParams(method, params, schema = SCHEMA) {
   if (!isPlainObject(params)) {
     return invalidProjection(params);
+  }
+  if (method === "error" && schema !== LEGACY_SCHEMA) {
+    const out = {};
+    if (hasOwn(params, "error")) {
+      out.error = !isPlainObject(params.error) ? invalidProjection(params.error) :
+        hasOwn(params.error, "codexErrorInfo")
+          ? { codexErrorInfo: projectDiagnosticCause(params.error.codexErrorInfo) } : {};
+    }
+    if (hasOwn(params, "willRetry")) {
+      out.willRetry = typeof params.willRetry === "boolean"
+        ? params.willRetry : invalidProjection(params.willRetry);
+    }
+    return out;
   }
   if (method === "initialized") {
     return {};
@@ -2801,7 +2843,7 @@ function projectNotificationParams(method, params) {
   return {};
 }
 
-export function projectRetainedEvent(event) {
+export function projectRetainedEvent(event, schema = SCHEMA) {
   if (!isPlainObject(event)) {
     return invalidProjection(event);
   }
@@ -2827,7 +2869,7 @@ export function projectRetainedEvent(event) {
   }
   if (hasOwn(event, "params")) {
     if (event.direction === "server" || event.method === "initialized") {
-      out.params = projectNotificationParams(event.method, event.params);
+      out.params = projectNotificationParams(event.method, event.params, schema);
     } else if (
       event.direction === "client" &&
       hasOwn(event, "id") &&
@@ -3057,7 +3099,7 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
     reasons.push("events payload is not an array");
   } else {
     for (const event of events) {
-      if (!sameJson(event, projectRetainedEvent(event))) {
+      if (!sameJson(event, projectRetainedEvent(event, manifest.schema))) {
         reasons.push("events payload is not the closed retained projection");
         break;
       }
@@ -3071,7 +3113,7 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   if (preSpawn.present && !preSpawn.valid) {
     reasons.push(preSpawn.reason);
   }
-  if (manifest.schema !== SCHEMA) {
+  if (![SCHEMA, LEGACY_SCHEMA].includes(manifest.schema)) {
     reasons.push(`unexpected schema ${manifest.schema}`);
   }
   try {
@@ -3107,7 +3149,7 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   if (manifest.hashes?.events !== actual) {
     reasons.push("events hash mismatch");
   }
-  const derivedInitialize = initializeFromEvents(events, manifest.journey ?? "tool");
+  const derivedInitialize = initializeFromEvents(events, manifest.journey ?? "tool", manifest.schema);
   if (!sameJson(manifest.initialize, derivedInitialize)) {
     reasons.push("manifest initialize does not match captured initialize event");
   }
@@ -3131,7 +3173,7 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
     reasons.push(expectedReason);
   }
   if (!manifest.truncated && !manifest.streamUnavailable) {
-    const topology = consumeJourneyTopology(events, manifest.journey ?? "tool");
+    const topology = consumeJourneyTopology(events, manifest.journey ?? "tool", manifest.schema);
     if (!topology.ok) {
       reasons.push(`journey topology: ${topology.reasons[0] || "mismatch"}`);
     }
@@ -3185,7 +3227,7 @@ export function validateProofRoot(proofRoot, maxBytes = DEFAULT_MAX_BYTES) {
   if (hostSubjectsRequired(manifest.captureMode, manifest.hostIdentity)) {
     let topology = null;
     try {
-      topology = consumeJourneyTopology(events, manifest.journey ?? "tool");
+      topology = consumeJourneyTopology(events, manifest.journey ?? "tool", manifest.schema);
     } catch {
       topology = null;
     }
