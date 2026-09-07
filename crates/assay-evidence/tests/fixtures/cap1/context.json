@@ -1,0 +1,70 @@
+{
+ "_comment": "The relying party's OWN state. Nothing here is taken from a producer. default applies to every vector; per_vector overrides model a relying party in a different position (pair 04 is byte-identical on the wire, so only this can separate it). catalogue_units is the unit list behind the digest the relying party precommitted to. withheld_results holds RESULT BYTES the relying party obtained out of band; the gate checks sha256(bytes) == withheld_digest. Here the bytes are the model strings the vectors were built from. PV-0x overrides model a relying party in the author's own position (precommitted to his digest, no unit set held), used only by run.py Part 4.",
+ "default": {
+  "precommitted_catalogue_digests": [
+   "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  ],
+  "catalogue_units": {
+   "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc": [
+    "pdf.ts",
+    "audio.ts",
+    "video.ts",
+    "exif.ts",
+    "selector.ts",
+    "quant.ts",
+    "ela.ts"
+   ]
+  },
+  "confirmable_not_applicable": [
+   "pdf.ts",
+   "audio.ts"
+  ],
+  "confirmable_out_of_scope": [],
+  "withheld_results": {},
+  "independent_producers": [
+   "reference",
+   "observer-y"
+  ]
+ },
+ "per_vector": {
+  "HV-04": {
+   "withheld_results": {
+    "6eba4ed548d118baeffa61e8ecc63524868e11b093c3abdea18c35d470a1e187": "withheld:video.ts",
+    "131208726f04b3001b54cbad086eeaa25d17c6f9ac97498795fd8013b683648e": "withheld:exif.ts",
+    "27a9fc94e197681fe4c1d623f8bf1c9532f3c55a9c9ec846d361caa6df87cf10": "withheld:selector.ts",
+    "8c29d80953692dc3fa58ceda925c2d1659adf869232bc55c2b3d54911cb2635c": "withheld:quant.ts",
+    "d6076cbf8a082cf4bff7d91bc89e6991b26eda679a447c0db61c9c7e7e2f7e9a": "withheld:ela.ts"
+   }
+  },
+  "PV-01": {
+   "precommitted_catalogue_digests": [
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   ],
+   "catalogue_units": {}
+  },
+  "PV-02": {
+   "precommitted_catalogue_digests": [
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   ],
+   "catalogue_units": {}
+  },
+  "PV-03": {
+   "precommitted_catalogue_digests": [
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   ],
+   "catalogue_units": {}
+  },
+  "PV-04": {
+   "precommitted_catalogue_digests": [
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   ],
+   "catalogue_units": {}
+  },
+  "PV-05": {
+   "precommitted_catalogue_digests": [
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   ],
+   "catalogue_units": {}
+  }
+ }
+}

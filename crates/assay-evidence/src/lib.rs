@@ -1,6 +1,7 @@
 pub mod attestation;
 pub mod bundle;
 pub mod coding_agent;
+pub mod coverage_attestation;
 pub mod crypto;
 pub mod denial_marker;
 pub mod diff;
@@ -29,6 +30,12 @@ pub use coding_agent::{
     CodingAgentGateDecision, CodingAgentNetworkPolicy, CodingAgentObservedEffects,
     CodingAgentSourceClass, CodingAgentWeakestCeiling, CODING_AGENT_EVIDENCE_EVENT_TYPE,
     CODING_AGENT_EVIDENCE_SOURCE,
+};
+pub use coverage_attestation::{
+    cap1_claim_decision, cap1_claim_decision_with, Cap1AbsenceAssertion, Cap1Basis, Cap1BasisKind,
+    Cap1ClaimDecision, Cap1Digest, Cap1Disposition, Cap1Document, Cap1Finding, Cap1Gap,
+    Cap1Integrity, Cap1Producer, Cap1RelyingPartyContext, Cap1Rule, Cap1Stratum, Cap1Subject,
+    Cap1Unexamined,
 };
 pub use denial_marker::{
     bindable_denial_marker, classify_denial_marker, BindableDenialMarker, DenialMarkerVersion,
