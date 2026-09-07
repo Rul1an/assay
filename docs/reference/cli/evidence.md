@@ -566,6 +566,18 @@ To compare the resulting Trust Basis artifact against another run, use
 - [P41 OpenFeature decision receipt import plan](../../architecture/PLAN-P41-OPENFEATURE-EVALUATION-DETAILS-DECISION-RECEIPT-IMPORT-2026q2.md)
 - [P31 Promptfoo receipt import plan](../../architecture/PLAN-P31-PROMPTFOO-JSONL-COMPONENT-RESULT-RECEIPT-IMPORT-2026q2.md)
 
+## Sign an artifact attestation
+
+```bash
+assay evidence attest --bundle evidence.tar.gz --key private-key.pem
+```
+
+The producer verifies the bounded archive and signs its complete archive digest and the
+artifact-derived v1.1 `extent` using the canonical builder. Stdout contains only the bare
+DSSE envelope. With `--out attestation.json`, the envelope is written to that file instead;
+the existing output-path notice goes to stderr. The subject digest binds the archive bytes,
+not just the semantic run root.
+
 ## Verify an artifact attestation
 
 ```bash
@@ -582,8 +594,21 @@ key as a substitute. The v0 predicate and unknown predicate versions are refused
 
 Successful stdout is one JSON document with schema `assay.evidence.attestation.verify.v1`,
 outcome `attestation_verified`, `signature_verified: true`, `subject_matched: true`,
-`artifact_sha256`, `predicate_type` and `subject_name`. The archive digest is lowercase
+`artifact_sha256`, `predicate_type`, `subject_name`, `extent_stated` and `extent`. The archive digest is lowercase
 SHA-256 hexadecimal without a prefix; it is distinct from the semantic run root.
+
+`extent` is the canonical verifier's checked projection, not an unchecked copy of signed
+JSON. It includes `retained_events_by_type` (retained row counts, not hit counts) and
+`observed.basis`. Producer summaries have basis `producer_reported` with `source_type` and
+`counts`; without a recognized summary the basis is `not_stated`. Sandbox summaries do not
+state a network count, so that field remains absent rather than becoming zero. Legacy
+predicates with absent or null extent remain valid and report `extent_stated: false` and
+`extent: null`; a stated, checked extent reports `extent_stated: true`.
+
+Artifact-bound support is an interpretation from the predicate specification, not a signed
+`support_ceiling` field. Neither an extent nor a valid signature establishes observation
+completeness. `signature_verified` and `subject_matched` remain separate statements: this
+command emits success only after both checks, including artifact-derived extent matching.
 
 Exit 0 means the full attestation matched. Input, signature, integrity, version and resource
 refusals exit 2 with a bounded static explanation on stderr and no success JSON. A stdout
