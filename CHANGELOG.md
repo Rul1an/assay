@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Codex host-proof v7 retains closed error cause discriminants and supplied retry
+  intent without diagnostic free text. Historical v6 empty diagnostics remain
+  supported without backfilling; diagnostics remain non-clean, and retry intent
+  is not retry execution or installed-host proof (#2838).
 - Optional artifact-derived attestation extent under the existing `evidence-bundle/v1` Type URI
   (#2833): retained event-type counts and explicitly producer-reported or not-stated summary counts.
   Additive library APIs opt producers in and expose checked extent; existing artifact verifiers
