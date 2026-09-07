@@ -17,9 +17,9 @@
 //! degrades "these are all of them", blocks "this did not happen"; a self-reported account caps
 //! at `asserted`) is the runner substrate's rule, restated here over a CAP-1 stratum rather than
 //! reinvented. `tests/cap1_relying_party_gate.rs` pins agreement with
-//! [`coding_agent_claim_decision`] on the two shapes that overlap, and pins decision parity with
-//! the Python reference at `github.com/Rul1an/cap1-conforming-but-misleading`, whose vectors
-//! are the fixtures.
+//! [`crate::coding_agent_claim_decision`] on the two shapes that overlap. Fixtures retain the
+//! Python reference at `github.com/Rul1an/cap1-conforming-but-misleading`; tests explicitly name
+//! Assay's stricter handling when the relying party lacks a catalogue population.
 //!
 //! What the rules read, stated exactly. Every rule derives from the document plus the relying
 //! party's context. The document's identities (producer name, subject ref, unit names, catalogue
@@ -244,6 +244,8 @@ pub enum Cap1Gap {
     PartialOnly,
     WithheldUnresolvable,
     PopulationMismatch,
+    PopulationUnavailable,
+    ClaimSupportMissing,
     SelfReportedOnly,
     ProducerNotAcceptedIndependent,
     DuplicateUnitIdentity,
@@ -311,6 +313,11 @@ pub fn cap1_claim_decision_with(
 
     let on = |r: Cap1Rule| !disabled.contains(&r);
     let neg = claim_kind != Kind::PositiveExistence;
+    let absence_decision = if claim_kind == Kind::BoundedNegative {
+        D::Blocked
+    } else {
+        D::Degraded
+    };
     let mut findings: Vec<Cap1Finding> = Vec::new();
     let mut add = |rule: Cap1Rule, decision: D, gap: Cap1Gap, detail: String| {
         findings.push(Cap1Finding {
@@ -327,6 +334,15 @@ pub fn cap1_claim_decision_with(
         .flatten()
         .map(|a| a.stratum.as_str())
         .collect();
+    // C3 also requires cited support: omitting assertions cannot promote a negative claim.
+    if on(Cap1Rule::AbsenceBoundedByExaminedUnits) && neg && cited.is_empty() {
+        add(
+            Cap1Rule::AbsenceBoundedByExaminedUnits,
+            absence_decision,
+            Cap1Gap::ClaimSupportMissing,
+            "no absence assertion cites a stratum in support of this claim".to_string(),
+        );
+    }
     let producer = doc.producer.as_ref().and_then(|p| p.name.as_deref());
     let subject_ref = doc.subject.reference.as_str();
 
@@ -474,11 +490,7 @@ pub fn cap1_claim_decision_with(
             if !shortfall.is_empty() {
                 add(
                     Cap1Rule::AbsenceBoundedByExaminedUnits,
-                    if claim_kind == Kind::BoundedNegative {
-                        D::Blocked
-                    } else {
-                        D::Degraded
-                    },
+                    absence_decision,
                     Cap1Gap::PartialOnly,
                     format!(
                         "strata[{sid}] examined {}/{}; absence over the stratum is not a fact about units that did not examine the input: {shortfall:?}",
@@ -548,6 +560,15 @@ pub fn cap1_claim_decision_with(
                         ),
                     );
                 }
+            } else {
+                add(
+                    Cap1Rule::PopulationGranularity,
+                    D::Degraded,
+                    Cap1Gap::PopulationUnavailable,
+                    format!(
+                        "strata[{sid}] catalogue population is unavailable to the relying party"
+                    ),
+                );
             }
         }
     }

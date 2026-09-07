@@ -1,9 +1,9 @@
 //! The CAP-1 relying-party gate, pinned three ways.
 //!
-//! 1. DECISION PARITY with the Python reference (`github.com/Rul1an/cap1-conforming-but-misleading`,
-//!    run of 2026-09-07): every vector, every claim kind, same decision, same rules fired. Two
-//!    implementations of one rule drift unless something holds them together; this is the
-//!    something.
+//! 1. REFERENCE BASELINE (`github.com/Rul1an/cap1-conforming-but-misleading`, run of
+//!    2026-09-07): decisions are checked for all three claim kinds on the 20 main vectors;
+//!    rules fired are checked for bounded-negative only. Explicit Assay deviations for EV-01b
+//!    and the five upstream positive vectors preserve the historical reference bytes.
 //! 2. SHAPE PARITY with `coding_agent_claim_decision` on the two shapes that overlap: partial
 //!    coverage (pair 03) and self-report (pair 06). The claim-kind asymmetry is the runner
 //!    substrate's rule, and the CAP-1 gate must not silently mean something different.
@@ -126,7 +126,7 @@ fn every_fixture_parses_under_the_closed_schema() {
 }
 
 #[test]
-fn decision_parity_with_the_python_reference() {
+fn reference_baseline_with_explicit_assay_population_deviations() {
     let ctx = load_context();
     let expected = load_expected();
     for id in vector_ids() {
@@ -159,25 +159,91 @@ fn decision_parity_with_the_python_reference() {
             .into_iter()
             .map(Cap1Rule::as_str)
             .collect();
-        assert_eq!(fired, want.rules_fired_bounded_negative, "{id} rules fired");
+        if id == "EV-01b" {
+            // Unknown digest also lacks an owned population: two independent missing inputs.
+            assert_eq!(
+                want.rules_fired_bounded_negative,
+                vec![Cap1Rule::DenominatorPrecommitted.as_str()]
+            );
+            assert_eq!(
+                fired,
+                vec![
+                    Cap1Rule::DenominatorPrecommitted.as_str(),
+                    Cap1Rule::PopulationGranularity.as_str()
+                ],
+                "{id} Assay rules"
+            );
+        } else {
+            assert_eq!(fired, want.rules_fired_bounded_negative, "{id} rules fired");
+        }
     }
-    // Part 4 of the reference: the author's own positive vectors, for a relying party in his
-    // position. Strictness is pinned, not hidden.
-    for (id, want) in &expected.upstream_positive {
-        let doc = load_doc(&fixtures().join("upstream").join(format!("{id}.json")));
-        let c = context_for(&ctx, id);
-        let neg = cap1_claim_decision(&doc, CodingAgentClaimKind::BoundedNegative, &c);
+    // Historical Python bytes are unchanged. These are Assay expectations, not a new
+    // reference run: each PV context lacks the relying party's catalogue unit set.
+    let deviations = [
+        ("PV-01", "degraded", vec![Cap1Rule::PopulationGranularity]),
+        (
+            "PV-02",
+            "blocked",
+            vec![
+                Cap1Rule::ApplicabilityConfirmable,
+                Cap1Rule::AbsenceBoundedByExaminedUnits,
+                Cap1Rule::PopulationGranularity,
+            ],
+        ),
+        (
+            "PV-03",
+            "blocked",
+            vec![
+                Cap1Rule::AbsenceBoundedByExaminedUnits,
+                Cap1Rule::PopulationGranularity,
+            ],
+        ),
+        (
+            "PV-04",
+            "degraded",
+            vec![
+                Cap1Rule::WithheldResolvable,
+                Cap1Rule::PopulationGranularity,
+            ],
+        ),
+        (
+            "PV-05",
+            "degraded",
+            vec![
+                Cap1Rule::DenominatorPrecommitted,
+                Cap1Rule::PopulationGranularity,
+            ],
+        ),
+    ];
+    assert_eq!(deviations.len(), expected.upstream_positive.len());
+    for (id, decision, rules) in deviations {
+        let historical = &expected.upstream_positive[id];
         assert_eq!(
-            decision_str(neg.decision),
-            want.bounded_negative,
-            "{id} bounded_negative"
+            historical.bounded_negative,
+            if id == "PV-01" { "allowed" } else { decision }
         );
-        let fired: Vec<&str> = neg
-            .rules_fired()
-            .into_iter()
+        let unchanged_rules: Vec<_> = rules
+            .iter()
+            .copied()
+            .filter(|r| *r != Cap1Rule::PopulationGranularity)
             .map(Cap1Rule::as_str)
             .collect();
-        assert_eq!(fired, want.rules_fired_bounded_negative, "{id} rules fired");
+        assert_eq!(
+            historical.rules_fired_bounded_negative, unchanged_rules,
+            "{id} historical rules"
+        );
+        let doc = load_doc(&fixtures().join("upstream").join(format!("{id}.json")));
+        let result = cap1_claim_decision(
+            &doc,
+            CodingAgentClaimKind::BoundedNegative,
+            &context_for(&ctx, id),
+        );
+        assert_eq!(
+            decision_str(result.decision),
+            decision,
+            "{id} Assay decision"
+        );
+        assert_eq!(result.rules_fired(), rules, "{id} Assay rules");
     }
 }
 
@@ -291,8 +357,23 @@ fn every_rule_is_killed_under_mutation() {
                 flipped.push(*id);
             }
         }
+        let expected_flips: &[&str] = match rule {
+            Cap1Rule::DenominatorPrecommitted => &["EV-01a", "MV-01"],
+            Cap1Rule::ApplicabilityConfirmable => &["EV-02b", "MV-02"],
+            Cap1Rule::AbsenceBoundedByExaminedUnits => &["MV-03"],
+            Cap1Rule::WithheldResolvable => &["MV-04"],
+            Cap1Rule::PopulationGranularity => &["EV-05a", "EV-05b", "EV-05c", "MV-05"],
+            Cap1Rule::ProducerIndependentOfSubject => &["EV-06", "MV-06"],
+            Cap1Rule::UnitIdentityUnique => &["EV-02"],
+        };
+        assert_eq!(
+            flipped,
+            expected_flips,
+            "{} exact affected vectors",
+            rule.as_str()
+        );
         for (id, dec) in &mutant {
-            if !id.starts_with("HV") && !flipped.contains(id) {
+            if !id.starts_with("HV") && !expected_flips.contains(id) {
                 others_ok &= *dec != CodingAgentGateDecision::Allowed;
             }
         }
@@ -305,4 +386,126 @@ fn every_rule_is_killed_under_mutation() {
         kills += 1;
     }
     assert_eq!(kills, Cap1Rule::ALL.len());
+    // EV-01b now has independent C1 and C5 gaps. Neither single-rule mutation may allow it;
+    // removing both does, explicitly separating this combined case from each rule's twins.
+    let (id, doc, ctx) = docs.iter().find(|(id, _, _)| id == "EV-01b").unwrap();
+    for disabled in [
+        Cap1Rule::DenominatorPrecommitted,
+        Cap1Rule::PopulationGranularity,
+    ] {
+        assert_eq!(
+            cap1_claim_decision_with(doc, CodingAgentClaimKind::BoundedNegative, ctx, &[disabled])
+                .decision,
+            CodingAgentGateDecision::Degraded,
+            "{id} surviving independent gap"
+        );
+    }
+    assert_eq!(
+        cap1_claim_decision_with(
+            doc,
+            CodingAgentClaimKind::BoundedNegative,
+            ctx,
+            &[
+                Cap1Rule::DenominatorPrecommitted,
+                Cap1Rule::PopulationGranularity
+            ]
+        )
+        .decision,
+        CodingAgentGateDecision::Allowed,
+        "{id} both guards removed"
+    );
+}
+
+#[test]
+fn missing_catalogue_population_is_not_allowed() {
+    use CodingAgentClaimKind as K;
+    use CodingAgentGateDecision as D;
+    let contexts = load_context();
+    let doc = load_doc(&fixtures().join("vectors/MV-05.json"));
+    let mut ctx = context_for(&contexts, "MV-05");
+    assert_eq!(
+        cap1_claim_decision(&doc, K::BoundedNegative, &ctx).decision,
+        D::Blocked
+    );
+    ctx.catalogue_units.clear();
+    for kind in [K::BoundedNegative, K::ExhaustiveSet] {
+        let result = cap1_claim_decision(&doc, kind, &ctx);
+        assert_eq!(
+            result.decision,
+            D::Degraded,
+            "missing owned population, {kind:?}"
+        );
+        assert_eq!(result.rules_fired(), vec![Cap1Rule::PopulationGranularity]);
+        assert_eq!(
+            serde_json::to_value(result.findings[0].gap).unwrap(),
+            "population_unavailable"
+        );
+    }
+    assert_eq!(
+        cap1_claim_decision(&doc, K::PositiveExistence, &ctx).decision,
+        D::Allowed
+    );
+    let honest = load_doc(&fixtures().join("vectors/HV-05.json"));
+    assert_eq!(
+        cap1_claim_decision(
+            &honest,
+            K::BoundedNegative,
+            &context_for(&contexts, "HV-05")
+        )
+        .decision,
+        D::Allowed
+    );
+}
+
+#[test]
+fn missing_absence_support_cannot_allow_nonpositive_claims() {
+    use CodingAgentClaimKind as K;
+    use CodingAgentGateDecision as D;
+    let contexts = load_context();
+    let mut doc = load_doc(&fixtures().join("vectors/MV-03.json"));
+    let ctx = context_for(&contexts, "MV-03");
+    assert_eq!(
+        cap1_claim_decision(&doc, K::BoundedNegative, &ctx).decision,
+        D::Blocked
+    );
+    assert_eq!(
+        cap1_claim_decision(&doc, K::ExhaustiveSet, &ctx).decision,
+        D::Degraded
+    );
+    for support in [None, Some(Vec::new())] {
+        doc.absence_assertions = support;
+        for (kind, expected) in [
+            (K::BoundedNegative, D::Blocked),
+            (K::ExhaustiveSet, D::Degraded),
+        ] {
+            let result = cap1_claim_decision(&doc, kind, &ctx);
+            assert_eq!(
+                result.decision, expected,
+                "missing cited support, {kind:?}, {:?}",
+                doc.absence_assertions
+            );
+            assert_eq!(
+                result.rules_fired(),
+                vec![Cap1Rule::AbsenceBoundedByExaminedUnits]
+            );
+            assert_eq!(
+                serde_json::to_value(result.findings[0].gap).unwrap(),
+                "claim_support_missing"
+            );
+        }
+        assert_eq!(
+            cap1_claim_decision(&doc, K::PositiveExistence, &ctx).decision,
+            D::Allowed
+        );
+    }
+    let honest = load_doc(&fixtures().join("vectors/HV-03.json"));
+    assert_eq!(
+        cap1_claim_decision(
+            &honest,
+            K::BoundedNegative,
+            &context_for(&contexts, "HV-03")
+        )
+        .decision,
+        D::Allowed
+    );
 }
