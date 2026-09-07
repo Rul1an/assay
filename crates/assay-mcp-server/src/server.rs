@@ -24,12 +24,12 @@ fn fail_closed_tool_result(code: &'static str, message: &'static str) -> Result<
     tools::ToolError::new(code, message).result()
 }
 
-fn classify_tool_result(result: &Value) -> (bool, bool) {
+fn classify_tool_result(result: &Value) -> (bool, bool, bool) {
     let has_error = result.get("error").is_some();
     let explicit_allowed = result.get("allowed").and_then(Value::as_bool);
     let allowed = explicit_allowed.unwrap_or(false);
     let is_error = has_error || explicit_allowed == Some(false);
-    (allowed, is_error)
+    (allowed, is_error, has_error)
 }
 
 fn next_rid() -> String {
@@ -419,7 +419,7 @@ impl Server {
 
                             let dur = start.elapsed().as_millis() as u64;
                             // Log outcome
-                            let (allowed, is_error) = classify_tool_result(&result);
+                            let (allowed, is_error, has_error) = classify_tool_result(&result);
                             if let Some(err) = result.get("error") {
                                 let code = err.get("code").and_then(|v| v.as_str()).unwrap_or("");
                                 tracing::info!(
@@ -486,10 +486,15 @@ impl Server {
                             // MCP Compliance: wrap every tool outcome in CallToolResult.
                             let json_text =
                                 serde_json::to_string_pretty(&result).unwrap_or_default();
-                            let mcp_result = serde_json::json!({
+                            let mut mcp_result = serde_json::json!({
                                 "content": [{"type": "text", "text": json_text}],
                                 "isError": is_error
                             });
+                            // Mirror the already-bounded ToolError value, not a second serializer.
+                            // A plain policy denial is isError too, but has no typed error to mirror.
+                            if has_error {
+                                mcp_result["structuredContent"] = result;
+                            }
                             JsonRpcResponse::ok(req.id.clone(), mcp_result)
                         }
                     }
@@ -521,22 +526,22 @@ mod claims_boundary_tests {
     #[test]
     fn tool_result_classification_separates_decision_from_mcp_error() {
         for (result, expected) in [
-            (serde_json::json!({"allowed": true}), (true, false)),
-            (serde_json::json!({"allowed": false}), (false, true)),
+            (serde_json::json!({"allowed": true}), (true, false, false)),
+            (serde_json::json!({"allowed": false}), (false, true, false)),
             (
                 serde_json::json!({"allowed": false, "error": {"code": "E_INTERNAL"}}),
-                (false, true),
+                (false, true, true),
             ),
             // Defence: an error object without `allowed` is still an MCP error. Production
             // `ToolError::result` always sets both, so this row is the only independent
             // witness for the `has_error` arm.
             (
                 serde_json::json!({"error": {"code": "E_INTERNAL"}}),
-                (false, true),
+                (false, true, true),
             ),
             // Report tools return data rather than a policy decision. Preserve the existing
             // decision telemetry while keeping their successful MCP result non-error.
-            (serde_json::json!({"report": {}}), (false, false)),
+            (serde_json::json!({"report": {}}), (false, false, false)),
         ] {
             assert_eq!(classify_tool_result(&result), expected, "result: {result}");
         }

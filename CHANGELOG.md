@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `assay-mcp-server` mirrors typed errors from selected tool calls into
+  `structuredContent`, preserving the existing JSON text and `isError` (#2815).
+  Both placements use the same bounded error value, including optional details.
+  This additive change is for the next minor release; ordinary policy denials,
+  successful results and JSON-RPC protocol errors retain their existing shape.
+  It adds no output schema or error vocabulary and establishes no host proof.
 - `assay evidence show --format json` includes `content_hash_scope`, supplied by the
   shared public `assay_evidence::crypto::id::content_hash_scope()` API. It describes
   the reader's hash inputs and separates event-file, run-root and archive integrity
