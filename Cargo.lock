@@ -275,7 +275,7 @@ dependencies = [
  "predicates",
  "process-wrap",
  "proptest",
- "rand 0.8.7",
+ "rand 0.8.8",
  "ratatui",
  "regex",
  "semver",
@@ -330,7 +330,7 @@ dependencies = [
  "nix 0.27.1",
  "pkcs8 0.11.0",
  "procfs",
- "rand 0.8.7",
+ "rand 0.8.8",
  "regex",
  "reqwest 0.12.28",
  "rusqlite",
@@ -386,7 +386,7 @@ dependencies = [
  "hex",
  "jsonschema",
  "object_store",
- "rand 0.8.7",
+ "rand 0.8.8",
  "serde",
  "serde_jcs",
  "serde_json",
@@ -506,7 +506,7 @@ dependencies = [
  "hex",
  "p256",
  "pkcs8 0.11.0",
- "rand 0.8.7",
+ "rand 0.8.8",
  "rcgen",
  "reqwest 0.12.28",
  "rustls-pki-types",
@@ -575,7 +575,7 @@ dependencies = [
  "chrono",
  "flate2",
  "hex",
- "rand 0.8.7",
+ "rand 0.8.8",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -3548,7 +3548,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d"
 dependencies = [
  "phf_shared",
- "rand 0.8.7",
+ "rand 0.8.8",
 ]
 
 [[package]]
@@ -3971,9 +3971,9 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rand"
-version = "0.8.7"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22f6172bdec972074665ed81ed53b71da00bfc44b65a753cfde883ec4c702a1a"
+checksum = "e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -5567,9 +5567,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.24.1"
+version = "1.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cefc03fd367c0c6d4305de1b312cf00248c4114f4a0418ce6a6af769e3b0bd9"
+checksum = "b5772d71c9be8a8a6ac2117d949c5b224c1b72241bb611d9a3012edcf8af7812"
 dependencies = [
  "atomic",
  "getrandom 0.4.3",
