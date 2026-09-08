@@ -161,6 +161,28 @@ fn join_bounded_reader(
         .unwrap_or_else(|error| panic!("{context}: read stderr: {error}"))
 }
 
+fn receive_bounded_reader_after_cleanup(
+    reader: Option<thread::JoinHandle<std::io::Result<Vec<u8>>>>,
+    context: &str,
+) -> Result<Vec<u8>, String> {
+    let Some(handle) = reader else {
+        return Ok(Vec::new());
+    };
+    let deadline = Instant::now() + REAP_GRACE;
+    while !handle.is_finished() {
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "{context}: stderr reader did not finish within {REAP_GRACE:?} after cleanup"
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    handle
+        .join()
+        .map_err(|_| format!("{context}: stderr reader panicked"))?
+        .map_err(|error| format!("{context}: read stderr: {error}"))
+}
+
 #[cfg(unix)]
 fn kill_already_gone(error: &std::io::Error) -> bool {
     error.raw_os_error() == Some(libc::ESRCH)
@@ -238,7 +260,6 @@ fn collect_closed_stdout(
 
 fn read_prefix_bounded(
     mut reader: impl Read + Send + 'static,
-    child: &mut dyn ChildWrapper,
     timeout: Duration,
     context: &str,
 ) -> Result<Vec<u8>, String> {
@@ -263,14 +284,45 @@ fn read_prefix_bounded(
                 thread::sleep(Duration::from_millis(10));
             }
             Err(mpsc::TryRecvError::Empty) => {
-                start_kill_named(child, context)?;
-                reap_after_kill(child, context)?;
                 return Err(format!(
                     "{context}: partial read did not complete within {timeout:?}"
                 ));
             }
         }
     }
+}
+
+fn cleanup_prefix_read_error(
+    child: &mut dyn ChildWrapper,
+    stderr_reader: Option<thread::JoinHandle<std::io::Result<Vec<u8>>>>,
+    error: String,
+    context: &str,
+) -> String {
+    let (pre_cleanup_child_state, cleanup_result) = match child.try_wait() {
+        Ok(Some(status)) => (format!("exited(code={:?})", status.code()), Ok(())),
+        Ok(None) => (
+            "live".to_owned(),
+            start_kill_named(child, context).and_then(|()| reap_after_kill(child, context)),
+        ),
+        Err(probe_error) => (
+            format!("probe_error({probe_error})"),
+            start_kill_named(child, context).and_then(|()| reap_after_kill(child, context)),
+        ),
+    };
+    let stderr = receive_bounded_reader_after_cleanup(stderr_reader, context);
+    let stderr_diagnostic = match stderr {
+        Ok(stderr) if stderr.is_empty() => "<empty>".to_owned(),
+        Ok(stderr) => String::from_utf8_lossy(&stderr).into_owned(),
+        Err(stderr_error) => format!("<unavailable: {stderr_error}>"),
+    };
+    let cleanup_diagnostic = cleanup_result
+        .err()
+        .map(|cleanup_error| format!("; cleanup_error={cleanup_error}"))
+        .unwrap_or_default();
+    format!(
+        "{error}; pre_cleanup_child_state={pre_cleanup_child_state}; \
+         received_stdout_prefix_bytes=0; stderr={stderr_diagnostic}{cleanup_diagnostic}"
+    )
 }
 
 fn run_reader_already_gone_with(
@@ -300,8 +352,17 @@ fn run_reader_already_gone(command: Command, context: &str) -> ClosedStdout {
 }
 
 fn run_partial_then_close_with(
+    command: Command,
+    timeout: Duration,
+    context: &str,
+) -> Result<ClosedStdout, String> {
+    run_partial_then_close_after_ready_with(command, timeout, None, context)
+}
+
+fn run_partial_then_close_after_ready_with(
     mut command: Command,
     timeout: Duration,
+    ready_path: Option<&Path>,
     context: &str,
 ) -> Result<ClosedStdout, String> {
     let (reader, writer) = std::io::pipe().expect("pipe");
@@ -316,7 +377,28 @@ fn run_partial_then_close_with(
         .stderr()
         .take()
         .map(|pipe| spawn_bounded_reader(pipe, LARGE_RUN_LIMITS.max_stderr_bytes));
-    let stdout_prefix = read_prefix_bounded(reader, child.as_mut(), timeout, context)?;
+    if let Some(ready_path) = ready_path {
+        let ready_deadline = Instant::now() + Duration::from_secs(5);
+        while !ready_path.exists() {
+            if Instant::now() >= ready_deadline {
+                start_kill_named(child.as_mut(), context)?;
+                reap_after_kill(child.as_mut(), context)?;
+                return Err(format!("{context}: fixture did not become ready within 5s"));
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+    let stdout_prefix = match read_prefix_bounded(reader, timeout, context) {
+        Ok(stdout_prefix) => stdout_prefix,
+        Err(error) => {
+            return Err(cleanup_prefix_read_error(
+                child.as_mut(),
+                stderr_reader,
+                error,
+                context,
+            ));
+        }
+    };
     collect_closed_stdout(
         child.as_mut(),
         stderr_reader,
@@ -534,6 +616,39 @@ fn hanging_stderr_command() -> Command {
     command
 }
 
+#[cfg(unix)]
+fn ready_hanging_command(ready_path: &Path, stderr_marker: bool) -> Command {
+    let script = if stderr_marker {
+        "printf 'prefix-timeout-marker\\n' >&2; : > \"$1\"; sleep 60"
+    } else {
+        ": > \"$1\"; sleep 60"
+    };
+    let mut command = Command::new("sh");
+    command.args(["-c", script, "stdout-prefix-fixture"]);
+    command.arg(ready_path);
+    command
+}
+
+#[cfg(windows)]
+fn ready_hanging_command(ready_path: &Path, stderr_marker: bool) -> Command {
+    let script = if stderr_marker {
+        "[Console]::Error.WriteLine('prefix-timeout-marker'); [IO.File]::WriteAllText($env:ASSAY_TEST_READY_PATH, 'ready'); Start-Sleep -Seconds 60"
+    } else {
+        "[IO.File]::WriteAllText($env:ASSAY_TEST_READY_PATH, 'ready'); Start-Sleep -Seconds 60"
+    };
+    let mut command = Command::new("powershell.exe");
+    command
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+        ])
+        .env("ASSAY_TEST_READY_PATH", ready_path);
+    command
+}
+
 #[cfg(windows)]
 fn hanging_stderr_command() -> Command {
     let mut command = Command::new("powershell.exe");
@@ -585,6 +700,58 @@ fn partial_read_times_out_when_the_child_never_writes_stdout() {
         "prefix read hung instead of timing out: {:?}",
         started.elapsed()
     );
+}
+
+#[test]
+fn partial_read_timeout_retains_live_state_and_bounded_stderr() {
+    let mut diagnostics = Vec::new();
+    for (label, stderr_marker) in [
+        ("silent prefix-timeout diagnostic", false),
+        ("marked prefix-timeout diagnostic", true),
+    ] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ready_path = dir.path().join("ready");
+        let started = Instant::now();
+        let error = run_partial_then_close_after_ready_with(
+            ready_hanging_command(&ready_path, stderr_marker),
+            Duration::from_millis(250),
+            Some(&ready_path),
+            label,
+        )
+        .expect_err("a ready child that stays silent on stdout must hit the prefix deadline");
+        assert!(
+            ready_path.exists(),
+            "{label}: fixture readiness must precede the prefix deadline"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(8),
+            "{label}: diagnostic cleanup and stderr capture must remain bounded"
+        );
+        diagnostics.push((label, stderr_marker, error));
+    }
+
+    for (label, stderr_marker, error) in diagnostics {
+        assert!(
+            error.contains("pre_cleanup_child_state=live"),
+            "{label}: diagnostic must preserve the state sampled before cleanup: {error}"
+        );
+        assert!(
+            error.contains("received_stdout_prefix_bytes=0"),
+            "{label}: diagnostic must preserve that no prefix was received before the deadline: \
+             {error}"
+        );
+        if stderr_marker {
+            assert!(
+                error.contains("prefix-timeout-marker"),
+                "{label}: diagnostic must retain the bounded child stderr marker: {error}"
+            );
+        } else {
+            assert!(
+                error.contains("stderr=<empty>"),
+                "{label}: diagnostic must distinguish empty stderr: {error}"
+            );
+        }
+    }
 }
 
 // --- the six bounded machine-stdout writers (#2441) -------------------------------------------
