@@ -9,7 +9,7 @@ use assay_evidence::attestation::{
 use assay_evidence::bundle::BundleWriter;
 use assay_evidence::types::{EvidenceEvent, ProducerMeta};
 use bounded_process::{run_bounded, ProcessLimits};
-use ed25519_dalek::pkcs8::{spki::der::pem::LineEnding, EncodePublicKey};
+use ed25519_dalek::pkcs8::{spki::der::pem::LineEnding, EncodePrivateKey, EncodePublicKey};
 use ed25519_dalek::SigningKey;
 use serde_json::{json, Value};
 use std::fs::{self, File};
@@ -136,7 +136,7 @@ fn matching_archive_returns_one_typed_matched_outcome() {
     let statement = statement_for_bundle(&f.bytes).unwrap();
     assert_eq!(
         result,
-        json!({"schema":"assay.evidence.attestation.verify.v1", "outcome":"attestation_verified", "signature_verified":true,"subject_matched":true,"artifact_sha256":statement.subject[0].digest["sha256"],"predicate_type":statement.predicate_type,"subject_name":statement.subject[0].name})
+        json!({"schema":"assay.evidence.attestation.verify.v1", "outcome":"attestation_verified", "signature_verified":true,"subject_matched":true,"artifact_sha256":statement.subject[0].digest["sha256"],"predicate_type":statement.predicate_type,"subject_name":statement.subject[0].name,"extent_stated":false,"extent":null})
     );
 }
 
@@ -322,4 +322,169 @@ fn attacker_values_are_not_echoed_through_library_error_chains() {
     assert!(output.stdout.is_empty());
     assert!(!String::from_utf8_lossy(&output.stderr).contains("ATTACKER_SECRET_2831"));
     assert!(String::from_utf8_lossy(&output.stderr).contains("attestation verification failed"));
+}
+
+fn extent_fixture(events: &[(&str, Value)]) -> Fixture {
+    let mut f = Fixture::small();
+    let producer = ProducerMeta {
+        name: "extent-cli-test".into(),
+        version: "test".into(),
+        git: None,
+    };
+    let mut writer = BundleWriter::new(File::create(f.dir.path().join("bundle.tar.gz")).unwrap())
+        .with_producer(producer.clone());
+    for (seq, (kind, data)) in events.iter().enumerate() {
+        writer.add_event(
+            EvidenceEvent::new(
+                *kind,
+                "urn:assay:test",
+                "verify_run",
+                seq as u64,
+                data.clone(),
+            )
+            .with_producer(&producer),
+        );
+    }
+    writer.finish().unwrap();
+    f.bytes = fs::read(f.dir.path().join("bundle.tar.gz")).unwrap();
+    f
+}
+
+#[test]
+fn extent_producer_emits_signed_extent_as_bare_envelope() {
+    let f = Fixture::small();
+    fs::write(
+        f.dir.path().join("private.pem"),
+        f.signing.to_pkcs8_pem(LineEnding::LF).unwrap().as_bytes(),
+    )
+    .unwrap();
+    for out_file in [false, true] {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay"));
+        cmd.current_dir(f.dir.path()).args([
+            "evidence",
+            "attest",
+            "--bundle",
+            "bundle.tar.gz",
+            "--key",
+            "private.pem",
+        ]);
+        if out_file {
+            cmd.args(["--out", "produced.json"]);
+        }
+        let output = run_bounded(
+            cmd,
+            &[],
+            ProcessLimits::new(Duration::from_secs(60), 16384, 4096),
+            "extent producer",
+        )
+        .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let bytes = if out_file {
+            assert!(output.stdout.is_empty());
+            assert_eq!(
+                String::from_utf8(output.stderr).unwrap(),
+                "Attestation: produced.json\n"
+            );
+            fs::read(f.dir.path().join("produced.json")).unwrap()
+        } else {
+            assert!(output.stderr.is_empty());
+            output.stdout
+        };
+        let envelope: DsseEnvelope =
+            serde_json::from_slice(&bytes).expect("stdout/file must be only a bare DSSE envelope");
+        let signed = assay_evidence::attestation::verify_envelope_signature(
+            &envelope,
+            &f.signing.verifying_key(),
+        )
+        .unwrap();
+        assert_eq!(
+            signed.statement.predicate["extent"],
+            json!({"retained_events_by_type":{"assay.test.event":1},"observed":{"basis":"not_stated"}}),
+            "shipped attest must sign derived extent"
+        );
+        assert!(signed.statement.predicate.get("support_ceiling").is_none());
+    }
+}
+
+#[test]
+fn extent_consumer_reports_checked_retained_and_producer_counts() {
+    let f = extent_fixture(&[
+        ("assay.fs.access", json!({"hits":99})),
+        (
+            "assay.profile.finished",
+            json!({"files_count":3,"network_count":2,"processes_count":1,"sandbox_degradation_count":0}),
+        ),
+    ]);
+    let statement =
+        assay_evidence::attestation::statement_for_bundle_with_extent(&f.bytes).unwrap();
+    f.write_statement(statement.clone());
+    let output = f.run();
+    assert_eq!(output.status.code(), Some(0));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["extent_stated"], true);
+    assert_eq!(
+        report["extent"],
+        json!({"retained_events_by_type":{"assay.fs.access":1,"assay.profile.finished":1},"observed":{"basis":"producer_reported","source_type":"assay.profile.finished","counts":{"files":3,"network":2,"processes":1,"sandbox_degradations":0}}})
+    );
+    assert_eq!(report["signature_verified"], true);
+    assert_eq!(report["subject_matched"], true);
+    let mut false_extent = statement;
+    false_extent.predicate["extent"]["retained_events_by_type"]["assay.fs.access"] = json!(99);
+    f.write_statement(false_extent);
+    f.refuse("attestation verification failed");
+}
+
+#[test]
+fn extent_consumer_preserves_absent_null_and_not_stated() {
+    let f = Fixture::small();
+    for explicit_null in [false, true] {
+        let mut statement = statement_for_bundle(&f.bytes).unwrap();
+        if explicit_null {
+            statement.predicate["extent"] = Value::Null;
+        }
+        f.write_statement(statement);
+        let output = f.run();
+        assert_eq!(output.status.code(), Some(0));
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report.get("extent_stated"), Some(&json!(false)));
+        assert_eq!(
+            report.get("extent"),
+            Some(&Value::Null),
+            "legacy absence must not become an empty/zero extent"
+        );
+    }
+    f.write_statement(
+        assay_evidence::attestation::statement_for_bundle_with_extent(&f.bytes).unwrap(),
+    );
+    let output = f.run();
+    assert_eq!(output.status.code(), Some(0));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["extent_stated"], true);
+    assert_eq!(report["extent"]["observed"], json!({"basis":"not_stated"}));
+}
+
+#[test]
+fn extent_sandbox_network_is_absent_not_zero() {
+    let f = extent_fixture(&[(
+        "assay.sandbox.summary",
+        json!({"fs_count":4,"exec_count":2,"degradation_count":0}),
+    )]);
+    f.write_statement(
+        assay_evidence::attestation::statement_for_bundle_with_extent(&f.bytes).unwrap(),
+    );
+    let output = f.run();
+    assert_eq!(output.status.code(), Some(0));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["extent"],
+        json!({"retained_events_by_type":{"assay.sandbox.summary":1},"observed":{"basis":"producer_reported","source_type":"assay.sandbox.summary","counts":{"files":4,"processes":2,"sandbox_degradations":0}}})
+    );
+    assert!(report["extent"]["observed"]["counts"]
+        .get("network")
+        .is_none());
 }
