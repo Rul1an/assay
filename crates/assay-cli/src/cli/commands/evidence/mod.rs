@@ -85,7 +85,7 @@ pub enum EvidenceCmd {
     Lint(lint::LintArgs),
     /// Diff two bundles and report changes
     Diff(diff::DiffArgs),
-    /// Sign a bundle's manifest as an in-toto/DSSE attestation
+    /// Sign a complete evidence archive as an in-toto/DSSE attestation
     Attest(attest::AttestArgs),
     /// Upload a bundle to remote storage (BYOS)
     Push(push::PushArgs),
