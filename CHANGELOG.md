@@ -4,8 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.1.0] - 2026-09-08
+
 ### Added
-- `evidence attest` now signs artifact-derived v1.1 extent; `evidence verify-attestation` reports the checked extent and its stated/absent status while preserving legacy absent/null predicates, qualified producer counts, and signature/artifact outcome distinctions (#2834).
+- Add `assay_evidence` CAP1 relying-party claim-decision APIs for already-conforming
+  accounting and the relying party's own state (#2830). They classify support per claim kind;
+  they do not run a CAP1 conformance verifier or authenticate producer identities.
+- `evidence attest` now signs artifact-derived v1.1 extent by default; `evidence verify-attestation` reports the checked extent and its stated/absent status while preserving legacy absent/null predicates, qualified producer counts, and signature/artifact outcome distinctions (#2834, #2852).
 - Codex host-proof v7 retains closed error cause discriminants and supplied retry
   intent without diagnostic free text. Historical v6 empty diagnostics remain
   supported without backfilling; diagnostics remain non-clean, and retry intent
@@ -15,13 +20,12 @@ All notable changes to this project will be documented in this file.
   Additive library APIs opt producers in and expose checked extent; existing artifact verifiers
   check present extent while legacy producers and public Rust result layouts remain unchanged.
   Absent/null extent retains legacy semantics. Counts and histogram growth are bounded; verification
-  does not establish observation completeness, provider outcomes, or producer identity. CLI opt-in
-  and extent presentation remain separate.
+  does not establish observation completeness, provider outcomes, or producer identity. The CLI
+  producer and extent presentation are integrated by #2852 as described above.
 - `assay-mcp-server` mirrors typed errors from selected tool calls into
   `structuredContent`, preserving the existing JSON text and `isError` (#2815).
   Both placements use the same bounded error value, including optional details.
-  This additive change is for the next minor release; ordinary policy denials,
-  successful results and JSON-RPC protocol errors retain their existing shape.
+  Ordinary policy denials, successful results and JSON-RPC protocol errors retain their existing shape.
   It adds no output schema or error vocabulary and establishes no host proof.
 - `assay evidence verify-attestation` checks an explicitly supplied Ed25519 public key,
   DSSE attestation and completed evidence archive through the canonical v1 verifier.
@@ -56,7 +60,7 @@ All notable changes to this project will be documented in this file.
   not introduce the separately planned trace-v7 schema.
 
 ### Changed
-- Open the Assay 6.1 source line so post-`v6.0.0` minor-compatible public API work can declare
+- The Assay 6.1 source line was opened so post-`v6.0.0` minor-compatible public API work could declare
   a version increment that covers it. The workspace version, internal dependency declarations,
   both lockfiles, and the generated source-version surfaces now read `6.1.0`;
   `.github/assay-release-tag` and every published installation instruction stay on verified
