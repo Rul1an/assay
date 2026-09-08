@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `evidence attest` now signs artifact-derived v1.1 extent; `evidence verify-attestation` reports the checked extent and its stated/absent status while preserving legacy absent/null predicates, qualified producer counts, and signature/artifact outcome distinctions (#2834).
 - Codex host-proof v7 retains closed error cause discriminants and supplied retry
   intent without diagnostic free text. Historical v6 empty diagnostics remain
   supported without backfilling; diagnostics remain non-clean, and retry intent
