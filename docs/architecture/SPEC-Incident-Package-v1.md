@@ -282,7 +282,9 @@ bounded by §8; no implicit truth is attached to prose. `Count` is §2's exact i
 `Surface` is tool_call/filesystem/network/process/transcript_join, in that order. `Time` is
 `YYYY-MM-DDTHH:MM:SS[.fraction]Z`, a valid Gregorian UTC date with 1–9 optional fractional digits,
 no leap-second 60. Unless ordered input is preserved, arrays sort lexicographically by stated ID.
-`non_claims` is always exactly ["no_activity_completeness","no_provider_outcome","no_automatic_trust"].
+Where the grammar defines `non_claims`—inventory (§7.1) and fresh verification result (§7.4)—
+its value is exactly ["no_activity_completeness","no_provider_outcome","no_automatic_trust"].
+This fixed value does not add the field to other closed object grammars.
 
 A `Ref` is exactly `{input_id,sha256,locator}`: Id, Digest, Text. Input ID and original SHA must both
 match the inventory. A JSON locator is `json:` plus RFC 6901 pointer; root is **`json:`** (the empty
