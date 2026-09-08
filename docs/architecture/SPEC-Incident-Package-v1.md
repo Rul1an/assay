@@ -260,6 +260,13 @@ resource_exhausted, failed, unavailable, out_of_scope, withheld. Unknown package
 before this stage; unsupported_input can describe only a known admitted unit’s unsupported examination.
 Resource exhaustion that prevents complete enumeration refuses the package; no estimated remainder.
 
+These three supports strings are **Assay-defined claim classes**, not a CAP-1 registry. In a
+stratum they permit reasoning only about its enumerated retained supplied-record population,
+including a verified empty population. They do not state that the corresponding activity surface
+was adequately observed. The identically named Claim.kind values in §7.3 address surface-scoped
+claims and require the additional observation, window and correspondence gate there. Neither an
+empty nor an unknown-observation stratum bypasses that second gate.
+
 CAP-1 integrity.complete describes dispatched examination accounting, not capture completeness.
 Package activity coverage remains independently unknown/limited when applicable sources or health
 are missing. Every activity-absence assertion names an existing supplied-record stratum and an
@@ -388,6 +395,10 @@ JoinContract retains the unchanged foreign identity and has exactly these fields
 | evidence_refs | nonempty Text[] encoding exact `input_id#locator`, resolved through inventory |
 | notes | Text[] |
 
+The nonempty evidence_refs requirement, exact `input_id#locator` encoding and inventory resolution
+are **package-added constraints**. The foreign schema itself permits an empty array and does not
+impose that locator grammar. The package wrapper narrows admission without changing the foreign ID.
+
 The pinned [join schema](../reference/observability/schema/join-result-v0.schema.json) and its
 [scope rules](../reference/observability/join-contract-v0.md) also apply; unknown fields refuse.
 Proposition is outside that closed foreign object. Canonical bundle roles are measured_run_archive;
@@ -437,23 +448,62 @@ The recorded assessment is recomputed under its bound external context; mismatch
 The external sibling result has exactly `schema`=assay.incident.verify.v1,
 `outcome`:package_verified|package_refused|verification_unavailable, `reason`:null|§10 token,
 `artifact_sha256`:Digest|null, `inventory_sha256`:Digest|null, `assessment_sha256`:Digest|null,
-`expectation`:not_requested|matched|mismatched, `attestations`:AttestationCheck[],
+`expectation`:not_evaluated|not_requested|matched|mismatched, `attestations`:AttestationCheck[],
 `verification_context`:ContextInput|null, `verification_context_sha256`:Digest|null,
 `resolved_results`:Ref[], `counts`:Counts|null, `non_claims`.
-Counts has inputs/objects/units/examined/withheld/resolved_result_count, each Count.
-Established digests are over complete raw bytes; interrupted reads cannot yield a final digest.
-Refused/unavailable have a non-null reason, empty unresolved results and null unestablished counts;
-verified has reason=null and complete counts/context. No single safe/clean boolean exists.
+Counts has inputs/objects/units/examined/withheld/resolved_result_count, each Count. Objects counts
+unique stored objects; inputs counts declared occurrences. Established success digests are over
+complete raw bytes, not semantic roots. No single safe/clean boolean exists.
+
+The projection is deliberately all-or-nothing for package metadata. A refusal does not publish
+partial counts or context, even if some reads succeeded. This is a presentation rule, not a claim
+that no work occurred. The following table is normative; non_claims is always the §7 constant.
+
+| Terminal phase | outcome / reason | expectation | Package digest fields; context and context digest; counts | resolved_results / attestations |
+| --- | --- | --- | --- | --- |
+| Any admission, schema, semantic or resource refusal before external expectation evaluation | package_refused / first §10 reason | not_evaluated | All null | [] / [] except the single failing attestation row specified below |
+| Required material cannot be read or supplied | verification_unavailable / io_unavailable | not_evaluated | All null | [] / [] except the single unavailable attestation row below |
+| External expectation equality or required disclosure fails | package_refused / expectation_mismatch | mismatched | All null | [] / [] |
+| Recomputed assessment differs, after expectations pass | package_refused / stale_assessment | not_evaluated | All null | [] / [] |
+| Atomic publication refuses or cannot complete | As §10 atomic_output/io_unavailable | not_evaluated | All null | [] / [] |
+| Every phase and requested atomic publication succeeds | package_verified / null | not_requested if expectations=[], otherwise matched | All three complete raw digests, complete ContextInput and its canonical digest, complete counts | Exact recomputed resolved targets / all successful rows ordered by input_id |
+
+A transport failure that also prevents writing the bounded sibling result yields no result, never
+a truncated JSON success. A stale-assessment or output failure discards an earlier matched status;
+not_evaluated means **no expectation result is released**, not that no comparison ran. No report is
+published into the package or included in its own digest.
 
 AttestationCheck is `{input_id:Id,key_sha256:Digest,status:verified|refused|unavailable,
 signature_verified:boolean,subject_matched:boolean,artifact_sha256:Digest|null,
-extent_stated:boolean,extent:EvidenceExtent|null}`. Checked EvidenceExtent is exactly the existing
-canonical API value; absent/null remain null, omitted sandbox network stays omitted. Separate
-signature and artifact-match outcomes are never flattened. No selected attestation means [], not
-signature_verified=true. A selected key mismatch or canonical verifier refusal rejects verification;
-missing required external key material is unavailable. Retained reports must agree with freshly
-established original artifact/signature/subject/extent fields; a copied OK string is insufficient.
-There is no signature over the new outer package in v1; checks concern original inner artifacts.
+extent_stated:boolean,extent:EvidenceExtent|null}`. A row is possible only after the DSSE input's
+inventory binding and required key-input digest are structurally admitted. key_sha256 always
+identifies those **bound original PEM bytes**, never an alternative offered/selected key. It is
+not proof that the key was selected, read, parsed or used. The caller's ContextInput.keys selects
+that digest externally; an unselected bound digest refuses rather than trying other keys.
+
+| Condition, in this order for each selected DSSE input | Row status | signature_verified / subject_matched | artifact_sha256 / extent_stated / extent | Overall outcome / reason |
+| --- | --- | --- | --- | --- |
+| Binding or required inventory key reference malformed/missing | No row | Not emitted | Not emitted | package_refused / input_shape or locator as §10 |
+| Bound digest absent from external keys selection | refused | false / false | null / false / null | package_refused / trust_input |
+| Selected required public key bytes or other required attestation material unavailable | unavailable | false / false | null / false / null | verification_unavailable / io_unavailable |
+| Available PEM/envelope transport malformed | refused | false / false | null / false / null | package_refused / input_shape |
+| Canonical signature, predicate/version, bundle, subject name/digest or extent verification returns Err | refused | false / false | null / false / null | package_refused / attestation_verification |
+| Canonical extent-aware verification returns Ok | verified | true / true | Canonical artifact SHA / extent.is_some() / canonical checked extent or null | Continue; success only after all remaining package phases |
+
+The existing `verify_attestation_for_bundle_with_extent_and_limits` returns a complete successful
+value or an error, **not a partial verification receipt**. Call it once per selected binding;
+do not separately reverify signatures or parse error text to synthesize partial success. In an error
+row false means not established by a returned successful value, not a cryptographic disproof.
+Signature and subject fields remain distinct despite both being established by this complete API.
+For signature failure, valid-signature/wrong-subject, and valid-signature/wrong-extent witnesses,
+the conservative error tuple is identical. Only successful rows expose checked EvidenceExtent;
+absent/null remain null and omitted sandbox network stays omitted. No selected attestation means
+[], never implicit signature success. Earlier successful rows are discarded on package refusal;
+a failing attestation contributes exactly its own row, not a partially accepted collection.
+
+Retained reports must agree with freshly established original artifact/signature/subject/extent
+fields; mismatch is stale_assessment. A copied OK string is insufficient. There is no signature
+over the new outer package in v1; checks concern original inner artifacts.
 
 The existing [attestation verifier](https://github.com/Rul1an/assay/blob/bf2659824e51c63edb433d2386b003f16a2da419/crates/assay-cli/src/cli/commands/evidence/verify_attestation.rs)
 from #2852 is the precedent for raw artifact binding and separate signature/subject/extent results,
@@ -464,7 +514,22 @@ support_ceiling field is added; artifact-bound support remains interpretation of
 ## 8. Resource contract
 
 All values below are finite hard maxima and defaults in v1; caller/package cannot increase them.
-A separately selected lower budget may refuse earlier and is recorded with the verifier invocation.
+A separately selected lower budget may refuse earlier. For each dimension the effective limit is
+min(hard maximum, selected budget, any stricter existing inner limit). ContextInput.limits records
+the selected budgets; it cannot raise a hard maximum or an inner reader's own limit. At each charge,
+check the applicable immutable hard/inner limit first, then the selected effective limit. Crossing
+the first yields resource_hard; crossing only the second yields resource_selected. Equality is
+accepted. If both would be crossed by that charge, resource_hard wins; overflow is resource_hard.
+Refuse before the operation whose next charge crosses the limit. No scan beyond the first refusal
+is required to discover a different limit that later bytes might cross. Invalid selected budgets
+are trust_input, not an inferred consumption failure. These static tokens reveal no consumed value
+or input text; a context alone cannot reveal which limit actually tripped. resource_selected means
+that the selected guard triggered at this charge, not that all unread bytes would fit a hard limit.
+Hard-first comparison is only over the next bounded charge or already admitted declared length;
+it never authorizes reading or retaining beyond the lower selected budget to discover total size.
+These resource tokens classify directly measured package guards. A limit refusal exposed only as
+an opaque canonical attestation API Err remains attestation_verification; do not infer its internal
+cause from error prose. The standalone leaf must preserve this same observable boundary.
 Charge counters before allocation/retention and cumulatively across input occurrences, even when
 objects share bytes. Checked addition overflow refuses. MiB is 1048576 bytes; KiB is 1024 bytes.
 
@@ -473,7 +538,7 @@ objects share bytes. Checked addition overflow refuses. MiB is 1048576 bytes; Ki
 | Outer source bytes | 256 MiB | Stream before retaining header/data |
 | Outer headers/members | 128 | Before admitting each header |
 | Outer path bytes | 80 | Before interpreting path |
-| Unique object bytes, total | 240 MiB | Before retaining staged object bytes |
+| Declared occurrence object bytes, total | 240 MiB | Charge each inventory occurrence before its object is retained or reused |
 | Input occurrences | 64 | Before inventory array allocation |
 | Inner compressed bundle | 100 MiB each | Existing bounded reader before materialization |
 | Decoded inner bytes | 512 MiB aggregate, never over inner default | While decoding, shared across bundles/occurrences |
@@ -489,6 +554,16 @@ objects share bytes. Checked addition overflow refuses. MiB is 1048576 bytes; Ki
 | JSON key / non-payload string | 256 bytes / 64 KiB | Before allocation; original opaque argument text still subject to entry/source ceilings |
 | Same-package references / traversal depth | 100000 / 1 | No reference chains/cycles; resolve directly to original object |
 | Diagnostic / fresh result output | 4 KiB / 16 MiB | Before writing; static reason tokens, no source values |
+
+object_bytes_total is the checked sum of Input.bytes over **every declared occurrence**. Verify
+each declared length against original bytes; sharing one object digest does not grant budget credit.
+The physical archive stores/caches each digest once, bounded independently by outer_bytes; logical
+occurrence charges precede reuse and do not require duplicate storage. A concrete duplicate-digest
+boundary fixture has two Inspector inputs referring to the same three bytes `[]\n`: total=6.
+With selected object_bytes_total=6 it passes this boundary; with selected limit=5 the same six
+bytes of occurrence charge are exactly limit+1 and refuse resource_selected before second reuse.
+All unrelated limits remain at defaults. Independently assert objects=1 and inputs=2 on success.
+Hard-boundary witnesses must likewise keep per-object limits valid; deduplication is no exemption.
 
 Original JSON strings are also capped at 1 MiB, so payload exceptions never remove a finite string
 bound. Repeated references use cached verified original bytes but still charge reference/operation
@@ -521,9 +596,9 @@ only externally selected digests can authorize the key used by a DSSE binding. T
 be bundled for repeatability, but selecting them because they were bundled is not external trust.
 
 Expectation is `{input_id:Id,sha256:Digest,require_disclosure:boolean}`. Each ID must exist and
-match; require_disclosure=true rejects any unexamined unit from that input. No expectations means
-not_requested; all satisfied means matched; any failed equality/disclosure means mismatched and
-package_refused. Equality to these declarations is not provenance authentication.
+match; require_disclosure=true rejects any unexamined unit from that input. On completed verification, no expectations means not_requested and all satisfied means matched;
+any missing ID, failed equality or required disclosure means mismatched and package_refused with
+expectation_mismatch. Other failures use the conservative §7.4 not_evaluated projection. Equality to these declarations is not provenance authentication.
 Invocation is `{tool:Text,version:Text,options:Text[]}`; no environment, credentials or wall-clock
 substitution. Limits is the exact numeric key map below, each positive integer <= its hard value;
 zero is not unlimited. Units and charging points remain those in §8.
@@ -604,15 +679,50 @@ raw environment dumps or automatically collected principal credentials.
 
 ## 10. Future behavioral acceptance (not executed here)
 
-Refusal reasons are input_shape, unknown_format, unknown_schema, locator, mapping, digest,
-policy_binding, disclosure, stale_assessment, cap1_shape, cap1_rules, claim_boundary, resource,
-atomic_output, trust_input, or io_unavailable. Failure reasons do not echo input strings.
+Reasons are closed and value-free. The following ordered phases define precedence, not a list of
+interchangeable labels. Stop at the first failing check; do not run later phases to choose a more
+specific reason. Within a phase use the listed order, then inventory input ID, unit ID, reference
+(input_id, locator, sha256), join ID and claim ID order as applicable; preserve physical record
+order within an input. Stream framing/resource checks occur before the semantic phase they guard.
+At a given read/charge, enforce §8 before parsing, then handle read failure, then semantic checks.
+The same ordering and terminal projection are required in Assay and the standalone leaf.
+
+| Phase / reason, in check order | Exact refusal condition | Outcome |
+| --- | --- | --- |
+| 1 trust_input | ContextInput shape, schema pin, selected limit range, unique keys/expectations, applicability shape or validity interval invalid | package_refused |
+| 2 input_shape | Outer framing/member allowlist/required membership, canonical package JSON, closed inventory/assessment structural grammar or binding shape invalid (schema identity values are checked in phase 3) | package_refused |
+| 3 unknown_format; unknown_schema; mapping | Format or emitted event type outside §3/5; recognized format with wrong required schema/version identity; declared surface does not equal admitted source mapping | package_refused |
+| 4 digest; policy_binding | Original object digest/length or assessment bytes digest differs from inventory; retained policy reference does not bind the designated original policy bytes | package_refused |
+| 5 locator; input_shape | Required non-policy input/reference ID absent, invalid locator or target not present; available non-attestation source bytes fail their admitted format/parser rules | package_refused |
+| 6 trust_input; input_shape; attestation_verification | Bound key digest not externally selected; available bound PEM/envelope transport malformed; canonical extent-aware attestation API returns Err (§7.4) | package_refused |
+| 7 disclosure | Result target has wrong result shape/source/operation/value, withholding digest differs, or supplied unit set is not exactly independent eligible enumeration once each | package_refused |
+| 8 cap1_shape; cap1_rules | Pinned normative JSON Schema rejects; otherwise first failed R0–R8 in numeric order rejects | package_refused |
+| 9 claim_boundary | Recorded supported/degraded/blocked decision violates §7.3's gate, or recorded join result violates its scoped proposition rule | package_refused |
+| 10 expectation_mismatch | External expected input ID absent, digest unequal, or required disclosure not satisfied | package_refused |
+| 11 stale_assessment | Bound context digest differs, retained attestation report differs from canonical result, or remaining recomputed assessment fields differ | package_refused |
+| 12 atomic_output | Destination already exists, is unsafe, or required atomic no-replace publication is unsupported | package_refused |
+| Guard resource_hard; resource_selected | First crossed charge as defined in §8, including before output materialization | package_refused |
+| Guard io_unavailable | Required bytes/key material cannot be obtained, a read is interrupted, or other I/O prevents completing verification/publication; malformed available bytes are not unavailable | verification_unavailable |
+
+The outer/transport admission phases validate structural grammar, not later semantic relationships.
+In particular an expectation naming a missing input reaches phase 10 rather than locator, which
+applies to package references. A policy reference failure is phase 4 policy_binding rather than the
+generic phase 5 locator. Retained report comparisons wait until phase 11 after actual API success.
+An I/O failure before a binding can be established emits no attestation row; a failure while obtaining
+that binding’s selected material at phase 6 emits its unavailable row. Missing required outer members
+are phase 2 input_shape, not an invented missing-key runtime result. An available key with the wrong bytes fails phase 4 digest; a correctly bound but unselected key
+fails phase 6 trust_input. Attestation API errors are deliberately one class; no error-message
+parsing or replacement cryptographic validation is specified. Resource/I/O guards may interrupt any
+phase, with the explicit charge-before-read ordering above; they do not retroactively replace an
+already terminal semantic refusal. Unknown-schema refers to outer/source schema admission; decoded
+signed predicate/version rejection remains the canonical attestation_verification class.
 
 | Named RED case | Effective mutation that must bite | Positive/control |
 | --- | --- | --- |
 | unknown_format_before_accounting | Map unknown format/type to unsupported_input | Valid admitted input |
 | missing_source_is_not_empty | Fabricate zero stratum/adequate coverage | Verified present-empty retains unknown activity |
 | adequate_spoof | Return confirmed OR unobservable for adequately established contradiction | Unique applicable paired observation |
+| conflict_not_erased | Downgrade a strongly unique byte-bound unequal pair to unobservable because another surface has partial/missing coverage | Same unequal pair with adequate unrelated coverage remains contradicted; equal pair confirms |
 | blinded_twin | Return contradicted from missing row under inadequate coverage | Same payload, adequate independently justified boundary |
 | failed_health_blocks_absence | Permit activity absence beside applicable Failed health | Positive presence remains separately assessable |
 | occurrence_accounting | Drop/dedupe an occurrence or expand hits | Duplicate IDs retained as distinct digest-bound occurrences |
@@ -622,6 +732,15 @@ atomic_output, trust_input, or io_unavailable. Failure reasons do not echo input
 | missing_surplus_member | Skip membership check, including inner extra member | Exact allowlist |
 | unresolved_reference | Treat unresolved as examined/withheld | Direct matched reference |
 | schema_rules_then_claims | Remove schema, R0–R8 or claim stage separately | Pinned positive CAP-1 fixtures |
+| duplicate_digest_budget | Charge cached digest once instead of each occurrence | Same two three-byte inputs at selected limit 6 pass; limit 5 refuses resource_selected |
+| signature_refused_projection | Infer signature_verified=true from any opaque Err | Bad-signature actual signed-input fixture yields conservative refusal; corresponding valid signature passes |
+| subject_mismatch_projection | Preserve signature_verified=true after canonical wrong-subject Err | Same valid signature with wrong artifact/subject refuses; matched subject succeeds |
+| extent_mismatch_projection | Expose unchecked extent from envelope after canonical Err | Signed false extent refuses; derived matching extent is returned only on success |
+| key_unavailable_projection | Emit false verification as a completed successful result, or replace the expected bound key digest with an alternative selected key | Admitted binding with interrupted material read is unavailable; identical available material proceeds |
+| attestation_phase_projection | Emit partial counts/context or retain earlier successful rows on refusal | Every §7.4 tuple is exact; unselected bound key is trust_input with the bound digest |
+| reason_precedence | Swap two failing phases, flatten hard/selected, or mislabel failed expectation | Multi-fault vectors select first ordered check; identical charge with default/lower budget selects specified token |
+| cap1_r1_validator | Remove R1 from validator receiving independently assembled schema-valid CAP-1 with eligible unequal to examined plus unexamined | Balanced independent CAP-1 value passes; do not regenerate the malformed value |
+| generator_exactly_once | Omit one independently enumerated action from both generated Unit rows and balanced CAP-1 | Independent enumeration still demands that occurrence; R1 arithmetic alone is insufficient |
 | budget_parity | Move each cap after allocation, reset aggregate, or diverge leaf | Exact limit and limit+1, counting-reader witness |
 | atomic_output | Truncate prior destination before validation | Refusal preserves prior bytes; valid new output completes |
 | deterministic_and_cold | Include wall clock/unordered metadata or rely on workspace/network | Identical selected inputs; standalone passive repeat |
@@ -1033,7 +1152,7 @@ is established; its nulls are unestablished results, not passed checks.
   "artifact_sha256": null,
   "inventory_sha256": null,
   "assessment_sha256": null,
-  "expectation": "not_requested",
+  "expectation": "not_evaluated",
   "attestations": [],
   "verification_context": null,
   "verification_context_sha256": null,
@@ -1053,3 +1172,199 @@ citing filesystem violates R6 because that stratum is absent; B3 changing withhe
 null to a digest while remaining examined violates exclusive disposition; B2 changing the retained
 request method while leaving its source reference fixed violates fresh result equality. Each
 negative retains every unrelated byte-bound input and has the matching original as its control.
+
+### Example D — terminal projection fixtures
+
+These are complete **projection-only** examples, not measurements or cryptographic evidence.
+D1 assumes a successful canonical verification of the A1–A3 present-empty package. Its outer digest
+(`aaaaaaaa…`, exactly 64 hex characters below) is an illustrative returned fixture value; no tar
+archive with that digest is supplied or claimed. The inventory, assessment and context digests do
+bind the displayed example JSON using JCS plus LF. No selected attestation means the array is empty.
+
+```json
+{
+  "schema": "assay.incident.verify.v1",
+  "outcome": "package_verified",
+  "reason": null,
+  "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "inventory_sha256": "747ae82961390332a1a203d8a6f7d8ffc3d7ecee77825c5c470dca627138e99b",
+  "assessment_sha256": "921dda0ca89d242f89ed1450748a3934335103cc4fdb34dc731969f53bd7397c",
+  "expectation": "not_requested",
+  "attestations": [],
+  "verification_context": {
+    "schema_pin": "4453f216089543780bfecc4295cc4a61462fdc585b88d1e35b7d1aba79716b4a",
+    "limits": {
+      "outer_bytes": 268435456,
+      "members": 128,
+      "outer_path_bytes": 80,
+      "object_bytes_total": 251658240,
+      "inputs": 64,
+      "inner_compressed_bytes": 104857600,
+      "decoded_bytes_total": 536870912,
+      "nested_archive_depth": 1,
+      "inventory_bytes": 1048576,
+      "assessment_bytes": 16777216,
+      "policy_bytes": 1048576,
+      "transcript_bytes": 16777216,
+      "health_bytes": 1048576,
+      "envelope_bytes": 33554432,
+      "key_bytes": 16384,
+      "retained_report_bytes": 16777216,
+      "inner_manifest_bytes": 10485760,
+      "inner_events_bytes": 524288000,
+      "records": 100000,
+      "record_bytes": 1048576,
+      "inner_path_bytes": 256,
+      "json_depth": 64,
+      "json_key_bytes": 256,
+      "non_payload_string_bytes": 65536,
+      "payload_string_bytes": 1048576,
+      "references": 100000,
+      "reference_depth": 1,
+      "diagnostic_bytes": 4096,
+      "fresh_result_bytes": 16777216
+    },
+    "keys": [],
+    "expectations": [],
+    "applicability": [],
+    "as_of": "2026-09-08T00:00:00Z",
+    "valid_from": "2026-09-08T00:00:00Z",
+    "valid_until": "2026-09-09T00:00:00Z",
+    "invocation": {
+      "tool": "illustrative-reader",
+      "version": "example-only",
+      "options": []
+    }
+  },
+  "verification_context_sha256": "919787b66b4dc0688944d7c76218c6da168890f8251985ccfb12e2a92cfcb814",
+  "resolved_results": [],
+  "counts": {
+    "inputs": 1,
+    "objects": 1,
+    "units": 0,
+    "examined": 0,
+    "withheld": 0,
+    "resolved_result_count": 0
+  },
+  "non_claims": [
+    "no_activity_completeness",
+    "no_provider_outcome",
+    "no_automatic_trust"
+  ]
+}
+```
+
+D2 models an interrupted read before a DSSE binding is admitted. Available malformed material would
+instead use input_shape and package_refused, not this unavailable result. Compare C (refused), D1
+(verified) and D2 (unavailable) as full-field parity fixtures; the §7.4 attestation matrix adds the
+selected-binding cases using actual signed downstream fixtures, not these illustrative values.
+
+```json
+{
+  "schema": "assay.incident.verify.v1",
+  "outcome": "verification_unavailable",
+  "reason": "io_unavailable",
+  "artifact_sha256": null,
+  "inventory_sha256": null,
+  "assessment_sha256": null,
+  "expectation": "not_evaluated",
+  "attestations": [],
+  "verification_context": null,
+  "verification_context_sha256": null,
+  "resolved_results": [],
+  "counts": null,
+  "non_claims": [
+    "no_activity_completeness",
+    "no_provider_outcome",
+    "no_automatic_trust"
+  ]
+}
+```
+
+### Example E — selected-binding row projections
+
+This array is an **inert test-vector container, not an admitted package document or new schema**.
+Each expected_row is a complete AttestationCheck. All cases assume the same already-admitted
+binding whose expected key digest is 64 `c` characters; the successful canonical artifact digest
+is 64 `a` characters. These are synthetic projection values, not supplied PEM/signature/archive
+proof. The future behavioral fixtures must use actual bound bytes and actual canonical API calls:
+bad signature, valid signature with wrong subject, valid signature with false extent, and an I/O
+failure after selection. They must not simulate those cryptographic refusals with malformed setup.
+The last case never calls the canonical verifier; all Err cases return the same conservative tuple.
+Only the Ok case can contribute a row to a package_verified report. The error rows use the exact
+outer field projections and reasons in §7.4; no extra fields from this test container enter the wire.
+
+```json
+[
+  {
+    "case": "verified_without_extent",
+    "canonical_result": "Ok",
+    "expected_row": {
+      "input_id": "selected-attestation",
+      "key_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "status": "verified",
+      "signature_verified": true,
+      "subject_matched": true,
+      "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "extent_stated": false,
+      "extent": null
+    }
+  },
+  {
+    "case": "signature_refused",
+    "canonical_result": "Err",
+    "expected_row": {
+      "input_id": "selected-attestation",
+      "key_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "status": "refused",
+      "signature_verified": false,
+      "subject_matched": false,
+      "artifact_sha256": null,
+      "extent_stated": false,
+      "extent": null
+    }
+  },
+  {
+    "case": "subject_mismatched",
+    "canonical_result": "Err",
+    "expected_row": {
+      "input_id": "selected-attestation",
+      "key_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "status": "refused",
+      "signature_verified": false,
+      "subject_matched": false,
+      "artifact_sha256": null,
+      "extent_stated": false,
+      "extent": null
+    }
+  },
+  {
+    "case": "extent_mismatched",
+    "canonical_result": "Err",
+    "expected_row": {
+      "input_id": "selected-attestation",
+      "key_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "status": "refused",
+      "signature_verified": false,
+      "subject_matched": false,
+      "artifact_sha256": null,
+      "extent_stated": false,
+      "extent": null
+    }
+  },
+  {
+    "case": "key_material_unavailable",
+    "canonical_result": "not_called",
+    "expected_row": {
+      "input_id": "selected-attestation",
+      "key_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "status": "unavailable",
+      "signature_verified": false,
+      "subject_matched": false,
+      "artifact_sha256": null,
+      "extent_stated": false,
+      "extent": null
+    }
+  }
+]
+```
