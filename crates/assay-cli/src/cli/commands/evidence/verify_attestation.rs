@@ -2,7 +2,9 @@
 use crate::output_write::write_stdout_json;
 use anyhow::{anyhow, Result};
 use assay_common::limits::{LimitKind, LimitReader};
-use assay_evidence::attestation::{verify_attestation_for_bundle_with_limits, DsseEnvelope};
+use assay_evidence::attestation::{
+    verify_attestation_for_bundle_with_extent_and_limits, DsseEnvelope, EvidenceExtent,
+};
 use assay_evidence::VerifyLimits;
 use clap::Args;
 use ed25519_dalek::pkcs8::DecodePublicKey;
@@ -37,6 +39,8 @@ struct AttestationVerificationReport {
     artifact_sha256: String,
     predicate_type: String,
     subject_name: String,
+    extent_stated: bool,
+    extent: Option<EvidenceExtent>,
 }
 
 /// Every input uses the same stream ceiling. Error context is static: underlying file,
@@ -83,8 +87,10 @@ pub fn cmd_verify_attestation(args: VerifyAttestationArgs) -> Result<i32> {
 
     // This is the one canonical full verification path. A checked signature alone is
     // artifact-unmatched and must never become this command's success report.
-    let verified = verify_attestation_for_bundle_with_limits(&envelope, &key, &bundle, limits)
-        .map_err(|_| anyhow!("attestation verification failed"))?;
+    let checked =
+        verify_attestation_for_bundle_with_extent_and_limits(&envelope, &key, &bundle, limits)
+            .map_err(|_| anyhow!("attestation verification failed"))?;
+    let (verified, extent) = checked.into_parts();
     let report = AttestationVerificationReport {
         schema: "assay.evidence.attestation.verify.v1",
         outcome: "attestation_verified",
@@ -93,6 +99,8 @@ pub fn cmd_verify_attestation(args: VerifyAttestationArgs) -> Result<i32> {
         artifact_sha256: verified.artifact_sha256,
         predicate_type: verified.statement.predicate_type,
         subject_name: verified.statement.subject[0].name.clone(),
+        extent_stated: extent.is_some(),
+        extent,
     };
     let json = serde_json::to_string(&report)
         .map_err(|_| anyhow!("serialize attestation verification report"))?;
