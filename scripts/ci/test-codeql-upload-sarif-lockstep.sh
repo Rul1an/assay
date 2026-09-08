@@ -11,6 +11,20 @@ WORKFLOWS=(
   .github/workflows/osv-scanner-scheduled.yml
 )
 
+read -r EXPECTED_SHA EXPECTED_TAG < <(
+  python3 - "$ROOT/$CHECKER" <<'PY'
+import runpy
+import sys
+
+contract = runpy.run_path(sys.argv[1])
+print(contract["EXPECTED_SHA"], contract["EXPECTED_TAG"])
+PY
+)
+if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ || ! "$EXPECTED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "FAIL: checker returned an invalid expected CodeQL pin" >&2
+  exit 1
+fi
+
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 
@@ -104,7 +118,7 @@ case_root="$scratch/one-laggard"
 seed "$case_root"
 mutate_once \
   "$case_root/.github/workflows/openssf-scorecard.yml" \
-  "db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28" \
+  "${EXPECTED_SHA}" \
   "d1ba80a13dd99fba24a470575428917156a28b43"
 run_case one-laggard-is-refused "$case_root" 1
 
@@ -112,7 +126,7 @@ case_root="$scratch/tag-drift"
 seed "$case_root"
 mutate_once \
   "$case_root/.github/workflows/assay-security.yml" \
-  "# v4.37.8" \
+  "# ${EXPECTED_TAG}" \
   "# v4.37.5"
 run_case tag-drift-is-refused "$case_root" 1
 
@@ -120,92 +134,92 @@ case_root="$scratch/invoke-bypass"
 seed "$case_root"
 mutate_once \
   "$case_root/.github/workflows/osv-scanner-scheduled.yml" \
-  "uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8" \
+  "uses: github/codeql-action/upload-sarif@${EXPECTED_SHA} # ${EXPECTED_TAG}" \
   "run: echo bypassed-upload"
 run_case invoke-bypass-is-refused "$case_root" 1
 
 case_root="$scratch/extra-callsite"
 seed "$case_root"
-cat >>"$case_root/.github/workflows/assay-security.yml" <<'YAML'
+cat >>"$case_root/.github/workflows/assay-security.yml" <<YAML
 
 # Mutation: a second active upload is outside the closed one-callsite contract.
-uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
+uses: github/codeql-action/upload-sarif@${EXPECTED_SHA} # ${EXPECTED_TAG}
 YAML
 run_case extra-callsite-is-refused "$case_root" 1
 
 case_root="$scratch/quoted-duplicate"
 seed "$case_root"
-cat >>"$case_root/.github/workflows/assay-security.yml" <<'YAML'
+cat >>"$case_root/.github/workflows/assay-security.yml" <<YAML
 
 # Mutation: quoted uses values are valid workflow YAML and remain active.
-uses: "github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28" # v4.37.8
+uses: "github/codeql-action/upload-sarif@${EXPECTED_SHA}" # ${EXPECTED_TAG}
 YAML
 run_case quoted-duplicate-is-refused "$case_root" 1
 
 case_root="$scratch/foreign-workflow"
 seed "$case_root"
-cat >"$case_root/.github/workflows/fourth-upload.yml" <<'YAML'
+cat >"$case_root/.github/workflows/fourth-upload.yml" <<YAML
 name: Mutated fourth CodeQL upload
 jobs:
   upload:
     steps:
-      - uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
+      - uses: github/codeql-action/upload-sarif@${EXPECTED_SHA} # ${EXPECTED_TAG}
 YAML
 run_case foreign-workflow-callsite-is-refused "$case_root" 1
 
 case_root="$scratch/quoted-foreign-workflow"
 seed "$case_root"
-cat >"$case_root/.github/workflows/quoted-upload.yaml" <<'YAML'
+cat >"$case_root/.github/workflows/quoted-upload.yaml" <<YAML
 name: Mutated quoted CodeQL upload
 jobs:
   upload:
     steps:
-      - uses: 'github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28' # v4.37.8
+      - uses: 'github/codeql-action/upload-sarif@${EXPECTED_SHA}' # ${EXPECTED_TAG}
 YAML
 run_case quoted-foreign-workflow-callsite-is-refused "$case_root" 1
 
 case_root="$scratch/flow-mapping-foreign-workflow"
 seed "$case_root"
-cat >"$case_root/.github/workflows/flow-upload.yml" <<'YAML'
+cat >"$case_root/.github/workflows/flow-upload.yml" <<YAML
 name: Mutated flow-mapping CodeQL upload
 on: workflow_dispatch
 jobs:
   upload:
     runs-on: ubuntu-latest
     steps:
-      - {uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28}
+      - {uses: github/codeql-action/upload-sarif@${EXPECTED_SHA}}
 YAML
 run_case flow-mapping-foreign-workflow-is-refused "$case_root" 1
 
 case_root="$scratch/quoted-key-foreign-workflow"
 seed "$case_root"
-cat >"$case_root/.github/workflows/quoted-key-upload.yml" <<'YAML'
+cat >"$case_root/.github/workflows/quoted-key-upload.yml" <<YAML
 name: Mutated quoted-key CodeQL upload
 on: workflow_dispatch
 jobs:
   upload:
     runs-on: ubuntu-latest
     steps:
-      - "uses": github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28
+      - "uses": github/codeql-action/upload-sarif@${EXPECTED_SHA}
 YAML
 run_case quoted-key-foreign-workflow-is-refused "$case_root" 1
 
 case_root="$scratch/spaced-colon-foreign-workflow"
 seed "$case_root"
-cat >"$case_root/.github/workflows/spaced-colon-upload.yml" <<'YAML'
+cat >"$case_root/.github/workflows/spaced-colon-upload.yml" <<YAML
 name: Mutated spaced-colon CodeQL upload
 on: workflow_dispatch
 jobs:
   upload:
     runs-on: ubuntu-latest
     steps:
-      - uses : github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28
+      - uses : github/codeql-action/upload-sarif@${EXPECTED_SHA}
 YAML
 run_case spaced-colon-foreign-workflow-is-refused "$case_root" 1
 
 case_root="$scratch/folded-scalar-foreign-workflow"
 seed "$case_root"
-cat >"$case_root/.github/workflows/folded-upload.yml" <<'YAML'
+cat >"$case_root/.github/workflows/folded-upload.yml" <<YAML
 name: Mutated folded-scalar CodeQL upload
 on: workflow_dispatch
 jobs:
@@ -213,73 +227,73 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: >-
-          github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28
+          github/codeql-action/upload-sarif@${EXPECTED_SHA}
 YAML
 run_case folded-scalar-foreign-workflow-is-refused "$case_root" 1
 
 case_root="$scratch/unicode-escaped-action"
 seed "$case_root"
-cat >"$case_root/.github/workflows/unicode-escaped-upload.yml" <<'YAML'
+cat >"$case_root/.github/workflows/unicode-escaped-upload.yml" <<YAML
 name: Mutated Unicode-escaped CodeQL upload
 on: workflow_dispatch
 jobs:
   upload:
     runs-on: ubuntu-latest
     steps:
-      - uses: "github/codeql-action/upload-sarif\u0040db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28"
+      - uses: "github/codeql-action/upload-sarif\u0040${EXPECTED_SHA}"
 YAML
 run_case unicode-escaped-action-is-refused "$case_root" 1
 
 case_root="$scratch/hex-escaped-action"
 seed "$case_root"
-cat >"$case_root/.github/workflows/hex-escaped-upload.yml" <<'YAML'
+cat >"$case_root/.github/workflows/hex-escaped-upload.yml" <<YAML
 name: Mutated hex-escaped CodeQL upload
 on: workflow_dispatch
 jobs:
   upload:
     runs-on: ubuntu-latest
     steps:
-      - uses: "github/codeql-action/upload-sarif\x40db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28"
+      - uses: "github/codeql-action/upload-sarif\x40${EXPECTED_SHA}"
 YAML
 run_case hex-escaped-action-is-refused "$case_root" 1
 
 case_root="$scratch/case-variant-action"
 seed "$case_root"
-cat >"$case_root/.github/workflows/case-variant-upload.yml" <<'YAML'
+cat >"$case_root/.github/workflows/case-variant-upload.yml" <<YAML
 name: Mutated case-variant CodeQL upload
 on: workflow_dispatch
 jobs:
   upload:
     runs-on: ubuntu-latest
     steps:
-      - uses: GitHub/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28
+      - uses: GitHub/codeql-action/upload-sarif@${EXPECTED_SHA}
 YAML
 run_case case-variant-action-is-refused "$case_root" 1
 
 case_root="$scratch/unicode-escaped-identity"
 seed "$case_root"
-cat >"$case_root/.github/workflows/unicode-identity-upload.yml" <<'YAML'
+cat >"$case_root/.github/workflows/unicode-identity-upload.yml" <<YAML
 name: Mutated Unicode-escaped CodeQL identity
 on: workflow_dispatch
 jobs:
   upload:
     runs-on: ubuntu-latest
     steps:
-      - uses: "\u0067ithub/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28"
+      - uses: "\u0067ithub/codeql-action/upload-sarif@${EXPECTED_SHA}"
 YAML
 run_case unicode-escaped-identity-is-refused "$case_root" 1
 
 case_root="$scratch/escaped-line-break-action"
 seed "$case_root"
-cat >"$case_root/.github/workflows/escaped-break-upload.yml" <<'YAML'
+cat >"$case_root/.github/workflows/escaped-break-upload.yml" <<YAML
 name: Mutated escaped-line-break CodeQL upload
 on: workflow_dispatch
 jobs:
   upload:
     runs-on: ubuntu-latest
     steps:
-      - uses: "github/codeql-action/upload-\
-          sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28"
+      - uses: "github/codeql-action/upload-\\
+          sarif@${EXPECTED_SHA}"
 YAML
 run_case escaped-line-break-action-is-refused "$case_root" 1
 
