@@ -1,7 +1,7 @@
-//! `assay evidence attest` — sign a bundle's manifest as an in-toto/DSSE attestation.
+//! `assay evidence attest` — sign a complete evidence archive as an in-toto/DSSE attestation.
 //!
-//! Wraps `assay_evidence::attestation` (ADR-039): opens and verifies an evidence
-//! bundle, builds an in-toto v1 Statement over its integrity root, and signs it
+//! Wraps `assay_evidence::attestation` (ADR-044/049): opens and verifies an evidence
+//! bundle, builds an in-toto v1 Statement binding its complete archive digest and extent, and signs it
 //! as a DSSE envelope with an Ed25519 key (PKCS#8 PEM, as produced by
 //! `assay mcp tool keygen`). The anchor (transparency log / timestamp) stays
 //! external. Attestation binds who-said-it and the bundle content; it does not
@@ -10,7 +10,7 @@
 use crate::output_write::write_stdout_json;
 use anyhow::{Context, Result};
 use assay_common::limits::{LimitKind, LimitReader};
-use assay_evidence::attestation::{sign_statement, statement_for_bundle_with_limits};
+use assay_evidence::attestation::{sign_statement, statement_for_bundle_with_extent_and_limits};
 use assay_evidence::VerifyLimits;
 use clap::Args;
 use ed25519_dalek::pkcs8::DecodePrivateKey;
@@ -103,7 +103,7 @@ fn run(args: AttestArgs) -> Result<i32> {
     // 4. Build the statement from the bounded bytes. Verification, predicate derivation and the
     //    subject name all happen inside that one call, against these bytes, so the CLI has no way
     //    to pair a predicate with an artifact it does not describe.
-    let statement = statement_for_bundle_with_limits(&bundle_bytes, limits)?;
+    let statement = statement_for_bundle_with_extent_and_limits(&bundle_bytes, limits)?;
     let envelope = sign_statement(&statement, &key).context("sign in-toto statement")?;
     let json = serde_json::to_string_pretty(&envelope).context("serialize DSSE envelope")?;
 
