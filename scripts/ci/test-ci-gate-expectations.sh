@@ -225,7 +225,7 @@ echo "ok: a documentation-only run passes with its jobs scoped out"
 
 # The defect: a code-bearing run where a job that should have executed did not. Before this change
 # every one of these was green.
-for job in DEPS_SECURITY CLIPPY RUSTDOC PUBLIC_MSRV PERF TEST; do
+for job in DEPS_SECURITY CLIPPY RUSTDOC PUBLIC_MSRV PERF TEST EVIDENCEREF_LIVE_RESOLVE; do
   out="$(run_gate fail "silently skipped $job" \
     SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
     PUBLIC_MSRV_RESULT=$ok \
@@ -235,6 +235,11 @@ for job in DEPS_SECURITY CLIPPY RUSTDOC PUBLIC_MSRV PERF TEST; do
     "${job}_RESULT=skipped")"
   grep -qi "was skipped, but this run required it" <<<"$out" \
     || fail "$job skipped: the gate failed, but not for the skip — got: $out"
+  # The reason alone does not say which job produced it, so a gate that named the wrong one — or
+  # failed over some other row entirely — read as clean here. The env-var prefix maps to the job id.
+  expected_name="$(printf '%s' "$job" | tr 'A-Z_' 'a-z-')"
+  grep -q "$expected_name was skipped" <<<"$out" \
+    || fail "$job skipped: the gate failed for a skip, but did not name $expected_name — got: $out"
 done
 echo "ok: a code-gated job that silently did not run fails the gate, and is named"
 
