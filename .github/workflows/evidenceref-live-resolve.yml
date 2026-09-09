@@ -1,0 +1,85 @@
+name: evidenceref-live-resolve
+
+# The experiment's own tests are the only guards for the claims its README publishes, and an
+# exact-head review found that no required lane ran them: "16 passed" was reproducible on demand
+# and enforced nowhere. AGENTS.md wants GitHub Actions as the final integration proof, so the
+# suite runs here on every change to the experiment or to the published consumer it pins.
+on:
+  pull_request:
+    paths:
+      - "docs/experiments/evidenceref-live-resolve-2026-09/**"
+      - "docs/experiments/evidenceref-recompute-consumer-2026-06/**"
+      - ".github/workflows/evidenceref-live-resolve.yml"
+  push:
+    branches: [main]
+    paths:
+      - "docs/experiments/evidenceref-live-resolve-2026-09/**"
+      - "docs/experiments/evidenceref-recompute-consumer-2026-06/**"
+      - ".github/workflows/evidenceref-live-resolve.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    name: evidenceref live-resolve suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: docs/experiments/evidenceref-live-resolve-2026-09
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # The consumer guard resolves a pinned commit, so the history has to be here.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.x"
+
+      # Pinned rather than latest: the RFC 8785 cross-check is the independent half of the JCS
+      # claim, so the library that provides it is part of the evidence.
+      - name: Install the declared test dependencies
+        run: python3 -m pip install --quiet "pytest==8.4.2" "rfc8785==0.1.4"
+
+      # Offline only. The live re-fetch stays out of CI deliberately: a third party's endpoint is
+      # not a dependency this repository should gate merges on, and refetch() is exercised in the
+      # suite against a stubbed transport.
+      - name: Capture verifies against its own content address
+        run: python3 capture.py
+
+      - name: Reference runner
+        run: python3 resolve.py
+
+      - name: Independent reproducer
+        run: python3 independent_resolve.py
+
+      - name: Mutation adequacy
+        run: python3 mutate.py
+
+      - name: Suite, and no skips
+        run: |
+          set -euo pipefail
+          # A skipped guard is the failure mode this lane exists to catch: the previous round's
+          # RFC 8785 check used importorskip, and a host without the library reported a clean run.
+          #
+          # The skip detection is Python rather than `grep -qv`, whose exit code depends on the
+          # grep implementation: on BSD grep `-q` decides on whether the pattern was found, on GNU
+          # grep on whether the inverted match selected a line, and pytest output always contains
+          # lines without the word. That difference is invisible on a developer's macOS and decides
+          # the guard on the Linux runner, so the check does not go through grep at all.
+          python3 -m pytest -q -rs --no-header test_live_resolve.py | tee result.txt
+          python3 - <<'PY'
+          import pathlib, re, sys
+          out = pathlib.Path("result.txt").read_text()
+          if re.search(r"\d+ skipped", out):
+              print("::error::a test skipped; the guards here must not skip")
+              sys.exit(1)
+          print("no skips in:", out.strip().splitlines()[-1])
+          PY
+
+      - name: Committed digests still describe the tree
+        run: shasum -a 256 -c SHA256SUMS.txt

@@ -19,7 +19,7 @@ python3 capture.py --fetch    # re-fetch the same address and compare byte for b
 python3 resolve.py            # 11 cases, writes runs/resolve-run.json, exit 0 iff every expectation holds
 python3 independent_resolve.py  # re-derive every verdict with code that imports neither runner nor consumer
 python3 mutate.py             # 7 rules, writes runs/mutation.json, exit 0 iff each is killed
-pytest                        # 12 tests
+pytest                        # 22 tests, and the lane fails on any skip
 ```
 
 Python 3 standard library only for the runners. The test suite requires `pytest` and `rfc8785`:
@@ -96,6 +96,15 @@ matter of adding a string.
   never hand-listed.
 - `runs/resolve-run.json`, `runs/mutation.json` machine-readable records; `SHA256SUMS.txt`.
 
+## Every fix here is reverted by a test
+
+An exact-head review reverted each production fix in turn and found the suite still green: the tests
+exercised helpers while the funnels went unguarded. That is now measured the other way. Removing the
+bounded read and the address refusal from `refetch`, disabling the case-set equality, skipping the
+consumer blob check, or restoring the per-rule control exemption each turns the suite red. `mutate.py`
+scores through one `kill_verdict`, and `control_survived` takes only the observations, so a per-rule
+exemption cannot be written without changing a signature a test asserts on.
+
 ## Two disciplines worth naming, because both bit
 
 **Integrity before interpretation.** The content address is checked before the bytes are parsed, so a
@@ -138,8 +147,9 @@ Offered so that a reader who keeps such a register can copy it rather than recon
   `independent-implementation-independent-vectors`, because there is one record here and no vector set.
 - **What the run showed:** the published address recomputes from the received octets; 11 of 11 cases
   land where expected under two independent runners; 7 of 7 octets rules killed under mutation with
-  the clean control preserved; the reference as served reaches `malformed_ref`, and reaches
-  `recomputed` once a profile and schema identity are named on it.
+  the clean control preserved and a blinded-control probe showing that control able to fail; 22 tests
+  with no skips, enforced by `.github/workflows/evidenceref-live-resolve.yml`; the reference as served
+  reaches `malformed_ref`, and reaches `recomputed` once a profile and schema identity are named on it.
 - **What it does not establish:** nothing about the producer's honesty or about the measured server;
   nothing about any record other than this capture; no cross-implementation result over a vector set;
   no claim that the proposed profile is correct to standardize.

@@ -218,3 +218,126 @@ def test_mutation_report_carries_a_fired_blinded_control_probe():
     assert probe["control_verdict_under_probe"] != "recomputed"
     for rule, res in report["rules"].items():
         assert res["control_preserved"] is True, rule
+
+
+# The four tests below exist because the previous round tested helpers while the production funnels
+# went unguarded: reverting each fix left the whole suite green. Each one now reverts with the suite.
+
+
+class _Resp:
+    """Minimal stand-in for the urlopen context manager, so refetch() itself is exercised."""
+
+    def __init__(self, payload: bytes):
+        self._payload = payload
+
+    def read(self, n: int = -1) -> bytes:
+        return self._payload if n < 0 else self._payload[:n]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_refetch_enforces_the_address_binding_and_the_bound(monkeypatch):
+    # Guards capture.refetch(), not its helpers. Replacing the bounded read with r.read() or
+    # dropping the binding refusal must fail here.
+    import capture
+
+    monkeypatch.setattr(capture.urllib.request, "urlopen", lambda *a, **k: _Resp(b'{"not":"the record"}'))
+    assert capture.refetch() == 1, "bytes that are not the named address must be refused"
+
+    monkeypatch.setattr(capture.urllib.request, "urlopen", lambda *a, **k: _Resp(OCTETS + b"x"))
+    with pytest.raises(SystemExit):
+        capture.refetch()
+
+    monkeypatch.setattr(capture.urllib.request, "urlopen", lambda *a, **k: _Resp(OCTETS))
+    assert capture.refetch() == 0, "the real bytes at the real address must still pass"
+
+
+def _isolated_copy(tmp_path):
+    import shutil
+
+    work = tmp_path / "exp"
+    shutil.copytree(HERE, work, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"))
+    return work
+
+
+def test_a_case_missing_from_the_run_record_fails_the_reproducer(tmp_path):
+    # Guards the set-equality check in independent_resolve. Disabling it must fail here rather
+    # than leaving a clean-looking n-of-n over a smaller set.
+    work = _isolated_copy(tmp_path)
+    record = work / "runs" / "resolve-run.json"
+    doc = json.loads(record.read_text())
+    doc["cases"] = doc["cases"][:-1]
+    record.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
+    r = subprocess.run([sys.executable, "independent_resolve.py"], cwd=work, capture_output=True, text=True)
+    assert r.returncode == 1, r.stdout
+    assert "case sets differ" in r.stdout
+
+
+def test_a_duplicated_case_fails_the_reproducer(tmp_path):
+    work = _isolated_copy(tmp_path)
+    record = work / "runs" / "resolve-run.json"
+    doc = json.loads(record.read_text())
+    doc["cases"].append(doc["cases"][0])
+    record.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
+    r = subprocess.run([sys.executable, "independent_resolve.py"], cwd=work, capture_output=True, text=True)
+    assert r.returncode == 1, r.stdout
+    assert "duplicate case ids" in r.stdout
+
+
+def test_the_runner_refuses_a_consumer_that_is_not_the_pinned_blob(tmp_path):
+    # Guards resolve.load_published_consumer, which is what actually loads the helper. Retargeting
+    # the runner at an unpinned copy must fail here, not pass because a test hashed another path.
+    import shutil
+
+    fake = tmp_path / "consumer"
+    fake.mkdir()
+    src = ref.PUBLISHED / "evidenceref_consumer.py"
+    shutil.copy(src, fake / "evidenceref_consumer.py")
+    assert ref.git_blob_sha1((fake / "evidenceref_consumer.py").read_bytes()) == ref.PUBLISHED_BLOB
+    (fake / "evidenceref_consumer.py").write_text(
+        (fake / "evidenceref_consumer.py").read_text() + "\n# one byte of drift\n"
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        ref.load_published_consumer(fake)
+    assert "unpinned consumer" in str(excinfo.value)
+
+
+def test_a_kill_requires_the_control_and_a_control_that_can_fail():
+    # Guards the single verdict function. Reintroducing a per-rule exemption, or leaving the probe
+    # unconsumed, must fail here.
+    import mutate
+
+    assert mutate.kill_verdict(True, True, True) is True
+    assert mutate.kill_verdict(True, True, False) is False, "a control that cannot fail scores nothing"
+    assert mutate.kill_verdict(True, False, True) is False, "a blinded control scores nothing"
+    assert mutate.kill_verdict(False, True, True) is False, "an unmoved mutant is not a kill"
+
+    report = json.loads((HERE / "runs" / "mutation.json").read_text())
+    fired = report["blinded_control_probe"]["control_detected_as_blinded"]
+    for rule, res in report["rules"].items():
+        assert res["valid_kill"] == mutate.kill_verdict(
+            bool(res["killed_by"]), res["control_preserved"], fired
+        ), rule
+
+
+def test_control_survival_cannot_depend_on_which_rule_was_mutated():
+    # The previous round's assertion compared the report with the verdict function and passed
+    # either way, because restoring the exemption made control_preserved spuriously true and the
+    # two stayed consistent. This pins the property instead: rule identity is not an input to the
+    # control, and no rule-conditional exists in the scoring loop.
+    import inspect
+
+    import mutate
+
+    assert list(inspect.signature(mutate.control_survived).parameters) == ["observations"]
+    assert mutate.control_survived({"C_octets_profile_named": "recomputed"}) is True
+    assert mutate.control_survived({"C_octets_profile_named": "digest_mismatch"}) is False
+    assert mutate.control_survived({}) is False
+
+    scoring = inspect.getsource(mutate.main)
+    assert "control_survived(got)" in scoring, "the loop must score through the pure function"
+    assert "rule ==" not in scoring, "a per-rule exemption reappeared in the scoring loop"

@@ -11,6 +11,8 @@ the case set reacts to damage, not that the rule discriminates.
 Scope: this mutates the octets consumer in `resolve.py` only. Cases A and B run through the published
 June consumer, which this experiment must not modify, so they are outside the mutation set.
 
+A kill is decided in exactly one place, `kill_verdict`, and rule identity is not one of its inputs.
+
 Usage: python3 mutate.py    # writes runs/mutation.json, exit 0 iff every rule is killed
 """
 from __future__ import annotations
@@ -62,6 +64,29 @@ def _mutated_consume(old: str, new: str):
     return ns["consume_octets"], ns["build_cases"]
 
 
+def control_survived(observations: dict) -> bool:
+    """Did the positive control survive this mutation?
+
+    The observations are the only input. Rule identity is deliberately absent from the signature,
+    so a per-rule exemption cannot be written here without changing it, and a test can say so.
+    An earlier version exempted the digest rule at the call site on the theory that silencing it
+    blinds the control; measured, it does not, and the exemption only removed the control from the
+    one rule where blinding is most plausible.
+    """
+    return observations.get("C_octets_profile_named") == "recomputed"
+
+
+def kill_verdict(changed: bool, control_ok: bool, probe_fired: bool) -> bool:
+    """The single place a kill is decided.
+
+    A kill counts only when the mutation moved a case, the control survived it, AND the control
+    was shown able to fail at all. Rule identity is deliberately not a parameter: an earlier
+    version exempted one rule from the control check here, which is how a control acquires a
+    hole that no test can see.
+    """
+    return bool(changed) and bool(control_ok) and bool(probe_fired)
+
+
 def blinded_control_probe() -> dict:
     """Must-fail probe: a mutation that blinds the positive control has to be refused, never counted.
 
@@ -88,12 +113,20 @@ def blinded_control_probe() -> dict:
 
 
 def main() -> int:
+    # Computed before any rule is scored: a report whose control cannot fail scores nothing.
+    probe = blinded_control_probe()
+    probe_fired = probe["control_detected_as_blinded"]
     base = _baseline()
     if base["C_octets_profile_named"] != "recomputed":
         print("baseline control is not clean; refusing to report kills")
         return 1
 
-    report = {"baseline": base, "rules": {}, "all_killed": None}
+    report = {
+        "baseline": base,
+        "rules": {},
+        "all_killed": None,
+        "blinded_control_probe": probe,
+    }
     for rule, (old, new) in MUTATIONS.items():
         consume, build = _mutated_consume(old, new)
         got = {}
@@ -105,26 +138,20 @@ def main() -> int:
                     got[c["id"]] = f"raised:{type(exc).__name__}"
         changed = sorted(k for k in base if got.get(k) != base[k])
         crashed = sorted(k for k in changed if str(got.get(k)).startswith("raised:"))
-        # The control must survive EVERY mutation, with no exception. An earlier version exempted
-        # the digest rule on the theory that silencing it would blind the control; measured, it does
-        # not, and the exemption only disabled the control for the one rule where blinding is most
-        # plausible. A rule-shaped hole in a control is a control that cannot fail.
-        control_ok = got.get("C_octets_profile_named") == "recomputed"
+        # The control must survive EVERY mutation, with no exception; see control_survived.
+        control_ok = control_survived(got)
         report["rules"][rule] = {
             "killed_by": changed,
             "crash_kills": crashed,
             "verdict_kills": sorted(set(changed) - set(crashed)),
             "killed": bool(changed),
             "control_preserved": control_ok,
-            "valid_kill": bool(changed) and control_ok,
+            "valid_kill": kill_verdict(bool(changed), control_ok, probe_fired),
         }
 
-    probe = blinded_control_probe()
-    report["blinded_control_probe"] = probe
     report["all_killed"] = all(r["valid_kill"] for r in report["rules"].values())
-    if not probe["control_detected_as_blinded"]:
+    if not probe_fired:
         print("BLINDED-CONTROL PROBE DID NOT FIRE: the control cannot go false; refusing to score")
-        report["all_killed"] = False
     (HERE / "runs").mkdir(exist_ok=True)
     (HERE / "runs" / "mutation.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
 

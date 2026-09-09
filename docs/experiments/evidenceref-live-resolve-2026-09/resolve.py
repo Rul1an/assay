@@ -31,9 +31,42 @@ import sys
 
 HERE = pathlib.Path(__file__).parent
 PUBLISHED = HERE.parent / "evidenceref-recompute-consumer-2026-06"
-sys.path.insert(0, str(PUBLISHED))
 
-import evidenceref_consumer as published  # noqa: E402  the June consumer, unmodified
+# The consumer linked from the June SEP-1913 comment, by its git blob id. The runner refuses to
+# consume anything else, so "unmodified from the one I published" is enforced where the object is
+# loaded rather than asserted in a test that hashes a path this module never reads.
+PUBLISHED_BLOB = "f48bb7410935caddd19f3d3b6d4a789b4bd02e97"
+
+
+def git_blob_sha1(data: bytes) -> str:
+    """Git's object id for a blob: sha1 over "blob <len>\0" + content. An identity, not a
+    security primitive; the bytes it names are already public."""
+    header = b"blob %d\0" % len(data)
+    try:
+        return hashlib.sha1(header + data, usedforsecurity=False).hexdigest()
+    except TypeError:  # pragma: no cover  Python < 3.9
+        return hashlib.sha1(header + data).hexdigest()
+
+
+def load_published_consumer(directory: pathlib.Path = PUBLISHED, expected: str = PUBLISHED_BLOB):
+    """Import the consumer only after its bytes match the pinned blob. Refusal is the point: a
+    resolution by 'the published consumer' means nothing if the runner will consume any file
+    sitting at that path."""
+    path = directory / "evidenceref_consumer.py"
+    if not path.is_file():
+        raise SystemExit(f"published consumer not found at {path}")
+    actual = git_blob_sha1(path.read_bytes())
+    if actual != expected:
+        raise SystemExit(
+            f"refusing an unpinned consumer: {path} is blob {actual}, expected {expected}"
+        )
+    sys.path.insert(0, str(directory))
+    import evidenceref_consumer  # noqa: PLC0415  imported only after the blob check
+
+    return evidenceref_consumer
+
+
+published = load_published_consumer()
 
 RECORD = HERE / "record" / "gate-record-4dffe218.json"
 ADDRESS = "sha256:4dffe218167d40bb5940ba6cd404225b95b3d20ca5cdac880fbd4c62f0e343fc"
