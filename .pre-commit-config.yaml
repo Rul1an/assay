@@ -25,6 +25,13 @@ repos:
         # is reproducible from the committed files. Adding a trailing
         # newline silently breaks the tamper-evident binding contract.
         #
+        # Same rule, same reason, for experiment record/ directories: those hold
+        # octets captured from a third party and pinned by their own content
+        # address, so the file's sha256 IS the identifier it is stored under.
+        # This hook appended one newline to such a capture on 2026-09-09 and
+        # turned 10190 bytes into 10191, which silently broke the address the
+        # capture exists to prove.
+        #
         # Same rule, same reason, for the vendored MCP schema artifacts: they
         # are verbatim copies from a pinned spec commit and PIN.json records a
         # sha256 over the committed bytes. A trailing newline changes the
@@ -34,6 +41,7 @@ repos:
         exclude: |
           (?x)^(
             docs/experiments/.+/archive-contents/.+
+            |docs/experiments/.+/record/.+
             |crates/assay-core/tests/fixtures/mcp-era-parity-v0/schema-.+\.json
             |third_party/serde_jcs-0\.2\.0/.+
             |scripts/ci/fixtures/assay-action-pin/(action\.yml|remediation_recipe\.cmd)
@@ -42,6 +50,7 @@ repos:
         exclude: |
           (?x)^(
             docs/experiments/.+/archive-contents/.+
+            |docs/experiments/.+/record/.+
             |crates/assay-core/tests/fixtures/mcp-era-parity-v0/schema-.+\.json
             |third_party/serde_jcs-0\.2\.0/.+
             |scripts/ci/fixtures/assay-action-pin/(action\.yml|remediation_recipe\.cmd)

@@ -1,0 +1,73 @@
+{
+  "all_killed": true,
+  "baseline": {
+    "C_octets_profile_named": "recomputed",
+    "D_octets_reserialized_body": "digest_mismatch",
+    "E_octets_tampered": "digest_mismatch",
+    "F_octets_incomplete_projection": "redacted_projection_incomplete",
+    "G_unknown_profile_name": "unsupported_canonicalization",
+    "H_octets_no_canonicalization": "malformed_ref",
+    "I_octets_digest_only": "unresolvable_digest_only",
+    "J_octets_locator_unresolvable": "unresolved_ref",
+    "K_octets_unknown_schema_identity": "schema_mismatch"
+  },
+  "rules": {
+    "digest_mismatch": {
+      "control_preserved": true,
+      "killed": true,
+      "killed_by": [
+        "D_octets_reserialized_body",
+        "E_octets_tampered"
+      ],
+      "valid_kill": true
+    },
+    "malformed_ref": {
+      "control_preserved": true,
+      "killed": true,
+      "killed_by": [
+        "H_octets_no_canonicalization"
+      ],
+      "valid_kill": true
+    },
+    "redacted_projection_incomplete": {
+      "control_preserved": true,
+      "killed": true,
+      "killed_by": [
+        "F_octets_incomplete_projection"
+      ],
+      "valid_kill": true
+    },
+    "unknown_schema": {
+      "control_preserved": true,
+      "killed": true,
+      "killed_by": [
+        "K_octets_unknown_schema_identity"
+      ],
+      "valid_kill": true
+    },
+    "unresolvable_digest_only": {
+      "control_preserved": true,
+      "killed": true,
+      "killed_by": [
+        "I_octets_digest_only"
+      ],
+      "valid_kill": true
+    },
+    "unresolved_ref": {
+      "control_preserved": true,
+      "killed": true,
+      "killed_by": [
+        "J_octets_locator_unresolvable"
+      ],
+      "valid_kill": true
+    },
+    "unsupported_canonicalization": {
+      "control_preserved": true,
+      "killed": true,
+      "killed_by": [
+        "G_unknown_profile_name"
+      ],
+      "valid_kill": true
+    }
+  }
+}
