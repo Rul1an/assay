@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Contract for evidence-based timeout-minutes on every job in .github/workflows/ci.yml (CI-5B / #2244).
 #
-# Fourteen jobs inherited GitHub's 360-minute default. This gate pins the complete 16-job set and
+# Fourteen jobs inherited GitHub's 360-minute default. This gate pins the complete job set and
 # the per-job timeout class so a missing ceiling, a wrong class, or a restored 360 cannot stay green.
+# The set size is reported from `expected`, never restated: the literal said 16 against a map of 17
+# for as long as it took someone to read it.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -53,7 +55,7 @@ unless actual_ids == expected_ids
   missing = expected_ids - actual_ids
   extra = actual_ids - expected_ids
   abort(
-    "ci.yml job set drifted from the pinned 16-job contract; " \
+    "ci.yml job set drifted from the pinned #{expected.size}-job contract; " \
     "missing=#{missing.inspect} extra=#{extra.inspect}"
   )
 end
@@ -102,7 +104,7 @@ unless rollup["if"] == "always()"
   abort "CI rollup must stay fail-closed with if: always(); got #{rollup['if'].inspect}"
 end
 
-puts "ci-job-timeouts contract=passed (16 jobs; rollup bounded at 10m)"
+puts "ci-job-timeouts contract=passed (#{expected.size} jobs; rollup bounded at 10m)"
 RUBY
 }
 

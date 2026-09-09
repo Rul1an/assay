@@ -21,6 +21,20 @@ fail() {
   exit 1
 }
 
+# Both skip loops assert the same two things about one gate run: that it failed *for the skip*,
+# and that it named the job under test. The name half is matched with -F against the emitted
+# `::error::<name> was skipped` prefix, not as a bare substring: an unanchored match accepted a
+# gate that printed `zz-deps-security` while claiming to check `deps-security`, and would accept
+# a future job id that merely ends with an existing one.
+assert_named_skip() {
+  local job="$1" out="$2" name
+  name="$(printf '%s' "$job" | tr 'A-Z_' 'a-z-')"
+  grep -qi "was skipped, but this run required it" <<<"$out" \
+    || fail "$job skipped: the gate failed, but not for the skip — got: $out"
+  grep -qF -- "::error::${name} was skipped" <<<"$out" \
+    || fail "$job skipped: the gate failed for a skip, but did not name $name — got: $out"
+}
+
 # Pull the gate's `run:` body out of the workflow: everything between the "Evaluate required job
 # results" step's `run: |` and the end of that block. Indentation-based, which is what YAML gives.
 extract_gate() {
@@ -233,8 +247,7 @@ for job in DEPS_SECURITY CLIPPY RUSTDOC PUBLIC_MSRV PERF TEST; do
     MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
     EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
     "${job}_RESULT=skipped")"
-  grep -qi "was skipped, but this run required it" <<<"$out" \
-    || fail "$job skipped: the gate failed, but not for the skip — got: $out"
+  assert_named_skip "$job" "$out"
 done
 echo "ok: a code-gated job that silently did not run fails the gate, and is named"
 
@@ -276,7 +289,8 @@ echo "ok: mcp-registry-foundation skipped while touched fails the gate"
 # Unconditional jobs may never be skipped, whatever the scope says. `publish-shape-cli` and
 # `public-crate-policy` join the list with #2230: both were outside `needs:` entirely, so the gate
 # had no opinion about them at all, skipped or failed.
-for job in DISTRIBUTION_BOUNDARY VENDORED_PACKS RELEASE_ASSET_CONTRACT PUBLISH_SHAPE_CLI PUBLIC_CRATE_POLICY; do
+for job in DISTRIBUTION_BOUNDARY VENDORED_PACKS RELEASE_ASSET_CONTRACT PUBLISH_SHAPE_CLI PUBLIC_CRATE_POLICY \
+  EVIDENCEREF_LIVE_RESOLVE; do
   out="$(run_gate fail "unconditional $job skipped" \
     SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=true DEPS_SECURITY_RESULT=skipped CLIPPY_RESULT=skipped RUSTDOC_RESULT=skipped \
     PUBLIC_MSRV_RESULT=skipped \
@@ -284,8 +298,7 @@ for job in DISTRIBUTION_BOUNDARY VENDORED_PACKS RELEASE_ASSET_CONTRACT PUBLISH_S
     MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=skipped TEST_RESULT=skipped \
     EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
     "${job}_RESULT=skipped")"
-  grep -qi "was skipped, but this run required it" <<<"$out" \
-    || fail "$job: expected the unconditional-skip message, got: $out"
+  assert_named_skip "$job" "$out"
 done
 echo "ok: a job with no condition may not be skipped even on a docs-only run"
 
