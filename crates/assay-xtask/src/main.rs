@@ -502,3 +502,28 @@ mod tests {
         );
     }
 }
+
+/// A test that is flaky by construction, driven only by
+/// `scripts/ci/test-nextest-flaky-result.sh` (#2871).
+///
+/// Nextest runs each attempt in a fresh process, so a marker file is the channel between
+/// attempts: the first attempt finds no marker, writes one and fails; the retry finds it and
+/// passes. That is the exact shape `retries = 1` used to report as a pass. It is ignored so no
+/// ordinary suite selects it; the script runs it with `--run-ignored ignored-only` and a fresh
+/// marker per arm. Without the marker environment it fails every attempt, which is a broken
+/// fixture rather than a flaky one, and the script's sanity arm distinguishes the two.
+#[cfg(test)]
+mod flaky_fixture {
+    #[test]
+    #[ignore = "flaky by construction; run only through scripts/ci/test-nextest-flaky-result.sh"]
+    fn flaky_by_construction_fails_once_then_passes() {
+        let marker = std::env::var_os("ASSAY_FLAKY_FIXTURE_MARKER")
+            .expect("ASSAY_FLAKY_FIXTURE_MARKER must name the marker file for this fixture");
+        let marker = std::path::Path::new(&marker);
+        if marker.exists() {
+            return;
+        }
+        std::fs::write(marker, b"first attempt\n").expect("write the attempt marker");
+        panic!("first attempt fails by construction; the retry must find the marker");
+    }
+}

@@ -72,7 +72,7 @@ jobs:
 
           if [[ "${run_all}" == "true" ]]; then
             global_changed=true
-          elif grep -Eq '^(Cargo\.toml|Cargo\.lock|rust-toolchain|rust-toolchain\.toml|deny\.toml|clippy\.toml|\.cargo/)' "$changed_file"; then
+          elif grep -Eq '^(Cargo\.toml|Cargo\.lock|rust-toolchain|rust-toolchain\.toml|deny\.toml|clippy\.toml|\.cargo/|\.config/)' "$changed_file"; then
             global_changed=true
           else
             global_changed=false
@@ -218,6 +218,15 @@ jobs:
           echo "installing cargo-hack ${CARGO_HACK_VERSION}"
           cargo install --locked --version "${CARGO_HACK_VERSION}" cargo-hack
           assert_cargo_plugin_version cargo-hack "${CARGO_HACK_VERSION}"
+
+      # This lane is where nextest runs, so it is where the profile's flaky-result contract is
+      # pinned (#2871): a test that fails once and passes on retry must fail the run. The
+      # required CI job uses `cargo test` and never retries; the profile does not reach it.
+      - name: Self-test nextest reports a retried pass as a failure
+        shell: bash
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: bash scripts/ci/test-nextest-flaky-result.sh
 
       - name: Run curated feature sets
         shell: bash
