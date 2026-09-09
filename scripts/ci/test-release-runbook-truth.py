@@ -132,6 +132,131 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
         item = contract._optional_lsm_item(mutated)
         self.assertNotIn("not a stable-release requirement", item.lower())
 
+    def test_pypi_publisher_expectation_matches_release_job(self) -> None:
+        self.assertEqual(
+            contract._pypi_publisher_problems(self.workflow, self.docs), []
+        )
+
+    def test_pypi_environment_drift_bites(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "    environment: pypi\n",
+            "    environment: release\n",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
+    def test_pypi_publish_action_removed_bites(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2\n",
+            "        run: python3 -m twine upload dist/*\n",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
+    def test_pypi_publish_action_in_a_comment_does_not_count(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2\n",
+            "        # uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33\n"
+            "        run: python3 -m twine upload dist/*\n",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
+    def test_pypi_publish_action_mutable_ref_bites(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33",
+            "pypa/gh-action-pypi-publish@main",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
+    def test_pypi_publish_action_in_disabled_step_does_not_count(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "      - name: Publish to PyPI\n"
+            "        uses: pypa/gh-action-pypi-publish@",
+            "      - name: Publish to PyPI\n"
+            "        if: ${{ false }}\n"
+            "        uses: pypa/gh-action-pypi-publish@",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
+    def test_pypi_publish_action_with_spaced_if_key_does_not_count(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "      - name: Publish to PyPI\n"
+            "        uses: pypa/gh-action-pypi-publish@",
+            "      - name: Publish to PyPI\n"
+            "        if : ${{ false }}\n"
+            "        uses: pypa/gh-action-pypi-publish@",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
+    def test_nested_uses_does_not_count_as_step_action(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2\n",
+            "        uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b\n"
+            "        env:\n"
+            "          uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33\n",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
+    def test_runbook_allows_no_legacy_publisher(self) -> None:
+        item = contract._checklist_item(self.docs, "PyPI Trusted Publisher")
+        self.assertIn("exactly one", item)
+        self.assertIn("`Rul1an/assay`", item)
+        self.assertIn("`release.yml`", item)
+        self.assertIn("`pypi`", item)
+        self.assertIn("`publish.yml`", item)
+        self.assertIn("Remove", item)
+
+    def test_runbook_that_keeps_publish_yml_bites_despite_remove_words(self) -> None:
+        mutated = replace_once(
+            self.docs,
+            "  Remove every other publisher, including the legacy `publish.yml` identity. An empty environment\n",
+            "  Keep the legacy `publish.yml` publisher. Remove only unrelated publishers. An empty environment\n",
+        )
+        self.assert_mutation_bites(docs=mutated)
+
+    def test_runbook_that_denies_exactly_one_bites(self) -> None:
+        mutated = replace_once(
+            self.docs,
+            "require exactly one\n  GitHub publisher",
+            "do not require exactly one\n  GitHub publisher",
+        )
+        self.assert_mutation_bites(docs=mutated)
+
+    def test_runbook_that_accepts_empty_environment_bites(self) -> None:
+        mutated = replace_once(
+            self.docs,
+            "An empty environment\n  is broader authority and does not match this contract.",
+            "An empty environment\n  is broader authority and matches this contract.",
+        )
+        self.assert_mutation_bites(docs=mutated)
+
+    def test_hidden_runbook_contract_does_not_count(self) -> None:
+        item = contract._checklist_item(self.docs, "PyPI Trusted Publisher")
+        opposite = item.replace(
+            "require exactly one\n  GitHub publisher",
+            "do not require exactly one\n  GitHub publisher",
+        ).replace(
+            "Remove every other publisher, including the legacy `publish.yml` identity.",
+            "Keep the legacy `publish.yml` publisher.",
+        ).replace(
+            "does not match this contract",
+            "matches this contract",
+        )
+        mutated = self.docs.replace(item, f"{opposite}\n  <!-- {item} -->")
+        self.assert_mutation_bites(docs=mutated)
+
+    def test_pypi_identity_outside_checklist_item_does_not_count(self) -> None:
+        item = contract._checklist_item(self.docs, "PyPI Trusted Publisher")
+        mutated = self.docs.replace("`Rul1an/assay`", "`wrong/repository`", 1)
+        mutated += "\n`Rul1an/assay` remains the expected repository.\n"
+        self.assertNotEqual(item, contract._checklist_item(mutated, "PyPI Trusted Publisher"))
+        self.assert_mutation_bites(docs=mutated)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
