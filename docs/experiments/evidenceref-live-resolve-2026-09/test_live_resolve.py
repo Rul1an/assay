@@ -341,3 +341,21 @@ def test_control_survival_cannot_depend_on_which_rule_was_mutated():
     scoring = inspect.getsource(mutate.main)
     assert "control_survived(got)" in scoring, "the loop must score through the pure function"
     assert "rule ==" not in scoring, "a per-rule exemption reappeared in the scoring loop"
+
+
+def test_refetch_divergence_names_which_copy_carries_the_address(monkeypatch, capsys):
+    # A divergence report that does not say which copy is address-bound leaves the reader to
+    # deduce it. The fetched copy is bound by the check above, so the pinned one is the odd one out.
+    import capture
+
+    other = json.dumps({"a": 1}, separators=(",", ":")).encode()
+    digest = hashlib.sha256(other).hexdigest()
+    url = "https://gate.horizonshield.dev/record/" + digest
+    monkeypatch.setitem(capture.MANIFEST, "source_url", url)
+    monkeypatch.setattr(capture.urllib.request, "urlopen", lambda *a, **k: _Resp(other))
+
+    assert capture.refetch() == 1, "bytes that differ from the pinned copy are a divergence"
+    out = capsys.readouterr().out
+    assert "DIVERGENCE" in out
+    assert "fetched copy   : address-bound" in out
+    assert "pinned copy    : address-bound=False" in out

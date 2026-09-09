@@ -19,7 +19,7 @@ python3 capture.py --fetch    # re-fetch the same address and compare byte for b
 python3 resolve.py            # 11 cases, writes runs/resolve-run.json, exit 0 iff every expectation holds
 python3 independent_resolve.py  # re-derive every verdict with code that imports neither runner nor consumer
 python3 mutate.py             # 7 rules, writes runs/mutation.json, exit 0 iff each is killed
-pytest                        # 22 tests, and the lane fails on any skip
+pytest                        # 23 tests, and the lane fails on any skip
 ```
 
 Python 3 standard library only for the runners. The test suite requires `pytest` and `rfc8785`:
@@ -147,7 +147,7 @@ Offered so that a reader who keeps such a register can copy it rather than recon
   `independent-implementation-independent-vectors`, because there is one record here and no vector set.
 - **What the run showed:** the published address recomputes from the received octets; 11 of 11 cases
   land where expected under two independent runners; 7 of 7 octets rules killed under mutation with
-  the clean control preserved and a blinded-control probe showing that control able to fail; 22 tests
+  the clean control preserved and a blinded-control probe showing that control able to fail; 23 tests
   with no skips, enforced by `.github/workflows/evidenceref-live-resolve.yml`; the reference as served
   reaches `malformed_ref`, and reaches `recomputed` once a profile and schema identity are named on it.
 - **What it does not establish:** nothing about the producer's honesty or about the measured server;
