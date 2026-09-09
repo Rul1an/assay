@@ -100,6 +100,7 @@ HARDENING_STEP_COMMANDS = (
     "bash scripts/ci/check-assay-action-pin.sh",
     "bash scripts/ci/check-assay-action-pin.sh --published",
     "bash scripts/ci/test-ci-hardening-b1.sh",
+    "bash scripts/ci/test-ci-job-timeouts-contract.sh --self-test",
     "bash scripts/ci/test-structurizr-export-docker.sh",
     "python3 scripts/ci/check-conformance-inventory-callsite.py",
     "python3 scripts/ci/test-conformance-inventory-callsite.py",
