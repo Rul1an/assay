@@ -120,16 +120,29 @@ def test_both_runners_agree_end_to_end():
     assert f"agrees on {n} of {n}" in r.stdout
 
 
-def test_published_consumer_is_used_unmodified():
-    # Case A and B must run through the June consumer as published. If this experiment ever edits it,
-    # the run stops being a resolution by the published consumer and this test says so.
-    published = HERE.parent / "evidenceref-recompute-consumer-2026-06" / "evidenceref_consumer.py"
-    committed = subprocess.run(
-        ["git", "show", f"HEAD:docs/experiments/evidenceref-recompute-consumer-2026-06/evidenceref_consumer.py"],
-        cwd=HERE.parents[2], capture_output=True,
+# The consumer as linked from the June comment in SEP-1913, pinned by commit AND blob. Comparing
+# against HEAD instead would follow any future edit of the consumer and still pass, which is the
+# opposite of the property this guard claims. The two are the same object today; that is a fact
+# about today, not a guarantee.
+PUBLISHED_COMMIT = "a052bf7f68d1e371485e33541c3e4a48e9ec6ef5"
+PUBLISHED_BLOB = "f48bb7410935caddd19f3d3b6d4a789b4bd02e97"
+PUBLISHED_PATH = "docs/experiments/evidenceref-recompute-consumer-2026-06/evidenceref_consumer.py"
+
+
+def test_published_consumer_is_the_frozen_blob():
+    frozen = subprocess.run(
+        ["git", "rev-parse", f"{PUBLISHED_COMMIT}:{PUBLISHED_PATH}"],
+        cwd=HERE.parents[2], capture_output=True, text=True,
     )
-    assert committed.returncode == 0
-    assert published.read_bytes() == committed.stdout
+    assert frozen.returncode == 0, frozen.stderr
+    assert frozen.stdout.strip() == PUBLISHED_BLOB, "the pinned commit no longer names the pinned blob"
+
+    on_disk = subprocess.run(
+        ["git", "hash-object", str(HERE.parent / "evidenceref-recompute-consumer-2026-06" / "evidenceref_consumer.py")],
+        cwd=HERE.parents[2], capture_output=True, text=True,
+    )
+    assert on_disk.returncode == 0, on_disk.stderr
+    assert on_disk.stdout.strip() == PUBLISHED_BLOB, "the consumer on disk is not the published object"
 
 
 def test_every_octets_rule_is_exercised():
@@ -150,7 +163,58 @@ def test_every_octets_rule_is_exercised():
 def test_our_jcs_matches_a_real_rfc8785_implementation():
     # The B verdict only means something if our JCS really is RFC 8785 on this record. Cross-checked
     # against an independent library rather than reasoned from the value space alone.
-    rfc8785 = pytest.importorskip("rfc8785")
+    # No importorskip. A silently skipped cross-check leaves the B verdict standing on our own
+    # JCS alone, which is the one thing this test exists to corroborate, while the suite still
+    # reports a clean run. A missing dependency is a failure here, not a skip.
+    try:
+        import rfc8785
+    except ImportError as exc:  # pragma: no cover
+        raise AssertionError(
+            "rfc8785 is required for this suite; run "
+            "`uv run --with pytest --with rfc8785 python3 -m pytest -q test_live_resolve.py`"
+        ) from exc
     ours = ref.published.canonical_bytes(BODY, "jcs-json-v1")
     assert ours == rfc8785.dumps(BODY)
     assert hashlib.sha256(ours).hexdigest() != hashlib.sha256(OCTETS).hexdigest()
+
+
+def test_capture_refuses_bytes_that_are_not_the_address_the_url_names():
+    # The wrong-address case: bytes that are perfectly valid, served from a URL claiming a
+    # different digest. Comparing only against our pinned copy would accept this.
+    import capture
+
+    ok, got, claimed = capture.address_matches(OCTETS, capture.MANIFEST["source_url"])
+    assert ok and got == claimed
+    wrong = "https://gate.horizonshield.dev/record/" + "0" * 64
+    ok, got, claimed = capture.address_matches(OCTETS, wrong)
+    assert not ok and claimed == "0" * 64 and got != claimed
+
+
+def test_capture_refuses_a_body_longer_than_the_pinned_length():
+    import io
+
+    import capture
+
+    assert capture.read_bounded(io.BytesIO(OCTETS)) == OCTETS
+    with pytest.raises(SystemExit):
+        capture.read_bounded(io.BytesIO(OCTETS + b"x"))
+
+
+def test_capture_detects_divergence_from_the_pinned_copy():
+    import capture
+
+    mutated = OCTETS.replace(b'"gate_version":"0.4.1"', b'"gate_version":"0.4.2"', 1)
+    assert mutated != OCTETS
+    ok, _, _ = capture.address_matches(mutated, capture.MANIFEST["source_url"])
+    assert not ok, "a diverged body must not satisfy the pinned address"
+
+
+def test_mutation_report_carries_a_fired_blinded_control_probe():
+    # Pins finding P1-4: the control must be able to go false, and the report must say it was
+    # checked. Without this, control_preserved: true on every row proves nothing.
+    report = json.loads((HERE / "runs" / "mutation.json").read_text())
+    probe = report["blinded_control_probe"]
+    assert probe["control_detected_as_blinded"] is True
+    assert probe["control_verdict_under_probe"] != "recomputed"
+    for rule, res in report["rules"].items():
+        assert res["control_preserved"] is True, rule

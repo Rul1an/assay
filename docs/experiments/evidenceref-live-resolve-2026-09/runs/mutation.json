@@ -11,6 +11,10 @@
     "J_octets_locator_unresolvable": "unresolved_ref",
     "K_octets_unknown_schema_identity": "schema_mismatch"
   },
+  "blinded_control_probe": {
+    "control_detected_as_blinded": true,
+    "control_verdict_under_probe": "digest_mismatch"
+  },
   "rules": {
     "digest_mismatch": {
       "control_preserved": true,

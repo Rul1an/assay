@@ -133,6 +133,20 @@ def main() -> int:
             octets, None, oct_supported),
     }
 
+    committed_ids = [c["id"] for c in committed["cases"]]
+    if len(set(committed_ids)) != len(committed_ids):
+        dupes = sorted({i for i in committed_ids if committed_ids.count(i) > 1})
+        print(f"duplicate case ids in the run record: {dupes}")
+        return 1
+    # Exact set equality, not containment. Without it a case dropped from the run record, or one
+    # this reproducer never derives, still prints a clean n-of-n total over a smaller set than the
+    # runner measured, and the total reads as agreement about cases nobody compared.
+    if set(derived) != set(committed_ids):
+        only_run = sorted(set(committed_ids) - set(derived))
+        only_here = sorted(set(derived) - set(committed_ids))
+        print(f"case sets differ. only in the run record: {only_run}; only derived here: {only_here}")
+        return 1
+
     disagreements = []
     for case in committed["cases"]:
         mine = derived.get(case["id"])

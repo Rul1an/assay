@@ -22,8 +22,10 @@ python3 mutate.py             # 7 rules, writes runs/mutation.json, exit 0 iff e
 pytest                        # 12 tests
 ```
 
-Python 3 standard library only. `pytest` and `rfc8785` are used by the test suite; the RFC 8785
-cross-check skips if the library is absent.
+Python 3 standard library only for the runners. The test suite requires `pytest` and `rfc8785`:
+the RFC 8785 cross-check **fails** rather than skipping when the library is absent, because a
+skipped cross-check leaves the case-B verdict resting on our own JCS while the suite still reads
+clean.
 
 ## What the record does
 
@@ -75,13 +77,20 @@ matter of adding a string.
 
 - `record/gate-record-4dffe218.json` the captured octets, byte for byte; `record/capture.json` the
   provenance manifest. The capture is self-verifying: its SHA-256 is the address it was fetched from.
+  `capture.py` checks that binding against the URL rather than against our own copy, since identical
+  bytes served from a different address would otherwise pass, and reads at most the pinned length
+  plus one byte on the wire and from disk.
 - `resolve.py` the reference runner. Cases A and B go through the published June consumer unmodified,
   pinned by `test_published_consumer_is_used_unmodified`. Cases C onward use the octets consumer here.
 - `independent_resolve.py` re-derives every verdict from the pinned octets with code that imports
-  neither `resolve.py` nor the published consumer, asserted by AST. It shares the standard library and,
+  neither `resolve.py` nor the published consumer, asserted by AST. It refuses duplicate case ids and
+  requires exact set equality with the run record, so a dropped case cannot still print a clean
+  n-of-n total over a smaller set than the runner measured. It shares the standard library and,
   for the object profile, the same one-line `json.dumps` JCS expression; the genuinely independent JCS
   check is the `rfc8785` package in the test suite.
-- `mutate.py` silences each octets rule in turn. Three of the seven kills are crash-kills (the guard's
+- `mutate.py` silences each octets rule in turn, and carries a blinded-control probe: a mutation
+  that makes the clean case non-clean must be detected, so `control_preserved` can go false rather
+  than being true by construction. Three of the seven kills are crash-kills (the guard's
   removal makes a later line raise), recorded as such in `runs/mutation.json`; a crash shows the guard is
   reachable, a verdict change shows it discriminates, and the report keeps the two apart. Its case roster is derived from `build_cases()` and
   never hand-listed.

@@ -62,6 +62,31 @@ def _mutated_consume(old: str, new: str):
     return ns["consume_octets"], ns["build_cases"]
 
 
+def blinded_control_probe() -> dict:
+    """Must-fail probe: a mutation that blinds the positive control has to be refused, never counted.
+
+    Without it the control check is itself untested, and `control_preserved: true` on every row
+    would be indistinguishable from a control that cannot go false. This mutation makes the clean
+    case non-clean, so every rule must come back with valid_kill false.
+    """
+    consume, build = _mutated_consume(
+        'return _v("recomputed", "octets_match_address_under_declared_profile_and_schema_complete")',
+        'return _v("digest_mismatch", "blinded-control probe")',
+    )
+    got = {}
+    for c in build():
+        if c["mode"] == "octets_consumer":
+            try:
+                got[c["id"]] = consume(c["ref"], {"gate-record": c["octets"]})["verdict"]
+            except Exception as exc:
+                got[c["id"]] = f"raised:{type(exc).__name__}"
+    control = got.get("C_octets_profile_named")
+    return {
+        "control_verdict_under_probe": control,
+        "control_detected_as_blinded": control != "recomputed",
+    }
+
+
 def main() -> int:
     base = _baseline()
     if base["C_octets_profile_named"] != "recomputed":
@@ -80,9 +105,11 @@ def main() -> int:
                     got[c["id"]] = f"raised:{type(exc).__name__}"
         changed = sorted(k for k in base if got.get(k) != base[k])
         crashed = sorted(k for k in changed if str(got.get(k)).startswith("raised:"))
-        # The control must survive every mutation except the one that removes the digest rule the
-        # control itself depends on. Otherwise the mutation blinded the control and the kill is void.
-        control_ok = got.get("C_octets_profile_named") == "recomputed" or rule == "digest_mismatch"
+        # The control must survive EVERY mutation, with no exception. An earlier version exempted
+        # the digest rule on the theory that silencing it would blind the control; measured, it does
+        # not, and the exemption only disabled the control for the one rule where blinding is most
+        # plausible. A rule-shaped hole in a control is a control that cannot fail.
+        control_ok = got.get("C_octets_profile_named") == "recomputed"
         report["rules"][rule] = {
             "killed_by": changed,
             "crash_kills": crashed,
@@ -92,7 +119,12 @@ def main() -> int:
             "valid_kill": bool(changed) and control_ok,
         }
 
+    probe = blinded_control_probe()
+    report["blinded_control_probe"] = probe
     report["all_killed"] = all(r["valid_kill"] for r in report["rules"].values())
+    if not probe["control_detected_as_blinded"]:
+        print("BLINDED-CONTROL PROBE DID NOT FIRE: the control cannot go false; refusing to score")
+        report["all_killed"] = False
     (HERE / "runs").mkdir(exist_ok=True)
     (HERE / "runs" / "mutation.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
 
@@ -100,7 +132,9 @@ def main() -> int:
         mark = "killed " if r["valid_kill"] else "SURVIVED"
         how = "crash" if r["crash_kills"] and not r["verdict_kills"] else "verdict"
         print(f"{mark} {rule:34s} {how:7s} by={','.join(r['killed_by']) or '(none)':52s} control={r['control_preserved']}")
-    print(f"\nall_killed={report['all_killed']}  ({len(MUTATIONS)} rules)")
+    print(f"\nblinded-control probe: control reads {probe['control_verdict_under_probe']!r}, "
+          f"detected={probe['control_detected_as_blinded']}")
+    print(f"all_killed={report['all_killed']}  ({len(MUTATIONS)} rules)")
     return 0 if report["all_killed"] else 1
 
 
