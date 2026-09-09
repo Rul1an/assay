@@ -19,7 +19,7 @@ python3 capture.py --fetch    # re-fetch the same address and compare byte for b
 python3 resolve.py            # 11 cases, writes runs/resolve-run.json, exit 0 iff every expectation holds
 python3 independent_resolve.py  # re-derive every verdict with code that imports neither runner nor consumer
 python3 mutate.py             # 7 rules, writes runs/mutation.json, exit 0 iff each is killed
-pytest                        # 25 tests, and the lane fails on any skip
+pytest                        # 26 tests, and the required CI job fails on any skip
 ```
 
 Python 3 standard library only for the runners. The test suite requires `pytest` and `rfc8785`:
@@ -81,7 +81,7 @@ matter of adding a string.
   bytes served from a different address would otherwise pass, and reads at most the pinned length
   plus one byte on the wire and from disk.
 - `resolve.py` the reference runner. Cases A and B go through the published June consumer unmodified,
-  pinned by `test_published_consumer_is_used_unmodified`. Cases C onward use the octets consumer here.
+  pinned by `test_published_consumer_is_the_frozen_blob`. Cases C onward use the octets consumer here.
 - `independent_resolve.py` re-derives every verdict from the pinned octets with code that imports
   neither `resolve.py` nor the published consumer, asserted by AST. It refuses duplicate case ids and
   requires exact set equality with the run record, so a dropped case cannot still print a clean
@@ -146,10 +146,14 @@ Offered so that a reader who keeps such a register can copy it rather than recon
   the producer's. Neither party authored the other's side. It is not
   `independent-implementation-independent-vectors`, because there is one record here and no vector set.
 - **What the run showed:** the published address recomputes from the received octets; 11 of 11 cases
-  land where expected under two runners that import neither each other nor the consumer, asserted by
-  AST, and that share the standard library and the same one-line JCS expression; 7 of 7 octets rules killed under mutation with
-  the clean control preserved and a blinded-control probe showing that control able to fail; 25 tests
-  with no skips, enforced by `.github/workflows/evidenceref-live-resolve.yml`; the reference as served
+  land where expected under two runners whose independence is asymmetric and stated as such:
+  `independent_resolve.py` imports neither the reference runner nor the consumer, which is what the AST
+  test asserts, while `resolve.py` deliberately loads and executes the pinned consumer, because
+  resolving through the published consumer is the point. They share the standard library and the same
+  one-line JCS expression; the independent JCS check is the `rfc8785` package. 7 of 7 octets rules
+  killed under mutation with the clean control preserved and a blinded-control probe showing that
+  control able to fail; 26 tests with no skips, enforced by the `evidenceref-live-resolve` job in
+  `.github/workflows/ci.yml`, which reaches the required `CI` context; the reference as served
   reaches `malformed_ref`, and reaches `recomputed` once a profile and schema identity are named on it.
 - **What it does not establish:** nothing about the producer's honesty or about the measured server;
   nothing about any record other than this capture; no cross-implementation result over a vector set;

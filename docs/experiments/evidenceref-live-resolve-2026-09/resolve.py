@@ -37,6 +37,10 @@ PUBLISHED = HERE.parent / "evidenceref-recompute-consumer-2026-06"
 # consume anything else, so "unmodified from the one I published" is enforced where the object is
 # loaded rather than asserted in a test that hashes a path this module never reads.
 PUBLISHED_BLOB = "f48bb7410935caddd19f3d3b6d4a789b4bd02e97"
+# The pinned consumer's exact length. A candidate longer than this cannot be the pinned blob, so
+# there is no reason to hold it in memory to find that out: an 8 MiB file was fully materialised
+# before the digest refused it. The ceiling belongs before the hash, as it does on the wire.
+PUBLISHED_LEN = 27787
 
 
 def git_blob_sha1(data: bytes) -> str:
@@ -56,8 +60,8 @@ def load_published_consumer(directory: pathlib.Path = PUBLISHED, expected: str =
     path = directory / "evidenceref_consumer.py"
     if not path.is_file():
         raise SystemExit(f"published consumer not found at {path}")
-    # One read. The bytes verified below are the bytes executed below; nothing goes back to the
-    # filesystem or to a module name in between.
+    # One bounded read. The bytes verified below are the bytes executed below; nothing goes back
+    # to the filesystem or to a module name in between.
     #
     # Two ways this was wrong before, both reproduced. `import evidenceref_consumer` is answered
     # from sys.modules when a module of that name is already loaded, so a pre-loaded module whose
@@ -65,7 +69,12 @@ def load_published_consumer(directory: pathlib.Path = PUBLISHED, expected: str =
     # Loading by path instead fixed that but left a swap between the two reads: hash the file,
     # have it replaced, execute the replacement. Reading once closes both, because there is only
     # one byte object and it is the one that was hashed.
-    source = path.read_bytes()
+    with path.open("rb") as handle:
+        source = handle.read(PUBLISHED_LEN + 1)
+    if len(source) > PUBLISHED_LEN:
+        raise SystemExit(
+            f"refusing an oversize consumer: {path} exceeds the pinned {PUBLISHED_LEN} bytes"
+        )
     actual = git_blob_sha1(source)
     if actual != expected:
         raise SystemExit(

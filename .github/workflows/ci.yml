@@ -1085,7 +1085,7 @@ jobs:
         working-directory: docs/experiments/evidenceref-live-resolve-2026-09
     steps:
       # These tests are the only guards for the claims that experiment's README publishes, and an
-      # exact-head review found them running nowhere required: "23 passed" was reproducible on
+      # exact-head review found them running nowhere required: the suite was reproducible on
       # demand and enforced by nothing. The job lives in ci.yml rather than in a lane beside it so
       # it reaches the one required context, and so check-ci-gate-coverage.py holds it there.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0

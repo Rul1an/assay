@@ -298,9 +298,12 @@ def test_the_runner_refuses_a_consumer_that_is_not_the_pinned_blob(tmp_path):
     src = ref.PUBLISHED / "evidenceref_consumer.py"
     shutil.copy(src, fake / "evidenceref_consumer.py")
     assert ref.git_blob_sha1((fake / "evidenceref_consumer.py").read_bytes()) == ref.PUBLISHED_BLOB
-    (fake / "evidenceref_consumer.py").write_text(
-        (fake / "evidenceref_consumer.py").read_text() + "\n# one byte of drift\n"
-    )
+    # Same length, different bytes: an appended line would trip the size ceiling instead, and this
+    # test would stop exercising the blob comparison it exists for.
+    original = (fake / "evidenceref_consumer.py").read_bytes()
+    drifted = original.replace(b"# ", b"#_", 1)
+    assert len(drifted) == len(original) and drifted != original
+    (fake / "evidenceref_consumer.py").write_bytes(drifted)
     with pytest.raises(SystemExit) as excinfo:
         ref.load_published_consumer(fake)
     assert "unpinned consumer" in str(excinfo.value)
@@ -394,17 +397,94 @@ def test_the_consumer_is_read_once_so_it_cannot_be_swapped_mid_load(monkeypatch,
     shutil.copy(ref.PUBLISHED / "evidenceref_consumer.py", staged / "evidenceref_consumer.py")
     pinned_bytes = (staged / "evidenceref_consumer.py").read_bytes()
 
-    reads = {"n": 0}
-    real_read_bytes = pathlib.Path.read_bytes
+    opens = {"n": 0}
+    real_open = pathlib.Path.open
 
-    def counting_and_swapping(self):
-        reads["n"] += 1
-        if reads["n"] == 1:
-            return pinned_bytes
-        return pinned_bytes + b"\n_is_redacted = lambda value: False\n"
+    class _SwappingFile:
+        """First open yields the pinned bytes; any later one yields a subverted file."""
 
-    monkeypatch.setattr(pathlib.Path, "read_bytes", counting_and_swapping)
+        def __init__(self, nth):
+            payload = pinned_bytes if nth == 1 else pinned_bytes.replace(
+                b"def _is_redacted", b"def _unused_redacted", 1
+            )
+            self._payload = payload
+
+        def read(self, n=-1):
+            return self._payload if n < 0 else self._payload[:n]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def counting_open(self, *a, **k):
+        opens["n"] += 1
+        return _SwappingFile(opens["n"])
+
+    monkeypatch.setattr(pathlib.Path, "open", counting_open)
     module = ref.load_published_consumer(staged)
 
-    assert reads["n"] == 1, "the consumer was read more than once; a swap fits between the reads"
+    assert opens["n"] == 1, "the consumer was opened more than once; a swap fits between the reads"
     assert module._is_redacted({"_redacted": True}) is True, "the executed bytes are not the verified ones"
+
+
+def test_an_oversize_candidate_consumer_is_refused_before_it_is_materialized(tmp_path):
+    # The digest refuses a wrong consumer, but only after reading all of it: a controlled 8 MiB
+    # blob was fully materialized before the check fired, against a pinned file of 27,787 bytes.
+    # A ceiling belongs before the hash, not after it, exactly as capture.read_bounded does on
+    # the wire. Refusal alone is not the property; refusing without materialising is.
+    staged = tmp_path / "consumer"
+    staged.mkdir()
+    (staged / "evidenceref_consumer.py").write_bytes(b"#" * (8 * 1024 * 1024))
+
+    read = {"bytes": 0}
+    real_read = pathlib.Path.read_bytes
+    real_open = pathlib.Path.open
+
+    def counting_read(self):
+        data = real_read(self)
+        read["bytes"] += len(data)
+        return data
+
+    class _CountingFile:
+        def __init__(self, fh):
+            self._fh = fh
+
+        def read(self, n=-1):
+            data = self._fh.read(n)
+            read["bytes"] += len(data)
+            return data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self._fh.close()
+            return False
+
+    def counting_open(self, *a, **k):
+        return _CountingFile(real_open(self, *a, **k))
+
+    pathlib.Path.read_bytes = counting_read
+    pathlib.Path.open = counting_open
+    try:
+        with pytest.raises(SystemExit) as excinfo:
+            ref.load_published_consumer(staged)
+    finally:
+        pathlib.Path.read_bytes = real_read
+        pathlib.Path.open = real_open
+
+    # The bounded read alone would truncate and then fail the digest, refusing for the wrong
+    # reason. The explicit ceiling refuses before hashing and says why; without it this reads
+    # "unpinned consumer" and the size fault is reported as a content fault.
+    #
+    # Matched on the prefix, not with `in`. The message carries the candidate path, pytest derives
+    # tmp_path from the test's own name, and this test is named ...oversize..., so a substring
+    # check was true no matter what the loader did. It passed with the ceiling deleted.
+    assert str(excinfo.value).startswith("refusing an oversize consumer"), str(excinfo.value)
+
+    assert read["bytes"] <= ref.PUBLISHED_LEN + 1, (
+        f"materialised {read['bytes']} bytes for a candidate that cannot be the pinned "
+        f"{ref.PUBLISHED_LEN}-byte consumer"
+    )
