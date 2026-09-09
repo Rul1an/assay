@@ -168,7 +168,14 @@ domain's reading of it.
 
 ## assay-sim (Attack Simulation)
 
-Suite tiers: `Quick` (<30s; not wired as a CI gate by any workflow as of 2026-09, see #2174), `Nightly` (5-15 min), `Stress`, `Chaos` (long-running).
+Suite tiers: `Quick`, `Nightly` (5-15 min), `Stress`, `Chaos` (long-running). The default suite
+time budget is 60s (`TimeBudget::default_suite`), raised from 30s because the zip bomb attack can
+exceed 30s on slow CI runners.
+
+The Quick tier gates pull requests, though no workflow invokes `assay sim run`. `test_quick_suite`
+(`crates/assay-sim/src/lib.rs`) runs the suite under `cargo test --workspace` and fails when any
+attack bypasses verification, and that job feeds the required `CI` context. Codifying the tiers as
+explicit gates is tracked in #2174.
 
 ```
 assay sim run --suite quick --seed 42 --target bundle.tar.gz --report sim.json
