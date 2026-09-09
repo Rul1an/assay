@@ -19,6 +19,20 @@ _PYPI_REPOSITORY = "Rul1an/assay"
 _PYPI_WORKFLOW = "release.yml"
 _PYPI_ENVIRONMENT = "pypi"
 _PYPI_LEGACY_WORKFLOW = "publish.yml"
+_PYPI_PUBLISH_ACTION = (
+    "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33"
+)
+_PYPI_LEGACY_REMOVAL_SENTENCE = (
+    "Remove every other publisher, including the legacy `publish.yml` identity."
+)
+_PYPI_SINGLE_PUBLISHER_SENTENCE = (
+    "In the `assay-it` project Publishing page, require exactly one GitHub publisher: "
+    "repository `Rul1an/assay`, "
+    "workflow `release.yml`, environment `pypi`."
+)
+_PYPI_EMPTY_ENVIRONMENT_SENTENCE = (
+    "An empty environment is broader authority and does not match this contract."
+)
 _BEFORE_CLAIM = re.compile(
     r"GitHub Release is created before crates publication",
     re.IGNORECASE,
@@ -131,6 +145,24 @@ def _publish_crates_needs_release(workflow: str) -> bool:
     return "release" in _job_needs_ids(job)
 
 
+def _active_step_uses(job: str) -> list[str]:
+    """Return active direct-step action references from one job mapping."""
+    uses: list[str] = []
+    for line in job.splitlines():
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(stripped)
+        if indent == 6 and stripped.startswith("- uses:"):
+            raw = stripped.removeprefix("- uses:")
+        elif indent == 8 and stripped.startswith("uses:"):
+            raw = stripped.removeprefix("uses:")
+        else:
+            continue
+        uses.append(raw.split(" #", 1)[0].strip(" '\""))
+    return uses
+
+
 def _pypi_workflow_problems(workflow: str) -> list[str]:
     try:
         jobs = _mapping_block(workflow, "jobs", 0)
@@ -153,8 +185,10 @@ def _pypi_workflow_problems(workflow: str) -> list[str]:
         id_token = permissions.get("id-token", "").split(" #", 1)[0].strip(" '\"")
         if id_token != "write":
             problems.append("publish-pypi does not grant id-token: write")
-    if "pypa/gh-action-pypi-publish@" not in job:
-        problems.append("publish-pypi does not invoke the PyPI trusted-publishing action")
+    if _active_step_uses(job).count(_PYPI_PUBLISH_ACTION) != 1:
+        problems.append(
+            "publish-pypi does not invoke the pinned PyPI trusted-publishing action exactly once"
+        )
     return problems
 
 
@@ -206,12 +240,15 @@ def _pypi_docs_problems(docs: str) -> list[str]:
     for literal in required_literals:
         if literal not in item:
             problems.append(f"PyPI Trusted Publisher item omits {literal}")
-    lowered = item.lower()
-    if "exactly one" not in lowered:
+    normalized = " ".join(item.split())
+    lowered = normalized.lower()
+    if _PYPI_SINGLE_PUBLISHER_SENTENCE not in normalized:
         problems.append("PyPI Trusted Publisher item does not require exactly one publisher")
-    if "remove" not in lowered:
-        problems.append("PyPI Trusted Publisher item does not require stale publishers to be removed")
-    if "empty environment" not in lowered:
+    if _PYPI_LEGACY_REMOVAL_SENTENCE not in normalized:
+        problems.append(
+            "PyPI Trusted Publisher item does not require removal of the legacy publish.yml publisher"
+        )
+    if _PYPI_EMPTY_ENVIRONMENT_SENTENCE not in normalized:
         problems.append("PyPI Trusted Publisher item does not reject an empty environment")
     if "owner-visible" not in lowered or "redacted receipt" not in lowered:
         problems.append("PyPI Trusted Publisher item omits the redacted owner-visible receipt")
