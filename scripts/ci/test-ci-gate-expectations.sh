@@ -190,6 +190,7 @@ run_gate() {
   out="$(env RELEASE_ASSET_CONTRACT_RESULT=success \
              PUBLISH_SHAPE_CLI_RESULT=success \
              PUBLIC_CRATE_POLICY_RESULT=success \
+             EVIDENCEREF_LIVE_RESOLVE_RESULT=success \
              "$@" bash -c "$GATE" 2>&1)" || rc=$?
   if [[ "$expected" == "pass" && $rc -ne 0 ]]; then
     echo "$out" >&2
@@ -238,6 +239,19 @@ done
 echo "ok: a code-gated job that silently did not run fails the gate, and is named"
 
 # The eBPF case the audit called sharpest: the `== 'true'` form disarms on a typo.
+# A default alone would leave this job in the table and out of every case, which is the shape
+# check-ci-gate-coverage.py exists to refuse one level up. This reaches it.
+out="$(run_gate fail "evidenceref live-resolve failed" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EVIDENCEREF_LIVE_RESOLVE_RESULT=failure \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false)"
+grep -q "evidenceref-live-resolve" <<<"$out" \
+  || fail "the gate did not name evidenceref-live-resolve when it failed"
+echo "ok: a failing evidenceref-live-resolve fails the gate"
+
 out="$(run_gate fail "ebpf required but skipped" \
   SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
   PUBLIC_MSRV_RESULT=$ok \

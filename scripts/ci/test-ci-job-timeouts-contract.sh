@@ -39,6 +39,7 @@ expected = {
   "release-asset-contract" => 10,
   "mcp-registry-foundation" => 10,
   "ci" => 10,
+  "evidenceref-live-resolve" => 10,
   "deps-security" => 20,
   "perf" => 20,
   "test" => 20,
@@ -91,6 +92,7 @@ expected_needs = %w[
   perf
   test
   ebpf-smoke-ubuntu
+  evidenceref-live-resolve
 ]
 got_needs = Array(rollup["needs"]).map(&:to_s)
 unless got_needs == expected_needs

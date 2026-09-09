@@ -1074,12 +1074,75 @@ jobs:
 
   # Single job named "CI" so branch protection (required status check "CI") is satisfied.
   # Branch protection matches check run name; other jobs use descriptive names, this one reports "CI".
+  evidenceref-live-resolve:
+    name: evidenceref live-resolve suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: docs/experiments/evidenceref-live-resolve-2026-09
+    steps:
+      # These tests are the only guards for the claims that experiment's README publishes, and an
+      # exact-head review found them running nowhere required: the suite was reproducible on
+      # demand and enforced by nothing. The job lives in ci.yml rather than in a lane beside it so
+      # it reaches the one required context, and so check-ci-gate-coverage.py holds it there.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          # The consumer guard resolves a pinned commit, so the history has to be present.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.x"
+
+      # Pinned: the RFC 8785 cross-check is the independent half of the JCS claim, so the library
+      # that supplies it is part of the evidence rather than a convenience.
+      - name: Install the declared test dependencies
+        run: python3 -m pip install --quiet "pytest==8.4.2" "rfc8785==0.1.4"
+
+      # Offline. The live re-fetch stays out deliberately: a third party's endpoint is not a
+      # dependency this repository should gate merges on, and refetch() is exercised in the suite
+      # against a stubbed transport.
+      - name: Capture verifies against its own content address
+        run: python3 capture.py
+
+      - name: Reference runner
+        run: python3 resolve.py
+
+      - name: Independent reproducer
+        run: python3 independent_resolve.py
+
+      - name: Mutation adequacy
+        run: python3 mutate.py
+
+      - name: Suite, and no skips
+        run: |
+          set -euo pipefail
+          # A skipped guard is the failure mode this job exists to catch: the RFC 8785 check once
+          # used importorskip, and a host without the library reported a clean run. The detection
+          # is Python because `grep -qv` decides differently on BSD and GNU grep.
+          python3 -m pytest -q -rs --no-header test_live_resolve.py | tee result.txt
+          python3 - <<'PY'
+          import pathlib, re, sys
+          out = pathlib.Path("result.txt").read_text()
+          if re.search(r"\d+ skipped", out):
+              print("::error::a test skipped; the guards here must not skip")
+              sys.exit(1)
+          print("no skips in:", out.strip().splitlines()[-1])
+          PY
+
+      - name: Committed digests still describe the tree
+        run: shasum -a 256 -c SHA256SUMS.txt
+
   ci:
     name: CI
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: always()
-    needs: [scope, deps-security, clippy, rustdoc, public-msrv, distribution-boundary, publish-shape-cli, public-crate-policy, vendored-packs, release-asset-contract, mcp-registry-foundation, perf, test, ebpf-smoke-ubuntu]
+    needs: [scope, deps-security, clippy, rustdoc, public-msrv, distribution-boundary, publish-shape-cli, public-crate-policy, vendored-packs, release-asset-contract, mcp-registry-foundation, perf, test, ebpf-smoke-ubuntu, evidenceref-live-resolve]
     permissions:
       contents: read
     steps:
@@ -1148,6 +1211,7 @@ jobs:
           MCP_REGISTRY_FOUNDATION_RESULT: ${{ needs.mcp-registry-foundation.result }}
           PERF_RESULT: ${{ needs.perf.result }}
           TEST_RESULT: ${{ needs.test.result }}
+          EVIDENCEREF_LIVE_RESOLVE_RESULT: ${{ needs.evidenceref-live-resolve.result }}
           EBPF_SMOKE_REQUIRED: ${{ needs.scope.outputs.ebpf_smoke_required }}
           EBPF_SMOKE_UBUNTU_RESULT: ${{ needs.ebpf-smoke-ubuntu.result }}
           MCP_REGISTRY_TOUCHED: ${{ needs.scope.outputs.mcp_registry_touched }}
@@ -1206,6 +1270,7 @@ jobs:
             "mcp-registry-foundation|${MCP_REGISTRY_FOUNDATION_RESULT}|${registry_expectation}" \
             "perf|${PERF_RESULT}|${code_gated_expectation}" \
             "test|${TEST_RESULT}|${code_gated_expectation}" \
+            "evidenceref-live-resolve|${EVIDENCEREF_LIVE_RESOLVE_RESULT}|required" \
             "ebpf-smoke-ubuntu|${EBPF_SMOKE_UBUNTU_RESULT}|${ebpf_expectation}"
           do
             name="${triple%%|*}"
