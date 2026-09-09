@@ -83,7 +83,7 @@ Released surfaces:
 | **External receipts** | Eval outcomes, runtime decisions, and model inventory as bounded receipts with JSON Schema contracts. |
 | **Tool-decision surface** | Each privileged `tools/call` recorded as `assay.tool_decision_surface.v0` — sensitive ids hashed, raw arguments never stored. |
 | **SARIF / CI** | GitHub Action, Security-tab integration, policy gates on PRs. |
-| **Attestation** | Export a bundle as an in-toto / DSSE statement (v0), anchor-pluggable. |
+| **Attestation** | Sign an evidence bundle as a DSSE-wrapped in-toto v1 Statement with the evidence-bundle/v1 predicate. |
 
 ```text
   Agent ──► Assay ──► MCP Server
