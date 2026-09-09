@@ -21,11 +21,15 @@ fail() {
   exit 1
 }
 
-# Both skip loops assert the same two things about one gate run: that it failed *for the skip*,
-# and that it named the job under test. The name half is matched with -F against the emitted
-# `::error::<name> was skipped` prefix, not as a bare substring: an unanchored match accepted a
-# gate that printed `zz-deps-security` while claiming to check `deps-security`, and would accept
-# a future job id that merely ends with an existing one.
+# Every skip assertion states the same two things about one gate run: that it failed *for the
+# skip*, and that it named the job under test. The name half is matched with -F against the
+# emitted `::error::<name> was skipped` prefix, not as a bare substring: an unanchored match
+# accepted a gate that printed `zz-deps-security` while claiming to check `deps-security`, and
+# would accept a future job id that merely ends with an existing one.
+#
+# The two loops call this helper. The single-case sites below whose diagnostic names the scope
+# output under test — three of them share one closing `echo`, so a shared message would not say
+# which case broke — keep their own wording and match the same prefix inline.
 assert_named_skip() {
   local job="$1" out="$2" name
   name="$(printf '%s' "$job" | tr 'A-Z_' 'a-z-')"
@@ -271,8 +275,7 @@ out="$(run_gate fail "ebpf required but skipped" \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
   EBPF_SMOKE_REQUIRED=true EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false)"
-grep -q "ebpf-smoke-ubuntu was skipped" <<<"$out" \
-  || fail "the ebpf case failed for the wrong reason: $out"
+assert_named_skip EBPF_SMOKE_UBUNTU "$out"
 echo "ok: ebpf-smoke-ubuntu skipped while required fails the gate"
 
 # The output the gate did not read at all until now.
@@ -282,8 +285,7 @@ out="$(run_gate fail "registry touched but skipped" \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=$ok TEST_RESULT=$ok \
   EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=true)"
-grep -q "mcp-registry-foundation was skipped" <<<"$out" \
-  || fail "the registry case failed for the wrong reason: $out"
+assert_named_skip MCP_REGISTRY_FOUNDATION "$out"
 echo "ok: mcp-registry-foundation skipped while touched fails the gate"
 
 # Unconditional jobs may never be skipped, whatever the scope says. `publish-shape-cli` and
@@ -366,7 +368,7 @@ out="$(run_gate fail "empty ebpf_smoke_required with the job skipped" \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
   EBPF_SMOKE_REQUIRED= EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false)"
-grep -q "ebpf-smoke-ubuntu was skipped" <<<"$out" \
+grep -qF -- "::error::ebpf-smoke-ubuntu was skipped" <<<"$out" \
   || fail "an empty ebpf_smoke_required must be strict, got: $out"
 
 out="$(run_gate fail "empty mcp_registry_touched with the job skipped" \
@@ -375,7 +377,7 @@ out="$(run_gate fail "empty mcp_registry_touched with the job skipped" \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=$ok TEST_RESULT=$ok \
   EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=)"
-grep -q "mcp-registry-foundation was skipped" <<<"$out" \
+grep -qF -- "::error::mcp-registry-foundation was skipped" <<<"$out" \
   || fail "an empty mcp_registry_touched must be strict, got: $out"
 
 # A wrong-case value is the same class as empty: GitHub compares these outputs as strings, so
@@ -386,7 +388,7 @@ out="$(run_gate fail "wrong-case ebpf_smoke_required" \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
   EBPF_SMOKE_REQUIRED=TRUE EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false)"
-grep -q "ebpf-smoke-ubuntu was skipped" <<<"$out" \
+grep -qF -- "::error::ebpf-smoke-ubuntu was skipped" <<<"$out" \
   || fail "a wrong-case ebpf_smoke_required must be strict, got: $out"
 echo "ok: empty or wrong-case == 'true' outputs are strict, so a disarmed job cannot read green"
 
