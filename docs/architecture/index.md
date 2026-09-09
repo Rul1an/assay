@@ -4,6 +4,7 @@ Assay is a CI-native evidence and trust compiler for agent systems, built as a R
 
 ## Structure
 
+- [Incident Package v1](./SPEC-Incident-Package-v1.md) — bounded local-input contract proposal; implementation pending
 - [Crate Structure](./crates.md) — workspace organization and module layout
 - [Data Flow](./data-flow.md) — trace → gate → evidence pipeline
 - [Split Refactor Plan (Q1-Q2 2026)](./PLAN-split-refactor-2026q1.md) — wave-by-wave execution plan
