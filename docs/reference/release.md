@@ -41,6 +41,13 @@ This document outlines the canonical checklist for releasing new versions of Ass
   published tag requires a new version.
 
 ### 2. Permissions Check (Crucial)
+- [ ] **PyPI Trusted Publisher**: In the `assay-it` project Publishing page, require exactly one
+  GitHub publisher: repository `Rul1an/assay`, workflow `release.yml`, environment `pypi`.
+  Remove every other publisher, including the legacy `publish.yml` identity. An empty environment
+  is broader authority and does not match this contract. Before creating a tag, run
+  `python3 scripts/ci/check-release-runbook-truth.py`, compare its expected identity with every
+  owner-visible PyPI publisher row, and retain a redacted receipt containing only the project,
+  repository, workflow, environment, publisher count, observation time, and result.
 - [ ] **Trusted Publishing**: Ensure GitHub Actions OIDC is enabled for the release tag on every current crates.io crate:
   - `assay-common`
   - `assay-registry`

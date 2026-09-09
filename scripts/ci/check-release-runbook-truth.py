@@ -2,6 +2,7 @@
 """Docs/workflow contract: release runbook may name only executable release.yml surfaces."""
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -13,6 +14,11 @@ DOCS = REPO / "docs/reference/release.md"
 _LSM_SMOKE = "lsm-smoke-test"
 _LSM_ITEM_TITLE = "Optional LSM verification"
 _LOCAL_LSM_CMD = "scripts/verify_lsm_docker.sh --release-tag vX.Y.Z"
+_PYPI_ITEM_TITLE = "PyPI Trusted Publisher"
+_PYPI_REPOSITORY = "Rul1an/assay"
+_PYPI_WORKFLOW = "release.yml"
+_PYPI_ENVIRONMENT = "pypi"
+_PYPI_LEGACY_WORKFLOW = "publish.yml"
 _BEFORE_CLAIM = re.compile(
     r"GitHub Release is created before crates publication",
     re.IGNORECASE,
@@ -125,6 +131,33 @@ def _publish_crates_needs_release(workflow: str) -> bool:
     return "release" in _job_needs_ids(job)
 
 
+def _pypi_workflow_problems(workflow: str) -> list[str]:
+    try:
+        jobs = _mapping_block(workflow, "jobs", 0)
+        job = _mapping_block(jobs, "publish-pypi", 2)
+        entries = _child_entries(job)
+    except AssertionError as exc:
+        return [f"release.yml PyPI publisher identity is unavailable ({exc})"]
+
+    problems: list[str] = []
+    environment = entries.get("environment", "").split(" #", 1)[0].strip(" '\"")
+    if environment != _PYPI_ENVIRONMENT:
+        problems.append(
+            f"publish-pypi environment is {environment!r}, expected {_PYPI_ENVIRONMENT!r}"
+        )
+    try:
+        permissions = _child_entries(_mapping_block(job, "permissions", 4))
+    except AssertionError as exc:
+        problems.append(f"publish-pypi permissions are unavailable ({exc})")
+    else:
+        id_token = permissions.get("id-token", "").split(" #", 1)[0].strip(" '\"")
+        if id_token != "write":
+            problems.append("publish-pypi does not grant id-token: write")
+    if "pypa/gh-action-pypi-publish@" not in job:
+        problems.append("publish-pypi does not invoke the PyPI trusted-publishing action")
+    return problems
+
+
 def _watch_ci(docs: str) -> str:
     start = docs.find("**Watch CI**")
     if start < 0:
@@ -147,7 +180,7 @@ def _checklist_item(docs: str, title: str) -> str:
     lines = docs[start:].splitlines(keepends=True)
     collected = [lines[0]]
     for line in lines[1:]:
-        if line.startswith("- ") or line.startswith("#"):
+        if line.startswith(("- ", "#")):
             break
         collected.append(line)
     return "".join(collected)
@@ -155,6 +188,38 @@ def _checklist_item(docs: str, title: str) -> str:
 
 def _optional_lsm_item(docs: str) -> str:
     return _checklist_item(docs, _LSM_ITEM_TITLE)
+
+
+def _pypi_docs_problems(docs: str) -> list[str]:
+    try:
+        item = _checklist_item(docs, _PYPI_ITEM_TITLE)
+    except AssertionError as exc:
+        return [str(exc)]
+
+    problems: list[str] = []
+    required_literals = (
+        f"`{_PYPI_REPOSITORY}`",
+        f"`{_PYPI_WORKFLOW}`",
+        f"`{_PYPI_ENVIRONMENT}`",
+        f"`{_PYPI_LEGACY_WORKFLOW}`",
+    )
+    for literal in required_literals:
+        if literal not in item:
+            problems.append(f"PyPI Trusted Publisher item omits {literal}")
+    lowered = item.lower()
+    if "exactly one" not in lowered:
+        problems.append("PyPI Trusted Publisher item does not require exactly one publisher")
+    if "remove" not in lowered:
+        problems.append("PyPI Trusted Publisher item does not require stale publishers to be removed")
+    if "empty environment" not in lowered:
+        problems.append("PyPI Trusted Publisher item does not reject an empty environment")
+    if "owner-visible" not in lowered or "redacted receipt" not in lowered:
+        problems.append("PyPI Trusted Publisher item omits the redacted owner-visible receipt")
+    return problems
+
+
+def _pypi_publisher_problems(workflow: str, docs: str) -> list[str]:
+    return _pypi_workflow_problems(workflow) + _pypi_docs_problems(docs)
 
 
 def _bullet_mentions_github_release(line: str) -> bool:
@@ -260,7 +325,11 @@ def _docs_problems(docs: str) -> list[str]:
 
 
 def contract_problems(workflow: str, docs: str) -> list[str]:
-    return _workflow_problems(workflow) + _docs_problems(docs)
+    return (
+        _workflow_problems(workflow)
+        + _docs_problems(docs)
+        + _pypi_publisher_problems(workflow, docs)
+    )
 
 
 def main() -> int:
@@ -276,6 +345,19 @@ def main() -> int:
             print(f"FAIL: {problem}", file=sys.stderr)
         return 1
     print("ok   release runbook matches executable release.yml")
+    print(
+        "expected_pypi_trusted_publisher="
+        + json.dumps(
+            {
+                "environment": _PYPI_ENVIRONMENT,
+                "publisher_count": 1,
+                "repository": _PYPI_REPOSITORY,
+                "workflow": _PYPI_WORKFLOW,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
     return 0
 
 

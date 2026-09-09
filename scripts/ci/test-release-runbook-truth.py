@@ -132,6 +132,35 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
         item = contract._optional_lsm_item(mutated)
         self.assertNotIn("not a stable-release requirement", item.lower())
 
+    def test_pypi_publisher_expectation_matches_release_job(self) -> None:
+        self.assertEqual(
+            contract._pypi_publisher_problems(self.workflow, self.docs), []
+        )
+
+    def test_pypi_environment_drift_bites(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "    environment: pypi\n",
+            "    environment: release\n",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
+    def test_runbook_allows_no_legacy_publisher(self) -> None:
+        item = contract._checklist_item(self.docs, "PyPI Trusted Publisher")
+        self.assertIn("exactly one", item)
+        self.assertIn("`Rul1an/assay`", item)
+        self.assertIn("`release.yml`", item)
+        self.assertIn("`pypi`", item)
+        self.assertIn("`publish.yml`", item)
+        self.assertIn("Remove", item)
+
+    def test_pypi_identity_outside_checklist_item_does_not_count(self) -> None:
+        item = contract._checklist_item(self.docs, "PyPI Trusted Publisher")
+        mutated = self.docs.replace("`Rul1an/assay`", "`wrong/repository`", 1)
+        mutated += "\n`Rul1an/assay` remains the expected repository.\n"
+        self.assertNotEqual(item, contract._checklist_item(mutated, "PyPI Trusted Publisher"))
+        self.assert_mutation_bites(docs=mutated)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
