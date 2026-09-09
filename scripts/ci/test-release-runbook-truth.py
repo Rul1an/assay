@@ -181,6 +181,27 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
         )
         self.assert_mutation_bites(workflow=mutated)
 
+    def test_pypi_publish_action_with_spaced_if_key_does_not_count(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "      - name: Publish to PyPI\n"
+            "        uses: pypa/gh-action-pypi-publish@",
+            "      - name: Publish to PyPI\n"
+            "        if : ${{ false }}\n"
+            "        uses: pypa/gh-action-pypi-publish@",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
+    def test_nested_uses_does_not_count_as_step_action(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2\n",
+            "        uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b\n"
+            "        env:\n"
+            "          uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33\n",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
     def test_runbook_allows_no_legacy_publisher(self) -> None:
         item = contract._checklist_item(self.docs, "PyPI Trusted Publisher")
         self.assertIn("exactly one", item)

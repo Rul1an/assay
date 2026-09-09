@@ -176,13 +176,23 @@ def _active_step_uses(job: str) -> list[str]:
         action = ""
         condition = ""
         for line in block:
-            stripped = line.strip()
-            if stripped.startswith("- "):
-                stripped = stripped[2:]
-            if stripped.startswith("uses:"):
-                action = stripped.removeprefix("uses:").split(" #", 1)[0].strip(" '\"")
-            elif stripped.startswith("if:"):
-                condition = stripped.removeprefix("if:").split(" #", 1)[0].strip(" '\"")
+            stripped = line.lstrip()
+            indent = len(line) - len(stripped)
+            if indent == 6 and stripped.startswith("- "):
+                direct = stripped[2:]
+            elif indent == 8:
+                direct = stripped
+            else:
+                continue
+            match = re.match(r"^([^:]+?)\s*:\s*(.*)$", direct)
+            if match is None:
+                continue
+            key = match.group(1).strip().strip("'\"")
+            value = match.group(2).split(" #", 1)[0].strip(" '\"")
+            if key == "uses":
+                action = value
+            elif key == "if":
+                condition = value
         if condition:
             continue
         if action:
