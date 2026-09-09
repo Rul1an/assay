@@ -28,6 +28,7 @@ import hashlib
 import json
 import pathlib
 import sys
+import types
 
 HERE = pathlib.Path(__file__).parent
 PUBLISHED = HERE.parent / "evidenceref-recompute-consumer-2026-06"
@@ -55,15 +56,25 @@ def load_published_consumer(directory: pathlib.Path = PUBLISHED, expected: str =
     path = directory / "evidenceref_consumer.py"
     if not path.is_file():
         raise SystemExit(f"published consumer not found at {path}")
-    actual = git_blob_sha1(path.read_bytes())
+    # One read. The bytes verified below are the bytes executed below; nothing goes back to the
+    # filesystem or to a module name in between.
+    #
+    # Two ways this was wrong before, both reproduced. `import evidenceref_consumer` is answered
+    # from sys.modules when a module of that name is already loaded, so a pre-loaded module whose
+    # `_is_redacted` returned False was handed back intact while the check reported a clean pin.
+    # Loading by path instead fixed that but left a swap between the two reads: hash the file,
+    # have it replaced, execute the replacement. Reading once closes both, because there is only
+    # one byte object and it is the one that was hashed.
+    source = path.read_bytes()
+    actual = git_blob_sha1(source)
     if actual != expected:
         raise SystemExit(
             f"refusing an unpinned consumer: {path} is blob {actual}, expected {expected}"
         )
-    sys.path.insert(0, str(directory))
-    import evidenceref_consumer  # noqa: PLC0415  imported only after the blob check
-
-    return evidenceref_consumer
+    module = types.ModuleType("_assay_pinned_evidenceref_consumer")
+    module.__file__ = str(path)
+    exec(compile(source, str(path), "exec"), module.__dict__)  # noqa: S102  verified bytes only
+    return module
 
 
 published = load_published_consumer()

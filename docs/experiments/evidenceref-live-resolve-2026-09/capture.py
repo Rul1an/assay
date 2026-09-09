@@ -96,7 +96,11 @@ def refetch() -> int:
         # a divergence means the pinned copy is the one that no longer matches, and the report says
         # so rather than leaving the reader to deduce it from two lines.
         pinned_bound, pinned_digest, _ = address_matches(pinned, url)
-        print("DIVERGENCE: the same content address served different bytes. Reported, not overwritten.")
+        print(
+            "DIVERGENCE: the pinned copy no longer matches the address. The fetch is address-bound, "
+            "so the endpoint served the bytes its URL names; the local copy is what differs. "
+            "Reported, not overwritten."
+        )
         print(f"  fetched copy   : address-bound, sha256 {got}")
         print(f"  pinned copy    : address-bound={pinned_bound}, sha256 {pinned_digest}")
     return 0 if same else 1

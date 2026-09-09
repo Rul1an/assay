@@ -2,11 +2,13 @@
 """Mutation check for the octets consumer: a rule that no case exercises is decoration.
 
 Each rule in `consume_octets` is silenced in turn by disabling its guard, and the run is re-executed.
-A rule is KILLED when at least one case changes verdict. Two conditions are required for a kill to
-count, and the second is the one that is easy to lose: the mutation must NOT blind the positive
-control, so case C (the clean resolution over the untouched record) must still reach `recomputed`
-under every mutation that is not the digest rule itself. A mutation that turns everything red proves
-the case set reacts to damage, not that the rule discriminates.
+A rule is KILLED when at least one case changes verdict. Three conditions are required for the kill
+to count: the mutation moved a case, the positive control survived it, and the control was shown able
+to fail at all. Case C, the clean resolution over the untouched record, must still reach `recomputed`
+under EVERY mutation, with no per-rule exception; an earlier version exempted the digest rule here and
+that exemption was dead code that only removed the control where blinding is most plausible. A
+mutation that turns everything red proves the case set reacts to damage, not that the rule
+discriminates.
 
 Scope: this mutates the octets consumer in `resolve.py` only. Cases A and B run through the published
 June consumer, which this experiment must not modify, so they are outside the mutation set.

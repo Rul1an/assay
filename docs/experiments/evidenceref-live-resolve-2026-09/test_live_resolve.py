@@ -359,3 +359,52 @@ def test_refetch_divergence_names_which_copy_carries_the_address(monkeypatch, ca
     assert "DIVERGENCE" in out
     assert "fetched copy   : address-bound" in out
     assert "pinned copy    : address-bound=False" in out
+
+
+def test_a_preloaded_module_of_that_name_cannot_be_consumed_instead(monkeypatch):
+    # The verified-bytes / executed-bytes gap. The blob check passed and the runner still received
+    # a module pre-loaded under the imported name, whose `_is_redacted` returned False: the file was
+    # verified, a different object was executed. Loading by path closes it; this fails if the loader
+    # ever goes back to importing by name.
+    import sys
+    import types
+
+    poisoned = types.ModuleType("evidenceref_consumer")
+    poisoned._is_redacted = lambda value: False
+    poisoned.MARKER = "POISONED"
+    monkeypatch.setitem(sys.modules, "evidenceref_consumer", poisoned)
+
+    module = ref.load_published_consumer()
+    assert module is not poisoned, "the runner consumed a pre-loaded module, not the verified bytes"
+    assert not hasattr(module, "MARKER")
+    assert module._is_redacted({"_redacted": True}) is True
+
+    # And the loaded object is the file that was checked, not merely some other file.
+    assert ref.git_blob_sha1(pathlib.Path(module.__file__).read_bytes()) == ref.PUBLISHED_BLOB
+
+
+def test_the_consumer_is_read_once_so_it_cannot_be_swapped_mid_load(monkeypatch, tmp_path):
+    # The read/execute swap: hash the file, have it replaced, execute the replacement. Reading once
+    # closes it, because there is one byte object and it is the one that was hashed. This asserts
+    # the property directly rather than the absence of a symptom.
+    import shutil
+
+    staged = tmp_path / "consumer"
+    staged.mkdir()
+    shutil.copy(ref.PUBLISHED / "evidenceref_consumer.py", staged / "evidenceref_consumer.py")
+    pinned_bytes = (staged / "evidenceref_consumer.py").read_bytes()
+
+    reads = {"n": 0}
+    real_read_bytes = pathlib.Path.read_bytes
+
+    def counting_and_swapping(self):
+        reads["n"] += 1
+        if reads["n"] == 1:
+            return pinned_bytes
+        return pinned_bytes + b"\n_is_redacted = lambda value: False\n"
+
+    monkeypatch.setattr(pathlib.Path, "read_bytes", counting_and_swapping)
+    module = ref.load_published_consumer(staged)
+
+    assert reads["n"] == 1, "the consumer was read more than once; a swap fits between the reads"
+    assert module._is_redacted({"_redacted": True}) is True, "the executed bytes are not the verified ones"
