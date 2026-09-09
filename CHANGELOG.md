@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [6.1.0] - 2026-09-08
+## [6.1.0] - 2026-09-09
 
 ### Added
 - Add `assay_evidence` CAP1 relying-party claim-decision APIs for already-conforming
@@ -58,6 +58,12 @@ All notable changes to this project will be documented in this file.
   its replacement content, preventing provenance from the previous value from
   surviving an upsert (#2787, #2805). This is the bounded storage repair; it does
   not introduce the separately planned trace-v7 schema.
+
+### Documentation And Verification
+- Define the deterministic, bounded incident-package v1 contract for future exporters
+  and independent readers (#2853, #2855). The specification fixes original-byte
+  identity, admission, accounting and refusal rules; this release does not implement
+  an incident-package exporter or verifier.
 
 ### Changed
 - The Assay 6.1 source line was opened so post-`v6.0.0` minor-compatible public API work could declare
