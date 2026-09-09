@@ -146,20 +146,47 @@ def _publish_crates_needs_release(workflow: str) -> bool:
 
 
 def _active_step_uses(job: str) -> list[str]:
-    """Return active direct-step action references from one job mapping."""
-    uses: list[str] = []
+    """Return direct-step actions that have no step-level condition."""
+    step_blocks: list[list[str]] = []
+    current: list[str] = []
+    in_steps = False
     for line in job.splitlines():
         stripped = line.lstrip()
         if not stripped or stripped.startswith("#"):
             continue
         indent = len(line) - len(stripped)
-        if indent == 6 and stripped.startswith("- uses:"):
-            raw = stripped.removeprefix("- uses:")
-        elif indent == 8 and stripped.startswith("uses:"):
-            raw = stripped.removeprefix("uses:")
-        else:
+        if indent == 4 and stripped == "steps:":
+            in_steps = True
             continue
-        uses.append(raw.split(" #", 1)[0].strip(" '\""))
+        if in_steps and indent <= 4:
+            break
+        if not in_steps:
+            continue
+        if indent == 6 and stripped.startswith("- "):
+            if current:
+                step_blocks.append(current)
+            current = [line]
+        elif current and indent > 6:
+            current.append(line)
+    if current:
+        step_blocks.append(current)
+
+    uses: list[str] = []
+    for block in step_blocks:
+        action = ""
+        condition = ""
+        for line in block:
+            stripped = line.strip()
+            if stripped.startswith("- "):
+                stripped = stripped[2:]
+            if stripped.startswith("uses:"):
+                action = stripped.removeprefix("uses:").split(" #", 1)[0].strip(" '\"")
+            elif stripped.startswith("if:"):
+                condition = stripped.removeprefix("if:").split(" #", 1)[0].strip(" '\"")
+        if condition:
+            continue
+        if action:
+            uses.append(action)
     return uses
 
 
@@ -226,7 +253,8 @@ def _optional_lsm_item(docs: str) -> str:
 
 def _pypi_docs_problems(docs: str) -> list[str]:
     try:
-        item = _checklist_item(docs, _PYPI_ITEM_TITLE)
+        visible_docs = re.sub(r"<!--.*?-->", "", docs, flags=re.DOTALL)
+        item = _checklist_item(visible_docs, _PYPI_ITEM_TITLE)
     except AssertionError as exc:
         return [str(exc)]
 

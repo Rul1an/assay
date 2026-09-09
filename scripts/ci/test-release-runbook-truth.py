@@ -170,6 +170,17 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
         )
         self.assert_mutation_bites(workflow=mutated)
 
+    def test_pypi_publish_action_in_disabled_step_does_not_count(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "      - name: Publish to PyPI\n"
+            "        uses: pypa/gh-action-pypi-publish@",
+            "      - name: Publish to PyPI\n"
+            "        if: ${{ false }}\n"
+            "        uses: pypa/gh-action-pypi-publish@",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
     def test_runbook_allows_no_legacy_publisher(self) -> None:
         item = contract._checklist_item(self.docs, "PyPI Trusted Publisher")
         self.assertIn("exactly one", item)
@@ -201,6 +212,21 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
             "An empty environment\n  is broader authority and does not match this contract.",
             "An empty environment\n  is broader authority and matches this contract.",
         )
+        self.assert_mutation_bites(docs=mutated)
+
+    def test_hidden_runbook_contract_does_not_count(self) -> None:
+        item = contract._checklist_item(self.docs, "PyPI Trusted Publisher")
+        opposite = item.replace(
+            "require exactly one\n  GitHub publisher",
+            "do not require exactly one\n  GitHub publisher",
+        ).replace(
+            "Remove every other publisher, including the legacy `publish.yml` identity.",
+            "Keep the legacy `publish.yml` publisher.",
+        ).replace(
+            "does not match this contract",
+            "matches this contract",
+        )
+        mutated = self.docs.replace(item, f"{opposite}\n  <!-- {item} -->")
         self.assert_mutation_bites(docs=mutated)
 
     def test_pypi_identity_outside_checklist_item_does_not_count(self) -> None:
