@@ -2,6 +2,74 @@
 use serde_json::json;
 
 #[test]
+fn user_draft7_idn_formats_preserve_argument_validation() {
+    use assay_core::policy_engine::{evaluate_tool_args, VerdictStatus};
+
+    for (format, valid, invalid) in [
+        ("idn-hostname", "münchen.example", "bad host.example"),
+        ("idn-email", "user@münchen.example", "missing-at-sign"),
+    ] {
+        let policy = json!({"lookup": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "string",
+            "format": format
+        }});
+        let accepted = evaluate_tool_args(&policy, "lookup", &json!(valid));
+        assert_eq!(
+            accepted.status,
+            VerdictStatus::Allowed,
+            "{format}: {accepted:?}"
+        );
+        let refused = evaluate_tool_args(&policy, "lookup", &json!(invalid));
+        assert_eq!(
+            refused.status,
+            VerdictStatus::Blocked,
+            "{format}: {refused:?}"
+        );
+        assert_eq!(refused.reason_code, "E_ARG_SCHEMA", "{format}");
+        assert!(!refused.details["violations"].as_array().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn user_fractional_multiple_of_accepts_valid_decimal_without_accepting_any_number() {
+    use assay_core::policy_engine::{evaluate_tool_args, VerdictStatus};
+
+    let policy = json!({"amount": {"type": "number", "multipleOf": 0.01}});
+    for valid in [1.25, 1070468.14] {
+        assert_eq!(
+            evaluate_tool_args(&policy, "amount", &json!(valid)).status,
+            VerdictStatus::Allowed
+        );
+    }
+    let refused = evaluate_tool_args(&policy, "amount", &json!(1.255));
+    assert_eq!(refused.status, VerdictStatus::Blocked);
+    assert_eq!(refused.reason_code, "E_ARG_SCHEMA");
+}
+
+#[test]
+fn user_regex_format_checks_ecma_syntax_not_rust_syntax() {
+    use assay_core::policy_engine::{evaluate_tool_args, VerdictStatus};
+
+    let policy = json!({"pattern": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "string",
+        "format": "regex"
+    }});
+    for valid in ["^abc$", "(?=a)"] {
+        assert_eq!(
+            evaluate_tool_args(&policy, "pattern", &json!(valid)).status,
+            VerdictStatus::Allowed
+        );
+    }
+    for invalid in ["(?i)abc", "["] {
+        let refused = evaluate_tool_args(&policy, "pattern", &json!(invalid));
+        assert_eq!(refused.status, VerdictStatus::Blocked, "{invalid}");
+        assert_eq!(refused.reason_code, "E_ARG_SCHEMA");
+    }
+}
+
+#[test]
 fn unresolvable_local_ref_fails_at_build_time() {
     let schema = json!({"$ref": "#/$defs/Missing"});
     let result = jsonschema::validator_for(&schema);
