@@ -26,7 +26,7 @@ pub(in crate::mcp::policy) fn tool_drift_decision(
         contract: format_deny_contract(
             tool_name,
             "E_TOOL_DRIFT",
-            "Tool metadata or schema has changed without policy update (SOTA Moat)",
+            "Tool metadata or schema has changed without policy update",
         ),
     })
 }
