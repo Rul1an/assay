@@ -17,7 +17,7 @@ in [modelcontextprotocol#1913](https://github.com/modelcontextprotocol/modelcont
 python3 capture.py            # verify the pinned capture offline (self-verifying, no trust in the capturer)
 python3 capture.py --fetch    # re-fetch the same address and compare byte for byte
 python3 resolve.py            # 11 cases, writes runs/resolve-run.json, exit 0 iff every expectation holds
-python3 independent_resolve.py  # re-derive every verdict with code that shares no import
+python3 independent_resolve.py  # re-derive every verdict with code that imports neither runner nor consumer
 python3 mutate.py             # 7 rules, writes runs/mutation.json, exit 0 iff each is killed
 pytest                        # 12 tests
 ```
@@ -78,8 +78,12 @@ matter of adding a string.
 - `resolve.py` the reference runner. Cases A and B go through the published June consumer unmodified,
   pinned by `test_published_consumer_is_used_unmodified`. Cases C onward use the octets consumer here.
 - `independent_resolve.py` re-derives every verdict from the pinned octets with code that imports
-  neither `resolve.py` nor the published consumer, asserted by AST.
-- `mutate.py` silences each octets rule in turn. Its case roster is derived from `build_cases()` and
+  neither `resolve.py` nor the published consumer, asserted by AST. It shares the standard library and,
+  for the object profile, the same one-line `json.dumps` JCS expression; the genuinely independent JCS
+  check is the `rfc8785` package in the test suite.
+- `mutate.py` silences each octets rule in turn. Three of the seven kills are crash-kills (the guard's
+  removal makes a later line raise), recorded as such in `runs/mutation.json`; a crash shows the guard is
+  reachable, a verdict change shows it discriminates, and the report keeps the two apart. Its case roster is derived from `build_cases()` and
   never hand-listed.
 - `runs/resolve-run.json`, `runs/mutation.json` machine-readable records; `SHA256SUMS.txt`.
 

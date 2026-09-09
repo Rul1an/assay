@@ -31,7 +31,7 @@ def test_capture_is_self_verifying():
     assert manifest["byte_length"] == len(OCTETS)
 
 
-def test_all_seven_cases_land_where_expected():
+def test_every_case_lands_where_expected():
     out = ref.run()
     assert out["all_expected"], [c for c in out["cases"] if not c["match"]]
     # Derived, not asserted against a literal: the roster follows build_cases so a new case cannot

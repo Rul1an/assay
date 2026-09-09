@@ -79,11 +79,14 @@ def main() -> int:
                 except Exception as exc:  # a rule whose removal crashes is still exercised
                     got[c["id"]] = f"raised:{type(exc).__name__}"
         changed = sorted(k for k in base if got.get(k) != base[k])
+        crashed = sorted(k for k in changed if str(got.get(k)).startswith("raised:"))
         # The control must survive every mutation except the one that removes the digest rule the
         # control itself depends on. Otherwise the mutation blinded the control and the kill is void.
         control_ok = got.get("C_octets_profile_named") == "recomputed" or rule == "digest_mismatch"
         report["rules"][rule] = {
             "killed_by": changed,
+            "crash_kills": crashed,
+            "verdict_kills": sorted(set(changed) - set(crashed)),
             "killed": bool(changed),
             "control_preserved": control_ok,
             "valid_kill": bool(changed) and control_ok,
@@ -95,7 +98,8 @@ def main() -> int:
 
     for rule, r in report["rules"].items():
         mark = "killed " if r["valid_kill"] else "SURVIVED"
-        print(f"{mark} {rule:34s} by={','.join(r['killed_by']) or '(none)':60s} control={r['control_preserved']}")
+        how = "crash" if r["crash_kills"] and not r["verdict_kills"] else "verdict"
+        print(f"{mark} {rule:34s} {how:7s} by={','.join(r['killed_by']) or '(none)':52s} control={r['control_preserved']}")
     print(f"\nall_killed={report['all_killed']}  ({len(MUTATIONS)} rules)")
     return 0 if report["all_killed"] else 1
 

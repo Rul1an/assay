@@ -14,60 +14,89 @@
   "rules": {
     "digest_mismatch": {
       "control_preserved": true,
+      "crash_kills": [],
       "killed": true,
       "killed_by": [
         "D_octets_reserialized_body",
         "E_octets_tampered"
       ],
-      "valid_kill": true
+      "valid_kill": true,
+      "verdict_kills": [
+        "D_octets_reserialized_body",
+        "E_octets_tampered"
+      ]
     },
     "malformed_ref": {
       "control_preserved": true,
+      "crash_kills": [
+        "H_octets_no_canonicalization"
+      ],
       "killed": true,
       "killed_by": [
         "H_octets_no_canonicalization"
       ],
-      "valid_kill": true
+      "valid_kill": true,
+      "verdict_kills": []
     },
     "redacted_projection_incomplete": {
       "control_preserved": true,
+      "crash_kills": [],
       "killed": true,
       "killed_by": [
         "F_octets_incomplete_projection"
       ],
-      "valid_kill": true
+      "valid_kill": true,
+      "verdict_kills": [
+        "F_octets_incomplete_projection"
+      ]
     },
     "unknown_schema": {
       "control_preserved": true,
+      "crash_kills": [
+        "K_octets_unknown_schema_identity"
+      ],
       "killed": true,
       "killed_by": [
         "K_octets_unknown_schema_identity"
       ],
-      "valid_kill": true
+      "valid_kill": true,
+      "verdict_kills": []
     },
     "unresolvable_digest_only": {
       "control_preserved": true,
+      "crash_kills": [],
       "killed": true,
       "killed_by": [
         "I_octets_digest_only"
       ],
-      "valid_kill": true
+      "valid_kill": true,
+      "verdict_kills": [
+        "I_octets_digest_only"
+      ]
     },
     "unresolved_ref": {
       "control_preserved": true,
+      "crash_kills": [
+        "J_octets_locator_unresolvable"
+      ],
       "killed": true,
       "killed_by": [
         "J_octets_locator_unresolvable"
       ],
-      "valid_kill": true
+      "valid_kill": true,
+      "verdict_kills": []
     },
     "unsupported_canonicalization": {
       "control_preserved": true,
+      "crash_kills": [],
       "killed": true,
       "killed_by": [
         "G_unknown_profile_name"
       ],
-      "valid_kill": true
+      "valid_kill": true,
+      "verdict_kills": [
+        "G_unknown_profile_name"
+      ]
     }
   }
 }
