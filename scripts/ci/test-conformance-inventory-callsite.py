@@ -111,6 +111,8 @@ HARDENING_STEP_COMMANDS = (
     "bash scripts/ci/test-setup-rust-composite-contract.sh",
     "bash scripts/ci/test-structurizr-export-docker.sh",
     "python3 scripts/ci/check-conformance-inventory-callsite.py",
+    "python3 scripts/ci/check-precommit-required-callsite.py --self-test",
+    "python3 scripts/ci/check-precommit-required-callsite.py",
     "python3 scripts/ci/test-conformance-inventory-callsite.py",
 )
 # Independent of the checker module and of FINALE_RUN_SCRIPT.

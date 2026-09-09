@@ -549,6 +549,16 @@ repos:
         pass_filenames: false
         files: ^(scripts/ci/test-ci-gate-expectations\.sh|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
 
+      - id: precommit-required-callsite
+        name: Pre-commit guards that judge a required workflow run from one
+        entry: bash -c 'python3 scripts/ci/check-precommit-required-callsite.py --self-test && python3 scripts/ci/check-precommit-required-callsite.py'
+        language: system
+        pass_filenames: false
+        # The self-test runs first so a guard whose rules match nothing fails here rather than
+        # passing quietly. Triggers on the config it reads, the ruleset that defines the required
+        # set, ci.yml, and itself.
+        files: ^(scripts/ci/check-precommit-required-callsite\.py|\.github/(workflows/ci\.yml|rulesets/main-required-ci-contexts\.json)|\.pre-commit-config\.yaml)$
+
       - id: ci-job-timeouts-contract-self-test
         name: CI job timeout-minutes contract
         entry: bash scripts/ci/test-ci-job-timeouts-contract.sh --self-test
