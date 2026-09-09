@@ -168,7 +168,7 @@ domain's reading of it.
 
 ## assay-sim (Attack Simulation)
 
-Suite tiers: `Quick` (<30s, PR gate), `Nightly` (5-15 min), `Stress`, `Chaos` (long-running).
+Suite tiers: `Quick` (<30s; intended as a PR gate, not invoked by any workflow as of 2026-09, see #2174), `Nightly` (5-15 min), `Stress`, `Chaos` (long-running).
 
 ```
 assay sim run --suite quick --seed 42 --target bundle.tar.gz --report sim.json
