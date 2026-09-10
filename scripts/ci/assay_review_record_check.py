@@ -359,13 +359,21 @@ def self_test() -> int:
     live, ref, green = "a" * 40, "ruley/2561-review-record-slice1", _rec()
     fail: list[str] = []
 
-    def expect(reason: str, sha: str, branch: str, comments: list[dict[str, Any]]) -> None:
+    def outcome(sha: str, branch: str, comments: list[dict[str, Any]]) -> tuple[str, str]:
+        # A crash is a result too: it comes back as its exception type, so the case that caused it
+        # is named in a failure line instead of ending the self-test in a traceback naming none.
         try:
             evaluate(sha, branch, comments)
-            fail.append(f"wanted {reason}, got pass")
         except GateError as exc:
-            if exc.reason != reason:
-                fail.append(f"wanted {reason}, got {exc.reason}")
+            return exc.reason, exc.detail
+        except Exception as exc:  # noqa: BLE001 - reported as the case's result, never passed
+            return type(exc).__name__, str(exc)
+        return "pass", ""
+
+    def expect(reason: str, sha: str, branch: str, comments: list[dict[str, Any]]) -> None:
+        got, _detail = outcome(sha, branch, comments)
+        if got != reason:
+            fail.append(f"wanted {reason}, got {got}")
 
     try:
         evaluate(live, ref, [_cmt(green)])
@@ -438,10 +446,9 @@ def self_test() -> int:
         ("older-head history is not current", [by(_rec(head_sha="b" * 40), 100, 5), by(green, 101, 11)]),
     ]
     for label, comments in greens:
-        try:
-            evaluate(live, ref, comments)
-        except GateError as exc:
-            fail.append(f"GREEN {label}: {exc.reason} {exc.detail}")
+        got, detail = outcome(live, ref, comments)
+        if got != "pass":
+            fail.append(f"GREEN {label}: {got} {detail}")
 
     self_review = _rec(builder={"agent": "ruley", "instance": "w1"},
                        reviewer={"agent": "ruley", "instance": "w1", "github_login": "Rul1an"})
@@ -497,12 +504,9 @@ def self_test() -> int:
         for value in ("101", True, 0, -1, 101.0, None, [101])
     ]
     for label, reason, comments in supersede_reds:
-        try:
-            evaluate(live, ref, comments)
-            fail.append(f"{label}: wanted {reason}, got pass")
-        except GateError as exc:
-            if exc.reason != reason:
-                fail.append(f"{label}: wanted {reason}, got {exc.reason} {exc.detail}")
+        got, detail = outcome(live, ref, comments)
+        if got != reason:
+            fail.append(f"{label}: wanted {reason}, got {got} {detail}".rstrip())
 
     if (HTTP_TIMEOUT_S, MAX_RESPONSE_BYTES, COMMENT_PAGE_SIZE, COMMENT_PAGE_MAX) != (30, 8 * 1024 * 1024, 100, 2):
         fail.append("API bound constants drifted")
