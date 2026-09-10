@@ -407,3 +407,114 @@ fn invalid_json_line_is_ignored_and_session_continues() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!stderr.contains(NOT_JSON), "stderr reflected {NOT_JSON}");
 }
+
+/// Slice C (#2776): a parsed notification — a message with no `id` member — must
+/// produce no stdout line at all, for every method and even when the version
+/// check would have rejected it. Requests with an id (including `"id": null`)
+/// behave exactly as before.
+///
+/// Silence is pinned by interleaving: the server answers sequentially, so any
+/// response to a notification would be consumed by the next `read_response`
+/// under the wrong id and fail the exact-id assertion that follows it.
+#[test]
+fn notifications_produce_no_output() {
+    let (mut conn, _root) = spawn_server(None);
+    initialize(&mut conn);
+
+    // Each notification is followed by a request whose exact-id response proves
+    // the notification emitted nothing.
+    let mut next_id: u64 = 100;
+    let mut ping = |conn: &mut Conn, notification: Value| {
+        assert!(
+            notification.get("id").is_none(),
+            "test bug: not a notification: {notification}"
+        );
+        conn.send(notification);
+        next_id += 1;
+        let id = next_id;
+        let response = conn.request("tools/list", serde_json::json!({}), id);
+        assert_eq!(response.get("id"), Some(&Value::from(id)), "{response}");
+        assert!(
+            response.get("result").is_some(),
+            "tools/list after notification: {response}"
+        );
+    };
+
+    // Unknown method notification: the method fallback must stay silent.
+    ping(
+        &mut conn,
+        serde_json::json!({"jsonrpc": "2.0", "method": "no/such/method"}),
+    );
+    // Known notification name.
+    ping(
+        &mut conn,
+        serde_json::json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {}}),
+    );
+    // The legacy handshake ack stays silent.
+    ping(
+        &mut conn,
+        serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}),
+    );
+    // A notification the version check would have rejected stays silent too.
+    ping(
+        &mut conn,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "tools/list",
+            "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2099-01-01"}}
+        }),
+    );
+
+    // The same version-mismatched method WITH an id is still answered: the
+    // refusal path is unchanged for requests.
+    next_id += 1;
+    let refused_id = next_id;
+    conn.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "tools/list",
+        "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2099-01-01"}},
+        "id": refused_id
+    }));
+    let refused = conn.read_response();
+    assert_eq!(
+        refused.get("id"),
+        Some(&Value::from(refused_id)),
+        "{refused}"
+    );
+    assert_eq!(
+        refused.pointer("/error/code"),
+        Some(&serde_json::json!(-32022)),
+        "{refused}"
+    );
+
+    // `"id": null` is a REQUEST (it gets a response); only an absent `id`
+    // member is a notification.
+    conn.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "tools/list",
+        "params": {},
+        "id": null
+    }));
+    let null_id = conn.read_response();
+    assert_eq!(null_id.get("id"), Some(&Value::Null), "{null_id}");
+    assert!(
+        null_id.get("result").is_some(),
+        "`id: null` request still answered: {null_id}"
+    );
+
+    // Normal request control.
+    next_id += 1;
+    let control_id = next_id;
+    let control = conn.request("tools/list", serde_json::json!({}), control_id);
+    assert_eq!(
+        control.get("id"),
+        Some(&Value::from(control_id)),
+        "{control}"
+    );
+    assert!(
+        control.get("result").is_some(),
+        "normal request still answered: {control}"
+    );
+
+    assert!(conn.shutdown().success());
+}

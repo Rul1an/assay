@@ -308,7 +308,7 @@ impl Server {
             }
 
             // Parse Request
-            let req: JsonRpcRequest = match serde_json::from_str(&line) {
+            let raw: Value = match serde_json::from_str(&line) {
                 Ok(r) => r,
                 Err(e) => {
                     tracing::warn!(
@@ -317,6 +317,27 @@ impl Server {
                         error=%e
                     );
                     continue; // Ignore invalid JSON lines (stdio transport robustness)
+                }
+            };
+
+            // JSON-RPC 2.0 / MCP: a notification (no `id` member) MUST NOT be
+            // answered, for any method, known or unknown. Presence of the key
+            // decides, not its value: `"id": null` deserializes to `None` like
+            // a missing id but is a request and keeps its response.
+            if raw.get("id").is_none() {
+                tracing::info!(event="notification_skipped", rid=%rid);
+                continue;
+            }
+
+            let req: JsonRpcRequest = match serde_json::from_value(raw) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!(
+                        event="json_parse_error",
+                        rid=%rid,
+                        error=%e
+                    );
+                    continue; // Ignore non-object lines (stdio transport robustness)
                 }
             };
 
