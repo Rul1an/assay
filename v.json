@@ -1,0 +1,832 @@
+{
+  "version": 2,
+  "canonicalization": "RFC 8785 JCS",
+  "hash_algorithm": "SHA-256",
+  "vectors": [
+    {
+      "name": "minimal_read",
+      "description": "Simplest read action, no context.",
+      "input": {
+        "action_type": "read:data",
+        "context": {}
+      },
+      "canonical": "{\"action_type\":\"read:data\",\"context\":{}}",
+      "sha256": "991033e23a3e0939c258e10f2f8f88183d9bcdb08de62ef02446e11e0819c671",
+      "expected_verify": true,
+      "reason": "Happy path: canonical form and SHA-256 are reproducible."
+    },
+    {
+      "name": "tool_call_with_counterparty",
+      "description": "Action with counterparty TLS fingerprint bound into the record.",
+      "input": {
+        "action_type": "api:call",
+        "context": {
+          "_counterparty": {
+            "kind": "tls_spki_sha256",
+            "value": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "tool": "database.query",
+          "args_hash": "sha256:9f2e0b1c4a"
+        }
+      },
+      "canonical": "{\"action_type\":\"api:call\",\"context\":{\"_counterparty\":{\"kind\":\"tls_spki_sha256\",\"value\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"},\"args_hash\":\"sha256:9f2e0b1c4a\",\"tool\":\"database.query\"}}",
+      "sha256": "a6c39c3b6e09761a141148c0862edbeaeb59642b4e0a1e4a85d6fba63f634ff4",
+      "expected_verify": true,
+      "reason": "Happy path: canonical form and SHA-256 are reproducible."
+    },
+    {
+      "name": "traced_child_action",
+      "description": "Child action with trace_id + parent_id linking to a workflow.",
+      "input": {
+        "action_type": "api:call",
+        "context": {
+          "_trace_id": "tr_01HVZABC",
+          "_parent_id": "act_01HVZPARENT",
+          "_system_prompt_hash": "sha256:aaa"
+        }
+      },
+      "canonical": "{\"action_type\":\"api:call\",\"context\":{\"_parent_id\":\"act_01HVZPARENT\",\"_system_prompt_hash\":\"sha256:aaa\",\"_trace_id\":\"tr_01HVZABC\"}}",
+      "sha256": "9294075a29c366f9dfc54b8b7f8fa0054c290fef20e8931e93e94b2bee921d22",
+      "expected_verify": true,
+      "reason": "Happy path: canonical form and SHA-256 are reproducible."
+    },
+    {
+      "name": "tampered_signature",
+      "description": "Signed bytes are unchanged but the ML-DSA signature was flipped by one bit. Verification MUST fail.",
+      "input": {
+        "agent_id": "agt_demo",
+        "algorithm": "ML-DSA-65",
+        "agent_public_key": "AAAA_base64_public_key_bytes_here",
+        "card_signed_at": "2026-04-22T20:00:00+00:00",
+        "card_version": "a2a.v1",
+        "name": "demo-agent",
+        "schemaVersion": "1.0"
+      },
+      "canonical": "{\"agent_id\":\"agt_demo\",\"agent_public_key\":\"AAAA_base64_public_key_bytes_here\",\"algorithm\":\"ML-DSA-65\",\"card_signed_at\":\"2026-04-22T20:00:00+00:00\",\"card_version\":\"a2a.v1\",\"name\":\"demo-agent\",\"schemaVersion\":\"1.0\"}",
+      "sha256": "3deafb65ffe2785bfe35fe9d687a3076aa475c50ef8be4b2763424ced3e19bba",
+      "signature_hex": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "expected_verify": false,
+      "reason": "ML-DSA-65 verify returns false when signature bytes do not match."
+    },
+    {
+      "name": "swapped_public_key",
+      "description": "Signed bytes and signature are unchanged but public key was substituted. Verification MUST fail.",
+      "input": {
+        "agent_id": "agt_demo",
+        "algorithm": "ML-DSA-65",
+        "agent_public_key": "AAAA_base64_public_key_bytes_here",
+        "card_signed_at": "2026-04-22T20:00:00+00:00",
+        "card_version": "a2a.v1",
+        "name": "demo-agent",
+        "schemaVersion": "1.0"
+      },
+      "canonical": "{\"agent_id\":\"agt_demo\",\"agent_public_key\":\"AAAA_base64_public_key_bytes_here\",\"algorithm\":\"ML-DSA-65\",\"card_signed_at\":\"2026-04-22T20:00:00+00:00\",\"card_version\":\"a2a.v1\",\"name\":\"demo-agent\",\"schemaVersion\":\"1.0\"}",
+      "sha256": "3deafb65ffe2785bfe35fe9d687a3076aa475c50ef8be4b2763424ced3e19bba",
+      "substitution": "agent_public_key was replaced with an attacker-controlled key",
+      "expected_verify": false,
+      "reason": "Verifier compares signature against the embedded public key; substitution breaks verification."
+    },
+    {
+      "name": "stale_card",
+      "description": "Valid signature but card_signed_at is older than the verifier's freshness window.",
+      "input": {
+        "agent_id": "agt_demo",
+        "algorithm": "ML-DSA-65",
+        "agent_public_key": "AAAA_base64_public_key_bytes_here",
+        "card_signed_at": "2020-01-01T00:00:00+00:00",
+        "card_version": "a2a.v1",
+        "name": "demo-agent",
+        "schemaVersion": "1.0"
+      },
+      "canonical": "{\"agent_id\":\"agt_demo\",\"agent_public_key\":\"AAAA_base64_public_key_bytes_here\",\"algorithm\":\"ML-DSA-65\",\"card_signed_at\":\"2020-01-01T00:00:00+00:00\",\"card_version\":\"a2a.v1\",\"name\":\"demo-agent\",\"schemaVersion\":\"1.0\"}",
+      "sha256": "0dcced0b29db5e9c29f5b71b4693c01443371042dd523e97fb917dad3b4040e9",
+      "expected_verify": false,
+      "reason": "Freshness check: verifier rejects cards older than its configured window (recommend 5 min for interactive, 24h for cached)."
+    },
+    {
+      "name": "nonce_mismatch",
+      "description": "Peer sent nonce N1 with request; card echoes different nonce N2. Suggests replay or endpoint substitution.",
+      "input": {
+        "agent_id": "agt_demo",
+        "algorithm": "ML-DSA-65",
+        "agent_public_key": "AAAA_base64_public_key_bytes_here",
+        "card_signed_at": "2026-04-22T20:00:00+00:00",
+        "card_version": "a2a.v1",
+        "name": "demo-agent",
+        "schemaVersion": "1.0",
+        "client_nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "canonical": "{\"agent_id\":\"agt_demo\",\"agent_public_key\":\"AAAA_base64_public_key_bytes_here\",\"algorithm\":\"ML-DSA-65\",\"card_signed_at\":\"2026-04-22T20:00:00+00:00\",\"card_version\":\"a2a.v1\",\"client_nonce\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"name\":\"demo-agent\",\"schemaVersion\":\"1.0\"}",
+      "sha256": "0d3916bae22c889c9bf77c2edecf91849366a8b3b8fb64a1d291e9a319904c9a",
+      "peer_sent_nonce": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "expected_verify": false,
+      "reason": "Nonce echoed inside the signed card does not match what the peer sent. Card was not produced for this peer's request."
+    },
+    {
+      "name": "card_version_downgrade",
+      "description": "Card claims card_version a2a.v0 but the signature was produced over a2a.v1 canonical bytes. Tampered after signing.",
+      "input": {
+        "agent_id": "agt_demo",
+        "algorithm": "ML-DSA-65",
+        "agent_public_key": "AAAA_base64_public_key_bytes_here",
+        "card_signed_at": "2026-04-22T20:00:00+00:00",
+        "card_version": "a2a.v0",
+        "name": "demo-agent",
+        "schemaVersion": "1.0"
+      },
+      "canonical": "{\"agent_id\":\"agt_demo\",\"agent_public_key\":\"AAAA_base64_public_key_bytes_here\",\"algorithm\":\"ML-DSA-65\",\"card_signed_at\":\"2026-04-22T20:00:00+00:00\",\"card_version\":\"a2a.v0\",\"name\":\"demo-agent\",\"schemaVersion\":\"1.0\"}",
+      "sha256": "9d62c8f11b8d3922e838edfecd866eae20e4865b38cdd58092e8b592aa789c30",
+      "expected_verify": false,
+      "reason": "Because card_version is inside the signed payload, any attempt to rewrite it post-signing changes the canonical bytes and breaks the signature."
+    },
+    {
+      "name": "capture_topology_in_process_sdk",
+      "description": "Audit Pack manifest entry stamped with capture_topology=in_process_sdk. Producer-side metadata; lives in `manifest`, never in the signed payload.",
+      "input": {
+        "action_type": "api:call",
+        "context": {
+          "tool": "database.query"
+        },
+        "manifest": {
+          "capture_topology": "in_process_sdk"
+        }
+      },
+      "canonical": "{\"action_type\":\"api:call\",\"context\":{\"tool\":\"database.query\"},\"manifest\":{\"capture_topology\":\"in_process_sdk\"}}",
+      "sha256": "f4b6da748f7720f15450cf61fa2c4cf8c3e9148fc15ab6b6cd15d8d3f3fd341e",
+      "capture_topology": "in_process_sdk",
+      "expected_verify": true,
+      "reason": "Closed-vocabulary value; manifest-only placement preserves signed-payload bytes."
+    },
+    {
+      "name": "capture_topology_network_proxy",
+      "description": "Audit Pack manifest entry stamped with capture_topology=network_proxy. Producer-side metadata; lives in `manifest`, never in the signed payload.",
+      "input": {
+        "action_type": "api:call",
+        "context": {
+          "tool": "database.query"
+        },
+        "manifest": {
+          "capture_topology": "network_proxy"
+        }
+      },
+      "canonical": "{\"action_type\":\"api:call\",\"context\":{\"tool\":\"database.query\"},\"manifest\":{\"capture_topology\":\"network_proxy\"}}",
+      "sha256": "de100ddcb08a1aadf3ade136a42ce554d38004ba06bbc4f0cecdc2235d46bd9d",
+      "capture_topology": "network_proxy",
+      "expected_verify": true,
+      "reason": "Closed-vocabulary value; manifest-only placement preserves signed-payload bytes."
+    },
+    {
+      "name": "capture_topology_browser_extension",
+      "description": "Audit Pack manifest entry stamped with capture_topology=browser_extension. Producer-side metadata; lives in `manifest`, never in the signed payload.",
+      "input": {
+        "action_type": "api:call",
+        "context": {
+          "tool": "database.query"
+        },
+        "manifest": {
+          "capture_topology": "browser_extension"
+        }
+      },
+      "canonical": "{\"action_type\":\"api:call\",\"context\":{\"tool\":\"database.query\"},\"manifest\":{\"capture_topology\":\"browser_extension\"}}",
+      "sha256": "9375a5437440101f386da4f6af0b2b64b1ed1f53fa3bdd5334363f15a173bd15",
+      "capture_topology": "browser_extension",
+      "expected_verify": true,
+      "reason": "Closed-vocabulary value; manifest-only placement preserves signed-payload bytes."
+    },
+    {
+      "name": "capture_topology_github_sha_pull",
+      "description": "Audit Pack manifest entry stamped with capture_topology=github_sha_pull, the server-stamped authoritative code-authorship capture layer. Lives in `manifest`, never in the signed payload.",
+      "input": {
+        "action_type": "api:call",
+        "context": {
+          "tool": "database.query"
+        },
+        "manifest": {
+          "capture_topology": "github_sha_pull"
+        }
+      },
+      "canonical": "{\"action_type\":\"api:call\",\"context\":{\"tool\":\"database.query\"},\"manifest\":{\"capture_topology\":\"github_sha_pull\"}}",
+      "sha256": "1a242ac2766e99b3e9bf00d7bb25ff251fdc1a1b59d77bbbe537723755fef4b6",
+      "capture_topology": "github_sha_pull",
+      "expected_verify": true,
+      "reason": "Closed-vocabulary value; manifest-only placement preserves signed-payload bytes."
+    },
+    {
+      "name": "capture_topology_mcp_proxy",
+      "description": "Audit Pack manifest entry stamped with capture_topology=mcp_proxy. Producer-side metadata; lives in `manifest`, never in the signed payload.",
+      "input": {
+        "action_type": "api:call",
+        "context": {
+          "tool": "database.query"
+        },
+        "manifest": {
+          "capture_topology": "mcp_proxy"
+        }
+      },
+      "canonical": "{\"action_type\":\"api:call\",\"context\":{\"tool\":\"database.query\"},\"manifest\":{\"capture_topology\":\"mcp_proxy\"}}",
+      "sha256": "4731cae72f4a30b5c10a688541faf8759873af7d78b8fe999069e112217b82c7",
+      "capture_topology": "mcp_proxy",
+      "expected_verify": true,
+      "reason": "Closed-vocabulary value; manifest-only placement preserves signed-payload bytes."
+    },
+    {
+      "name": "capture_topology_unknown_value_rejected",
+      "description": "An unknown capture_topology value MUST be rejected by a conformant SDK before the HTTP roundtrip. Canonical bytes are still defined so implementers can verify rejection without depending on hash drift.",
+      "input": {
+        "action_type": "api:call",
+        "context": {
+          "tool": "database.query"
+        },
+        "manifest": {
+          "capture_topology": "rootkit"
+        }
+      },
+      "canonical": "{\"action_type\":\"api:call\",\"context\":{\"tool\":\"database.query\"},\"manifest\":{\"capture_topology\":\"rootkit\"}}",
+      "sha256": "d2a306e1c437b467c431b7d1b4a70c1190aec10642e43ac002c55bb84dd3e617",
+      "capture_topology": "rootkit",
+      "expected_verify": false,
+      "reason": "capture_topology is a closed Literal of {in_process_sdk, network_proxy, browser_extension, mcp_proxy, passive_telemetry, github_sha_pull}; any other value is rejected client-side."
+    },
+    {
+      "name": "counterparty_binding_happy_path",
+      "description": "B's acknowledgment payload carries counterparty_binding with all members set. envelope_hash is base64 SHA-256 over the JCS bytes of A's {payload, signature} - the envelope_minus_anchors scope named in counterparty_binding.scope. Anchors are excluded because they are OPTIONAL and change after issuance, so a digest covering them would break every acknowledgment the moment A's timestamp was upgraded.",
+      "input": {
+        "action_id": "act_01HVZB_ACK_0001",
+        "action_ref": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "agent_id": "agt_acknowledger_B",
+        "counterparty_binding": {
+          "envelope_hash": "dXqDdpt/tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=",
+          "expect_ack_from": "00000000000000000098",
+          "receipt_ref": "asqav-receipt://org_demo/agt_originator_A/seq/0001",
+          "transport_label": "mcp",
+          "scope": "envelope_minus_anchors"
+        },
+        "decision": "allow",
+        "issued_at": "2026-05-18T20:00:01+00:00",
+        "issuer_id": "00000000000000000098",
+        "org_id": "org_demo",
+        "payload_digest": {
+          "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "policy_digest": "sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
+        "previousReceiptHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "sandbox_state": "live",
+        "tool_name": "database.query",
+        "type": "protectmcp:acknowledgment",
+        "v": 1
+      },
+      "canonical": "{\"action_id\":\"act_01HVZB_ACK_0001\",\"action_ref\":\"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"agent_id\":\"agt_acknowledger_B\",\"counterparty_binding\":{\"envelope_hash\":\"dXqDdpt/tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=\",\"expect_ack_from\":\"00000000000000000098\",\"receipt_ref\":\"asqav-receipt://org_demo/agt_originator_A/seq/0001\",\"scope\":\"envelope_minus_anchors\",\"transport_label\":\"mcp\"},\"decision\":\"allow\",\"issued_at\":\"2026-05-18T20:00:01+00:00\",\"issuer_id\":\"00000000000000000098\",\"org_id\":\"org_demo\",\"payload_digest\":{\"hash\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"policy_digest\":\"sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888\",\"previousReceiptHash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sandbox_state\":\"live\",\"tool_name\":\"database.query\",\"type\":\"protectmcp:acknowledgment\",\"v\":1}",
+      "sha256": "c3d000e0a3bde647754dd6562fe2ca4dff2bde2aa1dac6aa288863ac506287f4",
+      "expected_verify": true,
+      "reason": "Happy path: B emits counterparty_binding over A's signed envelope under the envelope_minus_anchors scope; verifier resolves receipt_ref, recomputes the digest over {payload, signature}, equality holds.",
+      "expected": {
+        "envelope_hash_base64": "dXqDdpt/tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=",
+        "envelope_hash_hex": "757a83769b7fb4163b20b30931ccd8c3ab31f2f3e6402157311f16dc00d6d9ef",
+        "originating_envelope_ref": "counterparty_binding_envelope_byte_equality"
+      }
+    },
+    {
+      "name": "counterparty_binding_envelope_byte_equality",
+      "description": "A's full three-key envelope ({payload, signature, anchors}). This is a PURE CANONICALIZATION fixture: two independent implementations canonicalizing this object MUST produce identical bytes and the SHA-256 hex pinned in `sha256`. That digest is NOT the counterparty binding value - the binding is taken under the envelope_minus_anchors scope over {payload, signature} only, and is published in `expected.envelope_hash_*`. The two cover different byte sets by design.",
+      "input": {
+        "anchors": [
+          {
+            "tsa_url": "https://tsa.example/timestamp",
+            "type": "rfc3161",
+            "value": "AAAA_synthetic_tsr_base64_placeholder_AAAA"
+          }
+        ],
+        "payload": {
+          "action_id": "act_01HVZA_ORIGINATOR_0001",
+          "action_ref": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "agent_id": "agt_originator_A",
+          "decision": "allow",
+          "issued_at": "2026-05-18T20:00:00+00:00",
+          "issuer_id": "00000000000000000098",
+          "org_id": "org_demo",
+          "payload_digest": {
+            "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "size": 0
+          },
+          "policy_digest": "sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
+          "previousReceiptHash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "sandbox_state": "live",
+          "tool_name": "database.query",
+          "type": "protectmcp:action",
+          "v": 1
+        },
+        "signature": {
+          "alg": "ML-DSA-65",
+          "kid": "00000000000000000098",
+          "sig": "AAAA_synthetic_signature_bytes_base64_placeholder_for_vector_only_AAAA"
+        }
+      },
+      "canonical": "{\"anchors\":[{\"tsa_url\":\"https://tsa.example/timestamp\",\"type\":\"rfc3161\",\"value\":\"AAAA_synthetic_tsr_base64_placeholder_AAAA\"}],\"payload\":{\"action_id\":\"act_01HVZA_ORIGINATOR_0001\",\"action_ref\":\"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"agent_id\":\"agt_originator_A\",\"decision\":\"allow\",\"issued_at\":\"2026-05-18T20:00:00+00:00\",\"issuer_id\":\"00000000000000000098\",\"org_id\":\"org_demo\",\"payload_digest\":{\"hash\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"policy_digest\":\"sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888\",\"previousReceiptHash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sandbox_state\":\"live\",\"tool_name\":\"database.query\",\"type\":\"protectmcp:action\",\"v\":1},\"signature\":{\"alg\":\"ML-DSA-65\",\"kid\":\"00000000000000000098\",\"sig\":\"AAAA_synthetic_signature_bytes_base64_placeholder_for_vector_only_AAAA\"}}",
+      "sha256": "66a247f6fa12575ff47f58cc84649b597bbb571921085d68217a80113a008551",
+      "expected_verify": true,
+      "reason": "Envelope byte-equality: JCS-canonical bytes of A's full envelope reproduce the same SHA-256 across implementations. This vector pins canonicalization, not the binding scope.",
+      "expected": {
+        "envelope_hash_base64": "dXqDdpt/tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=",
+        "envelope_hash_base64url": "dXqDdpt_tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=",
+        "originating_envelope_ref": "counterparty_binding_envelope_byte_equality"
+      }
+    },
+    {
+      "name": "counterparty_binding_base64url_tolerance",
+      "description": "Same originating envelope, same SHA-256 digest, but B encoded envelope_hash with base64url instead of standard base64. Verifier MUST accept both alphabets and normalise before byte-comparing.",
+      "input": {
+        "action_id": "act_01HVZB_ACK_0003",
+        "action_ref": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "agent_id": "agt_acknowledger_B",
+        "counterparty_binding": {
+          "envelope_hash": "dXqDdpt_tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=",
+          "receipt_ref": "asqav-receipt://org_demo/agt_originator_A/seq/0001",
+          "scope": "envelope_minus_anchors"
+        },
+        "decision": "allow",
+        "issued_at": "2026-05-18T20:00:01+00:00",
+        "issuer_id": "00000000000000000098",
+        "org_id": "org_demo",
+        "payload_digest": {
+          "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "policy_digest": "sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
+        "previousReceiptHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "sandbox_state": "live",
+        "tool_name": "database.query",
+        "type": "protectmcp:acknowledgment",
+        "v": 1
+      },
+      "canonical": "{\"action_id\":\"act_01HVZB_ACK_0003\",\"action_ref\":\"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"agent_id\":\"agt_acknowledger_B\",\"counterparty_binding\":{\"envelope_hash\":\"dXqDdpt_tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=\",\"receipt_ref\":\"asqav-receipt://org_demo/agt_originator_A/seq/0001\",\"scope\":\"envelope_minus_anchors\"},\"decision\":\"allow\",\"issued_at\":\"2026-05-18T20:00:01+00:00\",\"issuer_id\":\"00000000000000000098\",\"org_id\":\"org_demo\",\"payload_digest\":{\"hash\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"policy_digest\":\"sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888\",\"previousReceiptHash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sandbox_state\":\"live\",\"tool_name\":\"database.query\",\"type\":\"protectmcp:acknowledgment\",\"v\":1}",
+      "sha256": "85fb8c26e0b56f1f8c6552052b7542235e9ade557e4049a445f005f51e68b1d4",
+      "expected_verify": true,
+      "reason": "base64 / base64url tolerance: both encodings of the same envelope_minus_anchors digest MUST verify-equal against the recomputed digest of A's {payload, signature}.",
+      "expected": {
+        "envelope_hash_base64url": "dXqDdpt_tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=",
+        "envelope_hash_base64": "dXqDdpt/tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=",
+        "originating_envelope_ref": "counterparty_binding_envelope_byte_equality"
+      }
+    },
+    {
+      "name": "counterparty_binding_opaque_receipt_ref",
+      "description": "receipt_ref is opaque to the verifier; producers MAY use any stable identifier scheme. This vector pins an unusual URN-with-fragment form to confirm the field round-trips unchanged through the canonical bytes.",
+      "input": {
+        "action_id": "act_01HVZB_ACK_0004",
+        "action_ref": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "agent_id": "agt_acknowledger_B",
+        "counterparty_binding": {
+          "envelope_hash": "dXqDdpt/tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=",
+          "receipt_ref": "urn:uuid:12345678-1234-5678-1234-567812345678#segment[0]",
+          "scope": "envelope_minus_anchors"
+        },
+        "decision": "allow",
+        "issued_at": "2026-05-18T20:00:02+00:00",
+        "issuer_id": "00000000000000000098",
+        "org_id": "org_demo",
+        "payload_digest": {
+          "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "policy_digest": "sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
+        "previousReceiptHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "sandbox_state": "live",
+        "tool_name": "database.query",
+        "type": "protectmcp:acknowledgment",
+        "v": 1
+      },
+      "canonical": "{\"action_id\":\"act_01HVZB_ACK_0004\",\"action_ref\":\"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"agent_id\":\"agt_acknowledger_B\",\"counterparty_binding\":{\"envelope_hash\":\"dXqDdpt/tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=\",\"receipt_ref\":\"urn:uuid:12345678-1234-5678-1234-567812345678#segment[0]\",\"scope\":\"envelope_minus_anchors\"},\"decision\":\"allow\",\"issued_at\":\"2026-05-18T20:00:02+00:00\",\"issuer_id\":\"00000000000000000098\",\"org_id\":\"org_demo\",\"payload_digest\":{\"hash\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"policy_digest\":\"sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888\",\"previousReceiptHash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sandbox_state\":\"live\",\"tool_name\":\"database.query\",\"type\":\"protectmcp:acknowledgment\",\"v\":1}",
+      "sha256": "8b665e8c123c722dff34e2490f3d2ea90041b0b54db587a59cc47a5abdcb0855",
+      "expected_verify": true,
+      "reason": "receipt_ref is an opaque resolvable locator; verifier MUST NOT interpret its structure, only resolve it. Round-trip equality is preserved by JCS.",
+      "expected": {
+        "receipt_ref": "urn:uuid:12345678-1234-5678-1234-567812345678#segment[0]",
+        "originating_envelope_ref": "counterparty_binding_envelope_byte_equality"
+      }
+    },
+    {
+      "name": "counterparty_binding_transport_label_non_trust",
+      "description": "transport_label is operational metadata only. This vector declares transport_label=http while the actual receipt was relayed over an MCP intermediary; the verifier MUST report the binding result on envelope_hash alone and MUST NOT derive trust from the label.",
+      "input": {
+        "action_id": "act_01HVZB_ACK_0005",
+        "action_ref": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "agent_id": "agt_acknowledger_B",
+        "counterparty_binding": {
+          "envelope_hash": "dXqDdpt/tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=",
+          "receipt_ref": "asqav-receipt://org_demo/agt_originator_A/seq/0001",
+          "transport_label": "http",
+          "scope": "envelope_minus_anchors"
+        },
+        "decision": "allow",
+        "issued_at": "2026-05-18T20:00:03+00:00",
+        "issuer_id": "00000000000000000098",
+        "org_id": "org_demo",
+        "payload_digest": {
+          "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "policy_digest": "sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
+        "previousReceiptHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "sandbox_state": "live",
+        "tool_name": "database.query",
+        "type": "protectmcp:acknowledgment",
+        "v": 1
+      },
+      "canonical": "{\"action_id\":\"act_01HVZB_ACK_0005\",\"action_ref\":\"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"agent_id\":\"agt_acknowledger_B\",\"counterparty_binding\":{\"envelope_hash\":\"dXqDdpt/tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=\",\"receipt_ref\":\"asqav-receipt://org_demo/agt_originator_A/seq/0001\",\"scope\":\"envelope_minus_anchors\",\"transport_label\":\"http\"},\"decision\":\"allow\",\"issued_at\":\"2026-05-18T20:00:03+00:00\",\"issuer_id\":\"00000000000000000098\",\"org_id\":\"org_demo\",\"payload_digest\":{\"hash\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"policy_digest\":\"sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888\",\"previousReceiptHash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sandbox_state\":\"live\",\"tool_name\":\"database.query\",\"type\":\"protectmcp:acknowledgment\",\"v\":1}",
+      "sha256": "58c787ae9c9e9ed9bf4aeaab066f1a3c6eadade8bc5db0a4d60542390ec7097d",
+      "expected_verify": true,
+      "reason": "transport_label is operational only; verifiers MUST NOT derive trust from it. Binding still resolves on envelope_hash equality regardless of declared label.",
+      "expected": {
+        "transport_label_declared": "http",
+        "transport_label_actual": "mcp",
+        "originating_envelope_ref": "counterparty_binding_envelope_byte_equality"
+      }
+    },
+    {
+      "name": "counterparty_binding_missing_envelope_hash_rejected",
+      "description": "A supported-scope binding without its required envelope_hash is malformed.",
+      "input": {
+        "action_id": "act_01HVZB_ACK_0006",
+        "action_ref": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "agent_id": "agt_acknowledger_B",
+        "counterparty_binding": {
+          "receipt_ref": "asqav-receipt://org_demo/agt_originator_A/seq/0001",
+          "scope": "envelope_minus_anchors"
+        },
+        "decision": "allow",
+        "issued_at": "2026-05-18T20:00:04+00:00",
+        "issuer_id": "00000000000000000098",
+        "org_id": "org_demo",
+        "payload_digest": {
+          "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "policy_digest": "sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
+        "previousReceiptHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "sandbox_state": "live",
+        "tool_name": "database.query",
+        "type": "protectmcp:acknowledgment",
+        "v": 1
+      },
+      "canonical": "{\"action_id\":\"act_01HVZB_ACK_0006\",\"action_ref\":\"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"agent_id\":\"agt_acknowledger_B\",\"counterparty_binding\":{\"receipt_ref\":\"asqav-receipt://org_demo/agt_originator_A/seq/0001\",\"scope\":\"envelope_minus_anchors\"},\"decision\":\"allow\",\"issued_at\":\"2026-05-18T20:00:04+00:00\",\"issuer_id\":\"00000000000000000098\",\"org_id\":\"org_demo\",\"payload_digest\":{\"hash\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"policy_digest\":\"sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888\",\"previousReceiptHash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sandbox_state\":\"live\",\"tool_name\":\"database.query\",\"type\":\"protectmcp:acknowledgment\",\"v\":1}",
+      "sha256": "fdf867b3c2cc86acd1423818ce4b56e8e0f17b5a4ce1862444dd67f7cbbe7ed3",
+      "counterparty_binding_member_missing": "envelope_hash",
+      "expected_verify": false,
+      "reason": "envelope_hash is REQUIRED on counterparty_binding; absence breaks the cross-agent byte-equality guarantee and MUST cause the acknowledging receipt to be reported non-conformant."
+    },
+    {
+      "name": "receipt_v2_signer_canary",
+      "description": "v:2 Asqav compliance receipt carrying the in-body signer and per-org _asqav_tid canary; byte-pinned to the backend PR #995 signed body.",
+      "input": {
+        "type": "protectmcp:decision",
+        "v": 2,
+        "issued_at": "2026-05-04T12:00:00+00:00",
+        "issuer_id": "Asqav Ltd",
+        "agent_id": "agt_demo_001",
+        "action_id": "act_v2_demo_0001",
+        "action_ref": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "payload_digest": {
+          "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "policy_digest": "sha256:9b71d224bd62f3785d96d46ad3ea3d73319bfbc2890caadae2dff72519673ca7",
+        "previousReceiptHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "decision": "allow",
+        "tool_name": "demo.action",
+        "mode": "hash",
+        "hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "hash_algo": "sha256",
+        "org_id": "org_demo_canary",
+        "server_timestamp": "2026-05-04T12:00:00+00:00",
+        "signer": "https://api.asqav.com",
+        "_asqav_tid": "4d9a220e3f0b7c35c932d1e85bd4e081fb702c0a47caa046fb18b88bc9246a7f"
+      },
+      "canonical": "{\"_asqav_tid\":\"4d9a220e3f0b7c35c932d1e85bd4e081fb702c0a47caa046fb18b88bc9246a7f\",\"action_id\":\"act_v2_demo_0001\",\"action_ref\":\"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"agent_id\":\"agt_demo_001\",\"decision\":\"allow\",\"hash\":\"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"hash_algo\":\"sha256\",\"issued_at\":\"2026-05-04T12:00:00+00:00\",\"issuer_id\":\"Asqav Ltd\",\"mode\":\"hash\",\"org_id\":\"org_demo_canary\",\"payload_digest\":{\"hash\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"policy_digest\":\"sha256:9b71d224bd62f3785d96d46ad3ea3d73319bfbc2890caadae2dff72519673ca7\",\"previousReceiptHash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"server_timestamp\":\"2026-05-04T12:00:00+00:00\",\"signer\":\"https://api.asqav.com\",\"tool_name\":\"demo.action\",\"type\":\"protectmcp:decision\",\"v\":2}",
+      "sha256": "dbb9fa8b319830814d2e6cc5b9c6a33f9c8f45e3223f75096d9c520aa9be55d4",
+      "expected_verify": true,
+      "reason": "signer and _asqav_tid are ordinary keys in the signed payload; JCS sorts them into place and the canonical form plus SHA-256 reproduce byte-for-byte."
+    },
+    {
+      "name": "asqav-24-jcs-astral-key-order",
+      "description": "RFC 8785 Section 3.2.3 orders member names by UTF-16 code unit. U+1F600 encodes as the surrogate pair D83D DE00, so it sorts BEFORE U+FF20 even though its code point is larger. A canonicalizer that sorts by code point (Python sorted / json.dumps(sort_keys=True), Rust and Go byte order) emits the other order and is non-conformant.",
+      "input": {
+        "＠": 1,
+        "😀": 1
+      },
+      "canonical": "{\"😀\":1,\"＠\":1}",
+      "sha256": "425159f5c1f0575fbcbf9d05a8f60cde3d040eae5166aa2136657564048651b6",
+      "expected_verify": true,
+      "reason": "Correct JCS ordering for supplementary-plane member names."
+    },
+    {
+      "name": "asqav-24-jcs-astral-key-order-codepoint-rejected",
+      "description": "Negative twin of asqav-24-jcs-astral-key-order. non_conformant_canonical is the code point ordering a non-conformant implementation produces for the SAME input. A verifier MUST NOT accept it as the canonical form, and MUST NOT reproduce it: canonicalize(input) has to differ from it byte for byte.",
+      "input": {
+        "＠": 1,
+        "😀": 1
+      },
+      "canonical": "{\"😀\":1,\"＠\":1}",
+      "sha256": "425159f5c1f0575fbcbf9d05a8f60cde3d040eae5166aa2136657564048651b6",
+      "non_conformant_canonical": "{\"＠\":1,\"😀\":1}",
+      "non_conformant_sha256": "1c314559129cce00bc1b3caa2ee37fa3e81f926aee65b34f8e4e21856b2de83b",
+      "expected_verify": false,
+      "reason": "Code point key order is not RFC 8785; a canonicalizer emitting non_conformant_canonical fails this vector."
+    },
+    {
+      "name": "asqav-25-number-above-safe-range-rejected",
+      "description": "A digest-covered integer with no exact IEEE-754 double. Python's json.loads keeps 9007199254740993 exactly and JavaScript's JSON.parse rounds it to 9007199254740992, neither raising, so the same document would canonicalize to two different byte strings and carry two different SHA-256 digests. A conformant implementation MUST refuse this document as a parse failure reported unverifiable, and MUST NOT round, truncate or re-serialize the value. The document is given as input_text, not as a parsed input, because a refused document has no canonical form and because a corpus file carrying the bare literal would itself be refused by the rule it describes.",
+      "input_text": "{\"n\":9007199254740993}",
+      "expected_verify": false,
+      "reason": "9007199254740993 has no exact IEEE-754 double, so the generic source-digit guard refuses it before parsing loses precision. The narrowed profile bound +/-(2**53 - 1) would also refuse the parsed rounded value 9007199254740992 on magnitude, but a magnitude test on parsed digits cannot recover the lost original, so the source-digit check stays mandatory. 992 itself round-trips exactly (see the boundary-rejected twin); 993 is refused because the two languages disagree on the digits.",
+      "expected": {
+        "refused_at": "parse",
+        "bound": "+/-(2**53 - 1)",
+        "max_canonical_integer": 9007199254740991,
+        "positive_twin": "asqav-25-number-above-safe-range-as-string"
+      }
+    },
+    {
+      "name": "asqav-25-number-above-safe-range-as-string",
+      "description": "Positive twin of asqav-25-number-above-safe-range-rejected: the same numeric value carried the conformant way, as a JSON string. A caller with an identifier or a nanosecond timestamp above 2**53 serializes it like this, and every implementation then agrees on the bytes because no number parsing is involved.",
+      "input": {
+        "n": "9007199254740993"
+      },
+      "expected_verify": true,
+      "reason": "A string carries the digits verbatim through every JSON reader, so the canonical bytes and their digest are identical across implementations.",
+      "expected": {
+        "negative_twin": "asqav-25-number-above-safe-range-rejected"
+      },
+      "canonical": "{\"n\":\"9007199254740993\"}",
+      "sha256": "3bbb752b000e9ac58b939c07bb99307d18ccc5be92189d3c32738ec24c98579f"
+    },
+    {
+      "name": "asqav-25-number-at-safe-range-boundary",
+      "description": "2**53 - 1 = 9007199254740991 is the largest integer inside the Asqav profile safe interval: n and n+1 are still distinguishable there, and every reader emits the same digits, so it MUST be accepted. 2**53 is excluded not because it fails to round-trip (it round-trips exactly) but because the safe-integer property fails there.",
+      "input": {
+        "n": 9007199254740991
+      },
+      "expected_verify": true,
+      "reason": "The largest integer inside the Asqav profile safe interval +/-(2**53 - 1).",
+      "expected": {
+        "negative_twin": "asqav-25-number-above-safe-range-rejected"
+      },
+      "canonical": "{\"n\":9007199254740991}",
+      "sha256": "e1da48c6a6089f06ecb4e0a2259e658e3786b2420f52baccdf929ec6460d7b41"
+    },
+    {
+      "name": "asqav-25-number-above-safe-range-boundary-rejected",
+      "description": "2**53 = 9007199254740992 is exactly representable and every reader emits the same digits for it, yet it sits outside the closed Asqav profile interval of draft Section 4, which ends at 2**53 - 1. A conformant profile implementation MUST refuse this document as a parse failure reported unverifiable. The document is given as input_text, not as a parsed input, because a refused document has no canonical form.",
+      "input_text": "{\"n\":9007199254740992}",
+      "expected_verify": false,
+      "reason": "9007199254740992 round-trips identically in both languages but lies outside the profile safe interval +/-(2**53 - 1): at 2**53 the safe-integer property (n and n+1 distinguishable) already fails. This is a different rejection from asqav-25-number-above-safe-range-rejected (9007199254740993), which is refused because the two languages disagree on the digits.",
+      "expected": {
+        "refused_at": "parse",
+        "positive_twin": "asqav-25-number-at-safe-range-boundary"
+      }
+    },
+    {
+      "name": "counterparty_binding_origin_two_anchors",
+      "description": "Pure canonicalization of an originating envelope with two replaceable anchors; binding recipes project the payload and signature separately.",
+      "input": {
+        "anchors": [
+          {
+            "tsa_url": "https://tsa.example/timestamp",
+            "type": "rfc3161",
+            "value": "AAAA_synthetic_tsr_base64_placeholder_AAAA"
+          },
+          {
+            "type": "opentimestamps",
+            "value": "synthetic_upgradeable_timestamp"
+          }
+        ],
+        "payload": {
+          "action_id": "act_01HVZA_ORIGINATOR_0001",
+          "action_ref": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "agent_id": "agt_originator_A",
+          "decision": "allow",
+          "issued_at": "2026-05-18T20:00:00+00:00",
+          "issuer_id": "00000000000000000098",
+          "org_id": "org_demo",
+          "payload_digest": {
+            "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "size": 0
+          },
+          "policy_digest": "sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
+          "previousReceiptHash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "sandbox_state": "live",
+          "tool_name": "database.query",
+          "type": "protectmcp:action",
+          "v": 1
+        },
+        "signature": {
+          "alg": "ML-DSA-65",
+          "kid": "00000000000000000098",
+          "sig": "AAAA_synthetic_signature_bytes_base64_placeholder_for_vector_only_AAAA"
+        }
+      },
+      "expected_verify": true,
+      "reason": "Envelope byte-equality: JCS-canonical bytes of A's full envelope reproduce the same SHA-256 across implementations. This vector pins canonicalization, not the binding scope.",
+      "expected": {
+        "envelope_hash_base64": "dXqDdpt/tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=",
+        "envelope_hash_base64url": "dXqDdpt_tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=",
+        "originating_envelope_ref": "counterparty_binding_origin_two_anchors"
+      },
+      "canonical": "{\"anchors\":[{\"tsa_url\":\"https://tsa.example/timestamp\",\"type\":\"rfc3161\",\"value\":\"AAAA_synthetic_tsr_base64_placeholder_AAAA\"},{\"type\":\"opentimestamps\",\"value\":\"synthetic_upgradeable_timestamp\"}],\"payload\":{\"action_id\":\"act_01HVZA_ORIGINATOR_0001\",\"action_ref\":\"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"agent_id\":\"agt_originator_A\",\"decision\":\"allow\",\"issued_at\":\"2026-05-18T20:00:00+00:00\",\"issuer_id\":\"00000000000000000098\",\"org_id\":\"org_demo\",\"payload_digest\":{\"hash\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"policy_digest\":\"sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888\",\"previousReceiptHash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sandbox_state\":\"live\",\"tool_name\":\"database.query\",\"type\":\"protectmcp:action\",\"v\":1},\"signature\":{\"alg\":\"ML-DSA-65\",\"kid\":\"00000000000000000098\",\"sig\":\"AAAA_synthetic_signature_bytes_base64_placeholder_for_vector_only_AAAA\"}}",
+      "sha256": "36e5256c3940a777eb4e4fc6b08fcb31f1e5a352c82736aa7b32578980b5e9b4"
+    },
+    {
+      "name": "counterparty_binding_scope_minus_anchors",
+      "description": "Counterparty fixture with binding outcome matches; its generation recipe is independent of the asserted wire scope.",
+      "input": {
+        "action_id": "act_counterparty_scope_minus_anchors",
+        "action_ref": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "agent_id": "agt_acknowledger_B",
+        "counterparty_binding": {
+          "envelope_hash": "dXqDdpt/tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=",
+          "expect_ack_from": "00000000000000000098",
+          "receipt_ref": "asqav-receipt://org_demo/agt_originator_A/seq/0001",
+          "transport_label": "mcp",
+          "scope": "envelope_minus_anchors"
+        },
+        "decision": "allow",
+        "issued_at": "2026-05-18T20:00:01+00:00",
+        "issuer_id": "00000000000000000098",
+        "org_id": "org_demo",
+        "payload_digest": {
+          "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "policy_digest": "sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
+        "previousReceiptHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "sandbox_state": "live",
+        "tool_name": "database.query",
+        "type": "protectmcp:acknowledgment",
+        "v": 1
+      },
+      "expected_verify": true,
+      "reason": "The binding axis returns matches.",
+      "expected": {
+        "envelope_hash_base64": "dXqDdpt/tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=",
+        "envelope_hash_hex": "757a83769b7fb4163b20b30931ccd8c3ab31f2f3e6402157311f16dc00d6d9ef",
+        "originating_envelope_ref": "counterparty_binding_origin_two_anchors",
+        "binding_result": true,
+        "binding_label": "matches",
+        "failure_class": null
+      },
+      "generation": {
+        "counterparty_digest_members": [
+          "payload",
+          "signature"
+        ]
+      },
+      "canonical": "{\"action_id\":\"act_counterparty_scope_minus_anchors\",\"action_ref\":\"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"agent_id\":\"agt_acknowledger_B\",\"counterparty_binding\":{\"envelope_hash\":\"dXqDdpt/tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=\",\"expect_ack_from\":\"00000000000000000098\",\"receipt_ref\":\"asqav-receipt://org_demo/agt_originator_A/seq/0001\",\"scope\":\"envelope_minus_anchors\",\"transport_label\":\"mcp\"},\"decision\":\"allow\",\"issued_at\":\"2026-05-18T20:00:01+00:00\",\"issuer_id\":\"00000000000000000098\",\"org_id\":\"org_demo\",\"payload_digest\":{\"hash\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"policy_digest\":\"sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888\",\"previousReceiptHash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sandbox_state\":\"live\",\"tool_name\":\"database.query\",\"type\":\"protectmcp:acknowledgment\",\"v\":1}",
+      "sha256": "e6a6b09958c64686de4ef7dd2494690ee0ed7d039da92e2e78b550190d5fe931"
+    },
+    {
+      "name": "counterparty_binding_anchors_included_rejected",
+      "description": "Counterparty fixture with binding outcome mismatch; its generation recipe is independent of the asserted wire scope.",
+      "input": {
+        "action_id": "act_counterparty_anchors_included_rejected",
+        "action_ref": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "agent_id": "agt_acknowledger_B",
+        "counterparty_binding": {
+          "envelope_hash": "NuUlbDlAp3frTk/GsI/LMfHlo1LIJzaqezJXiYC16bQ=",
+          "expect_ack_from": "00000000000000000098",
+          "receipt_ref": "asqav-receipt://org_demo/agt_originator_A/seq/0001",
+          "transport_label": "mcp",
+          "scope": "envelope_minus_anchors"
+        },
+        "decision": "allow",
+        "issued_at": "2026-05-18T20:00:01+00:00",
+        "issuer_id": "00000000000000000098",
+        "org_id": "org_demo",
+        "payload_digest": {
+          "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "policy_digest": "sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
+        "previousReceiptHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "sandbox_state": "live",
+        "tool_name": "database.query",
+        "type": "protectmcp:acknowledgment",
+        "v": 1
+      },
+      "expected_verify": false,
+      "reason": "The binding axis returns mismatch.",
+      "expected": {
+        "envelope_hash_base64": "NuUlbDlAp3frTk/GsI/LMfHlo1LIJzaqezJXiYC16bQ=",
+        "envelope_hash_hex": "36e5256c3940a777eb4e4fc6b08fcb31f1e5a352c82736aa7b32578980b5e9b4",
+        "originating_envelope_ref": "counterparty_binding_origin_two_anchors",
+        "binding_result": false,
+        "binding_label": "mismatch",
+        "failure_class": "invalid"
+      },
+      "generation": {
+        "counterparty_digest_members": [
+          "payload",
+          "signature",
+          "anchors"
+        ]
+      },
+      "canonical": "{\"action_id\":\"act_counterparty_anchors_included_rejected\",\"action_ref\":\"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"agent_id\":\"agt_acknowledger_B\",\"counterparty_binding\":{\"envelope_hash\":\"NuUlbDlAp3frTk/GsI/LMfHlo1LIJzaqezJXiYC16bQ=\",\"expect_ack_from\":\"00000000000000000098\",\"receipt_ref\":\"asqav-receipt://org_demo/agt_originator_A/seq/0001\",\"scope\":\"envelope_minus_anchors\",\"transport_label\":\"mcp\"},\"decision\":\"allow\",\"issued_at\":\"2026-05-18T20:00:01+00:00\",\"issuer_id\":\"00000000000000000098\",\"org_id\":\"org_demo\",\"payload_digest\":{\"hash\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"policy_digest\":\"sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888\",\"previousReceiptHash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sandbox_state\":\"live\",\"tool_name\":\"database.query\",\"type\":\"protectmcp:acknowledgment\",\"v\":1}",
+      "sha256": "85004158dcf9345ef58eed4178bbfea481a38f0b8cb2a1970785d892980695dc"
+    },
+    {
+      "name": "counterparty_binding_legacy_scope_absent",
+      "description": "Counterparty fixture with binding outcome legacy_scope; its generation recipe is independent of the asserted wire scope.",
+      "input": {
+        "action_id": "act_counterparty_legacy_scope_absent",
+        "action_ref": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "agent_id": "agt_acknowledger_B",
+        "counterparty_binding": {
+          "envelope_hash": "NuUlbDlAp3frTk/GsI/LMfHlo1LIJzaqezJXiYC16bQ=",
+          "expect_ack_from": "00000000000000000098",
+          "receipt_ref": "asqav-receipt://org_demo/agt_originator_A/seq/0001",
+          "transport_label": "mcp"
+        },
+        "decision": "allow",
+        "issued_at": "2026-05-18T20:00:01+00:00",
+        "issuer_id": "00000000000000000098",
+        "org_id": "org_demo",
+        "payload_digest": {
+          "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "policy_digest": "sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
+        "previousReceiptHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "sandbox_state": "live",
+        "tool_name": "database.query",
+        "type": "protectmcp:acknowledgment",
+        "v": 1
+      },
+      "expected_verify": false,
+      "reason": "The binding axis returns legacy_scope.",
+      "expected": {
+        "envelope_hash_base64": "NuUlbDlAp3frTk/GsI/LMfHlo1LIJzaqezJXiYC16bQ=",
+        "envelope_hash_hex": "36e5256c3940a777eb4e4fc6b08fcb31f1e5a352c82736aa7b32578980b5e9b4",
+        "originating_envelope_ref": "counterparty_binding_origin_two_anchors",
+        "binding_result": null,
+        "binding_label": "legacy_scope",
+        "failure_class": "unverifiable"
+      },
+      "generation": {
+        "counterparty_digest_members": [
+          "payload",
+          "signature",
+          "anchors"
+        ]
+      },
+      "canonical": "{\"action_id\":\"act_counterparty_legacy_scope_absent\",\"action_ref\":\"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"agent_id\":\"agt_acknowledger_B\",\"counterparty_binding\":{\"envelope_hash\":\"NuUlbDlAp3frTk/GsI/LMfHlo1LIJzaqezJXiYC16bQ=\",\"expect_ack_from\":\"00000000000000000098\",\"receipt_ref\":\"asqav-receipt://org_demo/agt_originator_A/seq/0001\",\"transport_label\":\"mcp\"},\"decision\":\"allow\",\"issued_at\":\"2026-05-18T20:00:01+00:00\",\"issuer_id\":\"00000000000000000098\",\"org_id\":\"org_demo\",\"payload_digest\":{\"hash\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"policy_digest\":\"sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888\",\"previousReceiptHash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sandbox_state\":\"live\",\"tool_name\":\"database.query\",\"type\":\"protectmcp:acknowledgment\",\"v\":1}",
+      "sha256": "9ea6a8cfad32136b496f8aff707dedf53e40f7bc13499f23d8acf598ced6e945"
+    },
+    {
+      "name": "counterparty_binding_unrecognised_scope",
+      "description": "Counterparty fixture with binding outcome unrecognised_scope; its generation recipe is independent of the asserted wire scope.",
+      "input": {
+        "action_id": "act_counterparty_unrecognised_scope",
+        "action_ref": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "agent_id": "agt_acknowledger_B",
+        "counterparty_binding": {
+          "envelope_hash": "dXqDdpt/tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=",
+          "expect_ack_from": "00000000000000000098",
+          "receipt_ref": "asqav-receipt://org_demo/agt_originator_A/seq/0001",
+          "transport_label": "mcp",
+          "scope": "unsupported_fixture_scope"
+        },
+        "decision": "allow",
+        "issued_at": "2026-05-18T20:00:01+00:00",
+        "issuer_id": "00000000000000000098",
+        "org_id": "org_demo",
+        "payload_digest": {
+          "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "policy_digest": "sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
+        "previousReceiptHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "sandbox_state": "live",
+        "tool_name": "database.query",
+        "type": "protectmcp:acknowledgment",
+        "v": 1
+      },
+      "expected_verify": false,
+      "reason": "The binding axis returns unrecognised_scope.",
+      "expected": {
+        "envelope_hash_base64": "dXqDdpt/tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=",
+        "envelope_hash_hex": "757a83769b7fb4163b20b30931ccd8c3ab31f2f3e6402157311f16dc00d6d9ef",
+        "originating_envelope_ref": "counterparty_binding_origin_two_anchors",
+        "binding_result": null,
+        "binding_label": "unrecognised_scope",
+        "failure_class": "unverifiable"
+      },
+      "generation": {
+        "counterparty_digest_members": [
+          "payload",
+          "signature"
+        ]
+      },
+      "canonical": "{\"action_id\":\"act_counterparty_unrecognised_scope\",\"action_ref\":\"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"agent_id\":\"agt_acknowledger_B\",\"counterparty_binding\":{\"envelope_hash\":\"dXqDdpt/tBY7ILMJMczYw6sx8vPmQCFXMR8W3ADW2e8=\",\"expect_ack_from\":\"00000000000000000098\",\"receipt_ref\":\"asqav-receipt://org_demo/agt_originator_A/seq/0001\",\"scope\":\"unsupported_fixture_scope\",\"transport_label\":\"mcp\"},\"decision\":\"allow\",\"issued_at\":\"2026-05-18T20:00:01+00:00\",\"issuer_id\":\"00000000000000000098\",\"org_id\":\"org_demo\",\"payload_digest\":{\"hash\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"policy_digest\":\"sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888\",\"previousReceiptHash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sandbox_state\":\"live\",\"tool_name\":\"database.query\",\"type\":\"protectmcp:acknowledgment\",\"v\":1}",
+      "sha256": "8f008eafa83e78228aa107d8d819d866f2ca94a017cdd01dd168ee2c19c2ad09"
+    }
+  ]
+}

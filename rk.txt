@@ -1,0 +1,74 @@
+https://github.com/trustless-ai/recompute-kit/issues/61#issuecomment-5920986134 babyblueviper1 2026-09-30T22:42:42Z
+@pipavlo82 confirmed — independently re-verified against the current `admit()` in `conformance/pq-key-binding-v1/cutoff_enforce.py` before editing anything. You're right on both counts:
+
+- resolved-empty branch returns `resolution_reason: "no_bindings_in_chain"`, not `no_in_force_binding`
+- unanchored-chain branch returns `"binding_anchor_unavailable"`, not `no_in_force_binding`
+
+So the issue's ow
+----
+https://github.com/trustless-ai/recompute-kit/pull/57#issuecomment-6079402075 pipavlo82 2026-10-09T10:50:32Z
+One new blocker from the system-wide audit on exact #57 head "88bba508", distinct from the existing NaN/Infinity literal controls.
+
+Strict JSON currently rejects literal "NaN" / "Infinity", but Python's parser can still overflow legal JSON numeric tokens to non-finite floats. The audit reproduced:
+
+"expected: 1e999"
+"reported: 2e999"
+
+Both become Python "inf", so the reporter comparison ret
+----
+https://github.com/trustless-ai/recompute-kit/pull/57#issuecomment-6079672637 babyblueviper1 2026-10-09T11:08:34Z
+@pipavlo82 reproduced on `88bba508`, and fixed in [`3540251`](https://github.com/trustless-ai/recompute-kit/commit/3540251).
+
+- `_strict_json` now accepts a number token only when its decimal value is exactly the double it parses to (or that double's shortest repr). It applies to both the corpus and the report.
+- Overflow was one case of a wider class: the parse rounds the token before the compari
+----
+https://github.com/trustless-ai/recompute-kit/pull/17#issuecomment-6080023205 pipavlo82 2026-10-09T11:32:59Z
+System-wide audit found one blocking boundary in #17's mutation oracle.
+
+On exact head "4ecf663f", a passing fixture was mutated from "x = 1" to "raise RuntimeError". The test process then crashed/nonzero, but "recompute-mutation-survival" counted that as:
+
+"KILLED 1/1"
+"verified-good"
+exit 0
+
+So the current relation is effectively "any nonzero test exit => KILLED". That collapses semantic
+----
+https://github.com/trustless-ai/recompute-kit/pull/60#issuecomment-6080635270 babyblueviper1 2026-10-09T12:12:32Z
+Merged — conformance green at the merge commit. Thanks for reproducing on a cold clone and confirming the presence-assertion red/green swap. Looking forward to the unpinned-rotation and `t == C` vectors in a follow-up PR.
+----
+https://github.com/trustless-ai/recompute-kit/pull/63#issuecomment-6086330436 babyblueviper1 2026-10-09T17:54:05Z
+Closing as a duplicate of #62, which @TMerlini opened first with the same fix. #57 touches the same README line, so if #62 lands first I'll rebase #57 onto it.
+
+----
+https://github.com/trustless-ai/recompute-kit/pull/17#issuecomment-6089576932 Echo-Merlini 2026-10-09T21:30:00Z
+@zexoverz — six weeks is far too long, and the cost of it is visible in this thread. No excuse offered.
+
+**Your `:73` finding from 26 August is the same defect @pipavlo82 independently rediscovered today.** You wrote:
+
+> Any non-zero exit counts as KILLED, so a mutant can die for a reason no assertion observed. With `"replace": "n % 2 =="` both fixtures report KILLED and verified-good, `fixtures/d
+----
+https://github.com/trustless-ai/recompute-kit/pull/18#issuecomment-6089584354 Echo-Merlini 2026-10-09T21:30:34Z
+@zexoverz — six weeks, and the awkward part is that this was **answered two days ago, by you, in a different room**, and nobody brought it back to the PR where you raised it.
+
+Your observation here was right as an observation:
+
+> `authority_revoked` appears only in the case `name`, while the machine-readable `expected` for `t == R` is still `no_in_force_binding` — that is the split from t/29225 #9
+----
+https://github.com/trustless-ai/recompute-kit/pull/17#issuecomment-6089850196 Echo-Merlini 2026-10-09T21:50:45Z
+Both design fixes are in at `c8fb4b7`.
+
+## `:73` — the kill relation
+
+A guard is now KILLED only when **both** hold:
+
+1. the mutation applied **exactly once** — zero is `not_applied`, more than one is `ambiguous_application`, both UNVERIFIABLE;
+2. the suite failed **and** the mutation's declared `kill_witness` appears in the output.
+
+`kill_witness` is REQUIRED on a guard, and a witness already pre
+----
+https://github.com/trustless-ai/recompute-kit/pull/18#issuecomment-6090114561 babyblueviper1 2026-10-09T22:12:17Z
+Fixed the #61 issue body and follow-up comment, which weren't showing their text. #61 lays out options (a) and (b); the decision, per Echo and Pavlo above, is option (b), and this PR doesn't change.
+----
+https://github.com/trustless-ai/recompute-kit/issues/61#issuecomment-6090532887 babyblueviper1 2026-10-09T22:44:56Z
+Decision, recorded from [Echo's comment on #18](https://github.com/trustless-ai/recompute-kit/pull/18#issuecomment-6089584354), with Pavlo agreeing: option (b). `resolution_reason` stays `no_in_force_binding` on the `t == R` branch, and #18 does not change. The fix is normative text, "a sentence saying `resolution_reason` describes the resolution path or reason and **MUST NOT** be interpreted as t
+----
