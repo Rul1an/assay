@@ -24,3 +24,19 @@ pub(super) fn validate_protocol(packet: &Value) -> AdapterResult<()> {
 
     Ok(())
 }
+
+pub(super) fn validate_profile(packet: &Value) -> AdapterResult<()> {
+    if let Some(profile) = string_field(packet, "profile") {
+        if profile != super::PROFILE_NAME {
+            return Err(AdapterError::new(
+                AdapterErrorKind::Measurement,
+                format!(
+                    "unsupported profile: '{profile}', expected '{}'",
+                    super::PROFILE_NAME
+                ),
+            ));
+        }
+    }
+
+    Ok(())
+}

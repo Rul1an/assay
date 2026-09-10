@@ -1,4 +1,11 @@
-//! A2A adapter MVP for translating selected A2A packets into canonical Assay evidence events.
+//! A2A adapter for translating selected A2A evidence projection profile packets
+//! into canonical Assay evidence events.
+//!
+//! # Profile Boundary
+//! This adapter implements an internal Assay projection profile (`assay.adapter.a2a.legacy-projection.v0`),
+//! translating synthetic and observed 0.x task/agent/artifact lifecycle events into canonical
+//! evidence. It is a selected evidence projection, not an implementation of the full A2A wire
+//! specification (such as A2A 1.0 protobuf/gRPC wire objects).
 
 use assay_adapter_api::{
     AdapterBatch, AdapterCapabilities, AdapterDescriptor, AdapterInput, AdapterResult,
@@ -7,7 +14,9 @@ use assay_adapter_api::{
 
 mod adapter_impl;
 
-/// A2A adapter MVP.
+pub use adapter_impl::{PROFILE_NAME, SUPPORTED_SPEC_VERSIONS};
+
+/// A2A adapter for the legacy evidence projection profile.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct A2aAdapter;
 
