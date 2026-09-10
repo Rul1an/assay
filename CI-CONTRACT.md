@@ -34,6 +34,10 @@ Repository state observed on 2026-06-11:
   - `.github/workflows/assay-runner-lane-check.yml`
     (`Assay-Runner Lane Check`)
   - `.github/workflows/split-wave0-gates.yml` (`Split Wave 0 Gates`)
+    This is the only hosted lane that runs `cargo nextest`; the required `CI` test job
+    runs `cargo test`. `.config/nextest.toml` sets `flaky-result = "fail"`, so a test that
+    fails once and passes on retry is reported as a failure wherever nextest runs, here and
+    locally. `scripts/ci/test-nextest-flaky-result.sh` pins that in this lane (#2871).
 - Experiment, docs, perf, and nightly workflows exist separately and should not
   be promoted into required PR cost by default.
 - Release workflow: `.github/workflows/release.yml`, with binary builds,
