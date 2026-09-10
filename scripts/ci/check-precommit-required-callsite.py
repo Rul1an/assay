@@ -25,12 +25,30 @@ A context that resolves to no workflow is an error, not a smaller required set: 
 renamed job or a moved status producer surfaces, rather than quietly shrinking what this guard
 protects. Anything this cannot parse is an error for the same reason.
 
+A hook's scripts are the files under `scripts/` that its `entry:` names, whatever the language.
+An earlier version recognised only `.sh` and `.py`, so a guard written in `.mjs` was never in
+scope. Directories are dropped: `scripts/ci` is a substring of most of ci.yml, and would read as
+a callsite for any hook that named it. Whatever the language, the text after a `#` is what gets
+stripped. So a path in a JavaScript `//` comment or a Python docstring counts as a binding, the
+deliberate direction described below; and a `#` that is not a comment -- a JavaScript private
+field, a URL fragment -- cuts its line short, which would hide a binding later on that line. The
+one such line among the hooks' scripts is this guard's own negative control, where it is the
+point.
+
+A callsite is an uncommented line of a required workflow that contains the script's path. That
+is presence, not execution: a path in an `env:` value or an `echo` would count. The hardening
+step's closed command set pins execution for the commands listed there; for any other callsite,
+this guard does not.
+
 Opting out is possible and visible. A hook may carry
 
     # required-callsite: local-only -- <reason>
 
-on a line inside its block. The reason floor is not about prose: it is there so the marker
-cannot be added as reflex punctuation while a reviewer skims past it.
+indented into its block, at the level of the hook's keys. A marker belongs to the block it is
+indented into, not to the last hook seen: attributing it that way made a marker written above
+the next hook -- the usual place for a comment about that hook -- exempt the one before it. A
+marker in no block exempts nothing and is reported. The reason floor is not about prose: it is
+there so the marker cannot be added as reflex punctuation while a reviewer skims past it.
 
 This guard is in its own scope and passes the way every other hook does, by having a callsite.
 An earlier version of this paragraph claimed the opposite -- that it built paths from a constant
@@ -88,8 +106,14 @@ MIN_REASON_CHARS = 30
 
 HOOK_ID_RE = re.compile(r"^      - id: (?P<id>\S+)\s*$")
 HOOK_ENTRY_RE = re.compile(r"^        entry: (?P<entry>.*)$")
-MARKER_RE = re.compile(rf"^\s*{re.escape(MARKER_PREFIX)}\s*(?P<reason>\S.*)$")
-SCRIPT_RE = re.compile(r"scripts/[A-Za-z0-9_./-]+\.(?:sh|py)")
+# A hook's keys sit at this indentation. A line indented less, other than a blank one, ends the
+# block -- the next `- id:`, a comment written above it, or the next `- repo:`.
+HOOK_KEY_INDENT = 8
+MARKER_RE = re.compile(rf"^(?P<indent>\s*){re.escape(MARKER_PREFIX)}\s*(?P<reason>\S.*)$")
+# Any path under scripts/, whatever its extension; `hook_scripts` keeps the ones that are files.
+# A closed extension list skipped the `.mjs` guard, and finding "the word after the interpreter"
+# fails on `node --test --test-reporter spec <path>` and on `f=<path>; python3 $f`.
+SCRIPT_RE = re.compile(r"scripts/[A-Za-z0-9_./-]+")
 JOB_KEY_RE = re.compile(r"^  (?P<name>[A-Za-z0-9_][A-Za-z0-9_-]*):\s*(?:#.*)?$")
 JOB_NAME_RE = re.compile(r"^    name:\s*(?P<value>.+?)\s*$")
 STATUS_CONTEXT_RE = re.compile(r"^STATUS_CONTEXT\s*=\s*[\"'](?P<context>[^\"']+)[\"']", re.M)
@@ -172,8 +196,16 @@ def required_workflows(ruleset_text: str, workflows: dict[str, str]) -> dict[str
     return resolved
 
 
-def parse_hooks(config_text: str) -> list[dict]:
+def parse_hooks(config_text: str) -> tuple[list[dict], list[int]]:
+    """The hooks, and the line numbers of opt-out markers that sit in no hook's block.
+
+    A marker belongs to the block it is indented into. Attributing it to "the last hook seen"
+    instead made a marker written above the next hook -- the usual place for a comment about
+    that hook -- exempt the one before it, silently. An orphan is returned rather than dropped:
+    a marker that exempts nothing is a mistake its writer needs to hear about.
+    """
     hooks: list[dict] = []
+    orphans: list[int] = []
     current: dict | None = None
     for number, line in enumerate(config_text.splitlines(), start=1):
         match = HOOK_ID_RE.match(line)
@@ -181,17 +213,28 @@ def parse_hooks(config_text: str) -> list[dict]:
             current = {"id": match["id"], "line": number, "entry": None, "reason": None}
             hooks.append(current)
             continue
+        if line.strip() and len(line) - len(line.lstrip()) < HOOK_KEY_INDENT:
+            current = None
+        marker = MARKER_RE.match(line)
+        if marker:
+            if current is None:
+                orphans.append(number)
+            else:
+                current["reason"] = marker["reason"].strip()
+            continue
         if current is None:
             continue
         entry = HOOK_ENTRY_RE.match(line)
         if entry:
             current["entry"] = entry["entry"]
-        marker = MARKER_RE.match(line)
-        if marker:
-            current["reason"] = marker["reason"].strip()
     if not hooks:
         raise CallsiteError(f"{CONFIG}: no hooks this guard can recognise")
-    return hooks
+    return hooks, orphans
+
+
+def hook_scripts(entry: str) -> list[str]:
+    """The files under scripts/ that a hook's `entry:` names. A directory is not a script."""
+    return sorted({t for t in SCRIPT_RE.findall(entry) if (REPO_ROOT / t).is_file()})
 
 
 def binding_names(body: str, required: set[str]) -> set[str]:
@@ -228,11 +271,16 @@ def has_active_callsite(scripts: list[str], workflows: dict[str, str], required:
 
 def check(config_text: str, ruleset_text: str, workflows: dict[str, str]) -> list[str]:
     required = set(required_workflows(ruleset_text, workflows))
-    problems = []
-    for hook in parse_hooks(config_text):
+    hooks, orphans = parse_hooks(config_text)
+    problems = [
+        f"{CONFIG}:{number}: `{MARKER_PREFIX}` sits outside any hook block, so it exempts "
+        f"nothing. Indent it into the block of the hook it is for, at the level of its keys."
+        for number in orphans
+    ]
+    for hook in hooks:
         if not hook["entry"]:
             continue
-        scripts = sorted(set(SCRIPT_RE.findall(hook["entry"])))
+        scripts = hook_scripts(hook["entry"])
         if not scripts:
             continue
         subjects = sorted({n for s in scripts for n in binds_required_workflow(s, required)})
@@ -282,21 +330,25 @@ def self_test() -> int:
     live_config = read_repo(CONFIG)
     failures = 0
 
-    def synthetic(*extra: str) -> str:
+    def synthetic(*extra: str, hook_id: str = "invented-unwired-guard",
+                  entry: str = "bash scripts/ci/test-ci-gate-expectations.sh") -> str:
         body = [
             "repos:",
             "  - repo: local",
             "    hooks:",
-            "      - id: invented-unwired-guard",
+            f"      - id: {hook_id}",
             "        name: invented",
-            "        entry: bash scripts/ci/test-ci-gate-expectations.sh",
+            f"        entry: {entry}",
             "        language: system",
         ]
         body.extend(extra)
         return "\n".join(body) + "\n"
 
-    def expect(label: str, config: str, wfs: dict[str, str], want: str | None) -> None:
-        """`want` is the hook id the guard must name, or None when it must stay silent."""
+    def expect(label: str, config: str, wfs: dict[str, str],
+               want: str | tuple[str, ...] | None) -> None:
+        """`want` is what the guard must say: None for silence, otherwise one substring per
+        problem it must report, and no others -- so a case that expects two problems fails if
+        the guard reports only the one it happened to get right."""
         nonlocal failures
         try:
             problems = check(config, ruleset, wfs)
@@ -305,7 +357,15 @@ def self_test() -> int:
         if want is None:
             ok = not problems
         else:
-            ok = len(problems) == 1 and want in problems[0]
+            wants = (want,) if isinstance(want, str) else want
+            unmatched = list(problems)
+            ok = len(problems) == len(wants)
+            for needle in wants:
+                hit = next((p for p in unmatched if needle in p), None)
+                if hit is None:
+                    ok = False
+                else:
+                    unmatched.remove(hit)
         if ok:
             print(f"ok    {label}")
         else:
@@ -336,6 +396,40 @@ def self_test() -> int:
     expect("a real opt-out reason is accepted",
            synthetic(f"        {MARKER_PREFIX} local feedback only; the runner enforces "
                      "this contract on the head that merges"), stripped, None)
+
+    # A marker belongs to the block it is indented into. Written above the next hook -- where a
+    # comment about that hook usually goes -- it used to exempt the hook *before* it, which is
+    # the unwired one here, and exempt nothing it was meant for. It must now exempt neither and
+    # be reported, so the writer learns the marker did nothing.
+    reason = "local feedback only; the runner enforces this contract on the head that merges"
+    benign = ["      - id: invented-benign", "        name: benign",
+              "        entry: bash -c true", "        language: system"]
+    expect("a marker above the next hook exempts neither",
+           synthetic("", f"      {MARKER_PREFIX} {reason}", *benign), stripped,
+           ("invented-unwired-guard", "outside any hook block"))
+    expect("a marker at repository indentation exempts nothing",
+           synthetic(f"{MARKER_PREFIX} {reason}", *benign), stripped,
+           ("invented-unwired-guard", "outside any hook block"))
+
+    # A guard is in scope whatever language it is written in. `node --test` puts a flag with a
+    # value before the path, so this also pins that scripts are not found by looking for the
+    # word after an interpreter. The fixture is a real script that binds ci.yml.
+    mjs = "scripts/ci/test_codex_host_proof.mjs"
+    mjs_unwired = dict(workflows)
+    mjs_unwired["ci.yml"] = workflows["ci.yml"].replace(
+        f"          node --test --test-reporter spec {mjs}\n", "", 1)
+    expect("a guard written in .mjs is in scope",
+           synthetic(hook_id="invented-mjs-guard",
+                     entry=f"node --test --test-reporter spec {mjs}"),
+           mjs_unwired, "invented-mjs-guard")
+
+    # Finding paths without an extension list also finds directories. `scripts/ci` is a
+    # substring of nearly every line in ci.yml, so a directory token that survived into the
+    # callsite search would wire every hook that names one. Only files are scripts.
+    expect("a directory in an entry is not a callsite",
+           synthetic(entry="bash -c 'python3 -m unittest discover -s scripts/ci && "
+                           "bash scripts/ci/test-ci-gate-expectations.sh'"),
+           stripped, "invented-unwired-guard")
 
     # A mention in prose is not a binding. Exercised directly rather than through a hook: no
     # script in the tree mentions a required workflow only in a comment, so a fixture routed
