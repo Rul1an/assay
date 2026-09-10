@@ -34,6 +34,7 @@ fn reserved_key(key: &str) -> bool {
     matches!(
         key,
         "protocol"
+            | "profile"
             | "version"
             | "event_type"
             | "timestamp"

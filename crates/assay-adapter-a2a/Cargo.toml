@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "A2A protocol adapter for Assay evidence translation."
+description = "A2A legacy projection profile adapter for selected Assay evidence translation."
 readme.workspace = true
 publish = false
 

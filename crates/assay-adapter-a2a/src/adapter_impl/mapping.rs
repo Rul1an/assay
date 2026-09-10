@@ -37,6 +37,7 @@ pub(super) fn count_unmapped_top_level_fields(packet: &Value) -> u32 {
             !matches!(
                 key.as_str(),
                 "protocol"
+                    | "profile"
                     | "version"
                     | "event_type"
                     | "timestamp"

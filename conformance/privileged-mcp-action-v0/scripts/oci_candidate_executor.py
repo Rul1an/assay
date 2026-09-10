@@ -172,11 +172,15 @@ def fresh_docker_env(parent: Path) -> tuple[dict[str, str], Path]:
     return env, config_dir
 
 
+def expected_wrapped_docker_argv(argv: list[str], env: dict[str, str]) -> list[str]:
+    assignments = ["%s=%s" % (key, env[key]) for key in sorted(env)]
+    return ["env", "-i", *assignments, str(resolve_docker_executable()), *argv[1:]]
+
+
 def wrap_docker_command(argv: list[str], env: dict[str, str]) -> list[str]:
     if not argv or argv[0] != "docker":
         raise DockerCommandError("docker argv must start with docker")
-    assignments = ["%s=%s" % (key, env[key]) for key in sorted(env)]
-    return ["env", "-i", *assignments, str(resolve_docker_executable()), *argv[1:]]
+    return expected_wrapped_docker_argv(argv, env)
 
 
 def implementation_from_registry(
@@ -286,21 +290,11 @@ def observation_for(
     return observe_error(case_id, input_sha256, capture_state, message)
 
 
-def digest_image_refs(argv: list[str]) -> list[str]:
-    refs: list[str] = []
-    for item in argv:
-        try:
-            validate_image_reference(item)
-        except ImplementationRegistryError:
-            continue
-        refs.append(item)
-    return refs
-
-
-def assert_wrapped_keeps_digest_refs(argv: list[str], wrapped: list[str]) -> None:
-    for ref in digest_image_refs(argv):
-        if ref not in wrapped:
-            raise DockerCommandError("digest-qualified image was stripped before docker")
+def assert_wrapped_keeps_digest_refs(
+    argv: list[str], wrapped: list[str], env: dict[str, str]
+) -> None:
+    if wrapped != expected_wrapped_docker_argv(argv, env):
+        raise DockerCommandError("digest-qualified image was stripped before docker")
 
 
 def run_docker(
@@ -315,7 +309,7 @@ def run_docker(
     if env is None:
         raise DockerCommandError("docker invocations require a fresh DOCKER_CONFIG")
     wrapped = wrap_docker_command(argv, env)
-    assert_wrapped_keeps_digest_refs(argv, wrapped)
+    assert_wrapped_keeps_digest_refs(argv, wrapped, env)
     result = run_bounded(
         wrapped,
         timeout_seconds=timeout_seconds,
@@ -435,47 +429,47 @@ def execute_candidate(
                 if not container_id:
                     raise DockerCommandError("docker create returned no container id")
             except DOCKER_LIFECYCLE_ERRORS as exc:
-                return OciExecution(
-                    STATE_CREATE_FAILURE, implementation_id, image, None, b"", b"", str(exc)
-                )
-            try:
-                started = runner(
-                    ["docker", "start", "-a", container_id],
-                    env=env,
-                    timeout_seconds=timeout_seconds,
-                    stdout_limit=STDOUT_LIMIT,
-                    stderr_limit=STDERR_LIMIT,
-                    allow_nonzero=True,
-                )
-                stdout = started.stdout
-                stderr = started.stderr
-            except DOCKER_LIFECYCLE_ERRORS as exc:
-                if isinstance(exc, ProcessLimitError):
-                    state = _limit_state(exc)
-                else:
-                    state = STATE_START_FAILURE
+                state = STATE_CREATE_FAILURE
                 error = str(exc)
-            try:
-                container = _parse_inspect(
-                    runner(["docker", "inspect", container_id], env=env).stdout
-                )
-                raw_exit = (container.get("State") or {}).get("ExitCode")
-                if type(raw_exit) is int:
-                    exit_code = raw_exit
-                    if (container.get("State") or {}).get("OOMKilled"):
-                        state = STATE_OOM
-                        error = error or "container OOMKilled"
-                    if state is None:
-                        state = STATE_COMPLETED
-                else:
-                    exit_code = None
+            if state is None:
+                try:
+                    started = runner(
+                        ["docker", "start", "-a", container_id],
+                        env=env,
+                        timeout_seconds=timeout_seconds,
+                        stdout_limit=STDOUT_LIMIT,
+                        stderr_limit=STDERR_LIMIT,
+                        allow_nonzero=True,
+                    )
+                    stdout = started.stdout
+                    stderr = started.stderr
+                except DOCKER_LIFECYCLE_ERRORS as exc:
+                    if isinstance(exc, ProcessLimitError):
+                        state = _limit_state(exc)
+                    else:
+                        state = STATE_START_FAILURE
+                    error = str(exc)
+                try:
+                    container = _parse_inspect(
+                        runner(["docker", "inspect", container_id], env=env).stdout
+                    )
+                    raw_exit = (container.get("State") or {}).get("ExitCode")
+                    if type(raw_exit) is int:
+                        exit_code = raw_exit
+                        if (container.get("State") or {}).get("OOMKilled"):
+                            state = STATE_OOM
+                            error = error or "container OOMKilled"
+                        if state is None:
+                            state = STATE_COMPLETED
+                    else:
+                        exit_code = None
+                        if state is None:
+                            state = STATE_START_FAILURE
+                            error = "container exit code is unavailable"
+                except DOCKER_LIFECYCLE_ERRORS as exc:
                     if state is None:
                         state = STATE_START_FAILURE
-                        error = "container exit code is unavailable"
-            except DOCKER_LIFECYCLE_ERRORS as exc:
-                if state is None:
-                    state = STATE_START_FAILURE
-                    error = str(exc)
+                        error = str(exc)
         finally:
             target = container_id or container_name
             if target:
