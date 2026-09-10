@@ -106,8 +106,9 @@ MIN_REASON_CHARS = 30
 
 HOOK_ID_RE = re.compile(r"^      - id: (?P<id>\S+)\s*$")
 HOOK_ENTRY_RE = re.compile(r"^        entry: (?P<entry>.*)$")
-# A hook's keys sit at this indentation. A line indented less, other than a blank one, ends the
-# block -- the next `- id:`, a comment written above it, or the next `- repo:`.
+# A hook's keys sit at this indentation. A less-indented line that is neither blank nor a
+# comment ends the block -- the next `- id:`, or the next `- repo:` and its `hooks:`. A marker
+# must itself sit at this level to count.
 HOOK_KEY_INDENT = 8
 MARKER_RE = re.compile(rf"^(?P<indent>\s*){re.escape(MARKER_PREFIX)}\s*(?P<reason>\S.*)$")
 # Any path under scripts/, whatever its extension; `hook_scripts` keeps the ones that are files.
@@ -199,10 +200,15 @@ def required_workflows(ruleset_text: str, workflows: dict[str, str]) -> dict[str
 def parse_hooks(config_text: str) -> tuple[list[dict], list[int]]:
     """The hooks, and the line numbers of opt-out markers that sit in no hook's block.
 
-    A marker belongs to the block it is indented into. Attributing it to "the last hook seen"
-    instead made a marker written above the next hook -- the usual place for a comment about
-    that hook -- exempt the one before it, silently. An orphan is returned rather than dropped:
-    a marker that exempts nothing is a mistake its writer needs to hear about.
+    A marker belongs to the block it is indented into: it must sit at the hook's key level,
+    inside a block that is still open. Attributing it to "the last hook seen" instead made a
+    marker written above the next hook -- the usual place for a comment about that hook --
+    exempt the one before it, silently. An orphan is returned rather than dropped: a marker
+    that exempts nothing is a mistake its writer needs to hear about.
+
+    Only structure ends a block: a less-indented line that is not a comment. A comment is not
+    structure, and letting one end the block would leave any `entry:` after it unread, so the
+    hook would be skipped rather than judged.
     """
     hooks: list[dict] = []
     orphans: list[int] = []
@@ -213,15 +219,17 @@ def parse_hooks(config_text: str) -> tuple[list[dict], list[int]]:
             current = {"id": match["id"], "line": number, "entry": None, "reason": None}
             hooks.append(current)
             continue
-        if line.strip() and len(line) - len(line.lstrip()) < HOOK_KEY_INDENT:
-            current = None
+        indent = len(line) - len(line.lstrip())
         marker = MARKER_RE.match(line)
         if marker:
-            if current is None:
+            if current is None or indent < HOOK_KEY_INDENT:
                 orphans.append(number)
             else:
                 current["reason"] = marker["reason"].strip()
             continue
+        text = line.strip()
+        if text and not text.startswith("#") and indent < HOOK_KEY_INDENT:
+            current = None
         if current is None:
             continue
         entry = HOOK_ENTRY_RE.match(line)
@@ -409,6 +417,27 @@ def self_test() -> int:
            ("invented-unwired-guard", "outside any hook block"))
     expect("a marker at repository indentation exempts nothing",
            synthetic(f"{MARKER_PREFIX} {reason}", *benign), stripped,
+           ("invented-unwired-guard", "outside any hook block"))
+
+    # A comment is not structure. One written between a hook's keys at list indentation must
+    # not end the block, or the `entry:` after it is never read and the hook is skipped -- the
+    # guard would pass a hook it never looked at.
+    comment_between_keys = "\n".join([
+        "repos:", "  - repo: local", "    hooks:",
+        "      - id: invented-unwired-guard",
+        "        name: invented",
+        "      # a comment at list indentation, between this hook's keys",
+        "        entry: bash scripts/ci/test-ci-gate-expectations.sh",
+        "        language: system",
+    ]) + "\n"
+    expect("a comment between a hook's keys does not end its block",
+           comment_between_keys, stripped, "invented-unwired-guard")
+
+    # What does end a block is structure: the next `- repo:` and its `hooks:`. A marker at key
+    # indentation after them belongs to no hook yet, so it must not reach back to the last one.
+    expect("a marker after the next repo entry exempts nothing",
+           synthetic("  - repo: local", "    hooks:", f"        {MARKER_PREFIX} {reason}",
+                     *benign), stripped,
            ("invented-unwired-guard", "outside any hook block"))
 
     # A guard is in scope whatever language it is written in. `node --test` puts a flag with a
