@@ -1,4 +1,5 @@
 use crate::cli::args::DemoArgs;
+use anyhow::Context;
 use assay_core::config::path_resolver::PathResolver;
 use assay_core::validate::{validate, ValidateOptions};
 use std::fs;
@@ -21,7 +22,8 @@ tools:
       properties:
         operation: { enum: ["add", "subtract"] }
 "#;
-    let _ = fs::write(&policy_path, policy_content);
+    fs::write(&policy_path, policy_content)
+        .with_context(|| format!("failed to write demo file {}", policy_path.display()))?;
 
     // 2. Create Config File (The Test Runner)
     let config_path = demo_dir.join("assay.yaml");
@@ -35,7 +37,8 @@ tests:
       type: args_valid
       policy: policy.yaml
 "#;
-    let _ = fs::write(&config_path, config_content);
+    fs::write(&config_path, config_content)
+        .with_context(|| format!("failed to write demo file {}", config_path.display()))?;
 
     // 2. Create Traces
     let trace_path = demo_dir.join("traces.jsonl");
@@ -43,7 +46,8 @@ tests:
     let trace_content = r#"{"id": "demo_trace_1", "tool": "Search", "args": {"query": "assay rules"}, "prompt": "find assay rules", "response": "detecting 123"}
 {"tool": "Calculate", "args": {"operation": "add", "x": 1, "y": 2}, "response": "3"}
 "#;
-    let _ = fs::write(&trace_path, trace_content);
+    fs::write(&trace_path, trace_content)
+        .with_context(|| format!("failed to write demo file {}", trace_path.display()))?;
 
     println!("✓ Created demo environment in {}", demo_dir.display());
     println!("  - Config: {}", config_path.display());
