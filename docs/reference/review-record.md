@@ -52,6 +52,46 @@ fail. Empty `findings` requires `no_findings: true`; each finding is
 `{id, summary, disposition}`. Independence flags must be JSON `true`,
 not the string `"true"`. `reviewer` must be an object.
 
+## Superseding a record on the same head
+
+Exactly one record may be current for the live head; a second one
+fails `ambiguous_current`, even when the first is malformed. A reviewer
+who posted a wrong record on the live head, whether malformed or with a
+verdict they need to change, posts a new record with one extra field,
+`"supersedes": <comment id>`. The id is the positive integer REST id of
+the earlier comment, the number in its `#issuecomment-N` link. Do not
+edit the old comment: an edited record fails `edited_current` whether
+or not it is superseded.
+
+The checker retires the named record only when all of these hold. A
+failure is `supersede_refused`, or the new record's own validation
+reason:
+
+- the new record is valid by itself (`BLOCKED` is valid, and the gate
+  still fails on it);
+- the target is a parseable record naming the same live head, not an
+  older-head record, a comment without a record, or an unknown id;
+- the target is older: a lower comment id, and a `created_at` that is
+  not later;
+- one comment author posted both, and both declare the same
+  `reviewer` `agent` and `instance`;
+- the new record's reviewer is not the builder the target declared.
+
+A refused supersede retires nothing. Anything still current after
+retirement is counted as before, so records from two reviewers stay
+`ambiguous_current`, and so does a later record that omits
+`supersedes`. Chains work (C supersedes B, which supersedes A) because
+every target is older. After posting, rerun the workflow as described
+under "Required workflow".
+
+This does not widen what a login can already do. The same author can
+delete its own comment and repost; superseding gets the same result
+and leaves the earlier record readable. It does not repair a carrier.
+A comment that does not parse, has been edited, was posted by a
+non-`User`, or declares another login fails as before, because either
+its reviewer identity cannot be read or the carrier is the defect.
+Those still need the comment deleted or a new head.
+
 ## Local checker
 
 `scripts/ci/assay_review_record_check.py --self-test` pins the record
@@ -61,7 +101,9 @@ the PR head again; a sha/ref change is `head_moved`. Responses are
 capped at 8 MiB, HTTP timeout is 30s, and comments stop after two
 pages (200 comments) with `comments_limit`. A comments-API failure is
 `comments_api_failure`. The pre-commit hook is
-`assay-review-record-self-test`.
+`assay-review-record-self-test`. The supersede rule is the checker's
+`resolve_supersedes`; `scripts/review/pr_landing_readiness.py` calls
+it rather than restating it.
 
 ## Required workflow
 
@@ -92,5 +134,8 @@ quality, an approval count, or AGENTS carry-forward. The workflow does not
 support merge queues, write comments or statuses, or use a write token. API
 failure is a failed required check, not evidence that the review was defective.
 A base checkout protects the executed repository code, not the PR-supplied
-workflow definition. Coordinated mutation of the workflow, checker, both
+workflow definition. `reviewer` is declared, not verified: when several agents
+post through one GitHub login, the declared pair is all that separates them,
+so the supersede check cannot tell a reviewer from someone declaring that
+reviewer's identity, just as a single record cannot. Coordinated mutation of the workflow, checker, both
 required roots, and live protection is outside repo-local enforcement.
