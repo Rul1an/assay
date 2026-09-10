@@ -9,9 +9,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-mkdir -p "$TMP/scripts/ci/lib" "$TMP/docs/generated" "$TMP/docs/guides" "$TMP/.github"
+mkdir -p "$TMP/scripts/ci/lib" "$TMP/docs/generated" "$TMP/docs/guides" "$TMP/.github" \
+  "$TMP/crates/assay-evidence/src"
 cp "$ROOT/scripts/ci/check-tag-tree-outward-truth.sh" "$TMP/scripts/ci/"
+cp "$ROOT/scripts/ci/check-readme-attestation-truth.py" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/lib/workspace_version.py" "$TMP/scripts/ci/lib/"
+# The attestation row is read from the real files; its own mutations live in
+# test-check-readme-attestation-truth.sh. Here one mutation proves the release path calls it.
+cp "$ROOT/README.md" "$TMP/README.md"
+cp "$ROOT/crates/assay-evidence/src/attestation.rs" "$TMP/crates/assay-evidence/src/"
 cat > "$TMP/Cargo.toml" <<'EOF'
 [workspace.package]
 version = "5.3.0"
@@ -40,7 +46,7 @@ printf '%s\n' 'v5.2.0' > "$TMP/.github/assay-release-tag"
   git init -q
   git config user.email test@example.invalid
   git config user.name test
-  git add -- Cargo.toml CHANGELOG.md .github docs scripts
+  git add -- Cargo.toml CHANGELOG.md README.md .github crates docs scripts
   git commit -qm fixture
 )
 
@@ -81,6 +87,8 @@ mutate_and_fail stale-guide-source docs/guides/agent-golden-path.md \
   'source tree declares Assay `5.2.0` (`v5.2.0`)' 'source-tree declaration'
 mutate_and_fail stale-changelog CHANGELOG.md \
   '\[5.3.0\]' '[5.2.0]' 'release heading'
+mutate_and_fail stale-readme-attestation README.md \
+  'in-toto v1 Statement' 'in-toto v0 Statement' 'README attestation row'
 
 if (cd "$TMP" && CANDIDATE_TAG=v5.2.0 EXPECTED_SHA="$head_sha" \
   bash scripts/ci/check-tag-tree-outward-truth.sh) >"$TMP/tag-mismatch.out" 2>&1; then
@@ -106,8 +114,8 @@ printf '%s\n' 'v4.9.0' > "$TMP/.github/assay-release-tag"
 run_check >/dev/null
 printf 'PASS: install-pin-does-not-govern-candidate-identity\n'
 
-if [ "$mutations" -ne 6 ]; then
-  echo "FAIL: expected 6 observed mutations, got $mutations" >&2
+if [ "$mutations" -ne 7 ]; then
+  echo "FAIL: expected 7 observed mutations, got $mutations" >&2
   exit 1
 fi
 printf 'tag-tree outward-truth mutations: %s observed\n' "$mutations"
@@ -193,11 +201,14 @@ pattern = re.compile(selectors[0])
 for required in (
     "Cargo.toml",
     "CHANGELOG.md",
+    "README.md",
+    "crates/assay-evidence/src/attestation.rs",
     "docs/generated/agent-golden-path.json",
     "docs/guides/agent-golden-path.md",
     "docs/reference/release.md",
     ".github/workflows/release.yml",
     "scripts/ci/check-tag-tree-outward-truth.sh",
+    "scripts/ci/check-readme-attestation-truth.py",
     "scripts/ci/test-check-tag-tree-outward-truth.sh",
     "scripts/ci/lib/clear-git-repository-env.sh",
 ):

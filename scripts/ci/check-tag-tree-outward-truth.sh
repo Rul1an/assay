@@ -69,5 +69,10 @@ changelog_pattern="^## \\[${changelog_version}\\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$"
 [ "$(grep -Ec "$changelog_pattern" "$ROOT/CHANGELOG.md" || true)" -eq 1 ] ||
   fail "CHANGELOG.md must contain exactly one dated release heading for $source_version"
 
+# A format claim is outward truth too: v6.0.0 and v6.1.0 shipped a README naming a v0 statement
+# over a source that emitted v1 (#2859, #2875).
+python3 "$ROOT/scripts/ci/check-readme-attestation-truth.py" --root "$ROOT" ||
+  fail "README attestation row does not match the statement the source emits"
+
 printf 'tag-tree outward truth: source %s, candidate %s, checkout %s\n' \
   "$source_version" "$CANDIDATE_TAG" "$actual_sha"
