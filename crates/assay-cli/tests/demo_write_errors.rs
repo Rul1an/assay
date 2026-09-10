@@ -3,8 +3,10 @@
 //! The write-error gap was `let _ = fs::write(...)` on policy.yaml, assay.yaml,
 //! and traces.jsonl, followed by an unconditional "Created demo environment".
 //! The parse gap was a shipped policy in the old `tools: Search:` shape, which
-//! `Policy` rejects (`allow`, `deny`, `require_args`, `arg_constraints`). These
-//! tests drive the built binary and read exit code, stdout, and stderr.
+//! `Policy` rejects (`allow`, `deny`, `require_args`, `arg_constraints`). The
+//! negative pin rewrites the demo Search query after a passing first run so a
+//! vacuous schema cannot stay green. These tests drive the built binary and
+//! read exit code, stdout, and stderr.
 
 use assert_cmd::Command;
 use std::fs;
@@ -67,6 +69,16 @@ fn run_printed_validate(stdout: &str) -> (i32, String, String) {
     (code, stdout, stderr)
 }
 
+fn rewrite_search_query(traces: &str, query: &str) -> String {
+    let needle = r#""query": "assay rules""#;
+    let replacement = format!(r#""query": "{query}""#);
+    assert!(
+        traces.contains(needle),
+        "traces.jsonl missing the demo Search query to rewrite:\n{traces}"
+    );
+    traces.replacen(needle, &replacement, 1)
+}
+
 #[test]
 fn demo_completes_and_printed_validate_passes() {
     let dir = tempdir().unwrap();
@@ -90,6 +102,33 @@ fn demo_completes_and_printed_validate_passes() {
     assert!(
         vstderr.contains("Validation OK"),
         "printed next-step validate should report Validation OK\nstdout:\n{vstdout}\nstderr:\n{vstderr}"
+    );
+}
+
+#[test]
+fn printed_validate_rejects_forbidden_search_query() {
+    let dir = tempdir().unwrap();
+    let out = dir.path();
+    let (code, stdout, stderr) = run_demo(out);
+
+    assert_eq!(
+        code, 0,
+        "assay demo --out should exit 0\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+
+    let traces = out.join("traces.jsonl");
+    let rewritten = rewrite_search_query(&fs::read_to_string(&traces).unwrap(), "assay;rules");
+    fs::write(&traces, rewritten).unwrap();
+
+    let (vcode, vstdout, vstderr) = run_printed_validate(&stdout);
+    assert_ne!(
+        vcode, 0,
+        "printed next-step validate should reject a forbidden Search query\nstdout:\n{vstdout}\nstderr:\n{vstderr}"
+    );
+    let combined = format!("{vstdout}{vstderr}");
+    assert!(
+        combined.contains("E_ARG_SCHEMA"),
+        "validate output should name E_ARG_SCHEMA\nstdout:\n{vstdout}\nstderr:\n{vstderr}"
     );
 }
 
