@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay validate --format json` emits `assay.validate_report.v1` for both successful
+  and failing validation reports, carrying `schema_version: 1` (#2169, #2171).
+- `assay run --format json` emits `assay.run_report.v1` for completed run reports,
+  carrying `schema_version: 1`, while early failures before results exist emit
+  the `assay.run_summary.v1` diagnosis (#2169, #2171).
+
 ## [6.1.2] - 2026-09-10
 
 A security patch release: secret redaction for current GitHub token formats.
