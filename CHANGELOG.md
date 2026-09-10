@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.1.1] - 2026-09-10
+
+A security patch release. Advisory: GHSA-959f-h4x8-m24q.
+
 ### Security
 - `evidence pull --verify` now requires the verified bundle to identify as the requested
   `bundle_id`, and verifies before writing: previously any internally valid bundle stored under the
@@ -12,6 +16,22 @@ All notable changes to this project will be documented in this file.
   re-upload unless it is byte-identical. `bundle_id` is the `run_root`, shared by different
   archives with the same events; previously the second archive was silently not stored, the command
   exited 0, and `--run-id` linked the run to the other archive. It now fails and links nothing.
+  The two findings are tracked in GHSA-959f-h4x8-m24q; both fixes exit non-zero where the old
+  behaviour exited 0.
+
+### Fixed
+- The MCP `E_TOOL_DRIFT` deny contract's reason text is reworded; the code and decision are unchanged (#2876).
+
+### Documentation
+- The README attestation row states what the source emits: a DSSE-wrapped in-toto v1 Statement
+  with the `evidence-bundle/v1` predicate (#2877).
+
+### Internal
+- The release path checks the README attestation row against the statement and predicate every
+  public constructor emits (#2885), and the landing helper refuses text that would close an issue a
+  PR does not declare, including negated phrases GitHub still acts on (#2883, #2887).
+- Required CI now runs the job-timeouts and gate-expectation contracts, and a derived rule keeps
+  pre-commit-only guards of required workflows from reappearing (#2878, #2879, #2882).
 
 ## [6.1.0] - 2026-09-09
 
