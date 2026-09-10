@@ -54,6 +54,34 @@ Subprocess output goes to temporary files; this is not a disk-quota guarantee.
 No evidence contents are executed. GitHub comments remain editable; this is not an
 immutable attestation or protection against subsequent evidence edits.
 
+## Closing keywords
+
+GitHub closes an issue when a closing keyword (`close`, `closes`, `closed`, `fix`, `fixes`,
+`fixed`, `resolve`, `resolves`, `resolved`, any case, optional colon) is followed by an issue
+reference, in a PR description or in a commit message that lands on the default branch. It has
+no notion of negation, and it reads commit messages the author can no longer edit. Between
+2026-08-19 and 2026-09-05 that closed five issues their authors meant to keep open: a sentence
+saying a change leaves an issue open, written with the keyword directly before the number,
+closes that issue; and a keyword retracted from a PR body still closes the issue from the
+commit that carried it.
+
+`pr_landing_readiness.py` therefore reports a blocker, via `closing_keywords.py`, when:
+
+- a closing keyword and issue reference sit in a negated clause, in the body, the title or any
+  commit message; or
+- a commit message or the title closes an issue that the PR body does not also close with a
+  non-negated keyword. The title is not parsed on the PR, but it becomes the subject of the
+  merge or squash commit, which is.
+
+The PR body is the live declaration of what a merge closes. The remedy for either blocker is
+the same: never put a closing keyword next to an issue number unless you mean to close it.
+Write `Refs #N` for a relationship. There is no negated form that GitHub understands, so the
+words must not appear, in the body or in a commit message.
+
+The rule is deliberately conservative: it prefers a false block, which costs one rewording, to
+a silent close. It cannot see a keyword that was edited out of the body before merge but left
+in place when the issue closed, and it does not undo a close that already happened.
+
 The broader readiness queries accept only the fixed `gh pr` and `gh api` command
 families used by the reporter, validate repository and branch path components, and
 apply a 30-second timeout plus an 8-MiB JSON ceiling before parsing. Human-readable
@@ -66,6 +94,7 @@ Run synthetic tests (fake gh, no live merges):
 python3 scripts/review/test_review_relay.py
 python3 scripts/review/test_safe_merge_protocol.py
 python3 scripts/review/test_pr_landing_readiness.py
+python3 scripts/review/test_closing_keywords.py
 ```
 
 The `review-relay-protocol-tests` pre-commit hook runs the complete set on the PR

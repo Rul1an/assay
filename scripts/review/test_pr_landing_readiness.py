@@ -312,13 +312,13 @@ class UnprotectedPolicyTests(unittest.TestCase):
     def run_report(self, *, explicit=True, protected=False, rules=None, checks=None,
                    review=True, blocked=False, state="OPEN", draft=False,
                    mergeable="MERGEABLE", body_current=True, number=30,
-                   output_format="json"):
+                   output_format="json", title="test", body_extra="", commits=None):
         head = "b" * 40
-        pr = dict(number=number, title="test", state=state, isDraft=draft,
+        pr = dict(number=number, title=title, state=state, isDraft=draft,
                   mergeable=mergeable, headRefOid=head, baseRefOid="a" * 40,
                   baseRefName="main", headRefName="codex/review-fix",
-                  body=head if body_current else "no pinned head",
-                  reviews=[], comments=[])
+                  body=(head if body_current else "no pinned head") + body_extra,
+                  reviews=[], comments=[], commits=commits or [])
         if review:
             pr["comments"] = [{"author": {"login": "reviewer"}, "body": f"READY\n{head}"}]
         if blocked:
@@ -404,6 +404,44 @@ class UnprotectedPolicyTests(unittest.TestCase):
         for protected, rules in [(True, []), (None, []), (False, [{}]), (False, {})]:
             with self.subTest(protected=protected, rules=rules), self.assertRaises(SystemExit):
                 self.run_report(protected=protected, rules=rules)
+
+    # The closing-keyword guard (#2880) is only worth anything on the landing path, so these
+    # drive it through main() rather than through the helper. Each case is otherwise a clean
+    # landing candidate, so the keyword blocker is the only thing that can flip the verdict.
+    KW = "clo" + "ses"
+
+    def test_clean_candidate_is_the_control_for_the_keyword_cases(self):
+        report, _ = self.run_report(body_extra=f"\n\n{self.KW.capitalize()} #7",
+                                    commits=[{"oid": "c" * 40, "messageHeadline": "fix: x",
+                                              "messageBody": f"{self.KW.capitalize()} #7"}])
+        self.assertTrue(report["landing_candidate"], report["blockers"])
+        self.assertEqual(report["closing_keyword_problems"], [])
+
+    def test_negated_keyword_in_body_blocks_landing(self):
+        report, _ = self.run_report(body_extra=f"\n\nDoes not {self.KW[:-1]} #7.")
+        self.assertFalse(report["landing_candidate"])
+        self.assertTrue(any("#7" in b and "negat" in b for b in report["blockers"]),
+                        report["blockers"])
+
+    def test_commit_keyword_the_body_does_not_declare_blocks_landing(self):
+        report, _ = self.run_report(
+            body_extra="\n\nRefs #7; it stays open.",
+            commits=[{"oid": "d" * 40, "messageHeadline": "fix: x",
+                      "messageBody": f"{self.KW.capitalize()} #7"}])
+        self.assertFalse(report["landing_candidate"])
+        self.assertTrue(any("dddddddd" in b and "#7" in b for b in report["blockers"]),
+                        report["blockers"])
+
+    def test_title_keyword_the_body_does_not_declare_blocks_landing(self):
+        report, _ = self.run_report(title="Fix #7 in the runner")
+        self.assertFalse(report["landing_candidate"])
+        self.assertTrue(any("title" in b and "#7" in b for b in report["blockers"]),
+                        report["blockers"])
+
+    def test_commits_are_requested_from_github(self):
+        _, calls = self.run_report()
+        view = next(c for c in calls if c[1:3] == ["pr", "view"])
+        self.assertIn("commits", view[-1].split(","))
 
     def test_missing_or_non_success_checks_refused(self):
         for state, bucket in [("FAILURE", "fail"), ("PENDING", "pending"), ("SKIPPED", "pass"), ("NEUTRAL", "pass"), ("SUCCESS", "unknown")]:

@@ -9,6 +9,8 @@ from pathlib import Path
 from urllib.parse import quote, unquote
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ci"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from closing_keywords import closing_problems  # noqa: E402
 from assay_review_record_check import (  # noqa: E402
     GateError,
     MARKER as REVIEW_RECORD_MARKER,
@@ -21,7 +23,7 @@ SHA_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])", re.IGNORECASE)
 REPO_COMPONENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 MAX_JSON_BYTES = 8 * 1024 * 1024
 COMMAND_TIMEOUT_SECONDS = 30
-PR_VIEW_FIELDS = "number,title,url,state,author,isDraft,mergeable,mergeStateStatus,headRefName,headRefOid,baseRefName,baseRefOid,body,reviews,comments"
+PR_VIEW_FIELDS = "number,title,url,state,author,isDraft,mergeable,mergeStateStatus,headRefName,headRefOid,baseRefName,baseRefOid,body,reviews,comments,commits"
 PR_CHECK_FIELDS = "name,state,bucket,link,workflow,event"
 REQUIRED_CONTEXT_QUERY = "query($owner:String!,$name:String!,$ref:String!){repository(owner:$owner,name:$name){ref(qualifiedName:$ref){branchProtectionRule{requiredStatusCheckContexts}}}}"
 
@@ -350,6 +352,17 @@ def main():
         blockers.append("current-head BLOCKED review exists")
     if not body_mentions_head:
         blockers.append("PR body does not mention current head SHA")
+    # Closing keywords in text that lands on the default branch (#2880). GitHub has no notion
+    # of negation and reads frozen commit messages, so both have closed issues their authors
+    # meant to keep open. See scripts/review/closing_keywords.py for the rule.
+    commit_messages = [
+        (f"commit {str(c.get('oid') or '')[:9]}",
+         f"{c.get('messageHeadline') or ''}\n\n{c.get('messageBody') or ''}")
+        for c in (pr.get("commits") or [])
+    ]
+    keyword_problems = closing_problems(
+        args.repo, pr.get("title") or "", pr.get("body") or "", commit_messages)
+    blockers.extend(keyword_problems)
 
     payload = {
         "pr": {key: pr.get(key) for key in ("number", "title", "url", "state", "author", "isDraft", "mergeable", "mergeStateStatus", "headRefName", "headRefOid", "baseRefName", "baseRefOid")},
@@ -360,6 +373,7 @@ def main():
         "check_policy": "explicit-unprotected" if explicit_checks else "classic-and-active-rulesets",
         "review_candidates": candidates,
         "body_mentions_head": body_mentions_head,
+        "closing_keyword_problems": keyword_problems,
         "blockers": blockers,
         "landing_candidate": not blockers,
         "non_claim": "Reviewer independence and actionable-finding disposition require human verification.",
