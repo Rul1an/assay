@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use assay_common::limits::{LimitKind, LimitReader};
 use assay_evidence::bundle::writer::VerifyLimits;
-use assay_evidence::store::BundleStore;
+use assay_evidence::store::{BundleStore, StreamCeiling};
 use assay_evidence::{resolve_store_url, Bytes, ObjectStoreBundleStore, StoreError, StoreSpec};
 use clap::Args;
 use std::fs::File;
@@ -92,17 +92,36 @@ pub async fn cmd_push(args: PushArgs) -> Result<i32> {
         .with_context(|| "failed to connect to store")?;
 
     // 4. Upload bundle
-    match store.put_bundle(&bundle_id, bytes).await {
+    match store.put_bundle(&bundle_id, bytes.clone()).await {
         Ok(()) => {
             eprintln!("✅ Uploaded: {}", bundle_id);
         }
         Err(StoreError::AlreadyExists { .. }) => {
+            // The key is `bundle_id`, which is the bundle's `run_root`: a digest over event
+            // semantics, not over the archive. A different archive with the same events shares it.
+            // So an existing object is an idempotent re-upload only if it is these bytes; anything
+            // else would keep the other archive and, below, link this run to it. `--allow-exists`
+            // quiets the identical case and does not waive this.
+            let stored = store
+                .get_bundle_bounded(&bundle_id, StreamCeiling::new(limits.max_bundle_bytes))
+                .await
+                .with_context(|| {
+                    format!(
+                        "bundle {bundle_id} already exists and could not be read back to compare"
+                    )
+                })?;
+            if stored != bytes {
+                anyhow::bail!(
+                    "a different archive is already stored as {bundle_id}; it was not replaced, \
+                     and no run was linked"
+                );
+            }
             if args.allow_exists {
                 eprintln!("ℹ️  Bundle already exists: {}", bundle_id);
             } else {
                 eprintln!("⚠️  Bundle already exists: {}", bundle_id);
                 eprintln!("   Use --allow-exists to suppress this warning");
-                // Not an error - idempotent
+                // Not an error: the stored object is these exact bytes.
             }
         }
         Err(e) => {

@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Security
+- `evidence pull --verify` now requires the verified bundle to identify as the requested
+  `bundle_id`, and verifies before writing: previously any internally valid bundle stored under the
+  requested key was reported as `Verified: OK` and written under the requested name.
+- `evidence push` no longer treats an existing object under the same `bundle_id` as an idempotent
+  re-upload unless it is byte-identical. `bundle_id` is the `run_root`, shared by different
+  archives with the same events; previously the second archive was silently not stored, the command
+  exited 0, and `--run-id` linked the run to the other archive. It now fails and links nothing.
+
 ## [6.1.0] - 2026-09-09
 
 ### Added

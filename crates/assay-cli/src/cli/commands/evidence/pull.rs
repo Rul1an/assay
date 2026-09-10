@@ -147,6 +147,24 @@ async fn pull_single(
         Err(e) => return Err(e).context("failed to download bundle"),
     };
 
+    // With --verify, the bytes are verified and bound to the requested id before anything is
+    // written. Integrity alone says the store returned *a* valid bundle; the store is keyed by a
+    // name anyone with write access can put any object under, so the verified manifest must also
+    // name the bundle that was asked for. Writing first, as this used to, left an unverified file
+    // under the requested name even when verification then failed.
+    if verify {
+        let verified = assay_evidence::verify_bundle(std::io::Cursor::new(bytes.as_ref()))
+            .context("bundle verification failed")?;
+        if verified.manifest.bundle_id != bundle_id {
+            anyhow::bail!(
+                "bundle identity mismatch: requested {}, but the store returned a bundle that \
+                 identifies as {}; nothing was written",
+                shown(bundle_id),
+                shown(&verified.manifest.bundle_id)
+            );
+        }
+    }
+
     // Determine output path
     let out_path = if out.is_dir() {
         out.join(bundle_filename(bundle_id))
@@ -163,10 +181,7 @@ async fn pull_single(
 
     eprintln!("✅ Downloaded to: {}", out_path.display());
 
-    // Verify if requested
     if verify {
-        let cursor = std::io::Cursor::new(bytes.as_ref());
-        assay_evidence::verify_bundle(cursor).context("bundle verification failed")?;
         eprintln!("✅ Verified: OK");
     }
 
