@@ -6,7 +6,7 @@ with tempfile.TemporaryDirectory(prefix='safe-merge-protocol-') as d:
     ci = root / 'scripts' / 'ci'
     review.mkdir(parents=True)
     ci.mkdir(parents=True)
-    for name in ('safe_merge.sh', 'pr_landing_readiness.py', 'verify_review_identity.py'):
+    for name in ('safe_merge.sh', 'pr_landing_readiness.py', 'verify_review_identity.py', 'closing_keywords.py'):
         shutil.copy2(source / name, review / name)
     shutil.copy2(source.parent / 'ci' / 'assay_review_record_check.py',
                  ci / 'assay_review_record_check.py')
@@ -19,7 +19,7 @@ case=os.environ['CASE']
 if args[:2]==['pr','view']:
  record=dict(schema='assay.review-record.v0',head_sha='a'*40 if case=='stale' else head,review_completed=True,verdict='BLOCKED' if case=='blocked' else 'READY',builder=dict(agent='codex',instance='writer'),reviewer=dict(agent='claude',instance='other' if case=='identity-mismatch' else 'reviewer',github_login='reviewer'),independence=dict(did_not_build=True,did_not_author_governing_spec=True),findings=[],no_findings=True)
  body='<!-- assay-review-record -->\\n```json\\n'+json.dumps(record)+'\\n```'
- print(json.dumps(dict(number=30,author=dict(login='owner'),state='OPEN',isDraft=False,mergeable='MERGEABLE',headRefOid=head,headRefName='codex/review-fix',baseRefOid='a'*40,baseRefName='main',body=head,comments=[] if case=='no-review' else [dict(author=dict(login='reviewer'),body=body)])))
+ print(json.dumps(dict(number=30,author=dict(login='owner'),state='OPEN',isDraft=False,mergeable='MERGEABLE',headRefOid=head,headRefName='codex/review-fix',baseRefOid='a'*40,baseRefName='main',body=head+('\\n\\nDoes not '+'clo'+'se #7.' if case=='negated-keyword' else ''),comments=[] if case=='no-review' else [dict(author=dict(login='reviewer'),body=body)])))
 elif args[:2]==['pr','checks']:
  print(json.dumps([dict(name='reproduce',state='SKIPPED' if case=='skipped' else 'SUCCESS',bucket='pass')]))
 elif args[:2]==['pr','merge']:
@@ -38,7 +38,7 @@ elif args[-1].endswith('/branches/main'): print('{"protected":false}')
 else: raise SystemExit('unexpected gh arguments: '+repr(args))
 ''')
     gh.chmod(0o755)
-    for case, explicit in [('protected',False),('ruleset',False),('unprotected',True),('no-review',True),('skipped',True),('blocked',True),('stale',True),('identity-mismatch',True)]:
+    for case, explicit in [('protected',False),('ruleset',False),('unprotected',True),('no-review',True),('skipped',True),('blocked',True),('stale',True),('identity-mismatch',True),('negated-keyword',True)]:
         log=root/'merge.json'
         log.unlink(missing_ok=True)
         env=dict(os.environ, PATH=str(root)+':'+os.environ['PATH'], CASE=case, MERGE_LOG=str(log))
@@ -48,6 +48,8 @@ else: raise SystemExit('unexpected gh arguments: '+repr(args))
         expected=case in ('protected','ruleset','unprotected')
         assert (p.returncode==0)==expected,(case,p.stderr)
         assert log.exists()==expected,case
+        if case=='negated-keyword':
+            assert 'negated closing keyword' in p.stderr and '#7' in p.stderr,(case,p.stderr)
         if expected:
             command=json.loads(log.read_text())
             assert command[-2:]==['--match-head-commit','b'*40],command
