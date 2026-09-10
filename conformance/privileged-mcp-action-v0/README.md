@@ -19,14 +19,14 @@ Vectors for the [Privileged MCP Action Evidence Profile v0](../../docs/profiles/
 ## What a reproduction establishes: read [ERRATA.md](ERRATA.md) first
 
 Reproducing all fourteen outcomes **can distinguish an implementation on at most five** of the
-profile's rules, and even those only at the points these vectors probe. **Twenty-two further rules
+profile's rules, and even those only at the points these vectors probe. **Twenty-five further rules
 that v0.md promises are not discriminated by any vector here**, so an implementation can omit them and
-still reproduce all fourteen expected outcomes. Two of the twenty-two cannot be closed by writing a
+still reproduce all fourteen expected outcomes. Two of the twenty-five cannot be closed by writing a
 better vector at all, and one cannot be isolated by any bundle that could exist.
 
-Five of twenty-seven is 18.5%. The run and the expectations are unchanged and the exercise is still
+Five of thirty is 16.7%. The run and the expectations are unchanged and the exercise is still
 worth doing. What changes is the claim that can be made afterwards, by the implementer and by us, and
-the report template now carries a field for it. [ERRATA.md](ERRATA.md) names all twenty-seven measured
+the report template now carries a field for it. [ERRATA.md](ERRATA.md) names all thirty measured
 rules with the profile sentence promising each, says which a new vector could close and which it could
 not, rules on whether it may be read before a freeze, and is pinned to the current corpus digest.
 

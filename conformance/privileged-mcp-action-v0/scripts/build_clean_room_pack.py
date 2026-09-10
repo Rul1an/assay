@@ -64,7 +64,7 @@ been observed to fail on. Read `canonicalization/README.md` before the spec.
 Less than the profile, and you should know the size of it before you start.
 
 These fourteen cases can distinguish an implementation on **at most five** of the
-profile's rules, and even those only at the points the cases probe. **Twenty-two
+profile's rules, and even those only at the points the cases probe. **Twenty-five
 rules that `spec.md` promises are not discriminated by any case in this pack**, so
 an implementation that omits them matches all fourteen expected outcomes anyway.
 That was measured by deleting each rule from a reference implementation and
@@ -77,7 +77,7 @@ is safe to read only after your implementation is frozen.
 
 Two consequences for your report. A match establishes agreement on at most those
 five rules and not on the profile, so do not write more than that and neither
-will we. And if you implemented any of the twenty-two anyway, say which: no case
+will we. And if you implemented any of the twenty-five anyway, say which: no case
 here can extract that, and it is the only evidence those rules can get.
 """
 

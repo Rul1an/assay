@@ -57,10 +57,10 @@ Pre-filled from [ERRATA.md](ERRATA.md), pinned to corpus digest `sha256:cb58ce91
 
 - This reproduction can distinguish this implementation on **at most five** of the profile's rules,
   and even those only at the points these vectors probe. It does not establish agreement on the
-  profile. Twenty-two promised rules are not discriminated by any vector in this corpus.
+  profile. Twenty-five promised rules are not discriminated by any vector in this corpus.
 - Was `ERRATA.md` read before the implementation was frozen? (yes/no; reading it is permitted and
   disclosed, not disqualifying):
-- Which of the twenty-two undiscriminated rules did you implement anyway? List them. No vector can
+- Which of the twenty-five undiscriminated rules did you implement anyway? List them. No vector can
   extract this and it is the only evidence those rules can get before a later corpus exists:
 
 ## Non-claims
