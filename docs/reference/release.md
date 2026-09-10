@@ -33,7 +33,9 @@ This document outlines the canonical checklist for releasing new versions of Ass
     bash scripts/ci/check-tag-tree-outward-truth.sh
   ```
   This binds the workspace, changelog, and generated golden-path source identity
-  to the candidate tag, and verifies the caller-provided checkout SHA. It does not
+  to the candidate tag, and verifies the caller-provided checkout SHA. It also
+  checks that the README attestation row names the in-toto Statement and
+  predicate versions the source emits. It does not
   prove that a not-yet-created tag already points at that commit. The published install pin may still name the
   previous release until the candidate assets exist; installability and source
   identity are separate checks.
