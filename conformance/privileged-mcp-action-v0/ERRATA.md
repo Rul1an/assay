@@ -89,8 +89,16 @@ python3 ../corpus-adequacy/corpus_adequacy.py \
   conformance/adequacy/privileged-mcp-action-v0.manifest.json
 ```
 
-It edits declared source files in place and restores them. Do not run it against a tree you are also
-working in, and do not commit while it runs.
+At that commit the process runner measures a disposable copy of the repository in the system temp
+directory and does not write your checkout; its lock file lives in temp too. The copy leaves out
+only `.git`, and it is refused above 64 MiB or 10,000 entries, so a build directory such as `target/`
+in the checkout makes the run stop with `materialization exceeds the ceiling of 67108864 bytes`
+before anything is measured or written. Move it out of the tree first. The copy is not an atomic
+snapshot, so do not edit the tree while it is being taken.
+
+An earlier version of this paragraph said the tool edits declared source files in place and restores
+them. That described the runner before corpus-adequacy isolated process and batch runs from the
+checkout (corpus-adequacy #20, 2026-08-20), not the pinned commit.
 
 ## The five rules a reproduction can distinguish
 
