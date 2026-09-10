@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.1.2] - 2026-09-10
+
+A security patch release: secret redaction for current GitHub token formats.
+
 ### Security
 - Recognise GitHub's stateless App installation-token format (`ghs_<app id>_<JWT>`, about 520
   characters with two dots), which GitHub began rolling out on 2026-04-27 and which every Actions
@@ -17,6 +21,15 @@ All notable changes to this project will be documented in this file.
   surrounding keyword, header or query context. No rule matched that shape, so a bare token passed
   capture-side and render-side redaction whole; a new `github-fine-grained-pat` rule joins the
   shared `secret-rules.v1.json` contract, in lockstep with the Plimsoll detector.
+
+### Internal
+- The two truncation entry points share one ceiling decision, and a parity table pins their bytes
+  and provenance, including the digest over the original bytes (#2886).
+- The OCI candidate executor pins the exact wrapped Docker argv and decides create and cleanup
+  outcomes after cleanup has run (#2888). The A2A adapter, which ships in no released artifact,
+  accepts only a closed, fixture-derived version set under an explicit legacy profile name (#2889).
+  The privileged-mcp-action/v0 adequacy manifest declares its exact-schema selection rules and is
+  re-measured (#2892).
 
 ## [6.1.1] - 2026-09-10
 
