@@ -25,6 +25,11 @@ lazy_static! {
         ),
         rule("github-token", "secret", r"\bgh[pousr]_[A-Za-z0-9._-]{36,}"),
         rule(
+            "github-fine-grained-pat",
+            "secret",
+            r"\bgithub_pat_[A-Za-z0-9_]{22,}"
+        ),
+        rule(
             "openai-key",
             "secret",
             r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b"

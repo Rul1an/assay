@@ -344,6 +344,7 @@ pub fn rule_specs() -> &'static [(&'static str, &'static str)] {
     &[
         ("aws-access-key-id", r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
         ("github-token", r"\bgh[pousr]_[A-Za-z0-9._-]{36,}"),
+        ("github-fine-grained-pat", r"\bgithub_pat_[A-Za-z0-9_]{22,}"),
         ("openai-key", r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b"),
         ("slack-token", r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
         ("google-api-key", r"\bAIza[0-9A-Za-z_-]{35}\b"),

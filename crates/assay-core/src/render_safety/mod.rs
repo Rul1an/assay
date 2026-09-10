@@ -344,6 +344,20 @@ mod tests {
     }
 
     #[test]
+    fn redacts_a_contextless_fine_grained_pat() {
+        // `github_pat_`, 22 characters, `_`, 59 characters; assembled from fragments.
+        let token = format!(
+            "git{}_pat_{}_{}",
+            "hub",
+            "11ABCDEFG0123456789abc",
+            "Zz9".repeat(19) + "Yy"
+        );
+        let out = redact(&format!("value {token} end"));
+        assert_eq!(out.text, "value <redacted:github-fine-grained-pat> end");
+        assert_eq!(out.secret_hits, 1);
+    }
+
+    #[test]
     fn a_stateless_installation_token_is_redacted_before_truncation() {
         let token = stateless_installation_token();
         let safe = render_safe(Sink::Stdout, &format!("{} {token}", "x".repeat(100)), 160);
