@@ -173,11 +173,12 @@ Names are indicative; the semantics below are the decision.
   `[prompt, meta_json]`; steps: `[content, meta_json]`; tool calls: `[args, result]`). One function
   computes it at write and at read. The reader recomputes it from the current row, and a mismatch
   makes the observation absent, losses included, because it describes other bytes. The check sits
-  with the reader, where the claim is made, so it covers every writer: older binaries, the
-  first-write-wins path and direct edits. Reported loss for steps and tool calls is still read from
-  the row's `truncations_json`, which #2805 keeps coherent with `content`. A binary older than
-  #2805 can leave it stale; with the observation already dropped by the binding check, that yields
-  a spurious loss or unmeasured, never clean.
+  with the reader, where the claim is made, so it covers older binaries, the first-write-wins path
+  and direct edits to the row that do not recompute `bound_sha256`. The digest is keyless by
+  design, so a writer that recomputes it is not caught. Reported loss for steps and tool calls is
+  still read from the row's `truncations_json`, which #2805 keeps coherent with `content`. A
+  binary older than #2805 can leave it stale; with the observation already dropped by the binding
+  check, that yields a spurious loss or unmeasured, never clean.
 - **Pointer map.** SQLite readings exist for `episodes.prompt` (`/input/prompt`),
   `episodes.meta_json` (`/meta`), `steps.content` (`/content`), `steps.meta_json` (`/meta`),
   `tool_calls.args` (`/args`) and `tool_calls.result` (`/result`). The `episodes` table stores only
@@ -250,10 +251,12 @@ Also required:
    trips. Mutation: restore the discard at `trace/upgrader.rs:67-68`.
 6. **Bypass producers.** OTel ingest and MCP import emit no observation and read `Unmeasured`.
    Mutation: attach an upgrader observation.
-7. **Binding.** After an observed step is rewritten by the pre-change upsert SQL executed
-   directly, the step does not read `MeasuredClean`. Mutation: skip the binding check. A second
-   observed tool call with the same identity and different `args` leaves the retained row's
-   reading equal to the first write's.
+7. **Binding.** After an observed step is rewritten by the pre-change step upsert SQL executed
+   directly, the step does not read `MeasuredClean`. Mutation: skip the binding check. After an
+   observed episode is rewritten the same way by the pre-change episode upsert SQL with a changed
+   prompt, `/input/prompt` does not read `MeasuredClean`. Mutation: skip the binding check for
+   episodes only. A second observed tool call with the same identity and different `args` leaves
+   the retained row's reading equal to the first write's.
 8. **Atomicity.** A failing observation insert rolls back the row of the same event. Mutation:
    commit observations in a separate transaction.
 9. **Older readers.** A line carrying `observations` deserializes to the same `TraceEvent` as the
@@ -264,6 +267,21 @@ Also required:
     `MeasuredClean` only through the new observation.
 11. **Unknown version and malformed value** read `Unmeasured`, and the event still reads.
 12. **Semver.** The Wave 0 semver job reports no major for `assay-core`.
+
+Must-bite, added in review:
+
+13. **Per-field clean.** A step with a short `/content` and one loss at `/meta/a`, held in both
+    `truncations` and a trusted observation with scope `["/content", "/meta"]`, reads `Lossy` at
+    `/meta` and `/meta/a` and `MeasuredClean` at `/content`. A reading at `/meta2` is
+    `Unmeasured`, because the `/meta` scope covers whole segments only. Mutations: observation-level
+    clean, where any loss vetoes the whole observation (`/content` turns red, the `Lossy` readings
+    are the control); string-prefix scope matching (`/meta2` turns red).
+14. **Extra observation loss.** The test 13 step with the `/meta/a` loss removed from
+    `truncations` reads `Lossy` at `/meta/a`, because the observation's loss still counts, and
+    `Unmeasured` at `/content`, because parity fails and the observation is absent for the clean
+    reading. Mutation: the reader ignores observation losses that have no `truncations` match,
+    whether by not counting them or by skipping the parity branch. Control: the test 13 record
+    reads `MeasuredClean` at `/content`.
 
 ## Non-claims
 
@@ -282,7 +300,10 @@ Also required:
 - Pre-carrier records do not become decidable; they stay unmeasured.
 - File-level ingest completeness is not addressed.
 - No consumer changes its verdict in this work. `trace verify`, coverage and policy decisions read
-  what they read today; wiring readings into a verdict is separate work.
+  what they read today; wiring readings into a verdict is separate work. Before any reading feeds
+  a verdict, that work must decide between a binding digest over the scoped JSONL values and
+  taking evidentiary clean readings from SQLite only, and it inherits the self-assertion that
+  trusting a stage by name concedes.
 
 ## Alternatives considered
 
