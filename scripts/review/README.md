@@ -95,9 +95,12 @@ a silent close. Known false blocks:
 
 - A line that mentions a negation, even inside inline code, followed with no punctuation or blank
   line by a genuine closing line. End the sentence or leave a blank line.
-- A declaration under "not only ... but also", which reads as negated.
-- A genuine close followed in the same clause by a negation, as in "Fixes #N without changing the
-  API". End the sentence after the number.
+- Any genuine close that shares its clause with a negation, whichever side it sits on and whatever
+  it refers to: a subordinate clause about something else ("unlike the attempt that did not pass
+  CI, this closes #N"), a parenthesis or colon after the number ("Closes #N: does not include
+  docs"), a comparison ("not only ... but also"), or a second reference in the same sentence
+  ("does not close #M, it closes #N" blocks #N too). End the sentence after the number, or give
+  the declaration its own line after a blank line.
 - The title is scanned for every merge method. It lands in the merge or squash commit subject,
   but not under `--rebase`, where a title keyword is therefore a spurious block.
 - The base branch is not consulted. A PR into a non-default branch closes nothing by its body,
@@ -108,6 +111,9 @@ Known silent closes, which this guard cannot see:
 
 - A negation word outside the list. The list covers every negator found in this repository's
   history and in review, but it is finite, and an unlisted one reads as a declaration.
+- A question, a condition or a hedge: "should we close #N here?", "if this closes #N, we can
+  ship", "this might close #N". GitHub has no notion of mood either, so each closes #N on merge,
+  and the guard reads each as a declaration. Only negation is refused; write "Refs #N" for these.
 - An issue linked through the sidebar's Development panel also closes on merge and carries no
   keyword text. That is a deliberate act and is out of scope.
 - A keyword edited out of the body before merge is invisible afterwards, and a close that already
