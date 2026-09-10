@@ -38,7 +38,12 @@ Record parsing and validation are imported from
 second interpretation of the schema. A malformed current-head machine carrier is
 reported as BLOCKED rather than discarded. Dismissed GitHub reviews do not count,
 and a current-head `CHANGES_REQUESTED` review is a blocker even without verdict
-prose.
+prose. A current-head record retired by a later record's `supersedes` does not
+count either, and a refused supersede is reported as BLOCKED. Both come from the
+checker's `resolve_supersedes`, with the comment id taken from the comment URL
+(see `docs/reference/review-record.md`). `verify_review_identity.py` reads only
+the one linked comment, so it cannot tell whether that record was superseded:
+link the superseding record.
 
 This verifies the retrieved declaration, not the actual agent's independence or
 identity. The operator still disposes actionable findings. `pr_landing_readiness.py`
