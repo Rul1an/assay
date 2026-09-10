@@ -8,6 +8,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from datetime import datetime
 from typing import Any
 
 MARKER = "<!-- assay-review-record -->"
@@ -158,6 +159,63 @@ def validate_record(
         raise GateError("blocked", verdict)
 
 
+def _comment_id(value: Any) -> int | None:
+    return value if type(value) is int and value > 0 else None
+
+
+def _instant(value: Any) -> datetime:
+    try:
+        when = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        when = None
+    if when is None or when.tzinfo is None:
+        raise GateError("missing_field", "created_at")
+    return when
+
+
+def _identity(obj: Any) -> tuple[Any, Any] | None:
+    return (obj.get("agent"), obj.get("instance")) if isinstance(obj, dict) else None
+
+
+def resolve_supersedes(
+    entries: list[tuple[int | None, str, Any, dict[str, Any]]], *, live_sha: str, branch_ref: str
+) -> tuple[set[int], dict[int, GateError]]:
+    """Apply each record's `supersedes`; the one rule the gate and the landing helper share.
+
+    `entries` holds (comment id, author login, created_at, record) for every parseable carrier
+    naming the live head. Returns the positions retired and, per position, why a declared
+    supersede was refused. A refused supersede retires nothing, so its target stays current.
+    """
+    at = {cid: i for i, (cid, _login, _created, _record) in enumerate(entries) if cid is not None}
+    retired: set[int] = set()
+    refused: dict[int, GateError] = {}
+    for i, (cid, login, created, record) in enumerate(entries):
+        if "supersedes" not in record:
+            continue
+        try:
+            target = _comment_id(record["supersedes"])
+            if target is None:
+                raise GateError("malformed_record", "supersedes")
+            if cid is None:
+                raise GateError("missing_field", "id")
+            validate_record(record, live_sha=live_sha, branch_ref=branch_ref, require_ready=False)
+            if target not in at:
+                raise GateError("supersede_refused", f"{target} is not a current-head record")
+            _tid, t_login, t_created, t_record = entries[at[target]]
+            if target >= cid or _instant(t_created) > _instant(created):
+                raise GateError("supersede_refused", f"{target} is not older than {cid}")
+            reviewer = _identity(record["reviewer"])
+            if t_login != login or _identity(t_record.get("reviewer")) != reviewer:
+                raise GateError("supersede_refused", f"{target} is another reviewer's record")
+            if _identity(t_record.get("builder")) == reviewer:
+                raise GateError("supersede_refused", f"{target} declares this reviewer as builder")
+        except GateError as exc:
+            refused[i] = exc
+            continue
+        retired.add(at[target])
+    return retired, refused
+
+
 def _current_sha(body: str, record: dict[str, Any] | None, live: str) -> bool:
     if record and str(record.get("head_sha") or "").lower() == live.lower():
         return True
@@ -165,7 +223,7 @@ def _current_sha(body: str, record: dict[str, Any] | None, live: str) -> bool:
 
 
 def evaluate(live_sha: str, branch_ref: str, comments: list[dict[str, Any]]) -> None:
-    current: list[dict[str, Any]] = []
+    entries: list[tuple[int | None, str, Any, dict[str, Any]]] = []
     for comment in comments:
         if not isinstance(comment, dict):
             continue
@@ -200,7 +258,11 @@ def evaluate(live_sha: str, branch_ref: str, comments: list[dict[str, Any]]) -> 
         login, declared = str(user.get("login") or ""), str(rev.get("github_login") or "")
         if declared != login:
             raise GateError("login_mismatch", f"{declared} != {login}")
-        current.append(record)
+        entries.append((_comment_id(comment.get("id")), login, created, record))
+    retired, refused = resolve_supersedes(entries, live_sha=live_sha, branch_ref=branch_ref)
+    if refused:
+        raise refused[min(refused)]
+    current = [record for i, (_cid, _login, _created, record) in enumerate(entries) if i not in retired]
     if not current:
         raise GateError("no_current_record", live_sha)
     if len(current) != 1:
@@ -270,7 +332,7 @@ def _rec(**over: Any) -> dict[str, Any]:
 
 
 def _cmt(record, *, extra="", second=False, bot=False, edited=False, login="Rul1an", body=None,
-         user_type="User", created="t0", updated="keep"):
+         user_type="User", created="t0", updated="keep", cid=None):
     if body is None:
         fence = "```json\n" + json.dumps(record) + "\n```"
         body = MARKER + "\nplease review\n" + fence + extra if extra else MARKER + "\n" + fence
@@ -284,6 +346,8 @@ def _cmt(record, *, extra="", second=False, bot=False, edited=False, login="Rul1
     if updated == "keep":
         updated = "t1" if edited else created
     row: dict[str, Any] = {"body": body, "user": user}
+    if cid is not None:
+        row["id"] = cid
     if created is not None:
         row["created_at"] = created
     if updated is not None:
@@ -352,6 +416,88 @@ def self_test() -> int:
     ]
     for row in reds:
         expect(*row)
+
+    # Same-head supersede. `bad` is the PR #2896 shape: parseable, but its findings carry
+    # claim/status keys, so validate_record() refuses it while it still names the live head.
+    def at(minute: int) -> str:
+        return f"2026-09-10T17:{minute:02d}:00Z"
+
+    def by(record: dict[str, Any], cid: int, minute: int, **kw: Any) -> dict[str, Any]:
+        return _cmt(record, cid=cid, created=at(minute), **kw)
+
+    bad = _rec(findings=[{"claim": 1, "status": "holds"}], no_findings=False)
+    fix = _rec(supersedes=101)
+    other = {"agent": "codex", "instance": "r2", "github_login": "Rul1an"}
+    found = [{"id": "F1", "summary": "x", "disposition": "fixed"}]
+    greens = [
+        ("supersede a malformed same-head record", [by(bad, 101, 11), by(fix, 102, 19)]),
+        ("supersede a valid BLOCKED record", [by(_rec(verdict="BLOCKED"), 101, 11), by(fix, 102, 19)]),
+        ("supersede chain", [by(bad, 101, 11), by(_rec(verdict="BLOCKED", findings=found,
+                             no_findings=False, supersedes=101), 102, 12), by(_rec(supersedes=102), 103, 13)]),
+        ("same-second repost ordered by id", [by(bad, 101, 11), by(fix, 102, 11)]),
+        ("older-head history is not current", [by(_rec(head_sha="b" * 40), 100, 5), by(green, 101, 11)]),
+    ]
+    for label, comments in greens:
+        try:
+            evaluate(live, ref, comments)
+        except GateError as exc:
+            fail.append(f"GREEN {label}: {exc.reason} {exc.detail}")
+
+    self_review = _rec(builder={"agent": "ruley", "instance": "w1"},
+                       reviewer={"agent": "ruley", "instance": "w1", "github_login": "Rul1an"})
+    as_builder = {"agent": "ruley", "instance": "w1", "github_login": "Rul1an"}
+    supersede_reds = [
+        ("different reviewers stay ambiguous", "ambiguous_current",
+         [by(green, 101, 11), by(_rec(reviewer=other), 102, 19)]),
+        ("different reviewer cannot supersede", "supersede_refused",
+         [by(green, 101, 11), by(_rec(reviewer=other, supersedes=101), 102, 19)]),
+        ("different github login cannot supersede", "supersede_refused",
+         [by(_rec(reviewer={"agent": "cursor", "instance": "r1", "github_login": "Other"}), 101, 11,
+             login="Other"), by(fix, 102, 19)]),
+        ("builder as reviewer cannot supersede", "identical_writer_reviewer",
+         [by(bad, 101, 11), by(_rec(reviewer=as_builder, supersedes=101), 102, 19)]),
+        ("builder under another reviewer identity cannot supersede", "supersede_refused",
+         [by(bad, 101, 11), by(_rec(builder={"agent": "ruley", "instance": "w2"}, reviewer=as_builder,
+                                    supersedes=101), 102, 19)]),
+        ("builder cannot supersede its own self-review", "supersede_refused",
+         [by(self_review, 101, 11), by(_rec(builder={"agent": "ruley", "instance": "w2"},
+                                            reviewer=as_builder, supersedes=101), 102, 19)]),
+        ("non-existent target", "supersede_refused", [by(bad, 101, 11), by(_rec(supersedes=999), 102, 19)]),
+        ("newer target", "supersede_refused", [by(_rec(supersedes=102), 101, 11), by(bad, 102, 19)]),
+        ("self target", "supersede_refused", [by(_rec(supersedes=101), 101, 11)]),
+        ("target created later despite lower id", "supersede_refused", [by(bad, 101, 30), by(fix, 102, 19)]),
+        ("older-head target", "supersede_refused",
+         [by(_rec(head_sha="b" * 40), 101, 11), by(fix, 102, 19)]),
+        ("non-record target", "supersede_refused",
+         [{"id": 101, "body": "looks good", "user": {"login": "Rul1an", "type": "User"},
+           "created_at": at(11), "updated_at": at(11)}, by(fix, 102, 19)]),
+        ("invalid superseding record", "missing_disposition",
+         [by(bad, 101, 11), by(_rec(findings=[{"claim": 1}], no_findings=False, supersedes=101), 102, 19)]),
+        ("superseding record without comment id", "missing_field", [by(bad, 101, 11), _cmt(fix, created=at(19))]),
+        ("unparsable timestamp", "missing_field", [_cmt(bad, cid=101, created="t0"), by(fix, 102, 19)]),
+        ("edited superseded record", "edited_current", [by(bad, 101, 11, edited=True), by(fix, 102, 19)]),
+        ("edited superseding record", "edited_current", [by(bad, 101, 11), by(fix, 102, 19, edited=True)]),
+        ("bot carrier cannot be superseded", "bot_carrier", [by(bad, 101, 11, bot=True), by(fix, 102, 19)]),
+        ("login-mismatched carrier cannot be superseded", "login_mismatch",
+         [by(_rec(reviewer={"agent": "cursor", "instance": "r1", "github_login": "Typo"}), 101, 11),
+          by(fix, 102, 19)]),
+        ("unparsable carrier cannot be superseded", "extra_prose",
+         [_cmt(bad, cid=101, created=at(11), extra="\nsorry\n"), by(fix, 102, 19)]),
+        ("two supersedes of one target", "ambiguous_current",
+         [by(bad, 101, 11), by(fix, 102, 19), by(fix, 103, 20)]),
+        ("superseding BLOCKED still fails", "blocked",
+         [by(green, 101, 11), by(_rec(verdict="BLOCKED", supersedes=101), 102, 19)]),
+    ] + [
+        (f"supersedes={value!r}", "malformed_record", [by(bad, 101, 11), by(_rec(supersedes=value), 102, 19)])
+        for value in ("101", True, 0, -1, 101.0, None, [101])
+    ]
+    for label, reason, comments in supersede_reds:
+        try:
+            evaluate(live, ref, comments)
+            fail.append(f"{label}: wanted {reason}, got pass")
+        except GateError as exc:
+            if exc.reason != reason:
+                fail.append(f"{label}: wanted {reason}, got {exc.reason} {exc.detail}")
 
     if (HTTP_TIMEOUT_S, MAX_RESPONSE_BYTES, COMMENT_PAGE_SIZE, COMMENT_PAGE_MAX) != (30, 8 * 1024 * 1024, 100, 2):
         fail.append("API bound constants drifted")

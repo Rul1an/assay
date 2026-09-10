@@ -202,6 +202,69 @@ class CandidateBindingTests(unittest.TestCase):
         self.assertIn("\\n", rendered)
 
 
+class SupersedeTests(unittest.TestCase):
+    """The helper applies the checker's same-head supersede rule, not a second reading of it."""
+
+    HEAD = "b" * 40
+
+    def record(self, **over):
+        row = {
+            "schema": "assay.review-record.v0",
+            "head_sha": self.HEAD,
+            "builder": {"agent": "ruley", "instance": "writer"},
+            "reviewer": {"agent": "claude", "instance": "reviewer", "github_login": "owner"},
+            "review_completed": True,
+            "verdict": "READY",
+            "findings": [],
+            "no_findings": True,
+            "independence": {"did_not_build": True, "did_not_author_governing_spec": True},
+        }
+        row.update(over)
+        return row
+
+    def comment(self, record, cid, minute, login="owner"):
+        return {
+            "author": {"login": login},
+            "url": f"https://github.com/example/repo/pull/7#issuecomment-{cid}",
+            "createdAt": f"2026-09-10T17:{minute:02d}:00Z",
+            "body": "<!-- assay-review-record -->\n```json\n" + json.dumps(record) + "\n```",
+        }
+
+    def rows(self, *comments):
+        return MODULE.review_candidates({"reviews": [], "comments": list(comments)}, self.HEAD)
+
+    def test_superseded_malformed_record_is_not_a_current_blocker(self):
+        bad = self.record(findings=[{"claim": 1, "status": "holds"}], no_findings=False)
+        rows = self.rows(self.comment(bad, 101, 11), self.comment(self.record(supersedes=101), 102, 19))
+        self.assertEqual([(row["verdict"], row["source"]) for row in rows], [("READY", "machine-comment")])
+
+    def test_control_without_supersedes_the_malformed_record_still_blocks(self):
+        bad = self.record(findings=[{"claim": 1, "status": "holds"}], no_findings=False)
+        rows = self.rows(self.comment(bad, 101, 11), self.comment(self.record(), 102, 19))
+        self.assertIn(("BLOCKED", "invalid-machine-comment"), [(row["verdict"], row["source"]) for row in rows])
+
+    def test_refused_supersede_blocks_and_keeps_its_target(self):
+        other = {"agent": "codex", "instance": "reviewer-2", "github_login": "owner"}
+        rows = self.rows(
+            self.comment(self.record(verdict="BLOCKED"), 101, 11),
+            self.comment(self.record(reviewer=other, supersedes=101), 102, 19),
+        )
+        self.assertEqual([(row["verdict"], row["source"]) for row in rows],
+                         [("BLOCKED", "machine-comment"), ("BLOCKED", "invalid-machine-comment")])
+
+    def test_supersede_pointing_at_a_newer_comment_blocks(self):
+        rows = self.rows(self.comment(self.record(supersedes=102), 101, 11),
+                         self.comment(self.record(verdict="BLOCKED"), 102, 19))
+        self.assertEqual([row["verdict"] for row in rows], ["BLOCKED", "BLOCKED"])
+
+    def test_superseding_comment_without_an_addressable_id_blocks(self):
+        bad = self.record(findings=[{"claim": 1}], no_findings=False)
+        unaddressed = self.comment(self.record(supersedes=101), 102, 19)
+        del unaddressed["url"]
+        rows = self.rows(self.comment(bad, 101, 11), unaddressed)
+        self.assertEqual([row["verdict"] for row in rows], ["BLOCKED", "BLOCKED"])
+
+
 class GitHubCommandBoundaryTests(unittest.TestCase):
     def test_repository_and_branch_inputs_are_validated(self):
         self.assertEqual(MODULE.parse_repo("example/repo"), ("example", "repo"))

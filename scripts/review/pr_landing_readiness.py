@@ -16,9 +16,11 @@ from assay_review_record_check import (  # noqa: E402
     MARKER as REVIEW_RECORD_MARKER,
     _loose_object,
     extract_record,
+    resolve_supersedes,
     validate_record,
 )
 
+COMMENT_URL_ID_RE = re.compile(r"#issuecomment-([1-9][0-9]*)$")
 SHA_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])", re.IGNORECASE)
 REPO_COMPONENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 MAX_JSON_BYTES = 8 * 1024 * 1024
@@ -194,6 +196,33 @@ def machine_review_candidate(body, author, head=None, branch_ref=""):
     }
 
 
+def head_record(body, head):
+    if not head or REVIEW_RECORD_MARKER not in body:
+        return None
+    try:
+        record = extract_record(body)
+    except GateError:
+        return None
+    bound = (record or {}).get("head_sha")
+    return record if isinstance(bound, str) and bound.lower() == head.lower() else None
+
+
+def supersede_resolution(comments, head, branch_ref):
+    """Map comment positions through the checker's own supersede rule."""
+    entries, where = [], {}
+    for n, comment in enumerate(comments):
+        record = head_record(comment.get("body") or "", head)
+        if record is None:
+            continue
+        match = COMMENT_URL_ID_RE.search(str(comment.get("url") or ""))
+        where[n] = len(entries)
+        entries.append((int(match.group(1)) if match else None,
+                        comment.get("author", {}).get("login"), comment.get("createdAt"), record))
+    retired, refused = resolve_supersedes(entries, live_sha=head, branch_ref=branch_ref)
+    return ({n for n, i in where.items() if i in retired},
+            {n: refused[i] for n, i in where.items() if i in refused})
+
+
 def review_candidates(pr, head):
     rows = []
     for review in pr.get("reviews", []):
@@ -212,9 +241,23 @@ def review_candidates(pr, head):
                 "current_head": bound == head,
                 "source": "review",
             })
-    for comment in pr.get("comments", []):
+    comments = pr.get("comments", [])
+    retired, refused = supersede_resolution(comments, head, pr.get("headRefName") or "")
+    for n, comment in enumerate(comments):
+        if n in retired:
+            continue
         body = comment.get("body") or ""
         author = comment.get("author", {}).get("login")
+        if n in refused:
+            rows.append({
+                "record_author": author,
+                "reviewer_identity": None,
+                "verdict": "BLOCKED",
+                "bound_sha": head,
+                "current_head": True,
+                "source": "invalid-machine-comment",
+            })
+            continue
         machine = machine_review_candidate(body, author, head, pr.get("headRefName") or "")
         if machine:
             rows.append({
