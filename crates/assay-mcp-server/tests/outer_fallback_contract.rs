@@ -488,12 +488,23 @@ fn notifications_produce_no_output() {
     );
 
     // `"id": null` is a REQUEST (it gets a response); only an absent `id`
-    // member is a notification.
+    // member is a notification. Both lines go out before either read, so a
+    // swallowed null-id response fails the exact-id assertion at once
+    // instead of surfacing only as the read deadline.
     conn.send(serde_json::json!({
         "jsonrpc": "2.0",
         "method": "tools/list",
         "params": {},
         "id": null
+    }));
+    // Normal request control.
+    next_id += 1;
+    let control_id = next_id;
+    conn.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "tools/list",
+        "params": {},
+        "id": control_id
     }));
     let null_id = conn.read_response();
     assert_eq!(null_id.get("id"), Some(&Value::Null), "{null_id}");
@@ -502,10 +513,7 @@ fn notifications_produce_no_output() {
         "`id: null` request still answered: {null_id}"
     );
 
-    // Normal request control.
-    next_id += 1;
-    let control_id = next_id;
-    let control = conn.request("tools/list", serde_json::json!({}), control_id);
+    let control = conn.read_response();
     assert_eq!(
         control.get("id"),
         Some(&Value::from(control_id)),
@@ -514,6 +522,54 @@ fn notifications_produce_no_output() {
     assert!(
         control.get("result").is_some(),
         "normal request still answered: {control}"
+    );
+
+    assert!(conn.shutdown().success());
+}
+
+/// Slice C follow-up: duplicate top-level members are rejected exactly as on
+/// base 89e9124ad, which answered none of the three probes below. The old
+/// two-step parse (`Value` keeps the last duplicate) answered them last-wins,
+/// so each probe is followed by a control request whose exact-id response
+/// proves the probe emitted nothing.
+#[test]
+fn duplicate_top_level_members_produce_no_output() {
+    let (mut conn, _root) = spawn_server(None);
+    initialize(&mut conn);
+
+    let mut next_id: u64 = 300;
+    let mut probe = |conn: &mut Conn, line: &str| {
+        conn.send_line(line);
+        next_id += 1;
+        let id = next_id;
+        conn.send(serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "tools/list",
+            "params": {},
+            "id": id
+        }));
+        let response = conn.read_response();
+        assert_eq!(response.get("id"), Some(&Value::from(id)), "{response}");
+        assert!(
+            response.get("result").is_some(),
+            "control after duplicate-member probe: {response}"
+        );
+    };
+
+    // Duplicate method: last-wins would answer tools/list for id 3.
+    probe(
+        &mut conn,
+        r#"{"jsonrpc":"2.0","method":"no/such","method":"tools/list","params":{},"id":3}"#,
+    );
+    // Duplicate params: last-wins would take the version-mismatched one (-32022).
+    probe(
+        &mut conn,
+        r#"{"jsonrpc":"2.0","method":"tools/list","params":{},"params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2099-01-01"}},"id":4}"#,
+    );
+    // Duplicate id: last-wins would answer with id 62.
+    probe(
+        &mut conn,
+        r#"{"jsonrpc":"2.0","method":"tools/list","params":{},"id":61,"id":62}"#,
     );
 
     assert!(conn.shutdown().success());

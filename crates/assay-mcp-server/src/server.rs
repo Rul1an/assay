@@ -177,12 +177,34 @@ fn initialize_result(protocol_version: LegacyProtocolVersion) -> Value {
     })
 }
 
+/// A present `id` member — including `"id": null` — reads as `Some(..)`;
+/// only an absent member (via `#[serde(default)]`) reads as `None`. A
+/// `serde_json::Value` pre-parse would keep the last of duplicate members,
+/// so the request is parsed in this one typed step to keep serde's
+/// duplicate-member rejection.
+fn deserialize_present_id<'de, D>(deserializer: D) -> Result<Option<Option<Value>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<Value>::deserialize(deserializer).map(Some)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct JsonRpcRequest {
     jsonrpc: String,
     method: String,
     params: Option<Value>,
-    id: Option<Value>,
+    /// Absent `id` (a notification) is `None`; `"id": null` is `Some(None)`.
+    #[serde(default, deserialize_with = "deserialize_present_id")]
+    id: Option<Option<Value>>,
+}
+
+impl JsonRpcRequest {
+    /// The id to put on the wire: absent and `null` both serialize as null,
+    /// and the notification case never reaches a response site.
+    fn response_id(&self) -> Option<Value> {
+        self.id.clone().flatten()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -307,8 +329,11 @@ impl Server {
                 continue;
             }
 
-            // Parse Request
-            let raw: Value = match serde_json::from_str(&line) {
+            // Parse the line directly into the typed request: one parse, not
+            // Value-then-from_value. The Value map keeps the last of
+            // duplicate members while the typed parser rejects them, so the
+            // two-step shape answered duplicate-member requests last-wins.
+            let req: JsonRpcRequest = match serde_json::from_str(&line) {
                 Ok(r) => r,
                 Err(e) => {
                     tracing::warn!(
@@ -316,37 +341,28 @@ impl Server {
                         rid=%rid,
                         error=%e
                     );
-                    continue; // Ignore invalid JSON lines (stdio transport robustness)
+                    // Not a request: invalid JSON, a scalar/array line, or an
+                    // object that is not a valid request (missing member,
+                    // wrong type, duplicate member). All stay silent.
+                    continue;
                 }
             };
 
             // JSON-RPC 2.0 / MCP: a notification (no `id` member) MUST NOT be
             // answered, for any method, known or unknown. Presence of the key
-            // decides, not its value: `"id": null` deserializes to `None` like
-            // a missing id but is a request and keeps its response.
-            if raw.get("id").is_none() {
+            // decides, not its value: `"id": null` is `Some(None)` — a
+            // request — and keeps its response.
+            if req.id.is_none() {
                 tracing::info!(event="notification_skipped", rid=%rid);
                 continue;
             }
-
-            let req: JsonRpcRequest = match serde_json::from_value(raw) {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::warn!(
-                        event="json_parse_error",
-                        rid=%rid,
-                        error=%e
-                    );
-                    continue; // Ignore non-object lines (stdio transport robustness)
-                }
-            };
 
             // Revision before dispatch. A revision this server does not implement is refused by name,
             // with the supported set in `data`, rather than served as whatever the method happens
             // to do -- which is the silent best-effort the 2026-07-28 spec replaced.
             if let Err(data) = check_request_version(req.params.as_ref()) {
                 let resp = JsonRpcResponse::error_with_data(
-                    req.id.clone(),
+                    req.response_id(),
                     ERROR_UNSUPPORTED_PROTOCOL_VERSION,
                     "unsupported protocol version".to_string(),
                     data,
@@ -360,22 +376,27 @@ impl Server {
             // Dispatch
             let resp = match req.method.as_str() {
                 "initialize" => match LegacyProtocolVersion::negotiate(req.params.as_ref()) {
-                    Ok(version) => JsonRpcResponse::ok(req.id.clone(), initialize_result(version)),
+                    Ok(version) => {
+                        JsonRpcResponse::ok(req.response_id(), initialize_result(version))
+                    }
                     Err(()) => JsonRpcResponse::error(
-                        req.id.clone(),
+                        req.response_id(),
                         -32602,
                         INVALID_INITIALIZE_PARAMS.to_string(),
                     ),
                 },
                 "notifications/initialized" => {
-                    // Notification, no response needed usually, but good to ack log
+                    // Reached only with an `id` present: id-less lines exit at
+                    // the notification skip above. Staying silent here is
+                    // pre-existing (Slice C keeps request handling unchanged);
+                    // a later slice may answer `-32600`/`-32601` instead.
                     tracing::info!(event="initialized", rid=%rid);
                     continue;
                 }
                 "tools/list" => {
                     let tool_list = tools::list_tools();
                     JsonRpcResponse::ok(
-                        req.id.clone(),
+                        req.response_id(),
                         serde_json::json!({
                             "tools": tool_list
                         }),
@@ -384,7 +405,7 @@ impl Server {
                 "tools/call" => {
                     match tools::classify_call_tool_params(req.params.as_ref()) {
                         Err(fault) => JsonRpcResponse::error_with_data(
-                            req.id.clone(),
+                            req.response_id(),
                             fault.code(),
                             fault.message().to_string(),
                             fault.data(),
@@ -401,7 +422,7 @@ impl Server {
                             tracing::info!(
                                event="tool_call_start",
                                rid=%rid,
-                               rpc_id=?req.id,
+                               rpc_id=?req.response_id(),
                                bytes_in=bytes_in,
                                args_bytes=args_bytes,
                             );
@@ -419,7 +440,7 @@ impl Server {
                                     tracing::error!(
                                         event = "tool_execution_error",
                                         rid = %rid,
-                                        rpc_id = ?req.id,
+                                        rpc_id = ?req.response_id(),
                                         duration_ms = start.elapsed().as_millis() as u64,
                                         code = "E_INTERNAL"
                                     );
@@ -430,7 +451,7 @@ impl Server {
                                     tracing::warn!(
                                        event="tool_call_timeout",
                                        rid=%rid,
-                                       rpc_id=?req.id,
+                                       rpc_id=?req.response_id(),
                                        duration_ms=dur,
                                        code="E_TIMEOUT"
                                     );
@@ -446,7 +467,7 @@ impl Server {
                                 tracing::info!(
                                   event="tool_call_done",
                                   rid=%rid,
-                                  rpc_id=?req.id,
+                                  rpc_id=?req.response_id(),
                                   duration_ms=dur,
                                   outcome="app_error",
                                   allowed=allowed,
@@ -456,7 +477,7 @@ impl Server {
                                 tracing::info!(
                                   event="tool_call_done",
                                   rid=%rid,
-                                  rpc_id=?req.id,
+                                  rpc_id=?req.response_id(),
                                   duration_ms=dur,
                                   outcome="ok",
                                   allowed=allowed
@@ -499,7 +520,7 @@ impl Server {
                                 tracing::info!(
                                     event = "tool_decision",
                                     rid = %rid,
-                                    rpc_id = ?req.id,
+                                    rpc_id = ?req.response_id(),
                                     decision = %serde_json::to_string(&decision).unwrap_or_default(),
                                 );
                             }
@@ -516,12 +537,12 @@ impl Server {
                             if has_error {
                                 mcp_result["structuredContent"] = result;
                             }
-                            JsonRpcResponse::ok(req.id.clone(), mcp_result)
+                            JsonRpcResponse::ok(req.response_id(), mcp_result)
                         }
                     }
                 }
                 _ => JsonRpcResponse::error(
-                    req.id.clone(),
+                    req.response_id(),
                     ERROR_METHOD_NOT_FOUND,
                     "Method not found".to_string(),
                 ),
