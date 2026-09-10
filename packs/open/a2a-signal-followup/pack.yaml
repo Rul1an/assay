@@ -12,7 +12,7 @@ disclaimer: |
   "A2A security." Rules do not reuse MCP G3 predicates; A2A authorization and signing surfaces
   are out of scope unless future adapter versions emit first-class typed fields.
   P2b v1 reflects Assay adapter evidence for supported upstream 0.x lines (see adapter
-  `SUPPORTED_SPEC_VERSION_RANGE` / version gate) — not full "A2A v1.0" protocol marketing coverage.
+  `SUPPORTED_SPEC_VERSIONS` / version gate) — not full "A2A v1.0" protocol marketing coverage.
   requires.assay_min_version is ">=3.2.3" (evidence-substrate floor; see MIGRATION-TRUST-COMPILER-3.2.md
   and PLAN-P2b — confirm the first published Assay release that embeds this built-in pack).
 
