@@ -14,6 +14,7 @@ import ast
 import functools
 import hashlib
 import inspect
+import io
 import json
 import os
 import shutil
@@ -2047,6 +2048,114 @@ class EvidenceBinding(unittest.TestCase):
         self.assertEqual(len(seen), 1)
         self.assertIn(DIGEST_IMAGE, seen[0])
         self.assertTrue(any("@sha256:" in item for item in seen[0]))
+        original = ["docker", "pull", "--platform", module.PLATFORM, DIGEST_IMAGE]
+        self.assertEqual(seen[0], module.expected_wrapped_docker_argv(original, env))
+
+    def test_constructor_output_is_pinned_by_test_owned_literals(self) -> None:
+        module = _require()
+        argv = ["docker", "pull", "--platform", module.PLATFORM, DIGEST_IMAGE]
+        allowed_keys = frozenset(
+            {"PATH", "DOCKER_CONFIG", "HOME", "TMPDIR", "DOCKER_HOST"}
+        )
+        required_keys = frozenset({"PATH", "DOCKER_CONFIG", "HOME", "TMPDIR"})
+        with tempfile.TemporaryDirectory() as raw:
+            env, _ = module.fresh_docker_env(Path(raw))
+        self.assertTrue(required_keys <= set(env), set(env))
+        self.assertTrue(set(env) <= allowed_keys, set(env))
+        wrapped = module.expected_wrapped_docker_argv(argv, env)
+        self.assertEqual(wrapped[:2], ["env", "-i"])
+        docker = str(module.resolve_docker_executable())
+        self.assertIn(docker, wrapped)
+        binary_at = wrapped.index(docker)
+        assignments = wrapped[2:binary_at]
+        keys: list[str] = []
+        for item in assignments:
+            self.assertIn("=", item, item)
+            keys.append(item.split("=", 1)[0])
+        self.assertTrue(required_keys <= set(keys) <= allowed_keys, keys)
+        self.assertEqual(keys, sorted(keys))
+        for key, item in zip(keys, assignments, strict=True):
+            self.assertEqual(item.split("=", 1)[1], env[key])
+        self.assertEqual(wrapped[binary_at + 1 :], argv[1:])
+
+    def test_wrap_rejects_argv_that_does_not_start_with_docker(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            env, _ = module.fresh_docker_env(Path(raw))
+        with self.assertRaises(module.DockerCommandError):
+            module.wrap_docker_command(["podman", "info"], env)
+        with self.assertRaises(module.DockerCommandError):
+            module.wrap_docker_command([], env)
+
+    def test_reordered_argv_suffix_is_rejected_by_final_funnel(self) -> None:
+        module = _require()
+        original = module.wrap_docker_command
+
+        def reorder_suffix(argv: list[str], env: dict[str, str]) -> list[str]:
+            wrapped = original(argv, env)
+            suffix_len = len(argv) - 1
+            prefix = wrapped[:-suffix_len]
+            suffix = wrapped[-suffix_len:]
+            return prefix + suffix[1:] + suffix[:1]
+
+        with tempfile.TemporaryDirectory() as raw:
+            env, _ = module.fresh_docker_env(Path(raw))
+        with mock.patch.object(module, "wrap_docker_command", side_effect=reorder_suffix):
+            with mock.patch.object(
+                module, "run_bounded", return_value=mock.Mock(returncode=0, stdout=b"", stderr=b"")
+            ):
+                with self.assertRaises(module.DockerCommandError):
+                    module.run_docker(
+                        ["docker", "pull", "--platform", module.PLATFORM, DIGEST_IMAGE],
+                        env=env,
+                    )
+
+    def test_injected_prefix_flag_is_rejected_by_final_funnel(self) -> None:
+        module = _require()
+        original = module.wrap_docker_command
+
+        def inject_flag(argv: list[str], env: dict[str, str]) -> list[str]:
+            wrapped = original(argv, env)
+            suffix_len = len(argv) - 1
+            prefix = wrapped[:-suffix_len]
+            suffix = wrapped[-suffix_len:]
+            return prefix + ["--privileged"] + suffix
+
+        with tempfile.TemporaryDirectory() as raw:
+            env, _ = module.fresh_docker_env(Path(raw))
+        with mock.patch.object(module, "wrap_docker_command", side_effect=inject_flag):
+            with mock.patch.object(
+                module, "run_bounded", return_value=mock.Mock(returncode=0, stdout=b"", stderr=b"")
+            ):
+                with self.assertRaises(module.DockerCommandError):
+                    module.run_docker(
+                        ["docker", "pull", "--platform", module.PLATFORM, DIGEST_IMAGE],
+                        env=env,
+                    )
+
+    def test_swapped_binary_is_rejected_by_final_funnel(self) -> None:
+        module = _require()
+        original = module.wrap_docker_command
+
+        def swap_binary(argv: list[str], env: dict[str, str]) -> list[str]:
+            wrapped = original(argv, env)
+            suffix_len = len(argv) - 1
+            prefix = list(wrapped[:-suffix_len])
+            suffix = wrapped[-suffix_len:]
+            prefix[-1] = "/tmp/not-the-resolved-docker"
+            return prefix + suffix
+
+        with tempfile.TemporaryDirectory() as raw:
+            env, _ = module.fresh_docker_env(Path(raw))
+        with mock.patch.object(module, "wrap_docker_command", side_effect=swap_binary):
+            with mock.patch.object(
+                module, "run_bounded", return_value=mock.Mock(returncode=0, stdout=b"", stderr=b"")
+            ):
+                with self.assertRaises(module.DockerCommandError):
+                    module.run_docker(
+                        ["docker", "pull", "--platform", module.PLATFORM, DIGEST_IMAGE],
+                        env=env,
+                    )
 
     def test_digest_strip_at_wrap_bites(self) -> None:
         module = _require()
@@ -2087,31 +2196,41 @@ class EvidenceBinding(unittest.TestCase):
 
     def test_missing_docker_main_is_not_a_traceback(self) -> None:
         module = _require()
-        stdout = mock.Mock()
-        stderr = mock.Mock()
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        color_keys = (
+            "FORCE_COLOR",
+            "NO_COLOR",
+            "PYTHON_COLORS",
+            "CLICOLOR",
+            "CLICOLOR_FORCE",
+        )
         with tempfile.TemporaryDirectory() as raw:
             bundle = _bundle(Path(raw))
             row = _registry_doc(DIGEST_IMAGE)["implementations"][0]
-            with (
-                mock.patch.object(
-                    module,
-                    "resolve_docker_executable",
-                    side_effect=module.DockerCommandError("docker executable not found"),
-                ),
-                mock.patch.object(module, "implementation_from_registry", return_value=row),
-                mock.patch.object(sys, "stdout", stdout),
-                mock.patch.object(sys, "stderr", stderr),
-            ):
-                code = module.main(
-                    [
-                        "--implementation-id",
-                        "inert-fixture",
-                        "--bundle",
-                        str(bundle),
-                    ]
-                )
-        out = "".join(str(call.args[0]) for call in stdout.write.call_args_list if call.args)
-        err = "".join(str(call.args[0]) for call in stderr.write.call_args_list if call.args)
+            with mock.patch.dict(os.environ, {"TERM": "xterm-256color"}, clear=False):
+                for key in color_keys:
+                    os.environ.pop(key, None)
+                with (
+                    mock.patch.object(
+                        module,
+                        "resolve_docker_executable",
+                        side_effect=module.DockerCommandError("docker executable not found"),
+                    ),
+                    mock.patch.object(module, "implementation_from_registry", return_value=row),
+                    mock.patch.object(sys, "stdout", stdout),
+                    mock.patch.object(sys, "stderr", stderr),
+                ):
+                    code = module.main(
+                        [
+                            "--implementation-id",
+                            "inert-fixture",
+                            "--bundle",
+                            str(bundle),
+                        ]
+                    )
+        out = stdout.getvalue()
+        err = stderr.getvalue()
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), module.STATE_PULL_FAILURE)
         self.assertNotIn("Traceback", out)
@@ -2147,6 +2266,36 @@ class EvidenceBinding(unittest.TestCase):
         self.assertEqual(result.state, module.STATE_CREATE_FAILURE)
         self.assertEqual(removed, [created_name["value"]])
         self.assertTrue(created_name["value"].startswith("assay-oci-"))
+
+    def test_create_failure_plus_cleanup_failure_is_cleanup_failure(self) -> None:
+        module = _require()
+        removed: list[str] = []
+
+        def runner(argv: list[str], **_kwargs: Any) -> Any:
+            kind = _docker_kind(argv)
+            if kind == "pull":
+                return module.BoundedDockerResult(0, b"", b"")
+            if kind in {"inspect", "image-inspect"}:
+                return module.BoundedDockerResult(0, json.dumps([_inspect_doc()]).encode(), b"")
+            if kind == "create":
+                raise module.DockerCommandError("create refused")
+            if kind == "rm":
+                removed.append(argv[-1])
+                raise module.DockerCommandError("rm refused after create failure")
+            raise AssertionError(argv)
+
+        with tempfile.TemporaryDirectory() as raw:
+            result = module.execute_candidate(
+                implementation_id="inert-fixture",
+                bundle_path=_bundle(Path(raw)),
+                registry_path=_write_registry(Path(raw), DIGEST_IMAGE),
+                timeout_seconds=2,
+                docker_runner=runner,
+            )
+        self.assertEqual(result.state, module.STATE_CLEANUP_FAILURE)
+        self.assertNotIn(result.state, AGREEMENT)
+        self.assertEqual(len(removed), 1)
+        self.assertTrue(removed[0].startswith("assay-oci-"))
 
     def test_cleanup_failure_does_not_overwrite_timeout(self) -> None:
         module = _require()
