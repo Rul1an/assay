@@ -203,6 +203,19 @@ mod tests {
                     *truncates,
                     "{name}, {field}: direct helper made the wrong ceiling decision"
                 );
+                // The two sides agreeing proves nothing about what they both record, so pin the
+                // provenance itself: the digest and length describe the original bytes, not the
+                // kept ones (Muse, in the review of the first head).
+                if let Some(meta) = &direct_meta {
+                    assert_eq!(
+                        meta.sha256,
+                        hex::encode(Sha256::digest(input.as_bytes())),
+                        "{name}, {field}: digest must cover the original bytes"
+                    );
+                    assert_eq!(meta.original_len, input.len(), "{name}, {field}");
+                    assert_eq!(meta.kept_len, direct.len(), "{name}, {field}");
+                    assert_eq!(meta.strategy, "head", "{name}, {field}");
+                }
                 assert_eq!(
                     value.as_str(),
                     Some(direct.as_str()),
