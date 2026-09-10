@@ -298,9 +298,9 @@ def digest_image_refs(argv: list[str]) -> list[str]:
 
 
 def assert_wrapped_keeps_digest_refs(argv: list[str], wrapped: list[str]) -> None:
-    for ref in digest_image_refs(argv):
-        if ref not in wrapped:
-            raise DockerCommandError("digest-qualified image was stripped before docker")
+    suffix = argv[1:]
+    if wrapped[len(wrapped) - len(suffix) :] != suffix:
+        raise DockerCommandError("digest-qualified image was stripped before docker")
 
 
 def run_docker(
@@ -435,47 +435,47 @@ def execute_candidate(
                 if not container_id:
                     raise DockerCommandError("docker create returned no container id")
             except DOCKER_LIFECYCLE_ERRORS as exc:
-                return OciExecution(
-                    STATE_CREATE_FAILURE, implementation_id, image, None, b"", b"", str(exc)
-                )
-            try:
-                started = runner(
-                    ["docker", "start", "-a", container_id],
-                    env=env,
-                    timeout_seconds=timeout_seconds,
-                    stdout_limit=STDOUT_LIMIT,
-                    stderr_limit=STDERR_LIMIT,
-                    allow_nonzero=True,
-                )
-                stdout = started.stdout
-                stderr = started.stderr
-            except DOCKER_LIFECYCLE_ERRORS as exc:
-                if isinstance(exc, ProcessLimitError):
-                    state = _limit_state(exc)
-                else:
-                    state = STATE_START_FAILURE
+                state = STATE_CREATE_FAILURE
                 error = str(exc)
-            try:
-                container = _parse_inspect(
-                    runner(["docker", "inspect", container_id], env=env).stdout
-                )
-                raw_exit = (container.get("State") or {}).get("ExitCode")
-                if type(raw_exit) is int:
-                    exit_code = raw_exit
-                    if (container.get("State") or {}).get("OOMKilled"):
-                        state = STATE_OOM
-                        error = error or "container OOMKilled"
-                    if state is None:
-                        state = STATE_COMPLETED
-                else:
-                    exit_code = None
+            if state is None:
+                try:
+                    started = runner(
+                        ["docker", "start", "-a", container_id],
+                        env=env,
+                        timeout_seconds=timeout_seconds,
+                        stdout_limit=STDOUT_LIMIT,
+                        stderr_limit=STDERR_LIMIT,
+                        allow_nonzero=True,
+                    )
+                    stdout = started.stdout
+                    stderr = started.stderr
+                except DOCKER_LIFECYCLE_ERRORS as exc:
+                    if isinstance(exc, ProcessLimitError):
+                        state = _limit_state(exc)
+                    else:
+                        state = STATE_START_FAILURE
+                    error = str(exc)
+                try:
+                    container = _parse_inspect(
+                        runner(["docker", "inspect", container_id], env=env).stdout
+                    )
+                    raw_exit = (container.get("State") or {}).get("ExitCode")
+                    if type(raw_exit) is int:
+                        exit_code = raw_exit
+                        if (container.get("State") or {}).get("OOMKilled"):
+                            state = STATE_OOM
+                            error = error or "container OOMKilled"
+                        if state is None:
+                            state = STATE_COMPLETED
+                    else:
+                        exit_code = None
+                        if state is None:
+                            state = STATE_START_FAILURE
+                            error = "container exit code is unavailable"
+                except DOCKER_LIFECYCLE_ERRORS as exc:
                     if state is None:
                         state = STATE_START_FAILURE
-                        error = "container exit code is unavailable"
-            except DOCKER_LIFECYCLE_ERRORS as exc:
-                if state is None:
-                    state = STATE_START_FAILURE
-                    error = str(exc)
+                        error = str(exc)
         finally:
             target = container_id or container_name
             if target:
