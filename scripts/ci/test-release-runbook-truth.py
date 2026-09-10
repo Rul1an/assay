@@ -257,6 +257,51 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
         self.assertNotEqual(item, contract._checklist_item(mutated, "PyPI Trusted Publisher"))
         self.assert_mutation_bites(docs=mutated)
 
+    def test_crates_publisher_expectation_matches_release_job(self) -> None:
+        self.assertEqual(
+            contract._crates_publisher_problems(self.workflow, self.docs), []
+        )
+
+    def test_crates_empty_environment_bites(self) -> None:
+        mutated = replace_once(
+            self.docs,
+            "An unset environment is broader authority and does not match this contract.",
+            "An unset environment is broader authority and matches this contract.",
+        )
+        self.assert_mutation_bites(docs=mutated)
+
+    def test_crates_wrong_environment_bites(self) -> None:
+        mutated = replace_once(
+            self.docs,
+            "workflow `release.yml`, environment `crates`.",
+            "workflow `release.yml`, environment `pypi`.",
+        )
+        self.assert_mutation_bites(docs=mutated)
+
+    def test_crates_wrong_workflow_bites(self) -> None:
+        mutated = replace_once(
+            self.docs,
+            "repository `Rul1an/assay`, workflow `release.yml`, environment `crates`.",
+            "repository `Rul1an/assay`, workflow `publish.yml`, environment `crates`.",
+        )
+        self.assert_mutation_bites(docs=mutated)
+
+    def test_crates_legacy_row_bites(self) -> None:
+        mutated = replace_once(
+            self.docs,
+            "  Remove every other publisher, including any publisher whose environment is unset.\n",
+            "  Keep publishers whose environment is unset. Remove only unrelated publishers.\n",
+        )
+        self.assert_mutation_bites(docs=mutated)
+
+    def test_crates_workflow_environment_drift_bites(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "    environment: crates\n",
+            "    environment: release\n",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
