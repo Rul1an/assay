@@ -210,7 +210,7 @@
         "anchor": "(DENIED_CALL_OBSERVATION_V0, PROXY_DENIED_V0, PROXY_ORIGIN) => {",
         "replacement": "(_, PROXY_DENIED_V0, PROXY_ORIGIN) => {",
         "scope": "out_of_scope",
-        "reason": "WRONG STAGE, same argument as declared mutant 0. Under v0 selection only payloads whose schema member is assay.denied_call_observation.v0 are collected into `observations`, so the classifier's schema leg cannot decide anything on this path: it is an equivalent mutant here, not a hole. Measured SURVIVED, as the reasoning predicts. Recorded because the published table credits this leg to the corpus."
+        "reason": "WRONG STAGE, same argument as declared mutant 0. Under v0 selection only payloads whose schema member is assay.denied_call_observation.v0 are collected into `observations`, so the classifier's schema leg cannot decide anything on this path: it is an equivalent mutant here, not a hole. Measured SURVIVED, as the reasoning predicts. Recorded because the published table credits this leg to the corpus. Addendum 2026-09-10: proved in both directions, not only argued. The leg is reachable once selection is relaxed (mutant 49), so it is foreclosed by that selection rather than dead, and deleting the Stage 2 rejecting arm (47) does not make it reachable."
       },
       {
         "label": "47 an unrecognised in-namespace payload schema fails closed (Stage 2)",
@@ -223,6 +223,12 @@
         "anchor": "check_vocab(dec, \"decision\", DECISION_VOCAB, violations);",
         "replacement": "let _ = DECISION_VOCAB;",
         "reason": "v0 Stage 2 closed vocabulary. Declared as its own call site rather than by mutating check_vocab, which would delete four rules at once. bad-107 should kill it."
+      },
+      {
+        "label": "49 an observation payload is selected only on the exact .v0 schema (Stage 2)",
+        "anchor": "other if other == profile_version.observation_schema() => {",
+        "replacement": "other if other.starts_with(\"assay.denied_call_observation.\") => {",
+        "reason": "v0 Section 2 and Section 5 Stage 2: events are selected by the exact schema member of their payload, and a payload whose schema starts with assay.denied_call_observation. but is not the exact .v0 string is an unrecognised profile schema, invalid, fail closed. This mutant selects any payload of the observation family instead. Declared mutant 47 deletes the rejecting arm and is killed, but only through bad-104, which exercises the DECISION family; no vector carries a non-.v0 observation. Measured on 2026-09-10 before this declaration: a bundle equal to ok-001 except that the observation's schema is assay.denied_call_observation.v1 is invalid on the unmodified verifier and valid with this mutant, while all fourteen vectors reproduce byte for byte. This selection is also what makes the triple's schema leg unreachable (mutant 44): with this mutant and 44 applied together, that same bundle confirms a caller-visible denial, and the corpus still sees nothing. Our tree catches it (verify_privileged_mcp_action.rs tests v1_observation_under_default_v0_fails_closed, mixed_v0_and_v1_observations_fail_closed, v0_observation_under_v1_fails_closed), and the v1 corpus catches the mirror direction with bad-201. Corpus-only, like the origin and code legs."
       },
       {
         "label": "CONTROL harness reachability on the verifier path",
@@ -246,7 +252,7 @@
       },
       {
         "label": "11 the code must be the v0 deny code",
-        "reason": "The SECOND leg of the same triple, found only because the first was published as a hole and someone asked what the other two do. v0 Stage 3 promises all three legs. Deleting the code conjunct leaves the 14-vector corpus test at 10 of 10 green, so no vector discriminates it. Cause is structural rather than an oversight in any one vector: gen_vectors.py:103 hard-codes the single marker shape {code: -32042, origin: assay-proxy} and is the only marker construction site, so no vector CAN vary either member. Corpus-only, like the origin leg: our tree does catch it -- deleting the conjunct fails crates/assay-evidence/tests/denial_marker_classifier.rs::cross_pair_v0_schema_v1_code_is_inert. Note the schema leg is not caught by the triple match either; bad-104 is decided earlier at Stage 2. Of the three legs the corpus discriminates NONE.",
+        "reason": "The SECOND leg of the same triple, found only because the first was published as a hole and someone asked what the other two do. v0 Stage 3 promises all three legs. Deleting the code conjunct leaves the 14-vector corpus test at 10 of 10 green, so no vector discriminates it. Cause is structural rather than an oversight in any one vector: gen_vectors.py:103 hard-codes the single marker shape {code: -32042, origin: assay-proxy} and is the only marker construction site, so no vector CAN vary either member. Corpus-only, like the origin leg: our tree does catch it -- deleting the conjunct fails crates/assay-evidence/tests/denial_marker_classifier.rs::cross_pair_v0_schema_v1_code_is_inert. Note the schema leg is not caught by the triple match either; bad-104 is decided earlier at Stage 2. Of the three legs the corpus discriminates NONE. Correction 2026-09-10: the schema leg is foreclosed by exact-schema observation selection (mutant 49), not by the Stage 2 arm bad-104 exercises; deleting that arm (47) leaves the leg unreachable.",
         "exercised_outside_corpus": "crates/assay-evidence/tests/denial_marker_classifier.rs::cross_pair_v0_schema_v1_code_is_inert",
         "recorded": "2026-08-19"
       }
