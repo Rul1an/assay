@@ -57,6 +57,32 @@ EXPECTED_STRING_WIRING_VECTORS = frozenset(
         "string_high_unicode",
     }
 )
+# Unique in lib.rs (count=1). The function body is the Unicode string-emission
+# rule's anchor, so this rule keys off the signature and carries the where
+# clause so the injected escape stays compile-valid under unused=deny.
+SOLIDUS_WIRING_ANCHOR = (
+    "fn write_string_fragment<W>(&mut self, writer: &mut W, fragment: &str) "
+    "-> io::Result<()>\n"
+    "  where\n"
+    "    W: Write + ?Sized,\n"
+    "  {"
+)
+# Over-escape solidus only: literal / becomes valid-JSON noncanonical \/.
+# Every other character, including non-ASCII, is left to the original body.
+SOLIDUS_WIRING_REPLACEMENT = (
+    "fn write_string_fragment<W>(&mut self, writer: &mut W, fragment: &str) "
+    "-> io::Result<()>\n"
+    "  where\n"
+    "    W: Write + ?Sized,\n"
+    "  {\n"
+    '    let fragment = fragment.replace(\'/\', "\\\\/");'
+)
+EXPECTED_SOLIDUS_WIRING_VECTORS = frozenset(
+    {
+        "string_solidus",
+        "rfc8785_appendix_mixed",
+    }
+)
 EXPECTED_SLICE_B_RULES = {
     "RFC 8785 section 3.2.3 UTF-16 object-key ordering": (
         "self.tag.cmp(&other.tag)",
@@ -70,8 +96,12 @@ EXPECTED_SLICE_B_RULES = {
         STRING_WIRING_ANCHOR,
         STRING_WIRING_REPLACEMENT,
     ),
+    "RFC 8785 section 3.2.2.2 solidus non-escaping": (
+        SOLIDUS_WIRING_ANCHOR,
+        SOLIDUS_WIRING_REPLACEMENT,
+    ),
 }
-EXPECTED_SLICE_B_WITNESSES = frozenset({"utf16", "number", "string"})
+EXPECTED_SLICE_B_WITNESSES = frozenset({"utf16", "number", "string", "solidus"})
 VECTOR_FAIL_RE = re.compile(r"^\[([a-z0-9_]+)\]\s*$")
 EXPECTED_FILES = frozenset(
     {
@@ -485,6 +515,10 @@ def _mutate_string_wiring(root: Path) -> None:
     _mutate_exact(root, STRING_WIRING_ANCHOR, STRING_WIRING_REPLACEMENT, "string")
 
 
+def _mutate_solidus_wiring(root: Path) -> None:
+    _mutate_exact(root, SOLIDUS_WIRING_ANCHOR, SOLIDUS_WIRING_REPLACEMENT, "solidus")
+
+
 def _run_conformance(root: Path, *, patch: bool) -> subprocess.CompletedProcess[str]:
     cmd = [
         "cargo",
@@ -760,6 +794,12 @@ def self_test(root: Path) -> None:
                 name="string",
                 mutate=_mutate_string_wiring,
                 expected_vectors=EXPECTED_STRING_WIRING_VECTORS,
+            ),
+            _wiring_witness(
+                root,
+                name="solidus",
+                mutate=_mutate_solidus_wiring,
+                expected_vectors=EXPECTED_SOLIDUS_WIRING_VECTORS,
             ),
         }
     )
