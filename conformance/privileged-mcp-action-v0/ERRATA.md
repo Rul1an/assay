@@ -44,7 +44,7 @@ run record.
 
 Reproducing all fourteen outcomes **can distinguish an implementation on at most five of the
 profile's rules, and even those only at the points these vectors probe.** It cannot distinguish it on
-the other twenty-two, and it does not demonstrate agreement on the profile.
+the other twenty-three, and it does not demonstrate agreement on the profile.
 
 The ceiling wording is load-bearing. Mutation adequacy licenses one direction only: *a surviving
 mutant means the corpus cannot transmit that rule.* It does **not** license the reverse, that a killed
@@ -59,26 +59,26 @@ outcomes, and be indistinguishable here from one that honours it.
 
 ## The measurement
 
-Twenty-seven declared in-scope rules, each promised by [v0.md](../../docs/profiles/privileged-mcp-action/v0.md)
+Twenty-eight declared in-scope rules, each promised by [v0.md](../../docs/profiles/privileged-mcp-action/v0.md)
 with a quoted sentence and section reference (audited independently; none is an implementation
 detail smuggled into the count).
 
 ```
-6 of 25 DECLARED in-scope rules killed (24.0%). 4 declared out of scope, 31 rules declared.
-control-killed. 19 mutant(s) survived. 2 KNOWN HOLES.
+6 of 26 DECLARED in-scope rules killed (23.1%). 4 declared out of scope, 32 rules declared.
+control-killed. 20 mutant(s) survived. 2 KNOWN HOLES.
 ```
 
 That block is the tool's own output, kept verbatim. **Neither of its numbers is the number to quote
 here**, for two separate reasons:
 
-- Its denominator of 25 excludes the two acknowledged holes. That is right for a *score* and wrong for
+- Its denominator of 26 excludes the two acknowledged holes. That is right for a *score* and wrong for
   this document, whose subject is what the corpus fails to transmit: an acknowledged hole fails to
-  transmit exactly as a survivor does. The denominator here is **twenty-seven**.
+  transmit exactly as a survivor does. The denominator here is **twenty-eight**.
 - Its numerator of 6 counts rules the corpus discriminates *against this implementation*. One of the
   six does not survive the change of subject to a third party (below), so the numerator here is
   **five**.
 
-**Five of twenty-seven, 18.5%.**
+**Five of twenty-eight, 17.9%.**
 
 Reproduce the tool's run with [`corpus-adequacy`](https://github.com/corpus-adequacy/corpus-adequacy)
 at commit `13048989c84ab6b4e0281f9514ea45fb79a2d8b4`, from the repository root, with that tool checked
@@ -97,7 +97,7 @@ working in, and do not commit while it runs.
 | rule | isolated by | what the vector actually probes |
 |---|---|---|
 | exactly one decision record | `bad-103` | two well-formed decisions |
-| an unrecognised in-namespace payload schema fails closed (Stage 2) | `bad-104` | a `.v1` schema inside the namespace |
+| an unrecognised in-namespace payload schema fails closed (Stage 2) | `bad-104` | a `.v1` schema inside the namespace, **in the decision family only.** No vector carries a non-`.v0` observation schema, so an implementation that selects observations by family reproduces all fourteen (rule 23 below) |
 | the decision `action.target_digest` is a well-formed sha256 | `bad-102` | **`null` only.** No vector carries uppercase hex, a wrong length, an empty string, or a missing `sha256:` prefix, all of which §5 Stage 2 also names |
 | `fail_closed` equals (`decision` == `"deny"`) | `bad-106` | **the deny arm only.** No vector carries `allow` with `fail_closed: true`, so an implementation checking only `deny ⇒ fail_closed` reproduces all fourteen |
 | a marker binds on the `target_digest` leg | `bad-105` | an all-zero digest, tool name matching |
@@ -117,9 +117,9 @@ profile nowhere requires. Secondary point on the same row: with the vocabulary c
 reference reaches `unreachable!("decision vocabulary is closed")`, so the mutant is killed by a panic
 rather than by a verdict, and reproducing a crash is not what this corpus asks anyone to do.
 
-The rule is therefore counted below among the twenty-two, not among the five.
+The rule is therefore counted below among the twenty-three, not among the five.
 
-## The twenty-two it cannot
+## The twenty-three it cannot
 
 Each is promised by [v0.md](../../docs/profiles/privileged-mcp-action/v0.md). Numbered so the count is
 checkable against the list.
@@ -158,15 +158,28 @@ checkable against the list.
 21. `caller_visible_error.origin` must be `"assay-proxy"`
 22. `caller_visible_error.code` must be `-32042`
 
-The triple's third leg, `schema`, is decided earlier at Stage 2, so of its three legs this corpus
-isolates none.
+**Observation selection**
+23. an observation is selected only on the exact `.v0` schema; any other `assay.denied_call_observation.`
+    schema is an unrecognised profile schema, invalid
 
-## Which of the twenty-two a new vector could close, and which it could not
+The triple's third leg, `schema`, cannot decide anything on this path: only a payload whose schema is
+exactly `assay.denied_call_observation.v0` is selected as an observation, so the classifier never sees
+another schema. An earlier version of this sentence said the leg is decided at Stage 2. That names the
+wrong layer: deleting the Stage 2 arm that rejects `bad-104` leaves the leg exactly as unreachable,
+because `bad-104` is a decision-family payload. What forecloses the leg is rule 23, and rule 23 is
+itself undiscriminated. Relaxing selection to the observation family reproduces all fourteen outcomes
+byte for byte; with the schema leg also deleted, a bundle equal to `ok-001` except for a `.v1`
+observation schema confirms a caller-visible denial, and still all fourteen reproduce. Of the triple's
+three legs this corpus isolates none, and it does not isolate the rule that makes the third one moot.
+
+## Which of the twenty-three a new vector could close, and which it could not
 
 An earlier draft of this file had this exactly backwards, and the correction matters because it
 changes what a fix costs.
 
-**Ordinary, closable by writing a vector** — including 21 and 22, the two recorded as `known_holes`.
+**Ordinary, closable by writing a vector** — including 21 and 22, the two recorded as `known_holes`,
+and 23, which needs no generator change at all: `event()` takes the type from the payload schema, so an
+observation payload with a `.v1` schema is a well-formed bundle this generator already emits.
 The generator hard-codes the marker shape at [`gen_vectors.py:103`](gen_vectors.py), but it already
 carries a hand-written literal payload dict at line 320, so a vector varying `caller_visible_error.code`
 or `.origin` can be written the same way. Closing them costs a new vector and therefore a new digest,
@@ -221,8 +234,8 @@ rule, and the pack deliberately omits semantic case names, expected outcomes and
 the generator. Shipping it would hand over the answers the pack exists to withhold.
 
 So the pack's own README now carries the **scope statement without the
-attributions**: at most five rules distinguishable, twenty-two not discriminated,
-do not claim more, and say which of the twenty-two you implemented anyway. That
+attributions**: at most five rules distinguishable, twenty-three not discriminated,
+do not claim more, and say which of the twenty-three you implemented anyway. That
 lands in the next pack built from this repository. `candidate.4` is already
 released and is not modified; reaching the people holding it is a decision about
 [#1840](https://github.com/Rul1an/assay/issues/1840) rather than about this file.
@@ -248,10 +261,10 @@ than invented. And reading this file before a freeze is a disclosure question, a
 A reproduction distinguishes at most the five rules named. Anyone stating more than that — including
 us — is overstating what fourteen vectors measured.
 
-**What the corpus cannot ask for, and we can.** Twenty-two of these rules will get no evidence from
+**What the corpus cannot ask for, and we can.** Twenty-three of these rules will get no evidence from
 any reproduction of this corpus. If you implemented them anyway, say which in your report. That is
 information no vector can extract, it costs nothing to supply, and until a later corpus exists it is
-the only route by which any of the twenty-two gets any evidence at all.
+the only route by which any of the twenty-three gets any evidence at all.
 
 ## Two smaller things a reader should know
 
@@ -289,11 +302,11 @@ The generated measurement line above comes directly from [`adequacy/results.json
 ```json
 {
   "not_derived": [
-    {"token": "18.5%", "reason": "editorial third-party numerator: producer killed minus one, not a producer measurement"},
-    {"token": "Twenty-seven declared in-scope rules", "reason": "editorial denominator includes two known holes outside the producer scored denominator"},
-    {"token": "twenty-seven", "reason": "word-form repetition of that editorial denominator"},
+    {"token": "17.9%", "reason": "editorial third-party numerator: producer killed minus one, not a producer measurement"},
+    {"token": "Twenty-eight declared in-scope rules", "reason": "editorial denominator includes two known holes outside the producer scored denominator"},
+    {"token": "twenty-eight", "reason": "word-form repetition of that editorial denominator"},
     {"token": "at most five", "reason": "editorial third-party distinguishability judgement"},
-    {"token": "twenty-two", "reason": "editorial complement of the third-party judgement"}
+    {"token": "twenty-three", "reason": "editorial complement of the third-party judgement"}
   ]
 }
 ```
