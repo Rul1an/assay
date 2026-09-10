@@ -1,0 +1,4 @@
+{
+  "name": "Assay",
+  "install": "cargo install --path crates/assay-cli --locked && cargo install --path crates/assay-mcp-server --locked"
+}
