@@ -53,7 +53,7 @@ class NegationShapes(unittest.TestCase):
     # MODULE._NEGATORS, so deleting a word from the module also deleted it from the test, and
     # seventeen of eighteen negators could be dropped with the suite still green.
     NEGATORS = ("not", "never", "nor", "neither", "without", "cannot", "unable", "hardly",
-                "dont", "doesnt", "didnt", "wont", "isnt", "arent", "cant", "shouldnt",
+                "barely", "scarcely", "rarely", "seldom", "aint", "dont", "doesnt", "didnt", "wont", "isnt", "arent", "cant", "shouldnt",
                 "wouldnt", "couldnt", "no longer", "does n't")
 
     def test_every_negator_is_recognised(self):
@@ -73,9 +73,30 @@ class NegationShapes(unittest.TestCase):
         self.assertTrue(problems(body=f"It does not\n{KW} #9012."))
         self.assertTrue(problems(body=f"- This does not\n  {KW} #9013, a wrapped list item."))
 
-    def test_capitalised_keyword_on_its_own_line_starts_a_new_clause(self):
-        # A trailer after an unrelated negation must stay a declaration, not become a block.
-        self.assertEqual(problems(body=f"This does not change behaviour\n{KWS.capitalize()} #9014"), [])
+    def test_capitalised_keyword_on_its_own_line_is_still_negated(self):
+        # Found by the review of da4f917 (Muse R1). A capitalised keyword opening its own line was
+        # exempted as a trailer, so each of these read clean while GitHub closed the issue.
+        cap, upper = KW.capitalize(), KWS.upper()
+        for body in (f"This PR does not\n{cap} #9014",
+                     f"This PR does not\n{upper} #9014",
+                     f"This PR does not\n  {cap} #9014 and more words",
+                     f"It does not\nchange that and\n{cap} #9014"):
+            with self.subTest(body=body):
+                self.assertTrue(problems(body=body), "a capitalised keyword line escaped the negation")
+
+    def test_trailer_after_a_boundary_is_a_declaration(self):
+        # The shapes a real trailer takes: after a blank line, or after a finished sentence.
+        self.assertEqual(problems(body=f"This does not change behaviour.\n{KWS.capitalize()} #9018"), [])
+        self.assertEqual(problems(body=f"This does not change behaviour\n\n{KWS.capitalize()} #9019"), [])
+
+    def test_negation_after_the_reference_in_the_same_clause(self):
+        # CodeRabbit on 9dd968c4c: the clause after the reference counts too.
+        self.assertTrue(problems(body=f"{KWS.capitalize()} #9020, but does not finish it"))
+        self.assertTrue(problems(body=f"{KWS.capitalize()} #9021 without\nthe second half"))
+
+    def test_negation_in_the_next_sentence_does_not_leak_back(self):
+        self.assertEqual(problems(body=f"{KWS.capitalize()} #9022. This does not change behaviour."), [])
+        self.assertEqual(problems(body=f"{KWS.capitalize()} #9023\n\nIt does not change behaviour."), [])
 
     def test_new_list_item_does_not_inherit_the_previous_negation(self):
         self.assertEqual(problems(body=f"- this does not change x\n- {KWS} #9015"), [])
