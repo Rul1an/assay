@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if ! command -v pre-commit >/dev/null 2>&1; then
+  echo "FAIL: pre-commit is not on PATH. Install it with: python3 -m pip install pre-commit" >&2
+  exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/ci/lib/golden-path-fixture-staging.sh
 source "$SCRIPT_DIR/lib/golden-path-fixture-staging.sh"
@@ -674,6 +679,13 @@ expect_valid_precommit_config() {
   fi
 }
 
+precommit_named_hook_skipped() {
+  local output="$1" hook="$2"
+  local line
+  line="$(grep -F -m 1 "$hook" "$output" || true)"
+  [[ -n "$line" && "$line" == *Skipped* ]]
+}
+
 expect_precommit_skip() {
   local name="$1" case_root="$2"
   local output="$case_root/precommit-run.log"
@@ -685,7 +697,9 @@ expect_precommit_skip() {
     echo "FAIL: $name did not skip successfully under pre-commit" >&2
     return 1
   fi
-  if ! grep -Fq "Skipped" "$output"; then
+  if ! precommit_named_hook_skipped "$output" "docs-generated-drift-self-test" \
+    && ! precommit_named_hook_skipped "$output" "Generated-docs drift check self-test"
+  then
     cat "$output" >&2
     echo "FAIL: $name exited zero without reporting a skipped hook" >&2
     return 1

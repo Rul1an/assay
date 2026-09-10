@@ -17,7 +17,8 @@ It is intentionally small:
 
 - `capture_probe.py`: small local LangWatch probe that emits one positive and
   one negative `add_evaluation(...)` call and saves raw discovery payloads
-- `requirements.txt`: local probe dependencies for the checked-in SDK path
+- `requirements.in`: local probe dependencies for the checked-in SDK path
+- `requirements.txt`: hashed lock compiled from `requirements.in`
 - `discovery/valid.emitted.input.json`: the public emitted input we sent for
   the valid live evaluation
 - `discovery/valid.surfaced.trace.response.json`: the wider surfaced trace
