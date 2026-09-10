@@ -306,6 +306,21 @@ Then:
 - Store `x-assay-bundle-id` metadata for verification
 - Support checksum validation on pull
 
+**Correction (2026-09-10).** The push sketch above treats `AlreadyExists` as "same bundle_id =
+same bytes". That premise is false: `bundle_id` is the bundle's `run_root`, a digest over event
+semantics, so two different archives carrying the same events share it. And "support checksum
+validation on pull" was implemented as integrity only: `pull --verify` never compared the verified
+manifest with the id that was requested. Both now hold as properties of the CLI:
+
+- `evidence push` treats an existing object as idempotent only when it is byte-identical to the
+  local archive; a different archive under the same id fails, is not stored, and links no run.
+  `--allow-exists` quiets the identical case only.
+- `evidence pull --verify` verifies before writing and requires the verified manifest's
+  `bundle_id` to equal the requested id; on a mismatch nothing is written.
+
+Keying the store by a digest of the archive bytes, rather than by `run_root`, would remove the
+collision itself; that is a storage-layout change and is not part of this correction.
+
 ### WORM Responsibility
 
 User is responsible for configuring Object Lock on their bucket:
