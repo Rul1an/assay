@@ -119,6 +119,53 @@ path.write_text(text, encoding="utf-8")
 PY
 expect_red source-statement-emitter-switch 'does not state "in-toto v2 Statement"'
 
+# Found by the review of 55b42551c (Grok F4): each of these mutants of the checker survived.
+# Two assignments of one field in the emitter: neither may win silently.
+python3 - "$TMP/tree/$SOURCE" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+field = "        predicate_type: EVIDENCE_BUNDLE_PREDICATE_TYPE_V1.to_string(),\n"
+at = text.index(field, text.index("fn statement_from_parts("))
+second = "        predicate_type: EVIDENCE_BUNDLE_PREDICATE_TYPE_V0.to_string(),\n"
+path.write_text(text[:at] + field + second + text[at + len(field):], encoding="utf-8")
+PY
+expect_red emitter-two-assignments 'from exactly one named constant'
+# An assignment in a form the check does not parse fails closed instead of being guessed at.
+replace_once "$SOURCE" '        predicate_type: EVIDENCE_BUNDLE_PREDICATE_TYPE_V1.to_string(),' \
+  '        predicate_type: EVIDENCE_BUNDLE_PREDICATE_TYPE_V1.to_owned(),'
+expect_red emitter-unfamiliar-form 'from exactly one named constant'
+# The names must be in the attestation row, not merely somewhere in the README.
+python3 - "$TMP/tree/$README" "$row_prefix" <<'PY'
+from pathlib import Path
+import sys
+
+path, prefix = Path(sys.argv[1]), sys.argv[2]
+lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+hits = [i for i, line in enumerate(lines) if line.startswith(prefix)]
+lines[hits[0]] = prefix + "Export a bundle as a signed statement. |\n"
+lines.append("\nElsewhere: an in-toto v1 Statement with the evidence-bundle/v1 predicate.\n")
+path.write_text("".join(lines), encoding="utf-8")
+PY
+expect_red names-elsewhere-only 'does not state "in-toto v1 Statement"'
+
+# The runtime leg: attestation.rs's unit test passes the URIs a running constructor returned.
+run_check() {
+  python3 "$CHECK" --root "$TMP/tree" --statement-type https://in-toto.io/Statement/v1 \
+    --predicate-type https://docs.getassay.dev/attestation/evidence-bundle/v2
+}
+expect_red runtime-predicate-differs 'does not state "evidence-bundle/v2 predicate"'
+run_check() {
+  python3 "$CHECK" --root "$TMP/tree" \
+    --predicate-type https://docs.getassay.dev/attestation/evidence-bundle/v1
+}
+expect_red runtime-half-given 'go together'
+run_check() {
+  python3 "$CHECK" --root "$TMP/tree"
+}
+
 # Anything the check cannot read is a failure, never a pass.
 replace_once "$SOURCE" 'fn statement_from_parts(' 'fn statement_assembled_from_parts('
 expect_red emitter-not-found 'statement_from_parts'
@@ -144,8 +191,8 @@ path.write_text("".join(lines) + row, encoding="utf-8")
 PY
 expect_red row-duplicated 'exactly one README attestation row'
 
-if [ "$mutations" -ne 11 ]; then
-  echo "FAIL: expected 11 observed mutations, got $mutations" >&2
+if [ "$mutations" -ne 16 ]; then
+  echo "FAIL: expected 16 observed mutations, got $mutations" >&2
   exit 1
 fi
 

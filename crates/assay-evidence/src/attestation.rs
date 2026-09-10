@@ -746,6 +746,45 @@ mod tests {
             .expect("the emitted predicate URI must bind its repository page");
     }
 
+    /// Run the README attestation-row check on what the CLI's constructor returns (#2875).
+    ///
+    /// `scripts/ci/check-readme-attestation-truth.py` holds the row rule. On the release path it
+    /// reads the names from this file's source text, because that job has no Rust toolchain. Here
+    /// it gets the URIs a running `statement_for_bundle_with_extent_and_limits` emits instead, so
+    /// a change the source reading cannot see, such as a type reassigned after
+    /// `statement_from_parts` returns, still fails under required CI. The second call is the
+    /// control: a URI the README does not name must be refused, or the first proves nothing.
+    #[cfg(unix)]
+    #[test]
+    fn readme_attestation_row_names_what_the_shipped_constructor_emits() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let check = |statement_type: &str, predicate_type: &str| {
+            std::process::Command::new("python3")
+                .arg(root.join("scripts/ci/check-readme-attestation-truth.py"))
+                .arg("--root")
+                .arg(&root)
+                .args(["--statement-type", statement_type])
+                .args(["--predicate-type", predicate_type])
+                .output()
+                .expect("python3 runs the README attestation check")
+        };
+        let statement =
+            statement_for_bundle_with_extent_and_limits(&bundle(), VerifyLimits::default())
+                .expect("the constructor `assay evidence attest` calls");
+
+        let shipped = check(&statement.type_, &statement.predicate_type);
+        assert!(
+            shipped.status.success(),
+            "README attestation row disagrees with the shipped statement: {}",
+            String::from_utf8_lossy(&shipped.stderr)
+        );
+        let other = format!("{}-changed", statement.predicate_type);
+        assert!(
+            !check(&statement.type_, &other).status.success(),
+            "the check accepted a predicate the README does not name"
+        );
+    }
+
     #[test]
     fn v1_predicate_uri_binding_refuses_a_missing_page() {
         let docs = tempfile::tempdir().expect("isolated docs directory");

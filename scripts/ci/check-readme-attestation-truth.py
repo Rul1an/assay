@@ -6,16 +6,24 @@ v6.0.0 and v6.1.0 while `crates/assay-evidence/src/attestation.rs` emitted an in
 Statement with the evidence-bundle/v1 predicate (#2859). Every release gate passed it, because
 none of them read the README (#2875).
 
-The source is the only vocabulary. The names are read from what `statement_from_parts` puts in
-`type_` and `predicate_type`, resolved through the constants it names: that function is the only
-place a statement is assembled, so switching it to another constant is a change of what ships,
-and a check that read a fixed constant name would miss it. The README row is the projection and
-must state both names, and no other version.
+The source is the only vocabulary, read from two sides with this one rule:
 
-Anything this cannot read is a failure, never a pass: a renamed emitter, a constant that is not a
-plain string, a URI outside the expected shape, or not exactly one attestation row.
+- On the release path, where no Rust toolchain exists, the names come from the source text: what
+  `statement_from_parts` puts in `type_` and `predicate_type`, resolved through the constants it
+  names. Every public constructor goes through that function; reading it rather than a fixed
+  constant name means switching it to another constant is caught. The deprecated
+  `statement_from_manifest` also assembles a statement, with the v0 predicate the verifier refuses,
+  and is deliberately not read.
+- Under required CI, `readme_attestation_row_names_what_the_shipped_constructor_emits` in
+  `attestation.rs` runs the constructor the CLI calls and passes the URIs it returns through
+  `--statement-type` and `--predicate-type`. That covers a change on the ship path the source
+  reading cannot see, such as a type reassigned after `statement_from_parts` returns.
 
-Usage: check-readme-attestation-truth.py [--root DIR]
+The README row is the projection and must state both names, and no other version. Anything this
+cannot read is a failure, never a pass: a renamed emitter, a constant that is not a plain string,
+an assignment in an unfamiliar form, a URI outside the expected shape, or not exactly one row.
+
+Usage: check-readme-attestation-truth.py [--root DIR] [--statement-type URI --predicate-type URI]
 """
 
 from __future__ import annotations
@@ -66,11 +74,15 @@ def constant_value(source: str, name: str) -> str:
     return values[0]
 
 
-def emitted_names(source: str) -> tuple[str, str, str]:
-    """Return (statement version, predicate name, predicate version) as the source emits them."""
+def source_uris(source: str) -> tuple[str, str]:
+    """Return (statement type, predicate type) as the source text says `statement_from_parts` emits."""
     body = emitter_body(source)
-    statement = constant_value(source, emitted_constant(body, "type_"))
-    predicate = constant_value(source, emitted_constant(body, "predicate_type"))
+    return (constant_value(source, emitted_constant(body, "type_")),
+            constant_value(source, emitted_constant(body, "predicate_type")))
+
+
+def names(statement: str, predicate: str) -> tuple[str, str, str]:
+    """Return (statement version, predicate name, predicate version) from the two type URIs."""
     statement_match = STATEMENT_URI.fullmatch(statement)
     if statement_match is None:
         raise CheckError(f"{SOURCE}: statement type {statement!r} is not an in-toto Statement URI")
@@ -87,11 +99,12 @@ def readme_row(readme: str) -> str:
     return rows[0]
 
 
-def problems(root: Path) -> list[str]:
+def problems(root: Path, emitted: tuple[str, str] | None = None) -> list[str]:
     try:
-        source = (root / SOURCE).read_text(encoding="utf-8")
         readme = (root / README).read_text(encoding="utf-8")
-        statement_version, predicate_name, predicate_version = emitted_names(source)
+        if emitted is None:
+            emitted = source_uris((root / SOURCE).read_text(encoding="utf-8"))
+        statement_version, predicate_name, predicate_version = names(*emitted)
         row = readme_row(readme)
     except (OSError, CheckError) as exc:
         return [str(exc)]
@@ -100,7 +113,7 @@ def problems(root: Path) -> list[str]:
     for phrase in (f"in-toto {statement_version} Statement", f"{predicate_name} predicate"):
         if phrase not in row:
             found.append(f"{README}: attestation row does not state \"{phrase}\", which "
-                         f"{SOURCE} emits: {row}")
+                         f"the statement emits: {row}")
     allowed = {statement_version, predicate_version}
     for token in sorted(set(VERSION_TOKEN.findall(row)) - allowed):
         found.append(f"{README}: attestation row names {token}, which the emitted statement "
@@ -111,8 +124,13 @@ def problems(root: Path) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
+    parser.add_argument("--statement-type", help="statement type URI a running constructor emitted")
+    parser.add_argument("--predicate-type", help="predicate type URI a running constructor emitted")
     args = parser.parse_args()
-    found = problems(args.root)
+    if (args.statement_type is None) != (args.predicate_type is None):
+        parser.error("--statement-type and --predicate-type go together")
+    emitted = None if args.statement_type is None else (args.statement_type, args.predicate_type)
+    found = problems(args.root, emitted)
     for problem in found:
         print(f"FAIL: {problem}", file=sys.stderr)
     if found:
