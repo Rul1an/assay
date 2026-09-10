@@ -51,21 +51,7 @@ fn truncate_value_at(v: &mut Value, path: &str) -> Vec<TruncationMeta> {
     let mut metas = Vec::new();
 
     match v {
-        Value::String(s) if s.len() > MAX_STRING_LEN => {
-            let original_len = s.len();
-            let hash = hex::encode(Sha256::digest(s.as_bytes()));
-            let new_s = truncate_string_to_byte_budget(s);
-            let kept_len = new_s.len();
-            *s = new_s;
-
-            metas.push(TruncationMeta {
-                field: path.to_string(),
-                original_len,
-                kept_len,
-                sha256: hash,
-                strategy: "head".to_string(),
-            });
-        }
+        Value::String(s) => metas.extend(truncate_str_at(s, path)),
         Value::Array(arr) => {
             for (i, item) in arr.iter_mut().enumerate() {
                 let sub_path = append_segment(path, &i.to_string());
@@ -90,23 +76,27 @@ fn truncate_value_at(v: &mut Value, path: &str) -> Vec<TruncationMeta> {
 /// [`truncate_value_with_provenance`].
 #[must_use]
 pub fn truncate_string(s: &mut String, field_name: &str) -> Option<TruncationMeta> {
-    if s.len() > MAX_STRING_LEN {
-        let original_len = s.len();
-        let hash = hex::encode(Sha256::digest(s.as_bytes()));
-        let new_s = truncate_string_to_byte_budget(s);
-        let kept_len = new_s.len();
-        *s = new_s;
+    truncate_str_at(s, &normalize_root_pointer(field_name))
+}
 
-        Some(TruncationMeta {
-            field: normalize_root_pointer(field_name),
-            original_len,
-            kept_len,
-            sha256: hash,
-            strategy: "head".to_string(),
-        })
-    } else {
-        None
+/// The ceiling decision and the truncation, shared by both public entry points.
+///
+/// Each used to carry its own copy, and the #2804 review found one copy's `>` could become `>=`
+/// with every test green (#2787). One copy leaves one boundary to get wrong.
+fn truncate_str_at(s: &mut String, pointer: &str) -> Option<TruncationMeta> {
+    if s.len() <= MAX_STRING_LEN {
+        return None;
     }
+    let original_len = s.len();
+    let sha256 = hex::encode(Sha256::digest(s.as_bytes()));
+    *s = truncate_string_to_byte_budget(s);
+    Some(TruncationMeta {
+        field: pointer.to_string(),
+        original_len,
+        kept_len: s.len(),
+        sha256,
+        strategy: "head".to_string(),
+    })
 }
 
 pub fn compute_sha256(v: &Value) -> String {
@@ -168,6 +158,83 @@ mod tests {
             emitted.len(),
             "kept_len must equal emitted UTF-8 byte length"
         );
+    }
+
+    /// The two public entry points must make one ceiling decision (#2787).
+    ///
+    /// The #2804 review found that turning the direct helper's `>` into `>=` left every verifier
+    /// test green, because the verifier's exact-match fast path masks the 4096-byte boundary. It
+    /// is not equivalent for direct callers: at exactly the ceiling one helper would truncate and
+    /// the other would not. Each row states its expectation rather than deriving it from the
+    /// ceiling, so moving the boundary in either helper turns this red.
+    #[test]
+    fn string_and_value_helpers_agree_on_bytes_and_provenance() {
+        let keep = MAX_STRING_LEN - TRUNCATED_MSG.len();
+        let cases: [(&str, String, bool); 6] = [
+            ("one below", "x".repeat(MAX_STRING_LEN - 1), false),
+            ("exactly at", "x".repeat(MAX_STRING_LEN), false),
+            ("one above", "x".repeat(MAX_STRING_LEN + 1), true),
+            (
+                "multibyte exactly at",
+                MULTI.repeat(MAX_STRING_LEN / 4),
+                false,
+            ),
+            (
+                "multibyte one above",
+                MULTI.repeat(MAX_STRING_LEN / 4) + "x",
+                true,
+            ),
+            (
+                "cut inside a code point",
+                "x".repeat(keep - 1) + &MULTI.repeat(10),
+                true,
+            ),
+        ];
+        for (name, input, truncates) in &cases {
+            for field in ["content", "a/b~c", "/already/absolute"] {
+                let mut direct = input.clone();
+                let direct_meta = truncate_string(&mut direct, field);
+
+                let mut value = Value::String(input.clone());
+                let value_metas = truncate_value_with_provenance(&mut value, field);
+
+                assert_eq!(
+                    direct_meta.is_some(),
+                    *truncates,
+                    "{name}, {field}: direct helper made the wrong ceiling decision"
+                );
+                assert_eq!(
+                    value.as_str(),
+                    Some(direct.as_str()),
+                    "{name}, {field}: emitted bytes differ"
+                );
+                assert_eq!(
+                    value_metas,
+                    direct_meta.iter().cloned().collect::<Vec<_>>(),
+                    "{name}, {field}: provenance differs"
+                );
+            }
+
+            // Nested under an escaped object key and an array index, the value helper must emit
+            // the same bytes and provenance, at the pointer of the leaf.
+            let mut direct = input.clone();
+            let direct_meta = truncate_string(&mut direct, "unused");
+            let mut nested = json!({ "a/b": [input.clone()] });
+            let nested_metas = truncate_value_with_provenance(&mut nested, "args");
+            assert_eq!(
+                nested["a/b"][0].as_str(),
+                Some(direct.as_str()),
+                "{name}: nested emitted bytes differ"
+            );
+            let expected: Vec<_> = direct_meta
+                .into_iter()
+                .map(|meta| TruncationMeta {
+                    field: "/args/a~1b/0".to_string(),
+                    ..meta
+                })
+                .collect();
+            assert_eq!(nested_metas, expected, "{name}: nested provenance differs");
+        }
     }
 
     #[test]
