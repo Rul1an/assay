@@ -38,11 +38,33 @@ _REF = (
 # "disclose", "prefix", "unresolved", "fixture" and "closet" never match.
 _CLOSING = re.compile(rf"(?<![\w-]){_KEYWORD}(?![\w-])\s*:?\s*{_REF}", re.IGNORECASE)
 
-# A clause ends at sentence punctuation followed by whitespace, so "ci.yml" is not a boundary.
-_CLAUSE_BOUNDARY = re.compile(r"[.!?;](?=\s)")
+# A clause ends at sentence punctuation followed by whitespace, so "ci.yml" is not a boundary,
+# and at a paragraph break. It also ends where a line starts a new structural element: a list
+# item, heading, table row or blockquote. A plain soft line break does not end it, because this
+# repository hard-wraps PR bodies and commit messages, so "It does not" at the end of one line and
+# the keyword at the start of the next is an ordinary shape, not an edge case.
+_CLAUSE_BOUNDARY = re.compile(
+    r"[.!?;](?=\s)"
+    r"|\n[ \t]*\n"
+    r"|\n(?=[ \t]*(?:[-*+][ \t]|\d+[.)][ \t]|#{1,6}[ \t]|\||>))"
+)
 # Bare "no" is left out on purpose: "a no-op that closes #5" is a real close, not a negation.
-_NEGATION = re.compile(r"(?<![\w-])(?:not|never|nor|without|cannot)(?![\w-])|n't(?![\w-])",
-                       re.IGNORECASE)
+# "no longer" is in, because it negates what follows it. Contractions are matched with and without
+# the apostrophe, since "wont" and "doesnt" are what fast typing produces.
+_NEGATORS = (
+    "not", "never", "nor", "neither", "without", "cannot", "unable", "hardly",
+    "dont", "doesnt", "didnt", "wont", "isnt", "arent", "cant", "shouldnt", "wouldnt", "couldnt",
+)
+_NEGATION = re.compile(
+    r"(?<![\w-])(?:" + "|".join(_NEGATORS) + r"|no[ \t\n]+longer)(?![\w-])|n't(?![\w-])",
+    re.IGNORECASE,
+)
+# Typographic apostrophes become ASCII before the negation scan: an editor or a phone turns
+# "doesn't" into "doesn\u2019t", and GitHub still reads the keyword that follows.
+_APOSTROPHES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u02bc": "'", "\uff07": "'"})
+# A keyword that opens its own line with a capital letter ("Closes #5") is a trailer or a new
+# sentence, not the wrapped tail of the line above, so it starts a fresh clause.
+_LINE_OPENING_KEYWORD = re.compile(r"[ \t]*(?:[-*+][ \t]+|\d+[.)][ \t]+)?[A-Z]")
 
 _LINE_LIMIT = 200
 
@@ -65,12 +87,18 @@ def _line_of(text: str, start: int, end: int) -> str:
 
 
 def _is_negated(text: str, start: int) -> bool:
-    """Whether the clause before a keyword, on the same line, carries a negation."""
+    """Whether the clause before a keyword carries a negation.
+
+    The clause runs back to the nearest boundary, across soft line breaks. A capitalised keyword
+    at the start of its own line begins a new clause, so a trailer never inherits the line above.
+    """
     line_start = text.rfind("\n", 0, start) + 1
-    before = text[line_start:start]
+    if _LINE_OPENING_KEYWORD.fullmatch(text[line_start:start + 1]):
+        return False
+    before = text[:start]
     boundaries = list(_CLAUSE_BOUNDARY.finditer(before))
     clause = before[boundaries[-1].end():] if boundaries else before
-    return bool(_NEGATION.search(clause))
+    return bool(_NEGATION.search(clause.translate(_APOSTROPHES)))
 
 
 def _references(repo: str, text: str):

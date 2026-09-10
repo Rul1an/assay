@@ -44,6 +44,49 @@ class IncidentFixtures(unittest.TestCase):
         self.assertTrue(any("#9002" in p and "commit" in p for p in found), found)
 
 
+class NegationShapes(unittest.TestCase):
+    """Found by the independent reviews of 9dd968c4c (Muse F1-F3, Ruley 1): each was a silent
+    close before the fix. Every boundary and every negator is pinned on its own, so dropping any
+    one of them turns exactly the matching test red."""
+
+    # A literal list, deliberately not read from the module. An earlier version iterated
+    # MODULE._NEGATORS, so deleting a word from the module also deleted it from the test, and
+    # seventeen of eighteen negators could be dropped with the suite still green.
+    NEGATORS = ("not", "never", "nor", "neither", "without", "cannot", "unable", "hardly",
+                "dont", "doesnt", "didnt", "wont", "isnt", "arent", "cant", "shouldnt",
+                "wouldnt", "couldnt", "no longer", "does n't")
+
+    def test_every_negator_is_recognised(self):
+        for word in self.NEGATORS:
+            with self.subTest(word=word):
+                found = problems(body=f"This change {word} {KW} #9010.")
+                self.assertTrue(found, f"{word!r} before a keyword was read as a declaration")
+
+    def test_typographic_apostrophe_is_a_negation(self):
+        for apostrophe in ("’", "‘", "ʼ", "＇"):
+            with self.subTest(apostrophe=hex(ord(apostrophe))):
+                found = problems(body=f"It doesn{apostrophe}t {KW} #9011.")
+                self.assertTrue(found, "an editor's curly apostrophe hid the negation")
+
+    def test_negation_on_the_line_above_a_wrapped_keyword(self):
+        # This repository hard-wraps prose, so the negation often ends the previous line.
+        self.assertTrue(problems(body=f"It does not\n{KW} #9012."))
+        self.assertTrue(problems(body=f"- This does not\n  {KW} #9013, a wrapped list item."))
+
+    def test_capitalised_keyword_on_its_own_line_starts_a_new_clause(self):
+        # A trailer after an unrelated negation must stay a declaration, not become a block.
+        self.assertEqual(problems(body=f"This does not change behaviour\n{KWS.capitalize()} #9014"), [])
+
+    def test_new_list_item_does_not_inherit_the_previous_negation(self):
+        self.assertEqual(problems(body=f"- this does not change x\n- {KWS} #9015"), [])
+
+    def test_paragraph_break_resets_the_clause(self):
+        self.assertEqual(problems(body=f"It does not\n\n{KWS} #9016"), [])
+
+    def test_table_row_does_not_inherit_the_previous_row(self):
+        self.assertEqual(problems(body=f"| a | does not change |\n| b | {KWS} #9017 |"), [])
+
+
 class Controls(unittest.TestCase):
     def test_no_keywords_is_clean(self):
         self.assertEqual(problems(title="ci: tidy", body="Refs #10. Nothing closes.",

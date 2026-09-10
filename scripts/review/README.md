@@ -59,11 +59,12 @@ immutable attestation or protection against subsequent evidence edits.
 GitHub closes an issue when a closing keyword (`close`, `closes`, `closed`, `fix`, `fixes`,
 `fixed`, `resolve`, `resolves`, `resolved`, any case, optional colon) is followed by an issue
 reference, in a PR description or in a commit message that lands on the default branch. It has
-no notion of negation, and it reads commit messages the author can no longer edit. Between
-2026-08-19 and 2026-09-05 that closed five issues their authors meant to keep open: a sentence
-saying a change leaves an issue open, written with the keyword directly before the number,
-closes that issue; and a keyword retracted from a PR body still closes the issue from the
-commit that carried it.
+no notion of negation, and it reads commit messages the author can no longer edit. Measured with
+GitHub's own `ClosedEvent.closer`, that closed issues their authors meant to keep open nine times
+across six issues between 2026-08-19 and 2026-09-05, and two of those closes went unnoticed for
+days, one of them on a P1 security bug. A sentence saying a change leaves an issue open, written
+with the keyword directly before the number, closes that issue; and a keyword retracted from a PR
+body still closes the issue from the commit that carried it.
 
 `pr_landing_readiness.py` therefore reports a blocker, via `closing_keywords.py`, when:
 
@@ -78,9 +79,26 @@ the same: never put a closing keyword next to an issue number unless you mean to
 Write `Refs #N` for a relationship. There is no negated form that GitHub understands, so the
 words must not appear, in the body or in a commit message.
 
+A negation counts when it sits in the same clause as the keyword. A clause runs back across soft
+line breaks, because this repository hard-wraps prose, and ends at sentence punctuation, a blank
+line, a list item, heading, table row or blockquote. A capitalised keyword that opens its own line
+(`Closes #N`, the trailer shape) starts a new clause. Typographic apostrophes are read as ASCII,
+so `doesn’t` is a negation. The negators are listed in `closing_keywords.py`; bare "no" is
+left out on purpose, since "a no-op that closes #N" is a real close.
+
 The rule is deliberately conservative: it prefers a false block, which costs one rewording, to
-a silent close. It cannot see a keyword that was edited out of the body before merge but left
-in place when the issue closed, and it does not undo a close that already happened.
+a silent close. Known limits, each a false block rather than a silent close unless stated:
+
+- The title is scanned for every merge method. It lands in the merge or squash commit subject,
+  but not under `--rebase`, where a title keyword is therefore a spurious block.
+- The base branch is not consulted. A PR into a non-default branch closes nothing by its body,
+  but its commit messages still close issues when those commits later reach the default branch,
+  so the commit rule stays relevant there.
+- An issue linked through the sidebar's Development panel also closes on merge and carries no
+  keyword text. That is a deliberate act and is out of scope; it is a silent close this guard
+  cannot see.
+- A keyword edited out of the body before merge is invisible afterwards, and a close that already
+  happened is not undone.
 
 The broader readiness queries accept only the fixed `gh pr` and `gh api` command
 families used by the reporter, validate repository and branch path components, and
