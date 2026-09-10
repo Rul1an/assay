@@ -32,11 +32,21 @@ Opting out is possible and visible. A hook may carry
 on a line inside its block. The reason floor is not about prose: it is there so the marker
 cannot be added as reflex punctuation while a reviewer skims past it.
 
-This guard does not hold itself to its own rule, and the exemption is structural rather than
-chosen: it builds workflow paths from `WORKFLOW_DIR` instead of binding a literal one, so
-`binding_names` does not see it. Its own callsite is pinned by the "Verify CI hardening
-contracts" step's closed command set, restated in three independent places, which is a stronger
-guarantee than this rule gives -- dropping the line turns all three red.
+This guard is in its own scope and passes the way every other hook does, by having a callsite.
+An earlier version of this paragraph claimed the opposite -- that it built paths from a constant
+and so could not match itself. That was wrong, and replaying the guard against a tree where its
+own ci.yml lines were absent falsified it: the guard reported itself, correctly. `uncommented()`
+strips `#` comments only, so the workflow path in this module's docstring above and in the
+self-test's positive control both count, and `binding_names` returns {"ci.yml"} for this file.
+
+That over-inclusion is deliberate in direction rather than accidental. A path named in a Python
+docstring or a string literal is prose, and treating it as a binding asks for a callsite that
+may not be needed -- the error falls toward wiring a contract into CI rather than away from it,
+and the marker is the escape when it lands wrongly. The rule reads cleanly for shell scripts,
+where `#` is the only comment form; for Python it is broader than "asserts against".
+
+The callsite is also pinned, independently of this rule, by the "Verify CI hardening contracts"
+step's closed command set, restated in three places: dropping the line turns all three red.
 
 Usage:
     check-precommit-required-callsite.py             # verify every in-scope hook is wired
@@ -187,8 +197,11 @@ def parse_hooks(config_text: str) -> list[dict]:
 def binding_names(body: str, required: set[str]) -> set[str]:
     """Which required workflows this source *binds*, as opposed to merely mentioning.
 
-    A path inside a comment is prose about a workflow, not a claim on it, and pulling such a
-    script into scope would make the guard demand a callsite for a contract it does not state.
+    A path inside a `#` comment is prose about a workflow, not a claim on it, and pulling such
+    a script into scope would make the guard demand a callsite for a contract it does not
+    state. Only `#` comments are stripped: a path in a Python docstring or a string literal
+    still counts, so for `.py` sources this is broader than "asserts against". See the module
+    docstring -- the direction of that error is deliberate, and the marker is the escape.
     """
     bound = set()
     for line in uncommented(body):
@@ -339,6 +352,15 @@ def self_test() -> int:
         failures += 1
     else:
         print("ok    a workflow named only in a comment is not a binding")
+
+    # This guard is in its own scope. Pinned because the module docstring once claimed the
+    # opposite: with its own callsite gone, the live config must name this guard's hook.
+    self_unwired = dict(workflows)
+    for line in ("          python3 scripts/ci/check-precommit-required-callsite.py --self-test\n",
+                 "          python3 scripts/ci/check-precommit-required-callsite.py\n"):
+        self_unwired["ci.yml"] = self_unwired["ci.yml"].replace(line, "", 1)
+    expect("the guard is in its own scope", live_config, self_unwired,
+           "precommit-required-callsite")
 
     # A required context nothing produces must be an error, never a smaller required set.
     renamed = dict(workflows)
