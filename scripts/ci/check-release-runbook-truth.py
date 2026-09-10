@@ -33,6 +33,29 @@ _PYPI_SINGLE_PUBLISHER_SENTENCE = (
 _PYPI_EMPTY_ENVIRONMENT_SENTENCE = (
     "An empty environment is broader authority and does not match this contract."
 )
+_CRATES_ITEM_TITLE = "Trusted Publishing"
+_CRATES_REPOSITORY = _PYPI_REPOSITORY
+_CRATES_WORKFLOW = _PYPI_WORKFLOW
+_CRATES_ENVIRONMENT = "crates"
+_CRATES_PUBLISH_ACTION = (
+    "rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18"
+)
+_CRATES_IDENTITY_SENTENCE = (
+    "Require, per crate, a GitHub Trusted Publisher: "
+    "repository `Rul1an/assay`, "
+    "workflow `release.yml`, environment `crates`."
+)
+_CRATES_LEGACY_REMOVAL_SENTENCE = (
+    "Remove every other publisher, including any publisher whose environment is unset."
+)
+_CRATES_UNSET_ENVIRONMENT_SENTENCE = (
+    "An unset environment is broader authority and does not match this contract."
+)
+_CRATES_RECEIPT_SENTENCE = (
+    "retain a redacted receipt containing only the crate, "
+    "repository, workflow, environment, publisher count, observation time, and result. "
+    "No credentials."
+)
 _BEFORE_CLAIM = re.compile(
     r"GitHub Release is created before crates publication",
     re.IGNORECASE,
@@ -200,32 +223,91 @@ def _active_step_uses(job: str) -> list[str]:
     return uses
 
 
-def _pypi_workflow_problems(workflow: str) -> list[str]:
+def _publisher_job(
+    workflow: str, job_id: str, label: str
+) -> tuple[str | None, dict[str, str] | None, list[str]]:
     try:
         jobs = _mapping_block(workflow, "jobs", 0)
-        job = _mapping_block(jobs, "publish-pypi", 2)
+        job = _mapping_block(jobs, job_id, 2)
         entries = _child_entries(job)
     except AssertionError as exc:
-        return [f"release.yml PyPI publisher identity is unavailable ({exc})"]
+        return None, None, [f"release.yml {label} publisher identity is unavailable ({exc})"]
+    return job, entries, []
 
-    problems: list[str] = []
-    environment = entries.get("environment", "").split(" #", 1)[0].strip(" '\"")
-    if environment != _PYPI_ENVIRONMENT:
-        problems.append(
-            f"publish-pypi environment is {environment!r}, expected {_PYPI_ENVIRONMENT!r}"
-        )
+
+def _job_environment(entries: dict[str, str]) -> str:
+    return entries.get("environment", "").split(" #", 1)[0].strip(" '\"")
+
+
+def _environment_problems(
+    entries: dict[str, str], *, job_id: str, expected: str
+) -> list[str]:
+    environment = _job_environment(entries)
+    if environment != expected:
+        return [f"{job_id} environment is {environment!r}, expected {expected!r}"]
+    return []
+
+
+def _id_token_write_problems(job: str, *, job_id: str) -> list[str]:
     try:
         permissions = _child_entries(_mapping_block(job, "permissions", 4))
     except AssertionError as exc:
-        problems.append(f"publish-pypi permissions are unavailable ({exc})")
-    else:
-        id_token = permissions.get("id-token", "").split(" #", 1)[0].strip(" '\"")
-        if id_token != "write":
-            problems.append("publish-pypi does not grant id-token: write")
-    if _active_step_uses(job).count(_PYPI_PUBLISH_ACTION) != 1:
-        problems.append(
-            "publish-pypi does not invoke the pinned PyPI trusted-publishing action exactly once"
+        return [f"{job_id} permissions are unavailable ({exc})"]
+    id_token = permissions.get("id-token", "").split(" #", 1)[0].strip(" '\"")
+    if id_token != "write":
+        return [f"{job_id} does not grant id-token: write"]
+    return []
+
+
+def _pinned_publish_action_problems(
+    job: str, *, job_id: str, action: str, label: str
+) -> list[str]:
+    if _active_step_uses(job).count(action) != 1:
+        return [
+            f"{job_id} does not invoke the pinned {label} trusted-publishing action exactly once"
+        ]
+    return []
+
+
+def _pypi_workflow_problems(workflow: str) -> list[str]:
+    job, entries, problems = _publisher_job(workflow, "publish-pypi", "PyPI")
+    if job is None or entries is None:
+        return problems
+    problems.extend(
+        _environment_problems(
+            entries, job_id="publish-pypi", expected=_PYPI_ENVIRONMENT
         )
+    )
+    problems.extend(_id_token_write_problems(job, job_id="publish-pypi"))
+    problems.extend(
+        _pinned_publish_action_problems(
+            job,
+            job_id="publish-pypi",
+            action=_PYPI_PUBLISH_ACTION,
+            label="PyPI",
+        )
+    )
+    return problems
+
+
+def _crates_workflow_problems(workflow: str) -> list[str]:
+    job, entries, problems = _publisher_job(workflow, "publish-crates", "crates.io")
+    if job is None or entries is None:
+        return problems
+    problems.extend(
+        _environment_problems(
+            entries, job_id="publish-crates", expected=_CRATES_ENVIRONMENT
+        )
+    )
+    problems.extend(_id_token_write_problems(job, job_id="publish-crates"))
+    problems.extend(
+        _pinned_publish_action_problems(
+            job,
+            job_id="publish-crates",
+            action=_CRATES_PUBLISH_ACTION,
+            label="crates.io",
+        )
+    )
     return problems
 
 
@@ -261,40 +343,117 @@ def _optional_lsm_item(docs: str) -> str:
     return _checklist_item(docs, _LSM_ITEM_TITLE)
 
 
-def _pypi_docs_problems(docs: str) -> list[str]:
+def _visible_docs(docs: str) -> str:
+    return re.sub(r"<!--.*?-->", "", docs, flags=re.DOTALL)
+
+
+def _trusted_publisher_docs_problems(
+    docs: str,
+    *,
+    title: str,
+    label: str,
+    required_literals: tuple[str, ...],
+    required_sentences: tuple[tuple[str, str], ...],
+) -> list[str]:
     try:
-        visible_docs = re.sub(r"<!--.*?-->", "", docs, flags=re.DOTALL)
-        item = _checklist_item(visible_docs, _PYPI_ITEM_TITLE)
+        item = _checklist_item(_visible_docs(docs), title)
     except AssertionError as exc:
         return [str(exc)]
 
     problems: list[str] = []
-    required_literals = (
-        f"`{_PYPI_REPOSITORY}`",
-        f"`{_PYPI_WORKFLOW}`",
-        f"`{_PYPI_ENVIRONMENT}`",
-        f"`{_PYPI_LEGACY_WORKFLOW}`",
-    )
     for literal in required_literals:
         if literal not in item:
-            problems.append(f"PyPI Trusted Publisher item omits {literal}")
+            problems.append(f"{label} item omits {literal}")
     normalized = " ".join(item.split())
+    for sentence, message in required_sentences:
+        if sentence not in normalized:
+            problems.append(message)
     lowered = normalized.lower()
-    if _PYPI_SINGLE_PUBLISHER_SENTENCE not in normalized:
-        problems.append("PyPI Trusted Publisher item does not require exactly one publisher")
-    if _PYPI_LEGACY_REMOVAL_SENTENCE not in normalized:
-        problems.append(
-            "PyPI Trusted Publisher item does not require removal of the legacy publish.yml publisher"
-        )
-    if _PYPI_EMPTY_ENVIRONMENT_SENTENCE not in normalized:
-        problems.append("PyPI Trusted Publisher item does not reject an empty environment")
     if "owner-visible" not in lowered or "redacted receipt" not in lowered:
-        problems.append("PyPI Trusted Publisher item omits the redacted owner-visible receipt")
+        problems.append(f"{label} item omits the redacted owner-visible receipt")
     return problems
+
+
+def _pypi_docs_problems(docs: str) -> list[str]:
+    return _trusted_publisher_docs_problems(
+        docs,
+        title=_PYPI_ITEM_TITLE,
+        label="PyPI Trusted Publisher",
+        required_literals=(
+            f"`{_PYPI_REPOSITORY}`",
+            f"`{_PYPI_WORKFLOW}`",
+            f"`{_PYPI_ENVIRONMENT}`",
+            f"`{_PYPI_LEGACY_WORKFLOW}`",
+        ),
+        required_sentences=(
+            (
+                _PYPI_SINGLE_PUBLISHER_SENTENCE,
+                "PyPI Trusted Publisher item does not require exactly one publisher",
+            ),
+            (
+                _PYPI_LEGACY_REMOVAL_SENTENCE,
+                "PyPI Trusted Publisher item does not require removal of the legacy publish.yml publisher",
+            ),
+            (
+                _PYPI_EMPTY_ENVIRONMENT_SENTENCE,
+                "PyPI Trusted Publisher item does not reject an empty environment",
+            ),
+        ),
+    )
+
+
+def _crates_docs_problems(docs: str) -> list[str]:
+    return _trusted_publisher_docs_problems(
+        docs,
+        title=_CRATES_ITEM_TITLE,
+        label="crates.io Trusted Publishing",
+        required_literals=(
+            f"`{_CRATES_REPOSITORY}`",
+            f"`{_CRATES_WORKFLOW}`",
+            f"`{_CRATES_ENVIRONMENT}`",
+        ),
+        required_sentences=(
+            (
+                _CRATES_IDENTITY_SENTENCE,
+                "crates.io Trusted Publishing item does not require the crates.io publisher identity per crate",
+            ),
+            (
+                _CRATES_LEGACY_REMOVAL_SENTENCE,
+                "crates.io Trusted Publishing item does not require removal of publishers whose environment is unset",
+            ),
+            (
+                _CRATES_UNSET_ENVIRONMENT_SENTENCE,
+                "crates.io Trusted Publishing item does not reject an unset environment",
+            ),
+            (
+                _CRATES_RECEIPT_SENTENCE,
+                "crates.io Trusted Publishing item omits the redacted crates.io receipt sentence",
+            ),
+        ),
+    )
 
 
 def _pypi_publisher_problems(workflow: str, docs: str) -> list[str]:
     return _pypi_workflow_problems(workflow) + _pypi_docs_problems(docs)
+
+
+def _crates_publisher_problems(workflow: str, docs: str) -> list[str]:
+    return _crates_workflow_problems(workflow) + _crates_docs_problems(docs)
+
+
+def _trusted_publisher_identity_json(
+    *, environment: str, repository: str, workflow: str
+) -> str:
+    return json.dumps(
+        {
+            "environment": environment,
+            "publisher_count": 1,
+            "repository": repository,
+            "workflow": workflow,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 def _bullet_mentions_github_release(line: str) -> bool:
@@ -404,6 +563,7 @@ def contract_problems(workflow: str, docs: str) -> list[str]:
         _workflow_problems(workflow)
         + _docs_problems(docs)
         + _pypi_publisher_problems(workflow, docs)
+        + _crates_publisher_problems(workflow, docs)
     )
 
 
@@ -422,15 +582,18 @@ def main() -> int:
     print("ok   release runbook matches executable release.yml")
     print(
         "expected_pypi_trusted_publisher="
-        + json.dumps(
-            {
-                "environment": _PYPI_ENVIRONMENT,
-                "publisher_count": 1,
-                "repository": _PYPI_REPOSITORY,
-                "workflow": _PYPI_WORKFLOW,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
+        + _trusted_publisher_identity_json(
+            environment=_PYPI_ENVIRONMENT,
+            repository=_PYPI_REPOSITORY,
+            workflow=_PYPI_WORKFLOW,
+        )
+    )
+    print(
+        "expected_crates_trusted_publisher="
+        + _trusted_publisher_identity_json(
+            environment=_CRATES_ENVIRONMENT,
+            repository=_CRATES_REPOSITORY,
+            workflow=_CRATES_WORKFLOW,
         )
     )
     return 0
