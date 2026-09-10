@@ -236,3 +236,39 @@ fn find_unredacted_backstop() {
     let red = r.redact_value("f", &gh(), &mut t).into_owned();
     assert_eq!(r.find_unredacted(&red), None);
 }
+
+/// A GitHub App installation token in the stateless format GitHub began rolling out on
+/// 2026-04-27: `ghs_<app id>_<JWT>`, about 520 characters with two dots. Assembled from fragments
+/// so this file carries no scannable token. The signature ends in `-`, a legal base64url character.
+fn stateless_installation_token() -> String {
+    let header = format!("ey{}", "JhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9");
+    let payload = format!("ey{}", "J".to_owned() + &"QmFzZTY0VXJs".repeat(28));
+    let signature = format!("{}{}", "c2lnbmF0dXJl_x".repeat(9), "Zz-");
+    format!("gh{}_{}_{header}.{payload}.{signature}", "s", "1234567")
+}
+
+#[test]
+fn shape_pass_redacts_a_stateless_installation_token_whole() {
+    let r = redactor(RedactMode::ShapeAndFlag);
+    let mut t = RedactionTally::default();
+    let token = stateless_installation_token();
+    let input = format!("/tmp/cfg/{token}");
+    let out = r.redact_value("filesystem_paths", &input, &mut t);
+    assert!(
+        out.contains("<redacted:github-token:"),
+        "not attributed: {out}"
+    );
+    let chars: Vec<char> = token.chars().collect();
+    let leaked = chars
+        .windows(12)
+        .any(|w| out.contains(&w.iter().collect::<String>()));
+    assert!(!leaked, "token fragment survived capture redaction: {out}");
+    // The signature's final `-` is part of the token; a trailing word boundary would leave it.
+    assert!(
+        out.ends_with('>'),
+        "a trailing token character survived: {out}"
+    );
+    assert_eq!(t.by_rule.get("github-token"), Some(&1));
+    assert_eq!(t.total, 1);
+    assert_eq!(r.find_unredacted(&token), Some("github-token"));
+}

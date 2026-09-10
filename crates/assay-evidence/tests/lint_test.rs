@@ -548,6 +548,44 @@ fn test_secret_in_subject_detected() {
     assert!(fp1.starts_with("sha256:"));
 }
 
+/// A GitHub App installation token in the stateless `ghs_<app id>_<JWT>` format. The subject lint
+/// matched only `ghp_`, `gho_` and `github_pat_`, so an installation token (every Actions
+/// `GITHUB_TOKEN`) in a subject was never flagged, in the old format or the new one.
+#[test]
+fn test_installation_token_in_subject_detected() {
+    for token in [
+        format!("gh{}_{}", "s", "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"),
+        format!(
+            "gh{}_{}_ey{}.ey{}.{}",
+            "s",
+            "1234567",
+            "Jhb".repeat(12),
+            "JQm".repeat(40),
+            "c2ln-"
+        ),
+    ] {
+        let mut buffer = Vec::new();
+        let mut writer = BundleWriter::new(&mut buffer);
+        let mut event = EvidenceEvent::new(
+            "assay.net.connect",
+            "urn:assay:test",
+            "run_installation_token",
+            0,
+            serde_json::json!({"url": "https://api.example.com"}),
+        );
+        event.time = Utc.timestamp_opt(1700000000, 0).unwrap();
+        event = event.with_subject(format!("https://api.example.com/repos?t={token}"));
+        writer.add_event(event);
+        writer.finish().unwrap();
+
+        let report = lint_bundle(Cursor::new(&buffer), VerifyLimits::default()).unwrap();
+        assert!(
+            report.findings.iter().any(|f| f.rule_id == "ASSAY-W001"),
+            "an installation token in a subject was not flagged"
+        );
+    }
+}
+
 #[test]
 fn test_stable_fingerprint() {
     let bundle = create_bundle_with_secret_subject();

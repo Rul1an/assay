@@ -302,6 +302,61 @@ mod tests {
         assert_eq!(out.secret_hits, 1);
     }
 
+    /// A GitHub App installation token in the stateless format GitHub began rolling out on
+    /// 2026-04-27: `ghs_<app id>_<JWT>`, about 520 characters with two dots, and the format of
+    /// every Actions `GITHUB_TOKEN` once the rollout reaches a repository. Assembled from
+    /// fragments so this file carries no scannable token. The signature ends in `-`, a legal
+    /// base64url character that a trailing word boundary would leave unredacted.
+    fn stateless_installation_token() -> String {
+        let header = format!("ey{}", "JhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9");
+        let payload = format!("ey{}", "J".to_owned() + &"QmFzZTY0VXJs".repeat(28));
+        let signature = format!("{}{}", "c2lnbmF0dXJl_x".repeat(9), "Zz-");
+        format!("gh{}_{}_{header}.{payload}.{signature}", "s", "1234567")
+    }
+
+    /// Every 12-character window of the token, so a partial match cannot pass as redaction.
+    fn leaks_any_window(text: &str, token: &str) -> bool {
+        let chars: Vec<char> = token.chars().collect();
+        chars
+            .windows(12)
+            .any(|w| text.contains(&w.iter().collect::<String>()))
+    }
+
+    #[test]
+    fn redacts_a_stateless_installation_token_whole() {
+        let token = stateless_installation_token();
+        assert!(token.len() > 480 && token.matches('.').count() == 2);
+        let out = redact(&format!("GITHUB_TOKEN value {token}. next"));
+        assert!(
+            out.text.contains("<redacted:github-token>"),
+            "not attributed to the github-token rule: {}",
+            out.text
+        );
+        assert!(
+            !leaks_any_window(&out.text, &token),
+            "token leaked: {}",
+            out.text
+        );
+        // Exact output pins the whole-token match: a trailing word boundary would stop before the
+        // signature's final `-` and leave `<redacted:github-token>-. next`.
+        assert_eq!(out.text, "GITHUB_TOKEN value <redacted:github-token> next");
+        assert_eq!(out.secret_hits, 1);
+    }
+
+    #[test]
+    fn a_stateless_installation_token_is_redacted_before_truncation() {
+        let token = stateless_installation_token();
+        let safe = render_safe(Sink::Stdout, &format!("{} {token}", "x".repeat(100)), 160);
+        assert!(
+            !safe.contains("ghs_"),
+            "raw prefix survived the bound: {safe}"
+        );
+        assert!(
+            !leaks_any_window(&safe, &token),
+            "token fragment survived: {safe}"
+        );
+    }
+
     #[test]
     fn strips_terminal_control() {
         let s = "\u{1b}[31mRED\u{1b}[0m\u{07}\u{202e}rev";
