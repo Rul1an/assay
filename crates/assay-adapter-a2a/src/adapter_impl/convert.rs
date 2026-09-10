@@ -9,7 +9,7 @@ use super::{
         default_time, nested_string_array_field, nested_string_field, string_field, timestamp_field,
     },
     mapping::{count_unmapped_top_level_fields, map_event_type, primary_id_for_event},
-    parse::{parse_packet, validate_protocol},
+    parse::{parse_packet, validate_profile, validate_protocol},
     payload::build_payload,
     version::{observed_version, validate_supported_version},
 };
@@ -32,6 +32,7 @@ pub(super) fn convert(
     let packet = parse_packet(input.payload)?;
     validate_json_shape(&packet, options.max_json_depth, options.max_array_length)?;
     validate_protocol(&packet)?;
+    validate_profile(&packet)?;
     let version = observed_version(&packet, input.protocol_version)?;
     validate_supported_version(&version)?;
 

@@ -2,7 +2,9 @@ use serde_json::Value;
 
 use assay_adapter_api::{AdapterError, AdapterErrorKind, AdapterResult};
 
-use super::fields::string_field;
+use super::{fields::string_field, PROFILE_NAME};
+
+pub const SUPPORTED_SPEC_VERSIONS: &[&str] = &["0.2", "0.2.0", "0.3.1"];
 
 pub(super) fn observed_version(
     packet: &Value,
@@ -19,26 +21,15 @@ pub(super) fn observed_version(
 }
 
 pub(super) fn validate_supported_version(version: &str) -> AdapterResult<()> {
-    let Some((major, minor)) = parse_version(version) else {
+    if !SUPPORTED_SPEC_VERSIONS.contains(&version) {
         return Err(AdapterError::new(
             AdapterErrorKind::UnsupportedProtocolVersion,
-            format!("unsupported A2A version: {version}"),
-        ));
-    };
-
-    if major != 0 || minor < 2 {
-        return Err(AdapterError::new(
-            AdapterErrorKind::UnsupportedProtocolVersion,
-            format!("unsupported A2A version: {version}"),
+            format!(
+                "unsupported A2A version: {version}; supported versions for profile '{PROFILE_NAME}' are: {}",
+                SUPPORTED_SPEC_VERSIONS.join(", ")
+            ),
         ));
     }
 
     Ok(())
-}
-
-fn parse_version(version: &str) -> Option<(u64, u64)> {
-    let mut parts = version.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    Some((major, minor))
 }
