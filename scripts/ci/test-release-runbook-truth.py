@@ -302,6 +302,45 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
         )
         self.assert_mutation_bites(workflow=mutated)
 
+    def test_crates_auth_action_removed_bites(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5\n",
+            "        run: echo skipped\n",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
+    def test_crates_auth_action_disabled_step_bites(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "      - name: Authenticate with crates.io\n"
+            "        id: auth\n"
+            "        uses: rust-lang/crates-io-auth-action@",
+            "      - name: Authenticate with crates.io\n"
+            "        if: ${{ false }}\n"
+            "        id: auth\n"
+            "        uses: rust-lang/crates-io-auth-action@",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
+    def test_crates_auth_action_mutable_ref_bites(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18",
+            "rust-lang/crates-io-auth-action@main",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
+    def test_crates_auth_action_duplicated_bites(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5\n",
+            "        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5\n"
+            "      - name: Authenticate with crates.io again\n"
+            "        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5\n",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

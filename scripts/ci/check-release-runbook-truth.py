@@ -37,6 +37,9 @@ _CRATES_ITEM_TITLE = "Trusted Publishing"
 _CRATES_REPOSITORY = _PYPI_REPOSITORY
 _CRATES_WORKFLOW = _PYPI_WORKFLOW
 _CRATES_ENVIRONMENT = "crates"
+_CRATES_PUBLISH_ACTION = (
+    "rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18"
+)
 _CRATES_IDENTITY_SENTENCE = (
     "Require, per crate, a GitHub Trusted Publisher: "
     "repository `Rul1an/assay`, "
@@ -256,6 +259,16 @@ def _id_token_write_problems(job: str, *, job_id: str) -> list[str]:
     return []
 
 
+def _pinned_publish_action_problems(
+    job: str, *, job_id: str, action: str, label: str
+) -> list[str]:
+    if _active_step_uses(job).count(action) != 1:
+        return [
+            f"{job_id} does not invoke the pinned {label} trusted-publishing action exactly once"
+        ]
+    return []
+
+
 def _pypi_workflow_problems(workflow: str) -> list[str]:
     job, entries, problems = _publisher_job(workflow, "publish-pypi", "PyPI")
     if job is None or entries is None:
@@ -266,10 +279,14 @@ def _pypi_workflow_problems(workflow: str) -> list[str]:
         )
     )
     problems.extend(_id_token_write_problems(job, job_id="publish-pypi"))
-    if _active_step_uses(job).count(_PYPI_PUBLISH_ACTION) != 1:
-        problems.append(
-            "publish-pypi does not invoke the pinned PyPI trusted-publishing action exactly once"
+    problems.extend(
+        _pinned_publish_action_problems(
+            job,
+            job_id="publish-pypi",
+            action=_PYPI_PUBLISH_ACTION,
+            label="PyPI",
         )
+    )
     return problems
 
 
@@ -283,6 +300,14 @@ def _crates_workflow_problems(workflow: str) -> list[str]:
         )
     )
     problems.extend(_id_token_write_problems(job, job_id="publish-crates"))
+    problems.extend(
+        _pinned_publish_action_problems(
+            job,
+            job_id="publish-crates",
+            action=_CRATES_PUBLISH_ACTION,
+            label="crates.io",
+        )
+    )
     return problems
 
 
@@ -381,7 +406,7 @@ def _crates_docs_problems(docs: str) -> list[str]:
     return _trusted_publisher_docs_problems(
         docs,
         title=_CRATES_ITEM_TITLE,
-        label="Trusted Publishing",
+        label="crates.io Trusted Publishing",
         required_literals=(
             f"`{_CRATES_REPOSITORY}`",
             f"`{_CRATES_WORKFLOW}`",
@@ -390,19 +415,19 @@ def _crates_docs_problems(docs: str) -> list[str]:
         required_sentences=(
             (
                 _CRATES_IDENTITY_SENTENCE,
-                "Trusted Publishing item does not require the crates.io publisher identity per crate",
+                "crates.io Trusted Publishing item does not require the crates.io publisher identity per crate",
             ),
             (
                 _CRATES_LEGACY_REMOVAL_SENTENCE,
-                "Trusted Publishing item does not require removal of publishers whose environment is unset",
+                "crates.io Trusted Publishing item does not require removal of publishers whose environment is unset",
             ),
             (
                 _CRATES_UNSET_ENVIRONMENT_SENTENCE,
-                "Trusted Publishing item does not reject an unset environment",
+                "crates.io Trusted Publishing item does not reject an unset environment",
             ),
             (
                 _CRATES_RECEIPT_SENTENCE,
-                "Trusted Publishing item omits the redacted crates.io receipt sentence",
+                "crates.io Trusted Publishing item omits the redacted crates.io receipt sentence",
             ),
         ),
     )
@@ -416,13 +441,15 @@ def _crates_publisher_problems(workflow: str, docs: str) -> list[str]:
     return _crates_workflow_problems(workflow) + _crates_docs_problems(docs)
 
 
-def _trusted_publisher_identity_json(*, environment: str) -> str:
+def _trusted_publisher_identity_json(
+    *, environment: str, repository: str, workflow: str
+) -> str:
     return json.dumps(
         {
             "environment": environment,
             "publisher_count": 1,
-            "repository": _PYPI_REPOSITORY,
-            "workflow": _PYPI_WORKFLOW,
+            "repository": repository,
+            "workflow": workflow,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -555,11 +582,19 @@ def main() -> int:
     print("ok   release runbook matches executable release.yml")
     print(
         "expected_pypi_trusted_publisher="
-        + _trusted_publisher_identity_json(environment=_PYPI_ENVIRONMENT)
+        + _trusted_publisher_identity_json(
+            environment=_PYPI_ENVIRONMENT,
+            repository=_PYPI_REPOSITORY,
+            workflow=_PYPI_WORKFLOW,
+        )
     )
     print(
         "expected_crates_trusted_publisher="
-        + _trusted_publisher_identity_json(environment=_CRATES_ENVIRONMENT)
+        + _trusted_publisher_identity_json(
+            environment=_CRATES_ENVIRONMENT,
+            repository=_CRATES_REPOSITORY,
+            workflow=_CRATES_WORKFLOW,
+        )
     )
     return 0
 
