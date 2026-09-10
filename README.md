@@ -147,7 +147,7 @@ schemas:
 
 | | |
 |---|---|
-| **Canonical evidence** | Assay's evidence model is the stable contract; OpenTelemetry and protocol adapters (ACP / A2A / UCP) map into it. |
+| **Canonical evidence** | Assay's evidence model is the stable contract; OpenTelemetry and protocol adapters (ACP / A2A projection profile / UCP) map into it. |
 | **Deterministic** | Same input, same decision — not probabilistic. |
 | **Bounded claims** | Explicit about **verified** vs **visible** vs **absent** — no score-first UX. |
 | **Offline-first** | No backend required for core enforcement and bundle verification. |

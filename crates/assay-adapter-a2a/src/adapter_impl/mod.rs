@@ -3,13 +3,24 @@ use assay_adapter_api::{
     AttachmentWriter, ConvertOptions, ProtocolDescriptor,
 };
 
+pub const PROFILE_NAME: &str = "assay.adapter.a2a.legacy-projection.v0";
 pub(super) const PROTOCOL_NAME: &str = "a2a";
 pub(super) const PROTOCOL_VERSION: &str = "0.2.0";
-pub(super) const SUPPORTED_SPEC_VERSION_RANGE: &str = ">=0.2 <1.0";
-pub(super) const SCHEMA_ID: &str = "a2a.message.v0_2";
+pub(super) const SCHEMA_ID: &str = PROFILE_NAME;
 pub(super) const SPEC_URL: &str = "https://google.github.io/A2A/";
 pub(super) const DEFAULT_TIME_SECS: i64 = 1_700_100_000;
 pub(super) const ADAPTER_ID: &str = "assay-adapter-a2a";
+
+mod convert;
+mod discovery;
+mod fields;
+mod handoff;
+mod mapping;
+mod parse;
+mod payload;
+mod version;
+
+pub use version::SUPPORTED_SPEC_VERSIONS;
 
 pub(super) fn adapter_descriptor() -> AdapterDescriptor {
     AdapterDescriptor {
@@ -36,20 +47,14 @@ pub(super) fn capabilities() -> AdapterCapabilities {
             "assay.adapter.a2a.artifact.shared".to_string(),
             "assay.adapter.a2a.message".to_string(),
         ],
-        supported_spec_versions: vec![SUPPORTED_SPEC_VERSION_RANGE.to_string()],
+        supported_spec_versions: SUPPORTED_SPEC_VERSIONS
+            .iter()
+            .map(|&s| s.to_string())
+            .collect(),
         supports_strict: true,
         supports_lenient: true,
     }
 }
-
-mod convert;
-mod discovery;
-mod fields;
-mod handoff;
-mod mapping;
-mod parse;
-mod payload;
-mod version;
 
 pub(super) fn convert(
     input: AdapterInput<'_>,

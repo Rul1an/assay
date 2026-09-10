@@ -9,9 +9,10 @@ fn protocol_metadata_uses_exact_version_and_range_capability() {
     assert_eq!(descriptor.adapter_id, ADAPTER_ID);
     assert!(!descriptor.adapter_version.is_empty());
     assert_eq!(protocol.spec_version, "0.2.0");
+    assert_eq!(protocol.schema_id.as_deref(), Some(PROFILE_NAME));
     assert_eq!(
         capabilities.supported_spec_versions,
-        vec![">=0.2 <1.0".to_string()]
+        vec!["0.2".to_string(), "0.2.0".to_string(), "0.3.1".to_string()]
     );
 }
 
@@ -237,4 +238,172 @@ fn lenient_missing_task_id_substitutes_unknown_task() {
     assert_eq!(h["task_ref_visible"], Value::Bool(false));
     assert_eq!(h["message_ref_visible"], Value::Bool(true));
     assert_eq!(digest_canonical_json(h), K1_HANDOFF_DIGEST_LENIENT_PARTIAL);
+}
+
+#[test]
+fn strict_version_0_99_is_rejected_before_mapping() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let payload = br#"{
+      "protocol": "a2a",
+      "version": "0.99",
+      "event_type": "task.requested",
+      "agent": {"id": "agent-1"},
+      "task": {"id": "task-1"}
+    }"#;
+    let input = AdapterInput {
+        payload,
+        media_type: "application/json",
+        protocol_version: None,
+    };
+
+    let err = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect_err("version 0.99 must be rejected");
+    assert_eq!(err.kind, AdapterErrorKind::UnsupportedProtocolVersion);
+    assert!(
+        err.message.contains("0.99"),
+        "error message should cite rejected version: {}",
+        err.message
+    );
+}
+
+#[test]
+fn strict_version_1_0_is_rejected_before_mapping() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let payload = br#"{
+      "protocol": "a2a",
+      "version": "1.0",
+      "event_type": "task.requested",
+      "agent": {"id": "agent-1"},
+      "task": {"id": "task-1"}
+    }"#;
+    let input = AdapterInput {
+        payload,
+        media_type: "application/json",
+        protocol_version: None,
+    };
+
+    let err = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect_err("version 1.0 must be rejected");
+    assert_eq!(err.kind, AdapterErrorKind::UnsupportedProtocolVersion);
+}
+
+#[test]
+fn strict_undeclared_version_0_4_is_rejected_before_mapping() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let payload = br#"{
+      "protocol": "a2a",
+      "version": "0.4",
+      "event_type": "task.requested",
+      "agent": {"id": "agent-1"},
+      "task": {"id": "task-1"}
+    }"#;
+    let input = AdapterInput {
+        payload,
+        media_type: "application/json",
+        protocol_version: None,
+    };
+
+    let err = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect_err("undeclared version 0.4 must be rejected");
+    assert_eq!(err.kind, AdapterErrorKind::UnsupportedProtocolVersion);
+}
+
+#[test]
+fn declared_supported_versions_match_fixture_inventory_exactly() {
+    let adapter = A2aAdapter;
+    let capabilities = adapter.capabilities();
+    let protocol = adapter.protocol();
+
+    assert_eq!(
+        protocol.schema_id.as_deref(),
+        Some("assay.adapter.a2a.legacy-projection.v0"),
+        "protocol descriptor must report the explicit Assay-owned profile name"
+    );
+
+    // Extract all versions present in real fixtures under scripts/ci/fixtures/adr026/a2a
+    let root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/ci/fixtures/adr026/a2a");
+    let mut fixture_versions = std::collections::BTreeSet::new();
+
+    fn collect_versions(dir: &std::path::Path, versions: &mut std::collections::BTreeSet<String>) {
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    collect_versions(&path, versions);
+                } else if path.extension().is_some_and(|ext| ext == "json") {
+                    let content = fs::read_to_string(&path).expect("fixture must be readable");
+                    if let Ok(val) = serde_json::from_str::<Value>(&content) {
+                        if let Some(v) = val.get("version").and_then(|v| v.as_str()) {
+                            versions.insert(v.to_string());
+                        }
+                    } else {
+                        // For malformed json fixtures, extract version field via quote boundary
+                        for line in content.lines() {
+                            if let Some(idx) = line.find("\"version\"") {
+                                let rest = &line[idx + 9..];
+                                if let Some(colon) = rest.find(':') {
+                                    let after_colon = &rest[colon + 1..];
+                                    if let Some(q1) = after_colon.find('"') {
+                                        let after_q1 = &after_colon[q1 + 1..];
+                                        if let Some(q2) = after_q1.find('"') {
+                                            let v = &after_q1[..q2];
+                                            if !v.is_empty() {
+                                                versions.insert(v.to_string());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    collect_versions(&root, &mut fixture_versions);
+    assert!(
+        !fixture_versions.is_empty(),
+        "must find fixture versions under {}",
+        root.display()
+    );
+
+    let declared_versions: std::collections::BTreeSet<String> =
+        capabilities.supported_spec_versions.into_iter().collect();
+
+    assert_eq!(
+        declared_versions, fixture_versions,
+        "declared supported_spec_versions and fixture versions must match exactly"
+    );
+}
+
+#[test]
+fn strict_profile_mismatch_is_rejected() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let payload = br#"{
+      "protocol": "a2a",
+      "profile": "unsupported.profile.v1",
+      "version": "0.2.0",
+      "event_type": "task.requested",
+      "agent": {"id": "agent-1"},
+      "task": {"id": "task-1"}
+    }"#;
+    let input = AdapterInput {
+        payload,
+        media_type: "application/json",
+        protocol_version: None,
+    };
+
+    let err = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect_err("mismatched profile must be rejected");
+    assert_eq!(err.kind, AdapterErrorKind::Measurement);
 }
