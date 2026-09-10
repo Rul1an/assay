@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Security
+- Recognise GitHub's stateless App installation-token format (`ghs_<app id>_<JWT>`, about 520
+  characters with two dots), which GitHub began rolling out on 2026-04-27 and which every Actions
+  `GITHUB_TOKEN` takes once the rollout reaches a repository. The `github-token` rule required 36
+  alphanumerics directly after the prefix, so a new-format token matched neither it nor the `jwt`
+  rule and passed capture-side redaction, render-side redaction and the subject lint unredacted.
+  The rule now takes the token's full character set; the shared `secret-rules.v1.json` contract
+  changes with it, and the render-side copy is now tested against that contract too. The subject
+  lint also gains `ghs_`, `ghu_` and `ghr_`, which it never checked.
+- Redact GitHub fine-grained personal access tokens (`github_pat_…`) that appear with no
+  surrounding keyword, header or query context. No rule matched that shape, so a bare token passed
+  capture-side and render-side redaction whole; a new `github-fine-grained-pat` rule joins the
+  shared `secret-rules.v1.json` contract, in lockstep with the Plimsoll detector.
+
 ## [6.1.1] - 2026-09-10
 
 A security patch release. Advisory: GHSA-959f-h4x8-m24q.

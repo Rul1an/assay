@@ -23,7 +23,12 @@ lazy_static! {
             "secret",
             r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"
         ),
-        rule("github-token", "secret", r"\bgh[pousr]_[A-Za-z0-9]{36,}\b"),
+        rule("github-token", "secret", r"\bgh[pousr]_[A-Za-z0-9._-]{36,}"),
+        rule(
+            "github-fine-grained-pat",
+            "secret",
+            r"\bgithub_pat_[A-Za-z0-9_]{22,}"
+        ),
         rule(
             "openai-key",
             "secret",
@@ -71,5 +76,40 @@ fn rule(name: &'static str, class: &'static str, pattern: &str) -> Rule {
         name,
         class,
         re: Regex::new(pattern).expect("render-safety rule pattern is a valid regex"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RULES;
+
+    /// This table mirrors the capture-side rules, whose contract is `secret-rules.v1.json`
+    /// (ADR-034). Only the runner copy was tested against it, so a change to one copy could leave
+    /// the render side behind; the GitHub installation-token format change touched both. Every
+    /// shared rule must exist here with a byte-identical pattern; render-only PII rules may be extra.
+    #[test]
+    fn shared_rules_match_the_secret_rules_contract() {
+        // Read at run time, like the attestation page-binding test: a compile-time include of a
+        // file outside this crate would break building the tests from the published package.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../assay-runner-core/tests/fixtures/secret-rules.v1.json");
+        let raw = std::fs::read_to_string(&path).expect("the shared secret-rules contract fixture");
+        let doc: serde_json::Value = serde_json::from_str(&raw).expect("fixture is valid json");
+        assert_eq!(doc["schema"], "assay.secret-rules.v1");
+        let shared = doc["rules"].as_array().expect("rules is an array");
+        assert!(!shared.is_empty());
+        for rule in shared {
+            let name = rule["name"].as_str().expect("rule name");
+            let pattern = rule["pattern"].as_str().expect("rule pattern");
+            let ours = RULES
+                .iter()
+                .find(|r| r.name == name)
+                .unwrap_or_else(|| panic!("render-safety has no rule {name:?} from the contract"));
+            assert_eq!(
+                ours.re.as_str(),
+                pattern,
+                "render-safety rule {name:?} drifted from secret-rules.v1.json"
+            );
+        }
     }
 }

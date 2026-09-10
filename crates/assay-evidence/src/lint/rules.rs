@@ -186,6 +186,9 @@ const SECRET_PATTERNS: &[&str] = &[
     "AKIA", // AWS access key prefix
     "ghp_", // GitHub personal access token
     "gho_", // GitHub OAuth token
+    "ghs_", // GitHub App installation token (every Actions GITHUB_TOKEN)
+    "ghu_", // GitHub App user-to-server token
+    "ghr_", // GitHub refresh token
     "github_pat_",
 ];
 

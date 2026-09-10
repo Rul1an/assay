@@ -42,7 +42,7 @@ basis caps what a review can claim rather than describing an exploitable weaknes
 
 Fires when `event.subject` contains any of a fixed list of literal credential prefixes, compared
 case-insensitively: `sk-`, `sk_live_`, `sk_test_`, `api_key=`, `apikey=`, `token=`, `password=`,
-`secret=`, `Bearer `, `AKIA` (AWS access key), `ghp_`, `gho_`, `github_pat_` (GitHub tokens). The
+`secret=`, `Bearer `, `AKIA` (AWS access key), `ghp_`, `gho_`, `ghs_`, `ghu_`, `ghr_`, `github_pat_` (GitHub tokens, including the App installation token every Actions `GITHUB_TOKEN` is). The
 message names the pattern that matched.
 
 **Why it matters.** A subject travels in the manifest and in every projection of the bundle. A
