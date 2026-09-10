@@ -2051,6 +2051,42 @@ class EvidenceBinding(unittest.TestCase):
         original = ["docker", "pull", "--platform", module.PLATFORM, DIGEST_IMAGE]
         self.assertEqual(seen[0], module.expected_wrapped_docker_argv(original, env))
 
+    def test_constructor_output_is_pinned_by_test_owned_literals(self) -> None:
+        module = _require()
+        argv = ["docker", "pull", "--platform", module.PLATFORM, DIGEST_IMAGE]
+        allowed_keys = frozenset(
+            {"PATH", "DOCKER_CONFIG", "HOME", "TMPDIR", "DOCKER_HOST"}
+        )
+        required_keys = frozenset({"PATH", "DOCKER_CONFIG", "HOME", "TMPDIR"})
+        with tempfile.TemporaryDirectory() as raw:
+            env, _ = module.fresh_docker_env(Path(raw))
+        self.assertTrue(required_keys <= set(env), set(env))
+        self.assertTrue(set(env) <= allowed_keys, set(env))
+        wrapped = module.expected_wrapped_docker_argv(argv, env)
+        self.assertEqual(wrapped[:2], ["env", "-i"])
+        docker = str(module.resolve_docker_executable())
+        self.assertIn(docker, wrapped)
+        binary_at = wrapped.index(docker)
+        assignments = wrapped[2:binary_at]
+        keys: list[str] = []
+        for item in assignments:
+            self.assertIn("=", item, item)
+            keys.append(item.split("=", 1)[0])
+        self.assertTrue(required_keys <= set(keys) <= allowed_keys, keys)
+        self.assertEqual(keys, sorted(keys))
+        for key, item in zip(keys, assignments, strict=True):
+            self.assertEqual(item.split("=", 1)[1], env[key])
+        self.assertEqual(wrapped[binary_at + 1 :], argv[1:])
+
+    def test_wrap_rejects_argv_that_does_not_start_with_docker(self) -> None:
+        module = _require()
+        with tempfile.TemporaryDirectory() as raw:
+            env, _ = module.fresh_docker_env(Path(raw))
+        with self.assertRaises(module.DockerCommandError):
+            module.wrap_docker_command(["podman", "info"], env)
+        with self.assertRaises(module.DockerCommandError):
+            module.wrap_docker_command([], env)
+
     def test_reordered_argv_suffix_is_rejected_by_final_funnel(self) -> None:
         module = _require()
         original = module.wrap_docker_command
