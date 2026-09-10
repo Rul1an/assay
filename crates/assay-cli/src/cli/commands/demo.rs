@@ -10,17 +10,25 @@ pub async fn cmd_demo(args: DemoArgs) -> anyhow::Result<i32> {
 
     // 1. Create Policy File (The Rules)
     let policy_path = demo_dir.join("policy.yaml");
-    let policy_content = r#"version: 1
+    // ToolsPolicy is deny_unknown_fields: allow / deny / require_args / arg_constraints.
+    // validate() serializes arg_constraints into evaluate_tool_args, which compiles
+    // each tool entry as a JSON Schema (Map<Tool, Schema>), not the RFC arg-map dialect.
+    let policy_content = r#"version: "1"
 name: demo-policy
 tools:
-  Search:
-    args:
+  arg_constraints:
+    Search:
+      type: object
       properties:
-        query: { pattern: "^[a-zA-Z0-9 ]+$" }
-  Calculate:
-    args:
+        query:
+          type: string
+          pattern: "^[a-zA-Z0-9 ]+$"
+    Calculate:
+      type: object
       properties:
-        operation: { enum: ["add", "subtract"] }
+        operation:
+          type: string
+          enum: ["add", "subtract"]
 "#;
     fs::write(&policy_path, policy_content)
         .with_context(|| format!("failed to write demo file {}", policy_path.display()))?;

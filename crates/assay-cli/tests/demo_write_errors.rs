@@ -1,7 +1,9 @@
-//! `assay demo` must not claim it created files when the writes failed (#2902).
+//! `assay demo` write failures (#2902) and a first-run that actually validates (#2905).
 //!
-//! The measured gap was `let _ = fs::write(...)` on policy.yaml, assay.yaml, and
-//! traces.jsonl, followed by an unconditional "Created demo environment". These
+//! The write-error gap was `let _ = fs::write(...)` on policy.yaml, assay.yaml,
+//! and traces.jsonl, followed by an unconditional "Created demo environment".
+//! The parse gap was a shipped policy in the old `tools: Search:` shape, which
+//! `Policy` rejects (`allow`, `deny`, `require_args`, `arg_constraints`). These
 //! tests drive the built binary and read exit code, stdout, and stderr.
 
 use assert_cmd::Command;
@@ -27,6 +29,68 @@ fn run_demo(out: &Path) -> (i32, String, String) {
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     (code, stdout, stderr)
+}
+
+fn run_printed_validate(stdout: &str) -> (i32, String, String) {
+    let line = stdout
+        .lines()
+        .find(|line| line.contains("assay validate --config"))
+        .unwrap_or_else(|| panic!("demo stdout missing next-step validate command:\n{stdout}"));
+    let command = line
+        .find("assay validate")
+        .map(|idx| &line[idx..])
+        .unwrap_or(line);
+    let mut parts = command.split_whitespace();
+    assert_eq!(parts.next(), Some("assay"));
+    assert_eq!(parts.next(), Some("validate"));
+    assert_eq!(parts.next(), Some("--config"));
+    let config = parts
+        .next()
+        .unwrap_or_else(|| panic!("next-step missing --config path:\n{line}"));
+    assert_eq!(parts.next(), Some("--trace-file"));
+    let trace = parts
+        .next()
+        .unwrap_or_else(|| panic!("next-step missing --trace-file path:\n{line}"));
+
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .arg("validate")
+        .arg("--config")
+        .arg(config)
+        .arg("--trace-file")
+        .arg(trace)
+        .output()
+        .expect("spawn assay validate");
+    let code = output.status.code().expect("assay validate exit code");
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    (code, stdout, stderr)
+}
+
+#[test]
+fn demo_completes_and_printed_validate_passes() {
+    let dir = tempdir().unwrap();
+    let out = dir.path();
+    let (code, stdout, stderr) = run_demo(out);
+
+    assert_eq!(
+        code, 0,
+        "assay demo --out should exit 0\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stdout.contains("Validation Passed"),
+        "assay demo should report Validation Passed\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+
+    let (vcode, vstdout, vstderr) = run_printed_validate(&stdout);
+    assert_eq!(
+        vcode, 0,
+        "printed next-step validate should exit 0\nstdout:\n{vstdout}\nstderr:\n{vstderr}"
+    );
+    assert!(
+        vstderr.contains("Validation OK"),
+        "printed next-step validate should report Validation OK\nstdout:\n{vstdout}\nstderr:\n{vstderr}"
+    );
 }
 
 #[test]
@@ -65,15 +129,15 @@ fn demo_does_not_report_validation_passed_on_stale_unwritable_files() {
     let dir = tempdir().unwrap();
     let out = dir.path();
 
-    let (_code, _stdout, _) = run_demo(out);
-    // The shipped demo policy no longer parses, so leftover files would not
-    // print "Validation Passed" on their own. Plant a policy the current
-    // loader accepts so an ignored rewrite can still claim success.
-    fs::write(
-        out.join("policy.yaml"),
-        "version: \"1\"\nname: stale-demo\ntools:\n  arg_constraints:\n    Search:\n      type: object\n      properties:\n        query:\n          type: string\n",
-    )
-    .unwrap();
+    let (seed_code, seed_stdout, seed_stderr) = run_demo(out);
+    assert_eq!(
+        seed_code, 0,
+        "stale-file seed must be the demo's own passing output\nstdout:\n{seed_stdout}\nstderr:\n{seed_stderr}"
+    );
+    assert!(
+        seed_stdout.contains("Validation Passed"),
+        "stale-file seed must be content that already printed Validation Passed:\n{seed_stdout}"
+    );
 
     let restore = RestoreWritable {
         dir: out.to_path_buf(),
