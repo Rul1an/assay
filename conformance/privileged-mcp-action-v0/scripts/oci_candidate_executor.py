@@ -172,11 +172,15 @@ def fresh_docker_env(parent: Path) -> tuple[dict[str, str], Path]:
     return env, config_dir
 
 
+def expected_wrapped_docker_argv(argv: list[str], env: dict[str, str]) -> list[str]:
+    assignments = ["%s=%s" % (key, env[key]) for key in sorted(env)]
+    return ["env", "-i", *assignments, str(resolve_docker_executable()), *argv[1:]]
+
+
 def wrap_docker_command(argv: list[str], env: dict[str, str]) -> list[str]:
     if not argv or argv[0] != "docker":
         raise DockerCommandError("docker argv must start with docker")
-    assignments = ["%s=%s" % (key, env[key]) for key in sorted(env)]
-    return ["env", "-i", *assignments, str(resolve_docker_executable()), *argv[1:]]
+    return expected_wrapped_docker_argv(argv, env)
 
 
 def implementation_from_registry(
@@ -286,20 +290,10 @@ def observation_for(
     return observe_error(case_id, input_sha256, capture_state, message)
 
 
-def digest_image_refs(argv: list[str]) -> list[str]:
-    refs: list[str] = []
-    for item in argv:
-        try:
-            validate_image_reference(item)
-        except ImplementationRegistryError:
-            continue
-        refs.append(item)
-    return refs
-
-
-def assert_wrapped_keeps_digest_refs(argv: list[str], wrapped: list[str]) -> None:
-    suffix = argv[1:]
-    if wrapped[len(wrapped) - len(suffix) :] != suffix:
+def assert_wrapped_keeps_digest_refs(
+    argv: list[str], wrapped: list[str], env: dict[str, str]
+) -> None:
+    if wrapped != expected_wrapped_docker_argv(argv, env):
         raise DockerCommandError("digest-qualified image was stripped before docker")
 
 
@@ -315,7 +309,7 @@ def run_docker(
     if env is None:
         raise DockerCommandError("docker invocations require a fresh DOCKER_CONFIG")
     wrapped = wrap_docker_command(argv, env)
-    assert_wrapped_keeps_digest_refs(argv, wrapped)
+    assert_wrapped_keeps_digest_refs(argv, wrapped, env)
     result = run_bounded(
         wrapped,
         timeout_seconds=timeout_seconds,

@@ -2049,7 +2049,7 @@ class EvidenceBinding(unittest.TestCase):
         self.assertIn(DIGEST_IMAGE, seen[0])
         self.assertTrue(any("@sha256:" in item for item in seen[0]))
         original = ["docker", "pull", "--platform", module.PLATFORM, DIGEST_IMAGE]
-        self.assertEqual(seen[0][-len(original) + 1 :], original[1:])
+        self.assertEqual(seen[0], module.expected_wrapped_docker_argv(original, env))
 
     def test_reordered_argv_suffix_is_rejected_by_final_funnel(self) -> None:
         module = _require()
@@ -2065,6 +2065,53 @@ class EvidenceBinding(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             env, _ = module.fresh_docker_env(Path(raw))
         with mock.patch.object(module, "wrap_docker_command", side_effect=reorder_suffix):
+            with mock.patch.object(
+                module, "run_bounded", return_value=mock.Mock(returncode=0, stdout=b"", stderr=b"")
+            ):
+                with self.assertRaises(module.DockerCommandError):
+                    module.run_docker(
+                        ["docker", "pull", "--platform", module.PLATFORM, DIGEST_IMAGE],
+                        env=env,
+                    )
+
+    def test_injected_prefix_flag_is_rejected_by_final_funnel(self) -> None:
+        module = _require()
+        original = module.wrap_docker_command
+
+        def inject_flag(argv: list[str], env: dict[str, str]) -> list[str]:
+            wrapped = original(argv, env)
+            suffix_len = len(argv) - 1
+            prefix = wrapped[:-suffix_len]
+            suffix = wrapped[-suffix_len:]
+            return prefix + ["--privileged"] + suffix
+
+        with tempfile.TemporaryDirectory() as raw:
+            env, _ = module.fresh_docker_env(Path(raw))
+        with mock.patch.object(module, "wrap_docker_command", side_effect=inject_flag):
+            with mock.patch.object(
+                module, "run_bounded", return_value=mock.Mock(returncode=0, stdout=b"", stderr=b"")
+            ):
+                with self.assertRaises(module.DockerCommandError):
+                    module.run_docker(
+                        ["docker", "pull", "--platform", module.PLATFORM, DIGEST_IMAGE],
+                        env=env,
+                    )
+
+    def test_swapped_binary_is_rejected_by_final_funnel(self) -> None:
+        module = _require()
+        original = module.wrap_docker_command
+
+        def swap_binary(argv: list[str], env: dict[str, str]) -> list[str]:
+            wrapped = original(argv, env)
+            suffix_len = len(argv) - 1
+            prefix = list(wrapped[:-suffix_len])
+            suffix = wrapped[-suffix_len:]
+            prefix[-1] = "/tmp/not-the-resolved-docker"
+            return prefix + suffix
+
+        with tempfile.TemporaryDirectory() as raw:
+            env, _ = module.fresh_docker_env(Path(raw))
+        with mock.patch.object(module, "wrap_docker_command", side_effect=swap_binary):
             with mock.patch.object(
                 module, "run_bounded", return_value=mock.Mock(returncode=0, stdout=b"", stderr=b"")
             ):
