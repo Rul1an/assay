@@ -768,20 +768,49 @@ mod tests {
                 .output()
                 .expect("python3 runs the README attestation check")
         };
-        let statement =
-            statement_for_bundle_with_extent_and_limits(&bundle(), VerifyLimits::default())
-                .expect("the constructor `assay evidence attest` calls");
+        let bytes = bundle();
+        // Every public constructor, the CLI's first. A library caller gets the others.
+        let statements = [
+            (
+                "statement_for_bundle_with_extent_and_limits (the CLI's)",
+                statement_for_bundle_with_extent_and_limits(&bytes, VerifyLimits::default()),
+            ),
+            (
+                "statement_for_bundle_with_extent",
+                statement_for_bundle_with_extent(&bytes),
+            ),
+            (
+                "statement_for_bundle_with_limits",
+                statement_for_bundle_with_limits(&bytes, VerifyLimits::default()),
+            ),
+            ("statement_for_bundle", statement_for_bundle(&bytes)),
+        ];
+        for (name, statement) in statements {
+            let statement = statement.expect(name);
+            let shipped = check(&statement.type_, &statement.predicate_type);
+            assert!(
+                shipped.status.success(),
+                "README attestation row disagrees with {name}: {}",
+                String::from_utf8_lossy(&shipped.stderr)
+            );
+        }
 
-        let shipped = check(&statement.type_, &statement.predicate_type);
+        // The control must reach the README comparison, so it is a well-formed predicate URI that
+        // differs only in its version. A malformed one would be refused by the URI shape check
+        // alone, and a checker that compared nothing would still pass it (Grok, review of the
+        // second head).
+        let (base, _) = EVIDENCE_BUNDLE_PREDICATE_TYPE_V1
+            .rsplit_once('/')
+            .expect("a versioned predicate URI");
+        let refused = check(STATEMENT_TYPE, &format!("{base}/v999"));
         assert!(
-            shipped.status.success(),
-            "README attestation row disagrees with the shipped statement: {}",
-            String::from_utf8_lossy(&shipped.stderr)
+            !refused.status.success(),
+            "the check accepted a predicate version the README does not name"
         );
-        let other = format!("{}-changed", statement.predicate_type);
         assert!(
-            !check(&statement.type_, &other).status.success(),
-            "the check accepted a predicate the README does not name"
+            String::from_utf8_lossy(&refused.stderr).contains("does not state"),
+            "the control was refused before the README comparison: {}",
+            String::from_utf8_lossy(&refused.stderr)
         );
     }
 
