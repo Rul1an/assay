@@ -517,7 +517,16 @@ repos:
         pass_filenames: false
         # The ordinary release-surface guard owns installability and the last-published pin. This
         # hook owns only candidate/source identity and the release workflow that consumes it.
-        files: ^(Cargo\.toml|CHANGELOG\.md|docs/(generated/agent-golden-path\.json|guides/agent-golden-path\.md|reference/release\.md)|scripts/(docs/generate-agent-golden-path\.py|ci/((check|test-check)-tag-tree-outward-truth\.sh|lib/(workspace_version\.py|clear-git-repository-env\.sh)))|\.github/workflows/release\.yml|\.pre-commit-config\.yaml)$
+        files: ^(Cargo\.toml|CHANGELOG\.md|README\.md|crates/assay-evidence/src/attestation\.rs|docs/(generated/agent-golden-path\.json|guides/agent-golden-path\.md|reference/release\.md)|scripts/(docs/generate-agent-golden-path\.py|ci/((check|test-check)-tag-tree-outward-truth\.sh|check-readme-attestation-truth\.py|lib/(workspace_version\.py|clear-git-repository-env\.sh)))|\.github/workflows/release\.yml|\.pre-commit-config\.yaml)$
+
+      - id: readme-attestation-truth
+        name: README attestation row names the statement the source emits
+        entry: bash -c 'bash scripts/ci/test-check-readme-attestation-truth.sh && python3 scripts/ci/check-readme-attestation-truth.py'
+        language: system
+        pass_filenames: false
+        # The release path runs the check through check-tag-tree-outward-truth.sh; this hook holds
+        # its mutations and catches a README or emitter change at commit time (#2875).
+        files: ^(README\.md|crates/assay-evidence/src/attestation\.rs|scripts/ci/(check|test-check)-readme-attestation-truth\.(py|sh)|\.pre-commit-config\.yaml)$
 
       - id: editor-mcp-recipe-truth
         name: Editor MCP recipe describes only the shipped transport

@@ -746,6 +746,74 @@ mod tests {
             .expect("the emitted predicate URI must bind its repository page");
     }
 
+    /// Run the README attestation-row check on what the CLI's constructor returns (#2875).
+    ///
+    /// `scripts/ci/check-readme-attestation-truth.py` holds the row rule. On the release path it
+    /// reads the names from this file's source text, because that job has no Rust toolchain. Here
+    /// it gets the URIs a running `statement_for_bundle_with_extent_and_limits` emits instead, so
+    /// a change the source reading cannot see, such as a type reassigned after
+    /// `statement_from_parts` returns, still fails under required CI. The second call is the
+    /// control: a URI the README does not name must be refused, or the first proves nothing.
+    #[cfg(unix)]
+    #[test]
+    fn readme_attestation_row_names_what_the_shipped_constructor_emits() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let check = |statement_type: &str, predicate_type: &str| {
+            std::process::Command::new("python3")
+                .arg(root.join("scripts/ci/check-readme-attestation-truth.py"))
+                .arg("--root")
+                .arg(&root)
+                .args(["--statement-type", statement_type])
+                .args(["--predicate-type", predicate_type])
+                .output()
+                .expect("python3 runs the README attestation check")
+        };
+        let bytes = bundle();
+        // Every public constructor, the CLI's first. A library caller gets the others.
+        let statements = [
+            (
+                "statement_for_bundle_with_extent_and_limits (the CLI's)",
+                statement_for_bundle_with_extent_and_limits(&bytes, VerifyLimits::default()),
+            ),
+            (
+                "statement_for_bundle_with_extent",
+                statement_for_bundle_with_extent(&bytes),
+            ),
+            (
+                "statement_for_bundle_with_limits",
+                statement_for_bundle_with_limits(&bytes, VerifyLimits::default()),
+            ),
+            ("statement_for_bundle", statement_for_bundle(&bytes)),
+        ];
+        for (name, statement) in statements {
+            let statement = statement.expect(name);
+            let shipped = check(&statement.type_, &statement.predicate_type);
+            assert!(
+                shipped.status.success(),
+                "README attestation row disagrees with {name}: {}",
+                String::from_utf8_lossy(&shipped.stderr)
+            );
+        }
+
+        // The control must reach the README comparison, so it is a well-formed predicate URI that
+        // differs only in its version. A malformed one would be refused by the URI shape check
+        // alone, and a checker that compared nothing would still pass it (Grok, review of the
+        // second head).
+        let (base, _) = EVIDENCE_BUNDLE_PREDICATE_TYPE_V1
+            .rsplit_once('/')
+            .expect("a versioned predicate URI");
+        let refused = check(STATEMENT_TYPE, &format!("{base}/v999"));
+        assert!(
+            !refused.status.success(),
+            "the check accepted a predicate version the README does not name"
+        );
+        assert!(
+            String::from_utf8_lossy(&refused.stderr).contains("does not state"),
+            "the control was refused before the README comparison: {}",
+            String::from_utf8_lossy(&refused.stderr)
+        );
+    }
+
     #[test]
     fn v1_predicate_uri_binding_refuses_a_missing_page() {
         let docs = tempfile::tempdir().expect("isolated docs directory");
