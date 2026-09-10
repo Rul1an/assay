@@ -21,6 +21,7 @@ docs/DISTRIBUTION-CHANNELS.md
 .cursor/*
 !.cursor/BUGBOT.md
 !.cursor/mcp.json
+!.cursor/environment.json
 .mcpregistry_*
 _v.txt
 ai-agent-eval-plugin/
