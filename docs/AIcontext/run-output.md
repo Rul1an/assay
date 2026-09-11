@@ -15,6 +15,8 @@ After a run, Assay writes:
 
 Consumers should branch on **`(reason_code_version, reason_code)`** for semantics; exit code is coarse transport only.
 
+JSON object key order in all examples and outputs is illustrative, not normative; consumers must not depend on key order.
+
 `assay ci --format json` writes the same `assay.run_summary.v1` document as `summary.json` to
 stdout after a completed gate, and writes the same early-failure diagnosis there when the pipeline
 cannot start. The default `text` format keeps stdout empty and retains the operator report on

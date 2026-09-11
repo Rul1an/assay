@@ -41,7 +41,7 @@ When `assay ci` (or the equivalent run invoked by the blessed workflow) complete
 
 | Field                 | Type    | Required | Description |
 |-----------------------|---------|----------|-------------|
-| `schema`             | string  | **Yes (2026-08 and later)** | Stable document identity. MUST be `assay.run_summary.v1` for newly produced `summary.json`. Consumers MUST treat an absent `schema` on a `schema_version: 1` document as a pre-identity summary and MUST NOT reject it for that absence. |
+| `schema`             | string  | **Yes (producers)** | Stable document identity. Producers MUST emit `assay.run_summary.v1` for newly produced `summary.json`. Consumers MUST treat an absent `schema` on a `schema_version: 1` document as a pre-identity summary and MUST NOT reject it for that absence. |
 | `schema_version`     | integer | **Yes**  | Version of this summary schema. MUST be `1` for this spec. Increment when adding or changing fields in a backward-incompatible way. |
 | `reason_code_version`| integer | **Yes**  | Version of the reason code registry. MUST be present. MUST equal `1` in Outputs-v1. Future changes to the reason code set use this version. Consumers MUST branch on `(reason_code_version, reason_code)` for semantics; exit code is coarse transport only. Consumers MUST treat unknown versions as "compat required" (fail closed or fallback parsing). |
 | `exit_code`           | integer | **Yes**  | Process exit code: 0 = pass, 1 = test failure, 2 = config/user error, 3 = infra/judge unavailable. See §4. |
@@ -112,9 +112,9 @@ When the run had judge evaluations, a top-level **`judge_metrics`** object MAY b
 
 **Implementation note (flip_rate):** The spec defines flip_rate as “order was swapped and outcome differed”. When the judge does not record whether the pass/fail verdict would have differed under the other ordering, implementations may use a heuristic proxy (e.g. swapped and non-unanimous agreement). This proxy does not guarantee that the verdict actually flipped; it indicates order may have affected the outcome. When present, run.json and the CLI console SHALL expose judge metrics so CI can display them.
 
-### 3.4 Example (Minimal)
+**JSON Object Key Order:** JSON object key order in all examples and outputs throughout this specification is illustrative, not normative; consumers MUST NOT depend on field ordering.
 
-JSON object key order in these examples is illustrative, not normative.
+### 3.4 Example (Minimal)
 
 ```json
 {
