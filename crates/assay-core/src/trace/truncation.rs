@@ -7,7 +7,10 @@ use sha2::{Digest, Sha256};
 /// path. This bound applies when V1/V2 events are read through `StreamUpgrader`
 /// (and any direct callers of these helpers). It is not a global evidence-bundle
 /// limit, a completeness claim, or a raiseable public contract.
-const MAX_STRING_LEN: usize = 4096;
+/// Stage-local ingest ceiling in UTF-8 bytes. Public so observation records
+/// can name the same bound the helpers apply.
+pub const INGEST_STRING_CEILING: usize = 4096;
+const MAX_STRING_LEN: usize = INGEST_STRING_CEILING;
 const TRUNCATED_MSG: &str = "...[TRUNCATED]";
 
 /// Truncate `s` to a UTF-8 byte budget, appending [`TRUNCATED_MSG`].

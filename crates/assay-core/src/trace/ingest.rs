@@ -24,14 +24,14 @@ pub fn ingest_file(input: &Path, output: &Path) -> anyhow::Result<IngestStats> {
         let reader = BufReader::new(file);
 
         // Use Upgrader to stream events (V1->V2 or V2 passthrough)
-        let upgrader = super::upgrader::StreamUpgrader::new(reader);
+        let upgrader = super::upgrader::StreamUpgrader::new(reader).observed();
 
         // JSONL Output
         let mut out_file = File::create(output).context("failed to create output file")?;
         let mut count = 0;
         for event_result in upgrader {
-            let event = event_result.context("failed to process trace entry")?;
-            let out_line = serde_json::to_string(&event)?;
+            let observed = event_result.context("failed to process trace entry")?;
+            let out_line = serde_json::to_string(&observed)?;
             writeln!(out_file, "{}", out_line)?;
             count += 1;
         }
@@ -48,7 +48,7 @@ pub fn ingest_into_store(
     let reader = BufReader::new(file);
 
     // Use Upgrader to stream events (V1->V2 or V2 passthrough)
-    let upgrader = super::upgrader::StreamUpgrader::new(reader);
+    let upgrader = super::upgrader::StreamUpgrader::new(reader).observed();
 
     let mut count = 0;
 
@@ -57,17 +57,17 @@ pub fn ingest_into_store(
     let mut batch = Vec::with_capacity(1000);
 
     for event_result in upgrader {
-        let event = event_result.context("failed to process trace entry")?;
-        batch.push(event);
+        let observed = event_result.context("failed to process trace entry")?;
+        batch.push(observed);
         count += 1;
 
         if batch.len() >= 1000 {
-            store.insert_batch(&batch, None, None)?;
+            store.insert_observed_batch(&batch, None, None)?;
             batch.clear();
         }
     }
     if !batch.is_empty() {
-        store.insert_batch(&batch, None, None)?;
+        store.insert_observed_batch(&batch, None, None)?;
     }
 
     Ok(IngestStats { event_count: count })
