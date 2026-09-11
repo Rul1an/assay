@@ -51,10 +51,29 @@ _CRATES_LEGACY_REMOVAL_SENTENCE = (
 _CRATES_UNSET_ENVIRONMENT_SENTENCE = (
     "An unset environment is broader authority and does not match this contract."
 )
+_PYPI_RECEIPT_SENTENCE = (
+    "compare its expected identity with every "
+    "owner-visible PyPI publisher row, and retain a redacted receipt containing only the project, "
+    "repository, workflow, environment, publisher count, observation time, and result."
+)
 _CRATES_RECEIPT_SENTENCE = (
-    "retain a redacted receipt containing only the crate, "
+    "compare its expected identity with every "
+    "owner-visible crates.io publisher row, and retain a redacted receipt containing only the crate, "
     "repository, workflow, environment, publisher count, observation time, and result. "
-    "No credentials."
+    "No credentials. Apply this on every current crates.io crate:"
+)
+# Environment vocabulary is an allowlist of pinned item sentences, not a
+# forbidden-phrase list. Closed-form ownership of the whole item would still pin
+# the crate inventory; those lines do not mention environment, so a crate-list
+# edit stays green. Both halves share this check so fixing one cannot reintroduce
+# the parity overclaim.
+_CHECKLIST_ITEM_PREFIX = re.compile(r"^- \[[ x]\] \*\*[^*]+\*\*: ")
+_RECEIPT_COMMAND_PREFIX = (
+    "Before creating a tag, run `python3 scripts/ci/check-release-runbook-truth.py`, "
+)
+_CRATES_REGISTRY_TOKEN = "CARGO_REGISTRY_TOKEN"
+_CRATES_SECRET_TOKEN_SOURCE_MESSAGE = (
+    "publish-crates CARGO_REGISTRY_TOKEN is sourced from secrets.*, not the auth step output"
 )
 _BEFORE_CLAIM = re.compile(
     r"GitHub Release is created before crates publication",
@@ -168,8 +187,8 @@ def _publish_crates_needs_release(workflow: str) -> bool:
     return "release" in _job_needs_ids(job)
 
 
-def _active_step_uses(job: str) -> list[str]:
-    """Return direct-step actions that have no step-level condition."""
+def _direct_step_blocks(job: str) -> list[list[str]]:
+    """Return list-item step blocks under the job's direct steps: key."""
     step_blocks: list[list[str]] = []
     current: list[str] = []
     in_steps = False
@@ -193,31 +212,50 @@ def _active_step_uses(job: str) -> list[str]:
             current.append(line)
     if current:
         step_blocks.append(current)
+    return step_blocks
 
-    uses: list[str] = []
-    for block in step_blocks:
-        action = ""
-        condition = ""
-        for line in block:
-            stripped = line.lstrip()
-            indent = len(line) - len(stripped)
-            if indent == 6 and stripped.startswith("- "):
-                direct = stripped[2:]
-            elif indent == 8:
-                direct = stripped
-            else:
-                continue
-            match = re.match(r"^([^:]+?)\s*:\s*(.*)$", direct)
-            if match is None:
-                continue
-            key = match.group(1).strip().strip("'\"")
-            value = match.group(2).split(" #", 1)[0].strip(" '\"")
-            if key == "uses":
-                action = value
-            elif key == "if":
-                condition = value
-        if condition:
+
+def _step_direct_fields(block: list[str]) -> dict[str, str]:
+    """Direct keys of a list-item step (indent 6/8), comment-stripped values."""
+    fields: dict[str, str] = {}
+    for line in block:
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+        if indent == 6 and stripped.startswith("- "):
+            direct = stripped[2:]
+        elif indent == 8:
+            direct = stripped
+        else:
             continue
+        match = re.match(r"^([^:]+?)\s*:\s*(.*)$", direct)
+        if match is None:
+            continue
+        key = match.group(1).strip().strip("'\"")
+        value = match.group(2).split(" #", 1)[0].strip(" '\"")
+        if key:
+            fields[key] = value
+    return fields
+
+
+def _step_env_entries(block: list[str]) -> dict[str, str] | None:
+    """Return the step's env mapping. Empty if absent; None if unparsable."""
+    text = "".join(line + "\n" for line in block)
+    try:
+        return _child_entries(_mapping_block(text, "env", 8))
+    except AssertionError as exc:
+        if "found 0" in str(exc):
+            return {}
+        return None
+
+
+def _active_step_uses(job: str) -> list[str]:
+    """Return direct-step actions that have no step-level condition."""
+    uses: list[str] = []
+    for block in _direct_step_blocks(job):
+        fields = _step_direct_fields(block)
+        if fields.get("if"):
+            continue
+        action = fields.get("uses", "")
         if action:
             uses.append(action)
     return uses
@@ -269,10 +307,46 @@ def _pinned_publish_action_problems(
     return []
 
 
+def _crates_registry_token_source_problems(job: str) -> list[str]:
+    auth_ids: list[str] = []
+    token_sources: list[str] = []
+    for block in _direct_step_blocks(job):
+        fields = _step_direct_fields(block)
+        if fields.get("if"):
+            continue
+        if fields.get("uses") == _CRATES_PUBLISH_ACTION:
+            auth_ids.append(fields.get("id", ""))
+        env_entries = _step_env_entries(block)
+        if env_entries is None:
+            return [
+                "publish-crates cannot determine the crates.io registry token source"
+            ]
+        raw = env_entries.get(_CRATES_REGISTRY_TOKEN)
+        if raw is None:
+            continue
+        token_sources.append(raw.split(" #", 1)[0].strip(" '\""))
+    if len(token_sources) != 1:
+        return [
+            "publish-crates cannot determine the crates.io registry token source"
+        ]
+    source = token_sources[0]
+    if re.search(r"\bsecrets\.", source):
+        return [_CRATES_SECRET_TOKEN_SOURCE_MESSAGE]
+    if len(auth_ids) != 1 or not auth_ids[0]:
+        return ["publish-crates cannot determine the crates.io auth step id"]
+    expected = "${{ steps." + auth_ids[0] + ".outputs.token }}"
+    if source != expected:
+        return [
+            f"publish-crates CARGO_REGISTRY_TOKEN is {source!r}, expected {expected!r}"
+        ]
+    return []
+
+
 def _pypi_workflow_problems(workflow: str) -> list[str]:
     job, entries, problems = _publisher_job(workflow, "publish-pypi", "PyPI")
-    if job is None or entries is None:
+    if job is None:
         return problems
+    assert entries is not None
     problems.extend(
         _environment_problems(
             entries, job_id="publish-pypi", expected=_PYPI_ENVIRONMENT
@@ -292,8 +366,9 @@ def _pypi_workflow_problems(workflow: str) -> list[str]:
 
 def _crates_workflow_problems(workflow: str) -> list[str]:
     job, entries, problems = _publisher_job(workflow, "publish-crates", "crates.io")
-    if job is None or entries is None:
+    if job is None:
         return problems
+    assert entries is not None
     problems.extend(
         _environment_problems(
             entries, job_id="publish-crates", expected=_CRATES_ENVIRONMENT
@@ -308,6 +383,7 @@ def _crates_workflow_problems(workflow: str) -> list[str]:
             label="crates.io",
         )
     )
+    problems.extend(_crates_registry_token_source_problems(job))
     return problems
 
 
@@ -347,12 +423,49 @@ def _visible_docs(docs: str) -> str:
     return re.sub(r"<!--.*?-->", "", docs, flags=re.DOTALL)
 
 
+def _item_sentences(item: str) -> list[str]:
+    text = _CHECKLIST_ITEM_PREFIX.sub("", " ".join(item.split()), count=1)
+    return [part.strip() for part in re.split(r"(?<=\.)\s+", text) if part.strip()]
+
+
+def _mentions_environment(text: str) -> bool:
+    return "environment" in text.lower()
+
+
+def _environment_allowlist(
+    required_sentences: tuple[tuple[str, str], ...],
+) -> frozenset[str]:
+    allowed: set[str] = set()
+    for sentence, _ in required_sentences:
+        if not _mentions_environment(sentence):
+            continue
+        if sentence.startswith("compare its expected identity"):
+            first = sentence.split(". ", 1)[0].rstrip(".") + "."
+            allowed.add(_RECEIPT_COMMAND_PREFIX + first)
+        else:
+            allowed.add(sentence)
+    return frozenset(allowed)
+
+
+def _unpinned_environment_sentence_problems(
+    item: str,
+    required_sentences: tuple[tuple[str, str], ...],
+    *,
+    label: str,
+) -> list[str]:
+    allowed = _environment_allowlist(required_sentences)
+    return [
+        f"{label} item includes an unpinned sentence that mentions environment"
+        for sentence in _item_sentences(item)
+        if _mentions_environment(sentence) and sentence not in allowed
+    ]
+
+
 def _trusted_publisher_docs_problems(
     docs: str,
     *,
     title: str,
     label: str,
-    required_literals: tuple[str, ...],
     required_sentences: tuple[tuple[str, str], ...],
 ) -> list[str]:
     try:
@@ -361,16 +474,15 @@ def _trusted_publisher_docs_problems(
         return [str(exc)]
 
     problems: list[str] = []
-    for literal in required_literals:
-        if literal not in item:
-            problems.append(f"{label} item omits {literal}")
     normalized = " ".join(item.split())
     for sentence, message in required_sentences:
         if sentence not in normalized:
             problems.append(message)
-    lowered = normalized.lower()
-    if "owner-visible" not in lowered or "redacted receipt" not in lowered:
-        problems.append(f"{label} item omits the redacted owner-visible receipt")
+    problems.extend(
+        _unpinned_environment_sentence_problems(
+            item, required_sentences, label=label
+        )
+    )
     return problems
 
 
@@ -379,12 +491,6 @@ def _pypi_docs_problems(docs: str) -> list[str]:
         docs,
         title=_PYPI_ITEM_TITLE,
         label="PyPI Trusted Publisher",
-        required_literals=(
-            f"`{_PYPI_REPOSITORY}`",
-            f"`{_PYPI_WORKFLOW}`",
-            f"`{_PYPI_ENVIRONMENT}`",
-            f"`{_PYPI_LEGACY_WORKFLOW}`",
-        ),
         required_sentences=(
             (
                 _PYPI_SINGLE_PUBLISHER_SENTENCE,
@@ -398,6 +504,10 @@ def _pypi_docs_problems(docs: str) -> list[str]:
                 _PYPI_EMPTY_ENVIRONMENT_SENTENCE,
                 "PyPI Trusted Publisher item does not reject an empty environment",
             ),
+            (
+                _PYPI_RECEIPT_SENTENCE,
+                "PyPI Trusted Publisher item omits the redacted owner-visible receipt",
+            ),
         ),
     )
 
@@ -407,11 +517,6 @@ def _crates_docs_problems(docs: str) -> list[str]:
         docs,
         title=_CRATES_ITEM_TITLE,
         label="crates.io Trusted Publishing",
-        required_literals=(
-            f"`{_CRATES_REPOSITORY}`",
-            f"`{_CRATES_WORKFLOW}`",
-            f"`{_CRATES_ENVIRONMENT}`",
-        ),
         required_sentences=(
             (
                 _CRATES_IDENTITY_SENTENCE,
@@ -427,7 +532,7 @@ def _crates_docs_problems(docs: str) -> list[str]:
             ),
             (
                 _CRATES_RECEIPT_SENTENCE,
-                "crates.io Trusted Publishing item omits the redacted crates.io receipt sentence",
+                "crates.io Trusted Publishing item omits the redacted crates.io receipt sentence ending with Apply this on every current crates.io crate",
             ),
         ),
     )

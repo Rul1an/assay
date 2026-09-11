@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.2.0] - 2026-09-11
+
+### Added
+- Trace truncation observations (`assay_core::trace::observation`): a
+  `TruncationObservation` record rides beside the trace rows, in JSONL and in SQLite, so a
+  reader can tell a trusted scan that found no loss from a trace nobody scanned. An absent,
+  empty, unknown-version, untrusted or unparsable observation reads as unmeasured, and only
+  a trusted observation with no loss for a field reads that field as clean. The existing
+  trace event structs are unchanged; `EpisodeStart` truncation loss is now retained through
+  the observation record instead of being discarded (#2925, #2787; design in ADR-050).
+
+### Fixed
+- `assay demo` now evaluates its `Calculate` rule too: the demo suite includes a `Calculate`
+  step, and the success message names each rule it checked (#2924, #2916).
+
+### Changed
+- `SECURITY.md` publishes response targets (acknowledgement, assessment, and fix or
+  mitigation windows by severity, coordinated disclosure), puts evidence-bundle limit bypass
+  in scope, and describes the tool-signing CLI that actually ships (#2923, #2913).
+
+### Internal
+- The release runbook check binds the crates.io token source to the publish step and rejects
+  runbook text that makes the publisher environment optional (#2928, #2912).
+- Review tooling names a self-test case that crashes instead of ending in a traceback, and
+  its supersede tests fail on a crash instead of erroring (#2906, #2907).
+- ADR index covers ADR-016 through ADR-050 and documents the duplicate ADR-034 number (#2926);
+  documentation corrections (#2921).
+
 ## [6.1.3] - 2026-09-11
 
 ### Added
