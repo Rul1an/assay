@@ -4,12 +4,32 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.1.3] - 2026-09-11
+
 ### Added
 - `assay validate --format json` emits `assay.validate_report.v1` for both successful
   and failing validation reports, carrying `schema_version: 1` (#2169, #2171).
 - `assay run --format json` emits `assay.run_report.v1` for completed run reports,
   carrying `schema_version: 1`, while early failures before results exist emit
   the `assay.run_summary.v1` diagnosis (#2169, #2171).
+
+### Fixed
+- `assay demo` completes again. Its generated policy used a `tools:` layout the policy parser
+  rejects, so the demo stopped with `E_CFG_PARSE`; it now writes the current schema, and a test
+  runs the printed next step. A failed write of a demo file is reported instead of being claimed
+  as created (#2904, #2902, #2905).
+- The stdio MCP server stays silent for every JSON-RPC notification, meaning any parsed message
+  without an `id` member. Only `notifications/initialized` was special-cased before, so other
+  notifications got a `-32601` error with `id: null`. A request with `"id": null` still gets a
+  response, and a request with duplicate top-level members still produces no output, as before
+  (#2903, #2776).
+
+### Internal
+- Release runbook: the crates.io Trusted Publisher identity (repository, workflow, `crates`
+  environment) is now required and checked against `release.yml` (#2901).
+- OpenSSF Scorecard runs complete again after hash-locking an example's requirements (#2910).
+- RFC 8785 adequacy measures a fourth dependency rule, solidus non-escaping (#2911).
+- Review tooling, CI guard and documentation fixes (#2896, #2899, #2900, #2909, #2917, #2918).
 
 ## [6.1.2] - 2026-09-10
 
