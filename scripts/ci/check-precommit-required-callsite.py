@@ -455,9 +455,9 @@ def self_test() -> int:
                      entry=f"node --test --test-reporter spec {mjs}"),
            mjs_unwired, "invented-mjs-guard")
 
-    # Finding paths without an extension list also finds directories. `scripts/ci` is a
-    # substring of nearly every line in ci.yml, so a directory token that survived into the
-    # callsite search would wire every hook that names one. Only files are scripts.
+    # Finding paths without an extension list also finds directories. The path of every
+    # script under `scripts/ci` contains that directory, so a directory token that survived
+    # into the callsite search would wire every hook that names one. Only files are scripts.
     expect("a directory in an entry is not a callsite",
            synthetic(entry="bash -c 'python3 -m unittest discover -s scripts/ci && "
                            "bash scripts/ci/test-ci-gate-expectations.sh'"),
