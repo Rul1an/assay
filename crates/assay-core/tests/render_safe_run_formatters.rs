@@ -118,15 +118,15 @@ fn assert_no_hostile_values(haystack: &str, ctx: &str) {
 }
 
 #[test]
-fn run_json_record_sink_is_render_safe() {
+fn render_json_report_sink_is_render_safe() {
     let artifacts = hostile_artifacts();
     let out = render_json(&artifacts).unwrap();
 
     // Structure preserved: still valid JSON (no double-encode / no broken serialization).
     let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
 
-    assert_no_hostile_values(&out, "run.json");
-    assert!(out.contains("<redacted:"), "run.json fired no redaction");
+    assert_no_hostile_values(&out, "render_json");
+    assert!(out.contains("<redacted:"), "render_json fired no redaction");
 
     // Assay-owned values are byte-stable.
     assert!(out.contains(SUITE), "suite mutated");
@@ -161,7 +161,7 @@ fn run_json_record_sink_is_render_safe() {
         "<redacted:github-token>"
     );
 
-    // "Beyond the console's 100-char view": the record sink keeps full content, so the deep prompt
+    // "Beyond the console's 100-char view": the report sink keeps full content, so the deep prompt
     // secret must be REDACTED here (not merely truncated away as on the console), and not truncated.
     let prompt = parsed["results"][0]["details"]["prompt"].as_str().unwrap();
     assert!(
@@ -171,7 +171,7 @@ fn run_json_record_sink_is_render_safe() {
     assert!(!prompt.contains("ghp_"));
     assert!(
         !prompt.contains("(truncated)"),
-        "record sink must not truncate"
+        "report sink must not truncate"
     );
 }
 

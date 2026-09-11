@@ -1,4 +1,5 @@
 use crate::cli::args::DemoArgs;
+use anyhow::Context;
 use assay_core::config::path_resolver::PathResolver;
 use assay_core::validate::{validate, ValidateOptions};
 use std::fs;
@@ -9,19 +10,28 @@ pub async fn cmd_demo(args: DemoArgs) -> anyhow::Result<i32> {
 
     // 1. Create Policy File (The Rules)
     let policy_path = demo_dir.join("policy.yaml");
-    let policy_content = r#"version: 1
+    // ToolsPolicy is deny_unknown_fields: allow / deny / require_args / arg_constraints.
+    // validate() serializes arg_constraints into evaluate_tool_args, which compiles
+    // each tool entry as a JSON Schema (Map<Tool, Schema>), not the RFC arg-map dialect.
+    let policy_content = r#"version: "1"
 name: demo-policy
 tools:
-  Search:
-    args:
+  arg_constraints:
+    Search:
+      type: object
       properties:
-        query: { pattern: "^[a-zA-Z0-9 ]+$" }
-  Calculate:
-    args:
+        query:
+          type: string
+          pattern: "^[a-zA-Z0-9 ]+$"
+    Calculate:
+      type: object
       properties:
-        operation: { enum: ["add", "subtract"] }
+        operation:
+          type: string
+          enum: ["add", "subtract"]
 "#;
-    let _ = fs::write(&policy_path, policy_content);
+    fs::write(&policy_path, policy_content)
+        .with_context(|| format!("failed to write demo file {}", policy_path.display()))?;
 
     // 2. Create Config File (The Test Runner)
     let config_path = demo_dir.join("assay.yaml");
@@ -35,7 +45,8 @@ tests:
       type: args_valid
       policy: policy.yaml
 "#;
-    let _ = fs::write(&config_path, config_content);
+    fs::write(&config_path, config_content)
+        .with_context(|| format!("failed to write demo file {}", config_path.display()))?;
 
     // 2. Create Traces
     let trace_path = demo_dir.join("traces.jsonl");
@@ -43,7 +54,8 @@ tests:
     let trace_content = r#"{"id": "demo_trace_1", "tool": "Search", "args": {"query": "assay rules"}, "prompt": "find assay rules", "response": "detecting 123"}
 {"tool": "Calculate", "args": {"operation": "add", "x": 1, "y": 2}, "response": "3"}
 "#;
-    let _ = fs::write(&trace_path, trace_content);
+    fs::write(&trace_path, trace_content)
+        .with_context(|| format!("failed to write demo file {}", trace_path.display()))?;
 
     println!("✓ Created demo environment in {}", demo_dir.display());
     println!("  - Config: {}", config_path.display());

@@ -34,6 +34,7 @@ This directory contains Architecture Decision Records (ADRs) for the Assay proje
 | [ADR-031](./ADR-031-Coverage-v1.1-DX-Polish.md) | Coverage v1.1 DX Polish | Accepted | **P2** |
 | [ADR-032](./ADR-032-MCP-Policy-Obligations-and-Evidence-v2.md) | MCP Policy Enforcement, Obligations, and Evidence v2 | Accepted | **P1** |
 | [ADR-033](./ADR-033-OTel-Trust-Compiler-Positioning.md) | OTel-Native Trust Compiler Positioning | Accepted | **P1** |
+| [ADR-050](./ADR-050-trace-truncation-observations-on-6x.md) | Truncation Observations Ride Next to the Trace Rows on 6.x | Proposed | **P1** |
 | [ADR-020](./ADR-020-Dependency-Governance.md) | Dependency Governance | Accepted | - |
 
 ## Q2 2026 Priorities
