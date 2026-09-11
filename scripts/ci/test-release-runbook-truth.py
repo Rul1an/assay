@@ -408,6 +408,30 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
             sentence="Publication proceeds when the environment is not configured.",
         )
 
+    def test_pypi_publisher_scope_must_be_pypi_bites(self) -> None:
+        self._assert_unpinned_environment_bites(
+            title=contract._PYPI_ITEM_TITLE,
+            sentence="Publisher scope must be `pypi`.",
+        )
+
+    def test_crates_publisher_scope_must_be_crates_bites(self) -> None:
+        self._assert_unpinned_environment_bites(
+            title=contract._CRATES_ITEM_TITLE,
+            sentence="Publisher scope must be `crates`.",
+        )
+
+    def test_pypi_publisher_scope_must_be_pypi_crates_bites(self) -> None:
+        self._assert_unpinned_environment_bites(
+            title=contract._PYPI_ITEM_TITLE,
+            sentence="Publisher scope must be `pypi`/`crates`.",
+        )
+
+    def test_crates_publisher_scope_must_be_pypi_crates_bites(self) -> None:
+        self._assert_unpinned_environment_bites(
+            title=contract._CRATES_ITEM_TITLE,
+            sentence="Publisher scope must be `pypi`/`crates`.",
+        )
+
     def test_adding_or_removing_a_crates_inventory_line_stays_green(self) -> None:
         added = replace_once(
             self.docs,
@@ -423,13 +447,15 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
         self.assert_clean(self.workflow, removed)
         item = contract._checklist_item(added, contract._CRATES_ITEM_TITLE)
         self.assertNotIn("environment", item.split("assay-newcrate")[1].lower())
+        self.assertNotIn("`pypi`", item.split("assay-newcrate")[1])
+        self.assertNotIn("`crates`", item.split("assay-newcrate")[1])
 
     def test_removing_environment_allowlist_lets_paraphrases_survive(self) -> None:
         source = Path(contract.__file__).read_text(encoding="utf-8")
         needle = (
             "    problems.extend(\n"
             "        _unpinned_environment_sentence_problems(\n"
-            "            item, required_sentences, label=label\n"
+            "            item, required_sentences, label=label, environment=environment\n"
             "        )\n"
             "    )\n"
         )
@@ -451,6 +477,34 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
             disabled = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(disabled)
             for title, sentence in paraphrases:
+                mutated = self._append_publisher_sentence(title, sentence)
+                problems = disabled.contract_problems(self.workflow, mutated)
+                with self.assertRaisesRegex(AssertionError, "mutation survived"):
+                    self.assertTrue(problems, "mutation survived")
+                live = contract.contract_problems(self.workflow, mutated)
+                self.assertTrue(live, "live allowlist must still bite")
+
+    def test_removing_value_keyed_trigger_lets_value_probes_survive(self) -> None:
+        source = Path(contract.__file__).read_text(encoding="utf-8")
+        needle = '    return bool(environment) and f"`{environment}`" in text\n'
+        self.assertEqual(source.count(needle), 1)
+        probes = (
+            (contract._PYPI_ITEM_TITLE, "Publisher scope must be `pypi`."),
+            (contract._CRATES_ITEM_TITLE, "Publisher scope must be `crates`."),
+            (contract._PYPI_ITEM_TITLE, "Publisher scope must be `pypi`/`crates`."),
+            (contract._CRATES_ITEM_TITLE, "Publisher scope must be `pypi`/`crates`."),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "check-release-runbook-truth.py"
+            path.write_text(source.replace(needle, "    return False\n", 1), encoding="utf-8")
+            spec = importlib.util.spec_from_file_location(
+                "value_trigger_disabled_release_runbook_truth", path
+            )
+            if spec is None or spec.loader is None:
+                raise AssertionError("disabled checker is not loadable")
+            disabled = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(disabled)
+            for title, sentence in probes:
                 mutated = self._append_publisher_sentence(title, sentence)
                 problems = disabled.contract_problems(self.workflow, mutated)
                 with self.assertRaisesRegex(AssertionError, "mutation survived"):
