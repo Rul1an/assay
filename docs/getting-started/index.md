@@ -30,7 +30,7 @@ This guide covers:
 
 ```bash
 # Install
-cargo install assay-cli --version 6.1.2 --locked
+cargo install assay-cli --version 6.1.3 --locked
 
 # Import an MCP session as trace
 assay import --format inspector session.json --out-trace traces/session.jsonl
