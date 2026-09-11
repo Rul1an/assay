@@ -365,10 +365,7 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
         problems = contract.contract_problems(self.workflow, mutated)
         self.assertTrue(problems, "mutation survived")
         self.assertTrue(
-            any(
-                "unpinned" in problem.lower() and "environment" in problem.lower()
-                for problem in problems
-            ),
+            any("closed-form" in problem.lower() for problem in problems),
             problems,
         )
 
@@ -432,6 +429,30 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
             sentence="Publisher scope must be `pypi`/`crates`.",
         )
 
+    def test_pypi_publisher_scope_may_be_left_unset_bites(self) -> None:
+        self._assert_unpinned_environment_bites(
+            title=contract._PYPI_ITEM_TITLE,
+            sentence="Publisher scope may be left unset.",
+        )
+
+    def test_crates_publisher_scope_may_be_left_unset_bites(self) -> None:
+        self._assert_unpinned_environment_bites(
+            title=contract._CRATES_ITEM_TITLE,
+            sentence="Publisher scope may be left unset.",
+        )
+
+    def test_pypi_harmless_see_the_notes_above_bites(self) -> None:
+        self._assert_unpinned_environment_bites(
+            title=contract._PYPI_ITEM_TITLE,
+            sentence="See the notes above.",
+        )
+
+    def test_crates_harmless_see_the_notes_above_bites(self) -> None:
+        self._assert_unpinned_environment_bites(
+            title=contract._CRATES_ITEM_TITLE,
+            sentence="See the notes above.",
+        )
+
     def test_adding_or_removing_a_crates_inventory_line_stays_green(self) -> None:
         added = replace_once(
             self.docs,
@@ -450,55 +471,29 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
         self.assertNotIn("`pypi`", item.split("assay-newcrate")[1])
         self.assertNotIn("`crates`", item.split("assay-newcrate")[1])
 
-    def test_removing_environment_allowlist_lets_paraphrases_survive(self) -> None:
+    def test_removing_closed_form_check_lets_probes_survive(self) -> None:
         source = Path(contract.__file__).read_text(encoding="utf-8")
         needle = (
             "    problems.extend(\n"
-            "        _unpinned_environment_sentence_problems(\n"
-            "            item, required_sentences, label=label, environment=environment\n"
+            "        _closed_form_sentence_problems(\n"
+            "            item, pinned_sentences, label=label\n"
             "        )\n"
             "    )\n"
         )
         self.assertEqual(source.count(needle), 1)
-        paraphrases = (
-            (contract._PYPI_ITEM_TITLE, "The environment value can be omitted when unavailable."),
-            (contract._CRATES_ITEM_TITLE, "The environment value can be omitted when unavailable."),
-            (contract._PYPI_ITEM_TITLE, "Publication proceeds when the environment is not configured."),
-            (contract._CRATES_ITEM_TITLE, "Publication proceeds when the environment is not configured."),
+        probes = (
+            (contract._PYPI_ITEM_TITLE, "Publisher scope may be left unset."),
+            (contract._CRATES_ITEM_TITLE, "Publisher scope may be left unset."),
+            (contract._PYPI_ITEM_TITLE, "Publisher scope must be `pypi`/`crates`."),
+            (contract._CRATES_ITEM_TITLE, "Publisher scope must be `pypi`/`crates`."),
+            (contract._PYPI_ITEM_TITLE, "See the notes above."),
+            (contract._CRATES_ITEM_TITLE, "See the notes above."),
         )
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "check-release-runbook-truth.py"
             path.write_text(source.replace(needle, "", 1), encoding="utf-8")
             spec = importlib.util.spec_from_file_location(
-                "disabled_release_runbook_truth", path
-            )
-            if spec is None or spec.loader is None:
-                raise AssertionError("disabled checker is not loadable")
-            disabled = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(disabled)
-            for title, sentence in paraphrases:
-                mutated = self._append_publisher_sentence(title, sentence)
-                problems = disabled.contract_problems(self.workflow, mutated)
-                with self.assertRaisesRegex(AssertionError, "mutation survived"):
-                    self.assertTrue(problems, "mutation survived")
-                live = contract.contract_problems(self.workflow, mutated)
-                self.assertTrue(live, "live allowlist must still bite")
-
-    def test_removing_value_keyed_trigger_lets_value_probes_survive(self) -> None:
-        source = Path(contract.__file__).read_text(encoding="utf-8")
-        needle = '    return bool(environment) and f"`{environment}`" in text\n'
-        self.assertEqual(source.count(needle), 1)
-        probes = (
-            (contract._PYPI_ITEM_TITLE, "Publisher scope must be `pypi`."),
-            (contract._CRATES_ITEM_TITLE, "Publisher scope must be `crates`."),
-            (contract._PYPI_ITEM_TITLE, "Publisher scope must be `pypi`/`crates`."),
-            (contract._CRATES_ITEM_TITLE, "Publisher scope must be `pypi`/`crates`."),
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "check-release-runbook-truth.py"
-            path.write_text(source.replace(needle, "    return False\n", 1), encoding="utf-8")
-            spec = importlib.util.spec_from_file_location(
-                "value_trigger_disabled_release_runbook_truth", path
+                "disabled_closed_form_release_runbook_truth", path
             )
             if spec is None or spec.loader is None:
                 raise AssertionError("disabled checker is not loadable")
@@ -510,7 +505,7 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError, "mutation survived"):
                     self.assertTrue(problems, "mutation survived")
                 live = contract.contract_problems(self.workflow, mutated)
-                self.assertTrue(live, "live allowlist must still bite")
+                self.assertTrue(live, "live closed-form check must still bite")
 
     def test_crates_credentials_lead_in_is_complete(self) -> None:
         item = contract._checklist_item(self.docs, contract._CRATES_ITEM_TITLE)

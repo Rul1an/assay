@@ -51,27 +51,45 @@ _CRATES_LEGACY_REMOVAL_SENTENCE = (
 _CRATES_UNSET_ENVIRONMENT_SENTENCE = (
     "An unset environment is broader authority and does not match this contract."
 )
+_RECEIPT_COMMAND_PREFIX = (
+    "Before creating a tag, run `python3 scripts/ci/check-release-runbook-truth.py`, "
+)
 _PYPI_RECEIPT_SENTENCE = (
     "compare its expected identity with every "
     "owner-visible PyPI publisher row, and retain a redacted receipt containing only the project, "
     "repository, workflow, environment, publisher count, observation time, and result."
 )
-_CRATES_RECEIPT_SENTENCE = (
+_CRATES_RECEIPT_BODY = (
     "compare its expected identity with every "
     "owner-visible crates.io publisher row, and retain a redacted receipt containing only the crate, "
-    "repository, workflow, environment, publisher count, observation time, and result. "
-    "No credentials. Apply this on every current crates.io crate:"
+    "repository, workflow, environment, publisher count, observation time, and result."
 )
-# Environment vocabulary is an allowlist of pinned item sentences, not a
-# forbidden-phrase list. A sentence is subject to pinning when it mentions
-# environment or contains that item's backticked environment value. Closed-form
-# ownership of the whole item would still pin the crate inventory; those lines
-# mention neither, so a crate-list edit stays green. Both halves share this
-# check so fixing one cannot reintroduce the parity overclaim.
+_CRATES_NO_CREDENTIALS_SENTENCE = "No credentials."
+_CRATES_APPLY_LEAD_IN = "Apply this on every current crates.io crate:"
+_CRATES_RECEIPT_SENTENCE = (
+    f"{_CRATES_RECEIPT_BODY} {_CRATES_NO_CREDENTIALS_SENTENCE} {_CRATES_APPLY_LEAD_IN}"
+)
+# Changing publisher-item prose means updating this pin in the same PR.
+_PYPI_CLOSED_FORM_SENTENCES = frozenset(
+    {
+        _PYPI_SINGLE_PUBLISHER_SENTENCE,
+        _PYPI_LEGACY_REMOVAL_SENTENCE,
+        _PYPI_EMPTY_ENVIRONMENT_SENTENCE,
+        _RECEIPT_COMMAND_PREFIX + _PYPI_RECEIPT_SENTENCE,
+    }
+)
+_CRATES_CLOSED_FORM_SENTENCES = frozenset(
+    {
+        _CRATES_IDENTITY_SENTENCE,
+        _CRATES_LEGACY_REMOVAL_SENTENCE,
+        _CRATES_UNSET_ENVIRONMENT_SENTENCE,
+        _RECEIPT_COMMAND_PREFIX + _CRATES_RECEIPT_BODY,
+        _CRATES_NO_CREDENTIALS_SENTENCE,
+        _CRATES_APPLY_LEAD_IN,
+    }
+)
 _CHECKLIST_ITEM_PREFIX = re.compile(r"^- \[[ x]\] \*\*[^*]+\*\*: ")
-_RECEIPT_COMMAND_PREFIX = (
-    "Before creating a tag, run `python3 scripts/ci/check-release-runbook-truth.py`, "
-)
+_CRATE_INVENTORY_LINE = re.compile(r"^[ \t]+- `[A-Za-z0-9_-]+`[ \t]*\r?\n?\Z")
 _CRATES_REGISTRY_TOKEN = "CARGO_REGISTRY_TOKEN"
 _CRATES_SECRET_TOKEN_SOURCE_MESSAGE = (
     "publish-crates CARGO_REGISTRY_TOKEN is sourced from secrets.*, not the auth step output"
@@ -429,40 +447,24 @@ def _item_sentences(item: str) -> list[str]:
     return [part.strip() for part in re.split(r"(?<=\.)\s+", text) if part.strip()]
 
 
-def _mentions_environment(text: str, environment: str = "") -> bool:
-    if "environment" in text.lower():
-        return True
-    return bool(environment) and f"`{environment}`" in text
+def _publisher_item_prose(item: str) -> str:
+    return "".join(
+        line
+        for line in item.splitlines(keepends=True)
+        if not _CRATE_INVENTORY_LINE.fullmatch(line)
+    )
 
 
-def _environment_allowlist(
-    required_sentences: tuple[tuple[str, str], ...],
-    environment: str = "",
-) -> frozenset[str]:
-    allowed: set[str] = set()
-    for sentence, _ in required_sentences:
-        if not _mentions_environment(sentence, environment):
-            continue
-        if sentence.startswith("compare its expected identity"):
-            first = sentence.split(". ", 1)[0].rstrip(".") + "."
-            allowed.add(_RECEIPT_COMMAND_PREFIX + first)
-        else:
-            allowed.add(sentence)
-    return frozenset(allowed)
-
-
-def _unpinned_environment_sentence_problems(
+def _closed_form_sentence_problems(
     item: str,
-    required_sentences: tuple[tuple[str, str], ...],
+    pinned: frozenset[str],
     *,
     label: str,
-    environment: str = "",
 ) -> list[str]:
-    allowed = _environment_allowlist(required_sentences, environment)
     return [
-        f"{label} item includes an unpinned sentence that mentions environment"
-        for sentence in _item_sentences(item)
-        if _mentions_environment(sentence, environment) and sentence not in allowed
+        f"{label} item includes a sentence outside the pinned closed-form set"
+        for sentence in _item_sentences(_publisher_item_prose(item))
+        if sentence not in pinned
     ]
 
 
@@ -472,7 +474,7 @@ def _trusted_publisher_docs_problems(
     title: str,
     label: str,
     required_sentences: tuple[tuple[str, str], ...],
-    environment: str,
+    pinned_sentences: frozenset[str],
 ) -> list[str]:
     try:
         item = _checklist_item(_visible_docs(docs), title)
@@ -485,8 +487,8 @@ def _trusted_publisher_docs_problems(
         if sentence not in normalized:
             problems.append(message)
     problems.extend(
-        _unpinned_environment_sentence_problems(
-            item, required_sentences, label=label, environment=environment
+        _closed_form_sentence_problems(
+            item, pinned_sentences, label=label
         )
     )
     return problems
@@ -497,7 +499,7 @@ def _pypi_docs_problems(docs: str) -> list[str]:
         docs,
         title=_PYPI_ITEM_TITLE,
         label="PyPI Trusted Publisher",
-        environment=_PYPI_ENVIRONMENT,
+        pinned_sentences=_PYPI_CLOSED_FORM_SENTENCES,
         required_sentences=(
             (
                 _PYPI_SINGLE_PUBLISHER_SENTENCE,
@@ -524,7 +526,7 @@ def _crates_docs_problems(docs: str) -> list[str]:
         docs,
         title=_CRATES_ITEM_TITLE,
         label="crates.io Trusted Publishing",
-        environment=_CRATES_ENVIRONMENT,
+        pinned_sentences=_CRATES_CLOSED_FORM_SENTENCES,
         required_sentences=(
             (
                 _CRATES_IDENTITY_SENTENCE,
