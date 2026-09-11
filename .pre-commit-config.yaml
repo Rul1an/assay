@@ -458,6 +458,13 @@ repos:
         pass_filenames: false
         files: ^(\.github/workflows/.*\.ya?ml|scripts/ci/(assay_runner_delegated_proof_pack\.py|check-actions-attest-lockstep\.py|test-actions-attest-lockstep\.sh)|\.pre-commit-config\.yaml)$
 
+      - id: stage-mcp-server-image-binaries
+        name: Stage mcp-server GHCR binaries contract
+        entry: python3 scripts/ci/test-stage-mcp-server-image-binaries.py
+        language: system
+        pass_filenames: false
+        files: ^(scripts/ci/(stage-mcp-server-image-binaries|test-stage-mcp-server-image-binaries)\.py|docker/assay-mcp-server/Dockerfile|\.pre-commit-config\.yaml)$
+
       - id: crosswalk-generator-contract
         name: Configuration crosswalk generator contract
         entry: bash scripts/ci/test-crosswalk-generator.sh

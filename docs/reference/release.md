@@ -86,6 +86,16 @@ This document outlines the canonical checklist for releasing new versions of Ass
 - [ ] **Public MSRV Check**: Run
   `ASSAY_PUBLIC_MSRV=1.89.0 scripts/ci/check-msrv-policy.sh`.
 - [ ] **Token Scopes**: If using a token fallback, ensure it has `publish-update` scope.
+- [ ] **GHCR environment**: Create a GitHub Environment named `ghcr` and attach it to
+  `publish-image` in `release.yml`. The job needs `packages: write`, `id-token: write`, and
+  `attestations: write`. Required reviewers on that environment are an owner choice; the workflow
+  already waits on `environment: ghcr` before it can push.
+- [ ] **GHCR package visibility**: GitHub creates user packages private. After the first image
+  exists, an owner must make `ghcr.io/rul1an/assay-mcp-server` public in the package settings.
+  That change cannot be undone. `verify-published-image` pulls the digest anonymously, so a
+  private package fails that job. The first real publication should be an rc tag (crates.io,
+  PyPI, and the MCP registry already skip `-rc` / `-beta`); do not put a digest into the install
+  docs until `verify-published-image` is green on a stable tag.
 
 ### 3. Execution
 - [ ] **Tag**: Create and push the git tag.
@@ -102,6 +112,16 @@ This document outlines the canonical checklist for releasing new versions of Ass
   - Step: `Build release proof kit` (produces `release/assay-${VERSION}-release-proof-kit.tar.gz` plus `.sha256`).
   - Step: `Check release asset preflight` (fails before publication unless the `release/` directory exactly matches the expected asset contract, every `.sha256` verifies, and `server.json` points at the generated MCPB checksum).
   - Step: `Create GitHub Release` (uploads only the preflighted files from `release/`).
+  - Job: `publish-image` (`Publish GHCR image`; needs `[release-contract, release]`; environment `ghcr`).
+    Stages the sha256-verified `x86_64` / `aarch64-unknown-linux-gnu` `assay-mcp-server` binaries,
+    copies them into `gcr.io/distroless/cc-debian13:nonroot` (no rebuild), pushes
+    `ghcr.io/rul1an/assay-mcp-server:vX.Y.Z`, and attaches GitHub attestations (provenance +
+    CycloneDX SBOM) with `push-to-registry: true` and `create-storage-record: false`. Stable tags
+    also receive `X.Y` and `latest`; rc / beta tags do not.
+  - Job: `verify-published-image` (`Verify published image`; needs `publish-image`).
+    Pulls the digest anonymously on amd64 and arm64, runs `--version` as user `65532:65532`,
+    byte-compares the image binary with the release tarball, and runs both `gh attestation verify`
+    checks.
   - Job: `publish-crates` (`Publish to crates.io`; uses `scripts/ci/publish_idempotent.sh`).
 
 ### Published binary installability
