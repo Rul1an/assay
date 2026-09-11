@@ -1,4 +1,5 @@
 pub mod ingest;
+pub mod observation;
 pub mod otel_ingest;
 pub mod precompute;
 pub mod schema;
