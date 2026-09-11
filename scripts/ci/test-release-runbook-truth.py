@@ -341,6 +341,72 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
         )
         self.assert_mutation_bites(workflow=mutated)
 
+    def test_crates_secret_token_source_bites(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}\n",
+            "          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}\n",
+        )
+        problems = contract.contract_problems(mutated, self.docs)
+        self.assertTrue(problems, "mutation survived")
+        self.assertIn(contract._CRATES_SECRET_TOKEN_SOURCE_MESSAGE, problems)
+
+    def test_pypi_appended_optional_environment_contradiction_bites(self) -> None:
+        item = contract._checklist_item(self.docs, contract._PYPI_ITEM_TITLE)
+        mutated = replace_once(
+            self.docs,
+            item,
+            item.rstrip("\n")
+            + "\n  The environment field is optional and may be left unset.\n",
+        )
+        problems = contract.contract_problems(self.workflow, mutated)
+        self.assertTrue(problems, "mutation survived")
+        self.assertTrue(
+            any("optional" in problem.lower() for problem in problems),
+            problems,
+        )
+
+    def test_crates_appended_optional_environment_contradiction_bites(self) -> None:
+        item = contract._checklist_item(self.docs, contract._CRATES_ITEM_TITLE)
+        mutated = replace_once(
+            self.docs,
+            item,
+            item.rstrip("\n")
+            + "\n  The environment field is optional and may be left unset.\n",
+        )
+        problems = contract.contract_problems(self.workflow, mutated)
+        self.assertTrue(problems, "mutation survived")
+        self.assertTrue(
+            any("optional" in problem.lower() for problem in problems),
+            problems,
+        )
+
+    def test_crates_credentials_lead_in_is_complete(self) -> None:
+        item = contract._checklist_item(self.docs, contract._CRATES_ITEM_TITLE)
+        normalized = " ".join(item.split())
+        self.assertIn(
+            "No credentials. Apply this on every current crates.io crate:",
+            normalized,
+        )
+
+    def test_crates_lead_in_fragment_bites(self) -> None:
+        item = contract._checklist_item(self.docs, contract._CRATES_ITEM_TITLE)
+        if "Apply this on every current crates.io crate:" in item:
+            mutated_item = item.replace(
+                "Apply this on every current crates.io crate:",
+                "on every current crates.io crate:",
+                1,
+            )
+        else:
+            mutated_item = item
+        mutated = replace_once(self.docs, item, mutated_item)
+        problems = contract.contract_problems(self.workflow, mutated)
+        self.assertTrue(problems, "mutation survived")
+        self.assertTrue(
+            any("Apply this" in problem for problem in problems),
+            problems,
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
