@@ -114,13 +114,13 @@ it is not an installer failure.
 <!-- release-installability-matrix:start -->
 | Component | Target | Install status | Release asset |
 | --- | --- | --- | --- |
-| `assay` | `x86_64-unknown-linux-gnu` | `installer` | `assay-v6.1.2-x86_64-unknown-linux-gnu.tar.gz` |
-| `assay` | `aarch64-unknown-linux-gnu` | `installer` | `assay-v6.1.2-aarch64-unknown-linux-gnu.tar.gz` |
-| `assay` | `x86_64-apple-darwin` | `installer` | `assay-v6.1.2-x86_64-apple-darwin.tar.gz` |
-| `assay` | `aarch64-apple-darwin` | `installer` | `assay-v6.1.2-aarch64-apple-darwin.tar.gz` |
-| `assay` | `x86_64-pc-windows-msvc` | `installer` | `assay-v6.1.2-x86_64-pc-windows-msvc.zip` |
-| `assay-mcp-server` | `x86_64-unknown-linux-gnu` | `manual_step` | `assay-mcp-server-v6.1.2-x86_64-unknown-linux-gnu.tar.gz` |
-| `assay-mcp-server` | `aarch64-unknown-linux-gnu` | `manual_step` | `assay-mcp-server-v6.1.2-aarch64-unknown-linux-gnu.tar.gz` |
+| `assay` | `x86_64-unknown-linux-gnu` | `installer` | `assay-v6.1.3-x86_64-unknown-linux-gnu.tar.gz` |
+| `assay` | `aarch64-unknown-linux-gnu` | `installer` | `assay-v6.1.3-aarch64-unknown-linux-gnu.tar.gz` |
+| `assay` | `x86_64-apple-darwin` | `installer` | `assay-v6.1.3-x86_64-apple-darwin.tar.gz` |
+| `assay` | `aarch64-apple-darwin` | `installer` | `assay-v6.1.3-aarch64-apple-darwin.tar.gz` |
+| `assay` | `x86_64-pc-windows-msvc` | `installer` | `assay-v6.1.3-x86_64-pc-windows-msvc.zip` |
+| `assay-mcp-server` | `x86_64-unknown-linux-gnu` | `manual_step` | `assay-mcp-server-v6.1.3-x86_64-unknown-linux-gnu.tar.gz` |
+| `assay-mcp-server` | `aarch64-unknown-linux-gnu` | `manual_step` | `assay-mcp-server-v6.1.3-aarch64-unknown-linux-gnu.tar.gz` |
 | `assay-mcp-server` | `x86_64-apple-darwin` | `unsupported` | `-` |
 | `assay-mcp-server` | `aarch64-apple-darwin` | `unsupported` | `-` |
 | `assay-mcp-server` | `x86_64-pc-windows-msvc` | `unsupported` | `-` |
