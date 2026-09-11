@@ -62,13 +62,14 @@ _CRATES_RECEIPT_SENTENCE = (
     "repository, workflow, environment, publisher count, observation time, and result. "
     "No credentials. Apply this on every current crates.io crate:"
 )
-# Additive contradictions of the environment contract. Closed-form ownership of
-# the whole checklist item would pin the crate inventory and receipt procedure, so
-# a crate-list edit would fail the publisher-identity check. Both halves share this
-# list so fixing one cannot reintroduce the parity overclaim.
-_FORBIDDEN_ENVIRONMENT_PHRASES = (
-    "optional",
-    "may be left unset",
+# Environment vocabulary is an allowlist of pinned item sentences, not a
+# forbidden-phrase list. Closed-form ownership of the whole item would still pin
+# the crate inventory; those lines do not mention environment, so a crate-list
+# edit stays green. Both halves share this check so fixing one cannot reintroduce
+# the parity overclaim.
+_CHECKLIST_ITEM_PREFIX = re.compile(r"^- \[[ x]\] \*\*[^*]+\*\*: ")
+_RECEIPT_COMMAND_PREFIX = (
+    "Before creating a tag, run `python3 scripts/ci/check-release-runbook-truth.py`, "
 )
 _CRATES_REGISTRY_TOKEN = "CARGO_REGISTRY_TOKEN"
 _CRATES_SECRET_TOKEN_SOURCE_MESSAGE = (
@@ -422,6 +423,44 @@ def _visible_docs(docs: str) -> str:
     return re.sub(r"<!--.*?-->", "", docs, flags=re.DOTALL)
 
 
+def _item_sentences(item: str) -> list[str]:
+    text = _CHECKLIST_ITEM_PREFIX.sub("", " ".join(item.split()), count=1)
+    return [part.strip() for part in re.split(r"(?<=\.)\s+", text) if part.strip()]
+
+
+def _mentions_environment(text: str) -> bool:
+    return "environment" in text.lower()
+
+
+def _environment_allowlist(
+    required_sentences: tuple[tuple[str, str], ...],
+) -> frozenset[str]:
+    allowed: set[str] = set()
+    for sentence, _ in required_sentences:
+        if not _mentions_environment(sentence):
+            continue
+        if sentence.startswith("compare its expected identity"):
+            first = sentence.split(". ", 1)[0].rstrip(".") + "."
+            allowed.add(_RECEIPT_COMMAND_PREFIX + first)
+        else:
+            allowed.add(sentence)
+    return frozenset(allowed)
+
+
+def _unpinned_environment_sentence_problems(
+    item: str,
+    required_sentences: tuple[tuple[str, str], ...],
+    *,
+    label: str,
+) -> list[str]:
+    allowed = _environment_allowlist(required_sentences)
+    return [
+        f"{label} item includes an unpinned sentence that mentions environment"
+        for sentence in _item_sentences(item)
+        if _mentions_environment(sentence) and sentence not in allowed
+    ]
+
+
 def _trusted_publisher_docs_problems(
     docs: str,
     *,
@@ -439,11 +478,11 @@ def _trusted_publisher_docs_problems(
     for sentence, message in required_sentences:
         if sentence not in normalized:
             problems.append(message)
-    lowered = normalized.lower()
-    if any(phrase in lowered for phrase in _FORBIDDEN_ENVIRONMENT_PHRASES):
-        problems.append(
-            f"{label} item contradicts the required environment by treating it as optional or unset"
+    problems.extend(
+        _unpinned_environment_sentence_problems(
+            item, required_sentences, label=label
         )
+    )
     return problems
 
 
