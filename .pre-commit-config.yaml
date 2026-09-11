@@ -45,6 +45,8 @@ repos:
             |crates/assay-core/tests/fixtures/mcp-era-parity-v0/schema-.+\.json
             |third_party/serde_jcs-0\.2\.0/.+
             |scripts/ci/fixtures/assay-action-pin/(action\.yml|remediation_recipe\.cmd)
+            # fuzz seeds are exact byte inputs; a newline changes what they exercise (#2931)
+            |fuzz/corpus/.+
           )$
       - id: trailing-whitespace
         exclude: |
@@ -54,6 +56,8 @@ repos:
             |crates/assay-core/tests/fixtures/mcp-era-parity-v0/schema-.+\.json
             |third_party/serde_jcs-0\.2\.0/.+
             |scripts/ci/fixtures/assay-action-pin/(action\.yml|remediation_recipe\.cmd)
+            # fuzz seeds are exact byte inputs; a newline changes what they exercise (#2931)
+            |fuzz/corpus/.+
           )$
 
   # GitGuardian secrets detection (manual/local opt-in; requires GITGUARDIAN_API_KEY)
