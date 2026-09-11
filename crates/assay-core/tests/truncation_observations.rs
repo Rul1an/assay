@@ -915,3 +915,136 @@ fn bound_digest_is_one_function() {
     assert_eq!(a, b);
     assert_ne!(a, bound_sha256(&[Some("q"), Some("null")]));
 }
+
+// --- Test 15 ---
+// Mutation: SQLite `unwrap_or_default` empty losses on unparsable `losses_json`.
+// JSONL-only assertions stay green under that mutant; the media-parity
+// comparison is what must bite.
+
+const PARITY_POINTERS: &[&str] = &["/content", "/meta", "/meta/a", "/other"];
+
+fn jsonl_field_readings(line: &str) -> anyhow::Result<Vec<TruncationReading>> {
+    let parsed = parse_observed_line(line)?;
+    Ok(PARITY_POINTERS
+        .iter()
+        .map(|pointer| read_observed(&parsed, pointer, TRUSTED))
+        .collect())
+}
+
+fn sqlite_field_readings(
+    store: &Store,
+    kind: &str,
+    key: &str,
+) -> anyhow::Result<Vec<TruncationReading>> {
+    PARITY_POINTERS
+        .iter()
+        .map(|pointer| store.read_truncation(kind, key, pointer, TRUSTED))
+        .collect()
+}
+
+fn sqlite_step_from_observed(
+    observed: &ObservedTraceEvent,
+) -> anyhow::Result<Vec<TruncationReading>> {
+    let store = Store::memory()?;
+    store.init_schema()?;
+    ensure_episode(&store, "e1")?;
+    store.insert_observed_event(observed, None, None)?;
+    sqlite_field_readings(&store, "step", "s1")
+}
+
+#[test]
+fn test_15_jsonl_sqlite_media_parity_including_malformed_losses() -> anyhow::Result<()> {
+    let loss = meta_loss("/meta/a", 100, 10, "m");
+    let cases = [
+        (
+            "clean empty losses",
+            line_step(
+                Some(json!([{
+                    "v": 1,
+                    "stage": UPGRADER_STAGE,
+                    "ceiling": INGEST_STRING_CEILING,
+                    "scope": ["/content", "/meta"],
+                    "losses": []
+                }])),
+                json!([]),
+            ),
+        ),
+        (
+            "reported loss",
+            line_step(
+                Some(json!([{
+                    "v": 1,
+                    "stage": UPGRADER_STAGE,
+                    "ceiling": INGEST_STRING_CEILING,
+                    "scope": ["/content", "/meta"],
+                    "losses": [loss]
+                }])),
+                json!([loss]),
+            ),
+        ),
+        (
+            "malformed losses",
+            line_step(
+                Some(json!([{
+                    "v": 1,
+                    "stage": UPGRADER_STAGE,
+                    "ceiling": INGEST_STRING_CEILING,
+                    "scope": ["/content", "/meta"],
+                    "losses": "not-an-array"
+                }])),
+                json!([]),
+            ),
+        ),
+    ];
+
+    for (name, line) in cases {
+        let jsonl = jsonl_field_readings(&line)?;
+        let parsed = parse_observed_line(&line)?;
+        let sqlite = sqlite_step_from_observed(&parsed)?;
+        assert_eq!(
+            jsonl, sqlite,
+            "{name}: JSONL and SQLite must agree at {PARITY_POINTERS:?}"
+        );
+    }
+
+    let malformed_losses_json = serde_json::to_string(&json!("not-an-array"))?;
+    let jsonl_malformed = jsonl_field_readings(&line_step(
+        Some(json!([{
+            "v": 1,
+            "stage": UPGRADER_STAGE,
+            "ceiling": INGEST_STRING_CEILING,
+            "scope": ["/content", "/meta"],
+            "losses": "not-an-array"
+        }])),
+        json!([]),
+    ))?;
+    assert!(
+        jsonl_malformed
+            .iter()
+            .all(|reading| *reading == TruncationReading::Unmeasured),
+        "JSONL leg alone: malformed losses are absent, so every field is Unmeasured"
+    );
+
+    let store = Store::memory()?;
+    store.init_schema()?;
+    ensure_episode(&store, "e1")?;
+    store.insert_observed_event(
+        &observed_step(vec![], clean_observation(&["/content", "/meta"], vec![])),
+        None,
+        None,
+    )?;
+    {
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE trace_observations SET losses_json = ?1
+             WHERE target_kind = 'step' AND target_key = 's1'",
+            params![malformed_losses_json],
+        )?;
+    }
+    let sqlite_malformed = sqlite_field_readings(&store, "step", "s1")?;
+    assert_eq!(
+        jsonl_malformed, sqlite_malformed,
+        "malformed losses_json on a bound row must match JSONL, not collapse to empty losses"
+    );
+    Ok(())
+}

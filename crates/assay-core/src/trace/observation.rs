@@ -7,7 +7,7 @@
 use super::schema::{TraceEvent, TruncationMeta};
 use super::truncation::compute_sha256;
 use serde::{Serialize, Serializer};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// Wire version this reader understands. Higher `v` values are treated as absent.
 pub const OBSERVATION_VERSION: u32 = 1;
@@ -145,6 +145,27 @@ fn decode_one_observation(value: &Value) -> Option<TruncationObservation> {
         return None;
     }
     Some(obs)
+}
+
+/// Rebuild the JSONL observation object from SQLite columns, then use the
+/// same decoder. Unparsable `scope_json` / `losses_json` (or any other field
+/// that would fail JSONL decode) is absent, not an empty-losses present row.
+pub(crate) fn decode_stored_observation(
+    version: i64,
+    stage: String,
+    ceiling: i64,
+    scope_json: &str,
+    losses_json: &str,
+) -> Option<TruncationObservation> {
+    let scope: Value = serde_json::from_str(scope_json).ok()?;
+    let losses: Value = serde_json::from_str(losses_json).ok()?;
+    decode_one_observation(&json!({
+        "v": version,
+        "stage": stage,
+        "ceiling": ceiling,
+        "scope": scope,
+        "losses": losses,
+    }))
 }
 
 /// SQLite target key for a tool call: JSON `[step_id, call_index]`.

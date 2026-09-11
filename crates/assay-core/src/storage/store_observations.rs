@@ -1,8 +1,8 @@
 use super::*;
 use crate::trace::observation::{
-    bound_sha256, episode_column_values, read_truncation, step_column_values,
-    tool_call_column_values, tool_call_target_key, ObservedTraceEvent, TruncationObservation,
-    TruncationReading,
+    bound_sha256, decode_stored_observation, episode_column_values, read_truncation,
+    step_column_values, tool_call_column_values, tool_call_target_key, ObservedTraceEvent,
+    TruncationObservation, TruncationReading,
 };
 use crate::trace::schema::{TraceEvent, TruncationMeta};
 use anyhow::Context;
@@ -192,16 +192,11 @@ impl Store {
             if stored_bound != bound {
                 continue;
             }
-            let scope: Vec<String> = serde_json::from_str(&scope_json).unwrap_or_default();
-            let losses: Vec<TruncationMeta> =
-                serde_json::from_str(&losses_json).unwrap_or_default();
-            observations.push(TruncationObservation {
-                v: version as u32,
-                stage,
-                ceiling: ceiling as usize,
-                scope,
-                losses,
-            });
+            if let Some(obs) =
+                decode_stored_observation(version, stage, ceiling, &scope_json, &losses_json)
+            {
+                observations.push(obs);
+            }
         }
 
         Ok(read_truncation(
