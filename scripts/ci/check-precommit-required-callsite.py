@@ -25,15 +25,15 @@ A context that resolves to no workflow is an error, not a smaller required set: 
 renamed job or a moved status producer surfaces, rather than quietly shrinking what this guard
 protects. Anything this cannot parse is an error for the same reason.
 
-A hook's scripts are the files under `scripts/` that its `entry:` names, whatever the language.
-An earlier version recognised only `.sh` and `.py`, so a guard written in `.mjs` was never in
-scope. Directories are dropped: `scripts/ci` is a substring of most of ci.yml, and would read as
-a callsite for any hook that named it. Whatever the language, the text after a `#` is what gets
-stripped. So a path in a JavaScript `//` comment or a Python docstring counts as a binding, the
-deliberate direction described below; and a `#` that is not a comment -- a JavaScript private
-field, a URL fragment -- cuts its line short, which would hide a binding later on that line. The
-one such line among the hooks' scripts is this guard's own negative control, where it is the
-point.
+A hook's scripts are the files under `scripts/` that its `entry:` names, whatever the language. An
+earlier version recognised only `.sh` and `.py`, so a guard written in `.mjs` was never in scope.
+Directories are dropped: the path of every script under `scripts/ci` contains `scripts/ci`, so a
+directory token would match any callsite of any of them and read as wired for any hook that named
+it. Whatever the language, the text after a `#` is what gets stripped. So a path in a JavaScript
+`//` comment or a Python docstring counts as a binding, the deliberate direction described below;
+and a `#` that is not a comment -- a JavaScript private field, a URL fragment -- cuts its line
+short, which would hide a binding later on that line. The one such line among the hooks' scripts
+is this guard's own negative control, where it is the point.
 
 A callsite is an uncommented line of a required workflow that contains the script's path. That
 is presence, not execution: a path in an `env:` value or an `echo` would count. The hardening
@@ -47,8 +47,11 @@ Opting out is possible and visible. A hook may carry
 indented into its block, at the level of the hook's keys. A marker belongs to the block it is
 indented into, not to the last hook seen: attributing it that way made a marker written above
 the next hook -- the usual place for a comment about that hook -- exempt the one before it. A
-marker in no block exempts nothing and is reported. The reason floor is not about prose: it is
-there so the marker cannot be added as reflex punctuation while a reviewer skims past it.
+marker in no block exempts nothing and is reported. Indentation decides, which leaves one edge:
+a marker at key level after a hook's last key, separated from the next hook only by blank or
+comment lines, still belongs to the hook above it. That is where YAML puts it, but a writer who
+meant it for the next hook is not warned. The reason floor is not about prose: it is there so
+the marker cannot be added as reflex punctuation while a reviewer skims past it.
 
 This guard is in its own scope and passes the way every other hook does, by having a callsite.
 An earlier version of this paragraph claimed the opposite -- that it built paths from a constant
@@ -452,9 +455,9 @@ def self_test() -> int:
                      entry=f"node --test --test-reporter spec {mjs}"),
            mjs_unwired, "invented-mjs-guard")
 
-    # Finding paths without an extension list also finds directories. `scripts/ci` is a
-    # substring of nearly every line in ci.yml, so a directory token that survived into the
-    # callsite search would wire every hook that names one. Only files are scripts.
+    # Finding paths without an extension list also finds directories. The path of every
+    # script under `scripts/ci` contains that directory, so a directory token that survived
+    # into the callsite search would wire every hook that names one. Only files are scripts.
     expect("a directory in an entry is not a callsite",
            synthetic(entry="bash -c 'python3 -m unittest discover -s scripts/ci && "
                            "bash scripts/ci/test-ci-gate-expectations.sh'"),
