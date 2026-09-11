@@ -1,4 +1,7 @@
 use super::*;
+use crate::trace::observation::{
+    episode_column_values, step_column_values, tool_call_column_values, tool_call_target_key,
+};
 
 impl Store {
     // --- Trace V2 Storage ---
@@ -14,7 +17,9 @@ impl Store {
         match event {
             TraceEvent::EpisodeStart(e) => Self::insert_episode(&tx, e, run_id, test_id)?,
             TraceEvent::Step(e) => Self::insert_step(&tx, e)?,
-            TraceEvent::ToolCall(e) => Self::insert_tool_call(&tx, e)?,
+            TraceEvent::ToolCall(e) => {
+                Self::insert_tool_call(&tx, e)?;
+            }
             TraceEvent::EpisodeEnd(e) => Self::update_episode_end(&tx, e)?,
         }
         tx.commit()?;
@@ -33,7 +38,9 @@ impl Store {
             match event {
                 TraceEvent::EpisodeStart(e) => Self::insert_episode(&tx, e, run_id, test_id)?,
                 TraceEvent::Step(e) => Self::insert_step(&tx, e)?,
-                TraceEvent::ToolCall(e) => Self::insert_tool_call(&tx, e)?,
+                TraceEvent::ToolCall(e) => {
+                    Self::insert_tool_call(&tx, e)?;
+                }
                 TraceEvent::EpisodeEnd(e) => Self::update_episode_end(&tx, e)?,
             }
         }
@@ -76,19 +83,13 @@ impl Store {
         load_episode_graph_for_episode_id(&conn, &episode_id)
     }
 
-    fn insert_episode(
+    pub(crate) fn insert_episode(
         tx: &rusqlite::Transaction<'_>,
         e: &EpisodeStart,
         run_id: Option<i64>,
         test_id: Option<&str>,
     ) -> anyhow::Result<()> {
-        let prompt_val = e.input.get("prompt").unwrap_or(&serde_json::Value::Null);
-        let prompt_str = if let Some(s) = prompt_val.as_str() {
-            s.to_string()
-        } else {
-            serde_json::to_string(prompt_val).unwrap_or_default()
-        };
-        let meta = serde_json::to_string(&e.meta).unwrap_or_default();
+        let (prompt_str, meta) = episode_column_values(e);
 
         let meta_test_id = e.meta.get("test_id").and_then(|v| v.as_str());
         let effective_test_id = test_id.or(meta_test_id).or(Some(&e.episode_id));
@@ -111,11 +112,12 @@ impl Store {
             ),
         )
         .context("insert episode")?;
+        Self::delete_observations(tx, "episode_start", &e.episode_id)?;
         Ok(())
     }
 
-    fn insert_step(tx: &rusqlite::Transaction<'_>, e: &StepEntry) -> anyhow::Result<()> {
-        let meta = serde_json::to_string(&e.meta).unwrap_or_default();
+    pub(crate) fn insert_step(tx: &rusqlite::Transaction<'_>, e: &StepEntry) -> anyhow::Result<()> {
+        let (_content, meta) = step_column_values(e);
         let trunc = serde_json::to_string(&e.truncations).unwrap_or_default();
 
         tx.execute(
@@ -135,20 +137,21 @@ impl Store {
             ),
         )
         .context("insert step")?;
+        Self::delete_observations(tx, "step", &e.step_id)?;
         Ok(())
     }
 
-    fn insert_tool_call(tx: &rusqlite::Transaction<'_>, e: &ToolCallEntry) -> anyhow::Result<()> {
-        let args = serde_json::to_string(&e.args).unwrap_or_default();
-        let result = e
-            .result
-            .as_ref()
-            .map(|r| serde_json::to_string(r).unwrap_or_default());
+    pub(crate) fn insert_tool_call(
+        tx: &rusqlite::Transaction<'_>,
+        e: &ToolCallEntry,
+    ) -> anyhow::Result<bool> {
+        let (args, result) = tool_call_column_values(e);
         let trunc = serde_json::to_string(&e.truncations).unwrap_or_default();
 
         let call_idx = e.call_index.unwrap_or(0);
 
-        tx.execute(
+        let n = tx
+            .execute(
             "INSERT INTO tool_calls (step_id, episode_id, tool_name, call_index, args, args_sha256, result, result_sha256, error, truncations_json)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(step_id, call_index) DO NOTHING",
@@ -165,11 +168,21 @@ impl Store {
                 trunc,
             ),
         )
-        .context("insert tool call")?;
-        Ok(())
+            .context("insert tool call")?;
+        if n > 0 {
+            Self::delete_observations(
+                tx,
+                "tool_call",
+                &tool_call_target_key(&e.step_id, call_idx),
+            )?;
+        }
+        Ok(n > 0)
     }
 
-    fn update_episode_end(tx: &rusqlite::Transaction<'_>, e: &EpisodeEnd) -> anyhow::Result<()> {
+    pub(crate) fn update_episode_end(
+        tx: &rusqlite::Transaction<'_>,
+        e: &EpisodeEnd,
+    ) -> anyhow::Result<()> {
         tx.execute(
             "UPDATE episodes SET outcome = ? WHERE id = ?",
             (e.outcome.as_deref(), &e.episode_id),
