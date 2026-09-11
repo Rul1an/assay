@@ -1,11 +1,13 @@
-//! `assay demo` write failures (#2902) and a first-run that actually validates (#2905).
+//! `assay demo` write failures (#2902), valid first-run (#2905), and Calculate evaluation (#2916).
 //!
 //! The write-error gap was `let _ = fs::write(...)` on policy.yaml, assay.yaml,
 //! and traces.jsonl, followed by an unconditional "Created demo environment".
 //! The parse gap was a shipped policy in the old `tools: Search:` shape, which
 //! `Policy` rejects (`allow`, `deny`, `require_args`, `arg_constraints`). The
-//! negative pin rewrites the demo Search query after a passing first run so a
-//! vacuous schema cannot stay green. These tests drive the built binary and
+//! Calculate evaluation gap was a trace line without a prompt matched by any
+//! test in assay.yaml, leaving its schema rule unexercised. The negative pins
+//! rewrite the Search query and Calculate operation after a passing first run so
+//! vacuous schemas cannot stay green. These tests drive the built binary and
 //! read exit code, stdout, and stderr.
 
 use assert_cmd::Command;
@@ -79,6 +81,16 @@ fn rewrite_search_query(traces: &str, query: &str) -> String {
     traces.replacen(needle, &replacement, 1)
 }
 
+fn rewrite_calculate_operation(traces: &str, operation: &str) -> String {
+    let needle = r#""operation": "add""#;
+    let replacement = format!(r#""operation": "{operation}""#);
+    assert!(
+        traces.contains(needle),
+        "traces.jsonl missing the demo Calculate operation to rewrite:\n{traces}"
+    );
+    traces.replacen(needle, &replacement, 1)
+}
+
 #[test]
 fn demo_completes_and_printed_validate_passes() {
     let dir = tempdir().unwrap();
@@ -92,6 +104,14 @@ fn demo_completes_and_printed_validate_passes() {
     assert!(
         stdout.contains("Validation Passed"),
         "assay demo should report Validation Passed\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stdout.contains("Search.query"),
+        "assay demo stdout should name checked rule Search.query\nstdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Calculate.operation"),
+        "assay demo stdout should name checked rule Calculate.operation\nstdout:\n{stdout}"
     );
 
     let (vcode, vstdout, vstderr) = run_printed_validate(&stdout);
@@ -129,6 +149,41 @@ fn printed_validate_rejects_forbidden_search_query() {
     assert!(
         combined.contains("E_ARG_SCHEMA"),
         "validate output should name E_ARG_SCHEMA\nstdout:\n{vstdout}\nstderr:\n{vstderr}"
+    );
+}
+
+#[test]
+fn printed_validate_rejects_forbidden_calculate_operation() {
+    let dir = tempdir().unwrap();
+    let out = dir.path();
+    let (code, stdout, stderr) = run_demo(out);
+
+    assert_eq!(
+        code, 0,
+        "assay demo --out should exit 0\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+
+    let traces = out.join("traces.jsonl");
+    let rewritten = rewrite_calculate_operation(&fs::read_to_string(&traces).unwrap(), "multiply");
+    fs::write(&traces, rewritten).unwrap();
+
+    let (vcode, vstdout, vstderr) = run_printed_validate(&stdout);
+    assert_ne!(
+        vcode, 0,
+        "printed next-step validate should reject a forbidden Calculate operation\nstdout:\n{vstdout}\nstderr:\n{vstderr}"
+    );
+    let combined = format!("{vstdout}{vstderr}");
+    assert!(
+        combined.contains("E_ARG_SCHEMA"),
+        "validate output should name E_ARG_SCHEMA\nstdout:\n{vstdout}\nstderr:\n{vstderr}"
+    );
+    assert!(
+        combined.contains("Calculate"),
+        "validate output should name tool Calculate\nstdout:\n{vstdout}\nstderr:\n{vstderr}"
+    );
+    assert!(
+        combined.contains("operation"),
+        "validate output should name property operation\nstdout:\n{vstdout}\nstderr:\n{vstderr}"
     );
 }
 
