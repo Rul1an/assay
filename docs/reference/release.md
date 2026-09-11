@@ -50,7 +50,14 @@ This document outlines the canonical checklist for releasing new versions of Ass
   `python3 scripts/ci/check-release-runbook-truth.py`, compare its expected identity with every
   owner-visible PyPI publisher row, and retain a redacted receipt containing only the project,
   repository, workflow, environment, publisher count, observation time, and result.
-- [ ] **Trusted Publishing**: Ensure GitHub Actions OIDC is enabled for the release tag on every current crates.io crate:
+- [ ] **Trusted Publishing**: Require, per crate, a GitHub Trusted Publisher:
+  repository `Rul1an/assay`, workflow `release.yml`, environment `crates`.
+  Remove every other publisher, including any publisher whose environment is unset.
+  An unset environment is broader authority and does not match this contract. Before creating a tag, run
+  `python3 scripts/ci/check-release-runbook-truth.py`, compare its expected identity with every
+  owner-visible crates.io publisher row, and retain a redacted receipt containing only the crate,
+  repository, workflow, environment, publisher count, observation time, and result.
+  No credentials. Apply this on every current crates.io crate:
   - `assay-common`
   - `assay-registry`
   - `assay-canonical`
@@ -106,13 +113,13 @@ it is not an installer failure.
 <!-- release-installability-matrix:start -->
 | Component | Target | Install status | Release asset |
 | --- | --- | --- | --- |
-| `assay` | `x86_64-unknown-linux-gnu` | `installer` | `assay-v6.1.2-x86_64-unknown-linux-gnu.tar.gz` |
-| `assay` | `aarch64-unknown-linux-gnu` | `installer` | `assay-v6.1.2-aarch64-unknown-linux-gnu.tar.gz` |
-| `assay` | `x86_64-apple-darwin` | `installer` | `assay-v6.1.2-x86_64-apple-darwin.tar.gz` |
-| `assay` | `aarch64-apple-darwin` | `installer` | `assay-v6.1.2-aarch64-apple-darwin.tar.gz` |
-| `assay` | `x86_64-pc-windows-msvc` | `installer` | `assay-v6.1.2-x86_64-pc-windows-msvc.zip` |
-| `assay-mcp-server` | `x86_64-unknown-linux-gnu` | `manual_step` | `assay-mcp-server-v6.1.2-x86_64-unknown-linux-gnu.tar.gz` |
-| `assay-mcp-server` | `aarch64-unknown-linux-gnu` | `manual_step` | `assay-mcp-server-v6.1.2-aarch64-unknown-linux-gnu.tar.gz` |
+| `assay` | `x86_64-unknown-linux-gnu` | `installer` | `assay-v6.1.3-x86_64-unknown-linux-gnu.tar.gz` |
+| `assay` | `aarch64-unknown-linux-gnu` | `installer` | `assay-v6.1.3-aarch64-unknown-linux-gnu.tar.gz` |
+| `assay` | `x86_64-apple-darwin` | `installer` | `assay-v6.1.3-x86_64-apple-darwin.tar.gz` |
+| `assay` | `aarch64-apple-darwin` | `installer` | `assay-v6.1.3-aarch64-apple-darwin.tar.gz` |
+| `assay` | `x86_64-pc-windows-msvc` | `installer` | `assay-v6.1.3-x86_64-pc-windows-msvc.zip` |
+| `assay-mcp-server` | `x86_64-unknown-linux-gnu` | `manual_step` | `assay-mcp-server-v6.1.3-x86_64-unknown-linux-gnu.tar.gz` |
+| `assay-mcp-server` | `aarch64-unknown-linux-gnu` | `manual_step` | `assay-mcp-server-v6.1.3-aarch64-unknown-linux-gnu.tar.gz` |
 | `assay-mcp-server` | `x86_64-apple-darwin` | `unsupported` | `-` |
 | `assay-mcp-server` | `aarch64-apple-darwin` | `unsupported` | `-` |
 | `assay-mcp-server` | `x86_64-pc-windows-msvc` | `unsupported` | `-` |

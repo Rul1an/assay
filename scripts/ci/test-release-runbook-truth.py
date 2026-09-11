@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -256,6 +257,232 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
         mutated += "\n`Rul1an/assay` remains the expected repository.\n"
         self.assertNotEqual(item, contract._checklist_item(mutated, "PyPI Trusted Publisher"))
         self.assert_mutation_bites(docs=mutated)
+
+    def test_crates_publisher_expectation_matches_release_job(self) -> None:
+        self.assertEqual(
+            contract._crates_publisher_problems(self.workflow, self.docs), []
+        )
+
+    def test_crates_empty_environment_bites(self) -> None:
+        mutated = replace_once(
+            self.docs,
+            "An unset environment is broader authority and does not match this contract.",
+            "An unset environment is broader authority and matches this contract.",
+        )
+        self.assert_mutation_bites(docs=mutated)
+
+    def test_crates_wrong_environment_bites(self) -> None:
+        mutated = replace_once(
+            self.docs,
+            "workflow `release.yml`, environment `crates`.",
+            "workflow `release.yml`, environment `pypi`.",
+        )
+        self.assert_mutation_bites(docs=mutated)
+
+    def test_crates_wrong_workflow_bites(self) -> None:
+        mutated = replace_once(
+            self.docs,
+            "repository `Rul1an/assay`, workflow `release.yml`, environment `crates`.",
+            "repository `Rul1an/assay`, workflow `publish.yml`, environment `crates`.",
+        )
+        self.assert_mutation_bites(docs=mutated)
+
+    def test_crates_legacy_row_bites(self) -> None:
+        mutated = replace_once(
+            self.docs,
+            "  Remove every other publisher, including any publisher whose environment is unset.\n",
+            "  Keep publishers whose environment is unset. Remove only unrelated publishers.\n",
+        )
+        self.assert_mutation_bites(docs=mutated)
+
+    def test_crates_workflow_environment_drift_bites(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "    environment: crates\n",
+            "    environment: release\n",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
+    def test_crates_auth_action_removed_bites(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5\n",
+            "        run: echo skipped\n",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
+    def test_crates_auth_action_disabled_step_bites(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "      - name: Authenticate with crates.io\n"
+            "        id: auth\n"
+            "        uses: rust-lang/crates-io-auth-action@",
+            "      - name: Authenticate with crates.io\n"
+            "        if: ${{ false }}\n"
+            "        id: auth\n"
+            "        uses: rust-lang/crates-io-auth-action@",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
+    def test_crates_auth_action_mutable_ref_bites(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18",
+            "rust-lang/crates-io-auth-action@main",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
+    def test_crates_auth_action_duplicated_bites(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5\n",
+            "        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5\n"
+            "      - name: Authenticate with crates.io again\n"
+            "        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5\n",
+        )
+        self.assert_mutation_bites(workflow=mutated)
+
+    def test_crates_secret_token_source_bites(self) -> None:
+        mutated = replace_once(
+            self.workflow,
+            "          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}\n",
+            "          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}\n",
+        )
+        problems = contract.contract_problems(mutated, self.docs)
+        self.assertTrue(problems, "mutation survived")
+        self.assertIn(contract._CRATES_SECRET_TOKEN_SOURCE_MESSAGE, problems)
+
+    def _append_publisher_sentence(self, title: str, sentence: str) -> str:
+        item = contract._checklist_item(self.docs, title)
+        return replace_once(
+            self.docs,
+            item,
+            item.rstrip("\n") + f"\n  {sentence}\n",
+        )
+
+    def _assert_unpinned_environment_bites(self, *, title: str, sentence: str) -> None:
+        mutated = self._append_publisher_sentence(title, sentence)
+        problems = contract.contract_problems(self.workflow, mutated)
+        self.assertTrue(problems, "mutation survived")
+        self.assertTrue(
+            any(
+                "unpinned" in problem.lower() and "environment" in problem.lower()
+                for problem in problems
+            ),
+            problems,
+        )
+
+    def test_pypi_appended_optional_environment_contradiction_bites(self) -> None:
+        self._assert_unpinned_environment_bites(
+            title=contract._PYPI_ITEM_TITLE,
+            sentence="The environment field is optional and may be left unset.",
+        )
+
+    def test_crates_appended_optional_environment_contradiction_bites(self) -> None:
+        self._assert_unpinned_environment_bites(
+            title=contract._CRATES_ITEM_TITLE,
+            sentence="The environment field is optional and may be left unset.",
+        )
+
+    def test_pypi_codex_omitted_when_unavailable_paraphrase_bites(self) -> None:
+        self._assert_unpinned_environment_bites(
+            title=contract._PYPI_ITEM_TITLE,
+            sentence="The environment value can be omitted when unavailable.",
+        )
+
+    def test_crates_codex_omitted_when_unavailable_paraphrase_bites(self) -> None:
+        self._assert_unpinned_environment_bites(
+            title=contract._CRATES_ITEM_TITLE,
+            sentence="The environment value can be omitted when unavailable.",
+        )
+
+    def test_pypi_blank_environment_accepted_paraphrase_bites(self) -> None:
+        self._assert_unpinned_environment_bites(
+            title=contract._PYPI_ITEM_TITLE,
+            sentence="Publication proceeds when the environment is not configured.",
+        )
+
+    def test_crates_blank_environment_accepted_paraphrase_bites(self) -> None:
+        self._assert_unpinned_environment_bites(
+            title=contract._CRATES_ITEM_TITLE,
+            sentence="Publication proceeds when the environment is not configured.",
+        )
+
+    def test_adding_or_removing_a_crates_inventory_line_stays_green(self) -> None:
+        added = replace_once(
+            self.docs,
+            "  - `assay-cli`\n",
+            "  - `assay-cli`\n  - `assay-newcrate`\n",
+        )
+        self.assert_clean(self.workflow, added)
+        removed = replace_once(
+            self.docs,
+            "  - `assay-sim`\n",
+            "",
+        )
+        self.assert_clean(self.workflow, removed)
+        item = contract._checklist_item(added, contract._CRATES_ITEM_TITLE)
+        self.assertNotIn("environment", item.split("assay-newcrate")[1].lower())
+
+    def test_removing_environment_allowlist_lets_paraphrases_survive(self) -> None:
+        source = Path(contract.__file__).read_text(encoding="utf-8")
+        needle = (
+            "    problems.extend(\n"
+            "        _unpinned_environment_sentence_problems(\n"
+            "            item, required_sentences, label=label\n"
+            "        )\n"
+            "    )\n"
+        )
+        self.assertEqual(source.count(needle), 1)
+        paraphrases = (
+            (contract._PYPI_ITEM_TITLE, "The environment value can be omitted when unavailable."),
+            (contract._CRATES_ITEM_TITLE, "The environment value can be omitted when unavailable."),
+            (contract._PYPI_ITEM_TITLE, "Publication proceeds when the environment is not configured."),
+            (contract._CRATES_ITEM_TITLE, "Publication proceeds when the environment is not configured."),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "check-release-runbook-truth.py"
+            path.write_text(source.replace(needle, "", 1), encoding="utf-8")
+            spec = importlib.util.spec_from_file_location(
+                "disabled_release_runbook_truth", path
+            )
+            if spec is None or spec.loader is None:
+                raise AssertionError("disabled checker is not loadable")
+            disabled = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(disabled)
+            for title, sentence in paraphrases:
+                mutated = self._append_publisher_sentence(title, sentence)
+                problems = disabled.contract_problems(self.workflow, mutated)
+                with self.assertRaisesRegex(AssertionError, "mutation survived"):
+                    self.assertTrue(problems, "mutation survived")
+                live = contract.contract_problems(self.workflow, mutated)
+                self.assertTrue(live, "live allowlist must still bite")
+
+    def test_crates_credentials_lead_in_is_complete(self) -> None:
+        item = contract._checklist_item(self.docs, contract._CRATES_ITEM_TITLE)
+        normalized = " ".join(item.split())
+        self.assertIn(
+            "No credentials. Apply this on every current crates.io crate:",
+            normalized,
+        )
+
+    def test_crates_lead_in_fragment_bites(self) -> None:
+        item = contract._checklist_item(self.docs, contract._CRATES_ITEM_TITLE)
+        if "Apply this on every current crates.io crate:" in item:
+            mutated_item = item.replace(
+                "Apply this on every current crates.io crate:",
+                "on every current crates.io crate:",
+                1,
+            )
+        else:
+            mutated_item = item
+        mutated = replace_once(self.docs, item, mutated_item)
+        problems = contract.contract_problems(self.workflow, mutated)
+        self.assertTrue(problems, "mutation survived")
+        self.assertTrue(
+            any("Apply this" in problem for problem in problems),
+            problems,
+        )
 
 
 if __name__ == "__main__":

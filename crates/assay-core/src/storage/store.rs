@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 
 #[path = "store_internal/mod.rs"]
 mod store_internal;
+#[path = "store_observations.rs"]
+mod store_observations;
 #[path = "store_trace.rs"]
 mod store_trace;
 
