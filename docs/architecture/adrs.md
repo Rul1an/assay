@@ -21,6 +21,11 @@ This directory contains Architecture Decision Records (ADRs) for the Assay proje
 | [ADR-013](./ADR-013-EU-AI-Act-Pack.md) | EU AI Act Compliance Pack | Accepted | **P2** |
 | [ADR-014](./ADR-014-GitHub-Action-v2.md) | GitHub Action v2 Design | **Implemented** | ✅ |
 | [ADR-015](./ADR-015-BYOS-Storage-Strategy.md) | BYOS Storage Strategy | **Accepted** | **P1** |
+| [ADR-016](./ADR-016-Pack-Taxonomy.md) | Pack Taxonomy (Baseline vs Pro) | Accepted | - |
+| [ADR-017](./ADR-017-Mandate-Evidence.md) | Mandate/Intent Evidence | Accepted | - |
+| [ADR-018](./ADR-018-GitHub-Action-v2.1.md) | GitHub Action v2.1 - Attestation, OIDC & Compliance | Accepted | - |
+| [ADR-019](./ADR-019-PR-Gate-2026-SOTA.md) | PR Gate 2026 SOTA — Implementation Plan v1 | Partially Implemented | - |
+| [ADR-020](./ADR-020-Dependency-Governance.md) | Dependency Governance | Accepted | - |
 | [ADR-021](./ADR-021-Local-Pack-Discovery.md) | Local Pack Discovery and Pack Resolution Order | **Accepted** | **P2** |
 | [ADR-022](./ADR-022-SOC2-Baseline-Pack.md) | SOC2 Baseline Pack (AICPA Trust Service Criteria) | **Accepted** | **P2** |
 | [ADR-023](./ADR-023-CICD-Starter-Pack.md) | CICD Starter Pack (Adoption Floor) | **Accepted** | **P1** |
@@ -34,8 +39,26 @@ This directory contains Architecture Decision Records (ADRs) for the Assay proje
 | [ADR-031](./ADR-031-Coverage-v1.1-DX-Polish.md) | Coverage v1.1 DX Polish | Accepted | **P2** |
 | [ADR-032](./ADR-032-MCP-Policy-Obligations-and-Evidence-v2.md) | MCP Policy Enforcement, Obligations, and Evidence v2 | Accepted | **P1** |
 | [ADR-033](./ADR-033-OTel-Trust-Compiler-Positioning.md) | OTel-Native Trust Compiler Positioning | Accepted | **P1** |
+| [ADR-034](./ADR-034-Assay-Runner-Harness-Contract-Seam.md) | Assay / Runner / Harness Contract Seam | Proposed | - |
+| [ADR-034](./ADR-034-Evidence-Redaction-At-Capture.md) | Evidence Redaction at Capture (runner-side secret hygiene) | Proposed | - |
+| [ADR-035](./ADR-035-sandbox-the-agent-evidence.md) | Sandbox-the-Agent Evidence Path | Proposed | - |
+| [ADR-036](./ADR-036-editor-mcp-wrap-recipe.md) | Editor MCP Wrap Recipe | Proposed | - |
+| [ADR-037](./ADR-037-runner-standalone-boundary.md) | Runner Standalone Boundary | Accepted | - |
+| [ADR-038](./ADR-038-otlp-exporter-for-observations.md) | OTLP Exporter for Assay Observations | Proposed | - |
+| [ADR-039](./ADR-039-evidence-bundle-attestation.md) | Evidence Bundle as in-toto / SCITT Attestation | Proposed | - |
+| [ADR-040](./ADR-040-inspect-claim-support-scorer.md) | Public Inspect Scorer for Claim Support | Proposed | - |
+| [ADR-041](./ADR-041-ebpf-policy-substrate-vs-bespoke.md) | eBPF and Policy, Substrate-versus-Bespoke | Proposed | - |
+| [ADR-042](./ADR-042-evidence-first-positioning.md) | Evidence-first positioning and scope freeze | Accepted | - |
+| [ADR-043](./ADR-043-evidence-chain-integrity-invariants.md) | Evidence-chain integrity invariants | Accepted | - |
+| [ADR-044](./ADR-044-attestation-subject-is-the-artifact.md) | The attestation subject is the artifact, not the semantic chain | Accepted | - |
+| [ADR-045](./ADR-045-aee-substrate-signed-run-end-seal.md) | AEE-compatible substrate-signed run-end seal primitive | Proposed | - |
+| [ADR-046](./ADR-046-reason-code-registries-stay-separate.md) | The reason-code registries stay separate, because they were never two answers to one question | Accepted | - |
+| [ADR-047](./ADR-047-session-scope-findings-are-events.md) | A session-scope finding is an event; a post-run disposition is not | Accepted | - |
+| [ADR-048](./ADR-048-claim-gate-construction-moves-readings-stay.md) | The claim gate shares one lattice and one invariant across three tables that legitimately differ — the two enums move to `assay-common`, the tables and the fold stay home, and the policy/trace path already makes absence claims it cannot base | Accepted | - |
+| [ADR-049](./ADR-049-attestation-extent.md) | Optional artifact-derived attestation extent | Accepted; implementation pending | - |
 | [ADR-050](./ADR-050-trace-truncation-observations-on-6x.md) | Truncation Observations Ride Next to the Trace Rows on 6.x | Proposed | **P1** |
-| [ADR-020](./ADR-020-Dependency-Governance.md) | Dependency Governance | Accepted | - |
+
+*Note on ADR-034 duplicate:* The number ADR-034 was assigned twice: `ADR-034-Assay-Runner-Harness-Contract-Seam.md` (Assay / Runner / Harness Contract Seam) and `ADR-034-Evidence-Redaction-At-Capture.md` (Evidence Redaction at Capture). Issue #2919 proposes resolving the collision by either having one file keep 034 while the other is renumbered, or keeping both with a documented a/b suffix alongside updating all in-repo references.
 
 ## Q2 2026 Priorities
 
