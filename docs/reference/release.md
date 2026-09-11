@@ -57,8 +57,7 @@ This document outlines the canonical checklist for releasing new versions of Ass
   `python3 scripts/ci/check-release-runbook-truth.py`, compare its expected identity with every
   owner-visible crates.io publisher row, and retain a redacted receipt containing only the crate,
   repository, workflow, environment, publisher count, observation time, and result.
-  No credentials.
-  on every current crates.io crate:
+  No credentials. Apply this on every current crates.io crate:
   - `assay-common`
   - `assay-registry`
   - `assay-canonical`

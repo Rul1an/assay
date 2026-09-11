@@ -44,6 +44,11 @@ tests:
     expected:
       type: args_valid
       policy: policy.yaml
+  - id: demo_trace_2
+    input: "calculate 1 + 2"
+    expected:
+      type: args_valid
+      policy: policy.yaml
 "#;
     fs::write(&config_path, config_content)
         .with_context(|| format!("failed to write demo file {}", config_path.display()))?;
@@ -52,7 +57,7 @@ tests:
     let trace_path = demo_dir.join("traces.jsonl");
     // We add an 'id' or 'prompt' to match the test case
     let trace_content = r#"{"id": "demo_trace_1", "tool": "Search", "args": {"query": "assay rules"}, "prompt": "find assay rules", "response": "detecting 123"}
-{"tool": "Calculate", "args": {"operation": "add", "x": 1, "y": 2}, "response": "3"}
+{"id": "demo_trace_2", "tool": "Calculate", "args": {"operation": "add", "x": 1, "y": 2}, "prompt": "calculate 1 + 2", "response": "3"}
 "#;
     fs::write(&trace_path, trace_content)
         .with_context(|| format!("failed to write demo file {}", trace_path.display()))?;
@@ -80,6 +85,9 @@ tests:
     // Print success
     if report.diagnostics.is_empty() {
         println!("✅ Validation Passed!");
+        println!("  Rules checked:");
+        println!("    - Search.query");
+        println!("    - Calculate.operation");
         println!();
         println!("Next steps:");
         println!("  1. Edit the policy: vim {}", policy_path.display());
