@@ -231,7 +231,12 @@ class SupersedeTests(unittest.TestCase):
         }
 
     def rows(self, *comments):
-        return MODULE.review_candidates({"reviews": [], "comments": list(comments)}, self.HEAD)
+        # review_candidates() turns every refusal into a BLOCKED row, so anything it raises is a
+        # crash; fail the test on it by name instead of letting unittest report an ERROR.
+        try:
+            return MODULE.review_candidates({"reviews": [], "comments": list(comments)}, self.HEAD)
+        except Exception as exc:  # noqa: BLE001 - reported as this test's failure
+            self.fail(f"review_candidates raised {type(exc).__name__}: {exc}")
 
     def test_superseded_malformed_record_is_not_a_current_blocker(self):
         bad = self.record(findings=[{"claim": 1, "status": "holds"}], no_findings=False)
