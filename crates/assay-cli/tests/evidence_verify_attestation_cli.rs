@@ -158,8 +158,23 @@ fn wrong_signature_key_is_refused_without_success_output() {
 #[test]
 fn valid_archive_with_other_container_bytes_is_refused() {
     let f = Fixture::small();
-    let mut other = f.bytes.clone();
-    other.extend_from_slice(b"trailing");
+    // The same archive in a different container: the tar is decoded and compressed again at a
+    // different gzip level, so the content verifies while the container bytes, and therefore
+    // the subject digest, differ. Appending bytes no longer works as a witness: the verifier
+    // refuses data after the gzip member on its own.
+    let mut tar = Vec::new();
+    std::io::Read::read_to_end(
+        &mut flate2::read::GzDecoder::new(f.bytes.as_slice()),
+        &mut tar,
+    )
+    .unwrap();
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    encoder.write_all(&tar).unwrap();
+    let other = encoder.finish().unwrap();
+    assert_ne!(
+        other, f.bytes,
+        "the witness must be different container bytes"
+    );
     // Prove the witness passes ordinary bundle validation before testing artifact matching.
     statement_for_bundle(&other).expect("changed container is still a valid bundle");
     fs::write(f.dir.path().join("bundle.tar.gz"), other).unwrap();

@@ -436,12 +436,22 @@ fn a_valid_bundle_with_an_unread_suffix_is_measured_whole() {
     with_suffix.extend(std::iter::repeat_n(b'Z', 10_000));
     let total = with_suffix.len() as u64;
 
-    // Exactly the real input size is accepted, including the suffix nothing parses.
-    verify_bundle_with_limits(
+    // Exactly the real input size clears the ceiling, suffix included. The bundle is then refused
+    // for the suffix itself, as data after the gzip member, which is only reachable because the
+    // ceiling admitted the whole source: a limit error here would mean the suffix was not counted.
+    let err = match verify_bundle_with_limits(
         Cursor::new(with_suffix.clone()),
         limits_with_bundle_ceiling(total),
-    )
-    .expect("a source of exactly the ceiling must be accepted, suffix included");
+    ) {
+        Ok(_) => panic!("data after the gzip member must be refused"),
+        Err(e) => e,
+    };
+    let ve = err.downcast_ref::<VerifyError>().expect("typed");
+    assert_eq!(
+        (ve.class, ve.code),
+        (ErrorClass::Integrity, ErrorCode::IntegrityGzip),
+        "a source of exactly the ceiling must clear it and be refused for its suffix"
+    );
 
     // One byte under is refused, which is only observable once the suffix is counted.
     let err = match verify_bundle_with_limits(

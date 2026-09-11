@@ -4,11 +4,13 @@ use crate::json_strict::validate_json_strict_with_depth;
 use crate::types::EvidenceEvent;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use flate2::read::GzDecoder;
+use flate2::bufread::GzDecoder;
 use sha2::{Digest, Sha256};
+use std::cell::Cell;
 use std::collections::HashSet;
-use std::io::Read;
+use std::io::{BufRead, Read};
 use std::path::Component;
+use std::rc::Rc;
 
 use super::errors::{ErrorClass, ErrorCode, VerifyError};
 use super::events;
@@ -55,6 +57,72 @@ pub(crate) fn apply_limit_class(
 
 /// Allowed files in bundle (strict allowlist).
 const ALLOWED_FILES: &[&str] = &["manifest.json", "events.ndjson"];
+
+/// The bundle source, read through `BufRead` so the verifier knows how much of it gzip consumed.
+///
+/// `flate2::bufread::GzDecoder` decodes exactly one gzip member and consumes nothing past it.
+/// Once the archive is drained, any byte beyond `consumed` is data the verifier never decoded:
+/// a second member, which a reader that decodes concatenated members would unpack, or garbage.
+/// Either way the bundle would mean more to another reader than it meant here, so it is refused.
+struct ConsumedSlice<'a> {
+    data: &'a [u8],
+    consumed: Rc<Cell<usize>>,
+}
+
+impl Read for ConsumedSlice<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let start = self.consumed.get();
+        let rest = &self.data[start..];
+        let n = rest.len().min(buf.len());
+        buf[..n].copy_from_slice(&rest[..n]);
+        self.consumed.set(start + n);
+        Ok(n)
+    }
+}
+
+impl BufRead for ConsumedSlice<'_> {
+    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+        Ok(&self.data[self.consumed.get()..])
+    }
+
+    fn consume(&mut self, amt: usize) {
+        let end = (self.consumed.get() + amt).min(self.data.len());
+        self.consumed.set(end);
+    }
+}
+
+/// Why a member's raw header is not a plain file header, or `None` when it is one.
+///
+/// Tar readers disagree on almost everything beyond a plain header: which of two PAX records
+/// wins, what a malformed record falls back to, whether a GNU header's bytes at offset 345 are a
+/// name prefix, whether a size field with a separator in it is a number. Each disagreement lets
+/// one archive verify here and unpack as other bytes, or under another name, somewhere else.
+/// Rather than reproduce one reader's answers, the verifier accepts only headers on which readers
+/// cannot differ. Every header the writer emits is one of them.
+fn plain_member_violation(header: &tar::Header) -> Option<&'static str> {
+    let bytes = header.as_bytes();
+    // `'0'` and the old-style `'\0'` both mean a regular file, and the writer emits `'\0'`. Every
+    // other type is refused rather than interpreted, extension records and links included.
+    if !matches!(bytes[156], b'0' | b'\0') {
+        return Some("A member is not a plain file");
+    }
+    // The link name, and everything from the ustar name prefix to the end of the header.
+    if bytes[157..257].iter().chain(&bytes[345..]).any(|&b| b != 0) {
+        return Some("A member header carries a link name or a name prefix");
+    }
+    // An old-style regular file whose name ends in a slash is a directory to other readers.
+    if header.path_bytes().ends_with(b"/") {
+        return Some("A member name ends in a slash");
+    }
+    // The size as POSIX writes it: eleven octal digits ended by a NUL (this writer, GNU tar) or a
+    // space (libarchive). Every reader agrees on that form; padding, base-256 and separators they
+    // do not all read alike.
+    let size = &bytes[124..136];
+    if !(size[..11].iter().all(|b| (b'0'..=b'7').contains(b)) && matches!(size[11], b'\0' | b' ')) {
+        return Some("A member size is not eleven octal digits");
+    }
+    None
+}
 
 /// Verification result with detailed information.
 #[derive(Debug, Clone)]
@@ -107,6 +175,9 @@ pub(crate) struct VerifiedBundle {
 /// 12. **Event Count**: Matches manifest.event_count
 /// 13. **Run Root**: Recomputed value matches manifest.run_root
 /// 14. **Bundle ID**: manifest.bundle_id equals manifest.run_root
+/// 15. **One Reading**: Every member is a plain file header, nothing follows the end of the
+///     archive but zero padding, and nothing follows the gzip member at all, so another tar or
+///     gzip reader cannot read the bundle as different content
 ///
 /// # Errors
 ///
@@ -166,7 +237,11 @@ fn verify_bundle_snapshot(
     with_extent: bool,
 ) -> Result<VerifiedBundle> {
     let mut extent = with_extent.then(crate::attestation::extent::Collector::default);
-    let reader = std::io::Cursor::new(source);
+    let consumed = Rc::new(Cell::new(0usize));
+    let reader = ConsumedSlice {
+        data: source,
+        consumed: Rc::clone(&consumed),
+    };
 
     let decoder = GzDecoder::new(reader);
     let limited_decoder =
@@ -190,11 +265,16 @@ fn verify_bundle_snapshot(
     let mut time_lo: Option<DateTime<Utc>> = None;
     let mut time_hi: Option<DateTime<Utc>> = None;
 
-    let entries = archive.entries().map_err(|e| {
-        let limit = classify_limit(&e);
-        let ve = apply_limit_class(VerifyError::from(e), limit, ErrorCode::IntegrityTar);
-        ve.with_context("Gzip/Tar stream")
-    })?;
+    // Raw, so the tar crate applies no PAX or GNU extension record and every member is exactly
+    // what its own header says; `plain_member_violation` then refuses the records themselves.
+    let entries = archive
+        .entries()
+        .map_err(|e| {
+            let limit = classify_limit(&e);
+            let ve = apply_limit_class(VerifyError::from(e), limit, ErrorCode::IntegrityTar);
+            ve.with_context("Gzip/Tar stream")
+        })?
+        .raw(true);
 
     for (i, entry) in entries.enumerate() {
         let entry = entry.map_err(|e| {
@@ -202,6 +282,14 @@ fn verify_bundle_snapshot(
             let ve = apply_limit_class(VerifyError::from(e), limit, ErrorCode::IntegrityTar);
             ve.with_context(format!("Entry #{}", i))
         })?;
+        if let Some(reason) = plain_member_violation(entry.header()) {
+            // Value-free: every field the reason is about is archive-controlled.
+            return Err(
+                VerifyError::new(ErrorClass::Integrity, ErrorCode::IntegrityTar, reason)
+                    .with_context(format!("Entry #{}", i))
+                    .into(),
+            );
+        }
         // Measure the path on the bytes the archive carries, before any conversion. `to_str`
         // returns None for invalid UTF-8 and the fallback measured an empty string, so a name
         // that is invalid on purpose skipped the ceiling entirely.
@@ -683,12 +771,24 @@ fn verify_bundle_snapshot(
     // trailer. The tar reader stops after the expected entries and would otherwise never read the
     // trailer, so a mutation in the compressed stream that lands in a manifest field not covered by
     // a specific check (e.g. producer metadata) could slip through. Draining forces the CRC check.
+    //
+    // What follows the end-of-archive marker is tar padding, so it must be zeros. Non-zero bytes
+    // there are content this verifier never parsed but a reader that skips zero blocks would.
     let mut tail = archive.into_inner();
     let mut drain = [0u8; 8192];
     loop {
         match tail.read(&mut drain) {
             Ok(0) => break,
-            Ok(_) => continue,
+            Ok(n) => {
+                if drain[..n].iter().any(|&b| b != 0) {
+                    return Err(VerifyError::new(
+                        ErrorClass::Integrity,
+                        ErrorCode::IntegrityTar,
+                        "Non-zero data after the end of the tar archive",
+                    )
+                    .into());
+                }
+            }
             Err(e) => {
                 let limit = classify_limit(&e);
                 let mut ve = VerifyError::from(e);
@@ -702,6 +802,17 @@ fn verify_bundle_snapshot(
                 return Err(ve.with_context("Gzip trailer").into());
             }
         }
+    }
+
+    // The drain reached the end of the one gzip member the decoder reads. Anything left in the
+    // source was never decoded here; see `ConsumedSlice`.
+    if consumed.get() != source.len() {
+        return Err(VerifyError::new(
+            ErrorClass::Integrity,
+            ErrorCode::IntegrityGzip,
+            "Data after the end of the gzip stream",
+        )
+        .into());
     }
 
     // The zero-event refusal above is what makes this pair total. Stated as an error rather than
