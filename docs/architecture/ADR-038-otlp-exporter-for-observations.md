@@ -3,7 +3,7 @@
 ## Status
 Proposed (June 2026) — decision recorded; code lands as a tracked slice.
 
-Depends on ADR-034 (contract seam).
+Depends on ADR-051 (contract seam).
 
 ## Context
 
@@ -52,4 +52,4 @@ decision; it is not satisfied until the exporter ships.
 ## References
 
 - `assay-core/src/otel/semconv.rs`, `trace/otel_ingest.rs`
-- ADR-034 (contract seam)
+- ADR-051 (contract seam)

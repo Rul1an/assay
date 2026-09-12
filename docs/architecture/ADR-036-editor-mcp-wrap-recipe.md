@@ -3,7 +3,7 @@
 ## Status
 Proposed (June 2026; remote/OAuth section finalises after the 28 July 2026 MCP spec)
 
-Depends on ADR-034 (Assay / Runner / Harness contract seam).
+Depends on ADR-051 (Assay / Runner / Harness contract seam).
 
 ## Context
 
@@ -54,4 +54,4 @@ stdio wrap is stable and is the primary path.
 
 - `docs/reference/cli/mcp-server.md`
 - `docs/guides/editor-mcp-recipe.md`
-- ADR-034 (contract seam)
+- ADR-051 (contract seam)
