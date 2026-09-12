@@ -1,12 +1,11 @@
+use super::integrity_payloads;
 use super::test_bundle::create_single_event_bundle;
 use crate::mutators::inject::InjectFile;
 use crate::mutators::Mutator;
 use crate::report::SimReport;
 use crate::suite::TimeBudget;
 use anyhow::Result as AnyhowResult;
-use assay_evidence::types::EvidenceEvent;
 use assay_evidence::{verify_bundle_with_limits, VerifyError, VerifyLimits};
-use chrono::{TimeZone, Utc};
 use flate2::read::GzEncoder;
 use flate2::Compression;
 use rand::Rng;
@@ -21,7 +20,7 @@ pub fn check_integrity_attacks(
 ) -> Result<(), IntegrityError> {
     let valid_bundle = create_single_event_bundle().map_err(IntegrityError::from)?;
 
-    // 1. BitFlip (Harder)
+    // 1. BitFlip (seeded; refusing rule depends on where the flips land)
     run_attack(report, "integrity.bitflip", limits, budget, || {
         let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
         let mut corrupted = valid_bundle.clone();
@@ -30,6 +29,11 @@ pub fn check_integrity_attacks(
             corrupted[idx] ^= 1 << rng.gen_range(0..8);
         }
         Ok(corrupted)
+    })?;
+
+    // 1b. CRC32 trailer bitflip: only the gzip drain can refuse this bundle.
+    run_attack(report, "integrity.bitflip_crc", limits, budget, || {
+        integrity_payloads::flip_gzip_crc(&valid_bundle)
     })?;
 
     // 2. Truncate
@@ -46,86 +50,24 @@ pub fn check_integrity_attacks(
         injector.mutate(&valid_bundle)
     })?;
 
-    // 4. Zip Bomb
+    // 4. Zip bomb: decoded-bytes ceiling, sized from the limits this run uses.
     run_attack(report, "security.zip_bomb", limits, budget, || {
-        create_zip_bomb(1100 * 1024 * 1024)
+        integrity_payloads::decode_bomb(&valid_bundle, limits)
     })?;
 
-    // 5. [SOTA 2026] Tar Duplicate Entry
+    // 5. Duplicate manifest.json on a writer-produced bundle.
     run_attack(report, "integrity.tar_duplicate", limits, budget, || {
-        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
-        {
-            let mut builder = tar::Builder::new(&mut encoder);
-            let manifest = serde_json::json!({
-                "schema_version": 1, "run_id": "test", "event_count": 1, "run_root": "sha256:...",
-                "files": { "events.ndjson": { "sha256": "..." } }
-            });
-            let manifest_bytes = serde_json::to_vec(&manifest)?;
-            let mut header = tar::Header::new_gnu();
-            header.set_path("manifest.json")?;
-            header.set_size(manifest_bytes.len() as u64);
-            header.set_cksum();
-            builder.append(&header, manifest_bytes.as_slice())?;
-
-            let event = create_event(0);
-            let event_bytes = serde_json::to_vec(&event)?;
-            for _ in 0..2 {
-                let mut header = tar::Header::new_gnu();
-                header.set_path("events.ndjson")?;
-                header.set_size(event_bytes.len() as u64);
-                header.set_cksum();
-                builder.append(&header, event_bytes.as_slice())?;
-            }
-            builder.finish()?;
-        }
-        Ok(encoder.finish()?)
+        integrity_payloads::duplicate_manifest(&valid_bundle)
     })?;
 
-    // 6. [SOTA 2026] NDJSON Nasties: BOM
+    // 6. NDJSON BOM on a writer-produced bundle (reaches the event parser).
     run_attack(report, "integrity.ndjson_bom", limits, budget, || {
-        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
-        {
-            let mut builder = tar::Builder::new(&mut encoder);
-            let manifest = serde_json::json!({
-                "schema_version": 1, "run_id": "test", "event_count": 1, "run_root": "sha256:...",
-                "files": { "events.ndjson": { "sha256": "..." } }
-            });
-            let manifest_bytes = serde_json::to_vec(&manifest)?;
-            let mut header = tar::Header::new_gnu();
-            header.set_path("manifest.json")?;
-            header.set_size(manifest_bytes.len() as u64);
-            header.set_cksum();
-            builder.append(&header, manifest_bytes.as_slice())?;
-
-            let mut content = vec![0xEF, 0xBB, 0xBF];
-            content.extend_from_slice(&serde_json::to_vec(&create_event(0))?);
-            let mut header = tar::Header::new_gnu();
-            header.set_path("events.ndjson")?;
-            header.set_size(content.len() as u64);
-            header.set_cksum();
-            builder.append(&header, content.as_slice())?;
-            builder.finish()?;
-        }
-        Ok(encoder.finish()?)
+        integrity_payloads::ndjson_bom(&valid_bundle)
     })?;
 
-    // 7. [SOTA 2026] NDJSON Nasties: CRLF
-    run_attack(report, "integrity.ndjson_crlf", limits, budget, || {
-        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
-        {
-            let mut builder = tar::Builder::new(&mut encoder);
-            // Append with \r\n
-            let mut content = serde_json::to_vec(&create_event(0))?;
-            content.extend_from_slice(b"\r\n");
-
-            let mut header = tar::Header::new_gnu();
-            header.set_path("events.ndjson")?;
-            header.set_size(content.len() as u64);
-            header.set_cksum();
-            builder.append(&header, content.as_slice())?;
-            builder.finish()?;
-        }
-        Ok(encoder.finish()?)
+    // 7. CRLF is tolerated: a valid bundle with CRLF events must still verify.
+    run_invariant(report, "integrity.ndjson_crlf", limits, budget, || {
+        integrity_payloads::ndjson_crlf(&valid_bundle)
     })?;
 
     // 8. limit_bundle_bytes (ADR-024): compressed size = limit + 1, streaming (no alloc)
@@ -142,12 +84,6 @@ pub fn check_integrity_attacks(
     )?;
 
     Ok(())
-}
-
-fn create_event(seq: u64) -> EvidenceEvent {
-    let mut event = EvidenceEvent::new("assay.test", "urn:test", "run", seq, serde_json::json!({}));
-    event.time = Utc.timestamp_opt(1700000000, 0).unwrap();
-    event
 }
 
 #[derive(Debug)]
@@ -185,7 +121,11 @@ where
         Ok(_) => report.add_attack(name, Err(anyhow::anyhow!("Attack Bypassed")), duration),
         Err(e) => {
             if let Some(ve) = e.downcast_ref::<VerifyError>() {
-                report.add_attack(name, Ok((ve.class(), ve.code)), duration);
+                report.add_attack(
+                    name,
+                    Ok((ve.class(), ve.code, ve.message.clone())),
+                    duration,
+                );
             } else {
                 report.add_attack(
                     name,
@@ -218,25 +158,38 @@ where
     })
 }
 
-fn create_zip_bomb(target_uncompressed: u64) -> AnyhowResult<Vec<u8>> {
-    use flate2::write::GzEncoder;
-    use flate2::Compression;
-    use std::io::Write;
-
-    let mut buf = Vec::new();
-    let mut encoder = GzEncoder::new(&mut buf, Compression::best());
-    let chunk = vec![0u8; 1024 * 1024];
-    let mut remaining = target_uncompressed;
-    while remaining > 0 {
-        let to_write = remaining.min(chunk.len() as u64);
-        encoder.write_all(&chunk[..to_write as usize])?;
-        remaining -= to_write;
+fn run_invariant<F>(
+    report: &mut SimReport,
+    name: &str,
+    limits: VerifyLimits,
+    budget: &TimeBudget,
+    mutator: F,
+) -> Result<(), IntegrityError>
+where
+    F: FnOnce() -> AnyhowResult<Vec<u8>>,
+{
+    if budget.exceeded() {
+        return Err(IntegrityError::BudgetExceeded);
     }
-    encoder.finish()?;
-    Ok(buf)
+    let data = mutator()?;
+    let start = std::time::Instant::now();
+    let res = verify_bundle_with_limits(Cursor::new(data), limits);
+    let duration = start.elapsed().as_millis() as u64;
+    match res {
+        Ok(_) => report.add_check(name, Ok(()), duration),
+        Err(e) => report.add_check(
+            name,
+            Err(anyhow::anyhow!("CRLF bundle was refused: {e}")),
+            duration,
+        ),
+    }
+    if budget.exceeded() {
+        return Err(IntegrityError::BudgetExceeded);
+    }
+    Ok(())
 }
 
-/// Run only the limit_bundle_bytes attack. Used by tests to avoid slow zip_bomb.
+/// Run only the limit_bundle_bytes attack. Used by tests to avoid the decode bomb.
 #[cfg(test)]
 fn run_limit_bundle_bytes_only(
     report: &mut SimReport,
@@ -262,11 +215,32 @@ mod tests {
     use crate::report::AttackStatus;
     use crate::suite::TimeBudget;
     use assay_evidence::VerifyLimits;
+    use std::io::Cursor;
+
+    fn verify_payload(
+        bytes: &[u8],
+        limits: VerifyLimits,
+    ) -> (AttackStatus, Option<String>, String) {
+        match verify_bundle_with_limits(Cursor::new(bytes), limits) {
+            Ok(_) => (AttackStatus::Passed, None, String::new()),
+            Err(e) => {
+                let ve = e
+                    .downcast_ref::<VerifyError>()
+                    .expect("expected a typed VerifyError");
+                (
+                    AttackStatus::Blocked,
+                    Some(format!("{:?}", ve.code)),
+                    ve.message.clone(),
+                )
+            }
+        }
+    }
 
     #[test]
     fn test_limit_bundle_bytes_blocked_with_limit_bundle_bytes() {
         // Use limit 100: gzip from 101 zeros is ~1024 bytes compressed, so LimitReader must trigger.
-        // Runs in isolation to avoid slow zip_bomb (1.1GB) in check_integrity_attacks.
+        // Runs in isolation so the decode-bomb construction in check_integrity_attacks is not
+        // part of this pin.
         let limits = VerifyLimits {
             max_bundle_bytes: 100,
             ..Default::default()
@@ -289,5 +263,74 @@ mod tests {
             "expected LimitBundleBytes, got {:?}",
             r.error_code
         );
+    }
+
+    #[test]
+    fn tar_duplicate_is_refused_as_duplicate_file() {
+        let bundle =
+            integrity_payloads::duplicate_manifest(&create_single_event_bundle().unwrap()).unwrap();
+        let (status, code, _) = verify_payload(&bundle, VerifyLimits::default());
+        assert_eq!(status, AttackStatus::Blocked);
+        assert_eq!(code.as_deref(), Some("ContractDuplicateFile"));
+    }
+
+    #[test]
+    fn ndjson_bom_names_the_bom_rule() {
+        let bundle =
+            integrity_payloads::ndjson_bom(&create_single_event_bundle().unwrap()).unwrap();
+        let (status, code, message) = verify_payload(&bundle, VerifyLimits::default());
+        assert_eq!(status, AttackStatus::Blocked);
+        assert_eq!(code.as_deref(), Some("ContractInvalidJson"));
+        assert!(
+            message.contains("BOM not allowed"),
+            "reached the event parser but not the BOM rule: {message}"
+        );
+    }
+
+    #[test]
+    fn ndjson_crlf_on_a_valid_bundle_still_verifies() {
+        let bundle =
+            integrity_payloads::ndjson_crlf(&create_single_event_bundle().unwrap()).unwrap();
+        let (status, code, message) = verify_payload(&bundle, VerifyLimits::default());
+        assert_eq!(
+            status,
+            AttackStatus::Passed,
+            "CRLF is tolerated; refused as {code:?}: {message}"
+        );
+    }
+
+    #[test]
+    fn bitflip_crc_is_refused_as_integrity_gzip() {
+        let bundle =
+            integrity_payloads::flip_gzip_crc(&create_single_event_bundle().unwrap()).unwrap();
+        let (status, code, message) = verify_payload(&bundle, VerifyLimits::default());
+        assert_eq!(status, AttackStatus::Blocked);
+        assert_eq!(code.as_deref(), Some("IntegrityGzip"));
+        assert!(
+            message.contains("Gzip trailer"),
+            "CRC flip must be refused by the trailer drain, got {message}"
+        );
+    }
+
+    #[test]
+    fn zip_bomb_is_refused_as_limit_decode_bytes() {
+        let valid = create_single_event_bundle().unwrap();
+        let mut tar = Vec::new();
+        flate2::read::GzDecoder::new(Cursor::new(&valid))
+            .read_to_end(&mut tar)
+            .unwrap();
+        let limits = VerifyLimits {
+            max_bundle_bytes: 5 * 1024 * 1024,
+            max_decode_bytes: tar.len() as u64,
+            ..Default::default()
+        };
+        let bomb = integrity_payloads::decode_bomb(&valid, limits).unwrap();
+        assert!(
+            (bomb.len() as u64) < limits.max_bundle_bytes,
+            "compressed form must clear max_bundle_bytes"
+        );
+        let (status, code, _) = verify_payload(&bomb, limits);
+        assert_eq!(status, AttackStatus::Blocked);
+        assert_eq!(code.as_deref(), Some("LimitDecodeBytes"));
     }
 }
