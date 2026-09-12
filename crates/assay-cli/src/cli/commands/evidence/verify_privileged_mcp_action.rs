@@ -16,7 +16,7 @@ use crate::evidence_verify_reason::{
 };
 use crate::exit_codes::{self, ReasonCode};
 use anyhow::{Context, Result};
-use assay_evidence::bundle::BundleReader;
+use assay_evidence::bundle::{BundleReader, VerifyLimits};
 use assay_evidence::denial_marker::{classify_denial_marker, DenialMarkerVersion};
 use assay_evidence::types::EvidenceEvent;
 use clap::{Args, ValueEnum};
@@ -303,10 +303,10 @@ pub fn verify_bundle_report_for(
 fn read_bundle_events(bundle: &Path) -> anyhow::Result<Vec<EvidenceEvent>> {
     let file = File::open(bundle)
         .with_context(|| format!("failed to open bundle {}", bundle.display()))?;
-    // Stage 1: BundleReader::open runs the full shipped bundle verification
-    // (verify_bundle_with_limits with default limits) before exposing any event.
+    // Stage 1: open_with_limits runs the shipped bundle verification before exposing
+    // any event. The retain ceiling is explicit and tighter than the 500 MiB default.
     // Context names the caller argv without replacing a typed VerifyError in the chain.
-    let reader = BundleReader::open(file)
+    let reader = BundleReader::open_with_limits(file, VerifyLimits::for_retained_events())
         .with_context(|| format!("failed to read bundle {}", bundle.display()))?;
     reader
         .events_vec()

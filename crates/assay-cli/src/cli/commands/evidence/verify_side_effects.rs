@@ -25,7 +25,7 @@ use crate::cli::commands::monitor::monitor_next::observed_peers::{
 };
 use crate::exit_codes;
 use anyhow::{Context, Result};
-use assay_evidence::bundle::BundleReader;
+use assay_evidence::bundle::{BundleReader, VerifyLimits};
 use assay_evidence::{
     coding_agent_claim_decision, coding_agent_weakest_ceiling, CodingAgentClaimCeiling,
     CodingAgentClaimDecision, CodingAgentClaimKind, CodingAgentCoverageState,
@@ -245,7 +245,7 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
     let file = File::open(&args.bundle)
         .with_context(|| format!("cannot open bundle {}", args.bundle.display()))?;
     // Integrity first: the ladder is meaningless over bytes that did not verify.
-    let events = BundleReader::open(file)
+    let events = BundleReader::open_with_limits(file, VerifyLimits::for_retained_events())
         .context("bundle failed verification")?
         .events_vec()
         .context("cannot read bundle events")?;
