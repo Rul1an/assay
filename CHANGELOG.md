@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.2.1] - 2026-09-12
+
+### Security
+- Bundle verification and the replay bundle reader walked each archive member through the tar
+  crate's effective view, which applies PAX and GNU extension records. Readers resolve those
+  records differently (which duplicate record wins, what an unparsable size falls back to,
+  whether a PAX name beats a GNU one), and neither reader looked past the end of the archive or
+  the first gzip member, so trailing content was never seen. Both now walk the archive raw and
+  accept only headers that readers cannot resolve differently: a regular file, no link name,
+  nothing from the name prefix on, no trailing slash, and an eleven-digit octal size terminated
+  by NUL or space. Padding after the archive must be zeros, and nothing may follow the gzip
+  member. The replay reader also refuses a member name it could only use by changing it, instead
+  of rendering invalid UTF-8 lossily or rewriting a backslash into a separator
+  ([GHSA-r4vq-qfrc-3xr8](https://github.com/Rul1an/assay/security/advisories/GHSA-r4vq-qfrc-3xr8)).
+  **Behaviour change:** bundles carrying extension records, non-plain headers, or data after the
+  gzip stream were accepted before and are now refused. Every bundle Assay writes uses plain
+  headers and is unaffected.
+
 ## [6.2.0] - 2026-09-11
 
 ### Added
