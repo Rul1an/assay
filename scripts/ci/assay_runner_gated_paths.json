@@ -37,6 +37,8 @@
     "scripts/ci",
     ".github/workflows/runner-spike-delegated.yml",
     ".github/workflows/runner-spike-sdk.yml",
-    ".github/actions/canonical-ebpf-build"
+    ".github/actions/canonical-ebpf-build",
+    "Cargo.lock",
+    "Cargo.toml"
   ]
 }
