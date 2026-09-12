@@ -3,7 +3,7 @@
 ## Status
 Proposed (June 2026)
 
-Depends on ADR-034 (Assay / Runner / Harness contract seam).
+Depends on ADR-051 (Assay / Runner / Harness contract seam).
 
 ## Context
 
@@ -28,7 +28,7 @@ of the agent's observed effects, with optional inline enforcement (`--enforce`,
 Frame the evidence dimensions around the three controls that matter most for an
 autonomous agent: network egress, file writes, and configuration protection.
 
-Consume the record via the contract seam (ADR-034). Promoting the evidence profile
+Consume the record via the contract seam (ADR-051). Promoting the evidence profile
 into the canonical evidence bundle consumed by `assay evidence lint` / `diff`, and a
 matching Assay-Harness recipe, gate, and report, is the next slice; until then the
 evidence profile is consumed directly.
@@ -63,4 +63,4 @@ evidence profile is consumed directly.
 
 - `crates/assay-cli/src/cli/commands/sandbox.rs`
 - `docs/guides/coding-agent-governance.md`
-- ADR-034 (contract seam)
+- ADR-051 (contract seam)
