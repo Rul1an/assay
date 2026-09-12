@@ -99,15 +99,29 @@ contract. `--pr N` talks to the live GitHub API when `GITHUB_REPOSITORY`
 and `GITHUB_TOKEN` are set. It reads the PR head, then comments, then
 the PR head again; a sha/ref change is `head_moved`. When no record names
 the live head it also runs `git` in the checkout to derive the carry, which
-is the checker's only subprocess; the refusals are `carry_objects_unavailable`,
-`carry_not_upstream_merge`, `carry_not_ancestor`, `carry_merge_conflict`,
-`carry_tree_mismatch` and `carry_touched_reviewed_file`. Responses are
+is the checker's only subprocess; the refusals are `carry_malformed_sha`,
+`carry_objects_unavailable`, `carry_not_upstream_merge`, `carry_not_ancestor`,
+`carry_merge_conflict`, `carry_tree_mismatch` and `carry_touched_reviewed_file`.
+A record's `head_sha` is text a commenter wrote, and both shas reach `git` argv,
+so `derive_carry` refuses anything that is not 40 lowercase hex before it runs
+anything — at the one place this checker spawns a subprocess, covering every
+caller. Responses are
 capped at 8 MiB, HTTP timeout is 30s, and comments stop after two
 pages (200 comments) with `comments_limit`. A comments-API failure is
 `comments_api_failure`. The pre-commit hook is
 `assay-review-record-self-test`. The supersede rule is the checker's
 `resolve_supersedes`; `scripts/review/pr_landing_readiness.py` calls
 it rather than restating it.
+
+The landing path answers through the same functions (#2958). `pr_landing_readiness.py`
+carries a record with the checker's `derive_carry`, and a carry counts only when the
+checker's `evaluate` also passes over the PR's whole comment set, because that is what
+the required gate judges: a bot carrier, an edited record, two current records or a
+refused supersede all refuse there. `verify_review_identity.py`, which `safe_merge.sh`
+runs after readiness, accepts a record the same derivation carries and validates it
+against its own head; it is not a second authorization of the carry, since readiness
+already asked the gate. Both need the commits: run them from a checkout, or from a
+`git archive` extract, where they fetch into a temporary clone of `--repo` and say so.
 
 ## Required workflow
 
