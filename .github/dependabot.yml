@@ -84,9 +84,17 @@ updates:
       # Revisit when Clippy is updated or nix stabilizes
       - dependency-name: "nix"
         update-types: ["version-update:semver-major"]
-      # assay-ebpf pins aya-ebpf and aya-log-ebpf to the same git tag; bump both together manually
+      # The aya stack moves as one unit or not at all (#2972). assay-ebpf pins aya-ebpf and
+      # aya-log-ebpf to the git tag aya-v0.13.0, the workspace pins aya and aya-log to the
+      # matching released versions, and `object` is exact-pinned to the one aya resolves so a
+      # second object never enters the tree (Cargo.toml:114). Dependabot can only ever offer half
+      # the change: it opened aya 0.14.0, aya-log 0.3 and object =0.40.0 as three separate PRs,
+      # and object =0.40.0 satisfies neither aya version, since aya 0.14 requires object ^0.39.
       - dependency-name: "aya-ebpf"
       - dependency-name: "aya-log-ebpf"
+      - dependency-name: "aya"
+      - dependency-name: "aya-log"
+      - dependency-name: "object"
       # rusqlite 0.38+ removed FromSql/ToSql impl for u64; requires code migration
       # Manual upgrade path: change row.get<_, Option<u64>>() to row.get<_, Option<i64>>().map(|v| v as u64)
       - dependency-name: "rusqlite"
