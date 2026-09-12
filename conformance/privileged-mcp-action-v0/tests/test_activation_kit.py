@@ -1922,6 +1922,37 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         self.assertNotEqual(report["suite"], report["profile"])
         validate_run_record.require_run_record_binds_capture(report, document, digest, self.expected_from(document))
 
+    def test_capture_and_run_record_admit_authorship_and_bind_it(self) -> None:
+        capture_path = self.valid_capture("cross-bind-authorship")
+        capture, digest = capture_format.load_capture_with_digest(capture_path)
+        capture["implementation"]["authorship"] = {
+            "kind": "agent-assisted",
+            "model": "Grok Bot",
+            "prompt_strategy": "spec-then-conformance",
+        }
+        capture_format.validate_capture(capture)
+        report = self.bound_report(capture, digest)
+        validate_run_record.validate_run_record(report)
+        self.assertEqual(
+            report["implementation"]["authorship"],
+            capture["implementation"]["authorship"],
+        )
+        validate_run_record.require_run_record_binds_capture(
+            report, capture, digest, self.expected_from(capture)
+        )
+
+    def test_capture_and_run_record_reject_invalid_authorship(self) -> None:
+        capture_path = self.valid_capture("cross-bind-invalid-auth")
+        capture, digest = capture_format.load_capture_with_digest(capture_path)
+        capture["implementation"]["authorship"] = {"kind": "agent-assisted"}
+        with self.assertRaises(capture_format.CaptureError):
+            capture_format.validate_capture(capture)
+
+        report = self.bound_report(json.loads(capture_path.read_text()), digest)
+        report["implementation"]["authorship"] = {"kind": "unknown"}
+        with self.assertRaises(ValueError):
+            validate_run_record.validate_run_record(report)
+
     def test_unswapped_scored_report_binds_capture(self) -> None:
         """No-op control: a report scored from the capture must bind it."""
         capture_path = self.valid_capture("cross-bind-noop")
@@ -2701,6 +2732,7 @@ class CandidateCaptureTests(CandidateHarness, unittest.TestCase):
         allowed = (
             capture_format.TOP_LEVEL_KEYS
             | capture_format.IMPLEMENTATION_KEYS
+            | capture_format.IMPLEMENTATION_OPTIONAL_KEYS
             | capture_format.OBSERVED_KEYS
             | capture_format.ERROR_KEYS
             | {"bundle_integrity", "verdict", "claims", "status", "source_class"}
