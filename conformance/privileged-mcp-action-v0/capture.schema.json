@@ -137,8 +137,73 @@
             "from_spec_then_conformance",
             "other_disclosed"
           ]
+        },
+        "authorship": {
+          "$ref": "#/$defs/authorship"
         }
       }
+    },
+    "authorship": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "human"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "model",
+            "prompt_strategy"
+          ],
+          "properties": {
+            "kind": {
+              "const": "agent-assisted"
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Exact opaque disclosure string; no model or version normalization."
+            },
+            "prompt_strategy": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "model",
+            "prompt_strategy"
+          ],
+          "properties": {
+            "kind": {
+              "const": "agent-generated"
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Exact opaque disclosure string; no model or version normalization."
+            },
+            "prompt_strategy": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
     },
     "observed": {
       "type": "object",

@@ -93,6 +93,9 @@
           "type": "string",
           "pattern": "^[^:@\\s]+(?:/[^:@\\s]+)*@sha256:[0-9a-f]{64}$",
           "description": "Optional exact name@sha256:<64 hex> declared by the capture. A digest addresses bytes; it does not prove which image ran."
+        },
+        "authorship": {
+          "$ref": "#/$defs/authorship"
         }
       },
       "dependentRequired": {
@@ -457,6 +460,68 @@
     "sha256": {
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "authorship": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "human"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "model",
+            "prompt_strategy"
+          ],
+          "properties": {
+            "kind": {
+              "const": "agent-assisted"
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Exact opaque disclosure string; no model or version normalization."
+            },
+            "prompt_strategy": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "model",
+            "prompt_strategy"
+          ],
+          "properties": {
+            "kind": {
+              "const": "agent-generated"
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Exact opaque disclosure string; no model or version normalization."
+            },
+            "prompt_strategy": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
     }
   }
 }

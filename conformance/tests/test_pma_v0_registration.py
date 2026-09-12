@@ -85,6 +85,9 @@ class CheckedInRow(unittest.TestCase):
         self.assertEqual(auth["kind"], "agent-assisted")
         self.assertEqual(auth["model"], MODEL)
         self.assertEqual(implementations.authorship_trailer(auth), "Assisted-By: Grok Bot")
+        self.assertEqual(implementations.project_capture_authorship(auth), auth)
+        self.assertEqual(implementations.project_run_authorship(auth), auth)
+        self.assertEqual(implementations.project_public_authorship(auth), auth)
         strategy = auth["prompt_strategy"]
         self.assertIn(FREEZE_COMMIT, strategy)
         self.assertIn("other_disclosed", strategy)
@@ -140,6 +143,33 @@ class RegistrationConsumerProjectsAuthorship(unittest.TestCase):
         with mock.patch.object(implementations, "authorship_trailer", wrong):
             with self.assertRaises(AssertionError):
                 self._run_checked_in_row()
+
+
+class LegacyRunFixtureContract(unittest.TestCase):
+    """Behavioral guard: legacy conformance_run.v1 fixture must stay authorship-unrecorded."""
+
+    LEGACY_FIXTURE_PATH = (
+        REPO
+        / "conformance/public-runs/9275ac65b1f2dde89299fcc811c733096b3b5683cb5ed15a8f32560d4580ae27"
+    )
+
+    def test_legacy_run_fixture_is_unrecorded(self) -> None:
+        fixture = json.loads(self.LEGACY_FIXTURE_PATH.read_text(encoding="utf-8"))
+        impl = fixture.get("implementation", {})
+        self.assertNotIn(
+            "authorship",
+            impl,
+            "checked-in legacy run fixture must not contain authorship in implementation",
+        )
+        legacy_auth = impl.get("authorship")
+        self.assertIsNone(
+            implementations.project_run_authorship(legacy_auth),
+            "project_run_authorship must return None for legacy fixture",
+        )
+        self.assertIsNone(
+            implementations.project_public_authorship(legacy_auth),
+            "project_public_authorship must return None for legacy fixture",
+        )
 
 
 class RequiredCi(unittest.TestCase):
