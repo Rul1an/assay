@@ -16,7 +16,7 @@ and one `assay.tool.decision` record under `.assay/quickstart/`.
 Source-build alternative (requires Rust):
 
 ```bash
-cargo install assay-cli --version 6.2.0 --locked
+cargo install assay-cli --version 6.2.1 --locked
 ```
 
 ## Run it
@@ -25,7 +25,7 @@ cargo install assay-cli --version 6.2.0 --locked
 python3 examples/mcp-quickstart/run.py
 ```
 
-For v6.2.0, run this from a source checkout or an extracted published CLI archive.
+For v6.2.1, run this from a source checkout or an extracted published CLI archive.
 The installer is binary-only and does not carry this bounded quickstart.
 The installer does not consume the published checksum or provenance sidecars.
 
