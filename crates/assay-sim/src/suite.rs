@@ -34,13 +34,17 @@ pub struct TimeBudget {
     limit: Duration,
 }
 
-/// Tier-specific default limits (ADR-024: Quick 5MB to keep suite fast).
+/// Tier-specific default limits (ADR-024: Quick stays small so the suite fits its budget).
 /// Single source of truth for tier defaults; used by CLI and suite.
 /// Input is normalized (trim + lowercase) for case-insensitive matching.
 pub fn tier_default_limits(tier: &str) -> VerifyLimits {
     let mut defaults = VerifyLimits::default();
     if tier.trim().to_lowercase() == "quick" {
         defaults.max_bundle_bytes = 5 * 1024 * 1024; // 5 MB
+                                                     // The default decode ceiling is 1 GiB. A bomb sized from that value is refused as
+                                                     // LimitDecodeBytes, but debug verify of 1 GiB of padding was measured at ~70s, which
+                                                     // exceeds the 60s Quick budget. 32 MiB still exercises the decode axis and fits.
+        defaults.max_decode_bytes = 32 * 1024 * 1024;
     }
     defaults
 }
@@ -54,8 +58,8 @@ impl TimeBudget {
     }
 
     /// Default suite budget: 60 seconds.
-    /// Note: Raised from 30s because zip bomb attack (1.1GB decompression)
-    /// can take 30+ seconds on slower CI runners (macOS).
+    /// Note: Raised from 30s because a decode bomb that actually reaches LimitDecodeBytes
+    /// has to expand past the Quick decode ceiling, and slower CI runners need headroom.
     pub fn default_suite() -> Self {
         Self::new(Duration::from_secs(60))
     }
@@ -281,6 +285,17 @@ fn run_chaos_phase(report: &mut SimReport, seed: u64, budget: &TimeBudget) {
 #[cfg(test)]
 mod not_attempted_tests {
     use super::*;
+
+    #[test]
+    fn quick_decode_ceiling_fits_the_suite_budget() {
+        let limits = tier_default_limits("quick");
+        assert_eq!(limits.max_bundle_bytes, 5 * 1024 * 1024);
+        assert_eq!(
+            limits.max_decode_bytes,
+            32 * 1024 * 1024,
+            "Quick's decode ceiling must stay inside the 60s budget; 1 GiB was measured at ~70s debug verify"
+        );
+    }
 
     /// The tiers that skip the chaos phase must say so, and the tier that runs it must not.
     ///
