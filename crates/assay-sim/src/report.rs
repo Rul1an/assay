@@ -83,19 +83,19 @@ impl SimReport {
     pub fn add_attack(
         &mut self,
         name: &str,
-        result: Result<(ErrorClass, ErrorCode), anyhow::Error>,
+        result: Result<(ErrorClass, ErrorCode, String), anyhow::Error>,
         duration_ms: u64,
     ) {
         self.summary.total += 1;
         let res = match result {
-            Ok((class, code)) => {
+            Ok((class, code, message)) => {
                 self.summary.blocked += 1;
                 AttackResult {
                     name: name.to_string(),
                     status: AttackStatus::Blocked,
                     error_class: Some(format!("{:?}", class)),
                     error_code: Some(format!("{:?}", code)),
-                    message: None,
+                    message: Some(message),
                     duration_ms,
                 }
             }
