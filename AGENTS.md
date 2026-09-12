@@ -99,7 +99,9 @@ revalidates the newest still-valid `READY` record on an earlier head of the same
 no fresh carry record. The checker reads no condition out of a record's text, so a record that claims
 a carry gets nothing for saying so, and every rule that record had to satisfy on its own head it
 still has to satisfy: a `BLOCKED`, edited, bot-carried, or self-reviewed record does not carry, and a
-record naming the live head is judged exactly as it was before.
+record naming the live head is judged exactly as it was before. The landing path asks the same
+functions, so what the gate carries is what merges: `scripts/review/safe_merge.sh` refuses a head the
+required checker would refuse, and lands a derived carry without a fresh record.
 
 Where the derivation refuses, the review does not carry and the new head needs its own review record.
 Rewritten history (rebase, squash) does not carry a review even when the tree is identical:
