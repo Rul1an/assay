@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from implementations import (  # noqa: E402
     ID_RE,
     ImplementationRegistryError,
+    project_run_authorship,
     validate_image_reference,
 )
 from strict_json import MAX_JSON_DEPTH, load_strict_object  # noqa: E402
@@ -70,6 +71,7 @@ IMPLEMENTATION_REQUIRED_KEYS = {
     "reproduction_mode",
 }
 IMPLEMENTATION_BINDING_KEYS = {"id", "image"}
+IMPLEMENTATION_OPTIONAL_KEYS = {"authorship"}
 TOP_LEVEL_KEYS = {
     "schema",
     "profile",
@@ -106,9 +108,11 @@ def implementation_record(declared: dict[str, Any]) -> dict[str, Any]:
         "commit": declared["commit"],
         "reproduction_mode": declared["reproduction_mode"],
     }
-    if declared["id"] is not None:
+    if declared.get("id") is not None:
         record["id"] = declared["id"]
         record["image"] = declared["image"]
+    if "authorship" in declared and declared["authorship"] is not None:
+        record["authorship"] = project_run_authorship(declared["authorship"])
     return record
 
 
@@ -277,9 +281,14 @@ def validate_run_record(report: dict[str, Any]) -> None:
 
     implementation = report["implementation"]
     require(isinstance(implementation, dict), "implementation must be an object")
+    allowed_keys = (
+        IMPLEMENTATION_REQUIRED_KEYS
+        | IMPLEMENTATION_BINDING_KEYS
+        | IMPLEMENTATION_OPTIONAL_KEYS
+    )
     require(
         set(implementation) >= IMPLEMENTATION_REQUIRED_KEYS
-        and set(implementation) <= IMPLEMENTATION_REQUIRED_KEYS | IMPLEMENTATION_BINDING_KEYS,
+        and set(implementation) <= allowed_keys,
         "implementation has missing or surplus fields",
     )
     # `id` and `image` are optional and travel together, so a record cannot
@@ -299,6 +308,11 @@ def validate_run_record(report: dict[str, Any]) -> None:
             validate_image_reference(implementation["image"])
         except ImplementationRegistryError as error:
             raise ValueError("implementation image is invalid: %s" % error) from error
+    if "authorship" in implementation:
+        try:
+            project_run_authorship(implementation["authorship"])
+        except ImplementationRegistryError as error:
+            raise ValueError(f"implementation authorship is invalid: {error}") from error
     require(
         isinstance(implementation["name"], str) and bool(implementation["name"]),
         "implementation name is missing",

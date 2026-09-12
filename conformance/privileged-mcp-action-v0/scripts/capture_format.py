@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from implementations import (  # noqa: E402
     ID_RE,
     ImplementationRegistryError,
+    project_capture_authorship,
     validate_image_reference,
 )
 
@@ -98,6 +99,7 @@ IMPLEMENTATION_KEYS = {
     "commit",
     "reproduction_mode",
 }
+IMPLEMENTATION_OPTIONAL_KEYS = {"authorship"}
 OBSERVED_KEYS = {
     "case_id",
     "input_sha256",
@@ -214,8 +216,10 @@ def expected_case_ids() -> list[str]:
 
 def validate_implementation(implementation: Any) -> None:
     require(isinstance(implementation, dict), "capture implementation must be an object")
+    allowed_keys = IMPLEMENTATION_KEYS | IMPLEMENTATION_OPTIONAL_KEYS
     require(
-        set(implementation) == IMPLEMENTATION_KEYS,
+        set(implementation) >= IMPLEMENTATION_KEYS
+        and set(implementation) <= allowed_keys,
         "capture implementation has missing or surplus fields",
     )
     require(
@@ -249,6 +253,11 @@ def validate_implementation(implementation: Any) -> None:
         (identifier is None) == (image is None),
         "capture implementation id and image must both be present or both be null",
     )
+    if "authorship" in implementation:
+        try:
+            project_capture_authorship(implementation["authorship"])
+        except ImplementationRegistryError as error:
+            raise CaptureError(f"capture implementation authorship is invalid: {error}") from error
     if identifier is None:
         return
     require(
