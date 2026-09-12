@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import pathlib
+import tempfile
 import unittest
 import io
 import subprocess
@@ -12,6 +13,24 @@ MODULE_PATH = pathlib.Path(__file__).with_name("pr_landing_readiness.py")
 SPEC = importlib.util.spec_from_file_location("pr_landing_readiness", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+
+
+class EveryTestInThisFileActuallyRuns(unittest.TestCase):
+    """`unittest.main()` collects what is defined when it runs, so it has to be last.
+
+    It sat mid-file while the #2958 classes were appended below it, and the invocation the
+    README documents (`python3 scripts/review/test_pr_landing_readiness.py`) then ran 43 of
+    60 tests and still printed OK. This class is first on purpose: a guard written below the
+    entrypoint disappears along with what it was meant to report.
+    """
+
+    def test_nothing_is_defined_after_the_entrypoint(self):
+        lines = pathlib.Path(__file__).read_text().splitlines()
+        entry = [n for n, line in enumerate(lines) if line.startswith("if __name__")]
+        self.assertEqual(len(entry), 1, "one entrypoint")
+        after = [line for line in lines[entry[0]:] if line.startswith(("class ", "def "))]
+        self.assertEqual(after, [], "these are invisible to a direct run")
+
 
 
 class VerdictTests(unittest.TestCase):
@@ -88,6 +107,7 @@ class CandidateBindingTests(unittest.TestCase):
             "bound_sha": current,
             "current_head": True,
             "source": "machine-comment",
+            "carry": None,
         }])
 
     def test_reviewer_identity_cannot_inject_human_read_output(self):
@@ -519,6 +539,310 @@ class UnprotectedPolicyTests(unittest.TestCase):
         report, _ = self.run_report(checks=[])
         self.assertFalse(report["landing_candidate"])
 
+
+
+def _git(root, *args, check=True):
+    import os
+    # `-C <root>` names the repository, and GIT_DIR and friends override it. The pre-commit hook
+    # exports them, so an inherited one would run this fixture against the real checkout.
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                        "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE")}
+    env.update({"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+                "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"})
+    done = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, env=env)
+    if check and done.returncode != 0:
+        raise AssertionError(f"git {args}: {done.stderr}")
+    return done.stdout.strip()
+
+
+def _carry_fixture(root):
+    """A reviewed head plus the advances the carry rules have to tell apart."""
+    rows = "".join(f"line {n}\n" for n in range(1, 21))
+    (root / "shared.txt").write_text(rows)
+    _git(root, "-c", "init.defaultBranch=main", "init", "-q")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "base")
+    base = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", "-b", "work")
+    (root / "feature.txt").write_text("feature\n")
+    (root / "shared.txt").write_text(rows.replace("line 1\n", "line 1 from the branch\n"))
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "reviewed work")
+    reviewed = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", "-b", "up-clean", base)
+    (root / "other.txt").write_text("other\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "upstream adds an untouched file")
+    _git(root, "checkout", "-q", "-b", "up-overlap", base)
+    (root / "shared.txt").write_text(rows.replace("line 20\n", "line 20 from main\n"))
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "upstream edits a reviewed file")
+    heads = {"reviewed": reviewed}
+    for name, branch in (("clean", "up-clean"), ("overlap", "up-overlap")):
+        _git(root, "checkout", "-q", "-b", f"live-{name}", "work")
+        _git(root, "merge", "-q", "--no-ff", "-m", "Merge main into work", branch)
+        heads[name] = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", "-b", "live-push", "work")
+    (root / "feature.txt").write_text("feature again\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "one more push")
+    heads["push"] = _git(root, "rev-parse", "HEAD")
+    return heads
+
+
+def _record_pr(bound):
+    record = {
+        "schema": "assay.review-record.v0", "head_sha": bound,
+        "builder": {"agent": "ruley", "instance": "writer"},
+        "reviewer": {"agent": "claude", "instance": "reviewer", "github_login": "Rul1an"},
+        "review_completed": True, "verdict": "READY", "findings": [], "no_findings": True,
+        "independence": {"did_not_build": True, "did_not_author_governing_spec": True},
+    }
+    body = "<!-- assay-review-record -->\n```json\n" + json.dumps(record) + "\n```"
+    return {"reviews": [], "headRefName": "ruley/2958-landing-derived-carry",
+            "comments": [{"author": {"login": "Rul1an"}, "body": body}]}
+
+
+class DerivedCarryBindsTheLandingGate(unittest.TestCase):
+    """#2958: the landing gate answers through the CI gate's own derivation, not its own rule."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.root = pathlib.Path(cls._tmp.name)
+        cls.heads = _carry_fixture(cls.root)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def _rows(self, head):
+        rows = MODULE.review_candidates(_record_pr(self.heads["reviewed"]), head, git_root=self.root)
+        self.assertEqual(len(rows), 1, f"the record produced no candidate row: {rows}")
+        return rows
+
+    def test_an_upstream_advance_carries_and_says_so(self):
+        row = self._rows(self.heads["clean"])[0]
+        self.assertTrue(row["current_head"])
+        self.assertEqual(row["source"], "machine-comment-carry")
+        self.assertIn("re-derived-by-checker", row["carry"])
+
+    def test_an_advance_touching_a_reviewed_file_does_not_carry(self):
+        row = self._rows(self.heads["overlap"])[0]
+        self.assertFalse(row["current_head"])
+        self.assertEqual(row["source"], "machine-comment")
+        self.assertIsNotNone(row["carry"], "no derivation was attempted")
+        self.assertIn("carry_touched_reviewed_file", row["carry"])
+
+    def test_a_further_push_is_not_an_upstream_merge(self):
+        row = self._rows(self.heads["push"])[0]
+        self.assertFalse(row["current_head"])
+        self.assertIsNotNone(row["carry"], "no derivation was attempted")
+        self.assertIn("carry_not_upstream_merge", row["carry"])
+
+    def test_a_head_sha_matching_nothing_is_refused(self):
+        rows = MODULE.review_candidates(_record_pr("f" * 40), self.heads["clean"], git_root=self.root)
+        self.assertFalse(rows[0]["current_head"])
+        self.assertIsNotNone(rows[0]["carry"], "no derivation was attempted")
+        self.assertIn("carry_objects_unavailable", rows[0]["carry"])
+
+    def test_both_gates_answer_the_same_on_the_same_head(self):
+        import assay_review_record_check as checker
+        for name, expected in (("clean", True), ("overlap", False), ("push", False)):
+            with self.subTest(head=name):
+                head = self.heads[name]
+                pr = _record_pr(self.heads["reviewed"])
+                landing = any(r["current_head"] and r["verdict"] == "READY"
+                              for r in MODULE.review_candidates(pr, head, git_root=self.root))
+                try:
+                    checker.evaluate(head, pr["headRefName"],
+                                     [{"body": c["body"], "user": {"login": "Rul1an", "type": "User"},
+                                       "created_at": "2026-09-12T00:00:00Z",
+                                       "updated_at": "2026-09-12T00:00:00Z", "id": 1}
+                                      for c in pr["comments"]], git_root=str(self.root))
+                    ci = True
+                except MODULE.GateError:
+                    ci = False
+                self.assertEqual(landing, ci, f"gates disagree on {name}")
+                self.assertEqual(landing, expected)
+
+
+class CarryWithoutACheckoutTests(unittest.TestCase):
+    """The landing recipe allows a `git archive` extract, which has no `.git` to derive in."""
+
+    def test_no_checkout_and_no_repo_refuses_rather_than_guessing(self):
+        with tempfile.TemporaryDirectory() as bare:
+            carried, note = MODULE.carried_to_head("a" * 40, "b" * 40, pathlib.Path(bare), {})
+        self.assertFalse(carried)
+        self.assertIn("carry_objects_unavailable", note)
+
+    def test_no_checkout_with_a_repo_derives_in_a_temporary_clone(self):
+        with tempfile.TemporaryDirectory() as bare:
+            cache = {}
+            root, note = MODULE._objects_root(pathlib.Path(bare), "Rul1an/assay", cache)
+            self.assertNotEqual(root, bare, "an extract is not a repository to derive in")
+            self.assertIn("temporary clone", note)
+            self.assertEqual(
+                MODULE.Git(root).run("remote", "get-url", "origin")[1],
+                "https://github.com/Rul1an/assay.git")
+
+    def test_a_real_checkout_is_used_as_is(self):
+        with tempfile.TemporaryDirectory() as real:
+            root = pathlib.Path(real)
+            _git(root, "-c", "init.defaultBranch=main", "init", "-q")
+            chosen, note = MODULE._objects_root(root, "Rul1an/assay", {})
+        self.assertEqual(chosen, str(root))
+        self.assertEqual(note, "")
+
+
+class GateSetJudgementTests(unittest.TestCase):
+    """#2958 F2: the derivation carries one record; the gate judges the whole comment set."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.root = pathlib.Path(cls._tmp.name)
+        cls.heads = _carry_fixture(cls.root)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def _rows(self, gate, head=None):
+        return MODULE.review_candidates(
+            _record_pr(self.heads["reviewed"]), head or self.heads["clean"],
+            git_root=self.root, gate=gate)
+
+    def test_a_refusing_gate_stops_a_derivable_carry(self):
+        for reason in ("bot_carrier: Bot", "edited_current: updated_at != created_at",
+                       "ambiguous_current: 2", "supersede_refused: 7 is not older than 8"):
+            with self.subTest(reason=reason):
+                row = self._rows(lambda reason=reason: (False, reason))[0]
+                self.assertFalse(row["current_head"], "the set refuses, so nothing carries")
+                self.assertIn(reason, row["carry"])
+
+    def test_a_passing_gate_leaves_the_derivation_in_charge(self):
+        row = self._rows(lambda: (True, "review-record-check would pass"))[0]
+        self.assertTrue(row["current_head"])
+        self.assertEqual(row["source"], "machine-comment-carry")
+
+    def test_no_gate_answer_keeps_the_derivation_alone(self):
+        row = self._rows(None)[0]
+        self.assertTrue(row["current_head"])
+
+    def test_the_gate_is_asked_only_when_there_is_a_carry_to_judge(self):
+        """The thunk costs an API call and can fail; nothing else may depend on it.
+
+        A record on the live head needs no carry, and a derivation that already refused cannot
+        be rescued by the set passing - so in both cases the answer is not read, and an outage
+        reaching that endpoint must not decide a landing check it was never going to decide.
+        """
+        def gate():
+            raise AssertionError("the gate was consulted without a carry to judge")
+
+        on_head = self._rows(gate, head=self.heads["reviewed"])[0]
+        self.assertTrue(on_head["current_head"])
+        self.assertEqual(on_head["source"], "machine-comment")
+
+        refused = self._rows(gate, head=self.heads["overlap"])[0]
+        self.assertFalse(refused["current_head"])
+        self.assertIn("carry_touched_reviewed_file", refused["carry"])
+
+
+class GateFetchMatchesTheCheckerCeiling(unittest.TestCase):
+    """The CI gate reads at most two pages and refuses past them; `--paginate` has no ceiling."""
+
+    def _answer(self, count):
+        page = [{"body": "x", "user": {"login": "Rul1an", "type": "User"},
+                 "created_at": "2026-09-12T00:00:00Z", "updated_at": "2026-09-12T00:00:00Z",
+                 "id": n} for n in range(count)]
+        with patch.object(MODULE, "run_json", return_value=[page]):
+            return MODULE.gate_answer("Rul1an/assay", "30", "b" * 40, "ruley/x", pathlib.Path("."), {})
+
+    def test_a_comment_set_the_checker_refuses_to_read_is_refused_here_too(self):
+        passes, why = self._answer(MODULE.COMMENT_PAGE_SIZE * MODULE.COMMENT_PAGE_MAX)
+        self.assertFalse(passes)
+        self.assertIn("comments_limit", why)
+
+    def test_one_comment_below_the_ceiling_is_still_judged_on_its_content(self):
+        passes, why = self._answer(MODULE.COMMENT_PAGE_SIZE * MODULE.COMMENT_PAGE_MAX - 1)
+        self.assertFalse(passes)
+        self.assertNotIn("comments_limit", why)
+
+class MalformedHeadShaNeverReachesGit(unittest.TestCase):
+    """#2958 F1: a record's head_sha is attacker-shaped text until it is 40 lowercase hex."""
+
+    def test_option_shaped_head_sha_is_refused_before_any_subprocess(self):
+        marker = pathlib.Path(tempfile.gettempdir()) / "landing-carry-injection-probe"
+        if marker.exists():
+            marker.unlink()
+        for bad in (f"--upload-pack=touch {marker}", "-x", "HEAD", "A" * 40, "", None,
+                    "a" * 40 + "\n", " " + "a" * 40, "a" * 41, "a" * 39):
+            with self.subTest(bad=bad):
+                carried, note = MODULE.carried_to_head(bad, "b" * 40, pathlib.Path("."), {})
+                self.assertFalse(carried)
+                if bad:
+                    self.assertIn("carry_malformed_sha", note)
+        self.assertFalse(marker.exists(), "a git option in a head_sha executed")
+
+
+class IdentityVerifierAcceptsACarry(unittest.TestCase):
+    """#2958 F3: `safe_merge.sh` runs this after readiness, and it read the head literally.
+
+    Readiness is what judges the comment set (it asks `review-record-check`'s own `evaluate`),
+    so this check is not a second authorization of the carry: it re-derives the same conditions
+    on the record it was handed, and must not refuse what the gate before it accepted.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.root = pathlib.Path(cls._tmp.name)
+        cls.heads = _carry_fixture(cls.root)
+        spec = importlib.util.spec_from_file_location(
+            "verify_review_identity", MODULE_PATH.with_name("verify_review_identity.py"))
+        cls.identity = importlib.util.module_from_spec(spec)
+        import sys
+        sys.path.insert(0, str(MODULE_PATH.parent))
+        spec.loader.exec_module(cls.identity)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def _verify(self, bound, head):
+        body = _record_pr(bound)["comments"][0]["body"]
+        comment = {
+            "html_url": "https://github.com/Rul1an/assay/pull/30#issuecomment-123",
+            "issue_url": "https://api.github.com/repos/Rul1an/assay/issues/30",
+            "user": {"login": "Rul1an"}, "body": body,
+        }
+        with patch.object(self.identity, "run_json", return_value=comment), \
+                patch.object(self.identity, "REPO_ROOT", self.root), \
+                patch("sys.stdout", new_callable=io.StringIO) as out:
+            self.identity.verify(
+                "Rul1an/assay", "30", head, "ruley/2958-landing-derived-carry", "Rul1an",
+                "claude/reviewer", "https://github.com/Rul1an/assay/pull/30#issuecomment-123",
+                "someone-else")
+        return out.getvalue()
+
+    def test_a_derived_carry_is_accepted_and_printed(self):
+        printed = self._verify(self.heads["reviewed"], self.heads["clean"])
+        self.assertIn("Carried to the live head", printed)
+        self.assertIn("re-derived-by-checker", printed)
+
+    def test_an_exact_head_record_still_passes_without_a_carry_line(self):
+        printed = self._verify(self.heads["clean"], self.heads["clean"])
+        self.assertNotIn("Carried to the live head", printed)
+
+    def test_an_advance_touching_a_reviewed_file_is_refused(self):
+        with self.assertRaises(ValueError):
+            self._verify(self.heads["reviewed"], self.heads["overlap"])
+
+    def test_a_further_push_is_refused(self):
+        with self.assertRaises(ValueError):
+            self._verify(self.heads["reviewed"], self.heads["push"])
 
 if __name__ == "__main__":
     unittest.main()
