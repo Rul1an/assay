@@ -88,6 +88,9 @@ demo/output/*.aiff
 # Local maturin build artifacts (platform-specific)
 assay-python-sdk/python/assay/_native*.so
 
+# Staged GHCR binaries (scripts/ci/stage-mcp-server-image-binaries.py)
+docker/assay-mcp-server/binaries/
+
 
 # Strategy/positioning docs: kept local, not published (sanitization discipline)
 docs/open-core.md

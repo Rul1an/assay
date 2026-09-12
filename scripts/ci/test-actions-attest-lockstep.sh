@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mutation battery for the closed two-workflow actions/attest pin set.
+# Mutation battery for the closed actions/attest producer set.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -8,6 +8,7 @@ PRECOMMIT=".pre-commit-config.yaml"
 WORKFLOWS=(
   .github/workflows/runner-spike-delegated.yml
   .github/workflows/privileged-mcp-action-pack-release.yml
+  .github/workflows/release.yml
 )
 OWNER_SHA="1e69f48acb82d1966a394da916b4c1698aa569d6"
 DRIFT_SHA="d1ba80a13dd99fba24a470575428917156a28b43"
@@ -177,6 +178,50 @@ mutate_once \
   "subject-checksums: release/SHA256SUMS" \
   "subject-checksums: release/OTHERSUMS"
 run_case retarget-pack-subject-is-refused "$case_root" 1
+
+# Existing checksums-file mutation: still refused after the image-subject shape lands.
+case_root="$scratch/image-subject-name"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/release.yml" \
+  "        id: attest-image-sbom
+        uses: actions/attest@${OWNER_SHA} # v4.2.2
+        with:
+          subject-name: ghcr.io/rul1an/assay-mcp-server" \
+  "        id: attest-image-sbom
+        uses: actions/attest@${OWNER_SHA} # v4.2.2
+        with:
+          subject-name: ghcr.io/example/other"
+run_case retarget-image-subject-name-is-refused "$case_root" 1
+
+case_root="$scratch/image-drop-storage-record"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/release.yml" \
+  "          sbom-path: sbom/crates/assay-mcp-server/assay-sbom.json
+          push-to-registry: true
+          create-storage-record: false
+" \
+  "          sbom-path: sbom/crates/assay-mcp-server/assay-sbom.json
+          push-to-registry: true
+"
+run_case drop-image-create-storage-record-is-refused "$case_root" 1
+
+case_root="$scratch/image-checksums-instead"
+seed "$case_root"
+mutate_once \
+  "$case_root/.github/workflows/release.yml" \
+  "          subject-name: ghcr.io/rul1an/assay-mcp-server
+          subject-digest: \${{ steps.build-and-push.outputs.digest }}
+          sbom-path: sbom/crates/assay-mcp-server/assay-sbom.json
+          push-to-registry: true
+          create-storage-record: false
+" \
+  "          subject-checksums: release/SHA256SUMS
+          push-to-registry: true
+          create-storage-record: false
+"
+run_case image-subject-checksums-instead-is-refused "$case_root" 1
 
 case_root="$scratch/delete-delegated-subject"
 seed "$case_root"

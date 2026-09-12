@@ -74,6 +74,21 @@ updates:
       - dependency-name: "serial_test"
         update-types: ["version-update:semver-major"]
 
+  # Distroless base digest for the assay-mcp-server GHCR image.
+  - package-ecosystem: "docker"
+    directory: "/docker/assay-mcp-server"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "ci"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+
   # Python (assay-python-sdk)
   - package-ecosystem: "pip"
     directory: "/assay-python-sdk"
