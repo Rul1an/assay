@@ -1,8 +1,8 @@
 use super::*;
 use crate::trace::observation::{
-    bound_sha256, decode_stored_observation, episode_column_values, read_truncation,
-    step_column_values, tool_call_column_values, tool_call_target_key, ObservedTraceEvent,
-    TruncationObservation, TruncationReading,
+    bound_sha256, decode_stored_observation, episode_column_values, pointer_covers,
+    read_truncation, step_column_values, tool_call_column_values, tool_call_target_key,
+    ObservedTraceEvent, TruncationObservation, TruncationReading,
 };
 use crate::trace::schema::{TraceEvent, TruncationMeta};
 use anyhow::Context;
@@ -135,6 +135,11 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let (truncations, bound, require_parity) = match kind {
             "episode_start" => {
+                if !pointer_covers("/input/prompt", pointer) && !pointer_covers("/meta", pointer) {
+                    anyhow::bail!(
+                        "pointer {pointer:?} is outside stored column map for episode_start"
+                    );
+                }
                 let (prompt, meta): (Option<String>, Option<String>) = conn.query_row(
                     "SELECT prompt, meta_json FROM episodes WHERE id = ?1",
                     rusqlite::params![key],
