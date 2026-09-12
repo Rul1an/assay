@@ -617,16 +617,19 @@ class DerivedCarryBindsTheLandingGate(unittest.TestCase):
         row = self._rows(self.heads["overlap"])[0]
         self.assertFalse(row["current_head"])
         self.assertEqual(row["source"], "machine-comment")
+        self.assertIsNotNone(row["carry"], "no derivation was attempted")
         self.assertIn("carry_touched_reviewed_file", row["carry"])
 
     def test_a_further_push_is_not_an_upstream_merge(self):
         row = self._rows(self.heads["push"])[0]
         self.assertFalse(row["current_head"])
+        self.assertIsNotNone(row["carry"], "no derivation was attempted")
         self.assertIn("carry_not_upstream_merge", row["carry"])
 
     def test_a_head_sha_matching_nothing_is_refused(self):
         rows = MODULE.review_candidates(_record_pr("f" * 40), self.heads["clean"], git_root=self.root)
         self.assertFalse(rows[0]["current_head"])
+        self.assertIsNotNone(rows[0]["carry"], "no derivation was attempted")
         self.assertIn("carry_objects_unavailable", rows[0]["carry"])
 
     def test_both_gates_answer_the_same_on_the_same_head(self):
