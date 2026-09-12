@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from implementations import (  # noqa: E402
     ImplementationRegistryError,
     load_implementations,
+    project_capture_authorship,
     validate_image_reference,
 )
 
@@ -195,7 +196,7 @@ def implementation_from_registry(
 
 
 def identity_from_registry_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
+    identity: dict[str, Any] = {
         "id": row["id"],
         "image": row["image"],
         "name": row["name"],
@@ -204,6 +205,9 @@ def identity_from_registry_row(row: dict[str, Any]) -> dict[str, Any]:
         "commit": row["commit"],
         "reproduction_mode": row["reproduction_mode"],
     }
+    if "authorship" in row:
+        identity["authorship"] = project_capture_authorship(row["authorship"])
+    return identity
 
 
 def reject_declared_volumes(image_inspect: dict[str, Any]) -> None:

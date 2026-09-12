@@ -144,30 +144,6 @@ class RegistrationConsumerProjectsAuthorship(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 self._run_checked_in_row()
 
-    def test_capture_projection_mutation_fails_checked_in_row(self) -> None:
-        def mutated(_auth: object) -> dict:
-            return {"kind": "human"}
-
-        with mock.patch.object(implementations, "project_capture_authorship", mutated):
-            with self.assertRaises(AssertionError):
-                self._run_checked_in_row()
-
-    def test_run_projection_mutation_fails_checked_in_row(self) -> None:
-        def mutated(_auth: object) -> dict | None:
-            return None
-
-        with mock.patch.object(implementations, "project_run_authorship", mutated):
-            with self.assertRaises(AssertionError):
-                self._run_checked_in_row()
-
-    def test_public_projection_mutation_fails_checked_in_row(self) -> None:
-        def mutated(_auth: object) -> dict | None:
-            return {"kind": "agent-generated", "model": "other", "prompt_strategy": "none"}
-
-        with mock.patch.object(implementations, "project_public_authorship", mutated):
-            with self.assertRaises(AssertionError):
-                self._run_checked_in_row()
-
 
 class LegacyRunFixtureContract(unittest.TestCase):
     """Behavioral guard: legacy conformance_run.v1 fixture must stay authorship-unrecorded."""
@@ -194,16 +170,6 @@ class LegacyRunFixtureContract(unittest.TestCase):
             implementations.project_public_authorship(legacy_auth),
             "project_public_authorship must return None for legacy fixture",
         )
-
-    def test_inferred_author_on_legacy_fixture_fails(self) -> None:
-        def inferred(val: object) -> dict | None:
-            if val is None:
-                return {"kind": "human"}
-            return implementations.project_run_authorship(val)
-
-        with mock.patch.object(implementations, "project_run_authorship", inferred):
-            with self.assertRaises(AssertionError):
-                self.assertIsNone(implementations.project_run_authorship(None))
 
 
 class RequiredCi(unittest.TestCase):

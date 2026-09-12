@@ -439,6 +439,12 @@ class RegistrySelection(unittest.TestCase):
         with self.assertRaises(implementations.ImplementationRegistryError):
             module.implementation_from_registry("inert-fixture")
 
+    def test_identity_from_registry_row_preserves_authorship(self) -> None:
+        module = _require()
+        row = _registry_doc(DIGEST_IMAGE)["implementations"][0]
+        identity = module.identity_from_registry_row(row)
+        self.assertEqual(identity["authorship"], {"kind": "human"})
+
     def test_cli_rejects_direct_image_input(self) -> None:
         module = _require()
         with tempfile.TemporaryDirectory() as raw:

@@ -16,7 +16,11 @@ sys.path.insert(0, str(REPO / "conformance/adequacy"))
 sys.path.insert(0, str(REPO / "conformance/privileged-mcp-action-v0/scripts"))
 
 import published_rows  # noqa: E402
-from implementations import ImplementationRegistryError, load_implementations  # noqa: E402
+from implementations import (  # noqa: E402
+    ImplementationRegistryError,
+    load_implementations,
+    project_public_authorship,
+)
 from artifact_io import content_sha256  # noqa: E402
 from strict_json import parse_strict_object  # noqa: E402
 from validate_run_record import MAX_RUN_RECORD_BYTES, validate_run_record  # noqa: E402
@@ -149,6 +153,11 @@ def _bind_row(row: dict, report: dict, registry: dict[str, dict]) -> None:
     for name, indexed, recorded, expected in checks:
         if not indexed == recorded == expected:
             raise ValueError("%s mismatch" % name)
+    recorded_authorship = project_public_authorship(implementation.get("authorship"))
+    if recorded_authorship is not None:
+        expected_authorship = project_public_authorship(registered.get("authorship"))
+        if recorded_authorship != expected_authorship:
+            raise ValueError("authorship mismatch")
 
 
 def load_publication(repo: Path) -> list[dict]:
