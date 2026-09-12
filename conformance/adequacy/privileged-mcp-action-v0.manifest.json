@@ -38,6 +38,10 @@
     "verdict",
     "claims"
   ],
+  "diagnostic_from": [
+    "findings"
+  ],
+  "_diagnostic_from_why": "The verifier emits `findings` beside the normative surface this manifest reads (bundle_integrity, verdict, claims); under the profile's conformance protocol findings stay reviewer-visible and unscored. Declaring the channel lets the corpus tell a mutant nothing notices (survived) from one only diagnostics notice (silent); silent counts in the scored denominator, never for it. This changes no outcome, vector, mutant, digest or normative comparison: the out-of-scope finding-only rule (43) stays out of scope, and no score improvement is claimed or forecast.",
   "vectors": "privileged-mcp-action-v0.vectors.json",
   "id_key": "vector_id",
   "vector_path_key": "path",

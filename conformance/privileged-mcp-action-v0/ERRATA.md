@@ -65,7 +65,7 @@ detail smuggled into the count).
 
 ```
 6 of 28 DECLARED in-scope rules killed (21.4%). 4 declared out of scope, 34 rules declared.
-control-killed. 22 mutant(s) survived. 2 KNOWN HOLES.
+control-killed. 20 mutant(s) survived. 2 KNOWN HOLES.
 ```
 
 That block is the tool's own output, kept verbatim. **Neither of its numbers is the number to quote
