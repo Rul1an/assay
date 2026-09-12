@@ -97,7 +97,11 @@ Those still need the comment deleted or a new head.
 `scripts/ci/assay_review_record_check.py --self-test` pins the record
 contract. `--pr N` talks to the live GitHub API when `GITHUB_REPOSITORY`
 and `GITHUB_TOKEN` are set. It reads the PR head, then comments, then
-the PR head again; a sha/ref change is `head_moved`. Responses are
+the PR head again; a sha/ref change is `head_moved`. When no record names
+the live head it also runs `git` in the checkout to derive the carry, which
+is the checker's only subprocess; the refusals are `carry_objects_unavailable`,
+`carry_not_upstream_merge`, `carry_not_ancestor`, `carry_merge_conflict`,
+`carry_tree_mismatch` and `carry_touched_reviewed_file`. Responses are
 capped at 8 MiB, HTTP timeout is 30s, and comments stop after two
 pages (200 comments) with `comments_limit`. A comments-API failure is
 `comments_api_failure`. The pre-commit hook is
@@ -130,8 +134,10 @@ the live protection rule.
 ## Non-claims
 
 The record is not cryptographic agent identity, intellectual adequacy, review
-quality, an approval count, or AGENTS carry-forward. The workflow does not
-support merge queues, write comments or statuses, or use a write token. API
+quality, or an approval count. It is not a carry either: a record carries to a
+later head only when the checker re-derives both AGENTS.md conditions from the
+commits, and it never reads a carry claim out of the record's text. The workflow
+does not support merge queues, write comments or statuses, or use a write token. API
 failure is a failed required check, not evidence that the review was defective.
 A base checkout protects the executed repository code, not the PR-supplied
 workflow definition. `reviewer` is declared, not verified: when several agents
