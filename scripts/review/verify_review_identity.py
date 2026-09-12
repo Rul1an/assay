@@ -40,7 +40,9 @@ def verify(repo, pr, head, branch_ref, record_author, identity, evidence_url, pr
     if machine is None:
         # A record bound to an earlier head still binds this one when the required checker's
         # own derivation carries it across an upstream-advance merge (#2955, #2958). It is
-        # validated against its own head, exactly as that gate validates it.
+        # validated against its own head, exactly as that gate validates it. This is not a
+        # second authorization of the carry: `safe_merge.sh` runs the readiness report first,
+        # and that is where the whole comment set is put to `review-record-check`'s `evaluate`.
         earlier = record_head_sha(body)
         carried, carry_note = carried_to_head(earlier, head, REPO_ROOT, {}, repo)
         if carried:
