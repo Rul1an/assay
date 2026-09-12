@@ -43,9 +43,12 @@ fn cmd_generate(args: TrustBasisGenerateArgs) -> Result<i32> {
         None
     };
 
-    let trust_basis =
-        generate_trust_basis(bundle, VerifyLimits::default(), TrustBasisOptions { lint })
-            .context("failed to generate trust basis")?;
+    let trust_basis = generate_trust_basis(
+        bundle,
+        VerifyLimits::for_retained_events(),
+        TrustBasisOptions { lint },
+    )
+    .context("failed to generate trust basis")?;
 
     let output =
         to_canonical_json_bytes(&trust_basis).context("failed to serialize trust basis")?;

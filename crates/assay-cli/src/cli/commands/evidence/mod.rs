@@ -303,10 +303,11 @@ fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
         )
     })?;
 
+    let limits = assay_evidence::VerifyLimits::for_retained_events();
     let reader = if args.no_verify {
-        assay_evidence::bundle::BundleReader::open_unverified(f)
+        assay_evidence::bundle::BundleReader::open_unverified_with_limits(f, limits)
     } else {
-        assay_evidence::bundle::BundleReader::open(f)
+        assay_evidence::bundle::BundleReader::open_with_limits(f, limits)
     };
     let br = reader.map_err(|error| {
         classify_show_error(&args.bundle, error, "failed to open bundle reader")

@@ -119,10 +119,11 @@ pub fn cmd_explore(args: ExploreArgs) -> Result<i32> {
     let f = std::fs::File::open(&args.bundle)
         .with_context(|| format!("failed to open bundle {}", args.bundle.display()))?;
 
+    let limits = assay_evidence::VerifyLimits::for_retained_events_capped(args.max_events);
     let br = if args.no_verify {
-        assay_evidence::bundle::BundleReader::open_unverified(f)
+        assay_evidence::bundle::BundleReader::open_unverified_with_limits(f, limits)
     } else {
-        assay_evidence::bundle::BundleReader::open(f)
+        assay_evidence::bundle::BundleReader::open_with_limits(f, limits)
     }
     .context("failed to open bundle")?;
 

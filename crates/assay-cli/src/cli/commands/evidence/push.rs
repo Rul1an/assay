@@ -56,16 +56,15 @@ pub async fn cmd_push(args: PushArgs) -> Result<i32> {
     // 2. Verify bundle (unless --no-verify)
     let bundle_id = if args.no_verify {
         let cursor = std::io::Cursor::new(&buffer);
-        // Deliberately `open_unverified_with_limits` and not `BundleInfo::peek_with_limits`, even
-        // though only `bundle_id` is read from the result. This looks like the same waste the
-        // verification-only callers had, and it is not: with `--no-verify` the reader's events
-        // pass is the *only* consumption of `events.ndjson`, so it is what applies
-        // `max_line_bytes`, `max_events`, UTF-8 validity and JSON depth. Switching to peek drops
-        // those ceilings — `contract_bounded_ingest_cli` catches it immediately, which is how this
-        // comment came to exist. Retention here is load-bearing.
-        let reader = assay_evidence::BundleReader::open_unverified_with_limits(cursor, limits)
+        // Deliberately `peek_and_bound_events` and not `BundleInfo::peek_with_limits`, even
+        // though only `bundle_id` is read from the result. With `--no-verify` this pass is the
+        // *only* consumption of `events.ndjson`, so it is what applies `max_line_bytes`,
+        // `max_events`, UTF-8 validity and JSON depth. Switching to peek drops those ceilings —
+        // `contract_bounded_ingest_cli` catches it immediately, which is how this comment came
+        // to exist. The events member is checked into a discard sink; it is not retained.
+        let info = assay_evidence::BundleInfo::peek_and_bound_events(cursor, limits)
             .context("failed to read bundle manifest")?;
-        reader.manifest().bundle_id.clone()
+        info.manifest.bundle_id.clone()
     } else {
         let cursor = std::io::Cursor::new(&buffer);
         let result = assay_evidence::bundle::writer::verify_bundle_with_limits(cursor, limits)
@@ -75,10 +74,8 @@ pub async fn cmd_push(args: PushArgs) -> Result<i32> {
     };
 
     // The upload takes ownership of the same buffer that was just checked rather than cloning it.
-    // Stated narrowly, because the earlier note overclaimed: this removes one copy, not all of
-    // them. `BundleReader` still materializes its own `Vec` internally, so a bundle near the
-    // ceiling is held more than once regardless. Both copies are bounded; what changed is that
-    // one of them is no longer gratuitous.
+    // `--no-verify` no longer materializes `events.ndjson` beside that buffer; the verified
+    // branch never did. Both copies that remain are the source snapshot and the upload bytes.
     let bytes = Bytes::from(buffer);
 
     // 3. Connect to store
