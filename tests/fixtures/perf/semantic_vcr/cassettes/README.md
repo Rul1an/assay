@@ -21,6 +21,8 @@ Geïmplementeerd in `crates/assay-core/src/vcr/mod.rs`. Zie de module docs voor 
 
 - `embeddings/` — opgenomen responses voor embedding-API (bijv. OpenAI /v1/embeddings).
 - `judge/` — opgenomen responses voor judge/LLM-calls.
+- `embeddings/.gitkeep` en `judge/.gitkeep` — pinned tekstregel om de lege-map sentinel
+  stabiel te houden onder tooling die anders een newline-only wijziging zou maken.
 
 ## Cassette format
 
