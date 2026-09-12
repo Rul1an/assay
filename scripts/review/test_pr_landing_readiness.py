@@ -603,7 +603,9 @@ class DerivedCarryBindsTheLandingGate(unittest.TestCase):
         cls._tmp.cleanup()
 
     def _rows(self, head):
-        return MODULE.review_candidates(_record_pr(self.heads["reviewed"]), head, git_root=self.root)
+        rows = MODULE.review_candidates(_record_pr(self.heads["reviewed"]), head, git_root=self.root)
+        self.assertEqual(len(rows), 1, f"the record produced no candidate row: {rows}")
+        return rows
 
     def test_an_upstream_advance_carries_and_says_so(self):
         row = self._rows(self.heads["clean"])[0]
