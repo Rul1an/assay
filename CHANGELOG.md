@@ -4,6 +4,51 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.3.0] - 2026-09-13
+
+### Added
+- `assay_evidence::bundle`: `BundleInfo::peek_and_bound_events` reads a bundle's manifest and
+  checks `events.ndjson` through the ceilings without keeping it, so a caller that only needs a
+  verify or manifest answer no longer pays full residency. `VerifyLimits::for_retained_events`
+  and `for_retained_events_capped` give the callers that genuinely need events an explicit,
+  tighter ceiling before materializing, instead of inheriting the 500 MiB default. Measured on
+  the same bundle: 22.8 MB peak on the old path, 0.6 MB on the new one (#2947, #2282).
+- `assay.delegated_exec_observation.v0`: a delegated exec or child-tool invocation can be
+  recorded as its own content-addressed evidence event, carrying the tool name and an argv
+  digest and no decision, outcome or claim. It sits outside the `privileged-mcp-action/v0`
+  namespaces, and a verification run over a bundle that carries it is byte-identical to one
+  without it (#2980, #2512).
+
+### Fixed
+- Truncation readings no longer answer beyond what their medium's own declaration covers. The
+  SQLite reader returns an error for a pointer the `episodes` table never stored rather than
+  reporting it clean; reported loss at a pointer now covers every pointer at or under it, so a
+  truncated `/meta` cannot leave `/meta/a` reading clean; and an observation carried in from
+  another stage with no loss of its own is no longer re-bound by our writer as though we had
+  produced it. Carried loss still survives (#2977, #2957).
+- The registry `authorship` object is preserved end to end through the real
+  registry → capture → run record → public projection path. The capture and report schemas
+  admit an optional `authorship` without a version bump, legacy `conformance_run.v1` records
+  stay explicitly authorship-unrecorded, and the projection is exercised by tests that fail
+  when production behaviour changes rather than when a mock does (#2940, #2818).
+
+### Internal
+- A stale `fuzz/Cargo.lock` now fails a required check on the pull request that causes it. The
+  assertion previously ran only in a non-required lane, so it could find the drift and not stop
+  it — which it did three times (#2978, #2975).
+- The delegated proof pack can cover `Cargo.lock` and `Cargo.toml`, so a lockfile-only change
+  can satisfy `lane-check/proof` through evidence instead of an override. The gating list and
+  the provenance list are now pinned to each other by a test (#2964, #2962).
+- Dependabot's two cargo updaters are folded into one entry across `/` and `/fuzz`, so a
+  dependency present in both trees lands as a single pull request carrying both lockfiles
+  (#2963). The aya stack is ignored there because its five pins move as one unit (#2974, #2972).
+- Quick-tier integrity attacks each reach the verifier rule their name designates, and the
+  suite report pins the refusing rule, so a drift in which check fires first turns the suite red
+  instead of staying green (#2945, #2936).
+- Two fuzz targets cover the stdio JSON-RPC loop and the `tools/call` decision input
+  (#2930, #2914).
+
+
 ## [6.2.1] - 2026-09-12
 
 ### Security
