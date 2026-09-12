@@ -100,7 +100,7 @@
       "manifest": "conformance/adequacy/privileged-mcp-action-v0.manifest.json",
       "manifest_sha256": "sha256:405211af4bc5fe3c14076ea1a86058db40d51de4e8b0c6d699b07c009e353f40",
       "measured_at": {
-        "commit": "a82bbe7de093234de44a9274b1909a27c0572a5d",
+        "commit": "94154243b1abc04bd4ce8a3dae9f9ec2a8bec36b",
         "depends_on": [
           "conformance/adequacy/privileged-mcp-action-v0.manifest.json",
           "conformance/adequacy/privileged-mcp-action-v0.vectors.json",
