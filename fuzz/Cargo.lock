@@ -110,7 +110,7 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "assay-adapter-api"
-version = "6.2.0"
+version = "6.2.1"
 dependencies = [
  "assay-evidence",
  "hex",
@@ -122,7 +122,7 @@ dependencies = [
 
 [[package]]
 name = "assay-canonical"
-version = "6.2.0"
+version = "6.2.1"
 dependencies = [
  "hex",
  "serde",
@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "assay-common"
-version = "6.2.0"
+version = "6.2.1"
 dependencies = [
  "chrono",
  "libc",
@@ -145,7 +145,7 @@ dependencies = [
 
 [[package]]
 name = "assay-core"
-version = "6.2.0"
+version = "6.2.1"
 dependencies = [
  "anyhow",
  "assay-adapter-api",
@@ -190,7 +190,7 @@ dependencies = [
 
 [[package]]
 name = "assay-evidence"
-version = "6.2.0"
+version = "6.2.1"
 dependencies = [
  "anyhow",
  "assay-canonical",

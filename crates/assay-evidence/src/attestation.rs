@@ -1125,8 +1125,13 @@ mod tests {
         let bytes = bundle();
         let envelope = sign_statement(&statement_for_bundle(&bytes).unwrap(), &k).unwrap();
 
-        let mut other = bytes.clone();
-        other.extend_from_slice(b"trailing");
+        // A different valid bundle, not these bytes with a suffix: the verifier refuses data after
+        // the gzip member on its own, which would test that refusal instead of the digest match.
+        let other = bundle_with_times(&["2026-07-28T11:00:00Z".parse().unwrap()]);
+        assert_ne!(
+            other, bytes,
+            "the other bundle must be a different artifact"
+        );
         let err = verify_attestation_for_bundle(&envelope, &k.verifying_key(), &other)
             .expect_err("a different artifact must not match");
         assert!(err.to_string().contains("does not match"), "got: {err}");

@@ -466,15 +466,46 @@ fn write_named_member_bundle(dir: &Path, member: &str) -> PathBuf {
     dest
 }
 
+/// A plain header that declares a `manifest.json` larger than the default manifest ceiling,
+/// followed by one block of content. The ceiling is checked on the declared size before any
+/// content is read, so the missing bytes are never reached.
+fn write_oversized_manifest_bundle(dir: &Path) -> PathBuf {
+    let dest = dir.join("oversized-manifest.bundle.tar.gz");
+    let script = dir.join("write_oversized.py");
+    std::fs::write(
+        &script,
+        "import gzip, sys, tarfile\n\
+         info = tarfile.TarInfo('manifest.json')\n\
+         info.size = 20 * 1024 * 1024\n\
+         header = info.tobuf(format=tarfile.USTAR_FORMAT)\n\
+         open(sys.argv[1], 'wb').write(gzip.compress(header + b'x' * 512))\n",
+    )
+    .expect("write python helper");
+    let status = std::process::Command::new("python3")
+        .args([script.as_os_str(), dest.as_os_str()])
+        .status()
+        .expect("python3 tarfile");
+    assert!(
+        status.success(),
+        "python3 failed to write the oversized manifest"
+    );
+    dest
+}
+
 /// Synthetic command-level cases sit beside the 14 corpus vectors. They do not fold
 /// Limits/Security into Integrity/Contract/Unreadable. Command-level drive covers the
 /// reachable traversal code in `writer_next/verify.rs`; AbsolutePath is a non-claim
 /// for that file.
+///
+/// The path-length ceiling is not reachable from here at its default. A plain header holds at
+/// most a 100-byte name, and a longer one needs a PAX or GNU extension record, which the verifier
+/// refuses as a member that is not a plain file before any ceiling applies. That refusal is a tar
+/// structure refusal, so it is pinned as unreadable below; the limit case uses the manifest
+/// ceiling instead.
 #[test]
 fn synthetic_limit_and_path_cases_consume_their_own_codes() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let long_name = "a".repeat(257);
-    let limit_bundle = write_named_member_bundle(tmp.path(), &long_name);
+    let limit_bundle = write_oversized_manifest_bundle(tmp.path());
     let (limit_report, limit_exit) = verify(&limit_bundle);
     assert_eq!(limit_exit, 2);
     assert_diagnosis(
@@ -511,6 +542,12 @@ fn synthetic_limit_and_path_cases_consume_their_own_codes() {
     assert_ne!(path_report["reason_code"], "E_EVIDENCE_UNREADABLE");
     assert!(path_report.get("claims").is_none());
     assert_eq!(path_report["bundle_integrity"], "fail");
+
+    let long_dir = tmp.path().join("long");
+    std::fs::create_dir(&long_dir).expect("long-name dir");
+    let long_bundle = write_named_member_bundle(&long_dir, &"a".repeat(257));
+    let (long_report, long_exit) = verify(&long_bundle);
+    assert_unreadable_profile_report(&long_report, long_exit, &long_bundle);
 
     let (limit_table, _) = verify_table(&limit_bundle);
     assert!(
