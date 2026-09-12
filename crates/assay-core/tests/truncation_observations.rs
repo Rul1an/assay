@@ -1048,3 +1048,120 @@ fn test_15_jsonl_sqlite_media_parity_including_malformed_losses() -> anyhow::Res
     );
     Ok(())
 }
+
+#[test]
+fn probe_a_sqlite_reader_refuses_pointer_outside_stored_column_map() -> anyhow::Result<()> {
+    let store = Store::memory()?;
+    store.init_schema()?;
+
+    let event = TraceEvent::EpisodeStart(EpisodeStart {
+        episode_id: "ep-a".into(),
+        timestamp: 1,
+        input: json!({
+            "prompt": "short prompt",
+            "system": "also short system prompt"
+        }),
+        meta: Value::Null,
+    });
+    let line = serde_json::to_string(&event)?;
+    let observed = StreamUpgrader::new(Cursor::new(&line))
+        .observed()
+        .next()
+        .expect("one event")?;
+    store.insert_observed_event(&observed, None, None)?;
+
+    let prompt_reading =
+        store.read_truncation("episode_start", "ep-a", "/input/prompt", TRUSTED)?;
+    assert_eq!(
+        prompt_reading,
+        TruncationReading::MeasuredClean {
+            stage: UPGRADER_STAGE.into(),
+            ceiling: INGEST_STRING_CEILING,
+        }
+    );
+
+    let system_result = store.read_truncation("episode_start", "ep-a", "/input/system", TRUSTED);
+    assert!(
+        system_result.is_err(),
+        "read_truncation for /input/system must return Err because it is outside stored column map, but got: {:?}",
+        system_result
+    );
+    Ok(())
+}
+
+#[test]
+fn probe_b_loss_at_ancestor_pointer_covers_descendants() -> anyhow::Result<()> {
+    let loss = meta_loss("/meta", 5000, 4096, "sha-meta");
+    let obs = clean_observation(&["/content", "/meta"], vec![loss.clone()]);
+    let step = observed_step(vec![loss], obs);
+
+    let meta_reading = read_observed(&step, "/meta", TRUSTED);
+    assert_eq!(meta_reading, TruncationReading::Lossy);
+
+    let child_reading = read_observed(&step, "/meta/a", TRUSTED);
+    assert_eq!(
+        child_reading,
+        TruncationReading::Lossy,
+        "loss at /meta must make descendant /meta/a read Lossy, but got: {:?}",
+        child_reading
+    );
+    Ok(())
+}
+
+#[test]
+fn probe_c_foreign_empty_loss_observation_not_carried_at_ingest() -> anyhow::Result<()> {
+    let store = Store::memory()?;
+    store.init_schema()?;
+
+    let line = json!({
+        "type": "step",
+        "episode_id": "ep-c",
+        "step_id": "s1",
+        "idx": 0,
+        "timestamp": 1,
+        "kind": "llm_completion",
+        "name": "model",
+        "content": "hello",
+        "content_sha256": "abc",
+        "truncations": [],
+        "meta": null,
+        "observations": [{
+            "v": 1,
+            "stage": "vendor.exporter",
+            "ceiling": 4096,
+            "scope": ["/content", "/meta"],
+            "losses": []
+        }]
+    })
+    .to_string();
+
+    ensure_episode(&store, "ep-c")?;
+
+    let observed = StreamUpgrader::new(Cursor::new(&line))
+        .observed()
+        .next()
+        .expect("one event")?;
+    store.insert_observed_event(&observed, None, None)?;
+
+    let count: i64 = store.conn.lock().unwrap().query_row(
+        "SELECT COUNT(*) FROM trace_observations WHERE target_kind = 'step' AND target_key = 's1'",
+        [],
+        |r| r.get(0),
+    )?;
+    assert_eq!(
+        count, 1,
+        "only the fresh scan observation should be stored; foreign empty-loss observation must be dropped at ingest, but found {count} rows"
+    );
+
+    let vendor_reading = store.read_truncation("step", "s1", "/content", &["vendor.exporter"])?;
+    assert_ne!(
+        vendor_reading,
+        TruncationReading::MeasuredClean {
+            stage: "vendor.exporter".into(),
+            ceiling: 4096,
+        },
+        "foreign empty-loss observation must not yield MeasuredClean after ingest"
+    );
+
+    Ok(())
+}
