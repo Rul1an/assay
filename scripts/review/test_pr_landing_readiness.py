@@ -15,6 +15,24 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+class EveryTestInThisFileActuallyRuns(unittest.TestCase):
+    """`unittest.main()` collects what is defined when it runs, so it has to be last.
+
+    It sat mid-file while the #2958 classes were appended below it, and the invocation the
+    README documents (`python3 scripts/review/test_pr_landing_readiness.py`) then ran 43 of
+    60 tests and still printed OK. This class is first on purpose: a guard written below the
+    entrypoint disappears along with what it was meant to report.
+    """
+
+    def test_nothing_is_defined_after_the_entrypoint(self):
+        lines = pathlib.Path(__file__).read_text().splitlines()
+        entry = [n for n, line in enumerate(lines) if line.startswith("if __name__")]
+        self.assertEqual(len(entry), 1, "one entrypoint")
+        after = [line for line in lines[entry[0]:] if line.startswith(("class ", "def "))]
+        self.assertEqual(after, [], "these are invisible to a direct run")
+
+
+
 class VerdictTests(unittest.TestCase):
     def test_exact_ready(self):
         self.assertEqual(MODULE.verdict("## Verdict\n\n**READY**"), "READY")
@@ -713,14 +731,23 @@ class GateSetJudgementTests(unittest.TestCase):
         row = self._rows(None)[0]
         self.assertTrue(row["current_head"])
 
-    def test_a_record_on_the_live_head_never_asks_the_gate(self):
-        """The thunk costs an API call, so a PR that cannot carry must not pay it."""
+    def test_the_gate_is_asked_only_when_there_is_a_carry_to_judge(self):
+        """The thunk costs an API call and can fail; nothing else may depend on it.
+
+        A record on the live head needs no carry, and a derivation that already refused cannot
+        be rescued by the set passing - so in both cases the answer is not read, and an outage
+        reaching that endpoint must not decide a landing check it was never going to decide.
+        """
         def gate():
             raise AssertionError("the gate was consulted without a carry to judge")
 
-        row = self._rows(gate, head=self.heads["reviewed"])[0]
-        self.assertTrue(row["current_head"])
-        self.assertEqual(row["source"], "machine-comment")
+        on_head = self._rows(gate, head=self.heads["reviewed"])[0]
+        self.assertTrue(on_head["current_head"])
+        self.assertEqual(on_head["source"], "machine-comment")
+
+        refused = self._rows(gate, head=self.heads["overlap"])[0]
+        self.assertFalse(refused["current_head"])
+        self.assertIn("carry_touched_reviewed_file", refused["carry"])
 
 
 class MalformedHeadShaNeverReachesGit(unittest.TestCase):
@@ -795,22 +822,6 @@ class IdentityVerifierAcceptsACarry(unittest.TestCase):
     def test_a_further_push_is_refused(self):
         with self.assertRaises(ValueError):
             self._verify(self.heads["reviewed"], self.heads["push"])
-
-class EveryTestInThisFileActuallyRuns(unittest.TestCase):
-    """`unittest.main()` collects what is defined when it runs, so it has to be last.
-
-    It sat mid-file while the #2958 classes were appended below it, and the invocation the
-    README documents (`python3 scripts/review/test_pr_landing_readiness.py`) then ran 43 of
-    60 tests and still printed OK.
-    """
-
-    def test_nothing_is_defined_after_the_entrypoint(self):
-        lines = pathlib.Path(__file__).read_text().splitlines()
-        entry = [n for n, line in enumerate(lines) if line.startswith("if __name__")]
-        self.assertEqual(len(entry), 1, "one entrypoint")
-        after = [line for line in lines[entry[0]:] if line.startswith(("class ", "def "))]
-        self.assertEqual(after, [], "these are invisible to a direct run")
-
 
 if __name__ == "__main__":
     unittest.main()
