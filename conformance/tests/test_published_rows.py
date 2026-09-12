@@ -29,14 +29,18 @@ def sha256(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
-def manifest_bytes(*, runner: str = "module", implementation: str = "implementation.py") -> bytes:
-    return (json.dumps({
+def manifest_bytes(*, runner: str = "module", implementation: str = "implementation.py",
+                   diagnostic_from: list[str] | None = None) -> bytes:
+    manifest: dict = {
         "schema": "corpus-adequacy.manifest.v0",
         "runner": runner,
         "tool_pin": {"commit": TOOL_COMMIT, "tool": "producer"},
         "implementation": implementation,
         "mutants": {"rules": []},
-    }, indent=2, sort_keys=True) + "\n").encode()
+    }
+    if diagnostic_from is not None:
+        manifest["diagnostic_from"] = diagnostic_from
+    return (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
 
 
 def report(*, runner: str = "module", control_status: str = "killed") -> dict:
@@ -45,13 +49,13 @@ def report(*, runner: str = "module", control_status: str = "killed") -> dict:
         "runner": runner,
         "killed": 2,
         "survived": 1,
-        "silent": 1,
+        "silent": 0,
         "equivalent": 1,
         "unexercised_out_of_scope": 3,
         "known_holes": 1,
         "unproved": 2,
-        "declared_total": 11,
-        "score_percent": 50.0,
+        "declared_total": 10,
+        "score_percent": 66.7,
         "adequate": False,
         "diagnostic_channel_declared": False,
         "control_status": control_status,
@@ -71,10 +75,12 @@ def report_bytes(value: dict) -> bytes:
 
 def projected(temp: Path, *, value: dict | None = None, runner: str = "module",
               implementation: str = "implementation.py",
+              diagnostic_from: list[str] | None = None,
               subject: dict | None = None) -> tuple[dict, bytes]:
     manifest = temp / "sample.manifest.json"
     temp.mkdir(parents=True, exist_ok=True)
-    raw_manifest = manifest_bytes(runner=runner, implementation=implementation)
+    raw_manifest = manifest_bytes(
+        runner=runner, implementation=implementation, diagnostic_from=diagnostic_from)
     manifest.write_bytes(raw_manifest)
     if not implementation.startswith("../"):
         (temp / implementation).write_text("# measured\n", encoding="utf-8")
@@ -268,7 +274,7 @@ class CurrentReportProjection(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             row, encoded = projected(Path(raw))
         self.assertEqual(row["runner"], "module")
-        self.assertEqual(row["silent"], 1)
+        self.assertEqual(row["silent"], 0)
         self.assertEqual(row["out_of_scope"], 3)
         self.assertEqual(row["known_holes"], 1)
         self.assertEqual(row["unproved"], 2)
@@ -301,6 +307,29 @@ class CurrentReportProjection(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             with self.assertRaisesRegex(ValueError, "diagnostic channel differs"):
                 projected(Path(raw), value=value)
+
+    def test_silent_without_a_declared_channel_is_rejected(self):
+        value = report()
+        value["silent"] = 1
+        value["declared_total"] = sum(
+            value[field] for field in published_rows.COUNT_FIELDS[:-1])
+        value["score_percent"] = 50.0
+        with tempfile.TemporaryDirectory() as raw:
+            with self.assertRaisesRegex(ValueError, "silent"):
+                projected(Path(raw), value=value)
+
+    def test_silent_with_a_declared_channel_projects(self):
+        value = report()
+        value["silent"] = 1
+        value["declared_total"] = sum(
+            value[field] for field in published_rows.COUNT_FIELDS[:-1])
+        value["score_percent"] = 50.0
+        value["diagnostic_channel_declared"] = True
+        with tempfile.TemporaryDirectory() as raw:
+            row, _ = projected(
+                Path(raw), value=value, diagnostic_from=["findings"])
+        self.assertEqual(row["silent"], 1)
+        self.assertTrue(row["diagnostic_channel_declared"])
 
     def test_error_envelope_is_not_a_successful_report(self):
         value = report()
@@ -505,6 +534,28 @@ class CurrentResultsDocument(unittest.TestCase):
             document["corpora"][0]["control"] = "SURVIVED"
             path.write_text(json.dumps(document), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "control"):
+                published_rows.load_results(path)
+
+    def test_stored_silent_without_a_channel_fails_on_load(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path, document, encoded = self.write_current(Path(raw))
+            old_digest = sha256(encoded)
+            producer = json.loads(document["reports"].pop(old_digest))
+            producer["silent"] = 1
+            producer["declared_total"] = sum(
+                producer[field] for field in published_rows.COUNT_FIELDS[:-1])
+            producer["score_percent"] = 50.0
+            changed = report_bytes(producer)
+            new_digest = sha256(changed)
+            document["reports"][new_digest] = changed.decode("utf-8")
+            row = document["corpora"][0]
+            row["report_sha256"] = new_digest
+            row["report_ref"] = "#/reports/%s" % new_digest
+            row["silent"] = 1
+            row["declared_total"] = producer["declared_total"]
+            row["score_percent"] = 50.0
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "silent"):
                 published_rows.load_results(path)
 
     def test_stored_diagnostic_channel_must_match_the_manifest(self):
