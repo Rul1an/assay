@@ -192,6 +192,16 @@ back to `github.token`. Until that secret exists, scheduled and manual runs fail
 closed at preflight with an explicit missing-secret error; they do not silently
 skip reconciliation.
 
+**Credential expiry: 2026-10-12.** Fine-grained tokens expire, and an expired one
+fails the same way a missing scope does: `gh: Bad credentials (HTTP 401)` on the
+first API call, on a job that is not a required check, so nothing blocks and the
+drift monitor is simply blind. That happened between 2026-09-10 and 2026-09-12
+(#2938). Before the date above, regenerate the token with the same scope
+(this repository only, **Administration: Read-only**), update the repository
+secret under the same name, and record the new expiry here. Verify with a manual
+run: the `Fetch live required status checks` and `Reconcile ruleset against live
+protection` steps must both pass, not only the preflight.
+
 The monitor is **not** a required status check. It runs on a schedule (every six
 hours) and `workflow_dispatch` on the default branch only. A red run means live
 protection drifted from the checked-in artifact, or the read failed (auth, API,
