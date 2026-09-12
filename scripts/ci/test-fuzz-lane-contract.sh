@@ -119,6 +119,16 @@ ${shell_line:-<none>}"
 a preamble can redirect the step's stderr without appearing in the script at all. Found:\n  \
 $bash_env_line"
 
+  # The harness executes the raw run script, so a GitHub `${{ }}` expression in
+  # it is a bash bad-substitution failure under `set -u` before the guard ever
+  # runs -- which the execution below reports only as a missing wrapper
+  # message, misattributing the break to the guard. Matrix legs and other
+  # GitHub values must arrive through the step's `env:`, the way TARGET does.
+  if grep -qF '${{' <<<"$run_block"; then
+    fail "the \`Fuzz smoke\` run script uses a GitHub \`\${{ }}\` expression; pass the value \
+through the step's \`env:\` instead, so the contract harness executes the same script"
+  fi
+
   local sandbox rc=0
   local sentinel="CARGO-STDERR-SENTINEL-4d1f9a"
   sandbox="$(mktemp -d "${SANDBOX_ROOT}/wf.XXXXXX")"
@@ -149,8 +159,10 @@ the run below would exercise the real toolchain instead of the mock"
 
   # `env -u BASH_ENV`: whatever the caller's environment carries must not decide whether this proof
   # holds. The workflow is checked for it above; here the harness itself is put beyond its reach.
+  # TARGET names one matrix leg, the way RUNS names one budget: GitHub interpolates the step's
+  # `env:` before bash starts, and the harness stands in for that interpolation here.
   ( cd "$sandbox" && env -u BASH_ENV PATH="$sandbox/bin:$PATH" RUNNER_TEMP="$sandbox/tmp" \
-      FUZZ_TOOLCHAIN="nightly-mock" RUNS=1 MAX_TOTAL_TIME=1 \
+      FUZZ_TOOLCHAIN="nightly-mock" RUNS=1 MAX_TOTAL_TIME=1 TARGET="bundle_reader" \
       bash step.sh ) >"$sandbox/out" 2>"$sandbox/err" || rc=$?
 
   [[ "$rc" -ne 0 ]] \
@@ -352,6 +364,21 @@ if ( check_workflow "$quoted_env_mutant" ) >/dev/null 2>&1; then
 of the key rather than the key"
 fi
 echo "ok: a quoted \`BASH_ENV\` key turns the contract red"
+
+# Negative control: use a GitHub expression in the run script instead of the
+# step's `env:`. The harness executes the raw script, so `${{ }}` dies as a
+# bad substitution under `set -u` before the guard runs -- and without the
+# static check the failure would read as a missing guard message.
+expr_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
+sed 's|^          case "${TARGET}" in|          case "${{ matrix.target }}" in|' \
+  "$WORKFLOW" > "$expr_mutant"
+grep -q 'matrix.target' "$expr_mutant" \
+  || fail "the expression mutation did not apply, so it proves nothing"
+if ( check_workflow "$expr_mutant" ) >/dev/null 2>&1; then
+  fail "a GitHub expression in the run script left the contract green — the script the harness \
+executes is not the script the runner interpolates"
+fi
+echo "ok: a GitHub expression in the run script turns the contract red"
 
 echo "ok: the lock guard reports without diagnosing, keeps Cargo's stderr, and fails closed"
 echo "ok: FUZZ_TOOLCHAIN is dated (${PIN})"
