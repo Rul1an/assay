@@ -232,11 +232,9 @@ pub fn read_truncation(
         if !scope_covers_field(&obs.scope, pointer) {
             continue;
         }
-        if obs
-            .losses
-            .iter()
-            .any(|loss| pointer_covers(pointer, &loss.field))
-        {
+        if obs.losses.iter().any(|loss| {
+            pointer_covers(pointer, &loss.field) || pointer_covers(&loss.field, pointer)
+        }) {
             continue;
         }
         return TruncationReading::MeasuredClean {
@@ -272,14 +270,14 @@ fn reported_loss_at_or_under(
 ) -> bool {
     truncations
         .iter()
-        .any(|loss| pointer_covers(pointer, &loss.field))
+        .any(|loss| pointer_covers(pointer, &loss.field) || pointer_covers(&loss.field, pointer))
         || observations
             .iter()
             .filter(|obs| is_known_version(obs))
             .any(|obs| {
-                obs.losses
-                    .iter()
-                    .any(|loss| pointer_covers(pointer, &loss.field))
+                obs.losses.iter().any(|loss| {
+                    pointer_covers(pointer, &loss.field) || pointer_covers(&loss.field, pointer)
+                })
             })
 }
 
@@ -315,8 +313,7 @@ fn scope_covers_field(scope: &[String], pointer: &str) -> bool {
     scope.iter().any(|s| pointer_covers(s, pointer))
 }
 
-/// `parent` covers `child` when they are equal or `child` is a descendant segment.
-fn pointer_covers(parent: &str, child: &str) -> bool {
+pub(crate) fn pointer_covers(parent: &str, child: &str) -> bool {
     child == parent
         || (child.len() > parent.len()
             && child.as_bytes().get(parent.len()) == Some(&b'/')
