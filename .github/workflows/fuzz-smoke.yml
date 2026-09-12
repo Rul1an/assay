@@ -4,8 +4,14 @@ name: Verifier Fuzz Smoke
 # never runs in CI does not satisfy that invariant. This lane is deliberately a smoke test, not a
 # campaign: a fixed run and time budget on a PR, a longer nightly pass on a schedule. The semantic
 # oracle is not here -- it lives in the deterministic property tests, which run in required CI on
-# every PR. This lane answers one narrower question: does the verifier crash, hang, or exceed its
+# every PR. This lane answers one narrower question: does the target crash, hang, or exceed its
 # own resource ceilings on inputs nobody wrote down.
+#
+# Besides the verifier (`bundle_reader`), the matrix runs the MCP stdio JSON-RPC line handler
+# (`mcp_jsonrpc`, issue #2914: silence, id echo, and response-size invariants over the same
+# `handle_line` the server loop calls) and the `tools/call` decision inputs (`tool_call_decision`:
+# envelope classification plus the privileged-action classifier, asserting totality and
+# determinism). Every target gets the same PR/nightly budgets below.
 
 on:
   pull_request:
@@ -25,6 +31,8 @@ on:
       - "crates/assay-adapter-api/**"
       - "crates/assay-canonical/**"
       - "crates/assay-common/**"
+      - "crates/assay-mcp-server/**"
+      - "crates/assay-metrics/**"
       - "Cargo.toml"
       - ".github/workflows/fuzz-smoke.yml"
   schedule:
@@ -54,11 +62,15 @@ concurrency:
 
 jobs:
   fuzz-smoke:
-    name: bundle_reader (evidence chain)
+    name: ${{ matrix.target }} (fuzz smoke)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [bundle_reader, mcp_jsonrpc, tool_call_decision]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -88,32 +100,87 @@ jobs:
 
       - name: Assert the seed corpus is intact
         shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
           # An empty corpus turns this lane into a build check, which ADR-043 §3 says is not
           # sufficient. Names rather than a count: a count stays green when a seed is replaced by
           # an unrelated file, and the expansion seed in particular is the only one that reaches
           # the decompression path at all.
-          required=(
-            valid-single-event
-            valid-three-events
-            truncated-half
-            truncated-gzip-header
-            payload-mutated
-            digest-mutated
-            run-root-mutated
-            duplicate-member
-            unexpected-member
-            manifest-only
-            wrong-member-order
-            oversize-line
-            high-ratio-gzip
-            pax-header-past-decode-ceiling
-          )
+          case "${TARGET}" in
+            bundle_reader)
+              required=(
+                valid-single-event
+                valid-three-events
+                truncated-half
+                truncated-gzip-header
+                payload-mutated
+                digest-mutated
+                run-root-mutated
+                duplicate-member
+                unexpected-member
+                manifest-only
+                wrong-member-order
+                oversize-line
+                high-ratio-gzip
+                pax-header-past-decode-ceiling
+              )
+              ;;
+            mcp_jsonrpc)
+              # Frames from the outer-fallback contract: every notification
+              # shape, id:null, all three duplicate-member probes plus the
+              # escape-spelled duplicate id, the oversize refusal, and the
+              # envelope faults. Dropping one silently narrows the oracle.
+              required=(
+                valid-initialize
+                valid-tools-list
+                valid-tools-call
+                bad-initialize
+                notification-unknown-method
+                notification-cancelled
+                notification-initialized
+                notification-version-mismatch
+                id-null
+                duplicate-method
+                duplicate-params
+                duplicate-id
+                duplicate-id-escape
+                oversize-line
+                invalid-json
+                empty-line
+                unknown-method
+                version-refused
+                malformed-tools-call
+                unknown-tool
+              )
+              ;;
+            tool_call_decision)
+              required=(
+                valid-check-args
+                valid-policy-decide
+                unknown-tool
+                malformed-scalar
+                malformed-text
+                malformed-missing-name
+                malformed-name-type
+                malformed-args-type
+                default-arguments
+                hostile-name
+                envelope-with-on-error
+                direct-deploy-key
+                direct-slack-invite
+                direct-workspace-admin
+                direct-secret-args
+                direct-unknown-tool
+                direct-scalar-args
+              )
+              ;;
+          esac
           missing=0
           for seed in "${required[@]}"; do
-            if [ ! -s "fuzz/corpus/bundle_reader/${seed}" ]; then
-              echo "::error::missing or empty seed: ${seed}"
+            if [ ! -s "fuzz/corpus/${TARGET}/${seed}" ]; then
+              echo "::error::missing or empty seed: ${TARGET}/${seed}"
               missing=1
             fi
           done
@@ -123,6 +190,10 @@ jobs:
       - name: Fuzz smoke
         shell: bash
         env:
+          # Matrix leg as plain env: the lane-contract harness executes this
+          # script with mocked cargo, where a GitHub `${{ }}` expression is a
+          # bash bad-substitution failure before the guard ever runs.
+          TARGET: ${{ matrix.target }}
           # PR budget stays small so the lane is advisory-fast; the nightly run gets the longer one.
           RUNS: ${{ github.event_name == 'schedule' && '200000' || '20000' }}
           MAX_TOTAL_TIME: ${{ github.event_name == 'schedule' && '900' || '120' }}
@@ -132,6 +203,13 @@ jobs:
           # input. Pointing the output at a scratch directory keeps generated units out of the
           # working tree, so a CI run can never quietly grow the checked-in corpus.
           mkdir -p "${RUNNER_TEMP}/fuzz-out"
+          # The JSON-RPC line domain is single lines: cap inputs above the
+          # largest seed that must load (the 5 KB oversize line). bundle_reader
+          # keeps its 1 MiB ceiling for the bundle format it parses.
+          case "${TARGET}" in
+            bundle_reader) MAX_LEN=1048576 ;;
+            mcp_jsonrpc | tool_call_decision) MAX_LEN=16384 ;;
+          esac
           # Report what actually runs, so the log carries the toolchain rather than an assumption.
           rustc "+${FUZZ_TOOLCHAIN}" --version --verbose
           # Assert the checked-in lock is current before fuzzing. `cargo fuzz run` has no
@@ -150,13 +228,13 @@ jobs:
           # diagnosis. Pinned by `scripts/ci/test-fuzz-lane-contract.sh`.
           ( cd fuzz && cargo "+${FUZZ_TOOLCHAIN}" metadata --locked --format-version 1 >/dev/null ) \
             || { echo "::error::locked fuzz metadata validation failed; inspect the Cargo error above"; exit 1; }
-          cargo "+${FUZZ_TOOLCHAIN}" fuzz run bundle_reader \
-            "${RUNNER_TEMP}/fuzz-out" fuzz/corpus/bundle_reader \
+          cargo "+${FUZZ_TOOLCHAIN}" fuzz run "${TARGET}" \
+            "${RUNNER_TEMP}/fuzz-out" "fuzz/corpus/${TARGET}" \
             -- \
             -runs="${RUNS}" \
             -max_total_time="${MAX_TOTAL_TIME}" \
             -rss_limit_mb=2048 \
-            -max_len=1048576 \
+            -max_len="${MAX_LEN}" \
             -print_final_stats=1
 
       - name: Upload crash artifacts
@@ -164,6 +242,6 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         continue-on-error: true
         with:
-          name: fuzz-artifacts-bundle_reader
-          path: fuzz/artifacts/bundle_reader/
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}/
           if-no-files-found: ignore
