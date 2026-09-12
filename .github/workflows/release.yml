@@ -674,6 +674,231 @@ jobs:
           fi
 
   # ============================================================
+  # Publish a multi-arch GHCR image of the already-built
+  # assay-mcp-server linux binaries. Needs the GitHub Release so
+  # an image can never outlive a failed release. rc tags publish
+  # :vX.Y.Z only; X.Y and latest are stable releases only.
+  # ============================================================
+  publish-image:
+    name: Publish GHCR image
+    needs: [release-contract, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ghcr
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build-and-push.outputs.digest }}
+      image: ${{ steps.tags.outputs.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Download release binaries and SBOM
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.release-contract.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset_dir="${RUNNER_TEMP}/ghcr-assets"
+          mkdir -p "$asset_dir"
+          gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" --dir "$asset_dir" \
+            "assay-mcp-server-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            "assay-mcp-server-${VERSION}-x86_64-unknown-linux-gnu.tar.gz.sha256" \
+            "assay-mcp-server-${VERSION}-aarch64-unknown-linux-gnu.tar.gz" \
+            "assay-mcp-server-${VERSION}-aarch64-unknown-linux-gnu.tar.gz.sha256" \
+            "assay-${VERSION}-sbom-cyclonedx.tar.gz" \
+            "assay-${VERSION}-sbom-cyclonedx.tar.gz.sha256"
+          python3 scripts/ci/stage-mcp-server-image-binaries.py \
+            --archives-dir "$asset_dir" \
+            --output-dir docker/assay-mcp-server/binaries
+          (
+            cd "$asset_dir"
+            sha256sum -c "assay-${VERSION}-sbom-cyclonedx.tar.gz.sha256"
+          )
+          extract="${RUNNER_TEMP}/sbom-extract"
+          mkdir -p "$extract"
+          tar -xzf "$asset_dir/assay-${VERSION}-sbom-cyclonedx.tar.gz" -C "$extract"
+          found="$(find "$extract" -path '*crates/assay-mcp-server/assay-sbom.json' | head -n 1)"
+          if [[ -z "$found" || ! -f "$found" ]]; then
+            echo "assay-mcp-server CycloneDX SBOM not found in the release bundle" >&2
+            exit 1
+          fi
+          mkdir -p sbom/crates/assay-mcp-server
+          cp "$found" sbom/crates/assay-mcp-server/assay-sbom.json
+
+      - name: Compute image tags
+        id: tags
+        env:
+          VERSION: ${{ needs.release-contract.outputs.version }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner="$(printf '%s' "$REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/${owner}/assay-mcp-server"
+          {
+            echo "image=${image}"
+            echo "tags<<EOF"
+            echo "${image}:${VERSION}"
+            if [[ "$VERSION" != *-rc* && "$VERSION" != *-beta* ]]; then
+              xy="${VERSION#v}"
+              xy="${xy%.*}"
+              echo "${image}:${xy}"
+              echo "${image}:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build and push image
+        id: build-and-push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: docker/assay-mcp-server
+          file: docker/assay-mcp-server/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            VERSION=${{ needs.release-contract.outputs.version }}
+
+      - name: Attest image provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ghcr.io/rul1an/assay-mcp-server
+          subject-digest: ${{ steps.build-and-push.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Attest image SBOM
+        id: attest-image-sbom
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/rul1an/assay-mcp-server
+          subject-digest: ${{ steps.build-and-push.outputs.digest }}
+          sbom-path: sbom/crates/assay-mcp-server/assay-sbom.json
+          push-to-registry: true
+          create-storage-record: false
+
+  # Pulls the published digest anonymously. A private package fails here until
+  # the owner makes ghcr.io/rul1an/assay-mcp-server public; that is irreversible.
+  verify-published-image:
+    name: Verify published image (${{ matrix.os }})
+    needs: [release-contract, publish-image]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      attestations: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rust_target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Pull by digest without registry credentials
+        env:
+          IMAGE: ${{ needs.publish-image.outputs.image }}
+          DIGEST: ${{ needs.publish-image.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io || true
+          docker pull "${IMAGE}@${DIGEST}"
+
+      - name: Run --version as the image user
+        env:
+          IMAGE: ${{ needs.publish-image.outputs.image }}
+          DIGEST: ${{ needs.publish-image.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          user="$(docker image inspect --format '{{.Config.User}}' "${IMAGE}@${DIGEST}")"
+          if [[ "$user" != "65532:65532" ]]; then
+            echo "image user is ${user}, want 65532:65532" >&2
+            exit 1
+          fi
+          docker run --rm --read-only --network none "${IMAGE}@${DIGEST}" --version
+
+      - name: Byte-compare the image binary with the release tarball
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.release-contract.outputs.version }}
+          IMAGE: ${{ needs.publish-image.outputs.image }}
+          DIGEST: ${{ needs.publish-image.outputs.digest }}
+          RUST_TARGET: ${{ matrix.rust_target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset_dir="${RUNNER_TEMP}/verify-assets"
+          mkdir -p "$asset_dir"
+          archive="assay-mcp-server-${VERSION}-${RUST_TARGET}.tar.gz"
+          gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" --dir "$asset_dir" \
+            "$archive" "${archive}.sha256"
+          (
+            cd "$asset_dir"
+            sha256sum -c "${archive}.sha256"
+          )
+          mkdir -p "${RUNNER_TEMP}/extracted"
+          tar -xzf "${asset_dir}/${archive}" -C "${RUNNER_TEMP}/extracted"
+          release_bin="$(find "${RUNNER_TEMP}/extracted" -name assay-mcp-server -type f | head -n 1)"
+          if [[ -z "$release_bin" ]]; then
+            echo "release tarball did not contain assay-mcp-server" >&2
+            exit 1
+          fi
+          cid="$(docker create "${IMAGE}@${DIGEST}")"
+          docker cp "${cid}:/usr/local/bin/assay-mcp-server" "${RUNNER_TEMP}/from-image"
+          docker rm "$cid" >/dev/null
+          cmp "${RUNNER_TEMP}/from-image" "$release_bin"
+
+      - name: Verify image attestations
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.release-contract.outputs.version }}
+          IMAGE: ${{ needs.publish-image.outputs.image }}
+          DIGEST: ${{ needs.publish-image.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          subject="oci://${IMAGE}@${DIGEST}"
+          gh attestation verify "$subject" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+            --source-ref "refs/tags/${VERSION}" \
+            --predicate-type https://slsa.dev/provenance/v1
+          gh attestation verify "$subject" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+            --source-ref "refs/tags/${VERSION}" \
+            --predicate-type https://cyclonedx.org/bom
+
+  # ============================================================
   # Verify LSM Enforcement (Self-Hosted Gate)
   # ============================================================
   verify-lsm-blocking:
