@@ -333,8 +333,11 @@ def derive_carry(git: Git, reviewed: str, live: str) -> str:
     if produced != landed:
         raise GateError("carry_tree_mismatch", f"{produced} != {landed}")
     base = git.line("merge-base", reviewed, second)
-    reviewed_files = git.names("diff", "--name-only", base, reviewed)
-    advance_files = git.names("diff", "--name-only", reviewed, live)
+    # `--no-renames` on both sides: rename detection reports only a rename's new name, so an
+    # upstream rename of a reviewed file would leave the intersection empty and carry a path
+    # whose content the review never saw at that name. A rename is a touch.
+    reviewed_files = git.names("diff", "--no-renames", "--name-only", base, reviewed)
+    advance_files = git.names("diff", "--no-renames", "--name-only", reviewed, live)
     touched = sorted(set(reviewed_files) & set(advance_files))
     if touched:
         raise GateError("carry_touched_reviewed_file", ", ".join(touched))
@@ -591,6 +594,18 @@ def _carry_repo(root: str) -> dict[str, str]:
     _fx(root, "checkout", "-q", "-b", "up-conflict", base)
     conflict = _fx_commit(root, "upstream edits a reviewed line", {
         "shared.txt": shared(0, "line 1 from main\n")})
+    # A rename is a touch: rename detection would report only the new name, so the old name
+    # would drop out of the advance and the carry would take content the review never saw.
+    _fx(root, "checkout", "-q", "-b", "up-rename", base)
+    _fx(root, "mv", "shared.txt", "moved.txt")
+    _fx(root, "commit", "-q", "-m", "upstream renames a reviewed file")
+    rename = _fx(root, "rev-parse", "HEAD")
+    _fx(root, "checkout", "-q", "-b", "up-rename-edit", base)
+    _fx(root, "mv", "shared.txt", "moved.txt")
+    _fx_write(root, "moved.txt", shared(29, "line 30 from main after the rename\n"))
+    _fx(root, "add", "--", "moved.txt")
+    _fx(root, "commit", "-q", "-m", "upstream renames and edits a reviewed file")
+    rename_edit = _fx(root, "rev-parse", "HEAD")
 
     def merged(branch: str, other: str) -> str:
         _fx(root, "checkout", "-q", "-b", branch, "work")
@@ -599,7 +614,9 @@ def _carry_repo(root: str) -> dict[str, str]:
 
     heads = {"base": base, "reviewed": reviewed, "clean": clean,
              "live_clean": merged("live-clean", clean),
-             "live_overlap": merged("live-overlap", overlap)}
+             "live_overlap": merged("live-overlap", overlap),
+             "live_rename": merged("live-rename", rename),
+             "live_rename_edit": merged("live-rename-edit", rename_edit)}
     _fx(root, "checkout", "-q", "-b", "live-conflict", "work")
     _fx(root, "merge", "--no-ff", "-m", "Merge main into work", conflict, allow_fail=True)
     _fx_write(root, "shared.txt", shared(0, "line 1 resolved by hand\n"))
@@ -812,6 +829,10 @@ def self_test() -> int:
              carried(at["live_tree"], older)),
             ("an upstream edit to a reviewed file does not carry", "carry_touched_reviewed_file",
              carried(at["live_overlap"], older)),
+            ("an upstream rename of a reviewed file does not carry",
+             "carry_touched_reviewed_file", carried(at["live_rename"], older)),
+            ("an upstream rename that also edits a reviewed file does not carry",
+             "carry_touched_reviewed_file", carried(at["live_rename_edit"], older)),
             ("a head outside the reviewed history is refused", "carry_not_ancestor",
              lambda: _require_ancestor(Git(tmp), at["unrelated"], live)),
             ("a BLOCKED record does not carry", "no_current_record",
