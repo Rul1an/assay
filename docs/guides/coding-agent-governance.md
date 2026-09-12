@@ -88,6 +88,6 @@ The bundle carries one CloudEvents-style event per observed filesystem operation
 executed program, and containment degradation, plus a summary event, under the
 deterministic profile run id (event timestamps reflect emission time). A matching
 Assay-Harness recipe, gate, and report over this bundle is tracked next (see ADR-035
-and ADR-034).
+and ADR-051).
 
 See also: [Editor MCP recipe](editor-mcp-recipe.md), [ADR-035](../architecture/ADR-035-sandbox-the-agent-evidence.md).

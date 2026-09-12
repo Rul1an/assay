@@ -3,7 +3,7 @@
 ## Status
 Proposed (June 2026) — trigger-gated.
 
-Depends on ADR-034 (contract seam).
+Depends on ADR-051 (contract seam).
 
 ## Context
 
@@ -71,4 +71,4 @@ shape; it is intentionally not built, to avoid freezing a predicate no one consu
 ## References
 
 - `assay-evidence/src/mandate/signing.rs`
-- ADR-034 (contract seam)
+- ADR-051 (contract seam)

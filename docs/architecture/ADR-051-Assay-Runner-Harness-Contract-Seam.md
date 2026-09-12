@@ -1,4 +1,4 @@
-# ADR-034: Assay / Runner / Harness Contract Seam
+# ADR-051: Assay / Runner / Harness Contract Seam
 
 ## Status
 Proposed (June 2026)

@@ -3,7 +3,7 @@
 ## Status
 Proposed (June 2026) — depends on the sandbox evidence slice (ADR-035).
 
-Depends on ADR-034 (contract seam).
+Depends on ADR-051 (contract seam).
 
 ## Context
 
@@ -19,7 +19,7 @@ packages scorers as standard Python packages, and registers community evals thro
 Ship the claim-support scorer as a standard Python package and register it through the
 `/register/` flow, not as a fork or a core-repo change. Be a scorer inside Inspect; do
 not build a competing eval harness. The scorer and any other consumer share the same
-claim-class contract (ADR-034); the vocabulary is not forked. Because Inspect can
+claim-class contract (ADR-051); the vocabulary is not forked. Because Inspect can
 drive a coding agent as the agent-under-test, the scorer grades a coding-agent run
 observed by `assay sandbox` (ADR-035), giving one end-to-end demo.
 
@@ -43,4 +43,4 @@ shape.
 
 ## References
 
-- ADR-034 (contract seam), ADR-035 (sandbox evidence)
+- ADR-051 (contract seam), ADR-035 (sandbox evidence)
