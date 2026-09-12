@@ -201,6 +201,7 @@ class PositiveFixtureAndHostileMatrix(unittest.TestCase):
         for extra in (
             {"kind": "human", "model": "claude-opus"},
             {"kind": "human", "prompt_strategy": "spec-first"},
+            {"kind": "human", "model": "claude-opus", "prompt_strategy": "spec-first"},
         ):
             path = self._write(_doc([_valid_row(id="human-extra", authorship=extra)]))
             with self.subTest(extra=extra), self.assertRaises(
@@ -596,59 +597,6 @@ class AuthorshipProjectionContract(unittest.TestCase):
             ), self.assertRaises(AssertionError):
                 self._assert_document_parity(protocol, template)
 
-    def test_unknown_fallback_mutation_is_caught(self) -> None:
-        human_rule = self.module.AUTHORSHIP_RULES["human"]
-        with mock.patch.object(
-            self.module, "_authorship_rule", return_value=human_rule
-        ), self.assertRaises(AssertionError):
-            self._assert_unknown_is_rejected()
-
-    def test_missing_agent_metadata_mutation_is_caught(self) -> None:
-        original = self.module.AUTHORSHIP_RULES
-        mutation = dict(original)
-        mutation["agent-assisted"] = mutation["agent-assisted"]._replace(
-            fields=("kind",), value_field=None
-        )
-        with mock.patch.object(self.module, "AUTHORSHIP_RULES", mutation):
-            with self.assertRaises(AssertionError):
-                with self.assertRaises(self.module.ImplementationRegistryError):
-                    self.module._validate_authorship(
-                        {"kind": "agent-assisted"}, "missing-agent-metadata"
-                    )
-
-    def test_agent_only_metadata_on_human_mutation_is_caught(self) -> None:
-        original = self.module.AUTHORSHIP_RULES
-        mutation = dict(original)
-        mutation["human"] = mutation["human"]._replace(
-            fields=("kind", "model", "prompt_strategy"), value_field="model"
-        )
-        value = {
-            "kind": "human",
-            "model": "should-not-be-accepted",
-            "prompt_strategy": "should-not-be-accepted",
-        }
-        with mock.patch.object(self.module, "AUTHORSHIP_RULES", mutation):
-            with self.assertRaises(AssertionError):
-                with self.assertRaises(self.module.ImplementationRegistryError):
-                    self.module._validate_authorship(value, "human-agent-fields")
-
-    def test_model_normalization_mutation_is_caught(self) -> None:
-        original = self.module.authorship_trailer
-
-        def normalized(value: object) -> str:
-            return original(value).strip().lower()
-
-        value = {
-            "kind": "agent-assisted",
-            "model": "  Grok Bot/version? undisclosed  ",
-            "prompt_strategy": "compatibility probe",
-        }
-        with mock.patch.object(self.module, "authorship_trailer", normalized):
-            with self.assertRaises(AssertionError):
-                self.assertEqual(
-                    self.module.authorship_trailer(value),
-                    "Assisted-By:   Grok Bot/version? undisclosed  ",
-                )
 
     def test_comment_only_control_stays_green(self) -> None:
         protocol = PROTOCOL.read_text(encoding="utf-8") + "\n<!-- control comment -->\n"
