@@ -78,7 +78,7 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
     let f = File::open(bundle)
         .with_context(|| format!("failed to open bundle {}", bundle.display()))?;
 
-    let limits = VerifyLimits::default();
+    let limits = VerifyLimits::for_retained_events();
 
     // Load packs: explicit --pack or default (ADR-023)
     let (packs, is_default_pack) = if let Some(pack_refs) = &args.pack {

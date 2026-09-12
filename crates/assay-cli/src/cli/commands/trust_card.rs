@@ -39,9 +39,12 @@ fn cmd_generate(args: TrustCardGenerateArgs) -> Result<i32> {
         None
     };
 
-    let trust_basis =
-        generate_trust_basis(bundle, VerifyLimits::default(), TrustBasisOptions { lint })
-            .context("failed to generate trust basis for trust card")?;
+    let trust_basis = generate_trust_basis(
+        bundle,
+        VerifyLimits::for_retained_events(),
+        TrustBasisOptions { lint },
+    )
+    .context("failed to generate trust basis for trust card")?;
 
     let card = trust_basis_to_trust_card(&trust_basis);
 

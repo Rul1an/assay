@@ -147,7 +147,7 @@ fn verification_streams_where_the_reader_retains() {
     let baseline = LIVE.load(Ordering::Relaxed);
     PEAK.store(baseline, Ordering::Relaxed);
 
-    let reader = assay_evidence::bundle::BundleReader::open(std::io::Cursor::new(bundle))
+    let reader = assay_evidence::bundle::BundleReader::open(bundle.as_slice())
         .expect("the bundle must open");
     let retained = reader.events_raw().len();
     let reader_peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
@@ -157,5 +157,63 @@ fn verification_streams_where_the_reader_retains() {
         "the reader is documented to load events into memory ({retained} bytes here) but peaked at \
          {reader_peak}. If it has become streaming, the retention question is answered and this \
          test's rationale needs rewriting rather than deleting."
+    );
+    drop(reader);
+
+    // Same process-wide counters: a second `#[test]` would race this one. The discard path is
+    // the remaining untrusted shape — manifest plus event ceilings, no `events_content`.
+    let baseline = LIVE.load(Ordering::Relaxed);
+    PEAK.store(baseline, Ordering::Relaxed);
+
+    let info = assay_evidence::bundle::BundleInfo::peek_and_bound_events(
+        bundle.as_slice(),
+        VerifyLimits::default(),
+    )
+    .expect("peek_and_bound_events must apply event ceilings");
+    assert_eq!(info.manifest.event_count, 4_000);
+
+    let peek_peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
+    assert!(
+        peek_peak < ceiling,
+        "peek_and_bound_events held {peek_peak} bytes at peak for a bundle whose events decompress \
+         to {decompressed} bytes ({on_disk} on disk). That is the retain path — the caller asked \
+         only for the manifest and the event ceilings, not events_content."
+    );
+
+    let mut tight = VerifyLimits::for_retained_events();
+    tight.max_events_bytes = 1_000_000;
+    let baseline = LIVE.load(Ordering::Relaxed);
+    PEAK.store(baseline, Ordering::Relaxed);
+    let err = assay_evidence::bundle::BundleReader::open_with_limits(bundle.as_slice(), tight);
+    assert!(
+        err.is_err(),
+        "a 1 MiB events ceiling must refuse a bundle whose events decompress to {decompressed} bytes"
+    );
+    let tight_peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
+    assert!(
+        tight_peak < ceiling,
+        "tight-limit open held {tight_peak} bytes at peak ({decompressed} decompressed). Ignoring \
+         max_events_bytes and retaining under the 500 MiB default is the defect this pins."
+    );
+}
+
+#[test]
+fn retained_event_limits_are_tighter_than_the_default() {
+    let default = VerifyLimits::default();
+    let retain = VerifyLimits::for_retained_events();
+    assert!(
+        retain.max_events_bytes < default.max_events_bytes,
+        "for_retained_events must choose a tighter residency ceiling than the 500 MiB default"
+    );
+    assert_eq!(
+        retain.max_events_bytes, default.max_bundle_bytes,
+        "the retain ceiling is the compressed-bundle ceiling, not a second invented number"
+    );
+
+    let capped = VerifyLimits::for_retained_events_capped(4);
+    assert_eq!(capped.max_events, 4);
+    assert!(
+        capped.max_events_bytes < retain.max_events_bytes,
+        "a small event cap must also shrink max_events_bytes so open cannot hold the retain ceiling"
     );
 }

@@ -9,7 +9,7 @@
 
 use crate::exit_codes;
 use anyhow::{Context, Result};
-use assay_evidence::bundle::BundleReader;
+use assay_evidence::bundle::{BundleReader, VerifyLimits};
 use assay_evidence::types::EvidenceEvent;
 use clap::{Args, ValueEnum};
 use serde::Serialize;
@@ -66,7 +66,8 @@ pub fn cmd_verify_skill_supply_chain(args: VerifySkillSupplyChainArgs) -> Result
     let file = File::open(&args.bundle)
         .with_context(|| format!("failed to open bundle {}", args.bundle.display()))?;
     // Verify-before-read: bundle integrity first, carrier semantics second.
-    let reader = BundleReader::open(file).context("bundle integrity verification failed")?;
+    let reader = BundleReader::open_with_limits(file, VerifyLimits::for_retained_events())
+        .context("bundle integrity verification failed")?;
     let events = reader
         .events_vec()
         .context("failed to read bundle events")?;
