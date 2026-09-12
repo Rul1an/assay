@@ -10,7 +10,10 @@ cargo-fuzz = true
 [dependencies]
 assay-core = { path = "../crates/assay-core" }
 assay-evidence = { path = "../crates/assay-evidence" }
+assay-mcp-server = { path = "../crates/assay-mcp-server" }
 libfuzzer-sys = "0.4"
+serde = { version = "1.0", default-features = false, features = ["std"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
 serde_yaml = "0.9"
 
 [[bin]]
@@ -23,6 +26,20 @@ bench = false
 [[bin]]
 name = "bundle_reader"
 path = "fuzz_targets/bundle_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mcp_jsonrpc"
+path = "fuzz_targets/mcp_jsonrpc.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tool_call_decision"
+path = "fuzz_targets/tool_call_decision.rs"
 test = false
 doc = false
 bench = false
