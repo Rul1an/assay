@@ -121,8 +121,10 @@ It never checks out or executes PR-head code and has only `contents: read` and
 Posting a comment does not itself trigger a workflow. The normal path is to
 post the record while the PR is draft and then mark the PR ready for review.
 For an already-ready PR, rerun the workflow in GitHub Actions after posting the
-record. A later push triggers `synchronize`; the old record is stale and the
-new head needs a new independent review record before a rerun can pass.
+record. A later push triggers `synchronize`. If the new head is an upstream-advance
+merge, the checker re-derives the two AGENTS.md carry conditions from the
+commits and the older record still counts; otherwise the old record is stale
+and the new head needs a new independent review record before a rerun can pass.
 
 The workflow structure is cross-pinned from the existing required CI and
 host-capability roots. Classic branch protection requires its stable
