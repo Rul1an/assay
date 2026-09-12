@@ -316,6 +316,12 @@ def derive_carry(git: Git, reviewed: str, live: str) -> str:
     parent; a rewritten history has no such parent and is refused before any tree is compared.
     Nothing here reads the record: a record that merely claims a carry gets no credit.
     """
+    # Both shas reach `git` argv. A value that is not a lowercase 40-hex object id is not
+    # an object to ask about, and a leading dash would be read as an option: refuse it here,
+    # at the one place this checker runs a subprocess, so every caller is covered.
+    for sha in (reviewed, live):
+        if not isinstance(sha, str) or not HEX40.match(sha) or sha != sha.lower():
+            raise GateError("carry_malformed_sha", str(sha)[:64])
     git.ensure(reviewed, live)
     parents = git.line("rev-list", "--parents", "-n", "1", live).split()[1:]
     if len(parents) != 2:

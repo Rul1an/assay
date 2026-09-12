@@ -679,3 +679,55 @@ class CarryWithoutACheckoutTests(unittest.TestCase):
             chosen, note = MODULE._objects_root(root, "Rul1an/assay", {})
         self.assertEqual(chosen, str(root))
         self.assertEqual(note, "")
+
+
+class GateSetJudgementTests(unittest.TestCase):
+    """#2958 F2: the derivation carries one record; the gate judges the whole comment set."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.root = pathlib.Path(cls._tmp.name)
+        cls.heads = _carry_fixture(cls.root)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def _rows(self, gate):
+        return MODULE.review_candidates(
+            _record_pr(self.heads["reviewed"]), self.heads["clean"],
+            git_root=self.root, gate=gate)
+
+    def test_a_refusing_gate_stops_a_derivable_carry(self):
+        for reason in ("bot_carrier: Bot", "edited_current: updated_at != created_at",
+                       "ambiguous_current: 2", "supersede_refused: 7 is not older than 8"):
+            with self.subTest(reason=reason):
+                row = self._rows((False, reason))[0]
+                self.assertFalse(row["current_head"], "the set refuses, so nothing carries")
+                self.assertIn(reason, row["carry"])
+
+    def test_a_passing_gate_leaves_the_derivation_in_charge(self):
+        row = self._rows((True, "review-record-check would pass"))[0]
+        self.assertTrue(row["current_head"])
+        self.assertEqual(row["source"], "machine-comment-carry")
+
+    def test_no_gate_answer_keeps_the_derivation_alone(self):
+        row = self._rows(None)[0]
+        self.assertTrue(row["current_head"])
+
+
+class MalformedHeadShaNeverReachesGit(unittest.TestCase):
+    """#2958 F1: a record's head_sha is attacker-shaped text until it is 40 lowercase hex."""
+
+    def test_option_shaped_head_sha_is_refused_before_any_subprocess(self):
+        marker = pathlib.Path(tempfile.gettempdir()) / "landing-carry-injection-probe"
+        if marker.exists():
+            marker.unlink()
+        for bad in (f"--upload-pack=touch {marker}", "-x", "HEAD", "A" * 40, "", None):
+            with self.subTest(bad=bad):
+                carried, note = MODULE.carried_to_head(bad, "b" * 40, pathlib.Path("."), {})
+                self.assertFalse(carried)
+                if bad:
+                    self.assertIn("carry_malformed_sha", note)
+        self.assertFalse(marker.exists(), "a git option in a head_sha executed")

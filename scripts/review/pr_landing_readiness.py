@@ -14,6 +14,7 @@ from closing_keywords import closing_problems  # noqa: E402
 from assay_review_record_check import (  # noqa: E402
     GateError,
     Git,
+    evaluate,
     MARKER as REVIEW_RECORD_MARKER,
     _loose_object,
     derive_carry,
@@ -90,6 +91,14 @@ def validate_gh_command(args):
               and parts[3:5] == ["rules", "branches"]):
             encoded = parts[5]
             allowed_tail = ["--paginate", "--slurp"]
+        elif (len(parts) == 6 and parts[0] == "repos" and parts[3] == "issues"
+              and parts[4].isdigit() and int(parts[4]) > 0 and parts[5] == "comments"):
+            # The comment list the required checker reads, in the checker's own shape: it
+            # carries `user.type`, `created_at` and `updated_at`, which `gh pr view` does not.
+            parse_repo(f"{parts[1]}/{parts[2]}")
+            if args[3:] != ["--paginate", "--slurp"]:
+                raise SystemExit("unsupported GitHub command shape")
+            return
         elif (len(parts) == 6 and parts[0] == "repos"
               and parts[3:5] == ["issues", "comments"]
               and parts[5].isdigit() and int(parts[5]) > 0):
@@ -282,7 +291,32 @@ def carried_to_head(bound, head, git_root, cache, repo=None):
     return cache[bound]
 
 
-def review_candidates(pr, head, git_root=None, repo=None):
+def gate_answer(repo, number, head, branch_ref, git_root, cache):
+    """What the required `review-record-check` says about this head, from its own function.
+
+    The landing decision is that gate's decision. `evaluate` judges the whole comment set, not
+    one record: a bot carrier, an edited record, two current records or a refused supersede all
+    refuse there, and a record on an earlier head passes only through `derive_carry`. Asking it
+    here is what keeps the two gates from drifting apart again (#2958).
+    """
+    if "answer" not in cache:
+        try:
+            slurped = run_json([
+                "gh", "api", f"repos/{repo}/issues/{number}/comments",
+                "--paginate", "--slurp",
+            ])
+            comments = [c for page in (slurped or []) for c in (page or [])]
+            root, note = _objects_root(git_root, repo, cache.setdefault("_root", {}))
+            evaluate(head, branch_ref, comments, git_root=root)
+            cache["answer"] = (True, f"review-record-check would pass{note}")
+        except GateError as exc:
+            cache["answer"] = (False, f"{exc.reason}: {exc.detail}" if exc.detail else exc.reason)
+        except SystemExit:
+            raise
+    return cache["answer"]
+
+
+def review_candidates(pr, head, git_root=None, repo=None, gate=None):
     rows = []
     git_root = REPO_ROOT if git_root is None else git_root
     carries = {}
@@ -336,6 +370,11 @@ def review_candidates(pr, head, git_root=None, repo=None):
         earlier = record_head_sha(body)
         if earlier and earlier != head:
             carried, carry_note = carried_to_head(earlier, head, git_root, carries, repo)
+            if carried and gate is not None and not gate[0]:
+                # The derivation carries this record, but the gate judges the set: a bot
+                # carrier, an edit, an ambiguity or a refused supersede refuses there.
+                carried, carry_note = False, f"{carry_note}; gate refuses the set: {gate[1]}"
+
             reviewed = machine_review_candidate(body, author, earlier, pr.get("headRefName") or "")
             if reviewed and reviewed["validation_error"] is None:
                 rows.append({
@@ -445,7 +484,10 @@ def main():
     head = pr["headRefOid"]
     body_shas = SHA_RE.findall(pr.get("body") or "")
     body_mentions_head = head in body_shas
-    candidates = review_candidates(pr, head, repo=args.repo)
+    gate = gate_answer(args.repo, args.pr, head, pr.get("headRefName") or "",
+                       REPO_ROOT, {}) if any(
+        REVIEW_RECORD_MARKER in (c.get("body") or "") for c in pr.get("comments", [])) else None
+    candidates = review_candidates(pr, head, repo=args.repo, gate=gate)
     current_ready = [row for row in candidates if row["current_head"] and row["verdict"] == "READY"]
     current_blocked = [row for row in candidates if row["current_head"] and row["verdict"] == "BLOCKED"]
     failing = [check for check in required if check.get("bucket") == "fail"]
