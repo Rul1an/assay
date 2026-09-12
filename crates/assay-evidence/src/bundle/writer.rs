@@ -26,7 +26,7 @@
 mod writer_next;
 
 use anyhow::Result;
-use std::io::Read;
+use std::io::{Read, Write};
 
 pub use writer_next::errors::{ErrorClass, ErrorCode, VerifyError};
 /// The conditions a bundle must satisfy to exist, shared by the writer and the verifier.
@@ -70,9 +70,9 @@ pub(crate) fn check_entry_path_len(raw_len: usize, max_path_len: usize) -> Resul
 /// checked line length and event count, so the allocation happened before the dimensions that
 /// govern it were consulted, and `max_json_depth` never reached event lines on this path at all.
 /// Reading line by line refuses at the first line that crosses a ceiling.
-pub(crate) fn read_events_bounded<R: std::io::Read>(
+pub(crate) fn read_events_bounded<R: std::io::Read, W: Write>(
     reader: R,
-    out: &mut Vec<u8>,
+    out: &mut W,
     limits: VerifyLimits,
 ) -> anyhow::Result<()> {
     let mut reader = std::io::BufReader::new(reader);
@@ -87,7 +87,7 @@ pub(crate) fn read_events_bounded<R: std::io::Read>(
         }
         let payload = line.strip_suffix(b"\n").unwrap_or(&line);
         if payload.is_empty() {
-            out.extend_from_slice(&line);
+            out.write_all(&line).map_err(classify_reader_io)?;
             continue;
         }
 
@@ -118,7 +118,7 @@ pub(crate) fn read_events_bounded<R: std::io::Read>(
         crate::json_strict::validate_json_strict_with_depth(text, limits.max_json_depth)
             .map_err(|e| classify_strict_json(e, "Event", limits.max_json_depth))?;
 
-        out.extend_from_slice(&line);
+        out.write_all(&line).map_err(classify_reader_io)?;
     }
     Ok(())
 }

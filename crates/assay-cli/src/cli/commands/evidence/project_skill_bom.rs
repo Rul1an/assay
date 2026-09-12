@@ -38,7 +38,10 @@ pub fn cmd_project_skill_bom(args: ProjectSkillBomArgs) -> Result<i32> {
             return Ok(exit_codes::EXIT_CONFIG_ERROR);
         }
     };
-    let reader = match assay_evidence::bundle::BundleReader::open(file) {
+    let reader = match assay_evidence::bundle::BundleReader::open_with_limits(
+        file,
+        assay_evidence::VerifyLimits::for_retained_events(),
+    ) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: bundle integrity verification failed: {e}");
