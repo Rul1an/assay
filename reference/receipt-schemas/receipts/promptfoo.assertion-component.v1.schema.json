@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/v3.8.0/docs/reference/receipt-schemas/receipts/promptfoo.assertion-component.v1.schema.json",
+  "title": "Assay Promptfoo Assertion Component Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "source_system",
+    "source_surface",
+    "source_artifact_ref",
+    "source_artifact_digest",
+    "reducer_version",
+    "imported_at",
+    "assertion_type",
+    "result"
+  ],
+  "properties": {
+    "schema": { "const": "assay.receipt.promptfoo.assertion-component.v1" },
+    "source_system": { "const": "promptfoo" },
+    "source_surface": { "const": "cli-jsonl.gradingResult.componentResults" },
+    "source_artifact_ref": { "$ref": "#/$defs/boundedRef" },
+    "source_artifact_digest": { "$ref": "#/$defs/sha256Digest" },
+    "reducer_version": { "const": "assay-promptfoo-jsonl-component-result@0.1.0" },
+    "imported_at": { "type": "string", "format": "date-time" },
+    "assertion_type": { "const": "equals" },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pass", "score"],
+      "properties": {
+        "pass": { "type": "boolean" },
+        "score": { "enum": [0, 1] },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[^\\r\\n\\\"`{}]+$"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "boundedRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  }
+}

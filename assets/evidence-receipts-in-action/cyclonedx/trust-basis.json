@@ -1,0 +1,74 @@
+{
+  "claims": [
+    {
+      "id": "bundle_verified",
+      "level": "verified",
+      "source": "bundle_verification",
+      "boundary": "bundle-wide",
+      "note": null
+    },
+    {
+      "id": "signing_evidence_present",
+      "level": "absent",
+      "source": "bundle_proof_surface",
+      "boundary": "proof-surfaces-only",
+      "note": null
+    },
+    {
+      "id": "provenance_backed_claims_present",
+      "level": "absent",
+      "source": "bundle_proof_surface",
+      "boundary": "proof-surfaces-only",
+      "note": null
+    },
+    {
+      "id": "delegation_context_visible",
+      "level": "absent",
+      "source": "canonical_decision_evidence",
+      "boundary": "supported-delegated-flows-only",
+      "note": null
+    },
+    {
+      "id": "authorization_context_visible",
+      "level": "absent",
+      "source": "canonical_decision_evidence",
+      "boundary": "supported-auth-projected-flows-only",
+      "note": null
+    },
+    {
+      "id": "containment_degradation_observed",
+      "level": "absent",
+      "source": "canonical_event_presence",
+      "boundary": "supported-containment-fallback-paths-only",
+      "note": null
+    },
+    {
+      "id": "external_eval_receipt_boundary_visible",
+      "level": "absent",
+      "source": "external_evidence_receipt",
+      "boundary": "supported-external-eval-receipt-events-only",
+      "note": null
+    },
+    {
+      "id": "external_decision_receipt_boundary_visible",
+      "level": "absent",
+      "source": "external_decision_receipt",
+      "boundary": "supported-external-decision-receipt-events-only",
+      "note": null
+    },
+    {
+      "id": "external_inventory_receipt_boundary_visible",
+      "level": "verified",
+      "source": "external_inventory_receipt",
+      "boundary": "supported-external-inventory-receipt-events-only",
+      "note": null
+    },
+    {
+      "id": "applied_pack_findings_present",
+      "level": "absent",
+      "source": "pack_execution_results",
+      "boundary": "pack-execution-only",
+      "note": null
+    }
+  ]
+}

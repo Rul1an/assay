@@ -1,0 +1,11 @@
+{
+  "schema": "assay.runner.archive_manifest.v0",
+  "run_id": "run_fixture_001",
+  "files": {
+    "manifest.json": {
+      "path": "manifest.json",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "bytes": 0
+    }
+  }
+}

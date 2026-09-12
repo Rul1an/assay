@@ -1,0 +1,34 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "serialNumber": "urn:uuid:66666666-7777-8888-9999-000000000000",
+  "version": 1,
+  "components": [
+    {
+      "bom-ref": "pkg:huggingface/example/checkout-risk-model@def456",
+      "type": "machine-learning-model",
+      "publisher": "Example Inc.",
+      "name": "checkout-risk-model",
+      "version": "1.1.0",
+      "purl": "pkg:huggingface/example/checkout-risk-model@def456",
+      "modelCard": {
+        "bom-ref": "model-card-checkout-risk-model-v1-1",
+        "modelParameters": {
+          "datasets": [
+            {
+              "ref": "component-checkout-risk-training-data-v2"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "bom-ref": "component-checkout-risk-training-data-v2",
+      "type": "data",
+      "publisher": "Example Inc.",
+      "name": "Checkout Risk Training Data",
+      "version": "2026-04-29"
+    }
+  ]
+}

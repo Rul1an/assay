@@ -1,0 +1,40 @@
+{
+  "evidence_verify_cost/1000": {
+    "verify_ms_median": {
+      "value": 16.192958
+    }
+  },
+  "evidence_verify_cost/5000": {
+    "verify_ms_median": {
+      "value": 80.64770899999999
+    }
+  },
+  "evidence_verify_cost/10000": {
+    "verify_ms_median": {
+      "value": 160.365417
+    }
+  },
+  "evidence_verify_cost/50000": {
+    "verify_ms_median": {
+      "value": 801.434792
+    }
+  },
+  "evidence_verify_cost/100000": {
+    "verify_ms_median": {
+      "value": 1609.891083
+    }
+  },
+  "evidence_verify_cost/fit": {
+    "ms_per_1k_events": {
+      "value": 16.091622046185417
+    }
+  },
+  "evidence_dsse": {
+    "sign_ms_median": {
+      "value": 0.029416
+    },
+    "verify_ms_median": {
+      "value": 0.047834
+    }
+  }
+}

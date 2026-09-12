@@ -1,0 +1,16 @@
+{
+  "connection_direction": "outbound_only",
+  "kind": "synthetic_mcp_tunnel_transport_context",
+  "metadata_visible_to_transport_provider": [
+    "egress_ip",
+    "host_fingerprint",
+    "connection_timing",
+    "byte_volume",
+    "tunnel_subdomain"
+  ],
+  "payload_tls_boundary": "inner_tls_to_proxy",
+  "proxy_role": "routes_to_private_mcp_server",
+  "transport_claim": "transport_context_only",
+  "transport_profile": "mcp_tunnel_synthetic",
+  "upstream_authentication": "independent_oauth_or_bearer_token"
+}

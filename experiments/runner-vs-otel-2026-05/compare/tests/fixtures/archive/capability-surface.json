@@ -1,0 +1,11 @@
+{
+  "schema": "assay.runner.capability_surface.v0",
+  "run_id": "run_fixture_001",
+  "filesystem_paths": [
+    "/tmp/fixture/openai-agents-input.txt"
+  ],
+  "network_endpoints": [],
+  "process_execs": ["/usr/bin/node"],
+  "mcp_tools": ["read_file"],
+  "policy_decisions": ["allow:read_file"]
+}
