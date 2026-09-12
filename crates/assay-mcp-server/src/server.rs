@@ -266,6 +266,196 @@ impl JsonRpcResponse {
     }
 }
 
+/// What one stdio line turns into before any tool runs.
+///
+/// Returned by [`handle_line`], the sync prefix of the server loop. The loop
+/// itself matches on this, so the fuzzer and the server share one function
+/// rather than two implementations of the same rule.
+#[derive(Debug)]
+pub enum LineOutcome {
+    /// Write nothing to stdout (empty line, unparsable line, notification,
+    /// or `notifications/initialized` with an id).
+    Silent,
+    /// Write this single line to stdout. At most one per input line.
+    Respond(String),
+    /// A well-formed `tools/call` for a known tool: the loop must execute it
+    /// asynchronously. Carries everything the async half needs. Boxed: the
+    /// plan is an order of magnitude larger than the other variants.
+    ExecuteTool(Box<ToolCallPlan>),
+}
+
+/// The async half of a `tools/call` line, planned by [`handle_line`].
+#[derive(Debug)]
+pub struct ToolCallPlan {
+    /// The id the eventual response must echo (`None` serializes as null).
+    pub response_id: Option<Value>,
+    /// Validated tool name: a known tool, so the loop must not re-check membership.
+    pub name: String,
+    /// Validated arguments object (defaults to `{}` when absent).
+    pub arguments: Value,
+    /// Full params object; the loop reads `_meta.traceparent` from it.
+    /// Always `Some`: `tools::classify_call_tool_params` rejects a missing
+    /// params object, so a plan only exists past that gate.
+    pub params: Option<Value>,
+}
+
+/// Largest fixed-shape response the line handler can emit above the input.
+///
+/// Every response template is fixed-size except the `-32022` refusal, which
+/// echoes the requested version string (bounded by the input line), and
+/// `tools/list`, which carries the advertised tool surface. This ceiling
+/// covers that surface; `tools_list_response_fits_the_fuzz_overhead` fails if
+/// the surface outgrows it, so the bound cannot drift silently.
+pub const MAX_RESPONSE_OVERHEAD_BYTES: usize = 64 * 1024;
+
+/// Serialize one response line. Total over these shapes: `Value` has no
+/// non-string map keys and JSON text cannot hold non-finite floats, and the
+/// nesting depth of anything that reaches here is capped by serde_json's
+/// parse recursion limit, so serializing cannot fail or overflow the stack.
+fn respond_json(resp: JsonRpcResponse) -> String {
+    serde_json::to_string(&resp).expect("JSON-RPC response serialization is total")
+}
+
+/// Handle one stdio line: the sync prefix of [`Server::run`]'s loop.
+///
+/// `line` is one `BufRead::lines` item, `max_msg_bytes` is
+/// [`ServerConfig::max_msg_bytes`](crate::config::ServerConfig::max_msg_bytes),
+/// and `rid` only labels tracing diagnostics. The return value is a pure
+/// function of `(line, max_msg_bytes)`; the only other caller-observable
+/// effect is tracing diagnostics, which the fuzz target runs without a
+/// subscriber.
+///
+/// Order is load-bearing and mirrors the loop this was extracted from:
+/// oversize refusal first (the id is unknown, so null), then empty, then the
+/// single typed parse (which rejects duplicate members), then the
+/// notification skip (absent `id`), then the revision gate, then dispatch.
+pub fn handle_line(line: &str, max_msg_bytes: usize, rid: &str) -> LineOutcome {
+    if line.len() > max_msg_bytes {
+        tracing::warn!(
+            target: "assay_mcp_server",
+            event="limit_exceeded",
+            rid=%rid,
+            bytes_in=line.len(),
+            max=max_msg_bytes
+        );
+
+        // Pre-parse: Request id is unknown, so JSON-RPC requires id null. This is a
+        // transport refusal (-32000 server error), not CallToolResult / tool-domain
+        // E_LIMIT_EXCEEDED, and must not reflect the rejected line.
+        let resp = JsonRpcResponse::error_with_data(
+            None,
+            -32000,
+            "Message too large".to_string(),
+            serde_json::json!({
+                "kind": "transport_limit",
+                "limit": max_msg_bytes,
+            }),
+        );
+        return LineOutcome::Respond(respond_json(resp));
+    }
+
+    if line.trim().is_empty() {
+        return LineOutcome::Silent;
+    }
+
+    // Parse the line directly into the typed request: one parse, not
+    // Value-then-from_value. The Value map keeps the last of
+    // duplicate members while the typed parser rejects them, so the
+    // two-step shape answered duplicate-member requests last-wins.
+    let req: JsonRpcRequest = match serde_json::from_str(line) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(
+                event="json_parse_error",
+                rid=%rid,
+                error=%e
+            );
+            // Not a request: invalid JSON, a scalar/array line, or an
+            // object that is not a valid request (missing member,
+            // wrong type, duplicate member). All stay silent.
+            return LineOutcome::Silent;
+        }
+    };
+
+    // JSON-RPC 2.0 / MCP: a notification (no `id` member) MUST NOT be
+    // answered, for any method, known or unknown. Presence of the key
+    // decides, not its value: `"id": null` is `Some(None)` — a
+    // request — and keeps its response.
+    if req.id.is_none() {
+        tracing::info!(event="notification_skipped", rid=%rid);
+        return LineOutcome::Silent;
+    }
+
+    // Revision before dispatch. A revision this server does not implement is refused by name,
+    // with the supported set in `data`, rather than served as whatever the method happens
+    // to do -- which is the silent best-effort the 2026-07-28 spec replaced.
+    if let Err(data) = check_request_version(req.params.as_ref()) {
+        let resp = JsonRpcResponse::error_with_data(
+            req.response_id(),
+            ERROR_UNSUPPORTED_PROTOCOL_VERSION,
+            "unsupported protocol version".to_string(),
+            data,
+        );
+        return LineOutcome::Respond(respond_json(resp));
+    }
+
+    // Dispatch. Destructured so the `tools/call` arm can move `params` into
+    // the plan while the other arms only need the id.
+    let JsonRpcRequest {
+        method, params, id, ..
+    } = req;
+    let response_id = id.clone().flatten();
+    match method.as_str() {
+        "initialize" => match LegacyProtocolVersion::negotiate(params.as_ref()) {
+            Ok(version) => LineOutcome::Respond(respond_json(JsonRpcResponse::ok(
+                response_id,
+                initialize_result(version),
+            ))),
+            Err(()) => LineOutcome::Respond(respond_json(JsonRpcResponse::error(
+                response_id,
+                -32602,
+                INVALID_INITIALIZE_PARAMS.to_string(),
+            ))),
+        },
+        "notifications/initialized" => {
+            // Reached only with an `id` present: id-less lines exit at
+            // the notification skip above. Staying silent here is
+            // pre-existing (Slice C keeps request handling unchanged);
+            // a later slice may answer `-32600`/`-32601` instead.
+            tracing::info!(event="initialized", rid=%rid);
+            LineOutcome::Silent
+        }
+        "tools/list" => {
+            let tool_list = tools::list_tools();
+            LineOutcome::Respond(respond_json(JsonRpcResponse::ok(
+                response_id,
+                serde_json::json!({
+                    "tools": tool_list
+                }),
+            )))
+        }
+        "tools/call" => match tools::classify_call_tool_params(params.as_ref()) {
+            Err(fault) => LineOutcome::Respond(respond_json(JsonRpcResponse::error_with_data(
+                response_id,
+                fault.code(),
+                fault.message().to_string(),
+                fault.data(),
+            ))),
+            Ok(dispatch) => LineOutcome::ExecuteTool(Box::new(ToolCallPlan {
+                response_id,
+                name: dispatch.name,
+                arguments: dispatch.arguments,
+                params,
+            })),
+        },
+        _ => LineOutcome::Respond(respond_json(JsonRpcResponse::error(
+            response_id,
+            ERROR_METHOD_NOT_FOUND,
+            "Method not found".to_string(),
+        ))),
+    }
+}
+
 pub struct Server;
 
 use crate::cache::PolicyCaches;
@@ -298,259 +488,156 @@ impl Server {
             let line = line?;
             let rid = next_rid();
 
-            if line.len() > cfg.max_msg_bytes {
-                tracing::warn!(
-                    target: "assay_mcp_server",
-                    event="limit_exceeded",
-                    rid=%rid,
-                    bytes_in=line.len(),
-                    max=cfg.max_msg_bytes
-                );
+            // Sync prefix shared with the `mcp_jsonrpc` fuzz target: one
+            // function plans the line, the loop only executes the plan.
+            // At most one response per input line, by construction.
+            let plan = match handle_line(&line, cfg.max_msg_bytes, &rid) {
+                LineOutcome::Silent => continue,
+                LineOutcome::Respond(resp_json) => {
+                    writeln!(stdout, "{resp_json}")?;
+                    stdout.flush()?;
+                    continue;
+                }
+                LineOutcome::ExecuteTool(plan) => plan,
+            };
 
-                // Pre-parse: Request id is unknown, so JSON-RPC requires id null. This is a
-                // transport refusal (-32000 server error), not CallToolResult / tool-domain
-                // E_LIMIT_EXCEEDED, and must not reflect the rejected line.
-                let resp = JsonRpcResponse::error_with_data(
-                    None,
-                    -32000,
-                    "Message too large".to_string(),
-                    serde_json::json!({
-                        "kind": "transport_limit",
-                        "limit": cfg.max_msg_bytes,
-                    }),
-                );
-                let resp_json = serde_json::to_string(&resp)?;
-                writeln!(stdout, "{}", resp_json)?;
-                stdout.flush()?;
-                continue;
-            }
+            // A planned `tools/call` for a known tool: execute it. Envelope
+            // classification already happened in `handle_line`; `plan` carries
+            // the validated dispatch, so the loop must not re-derive it.
+            let ToolCallPlan {
+                response_id,
+                name,
+                arguments,
+                params,
+            } = *plan;
+            let name = name.as_str();
+            let args = &arguments;
 
-            if line.trim().is_empty() {
-                continue;
-            }
+            let bytes_in = line.len();
+            let args_bytes = serde_json::to_vec(args).map(|b| b.len()).unwrap_or(0);
 
-            // Parse the line directly into the typed request: one parse, not
-            // Value-then-from_value. The Value map keeps the last of
-            // duplicate members while the typed parser rejects them, so the
-            // two-step shape answered duplicate-member requests last-wins.
-            let req: JsonRpcRequest = match serde_json::from_str(&line) {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::warn!(
-                        event="json_parse_error",
-                        rid=%rid,
-                        error=%e
+            let start = std::time::Instant::now();
+
+            tracing::info!(
+               event="tool_call_start",
+               rid=%rid,
+               rpc_id=?response_id,
+               bytes_in=bytes_in,
+               args_bytes=args_bytes,
+            );
+
+            // Metered billing telemetry
+            assay_metrics::usage::log_usage_event("policy_check", 1);
+
+            // Execute with timeout
+            let fut = tools::handle_call(&ctx, name, args);
+            let result = match timeout(Duration::from_millis(cfg.timeout_ms), fut).await {
+                Ok(Ok(value)) => value,
+                Ok(Err(_error)) => {
+                    tracing::error!(
+                        event = "tool_execution_error",
+                        rid = %rid,
+                        rpc_id = ?response_id,
+                        duration_ms = start.elapsed().as_millis() as u64,
+                        code = "E_INTERNAL"
                     );
-                    // Not a request: invalid JSON, a scalar/array line, or an
-                    // object that is not a valid request (missing member,
-                    // wrong type, duplicate member). All stay silent.
-                    continue;
+                    fail_closed_tool_result("E_INTERNAL", TOOL_EXECUTION_FAILED)?
+                }
+                Err(_) => {
+                    let dur = start.elapsed().as_millis() as u64;
+                    tracing::warn!(
+                       event="tool_call_timeout",
+                       rid=%rid,
+                       rpc_id=?response_id,
+                       duration_ms=dur,
+                       code="E_TIMEOUT"
+                    );
+                    fail_closed_tool_result("E_TIMEOUT", TOOL_EXECUTION_TIMED_OUT)?
                 }
             };
 
-            // JSON-RPC 2.0 / MCP: a notification (no `id` member) MUST NOT be
-            // answered, for any method, known or unknown. Presence of the key
-            // decides, not its value: `"id": null` is `Some(None)` — a
-            // request — and keeps its response.
-            if req.id.is_none() {
-                tracing::info!(event="notification_skipped", rid=%rid);
-                continue;
-            }
-
-            // Revision before dispatch. A revision this server does not implement is refused by name,
-            // with the supported set in `data`, rather than served as whatever the method happens
-            // to do -- which is the silent best-effort the 2026-07-28 spec replaced.
-            if let Err(data) = check_request_version(req.params.as_ref()) {
-                let resp = JsonRpcResponse::error_with_data(
-                    req.response_id(),
-                    ERROR_UNSUPPORTED_PROTOCOL_VERSION,
-                    "unsupported protocol version".to_string(),
-                    data,
+            let dur = start.elapsed().as_millis() as u64;
+            // Log outcome
+            let (allowed, is_error, has_error) = classify_tool_result(&result);
+            if let Some(err) = result.get("error") {
+                let code = err.get("code").and_then(|v| v.as_str()).unwrap_or("");
+                tracing::info!(
+                  event="tool_call_done",
+                  rid=%rid,
+                  rpc_id=?response_id,
+                  duration_ms=dur,
+                  outcome="app_error",
+                  allowed=allowed,
+                  code=code
                 );
-                let resp_json = serde_json::to_string(&resp)?;
-                writeln!(stdout, "{}", resp_json)?;
-                stdout.flush()?;
-                continue;
+            } else {
+                tracing::info!(
+                  event="tool_call_done",
+                  rid=%rid,
+                  rpc_id=?response_id,
+                  duration_ms=dur,
+                  outcome="ok",
+                  allowed=allowed
+                );
             }
 
-            // Dispatch
-            let resp = match req.method.as_str() {
-                "initialize" => match LegacyProtocolVersion::negotiate(req.params.as_ref()) {
-                    Ok(version) => {
-                        JsonRpcResponse::ok(req.response_id(), initialize_result(version))
-                    }
-                    Err(()) => JsonRpcResponse::error(
-                        req.response_id(),
-                        -32602,
-                        INVALID_INITIALIZE_PARAMS.to_string(),
+            // P57b: emit the observed tool decision (assay.tool_decision_surface.v0) as
+            // its own structured event. Redaction and the asserted-vs-verified rule are
+            // enforced inside build_decision; this site never has SaaS-verified evidence.
+            {
+                use crate::tool_decision::{build_decision, Effect, ObservedCall};
+                let (effect, status) = if let Some(code) = result
+                    .get("error")
+                    .and_then(|e| e.get("code"))
+                    .and_then(|v| v.as_str())
+                {
+                    (Effect::Error, code.to_string())
+                } else if allowed {
+                    (Effect::Allow, "success".to_string())
+                } else {
+                    (Effect::Deny, "blocked".to_string())
+                };
+                let decision = build_decision(&ObservedCall {
+                    server_id: "mcp",
+                    tool_name: name,
+                    // Inspected transiently by the classifier to project named target
+                    // fields (hashed); never copied into the record verbatim.
+                    args,
+                    effect,
+                    status: &status,
+                    rule_id: None,
+                    // SEP-414 (MCP 2026-07-28): trace context travels in `_meta`.
+                    // Validation and basis typing happen inside build_decision.
+                    traceparent: crate::tool_decision::traceparent_from_params(
+                        params
+                            .as_ref()
+                            .expect("classify_call_tool_params accepted params"),
                     ),
-                },
-                "notifications/initialized" => {
-                    // Reached only with an `id` present: id-less lines exit at
-                    // the notification skip above. Staying silent here is
-                    // pre-existing (Slice C keeps request handling unchanged);
-                    // a later slice may answer `-32600`/`-32601` instead.
-                    tracing::info!(event="initialized", rid=%rid);
-                    continue;
-                }
-                "tools/list" => {
-                    let tool_list = tools::list_tools();
-                    JsonRpcResponse::ok(
-                        req.response_id(),
-                        serde_json::json!({
-                            "tools": tool_list
-                        }),
-                    )
-                }
-                "tools/call" => {
-                    match tools::classify_call_tool_params(req.params.as_ref()) {
-                        Err(fault) => JsonRpcResponse::error_with_data(
-                            req.response_id(),
-                            fault.code(),
-                            fault.message().to_string(),
-                            fault.data(),
-                        ),
-                        Ok(dispatch) => {
-                            let name = dispatch.name.as_str();
-                            let args = &dispatch.arguments;
+                });
+                tracing::info!(
+                    event = "tool_decision",
+                    rid = %rid,
+                    rpc_id = ?response_id,
+                    decision = %serde_json::to_string(&decision).unwrap_or_default(),
+                );
+            }
 
-                            let bytes_in = line.len();
-                            let args_bytes = serde_json::to_vec(args).map(|b| b.len()).unwrap_or(0);
-
-                            let start = std::time::Instant::now();
-
-                            tracing::info!(
-                               event="tool_call_start",
-                               rid=%rid,
-                               rpc_id=?req.response_id(),
-                               bytes_in=bytes_in,
-                               args_bytes=args_bytes,
-                            );
-
-                            // Metered billing telemetry
-                            assay_metrics::usage::log_usage_event("policy_check", 1);
-
-                            // Execute with timeout
-                            let fut = tools::handle_call(&ctx, name, args);
-                            let result = match timeout(Duration::from_millis(cfg.timeout_ms), fut)
-                                .await
-                            {
-                                Ok(Ok(value)) => value,
-                                Ok(Err(_error)) => {
-                                    tracing::error!(
-                                        event = "tool_execution_error",
-                                        rid = %rid,
-                                        rpc_id = ?req.response_id(),
-                                        duration_ms = start.elapsed().as_millis() as u64,
-                                        code = "E_INTERNAL"
-                                    );
-                                    fail_closed_tool_result("E_INTERNAL", TOOL_EXECUTION_FAILED)?
-                                }
-                                Err(_) => {
-                                    let dur = start.elapsed().as_millis() as u64;
-                                    tracing::warn!(
-                                       event="tool_call_timeout",
-                                       rid=%rid,
-                                       rpc_id=?req.response_id(),
-                                       duration_ms=dur,
-                                       code="E_TIMEOUT"
-                                    );
-                                    fail_closed_tool_result("E_TIMEOUT", TOOL_EXECUTION_TIMED_OUT)?
-                                }
-                            };
-
-                            let dur = start.elapsed().as_millis() as u64;
-                            // Log outcome
-                            let (allowed, is_error, has_error) = classify_tool_result(&result);
-                            if let Some(err) = result.get("error") {
-                                let code = err.get("code").and_then(|v| v.as_str()).unwrap_or("");
-                                tracing::info!(
-                                  event="tool_call_done",
-                                  rid=%rid,
-                                  rpc_id=?req.response_id(),
-                                  duration_ms=dur,
-                                  outcome="app_error",
-                                  allowed=allowed,
-                                  code=code
-                                );
-                            } else {
-                                tracing::info!(
-                                  event="tool_call_done",
-                                  rid=%rid,
-                                  rpc_id=?req.response_id(),
-                                  duration_ms=dur,
-                                  outcome="ok",
-                                  allowed=allowed
-                                );
-                            }
-
-                            // P57b: emit the observed tool decision (assay.tool_decision_surface.v0) as
-                            // its own structured event. Redaction and the asserted-vs-verified rule are
-                            // enforced inside build_decision; this site never has SaaS-verified evidence.
-                            {
-                                use crate::tool_decision::{build_decision, Effect, ObservedCall};
-                                let (effect, status) = if let Some(code) = result
-                                    .get("error")
-                                    .and_then(|e| e.get("code"))
-                                    .and_then(|v| v.as_str())
-                                {
-                                    (Effect::Error, code.to_string())
-                                } else if allowed {
-                                    (Effect::Allow, "success".to_string())
-                                } else {
-                                    (Effect::Deny, "blocked".to_string())
-                                };
-                                let decision = build_decision(&ObservedCall {
-                                    server_id: "mcp",
-                                    tool_name: name,
-                                    // Inspected transiently by the classifier to project named target
-                                    // fields (hashed); never copied into the record verbatim.
-                                    args,
-                                    effect,
-                                    status: &status,
-                                    rule_id: None,
-                                    // SEP-414 (MCP 2026-07-28): trace context travels in `_meta`.
-                                    // Validation and basis typing happen inside build_decision.
-                                    traceparent: crate::tool_decision::traceparent_from_params(
-                                        req.params
-                                            .as_ref()
-                                            .expect("classify_call_tool_params accepted params"),
-                                    ),
-                                });
-                                tracing::info!(
-                                    event = "tool_decision",
-                                    rid = %rid,
-                                    rpc_id = ?req.response_id(),
-                                    decision = %serde_json::to_string(&decision).unwrap_or_default(),
-                                );
-                            }
-
-                            // MCP Compliance: wrap every tool outcome in CallToolResult.
-                            let json_text =
-                                serde_json::to_string_pretty(&result).unwrap_or_default();
-                            let mut mcp_result = serde_json::json!({
-                                "content": [{"type": "text", "text": json_text}],
-                                "isError": is_error
-                            });
-                            // Mirror the already-bounded ToolError value, not a second serializer.
-                            // A plain policy denial is isError too, but has no typed error to mirror.
-                            if has_error {
-                                mcp_result["structuredContent"] = result;
-                            }
-                            JsonRpcResponse::ok(req.response_id(), mcp_result)
-                        }
-                    }
-                }
-                _ => JsonRpcResponse::error(
-                    req.response_id(),
-                    ERROR_METHOD_NOT_FOUND,
-                    "Method not found".to_string(),
-                ),
-            };
+            // MCP Compliance: wrap every tool outcome in CallToolResult.
+            let json_text = serde_json::to_string_pretty(&result).unwrap_or_default();
+            let mut mcp_result = serde_json::json!({
+                "content": [{"type": "text", "text": json_text}],
+                "isError": is_error
+            });
+            // Mirror the already-bounded ToolError value, not a second serializer.
+            // A plain policy denial is isError too, but has no typed error to mirror.
+            if has_error {
+                mcp_result["structuredContent"] = result;
+            }
+            let resp = JsonRpcResponse::ok(response_id, mcp_result);
 
             // Send Response
             let resp_json = serde_json::to_string(&resp)?;
-            writeln!(stdout, "{}", resp_json)?;
+            writeln!(stdout, "{resp_json}")?;
             stdout.flush()?;
         }
 
@@ -807,5 +894,228 @@ mod claims_boundary_tests {
                 .and_then(|n| n.as_str()),
             Some("assay-mcp-server")
         );
+    }
+}
+
+/// Contract tests for [`super::handle_line`], the sync prefix of the stdio
+/// loop shared with the `mcp_jsonrpc` fuzz target.
+///
+/// These pin the wire frames from `tests/outer_fallback_contract.rs` at the
+/// function level, so the extraction cannot change what the loop does and the
+/// fuzz oracle has a deterministic premise to assert.
+#[cfg(test)]
+mod line_handler_tests {
+    use super::{handle_line, LineOutcome, MAX_RESPONSE_OVERHEAD_BYTES};
+    use serde_json::{json, Value};
+
+    const MAX: usize = 1_000;
+
+    fn assert_silent(line: &str) {
+        match handle_line(line, MAX, "test") {
+            LineOutcome::Silent => {}
+            outcome => panic!("expected silence, got {outcome:?} for {line}"),
+        }
+    }
+
+    fn respond(line: &str) -> Value {
+        match handle_line(line, MAX, "test") {
+            LineOutcome::Respond(text) => {
+                serde_json::from_str(&text).expect("response line parses")
+            }
+            outcome => panic!("expected a response line, got {outcome:?} for {line}"),
+        }
+    }
+
+    fn assert_outcome_eq(line: &str) {
+        let first = handle_line(line, MAX, "test");
+        let second = handle_line(line, MAX, "test");
+        let key = |outcome: &LineOutcome| match outcome {
+            LineOutcome::Silent => "silent".to_string(),
+            LineOutcome::Respond(text) => format!("respond:{text}"),
+            LineOutcome::ExecuteTool(plan) => format!(
+                "execute:{}:{}:{}",
+                serde_json::to_string(&plan.response_id).expect("id serializes"),
+                plan.name,
+                serde_json::to_string(&plan.arguments).expect("args serialize"),
+            ),
+        };
+        assert_eq!(key(&first), key(&second), "not deterministic for {line}");
+    }
+
+    #[test]
+    fn notifications_produce_no_output() {
+        for line in [
+            r#"{"jsonrpc":"2.0","method":"no/such/method"}"#,
+            r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{}}"#,
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#,
+            // A notification the version gate would have rejected stays silent too.
+            r#"{"jsonrpc":"2.0","method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2099-01-01"}}}"#,
+        ] {
+            assert_silent(line);
+            assert_outcome_eq(line);
+        }
+    }
+
+    #[test]
+    fn null_id_is_a_request_not_a_notification() {
+        let response = respond(r#"{"jsonrpc":"2.0","method":"tools/list","params":{},"id":null}"#);
+        assert_eq!(response.get("id"), Some(&Value::Null), "{response}");
+        assert!(response.get("result").is_some(), "{response}");
+        assert_outcome_eq(r#"{"jsonrpc":"2.0","method":"tools/list","params":{},"id":null}"#);
+    }
+
+    #[test]
+    fn duplicate_top_level_members_produce_no_output() {
+        for line in [
+            // Duplicate method: last-wins would answer tools/list for id 3.
+            r#"{"jsonrpc":"2.0","method":"no/such","method":"tools/list","params":{},"id":3}"#,
+            // Duplicate params: last-wins would take the version-mismatched one.
+            r#"{"jsonrpc":"2.0","method":"tools/list","params":{},"params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2099-01-01"}},"id":4}"#,
+            // Duplicate id: last-wins would answer with id 62.
+            r#"{"jsonrpc":"2.0","method":"tools/list","params":{},"id":61,"id":62}"#,
+        ] {
+            assert_silent(line);
+            assert_outcome_eq(line);
+        }
+    }
+
+    #[test]
+    fn empty_and_unparsable_lines_are_silent() {
+        for line in [
+            "",
+            "   ",
+            "\n",
+            "NOT_JSON",
+            "42",
+            "[1, 2]",
+            r#""just a string""#,
+            // Valid JSON but not a request: missing method.
+            r#"{"jsonrpc":"2.0","id":1}"#,
+        ] {
+            assert_silent(line);
+            assert_outcome_eq(line);
+        }
+    }
+
+    #[test]
+    fn oversize_line_is_refused_with_id_null() {
+        let sentinel = "OVERSIZE_REFUSAL_SENTINEL";
+        let line = format!(
+            "{{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{{\"huge\":\"{sentinel}{}\"}},\"id\":1}}",
+            "x".repeat(2_000)
+        );
+        assert!(line.len() > MAX, "fixture must exceed the limit");
+        let response = respond(&line);
+        assert_eq!(response.get("id"), Some(&Value::Null), "{response}");
+        assert!(response.get("result").is_none(), "{response}");
+        let error = response.get("error").expect("top-level error");
+        assert_eq!(error.get("code"), Some(&json!(-32000)), "{response}");
+        assert_eq!(
+            error.get("message").and_then(Value::as_str),
+            Some("Message too large"),
+            "{response}"
+        );
+        assert_eq!(
+            error.get("data"),
+            Some(&json!({"kind": "transport_limit", "limit": MAX})),
+            "{response}"
+        );
+        let wire = serde_json::to_string(&response).expect("response serializes");
+        assert!(!wire.contains(sentinel), "refusal reflected input: {wire}");
+        assert_outcome_eq(&line);
+    }
+
+    #[test]
+    fn unknown_method_echoes_the_request_id() {
+        let response = respond(r#"{"jsonrpc":"2.0","method":"no/such","id":3}"#);
+        assert_eq!(response.get("id"), Some(&json!(3)), "{response}");
+        assert_eq!(
+            response.pointer("/error/code"),
+            Some(&json!(-32601)),
+            "{response}"
+        );
+    }
+
+    #[test]
+    fn version_refusal_echoes_the_request_id() {
+        let response = respond(
+            r#"{"jsonrpc":"2.0","method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2099-01-01"}},"id":7}"#,
+        );
+        assert_eq!(response.get("id"), Some(&json!(7)), "{response}");
+        assert_eq!(
+            response.pointer("/error/code"),
+            Some(&json!(-32022)),
+            "{response}"
+        );
+    }
+
+    #[test]
+    fn tools_call_envelope_faults_echo_the_request_id() {
+        let missing = respond(r#"{"jsonrpc":"2.0","method":"tools/call","id":10}"#);
+        assert_eq!(missing.get("id"), Some(&json!(10)), "{missing}");
+        assert_eq!(
+            missing.get("error").and_then(|e| e.get("data")),
+            Some(&json!({"kind": "malformed_call"})),
+            "{missing}"
+        );
+
+        let unknown = respond(
+            r#"{"jsonrpc":"2.0","method":"tools/call","params":{"name":"not_a_real_tool","arguments":{}},"id":11}"#,
+        );
+        assert_eq!(unknown.get("id"), Some(&json!(11)), "{unknown}");
+        assert_eq!(
+            unknown.get("error").and_then(|e| e.get("data")),
+            Some(&json!({"kind": "unknown_tool"})),
+            "{unknown}"
+        );
+    }
+
+    #[test]
+    fn tools_call_for_a_known_tool_plans_execution() {
+        let line = r#"{"jsonrpc":"2.0","method":"tools/call","params":{"name":"assay_check_args","arguments":{}},"id":9}"#;
+        match handle_line(line, MAX, "test") {
+            LineOutcome::ExecuteTool(plan) => {
+                assert_eq!(plan.response_id, Some(json!(9)));
+                assert_eq!(plan.name, "assay_check_args");
+                assert_eq!(plan.arguments, json!({}));
+                assert!(plan.params.is_some(), "plan must carry params");
+            }
+            outcome => panic!("expected a planned tools/call, got {outcome:?}"),
+        }
+        assert_outcome_eq(line);
+    }
+
+    #[test]
+    fn initialize_answers_with_the_negotiated_version() {
+        let response = respond(
+            r#"{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"1"}},"id":1}"#,
+        );
+        assert_eq!(response.get("id"), Some(&json!(1)), "{response}");
+        assert_eq!(
+            response.pointer("/result/protocolVersion"),
+            Some(&json!("2025-11-25")),
+            "{response}"
+        );
+    }
+
+    #[test]
+    fn initialized_with_an_id_stays_silent() {
+        assert_silent(
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{},"id":5}"#,
+        );
+    }
+
+    #[test]
+    fn tools_list_response_fits_the_fuzz_overhead() {
+        let line = r#"{"jsonrpc":"2.0","method":"tools/list","params":{},"id":1}"#;
+        match handle_line(line, MAX, "test") {
+            LineOutcome::Respond(text) => assert!(
+                text.len() <= MAX_RESPONSE_OVERHEAD_BYTES,
+                "tools/list response ({} bytes) outgrew the fuzz ceiling ({MAX_RESPONSE_OVERHEAD_BYTES})",
+                text.len()
+            ),
+            outcome => panic!("expected tools/list response, got {outcome:?}"),
+        }
+        assert_outcome_eq(line);
     }
 }
