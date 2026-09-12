@@ -24,7 +24,9 @@ SCHEMA = "assay.review-record.v0"
 CHECKER = "scripts/ci/assay_review_record_check.py"
 HOOK_ID = "assay-review-record-self-test"
 PREFIXES = frozenset({"codex", "claude", "cursor", "ruley"})
-HEX40 = re.compile(r"^[0-9a-f]{40}$")
+# `$` also matches before a trailing newline, so "<40 hex>\n" passed this and reached `git`
+# argv as an object id; `\Z` is the end of the string and nothing else.
+HEX40 = re.compile(r"\A[0-9a-f]{40}\Z")
 IDENTITY_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$")
 FENCE = re.compile(r"^```(?:json)?\n(.*)\n```$", re.S)
 HTTP_TIMEOUT_S = 30
@@ -316,6 +318,12 @@ def derive_carry(git: Git, reviewed: str, live: str) -> str:
     parent; a rewritten history has no such parent and is refused before any tree is compared.
     Nothing here reads the record: a record that merely claims a carry gets no credit.
     """
+    # Both shas reach `git` argv. A value that is not a lowercase 40-hex object id is not
+    # an object to ask about, and a leading dash would be read as an option: refuse it here,
+    # at the one place this checker runs a subprocess, so every caller is covered.
+    for sha in (reviewed, live):
+        if not isinstance(sha, str) or not HEX40.match(sha) or sha != sha.lower():
+            raise GateError("carry_malformed_sha", str(sha)[:64])
     git.ensure(reviewed, live)
     parents = git.line("rev-list", "--parents", "-n", "1", live).split()[1:]
     if len(parents) != 2:
