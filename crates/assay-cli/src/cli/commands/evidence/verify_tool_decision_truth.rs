@@ -10,7 +10,7 @@ use crate::exit_codes;
 use anyhow::{Context, Result};
 use assay_core::mcp::tool_decision_truth as tdt;
 use assay_core::otel::projection::TdtDecision;
-use assay_evidence::bundle::BundleReader;
+use assay_evidence::bundle::{BundleReader, VerifyLimits};
 use assay_evidence::types::EvidenceEvent;
 use clap::{Args, ValueEnum};
 use serde::Serialize;
@@ -72,7 +72,8 @@ pub fn cmd_verify_tool_decision_truth(args: VerifyToolDecisionTruthArgs) -> Resu
     let file = File::open(&args.bundle)
         .with_context(|| format!("failed to open bundle {}", args.bundle.display()))?;
     // BundleReader::open verifies manifest hashes and the deterministic run-root digest before we read events.
-    let reader = BundleReader::open(file).context("bundle integrity verification failed")?;
+    let reader = BundleReader::open_with_limits(file, VerifyLimits::for_retained_events())
+        .context("bundle integrity verification failed")?;
     let events = reader
         .events_vec()
         .context("failed to read bundle events")?;
