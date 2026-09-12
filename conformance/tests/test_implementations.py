@@ -679,6 +679,102 @@ class PublicImageValidator(unittest.TestCase):
                 self.assertIsNone(compiled.fullmatch(reference))
 
 
+class AuthorshipProjectionPipelineAndLegacyContracts(unittest.TestCase):
+    """Contract for registry -> capture -> run record -> public projection pipeline and legacy runs."""
+
+    LEGACY_FIXTURE_PATH = (
+        REPO
+        / "conformance/public-runs/9275ac65b1f2dde89299fcc811c733096b3b5683cb5ed15a8f32560d4580ae27"
+    )
+
+    def setUp(self) -> None:
+        self.module = _require_module()
+
+    def _all_test_authorship_cases(self) -> tuple[dict, ...]:
+        return (
+            HUMAN_AUTHORSHIP,
+            ASSISTED_AUTHORSHIP,
+            GENERATED_AUTHORSHIP,
+            {
+                "kind": "agent-assisted",
+                "model": "Grok Bot",
+                "prompt_strategy": "spec-then-conformance",
+            },
+            {
+                "kind": "agent-generated",
+                "model": "  Custom Model / v1.0.0-rc1+build.42  ",
+                "prompt_strategy": "blind_from_spec",
+            },
+        )
+
+    def test_capture_projection_preserves_canonical_authorship(self) -> None:
+        for auth in self._all_test_authorship_cases():
+            with self.subTest(kind=auth["kind"]):
+                projected = self.module.project_capture_authorship(auth)
+                self.assertEqual(projected, auth)
+                self.assertIsNot(projected, auth, "must return a distinct dictionary copy")
+
+    def test_run_projection_preserves_canonical_authorship(self) -> None:
+        for auth in self._all_test_authorship_cases():
+            with self.subTest(kind=auth["kind"]):
+                projected = self.module.project_run_authorship(auth)
+                self.assertEqual(projected, auth)
+                self.assertIsNot(projected, auth, "must return a distinct dictionary copy")
+
+    def test_public_projection_preserves_canonical_authorship(self) -> None:
+        for auth in self._all_test_authorship_cases():
+            with self.subTest(kind=auth["kind"]):
+                projected = self.module.project_public_authorship(auth)
+                self.assertEqual(projected, auth)
+                self.assertIsNot(projected, auth, "must return a distinct dictionary copy")
+
+    def test_end_to_end_projection_pipeline_preserves_authorship(self) -> None:
+        for auth in self._all_test_authorship_cases():
+            with self.subTest(kind=auth["kind"]):
+                capture_auth = self.module.project_capture_authorship(auth)
+                self.assertEqual(capture_auth, auth)
+                run_auth = self.module.project_run_authorship(capture_auth)
+                self.assertEqual(run_auth, auth)
+                public_auth = self.module.project_public_authorship(run_auth)
+                self.assertEqual(public_auth, auth)
+
+    def test_capture_projection_rejects_invalid_or_unknown_authorship(self) -> None:
+        invalid_cases = (
+            {"kind": "unknown"},
+            {"kind": "agent-assisted"},
+            {"kind": "agent-assisted", "model": ""},
+            {"kind": "human", "model": "gpt-4"},
+            "not-an-object",
+            None,
+            [],
+        )
+        for invalid in invalid_cases:
+            with self.subTest(invalid=invalid), self.assertRaises(
+                self.module.ImplementationRegistryError
+            ):
+                self.module.project_capture_authorship(invalid)
+
+    def test_legacy_run_fixture_remains_explicitly_authorship_unrecorded(self) -> None:
+        self.assertIsNone(self.module.project_run_authorship(None))
+        self.assertIsNone(self.module.project_public_authorship(None))
+
+        fixture_data = json.loads(self.LEGACY_FIXTURE_PATH.read_text(encoding="utf-8"))
+        impl = fixture_data.get("implementation", {})
+        self.assertNotIn(
+            "authorship",
+            impl,
+            "legacy conformance_run.v1 fixture must not contain an authorship field",
+        )
+        legacy_auth = impl.get("authorship")
+        self.assertIsNone(
+            self.module.project_run_authorship(legacy_auth),
+            "project_run_authorship must return None for legacy run fixture without authorship",
+        )
+        self.assertIsNone(
+            self.module.project_public_authorship(legacy_auth),
+            "project_public_authorship must return None for legacy run fixture without authorship",
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
