@@ -750,6 +750,26 @@ class GateSetJudgementTests(unittest.TestCase):
         self.assertIn("carry_touched_reviewed_file", refused["carry"])
 
 
+class GateFetchMatchesTheCheckerCeiling(unittest.TestCase):
+    """The CI gate reads at most two pages and refuses past them; `--paginate` has no ceiling."""
+
+    def _answer(self, count):
+        page = [{"body": "x", "user": {"login": "Rul1an", "type": "User"},
+                 "created_at": "2026-09-12T00:00:00Z", "updated_at": "2026-09-12T00:00:00Z",
+                 "id": n} for n in range(count)]
+        with patch.object(MODULE, "run_json", return_value=[page]):
+            return MODULE.gate_answer("Rul1an/assay", "30", "b" * 40, "ruley/x", pathlib.Path("."), {})
+
+    def test_a_comment_set_the_checker_refuses_to_read_is_refused_here_too(self):
+        passes, why = self._answer(MODULE.COMMENT_PAGE_SIZE * MODULE.COMMENT_PAGE_MAX)
+        self.assertFalse(passes)
+        self.assertIn("comments_limit", why)
+
+    def test_one_comment_below_the_ceiling_is_still_judged_on_its_content(self):
+        passes, why = self._answer(MODULE.COMMENT_PAGE_SIZE * MODULE.COMMENT_PAGE_MAX - 1)
+        self.assertFalse(passes)
+        self.assertNotIn("comments_limit", why)
+
 class MalformedHeadShaNeverReachesGit(unittest.TestCase):
     """#2958 F1: a record's head_sha is attacker-shaped text until it is 40 lowercase hex."""
 
@@ -757,7 +777,8 @@ class MalformedHeadShaNeverReachesGit(unittest.TestCase):
         marker = pathlib.Path(tempfile.gettempdir()) / "landing-carry-injection-probe"
         if marker.exists():
             marker.unlink()
-        for bad in (f"--upload-pack=touch {marker}", "-x", "HEAD", "A" * 40, "", None):
+        for bad in (f"--upload-pack=touch {marker}", "-x", "HEAD", "A" * 40, "", None,
+                    "a" * 40 + "\n", " " + "a" * 40, "a" * 41, "a" * 39):
             with self.subTest(bad=bad):
                 carried, note = MODULE.carried_to_head(bad, "b" * 40, pathlib.Path("."), {})
                 self.assertFalse(carried)

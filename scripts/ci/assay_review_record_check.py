@@ -24,7 +24,9 @@ SCHEMA = "assay.review-record.v0"
 CHECKER = "scripts/ci/assay_review_record_check.py"
 HOOK_ID = "assay-review-record-self-test"
 PREFIXES = frozenset({"codex", "claude", "cursor", "ruley"})
-HEX40 = re.compile(r"^[0-9a-f]{40}$")
+# `$` also matches before a trailing newline, so "<40 hex>\n" passed this and reached `git`
+# argv as an object id; `\Z` is the end of the string and nothing else.
+HEX40 = re.compile(r"\A[0-9a-f]{40}\Z")
 IDENTITY_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$")
 FENCE = re.compile(r"^```(?:json)?\n(.*)\n```$", re.S)
 HTTP_TIMEOUT_S = 30

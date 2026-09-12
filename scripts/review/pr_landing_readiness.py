@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ci"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from closing_keywords import closing_problems  # noqa: E402
 from assay_review_record_check import (  # noqa: E402
+    COMMENT_PAGE_MAX,
+    COMMENT_PAGE_SIZE,
     GateError,
     Git,
     evaluate,
@@ -310,6 +312,12 @@ def gate_answer(repo, number, head, branch_ref, git_root, cache):
                 "--paginate", "--slurp",
             ])
             comments = [c for page in (slurped or []) for c in (page or [])]
+            # That gate stops at two pages and refuses beyond them, and the ceiling lives in
+            # its fetch loop rather than in `evaluate`. `--paginate` has no such ceiling, so
+            # without this the landing gate would judge a comment set the CI gate refuses to
+            # read - a disagreement in the direction that lands what CI would not.
+            if len(comments) >= COMMENT_PAGE_SIZE * COMMENT_PAGE_MAX:
+                raise GateError("comments_limit", "200-comment safety ceiling reached")
             root, note = _objects_root(git_root, repo, cache.setdefault("_root", {}))
             evaluate(head, branch_ref, comments, git_root=root)
             cache["answer"] = (True, f"review-record-check would pass{note}")
