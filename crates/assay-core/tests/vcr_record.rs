@@ -13,6 +13,30 @@ use serde_json::json;
 use std::path::PathBuf;
 
 const CASSETTE_DIR: &str = "tests/fixtures/perf/semantic_vcr/cassettes";
+const GITKEEP_CONTRACT: &[u8] = b"# Keep directory tracked for semantic VCR fixture cassettes.\n";
+
+#[test]
+fn semantic_vcr_gitkeep_contract_is_pinned() {
+    let cassette_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join(CASSETTE_DIR);
+
+    for kind in ["embeddings", "judge"] {
+        let path = cassette_dir.join(kind).join(".gitkeep");
+        let content = std::fs::read(&path).unwrap_or_else(|e| {
+            panic!("failed to read {}: {}", path.display(), e);
+        });
+        assert_eq!(
+            content,
+            GITKEEP_CONTRACT,
+            "{} drifted; keep the pinned contract bytes",
+            path.display()
+        );
+    }
+}
 
 /// Record embedding cassettes for semantic_vcr fixture.
 ///
