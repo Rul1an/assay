@@ -90,9 +90,23 @@ the new head touched no file the review covered, meaning the PR's changed files 
 head. The first covers the whole tree, never a file list, so content outside the reviewed files cannot
 ride the carry; the second exists because an upstream change to a reviewed file changes what lands
 even though it smuggles nothing, and "the branch added nothing" is a neighbouring property of "what
-was reviewed is what merges", not the same one. Put both checks in the review record; without them,
-the review does not carry. Rewritten history (rebase, squash) does not carry a review even when the
-tree is identical: revalidation is for upstream advances only.
+was reviewed is what merges", not the same one.
+
+Both conditions are checked, never asserted. When the new head is a two-parent merge that brought
+`main` into the reviewed head, `scripts/ci/assay_review_record_check.py` re-derives both from the
+commits — the parent the advance merged, the tree that merge produces, and the two file lists — and
+revalidates the newest still-valid `READY` record on an earlier head of the same PR. That case needs
+no fresh carry record. The checker reads no condition out of a record's text, so a record that claims
+a carry gets nothing for saying so, and every rule that record had to satisfy on its own head it
+still has to satisfy: a `BLOCKED`, edited, bot-carried, or self-reviewed record does not carry, and a
+record naming the live head is judged exactly as it was before.
+
+Where the derivation refuses, the review does not carry and the new head needs its own review record.
+Rewritten history (rebase, squash) does not carry a review even when the tree is identical:
+revalidation is for upstream advances only, and the checker refuses it on the shape of the history,
+before any tree is compared. Where the derivation cannot see enough to decide — commits it cannot
+obtain, a history shape it does not model — a human equivalence check bound to the live head remains
+the path, and it puts both checks in the review record; without them, the review does not carry.
 
 A review record that says it did not review is not a review. A bot that returns `COMMENTED` with
 "unable to review — quota limit", or a check that reports `pass` alongside "review rate limited",
