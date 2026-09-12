@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import pathlib
+import tempfile
 import unittest
 import io
 import subprocess
@@ -88,6 +89,7 @@ class CandidateBindingTests(unittest.TestCase):
             "bound_sha": current,
             "current_head": True,
             "source": "machine-comment",
+            "carry": None,
         }])
 
     def test_reviewer_identity_cannot_inject_human_read_output(self):
@@ -522,3 +524,153 @@ class UnprotectedPolicyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _git(root, *args, check=True):
+    import os
+    # `-C <root>` names the repository, and GIT_DIR and friends override it. The pre-commit hook
+    # exports them, so an inherited one would run this fixture against the real checkout.
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                        "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE")}
+    env.update({"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+                "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"})
+    done = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, env=env)
+    if check and done.returncode != 0:
+        raise AssertionError(f"git {args}: {done.stderr}")
+    return done.stdout.strip()
+
+
+def _carry_fixture(root):
+    """A reviewed head plus the advances the carry rules have to tell apart."""
+    rows = "".join(f"line {n}\n" for n in range(1, 21))
+    (root / "shared.txt").write_text(rows)
+    _git(root, "-c", "init.defaultBranch=main", "init", "-q")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "base")
+    base = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", "-b", "work")
+    (root / "feature.txt").write_text("feature\n")
+    (root / "shared.txt").write_text(rows.replace("line 1\n", "line 1 from the branch\n"))
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "reviewed work")
+    reviewed = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", "-b", "up-clean", base)
+    (root / "other.txt").write_text("other\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "upstream adds an untouched file")
+    _git(root, "checkout", "-q", "-b", "up-overlap", base)
+    (root / "shared.txt").write_text(rows.replace("line 20\n", "line 20 from main\n"))
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "upstream edits a reviewed file")
+    heads = {"reviewed": reviewed}
+    for name, branch in (("clean", "up-clean"), ("overlap", "up-overlap")):
+        _git(root, "checkout", "-q", "-b", f"live-{name}", "work")
+        _git(root, "merge", "-q", "--no-ff", "-m", "Merge main into work", branch)
+        heads[name] = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", "-b", "live-push", "work")
+    (root / "feature.txt").write_text("feature again\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "one more push")
+    heads["push"] = _git(root, "rev-parse", "HEAD")
+    return heads
+
+
+def _record_pr(bound):
+    record = {
+        "schema": "assay.review-record.v0", "head_sha": bound,
+        "builder": {"agent": "ruley", "instance": "writer"},
+        "reviewer": {"agent": "claude", "instance": "reviewer", "github_login": "Rul1an"},
+        "review_completed": True, "verdict": "READY", "findings": [], "no_findings": True,
+        "independence": {"did_not_build": True, "did_not_author_governing_spec": True},
+    }
+    body = "<!-- assay-review-record -->\n```json\n" + json.dumps(record) + "\n```"
+    return {"reviews": [], "headRefName": "ruley/2958-landing-derived-carry",
+            "comments": [{"author": {"login": "Rul1an"}, "body": body}]}
+
+
+class DerivedCarryBindsTheLandingGate(unittest.TestCase):
+    """#2958: the landing gate answers through the CI gate's own derivation, not its own rule."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.root = pathlib.Path(cls._tmp.name)
+        cls.heads = _carry_fixture(cls.root)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def _rows(self, head):
+        return MODULE.review_candidates(_record_pr(self.heads["reviewed"]), head, git_root=self.root)
+
+    def test_an_upstream_advance_carries_and_says_so(self):
+        row = self._rows(self.heads["clean"])[0]
+        self.assertTrue(row["current_head"])
+        self.assertEqual(row["source"], "machine-comment-carry")
+        self.assertIn("re-derived-by-checker", row["carry"])
+
+    def test_an_advance_touching_a_reviewed_file_does_not_carry(self):
+        row = self._rows(self.heads["overlap"])[0]
+        self.assertFalse(row["current_head"])
+        self.assertEqual(row["source"], "machine-comment")
+        self.assertIn("carry_touched_reviewed_file", row["carry"])
+
+    def test_a_further_push_is_not_an_upstream_merge(self):
+        row = self._rows(self.heads["push"])[0]
+        self.assertFalse(row["current_head"])
+        self.assertIn("carry_not_upstream_merge", row["carry"])
+
+    def test_a_head_sha_matching_nothing_is_refused(self):
+        rows = MODULE.review_candidates(_record_pr("f" * 40), self.heads["clean"], git_root=self.root)
+        self.assertFalse(rows[0]["current_head"])
+        self.assertIn("carry_objects_unavailable", rows[0]["carry"])
+
+    def test_both_gates_answer_the_same_on_the_same_head(self):
+        import assay_review_record_check as checker
+        for name, expected in (("clean", True), ("overlap", False), ("push", False)):
+            with self.subTest(head=name):
+                head = self.heads[name]
+                pr = _record_pr(self.heads["reviewed"])
+                landing = any(r["current_head"] and r["verdict"] == "READY"
+                              for r in MODULE.review_candidates(pr, head, git_root=self.root))
+                try:
+                    checker.evaluate(head, pr["headRefName"],
+                                     [{"body": c["body"], "user": {"login": "Rul1an", "type": "User"},
+                                       "created_at": "2026-09-12T00:00:00Z",
+                                       "updated_at": "2026-09-12T00:00:00Z", "id": 1}
+                                      for c in pr["comments"]], git_root=str(self.root))
+                    ci = True
+                except MODULE.GateError:
+                    ci = False
+                self.assertEqual(landing, ci, f"gates disagree on {name}")
+                self.assertEqual(landing, expected)
+
+
+class CarryWithoutACheckoutTests(unittest.TestCase):
+    """The landing recipe allows a `git archive` extract, which has no `.git` to derive in."""
+
+    def test_no_checkout_and_no_repo_refuses_rather_than_guessing(self):
+        with tempfile.TemporaryDirectory() as bare:
+            carried, note = MODULE.carried_to_head("a" * 40, "b" * 40, pathlib.Path(bare), {})
+        self.assertFalse(carried)
+        self.assertIn("carry_objects_unavailable", note)
+
+    def test_no_checkout_with_a_repo_derives_in_a_temporary_clone(self):
+        with tempfile.TemporaryDirectory() as bare:
+            cache = {}
+            root, note = MODULE._objects_root(pathlib.Path(bare), "Rul1an/assay", cache)
+            self.assertNotEqual(root, bare, "an extract is not a repository to derive in")
+            self.assertIn("temporary clone", note)
+            self.assertEqual(
+                MODULE.Git(root).run("remote", "get-url", "origin")[1],
+                "https://github.com/Rul1an/assay.git")
+
+    def test_a_real_checkout_is_used_as_is(self):
+        with tempfile.TemporaryDirectory() as real:
+            root = pathlib.Path(real)
+            _git(root, "-c", "init.defaultBranch=main", "init", "-q")
+            chosen, note = MODULE._objects_root(root, "Rul1an/assay", {})
+        self.assertEqual(chosen, str(root))
+        self.assertEqual(note, "")
