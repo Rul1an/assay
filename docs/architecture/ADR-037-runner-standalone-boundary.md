@@ -3,7 +3,7 @@
 ## Status
 Accepted (June 2026) — records existing discipline; pointer ADR.
 
-Depends on ADR-034 (contract seam).
+Depends on ADR-051 (contract seam).
 
 ## Context
 
@@ -18,7 +18,7 @@ extraction.
 
 This ADR does not re-decide the extraction question. It records the invariant the
 rest of the interop program must preserve: every interop slice consumes the Runner
-through its published schema (ADR-034 contract seam) and keeps it standalone-useful,
+through its published schema (ADR-051 contract seam) and keeps it standalone-useful,
 so the options in the extraction roadmap stay open. Any move to make the Runner its
 own product follows that roadmap's gates and kill criteria, not this ADR.
 
@@ -35,4 +35,4 @@ own product follows that roadmap's gates and kill criteria, not this ADR.
 ## References
 
 - `docs/reference/runner/extraction-roadmap.md`
-- ADR-034 (contract seam)
+- ADR-051 (contract seam)
