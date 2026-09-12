@@ -91,6 +91,10 @@ fn observe_event(
     mut event: TraceEvent,
     mut prior: Vec<TruncationObservation>,
 ) -> ObservedTraceEvent {
+    // Foreign observations with no losses must not be carried forward across stages.
+    // Otherwise, our ingest writer attaches its own digest binding to the foreign observation,
+    // falsely certifying foreign completeness as origin completeness under our key.
+    prior.retain(|obs| !obs.losses.is_empty());
     if let Some(obs) = scan_and_truncate(&mut event) {
         prior.push(obs);
     }

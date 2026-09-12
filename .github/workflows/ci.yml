@@ -225,8 +225,10 @@ jobs:
       # the selection there too rather than being shadowed by the script's own default.
       #
       # Scope, deliberately: no step in this job builds or tests the workspace -- checkout, two tool
-      # installs, a `sed`-only alignment check, `cargo-deny check` and two `cargo audit` runs. The
-      # only crates this job compiles are the dependency tools themselves, installed from source.
+      # installs, a `sed`-only alignment check, `cargo-deny check`, two `cargo audit` runs, and a
+      # read-only `cargo metadata --locked` staleness assertion over `fuzz/Cargo.toml` (#2975). The
+      # only crates this job compiles are the dependency tools themselves, installed from source;
+      # the metadata step resolves the fuzz graph without compiling anything.
       # `rust-toolchain.toml` stays the source for every job that compiles workspace code.
       RUSTUP_TOOLCHAIN: stable
     steps:
@@ -289,6 +291,23 @@ jobs:
           # to be quietly excused, which is the point.
           # Same isolated-db runner as the root audit / pre-push hook (CI-4F / #2188).
           ( cd "${RUNNER_TEMP}" && bash "${GITHUB_WORKSPACE}/scripts/ci/cargo-audit-with-isolated-db.sh" --file "${GITHUB_WORKSPACE}/fuzz/Cargo.lock" )
+
+      - name: Fuzz lockfile is current
+        # #2975: this assertion ran only in fuzz-smoke.yml, which is not a required context, so a
+        # PR that staled `fuzz/Cargo.lock` (e.g. #2970 bumping base64 in five manifests, none of
+        # them a fuzz file) stayed green on every required gate. This job owns the fuzz lockfile
+        # already (the audit above), has a toolchain (job-level RUSTUP_TOOLCHAIN), and is in the
+        # required gate's `needs:`, so the check runs on every PR with no path list to maintain.
+        # Not shared with the lane's inline form: that spelling is pinned by
+        # `scripts/ci/test-fuzz-lane-contract.sh` (which executes the lane's own run block) and
+        # selects the date-pinned fuzz toolchain, while this one resolves read-only under stable.
+        # The wrapper adds an exit code and nothing else; `--locked` also fails on registry or
+        # network faults, so the message must not name a cause -- Cargo's stderr stays the
+        # diagnosis. Pinned by `scripts/ci/test-fuzz-lock-required-gate.sh`.
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml >/dev/null \
+            || { echo "::error::locked fuzz metadata validation failed; inspect the Cargo error above"; exit 1; }
 
   clippy:
     name: Clippy (deny warnings)
@@ -1176,6 +1195,7 @@ jobs:
           bash scripts/ci/test-ci-job-timeouts-contract.sh --self-test
           bash scripts/ci/test-classify-lightweight-changes.sh
           bash scripts/ci/test-deps-security-toolchain-contract.sh
+          bash scripts/ci/test-fuzz-lock-required-gate.sh
           bash scripts/ci/test-mcp-preflight-windows-contract.sh
           bash scripts/ci/test-reconcile-docs-auto-pr.sh
           bash scripts/ci/test-setup-rust-composite-contract.sh

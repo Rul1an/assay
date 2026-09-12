@@ -3,6 +3,7 @@ pub mod bundle;
 pub mod coding_agent;
 pub mod coverage_attestation;
 pub mod crypto;
+pub mod delegated_exec;
 pub mod denial_marker;
 pub mod diff;
 pub mod g3_authorization_context;
@@ -37,6 +38,7 @@ pub use coverage_attestation::{
     Cap1Integrity, Cap1Producer, Cap1RelyingPartyContext, Cap1Rule, Cap1Stratum, Cap1Subject,
     Cap1Unexamined,
 };
+pub use delegated_exec::{delegated_exec_observation_event, DELEGATED_EXEC_OBSERVATION_SCHEMA};
 pub use denial_marker::{
     bindable_denial_marker, classify_denial_marker, BindableDenialMarker, DenialMarkerVersion,
     DENIED_CALL_OBSERVATION_V0, DENIED_CALL_OBSERVATION_V1, PROXY_DENIED_V0, PROXY_DENIED_V1,

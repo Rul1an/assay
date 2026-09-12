@@ -259,6 +259,12 @@ def _validate_report(report: dict) -> None:
         raise ValueError("adequate does not match failures")
     if not isinstance(report.get("diagnostic_channel_declared"), bool):
         raise ValueError("diagnostic_channel_declared must be boolean")
+    if report["silent"] > 0 and not report["diagnostic_channel_declared"]:
+        raise ValueError(
+            "silent mutants without a declared diagnostic channel: "
+            "a nonzero silent count is measured absence of nothing, "
+            "so the report is invalid until the manifest declares "
+            "a diagnostic channel")
     control_status = report.get("control_status")
     if control_status not in CONTROL:
         raise ValueError("control_status is not a producer verdict")
