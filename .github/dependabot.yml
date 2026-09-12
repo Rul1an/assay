@@ -24,17 +24,41 @@ updates:
       # bencherdev/bencher: pinned to @main SHA, can cause update conflicts
       - dependency-name: "bencherdev/bencher"
 
-  # Cargo - weekly dependency updates
+  # Cargo - weekly dependency updates, including the fuzz crate's own lockfile.
+  #
+  # `Cargo.toml` sets `exclude = ["fuzz"]`, so a root-only cargo updater never sees this tree and
+  # `fuzz/Cargo.lock` had no updater at all: it sat at workspace 3.34.0 against a 3.35.0 tree,
+  # missing a dependency edge, holding six advisories the root lock had already moved past. The
+  # lock is kept rather than deleted — cargo-fuzz's own generated `.gitignore` covers
+  # `target/corpus/artifacts/coverage` and not `Cargo.lock`, and this is a `publish = false` binary
+  # crate, for which committing the lock is the Cargo convention — so it needs an updater to match
+  # the staleness assertion the fuzz lane now runs. That assertion is a separate
+  # `cargo metadata --locked` step, not a flag on the fuzz run: `cargo fuzz run` has no `--locked`.
+  #
+  # Two independent cargo updaters (`/` and `/fuzz`) then opened complementary halves of one bump:
+  # each PR left the other lock stale, and `cargo metadata --locked` failed on the unmoved tree.
+  # `directories` plus `group-by: dependency-name` keeps fuzz covered without splitting a shared
+  # dependency into two PRs. Incompatible version constraints still fall back to separate PRs.
   - package-ecosystem: "cargo"
-    directory: "/"
+    directories:
+      - "/"
+      - "/fuzz"
     schedule:
       interval: "weekly"
       day: "monday"
     groups:
       # These two move together through the digest crate line and do not land
-      # reliably as separate PRs.
+      # reliably as separate PRs. Listed first so first-match keeps them together
+      # instead of the per-name group below splitting them.
       crypto-digest-line:
         patterns:
+          - "sha2"
+          - "hmac"
+      # One PR per remaining dependency across both cargo trees, not one PR per
+      # directory. Version updates only; security updates stay ungrouped.
+      across-cargo-trees:
+        group-by: dependency-name
+        exclude-patterns:
           - "sha2"
           - "hmac"
     commit-message:
@@ -100,33 +124,6 @@ updates:
     labels:
       - "dependencies"
       - "python"
-    open-pull-requests-limit: 5
-    cooldown:
-      default-days: 7
-      semver-major-days: 30
-      semver-minor-days: 7
-      semver-patch-days: 7
-
-  # Cargo - the fuzz crate carries its own lockfile.
-  #
-  # `Cargo.toml` sets `exclude = ["fuzz"]`, so the root cargo entry above never sees this tree and
-  # `fuzz/Cargo.lock` had no updater at all: it sat at workspace 3.34.0 against a 3.35.0 tree,
-  # missing a dependency edge, holding six advisories the root lock had already moved past. The
-  # lock is kept rather than deleted — cargo-fuzz's own generated `.gitignore` covers
-  # `target/corpus/artifacts/coverage` and not `Cargo.lock`, and this is a `publish = false` binary
-  # crate, for which committing the lock is the Cargo convention — so it needs an updater to match
-  # the staleness assertion the fuzz lane now runs. That assertion is a separate
-  # `cargo metadata --locked` step, not a flag on the fuzz run: `cargo fuzz run` has no `--locked`.
-  - package-ecosystem: "cargo"
-    directory: "/fuzz"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    commit-message:
-      prefix: "chore(deps)"
-    labels:
-      - "dependencies"
-      - "rust"
     open-pull-requests-limit: 5
     cooldown:
       default-days: 7
