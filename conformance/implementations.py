@@ -140,6 +140,25 @@ def authorship_trailer(value: object) -> str:
     return "%s: %s" % (rule.trailer, trailer_value)
 
 
+def project_capture_authorship(value: object) -> dict:
+    """Project canonical registry authorship to candidate capture."""
+    return dict(_validate_authorship(value, "capture authorship"))
+
+
+def project_run_authorship(value: object) -> dict | None:
+    """Project capture authorship to run record; legacy runs stay unrecorded."""
+    if value is None:
+        return None
+    return dict(_validate_authorship(value, "run record authorship"))
+
+
+def project_public_authorship(value: object) -> dict | None:
+    """Project run record authorship to public projection; legacy stays unrecorded."""
+    if value is None:
+        return None
+    return dict(_validate_authorship(value, "public projection authorship"))
+
+
 def _documentary_trailer(kind: str, rule: AuthorshipRule) -> str:
     value = kind if rule.value_field is None else "<model disclosure>"
     return "%s: %s" % (rule.trailer, value)

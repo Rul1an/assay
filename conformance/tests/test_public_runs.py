@@ -486,6 +486,36 @@ class PublicRunMutations(unittest.TestCase):
             )
             self.assertIn("python3 conformance/project_public_runs.py --check", document)
 
+    def test_authorship_mismatch_fails_closed(self) -> None:
+        with sandbox() as (root, project):
+            def mutate_authorship(payload: dict) -> None:
+                payload["implementation"]["authorship"] = {
+                    "kind": "agent-generated",
+                    "model": "Impostor Bot",
+                    "prompt_strategy": "blind_from_spec",
+                }
+
+            _rebind_record(root, mutate_authorship)
+            findings = project.projection_findings(root)
+            self.assertTrue(any("authorship" in item for item in findings), findings)
+
+    def test_valid_authorship_is_projected_and_bound(self) -> None:
+        with sandbox() as (root, project):
+            import validate_run_record
+
+            registry = json.loads((root / "conformance/implementations.json").read_text())
+            grok_auth = registry["implementations"][0]["authorship"]
+
+            def add_authorship(payload: dict) -> None:
+                payload["implementation"]["authorship"] = grok_auth
+
+            digest = _rebind_record(root, add_authorship)
+            report = validate_run_record.load_run_record(root / "conformance/public-runs" / digest)
+            validate_run_record.validate_run_record(report)
+            self.assertEqual(report["implementation"]["authorship"], grok_auth)
+            rows = project.load_publication(root)
+            self.assertEqual(len(rows), 1)
+
     def test_check_does_not_write(self) -> None:
         with sandbox() as (root, project):
             markdown = root / "conformance/IMPLEMENTATIONS.md"
