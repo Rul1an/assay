@@ -298,6 +298,10 @@ def gate_answer(repo, number, head, branch_ref, git_root, cache):
     one record: a bot carrier, an edited record, two current records or a refused supersede all
     refuse there, and a record on an earlier head passes only through `derive_carry`. Asking it
     here is what keeps the two gates from drifting apart again (#2958).
+
+    Only a carry consults this, so callers pass it as a thunk and it runs at most once, on the
+    PRs that need it: a record bound to the live head is judged without a second API call, and
+    an outage reaching that endpoint cannot fail a landing check that was never going to carry.
     """
     if "answer" not in cache:
         try:
@@ -311,8 +315,6 @@ def gate_answer(repo, number, head, branch_ref, git_root, cache):
             cache["answer"] = (True, f"review-record-check would pass{note}")
         except GateError as exc:
             cache["answer"] = (False, f"{exc.reason}: {exc.detail}" if exc.detail else exc.reason)
-        except SystemExit:
-            raise
     return cache["answer"]
 
 
@@ -370,10 +372,12 @@ def review_candidates(pr, head, git_root=None, repo=None, gate=None):
         earlier = record_head_sha(body)
         if earlier and earlier != head:
             carried, carry_note = carried_to_head(earlier, head, git_root, carries, repo)
-            if carried and gate is not None and not gate[0]:
+            if carried and gate is not None:
                 # The derivation carries this record, but the gate judges the set: a bot
                 # carrier, an edit, an ambiguity or a refused supersede refuses there.
-                carried, carry_note = False, f"{carry_note}; gate refuses the set: {gate[1]}"
+                passes, why = gate()
+                if not passes:
+                    carried, carry_note = False, f"{carry_note}; gate refuses the set: {why}"
 
             reviewed = machine_review_candidate(body, author, earlier, pr.get("headRefName") or "")
             if reviewed and reviewed["validation_error"] is None:
@@ -484,10 +488,12 @@ def main():
     head = pr["headRefOid"]
     body_shas = SHA_RE.findall(pr.get("body") or "")
     body_mentions_head = head in body_shas
-    gate = gate_answer(args.repo, args.pr, head, pr.get("headRefName") or "",
-                       REPO_ROOT, {}) if any(
-        REVIEW_RECORD_MARKER in (c.get("body") or "") for c in pr.get("comments", [])) else None
-    candidates = review_candidates(pr, head, repo=args.repo, gate=gate)
+    gate_cache = {}
+    candidates = review_candidates(
+        pr, head, repo=args.repo,
+        gate=lambda: gate_answer(args.repo, args.pr, head, pr.get("headRefName") or "",
+                                 REPO_ROOT, gate_cache),
+    )
     current_ready = [row for row in candidates if row["current_head"] and row["verdict"] == "READY"]
     current_blocked = [row for row in candidates if row["current_head"] and row["verdict"] == "BLOCKED"]
     failing = [check for check in required if check.get("bucket") == "fail"]

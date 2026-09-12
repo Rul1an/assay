@@ -522,9 +522,6 @@ class UnprotectedPolicyTests(unittest.TestCase):
         self.assertFalse(report["landing_candidate"])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 def _git(root, *args, check=True):
     import os
@@ -694,27 +691,36 @@ class GateSetJudgementTests(unittest.TestCase):
     def tearDownClass(cls):
         cls._tmp.cleanup()
 
-    def _rows(self, gate):
+    def _rows(self, gate, head=None):
         return MODULE.review_candidates(
-            _record_pr(self.heads["reviewed"]), self.heads["clean"],
+            _record_pr(self.heads["reviewed"]), head or self.heads["clean"],
             git_root=self.root, gate=gate)
 
     def test_a_refusing_gate_stops_a_derivable_carry(self):
         for reason in ("bot_carrier: Bot", "edited_current: updated_at != created_at",
                        "ambiguous_current: 2", "supersede_refused: 7 is not older than 8"):
             with self.subTest(reason=reason):
-                row = self._rows((False, reason))[0]
+                row = self._rows(lambda reason=reason: (False, reason))[0]
                 self.assertFalse(row["current_head"], "the set refuses, so nothing carries")
                 self.assertIn(reason, row["carry"])
 
     def test_a_passing_gate_leaves_the_derivation_in_charge(self):
-        row = self._rows((True, "review-record-check would pass"))[0]
+        row = self._rows(lambda: (True, "review-record-check would pass"))[0]
         self.assertTrue(row["current_head"])
         self.assertEqual(row["source"], "machine-comment-carry")
 
     def test_no_gate_answer_keeps_the_derivation_alone(self):
         row = self._rows(None)[0]
         self.assertTrue(row["current_head"])
+
+    def test_a_record_on_the_live_head_never_asks_the_gate(self):
+        """The thunk costs an API call, so a PR that cannot carry must not pay it."""
+        def gate():
+            raise AssertionError("the gate was consulted without a carry to judge")
+
+        row = self._rows(gate, head=self.heads["reviewed"])[0]
+        self.assertTrue(row["current_head"])
+        self.assertEqual(row["source"], "machine-comment")
 
 
 class MalformedHeadShaNeverReachesGit(unittest.TestCase):
@@ -731,3 +737,80 @@ class MalformedHeadShaNeverReachesGit(unittest.TestCase):
                 if bad:
                     self.assertIn("carry_malformed_sha", note)
         self.assertFalse(marker.exists(), "a git option in a head_sha executed")
+
+
+class IdentityVerifierAcceptsACarry(unittest.TestCase):
+    """#2958 F3: `safe_merge.sh` runs this after readiness, and it read the head literally.
+
+    Readiness is what judges the comment set (it asks `review-record-check`'s own `evaluate`),
+    so this check is not a second authorization of the carry: it re-derives the same conditions
+    on the record it was handed, and must not refuse what the gate before it accepted.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.root = pathlib.Path(cls._tmp.name)
+        cls.heads = _carry_fixture(cls.root)
+        spec = importlib.util.spec_from_file_location(
+            "verify_review_identity", MODULE_PATH.with_name("verify_review_identity.py"))
+        cls.identity = importlib.util.module_from_spec(spec)
+        import sys
+        sys.path.insert(0, str(MODULE_PATH.parent))
+        spec.loader.exec_module(cls.identity)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def _verify(self, bound, head):
+        body = _record_pr(bound)["comments"][0]["body"]
+        comment = {
+            "html_url": "https://github.com/Rul1an/assay/pull/30#issuecomment-123",
+            "issue_url": "https://api.github.com/repos/Rul1an/assay/issues/30",
+            "user": {"login": "Rul1an"}, "body": body,
+        }
+        with patch.object(self.identity, "run_json", return_value=comment), \
+                patch.object(self.identity, "REPO_ROOT", self.root), \
+                patch("sys.stdout", new_callable=io.StringIO) as out:
+            self.identity.verify(
+                "Rul1an/assay", "30", head, "ruley/2958-landing-derived-carry", "Rul1an",
+                "claude/reviewer", "https://github.com/Rul1an/assay/pull/30#issuecomment-123",
+                "someone-else")
+        return out.getvalue()
+
+    def test_a_derived_carry_is_accepted_and_printed(self):
+        printed = self._verify(self.heads["reviewed"], self.heads["clean"])
+        self.assertIn("Carried to the live head", printed)
+        self.assertIn("re-derived-by-checker", printed)
+
+    def test_an_exact_head_record_still_passes_without_a_carry_line(self):
+        printed = self._verify(self.heads["clean"], self.heads["clean"])
+        self.assertNotIn("Carried to the live head", printed)
+
+    def test_an_advance_touching_a_reviewed_file_is_refused(self):
+        with self.assertRaises(ValueError):
+            self._verify(self.heads["reviewed"], self.heads["overlap"])
+
+    def test_a_further_push_is_refused(self):
+        with self.assertRaises(ValueError):
+            self._verify(self.heads["reviewed"], self.heads["push"])
+
+class EveryTestInThisFileActuallyRuns(unittest.TestCase):
+    """`unittest.main()` collects what is defined when it runs, so it has to be last.
+
+    It sat mid-file while the #2958 classes were appended below it, and the invocation the
+    README documents (`python3 scripts/review/test_pr_landing_readiness.py`) then ran 43 of
+    60 tests and still printed OK.
+    """
+
+    def test_nothing_is_defined_after_the_entrypoint(self):
+        lines = pathlib.Path(__file__).read_text().splitlines()
+        entry = [n for n, line in enumerate(lines) if line.startswith("if __name__")]
+        self.assertEqual(len(entry), 1, "one entrypoint")
+        after = [line for line in lines[entry[0]:] if line.startswith(("class ", "def "))]
+        self.assertEqual(after, [], "these are invisible to a direct run")
+
+
+if __name__ == "__main__":
+    unittest.main()
