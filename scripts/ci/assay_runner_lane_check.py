@@ -2126,13 +2126,19 @@ def self_test() -> None:
     assert not recorded_gate_ok("- gate: kernel-only", Gate.ALL)
     assert not recorded_gate_ok("- gate: kernel-only", Gate.OPENAI_AGENTS_KERNEL_POLICY)
     assert uncovered_content_provenance_files(["crates/assay-runner-core/src/lib.rs"]) == ()
-    assert uncovered_content_provenance_files(["Cargo.lock"]) == ("Cargo.lock",)
+    # #2962: the workspace dependency surface is content-addressed, so a
+    # lockfile-only PR can reuse a delegated proof across heads.
+    assert uncovered_content_provenance_files(["Cargo.lock", "Cargo.toml"]) == ()
+    assert uncovered_content_provenance_files(["crates/assay-cli/src/backend.rs"]) == (
+        "crates/assay-cli/src/backend.rs",
+    )
     _test_gating_rule_count_is_derived()
     _test_gate_execution_is_verified()
     _test_pack_claims_match_the_step_witness()
     _test_gate_selections_match_the_workflow()
     _test_gating_map_is_current()
     _test_prefix_gated_surfaces_keep_their_coverage()
+    _test_all_gate_exact_paths_keep_their_coverage()
     _test_declared_gate_surfaces_exist()
     _test_the_syscall_surface_is_gated()
     _test_run_check_executes()
@@ -2438,6 +2444,97 @@ def _test_prefix_gated_surfaces_keep_their_coverage() -> None:
     ], uncovered
 
 
+# Exact `all_gate_paths` members that are gated but deliberately not
+# content-addressed. An uncovered gated path forces every touching PR onto an
+# exact-head proof: reuse across heads is refused, so a fresh delegated
+# dispatch at the PR's own head is the only way through. That fail-closed
+# default is accepted cost for the entries below — each is a human-driven,
+# low-churn CLI/cgroup source file, so a fresh dispatch at the PR head is
+# cheap and never races a mechanical rebase. It stopped being acceptable for
+# `Cargo.lock` (#2962): weekly dependabot bumps rebase mid-flight, which
+# invalidated each exact-head proof in turn and made the gate unsatisfiable
+# for the whole PR class. `Cargo.toml` rides the same mechanical bumps
+# (#2950, #2949, #2961 touch it), so it is covered for the same reason.
+# A new `all_gate_paths` entry is covered by default: it fails this test
+# until it is either added to `content_provenance_paths` or named here with
+# its own reason.
+GATED_PATHS_WITHOUT_CONTENT_PROVENANCE: tuple[tuple[str, str], ...] = (
+    (
+        "crates/assay-cli/src/backend.rs",
+        "sandbox backend selection (BPF/Landlock/NoopAudit): human-driven "
+        "changes, exact-head proof is the intended cost",
+    ),
+    (
+        "crates/assay-cli/src/diagnostics/landlock_net_smoke.rs",
+        "Landlock network smoke diagnostic: human-driven changes, "
+        "exact-head proof is the intended cost",
+    ),
+    (
+        "crates/assay-cli/src/diagnostics/probes.rs",
+        "diagnostics probes: human-driven changes, exact-head proof is the "
+        "intended cost",
+    ),
+    (
+        "crates/assay-common/src/lib.rs",
+        "shared no_std common types: human-driven changes, exact-head proof "
+        "is the intended cost",
+    ),
+    (
+        "crates/assay-cli/src/cli/commands/sandbox/child.rs",
+        "sandbox child pre_exec enforcement: human-driven changes, "
+        "exact-head proof is the intended cost",
+    ),
+    (
+        "crates/assay-cli/src/landlock_net.rs",
+        "Landlock network enforcement: human-driven changes, exact-head "
+        "proof is the intended cost",
+    ),
+    (
+        "crates/assay-cli/src/landlock_check.rs",
+        "Landlock availability check: human-driven changes, exact-head "
+        "proof is the intended cost",
+    ),
+    (
+        "crates/assay-cli/src/cli/commands/runner_spike.rs",
+        "runner_spike command facade: human-driven changes, exact-head "
+        "proof is the intended cost",
+    ),
+)
+
+
+def _test_all_gate_exact_paths_keep_their_coverage() -> None:
+    """Every exact gated path is content-addressed, except the named few.
+
+    The sibling prefix test pins `all_gate_prefixes` coverage and the gating
+    map pins the code-rule surfaces; this pins the remaining declared
+    surface, the exact `all_gate_paths` members. Both lists are read from
+    the manifest, so neither side restates the other — only the exceptions
+    are written down, each with its reason, and the equality below fails in
+    both directions: a gated path that loses its tree, and an allowlist
+    entry that stops gating anything or gains a tree without being removed
+    here.
+    """
+    config = load_gated_path_config()
+    assert all(reason.strip() for _, reason in GATED_PATHS_WITHOUT_CONTENT_PROVENANCE), (
+        "every coverage exception needs a reason"
+    )
+    allowed = {path for path, _reason in GATED_PATHS_WITHOUT_CONTENT_PROVENANCE}
+    declared = set(config.all_gate_paths)
+    assert allowed <= declared, (
+        "coverage exceptions that no longer gate anything: "
+        f"{sorted(allowed - declared)}"
+    )
+    uncovered = sorted(
+        path
+        for path in config.all_gate_paths
+        if not content_provenance_covers_path(path, config)
+    )
+    assert uncovered == sorted(allowed), (
+        "gated exact paths without content provenance changed: "
+        f"uncovered={uncovered} allowed={sorted(allowed)}"
+    )
+
+
 def _test_the_syscall_surface_is_gated() -> None:
     """No file that invokes a syscall directly may classify `Gate.NONE`.
 
@@ -2670,11 +2767,11 @@ def _test_uncovered_paths_require_exact_head() -> None:
     }
     stale_pr = PullRequest(
         number=1,
-        title="Dependency update",
+        title="CLI change",
         body="",
-        author_login="dependabot[bot]",
+        author_login="someone",
         head_sha="new-head",
-        files=("Cargo.lock",),
+        files=("crates/assay-cli/src/backend.rs",),
     )
 
     old_fetch = globals()["fetch_ref_for_diff"]
@@ -2688,7 +2785,7 @@ def _test_uncovered_paths_require_exact_head() -> None:
         rejected = content_tree_proof_accepts_head(manifest, stale_pr)
         assert not rejected.accepted
         assert rejected.diagnostics == (
-            "Cargo.lock: gated path is not covered by content-provenance trees",
+            "crates/assay-cli/src/backend.rs: gated path is not covered by content-provenance trees",
         )
 
         globals()["fetch_ref_for_diff"] = lambda *_args: None

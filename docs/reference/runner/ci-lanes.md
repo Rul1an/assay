@@ -118,13 +118,16 @@ without another delegated run. This does not claim anything about unrelated
 repository state; it only preserves the proof for the gated content the
 delegated host actually exercised.
 
-`Cargo.lock` is a literal member of `all_gate_paths` and is matched by path
-only: the classifier does not read the lockfile diff, does not ask which
-packages moved, and does not ask whether a bump reaches runner, monitor, eBPF,
-CLI, policy, or fixture surfaces. Every touch therefore requires a fresh
-`gates=all` delegated proof. `Cargo.lock` is also outside
-`content_provenance_paths`, so that proof cannot be reused across a head that
-touches it — content provenance reports the path as `unaddressed`.
+`Cargo.lock` (and `Cargo.toml`) are literal members of `all_gate_paths` and
+are matched by path only: the classifier does not read the lockfile diff, does
+not ask which packages moved, and does not ask whether a bump reaches runner,
+monitor, eBPF, CLI, policy, or fixture surfaces. Every touch therefore requires
+a `gates=all` delegated proof. Both files are also members of
+`content_provenance_paths` (#2962), so that proof is content-addressed over
+them: a proof produced on an earlier head is still accepted after a rebase
+that leaves their bytes identical, which is what keeps mechanical lockfile
+bumps satisfiable. Paths the map reports as `unaddressed` keep the stricter
+rule — a proof at the PR's own exact head, no reuse.
 
 The workflow keeps `pull-requests: write` while the transition comment channel
 exists. Empirically, `issues: write` plus `pull-requests: read` is not enough to
