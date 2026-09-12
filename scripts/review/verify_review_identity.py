@@ -6,8 +6,11 @@ import subprocess
 from urllib.parse import urlsplit
 
 from pr_landing_readiness import (
+    REPO_ROOT,
+    carried_to_head,
     machine_review_candidate,
     parse_repo,
+    record_head_sha,
     run_json,
 )
 
@@ -33,7 +36,20 @@ def verify(repo, pr, head, branch_ref, record_author, identity, evidence_url, pr
         raise ValueError('review evidence publisher or PR does not match')
     body = comment.get('body', '').strip()
     machine = machine_review_candidate(body, record_author, head, branch_ref)
-    if machine is None or machine['verdict'] != 'READY' or machine['bound_sha'] != head:
+    carried, carry_note = False, None
+    if machine is None:
+        # A record bound to an earlier head still binds this one when the required checker's
+        # own derivation carries it across an upstream-advance merge (#2955, #2958). It is
+        # validated against its own head, exactly as that gate validates it. This is not a
+        # second authorization of the carry: `safe_merge.sh` runs the readiness report first,
+        # and that is where the whole comment set is put to `review-record-check`'s `evaluate`.
+        earlier = record_head_sha(body)
+        carried, carry_note = carried_to_head(earlier, head, REPO_ROOT, {}, repo)
+        if carried:
+            machine = machine_review_candidate(body, record_author, earlier, branch_ref)
+    if machine is None or machine['verdict'] != 'READY':
+        raise ValueError('review identity, head, verdict or independence declaration mismatch')
+    if machine['bound_sha'] != head and not carried:
         raise ValueError('review identity, head, verdict or independence declaration mismatch')
     direct_human = (
         identity == record_author and record_author != pr_author
@@ -44,6 +60,8 @@ def verify(repo, pr, head, branch_ref, record_author, identity, evidence_url, pr
     print(f'Record author: {record_author}')
     print(f'Reviewing identity: {identity}')
     print(f'Review evidence: {evidence_url}')
+    if carried:
+        print(f'Carried to the live head: {carry_note}')
     print('The linked record declares a completed non-building review; agent identity is not authenticated by this check.')
 
 
