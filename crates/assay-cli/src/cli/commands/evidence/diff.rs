@@ -82,7 +82,7 @@ pub fn cmd_diff(args: DiffArgs) -> Result<i32> {
     let candidate_file = File::open(&candidate_path)
         .with_context(|| format!("failed to open candidate {}", candidate_path.display()))?;
 
-    let limits = VerifyLimits::default();
+    let limits = VerifyLimits::for_retained_events();
     let report = diff_bundles(baseline_file, candidate_file, limits)?;
 
     match args.format {

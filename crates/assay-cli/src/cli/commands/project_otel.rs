@@ -94,8 +94,11 @@ fn run_tool_decision_truth(bundle: &Path, out: Option<&Path>) -> anyhow::Result<
             return Ok(EXIT_CONFIG_ERROR);
         }
     };
-    // BundleReader::open verifies manifest hashes and the deterministic run-root digest.
-    let reader = match assay_evidence::bundle::BundleReader::open(file) {
+    // open_with_limits verifies manifest hashes and the deterministic run-root digest.
+    let reader = match assay_evidence::bundle::BundleReader::open_with_limits(
+        file,
+        assay_evidence::VerifyLimits::for_retained_events(),
+    ) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: bundle integrity verification failed: {e}");
