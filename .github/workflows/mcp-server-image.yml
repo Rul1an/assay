@@ -1,0 +1,85 @@
+# PR-time image build: exercise the Dockerfile with push: false.
+# Release publication lives in release.yml (publish-image → verify-published-image).
+
+name: assay-mcp-server image
+
+on:
+  pull_request:
+    paths:
+      - "docker/assay-mcp-server/**"
+      - "scripts/ci/stage-mcp-server-image-binaries.py"
+      - "scripts/ci/test-stage-mcp-server-image-binaries.py"
+      - ".github/workflows/mcp-server-image.yml"
+      - ".github/workflows/release.yml"
+      - "crates/assay-mcp-server/**"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  build-image:
+    name: Build image (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux/amd64
+            docker_arch: amd64
+          - os: ubuntu-24.04-arm
+            platform: linux/arm64
+            docker_arch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+
+      - name: Build assay-mcp-server
+        run: cargo build --release --package assay-mcp-server
+
+      - name: Stage native binary and enforce GLIBC ceiling
+        env:
+          DOCKER_ARCH: ${{ matrix.docker_arch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/stage-mcp-server-image-binaries.py \
+            --binary target/release/assay-mcp-server \
+            --arch "$DOCKER_ARCH" \
+            --output-dir docker/assay-mcp-server/binaries
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build image without pushing
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: docker/assay-mcp-server
+          file: docker/assay-mcp-server/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: false
+          load: true
+          provenance: false
+          sbom: false
+          tags: assay-mcp-server:pr
+          build-args: |
+            VERSION=pr
+
+      - name: Run --version
+        shell: bash
+        run: |
+          set -euo pipefail
+          user="$(docker image inspect --format '{{.Config.User}}' assay-mcp-server:pr)"
+          if [[ "$user" != "65532:65532" ]]; then
+            echo "image user is ${user}, want 65532:65532" >&2
+            exit 1
+          fi
+          docker run --rm --read-only --network none assay-mcp-server:pr --version

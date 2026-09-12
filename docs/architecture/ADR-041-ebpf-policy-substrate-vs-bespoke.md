@@ -3,7 +3,7 @@
 ## Status
 Proposed (June 2026) — decision recorded; default posture set.
 
-Depends on ADR-034 (contract seam); read with `docs/reference/runner/extraction-roadmap.md`.
+Depends on ADR-051 (contract seam); read with `docs/reference/runner/extraction-roadmap.md`.
 
 ## Context
 
@@ -53,4 +53,4 @@ raw kernel observation or by a general policy engine. Default posture, set now:
 ## References
 
 - `docs/reference/runner/extraction-roadmap.md`
-- ADR-034 (contract seam), ADR-037 (runner standalone boundary)
+- ADR-051 (contract seam), ADR-037 (runner standalone boundary)

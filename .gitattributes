@@ -9,3 +9,4 @@ packaging/claude-plugin/.claude-plugin/plugin.json text eol=lf
 packaging/claude-plugin/.mcp.json text eol=lf
 packaging/claude-plugin/skills/assay-golden-path/** text eol=lf
 packaging/agent-plugin/** text eol=lf
+tests/fixtures/perf/semantic_vcr/cassettes/**/.gitkeep text eol=lf

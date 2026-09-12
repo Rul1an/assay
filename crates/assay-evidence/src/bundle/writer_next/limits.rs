@@ -49,6 +49,31 @@ pub struct VerifyLimitsOverrides {
 }
 
 impl VerifyLimits {
+    /// Limits for a caller that retains decompressed `events.ndjson`.
+    ///
+    /// `max_events_bytes` is the compressed-bundle ceiling (100 MiB), five times
+    /// tighter than [`Self::default`]. Call this at the open site so residency is a
+    /// chosen bound, not the 500 MiB default inherited by [`crate::bundle::BundleReader::open`].
+    pub fn for_retained_events() -> Self {
+        let defaults = Self::default();
+        Self {
+            max_events_bytes: defaults.max_bundle_bytes,
+            ..defaults
+        }
+    }
+
+    /// [`Self::for_retained_events`] with the caller's event cap applied before materialization.
+    ///
+    /// `max_events_bytes` is also capped at `max_events * max_line_bytes` so a small
+    /// `--max-events` cannot still hold the full retain ceiling.
+    pub fn for_retained_events_capped(max_events: usize) -> Self {
+        let mut limits = Self::for_retained_events();
+        limits.max_events = max_events;
+        let from_lines = (max_events as u64).saturating_mul(limits.max_line_bytes as u64);
+        limits.max_events_bytes = limits.max_events_bytes.min(from_lines);
+        limits
+    }
+
     /// Apply overrides onto these defaults. Only `Some` values override.
     pub fn apply(self, overrides: VerifyLimitsOverrides) -> Self {
         Self {

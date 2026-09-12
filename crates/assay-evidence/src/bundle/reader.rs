@@ -1,18 +1,13 @@
 //! Bundle reader for evidence bundles.
 //!
-//! Provides a safe way to read and iterate over events from a bundle
-//! without needing to handle tar/gzip internals.
-//!
-//! # Design Choice: Memory-Based (Option A)
-//!
-//! This implementation reads the entire events.ndjson into memory.
-//! For v1, this is acceptable because:
-//! - Bundles are typically <100MB
-//! - Simplifies lifetime management
-//! - Avoids streaming complexity
-//!
-//! For very large bundles (>1GB), consider tempfile-based streaming
-//! or the `into_events()` consuming pattern in a future version.
+//! [`BundleReader::open`] retains the decompressed `events.ndjson` so a caller can
+//! iterate it. That residency is bounded only by the limits passed at open; the
+//! default `max_events_bytes` is 500 MiB, five times `max_bundle_bytes`. A small
+//! compressible archive can therefore cost far more resident memory than its size
+//! on disk. Callers that only need a verify or manifest answer must use
+//! [`crate::bundle::verify_bundle`] or [`BundleInfo::peek_and_bound_events`].
+//! Callers that need events must pass [`VerifyLimits::for_retained_events`] (or a
+//! tighter cap) before materializing.
 
 use crate::bundle::writer::{
     check_entry_path_len, classify_reader_io, classify_strict_json, read_events_bounded,
@@ -240,7 +235,9 @@ impl BundleReader {
 
 /// Info-only bundle inspection (manifest only, no event loading).
 ///
-/// Faster than `BundleReader::open()` when you only need metadata.
+/// Use this when the caller needs the manifest and not the events stream.
+/// Peeking still expands the archive under [`VerifyLimits`]; it does not make
+/// opening cheap relative to on-disk size.
 pub struct BundleInfo {
     pub manifest: Manifest,
 }
@@ -249,7 +246,7 @@ impl BundleInfo {
     /// Read only the manifest from a bundle.
     ///
     /// Does NOT verify event integrity.
-    /// Use `BundleReader::open()` for full verification.
+    /// Use [`crate::bundle::verify_bundle`] when the caller needs a verify answer.
     pub fn peek<R: Read>(reader: R) -> Result<Self> {
         Self::peek_with_limits(reader, VerifyLimits::default())
     }
@@ -309,6 +306,52 @@ impl BundleInfo {
 
         anyhow::bail!("Bundle missing manifest.json")
     }
+
+    /// Apply event-member ceilings and return the manifest without retaining `events.ndjson`.
+    ///
+    /// Use this when the caller needs the identifier (or other manifest fields) and must still
+    /// enforce `max_line_bytes`, `max_events`, UTF-8 and JSON depth — the ceilings
+    /// [`Self::peek_with_limits`] does not apply because it never reads the events member.
+    pub fn peek_and_bound_events<R: Read>(reader: R, limits: VerifyLimits) -> Result<Self> {
+        let mut source = Vec::new();
+        LimitReader::new(reader, limits.max_bundle_bytes, LimitKind::SourceBytes)
+            .read_to_end(&mut source)
+            .map_err(classify_reader_io)
+            .context("Bundle source")?;
+
+        let info = Self::peek_with_limits(Cursor::new(&source), limits)?;
+
+        let decoder = LimitReader::new(
+            GzDecoder::new(Cursor::new(&source)),
+            limits.max_decode_bytes,
+            LimitKind::DecodedBytes,
+        );
+        let mut archive = tar::Archive::new(decoder);
+        let mut events_found = false;
+
+        for entry in archive.entries().map_err(classify_reader_io)?.raw(true) {
+            let entry = entry.map_err(classify_reader_io)?;
+            check_entry_path_len(entry.path_bytes().len(), limits.max_path_len)?;
+            let path = entry.path()?.to_string_lossy().to_string();
+            if path == "events.ndjson" {
+                events_found = true;
+                let entry =
+                    LimitReader::new(entry, limits.max_events_bytes, LimitKind::MemberBytes);
+                read_events_bounded(entry, &mut std::io::sink(), limits)?;
+                break;
+            }
+        }
+
+        if !events_found {
+            return Err(anyhow::Error::new(VerifyError::new(
+                ErrorClass::Contract,
+                ErrorCode::ContractMissingFile,
+                "events.ndjson missing from bundle".to_string(),
+            )));
+        }
+
+        Ok(info)
+    }
 }
 
 #[cfg(test)]
@@ -346,6 +389,16 @@ mod tests {
     fn test_bundle_info_peek() {
         let bundle = create_test_bundle(5);
         let info = BundleInfo::peek(Cursor::new(&bundle)).unwrap();
+
+        assert_eq!(info.manifest.event_count, 5);
+        assert_eq!(info.manifest.run_id, "run_test");
+    }
+
+    #[test]
+    fn peek_and_bound_events_returns_the_manifest() {
+        let bundle = create_test_bundle(5);
+        let info = BundleInfo::peek_and_bound_events(Cursor::new(&bundle), VerifyLimits::default())
+            .unwrap();
 
         assert_eq!(info.manifest.event_count, 5);
         assert_eq!(info.manifest.run_id, "run_test");
