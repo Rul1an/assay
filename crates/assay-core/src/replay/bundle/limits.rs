@@ -116,6 +116,29 @@ pub enum ReplayContractError {
     /// that is verified is unambiguously the one the archive declared first.
     #[error("replay bundle contains more than one manifest")]
     DuplicateManifest,
+
+    /// A member whose header is not a plain file header: an extension record, a link, a name
+    /// prefix, or a size not written as eleven octal digits. Tar readers disagree on what such a
+    /// header means, so the bytes this reader hashed and scanned could unpack differently
+    /// elsewhere.
+    #[error("replay bundle contains a member that is not a plain file")]
+    NotAPlainMember,
+
+    /// A member name this reader could only use by changing it: not valid UTF-8, or carrying a
+    /// backslash that normalising would turn into a separator. Either way the member would be
+    /// stored under a name no other reader reports for it.
+    #[error("replay bundle contains a member name that is not usable as written")]
+    AmbiguousMemberName,
+
+    /// Non-zero bytes after the tar end-of-archive marker: content this reader never parsed but a
+    /// reader that skips zero blocks would.
+    #[error("replay bundle contains data after the end of the tar archive")]
+    DataAfterArchive,
+
+    /// Bytes after the one gzip member this reader decodes: a second member, which a reader that
+    /// decodes concatenated members would unpack, or garbage.
+    #[error("replay bundle contains data after the end of the gzip stream")]
+    DataAfterGzipStream,
 }
 
 /// If `err` was produced by a [`LimitReader`](assay_common::limits::LimitReader) that wraps

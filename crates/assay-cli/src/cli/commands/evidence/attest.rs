@@ -214,8 +214,24 @@ mod tests {
         .expect("attestation must verify against the bundle it describes");
         assert_eq!(attested.predicate.run.event_count, 1);
 
-        let mut other = bytes.clone();
-        other.extend_from_slice(b"trailing");
+        // A different valid bundle, not these bytes with a suffix: the verifier refuses data after
+        // the gzip member on its own, which would test that refusal instead of the digest match.
+        let mut other = Vec::new();
+        {
+            let mut w = BundleWriter::new(&mut other);
+            w.add_event(EvidenceEvent::new(
+                "assay.test.event",
+                "urn:assay:test",
+                "attest_other_run",
+                0,
+                serde_json::json!({}),
+            ));
+            w.finish().unwrap();
+        }
+        assert_ne!(
+            other, bytes,
+            "the other bundle must be a different artifact"
+        );
         let err = assay_evidence::attestation::verify_attestation_for_bundle(
             &envelope,
             &f.signing.verifying_key(),

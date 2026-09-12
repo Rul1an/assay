@@ -744,8 +744,10 @@ fn generate_seed_corpus() {
 /// the file ceilings on this path, and `max_decode_bytes` is the backstop pinned separately by
 /// `the_decode_ceiling_is_enforced_independently_of_the_byte_ceiling`.
 ///
-/// The shape that does reach it is a PAX extended header, pinned by
-/// `a_pax_extended_header_reaches_the_decode_ceiling` below.
+/// A PAX extended header used to be the one shape that reached it, because the tar reader consumed
+/// the record before handing the verifier a member. Members are now walked raw and an extension
+/// record is refused at its own header, pinned by
+/// `a_pax_extended_header_is_refused_before_its_body_is_decoded` below.
 #[test]
 fn high_ratio_gzip_stops_at_the_tar_layer_not_the_decode_ceiling() {
     let seed = std::fs::read(
@@ -766,13 +768,12 @@ fn high_ratio_gzip_stops_at_the_tar_layer_not_the_decode_ceiling() {
     );
 }
 
-/// `max_decode_bytes` is reachable, and this is the shape that reaches it. A PAX extended header is
-/// consumed inside the tar reader before any member is handed to the verifier, so the per-file
-/// ceilings — which are checked against a declared member size — never apply to it. That makes the
-/// decode ceiling the only guard on this path, which is why it needs a seed and a pinned outcome
-/// rather than a note saying the limit is unreachable.
+/// A PAX extended header declaring more than `max_decode_bytes` is refused at its own header,
+/// before any of its body is decoded. It used to be consumed inside the tar reader, where only the
+/// decode ceiling could stop it. Walking the archive raw hands the record to the verifier, which
+/// refuses every extension record as a member that is not a plain file.
 #[test]
-fn a_pax_extended_header_reaches_the_decode_ceiling() {
+fn a_pax_extended_header_is_refused_before_its_body_is_decoded() {
     let seed = std::fs::read(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../fuzz/corpus/bundle_reader/pax-header-past-decode-ceiling"),
@@ -783,10 +784,8 @@ fn a_pax_extended_header_reaches_the_decode_ceiling() {
         (seed.len() as u64) < small_limits().max_bundle_bytes,
         "the compressed form must clear the byte ceiling, or this tests the wrong axis"
     );
-    // Guards this test's own premise. Without it, shrinking the PAX declared size below the
-    // ceiling would leave the test green while it silently exercised a different path -- the
-    // failure mode this whole file exists to catch. Pinned to the named limit rather than a
-    // literal so the guard moves with the ceiling instead of drifting away from it.
+    // Guards this test's own premise: the record declares more than the decode ceiling, so a
+    // refusal in the tar layer shows the body was never decoded rather than that it was small.
     assert!(
         decoded_len(&seed) as u64 > small_limits().max_decode_bytes,
         "seed must still declare more than the decode ceiling, or it tests a different path"
@@ -794,7 +793,7 @@ fn a_pax_extended_header_reaches_the_decode_ceiling() {
     let (class, code) = expect_rejected(&seed, "a PAX header declaring more than the decode limit");
     assert_eq!(
         (class, code),
-        (ErrorClass::Limits, ErrorCode::LimitDecodeBytes)
+        (ErrorClass::Integrity, ErrorCode::IntegrityTar)
     );
 }
 
@@ -818,4 +817,352 @@ fn classification_is_stable_across_repeated_runs() {
             "classification must be deterministic"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Parser differentials: the archive another reader sees must be the one that was verified
+// ---------------------------------------------------------------------------
+
+fn pax_record(key: &str, value: &str) -> Vec<u8> {
+    let body = format!(" {key}={value}\n");
+    let mut len = body.len() + 1;
+    loop {
+        let record = format!("{len}{body}");
+        if record.len() == len {
+            return record.into_bytes();
+        }
+        len = record.len();
+    }
+}
+
+/// A header whose name and size are written as given, bypassing `set_path`, which refuses the
+/// shapes these tests need.
+fn raw_header(name: &[u8], size: u64, kind: tar::EntryType) -> tar::Header {
+    let mut header = tar::Header::new_gnu();
+    header.as_gnu_mut().expect("gnu header").name[..name.len()].copy_from_slice(name);
+    header.set_entry_type(kind);
+    header.set_size(size);
+    header.set_mode(0o644);
+    header.set_mtime(0);
+    header.set_cksum();
+    header
+}
+
+/// A rewrite of one member header, applied before its checksum is recomputed.
+type HeaderEdit = fn(&mut [u8; 512]);
+
+/// An extension record placed before the member under test, whose own header then claims
+/// `name` and `size`. The member's bytes are always written in full.
+struct Record<'a> {
+    kind: tar::EntryType,
+    body: Vec<u8>,
+    name: &'a str,
+    size: u64,
+}
+
+/// Repack a valid bundle from plain headers. `edit` may rewrite the header of `target` (the
+/// checksum is recomputed afterwards), and `record`, if any, is placed before it.
+fn repack_members(
+    manifest: &[u8],
+    events: &[u8],
+    target: &str,
+    record: Option<Record<'_>>,
+    edit: impl Fn(&mut [u8; 512]),
+) -> Vec<u8> {
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+    {
+        let mut builder = tar::Builder::new(&mut encoder);
+        for (path, content) in [("manifest.json", manifest), ("events.ndjson", events)] {
+            let len = content.len() as u64;
+            if path != target {
+                let header = raw_header(path.as_bytes(), len, tar::EntryType::Regular);
+                builder.append(&header, content).expect("append member");
+                continue;
+            }
+            let (name, size) = match &record {
+                Some(record) => {
+                    let record_header =
+                        raw_header(b"PaxHeaders/member", record.body.len() as u64, record.kind);
+                    builder
+                        .append(&record_header, record.body.as_slice())
+                        .expect("append extension record");
+                    (record.name, record.size)
+                }
+                None => (path, len),
+            };
+            let mut header = raw_header(name.as_bytes(), size, tar::EntryType::Regular);
+            edit(header.as_mut_bytes());
+            header.set_cksum();
+            builder.append(&header, content).expect("append member");
+        }
+        builder.finish().expect("finish tar");
+    }
+    encoder.finish().expect("finish gzip")
+}
+
+fn gzip(bytes: &[u8]) -> Vec<u8> {
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+    encoder.write_all(bytes).expect("gzip write");
+    encoder.finish().expect("gzip finish")
+}
+
+fn decoded_tar(bundle: &[u8]) -> Vec<u8> {
+    let mut tar = Vec::new();
+    GzDecoder::new(Cursor::new(bundle))
+        .read_to_end(&mut tar)
+        .expect("valid gzip");
+    tar
+}
+
+const TARGETS: [&str; 2] = ["manifest.json", "events.ndjson"];
+
+/// The control for the differential tests below. The writer emits the old-style regular type
+/// `'\0'`; `'0'` means the same, and zero padding after the archive is what a well-formed archive
+/// carries. If these stop verifying, the checks below have become "refuse anything unusual".
+#[test]
+fn plain_headers_of_either_regular_type_and_zero_padding_still_verify() {
+    let (manifest, events) = unpack(&valid_bundle(3));
+    assert_eq!(
+        decoded_tar(&valid_bundle(3))[156],
+        0,
+        "the writer emits '\\0'"
+    );
+    for target in TARGETS {
+        let bundle = repack_members(&manifest, &events, target, None, |_| {});
+        assert_eq!(classify(&bundle), Ok(()), "plain '0' header on {target}");
+        // libarchive ends the size with a space where this writer uses a NUL.
+        let bundle = repack_members(&manifest, &events, target, None, |h| h[135] = b' ');
+        assert_eq!(
+            classify(&bundle),
+            Ok(()),
+            "space-terminated size on {target}"
+        );
+    }
+    let mut tar = decoded_tar(&valid_bundle(3));
+    tar.extend_from_slice(&[0u8; 10240]);
+    assert_eq!(
+        classify(&gzip(&tar)),
+        Ok(()),
+        "zero padding after the archive"
+    );
+}
+
+/// Readers disagree on extension records: which of two wins, what a malformed one falls back
+/// to, whether a PAX name beats a GNU one. Comparing the tar crate's reading with the header
+/// only asks the tar crate, so every record is refused, including one that agrees.
+#[test]
+fn every_extension_record_is_refused_even_one_that_agrees() {
+    let (manifest, events) = unpack(&valid_bundle(3));
+    for target in TARGETS {
+        let len = if target == "manifest.json" {
+            manifest.len()
+        } else {
+            events.len()
+        } as u64;
+        let pax = |body: Vec<u8>, name, size| Record {
+            kind: tar::EntryType::XHeader,
+            body,
+            name,
+            size,
+        };
+        let cases = [
+            (
+                "agreeing PAX size",
+                pax(pax_record("size", &len.to_string()), target, len),
+            ),
+            (
+                "PAX size 0",
+                pax(pax_record("size", &len.to_string()), target, 0),
+            ),
+            (
+                "PAX size len-1",
+                pax(pax_record("size", &len.to_string()), target, len - 1),
+            ),
+            (
+                "PAX size len+1",
+                pax(pax_record("size", &len.to_string()), target, len + 1),
+            ),
+            (
+                "PAX path",
+                pax(pax_record("path", target), "notes.txt", len),
+            ),
+            (
+                "two PAX sizes, first one true",
+                pax(
+                    [
+                        pax_record("size", &len.to_string()),
+                        pax_record("size", "10"),
+                    ]
+                    .concat(),
+                    target,
+                    len,
+                ),
+            ),
+            (
+                "two PAX paths, first one true",
+                pax(
+                    [pax_record("path", target), pax_record("path", "../evil")].concat(),
+                    target,
+                    len,
+                ),
+            ),
+            (
+                "unparsable PAX size",
+                pax(pax_record("size", "1_0"), target, len),
+            ),
+            (
+                "PAX global header",
+                Record {
+                    kind: tar::EntryType::XGlobalHeader,
+                    body: pax_record("path", "../evil"),
+                    name: target,
+                    size: len,
+                },
+            ),
+            (
+                "GNU long name",
+                Record {
+                    kind: tar::EntryType::GNULongName,
+                    body: [target.as_bytes(), b"\0"].concat(),
+                    name: "notes.txt",
+                    size: len,
+                },
+            ),
+        ];
+        for (what, record) in cases {
+            let bundle = repack_members(&manifest, &events, target, Some(record), |_| {});
+            assert_eq!(
+                expect_rejected(&bundle, what),
+                (ErrorClass::Integrity, ErrorCode::IntegrityTar),
+                "{what} before {target}"
+            );
+        }
+    }
+}
+
+/// A link, directory or sparse file carrying data: other readers unpack a link or nothing,
+/// where the tar crate reads the data as the member.
+#[test]
+fn a_member_that_is_not_a_regular_file_is_refused() {
+    let (manifest, events) = unpack(&valid_bundle(3));
+    for target in TARGETS {
+        for kind in [b'1', b'2', b'5', b'7', b'S', b'x', b'g', b'L'] {
+            let bundle = repack_members(&manifest, &events, target, None, |h| h[156] = kind);
+            assert_eq!(
+                expect_rejected(&bundle, "a member that is not a regular file"),
+                (ErrorClass::Integrity, ErrorCode::IntegrityTar),
+                "type {:?} on {target}",
+                kind as char
+            );
+        }
+    }
+}
+
+/// Python and Go read bytes 345 onwards of a GNU header as a name prefix, where the tar crate
+/// ignores them; a link name on a regular file is noise no reader should be asked to resolve.
+#[test]
+fn a_link_name_or_anything_from_the_name_prefix_on_is_refused() {
+    let (manifest, events) = unpack(&valid_bundle(3));
+    let edits: [(&str, HeaderEdit); 4] = [
+        ("link name", |h| h[157..160].copy_from_slice(b"etc")),
+        ("name prefix", |h| {
+            h[345..355].copy_from_slice(b"../../evil")
+        }),
+        ("star trailer", |h| h[508..512].copy_from_slice(b"tar\0")),
+        ("padding", |h| h[511] = 1),
+    ];
+    for target in TARGETS {
+        for (what, edit) in edits {
+            let bundle = repack_members(&manifest, &events, target, None, edit);
+            assert_eq!(
+                expect_rejected(&bundle, what),
+                (ErrorClass::Integrity, ErrorCode::IntegrityTar),
+                "{what} on {target}"
+            );
+        }
+    }
+}
+
+/// An old-style regular file whose name ends in a slash is a directory to Python and Go. The
+/// allowlist would refuse the name too, but in another class; this pins the header rule.
+#[test]
+fn a_member_name_ending_in_a_slash_is_refused() {
+    let (manifest, events) = unpack(&valid_bundle(3));
+    for target in TARGETS {
+        let bundle = repack_members(&manifest, &events, target, None, |h| {
+            h[156] = 0;
+            h[target.len()] = b'/';
+        });
+        assert_eq!(
+            expect_rejected(&bundle, "a name ending in a slash"),
+            (ErrorClass::Integrity, ErrorCode::IntegrityTar),
+            "{target}/"
+        );
+    }
+}
+
+/// The tar crate trims spaces around a size and reads base-256; Python also accepts separators
+/// the tar crate refuses. Only the POSIX form is accepted: eleven octal digits ended by a NUL or a
+/// space. Every variant here still parses to the member's true length in the tar crate.
+#[test]
+fn a_size_not_written_as_eleven_octal_digits_is_refused() {
+    let (manifest, events) = unpack(&valid_bundle(3));
+    for target in TARGETS {
+        let len = if target == "manifest.json" {
+            manifest.len()
+        } else {
+            events.len()
+        } as u64;
+        let mut base256 = [0u8; 12];
+        base256[0] = 0x80;
+        base256[4..].copy_from_slice(&len.to_be_bytes());
+        let variants: [(&str, Vec<u8>); 3] = [
+            ("leading spaces", format!("{len:>11o}\0").into_bytes()),
+            (
+                "twelve digits, no terminator",
+                format!("{len:012o}").into_bytes(),
+            ),
+            ("base-256", base256.to_vec()),
+        ];
+        for (what, field) in variants {
+            let bundle = repack_members(&manifest, &events, target, None, |h| {
+                h[124..136].copy_from_slice(&field)
+            });
+            assert_eq!(
+                expect_rejected(&bundle, what),
+                (ErrorClass::Integrity, ErrorCode::IntegrityTar),
+                "{what} size on {target}"
+            );
+        }
+    }
+}
+
+/// Bytes after the end-of-archive marker are tar padding and must be zeros. Anything else is
+/// content this verifier never parsed but a reader that skips zero blocks would.
+#[test]
+fn non_zero_data_after_the_end_of_the_archive_is_refused() {
+    let mut tar = decoded_tar(&valid_bundle(3));
+    tar.extend_from_slice(b"bytes after the archive");
+    assert_eq!(
+        expect_rejected(&gzip(&tar), "non-zero data after the end of the archive"),
+        (ErrorClass::Integrity, ErrorCode::IntegrityTar)
+    );
+}
+
+/// The verifier decodes one gzip member. A second member, or any other trailing bytes, is data
+/// it never looked at and a reader that decodes concatenated members would unpack.
+#[test]
+fn data_after_the_gzip_member_is_refused() {
+    let mut second_member = valid_bundle(3);
+    second_member.extend_from_slice(&gzip(b"a second member"));
+    assert_eq!(
+        expect_rejected(&second_member, "a second gzip member"),
+        (ErrorClass::Integrity, ErrorCode::IntegrityGzip)
+    );
+    let mut trailing = valid_bundle(3);
+    trailing.extend_from_slice(b"trailing bytes");
+    assert_eq!(
+        expect_rejected(&trailing, "trailing bytes after the gzip member"),
+        (ErrorClass::Integrity, ErrorCode::IntegrityGzip)
+    );
 }

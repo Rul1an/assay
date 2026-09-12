@@ -152,7 +152,11 @@ impl BundleReader {
         let mut events_content = Vec::new();
         let mut events_found = false;
 
-        for entry in archive.entries().map_err(classify_reader_io)? {
+        // Raw, like the verifier: the member this pass extracts is named by its own header and
+        // never by a PAX or GNU record. On the verified path those records are already refused, so
+        // this changes nothing; on the peek path, which never verifies, it stops a record from
+        // pointing the name `events.ndjson` at another member's bytes.
+        for entry in archive.entries().map_err(classify_reader_io)?.raw(true) {
             let entry = entry.map_err(classify_reader_io)?;
             // Measure the path on the bytes the archive carries, before any conversion.
             // `to_string_lossy` emits three bytes for every invalid one, so a check on the
@@ -274,7 +278,9 @@ impl BundleInfo {
         );
         let mut archive = tar::Archive::new(decoder);
 
-        for entry in archive.entries().map_err(classify_reader_io)? {
+        // Raw, like the verifier: peek returns the manifest a reader finds under that name in the
+        // archive's own headers, not one an extension record renamed into place.
+        for entry in archive.entries().map_err(classify_reader_io)?.raw(true) {
             let entry = entry.map_err(classify_reader_io)?;
             check_entry_path_len(entry.path_bytes().len(), limits.max_path_len)?;
             let path = entry.path()?.to_string_lossy().to_string();
