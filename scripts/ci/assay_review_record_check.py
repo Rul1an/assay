@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
-"""Exact-head review-record checker used by the Slice B advisory workflow."""
+"""Exact-head review-record checker used by the Slice B advisory workflow.
+
+When no record names the live head, the checker re-derives the AGENTS.md carry conditions
+from the commits themselves rather than reading them out of a posted record's prose; see
+`derive_carry`, which quotes the contract it answers.
+"""
 from __future__ import annotations
 
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -23,6 +31,14 @@ HTTP_TIMEOUT_S = 30
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 COMMENT_PAGE_SIZE = 100
 COMMENT_PAGE_MAX = 2
+REMOTE = "origin"
+GIT_TIMEOUT_S = 60
+GIT_FETCH_TIMEOUT_S = 180
+# `-C <root>` names the repository to answer about, and these override it. An inherited one
+# points git at somebody else's checkout: the pre-commit hook exports GIT_DIR and GIT_INDEX_FILE,
+# so a derivation run from there would read the wrong objects rather than none.
+GIT_SCOPE_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                  "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE")
 
 
 class GateError(Exception):
@@ -216,13 +232,145 @@ def resolve_supersedes(
     return retired, refused
 
 
+class Git:
+    """Bounded `git` access to one checkout: the only subprocess this checker runs."""
+
+    def __init__(self, root: str, timeout: float = GIT_TIMEOUT_S,
+                 fetch_timeout: float = GIT_FETCH_TIMEOUT_S) -> None:
+        self.root, self.timeout, self.fetch_timeout = root, timeout, fetch_timeout
+
+    def run(self, *args: str, timeout: float | None = None) -> tuple[int, str]:
+        try:
+            done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                ["git", "-C", self.root, *args], capture_output=True, text=True,
+                env={key: value for key, value in os.environ.items()
+                     if key not in GIT_SCOPE_VARS},
+                timeout=self.timeout if timeout is None else timeout, check=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise GateError("carry_objects_unavailable", f"git {args[0]}: {exc}") from exc
+        return done.returncode, done.stdout.strip()
+
+    def ok(self, *args: str) -> bool:
+        return self.run(*args)[0] == 0
+
+    def line(self, *args: str) -> str:
+        """One nonempty line, or the objects were not obtainable after all."""
+        code, out = self.run(*args)
+        if code != 0 or not out:
+            raise GateError("carry_objects_unavailable", " ".join(args))
+        return out.splitlines()[0].strip()
+
+    def names(self, *args: str) -> list[str]:
+        code, out = self.run(*args)
+        if code != 0:
+            raise GateError("carry_objects_unavailable", " ".join(args))
+        return [name for name in out.splitlines() if name]
+
+    def shallow(self) -> bool:
+        return self.run("rev-parse", "--is-shallow-repository")[1] == "true"
+
+    def ensure(self, *shas: str) -> None:
+        """Obtain each commit and enough history around it to answer ancestry exactly.
+
+        The workflow checks out the PR base at depth 1 from the public `origin` with no
+        credentials, so both the commits and the graft boundary are missing. Fetching a sha
+        brings the commit; `--unshallow` on the same bounded fetch removes the boundary that
+        would otherwise let `merge-base` answer from truncated history — a wrong answer, not
+        a missing one.
+        """
+        if self.shallow():
+            self.run("fetch", "--no-tags", "--unshallow", REMOTE, *shas,
+                     timeout=self.fetch_timeout)
+        for sha in shas:
+            if not self.ok("cat-file", "-e", f"{sha}^{{commit}}"):
+                self.run("fetch", "--no-tags", REMOTE, sha, timeout=self.fetch_timeout)
+            if not self.ok("cat-file", "-e", f"{sha}^{{commit}}"):
+                raise GateError("carry_objects_unavailable", sha)
+        if self.shallow():
+            raise GateError("carry_objects_unavailable", "history is still shallow")
+
+
+def _require_ancestor(git: Git, reviewed: str, live: str) -> None:
+    """Refuse a live head whose history does not contain the reviewed head.
+
+    Reached on its own terms only when the first-parent check above is loosened: a two-parent
+    head whose first parent already contains `reviewed` contains it too. It stays as the
+    direct statement of "what was reviewed is still in what lands", and it is tested directly.
+    """
+    if not git.ok("merge-base", "--is-ancestor", reviewed, live):
+        raise GateError("carry_not_ancestor", f"{reviewed} is not an ancestor of {live}")
+
+
+def derive_carry(git: Git, reviewed: str, live: str) -> str:
+    """Re-derive both AGENTS.md carry conditions from the commits. Quoting that contract:
+
+        A review is revalidated for a new head only by a recorded equivalence check with two
+        conditions: the new head introduces no change, to any file, that is not already on
+        `main` - its tree is what merging `main` into the reviewed head produces without
+        conflicts - and the advance from the reviewed head to the new head touched no file the
+        review covered, meaning the PR's changed files as of the reviewed head. [...] Rewritten
+        history (rebase, squash) does not carry a review even when the tree is identical:
+        revalidation is for upstream advances only.
+
+    `main` is read as the commit the advance actually merged, which is the live head's second
+    parent; a rewritten history has no such parent and is refused before any tree is compared.
+    Nothing here reads the record: a record that merely claims a carry gets no credit.
+    """
+    git.ensure(reviewed, live)
+    parents = git.line("rev-list", "--parents", "-n", "1", live).split()[1:]
+    if len(parents) != 2:
+        raise GateError("carry_not_upstream_merge", f"{live} has {len(parents)} parent(s)")
+    first, second = parents
+    if not git.ok("merge-base", "--is-ancestor", reviewed, first):
+        raise GateError("carry_not_upstream_merge", f"{reviewed} is not in {first}'s history")
+    _require_ancestor(git, reviewed, live)
+    code, merged = git.run("merge-tree", "--write-tree", second, reviewed)
+    if code == 1:
+        raise GateError("carry_merge_conflict", f"merging {second} into {reviewed} conflicts")
+    if code != 0 or not merged:
+        raise GateError("carry_objects_unavailable", f"merge-tree exit {code}")
+    produced, landed = merged.splitlines()[0].strip(), git.line("rev-parse", f"{live}^{{tree}}")
+    if produced != landed:
+        raise GateError("carry_tree_mismatch", f"{produced} != {landed}")
+    base = git.line("merge-base", reviewed, second)
+    reviewed_files = git.names("diff", "--name-only", base, reviewed)
+    advance_files = git.names("diff", "--name-only", reviewed, live)
+    touched = sorted(set(reviewed_files) & set(advance_files))
+    if touched:
+        raise GateError("carry_touched_reviewed_file", ", ".join(touched))
+    return (f"review-record-carry=derived reviewed={reviewed} merged={second} "
+            f"conditions=tree-equivalence+no-overlap-re-derived-by-checker "
+            f"reviewed_files={len(reviewed_files)} advance_files={len(advance_files)}")
+
+
+def _carry_candidates(live_sha: str, comments: list[dict[str, Any]]) -> list[str]:
+    """Reviewed heads named by records on this PR, newest carrier first, live head excluded."""
+    seen: dict[str, int] = {}
+    for position, comment in enumerate(comments):
+        if not isinstance(comment, dict):
+            continue
+        body = str(comment.get("body") or "")
+        if MARKER not in body:
+            continue
+        try:
+            record = extract_record(body)
+        except GateError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        sha = str(record.get("head_sha") or "").lower()
+        if HEX40.match(sha) and sha != live_sha.lower():
+            seen[sha] = position
+    return sorted(seen, key=lambda sha: seen[sha], reverse=True)
+
+
 def _current_sha(body: str, record: dict[str, Any] | None, live: str) -> bool:
     if record and str(record.get("head_sha") or "").lower() == live.lower():
         return True
     return live.lower() in body.lower()
 
 
-def evaluate(live_sha: str, branch_ref: str, comments: list[dict[str, Any]]) -> None:
+def _evaluate_head(live_sha: str, branch_ref: str, comments: list[dict[str, Any]]) -> None:
     entries: list[tuple[int | None, str, Any, dict[str, Any]]] = []
     for comment in comments:
         if not isinstance(comment, dict):
@@ -270,6 +418,32 @@ def evaluate(live_sha: str, branch_ref: str, comments: list[dict[str, Any]]) -> 
     validate_record(current[0], live_sha=live_sha, branch_ref=branch_ref)
 
 
+def evaluate(
+    live_sha: str, branch_ref: str, comments: list[dict[str, Any]], *, git_root: str | None = None
+) -> str | None:
+    """Judge the live head; fall back to a carry the checker derives itself.
+
+    A record naming the live head is judged exactly as before, pass or fail, and its own text
+    never claims a carry into existence. Only when no record names the live head does the
+    newest still-valid READY record on an earlier head get tested against the commits, and
+    every rule that record had to satisfy on its own head it still has to satisfy here.
+    Returns the derived-carry line when one was derived, else `None`.
+    """
+    try:
+        _evaluate_head(live_sha, branch_ref, comments)
+        return None
+    except GateError as exc:
+        if exc.reason != "no_current_record" or git_root is None:
+            raise
+    for sha in _carry_candidates(live_sha, comments):
+        try:
+            _evaluate_head(sha, branch_ref, comments)
+        except GateError:
+            continue
+        return derive_carry(Git(git_root), sha, live_sha.lower())
+    raise GateError("no_current_record", live_sha)
+
+
 class GitHubApi:
     def __init__(self, repo: str, token: str) -> None:
         self.base = f"https://api.github.com/repos/{repo}"
@@ -314,7 +488,9 @@ def live_check(number: int, api: GitHubApi | None = None) -> int:
     sha2, ref2 = head_fields(again)
     if (sha, ref) != (sha2, ref2):
         raise GateError("head_moved", f"{sha} {ref} -> {sha2} {ref2}")
-    evaluate(sha2, ref2, comments)
+    carried = evaluate(sha2, ref2, comments, git_root=_root())
+    if carried:
+        print(carried)
     print(f"review-record-check=pass head={sha2}")
     return 0
 
@@ -355,20 +531,117 @@ def _cmt(record, *, extra="", second=False, bot=False, edited=False, login="Rul1
     return row
 
 
+def _fixture_env() -> dict[str, str]:
+    """A hermetic, deterministic environment for the self-test's throwaway repositories."""
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env.update({
+        "GIT_AUTHOR_NAME": "assay-self-test", "GIT_AUTHOR_EMAIL": "self-test@assay.invalid",
+        "GIT_COMMITTER_NAME": "assay-self-test", "GIT_COMMITTER_EMAIL": "self-test@assay.invalid",
+        "GIT_AUTHOR_DATE": "2026-01-01T00:00:00+0000",
+        "GIT_COMMITTER_DATE": "2026-01-01T00:00:00+0000",
+        "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
+        "GIT_TERMINAL_PROMPT": "0", "GIT_ALLOW_PROTOCOL": "none",
+    })
+    return env
+
+
+def _fx(root: str, *args: str, allow_fail: bool = False) -> str:
+    done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        ["git", "-C", root, *args], env=_fixture_env(), capture_output=True, text=True,
+        timeout=GIT_TIMEOUT_S, check=False)
+    if done.returncode != 0 and not allow_fail:
+        raise RuntimeError(f"fixture `git {' '.join(args)}` failed: {done.stderr.strip()}")
+    return done.stdout.strip()
+
+
+def _fx_write(root: str, name: str, text: str) -> None:
+    with open(os.path.join(root, name), "w", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def _fx_commit(root: str, message: str, files: dict[str, str]) -> str:
+    for name, text in files.items():
+        _fx_write(root, name, text)
+    _fx(root, "add", "--", *files)
+    _fx(root, "commit", "-q", "-m", message)
+    return _fx(root, "rev-parse", "HEAD")
+
+
+def _carry_repo(root: str) -> dict[str, str]:
+    """One repository holding a reviewed head and every advance shape the carry rules judge."""
+    rows = [f"line {index}\n" for index in range(1, 31)]
+
+    def shared(index: int | None = None, text: str = "") -> str:
+        edited = list(rows)
+        if index is not None:
+            edited[index] = text
+        return "".join(edited)
+
+    _fx(root, "-c", "init.defaultBranch=main", "init", "-q")
+    _fx(root, "config", "core.autocrlf", "false")
+    base = _fx_commit(root, "base", {"main.txt": "m0\n", "shared.txt": shared()})
+    _fx(root, "checkout", "-q", "-b", "work")
+    reviewed = _fx_commit(root, "reviewed work", {
+        "feature.txt": "feature\n", "shared.txt": shared(0, "line 1 from the branch\n")})
+    _fx(root, "checkout", "-q", "-b", "up-clean", base)
+    clean = _fx_commit(root, "upstream adds an untouched file", {"other.txt": "other\n"})
+    _fx(root, "checkout", "-q", "-b", "up-overlap", base)
+    overlap = _fx_commit(root, "upstream edits a reviewed file", {
+        "shared.txt": shared(29, "line 30 from main\n")})
+    _fx(root, "checkout", "-q", "-b", "up-conflict", base)
+    conflict = _fx_commit(root, "upstream edits a reviewed line", {
+        "shared.txt": shared(0, "line 1 from main\n")})
+
+    def merged(branch: str, other: str) -> str:
+        _fx(root, "checkout", "-q", "-b", branch, "work")
+        _fx(root, "merge", "-q", "--no-ff", "-m", "Merge main into work", other)
+        return _fx(root, "rev-parse", "HEAD")
+
+    heads = {"base": base, "reviewed": reviewed, "clean": clean,
+             "live_clean": merged("live-clean", clean),
+             "live_overlap": merged("live-overlap", overlap)}
+    _fx(root, "checkout", "-q", "-b", "live-conflict", "work")
+    _fx(root, "merge", "--no-ff", "-m", "Merge main into work", conflict, allow_fail=True)
+    _fx_write(root, "shared.txt", shared(0, "line 1 resolved by hand\n"))
+    _fx(root, "add", "--", "shared.txt")
+    _fx(root, "commit", "-q", "--no-edit")
+    heads["live_conflict"] = _fx(root, "rev-parse", "HEAD")
+    _fx(root, "checkout", "-q", "-b", "live-tree", heads["live_clean"])
+    _fx_write(root, "sneak.txt", "never on main\n")
+    _fx(root, "add", "--", "sneak.txt")
+    _fx(root, "commit", "-q", "--amend", "--no-edit")
+    heads["live_tree"] = _fx(root, "rev-parse", "HEAD")
+    _fx(root, "checkout", "-q", "-b", "live-push", "work")
+    heads["live_push"] = _fx_commit(root, "one more push", {"feature.txt": "feature again\n"})
+    _fx(root, "checkout", "-q", "-b", "live-rebase", clean)
+    _fx(root, "cherry-pick", reviewed)
+    heads["live_rebase"] = _fx(root, "rev-parse", "HEAD")
+    _fx(root, "checkout", "-q", "-b", "live-backward", clean)
+    _fx(root, "merge", "-q", "--no-ff", "-m", "Merge work into main", "work")
+    heads["live_backward"] = _fx(root, "rev-parse", "HEAD")
+    _fx(root, "checkout", "-q", "--orphan", "lonely")
+    _fx(root, "reset", "-q")
+    heads["unrelated"] = _fx_commit(root, "unrelated root", {"lonely.txt": "alone\n"})
+    return heads
+
+
 def self_test() -> int:
     live, ref, green = "a" * 40, "ruley/2561-review-record-slice1", _rec()
     fail: list[str] = []
 
-    def outcome(sha: str, branch: str, comments: list[dict[str, Any]]) -> tuple[str, str]:
+    def result(thunk: Any) -> tuple[str, str]:
         # A crash is a result too: it comes back as its exception type, so the case that caused it
         # is named in a failure line instead of ending the self-test in a traceback naming none.
         try:
-            evaluate(sha, branch, comments)
+            note = thunk()
         except GateError as exc:
             return exc.reason, exc.detail
         except Exception as exc:  # noqa: BLE001 - reported as the case's result, never passed
             return type(exc).__name__, str(exc)
-        return "pass", ""
+        return "pass", str(note or "")
+
+    def outcome(sha: str, branch: str, comments: list[dict[str, Any]]) -> tuple[str, str]:
+        return result(lambda: evaluate(sha, branch, comments))
 
     def expect(reason: str, sha: str, branch: str, comments: list[dict[str, Any]]) -> None:
         got, _detail = outcome(sha, branch, comments)
@@ -508,8 +781,83 @@ def self_test() -> int:
         if got != reason:
             fail.append(f"{label}: wanted {reason}, got {got} {detail}".rstrip())
 
+    # Derived carry. Every case builds a real repository, so what is judged is what git answers
+    # about real commits; no record's text is consulted for a condition anywhere below.
+    tmp = tempfile.mkdtemp(prefix="assay-review-record-carry-")
+    try:
+        at = _carry_repo(tmp)
+        reviewed, live = at["reviewed"], at["live_clean"]
+
+        def carried(head: str, *records: dict[str, Any]) -> Any:
+            return lambda: evaluate(head, ref, list(records), git_root=tmp)
+
+        def posted(head: str, **over: Any) -> dict[str, Any]:
+            return _cmt(_rec(head_sha=head, **over))
+
+        older = posted(reviewed)
+        claims = posted(live, carry={"conditions_hold": True, "note": "both conditions checked"})
+        carry_cases = [
+            ("an upstream-advance merge carries", "pass", carried(live, older)),
+            ("an unobtainable reviewed head", "carry_objects_unavailable",
+             carried(live, posted("e" * 40))),
+            ("a further push is not an upstream merge", "carry_not_upstream_merge",
+             carried(at["live_push"], older)),
+            ("a rebase does not carry", "carry_not_upstream_merge",
+             carried(at["live_rebase"], older)),
+            ("a merge taken on the main side does not carry", "carry_not_upstream_merge",
+             carried(at["live_backward"], older)),
+            ("a hand-resolved conflict does not carry", "carry_merge_conflict",
+             carried(at["live_conflict"], older)),
+            ("an amended merge does not carry", "carry_tree_mismatch",
+             carried(at["live_tree"], older)),
+            ("an upstream edit to a reviewed file does not carry", "carry_touched_reviewed_file",
+             carried(at["live_overlap"], older)),
+            ("a head outside the reviewed history is refused", "carry_not_ancestor",
+             lambda: _require_ancestor(Git(tmp), at["unrelated"], live)),
+            ("a BLOCKED record does not carry", "no_current_record",
+             carried(live, posted(reviewed, verdict="BLOCKED"))),
+            ("an edited record does not carry", "no_current_record",
+             carried(live, _cmt(_rec(head_sha=reviewed), edited=True))),
+            ("a self-reviewed record does not carry", "no_current_record",
+             carried(live, posted(reviewed, reviewer={
+                 "agent": "ruley", "instance": "w1", "github_login": "Rul1an"}))),
+            ("a bot-carried record does not carry", "no_current_record",
+             carried(live, _cmt(_rec(head_sha=reviewed), bot=True))),
+            ("no record at all still fails as before", "no_current_record", carried(live)),
+            ("a live-head record is judged as before", "pass", carried(live, claims, older)),
+            ("a live-head record's carry claim earns nothing", "blocked",
+             carried(live, posted(live, verdict="BLOCKED"), older)),
+        ]
+        for label, reason, thunk in carry_cases:
+            got, detail = result(thunk)
+            if got != reason:
+                fail.append(f"carry: {label}: wanted {reason}, got {got} {detail}".rstrip())
+        _got, note = result(carried(live, older))
+        wanted = (f"reviewed={reviewed}", f"merged={at['clean']}", "re-derived-by-checker",
+                  "reviewed_files=2", "advance_files=1")
+        for token in wanted:
+            if token not in note:
+                fail.append(f"carry: derived line omits {token}: {note!r}")
+        _got, quiet = result(carried(live, claims, older))
+        if quiet:
+            fail.append(f"carry: a live-head record derived a carry line: {quiet!r}")
+        decoy, os.environ["GIT_DIR"] = os.environ.get("GIT_DIR"), os.path.join(tmp, "not-a-git-dir")
+        try:
+            got, detail = result(carried(live, older))
+            if got != "pass":
+                fail.append(f"carry: an inherited GIT_DIR redirected the derivation: {got} {detail}")
+        finally:
+            if decoy is None:
+                del os.environ["GIT_DIR"]
+            else:
+                os.environ["GIT_DIR"] = decoy
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
     if (HTTP_TIMEOUT_S, MAX_RESPONSE_BYTES, COMMENT_PAGE_SIZE, COMMENT_PAGE_MAX) != (30, 8 * 1024 * 1024, 100, 2):
         fail.append("API bound constants drifted")
+    if (GIT_TIMEOUT_S, GIT_FETCH_TIMEOUT_S, REMOTE) != (60, 180, "origin"):
+        fail.append("git bound constants drifted")
     pc = open(os.path.join(_root(), ".pre-commit-config.yaml"), encoding="utf-8").read()
     if HOOK_ID not in pc or f"{CHECKER} --self-test" not in pc:
         fail.append("pre-commit hook not registered")
