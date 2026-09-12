@@ -43,7 +43,6 @@ The index lists primary ADRs and links companions from their parent.
 | [ADR-031](./ADR-031-Coverage-v1.1-DX-Polish.md) | Coverage v1.1 DX Polish | Accepted (March 2026; implemented on `main` via PRs #585, #587, and #588) | **P2** |
 | [ADR-032](./ADR-032-MCP-Policy-Obligations-and-Evidence-v2.md) | MCP Policy Enforcement, Obligations, and Evidence v2 | Accepted (March 2026) | **P1** |
 | [ADR-033](./ADR-033-OTel-Trust-Compiler-Positioning.md) | Assay as an OTel-Native Trust Compiler for Agent Systems | Accepted (March 2026) | **P1** |
-| [ADR-034](./ADR-034-Assay-Runner-Harness-Contract-Seam.md) | Assay / Runner / Harness Contract Seam | Proposed (June 2026) | - |
 | [ADR-034](./ADR-034-Evidence-Redaction-At-Capture.md) | Evidence Redaction at Capture (runner-side secret hygiene) | Proposed (June 2026). DRAFT, reviewer feedback incorporated; design decisions resolved (see Decisions). | - |
 | [ADR-035](./ADR-035-sandbox-the-agent-evidence.md) | Sandbox-the-Agent Evidence Path | Proposed (June 2026) | - |
 | [ADR-036](./ADR-036-editor-mcp-wrap-recipe.md) | Editor MCP Wrap Recipe | Proposed (June 2026; remote/OAuth section finalises after the 28 July 2026 MCP spec) | - |
@@ -61,8 +60,9 @@ The index lists primary ADRs and links companions from their parent.
 | [ADR-048](./ADR-048-claim-gate-construction-moves-readings-stay.md) | The claim gate shares one lattice and one invariant across three tables that legitimately differ — the two enums move to `assay-common`, the tables and the fold stay home, and the policy/trace path already makes absence claims it cannot base | Accepted | - |
 | [ADR-049](./ADR-049-attestation-extent.md) | Optional artifact-derived attestation extent | Accepted; implementation pending | - |
 | [ADR-050](./ADR-050-trace-truncation-observations-on-6x.md) | Truncation observations ride next to the trace rows on 6.x | Proposed | **P1** |
+| [ADR-051](./ADR-051-Assay-Runner-Harness-Contract-Seam.md) | Assay / Runner / Harness Contract Seam | Proposed (June 2026) | - |
 
-*Note on ADR-034 duplicate:* The number ADR-034 was assigned twice: `ADR-034-Assay-Runner-Harness-Contract-Seam.md` (Assay / Runner / Harness Contract Seam) and `ADR-034-Evidence-Redaction-At-Capture.md` (Evidence Redaction at Capture). Issue #2919 proposes resolving the collision by either having one file keep 034 while the other is renumbered, or keeping both with a documented a/b suffix alongside updating all in-repo references.
+*Note on ADR-051:* Renumbered from ADR-034, which was assigned twice; Evidence Redaction at Capture keeps ADR-034, while the Assay / Runner / Harness Contract Seam skeleton was renumbered to ADR-051 (issue #2919).
 
 ## Q2 2026 Priorities
 
