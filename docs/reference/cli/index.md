@@ -11,7 +11,7 @@ selective noun-verb grouping direction and migration contract.
 
 ```bash
 # Rust
-cargo install assay-cli --version 6.2.0 --locked
+cargo install assay-cli --version 6.2.1 --locked
 # Or via installer scripts (see Home)
 ```
 
@@ -19,7 +19,7 @@ Verify installation:
 
 ```bash
 assay --version
-# assay 6.2.0
+# assay 6.2.1
 ```
 
 ---
