@@ -54,9 +54,18 @@ workflow_calls = (
     'bash scripts/ci/write_sha256_sidecar.sh "${OUT_ARCHIVE}"',
 )
 mcpb_call = 'bash "${SCRIPT_DIR}/write_sha256_sidecar.sh" "$OUTPUT"'
-legacy_writer = re.compile(
-    r"(shasum -a 256|sha256sum|Get-FileHash|Out-File).*[.]sha256"
-)
+checksum_cmd = re.compile(r"(shasum -a 256|sha256sum|Get-FileHash|Out-File)")
+# sha256sum/shasum -c reads a sidecar; Get-FileHash has no -c, so a PowerShell
+# verify is "not a producer" by lacking a write (redirect, -o, tee, Out-File).
+verify_invocation = re.compile(r"(?:sha256sum|shasum -a 256)\s+-c\b")
+sidecar_write = re.compile(r"(?:>>|>|-o\b|\btee\b|\bOut-File\b).*\.sha256")
+PRODUCER_MSG = "release checksum producer bypasses write_sha256_sidecar.sh"
+
+
+def is_checksum_producer(line):
+    if verify_invocation.search(line):
+        return False
+    return bool(checksum_cmd.search(line) and sidecar_write.search(line))
 
 
 def active_lines(text):
@@ -75,14 +84,51 @@ def validate_wiring(workflow, mcpb):
             raise ValueError(f"missing or duplicate active release checksum call: {expected}")
     if mcpb_active.count(mcpb_call) != 1:
         raise ValueError("missing or duplicate active MCPB checksum call")
-    if any(legacy_writer.search(line) for line in workflow_active + mcpb_active):
-        raise ValueError("release checksum producer bypasses write_sha256_sidecar.sh")
+    if any(is_checksum_producer(line) for line in workflow_active + mcpb_active):
+        raise ValueError(PRODUCER_MSG)
 
 
-validate_wiring(release_text, mcpb_text)
+def expect_classified(label, line, want_producer):
+    got = bool(is_checksum_producer(line))
+    if got != want_producer:
+        raise SystemExit(
+            f"{label}: is_checksum_producer({line!r}) is {got}, want {want_producer}"
+        )
 
-# Pin the original failure in the textual guard: a commented producer is not
-# an active producer even though a plain occurrence count still sees it.
+
+def expect_producer_refused(label, mutated):
+    try:
+        validate_wiring(mutated, mcpb_text)
+    except ValueError as exc:
+        if str(exc) != PRODUCER_MSG:
+            raise SystemExit(f"{label}: refused for the wrong reason: {exc}") from exc
+    else:
+        raise SystemExit(f"{label}: producer mutation passed the wiring contract")
+
+
+# One rule, no file or line special-case: verify is not a write.
+expect_classified("(a) sha256sum redirect", 'sha256sum "$f" > "$f.sha256"', True)
+expect_classified(
+    "(b) Get-FileHash/Out-File",
+    'Get-FileHash $f | Out-File "$f.sha256"',
+    True,
+)
+expect_classified("(d) sha256sum -c", 'sha256sum -c "${archive}.sha256"', False)
+expect_classified("(d) shasum -a 256 -c", "shasum -a 256 -c file.sha256", False)
+
+# (a) a real producer added to release.yml is still refused.
+expect_producer_refused(
+    "(a) sha256sum redirect",
+    release_text + '\nsha256sum "$f" > "$f.sha256"\n',
+)
+
+# (b) a Get-FileHash/Out-File producer is still refused.
+expect_producer_refused(
+    "(b) Get-FileHash/Out-File",
+    release_text + '\nGet-FileHash $f | Out-File "$f.sha256"\n',
+)
+
+# (c) a commented shared-writer call is still an inactive producer.
 provenance_call = workflow_calls[3]
 mutated = release_text.replace(
     f"          {provenance_call}",
@@ -95,6 +141,9 @@ except ValueError:
     pass
 else:
     raise SystemExit("commented checksum producer passed the wiring contract")
+
+# (d) live workflows: verification invocations are not producers.
+validate_wiring(release_text, mcpb_text)
 
 start = ci_text.index("  release-asset-contract:")
 remaining = ci_text[start + 1 :]
