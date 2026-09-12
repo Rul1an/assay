@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pin Assay's two direct actions/attest producers in lockstep."""
+"""Pin Assay's direct actions/attest producers in lockstep."""
 
 from __future__ import annotations
 
@@ -31,6 +31,8 @@ NONEMPTY_OUTPUT_TERM_RE = re.compile(
 
 
 class Producer(NamedTuple):
+    """Checksums-file subject: subject-checksums plus a shell producer/consumer."""
+
     path: Path
     job_id: str
     job_env: tuple[tuple[str, str], ...]
@@ -48,6 +50,24 @@ class Producer(NamedTuple):
     consumer_if: str | None
     consumer_env: tuple[tuple[str, str], ...] | None
     consumer_commands: tuple[str, ...]
+
+
+class ImageProducer(NamedTuple):
+    """OCI image subject: subject-name + subject-digest, no checksums file."""
+
+    path: Path
+    job_id: str
+    step_id: str
+    subject_name: str
+    subject_digest: str
+    sbom_path: str
+    push_to_registry: str
+    create_storage_record: str
+    producer_step_id: str
+    producer_uses_prefix: str
+    provenance: str
+    sbom: str
+    push: str
 
 
 class WorkflowParseError(Exception):
@@ -140,6 +160,21 @@ PRODUCERS = (
             "cp '$ATTESTATION_BUNDLE' release/attestation-bundle.json",
         ),
     ),
+    ImageProducer(
+        path=Path(".github/workflows/release.yml"),
+        job_id="publish-image",
+        step_id="attest-image-sbom",
+        subject_name="ghcr.io/rul1an/assay-mcp-server",
+        subject_digest="${{ steps.build-and-push.outputs.digest }}",
+        sbom_path="sbom/crates/assay-mcp-server/assay-sbom.json",
+        push_to_registry="true",
+        create_storage_record="false",
+        producer_step_id="build-and-push",
+        producer_uses_prefix="docker/build-push-action@",
+        provenance="false",
+        sbom="false",
+        push="true",
+    ),
 )
 
 
@@ -161,6 +196,16 @@ def has_exact_step_env(
     if expected is None:
         return value is None
     return value == dict(expected)
+
+
+def yaml_bool_text(value: object) -> str | None:
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, str):
+        return value.strip()
+    return None
 
 
 def load_workflow_mapping(path: Path) -> object:
@@ -326,7 +371,146 @@ def step_runs_exact_commands(
     return shell_command_tokens(step_run_text(step)) == expected_tokens
 
 
-def producer_contract_errors(producer: Producer, document: object) -> list[str]:
+def producer_contract_errors(
+    producer: Producer | ImageProducer, document: object
+) -> list[str]:
+    if isinstance(producer, ImageProducer):
+        return image_producer_contract_errors(producer, document)
+    return checksums_producer_contract_errors(producer, document)
+
+
+def image_producer_contract_errors(
+    producer: ImageProducer, document: object
+) -> list[str]:
+    errors: list[str] = []
+    attest_steps = structural_attest_steps(document)
+    if len(attest_steps) != 1:
+        errors.append(
+            f"{producer.path}: want exactly one direct actions/attest step, "
+            f"found {len(attest_steps)}"
+        )
+        return errors
+    job_id, attest_index, step = attest_steps[0]
+    jobs = dict(iter_jobs(document))
+    job = jobs.get(producer.job_id)
+    if job_id != producer.job_id or job is None:
+        errors.append(
+            f"{producer.path}: attest step is in job {job_id!r}, "
+            f"want {producer.job_id!r}"
+        )
+        return errors
+    if not is_reachable(job):
+        errors.append(f"{producer.path}: job {producer.job_id!r} is not reachable")
+    if not is_reachable(step):
+        errors.append(
+            f"{producer.path}: attest step {producer.step_id!r} is not reachable"
+        )
+    if step.get("id") != producer.step_id:
+        errors.append(
+            f"{producer.path}: attest step id {step.get('id')!r}, "
+            f"want {producer.step_id!r}"
+        )
+    with_block = step.get("with")
+    if not isinstance(with_block, dict):
+        errors.append(
+            f"{producer.path}: SHA pin is unwired; missing image subject "
+            f"{producer.subject_name}"
+        )
+        return errors
+    if "subject-checksums" in with_block:
+        errors.append(
+            f"{producer.path}: image producer must not set subject-checksums"
+        )
+    if with_block.get("subject-name") != producer.subject_name:
+        errors.append(
+            f"{producer.path}: subject-name {with_block.get('subject-name')!r}, "
+            f"want {producer.subject_name!r}"
+        )
+    if with_block.get("subject-digest") != producer.subject_digest:
+        errors.append(
+            f"{producer.path}: subject-digest {with_block.get('subject-digest')!r}, "
+            f"want {producer.subject_digest!r}"
+        )
+    if with_block.get("sbom-path") != producer.sbom_path:
+        errors.append(
+            f"{producer.path}: sbom-path {with_block.get('sbom-path')!r}, "
+            f"want {producer.sbom_path!r}"
+        )
+    if yaml_bool_text(with_block.get("push-to-registry")) != producer.push_to_registry:
+        errors.append(
+            f"{producer.path}: push-to-registry "
+            f"{with_block.get('push-to-registry')!r}, "
+            f"want {producer.push_to_registry!r}"
+        )
+    if (
+        yaml_bool_text(with_block.get("create-storage-record"))
+        != producer.create_storage_record
+    ):
+        errors.append(
+            f"{producer.path}: create-storage-record "
+            f"{with_block.get('create-storage-record')!r}, "
+            f"want {producer.create_storage_record!r}"
+        )
+    same_job_steps = job_steps(job)
+    attest_id_steps = steps_with_id(same_job_steps, producer.step_id)
+    if len(attest_id_steps) != 1:
+        errors.append(
+            f"{producer.path}: want exactly one step owning attest id "
+            f"{producer.step_id!r}, found {len(attest_id_steps)}"
+        )
+    producer_steps = steps_with_id(same_job_steps, producer.producer_step_id)
+    if len(producer_steps) != 1:
+        errors.append(
+            f"{producer.path}: want exactly one producer step "
+            f"{producer.producer_step_id!r}, found {len(producer_steps)}"
+        )
+        return errors
+    producer_index, producer_step = producer_steps[0]
+    if producer_index >= attest_index:
+        errors.append(
+            f"{producer.path}: producer step {producer.producer_step_id!r} "
+            "does not precede attestation"
+        )
+    if not is_reachable(producer_step):
+        errors.append(
+            f"{producer.path}: producer step {producer.producer_step_id!r} "
+            "is not reachable"
+        )
+    uses = producer_step.get("uses")
+    uses_re = re.compile(
+        r"^" + re.escape(producer.producer_uses_prefix) + r"[0-9a-f]{40}$"
+    )
+    if not isinstance(uses, str) or uses_re.fullmatch(uses) is None:
+        errors.append(
+            f"{producer.path}: producer uses {uses!r}, "
+            f"want {producer.producer_uses_prefix}<40-hex-sha>"
+        )
+    producer_with = producer_step.get("with")
+    if not isinstance(producer_with, dict):
+        errors.append(
+            f"{producer.path}: producer step {producer.producer_step_id!r} "
+            "is missing with.provenance / with.sbom / with.push"
+        )
+        return errors
+    if yaml_bool_text(producer_with.get("provenance")) != producer.provenance:
+        errors.append(
+            f"{producer.path}: producer provenance "
+            f"{producer_with.get('provenance')!r}, want {producer.provenance!r}"
+        )
+    if yaml_bool_text(producer_with.get("sbom")) != producer.sbom:
+        errors.append(
+            f"{producer.path}: producer sbom {producer_with.get('sbom')!r}, "
+            f"want {producer.sbom!r}"
+        )
+    if yaml_bool_text(producer_with.get("push")) != producer.push:
+        errors.append(
+            f"{producer.path}: producer push {producer_with.get('push')!r}, "
+            f"want {producer.push!r}"
+        )
+    return errors
+
+
+def checksums_producer_contract_errors(producer: Producer, document: object) -> list[str]:
     errors: list[str] = []
     attest_steps = structural_attest_steps(document)
     if len(attest_steps) != 1:
