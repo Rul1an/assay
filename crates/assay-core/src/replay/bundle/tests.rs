@@ -656,14 +656,22 @@ mod bounded_ingest {
         with_suffix.extend(std::iter::repeat_n(b'Z', 10_000));
         let total = with_suffix.len() as u64;
 
-        read_bundle_tar_gz_with_limits(
+        // Exactly the real input size clears the ceiling, suffix included. The bundle is then
+        // refused for the suffix itself, which is only reachable because the ceiling admitted the
+        // whole source: a ceiling error here would mean the suffix was not counted.
+        let err = read_bundle_tar_gz_with_limits(
             Cursor::new(with_suffix.clone()),
             ReplayLimits {
                 max_source_bytes: total,
                 ..ReplayLimits::default()
             },
         )
-        .expect("exactly the real input size must be accepted, suffix included");
+        .expect_err("data after the gzip member must be refused");
+        assert_eq!(
+            err.downcast_ref::<super::super::ReplayContractError>(),
+            Some(&super::super::ReplayContractError::DataAfterGzipStream),
+            "a source of exactly the ceiling must clear it and be refused for its suffix: {err:#}"
+        );
 
         let err = read_bundle_tar_gz_with_limits(
             Cursor::new(with_suffix),
@@ -1238,5 +1246,384 @@ mod refusal_provenance {
         let bytes = valid_bundle();
         read_verify_bounded(Cursor::new(&bytes), ReplayLimits::default())
             .expect("the fixture is a valid bundle");
+    }
+}
+
+mod archive_differentials {
+    //! The archive another reader sees must be the one this reader read.
+    //!
+    //! Mirrors the parser-differential cases in `assay-evidence`'s
+    //! `verifier_fail_closed_properties.rs`. The two readers share no private code, so the same
+    //! cases pinned on both sides are what keeps them from drifting apart.
+
+    use super::super::{
+        read_bundle_tar_gz_with_limits, write_bundle_tar_gz, BundleEntry, ReplayContractError,
+        ReplayLimits,
+    };
+    use crate::replay::manifest::ReplayManifest;
+    use flate2::read::GzDecoder;
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::{Cursor, Read, Write};
+
+    type Members = Vec<(String, Vec<u8>)>;
+
+    fn valid_bundle() -> Vec<u8> {
+        let manifest = ReplayManifest::minimal("2.15.0".into());
+        let mut buf = Vec::new();
+        write_bundle_tar_gz(
+            &mut buf,
+            &manifest,
+            &[BundleEntry {
+                path: "files/trace.jsonl".into(),
+                data: b"{\"a\":1}\n".to_vec(),
+            }],
+        )
+        .expect("write bundle");
+        buf
+    }
+
+    fn unpack(bundle: &[u8]) -> Members {
+        let mut archive = tar::Archive::new(GzDecoder::new(Cursor::new(bundle)));
+        archive
+            .entries()
+            .expect("entries")
+            .map(|entry| {
+                let mut entry = entry.expect("entry");
+                let path = entry.path().expect("path").to_string_lossy().to_string();
+                let mut data = Vec::new();
+                entry.read_to_end(&mut data).expect("read");
+                (path, data)
+            })
+            .collect()
+    }
+
+    fn pax_record(key: &str, value: &str) -> Vec<u8> {
+        let body = format!(" {key}={value}\n");
+        let mut len = body.len() + 1;
+        loop {
+            let record = format!("{len}{body}");
+            if record.len() == len {
+                return record.into_bytes();
+            }
+            len = record.len();
+        }
+    }
+
+    fn raw_header(name: &[u8], size: u64, kind: tar::EntryType) -> tar::Header {
+        let mut header = tar::Header::new_gnu();
+        header.as_gnu_mut().expect("gnu header").name[..name.len()].copy_from_slice(name);
+        header.set_entry_type(kind);
+        header.set_size(size);
+        header.set_mode(0o644);
+        header.set_mtime(0);
+        header.set_cksum();
+        header
+    }
+
+    /// A rewrite of one member header, applied before its checksum is recomputed.
+    type HeaderEdit = fn(&mut [u8; 512]);
+
+    /// An extension record placed before the member under test, whose own header then claims
+    /// `name` and `size`. The member's bytes are always written in full.
+    struct Record<'a> {
+        kind: tar::EntryType,
+        body: Vec<u8>,
+        name: &'a str,
+        size: u64,
+    }
+
+    /// Repack from plain headers. `edit` may rewrite the header of `target` (the checksum is
+    /// recomputed afterwards), and `record`, if any, is placed before it.
+    fn repack(
+        members: &Members,
+        target: &str,
+        record: Option<Record<'_>>,
+        edit: impl Fn(&mut [u8; 512]),
+    ) -> Vec<u8> {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        {
+            let mut builder = tar::Builder::new(&mut encoder);
+            for (path, content) in members {
+                let len = content.len() as u64;
+                if path != target {
+                    let header = raw_header(path.as_bytes(), len, tar::EntryType::Regular);
+                    builder.append(&header, content.as_slice()).expect("append");
+                    continue;
+                }
+                let (name, size) = match &record {
+                    Some(record) => {
+                        let record_header =
+                            raw_header(b"PaxHeaders/member", record.body.len() as u64, record.kind);
+                        builder
+                            .append(&record_header, record.body.as_slice())
+                            .expect("append extension record");
+                        (record.name, record.size)
+                    }
+                    None => (path.as_str(), len),
+                };
+                let mut header = raw_header(name.as_bytes(), size, tar::EntryType::Regular);
+                edit(header.as_mut_bytes());
+                header.set_cksum();
+                builder.append(&header, content.as_slice()).expect("append");
+            }
+            builder.finish().expect("finish tar");
+        }
+        encoder.finish().expect("finish gzip")
+    }
+
+    fn gzip(bytes: &[u8]) -> Vec<u8> {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(bytes).expect("gzip write");
+        encoder.finish().expect("gzip finish")
+    }
+
+    fn decoded_tar(bundle: &[u8]) -> Vec<u8> {
+        let mut tar = Vec::new();
+        GzDecoder::new(Cursor::new(bundle))
+            .read_to_end(&mut tar)
+            .expect("valid gzip");
+        tar
+    }
+
+    fn read(bytes: &[u8]) -> anyhow::Result<super::super::ReadBundle> {
+        read_bundle_tar_gz_with_limits(Cursor::new(bytes.to_vec()), ReplayLimits::default())
+    }
+
+    fn assert_refused_as(bytes: &[u8], expected: ReplayContractError, what: &str) {
+        let err = match read(bytes) {
+            Ok(_) => panic!("{what} must be refused"),
+            Err(e) => e,
+        };
+        assert_eq!(
+            err.downcast_ref::<ReplayContractError>(),
+            Some(&expected),
+            "{what}: {err:#}"
+        );
+    }
+
+    #[test]
+    fn plain_headers_of_either_regular_type_and_zero_padding_still_read() {
+        assert_eq!(
+            decoded_tar(&valid_bundle())[156],
+            0,
+            "the writer emits '\\0'"
+        );
+        let members = unpack(&valid_bundle());
+        for (target, _) in &members {
+            let bundle = repack(&members, target, None, |_| {});
+            read(&bundle).unwrap_or_else(|e| panic!("plain '0' header on {target}: {e:#}"));
+            // libarchive ends the size with a space where this writer uses a NUL.
+            let bundle = repack(&members, target, None, |h| h[135] = b' ');
+            read(&bundle).unwrap_or_else(|e| panic!("space-terminated size on {target}: {e:#}"));
+        }
+        let mut tar = decoded_tar(&valid_bundle());
+        tar.extend_from_slice(&[0u8; 10240]);
+        read(&gzip(&tar)).expect("zero padding after the archive");
+    }
+
+    #[test]
+    fn every_extension_record_is_refused_even_one_that_agrees() {
+        let members = unpack(&valid_bundle());
+        for (target, content) in &members {
+            let len = content.len() as u64;
+            let pax = |body: Vec<u8>, name, size| Record {
+                kind: tar::EntryType::XHeader,
+                body,
+                name,
+                size,
+            };
+            let true_size = pax_record("size", &len.to_string());
+            let cases = [
+                ("agreeing PAX size", pax(true_size.clone(), target, len)),
+                ("PAX size 0", pax(true_size.clone(), target, 0)),
+                ("PAX size len-1", pax(true_size.clone(), target, len - 1)),
+                ("PAX size len+1", pax(true_size.clone(), target, len + 1)),
+                (
+                    "PAX path",
+                    pax(pax_record("path", target), "files/other.jsonl", len),
+                ),
+                (
+                    "two PAX sizes, first one true",
+                    pax(
+                        [true_size.clone(), pax_record("size", "3")].concat(),
+                        target,
+                        len,
+                    ),
+                ),
+                (
+                    "two PAX paths, first one true",
+                    pax(
+                        [pax_record("path", target), pax_record("path", "../evil")].concat(),
+                        target,
+                        len,
+                    ),
+                ),
+                (
+                    "unparsable PAX size",
+                    pax(pax_record("size", "1_0"), target, len),
+                ),
+                (
+                    "PAX global header",
+                    Record {
+                        kind: tar::EntryType::XGlobalHeader,
+                        body: pax_record("path", "../evil"),
+                        name: target,
+                        size: len,
+                    },
+                ),
+                (
+                    "GNU long name",
+                    Record {
+                        kind: tar::EntryType::GNULongName,
+                        body: [target.as_bytes(), b"\0"].concat(),
+                        name: "files/other.jsonl",
+                        size: len,
+                    },
+                ),
+            ];
+            for (what, record) in cases {
+                let bundle = repack(&members, target, Some(record), |_| {});
+                assert_refused_as(
+                    &bundle,
+                    ReplayContractError::NotAPlainMember,
+                    &format!("{what} before {target}"),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_member_that_is_not_a_regular_file_is_refused() {
+        let members = unpack(&valid_bundle());
+        for (target, _) in &members {
+            for kind in [b'1', b'2', b'5', b'7', b'S', b'x', b'g', b'L'] {
+                let bundle = repack(&members, target, None, |h| h[156] = kind);
+                assert_refused_as(
+                    &bundle,
+                    ReplayContractError::NotAPlainMember,
+                    &format!("type {:?} on {target}", kind as char),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_link_name_or_anything_from_the_name_prefix_on_is_refused() {
+        let members = unpack(&valid_bundle());
+        let edits: [(&str, HeaderEdit); 4] = [
+            ("link name", |h| h[157..160].copy_from_slice(b"etc")),
+            ("name prefix", |h| {
+                h[345..355].copy_from_slice(b"../../evil")
+            }),
+            ("star trailer", |h| h[508..512].copy_from_slice(b"tar\0")),
+            ("padding", |h| h[511] = 1),
+        ];
+        for (target, _) in &members {
+            for (what, edit) in edits {
+                let bundle = repack(&members, target, None, edit);
+                assert_refused_as(
+                    &bundle,
+                    ReplayContractError::NotAPlainMember,
+                    &format!("{what} on {target}"),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_member_name_ending_in_a_slash_is_refused() {
+        let members = unpack(&valid_bundle());
+        for (target, _) in &members {
+            let bundle = repack(&members, target, None, |h| {
+                h[156] = 0;
+                h[target.len()] = b'/';
+            });
+            assert_refused_as(
+                &bundle,
+                ReplayContractError::NotAPlainMember,
+                &format!("{target}/"),
+            );
+        }
+    }
+
+    /// The reader used to render a name lossily and rewrite backslashes, so a member could be
+    /// stored under a name no other reader reports for it. Both are refused now.
+    #[test]
+    fn a_member_name_this_reader_would_have_to_change_is_refused() {
+        let members = unpack(&valid_bundle());
+        let target = "files/trace.jsonl";
+        for (what, name) in [
+            ("a backslash", b"files\\trace.jsonl".to_vec()),
+            ("invalid UTF-8", b"files/tr\xffce.jsonl".to_vec()),
+        ] {
+            let bundle = repack(&members, target, None, |h| {
+                h[..100].fill(0);
+                h[..name.len()].copy_from_slice(&name);
+            });
+            assert_refused_as(
+                &bundle,
+                ReplayContractError::AmbiguousMemberName,
+                &format!("a member name with {what}"),
+            );
+        }
+    }
+
+    #[test]
+    fn a_size_not_written_as_eleven_octal_digits_is_refused() {
+        let members = unpack(&valid_bundle());
+        for (target, content) in &members {
+            let len = content.len() as u64;
+            let mut base256 = [0u8; 12];
+            base256[0] = 0x80;
+            base256[4..].copy_from_slice(&len.to_be_bytes());
+            let variants: [(&str, Vec<u8>); 3] = [
+                ("leading spaces", format!("{len:>11o}\0").into_bytes()),
+                (
+                    "twelve digits, no terminator",
+                    format!("{len:012o}").into_bytes(),
+                ),
+                ("base-256", base256.to_vec()),
+            ];
+            for (what, field) in variants {
+                let bundle = repack(&members, target, None, |h| {
+                    h[124..136].copy_from_slice(&field)
+                });
+                assert_refused_as(
+                    &bundle,
+                    ReplayContractError::NotAPlainMember,
+                    &format!("{what} size on {target}"),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn non_zero_data_after_the_end_of_the_archive_is_refused() {
+        let mut tar = decoded_tar(&valid_bundle());
+        tar.extend_from_slice(b"bytes after the archive");
+        assert_refused_as(
+            &gzip(&tar),
+            ReplayContractError::DataAfterArchive,
+            "non-zero data after the archive",
+        );
+    }
+
+    #[test]
+    fn data_after_the_gzip_member_is_refused() {
+        let mut second_member = valid_bundle();
+        second_member.extend_from_slice(&gzip(b"a second member"));
+        assert_refused_as(
+            &second_member,
+            ReplayContractError::DataAfterGzipStream,
+            "a second gzip member",
+        );
+        let mut trailing = valid_bundle();
+        trailing.extend_from_slice(b"trailing bytes");
+        assert_refused_as(
+            &trailing,
+            ReplayContractError::DataAfterGzipStream,
+            "trailing bytes",
+        );
     }
 }
