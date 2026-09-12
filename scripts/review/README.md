@@ -130,6 +130,13 @@ apply a 30-second timeout plus an 8-MiB JSON ceiling before parsing. Human-reada
 output JSON-escapes every API-provided scalar; it is a display, never a second
 machine-readable verdict channel.
 
+The landing gate answers "does a valid READY review bind this head" through the required
+checker's own `derive_carry` (#2955, #2958), so a record bound to an earlier head counts here
+exactly when `review-record-check` counts it, and the printed candidate line says which condition
+carried or refused. The derivation needs the commits: run these helpers from a checkout, or from a
+`git archive origin/main scripts/review scripts/ci` extract, where the gate fetches the two commits
+it needs into a temporary clone of `--repo` and says so in that line.
+
 Run synthetic tests (fake gh, no live merges):
 
 ```

@@ -12,14 +12,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ci"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from closing_keywords import closing_problems  # noqa: E402
 from assay_review_record_check import (  # noqa: E402
+    COMMENT_PAGE_MAX,
+    COMMENT_PAGE_SIZE,
     GateError,
+    Git,
+    evaluate,
     MARKER as REVIEW_RECORD_MARKER,
     _loose_object,
+    derive_carry,
     extract_record,
     resolve_supersedes,
     validate_record,
 )
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMENT_URL_ID_RE = re.compile(r"#issuecomment-([1-9][0-9]*)$")
 SHA_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])", re.IGNORECASE)
 REPO_COMPONENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
@@ -87,6 +93,14 @@ def validate_gh_command(args):
               and parts[3:5] == ["rules", "branches"]):
             encoded = parts[5]
             allowed_tail = ["--paginate", "--slurp"]
+        elif (len(parts) == 6 and parts[0] == "repos" and parts[3] == "issues"
+              and parts[4].isdigit() and int(parts[4]) > 0 and parts[5] == "comments"):
+            # The comment list the required checker reads, in the checker's own shape: it
+            # carries `user.type`, `created_at` and `updated_at`, which `gh pr view` does not.
+            parse_repo(f"{parts[1]}/{parts[2]}")
+            if args[3:] != ["--paginate", "--slurp"]:
+                raise SystemExit("unsupported GitHub command shape")
+            return
         elif (len(parts) == 6 and parts[0] == "repos"
               and parts[3:5] == ["issues", "comments"]
               and parts[5].isdigit() and int(parts[5]) > 0):
@@ -223,8 +237,99 @@ def supersede_resolution(comments, head, branch_ref):
             {n: refused[i] for n, i in where.items() if i in refused})
 
 
-def review_candidates(pr, head):
+def record_head_sha(body):
+    """The head a well-formed record names, or None. No judgement, just the binding."""
+    if REVIEW_RECORD_MARKER not in body:
+        return None
+    try:
+        record = extract_record(body)
+    except GateError:
+        return None
+    bound = (record or {}).get("head_sha")
+    return bound.lower() if isinstance(bound, str) else None
+
+
+def _objects_root(git_root, repo, cache):
+    """A checkout to derive in: this one, or a temporary clone that can fetch the commits.
+
+    The landing recipe allows running these helpers from a `git archive` extract, which has no
+    `.git` at all, and `derive_carry` needs the commits. Rather than falling back to the literal
+    head comparison there - a second answer to the question this gate just delegated - a bare
+    temporary repository is created with `origin` set to the PR's repository, and the checker's
+    own bounded fetch brings in the two commits. The caller says so in its output.
+    """
+    if cache.get("root") is None:
+        probe = Git(str(git_root))
+        if probe.run("rev-parse", "--is-inside-work-tree")[1] == "true":
+            cache["root"], cache["note"] = str(git_root), ""
+        elif repo:
+            tmp = tempfile.TemporaryDirectory(prefix="landing-carry-")
+            cache["tmp"] = tmp  # kept alive for the process; removed when it exits
+            scratch = Git(tmp.name)
+            scratch.run("init", "-q")
+            scratch.run("remote", "add", "origin", f"https://github.com/{repo}.git")
+            cache["root"], cache["note"] = tmp.name, " (objects fetched into a temporary clone)"
+        else:
+            cache["root"], cache["note"] = str(git_root), ""
+    return cache["root"], cache["note"]
+
+
+def carried_to_head(bound, head, git_root, cache, repo=None):
+    """Does the CI gate's own derivation bind `bound` to `head`? One rule, one function.
+
+    The required `review-record-check` carries a record across an upstream-advance merge by
+    re-deriving both AGENTS.md conditions from the commits (#2955). This gate asks that same
+    function rather than restating the conditions, so the two cannot answer differently about
+    one head. A refusal is kept for the human read: it says which condition failed.
+    """
+    if not bound or bound == head:
+        return False, None
+    if bound not in cache:
+        root, note = _objects_root(git_root, repo, cache.setdefault("_root", {}))
+        try:
+            cache[bound] = (True, derive_carry(Git(root), bound, head) + note)
+        except GateError as exc:
+            cache[bound] = (False, f"{exc.reason}: {exc.detail}" if exc.detail else exc.reason)
+    return cache[bound]
+
+
+def gate_answer(repo, number, head, branch_ref, git_root, cache):
+    """What the required `review-record-check` says about this head, from its own function.
+
+    The landing decision is that gate's decision. `evaluate` judges the whole comment set, not
+    one record: a bot carrier, an edited record, two current records or a refused supersede all
+    refuse there, and a record on an earlier head passes only through `derive_carry`. Asking it
+    here is what keeps the two gates from drifting apart again (#2958).
+
+    Only a carry consults this, so callers pass it as a thunk and it runs at most once, on the
+    PRs that need it: a record bound to the live head is judged without a second API call, and
+    an outage reaching that endpoint cannot fail a landing check that was never going to carry.
+    """
+    if "answer" not in cache:
+        try:
+            slurped = run_json([
+                "gh", "api", f"repos/{repo}/issues/{number}/comments",
+                "--paginate", "--slurp",
+            ])
+            comments = [c for page in (slurped or []) for c in (page or [])]
+            # That gate stops at two pages and refuses beyond them, and the ceiling lives in
+            # its fetch loop rather than in `evaluate`. `--paginate` has no such ceiling, so
+            # without this the landing gate would judge a comment set the CI gate refuses to
+            # read - a disagreement in the direction that lands what CI would not.
+            if len(comments) >= COMMENT_PAGE_SIZE * COMMENT_PAGE_MAX:
+                raise GateError("comments_limit", "200-comment safety ceiling reached")
+            root, note = _objects_root(git_root, repo, cache.setdefault("_root", {}))
+            evaluate(head, branch_ref, comments, git_root=root)
+            cache["answer"] = (True, f"review-record-check would pass{note}")
+        except GateError as exc:
+            cache["answer"] = (False, f"{exc.reason}: {exc.detail}" if exc.detail else exc.reason)
+    return cache["answer"]
+
+
+def review_candidates(pr, head, git_root=None, repo=None, gate=None):
     rows = []
+    git_root = REPO_ROOT if git_root is None else git_root
+    carries = {}
     for review in pr.get("reviews", []):
         state = review.get("state")
         if state == "DISMISSED":
@@ -267,8 +372,33 @@ def review_candidates(pr, head):
                 "bound_sha": machine["bound_sha"],
                 "current_head": machine["bound_sha"] == head,
                 "source": "machine-comment" if machine["validation_error"] is None else "invalid-machine-comment",
+                "carry": None,
             })
             continue
+        # A record bound to an earlier head still binds this one when the CI gate's derivation
+        # says so. It is validated against its own head, exactly as that gate validates it.
+        earlier = record_head_sha(body)
+        if earlier and earlier != head:
+            carried, carry_note = carried_to_head(earlier, head, git_root, carries, repo)
+            if carried and gate is not None:
+                # The derivation carries this record, but the gate judges the set: a bot
+                # carrier, an edit, an ambiguity or a refused supersede refuses there.
+                passes, why = gate()
+                if not passes:
+                    carried, carry_note = False, f"{carry_note}; gate refuses the set: {why}"
+
+            reviewed = machine_review_candidate(body, author, earlier, pr.get("headRefName") or "")
+            if reviewed and reviewed["validation_error"] is None:
+                rows.append({
+                    "record_author": author,
+                    "reviewer_identity": reviewed["reviewer_identity"],
+                    "verdict": reviewed["verdict"],
+                    "bound_sha": earlier,
+                    "current_head": carried,
+                    "source": "machine-comment-carry" if carried else "machine-comment",
+                    "carry": carry_note,
+                })
+                continue
         if body.strip().startswith(REVIEW_RECORD_MARKER):
             continue
         result = verdict(body)
@@ -366,7 +496,12 @@ def main():
     head = pr["headRefOid"]
     body_shas = SHA_RE.findall(pr.get("body") or "")
     body_mentions_head = head in body_shas
-    candidates = review_candidates(pr, head)
+    gate_cache = {}
+    candidates = review_candidates(
+        pr, head, repo=args.repo,
+        gate=lambda: gate_answer(args.repo, args.pr, head, pr.get("headRefName") or "",
+                                 REPO_ROOT, gate_cache),
+    )
     current_ready = [row for row in candidates if row["current_head"] and row["verdict"] == "READY"]
     current_blocked = [row for row in candidates if row["current_head"] and row["verdict"] == "BLOCKED"]
     failing = [check for check in required if check.get("bucket") == "fail"]
@@ -441,7 +576,7 @@ def main():
         print("  - none")
     for row in candidates:
         identity = row["reviewer_identity"] or "not declared"
-        print(f"  - {markdown_atom(row['verdict'])} record by {markdown_atom(row['record_author'])}; reviewer {markdown_atom(identity)} on {markdown_atom(row['bound_sha'])}; current={markdown_atom(row['current_head'])} ({markdown_atom(row['source'])})")
+        print(f"  - {markdown_atom(row['verdict'])} record by {markdown_atom(row['record_author'])}; reviewer {markdown_atom(identity)} on {markdown_atom(row['bound_sha'])}; current={markdown_atom(row['current_head'])} ({markdown_atom(row['source'])}){markdown_atom('; ' + row['carry']) if row.get('carry') else ''}")
     print("- blockers:")
     if not blockers:
         print("  - none from machine-verifiable state")
