@@ -33,12 +33,13 @@ cleanup_junction_temps() {
 trap cleanup_junction_temps EXIT
 
 allocate_python_scratch() {
-  local prefix="$1"
-  local parent="${2:-${TMPDIR:-/tmp}}"
-  local d
-  d="$(mktemp -d "${parent}/${prefix}.XXXXXX")"
-  register_junction_temp "${d}"
-  printf '%s/%s.py\n' "${d}" "${prefix}"
+  local _out_var="$1"
+  local _prefix="$2"
+  local _parent="${3:-${TMPDIR:-/tmp}}"
+  local _d
+  _d="$(mktemp -d "${_parent}/${_prefix}.XXXXXX")"
+  register_junction_temp "${_d}"
+  printf -v "${_out_var}" '%s/%s.py' "${_d}" "${_prefix}"
 }
 
 PIN="$("${READER}")"
@@ -569,7 +570,7 @@ check_explicit_glob_and_pin_filter() {
 
   # Shared runner: new session/process group; on wall timeout TERM then KILL the group.
   # Descendant cleanup is only claimed where the synthetic child probe below measures it.
-  pg_runner="$(allocate_python_scratch "2802-pg-runner")"
+  allocate_python_scratch pg_runner "2802-pg-runner"
   cat >"${pg_runner}" <<'PYPG'
 import json
 import os
@@ -696,7 +697,7 @@ if __name__ == "__main__":
 PYPG
 
   # Shared probe predicate: os.kill(pid, 0) errno-aware. Only ESRCH == absent.
-  child_presence="$(allocate_python_scratch "2802-child-presence")"
+  allocate_python_scratch child_presence "2802-child-presence"
   cat >"${child_presence}" <<'PYPRES'
 import errno
 import os
@@ -991,24 +992,41 @@ with patch.object(os, "kill", side_effect=OSError(errno.EIO, "I/O error")):
 print("ok    mock-child-presence-other-oserror-unavailable")
 PYPRESMOCK
 
-  # Verify scratch allocations via allocate_python_scratch are collision-free under a shared temp parent,
-  # even when the parent directory path contains literal XXXXXX (GREEN control),
-  # and demonstrate that legacy non-trailing suffix templates fail or collide (RED control).
+  # Verify scratch allocations via allocate_python_scratch:
+  # 1. Runs in-shell so register_junction_temp updates caller's JUNCTION_TEMPS and cleanup genuinely removes it
+  # 2. Allocations are collision-free under a shared temp parent, even when parent contains literal XXXXXX (GREEN)
+  # 3. Legacy non-trailing suffix templates fail or collide (RED)
   {
-    local probe_parent probe_r1 probe_r2 probe_p1 probe_p2
+    local probe_parent probe_r1 probe_r2 probe_p1 probe_p2 isolated_scratch isolated_dir
+
+    # Genuine cleanup verification: in-shell execution ensures register_junction_temp updates caller
+    (
+      JUNCTION_TEMPS=()
+      allocate_python_scratch isolated_scratch "2802-cleanup-proof"
+      [[ "${#JUNCTION_TEMPS[@]}" -eq 1 ]] \
+        || die "allocate_python_scratch failed to register temp directory in caller shell"
+      isolated_dir="$(dirname "${isolated_scratch}")"
+      : >"${isolated_scratch}"
+      [[ -f "${isolated_scratch}" ]] \
+        || die "failed to create isolated scratch file"
+      cleanup_junction_temps
+      [[ ! -d "${isolated_dir}" && ! -f "${isolated_scratch}" ]] \
+        || die "cleanup_junction_temps failed to remove allocated scratch directory"
+    )
+
     probe_parent="$(mktemp -d "${TMPDIR:-/tmp}/2802-parent-XXXXXX.XXXXXX")"
     register_junction_temp "${probe_parent}"
 
     # GREEN control: allocations under a parent containing literal XXXXXX must succeed and produce distinct files
-    probe_r1="$(allocate_python_scratch "2802-pg-runner" "${probe_parent}")"
-    probe_r2="$(allocate_python_scratch "2802-pg-runner" "${probe_parent}")"
+    allocate_python_scratch probe_r1 "2802-pg-runner" "${probe_parent}"
+    allocate_python_scratch probe_r2 "2802-pg-runner" "${probe_parent}"
     : >"${probe_r1}"
     : >"${probe_r2}"
     [[ -f "${probe_r1}" && -f "${probe_r2}" && "${probe_r1}" != "${probe_r2}" ]] \
       || die "pg_runner scratch helper failed to produce distinct coexisting files"
 
-    probe_p1="$(allocate_python_scratch "2802-child-presence" "${probe_parent}")"
-    probe_p2="$(allocate_python_scratch "2802-child-presence" "${probe_parent}")"
+    allocate_python_scratch probe_p1 "2802-child-presence" "${probe_parent}"
+    allocate_python_scratch probe_p2 "2802-child-presence" "${probe_parent}"
     : >"${probe_p1}"
     : >"${probe_p2}"
     [[ -f "${probe_p1}" && -f "${probe_p2}" && "${probe_p1}" != "${probe_p2}" ]] \
