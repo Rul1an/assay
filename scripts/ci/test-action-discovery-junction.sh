@@ -995,9 +995,9 @@ PYPRESMOCK
   # Verify scratch allocations via allocate_python_scratch:
   # 1. Runs in-shell so register_junction_temp updates caller's JUNCTION_TEMPS and cleanup genuinely removes it
   # 2. Allocations are collision-free under a shared temp parent, even when parent contains literal XXXXXX (GREEN)
-  # 3. Legacy non-trailing suffix templates fail or collide (RED)
+  # 3. Legacy non-trailing suffix templates: platform-bound proof on BSD mktemp, not universal invariant
   {
-    local probe_parent probe_r1 probe_r2 probe_p1 probe_p2 isolated_scratch isolated_dir
+    local probe_parent probe_r1 probe_r2 probe_p1 probe_p2 isolated_scratch isolated_dir legacy_probe
 
     # Genuine cleanup verification: in-shell execution ensures register_junction_temp updates caller
     (
@@ -1032,22 +1032,38 @@ PYPRESMOCK
     [[ -f "${probe_p1}" && -f "${probe_p2}" && "${probe_p1}" != "${probe_p2}" ]] \
       || die "child_presence scratch helper failed to produce distinct coexisting files"
 
-    # Negative control (RED): old non-trailing template fails either on allocation (GNU mktemp)
-    # or on collision upon second allocation (BSD mktemp leaves literal XXXXXX).
-    local red_collided=0 red_f1 red_rc=0
-    set +e
-    red_f1="$(mktemp "${probe_parent}/2802-legacy-suffix.XXXXXX.py" 2>/dev/null)"
-    red_rc=$?
-    if [[ "${red_rc}" -ne 0 ]]; then
-      red_collided=1
-    elif [[ -f "${red_f1}" ]]; then
-      if ! mktemp "${probe_parent}/2802-legacy-suffix.XXXXXX.py" >/dev/null 2>&1; then
-        red_collided=1
-      fi
+    # Platform-specific defect demonstration:
+    # On BSD mktemp (macOS), legacy non-trailing X templates leave literal XXXXXX and collide on second allocation.
+    # On GNU mktemp (Linux), --suffix is implied if template does not end in X, so legacy templates expand.
+    # Therefore, verify collision conditionally only when literal XXXXXX is retained by the host mktemp.
+    legacy_probe="$(mktemp "${probe_parent}/2802-legacy-probe.XXXXXX.py" 2>/dev/null || true)"
+    if [[ -n "${legacy_probe}" && "${legacy_probe}" == *'2802-legacy-probe.XXXXXX.py' ]]; then
+      ! mktemp "${probe_parent}/2802-legacy-probe.XXXXXX.py" >/dev/null 2>&1 \
+        || die "expected BSD mktemp to collide on second allocation of literal XXXXXX.py template"
     fi
-    set -e
-    [[ "${red_collided}" -eq 1 ]] \
-      || die "expected old non-trailing X suffix template to fail safely (RED control)"
+
+    # Verify portable positive coexistence under GNU mktemp when available locally
+    if command -v gmktemp >/dev/null 2>&1; then
+      (
+        local gnu_bin gnu_parent gnu_r1 gnu_r2
+        gnu_bin="$(mktemp -d "${TMPDIR:-/tmp}/2802-gmktemp-bin.XXXXXX")"
+        ln -s "$(command -v gmktemp)" "${gnu_bin}/mktemp"
+        PATH="${gnu_bin}:${PATH}"
+        JUNCTION_TEMPS=()
+        gnu_parent="$(mktemp -d "${TMPDIR:-/tmp}/2802-gnu-parent-XXXXXX.XXXXXX")"
+        register_junction_temp "${gnu_parent}"
+        allocate_python_scratch gnu_r1 "2802-pg-runner" "${gnu_parent}"
+        allocate_python_scratch gnu_r2 "2802-pg-runner" "${gnu_parent}"
+        : >"${gnu_r1}"
+        : >"${gnu_r2}"
+        [[ -f "${gnu_r1}" && -f "${gnu_r2}" && "${gnu_r1}" != "${gnu_r2}" ]] \
+          || die "allocate_python_scratch failed positive coexistence under GNU mktemp"
+        cleanup_junction_temps
+        [[ ! -f "${gnu_r1}" && ! -f "${gnu_r2}" && ! -d "${gnu_parent}" ]] \
+          || die "cleanup_junction_temps failed under GNU mktemp"
+        rm -rf "${gnu_bin}"
+      )
+    fi
 
     ok "scratch-allocations-collision-free"
   }
