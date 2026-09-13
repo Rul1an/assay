@@ -69,7 +69,7 @@ else
   ok "baseline resolves to ${resolved}"
 fi
 
-# --- the expensive one: a planted break must fail --------------------------------------------
+# --- the expensive one: planted breaks in two newly covered crates must fail ------------------
 #
 # Everything above checks the shape of the gate. This checks that the gate reaches a verdict, which
 # is the property that was actually missing: the job ran, on the right crates, with the right tool,
@@ -78,9 +78,12 @@ if [ "${ASSAY_SEMVER_GATE_FULL:-0}" = "1" ]; then
   if ! command -v cargo-semver-checks >/dev/null 2>&1; then
     bad "ASSAY_SEMVER_GATE_FULL=1 but cargo-semver-checks is not installed"
   else
-    subject="$ROOT/crates/assay-core/src/metrics_api.rs"
-    backup="$(mktemp)"
-    cp "$subject" "$backup"
+    subject_runner_core="$ROOT/crates/assay-runner-core/src/run.rs"
+    subject_sim="$ROOT/crates/assay-sim/src/report.rs"
+    backup_runner_core="$(mktemp)"
+    backup_sim="$(mktemp)"
+    cp "$subject_runner_core" "$backup_runner_core"
+    cp "$subject_sim" "$backup_sim"
 
     # The manifest version is set to the baseline's first, and that is not incidental.
     #
@@ -97,13 +100,14 @@ if [ "${ASSAY_SEMVER_GATE_FULL:-0}" = "1" ]; then
     manifest_backup="$(mktemp -d)"
     (cd "$ROOT" && cp Cargo.toml "$manifest_backup/root.toml" && \
       for m in crates/*/Cargo.toml; do mkdir -p "$manifest_backup/$(dirname "$m")"; cp "$m" "$manifest_backup/$m"; done)
-    restore() {
-      cp "$backup" "$subject"
+    restore_all() {
+      cp "$backup_runner_core" "$subject_runner_core"
+      cp "$backup_sim" "$subject_sim"
       cp "$manifest_backup/root.toml" "$ROOT/Cargo.toml"
       (cd "$ROOT" && for m in crates/*/Cargo.toml; do cp "$manifest_backup/$m" "$m"; done)
-      rm -rf "$backup" "$manifest_backup" "${scratch_target:-}"
+      rm -rf "$backup_runner_core" "$backup_sim" "$manifest_backup" "${scratch_target:-}"
     }
-    trap restore EXIT
+    trap restore_all EXIT
 
     # Every manifest, not only the root. The first version of this moved the workspace version alone
     # and `cargo metadata` refused: nine internal dependencies still declared `version = "4.0.0"`,
@@ -115,40 +119,58 @@ if [ "${ASSAY_SEMVER_GATE_FULL:-0}" = "1" ]; then
       sed -i.bak "s/version = \"${current_version}\"/version = \"${baseline_version}\"/g" Cargo.toml crates/*/Cargo.toml && \
       rm -f Cargo.toml.bak crates/*/Cargo.toml.bak)
 
-    # A new pub field on a pub struct with no `#[non_exhaustive]`: the same shape as the break that
-    # got through, so this tests the lint that actually missed it rather than any breaking change.
-    python3 - "$subject" <<'PY'
+    plant_break() {
+      local subject="$1" anchor="$2" field="$3"
+      python3 - "$subject" "$anchor" "$field" <<'PY'
 import sys
-p = sys.argv[1]
+p, anchor, field = sys.argv[1], sys.argv[2], sys.argv[3]
 t = open(p).read()
-anchor = "pub struct MetricResult {"
 assert anchor in t, "MetricResult moved; update the self-test"
-t = t.replace(anchor, anchor + "\n    pub deliberately_planted_for_the_gate_test: bool,", 1)
+t = t.replace(anchor, anchor + "\n" + field, 1)
 open(p, "w").write(t)
 PY
-    # Its own target directory. This check downgrades the workspace version and plants a breaking
-    # change; artifacts built from that tree are keyed to a version and a source that do not exist,
-    # and writing them into the shared target dir would leave them there for the next build.
-    scratch_target="$(mktemp -d)"
-    out="$(cd "$ROOT" && CARGO_TARGET_DIR="$scratch_target" \
-      cargo semver-checks check-release -p assay-core --baseline-rev "$resolved" 2>&1)"
-    status=$?
-    restore
+    }
+
+    check_planted_break() {
+      local crate="$1" subject="$2" anchor="$3"
+      local field='    pub deliberately_planted_for_the_gate_test: bool,'
+      local out status
+      plant_break "$subject" "$anchor" "$field"
+      scratch_target="$(mktemp -d)"
+      out="$(cd "$ROOT" && CARGO_TARGET_DIR="$scratch_target" \
+        cargo semver-checks check-release -p "$crate" --baseline-rev "$resolved" 2>&1)"
+      status=$?
+      rm -rf "$scratch_target"
+      scratch_target=""
+      if [ "$status" -eq 0 ]; then
+        bad "a planted breaking change did not fail the gate for ${crate}"
+      else
+        ok "a planted breaking change fails the gate for ${crate}"
+      fi
+      if printf '%s\n' "$out" | grep -q 'constructible_struct_adds_field'; then
+        ok "  and names constructible_struct_adds_field for ${crate}"
+      else
+        bad "  but ${crate} did not fail via constructible_struct_adds_field"
+      fi
+      # Restore file after each planted mutation so the second crate starts clean.
+      if [ "$crate" = "assay-runner-core" ]; then
+        cp "$backup_runner_core" "$subject_runner_core"
+      elif [ "$crate" = "assay-sim" ]; then
+        cp "$backup_sim" "$subject_sim"
+      fi
+    }
+
+    # Two newly covered crates from issue #2983: assay-runner-core and assay-sim.
+    check_planted_break \
+      "assay-runner-core" \
+      "$subject_runner_core" \
+      "pub struct RunSpec {"
+    check_planted_break \
+      "assay-sim" \
+      "$subject_sim" \
+      "pub struct SimSummary {"
+    restore_all
     trap - EXIT
-
-    if [ "$status" -eq 0 ]; then
-      bad "a planted breaking change did not fail the gate"
-      printf '%s\n' "$out" | tail -5 | sed 's/^/      /'
-    else
-      ok "a planted breaking change fails the gate"
-    fi
-
-    # And it failed for the right reason. A gate that fails because the tool crashed is not a gate.
-    if printf '%s\n' "$out" | grep -q 'constructible_struct_adds_field'; then
-      ok "  and names the lint that caught it"
-    else
-      bad "  but not via constructible_struct_adds_field; it may have failed for an unrelated reason"
-    fi
   fi
 else
   echo "skip  planted-break check (set ASSAY_SEMVER_GATE_FULL=1 to run it)"
