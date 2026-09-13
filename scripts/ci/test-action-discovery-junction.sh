@@ -37,7 +37,8 @@ allocate_python_scratch() {
   local _prefix="$2"
   local _parent="${3:-${TMPDIR:-/tmp}}"
   local _d
-  _d="$(mktemp -d "${_parent}/${_prefix}.XXXXXX")"
+  _d="$(mktemp -d "${_parent}/${_prefix}.XXXXXX" 2>/dev/null)" || return 1
+  [[ -n "${_d}" && -d "${_d}" ]] || return 1
   register_junction_temp "${_d}"
   printf -v "${_out_var}" '%s/%s.py' "${_d}" "${_prefix}"
 }
@@ -1014,6 +1015,25 @@ PYPRESMOCK
         || die "cleanup_junction_temps failed to remove allocated scratch directory"
     )
 
+    # Failed allocation verification: explicit return 1, no registration in JUNCTION_TEMPS, no output variable mutation
+    (
+      JUNCTION_TEMPS=()
+      local fail_parent fail_missing fail_out="sentinel" fail_rc=0
+      fail_parent="$(mktemp -d "${TMPDIR:-/tmp}/2802-fail-parent.XXXXXX")"
+      fail_missing="${fail_parent}/nonexistent-child"
+      set +e
+      allocate_python_scratch fail_out "2802-fail" "${fail_missing}"
+      fail_rc=$?
+      set -e
+      rmdir "${fail_parent}"
+      [[ "${fail_rc}" -eq 1 ]] \
+        || die "allocate_python_scratch must return 1 on failed allocation"
+      [[ "${#JUNCTION_TEMPS[@]}" -eq 0 ]] \
+        || die "failed allocation must not register in JUNCTION_TEMPS"
+      [[ "${fail_out}" == "sentinel" ]] \
+        || die "failed allocation must not mutate output variable"
+    )
+
     probe_parent="$(mktemp -d "${TMPDIR:-/tmp}/2802-parent-XXXXXX.XXXXXX")"
     register_junction_temp "${probe_parent}"
 
@@ -1046,10 +1066,11 @@ PYPRESMOCK
     if command -v gmktemp >/dev/null 2>&1; then
       (
         local gnu_bin gnu_parent gnu_r1 gnu_r2
+        JUNCTION_TEMPS=()
         gnu_bin="$(mktemp -d "${TMPDIR:-/tmp}/2802-gmktemp-bin.XXXXXX")"
+        trap 'rm -rf "${gnu_bin}"; cleanup_junction_temps' EXIT
         ln -s "$(command -v gmktemp)" "${gnu_bin}/mktemp"
         PATH="${gnu_bin}:${PATH}"
-        JUNCTION_TEMPS=()
         gnu_parent="$(mktemp -d "${TMPDIR:-/tmp}/2802-gnu-parent-XXXXXX.XXXXXX")"
         register_junction_temp "${gnu_parent}"
         allocate_python_scratch gnu_r1 "2802-pg-runner" "${gnu_parent}"
@@ -1061,7 +1082,6 @@ PYPRESMOCK
         cleanup_junction_temps
         [[ ! -f "${gnu_r1}" && ! -f "${gnu_r2}" && ! -d "${gnu_parent}" ]] \
           || die "cleanup_junction_temps failed under GNU mktemp"
-        rm -rf "${gnu_bin}"
       )
     fi
 
