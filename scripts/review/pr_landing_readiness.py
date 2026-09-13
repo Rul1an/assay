@@ -301,9 +301,9 @@ def gate_answer(repo, number, head, branch_ref, git_root, cache):
     refuse there, and a record on an earlier head passes only through `derive_carry`. Asking it
     here is what keeps the two gates from drifting apart again (#2958).
 
-    Only a carry consults this, so callers pass it as a thunk and it runs at most once, on the
-    PRs that need it: a record bound to the live head is judged without a second API call, and
-    an outage reaching that endpoint cannot fail a landing check that was never going to carry.
+    The landing report now consults this on every readiness run, not only on carry candidates:
+    the report is about whether this head can land, and this is the required check that answers
+    that question. Caching still keeps the cost to one API read and one evaluation per run.
     """
     if "answer" not in cache:
         try:
@@ -330,6 +330,7 @@ def review_candidates(pr, head, git_root=None, repo=None, gate=None):
     rows = []
     git_root = REPO_ROOT if git_root is None else git_root
     carries = {}
+    gate_decision = gate() if gate is not None else None
     for review in pr.get("reviews", []):
         state = review.get("state")
         if state == "DISMISSED":
@@ -365,14 +366,22 @@ def review_candidates(pr, head, git_root=None, repo=None, gate=None):
             continue
         machine = machine_review_candidate(body, author, head, pr.get("headRefName") or "")
         if machine:
+            source = "machine-comment" if machine["validation_error"] is None else "invalid-machine-comment"
+            carry_note = None
+            verdict_value = machine["verdict"]
+            if (gate_decision is not None and not gate_decision[0]
+                    and machine["bound_sha"] == head and machine["verdict"] == "READY"):
+                verdict_value = "BLOCKED"
+                source = "invalid-machine-comment"
+                carry_note = f"gate refuses the set: {gate_decision[1]}"
             rows.append({
                 "record_author": author,
                 "reviewer_identity": machine["reviewer_identity"],
-                "verdict": machine["verdict"],
+                "verdict": verdict_value,
                 "bound_sha": machine["bound_sha"],
                 "current_head": machine["bound_sha"] == head,
-                "source": "machine-comment" if machine["validation_error"] is None else "invalid-machine-comment",
-                "carry": None,
+                "source": source,
+                "carry": carry_note,
             })
             continue
         # A record bound to an earlier head still binds this one when the CI gate's derivation
@@ -380,10 +389,10 @@ def review_candidates(pr, head, git_root=None, repo=None, gate=None):
         earlier = record_head_sha(body)
         if earlier and earlier != head:
             carried, carry_note = carried_to_head(earlier, head, git_root, carries, repo)
-            if carried and gate is not None:
+            if carried and gate_decision is not None:
                 # The derivation carries this record, but the gate judges the set: a bot
                 # carrier, an edit, an ambiguity or a refused supersede refuses there.
-                passes, why = gate()
+                passes, why = gate_decision
                 if not passes:
                     carried, carry_note = False, f"{carry_note}; gate refuses the set: {why}"
 
@@ -497,10 +506,11 @@ def main():
     body_shas = SHA_RE.findall(pr.get("body") or "")
     body_mentions_head = head in body_shas
     gate_cache = {}
+    gate_decision = gate_answer(args.repo, args.pr, head, pr.get("headRefName") or "",
+                                REPO_ROOT, gate_cache)
     candidates = review_candidates(
         pr, head, repo=args.repo,
-        gate=lambda: gate_answer(args.repo, args.pr, head, pr.get("headRefName") or "",
-                                 REPO_ROOT, gate_cache),
+        gate=lambda: gate_decision,
     )
     current_ready = [row for row in candidates if row["current_head"] and row["verdict"] == "READY"]
     current_blocked = [row for row in candidates if row["current_head"] and row["verdict"] == "BLOCKED"]
@@ -522,6 +532,8 @@ def main():
         blockers.append(f"mergeable={pr.get('mergeable')}")
     if not required_green:
         blockers.append("required checks are not all green")
+    if not gate_decision[0]:
+        blockers.append(f"review-record-check refuses current comment set: {gate_decision[1]}")
     if missing_required:
         blockers.append(f"required contexts not reported: {', '.join(missing_required)}")
     if not current_ready:
