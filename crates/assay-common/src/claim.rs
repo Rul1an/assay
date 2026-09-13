@@ -11,6 +11,13 @@
 //! `assay_runner_schema::permissiveness`, a free function next to the invariant that needs it; an
 //! ordering on the public type would invite arithmetic on it. Neither enum is `#[non_exhaustive]`:
 //! a fourth member changes what every table means and must cost a major, not be absorbed.
+//! Closedness is also what enumerates them. The parity helpers
+//! (`kinds()` in `assay-evidence`'s `claim_gate_parity`, `all_claim_kinds()` in
+//! `assay-runner-schema`) match [`ClaimKind`] exhaustively, so a new member is `E0004`
+//! there unless the author edits the helper. That is the strongest pin available
+//! without a derive: it forces an edit next to the list. It does not prove the
+//! list grew. Naming the variant in the pattern and omitting it from the `vec`
+//! still compiles.
 
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +42,12 @@ pub enum ClaimDecision {
 }
 
 /// What kind of claim a consumer wants to make about one dimension.
+///
+/// Deliberately closed. A wildcard is not a correct handler for an unknown claim
+/// kind, so this enum is not `#[non_exhaustive]`. That closedness is what
+/// enumerates the parity helpers: they `match` this type exhaustively, which
+/// forces an edit when a member is added. The pattern and the returned `vec`
+/// remain two lists; see the helpers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ClaimKind {
