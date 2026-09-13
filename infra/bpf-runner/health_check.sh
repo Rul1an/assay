@@ -217,27 +217,35 @@ cancel_stale_jobs() {
     log_info "Checking for stale queued jobs (older than ${STALE_JOB_HOURS} hours)..."
 
     local stale_jobs
-    stale_jobs=$($gh run list --repo "$REPO" --status queued --limit 50 --json databaseId,createdAt 2>/dev/null | \
-        jq -r --arg cutoff "$cutoff_time" '.[] | select(.createdAt < $cutoff) | .databaseId' || echo "")
+    if ! stale_jobs=$($gh run list --repo "$REPO" --status queued --limit 50 --json databaseId,createdAt 2>/dev/null | \
+        jq -r --arg cutoff "$cutoff_time" '.[] | select(.createdAt < $cutoff) | .databaseId'); then
+        log_warn "Could not enumerate stale queued jobs"
+        return 1
+    fi
 
     if [[ -z "$stale_jobs" ]]; then
         log_info "No stale jobs found"
         return 0
     fi
 
-    local cancel_count=0
+    local request_count=0
+    local failed=0
+    local run_id
     for run_id in $stale_jobs; do
-        log_info "Cancelling stale run $run_id..."
-        $gh run cancel "$run_id" --repo "$REPO" 2>/dev/null || true
-        ((cancel_count++))
+        if $gh run cancel "$run_id" --repo "$REPO" >/dev/null 2>&1; then
+            request_count=$((request_count + 1))
+        else
+            log_warn "Cancellation request failed for run $run_id"
+            failed=1
+        fi
         sleep 1  # Rate limiting
     done
 
-    if [[ "$cancel_count" -gt 0 ]]; then
-        log_ok "Cancelled $cancel_count stale queued jobs"
+    if [[ "$request_count" -gt 0 ]]; then
+        log_info "Cancellation requested for $request_count stale queued runs; terminal status not verified"
     fi
 
-    return 0
+    return "$failed"
 }
 
 # Cancel superseded runs (older queued runs for the same workflow/branch/event)

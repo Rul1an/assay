@@ -585,4 +585,50 @@ if [[ "${crontab_write_status}" -ne 73 ]]; then
 fi
 rm -f "${CRONTAB_CAPTURE}"
 
+# Cancellation is asynchronous: command success is a request, not a terminal run.
+(
+    export GH_CMD=cancel_test_gh
+    log_info() { printf 'INFO %s\n' "$*"; }
+    log_warn() { printf 'WARN %s\n' "$*"; }
+    log_ok() { printf 'OK %s\n' "$*"; }
+    cancel_test_gh() {
+        case "$1 $2" in
+            'run list')
+                if [[ "$mode" == list_failure ]]; then return 1; fi
+                if [[ "$mode" == malformed ]]; then printf '{\n'; return; fi
+                if [[ "$mode" == empty ]]; then printf '[]\n'; return; fi
+                printf '[{"databaseId":123,"createdAt":"2000-01-01T00:00:00Z"}]\n'
+                ;;
+            'run cancel')
+                printf '%s\n' "$3" >>"${EVENTS}"
+                [[ "$mode" != rejected ]]
+                ;;
+            *) echo 'unexpected GitHub operation' >&2; return 99 ;;
+        esac
+    }
+    for mode in accepted rejected list_failure malformed empty; do
+        : >"${EVENTS}"
+        rc=0
+        output=$(cancel_stale_jobs) || rc=$?
+        if [[ "$mode" == accepted ]]; then
+            [[ "$rc" == 0 && "$output" == *'Cancellation requested for 1 stale queued runs'* ]] || {
+                echo "accepted cancellation must be reported as requested: $output" >&2; exit 1;
+            }
+        elif [[ "$mode" == empty ]]; then
+            [[ "$rc" == 0 && "$output" == *'No stale jobs found'* ]] || exit 1
+        else
+            [[ "$rc" != 0 ]] || { echo "$mode must not return success: $output" >&2; exit 1; }
+        fi
+        if [[ "$mode" == accepted || "$mode" == rejected ]]; then
+            [[ "$(cat "${EVENTS}")" == 123 ]] || { echo 'cancellation was not invoked exactly once' >&2; exit 1; }
+        elif [[ -s "${EVENTS}" ]]; then
+            echo 'invalid or empty inventory invoked cancellation' >&2; exit 1
+        fi
+        if [[ "$output" == *'Cancelled '* ]]; then
+            echo "unconfirmed cancellation reported as completed: $output" >&2
+            exit 1
+        fi
+    done
+)
+
 echo "ok: runner auto-recovery keeps registration tokens fresh and bounds destructive calls"
