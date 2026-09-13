@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import re
 import subprocess
 import sys
 import tempfile
@@ -74,8 +75,30 @@ REQUIRED_INVENTORY_COMMANDS = (
     "python3 -W error::ResourceWarning conformance/tests/test_bounded_run.py",
     "python3 -W error::ResourceWarning conformance/tests/test_run_all.py",
     "python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_published_rows.py",
     "python3 conformance/run_all.py",
 )
+INVENTORY_REQUIRED_SCOPE_STEPS = (
+    INVENTORY_STEP,
+    "Public-run projection",
+    "Published-numbers projection contract",
+)
+INVENTORY_TEST_EXCEPTIONS = {
+    "conformance/tests/test_corpus_adequacy_own_corpora.py": {
+        "reason": (
+            "requires sibling corpus-adequacy and sibling corpora checkouts that are "
+            "outside this repository checkout"
+        ),
+        "covered_by_required_check": "python3 conformance/adequacy/check_published_numbers.py",
+    },
+    "conformance/tests/test_privileged_mcp_diagnostic_channel.py": {
+        "reason": (
+            "requires sibling corpus-adequacy at the manifest-pinned commit, so required CI "
+            "cannot run it from this repository checkout alone"
+        ),
+        "covered_by_required_check": "python3 conformance/adequacy/check_published_numbers.py",
+    },
+}
 # Independent of the completion-scope gated-run tuple.
 GATED_LINUX_JOB = "test"
 GATED_LINUX_STEP = "Conformance required cargo lanes (Linux)"
@@ -127,6 +150,80 @@ HARDENING_ENV_BLOCK = (
     "        env:\n"
     f"          {HARDENING_GH_TOKEN}\n"
 )
+
+
+def listed_inventory_test_files(commands: tuple[str, ...]) -> set[str]:
+    listed: set[str] = set()
+    for command in commands:
+        for match in re.findall(r"conformance/tests/test_[^\s]+\.py", command):
+            listed.add(match)
+    return listed
+
+
+def discovered_conformance_test_files() -> set[str]:
+    tests_dir = REPO / "conformance/tests"
+    return {
+        str(path.relative_to(REPO)).replace("\\", "/")
+        for path in tests_dir.glob("test_*.py")
+    }
+
+
+def required_scope_commands(text: str) -> set[str]:
+    active: set[str] = set()
+    for step_name in INVENTORY_REQUIRED_SCOPE_STEPS:
+        step = named_step(text, JOB, step_name)
+        active.update(_active_run_lines(step))
+    return active
+
+
+def assert_inventory_test_contract(text: str) -> None:
+    discovered = discovered_conformance_test_files()
+    listed = listed_inventory_test_files(tuple(required_scope_commands(text)))
+    excepted = set(INVENTORY_TEST_EXCEPTIONS)
+
+    both = sorted(listed & excepted)
+    if both:
+        raise AssertionError(
+            "conformance inventory files cannot be both listed and excepted: "
+            + ", ".join(both)
+        )
+
+    stale = sorted(excepted - discovered)
+    if stale:
+        raise AssertionError(
+            "conformance inventory exception has no matching file: "
+            + ", ".join(stale)
+        )
+
+    uncovered = sorted(discovered - listed - excepted)
+    if uncovered:
+        raise AssertionError(
+            "conformance inventory uncovered test files: "
+            + ", ".join(uncovered)
+        )
+
+    active_required_scope = required_scope_commands(text)
+    for test_file, record in sorted(INVENTORY_TEST_EXCEPTIONS.items()):
+        if not isinstance(record, dict):
+            raise AssertionError(
+                f"conformance inventory exception for {test_file} must be a mapping"
+            )
+        reason = str(record.get("reason", "")).strip()
+        if not reason:
+            raise AssertionError(
+                f"conformance inventory exception for {test_file} is missing a reason"
+            )
+        covered = str(record.get("covered_by_required_check", "")).strip()
+        if not covered:
+            raise AssertionError(
+                "conformance inventory exception for "
+                f"{test_file} is missing covered_by_required_check"
+            )
+        if covered not in active_required_scope:
+            raise AssertionError(
+                f"conformance inventory exception for {test_file} names "
+                f"{covered!r}, which is not active in required CI scope"
+            )
 
 
 def load_checker():
@@ -658,6 +755,43 @@ class ConformanceInventoryCallsite(unittest.TestCase):
     def test_live_inventory_step_matches_independent_literals(self) -> None:
         step = named_step(self.live, JOB, INVENTORY_STEP)
         self.assertEqual(tuple(_active_run_lines(step)), REQUIRED_INVENTORY_COMMANDS)
+
+    def test_inventory_test_files_are_listed_or_reasoned_exceptions(self) -> None:
+        assert_inventory_test_contract(self.live)
+
+    def test_unlisted_inventory_test_file_fails_with_exact_message(self) -> None:
+        probe = REPO / "conformance/tests/test_inventory_contract_probe.py"
+        probe.write_text(
+            "#!/usr/bin/env python3\n"
+            "import unittest\n\n"
+            "class Probe(unittest.TestCase):\n"
+            "    pass\n",
+            encoding="utf-8",
+        )
+        try:
+            with self.assertRaisesRegex(
+                AssertionError,
+                (
+                    "conformance inventory uncovered test files: "
+                    "conformance/tests/test_inventory_contract_probe.py"
+                ),
+            ):
+                assert_inventory_test_contract(self.live)
+        finally:
+            probe.unlink()
+
+    def test_comment_only_change_to_listed_test_stays_green(self) -> None:
+        target = REPO / "conformance/tests/test_registry.py"
+        original = target.read_text(encoding="utf-8")
+        mutated = original
+        if not mutated.endswith("\n"):
+            mutated += "\n"
+        mutated += "# comment-only control for inventory contract\n"
+        target.write_text(mutated, encoding="utf-8")
+        try:
+            assert_inventory_test_contract(self.live)
+        finally:
+            target.write_text(original, encoding="utf-8")
 
     def test_live_gated_linux_step_matches_independent_literals(self) -> None:
         step = named_step(self.live, GATED_LINUX_JOB, GATED_LINUX_STEP)
