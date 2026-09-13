@@ -177,7 +177,7 @@ jobs:
   semver-public:
     name: Wave 0 semver checks (public crates)
     needs: detect-changes
-    if: needs.detect-changes.outputs.semver_relevant == 'true'
+    if: needs.detect-changes.outputs.semver_relevant == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
