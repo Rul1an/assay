@@ -11,7 +11,34 @@ use sha2::{Digest, Sha256};
 /// can name the same bound the helpers apply.
 pub const INGEST_STRING_CEILING: usize = 4096;
 const MAX_STRING_LEN: usize = INGEST_STRING_CEILING;
-const TRUNCATED_MSG: &str = "...[TRUNCATED]";
+/// In-band mark appended by [`truncate_string_to_byte_budget`].
+///
+/// 6.1 `trace ingest` wrote this onto overlong EpisodeStart fields and discarded
+/// the loss record. Readers treat a retained value that still carries it, with
+/// no loss record, as unmeasured.
+pub(crate) const TRUNCATED_MSG: &str = "...[TRUNCATED]";
+
+/// True when `s` carries the in-band mark this crate's truncator writes.
+///
+/// The producer appends the mark at the end. The match is `contains`, not
+/// `ends_with`: a mid-string mark is not something our truncator writes, but
+/// the check may only lower a reading, so the broader match is the safe
+/// direction. A forged sentinel can turn `MeasuredClean` into `Unmeasured`;
+/// it cannot raise `Unmeasured` or `Lossy`.
+pub(crate) fn carries_inband_truncation_sentinel(s: &str) -> bool {
+    s.contains(TRUNCATED_MSG)
+}
+
+/// Walk a retained JSON value (the field at a pointer, or a subtree under it)
+/// and report whether any string carries the in-band mark.
+pub(crate) fn value_carries_inband_truncation_sentinel(v: &Value) -> bool {
+    match v {
+        Value::String(s) => carries_inband_truncation_sentinel(s),
+        Value::Array(items) => items.iter().any(value_carries_inband_truncation_sentinel),
+        Value::Object(map) => map.values().any(value_carries_inband_truncation_sentinel),
+        _ => false,
+    }
+}
 
 /// Truncate `s` to a UTF-8 byte budget, appending [`TRUNCATED_MSG`].
 ///
@@ -125,6 +152,25 @@ mod tests {
     fn over_budget_multibyte() -> String {
         // 1500 × 4 = 6000 bytes > 4096; char-count keep (~4082) would emit ~16 KiB.
         MULTI.repeat(1500)
+    }
+
+    #[test]
+    fn inband_sentinel_is_the_historical_6_1_mark_and_matches_contains() {
+        assert_eq!(
+            TRUNCATED_MSG, "...[TRUNCATED]",
+            "the constant is the 6.1 wire mark; do not invent a second literal"
+        );
+        assert!(carries_inband_truncation_sentinel("head...[TRUNCATED]"));
+        assert!(carries_inband_truncation_sentinel("...[TRUNCATED]"));
+        assert!(carries_inband_truncation_sentinel("head...[TRUNCATED]tail"));
+        assert!(!carries_inband_truncation_sentinel("intact"));
+        assert!(!carries_inband_truncation_sentinel("[TRUNCATED]"));
+        assert!(value_carries_inband_truncation_sentinel(&json!({
+            "note": "head...[TRUNCATED]tail"
+        })));
+        assert!(!value_carries_inband_truncation_sentinel(
+            &json!({"note": "intact"})
+        ));
     }
 
     #[test]

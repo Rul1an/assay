@@ -1165,3 +1165,176 @@ fn probe_c_foreign_empty_loss_observation_not_carried_at_ingest() -> anyhow::Res
 
     Ok(())
 }
+
+/// Historical 6.1 in-band mark. Production must use `TRUNCATED_MSG`, not a second
+/// literal; this pin is the wire string a 6.1 ingest left behind.
+const INBAND_SENTINEL: &str = "...[TRUNCATED]";
+
+fn sentinel_bearing_under_ceiling() -> String {
+    let keep = INGEST_STRING_CEILING - INBAND_SENTINEL.len();
+    let mut s = "p".repeat(keep);
+    s.push_str(INBAND_SENTINEL);
+    s
+}
+
+fn mid_string_sentinel_under_ceiling() -> String {
+    format!("head{INBAND_SENTINEL}tail")
+}
+
+/// Probe C (#2782): a retained value that carries the in-band sentinel with no
+/// loss record must read Unmeasured, never MeasuredClean. A forged sentinel may
+/// only lower a reading.
+///
+/// Mutation: remove the sentinel check. This test must then fail (Unmeasured
+/// becomes MeasuredClean). Control: a clean retained value with no sentinel
+/// still reads MeasuredClean. A value with a loss record plus sentinel stays
+/// Lossy under that mutation.
+#[test]
+fn probe_c_sentinel_without_loss_record_reads_unmeasured() -> anyhow::Result<()> {
+    let prompt = sentinel_bearing_under_ceiling();
+    assert_eq!(prompt.len(), INGEST_STRING_CEILING);
+    assert!(
+        prompt.len() <= INGEST_STRING_CEILING,
+        "retained bytes must be under the stage ceiling so the upgrader records clean"
+    );
+
+    let nested = mid_string_sentinel_under_ceiling();
+    let line = json!({
+        "type": "episode_start",
+        "episode_id": "ep-sentinel",
+        "timestamp": 1,
+        "input": {"prompt": prompt},
+        "meta": {"note": nested}
+    })
+    .to_string();
+
+    let observed = upgrade_observed(&line);
+    let TraceEvent::EpisodeStart(start) = observed.event() else {
+        panic!("expected episode_start");
+    };
+    assert!(
+        observed.observations()[0].losses.is_empty(),
+        "upgrader must record no loss: retained bytes are under the ceiling"
+    );
+    assert!(
+        start.input["prompt"]
+            .as_str()
+            .expect("prompt string")
+            .contains(INBAND_SENTINEL),
+        "retained prompt must still carry the 6.1 in-band mark"
+    );
+    assert!(
+        observed.reported_truncations().is_empty(),
+        "EpisodeStart has no truncations field; no loss record on the row"
+    );
+
+    let jsonl_prompt = read_observed(&observed, "/input/prompt", TRUSTED);
+    assert_eq!(
+        jsonl_prompt,
+        TruncationReading::Unmeasured,
+        "JSONL: sentinel-bearing /input/prompt with no loss record must not read clean, got {jsonl_prompt:?}"
+    );
+    let jsonl_nested = read_observed(&observed, "/meta/note", TRUSTED);
+    assert_eq!(
+        jsonl_nested,
+        TruncationReading::Unmeasured,
+        "JSONL: sentinel nested under /meta/note with no loss record must not read clean, got {jsonl_nested:?}"
+    );
+
+    let store = Store::memory()?;
+    store.init_schema()?;
+    store.insert_observed_event(&observed, None, None)?;
+    let sqlite_prompt =
+        store.read_truncation("episode_start", "ep-sentinel", "/input/prompt", TRUSTED)?;
+    assert_eq!(
+        sqlite_prompt,
+        TruncationReading::Unmeasured,
+        "SQLite: sentinel-bearing /input/prompt with no loss record must not read clean, got {sqlite_prompt:?}"
+    );
+    let sqlite_nested =
+        store.read_truncation("episode_start", "ep-sentinel", "/meta/note", TRUSTED)?;
+    assert_eq!(
+        sqlite_nested,
+        TruncationReading::Unmeasured,
+        "SQLite: sentinel nested under /meta/note with no loss record must not read clean, got {sqlite_nested:?}"
+    );
+
+    // Positive control: trusted clean stage, no sentinel, still MeasuredClean.
+    let clean_line = json!({
+        "type": "episode_start",
+        "episode_id": "ep-clean",
+        "timestamp": 1,
+        "input": {"prompt": "short prompt"},
+        "meta": {"note": "intact"}
+    })
+    .to_string();
+    let clean = upgrade_observed(&clean_line);
+    assert_eq!(
+        read_observed(&clean, "/input/prompt", TRUSTED),
+        TruncationReading::MeasuredClean {
+            stage: UPGRADER_STAGE.into(),
+            ceiling: INGEST_STRING_CEILING,
+        },
+        "clean retained value with no sentinel must still read MeasuredClean"
+    );
+    let store_clean = Store::memory()?;
+    store_clean.init_schema()?;
+    store_clean.insert_observed_event(&clean, None, None)?;
+    assert_eq!(
+        store_clean.read_truncation("episode_start", "ep-clean", "/input/prompt", TRUSTED)?,
+        TruncationReading::MeasuredClean {
+            stage: UPGRADER_STAGE.into(),
+            ceiling: INGEST_STRING_CEILING,
+        },
+        "SQLite clean control must still read MeasuredClean"
+    );
+
+    Ok(())
+}
+
+/// Direction-only control for the sentinel guard. Removing the check must leave
+/// these readings unchanged: Unmeasured stays Unmeasured, Lossy stays Lossy.
+#[test]
+fn probe_c_sentinel_may_only_lower_a_reading() -> anyhow::Result<()> {
+    let unmeasured = ObservedTraceEvent::new(
+        TraceEvent::EpisodeStart(EpisodeStart {
+            episode_id: "ep-unmeasured".into(),
+            timestamp: 1,
+            input: json!({"prompt": sentinel_bearing_under_ceiling()}),
+            meta: Value::Null,
+        }),
+        vec![],
+    );
+    assert_eq!(
+        read_observed(&unmeasured, "/input/prompt", TRUSTED),
+        TruncationReading::Unmeasured,
+        "sentinel must not raise Unmeasured"
+    );
+
+    let loss = meta_loss("/content", 4595, INGEST_STRING_CEILING, "deadbeef");
+    let mut lossy_step = short_step(vec![loss.clone()]);
+    lossy_step.content = Some(sentinel_bearing_under_ceiling());
+    let lossy = ObservedTraceEvent::new(
+        TraceEvent::Step(lossy_step),
+        vec![clean_observation(
+            &["/content", "/meta"],
+            vec![loss.clone()],
+        )],
+    );
+    assert_eq!(
+        read_observed(&lossy, "/content", TRUSTED),
+        TruncationReading::Lossy,
+        "sentinel must not raise Lossy"
+    );
+    let store_lossy = Store::memory()?;
+    store_lossy.init_schema()?;
+    ensure_episode(&store_lossy, "e1")?;
+    store_lossy.insert_observed_event(&lossy, None, None)?;
+    assert_eq!(
+        store_lossy.read_truncation("step", "s1", "/content", TRUSTED)?,
+        TruncationReading::Lossy,
+        "SQLite: loss record plus sentinel stays Lossy"
+    );
+
+    Ok(())
+}
