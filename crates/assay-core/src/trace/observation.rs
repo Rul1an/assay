@@ -5,7 +5,7 @@
 //! unmeasured. Reported loss dominates.
 
 use super::schema::{TraceEvent, TruncationMeta};
-use super::truncation::compute_sha256;
+use super::truncation::{compute_sha256, value_carries_inband_truncation_sentinel};
 use serde::{Serialize, Serializer};
 use serde_json::{json, Value};
 
@@ -215,6 +215,10 @@ pub fn tool_call_column_values(e: &super::schema::ToolCallEntry) -> (String, Opt
 }
 
 /// One function for JSONL and SQLite. The SQLite reader applies the binding check first.
+///
+/// This lattice does not see retained bytes. [`read_observed`] and the SQLite
+/// reader apply the in-band sentinel guard so a sentinel-bearing value with no
+/// loss record cannot stay [`TruncationReading::MeasuredClean`].
 pub fn read_truncation(
     pointer: &str,
     truncations: &[TruncationMeta],
@@ -250,13 +254,72 @@ pub fn read_observed(
     pointer: &str,
     trusted_stages: &[&str],
 ) -> TruncationReading {
-    read_truncation(
+    let reading = read_truncation(
         pointer,
         observed.reported_truncations(),
         observed.observations(),
         trusted_stages,
         observed.requires_loss_parity(),
-    )
+    );
+    let retained_root = serde_json::to_value(observed.event()).unwrap_or(Value::Null);
+    apply_inband_sentinel_guard(reading, &retained_root, pointer)
+}
+
+/// Lower [`TruncationReading::MeasuredClean`] when the retained value at
+/// `pointer` (or a string nested under it) carries the in-band truncation
+/// sentinel and no loss record already made the reading [`TruncationReading::Lossy`].
+///
+/// One function for JSONL ([`read_observed`]) and SQLite (`Store::read_truncation`).
+/// Direction only: `Unmeasured` and `Lossy` are unchanged.
+pub(crate) fn apply_inband_sentinel_guard(
+    reading: TruncationReading,
+    retained_root: &Value,
+    pointer: &str,
+) -> TruncationReading {
+    if !matches!(reading, TruncationReading::MeasuredClean { .. }) {
+        return reading;
+    }
+    let Some(value) = retained_root.pointer(pointer) else {
+        return reading;
+    };
+    if value_carries_inband_truncation_sentinel(value) {
+        TruncationReading::Unmeasured
+    } else {
+        reading
+    }
+}
+
+pub(crate) fn episode_retained_root(prompt: Option<&str>, meta_json: Option<&str>) -> Value {
+    let meta = meta_json
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or(Value::Null);
+    json!({
+        "input": { "prompt": prompt },
+        "meta": meta
+    })
+}
+
+pub(crate) fn step_retained_root(content: Option<&str>, meta_json: Option<&str>) -> Value {
+    let meta = meta_json
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or(Value::Null);
+    json!({
+        "content": content,
+        "meta": meta
+    })
+}
+
+pub(crate) fn tool_call_retained_root(args: Option<&str>, result: Option<&str>) -> Value {
+    let args_v = args
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or(Value::Null);
+    let result_v = result
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or(Value::Null);
+    json!({
+        "args": args_v,
+        "result": result_v
+    })
 }
 
 fn is_known_version(obs: &TruncationObservation) -> bool {
