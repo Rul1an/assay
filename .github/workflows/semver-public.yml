@@ -179,7 +179,9 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.semver_relevant == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The 20m ceiling cancelled #3005 during the final crate's baseline rustdoc.
+    # Preserve the complete derived library set and self-tests; timeout is not success.
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
