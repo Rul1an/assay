@@ -20,6 +20,7 @@ PERF_MAIN="${ROOT}/.github/workflows/perf_main.yml"
 PERF_PR="${ROOT}/.github/workflows/perf_pr.yml"
 PERF_NIGHTLY="${ROOT}/.github/workflows/perf_nightly.yml"
 SPLIT_WAVE0="${ROOT}/.github/workflows/split-wave0-gates.yml"
+SEMVER_PUBLIC="${ROOT}/.github/workflows/semver-public.yml"
 CI_YML="${ROOT}/.github/workflows/ci.yml"
 KERNEL_MATRIX="${ROOT}/.github/workflows/kernel-matrix.yml"
 TOOLCHAIN_REF="dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
@@ -45,6 +46,7 @@ trap 'abort_is_failure "$?"' ERR
 [[ -f "${PERF_PR}" ]] || fail "missing .github/workflows/perf_pr.yml"
 [[ -f "${PERF_NIGHTLY}" ]] || fail "missing .github/workflows/perf_nightly.yml"
 [[ -f "${SPLIT_WAVE0}" ]] || fail "missing .github/workflows/split-wave0-gates.yml"
+[[ -f "${SEMVER_PUBLIC}" ]] || fail "missing .github/workflows/semver-public.yml"
 [[ -f "${CI_YML}" ]] || fail "missing .github/workflows/ci.yml"
 [[ -f "${KERNEL_MATRIX}" ]] || fail "missing .github/workflows/kernel-matrix.yml"
 
@@ -266,7 +268,7 @@ print(
 )
 PY
 
-python3 - "${FUZZ_SMOKE}" "${ADR025}" "${SMOKE_INSTALL}" "${RUNNER_SPIKE}" "${PERF_MAIN}" "${PERF_PR}" "${PERF_NIGHTLY}" "${SPLIT_WAVE0}" "${CI_YML}" "${KERNEL_MATRIX}" <<'PY' || fail "simple-caller setup-rust contract failed"
+python3 - "${FUZZ_SMOKE}" "${ADR025}" "${SMOKE_INSTALL}" "${RUNNER_SPIKE}" "${PERF_MAIN}" "${PERF_PR}" "${PERF_NIGHTLY}" "${SPLIT_WAVE0}" "${CI_YML}" "${KERNEL_MATRIX}" "${SEMVER_PUBLIC}" <<'PY' || fail "simple-caller setup-rust contract failed"
 import re, sys
 from pathlib import Path
 
@@ -280,6 +282,7 @@ perf_nightly_text = Path(sys.argv[7]).read_text(encoding="utf-8")
 split_wave0_text = Path(sys.argv[8]).read_text(encoding="utf-8")
 ci_text = Path(sys.argv[9]).read_text(encoding="utf-8")
 kernel_matrix_text = Path(sys.argv[10]).read_text(encoding="utf-8")
+semver_public_text = Path(sys.argv[11]).read_text(encoding="utf-8")
 
 
 def jobs_by_id(text: str) -> dict[str, str]:
@@ -535,9 +538,9 @@ print(
     "with-map empty; no direct pins"
 )
 
-# --- Split Wave 0: feature-matrix / quality-gates / semver-public only ---
+# --- Split Wave 0: feature-matrix / quality-gates only ---
 split_wave0_jobs = jobs_by_id(split_wave0_text)
-for required in ("feature-matrix", "quality-gates", "semver-public", "detect-changes", "nightly-safety"):
+for required in ("feature-matrix", "quality-gates", "detect-changes", "nightly-safety"):
     if required not in split_wave0_jobs:
         raise SystemExit(f"split-wave0 missing job {required}")
 
@@ -545,9 +548,8 @@ assert_default_setup_rust_caller("split-wave0", split_wave0_text, "feature-matri
 assert_setup_rust_exact_with(
     "split-wave0", split_wave0_text, "quality-gates", {"components": "clippy"}
 )
-assert_default_setup_rust_caller("split-wave0", split_wave0_text, "semver-public")
 
-allowed_setup = {"feature-matrix", "quality-gates", "semver-public"}
+allowed_setup = {"feature-matrix", "quality-gates"}
 for job_id, block in split_wave0_jobs.items():
     if job_id in allowed_setup:
         continue
@@ -558,9 +560,29 @@ for job_id, block in split_wave0_jobs.items():
         )
 
 print(
-    "ok   split-wave0: feature-matrix + semver-public default setup-rust after checkout; "
+    "ok   split-wave0: feature-matrix default setup-rust after checkout; "
     "quality-gates with-map exact {components: clippy}; "
     "no setup-rust in detect-changes/nightly-safety; no direct pins"
+)
+
+# --- Semver Public reusable workflow: semver-public only ---
+semver_jobs = jobs_by_id(semver_public_text)
+for required in ("detect-changes", "semver-public"):
+    if required not in semver_jobs:
+        raise SystemExit(f"semver-public.yml missing job {required}")
+
+assert_default_setup_rust_caller("semver-public", semver_public_text, "semver-public")
+for job_id, block in semver_jobs.items():
+    if job_id == "semver-public":
+        continue
+    if "./.github/actions/setup-rust" in block:
+        raise SystemExit(
+            f"semver-public.yml: setup-rust only allowed in semver-public, found in {job_id}"
+        )
+
+print(
+    "ok   semver-public.yml: semver-public default setup-rust after checkout; "
+    "no setup-rust in detect-changes; no direct pins"
 )
 
 

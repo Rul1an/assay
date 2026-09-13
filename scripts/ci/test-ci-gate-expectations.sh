@@ -76,6 +76,8 @@ GATE="$(extract_gate)"
 [[ -n "$GATE" ]] || fail "extracted an empty gate body — the workflow shape changed"
 grep -q "MCP_REGISTRY_TOUCHED" <<<"$GATE" \
   || fail "the gate does not read mcp_registry_touched; three scope outputs decide whether a job should run"
+grep -q "SEMVER_RELEVANT" <<<"$GATE" \
+  || fail "the gate does not read semver_relevant from the reusable semver workflow output"
 # Which jobs the gate must wait on and judge is asserted by
 # `scripts/ci/check-ci-gate-coverage.py`, derived from the workflow. Three job names used to be
 # grepped for here as well; that was a second, hand-maintained statement of the same rule, and a
@@ -204,12 +206,19 @@ fi
 run_gate() {
   local expected="$1" name="$2"
   shift 2
-  local out rc=0
+  local out rc=0 summary
+  summary="$(mktemp)"
   out="$(env RELEASE_ASSET_CONTRACT_RESULT=success \
              PUBLISH_SHAPE_CLI_RESULT=success \
              PUBLIC_CRATE_POLICY_RESULT=success \
              EVIDENCEREF_LIVE_RESOLVE_RESULT=success \
+             SEMVER_RESULT=success \
+             SEMVER_RELEVANT=true \
+             SEMVER_OVERRIDE_REASON= \
+             SEMVER_OVERRIDE_ACTOR= \
+             GITHUB_STEP_SUMMARY="${summary}" \
              "$@" bash -c "$GATE" 2>&1)" || rc=$?
+  LAST_GATE_SUMMARY="${summary}"
   if [[ "$expected" == "pass" && $rc -ne 0 ]]; then
     echo "$out" >&2
     fail "$name: expected the gate to pass, it exited $rc"
@@ -229,7 +238,8 @@ run_gate pass "everything green" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false >/dev/null
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=true SEMVER_RESULT=success >/dev/null
 echo "ok: a complete green run passes"
 
 # A docs-only run: the four code-gated jobs are legitimately scoped out.
@@ -238,7 +248,8 @@ run_gate pass "lightweight scoped out" \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=skipped TEST_RESULT=skipped \
   PUBLIC_MSRV_RESULT=skipped \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false >/dev/null
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=false SEMVER_RESULT=skipped >/dev/null
 echo "ok: a documentation-only run passes with its jobs scoped out"
 
 # The defect: a code-bearing run where a job that should have executed did not. Before this change
@@ -345,6 +356,78 @@ for result in failure ""; do
     || fail "public-msrv ${result:-empty}: the gate failed without naming the job"
 done
 echo "ok: a failed or missing public-msrv result fails closed and names the job"
+
+# Semver from reusable workflow: required when relevant=true.
+out="$(run_gate fail "semver relevant but skipped" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=true SEMVER_RESULT=skipped)"
+assert_named_skip SEMVER "$out"
+echo "ok: semver skipped while relevant fails the gate"
+
+# Literal false scopes semver out.
+run_gate pass "semver not relevant may skip" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=false SEMVER_RESULT=skipped >/dev/null
+echo "ok: semver skipped while not relevant remains green"
+
+# Empty/misspelled semver_relevant is fail-closed, including when semver is skipped.
+out="$(run_gate fail "empty semver_relevant with semver skipped" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT= SEMVER_RESULT=skipped)"
+grep -q "semver_relevant must be the literal" <<<"$out" \
+  || fail "an empty semver_relevant must fail closed, got: $out"
+echo "ok: empty semver_relevant fails closed"
+
+# Detection failures in the called workflow fail the CI rollup.
+out="$(run_gate fail "semver detection failure surfaces as semver failure" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=true SEMVER_RESULT=failure)"
+grep -q "Required CI dependency semver ended with failure" <<<"$out" \
+  || fail "a semver detection failure must fail the gate and name semver, got: $out"
+echo "ok: semver detection failure fails the gate"
+
+# Override is recorded-only: empty reason does nothing, non-empty reason waives semver failure.
+run_gate fail "semver override with empty reason remains failing" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=true SEMVER_RESULT=failure SEMVER_OVERRIDE_REASON='   ' SEMVER_OVERRIDE_ACTOR=maintainer >/dev/null
+echo "ok: semver override with empty reason does not bypass failure"
+
+run_gate pass "semver override with reason waives semver failure" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=true SEMVER_RESULT=failure \
+  SEMVER_OVERRIDE_REASON='intentional break before the version bump PR' \
+  SEMVER_OVERRIDE_ACTOR='release-maintainer' >/dev/null
+grep -q "## Semver override" "${LAST_GATE_SUMMARY}" \
+  || fail "override summary heading missing from gate summary"
+grep -q "actor: release-maintainer" "${LAST_GATE_SUMMARY}" \
+  || fail "override summary must record actor"
+grep -q "reason: intentional break before the version bump PR" "${LAST_GATE_SUMMARY}" \
+  || fail "override summary must record reason"
+echo "ok: semver override with reason records actor+reason and passes"
 
 # An empty scope output is the typo signature: `'' == 'true'` is false, so the job silently never
 # runs. Treating empty as "not required" would reproduce the defect through the fix.

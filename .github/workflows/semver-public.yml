@@ -1,0 +1,303 @@
+name: Semver Public
+
+on:
+  workflow_call:
+    inputs:
+      simulated_changed_files:
+        description: "Optional newline/comma separated changed files to simulate pull_request diff"
+        required: false
+        type: string
+      pr_number:
+        description: "Optional PR number for exact-head workflow_dispatch parity."
+        required: false
+        type: string
+      expected_head_sha:
+        description: "Optional expected PR head SHA for exact-head workflow_dispatch parity."
+        required: false
+        type: string
+    outputs:
+      semver_relevant:
+        description: "Literal true/false semver scope decision from detect-changes."
+        value: ${{ jobs.detect-changes.outputs.semver_relevant }}
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  detect-changes:
+    name: Detect semver scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      semver_relevant: ${{ steps.detect.outputs.semver_relevant }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - id: detect
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before || '' }}
+          CURRENT_SHA: ${{ github.sha }}
+          SIMULATED_CHANGED_FILES: ${{ inputs.simulated_changed_files }}
+          DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          changed_file="$RUNNER_TEMP/changed_files.txt"
+          simulated="${SIMULATED_CHANGED_FILES}"
+
+          if [[ -n "${simulated}" ]]; then
+            printf '%s\n' "${simulated}" | tr ',' '\n' | sed '/^[[:space:]]*$/d' > "$changed_file"
+            run_all=false
+          elif [[ -n "${DISPATCH_PR_NUMBER}" ]]; then
+            if [[ -n "${EXPECTED_HEAD_SHA}" && "${CURRENT_SHA}" != "${EXPECTED_HEAD_SHA}" ]]; then
+              echo "dispatched semver head ${CURRENT_SHA} does not match expected ${EXPECTED_HEAD_SHA}" >&2
+              exit 2
+            fi
+            if [[ -n "${EXPECTED_HEAD_SHA}" ]]; then
+              pr_head="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${DISPATCH_PR_NUMBER}" --jq '.head.sha')"
+              if [[ "${pr_head}" != "${EXPECTED_HEAD_SHA}" ]]; then
+                echo "PR #${DISPATCH_PR_NUMBER} moved from ${EXPECTED_HEAD_SHA} to ${pr_head}" >&2
+                exit 2
+              fi
+            fi
+            gh api \
+              --paginate \
+              "repos/${GITHUB_REPOSITORY}/pulls/${DISPATCH_PR_NUMBER}/files?per_page=100" \
+              --jq '.[].filename' > "$changed_file"
+            run_all=false
+          elif [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            : > "$changed_file"
+            run_all=true
+          elif [[ -n "${PR_BASE_SHA}" ]]; then
+            run_all=false
+            git diff --name-only "${PR_BASE_SHA}...${PR_HEAD_SHA}" > "$changed_file"
+          elif [[ -n "${PUSH_BASE_SHA}" ]]; then
+            run_all=false
+            if [[ "${PUSH_BASE_SHA}" =~ ^0+$ ]]; then
+              git diff-tree --no-commit-id --name-only -r "${CURRENT_SHA}" > "$changed_file"
+            else
+              git diff --name-only "${PUSH_BASE_SHA}...${CURRENT_SHA}" > "$changed_file"
+            fi
+          else
+            echo "::error::could not determine changed files for semver detection (event=${EVENT_NAME})"
+            exit 2
+          fi
+
+          if [[ "${run_all}" == "true" ]]; then
+            global_changed=true
+          elif grep -Eq '^(Cargo\.toml|Cargo\.lock|rust-toolchain|rust-toolchain\.toml|deny\.toml|clippy\.toml|\.cargo/|\.config/)' "$changed_file"; then
+            global_changed=true
+          else
+            global_changed=false
+          fi
+
+          derived_semver_crates="$RUNNER_TEMP/semver-public-lib-crates.tsv"
+          python3 scripts/ci/derive-semver-published-lib-crates.py > "${derived_semver_crates}"
+          if [[ "${run_all}" == "true" || "${global_changed}" == "true" ]]; then
+            semver_published_lib_changed=true
+          else
+            semver_published_lib_changed=false
+            while IFS= read -r changed_path; do
+              [[ -n "${changed_path}" ]] || continue
+              while IFS=$'\t' read -r _ manifest_rel; do
+                [[ -n "${manifest_rel}" ]] || continue
+                crate_dir="${manifest_rel%/Cargo.toml}"
+                case "${changed_path}" in
+                  "${crate_dir}" | "${crate_dir}"/*)
+                    semver_published_lib_changed=true
+                    break 2
+                    ;;
+                esac
+              done < "${derived_semver_crates}"
+            done < "${changed_file}"
+          fi
+
+          if [[ "${run_all}" == "true" || "${global_changed}" == "true" || "${semver_published_lib_changed}" == "true" ]]; then
+            semver_relevant=true
+          else
+            semver_relevant=false
+          fi
+
+          {
+            echo "semver_relevant=${semver_relevant}"
+            echo "semver_published_lib_changed=${semver_published_lib_changed}"
+            echo "global_changed=${global_changed}"
+            echo "run_all=${run_all}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Semver change detection"
+            if [[ -n "${simulated}" ]]; then
+              echo "- mode: workflow_dispatch (simulated changed files)"
+            elif [[ -n "${DISPATCH_PR_NUMBER}" ]]; then
+              echo "- mode: workflow_dispatch (PR #${DISPATCH_PR_NUMBER} files)"
+            elif [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+              echo "- mode: workflow_dispatch (run_all)"
+            elif [[ -n "${PR_BASE_SHA}" ]]; then
+              echo "- mode: pull_request diff"
+            else
+              echo "- mode: push diff"
+            fi
+            echo "- run_all: ${run_all}"
+            echo "- changed_file_count: $(wc -l < "$changed_file" | tr -d ' ')"
+            echo "- global_changed: ${global_changed}"
+            echo "- semver_relevant: ${semver_relevant}"
+            echo "- semver_published_lib_changed: ${semver_published_lib_changed}"
+            if [[ "${run_all}" == "false" || -n "${simulated}" ]]; then
+              echo ""
+              echo "### Changed files"
+              if [[ -s "$changed_file" ]]; then
+                sed 's/^/- /' "$changed_file"
+              else
+                echo "- (none)"
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify split-wave semver routing
+        run: bash scripts/ci/test-split-wave0-semver-routing.sh
+
+  semver-public:
+    name: Wave 0 semver checks (public crates)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.semver_relevant == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Rust toolchain and cache
+        uses: ./.github/actions/setup-rust
+
+      # Pin lives in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). RUSTUP_TOOLCHAIN is
+      # step-scoped for the install; plugin invocations bind stable explicitly, while
+      # ordinary workspace cargo follows rust-toolchain.toml.
+      - name: Install cargo-semver-checks
+        shell: bash
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: |
+          set -euo pipefail
+          # shellcheck source=scripts/ci/cargo-plugin-versions.sh
+          source ./scripts/ci/cargo-plugin-versions.sh
+          echo "installing cargo-semver-checks ${CARGO_SEMVER_CHECKS_VERSION}"
+          cargo install --locked --version "${CARGO_SEMVER_CHECKS_VERSION}" cargo-semver-checks
+          assert_cargo_plugin_version cargo-semver-checks "${CARGO_SEMVER_CHECKS_VERSION}"
+
+      # The baseline is the last release, resolved now, not a SHA pinned in this file.
+      #
+      # It used to be `9cc23b4c`, which is `chore: release v2.18.0` from 2026-02-11. `check-release`
+      # does not ask "is there a breaking change"; it asks whether the declared version increment
+      # covers the changes it finds. Against a 2.x baseline the manifest already declared 3.x, a
+      # major, which licenses any break -- so the job had been structurally unable to fail for the
+      # whole 3.x line. #2068 added a public field to `MetricResult` and this job reported success
+      # (#2088).
+      #
+      # Against the last release tag the question becomes the one that matters: does THIS branch's
+      # version cover what THIS branch changed. A break with no bump fails; a release PR that bumps
+      # to cover it passes.
+      - name: Resolve semver baseline from the last release tag
+        id: baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          # No `|| true`. A failed fetch leaves whatever tags the checkout happens to have, and
+          # `git tag --list` would then pick a stale baseline and compare against the wrong release
+          # while reporting success. That is the exact failure this job exists to stop, so it must
+          # not be the way this job fails.
+          git fetch --tags --quiet origin
+          tag="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1)"
+          if [ -z "${tag}" ]; then
+            echo "::error::no v* release tag found, so there is nothing to compare against."
+            echo "A missing baseline is a 'could not check', and this job must not report success"
+            echo "for a comparison it did not make."
+            exit 1
+          fi
+          git cat-file -e "${tag}^{commit}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Semver baseline: ${tag} ($(git rev-parse --short "${tag}^{commit}"))"
+
+      # Prove the gate can fail before trusting what it says about this branch.
+      #
+      # It could not, for the whole 3.x line, and nothing noticed because a gate that skips every
+      # check is indistinguishable from a gate that finds nothing. This plants a public field on a
+      # public struct -- the same shape as the break that got through -- and requires both a
+      # non-zero exit and the right lint name.
+      - name: Self-test the semver gate
+        env:
+          ASSAY_SEMVER_GATE_FULL: "1"
+        run: bash scripts/ci/test-semver-gate.sh
+
+      - name: Run semver checks (allowlist)
+        shell: bash
+        env:
+          BASELINE_TAG: ${{ steps.baseline.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          run_semver_for() {
+            local crate="$1"
+            echo "- ${crate}" >> "$GITHUB_STEP_SUMMARY"
+            # Bind stable for the plugin only; workspace rust-toolchain.toml stays for cargo check.
+            RUSTUP_TOOLCHAIN=stable cargo semver-checks check-release -p "${crate}" --baseline-rev "${BASELINE_TAG}"
+          }
+
+          derived_crates="$RUNNER_TEMP/semver-public-lib-crates.tsv"
+          python3 scripts/ci/derive-semver-published-lib-crates.py > "${derived_crates}"
+          if [[ ! -s "${derived_crates}" ]]; then
+            echo "::error::published-library derivation returned no crates"
+            exit 1
+          fi
+
+          checked_count=0
+          skipped_count=0
+          {
+            echo "## Semver checks"
+            echo "- Baseline: ${BASELINE_TAG} (last release tag)"
+            echo "- Crates derived from publishable workspace library targets:"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          while IFS=$'\t' read -r crate manifest_rel; do
+            [[ -n "${crate}" ]] || continue
+            [[ -n "${manifest_rel}" ]] || {
+              echo "::error::invalid semver derivation row for crate ${crate}"
+              exit 1
+            }
+            if git cat-file -e "${BASELINE_TAG}:${manifest_rel}" 2>/dev/null; then
+              run_semver_for "${crate}"
+              checked_count=$((checked_count + 1))
+            else
+              echo "- ${crate} (skipped: ${manifest_rel} absent at baseline ${BASELINE_TAG})" >> "$GITHUB_STEP_SUMMARY"
+              echo "::warning::Skipping semver check for ${crate}: ${manifest_rel} absent at baseline ${BASELINE_TAG}"
+              skipped_count=$((skipped_count + 1))
+            fi
+          done < "${derived_crates}"
+
+          {
+            echo "- Checked count: ${checked_count}"
+            echo "- Skipped (baseline-absent): ${skipped_count}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "${checked_count}" -eq 0 ]]; then
+            echo "::error::no semver checks were executed (all derived crates were absent at baseline ${BASELINE_TAG})"
+            exit 1
+          fi

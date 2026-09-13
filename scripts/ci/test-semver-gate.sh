@@ -28,7 +28,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-WORKFLOW="$ROOT/.github/workflows/split-wave0-gates.yml"
+WORKFLOW="$ROOT/.github/workflows/semver-public.yml"
 FAILURES=0
 
 ok()   { echo "ok    $1"; }
