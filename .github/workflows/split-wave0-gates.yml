@@ -106,6 +106,27 @@ jobs:
             unmatched_assay_crate_changed=false
           fi
 
+          derived_semver_crates="$RUNNER_TEMP/semver-public-lib-crates.tsv"
+          python3 scripts/ci/derive-semver-published-lib-crates.py > "${derived_semver_crates}"
+          if [[ "${run_all}" == "true" || "${global_changed}" == "true" ]]; then
+            semver_published_lib_changed=true
+          else
+            semver_published_lib_changed=false
+            while IFS= read -r changed_path; do
+              [[ -n "${changed_path}" ]] || continue
+              while IFS=$'\t' read -r _ manifest_rel; do
+                [[ -n "${manifest_rel}" ]] || continue
+                crate_dir="${manifest_rel%/Cargo.toml}"
+                case "${changed_path}" in
+                  "${crate_dir}" | "${crate_dir}"/*)
+                    semver_published_lib_changed=true
+                    break 2
+                    ;;
+                esac
+              done < "${derived_semver_crates}"
+            done < "${changed_file}"
+          fi
+
           if [[ "${assay_core_changed}" == "true" || "${assay_cli_changed}" == "true" || "${assay_registry_changed}" == "true" || "${assay_evidence_changed}" == "true" ]]; then
             hotspot_changed=true
           else
@@ -114,9 +135,13 @@ jobs:
 
           if [[ "${global_changed}" == "true" || "${hotspot_changed}" == "true" || "${assay_common_changed}" == "true" || "${assay_policy_changed}" == "true" || "${assay_metrics_changed}" == "true" || "${assay_runner_schema_changed}" == "true" || "${unmatched_assay_crate_changed}" == "true" ]]; then
             any_relevant=true
-            semver_relevant=true
           else
             any_relevant=false
+          fi
+
+          if [[ "${run_all}" == "true" || "${global_changed}" == "true" || "${semver_published_lib_changed}" == "true" ]]; then
+            semver_relevant=true
+          else
             semver_relevant=false
           fi
 
@@ -136,6 +161,7 @@ jobs:
             echo "assay_metrics_changed=${assay_metrics_changed}"
             echo "assay_runner_schema_changed=${assay_runner_schema_changed}"
             echo "unmatched_assay_crate_changed=${unmatched_assay_crate_changed}"
+            echo "semver_published_lib_changed=${semver_published_lib_changed}"
           } >> "$GITHUB_OUTPUT"
 
           {
@@ -153,6 +179,7 @@ jobs:
             echo "- hotspot_changed: ${hotspot_changed}"
             echo "- any_relevant: ${any_relevant}"
             echo "- semver_relevant: ${semver_relevant}"
+            echo "- semver_published_lib_changed: ${semver_published_lib_changed}"
             echo "- assay_runner_schema_changed: ${assay_runner_schema_changed}"
             echo "- unmatched_assay_crate_changed: ${unmatched_assay_crate_changed}"
             if [[ "${run_all}" == "false" || -n "${simulated}" ]]; then
