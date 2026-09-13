@@ -89,6 +89,17 @@ required contexts.
 
 Wave 0 workflow always triggers on `pull_request`; heavy jobs are conditional to avoid docs-only blocking.
 
+## Semver result propagation
+
+Semver checks for public crates execute via the reusable workflow
+`.github/workflows/semver-public.yml`, which is called by `.github/workflows/ci.yml`.
+Because GitHub Actions reports a caller job (`needs.semver.result`) as successful
+even if inner jobs are skipped, the `CI` rollup in `ci.yml` imports and evaluates
+both the change detection decision (`semver_relevant`) and the actual child check
+conclusion (`semver_public_result`). When semver is relevant (`semver_relevant == 'true'`),
+`semver_public_result` must be `success` (or `failure` waived by an explicit, recorded
+override); an inner check that skipped or went missing fails closed.
+
 ## Stabilization acceptance
 
 Before declaring Wave 0 stable:

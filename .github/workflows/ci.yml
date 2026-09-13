@@ -1273,6 +1273,7 @@ jobs:
           # GitHub exposes reusable workflow outputs through needs.<job>.outputs in the caller:
           # https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows#using-outputs-from-a-reusable-workflow
           SEMVER_RELEVANT: ${{ needs.semver.outputs['semver_relevant'] }}
+          SEMVER_PUBLIC_RESULT: ${{ needs.semver.outputs['semver_public_result'] }}
           SEMVER_OVERRIDE_REASON: ${{ github.event_name == 'workflow_dispatch' && inputs.override_reason || '' }}
           SEMVER_OVERRIDE_ACTOR: ${{ github.event_name == 'workflow_dispatch' && github.actor || '' }}
           EBPF_SMOKE_REQUIRED: ${{ needs.scope.outputs.ebpf_smoke_required }}
@@ -1343,6 +1344,24 @@ jobs:
           if [[ "${semver_expectation}" == "invalid-output" ]]; then
             echo "::error::semver_relevant must be the literal 'true' or 'false' from the reusable semver workflow; got '${SEMVER_RELEVANT}'."
             failures=$((failures + 1))
+          elif [[ "${semver_expectation}" == "required" || "${semver_expectation}" == "override" ]]; then
+            # The reusable workflow caller conclusion (`needs.semver.result`) can be 'success'
+            # even when its inner jobs are skipped. Validate the actual inner semver check conclusion.
+            if [[ "${SEMVER_PUBLIC_RESULT}" == "skipped" ]]; then
+              echo "::error::inner semver-public was skipped while semver_relevant=true. The check must execute when relevant."
+              failures=$((failures + 1))
+            elif [[ -z "${SEMVER_PUBLIC_RESULT}" ]]; then
+              echo "::error::missing semver_public_result output from reusable semver workflow."
+              failures=$((failures + 1))
+            elif [[ "${SEMVER_PUBLIC_RESULT}" == "failure" ]]; then
+              if [[ "${semver_expectation}" != "override" ]]; then
+                echo "::error::inner semver-public ended with failure while semver_relevant=true and no override was provided."
+                failures=$((failures + 1))
+              fi
+            elif [[ "${SEMVER_PUBLIC_RESULT}" != "success" ]]; then
+              echo "::error::semver_public_result has unexpected conclusion '${SEMVER_PUBLIC_RESULT}'."
+              failures=$((failures + 1))
+            fi
           fi
           for triple in \
             "scope|${SCOPE_RESULT}|required" \
@@ -1401,6 +1420,7 @@ jobs:
           echo "ebpf_smoke_required=${EBPF_SMOKE_REQUIRED}"
           echo "mcp_registry_touched=${MCP_REGISTRY_TOUCHED}"
           echo "semver_relevant=${SEMVER_RELEVANT}"
+          echo "semver_public_result=${SEMVER_PUBLIC_RESULT}"
           if (( failures > 0 )); then
             echo "${failures} required CI dependenc(ies) did not satisfy the gate."
             exit 1

@@ -19,6 +19,9 @@ on:
       semver_relevant:
         description: "Literal true/false semver scope decision from detect-changes."
         value: ${{ jobs.detect-changes.outputs.semver_relevant }}
+      semver_public_result:
+        description: "Literal conclusion of the inner semver-public check job."
+        value: ${{ jobs.conclude.outputs.semver_public_result }}
 
 permissions: {}
 
@@ -301,3 +304,17 @@ jobs:
             echo "::error::no semver checks were executed (all derived crates were absent at baseline ${BASELINE_TAG})"
             exit 1
           fi
+
+  conclude:
+    name: Conclude semver checks
+    needs: [detect-changes, semver-public]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      semver_public_result: ${{ needs.semver-public.result }}
+    steps:
+      - name: Report conclusion
+        shell: bash
+        run: echo "semver-public concluded with ${{ needs.semver-public.result }}"
