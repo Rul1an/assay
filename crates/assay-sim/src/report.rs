@@ -2,6 +2,8 @@ use anyhow::Result;
 use assay_evidence::bundle::writer::{ErrorClass, ErrorCode};
 use serde::Serialize;
 
+// Hosted semver positive control: no public API or behavior change.
+
 #[derive(Debug, Serialize, Clone)]
 pub struct SimReport {
     pub suite: String,
