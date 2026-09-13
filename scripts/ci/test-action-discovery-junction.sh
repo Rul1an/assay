@@ -32,6 +32,15 @@ cleanup_junction_temps() {
 }
 trap cleanup_junction_temps EXIT
 
+allocate_python_scratch() {
+  local prefix="$1"
+  local parent="${2:-${TMPDIR:-/tmp}}"
+  local d
+  d="$(mktemp -d "${parent}/${prefix}.XXXXXX")"
+  register_junction_temp "${d}"
+  printf '%s/%s.py\n' "${d}" "${prefix}"
+}
+
 PIN="$("${READER}")"
 [[ "${PIN}" =~ ^[0-9a-f]{40}$ ]] || die "reader pin malformed: ${PIN}"
 
@@ -544,7 +553,7 @@ check_explicit_glob_and_pin_filter() {
   grep -Fq "attests the sandbox command's observed effects, not that a test suite" "${doc_path}" \
     || die "docs dry-run recipe must qualify observed-effects-only (not suite pass)"
 
-  local glob_scratch capture_default capture_star mock_action run_body pg_runner pg_runner_dir child_presence child_presence_dir
+  local glob_scratch capture_default capture_star mock_action run_body pg_runner child_presence
   glob_scratch="$(mktemp -d "${TMPDIR:-/tmp}/2802-glob-depth.XXXXXX")"
   register_junction_temp "${glob_scratch}"
   mkdir -p "${glob_scratch}/.assay/evidence/mid/deep"
@@ -560,11 +569,7 @@ check_explicit_glob_and_pin_filter() {
 
   # Shared runner: new session/process group; on wall timeout TERM then KILL the group.
   # Descendant cleanup is only claimed where the synthetic child probe below measures it.
-  pg_runner_dir="$(mktemp -d "${TMPDIR:-/tmp}/2802-pg-runner.XXXXXX")"
-  register_junction_temp "${pg_runner_dir}"
-  pg_runner="${pg_runner_dir}/2802-pg-runner.py"
-  [[ "${pg_runner}" != *XXXXXX* ]] \
-    || die "pg_runner template did not expand X characters (retained literal XXXXXX)"
+  pg_runner="$(allocate_python_scratch "2802-pg-runner")"
   cat >"${pg_runner}" <<'PYPG'
 import json
 import os
@@ -691,11 +696,7 @@ if __name__ == "__main__":
 PYPG
 
   # Shared probe predicate: os.kill(pid, 0) errno-aware. Only ESRCH == absent.
-  child_presence_dir="$(mktemp -d "${TMPDIR:-/tmp}/2802-child-presence.XXXXXX")"
-  register_junction_temp "${child_presence_dir}"
-  child_presence="${child_presence_dir}/2802-child-presence.py"
-  [[ "${child_presence}" != *XXXXXX* ]] \
-    || die "child_presence template did not expand X characters (retained literal XXXXXX)"
+  child_presence="$(allocate_python_scratch "2802-child-presence")"
   cat >"${child_presence}" <<'PYPRES'
 import errno
 import os
@@ -990,40 +991,45 @@ with patch.object(os, "kill", side_effect=OSError(errno.EIO, "I/O error")):
 print("ok    mock-child-presence-other-oserror-unavailable")
 PYPRESMOCK
 
-  # Verify scratch template allocations expand trailing X's and are collision-free under a shared temp parent.
+  # Verify scratch allocations via allocate_python_scratch are collision-free under a shared temp parent,
+  # even when the parent directory path contains literal XXXXXX (GREEN control),
+  # and demonstrate that legacy non-trailing suffix templates fail or collide (RED control).
   {
-    local probe_parent probe_r1_dir probe_r2_dir probe_r1 probe_r2
-    local probe_p1_dir probe_p2_dir probe_p1 probe_p2
-    probe_parent="$(mktemp -d "${TMPDIR:-/tmp}/2802-collision-probe.XXXXXX")"
+    local probe_parent probe_r1 probe_r2 probe_p1 probe_p2
+    probe_parent="$(mktemp -d "${TMPDIR:-/tmp}/2802-parent-XXXXXX.XXXXXX")"
     register_junction_temp "${probe_parent}"
 
-    # pg_runner pattern: two allocations under same parent must succeed and yield distinct paths
-    probe_r1_dir="$(mktemp -d "${probe_parent}/2802-pg-runner.XXXXXX")"
-    probe_r2_dir="$(mktemp -d "${probe_parent}/2802-pg-runner.XXXXXX")"
-    [[ "${probe_r1_dir}" != "${probe_r2_dir}" ]] \
-      || die "pg_runner directory template failed to expand distinct trailing X characters"
-    probe_r1="${probe_r1_dir}/2802-pg-runner.py"
-    probe_r2="${probe_r2_dir}/2802-pg-runner.py"
+    # GREEN control: allocations under a parent containing literal XXXXXX must succeed and produce distinct files
+    probe_r1="$(allocate_python_scratch "2802-pg-runner" "${probe_parent}")"
+    probe_r2="$(allocate_python_scratch "2802-pg-runner" "${probe_parent}")"
     : >"${probe_r1}"
     : >"${probe_r2}"
     [[ -f "${probe_r1}" && -f "${probe_r2}" && "${probe_r1}" != "${probe_r2}" ]] \
-      || die "pg_runner concurrent allocation failed to produce distinct retained files"
-    [[ "${probe_r1}" != *XXXXXX* && "${probe_r2}" != *XXXXXX* ]] \
-      || die "pg_runner path retained literal XXXXXX"
+      || die "pg_runner scratch helper failed to produce distinct coexisting files"
 
-    # child_presence pattern: two allocations under same parent must succeed and yield distinct paths
-    probe_p1_dir="$(mktemp -d "${probe_parent}/2802-child-presence.XXXXXX")"
-    probe_p2_dir="$(mktemp -d "${probe_parent}/2802-child-presence.XXXXXX")"
-    [[ "${probe_p1_dir}" != "${probe_p2_dir}" ]] \
-      || die "child_presence directory template failed to expand distinct trailing X characters"
-    probe_p1="${probe_p1_dir}/2802-child-presence.py"
-    probe_p2="${probe_p2_dir}/2802-child-presence.py"
+    probe_p1="$(allocate_python_scratch "2802-child-presence" "${probe_parent}")"
+    probe_p2="$(allocate_python_scratch "2802-child-presence" "${probe_parent}")"
     : >"${probe_p1}"
     : >"${probe_p2}"
     [[ -f "${probe_p1}" && -f "${probe_p2}" && "${probe_p1}" != "${probe_p2}" ]] \
-      || die "child_presence concurrent allocation failed to produce distinct retained files"
-    [[ "${probe_p1}" != *XXXXXX* && "${probe_p2}" != *XXXXXX* ]] \
-      || die "child_presence path retained literal XXXXXX"
+      || die "child_presence scratch helper failed to produce distinct coexisting files"
+
+    # Negative control (RED): old non-trailing template fails either on allocation (GNU mktemp)
+    # or on collision upon second allocation (BSD mktemp leaves literal XXXXXX).
+    local red_collided=0 red_f1 red_rc=0
+    set +e
+    red_f1="$(mktemp "${probe_parent}/2802-legacy-suffix.XXXXXX.py" 2>/dev/null)"
+    red_rc=$?
+    if [[ "${red_rc}" -ne 0 ]]; then
+      red_collided=1
+    elif [[ -f "${red_f1}" ]]; then
+      if ! mktemp "${probe_parent}/2802-legacy-suffix.XXXXXX.py" >/dev/null 2>&1; then
+        red_collided=1
+      fi
+    fi
+    set -e
+    [[ "${red_collided}" -eq 1 ]] \
+      || die "expected old non-trailing X suffix template to fail safely (RED control)"
 
     ok "scratch-allocations-collision-free"
   }
