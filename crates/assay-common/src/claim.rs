@@ -13,7 +13,7 @@
 //! a fourth member changes what every table means and must cost a major, not be absorbed.
 //! Closedness is also what enumerates them. The parity helpers
 //! (`kinds()` in `assay-evidence`'s `claim_gate_parity`, `all_claim_kinds()` in
-//! `assay-runner-schema`) match [`ClaimKind`] exhaustively, so a new member is `E0004`
+//! `assay-runner-schema`) match [`ClaimKind`](crate::claim::ClaimKind) exhaustively, so a new member is `E0004`
 //! there unless the author edits the helper. That is the strongest pin available
 //! without a derive: it forces an edit next to the list. It does not prove the
 //! list grew. Naming the variant in the pattern and omitting it from the `vec`
