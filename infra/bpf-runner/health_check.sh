@@ -218,6 +218,7 @@ cancel_stale_jobs() {
 
     local stale_jobs
     if ! stale_jobs=$($gh run list --repo "$REPO" --status queued --limit 50 --json databaseId,createdAt 2>/dev/null | \
+        require_json_array | \
         jq -r --arg cutoff "$cutoff_time" '.[] | select(.createdAt < $cutoff) | .databaseId'); then
         log_warn "Could not enumerate stale queued jobs"
         return 1
@@ -248,6 +249,12 @@ cancel_stale_jobs() {
     return "$failed"
 }
 
+# Require exactly one top-level JSON array (reject empty, {}, null, scalars, trailing junk).
+# stdin → stdout compact array, or non-zero status.
+require_json_array() {
+    jq -c -e -R -s 'fromjson | if type == "array" then . else error("expected JSON array") end'
+}
+
 # Cancel superseded runs (older queued runs for the same workflow/branch/event)
 cancel_superseded_runs() {
     local gh="${GH_CMD:-gh}"
@@ -256,10 +263,19 @@ cancel_superseded_runs() {
 
     # Group by workflow + branch + event so distinct queued workflows on the same
     # branch are not cancelled accidentally.
+    local list_json
+    if ! list_json=$($gh run list --repo "$REPO" --status queued --limit 50 \
+        --json databaseId,workflowName,headBranch,event,createdAt 2>/dev/null); then
+        log_error "Failed to list queued runs for superseded-run check"
+        return 1
+    fi
+    if ! list_json=$(printf '%s' "$list_json" | require_json_array); then
+        log_error "Queued run list was not a JSON array"
+        return 1
+    fi
+
     local superseded
-    superseded=$($gh run list --repo "$REPO" --status queued --limit 50 \
-        --json databaseId,workflowName,headBranch,event,createdAt 2>/dev/null | \
-        jq -r '
+    if ! superseded=$(printf '%s' "$list_json" | jq -r '
             map(. + {group_key: ((.workflowName // "") + "|" + (.headBranch // "") + "|" + (.event // ""))})
             | sort_by([.group_key, .createdAt])
             | group_by(.group_key)
@@ -268,25 +284,36 @@ cancel_superseded_runs() {
             | sort_by(.createdAt)
             | .[:-1]
             | .[].databaseId
-        ' || echo "")
+        '); then
+        log_error "Failed to parse queued runs for superseded-run check"
+        return 1
+    fi
 
     if [[ -z "$superseded" ]]; then
         log_info "No superseded runs found"
         return 0
     fi
 
-    local cancel_count=0
+    local accepted=0
+    local failed=0
+    local run_id
     for run_id in $superseded; do
-        log_info "Cancelling superseded run $run_id..."
-        $gh run cancel "$run_id" --repo "$REPO" 2>/dev/null || true
-        ((cancel_count++))
+        log_info "Requesting cancel for superseded run $run_id..."
+        if $gh run cancel "$run_id" --repo "$REPO" >/dev/null 2>&1; then
+            accepted=$((accepted + 1))
+        else
+            log_error "Cancel request refused for superseded run $run_id"
+            failed=1
+        fi
         sleep 1
     done
 
-    if [[ "$cancel_count" -gt 0 ]]; then
-        log_ok "Cancelled $cancel_count superseded runs"
+    if [[ "$failed" -ne 0 ]]; then
+        return 1
     fi
-
+    if [[ "$accepted" -gt 0 ]]; then
+        log_ok "Cancel request accepted for $accepted superseded runs"
+    fi
     return 0
 }
 
@@ -297,22 +324,71 @@ prioritize_pr_runs() {
     log_info "Checking if PR runs should be prioritized..."
 
     # Count queued PR runs vs push runs
+    local pr_json push_json
+    if ! pr_json=$($gh run list --repo "$REPO" --status queued --event pull_request --limit 50 --json databaseId 2>/dev/null); then
+        log_error "Failed to list queued pull_request runs"
+        return 1
+    fi
+    if ! pr_json=$(printf '%s' "$pr_json" | require_json_array); then
+        log_error "Queued pull_request run list was not a JSON array"
+        return 1
+    fi
+    if ! push_json=$($gh run list --repo "$REPO" --status queued --event push --limit 50 --json databaseId 2>/dev/null); then
+        log_error "Failed to list queued push runs"
+        return 1
+    fi
+    if ! push_json=$(printf '%s' "$push_json" | require_json_array); then
+        log_error "Queued push run list was not a JSON array"
+        return 1
+    fi
+
     local pr_runs push_runs
-    pr_runs=$($gh run list --repo "$REPO" --status queued --event pull_request --limit 50 --json databaseId 2>/dev/null | jq 'length' || echo "0")
-    push_runs=$($gh run list --repo "$REPO" --status queued --event push --limit 50 --json databaseId 2>/dev/null | jq 'length' || echo "0")
+    if ! pr_runs=$(printf '%s' "$pr_json" | jq 'length'); then
+        log_error "Failed to parse queued pull_request run list"
+        return 1
+    fi
+    if ! push_runs=$(printf '%s' "$push_json" | jq 'length'); then
+        log_error "Failed to parse queued push run list"
+        return 1
+    fi
 
     if [[ "$pr_runs" -gt 5 && "$push_runs" -gt 0 ]]; then
         log_info "Many PR runs waiting ($pr_runs), cancelling $push_runs queued push runs..."
 
         # Cancel push runs (they'll be superseded by next push anyway)
-        $gh run list --repo "$REPO" --status queued --event push --limit 10 --json databaseId 2>/dev/null | \
-            jq -r '.[].databaseId' | while read -r run_id; do
-            log_info "Cancelling push run $run_id (PR priority)..."
-            $gh run cancel "$run_id" --repo "$REPO" 2>/dev/null || true
+        local push_cancel_json
+        if ! push_cancel_json=$($gh run list --repo "$REPO" --status queued --event push --limit 10 --json databaseId 2>/dev/null); then
+            log_error "Failed to list push runs for PR-priority cancel"
+            return 1
+        fi
+        if ! push_cancel_json=$(printf '%s' "$push_cancel_json" | require_json_array); then
+            log_error "PR-priority push run list was not a JSON array"
+            return 1
+        fi
+
+        local run_ids accepted=0 failed=0 run_id
+        if ! run_ids=$(printf '%s' "$push_cancel_json" | jq -r '.[].databaseId'); then
+            log_error "Failed to parse push runs for PR-priority cancel"
+            return 1
+        fi
+        for run_id in $run_ids; do
+            [[ -z "$run_id" ]] && continue
+            log_info "Requesting cancel for push run $run_id (PR priority)..."
+            if $gh run cancel "$run_id" --repo "$REPO" >/dev/null 2>&1; then
+                accepted=$((accepted + 1))
+            else
+                log_error "Cancel request refused for push run $run_id"
+                failed=1
+            fi
             sleep 1
         done
 
-        log_ok "PR runs prioritized"
+        if [[ "$failed" -ne 0 ]]; then
+            return 1
+        fi
+        if [[ "$accepted" -gt 0 ]]; then
+            log_ok "Cancel request accepted for $accepted push runs (PR priority)"
+        fi
     else
         log_info "Queue balanced (PR: $pr_runs, push: $push_runs)"
     fi
@@ -700,10 +776,10 @@ health_check() {
         cancel_stale_jobs || return $?
 
         # 2. Cancel superseded runs (duplicates for same branch)
-        cancel_superseded_runs
+        cancel_superseded_runs || return $?
 
         # 3. Prioritize PR runs over push runs
-        prioritize_pr_runs
+        prioritize_pr_runs || return $?
 
         # 4. Check for action cache issues
         heal_action_cache
@@ -977,19 +1053,19 @@ case "${1:-}" in
     --cancel-superseded)
         rotate_log
         check_gh_auth || exit 1
-        cancel_superseded_runs
+        cancel_superseded_runs || exit $?
         ;;
     --prioritize-prs)
         rotate_log
         check_gh_auth || exit 1
-        prioritize_pr_runs
+        prioritize_pr_runs || exit $?
         ;;
     --optimize-queue)
         rotate_log
         check_gh_auth || exit 1
         cancel_stale_jobs
-        cancel_superseded_runs
-        prioritize_pr_runs
+        cancel_superseded_runs || exit $?
+        prioritize_pr_runs || exit $?
         ;;
     --help|-h)
         echo "Usage: $0 [OPTIONS]"

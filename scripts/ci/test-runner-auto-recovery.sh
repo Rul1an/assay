@@ -586,6 +586,7 @@ fi
 rm -f "${CRONTAB_CAPTURE}"
 
 # Cancellation is asynchronous: command success is a request, not a terminal run.
+# shellcheck disable=SC2030,SC2031 # Each test subshell supplies its own complete stub environment.
 (
     export GH_CMD=cancel_test_gh
     log_info() { printf 'INFO %s\n' "$*"; }
@@ -596,6 +597,10 @@ rm -f "${CRONTAB_CAPTURE}"
             'run list')
                 if [[ "$mode" == list_failure ]]; then return 1; fi
                 if [[ "$mode" == malformed ]]; then printf '{\n'; return; fi
+                if [[ "$mode" == blank ]]; then return 0; fi
+                if [[ "$mode" == object ]]; then printf '{}\n'; return; fi
+                if [[ "$mode" == scalar ]]; then printf 'null\n'; return; fi
+                if [[ "$mode" == multiple ]]; then printf '[]\n[]\n'; return; fi
                 if [[ "$mode" == empty ]]; then printf '[]\n'; return; fi
                 printf '[{"databaseId":123,"createdAt":"2000-01-01T00:00:00Z"}]\n'
                 ;;
@@ -606,7 +611,7 @@ rm -f "${CRONTAB_CAPTURE}"
             *) echo 'unexpected GitHub operation' >&2; return 99 ;;
         esac
     }
-    for mode in accepted rejected list_failure malformed empty; do
+    for mode in accepted rejected list_failure malformed blank object scalar multiple empty; do
         : >"${EVENTS}"
         rc=0
         output=$(cancel_stale_jobs) || rc=$?
@@ -649,5 +654,383 @@ rm -f "${CRONTAB_CAPTURE}"
     output=$(health_check)
     [[ "$output" == *MAINTENANCE_AFTER_STALE* ]] || exit 1
 )
+
+# ------------------------------------------------------------------------------
+# cancel_superseded_runs / prioritize_pr_runs result-truth (issue #2985)
+# cancel_stale_jobs is exercised in the preceding block.
+# ------------------------------------------------------------------------------
+GH_STUB_DIR="$(mktemp -d)"
+trap 'rm -f "${EVENTS}"; rm -rf "${GUEST_TEST_ROOT}" "${GH_STUB_DIR}"' EXIT
+
+cat >"${GH_STUB_DIR}/gh" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+mode_file="${GH_STUB_MODE_FILE:?}"
+log_file="${GH_STUB_LOG:?}"
+mode="$(cat "${mode_file}")"
+printf 'ARGS:%s\n' "$*" >>"${log_file}"
+
+if [[ "$*" == *"run list"* ]]; then
+  case "${mode}" in
+    supersede-ok|supersede-cancel-fail)
+      cat <<'JSON'
+[{"databaseId":111,"workflowName":"CI","headBranch":"feat","event":"push","createdAt":"2026-09-13T10:00:00Z"},{"databaseId":222,"workflowName":"CI","headBranch":"feat","event":"push","createdAt":"2026-09-13T11:00:00Z"}]
+JSON
+      exit 0
+      ;;
+    supersede-empty)
+      echo '[]'
+      exit 0
+      ;;
+    supersede-malformed)
+      # gh succeeds but body is not JSON — jq must refuse
+      printf '%s\n' '{'
+      exit 0
+      ;;
+    supersede-blank)
+      # gh succeeds with empty stdout — not a JSON array
+      exit 0
+      ;;
+    supersede-object)
+      printf '%s\n' '{}'
+      exit 0
+      ;;
+    supersede-null)
+      printf '%s\n' 'null'
+      exit 0
+      ;;
+    supersede-list-fail|prio-list-fail)
+      echo "stub list failure" >&2
+      exit 1
+      ;;
+    prio-ok|prio-cancel-fail)
+      if [[ "$*" == *"--event pull_request"* ]]; then
+        python3 -c 'import json; print(json.dumps([{"databaseId": i} for i in range(1, 7)]))'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* ]]; then
+        python3 -c 'import json; print(json.dumps([{"databaseId": 9001}, {"databaseId": 9002}]))'
+        exit 0
+      fi
+      echo '[]'
+      exit 0
+      ;;
+    prio-balanced)
+      if [[ "$*" == *"--event pull_request"* ]]; then
+        echo '[{"databaseId":1}]'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* ]]; then
+        echo '[{"databaseId":2}]'
+        exit 0
+      fi
+      echo '[]'
+      exit 0
+      ;;
+    prio-malformed-pr)
+      if [[ "$*" == *"--event pull_request"* ]]; then
+        printf '%s\n' '{'
+        exit 0
+      fi
+      echo '[]'
+      exit 0
+      ;;
+    prio-malformed-push)
+      if [[ "$*" == *"--event pull_request"* ]]; then
+        python3 -c 'import json; print(json.dumps([{"databaseId": i} for i in range(1, 7)]))'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* ]]; then
+        printf '%s\n' '{'
+        exit 0
+      fi
+      echo '[]'
+      exit 0
+      ;;
+    prio-malformed-push2)
+      if [[ "$*" == *"--event pull_request"* ]]; then
+        python3 -c 'import json; print(json.dumps([{"databaseId": i} for i in range(1, 7)]))'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* && "$*" == *"--limit 10"* ]]; then
+        printf '%s\n' '{'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* ]]; then
+        python3 -c 'import json; print(json.dumps([{"databaseId": 9001}, {"databaseId": 9002}]))'
+        exit 0
+      fi
+      echo '[]'
+      exit 0
+      ;;
+    prio-blank-pr|prio-object-pr|prio-null-pr)
+      if [[ "$*" == *"--event pull_request"* ]]; then
+        case "${mode}" in
+          prio-blank-pr) exit 0 ;;
+          prio-object-pr) printf '%s\n' '{}'; exit 0 ;;
+          prio-null-pr) printf '%s\n' 'null'; exit 0 ;;
+        esac
+      fi
+      echo '[]'
+      exit 0
+      ;;
+    prio-blank-push|prio-object-push|prio-null-push)
+      if [[ "$*" == *"--event pull_request"* ]]; then
+        python3 -c 'import json; print(json.dumps([{"databaseId": i} for i in range(1, 7)]))'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* ]]; then
+        case "${mode}" in
+          prio-blank-push) exit 0 ;;
+          prio-object-push) printf '%s\n' '{}'; exit 0 ;;
+          prio-null-push) printf '%s\n' 'null'; exit 0 ;;
+        esac
+      fi
+      echo '[]'
+      exit 0
+      ;;
+    prio-blank-push2|prio-object-push2|prio-null-push2)
+      if [[ "$*" == *"--event pull_request"* ]]; then
+        python3 -c 'import json; print(json.dumps([{"databaseId": i} for i in range(1, 7)]))'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* && "$*" == *"--limit 10"* ]]; then
+        case "${mode}" in
+          prio-blank-push2) exit 0 ;;
+          prio-object-push2) printf '%s\n' '{}'; exit 0 ;;
+          prio-null-push2) printf '%s\n' 'null'; exit 0 ;;
+        esac
+      fi
+      if [[ "$*" == *"--event push"* ]]; then
+        python3 -c 'import json; print(json.dumps([{"databaseId": 9001}, {"databaseId": 9002}]))'
+        exit 0
+      fi
+      echo '[]'
+      exit 0
+      ;;
+    *)
+      echo "unknown stub mode ${mode}" >&2
+      exit 99
+      ;;
+  esac
+fi
+
+if [[ "$*" == *"run cancel"* ]]; then
+  case "${mode}" in
+    *cancel-fail*)
+      echo "stub cancel refused" >&2
+      exit 1
+      ;;
+    *)
+      echo "stub cancel accepted" >&2
+      exit 0
+      ;;
+  esac
+fi
+
+echo "stub unhandled: $*" >&2
+exit 98
+STUB
+chmod +x "${GH_STUB_DIR}/gh"
+
+CAPTURE="$(mktemp)"
+restore_queue_logs() {
+    log_info() { :; }
+    log_warn() { :; }
+    log_error() { :; }
+    log_ok() { :; }
+}
+capture_queue_logs() {
+    : >"${CAPTURE}"
+    log_info() { printf 'INFO:%s\n' "$*" >>"${CAPTURE}"; }
+    log_warn() { printf 'WARN:%s\n' "$*" >>"${CAPTURE}"; }
+    log_error() { printf 'ERROR:%s\n' "$*" >>"${CAPTURE}"; }
+    log_ok() { printf 'OK:%s\n' "$*" >>"${CAPTURE}"; }
+}
+
+run_queue_case() {
+    local mode="$1"
+    local fn="$2"
+    local expect_exit="$3"
+    local expect_ok_substr="${4:-}"
+    local forbid_cancelled="${5:-1}"
+    local outdir="${GH_STUB_DIR}/${mode}-${fn}"
+    mkdir -p "${outdir}"
+    printf '%s\n' "${mode}" >"${outdir}/mode"
+    : >"${outdir}/stub.log"
+    capture_queue_logs
+    set +e
+    # shellcheck disable=SC2030,SC2031 # Stub configuration is deliberately isolated per invocation.
+    (
+        export GH_CMD="${GH_STUB_DIR}/gh"
+        export GH_STUB_MODE_FILE="${outdir}/mode"
+        export GH_STUB_LOG="${outdir}/stub.log"
+        "${fn}"
+    )
+    local got=$?
+    set -e
+    restore_queue_logs
+    if [[ "${got}" -ne "${expect_exit}" ]]; then
+        echo "cancel_superseded_runs result-truth: ${fn} mode=${mode} expected exit ${expect_exit}, got ${got}" >&2
+        cat "${CAPTURE}" >&2
+        cat "${outdir}/stub.log" >&2
+        exit 1
+    fi
+    if [[ -n "${expect_ok_substr}" ]]; then
+        if ! grep -Fq "OK:${expect_ok_substr}" "${CAPTURE}"; then
+            echo "cancel_superseded_runs result-truth: ${fn} mode=${mode} missing OK substring: ${expect_ok_substr}" >&2
+            cat "${CAPTURE}" >&2
+            exit 1
+        fi
+    else
+        if grep -Fq 'OK:' "${CAPTURE}"; then
+            echo "cancel_superseded_runs result-truth: ${fn} mode=${mode} unexpected OK line" >&2
+            cat "${CAPTURE}" >&2
+            exit 1
+        fi
+    fi
+    if [[ "${forbid_cancelled}" -eq 1 ]] && grep -Ei 'OK:.*[Cc]ancelled' "${CAPTURE}"; then
+        echo "cancel_superseded_runs result-truth: must not claim terminal cancelled in OK line" >&2
+        cat "${CAPTURE}" >&2
+        exit 1
+    fi
+}
+
+# Positive + failure matrix for cancel_superseded_runs
+run_queue_case supersede-ok cancel_superseded_runs 0 "Cancel request accepted for 1 superseded runs"
+run_queue_case supersede-cancel-fail cancel_superseded_runs 1 ""
+run_queue_case supersede-list-fail cancel_superseded_runs 1 ""
+run_queue_case supersede-empty cancel_superseded_runs 0 ""
+run_queue_case supersede-malformed cancel_superseded_runs 1 ""
+run_queue_case supersede-blank cancel_superseded_runs 1 ""
+run_queue_case supersede-object cancel_superseded_runs 1 ""
+run_queue_case supersede-null cancel_superseded_runs 1 ""
+
+# Positive + failure matrix for prioritize_pr_runs
+run_queue_case prio-ok prioritize_pr_runs 0 "Cancel request accepted for 2 push runs (PR priority)"
+run_queue_case prio-cancel-fail prioritize_pr_runs 1 ""
+run_queue_case prio-list-fail prioritize_pr_runs 1 ""
+run_queue_case prio-balanced prioritize_pr_runs 0 ""
+run_queue_case prio-malformed-pr prioritize_pr_runs 1 ""
+run_queue_case prio-malformed-push prioritize_pr_runs 1 ""
+run_queue_case prio-malformed-push2 prioritize_pr_runs 1 ""
+run_queue_case prio-blank-pr prioritize_pr_runs 1 ""
+run_queue_case prio-object-pr prioritize_pr_runs 1 ""
+run_queue_case prio-null-pr prioritize_pr_runs 1 ""
+run_queue_case prio-blank-push prioritize_pr_runs 1 ""
+run_queue_case prio-object-push prioritize_pr_runs 1 ""
+run_queue_case prio-null-push prioritize_pr_runs 1 ""
+run_queue_case prio-blank-push2 prioritize_pr_runs 1 ""
+run_queue_case prio-object-push2 prioritize_pr_runs 1 ""
+run_queue_case prio-null-push2 prioritize_pr_runs 1 ""
+
+# if-caller: cancel-fail must take the false branch
+mkdir -p "${GH_STUB_DIR}/if-prio"
+printf 'prio-cancel-fail\n' >"${GH_STUB_DIR}/if-prio/mode"
+: >"${GH_STUB_DIR}/if-prio/stub.log"
+capture_queue_logs
+if_branch=""
+set +e
+# shellcheck disable=SC2030,SC2031 # This case does not inherit another case's stub configuration.
+(
+    export GH_CMD="${GH_STUB_DIR}/gh"
+    export GH_STUB_MODE_FILE="${GH_STUB_DIR}/if-prio/mode"
+    export GH_STUB_LOG="${GH_STUB_DIR}/if-prio/stub.log"
+    if prioritize_pr_runs; then
+        if_branch=true
+    else
+        if_branch=false
+    fi
+    printf '%s\n' "${if_branch}" >"${GH_STUB_DIR}/if-prio/branch"
+)
+set -e
+restore_queue_logs
+if [[ "$(cat "${GH_STUB_DIR}/if-prio/branch")" != "false" ]]; then
+    echo "prioritize_pr_runs if-caller stayed true after cancel refusal" >&2
+    exit 1
+fi
+
+mkdir -p "${GH_STUB_DIR}/if-supersede-malformed"
+printf 'supersede-malformed\n' >"${GH_STUB_DIR}/if-supersede-malformed/mode"
+: >"${GH_STUB_DIR}/if-supersede-malformed/stub.log"
+capture_queue_logs
+set +e
+# shellcheck disable=SC2030,SC2031 # This case supplies all three stub variables independently.
+(
+    export GH_CMD="${GH_STUB_DIR}/gh"
+    export GH_STUB_MODE_FILE="${GH_STUB_DIR}/if-supersede-malformed/mode"
+    export GH_STUB_LOG="${GH_STUB_DIR}/if-supersede-malformed/stub.log"
+    if cancel_superseded_runs; then
+        printf 'true\n' >"${GH_STUB_DIR}/if-supersede-malformed/branch"
+    else
+        printf 'false\n' >"${GH_STUB_DIR}/if-supersede-malformed/branch"
+    fi
+)
+set -e
+restore_queue_logs
+if [[ "$(cat "${GH_STUB_DIR}/if-supersede-malformed/branch")" != "false" ]]; then
+    echo "cancel_superseded_runs if-caller stayed true after malformed list payload" >&2
+    cat "${CAPTURE}" >&2
+    exit 1
+fi
+
+# health_check online path must not report healthy when superseded cancel refuses
+ORIGINAL_CHECK_GH="$(declare -f check_gh_auth)"
+ORIGINAL_CHECK_VM="$(declare -f check_vm_running)"
+ORIGINAL_ENSURE="$(declare -f ensure_assay_cli_current)"
+ORIGINAL_GET_STATUS="$(declare -f get_runner_status)"
+ORIGINAL_STALE="$(declare -f cancel_stale_jobs)"
+ORIGINAL_HEAL="$(declare -f heal_action_cache)"
+ORIGINAL_CLEAN_CACHE="$(declare -f clean_actions_cache)"
+ORIGINAL_SUPERSEDED="$(declare -f cancel_superseded_runs)"
+ORIGINAL_PRIO="$(declare -f prioritize_pr_runs)"
+
+check_gh_auth() { return 0; }
+check_vm_running() { return 0; }
+ensure_assay_cli_current() { return 0; }
+get_runner_status() { printf '%s\n' online; }
+cancel_stale_jobs() { return 0; }
+heal_action_cache() { return 0; }
+clean_actions_cache() { return 0; }
+
+# Force real cancel_superseded_runs against cancel-fail stub; keep prioritize no-op success
+prioritize_pr_runs() { return 0; }
+mkdir -p "${GH_STUB_DIR}/health"
+printf 'supersede-cancel-fail\n' >"${GH_STUB_DIR}/health/mode"
+: >"${GH_STUB_DIR}/health/stub.log"
+capture_queue_logs
+set +e
+# shellcheck disable=SC2030,SC2031 # Health-check probe environment must not escape to later tests.
+(
+    export GH_CMD="${GH_STUB_DIR}/gh"
+    export GH_STUB_MODE_FILE="${GH_STUB_DIR}/health/mode"
+    export GH_STUB_LOG="${GH_STUB_DIR}/health/stub.log"
+    health_check
+)
+health_status=$?
+set -e
+restore_queue_logs
+if [[ "${health_status}" -eq 0 ]]; then
+    echo "health_check returned 0 after superseded cancel refusal" >&2
+    cat "${CAPTURE}" >&2
+    exit 1
+fi
+if grep -Fq 'OK:Runner is healthy' "${CAPTURE}"; then
+    echo "health_check claimed healthy after superseded cancel refusal" >&2
+    cat "${CAPTURE}" >&2
+    exit 1
+fi
+
+# restore originals used later? suite ends after this.
+eval "${ORIGINAL_CHECK_GH}"
+eval "${ORIGINAL_CHECK_VM}"
+eval "${ORIGINAL_ENSURE}"
+eval "${ORIGINAL_GET_STATUS}"
+eval "${ORIGINAL_STALE}"
+eval "${ORIGINAL_HEAL}"
+eval "${ORIGINAL_CLEAN_CACHE}"
+eval "${ORIGINAL_SUPERSEDED}"
+eval "${ORIGINAL_PRIO}"
+rm -f "${CAPTURE}"
 
 echo "ok: runner auto-recovery keeps registration tokens fresh and bounds destructive calls"
