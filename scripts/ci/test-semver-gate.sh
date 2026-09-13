@@ -34,6 +34,18 @@ FAILURES=0
 ok()   { echo "ok    $1"; }
 bad()  { echo "FAIL  $1"; FAILURES=$((FAILURES + 1)); }
 
+# The full published-library pass must retain a bounded, usable job budget.
+if ruby -ryaml - "$WORKFLOW" <<'RUBY'
+doc = YAML.safe_load_file(ARGV.fetch(0), aliases: false)
+job = doc.fetch("jobs").fetch("semver-public")
+abort "semver-public must have a 30-minute job budget" unless job.fetch("timeout-minutes", nil) == 30
+RUBY
+then
+  ok "full semver pass has a bounded 30-minute budget"
+else
+  bad "full semver pass budget drifted"
+fi
+
 # --- the baseline is resolved, not pinned ---------------------------------------------------
 #
 # The whole defect was a constant. A SHA in this file cannot know that the project released twice
