@@ -186,7 +186,12 @@ assert_detect_routing_contract() {
 
   detect_metadata="${scratch}/detect-metadata.json"
   build_detect_metadata_fixture "${detect_metadata}"
-  got="$(run_detect_case "${workflow}" 'crates/zz-published-lib/src/lib.rs' "${detect_metadata}")"
+  got="$(
+    run_detect_case \
+      "${workflow}" \
+      'crates/zz-published-lib/src/lib.rs' \
+      "$(cat "${detect_metadata}")"
+  )"
   semver="${got%%$'\t'*}"
   [[ "${semver}" == "true" ]] \
     || fail "zz-published-lib must flip when added as publish-unset lib in derived metadata"
@@ -251,8 +256,11 @@ JSON
 
 assert_derivation_contract() {
   local base_fixture="$1"
-  local got expected removed added
-  got="$(python3 "${DERIVER}" --metadata-json "${base_fixture}")"
+  local got expected removed added invalid_dir cargo_probe
+  got="$(
+    ASSAY_SEMVER_METADATA_JSON="$(cat "${base_fixture}")" \
+      python3 "${DERIVER}"
+  )"
   expected=$'assay-core\tcrates/assay-core/Cargo.toml\nassay-runner-core\tcrates/assay-runner-core/Cargo.toml\nassay-sim\tcrates/assay-sim/Cargo.toml'
   [[ "${got}" == "${expected}" ]] \
     || fail "base derivation mismatch; got:
@@ -273,7 +281,10 @@ for package in data["packages"]:
         package["publish"] = []
 json.dump(data, open(dst, "w"), indent=2)
 PY
-  got="$(python3 "${DERIVER}" --metadata-json "${removed}")"
+  got="$(
+    ASSAY_SEMVER_METADATA_JSON="$(cat "${removed}")" \
+      python3 "${DERIVER}"
+  )"
   if grep -q '^assay-sim\b' <<<"${got}"; then
     fail "publish=false did not remove assay-sim from derived semver set"
   fi
@@ -300,11 +311,35 @@ data["packages"].append(
 )
 json.dump(data, open(dst, "w"), indent=2)
 PY
-  got="$(python3 "${DERIVER}" --metadata-json "${added}")"
+  got="$(
+    ASSAY_SEMVER_METADATA_JSON="$(cat "${added}")" \
+      python3 "${DERIVER}"
+  )"
   grep -q $'^assay-newlib\tcrates/assay-newlib/Cargo.toml$' <<<"${got}" \
     || fail "publish-unset new crate did not enter derived semver set; got:
 ${got}"
   ok "publish-unset new crate enters derived semver set"
+
+  invalid_dir="$(mktemp -d "${scratch}/invalid-json.XXXXXX")"
+  cargo_probe="${invalid_dir}/cargo-called"
+  mkdir -p "${invalid_dir}/bin"
+  cat > "${invalid_dir}/bin/cargo" <<'CARGO'
+#!/usr/bin/env bash
+set -euo pipefail
+touch "${CARGO_PROBE}"
+exit 99
+CARGO
+  chmod +x "${invalid_dir}/bin/cargo"
+
+  if PATH="${invalid_dir}/bin:${PATH}" \
+    CARGO_PROBE="${cargo_probe}" \
+    ASSAY_SEMVER_METADATA_JSON='{"broken":' \
+      python3 "${DERIVER}" >/dev/null 2>"${invalid_dir}/invalid.err"; then
+    fail "invalid JSON override must fail"
+  fi
+  [[ ! -e "${cargo_probe}" ]] \
+    || fail "invalid JSON override must not fall back to cargo metadata"
+  ok "invalid JSON override fails without cargo fallback"
 }
 
 check_contract() (
@@ -360,7 +395,7 @@ GIT
   RUNNER_TEMP="${case_dir}/runner" \
   GITHUB_STEP_SUMMARY="${summary}" \
   BASELINE_TAG=v-test \
-  ASSAY_SEMVER_METADATA_JSON="${metadata}" \
+  ASSAY_SEMVER_METADATA_JSON="$(cat "${metadata}")" \
     bash "${semver_run}"
 
   local expected
@@ -379,7 +414,7 @@ $(cat "${cargo_log}")"
   GITHUB_STEP_SUMMARY="${summary}" \
   BASELINE_TAG=v-test \
   BASELINE_MISSING_PATTERN='crates/assay-sim/Cargo.toml' \
-  ASSAY_SEMVER_METADATA_JSON="${metadata}" \
+  ASSAY_SEMVER_METADATA_JSON="$(cat "${metadata}")" \
     bash "${semver_run}"
   grep -q 'assay-sim (skipped:' "${summary}" \
     || fail "missing-baseline crate did not emit visible skip summary line"

@@ -3,67 +3,25 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import subprocess
-import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
 
-def _path_within_root(path: str, root: str) -> bool:
-    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
-
-
-def _allowed_metadata_roots(cwd: Path) -> list[tuple[str, str]]:
-    allowed: list[tuple[str, str]] = [
-        ("repository root (checked-in fixtures)", os.path.realpath(str(cwd)))
-    ]
-    runner_temp = os.environ.get("RUNNER_TEMP", "").strip()
-    if runner_temp:
-        allowed.append(
-            (
-                "RUNNER_TEMP (CI-generated fixtures)",
-                os.path.realpath(runner_temp),
-            )
-        )
-    allowed.append(
-        (
-            "system temp dir (local/CI fixture scratch)",
-            os.path.realpath(tempfile.gettempdir()),
-        )
-    )
-    return allowed
-
-
-def _read_metadata(explicit_path: str | None) -> dict[str, Any]:
-    metadata_path = explicit_path or None
-    if metadata_path is None:
-        env_override = os.environ.get("ASSAY_SEMVER_METADATA_JSON", "")
-        # CI contract tests set this to inject fixture metadata without
-        # modifying the workflow code path.
+def _read_metadata() -> dict[str, Any]:
+    env_override = os.environ.get("ASSAY_SEMVER_METADATA_JSON")
+    if env_override is not None:
+        env_override = env_override.strip()
         if env_override:
-            metadata_path = env_override
-
-    if metadata_path:
-        resolved_metadata_path = os.path.realpath(metadata_path)
-        allowed_roots = _allowed_metadata_roots(Path.cwd().resolve())
-        if not any(
-            _path_within_root(resolved_metadata_path, root)
-            for _, root in allowed_roots
-        ):
-            allowed_roots_text = ", ".join(
-                f"{label}: {root}" for label, root in allowed_roots
-            )
-            raise SystemExit(
-                "Refusing --metadata-json/ASSAY_SEMVER_METADATA_JSON outside allowed roots. "
-                f"Resolved path: {resolved_metadata_path}. Allowed roots: {allowed_roots_text}."
-            )
-
-        with open(resolved_metadata_path, "r", encoding="utf-8") as fh:
-            return json.load(fh)
+            try:
+                # CI contract tests inject fixture metadata as JSON text.
+                return json.loads(env_override)
+            except json.JSONDecodeError as exc:
+                raise SystemExit(
+                    "ASSAY_SEMVER_METADATA_JSON must contain valid JSON text."
+                ) from exc
 
     result = subprocess.run(
         ["cargo", "metadata", "--format-version=1", "--no-deps"],
@@ -123,14 +81,7 @@ def derive_published_library_crates(metadata: dict[str, Any]) -> list[tuple[str,
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--metadata-json",
-        help="Read metadata from this JSON file instead of cargo metadata",
-    )
-    args = parser.parse_args()
-
-    metadata = _read_metadata(args.metadata_json)
+    metadata = _read_metadata()
     crates = derive_published_library_crates(metadata)
     if not crates:
         raise SystemExit("no publishable workspace library crates found")
