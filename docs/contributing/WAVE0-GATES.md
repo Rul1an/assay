@@ -23,7 +23,10 @@ Wave 0 gates are the pre-refactor guardrails for:
 ## Runtime budget targets
 
 - `feature-matrix` job: target <= 25 minutes on `ubuntu-latest`.
-- `semver-public` job: target <= 15 minutes on `ubuntu-latest`.
+- `semver-public` job (called by CI): hard ceiling 30 minutes on `ubuntu-latest`.
+  The previous 20-minute ceiling cancelled hosted probes #3005 and #3006 before
+  the full comparison finished. The larger bound preserves all derived libraries
+  and self-tests; it is not a measured completion-time guarantee.
 - Total Wave 0 workflow target: <= 40 minutes.
 
 If budget is exceeded:
