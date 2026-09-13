@@ -57,6 +57,7 @@ INVENTORY_RUN_SCRIPT = (
     "python3 -W error::ResourceWarning conformance/tests/test_bounded_run.py",
     "python3 -W error::ResourceWarning conformance/tests/test_run_all.py",
     "python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py",
+    "python3 -W error::ResourceWarning conformance/tests/test_published_rows.py",
     PLAIN_RUN_ALL,
 )
 HARDENING_RUN_SCRIPT = (
