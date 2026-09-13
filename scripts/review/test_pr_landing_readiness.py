@@ -407,8 +407,36 @@ class UnprotectedPolicyTests(unittest.TestCase):
                   baseRefName="main", headRefName="codex/review-fix",
                   body=(head if body_current else "no pinned head") + body_extra,
                   reviews=[], comments=[], commits=commits or [])
+        machine = {
+            "schema": "assay.review-record.v0",
+            "head_sha": head,
+            "builder": {"agent": "codex", "instance": "writer"},
+            "reviewer": {"agent": "muse", "instance": "reviewer", "github_login": "reviewer"},
+            "review_completed": True,
+            "verdict": "READY",
+            "findings": [],
+            "no_findings": True,
+            "independence": {
+                "did_not_build": True,
+                "did_not_author_governing_spec": True,
+            },
+        }
+        machine_body = "<!-- assay-review-record -->\n```json\n" + json.dumps(machine) + "\n```"
+        checker_comments = []
         if review:
-            pr["comments"] = [{"author": {"login": "reviewer"}, "body": f"READY\n{head}"}]
+            pr["comments"] = [{
+                "author": {"login": "reviewer"},
+                "body": machine_body,
+                "url": "https://github.com/example/repo/pull/30#issuecomment-101",
+                "createdAt": "2026-09-13T00:00:00Z",
+            }]
+            checker_comments = [{
+                "id": 101,
+                "body": machine_body,
+                "user": {"login": "reviewer", "type": "User"},
+                "created_at": "2026-09-13T00:00:00Z",
+                "updated_at": "2026-09-13T00:00:00Z",
+            }]
         if blocked:
             pr["comments"].append(
                 {"author": {"login": "blocker"}, "body": f"BLOCKED\n{head}"})
@@ -419,6 +447,8 @@ class UnprotectedPolicyTests(unittest.TestCase):
                 return pr
             if args[1:3] == ["pr", "checks"]:
                 return checks if checks is not None else [dict(name="reproduce", state="SUCCESS", bucket="pass")]
+            if args[1] == "api" and f"/issues/30/comments" in args[2]:
+                return [checker_comments]
             if args[-1].endswith("/protection/required_status_checks"):
                 raise SystemExit("HTTP 404")
             if args[1:3] == ["api", "graphql"]:
@@ -731,23 +761,20 @@ class GateSetJudgementTests(unittest.TestCase):
         row = self._rows(None)[0]
         self.assertTrue(row["current_head"])
 
-    def test_the_gate_is_asked_only_when_there_is_a_carry_to_judge(self):
-        """The thunk costs an API call and can fail; nothing else may depend on it.
+    def test_a_refusing_gate_turns_a_current_head_ready_into_blocked(self):
+        for reason in ("bot_carrier: Bot", "edited_current: updated_at != created_at"):
+            with self.subTest(reason=reason):
+                row = self._rows(lambda reason=reason: (False, reason), head=self.heads["reviewed"])[0]
+                self.assertTrue(row["current_head"])
+                self.assertEqual(row["verdict"], "BLOCKED")
+                self.assertEqual(row["source"], "invalid-machine-comment")
+                self.assertIn(f"gate refuses the set: {reason}", row["carry"])
 
-        A record on the live head needs no carry, and a derivation that already refused cannot
-        be rescued by the set passing - so in both cases the answer is not read, and an outage
-        reaching that endpoint must not decide a landing check it was never going to decide.
-        """
-        def gate():
-            raise AssertionError("the gate was consulted without a carry to judge")
-
-        on_head = self._rows(gate, head=self.heads["reviewed"])[0]
-        self.assertTrue(on_head["current_head"])
-        self.assertEqual(on_head["source"], "machine-comment")
-
-        refused = self._rows(gate, head=self.heads["overlap"])[0]
-        self.assertFalse(refused["current_head"])
-        self.assertIn("carry_touched_reviewed_file", refused["carry"])
+    def test_a_passing_gate_keeps_a_current_head_ready_current(self):
+        row = self._rows(lambda: (True, "review-record-check would pass"), head=self.heads["reviewed"])[0]
+        self.assertTrue(row["current_head"])
+        self.assertEqual(row["verdict"], "READY")
+        self.assertEqual(row["source"], "machine-comment")
 
 
 class GateFetchMatchesTheCheckerCeiling(unittest.TestCase):

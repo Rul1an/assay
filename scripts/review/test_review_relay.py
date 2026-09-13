@@ -66,6 +66,31 @@ elif args[:2]==['pr','merge']:
  open(os.environ['MERGE_LOG'],'w').write(json.dumps(args))
 elif args[:2]==['api','graphql']:
  print(json.dumps({'data':{'repository':{'ref':{'branchProtectionRule':{'requiredStatusCheckContexts':['CI']}}}}}))
+elif args[:2]==['api','repos/example/repo/issues/30/comments']:
+ candidate_body=body
+ candidate_author='owner'
+ if case=='candidate-blocked':
+  candidate_record=dict(record); candidate_record['verdict']='BLOCKED'
+  candidate_body='<!-- assay-review-record -->\\n```json\\n'+json.dumps(candidate_record)+'\\n```'
+ if case=='candidate-stale':
+  candidate_record=dict(record); candidate_record['head_sha']='a'*40
+  candidate_body='<!-- assay-review-record -->\\n```json\\n'+json.dumps(candidate_record)+'\\n```'
+ if case=='candidate-identity-mismatch':
+  candidate_record=dict(record); candidate_record['reviewer']=dict(record['reviewer'],instance='other')
+  candidate_body='<!-- assay-review-record -->\\n```json\\n'+json.dumps(candidate_record)+'\\n```'
+ if case=='candidate-author-mismatch':
+  candidate_record=dict(record); candidate_record['reviewer']=dict(record['reviewer'],github_login='other')
+  candidate_body='<!-- assay-review-record -->\\n```json\\n'+json.dumps(candidate_record)+'\\n```'
+  candidate_author='other'
+ comments=[] if case=='carrier-only' else [dict(id=101,body=candidate_body,
+  user=dict(login=candidate_author,type='User'),
+  created_at='2026-09-13T00:00:00Z',updated_at='2026-09-13T00:00:00Z')]
+ if case=='candidate-stale':
+  helper=dict(record); helper['reviewer']=dict(record['reviewer'],instance='helper',github_login='helper')
+  helper_body='<!-- assay-review-record -->\\n```json\\n'+json.dumps(helper)+'\\n```'
+  comments.append(dict(id=102,body=helper_body,user=dict(login='helper',type='User'),
+   created_at='2026-09-13T00:01:00Z',updated_at='2026-09-13T00:01:00Z'))
+ print(json.dumps([comments]))
 elif '--slurp' in args: print('[[]]')
 elif args[:2]==['api','repos/example/repo/issues/comments/123']:
  if case=='unavailable': sys.exit(1)
