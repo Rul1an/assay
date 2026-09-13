@@ -19,6 +19,12 @@ const NON_CLAIMS: &[&str] = &[
     "fidelity_no_probabilistic_confidence_score",
 ];
 
+/// How healthy a run's observation was.
+///
+/// Deliberately closed. A sixth variant is already `E0004` in [`RunnerClaimGate::for_verdict`]
+/// and in `claim_support`'s scope match. [`crate::all_verdicts`] repeats that
+/// exhaustive `match` next to the list the table iterates; naming the variant
+/// in the pattern and omitting it from the `vec` still compiles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunnerFidelityVerdict {
