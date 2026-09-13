@@ -14,10 +14,7 @@ from typing import Any
 
 
 def _path_within_root(path: str, root: str) -> bool:
-    try:
-        return os.path.commonpath([path, root]) == root
-    except ValueError:
-        return False
+    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
 
 
 def _allowed_metadata_roots(cwd: Path) -> list[tuple[str, str]]:
