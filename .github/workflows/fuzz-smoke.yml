@@ -228,6 +228,8 @@ jobs:
           # diagnosis. Pinned by `scripts/ci/test-fuzz-lane-contract.sh`.
           ( cd fuzz && cargo "+${FUZZ_TOOLCHAIN}" metadata --locked --format-version 1 >/dev/null ) \
             || { echo "::error::locked fuzz metadata validation failed; inspect the Cargo error above"; exit 1; }
+          fuzz_log="${RUNNER_TEMP}/fuzz.log"
+          fuzz_status=0
           cargo "+${FUZZ_TOOLCHAIN}" fuzz run "${TARGET}" \
             "${RUNNER_TEMP}/fuzz-out" "fuzz/corpus/${TARGET}" \
             -- \
@@ -235,7 +237,12 @@ jobs:
             -max_total_time="${MAX_TOTAL_TIME}" \
             -rss_limit_mb=2048 \
             -max_len="${MAX_LEN}" \
-            -print_final_stats=1
+            -print_final_stats=1 > "${fuzz_log}" 2>&1 || fuzz_status=$?
+          cat "${fuzz_log}"
+          if [ "${fuzz_status}" -ne 0 ]; then
+            exit "${fuzz_status}"
+          fi
+          bash scripts/ci/check-fuzz-executed-units.sh "${fuzz_log}" "${TARGET}"
 
       - name: Upload crash artifacts
         if: failure()
