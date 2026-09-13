@@ -39,6 +39,83 @@ get_runner_status() {
 }
 sleep() { :; }
 
+# Admission uses only synthetic API responses; no guest or credentials are read.
+gh() {
+    [[ "$*" == "api --paginate repos/$REPO/actions/runners?per_page=100" ]] || return 92
+    printf '%s' "${ADMISSION_BODY}"
+    return "${ADMISSION_API_RC:-0}"
+}
+GH_CMD=gh
+timeout() {
+    [[ "$1" == "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" ]] || return 93
+    shift
+    [[ "${ADMISSION_TIMEOUT:-0}" == 0 ]] || return 124
+    "$@"
+}
+ADMISSION_API_RC=0
+while IFS='|' read -r case_name expected ADMISSION_BODY; do
+    : >"${EVENTS}"
+    rc=0
+    recover_runner || rc=$?
+    if [[ "$expected" == refuse ]]; then
+        if [[ "$rc" -eq 0 || -s "${EVENTS}" ]]; then
+            echo "admission must refuse ${case_name} before recovery side effects" >&2
+            exit 1
+        fi
+    elif [[ "$rc" -ne 0 ]] || ! grep -Fxq cleanup "${EVENTS}"; then
+        echo "admission must allow ${case_name}" >&2
+        exit 1
+    fi
+done <<'ADMISSION_CASES'
+busy|refuse|{"runners":[{"id":1,"name":"assay-bpf-runner","status":"online","busy":true}]}
+missing|refuse|{"runners":[]}
+empty|refuse|
+malformed|refuse|{
+wrong-page|refuse|{"runners":null}
+missing-busy|refuse|{"runners":[{"id":1,"name":"assay-bpf-runner","status":"offline"}]}
+string-busy|refuse|{"runners":[{"id":1,"name":"assay-bpf-runner","status":"offline","busy":"false"}]}
+unknown-status|refuse|{"runners":[{"id":1,"name":"assay-bpf-runner","status":"unknown","busy":false}]}
+missing-id|refuse|{"runners":[{"name":"assay-bpf-runner","status":"offline","busy":false}]}
+zero-id|refuse|{"runners":[{"id":0,"name":"assay-bpf-runner","status":"offline","busy":false}]}
+fractional-id|refuse|{"runners":[{"id":1.5,"name":"assay-bpf-runner","status":"offline","busy":false}]}
+malformed-second-page|refuse|{"runners":[{"id":1,"name":"assay-bpf-runner","status":"offline","busy":false}]} {}
+duplicate-pages|refuse|{"runners":[{"id":1,"name":"assay-bpf-runner","status":"offline","busy":false}]} {"runners":[{"id":2,"name":"assay-bpf-runner","status":"offline","busy":false}]}
+online-idle|allow|{"runners":[{"id":1,"name":"assay-bpf-runner","status":"online","busy":false}]}
+offline-idle|allow|{"runners":[{"id":1,"name":"assay-bpf-runner","status":"offline","busy":false}]}
+second-page|allow|{"runners":[]} {"runners":[{"id":1,"name":"assay-bpf-runner","status":"offline","busy":false}]}
+ADMISSION_CASES
+ADMISSION_BODY='{"runners":[{"id":1,"name":"assay-bpf-runner","status":"offline","busy":false}]}'
+ADMISSION_API_RC=1
+: >"${EVENTS}"
+rc=0
+recover_runner || rc=$?
+if [[ "$rc" -eq 0 || -s "${EVENTS}" ]]; then
+    echo "failed API after valid partial output must refuse recovery" >&2
+    exit 1
+fi
+ADMISSION_API_RC=0
+ADMISSION_VALID_BODY="$ADMISSION_BODY"
+for admission_failure in timeout oversize; do
+    ADMISSION_BODY="$ADMISSION_VALID_BODY"
+    ADMISSION_TIMEOUT=0
+    if [[ "$admission_failure" == timeout ]]; then
+        ADMISSION_TIMEOUT=1
+    else
+        # Valid JSON plus spaces, exactly one byte beyond the response ceiling.
+        printf -v padding '%*s' "$((1048577 - ${#ADMISSION_BODY}))" ''
+        ADMISSION_BODY+="$padding"
+    fi
+    : >"${EVENTS}"
+    rc=0
+    recover_runner || rc=$?
+    if [[ "$rc" -eq 0 || -s "${EVENTS}" ]]; then
+        echo "${admission_failure} observation must refuse before recovery" >&2
+        exit 1
+    fi
+done
+ADMISSION_TIMEOUT=0
+ADMISSION_BODY="$ADMISSION_VALID_BODY"
+: >"${EVENTS}"
 recover_runner
 
 cat >"${EVENTS}.expected" <<'EOF'
