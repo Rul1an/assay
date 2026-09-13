@@ -27,6 +27,7 @@ pub struct SimReport {
 
 #[derive(Debug, Serialize, Clone, Default)]
 pub struct SimSummary {
+    pub deliberately_planted_for_the_gate_test: bool,
     pub total: usize,
     pub passed: usize,   // For invariant checks
     pub blocked: usize,  // For attacks
