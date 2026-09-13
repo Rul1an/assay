@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Prove that an assay-runner-schema change reaches its cargo-semver-checks invocation.
+# Prove semver checks run from the derived published-lib set, not a hand-maintained allowlist.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORKFLOW="${ROOT}/.github/workflows/split-wave0-gates.yml"
+DERIVER="${ROOT}/scripts/ci/derive-semver-published-lib-crates.py"
 scratch="$(mktemp -d)"
 trap 'rm -rf "${scratch}"' EXIT
 
@@ -11,6 +12,8 @@ fail() {
   echo "FAIL: $*" >&2
   exit 1
 }
+
+ok() { echo "ok   $*"; }
 
 job_block() {
   local workflow="$1" job="$2"
@@ -40,82 +43,198 @@ step_run() {
   '
 }
 
-require_one_line() {
-  local text="$1" line="$2" description="$3" count
-  count="$(printf '%s\n' "${text}" | grep -Fxc -- "${line}" || true)"
-  [[ "${count}" -eq 1 ]] \
-    || fail "${description}: expected one active line, found ${count}"
+build_metadata_fixture() {
+  local out="$1"
+  cat > "${out}" <<'JSON'
+{
+  "workspace_members": [
+    "assay-core 6.3.0 (path+file:///repo/crates/assay-core)",
+    "assay-sim 6.3.0 (path+file:///repo/crates/assay-sim)",
+    "assay-runner-core 6.3.0 (path+file:///repo/crates/assay-runner-core)",
+    "assay-private 6.3.0 (path+file:///repo/crates/assay-private)",
+    "assay-cli 6.3.0 (path+file:///repo/crates/assay-cli)"
+  ],
+  "packages": [
+    {
+      "id": "assay-core 6.3.0 (path+file:///repo/crates/assay-core)",
+      "name": "assay-core",
+      "source": null,
+      "publish": null,
+      "manifest_path": "/repo/crates/assay-core/Cargo.toml",
+      "targets": [{"kind": ["lib"]}]
+    },
+    {
+      "id": "assay-sim 6.3.0 (path+file:///repo/crates/assay-sim)",
+      "name": "assay-sim",
+      "source": null,
+      "publish": null,
+      "manifest_path": "/repo/crates/assay-sim/Cargo.toml",
+      "targets": [{"kind": ["lib"]}]
+    },
+    {
+      "id": "assay-runner-core 6.3.0 (path+file:///repo/crates/assay-runner-core)",
+      "name": "assay-runner-core",
+      "source": null,
+      "publish": null,
+      "manifest_path": "/repo/crates/assay-runner-core/Cargo.toml",
+      "targets": [{"kind": ["lib"]}]
+    },
+    {
+      "id": "assay-private 6.3.0 (path+file:///repo/crates/assay-private)",
+      "name": "assay-private",
+      "source": null,
+      "publish": [],
+      "manifest_path": "/repo/crates/assay-private/Cargo.toml",
+      "targets": [{"kind": ["lib"]}]
+    },
+    {
+      "id": "assay-cli 6.3.0 (path+file:///repo/crates/assay-cli)",
+      "name": "assay-cli",
+      "source": null,
+      "publish": null,
+      "manifest_path": "/repo/crates/assay-cli/Cargo.toml",
+      "targets": [{"kind": ["bin"]}]
+    }
+  ]
+}
+JSON
 }
 
-output_value() {
-  local output_file="$1" key="$2"
-  awk -F= -v key="${key}" '$1 == key { value=substr($0, length(key) + 2) } END { print value }' \
-    "${output_file}"
+assert_derivation_contract() {
+  local base_fixture="$1"
+  local got expected removed added
+  got="$(python3 "${DERIVER}" --metadata-json "${base_fixture}")"
+  expected=$'assay-core\tcrates/assay-core/Cargo.toml\nassay-runner-core\tcrates/assay-runner-core/Cargo.toml\nassay-sim\tcrates/assay-sim/Cargo.toml'
+  [[ "${got}" == "${expected}" ]] \
+    || fail "base derivation mismatch; got:
+${got}
+expected:
+${expected}"
+  ok "base derivation selects publishable workspace lib crates"
+
+  removed="${scratch}/metadata-removed.json"
+  python3 - "${base_fixture}" "${removed}" <<'PY'
+import json
+import sys
+
+src, dst = sys.argv[1], sys.argv[2]
+data = json.load(open(src))
+for package in data["packages"]:
+    if package["name"] == "assay-sim":
+        package["publish"] = []
+json.dump(data, open(dst, "w"), indent=2)
+PY
+  got="$(python3 "${DERIVER}" --metadata-json "${removed}")"
+  if grep -q '^assay-sim\b' <<<"${got}"; then
+    fail "publish=false did not remove assay-sim from derived semver set"
+  fi
+  ok "publish=false drops a crate from derived semver set"
+
+  added="${scratch}/metadata-added.json"
+  python3 - "${base_fixture}" "${added}" <<'PY'
+import json
+import sys
+
+src, dst = sys.argv[1], sys.argv[2]
+data = json.load(open(src))
+new_id = "assay-newlib 0.1.0 (path+file:///repo/crates/assay-newlib)"
+data["workspace_members"].append(new_id)
+data["packages"].append(
+    {
+        "id": new_id,
+        "name": "assay-newlib",
+        "source": None,
+        "publish": None,
+        "manifest_path": "/repo/crates/assay-newlib/Cargo.toml",
+        "targets": [{"kind": ["lib"]}],
+    }
+)
+json.dump(data, open(dst, "w"), indent=2)
+PY
+  got="$(python3 "${DERIVER}" --metadata-json "${added}")"
+  grep -q $'^assay-newlib\tcrates/assay-newlib/Cargo.toml$' <<<"${got}" \
+    || fail "publish-unset new crate did not enter derived semver set; got:
+${got}"
+  ok "publish-unset new crate enters derived semver set"
 }
 
 check_contract() (
   set -euo pipefail
-  local workflow="$1" case_dir detector detector_job semver_step
+  local workflow="$1" case_dir semver_step semver_run metadata summary cargo_log
   case_dir="$(mktemp -d "${scratch}/case.XXXXXX")"
-  detector="${case_dir}/detect.sh"
-  detector_job="$(job_block "${workflow}" detect-changes)"
   semver_step="$(step_block "${workflow}" semver-public '      - name: Run semver checks (allowlist)')"
+  semver_run="${case_dir}/semver.sh"
+  step_run "${workflow}" semver-public '      - name: Run semver checks (allowlist)' > "${semver_run}"
+  [[ -s "${semver_run}" ]] || fail "could not extract semver run block"
 
-  step_run "${workflow}" detect-changes '      - id: detect' > "${detector}"
-  [[ -s "${detector}" ]] || fail "could not extract detect step run block"
-  mkdir -p "${case_dir}/runner"
-  : > "${case_dir}/outputs"
-  : > "${case_dir}/summary"
-  RUNNER_TEMP="${case_dir}/runner" \
-  GITHUB_OUTPUT="${case_dir}/outputs" \
-  GITHUB_STEP_SUMMARY="${case_dir}/summary" \
-  GITHUB_EVENT_NAME=workflow_dispatch \
-  SIMULATED_CHANGED_FILES=crates/assay-runner-schema/src/lib.rs \
-    bash "${detector}"
+  grep -q 'derive-semver-published-lib-crates.py' <<<"${semver_step}" \
+    || fail "semver step must derive crate set via scripts/ci/derive-semver-published-lib-crates.py"
+  if grep -qE 'CORE_CHANGED|REGISTRY_CHANGED|EVIDENCE_CHANGED|COMMON_CHANGED|POLICY_CHANGED|METRICS_CHANGED|RUNNER_SCHEMA_CHANGED' <<<"${semver_step}"; then
+    fail "semver step still consumes per-crate routing env vars"
+  fi
 
-  [[ "$(output_value "${case_dir}/outputs" assay_runner_schema_changed)" == "true" ]] \
-    || fail "assay-runner-schema change did not emit assay_runner_schema_changed=true"
-  [[ "$(output_value "${case_dir}/outputs" semver_relevant)" == "true" ]] \
-    || fail "assay-runner-schema change did not emit semver_relevant=true"
-  [[ "$(output_value "${case_dir}/outputs" unmatched_assay_crate_changed)" == "false" ]] \
-    || fail "assay-runner-schema remains classified as an unmatched Assay crate"
+  metadata="${case_dir}/metadata.json"
+  build_metadata_fixture "${metadata}"
+  assert_derivation_contract "${metadata}"
 
-  require_one_line "${detector_job}" \
-    "      assay_runner_schema_changed: \${{ steps.detect.outputs.assay_runner_schema_changed }}" \
-    "detect output is not projected to the job"
-  require_one_line "${semver_step}" \
-    "          RUNNER_SCHEMA_CHANGED: \${{ needs.detect-changes.outputs.assay_runner_schema_changed }}" \
-    "runner-schema job output is not consumed by the semver step"
-
-  step_run "${workflow}" semver-public '      - name: Run semver checks (allowlist)' \
-    > "${case_dir}/semver.sh"
-  [[ -s "${case_dir}/semver.sh" ]] || fail "could not extract semver run block"
   mkdir -p "${case_dir}/bin"
   cat > "${case_dir}/bin/cargo" <<'CARGO'
 #!/usr/bin/env bash
 printf 'toolchain=%s argv=%s\n' "${RUSTUP_TOOLCHAIN:-}" "$*" >> "${CARGO_LOG}"
 CARGO
   chmod +x "${case_dir}/bin/cargo"
-  : > "${case_dir}/cargo.log"
+
+  cat > "${case_dir}/bin/git" <<'GIT'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "cat-file" && "${2:-}" == "-e" ]]; then
+  arg="${3:-}"
+  if [[ -n "${BASELINE_MISSING_PATTERN:-}" ]] && [[ "${arg}" == *"${BASELINE_MISSING_PATTERN}" ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+/usr/bin/git "$@"
+GIT
+  chmod +x "${case_dir}/bin/git"
+
+  summary="${case_dir}/summary.md"
+  cargo_log="${case_dir}/cargo.log"
+  : > "${summary}"
+  : > "${cargo_log}"
+  mkdir -p "${case_dir}/runner"
 
   PATH="${case_dir}/bin:${PATH}" \
-  CARGO_LOG="${case_dir}/cargo.log" \
-  GITHUB_STEP_SUMMARY="${case_dir}/summary" \
-  BASELINE_TAG=test-baseline \
-  RUN_ALL=false \
-  GLOBAL_CHANGED=false \
-  CORE_CHANGED=false \
-  REGISTRY_CHANGED=false \
-  EVIDENCE_CHANGED=false \
-  COMMON_CHANGED=false \
-  POLICY_CHANGED=false \
-  METRICS_CHANGED=false \
-  RUNNER_SCHEMA_CHANGED=true \
-    bash "${case_dir}/semver.sh"
+  CARGO_LOG="${cargo_log}" \
+  RUNNER_TEMP="${case_dir}/runner" \
+  GITHUB_STEP_SUMMARY="${summary}" \
+  BASELINE_TAG=v-test \
+  ASSAY_SEMVER_METADATA_JSON="${metadata}" \
+    bash "${semver_run}"
 
-  expected='toolchain=stable argv=semver-checks check-release -p assay-runner-schema --baseline-rev test-baseline'
-  [[ "$(cat "${case_dir}/cargo.log")" == "${expected}" ]] \
-    || fail "runner-schema route did not make exactly the expected cargo invocation; got: $(cat "${case_dir}/cargo.log")"
+  local expected
+  expected=$'toolchain=stable argv=semver-checks check-release -p assay-core --baseline-rev v-test\ntoolchain=stable argv=semver-checks check-release -p assay-runner-core --baseline-rev v-test\ntoolchain=stable argv=semver-checks check-release -p assay-sim --baseline-rev v-test'
+  [[ "$(cat "${cargo_log}")" == "${expected}" ]] \
+    || fail "semver step did not run the derived crate set; got:
+$(cat "${cargo_log}")"
+  grep -q 'assay-runner-core' "${summary}" \
+    || fail "summary omitted a checked crate from derived set"
+
+  : > "${summary}"
+  : > "${cargo_log}"
+  PATH="${case_dir}/bin:${PATH}" \
+  CARGO_LOG="${cargo_log}" \
+  RUNNER_TEMP="${case_dir}/runner" \
+  GITHUB_STEP_SUMMARY="${summary}" \
+  BASELINE_TAG=v-test \
+  BASELINE_MISSING_PATTERN='crates/assay-sim/Cargo.toml' \
+  ASSAY_SEMVER_METADATA_JSON="${metadata}" \
+    bash "${semver_run}"
+  grep -q 'assay-sim (skipped:' "${summary}" \
+    || fail "missing-baseline crate did not emit visible skip summary line"
+  if grep -q 'assay-sim' "${cargo_log}"; then
+    fail "missing-baseline crate still invoked cargo semver-checks"
+  fi
 )
 
 expect_mutation_to_fail() {
@@ -123,28 +242,18 @@ expect_mutation_to_fail() {
   if check_contract "${workflow}" >/dev/null 2>"${scratch}/${name}.err"; then
     fail "${name} mutation survived"
   fi
-  echo "ok   ${name} mutation bites"
+  ok "${name} mutation bites"
 }
 
+[[ -f "${DERIVER}" ]] || fail "missing ${DERIVER#${ROOT}/}"
 check_contract "${WORKFLOW}"
 
-cp "${WORKFLOW}" "${scratch}/missing-job-output.yml"
-sed -i.bak '/^[[:space:]]*assay_runner_schema_changed: \${{ steps\.detect\.outputs\.assay_runner_schema_changed }}[[:space:]]*$/d' \
-  "${scratch}/missing-job-output.yml"
-expect_mutation_to_fail missing-job-output "${scratch}/missing-job-output.yml"
-
-cp "${WORKFLOW}" "${scratch}/missing-step-env.yml"
-sed -i.bak '/^[[:space:]]*RUNNER_SCHEMA_CHANGED: \${{ needs\.detect-changes\.outputs\.assay_runner_schema_changed }}[[:space:]]*$/d' \
-  "${scratch}/missing-step-env.yml"
-expect_mutation_to_fail missing-step-env "${scratch}/missing-step-env.yml"
-
-cp "${WORKFLOW}" "${scratch}/missing-invocation.yml"
-sed -i.bak 's/^[[:space:]]*run_semver_for assay-runner-schema[[:space:]]*$/            : # runner-schema invocation removed/' \
-  "${scratch}/missing-invocation.yml"
-expect_mutation_to_fail missing-invocation "${scratch}/missing-invocation.yml"
+cp "${WORKFLOW}" "${scratch}/missing-deriver.yml"
+sed -i.bak '/derive-semver-published-lib-crates\.py/d' "${scratch}/missing-deriver.yml"
+expect_mutation_to_fail missing-deriver "${scratch}/missing-deriver.yml"
 
 cp "${WORKFLOW}" "${scratch}/control.yml"
 printf '\n# comment-only control\n' >> "${scratch}/control.yml"
 check_contract "${scratch}/control.yml"
-echo "ok   comment-only control remains green"
+ok "comment-only control remains green"
 echo "split-wave0 semver routing: PASS"

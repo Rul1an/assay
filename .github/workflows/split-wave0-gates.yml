@@ -448,15 +448,6 @@ jobs:
         shell: bash
         env:
           BASELINE_TAG: ${{ steps.baseline.outputs.tag }}
-          RUN_ALL: ${{ needs.detect-changes.outputs.run_all }}
-          GLOBAL_CHANGED: ${{ needs.detect-changes.outputs.global_changed }}
-          CORE_CHANGED: ${{ needs.detect-changes.outputs.assay_core_changed }}
-          REGISTRY_CHANGED: ${{ needs.detect-changes.outputs.assay_registry_changed }}
-          EVIDENCE_CHANGED: ${{ needs.detect-changes.outputs.assay_evidence_changed }}
-          COMMON_CHANGED: ${{ needs.detect-changes.outputs.assay_common_changed }}
-          POLICY_CHANGED: ${{ needs.detect-changes.outputs.assay_policy_changed }}
-          METRICS_CHANGED: ${{ needs.detect-changes.outputs.assay_metrics_changed }}
-          RUNNER_SCHEMA_CHANGED: ${{ needs.detect-changes.outputs.assay_runner_schema_changed }}
         run: |
           set -euo pipefail
 
@@ -467,32 +458,45 @@ jobs:
             RUSTUP_TOOLCHAIN=stable cargo semver-checks check-release -p "${crate}" --baseline-rev "${BASELINE_TAG}"
           }
 
+          derived_crates="$RUNNER_TEMP/semver-public-lib-crates.tsv"
+          python3 scripts/ci/derive-semver-published-lib-crates.py > "${derived_crates}"
+          if [[ ! -s "${derived_crates}" ]]; then
+            echo "::error::published-library derivation returned no crates"
+            exit 1
+          fi
+
+          checked_count=0
+          skipped_count=0
           {
             echo "## Semver checks"
             echo "- Baseline: ${BASELINE_TAG} (last release tag)"
-            echo "- Crates checked:"
+            echo "- Crates derived from publishable workspace library targets:"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [[ "${RUN_ALL}" == "true" || "${GLOBAL_CHANGED}" == "true" || "${COMMON_CHANGED}" == "true" ]]; then
-            run_semver_for assay-common
-          fi
-          if [[ "${RUN_ALL}" == "true" || "${GLOBAL_CHANGED}" == "true" || "${POLICY_CHANGED}" == "true" ]]; then
-            run_semver_for assay-policy
-          fi
-          if [[ "${RUN_ALL}" == "true" || "${GLOBAL_CHANGED}" == "true" || "${METRICS_CHANGED}" == "true" ]]; then
-            run_semver_for assay-metrics
-          fi
-          if [[ "${RUN_ALL}" == "true" || "${GLOBAL_CHANGED}" == "true" || "${CORE_CHANGED}" == "true" ]]; then
-            run_semver_for assay-core
-          fi
-          if [[ "${RUN_ALL}" == "true" || "${GLOBAL_CHANGED}" == "true" || "${REGISTRY_CHANGED}" == "true" ]]; then
-            run_semver_for assay-registry
-          fi
-          if [[ "${RUN_ALL}" == "true" || "${GLOBAL_CHANGED}" == "true" || "${EVIDENCE_CHANGED}" == "true" ]]; then
-            run_semver_for assay-evidence
-          fi
-          if [[ "${RUN_ALL}" == "true" || "${GLOBAL_CHANGED}" == "true" || "${RUNNER_SCHEMA_CHANGED}" == "true" ]]; then
-            run_semver_for assay-runner-schema
+          while IFS=$'\t' read -r crate manifest_rel; do
+            [[ -n "${crate}" ]] || continue
+            [[ -n "${manifest_rel}" ]] || {
+              echo "::error::invalid semver derivation row for crate ${crate}"
+              exit 1
+            }
+            if git cat-file -e "${BASELINE_TAG}:${manifest_rel}" 2>/dev/null; then
+              run_semver_for "${crate}"
+              checked_count=$((checked_count + 1))
+            else
+              echo "- ${crate} (skipped: ${manifest_rel} absent at baseline ${BASELINE_TAG})" >> "$GITHUB_STEP_SUMMARY"
+              echo "::warning::Skipping semver check for ${crate}: ${manifest_rel} absent at baseline ${BASELINE_TAG}"
+              skipped_count=$((skipped_count + 1))
+            fi
+          done < "${derived_crates}"
+
+          {
+            echo "- Checked count: ${checked_count}"
+            echo "- Skipped (baseline-absent): ${skipped_count}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "${checked_count}" -eq 0 ]]; then
+            echo "::error::no semver checks were executed (all derived crates were absent at baseline ${BASELINE_TAG})"
+            exit 1
           fi
 
   nightly-safety:
