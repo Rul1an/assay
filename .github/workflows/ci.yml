@@ -57,6 +57,7 @@ jobs:
           python3 -W error::ResourceWarning conformance/tests/test_bounded_run.py
           python3 -W error::ResourceWarning conformance/tests/test_run_all.py
           python3 -W error::ResourceWarning conformance/tests/test_completion_scope.py
+          python3 -W error::ResourceWarning conformance/tests/test_published_rows.py
           python3 conformance/run_all.py
 
       - name: Public-run projection
