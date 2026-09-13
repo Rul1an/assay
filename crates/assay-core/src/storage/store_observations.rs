@@ -1,8 +1,9 @@
 use super::*;
 use crate::trace::observation::{
-    bound_sha256, decode_stored_observation, episode_column_values, pointer_covers,
-    read_truncation, step_column_values, tool_call_column_values, tool_call_target_key,
-    ObservedTraceEvent, TruncationObservation, TruncationReading,
+    apply_inband_sentinel_guard, bound_sha256, decode_stored_observation, episode_column_values,
+    episode_retained_root, pointer_covers, read_truncation, step_column_values, step_retained_root,
+    tool_call_column_values, tool_call_retained_root, tool_call_target_key, ObservedTraceEvent,
+    TruncationObservation, TruncationReading,
 };
 use crate::trace::schema::{TraceEvent, TruncationMeta};
 use anyhow::Context;
@@ -133,7 +134,7 @@ impl Store {
         trusted_stages: &[&str],
     ) -> anyhow::Result<TruncationReading> {
         let conn = self.conn.lock().unwrap();
-        let (truncations, bound, require_parity) = match kind {
+        let (truncations, bound, require_parity, retained_root) = match kind {
             "episode_start" => {
                 if !pointer_covers("/input/prompt", pointer) && !pointer_covers("/meta", pointer) {
                     anyhow::bail!(
@@ -146,7 +147,8 @@ impl Store {
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )?;
                 let bound = bound_sha256(&[prompt.as_deref(), meta.as_deref()]);
-                (Vec::new(), bound, false)
+                let retained_root = episode_retained_root(prompt.as_deref(), meta.as_deref());
+                (Vec::new(), bound, false, retained_root)
             }
             "step" => {
                 let (content, meta, trunc_json): (Option<String>, Option<String>, Option<String>) =
@@ -156,7 +158,8 @@ impl Store {
                         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                     )?;
                 let bound = bound_sha256(&[content.as_deref(), meta.as_deref()]);
-                (parse_truncations(trunc_json), bound, true)
+                let retained_root = step_retained_root(content.as_deref(), meta.as_deref());
+                (parse_truncations(trunc_json), bound, true, retained_root)
             }
             "tool_call" => {
                 let (step_id, call_index): (String, u32) = serde_json::from_str(key)
@@ -169,7 +172,8 @@ impl Store {
                         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                     )?;
                 let bound = bound_sha256(&[args.as_deref(), result.as_deref()]);
-                (parse_truncations(trunc_json), bound, true)
+                let retained_root = tool_call_retained_root(args.as_deref(), result.as_deref());
+                (parse_truncations(trunc_json), bound, true, retained_root)
             }
             other => anyhow::bail!("unknown observation target kind: {other}"),
         };
@@ -204,12 +208,16 @@ impl Store {
             }
         }
 
-        Ok(read_truncation(
+        Ok(apply_inband_sentinel_guard(
+            read_truncation(
+                pointer,
+                &truncations,
+                &observations,
+                trusted_stages,
+                require_parity,
+            ),
+            &retained_root,
             pointer,
-            &truncations,
-            &observations,
-            trusted_stages,
-            require_parity,
         ))
     }
 }
