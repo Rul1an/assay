@@ -1338,3 +1338,64 @@ fn probe_c_sentinel_may_only_lower_a_reading() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// Mutation: the sentinel guard searches the whole retained root instead of
+/// the pointer's subtree. A sibling-only mark must not lower a clean field.
+///
+/// `/input` is the JSONL pointer. SQLite episode_start stores that value as the
+/// prompt column, so the matching stored pointer is `/input/prompt` (probe_a
+/// refuses `/input`). `/meta/x` is readable on both media.
+#[test]
+fn probe_c_sibling_sentinel_does_not_lower_clean_pointer() -> anyhow::Result<()> {
+    let line = json!({
+        "type": "episode_start",
+        "episode_id": "ep-sibling",
+        "timestamp": 1,
+        "input": {"prompt": "short prompt"},
+        "meta": {"x": INBAND_SENTINEL}
+    })
+    .to_string();
+
+    let observed = upgrade_observed(&line);
+    assert!(
+        observed.observations()[0].losses.is_empty(),
+        "upgrader must record no loss: both retained values are under the ceiling"
+    );
+    assert!(
+        observed.reported_truncations().is_empty(),
+        "EpisodeStart has no truncations field; no loss record on the row"
+    );
+
+    let expected_clean = TruncationReading::MeasuredClean {
+        stage: UPGRADER_STAGE.into(),
+        ceiling: INGEST_STRING_CEILING,
+    };
+
+    let jsonl_input = read_observed(&observed, "/input", TRUSTED);
+    let jsonl_prompt = read_observed(&observed, "/input/prompt", TRUSTED);
+    let jsonl_meta = read_observed(&observed, "/meta/x", TRUSTED);
+
+    let store = Store::memory()?;
+    store.init_schema()?;
+    store.insert_observed_event(&observed, None, None)?;
+    let sqlite_prompt =
+        store.read_truncation("episode_start", "ep-sibling", "/input/prompt", TRUSTED)?;
+    let sqlite_meta = store.read_truncation("episode_start", "ep-sibling", "/meta/x", TRUSTED)?;
+
+    assert_eq!(
+        (jsonl_input, jsonl_prompt, sqlite_prompt),
+        (
+            expected_clean.clone(),
+            expected_clean.clone(),
+            expected_clean
+        ),
+        "JSONL /input and both-media /input/prompt must stay MeasuredClean when the sentinel is only in sibling /meta/x"
+    );
+    assert_eq!(
+        (jsonl_meta, sqlite_meta),
+        (TruncationReading::Unmeasured, TruncationReading::Unmeasured),
+        "/meta/x carries the sentinel with no loss record and must read Unmeasured on both media"
+    );
+
+    Ok(())
+}
