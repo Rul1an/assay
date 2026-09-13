@@ -14,6 +14,13 @@ on:
         description: "Expected head SHA for an exact-head docs-only run"
         required: false
         type: string
+      override_reason:
+        description: >-
+          Record why semver verification may be waived for this dispatch. The
+          reason and actor are recorded in the CI summary, and only relax the
+          semver lane expectation.
+        required: false
+        type: string
 
 permissions: {}
 
@@ -1157,12 +1164,24 @@ jobs:
       - name: Committed digests still describe the tree
         run: shasum -a 256 -c SHA256SUMS.txt
 
+  semver:
+    name: Semver public gate
+    needs: [scope]
+    if: always()
+    uses: ./.github/workflows/semver-public.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      pr_number: ${{ github.event_name == 'workflow_dispatch' && inputs.pr_number || '' }}
+      expected_head_sha: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_head_sha || '' }}
+
   ci:
     name: CI
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: always()
-    needs: [scope, deps-security, clippy, rustdoc, public-msrv, distribution-boundary, publish-shape-cli, public-crate-policy, vendored-packs, release-asset-contract, mcp-registry-foundation, perf, test, ebpf-smoke-ubuntu, evidenceref-live-resolve]
+    needs: [scope, deps-security, clippy, rustdoc, public-msrv, distribution-boundary, publish-shape-cli, public-crate-policy, vendored-packs, release-asset-contract, mcp-registry-foundation, perf, test, ebpf-smoke-ubuntu, evidenceref-live-resolve, semver]
     permissions:
       contents: read
     steps:
@@ -1250,6 +1269,13 @@ jobs:
           PERF_RESULT: ${{ needs.perf.result }}
           TEST_RESULT: ${{ needs.test.result }}
           EVIDENCEREF_LIVE_RESOLVE_RESULT: ${{ needs.evidenceref-live-resolve.result }}
+          SEMVER_RESULT: ${{ needs.semver.result }}
+          # GitHub exposes reusable workflow outputs through needs.<job>.outputs in the caller:
+          # https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows#using-outputs-from-a-reusable-workflow
+          SEMVER_RELEVANT: ${{ needs.semver.outputs['semver_relevant'] }}
+          SEMVER_PUBLIC_RESULT: ${{ needs.semver.outputs['semver_public_result'] }}
+          SEMVER_OVERRIDE_REASON: ${{ github.event_name == 'workflow_dispatch' && inputs.override_reason || '' }}
+          SEMVER_OVERRIDE_ACTOR: ${{ github.event_name == 'workflow_dispatch' && github.actor || '' }}
           EBPF_SMOKE_REQUIRED: ${{ needs.scope.outputs.ebpf_smoke_required }}
           EBPF_SMOKE_UBUNTU_RESULT: ${{ needs.ebpf-smoke-ubuntu.result }}
           MCP_REGISTRY_TOUCHED: ${{ needs.scope.outputs.mcp_registry_touched }}
@@ -1293,7 +1319,50 @@ jobs:
             registry_expectation="required"
           fi
 
+          semver_override_reason="$(printf '%s' "${SEMVER_OVERRIDE_REASON:-}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+          semver_override_actor="$(printf '%s' "${SEMVER_OVERRIDE_ACTOR:-}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+          if [[ -n "${semver_override_reason}" && -z "${semver_override_actor}" ]]; then
+            semver_override_actor="unknown"
+          fi
+          if [[ "${SEMVER_RELEVANT}" == "false" ]]; then
+            semver_expectation="optional"
+          elif [[ "${SEMVER_RELEVANT}" == "true" ]]; then
+            semver_expectation="required"
+          else
+            semver_expectation="invalid-output"
+          fi
+          if [[ -n "${semver_override_reason}" && "${semver_expectation}" == "required" ]]; then
+            semver_expectation="override"
+            {
+              echo "## Semver override"
+              echo "- actor: ${semver_override_actor}"
+              echo "- reason: ${semver_override_reason}"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
           failures=0
+          if [[ "${semver_expectation}" == "invalid-output" ]]; then
+            echo "::error::semver_relevant must be the literal 'true' or 'false' from the reusable semver workflow; got '${SEMVER_RELEVANT}'."
+            failures=$((failures + 1))
+          elif [[ "${semver_expectation}" == "required" || "${semver_expectation}" == "override" ]]; then
+            # The reusable workflow caller conclusion (`needs.semver.result`) can be 'success'
+            # even when its inner jobs are skipped. Validate the actual inner semver check conclusion.
+            if [[ "${SEMVER_PUBLIC_RESULT}" == "skipped" ]]; then
+              echo "::error::inner semver-public was skipped while semver_relevant=true. The check must execute when relevant."
+              failures=$((failures + 1))
+            elif [[ -z "${SEMVER_PUBLIC_RESULT}" ]]; then
+              echo "::error::missing semver_public_result output from reusable semver workflow."
+              failures=$((failures + 1))
+            elif [[ "${SEMVER_PUBLIC_RESULT}" == "failure" ]]; then
+              if [[ "${semver_expectation}" != "override" ]]; then
+                echo "::error::inner semver-public ended with failure while semver_relevant=true and no override was provided."
+                failures=$((failures + 1))
+              fi
+            elif [[ "${SEMVER_PUBLIC_RESULT}" != "success" ]]; then
+              echo "::error::semver_public_result has unexpected conclusion '${SEMVER_PUBLIC_RESULT}'."
+              failures=$((failures + 1))
+            fi
+          fi
           for triple in \
             "scope|${SCOPE_RESULT}|required" \
             "deps-security|${DEPS_SECURITY_RESULT}|${code_gated_expectation}" \
@@ -1309,13 +1378,17 @@ jobs:
             "perf|${PERF_RESULT}|${code_gated_expectation}" \
             "test|${TEST_RESULT}|${code_gated_expectation}" \
             "evidenceref-live-resolve|${EVIDENCEREF_LIVE_RESOLVE_RESULT}|required" \
-            "ebpf-smoke-ubuntu|${EBPF_SMOKE_UBUNTU_RESULT}|${ebpf_expectation}"
+            "ebpf-smoke-ubuntu|${EBPF_SMOKE_UBUNTU_RESULT}|${ebpf_expectation}" \
+            "semver|${SEMVER_RESULT}|${semver_expectation}"
           do
             name="${triple%%|*}"
             rest="${triple#*|}"
             result="${rest%%|*}"
             expectation="${rest##*|}"
 
+            if [[ "${name}" == "semver" && "${expectation}" == "override" && "${result}" == "failure" ]]; then
+              continue
+            fi
             case "${result}" in
               success)
                 ;;
@@ -1327,6 +1400,12 @@ jobs:
                        "mcp_registry_touched=${MCP_REGISTRY_TOUCHED}." \
                        "A job that never runs reports the same result as one deliberately not run;" \
                        "check that job's \`if:\` against the scope output it reads."
+                  failures=$((failures + 1))
+                elif [[ "${expectation}" == "override" ]]; then
+                  echo "::error::${name} was skipped while semver_relevant=true. override_reason can waive semver failures, not a semver lane that never ran."
+                  failures=$((failures + 1))
+                elif [[ "${expectation}" == "invalid-output" ]]; then
+                  echo "::error::${name} was skipped with an unreadable semver_relevant output ('${SEMVER_RELEVANT}')."
                   failures=$((failures + 1))
                 fi
                 ;;
@@ -1340,6 +1419,8 @@ jobs:
           echo "lightweight_only=${LIGHTWEIGHT_ONLY}"
           echo "ebpf_smoke_required=${EBPF_SMOKE_REQUIRED}"
           echo "mcp_registry_touched=${MCP_REGISTRY_TOUCHED}"
+          echo "semver_relevant=${SEMVER_RELEVANT}"
+          echo "semver_public_result=${SEMVER_PUBLIC_RESULT}"
           if (( failures > 0 )); then
             echo "${failures} required CI dependenc(ies) did not satisfy the gate."
             exit 1

@@ -76,6 +76,107 @@ GATE="$(extract_gate)"
 [[ -n "$GATE" ]] || fail "extracted an empty gate body — the workflow shape changed"
 grep -q "MCP_REGISTRY_TOUCHED" <<<"$GATE" \
   || fail "the gate does not read mcp_registry_touched; three scope outputs decide whether a job should run"
+grep -q "SEMVER_RELEVANT" <<<"$GATE" \
+  || fail "the gate does not read semver_relevant from the reusable semver workflow output"
+grep -q "SEMVER_PUBLIC_RESULT" <<<"$GATE" \
+  || fail "the gate does not read semver_public_result from the reusable semver workflow output"
+# Prove reusable workflow output and caller binding:
+# 1. semver-public.yml outputs.semver_public_result MUST bind ${{ jobs.conclude.outputs.semver_public_result }}
+# 2. semver-public.yml jobs.conclude.outputs.semver_public_result MUST bind ${{ needs.semver-public.result }}
+# 3. ci.yml env.SEMVER_PUBLIC_RESULT MUST bind ${{ needs.semver.outputs['semver_public_result'] }}
+python3 - "$WORKFLOW" "${ROOT}/.github/workflows/semver-public.yml" <<'PY' \
+  || fail "semver_public_result output or caller binding violated the wiring contract"
+import sys
+
+ci_path, semver_path = sys.argv[1], sys.argv[2]
+ci_lines = open(ci_path).read().splitlines()
+semver_lines = open(semver_path).read().splitlines()
+
+def validate_semver_wiring(semver_l: list[str], ci_l: list[str]):
+    # 1. semver-public.yml top-level outputs.semver_public_result.value
+    found_wf_output = False
+    in_outputs = False
+    in_semver_public_result = False
+    for line in semver_l:
+        indent = len(line) - len(line.lstrip())
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if indent == 4 and stripped == "outputs:":
+            in_outputs = True
+            continue
+        if in_outputs:
+            if indent <= 4:
+                break
+            if indent == 6 and stripped == "semver_public_result:":
+                in_semver_public_result = True
+                continue
+            if in_semver_public_result:
+                if indent <= 6:
+                    in_semver_public_result = False
+                elif indent == 8 and stripped.startswith("value:"):
+                    expr = stripped[len("value:"):].strip()
+                    expr = expr.removeprefix("${{").removesuffix("}}").strip()
+                    if expr == "jobs.conclude.outputs.semver_public_result":
+                        found_wf_output = True
+                    break
+    if not found_wf_output:
+        raise ValueError("semver-public.yml outputs.semver_public_result does not bind jobs.conclude.outputs.semver_public_result")
+
+    # 2. semver-public.yml conclude job outputs.semver_public_result
+    found_conclude_output = False
+    in_conclude = False
+    for line in semver_l:
+        indent = len(line) - len(line.lstrip())
+        stripped = line.strip()
+        if indent == 2 and stripped == "conclude:":
+            in_conclude = True
+            continue
+        if in_conclude:
+            if indent == 2 and stripped != "conclude:":
+                break
+            if stripped.startswith("semver_public_result:"):
+                expr = stripped[len("semver_public_result:"):].strip()
+                expr = expr.removeprefix("${{").removesuffix("}}").strip()
+                if expr == "needs.semver-public.result":
+                    found_conclude_output = True
+                break
+    if not found_conclude_output:
+        raise ValueError("semver-public.yml jobs.conclude.outputs does not bind needs.semver-public.result")
+
+    # 3. Line-by-line bounded parse for ci.yml SEMVER_PUBLIC_RESULT
+    found_ci_env = False
+    for line in ci_l:
+        stripped = line.strip()
+        if stripped.startswith("SEMVER_PUBLIC_RESULT:"):
+            val = stripped[len("SEMVER_PUBLIC_RESULT:"):].strip()
+            val = val.removeprefix("${{").removesuffix("}}").strip()
+            if val == "needs.semver.outputs['semver_public_result']":
+                found_ci_env = True
+                break
+    if not found_ci_env:
+        raise ValueError("ci.yml does not bind SEMVER_PUBLIC_RESULT to needs.semver.outputs['semver_public_result']")
+
+validate_semver_wiring(semver_lines, ci_lines)
+
+# Bounded mutation checks to prove guard bites
+def mutate_lines(lines: list[str], old: str, new: str) -> list[str]:
+    return [line.replace(old, new) for line in lines]
+
+mutations = [
+    (mutate_lines(semver_lines, "jobs.conclude.outputs.semver_public_result", "'success'"), ci_lines, "literal success in semver-public.yml output"),
+    (mutate_lines(semver_lines, "needs.semver-public.result", "'success'"), ci_lines, "literal success in conclude job"),
+    (mutate_lines(semver_lines, "needs.semver-public.result", "needs.detect-changes.result"), ci_lines, "wrong job in conclude"),
+    (semver_lines, mutate_lines(ci_lines, "needs.semver.outputs['semver_public_result']", "'success'"), "literal success in ci.yml"),
+    (semver_lines, mutate_lines(ci_lines, "needs.semver.outputs['semver_public_result']", "needs.semver.outputs['semver_relevant']"), "wrong output in ci.yml"),
+]
+for mut_semver, mut_ci, desc in mutations:
+    try:
+        validate_semver_wiring(mut_semver, mut_ci)
+    except ValueError:
+        continue
+    raise SystemExit(f"wiring mutation survived: {desc}")
+PY
 # Which jobs the gate must wait on and judge is asserted by
 # `scripts/ci/check-ci-gate-coverage.py`, derived from the workflow. Three job names used to be
 # grepped for here as well; that was a second, hand-maintained statement of the same rule, and a
@@ -204,12 +305,20 @@ fi
 run_gate() {
   local expected="$1" name="$2"
   shift 2
-  local out rc=0
+  local out rc=0 summary
+  summary="$(mktemp)"
   out="$(env RELEASE_ASSET_CONTRACT_RESULT=success \
              PUBLISH_SHAPE_CLI_RESULT=success \
              PUBLIC_CRATE_POLICY_RESULT=success \
              EVIDENCEREF_LIVE_RESOLVE_RESULT=success \
+             SEMVER_RESULT=success \
+             SEMVER_PUBLIC_RESULT=success \
+             SEMVER_RELEVANT=true \
+             SEMVER_OVERRIDE_REASON= \
+             SEMVER_OVERRIDE_ACTOR= \
+             GITHUB_STEP_SUMMARY="${summary}" \
              "$@" bash -c "$GATE" 2>&1)" || rc=$?
+  LAST_GATE_SUMMARY="${summary}"
   if [[ "$expected" == "pass" && $rc -ne 0 ]]; then
     echo "$out" >&2
     fail "$name: expected the gate to pass, it exited $rc"
@@ -229,7 +338,8 @@ run_gate pass "everything green" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false >/dev/null
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=true SEMVER_RESULT=success >/dev/null
 echo "ok: a complete green run passes"
 
 # A docs-only run: the four code-gated jobs are legitimately scoped out.
@@ -238,7 +348,8 @@ run_gate pass "lightweight scoped out" \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=skipped TEST_RESULT=skipped \
   PUBLIC_MSRV_RESULT=skipped \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false >/dev/null
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=false SEMVER_RESULT=skipped >/dev/null
 echo "ok: a documentation-only run passes with its jobs scoped out"
 
 # The defect: a code-bearing run where a job that should have executed did not. Before this change
@@ -345,6 +456,171 @@ for result in failure ""; do
     || fail "public-msrv ${result:-empty}: the gate failed without naming the job"
 done
 echo "ok: a failed or missing public-msrv result fails closed and names the job"
+
+# Semver from reusable workflow: required when relevant=true.
+out="$(run_gate fail "semver relevant but skipped" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=true SEMVER_RESULT=skipped)"
+assert_named_skip SEMVER "$out"
+echo "ok: semver skipped while relevant fails the gate"
+
+# Literal false scopes semver out.
+run_gate pass "semver not relevant may skip" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=false SEMVER_RESULT=skipped >/dev/null
+echo "ok: semver skipped while not relevant remains green"
+
+# Empty/misspelled semver_relevant is fail-closed, including when semver is skipped.
+out="$(run_gate fail "empty semver_relevant with semver skipped" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT= SEMVER_RESULT=skipped)"
+grep -q "semver_relevant must be the literal" <<<"$out" \
+  || fail "an empty semver_relevant must fail closed, got: $out"
+echo "ok: empty semver_relevant fails closed"
+
+# Detection failures in the called workflow fail the CI rollup.
+out="$(run_gate fail "semver detection failure surfaces as semver failure" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=true SEMVER_RESULT=failure)"
+grep -q "Required CI dependency semver ended with failure" <<<"$out" \
+  || fail "a semver detection failure must fail the gate and name semver, got: $out"
+echo "ok: semver detection failure fails the gate"
+
+# Override is recorded-only: empty reason does nothing, non-empty reason waives semver failure.
+run_gate fail "semver override with empty reason remains failing" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=true SEMVER_RESULT=failure SEMVER_PUBLIC_RESULT=failure SEMVER_OVERRIDE_REASON='   ' SEMVER_OVERRIDE_ACTOR=maintainer >/dev/null
+echo "ok: semver override with empty reason does not bypass failure"
+
+run_gate pass "semver override with reason waives semver failure" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=true SEMVER_RESULT=failure SEMVER_PUBLIC_RESULT=failure \
+  SEMVER_OVERRIDE_REASON='intentional break before the version bump PR' \
+  SEMVER_OVERRIDE_ACTOR='release-maintainer' >/dev/null
+grep -q "## Semver override" "${LAST_GATE_SUMMARY}" \
+  || fail "override summary heading missing from gate summary"
+grep -q "actor: release-maintainer" "${LAST_GATE_SUMMARY}" \
+  || fail "override summary must record actor"
+grep -q "reason: intentional break before the version bump PR" "${LAST_GATE_SUMMARY}" \
+  || fail "override summary must record reason"
+echo "ok: semver override with reason records actor+reason and passes"
+
+# Defect #3000: reusable workflow caller reported success, but inner semver-public job skipped or missing.
+out="$(run_gate fail "semver relevant, caller success, but inner semver-public skipped" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=true SEMVER_RESULT=success SEMVER_PUBLIC_RESULT=skipped)"
+grep -q "semver-public was skipped while semver_relevant=true" <<<"$out" \
+  || fail "caller success with inner semver-public skipped must fail the gate and name the condition, got: $out"
+echo "ok: caller success with inner semver-public skipped fails the gate"
+
+# Never allow skip override when semver_relevant=true!
+out="$(run_gate fail "semver override cannot waive skipped inner semver job" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=true SEMVER_RESULT=success SEMVER_PUBLIC_RESULT=skipped \
+  SEMVER_OVERRIDE_REASON='intentional break before the version bump PR' \
+  SEMVER_OVERRIDE_ACTOR='release-maintainer')"
+grep -q "semver-public was skipped while semver_relevant=true" <<<"$out" \
+  || fail "override cannot waive skipped inner semver-public job, got: $out"
+echo "ok: semver override cannot waive skipped inner semver job"
+
+out="$(run_gate fail "semver relevant but inner semver-public result missing" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=true SEMVER_RESULT=success SEMVER_PUBLIC_RESULT=)"
+grep -q "semver_public_result output" <<<"$out" \
+  || fail "missing semver_public_result when semver_relevant=true must fail closed, got: $out"
+echo "ok: missing semver_public_result fails closed"
+
+# Defect #3000: caller=success, inner semver-public=failure without override MUST fail!
+out="$(run_gate fail "semver relevant, caller success, inner semver-public failure without override" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=true SEMVER_RESULT=success SEMVER_PUBLIC_RESULT=failure)"
+grep -q "inner semver-public ended with failure" <<<"$out" \
+  || fail "inner failure without override must fail the gate and name the condition, got: $out"
+echo "ok: inner failure without override fails the gate"
+
+# Cancelled inner job when relevant MUST fail!
+out="$(run_gate fail "semver relevant, caller success, inner semver-public cancelled" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=true SEMVER_RESULT=success SEMVER_PUBLIC_RESULT=cancelled)"
+grep -q "unexpected conclusion 'cancelled'" <<<"$out" \
+  || fail "inner cancelled must fail the gate, got: $out"
+echo "ok: inner cancelled fails the gate"
+
+# Malformed conclusion when relevant MUST fail!
+out="$(run_gate fail "semver relevant, caller success, inner semver-public malformed" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=true SEMVER_RESULT=success SEMVER_PUBLIC_RESULT=bogus)"
+grep -q "unexpected conclusion 'bogus'" <<<"$out" \
+  || fail "inner bogus conclusion must fail the gate, got: $out"
+echo "ok: inner malformed conclusion fails the gate"
+
+# Scope-out pair: relevant=false permits inner skipped
+run_gate pass "semver not relevant permits inner skipped" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=false SEMVER_RESULT=skipped SEMVER_PUBLIC_RESULT=skipped >/dev/null
+echo "ok: semver not relevant permits inner skipped"
+
+# Scope-out pair: relevant=false permits empty inner result (e.g. detect-changes short-circuit)
+run_gate pass "semver not relevant permits empty inner result" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  SEMVER_RELEVANT=false SEMVER_RESULT=skipped SEMVER_PUBLIC_RESULT= >/dev/null
+echo "ok: semver not relevant permits empty inner result"
 
 # An empty scope output is the typo signature: `'' == 'true'` is false, so the job silently never
 # runs. Treating empty as "not required" would reproduce the defect through the fix.
