@@ -86,27 +86,51 @@ pub struct ClaimSupportParityTable {
     pub non_claims: Vec<String>,
 }
 
-/// Every verdict this gate can reach. Exhaustively destructured in [`claim_support_table`], so a
-/// sixth variant stops the crate compiling rather than silently dropping a row.
+/// Every verdict this gate can reach.
+///
+/// Exhaustive `match` over the closed [`RunnerFidelityVerdict`]. A sixth variant
+/// is already `E0004` in [`RunnerClaimGate::for_verdict`] and in `claim_support`'s
+/// scope match; the match here is the reader-facing pin next to the list this
+/// table iterates. No wildcard: that would snapshot the five we already know.
+/// Naming the variant in the pattern and omitting it from the `vec` still
+/// compiles. Order is the historical helper order (`NotApplicable` before
+/// `Failed`), not enum declaration order; the totality test compares as a set,
+/// so order is not load-bearing.
 #[must_use]
 pub fn all_verdicts() -> Vec<RunnerFidelityVerdict> {
-    vec![
-        RunnerFidelityVerdict::Clean,
-        RunnerFidelityVerdict::Clipped,
-        RunnerFidelityVerdict::CorrelationPartial,
-        RunnerFidelityVerdict::NotApplicable,
-        RunnerFidelityVerdict::Failed,
-    ]
+    match RunnerFidelityVerdict::Clean {
+        RunnerFidelityVerdict::Clean
+        | RunnerFidelityVerdict::Clipped
+        | RunnerFidelityVerdict::CorrelationPartial
+        | RunnerFidelityVerdict::NotApplicable
+        | RunnerFidelityVerdict::Failed => vec![
+            RunnerFidelityVerdict::Clean,
+            RunnerFidelityVerdict::Clipped,
+            RunnerFidelityVerdict::CorrelationPartial,
+            RunnerFidelityVerdict::NotApplicable,
+            RunnerFidelityVerdict::Failed,
+        ],
+    }
 }
 
 /// Every claim kind the crate's coverage vocabulary carries.
+///
+/// Exhaustive `match` over the closed [`CoverageClaimKind`]. A fourth member is
+/// `E0004` here unless this helper is edited. No wildcard. Naming the variant
+/// in the pattern and omitting it from the `vec` still compiles; the pin is
+/// that the author has to edit this helper, not that the list is derived from
+/// one source. Same residual as `StreamRule::ALL`.
 #[must_use]
 pub fn all_claim_kinds() -> Vec<CoverageClaimKind> {
-    vec![
-        CoverageClaimKind::PositiveExistence,
-        CoverageClaimKind::ExhaustiveSet,
-        CoverageClaimKind::BoundedNegative,
-    ]
+    match CoverageClaimKind::PositiveExistence {
+        CoverageClaimKind::PositiveExistence
+        | CoverageClaimKind::ExhaustiveSet
+        | CoverageClaimKind::BoundedNegative => vec![
+            CoverageClaimKind::PositiveExistence,
+            CoverageClaimKind::ExhaustiveSet,
+            CoverageClaimKind::BoundedNegative,
+        ],
+    }
 }
 
 /// The health half's answer for one pair, read off [`RunnerClaimGate`] rather than restated.

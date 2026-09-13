@@ -25,12 +25,22 @@ use assay_evidence::{
 use assay_runner_schema::{ClaimGateDecision, CoverageClaimKind, CoverageDescriptor};
 
 /// One vocabulary since ADR-048; `CoverageClaimKind` is the same type under the runner's name.
+///
+/// Exhaustive `match` over the closed enum. A fourth member is `E0004` here
+/// unless this helper is edited. No wildcard: that would snapshot the three we
+/// already know. Same residual as `StreamRule::ALL`: naming the variant in the
+/// pattern and omitting it from the `vec` still compiles. The pin is that the
+/// author has to edit this helper, not that the list is derived from one source.
 fn kinds() -> Vec<CodingAgentClaimKind> {
-    vec![
-        CodingAgentClaimKind::PositiveExistence,
-        CodingAgentClaimKind::ExhaustiveSet,
-        CodingAgentClaimKind::BoundedNegative,
-    ]
+    match CodingAgentClaimKind::PositiveExistence {
+        CodingAgentClaimKind::PositiveExistence
+        | CodingAgentClaimKind::ExhaustiveSet
+        | CodingAgentClaimKind::BoundedNegative => vec![
+            CodingAgentClaimKind::PositiveExistence,
+            CodingAgentClaimKind::ExhaustiveSet,
+            CodingAgentClaimKind::BoundedNegative,
+        ],
+    }
 }
 
 /// The runner's public signal for "this descriptor supports complete claims".

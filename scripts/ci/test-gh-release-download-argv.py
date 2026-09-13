@@ -39,7 +39,10 @@ Seams:
   non-claim; no current site uses that form. Only command-position `gh`
   counts, so a step name such as `Verify gh release download argv contract`
   is not an invocation. A line whose first non-space character is `#` is a
-  comment, not an invocation: `&&` after `#` must stay quiet.
+  comment, not an invocation: `&&` after `#` must stay quiet. Trailing `#`
+  comments are stripped quote-aware before token counting. Invocations prefixed
+  by `sudo`, `env`, variable assignments, single-line `run:`, pipes, or
+  subshells/backticks are recognized.
 
 Value-taking flags, from `gh release download --help`:
 
@@ -79,12 +82,43 @@ VALUE_FLAGS = frozenset(
     }
 )
 
-# Command position only: indent, or a shell list operator, then `gh`.
-# A YAML step name that mentions the phrase is not an invocation.
+# Command position: start of line (optionally YAML list item or `run:`), shell
+# list/pipe operators, or subshells/command substitutions, followed by optional
+# command prefixes (`sudo`, `env`, `VAR=value` assignments, `!`).
+# A YAML step name or hook id that mentions the phrase is not an invocation.
 INVOKE_RE = re.compile(
-    r"^\s*(?:(?:.*(?:&&|\|\||;)\s*))?gh\s+release\s+download\b"
+    r"""
+    (?:
+        ^\s*(?:-\s+)?(?:run:\s*)?   # start of line, optional YAML list item, optional run:
+      | (?:&&|\|\||;|\|&|\||&)\s*   # shell command separators
+      | (?:\$\(|\`|\()\s*           # command substitution or subshell
+    )
+    (?:
+        (?:
+            sudo\s+(?:(?!--|\bgh\b)\S+\s+)*(?:--\s+)?
+          | env\s+(?:(?!--|\bgh\b)\S+\s+)*(?:--\s+)?
+          | [A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)\s+
+          | !\s+
+        )
+    )*
+    gh\s+release\s+download\b
+    """,
+    re.VERBOSE | re.MULTILINE,
 )
-DECLARED_TEST_COUNT = 9
+COMMAND_TERMINATORS = frozenset(
+    {
+        "|",
+        "|&",
+        "&&",
+        "||",
+        ";",
+        ";;",
+        "&",
+        ")",
+        "`",
+    }
+)
+DECLARED_TEST_COUNT = 21
 
 PUBLISH_HEAD = (
     '          gh release download "$VERSION" --repo "$GITHUB_REPOSITORY"'
@@ -131,8 +165,19 @@ def positional_tokens(tokens: list[str]) -> list[str]:
     i = 0
     while i < len(tokens):
         token = tokens[i]
+        if token in COMMAND_TERMINATORS or token.startswith(("<", ">")):
+            break
+        if (
+            token.isdigit()
+            and i + 1 < len(tokens)
+            and tokens[i + 1].startswith(("<", ">"))
+        ):
+            break
         if token == "--":
-            positionals.extend(tokens[i + 1 :])
+            for t in tokens[i + 1 :]:
+                if t in COMMAND_TERMINATORS or t.startswith(("<", ">")):
+                    break
+                positionals.append(t)
             break
         if token.startswith("-"):
             name = token.split("=", 1)[0]
@@ -148,27 +193,70 @@ def positional_tokens(tokens: list[str]) -> list[str]:
     return positionals
 
 
+def strip_shell_comment(text: str) -> str:
+    """Strip trailing shell comment (# preceded by whitespace or at start of word)."""
+    in_single = False
+    in_double = False
+    escape = False
+    at_word_start = True
+    for i, ch in enumerate(text):
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and not in_single:
+            escape = True
+            at_word_start = False
+            continue
+        if in_single:
+            if ch == "'":
+                in_single = False
+            continue
+        if in_double:
+            if ch == '"':
+                in_double = False
+            continue
+        if ch == "'":
+            in_single = True
+            at_word_start = False
+        elif ch == '"':
+            in_double = True
+            at_word_start = False
+        elif ch.isspace():
+            at_word_start = True
+        elif ch == "#" and at_word_start:
+            return text[:i]
+        else:
+            at_word_start = False
+    return text
+
+
+def tokenize_invocation(rest: str) -> list[str]:
+    rest = strip_shell_comment(rest)
+    lex = shlex.shlex(rest, posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    lex.commenters = ""
+    return list(lex)
+
+
 def invocation_problems(text: str, relpath: str) -> list[str]:
     problems: list[str] = []
     for line_no, line in joined_lines(text):
         if line.lstrip().startswith("#"):
             continue
-        match = INVOKE_RE.search(line)
-        if match is None:
-            continue
-        rest = line[match.end() :]
-        try:
-            tokens = shlex.split(rest, posix=True)
-            positionals = positional_tokens(tokens)
-        except ValueError as exc:
-            problems.append(f"{relpath}:{line_no}: cannot tokenize: {exc}")
-            continue
-        if len(positionals) > 1:
-            problems.append(
-                f"{relpath}:{line_no}: gh release download accepts at most 1 "
-                f"positional (the tag); received {len(positionals)}: "
-                f"{positionals!r}. Select assets with --pattern."
-            )
+        for match in INVOKE_RE.finditer(line):
+            rest = line[match.end() :]
+            try:
+                tokens = tokenize_invocation(rest)
+                positionals = positional_tokens(tokens)
+            except ValueError as exc:
+                problems.append(f"{relpath}:{line_no}: cannot tokenize: {exc}")
+                continue
+            if len(positionals) > 1:
+                problems.append(
+                    f"{relpath}:{line_no}: gh release download accepts at most 1 "
+                    f"positional (the tag); received {len(positionals)}: "
+                    f"{positionals!r}. Select assets with --pattern."
+                )
     return problems
 
 
@@ -297,6 +385,81 @@ class GhReleaseDownloadArgv(unittest.TestCase):
     def test_comment_line_is_not_an_invocation(self) -> None:
         text = "          # && gh release download x y\n"
         self.assertEqual(invocation_problems(text, "seam-comment.yml"), [])
+
+    def test_trailing_comment_compliant_is_quiet(self) -> None:
+        text = (
+            '          gh release download "$TAG" --pattern a.tar.gz  # refresh it\n'
+            '          gh release download "$TAG" --pattern "a#b.tar.gz"  # with quoted hash\n'
+        )
+        self.assertEqual(invocation_problems(text, "seam-trailing-comment.yml"), [])
+
+    def test_trailing_comment_positional_asset_is_refused(self) -> None:
+        text = '          gh release download "$TAG" a.tar.gz # note\n'
+        problems = invocation_problems(text, "seam-trailing-comment-violation.yml")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertTrue(problems[0].startswith("seam-trailing-comment-violation.yml:1:"), problems)
+
+    def test_sudo_prefix_positional_asset_is_refused(self) -> None:
+        bad = '          sudo -u runner -E gh release download "$TAG" a.tar.gz\n'
+        good = '          sudo -u runner -E gh release download "$TAG" --pattern a.tar.gz\n'
+        self.assertEqual(len(invocation_problems(bad, "seam-sudo.yml")), 1)
+        self.assertEqual(invocation_problems(good, "seam-sudo.yml"), [])
+
+    def test_var_assignment_prefix_positional_asset_is_refused(self) -> None:
+        bad = '          GH_TOKEN=xyz VAR="foo bar" gh release download "$TAG" a.tar.gz\n'
+        good = '          GH_TOKEN=xyz VAR="foo bar" gh release download "$TAG" --pattern a.tar.gz\n'
+        self.assertEqual(len(invocation_problems(bad, "seam-var.yml")), 1)
+        self.assertEqual(invocation_problems(good, "seam-var.yml"), [])
+
+    def test_env_command_prefix_positional_asset_is_refused(self) -> None:
+        bad = '          env -i GH_TOKEN=xyz gh release download "$TAG" a.tar.gz\n'
+        good = '          env -i GH_TOKEN=xyz gh release download "$TAG" --pattern a.tar.gz\n'
+        self.assertEqual(len(invocation_problems(bad, "seam-env.yml")), 1)
+        self.assertEqual(invocation_problems(good, "seam-env.yml"), [])
+
+    def test_pipe_prefix_positional_asset_is_refused(self) -> None:
+        bad = '          echo "$TAG" | gh release download "$TAG" a.tar.gz\n'
+        good = '          echo "$TAG" | gh release download "$TAG" --pattern a.tar.gz\n'
+        self.assertEqual(len(invocation_problems(bad, "seam-pipe.yml")), 1)
+        self.assertEqual(invocation_problems(good, "seam-pipe.yml"), [])
+
+    def test_command_substitution_positional_asset_is_refused(self) -> None:
+        bad_sub = '          TAG=$(gh release download "$TAG" a.tar.gz)\n'
+        good_sub = '          TAG=$(gh release download "$TAG" --pattern a.tar.gz)\n'
+        bad_bt = '          TAG=`gh release download "$TAG" a.tar.gz`\n'
+        good_bt = '          TAG=`gh release download "$TAG" --pattern a.tar.gz`\n'
+        self.assertEqual(len(invocation_problems(bad_sub, "seam-subshell.yml")), 1)
+        self.assertEqual(invocation_problems(good_sub, "seam-subshell.yml"), [])
+        self.assertEqual(len(invocation_problems(bad_bt, "seam-backtick.yml")), 1)
+        self.assertEqual(invocation_problems(good_bt, "seam-backtick.yml"), [])
+
+    def test_single_line_run_positional_asset_is_refused(self) -> None:
+        bad = '      - run: gh release download "$TAG" a.tar.gz\n'
+        good = '      - run: gh release download "$TAG" --pattern a.tar.gz\n'
+        self.assertEqual(len(invocation_problems(bad, "seam-run.yml")), 1)
+        self.assertEqual(invocation_problems(good, "seam-run.yml"), [])
+
+    def test_hash_in_dir_value_positional_asset_is_refused(self) -> None:
+        text = '          gh release download "$TAG" --dir out#1 a.tar.gz\n'
+        problems = invocation_problems(text, "seam-dir-hash.yml")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertTrue(problems[0].startswith("seam-dir-hash.yml:1:"), problems)
+
+    def test_hash_glued_to_tag_positional_asset_is_refused(self) -> None:
+        text = '          gh release download "$TAG"#x a.tar.gz\n'
+        problems = invocation_problems(text, "seam-tag-hash.yml")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertTrue(problems[0].startswith("seam-tag-hash.yml:1:"), problems)
+
+    def test_hash_in_pattern_flag_value_is_quiet_and_single_token(self) -> None:
+        text = '          gh release download "$TAG" --pattern a.tar.gz#x\n'
+        self.assertEqual(invocation_problems(text, "seam-pattern-hash.yml"), [])
+        tokens = tokenize_invocation(' "$TAG" --pattern a.tar.gz#x')
+        self.assertEqual(tokens, ["$TAG", "--pattern", "a.tar.gz#x"])
+
+    def test_hook_id_mention_is_not_an_invocation(self) -> None:
+        text = "      - id: gh-release-download-argv\n"
+        self.assertEqual(invocation_problems(text, ".pre-commit-config.yaml"), [])
 
 
 if __name__ == "__main__":
