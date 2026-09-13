@@ -629,6 +629,25 @@ rm -f "${CRONTAB_CAPTURE}"
             exit 1
         fi
     done
+
+    # Call in a conditional context, where Bash disables implicit errexit.
+    check_gh_auth() { :; }
+    check_vm_running() { :; }
+    ensure_assay_cli_current() { :; }
+    get_runner_status() { printf 'online\n'; }
+    cancel_superseded_runs() { printf 'MAINTENANCE_AFTER_STALE\n'; }
+    prioritize_pr_runs() { :; }
+    heal_action_cache() { :; }
+    clean_actions_cache() { :; }
+    mode=rejected
+    if output=$(health_check); then
+        echo "failed cancellation must fail the health-check caller: $output" >&2
+        exit 1
+    fi
+    [[ "$output" != *MAINTENANCE_AFTER_STALE* ]] || exit 1
+    mode=accepted
+    output=$(health_check)
+    [[ "$output" == *MAINTENANCE_AFTER_STALE* ]] || exit 1
 )
 
 echo "ok: runner auto-recovery keeps registration tokens fresh and bounds destructive calls"

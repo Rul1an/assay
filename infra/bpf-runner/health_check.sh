@@ -695,8 +695,9 @@ health_check() {
     if [[ "$status" == "online" ]]; then
         # Runner is online - perform maintenance tasks
 
-        # 1. Cancel stale queued jobs to prevent backlog
-        cancel_stale_jobs
+        # 1. Fail the tick on a failed request; do not report healthy or continue
+        # maintenance. Propagate explicitly even when a caller suppresses errexit.
+        cancel_stale_jobs || return $?
 
         # 2. Cancel superseded runs (duplicates for same branch)
         cancel_superseded_runs
