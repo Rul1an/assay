@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Contract assertions for the fuzz lane's lock-staleness guard.
+# Contract assertions for the fuzz lane's lock-staleness and executed-units guards.
 #
-# The guard wraps `cargo metadata --locked`, and a wrapper that names one cause for every failure
+# The lock guard wraps `cargo metadata --locked`, and a wrapper that names one cause for every failure
 # is a diagnosis the command did not make. `--locked` fails on a stale lock, but equally on an
 # unparsable manifest, an unavailable dependency, a registry or network fault, or a broken
 # toolchain — and the first version of this wrapper reported all of them as "fuzz/Cargo.lock is
@@ -11,11 +11,14 @@ set -euo pipefail
 # is wrong and, followed, would rewrite a lock that was never the problem.
 #
 # So the wrapper must add exit-code discipline and nothing else: Cargo's own stderr stays visible
-# and stays the diagnosis. These assertions pin that, because prose in a comment is what went
-# stale last time.
+# and stays the diagnosis.
+#
+# The executed-units guard captures libFuzzer output and asserts that units were actually executed,
+# failing if the run executed 0 units or emitted no summary line (-print_final_stats=1).
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORKFLOW="${ROOT}/.github/workflows/fuzz-smoke.yml"
+CHECK_SCRIPT="${ROOT}/scripts/ci/check-fuzz-executed-units.sh"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -23,6 +26,8 @@ fail() {
 }
 
 [[ -f "$WORKFLOW" ]] || fail "missing ${WORKFLOW#"$ROOT"/}"
+[[ -f "$CHECK_SCRIPT" ]] || fail "missing ${CHECK_SCRIPT#"$ROOT"/}"
+[[ -x "$CHECK_SCRIPT" ]] || fail "not executable: ${CHECK_SCRIPT#"$ROOT"/}"
 
 # One root for every temporary the test builds -- mutant workflows and behavioural sandboxes alike.
 # Each mutant run aborts partway through check_workflow by design, so a cleanup line placed after
@@ -64,10 +69,6 @@ toolchain configuration). Report the failure and let Cargo's stderr say why:\n  
     || fail "the lock-guard message should send the reader to Cargo's own error, got:\n  $guard_msg"
 
   # 3. Cargo's stderr must stay visible. Only stdout is noise here — the metadata JSON.
-  #    Any `2>` form, not an enumeration of them: `2>/dev/null` and `2>&1` were listed, so
-  #    `2>cargo-error.log` passed both this test and actionlint while putting the only real
-  #    diagnosis in a file nobody reads.
-  #
   #    Scoped to the entire `Fuzz smoke` run block, not to the guard's own two lines. fd2 is step
   #    state, not line state: `exec 2>cargo-error.log` anywhere above the guard redirects it just
   #    as effectively, and a two-line window cannot see that. The property being promised is that
@@ -85,13 +86,7 @@ toolchain configuration). Report the failure and let Cargo's stderr say why:\n  
   grep -qF 'metadata --locked' <<<"$run_block" \
     || fail "the extracted \`Fuzz smoke\` run block does not contain the guard, so scanning it \
 proves nothing"
-  #    Proved by running the step rather than by pattern-matching it. Matching text was wrong in
-  #    both directions at once: a step-level `shell: bash {0} 2>cargo-error.log` redirects the whole
-  #    script from outside the block a regex can see, and a comment saying `2>cargo-error.log`
-  #    turned the check red while changing nothing. Each new operator spelling only moved the line.
-  #
-  #    So: pin the shell, then execute the extracted script against a `cargo` that fails the way
-  #    `--locked` fails, and require the diagnosis to arrive on the step's own stderr.
+
   local shell_line
   shell_line="$(awk '
     /^      - name: Fuzz smoke[[:space:]]*$/ { in_step=1; next }
@@ -103,45 +98,78 @@ proves nothing"
 script's stderr from outside the script, where nothing in the run block can see it. Got:\n  \
 ${shell_line:-<none>}"
 
-  # `BASH_ENV` names a file bash sources before the script, and `--noprofile --norc` does not
-  # suppress it -- confirmed by running a preamble that does `exec 2>file`, which empties the outer
-  # stderr capture while leaving the script itself untouched. The harness below executes the script,
-  # so it can never see a preamble the runner would have sourced first. Matched as an active mapping
-  # key, one name, no env parsing: a line that is commented out sources nothing and stays green.
-  #    YAML lets a key be plain, single-quoted or double-quoted, and all three are the same key.
-  #    An unquoted-only match called `"BASH_ENV": file` absent while actionlint called it valid, so
-  #    the three forms are spelled out here rather than claimed. Still one name and no parser.
+  # `BASH_ENV` check
   local bash_env_line
   local bash_env_key=$'^[[:space:]]*("BASH_ENV"|\'BASH_ENV\'|BASH_ENV)[[:space:]]*:'
   bash_env_line="$(grep -nE "$bash_env_key" "$wf" | head -1 || true)"
   [[ -z "$bash_env_line" ]] \
-    || fail "this lane must not set \`BASH_ENV\`: bash sources it before the step's own script, so
+    || fail "this lane must not set \`BASH_ENV\`: bash sources it before the step's own script, so \
 a preamble can redirect the step's stderr without appearing in the script at all. Found:\n  \
 $bash_env_line"
 
-  # The harness executes the raw run script, so a GitHub `${{ }}` expression in
-  # it is a bash bad-substitution failure under `set -u` before the guard ever
-  # runs -- which the execution below reports only as a missing wrapper
-  # message, misattributing the break to the guard. Matrix legs and other
-  # GitHub values must arrive through the step's `env:`, the way TARGET does.
+  # Reject GitHub expressions inside raw script block
   if grep -qF '${{' <<<"$run_block"; then
     fail "the \`Fuzz smoke\` run script uses a GitHub \`\${{ }}\` expression; pass the value \
 through the step's \`env:\` instead, so the contract harness executes the same script"
   fi
 
+  # 4. The failure must still be a failure — asserted on the guard's own `||` arm, not on the file.
+  grep -q 'exit 1' <<<"$guard_line" \
+    || fail "the lock guard reports but does not exit nonzero:\n  $guard_line"
+
+  # 5. Check that the step redirects fuzz run output to a log without piping through tee/tail/head,
+  #    prints the log, checks exit code, and invokes check-fuzz-executed-units.sh.
+  grep -q 'scripts/ci/check-fuzz-executed-units.sh' <<<"$run_block" \
+    || fail "the fuzz step does not invoke scripts/ci/check-fuzz-executed-units.sh"
+
+  if grep -E '\|[[:space:]]*(tee|tail|head)' <<<"$run_block"; then
+    fail "the fuzz step pipes through a filter (tee/tail/head), which can mask the exit code; \
+redirect to a file instead"
+  fi
+
+  grep -qE 'cat[[:space:]]+"\$?\{?fuzz_log\}?"' <<<"$run_block" \
+    || fail "the fuzz step must print the fuzz log via cat before checking or exiting"
+
   local sandbox rc=0
   local sentinel="CARGO-STDERR-SENTINEL-4d1f9a"
   sandbox="$(mktemp -d "${SANDBOX_ROOT}/wf.XXXXXX")"
-  mkdir -p "$sandbox/bin" "$sandbox/fuzz" "$sandbox/tmp"
+  mkdir -p "$sandbox/bin" "$sandbox/fuzz" "$sandbox/tmp" "$sandbox/scripts/ci"
   awk '{ sub(/^          /, ""); print }' <<<"$run_block" > "$sandbox/step.sh"
+  cp "$CHECK_SCRIPT" "$sandbox/scripts/ci/check-fuzz-executed-units.sh"
+  chmod +x "$sandbox/scripts/ci/check-fuzz-executed-units.sh"
 
-  # `cargo` fails only for the guard, the way a `--locked` violation does: a message on stderr and
-  # a nonzero exit. Everything else succeeds, so a green run means the guard did its job.
   {
     echo '#!/usr/bin/env bash'
     echo 'if [[ "$*" == *"metadata --locked"* ]]; then'
-    echo "  echo \"error: the lock file needs to be updated -- ${sentinel}\" >&2"
-    echo '  exit 1'
+    echo '  if [[ "${MOCK_CARGO_SCENARIO:-}" == "lock_failure" ]]; then'
+    echo "    echo \"error: the lock file needs to be updated -- ${sentinel}\" >&2"
+    echo '    exit 1'
+    echo '  fi'
+    echo '  exit 0'
+    echo 'fi'
+    echo 'if [[ "$*" == *"fuzz run"* ]]; then'
+    echo '  case "${MOCK_CARGO_SCENARIO:-}" in'
+    echo '    fuzz_crash)'
+    echo '      echo "FATAL: fuzz target crashed with SIGSEGV" >&2'
+    echo '      exit 77'
+    echo '      ;;'
+    echo '    fuzz_zero_units)'
+    echo '      echo "Running: 0 units"'
+    echo '      echo "stat::number_of_executed_units: 0"'
+    echo '      exit 0'
+    echo '      ;;'
+    echo '    fuzz_no_summary)'
+    echo '      echo "Fuzzer started and hung"'
+    echo '      exit 0'
+    echo '      ;;'
+    echo '    fuzz_success | *)'
+    echo '      echo "Running: 20000 units"'
+    echo '      echo "stat::number_of_executed_units: 20000"'
+    echo '      echo "stat::average_exec_per_sec: 1428"'
+    echo '      echo "stat::peak_rss_mb: 412"'
+    echo '      exit 0'
+    echo '      ;;'
+    echo '  esac'
     echo 'fi'
     echo 'exit 0'
   } > "$sandbox/bin/cargo"
@@ -157,48 +185,76 @@ through the step's \`env:\` instead, so the contract harness executes the same s
 the run below would exercise the real toolchain instead of the mock"
   done
 
-  # `env -u BASH_ENV`: whatever the caller's environment carries must not decide whether this proof
-  # holds. The workflow is checked for it above; here the harness itself is put beyond its reach.
-  # TARGET names one matrix leg, the way RUNS names one budget: GitHub interpolates the step's
-  # `env:` before bash starts, and the harness stands in for that interpolation here.
+  # Scenario 1: lock validation failure
   ( cd "$sandbox" && env -u BASH_ENV PATH="$sandbox/bin:$PATH" RUNNER_TEMP="$sandbox/tmp" \
       FUZZ_TOOLCHAIN="nightly-mock" RUNS=1 MAX_TOTAL_TIME=1 TARGET="bundle_reader" \
-      bash step.sh ) >"$sandbox/out" 2>"$sandbox/err" || rc=$?
+      MOCK_CARGO_SCENARIO="lock_failure" \
+      bash step.sh ) >"$sandbox/out.lock" 2>"$sandbox/err.lock" || rc=$?
 
   [[ "$rc" -ne 0 ]] \
     || fail "the fuzz step exited 0 even though \`cargo metadata --locked\` failed"
-  grep -q '::error::locked fuzz metadata validation failed' "$sandbox/out" \
-    || fail "the guard's wrapper message never printed:\n$(cat "$sandbox/out")"
-  grep -q "$sentinel" "$sandbox/err" \
-    || fail "Cargo's stderr did not reach the step's stderr, so the only real diagnosis is \
-invisible to a reviewer. Step stderr was:\n$(cat "$sandbox/err")"
+  grep -q '::error::locked fuzz metadata validation failed' "$sandbox/out.lock" \
+    || fail "the guard's wrapper message never printed:\n$(cat "$sandbox/out.lock")"
+  grep -q "$sentinel" "$sandbox/err.lock" \
+    || fail "Cargo's stderr did not reach the step's stderr. Step stderr was:\n$(cat "$sandbox/err.lock")"
 
-  # 4. The failure must still be a failure — asserted on the guard's own `||` arm, not on the file.
-  #    Searching the whole workflow passed on the seed-corpus check's unrelated `exit 1`, so
-  #    removing only this guard's exit left the contract green. An assertion scoped wider than its
-  #    subject reports on something else.
-  grep -q 'exit 1' <<<"$guard_line" \
-    || fail "the lock guard reports but does not exit nonzero:\n  $guard_line"
+  # Scenario 2: fuzz run crash (must preserve exit code 77 and print log)
+  rc=0
+  ( cd "$sandbox" && env -u BASH_ENV PATH="$sandbox/bin:$PATH" RUNNER_TEMP="$sandbox/tmp" \
+      FUZZ_TOOLCHAIN="nightly-mock" RUNS=1 MAX_TOTAL_TIME=1 TARGET="bundle_reader" \
+      MOCK_CARGO_SCENARIO="fuzz_crash" \
+      bash step.sh ) >"$sandbox/out.crash" 2>"$sandbox/err.crash" || rc=$?
 
-  # 5. The toolchain pin stays dated. A channel alias would hide both a break and its fix, which is
-  #    exactly what happened when nightly-2026-07-24 began ICEing on tokio under sanitizer coverage.
+  [[ "$rc" -eq 77 ]] \
+    || fail "a fuzz crash did not preserve exit code 77 (got exit code ${rc})"
+  grep -q 'FATAL: fuzz target crashed' "$sandbox/out.crash" \
+    || fail "fuzz crash output was not displayed on stdout"
+
+  # Scenario 3: fuzz run succeeds with 0 executed units (must fail with ::error::)
+  rc=0
+  ( cd "$sandbox" && env -u BASH_ENV PATH="$sandbox/bin:$PATH" RUNNER_TEMP="$sandbox/tmp" \
+      FUZZ_TOOLCHAIN="nightly-mock" RUNS=1 MAX_TOTAL_TIME=1 TARGET="bundle_reader" \
+      MOCK_CARGO_SCENARIO="fuzz_zero_units" \
+      bash step.sh ) >"$sandbox/out.zero" 2>"$sandbox/err.zero" || rc=$?
+
+  [[ "$rc" -ne 0 ]] \
+    || fail "a fuzz run with 0 executed units unexpectedly exited 0"
+  grep -q '::error::fuzz target bundle_reader executed 0 units' "$sandbox/err.zero" \
+    || grep -q '::error::fuzz target bundle_reader executed 0 units' "$sandbox/out.zero" \
+    || fail "0 executed units did not report expected ::error:: message:\n$(cat "$sandbox/out.zero" "$sandbox/err.zero")"
+
+  # Scenario 4: fuzz run succeeds with missing summary (must fail with ::error::)
+  rc=0
+  ( cd "$sandbox" && env -u BASH_ENV PATH="$sandbox/bin:$PATH" RUNNER_TEMP="$sandbox/tmp" \
+      FUZZ_TOOLCHAIN="nightly-mock" RUNS=1 MAX_TOTAL_TIME=1 TARGET="bundle_reader" \
+      MOCK_CARGO_SCENARIO="fuzz_no_summary" \
+      bash step.sh ) >"$sandbox/out.nosummary" 2>"$sandbox/err.nosummary" || rc=$?
+
+  [[ "$rc" -ne 0 ]] \
+    || fail "a fuzz run with no summary line unexpectedly exited 0"
+  grep -q '::error::no stat::number_of_executed_units line found' "$sandbox/err.nosummary" \
+    || grep -q '::error::no stat::number_of_executed_units line found' "$sandbox/out.nosummary" \
+    || fail "missing summary line did not report expected ::error:: message:\n$(cat "$sandbox/out.nosummary" "$sandbox/err.nosummary")"
+
+  # Scenario 5: fuzz run succeeds with valid units (must succeed)
+  rc=0
+  ( cd "$sandbox" && env -u BASH_ENV PATH="$sandbox/bin:$PATH" RUNNER_TEMP="$sandbox/tmp" \
+      FUZZ_TOOLCHAIN="nightly-mock" RUNS=1 MAX_TOTAL_TIME=1 TARGET="bundle_reader" \
+      MOCK_CARGO_SCENARIO="fuzz_success" \
+      bash step.sh ) >"$sandbox/out.success" 2>"$sandbox/err.success" || rc=$?
+
+  [[ "$rc" -eq 0 ]] \
+    || fail "a valid fuzz run with 20000 units failed with exit code ${rc}:\n$(cat "$sandbox/out.success" "$sandbox/err.success")"
+  grep -q 'ok: fuzz target bundle_reader executed 20000 units' "$sandbox/out.success" \
+    || fail "successful fuzz run did not report success message:\n$(cat "$sandbox/out.success")"
+
+  # 6. The toolchain pin stays dated.
   pin="$(grep -E '^\s*FUZZ_TOOLCHAIN:' "$wf" | head -1 | sed 's/.*: *//')"
   [[ "$pin" =~ ^nightly-[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] \
     || fail "FUZZ_TOOLCHAIN must be a dated nightly, got: ${pin:-<empty>}"
   PIN="$pin"
 
-  # 6. Every local crate the fuzz graph resolves must trigger this lane.
-  #
-  #    Derived from `fuzz/Cargo.lock` rather than listed: a package with no `source` is a path
-  #    dependency, so the set comes from the same file the lane pins. Listing them by hand is what
-  #    left `assay-adapter-api`, `assay-canonical` and `assay-common` uncovered while
-  #    `assay-core` and `assay-evidence` were named -- a change in any of the three could alter
-  #    code, manifest or lock without this lane ever running, which is the staleness this whole
-  #    branch exists to stop. Offline and cheap: no cargo invocation.
-  #    Read from the `on.pull_request.paths` sequence itself, not from the file. A crate name
-  #    appears in this workflow's own prose too, so a whole-file grep answered "covered" for
-  #    `# - "crates/assay-common/**"` -- a commented-out entry that triggers nothing, and that
-  #    actionlint passes as valid YAML. The extractor takes only `- ` items inside that one block.
+  # 7. Every local crate the fuzz graph resolves must trigger this lane.
   local paths_active locals missing=""
   paths_active="$(awk '
     /^  pull_request:[[:space:]]*$/ { in_pr=1; next }
@@ -210,7 +266,6 @@ invisible to a reviewer. Step stderr was:\n$(cat "$sandbox/err")"
   [[ -n "$paths_active" ]] \
     || fail "could not read the \`on.pull_request.paths\` sequence from ${wf##*/}"
 
-  local locals
   locals="$(awk '/^\[\[package\]\]/{name="";src=0} /^name = /{gsub(/[",]/,"",$3); name=$3} \
                  /^source = /{src=1} /^$/{if(name!="" && !src) print name} \
                  END{if(name!="" && !src) print name}' \
@@ -226,87 +281,211 @@ them, so a change there can go untested:${missing}"
 
 check_workflow "$WORKFLOW"
 
-# Negative control: strip the guard's exit and nothing else. The seed-corpus check keeps its own
-# `exit 1`, which is exactly the state that used to pass.
+# --- Unit Controls for check-fuzz-executed-units.sh ---
+
+# Negative control: log with 0 executed units
+zero_summary="$(mktemp "${SANDBOX_ROOT}/zero.XXXXXX")"
+cat <<'EOF' > "$zero_summary"
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 123456789
+stat::number_of_executed_units: 0
+stat::average_exec_per_sec:     0
+stat::new_units_added:          0
+stat::slowest_unit_time_sec:    0
+stat::peak_rss_mb:              120
+EOF
+rc=0
+out="$(bash "$CHECK_SCRIPT" "$zero_summary" "bundle_reader" 2>&1)" || rc=$?
+[[ "$rc" -ne 0 ]] || fail "check-fuzz-executed-units passed on 0 executed units"
+grep -q '::error::fuzz target bundle_reader executed 0 units' <<<"$out" \
+  || fail "check-fuzz-executed-units did not emit 0 units error message on 0 units, got:\n$out"
+echo "ok: negative control on 0 executed units correctly fails"
+
+# Negative control: log with no stat line (e.g. hung process or missing -print_final_stats)
+missing_summary="$(mktemp "${SANDBOX_ROOT}/missing.XXXXXX")"
+cat <<'EOF' > "$missing_summary"
+INFO: Seed: 123456789
+INFO: Loaded 14 seeds
+# Process exited without final stats
+EOF
+rc=0
+out="$(bash "$CHECK_SCRIPT" "$missing_summary" "bundle_reader" 2>&1)" || rc=$?
+[[ "$rc" -ne 0 ]] || fail "check-fuzz-executed-units passed on missing summary line"
+grep -q '::error::no stat::number_of_executed_units line found in fuzz output' <<<"$out" \
+  || fail "check-fuzz-executed-units did not emit missing summary error message, got:\n$out"
+echo "ok: negative control on missing summary line correctly fails"
+
+# Negative control: log with malformed stat line
+malformed_summary="$(mktemp "${SANDBOX_ROOT}/malformed.XXXXXX")"
+cat <<'EOF' > "$malformed_summary"
+stat::number_of_executed_units: not_a_number
+EOF
+rc=0
+out="$(bash "$CHECK_SCRIPT" "$malformed_summary" "bundle_reader" 2>&1)" || rc=$?
+[[ "$rc" -ne 0 ]] || fail "check-fuzz-executed-units passed on malformed summary line"
+grep -q '::error::malformed stat::number_of_executed_units line' <<<"$out" \
+  || fail "check-fuzz-executed-units did not emit malformed line error message, got:\n$out"
+echo "ok: negative control on malformed stat line correctly fails"
+
+# Positive control: real-shaped libFuzzer summary
+# Exact format cited from LLVM libFuzzer compiler-rt/lib/fuzzer/FuzzerLoop.cpp PrintFinalStats():
+# Printf("stat::number_of_executed_units: %zd\n", TotalNumberOfRuns);
+# Printf("stat::average_exec_per_sec:     %zd\n", ExecsPerSec);
+# Printf("stat::new_units_added:          %zd\n", NumberOfNewUnitsAdded);
+# Printf("stat::slowest_unit_time_sec:    %zd\n", SlowestUnitStartTime);
+# Printf("stat::peak_rss_mb:              %zd\n", GetPeakRSSMb());
+real_summary="$(mktemp "${SANDBOX_ROOT}/real.XXXXXX")"
+cat <<'EOF' > "$real_summary"
+INFO: 20000 runs completed in 14 seconds.
+stat::number_of_executed_units: 20000
+stat::average_exec_per_sec:     1428
+stat::new_units_added:          776
+stat::slowest_unit_time_sec:    0
+stat::peak_rss_mb:              412
+EOF
+rc=0
+out="$(bash "$CHECK_SCRIPT" "$real_summary" "bundle_reader" 2>&1)" || rc=$?
+[[ "$rc" -eq 0 ]] || fail "check-fuzz-executed-units failed on real libFuzzer summary, got:\n$out"
+grep -q 'ok: fuzz target bundle_reader executed 20000 units' <<<"$out" \
+  || fail "check-fuzz-executed-units did not print expected ok line on real summary, got:\n$out"
+echo "ok: positive control on real libFuzzer summary passes"
+
+# Positive control: multi-worker libFuzzer summary (summing per-worker outputs)
+multi_summary="$(mktemp "${SANDBOX_ROOT}/multi.XXXXXX")"
+cat <<'EOF' > "$multi_summary"
+=== Worker 0 ===
+stat::number_of_executed_units: 10000
+stat::average_exec_per_sec:     1000
+stat::peak_rss_mb:              200
+=== Worker 1 ===
+stat::number_of_executed_units: 15000
+stat::average_exec_per_sec:     1500
+stat::peak_rss_mb:              250
+EOF
+rc=0
+out="$(bash "$CHECK_SCRIPT" "$multi_summary" "mcp_jsonrpc" 2>&1)" || rc=$?
+[[ "$rc" -eq 0 ]] || fail "check-fuzz-executed-units failed on multi-worker summary, got:\n$out"
+grep -q 'ok: fuzz target mcp_jsonrpc executed 25000 units' <<<"$out" \
+  || fail "check-fuzz-executed-units did not sum multi-worker units correctly, got:\n$out"
+echo "ok: positive control on multi-worker summary sums units correctly"
+
+# --- Parser Mutation Controls (RED tests) ---
+
+# Negative control mutant: bypass 0-units check in check-fuzz-executed-units.sh
+zero_mutant_script="$(mktemp "${SANDBOX_ROOT}/zero_mut.XXXXXX")"
+sed 's|if \[\[ "\$total_units" -le 0 \]\];* *then|if false; then|' "$CHECK_SCRIPT" > "$zero_mutant_script"
+if ! grep -q 'if false; then' "$zero_mutant_script"; then
+  fail "the 0-units mutation did not apply to check-fuzz-executed-units.sh"
+fi
+if ! bash "$zero_mutant_script" "$zero_summary" "bundle_reader" >/dev/null 2>&1; then
+  fail "bypassing the 0-units check still caused a failure on 0 units"
+fi
+echo "ok: removing the 0-units check in the checker turns the 0-units control false-green (isolated)"
+
+# Negative control mutant: bypass missing-summary check in check-fuzz-executed-units.sh
+missing_mutant_script="$(mktemp "${SANDBOX_ROOT}/missing_mut.XXXXXX")"
+sed 's|if \[\[ -z "\$matched_lines" \]\];* *then|if false; then|' "$CHECK_SCRIPT" > "$missing_mutant_script"
+if ! grep -q 'if false; then' "$missing_mutant_script"; then
+  fail "the missing-summary mutation did not apply to check-fuzz-executed-units.sh"
+fi
+mut_out="$(bash "$missing_mutant_script" "$missing_summary" "bundle_reader" 2>&1 || true)"
+if grep -q '::error::no stat::number_of_executed_units line found in fuzz output' <<<"$mut_out"; then
+  fail "bypassing the missing-summary check still emitted the missing-summary error"
+fi
+echo "ok: removing the missing-summary check fails to emit the distinct missing-summary error"
+
+# --- Workflow Mutation Controls ---
+
+# Negative control: strip the lock guard's exit and nothing else.
 mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
 sed 's|\(inspect the Cargo error above"\); exit 1; }|\1; }|' "$WORKFLOW" > "$mutant"
 if ! grep -q 'exit 1' "$mutant"; then
   fail "the mutation removed every exit, so it does not isolate the guard"
 fi
 if ( check_workflow "$mutant" ) >/dev/null 2>&1; then
-  fail "removing only the guard's exit left the contract green — the fail-closed assertion is not \
-bound to the guard"
+  fail "removing only the guard's exit left the contract green"
 fi
 echo "ok: removing only the guard's exit turns the contract red"
 
-# Negative control: send stderr to a file. It is not `/dev/null` and not `2>&1`, so the enumerated
-# form of this check passed it -- and actionlint passes it too, since the shell is valid. The
-# diagnosis simply lands somewhere no reviewer looks.
+# Negative control: remove check-fuzz-executed-units.sh invocation from workflow
+no_check_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
+sed 's|bash scripts/ci/check-fuzz-executed-units.sh.*||' "$WORKFLOW" > "$no_check_mutant"
+if ( check_workflow "$no_check_mutant" ) >/dev/null 2>&1; then
+  fail "removing the check-fuzz-executed-units invocation left the contract green"
+fi
+echo "ok: removing check-fuzz-executed-units invocation turns the contract red"
+
+# Negative control: pipe cargo fuzz run through tee in workflow
+tee_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
+sed 's|-print_final_stats=1 > "${fuzz_log}" 2>&1|-print_final_stats=1 2>\&1 \| tee "${fuzz_log}"|' "$WORKFLOW" > "$tee_mutant"
+if ( check_workflow "$tee_mutant" ) >/dev/null 2>&1; then
+  fail "piping cargo fuzz run through tee left the contract green"
+fi
+echo "ok: piping cargo fuzz run through tee turns the contract red"
+
+# Negative control: swallow fuzz crash exit code in workflow
+swallow_crash_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
+sed 's|exit "${fuzz_status}"|# exit "${fuzz_status}"|' "$WORKFLOW" > "$swallow_crash_mutant"
+grep -q '# exit "${fuzz_status}"' "$swallow_crash_mutant" \
+  || fail "the swallow-crash mutation did not apply"
+if ( check_workflow "$swallow_crash_mutant" ) >/dev/null 2>&1; then
+  fail "swallowing fuzz crash exit code left the contract green"
+fi
+echo "ok: swallowing fuzz crash exit code turns the contract red"
+
+# Negative control: send Cargo stderr to a file.
 redirect_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
 sed 's|--format-version 1 >/dev/null )|--format-version 1 >/dev/null 2>cargo-error.log )|' \
   "$WORKFLOW" > "$redirect_mutant"
 grep -q '2>cargo-error.log' "$redirect_mutant" \
   || fail "the redirect mutation did not apply, so it proves nothing"
 if ( check_workflow "$redirect_mutant" ) >/dev/null 2>&1; then
-  fail "sending Cargo's stderr to a file left the contract green — the check enumerates redirect \
-forms instead of rejecting them"
+  fail "sending Cargo's stderr to a file left the contract green"
 fi
 echo "ok: redirecting Cargo's stderr to a file turns the contract red"
 
-# Negative control: drop one crate from the path filter. This is the state the branch shipped in --
-# three of the five local crates were simply absent -- so the assertion that catches it has to be
-# shown catching it.
+# Negative control: drop one crate from the path filter.
 paths_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
 grep -v '"crates/assay-common/\*\*"' "$WORKFLOW" > "$paths_mutant"
 if ( check_workflow "$paths_mutant" ) >/dev/null 2>&1; then
-  fail "dropping a local crate from the path filter left the contract green — the coverage \
-assertion is not bound to the lockfile"
+  fail "dropping a local crate from the path filter left the contract green"
 fi
 echo "ok: dropping a local crate from the path filter turns the contract red"
 
-# Negative control: comment the entry out instead of deleting it. The line is still in the file and
-# still says the crate's name, so a whole-file grep called it covered — while `pull_request.paths`
-# no longer carries it and actionlint sees nothing wrong.
+# Negative control: comment the entry out instead of deleting it.
 comment_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
 sed 's|^      - "crates/assay-common/\*\*"|      # - "crates/assay-common/**"|' \
   "$WORKFLOW" > "$comment_mutant"
 grep -q '^      # - "crates/assay-common/\*\*"' "$comment_mutant" \
   || fail "the comment mutation did not apply, so it proves nothing"
 if ( check_workflow "$comment_mutant" ) >/dev/null 2>&1; then
-  fail "commenting out a path entry left the contract green — the coverage assertion reads the \
-file rather than the active \`pull_request.paths\` sequence"
+  fail "commenting out a path entry left the contract green"
 fi
 echo "ok: commenting out a path entry turns the contract red"
 
-# Negative control: move the redirect off the guard line. `exec 2>` sets fd2 for the rest of the
-# step, so Cargo's diagnosis is gone just the same -- but a check windowed on the guard's own two
-# lines never sees it, and actionlint has no opinion. Same promised property, one scope wider.
+# Negative control: move the redirect off the guard line.
 exec_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
 sed 's|^          # Assert the checked-in lock is current before fuzzing.|          exec 2>cargo-error.log\
 &|' "$WORKFLOW" > "$exec_mutant"
 grep -q '^          exec 2>cargo-error.log$' "$exec_mutant" \
   || fail "the exec-redirect mutation did not apply, so it proves nothing"
 if ( check_workflow "$exec_mutant" ) >/dev/null 2>&1; then
-  fail "an \`exec 2>\` earlier in the step left the contract green — the stderr check is \
-windowed on the guard rather than on the step"
+  fail "an \`exec 2>\` earlier in the step left the contract green"
 fi
 echo "ok: an \`exec 2>\` earlier in the step turns the contract red"
 
-# Negative control: `2<>` opens fd2 read/write on a file. It is a different operator, not a
-# different target, so a check spelled `2>` never saw it -- and the step's stderr is just as gone.
+# Negative control: `2<>` opens fd2 read/write on a file.
 readwrite_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
 sed 's|^          # Assert the checked-in lock is current before fuzzing.|          exec 2<>cargo-error.log\
 &|' "$WORKFLOW" > "$readwrite_mutant"
 grep -q '^          exec 2<>cargo-error.log$' "$readwrite_mutant" \
   || fail "the read/write redirect mutation did not apply, so it proves nothing"
 if ( check_workflow "$readwrite_mutant" ) >/dev/null 2>&1; then
-  fail "an \`exec 2<>\` left the contract green — the stderr check matches one spelling rather \
-than the redirection operators that hide fd2"
+  fail "an \`exec 2<>\` left the contract green"
 fi
 echo "ok: an \`exec 2<>\` turns the contract red"
 
-# Negative control: redirect from the step's `shell:` line. It is outside the run block entirely,
-# so no amount of scanning the script can see it -- only pinning the shell can.
+# Negative control: redirect from the step's `shell:` line.
 shell_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
 awk '
   /^      - name: Fuzz smoke[[:space:]]*$/ { in_step=1 }
@@ -316,27 +495,22 @@ awk '
 grep -q 'shell: bash {0} 2>cargo-error.log' "$shell_mutant" \
   || fail "the custom-shell mutation did not apply, so it proves nothing"
 if ( check_workflow "$shell_mutant" ) >/dev/null 2>&1; then
-  fail "a step-level \`shell:\` redirect left the contract green — the stderr proof does not \
-cover how the script is invoked"
+  fail "a step-level \`shell:\` redirect left the contract green"
 fi
 echo "ok: a step-level \`shell:\` redirect turns the contract red"
 
 # Positive control: a comment that merely names a redirect changes nothing and must stay green.
-# The previous static check matched the text and went red on it, which is a false alarm on a line
-# warning against the very thing the test exists to catch.
 comment_ok="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
 sed 's|^          # Assert the checked-in lock is current before fuzzing.|          # Never add 2>cargo-error.log here, and never set BASH_ENV: anything\
 &|' "$WORKFLOW" > "$comment_ok"
 grep -q '# Never add 2>cargo-error.log here' "$comment_ok" \
   || fail "the comment control did not apply, so it proves nothing"
 if ! ( check_workflow "$comment_ok" ) >/dev/null 2>&1; then
-  fail "a comment naming a redirect turned the contract red — the check reacts to text rather \
-than to behaviour"
+  fail "a comment naming a redirect turned the contract red"
 fi
 echo "ok: a comment naming a redirect or BASH_ENV leaves the contract green"
 
-# Negative control: set `BASH_ENV` on the step. The script is untouched, so extracting and running
-# it proves nothing -- the runner would have sourced a preamble before the first line ever ran.
+# Negative control: set `BASH_ENV` on the step.
 bash_env_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
 awk '
   /^          RUNS: / && !done { print "          BASH_ENV: .github/fuzz-preamble.sh"; done=1 }
@@ -345,13 +519,11 @@ awk '
 grep -q '^          BASH_ENV: ' "$bash_env_mutant" \
   || fail "the BASH_ENV mutation did not apply, so it proves nothing"
 if ( check_workflow "$bash_env_mutant" ) >/dev/null 2>&1; then
-  fail "a step-level \`BASH_ENV\` left the contract green — bash sources it before the script, \
-which is where the harness starts looking"
+  fail "a step-level \`BASH_ENV\` left the contract green"
 fi
 echo "ok: a step-level \`BASH_ENV\` turns the contract red"
 
-# Negative control: quote the key. `"BASH_ENV": file` is the same mapping key to YAML and to the
-# runner, and actionlint accepts it -- only a match written for the bare word missed it.
+# Negative control: quote the key.
 quoted_env_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
 awk '
   /^          RUNS: / && !done { print "          \"BASH_ENV\": .github/fuzz-preamble.sh"; done=1 }
@@ -360,26 +532,22 @@ awk '
 grep -q '^          "BASH_ENV": ' "$quoted_env_mutant" \
   || fail "the quoted-key mutation did not apply, so it proves nothing"
 if ( check_workflow "$quoted_env_mutant" ) >/dev/null 2>&1; then
-  fail "a quoted \`\"BASH_ENV\"\` key left the contract green — the check matches one spelling \
-of the key rather than the key"
+  fail "a quoted \`\"BASH_ENV\"\` key left the contract green"
 fi
 echo "ok: a quoted \`BASH_ENV\` key turns the contract red"
 
-# Negative control: use a GitHub expression in the run script instead of the
-# step's `env:`. The harness executes the raw script, so `${{ }}` dies as a
-# bad substitution under `set -u` before the guard runs -- and without the
-# static check the failure would read as a missing guard message.
+# Negative control: use a GitHub expression in the run script instead of the step's `env:`.
 expr_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
 sed 's|^          case "${TARGET}" in|          case "${{ matrix.target }}" in|' \
   "$WORKFLOW" > "$expr_mutant"
 grep -q 'matrix.target' "$expr_mutant" \
   || fail "the expression mutation did not apply, so it proves nothing"
 if ( check_workflow "$expr_mutant" ) >/dev/null 2>&1; then
-  fail "a GitHub expression in the run script left the contract green — the script the harness \
-executes is not the script the runner interpolates"
+  fail "a GitHub expression in the run script left the contract green"
 fi
 echo "ok: a GitHub expression in the run script turns the contract red"
 
 echo "ok: the lock guard reports without diagnosing, keeps Cargo's stderr, and fails closed"
+echo "ok: the executed-units guard fails on 0 units and missing summary, preserves crashes, and sums multi-worker outputs"
 echo "ok: FUZZ_TOOLCHAIN is dated (${PIN})"
 echo "PASS: fuzz lane contract"

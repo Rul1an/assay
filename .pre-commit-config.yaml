@@ -413,7 +413,7 @@ repos:
         # `fuzz/Cargo.{toml,lock}` included: the contract derives the lane's required path filter
         # from the lock, so a change there can invalidate the assertion without touching either
         # file that used to trigger this hook.
-        files: ^(scripts/ci/test-fuzz-lane-contract\.sh|\.github/workflows/fuzz-smoke\.yml|fuzz/Cargo\.(toml|lock)|\.pre-commit-config\.yaml)$
+        files: ^(scripts/ci/(test-fuzz-lane-contract|check-fuzz-executed-units)\.sh|\.github/workflows/fuzz-smoke\.yml|fuzz/Cargo\.(toml|lock)|\.pre-commit-config\.yaml)$
 
       - id: git-fixture-env-isolation
         name: Git fixture tests isolate hook repository state
