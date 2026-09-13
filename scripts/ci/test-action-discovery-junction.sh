@@ -544,7 +544,7 @@ check_explicit_glob_and_pin_filter() {
   grep -Fq "attests the sandbox command's observed effects, not that a test suite" "${doc_path}" \
     || die "docs dry-run recipe must qualify observed-effects-only (not suite pass)"
 
-  local glob_scratch capture_default capture_star mock_action run_body pg_runner child_presence
+  local glob_scratch capture_default capture_star mock_action run_body pg_runner pg_runner_dir child_presence child_presence_dir
   glob_scratch="$(mktemp -d "${TMPDIR:-/tmp}/2802-glob-depth.XXXXXX")"
   register_junction_temp "${glob_scratch}"
   mkdir -p "${glob_scratch}/.assay/evidence/mid/deep"
@@ -560,8 +560,11 @@ check_explicit_glob_and_pin_filter() {
 
   # Shared runner: new session/process group; on wall timeout TERM then KILL the group.
   # Descendant cleanup is only claimed where the synthetic child probe below measures it.
-  pg_runner="$(mktemp "${TMPDIR:-/tmp}/2802-pg-runner.XXXXXX.py")"
-  register_junction_temp "${pg_runner}"
+  pg_runner_dir="$(mktemp -d "${TMPDIR:-/tmp}/2802-pg-runner.XXXXXX")"
+  register_junction_temp "${pg_runner_dir}"
+  pg_runner="${pg_runner_dir}/2802-pg-runner.py"
+  [[ "${pg_runner}" != *XXXXXX* ]] \
+    || die "pg_runner template did not expand X characters (retained literal XXXXXX)"
   cat >"${pg_runner}" <<'PYPG'
 import json
 import os
@@ -688,8 +691,11 @@ if __name__ == "__main__":
 PYPG
 
   # Shared probe predicate: os.kill(pid, 0) errno-aware. Only ESRCH == absent.
-  child_presence="$(mktemp "${TMPDIR:-/tmp}/2802-child-presence.XXXXXX.py")"
-  register_junction_temp "${child_presence}"
+  child_presence_dir="$(mktemp -d "${TMPDIR:-/tmp}/2802-child-presence.XXXXXX")"
+  register_junction_temp "${child_presence_dir}"
+  child_presence="${child_presence_dir}/2802-child-presence.py"
+  [[ "${child_presence}" != *XXXXXX* ]] \
+    || die "child_presence template did not expand X characters (retained literal XXXXXX)"
   cat >"${child_presence}" <<'PYPRES'
 import errno
 import os
@@ -872,7 +878,7 @@ PYDISC
   # Positive / no-op control: short script exits 0 under the same process-group runner.
   {
     local noop_sh noop_rc
-    noop_sh="$(mktemp "${TMPDIR:-/tmp}/2802-noop.XXXXXX.sh")"
+    noop_sh="$(mktemp "${TMPDIR:-/tmp}/2802-noop.XXXXXX")"
     register_junction_temp "${noop_sh}"
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'echo noop-ok' >"${noop_sh}"
     set +e
@@ -983,6 +989,44 @@ with patch.object(os, "kill", side_effect=OSError(errno.EIO, "I/O error")):
     assert mod.classify_pid(1) == "unavailable"
 print("ok    mock-child-presence-other-oserror-unavailable")
 PYPRESMOCK
+
+  # Verify scratch template allocations expand trailing X's and are collision-free under a shared temp parent.
+  {
+    local probe_parent probe_r1_dir probe_r2_dir probe_r1 probe_r2
+    local probe_p1_dir probe_p2_dir probe_p1 probe_p2
+    probe_parent="$(mktemp -d "${TMPDIR:-/tmp}/2802-collision-probe.XXXXXX")"
+    register_junction_temp "${probe_parent}"
+
+    # pg_runner pattern: two allocations under same parent must succeed and yield distinct paths
+    probe_r1_dir="$(mktemp -d "${probe_parent}/2802-pg-runner.XXXXXX")"
+    probe_r2_dir="$(mktemp -d "${probe_parent}/2802-pg-runner.XXXXXX")"
+    [[ "${probe_r1_dir}" != "${probe_r2_dir}" ]] \
+      || die "pg_runner directory template failed to expand distinct trailing X characters"
+    probe_r1="${probe_r1_dir}/2802-pg-runner.py"
+    probe_r2="${probe_r2_dir}/2802-pg-runner.py"
+    : >"${probe_r1}"
+    : >"${probe_r2}"
+    [[ -f "${probe_r1}" && -f "${probe_r2}" && "${probe_r1}" != "${probe_r2}" ]] \
+      || die "pg_runner concurrent allocation failed to produce distinct retained files"
+    [[ "${probe_r1}" != *XXXXXX* && "${probe_r2}" != *XXXXXX* ]] \
+      || die "pg_runner path retained literal XXXXXX"
+
+    # child_presence pattern: two allocations under same parent must succeed and yield distinct paths
+    probe_p1_dir="$(mktemp -d "${probe_parent}/2802-child-presence.XXXXXX")"
+    probe_p2_dir="$(mktemp -d "${probe_parent}/2802-child-presence.XXXXXX")"
+    [[ "${probe_p1_dir}" != "${probe_p2_dir}" ]] \
+      || die "child_presence directory template failed to expand distinct trailing X characters"
+    probe_p1="${probe_p1_dir}/2802-child-presence.py"
+    probe_p2="${probe_p2_dir}/2802-child-presence.py"
+    : >"${probe_p1}"
+    : >"${probe_p2}"
+    [[ -f "${probe_p1}" && -f "${probe_p2}" && "${probe_p1}" != "${probe_p2}" ]] \
+      || die "child_presence concurrent allocation failed to produce distinct retained files"
+    [[ "${probe_p1}" != *XXXXXX* && "${probe_p2}" != *XXXXXX* ]] \
+      || die "child_presence path retained literal XXXXXX"
+
+    ok "scratch-allocations-collision-free"
+  }
 
   # Teardown: signal only the probe-recorded child PID (never rediscover a pgid).
   reap_owned_probe_child() {
