@@ -8,8 +8,37 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
+
+
+def _path_within_root(path: str, root: str) -> bool:
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:
+        return False
+
+
+def _allowed_metadata_roots(cwd: Path) -> list[tuple[str, str]]:
+    allowed: list[tuple[str, str]] = [
+        ("repository root (checked-in fixtures)", os.path.realpath(str(cwd)))
+    ]
+    runner_temp = os.environ.get("RUNNER_TEMP", "").strip()
+    if runner_temp:
+        allowed.append(
+            (
+                "RUNNER_TEMP (CI-generated fixtures)",
+                os.path.realpath(runner_temp),
+            )
+        )
+    allowed.append(
+        (
+            "system temp dir (local/CI fixture scratch)",
+            os.path.realpath(tempfile.gettempdir()),
+        )
+    )
+    return allowed
 
 
 def _read_metadata(explicit_path: str | None) -> dict[str, Any]:
@@ -22,7 +51,21 @@ def _read_metadata(explicit_path: str | None) -> dict[str, Any]:
             metadata_path = env_override
 
     if metadata_path:
-        with open(metadata_path, "r", encoding="utf-8") as fh:
+        resolved_metadata_path = os.path.realpath(metadata_path)
+        allowed_roots = _allowed_metadata_roots(Path.cwd().resolve())
+        if not any(
+            _path_within_root(resolved_metadata_path, root)
+            for _, root in allowed_roots
+        ):
+            allowed_roots_text = ", ".join(
+                f"{label}: {root}" for label, root in allowed_roots
+            )
+            raise SystemExit(
+                "Refusing --metadata-json/ASSAY_SEMVER_METADATA_JSON outside allowed roots. "
+                f"Resolved path: {resolved_metadata_path}. Allowed roots: {allowed_roots_text}."
+            )
+
+        with open(resolved_metadata_path, "r", encoding="utf-8") as fh:
             return json.load(fh)
 
     result = subprocess.run(
@@ -39,7 +82,7 @@ def _manifest_relpath(manifest_path: str) -> str:
     cwd = Path.cwd().resolve()
     if candidate.is_absolute():
         try:
-            return candidate.resolve().relative_to(cwd).as_posix()
+            return candidate.relative_to(cwd).as_posix()
         except ValueError:
             pass
 
@@ -48,7 +91,7 @@ def _manifest_relpath(manifest_path: str) -> str:
     idx = normalized.find(marker)
     if idx != -1:
         return normalized[idx + 1 :]
-    return normalized.lstrip("./")
+    return normalized.removeprefix("./")
 
 
 def _has_lib_target(package: dict[str, Any]) -> bool:
