@@ -650,6 +650,134 @@ def _carry_repo(root: str) -> dict[str, str]:
     return heads
 
 
+def _self_test_comment_case_groups(
+    live: str, ref: str, green: dict[str, Any]
+) -> tuple[
+    list[tuple[str, str, str, str, list[dict[str, Any]]]],
+    list[tuple[str, list[dict[str, Any]]]],
+    list[tuple[str, str, list[dict[str, Any]]]],
+]:
+    """Return the comment-set cases that both self-test and landing parity consume."""
+
+    # Same-head supersede. `bad` is the PR #2896 shape: parseable, but its findings carry
+    # claim/status keys, so validate_record() refuses it while it still names the live head.
+    def at(minute: int) -> str:
+        return f"2026-09-10T17:{minute:02d}:00Z"
+
+    def by(record: dict[str, Any], cid: int, minute: int, **kw: Any) -> dict[str, Any]:
+        return _cmt(record, cid=cid, created=at(minute), **kw)
+
+    bad = _rec(findings=[{"claim": 1, "status": "holds"}], no_findings=False)
+    fix = _rec(supersedes=101)
+    other = {"agent": "codex", "instance": "r2", "github_login": "Rul1an"}
+    found = [{"id": "F1", "summary": "x", "disposition": "fixed"}]
+    self_review = _rec(builder={"agent": "ruley", "instance": "w1"},
+                       reviewer={"agent": "ruley", "instance": "w1", "github_login": "Rul1an"})
+    as_builder = {"agent": "ruley", "instance": "w1", "github_login": "Rul1an"}
+    reds = [
+        ("no_current_record on other sha", "no_current_record", "c" * 40, ref, [_cmt(green)]),
+        ("no_current_record prose READY", "no_current_record", live, ref, [_cmt(None, body="READY " + live)]),
+        ("bot carrier", "bot_carrier", live, ref, [_cmt(green, bot=True)]),
+        ("organization carrier", "bot_carrier", live, ref, [_cmt(green, user_type="Organization")]),
+        ("missing user.type", "missing_field", live, ref, [_cmt(green, user_type=None)]),
+        ("missing created and updated", "missing_field", live, ref, [_cmt(green, created=None, updated=None)]),
+        ("missing created", "missing_field", live, ref, [_cmt(green, created=None)]),
+        ("empty timestamps", "missing_field", live, ref, [_cmt(green, created="", updated="")]),
+        ("identical writer reviewer", "identical_writer_reviewer", live, ref, [_cmt(_rec(
+            reviewer={"agent": "ruley", "instance": "w1", "github_login": "Rul1an"}))]),
+        ("missing verdict", "missing_field", live, ref, [_cmt(_rec(verdict=None))]),
+        ("findings without no_findings", "missing_field", live, ref, [_cmt(_rec(findings=[], no_findings=False))]),
+        ("missing disposition", "missing_disposition", live, ref, [_cmt(_rec(
+            findings=[{"id": "1", "summary": "x", "disposition": ""}], no_findings=False))]),
+        ("did not review", "did_not_review", live, ref, [_cmt(_rec(review_completed=False))]),
+        ("ambiguous current", "ambiguous_current", live, ref, [_cmt(green), _cmt(green)]),
+        ("malformed record", "malformed_record", live, ref,
+         [_cmt(None, body=MARKER + "\n```json\n{not " + live + "\n```\n")]),
+        ("edited current", "edited_current", live, ref, [_cmt(green, edited=True)]),
+        ("blocked verdict", "blocked", live, ref, [_cmt(_rec(verdict="BLOCKED"))]),
+        ("builder prefix vs ruley branch", "branch_prefix_mismatch", live, ref,
+         [_cmt(_rec(builder={"agent": "codex", "instance": "w1"}))]),
+        ("builder prefix vs codex branch", "branch_prefix_mismatch", live, "codex/foo",
+         [_cmt(_rec(builder={"agent": "cursor", "instance": "w1"}))]),
+        ("extra prose", "extra_prose", live, ref, [_cmt(green, extra="\nplease look\n")]),
+        ("multiple fences", "multiple_fences", live, ref, [_cmt(green, second=True)]),
+        ("independence not bool", "missing_field", live, ref, [_cmt(_rec(independence={
+            "did_not_build": "true", "did_not_author_governing_spec": True}))]),
+        ("reviewer not object", "missing_field", live, ref, [_cmt(_rec(reviewer=[]))]),
+    ]
+    greens = [
+        ("supersede malformed same-head", [by(bad, 101, 11), by(fix, 102, 19)]),
+        ("supersede valid BLOCKED", [by(_rec(verdict="BLOCKED"), 101, 11), by(fix, 102, 19)]),
+        ("supersede chain", [by(bad, 101, 11), by(_rec(verdict="BLOCKED", findings=found,
+                             no_findings=False, supersedes=101), 102, 12), by(_rec(supersedes=102), 103, 13)]),
+        ("same-second repost by id", [by(bad, 101, 11), by(fix, 102, 11)]),
+        ("older-head history is not current", [by(_rec(head_sha="b" * 40), 100, 5), by(green, 101, 11)]),
+    ]
+    supersede_reds = [
+        ("different reviewers stay ambiguous", "ambiguous_current",
+         [by(green, 101, 11), by(_rec(reviewer=other), 102, 19)]),
+        ("different reviewer cannot supersede", "supersede_refused",
+         [by(green, 101, 11), by(_rec(reviewer=other, supersedes=101), 102, 19)]),
+        ("different github login cannot supersede", "supersede_refused",
+         [by(_rec(reviewer={"agent": "cursor", "instance": "r1", "github_login": "Other"}), 101, 11,
+             login="Other"), by(fix, 102, 19)]),
+        ("builder as reviewer cannot supersede", "identical_writer_reviewer",
+         [by(bad, 101, 11), by(_rec(reviewer=as_builder, supersedes=101), 102, 19)]),
+        ("builder under another identity cannot supersede", "supersede_refused",
+         [by(bad, 101, 11), by(_rec(builder={"agent": "ruley", "instance": "w2"}, reviewer=as_builder,
+                                    supersedes=101), 102, 19)]),
+        ("builder cannot supersede its own self-review", "supersede_refused",
+         [by(self_review, 101, 11), by(_rec(builder={"agent": "ruley", "instance": "w2"},
+                                            reviewer=as_builder, supersedes=101), 102, 19)]),
+        ("non-existent supersede target", "supersede_refused",
+         [by(bad, 101, 11), by(_rec(supersedes=999), 102, 19)]),
+        ("newer supersede target", "supersede_refused", [by(_rec(supersedes=102), 101, 11), by(bad, 102, 19)]),
+        ("self supersede target", "supersede_refused", [by(_rec(supersedes=101), 101, 11)]),
+        ("target created later despite lower id", "supersede_refused", [by(bad, 101, 30), by(fix, 102, 19)]),
+        ("older-head supersede target", "supersede_refused",
+         [by(_rec(head_sha="b" * 40), 101, 11), by(fix, 102, 19)]),
+        ("non-record supersede target", "supersede_refused",
+         [{"id": 101, "body": "looks good", "user": {"login": "Rul1an", "type": "User"},
+           "created_at": at(11), "updated_at": at(11)}, by(fix, 102, 19)]),
+        ("invalid superseding record", "missing_disposition",
+         [by(bad, 101, 11), by(_rec(findings=[{"claim": 1}], no_findings=False, supersedes=101), 102, 19)]),
+        ("invalid record in a chain retires nothing", "missing_disposition",
+         [by(bad, 101, 11), by(_rec(findings=[{"claim": 1}], no_findings=False, supersedes=101), 102, 12),
+          by(_rec(supersedes=102), 103, 13)]),
+        ("superseding record without comment id", "missing_field", [by(bad, 101, 11), _cmt(fix, created=at(19))]),
+        ("timestamp without a zone", "missing_field", [_cmt(bad, cid=101, created="2026-09-10T17:11:00"),
+                                                       by(fix, 102, 19)]),
+        ("unparsable timestamp", "missing_field", [_cmt(bad, cid=101, created="t0"), by(fix, 102, 19)]),
+        ("edited superseded record", "edited_current", [by(bad, 101, 11, edited=True), by(fix, 102, 19)]),
+        ("edited superseding record", "edited_current", [by(bad, 101, 11), by(fix, 102, 19, edited=True)]),
+        ("bot carrier cannot be superseded", "bot_carrier", [by(bad, 101, 11, bot=True), by(fix, 102, 19)]),
+        ("login-mismatched carrier cannot be superseded", "login_mismatch",
+         [by(_rec(reviewer={"agent": "cursor", "instance": "r1", "github_login": "Typo"}), 101, 11),
+          by(fix, 102, 19)]),
+        ("unparsable carrier cannot be superseded", "extra_prose",
+         [_cmt(bad, cid=101, created=at(11), extra="\nsorry\n"), by(fix, 102, 19)]),
+        ("two supersedes of one target", "ambiguous_current",
+         [by(bad, 101, 11), by(fix, 102, 19), by(fix, 103, 20)]),
+        ("superseding BLOCKED still fails", "blocked",
+         [by(green, 101, 11), by(_rec(verdict="BLOCKED", supersedes=101), 102, 19)]),
+    ] + [
+        (f"supersedes={value!r}", "malformed_record", [by(bad, 101, 11), by(_rec(supersedes=value), 102, 19)])
+        for value in ("101", True, 0, -1, 101.0, None, [101])
+    ]
+    return reds, greens, supersede_reds
+
+
+def self_test_comment_sets() -> list[tuple[str, str, str, list[dict[str, Any]]]]:
+    """Expose the checker's comment-set inventory for landing-gate parity tests."""
+    live, ref, green = "a" * 40, "ruley/2561-review-record-slice1", _rec()
+    rows = [("valid READY", live, ref, [_cmt(green)])]
+    reds, greens, supersede_reds = _self_test_comment_case_groups(live, ref, green)
+    rows.extend((label, sha, branch, comments) for label, _reason, sha, branch, comments in reds)
+    rows.extend((label, live, ref, comments) for label, comments in greens)
+    rows.extend((label, live, ref, comments) for label, _reason, comments in supersede_reds)
+    return rows
+
+
 def self_test() -> int:
     live, ref, green = "a" * 40, "ruley/2561-review-record-slice1", _rec()
     fail: list[str] = []
@@ -692,115 +820,15 @@ def self_test() -> int:
         if exc.reason != "stale_sha":
             fail.append(f"wanted stale_sha, got {exc.reason}")
 
-    reds = [
-        ("no_current_record", "c" * 40, ref, [_cmt(green)]),
-        ("no_current_record", live, ref, [_cmt(None, body="READY " + live)]),
-        ("bot_carrier", live, ref, [_cmt(green, bot=True)]),
-        ("bot_carrier", live, ref, [_cmt(green, user_type="Organization")]),
-        ("missing_field", live, ref, [_cmt(green, user_type=None)]),
-        ("missing_field", live, ref, [_cmt(green, created=None, updated=None)]),
-        ("missing_field", live, ref, [_cmt(green, created=None)]),
-        ("missing_field", live, ref, [_cmt(green, created="", updated="")]),
-        ("identical_writer_reviewer", live, ref, [_cmt(_rec(
-            reviewer={"agent": "ruley", "instance": "w1", "github_login": "Rul1an"}))]),
-        ("missing_field", live, ref, [_cmt(_rec(verdict=None))]),
-        ("missing_field", live, ref, [_cmt(_rec(findings=[], no_findings=False))]),
-        ("missing_disposition", live, ref, [_cmt(_rec(
-            findings=[{"id": "1", "summary": "x", "disposition": ""}], no_findings=False))]),
-        ("did_not_review", live, ref, [_cmt(_rec(review_completed=False))]),
-        ("ambiguous_current", live, ref, [_cmt(green), _cmt(green)]),
-        ("malformed_record", live, ref, [_cmt(None, body=MARKER + "\n```json\n{not " + live + "\n```\n")]),
-        ("edited_current", live, ref, [_cmt(green, edited=True)]),
-        ("blocked", live, ref, [_cmt(_rec(verdict="BLOCKED"))]),
-        ("branch_prefix_mismatch", live, ref, [_cmt(_rec(builder={"agent": "codex", "instance": "w1"}))]),
-        ("branch_prefix_mismatch", live, "codex/foo", [_cmt(_rec(builder={"agent": "cursor", "instance": "w1"}))]),
-        ("extra_prose", live, ref, [_cmt(green, extra="\nplease look\n")]),
-        ("multiple_fences", live, ref, [_cmt(green, second=True)]),
-        ("missing_field", live, ref, [_cmt(_rec(independence={
-            "did_not_build": "true", "did_not_author_governing_spec": True}))]),
-        ("missing_field", live, ref, [_cmt(_rec(reviewer=[]))]),
-    ]
-    for row in reds:
-        expect(*row)
+    reds, greens, supersede_reds = _self_test_comment_case_groups(live, ref, green)
+    for _label, reason, sha, branch, comments in reds:
+        expect(reason, sha, branch, comments)
 
-    # Same-head supersede. `bad` is the PR #2896 shape: parseable, but its findings carry
-    # claim/status keys, so validate_record() refuses it while it still names the live head.
-    def at(minute: int) -> str:
-        return f"2026-09-10T17:{minute:02d}:00Z"
-
-    def by(record: dict[str, Any], cid: int, minute: int, **kw: Any) -> dict[str, Any]:
-        return _cmt(record, cid=cid, created=at(minute), **kw)
-
-    bad = _rec(findings=[{"claim": 1, "status": "holds"}], no_findings=False)
-    fix = _rec(supersedes=101)
-    other = {"agent": "codex", "instance": "r2", "github_login": "Rul1an"}
-    found = [{"id": "F1", "summary": "x", "disposition": "fixed"}]
-    greens = [
-        ("supersede a malformed same-head record", [by(bad, 101, 11), by(fix, 102, 19)]),
-        ("supersede a valid BLOCKED record", [by(_rec(verdict="BLOCKED"), 101, 11), by(fix, 102, 19)]),
-        ("supersede chain", [by(bad, 101, 11), by(_rec(verdict="BLOCKED", findings=found,
-                             no_findings=False, supersedes=101), 102, 12), by(_rec(supersedes=102), 103, 13)]),
-        ("same-second repost ordered by id", [by(bad, 101, 11), by(fix, 102, 11)]),
-        ("older-head history is not current", [by(_rec(head_sha="b" * 40), 100, 5), by(green, 101, 11)]),
-    ]
     for label, comments in greens:
         got, detail = outcome(live, ref, comments)
         if got != "pass":
             fail.append(f"GREEN {label}: {got} {detail}")
 
-    self_review = _rec(builder={"agent": "ruley", "instance": "w1"},
-                       reviewer={"agent": "ruley", "instance": "w1", "github_login": "Rul1an"})
-    as_builder = {"agent": "ruley", "instance": "w1", "github_login": "Rul1an"}
-    supersede_reds = [
-        ("different reviewers stay ambiguous", "ambiguous_current",
-         [by(green, 101, 11), by(_rec(reviewer=other), 102, 19)]),
-        ("different reviewer cannot supersede", "supersede_refused",
-         [by(green, 101, 11), by(_rec(reviewer=other, supersedes=101), 102, 19)]),
-        ("different github login cannot supersede", "supersede_refused",
-         [by(_rec(reviewer={"agent": "cursor", "instance": "r1", "github_login": "Other"}), 101, 11,
-             login="Other"), by(fix, 102, 19)]),
-        ("builder as reviewer cannot supersede", "identical_writer_reviewer",
-         [by(bad, 101, 11), by(_rec(reviewer=as_builder, supersedes=101), 102, 19)]),
-        ("builder under another reviewer identity cannot supersede", "supersede_refused",
-         [by(bad, 101, 11), by(_rec(builder={"agent": "ruley", "instance": "w2"}, reviewer=as_builder,
-                                    supersedes=101), 102, 19)]),
-        ("builder cannot supersede its own self-review", "supersede_refused",
-         [by(self_review, 101, 11), by(_rec(builder={"agent": "ruley", "instance": "w2"},
-                                            reviewer=as_builder, supersedes=101), 102, 19)]),
-        ("non-existent target", "supersede_refused", [by(bad, 101, 11), by(_rec(supersedes=999), 102, 19)]),
-        ("newer target", "supersede_refused", [by(_rec(supersedes=102), 101, 11), by(bad, 102, 19)]),
-        ("self target", "supersede_refused", [by(_rec(supersedes=101), 101, 11)]),
-        ("target created later despite lower id", "supersede_refused", [by(bad, 101, 30), by(fix, 102, 19)]),
-        ("older-head target", "supersede_refused",
-         [by(_rec(head_sha="b" * 40), 101, 11), by(fix, 102, 19)]),
-        ("non-record target", "supersede_refused",
-         [{"id": 101, "body": "looks good", "user": {"login": "Rul1an", "type": "User"},
-           "created_at": at(11), "updated_at": at(11)}, by(fix, 102, 19)]),
-        ("invalid superseding record", "missing_disposition",
-         [by(bad, 101, 11), by(_rec(findings=[{"claim": 1}], no_findings=False, supersedes=101), 102, 19)]),
-        ("invalid record in a chain retires nothing", "missing_disposition",
-         [by(bad, 101, 11), by(_rec(findings=[{"claim": 1}], no_findings=False, supersedes=101), 102, 12),
-          by(_rec(supersedes=102), 103, 13)]),
-        ("superseding record without comment id", "missing_field", [by(bad, 101, 11), _cmt(fix, created=at(19))]),
-        ("timestamp without a zone", "missing_field", [_cmt(bad, cid=101, created="2026-09-10T17:11:00"),
-                                                       by(fix, 102, 19)]),
-        ("unparsable timestamp", "missing_field", [_cmt(bad, cid=101, created="t0"), by(fix, 102, 19)]),
-        ("edited superseded record", "edited_current", [by(bad, 101, 11, edited=True), by(fix, 102, 19)]),
-        ("edited superseding record", "edited_current", [by(bad, 101, 11), by(fix, 102, 19, edited=True)]),
-        ("bot carrier cannot be superseded", "bot_carrier", [by(bad, 101, 11, bot=True), by(fix, 102, 19)]),
-        ("login-mismatched carrier cannot be superseded", "login_mismatch",
-         [by(_rec(reviewer={"agent": "cursor", "instance": "r1", "github_login": "Typo"}), 101, 11),
-          by(fix, 102, 19)]),
-        ("unparsable carrier cannot be superseded", "extra_prose",
-         [_cmt(bad, cid=101, created=at(11), extra="\nsorry\n"), by(fix, 102, 19)]),
-        ("two supersedes of one target", "ambiguous_current",
-         [by(bad, 101, 11), by(fix, 102, 19), by(fix, 103, 20)]),
-        ("superseding BLOCKED still fails", "blocked",
-         [by(green, 101, 11), by(_rec(verdict="BLOCKED", supersedes=101), 102, 19)]),
-    ] + [
-        (f"supersedes={value!r}", "malformed_record", [by(bad, 101, 11), by(_rec(supersedes=value), 102, 19)])
-        for value in ("101", True, 0, -1, 101.0, None, [101])
-    ]
     for label, reason, comments in supersede_reds:
         got, detail = outcome(live, ref, comments)
         if got != reason:

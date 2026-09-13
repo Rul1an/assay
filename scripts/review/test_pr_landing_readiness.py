@@ -883,116 +883,8 @@ class IdentityVerifierAcceptsACarry(unittest.TestCase):
 
 
 def _checker_self_test_comment_sets():
-    """Comment sets the checker's `--self-test` constructs, via its own `_cmt`/`_rec`.
-
-    Carry-repo cases are omitted: they are thunks over a throwaway git repository, not a
-    comment-set the landing fetch can return. Every other refusal (and the greens that
-    keep a report-that-always-blocks from looking like agreement) is here.
-    """
-    live, ref, green = "a" * 40, "ruley/2561-review-record-slice1", CHECKER._rec()
-    rows = [
-        ("valid READY", live, ref, [CHECKER._cmt(green)]),
-        ("no_current_record on other sha", "c" * 40, ref, [CHECKER._cmt(green)]),
-        ("no_current_record prose READY", live, ref, [CHECKER._cmt(None, body="READY " + live)]),
-        ("bot carrier", live, ref, [CHECKER._cmt(green, bot=True)]),
-        ("organization carrier", live, ref, [CHECKER._cmt(green, user_type="Organization")]),
-        ("missing user.type", live, ref, [CHECKER._cmt(green, user_type=None)]),
-        ("missing created and updated", live, ref, [CHECKER._cmt(green, created=None, updated=None)]),
-        ("missing created", live, ref, [CHECKER._cmt(green, created=None)]),
-        ("empty timestamps", live, ref, [CHECKER._cmt(green, created="", updated="")]),
-        ("identical writer reviewer", live, ref, [CHECKER._cmt(CHECKER._rec(
-            reviewer={"agent": "ruley", "instance": "w1", "github_login": "Rul1an"}))]),
-        ("missing verdict", live, ref, [CHECKER._cmt(CHECKER._rec(verdict=None))]),
-        ("findings without no_findings", live, ref, [CHECKER._cmt(CHECKER._rec(
-            findings=[], no_findings=False))]),
-        ("missing disposition", live, ref, [CHECKER._cmt(CHECKER._rec(
-            findings=[{"id": "1", "summary": "x", "disposition": ""}], no_findings=False))]),
-        ("did not review", live, ref, [CHECKER._cmt(CHECKER._rec(review_completed=False))]),
-        ("ambiguous current", live, ref, [CHECKER._cmt(green), CHECKER._cmt(green)]),
-        ("malformed record", live, ref, [CHECKER._cmt(None, body=CHECKER.MARKER + "\n```json\n{not " + live + "\n```\n")]),
-        ("edited current", live, ref, [CHECKER._cmt(green, edited=True)]),
-        ("blocked verdict", live, ref, [CHECKER._cmt(CHECKER._rec(verdict="BLOCKED"))]),
-        ("builder prefix vs ruley branch", live, ref, [CHECKER._cmt(CHECKER._rec(
-            builder={"agent": "codex", "instance": "w1"}))]),
-        ("builder prefix vs codex branch", live, "codex/foo", [CHECKER._cmt(CHECKER._rec(
-            builder={"agent": "cursor", "instance": "w1"}))]),
-        ("extra prose", live, ref, [CHECKER._cmt(green, extra="\nplease look\n")]),
-        ("multiple fences", live, ref, [CHECKER._cmt(green, second=True)]),
-        ("independence not bool", live, ref, [CHECKER._cmt(CHECKER._rec(independence={
-            "did_not_build": "true", "did_not_author_governing_spec": True}))]),
-        ("reviewer not object", live, ref, [CHECKER._cmt(CHECKER._rec(reviewer=[]))]),
-    ]
-
-    def at(minute):
-        return f"2026-09-10T17:{minute:02d}:00Z"
-
-    def by(record, cid, minute, **kw):
-        return CHECKER._cmt(record, cid=cid, created=at(minute), **kw)
-
-    bad = CHECKER._rec(findings=[{"claim": 1, "status": "holds"}], no_findings=False)
-    fix = CHECKER._rec(supersedes=101)
-    other = {"agent": "codex", "instance": "r2", "github_login": "Rul1an"}
-    found = [{"id": "F1", "summary": "x", "disposition": "fixed"}]
-    as_builder = {"agent": "ruley", "instance": "w1", "github_login": "Rul1an"}
-    self_review = CHECKER._rec(builder={"agent": "ruley", "instance": "w1"}, reviewer=as_builder)
-    rows.extend([
-        ("supersede malformed same-head", live, ref, [by(bad, 101, 11), by(fix, 102, 19)]),
-        ("supersede valid BLOCKED", live, ref, [by(CHECKER._rec(verdict="BLOCKED"), 101, 11), by(fix, 102, 19)]),
-        ("supersede chain", live, ref, [
-            by(bad, 101, 11),
-            by(CHECKER._rec(verdict="BLOCKED", findings=found, no_findings=False, supersedes=101), 102, 12),
-            by(CHECKER._rec(supersedes=102), 103, 13)]),
-        ("same-second repost by id", live, ref, [by(bad, 101, 11), by(fix, 102, 11)]),
-        ("older-head history is not current", live, ref, [by(CHECKER._rec(head_sha="b" * 40), 100, 5), by(green, 101, 11)]),
-        ("different reviewers stay ambiguous", live, ref,
-         [by(green, 101, 11), by(CHECKER._rec(reviewer=other), 102, 19)]),
-        ("different reviewer cannot supersede", live, ref,
-         [by(green, 101, 11), by(CHECKER._rec(reviewer=other, supersedes=101), 102, 19)]),
-        ("different github login cannot supersede", live, ref,
-         [by(CHECKER._rec(reviewer={"agent": "cursor", "instance": "r1", "github_login": "Other"}), 101, 11,
-             login="Other"), by(fix, 102, 19)]),
-        ("builder as reviewer cannot supersede", live, ref,
-         [by(bad, 101, 11), by(CHECKER._rec(reviewer=as_builder, supersedes=101), 102, 19)]),
-        ("builder under another identity cannot supersede", live, ref,
-         [by(bad, 101, 11), by(CHECKER._rec(builder={"agent": "ruley", "instance": "w2"},
-                                            reviewer=as_builder, supersedes=101), 102, 19)]),
-        ("builder cannot supersede its own self-review", live, ref,
-         [by(self_review, 101, 11), by(CHECKER._rec(builder={"agent": "ruley", "instance": "w2"},
-                                                    reviewer=as_builder, supersedes=101), 102, 19)]),
-        ("non-existent supersede target", live, ref, [by(bad, 101, 11), by(CHECKER._rec(supersedes=999), 102, 19)]),
-        ("newer supersede target", live, ref, [by(CHECKER._rec(supersedes=102), 101, 11), by(bad, 102, 19)]),
-        ("self supersede target", live, ref, [by(CHECKER._rec(supersedes=101), 101, 11)]),
-        ("target created later despite lower id", live, ref, [by(bad, 101, 30), by(fix, 102, 19)]),
-        ("older-head supersede target", live, ref,
-         [by(CHECKER._rec(head_sha="b" * 40), 101, 11), by(fix, 102, 19)]),
-        ("non-record supersede target", live, ref,
-         [{"id": 101, "body": "looks good", "user": {"login": "Rul1an", "type": "User"},
-           "created_at": at(11), "updated_at": at(11)}, by(fix, 102, 19)]),
-        ("invalid superseding record", live, ref,
-         [by(bad, 101, 11), by(CHECKER._rec(findings=[{"claim": 1}], no_findings=False, supersedes=101), 102, 19)]),
-        ("invalid record in a chain retires nothing", live, ref,
-         [by(bad, 101, 11), by(CHECKER._rec(findings=[{"claim": 1}], no_findings=False, supersedes=101), 102, 12),
-          by(CHECKER._rec(supersedes=102), 103, 13)]),
-        ("superseding record without comment id", live, ref, [by(bad, 101, 11), CHECKER._cmt(fix, created=at(19))]),
-        ("timestamp without a zone", live, ref, [CHECKER._cmt(bad, cid=101, created="2026-09-10T17:11:00"),
-                                                 by(fix, 102, 19)]),
-        ("unparsable timestamp", live, ref, [CHECKER._cmt(bad, cid=101, created="t0"), by(fix, 102, 19)]),
-        ("edited superseded record", live, ref, [by(bad, 101, 11, edited=True), by(fix, 102, 19)]),
-        ("edited superseding record", live, ref, [by(bad, 101, 11), by(fix, 102, 19, edited=True)]),
-        ("bot carrier cannot be superseded", live, ref, [by(bad, 101, 11, bot=True), by(fix, 102, 19)]),
-        ("login-mismatched carrier cannot be superseded", live, ref,
-         [by(CHECKER._rec(reviewer={"agent": "cursor", "instance": "r1", "github_login": "Typo"}), 101, 11),
-          by(fix, 102, 19)]),
-        ("unparsable carrier cannot be superseded", live, ref,
-         [CHECKER._cmt(bad, cid=101, created=at(11), extra="\nsorry\n"), by(fix, 102, 19)]),
-        ("two supersedes of one target", live, ref, [by(bad, 101, 11), by(fix, 102, 19), by(fix, 103, 20)]),
-        ("superseding BLOCKED still fails", live, ref,
-         [by(green, 101, 11), by(CHECKER._rec(verdict="BLOCKED", supersedes=101), 102, 19)]),
-    ])
-    for value in ("101", True, 0, -1, 101.0, None, [101]):
-        rows.append((f"supersedes={value!r}", live, ref,
-                     [by(bad, 101, 11), by(CHECKER._rec(supersedes=value), 102, 19)]))
-    return rows
+    """The checker owns this inventory; landing parity only consumes it."""
+    return CHECKER.self_test_comment_sets()
 
 
 class CheckerLandingParityTests(unittest.TestCase):
@@ -1070,7 +962,9 @@ class CheckerLandingParityTests(unittest.TestCase):
                                     (reason, report["blockers"]))
 
     def test_report_tracks_evaluate_on_checker_self_test_sets(self):
-        for label, head, branch, comments in _checker_self_test_comment_sets():
+        rows = _checker_self_test_comment_sets()
+        self.assertEqual(len(rows), len(CHECKER.self_test_comment_sets()))
+        for label, head, branch, comments in rows:
             with self.subTest(label=label):
                 eval_ok, reason = self._evaluate(comments, head, branch)
                 report = self._report(comments, head, branch)
