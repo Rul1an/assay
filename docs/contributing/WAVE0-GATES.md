@@ -39,44 +39,34 @@ If budget is exceeded:
 - `assay-cli` excludes `experimental` in blocking lane:
   - `cargo hack check -p assay-cli --each-feature --exclude-features experimental`
 
-## Semver allowlist (public crates)
+## Semver crate set (derived)
 
-Wave 0 semver gate runs on the library-API subset of the current public
-crates.io contract:
+Wave 0 semver checks do not use a hand-maintained crate list. The job derives
+its check set from `cargo metadata` via
+`scripts/ci/derive-semver-published-lib-crates.py`.
 
-- `assay-common`
-- `assay-policy`
-- `assay-metrics`
-- `assay-core`
-- `assay-registry`
-- `assay-evidence`
-- `assay-runner-schema`
+A crate is in the derived set when all are true:
 
-Checks are still conditional on touched/global change detection.
+- it is a workspace member;
+- it is a local workspace package (`source == null`);
+- it is publishable (`publish != []`, including `publish` unset);
+- it has a `lib` target.
 
-The full current crates.io publish contract is enforced separately by
-`scripts/ci/check-public-crate-policy.sh` and `scripts/ci/publish_idempotent.sh`.
-Binary- or operational-facing crates such as `assay-cli`, `assay-monitor`,
-`assay-mcp-server`, and `assay-sim` are published, but are not part of this
-Wave 0 library semver allowlist unless a future gate slice adds stable library
-API coverage for them.
+The semver job itself still runs conditionally (`semver_relevant == true`).
+That trigger flips true on:
 
-The Assay-Runner substrate crates — `assay-runner-schema`,
-`assay-runner-core`, and `assay-runner-linux` — are also published as of
-`v3.11.3`, but their package descriptions explicitly
-frame them as internal/experimental substrate (no standalone product
-guarantee, intentionally undocumented for third-party use, semver tracks
-the Assay workspace). `assay-runner-schema` is the narrow exception in this
-allowlist: ADR-048 requires its existing public type paths to survive a move
-to shared definitions, so that migration needs a real semver check. This does
-not grant a standalone-product guarantee. `assay-runner-core` and
-`assay-runner-linux` remain outside the Wave 0 library semver allowlist; the
-substrate crates exist on crates.io because `assay-cli` depends on them and
-cargo publish requires every declared dependency to be resolvable there.
+- workspace-global semver inputs (`Cargo.toml`, `Cargo.lock`);
+- any changed path under the manifest directory of a crate in the derived set.
 
-As of `v3.11.3`, `check-public-crate-policy.sh` also runs as a PR-CI
-guardrail (job `Public crate policy` in `ci.yml`), so the policy gate
-fires before tag, not at release time.
+Non-claim (current Wave 0 scope): a change isolated to a `publish = false`
+workspace crate does not by itself trigger `semver_relevant`, even if that
+crate is a dependency of a derived published library crate. This keeps routing
+tied to one derived direct-membership rule and avoids a second dependency-closure
+rule in trigger logic.
+
+Non-claim (routing, current scope): changes to semver gate wiring files
+themselves do not set `semver_relevant`; they are covered by the semver routing
+and semver gate contract tests in CI.
 
 ## Nightly safety lane (Wave 0.1)
 
