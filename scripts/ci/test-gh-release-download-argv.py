@@ -38,7 +38,8 @@ Seams:
   blocks. Folded `>` scalars with a positional on the next source line are a
   non-claim; no current site uses that form. Only command-position `gh`
   counts, so a step name such as `Verify gh release download argv contract`
-  is not an invocation.
+  is not an invocation. A line whose first non-space character is `#` is a
+  comment, not an invocation: `&&` after `#` must stay quiet.
 
 Value-taking flags, from `gh release download --help`:
 
@@ -83,7 +84,7 @@ VALUE_FLAGS = frozenset(
 INVOKE_RE = re.compile(
     r"^\s*(?:(?:.*(?:&&|\|\||;)\s*))?gh\s+release\s+download\b"
 )
-DECLARED_TEST_COUNT = 8
+DECLARED_TEST_COUNT = 9
 
 PUBLISH_HEAD = (
     '          gh release download "$VERSION" --repo "$GITHUB_REPOSITORY"'
@@ -150,6 +151,8 @@ def positional_tokens(tokens: list[str]) -> list[str]:
 def invocation_problems(text: str, relpath: str) -> list[str]:
     problems: list[str] = []
     for line_no, line in joined_lines(text):
+        if line.lstrip().startswith("#"):
+            continue
         match = INVOKE_RE.search(line)
         if match is None:
             continue
@@ -290,6 +293,10 @@ class GhReleaseDownloadArgv(unittest.TestCase):
     def test_step_name_mention_is_not_an_invocation(self) -> None:
         text = "      - name: Verify gh release download argv contract\n"
         self.assertEqual(invocation_problems(text, ".github/workflows/ci.yml"), [])
+
+    def test_comment_line_is_not_an_invocation(self) -> None:
+        text = "          # && gh release download x y\n"
+        self.assertEqual(invocation_problems(text, "seam-comment.yml"), [])
 
 
 if __name__ == "__main__":

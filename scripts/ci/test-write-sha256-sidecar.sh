@@ -66,10 +66,10 @@ LIVE_SHA256_CONSUMERS = frozenset(
         'MCPB_SHA="$(cut -d\' \' -f1 "${MCPB_FILE}.sha256")"',
         "PROVENANCE_SUMMARY_SHA256: release/assay-${{ needs.release-contract.outputs.version }}-release-provenance.json.sha256",
         "Verify your download with the `.sha256` files.",
-        '"assay-mcp-server-${VERSION}-x86_64-unknown-linux-gnu.tar.gz.sha256" \\',
-        '"assay-mcp-server-${VERSION}-aarch64-unknown-linux-gnu.tar.gz.sha256" \\',
-        '"assay-${VERSION}-sbom-cyclonedx.tar.gz.sha256"',
-        '"$archive" "${archive}.sha256"',
+        '--pattern "assay-mcp-server-${VERSION}-x86_64-unknown-linux-gnu.tar.gz.sha256" \\',
+        '--pattern "assay-mcp-server-${VERSION}-aarch64-unknown-linux-gnu.tar.gz.sha256" \\',
+        '--pattern "assay-${VERSION}-sbom-cyclonedx.tar.gz.sha256"',
+        '--pattern "${archive}.sha256"',
     )
 )
 PRODUCER_MSG = "release checksum producer bypasses write_sha256_sidecar.sh"
