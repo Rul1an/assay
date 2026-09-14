@@ -1100,6 +1100,38 @@ if grep -Fq 'OK:Runner is healthy' "${CAPTURE}"; then
     exit 1
 fi
 
+# Automatic health ticks must not invoke the optional priority policy. Exercise
+# the real CLI dispatcher too, so explicit queue administration stays available.
+(
+    rotate_log() { :; }
+    cancel_stale_jobs() { printf 'stale\n' >>"${EVENTS}"; }
+    cancel_superseded_runs() { printf 'superseded\n' >>"${EVENTS}"; }
+    prioritize_pr_runs() { printf 'priority\n' >>"${EVENTS}"; return 73; }
+    heal_action_cache() { printf 'heal\n' >>"${EVENTS}"; }
+    clean_actions_cache() { printf 'clean\n' >>"${EVENTS}"; }
+    : >"${EVENTS}"
+    if ! main; then
+        echo "automatic health tick invoked the optional priority policy" >&2
+        exit 1
+    fi
+    if [[ "$(cat "${EVENTS}")" != $'stale\nsuperseded\nheal\nclean' ]]; then
+        echo "automatic health tick changed its bounded maintenance sequence" >&2
+        cat "${EVENTS}" >&2
+        exit 1
+    fi
+    for option in --prioritize-prs --optimize-queue; do
+        : >"${EVENTS}"
+        set +e
+        ( main "$option" )
+        explicit_status=$?
+        set -e
+        if [[ "$explicit_status" -ne 73 ]] || ! grep -Fxq priority "${EVENTS}"; then
+            echo "explicit ${option} lost priority execution or refusal status" >&2
+            exit 1
+        fi
+    done
+)
+
 # restore originals used later? suite ends after this.
 eval "${ORIGINAL_CHECK_GH}"
 eval "${ORIGINAL_CHECK_VM}"
