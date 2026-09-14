@@ -779,7 +779,7 @@ repos:
         # workspace cargo follows rust-toolchain.toml). Mutations cover missing pins, restated
         # literals, missing source/assert, unpinned/duplicate install (including cargo
         # +toolchain), PATH decoys, optional-helper unpin, and stale toolchain comments.
-        files: ^(scripts/ci/(cargo-plugin-versions|test-split-wave-plugin-versions-contract|optional-public-api-drift)\.sh|\.github/workflows/split-wave0-gates\.yml|\.pre-commit-config\.yaml)$
+        files: ^(scripts/ci/(cargo-plugin-versions|test-split-wave-plugin-versions-contract|optional-public-api-drift)\.sh|\.github/workflows/(split-wave0-gates|semver-public)\.yml|\.pre-commit-config\.yaml)$
 
       - id: optional-plugin-versions-contract-self-test
         name: optional plugin versions contract
@@ -831,14 +831,14 @@ repos:
         # and a missing tag fails rather than skips. The planted-break case costs a rustdoc build per
         # crate, so it runs under ASSAY_SEMVER_GATE_FULL=1 and in the workflow's own CI job.
         stages: [pre-push]
-        files: ^(scripts/ci/(test-semver-gate\.sh|derive-semver-published-lib-crates\.py)|\.github/workflows/split-wave0-gates\.yml)$
+        files: ^(scripts/ci/(test-semver-gate\.sh|derive-semver-published-lib-crates\.py)|\.github/workflows/semver-public\.yml)$
       - id: split-wave0-semver-routing-contract
         name: Split Wave 0 semver routing contract
         entry: bash scripts/ci/test-split-wave0-semver-routing.sh
         language: system
         pass_filenames: false
         stages: [pre-commit, pre-push]
-        files: ^(\.github/workflows/split-wave0-gates\.yml|scripts/ci/(test-split-wave0-semver-routing\.sh|derive-semver-published-lib-crates\.py)|docs/contributing/WAVE0-GATES\.md|\.pre-commit-config\.yaml)$
+        files: ^(\.github/workflows/semver-public\.yml|scripts/ci/(test-split-wave0-semver-routing\.sh|derive-semver-published-lib-crates\.py)|docs/contributing/WAVE0-GATES\.md|\.pre-commit-config\.yaml)$
       - id: linux-gate-self-test
         name: Linux compile gate self-test
         entry: bash scripts/ci/test-check-linux.sh

@@ -29,7 +29,11 @@ abort "ci.yml jobs must be a mapping" unless jobs.is_a?(Hash)
 
 # Authoritative CI-5B mapping (#2244 clarification): short=10, hosted heavy=20,
 # eBPF smoke preserved at 15/60.
-expected = {
+#
+# `semver` is a reusable-workflow caller job (`uses:`); GitHub does not allow
+# `timeout-minutes` on that job shape, so its timeout is pinned inside
+# semver-public.yml's own jobs.
+expected_timeouts = {
   "scope" => 10,
   "clippy" => 10,
   "rustdoc" => 10,
@@ -48,19 +52,19 @@ expected = {
   "ebpf-smoke-ubuntu" => 15,
   "ebpf-smoke-self-hosted" => 60,
 }.freeze
+expected_ids = (expected_timeouts.keys + ["semver"]).sort
 
 actual_ids = jobs.keys.map(&:to_s).sort
-expected_ids = expected.keys.sort
 unless actual_ids == expected_ids
   missing = expected_ids - actual_ids
   extra = actual_ids - expected_ids
   abort(
-    "ci.yml job set drifted from the pinned #{expected.size}-job contract; " \
+    "ci.yml job set drifted from the pinned #{expected_ids.size}-job contract; " \
     "missing=#{missing.inspect} extra=#{extra.inspect}"
   )
 end
 
-expected.each do |job_id, want|
+expected_timeouts.each do |job_id, want|
   job = jobs.fetch(job_id)
   abort "#{job_id}: job body must be a mapping" unless job.is_a?(Hash)
   unless job.key?("timeout-minutes")
@@ -76,6 +80,12 @@ expected.each do |job_id, want|
   unless got == want
     abort "#{job_id}: timeout-minutes class mismatch: expected #{want}, got #{got}"
   end
+end
+
+semver = jobs.fetch("semver")
+abort "semver: job body must be a mapping" unless semver.is_a?(Hash)
+if semver.key?("timeout-minutes")
+  abort "semver: reusable-workflow caller job must not set timeout-minutes"
 end
 
 rollup = jobs.fetch("ci")
@@ -95,6 +105,7 @@ expected_needs = %w[
   test
   ebpf-smoke-ubuntu
   evidenceref-live-resolve
+  semver
 ]
 got_needs = Array(rollup["needs"]).map(&:to_s)
 unless got_needs == expected_needs
@@ -104,7 +115,7 @@ unless rollup["if"] == "always()"
   abort "CI rollup must stay fail-closed with if: always(); got #{rollup['if'].inspect}"
 end
 
-puts "ci-job-timeouts contract=passed (#{expected.size} jobs; rollup bounded at 10m)"
+puts "ci-job-timeouts contract=passed (#{expected_ids.size} jobs; rollup bounded at 10m)"
 RUBY
 }
 
@@ -135,6 +146,8 @@ when "ebpf-ubuntu-changed"
   jobs.fetch("ebpf-smoke-ubuntu")["timeout-minutes"] = 30
 when "ebpf-self-hosted-changed"
   jobs.fetch("ebpf-smoke-self-hosted")["timeout-minutes"] = 90
+when "reusable-timeout-added"
+  jobs.fetch("semver")["timeout-minutes"] = 20
 when "unpinned-new-job"
   jobs["rogue-unpinned"] = {
     "name" => "Rogue",
@@ -160,6 +173,7 @@ RUBY
   run_mutation fallback-360 fallback-360
   run_mutation ebpf-ubuntu-changed ebpf-ubuntu-changed
   run_mutation ebpf-self-hosted-changed ebpf-self-hosted-changed
+  run_mutation reusable-timeout-added reusable-timeout-added
   run_mutation unpinned-new-job unpinned-new-job
   echo "ci-job-timeouts contract self-test=passed"
 }

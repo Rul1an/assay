@@ -23,7 +23,10 @@ Wave 0 gates are the pre-refactor guardrails for:
 ## Runtime budget targets
 
 - `feature-matrix` job: target <= 25 minutes on `ubuntu-latest`.
-- `semver-public` job: target <= 15 minutes on `ubuntu-latest`.
+- `semver-public` job (called by CI): hard ceiling 30 minutes on `ubuntu-latest`.
+  The previous 20-minute ceiling cancelled hosted probes #3005 and #3006 before
+  the full comparison finished. The larger bound preserves all derived libraries
+  and self-tests; it is not a measured completion-time guarantee.
 - Total Wave 0 workflow target: <= 40 minutes.
 
 If budget is exceeded:
@@ -88,6 +91,17 @@ Wave 0 job names (`Wave 0 feature matrix`, `Wave 0 quality gates`,
 required contexts.
 
 Wave 0 workflow always triggers on `pull_request`; heavy jobs are conditional to avoid docs-only blocking.
+
+## Semver result propagation
+
+Semver checks for public crates execute via the reusable workflow
+`.github/workflows/semver-public.yml`, which is called by `.github/workflows/ci.yml`.
+Because GitHub Actions reports a caller job (`needs.semver.result`) as successful
+even if inner jobs are skipped, the `CI` rollup in `ci.yml` imports and evaluates
+both the change detection decision (`semver_relevant`) and the actual child check
+conclusion (`semver_public_result`). When semver is relevant (`semver_relevant == 'true'`),
+`semver_public_result` must be `success` (or `failure` waived by an explicit, recorded
+override); an inner check that skipped or went missing fails closed.
 
 ## Stabilization acceptance
 

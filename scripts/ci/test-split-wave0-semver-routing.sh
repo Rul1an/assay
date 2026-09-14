@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-WORKFLOW="${ROOT}/.github/workflows/split-wave0-gates.yml"
+WORKFLOW="${ROOT}/.github/workflows/semver-public.yml"
 DERIVER="${ROOT}/scripts/ci/derive-semver-published-lib-crates.py"
 scratch="$(mktemp -d)"
 trap 'rm -rf "${scratch}"' EXIT
@@ -54,7 +54,7 @@ output_value() {
 run_detect_case() (
   set -euo pipefail
   local workflow="$1" changed="$2" metadata_override="${3:-}"
-  local case_dir detect_run output summary semver unmatched global
+  local case_dir detect_run output summary semver global
   case_dir="$(mktemp -d "${scratch}/detect.XXXXXX")"
   detect_run="${case_dir}/detect.sh"
   step_run "${workflow}" detect-changes '      - id: detect' > "${detect_run}"
@@ -85,9 +85,8 @@ run_detect_case() (
   fi
 
   semver="$(output_value "${output}" semver_relevant)"
-  unmatched="$(output_value "${output}" unmatched_assay_crate_changed)"
   global="$(output_value "${output}" global_changed)"
-  printf '%s\t%s\t%s\n' "${semver}" "${unmatched}" "${global}"
+  printf '%s\t%s\n' "${semver}" "${global}"
 )
 
 build_detect_metadata_fixture() {
@@ -130,23 +129,19 @@ JSON
 }
 
 assert_detect_routing_contract() {
-  local workflow="$1" detect_metadata got semver unmatched global
+  local workflow="$1" detect_metadata got semver global
 
   got="$(run_detect_case "${workflow}" 'crates/assay-runner-linux/src/lib.rs')"
   semver="${got%%$'\t'*}"
-  got="${got#*$'\t'}"
-  unmatched="${got%%$'\t'*}"
   global="${got##*$'\t'}"
-  [[ "${semver}" == "true" && "${unmatched}" == "true" && "${global}" == "false" ]] \
-    || fail "assay-runner-linux case mismatch: semver=${semver} unmatched=${unmatched} global=${global}"
+  [[ "${semver}" == "true" && "${global}" == "false" ]] \
+    || fail "assay-runner-linux case mismatch: semver=${semver} global=${global}"
 
   got="$(run_detect_case "${workflow}" 'crates/assay-sim/src/report.rs')"
   semver="${got%%$'\t'*}"
-  got="${got#*$'\t'}"
-  unmatched="${got%%$'\t'*}"
   global="${got##*$'\t'}"
-  [[ "${semver}" == "true" && "${unmatched}" == "true" && "${global}" == "false" ]] \
-    || fail "assay-sim case mismatch: semver=${semver} unmatched=${unmatched} global=${global}"
+  [[ "${semver}" == "true" && "${global}" == "false" ]] \
+    || fail "assay-sim case mismatch: semver=${semver} global=${global}"
 
   got="$(run_detect_case "${workflow}" 'crates/foo-lib/src/lib.rs')"
   semver="${got%%$'\t'*}"
@@ -160,7 +155,7 @@ assert_detect_routing_contract() {
   semver="${got%%$'\t'*}"
   [[ "${semver}" == "true" ]] || fail "Cargo.lock must flip semver_relevant"
 
-  got="$(run_detect_case "${workflow}" '.github/workflows/split-wave0-gates.yml')"
+  got="$(run_detect_case "${workflow}" '.github/workflows/semver-public.yml')"
   semver="${got%%$'\t'*}"
   [[ "${semver}" == "false" ]] || fail "workflow file must not flip semver_relevant"
 
