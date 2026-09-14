@@ -8,6 +8,8 @@ EVENTS="$(mktemp)"
 GUEST_TEST_ROOT="$(mktemp -d)"
 trap 'rm -f "${EVENTS}"; rm -rf "${GUEST_TEST_ROOT}"' EXIT
 
+# Fixture identity is independent of the host runner's RUNNER_NAME environment.
+export RUNNER_NAME=assay-bpf-runner
 # shellcheck source=/dev/null
 source "${SCRIPT}"
 
