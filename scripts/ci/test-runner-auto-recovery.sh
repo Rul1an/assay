@@ -816,6 +816,14 @@ if [[ "$*" == *"pr list"* ]]; then
       echo '[]'
       exit 0
       ;;
+    prio-mixed-candidates)
+      if [[ "$*" == *"--head feat/with-pr"* ]]; then
+        printf '%s\n' '[{"number":42}]'
+        exit 0
+      fi
+      echo '[]'
+      exit 0
+      ;;
     prio-preflight-abort)
       if [[ "$*" == *"--head feat/error"* ]]; then
         echo "stub pr list error on branch" >&2
@@ -1181,6 +1189,22 @@ JSON
       echo '[]'
       exit 0
       ;;
+    prio-mixed-candidates)
+      if [[ "$*" == *"--event pull_request"* ]]; then
+        python3 -c 'import json; print(json.dumps([{"databaseId": i} for i in range(1, 7)]))'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* && "$*" == *"--limit 10"* ]]; then
+        printf '%s\n' '[{"databaseId":9101,"headBranch":"main"},{"databaseId":9102,"headBranch":"feat/unprotected-1"},{"databaseId":9103,"headBranch":"feat/with-pr"},{"databaseId":9104,"headBranch":"feat/unprotected-2"}]'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* ]]; then
+        python3 -c 'import json; print(json.dumps([{"databaseId": i} for i in (9101, 9102, 9103, 9104)]))'
+        exit 0
+      fi
+      echo '[]'
+      exit 0
+      ;;
     prio-preflight-abort)
       if [[ "$*" == *"--event pull_request"* ]]; then
         python3 -c 'import json; print(json.dumps([{"databaseId": i} for i in range(1, 7)]))'
@@ -1297,6 +1321,14 @@ run_queue_case supersede-null cancel_superseded_runs 1 ""
 
 # Positive + failure matrix for prioritize_pr_runs
 run_queue_case prio-ok prioritize_pr_runs 0 "Cancel request accepted for 2 push runs (PR priority)"
+# Assert exact ordered cancellation IDs for existing positive case.
+# Order choice: linear queue evaluation preserves candidate FIFO order as returned by GitHub API (9001 then 9002).
+cancelled_prio_ok="$(awk '/^ARGS:run cancel / { print $3 }' "${GH_STUB_DIR}/prio-ok-prioritize_pr_runs/stub.log")"
+expected_prio_ok=$'9001\n9002'
+if [[ "${cancelled_prio_ok}" != "${expected_prio_ok}" ]]; then
+    echo "prio-ok expected exact cancellation of IDs 9001 and 9002, got: ${cancelled_prio_ok}" >&2
+    exit 1
+fi
 run_queue_case prio-cancel-fail prioritize_pr_runs 1 ""
 run_queue_case prio-list-fail prioritize_pr_runs 1 ""
 run_queue_case prio-balanced prioritize_pr_runs 0 ""
@@ -1361,6 +1393,43 @@ run_queue_case prio-candidate-branch-newline prioritize_pr_runs 1 ""
 run_queue_case prio-candidate-branch-tab prioritize_pr_runs 1 ""
 run_queue_case prio-candidate-branch-cr prioritize_pr_runs 1 ""
 run_queue_case prio-nondefault-no-pr-ok prioritize_pr_runs 0 "Cancel request accepted for 1 push runs (PR priority)"
+# Assert exact cancellation ID for existing single-candidate positive case.
+# Order choice: linear queue evaluation preserves candidate FIFO order as returned by GitHub API.
+cancelled_single="$(awk '/^ARGS:run cancel / { print $3 }' "${GH_STUB_DIR}/prio-nondefault-no-pr-ok-prioritize_pr_runs/stub.log")"
+if [[ "${cancelled_single}" != "9001" ]]; then
+    echo "prio-nondefault-no-pr-ok expected exact cancellation of ID 9001, got: ${cancelled_single}" >&2
+    exit 1
+fi
+
+# Mixed candidate fixture: distinct IDs covering default branch, open PR, and multiple unprotected branches.
+run_queue_case prio-mixed-candidates prioritize_pr_runs 0 "Cancel request accepted for 2 push runs (PR priority)"
+cancelled_mixed="$(awk '/^ARGS:run cancel / { print $3 }' "${GH_STUB_DIR}/prio-mixed-candidates-prioritize_pr_runs/stub.log")"
+
+# Order choice: prioritize_pr_runs evaluates candidate rows in linear FIFO sequence from run list;
+# eligible runs are cancelled in that exact order (9102 then 9104).
+expected_mixed=$'9102\n9104'
+if [[ "${cancelled_mixed}" != "${expected_mixed}" ]]; then
+    echo "prio-mixed-candidates cancellation ID mismatch" >&2
+    echo "Expected ordered IDs:" >&2
+    printf '%s\n' "${expected_mixed}" >&2
+    echo "Actual cancelled IDs:" >&2
+    printf '%s\n' "${cancelled_mixed}" >&2
+    exit 1
+fi
+
+# Assert no protected IDs were cancelled
+if grep -E -q '^(9101|9103)$' <<< "${cancelled_mixed}"; then
+    echo "prio-mixed-candidates requested cancellation of protected run ID (9101=default or 9103=open-PR)" >&2
+    exit 1
+fi
+
+# Assert no duplicate IDs were cancelled
+count_raw="$(grep -c . <<< "${cancelled_mixed}" || true)"
+count_unique="$(sort -u <<< "${cancelled_mixed}" | grep -c . || true)"
+if [[ "${count_raw}" -ne 2 || "${count_unique}" -ne 2 ]]; then
+    echo "prio-mixed-candidates cancelled count mismatch or duplicates: raw=${count_raw}, unique=${count_unique}" >&2
+    exit 1
+fi
 
 # Verify --help describes explicit PR prioritization with default and open-PR protection
 help_out="$(bash "${SCRIPT}" --help)"
