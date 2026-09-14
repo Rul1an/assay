@@ -719,8 +719,54 @@ heal_action_cache() {
 # Runner Recovery
 # ==============================================================================
 
+# An idle snapshot admits recovery; it is not an atomic drain of job assignment.
+# Missing registration is bootstrap, not evidence that a runner is idle.
+require_recovery_admission() {
+    local gh="${GH_CMD:-gh}" payload admission
+    local LC_ALL=C
+    if ! payload=$(set -o pipefail; timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" \
+        "$gh" api --paginate "repos/$REPO/actions/runners?per_page=100" 2>/dev/null \
+        | head -c 1048577); then
+        log_error "Recovery refused: runner observation unavailable"
+        return 1
+    fi
+    if [[ ${#payload} -gt 1048576 ]]; then
+        log_error "Recovery refused: runner observation exceeds limit"
+        return 1
+    fi
+    # Validate every page before selecting; duplicate names must not select row one.
+    # shellcheck disable=SC2016
+    if ! admission=$(printf '%s' "$payload" | jq -sr --arg name "$RUNNER_NAME" '
+        if length == 0 or any(.[];
+            type != "object" or (.runners | type) != "array") then
+            "unknown"
+        elif any(.[].runners[]; type != "object" or (.name | type) != "string") then
+            "unknown"
+        else
+            [.[].runners[] | select(.name == $name)] |
+            if length == 0 then "not_found"
+            elif length != 1 then "ambiguous"
+            else .[0] |
+                if (.id | type) != "number" then "unknown"
+                elif .id <= 0 or .id != (.id | floor) then "unknown"
+                elif (.busy | type) != "boolean" then "unknown"
+                elif .status != "online" and .status != "offline" then "unknown"
+                elif .busy then "busy"
+                else "idle"
+                end
+            end
+        end' 2>/dev/null); then
+        admission=unknown
+    fi
+    if [[ "$admission" != idle ]]; then
+        log_error "Recovery refused: runner observation $admission"
+        return 1
+    fi
+}
+
 # Full recovery procedure
 recover_runner() {
+    require_recovery_admission || return $?
     log_warn "Starting runner recovery..."
 
     # Step 1: Sync time
