@@ -244,7 +244,7 @@ repos:
         entry: python3 scripts/ci/test_claude_plugin_install_import.py
         language: system
         pass_filenames: false
-        files: ^(scripts/ci/(claude_plugin_install_workflow|test_claude_plugin_install_import)\.py|\.pre-commit-config\.yaml)$
+        files: ^(scripts/ci/(claude_plugin_install_workflow|test_claude_plugin_install_import|release_heading)\.py|\.pre-commit-config\.yaml)$
 
       - id: claude-plugin-run-bounded-stdin
         name: Claude plugin bounded stdin is deadline-supervised

@@ -16,10 +16,12 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from runpy import run_path
 from typing import Iterable, NoReturn
 from unittest.mock import patch
 
-from release_heading import RELEASE_HEADING
+# Explicit-file consumers need the same sibling without changing sys.path.
+RELEASE_HEADING = run_path(str(Path(__file__).with_name("release_heading.py")))["RELEASE_HEADING"]
 
 MAX_BYTES = 1_048_576
 DEFAULT_TIMEOUT_SECONDS = 30.0
