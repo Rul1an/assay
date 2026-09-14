@@ -255,6 +255,9 @@ require_json_array() {
     jq -c -e -R -s 'fromjson | if type == "array" then . else error("expected JSON array") end'
 }
 
+# Shared jq branch name validator definition (non-empty string without embedded tabs, newlines, or carriage returns).
+JQ_IS_VALID_BRANCH='def is_valid_branch: type == "string" and length > 0 and (test("[\t\r\n]") | not);'
+
 # Cancel superseded runs (older queued runs for the same workflow/branch/event)
 cancel_superseded_runs() {
     local gh="${GH_CMD:-gh}"
@@ -366,16 +369,14 @@ prioritize_pr_runs() {
             return 1
         fi
 
-        # Validate candidate run items (must have valid positive databaseId and non-empty headBranch without control characters)
-        if ! printf '%s' "$push_cancel_json" | jq -e '
+        # Validate candidate run items (must have valid positive databaseId and valid branch name)
+        if ! printf '%s' "$push_cancel_json" | jq -e "${JQ_IS_VALID_BRANCH}"'
             if all(.[];
                 type == "object"
                 and (.databaseId | type) == "number"
                 and .databaseId > 0
                 and .databaseId == (.databaseId | floor)
-                and (.headBranch | type) == "string"
-                and (.headBranch | length) > 0
-                and (.headBranch | test("[\t\r\n]") | not)
+                and (.headBranch | is_valid_branch)
             ) then . else error("invalid candidate push run shape") end' >/dev/null 2>&1; then
             log_error "Candidate push runs contain invalid or missing id/headBranch"
             return 1
@@ -394,12 +395,11 @@ prioritize_pr_runs() {
             log_error "Failed to query repository default branch"
             return 1
         fi
-        if ! default_branch=$(printf '%s' "$default_branch_json" | jq -e -r -R -s '
+        if ! default_branch=$(printf '%s' "$default_branch_json" | jq -e -r -R -s "${JQ_IS_VALID_BRANCH}"'
             fromjson |
             if type == "object"
                 and (.defaultBranchRef | type) == "object"
-                and (.defaultBranchRef.name | type) == "string"
-                and (.defaultBranchRef.name | length) > 0
+                and (.defaultBranchRef.name | is_valid_branch)
             then
                 .defaultBranchRef.name
             else
@@ -1215,7 +1215,7 @@ case "${1:-}" in
         echo "Queue Management:"
         echo "  --cancel-stale      Cancel queued jobs older than ${STALE_JOB_HOURS} hours"
         echo "  --cancel-superseded Cancel older duplicate runs for same branch"
-        echo "  --prioritize-prs    Explicitly cancel push runs when many PR runs wait (including protected branches)"
+        echo "  --prioritize-prs    Explicitly cancel push runs when many PR runs wait (protects default and open-PR branches)"
         echo "  --optimize-queue    Run all queue optimizations (stale + superseded + PR priority)"
         echo ""
         echo "Environment Variables:"

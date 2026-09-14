@@ -771,6 +771,22 @@ if [[ "$*" == *"repo view"* ]]; then
       printf '%s\n' '{"default_branch":"main"}'
       exit 0
       ;;
+    prio-default-cr)
+      printf '%s\n' '{"defaultBranchRef":{"name":"main\r"}}'
+      exit 0
+      ;;
+    prio-default-newline)
+      printf '%s\n' '{"defaultBranchRef":{"name":"main\n"}}'
+      exit 0
+      ;;
+    prio-default-tab)
+      printf '%s\n' '{"defaultBranchRef":{"name":"main\t"}}'
+      exit 0
+      ;;
+    prio-default-empty)
+      printf '%s\n' '{"defaultBranchRef":{"name":""}}'
+      exit 0
+      ;;
     prio-default-nonmain*)
       printf '%s\n' '{"defaultBranchRef":{"name":"trunk"}}'
       exit 0
@@ -1021,7 +1037,7 @@ JSON
       echo '[]'
       exit 0
       ;;
-    prio-default-multiple|prio-default-trailing-junk)
+    prio-default-multiple|prio-default-trailing-junk|prio-default-cr|prio-default-newline|prio-default-tab|prio-default-empty)
       if [[ "$*" == *"--event pull_request"* ]]; then
         python3 -c 'import json; print(json.dumps([{"databaseId": i} for i in range(1, 7)]))'
         exit 0
@@ -1333,10 +1349,29 @@ if grep -Fq "run cancel" "${GH_STUB_DIR}/prio-default-alternate-key-prioritize_p
     echo "prio-default-alternate-key requested cancel despite unrequested fallback key" >&2
     exit 1
 fi
+run_queue_case prio-default-cr prioritize_pr_runs 1 ""
+if grep -Fq "run cancel" "${GH_STUB_DIR}/prio-default-cr-prioritize_pr_runs/stub.log"; then
+    echo "prio-default-cr requested cancel for default branch with carriage return" >&2
+    exit 1
+fi
+run_queue_case prio-default-newline prioritize_pr_runs 1 ""
+run_queue_case prio-default-tab prioritize_pr_runs 1 ""
+run_queue_case prio-default-empty prioritize_pr_runs 1 ""
 run_queue_case prio-candidate-branch-newline prioritize_pr_runs 1 ""
 run_queue_case prio-candidate-branch-tab prioritize_pr_runs 1 ""
 run_queue_case prio-candidate-branch-cr prioritize_pr_runs 1 ""
 run_queue_case prio-nondefault-no-pr-ok prioritize_pr_runs 0 "Cancel request accepted for 1 push runs (PR priority)"
+
+# Verify --help describes explicit PR prioritization with default and open-PR protection
+help_out="$(bash "${SCRIPT}" --help)"
+if ! printf '%s\n' "${help_out}" | grep -Fq -- "--prioritize-prs    Explicitly cancel push runs when many PR runs wait (protects default and open-PR branches)"; then
+    echo "health_check.sh --help text does not accurately describe --prioritize-prs protection semantics" >&2
+    exit 1
+fi
+if printf '%s\n' "${help_out}" | grep -Fq "including protected branches"; then
+    echo "health_check.sh --help text still contains obsolete '(including protected branches)'" >&2
+    exit 1
+fi
 
 # Preflight selection abort: ensure NO cancel is requested when any candidate lookup fails
 mkdir -p "${GH_STUB_DIR}/if-prio-preflight"
