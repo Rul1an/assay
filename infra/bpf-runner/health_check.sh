@@ -366,7 +366,7 @@ prioritize_pr_runs() {
             return 1
         fi
 
-        # Validate candidate run items (must have valid positive databaseId and non-empty headBranch)
+        # Validate candidate run items (must have valid positive databaseId and non-empty headBranch without control characters)
         if ! printf '%s' "$push_cancel_json" | jq -e '
             if all(.[];
                 type == "object"
@@ -375,6 +375,7 @@ prioritize_pr_runs() {
                 and .databaseId == (.databaseId | floor)
                 and (.headBranch | type) == "string"
                 and (.headBranch | length) > 0
+                and (.headBranch | test("[\t\r\n]") | not)
             ) then . else error("invalid candidate push run shape") end' >/dev/null 2>&1; then
             log_error "Candidate push runs contain invalid or missing id/headBranch"
             return 1
@@ -393,17 +394,16 @@ prioritize_pr_runs() {
             log_error "Failed to query repository default branch"
             return 1
         fi
-        if ! default_branch=$(printf '%s' "$default_branch_json" | jq -e -r '
-            if type == "object" then
-                if (.defaultBranchRef | type) == "object" and (.defaultBranchRef.name | type) == "string" and (.defaultBranchRef.name | length) > 0 then
-                    .defaultBranchRef.name
-                elif (.default_branch | type) == "string" and (.default_branch | length) > 0 then
-                    .default_branch
-                else
-                    error("invalid default branch structure")
-                end
+        if ! default_branch=$(printf '%s' "$default_branch_json" | jq -e -r -R -s '
+            fromjson |
+            if type == "object"
+                and (.defaultBranchRef | type) == "object"
+                and (.defaultBranchRef.name | type) == "string"
+                and (.defaultBranchRef.name | length) > 0
+            then
+                .defaultBranchRef.name
             else
-                error("expected JSON object")
+                error("invalid defaultBranchRef structure")
             end' 2>/dev/null); then
             log_error "Default branch query returned invalid or malformed data"
             return 1

@@ -759,6 +759,18 @@ if [[ "$*" == *"repo view"* ]]; then
       printf '%s\n' '{"defaultBranchRef":null}'
       exit 0
       ;;
+    prio-default-multiple)
+      printf '%s\n' '{"defaultBranchRef":{"name":"main"}} {"defaultBranchRef":{"name":"trunk"}}'
+      exit 0
+      ;;
+    prio-default-trailing-junk)
+      printf '%s\n' '{"defaultBranchRef":{"name":"main"}} trailing'
+      exit 0
+      ;;
+    prio-default-alternate-key)
+      printf '%s\n' '{"default_branch":"main"}'
+      exit 0
+      ;;
     prio-default-nonmain*)
       printf '%s\n' '{"defaultBranchRef":{"name":"trunk"}}'
       exit 0
@@ -1009,6 +1021,86 @@ JSON
       echo '[]'
       exit 0
       ;;
+    prio-default-multiple|prio-default-trailing-junk)
+      if [[ "$*" == *"--event pull_request"* ]]; then
+        python3 -c 'import json; print(json.dumps([{"databaseId": i} for i in range(1, 7)]))'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* && "$*" == *"--limit 10"* ]]; then
+        printf '%s\n' '[{"databaseId":9001,"headBranch":"main"}]'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* ]]; then
+        echo '[{"databaseId":9001}]'
+        exit 0
+      fi
+      echo '[]'
+      exit 0
+      ;;
+    prio-default-alternate-key)
+      if [[ "$*" == *"--event pull_request"* ]]; then
+        python3 -c 'import json; print(json.dumps([{"databaseId": i} for i in range(1, 7)]))'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* && "$*" == *"--limit 10"* ]]; then
+        printf '%s\n' '[{"databaseId":9001,"headBranch":"feat/clean"}]'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* ]]; then
+        echo '[{"databaseId":9001}]'
+        exit 0
+      fi
+      echo '[]'
+      exit 0
+      ;;
+    prio-candidate-branch-newline)
+      if [[ "$*" == *"--event pull_request"* ]]; then
+        python3 -c 'import json; print(json.dumps([{"databaseId": i} for i in range(1, 7)]))'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* && "$*" == *"--limit 10"* ]]; then
+        printf '%s\n' '[{"databaseId":9001,"headBranch":"feat\ninjected"}]'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* ]]; then
+        echo '[{"databaseId":9001}]'
+        exit 0
+      fi
+      echo '[]'
+      exit 0
+      ;;
+    prio-candidate-branch-tab)
+      if [[ "$*" == *"--event pull_request"* ]]; then
+        python3 -c 'import json; print(json.dumps([{"databaseId": i} for i in range(1, 7)]))'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* && "$*" == *"--limit 10"* ]]; then
+        printf '%s\n' '[{"databaseId":9001,"headBranch":"feat\tinjected"}]'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* ]]; then
+        echo '[{"databaseId":9001}]'
+        exit 0
+      fi
+      echo '[]'
+      exit 0
+      ;;
+    prio-candidate-branch-cr)
+      if [[ "$*" == *"--event pull_request"* ]]; then
+        python3 -c 'import json; print(json.dumps([{"databaseId": i} for i in range(1, 7)]))'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* && "$*" == *"--limit 10"* ]]; then
+        printf '%s\n' '[{"databaseId":9001,"headBranch":"feat\rinjected"}]'
+        exit 0
+      fi
+      if [[ "$*" == *"--event push"* ]]; then
+        echo '[{"databaseId":9001}]'
+        exit 0
+      fi
+      echo '[]'
+      exit 0
+      ;;
     prio-default-fail|prio-default-malformed)
       if [[ "$*" == *"--event pull_request"* ]]; then
         python3 -c 'import json; print(json.dumps([{"databaseId": i} for i in range(1, 7)]))'
@@ -1230,6 +1322,20 @@ run_queue_case prio-default-fail prioritize_pr_runs 1 ""
 run_queue_case prio-default-malformed prioritize_pr_runs 1 ""
 run_queue_case prio-malformed-candidate-branch prioritize_pr_runs 1 ""
 run_queue_case prio-malformed-candidate-id prioritize_pr_runs 1 ""
+run_queue_case prio-default-multiple prioritize_pr_runs 1 ""
+if grep -Fq "run cancel" "${GH_STUB_DIR}/prio-default-multiple-prioritize_pr_runs/stub.log"; then
+    echo "prio-default-multiple requested cancel despite multi-document default branch" >&2
+    exit 1
+fi
+run_queue_case prio-default-trailing-junk prioritize_pr_runs 1 ""
+run_queue_case prio-default-alternate-key prioritize_pr_runs 1 ""
+if grep -Fq "run cancel" "${GH_STUB_DIR}/prio-default-alternate-key-prioritize_pr_runs/stub.log"; then
+    echo "prio-default-alternate-key requested cancel despite unrequested fallback key" >&2
+    exit 1
+fi
+run_queue_case prio-candidate-branch-newline prioritize_pr_runs 1 ""
+run_queue_case prio-candidate-branch-tab prioritize_pr_runs 1 ""
+run_queue_case prio-candidate-branch-cr prioritize_pr_runs 1 ""
 run_queue_case prio-nondefault-no-pr-ok prioritize_pr_runs 0 "Cancel request accepted for 1 push runs (PR priority)"
 
 # Preflight selection abort: ensure NO cancel is requested when any candidate lookup fails
