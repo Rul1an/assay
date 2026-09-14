@@ -353,11 +353,11 @@ prioritize_pr_runs() {
     fi
 
     if [[ "$pr_runs" -gt 5 && "$push_runs" -gt 0 ]]; then
-        log_info "Many PR runs waiting ($pr_runs), cancelling $push_runs queued push runs..."
+        log_info "Many PR runs waiting ($pr_runs), cancelling queued push runs..."
 
-        # Cancel push runs (they'll be superseded by next push anyway)
+        # Query candidate push runs with both databaseId and headBranch
         local push_cancel_json
-        if ! push_cancel_json=$($gh run list --repo "$REPO" --status queued --event push --limit 10 --json databaseId 2>/dev/null); then
+        if ! push_cancel_json=$($gh run list --repo "$REPO" --status queued --event push --limit 10 --json databaseId,headBranch 2>/dev/null); then
             log_error "Failed to list push runs for PR-priority cancel"
             return 1
         fi
@@ -366,12 +366,97 @@ prioritize_pr_runs() {
             return 1
         fi
 
-        local run_ids accepted=0 failed=0 run_id
-        if ! run_ids=$(printf '%s' "$push_cancel_json" | jq -r '.[].databaseId'); then
-            log_error "Failed to parse push runs for PR-priority cancel"
+        # Validate candidate run items (must have valid positive databaseId and non-empty headBranch)
+        if ! printf '%s' "$push_cancel_json" | jq -e '
+            if all(.[];
+                type == "object"
+                and (.databaseId | type) == "number"
+                and .databaseId > 0
+                and .databaseId == (.databaseId | floor)
+                and (.headBranch | type) == "string"
+                and (.headBranch | length) > 0
+            ) then . else error("invalid candidate push run shape") end' >/dev/null 2>&1; then
+            log_error "Candidate push runs contain invalid or missing id/headBranch"
             return 1
         fi
-        for run_id in $run_ids; do
+
+        local candidate_count
+        candidate_count=$(printf '%s' "$push_cancel_json" | jq 'length')
+        if [[ "$candidate_count" -eq 0 ]]; then
+            log_info "No queued push runs to evaluate for PR priority"
+            return 0
+        fi
+
+        # Query configured repository default branch dynamically (never hardcode main)
+        local default_branch_json default_branch
+        if ! default_branch_json=$($gh repo view "$REPO" --json defaultBranchRef 2>/dev/null); then
+            log_error "Failed to query repository default branch"
+            return 1
+        fi
+        if ! default_branch=$(printf '%s' "$default_branch_json" | jq -e -r '
+            if type == "object" then
+                if (.defaultBranchRef | type) == "object" and (.defaultBranchRef.name | type) == "string" and (.defaultBranchRef.name | length) > 0 then
+                    .defaultBranchRef.name
+                elif (.default_branch | type) == "string" and (.default_branch | length) > 0 then
+                    .default_branch
+                else
+                    error("invalid default branch structure")
+                end
+            else
+                error("expected JSON object")
+            end' 2>/dev/null); then
+            log_error "Default branch query returned invalid or malformed data"
+            return 1
+        fi
+
+        # Preflight selection: evaluate all candidate runs before issuing any cancellation request
+        local to_cancel=()
+        local candidate_rows run_id branch
+        candidate_rows=$(printf '%s' "$push_cancel_json" | jq -r '.[] | "\(.databaseId)\t\(.headBranch)"')
+        while IFS=$'\t' read -r run_id branch; do
+            [[ -z "$run_id" ]] && continue
+
+            # Default branch runs represent landed code / post-merge CI; never cancel them.
+            if [[ "$branch" == "$default_branch" ]]; then
+                log_info "Keeping push run $run_id ($branch: default branch post-merge CI)"
+                continue
+            fi
+
+            # Check if the candidate branch has an open pull request.
+            # On Assay, push runs for open PR branches generate required checks.
+            local pr_list_raw pr_list_json open_pr_count
+            if ! pr_list_raw=$($gh pr list --repo "$REPO" --head "$branch" --state open --json number 2>/dev/null); then
+                log_error "Failed to query open PRs for branch $branch"
+                return 1
+            fi
+            if ! pr_list_json=$(printf '%s' "$pr_list_raw" | require_json_array); then
+                log_error "Open PR list for branch $branch was not a JSON array"
+                return 1
+            fi
+            if ! open_pr_count=$(printf '%s' "$pr_list_json" | jq -e '
+                if all(.[]; type == "object" and (.number | type) == "number" and .number > 0 and .number == (.number | floor)) then
+                    length
+                else
+                    error("invalid pr item")
+                end' 2>/dev/null); then
+                log_error "Open PR query for branch $branch contained invalid or malformed entries"
+                return 1
+            fi
+            if [[ "$open_pr_count" -gt 0 ]]; then
+                log_info "Keeping push run $run_id ($branch has an open PR; this run is its required check)"
+                continue
+            fi
+
+            to_cancel+=("$run_id")
+        done <<< "$candidate_rows"
+
+        if [[ ${#to_cancel[@]} -eq 0 ]]; then
+            log_info "All candidate push runs protected (default branch or open PR); no cancellation requested"
+            return 0
+        fi
+
+        local accepted=0 failed=0 run_id
+        for run_id in "${to_cancel[@]}"; do
             [[ -z "$run_id" ]] && continue
             log_info "Requesting cancel for push run $run_id (PR priority)..."
             if $gh run cancel "$run_id" --repo "$REPO" >/dev/null 2>&1; then
