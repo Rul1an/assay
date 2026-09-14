@@ -191,6 +191,9 @@ def _invoke(
 
 FCNTL_BLOCKER = r"""
 import sys
+from pathlib import Path
+# Match the CLI's sibling-module resolution when importing by explicit file path.
+sys.path.insert(0, str(Path(sys.argv[1]).resolve().parent))
 from importlib.util import module_from_spec, spec_from_file_location
 
 class BlockFcntl:
@@ -623,6 +626,7 @@ print("marker", marker.exists())
 import os, tempfile, sys
 from pathlib import Path
 from importlib.util import module_from_spec, spec_from_file_location
+sys.path.insert(0, str(Path(sys.argv[1]).resolve().parent))
 spec = spec_from_file_location("wf_no_killpg", sys.argv[1])
 mod = module_from_spec(spec)
 sys.modules[spec.name] = mod

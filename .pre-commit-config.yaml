@@ -237,7 +237,7 @@ repos:
         # costs several seconds warm. Keep commit-time feedback fast; the same hook is
         # installed and enforced before push, where end-to-end workflow proof belongs.
         stages: [pre-push]
-        files: ^(CHANGELOG\.md|scripts/ci/(test-claude-plugin-install\.sh|claude_plugin_install_workflow\.py)|docs/guides/editor-mcp-recipe\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.pre-commit-config\.yaml)$
+        files: ^(CHANGELOG\.md|scripts/ci/(test-claude-plugin-install\.sh|claude_plugin_install_workflow\.py|release_heading\.py)|docs/guides/editor-mcp-recipe\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.pre-commit-config\.yaml)$
 
       - id: claude-plugin-install-import-safe
         name: Claude plugin install workflow is import-safe
@@ -499,7 +499,7 @@ repos:
         entry: bash -c 'bash scripts/ci/test-check-assay-action-pin.sh && bash scripts/ci/check-assay-action-pin.sh'
         language: system
         pass_filenames: false
-        files: ^(\.github/(assay-action-pin|dependabot\.yml|workflows/.*\.ya?ml)|scripts/ci/(read|check|test-check)-assay-action-pin\.sh|scripts/ci/(produce-default-discovery-sandbox-evidence|test-action-discovery-junction)\.sh|scripts/ci/fixtures/assay-action-pin/.*|docs/.*\.md|CHANGELOG\.md|crates/assay-cli/src/templates\.rs|packs/open/cicd-starter/README\.md|\.pre-commit-config\.yaml)$
+        files: ^(\.github/(assay-action-pin|dependabot\.yml|workflows/.*\.ya?ml)|scripts/ci/(read|check|test-check)-assay-action-pin\.sh|scripts/ci/release_heading\.py|scripts/ci/(produce-default-discovery-sandbox-evidence|test-action-discovery-junction)\.sh|scripts/ci/fixtures/assay-action-pin/.*|docs/.*\.md|CHANGELOG\.md|crates/assay-cli/src/templates\.rs|packs/open/cicd-starter/README\.md|\.pre-commit-config\.yaml)$
 
       - id: workflow-continue-on-error-policy
         name: Workflow continue-on-error policy
