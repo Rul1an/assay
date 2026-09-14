@@ -824,13 +824,13 @@ health_check() {
         # 2. Cancel superseded runs (duplicates for same branch)
         cancel_superseded_runs || return $?
 
-        # 3. Prioritize PR runs over push runs
-        prioritize_pr_runs || return $?
+        # PR-priority cancellation is explicit-only: a health tick must not
+        # discard push evidence merely because PR runs are waiting.
 
-        # 4. Check for action cache issues
+        # 3. Check for action cache issues
         heal_action_cache
 
-        # 5. Periodic cache cleanup
+        # 4. Periodic cache cleanup
         clean_actions_cache
 
         log_ok "Runner is healthy"
@@ -1117,7 +1117,7 @@ case "${1:-}" in
         echo "Usage: $0 [OPTIONS]"
         echo ""
         echo "Options:"
-        echo "  (none)          Run full health check (including all maintenance)"
+        echo "  (none)          Run health check and maintenance (excluding PR-priority cancellation)"
         echo "  --install-cron  Install cron job (every 5 minutes)"
         echo "  --status        Show current status"
         echo "  --recover       Force full runner recovery"
@@ -1130,7 +1130,7 @@ case "${1:-}" in
         echo "Queue Management:"
         echo "  --cancel-stale      Cancel queued jobs older than ${STALE_JOB_HOURS} hours"
         echo "  --cancel-superseded Cancel older duplicate runs for same branch"
-        echo "  --prioritize-prs    Cancel push runs when many PR runs waiting"
+        echo "  --prioritize-prs    Explicitly cancel push runs when many PR runs wait (including protected branches)"
         echo "  --optimize-queue    Run all queue optimizations (stale + superseded + PR priority)"
         echo ""
         echo "Environment Variables:"
