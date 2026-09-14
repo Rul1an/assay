@@ -16,8 +16,12 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from runpy import run_path
 from typing import Iterable, NoReturn
 from unittest.mock import patch
+
+# Explicit-file consumers need the same sibling without changing sys.path.
+RELEASE_HEADING = run_path(str(Path(__file__).with_name("release_heading.py")))["RELEASE_HEADING"]
 
 MAX_BYTES = 1_048_576
 DEFAULT_TIMEOUT_SECONDS = 30.0
@@ -1253,10 +1257,6 @@ CHANGELOG_CLAIM_MARKERS = (
     "observed_route",
     "wrong Assay tool",
 )
-RELEASE_HEADING = re.compile(
-    r"## \[(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\]"
-    r" - [0-9]{4}-[0-9]{2}-[0-9]{2}"
-)
 
 
 def _changelog_claim_section(text: str) -> str:
@@ -1388,6 +1388,18 @@ def assert_changelog_history_self_test() -> None:
         + active[first_release.start() :]
     )
     _changelog_claim_section(released)
+
+    for version in ("99.99.99-rc.1", "99.99.99-beta.2"):
+        candidate = released.replace("[99.99.99]", f"[{version}]", 1)
+        _changelog_claim_section(candidate)
+    for version in ("99.99.99-alpha.1", "99.99.99-rc", "99.99.99-rc.x", "99.99.99+build", "099.99.99"):
+        candidate = released.replace("[99.99.99]", f"[{version}]", 1)
+        try:
+            _changelog_claim_section(candidate)
+        except WorkflowError:
+            pass
+        else:
+            fail("changelog_self_test", f"unsupported heading stayed green: {version}", "restore release grammar")
 
     for marker in CHANGELOG_CLAIM_MARKERS:
         split = released.replace(marker, "", 1).replace(

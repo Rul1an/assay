@@ -32,6 +32,9 @@ jobs:
       - name: Verify software and conformance release channels stay separate
         run: bash scripts/ci/test-release-channel-separation.sh
 
+      - name: Verify channel contracts from stable and prerelease workspaces
+        run: bash scripts/ci/test-release-channel-workspaces.sh
+
       # The release-blocking gate's only test used to be cutting a release. This is where it stops
       # being that.
       - name: Exercise the release-blocking gate
