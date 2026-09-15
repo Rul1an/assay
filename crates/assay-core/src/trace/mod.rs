@@ -1,3 +1,4 @@
+pub mod field_readings;
 pub mod ingest;
 pub mod observation;
 pub mod otel_ingest;
