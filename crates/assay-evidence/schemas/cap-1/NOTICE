@@ -1,0 +1,16 @@
+CAP-1.schema.json is the normative JSON Schema of the Coverage Attestation
+Profile, copied byte-for-byte from
+Certisyn-Inc/certisyn-drafts@0980d3201aa2caab3cbad5c6e9bc99b422370b43
+(cap-1/src/CAP-1.schema.json), SHA-256
+4453f216089543780bfecc4295cc4a61462fdc585b88d1e35b7d1aba79716b4a.
+
+Copyright 2026 Certisyn, Inc. Specification text, including this schema, is
+licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
+Attribution:
+
+    Hillier, J. D., "The Coverage Attestation Profile (CAP-1)",
+    draft-hillier-coverage-attestation-00, Certisyn, Inc., 2026.
+
+This pins an Internet-Draft, not an adopted standard. The bytes are embedded by
+`assay_evidence::coverage_attestation::verify` and checked against the digest
+above by `tests/cap1_normative_verify.rs`.
