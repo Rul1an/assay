@@ -393,13 +393,12 @@ fn installed_binary_reports_a_version_on_stdout() {
     let output = assay_contract(dir.path(), &expected, &[]);
     assert_exit(&output, &expected, "version");
     let version = stdout_text(&output, &expected, "version");
-    let components: Vec<_> = version.trim().split('.').collect();
-    assert_eq!(components.len(), 3, "version is not semver: {version:?}");
-    assert!(
-        components
-            .iter()
-            .all(|component| component.parse::<u64>().is_ok()),
-        "version is not numeric semver: {version:?}"
+    let parsed = semver::Version::parse(version.trim())
+        .unwrap_or_else(|error| panic!("version is not semver: {version:?}: {error}"));
+    assert_eq!(
+        parsed,
+        semver::Version::parse(env!("CARGO_PKG_VERSION")).expect("package version is semver"),
+        "binary version must match the package, including prerelease and build metadata"
     );
 }
 
