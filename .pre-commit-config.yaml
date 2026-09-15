@@ -439,7 +439,7 @@ repos:
         entry: bash -c 'bash scripts/ci/test-check-python-artifact-truth.sh && python3 scripts/ci/check-python-artifact-truth.py && bash scripts/ci/test-check-python-wheel-smoke-contract.sh && python3 scripts/ci/check-python-wheel-smoke-contract.py'
         language: system
         pass_filenames: false
-        files: ^(assay-python-sdk/(python-artifact-matrix\.v0\.json|pyproject\.toml|Cargo\.toml|README\.md)|scripts/ci/(check-python-artifact-truth\.py|test-check-python-artifact-truth\.sh|check-python-wheel-smoke-contract\.py|test-check-python-wheel-smoke-contract\.sh|smoke-python-wheel\.py|plan-python-artifact-matrix\.py)|\.github/workflows/(release|kernel-matrix)\.yml|docs/(python-sdk/index\.md|getting-started/(index|installation|python-quickstart)\.md|guides/troubleshooting\.md|AIcontext/user-flows\.md|migration-v1\.2\.md)|llms\.txt|CHANGELOG\.md|\.pre-commit-config\.yaml)$
+        files: ^(assay-python-sdk/(python-artifact-matrix\.v0\.json|pyproject\.toml|Cargo\.toml|README\.md)|scripts/ci/(check-python-artifact-truth\.py|test-check-python-artifact-truth\.sh|check-python-wheel-smoke-contract\.py|test-check-python-wheel-smoke-contract\.sh|smoke-python-wheel\.py|test-smoke-python-wheel-version\.py|plan-python-artifact-matrix\.py)|\.github/workflows/(release|kernel-matrix)\.yml|docs/(python-sdk/index\.md|getting-started/(index|installation|python-quickstart)\.md|guides/troubleshooting\.md|AIcontext/user-flows\.md|migration-v1\.2\.md)|llms\.txt|CHANGELOG\.md|\.pre-commit-config\.yaml)$
 
       - id: osv-scanner-scheduled-lockstep
         name: OSV scanner/reporter lockstep and count bind
@@ -827,11 +827,11 @@ repos:
         # `check-release` saw a declared major and skipped all 254 checks -- reporting success while
         # #2068's `MetricResult` break went through and was found by hand at release prep.
         #
-        # The cheap cases run here: no pinned SHA, the baseline comes from the newest release tag,
+        # The cheap cases run here: no pinned SHA, the baseline comes from the newest stable tag,
         # and a missing tag fails rather than skips. The planted-break case costs a rustdoc build per
         # crate, so it runs under ASSAY_SEMVER_GATE_FULL=1 and in the workflow's own CI job.
         stages: [pre-push]
-        files: ^(scripts/ci/(test-semver-gate\.sh|derive-semver-published-lib-crates\.py)|\.github/workflows/semver-public\.yml)$
+        files: ^(scripts/ci/(test-semver-gate\.sh|resolve-semver-baseline\.sh|derive-semver-published-lib-crates\.py)|\.github/workflows/semver-public\.yml)$
       - id: split-wave0-semver-routing-contract
         name: Split Wave 0 semver routing contract
         entry: bash scripts/ci/test-split-wave0-semver-routing.sh

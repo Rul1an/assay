@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.3.1-rc.2] - 2026-09-15
+
+Replacement candidate for the RC1 wheel smoke failure. RC1's binary release and
+GHCR publication succeeded, including both hosted image-verification jobs, but
+its wheel matrix failed. The RC1 tag remains unchanged. The stable installation
+pin remains v6.3.0; this entry does not assert successful RC2 publication.
+
+### Fixed
+- Convert the workspace's RC and beta versions to Python's PEP 440 spelling once
+  for wheel selection, installation, and installed-metadata verification. Keep
+  the exact wheel-count, platform-tag, and native-import checks in place.
+- Resolve semver baselines from the latest stable release tag, not a newer RC
+  or beta. A prerelease baseline caused the gate's planted API breaks to be
+  accepted; the required CI self-test caught this before RC2 could merge.
+
 ## [6.3.1-rc.1] - 2026-09-14
 
 Release candidate for the next patch release and the GHCR publication rehearsal.

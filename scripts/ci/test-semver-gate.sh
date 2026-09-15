@@ -28,6 +28,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT/scripts/ci/lib/clear-git-repository-env.sh"
 WORKFLOW="$ROOT/.github/workflows/semver-public.yml"
 FAILURES=0
 
@@ -56,34 +57,77 @@ else
   ok "no pinned baseline SHA"
 fi
 
-if grep -q "git tag --list 'v\[0-9\]\*' --sort=-v:refname" "$WORKFLOW"; then
-  ok "the baseline is resolved from the newest release tag"
-else
-  bad "the baseline is no longer resolved from a release tag"
-fi
+# Execute the actual workflow step against local Git remotes, not a second selector.
+# This also proves that a failed fetch cannot silently use a stale local baseline.
+baseline_cases="$(mktemp -d)"
+trap 'rm -rf "$baseline_cases"' EXIT
+ruby -ryaml - "$WORKFLOW" > "$baseline_cases/step.sh" <<'RUBY'
+doc = YAML.safe_load_file(ARGV.fetch(0), aliases: false)
+steps = doc.fetch("jobs").fetch("semver-public").fetch("steps")
+print steps.find { |step| step["id"] == "baseline" }.fetch("run")
+RUBY
 
-# --- a missing baseline is a failure, not a skip ---------------------------------------------
-#
-# "Could not check" and "nothing to report" must not be spelled the same way. This is the rule the
-# Linux gate (#2076) and the release gate (#1993) were both fixed to follow.
-if grep -q 'no v\* release tag found' "$WORKFLOW" && \
-   awk '/no v\* release tag found/,/exit 1/' "$WORKFLOW" | grep -q 'exit 1'; then
-  ok "a missing release tag fails the job"
-else
-  bad "a missing release tag no longer fails the job"
-fi
+baseline_case() {
+  local name="$1" expected="$2"
+  shift 2
+  local case_root="$baseline_cases/$name" tag status
+  mkdir -p "$case_root"
+  git init -q "$case_root/source" || return 1
+  git -C "$case_root/source" -c user.name=fixture -c user.email=fixture@example.invalid \
+    -c core.hooksPath=/dev/null -c commit.gpgSign=false commit --allow-empty -qm fixture || return 1
+  for tag in "$@"; do git -C "$case_root/source" -c tag.gpgSign=false tag "$tag" || return 1; done
+  if [ "$name" = noncommit ]; then
+    local blob
+    blob="$(printf 'not a commit' | git -C "$case_root/source" hash-object -w --stdin)"
+    git -C "$case_root/source" -c tag.gpgSign=false tag v99.0.0 "$blob" || return 1
+  fi
+  git clone -q --bare "$case_root/source" "$case_root/origin" || return 1
+  git clone -q "$case_root/origin" "$case_root/clone" || return 1
+  # Positive path control before interpreting a refusal.
+  git -C "$case_root/clone" cat-file -e 'HEAD^{commit}' || return 1
+  mkdir -p "$case_root/clone/scripts/ci"
+  if [ -f "$ROOT/scripts/ci/resolve-semver-baseline.sh" ]; then
+    cp "$ROOT/scripts/ci/resolve-semver-baseline.sh" "$case_root/clone/scripts/ci/"
+  fi
+  if [ "$name" = fetch_failure ]; then mv "$case_root/origin" "$case_root/unavailable"; fi
+  (cd "$case_root/clone" && GITHUB_OUTPUT="$case_root/output" bash "$baseline_cases/step.sh") \
+    > "$case_root/log" 2>&1
+  status=$?
+  if [ "$expected" = refuse ]; then
+    [ "$status" -ne 0 ] && return 0
+  elif [ "$status" -eq 0 ] && [ "$(cat "$case_root/output")" = "tag=$expected" ]; then
+    return 0
+  fi
+  cat "$case_root/log" >&2
+  echo "baseline case $name: exit=$status, expected=$expected" >&2
+  return 1
+}
+
+for scenario in stable prereleases no_stable no_tags fetch_failure noncommit; do
+  case "$scenario" in
+    stable) baseline_case "$scenario" v6.10.0 v6.9.0 v6.10.0 ;;
+    prereleases) baseline_case "$scenario" v6.3.0 v6.3.0 v6.3.1-rc.1 v7.0.0-beta.1 ;;
+    no_stable) baseline_case "$scenario" refuse v6.3.1-rc.1 ;;
+    no_tags) baseline_case "$scenario" refuse ;;
+    fetch_failure) baseline_case "$scenario" refuse v6.3.0 ;;
+    noncommit) baseline_case "$scenario" refuse v6.3.0 ;;
+  esac
+  if [ "$?" -eq 0 ]; then ok "workflow baseline: $scenario"; else bad "workflow baseline: $scenario"; fi
+done
+rm -rf "$baseline_cases"
+trap - EXIT
 
 # --- the tag the workflow would pick is the one we expect ------------------------------------
-resolved="$(cd "$ROOT" && git tag --list 'v[0-9]*' --sort=-v:refname | head -n1)"
+resolved="$(bash "$ROOT/scripts/ci/resolve-semver-baseline.sh" "$ROOT")"
 if [ -z "$resolved" ]; then
-  bad "no v* tag in this clone, so the workflow would fail closed here (fetch tags to test)"
+  bad "no stable vX.Y.Z tag in this clone (fetch tags to test)"
 else
   ok "baseline resolves to ${resolved}"
 fi
 
 # --- the expensive one: planted breaks in two newly covered crates must fail ------------------
 #
-# Everything above checks the shape of the gate. This checks that the gate reaches a verdict, which
+# Everything above checks baseline selection and the gate's shape. This checks its API verdict, which
 # is the property that was actually missing: the job ran, on the right crates, with the right tool,
 # and could not fail.
 if [ "${ASSAY_SEMVER_GATE_FULL:-0}" = "1" ]; then
