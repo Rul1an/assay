@@ -52,7 +52,7 @@ if spec is None or spec.loader is None:
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 
-sentinel_version = "9.9.9-sentinel"
+sentinel_version = "9.9.9-rc.12"
 sentinel_wheel = Path("/sentinel/wheel.whl")
 spy_calls = []
 
@@ -102,7 +102,7 @@ except SystemExit as exc:
     print(f"main raised SystemExit: {exc}", file=sys.stderr)
     raise SystemExit(1)
 
-expected = [("/sentinel/python", sentinel_wheel, sentinel_version)]
+expected = [("/sentinel/python", sentinel_wheel, "9.9.9rc12")]
 if rc != 0 or spy_calls != expected:
     print(f"rc={rc!r} spy_calls={spy_calls!r} expected {expected!r}", file=sys.stderr)
     raise SystemExit(1)
@@ -111,6 +111,7 @@ PY
 }
 
 expect_pass "production install_and_import spy" run_install_spy "$SMOKE"
+expect_pass "release version wheel and import contract" python3 "$ROOT/scripts/ci/test-smoke-python-wheel-version.py"
 
 expect_pass "live smoke contract" python3 "$CONTRACT" --root "$ROOT"
 
