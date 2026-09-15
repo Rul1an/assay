@@ -265,10 +265,13 @@ if [[ -z "${REAL_RUBY}" ]]; then
 fi
 
 check_consumer_compat() {
-  python3 - "$1" "$2" "$3" <<'PY'
+  python3 - "$1" "$2" "$3" "$ROOT/scripts/ci" <<'PY'
 import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, sys.argv[4])
+from release_heading import RELEASE_HEADING
 
 dependabot = Path(sys.argv[1]).read_text(encoding="utf-8")
 pinned = Path(sys.argv[2]).read_text(encoding="utf-8")
@@ -290,10 +293,7 @@ first_release = -1
 if next_h2 is not None:
     first_release = unreleased_start + 1 + next_h2.start()
     release_heading = next_h2.group(0)
-    if re.fullmatch(
-        r"## \[(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\] - [0-9]{4}-[0-9]{2}-[0-9]{2}",
-        release_heading,
-    ) is None:
+    if RELEASE_HEADING.fullmatch(release_heading) is None:
         errors.append("CHANGELOG Unreleased is not followed by a dated semver release")
 claims = (
     "mixed Action migration",
@@ -450,6 +450,14 @@ path.write_text(text, encoding="utf-8")
 PY
 expect_ok "consumer-compat-released-history" check_consumer_compat \
   "${DEPENDABOT}" "${PINNED_ACTIONS}" "${scratch}/CHANGELOG-released.md"
+for candidate in 99.99.99-rc.1 99.99.99-beta.2; do
+  awk -v heading="## [$candidate] - 2099-12-31" \
+    '{ print; if ($0 == "## [Unreleased]") print "\n" heading "\n" }' \
+    "${scratch}/CHANGELOG-released.md" \
+    > "${scratch}/CHANGELOG-candidate.md"
+  expect_ok "consumer-compat-$candidate" check_consumer_compat \
+    "${DEPENDABOT}" "${PINNED_ACTIONS}" "${scratch}/CHANGELOG-candidate.md"
+done
 for claim in \
   'mixed Action migration' \
   'literal `false`' \
