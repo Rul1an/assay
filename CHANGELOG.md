@@ -4,6 +4,48 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.3.1-rc.1] - 2026-09-14
+
+Release candidate for the next patch release and the GHCR publication rehearsal.
+The published installation pin remains on v6.3.0 until a stable release's assets
+and installation journey have been verified. This entry declares candidate source,
+not successful publication or installed-agent proof.
+
+### Fixed
+- Trace streams propagate read failures instead of treating them as clean EOF,
+  so coverage verification and ingestion report unreadable trailing input.
+  Earlier output may remain on failure; atomic rollback is not promised (#3023).
+- Update rustls to 0.23.45 in both root and fuzz lockfiles for
+  RUSTSEC-2026-0285 / GHSA-2mjx-qc3c-rqvc. No Assay-specific exploitability has
+  been reproduced; already-published v6.3.0 binaries are unchanged (#3013).
+- A sentinel-bearing value without a corresponding loss record is read as
+  `Unmeasured`, rather than being eligible for a clean truncation reading (#3001).
+- GHCR packaging selects release archives with `gh release download --pattern`
+  instead of positional asset arguments. A working image channel still requires
+  successful publication and digest-bound verification (#2992, #2994).
+
+### Repository Tooling
+- Update the MCP server's pinned distroless base image. Both hosted architecture
+  builds passed; this does not establish publication of an RC image (#3018).
+- Explicit runner queue-priority commands refuse ambiguous branch/PR admission;
+  the deployed health script matches the merged source. Live recovery remains
+  a separate proof obligation (#3022).
+- Release-channel contract tests run from stable, RC, and beta source workspaces
+  without treating a prerelease as a stable installation target (#3017).
+- Required CI now consumes the public semver gate result; the published-library
+  inventory determines its scope (#2996, #3003).
+- Fuzz smoke refuses a run that executed zero units (#2999).
+- Runner maintenance propagates cancellation request failures, and recovery
+  requires a bounded, unambiguous idle registration observation. This is not
+  atomic scheduler exclusion or proof that an installed runner was updated
+  (#3004, #3010).
+- Normal runner health checks no longer invoke PR-priority cancellation of push
+  runs; explicit queue-management commands retain that operation. This is a
+  repository-script change, not evidence of deployment to the runner (#3014).
+- Review landing and conformance inventory checks share the checker's case
+  inventory instead of maintaining a separate interpretation (#2988, #2991,
+  #2997, #3002).
+
 ## [6.3.0] - 2026-09-13
 
 ### Added
