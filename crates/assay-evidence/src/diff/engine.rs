@@ -1,19 +1,35 @@
-use super::{BundleSummary, DiffReport, DiffSet, DiffSummary};
+use super::{
+    BundleComparison, BundleSummary, DiffReport, DiffSet, DiffSummary, EventDiff, EventRef,
+};
 use crate::bundle::reader::BundleReader;
 use crate::bundle::writer::VerifyLimits;
 use crate::types::EvidenceEvent;
 use anyhow::{Context, Result};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 
 /// Diff two verified bundles and report differences in network, filesystem, and process subjects.
 ///
-/// Both bundles are verified first (hard fail if either fails).
+/// The projection layer of [`compare_bundles`]; the retained events outside those projections are
+/// not in this report. Both bundles are verified first (hard fail if either fails).
 pub fn diff_bundles<R1: Read, R2: Read>(
     baseline: R1,
     candidate: R2,
     limits: VerifyLimits,
 ) -> Result<DiffReport> {
+    compare_bundles(baseline, candidate, limits).map(|comparison| comparison.report)
+}
+
+/// Compare two verified bundles on both layers: the retained events by verified content id (with
+/// `run_root` as the whole-record witness), and the network, filesystem and process subject
+/// projections.
+///
+/// Both bundles are verified first (hard fail if either fails).
+pub fn compare_bundles<R1: Read, R2: Read>(
+    baseline: R1,
+    candidate: R2,
+    limits: VerifyLimits,
+) -> Result<BundleComparison> {
     let baseline_reader = BundleReader::open_with_limits(baseline, limits)
         .context("failed to open baseline bundle")?;
     let candidate_reader = BundleReader::open_with_limits(candidate, limits)
@@ -42,17 +58,74 @@ pub fn diff_bundles<R1: Read, R2: Read>(
     );
     let processes = compute_diff(&baseline_subjects.processes, &candidate_subjects.processes);
 
-    Ok(DiffReport {
-        baseline: baseline_summary,
-        candidate: candidate_summary,
-        summary: DiffSummary {
-            event_count_delta,
-            duration_delta: None,
+    let retained_events = compare_events(
+        &baseline_events,
+        &candidate_events,
+        baseline_summary.run_root == candidate_summary.run_root,
+    )?;
+
+    Ok(BundleComparison {
+        report: DiffReport {
+            baseline: baseline_summary,
+            candidate: candidate_summary,
+            summary: DiffSummary {
+                event_count_delta,
+                duration_delta: None,
+            },
+            network,
+            filesystem,
+            processes,
         },
-        network,
-        filesystem,
-        processes,
+        retained_events,
     })
+}
+
+/// Compare the retained events by content id. The ids were recomputed by verification, so they
+/// are the same function `run_root` is built from; this is the record-level reading of that root,
+/// not a second identity.
+fn compare_events(
+    baseline: &[EvidenceEvent],
+    candidate: &[EvidenceEvent],
+    run_root_equal: bool,
+) -> Result<EventDiff> {
+    let baseline_ids = index_by_content_hash(baseline)?;
+    let candidate_ids = index_by_content_hash(candidate)?;
+    Ok(EventDiff {
+        run_root_equal,
+        added: only_in(&candidate_ids, &baseline_ids),
+        removed: only_in(&baseline_ids, &candidate_ids),
+    })
+}
+
+/// First occurrence per content id. An event without a content id after verification is a
+/// contract breach, not an event to skip: skipping would let it vanish from the comparison.
+fn index_by_content_hash(events: &[EvidenceEvent]) -> Result<BTreeMap<String, EventRef>> {
+    let mut index = BTreeMap::new();
+    for event in events {
+        let content_hash = event
+            .content_hash
+            .clone()
+            .with_context(|| format!("verified event seq {} has no content_hash", event.seq))?;
+        index.entry(content_hash.clone()).or_insert(EventRef {
+            content_hash,
+            type_: event.type_.clone(),
+            seq: event.seq,
+        });
+    }
+    Ok(index)
+}
+
+fn only_in(
+    these: &BTreeMap<String, EventRef>,
+    others: &BTreeMap<String, EventRef>,
+) -> Vec<EventRef> {
+    let mut refs: Vec<EventRef> = these
+        .iter()
+        .filter(|(hash, _)| !others.contains_key(*hash))
+        .map(|(_, event)| event.clone())
+        .collect();
+    refs.sort_by_key(|event| event.seq);
+    refs
 }
 
 fn make_summary(reader: &BundleReader, events: &[EvidenceEvent]) -> BundleSummary {

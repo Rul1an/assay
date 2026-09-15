@@ -1,12 +1,10 @@
+use super::diff_render::render_human;
 use anyhow::{Context, Result};
-use assay_evidence::diff::engine::diff_bundles;
+use assay_evidence::diff::engine::compare_bundles;
 use assay_evidence::VerifyLimits;
 use clap::{Args, ValueEnum};
 use serde::Serialize;
 use std::fs::File;
-
-const COMPARISON_SCOPE_SENTENCE: &str =
-    "Comparison scope: retained verified events. Absence and completeness are not established.";
 
 #[derive(Debug, Serialize)]
 struct DiffComparisonScope {
@@ -27,7 +25,7 @@ impl DiffComparisonScope {
 struct DiffCliDocument<'a> {
     comparison_scope: DiffComparisonScope,
     #[serde(flatten)]
-    report: &'a assay_evidence::diff::DiffReport,
+    comparison: &'a assay_evidence::diff::BundleComparison,
 }
 
 /// The shapes `evidence diff` can emit. A type rather than a string, so the match over it is
@@ -83,42 +81,20 @@ pub fn cmd_diff(args: DiffArgs) -> Result<i32> {
         .with_context(|| format!("failed to open candidate {}", candidate_path.display()))?;
 
     let limits = VerifyLimits::for_retained_events();
-    let report = diff_bundles(baseline_file, candidate_file, limits)?;
+    let comparison = compare_bundles(baseline_file, candidate_file, limits)?;
 
     match args.format {
         DiffFormat::Json => {
             let document = DiffCliDocument {
                 comparison_scope: DiffComparisonScope::retained_verified(),
-                report: &report,
+                comparison: &comparison,
             };
             println!("{}", serde_json::to_string_pretty(&document)?);
         }
-        DiffFormat::Human => {
-            eprintln!("Assay Evidence Diff");
-            eprintln!("===================");
-            eprintln!(
-                "Baseline:  {} ({} events)",
-                report.baseline.run_id, report.baseline.event_count
-            );
-            eprintln!(
-                "Candidate: {} ({} events)",
-                report.candidate.run_id, report.candidate.event_count
-            );
-            eprintln!("Event count delta: {:+}", report.summary.event_count_delta);
-            eprintln!();
-            eprintln!("{COMPARISON_SCOPE_SENTENCE}");
-            eprintln!();
-
-            print_diff_set("Network", &report.network);
-            print_diff_set("Filesystem", &report.filesystem);
-            print_diff_set("Processes", &report.processes);
-
-            if report.is_empty() {
-                eprintln!("No differences found.");
-            }
-        }
+        DiffFormat::Human => render_human(&comparison),
     }
 
+    // Exit 0 means the comparison completed; the result is in the report, not the exit code.
     Ok(0)
 }
 
@@ -241,20 +217,6 @@ fn resolve_paths(args: &DiffArgs) -> Result<(std::path::PathBuf, std::path::Path
             .context("candidate bundle path is required (or use --baseline-dir + --key)")?;
         Ok((args.baseline.clone(), candidate.clone()))
     }
-}
-
-fn print_diff_set(category: &str, diff: &assay_evidence::diff::DiffSet) {
-    if diff.is_empty() {
-        return;
-    }
-    eprintln!("{}:", category);
-    for added in &diff.added {
-        eprintln!("  + {}", added);
-    }
-    for removed in &diff.removed {
-        eprintln!("  - {}", removed);
-    }
-    eprintln!();
 }
 
 #[cfg(test)]
