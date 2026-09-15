@@ -59,6 +59,33 @@ sha256:a3f2b1c4d5e6f7890...
 
 Any modification changes the ID. Tamper-evident by design.
 
+### Comparing Bundles
+
+`assay evidence diff` verifies both bundles, then compares the retained verified events
+on two layers:
+
+- **Retained events by content id.** Every event carries a verified `content_hash` over its
+  type, subject and payload; `run_root` binds the ordered sequence of those hashes. The report
+  prints both `run_root`s and lists events present on one side only, named by content id, type
+  and sequence number. Unequal roots are a sound witness that the retained events differ;
+  equal roots that they do not.
+- **Subject projections.** Added and removed `.net`, `.fs` and `.process` subjects (hosts,
+  paths, process names), as before.
+
+The output ends with one of two lines:
+
+```
+No differences in retained verified events: run_root equal.
+Retained verified events differ: run_root differs; 1 added, 1 removed by content id.
+```
+
+Equal projections with a differing `run_root` are reported as differing, never as clean.
+Absence and completeness are not established: the comparison covers what both bundles
+retained, not what happened. Exit code is `0` whenever both bundles verify and the comparison
+completes, with or without differences; a bundle that fails to open or verify is an error.
+`--format json` carries the same data under `retained_events` (`run_root_equal`, `added`,
+`removed`) next to the existing subject sets.
+
 ### BYOS Storage
 
 Push bundles to your own S3-compatible storage:

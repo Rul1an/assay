@@ -2,6 +2,7 @@ pub mod adapt_skill_scan;
 pub mod attest;
 pub mod cyclonedx_mlbom_model;
 pub mod diff;
+mod diff_render;
 pub mod effect_refutation;
 pub mod lint;
 pub mod list;

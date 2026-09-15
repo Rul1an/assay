@@ -1,5 +1,5 @@
 use assay_evidence::bundle::BundleWriter;
-use assay_evidence::diff::engine::diff_bundles;
+use assay_evidence::diff::engine::{compare_bundles, diff_bundles};
 use assay_evidence::types::EvidenceEvent;
 use assay_evidence::VerifyLimits;
 use chrono::{TimeZone, Utc};
@@ -72,14 +72,17 @@ fn test_identical_bundles_empty_diff() {
     let events = base_events("run_base");
     let bundle = create_bundle("run_base", events);
 
-    let report = diff_bundles(
+    let comparison = compare_bundles(
         Cursor::new(&bundle),
         Cursor::new(&bundle),
         VerifyLimits::default(),
     )
     .unwrap();
+    let report = &comparison.report;
 
+    assert!(comparison.is_empty());
     assert!(report.is_empty());
+    assert!(comparison.retained_events.run_root_equal);
     assert_eq!(report.summary.event_count_delta, 0);
     assert!(report.network.added.is_empty());
     assert!(report.network.removed.is_empty());
@@ -118,6 +121,79 @@ fn test_extra_network_event_detected() {
         .network
         .added
         .contains(&"evil.example.com:80".to_string()));
+}
+
+fn policy_decision_event(run_id: &str, decision: &str) -> EvidenceEvent {
+    let mut event = EvidenceEvent::new(
+        "assay.policy.decision",
+        "urn:assay:test",
+        run_id,
+        4,
+        serde_json::json!({"tool": "write_file", "decision": decision}),
+    );
+    event.time = Utc.timestamp_opt(1700000004, 0).unwrap();
+    event
+}
+
+/// Two bundles whose `.net` / `.fs` / `.process` projections are identical but whose retained
+/// events differ in a field none of the projections read (#3037). The projections are empty, the
+/// verified `run_root`s differ, and the report must not read as empty.
+#[test]
+fn test_equal_projections_differing_payload_is_not_empty() {
+    let mut baseline_events = base_events("run_base");
+    baseline_events.push(policy_decision_event("run_base", "allow"));
+    let baseline = create_bundle("run_base", baseline_events);
+
+    let mut candidate_events = base_events("run_cand");
+    candidate_events.push(policy_decision_event("run_cand", "deny"));
+    let candidate = create_bundle("run_cand", candidate_events);
+
+    let comparison = compare_bundles(
+        Cursor::new(&baseline),
+        Cursor::new(&candidate),
+        VerifyLimits::default(),
+    )
+    .unwrap();
+    let report = &comparison.report;
+
+    assert!(report.is_empty(), "the projection layer alone is equal");
+    assert_ne!(report.baseline.run_root, report.candidate.run_root);
+
+    assert!(
+        !comparison.is_empty(),
+        "run_root differs, so the comparison must not be empty"
+    );
+    let events = &comparison.retained_events;
+    assert!(!events.run_root_equal);
+    assert_eq!(events.added.len(), 1);
+    assert_eq!(events.removed.len(), 1);
+    let added = &events.added[0];
+    let removed = &events.removed[0];
+    assert_eq!(added.type_, "assay.policy.decision");
+    assert_eq!(removed.type_, "assay.policy.decision");
+    assert_eq!(added.seq, 4);
+    assert_eq!(removed.seq, 4);
+    assert_ne!(added.content_hash, removed.content_hash);
+    assert!(added.content_hash.starts_with("sha256:"));
+}
+
+/// Stream identity (`run_id`, `id`) is not bound by the content id, so two runs that retained the
+/// same events must compare equal by content id and by `run_root`.
+#[test]
+fn test_same_events_different_run_id_is_empty() {
+    let baseline = create_bundle("run_base", base_events("run_base"));
+    let candidate = create_bundle("run_cand", base_events("run_cand"));
+
+    let comparison = compare_bundles(
+        Cursor::new(&baseline),
+        Cursor::new(&candidate),
+        VerifyLimits::default(),
+    )
+    .unwrap();
+
+    assert!(comparison.retained_events.run_root_equal);
+    assert!(comparison.retained_events.is_empty());
+    assert!(comparison.is_empty());
 }
 
 #[test]
