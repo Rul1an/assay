@@ -827,11 +827,11 @@ repos:
         # `check-release` saw a declared major and skipped all 254 checks -- reporting success while
         # #2068's `MetricResult` break went through and was found by hand at release prep.
         #
-        # The cheap cases run here: no pinned SHA, the baseline comes from the newest release tag,
+        # The cheap cases run here: no pinned SHA, the baseline comes from the newest stable tag,
         # and a missing tag fails rather than skips. The planted-break case costs a rustdoc build per
         # crate, so it runs under ASSAY_SEMVER_GATE_FULL=1 and in the workflow's own CI job.
         stages: [pre-push]
-        files: ^(scripts/ci/(test-semver-gate\.sh|derive-semver-published-lib-crates\.py)|\.github/workflows/semver-public\.yml)$
+        files: ^(scripts/ci/(test-semver-gate\.sh|resolve-semver-baseline\.sh|derive-semver-published-lib-crates\.py)|\.github/workflows/semver-public\.yml)$
       - id: split-wave0-semver-routing-contract
         name: Split Wave 0 semver routing contract
         entry: bash scripts/ci/test-split-wave0-semver-routing.sh

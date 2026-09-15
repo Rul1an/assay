@@ -15,6 +15,9 @@ pin remains v6.3.0; this entry does not assert successful RC2 publication.
 - Convert the workspace's RC and beta versions to Python's PEP 440 spelling once
   for wheel selection, installation, and installed-metadata verification. Keep
   the exact wheel-count, platform-tag, and native-import checks in place.
+- Resolve semver baselines from the latest stable release tag, not a newer RC
+  or beta. A prerelease baseline caused the gate's planted API breaks to be
+  accepted; the required CI self-test caught this before RC2 could merge.
 
 ## [6.3.1-rc.1] - 2026-09-14
 

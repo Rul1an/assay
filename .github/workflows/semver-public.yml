@@ -217,10 +217,10 @@ jobs:
       # whole 3.x line. #2068 added a public field to `MetricResult` and this job reported success
       # (#2088).
       #
-      # Against the last release tag the question becomes the one that matters: does THIS branch's
+      # Against the last stable release tag the question becomes the one that matters: does THIS branch's
       # version cover what THIS branch changed. A break with no bump fails; a release PR that bumps
       # to cover it passes.
-      - name: Resolve semver baseline from the last release tag
+      - name: Resolve semver baseline from the last stable release tag
         id: baseline
         shell: bash
         run: |
@@ -230,14 +230,7 @@ jobs:
           # while reporting success. That is the exact failure this job exists to stop, so it must
           # not be the way this job fails.
           git fetch --tags --quiet origin
-          tag="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1)"
-          if [ -z "${tag}" ]; then
-            echo "::error::no v* release tag found, so there is nothing to compare against."
-            echo "A missing baseline is a 'could not check', and this job must not report success"
-            echo "for a comparison it did not make."
-            exit 1
-          fi
-          git cat-file -e "${tag}^{commit}"
+          tag="$(bash scripts/ci/resolve-semver-baseline.sh)"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "Semver baseline: ${tag} ($(git rev-parse --short "${tag}^{commit}"))"
 
@@ -277,7 +270,7 @@ jobs:
           skipped_count=0
           {
             echo "## Semver checks"
-            echo "- Baseline: ${BASELINE_TAG} (last release tag)"
+            echo "- Baseline: ${BASELINE_TAG} (last stable release tag)"
             echo "- Crates derived from publishable workspace library targets:"
           } >> "$GITHUB_STEP_SUMMARY"
 
