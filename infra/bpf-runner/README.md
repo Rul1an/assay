@@ -11,7 +11,12 @@ Setup and maintenance for the GitHub Actions self-hosted runner used by Kernel M
 
 ## Health Check & Auto-Recovery
 
-The `health_check.sh` script monitors the runner and auto-recovers from common failures:
+The `health_check.sh` script monitors the runner and auto-recovers from common failures.
+Recovery re-registers the runner, which stops its service; it therefore refuses while the
+GitHub API reports the runner busy, while a `Runner.Worker` process exists in the guest, or
+when that guest probe fails or times out. The "offline with queued jobs" trigger counts only
+waiting jobs that require the `assay-bpf-runner` label, not every queued run in the repository
+(#2985). `--recover` is subject to the same refusals.
 
 ```bash
 # Check status

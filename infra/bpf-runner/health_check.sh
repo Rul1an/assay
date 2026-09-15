@@ -183,16 +183,38 @@ ensure_assay_cli_current() {
     return 0
 }
 
-# Check if there are queued jobs waiting for our runner labels
-check_queued_jobs() {
-    local queued_count
-    local gh="${GH_CMD:-gh}"
-    queued_count=$($gh api "repos/$REPO/actions/runs?status=queued" --jq '.workflow_runs | length' 2>/dev/null || echo "0")
+# Queued demand means a waiting job that requires this runner's label. A
+# repository-wide queued-run count also fires on hosted backlog, and that count
+# was one half of the #2985 teardowns. The waiting-status set mirrors
+# scripts/ci/check-runner-health.sh; the two scripts cannot share a file
+# because this one is installed on the host as a single file.
+REQUIRED_RUNNER_LABEL="${REQUIRED_RUNNER_LABEL:-assay-bpf-runner}"
+QUEUED_RUN_INSPECTION_LIMIT="${QUEUED_RUN_INSPECTION_LIMIT:-20}"
 
-    if [[ "$queued_count" -gt 0 ]]; then
-        log_info "Found $queued_count queued workflow runs"
-        return 0
+check_queued_jobs() {
+    local gh="${GH_CMD:-gh}"
+    local run_ids run_id matching
+
+    if ! run_ids=$($gh api "repos/$REPO/actions/runs?status=queued&per_page=${QUEUED_RUN_INSPECTION_LIMIT}" 2>/dev/null \
+        | jq -r '.workflow_runs[]? | .id | select(type == "number")' 2>/dev/null); then
+        return 1
     fi
+    [[ -n "$run_ids" ]] || return 1
+
+    for run_id in $run_ids; do
+        # shellcheck disable=SC2016 # jq --arg binding, not shell expansion.
+        matching=$($gh api "repos/$REPO/actions/runs/${run_id}/jobs?per_page=100" 2>/dev/null \
+            | jq -r --arg label "$REQUIRED_RUNNER_LABEL" '
+                [.jobs[]?
+                 | select((.status == "queued" or .status == "waiting"
+                           or .status == "pending" or .status == "requested")
+                          and ((.labels // []) | index($label)))]
+                | length' 2>/dev/null) || matching=""
+        if [[ "$matching" =~ ^[0-9]+$ && "$matching" -gt 0 ]]; then
+            log_info "Found $matching queued job(s) requiring label $REQUIRED_RUNNER_LABEL in run $run_id"
+            return 0
+        fi
+    done
     return 1
 }
 
@@ -849,9 +871,28 @@ require_recovery_admission() {
     fi
 }
 
+# The API snapshot can read `offline` while the guest is executing a job (#2985:
+# three teardowns, each a `svc.sh stop` under a running Runner.Worker). The
+# guest process table is the second signal the stop decision requires. pgrep
+# exit 1 is the only reading that means idle; a match, an error, or a timed-out
+# probe all refuse, because stopping a runner of unknown liveness is the fault.
+require_guest_quiescence() {
+    local rc=0
+    timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" \
+        multipass exec "$VM_NAME" -- pgrep -x Runner.Worker >/dev/null 2>&1 || rc=$?
+    case "$rc" in
+        1) return 0 ;;
+        0) log_error "Recovery refused: a Runner.Worker process is executing in the guest" ;;
+        124) log_error "Recovery refused: guest worker probe timed out" ;;
+        *) log_error "Recovery refused: guest worker probe failed (exit $rc)" ;;
+    esac
+    return 1
+}
+
 # Full recovery procedure
 recover_runner() {
     require_recovery_admission || return $?
+    require_guest_quiescence || return $?
     log_warn "Starting runner recovery..."
 
     # Step 1: Sync time

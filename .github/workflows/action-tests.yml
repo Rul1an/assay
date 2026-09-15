@@ -48,6 +48,11 @@ jobs:
       - name: Exercise runner auto-recovery token freshness
         run: bash scripts/ci/test-runner-auto-recovery.sh
 
+      # #2985: recovery stopped a runner that was executing a job. Keep the
+      # guest-worker refusal and the label-scoped queue trigger on the PR path.
+      - name: Exercise runner recovery liveness and queue scoping
+        run: bash scripts/ci/test-runner-recovery-liveness.sh
+
       - name: Build CLI once
         run: cargo build --release --workspace --exclude assay-ebpf
 
