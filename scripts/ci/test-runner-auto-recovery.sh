@@ -40,6 +40,9 @@ get_runner_status() {
     printf '%s\n' online
 }
 sleep() { :; }
+# The guest worker probe (#2985) is owned by test-runner-recovery-liveness.sh;
+# this suite holds it at idle so admission and token freshness stay isolated.
+require_guest_quiescence() { :; }
 
 # Admission uses only synthetic API responses; no guest or credentials are read.
 gh() {

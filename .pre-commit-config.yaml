@@ -149,6 +149,13 @@ repos:
         pass_filenames: false
         files: ^(infra/bpf-runner/health_check\.sh|scripts/ci/test-runner-auto-recovery\.sh)$
 
+      - id: runner-recovery-liveness-contract
+        name: Runner recovery refuses while a guest worker runs
+        entry: bash scripts/ci/test-runner-recovery-liveness.sh
+        language: system
+        pass_filenames: false
+        files: ^(infra/bpf-runner/health_check\.sh|scripts/ci/test-runner-recovery-liveness\.sh)$
+
       - id: docs-generated-drift-self-test
         name: Generated-docs drift check self-test
         entry: bash -c 'bash scripts/ci/test-check-docs-generated-drift-safety.sh && bash scripts/ci/test-check-docs-generated-drift.sh'
