@@ -1,0 +1,58 @@
+{
+  "manifest": {
+    "schema_version": 1,
+    "bundle_id": "sha256:0ce691dd7626b324a5c02def4f0e542db1341c58cdcf8e1b15cd8c38f80897de",
+    "producer": {
+      "name": "assay-cli",
+      "version": "3.9.1"
+    },
+    "run_id": "promptfoo_candidate",
+    "event_count": 1,
+    "run_root": "sha256:0ce691dd7626b324a5c02def4f0e542db1341c58cdcf8e1b15cd8c38f80897de",
+    "algorithms": {
+      "canon": "jcs-rfc8785",
+      "hash": "sha256",
+      "root": "sha256(concat(content_hash + \"\\n\"))"
+    },
+    "files": {
+      "events.ndjson": {
+        "path": "events.ndjson",
+        "sha256": "sha256:9f5c6c89633e9658669a2ad30d054e550f7b6f07fc96213276be2555de8a72c7",
+        "bytes": 984
+      }
+    }
+  },
+  "events": [
+    {
+      "specversion": "1.0",
+      "type": "assay.receipt.promptfoo.assertion_component.v1",
+      "source": "urn:assay:external:promptfoo:assertion-component",
+      "id": "promptfoo_candidate:0",
+      "time": "2026-04-30T09:01:00Z",
+      "datacontenttype": "application/json",
+      "assayrunid": "promptfoo_candidate",
+      "assayseq": 0,
+      "assayproducer": "assay-cli",
+      "assayproducerversion": "3.9.1",
+      "assaygit": "unknown",
+      "assaypii": false,
+      "assaysecrets": false,
+      "assaycontenthash": "sha256:c4f513f3e43e0f0607921bf93fe19ada80b91e026a069637cd6068ca629c1fa9",
+      "data": {
+        "assertion_type": "equals",
+        "imported_at": "2026-04-30T09:01:00Z",
+        "reducer_version": "assay-promptfoo-jsonl-component-result@0.1.0",
+        "result": {
+          "pass": true,
+          "reason": "Assertion passed",
+          "score": 1
+        },
+        "schema": "assay.receipt.promptfoo.assertion-component.v1",
+        "source_artifact_digest": "sha256:299964351a22c559b83c93259da7c710d76bd50cfaf985aa039ff54558f1b68b",
+        "source_artifact_ref": "candidate.results.jsonl",
+        "source_surface": "cli-jsonl.gradingResult.componentResults",
+        "source_system": "promptfoo"
+      }
+    }
+  ]
+}

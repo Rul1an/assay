@@ -1,0 +1,68 @@
+{
+  "schema": "assay.experiment.evidence_verify_cost.v0",
+  "profile": "release",
+  "payload_bytes_per_event": 256,
+  "rows": [
+    {
+      "events": 1000,
+      "verify_ms_median": 16.192958,
+      "verify_reps": 11,
+      "compressed_bytes": 260847,
+      "events_bytes": 762780,
+      "bytes_per_event_compressed": 260.847,
+      "gzip_ratio": 0.3419688507826634,
+      "inclusion_proof_hashes": 10
+    },
+    {
+      "events": 5000,
+      "verify_ms_median": 80.64770899999999,
+      "verify_reps": 9,
+      "compressed_bytes": 1301206,
+      "events_bytes": 3822780,
+      "bytes_per_event_compressed": 260.2412,
+      "gzip_ratio": 0.3403821302821507,
+      "inclusion_proof_hashes": 13
+    },
+    {
+      "events": 10000,
+      "verify_ms_median": 160.365417,
+      "verify_reps": 7,
+      "compressed_bytes": 2601647,
+      "events_bytes": 7647780,
+      "bytes_per_event_compressed": 260.1647,
+      "gzip_ratio": 0.3401832950215618,
+      "inclusion_proof_hashes": 14
+    },
+    {
+      "events": 50000,
+      "verify_ms_median": 801.434792,
+      "verify_reps": 5,
+      "compressed_bytes": 13005058,
+      "events_bytes": 38327780,
+      "bytes_per_event_compressed": 260.10116,
+      "gzip_ratio": 0.33931153852375484,
+      "inclusion_proof_hashes": 16
+    },
+    {
+      "events": 100000,
+      "verify_ms_median": 1609.891083,
+      "verify_reps": 3,
+      "compressed_bytes": 26009231,
+      "events_bytes": 76677780,
+      "bytes_per_event_compressed": 260.09231,
+      "gzip_ratio": 0.3392016696362362,
+      "inclusion_proof_hashes": 17
+    }
+  ],
+  "fit": {
+    "slope_ms_per_event": 0.016091622046185416,
+    "intercept_ms": -0.5354601333558093,
+    "ms_per_1k_events": 16.091622046185417,
+    "r2": 0.9999949267462757
+  },
+  "dsse": {
+    "sign_ms_median": 0.029416,
+    "verify_ms_median": 0.047834,
+    "reps": 101
+  }
+}

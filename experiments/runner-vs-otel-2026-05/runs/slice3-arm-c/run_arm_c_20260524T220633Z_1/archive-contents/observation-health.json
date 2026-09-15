@@ -1,0 +1,1 @@
+{"schema":"assay.runner.observation_health.v0","run_id":"run_arm_c_20260524T220633Z_1","platform":"linux","kernel_layer":"complete","ringbuf_drops":0,"policy_layer":"absent","sdk_layer":"self_reported","cgroup_correlation":"clean","notes":["s2_kernel_capture: monitor_events=10 ringbuf_drops=0","s5_sdk_capture: sdk_events=3 sdk_tool_calls=1"]}
