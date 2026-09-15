@@ -1,0 +1,18 @@
+diff --git a/crates/assay-core/src/mcp/tool_call_handler/evaluate_next/approval.rs b/crates/assay-core/src/mcp/tool_call_handler/evaluate_next/approval.rs
+index c35046cad..3650f3d20 100644
+--- a/crates/assay-core/src/mcp/tool_call_handler/evaluate_next/approval.rs
++++ b/crates/assay-core/src/mcp/tool_call_handler/evaluate_next/approval.rs
+@@ -66,12 +66,7 @@ pub(in crate::mcp::tool_call_handler) fn validate_approval_required(
+
+     let freshness = classify_approval_freshness(&artifact);
+     tool_match.approval_freshness = Some(freshness);
+-    if !matches!(freshness, ApprovalFreshness::Fresh) {
+-        return Some(mark_approval_failure(
+-            tool_match,
+-            ApprovalFailure::ExpiredApproval,
+-        ));
+-    }
++    // Experimental mutant: freshness remains recorded, rejection is disabled.
+
+     if artifact.bound_tool != tool_name {
+         return Some(mark_approval_failure(
