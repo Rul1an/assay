@@ -45,6 +45,10 @@ anyhow = { workspace = true }
 serde_yaml = "0.9"
 globset = "0.4"
 
+# CAP-1 normative verification (coverage_attestation::verify): JSON Schema 2020-12 validation
+# against the embedded pinned schema. Workspace pin, no default features, so no retrieval.
+jsonschema.workspace = true
+
 # BYOS: Object storage (S3, Azure, GCS, local, memory)
 object_store = { version = "0.14", features = ["aws", "http"] }
 async-trait = "0.1"
@@ -64,7 +68,6 @@ tokio = { workspace = true }
 # one table cannot simply call the other; the tables stay apart by decision, not by omission.
 assay-runner-schema = { workspace = true }
 getrandom = { version = "0.4", features = ["sys_rng"] }
-jsonschema.workspace = true
 tempfile = "3"
 assert_fs = "1.1"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }

@@ -8,8 +8,9 @@
 //! producer. "A conforming document may be entirely false."
 //!
 //! This module is the layer those sections scope out. Given a document that already CONFORMS
-//! (this module runs no CAP-1 verifier and claims no CAP-1 implementation) and the relying
-//! party's OWN state, it answers, per claim kind, what the accounting supports. The vocabulary is
+//! (the normative stage is [`verify_cap1_document`] in the `verify` submodule: bounded
+//! admission, the pinned schema, then R0–R8 in `rules`; this gate runs none of it) and the
+//! relying party's OWN state, it answers, per claim kind, what the accounting supports. The vocabulary is
 //! the one this crate already uses for coding-agent evidence and the runner substrate mirrors:
 //! [`CodingAgentClaimKind`] in, [`CodingAgentGateDecision`] out, worst wins.
 //!
@@ -30,12 +31,20 @@
 //! already binds five of these seven axes at the byte layer. Absence is evaluated over the stratum
 //! the assertion cites, which is what R6 binds it to; CAP-1's free-text `qualifier` is not read.
 
+pub mod rules;
+pub mod verify;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::coding_agent::{CodingAgentClaimKind, CodingAgentGateDecision};
+pub use rules::{verify_cap1_rules, verify_cap1_rules_with, Cap1NormativeRule};
+pub use verify::{
+    verify_cap1_document, Cap1AdmissionLimits, Cap1Refusal, Cap1Stage, Cap1SyntaxFault,
+    CAP1_SCHEMA_JSON, CAP1_SCHEMA_SHA256, CAP1_SCHEMA_SOURCE,
+};
 
 /// A CAP-1 document, as the normative JSON Schema shapes it (`additionalProperties: false`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
