@@ -35,7 +35,7 @@ impl<R: BufRead> StreamUpgrader<R> {
         match self.reader.read_line(&mut line) {
             Ok(0) => return None,
             Ok(_) => {}
-            Err(_) => return None,
+            Err(error) => return Some(Err(serde_json::Error::io(error))),
         }
 
         let line = line.trim();
