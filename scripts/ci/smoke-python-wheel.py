@@ -30,6 +30,18 @@ def load_matrix(root: Path) -> dict:
     return json.loads((root / MATRIX_REL).read_text(encoding="utf-8"))
 
 
+def distribution_version(version: str) -> str:
+    """Map the supported release channels to Maturin's PEP 440 spelling."""
+    match = re.fullmatch(r"([0-9]+\.[0-9]+\.[0-9]+)(?:-(rc|beta)\.([0-9]+))?", version)
+    if match is None:
+        raise SystemExit(f"unsupported wheel release version: {version}")
+    base, channel, number = match.groups()
+    base = ".".join(str(int(part)) for part in base.split("."))
+    if channel is None:
+        return base
+    return base + {"rc": "rc", "beta": "b"}[channel] + str(int(number))
+
+
 def load_cell(root: Path, target: str) -> dict:
     matrix = load_matrix(root)
     matches = [row for row in matrix["wheels"] if row["target"] == target]
@@ -126,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     if not dist.is_absolute():
         dist = root / dist
     cell = load_cell(root, args.target)
-    version = workspace_version(root)
+    version = distribution_version(workspace_version(root))
     package = resolve_package(root, args.package)
     os.environ["ASSAY_WHEEL_PACKAGE"] = package
     wheel = find_wheel(dist, package, version, cell["tag"])

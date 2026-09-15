@@ -280,8 +280,8 @@ ${install_run}"
     || fail "semver-public install must set RUSTUP_TOOLCHAIN: stable (step/job) or call setup-rust before the install"
 
   job="$(semver_public_job "${wf}")"
-  # Preserve semver gate logic: baseline from last release tag, self-test, allowlist check-release.
-  grep -q 'Resolve semver baseline from the last release tag' <<<"${job}" \
+  # Preserve semver gate logic: stable baseline, self-test, allowlist check-release.
+  grep -q 'Resolve semver baseline from the last stable release tag' <<<"${job}" \
     || fail "semver-public lost baseline resolution step"
   grep -q 'scripts/ci/test-semver-gate.sh' <<<"${job}" \
     || fail "semver-public lost semver gate self-test"
