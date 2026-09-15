@@ -182,12 +182,50 @@ awk -F'"' '/"tool"/ {print $4}' traces/golden.jsonl | sort | uniq -c
 ### Validate a Trace
 
 ```bash
-# Check trace format is valid
+# Check every configured prompt appears verbatim in the trace
 assay trace verify --trace traces/golden.jsonl --config eval.yaml
 
 # Output:
-# ✅ Trace verifies against config coverage
+# truncation ordinal=1 kind=episode_start episode_id="ep-1" pointer=/input reading=unmeasured
+# truncation ordinal=1 kind=episode_start episode_id="ep-1" pointer=/meta reading=unmeasured
+# truncation ordinal=2 kind=step episode_id="ep-1" step_id="s1" pointer=/content reading=unmeasured
+# ...
+# ✅ Trace Verification Passed: All 3 config tests found in trace.
 ```
+
+Before the coverage verdict, `trace verify` prints one truncation reading per event
+occurrence and per field the ingest stage scans (`/input` and `/meta` for an episode start,
+`/content` and `/meta` for a step, `/args` and `/result` for a tool call; an episode end
+scans nothing and is printed with `fields=none`). The ordinal counts yielded events, so a
+V1 record expands to three ordinals; it is a locator, not a JSONL line number or a proof
+of origin. Identifiers and stage names are printed as JSON string literals escaped to
+printable ASCII.
+
+Readings come from the ADR-050 observation carrier and mean exactly this:
+
+- `lossy`: a loss record covers the field. Truncation happened at some stage and the
+  original bytes are not in the trace.
+- `measured_clean stage="<name>" ceiling=<bytes>`: the named stage reports it did not
+  shorten anything under this field at that ceiling. This is stage-local, not end-to-end
+  completeness; an exporter or host upstream may already have cut the value.
+- `unmeasured`: no trusted stage reports on the field. Absence of a record is not
+  intactness. A value that still carries the in-band `...[TRUNCATED]` mark with no loss
+  record also reads `unmeasured`, never clean.
+
+No stage is trusted by default, so a fresh run shows `lossy` or `unmeasured` only. Pass
+`--trust-stage <name>` once per stage whose clean report you accept; the ingest stage is
+`assay.trace.upgrader`, and trusting it is trusting this local scan, not the original
+producer. Trust never turns `lossy` into anything else. The readings are informational: the
+exit code is still decided by prompt coverage alone.
+
+```bash
+assay trace verify --trace traces/golden.jsonl --config eval.yaml \
+  --trust-stage assay.trace.upgrader
+```
+
+If the trace cannot be read to the end, the rows already printed are followed by
+`truncation incomplete after_ordinal=<n> error="..."` and the command fails; those rows
+describe only the events before the failure.
 
 ### Compare Traces
 
