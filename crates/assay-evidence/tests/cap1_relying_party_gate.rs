@@ -11,9 +11,10 @@
 //!    honest twin must stay `Allowed`, every other vector must stay not-allowed. A rule whose
 //!    silence changes nothing is decoration.
 //!
-//! Conformance of the fixtures to CAP-1 itself is NOT re-checked here (this crate has no CAP-1
-//! verifier and claims none); the Python reference checks it under the author's own verifiers
-//! and the fixtures are pinned from that run.
+//! Conformance of the fixtures to CAP-1 itself is NOT re-checked here; the normative stage is
+//! `verify_cap1_document`, pinned separately in `tests/cap1_normative_verify.rs`. The Python
+//! reference checks these vectors under the author's own verifiers and the fixtures are
+//! pinned from that run.
 
 use std::collections::BTreeMap;
 use std::fs;

@@ -204,6 +204,7 @@ dependencies = [
  "futures",
  "globset",
  "hex",
+ "jsonschema",
  "object_store",
  "rand 0.8.7",
  "serde",

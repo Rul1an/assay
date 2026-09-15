@@ -47,6 +47,8 @@ repos:
             |scripts/ci/fixtures/assay-action-pin/(action\.yml|remediation_recipe\.cmd)
             # fuzz seeds are exact byte inputs; a newline changes what they exercise (#2931)
             |fuzz/corpus/.+
+            # CAP-1 vectors are verbatim upstream bytes pinned by SHA256SUMS (#2493)
+            |crates/assay-evidence/tests/fixtures/cap1/normative/(PV|NC)-\d+\.json
           )$
       - id: trailing-whitespace
         exclude: |
@@ -58,6 +60,8 @@ repos:
             |scripts/ci/fixtures/assay-action-pin/(action\.yml|remediation_recipe\.cmd)
             # fuzz seeds are exact byte inputs; a newline changes what they exercise (#2931)
             |fuzz/corpus/.+
+            # CAP-1 vectors are verbatim upstream bytes pinned by SHA256SUMS (#2493)
+            |crates/assay-evidence/tests/fixtures/cap1/normative/(PV|NC)-\d+\.json
           )$
 
   # GitGuardian secrets detection (manual/local opt-in; requires GITGUARDIAN_API_KEY)
