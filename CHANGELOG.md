@@ -12,6 +12,9 @@ and installation journey have been verified. This entry declares candidate sourc
 not successful publication or installed-agent proof.
 
 ### Fixed
+- Trace streams propagate read failures instead of treating them as clean EOF,
+  so coverage verification and ingestion report unreadable trailing input.
+  Earlier output may remain on failure; atomic rollback is not promised (#3023).
 - Update rustls to 0.23.45 in both root and fuzz lockfiles for
   RUSTSEC-2026-0285 / GHSA-2mjx-qc3c-rqvc. No Assay-specific exploitability has
   been reproduced; already-published v6.3.0 binaries are unchanged (#3013).
@@ -22,6 +25,11 @@ not successful publication or installed-agent proof.
   successful publication and digest-bound verification (#2992, #2994).
 
 ### Repository Tooling
+- Update the MCP server's pinned distroless base image. Both hosted architecture
+  builds passed; this does not establish publication of an RC image (#3018).
+- Explicit runner queue-priority commands refuse ambiguous branch/PR admission;
+  the deployed health script matches the merged source. Live recovery remains
+  a separate proof obligation (#3022).
 - Release-channel contract tests run from stable, RC, and beta source workspaces
   without treating a prerelease as a stable installation target (#3017).
 - Required CI now consumes the public semver gate result; the published-library
