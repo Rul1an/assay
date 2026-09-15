@@ -10,3 +10,6 @@ packaging/claude-plugin/.mcp.json text eol=lf
 packaging/claude-plugin/skills/assay-golden-path/** text eol=lf
 packaging/agent-plugin/** text eol=lf
 tests/fixtures/perf/semantic_vcr/cassettes/**/.gitkeep text eol=lf
+# CAP-1 schema and conformance vectors are pinned by SHA-256 (#2493); CRLF checkout would break the pin
+crates/assay-evidence/schemas/cap-1/** text eol=lf
+crates/assay-evidence/tests/fixtures/cap1/normative/** text eol=lf
