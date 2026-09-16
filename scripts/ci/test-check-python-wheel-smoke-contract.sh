@@ -142,19 +142,17 @@ cp "$ROOT/Cargo.toml" "$CASE/Cargo.toml"
 echo "=== mutation: drop smoke step ==="
 python3 - "$CASE/.github/workflows/release.yml" <<'PY'
 from pathlib import Path
+import re
 import sys
 path = Path(sys.argv[1])
 text = path.read_text()
-old = """      - name: Smoke the produced wheel
-        shell: bash
-        env:
-          ASSAY_WHEEL_TARGET: ${{ matrix.target }}
-        run: python3 scripts/ci/smoke-python-wheel.py --dist-dir assay-python-sdk/dist --python "python${{ needs.plan-python-artifact.outputs.python }}"
-
-"""
-if old not in text:
+pattern = re.compile(
+    r"\n      - name: Smoke the produced wheel\n(?:(?:        .*)?\n)+?(?=      - name: Upload wheels\n)",
+    re.M,
+)
+if not pattern.search(text):
     raise SystemExit("smoke step not found")
-path.write_text(text.replace(old, "", 1))
+path.write_text(pattern.sub("\n", text, count=1))
 PY
 expect_fail "drop smoke step" python3 "$CONTRACT" --root "$CASE"
 cp "$ROOT/.github/workflows/release.yml" "$CASE/.github/workflows/release.yml"
@@ -164,13 +162,13 @@ mkdir -p "$CASE/assay-python-sdk/dist"
 expect_fail "empty dist native cell" python3 "$SMOKE" --root "$ROOT" --dist-dir "$CASE/assay-python-sdk/dist" --target x86_64-unknown-linux-gnu --python python3 --package assay-it
 
 echo "=== mutation: extra wheel beside expected ==="
-write_dummy_wheel "$CASE/assay-python-sdk/dist" "assay_it-5.4.0-cp312-cp312-macosx_10_12_x86_64.whl"
+write_dummy_wheel "$CASE/assay-python-sdk/dist" "assay_it-5.4.0-cp312-abi3-macosx_10_12_x86_64.whl"
 write_dummy_wheel "$CASE/assay-python-sdk/dist" "noise-not-the-cell.whl"
 expect_fail "extra wheel beside expected" python3 "$SMOKE" --root "$ROOT" --dist-dir "$CASE/assay-python-sdk/dist" --target x86_64-apple-darwin --python python3 --package assay-it
 rm -f "$CASE/assay-python-sdk/dist/noise-not-the-cell.whl"
 
 echo "=== mutation: renamed produced wheel ==="
-mv "$CASE/assay-python-sdk/dist/assay_it-5.4.0-cp312-cp312-macosx_10_12_x86_64.whl" \
+mv "$CASE/assay-python-sdk/dist/assay_it-5.4.0-cp312-abi3-macosx_10_12_x86_64.whl" \
   "$CASE/assay-python-sdk/dist/renamed-away.whl"
 expect_fail "renamed produced wheel" python3 "$SMOKE" --root "$ROOT" --dist-dir "$CASE/assay-python-sdk/dist" --target x86_64-apple-darwin --python python3 --package assay-it
 
@@ -331,6 +329,53 @@ path.write_text(text.replace(old, new, 1))
 PY
 expect_fail "return 0 before production install_and_import" run_install_spy "$CASE/scripts/ci/smoke-python-wheel.py"
 cp "$ROOT/scripts/ci/smoke-python-wheel.py" "$CASE/scripts/ci/smoke-python-wheel.py"
+
+echo "=== #3063 case: workflow smokes only 3.12 ==="
+cp "$ROOT/.github/workflows/release.yml" "$CASE/.github/workflows/release.yml"
+cp "$ROOT/assay-python-sdk/python-artifact-matrix.v0.json" "$CASE/assay-python-sdk/python-artifact-matrix.v0.json"
+python3 - "$CASE/assay-python-sdk/python-artifact-matrix.v0.json" "$CASE/.github/workflows/release.yml" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+matrix_path = Path(sys.argv[1])
+release_path = Path(sys.argv[2])
+
+matrix = json.loads(matrix_path.read_text())
+matrix["requires_python"] = ">=3.12"
+matrix["abi"] = "abi3"
+matrix["smoke_pythons"] = ["3.12", "3.13", "3.14"]
+for wheel in matrix["wheels"]:
+    wheel["tag"] = wheel["tag"].replace("cp312-cp312", "cp312-abi3", 1)
+matrix_path.write_text(json.dumps(matrix, indent=2) + "\n")
+
+release = release_path.read_text()
+old_smoke = """      - name: Smoke the produced wheel
+        shell: bash
+        env:
+          ASSAY_WHEEL_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          for py in ${{ join(matrix.smoke_pythons, ' ') }}; do
+            python3 scripts/ci/smoke-python-wheel.py --dist-dir assay-python-sdk/dist --python "python${py}"
+          done
+"""
+new_smoke = """      - name: Smoke the produced wheel
+        shell: bash
+        env:
+          ASSAY_WHEEL_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/smoke-python-wheel.py --dist-dir assay-python-sdk/dist --python "python3.12"
+"""
+if old_smoke not in release:
+    raise SystemExit("smoke step block not found")
+release = release.replace(old_smoke, new_smoke, 1)
+release_path.write_text(release)
+PY
+expect_fail "workflow smokes only 3.12" python3 "$CONTRACT" --root "$CASE"
+cp "$ROOT/.github/workflows/release.yml" "$CASE/.github/workflows/release.yml"
+cp "$ROOT/assay-python-sdk/python-artifact-matrix.v0.json" "$CASE/assay-python-sdk/python-artifact-matrix.v0.json"
 
 echo "=== no-op restore ==="
 cp "$ROOT/.github/workflows/release.yml" "$CASE/.github/workflows/release.yml"
