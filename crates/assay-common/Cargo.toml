@@ -19,9 +19,8 @@ serde_json = { workspace = true, features = ["alloc"], optional = true }
 chrono = { workspace = true, optional = true }
 
 aya = { workspace = true, optional = true }
-tempfile = { workspace = true, optional = true }
 
 [features]
 default = ["std"]
-std = ["serde/std", "chrono/std", "dep:serde_json", "dep:nix", "dep:tempfile"]
+std = ["serde/std", "chrono/std", "dep:serde_json", "dep:nix"]
 user = ["std", "dep:aya"]

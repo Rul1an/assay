@@ -95,7 +95,7 @@ pub fn save_atomic(path: &Path, content: &str) -> anyhow::Result<()> {
             anyhow::bail!("Refusing to write to symlink: {}", path.display());
         }
         if meta.is_file() {
-            // #3027: preserve existing profile/report overwrite behavior at this call site.
+            // #3027: callers write at process exit and readers come later, so delete-then-create is acceptable here.
             std::fs::remove_file(path)?;
         }
     }
