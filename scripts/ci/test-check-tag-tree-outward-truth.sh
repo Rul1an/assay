@@ -327,5 +327,27 @@ if required not in normalized:
 immutable = "Published release tags are immutable and are never moved or rewritten"
 if immutable not in normalized:
     raise SystemExit(f"release docs omit tag immutability rule: {immutable}")
+internal_dep = "An internal dependency declaration must carry a version, and the tag guard refuses one without it."
+if internal_dep not in normalized:
+    raise SystemExit(f"release docs omit internal dependency version rule: {internal_dep}")
 PY
 printf 'PASS: release docs distinguish candidate identity from installability\n'
+
+check_python_version_floor() {
+  local output rc=0
+  output="$(python3 - "$TMP/scripts/ci/check_internal_dep_versions.py" <<'PY' 2>&1
+import runpy
+import sys
+
+sys.version_info = (3, 10, 0, "final", 0)
+runpy.run_path(sys.argv[1], run_name="__main__")
+PY
+)" || rc=$?
+  if [ "$rc" -eq 0 ] || ! printf '%s\n' "$output" | grep -Fq 'Python 3.11 or later is required (tomllib missing)'; then
+    echo "FAIL: check_internal_dep_versions.py missed named Python floor diagnostic: $output" >&2
+    exit 1
+  fi
+}
+
+check_python_version_floor
+printf 'PASS: python-version-floor\n'

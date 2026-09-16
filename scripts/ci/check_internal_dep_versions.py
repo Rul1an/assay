@@ -58,9 +58,14 @@ helper that dies or goes quiet cannot read as a clean sweep.
 
 from __future__ import annotations
 
+import sys
+
+if sys.version_info < (3, 11):
+    print("fail\tPython 3.11 or later is required (tomllib missing)")
+    sys.exit("Python 3.11 or later is required (tomllib missing)")
+
 import fnmatch
 import subprocess
-import sys
 import tomllib
 from pathlib import Path, PurePosixPath
 
