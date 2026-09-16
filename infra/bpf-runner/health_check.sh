@@ -202,7 +202,7 @@ check_queued_jobs() {
 
     for run_id in $run_ids; do
         # shellcheck disable=SC2016 # jq --arg binding, not shell expansion.
-        # -s slurps paginated JSON documents so a labelled job past page 1 still counts.
+        # -s slurps page documents; removing it silently reads zero demand even on one page.
         matching=$($gh api --paginate "repos/$REPO/actions/runs/${run_id}/jobs?filter=latest&per_page=100" 2>/dev/null \
             | jq -s -r --arg label "$REQUIRED_RUNNER_LABEL" '
                 [.[].jobs[]?
