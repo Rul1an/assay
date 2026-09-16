@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct OtelConfig {
     /// GenAI Semantic Conventions version to anchor span attributes.
-    /// Default: "1.28.0" (Bleeding Edge 2026)
+    /// Default: the shared [`crate::otel::pin::GENAI_SEMCONV_PIN`]. Unknown values fail closed.
     pub genai_semconv_version: String,
 
     /// Stability control for attributes.
@@ -38,7 +38,7 @@ fn default_true() -> bool {
 impl Default for OtelConfig {
     fn default() -> Self {
         Self {
-            genai_semconv_version: "1.28.0".to_string(),
+            genai_semconv_version: crate::otel::pin::GENAI_SEMCONV_PIN.to_string(),
             semconv_stability: SemConvStability::default(),
             capture_mode: PromptCaptureMode::default(),
             redaction: RedactionConfig::default(),
@@ -87,6 +87,7 @@ pub struct ExporterConfig {
 
 impl OtelConfig {
     pub fn validate(&self) -> Result<(), String> {
+        crate::otel::pin::require_known_semconv_version(&self.genai_semconv_version)?;
         if matches!(self.capture_mode, PromptCaptureMode::Off) {
             return Ok(());
         }

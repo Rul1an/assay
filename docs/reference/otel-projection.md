@@ -18,16 +18,17 @@ reader sees the contract concretely and a mapping drift is caught by a test rath
 ## Versioning
 
 ```json
-"semconv": { "otel_genai": "1.37.0-development", "openinference": "pinned" }
+"semconv": { "otel_genai": "open-telemetry/semantic-conventions-genai@434c91dcc34ed038e3048c07720ddfed2c6bddfc", "openinference": "pinned" }
 ```
 
-OTel GenAI semantic conventions are still Development upstream (as are the MCP conventions), so the
-projection pins a version and flags it. A bump is an explicit change, never a silent reinterpretation.
-`openinference` is pinned by name (its span-kind set is stable enough to target).
+OTel GenAI semantic conventions are still Development upstream (as are the MCP conventions), and the
+dedicated repository has no release. The projection and MCP ingest share one commit pin. A bump is
+an explicit change, never a silent reinterpretation. `openinference` is pinned by name (its span-kind
+set is stable enough to target).
 
-The pinned version targets the GenAI **agent/tool** span surface (`execute_tool`, `gen_ai.tool.*`),
-which is newer than the LLM-**client** span surface the rest of the `otel` module pins at 1.28.0:
-`execute_tool` did not exist in 1.28.0, so the two surfaces are pinned independently.
+The pin names the GenAI **agent/tool** span surface (`execute_tool`, `gen_ai.provider.name`,
+`gen_ai.tool.*`). Pinning a Development-status commit names the attribute table Assay wrote against;
+it is not a Stable-release compatibility claim.
 
 A future slice may also emit the OTel **MCP** semantic conventions (`mcp.*`) for these spans, since
 assay's `mcp_tools` are MCP tool calls; the MCP conventions are Development today, so that is a
@@ -37,7 +38,7 @@ deliberate later addition, not part of v0.
 
 | assay input | projected as | honesty qualifier |
 | --- | --- | --- |
-| `capability_surface.mcp_tools[]` | OTel `execute_tool` span (`gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`) + OpenInference `span.kind=TOOL` | `assay.claim_class=observed` |
+| `capability_surface.mcp_tools[]` | OTel `execute_tool` span (`gen_ai.operation.name=execute_tool`, `gen_ai.provider.name=assay`, `gen_ai.tool.name`) + OpenInference `span.kind=TOOL` | `assay.claim_class=observed` |
 | `capability_surface.policy_decisions[]` (`<verdict>:<key>`) | OpenInference `span.kind=GUARDRAIL` span + `assay.decision` | `assay.claim_class=observed` |
 | `enforcement_health.v0` | a **separate** `span.kind=GUARDRAIL` enforcement span with `assay.enforcement.*` | `assay.claim_class=enforcement` |
 | `observation_health.v0` | run-level `resource_attributes` (`assay.observation.*`) | (context, not a claim) |

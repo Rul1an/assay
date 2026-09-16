@@ -6,18 +6,39 @@
 //! projection semantics live in `assay_core`, so there is exactly one projection truth — never a
 //! second, divergent CLI projection.
 
+use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 
+use assay_common::limits::{LimitExceeded, LimitKind, LimitReader};
+use assay_evidence::VerifyLimits;
 use serde_json::Value;
 
 use crate::cli::args::ProjectOtelArgs;
 use crate::exit_codes::{EXIT_CONFIG_ERROR, EXIT_SUCCESS};
 use crate::output_write::write_stdout_json;
 
+fn json_input_limit() -> u64 {
+    VerifyLimits::default().max_manifest_bytes
+}
+
 fn read_json(path: &Path) -> anyhow::Result<Value> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", path.display()))?;
-    serde_json::from_str(&text)
+    let file =
+        File::open(path).map_err(|e| anyhow::anyhow!("cannot read {}: {e}", path.display()))?;
+    let mut reader = LimitReader::new(file, json_input_limit(), LimitKind::SourceBytes);
+    let mut buf = Vec::new();
+    reader.read_to_end(&mut buf).map_err(|e| {
+        if let Some(exceeded) = LimitExceeded::from_io(&e) {
+            anyhow::anyhow!(
+                "input exceeds {} limit of {}",
+                exceeded.kind,
+                exceeded.limit
+            )
+        } else {
+            anyhow::anyhow!("cannot read {}: {e}", path.display())
+        }
+    })?;
+    serde_json::from_slice(&buf)
         .map_err(|e| anyhow::anyhow!("invalid JSON in {}: {e}", path.display()))
 }
 
