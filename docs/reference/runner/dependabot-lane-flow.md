@@ -96,6 +96,43 @@ change monitor, eBPF, cgroup, or archive behavior:
 - require `ringbuf_drops=0`, `kernel_layer=complete`, and
   `cgroup_correlation=clean` exactly as in the Phase 1 acceptance lane.
 
+## Queue Maintenance Identity
+
+`Dependabot Queue Maintenance` (`.github/workflows/dependabot-maintenance.yml`,
+script `scripts/ci/dependabot-maintenance.sh`) updates `BEHIND` dependency PRs
+and enables auto-merge on them. It does both as the repository's dedicated
+GitHub App, `assay-dependabot-lane`, never as `GITHUB_TOKEN` (#3035):
+
+- Events caused by `GITHUB_TOKEN` start no workflow runs, so a merge that
+  `GITHUB_TOKEN` enabled ran no `push` workflows on `main`, including `CI` and
+  this maintenance workflow, and the next queued PR was not refreshed.
+- A pull request updated through `GITHUB_TOKEN` gets its `pull_request` runs
+  created in an approval-required state, with zero jobs until a maintainer
+  approves each run. The Actions approval setting cannot remove that hold; only
+  a different pushing identity does.
+
+The job runs in environment `dependabot-maintenance`, restricted to `main`,
+with `deployment: false`. The environment holds variables
+`DEPENDABOT_APP_CLIENT_ID` and `DEPENDABOT_APP_SLUG` and secret
+`DEPENDABOT_APP_PRIVATE_KEY`. The token is minted per run with
+`contents: write` and `pull-requests: write` for this repository only, and is
+revoked when the job ends. The App itself holds Contents and Pull requests
+read and write plus Metadata read, and no `workflows` permission. The script
+refuses to act unless the token step's App slug equals
+`DEPENDABOT_APP_SLUG`, and a refused branch update or auto-merge fails the run.
+`scripts/ci/test-dependabot-maintenance.sh` pins both behaviours.
+
+Not yet measured: that the first App-updated head runs its `pull_request`
+workflows without approval, that an App-enabled merge runs the `push`
+workflows on `main`, and that a workflow-file bump updates without the
+`workflows` permission, and that the maintenance run started by such a merge
+refreshes the remaining `BEHIND` PRs on its own. Until #3035 records those, keep approving held runs
+and dispatching `CI` on `main` by hand when they are missing.
+
+To rotate the key, generate a new private key on the App, replace the
+environment secret, run the workflow once with `workflow_dispatch`, then delete
+the old key on the App.
+
 ## Interaction With Auto-Merge
 
 If Dependabot auto-merge is enabled, runner-impacting bumps stay blocked until
