@@ -79,7 +79,7 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
         jsonl_path: args.otel_jsonl.clone(),
         redact_prompts: args.redact_prompts,
     };
-    let _ = assay_core::otel::export_jsonl(&otel_cfg, &cfg.suite, &artifacts.results);
+    assay_core::otel::export_jsonl(&otel_cfg, &cfg.suite, &artifacts.results)?;
 
     maybe_export_baseline(&args.export_baseline, &args.config, &cfg, &artifacts);
 

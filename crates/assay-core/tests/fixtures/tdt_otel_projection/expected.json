@@ -1,7 +1,7 @@
 {
   "schema": "assay.tool_decision_truth.otel_projection.v0",
   "semconv": {
-    "otel_genai": "1.37.0-development",
+    "otel_genai": "open-telemetry/semantic-conventions-genai@434c91dcc34ed038e3048c07720ddfed2c6bddfc",
     "openinference": "pinned"
   },
   "spans": [
@@ -10,6 +10,7 @@
       "kind": "INTERNAL",
       "attributes": {
         "gen_ai.operation.name": "execute_tool",
+        "gen_ai.provider.name": "assay",
         "gen_ai.tool.name": "deploy",
         "tool.name": "deploy",
         "openinference.span.kind": "TOOL",
@@ -29,6 +30,7 @@
       "kind": "INTERNAL",
       "attributes": {
         "gen_ai.operation.name": "execute_tool",
+        "gen_ai.provider.name": "assay",
         "gen_ai.tool.name": "delete_all",
         "tool.name": "delete_all",
         "openinference.span.kind": "TOOL",
@@ -54,6 +56,6 @@
     "gen_ai.* and openinference.* fields are a projection, not the source of truth.",
     "A tool-decision-truth verdict is a derived comparison over observed and declared data (assay.claim_class=derived); it is not a raw observation, not enforcement, and not an intent or safety judgement.",
     "Raw tool arguments and the keyed args_digest are not projected; this view carries only the higher-level observed-input, declared-policy, decision-identity, and carrier-content digests.",
-    "Pinned to OTel GenAI semconv 1.37.0-development and OpenInference pinned; a version bump is explicit."
+    "Pinned to OTel GenAI semconv open-telemetry/semantic-conventions-genai@434c91dcc34ed038e3048c07720ddfed2c6bddfc and OpenInference pinned; a version bump is explicit."
   ]
 }
