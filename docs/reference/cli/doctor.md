@@ -30,6 +30,8 @@ Notes:
 - `--fix` currently supports text output mode.
 - `--yes` and `--dry-run` require `--fix`.
 - `--dry-run` previews fixes but still returns non-zero when blocking diagnostics remain.
+- Without `--yes` or `--dry-run`, `--fix` prompts. If stdin is not a terminal the
+  prompt cannot be shown: the command refuses with exit 2 and names `--yes`.
 
 ---
 

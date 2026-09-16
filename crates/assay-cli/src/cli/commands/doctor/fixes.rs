@@ -3,12 +3,12 @@ use std::path::{Path, PathBuf};
 use assay_core::agentic::{build_suggestions, AgenticCtx, SuggestedPatch};
 use assay_core::config::{load_config_with_cause, path_resolver::PathResolver, LoadOptions};
 use assay_core::errors::diagnostic::{codes, Diagnostic};
-use dialoguer::{theme::ColorfulTheme, Confirm};
 
 use crate::cli::args::DoctorArgs;
 use crate::cli::helpers::{
     decide_exit, decide_repair_failure_exit, infer_policy_path, normalize_severity,
 };
+use crate::cli::interaction::confirm;
 
 use super::implementation::config_failure;
 use super::patching::{apply_patch_to_file, create_empty_trace, preview_patch};
@@ -98,20 +98,14 @@ pub(super) async fn run_doctor_fix(
         println!("  - {}", op.title());
     }
 
-    let theme = ColorfulTheme::default();
     let mut applied = 0usize;
     let mut failed = 0usize;
 
     for op in &ops {
-        let should_apply = if args.yes || args.dry_run {
-            true
-        } else {
-            Confirm::with_theme(&theme)
-                .with_prompt(format!("Apply fix '{}'?", op.title()))
-                .default(false)
-                .interact()
-                .unwrap_or(false)
-        };
+        let should_apply = confirm(
+            &format!("Apply fix '{}'?", op.title()),
+            args.yes || args.dry_run,
+        )?;
 
         if !should_apply {
             continue;
