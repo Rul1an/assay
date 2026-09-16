@@ -107,16 +107,50 @@ def check_pyproject(root: Path, matrix: dict, errors: list[str]) -> None:
     for forbidden in matrix["forbidden_classifiers"]:
         if forbidden in text:
             fail(errors, f"{PYPROJECT_REL}: forbidden classifier {forbidden!r}")
-    if "pyo3/abi3" in text or "abi3-py" in text:
-        fail(errors, f"{PYPROJECT_REL}: abi3 is out of scope")
+    smoke = matrix.get("smoke_pythons")
+    if smoke is not None:
+        if not isinstance(smoke, list) or not smoke:
+            fail(errors, f"{MATRIX_REL}: smoke_pythons must be a non-empty list")
+        for version in smoke:
+            if not isinstance(version, str):
+                fail(errors, f"{MATRIX_REL}: smoke_pythons entry must be a string, got {version!r}")
+                continue
+            classifier = f"Programming Language :: Python :: {version}"
+            if classifier not in text:
+                fail(errors, f"{PYPROJECT_REL}: missing classifier {classifier!r}")
 
 
-def check_cargo(root: Path, errors: list[str]) -> None:
+def check_cargo(root: Path, matrix: dict, planner, errors: list[str]) -> None:
     text = (root / CARGO_REL).read_text(encoding="utf-8")
-    if "abi3" in text:
-        fail(errors, f"{CARGO_REL}: abi3 is out of scope")
-    if "extension-module" not in text:
-        fail(errors, f"{CARGO_REL}: expected pyo3 extension-module only")
+    match = re.search(
+        r"pyo3\s*=\s*\{[^}]*features\s*=\s*\[([^\]]*)\]",
+        text,
+        re.DOTALL,
+    )
+    if not match:
+        fail(errors, f"{CARGO_REL}: pyo3 features list is required")
+        return
+    features = re.findall(r'"([^"]+)"', match.group(1))
+    if "extension-module" not in features:
+        fail(errors, f"{CARGO_REL}: expected pyo3 extension-module feature")
+    if "abi3" in features:
+        fail(errors, f"{CARGO_REL}: bare abi3 feature is forbidden; use abi3-pyXY")
+    abi3t = [feature for feature in features if feature.startswith("abi3t")]
+    if abi3t:
+        fail(errors, f"{CARGO_REL}: abi3t features are out of scope: {abi3t}")
+    abi3_features = [feature for feature in features if re.fullmatch(r"abi3-py\d+", feature)]
+    mode, major, minor = planner.parse_requires_python(matrix.get("requires_python"))
+    expected = f"abi3-py{major}{minor}"
+    if mode == "minimum":
+        if matrix.get("abi") != "abi3":
+            fail(errors, f"{MATRIX_REL}: requires_python >=X.Y requires abi = 'abi3'")
+        if expected not in abi3_features:
+            fail(errors, f"{CARGO_REL}: requires_python minimum expects {expected!r}")
+        extras = [feature for feature in abi3_features if feature != expected]
+        if extras:
+            fail(errors, f"{CARGO_REL}: abi3 feature must match the minimum only, got {extras}")
+    elif abi3_features:
+        fail(errors, f"{CARGO_REL}: exact requires_python cannot declare abi3-pyXY features: {abi3_features}")
 
 
 def wheels_job(text: str) -> str:
@@ -154,8 +188,13 @@ def check_release_workflow(root: Path, matrix: dict, plan: dict, errors: list[st
             errors,
             f"{RELEASE_REL}: wheels include must consume needs.plan-python-artifact.outputs.wheels",
         )
-    if "needs.plan-python-artifact.outputs.python" not in job:
-        fail(errors, f"{RELEASE_REL}: setup-python and maturin -i must consume needs.plan-python-artifact.outputs.python")
+    if matrix.get("smoke_pythons") is None:
+        if "needs.plan-python-artifact.outputs.python" not in job:
+            fail(errors, f"{RELEASE_REL}: setup-python must consume needs.plan-python-artifact.outputs.python")
+    elif "matrix.smoke_pythons" not in job:
+        fail(errors, f"{RELEASE_REL}: setup-python and smoke loop must consume matrix.smoke_pythons")
+    if "python${{ needs.plan-python-artifact.outputs.python }}" not in job:
+        fail(errors, f"{RELEASE_REL}: maturin -i must consume needs.plan-python-artifact.outputs.python")
     if STRAY_PYTHON_VERSION_RE.search(job):
         fail(errors, f"{RELEASE_REL}: wheels job must not pin a literal python-version")
     if STRAY_MATURIN_INTERPRETER_RE.search(job):
@@ -173,8 +212,18 @@ def check_release_workflow(root: Path, matrix: dict, plan: dict, errors: list[st
     del matrix, plan
 
 
-def expected_support_bound(python: str, wheels: list) -> str:
-    """Bind support_bound to parsed X.Y and the declared os/target/tag set."""
+def format_python_versions(versions: list[str]) -> str:
+    if not versions:
+        raise ValueError("support bound requires at least one CPython version")
+    if len(versions) == 1:
+        return versions[0]
+    if len(versions) == 2:
+        return f"{versions[0]} and {versions[1]}"
+    return f"{', '.join(versions[:-1])}, and {versions[-1]}"
+
+
+def expected_support_bound(pythons: list[str], wheels: list) -> str:
+    """Bind support_bound to declared versions and the declared os/target/tag set."""
     families: dict[str, list[str]] = {}
     for wheel in wheels:
         target = wheel.get("target")
@@ -195,7 +244,7 @@ def expected_support_bound(python: str, wheels: list) -> str:
     if not parts:
         raise ValueError("cannot derive support_bound from an empty wheels list")
     return (
-        f"CPython {python} on {' and '.join(parts)}; "
+        f"CPython {format_python_versions(pythons)} on {' and '.join(parts)}; "
         "other interpreters and platforms are not claimed."
     )
 
@@ -279,18 +328,22 @@ def check_tag_anchor(root: Path, matrix: dict, planner, errors: list[str]) -> di
         fail(errors, f"{MATRIX_REL}: {exc}")
         return None
 
-    classifier = f"Programming Language :: Python :: {plan['python']}"
     required = matrix.get("required_classifiers") or []
-    if classifier not in required:
-        fail(
-            errors,
-            f"{MATRIX_REL}: required_classifiers must include {classifier!r}",
-        )
+    smoke_pythons = plan.get("smoke_pythons") or [plan["python"]]
+    for version in smoke_pythons:
+        classifier = f"Programming Language :: Python :: {version}"
+        if classifier not in required:
+            fail(
+                errors,
+                f"{MATRIX_REL}: required_classifiers must include {classifier!r}",
+            )
     pyproject = (root / PYPROJECT_REL).read_text(encoding="utf-8")
-    if classifier not in pyproject:
-        fail(errors, f"{PYPROJECT_REL}: missing classifier {classifier!r}")
+    for version in smoke_pythons:
+        classifier = f"Programming Language :: Python :: {version}"
+        if classifier not in pyproject:
+            fail(errors, f"{PYPROJECT_REL}: missing classifier {classifier!r}")
     try:
-        expected_bound = expected_support_bound(plan["python"], matrix.get("wheels") or [])
+        expected_bound = expected_support_bound(smoke_pythons, matrix.get("wheels") or [])
     except ValueError as exc:
         fail(errors, f"{MATRIX_REL}: {exc}")
     else:
@@ -302,8 +355,9 @@ def check_tag_anchor(root: Path, matrix: dict, planner, errors: list[str]) -> di
             )
 
     abis = [planner.tag_abi(str(wheel.get("tag") or "")) for wheel in matrix.get("wheels") or []]
+    pythons = [planner.tag_python(str(wheel.get("tag") or "")) for wheel in matrix.get("wheels") or []]
     has_pypy = PYPY_CLASSIFIER in pyproject or PYPY_CLASSIFIER in required
-    has_pp_tag = any(PP_ABI_RE.fullmatch(abi) for abi in abis)
+    has_pp_tag = any(PP_ABI_RE.fullmatch(python) for python in pythons)
     if has_pypy and not has_pp_tag:
         fail(
             errors,
@@ -439,7 +493,7 @@ def main(argv: list[str] | None = None) -> int:
     version = workspace_version(root, errors)
     check_pyproject(root, matrix, errors)
     plan = check_tag_anchor(root, matrix, planner, errors)
-    check_cargo(root, errors)
+    check_cargo(root, matrix, planner, errors)
     if plan is not None:
         check_release_workflow(root, matrix, plan, errors)
     check_docs(root, matrix, errors)

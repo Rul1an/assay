@@ -113,7 +113,7 @@ features = ["pyo3/extension-module"]
 TOML
   cat > "$dest/assay-python-sdk/Cargo.toml" <<'TOML'
 [dependencies]
-pyo3 = { version = "0.29", features = ["pyo3/extension-module"] }
+pyo3 = { version = "0.29", features = ["extension-module"] }
 TOML
   cat > "$dest/.github/workflows/release.yml" <<'YML'
 jobs:
@@ -578,6 +578,190 @@ path.write_text(json.dumps(data, indent=2) + "\n")
 PY
 expect_fail "support_bound drifts from declared wheels" --root "$GREEN"
 mv "$TMP/matrix.bak" "$GREEN/assay-python-sdk/python-artifact-matrix.v0.json"
+
+echo "=== #3063 abi3 design cases ==="
+ABI3="$TMP/abi3"
+cp -a "$GREEN" "$ABI3"
+python3 - "$ABI3/assay-python-sdk/python-artifact-matrix.v0.json" \
+  "$ABI3/assay-python-sdk/pyproject.toml" \
+  "$ABI3/assay-python-sdk/Cargo.toml" \
+  "$ABI3/.github/workflows/release.yml" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+matrix_path = Path(sys.argv[1])
+pyproject_path = Path(sys.argv[2])
+cargo_path = Path(sys.argv[3])
+release_path = Path(sys.argv[4])
+
+matrix = json.loads(matrix_path.read_text())
+matrix["requires_python"] = ">=3.12"
+matrix["abi"] = "abi3"
+matrix["smoke_pythons"] = ["3.12", "3.13", "3.14"]
+matrix["required_classifiers"] = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
+matrix["support_bound"] = (
+    "CPython 3.12, 3.13, and 3.14 on macOS x86_64/arm64 and Linux x86_64; "
+    "other interpreters and platforms are not claimed."
+)
+for wheel in matrix["wheels"]:
+    wheel["tag"] = wheel["tag"].replace("cp312-cp312", "cp312-abi3", 1)
+matrix_path.write_text(json.dumps(matrix, indent=2) + "\n")
+
+pyproject = pyproject_path.read_text()
+pyproject = pyproject.replace('requires-python = "==3.12.*"', 'requires-python = ">=3.12"', 1)
+pyproject = pyproject.replace(
+    '"Programming Language :: Python :: 3.12",',
+    '"Programming Language :: Python :: 3.12",\n'
+    '    "Programming Language :: Python :: 3.13",\n'
+    '    "Programming Language :: Python :: 3.14",',
+    1,
+)
+pyproject_path.write_text(pyproject)
+
+cargo_path.write_text(
+    "[dependencies]\n"
+    'pyo3 = { version = "0.29", features = ["extension-module", "abi3-py312"] }\n'
+)
+
+release = release_path.read_text()
+old_setup = """      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ needs.plan-python-artifact.outputs.python }}
+"""
+new_setup = """      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ join(matrix.smoke_pythons, '\\n') }}
+"""
+if old_setup in release:
+    release = release.replace(old_setup, new_setup, 1)
+old_smoke = """      - name: Smoke the produced wheel
+        env:
+          ASSAY_WHEEL_TARGET: ${{ matrix.target }}
+        run: python3 scripts/ci/smoke-python-wheel.py --dist-dir assay-python-sdk/dist --python "python${{ needs.plan-python-artifact.outputs.python }}"
+"""
+new_smoke = """      - name: Smoke the produced wheel
+        env:
+          ASSAY_WHEEL_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          for py in ${{ join(matrix.smoke_pythons, ' ') }}; do
+            python3 scripts/ci/smoke-python-wheel.py --dist-dir assay-python-sdk/dist --python "python${py}"
+          done
+"""
+if old_smoke in release:
+    release = release.replace(old_smoke, new_smoke, 1)
+release_path.write_text(release)
+
+old_bound = "CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed."
+new_bound = matrix["support_bound"]
+for rel in matrix["install_docs"]:
+    path = matrix_path.parent.parent / rel
+    path.write_text(path.read_text().replace(old_bound, new_bound))
+PY
+
+expect_pass "abi3 positive control" --root "$ABI3"
+
+echo "=== #3063 case: abi3-py311 with >=3.12 ==="
+cp "$ABI3/assay-python-sdk/Cargo.toml" "$TMP/abi3-cargo.bak"
+python3 - "$ABI3/assay-python-sdk/Cargo.toml" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+path.write_text(path.read_text().replace("abi3-py312", "abi3-py311", 1))
+PY
+expect_fail "abi3-py311 with >=3.12" --root "$ABI3"
+mv "$TMP/abi3-cargo.bak" "$ABI3/assay-python-sdk/Cargo.toml"
+
+echo "=== #3063 case: bare abi3 feature ==="
+cp "$ABI3/assay-python-sdk/Cargo.toml" "$TMP/abi3-cargo.bak"
+python3 - "$ABI3/assay-python-sdk/Cargo.toml" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+path.write_text(path.read_text().replace("abi3-py312", "abi3", 1))
+PY
+expect_fail "bare abi3 feature" --root "$ABI3"
+mv "$TMP/abi3-cargo.bak" "$ABI3/assay-python-sdk/Cargo.toml"
+
+echo "=== #3063 case: abi3t feature ==="
+cp "$ABI3/assay-python-sdk/Cargo.toml" "$TMP/abi3-cargo.bak"
+python3 - "$ABI3/assay-python-sdk/Cargo.toml" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+path.write_text(path.read_text().replace("abi3-py312", "abi3t", 1))
+PY
+expect_fail "abi3t feature" --root "$ABI3"
+mv "$TMP/abi3-cargo.bak" "$ABI3/assay-python-sdk/Cargo.toml"
+
+echo "=== #3063 case: abi3 tags with ==3.12.* ==="
+cp "$ABI3/assay-python-sdk/pyproject.toml" "$TMP/abi3-pyproject.bak"
+cp "$ABI3/assay-python-sdk/python-artifact-matrix.v0.json" "$TMP/abi3-matrix.bak"
+python3 - "$ABI3/assay-python-sdk/pyproject.toml" "$ABI3/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+pyproject = Path(sys.argv[1])
+matrix = Path(sys.argv[2])
+pyproject.write_text(pyproject.read_text().replace('requires-python = ">=3.12"', 'requires-python = "==3.12.*"', 1))
+data = json.loads(matrix.read_text())
+data["requires_python"] = "==3.12.*"
+matrix.write_text(json.dumps(data, indent=2) + "\n")
+PY
+expect_fail "abi3 tags with ==3.12.*" --root "$ABI3"
+mv "$TMP/abi3-pyproject.bak" "$ABI3/assay-python-sdk/pyproject.toml"
+mv "$TMP/abi3-matrix.bak" "$ABI3/assay-python-sdk/python-artifact-matrix.v0.json"
+
+echo "=== #3063 case: >=3.12 with cp312-cp312 tags ==="
+cp "$ABI3/assay-python-sdk/python-artifact-matrix.v0.json" "$TMP/abi3-matrix.bak"
+python3 - "$ABI3/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+path = Path(sys.argv[1])
+data = json.loads(path.read_text())
+for wheel in data["wheels"]:
+    wheel["tag"] = wheel["tag"].replace("-abi3-", "-cp312-", 1)
+path.write_text(json.dumps(data, indent=2) + "\n")
+PY
+expect_fail ">=3.12 with cp312-cp312 tags" --root "$ABI3"
+mv "$TMP/abi3-matrix.bak" "$ABI3/assay-python-sdk/python-artifact-matrix.v0.json"
+
+echo "=== #3063 case: cp313-abi3 with min 3.12 ==="
+cp "$ABI3/assay-python-sdk/python-artifact-matrix.v0.json" "$TMP/abi3-matrix.bak"
+python3 - "$ABI3/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+path = Path(sys.argv[1])
+data = json.loads(path.read_text())
+data["wheels"][0]["tag"] = data["wheels"][0]["tag"].replace("cp312-abi3", "cp313-abi3", 1)
+path.write_text(json.dumps(data, indent=2) + "\n")
+PY
+expect_fail "cp313-abi3 with minimum 3.12" --root "$ABI3"
+mv "$TMP/abi3-matrix.bak" "$ABI3/assay-python-sdk/python-artifact-matrix.v0.json"
+
+echo "=== #3063 case: smoke Python without matching classifier ==="
+cp "$ABI3/assay-python-sdk/pyproject.toml" "$TMP/abi3-pyproject.bak"
+python3 - "$ABI3/assay-python-sdk/pyproject.toml" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+path.write_text(path.read_text().replace('    "Programming Language :: Python :: 3.14",\n', "", 1))
+PY
+expect_fail "smoke Python 3.14 without classifier" --root "$ABI3"
+mv "$TMP/abi3-pyproject.bak" "$ABI3/assay-python-sdk/pyproject.toml"
 
 echo "=== no-op restore ==="
 expect_pass "restored green fixture" --root "$GREEN"

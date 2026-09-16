@@ -27,7 +27,7 @@ flowchart TD
 ```
 
 **Steps:**
-1. **Install**: `cargo install assay-cli --version 6.3.1 --locked` or use a verified release asset; install the Python SDK separately with `pip install assay-it`. CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
+1. **Install**: `cargo install assay-cli --version 6.3.1 --locked` or use a verified release asset; install the Python SDK separately with `pip install assay-it`. CPython 3.12, 3.13, and 3.14 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
 2. **Initialize**: `assay init` - auto-detects project, generates secure defaults
 3. **Capture traces**: Use `AssayClient` or `assay import` to record tool calls
 4. **Validate**: `assay validate --config eval.yaml --trace-file traces.jsonl`
@@ -254,7 +254,7 @@ flowchart TD
 
 **Python SDK Flow:**
 
-1. **Installation**: `pip install assay-it` (the Python SDK; install the Rust CLI separately when the workflow invokes `assay` commands). CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
+1. **Installation**: `pip install assay-it` (the Python SDK; install the Rust CLI separately when the workflow invokes `assay` commands). CPython 3.12, 3.13, and 3.14 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
 2. **Recording**:
 ```python
 from assay import AssayClient

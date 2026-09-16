@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read the artifact matrix; emit wheels JSON plus ==X.Y.* -> X.Y / cpXY."""
+"""Read the artifact matrix and emit release-plan outputs for wheels and smoke runtimes."""
 
 from __future__ import annotations
 
@@ -11,16 +11,22 @@ from pathlib import Path
 
 MATRIX_REL = "assay-python-sdk/python-artifact-matrix.v0.json"
 REQUIRES_EXACT_RE = re.compile(r"^==(\d+)\.(\d+)\.\*$")
+REQUIRES_MIN_RE = re.compile(r"^>=(\d+)\.(\d+)$")
+PYTHON_DOTTED_RE = re.compile(r"^\d+\.\d+$")
 
 
-def parse_requires_python(spec: str) -> tuple[int, int]:
-    """Parse exact ==X.Y.* only. Reject >=, ~=, bare 3.12, ==3.12, ==3.12.0, 3.12+."""
+def parse_requires_python(spec: str) -> tuple[str, int, int]:
+    """Parse either ==X.Y.* (exact wheel ABI) or >=X.Y (abi3 minimum)."""
     if not isinstance(spec, str):
-        raise ValueError(f"requires_python must be exact ==X.Y.*, got {spec!r}")
-    match = REQUIRES_EXACT_RE.fullmatch(spec.strip())
-    if not match:
-        raise ValueError(f"requires_python must be exact ==X.Y.*, got {spec!r}")
-    return int(match.group(1)), int(match.group(2))
+        raise ValueError(f"requires_python must be '==X.Y.*' or '>=X.Y', got {spec!r}")
+    stripped = spec.strip()
+    exact = REQUIRES_EXACT_RE.fullmatch(stripped)
+    if exact:
+        return "exact", int(exact.group(1)), int(exact.group(2))
+    minimum = REQUIRES_MIN_RE.fullmatch(stripped)
+    if minimum:
+        return "minimum", int(minimum.group(1)), int(minimum.group(2))
+    raise ValueError(f"requires_python must be '==X.Y.*' or '>=X.Y', got {spec!r}")
 
 
 def cpython_abi(major: int, minor: int) -> str:
@@ -28,33 +34,96 @@ def cpython_abi(major: int, minor: int) -> str:
     return f"cp{major}{minor}"
 
 
+def wheel_tag_parts(tag: str) -> tuple[str, str]:
+    parts = str(tag).split("-")
+    if len(parts) < 2:
+        raise ValueError(f"wheel tag must start with <python>-<abi>-..., got {tag!r}")
+    return parts[0], parts[1]
+
+
+def tag_python(tag: str) -> str:
+    return wheel_tag_parts(tag)[0]
+
+
 def tag_abi(tag: str) -> str:
-    """Wheel ABI/impl is the first '-' separated tag component."""
-    return str(tag).split("-", 1)[0]
+    """Wheel ABI is the second '-' separated tag component."""
+    return wheel_tag_parts(tag)[1]
+
+
+def parse_smoke_pythons(
+    matrix: dict, *, mode: str, minimum_python: str
+) -> list[str]:
+    raw = matrix.get("smoke_pythons")
+    if raw is None:
+        return [minimum_python]
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("smoke_pythons must be a non-empty list of X.Y strings")
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, str) or not PYTHON_DOTTED_RE.fullmatch(item):
+            raise ValueError(f"smoke_pythons entry must be X.Y, got {item!r}")
+        if item in seen:
+            raise ValueError(f"smoke_pythons must not repeat {item!r}")
+        seen.add(item)
+        out.append(item)
+    if mode == "minimum" and minimum_python not in seen:
+        raise ValueError(
+            f"smoke_pythons must include minimum interpreter {minimum_python!r}"
+        )
+    if mode == "minimum" and out[0] != minimum_python:
+        raise ValueError(
+            "smoke_pythons must start with the requires_python minimum"
+        )
+    return out
 
 
 def build_plan(matrix: dict) -> dict:
-    major, minor = parse_requires_python(matrix.get("requires_python"))
-    abi = cpython_abi(major, minor)
+    mode, major, minor = parse_requires_python(matrix.get("requires_python"))
     python = f"{major}.{minor}"
+    cpython = cpython_abi(major, minor)
+    smoke_pythons = parse_smoke_pythons(
+        matrix, mode=mode, minimum_python=python
+    )
+    if mode == "exact":
+        declared_abi = cpython
+        expected_abi_tag = cpython
+    else:
+        if matrix.get("abi") != "abi3":
+            raise ValueError(
+                "requires_python >=X.Y requires matrix.abi = 'abi3'"
+            )
+        declared_abi = "abi3"
+        expected_abi_tag = "abi3"
     wheels_out: list[dict] = []
     for wheel in matrix.get("wheels") or []:
         tag = str(wheel.get("tag") or "")
-        got = tag_abi(tag)
-        if got != abi:
+        got_py = tag_python(tag)
+        got_abi = tag_abi(tag)
+        if got_py != cpython:
             raise ValueError(
-                f"tag {tag!r}: ABI must be {abi} for Requires-Python =={python}.*"
+                f"tag {tag!r}: python tag must be {cpython} for requires_python {matrix.get('requires_python')!r}"
+            )
+        if got_abi != expected_abi_tag:
+            raise ValueError(
+                f"tag {tag!r}: ABI tag must be {expected_abi_tag} for requires_python {matrix.get('requires_python')!r}"
             )
         wheels_out.append(
             {
                 "os": wheel["os"],
                 "target": wheel["target"],
                 "tag": tag,
+                "smoke_pythons": smoke_pythons,
             }
         )
     if not wheels_out:
         raise ValueError("matrix.wheels must be a non-empty list")
-    return {"python": python, "abi": abi, "wheels": wheels_out}
+    return {
+        "python": python,
+        "abi": declared_abi,
+        "smoke_pythons": smoke_pythons,
+        "wheels": wheels_out,
+    }
 
 
 def load_matrix(root: Path) -> dict:
@@ -81,6 +150,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     print(f"python={plan['python']}")
     print(f"abi={plan['abi']}")
+    print(
+        f"smoke_pythons={json.dumps(plan['smoke_pythons'], separators=(',', ':'))}"
+    )
     print(f"wheels={json.dumps(plan['wheels'], separators=(',', ':'))}")
     return 0
 
