@@ -478,6 +478,8 @@ mutate_and_expect_failure ghcr-installation-uppercase-host docs/getting-started/
 append_and_expect_failure ghcr-installation-second-digest docs/getting-started/installation.md \
   'The v5.0.0 image index is `ghcr.io/rul1an/assay-mcp-server@sha256:47e2254c130f6892172b3386a89030abfc0cb00df0dac4b218393d421b08f2fd`' \
   'expected exactly one image digest line'
+mutate_and_expect_success ghcr-installation-uppercase-pinned docs/getting-started/installation.md \
+  's/ghcr\.io\/rul1an\/assay-mcp-server/GHCR.IO\/rul1an\/assay-mcp-server/'
 mutate_and_expect_failure ghcr-air-gapped docs/use-cases/air-gapped.md \
   's/No runtime image is shipped./docker pull ghcr.io\/rul1an\/assay:latest/' 'unsupported GHCR image'
 mutate_and_expect_failure stale-windows-asset docs/getting-started/installation.md \
@@ -1228,8 +1230,8 @@ if [ "$mutation_count" -ne 132 ]; then
   echo "FAIL: expected 132 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
-if [ "$control_count" -ne 2 ]; then
-  echo "FAIL: expected 2 release-surface negative controls, observed $control_count" >&2
+if [ "$control_count" -ne 3 ]; then
+  echo "FAIL: expected 3 release-surface negative controls, observed $control_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"
