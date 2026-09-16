@@ -99,16 +99,29 @@ GUEST_TIMEOUT=0
 QUEUED_RUNS_RC=0
 QUEUED_RUN_IDS=""
 declare -A JOBS_BY_RUN=()
+declare -A JOBS_PAGE2_BY_RUN=()
 gh() {
-    case "$*" in
-        "api repos/$REPO/actions/runs?status=queued&per_page=${QUEUED_RUN_INSPECTION_LIMIT}")
+    local paginate=0 path="" arg
+    for arg in "$@"; do
+        case "$arg" in
+            --paginate) paginate=1 ;;
+            -*) ;;
+            *) path="$arg" ;;
+        esac
+    done
+    case "$path" in
+        "repos/$REPO/actions/runs?status=queued&per_page="*)
             [[ "${QUEUED_RUNS_RC}" == 0 ]] || return "${QUEUED_RUNS_RC}"
             printf '{"workflow_runs":[%s]}' "${QUEUED_RUN_IDS}"
             ;;
-        "api repos/$REPO/actions/runs/"*"/jobs?per_page=100")
-            local run_id="${2#repos/"$REPO"/actions/runs/}"
+        "repos/$REPO/actions/runs/"*"/jobs"*)
+            local run_id="${path#repos/"$REPO"/actions/runs/}"
             run_id="${run_id%%/*}"
             printf '%s' "${JOBS_BY_RUN[${run_id}]:-}"
+            # Without --paginate, gh returns only the first jobs page.
+            if [[ "$paginate" == 1 && -n "${JOBS_PAGE2_BY_RUN[${run_id}]:-}" ]]; then
+                printf '\n%s' "${JOBS_PAGE2_BY_RUN[${run_id}]}"
+            fi
             ;;
         *)
             return 92
@@ -160,5 +173,13 @@ QUEUED_RUN_IDS='{"id":13},{"id":12}'
 JOBS_BY_RUN[13]='not json'
 JOBS_BY_RUN[12]="{\"jobs\":[$(job waiting "$OURS")]}"
 expect_queue unparsable-then-labelled 0
+
+# Labelled demand on a later jobs page is still demand. Without --paginate,
+# the mock serves only page 1 (hosted jobs), so this case must fail.
+QUEUED_RUN_IDS='{"id":21}'
+JOBS_BY_RUN[21]="{\"jobs\":[$(job queued "$HOSTED")]}"
+JOBS_PAGE2_BY_RUN[21]="{\"jobs\":[$(job queued "$OURS")]}"
+expect_queue labelled-beyond-first-jobs-page 0
+unset 'JOBS_PAGE2_BY_RUN[21]'
 
 echo "ok: runner recovery refuses while a guest worker runs and queued demand is label-scoped"

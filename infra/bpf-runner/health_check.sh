@@ -185,17 +185,16 @@ ensure_assay_cli_current() {
 
 # Queued demand means a waiting job that requires this runner's label. A
 # repository-wide queued-run count also fires on hosted backlog, and that count
-# was one half of the #2985 teardowns. The waiting-status set mirrors
-# scripts/ci/check-runner-health.sh; the two scripts cannot share a file
-# because this one is installed on the host as a single file.
+# was one half of the #2985 teardowns. The waiting-status set and --paginate
+# jobs walk mirror scripts/ci/check-runner-health.sh; the two scripts cannot
+# share a file because this one is installed on the host as a single file.
 REQUIRED_RUNNER_LABEL="${REQUIRED_RUNNER_LABEL:-assay-bpf-runner}"
-QUEUED_RUN_INSPECTION_LIMIT="${QUEUED_RUN_INSPECTION_LIMIT:-20}"
 
 check_queued_jobs() {
     local gh="${GH_CMD:-gh}"
     local run_ids run_id matching
 
-    if ! run_ids=$($gh api "repos/$REPO/actions/runs?status=queued&per_page=${QUEUED_RUN_INSPECTION_LIMIT}" 2>/dev/null \
+    if ! run_ids=$($gh api --paginate "repos/$REPO/actions/runs?status=queued&per_page=100" 2>/dev/null \
         | jq -r '.workflow_runs[]? | .id | select(type == "number")' 2>/dev/null); then
         return 1
     fi
@@ -203,9 +202,10 @@ check_queued_jobs() {
 
     for run_id in $run_ids; do
         # shellcheck disable=SC2016 # jq --arg binding, not shell expansion.
-        matching=$($gh api "repos/$REPO/actions/runs/${run_id}/jobs?per_page=100" 2>/dev/null \
-            | jq -r --arg label "$REQUIRED_RUNNER_LABEL" '
-                [.jobs[]?
+        # -s slurps paginated JSON documents so a labelled job past page 1 still counts.
+        matching=$($gh api --paginate "repos/$REPO/actions/runs/${run_id}/jobs?filter=latest&per_page=100" 2>/dev/null \
+            | jq -s -r --arg label "$REQUIRED_RUNNER_LABEL" '
+                [.[].jobs[]?
                  | select((.status == "queued" or .status == "waiting"
                            or .status == "pending" or .status == "requested")
                           and ((.labels // []) | index($label)))]

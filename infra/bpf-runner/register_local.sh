@@ -8,6 +8,11 @@ set -euo pipefail
 TOKEN=${1:-}
 VM="assay-bpf-runner"
 REPO_URL="https://github.com/Rul1an/assay"
+# One-place pin: both arch download URLs and the post-extract version check
+# read this. Current upstream latest: tagName=v2.337.0 publishedAt=2026-08-26T14:33:29Z.
+ACTIONS_RUNNER_VERSION="2.337.0"
+ACTIONS_RUNNER_SHA256_LINUX_ARM64="9b1dc70626422526e3c94767cf024896beb15da5342a3f4819bf2feac13e0393"
+ACTIONS_RUNNER_SHA256_LINUX_X64="70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613"
 
 run_vm_root_script() {
     multipass exec "$VM" -- sudo bash -s
@@ -28,11 +33,16 @@ if [ -z "$TOKEN" ]; then
 fi
 
 echo "🚀 Registering runner with GitHub..."
+echo "Pinned actions-runner version: ${ACTIONS_RUNNER_VERSION}"
 
 # 0. Repair / Ensure State (Idempotent Fix)
 echo "🛠️  Ensuring VM state (User, Docker, Dependencies)..."
-run_vm_root_script <<'EOF'
+run_vm_root_script <<EOF
     set -e
+    ACTIONS_RUNNER_VERSION='${ACTIONS_RUNNER_VERSION}'
+    ACTIONS_RUNNER_SHA256_LINUX_ARM64='${ACTIONS_RUNNER_SHA256_LINUX_ARM64}'
+    ACTIONS_RUNNER_SHA256_LINUX_X64='${ACTIONS_RUNNER_SHA256_LINUX_X64}'
+$(cat <<'GUEST'
     # Ensure User
     if ! id -u github-runner >/dev/null 2>&1; then
         echo "   -> Creating github-runner user..."
@@ -61,10 +71,13 @@ run_vm_root_script <<'EOF'
     # SOTA: Detect Architecture (ARM64 vs x64 for Apple Silicon support)
     ARCH=$(dpkg --print-architecture)
     if [ "$ARCH" = "arm64" ]; then
-        RUNNER_URL="https://github.com/actions/runner/releases/download/v2.311.0/actions-runner-linux-arm64-2.311.0.tar.gz"
+        RUNNER_TARBALL="actions-runner-linux-arm64-${ACTIONS_RUNNER_VERSION}.tar.gz"
+        RUNNER_SHA256="${ACTIONS_RUNNER_SHA256_LINUX_ARM64}"
     else
-        RUNNER_URL="https://github.com/actions/runner/releases/download/v2.311.0/actions-runner-linux-x64-2.311.0.tar.gz"
+        RUNNER_TARBALL="actions-runner-linux-x64-${ACTIONS_RUNNER_VERSION}.tar.gz"
+        RUNNER_SHA256="${ACTIONS_RUNNER_SHA256_LINUX_X64}"
     fi
+    RUNNER_URL="https://github.com/actions/runner/releases/download/v${ACTIONS_RUNNER_VERSION}/${RUNNER_TARBALL}"
 
     # Check for corruption / incorrect arch
     CORRUPT=0
@@ -79,12 +92,23 @@ run_vm_root_script <<'EOF'
 
     # Download Agent if missing or corrupt
     if [ ! -f "/opt/actions-runner/config.sh" ] || [ "$CORRUPT" -eq 1 ]; then
-        echo "   -> Downloading Runner Agent ($ARCH)..."
+        echo "   -> Downloading Runner Agent ($ARCH), pinned ${ACTIONS_RUNNER_VERSION}..."
         cd /opt/actions-runner
 
         curl -o runner.tar.gz -L "$RUNNER_URL"
+        if ! printf '%s  runner.tar.gz\n' "$RUNNER_SHA256" | sha256sum -c -; then
+            echo "ERROR: actions-runner-checksum-mismatch: expected ${RUNNER_SHA256}" >&2
+            exit 1
+        fi
         tar xzf ./runner.tar.gz
         rm runner.tar.gz
+
+        installed="$(./bin/Runner.Listener --version 2>/dev/null | tr -d '[:space:]')"
+        if [ "$installed" != "$ACTIONS_RUNNER_VERSION" ]; then
+            echo "ERROR: actions-runner-version-mismatch: expected ${ACTIONS_RUNNER_VERSION}, got ${installed:-<empty>}" >&2
+            exit 1
+        fi
+        echo "Pinned actions-runner version: ${ACTIONS_RUNNER_VERSION}"
 
         chown -R github-runner:github-runner /opt/actions-runner
     fi
@@ -93,6 +117,8 @@ run_vm_root_script <<'EOF'
     # SOTA: Fix Permissions strictly for github-runner
     echo "   -> Enforcing strict ownership (github-runner:github-runner)..."
     chown -R github-runner:github-runner /opt/actions-runner
+GUEST
+)
 EOF
 
 # 1. Configure (Unattended)
