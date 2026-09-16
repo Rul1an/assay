@@ -129,9 +129,10 @@ jobs:
               ;;
             mcp_jsonrpc)
               # Frames from the outer-fallback contract: every notification
-              # shape, id:null, all three duplicate-member probes plus the
-              # escape-spelled duplicate id, the oversize refusal, and the
-              # envelope faults. Dropping one silently narrows the oracle.
+              # shape, id:null, all three request-member duplicate probes plus
+              # the escape-spelled duplicate id, a duplicate of an ignored
+              # unknown member (must stay answered), the oversize refusal, and
+              # the envelope faults. Dropping one silently narrows the oracle.
               required=(
                 valid-initialize
                 valid-tools-list
@@ -146,6 +147,7 @@ jobs:
                 duplicate-params
                 duplicate-id
                 duplicate-id-escape
+                duplicate-unknown-member
                 oversize-line
                 invalid-json
                 empty-line
