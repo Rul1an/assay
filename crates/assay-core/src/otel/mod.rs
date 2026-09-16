@@ -1,11 +1,10 @@
 use crate::model::TestResultRow;
 
-pub mod genai;
 pub(crate) mod mcp_ingest;
 pub mod metrics;
+pub mod pin;
 pub mod projection;
 pub mod redaction;
-pub mod semconv;
 
 #[derive(Debug, Clone, Default)]
 pub struct OTelConfig {
@@ -26,14 +25,10 @@ pub fn export_jsonl(
         .append(true)
         .open(path)?;
     for r in results {
-        // GenAI Semantic Conventions (simplified for MVP)
-        // https://opentelemetry.io/docs/specs/semconv/gen-ai/
         let row = serde_json::json!({
             "timestamp": chrono::Utc::now().to_rfc3339(),
             "attributes": {
-                "gen_ai.system": "assay",
-                "gen_ai.request.model": "unknown", // can be enriched if we track it better
-                "gen_ai.response.completion_tokens": 0, // placeholder
+                "gen_ai.provider.name": pin::PROVIDER_ASSAY,
                 "assay.test_id": r.test_id,
                 "assay.status": format!("{:?}", r.status),
                 "assay.score": r.score,
@@ -65,8 +60,8 @@ pub struct ToolObservation {
 
 /// Emit observed tool effects as OTel GenAI `execute_tool` spans in the
 /// semconv-shaped JSONL collector format (the same pattern as [`export_jsonl`]),
-/// each carrying the Assay claim-class outcome as an attribute. Pinned to GenAI
-/// semconv 1.28.0. A no-op unless `cfg.jsonl_path` is set.
+/// each carrying the Assay claim-class outcome as an attribute. Pinned to
+/// [`pin::GENAI_SEMCONV_PIN`]. A no-op unless `cfg.jsonl_path` is set.
 ///
 /// This is the emit side of the claimed-versus-actual surface: a downstream OTel
 /// collector ingests these spans alongside the agent's self-reported spans, so a
@@ -86,13 +81,11 @@ pub fn export_tool_spans_jsonl(
         .open(path)?;
     use std::io::Write;
     for (seq, obs) in observations.iter().enumerate() {
-        // OTel GenAI execute-tool span (semconv 1.28.0), plus the assay claim-class
-        // outcome as a vendor extension attribute.
         let row = serde_json::json!({
             "timestamp": chrono::Utc::now().to_rfc3339(),
             "name": "execute_tool",
             "attributes": {
-                "gen_ai.system": "assay",
+                "gen_ai.provider.name": pin::PROVIDER_ASSAY,
                 "gen_ai.operation.name": "execute_tool",
                 "gen_ai.tool.name": obs.tool_name,
                 "assay.claim_class.outcome": obs.claim_class_outcome,
@@ -149,7 +142,80 @@ mod tool_span_tests {
         );
         let second: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
         assert_eq!(second["attributes"]["assay.claim_class.outcome"], "blocked");
+        assert_eq!(first["attributes"]["gen_ai.provider.name"], "assay");
+        assert!(first["attributes"].get("gen_ai.system").is_none());
 
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn execute_tool_spans_carry_provider_name_and_never_gen_ai_system() {
+        let path = std::env::temp_dir().join(format!(
+            "assay-otel-provider-name-{}.jsonl",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let cfg = OTelConfig {
+            jsonl_path: Some(path.clone()),
+            redact_prompts: false,
+        };
+        export_tool_spans_jsonl(
+            &cfg,
+            "run",
+            &[ToolObservation {
+                tool_name: "search".into(),
+                claim_class_outcome: "supported".into(),
+                subject: None,
+            }],
+        )
+        .expect("export");
+        let row: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("json");
+        assert_eq!(row["attributes"]["gen_ai.provider.name"], "assay");
+        assert!(row["attributes"].get("gen_ai.system").is_none());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn export_jsonl_emits_no_placeholder_and_no_unregistered_key() {
+        let path = std::env::temp_dir().join(format!(
+            "assay-otel-no-placeholder-{}.jsonl",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let cfg = OTelConfig {
+            jsonl_path: Some(path.clone()),
+            redact_prompts: false,
+        };
+        let row = crate::model::TestResultRow {
+            test_id: "t1".into(),
+            status: crate::model::TestStatus::Pass,
+            score: Some(1.0),
+            cached: false,
+            message: "ok".into(),
+            details: serde_json::json!({}),
+            duration_ms: Some(1),
+            fingerprint: None,
+            skip_reason: None,
+            attempts: None,
+            error_policy_applied: None,
+        };
+        export_jsonl(&cfg, "suite", &[row]).expect("export");
+        let body: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("json");
+        let attrs = body["attributes"].as_object().expect("attributes");
+        assert!(
+            !attrs.contains_key("gen_ai.request.model"),
+            "omit gen_ai.request.model when no model was observed"
+        );
+        assert!(
+            !attrs.contains_key("gen_ai.response.completion_tokens"),
+            "unregistered gen_ai.response.completion_tokens must not be written"
+        );
+        assert_ne!(
+            attrs.get("gen_ai.request.model").and_then(|v| v.as_str()),
+            Some("unknown")
+        );
         std::fs::remove_file(&path).ok();
     }
 }

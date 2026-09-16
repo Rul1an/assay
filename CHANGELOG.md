@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- OTel emit and ingest share one GenAI semconv commit pin. `gen_ai.system` is no
+  longer written; `gen_ai.provider.name` is. Fabricated `"unknown"` models and
+  `completion_tokens: 0` are omitted, and an unknown `genai_semconv_version`
+  fails closed instead of falling back to 1.28.0. `assay project-otel` JSON
+  inputs are bounded by `LimitReader` (#2489).
 - `assay evidence push --no-verify` is refused with exit 2 before the archive is
   opened. The store key is the verified `bundle_id`; the flag used to take that id
   from the unverified manifest, so an archive could name its own key (#2492).
