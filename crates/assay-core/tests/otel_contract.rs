@@ -216,6 +216,48 @@ async fn test_invariant_redacted_inline() {
     );
 }
 
+#[tokio::test]
+async fn execute_tool_spans_carry_provider_name_and_never_gen_ai_system() {
+    let (writer, _guard) = setup_capture();
+    let cfg = OtelConfig {
+        capture_mode: PromptCaptureMode::Off,
+        capture_requires_sampled_span: false,
+        ..Default::default()
+    };
+    let inner = Arc::new(FakeClient::new("gpt-4".to_string()));
+    let client = TracingLlmClient::new(inner, cfg);
+    let _ = client.complete("hello", None).await;
+    let output = String::from_utf8(writer.buf.lock().unwrap().clone()).unwrap();
+    let field_keys = parse_span_field_keys(&output);
+    assert!(
+        field_keys.iter().any(|k| k == "gen_ai.provider.name"),
+        "TracingLlmClient must emit gen_ai.provider.name; keys={field_keys:?}"
+    );
+    assert!(
+        !field_keys.iter().any(|k| k == "gen_ai.system"),
+        "retired gen_ai.system must not be emitted; keys={field_keys:?}"
+    );
+}
+
+#[test]
+fn unknown_semconv_version_is_an_error_not_a_fallback() {
+    let cfg = OtelConfig {
+        genai_semconv_version: "9.9.9".to_string(),
+        ..Default::default()
+    };
+    let err = cfg
+        .validate()
+        .expect_err("unknown genai_semconv_version must fail closed");
+    assert!(
+        err.contains("9.9.9"),
+        "error must name the rejected version: {err}"
+    );
+    assert!(
+        !err.to_ascii_lowercase().contains("fallback"),
+        "must not describe a silent fallback: {err}"
+    );
+}
+
 /// Sign-off: when span is not recorded (sampling drop), no blob hash / redaction work is done.
 /// Subscriber filter "warn" disables info-level spans so is_disabled() is true.
 #[tokio::test]

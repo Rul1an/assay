@@ -1,6 +1,6 @@
 use crate::config::otel::OtelConfig;
 use crate::model::LlmResponse;
-use crate::otel::genai::GenAiSpanBuilder;
+use crate::otel::pin::{ATTR_PROVIDER_NAME, PROVIDER_ASSAY};
 use crate::otel::redaction::RedactionService;
 use crate::providers::llm::LlmClient;
 use async_trait::async_trait;
@@ -9,20 +9,17 @@ use tracing::{info_span, Instrument};
 
 pub struct TracingLlmClient {
     inner: Arc<dyn LlmClient>,
-    span_builder: GenAiSpanBuilder,
     redaction: RedactionService,
     config: OtelConfig,
 }
 
 impl TracingLlmClient {
     pub fn new(inner: Arc<dyn LlmClient>, config: OtelConfig) -> Self {
-        let span_builder = GenAiSpanBuilder::new(&config);
         let redaction =
             RedactionService::new(config.capture_mode.clone(), config.redaction.clone());
 
         Self {
             inner,
-            span_builder,
             redaction,
             config,
         }
@@ -36,8 +33,6 @@ impl LlmClient for TracingLlmClient {
         prompt: &str,
         context: Option<&[String]>,
     ) -> anyhow::Result<LlmResponse> {
-        // Compute GenAI attributes
-        let (_sys_key, sys_val) = self.span_builder.gen_ai_system();
         let provider = self.inner.provider_name();
 
         // Conditional Span Creation (Sign-off: gen_ai.prompt only in RedactedInline)
@@ -46,7 +41,7 @@ impl LlmClient for TracingLlmClient {
             crate::config::otel::PromptCaptureMode::Off => {
                 info_span!(
                     "gen_ai.client.request",
-                    "gen_ai.system" = sys_val,
+                    { ATTR_PROVIDER_NAME } = PROVIDER_ASSAY,
                     "assay.provider" = provider,
                     "assay.semconv.genai" = self.config.genai_semconv_version.as_str(),
                     "gen_ai.request.model" = tracing::field::Empty,
@@ -60,7 +55,7 @@ impl LlmClient for TracingLlmClient {
             crate::config::otel::PromptCaptureMode::BlobRef => {
                 info_span!(
                     "gen_ai.client.request",
-                    "gen_ai.system" = sys_val,
+                    { ATTR_PROVIDER_NAME } = PROVIDER_ASSAY,
                     "assay.provider" = provider,
                     "assay.semconv.genai" = self.config.genai_semconv_version.as_str(),
                     "gen_ai.request.model" = tracing::field::Empty,
@@ -76,7 +71,7 @@ impl LlmClient for TracingLlmClient {
             crate::config::otel::PromptCaptureMode::RedactedInline => {
                 info_span!(
                     "gen_ai.client.request",
-                    "gen_ai.system" = sys_val,
+                    { ATTR_PROVIDER_NAME } = PROVIDER_ASSAY,
                     "assay.provider" = provider,
                     "assay.semconv.genai" = self.config.genai_semconv_version.as_str(),
                     "gen_ai.request.model" = tracing::field::Empty,
