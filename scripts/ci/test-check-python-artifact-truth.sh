@@ -7,9 +7,70 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECK="$ROOT/scripts/ci/check-python-artifact-truth.py"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+BASE_CHECK="$TMP/check-python-artifact-truth.base.py"
+CHECK_REL="scripts/ci/check-python-artifact-truth.py"
+mapfile -t CHECK_REVS < <(git -C "$ROOT" rev-list -n 2 HEAD -- "$CHECK_REL")
+if [ "${#CHECK_REVS[@]}" -lt 2 ]; then
+  echo "FAIL: cannot derive baseline checker revision for $CHECK_REL" >&2
+  exit 1
+fi
+BASE_CHECK_REV="${PY_ARTIFACT_TRUTH_BASE_REV:-${CHECK_REVS[1]}}"
+git -C "$ROOT" show "$BASE_CHECK_REV:$CHECK_REL" > "$BASE_CHECK"
+chmod +x "$BASE_CHECK"
 
 pass() { echo "PASS: $*"; }
 fail_test() { echo "FAIL: $*" >&2; exit 1; }
+MUTANT_OLD_GREEN=0
+MUTANT_OLD_RED=0
+MUTANT_NEW_GREEN=0
+MUTANT_NEW_RED=0
+
+record_mutant_status() {
+  local side="$1"
+  local status="$2"
+  if [ "$side" = "old" ]; then
+    if [ "$status" = "GREEN" ]; then
+      MUTANT_OLD_GREEN=$((MUTANT_OLD_GREEN + 1))
+    else
+      MUTANT_OLD_RED=$((MUTANT_OLD_RED + 1))
+    fi
+  else
+    if [ "$status" = "GREEN" ]; then
+      MUTANT_NEW_GREEN=$((MUTANT_NEW_GREEN + 1))
+    else
+      MUTANT_NEW_RED=$((MUTANT_NEW_RED + 1))
+    fi
+  fi
+}
+
+check_status() {
+  local checker="$1"
+  shift
+  if python3 "$checker" "$@" >"$TMP/out" 2>"$TMP/err"; then
+    echo "GREEN"
+  else
+    echo "RED"
+  fi
+}
+
+expect_mutant_delta() {
+  local label="$1"
+  local expected_head="$2"
+  shift 2
+  local base_status
+  local head_status
+  base_status="$(check_status "$BASE_CHECK" "$@")"
+  head_status="$(check_status "$CHECK" "$@")"
+  record_mutant_status "old" "$base_status"
+  record_mutant_status "new" "$head_status"
+  echo "MUTANT: $label: old=$base_status head=$head_status"
+  if [ "$base_status" = "RED" ] && [ "$head_status" = "RED" ]; then
+    echo "NOTE: $label control is RED on both old/head; this mutant is non-discriminating."
+  fi
+  if [ "$head_status" != "$expected_head" ]; then
+    fail_test "$label: expected head=$expected_head, got head=$head_status"
+  fi
+}
 
 expect_fail() {
   local label="$1"
@@ -60,6 +121,10 @@ Path(sys.argv[1]).write_text(
             ],
             "publish_sdist": False,
             "support_bound": (
+                "CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; "
+                "other interpreters and platforms are not claimed."
+            ),
+            "published_support_bound": (
                 "CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; "
                 "other interpreters and platforms are not claimed."
             ),
@@ -168,6 +233,7 @@ YML
 GREEN="$TMP/green"
 write_green_fixture "$GREEN"
 
+echo "BASE CHECK REV: $BASE_CHECK_REV"
 echo "=== live tree ==="
 if python3 "$CHECK" --root "$ROOT"; then
   pass "live tree GREEN"
@@ -610,6 +676,7 @@ matrix["support_bound"] = (
     "CPython 3.12, 3.13, and 3.14 on macOS x86_64/arm64 and Linux x86_64; "
     "other interpreters and platforms are not claimed."
 )
+matrix["published_support_bound"] = matrix["support_bound"]
 for wheel in matrix["wheels"]:
     wheel["tag"] = wheel["tag"].replace("cp312-cp312", "cp312-abi3", 1)
 matrix_path.write_text(json.dumps(matrix, indent=2) + "\n")
@@ -762,6 +829,98 @@ path.write_text(path.read_text().replace('    "Programming Language :: Python ::
 PY
 expect_fail "smoke Python 3.14 without classifier" --root "$ABI3"
 mv "$TMP/abi3-pyproject.bak" "$ABI3/assay-python-sdk/pyproject.toml"
+
+echo "=== #3065 published_support_bound split cases ==="
+TREE_BOUND='CPython 3.12, 3.13, and 3.14 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.'
+PUBLISHED_BOUND='CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.'
+ABI3_POST_RELEASE="$TMP/abi3-post-release"
+cp -a "$ABI3" "$ABI3_POST_RELEASE"
+expect_mutant_delta "published == support_bound (post-release state)" "GREEN" --root "$ABI3_POST_RELEASE"
+
+cp "$ABI3_POST_RELEASE/assay-python-sdk/python-artifact-matrix.v0.json" "$TMP/published-bound-matrix.bak"
+python3 - "$ABI3_POST_RELEASE/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+path = Path(sys.argv[1])
+data = json.loads(path.read_text())
+data.pop("published_support_bound", None)
+path.write_text(json.dumps(data, indent=2) + "\n")
+PY
+expect_mutant_delta "published_support_bound missing" "RED" --root "$ABI3_POST_RELEASE"
+mv "$TMP/published-bound-matrix.bak" "$ABI3_POST_RELEASE/assay-python-sdk/python-artifact-matrix.v0.json"
+
+cp "$ABI3_POST_RELEASE/assay-python-sdk/python-artifact-matrix.v0.json" "$TMP/published-bound-matrix.bak"
+python3 - "$ABI3_POST_RELEASE/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+path = Path(sys.argv[1])
+data = json.loads(path.read_text())
+data["published_support_bound"] = (
+    "CPython 3.12 and 3.15 on macOS x86_64/arm64 and Linux x86_64; "
+    "other interpreters and platforms are not claimed."
+)
+path.write_text(json.dumps(data, indent=2) + "\n")
+PY
+expect_mutant_delta "published_support_bound names 3.15" "RED" --root "$ABI3_POST_RELEASE"
+mv "$TMP/published-bound-matrix.bak" "$ABI3_POST_RELEASE/assay-python-sdk/python-artifact-matrix.v0.json"
+
+cp "$ABI3_POST_RELEASE/assay-python-sdk/python-artifact-matrix.v0.json" "$TMP/published-bound-matrix.bak"
+python3 - "$ABI3_POST_RELEASE/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+path = Path(sys.argv[1])
+data = json.loads(path.read_text())
+data["published_support_bound"] = (
+    "CPython 3.12 on macOS x86_64/arm64 and Linux arm64; "
+    "other interpreters and platforms are not claimed."
+)
+path.write_text(json.dumps(data, indent=2) + "\n")
+PY
+expect_mutant_delta "published_support_bound platform text drifts" "RED" --root "$ABI3_POST_RELEASE"
+mv "$TMP/published-bound-matrix.bak" "$ABI3_POST_RELEASE/assay-python-sdk/python-artifact-matrix.v0.json"
+
+ABI3_PRE_RELEASE="$TMP/abi3-pre-release"
+cp -a "$ABI3" "$ABI3_PRE_RELEASE"
+python3 - "$ABI3_PRE_RELEASE" "$TREE_BOUND" "$PUBLISHED_BOUND" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+root = Path(sys.argv[1])
+tree_bound = sys.argv[2]
+published_bound = sys.argv[3]
+matrix_path = root / "assay-python-sdk/python-artifact-matrix.v0.json"
+data = json.loads(matrix_path.read_text())
+data["published_support_bound"] = published_bound
+matrix_path.write_text(json.dumps(data, indent=2) + "\n")
+for rel in data["install_docs"]:
+    doc_path = root / rel
+    doc_path.write_text(doc_path.read_text().replace(tree_bound, published_bound))
+PY
+
+python3 - "$ABI3_PRE_RELEASE" "$PUBLISHED_BOUND" "$TREE_BOUND" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+root = Path(sys.argv[1])
+published_bound = sys.argv[2]
+tree_bound = sys.argv[3]
+matrix_path = root / "assay-python-sdk/python-artifact-matrix.v0.json"
+data = json.loads(matrix_path.read_text())
+for rel in data["install_docs"]:
+    doc_path = root / rel
+    doc_path.write_text(doc_path.read_text().replace(published_bound, tree_bound))
+PY
+expect_mutant_delta "doc carries tree sentence (3.12, 3.13, and 3.14) instead of published sentence" "RED" --root "$ABI3_PRE_RELEASE"
+
+echo "MUTANT COUNTERS old->head: GREEN $MUTANT_OLD_GREEN->$MUTANT_NEW_GREEN RED $MUTANT_OLD_RED->$MUTANT_NEW_RED"
 
 echo "=== no-op restore ==="
 expect_pass "restored green fixture" --root "$GREEN"

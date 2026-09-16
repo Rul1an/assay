@@ -51,6 +51,11 @@ STRAY_PYTHON_VERSION_RE = re.compile(
     r"""python-version:\s*['\"]?\d+\.\d+['\"]?"""
 )
 STRAY_MATURIN_INTERPRETER_RE = re.compile(r"-i\s+python\d+\.\d+")
+PYTHON_VERSION_RE = re.compile(r"^\d+\.\d+$")
+SUPPORT_BOUND_RE = re.compile(
+    r"^CPython (?P<versions>.+) on (?P<platforms>.+); "
+    r"other interpreters and platforms are not claimed\.$"
+)
 FAMILY_ORDER = ("macOS", "Linux")
 TARGET_FAMILY_ARCH = {
     "x86_64-apple-darwin": ("macOS", "x86_64"),
@@ -222,6 +227,26 @@ def format_python_versions(versions: list[str]) -> str:
     return f"{', '.join(versions[:-1])}, and {versions[-1]}"
 
 
+def parse_support_bound(bound: str) -> tuple[list[str], str]:
+    match = SUPPORT_BOUND_RE.fullmatch(bound)
+    if match is None:
+        raise ValueError(
+            "support bound must match "
+            "'CPython X[,...] on <platforms>; other interpreters and platforms are not claimed.'"
+        )
+    versions_part = match.group("versions")
+    if ", and " in versions_part:
+        left, tail = versions_part.rsplit(", and ", 1)
+        versions = [*left.split(", "), tail]
+    elif " and " in versions_part:
+        versions = versions_part.split(" and ")
+    else:
+        versions = [versions_part]
+    if not versions or any(PYTHON_VERSION_RE.fullmatch(version) is None for version in versions):
+        raise ValueError("support bound CPython versions must be non-empty dotted versions")
+    return versions, match.group("platforms")
+
+
 def expected_support_bound(pythons: list[str], wheels: list) -> str:
     """Bind support_bound to declared versions and the declared os/target/tag set."""
     families: dict[str, list[str]] = {}
@@ -250,7 +275,10 @@ def expected_support_bound(pythons: list[str], wheels: list) -> str:
 
 
 def check_docs(root: Path, matrix: dict, errors: list[str]) -> None:
-    bound = matrix["support_bound"]
+    bound = matrix.get("published_support_bound")
+    if not isinstance(bound, str):
+        fail(errors, f"{MATRIX_REL}: published_support_bound must be a string")
+        return
     for rel in matrix["install_docs"]:
         path = root / rel
         if not path.is_file():
@@ -258,7 +286,7 @@ def check_docs(root: Path, matrix: dict, errors: list[str]) -> None:
             continue
         text = path.read_text(encoding="utf-8")
         if PIP_INSTALL_RE.search(text) and bound not in text:
-            fail(errors, f"{rel}: pip install assay-it without support bound")
+            fail(errors, f"{rel}: pip install assay-it without published support bound")
         if BROADER_PYTHON_RE.search(text):
             fail(errors, f"{rel}: broader Python/PyPy claim than the matrix")
         if SDIST_CLAIM_RE.search(text) and "assay-it" in text.lower():
@@ -353,6 +381,35 @@ def check_tag_anchor(root: Path, matrix: dict, planner, errors: list[str]) -> di
                 f"{MATRIX_REL}: support_bound must match declared wheels and "
                 f"CPython {plan['python']}, expected {expected_bound!r}",
             )
+    published_bound = matrix.get("published_support_bound")
+    if not isinstance(published_bound, str):
+        fail(errors, f"{MATRIX_REL}: published_support_bound must be a string")
+    else:
+        try:
+            published_versions, _published_platforms = parse_support_bound(published_bound)
+        except ValueError as exc:
+            fail(errors, f"{MATRIX_REL}: published_support_bound: {exc}")
+        else:
+            missing = [version for version in published_versions if version not in smoke_pythons]
+            if missing:
+                fail(
+                    errors,
+                    f"{MATRIX_REL}: published_support_bound versions must be a subset of smoke_pythons, "
+                    f"extra {missing}",
+                )
+            try:
+                expected_published = expected_support_bound(
+                    published_versions, matrix.get("wheels") or []
+                )
+            except ValueError as exc:
+                fail(errors, f"{MATRIX_REL}: {exc}")
+            else:
+                if published_bound != expected_published:
+                    fail(
+                        errors,
+                        f"{MATRIX_REL}: published_support_bound must match declared wheels for its versions, "
+                        f"expected {expected_published!r}",
+                    )
 
     abis = [planner.tag_abi(str(wheel.get("tag") or "")) for wheel in matrix.get("wheels") or []]
     pythons = [planner.tag_python(str(wheel.get("tag") or "")) for wheel in matrix.get("wheels") or []]
