@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay evidence verify-coverage-attestation` admits one local CAP-1 document
+  under the existing byte ceiling and writes a three-valued conformance
+  document. Conformance is internal consistency of that document, not producer
+  truth or capture completeness; the C1–C7 claim gate does not run (#2493).
+
 ### Changed
 - `assay evidence push --no-verify` is refused with exit 2 before the archive is
   opened. The store key is the verified `bundle_id`; the flag used to take that id

@@ -24,3 +24,6 @@ aya = { workspace = true, optional = true }
 default = ["std"]
 std = ["serde/std", "chrono/std", "dep:serde_json", "dep:nix"]
 user = ["std", "dep:aya"]
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,17 +1,20 @@
 use anyhow::{anyhow, Context, Result};
+use assay_common::atomic_write::write_new_at;
 use assay_common::exports::{EventRecordExport, ProcessTreeExport};
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
-use nix::fcntl::{open, openat, renameat, OFlag};
+use nix::sys::stat::{fchmod, fstat, Mode};
 #[cfg(unix)]
-use nix::sys::stat::{fchmod, Mode};
+use std::fs::OpenOptions;
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-#[cfg(unix)]
-use std::os::unix::io::{AsRawFd, FromRawFd};
 
 use uuid::Uuid;
 
@@ -72,16 +75,9 @@ impl IncidentBuilder {
     }
 
     /// Writes the bundle atomically to the specified directory.
-    /// Creates a temp file, sets permissions (0600), then moves it.
-    /// Enforces 0700 on parent directory for security.
-    /// Secure Atomic Write (SOTA P0)
-    /// Uses low-level O_NOFOLLOW/openat to prevent symlink attacks.
-    /// Enforces 0700 on directory and 0600 on file.
+    /// Enforces 0700 on the containing directory and writes 0600 outputs.
     #[cfg(unix)]
     pub fn atomic_write(&self, output_dir: &Path) -> Result<PathBuf> {
-        let dir_path_str = output_dir.to_str().ok_or_else(|| anyhow!("Invalid path"))?;
-
-        // 1. Ensure directory exists
         if !output_dir.exists() {
             fs::create_dir_all(output_dir).context("Failed to create output dir")?;
             let mut perms = fs::metadata(output_dir)?.permissions();
@@ -89,74 +85,78 @@ impl IncidentBuilder {
             fs::set_permissions(output_dir, perms).context("Failed to secure new output dir")?;
         }
 
-        // 2. Open Directory securely (O_DIRECTORY | O_NOFOLLOW)
-        let dir_raw_fd = open(
-            dir_path_str,
-            OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW,
-            Mode::empty(),
-        )
-        .context("Failed to open output directory securely")?;
+        let dir_fd = Self::open_output_dir_fd(output_dir)?;
+        Self::enforce_secure_directory_mode(&dir_fd)?;
 
-        // SAFETY: We wrap the raw FD immediately to ensure RAII closure.
-        #[allow(unsafe_code)]
-        let dir_file = unsafe { std::fs::File::from_raw_fd(dir_raw_fd) };
+        let suffix = Uuid::new_v4().simple().to_string();
+        let filename = incident_filename(&self.bundle.metadata.session_id, &suffix);
+        self.write_with_filename_at(output_dir, &dir_fd, &filename)
+    }
 
-        // 3. Verify Directory Permissions (fstat on fd)
-        let dir_meta = dir_file.metadata()?;
-        let current_mode = dir_meta.permissions().mode();
+    #[cfg(unix)]
+    fn open_output_dir_fd(output_dir: &Path) -> Result<std::fs::File> {
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(output_dir)
+            .with_context(|| {
+                format!(
+                    "Failed to open output directory securely: {}",
+                    output_dir.display()
+                )
+            })
+    }
+
+    #[cfg(unix)]
+    fn enforce_secure_directory_mode(dir_fd: &std::fs::File) -> Result<()> {
+        let current_mode = fstat(dir_fd.as_raw_fd())?.st_mode as u32;
         if (current_mode & 0o777) != 0o700 {
-            // P0: Enforce 0700 always (via fd to avoid TOCTOU)
-            fchmod(dir_file.as_raw_fd(), Mode::from_bits_truncate(0o700))
+            fchmod(dir_fd.as_raw_fd(), Mode::from_bits_truncate(0o700))
                 .context("Failed to fchmod output directory")?;
         }
+        Ok(())
+    }
 
-        // SOTA: Guaranteed unique filename to prevent overwrites (collision free)
-        let suffix = Uuid::new_v4().simple().to_string();
-        let filename = format!(
-            "incident_{}_{}.json",
-            self.bundle.metadata.session_id, suffix
-        );
-        let tmp_filename = format!(".tmp_{}", filename);
-
-        let content = serde_json::to_string_pretty(&self.bundle)
+    #[cfg(unix)]
+    fn write_with_filename_at(
+        &self,
+        output_dir: &Path,
+        output_dir_fd: &std::fs::File,
+        filename: &str,
+    ) -> Result<PathBuf> {
+        let content = serde_json::to_vec_pretty(&self.bundle)
             .context("Failed to serialize incident bundle")?;
-
-        // 4. Open Temp File (openat relative to dir_fd, O_CREAT|O_EXCL|O_NOFOLLOW, 0600)
-        let tmp_fd = openat(
-            dir_file.as_raw_fd(),
-            tmp_filename.as_str(),
-            OFlag::O_CREAT | OFlag::O_WRONLY | OFlag::O_EXCL | OFlag::O_NOFOLLOW,
-            Mode::from_bits_truncate(0o600),
-        )
-        .context("Failed to create temp file securely")?;
-
-        #[allow(unsafe_code)]
-        let mut tmp_file = unsafe { std::fs::File::from_raw_fd(tmp_fd) };
-
-        // 5. Write and Fsync
-        use std::io::Write;
-        tmp_file.write_all(content.as_bytes())?;
-        tmp_file.sync_all()?;
-
-        // 6. Atomic Rename (renameat)
-        renameat(
-            Some(dir_file.as_raw_fd()),
-            tmp_filename.as_str(),
-            Some(dir_file.as_raw_fd()),
-            filename.as_str(),
-        )
-        .context("Failed to rename atomic file")?;
-
-        // 7. Sync Parent Directory
-        dir_file.sync_all()?;
-
+        write_new_at(output_dir_fd, filename, &content).map_err(|error| {
+            anyhow!(
+                "Failed to atomically create incident bundle {}: {error}",
+                output_dir.join(filename).display()
+            )
+        })?;
         Ok(output_dir.join(filename))
+    }
+
+    #[cfg(unix)]
+    #[cfg(test)]
+    fn atomic_write_with_suffix_for_test(
+        &self,
+        output_dir: &Path,
+        suffix: &str,
+    ) -> Result<PathBuf> {
+        let filename = incident_filename(&self.bundle.metadata.session_id, suffix);
+        let dir_fd = Self::open_output_dir_fd(output_dir)?;
+        Self::enforce_secure_directory_mode(&dir_fd)?;
+        self.write_with_filename_at(output_dir, &dir_fd, &filename)
     }
 
     #[cfg(not(unix))]
     pub fn atomic_write(&self, _output_dir: &Path) -> Result<PathBuf> {
         Err(anyhow!("Incident bundles only supported on Unix"))
     }
+}
+
+#[cfg(unix)]
+fn incident_filename(session_id: &str, suffix: &str) -> String {
+    format!("incident_{}_{}.json", session_id, suffix)
 }
 
 #[cfg(test)]
@@ -192,5 +192,63 @@ mod tests {
         assert_eq!(json["metadata"]["session_id"], "test-session");
 
         Ok(())
+    }
+
+    #[test]
+    fn test_atomic_write_refuses_existing_incident_path() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let builder = IncidentBuilder::new("collision-session".to_string());
+        let suffix = "forcedsuffix";
+        let filename = incident_filename("collision-session", suffix);
+        let existing = temp_dir.path().join(&filename);
+        std::fs::write(&existing, br#"{"status":"original"}"#).expect("seed existing");
+
+        let error = builder
+            .atomic_write_with_suffix_for_test(temp_dir.path(), suffix)
+            .expect_err("existing target must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("without overwriting an existing path"),
+            "unexpected error: {error:#}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&existing).expect("read existing"),
+            r#"{"status":"original"}"#
+        );
+    }
+
+    #[test]
+    fn test_atomic_write_directory_swap_does_not_write_into_symlink_target() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let original_dir = root.path().join("incident-output");
+        let moved_dir = root.path().join("incident-output-moved");
+        let leaked_dir = tempfile::tempdir().expect("leaked");
+        std::fs::create_dir(&original_dir).expect("create original output dir");
+
+        let builder = IncidentBuilder::new("swap-session".to_string());
+        let suffix = "swapsuffix";
+        let filename = incident_filename("swap-session", suffix);
+
+        let opened_dir_fd =
+            IncidentBuilder::open_output_dir_fd(&original_dir).expect("open output dir fd");
+        IncidentBuilder::enforce_secure_directory_mode(&opened_dir_fd)
+            .expect("secure directory mode");
+        std::fs::rename(&original_dir, &moved_dir).expect("move original output dir");
+        std::os::unix::fs::symlink(leaked_dir.path(), &original_dir)
+            .expect("replace path with symlink");
+
+        builder
+            .write_with_filename_at(&original_dir, &opened_dir_fd, &filename)
+            .expect("atomic write should succeed");
+
+        assert!(
+            moved_dir.join(&filename).exists(),
+            "expected write to stay bound to originally opened directory"
+        );
+        assert!(
+            !leaked_dir.path().join(&filename).exists(),
+            "write escaped into symlink target"
+        );
     }
 }
