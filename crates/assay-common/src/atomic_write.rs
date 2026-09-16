@@ -26,6 +26,7 @@ use std::os::fd::{AsRawFd, RawFd};
 const MAX_TEMP_CREATE_ATTEMPTS: usize = 32;
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum WriteNewError {
     InvalidName { name: String },
     OpenDir { dir: PathBuf, source: io::Error },
