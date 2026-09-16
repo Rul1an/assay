@@ -4,28 +4,70 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.4.0] - 2026-09-17
+
 ### Added
 - `assay evidence verify-coverage-attestation` admits one local CAP-1 document
   under the existing byte ceiling and writes a three-valued conformance
   document. Conformance is internal consistency of that document, not producer
-  truth or capture completeness; the C1–C7 claim gate does not run (#2493).
+  truth or capture completeness; the C1–C7 claim gate does not run (#2493, #3049).
+- `assay_evidence::verify_cap1_document`: the CAP-1 normative verifier
+  (admission, JSON Schema, typed parse, rules R0-R8) with value-free refusals (#3039).
+- `assay trace verify` prints one truncation reading per event and declared
+  field (`lossy`, `measured_clean`, `unmeasured`) before the coverage verdict,
+  and accepts repeatable `--trust-stage`; an empty trust list never reads
+  `measured_clean` (#2782, #3034).
+- `assay_common::atomic_write::{write_new, write_new_at}`: one no-replace,
+  fsync'd, directory-fd-bound file writer (#3027, #3047).
+- The `assay-mcp-server` container image is documented as a verified release
+  channel with a digest-pinned reference and attestation-verify examples (#2915, #3046).
 
 ### Changed
 - OTel emit and ingest share one GenAI semconv commit pin. `gen_ai.system` is no
   longer written; `gen_ai.provider.name` is. Fabricated `"unknown"` models and
   `completion_tokens: 0` are omitted, and an unknown `genai_semconv_version`
   fails closed instead of falling back to 1.28.0. `assay project-otel` JSON
-  inputs are bounded by `LimitReader` (#2489).
+  inputs are bounded by `LimitReader` (#2489, #3055).
+  **Migration:** emit and ingest `gen_ai.provider.name` instead of `gen_ai.system`.
+  Pin a known `genai_semconv_version`; an unknown version now fails closed.
 - `assay evidence push --no-verify` is refused with exit 2 before the archive is
   opened. The store key is the verified `bundle_id`; the flag used to take that id
-  from the unverified manifest, so an archive could name its own key (#2492).
+  from the unverified manifest, so an archive could name its own key (#2492, #3044).
+  **Migration:** drop the flag; push always verifies. The store key is the verified
+  `bundle_id`.
+- `assay evidence diff` compares retained verified events by content id and
+  never reports "No differences found" when the run root differs; the third
+  closing line and terminal sanitization of human output are documented
+  (#3037, #3038, #3042, #3059).
+- The incident export refuses an existing target instead of replacing it (#3027).
+  **Migration:** choose a new path or remove the existing file before export.
+- `assay fix` and `assay doctor --fix` refuse an unshowable confirm prompt with
+  exit 2 and name `--yes` on stderr when stdin is not a terminal and consent
+  was not given (#2573, #3058).
+  **Migration:** pass `--yes` (or `--dry-run`) on non-TTY runs that apply a fix.
 
 ### Fixed
 - `assay evidence pull --verify` reports a bundle served under a key other than
   its own `bundle_id` as a typed `Contract` verifier error
   (`ContractBundleIdMismatch`) naming both ids, exit 2, with nothing written.
-  The prose-only refusal was indistinguishable from a transport failure (#2492).
-- Trace verify coverage failures cite per-occurrence `/input` readings under each stage-local truncation-shape id (#2782).
+  The prose-only refusal was indistinguishable from a transport failure
+  (#2492, #3044).
+- Trace verify coverage failures cite per-occurrence `/input` readings under each
+  stage-local truncation-shape id (#2782, #3051).
+
+### Internal
+- Fuzz oracle for the stdio JSON-RPC target no longer treats duplicates of
+  ignored members as ambiguous (#3041, #3045).
+- CI self-test scratch allocation is collision-free under BSD mktemp (#3007, #3043).
+- Dependency behaviour pins for jsonschema sibling keywords and `CidrRule`
+  serialisation (#3036, #3056).
+- Release guard shares one pin-and-lockfile check with the release surface
+  (#3030, #3053).
+- jsonschema 0.55.1 and ipnet 2.12.2 (#3019, #3020).
+- The runner install script pins actions-runner once (2.337.0) and verifies
+  the extracted version; the runner README states the backup monitor's
+  six-hourly cadence and the fail-closed recovery refusal; queued-job
+  inspection paginates (#3025, #3026, #3031, #3057).
 
 ## [6.3.1] - 2026-09-15
 
