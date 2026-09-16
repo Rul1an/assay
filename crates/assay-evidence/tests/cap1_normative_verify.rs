@@ -11,7 +11,8 @@
 //! Conformance is internal consistency of a document. It says nothing about producer truth,
 //! capture completeness, or what any agent did.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -24,7 +25,29 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 fn normative_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cap1/normative")
+    cap1_fixture_dir().join("normative")
+}
+
+fn local_dir() -> PathBuf {
+    cap1_fixture_dir().join("local")
+}
+
+fn cap1_fixture_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cap1")
+}
+
+fn fixture_subdir(directory: &str) -> PathBuf {
+    match directory {
+        NORMATIVE_DIR => normative_dir(),
+        LOCAL_DIR => local_dir(),
+        other => panic!("unknown fixture directory {other:?}"),
+    }
+}
+
+fn expected_fixture_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/cap1/normative")
+        .join(EXPECTED_FIXTURE_NAME)
 }
 
 fn vector(id: &str) -> Vec<u8> {
@@ -50,6 +73,13 @@ enum ExpectedOutcome {
     },
 }
 
+#[derive(Debug, Deserialize)]
+struct ExpectedCase {
+    directory: String,
+    #[serde(flatten)]
+    outcome: ExpectedOutcome,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum ActualOutcome {
     Pass,
@@ -60,6 +90,11 @@ enum ActualOutcome {
         admission_ground: Option<String>,
     },
 }
+
+const NORMATIVE_DIR: &str = "normative/";
+const LOCAL_DIR: &str = "local/";
+const GENERATED_OVERSIZE_CASE: &str = "generated:oversize";
+const EXPECTED_FIXTURE_NAME: &str = "expected-first-failure.json";
 
 fn rule_of(r: &Cap1Refusal) -> Cap1NormativeRule {
     match r {
@@ -90,27 +125,102 @@ fn vendored_vectors_match_their_recorded_digests() {
         assert_eq!(hex::encode(Sha256::digest(&bytes)), digest, "{name}");
         seen += 1;
     }
-    assert_eq!(seen, 17);
+    assert_eq!(seen, 15);
 }
 
 #[test]
 fn shared_expected_first_failure_parity_fixture() {
-    let expected: BTreeMap<String, ExpectedOutcome> = serde_json::from_slice(
-        &fs::read(normative_dir().join("expected-first-failure.json")).expect("expected fixture"),
-    )
-    .expect("expected fixture parses");
-    for (vector_file, expected_outcome) in expected {
-        let bytes = fs::read(normative_dir().join(&vector_file)).expect("vector readable");
+    let expected: BTreeMap<String, ExpectedCase> =
+        serde_json::from_slice(&fs::read(expected_fixture_path()).expect("expected fixture"))
+            .expect("expected fixture parses");
+    assert_expected_fixture_covers_all_json_vectors(&expected);
+    for (case, expected_case) in expected {
+        let bytes = fixture_case_bytes(&case, &expected_case.directory);
         let actual = match verify(&bytes) {
             Ok(_) => ActualOutcome::Pass,
             Err(err) => refusal_to_actual(&err),
         };
         assert_eq!(
             actual,
-            expected_to_actual(expected_outcome),
-            "{vector_file}"
+            expected_to_actual(expected_case.outcome),
+            "{}/{}",
+            expected_case.directory,
+            case
         );
     }
+}
+
+fn fixture_case_bytes(case: &str, directory: &str) -> Vec<u8> {
+    if case == GENERATED_OVERSIZE_CASE {
+        assert_eq!(
+            directory, LOCAL_DIR,
+            "{GENERATED_OVERSIZE_CASE} must be scoped under {LOCAL_DIR}"
+        );
+        return generated_oversize_case();
+    }
+    fs::read(fixture_subdir(directory).join(case)).expect("fixture case readable")
+}
+
+fn generated_oversize_case() -> Vec<u8> {
+    let mut bytes = vector("PV-01");
+    bytes.resize(Cap1AdmissionLimits::HARD_MAX_BYTES + 1, b' ');
+    bytes
+}
+
+fn assert_expected_fixture_covers_all_json_vectors(expected: &BTreeMap<String, ExpectedCase>) {
+    assert_directory_inventory(expected, NORMATIVE_DIR);
+    assert_directory_inventory(expected, LOCAL_DIR);
+    for (case, expected_case) in expected {
+        if case == GENERATED_OVERSIZE_CASE {
+            assert_eq!(
+                expected_case.directory, LOCAL_DIR,
+                "{GENERATED_OVERSIZE_CASE} must be in {LOCAL_DIR}"
+            );
+            continue;
+        }
+        let path = fixture_subdir(&expected_case.directory).join(case);
+        assert!(
+            path.is_file(),
+            "expected entry {}/{} has no file",
+            expected_case.directory,
+            case
+        );
+    }
+}
+
+fn assert_directory_inventory(expected: &BTreeMap<String, ExpectedCase>, directory: &str) {
+    let files = fixture_json_names(&fixture_subdir(directory));
+    for file in files {
+        let entry = expected
+            .get(&file)
+            .unwrap_or_else(|| panic!("{directory}{file} is missing from expected fixture"));
+        assert_eq!(
+            entry.directory, directory,
+            "expected entry {file} must name {directory}"
+        );
+    }
+}
+
+fn fixture_json_names(directory: &Path) -> BTreeSet<String> {
+    let mut files = BTreeSet::new();
+    for entry in fs::read_dir(directory).expect("fixture directory readable") {
+        let entry = entry.expect("fixture entry readable");
+        if !entry
+            .file_type()
+            .expect("fixture entry metadata readable")
+            .is_file()
+        {
+            continue;
+        }
+        let path = entry.path();
+        if path.extension() == Some(OsStr::new("json")) {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name != EXPECTED_FIXTURE_NAME {
+                files.insert(name);
+            }
+        }
+    }
+    files
 }
 
 fn expected_to_actual(expected: ExpectedOutcome) -> ActualOutcome {
