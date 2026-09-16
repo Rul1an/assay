@@ -1,7 +1,8 @@
 use anyhow::{bail, Context, Result};
+use assay_common::atomic_write::write_new;
 use assay_common::limits::{LimitKind, LimitReader};
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 pub const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
@@ -33,19 +34,18 @@ pub fn write_json_create_new(path: &Path, value: &impl serde::Serialize) -> Resu
     }
 
     let parent = usable_parent(path);
-    let mut temp = tempfile::NamedTempFile::new_in(parent)
-        .with_context(|| format!("creating temporary output beside {}", path.display()))?;
-    temp.write_all(&bytes)
-        .with_context(|| format!("writing temporary output for {}", path.display()))?;
-    temp.flush()
-        .with_context(|| format!("flushing temporary output for {}", path.display()))?;
-    temp.persist_noclobber(path).map_err(|error| {
-        anyhow::anyhow!(
-            "creating {} without overwriting an existing file: {}",
-            path.display(),
-            error.error
-        )
-    })?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow::anyhow!("{} must end with a UTF-8 file name", path.display()))?;
+    write_new(&parent, file_name, &bytes)
+        .map(|_| ())
+        .with_context(|| {
+            format!(
+                "creating {} without overwriting an existing file",
+                path.display()
+            )
+        })?;
     Ok(())
 }
 

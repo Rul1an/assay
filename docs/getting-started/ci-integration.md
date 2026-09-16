@@ -209,7 +209,7 @@ pipeline {
 
 ## Docker-Based CI
 
-For environments without a preinstalled Rust toolchain, download and verify the explicit `v6.3.1` release asset during a trusted setup stage, then cache that exact binary. Assay does not currently claim a verified public GHCR image.
+For environments without a preinstalled Rust toolchain, download and verify the explicit `v6.3.1` release asset during a trusted setup stage, then cache that exact binary. The verified container image for `assay-mcp-server` is documented in the [installation guide](installation.md#container-image-assay-mcp-server).
 
 ---
 
