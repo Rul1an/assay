@@ -7,6 +7,7 @@
 
 use assay_core::mcp::policy::McpPolicy;
 use assay_core::mcp::tool_decision_truth::{self as tdt, DecisionEvidence};
+use assay_core::otel::pin::GENAI_SEMCONV_PIN;
 use assay_core::otel::projection::{project_tool_decision_truth, TdtDecision};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -91,10 +92,17 @@ fn golden_projection_roundtrip() {
     // Belt-and-suspenders: the golden carries the honesty contract and never raw args.
     assert_eq!(expected["lossy"], json!(true));
     assert_eq!(expected["source_of_truth"], json!("assay artifacts"));
+    assert_eq!(
+        expected["semconv"]["otel_genai"],
+        json!(GENAI_SEMCONV_PIN),
+        "TDT golden must name the shared emit/ingest pin, not a floating label"
+    );
     let serialized = serde_json::to_string(&expected).unwrap();
     assert!(!serialized.contains("\"arguments\""));
     for span in expected["spans"].as_array().unwrap() {
         assert_eq!(span["attributes"]["assay.claim_class"], json!("derived"));
         assert_eq!(span["attributes"]["openinference.span.kind"], json!("TOOL"));
+        assert_eq!(span["attributes"]["gen_ai.provider.name"], json!("assay"));
+        assert!(span["attributes"].get("gen_ai.system").is_none());
     }
 }
