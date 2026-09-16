@@ -28,7 +28,7 @@ pub struct PushArgs {
     #[arg(long)]
     pub store_config: Option<PathBuf>,
 
-    /// Skip verification before upload
+    /// Refused. The store key is the verified `bundle_id`, so an unverified archive has no key.
     #[arg(long)]
     pub no_verify: bool,
 
@@ -38,44 +38,44 @@ pub struct PushArgs {
 }
 
 pub async fn cmd_push(args: PushArgs) -> Result<i32> {
+    // The object key is `bundle_id`, and the only `bundle_id` that means anything is the one the
+    // verifier has pinned to the recomputed `run_root` (check 14). `--no-verify` used to read the
+    // id out of the unverified manifest and upload under it, so an archive named its own key and
+    // "content-addressed" held only on the verifying branch. There is no key to derive from an
+    // unverified archive, so the flag is refused before the file is opened: nothing is read,
+    // nothing is uploaded, no run is linked. Exit 2 is the usage-error code (#2492 slice 1).
+    if args.no_verify {
+        eprintln!(
+            "❌ --no-verify is not accepted by `evidence push`: the store key is the verified \
+             bundle_id, and an unverified archive cannot choose its own key."
+        );
+        eprintln!("   Nothing was read or uploaded. Run without --no-verify.");
+        return Ok(2);
+    }
+
     // 1. Read bundle
     let mut file = File::open(&args.bundle)
         .with_context(|| format!("failed to open bundle: {}", args.bundle.display()))?;
 
     // ADR-043 section 1: the ceiling applies to the stream, before the input is materialized.
     // The file was read whole with no bound at all, so an oversized archive sized the allocation
-    // regardless of what the verifier concluded afterwards, and `--no-verify` skipped even that
-    // afterthought. Bounding here covers both branches, because whatever is about to be uploaded
-    // has to pass the ceiling first.
+    // regardless of what the verifier concluded afterwards. Whatever is about to be uploaded has
+    // to pass the ceiling first.
     let limits = VerifyLimits::default();
     let mut buffer = Vec::new();
     LimitReader::new(&mut file, limits.max_bundle_bytes, LimitKind::SourceBytes)
         .read_to_end(&mut buffer)
         .with_context(|| "failed to read bundle")?;
 
-    // 2. Verify bundle (unless --no-verify)
-    let bundle_id = if args.no_verify {
-        let cursor = std::io::Cursor::new(&buffer);
-        // Deliberately `peek_and_bound_events` and not `BundleInfo::peek_with_limits`, even
-        // though only `bundle_id` is read from the result. With `--no-verify` this pass is the
-        // *only* consumption of `events.ndjson`, so it is what applies `max_line_bytes`,
-        // `max_events`, UTF-8 validity and JSON depth. Switching to peek drops those ceilings —
-        // `contract_bounded_ingest_cli` catches it immediately, which is how this comment came
-        // to exist. The events member is checked into a discard sink; it is not retained.
-        let info = assay_evidence::BundleInfo::peek_and_bound_events(cursor, limits)
-            .context("failed to read bundle manifest")?;
-        info.manifest.bundle_id.clone()
-    } else {
-        let cursor = std::io::Cursor::new(&buffer);
-        let result = assay_evidence::bundle::writer::verify_bundle_with_limits(cursor, limits)
-            .context("bundle verification failed")?;
-        eprintln!("✅ Bundle verified: {}", result.manifest.bundle_id);
-        result.manifest.bundle_id
-    };
+    // 2. Verify bundle; the key is the verified id and nothing else.
+    let cursor = std::io::Cursor::new(&buffer);
+    let result = assay_evidence::bundle::writer::verify_bundle_with_limits(cursor, limits)
+        .context("bundle verification failed")?;
+    eprintln!("✅ Bundle verified: {}", result.manifest.bundle_id);
+    let bundle_id = result.manifest.bundle_id;
 
     // The upload takes ownership of the same buffer that was just checked rather than cloning it.
-    // `--no-verify` no longer materializes `events.ndjson` beside that buffer; the verified
-    // branch never did. Both copies that remain are the source snapshot and the upload bytes.
+    // The two copies that remain are the source snapshot and the upload bytes.
     let bytes = Bytes::from(buffer);
 
     // 3. Connect to store

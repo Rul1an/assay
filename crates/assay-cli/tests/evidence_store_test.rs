@@ -358,14 +358,50 @@ fn pull_verify_refuses_a_valid_bundle_stored_under_another_id() {
         .arg("-o")
         .arg(&pull_dir)
         .assert()
-        .failure()
+        // Exit 2, as the store's other refusals (not found, ceiling): the store served the wrong
+        // object, which is a contract violation between key and content, not a test failure.
+        .code(2)
         .stderr(predicate::str::contains("Verified: OK").not())
+        .stderr(predicate::str::contains("Contract"))
+        .stderr(predicate::str::contains(&requested_id))
         .stderr(predicate::str::contains(&other_id));
 
     assert_eq!(
         fs::read_dir(&pull_dir).unwrap().count(),
         0,
         "a bundle that is not the one requested must not be written under its name"
+    );
+}
+
+/// The key is the verified `bundle_id`. `--no-verify` used to take that id from the unverified
+/// manifest and upload under it, so an archive could name its own key; the module doc's
+/// "content-addressed, `bundle_id` is the source of truth" held only on the verifying branch.
+/// Nothing in an unverified archive may choose where it is stored, so the flag is refused before
+/// the archive is opened and the store stays untouched. (#2492 slice 1)
+#[test]
+fn push_without_verify_does_not_choose_the_key() {
+    let dir = tempdir().unwrap();
+    let store_dir = dir.path().join("store");
+    fs::create_dir_all(&store_dir).unwrap();
+    let store_url = format!("file://{}", store_dir.display());
+
+    let bundle = create_bundle_observing(dir.path(), "unverified", "/tmp/unverified.txt");
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args(["evidence", "push", "--no-verify"])
+        .arg(&bundle)
+        .args(["--store", &store_url, "--run-id", "unverified-run"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("Uploaded").not())
+        .stderr(predicate::str::contains("--no-verify"))
+        .stderr(predicate::str::contains("verified"));
+
+    assert_eq!(
+        fs::read_dir(&store_dir).unwrap().count(),
+        0,
+        "an unverified push must leave the store empty: no bundle object and no run link"
     );
 }
 
