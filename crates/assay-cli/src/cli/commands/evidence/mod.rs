@@ -25,6 +25,7 @@ pub mod skill_supply_chain_capture;
 pub mod store_status;
 pub mod tool_decision_truth;
 pub mod verify_attestation;
+pub mod verify_coverage_attestation;
 pub mod verify_privileged_mcp_action;
 pub mod verify_side_effects;
 pub mod verify_skill_supply_chain;
@@ -46,6 +47,9 @@ pub enum EvidenceCmd {
     /// Verify a signed v1 attestation against the complete evidence archive
     #[command(name = "verify-attestation")]
     VerifyAttestation(verify_attestation::VerifyAttestationArgs),
+    /// Verify a local CAP-1 coverage attestation document
+    #[command(name = "verify-coverage-attestation")]
+    VerifyCoverageAttestation(verify_coverage_attestation::VerifyCoverageAttestationArgs),
     /// Verify SEP-2787/server execution-record fixture pairing
     #[command(name = "verify-mcp-records")]
     VerifyMcpRecords(mcp_execution_records::McpExecutionRecordArgs),
@@ -206,6 +210,9 @@ pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
         EvidenceCmd::Diff(a) => diff::cmd_diff(a),
         EvidenceCmd::Attest(a) => attest::cmd_attest(a),
         EvidenceCmd::VerifyAttestation(a) => verify_attestation::cmd_verify_attestation(a),
+        EvidenceCmd::VerifyCoverageAttestation(a) => {
+            verify_coverage_attestation::cmd_verify_coverage_attestation(a)
+        }
         EvidenceCmd::Push(a) => push::cmd_push(a).await,
         EvidenceCmd::Pull(a) => pull::cmd_pull(a).await,
         EvidenceCmd::List(a) => list::cmd_list(a).await,
