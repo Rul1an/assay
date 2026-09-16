@@ -375,58 +375,29 @@ mod tests {
     #[cfg(unix)]
     use super::write_new_at;
     use super::{write_new, WriteNewError};
-    use std::format;
     use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::OnceLock;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::path::Path;
     use std::vec;
     use std::vec::Vec;
+    use tempfile::TempDir;
 
     #[cfg(unix)]
     use std::os::unix::fs::{symlink, PermissionsExt};
 
     struct TestDir {
-        path: PathBuf,
+        dir: TempDir,
     }
 
     impl TestDir {
         fn new() -> Self {
-            static NEXT_ID: AtomicU64 = AtomicU64::new(0);
-            static ROOT: OnceLock<PathBuf> = OnceLock::new();
-            let root = ROOT.get_or_init(|| {
-                let path = std::env::temp_dir().join("assay-common-atomic-write-tests");
-                fs::create_dir_all(&path).expect("create test root");
-                path
-            });
-            let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-            let candidate = root.join(format!(
-                "run-{:x}-{:x}-{:x}",
-                std::process::id(),
-                monotonic_nanos(),
-                id
-            ));
-            fs::create_dir(&candidate).expect("create unique temp dir");
-            Self { path: candidate }
+            Self {
+                dir: tempfile::tempdir().expect("create unique temp dir"),
+            }
         }
 
         fn path(&self) -> &Path {
-            &self.path
+            self.dir.path()
         }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.path);
-        }
-    }
-
-    fn monotonic_nanos() -> u128 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or(0)
     }
 
     #[test]
