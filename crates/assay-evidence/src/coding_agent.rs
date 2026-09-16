@@ -294,8 +294,6 @@ pub fn session_finding_claim_decision(
     coding_agent_claim_decision(source_class, coverage, claim_kind)
 }
 
-pub use session_finding_claim_decision as session_coverage_claim_decision;
-
 /// Per-dimension decisions for one evidence payload, for one kind of claim.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CodingAgentCoverageReport {

@@ -504,7 +504,6 @@ impl PayloadSessionFinding {
 #[non_exhaustive]
 pub struct PayloadSessionCoverage {
     /// CloudEvents `id` of the referenced session finding event.
-    #[serde(alias = "finding_event_id")]
     pub finding_id: String,
     /// Stable identity of the policy rule evaluated in the finding.
     pub rule_id: String,

@@ -257,17 +257,6 @@ fn session_coverage_payload_and_variant_round_trip() {
         serde_json::from_value(value.clone()).expect("deserializes from json value");
     assert_eq!(back, coverage_payload);
 
-    // Alias finding_event_id deserialization support
-    let aliased = serde_json::json!({
-        "finding_event_id": "evt_run_1:42",
-        "rule_id": "never_after:credentials->network",
-        "coverage": "observed",
-        "source_class": "boundary_observed",
-    });
-    let from_alias: PayloadSessionCoverage =
-        serde_json::from_value(aliased).expect("deserializes with finding_event_id alias");
-    assert_eq!(from_alias, coverage_payload);
-
     // Payload enum round trip
     let tagged = serde_json::json!({
         "type": PayloadSessionCoverage::EVENT_TYPE,
