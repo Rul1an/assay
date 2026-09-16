@@ -1,0 +1,67 @@
+{
+  "AD-01.json": {
+    "outcome": "refusal",
+    "stage": "admission",
+    "admission_ground": "oversized"
+  },
+  "PV-01.json": { "outcome": "pass" },
+  "PV-02.json": { "outcome": "pass" },
+  "PV-03.json": { "outcome": "pass" },
+  "PV-04.json": { "outcome": "pass" },
+  "PV-05.json": { "outcome": "pass" },
+  "NC-01.json": {
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R1-no-silent-remainder"
+  },
+  "NC-02.json": {
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/strata/0/unexamined/0/disposition"
+  },
+  "NC-03.json": {
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R3-withholding-digest-bound"
+  },
+  "NC-04.json": {
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R4-denominator-basis"
+  },
+  "NC-05.json": {
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R1-no-silent-remainder"
+  },
+  "NC-06.json": {
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R6-absence-is-scoped"
+  },
+  "NC-07.json": {
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R7-incomplete-not-clean"
+  },
+  "NC-08.json": {
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R8-supports-bounds-citation"
+  },
+  "NC-09.json": {
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R1-no-silent-remainder"
+  },
+  "NC-10.json": {
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R7-incomplete-not-clean"
+  },
+  "NC-11.json": {
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/strata/0/id"
+  }
+}

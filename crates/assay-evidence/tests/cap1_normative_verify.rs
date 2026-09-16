@@ -11,6 +11,7 @@
 //! Conformance is internal consistency of a document. It says nothing about producer truth,
 //! capture completeness, or what any agent did.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -19,6 +20,7 @@ use assay_evidence::{
     Cap1AdmissionLimits, Cap1Document, Cap1NormativeRule, Cap1Refusal, Cap1RelyingPartyContext,
     Cap1Stage, Cap1SyntaxFault, CodingAgentClaimKind, CAP1_SCHEMA_JSON, CAP1_SCHEMA_SHA256,
 };
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 fn normative_dir() -> PathBuf {
@@ -31,6 +33,32 @@ fn vector(id: &str) -> Vec<u8> {
 
 fn verify(bytes: &[u8]) -> Result<Cap1Document, Cap1Refusal> {
     verify_cap1_document(bytes, &Cap1AdmissionLimits::default())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+enum ExpectedOutcome {
+    Pass,
+    Refusal {
+        stage: String,
+        #[serde(default)]
+        rule: Option<String>,
+        #[serde(default)]
+        schema_ground: Option<String>,
+        #[serde(default)]
+        admission_ground: Option<String>,
+    },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ActualOutcome {
+    Pass,
+    Refusal {
+        stage: String,
+        rule: Option<String>,
+        schema_ground: Option<String>,
+        admission_ground: Option<String>,
+    },
 }
 
 fn rule_of(r: &Cap1Refusal) -> Cap1NormativeRule {
@@ -62,45 +90,76 @@ fn vendored_vectors_match_their_recorded_digests() {
         assert_eq!(hex::encode(Sha256::digest(&bytes)), digest, "{name}");
         seen += 1;
     }
-    assert_eq!(seen, 15);
+    assert_eq!(seen, 17);
 }
 
 #[test]
-fn upstream_positive_vectors_conform() {
-    for id in ["PV-01", "PV-02", "PV-03", "PV-04", "PV-05"] {
-        let doc = verify(&vector(id)).unwrap_or_else(|e| panic!("{id}: {e}"));
-        assert_eq!(doc.profile, "cap/1");
+fn shared_expected_first_failure_parity_fixture() {
+    let expected: BTreeMap<String, ExpectedOutcome> = serde_json::from_slice(
+        &fs::read(normative_dir().join("expected-first-failure.json")).expect("expected fixture"),
+    )
+    .expect("expected fixture parses");
+    for (vector_file, expected_outcome) in expected {
+        let bytes = fs::read(normative_dir().join(&vector_file)).expect("vector readable");
+        let actual = match verify(&bytes) {
+            Ok(_) => ActualOutcome::Pass,
+            Err(err) => refusal_to_actual(&err),
+        };
+        assert_eq!(
+            actual,
+            expected_to_actual(expected_outcome),
+            "{vector_file}"
+        );
     }
 }
 
-#[test]
-fn upstream_negative_vectors_refuse_at_their_first_stage() {
-    use Cap1NormativeRule as R;
-    let rules = [
-        ("NC-01", R::R1NoSilentRemainder),
-        ("NC-03", R::R3WithholdingDigestBound),
-        ("NC-04", R::R4DenominatorBasis),
-        // R1 reconciles first (9 != 11 + 0); R5 is later in numeric order.
-        ("NC-05", R::R1NoSilentRemainder),
-        ("NC-06", R::R6AbsenceIsScoped),
-        ("NC-07", R::R7IncompleteNotClean),
-        ("NC-08", R::R8SupportsBoundsCitation),
-        ("NC-09", R::R1NoSilentRemainder),
-        ("NC-10", R::R7IncompleteNotClean),
-    ];
-    for (id, expected) in rules {
-        let err = verify(&vector(id)).expect_err(id);
-        assert_eq!(err.stage(), Cap1Stage::Rules, "{id}: {err}");
-        assert_eq!(rule_of(&err), expected, "{id}: {err}");
+fn expected_to_actual(expected: ExpectedOutcome) -> ActualOutcome {
+    match expected {
+        ExpectedOutcome::Pass => ActualOutcome::Pass,
+        ExpectedOutcome::Refusal {
+            stage,
+            rule,
+            schema_ground,
+            admission_ground,
+        } => ActualOutcome::Refusal {
+            stage,
+            rule,
+            schema_ground,
+            admission_ground,
+        },
     }
-    // An open disposition string is a schema rejection before R2 is ever evaluated.
-    let err = verify(&vector("NC-02")).expect_err("NC-02");
-    assert_eq!(err.stage(), Cap1Stage::Schema, "{err}");
-    match &err {
-        Cap1Refusal::Schema { instance_path, .. } => {
-            assert_eq!(instance_path, "/strata/0/unexamined/0/disposition");
+}
+
+fn refusal_to_actual(err: &Cap1Refusal) -> ActualOutcome {
+    let stage = match err.stage() {
+        Cap1Stage::Admission => "admission",
+        Cap1Stage::Schema => "schema",
+        Cap1Stage::Rules => "rules",
+    }
+    .to_string();
+    let rule = err.rule().map(|r| r.as_str().to_string());
+    let schema_ground = match err {
+        Cap1Refusal::Schema { instance_path, .. } => Some(instance_path.clone()),
+        _ => None,
+    };
+    let admission_ground = match err {
+        Cap1Refusal::Oversized { .. } => Some("oversized".to_string()),
+        Cap1Refusal::Syntax(Cap1SyntaxFault::NotUtf8) => Some("not-utf8".to_string()),
+        Cap1Refusal::Syntax(Cap1SyntaxFault::DuplicateKey) => Some("duplicate-key".to_string()),
+        Cap1Refusal::Syntax(Cap1SyntaxFault::InvalidEscape) => Some("invalid-escape".to_string()),
+        Cap1Refusal::Syntax(Cap1SyntaxFault::NestingTooDeep) => {
+            Some("nesting-too-deep".to_string())
         }
-        other => panic!("{other:?}"),
+        Cap1Refusal::Syntax(Cap1SyntaxFault::TooManyKeys) => Some("too-many-keys".to_string()),
+        Cap1Refusal::Syntax(Cap1SyntaxFault::StringTooLong) => Some("string-too-long".to_string()),
+        Cap1Refusal::Syntax(Cap1SyntaxFault::Malformed) => Some("malformed-json".to_string()),
+        _ => None,
+    };
+    ActualOutcome::Refusal {
+        stage,
+        rule,
+        schema_ground,
+        admission_ground,
     }
 }
 
