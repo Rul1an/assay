@@ -50,14 +50,16 @@ This is cargo's own rule, not an extra restriction invented here: cargo refuses 
 Output protocol, tab-separated on stdout:
     root_count\t<in-scope declarations in [workspace.dependencies]>
     crate_count\t<in-scope declarations across member manifests>
+    lock_count\t<tracked lockfiles pinning workspace members>
     fail\t<message>        (zero or more)
-Both counts are always emitted. The caller fails closed when either is missing or zero, so a
+All three counts are always emitted. The caller fails closed when any is missing or zero, so a
 helper that dies or goes quiet cannot read as a clean sweep.
 """
 
 from __future__ import annotations
 
 import fnmatch
+import subprocess
 import sys
 import tomllib
 from pathlib import Path, PurePosixPath
@@ -247,7 +249,41 @@ def _publishes(manifest: dict) -> bool:
     return not (publish is False or publish == [])
 
 
-def check(root: Path) -> tuple[int, int, list[str]]:
+def _lockfiles(root: Path) -> list[Path]:
+    proc = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "*Cargo.lock"],
+        capture_output=True,
+        check=True,
+    )
+    raw = proc.stdout
+    if not raw:
+        return []
+    paths: list[Path] = []
+    for item in raw.split(b"\0"):
+        if not item:
+            continue
+        rel_str = item.decode("utf-8")
+        path = _within_root(root, root / rel_str)
+        if path is not None and path.is_file():
+            paths.append(path)
+    return paths
+
+
+def _member_package_names(root: Path, member_dirs: list[Path]) -> set[str]:
+    names: set[str] = set()
+    for member_dir in member_dirs:
+        manifest_path = member_dir / "Cargo.toml"
+        try:
+            manifest = _load_within(root, manifest_path)
+        except (OSError, tomllib.TOMLDecodeError):
+            continue
+        pkg_name = manifest.get("package", {}).get("name")
+        if isinstance(pkg_name, str):
+            names.add(pkg_name)
+    return names
+
+
+def check(root: Path) -> tuple[int, int, int, list[str]]:
     root_manifest = _load_within(root, root / "Cargo.toml")
 
     workspace = root_manifest.get("workspace")
@@ -302,7 +338,38 @@ def check(root: Path) -> tuple[int, int, list[str]]:
                 if problem:
                     problems.append(problem)
 
-    return root_checked, crate_checked, problems
+    # Site 3: every tracked Cargo.lock that pins a workspace member.
+    lock_checked = 0
+    member_package_names = _member_package_names(root, member_dirs)
+    for lock_path in _lockfiles(root):
+        rel = lock_path.relative_to(root)
+        try:
+            lock_data = _load_within(root, lock_path)
+        except tomllib.TOMLDecodeError as error:
+            problems.append(f"{rel}: lockfile does not parse as TOML: {error}")
+            continue
+        packages = lock_data.get("package", [])
+        if not isinstance(packages, list):
+            continue
+        member_pkgs = [
+            pkg for pkg in packages
+            if isinstance(pkg, dict) and pkg.get("name") in member_package_names
+        ]
+        if not member_pkgs:
+            continue
+        lock_checked += 1
+        for pkg in member_pkgs:
+            name = pkg.get("name")
+            problem = _version_problem(
+                f"{rel}: {name}",
+                pkg,
+                workspace_version,
+                True,
+            )
+            if problem:
+                problems.append(problem)
+
+    return root_checked, crate_checked, lock_checked, problems
 
 
 def main() -> int:
@@ -310,14 +377,15 @@ def main() -> int:
     # repository root, and an argv-controlled root is a path this program should not accept.
     root = Path.cwd()
     try:
-        root_checked, crate_checked, problems = check(root)
-    except (OSError, tomllib.TOMLDecodeError) as error:
+        root_checked, crate_checked, lock_checked, problems = check(root)
+    except (OSError, tomllib.TOMLDecodeError, subprocess.SubprocessError) as error:
         # Emitted as a fail line as well as a non-zero exit: the counts are absent either way, so
         # the caller fails closed, but the operator should see the cause and not only the guard.
         print(f"fail\tcould not read the workspace: {error}")
         return 2
     print(f"root_count\t{root_checked}")
     print(f"crate_count\t{crate_checked}")
+    print(f"lock_count\t{lock_checked}")
     for problem in problems:
         print(f"fail\t{problem}")
     return 0
