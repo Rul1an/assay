@@ -242,9 +242,7 @@ ssh air-gapped-server 'cd /tmp && tar -xzf assay-v6.3.1-x86_64-unknown-linux-gnu
 
 ## Containers
 
-Assay does not currently ship a runtime container image or a root `Dockerfile`. For an air-gapped
-installation, mirror the verified release archive and checksum described above. The repository's
-`docker/Dockerfile.ebpf-builder` builds the eBPF toolchain only; it is not an Assay runtime image.
+Air-gapped deployments use the verified release archives and checksums described above; a signed container image of `assay-mcp-server` is published for connected environments (see the [installation guide](../getting-started/installation.md#container-image-assay-mcp-server)). The repository does not ship a root `Dockerfile`, and `docker/Dockerfile.ebpf-builder` builds the eBPF toolchain only.
 
 Install the verified binary on the air-gapped CI runner host or bake that binary into an
 organization-owned image using an internal build process. Assay does not provide or verify that
