@@ -27,16 +27,18 @@ All notable changes to this project will be documented in this file.
   longer written; `gen_ai.provider.name` is. Fabricated `"unknown"` models and
   `completion_tokens: 0` are omitted, and an unknown `genai_semconv_version`
   fails closed instead of falling back to 1.28.0. `assay project-otel` JSON
-  inputs are bounded by `LimitReader` (#2489).
+  inputs are bounded by `LimitReader` (#2489, #3055).
   **Migration:** emit and ingest `gen_ai.provider.name` instead of `gen_ai.system`.
   Pin a known `genai_semconv_version`; an unknown version now fails closed.
 - `assay evidence push --no-verify` is refused with exit 2 before the archive is
   opened. The store key is the verified `bundle_id`; the flag used to take that id
-  from the unverified manifest, so an archive could name its own key (#2492).
+  from the unverified manifest, so an archive could name its own key (#2492, #3044).
   **Migration:** drop the flag; push always verifies. The store key is the verified
   `bundle_id`.
 - `assay evidence diff` compares retained verified events by content id and
-  never reports "No differences found" when the run root differs (#3037, #3038).
+  never reports "No differences found" when the run root differs; the third
+  closing line and terminal sanitization of human output are documented
+  (#3037, #3038, #3042, #3059).
 - The incident export refuses an existing target instead of replacing it (#3027).
   **Migration:** choose a new path or remove the existing file before export.
 - `assay fix` and `assay doctor --fix` refuse an unshowable confirm prompt with
@@ -48,7 +50,8 @@ All notable changes to this project will be documented in this file.
 - `assay evidence pull --verify` reports a bundle served under a key other than
   its own `bundle_id` as a typed `Contract` verifier error
   (`ContractBundleIdMismatch`) naming both ids, exit 2, with nothing written.
-  The prose-only refusal was indistinguishable from a transport failure (#2492).
+  The prose-only refusal was indistinguishable from a transport failure
+  (#2492, #3044).
 - Trace verify coverage failures cite per-occurrence `/input` readings under each
   stage-local truncation-shape id (#2782, #3051).
 
@@ -61,6 +64,10 @@ All notable changes to this project will be documented in this file.
 - Release guard shares one pin-and-lockfile check with the release surface
   (#3030, #3053).
 - jsonschema 0.55.1 and ipnet 2.12.2 (#3019, #3020).
+- The runner install script pins actions-runner once (2.337.0) and verifies
+  the extracted version; the runner README states the backup monitor's
+  six-hourly cadence and the fail-closed recovery refusal; queued-job
+  inspection paginates (#3025, #3026, #3031, #3057).
 
 ## [6.3.1] - 2026-09-15
 
