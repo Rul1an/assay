@@ -1,17 +1,18 @@
 use anyhow::{anyhow, Context, Result};
+use assay_common::atomic_write::write_new;
 use assay_common::exports::{EventRecordExport, ProcessTreeExport};
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
-use nix::fcntl::{open, openat, renameat, OFlag};
+use nix::fcntl::{open, OFlag};
 #[cfg(unix)]
-use nix::sys::stat::{fchmod, Mode};
+use nix::sys::stat::{fchmod, fstat, Mode};
+#[cfg(unix)]
+use nix::unistd::close;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-#[cfg(unix)]
-use std::os::unix::io::{AsRawFd, FromRawFd};
 
 use uuid::Uuid;
 
@@ -97,66 +98,53 @@ impl IncidentBuilder {
         )
         .context("Failed to open output directory securely")?;
 
-        // SAFETY: We wrap the raw FD immediately to ensure RAII closure.
-        #[allow(unsafe_code)]
-        let dir_file = unsafe { std::fs::File::from_raw_fd(dir_raw_fd) };
-
         // 3. Verify Directory Permissions (fstat on fd)
-        let dir_meta = dir_file.metadata()?;
-        let current_mode = dir_meta.permissions().mode();
+        let current_mode = fstat(dir_raw_fd)?.st_mode as u32;
         if (current_mode & 0o777) != 0o700 {
             // P0: Enforce 0700 always (via fd to avoid TOCTOU)
-            fchmod(dir_file.as_raw_fd(), Mode::from_bits_truncate(0o700))
+            fchmod(dir_raw_fd, Mode::from_bits_truncate(0o700))
                 .context("Failed to fchmod output directory")?;
         }
+        close(dir_raw_fd).context("Failed to close output directory descriptor")?;
 
-        // SOTA: Guaranteed unique filename to prevent overwrites (collision free)
+        // Guaranteed unique filename to prevent expected collisions.
         let suffix = Uuid::new_v4().simple().to_string();
-        let filename = format!(
-            "incident_{}_{}.json",
-            self.bundle.metadata.session_id, suffix
-        );
-        let tmp_filename = format!(".tmp_{}", filename);
+        let filename = incident_filename(&self.bundle.metadata.session_id, &suffix);
+        self.write_with_filename(output_dir, &filename)
+    }
 
-        let content = serde_json::to_string_pretty(&self.bundle)
+    #[cfg(unix)]
+    fn write_with_filename(&self, output_dir: &Path, filename: &str) -> Result<PathBuf> {
+        let content = serde_json::to_vec_pretty(&self.bundle)
             .context("Failed to serialize incident bundle")?;
+        write_new(output_dir, filename, &content).map_err(|error| {
+            anyhow!(
+                "Failed to atomically create incident bundle {}: {error}",
+                output_dir.join(filename).display()
+            )
+        })
+    }
 
-        // 4. Open Temp File (openat relative to dir_fd, O_CREAT|O_EXCL|O_NOFOLLOW, 0600)
-        let tmp_fd = openat(
-            dir_file.as_raw_fd(),
-            tmp_filename.as_str(),
-            OFlag::O_CREAT | OFlag::O_WRONLY | OFlag::O_EXCL | OFlag::O_NOFOLLOW,
-            Mode::from_bits_truncate(0o600),
-        )
-        .context("Failed to create temp file securely")?;
-
-        #[allow(unsafe_code)]
-        let mut tmp_file = unsafe { std::fs::File::from_raw_fd(tmp_fd) };
-
-        // 5. Write and Fsync
-        use std::io::Write;
-        tmp_file.write_all(content.as_bytes())?;
-        tmp_file.sync_all()?;
-
-        // 6. Atomic Rename (renameat)
-        renameat(
-            Some(dir_file.as_raw_fd()),
-            tmp_filename.as_str(),
-            Some(dir_file.as_raw_fd()),
-            filename.as_str(),
-        )
-        .context("Failed to rename atomic file")?;
-
-        // 7. Sync Parent Directory
-        dir_file.sync_all()?;
-
-        Ok(output_dir.join(filename))
+    #[cfg(unix)]
+    #[cfg(test)]
+    fn atomic_write_with_suffix_for_test(
+        &self,
+        output_dir: &Path,
+        suffix: &str,
+    ) -> Result<PathBuf> {
+        let filename = incident_filename(&self.bundle.metadata.session_id, suffix);
+        self.write_with_filename(output_dir, &filename)
     }
 
     #[cfg(not(unix))]
     pub fn atomic_write(&self, _output_dir: &Path) -> Result<PathBuf> {
         Err(anyhow!("Incident bundles only supported on Unix"))
     }
+}
+
+#[cfg(unix)]
+fn incident_filename(session_id: &str, suffix: &str) -> String {
+    format!("incident_{}_{}.json", session_id, suffix)
 }
 
 #[cfg(test)]
@@ -192,5 +180,29 @@ mod tests {
         assert_eq!(json["metadata"]["session_id"], "test-session");
 
         Ok(())
+    }
+
+    #[test]
+    fn test_atomic_write_refuses_existing_incident_path() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let builder = IncidentBuilder::new("collision-session".to_string());
+        let suffix = "forcedsuffix";
+        let filename = incident_filename("collision-session", suffix);
+        let existing = temp_dir.path().join(&filename);
+        std::fs::write(&existing, br#"{"status":"original"}"#).expect("seed existing");
+
+        let error = builder
+            .atomic_write_with_suffix_for_test(temp_dir.path(), suffix)
+            .expect_err("existing target must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("without overwriting an existing path"),
+            "unexpected error: {error:#}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&existing).expect("read existing"),
+            r#"{"status":"original"}"#
+        );
     }
 }
