@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay evidence verify-coverage-attestation` admits one local CAP-1 document
+  under the existing byte ceiling and writes a three-valued conformance
+  document. Conformance is internal consistency of that document, not producer
+  truth or capture completeness; the C1–C7 claim gate does not run (#2493).
+
 ## [6.3.1] - 2026-09-15
 
 Patch release consolidating the RC1 and RC2 candidates. Source is the RC2 tree
