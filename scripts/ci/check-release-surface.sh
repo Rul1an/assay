@@ -443,9 +443,35 @@ check_absent_regex docs/getting-started/installation.md \
   'brew install .*assay' 'unsupported Homebrew channel'
 check_absent_regex docs/getting-started/installation.md \
   'scoop (bucket add|install) assay' 'unsupported Scoop channel'
-for file in docs/getting-started/installation.md docs/getting-started/ci-integration.md docs/use-cases/air-gapped.md; do
+for file in docs/getting-started/ci-integration.md docs/use-cases/air-gapped.md; do
   check_absent_regex "$file" 'ghcr\.io/.*/assay' 'unsupported GHCR image'
 done
+# installation.md must document the verified assay-mcp-server image pinned by digest.
+# The digest itself cannot be verified offline; the doc line carrying the digest names the
+# release tag ($PUBLISHED_TAG) so the release pin and image reference stay tied, and the
+# post-release pin-promotion PR must update both the tag and the digest.
+if ! grep -Eq 'ghcr\.io/rul1an/assay-mcp-server@sha256:[0-9a-f]{64}' docs/getting-started/installation.md; then
+  fail "docs/getting-started/installation.md: missing digest-pinned GHCR image reference"
+fi
+if grep -E 'ghcr\.io/rul1an/assay-mcp-server:' docs/getting-started/installation.md | grep -Evq '@sha256:[0-9a-f]{64}'; then
+  fail "docs/getting-started/installation.md: unpinned GHCR image tag reference"
+fi
+invalid_ghcr="$(
+  grep -Eo '(oci://)?ghcr\.io/[^[:space:]<>()"`]+' docs/getting-started/installation.md \
+    | grep -E 'assay' \
+    | grep -Ev '^(oci://)?ghcr\.io/rul1an/assay-mcp-server@sha256:[0-9a-f]{64}$' \
+    | grep -Ev '^(oci://)?ghcr\.io/rul1an/assay-mcp-server:' \
+    || true
+)"
+if [ -n "$invalid_ghcr" ]; then
+  fail "docs/getting-started/installation.md: unsupported GHCR image reference"
+fi
+digest_line="$(grep -E 'The `?[^`[:space:]]+`? image index is `?ghcr\.io/rul1an/assay-mcp-server@sha256:[0-9a-f]{64}' docs/getting-started/installation.md || true)"
+if [ -z "$digest_line" ]; then
+  fail "docs/getting-started/installation.md: missing release-tied image index line"
+elif ! printf '%s\n' "$digest_line" | grep -Eq "The \`?$PUBLISHED_TAG\`? image index is"; then
+  fail "docs/getting-started/installation.md: image digest line must name $PUBLISHED_TAG"
+fi
 linux_archive="assay-$PUBLISHED_TAG-x86_64-unknown-linux-gnu.tar.gz"
 linux_archive_root="${linux_archive%.tar.gz}"
 linux_archive_url="https://github.com/Rul1an/assay/releases/download/$PUBLISHED_TAG/$linux_archive"
