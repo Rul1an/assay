@@ -627,3 +627,74 @@ mod weakest_ceiling_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod claim_gate_table_pins {
+    use super::*;
+
+    #[test]
+    fn non_allowed_rows_always_carry_a_gap_and_pair_to_one_rule() {
+        let source_classes = [
+            CodingAgentSourceClass::BoundaryObserved,
+            CodingAgentSourceClass::IndependentlyObserved,
+            CodingAgentSourceClass::ThirdPartyObserved,
+            CodingAgentSourceClass::ProducerReported,
+            CodingAgentSourceClass::IssuerAttested,
+            CodingAgentSourceClass::ReceiverReceipt,
+        ];
+        let coverage_states = [
+            CodingAgentCoverageState::Observed,
+            CodingAgentCoverageState::Unavailable,
+            CodingAgentCoverageState::SelfReported,
+            CodingAgentCoverageState::Absent,
+            CodingAgentCoverageState::Partial,
+        ];
+        let claim_kinds = [
+            CodingAgentClaimKind::PositiveExistence,
+            CodingAgentClaimKind::ExhaustiveSet,
+            CodingAgentClaimKind::BoundedNegative,
+        ];
+
+        let mut non_allowed_pairs: Vec<(
+            (CodingAgentGateDecision, CodingAgentCoverageGap),
+            String,
+        )> = Vec::new();
+
+        for source_class in source_classes {
+            for coverage in coverage_states {
+                for claim_kind in claim_kinds {
+                    let decision = coding_agent_claim_decision(source_class, coverage, claim_kind);
+                    if decision.decision == CodingAgentGateDecision::Allowed {
+                        assert!(
+                            decision.gap.is_none(),
+                            "allowed decision must not carry a gap at {source_class:?}/{coverage:?}/{claim_kind:?}"
+                        );
+                        continue;
+                    }
+
+                    let gap = decision.gap.expect(
+                        "every non-allowed decision must carry a coverage gap in the decision table",
+                    );
+                    let key = (decision.decision, gap);
+                    if let Some((_, existing_rule)) = non_allowed_pairs
+                        .iter()
+                        .find(|((d, g), _)| *d == key.0 && *g == key.1)
+                    {
+                        assert_eq!(
+                            existing_rule, &decision.rule,
+                            "rule drifted for key {key:?} at {source_class:?}/{coverage:?}/{claim_kind:?}"
+                        );
+                    } else {
+                        non_allowed_pairs.push((key, decision.rule.clone()));
+                    }
+                }
+            }
+        }
+
+        assert_eq!(
+            non_allowed_pairs.len(),
+            6,
+            "decision table should expose exactly the six non-allowed (decision, gap) pairs"
+        );
+    }
+}

@@ -173,6 +173,10 @@ fn the_table_render_path_works_and_names_the_rejection() {
         text.contains("not promoted"),
         "a rejection must be visible, not only in JSON"
     );
+    assert!(
+        text.contains("occurrence=Degraded reason=self_reported_only"),
+        "{text}"
+    );
     assert!(text.contains("binds_different_call"), "{text}");
     assert!(text.contains("promoted to verified: 0"), "{text}");
 }
@@ -227,6 +231,109 @@ fn no_level_ever_supports_an_absence_claim() {
             "no side-effect level is coverage of a dimension"
         );
     }
+}
+
+#[test]
+fn a_qualified_claim_names_its_reason_in_the_report() {
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_asserted_decision(&bundle);
+
+    let report = run(&bundle, None);
+    let call = &report["calls"][0];
+    assert_eq!(call["occurrence_claim"], json!("degraded"));
+    assert_eq!(
+        call["occurrence_reason"],
+        json!({
+            "origin": "claim_gate",
+            "gap": "self_reported_only",
+            "rule": "self_reported_degrades_positive_claim",
+        })
+    );
+    assert_eq!(
+        call["bounded_negative_reason"],
+        json!({
+            "origin": "claim_gate",
+            "gap": "self_reported_only",
+            "rule": "self_reported_blocks_completeness_claim",
+        })
+    );
+}
+
+#[test]
+fn a_refuted_occurrence_names_the_refutation_and_not_a_gate_rule() {
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_asserted_decision(&bundle);
+    let import = import_dir(dir.path(), "audit_record_github_deploy_key.json");
+    let oh = health(dir.path(), "connect_only", "clean");
+
+    let report = run_with_health(&bundle, Some(&import), &oh);
+    let call = &report["calls"][0];
+    assert_eq!(call["occurrence_claim"], json!("blocked"));
+    assert_eq!(
+        call["occurrence_reason"],
+        json!({
+            "origin": "observer_refutation",
+        })
+    );
+    assert_ne!(
+        call["occurrence_reason"]["rule"],
+        json!("partial_coverage_allows_positive_claim")
+    );
+}
+
+#[test]
+fn a_reason_is_present_exactly_when_the_verdict_is_not_allowed() {
+    let dir = tempdir().unwrap();
+
+    let one_call_bundle = dir.path().join("one.tar.gz");
+    bundle_with_asserted_decision(&one_call_bundle);
+    let one_call_report = run(&one_call_bundle, None);
+
+    let two_call_bundle = dir.path().join("two.tar.gz");
+    bundle_with_one_bindable_and_one_unbindable_call(&two_call_bundle);
+    let import = import_dir(dir.path(), "audit_record_github_deploy_key.json");
+    let two_call_report = run(&two_call_bundle, Some(&import));
+
+    let no_assert_bundle = dir.path().join("none.tar.gz");
+    bundle_with_no_asserted_side_effect(&no_assert_bundle);
+    let no_assert_report = run(&no_assert_bundle, None);
+
+    for report in [one_call_report, two_call_report, no_assert_report] {
+        for call in report["calls"].as_array().expect("report has calls array") {
+            let occurrence_allowed = call["occurrence_claim"] == json!("allowed");
+            let occurrence_reason_present = !call["occurrence_reason"].is_null();
+            assert_eq!(
+                occurrence_reason_present, !occurrence_allowed,
+                "occurrence_reason must be present iff occurrence_claim is not allowed"
+            );
+
+            let bounded_negative_allowed = call["bounded_negative_claim"] == json!("allowed");
+            let bounded_negative_reason_present = !call["bounded_negative_reason"].is_null();
+            assert_eq!(
+                bounded_negative_reason_present, !bounded_negative_allowed,
+                "bounded_negative_reason must be present iff bounded_negative_claim is not allowed"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_allowed_claim_carries_no_reason() {
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_asserted_decision(&bundle);
+    let import = import_dir(dir.path(), "audit_record_github_deploy_key.json");
+
+    let report = run(&bundle, Some(&import));
+    let call = &report["calls"][0];
+    assert_eq!(call["occurrence_claim"], json!("allowed"));
+    assert_eq!(
+        call["occurrence_reason"],
+        Value::Null,
+        "allowed rows stay reasonless"
+    );
 }
 
 // ---------------------------------------------------------------- Ec: refutation from below
