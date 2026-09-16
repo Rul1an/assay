@@ -9,6 +9,24 @@ fi
 
 summary_file="${GITHUB_STEP_SUMMARY:-}"
 
+# The lane must act as the dedicated GitHub App (#3035). Updates and auto-merges made with
+# GITHUB_TOKEN start no push workflows on main and leave the refreshed PR's runs waiting for
+# approval, so any other identity is refused before the first GitHub call.
+expected_app_slug="${EXPECTED_APP_SLUG:-}"
+app_slug="${APP_SLUG:-}"
+if [[ -z "$expected_app_slug" ]]; then
+  echo "EXPECTED_APP_SLUG is not set; refusing to run without the lane's App identity" >&2
+  exit 2
+fi
+if [[ -z "$app_slug" ]]; then
+  echo "APP_SLUG is not set; refusing to run without a GitHub App installation token" >&2
+  exit 2
+fi
+if [[ "$app_slug" != "$expected_app_slug" ]]; then
+  echo "token belongs to App '$app_slug', expected '$expected_app_slug'; refusing to run" >&2
+  exit 2
+fi
+
 append_summary() {
   if [[ -n "$summary_file" ]]; then
     printf '%s\n' "$1" >> "$summary_file"
@@ -131,4 +149,9 @@ append_summary "- auto_merge_failures: $automerge_failures"
 
 if [[ "$update_failures" -gt 0 || "$automerge_failures" -gt 0 ]]; then
   append_summary "- note: some PRs could not be updated automatically; inspect workflow logs for details"
+fi
+
+if (( update_failures > 0 || automerge_failures > 0 )); then
+  echo "refused: $update_failures branch update(s), $automerge_failures auto-merge enablement(s)" >&2
+  exit 1
 fi

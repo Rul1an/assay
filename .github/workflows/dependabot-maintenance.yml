@@ -17,16 +17,33 @@ jobs:
   refresh-queue:
     name: Refresh dependency queue PR branches
     runs-on: ubuntu-latest
+    # The App's client id, slug and private key live in this environment, which only main may use.
+    # deployment: false keeps the secret and branch rule without a deployment record per run.
+    environment:
+      name: dependabot-maintenance
+      deployment: false
+    # GITHUB_TOKEN only checks out. Branch updates and auto-merge use the App token below: events
+    # caused by GITHUB_TOKEN start no push workflows on main and hold the refreshed PR's
+    # pull_request runs for approval (#3035).
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+      - name: Mint App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.DEPENDABOT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DEPENDABOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
       - name: Refresh queue
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          EXPECTED_APP_SLUG: ${{ vars.DEPENDABOT_APP_SLUG }}
           REPO: ${{ github.repository }}
         shell: bash
         run: ./scripts/ci/dependabot-maintenance.sh "$REPO"
