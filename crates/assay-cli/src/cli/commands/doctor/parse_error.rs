@@ -4,9 +4,9 @@ use anyhow::Context;
 use assay_core::config::{load_config_with_cause, LoadOptions};
 use assay_core::errors::similarity::closest_prompt;
 use assay_core::errors::ConfigLoadError;
-use dialoguer::{theme::ColorfulTheme, Confirm};
 
 use crate::cli::args::DoctorArgs;
+use crate::cli::interaction::confirm;
 
 use super::implementation::config_failure;
 use super::patching::{print_unified_diff, write_text_file};
@@ -45,20 +45,15 @@ pub(super) fn try_fix_parse_error(
         return Ok(unresolved_exit);
     };
 
-    let do_apply = if args.yes || args.dry_run {
-        true
-    } else {
-        Confirm::with_theme(&ColorfulTheme::default())
-            .with_prompt(format!(
-                "Replace key '{}' with '{}' in {}?",
-                unknown,
-                replacement,
-                config_path.display()
-            ))
-            .default(false)
-            .interact()
-            .unwrap_or(false)
-    };
+    let do_apply = confirm(
+        &format!(
+            "Replace key '{}' with '{}' in {}?",
+            unknown,
+            replacement,
+            config_path.display()
+        ),
+        args.yes || args.dry_run,
+    )?;
 
     if !do_apply {
         println!("No fixes applied.");

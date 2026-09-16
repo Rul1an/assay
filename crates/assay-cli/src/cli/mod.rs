@@ -2,4 +2,5 @@ pub mod args;
 pub(crate) mod bounded_child;
 pub mod commands;
 pub mod helpers;
+pub(crate) mod interaction;
 pub mod util;
