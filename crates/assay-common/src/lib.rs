@@ -7,6 +7,9 @@ extern crate std;
 #[cfg(feature = "std")]
 pub mod exports;
 
+#[cfg(feature = "std")]
+pub mod atomic_write;
+
 /// Bounded ingest primitive (ADR-043 §1). std-only: it is an `io::Read` adapter.
 pub mod limits;
 
