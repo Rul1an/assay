@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- `assay evidence push --no-verify` is refused with exit 2 before the archive is
+  opened. The store key is the verified `bundle_id`; the flag used to take that id
+  from the unverified manifest, so an archive could name its own key (#2492).
+
+### Fixed
+- `assay evidence pull --verify` reports a bundle served under a key other than
+  its own `bundle_id` as a typed `Contract` verifier error
+  (`ContractBundleIdMismatch`) naming both ids, exit 2, with nothing written.
+  The prose-only refusal was indistinguishable from a transport failure (#2492).
 - Trace verify coverage failures cite per-occurrence `/input` readings under each stage-local truncation-shape id (#2782).
 
 ## [6.3.1] - 2026-09-15
