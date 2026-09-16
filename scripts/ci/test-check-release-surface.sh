@@ -18,6 +18,7 @@ cp "$ROOT/scripts/ci/release_readme.py" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/check_internal_dep_versions.py" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/read-assay-release-tag.sh" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/lib/editor-plugin-install-commands.sh" "$TMP/scripts/ci/lib/"
+cp "$ROOT/scripts/ci/lib/internal-version-truth.sh" "$TMP/scripts/ci/lib/"
 cp "$ROOT/.pre-commit-config.yaml" "$TMP/"
 printf '%s\n' 'v5.1.0' > "$TMP/.github/assay-release-tag"
 cat > "$TMP/SECURITY.md" <<'DOC'
@@ -277,6 +278,7 @@ for path in (
     "docs/COMMUNITY.md",
     "mkdocs.yml",
     "scripts/ci/lib/editor-plugin-install-commands.sh",
+    "scripts/ci/lib/internal-version-truth.sh",
     "docs/guides/editor-mcp-recipe.md",
     "scripts/ci/test-editor-release-hook-precommit-consumer.sh",
     "crates/assay-core/Cargo.toml",

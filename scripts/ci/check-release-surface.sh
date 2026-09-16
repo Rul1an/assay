@@ -97,37 +97,10 @@ FLOATING_ASSAY_MCP="cargo install assay-mcp-server --locked"
 # workspace has not compiled against since.
 # ---------------------------------------------------------------------------
 note ""
-note "internal dependency declarations:"
+note "internal dependency declarations and workspace lockfiles:"
 
-# One helper reports both sites. The counts are consumed as data rather than trusted: a helper
-# that dies, or that stops emitting a count, must not read as a clean sweep. A `fail` inside the
-# process substitution below would run in its subshell and never reach the counter, which is why
-# the guards live out here instead.
-root_checked=""
-crate_checked=""
-while IFS=$'\t' read -r kind value; do
-  case "$kind" in
-    root_count)  root_checked="$value" ;;
-    crate_count) crate_checked="$value" ;;
-    fail)        fail "$value" ;;
-  esac
-done < <(python3 scripts/ci/check_internal_dep_versions.py || true)
-
-if [ -z "$root_checked" ]; then
-  fail "internal dependency check reported no root count; the enumeration is broken"
-elif [ "$root_checked" -eq 0 ]; then
-  fail "no internal path dependencies found in [workspace.dependencies]; the enumeration is broken"
-else
-  note "  checked $root_checked root declaration(s)"
-fi
-
-if [ -z "$crate_checked" ]; then
-  fail "internal dependency check reported no crate count; the enumeration is broken"
-elif [ "$crate_checked" -eq 0 ]; then
-  fail "no crate-level path dependencies on workspace members found; the enumeration is broken"
-else
-  note "  checked $crate_checked crate-level declaration(s)"
-fi
+# shellcheck source=scripts/ci/lib/internal-version-truth.sh
+source scripts/ci/lib/internal-version-truth.sh
 
 # ---------------------------------------------------------------------------
 # 2. The source binary and documented published `assay --version` output.
@@ -136,53 +109,6 @@ fi
 # name the latest published release. Verify those facts independently rather than forcing one to
 # impersonate the other.
 # ---------------------------------------------------------------------------
-note ""
-note "workspace lockfiles:"
-
-# A lockfile that pins a workspace crate at the previous version is not cosmetic: any job running
-# with `--locked` refuses outright. `fuzz/Cargo.lock` is a separate workspace, so the root bump does
-# not reach it, and nothing else in this script would have looked.
-#
-# Discovered, not listed. Only locks that actually pin one of our crates are considered, so the
-# vendored upstream reference lock under scripts/ci/fixtures is out of scope by construction rather
-# than by an exclusion someone has to maintain.
-# The crates this workspace publishes, read from their own manifests. `assay-fuzz` is deliberately
-# excluded by this derivation rather than by name: it lives outside `crates/`, pins itself at 0.0.0
-# and is never published, so a name-prefix match would have flagged it forever.
-WORKSPACE_MEMBERS="$(
-  for manifest in crates/*/Cargo.toml assay-python-sdk/Cargo.toml; do
-    [ -f "$manifest" ] || continue
-    grep -q '^version\.workspace = true' "$manifest" || continue
-    awk -F' *= *' '/^name *=/ { gsub(/"/, "", $2); print $2; exit }' "$manifest"
-  done | tr '\n' ' '
-)"
-[ -n "$WORKSPACE_MEMBERS" ] || fail "could not derive the workspace member set; the manifest shape moved"
-
-locks_checked=0
-while IFS= read -r lock; do
-  [ -f "$lock" ] || continue
-  pinned="$(awk -v members="$WORKSPACE_MEMBERS" '
-    BEGIN { split(members, m, " "); for (i in m) is_member[m[i]] = 1 }
-    /^\[\[package\]\]/ { name = ""; next }
-    /^name = / { n = $3; gsub(/"/, "", n); if (n in is_member) name = n; next }
-    name != "" && /^version = / {
-      v = $3; gsub(/"/, "", v)
-      printf "%s\t%s\n", name, v
-      name = ""
-    }
-  ' "$lock")"
-  [ -n "$pinned" ] || continue
-  locks_checked=$((locks_checked + 1))
-  while IFS=$'\t' read -r name version; do
-    [ -n "$name" ] || continue
-    if [ "$version" != "$WORKSPACE_VERSION" ]; then
-      fail "$lock: $name pinned at \"$version\", workspace is \"$WORKSPACE_VERSION\""
-    fi
-  done <<< "$pinned"
-done < <(git ls-files '*Cargo.lock')
-
-note "  checked ${locks_checked} lockfile(s) pinning workspace crates"
-
 note ""
 note "documented CLI version output:"
 

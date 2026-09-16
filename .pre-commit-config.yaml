@@ -441,7 +441,7 @@ repos:
         pass_filenames: false
         # Triggers on the files it can be wrong about, plus itself. It does not need a binary: with
         # no `target/` build it still verifies source and published-release truth independently.
-        files: ^(scripts/ci/((check|test-check)-release-surface|read-assay-release-tag|run-release-quickstart-contract|lib/editor-plugin-install-commands|test-editor-release-hook-precommit-consumer)\.sh|scripts/ci/(release_readme|test_release_quickstart|check_internal_dep_versions)\.py|\.github/assay-release-tag|Cargo\.toml|crates/.+/Cargo\.toml|assay-python-sdk/Cargo\.toml|README\.md|SECURITY\.md|llms\.txt|mkdocs\.yml|examples/mcp-quickstart/README\.md|docs/(COMMUNITY\.md|index\.md|getting-started/(index|installation|quickstart|ci-integration)\.md|reference/cli/index\.md|python-sdk/index\.md|use-cases/(air-gapped|ci-gate)\.md|AIcontext/user-flows\.md|migration-v1\.2\.md|guides/editor-mcp-recipe\.md)|\.devcontainer/welcome\.sh|demo/CODESPACES-PLAYBOOK\.md|\.pre-commit-config\.yaml)$
+        files: ^(scripts/ci/((check|test-check)-release-surface|read-assay-release-tag|run-release-quickstart-contract|lib/(editor-plugin-install-commands|internal-version-truth)|test-editor-release-hook-precommit-consumer)\.sh|scripts/ci/(release_readme|test_release_quickstart|check_internal_dep_versions)\.py|\.github/assay-release-tag|Cargo\.toml|crates/.+/Cargo\.toml|assay-python-sdk/Cargo\.toml|README\.md|SECURITY\.md|llms\.txt|mkdocs\.yml|examples/mcp-quickstart/README\.md|docs/(COMMUNITY\.md|index\.md|getting-started/(index|installation|quickstart|ci-integration)\.md|reference/cli/index\.md|python-sdk/index\.md|use-cases/(air-gapped|ci-gate)\.md|AIcontext/user-flows\.md|migration-v1\.2\.md|guides/editor-mcp-recipe\.md)|\.devcontainer/welcome\.sh|demo/CODESPACES-PLAYBOOK\.md|\.pre-commit-config\.yaml)$
 
 
 
@@ -546,7 +546,7 @@ repos:
         pass_filenames: false
         # The ordinary release-surface guard owns installability and the last-published pin. This
         # hook owns only candidate/source identity and the release workflow that consumes it.
-        files: ^(Cargo\.toml|CHANGELOG\.md|README\.md|crates/assay-evidence/src/attestation\.rs|docs/(generated/agent-golden-path\.json|guides/agent-golden-path\.md|reference/release\.md)|scripts/(docs/generate-agent-golden-path\.py|ci/((check|test-check)-tag-tree-outward-truth\.sh|check-readme-attestation-truth\.py|lib/(workspace_version\.py|clear-git-repository-env\.sh)))|\.github/workflows/release\.yml|\.pre-commit-config\.yaml)$
+        files: ^(Cargo\.toml|CHANGELOG\.md|README\.md|crates/assay-evidence/src/attestation\.rs|docs/(generated/agent-golden-path\.json|guides/agent-golden-path\.md|reference/release\.md)|scripts/(docs/generate-agent-golden-path\.py|ci/((check|test-check)-tag-tree-outward-truth\.sh|check-readme-attestation-truth\.py|check_internal_dep_versions\.py|lib/(workspace_version\.py|clear-git-repository-env\.sh|internal-version-truth\.sh)))|\.github/workflows/release\.yml|\.pre-commit-config\.yaml)$
 
       - id: readme-attestation-truth
         name: README attestation row names the statement the source emits
