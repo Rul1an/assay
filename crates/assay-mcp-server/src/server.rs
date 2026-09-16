@@ -980,6 +980,27 @@ mod line_handler_tests {
     }
 
     #[test]
+    fn duplicate_unknown_top_level_member_echoes_the_request_id() {
+        // Unknown members are ignored (no deny_unknown_fields), so a
+        // duplicate of one nobody reads is not a last-wins ambiguity.
+        // The mcp_jsonrpc oracle must treat this as respondable, matching
+        // the handler. Seed `duplicate-unknown-member` is this line plus a
+        // trailing newline.
+        let line = r#"{"jsonrpc":"2.0","metNod":"no/such","methoonrpc":"2.0","metNod":"no/such","method":"tools/list","paramsd":"tools/list","params":{},"id":3}"#;
+        let response = respond(line);
+        assert_eq!(
+            response.get("id"),
+            Some(&json!(3)),
+            "duplicate unknown member must still echo id 3: {response}"
+        );
+        assert!(
+            response.get("result").is_some(),
+            "tools/list with a duplicated unknown member is still answered: {response}"
+        );
+        assert_outcome_eq(line);
+    }
+
+    #[test]
     fn empty_and_unparsable_lines_are_silent() {
         for line in [
             "",
