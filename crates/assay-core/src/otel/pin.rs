@@ -22,6 +22,20 @@ pub const ATTR_OPERATION_NAME: &str = "gen_ai.operation.name";
 pub const ATTR_TOOL_NAME: &str = "gen_ai.tool.name";
 pub const PROVIDER_ASSAY: &str = "assay";
 
+/// Retired GenAI system attribute. Named here so the `otel::semconv`
+/// facade cannot invent a second string. Emit and ingest write [`ATTR_PROVIDER_NAME`].
+pub const ATTR_SYSTEM: &str = "gen_ai.system";
+pub const ATTR_REQUEST_MODEL: &str = "gen_ai.request.model";
+pub const ATTR_REQUEST_TEMPERATURE: &str = "gen_ai.request.temperature";
+pub const ATTR_REQUEST_TOP_P: &str = "gen_ai.request.top_p";
+pub const ATTR_USAGE_INPUT_TOKENS: &str = "gen_ai.usage.input_tokens";
+pub const ATTR_USAGE_OUTPUT_TOKENS: &str = "gen_ai.usage.output_tokens";
+pub const ATTR_RESPONSE_FINISH_REASONS: &str = "gen_ai.response.finish_reasons";
+pub const ATTR_RESPONSE_ID: &str = "gen_ai.response.id";
+pub const ATTR_RESPONSE_MODEL: &str = "gen_ai.response.model";
+pub const ATTR_PROMPT: &str = "gen_ai.prompt";
+pub const ATTR_COMPLETION: &str = "gen_ai.completion";
+
 /// Split [`GENAI_SEMCONV_PIN`] into repo and commit. One string, derived fields.
 pub fn genai_semconv() -> SemconvPin {
     let (repo, commit) = GENAI_SEMCONV_PIN

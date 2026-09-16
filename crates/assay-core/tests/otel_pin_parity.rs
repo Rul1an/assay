@@ -3,8 +3,15 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+use assay_core::config::otel::{OtelConfig, SemConvStability};
 use assay_core::model::{TestResultRow, TestStatus};
+use assay_core::otel::genai::GenAiSpanBuilder;
+use assay_core::otel::pin::{
+    require_known_semconv_version, ATTR_PROVIDER_NAME, ATTR_REQUEST_MODEL, ATTR_SYSTEM,
+    GENAI_SEMCONV_PIN, PROVIDER_ASSAY,
+};
 use assay_core::otel::projection::project;
+use assay_core::otel::semconv::{GenAiSemConv, V1_28_0};
 use assay_core::otel::{export_jsonl, export_tool_spans_jsonl, OTelConfig, ToolObservation};
 use serde_json::{json, Value};
 
@@ -181,6 +188,88 @@ fn emitted_genai_keys_exist_at_pinned_revision() {
         assert!(
             registered.contains(&key),
             "{key} is not in the vendored registry at the pinned commit"
+        );
+    }
+}
+
+/// Public 6.3.1 names stay reachable. The facade forwards to
+/// [`assay_core::otel::pin`]; it must not become a second version table.
+#[test]
+fn public_otel_names_forward_to_the_single_pin() {
+    let table = V1_28_0::new(SemConvStability::StableOnly);
+    assert_eq!(
+        table.version(),
+        GENAI_SEMCONV_PIN,
+        "V1_28_0 must report the pin, not a second version string"
+    );
+    assert_eq!(table.system(), ATTR_SYSTEM);
+    assert_eq!(table.request_model(), ATTR_REQUEST_MODEL);
+    assert_eq!(table.system(), "gen_ai.system");
+    assert_eq!(table.request_model(), "gen_ai.request.model");
+
+    let unknown = OtelConfig {
+        genai_semconv_version: "9.9.9".to_string(),
+        ..Default::default()
+    };
+    let builder = GenAiSpanBuilder::new(&unknown);
+    assert_eq!(
+        builder.request_model(),
+        ATTR_REQUEST_MODEL,
+        "compat builder keys must come from pin.rs"
+    );
+    assert_eq!(builder.gen_ai_system(), (ATTR_SYSTEM, PROVIDER_ASSAY));
+    require_known_semconv_version("9.9.9")
+        .expect_err("production pin path must fail closed on unknown versions");
+    unknown
+        .validate()
+        .expect_err("OtelConfig::validate must keep using the pin, not the compat fallback");
+}
+
+/// Emit writes the pin's provider attribute. The compatibility trait still
+/// exposes retired `gen_ai.system`; that must not leak into emit/ingest.
+#[test]
+fn emit_uses_pin_not_deprecated_trait() {
+    let table = V1_28_0::new(SemConvStability::StableOnly);
+    assert_eq!(table.system(), ATTR_SYSTEM);
+    assert_ne!(
+        table.system(),
+        ATTR_PROVIDER_NAME,
+        "retired system key and current provider key must stay distinct"
+    );
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let jsonl = dir.path().join("otel.jsonl");
+    let cfg = OTelConfig {
+        jsonl_path: Some(jsonl.clone()),
+        redact_prompts: false,
+    };
+    export_jsonl(&cfg, "suite", &[sample_row()]).expect("export_jsonl");
+    export_tool_spans_jsonl(
+        &cfg,
+        "run",
+        &[ToolObservation {
+            tool_name: "search".into(),
+            claim_class_outcome: "supported".into(),
+            subject: None,
+        }],
+    )
+    .expect("export_tool_spans");
+
+    let body = std::fs::read_to_string(&jsonl).expect("jsonl");
+    for line in body.lines().filter(|l| !l.is_empty()) {
+        let row: Value = serde_json::from_str(line).expect("jsonl row");
+        let attrs = row["attributes"].as_object().expect("attributes");
+        assert_eq!(
+            attrs.get(ATTR_PROVIDER_NAME).and_then(|v| v.as_str()),
+            Some(PROVIDER_ASSAY)
+        );
+        assert!(
+            !attrs.contains_key(ATTR_SYSTEM),
+            "emit must call the pin, not GenAiSemConv::system"
+        );
+        assert!(
+            !attrs.contains_key(table.system()),
+            "emit must not write the compatibility trait's system key"
         );
     }
 }

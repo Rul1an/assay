@@ -1,10 +1,12 @@
 use crate::model::TestResultRow;
 
+pub mod genai;
 pub(crate) mod mcp_ingest;
 pub mod metrics;
 pub mod pin;
 pub mod projection;
 pub mod redaction;
+pub mod semconv;
 
 #[derive(Debug, Clone, Default)]
 pub struct OTelConfig {
