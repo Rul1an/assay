@@ -32,6 +32,17 @@ cleanup_junction_temps() {
 }
 trap cleanup_junction_temps EXIT
 
+allocate_python_scratch() {
+  local _out_var="$1"
+  local _prefix="$2"
+  local _parent="${3:-${TMPDIR:-/tmp}}"
+  local _d
+  _d="$(mktemp -d "${_parent}/${_prefix}.XXXXXX" 2>/dev/null)" || return 1
+  [[ -n "${_d}" && -d "${_d}" ]] || return 1
+  register_junction_temp "${_d}"
+  printf -v "${_out_var}" '%s/%s.py' "${_d}" "${_prefix}"
+}
+
 PIN="$("${READER}")"
 [[ "${PIN}" =~ ^[0-9a-f]{40}$ ]] || die "reader pin malformed: ${PIN}"
 
@@ -560,8 +571,7 @@ check_explicit_glob_and_pin_filter() {
 
   # Shared runner: new session/process group; on wall timeout TERM then KILL the group.
   # Descendant cleanup is only claimed where the synthetic child probe below measures it.
-  pg_runner="$(mktemp "${TMPDIR:-/tmp}/2802-pg-runner.XXXXXX.py")"
-  register_junction_temp "${pg_runner}"
+  allocate_python_scratch pg_runner "2802-pg-runner"
   cat >"${pg_runner}" <<'PYPG'
 import json
 import os
@@ -688,8 +698,7 @@ if __name__ == "__main__":
 PYPG
 
   # Shared probe predicate: os.kill(pid, 0) errno-aware. Only ESRCH == absent.
-  child_presence="$(mktemp "${TMPDIR:-/tmp}/2802-child-presence.XXXXXX.py")"
-  register_junction_temp "${child_presence}"
+  allocate_python_scratch child_presence "2802-child-presence"
   cat >"${child_presence}" <<'PYPRES'
 import errno
 import os
@@ -872,7 +881,7 @@ PYDISC
   # Positive / no-op control: short script exits 0 under the same process-group runner.
   {
     local noop_sh noop_rc
-    noop_sh="$(mktemp "${TMPDIR:-/tmp}/2802-noop.XXXXXX.sh")"
+    noop_sh="$(mktemp "${TMPDIR:-/tmp}/2802-noop.XXXXXX")"
     register_junction_temp "${noop_sh}"
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'echo noop-ok' >"${noop_sh}"
     set +e
@@ -983,6 +992,101 @@ with patch.object(os, "kill", side_effect=OSError(errno.EIO, "I/O error")):
     assert mod.classify_pid(1) == "unavailable"
 print("ok    mock-child-presence-other-oserror-unavailable")
 PYPRESMOCK
+
+  # Verify scratch allocations via allocate_python_scratch:
+  # 1. Runs in-shell so register_junction_temp updates caller's JUNCTION_TEMPS and cleanup genuinely removes it
+  # 2. Allocations are collision-free under a shared temp parent, even when parent contains literal XXXXXX (GREEN)
+  # 3. Legacy non-trailing suffix templates: platform-bound proof on BSD mktemp, not universal invariant
+  {
+    local probe_parent probe_r1 probe_r2 probe_p1 probe_p2 isolated_scratch isolated_dir legacy_probe
+
+    # Genuine cleanup verification: in-shell execution ensures register_junction_temp updates caller
+    (
+      JUNCTION_TEMPS=()
+      allocate_python_scratch isolated_scratch "2802-cleanup-proof"
+      [[ "${#JUNCTION_TEMPS[@]}" -eq 1 ]] \
+        || die "allocate_python_scratch failed to register temp directory in caller shell"
+      isolated_dir="$(dirname "${isolated_scratch}")"
+      : >"${isolated_scratch}"
+      [[ -f "${isolated_scratch}" ]] \
+        || die "failed to create isolated scratch file"
+      cleanup_junction_temps
+      [[ ! -d "${isolated_dir}" && ! -f "${isolated_scratch}" ]] \
+        || die "cleanup_junction_temps failed to remove allocated scratch directory"
+    )
+
+    # Failed allocation verification: explicit return 1, no registration in JUNCTION_TEMPS, no output variable mutation
+    (
+      JUNCTION_TEMPS=()
+      local fail_parent fail_missing fail_out="sentinel" fail_rc=0
+      fail_parent="$(mktemp -d "${TMPDIR:-/tmp}/2802-fail-parent.XXXXXX")"
+      fail_missing="${fail_parent}/nonexistent-child"
+      set +e
+      allocate_python_scratch fail_out "2802-fail" "${fail_missing}"
+      fail_rc=$?
+      set -e
+      rmdir "${fail_parent}"
+      [[ "${fail_rc}" -eq 1 ]] \
+        || die "allocate_python_scratch must return 1 on failed allocation"
+      [[ "${#JUNCTION_TEMPS[@]}" -eq 0 ]] \
+        || die "failed allocation must not register in JUNCTION_TEMPS"
+      [[ "${fail_out}" == "sentinel" ]] \
+        || die "failed allocation must not mutate output variable"
+    )
+
+    probe_parent="$(mktemp -d "${TMPDIR:-/tmp}/2802-parent-XXXXXX.XXXXXX")"
+    register_junction_temp "${probe_parent}"
+
+    # GREEN control: allocations under a parent containing literal XXXXXX must succeed and produce distinct files
+    allocate_python_scratch probe_r1 "2802-pg-runner" "${probe_parent}"
+    allocate_python_scratch probe_r2 "2802-pg-runner" "${probe_parent}"
+    : >"${probe_r1}"
+    : >"${probe_r2}"
+    [[ -f "${probe_r1}" && -f "${probe_r2}" && "${probe_r1}" != "${probe_r2}" ]] \
+      || die "pg_runner scratch helper failed to produce distinct coexisting files"
+
+    allocate_python_scratch probe_p1 "2802-child-presence" "${probe_parent}"
+    allocate_python_scratch probe_p2 "2802-child-presence" "${probe_parent}"
+    : >"${probe_p1}"
+    : >"${probe_p2}"
+    [[ -f "${probe_p1}" && -f "${probe_p2}" && "${probe_p1}" != "${probe_p2}" ]] \
+      || die "child_presence scratch helper failed to produce distinct coexisting files"
+
+    # Platform-specific defect demonstration:
+    # On BSD mktemp (macOS), legacy non-trailing X templates leave literal XXXXXX and collide on second allocation.
+    # On GNU mktemp (Linux), --suffix is implied if template does not end in X, so legacy templates expand.
+    # Therefore, verify collision conditionally only when literal XXXXXX is retained by the host mktemp.
+    legacy_probe="$(mktemp "${probe_parent}/2802-legacy-probe.XXXXXX.py" 2>/dev/null || true)"
+    if [[ -n "${legacy_probe}" && "${legacy_probe}" == *'2802-legacy-probe.XXXXXX.py' ]]; then
+      ! mktemp "${probe_parent}/2802-legacy-probe.XXXXXX.py" >/dev/null 2>&1 \
+        || die "expected BSD mktemp to collide on second allocation of literal XXXXXX.py template"
+    fi
+
+    # Verify portable positive coexistence under GNU mktemp when available locally
+    if command -v gmktemp >/dev/null 2>&1; then
+      (
+        local gnu_bin gnu_parent gnu_r1 gnu_r2
+        JUNCTION_TEMPS=()
+        gnu_bin="$(mktemp -d "${TMPDIR:-/tmp}/2802-gmktemp-bin.XXXXXX")"
+        trap 'rm -rf "${gnu_bin}"; cleanup_junction_temps' EXIT
+        ln -s "$(command -v gmktemp)" "${gnu_bin}/mktemp"
+        PATH="${gnu_bin}:${PATH}"
+        gnu_parent="$(mktemp -d "${TMPDIR:-/tmp}/2802-gnu-parent-XXXXXX.XXXXXX")"
+        register_junction_temp "${gnu_parent}"
+        allocate_python_scratch gnu_r1 "2802-pg-runner" "${gnu_parent}"
+        allocate_python_scratch gnu_r2 "2802-pg-runner" "${gnu_parent}"
+        : >"${gnu_r1}"
+        : >"${gnu_r2}"
+        [[ -f "${gnu_r1}" && -f "${gnu_r2}" && "${gnu_r1}" != "${gnu_r2}" ]] \
+          || die "allocate_python_scratch failed positive coexistence under GNU mktemp"
+        cleanup_junction_temps
+        [[ ! -f "${gnu_r1}" && ! -f "${gnu_r2}" && ! -d "${gnu_parent}" ]] \
+          || die "cleanup_junction_temps failed under GNU mktemp"
+      )
+    fi
+
+    ok "scratch-allocations-collision-free"
+  }
 
   # Teardown: signal only the probe-recorded child PID (never rediscover a pgid).
   reap_owned_probe_child() {
