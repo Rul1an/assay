@@ -116,7 +116,8 @@ with `deployment: false`. The environment holds variables
 `DEPENDABOT_APP_CLIENT_ID` and `DEPENDABOT_APP_SLUG` and secret
 `DEPENDABOT_APP_PRIVATE_KEY`. The token is minted per run with
 `contents: write` and `pull-requests: write` for this repository only, and is
-revoked when the job ends. The App holds no `workflows` permission. The script
+revoked when the job ends. The App itself holds Contents and Pull requests
+read and write plus Metadata read, and no `workflows` permission. The script
 refuses to act unless the token step's App slug equals
 `DEPENDABOT_APP_SLUG`, and a refused branch update or auto-merge fails the run.
 `scripts/ci/test-dependabot-maintenance.sh` pins both behaviours.
@@ -124,7 +125,8 @@ refuses to act unless the token step's App slug equals
 Not yet measured: that the first App-updated head runs its `pull_request`
 workflows without approval, that an App-enabled merge runs the `push`
 workflows on `main`, and that a workflow-file bump updates without the
-`workflows` permission. Until #3035 records those, keep approving held runs
+`workflows` permission, and that the maintenance run started by such a merge
+refreshes the remaining `BEHIND` PRs on its own. Until #3035 records those, keep approving held runs
 and dispatching `CI` on `main` by hand when they are missing.
 
 To rotate the key, generate a new private key on the App, replace the

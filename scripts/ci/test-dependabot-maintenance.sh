@@ -137,9 +137,11 @@ fi
 
 # 7. Workflow contract: the App token is the only write credential the script receives.
 wf="$(cat "$WORKFLOW")"
+# Positive checks match YAML keys only: a leading-indent anchor keeps a comment that merely
+# mentions a key from satisfying the check.
 check_wf() {
   local label="$1" pattern="$2"
-  if grep -Eq -- "$pattern" <<<"$wf"; then ok "workflow: $label"; else fail "workflow: $label"; fi
+  if grep -Eq -- "^[[:space:]]*(- )?${pattern}" <<<"$wf"; then ok "workflow: $label"; else fail "workflow: $label"; fi
 }
 check_wf_absent() {
   local label="$1" pattern="$2"
