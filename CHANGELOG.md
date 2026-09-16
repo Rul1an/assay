@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
   its own `bundle_id` as a typed `Contract` verifier error
   (`ContractBundleIdMismatch`) naming both ids, exit 2, with nothing written.
   The prose-only refusal was indistinguishable from a transport failure (#2492).
+- Trace verify coverage failures cite per-occurrence `/input` readings under each stage-local truncation-shape id (#2782).
 
 ## [6.3.1] - 2026-09-15
 
