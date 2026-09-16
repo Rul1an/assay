@@ -14,7 +14,8 @@
 //! on stdin; today both paths refuse with a `LimitLineBytes` refusal.
 //!
 //! `--no-verify` gets its own arm, because the audit specifically called it out as the mode
-//! that historically skipped the check.
+//! that historically skipped the check. It is now refused before ingest (#2492 slice 1), and
+//! the arm pins that the refusal happens before any byte is read.
 //!
 //! Restricted to `unix` because `Command::write_stdin` requires a piped stdin the invoked
 //! process actually reads, matching the existing sandbox integration tests.
@@ -104,11 +105,13 @@ fn push_refuses_a_bundle_whose_line_exceeds_the_ceiling_in_verify_mode() {
     assert_named_a_line_ceiling(&String::from_utf8_lossy(&out.stderr));
 }
 
-/// The audit named `--no-verify` as the mode that historically skipped resource checks. It
-/// must still refuse this fixture, on the per-line ceiling that the pre-scan applies before
-/// returning `events_content`.
+/// The audit named `--no-verify` as the mode that historically skipped resource checks. Since
+/// #2492 slice 1 that mode is not an ingest path at all: the store key is the verified
+/// `bundle_id`, so an unverified push has no key and is refused before the archive is opened.
+/// The witness is the same oversized fixture, with the store left unset so the run must stop on
+/// the flag alone: the refusal must not be a ceiling, because no byte of the bundle was read.
 #[test]
-fn push_no_verify_still_refuses_a_bundle_whose_line_exceeds_the_ceiling() {
+fn push_no_verify_is_refused_before_the_bundle_is_read() {
     let mut f = NamedTempFile::new().expect("temp bundle");
     f.write_all(&bundle_with_oversized_line()).expect("write");
     f.flush().expect("flush");
@@ -121,10 +124,18 @@ fn push_no_verify_still_refuses_a_bundle_whose_line_exceeds_the_ceiling() {
         .get_output()
         .clone();
 
-    assert_ne!(
+    assert_eq!(
         out.status.code(),
-        Some(0),
-        "--no-verify push must refuse an oversized-line bundle before upload"
+        Some(2),
+        "--no-verify push is refused as a usage error before any ingest"
     );
-    assert_named_a_line_ceiling(&String::from_utf8_lossy(&out.stderr));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.to_lowercase().contains("limitlinebytes"),
+        "the bundle must not have been read at all; got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("--no-verify") && stderr.contains("verified"),
+        "the refusal must say why an unverified archive cannot choose its key; got:\n{stderr}"
+    );
 }
