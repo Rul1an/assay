@@ -107,11 +107,11 @@ mod tool_span_tests {
 
     #[test]
     fn export_tool_spans_writes_execute_tool_rows_with_claim_class() {
-        let path = std::env::temp_dir().join(format!(
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(format!(
             "assay-otel-tool-spans-{}.jsonl",
             std::process::id()
         ));
-        let _ = std::fs::remove_file(&path);
         let cfg = OTelConfig {
             jsonl_path: Some(path.clone()),
             redact_prompts: false,
@@ -146,17 +146,15 @@ mod tool_span_tests {
         assert_eq!(second["attributes"]["assay.claim_class.outcome"], "blocked");
         assert_eq!(first["attributes"]["gen_ai.provider.name"], "assay");
         assert!(first["attributes"].get("gen_ai.system").is_none());
-
-        std::fs::remove_file(&path).ok();
     }
 
     #[test]
     fn execute_tool_spans_carry_provider_name_and_never_gen_ai_system() {
-        let path = std::env::temp_dir().join(format!(
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(format!(
             "assay-otel-provider-name-{}.jsonl",
             std::process::id()
         ));
-        let _ = std::fs::remove_file(&path);
         let cfg = OTelConfig {
             jsonl_path: Some(path.clone()),
             redact_prompts: false,
@@ -175,16 +173,15 @@ mod tool_span_tests {
             serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("json");
         assert_eq!(row["attributes"]["gen_ai.provider.name"], "assay");
         assert!(row["attributes"].get("gen_ai.system").is_none());
-        std::fs::remove_file(&path).ok();
     }
 
     #[test]
     fn export_jsonl_emits_no_placeholder_and_no_unregistered_key() {
-        let path = std::env::temp_dir().join(format!(
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(format!(
             "assay-otel-no-placeholder-{}.jsonl",
             std::process::id()
         ));
-        let _ = std::fs::remove_file(&path);
         let cfg = OTelConfig {
             jsonl_path: Some(path.clone()),
             redact_prompts: false,
@@ -218,6 +215,5 @@ mod tool_span_tests {
             attrs.get("gen_ai.request.model").and_then(|v| v.as_str()),
             Some("unknown")
         );
-        std::fs::remove_file(&path).ok();
     }
 }
