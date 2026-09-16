@@ -111,13 +111,19 @@ fn partial_coverage_matches_partial_completeness() {
 /// Full coverage here, a complete descriptor there: both allow everything.
 #[test]
 fn full_coverage_matches_complete_descriptor() {
-    let complete = CoverageDescriptor::network_connect_and_datagram_peer_observed();
-    if !allows_absence(&complete) {
-        // The runner's notion of "complete" is descriptor-specific; if no shipped constructor is
-        // complete, this leg cannot be asserted and saying so is better than asserting a weaker one.
-        eprintln!("no shipped descriptor reports complete coverage; leg skipped deliberately");
-        return;
-    }
+    let complete = CoverageDescriptor {
+        schema: assay_runner_schema::COVERAGE_DESCRIPTOR_SCHEMA.to_string(),
+        dimension: assay_runner_schema::EffectDimension::Filesystem,
+        method: "complete filesystem observation".to_string(),
+        observes: vec!["every path open".to_string()],
+        known_blind_spots: vec![],
+        completeness: assay_runner_schema::CoverageCompleteness::Full,
+    };
+    assert!(
+        allows_absence(&complete),
+        "fixture must be complete enough to allow bounded-negative claims"
+    );
+    let mut compared = 0usize;
     for kind in kinds() {
         let ours = coding_agent_claim_decision(
             CodingAgentSourceClass::BoundaryObserved,
@@ -125,6 +131,7 @@ fn full_coverage_matches_complete_descriptor() {
             kind,
         );
         let theirs = complete.claim_decision(kind);
+        compared += 1;
         assert!(
             ours.decision == theirs.decision,
             "observed/{kind:?}: evidence says {:?}, runner says {:?} ({})",
@@ -133,6 +140,10 @@ fn full_coverage_matches_complete_descriptor() {
             theirs.rule
         );
     }
+    assert!(
+        compared > 0,
+        "parity leg must execute at least one comparison"
+    );
 }
 
 /// The asymmetry itself, asserted on both sides rather than inferred: partial coverage must allow a

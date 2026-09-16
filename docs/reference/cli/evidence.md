@@ -118,6 +118,41 @@ Pairing or enum mismatches produce a report and exit `2`.
 
 ---
 
+## Verify Side Effects
+
+Promote observed side-effect assertions using imported provider audit records,
+then project what claims each call can support:
+
+```bash
+assay evidence verify-side-effects bundle.tar.gz --format json
+assay evidence verify-side-effects bundle.tar.gz --audit-import ./audit --format table
+```
+
+The command emits `assay.side_effect_verification.v0`.
+
+For each call, two claim fields are emitted:
+
+- `occurrence_claim` - what can be claimed about "this effect happened"
+- `bounded_negative_claim` - what can be claimed about "this effect did not happen"
+
+When either claim is not `allowed`, its reason is now emitted in a sibling field:
+
+- `occurrence_reason`
+- `bounded_negative_reason`
+
+Reason shape:
+
+- claim-gate qualification:
+  `{ "origin": "claim_gate", "gap": "<gap>", "rule": "<rule>" }`
+- observer refutation override:
+  `{ "origin": "observer_refutation" }`
+
+In table output, non-`allowed` claims include `reason=<gap>` (or
+`reason=observer_refutation`) so the qualification is visible without reading
+JSON.
+
+---
+
 ## MCP Tunnel Observed-Facts Check
 
 Validate one bounded MCP tunnel observed-facts fixture and classify its join

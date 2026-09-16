@@ -28,8 +28,9 @@ use anyhow::{Context, Result};
 use assay_evidence::bundle::{BundleReader, VerifyLimits};
 use assay_evidence::{
     coding_agent_claim_decision, coding_agent_weakest_ceiling, CodingAgentClaimCeiling,
-    CodingAgentClaimDecision, CodingAgentClaimKind, CodingAgentCoverageState,
-    CodingAgentGateDecision, CodingAgentSourceClass, CodingAgentWeakestCeiling,
+    CodingAgentClaimDecision, CodingAgentClaimKind, CodingAgentCoverageGap,
+    CodingAgentCoverageState, CodingAgentGateDecision, CodingAgentSourceClass,
+    CodingAgentWeakestCeiling,
 };
 use assay_mcp_server::side_effect::{
     check_audit_record, AuditBinding, SideEffectLevel, PROVIDER_AUDIT_RECORD_SCHEMA,
@@ -93,7 +94,11 @@ struct CallRow {
     /// What this level lets a consumer claim, from the existing claim gate rather than a second
     /// rule. `occurrence` asks "did this effect happen"; `bounded_negative` asks "did it not".
     occurrence_claim: CodingAgentGateDecision,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    occurrence_reason: Option<ClaimReason>,
     bounded_negative_claim: CodingAgentGateDecision,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bounded_negative_reason: Option<ClaimReason>,
     /// How strong the occurrence claim is allowed to be, on the published ceiling ladder.
     ///
     /// The gate has always computed this and this report used to drop it, which made the ladder's
@@ -117,6 +122,17 @@ struct CallRow {
     /// What a below-harness observer could say about the claimed egress, when one was supplied.
     #[serde(skip_serializing_if = "Option::is_none")]
     egress: Option<EgressRefutation>,
+}
+
+/// Why a claim is not cleanly `Allowed`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "origin", rename_all = "snake_case")]
+enum ClaimReason {
+    ClaimGate {
+        gap: CodingAgentCoverageGap,
+        rule: String,
+    },
+    ObserverRefutation,
 }
 
 #[derive(Debug, Serialize)]
@@ -196,6 +212,36 @@ fn claim_decision_for(
         _ => CodingAgentCoverageState::Partial,
     };
     coding_agent_claim_decision(source_class_for(level), coverage, kind)
+}
+
+fn reason_for(decision: &CodingAgentClaimDecision) -> Result<Option<ClaimReason>> {
+    if decision.decision == CodingAgentGateDecision::Allowed {
+        return Ok(None);
+    }
+    let gap = decision.gap.ok_or_else(|| {
+        anyhow::anyhow!("claim gate returned a qualified decision without a reason")
+    })?;
+    Ok(Some(ClaimReason::ClaimGate {
+        gap,
+        rule: decision.rule.clone(),
+    }))
+}
+
+fn gap_label(gap: CodingAgentCoverageGap) -> &'static str {
+    match gap {
+        CodingAgentCoverageGap::NotObserved => "not_observed",
+        CodingAgentCoverageGap::ObserverUnavailable => "observer_unavailable",
+        CodingAgentCoverageGap::SelfReportedOnly => "self_reported_only",
+        CodingAgentCoverageGap::PartialOnly => "partial_only",
+    }
+}
+
+fn reason_label(reason: &Option<ClaimReason>) -> &'static str {
+    match reason {
+        Some(ClaimReason::ClaimGate { gap, .. }) => gap_label(*gap),
+        Some(ClaimReason::ObserverRefutation) => "observer_refutation",
+        None => "-",
+    }
 }
 
 /// The weakest occurrence rung across the calls that asserted a side effect.
@@ -363,7 +409,9 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                 subject_digest: None,
                 binding: None,
                 occurrence_claim: CodingAgentGateDecision::Blocked,
+                occurrence_reason: None,
                 bounded_negative_claim: CodingAgentGateDecision::Blocked,
+                bounded_negative_reason: None,
                 occurrence_ceiling: None,
                 occurrence_decision: CodingAgentClaimDecision {
                     decision: CodingAgentGateDecision::Blocked,
@@ -416,8 +464,10 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                     refute_egress(observation_health.as_ref(), &observed_peers, expected)
                 });
             }
-            let occurrence = claim_decision_for(row.level, CodingAgentClaimKind::PositiveExistence);
+            let mut occurrence =
+                claim_decision_for(row.level, CodingAgentClaimKind::PositiveExistence);
             row.occurrence_claim = occurrence.decision;
+            row.occurrence_reason = reason_for(&occurrence)?;
             // Only a call that asserted a side effect gets a rung. `occurrence_claim` is computed for
             // every row and that predates this change, but a ladder position is a stronger thing to
             // publish: it grades a claim, and a call that asserted nothing has not made one.
@@ -435,6 +485,13 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                 // `independently_confirmed` would let a reader take the number and drop the verdict,
                 // which is the exact misreading the refutation exists to prevent.
                 row.occurrence_ceiling = None;
+                row.occurrence_reason = Some(ClaimReason::ObserverRefutation);
+                occurrence = CodingAgentClaimDecision {
+                    decision: CodingAgentGateDecision::Blocked,
+                    ceiling: None,
+                    gap: None,
+                    rule: "observer_refutation".to_string(),
+                };
             }
 
             // Carry the full decision for the ceiling fold. After a refutation override, rebuild
@@ -445,8 +502,10 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                 gap: occurrence.gap,
                 rule: occurrence.rule,
             };
-            row.bounded_negative_claim =
-                claim_decision_for(row.level, CodingAgentClaimKind::BoundedNegative).decision;
+            let bounded_negative =
+                claim_decision_for(row.level, CodingAgentClaimKind::BoundedNegative);
+            row.bounded_negative_claim = bounded_negative.decision;
+            row.bounded_negative_reason = reason_for(&bounded_negative)?;
             calls.push(row);
         }
     }
@@ -485,13 +544,15 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
             for c in &report.calls {
                 let level = serde_json::to_value(c.level)?;
                 println!(
-                    "  {:40} asserted={:5} level={:18} occurrence={:?} ceiling={:?} absence={:?}",
+                    "  {:40} asserted={:5} level={:18} occurrence={:?} reason={} ceiling={:?} absence={:?} absence_reason={}",
                     c.tool,
                     c.asserted,
                     level.as_str().unwrap_or("?"),
                     c.occurrence_claim,
+                    reason_label(&c.occurrence_reason),
                     c.occurrence_ceiling,
-                    c.bounded_negative_claim
+                    c.bounded_negative_claim,
+                    reason_label(&c.bounded_negative_reason),
                 );
                 if let Some(e) = &c.egress {
                     println!("      egress: {}", serde_json::to_string(e)?);
