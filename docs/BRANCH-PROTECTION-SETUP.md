@@ -233,6 +233,16 @@ For human-in-the-loop on release and publish:
 2. For each environment, add **Required reviewers** (e.g. 1–2 maintainers).
 3. In `release.yml`, set `environment: release` (or `crates` / `pypi`) on the corresponding jobs so that runs wait for approval before executing.
 
+`dependabot-maintenance` is a different kind of environment: it holds the
+Dependabot lane's GitHub App credentials, not a release approval. Keep it
+restricted to deployment branch `main`, with **no** required reviewers or wait
+timer (the scheduled maintenance run would stall) and no custom deployment
+protection rules (the job uses `deployment: false`, which refuses them). It
+holds variables `DEPENDABOT_APP_CLIENT_ID` and `DEPENDABOT_APP_SLUG` and secret
+`DEPENDABOT_APP_PRIVATE_KEY`; the App (`assay-dependabot-lane`) is installed on
+this repository only with Contents and Pull requests read and write. See
+`docs/reference/runner/dependabot-lane-flow.md` for why and for key rotation.
+
 See `docs/REVIEWER-PACK.md` (sectie 3, “Environments & approvals”) and the current `release.yml` for which jobs already use `environment:`.
 
 ---

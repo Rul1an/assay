@@ -466,3 +466,82 @@ fn legacy_entry_point_keeps_its_verdict_and_agrees_with_observed() {
         assert_eq!(legacy, observed, "trace: {lines:?}");
     }
 }
+
+#[test]
+fn coverage_failure_report_cites_input_readings_per_occurrence() {
+    use assay_core::trace::truncation::truncate_string;
+
+    let long = over_ceiling();
+    let mut truncated = long.clone();
+    truncate_string(&mut truncated, "prompt").expect("over-ceiling prompt must truncate");
+    assert!(
+        truncated.contains("...[TRUNCATED]"),
+        "the retained truncated form must carry the in-band sentinel"
+    );
+
+    let trace = trace_file(&[
+        episode_start("ep-1", json!({"prompt": long.clone()}), json!({})),
+        episode_start("ep-2", json!({"prompt": truncated}), json!({})),
+    ]);
+    let cfg = config(&[long.as_str()]);
+
+    for trusted in [TRUSTED, &[] as &[&str]] {
+        let (result, out) = run(&trace, &cfg, trusted);
+        let err = format!(
+            "{:#}",
+            result.expect_err("coverage must fail: the exact prompt is absent")
+        );
+        // The verdict classification and wording are unchanged.
+        assert!(
+            err.contains("matches stage-local truncation shape"),
+            "verdict wording must survive:\n{err}"
+        );
+        assert!(err.contains("     - test-0"), "{err}");
+        let lossy = "       ordinal=1 /input reading=lossy";
+        let unmeasured = "       ordinal=2 /input reading=unmeasured";
+        for line in [lossy, unmeasured] {
+            assert!(
+                err.lines().any(|l| l == line),
+                "expected occurrence line\n  {line}\nin report:\n{err}"
+            );
+        }
+        let pos_lossy = err.lines().position(|l| l == lossy).unwrap();
+        let pos_unmeasured = err.lines().position(|l| l == unmeasured).unwrap();
+        assert!(
+            pos_lossy < pos_unmeasured,
+            "occurrences must stay in ordinal order:\n{err}"
+        );
+        assert!(!err.contains("Trace Verification Passed"), "{err}");
+        if trusted.is_empty() {
+            assert!(
+                !err.contains("measured_clean"),
+                "an empty trust list must never license measured-clean:\n{err}"
+            );
+            assert!(
+                !out.contains("measured_clean"),
+                "an empty trust list must never license measured-clean:\n{out}"
+            );
+        }
+    }
+}
+
+#[test]
+fn read_failure_on_the_first_record_reports_after_ordinal_zero() {
+    let mut file = NamedTempFile::new().unwrap();
+    file.write_all(&[0xff, b'\n']).unwrap();
+    file.flush().unwrap();
+
+    let (result, out) = run(&file, &config(&["hello"]), &[]);
+    assert!(result.is_err(), "an unreadable first record is not EOF");
+    assert_eq!(
+        rows(&out).len(),
+        0,
+        "no event was yielded, so there are no rows:\n{out}"
+    );
+    assert!(
+        out.lines()
+            .any(|l| l.starts_with("truncation incomplete after_ordinal=0 error=\"")),
+        "a first-record read failure must be announced at ordinal zero:\n{out}"
+    );
+    assert!(!out.contains("Trace Verification Passed"), "{out}");
+}

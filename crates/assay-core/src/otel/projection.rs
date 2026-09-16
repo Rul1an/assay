@@ -31,11 +31,8 @@ pub const PROJECTION_SCHEMA: &str = "assay.otel_projection.v0";
 /// Schema id of the tool-decision-truth projection artifact (EXPERIMENTAL).
 pub const TDT_PROJECTION_SCHEMA: &str = "assay.tool_decision_truth.otel_projection.v0";
 
-/// Pinned OTel GenAI semconv target, flagged Development to match upstream status. This projection
-/// targets the GenAI *agent/tool* span surface (`execute_tool`, `gen_ai.tool.*`), which is newer than
-/// the LLM-*client* span surface the rest of the `otel` module pins at 1.28.0 (`semconv::V1_28_0`):
-/// `execute_tool` did not exist in 1.28.0. Both surfaces are Development upstream. A bump is explicit.
-pub const OTEL_GENAI_SEMCONV: &str = "1.37.0-development";
+/// The emit-side name for [`crate::otel::pin::GENAI_SEMCONV_PIN`]. One pin, one value.
+pub use crate::otel::pin::GENAI_SEMCONV_PIN as OTEL_GENAI_SEMCONV;
 
 /// OpenInference is pinned (its span-kind set is stable enough to target by name).
 pub const OPENINFERENCE_SEMCONV: &str = "pinned";
@@ -109,10 +106,17 @@ pub fn project(
     for tool in str_array(capability_surface, "mcp_tools") {
         let mut attrs = Map::new();
         attrs.insert(
-            "gen_ai.operation.name".into(),
+            crate::otel::pin::ATTR_OPERATION_NAME.into(),
             Value::String("execute_tool".into()),
         );
-        attrs.insert("gen_ai.tool.name".into(), Value::String(tool.clone()));
+        attrs.insert(
+            crate::otel::pin::ATTR_PROVIDER_NAME.into(),
+            Value::String(crate::otel::pin::PROVIDER_ASSAY.into()),
+        );
+        attrs.insert(
+            crate::otel::pin::ATTR_TOOL_NAME.into(),
+            Value::String(tool.clone()),
+        );
         attrs.insert(
             "openinference.span.kind".into(),
             Value::String("TOOL".into()),
@@ -283,11 +287,18 @@ pub fn project_tool_decision_truth(decisions: &[TdtDecision]) -> Projection {
 
         let mut attrs = Map::new();
         attrs.insert(
-            "gen_ai.operation.name".into(),
+            crate::otel::pin::ATTR_OPERATION_NAME.into(),
             Value::String("execute_tool".into()),
         );
+        attrs.insert(
+            crate::otel::pin::ATTR_PROVIDER_NAME.into(),
+            Value::String(crate::otel::pin::PROVIDER_ASSAY.into()),
+        );
         if !tool.is_empty() {
-            attrs.insert("gen_ai.tool.name".into(), Value::String(tool.clone()));
+            attrs.insert(
+                crate::otel::pin::ATTR_TOOL_NAME.into(),
+                Value::String(tool.clone()),
+            );
             attrs.insert("tool.name".into(), Value::String(tool.clone()));
         }
         attrs.insert(

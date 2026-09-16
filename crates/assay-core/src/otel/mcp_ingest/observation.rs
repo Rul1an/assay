@@ -12,10 +12,9 @@
 
 use std::sync::Arc;
 
-/// The pinned semconv revision that defines the recognized attribute names. Matches the
-/// `semconv` entry in `tests/fixtures/otel-mcp-ingest-v0/upstream.lock.json`.
-pub(crate) const SEMCONV_PIN: &str =
-    "open-telemetry/semantic-conventions-genai@434c91dcc34ed038e3048c07720ddfed2c6bddfc";
+/// The pinned semconv revision that defines the recognized attribute names.
+/// Re-export of [`crate::otel::pin::GENAI_SEMCONV_PIN`]; emit and ingest share one value.
+pub(crate) use crate::otel::pin::GENAI_SEMCONV_PIN as SEMCONV_PIN;
 
 /// Upstream provenance of one extracted observation: which pinned field it came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
