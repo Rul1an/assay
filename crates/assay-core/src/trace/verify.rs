@@ -1,9 +1,9 @@
-use super::field_readings::{write_event_readings, write_incomplete};
-use super::observation::ObservedTraceEvent;
+use super::field_readings::{render_reading, write_event_readings, write_incomplete};
+use super::observation::{read_observed, ObservedTraceEvent, TruncationReading};
 use super::upgrader::StreamUpgrader;
 use crate::model::EvalConfig;
 use anyhow::Context;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Write};
 use std::path::Path;
@@ -12,7 +12,7 @@ use std::path::Path;
 /// observation carrier is consumed by [`verify_coverage_observed`].
 pub fn verify_coverage(trace_path: &Path, cfg: &EvalConfig) -> anyhow::Result<()> {
     let reader = open(trace_path)?;
-    let prompts = collect_prompts(reader, |_, _| Ok(())).map_err(|f| f.source)?;
+    let prompts = collect_prompts(reader, &[], |_, _| Ok(())).map_err(|f| f.source)?;
     let covered = evaluate_coverage(&prompts, cfg).map_err(|report| anyhow::anyhow!(report))?;
     println!("{}", passed_line(covered));
     Ok(())
@@ -32,7 +32,7 @@ pub fn verify_coverage_observed(
     out: &mut dyn Write,
 ) -> anyhow::Result<()> {
     let reader = open(trace_path)?;
-    let prompts = collect_prompts(reader, |ordinal, observed| {
+    let prompts = collect_prompts(reader, trusted_stages, |ordinal, observed| {
         write_event_readings(out, ordinal, observed, trusted_stages)
             .context("failed to write truncation reading")
     })
@@ -59,12 +59,17 @@ fn open(trace_path: &Path) -> anyhow::Result<BufReader<File>> {
 
 /// One pass over the observed stream. `on_event` sees every successfully yielded
 /// event with its ordinal (1-based, advancing for every event kind); the returned
-/// set holds the EpisodeStart prompts used for coverage membership.
+/// map holds, per retained EpisodeStart prompt, each occurrence's ordinal and
+/// `/input` reading in stream order. The reading goes through [`read_observed`],
+/// with the caller's `trusted_stages`, so the report cites the same carrier the
+/// streamed rows do and a sentinel-bearing value with no loss record stays
+/// unmeasured here too.
 fn collect_prompts(
     reader: BufReader<File>,
+    trusted_stages: &[&str],
     mut on_event: impl FnMut(u64, &ObservedTraceEvent) -> anyhow::Result<()>,
-) -> Result<HashSet<String>, StreamFailure> {
-    let mut prompts = HashSet::new();
+) -> Result<HashMap<String, Vec<(u64, TruncationReading)>>, StreamFailure> {
+    let mut prompts: HashMap<String, Vec<(u64, TruncationReading)>> = HashMap::new();
     let mut ordinal: u64 = 0;
     for event_result in StreamUpgrader::new(reader).observed() {
         let observed = event_result
@@ -80,7 +85,11 @@ fn collect_prompts(
         })?;
         if let super::schema::TraceEvent::EpisodeStart(start) = observed.event() {
             if let Some(prompt) = start.input.get("prompt").and_then(|v| v.as_str()) {
-                prompts.insert(prompt.to_string());
+                let reading = read_observed(&observed, "/input", trusted_stages);
+                prompts
+                    .entry(prompt.to_string())
+                    .or_default()
+                    .push((ordinal, reading));
             }
         }
     }
@@ -93,21 +102,28 @@ fn passed_line(covered: usize) -> String {
 
 /// `Ok(count)` when every configured prompt is present verbatim; otherwise the
 /// failure report. Exact membership and stage-local truncation shape are kept
-/// apart, and neither is an observation reading.
-fn evaluate_coverage(trace_prompts: &HashSet<String>, cfg: &EvalConfig) -> Result<usize, String> {
+/// apart, and the classification still recomputes the expected truncated shape:
+/// each `truncated_shape` id is followed by one line per EpisodeStart occurrence
+/// of the retained prompt, citing that occurrence's `/input` reading from the
+/// observation carrier. The readings are informational and never change the
+/// verdict: an id is listed exactly when the recomputation matches.
+fn evaluate_coverage(
+    trace_prompts: &HashMap<String, Vec<(u64, TruncationReading)>>,
+    cfg: &EvalConfig,
+) -> Result<usize, String> {
     let mut missing: Vec<String> = Vec::new();
-    let mut truncated_shape: Vec<String> = Vec::new();
+    let mut truncated_shape: Vec<(String, String)> = Vec::new();
 
     for tc in &cfg.tests {
-        if trace_prompts.contains(&tc.input.prompt) {
+        if trace_prompts.contains_key(&tc.input.prompt) {
             continue;
         }
 
         let mut expected_truncated = tc.input.prompt.clone();
         if super::truncation::truncate_string(&mut expected_truncated, "prompt").is_some()
-            && trace_prompts.contains(&expected_truncated)
+            && trace_prompts.contains_key(&expected_truncated)
         {
-            truncated_shape.push(tc.id.clone());
+            truncated_shape.push((tc.id.clone(), expected_truncated));
         } else {
             missing.push(tc.id.clone());
         }
@@ -145,8 +161,16 @@ fn evaluate_coverage(trace_prompts: &HashSet<String>, cfg: &EvalConfig) -> Resul
             count_desc(truncated_shape.len()),
             verb
         ));
-        for id in &truncated_shape {
+        for (id, retained) in &truncated_shape {
             report.push_str(&format!("     - {}\n", id));
+            if let Some(occurrences) = trace_prompts.get(retained) {
+                for (ordinal, reading) in occurrences {
+                    report.push_str(&format!(
+                        "       ordinal={ordinal} /input {}\n",
+                        render_reading(reading)
+                    ));
+                }
+            }
         }
     }
 

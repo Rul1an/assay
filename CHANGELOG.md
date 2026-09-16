@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Trace verify coverage failures cite per-occurrence `/input` readings under each stage-local truncation-shape id (#2782).
+
 ## [6.3.1] - 2026-09-15
 
 Patch release consolidating the RC1 and RC2 candidates. Source is the RC2 tree
