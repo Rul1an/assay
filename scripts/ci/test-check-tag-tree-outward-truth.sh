@@ -10,16 +10,44 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/scripts/ci/lib" "$TMP/docs/generated" "$TMP/docs/guides" "$TMP/.github" \
-  "$TMP/crates/assay-evidence/src"
+  "$TMP/crates/assay-evidence/src" "$TMP/crates/assay-core" "$TMP/assay-python-sdk"
 cp "$ROOT/scripts/ci/check-tag-tree-outward-truth.sh" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/check-readme-attestation-truth.py" "$TMP/scripts/ci/"
+cp "$ROOT/scripts/ci/check_internal_dep_versions.py" "$TMP/scripts/ci/"
 cp "$ROOT/scripts/ci/lib/workspace_version.py" "$TMP/scripts/ci/lib/"
+cp "$ROOT/scripts/ci/lib/internal-version-truth.sh" "$TMP/scripts/ci/lib/"
 # The attestation row is read from the real files; its own mutations live in
 # test-check-readme-attestation-truth.sh. Here one mutation proves the release path calls it.
 cp "$ROOT/README.md" "$TMP/README.md"
 cp "$ROOT/crates/assay-evidence/src/attestation.rs" "$TMP/crates/assay-evidence/src/"
 cat > "$TMP/Cargo.toml" <<'EOF'
+[workspace]
+members = ["crates/assay-core", "assay-python-sdk"]
 [workspace.package]
+version = "5.3.0"
+[workspace.dependencies]
+assay-core = { version = "5.3.0", path = "crates/assay-core" }
+EOF
+cat > "$TMP/crates/assay-core/Cargo.toml" <<'EOF'
+[package]
+name = "assay-core"
+version.workspace = true
+EOF
+cat > "$TMP/assay-python-sdk/Cargo.toml" <<'EOF'
+[package]
+name = "assay-it"
+version.workspace = true
+
+[dependencies]
+assay-core = { path = "../crates/assay-core", version = "5.3.0" }
+EOF
+cat > "$TMP/Cargo.lock" <<'EOF'
+[[package]]
+name = "assay-core"
+version = "5.3.0"
+
+[[package]]
+name = "assay-it"
 version = "5.3.0"
 EOF
 cat > "$TMP/docs/generated/agent-golden-path.json" <<'EOF'
@@ -46,7 +74,7 @@ printf '%s\n' 'v5.2.0' > "$TMP/.github/assay-release-tag"
   git init -q
   git config user.email test@example.invalid
   git config user.name test
-  git add -- Cargo.toml CHANGELOG.md README.md .github crates docs scripts
+  git add -- Cargo.toml Cargo.lock CHANGELOG.md README.md .github crates assay-python-sdk docs scripts
   git commit -qm fixture
 )
 
@@ -109,13 +137,58 @@ grep -Fq 'checked-out HEAD' "$TMP/sha-mismatch.out"
 mutations=$((mutations + 1))
 printf 'PASS: exact-sha-mismatch\n'
 
+mutate_single_match() {
+  local name="$1" file="$2" old="$3" new="$4" diagnostic="$5"
+  local backup="$TMP/$file.$name"
+  cp "$TMP/$file" "$backup"
+  python3 - "$backup" "$TMP/$file" "$old" "$new" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1]).read_text(encoding="utf-8")
+old, new = sys.argv[3], sys.argv[4]
+if source.count(old) != 1:
+    raise SystemExit(f"expected exactly 1 match for {old!r}, found {source.count(old)}")
+Path(sys.argv[2]).write_text(source.replace(old, new, 1), encoding="utf-8")
+PY
+  if run_check >"$TMP/$name.out" 2>&1; then
+    echo "FAIL: mutation $name was not observed" >&2
+    exit 1
+  fi
+  grep -Fq "$diagnostic" "$TMP/$name.out" || {
+    cat "$TMP/$name.out" >&2
+    echo "FAIL: mutation $name missed diagnostic: $diagnostic" >&2
+    exit 1
+  }
+  mv "$backup" "$TMP/$file"
+  mutations=$((mutations + 1))
+  printf 'PASS: %s\n' "$name"
+}
+
+mutate_single_match stale-workspace-dep-pin Cargo.toml \
+  'assay-core = { version = "5.3.0", path = "crates/assay-core" }' \
+  'assay-core = { version = "5.2.0", path = "crates/assay-core" }' \
+  'declares version'
+mutate_single_match stale-lock-entry Cargo.lock \
+  $'name = "assay-core"\nversion = "5.3.0"' \
+  $'name = "assay-core"\nversion = "5.2.0"' \
+  'assay-core'
+mutate_single_match stale-python-sdk-lock-entry Cargo.lock \
+  $'name = "assay-it"\nversion = "5.3.0"' \
+  $'name = "assay-it"\nversion = "5.2.0"' \
+  'assay-it'
+mutate_single_match missing-lock-count scripts/ci/check_internal_dep_versions.py \
+  'print(f"lock_count\t{lock_checked}")' \
+  '# lock_count suppressed' \
+  'internal dependency check reported no lock count; the enumeration is broken'
+
 # Candidate identity and install availability are deliberately separate contracts.
 printf '%s\n' 'v4.9.0' > "$TMP/.github/assay-release-tag"
 run_check >/dev/null
 printf 'PASS: install-pin-does-not-govern-candidate-identity\n'
 
-if [ "$mutations" -ne 7 ]; then
-  echo "FAIL: expected 7 observed mutations, got $mutations" >&2
+if [ "$mutations" -ne 11 ]; then
+  echo "FAIL: expected 11 observed mutations, got $mutations" >&2
   exit 1
 fi
 printf 'tag-tree outward-truth mutations: %s observed\n' "$mutations"
@@ -209,8 +282,10 @@ for required in (
     ".github/workflows/release.yml",
     "scripts/ci/check-tag-tree-outward-truth.sh",
     "scripts/ci/check-readme-attestation-truth.py",
+    "scripts/ci/check_internal_dep_versions.py",
     "scripts/ci/test-check-tag-tree-outward-truth.sh",
     "scripts/ci/lib/clear-git-repository-env.sh",
+    "scripts/ci/lib/internal-version-truth.sh",
 ):
     if not pattern.search(required):
         raise SystemExit(f"tag-tree outward-truth hook omits {required}")

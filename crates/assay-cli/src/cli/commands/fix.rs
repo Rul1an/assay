@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Context};
-use dialoguer::{theme::ColorfulTheme, Confirm};
 use similar::TextDiff;
 
 use assay_core::agentic::{build_suggestions, AgenticCtx, RiskLevel};
@@ -10,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use crate::cli::args::{FixArgs, MaxRisk};
+use crate::cli::interaction::confirm;
 use crate::cli::util::{
     decide_exit, decide_repair_failure_exit, infer_policy_path, normalize_severity,
 };
@@ -79,8 +79,6 @@ pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         ps.sort_by(|a, b| a.id.cmp(&b.id));
     }
 
-    let theme = ColorfulTheme::default();
-
     let mut applied: Vec<String> = Vec::new();
     let mut failed: Vec<(String, String)> = Vec::new();
 
@@ -93,15 +91,7 @@ pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
                 p.title, p.id, p.risk, file
             );
 
-            let do_apply = if args.yes {
-                true
-            } else {
-                Confirm::with_theme(&theme)
-                    .with_prompt(prompt)
-                    .default(false)
-                    .interact()
-                    .unwrap_or(false)
-            };
+            let do_apply = confirm(&prompt, args.yes || args.dry_run)?;
 
             if !do_apply {
                 continue;
