@@ -143,7 +143,7 @@ cargo install assay-cli --version 5.1.0 --locked
 cargo install assay-cli --version 5.1.0 --locked
 pip install assay-it
 assay-v5.1.0-x86_64-pc-windows-msvc.zip
-ghcr.io/rul1an/assay-mcp-server@sha256:47e2254c130f6892172b3386a89030abfc0cb00df0dac4b218393d421b08f2fd
+The v5.1.0 image index is `ghcr.io/rul1an/assay-mcp-server@sha256:47e2254c130f6892172b3386a89030abfc0cb00df0dac4b218393d421b08f2fd`
 DOC
 cat > "$TMP/docs/getting-started/index.md" <<'DOC'
 cargo install assay-cli --version 5.1.0 --locked
@@ -466,6 +466,10 @@ mutate_and_expect_failure ghcr-installation-missing-digest docs/getting-started/
   's/ghcr\.io\/rul1an\/assay-mcp-server@sha256:[0-9a-f]\{64\}//' 'missing digest-pinned GHCR image reference'
 mutate_and_expect_failure ghcr-installation-unpinned-tag docs/getting-started/installation.md \
   's/assay-v5.1.0-x86_64-pc-windows-msvc.zip/docker pull ghcr.io\/rul1an\/assay-mcp-server:v5.1.0/' 'unpinned GHCR image tag reference'
+mutate_and_expect_failure ghcr-installation-other-image docs/getting-started/installation.md \
+  's/assay-mcp-server/assay/' 'unsupported GHCR image reference'
+mutate_and_expect_failure ghcr-installation-stale-tag docs/getting-started/installation.md \
+  's/v5.1.0 image index/v5.0.0 image index/' 'image digest line must name v5.1.0'
 mutate_and_expect_failure ghcr-air-gapped docs/use-cases/air-gapped.md \
   's/No runtime image is shipped./docker pull ghcr.io\/rul1an\/assay:latest/' 'unsupported GHCR image'
 mutate_and_expect_failure stale-windows-asset docs/getting-started/installation.md \
@@ -1212,8 +1216,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 128 ]; then
-  echo "FAIL: expected 128 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 130 ]; then
+  echo "FAIL: expected 130 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 if [ "$control_count" -ne 2 ]; then

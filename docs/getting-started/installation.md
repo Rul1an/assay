@@ -32,7 +32,9 @@ Assay documents the container image below as a verified release channel. Homebre
 
 ## Container image (assay-mcp-server)
 
-Pull and run the multi-arch `assay-mcp-server` image by index digest (tags such as `v6.3.1`, `6.3`, and `latest` are convenience aliases; the digest is the pinned reference):
+The `v6.3.1` image index is `ghcr.io/rul1an/assay-mcp-server@sha256:47e2254c130f6892172b3386a89030abfc0cb00df0dac4b218393d421b08f2fd` (tags such as `v6.3.1`, `6.3`, and `latest` are convenience aliases; the digest is the pinned reference).
+
+Pull and run the multi-arch `assay-mcp-server` image by index digest:
 
 ```bash
 docker run --rm ghcr.io/rul1an/assay-mcp-server@sha256:47e2254c130f6892172b3386a89030abfc0cb00df0dac4b218393d421b08f2fd --version
