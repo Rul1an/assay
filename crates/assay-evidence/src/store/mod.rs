@@ -180,8 +180,9 @@ pub trait BundleStore: Send + Sync {
     ///
     /// # Note
     ///
-    /// This is a convenience operation. For authoritative listings,
-    /// use `list_bundles_for_run` with explicit run IDs.
+    /// The `bundles/` prefix this lists is the canonical set. `list_bundles_for_run` reads the
+    /// `runs/` index, which is derived from the bundles' manifests and is not authoritative:
+    /// a `.ref` can be missing or stale without any canonical object changing.
     async fn list_bundles(
         &self,
         prefix: Option<&str>,
