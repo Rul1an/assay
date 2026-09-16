@@ -517,9 +517,18 @@ check_absent_regex docs/getting-started/installation.md \
   'brew install .*assay' 'unsupported Homebrew channel'
 check_absent_regex docs/getting-started/installation.md \
   'scoop (bucket add|install) assay' 'unsupported Scoop channel'
-for file in docs/getting-started/installation.md docs/getting-started/ci-integration.md docs/use-cases/air-gapped.md; do
+for file in docs/getting-started/ci-integration.md docs/use-cases/air-gapped.md; do
   check_absent_regex "$file" 'ghcr\.io/.*/assay' 'unsupported GHCR image'
 done
+# installation.md must document the verified assay-mcp-server image pinned by digest.
+# The digest is release-specific and updated on post-release pin promotion PRs;
+# it is not tied to PUBLISHED_TAG by the script.
+if ! grep -Eq 'ghcr\.io/rul1an/assay-mcp-server@sha256:[0-9a-f]{64}' docs/getting-started/installation.md; then
+  fail "docs/getting-started/installation.md: missing digest-pinned GHCR image reference"
+fi
+if grep -E 'ghcr\.io/rul1an/assay-mcp-server:' docs/getting-started/installation.md | grep -Evq '@sha256:[0-9a-f]{64}'; then
+  fail "docs/getting-started/installation.md: unpinned GHCR image tag reference"
+fi
 linux_archive="assay-$PUBLISHED_TAG-x86_64-unknown-linux-gnu.tar.gz"
 linux_archive_root="${linux_archive%.tar.gz}"
 linux_archive_url="https://github.com/Rul1an/assay/releases/download/$PUBLISHED_TAG/$linux_archive"

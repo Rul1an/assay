@@ -28,7 +28,26 @@ Windows x86-64 uses:
 assay-v6.3.1-x86_64-pc-windows-msvc.zip
 ```
 
-Assay does not currently document Homebrew, Scoop, or a public GHCR image as verified release channels.
+Assay documents the container image below as a verified release channel. Homebrew and Scoop remain unsupported.
+
+## Container image (assay-mcp-server)
+
+Pull and run the multi-arch `assay-mcp-server` image by index digest (tags such as `v6.3.1`, `6.3`, and `latest` are convenience aliases; the digest is the pinned reference):
+
+```bash
+docker run --rm ghcr.io/rul1an/assay-mcp-server@sha256:47e2254c130f6892172b3386a89030abfc0cb00df0dac4b218393d421b08f2fd --version
+```
+
+The image runs as uid:gid 65532:65532 (non-root) on a minimal base, and the index contains both linux/amd64 and linux/arm64 images.
+
+Verify SLSA provenance and CycloneDX SBOM attestations:
+
+```bash
+gh attestation verify oci://ghcr.io/rul1an/assay-mcp-server@sha256:47e2254c130f6892172b3386a89030abfc0cb00df0dac4b218393d421b08f2fd -R Rul1an/assay --predicate-type https://slsa.dev/provenance/v1
+gh attestation verify oci://ghcr.io/rul1an/assay-mcp-server@sha256:47e2254c130f6892172b3386a89030abfc0cb00df0dac4b218393d421b08f2fd -R Rul1an/assay --predicate-type https://cyclonedx.org/bom
+```
+
+Verified status means [release run 34972237394](https://github.com/Rul1an/assay/actions/runs/34972237394) pulled the image by digest, verified attestations, and executed `--version` on both architectures.
 
 ## Python SDK and pytest plugin
 
