@@ -34,6 +34,9 @@ source_tag="v${source_version}"
 [ "$CANDIDATE_TAG" = "$source_tag" ] ||
   fail "candidate tag $CANDIDATE_TAG does not match workspace source tag $source_tag"
 
+# shellcheck source=scripts/ci/lib/internal-version-truth.sh
+source "$ROOT/scripts/ci/lib/internal-version-truth.sh"
+
 IFS=$'\t' read -r contract_source_version contract_source_tag < <(
   python3 - "$ROOT/docs/generated/agent-golden-path.json" <<'PY'
 import json
