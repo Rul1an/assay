@@ -53,6 +53,11 @@ jobs:
       - name: Exercise runner recovery liveness and queue scoping
         run: bash scripts/ci/test-runner-recovery-liveness.sh
 
+      # #3035: the Dependabot lane must act as its App, never as GITHUB_TOKEN, and a refused
+      # update or auto-merge must fail the run.
+      - name: Exercise the Dependabot lane App-token contract
+        run: bash scripts/ci/test-dependabot-maintenance.sh
+
       - name: Build CLI once
         run: cargo build --release --workspace --exclude assay-ebpf
 
