@@ -245,6 +245,18 @@ No stage is trusted by default, so a fresh run shows `lossy` or `unmeasured` onl
 producer. Trust never turns `lossy` into anything else. The readings are informational: the
 exit code is still decided by prompt coverage alone.
 
+When a configured prompt is absent verbatim but its stage-local truncated shape is present
+in the trace, the failure report keeps that verdict and cites one line per `EpisodeStart`
+occurrence of the retained prompt, each with that occurrence's `/input` reading:
+
+```text
+❌ Trace Verification Failed (1 unresolved test):
+  • 1 test matches stage-local truncation shape (exact prompt coverage cannot be established):
+     - test-0
+       ordinal=1 /input reading=lossy
+       ordinal=2 /input reading=unmeasured
+```
+
 ```bash
 assay trace verify --trace traces/golden.jsonl --config eval.yaml \
   --trust-stage assay.trace.upgrader
