@@ -14,9 +14,13 @@ Setup and maintenance for the GitHub Actions self-hosted runner used by Kernel M
 The `health_check.sh` script monitors the runner and auto-recovers from common failures.
 Recovery re-registers the runner, which stops its service; it therefore refuses while the
 GitHub API reports the runner busy, while a `Runner.Worker` process exists in the guest, or
-when that guest probe fails or times out. The "offline with queued jobs" trigger counts only
-waiting jobs that require the `assay-bpf-runner` label, not every queued run in the repository
-(#2985). `--recover` is subject to the same refusals.
+when that guest probe fails or times out. `require_guest_quiescence` refuses unless the guest
+probe returns exactly 1, so a hung `Runner.Worker` or a broken `multipass exec` pins the cron
+and `--recover` into indefinite refusal. Manual remediation:
+`multipass exec assay-bpf-runner -- sudo systemctl status 'actions.runner*'` ;
+`pgrep -a Runner.Worker` ; then restart the unit or the VM by hand. The "offline with queued
+jobs" trigger counts only waiting jobs that require the `assay-bpf-runner` label, not every
+queued run in the repository (#2985). `--recover` is subject to the same refusals.
 
 ```bash
 # Check status
@@ -51,7 +55,7 @@ waiting jobs that require the `assay-bpf-runner` label, not every queued run in 
 - Configure only the custom labels: `bpf-lsm,assay-bpf-runner`
 - GitHub adds read-only labels such as `self-hosted`, `Linux`, and the current architecture automatically
 
-**GitHub Actions backup:** A workflow (`runner-health.yml`) runs every 15 minutes and creates a GitHub issue only when the runner is unavailable with queued jobs that require the `assay-bpf-runner` label, or when the monitor cannot classify that label-specific queue. Kernel Matrix cleanup jobs also use per-ref concurrency so stale self-hosted cleanup work does not keep piling up while the runner is offline.
+**GitHub Actions backup:** A workflow (`runner-health.yml`) runs every six hours (`cron: '0 */6 * * *'`) and creates a GitHub issue only when the runner is unavailable with queued jobs that require the `assay-bpf-runner` label, or when the monitor cannot classify that label-specific queue. It cannot detect the canceled → exit 0 → inactive shape (#2985 C15): a canceled job whose runner process then exits 0 and leaves the service inactive still looks quiet to this monitor. Kernel Matrix cleanup jobs also use per-ref concurrency so stale self-hosted cleanup work does not keep piling up while the runner is offline.
 
 ## "No space left on device" (Kernel Matrix CI)
 
