@@ -23,13 +23,16 @@ use std::fmt;
 /// the limit as a parameter, so this exercises the same code path.
 const MAX_MSG_BYTES: usize = 4_096;
 
-/// Duplicate detection over the top-level members of one JSON object line.
+/// Duplicate detection over the four request members of one JSON object line.
 ///
 /// Implemented as a serde visitor rather than a string scan so member-name
 /// decoding (escapes, `\uXXXX`, surrogate pairs) is serde's own: a scan that
 /// compared raw slices would disagree with the typed parser about
 /// `{"id":1,"id":2}` spelled with escapes, and the oracle would assert on the
 /// wrong tree. Nested members are skipped; only the top level decides.
+/// Unknown top-level names, duplicated or not, do not count: `JsonRpcRequest`
+/// has no `deny_unknown_fields` and never reads them, so they have no
+/// last-wins ambiguity.
 struct HasDuplicate(bool);
 
 struct HasDuplicateVisitor;
@@ -45,7 +48,7 @@ impl<'de> Visitor<'de> for HasDuplicateVisitor {
         let mut seen = HashSet::new();
         let mut duplicate = false;
         while let Some(key) = map.next_key::<String>()? {
-            if !seen.insert(key) {
+            if is_request_member(&key) && !seen.insert(key) {
                 duplicate = true;
             }
             let _: IgnoredAny = map.next_value()?;
@@ -60,9 +63,19 @@ impl<'de> serde::Deserialize<'de> for HasDuplicate {
     }
 }
 
-/// True when `line` is a JSON object with a repeated top-level member name.
-/// Only called when `line` already parses as a `Value` object, so a `false`
-/// here means "parsed object, no duplicates" rather than "unparsable".
+/// The four members `JsonRpcRequest` deserializes.
+/// A duplicate among these is the last-wins ambiguity serde rejects; a
+/// duplicate of any other top-level name is ignored the same way a unique
+/// unknown member is.
+fn is_request_member(name: &str) -> bool {
+    matches!(name, "jsonrpc" | "method" | "params" | "id")
+}
+
+/// True when `line` is a JSON object with a repeated request member
+/// (`jsonrpc`, `method`, `params`, or `id`). Duplicates of unknown members
+/// do not count. Only called when `line` already parses as a `Value` object,
+/// so a `false` here means "parsed object, no request-member duplicates"
+/// rather than "unparsable".
 fn has_duplicate_top_level_member(line: &str) -> bool {
     serde_json::from_str::<HasDuplicate>(line)
         .map(|found| found.0)
