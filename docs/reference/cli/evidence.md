@@ -571,6 +571,7 @@ The human report (stderr) closes with exactly one of:
 ```
 No differences in retained verified events: run_root equal.
 Retained verified events differ: run_root differs; <n> added, <m> removed by content id.
+Retained verified events differ: run_root differs; no content id added or removed (order or multiplicity differs).
 ```
 
 A `run_root` that differs while no content id is added or removed means the same events in a

@@ -2,7 +2,7 @@
 //!
 //! Every string that comes out of a bundle passes through `sanitize_terminal` before it reaches
 //! the terminal; content ids are printed as verified (they are `sha256:` hex by construction).
-//! The closing line is one of two fixed sentences pinned by
+//! The closing line is one of three fixed sentences pinned by
 //! `tests/evidence_diff_stdout_contract.rs`, and the differs sentence is emitted whenever the
 //! verified `run_root`s differ, whatever the subject projections say (#3037).
 
