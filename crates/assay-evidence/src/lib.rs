@@ -25,12 +25,12 @@ pub use bundle::{
 };
 pub use coding_agent::{
     coding_agent_claim_ceiling, coding_agent_claim_decision, coding_agent_evidence_event,
-    coding_agent_weakest_ceiling, CodingAgentClaimCeiling, CodingAgentClaimDecision,
-    CodingAgentClaimKind, CodingAgentCoverage, CodingAgentCoverageGap, CodingAgentCoverageReport,
-    CodingAgentCoverageState, CodingAgentDeclaredScope, CodingAgentEvidencePayload,
-    CodingAgentGateDecision, CodingAgentNetworkPolicy, CodingAgentObservedEffects,
-    CodingAgentSourceClass, CodingAgentWeakestCeiling, CODING_AGENT_EVIDENCE_EVENT_TYPE,
-    CODING_AGENT_EVIDENCE_SOURCE,
+    coding_agent_weakest_ceiling, session_coverage_claim_decision, session_finding_claim_decision,
+    CodingAgentClaimCeiling, CodingAgentClaimDecision, CodingAgentClaimKind, CodingAgentCoverage,
+    CodingAgentCoverageGap, CodingAgentCoverageReport, CodingAgentCoverageState,
+    CodingAgentDeclaredScope, CodingAgentEvidencePayload, CodingAgentGateDecision,
+    CodingAgentNetworkPolicy, CodingAgentObservedEffects, CodingAgentSourceClass,
+    CodingAgentWeakestCeiling, CODING_AGENT_EVIDENCE_EVENT_TYPE, CODING_AGENT_EVIDENCE_SOURCE,
 };
 pub use coverage_attestation::{
     cap1_claim_decision, cap1_claim_decision_with, verify_cap1_document, verify_cap1_rules,
@@ -65,8 +65,8 @@ pub use trust_card::{
     TRUST_CARD_SCHEMA_VERSION,
 };
 pub use types::{
-    Envelope, EvidenceEvent, ProducerMeta, ASSAY_EVIDENCE_SPEC_VERSION, CE_SPECVERSION,
-    SPEC_VERSION,
+    Envelope, EvidenceEvent, PayloadSessionCoverage, ProducerMeta, ASSAY_EVIDENCE_SPEC_VERSION,
+    CE_SPECVERSION, SESSION_COVERAGE_EVENT_TYPE, SPEC_VERSION,
 };
 
 // Re-export bytes for CLI convenience

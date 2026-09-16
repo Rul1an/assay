@@ -6,7 +6,7 @@
 //! these facts, but the evidence event itself stays an observed-effect record.
 
 use crate::crypto::id::compute_content_hash;
-use crate::types::EvidenceEvent;
+use crate::types::{EvidenceEvent, PayloadSessionCoverage, PayloadSessionFinding};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -255,6 +255,46 @@ pub fn coding_agent_claim_decision(
         rule: "observed_coverage_allows_claim".to_string(),
     }
 }
+
+/// Return the claim decision for a session finding given an optional sibling coverage event.
+///
+/// Delegating to [`coding_agent_claim_decision`]:
+/// - A finding with no sibling reads as the most restrictive coverage ([`CodingAgentCoverageState::Partial`]),
+///   so absence claims stay blocked.
+/// - A sibling for a different `rule_id` does not apply and fails closed as no sibling.
+/// - `Observed` coverage counts only with a non-producer source class; otherwise it reads
+///   as [`CodingAgentCoverageState::SelfReported`].
+pub fn session_finding_claim_decision(
+    finding: &PayloadSessionFinding,
+    sibling: Option<&PayloadSessionCoverage>,
+    claim_kind: CodingAgentClaimKind,
+) -> CodingAgentClaimDecision {
+    // A sibling for another rule must not apply (join on rule_id).
+    let sibling = sibling.filter(|s| s.rule_id == finding.rule_id);
+
+    let (source_class, coverage) = match sibling {
+        None => (
+            CodingAgentSourceClass::ProducerReported,
+            CodingAgentCoverageState::Partial,
+        ),
+        Some(s) => {
+            let coverage = match s.coverage {
+                // Observed counts only with a non-producer source class; otherwise it reads as self-reported.
+                CodingAgentCoverageState::Observed
+                    if s.source_class == CodingAgentSourceClass::ProducerReported =>
+                {
+                    CodingAgentCoverageState::SelfReported
+                }
+                other => other,
+            };
+            (s.source_class, coverage)
+        }
+    };
+
+    coding_agent_claim_decision(source_class, coverage, claim_kind)
+}
+
+pub use session_finding_claim_decision as session_coverage_claim_decision;
 
 /// Per-dimension decisions for one evidence payload, for one kind of claim.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
