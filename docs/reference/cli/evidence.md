@@ -661,3 +661,33 @@ verifier independently applies strict parsing to the decoded signed Statement.
 Key selection remains the caller's trust policy. Verification does not establish a trust
 root, transparency inclusion, observation completeness, provider outcomes or live host
 activity. See the [v1 predicate contract](../../attestation/evidence-bundle/v1.md).
+
+## Verify a coverage attestation
+
+```bash
+assay evidence verify-coverage-attestation --document coverage.json
+```
+
+The command admits one local CAP-1 document under the existing byte ceiling
+(`min(--max-bytes, 1048576)`), runs the normative verifier, and writes one JSON
+document with schema `assay.evidence.coverage_attestation.verify.v1`. Stdin is
+not accepted. Human text is not written on stdout. A refusal prints one
+value-free line on stderr from the verifier's `Display`.
+
+Stdout `outcome` is `cap1_conforms`, `cap1_refused`, or
+`verification_unavailable`. Exit 0 is conformance; exit 2 is a contract
+refusal (`E_EVIDENCE_CONTRACT`) or an unreadable input
+(`E_EVIDENCE_UNREADABLE`). A stdout write or flush failure exits 3.
+
+`input_sha256` is the SHA-256 of the complete raw bytes, or null when those
+bytes were not completely read. `schema_pin` names the embedded CAP-1 schema
+and its digest. `document` carries profile, stratum count, `integrity.complete`
+as `integrity_complete`, and the absence-assertion count; it is null when the
+document did not conform. `claim_gate` is always `not_evaluated`.
+
+Conformance is internal consistency of one document, not producer truth, not
+capture completeness. The claim gate did not run. `verification_unavailable`
+is not a refusal. A conforming document is not a clean result.
+
+`--max-bytes` selects a budget and never raises the hard maximum. Nobody signs
+this document; it is a fresh local result.
