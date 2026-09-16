@@ -98,6 +98,11 @@ pub enum TraceSub {
         trace: PathBuf,
         #[arg(long)]
         config: PathBuf,
+        /// Stage whose clean truncation observation may read `measured_clean`.
+        /// Repeat once per stage. Nothing is trusted by default; reported loss
+        /// reads `lossy` regardless. The ingest stage is `assay.trace.upgrader`.
+        #[arg(long = "trust-stage", value_name = "STAGE")]
+        trust_stage: Vec<String>,
     },
     /// Precompute embeddings for trace entries
     PrecomputeEmbeddings {

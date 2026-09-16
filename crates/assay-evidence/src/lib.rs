@@ -33,10 +33,12 @@ pub use coding_agent::{
     CODING_AGENT_EVIDENCE_SOURCE,
 };
 pub use coverage_attestation::{
-    cap1_claim_decision, cap1_claim_decision_with, Cap1AbsenceAssertion, Cap1Basis, Cap1BasisKind,
+    cap1_claim_decision, cap1_claim_decision_with, verify_cap1_document, verify_cap1_rules,
+    verify_cap1_rules_with, Cap1AbsenceAssertion, Cap1AdmissionLimits, Cap1Basis, Cap1BasisKind,
     Cap1ClaimDecision, Cap1Digest, Cap1Disposition, Cap1Document, Cap1Finding, Cap1Gap,
-    Cap1Integrity, Cap1Producer, Cap1RelyingPartyContext, Cap1Rule, Cap1Stratum, Cap1Subject,
-    Cap1Unexamined,
+    Cap1Integrity, Cap1NormativeRule, Cap1Producer, Cap1Refusal, Cap1RelyingPartyContext, Cap1Rule,
+    Cap1Stage, Cap1Stratum, Cap1Subject, Cap1SyntaxFault, Cap1Unexamined, CAP1_SCHEMA_JSON,
+    CAP1_SCHEMA_SHA256, CAP1_SCHEMA_SOURCE,
 };
 pub use delegated_exec::{delegated_exec_observation_event, DELEGATED_EXEC_OBSERVATION_SCHEMA};
 pub use denial_marker::{

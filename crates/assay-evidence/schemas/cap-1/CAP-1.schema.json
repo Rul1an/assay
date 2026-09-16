@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://certisyn.com/spec/cap-1/CAP-1.schema.json",
+  "title": "Coverage Attestation Profile, version 1",
+  "description": "A tool-agnostic statement of what an examination examined, what it did not, and why, sufficient to make an assertion of absence falsifiable.",
+  "type": "object",
+  "required": ["profile", "subject", "strata", "integrity"],
+  "additionalProperties": false,
+  "properties": {
+    "profile": { "const": "cap/1" },
+    "subject": {
+      "type": "object",
+      "required": ["kind", "ref"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "description": "What was examined: artefact, corpus, device, collection, stream." },
+        "ref":  { "type": "string", "description": "Opaque reference to the subject. Not required to be resolvable by the reader." },
+        "digest": {
+          "type": "object", "required": ["algorithm", "value"], "additionalProperties": false,
+          "properties": { "algorithm": { "type": "string" }, "value": { "type": "string", "pattern": "^[0-9a-f]{32,128}$" } }
+        }
+      }
+    },
+    "strata": {
+      "type": "array", "minItems": 1,
+      "description": "One entry per population over which coverage is claimed. A stratum is a denominator and its accounting.",
+      "items": {
+        "type": "object",
+        "required": ["id", "population", "basis", "eligible", "examined", "unexamined"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+          "population": { "type": "string", "description": "What is being counted: detector units, records, containers, pages, time windows." },
+          "basis": {
+            "type": "object",
+            "required": ["kind"],
+            "additionalProperties": false,
+            "description": "How the denominator was determined. A denominator without a basis is an assertion, not a measurement.",
+            "properties": {
+              "kind": { "enum": ["catalogue", "enumeration", "declared"] },
+              "catalogue_digest": { "type": "string", "pattern": "^[0-9a-f]{32,128}$" },
+              "catalogue_version": { "type": "string" },
+              "enumeration_method": { "type": "string" },
+              "note": { "type": "string" }
+            }
+          },
+          "eligible": { "type": "integer", "minimum": 0 },
+          "examined": { "type": "integer", "minimum": 0 },
+          "unexamined": {
+            "type": "array",
+            "description": "Every unit not examined, individually accounted. A count alone is not an accounting.",
+            "items": {
+              "type": "object",
+              "required": ["unit", "disposition"],
+              "additionalProperties": false,
+              "properties": {
+                "unit": { "type": "string" },
+                "disposition": {
+                  "enum": ["not_applicable","disabled_by_policy","unsupported_input","resource_exhausted","failed","unavailable","out_of_scope","withheld"]
+                },
+                "detail": { "type": "string" },
+                "withheld_digest": { "type": "string", "pattern": "^[0-9a-f]{32,128}$" }
+              }
+            }
+          },
+          "supports": {
+            "type": "array",
+            "description": "The claim classes this stratum's coverage is offered in support of. Bounds what the attestation may be cited for.",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "absence_assertions": {
+      "type": "array",
+      "description": "Every assertion that something was not observed. Each MUST name the stratum that bounds it.",
+      "items": {
+        "type": "object",
+        "required": ["assertion", "stratum"],
+        "additionalProperties": false,
+        "properties": {
+          "assertion": { "type": "string" },
+          "stratum": { "type": "string" },
+          "qualifier": { "type": "string" }
+        }
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "required": ["complete", "statement"],
+      "additionalProperties": false,
+      "properties": {
+        "complete": { "type": "boolean", "description": "True only if every dispatched unit reached a recorded outcome." },
+        "statement": { "type": "string" },
+        "uncapped_verdict": { "type": ["string", "null"] },
+        "capped_to": { "type": ["string", "null"], "description": "Required when complete is false. The verdict a reader may rely on given incomplete execution." },
+        "unaccounted": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "producer": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "name": { "type": "string" }, "version": { "type": "string" }, "policy": { "type": "string" } }
+    },
+    "as_of": { "type": "string" }
+  }
+}

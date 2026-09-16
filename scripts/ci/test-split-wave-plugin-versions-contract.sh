@@ -15,6 +15,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERSIONS="${ROOT}/scripts/ci/cargo-plugin-versions.sh"
 WORKFLOW="${ROOT}/.github/workflows/split-wave0-gates.yml"
+SEMVER_WORKFLOW="${ROOT}/.github/workflows/semver-public.yml"
 OPTIONAL="${ROOT}/scripts/ci/optional-public-api-drift.sh"
 
 fail() {
@@ -41,6 +42,7 @@ if awk '
 fi
 
 [[ -f "${WORKFLOW}" ]] || fail "missing ${WORKFLOW#"${ROOT}"/}"
+[[ -f "${SEMVER_WORKFLOW}" ]] || fail "missing ${SEMVER_WORKFLOW#"${ROOT}"/}"
 [[ -f "${OPTIONAL}" ]] || fail "missing ${OPTIONAL#"${ROOT}"/}"
 [[ -f "${VERSIONS}" ]] || fail "missing shared version source ${VERSIONS#"${ROOT}"/}"
 
@@ -278,8 +280,8 @@ ${install_run}"
     || fail "semver-public install must set RUSTUP_TOOLCHAIN: stable (step/job) or call setup-rust before the install"
 
   job="$(semver_public_job "${wf}")"
-  # Preserve semver gate logic: baseline from last release tag, self-test, allowlist check-release.
-  grep -q 'Resolve semver baseline from the last release tag' <<<"${job}" \
+  # Preserve semver gate logic: stable baseline, self-test, allowlist check-release.
+  grep -q 'Resolve semver baseline from the last stable release tag' <<<"${job}" \
     || fail "semver-public lost baseline resolution step"
   grep -q 'scripts/ci/test-semver-gate.sh' <<<"${job}" \
     || fail "semver-public lost semver gate self-test"
@@ -318,30 +320,26 @@ check_d2_plugin_invocation_bindings() {
 # step-scoped install; plugin invocations bind stable explicitly; ordinary workspace cargo
 # follows rust-toolchain.toml. Reject the pre-D4 "still follow(s) rust-toolchain.toml" wording.
 check_d2_install_comment_semantics() {
-  local wf="$1" step window
-  for step in \
-    "Install cargo-nextest and cargo-hack" \
-    "Install cargo-semver-checks"; do
-    window="$(grep -B5 -F -- "- name: ${step}" "${wf}" || true)"
-    [[ -n "${window}" ]] || fail "missing step: ${step}"
-    grep -qF 'step-scoped' <<<"${window}" \
-      || fail "${step}: comments must state step-scoped install"
-    grep -qF 'plugin invocations bind stable explicitly' <<<"${window}" \
-      || fail "${step}: comments must state plugin invocations bind stable explicitly"
-    grep -qF 'ordinary workspace cargo follows rust-toolchain.toml' <<<"${window}" \
-      || fail "${step}: comments must state ordinary workspace cargo follows rust-toolchain.toml"
-    if grep -qE 'still follow(s)?[[:space:]]+rust-toolchain\.toml' <<<"${window}"; then
-      fail "${step}: stale still follow(s) rust-toolchain.toml claim"
-    fi
-  done
-  ok "D2 install-step comment semantics hold for ${wf##*/}"
+  local wf="$1" step="$2" window
+  window="$(grep -B5 -F -- "- name: ${step}" "${wf}" || true)"
+  [[ -n "${window}" ]] || fail "missing step: ${step}"
+  grep -qF 'step-scoped' <<<"${window}" \
+    || fail "${step}: comments must state step-scoped install"
+  grep -qF 'plugin invocations bind stable explicitly' <<<"${window}" \
+    || fail "${step}: comments must state plugin invocations bind stable explicitly"
+  grep -qF 'ordinary workspace cargo follows rust-toolchain.toml' <<<"${window}" \
+    || fail "${step}: comments must state ordinary workspace cargo follows rust-toolchain.toml"
+  if grep -qE 'still follow(s)?[[:space:]]+rust-toolchain\.toml' <<<"${window}"; then
+    fail "${step}: stale still follow(s) rust-toolchain.toml claim"
+  fi
+  ok "D2 install-step comment semantics hold for ${wf##*/}:${step}"
 }
 
-check_workflow() {
-  local wf="$1"
-  check_feature_matrix_install "${wf}"
-  check_semver_public_install "${wf}"
-  check_d2_install_comment_semantics "${wf}"
+check_workflows() {
+  check_feature_matrix_install "${WORKFLOW}"
+  check_semver_public_install "${SEMVER_WORKFLOW}"
+  check_d2_install_comment_semantics "${WORKFLOW}" "Install cargo-nextest and cargo-hack"
+  check_d2_install_comment_semantics "${SEMVER_WORKFLOW}" "Install cargo-semver-checks"
 }
 
 # --- Optional helper: semver-checks pin (public-api pin/bind owned by CI-4D3) -----------
@@ -374,7 +372,7 @@ check_optional_helper() {
   ok "optional-public-api-drift.sh semver-checks pin contract holds"
 }
 
-check_workflow "${WORKFLOW}"
+check_workflows
 check_optional_helper "${OPTIONAL}"
 
 # --- Behavioral: assertion binds install location; nextest banner tolerated ------------
@@ -531,7 +529,7 @@ if n != 1:
     raise SystemExit(f"could not strip nextest --version (n={n})")
 dst.write_text(new)
 PY
-if ( check_workflow "${mutant}" ) >/dev/null 2>&1; then
+if ( check_feature_matrix_install "${mutant}" ) >/dev/null 2>&1; then
   fail "removing nextest --version left the contract green"
 fi
 ok "removing nextest --version turns the contract red"
@@ -548,7 +546,7 @@ if old not in text:
     raise SystemExit("could not find versioned hack install line to literalize")
 dst.write_text(text.replace(old, new, 1))
 PY
-if ( check_workflow "${literal}" ) >/dev/null 2>&1; then
+if ( check_feature_matrix_install "${literal}" ) >/dev/null 2>&1; then
   fail "restating the hack version literal in the workflow left the contract green"
 fi
 ok "duplicate hack workflow literal turns the contract red"
@@ -572,14 +570,14 @@ if n != 1:
     raise SystemExit(f"could not remove feature-matrix source block (n={n})")
 dst.write_text(new)
 PY
-if ( check_workflow "${nosource}" ) >/dev/null 2>&1; then
+if ( check_feature_matrix_install "${nosource}" ) >/dev/null 2>&1; then
   fail "removing feature-matrix workflow source left the contract green"
 fi
 ok "removing feature-matrix workflow source turns the contract red"
 
 echo "== mutation: remove semver-checks version assertion =="
 noassert="$(mktemp "${SANDBOX_ROOT}/noassert.XXXXXX.yml")"
-python3 - "${WORKFLOW}" "${noassert}" <<'PY'
+python3 - "${SEMVER_WORKFLOW}" "${noassert}" <<'PY'
 import pathlib, re, sys
 src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 text = src.read_text()
@@ -594,7 +592,7 @@ if n != 1:
     raise SystemExit(f"could not remove semver assert line (n={n})")
 dst.write_text(new)
 PY
-if ( check_workflow "${noassert}" ) >/dev/null 2>&1; then
+if ( check_semver_public_install "${noassert}" ) >/dev/null 2>&1; then
   fail "removing semver-checks version assertion left the contract green"
 fi
 ok "removing semver-checks version assertion turns the contract red"
@@ -629,7 +627,7 @@ if n != 1:
     raise SystemExit(f"could not rewrite nextest/hack install block for ghost mutation (n={n})")
 dst.write_text(new)
 PY
-if ( check_workflow "${ghost}" ) >/dev/null 2>&1; then
+if ( check_feature_matrix_install "${ghost}" ) >/dev/null 2>&1; then
   fail "comment-ghost pin left the feature-matrix contract green"
 fi
 ok "comment-ghost pin + active unpinned installs turns the contract red"
@@ -639,7 +637,7 @@ expect_second_semver_cargo_install_red() {
   local name="$1" extra="$2"
   local mutant mutant_run
   mutant="$(mktemp "${SANDBOX_ROOT}/dual-${name}.XXXXXX.yml")"
-  python3 - "${WORKFLOW}" "${mutant}" "${extra}" <<'PY'
+  python3 - "${SEMVER_WORKFLOW}" "${mutant}" "${extra}" <<'PY'
 import pathlib, sys
 
 src, dst, extra = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), sys.argv[3]
@@ -654,7 +652,7 @@ PY
   [[ "$(count_active_cargo_installs "${mutant_run}")" -eq 2 ]] \
     || fail "${name}: expected two active cargo install lines; got:
 ${mutant_run}"
-  if ( check_workflow "${mutant}" ) >/dev/null 2>&1; then
+  if ( check_semver_public_install "${mutant}" ) >/dev/null 2>&1; then
     fail "${name}: second cargo install left the contract green"
   fi
   ok "second cargo install turns red (${name})"
@@ -727,7 +725,7 @@ if n != 1:
     raise SystemExit(f"could not switch feature-matrix install to run: |- (n={n})")
 dst.write_text(new)
 PY
-if ! ( check_workflow "${chomp}" ) >/dev/null 2>&1; then
+if ! ( check_feature_matrix_install "${chomp}" ) >/dev/null 2>&1; then
   fail "correctly pinned feature-matrix run: |- turned the contract red"
 fi
 ok "correctly pinned feature-matrix run: |- stays green"
@@ -744,7 +742,7 @@ if old not in text:
     raise SystemExit("could not find bound nextest invocation to unbind")
 dst.write_text(text.replace(old, new, 1))
 PY
-if ( check_workflow "${unbound_nextest}" ) >/dev/null 2>&1; then
+if ( check_feature_matrix_install "${unbound_nextest}" ) >/dev/null 2>&1; then
   fail "removing nextest invocation RUSTUP_TOOLCHAIN binding left the contract green"
 fi
 ok "removing nextest invocation binding turns the contract red"
@@ -761,14 +759,14 @@ if old not in text:
     raise SystemExit("could not find bound hack invocation to unbind")
 dst.write_text(text.replace(old, new, 1))
 PY
-if ( check_workflow "${unbound_hack}" ) >/dev/null 2>&1; then
+if ( check_feature_matrix_install "${unbound_hack}" ) >/dev/null 2>&1; then
   fail "removing hack invocation RUSTUP_TOOLCHAIN binding left the contract green"
 fi
 ok "removing hack invocation binding turns the contract red"
 
 echo "== mutation: remove semver-checks invocation toolchain binding =="
 unbound_semver="$(mktemp "${SANDBOX_ROOT}/unbound-semver.XXXXXX.yml")"
-python3 - "${WORKFLOW}" "${unbound_semver}" <<'PY'
+python3 - "${SEMVER_WORKFLOW}" "${unbound_semver}" <<'PY'
 import pathlib, sys
 src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 text = src.read_text()
@@ -778,7 +776,7 @@ if old not in text:
     raise SystemExit("could not find bound semver-checks invocation to unbind")
 dst.write_text(text.replace(old, new, 1))
 PY
-if ( check_workflow "${unbound_semver}" ) >/dev/null 2>&1; then
+if ( check_semver_public_install "${unbound_semver}" ) >/dev/null 2>&1; then
   fail "removing semver-checks invocation RUSTUP_TOOLCHAIN binding left the contract green"
 fi
 ok "removing semver-checks invocation binding turns the contract red"
@@ -803,10 +801,10 @@ ok "removing optional semver check-release binding turns the helper contract red
 # Table-driven: replace the comment block above a named install step with stale text; must bite.
 # Stale body is read from stdin (heredoc at the call site).
 expect_stale_install_comment_red() {
-  local label="$1" step="$2" mutant stale
+  local label="$1" workflow="$2" step="$3" mutant stale
   stale="$(cat)"
   mutant="$(mktemp "${SANDBOX_ROOT}/stale-${label}.XXXXXX.yml")"
-  STEP="${step}" STALE="${stale}" python3 - "${WORKFLOW}" "${mutant}" <<'PY'
+  STEP="${step}" STALE="${stale}" python3 - "${workflow}" "${mutant}" <<'PY'
 import os, pathlib, re, sys
 
 src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
@@ -823,22 +821,22 @@ if n != 1:
     raise SystemExit(f"could not rewrite preamble for {step!r} (n={n})")
 dst.write_text(new)
 PY
-  if ( check_d2_install_comment_semantics "${mutant}" ) >/dev/null 2>&1; then
+  if ( check_d2_install_comment_semantics "${mutant}" "${step}" ) >/dev/null 2>&1; then
     fail "stale ${label} install comment left the contract green"
   fi
   ok "stale ${label} install comment turns the contract red"
 }
 
 echo "== mutation: stale install-step comments =="
-expect_stale_install_comment_red nextest "Install cargo-nextest and cargo-hack" <<'EOF'
+expect_stale_install_comment_red nextest "${WORKFLOW}" "Install cargo-nextest and cargo-hack" <<'EOF'
       # Pins live in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). RUSTUP_TOOLCHAIN
       # is step-scoped so workspace cargo check/nextest/hack below still follow rust-toolchain.toml.
 EOF
-expect_stale_install_comment_red semver "Install cargo-semver-checks" <<'EOF'
+expect_stale_install_comment_red semver "${SEMVER_WORKFLOW}" "Install cargo-semver-checks" <<'EOF'
       # Pin lives in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). Step-scoped
       # RUSTUP_TOOLCHAIN so check-release below still follows rust-toolchain.toml.
 EOF
-expect_stale_install_comment_red nobind "Install cargo-nextest and cargo-hack" <<'EOF'
+expect_stale_install_comment_red nobind "${WORKFLOW}" "Install cargo-nextest and cargo-hack" <<'EOF'
       # Pins live in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). RUSTUP_TOOLCHAIN
       # is step-scoped for the install, while ordinary workspace cargo follows rust-toolchain.toml.
 EOF

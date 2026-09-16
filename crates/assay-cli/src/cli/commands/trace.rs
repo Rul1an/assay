@@ -69,11 +69,17 @@ pub async fn cmd_trace(args: TraceArgs, legacy_mode: bool) -> anyhow::Result<i32
 
             Ok(exit_codes::OK)
         }
-        TraceSub::Verify { trace, config } => {
+        TraceSub::Verify {
+            trace,
+            config,
+            trust_stage,
+        } => {
             let cfg = assay_core::config::load_config(&config, legacy_mode, false)
                 .map_err(|e| anyhow::anyhow!("failed to load config: {}", e))?;
 
-            trace::verify::verify_coverage(&trace, &cfg)?;
+            let trusted: Vec<&str> = trust_stage.iter().map(String::as_str).collect();
+            let mut stdout = std::io::stdout().lock();
+            trace::verify::verify_coverage_observed(&trace, &cfg, &trusted, &mut stdout)?;
             Ok(exit_codes::OK)
         }
         TraceSub::PrecomputeEmbeddings {

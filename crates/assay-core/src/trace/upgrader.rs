@@ -35,7 +35,7 @@ impl<R: BufRead> StreamUpgrader<R> {
         match self.reader.read_line(&mut line) {
             Ok(0) => return None,
             Ok(_) => {}
-            Err(_) => return None,
+            Err(error) => return Some(Err(serde_json::Error::io(error))),
         }
 
         let line = line.trim();
@@ -101,15 +101,34 @@ fn observe_event(
     ObservedTraceEvent::new(event, prior)
 }
 
+/// Field roots the upgrader scans for each event kind, as absolute RFC 6901 pointers.
+///
+/// One table for the producer (the observation's `scope`) and for consumers that
+/// render a reading per declared field: a root added here is scanned and reported
+/// together. `EpisodeEnd` declares nothing and gets no observation.
+pub fn declared_field_roots(event: &TraceEvent) -> &'static [&'static str] {
+    match event {
+        TraceEvent::EpisodeStart(_) => &["/input", "/meta"],
+        TraceEvent::Step(_) => &["/content", "/meta"],
+        TraceEvent::ToolCall(_) => &["/args", "/result"],
+        TraceEvent::EpisodeEnd(_) => &[],
+    }
+}
+
+fn declared_scope(event: &TraceEvent) -> Vec<String> {
+    declared_field_roots(event)
+        .iter()
+        .map(|root| (*root).to_string())
+        .collect()
+}
+
 fn scan_and_truncate(event: &mut TraceEvent) -> Option<TruncationObservation> {
+    let scope = declared_scope(event);
     match event {
         TraceEvent::EpisodeStart(e) => {
             let mut losses = truncate_value_with_provenance(&mut e.input, "input");
             losses.extend(truncate_value_with_provenance(&mut e.meta, "meta"));
-            Some(TruncationObservation::upgrader(
-                vec!["/input".into(), "/meta".into()],
-                losses,
-            ))
+            Some(TruncationObservation::upgrader(scope, losses))
         }
         TraceEvent::Step(e) => {
             let mut losses = Vec::new();
@@ -121,10 +140,7 @@ fn scan_and_truncate(event: &mut TraceEvent) -> Option<TruncationObservation> {
             }
             losses.extend(truncate_value_with_provenance(&mut e.meta, "meta"));
             e.truncations.extend(losses.iter().cloned());
-            Some(TruncationObservation::upgrader(
-                vec!["/content".into(), "/meta".into()],
-                losses,
-            ))
+            Some(TruncationObservation::upgrader(scope, losses))
         }
         TraceEvent::ToolCall(e) => {
             e.args_sha256 = Some(compute_sha256(&e.args));
@@ -138,10 +154,7 @@ fn scan_and_truncate(event: &mut TraceEvent) -> Option<TruncationObservation> {
                 e.result = Some(result_val);
             }
             e.truncations.extend(losses.iter().cloned());
-            Some(TruncationObservation::upgrader(
-                vec!["/args".into(), "/result".into()],
-                losses,
-            ))
+            Some(TruncationObservation::upgrader(scope, losses))
         }
         TraceEvent::EpisodeEnd(_) => None,
     }

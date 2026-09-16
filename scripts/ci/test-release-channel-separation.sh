@@ -15,15 +15,30 @@ WORKSPACE_VERSION="$(
     }
   ' "$REPO_ROOT/Cargo.toml"
 )"
-if [[ ! "$WORKSPACE_VERSION" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
-  echo "could not read a stable workspace version from Cargo.toml" >&2
+if [[ ! "$WORKSPACE_VERSION" =~ ^[0-9]+[.][0-9]+[.][0-9]+(-(rc|beta)[.][0-9]+)?$ ]]; then
+  echo "could not read a supported workspace version from Cargo.toml" >&2
   exit 1
 fi
-VALID_TAG="v${WORKSPACE_VERSION}"
+SOURCE_TAG="v${WORKSPACE_VERSION}"
+# Stable consumers are tested independently of the release candidate producer.
+STABLE_FIXTURE_VERSION="${WORKSPACE_VERSION%%-*}"
+VALID_TAG="v${STABLE_FIXTURE_VERSION}"
+MISMATCH_PRERELEASE_TAG="${VALID_TAG}-rc.1"
+if [[ "$MISMATCH_PRERELEASE_TAG" == "$SOURCE_TAG" ]]; then
+  MISMATCH_PRERELEASE_TAG="${VALID_TAG}-beta.1"
+fi
 LATEST_TAG="v1.0.0"
-export FAKE_ASSAY_VERSION="$WORKSPACE_VERSION"
+export FAKE_ASSAY_VERSION="$STABLE_FIXTURE_VERSION"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
+
+# Version-line verification remains stable-only, including its workspace fixture.
+mkdir -p "$TMP_DIR/stable-workspace"
+printf '[workspace.package]\nversion = "%s"\n' "$STABLE_FIXTURE_VERSION" \
+  > "$TMP_DIR/stable-workspace/Cargo.toml"
+printf '#!/usr/bin/env bash\ncd -- %q || exit 1\nexec bash %q "$@"\n' \
+  "$TMP_DIR/stable-workspace" "$REPO_ROOT/scripts/ci/check-assay-version-line.sh" \
+  > "$TMP_DIR/stable-workspace/version-line.sh"
 
 require_literal() {
   local file="$1"
@@ -116,7 +131,7 @@ rejects_fake_latest() {
 rejects_fake_latest bash "$REPO_ROOT/scripts/install.sh"
 rejects_fake_latest bash "$REPO_ROOT/infra/bpf-runner/update_assay_latest.sh"
 rejects_fake_latest env CHECK_VM=0 HARNESS_DIR="$TMP_DIR/missing-harness" \
-  bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh"
+  bash "$TMP_DIR/stable-workspace/version-line.sh"
 rejects_fake_latest env GITHUB_OUTPUT="$TMP_DIR/action-invalid.out" \
   bash "$REPO_ROOT/assay-action/resolve-version.sh" latest
 # shellcheck disable=SC2016 # $1 expands in the nested shell.
@@ -145,19 +160,19 @@ run_logged() {
 }
 
 resolved_dispatch="$(
-  EVENT_NAME=workflow_dispatch RELEASE_VERSION_INPUT="$VALID_TAG" \
+  EVENT_NAME=workflow_dispatch RELEASE_VERSION_INPUT="$SOURCE_TAG" \
     bash "$REPO_ROOT/scripts/ci/resolve-release-version.sh"
 )"
-if [[ "$resolved_dispatch" != "$VALID_TAG" ]]; then
+if [[ "$resolved_dispatch" != "$SOURCE_TAG" ]]; then
   echo "release resolver changed a workspace-matching dispatch version" >&2
   exit 1
 fi
 
 resolved_push="$(
-  EVENT_NAME=push RELEASE_REF="refs/tags/$VALID_TAG" \
+  EVENT_NAME=push RELEASE_REF="refs/tags/$SOURCE_TAG" \
     bash "$REPO_ROOT/scripts/ci/resolve-release-version.sh"
 )"
-if [[ "$resolved_push" != "$VALID_TAG" ]]; then
+if [[ "$resolved_push" != "$SOURCE_TAG" ]]; then
   echo "release resolver changed a workspace-matching pushed tag" >&2
   exit 1
 fi
@@ -170,9 +185,9 @@ then
   exit 1
 fi
 require_literal_from_path "$TMP_DIR/release-version-mismatch.log" \
-  "release version $LATEST_TAG does not match workspace version $VALID_TAG"
+  "release version $LATEST_TAG does not match workspace version $SOURCE_TAG"
 
-if EVENT_NAME=workflow_dispatch RELEASE_VERSION_INPUT="${VALID_TAG}"$'\nextra' \
+if EVENT_NAME=workflow_dispatch RELEASE_VERSION_INPUT="${SOURCE_TAG}"$'\nextra' \
   bash "$REPO_ROOT/scripts/ci/resolve-release-version.sh" \
   >"$TMP_DIR/release-version-injected.log" 2>&1
 then
@@ -182,15 +197,15 @@ fi
 require_literal_from_path "$TMP_DIR/release-version-injected.log" \
   "release version must be a single-line value"
 
-if EVENT_NAME=workflow_dispatch RELEASE_VERSION_INPUT="${VALID_TAG}-rc.1" \
+if EVENT_NAME=workflow_dispatch RELEASE_VERSION_INPUT="$MISMATCH_PRERELEASE_TAG" \
   bash "$REPO_ROOT/scripts/ci/resolve-release-version.sh" \
   >"$TMP_DIR/release-version-prerelease.log" 2>&1
 then
-  echo "release resolver accepted a prerelease tag for a stable workspace" >&2
+  echo "release resolver accepted a prerelease tag that differs from the workspace" >&2
   exit 1
 fi
 require_literal_from_path "$TMP_DIR/release-version-prerelease.log" \
-  "release version ${VALID_TAG}-rc.1 does not match workspace version $VALID_TAG"
+  "release version $MISMATCH_PRERELEASE_TAG does not match workspace version $SOURCE_TAG"
 
 mkdir -p "$TMP_DIR/prerelease-repo/scripts/ci"
 cp "$REPO_ROOT/scripts/ci/resolve-release-version.sh" \
@@ -266,7 +281,7 @@ for state_file in output path env state summary; do
   : >"$TMP_DIR/action-child-$state_file.out"
 done
 : >"$TMP_DIR/action-child-invocations.out"
-FAKE_MUTATE_ACTION_STATE=1 FAKE_ASSAY_VERSION="$WORKSPACE_VERSION" \
+FAKE_MUTATE_ACTION_STATE=1 FAKE_ASSAY_VERSION="$STABLE_FIXTURE_VERSION" \
   FAKE_INVOCATION_COUNTER="$TMP_DIR/action-child-invocations.out" \
   GITHUB_OUTPUT="$TMP_DIR/action-child-output.out" \
   GITHUB_PATH="$TMP_DIR/action-child-path.out" \
@@ -444,7 +459,7 @@ EOF
 run_logged "$TMP_DIR/version-line-release-prep.log" \
   env FAKE_TAG="$LATEST_TAG" EXPECTED_RELEASE="$VALID_TAG" CHECK_VM=0 \
   HARNESS_DIR="$TMP_DIR/harness" PATH="$TMP_DIR/bin:$PATH" \
-  bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh"
+  bash "$TMP_DIR/stable-workspace/version-line.sh"
 require_literal_from_path "$TMP_DIR/version-line-release-prep.log" \
   "latest_release=$LATEST_TAG"
 require_literal_from_path "$TMP_DIR/version-line-release-prep.log" \
@@ -458,16 +473,16 @@ run_logged "$TMP_DIR/version-line-vm-latest.log" \
   env FAKE_TAG="$LATEST_TAG" FAKE_VM_VERSION="${LATEST_TAG#v}" \
   EXPECTED_RELEASE="$VALID_TAG" CHECK_VM=1 \
   HARNESS_DIR="$TMP_DIR/harness" PATH="$TMP_DIR/bin:$PATH" \
-  bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh"
+  bash "$TMP_DIR/stable-workspace/version-line.sh"
 require_literal_from_path "$TMP_DIR/version-line-vm-latest.log" \
   "vm_assay_version=${LATEST_TAG#v}"
 require_literal_from_path "$TMP_DIR/version-line-vm-latest.log" \
   "version_line_status=ok"
 
-if FAKE_TAG="$LATEST_TAG" FAKE_VM_VERSION="$WORKSPACE_VERSION" \
+if FAKE_TAG="$LATEST_TAG" FAKE_VM_VERSION="$STABLE_FIXTURE_VERSION" \
   EXPECTED_RELEASE="$VALID_TAG" CHECK_VM=1 \
   HARNESS_DIR="$TMP_DIR/harness" PATH="$TMP_DIR/bin:$PATH" \
-  bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh" \
+  bash "$TMP_DIR/stable-workspace/version-line.sh" \
   >"$TMP_DIR/version-line-vm-target.log" 2>&1
 then
   echo "version-line check accepted a VM on the release target instead of Latest" >&2
@@ -492,7 +507,7 @@ jobs:
 EOF
 if FAKE_TAG="$LATEST_TAG" EXPECTED_RELEASE="$VALID_TAG" CHECK_VM=0 \
   HARNESS_DIR="$TMP_DIR/harness-lookalike" PATH="$TMP_DIR/bin:$PATH" \
-  bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh" \
+  bash "$TMP_DIR/stable-workspace/version-line.sh" \
   >"$TMP_DIR/version-line-lookalike.log" 2>&1
 then
   echo "version-line check accepted workflow YAML from a block scalar" >&2
@@ -510,7 +525,7 @@ on:
 EOF
 if FAKE_TAG="$LATEST_TAG" EXPECTED_RELEASE="$VALID_TAG" CHECK_VM=0 \
   HARNESS_DIR="$TMP_DIR/harness-duplicate" PATH="$TMP_DIR/bin:$PATH" \
-  bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh" \
+  bash "$TMP_DIR/stable-workspace/version-line.sh" \
   >"$TMP_DIR/version-line-duplicate.log" 2>&1
 then
   echo "version-line check accepted a duplicate Harness version key" >&2
@@ -532,7 +547,7 @@ true:
 EOF
 if FAKE_TAG="$LATEST_TAG" EXPECTED_RELEASE="$VALID_TAG" CHECK_VM=0 \
   HARNESS_DIR="$TMP_DIR/harness-semantic-duplicate" PATH="$TMP_DIR/bin:$PATH" \
-  bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh" \
+  bash "$TMP_DIR/stable-workspace/version-line.sh" \
   >"$TMP_DIR/version-line-semantic-duplicate.log" 2>&1
 then
   echo "version-line check accepted semantically duplicate YAML keys" >&2
@@ -554,7 +569,7 @@ true:
 EOF
 if FAKE_TAG="$LATEST_TAG" EXPECTED_RELEASE="$VALID_TAG" CHECK_VM=0 \
   HARNESS_DIR="$TMP_DIR/harness-tagged-duplicate" PATH="$TMP_DIR/bin:$PATH" \
-  bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh" \
+  bash "$TMP_DIR/stable-workspace/version-line.sh" \
   >"$TMP_DIR/version-line-tagged-duplicate.log" 2>&1
 then
   echo "version-line check accepted an explicitly tagged YAML key" >&2
@@ -564,7 +579,7 @@ fi
 INVALID_TARGET="$FAKE_TAG"
 if FAKE_TAG="$LATEST_TAG" EXPECTED_RELEASE="$INVALID_TARGET" CHECK_VM=0 \
   HARNESS_DIR="$TMP_DIR/harness" PATH="$TMP_DIR/bin:$PATH" \
-  bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh" \
+  bash "$TMP_DIR/stable-workspace/version-line.sh" \
   >"$TMP_DIR/version-line-invalid-target.log" 2>&1
 then
   echo "version-line check accepted a non-software release target" >&2

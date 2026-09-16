@@ -29,14 +29,22 @@ import re
 import sys
 
 pin, workspace = sys.argv[1:]
-stable = re.compile(r"^v?[0-9]+\.[0-9]+\.[0-9]+$")
-if not stable.fullmatch(workspace):
-    raise SystemExit(f"workspace version is not stable semver: {workspace}")
+release = re.fullmatch(
+    r"v?([0-9]+\.[0-9]+\.[0-9]+)(-(?:rc|beta)\.(?:0|[1-9][0-9]*))?",
+    workspace,
+)
+if release is None:
+    raise SystemExit(f"workspace version is not a supported release version: {workspace}")
 
 def version(value: str) -> tuple[int, int, int]:
     return tuple(map(int, value.removeprefix("v").split(".")))
 
-if version(pin) > version(workspace):
+# A stable install pin at the same core version leads an RC/beta workspace.
+pin_version = version(pin)
+workspace_core = version(release.group(1))
+if pin_version > workspace_core or (
+    pin_version == workspace_core and release.group(2) is not None
+):
     raise SystemExit(
         f"install pin {pin} leads workspace version {workspace}; "
         "publish the release before advancing the install pin"

@@ -548,6 +548,38 @@ To compare the resulting Trust Basis artifact against another run, use
 
 ---
 
+## Diff Two Bundles
+
+```bash
+assay evidence diff baseline.tar.gz candidate.tar.gz [--format human|json]
+assay evidence diff candidate.tar.gz --baseline-dir baselines/ --key nightly
+```
+
+Both bundles are verified first; a bundle that fails to open or verify is an error. The
+comparison covers the retained verified events of both bundles and nothing outside them:
+absence and completeness are not established.
+
+Two layers are compared and both are reported:
+
+| Layer | Basis | Output |
+|---|---|---|
+| Retained events | verified per-event `content_hash` (JCS RFC 8785 + SHA-256 over the bound fields listed by `assay evidence show --format json` under `content_hash_scope`); `run_root` binds the ordered sequence | both `run_root`s; events on one side only, by content id, type and `seq`; `run_root_equal` in JSON |
+| Subject projections | `.net`, `.fs`, `.process` subjects as sets | `+`/`-` hosts, paths, process names |
+
+The human report (stderr) closes with exactly one of:
+
+```
+No differences in retained verified events: run_root equal.
+Retained verified events differ: run_root differs; <n> added, <m> removed by content id.
+```
+
+A `run_root` that differs while no content id is added or removed means the same events in a
+different order or multiplicity; the line says so. Equal subject projections never make a
+differing `run_root` read as clean.
+
+Exit code `0` means the comparison completed, with or without differences. The exit code does
+not encode the result; read the closing line or `retained_events.run_root_equal` in JSON.
+
 ## See Also
 
 - [Evidence Contract v1](../../spec/EVIDENCE-CONTRACT-v1.md)

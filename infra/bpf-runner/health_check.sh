@@ -183,16 +183,38 @@ ensure_assay_cli_current() {
     return 0
 }
 
-# Check if there are queued jobs waiting for our runner labels
-check_queued_jobs() {
-    local queued_count
-    local gh="${GH_CMD:-gh}"
-    queued_count=$($gh api "repos/$REPO/actions/runs?status=queued" --jq '.workflow_runs | length' 2>/dev/null || echo "0")
+# Queued demand means a waiting job that requires this runner's label. A
+# repository-wide queued-run count also fires on hosted backlog, and that count
+# was one half of the #2985 teardowns. The waiting-status set mirrors
+# scripts/ci/check-runner-health.sh; the two scripts cannot share a file
+# because this one is installed on the host as a single file.
+REQUIRED_RUNNER_LABEL="${REQUIRED_RUNNER_LABEL:-assay-bpf-runner}"
+QUEUED_RUN_INSPECTION_LIMIT="${QUEUED_RUN_INSPECTION_LIMIT:-20}"
 
-    if [[ "$queued_count" -gt 0 ]]; then
-        log_info "Found $queued_count queued workflow runs"
-        return 0
+check_queued_jobs() {
+    local gh="${GH_CMD:-gh}"
+    local run_ids run_id matching
+
+    if ! run_ids=$($gh api "repos/$REPO/actions/runs?status=queued&per_page=${QUEUED_RUN_INSPECTION_LIMIT}" 2>/dev/null \
+        | jq -r '.workflow_runs[]? | .id | select(type == "number")' 2>/dev/null); then
+        return 1
     fi
+    [[ -n "$run_ids" ]] || return 1
+
+    for run_id in $run_ids; do
+        # shellcheck disable=SC2016 # jq --arg binding, not shell expansion.
+        matching=$($gh api "repos/$REPO/actions/runs/${run_id}/jobs?per_page=100" 2>/dev/null \
+            | jq -r --arg label "$REQUIRED_RUNNER_LABEL" '
+                [.jobs[]?
+                 | select((.status == "queued" or .status == "waiting"
+                           or .status == "pending" or .status == "requested")
+                          and ((.labels // []) | index($label)))]
+                | length' 2>/dev/null) || matching=""
+        if [[ "$matching" =~ ^[0-9]+$ && "$matching" -gt 0 ]]; then
+            log_info "Found $matching queued job(s) requiring label $REQUIRED_RUNNER_LABEL in run $run_id"
+            return 0
+        fi
+    done
     return 1
 }
 
@@ -254,6 +276,9 @@ cancel_stale_jobs() {
 require_json_array() {
     jq -c -e -R -s 'fromjson | if type == "array" then . else error("expected JSON array") end'
 }
+
+# Shared jq branch name validator definition (non-empty string without embedded tabs, newlines, or carriage returns).
+JQ_IS_VALID_BRANCH='def is_valid_branch: type == "string" and length > 0 and (test("[\t\r\n]") | not);'
 
 # Cancel superseded runs (older queued runs for the same workflow/branch/event)
 cancel_superseded_runs() {
@@ -353,11 +378,11 @@ prioritize_pr_runs() {
     fi
 
     if [[ "$pr_runs" -gt 5 && "$push_runs" -gt 0 ]]; then
-        log_info "Many PR runs waiting ($pr_runs), cancelling $push_runs queued push runs..."
+        log_info "Many PR runs waiting ($pr_runs), cancelling queued push runs..."
 
-        # Cancel push runs (they'll be superseded by next push anyway)
+        # Query candidate push runs with both databaseId and headBranch
         local push_cancel_json
-        if ! push_cancel_json=$($gh run list --repo "$REPO" --status queued --event push --limit 10 --json databaseId 2>/dev/null); then
+        if ! push_cancel_json=$($gh run list --repo "$REPO" --status queued --event push --limit 10 --json databaseId,headBranch 2>/dev/null); then
             log_error "Failed to list push runs for PR-priority cancel"
             return 1
         fi
@@ -366,12 +391,94 @@ prioritize_pr_runs() {
             return 1
         fi
 
-        local run_ids accepted=0 failed=0 run_id
-        if ! run_ids=$(printf '%s' "$push_cancel_json" | jq -r '.[].databaseId'); then
-            log_error "Failed to parse push runs for PR-priority cancel"
+        # Validate candidate run items (must have valid positive databaseId and valid branch name)
+        if ! printf '%s' "$push_cancel_json" | jq -e "${JQ_IS_VALID_BRANCH}"'
+            if all(.[];
+                type == "object"
+                and (.databaseId | type) == "number"
+                and .databaseId > 0
+                and .databaseId == (.databaseId | floor)
+                and (.headBranch | is_valid_branch)
+            ) then . else error("invalid candidate push run shape") end' >/dev/null 2>&1; then
+            log_error "Candidate push runs contain invalid or missing id/headBranch"
             return 1
         fi
-        for run_id in $run_ids; do
+
+        local candidate_count
+        candidate_count=$(printf '%s' "$push_cancel_json" | jq 'length')
+        if [[ "$candidate_count" -eq 0 ]]; then
+            log_info "No queued push runs to evaluate for PR priority"
+            return 0
+        fi
+
+        # Query configured repository default branch dynamically (never hardcode main)
+        local default_branch_json default_branch
+        if ! default_branch_json=$($gh repo view "$REPO" --json defaultBranchRef 2>/dev/null); then
+            log_error "Failed to query repository default branch"
+            return 1
+        fi
+        if ! default_branch=$(printf '%s' "$default_branch_json" | jq -e -r -R -s "${JQ_IS_VALID_BRANCH}"'
+            fromjson |
+            if type == "object"
+                and (.defaultBranchRef | type) == "object"
+                and (.defaultBranchRef.name | is_valid_branch)
+            then
+                .defaultBranchRef.name
+            else
+                error("invalid defaultBranchRef structure")
+            end' 2>/dev/null); then
+            log_error "Default branch query returned invalid or malformed data"
+            return 1
+        fi
+
+        # Preflight selection: evaluate all candidate runs before issuing any cancellation request
+        local to_cancel=()
+        local candidate_rows run_id branch
+        candidate_rows=$(printf '%s' "$push_cancel_json" | jq -r '.[] | "\(.databaseId)\t\(.headBranch)"')
+        while IFS=$'\t' read -r run_id branch; do
+            [[ -z "$run_id" ]] && continue
+
+            # Default branch runs represent landed code / post-merge CI; never cancel them.
+            if [[ "$branch" == "$default_branch" ]]; then
+                log_info "Keeping push run $run_id ($branch: default branch post-merge CI)"
+                continue
+            fi
+
+            # Check if the candidate branch has an open pull request.
+            # On Assay, push runs for open PR branches generate required checks.
+            local pr_list_raw pr_list_json open_pr_count
+            if ! pr_list_raw=$($gh pr list --repo "$REPO" --head "$branch" --state open --json number 2>/dev/null); then
+                log_error "Failed to query open PRs for branch $branch"
+                return 1
+            fi
+            if ! pr_list_json=$(printf '%s' "$pr_list_raw" | require_json_array); then
+                log_error "Open PR list for branch $branch was not a JSON array"
+                return 1
+            fi
+            if ! open_pr_count=$(printf '%s' "$pr_list_json" | jq -e '
+                if all(.[]; type == "object" and (.number | type) == "number" and .number > 0 and .number == (.number | floor)) then
+                    length
+                else
+                    error("invalid pr item")
+                end' 2>/dev/null); then
+                log_error "Open PR query for branch $branch contained invalid or malformed entries"
+                return 1
+            fi
+            if [[ "$open_pr_count" -gt 0 ]]; then
+                log_info "Keeping push run $run_id ($branch has an open PR; this run is its required check)"
+                continue
+            fi
+
+            to_cancel+=("$run_id")
+        done <<< "$candidate_rows"
+
+        if [[ ${#to_cancel[@]} -eq 0 ]]; then
+            log_info "All candidate push runs protected (default branch or open PR); no cancellation requested"
+            return 0
+        fi
+
+        local accepted=0 failed=0 run_id
+        for run_id in "${to_cancel[@]}"; do
             [[ -z "$run_id" ]] && continue
             log_info "Requesting cancel for push run $run_id (PR priority)..."
             if $gh run cancel "$run_id" --repo "$REPO" >/dev/null 2>&1; then
@@ -719,8 +826,73 @@ heal_action_cache() {
 # Runner Recovery
 # ==============================================================================
 
+# An idle snapshot admits recovery; it is not an atomic drain of job assignment.
+# Missing registration is bootstrap, not evidence that a runner is idle.
+require_recovery_admission() {
+    local gh="${GH_CMD:-gh}" payload admission
+    local LC_ALL=C
+    if ! payload=$(set -o pipefail; timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" \
+        "$gh" api --paginate "repos/$REPO/actions/runners?per_page=100" 2>/dev/null \
+        | head -c 1048577); then
+        log_error "Recovery refused: runner observation unavailable"
+        return 1
+    fi
+    if [[ ${#payload} -gt 1048576 ]]; then
+        log_error "Recovery refused: runner observation exceeds limit"
+        return 1
+    fi
+    # Validate every page before selecting; duplicate names must not select row one.
+    # shellcheck disable=SC2016
+    if ! admission=$(printf '%s' "$payload" | jq -sr --arg name "$RUNNER_NAME" '
+        if length == 0 or any(.[];
+            type != "object" or (.runners | type) != "array") then
+            "unknown"
+        elif any(.[].runners[]; type != "object" or (.name | type) != "string") then
+            "unknown"
+        else
+            [.[].runners[] | select(.name == $name)] |
+            if length == 0 then "not_found"
+            elif length != 1 then "ambiguous"
+            else .[0] |
+                if (.id | type) != "number" then "unknown"
+                elif .id <= 0 or .id != (.id | floor) then "unknown"
+                elif (.busy | type) != "boolean" then "unknown"
+                elif .status != "online" and .status != "offline" then "unknown"
+                elif .busy then "busy"
+                else "idle"
+                end
+            end
+        end' 2>/dev/null); then
+        admission=unknown
+    fi
+    if [[ "$admission" != idle ]]; then
+        log_error "Recovery refused: runner observation $admission"
+        return 1
+    fi
+}
+
+# The API snapshot can read `offline` while the guest is executing a job (#2985:
+# three teardowns, each a `svc.sh stop` under a running Runner.Worker). The
+# guest process table is the second signal the stop decision requires. pgrep
+# exit 1 is the only reading that means idle; a match, an error, or a timed-out
+# probe all refuse, because stopping a runner of unknown liveness is the fault.
+require_guest_quiescence() {
+    local rc=0
+    timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" \
+        multipass exec "$VM_NAME" -- pgrep -x Runner.Worker >/dev/null 2>&1 || rc=$?
+    case "$rc" in
+        1) return 0 ;;
+        0) log_error "Recovery refused: a Runner.Worker process is executing in the guest" ;;
+        124) log_error "Recovery refused: guest worker probe timed out" ;;
+        *) log_error "Recovery refused: guest worker probe failed (exit $rc)" ;;
+    esac
+    return 1
+}
+
 # Full recovery procedure
 recover_runner() {
+    require_recovery_admission || return $?
+    require_guest_quiescence || return $?
     log_warn "Starting runner recovery..."
 
     # Step 1: Sync time
@@ -778,13 +950,13 @@ health_check() {
         # 2. Cancel superseded runs (duplicates for same branch)
         cancel_superseded_runs || return $?
 
-        # 3. Prioritize PR runs over push runs
-        prioritize_pr_runs || return $?
+        # PR-priority cancellation is explicit-only: a health tick must not
+        # discard push evidence merely because PR runs are waiting.
 
-        # 4. Check for action cache issues
+        # 3. Check for action cache issues
         heal_action_cache
 
-        # 5. Periodic cache cleanup
+        # 4. Periodic cache cleanup
         clean_actions_cache
 
         log_ok "Runner is healthy"
@@ -1071,7 +1243,7 @@ case "${1:-}" in
         echo "Usage: $0 [OPTIONS]"
         echo ""
         echo "Options:"
-        echo "  (none)          Run full health check (including all maintenance)"
+        echo "  (none)          Run health check and maintenance (excluding PR-priority cancellation)"
         echo "  --install-cron  Install cron job (every 5 minutes)"
         echo "  --status        Show current status"
         echo "  --recover       Force full runner recovery"
@@ -1084,7 +1256,7 @@ case "${1:-}" in
         echo "Queue Management:"
         echo "  --cancel-stale      Cancel queued jobs older than ${STALE_JOB_HOURS} hours"
         echo "  --cancel-superseded Cancel older duplicate runs for same branch"
-        echo "  --prioritize-prs    Cancel push runs when many PR runs waiting"
+        echo "  --prioritize-prs    Explicitly cancel push runs when many PR runs wait (protects default and open-PR branches)"
         echo "  --optimize-queue    Run all queue optimizations (stale + superseded + PR priority)"
         echo ""
         echo "Environment Variables:"

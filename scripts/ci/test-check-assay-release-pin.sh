@@ -106,10 +106,23 @@ echo "== invalid published tag fails closed =="
 write_release "latest" "assay-latest-x86_64-unknown-linux-gnu.tar.gz"
 expect_fail "latest published release has an invalid stable tag: 'latest'" run_check --published
 
-echo "== prerelease workspace version fails closed =="
-write_manifest "5.2.0-rc.1"
+echo "== RC and beta workspaces retain a published stable install pin =="
+for candidate in 5.2.0-rc.1 5.2.0-beta.2; do
+  write_manifest "$candidate"
+  write_pin "v5.1.0"
+  write_release "v5.1.0"
+  run_check
+  run_check --published
+  write_pin "v5.2.0"
+  expect_fail "install pin v5.2.0 leads workspace version $candidate" run_check
+done
+
+echo "== malformed or unsupported workspace channels fail closed =="
 write_pin "v5.1.0"
-expect_fail "workspace version is not stable semver: 5.2.0-rc.1" run_check
+for candidate in 5.2.0-rc 5.2.0-rc.01 5.2.0-alpha.1 5.2.0-rc.1.extra; do
+  write_manifest "$candidate"
+  expect_fail "workspace version is not a supported release version" run_check
+done
 
 echo "== missing install asset fails closed =="
 write_manifest "5.2.0"

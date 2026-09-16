@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -125,6 +127,34 @@ class ClaudePluginInstallImportTests(unittest.TestCase):
     def setUp(self) -> None:
         self.enterContext(patch.dict(os.environ, _synthetic_environ(), clear=True))
 
+    def test_import_by_path_needs_no_sibling_search_path(self) -> None:
+        isolated = [p for p in sys.path if Path(p).resolve() != WORKFLOW.parent]
+        original_path = tuple(isolated)
+        with patch.object(sys, "path", isolated), patch.dict(sys.modules):
+            sys.modules.pop("release_heading", None)
+            with ImportTraps() as traps:
+                module = load_workflow(WORKFLOW, "workflow_without_sibling_path")
+            self.assertEqual(traps.launches, [])
+            self.assertEqual(tuple(sys.path), original_path)
+            self.assertIsNotNone(module.RELEASE_HEADING.fullmatch("## [6.3.1-rc.1] - 2026-09-15"))
+        self._assert_synthetic_auth_unchanged()
+
+    def test_helper_edits_select_both_consumers_and_import_guard(self) -> None:
+        parsed = subprocess.run(
+            ["ruby", "-rjson", "-ryaml", "-e",
+             "puts JSON.generate(YAML.safe_load(STDIN.read, aliases: false))"],
+            input=(ROOT / ".pre-commit-config.yaml").read_text(),
+            capture_output=True, text=True, check=True,
+        )
+        hooks = [h for repo in json.loads(parsed.stdout)["repos"]
+                 if repo["repo"] == "local" for h in repo["hooks"]]
+        for hook_id in ("claude-plugin-install-import-safe",
+                        "claude-plugin-install-workflow-self-test", "assay-action-consumer-pin"):
+            with self.subTest(hook=hook_id):
+                matches = [h for h in hooks if h["id"] == hook_id]
+                self.assertEqual(len(matches), 1)
+                self.assertIsNotNone(re.search(matches[0]["files"], "scripts/ci/release_heading.py"))
+
     def _assert_synthetic_auth_unchanged(self) -> None:
         after_keys = _auth_keys()
         expected_keys = tuple(sorted(SYNTHETIC_AUTH))
@@ -172,6 +202,7 @@ class ClaudePluginInstallImportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="assay-claude-import-mut-") as temporary:
             mutant = Path(temporary) / "claude_plugin_install_workflow.py"
             mutant.write_text(unguarded, encoding="utf-8")
+            shutil.copyfile(WORKFLOW.with_name("release_heading.py"), mutant.with_name("release_heading.py"))
             traps = ImportTraps()
             with traps:
                 with self.assertRaises((SystemExit, LaunchAttempt)) as raised:

@@ -47,6 +47,8 @@ repos:
             |scripts/ci/fixtures/assay-action-pin/(action\.yml|remediation_recipe\.cmd)
             # fuzz seeds are exact byte inputs; a newline changes what they exercise (#2931)
             |fuzz/corpus/.+
+            # CAP-1 vectors are verbatim upstream bytes pinned by SHA256SUMS (#2493)
+            |crates/assay-evidence/tests/fixtures/cap1/normative/(PV|NC)-\d+\.json
           )$
       - id: trailing-whitespace
         exclude: |
@@ -58,6 +60,8 @@ repos:
             |scripts/ci/fixtures/assay-action-pin/(action\.yml|remediation_recipe\.cmd)
             # fuzz seeds are exact byte inputs; a newline changes what they exercise (#2931)
             |fuzz/corpus/.+
+            # CAP-1 vectors are verbatim upstream bytes pinned by SHA256SUMS (#2493)
+            |crates/assay-evidence/tests/fixtures/cap1/normative/(PV|NC)-\d+\.json
           )$
 
   # GitGuardian secrets detection (manual/local opt-in; requires GITGUARDIAN_API_KEY)
@@ -149,6 +153,13 @@ repos:
         pass_filenames: false
         files: ^(infra/bpf-runner/health_check\.sh|scripts/ci/test-runner-auto-recovery\.sh)$
 
+      - id: runner-recovery-liveness-contract
+        name: Runner recovery refuses while a guest worker runs
+        entry: bash scripts/ci/test-runner-recovery-liveness.sh
+        language: system
+        pass_filenames: false
+        files: ^(infra/bpf-runner/health_check\.sh|scripts/ci/test-runner-recovery-liveness\.sh)$
+
       - id: docs-generated-drift-self-test
         name: Generated-docs drift check self-test
         entry: bash -c 'bash scripts/ci/test-check-docs-generated-drift-safety.sh && bash scripts/ci/test-check-docs-generated-drift.sh'
@@ -237,14 +248,14 @@ repos:
         # costs several seconds warm. Keep commit-time feedback fast; the same hook is
         # installed and enforced before push, where end-to-end workflow proof belongs.
         stages: [pre-push]
-        files: ^(CHANGELOG\.md|scripts/ci/(test-claude-plugin-install\.sh|claude_plugin_install_workflow\.py)|docs/guides/editor-mcp-recipe\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.pre-commit-config\.yaml)$
+        files: ^(CHANGELOG\.md|scripts/ci/(test-claude-plugin-install\.sh|claude_plugin_install_workflow\.py|release_heading\.py)|docs/guides/editor-mcp-recipe\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.pre-commit-config\.yaml)$
 
       - id: claude-plugin-install-import-safe
         name: Claude plugin install workflow is import-safe
         entry: python3 scripts/ci/test_claude_plugin_install_import.py
         language: system
         pass_filenames: false
-        files: ^(scripts/ci/(claude_plugin_install_workflow|test_claude_plugin_install_import)\.py|\.pre-commit-config\.yaml)$
+        files: ^(scripts/ci/(claude_plugin_install_workflow|test_claude_plugin_install_import|release_heading)\.py|\.pre-commit-config\.yaml)$
 
       - id: claude-plugin-run-bounded-stdin
         name: Claude plugin bounded stdin is deadline-supervised
@@ -439,7 +450,7 @@ repos:
         entry: bash -c 'bash scripts/ci/test-check-python-artifact-truth.sh && python3 scripts/ci/check-python-artifact-truth.py && bash scripts/ci/test-check-python-wheel-smoke-contract.sh && python3 scripts/ci/check-python-wheel-smoke-contract.py'
         language: system
         pass_filenames: false
-        files: ^(assay-python-sdk/(python-artifact-matrix\.v0\.json|pyproject\.toml|Cargo\.toml|README\.md)|scripts/ci/(check-python-artifact-truth\.py|test-check-python-artifact-truth\.sh|check-python-wheel-smoke-contract\.py|test-check-python-wheel-smoke-contract\.sh|smoke-python-wheel\.py|plan-python-artifact-matrix\.py)|\.github/workflows/(release|kernel-matrix)\.yml|docs/(python-sdk/index\.md|getting-started/(index|installation|python-quickstart)\.md|guides/troubleshooting\.md|AIcontext/user-flows\.md|migration-v1\.2\.md)|llms\.txt|CHANGELOG\.md|\.pre-commit-config\.yaml)$
+        files: ^(assay-python-sdk/(python-artifact-matrix\.v0\.json|pyproject\.toml|Cargo\.toml|README\.md)|scripts/ci/(check-python-artifact-truth\.py|test-check-python-artifact-truth\.sh|check-python-wheel-smoke-contract\.py|test-check-python-wheel-smoke-contract\.sh|smoke-python-wheel\.py|test-smoke-python-wheel-version\.py|plan-python-artifact-matrix\.py)|\.github/workflows/(release|kernel-matrix)\.yml|docs/(python-sdk/index\.md|getting-started/(index|installation|python-quickstart)\.md|guides/troubleshooting\.md|AIcontext/user-flows\.md|migration-v1\.2\.md)|llms\.txt|CHANGELOG\.md|\.pre-commit-config\.yaml)$
 
       - id: osv-scanner-scheduled-lockstep
         name: OSV scanner/reporter lockstep and count bind
@@ -499,7 +510,7 @@ repos:
         entry: bash -c 'bash scripts/ci/test-check-assay-action-pin.sh && bash scripts/ci/check-assay-action-pin.sh'
         language: system
         pass_filenames: false
-        files: ^(\.github/(assay-action-pin|dependabot\.yml|workflows/.*\.ya?ml)|scripts/ci/(read|check|test-check)-assay-action-pin\.sh|scripts/ci/(produce-default-discovery-sandbox-evidence|test-action-discovery-junction)\.sh|scripts/ci/fixtures/assay-action-pin/.*|docs/.*\.md|CHANGELOG\.md|crates/assay-cli/src/templates\.rs|packs/open/cicd-starter/README\.md|\.pre-commit-config\.yaml)$
+        files: ^(\.github/(assay-action-pin|dependabot\.yml|workflows/.*\.ya?ml)|scripts/ci/(read|check|test-check)-assay-action-pin\.sh|scripts/ci/release_heading\.py|scripts/ci/(produce-default-discovery-sandbox-evidence|test-action-discovery-junction)\.sh|scripts/ci/fixtures/assay-action-pin/.*|docs/.*\.md|CHANGELOG\.md|crates/assay-cli/src/templates\.rs|packs/open/cicd-starter/README\.md|\.pre-commit-config\.yaml)$
 
       - id: workflow-continue-on-error-policy
         name: Workflow continue-on-error policy
@@ -779,7 +790,7 @@ repos:
         # workspace cargo follows rust-toolchain.toml). Mutations cover missing pins, restated
         # literals, missing source/assert, unpinned/duplicate install (including cargo
         # +toolchain), PATH decoys, optional-helper unpin, and stale toolchain comments.
-        files: ^(scripts/ci/(cargo-plugin-versions|test-split-wave-plugin-versions-contract|optional-public-api-drift)\.sh|\.github/workflows/split-wave0-gates\.yml|\.pre-commit-config\.yaml)$
+        files: ^(scripts/ci/(cargo-plugin-versions|test-split-wave-plugin-versions-contract|optional-public-api-drift)\.sh|\.github/workflows/(split-wave0-gates|semver-public)\.yml|\.pre-commit-config\.yaml)$
 
       - id: optional-plugin-versions-contract-self-test
         name: optional plugin versions contract
@@ -827,18 +838,18 @@ repos:
         # `check-release` saw a declared major and skipped all 254 checks -- reporting success while
         # #2068's `MetricResult` break went through and was found by hand at release prep.
         #
-        # The cheap cases run here: no pinned SHA, the baseline comes from the newest release tag,
+        # The cheap cases run here: no pinned SHA, the baseline comes from the newest stable tag,
         # and a missing tag fails rather than skips. The planted-break case costs a rustdoc build per
         # crate, so it runs under ASSAY_SEMVER_GATE_FULL=1 and in the workflow's own CI job.
         stages: [pre-push]
-        files: ^(scripts/ci/(test-semver-gate\.sh|derive-semver-published-lib-crates\.py)|\.github/workflows/split-wave0-gates\.yml)$
+        files: ^(scripts/ci/(test-semver-gate\.sh|resolve-semver-baseline\.sh|derive-semver-published-lib-crates\.py)|\.github/workflows/semver-public\.yml)$
       - id: split-wave0-semver-routing-contract
         name: Split Wave 0 semver routing contract
         entry: bash scripts/ci/test-split-wave0-semver-routing.sh
         language: system
         pass_filenames: false
         stages: [pre-commit, pre-push]
-        files: ^(\.github/workflows/split-wave0-gates\.yml|scripts/ci/(test-split-wave0-semver-routing\.sh|derive-semver-published-lib-crates\.py)|docs/contributing/WAVE0-GATES\.md|\.pre-commit-config\.yaml)$
+        files: ^(\.github/workflows/semver-public\.yml|scripts/ci/(test-split-wave0-semver-routing\.sh|derive-semver-published-lib-crates\.py)|docs/contributing/WAVE0-GATES\.md|\.pre-commit-config\.yaml)$
       - id: linux-gate-self-test
         name: Linux compile gate self-test
         entry: bash scripts/ci/test-check-linux.sh

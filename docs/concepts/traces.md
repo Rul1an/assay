@@ -59,6 +59,33 @@ sha256:a3f2b1c4d5e6f7890...
 
 Any modification changes the ID. Tamper-evident by design.
 
+### Comparing Bundles
+
+`assay evidence diff` verifies both bundles, then compares the retained verified events
+on two layers:
+
+- **Retained events by content id.** Every event carries a verified `content_hash` over its
+  type, subject and payload; `run_root` binds the ordered sequence of those hashes. The report
+  prints both `run_root`s and lists events present on one side only, named by content id, type
+  and sequence number. Unequal roots are a sound witness that the retained events differ;
+  equal roots that they do not.
+- **Subject projections.** Added and removed `.net`, `.fs` and `.process` subjects (hosts,
+  paths, process names), as before.
+
+The output ends with one of two lines:
+
+```
+No differences in retained verified events: run_root equal.
+Retained verified events differ: run_root differs; 1 added, 1 removed by content id.
+```
+
+Equal projections with a differing `run_root` are reported as differing, never as clean.
+Absence and completeness are not established: the comparison covers what both bundles
+retained, not what happened. Exit code is `0` whenever both bundles verify and the comparison
+completes, with or without differences; a bundle that fails to open or verify is an error.
+`--format json` carries the same data under `retained_events` (`run_root_equal`, `added`,
+`removed`) next to the existing subject sets.
+
 ### BYOS Storage
 
 Push bundles to your own S3-compatible storage:
@@ -182,12 +209,50 @@ awk -F'"' '/"tool"/ {print $4}' traces/golden.jsonl | sort | uniq -c
 ### Validate a Trace
 
 ```bash
-# Check trace format is valid
+# Check every configured prompt appears verbatim in the trace
 assay trace verify --trace traces/golden.jsonl --config eval.yaml
 
 # Output:
-# ✅ Trace verifies against config coverage
+# truncation ordinal=1 kind=episode_start episode_id="ep-1" pointer=/input reading=unmeasured
+# truncation ordinal=1 kind=episode_start episode_id="ep-1" pointer=/meta reading=unmeasured
+# truncation ordinal=2 kind=step episode_id="ep-1" step_id="s1" pointer=/content reading=unmeasured
+# ...
+# ✅ Trace Verification Passed: All 3 config tests found in trace.
 ```
+
+Before the coverage verdict, `trace verify` prints one truncation reading per event
+occurrence and per field the ingest stage scans (`/input` and `/meta` for an episode start,
+`/content` and `/meta` for a step, `/args` and `/result` for a tool call; an episode end
+scans nothing and is printed with `fields=none`). The ordinal counts yielded events, so a
+V1 record expands to three ordinals; it is a locator, not a JSONL line number or a proof
+of origin. Identifiers and stage names are printed as JSON string literals escaped to
+printable ASCII.
+
+Readings come from the ADR-050 observation carrier and mean exactly this:
+
+- `lossy`: a loss record covers the field. Truncation happened at some stage and the
+  original bytes are not in the trace.
+- `measured_clean stage="<name>" ceiling=<bytes>`: the named stage reports it did not
+  shorten anything under this field at that ceiling. This is stage-local, not end-to-end
+  completeness; an exporter or host upstream may already have cut the value.
+- `unmeasured`: no trusted stage reports on the field. Absence of a record is not
+  intactness. A value that still carries the in-band `...[TRUNCATED]` mark with no loss
+  record also reads `unmeasured`, never clean.
+
+No stage is trusted by default, so a fresh run shows `lossy` or `unmeasured` only. Pass
+`--trust-stage <name>` once per stage whose clean report you accept; the ingest stage is
+`assay.trace.upgrader`, and trusting it is trusting this local scan, not the original
+producer. Trust never turns `lossy` into anything else. The readings are informational: the
+exit code is still decided by prompt coverage alone.
+
+```bash
+assay trace verify --trace traces/golden.jsonl --config eval.yaml \
+  --trust-stage assay.trace.upgrader
+```
+
+If the trace cannot be read to the end, the rows already printed are followed by
+`truncation incomplete after_ordinal=<n> error="..."` and the command fails; those rows
+describe only the events before the failure.
 
 ### Compare Traces
 

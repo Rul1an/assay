@@ -4,6 +4,94 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.3.1] - 2026-09-15
+
+Patch release consolidating the RC1 and RC2 candidates. Source is the RC2 tree
+with only the version and this entry changed. RC2 (`v6.3.1-rc.2`) verified the
+GHCR image channel end to end: publication, anonymous pull by digest on amd64
+and arm64, non-root execution, byte parity with the release archives, and SLSA
+provenance plus CycloneDX SBOM attestations bound to the image digest. This
+entry declares the candidate source; crates.io, PyPI and MCP Registry
+publication and the published installation journey are exercised by the stable
+release run and are not asserted here.
+
+### Security
+- Update rustls to 0.23.45 in both root and fuzz lockfiles for
+  RUSTSEC-2026-0285 / GHSA-2mjx-qc3c-rqvc. Assay has performed no
+  exploitability analysis of its own TLS usage and makes no claim either way;
+  already-published v6.3.0 and earlier binaries resolve rustls 0.23.37 and are
+  unchanged (#3013, #3012).
+
+### Fixed
+- Trace streams propagate read failures instead of treating them as clean EOF,
+  so coverage verification and ingestion report unreadable trailing input.
+  Earlier output may remain on failure; atomic rollback is not promised (#3023).
+- A sentinel-bearing value without a corresponding loss record is read as
+  `Unmeasured`, rather than being eligible for a clean truncation reading (#3001).
+- GHCR packaging selects release archives with `gh release download --pattern`
+  instead of positional asset arguments (#2992, #2994).
+- Convert the workspace's RC and beta versions to Python's PEP 440 spelling once
+  for wheel selection, installation, and installed-metadata verification (#3024).
+- Resolve semver baselines from the latest stable release tag, not a newer RC
+  or beta (#3024).
+
+## [6.3.1-rc.2] - 2026-09-15
+
+Replacement candidate for the RC1 wheel smoke failure. RC1's binary release and
+GHCR publication succeeded, including both hosted image-verification jobs, but
+its wheel matrix failed. The RC1 tag remains unchanged. The stable installation
+pin remains v6.3.0; this entry does not assert successful RC2 publication.
+
+### Fixed
+- Convert the workspace's RC and beta versions to Python's PEP 440 spelling once
+  for wheel selection, installation, and installed-metadata verification. Keep
+  the exact wheel-count, platform-tag, and native-import checks in place.
+- Resolve semver baselines from the latest stable release tag, not a newer RC
+  or beta. A prerelease baseline caused the gate's planted API breaks to be
+  accepted; the required CI self-test caught this before RC2 could merge.
+
+## [6.3.1-rc.1] - 2026-09-14
+
+Release candidate for the next patch release and the GHCR publication rehearsal.
+The published installation pin remains on v6.3.0 until a stable release's assets
+and installation journey have been verified. This entry declares candidate source,
+not successful publication or installed-agent proof.
+
+### Fixed
+- Trace streams propagate read failures instead of treating them as clean EOF,
+  so coverage verification and ingestion report unreadable trailing input.
+  Earlier output may remain on failure; atomic rollback is not promised (#3023).
+- Update rustls to 0.23.45 in both root and fuzz lockfiles for
+  RUSTSEC-2026-0285 / GHSA-2mjx-qc3c-rqvc. No Assay-specific exploitability has
+  been reproduced; already-published v6.3.0 binaries are unchanged (#3013).
+- A sentinel-bearing value without a corresponding loss record is read as
+  `Unmeasured`, rather than being eligible for a clean truncation reading (#3001).
+- GHCR packaging selects release archives with `gh release download --pattern`
+  instead of positional asset arguments. A working image channel still requires
+  successful publication and digest-bound verification (#2992, #2994).
+
+### Repository Tooling
+- Update the MCP server's pinned distroless base image. Both hosted architecture
+  builds passed; this does not establish publication of an RC image (#3018).
+- Explicit runner queue-priority commands refuse ambiguous branch/PR admission;
+  the deployed health script matches the merged source. Live recovery remains
+  a separate proof obligation (#3022).
+- Release-channel contract tests run from stable, RC, and beta source workspaces
+  without treating a prerelease as a stable installation target (#3017).
+- Required CI now consumes the public semver gate result; the published-library
+  inventory determines its scope (#2996, #3003).
+- Fuzz smoke refuses a run that executed zero units (#2999).
+- Runner maintenance propagates cancellation request failures, and recovery
+  requires a bounded, unambiguous idle registration observation. This is not
+  atomic scheduler exclusion or proof that an installed runner was updated
+  (#3004, #3010).
+- Normal runner health checks no longer invoke PR-priority cancellation of push
+  runs; explicit queue-management commands retain that operation. This is a
+  repository-script change, not evidence of deployment to the runner (#3014).
+- Review landing and conformance inventory checks share the checker's case
+  inventory instead of maintaining a separate interpretation (#2988, #2991,
+  #2997, #3002).
+
 ## [6.3.0] - 2026-09-13
 
 ### Added
