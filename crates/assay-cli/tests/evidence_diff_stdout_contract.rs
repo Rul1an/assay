@@ -9,6 +9,7 @@
 //! does not change verification or exit codes.
 
 use assay_evidence::bundle::BundleWriter;
+use assay_evidence::sanitize::sanitize_terminal;
 use assay_evidence::types::EvidenceEvent;
 use assert_cmd::Command;
 use chrono::{TimeZone, Utc};
@@ -23,6 +24,37 @@ const DIFFERS_PREFIX: &str = "Retained verified events differ: run_root differs;
 
 fn write_bundle(path: &Path, run_id: &str, include_config: bool) {
     write_bundle_with_decision(path, run_id, include_config, None);
+}
+
+fn write_bundle_with_event_type(path: &Path, run_id: &str, event_type: &str) {
+    let mut events = Vec::new();
+
+    let mut started = EvidenceEvent::new(
+        "assay.profile.started",
+        "urn:assay:test",
+        run_id,
+        0,
+        serde_json::json!({"name": "diff-scope"}),
+    );
+    started.time = Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+    events.push(started);
+
+    let mut custom = EvidenceEvent::new(
+        event_type,
+        "urn:assay:test",
+        run_id,
+        1,
+        serde_json::json!({"hostile": true}),
+    );
+    custom.time = Utc.timestamp_opt(1_700_000_001, 0).unwrap();
+    events.push(custom);
+
+    let mut file = std::fs::File::create(path).expect("create bundle");
+    let mut writer = BundleWriter::new(&mut file);
+    for event in events {
+        writer.add_event(event);
+    }
+    writer.finish().expect("finish bundle");
 }
 
 /// `decision` adds an `assay.policy.decision` event whose payload no subject projection reads.
@@ -333,4 +365,56 @@ fn json_diff_publishes_comparison_scope_and_keeps_report_fields() {
         "not_established"
     );
     assert_no_extent_license(&report, "$");
+}
+
+#[test]
+fn hostile_event_type_human_diff_sanitizes_terminal_output() {
+    let dir = tempdir().expect("tempdir");
+    let baseline = dir.path().join("baseline.tar.gz");
+    let candidate = dir.path().join("candidate.tar.gz");
+    let hostile_type = "assay.hostile.\x1b[31mcolor\x01\nnewline";
+
+    write_bundle(&baseline, "run_base", true);
+    write_bundle_with_event_type(&candidate, "run_cand", hostile_type);
+
+    let output = run_diff(&baseline, &candidate, "human")
+        .success()
+        .get_output()
+        .clone();
+    assert_eq!(output.status.code(), Some(0));
+
+    assert!(
+        !output.stderr.contains(&0x1b),
+        "human diff output on stderr must not contain raw ESC byte (0x1b)"
+    );
+    assert!(
+        !output.stdout.contains(&0x1b),
+        "human diff output on stdout must not contain raw ESC byte (0x1b)"
+    );
+
+    for (idx, &byte) in output.stderr.iter().enumerate() {
+        if byte < 0x20 {
+            assert_eq!(
+                byte, b'\n',
+                "stderr byte at index {idx} ({byte:#04x}) is a raw control byte other than newline"
+            );
+        } else {
+            assert_ne!(
+                byte, 0x7f,
+                "stderr byte at index {idx} is a DEL control byte (0x7f)"
+            );
+        }
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let expected_sanitized = sanitize_terminal(hostile_type);
+    assert!(
+        stderr.contains(&expected_sanitized),
+        "stderr must contain sanitized rendering ({expected_sanitized:?}):\n{stderr}"
+    );
+    assert!(
+        stderr.contains('\u{FFFD}'),
+        "stderr must contain the replacement character U+FFFD:\n{stderr}"
+    );
+    scope_appears_before(&stderr, DIFFERS_PREFIX);
 }
