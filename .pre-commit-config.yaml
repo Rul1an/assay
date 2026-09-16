@@ -92,7 +92,8 @@ repos:
 
   # actionlint (GitHub Actions workflow lint)
   - repo: https://github.com/rhysd/actionlint
-    rev: v1.7.10
+    # v1.7.12 is the first release that accepts jobs.<id>.environment.deployment (#3035).
+    rev: v1.7.12
     hooks:
       - id: actionlint
         # GitHub Actions added concurrency.queue in May 2026; actionlint has not
@@ -159,6 +160,13 @@ repos:
         language: system
         pass_filenames: false
         files: ^(infra/bpf-runner/health_check\.sh|scripts/ci/test-runner-recovery-liveness\.sh)$
+
+      - id: dependabot-maintenance-app-token-contract
+        name: Dependabot lane acts only as its App
+        entry: bash scripts/ci/test-dependabot-maintenance.sh
+        language: system
+        pass_filenames: false
+        files: ^(\.github/workflows/dependabot-maintenance\.yml|scripts/ci/(dependabot-maintenance|test-dependabot-maintenance)\.sh)$
 
       - id: docs-generated-drift-self-test
         name: Generated-docs drift check self-test

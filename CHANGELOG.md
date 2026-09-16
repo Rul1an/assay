@@ -4,7 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay evidence verify-coverage-attestation` admits one local CAP-1 document
+  under the existing byte ceiling and writes a three-valued conformance
+  document. Conformance is internal consistency of that document, not producer
+  truth or capture completeness; the C1–C7 claim gate does not run (#2493).
+
 ### Changed
+- OTel emit and ingest share one GenAI semconv commit pin. `gen_ai.system` is no
+  longer written; `gen_ai.provider.name` is. Fabricated `"unknown"` models and
+  `completion_tokens: 0` are omitted, and an unknown `genai_semconv_version`
+  fails closed instead of falling back to 1.28.0. `assay project-otel` JSON
+  inputs are bounded by `LimitReader` (#2489).
 - `assay evidence push --no-verify` is refused with exit 2 before the archive is
   opened. The store key is the verified `bundle_id`; the flag used to take that id
   from the unverified manifest, so an archive could name its own key (#2492).
@@ -14,6 +25,7 @@ All notable changes to this project will be documented in this file.
   its own `bundle_id` as a typed `Contract` verifier error
   (`ContractBundleIdMismatch`) naming both ids, exit 2, with nothing written.
   The prose-only refusal was indistinguishable from a transport failure (#2492).
+- Trace verify coverage failures cite per-occurrence `/input` readings under each stage-local truncation-shape id (#2782).
 
 ## [6.3.1] - 2026-09-15
 

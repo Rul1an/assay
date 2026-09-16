@@ -1,0 +1,88 @@
+{
+  "schema_version": "1",
+  "locked_at": "2026-09-16T00:00:00Z",
+  "upstream_sources": [
+    {
+      "type": "semconv",
+      "repository": "https://github.com/open-telemetry/semantic-conventions-genai",
+      "tag": null,
+      "commit": "434c91dcc34ed038e3048c07720ddfed2c6bddfc",
+      "files": [
+        {
+          "source_path": "docs/gen-ai/gen-ai-agent-spans.md",
+          "sha256": "3540a19cdce5a36ade213b259f12685533c35698cd7dffccd49b1a9025f8f395"
+        },
+        {
+          "source_path": "model/gen-ai/registry.yaml",
+          "sha256": "92745ebd07340b0c1f7ebd8a2828be12d939add12ed351ed4b444093d3201675"
+        }
+      ]
+    }
+  ],
+  "extracted_genai_keys": [
+    "gen_ai.agent.description",
+    "gen_ai.agent.id",
+    "gen_ai.agent.name",
+    "gen_ai.agent.version",
+    "gen_ai.conversation.compacted",
+    "gen_ai.conversation.id",
+    "gen_ai.data_source.id",
+    "gen_ai.embeddings.dimension.count",
+    "gen_ai.evaluation.explanation",
+    "gen_ai.evaluation.name",
+    "gen_ai.evaluation.score.label",
+    "gen_ai.evaluation.score.value",
+    "gen_ai.input.messages",
+    "gen_ai.memory.query.text",
+    "gen_ai.memory.record.count",
+    "gen_ai.memory.record.id",
+    "gen_ai.memory.records",
+    "gen_ai.memory.store.id",
+    "gen_ai.operation.name",
+    "gen_ai.output.messages",
+    "gen_ai.output.type",
+    "gen_ai.prompt.name",
+    "gen_ai.prompt.variable",
+    "gen_ai.prompt.version",
+    "gen_ai.provider.name",
+    "gen_ai.request.choice.count",
+    "gen_ai.request.encoding_formats",
+    "gen_ai.request.frequency_penalty",
+    "gen_ai.request.max_tokens",
+    "gen_ai.request.model",
+    "gen_ai.request.presence_penalty",
+    "gen_ai.request.previous_response.id",
+    "gen_ai.request.reasoning.level",
+    "gen_ai.request.seed",
+    "gen_ai.request.stop_sequences",
+    "gen_ai.request.stream",
+    "gen_ai.request.temperature",
+    "gen_ai.request.top_k",
+    "gen_ai.request.top_p",
+    "gen_ai.response.finish_reasons",
+    "gen_ai.response.id",
+    "gen_ai.response.model",
+    "gen_ai.response.time_to_first_chunk",
+    "gen_ai.retrieval.documents",
+    "gen_ai.retrieval.query.text",
+    "gen_ai.retrieval.top_k",
+    "gen_ai.system_instructions",
+    "gen_ai.token.type",
+    "gen_ai.tool.call.arguments",
+    "gen_ai.tool.call.id",
+    "gen_ai.tool.call.result",
+    "gen_ai.tool.definitions",
+    "gen_ai.tool.description",
+    "gen_ai.tool.name",
+    "gen_ai.tool.type",
+    "gen_ai.usage.cache_creation.input_tokens",
+    "gen_ai.usage.cache_read.input_tokens",
+    "gen_ai.usage.input_tokens",
+    "gen_ai.usage.output_tokens",
+    "gen_ai.usage.reasoning.output_tokens",
+    "gen_ai.workflow.name"
+  ],
+  "provenance": {
+    "note": "Attribute table extracted from semantic-conventions-genai@434c91dc model/gen-ai/registry.yaml. Pinning a Development-status commit names the table Assay wrote against; it is not a Stable-release compatibility claim."
+  }
+}

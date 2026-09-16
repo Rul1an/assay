@@ -1,31 +1,42 @@
-use crate::config::otel::SemConvStability;
+//! Compatibility facade for the 6.3.1 `otel::semconv` path.
+//!
+//! Attribute names and the version string come from [`crate::otel::pin`].
+//! Production emit and ingest call the pin; this module must not become a
+//! second version table.
 
-/// Trait to valid OpenTelemetry GenAI Semantic Conventions across versions.
+use crate::config::otel::SemConvStability;
+use crate::otel::pin;
+
+/// Trait to name OpenTelemetry GenAI attributes across versions.
+///
+/// Prefer [`crate::otel::pin`]. This trait remains reachable so 6.3.1 stays
+/// non-breaking. `#[deprecated]` is omitted: cargo-semver-checks treats that
+/// as a minor bump, and this crate is still on the 6.3.1 patch line.
 pub trait GenAiSemConv {
     fn version(&self) -> &'static str;
 
-    // System Attributes
     fn system(&self) -> &'static str;
 
-    // Request Attributes
     fn request_model(&self) -> &'static str;
     fn request_temperature(&self) -> &'static str;
     fn request_top_p(&self) -> &'static str;
 
-    // Usage Attributes
     fn usage_input_tokens(&self) -> &'static str;
     fn usage_output_tokens(&self) -> &'static str;
 
-    // Response Attributes
     fn response_finish_reasons(&self) -> &'static str;
     fn response_id(&self) -> &'static str;
-    fn response_model(&self) -> &'static str; // If different from request
+    fn response_model(&self) -> &'static str;
 
-    // Payload Attributes (Privacy sensitive)
     fn prompt_content(&self) -> &'static str;
     fn completion_content(&self) -> &'static str;
 }
 
+/// Historical type name for the current pin's attribute table.
+///
+/// The name is kept for cargo-semver-checks. [`GenAiSemConv::version`]
+/// returns [`GENAI_SEMCONV_PIN`](crate::otel::pin::GENAI_SEMCONV_PIN),
+/// not the retired `1.28.0` label.
 pub struct V1_28_0 {
     #[allow(dead_code)]
     stability: SemConvStability,
@@ -39,47 +50,45 @@ impl V1_28_0 {
 
 impl GenAiSemConv for V1_28_0 {
     fn version(&self) -> &'static str {
-        "1.28.0"
+        pin::GENAI_SEMCONV_PIN
     }
 
     fn system(&self) -> &'static str {
-        "gen_ai.system"
+        pin::ATTR_SYSTEM
     }
 
     fn request_model(&self) -> &'static str {
-        "gen_ai.request.model"
+        pin::ATTR_REQUEST_MODEL
     }
     fn request_temperature(&self) -> &'static str {
-        "gen_ai.request.temperature"
+        pin::ATTR_REQUEST_TEMPERATURE
     }
     fn request_top_p(&self) -> &'static str {
-        "gen_ai.request.top_p"
+        pin::ATTR_REQUEST_TOP_P
     }
 
     fn usage_input_tokens(&self) -> &'static str {
-        "gen_ai.usage.input_tokens"
+        pin::ATTR_USAGE_INPUT_TOKENS
     }
     fn usage_output_tokens(&self) -> &'static str {
-        "gen_ai.usage.output_tokens"
+        pin::ATTR_USAGE_OUTPUT_TOKENS
     }
 
     fn response_finish_reasons(&self) -> &'static str {
-        "gen_ai.response.finish_reasons"
+        pin::ATTR_RESPONSE_FINISH_REASONS
     }
     fn response_id(&self) -> &'static str {
-        "gen_ai.response.id"
+        pin::ATTR_RESPONSE_ID
     }
     fn response_model(&self) -> &'static str {
-        "gen_ai.response.model"
+        pin::ATTR_RESPONSE_MODEL
     }
 
     fn prompt_content(&self) -> &'static str {
-        // If strict stability and this is experimental?
-        // In 1.28, prompts might be experimental. For now we return standard key.
-        "gen_ai.prompt"
+        pin::ATTR_PROMPT
     }
 
     fn completion_content(&self) -> &'static str {
-        "gen_ai.completion"
+        pin::ATTR_COMPLETION
     }
 }

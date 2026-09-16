@@ -88,7 +88,7 @@ fn locator(ordinal: u64, event: &TraceEvent) -> String {
     s
 }
 
-fn render_reading(reading: &TruncationReading) -> String {
+pub(crate) fn render_reading(reading: &TruncationReading) -> String {
     match reading {
         TruncationReading::Lossy => "reading=lossy".to_string(),
         TruncationReading::Unmeasured => "reading=unmeasured".to_string(),

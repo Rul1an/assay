@@ -1,7 +1,6 @@
 use super::suggest::PolicySuggestion;
-use std::fs::File;
-use std::io::Write;
-use std::path::Path;
+use assay_common::atomic_write::write_new;
+use std::path::{Path, PathBuf};
 
 /// Write policy suggestion to YAML string (deterministic).
 pub fn write_yaml(s: &PolicySuggestion) -> anyhow::Result<String> {
@@ -90,66 +89,46 @@ fn require_empty_extends(s: &PolicySuggestion) -> anyhow::Result<()> {
 
 /// Save content to disk atomically and safely.
 pub fn save_atomic(path: &Path, content: &str) -> anyhow::Result<()> {
-    // 1. Check if target is a symlink (avoid TOCTOU/symlink attacks if possible)
     if path.exists() {
         let meta = std::fs::symlink_metadata(path)?;
         if meta.file_type().is_symlink() {
             anyhow::bail!("Refusing to write to symlink: {}", path.display());
         }
-    }
-
-    // Unique temp path to avoid race conditions
-    let pid = std::process::id();
-    let temp_path = path.with_extension(format!("tmp.{}", pid));
-
-    // RAII Cleanup handler
-    struct Cleanup<'a>(&'a Path);
-    impl Drop for Cleanup<'_> {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_file(self.0);
-        }
-    }
-    let _cleanup = Cleanup(&temp_path);
-
-    // 2. Create temp file
-    let mut file = File::create(&temp_path)?;
-
-    // 3. Set permissions 0600 (Unix)
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = file.metadata()?.permissions();
-        perms.set_mode(0o600);
-        file.set_permissions(perms)?;
-    }
-
-    // 4. Write content
-    file.write_all(content.as_bytes())?;
-
-    // 5. Fsync
-    file.sync_all()?;
-    drop(file); // Ensure closed
-
-    // 6. Rename (Atomic)
-    std::fs::rename(&temp_path, path)?;
-
-    // 7. Fsync Directory (SOTA durability: ensure rename is persisted)
-    if let Some(parent) = path.parent() {
-        if let Ok(dir) = File::open(parent) {
-            let _ = dir.sync_all();
+        if meta.is_file() {
+            // #3027: callers write at process exit and readers come later, so delete-then-create is acceptable here.
+            std::fs::remove_file(path)?;
         }
     }
 
-    // Defuse cleanup: path is successfully moved
-    std::mem::forget(_cleanup);
+    let parent = usable_parent(path);
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow::anyhow!("{} must end with a UTF-8 file name", path.display()))?;
+    write_new(&parent, file_name, content.as_bytes())
+        .map(|_| ())
+        .map_err(|error| {
+            anyhow::anyhow!("failed to atomically write {}: {error}", path.display())
+        })?;
 
     Ok(())
 }
 
+fn usable_parent(path: &Path) -> PathBuf {
+    match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => PathBuf::from("."),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{write_json, write_yaml};
+    use super::{save_atomic, write_json, write_yaml};
     use crate::profile::suggest::PolicySuggestion;
+    use std::fs;
+
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
 
     #[test]
     fn generated_formats_refuse_nonempty_extends() {
@@ -166,6 +145,42 @@ mod tests {
         assert_eq!(
             json_error.to_string(),
             "generated sandbox policies do not support non-empty extends"
+        );
+    }
+
+    #[test]
+    fn save_atomic_overwrites_existing_regular_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let output = dir.path().join("profile.yaml");
+        fs::write(&output, "old").expect("seed old");
+
+        save_atomic(&output, "new content\n").expect("overwrite succeeds");
+
+        assert_eq!(
+            fs::read_to_string(&output).expect("read output"),
+            "new content\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_atomic_refuses_symlink_targets() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let outside = tempfile::tempdir().expect("outside");
+        let outside_file = outside.path().join("outside.txt");
+        fs::write(&outside_file, "outside").expect("seed outside");
+
+        let output = dir.path().join("profile.yaml");
+        symlink(&outside_file, &output).expect("create symlink");
+
+        let error = save_atomic(&output, "new content\n").expect_err("symlink must be rejected");
+        assert!(
+            error.to_string().contains("Refusing to write to symlink"),
+            "unexpected error: {error:#}"
+        );
+        assert_eq!(
+            fs::read_to_string(&outside_file).expect("read outside"),
+            "outside"
         );
     }
 }

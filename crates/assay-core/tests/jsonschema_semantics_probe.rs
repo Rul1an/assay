@@ -146,3 +146,79 @@ mod collision_policy_enforcement {
         );
     }
 }
+
+/// #3036 (from #3019 F3): pin the rendered violation `path` for sibling keywords.
+///
+/// `evaluate_schema` renders each failure as `{"path": <instance_path>, ...}`.
+/// Upstream 0.55.0 changed sibling-keyword locations (`absolute_keyword_location`
+/// naming the sibling keyword), and the repo consumes neither that field nor
+/// `canonical::ObjectViolationView`, so a future bump could shift the wording of
+/// `ValidationError` Display / `instance_path` for sibling failures without any
+/// red test. This table pins what the renderer emits today for three shapes --
+/// a two-name `required` beside `properties`, sibling `minLength`/`maxLength`,
+/// and sibling `minItems`/`maxItems` -- following this file's convention of
+/// asserting status plus `reason_code`, not messages.
+///
+/// Recorded against jsonschema 0.55.1.
+#[test]
+fn sibling_keyword_violations_pin_rendered_path() {
+    use assay_core::policy_engine::{evaluate_schema, VerdictStatus};
+
+    let cases = [
+        (
+            "required",
+            json!({
+                "type": "object",
+                "properties": {"a": {"type": "string"}, "b": {"type": "string"}},
+                "required": ["a", "b"],
+            }),
+            json!({"a": "x", "b": "y"}),
+            json!({"a": "x"}),
+            "",
+        ),
+        (
+            "minLength+maxLength",
+            json!({
+                "type": "object",
+                "properties": {"name": {"type": "string", "minLength": 2, "maxLength": 5}},
+                "required": ["name"],
+            }),
+            json!({"name": "abc"}),
+            json!({"name": "x"}),
+            "/name",
+        ),
+        (
+            "minItems+maxItems",
+            json!({
+                "type": "object",
+                "properties": {"tags": {"type": "array", "minItems": 1, "maxItems": 3}},
+                "required": ["tags"],
+            }),
+            json!({"tags": ["a", "b"]}),
+            json!({"tags": []}),
+            "/tags",
+        ),
+    ];
+
+    for (shape, schema, valid, invalid, path) in cases {
+        let compiled = jsonschema::validator_for(&schema).expect("case schema compiles");
+        let accepted = evaluate_schema(&compiled, &valid);
+        assert_eq!(
+            accepted.status,
+            VerdictStatus::Allowed,
+            "{shape}: {accepted:?}"
+        );
+        let refused = evaluate_schema(&compiled, &invalid);
+        assert_eq!(
+            refused.status,
+            VerdictStatus::Blocked,
+            "{shape}: {refused:?}"
+        );
+        assert_eq!(refused.reason_code, "E_ARG_SCHEMA", "{shape}");
+        let violations = refused.details["violations"]
+            .as_array()
+            .expect("violations array");
+        assert!(!violations.is_empty(), "{shape}");
+        assert_eq!(violations[0]["path"], json!(path), "{shape}: pinned path");
+    }
+}

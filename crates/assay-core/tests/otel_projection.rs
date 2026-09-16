@@ -52,6 +52,26 @@ fn header_pins_schema_versions_and_lossy_contract() {
 }
 
 #[test]
+fn execute_tool_spans_carry_provider_name_and_never_gen_ai_system() {
+    let p = project(&surface(), None, None);
+    let tool = p
+        .spans
+        .iter()
+        .find(|s| s.name.starts_with("execute_tool "))
+        .expect("execute_tool span");
+    assert_eq!(
+        tool.attributes
+            .get("gen_ai.provider.name")
+            .and_then(|v| v.as_str()),
+        Some("assay")
+    );
+    assert!(
+        !tool.attributes.contains_key("gen_ai.system"),
+        "retired gen_ai.system must not be emitted"
+    );
+}
+
+#[test]
 fn tool_span_carries_genai_and_openinference_and_is_observed() {
     let p = project(&surface(), Some(&observation()), Some(&enforcement()));
     let tool = p

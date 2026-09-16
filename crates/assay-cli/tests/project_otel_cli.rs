@@ -155,6 +155,29 @@ fn out_flag_writes_file_and_leaves_stdout_empty() {
 }
 
 #[test]
+fn project_otel_rejects_oversized_json_input() {
+    let limit = assay_evidence::VerifyLimits::default().max_manifest_bytes;
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("project_otel_oversized");
+    fs::create_dir_all(&dir).unwrap();
+    let cap = dir.join("capability-surface.json");
+    let mut body = Vec::from(br#"{"schema":"assay.runner.capability_surface.v0","mcp_tools":[]}"#);
+    body.resize((limit as usize) + 1, b' ');
+    fs::write(&cap, &body).unwrap();
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "project-otel",
+            "--capability-surface",
+            cap.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .code(2)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains(limit.to_string()));
+}
+
+#[test]
 fn evidence_bundle_rejects_capability_surface_context_flags() {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("project_otel_arg_conflict");
     fs::create_dir_all(&dir).unwrap();
