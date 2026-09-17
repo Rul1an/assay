@@ -4,6 +4,39 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.5.0] - 2026-09-17
+
+Stable release consolidating the RC1 and RC2 candidates. RC2 (`v6.5.0-rc.2`)
+verified the abi3 wheel pipeline with three `cp312-abi3` wheels, plus install
+and native import checks on CPython 3.12, 3.13, and 3.14, and also verified
+the binary and GHCR channels. Source is the RC2 tree plus #3077, #3079, #3082,
+and #3086, plus #3075 (merged before RC2 prep and not listed in an RC section).
+This entry declares candidate source; crates.io, PyPI, and MCP Registry
+publication and the published installation journey are exercised by the stable
+release run and are not asserted here.
+
+### Changed
+- Prompt refusals now name why a prompt cannot be shown with
+  `<command> cannot show prompt "<prompt>": <reason>; pass --yes`, where
+  `<reason>` is one of `stdin is not a terminal`, `stderr is not a terminal`,
+  or `the prompt could not be read` (#3075).
+- `assay-it` wheel artifacts in stable are `cp312-abi3` (one wheel per
+  platform, CPython 3.12+).
+  **Migration:** update automation that still pins `cp312-cp312` wheel names.
+
+### Internal
+- The generated-output drift check is now part of required CI and is exercised
+  by dedicated script contracts (#3079).
+- `generate-crate-deps.sh` no longer drops edges under parallel load in docs
+  generation (#3086).
+
+### Skipped
+- `fuzz: the tools/call decision target evaluates the real policy path` is
+  internal fuzz and workflow hardening and does not change user or operator
+  runtime behavior (#3077).
+- `test(mcp): pin the shape of the injected tool_identity` is a test-only
+  contract addition with no production path change (#3082).
+
 ## [6.5.0-rc.2] - 2026-09-17
 
 Replacement candidate for the RC1 wheel matrix failure. RC1's binary release
