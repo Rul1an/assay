@@ -114,6 +114,34 @@ expect_pass "production install_and_import spy" run_install_spy "$SMOKE"
 expect_pass "release version wheel and import contract" python3 "$ROOT/scripts/ci/test-smoke-python-wheel-version.py"
 
 expect_pass "live smoke contract" python3 "$CONTRACT" --root "$ROOT"
+expect_pass "planner emits decoded newline smoke_python_lines" \
+  python3 - "$ROOT" <<'PY'
+import json
+import subprocess
+import sys
+
+root = sys.argv[1]
+out = subprocess.check_output(
+    ["python3", "scripts/ci/plan-python-artifact-matrix.py", "--root", root, "--format", "json"],
+    text=True,
+    cwd=root,
+)
+plan = json.loads(out)
+expected = "3.12\n3.13\n3.14"
+wheels = plan.get("wheels") or []
+if not wheels:
+    raise SystemExit("planner returned no wheels")
+for wheel in wheels:
+    got = wheel.get("smoke_python_lines")
+    if got != expected:
+        raise SystemExit(
+            f"target {wheel.get('target')}: expected smoke_python_lines={expected!r}, got {got!r}"
+        )
+    if "\\n" in got:
+        raise SystemExit(
+            f"target {wheel.get('target')}: smoke_python_lines must decode to real newlines"
+        )
+PY
 
 write_dummy_wheel() {
   local dest="$1" name="$2"
@@ -329,6 +357,32 @@ path.write_text(text.replace(old, new, 1))
 PY
 expect_fail "return 0 before production install_and_import" run_install_spy "$CASE/scripts/ci/smoke-python-wheel.py"
 cp "$ROOT/scripts/ci/smoke-python-wheel.py" "$CASE/scripts/ci/smoke-python-wheel.py"
+
+echo "=== mutation: restore setup-python escaped newline expression ==="
+python3 - "$CASE/.github/workflows/release.yml" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+pattern = re.compile(
+    r"(python-version:\s*)\$\{\{\s*matrix\.smoke_python_lines\s*\}\}"
+)
+if pattern.search(text):
+    text = pattern.sub(r"\1${{ join(matrix.smoke_pythons, '\\n') }}", text, count=1)
+else:
+    # Force the historical bad shape so the guard must reject it.
+    text = re.sub(
+        r"(python-version:\s*)\$\{\{[^}]+\}\}",
+        r"\1${{ join(matrix.smoke_pythons, '\\n') }}",
+        text,
+        count=1,
+    )
+path.write_text(text)
+PY
+expect_fail "setup-python escaped newline expression" python3 "$CONTRACT" --root "$CASE"
+cp "$ROOT/.github/workflows/release.yml" "$CASE/.github/workflows/release.yml"
 
 echo "=== #3063 case: workflow smokes only 3.12 ==="
 cp "$ROOT/.github/workflows/release.yml" "$CASE/.github/workflows/release.yml"
