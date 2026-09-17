@@ -96,6 +96,7 @@ def build_plan(matrix: dict) -> dict:
         declared_abi = "abi3"
         expected_abi_tag = "abi3"
     wheels_out: list[dict] = []
+    smoke_python_lines = "\n".join(smoke_pythons)
     for wheel in matrix.get("wheels") or []:
         tag = str(wheel.get("tag") or "")
         got_py = tag_python(tag)
@@ -114,6 +115,7 @@ def build_plan(matrix: dict) -> dict:
                 "target": wheel["target"],
                 "tag": tag,
                 "smoke_pythons": smoke_pythons,
+                "smoke_python_lines": smoke_python_lines,
             }
         )
     if not wheels_out:
