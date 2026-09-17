@@ -310,6 +310,7 @@ run_gate() {
   out="$(env RELEASE_ASSET_CONTRACT_RESULT=success \
              PUBLISH_SHAPE_CLI_RESULT=success \
              PUBLIC_CRATE_POLICY_RESULT=success \
+             GENERATED_DRIFT_RESULT=success \
              EVIDENCEREF_LIVE_RESOLVE_RESULT=success \
              SEMVER_RESULT=success \
              SEMVER_PUBLIC_RESULT=success \
@@ -337,6 +338,7 @@ run_gate pass "everything green" \
   SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  GENERATED_DRIFT_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
   EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
   SEMVER_RELEVANT=true SEMVER_RESULT=success >/dev/null
@@ -346,6 +348,7 @@ echo "ok: a complete green run passes"
 run_gate pass "lightweight scoped out" \
   SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=true DEPS_SECURITY_RESULT=skipped CLIPPY_RESULT=skipped RUSTDOC_RESULT=skipped \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  GENERATED_DRIFT_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=skipped TEST_RESULT=skipped \
   PUBLIC_MSRV_RESULT=skipped \
   EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
@@ -403,7 +406,7 @@ echo "ok: mcp-registry-foundation skipped while touched fails the gate"
 # `public-crate-policy` join the list with #2230: both were outside `needs:` entirely, so the gate
 # had no opinion about them at all, skipped or failed.
 for job in DISTRIBUTION_BOUNDARY VENDORED_PACKS RELEASE_ASSET_CONTRACT PUBLISH_SHAPE_CLI PUBLIC_CRATE_POLICY \
-  EVIDENCEREF_LIVE_RESOLVE; do
+  GENERATED_DRIFT EVIDENCEREF_LIVE_RESOLVE; do
   out="$(run_gate fail "unconditional $job skipped" \
     SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=true DEPS_SECURITY_RESULT=skipped CLIPPY_RESULT=skipped RUSTDOC_RESULT=skipped \
     PUBLIC_MSRV_RESULT=skipped \
@@ -415,9 +418,8 @@ for job in DISTRIBUTION_BOUNDARY VENDORED_PACKS RELEASE_ASSET_CONTRACT PUBLISH_S
 done
 echo "ok: a job with no condition may not be skipped even on a docs-only run"
 
-# The #2230 case stated as the outcome that was wrong: a red release guardrail must now turn the
-# required context red. Both were green as `CI` reported success, because the gate never saw them.
-for job in PUBLISH_SHAPE_CLI PUBLIC_CRATE_POLICY; do
+# A red unconditional guardrail must turn the required context red.
+for job in PUBLISH_SHAPE_CLI PUBLIC_CRATE_POLICY GENERATED_DRIFT; do
   out="$(run_gate fail "$job failed" \
     SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
     PUBLIC_MSRV_RESULT=$ok \

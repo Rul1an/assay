@@ -329,7 +329,8 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup-rust
+      - name: Set up Rust toolchain and cache
+        uses: ./.github/actions/setup-rust
         with:
           components: clippy
       - name: Install Linux deps (for build scripts)
@@ -1164,6 +1165,29 @@ jobs:
       - name: Committed digests still describe the tree
         run: shasum -a 256 -c SHA256SUMS.txt
 
+  generated-drift:
+    name: Generated outputs match their generators
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Set up Rust toolchain and cache
+        uses: ./.github/actions/setup-rust
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - name: Verify generated outputs are in sync
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ci/test-check-docs-generated-drift-safety.sh
+          bash scripts/ci/test-check-docs-generated-drift.sh
+          bash scripts/ci/check-docs-generated-drift.sh
+
   semver:
     name: Semver public gate
     needs: [scope]
@@ -1181,7 +1205,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: always()
-    needs: [scope, deps-security, clippy, rustdoc, public-msrv, distribution-boundary, publish-shape-cli, public-crate-policy, vendored-packs, release-asset-contract, mcp-registry-foundation, perf, test, ebpf-smoke-ubuntu, evidenceref-live-resolve, semver]
+    needs: [scope, deps-security, clippy, rustdoc, public-msrv, distribution-boundary, publish-shape-cli, public-crate-policy, vendored-packs, release-asset-contract, mcp-registry-foundation, perf, test, ebpf-smoke-ubuntu, generated-drift, evidenceref-live-resolve, semver]
     permissions:
       contents: read
     steps:
@@ -1268,6 +1292,7 @@ jobs:
           MCP_REGISTRY_FOUNDATION_RESULT: ${{ needs.mcp-registry-foundation.result }}
           PERF_RESULT: ${{ needs.perf.result }}
           TEST_RESULT: ${{ needs.test.result }}
+          GENERATED_DRIFT_RESULT: ${{ needs.generated-drift.result }}
           EVIDENCEREF_LIVE_RESOLVE_RESULT: ${{ needs.evidenceref-live-resolve.result }}
           SEMVER_RESULT: ${{ needs.semver.result }}
           # GitHub exposes reusable workflow outputs through needs.<job>.outputs in the caller:
@@ -1377,6 +1402,7 @@ jobs:
             "mcp-registry-foundation|${MCP_REGISTRY_FOUNDATION_RESULT}|${registry_expectation}" \
             "perf|${PERF_RESULT}|${code_gated_expectation}" \
             "test|${TEST_RESULT}|${code_gated_expectation}" \
+            "generated-drift|${GENERATED_DRIFT_RESULT}|required" \
             "evidenceref-live-resolve|${EVIDENCEREF_LIVE_RESOLVE_RESULT}|required" \
             "ebpf-smoke-ubuntu|${EBPF_SMOKE_UBUNTU_RESULT}|${ebpf_expectation}" \
             "semver|${SEMVER_RESULT}|${semver_expectation}"

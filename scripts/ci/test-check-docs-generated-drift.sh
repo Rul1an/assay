@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/drift-tree-snapshot.sh"
 
 ROOT="$(without_git_context git rev-parse --show-toplevel)"
+CI_WORKFLOW="$ROOT/.github/workflows/ci.yml"
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 SEED="$SCRATCH/seed"
@@ -14,6 +15,54 @@ INTERRUPT_CASE="${ASSAY_DOCS_DRIFT_INTERRUPT_AFTER_MUTATION:-}"
 GATE_OUTPUT=""
 # Full mode is a fixed mutation battery; selected mode deliberately executes one row.
 EXPECTED_CASES=16
+
+assert_generated_drift_job_contract() {
+  python3 - "$CI_WORKFLOW" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+workflow = Path(sys.argv[1]).read_text(encoding="utf-8")
+job = re.search(r"(?ms)^  generated-drift:\n(.*?)(?=^  [A-Za-z0-9_-]+:|\Z)", workflow)
+if not job:
+    raise SystemExit("FAIL: ci.yml missing generated-drift job")
+section = job.group(1)
+if re.search(r"(?m)^    if:\s*", section):
+    raise SystemExit("FAIL: generated-drift job must not set if:")
+if re.search(r"(?m)^    continue-on-error:\s*", section):
+    raise SystemExit("FAIL: generated-drift job must not set continue-on-error:")
+
+heading = "      - name: Verify generated outputs are in sync\n"
+at = section.find(heading)
+if at < 0:
+    raise SystemExit("FAIL: generated-drift job missing verification step")
+rest = section[at + len(heading):]
+next_step = re.search(r"(?m)^      - ", rest)
+body = rest if next_step is None else rest[:next_step.start()]
+if re.search(r"(?m)^        (if|continue-on-error):", body):
+    raise SystemExit("FAIL: generated-drift verification step must not use if or continue-on-error")
+run_at = body.find("        run: |\n")
+if run_at < 0:
+    raise SystemExit("FAIL: generated-drift verification step missing run block")
+script = body[run_at + len("        run: |\n"):]
+active = [
+    line.strip()
+    for line in script.splitlines()
+    if line.startswith("          ") and not line.lstrip().startswith("#")
+]
+required = [
+    "set -euo pipefail",
+    "bash scripts/ci/test-check-docs-generated-drift-safety.sh",
+    "bash scripts/ci/test-check-docs-generated-drift.sh",
+    "bash scripts/ci/check-docs-generated-drift.sh",
+]
+if active != required:
+    raise SystemExit(
+        "FAIL: generated-drift verification step must run exactly "
+        f"{required!r}, got {active!r}"
+    )
+PY
+}
 
 seed_repo() {
   local destination="$1"
@@ -292,6 +341,7 @@ if [[ -n "$SELECTED_CASE" ]]; then
 fi
 
 seed_repo "$SEED"
+assert_generated_drift_job_contract
 ROOT_BEFORE="$(snapshot_tree "$ROOT")"
 executed_cases=0
 

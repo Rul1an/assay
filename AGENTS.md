@@ -124,6 +124,10 @@ Auto-merge may be enabled only when:
 - the review quorum is satisfied;
 - every actionable finding is fixed or has a recorded technical disposition.
 
+Pre-commit hooks that run only in `Lint (pre-commit)` are advisory for branch protection. A guard
+that must block merges needs a call site in a job the required `CI` aggregate waits on and judges
+as required; the generated-output drift check is one such guard (Refs #3071).
+
 For an ADR-042/043 slice, open the PR with the dedicated template:
 
 ```bash
