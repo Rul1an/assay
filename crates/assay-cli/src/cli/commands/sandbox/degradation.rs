@@ -5,11 +5,19 @@ use assay_evidence::types::{
     SandboxDegradationReasonCode,
 };
 
+/// `--fail-closed`, and `--enforce` without `--allow-audit-fallback`, refuse
+/// rather than continue in audit. One predicate for the no-backend guard, the
+/// policy-conflict guard, and the degradation-event guards.
+pub(super) fn refuses_when_unenforceable(args: &SandboxArgs) -> bool {
+    args.fail_closed || (args.enforce && !args.allow_audit_fallback)
+}
+
 pub(super) fn backend_unavailable_degradation(
     args: &SandboxArgs,
     backend: &BackendType,
 ) -> Option<PayloadSandboxDegraded> {
-    if !args.enforce || args.fail_closed || matches!(backend, BackendType::Landlock) {
+    if refuses_when_unenforceable(args) || !args.enforce || matches!(backend, BackendType::Landlock)
+    {
         return None;
     }
 
@@ -26,7 +34,11 @@ pub(super) fn policy_conflict_degradation(
     actual_enforcement: bool,
     compat: &crate::landlock_check::LandlockCompatReport,
 ) -> Option<PayloadSandboxDegraded> {
-    if !args.enforce || args.fail_closed || !actual_enforcement || compat.is_compatible() {
+    if refuses_when_unenforceable(args)
+        || !args.enforce
+        || !actual_enforcement
+        || compat.is_compatible()
+    {
         return None;
     }
 

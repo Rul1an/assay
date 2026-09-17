@@ -65,8 +65,10 @@ nonexistent path does not become an active Landlock rule.
 `fs.deny` is used for compatibility checking. Landlock is allowlist-based:
 paths not admitted by the baseline or an explicit allow are unavailable.
 A deny nested inside an allowed directory cannot be represented. Assay
-therefore degrades to audit mode, or exits 2 with `--fail-closed`, rather
-than claiming that the nested deny was enforced.
+therefore degrades to audit mode when `--enforce` is not set, exits 2 with
+`--fail-closed` or `--enforce`, or continues in audit with
+`--enforce --allow-audit-fallback`, rather than claiming that the nested deny
+was enforced.
 
 ```yaml
 # Not enforceable: the allow grants the whole directory while the deny is nested in it.
@@ -195,7 +197,8 @@ before starting `true`.
 Exit code 2 covers configuration that cannot be enforced, including:
 
 - a missing or malformed named policy;
-- a Landlock compatibility conflict under `--fail-closed`;
+- a missing containment backend under `--enforce`;
+- a Landlock compatibility conflict under `--fail-closed` or `--enforce` without `--allow-audit-fallback`;
 - a network policy that is not expressible under `--enforce-net`.
 
 ## Current limitations
