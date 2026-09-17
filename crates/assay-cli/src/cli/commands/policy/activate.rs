@@ -28,6 +28,15 @@ pub struct ActivationRecord {
     pub rollback_of: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct PolicyRootDirs {
+    pub root: PathBuf,
+    #[allow(dead_code)]
+    pub assay_dir: PathBuf,
+    pub store_dir: PathBuf,
+    pub activations_dir: PathBuf,
+}
+
 pub fn now_rfc3339_utc() -> String {
     chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
 }
@@ -39,6 +48,197 @@ pub fn validate_target_name(name: &str) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+pub fn ensure_policy_root_dirs(
+    root: &Path,
+    create_if_missing: bool,
+) -> anyhow::Result<PolicyRootDirs> {
+    let _root_meta = match std::fs::symlink_metadata(root) {
+        Ok(m) => m,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            anyhow::bail!("policy root directory does not exist: {}", root.display());
+        }
+        Err(err) => {
+            return Err(anyhow::anyhow!(
+                "failed to access policy root {}: {err}",
+                root.display()
+            ));
+        }
+    };
+
+    if !root.is_dir() {
+        anyhow::bail!("policy root is not a directory: {}", root.display());
+    }
+
+    let canonical_root = root.canonicalize().map_err(|err| {
+        anyhow::anyhow!(
+            "failed to canonicalize policy root {}: {err}",
+            root.display()
+        )
+    })?;
+
+    let assay_dir = root.join(".assay");
+    let store_dir = assay_dir.join("policy-store");
+    let activations_dir = assay_dir.join("activations");
+
+    // 1. Check / create .assay
+    match std::fs::symlink_metadata(&assay_dir) {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() {
+                anyhow::bail!(
+                    "refusing to operate on symlinked assay directory: {}",
+                    assay_dir.display()
+                );
+            }
+            if !meta.is_dir() {
+                anyhow::bail!(
+                    "assay directory is not a directory: {}",
+                    assay_dir.display()
+                );
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            if create_if_missing {
+                std::fs::create_dir(&assay_dir).map_err(|err| {
+                    anyhow::anyhow!(
+                        "failed to create assay directory {}: {err}",
+                        assay_dir.display()
+                    )
+                })?;
+            }
+        }
+        Err(err) => {
+            return Err(anyhow::anyhow!(
+                "failed to access assay directory {}: {err}",
+                assay_dir.display()
+            ));
+        }
+    }
+
+    // 2. Check / create policy-store
+    match std::fs::symlink_metadata(&store_dir) {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() {
+                anyhow::bail!(
+                    "refusing to operate on symlinked policy-store directory: {}",
+                    store_dir.display()
+                );
+            }
+            if !meta.is_dir() {
+                anyhow::bail!(
+                    "policy-store directory is not a directory: {}",
+                    store_dir.display()
+                );
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            if create_if_missing {
+                std::fs::create_dir(&store_dir).map_err(|err| {
+                    anyhow::anyhow!(
+                        "failed to create policy-store directory {}: {err}",
+                        store_dir.display()
+                    )
+                })?;
+            }
+        }
+        Err(err) => {
+            return Err(anyhow::anyhow!(
+                "failed to access policy-store directory {}: {err}",
+                store_dir.display()
+            ));
+        }
+    }
+
+    // 3. Check / create activations
+    match std::fs::symlink_metadata(&activations_dir) {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() {
+                anyhow::bail!(
+                    "refusing to operate on symlinked activations directory: {}",
+                    activations_dir.display()
+                );
+            }
+            if !meta.is_dir() {
+                anyhow::bail!(
+                    "activations directory is not a directory: {}",
+                    activations_dir.display()
+                );
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            if create_if_missing {
+                std::fs::create_dir(&activations_dir).map_err(|err| {
+                    anyhow::anyhow!(
+                        "failed to create activations directory {}: {err}",
+                        activations_dir.display()
+                    )
+                })?;
+            }
+        }
+        Err(err) => {
+            return Err(anyhow::anyhow!(
+                "failed to access activations directory {}: {err}",
+                activations_dir.display()
+            ));
+        }
+    }
+
+    // 4. Verify canonical containment
+    if assay_dir.exists() {
+        let canonical_assay = assay_dir.canonicalize().map_err(|err| {
+            anyhow::anyhow!(
+                "failed to canonicalize assay dir {}: {err}",
+                assay_dir.display()
+            )
+        })?;
+        if !canonical_assay.starts_with(&canonical_root) {
+            anyhow::bail!(
+                "assay directory {} escapes root {}",
+                assay_dir.display(),
+                root.display()
+            );
+        }
+    }
+
+    if store_dir.exists() {
+        let canonical_store = store_dir.canonicalize().map_err(|err| {
+            anyhow::anyhow!(
+                "failed to canonicalize policy-store dir {}: {err}",
+                store_dir.display()
+            )
+        })?;
+        if !canonical_store.starts_with(&canonical_root) {
+            anyhow::bail!(
+                "policy-store directory {} escapes root {}",
+                store_dir.display(),
+                root.display()
+            );
+        }
+    }
+
+    if activations_dir.exists() {
+        let canonical_activations = activations_dir.canonicalize().map_err(|err| {
+            anyhow::anyhow!(
+                "failed to canonicalize activations dir {}: {err}",
+                activations_dir.display()
+            )
+        })?;
+        if !canonical_activations.starts_with(&canonical_root) {
+            anyhow::bail!(
+                "activations directory {} escapes root {}",
+                activations_dir.display(),
+                root.display()
+            );
+        }
+    }
+
+    Ok(PolicyRootDirs {
+        root: root.to_path_buf(),
+        assay_dir,
+        store_dir,
+        activations_dir,
+    })
 }
 
 pub fn store_policy_content(
@@ -60,6 +260,22 @@ pub fn store_policy_content(
 pub fn replace_pointer_atomic(root: &Path, name: &str, bytes: &[u8]) -> anyhow::Result<PathBuf> {
     validate_target_name(name)?;
     let target = root.join(name);
+
+    if let Ok(meta) = std::fs::symlink_metadata(&target) {
+        if meta.file_type().is_symlink() {
+            anyhow::bail!(
+                "refusing to operate on symlinked policy target: {}",
+                target.display()
+            );
+        }
+        if meta.is_dir() {
+            anyhow::bail!(
+                "policy target {} is a directory; expected a regular file",
+                target.display()
+            );
+        }
+    }
+
     let temp_name = format!(
         ".{name}.tmp.{}.{:x}",
         std::process::id(),
@@ -197,19 +413,14 @@ pub async fn run(args: PolicyActivateArgs) -> anyhow::Result<i32> {
     let resolved = super::resolved::load_resolved(&bytes)
         .map_err(|error| super::classify_load_error(&args.src, error))?;
 
-    // 2. Ensure .assay directories exist
-    let root = &args.root;
-    let assay_dir = root.join(".assay");
-    let store_dir = assay_dir.join("policy-store");
-    let activations_dir = assay_dir.join("activations");
-    std::fs::create_dir_all(&store_dir)?;
-    std::fs::create_dir_all(&activations_dir)?;
+    // 2. Ensure .assay directories exist inside root (fail if root missing or symlinked)
+    let dirs = ensure_policy_root_dirs(&args.root, true)?;
 
     // 3. Store content in content store
-    store_policy_content(&store_dir, &resolved.input_sha256, &bytes)?;
+    store_policy_content(&dirs.store_dir, &resolved.input_sha256, &bytes)?;
 
     // 4. Find previous state
-    let latest = find_latest_activation_record(&activations_dir, &name)?;
+    let latest = find_latest_activation_record(&dirs.activations_dir, &name)?;
     let (prev_sha, prev_digest) = match latest {
         Some((_, _, ref prev_rec)) => (
             Some(prev_rec.input_sha256.clone()),
@@ -219,12 +430,12 @@ pub async fn run(args: PolicyActivateArgs) -> anyhow::Result<i32> {
     };
 
     // 5. Replace active pointer atomically
-    replace_pointer_atomic(root, &name, &bytes)?;
+    replace_pointer_atomic(&dirs.root, &name, &bytes)?;
 
     // 6. Record activation
     let source_str = args.src.display().to_string();
     let (record, record_path) = write_activation_record(
-        &activations_dir,
+        &dirs.activations_dir,
         &name,
         &resolved.input_sha256,
         &resolved.policy_digest,

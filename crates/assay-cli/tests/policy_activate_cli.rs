@@ -515,3 +515,207 @@ fn parity_table_validate_resolve_activate_error_classification() {
     assert!(!sm_res.contains("E_POLICY_PARSE"));
     assert!(!sm_act.contains("E_POLICY_PARSE"));
 }
+
+// ── Test 7: missing-file stderr pins main text for validate and resolve ───────
+
+#[test]
+fn missing_file_stderr_pins_main_text_for_validate_and_resolve() {
+    let dir = tmp();
+    let p_missing = dir.path().join("missing.yaml");
+
+    let val = assay()
+        .args(["policy", "validate", "--input", p_missing.to_str().unwrap()])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    let val_stderr = String::from_utf8_lossy(&val.stderr);
+    let expected_val_prefix = format!(
+        "fatal: failed to load policy {}\n\nCaused by:\n    0: failed to read policy {}\n    1: ",
+        p_missing.display(),
+        p_missing.display()
+    );
+    assert!(
+        val_stderr.starts_with(&expected_val_prefix),
+        "validate missing file stderr must preserve read-context chain: {val_stderr}"
+    );
+    assert!(val_stderr.contains("No such file or directory"));
+
+    let res = assay()
+        .args([
+            "policy",
+            "resolve",
+            "--input",
+            p_missing.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    let res_stderr = String::from_utf8_lossy(&res.stderr);
+    let expected_res_prefix = format!(
+        "fatal: failed to load policy {}\n\nCaused by:\n    ",
+        p_missing.display()
+    );
+    assert!(
+        res_stderr.starts_with(&expected_res_prefix)
+            && !res_stderr.contains("failed to read policy"),
+        "resolve missing file stderr must not have intermediate read context: {res_stderr}"
+    );
+    assert!(res_stderr.contains("No such file or directory"));
+}
+
+// ── Test 8: activate refuses symlinks and never escapes root ──────────────────
+
+#[test]
+#[cfg(unix)]
+fn activate_refuses_symlinked_assay_dir_and_writes_nothing_outside() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+
+    let outside = dir.path().join("outside_target");
+    std::fs::create_dir_all(&outside).expect("create outside target");
+
+    // Create symlink root/.assay -> outside
+    std::os::unix::fs::symlink(&outside, root.join(".assay")).expect("create symlink");
+
+    let src = write_file(dir.path(), "valid.yaml", VALID_A);
+
+    let out = cmd_activate(&src, &root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("symlink") || stderr.contains("refusing to operate on symlink"),
+        "must refuse symlinked .assay directory: {stderr}"
+    );
+
+    // Check that nothing was written outside
+    let outside_entries: Vec<_> = std::fs::read_dir(&outside)
+        .expect("read outside")
+        .map(|e| e.expect("entry").file_name())
+        .collect();
+    assert!(
+        outside_entries.is_empty(),
+        "outside directory must remain empty, found: {outside_entries:?}"
+    );
+
+    // Check that active policy was not created
+    assert!(!root.join("policy.yaml").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn activate_refuses_symlinked_target_name() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+
+    let outside = dir.path().join("outside_file.yaml");
+    std::fs::write(&outside, "original content").expect("write outside file");
+
+    // Create symlink root/policy.yaml -> outside
+    std::os::unix::fs::symlink(&outside, root.join("policy.yaml")).expect("create symlink");
+
+    let src = write_file(dir.path(), "valid.yaml", VALID_A);
+
+    let out = cmd_activate(&src, &root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("symlink") || stderr.contains("refusing to operate on symlink"),
+        "must refuse symlinked target: {stderr}"
+    );
+
+    // Outside file must remain untouched
+    assert_eq!(
+        std::fs::read_to_string(&outside).expect("read outside"),
+        "original content"
+    );
+}
+
+// ── Test 9: activate, rollback and status fail cleanly on missing/non-dir root ──
+
+#[test]
+fn activate_rollback_status_fail_on_missing_or_non_dir_root() {
+    let dir = tmp();
+    let missing_root = dir.path().join("nonexistent_root");
+    let src = write_file(dir.path(), "valid.yaml", VALID_A);
+
+    // 1. Missing root on activate
+    let out_act = cmd_activate(&src, &missing_root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out_act.status.code(), Some(2));
+    let s_act = String::from_utf8_lossy(&out_act.stderr);
+    assert!(
+        s_act.contains("does not exist"),
+        "activate on missing root must fail cleanly: {s_act}"
+    );
+    assert!(
+        !missing_root.exists(),
+        "activate must never auto-create the missing --root directory"
+    );
+
+    // 2. Missing root on rollback
+    let out_rb = cmd_rollback(&missing_root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out_rb.status.code(), Some(2));
+    let s_rb = String::from_utf8_lossy(&out_rb.stderr);
+    assert!(
+        s_rb.contains("does not exist"),
+        "rollback on missing root must fail cleanly: {s_rb}"
+    );
+    assert!(!missing_root.exists());
+
+    // 3. Missing root on status
+    let out_st = cmd_status(&missing_root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out_st.status.code(), Some(2));
+    let s_st = String::from_utf8_lossy(&out_st.stderr);
+    assert!(
+        s_st.contains("does not exist"),
+        "status on missing root must fail cleanly: {s_st}"
+    );
+    assert!(!missing_root.exists());
+
+    // 4. Non-directory root (pointing to a regular file)
+    let file_root = write_file(dir.path(), "file_root", "not a dir");
+    let out_file_act = cmd_activate(&src, &file_root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out_file_act.status.code(), Some(2));
+    let s_file = String::from_utf8_lossy(&out_file_act.stderr);
+    assert!(
+        s_file.contains("not a directory"),
+        "activate on non-directory root must fail: {s_file}"
+    );
+
+    let out_file_rb = cmd_rollback(&file_root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out_file_rb.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out_file_rb.stderr).contains("not a directory"));
+
+    let out_file_st = cmd_status(&file_root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out_file_st.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out_file_st.stderr).contains("not a directory"));
+}

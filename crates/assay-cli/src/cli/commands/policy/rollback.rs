@@ -8,15 +8,13 @@ pub async fn run(args: PolicyRollbackArgs) -> anyhow::Result<i32> {
     super::activate::validate_target_name(name)?;
 
     let root = &args.root;
-    let assay_dir = root.join(".assay");
-    let store_dir = assay_dir.join("policy-store");
-    let activations_dir = assay_dir.join("activations");
+    let dirs = super::activate::ensure_policy_root_dirs(root, false)?;
 
-    if !activations_dir.exists() {
+    if !dirs.activations_dir.exists() {
         anyhow::bail!("no activation history found for root {}", root.display());
     }
 
-    let latest = super::activate::find_latest_activation_record(&activations_dir, name)?;
+    let latest = super::activate::find_latest_activation_record(&dirs.activations_dir, name)?;
     let (_latest_seq, latest_record_file, latest_rec) =
         latest.ok_or_else(|| anyhow::anyhow!("no activation records found for policy '{name}'"))?;
 
@@ -29,11 +27,11 @@ pub async fn run(args: PolicyRollbackArgs) -> anyhow::Result<i32> {
             )
         })?;
 
-    let stored_bytes_path = store_dir.join(prev_sha);
+    let stored_bytes_path = dirs.store_dir.join(prev_sha);
     let bytes = std::fs::read(&stored_bytes_path).map_err(|err| {
         anyhow::anyhow!(
             "stored policy content '{prev_sha}' missing from store {}: {err}",
-            store_dir.display()
+            dirs.store_dir.display()
         )
     })?;
 
@@ -48,7 +46,7 @@ pub async fn run(args: PolicyRollbackArgs) -> anyhow::Result<i32> {
     let source_str = format!("rollback:{}", latest_rec.input_sha256);
     let rollback_of = Some(latest_record_file);
     let (record, record_path) = super::activate::write_activation_record(
-        &activations_dir,
+        &dirs.activations_dir,
         name,
         &resolved.input_sha256,
         &resolved.policy_digest,

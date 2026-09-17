@@ -25,7 +25,34 @@ pub async fn run(args: PolicyStatusArgs) -> anyhow::Result<i32> {
     super::activate::validate_target_name(name)?;
 
     let root = &args.root;
+    let dirs = match super::activate::ensure_policy_root_dirs(root, false) {
+        Ok(d) => d,
+        Err(err) => {
+            eprintln!("error: {err}");
+            return Ok(EXIT_CONFIG_ERROR);
+        }
+    };
+
     let active_path = root.join(name);
+    if let Ok(meta) = std::fs::symlink_metadata(&active_path) {
+        if meta.file_type().is_symlink() {
+            eprintln!(
+                "error: active policy target '{}' in root {} is a symlink; refusing to operate on symlinks",
+                name,
+                root.display()
+            );
+            return Ok(EXIT_CONFIG_ERROR);
+        }
+        if meta.is_dir() {
+            eprintln!(
+                "error: active policy target '{}' in root {} is a directory; expected a regular file",
+                name,
+                root.display()
+            );
+            return Ok(EXIT_CONFIG_ERROR);
+        }
+    }
+
     if !active_path.exists() {
         eprintln!(
             "error: active policy file does not exist: {}",
@@ -56,18 +83,14 @@ pub async fn run(args: PolicyStatusArgs) -> anyhow::Result<i32> {
         }
     };
 
-    let assay_dir = root.join(".assay");
-    let store_dir = assay_dir.join("policy-store");
-    let activations_dir = assay_dir.join("activations");
-
-    let latest = super::activate::find_latest_activation_record(&activations_dir, name)?;
+    let latest = super::activate::find_latest_activation_record(&dirs.activations_dir, name)?;
     let (_latest_seq, latest_record_file, latest_rec) = match latest {
         Some(r) => r,
         None => {
             eprintln!(
                 "error: active policy file '{}' is unrecorded (no activation record found in {})",
                 name,
-                activations_dir.display()
+                dirs.activations_dir.display()
             );
             if args.format == OutputFormat::Json {
                 let doc = StatusDocument {
@@ -118,12 +141,12 @@ pub async fn run(args: PolicyStatusArgs) -> anyhow::Result<i32> {
     }
 
     // Check store
-    let in_store = store_dir.join(&resolved.input_sha256).exists();
+    let in_store = dirs.store_dir.join(&resolved.input_sha256).exists();
     if !in_store {
         eprintln!(
             "error: active policy content '{}' is not present in policy store {}",
             resolved.input_sha256,
-            store_dir.display()
+            dirs.store_dir.display()
         );
         return Ok(EXIT_CONFIG_ERROR);
     }
