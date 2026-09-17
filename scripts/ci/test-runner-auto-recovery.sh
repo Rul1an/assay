@@ -911,9 +911,21 @@ fi
 
 if [[ "$*" == *"run list"* ]]; then
   case "${mode}" in
-    supersede-ok|supersede-cancel-fail)
+    supersede-ok|supersede-cancel-fail|supersede-zero-jobs|supersede-count-fail|health-supersede-zero-jobs)
       cat <<'JSON'
 [{"databaseId":111,"workflowName":"CI","headBranch":"feat","event":"push","createdAt":"2026-09-13T10:00:00Z"},{"databaseId":222,"workflowName":"CI","headBranch":"feat","event":"push","createdAt":"2026-09-13T11:00:00Z"}]
+JSON
+      exit 0
+      ;;
+    supersede-zero-jobs-multiple)
+      cat <<'JSON'
+[{"databaseId":111,"workflowName":"CI","headBranch":"feat","event":"push","createdAt":"2026-09-13T10:00:00Z"},{"databaseId":222,"workflowName":"CI","headBranch":"feat","event":"push","createdAt":"2026-09-13T11:00:00Z"},{"databaseId":333,"workflowName":"CI","headBranch":"feat","event":"push","createdAt":"2026-09-13T12:00:00Z"}]
+JSON
+      exit 0
+      ;;
+    supersede-mix)
+      cat <<'JSON'
+[{"databaseId":111,"workflowName":"CI","headBranch":"feat","event":"push","createdAt":"2026-09-13T10:00:00Z"},{"databaseId":222,"workflowName":"CI","headBranch":"feat","event":"push","createdAt":"2026-09-13T11:00:00Z"},{"databaseId":333,"workflowName":"CI","headBranch":"feat","event":"push","createdAt":"2026-09-13T12:00:00Z"}]
 JSON
       exit 0
       ;;
@@ -1298,9 +1310,34 @@ JSON
   esac
 fi
 
+if [[ "$*" == *"actions/runs/"*"/jobs"* ]]; then
+  case "${mode}" in
+    supersede-zero-jobs|supersede-zero-jobs-multiple|health-supersede-zero-jobs)
+      echo 0
+      exit 0
+      ;;
+    supersede-mix)
+      if [[ "$*" == *"runs/111/jobs"* ]]; then
+        echo 0
+      else
+        echo 1
+      fi
+      exit 0
+      ;;
+    supersede-count-fail)
+      echo "stub jobs api error" >&2
+      exit 1
+      ;;
+    *)
+      echo 1
+      exit 0
+      ;;
+  esac
+fi
+
 if [[ "$*" == *"run cancel"* ]]; then
   case "${mode}" in
-    *cancel-fail*)
+    *cancel-fail*|supersede-zero-jobs|supersede-zero-jobs-multiple|health-supersede-zero-jobs)
       echo "stub cancel refused" >&2
       exit 1
       ;;
@@ -1382,6 +1419,47 @@ run_queue_case() {
 # Positive + failure matrix for cancel_superseded_runs
 run_queue_case supersede-ok cancel_superseded_runs 0 "Cancel request accepted for 1 superseded runs"
 run_queue_case supersede-cancel-fail cancel_superseded_runs 1 ""
+run_queue_case supersede-zero-jobs cancel_superseded_runs 0 ""
+if ! grep -Fq "INFO:Skipping 1 superseded queued runs without jobs (not cancellable): 111" "${CAPTURE}"; then
+    echo "supersede-zero-jobs missing skip log line" >&2
+    exit 1
+fi
+if grep -Fq "run cancel" "${GH_STUB_DIR}/supersede-zero-jobs-cancel_superseded_runs/stub.log"; then
+    echo "supersede-zero-jobs attempted cancel for job-less run" >&2
+    exit 1
+fi
+
+run_queue_case supersede-zero-jobs-multiple cancel_superseded_runs 0 ""
+if ! grep -Fq "INFO:Skipping 2 superseded queued runs without jobs (not cancellable): 111 222" "${CAPTURE}"; then
+    echo "supersede-zero-jobs-multiple missing skip log line" >&2
+    exit 1
+fi
+if [[ "$(grep -c 'Skipping' "${CAPTURE}")" -ne 1 ]]; then
+    echo "supersede-zero-jobs-multiple must log skip line exactly once" >&2
+    exit 1
+fi
+if grep -Fq "run cancel" "${GH_STUB_DIR}/supersede-zero-jobs-multiple-cancel_superseded_runs/stub.log"; then
+    echo "supersede-zero-jobs-multiple attempted cancel for job-less runs" >&2
+    exit 1
+fi
+
+run_queue_case supersede-mix cancel_superseded_runs 0 "Cancel request accepted for 1 superseded runs"
+if ! grep -Fq "INFO:Skipping 1 superseded queued runs without jobs (not cancellable): 111" "${CAPTURE}"; then
+    echo "supersede-mix missing skip log line for run 111" >&2
+    exit 1
+fi
+cancelled_supersede_mix="$(awk '/^ARGS:run cancel / { print $3 }' "${GH_STUB_DIR}/supersede-mix-cancel_superseded_runs/stub.log")"
+if [[ "${cancelled_supersede_mix}" != "222" ]]; then
+    echo "supersede-mix expected cancel for run 222 only, got: ${cancelled_supersede_mix}" >&2
+    exit 1
+fi
+
+run_queue_case supersede-count-fail cancel_superseded_runs 0 "Cancel request accepted for 1 superseded runs"
+if grep -Fq "Skipping" "${CAPTURE}"; then
+    echo "supersede-count-fail must not skip on count read failure" >&2
+    exit 1
+fi
+
 run_queue_case supersede-list-fail cancel_superseded_runs 1 ""
 run_queue_case supersede-empty cancel_superseded_runs 0 ""
 run_queue_case supersede-malformed cancel_superseded_runs 1 ""
@@ -1634,6 +1712,37 @@ if grep -Fq 'OK:Runner is healthy' "${CAPTURE}"; then
     exit 1
 fi
 
+# health_check online path must continue to healthy when superseded run has no jobs
+mkdir -p "${GH_STUB_DIR}/health-zero-jobs"
+printf 'health-supersede-zero-jobs\n' >"${GH_STUB_DIR}/health-zero-jobs/mode"
+: >"${GH_STUB_DIR}/health-zero-jobs/stub.log"
+capture_queue_logs
+set +e
+# shellcheck disable=SC2030,SC2031
+(
+    export GH_CMD="${GH_STUB_DIR}/gh"
+    export GH_STUB_MODE_FILE="${GH_STUB_DIR}/health-zero-jobs/mode"
+    export GH_STUB_LOG="${GH_STUB_DIR}/health-zero-jobs/stub.log"
+    health_check
+)
+health_zero_status=$?
+set -e
+restore_queue_logs
+if [[ "${health_zero_status}" -ne 0 ]]; then
+    echo "health_check returned ${health_zero_status} on job-less superseded run; expected 0" >&2
+    cat "${CAPTURE}" >&2
+    exit 1
+fi
+if ! grep -Fq 'OK:Runner is healthy' "${CAPTURE}"; then
+    echo "health_check did not log 'Runner is healthy' on job-less superseded run" >&2
+    cat "${CAPTURE}" >&2
+    exit 1
+fi
+if grep -Fq "run cancel" "${GH_STUB_DIR}/health-zero-jobs/stub.log"; then
+    echo "health_check attempted to cancel job-less superseded run" >&2
+    exit 1
+fi
+
 # Automatic health ticks must not invoke the optional priority policy. Exercise
 # the real CLI dispatcher too, so explicit queue administration stays available.
 (
@@ -1677,5 +1786,45 @@ eval "${ORIGINAL_CLEAN_CACHE}"
 eval "${ORIGINAL_SUPERSEDED}"
 eval "${ORIGINAL_PRIO}"
 rm -f "${CAPTURE}"
+
+# Helper call verification (issue #3087): both queue cancellation functions must call run_has_jobs
+if ! grep -Eq '\brun_has_jobs\b' <(declare -f cancel_stale_jobs); then
+    echo "cancel_stale_jobs must use run_has_jobs helper" >&2
+    exit 1
+fi
+if ! grep -Eq '\brun_has_jobs\b' <(declare -f cancel_superseded_runs); then
+    echo "cancel_superseded_runs must use run_has_jobs helper" >&2
+    exit 1
+fi
+
+# Direct unit tests for run_has_jobs helper
+# shellcheck disable=SC2030,SC2031
+(
+    export GH_CMD=helper_test_gh
+    helper_mode="zero"
+    helper_test_gh() {
+        case "$helper_mode" in
+            zero) echo 0 ;;
+            one) echo 1 ;;
+            many) echo 42 ;;
+            empty) echo "" ;;
+            non_numeric) echo "invalid" ;;
+            api_fail) return 1 ;;
+        esac
+    }
+
+    helper_mode=zero
+    if run_has_jobs 999; then
+        echo "run_has_jobs must return non-zero (false) when total_count is 0" >&2
+        exit 1
+    fi
+
+    for helper_mode in one many empty non_numeric api_fail; do
+        if ! run_has_jobs 999; then
+            echo "run_has_jobs must return 0 (true) for mode ${helper_mode}" >&2
+            exit 1
+        fi
+    done
+)
 
 echo "ok: runner auto-recovery keeps registration tokens fresh and bounds destructive calls"

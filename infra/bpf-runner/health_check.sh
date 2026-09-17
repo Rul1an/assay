@@ -224,6 +224,20 @@ check_queued_jobs() {
 
 STALE_JOB_HOURS="${STALE_JOB_HOURS:-4}"
 
+# Check if a workflow run has any jobs.
+# Returns 1 if total_count is confirmed 0 (job-less run, cannot be cancelled).
+# Returns 0 if jobs exist or if the count could not be determined (fallback to attempting cancel).
+run_has_jobs() {
+    local run_id="$1"
+    local gh="${GH_CMD:-gh}"
+    local job_count
+    job_count=$($gh api "repos/$REPO/actions/runs/${run_id}/jobs?per_page=1" --jq .total_count 2>/dev/null || echo "")
+    if [[ "$job_count" =~ ^[0-9]+$ && "$job_count" -eq 0 ]]; then
+        return 1
+    fi
+    return 0
+}
+
 # Cancel stale queued jobs (older than STALE_JOB_HOURS)
 cancel_stale_jobs() {
     local gh="${GH_CMD:-gh}"
@@ -254,10 +268,9 @@ cancel_stale_jobs() {
     local request_count=0
     local failed=0
     local skipped_ids=()
-    local run_id job_count
+    local run_id
     for run_id in $stale_jobs; do
-        job_count=$($gh api "repos/$REPO/actions/runs/${run_id}/jobs?per_page=1" --jq .total_count 2>/dev/null || echo "")
-        if [[ "$job_count" =~ ^[0-9]+$ && "$job_count" -eq 0 ]]; then
+        if ! run_has_jobs "$run_id"; then
             skipped_ids+=("$run_id")
             continue
         fi
@@ -332,8 +345,14 @@ cancel_superseded_runs() {
 
     local accepted=0
     local failed=0
+    local skipped_ids=()
     local run_id
     for run_id in $superseded; do
+        if ! run_has_jobs "$run_id"; then
+            skipped_ids+=("$run_id")
+            continue
+        fi
+
         log_info "Requesting cancel for superseded run $run_id..."
         if $gh run cancel "$run_id" --repo "$REPO" >/dev/null 2>&1; then
             accepted=$((accepted + 1))
@@ -343,6 +362,10 @@ cancel_superseded_runs() {
         fi
         sleep 1
     done
+
+    if [[ ${#skipped_ids[@]} -gt 0 ]]; then
+        log_info "Skipping ${#skipped_ids[@]} superseded queued runs without jobs (not cancellable): ${skipped_ids[*]}"
+    fi
 
     if [[ "$failed" -ne 0 ]]; then
         return 1
