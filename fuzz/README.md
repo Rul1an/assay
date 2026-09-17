@@ -10,8 +10,9 @@ that are easy to regress silently:
 - `mcp_jsonrpc`: fuzzes the stdio JSON-RPC line handler through the same `handle_line` the
   `assay-mcp-server` loop calls, asserting notification silence, id echo, and bounded responses;
   the deterministic contract frames live in `server::line_handler_tests`
-- `tool_call_decision`: fuzzes the `tools/call` envelope classifier and the observed
-  tool-decision builder, asserting totality, determinism, and argument redaction
+- `tool_call_decision`: fuzzes the `tools/call` envelope classifier, the production
+  `handle_call` evaluator, and the observed tool-decision builder, asserting totality,
+  determinism, and argument redaction
 
 Examples:
 

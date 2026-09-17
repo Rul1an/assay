@@ -78,6 +78,29 @@ impl Effect {
     }
 }
 
+/// Map a `handle_call` result to the observed effect and status `Server::run`
+/// records. One function so the fuzz target cannot invent a second reading.
+///
+/// An `error.code` is Error even when `allowed` is true. Otherwise `allowed:
+/// true` is Allow and every other result is Deny.
+pub fn observed_effect(result: &Value) -> (Effect, String) {
+    if let Some(code) = result
+        .get("error")
+        .and_then(|e| e.get("code"))
+        .and_then(|v| v.as_str())
+    {
+        (Effect::Error, code.to_string())
+    } else if result
+        .get("allowed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        (Effect::Allow, "success".to_string())
+    } else {
+        (Effect::Deny, "blocked".to_string())
+    }
+}
+
 /// Inputs the proxy has at the `tool_call_done` site.
 pub struct ObservedCall<'a> {
     pub server_id: &'a str,
