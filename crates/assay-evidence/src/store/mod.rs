@@ -72,6 +72,22 @@ pub struct StoreSpec {
     pub region: Option<String>,
 }
 
+const FILE_STORE_ROOT_REFUSAL_REASON: &str = "file store URL must include an explicit non-root local filesystem path (for example file:///tmp/assay-store); filesystem root '/' is not allowed";
+
+fn is_filesystem_root_path(path: &std::path::Path) -> bool {
+    use std::path::Component;
+
+    let mut saw_root = false;
+    for component in path.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir => saw_root = true,
+            Component::CurDir => {}
+            Component::Normal(_) | Component::ParentDir => return false,
+        }
+    }
+    saw_root
+}
+
 impl StoreSpec {
     /// Parse a store URL like `s3://bucket/prefix` or `file:///path`.
     pub fn parse(url: &str) -> StoreResult<Self> {
@@ -83,15 +99,17 @@ impl StoreSpec {
         let scheme = url.scheme().to_string();
         let bucket = url.host_str().map(|s| s.to_string());
         let prefix = if scheme == "file" {
-            if url.path().is_empty() {
-                String::new()
-            } else {
-                let path = url.to_file_path().map_err(|_| StoreError::InvalidSpec {
+            let path = url.to_file_path().map_err(|_| StoreError::InvalidSpec {
+                spec: url.to_string(),
+                reason: "file URL is not a valid local filesystem path".to_string(),
+            })?;
+            if is_filesystem_root_path(&path) {
+                return Err(StoreError::InvalidSpec {
                     spec: url.to_string(),
-                    reason: "file URL is not a valid local filesystem path".to_string(),
-                })?;
-                path.display().to_string()
+                    reason: FILE_STORE_ROOT_REFUSAL_REASON.to_string(),
+                });
             }
+            path.display().to_string()
         } else {
             url.path().trim_start_matches('/').to_string()
         };
@@ -262,5 +280,41 @@ mod tests {
             assert_eq!(actual.prefix, expected.prefix, "prefix mismatch for {url}");
             assert_eq!(actual.region, expected.region, "region mismatch for {url}");
         }
+    }
+
+    fn assert_file_root_url_is_refused(url: &str) {
+        let expected_spec = url::Url::parse(url)
+            .expect("test input should parse as URL")
+            .to_string();
+        let err = StoreSpec::parse(url).expect_err("rooted file URL must be refused");
+        match err {
+            StoreError::InvalidSpec { spec, reason } => {
+                assert_eq!(spec, expected_spec);
+                assert!(
+                    reason.contains("filesystem root"),
+                    "reason should explain root refusal: {reason}"
+                );
+                assert!(
+                    reason.contains("file:///tmp/assay-store"),
+                    "reason should include an explicit path example: {reason}"
+                );
+            }
+            other => panic!("expected InvalidSpec, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_rejects_file_url_without_explicit_path_file_double_slash() {
+        assert_file_root_url_is_refused("file://");
+    }
+
+    #[test]
+    fn test_parse_rejects_file_url_without_explicit_path_file_scheme_only() {
+        assert_file_root_url_is_refused("file:");
+    }
+
+    #[test]
+    fn test_parse_rejects_file_url_without_explicit_path_file_triple_slash() {
+        assert_file_root_url_is_refused("file:///");
     }
 }

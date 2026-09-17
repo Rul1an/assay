@@ -26,13 +26,42 @@ pub struct ObjectStoreBundleStore {
     keys: KeyBuilder,
 }
 
+fn legacy_layout_ignored_warning_message(
+    new_bundles_path: &std::path::Path,
+    legacy_bundles_path: &std::path::Path,
+) -> String {
+    format!(
+        "warning: both local file-store layouts exist; using new bundles path '{}' and ignoring legacy bundles path '{}'. The legacy tree is not being read.",
+        new_bundles_path.display(),
+        legacy_bundles_path.display()
+    )
+}
+
+fn emit_legacy_layout_ignored_warning(
+    new_bundles_path: &std::path::Path,
+    legacy_bundles_path: &std::path::Path,
+) {
+    let message = legacy_layout_ignored_warning_message(new_bundles_path, legacy_bundles_path);
+    #[cfg(test)]
+    CAPTURED_LAYOUT_WARNINGS.with(|warnings| warnings.borrow_mut().push(message.clone()));
+    eprintln!("{message}");
+}
+
+#[cfg(test)]
+thread_local! {
+    static CAPTURED_LAYOUT_WARNINGS: std::cell::RefCell<Vec<String>> = const {
+        std::cell::RefCell::new(Vec::new())
+    };
+}
+
+#[cfg(test)]
+fn drain_captured_layout_warnings() -> Vec<String> {
+    CAPTURED_LAYOUT_WARNINGS.with(|warnings| std::mem::take(&mut *warnings.borrow_mut()))
+}
+
 impl ObjectStoreBundleStore {
     fn file_store_root(prefix: &str) -> PathBuf {
-        if prefix.is_empty() {
-            std::env::temp_dir().join("assay-store")
-        } else {
-            PathBuf::from(prefix)
-        }
+        PathBuf::from(prefix)
     }
 
     fn legacy_file_bundles_dir(store_root: &std::path::Path, prefix: &str) -> PathBuf {
@@ -80,6 +109,12 @@ impl ObjectStoreBundleStore {
                         new_bundles_path: new_bundles_path.display().to_string(),
                         legacy_bundles_path: legacy_bundles_path.display().to_string(),
                     });
+                }
+                if legacy_bundles_path != new_bundles_path
+                    && new_bundles_path.is_dir()
+                    && legacy_bundles_path.is_dir()
+                {
+                    emit_legacy_layout_ignored_warning(&new_bundles_path, &legacy_bundles_path);
                 }
                 (
                     Arc::new(
@@ -272,12 +307,7 @@ impl ObjectStoreBundleStore {
 
         // Probe: writable via put + delete of a probe key outside the bundles/ namespace
         let writable = if reachable {
-            let probe_path = if prefix.is_empty() {
-                ".assay_probe_write_test".to_string()
-            } else {
-                format!("{}/.assay_probe_write_test", prefix.trim_end_matches('/'))
-            };
-            let probe_key = object_store::path::Path::from(probe_path);
+            let probe_key = self.keys.probe_key();
             let probe_bytes = Bytes::from("probe");
             let put_ok = self
                 .inner
@@ -698,6 +728,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_file_store_with_new_and_legacy_layout_emits_ignored_legacy_warning() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let store_root = temp_dir.path().join("both-layouts-store-warning");
+        let new_bundles = store_root.join("bundles");
+        std::fs::create_dir_all(&new_bundles).expect("new bundles dir");
+        let store_url = url::Url::from_file_path(&store_root)
+            .expect("store root should convert to a file:// URL")
+            .to_string();
+        let spec = StoreSpec::parse(&store_url).expect("parse file URL");
+        let legacy_bundles =
+            ObjectStoreBundleStore::legacy_file_bundles_dir(&store_root, &spec.prefix);
+        std::fs::create_dir_all(&legacy_bundles).expect("legacy bundles dir");
+
+        let _ = drain_captured_layout_warnings();
+        let _store = ObjectStoreBundleStore::from_spec(&spec)
+            .await
+            .expect("both-layout fixture should still open");
+        let warnings = drain_captured_layout_warnings();
+        assert_eq!(warnings.len(), 1, "exactly one warning should be emitted");
+        let warning = &warnings[0];
+        assert!(
+            warning.contains(&new_bundles.display().to_string()),
+            "warning should name new bundles path: {warning}"
+        );
+        assert!(
+            warning.contains(&legacy_bundles.display().to_string()),
+            "warning should name legacy bundles path: {warning}"
+        );
+        assert!(
+            warning.contains("legacy tree is not being read"),
+            "warning should explain that the legacy tree is ignored: {warning}"
+        );
+    }
+
+    #[tokio::test]
     async fn test_file_store_with_neither_layout_creates_new_layout_on_write() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let store_root = temp_dir.path().join("neither-layout-store");
@@ -733,37 +798,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_empty_file_prefix_uses_platform_temp_dir_and_is_writable() {
-        let spec = StoreSpec {
-            scheme: "file".to_string(),
-            bucket: None,
-            prefix: String::new(),
-            region: None,
-        };
-
-        let expected_root = std::env::temp_dir().join("assay-store");
+    async fn test_store_status_probe_key_stays_in_store_keyspace_and_cleans_up() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let store_root = temp_dir.path().join("status-probe-store");
+        std::fs::create_dir_all(&store_root).expect("store root");
+        let store_url = url::Url::from_file_path(&store_root)
+            .expect("store root should convert to a file:// URL")
+            .to_string();
+        let spec = StoreSpec::parse(&store_url).expect("parse file URL");
         let store = ObjectStoreBundleStore::from_spec(&spec)
             .await
-            .expect("empty file prefix should initialize local store");
+            .expect("fresh store should open");
 
-        let proof_path = expected_root.join(format!("writable-proof-{}", std::process::id()));
-        std::fs::write(&proof_path, b"proof").expect("expected writable default store location");
-        assert_eq!(std::fs::read(&proof_path).unwrap(), b"proof");
-        std::fs::remove_file(&proof_path).expect("cleanup writable proof");
+        let status = store.store_status(&spec).await;
+        assert!(status.writable, "store-status must confirm writeability");
 
-        let unique_bundle_id = format!(
-            "bundle-id-2-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock before unix epoch")
-                .as_nanos()
+        let first_store_root_segment = store_root
+            .components()
+            .find_map(|component| match component {
+                std::path::Component::Normal(segment) => {
+                    Some(segment.to_string_lossy().to_string())
+                }
+                _ => None,
+            })
+            .expect("store root should include at least one normal path segment");
+        assert!(
+            !store_root.join(first_store_root_segment).exists(),
+            "probe must not create duplicated-path skeleton under the store root"
         );
-        store
-            .put_bundle(&unique_bundle_id, Bytes::from_static(b"payload"))
-            .await
-            .expect("default temp store should accept writes");
-        assert!(expected_root.join("bundles").exists());
+        assert!(
+            !store_root.join(".assay_probe_write_test").exists(),
+            "probe file should be deleted after writability check"
+        );
     }
 
     #[tokio::test]
