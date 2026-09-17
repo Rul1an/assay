@@ -52,7 +52,7 @@ scope_flag() {
   else
     : >"$list"
   fi
-  python3 "$DRIFT_SELF_TEST_SCOPE" "$list"
+  python3 "$DRIFT_SELF_TEST_SCOPE" < "$list"
   rm -f "$list"
 }
 

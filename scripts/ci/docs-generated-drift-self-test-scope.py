@@ -30,8 +30,8 @@ def extract_files_pattern(config_text: str) -> str:
     return match.group("pattern").strip()
 
 
-def loads_changed_files(path: Path) -> list[str]:
-    return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+def loads_changed_files() -> list[str]:
+    return [line.strip() for line in sys.stdin.read().splitlines() if line.strip()]
 
 
 def scope_flag(changed_files: list[str], pattern: str) -> bool:
@@ -53,11 +53,6 @@ def run_self_test(config_text: str) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "changed_file_list",
-        nargs="?",
-        help="newline-delimited changed-file list",
-    )
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
 
@@ -65,11 +60,11 @@ def main() -> int:
     if args.self_test:
         return run_self_test(config_text)
 
-    if args.changed_file_list is None:
+    changed_files = loads_changed_files()
+    if not changed_files:
         print("false")
         return 0
 
-    changed_files = loads_changed_files(Path(args.changed_file_list))
     pattern = extract_files_pattern(config_text)
     print("true" if scope_flag(changed_files, pattern) else "false")
     return 0
