@@ -253,8 +253,15 @@ cancel_stale_jobs() {
 
     local request_count=0
     local failed=0
-    local run_id
+    local skipped_ids=()
+    local run_id job_count
     for run_id in $stale_jobs; do
+        job_count=$($gh api "repos/$REPO/actions/runs/${run_id}/jobs?per_page=1" --jq .total_count 2>/dev/null || echo "")
+        if [[ "$job_count" =~ ^[0-9]+$ && "$job_count" -eq 0 ]]; then
+            skipped_ids+=("$run_id")
+            continue
+        fi
+
         if $gh run cancel "$run_id" --repo "$REPO" >/dev/null 2>&1; then
             request_count=$((request_count + 1))
         else
@@ -263,6 +270,10 @@ cancel_stale_jobs() {
         fi
         sleep 1  # Rate limiting
     done
+
+    if [[ ${#skipped_ids[@]} -gt 0 ]]; then
+        log_info "Skipping ${#skipped_ids[@]} stale queued runs without jobs (not cancellable): ${skipped_ids[*]}"
+    fi
 
     if [[ "$request_count" -gt 0 ]]; then
         log_info "Cancellation requested for $request_count stale queued runs; terminal status not verified"
