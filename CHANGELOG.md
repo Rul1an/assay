@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay_evidence::PayloadSessionCoverage` and the `assay.session.coverage`
+  sibling event define session-finding coverage as an additive evidence stream
+  event, with `session_finding_claim_decision` applying the four-vector gate and
+  failing closed when the sibling is missing or mismatched (#2422, #3069).
+- `gateway-evidence-replay` now ships a standalone CAP-1 verifier that mirrors
+  admission/schema/rule ordering and reuses a shared first-failure parity fixture
+  with `assay-evidence` (#2493, #3068).
+- The Agent Plugin package now includes package-local `mcp.json`, pinned to the
+  Agent Plugins 1.0.0 MCP schema with a lockfile, so portable plugin bundles
+  carry an explicit stdio MCP declaration (#2754, #3070).
+
+### Changed
+- `assay evidence verify-side-effects` now names qualified-claim refusals with
+  `occurrence_reason` and `bounded_negative_reason`, prints `reason=<gap>` in
+  table output, and preserves observer refutations without rebuilding a stale
+  blocked decision (#2826, #3061).
+- Release guards now treat GHCR host case-insensitively, require exactly one
+  published-digest sentence in installation docs, and refuse Python older than
+  3.11 in `check_internal_dep_versions.py` with a named error (#3048, #3054, #3062).
+- `assay-it` wheels now use `cp312-abi3` tagging, enabling one wheel per
+  platform for CPython 3.12 and newer, and release wheel smoke now checks 3.12,
+  3.13, and 3.14 (#3063, #3065).
+  **Migration:** assay-it wheels are now cp312-abi3 (one wheel per platform,
+  CPython 3.12+); anyone pinning the old cp312-cp312 filenames must update.
+
 ## [6.4.0] - 2026-09-17
 
 ### Added
