@@ -6,6 +6,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CLASSIFIER="${ROOT}/scripts/ci/classify-lightweight-changes.sh"
+DRIFT_SELF_TEST_SCOPE="${ROOT}/scripts/ci/docs-generated-drift-self-test-scope.py"
 WORKFLOW="${ROOT}/.github/workflows/ci.yml"
 
 fail() {
@@ -43,6 +44,29 @@ expect_class true "mkdocs.yml"
 expect_class true "scripts/ci/review-example.sh"
 expect_class false "crates/assay-cli/src/lib.rs"
 
+scope_flag() {
+  local list
+  list="$(mktemp)"
+  if (($#)); then
+    printf '%s\n' "$@" >"$list"
+  else
+    : >"$list"
+  fi
+  python3 "$DRIFT_SELF_TEST_SCOPE" "$list"
+  rm -f "$list"
+}
+
+expect_scope_flag() {
+  local expected="$1"
+  shift
+  local got
+  got="$(scope_flag "$@")"
+  [[ "$got" == "$expected" ]] || fail "scope-flag($*) => $got, expected $expected"
+}
+
+expect_scope_flag true "scripts/ci/check-docs-generated-drift.sh"
+expect_scope_flag false "crates/assay-core/src/lib.rs"
+
 python3 - "$WORKFLOW" <<'PY' || fail "ci.yml does not invoke the classifier in both required detect paths"
 import re
 import sys
@@ -66,6 +90,8 @@ for line in lines[1:]:
 script = "\n".join(body)
 if script.count("lightweight_only=true") != 0:
     raise SystemExit("detect step still hardcodes lightweight_only=true")
+if script.count("docs_generated_drift_inputs_touched=true") != 0:
+    raise SystemExit("detect step still hardcodes docs_generated_drift_inputs_touched=true")
 invocations = [
     line
     for line in body
@@ -75,6 +101,20 @@ if len(invocations) != 2:
     raise SystemExit(
         f"detect step must call classify-lightweight-changes.sh twice, found {len(invocations)}"
     )
+scope_invocations = [
+    line
+    for line in body
+    if "scripts/ci/docs-generated-drift-self-test-scope.py" in line
+]
+if len(scope_invocations) != 1:
+    raise SystemExit(
+        "detect step must call docs-generated-drift-self-test-scope.py once, "
+        f"found {len(scope_invocations)}"
+    )
+if not any("docs_generated_drift_inputs_touched=" in line for line in body):
+    raise SystemExit("detect step does not assign docs_generated_drift_inputs_touched")
+if 'echo "docs_generated_drift_inputs_touched=${docs_generated_drift_inputs_touched}"' not in script:
+    raise SystemExit("detect step does not publish docs_generated_drift_inputs_touched")
 dispatch_pr = re.search(
     r'GITHUB_EVENT_NAME\}" == "workflow_dispatch" &&.*?elif \[\[ "\$\{GITHUB_EVENT_NAME\}" == "workflow_dispatch"',
     script,
@@ -103,4 +143,4 @@ if "classify-lightweight-changes.sh" not in normal.group(1):
 print("ci.yml detect paths invoke the classifier")
 PY
 
-echo "ok: lightweight classifier cases and ci.yml invocations"
+echo "ok: lightweight classifier cases, drift self-test scope flag, and ci.yml invocations"

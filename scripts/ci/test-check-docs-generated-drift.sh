@@ -22,45 +22,115 @@ from pathlib import Path
 import re
 import sys
 
-workflow = Path(sys.argv[1]).read_text(encoding="utf-8")
-job = re.search(r"(?ms)^  generated-drift:\n(.*?)(?=^  [A-Za-z0-9_-]+:|\Z)", workflow)
-if not job:
-    raise SystemExit("FAIL: ci.yml missing generated-drift job")
-section = job.group(1)
-if re.search(r"(?m)^    if:\s*", section):
-    raise SystemExit("FAIL: generated-drift job must not set if:")
-if re.search(r"(?m)^    continue-on-error:\s*", section):
-    raise SystemExit("FAIL: generated-drift job must not set continue-on-error:")
+def fail(message: str) -> None:
+    raise AssertionError(message)
 
-heading = "      - name: Verify generated outputs are in sync\n"
-at = section.find(heading)
-if at < 0:
-    raise SystemExit("FAIL: generated-drift job missing verification step")
-rest = section[at + len(heading):]
-next_step = re.search(r"(?m)^      - ", rest)
-body = rest if next_step is None else rest[:next_step.start()]
-if re.search(r"(?m)^        (if|continue-on-error):", body):
-    raise SystemExit("FAIL: generated-drift verification step must not use if or continue-on-error")
-run_at = body.find("        run: |\n")
-if run_at < 0:
-    raise SystemExit("FAIL: generated-drift verification step missing run block")
-script = body[run_at + len("        run: |\n"):]
-active = [
-    line.strip()
-    for line in script.splitlines()
-    if line.startswith("          ") and not line.lstrip().startswith("#")
-]
-required = [
-    "set -euo pipefail",
-    "bash scripts/ci/test-check-docs-generated-drift-safety.sh",
-    "bash scripts/ci/test-check-docs-generated-drift.sh",
-    "bash scripts/ci/check-docs-generated-drift.sh",
-]
-if active != required:
-    raise SystemExit(
-        "FAIL: generated-drift verification step must run exactly "
-        f"{required!r}, got {active!r}"
+def job_section(workflow_text: str) -> str:
+    job = re.search(
+        r"(?ms)^  generated-drift:\n(.*?)(?=^  [A-Za-z0-9_-]+:|\Z)",
+        workflow_text,
     )
+    if not job:
+        fail("ci.yml missing generated-drift job")
+    return job.group(1)
+
+def step_body(section: str, step_name: str) -> str:
+    heading = f"      - name: {step_name}\n"
+    at = section.find(heading)
+    if at < 0:
+        fail(f"generated-drift job missing step: {step_name}")
+    rest = section[at + len(heading):]
+    next_step = re.search(r"(?m)^      - ", rest)
+    return rest if next_step is None else rest[:next_step.start()]
+
+def active_commands(body: str, label: str) -> list[str]:
+    run_at = body.find("        run: |\n")
+    if run_at < 0:
+        fail(f"{label} missing run block")
+    script = body[run_at + len("        run: |\n"):]
+    return [
+        line.strip()
+        for line in script.splitlines()
+        if line.startswith("          ") and not line.lstrip().startswith("#")
+    ]
+
+def validate(workflow_text: str) -> None:
+    section = job_section(workflow_text)
+    if re.search(r"(?m)^    if:\s*", section):
+        fail("generated-drift job must not set if:")
+    if re.search(r"(?m)^    continue-on-error:\s*", section):
+        fail("generated-drift job must not set continue-on-error:")
+
+    verification_step = step_body(section, "Verify generated outputs are in sync")
+    if re.search(r"(?m)^        (if|continue-on-error):", verification_step):
+        fail("generated-drift verification step must not use if or continue-on-error")
+    verification_commands = active_commands(
+        verification_step,
+        "generated-drift verification step",
+    )
+    required_verification = [
+        "set -euo pipefail",
+        "bash scripts/ci/check-docs-generated-drift.sh",
+    ]
+    if verification_commands != required_verification:
+        fail(
+            "generated-drift verification step must run exactly "
+            f"{required_verification!r}, got {verification_commands!r}"
+        )
+
+    self_test_step = step_body(section, "Verify generated outputs self-test battery")
+    if not re.search(
+        r"(?m)^        if: needs\.scope\.outputs\.docs_generated_drift_inputs_touched == 'true'\s*$",
+        self_test_step,
+    ):
+        fail(
+            "generated-drift self-test step must be scoped by "
+            "needs.scope.outputs.docs_generated_drift_inputs_touched == 'true'"
+        )
+    if re.search(r"(?m)^        continue-on-error:", self_test_step):
+        fail("generated-drift self-test step must not use continue-on-error")
+    self_test_commands = active_commands(self_test_step, "generated-drift self-test step")
+    required_self_test = [
+        "set -euo pipefail",
+        "bash scripts/ci/test-check-docs-generated-drift-safety.sh",
+    ]
+    if self_test_commands != required_self_test:
+        fail(
+            "generated-drift self-test step must run exactly "
+            f"{required_self_test!r}, got {self_test_commands!r}"
+        )
+    if any(
+        command == "bash scripts/ci/test-check-docs-generated-drift.sh"
+        for command in self_test_commands
+    ):
+        fail("generated-drift self-test battery must not run test-check-docs-generated-drift.sh twice")
+
+workflow = Path(sys.argv[1]).read_text(encoding="utf-8")
+try:
+    validate(workflow)
+except AssertionError as exc:
+    raise SystemExit(f"FAIL: {exc}") from exc
+
+mutant = workflow.replace(
+    "      - name: Verify generated outputs are in sync\n",
+    "      - name: Verify generated outputs are in sync\n"
+    "        if: needs.scope.outputs.docs_generated_drift_inputs_touched == 'true'\n",
+    1,
+)
+if mutant == workflow:
+    raise SystemExit("FAIL: could not apply check-step if-mutation to generated-drift job")
+
+try:
+    validate(mutant)
+except AssertionError as exc:
+    if "generated-drift verification step must not use if or continue-on-error" not in str(exc):
+        raise SystemExit(
+            "FAIL: check-step if-mutation failed for the wrong reason: "
+            f"{exc}"
+        ) from exc
+else:
+    raise SystemExit("FAIL: generated-drift check-step if-mutation passed")
+print("ok    generated-drift check-step if-mutation is rejected")
 PY
 }
 
