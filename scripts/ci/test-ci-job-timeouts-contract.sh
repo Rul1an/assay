@@ -44,6 +44,7 @@ expected_timeouts = {
   "vendored-packs" => 10,
   "release-asset-contract" => 10,
   "mcp-registry-foundation" => 10,
+  "generated-drift" => 12,
   "ci" => 10,
   "evidenceref-live-resolve" => 10,
   "deps-security" => 20,
@@ -104,6 +105,7 @@ expected_needs = %w[
   perf
   test
   ebpf-smoke-ubuntu
+  generated-drift
   evidenceref-live-resolve
   semver
 ]
