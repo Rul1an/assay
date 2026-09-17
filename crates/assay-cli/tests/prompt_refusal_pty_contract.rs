@@ -1,15 +1,14 @@
-//! Pty-harness row of the prompt-refusal contract (#2573 slice 2).
+//! Pty-harness row of the prompt-refusal contract (#2573 slice 2 & 3).
 //!
-//! Slice 1 covered null stdin. This file pins TTY stdin + redirected stderr,
-//! which #3058 Q3 only code-read. Unix-only: `nix::pty::openpty`. Same POSIX
-//! path on macOS and Linux; no `ptsname` (macOS has no safe `ptsname_r` in
-//! nix 0.27).
+//! Slice 1 covered null stdin. Slice 2 added the pty harness for TTY stdin +
+//! redirected stderr. Slice 3 makes the refusal attributable to product code:
+//! `interaction.rs` checks `stderr().is_terminal()` explicitly before calling
+//! dialoguer.
 //!
 //! Decision table row (`interaction.rs`):
 //! 1. not preapproved
-//! 2. `stdin().is_terminal()` is true (pty slave) → early refuse does not fire
-//! 3. `dialoguer::Confirm::interact` uses `Term::stderr()`; a pipe is not a
-//!    terminal → `NotConnected` → `PromptRefused` (exit 2, names `--yes`)
+//! 2. `stdin().is_terminal()` is true (pty slave) → early stdin refuse does not fire
+//! 3. `stderr().is_terminal()` is false (piped stderr) → refuses (`stderr is not a terminal`, exit 2, names `--yes`)
 //!
 //! Item 2 (`assay fix` confirm): no measured `validate()` input produces a
 //! `SuggestedPatch`. `fix.rs` runs `validate` then `build_suggestions`. Patch
@@ -114,6 +113,10 @@ fn t4_doctor_fix_tty_stdin_piped_stderr_refuses() {
          stdout:\n{stdout}\nstderr:\n{stderr}"
     );
     assert!(
+        stderr.contains("stderr is not a terminal"),
+        "TTY stdin + piped stderr refusal must name stderr reason; stderr:\n{stderr}"
+    );
+    assert!(
         stderr.contains("--yes"),
         "TTY stdin + piped stderr refusal must name --yes; stderr:\n{stderr}"
     );
@@ -144,6 +147,10 @@ fn t4_doctor_parse_error_tty_stdin_piped_stderr_refuses() {
     assert_eq!(
         code, 2,
         "TTY stdin + piped stderr must refuse the parse-error prompt; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("stderr is not a terminal"),
+        "TTY stdin + piped stderr refusal must name stderr reason; stderr:\n{stderr}"
     );
     assert!(
         stderr.contains("--yes"),

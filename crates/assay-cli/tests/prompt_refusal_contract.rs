@@ -121,6 +121,10 @@ fn assert_refused(assert: assert_cmd::assert::Assert, context: &str) {
         "{context}: refused prompt must exit 2; stderr:\n{stderr}"
     );
     assert!(
+        stderr.contains("stdin is not a terminal"),
+        "{context}: refused prompt must name stdin reason on stderr; stderr:\n{stderr}"
+    );
+    assert!(
         stderr.contains("--yes"),
         "{context}: refused prompt must name --yes on stderr; stderr:\n{stderr}"
     );
