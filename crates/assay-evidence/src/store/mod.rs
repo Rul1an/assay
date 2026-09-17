@@ -73,6 +73,9 @@ pub struct StoreSpec {
 }
 
 const FILE_STORE_ROOT_REFUSAL_REASON: &str = "file store URL must include an explicit non-root local filesystem path (for example file:///tmp/assay-store); filesystem root '/' is not allowed";
+const FILE_STORE_NON_LOCAL_HOST_REFUSAL_REASON: &str =
+    "file store URL host must be empty or localhost (for example file:///tmp/assay-store)";
+const FILE_STORE_INVALID_LOCAL_PATH_REASON: &str = "file URL is not a valid local filesystem path";
 
 fn is_filesystem_root_path(path: &std::path::Path) -> bool {
     use std::path::Component;
@@ -97,11 +100,30 @@ impl StoreSpec {
         })?;
 
         let scheme = url.scheme().to_string();
-        let bucket = url.host_str().map(|s| s.to_string());
+        let bucket = if scheme == "file" {
+            None
+        } else {
+            url.host_str().map(|s| s.to_string())
+        };
         let prefix = if scheme == "file" {
+            if url
+                .host_str()
+                .is_some_and(|host| !host.eq_ignore_ascii_case("localhost"))
+            {
+                return Err(StoreError::InvalidSpec {
+                    spec: url.to_string(),
+                    reason: FILE_STORE_NON_LOCAL_HOST_REFUSAL_REASON.to_string(),
+                });
+            }
+            if matches!(url.path(), "" | "/") {
+                return Err(StoreError::InvalidSpec {
+                    spec: url.to_string(),
+                    reason: FILE_STORE_ROOT_REFUSAL_REASON.to_string(),
+                });
+            }
             let path = url.to_file_path().map_err(|_| StoreError::InvalidSpec {
                 spec: url.to_string(),
-                reason: "file URL is not a valid local filesystem path".to_string(),
+                reason: FILE_STORE_INVALID_LOCAL_PATH_REASON.to_string(),
             })?;
             if is_filesystem_root_path(&path) {
                 return Err(StoreError::InvalidSpec {
@@ -226,14 +248,6 @@ mod tests {
 
     #[test]
     fn test_parse_core_specs_regression() {
-        let file_url = "file:///tmp/assay-store";
-        let expected_file_prefix = url::Url::parse(file_url)
-            .unwrap()
-            .to_file_path()
-            .unwrap()
-            .display()
-            .to_string();
-
         let cases = [
             (
                 "s3://my-bucket/assay/evidence",
@@ -251,15 +265,6 @@ mod tests {
                     bucket: Some("my-bucket".to_string()),
                     prefix: "prefix".to_string(),
                     region: Some("us-west-2".to_string()),
-                },
-            ),
-            (
-                file_url,
-                StoreSpec {
-                    scheme: "file".to_string(),
-                    bucket: None,
-                    prefix: expected_file_prefix,
-                    region: None,
                 },
             ),
             (
@@ -290,13 +295,9 @@ mod tests {
         match err {
             StoreError::InvalidSpec { spec, reason } => {
                 assert_eq!(spec, expected_spec);
-                assert!(
-                    reason.contains("filesystem root"),
-                    "reason should explain root refusal: {reason}"
-                );
-                assert!(
-                    reason.contains("file:///tmp/assay-store"),
-                    "reason should include an explicit path example: {reason}"
+                assert_eq!(
+                    reason, FILE_STORE_ROOT_REFUSAL_REASON,
+                    "reason should stay stable across platforms"
                 );
             }
             other => panic!("expected InvalidSpec, got {other:?}"),
@@ -316,5 +317,24 @@ mod tests {
     #[test]
     fn test_parse_rejects_file_url_without_explicit_path_file_triple_slash() {
         assert_file_root_url_is_refused("file:///");
+    }
+
+    #[test]
+    fn test_parse_rejects_file_url_with_non_local_host() {
+        let url = "file://example.com";
+        let expected_spec = url::Url::parse(url)
+            .expect("test input should parse")
+            .to_string();
+        let err = StoreSpec::parse(url).expect_err("non-local host must be refused");
+        match err {
+            StoreError::InvalidSpec { spec, reason } => {
+                assert_eq!(spec, expected_spec);
+                assert_eq!(
+                    reason, FILE_STORE_NON_LOCAL_HOST_REFUSAL_REASON,
+                    "file URL host refusal reason should be platform-independent"
+                );
+            }
+            other => panic!("expected InvalidSpec, got {other:?}"),
+        }
     }
 }

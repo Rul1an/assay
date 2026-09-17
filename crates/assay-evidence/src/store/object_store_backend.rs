@@ -553,9 +553,9 @@ mod tests {
         match err {
             StoreError::InvalidSpec { spec, reason } => {
                 assert_eq!(spec, normalized_url);
-                assert!(
-                    !reason.contains("/example.com"),
-                    "error should not mention an invented filesystem path: {reason}"
+                assert_eq!(
+                    reason,
+                    super::super::FILE_STORE_NON_LOCAL_HOST_REFUSAL_REASON
                 );
             }
             other => panic!("expected InvalidSpec, got {other:?}"),
