@@ -326,3 +326,29 @@ fn the_emitted_decision_carries_the_side_effect_block_at_asserted() {
         "nothing promotes at emit time"
     );
 }
+
+#[test]
+fn observed_effect_maps_error_allow_and_deny() {
+    assert_eq!(
+        observed_effect(&json!({
+            "allowed": false,
+            "error": {"code": "E_POLICY_NOT_FOUND"}
+        })),
+        (Effect::Error, "E_POLICY_NOT_FOUND".to_string())
+    );
+    assert_eq!(
+        observed_effect(&json!({"allowed": true, "reason": "Allowed by policy"})),
+        (Effect::Allow, "success".to_string())
+    );
+    assert_eq!(
+        observed_effect(&json!({"allowed": false, "matches": ["blocked"]})),
+        (Effect::Deny, "blocked".to_string())
+    );
+    assert_eq!(
+        observed_effect(&json!({
+            "allowed": true,
+            "error": {"code": "E_INTERNAL"}
+        })),
+        (Effect::Error, "E_INTERNAL".to_string())
+    );
+}
