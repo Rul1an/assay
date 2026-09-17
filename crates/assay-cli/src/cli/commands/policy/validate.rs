@@ -12,7 +12,9 @@ pub async fn run(args: PolicyValidateArgs) -> Result<i32> {
     let bytes = super::resolved::read_bounded(&args.input).map_err(|error| {
         super::classify_load_error(
             &args.input,
-            error.context(format!("failed to read policy {}", args.input.display())),
+            error
+                .context(format!("failed to read policy {}", args.input.display()))
+                .context(format!("failed to read policy {}", args.input.display())),
         )
     })?;
     let _resolved = super::resolved::load_resolved(&bytes)

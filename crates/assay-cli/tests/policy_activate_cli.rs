@@ -522,49 +522,35 @@ fn parity_table_validate_resolve_activate_error_classification() {
 fn missing_file_stderr_pins_main_text_for_validate_and_resolve() {
     let dir = tmp();
     let p_missing = dir.path().join("missing.yaml");
+    let path_str = p_missing.to_str().unwrap();
 
     let val = assay()
-        .args(["policy", "validate", "--input", p_missing.to_str().unwrap()])
+        .args(["policy", "validate", "--input", path_str])
         .assert()
         .failure()
         .get_output()
         .clone();
     let val_stderr = String::from_utf8_lossy(&val.stderr);
-    let expected_val_prefix = format!(
-        "fatal: failed to load policy {}\n\nCaused by:\n    0: failed to read policy {}\n    1: ",
-        p_missing.display(),
-        p_missing.display()
+    let norm_val = val_stderr.replace(path_str, "<PATH>");
+    let expected_val = "fatal: failed to load policy <PATH>\n\nCaused by:\n    0: failed to read policy <PATH>\n    1: failed to read policy <PATH>\n    2: No such file or directory (os error 2)\n";
+    assert_eq!(
+        norm_val, expected_val,
+        "validate missing file stderr must match main's exact complete error output"
     );
-    assert!(
-        val_stderr.starts_with(&expected_val_prefix),
-        "validate missing file stderr must preserve read-context chain: {val_stderr}"
-    );
-    assert!(val_stderr.contains("No such file or directory"));
 
     let res = assay()
-        .args([
-            "policy",
-            "resolve",
-            "--input",
-            p_missing.to_str().unwrap(),
-            "--format",
-            "json",
-        ])
+        .args(["policy", "resolve", "--input", path_str, "--format", "json"])
         .assert()
         .failure()
         .get_output()
         .clone();
     let res_stderr = String::from_utf8_lossy(&res.stderr);
-    let expected_res_prefix = format!(
-        "fatal: failed to load policy {}\n\nCaused by:\n    ",
-        p_missing.display()
+    let norm_res = res_stderr.replace(path_str, "<PATH>");
+    let expected_res = "fatal: failed to load policy <PATH>\n\nCaused by:\n    No such file or directory (os error 2)\n";
+    assert_eq!(
+        norm_res, expected_res,
+        "resolve missing file stderr must match main's exact complete error output"
     );
-    assert!(
-        res_stderr.starts_with(&expected_res_prefix)
-            && !res_stderr.contains("failed to read policy"),
-        "resolve missing file stderr must not have intermediate read context: {res_stderr}"
-    );
-    assert!(res_stderr.contains("No such file or directory"));
 }
 
 // ── Test 8: activate refuses symlinks and never escapes root ──────────────────
