@@ -675,25 +675,54 @@ rm -f "${CRONTAB_CAPTURE}"
     log_warn() { printf 'WARN %s\n' "$*"; }
     log_ok() { printf 'OK %s\n' "$*"; }
     cancel_test_gh() {
-        case "$1 $2" in
-            'run list')
-                if [[ "$mode" == list_failure ]]; then return 1; fi
-                if [[ "$mode" == malformed ]]; then printf '{\n'; return; fi
-                if [[ "$mode" == blank ]]; then return 0; fi
-                if [[ "$mode" == object ]]; then printf '{}\n'; return; fi
-                if [[ "$mode" == scalar ]]; then printf 'null\n'; return; fi
-                if [[ "$mode" == multiple ]]; then printf '[]\n[]\n'; return; fi
-                if [[ "$mode" == empty ]]; then printf '[]\n'; return; fi
-                printf '[{"databaseId":123,"createdAt":"2000-01-01T00:00:00Z"}]\n'
+        case "$1" in
+            'run')
+                case "$2" in
+                    'list')
+                        if [[ "$mode" == list_failure ]]; then return 1; fi
+                        if [[ "$mode" == malformed ]]; then printf '{\n'; return; fi
+                        if [[ "$mode" == blank ]]; then return 0; fi
+                        if [[ "$mode" == object ]]; then printf '{}\n'; return; fi
+                        if [[ "$mode" == scalar ]]; then printf 'null\n'; return; fi
+                        if [[ "$mode" == multiple ]]; then printf '[]\n[]\n'; return; fi
+                        if [[ "$mode" == empty ]]; then printf '[]\n'; return; fi
+                        if [[ "$mode" == mix || "$mode" == zero_jobs_multiple ]]; then
+                            printf '[{"databaseId":101,"createdAt":"2000-01-01T00:00:00Z"},{"databaseId":102,"createdAt":"2000-01-01T00:00:00Z"}]\n'
+                            return 0
+                        fi
+                        printf '[{"databaseId":123,"createdAt":"2000-01-01T00:00:00Z"}]\n'
+                        ;;
+                    'cancel')
+                        printf '%s\n' "$3" >>"${EVENTS}"
+                        [[ "$mode" != rejected ]]
+                        ;;
+                    *) echo "unexpected run operation: $2" >&2; return 99 ;;
+                esac
                 ;;
-            'run cancel')
-                printf '%s\n' "$3" >>"${EVENTS}"
-                [[ "$mode" != rejected ]]
+            'api')
+                case "$mode" in
+                    zero_jobs|zero_jobs_multiple)
+                        printf '0\n'
+                        ;;
+                    api_failure)
+                        return 1
+                        ;;
+                    mix)
+                        if [[ "$2" == *"runs/101/jobs"* ]]; then
+                            printf '0\n'
+                        else
+                            printf '1\n'
+                        fi
+                        ;;
+                    *)
+                        printf '1\n'
+                        ;;
+                esac
                 ;;
-            *) echo 'unexpected GitHub operation' >&2; return 99 ;;
+            *) echo "unexpected GitHub operation: $*" >&2; return 99 ;;
         esac
     }
-    for mode in accepted rejected list_failure malformed blank object scalar multiple empty; do
+    for mode in accepted rejected list_failure malformed blank object scalar multiple empty zero_jobs zero_jobs_multiple api_failure mix; do
         : >"${EVENTS}"
         rc=0
         output=$(cancel_stale_jobs) || rc=$?
@@ -701,13 +730,51 @@ rm -f "${CRONTAB_CAPTURE}"
             [[ "$rc" == 0 && "$output" == *'Cancellation requested for 1 stale queued runs'* ]] || {
                 echo "accepted cancellation must be reported as requested: $output" >&2; exit 1;
             }
+            [[ "$output" != *'Skipping'* ]] || { echo "accepted must not report skipped: $output" >&2; exit 1; }
+        elif [[ "$mode" == zero_jobs ]]; then
+            [[ "$rc" == 0 && "$output" == *'Skipping 1 stale queued runs without jobs (not cancellable): 123'* ]] || {
+                echo "zero_jobs must report skipped run 123: $output" >&2; exit 1;
+            }
+            [[ "$output" != *'Cancellation requested'* ]] || {
+                echo "zero_jobs must not request cancellation: $output" >&2; exit 1;
+            }
+        elif [[ "$mode" == zero_jobs_multiple ]]; then
+            [[ "$rc" == 0 && "$output" == *'Skipping 2 stale queued runs without jobs (not cancellable): 101 102'* ]] || {
+                echo "zero_jobs_multiple must report skipped runs 101 102: $output" >&2; exit 1;
+            }
+            [[ $(grep -c 'Skipping' <<< "$output") -eq 1 ]] || {
+                echo "zero_jobs_multiple must log skip line exactly once: $output" >&2; exit 1;
+            }
+            [[ "$output" != *'Cancellation requested'* ]] || {
+                echo "zero_jobs_multiple must not request cancellation: $output" >&2; exit 1;
+            }
+        elif [[ "$mode" == api_failure ]]; then
+            [[ "$rc" == 0 && "$output" == *'Cancellation requested for 1 stale queued runs'* ]] || {
+                echo "api_failure must fall back to attempting cancellation: $output" >&2; exit 1;
+            }
+            [[ "$output" != *'Skipping'* ]] || { echo "api_failure must not report skipped: $output" >&2; exit 1; }
+        elif [[ "$mode" == mix ]]; then
+            [[ "$rc" == 0 && "$output" == *'Skipping 1 stale queued runs without jobs (not cancellable): 101'* ]] || {
+                echo "mix must report skipped run 101: $output" >&2; exit 1;
+            }
+            [[ "$output" == *'Cancellation requested for 1 stale queued runs'* ]] || {
+                echo "mix must report cancellation requested for 1 run: $output" >&2; exit 1;
+            }
+            [[ $(grep -c 'Skipping' <<< "$output") -eq 1 ]] || {
+                echo "mix must log skip line exactly once: $output" >&2; exit 1;
+            }
+            [[ $(grep -c 'Cancellation requested for 1' <<< "$output") -eq 1 ]] || {
+                echo "mix must log cancellation requested line exactly once: $output" >&2; exit 1;
+            }
         elif [[ "$mode" == empty ]]; then
             [[ "$rc" == 0 && "$output" == *'No stale jobs found'* ]] || exit 1
         else
             [[ "$rc" != 0 ]] || { echo "$mode must not return success: $output" >&2; exit 1; }
         fi
-        if [[ "$mode" == accepted || "$mode" == rejected ]]; then
+        if [[ "$mode" == accepted || "$mode" == rejected || "$mode" == api_failure ]]; then
             [[ "$(cat "${EVENTS}")" == 123 ]] || { echo 'cancellation was not invoked exactly once' >&2; exit 1; }
+        elif [[ "$mode" == mix ]]; then
+            [[ "$(cat "${EVENTS}")" == 102 ]] || { echo "mix must cancel only run 102, got: $(cat "${EVENTS}")" >&2; exit 1; }
         elif [[ -s "${EVENTS}" ]]; then
             echo 'invalid or empty inventory invoked cancellation' >&2; exit 1
         fi

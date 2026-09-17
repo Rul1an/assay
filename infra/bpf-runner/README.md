@@ -50,6 +50,7 @@ queued run in the repository (#2985). `--recover` is subject to the same refusal
 - Stopped services (restarts runner service)
 - Stale configuration (full reconfiguration if needed)
 - Stale Assay CLI binary (runs `/usr/local/sbin/update-assay-latest` and verifies the runner user sees the latest version)
+- Stale queued runs (cancels queued runs older than 4 hours; skips runs without jobs that cannot be cancelled)
 
 **Label contract:**
 - Configure only the custom labels: `bpf-lsm,assay-bpf-runner`
