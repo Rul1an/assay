@@ -7,13 +7,15 @@
 //! there, a per-dimension coverage state and a source class here — and this file keeps their
 //! overlapping readings from drifting, which a shared type cannot do on its own.
 //!
-//! Two gaps are known and deliberately left open, recorded in ADR-048 rather than fixed here:
+//! Two status points are recorded in ADR-048:
 //!
 //! * The fidelity table, `RunnerClaimGate::for_verdict`, is **not** pinned against the evidence
-//!   gate by this file or any other. `claim_support_parity.rs` pins it only to its own crate's
+//!   gate by this file or any other. That divergence is deliberate: the inputs do not correspond
+//!   (a runner health verdict versus a coverage state plus source class), ADR-048 records the
+//!   boundary, and `claim_support_parity.rs` pins fidelity only to its own crate's
 //!   `claim_support` projection.
-//! * The complete-coverage leg below is dead: no shipped descriptor constructor satisfies the
-//!   runner's completeness rule, so that test prints a notice and skips.
+//! * The complete-coverage leg below is live since #3061: it builds an explicit full descriptor
+//!   and asserts `compared > 0`, so the leg cannot silently skip.
 //!
 //! `assay-runner-schema` is a dev-dependency only; the production edge ADR-048 admitted runs the
 //! other way, `assay-runner-schema -> assay-common`.

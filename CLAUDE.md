@@ -139,9 +139,12 @@ ADR-048 moved the shared claim vocabulary â€” `ClaimDecision` and `ClaimKind` â€
 `assay_common::claim`, which is why `assay-runner-schema` is no longer a leaf; the four former
 public paths re-export the shared types under their old names. The decision tables did not move:
 `assay-evidence`'s gate and `assay-runner-schema`'s descriptor table are domain readings of one
-lattice, and `tests/claim_gate_parity.rs` still pins their overlapping outputs. Two gaps stay open
-and are recorded in the ADR: nothing pins `RunnerClaimGate::for_verdict` against the evidence gate,
-and the parity test's complete-coverage leg is dead. Note `docs/generated/crate-deps.mermaid` draws
+lattice, and `tests/claim_gate_parity.rs` still pins their overlapping outputs. One deliberate gap
+remains in ADR-048: nothing pins `RunnerClaimGate::for_verdict` against the evidence gate because
+their inputs do not correspond (runner health verdict versus coverage state plus source class), and
+`claim_support_parity.rs` pins fidelity only inside `assay-runner-schema`. The complete-coverage
+leg is live since #3061 (`tests/claim_gate_parity.rs` now builds a literal complete descriptor and
+asserts `compared > 0`). Note `docs/generated/crate-deps.mermaid` draws
 dependency edges without distinguishing kind, so the dev-only edge appears there as if it were
 architectural.
 
