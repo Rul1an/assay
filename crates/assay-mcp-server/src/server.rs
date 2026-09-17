@@ -585,18 +585,8 @@ impl Server {
             // its own structured event. Redaction and the asserted-vs-verified rule are
             // enforced inside build_decision; this site never has SaaS-verified evidence.
             {
-                use crate::tool_decision::{build_decision, Effect, ObservedCall};
-                let (effect, status) = if let Some(code) = result
-                    .get("error")
-                    .and_then(|e| e.get("code"))
-                    .and_then(|v| v.as_str())
-                {
-                    (Effect::Error, code.to_string())
-                } else if allowed {
-                    (Effect::Allow, "success".to_string())
-                } else {
-                    (Effect::Deny, "blocked".to_string())
-                };
+                use crate::tool_decision::{build_decision, observed_effect, ObservedCall};
+                let (effect, status) = observed_effect(&result);
                 let decision = build_decision(&ObservedCall {
                     server_id: "mcp",
                     tool_name: name,

@@ -10,8 +10,9 @@ name: Verifier Fuzz Smoke
 # Besides the verifier (`bundle_reader`), the matrix runs the MCP stdio JSON-RPC line handler
 # (`mcp_jsonrpc`, issue #2914: silence, id echo, and response-size invariants over the same
 # `handle_line` the server loop calls) and the `tools/call` decision inputs (`tool_call_decision`:
-# envelope classification plus the privileged-action classifier, asserting totality and
-# determinism). Every target gets the same PR/nightly budgets below.
+# envelope classification, production `handle_call` evaluation, and the privileged-action
+# classifier, asserting totality and determinism). Every target gets the same PR/nightly budgets
+# below.
 
 on:
   pull_request:
@@ -176,6 +177,9 @@ jobs:
                 direct-secret-args
                 direct-unknown-tool
                 direct-scalar-args
+                eval-allow
+                eval-deny
+                eval-error
               )
               ;;
           esac
