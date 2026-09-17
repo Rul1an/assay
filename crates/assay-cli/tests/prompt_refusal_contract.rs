@@ -160,10 +160,14 @@ fn t2_fix_without_yes_refuses_when_stdin_is_not_a_terminal() {
     let before = fs::read(&config).expect("read config before");
 
     if listed.trim().is_empty() {
-        // `validate` + `build_suggestions` currently offer no patch for this
-        // tree (or any other tree measured on this binary). The confirm site
-        // in `fix.rs` is still wired; the parse-error test below is the
-        // reachable apply-prompt on this slice.
+        // Item 2 (#2573 slice 2): no measured `validate()` input produces a
+        // `SuggestedPatch`. `fix.rs` runs `validate` then `build_suggestions`.
+        // Patch arms need codes `validate` never emits (`E_CFG_SCHEMA_UNKNOWN_FIELD`
+        // with file/pointer context, `E_TOOL_NOT_ALLOWED`, `E_PATH_SCOPE_VIOLATION`)
+        // or `E_PATH_NOT_FOUND` with `file` ending `assay.yaml` plus `field`,
+        // which `validate` does not attach (it sets `path` only). The confirm
+        // is unreachable today; do not invent a patch arm here. The parse-error
+        // doctor path below is the reachable apply-prompt.
         let assert = run_null_stdin(
             temp.path(),
             &[
