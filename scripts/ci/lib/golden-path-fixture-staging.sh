@@ -58,6 +58,8 @@ stage_golden_path_fixtures() {
     "$case_root/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/"
   cp "$repo_root/packaging/agent-plugin/plugin.json" \
     "$case_root/packaging/agent-plugin/"
+  cp "$repo_root/packaging/agent-plugin/mcp.json" \
+    "$case_root/packaging/agent-plugin/"
   cp "$repo_root/packaging/agent-plugin/schemas/plugin.schema.json" \
     "$case_root/packaging/agent-plugin/schemas/"
   cp "$repo_root/packaging/agent-plugin/schemas/plugin.schema.lock.json" \
