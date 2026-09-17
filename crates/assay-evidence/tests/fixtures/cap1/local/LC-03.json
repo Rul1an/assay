@@ -1,0 +1,6 @@
+{
+  "profile": "cap/1",
+  "subject": { "kind": "artefact", "ref": "s" },
+  "strata": [],
+  "integrity": { "complete": true, "statement": "s" }
+}

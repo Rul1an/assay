@@ -8,6 +8,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
+use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -58,6 +59,7 @@ pub enum Cap1Stage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cap1SyntaxFault {
     NotUtf8,
+    DuplicateKey,
     Malformed,
 }
 
@@ -118,6 +120,7 @@ impl Cap1Refusal {
         match self {
             Self::Oversized { .. } => Some("oversized"),
             Self::Syntax(Cap1SyntaxFault::NotUtf8) => Some("not-utf8"),
+            Self::Syntax(Cap1SyntaxFault::DuplicateKey) => Some("duplicate-key"),
             Self::Syntax(Cap1SyntaxFault::Malformed) => Some("malformed-json"),
             _ => None,
         }
@@ -147,6 +150,100 @@ impl fmt::Display for Cap1Refusal {
 }
 
 impl std::error::Error for Cap1Refusal {}
+
+const DUPLICATE_KEY_MARKER: &str = "cap-1 duplicate object key: ";
+
+struct StrictValue(Value);
+
+impl<'de> Deserialize<'de> for StrictValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(StrictVisitor).map(Self)
+    }
+}
+
+struct StrictVisitor;
+
+impl<'de> Visitor<'de> for StrictVisitor {
+    type Value = Value;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("any valid JSON value with unique object keys")
+    }
+
+    fn visit_bool<E: de::Error>(self, value: bool) -> Result<Self::Value, E> {
+        Ok(Value::Bool(value))
+    }
+
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+        Ok(Value::from(value))
+    }
+
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+        Ok(Value::from(value))
+    }
+
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
+        Ok(Value::from(value))
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        Ok(Value::String(value.to_owned()))
+    }
+
+    fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+        Ok(Value::String(value))
+    }
+
+    fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_some<D: serde::Deserializer<'de>>(
+        self,
+        deserializer: D,
+    ) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_any(StrictVisitor)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let mut out = Vec::new();
+        while let Some(StrictValue(value)) = seq.next_element()? {
+            out.push(value);
+        }
+        Ok(Value::Array(out))
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut out = serde_json::Map::new();
+        while let Some(key) = map.next_key::<String>()? {
+            let StrictValue(value) = map.next_value()?;
+            if out.insert(key.clone(), value).is_some() {
+                return Err(de::Error::custom(format!("{DUPLICATE_KEY_MARKER}{key}")));
+            }
+        }
+        Ok(Value::Object(out))
+    }
+}
+
+fn parse_json_value_strict(raw: &str) -> Result<Value, Cap1Refusal> {
+    serde_json::from_str::<StrictValue>(raw)
+        .map(|strict| strict.0)
+        .map_err(classify_parse_error)
+}
+
+fn classify_parse_error(err: serde_json::Error) -> Cap1Refusal {
+    let msg = err.to_string();
+    let fault = if msg.starts_with(DUPLICATE_KEY_MARKER) {
+        Cap1SyntaxFault::DuplicateKey
+    } else {
+        Cap1SyntaxFault::Malformed
+    };
+    Cap1Refusal::Syntax(fault)
+}
 
 fn schema_refusal(path: impl Into<String>, ground: &'static str) -> Cap1Refusal {
     Cap1Refusal::Schema {
@@ -374,6 +471,21 @@ fn validate_schema_shape(instance: &Value) -> Result<(), Cap1Refusal> {
             }
         }
 
+        for (field, value) in [
+            ("eligible", stratum_obj.get("eligible")),
+            ("examined", stratum_obj.get("examined")),
+        ] {
+            if let Some(value) = value {
+                if value.as_u64().is_some() {
+                    continue;
+                }
+                if value.as_i64().is_some_and(|n| n < 0) {
+                    return Err(schema_refusal(format!("{path}/{field}"), "minimum"));
+                }
+                return Err(schema_refusal(format!("{path}/{field}"), "typed-shape"));
+            }
+        }
+
         if let Some(unexamined) = stratum_obj.get("unexamined").and_then(Value::as_array) {
             for (j, unit) in unexamined.iter().enumerate() {
                 let unit_path = format!("{path}/unexamined/{j}");
@@ -443,8 +555,7 @@ pub fn verify_cap1_document(
 
     let text =
         std::str::from_utf8(bytes).map_err(|_| Cap1Refusal::Syntax(Cap1SyntaxFault::NotUtf8))?;
-    let value: Value =
-        serde_json::from_str(text).map_err(|_| Cap1Refusal::Syntax(Cap1SyntaxFault::Malformed))?;
+    let value: Value = parse_json_value_strict(text)?;
 
     validate_schema_shape(&value)?;
     let doc: Cap1Document =

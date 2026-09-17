@@ -1,4 +1,20 @@
 {
+  "generated:at-limit": {
+    "directory": "local/",
+    "outcome": "pass"
+  },
+  "generated:malformed-json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "admission",
+    "admission_ground": "malformed-json"
+  },
+  "generated:not-utf8": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "admission",
+    "admission_ground": "not-utf8"
+  },
   "generated:oversize": {
     "directory": "local/",
     "outcome": "refusal",
@@ -75,5 +91,89 @@
     "outcome": "refusal",
     "stage": "schema",
     "schema_ground": "/strata/0/id"
+  },
+  "LC-02.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/profile"
+  },
+  "LC-03.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/strata"
+  },
+  "LC-04.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/strata/0/basis/kind"
+  },
+  "LC-05.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/subject/digest/value"
+  },
+  "LC-06.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/strata/0/basis/catalogue_digest"
+  },
+  "LC-07.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/strata/0/unexamined/0/withheld_digest"
+  },
+  "LC-08.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": ""
+  },
+  "LC-09.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/strata/0/eligible"
+  },
+  "LC-10.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/strata/0/eligible"
+  },
+  "LC-11.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R0-shape"
+  },
+  "LC-12.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R2-closed-disposition"
+  },
+  "LC-13.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "admission",
+    "admission_ground": "duplicate-key"
+  },
+  "LC-14.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "admission",
+    "admission_ground": "duplicate-key"
+  },
+  "LC-15.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R1-no-silent-remainder"
   }
 }
