@@ -9,14 +9,16 @@ pub async fn run(args: PolicyValidateArgs) -> Result<i32> {
         std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1");
     }
 
-    // Let core handle parsing + auto-migration warnings.
-    let policy = assay_core::mcp::policy::McpPolicy::from_file(&args.input)
+    let bytes = super::resolved::read_bounded(&args.input).map_err(|error| {
+        super::classify_load_error(
+            &args.input,
+            error
+                .context(format!("failed to read policy {}", args.input.display()))
+                .context(format!("failed to read policy {}", args.input.display())),
+        )
+    })?;
+    let _resolved = super::resolved::load_resolved(&bytes)
         .map_err(|error| super::classify_load_error(&args.input, error))?;
-
-    // Force schema compilation so failures happen here (not at runtime).
-    policy
-        .try_compile_all_schemas()
-        .map_err(|error| anyhow::anyhow!("policy schemas failed to compile: {error}"))?;
 
     eprintln!("✔ Policy OK: {}", args.input.display());
     if args.is_json() {

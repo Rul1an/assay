@@ -1,8 +1,8 @@
 # assay policy
 
-Policy authoring, validation, formatting, and migration commands.
+Policy authoring, validation, formatting, migration, activation, rollback, and status commands.
 
-The policy family owns policy-authoring commands. The legacy top-level forms
+The policy family owns policy-authoring and lifecycle commands. The legacy top-level forms
 `assay generate` and `assay record` were removed; use `assay policy generate`
 and `assay policy record`.
 
@@ -26,6 +26,9 @@ assay policy <COMMAND> [OPTIONS]
 | `assay policy migrate` | Migrate v1.x constraints policies to v2.0 schemas. |
 | `assay policy fmt` | Format policy YAML. |
 | `assay policy resolve` | Dump the resolved policy this Assay version would load. |
+| `assay policy activate` | Activate a validated policy into a policy root. |
+| `assay policy rollback` | Roll back an active policy to its previously activated version. |
+| `assay policy status` | Check active policy status and verify synchronization with activation history. |
 
 ---
 
@@ -67,7 +70,6 @@ schema; schema-identity evolution remains tracked in issue #2167.
 
 ---
 
-
 ### Resolve A Policy
 
 ```bash
@@ -103,6 +105,63 @@ the policy, that the policy is complete, safe, or compliant, or that the
 producer is authenticated. The whole-policy digest is not the experimental
 declared-constraint digest. The filename is not identity. Absence of a dump
 is not a claim.
+
+---
+
+### Activate A Policy
+
+```bash
+assay policy activate src/policy.yaml --root /path/to/policy-root --as policy.yaml
+```
+
+Validates the input policy, stores the immutable content in `<root>/.assay/policy-store/<input_sha256>`,
+atomically replaces `<root>/<name>` via atomic rename, and appends an activation record to
+`<root>/.assay/activations/<NNNNNN>-<name>.json`.
+
+Activation record schema (`assay.policy.activation.v0`):
+
+- `schema`: `assay.policy.activation.v0`
+- `name`: active policy filename within root (e.g. `policy.yaml`)
+- `input_sha256`: SHA-256 of the raw policy bytes (`sha256:<hex>`)
+- `policy_digest`: canonical `McpPolicy::policy_digest()`
+- `previous_input_sha256`: previous active version's input hash, if any
+- `previous_policy_digest`: previous active version's policy digest, if any
+- `assay_version`: Assay CLI version
+- `activated_at`: RFC3339 UTC timestamp
+- `source`: source path or origin string
+- `rollback_of`: optional pointer to previous activation record reversed by rollback
+
+Concurrent activations on the same sequence number are resolved by bounded retries (up to 10 attempts).
+If validation fails, the active policy file and activation records remain completely untouched (fail-closed).
+
+---
+
+### Roll Back A Policy
+
+```bash
+assay policy rollback policy.yaml --root /path/to/policy-root
+```
+
+Restores `<root>/<name>` to the bytes recorded in `previous_input_sha256` of the latest activation record.
+The restored policy is fetched from `<root>/.assay/policy-store/<previous_input_sha256>`, validated,
+atomically swapped into place, and recorded as a new activation record with `rollback_of` set to the
+reversed record filename.
+
+---
+
+### Check Policy Status
+
+```bash
+assay policy status policy.yaml --root /path/to/policy-root [--format text|json]
+```
+
+Verifies that:
+1. `<root>/<name>` exists and is valid policy YAML.
+2. Its `input_sha256` and `policy_digest` match the latest recorded activation in `<root>/.assay/activations/`.
+3. Its content is present in `<root>/.assay/policy-store/`.
+
+Exits `0` when active bytes are verified and in sync with activation history. Exits non-zero (`2`) if
+unrecorded active bytes or discrepancies are detected. In JSON mode, emits `assay.policy.status.v0`.
 
 ---
 
