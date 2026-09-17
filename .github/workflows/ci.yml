@@ -192,6 +192,13 @@ jobs:
           python3 conformance/tests/test_published_numbers_guard.py
           python3 conformance/adequacy/check_published_numbers.py
 
+      - name: Python artifact truth contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ci/test-check-python-artifact-truth.sh
+          python3 scripts/ci/check-python-artifact-truth.py
+
       - name: Evidence vocabulary guard
         shell: bash
         run: |

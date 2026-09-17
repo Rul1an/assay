@@ -874,6 +874,27 @@ printf 'The Python wheels cover CPython 3.11 on macOS x86_64/arm64 and Linux x86
 expect_fail "README Python support bound drifts" --root "$GREEN"
 mv "$TMP/readme.bak" "$GREEN/README.md"
 
+echo "=== mutation: docs/getting-started/index.md interpreter bound drifts without pip install ==="
+cp "$GREEN/docs/getting-started/index.md" "$TMP/index.bak"
+cat > "$GREEN/docs/getting-started/index.md" <<'EOF'
+# Getting Started
+## Prerequisites
+- CPython 3.11 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
+EOF
+expect_fail "docs/getting-started/index.md without pip install has drifted bound" --root "$GREEN"
+mv "$TMP/index.bak" "$GREEN/docs/getting-started/index.md"
+
+echo "=== mutation: docs/getting-started/index.md has stale SDK prerequisite claim ==="
+cp "$GREEN/docs/getting-started/index.md" "$TMP/index.bak"
+cat > "$GREEN/docs/getting-started/index.md" <<'EOF'
+# Getting Started
+## Prerequisites
+- **Rust 1.96** for repository development, or CPython 3.12 for Python SDK use
+- CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
+EOF
+expect_fail "docs/getting-started/index.md has stale SDK prerequisite claim" --root "$GREEN"
+mv "$TMP/index.bak" "$GREEN/docs/getting-started/index.md"
+
 echo "=== no-op restore ==="
 expect_pass "restored green fixture" --root "$GREEN"
 

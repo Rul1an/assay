@@ -47,6 +47,14 @@ BROADER_PYTHON_RE = re.compile(
 )
 SDIST_CLAIM_RE = re.compile(r"\bsdist\b|source distribution", re.IGNORECASE)
 ABI3_CLAIM_RE = re.compile(r"\babi3(?:-py\d+)?\b", re.IGNORECASE)
+INTERPRETER_CLAIM_RE = re.compile(
+    r"\bCPython\b|other interpreters and platforms are not claimed",
+    re.IGNORECASE,
+)
+STALE_SDK_INTERPRETER_RE = re.compile(
+    r"\bCPython\s+3\.\d+\s+for\s+Python\s+SDK(?:\s+use)?\b",
+    re.IGNORECASE,
+)
 STRAY_PYTHON_VERSION_RE = re.compile(
     r"""python-version:\s*['\"]?\d+\.\d+['\"]?"""
 )
@@ -274,17 +282,47 @@ def expected_support_bound(pythons: list[str], wheels: list) -> str:
     )
 
 
+def iter_doc_candidates(root: Path, matrix: dict) -> list[str]:
+    rels: list[str] = []
+    for top in ("README.md", "llms.txt"):
+        if (root / top).is_file():
+            rels.append(top)
+    docs_dir = root / "docs"
+    if docs_dir.is_dir():
+        for path in sorted(docs_dir.rglob("*.md")):
+            rels.append(path.relative_to(root).as_posix())
+    sdk_dir = root / "assay-python-sdk"
+    if sdk_dir.is_dir():
+        for path in sorted(sdk_dir.rglob("*.md")):
+            rels.append(path.relative_to(root).as_posix())
+    for rel in matrix.get("install_docs", []):
+        if rel not in rels:
+            rels.append(rel)
+    seen: set[str] = set()
+    out: list[str] = []
+    for r in rels:
+        if r not in seen:
+            seen.add(r)
+            out.append(r)
+    return out
+
+
 def check_docs(root: Path, matrix: dict, errors: list[str]) -> None:
     bound = matrix.get("published_support_bound")
     if not isinstance(bound, str):
         fail(errors, f"{MATRIX_REL}: published_support_bound must be a string")
         return
-    for rel in matrix["install_docs"]:
+
+    for rel in matrix.get("install_docs", []):
         path = root / rel
         if not path.is_file():
             fail(errors, f"{rel}: install-doc is missing")
             continue
-        text = path.read_text(encoding="utf-8")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            fail(errors, f"{rel}: cannot read markdown: {exc}")
+            continue
         if PIP_INSTALL_RE.search(text) and bound not in text:
             fail(errors, f"{rel}: pip install assay-it without published support bound")
         if BROADER_PYTHON_RE.search(text):
@@ -293,6 +331,32 @@ def check_docs(root: Path, matrix: dict, errors: list[str]) -> None:
             fail(errors, f"{rel}: sdist claim is out of scope")
         if ABI3_CLAIM_RE.search(text):
             fail(errors, f"{rel}: abi3 claim is out of scope")
+
+    for rel in iter_doc_candidates(root, matrix):
+        path = root / rel
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+
+        if INTERPRETER_CLAIM_RE.search(text):
+            if bound not in text:
+                fail(
+                    errors,
+                    f"{rel}: interpreter support claim does not match {MATRIX_REL} published_support_bound: expected {bound!r}",
+                )
+            if STALE_SDK_INTERPRETER_RE.search(text):
+                match = STALE_SDK_INTERPRETER_RE.search(text).group(0)
+                fail(
+                    errors,
+                    f"{rel}: stale single-version SDK prerequisite claim {match!r}; must name all supported versions",
+                )
+            if BROADER_PYTHON_RE.search(text):
+                fail(errors, f"{rel}: broader Python/PyPy claim than the matrix")
+            if ABI3_CLAIM_RE.search(text):
+                fail(errors, f"{rel}: abi3 claim is out of scope")
 
     readme = root / "README.md"
     if not readme.is_file():
@@ -304,17 +368,6 @@ def check_docs(root: Path, matrix: dict, errors: list[str]) -> None:
             fail(
                 errors,
                 f"README.md: Python wheel support claim must match {MATRIX_REL} published_support_bound: expected {expected_readme!r}",
-            )
-
-    install_doc = root / "docs/getting-started/installation.md"
-    if not install_doc.is_file():
-        fail(errors, "docs/getting-started/installation.md: file is missing")
-    else:
-        install_text = install_doc.read_text(encoding="utf-8")
-        if bound not in install_text:
-            fail(
-                errors,
-                f"docs/getting-started/installation.md: Python support claim must match {MATRIX_REL} published_support_bound: {bound!r}",
             )
 
 
