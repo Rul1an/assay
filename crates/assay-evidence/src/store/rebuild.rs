@@ -1,6 +1,6 @@
 //! Evidence run-to-bundle index rebuilding from canonical bundles.
 //!
-//! Reconstructs the non-canonical run index under `runs/{run_id}/bundles/{bundle_id}.ref`
+//! Reconstructs the non-canonical run index under `runs/{run_id}/{bundle_id}.ref`
 //! by inspecting the canonical bundles stored under `bundles/`.
 
 use futures::TryStreamExt;
@@ -48,7 +48,7 @@ impl ObjectStoreBundleStore {
     ///    Stale references are never trusted and never deleted.
     /// 4. Downloads and verifies each canonical bundle with full cryptographic integrity
     ///    and manifest bundle_id binding. Corrupt bundles are skipped and reported.
-    /// 5. Recreates missing run links under `runs/{run_id}/bundles/{bundle_id}.ref`.
+    /// 5. Recreates missing run links under `runs/{run_id}/{bundle_id}.ref`.
     ///    Idempotent: existing references are not re-linked and zero new refs are created
     ///    on repeated runs.
     pub async fn rebuild_index(&self, ceiling: StreamCeiling) -> StoreResult<IndexRebuildReport> {

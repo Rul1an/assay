@@ -639,3 +639,83 @@ fn test_evidence_index_rebuild_cli() {
         .stdout(predicate::str::contains("Refs linked:       0"))
         .stdout(predicate::str::contains("Already indexed:   2"));
 }
+
+#[test]
+fn test_evidence_index_rebuild_exit_code_stale_refs_success() {
+    let dir = tempdir().unwrap();
+    let store_dir = dir.path().join("store");
+    fs::create_dir_all(&store_dir).unwrap();
+    let store_url = format!("file://{}", store_dir.display());
+
+    // Push a valid bundle
+    let bundle_path = create_test_bundle(dir.path());
+    let bundle_bytes = fs::read(&bundle_path).unwrap();
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args(["evidence", "push", "--store", &store_url])
+        .arg(&bundle_path)
+        .assert()
+        .success();
+
+    let pushed_obj = stored_object_with(&store_dir, &bundle_bytes);
+    let store_base = pushed_obj.parent().unwrap().parent().unwrap();
+
+    // Plant a stale reference under runs/stale_run/sha256:ghost_nonexistent.ref
+    let stale_ref_dir = store_base.join("runs").join("stale_run");
+    fs::create_dir_all(&stale_ref_dir).unwrap();
+    fs::write(
+        stale_ref_dir.join("sha256:ghost_nonexistent.ref"),
+        b"sha256:ghost_nonexistent",
+    )
+    .unwrap();
+
+    // Rebuild index: stale refs found -> exits 0 with stale refs listed
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args(["evidence", "index", "rebuild", "--store", &store_url])
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains(
+            "Stale references detected (not deleted):",
+        ))
+        .stdout(predicate::str::contains(
+            "run: stale_run, bundle: sha256:ghost_nonexistent",
+        ));
+}
+
+#[test]
+fn test_evidence_index_rebuild_exit_code_failed_bundle_failure() {
+    let dir = tempdir().unwrap();
+    let store_dir = dir.path().join("store");
+    fs::create_dir_all(&store_dir).unwrap();
+    let store_url = format!("file://{}", store_dir.display());
+
+    // Push a valid bundle first
+    let bundle_path = create_test_bundle(dir.path());
+    let bundle_bytes = fs::read(&bundle_path).unwrap();
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args(["evidence", "push", "--store", &store_url])
+        .arg(&bundle_path)
+        .assert()
+        .success();
+
+    let pushed_obj = stored_object_with(&store_dir, &bundle_bytes);
+    let bundles_dir = pushed_obj.parent().unwrap();
+
+    // Place a corrupted bundle file in bundles/
+    fs::write(
+        bundles_dir.join("sha256:corrupted_bundle_bytes.tar.gz"),
+        b"corrupted not tar gz data",
+    )
+    .unwrap();
+
+    // Rebuild index: verification failure -> exits 1 with failed bundle listed
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args(["evidence", "index", "rebuild", "--store", &store_url])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("Failed bundles (skipped):"))
+        .stdout(predicate::str::contains("sha256:corrupted_bundle_bytes"));
+}

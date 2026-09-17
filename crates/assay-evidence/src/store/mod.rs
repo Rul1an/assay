@@ -15,7 +15,7 @@
 //!
 //! ```text
 //! bundles/{bundle_id}/bundle.tar.gz     # The bundle itself
-//! runs/{run_id}/bundles/{bundle_id}.ref # Run-to-bundle index (for list --run-id)
+//! runs/{run_id}/{bundle_id}.ref         # Run-to-bundle index (for list --run-id)
 //! ```
 
 mod bounded;
@@ -186,7 +186,7 @@ pub trait BundleStore: Send + Sync {
 
     /// Link a bundle to a run ID (for `list --run-id`).
     ///
-    /// Creates a small reference object under `runs/{run_id}/bundles/`.
+    /// Creates a small reference object under `runs/{run_id}/`.
     /// Idempotent: linking the same bundle twice is a no-op.
     async fn link_run_bundle(&self, run_id: &str, bundle_id: &str) -> StoreResult<()>;
 

@@ -784,7 +784,7 @@ assay evidence list [--store <URL>] [--run-id <RUN_ID>] [--prefix <PREFIX>] [--l
 
 ### Index Rebuild
 
-Reconstruct the non-canonical run index (`runs/{run_id}/bundles/{bundle_id}.ref`) from
+Reconstruct the non-canonical run index (`runs/{run_id}/{bundle_id}.ref`) from
 canonical bundles (`bundles/{bundle_id}.tar.gz`):
 
 ```bash
@@ -794,8 +794,16 @@ assay evidence index rebuild [--store <URL>] [--store-config <PATH>] [--format s
 - Discovers canonical bundles from `bundles/`.
 - Verifies each bundle's full cryptographic integrity and manifest binding (`bundle_id == run_root`).
 - Skips and reports corrupted bundles without linking them.
-- (Re)creates missing run links under `runs/{run_id}/bundles/{bundle_id}.ref`.
+- (Re)creates missing run links under `runs/{run_id}/{bundle_id}.ref`.
 - Idempotent: existing links are preserved and repeated runs link 0 new refs.
 - Detects and reports stale references (refs pointing to bundles missing from the canonical store)
   without deleting or trusting them.
 - In JSON mode, emits document schema `assay.evidence.index_rebuild.v0`.
+
+#### Exit Codes
+
+| Exit Code | Condition | Behavior |
+|-----------|-----------|----------|
+| `0` | Success | All discovered bundles verified and indexed successfully. If stale references are detected, they are listed and reported, but the command exits `0`. |
+| `1` | Verification failure / Store error | One or more canonical bundles failed cryptographic or schema verification, or a store I/O error occurred. |
+| `2` | Configuration error | Store URL resolution failed or the store specification URL is invalid. |

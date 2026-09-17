@@ -26,6 +26,10 @@ pub enum StoreError {
     #[error("invalid store spec '{spec}': {reason}")]
     InvalidSpec { spec: String, reason: String },
 
+    /// Invalid identifier (empty, path traversal, slash, or control characters).
+    #[error("invalid identifier '{id}': {reason}")]
+    InvalidId { id: String, reason: String },
+
     /// Storage backend is not configured.
     #[error("store not configured: {message}")]
     NotConfigured { message: String },
