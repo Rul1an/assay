@@ -292,3 +292,41 @@ fn a_session_finding_parses_as_a_typed_record_and_there_is_no_fallback_member() 
             .expect("the wire is untyped and parses regardless");
     assert_eq!(raw["payload"]["kept"], serde_json::json!([1, 2]));
 }
+
+#[test]
+fn a_session_coverage_record_parses_as_a_typed_record_and_round_trips() {
+    assert_eq!(PayloadSessionCoverage::EVENT_TYPE, "assay.session.coverage");
+    assert_eq!(SESSION_COVERAGE_EVENT_TYPE, "assay.session.coverage");
+
+    let payload = serde_json::json!({
+        "finding_id": "run_001:3",
+        "rule_id": "after:read_credentials->http_post",
+        "coverage": "observed",
+        "source_class": "boundary_observed"
+    });
+    let c: PayloadSessionCoverage =
+        serde_json::from_value(payload.clone()).expect("typed coverage record parses");
+    assert_eq!(c.finding_id, "run_001:3");
+    assert_eq!(c.rule_id, "after:read_credentials->http_post");
+    assert_eq!(
+        c.coverage,
+        crate::coding_agent::CodingAgentCoverageState::Observed
+    );
+    assert_eq!(
+        c.source_class,
+        crate::coding_agent::CodingAgentSourceClass::BoundaryObserved
+    );
+    assert_eq!(serde_json::to_value(&c).unwrap(), payload, "round trip");
+
+    // Also round trips through the Payload enum variant
+    let tagged = serde_json::json!({
+        "type": PayloadSessionCoverage::EVENT_TYPE,
+        "payload": payload,
+    });
+    let parsed: Payload =
+        serde_json::from_value(tagged).expect("Payload enum parses session coverage");
+    match parsed {
+        Payload::SessionCoverage(back) => assert_eq!(back, c),
+        other => panic!("expected SessionCoverage variant, got {other:?}"),
+    }
+}
