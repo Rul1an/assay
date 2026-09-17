@@ -24,6 +24,7 @@ EXPECTED_OS = {
     "aarch64-apple-darwin": "macos-15",
 }
 INCLUDE_PAIR_RE = re.compile(r"(?m)^\s+-\s+os:\s+(\S+)\s*\n\s+target:\s+(\S+)\s*$")
+PYTHON_DOTTED_RE = re.compile(r"^\d+\.\d+$")
 
 
 def fail(errors: list[str], msg: str) -> None:
@@ -45,7 +46,7 @@ def step_index(job: str, name: str) -> int:
     return job.find(marker)
 
 
-def check_workflow(root: Path, errors: list[str]) -> str:
+def check_workflow(root: Path, matrix: dict | None, errors: list[str]) -> str:
     text = (root / RELEASE_REL).read_text(encoding="utf-8")
     try:
         job = wheels_job(text)
@@ -73,6 +74,18 @@ def check_workflow(root: Path, errors: list[str]) -> str:
         fail(errors, f"{RELEASE_REL}: wheels job must not use a PyPI network index")
     if not re.search(r"--python\b|PYTHON_BIN", job):
         fail(errors, f"{RELEASE_REL}: smoke must pass --python or PYTHON_BIN explicitly")
+    smoke_pythons = []
+    if isinstance(matrix, dict):
+        raw = matrix.get("smoke_pythons")
+        if isinstance(raw, list):
+            smoke_pythons = [item for item in raw if isinstance(item, str)]
+    if smoke_pythons:
+        if "join(matrix.smoke_pythons" not in job:
+            fail(errors, f"{RELEASE_REL}: wheels job must derive setup/smoke interpreters from matrix.smoke_pythons")
+        if "for py in" not in job:
+            fail(errors, f"{RELEASE_REL}: smoke must loop over matrix.smoke_pythons")
+        if 'python${py}' not in job:
+            fail(errors, f"{RELEASE_REL}: smoke loop must invoke --python \"python${{py}}\"")
     if "plan-python-artifact-matrix.py" not in text:
         fail(errors, f"{RELEASE_REL}: plan job must invoke plan-python-artifact-matrix.py")
     if "fromJSON(needs.plan-python-artifact.outputs.wheels)" not in job:
@@ -103,6 +116,15 @@ def check_matrix(root: Path, errors: list[str]) -> dict | None:
             fail(errors, f"{MATRIX_REL}: {target}: unexpected declared target")
         elif os_label != expected_os:
             fail(errors, f"{MATRIX_REL}: {target}: os must be {expected_os}, got {os_label}")
+    smoke = matrix.get("smoke_pythons")
+    if smoke is not None:
+        if not isinstance(smoke, list) or not smoke:
+            fail(errors, f"{MATRIX_REL}: smoke_pythons must be a non-empty list")
+        for version in smoke:
+            if not isinstance(version, str) or not PYTHON_DOTTED_RE.fullmatch(version):
+                fail(errors, f"{MATRIX_REL}: smoke_pythons entry must be X.Y, got {version!r}")
+    if matrix.get("abi") == "abi3" and smoke is None:
+        fail(errors, f"{MATRIX_REL}: abi3 wheels require smoke_pythons")
     return matrix
 
 
@@ -166,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args.root).resolve()
     errors: list[str] = []
     matrix = check_matrix(root, errors)
-    job = check_workflow(root, errors)
+    job = check_workflow(root, matrix, errors)
     if matrix is not None and job:
         check_wheels_pairs(job, matrix, errors)
     check_smoke_script(root, errors)
