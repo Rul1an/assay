@@ -7,6 +7,7 @@ pub mod delegated_exec;
 pub mod denial_marker;
 pub mod diff;
 pub mod g3_authorization_context;
+pub mod incident_package;
 pub mod json_strict;
 pub mod lint;
 pub mod mandate;
@@ -45,6 +46,11 @@ pub use denial_marker::{
     bindable_denial_marker, classify_denial_marker, BindableDenialMarker, DenialMarkerVersion,
     DENIED_CALL_OBSERVATION_V0, DENIED_CALL_OBSERVATION_V1, PROXY_DENIED_V0, PROXY_DENIED_V1,
     PROXY_ORIGIN,
+};
+pub use incident_package::{
+    read_incident_container, ContainerMember, IncidentContainer, IncidentExpectation,
+    IncidentOutcome, IncidentReason, IncidentVerifyReport, INCIDENT_VERIFY_SCHEMA_V1,
+    NON_CLAIMS_DEFAULT,
 };
 pub use lint::packs::{load_pack, load_packs, LoadedPack, PackError, PackSource};
 pub use ndjson::{read_events, write_events, NdjsonEvents};
