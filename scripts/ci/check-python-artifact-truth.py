@@ -294,6 +294,29 @@ def check_docs(root: Path, matrix: dict, errors: list[str]) -> None:
         if ABI3_CLAIM_RE.search(text):
             fail(errors, f"{rel}: abi3 claim is out of scope")
 
+    readme = root / "README.md"
+    if not readme.is_file():
+        fail(errors, "README.md: file is missing")
+    else:
+        readme_text = readme.read_text(encoding="utf-8")
+        expected_readme = f"The Python wheels cover {bound}"
+        if expected_readme not in readme_text:
+            fail(
+                errors,
+                f"README.md: Python wheel support claim must match {MATRIX_REL} published_support_bound: expected {expected_readme!r}",
+            )
+
+    install_doc = root / "docs/getting-started/installation.md"
+    if not install_doc.is_file():
+        fail(errors, "docs/getting-started/installation.md: file is missing")
+    else:
+        install_text = install_doc.read_text(encoding="utf-8")
+        if bound not in install_text:
+            fail(
+                errors,
+                f"docs/getting-started/installation.md: Python support claim must match {MATRIX_REL} published_support_bound: {bound!r}",
+            )
+
 
 DOC_SUFFIXES = {".md", ".txt"}
 # Live install-doc surfaces (current inventory dirs + top-level docs/*.md).

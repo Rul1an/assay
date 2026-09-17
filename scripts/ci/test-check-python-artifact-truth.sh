@@ -154,6 +154,7 @@ jobs:
     name: Publish to PyPI
 YML
   bound='CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.'
+  printf 'The Python wheels cover %s\n' "$bound" > "$dest/README.md"
   for rel in \
     assay-python-sdk/README.md \
     docs/python-sdk/index.md \
@@ -669,6 +670,9 @@ new_bound = matrix["support_bound"]
 for rel in matrix["install_docs"]:
     path = matrix_path.parent.parent / rel
     path.write_text(path.read_text().replace(old_bound, new_bound))
+readme_path = matrix_path.parent.parent / "README.md"
+if readme_path.is_file():
+    readme_path.write_text(readme_path.read_text().replace(old_bound, new_bound))
 PY
 
 expect_pass "abi3 positive control" --root "$ABI3"
@@ -840,6 +844,9 @@ matrix_path.write_text(json.dumps(data, indent=2) + "\n")
 for rel in data["install_docs"]:
     doc_path = root / rel
     doc_path.write_text(doc_path.read_text().replace(tree_bound, published_bound))
+readme_path = root / "README.md"
+if readme_path.is_file():
+    readme_path.write_text(readme_path.read_text().replace(tree_bound, published_bound))
 PY
 
 python3 - "$ABI3_PRE_RELEASE" "$PUBLISHED_BOUND" "$TREE_BOUND" <<'PY'
@@ -855,8 +862,17 @@ data = json.loads(matrix_path.read_text())
 for rel in data["install_docs"]:
     doc_path = root / rel
     doc_path.write_text(doc_path.read_text().replace(published_bound, tree_bound))
+readme_path = root / "README.md"
+if readme_path.is_file():
+    readme_path.write_text(readme_path.read_text().replace(published_bound, tree_bound))
 PY
 expect_fail "doc carries tree sentence (3.12, 3.13, and 3.14) instead of published sentence" --root "$ABI3_PRE_RELEASE"
+
+echo "=== mutation: README Python support bound drifts ==="
+cp "$GREEN/README.md" "$TMP/readme.bak"
+printf 'The Python wheels cover CPython 3.11 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.\n' > "$GREEN/README.md"
+expect_fail "README Python support bound drifts" --root "$GREEN"
+mv "$TMP/readme.bak" "$GREEN/README.md"
 
 echo "=== no-op restore ==="
 expect_pass "restored green fixture" --root "$GREEN"
