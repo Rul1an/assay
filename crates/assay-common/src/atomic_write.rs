@@ -6,6 +6,7 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::string::{String, ToString};
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::vec::Vec;
 
 #[cfg(not(unix))]
 use std::fs::File;
@@ -19,7 +20,10 @@ use nix::fcntl::{open, openat, OFlag};
 #[cfg(unix)]
 use nix::sys::stat::Mode;
 #[cfg(unix)]
-use nix::unistd::{close, fsync, linkat, unlinkat, write as nix_write, LinkatFlags, UnlinkatFlags};
+use nix::unistd::{
+    close, fsync, linkat, read as nix_read, unlinkat, write as nix_write, LinkatFlags,
+    UnlinkatFlags,
+};
 #[cfg(unix)]
 use std::os::fd::{AsRawFd, RawFd};
 
@@ -114,6 +118,40 @@ pub fn write_new_at(dir: &std::fs::File, name: &str, bytes: &[u8]) -> Result<(),
         name,
         bytes,
     )
+}
+
+#[cfg(unix)]
+pub fn read_at(dir: &std::fs::File, name: &str) -> io::Result<Vec<u8>> {
+    validate_name(name)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
+    let fd = openat(
+        dir.as_raw_fd(),
+        name,
+        OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(io_error)?;
+
+    let mut out = Vec::new();
+    let mut buffer = [0_u8; 8192];
+    let read_result = (|| -> io::Result<()> {
+        loop {
+            match nix_read(fd, &mut buffer) {
+                Ok(0) => break,
+                Ok(read_bytes) => out.extend_from_slice(&buffer[..read_bytes]),
+                Err(Errno::EINTR) => continue,
+                Err(errno) => return Err(io_error(errno)),
+            }
+        }
+        Ok(())
+    })();
+    let close_result = close(fd).map_err(io_error);
+
+    match (read_result, close_result) {
+        (Err(err), _) => Err(err),
+        (Ok(()), Err(err)) => Err(err),
+        (Ok(()), Ok(())) => Ok(out),
+    }
 }
 
 #[cfg(unix)]
@@ -374,7 +412,7 @@ fn validate_name(name: &str) -> Result<(), WriteNewError> {
 #[cfg(test)]
 mod tests {
     #[cfg(unix)]
-    use super::write_new_at;
+    use super::{read_at, write_new_at};
     use super::{write_new, WriteNewError};
     use std::fs;
     use std::path::Path;
@@ -446,6 +484,33 @@ mod tests {
             !leaked_dir.path().join("out.json").exists(),
             "write must not escape into symlink target"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_at_reads_regular_file_from_opened_directory_fd() {
+        let dir = TestDir::new();
+        let payload = b"payload";
+        fs::write(dir.path().join("record.json"), payload).expect("seed file");
+
+        let dir_file = std::fs::File::open(dir.path()).expect("open directory fd");
+        let read_back = read_at(&dir_file, "record.json").expect("read through opened directory");
+        assert_eq!(read_back, payload);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_at_rejects_symlink_entry_without_following_target() {
+        let dir = TestDir::new();
+        let outside = TestDir::new();
+        let outside_file = outside.path().join("outside.json");
+        fs::write(&outside_file, b"outside").expect("seed outside file");
+        symlink(&outside_file, dir.path().join("record.json")).expect("create symlink");
+
+        let dir_file = std::fs::File::open(dir.path()).expect("open directory fd");
+        let err = read_at(&dir_file, "record.json").expect_err("must reject symlink");
+        assert_eq!(err.raw_os_error(), Some(libc::ELOOP));
+        assert_eq!(fs::read(&outside_file).expect("outside"), b"outside");
     }
 
     #[test]

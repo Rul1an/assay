@@ -257,6 +257,61 @@ pub fn store_policy_content(
     }
 }
 
+fn parse_activation_record_seq(record_name: &str, target_name: &str) -> Option<u64> {
+    let suffix = format!("-{target_name}.json");
+    let prefix = record_name.strip_suffix(&suffix)?;
+    if prefix.is_empty() || !prefix.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    prefix.parse::<u64>().ok()
+}
+
+fn is_lower_hex_64(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+pub fn validate_store_object_name(name: &str) -> anyhow::Result<()> {
+    let Some(hex) = name.strip_prefix("sha256:") else {
+        anyhow::bail!(
+            "invalid policy-store object name '{name}': expected sha256:<64 lowercase hex chars>"
+        );
+    };
+    if !is_lower_hex_64(hex) || hex.bytes().any(|b| b.is_ascii_uppercase()) {
+        anyhow::bail!(
+            "invalid policy-store object name '{name}': expected sha256:<64 lowercase hex chars>"
+        );
+    }
+    Ok(())
+}
+
+pub fn read_store_object(store_dir: &Path, object_name: &str) -> anyhow::Result<Vec<u8>> {
+    validate_store_object_name(object_name)?;
+    let store_dir_handle = std::fs::File::open(store_dir).map_err(|err| {
+        anyhow::anyhow!(
+            "failed to open policy-store directory {}: {err}",
+            store_dir.display()
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        assay_common::atomic_write::read_at(&store_dir_handle, object_name).map_err(|err| {
+            anyhow::anyhow!(
+                "failed to read policy-store object '{object_name}' from {}: {err}",
+                store_dir.display()
+            )
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::read(store_dir.join(object_name)).map_err(|err| {
+            anyhow::anyhow!(
+                "failed to read policy-store object '{object_name}' from {}: {err}",
+                store_dir.display()
+            )
+        })
+    }
+}
+
 pub fn replace_pointer_atomic(root: &Path, name: &str, bytes: &[u8]) -> anyhow::Result<PathBuf> {
     validate_target_name(name)?;
     let target = root.join(name);
@@ -328,24 +383,50 @@ pub fn find_latest_activation_record(
     if !activations_dir.exists() {
         return Ok(None);
     }
-    let suffix = format!("-{name}.json");
+    let activations_dir_handle = std::fs::File::open(activations_dir).map_err(|err| {
+        anyhow::anyhow!(
+            "failed to open activations directory {}: {err}",
+            activations_dir.display()
+        )
+    })?;
     let mut highest: Option<(u64, String, ActivationRecord)> = None;
 
     for entry in std::fs::read_dir(activations_dir)? {
         let entry = entry?;
-        let file_name = entry.file_name().to_string_lossy().to_string();
-        if file_name.ends_with(&suffix) {
-            let prefix = &file_name[..file_name.len() - suffix.len()];
-            if let Ok(seq) = prefix.parse::<u64>() {
-                let content = std::fs::read(entry.path())?;
-                if let Ok(rec) = serde_json::from_slice::<ActivationRecord>(&content) {
-                    if highest
-                        .as_ref()
-                        .is_none_or(|(max_seq, _, _)| seq > *max_seq)
-                    {
-                        highest = Some((seq, file_name, rec));
-                    }
-                }
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let Some(file_name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let Some(seq) = parse_activation_record_seq(&file_name, name) else {
+            continue;
+        };
+
+        #[cfg(unix)]
+        let content = assay_common::atomic_write::read_at(&activations_dir_handle, &file_name)
+            .map_err(|err| {
+                anyhow::anyhow!(
+                    "failed to read activation record '{}' from {}: {err}",
+                    file_name,
+                    activations_dir.display()
+                )
+            })?;
+        #[cfg(not(unix))]
+        let content = std::fs::read(activations_dir.join(&file_name)).map_err(|err| {
+            anyhow::anyhow!(
+                "failed to read activation record '{}' from {}: {err}",
+                file_name,
+                activations_dir.display()
+            )
+        })?;
+
+        if let Ok(rec) = serde_json::from_slice::<ActivationRecord>(&content) {
+            if highest
+                .as_ref()
+                .is_none_or(|(max_seq, _, _)| seq > *max_seq)
+            {
+                highest = Some((seq, file_name, rec));
             }
         }
     }

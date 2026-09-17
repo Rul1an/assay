@@ -109,13 +109,19 @@ fn list_activation_records(root: &Path, name: &str) -> Vec<(String, Value)> {
     if !activations_dir.exists() {
         return Vec::new();
     }
+    let activations_dir_handle = std::fs::File::open(&activations_dir).expect("open activations");
     let suffix = format!("-{name}.json");
     let mut records = Vec::new();
     for entry in std::fs::read_dir(&activations_dir).expect("read activations dir") {
         let entry = entry.expect("entry");
         let file_name = entry.file_name().to_string_lossy().to_string();
         if file_name.ends_with(&suffix) {
-            let content = std::fs::read(entry.path()).expect("read activation record");
+            #[cfg(unix)]
+            let content = assay_common::atomic_write::read_at(&activations_dir_handle, &file_name)
+                .expect("read activation record");
+            #[cfg(not(unix))]
+            let content =
+                std::fs::read(activations_dir.join(&file_name)).expect("read activation record");
             let v: Value = serde_json::from_slice(&content).expect("parse activation record json");
             records.push((file_name, v));
         }
@@ -295,6 +301,45 @@ fn rollback_restores_previous_bytes_and_records_it() {
     );
 }
 
+#[test]
+fn rollback_rejects_previous_sha_outside_store_namespace() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+
+    let src_a = write_file(dir.path(), "src_a.yaml", VALID_A);
+    let src_b = write_file(dir.path(), "src_b.yaml", VALID_B);
+
+    cmd_activate(&src_a, &root, "policy.yaml").success();
+    cmd_activate(&src_b, &root, "policy.yaml").success();
+
+    let activations_dir = root.join(".assay").join("activations");
+    let latest_path = activations_dir.join("000002-policy.yaml.json");
+    let latest_bytes = std::fs::read(&latest_path).expect("read latest activation record");
+    let mut latest_json: Value =
+        serde_json::from_slice(&latest_bytes).expect("parse latest activation record");
+    latest_json["previous_input_sha256"] = Value::String("../outside.yaml".to_string());
+    std::fs::write(
+        &latest_path,
+        serde_json::to_vec_pretty(&latest_json).expect("serialize latest activation record"),
+    )
+    .expect("rewrite latest activation record");
+
+    // If rollback naively joins store_dir + previous_input_sha256, this becomes readable.
+    write_file(&root.join(".assay"), "outside.yaml", VALID_A);
+
+    let out = cmd_rollback(&root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("invalid") || stderr.contains("store") || stderr.contains("failed to read"),
+        "rollback must reject traversal-like previous_input_sha256: {stderr}"
+    );
+}
+
 // ── Test 4: stopping before rename leaves old policy readable ──────────────────
 
 #[test]
@@ -364,6 +409,42 @@ fn status_refuses_unrecorded_active_bytes() {
             || combined.contains("not in sync"),
         "status must report active bytes mismatch: {combined}"
     );
+}
+
+#[test]
+#[cfg(unix)]
+fn status_ignores_symlinked_higher_sequence_activation_record() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+    let src_a = write_file(dir.path(), "src_a.yaml", VALID_A);
+
+    cmd_activate(&src_a, &root, "policy.yaml").success();
+
+    let activations_dir = root.join(".assay").join("activations");
+    let outside_record = dir.path().join("outside-record.json");
+    let poisoned = serde_json::json!({
+        "schema": SCHEMA_ACTIVATION_V0,
+        "name": "policy.yaml",
+        "input_sha256": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "policy_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "assay_version": env!("CARGO_PKG_VERSION"),
+        "activated_at": "2026-09-17T00:00:00Z",
+        "source": "poison"
+    });
+    std::fs::write(
+        &outside_record,
+        serde_json::to_vec_pretty(&poisoned).expect("serialize poisoned record"),
+    )
+    .expect("write poisoned record");
+
+    std::os::unix::fs::symlink(
+        &outside_record,
+        activations_dir.join("999999-policy.yaml.json"),
+    )
+    .expect("create poisoned symlink");
+
+    cmd_status(&root, "policy.yaml").success();
 }
 
 // ── Test 6: parity table across validate, resolve and activate ─────────────────

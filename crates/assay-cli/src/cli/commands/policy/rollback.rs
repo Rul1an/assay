@@ -27,10 +27,9 @@ pub async fn run(args: PolicyRollbackArgs) -> anyhow::Result<i32> {
             )
         })?;
 
-    let stored_bytes_path = dirs.store_dir.join(prev_sha);
-    let bytes = std::fs::read(&stored_bytes_path).map_err(|err| {
+    let bytes = super::activate::read_store_object(&dirs.store_dir, prev_sha).map_err(|err| {
         anyhow::anyhow!(
-            "stored policy content '{prev_sha}' missing from store {}: {err}",
+            "stored policy content '{prev_sha}' is unavailable from store {}: {err}",
             dirs.store_dir.display()
         )
     })?;

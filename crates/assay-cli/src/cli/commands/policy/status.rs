@@ -140,11 +140,10 @@ pub async fn run(args: PolicyStatusArgs) -> anyhow::Result<i32> {
         return Ok(EXIT_CONFIG_ERROR);
     }
 
-    // Check store
-    let in_store = dirs.store_dir.join(&resolved.input_sha256).exists();
-    if !in_store {
+    // Check store (fd-relative read on Unix via shared helper).
+    if let Err(err) = super::activate::read_store_object(&dirs.store_dir, &resolved.input_sha256) {
         eprintln!(
-            "error: active policy content '{}' is not present in policy store {}",
+            "error: active policy content '{}' is not available in policy store {}: {err}",
             resolved.input_sha256,
             dirs.store_dir.display()
         );
