@@ -13,7 +13,7 @@ SELECTED_CASE="${ASSAY_DOCS_DRIFT_SELF_TEST_CASE:-}"
 INTERRUPT_CASE="${ASSAY_DOCS_DRIFT_INTERRUPT_AFTER_MUTATION:-}"
 GATE_OUTPUT=""
 # Full mode is a fixed mutation battery; selected mode deliberately executes one row.
-EXPECTED_CASES=14
+EXPECTED_CASES=16
 
 seed_repo() {
   local destination="$1"
@@ -160,6 +160,40 @@ case_hand_edited_agent_plugin_contract() {
   expect_gate_status "$name" "$case_root" 1
 }
 
+# Semantic no-op byte drift: same JSON object, different whitespace. This is
+# the F1 gap: a required-check-visible pin that the generator still owns the
+# package-root manifests, not only the skill copies.
+plant_json_whitespace_drift() {
+  local path="$1"
+  CASE_PATH="$path" python3 - <<'PY'
+from pathlib import Path
+import json
+import os
+
+path = Path(os.environ["CASE_PATH"])
+data = json.loads(path.read_text(encoding="utf-8"))
+path.write_text(json.dumps(data, indent=4) + "\n", encoding="utf-8")
+PY
+}
+
+case_hand_edited_agent_plugin_mcp() {
+  local case_root="$1" name="$2"
+  local drifted="packaging/agent-plugin/mcp.json"
+  plant_json_whitespace_drift "$case_root/$drifted"
+  maybe_interrupt_after_mutation "$name"
+  expect_gate_status "$name" "$case_root" 1
+  expect_gate_output "$name" "$drifted"
+}
+
+case_hand_edited_agent_plugin_manifest() {
+  local case_root="$1" name="$2"
+  local drifted="packaging/agent-plugin/plugin.json"
+  plant_json_whitespace_drift "$case_root/$drifted"
+  maybe_interrupt_after_mutation "$name"
+  expect_gate_status "$name" "$case_root" 1
+  expect_gate_output "$name" "$drifted"
+}
+
 case_missing_codex_destination() {
   local case_root="$1" name="$2"
   local destination=".agents/skills/assay-golden-path/SKILL.md"
@@ -232,6 +266,8 @@ CASES=(
   "hand-edited-plugin-skill|case_hand_edited_plugin_skill"
   "hand-edited-agent-plugin-skill|case_hand_edited_agent_plugin_skill"
   "hand-edited-agent-plugin-contract|case_hand_edited_agent_plugin_contract"
+  "hand-edited-agent-plugin-mcp|case_hand_edited_agent_plugin_mcp"
+  "hand-edited-agent-plugin-manifest|case_hand_edited_agent_plugin_manifest"
   "missing-codex-skill-destination|case_missing_codex_destination"
   "missing-claude-skill-destination|case_missing_claude_destination"
   "missing-plugin-skill-destination|case_missing_plugin_destination"

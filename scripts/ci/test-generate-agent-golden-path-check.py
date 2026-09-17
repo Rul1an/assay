@@ -49,6 +49,7 @@ GENERATED_OUTPUTS = (
         "privileged-action-gate/policies/no-allowance.yaml"
     ),
     Path("packaging/agent-plugin/plugin.json"),
+    Path("packaging/agent-plugin/mcp.json"),
     Path("packaging/agent-plugin/skills/assay-golden-path/SKILL.md"),
     Path(
         "packaging/agent-plugin/skills/assay-golden-path/references/agent-golden-path.json"
