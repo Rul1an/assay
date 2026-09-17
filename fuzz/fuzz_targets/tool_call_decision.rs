@@ -28,9 +28,7 @@ use assay_mcp_server::config::ServerConfig;
 use assay_mcp_server::tool_decision::{
     build_decision, classify, observed_effect, traceparent_from_params, Effect, ObservedCall,
 };
-use assay_mcp_server::tools::{
-    classify_call_tool_params, handle_call, ToolContext, ToolError,
-};
+use assay_mcp_server::tools::{classify_call_tool_params, handle_call, ToolContext, ToolError};
 use libfuzzer_sys::fuzz_target;
 use serde_json::Value;
 use std::sync::OnceLock;
@@ -53,29 +51,39 @@ fn runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
+/// Process-lifetime policy fixture. `_dir` is stored next to `ctx` so
+/// `TempDir`'s Drop does not delete the policy files while the context
+/// still points at them.
+struct Fixture {
+    _dir: tempfile::TempDir,
+    ctx: ToolContext,
+}
+
 /// One fixture policy for the process: `blocked_tool` and `Blocked` are denied;
 /// every other name is allowed. Missing files stay missing so Error is reachable.
 fn fixture_ctx() -> &'static ToolContext {
-    static CTX: OnceLock<ToolContext> = OnceLock::new();
-    CTX.get_or_init(|| {
-        let dir = std::env::temp_dir().join(format!(
-            "assay-fuzz-tool-call-decision-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).expect("fixture policy dir");
-        std::fs::write(
-            dir.join("policy.yaml"),
-            "blocklist:\n  - blocked_tool\n  - Blocked\n",
-        )
-        .expect("fixture policy");
-        let canon = std::fs::canonicalize(&dir).expect("fixture policy canon");
-        ToolContext {
-            policy_root: dir,
-            policy_root_canon: canon,
-            cfg: ServerConfig::default(),
-            caches: PolicyCaches::new(128),
-        }
-    })
+    static FIXTURE: OnceLock<Fixture> = OnceLock::new();
+    &FIXTURE
+        .get_or_init(|| {
+            let dir = tempfile::tempdir().expect("fixture policy dir");
+            std::fs::write(
+                dir.path().join("policy.yaml"),
+                "blocklist:\n  - blocked_tool\n  - Blocked\n",
+            )
+            .expect("fixture policy");
+            let policy_root = dir.path().to_path_buf();
+            let canon = std::fs::canonicalize(&policy_root).expect("fixture policy canon");
+            Fixture {
+                ctx: ToolContext {
+                    policy_root,
+                    policy_root_canon: canon,
+                    cfg: ServerConfig::default(),
+                    caches: PolicyCaches::new(128),
+                },
+                _dir: dir,
+            }
+        })
+        .ctx
 }
 
 /// The same fail-closed construction `Server::run` uses for `handle_call` Err:
@@ -106,12 +114,10 @@ fn assert_well_formed_decision(call: &ObservedCall<'_>) {
         Some(effect_name(call.effect))
     );
     // ... with a classification and reason code on every input ...
-    assert!(
-        first
-            .get("reason_code")
-            .and_then(Value::as_str)
-            .is_some_and(|reason| !reason.is_empty())
-    );
+    assert!(first
+        .get("reason_code")
+        .and_then(Value::as_str)
+        .is_some_and(|reason| !reason.is_empty()));
     // ... and arguments stay redacted no matter how hostile they are.
     assert_eq!(
         first.pointer("/redaction/arguments_redacted"),
