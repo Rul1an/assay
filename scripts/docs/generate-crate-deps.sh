@@ -43,12 +43,13 @@ for crate in $WORKSPACE_MEMBERS; do
         .dependencies[]? |
         select(.path != null) |
         .name
-    ' 2>/dev/null | sort -u || true)
+    ' | sort -u)
 
     for dep in $deps; do
         dep_id=$(echo "$dep" | tr '-' '_')
-        # Only add edge if dep is in workspace
-        if echo "$WORKSPACE_MEMBERS" | grep -q "^${dep}$"; then
+        # Here-string, not a pipe: grep -q exits at first match and would SIGPIPE
+        # the writer under pipefail, turning a hit into a silently dropped edge.
+        if grep -qxF -- "$dep" <<<"$WORKSPACE_MEMBERS"; then
             echo "    ${node_id} --> ${dep_id}" >> "$OUTPUT_FILE"
         fi
     done
