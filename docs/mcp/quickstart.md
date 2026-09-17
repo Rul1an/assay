@@ -1,6 +1,10 @@
 # MCP Quick Start
 
-Add a policy gate to your MCP server in under 5 minutes.
+Add a policy gate to your MCP server in under 5 minutes on macOS or Linux.
+
+The wrap steps below are Unix. We ship an `x86_64-pc-windows-msvc` archive; this
+page does not give a Windows walkthrough because the example policy matches
+`/tmp/assay-demo` paths.
 
 ## Prerequisites
 
@@ -86,17 +90,36 @@ Blocked calls never reach the server.
 ```bash
 mkdir -p /tmp/assay-demo && echo "safe content" > /tmp/assay-demo/safe.txt
 
-assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
-  -- npx @modelcontextprotocol/server-filesystem /tmp/assay-demo
+assay mcp wrap --policy examples/mcp-quickstart/policy.yaml --verbose \
+  -- npx -y @modelcontextprotocol/server-filesystem /tmp/assay-demo
 ```
 
-Output:
+Decision lines print on stderr, and only with `--verbose`. Captured stderr from
+that command on macOS arm64 (assay-cli 6.5.0) after `initialize`, `tools/list`,
+and one allowed `read_file` of `/tmp/assay-demo/safe.txt`:
 
+```text
+[assay] loading policy from examples/mcp-quickstart/policy.yaml
+[assay] wrapping command: npx ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/assay-demo"]
+[assay] ALLOW read_file
+Secure MCP Filesystem Server running on stdio
 ```
-✅ ALLOW  read_file  path=/tmp/assay-demo/safe.txt  reason=policy_allow
-❌ DENY   read_file  path=/tmp/outside-demo.txt      reason=path_constraint_violation
-❌ DENY   exec       cmd=ls                          reason=tool_denied
+
+The same command, after a `read_file` of `/tmp/outside-demo.txt`:
+
+```text
+[assay] DENY read_file (reason: JSON Schema validation failed)
 ```
+
+The same command, after an `exec` call:
+
+```text
+[assay] DENY exec (reason: Tool is explicitly denylisted by name)
+```
+
+Without `--verbose`, those ALLOW/DENY lines are not printed. The wrap still
+enforces: a deny is a JSON-RPC result on stdout with `isError: true`. The proxy
+does not print a decision table.
 
 ## Step 2: Write a Policy
 

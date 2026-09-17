@@ -1,6 +1,10 @@
 # Quick Start
 
-Add a policy gate to your MCP server in under 5 minutes.
+Add a policy gate to your MCP server in under 5 minutes on macOS or Linux.
+
+These wrap steps are Unix. We ship an `x86_64-pc-windows-msvc` archive; this
+page does not give a Windows walkthrough because the example policy matches
+`/tmp/assay-demo` paths.
 
 ## Install
 
@@ -12,7 +16,8 @@ For exact stdout, exits, upgrade, and rollback behavior, use the [release-pinned
 
 ## Option A: Wrap an MCP Server (recommended)
 
-The fastest path to first value. Wrap any MCP server and see ALLOW/DENY on every tool call.
+The fastest path to first value. Wrap any MCP server. Decision lines print on
+stderr, and only with `--verbose`.
 
 **1. Create a demo workspace:**
 
@@ -23,17 +28,38 @@ mkdir -p /tmp/assay-demo && echo "safe content" > /tmp/assay-demo/safe.txt
 **2. Wrap with policy:**
 
 ```bash
-assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
-  -- npx @modelcontextprotocol/server-filesystem /tmp/assay-demo
+assay mcp wrap --policy examples/mcp-quickstart/policy.yaml --verbose \
+  -- npx -y @modelcontextprotocol/server-filesystem /tmp/assay-demo
 ```
 
 **3. See decisions:**
 
+Send a `tools/call` through the wrap. Captured stderr from that command on
+macOS arm64 (assay-cli 6.5.0) after `initialize`, `tools/list`, and one allowed
+`read_file` of `/tmp/assay-demo/safe.txt`:
+
+```text
+[assay] loading policy from examples/mcp-quickstart/policy.yaml
+[assay] wrapping command: npx ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/assay-demo"]
+[assay] ALLOW read_file
+Secure MCP Filesystem Server running on stdio
 ```
-✅ ALLOW  read_file  path=/tmp/assay-demo/safe.txt  reason=policy_allow
-❌ DENY   read_file  path=/tmp/outside-demo.txt      reason=path_constraint_violation
-❌ DENY   exec       cmd=ls                          reason=tool_denied
+
+The same command, after a `read_file` of `/tmp/outside-demo.txt`:
+
+```text
+[assay] DENY read_file (reason: JSON Schema validation failed)
 ```
+
+The same command, after an `exec` call:
+
+```text
+[assay] DENY exec (reason: Tool is explicitly denylisted by name)
+```
+
+Without `--verbose`, those ALLOW/DENY lines are not printed. The wrap still
+enforces: a deny is a JSON-RPC result on stdout with `isError: true`. The proxy
+does not print a decision table.
 
 See the [MCP quickstart example](../../examples/mcp-quickstart/) for the full walkthrough.
 
