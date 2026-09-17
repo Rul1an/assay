@@ -17,6 +17,13 @@ the struct body has no `serde(rename)`. A rename, a missing struct, or an
 unreadable page is a failure, never a pass: this cannot guess a second
 mapping.
 
+Pages are listed explicitly. A docs-wide walk of every `report[` / `result[`
+subscript would need a map from documented keys onto the serialised type they
+belong to: `docs/use-cases/self-correction.md` writes `result["allowed"]` for
+a different API, and `docs/AIcontext/` still names `result["passed"]`. This
+check does not carry that map. `docs/python-sdk/index.md` is in the set
+because it documents `validate()` / `Coverage.analyze()` against CoverageReport.
+
 Usage: check-docs-serialized-keys.py [--root DIR]
 """
 
@@ -30,6 +37,7 @@ from pathlib import Path
 SOURCE = "crates/assay-core/src/coverage_next/types.rs"
 PAGES = (
     "docs/getting-started/python-quickstart.md",
+    "docs/python-sdk/index.md",
 )
 
 STRUCT_HEAD = re.compile(r"^pub struct CoverageReport \{", re.MULTILINE)

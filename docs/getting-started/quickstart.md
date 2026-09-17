@@ -3,8 +3,9 @@
 Add a policy gate to your MCP server in under 5 minutes on macOS or Linux.
 
 These wrap steps are Unix. We ship an `x86_64-pc-windows-msvc` archive; this
-page does not give a Windows walkthrough because the example policy matches
-`/tmp/assay-demo` paths.
+page does not give a Windows walkthrough because the example policy requires
+paths matching `^/tmp/assay-demo/.*`. A Windows path kept under that same
+policy is denied by the policy, not by Unix path syntax.
 
 ## Install
 
@@ -57,9 +58,9 @@ The same command, after an `exec` call:
 [assay] DENY exec (reason: Tool is explicitly denylisted by name)
 ```
 
-Without `--verbose`, those ALLOW/DENY lines are not printed. The wrap still
-enforces: a deny is a JSON-RPC result on stdout with `isError: true`. The proxy
-does not print a decision table.
+Without `--verbose`, those ALLOW/DENY lines are not printed and stderr stays
+empty. The wrap still returns a JSON-RPC deny on stdout; a reader who drops
+the flag sees silence and should not read silence as "nothing was denied".
 
 See the [MCP quickstart example](../../examples/mcp-quickstart/) for the full walkthrough.
 

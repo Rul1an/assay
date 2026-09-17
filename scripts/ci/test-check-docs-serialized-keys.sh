@@ -8,12 +8,15 @@ trap 'rm -rf "$TMP"' EXIT
 
 CHECK="$ROOT/scripts/ci/check-docs-serialized-keys.py"
 PAGE=docs/getting-started/python-quickstart.md
+SDK_PAGE=docs/python-sdk/index.md
 SOURCE=crates/assay-core/src/coverage_next/types.rs
 
 reset_tree() {
   rm -rf "$TMP/tree"
-  mkdir -p "$TMP/tree/$(dirname "$PAGE")" "$TMP/tree/$(dirname "$SOURCE")"
+  mkdir -p "$TMP/tree/$(dirname "$PAGE")" "$TMP/tree/$(dirname "$SDK_PAGE")" \
+    "$TMP/tree/$(dirname "$SOURCE")"
   cp "$ROOT/$PAGE" "$TMP/tree/$PAGE"
+  cp "$ROOT/$SDK_PAGE" "$TMP/tree/$SDK_PAGE"
   cp "$ROOT/$SOURCE" "$TMP/tree/$SOURCE"
 }
 
@@ -37,10 +40,10 @@ PY
 reset_tree
 run_check >"$TMP/control.out" 2>&1 || {
   cat "$TMP/control.out" >&2
-  echo "FAIL: the shipped python-quickstart and CoverageReport must agree" >&2
+  echo "FAIL: the shipped pages and CoverageReport must agree" >&2
   exit 1
 }
-printf 'PASS: shipped python-quickstart keys agree with CoverageReport\n'
+printf 'PASS: shipped pages keys agree with CoverageReport\n'
 
 mutations=0
 expect_red() {
@@ -93,8 +96,12 @@ expect_red serde-rename 'serde(rename)'
 replace_once "$SOURCE" 'pub struct CoverageReport {' 'pub struct CoverageAnalysis {'
 expect_red struct-missing 'exactly one `pub struct CoverageReport`'
 
-if [ "$mutations" -ne 6 ]; then
-  echo "FAIL: expected 6 observed mutations, got $mutations" >&2
+# The SDK page must stay in the scanned set: a list that omitted it stayed green.
+replace_once "$SDK_PAGE" 'report["meets_threshold"]' 'report["passed"]'
+expect_red sdk-page-scanned "docs/python-sdk/index.md: documents 'passed'"
+
+if [ "$mutations" -ne 7 ]; then
+  echo "FAIL: expected 7 observed mutations, got $mutations" >&2
   exit 1
 fi
 
