@@ -93,6 +93,17 @@ impl KeyBuilder {
         }
     }
 
+    /// Prefix for listing all run references.
+    ///
+    /// Returns: `{base}/runs/`
+    pub fn runs_prefix(&self) -> Path {
+        if self.base_prefix.is_empty() {
+            Path::from("runs/")
+        } else {
+            Path::from(format!("{}/runs/", self.base_prefix))
+        }
+    }
+
     /// Extract bundle_id from a bundle key.
     ///
     /// Input: `{base}/bundles/{bundle_id}.tar.gz`
@@ -133,6 +144,26 @@ impl KeyBuilder {
             .next()
             .and_then(|filename| filename.strip_suffix(".ref"))
             .map(|s| s.to_string())
+    }
+
+    /// Extract `(run_id, bundle_id)` from a run reference key.
+    ///
+    /// Accepts `{base}/runs/{run_id}/{bundle_id}.ref`
+    /// or `{base}/runs/{run_id}/bundles/{bundle_id}.ref`.
+    pub fn parse_run_ref_parts(&self, key: &Path) -> Option<(String, String)> {
+        let key_str = key.as_ref();
+        if !key_str.ends_with(".ref") {
+            return None;
+        }
+        let parts: Vec<&str> = key_str.split('/').collect();
+        for (i, part) in parts.iter().enumerate() {
+            if *part == "runs" && i + 1 < parts.len() {
+                let run_id = parts[i + 1].to_string();
+                let bundle_id = parts.last()?.strip_suffix(".ref")?.to_string();
+                return Some((run_id, bundle_id));
+            }
+        }
+        None
     }
 
     /// Sanitize an ID for use in keys.
@@ -208,5 +239,42 @@ mod tests {
             .run_bundles_prefix("run_001")
             .as_ref()
             .starts_with("assay/runs/run_001"));
+    }
+
+    #[test]
+    fn test_runs_prefix() {
+        let kb = KeyBuilder::new("assay");
+        assert!(kb.runs_prefix().as_ref().starts_with("assay/runs"));
+
+        let kb_empty = KeyBuilder::new("");
+        assert_eq!(kb_empty.runs_prefix().as_ref(), "runs");
+    }
+
+    #[test]
+    fn test_parse_run_ref_parts() {
+        let kb = KeyBuilder::new("assay");
+        let k1 = Path::from("assay/runs/run_001/sha256:abc123.ref");
+        assert_eq!(
+            kb.parse_run_ref_parts(&k1),
+            Some(("run_001".to_string(), "sha256:abc123".to_string()))
+        );
+
+        let k2 = Path::from("assay/runs/run_001/bundles/sha256:abc123.ref");
+        assert_eq!(
+            kb.parse_run_ref_parts(&k2),
+            Some(("run_001".to_string(), "sha256:abc123".to_string()))
+        );
+
+        let k3 = Path::from("runs/run_002/sha256:def456.ref");
+        assert_eq!(
+            kb.parse_run_ref_parts(&k3),
+            Some(("run_002".to_string(), "sha256:def456".to_string()))
+        );
+
+        let not_ref = Path::from("assay/runs/run_001/sha256:abc123.txt");
+        assert_eq!(kb.parse_run_ref_parts(&not_ref), None);
+
+        let bundle_key = Path::from("assay/bundles/sha256:abc123.tar.gz");
+        assert_eq!(kb.parse_run_ref_parts(&bundle_key), None);
     }
 }

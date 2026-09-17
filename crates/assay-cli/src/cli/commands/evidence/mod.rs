@@ -4,6 +4,7 @@ pub mod cyclonedx_mlbom_model;
 pub mod diff;
 mod diff_render;
 pub mod effect_refutation;
+pub mod index;
 pub mod lint;
 pub mod list;
 pub mod livekit_tool_action;
@@ -100,6 +101,9 @@ pub enum EvidenceCmd {
     List(list::ListArgs),
     /// Check evidence store connectivity and status (BYOS)
     StoreStatus(store_status::StoreStatusArgs),
+    /// Manage the evidence run index (BYOS)
+    #[command(subcommand)]
+    Index(index::EvidenceIndexCmd),
     /// Interactive TUI explorer for evidence bundles
     #[cfg(feature = "tui")]
     Explore(explore::ExploreArgs),
@@ -217,6 +221,7 @@ pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
         EvidenceCmd::Pull(a) => pull::cmd_pull(a).await,
         EvidenceCmd::List(a) => list::cmd_list(a).await,
         EvidenceCmd::StoreStatus(a) => store_status::cmd_store_status(a).await,
+        EvidenceCmd::Index(a) => index::cmd_evidence_index(a).await,
         #[cfg(feature = "tui")]
         EvidenceCmd::Explore(a) => explore::cmd_explore(a),
     }
