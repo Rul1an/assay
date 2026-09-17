@@ -1,0 +1,23 @@
+{
+  "profile": "cap/1",
+  "subject": { "kind": "artefact", "ref": "s" },
+  "strata": [
+    {
+      "id": "dup",
+      "population": "p",
+      "basis": { "kind": "declared" },
+      "eligible": 0,
+      "examined": 0,
+      "unexamined": []
+    },
+    {
+      "id": "dup",
+      "population": "p",
+      "basis": { "kind": "declared" },
+      "eligible": 0,
+      "examined": 0,
+      "unexamined": []
+    }
+  ],
+  "integrity": { "complete": true, "statement": "s" }
+}

@@ -11,6 +11,8 @@
 //! Conformance is internal consistency of a document. It says nothing about producer truth,
 //! capture completeness, or what any agent did.
 
+use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -19,10 +21,33 @@ use assay_evidence::{
     Cap1AdmissionLimits, Cap1Document, Cap1NormativeRule, Cap1Refusal, Cap1RelyingPartyContext,
     Cap1Stage, Cap1SyntaxFault, CodingAgentClaimKind, CAP1_SCHEMA_JSON, CAP1_SCHEMA_SHA256,
 };
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 fn normative_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cap1/normative")
+    cap1_fixture_dir().join("normative")
+}
+
+fn local_dir() -> PathBuf {
+    cap1_fixture_dir().join("local")
+}
+
+fn cap1_fixture_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cap1")
+}
+
+fn fixture_subdir(directory: &str) -> PathBuf {
+    match directory {
+        NORMATIVE_DIR => normative_dir(),
+        LOCAL_DIR => local_dir(),
+        other => panic!("unknown fixture directory {other:?}"),
+    }
+}
+
+fn expected_fixture_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/cap1/normative")
+        .join(EXPECTED_FIXTURE_NAME)
 }
 
 fn vector(id: &str) -> Vec<u8> {
@@ -32,6 +57,55 @@ fn vector(id: &str) -> Vec<u8> {
 fn verify(bytes: &[u8]) -> Result<Cap1Document, Cap1Refusal> {
     verify_cap1_document(bytes, &Cap1AdmissionLimits::default())
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+enum ExpectedOutcome {
+    Pass,
+    Refusal {
+        stage: String,
+        #[serde(default)]
+        rule: Option<String>,
+        #[serde(default)]
+        schema_ground: Option<String>,
+        #[serde(default)]
+        admission_ground: Option<String>,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+struct ExpectedCase {
+    directory: String,
+    #[serde(flatten)]
+    outcome: ExpectedOutcome,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ActualOutcome {
+    Pass,
+    Refusal {
+        stage: String,
+        rule: Option<String>,
+        schema_ground: Option<String>,
+        admission_ground: Option<String>,
+    },
+}
+
+const NORMATIVE_DIR: &str = "normative/";
+const LOCAL_DIR: &str = "local/";
+const GENERATED_OVERSIZE_CASE: &str = "generated:oversize";
+const GENERATED_AT_LIMIT_CASE: &str = "generated:at-limit";
+const GENERATED_NOT_UTF8_CASE: &str = "generated:not-utf8";
+const GENERATED_MALFORMED_CASE: &str = "generated:malformed-json";
+const GENERATED_DEPTH_64_CASE: &str = "generated:depth-64";
+const GENERATED_DEPTH_65_CASE: &str = "generated:depth-65";
+const GENERATED_ORDER_DEPTH_BEFORE_DUPLICATE_CASE: &str = "generated:order-depth-before-duplicate";
+const GENERATED_KEYS_10000_CASE: &str = "generated:keys-10000";
+const GENERATED_KEYS_10001_CASE: &str = "generated:keys-10001";
+const GENERATED_LONE_SURROGATE_CASE: &str = "generated:lone-surrogate";
+const GENERATED_BAD_ESCAPE_CASE: &str = "generated:bad-escape";
+const PINNED_HARD_MAX_BYTES: usize = 1_048_576;
+const EXPECTED_FIXTURE_NAME: &str = "expected-first-failure.json";
 
 fn rule_of(r: &Cap1Refusal) -> Cap1NormativeRule {
     match r {
@@ -66,41 +140,256 @@ fn vendored_vectors_match_their_recorded_digests() {
 }
 
 #[test]
-fn upstream_positive_vectors_conform() {
-    for id in ["PV-01", "PV-02", "PV-03", "PV-04", "PV-05"] {
-        let doc = verify(&vector(id)).unwrap_or_else(|e| panic!("{id}: {e}"));
-        assert_eq!(doc.profile, "cap/1");
+fn shared_expected_first_failure_parity_fixture() {
+    let expected: BTreeMap<String, ExpectedCase> =
+        serde_json::from_slice(&fs::read(expected_fixture_path()).expect("expected fixture"))
+            .expect("expected fixture parses");
+    assert_expected_fixture_covers_all_json_vectors(&expected);
+    for (case, expected_case) in expected {
+        let bytes = fixture_case_bytes(&case, &expected_case.directory);
+        let actual = match verify(&bytes) {
+            Ok(_) => ActualOutcome::Pass,
+            Err(err) => refusal_to_actual(&err),
+        };
+        assert_eq!(
+            actual,
+            expected_to_actual(expected_case.outcome),
+            "{}/{}",
+            expected_case.directory,
+            case
+        );
     }
 }
 
-#[test]
-fn upstream_negative_vectors_refuse_at_their_first_stage() {
-    use Cap1NormativeRule as R;
-    let rules = [
-        ("NC-01", R::R1NoSilentRemainder),
-        ("NC-03", R::R3WithholdingDigestBound),
-        ("NC-04", R::R4DenominatorBasis),
-        // R1 reconciles first (9 != 11 + 0); R5 is later in numeric order.
-        ("NC-05", R::R1NoSilentRemainder),
-        ("NC-06", R::R6AbsenceIsScoped),
-        ("NC-07", R::R7IncompleteNotClean),
-        ("NC-08", R::R8SupportsBoundsCitation),
-        ("NC-09", R::R1NoSilentRemainder),
-        ("NC-10", R::R7IncompleteNotClean),
-    ];
-    for (id, expected) in rules {
-        let err = verify(&vector(id)).expect_err(id);
-        assert_eq!(err.stage(), Cap1Stage::Rules, "{id}: {err}");
-        assert_eq!(rule_of(&err), expected, "{id}: {err}");
+fn fixture_case_bytes(case: &str, directory: &str) -> Vec<u8> {
+    if is_generated_case(case) {
+        assert_eq!(
+            directory, LOCAL_DIR,
+            "{case} must be scoped under {LOCAL_DIR}"
+        );
     }
-    // An open disposition string is a schema rejection before R2 is ever evaluated.
-    let err = verify(&vector("NC-02")).expect_err("NC-02");
-    assert_eq!(err.stage(), Cap1Stage::Schema, "{err}");
-    match &err {
-        Cap1Refusal::Schema { instance_path, .. } => {
-            assert_eq!(instance_path, "/strata/0/unexamined/0/disposition");
+    match case {
+        GENERATED_OVERSIZE_CASE => generated_oversize_case(),
+        GENERATED_AT_LIMIT_CASE => generated_at_limit_case(),
+        GENERATED_NOT_UTF8_CASE => generated_not_utf8_case(),
+        GENERATED_MALFORMED_CASE => generated_malformed_json_case(),
+        GENERATED_DEPTH_64_CASE => generated_depth_64_case(),
+        GENERATED_DEPTH_65_CASE => generated_depth_65_case(),
+        GENERATED_ORDER_DEPTH_BEFORE_DUPLICATE_CASE => {
+            generated_order_depth_before_duplicate_case()
         }
-        other => panic!("{other:?}"),
+        GENERATED_KEYS_10000_CASE => generated_keys_10000_case(),
+        GENERATED_KEYS_10001_CASE => generated_keys_10001_case(),
+        GENERATED_LONE_SURROGATE_CASE => generated_lone_surrogate_case(),
+        GENERATED_BAD_ESCAPE_CASE => generated_bad_escape_case(),
+        _ => fs::read(fixture_subdir(directory).join(case)).expect("fixture case readable"),
+    }
+}
+
+fn generated_oversize_case() -> Vec<u8> {
+    let mut bytes = vector("PV-01");
+    bytes.resize(PINNED_HARD_MAX_BYTES + 1, b' ');
+    bytes
+}
+
+fn generated_at_limit_case() -> Vec<u8> {
+    let mut bytes = vector("PV-01");
+    bytes.resize(PINNED_HARD_MAX_BYTES, b' ');
+    bytes
+}
+
+fn generated_not_utf8_case() -> Vec<u8> {
+    vec![0xff, b'{', b'}']
+}
+
+fn generated_malformed_json_case() -> Vec<u8> {
+    b"{\"profile\": ".to_vec()
+}
+
+fn generated_nested_scalar_case(depth: usize) -> Vec<u8> {
+    format!("{}0{}", "[".repeat(depth), "]".repeat(depth)).into_bytes()
+}
+
+fn generated_nested_duplicate_key_case(depth: usize) -> Vec<u8> {
+    format!(
+        "{}{{\"k\":1,\"k\":2}}{}",
+        "[".repeat(depth),
+        "]".repeat(depth)
+    )
+    .into_bytes()
+}
+
+fn generated_depth_64_case() -> Vec<u8> {
+    generated_nested_scalar_case(64)
+}
+
+fn generated_depth_65_case() -> Vec<u8> {
+    generated_nested_scalar_case(65)
+}
+
+fn generated_order_depth_before_duplicate_case() -> Vec<u8> {
+    generated_nested_duplicate_key_case(64)
+}
+
+fn generated_keys_10000_case() -> Vec<u8> {
+    generated_object_with_key_count(10_000)
+}
+
+fn generated_keys_10001_case() -> Vec<u8> {
+    generated_object_with_key_count(10_001)
+}
+
+fn generated_object_with_key_count(count: usize) -> Vec<u8> {
+    assert!(count >= 4, "count must include required CAP-1 root keys");
+
+    let mut json = String::with_capacity(count * 12 + 256);
+    json.push_str("{\"profile\":\"cap/1\",");
+    json.push_str("\"subject\":{\"kind\":\"artefact\",\"ref\":\"s\"},");
+    json.push_str("\"strata\":[{\"id\":\"a\",\"population\":\"p\",");
+    json.push_str(
+        "\"basis\":{\"kind\":\"declared\"},\"eligible\":0,\"examined\":0,\"unexamined\":[]}],",
+    );
+    json.push_str("\"integrity\":{\"complete\":true,\"statement\":\"s\"}");
+
+    for i in 0..(count - 4) {
+        json.push(',');
+        json.push('"');
+        json.push('k');
+        json.push_str(&i.to_string());
+        json.push_str("\":0");
+    }
+    json.push('}');
+    json.into_bytes()
+}
+
+fn generated_lone_surrogate_case() -> Vec<u8> {
+    b"{\"x\":\"\\uD800\"}".to_vec()
+}
+
+fn generated_bad_escape_case() -> Vec<u8> {
+    b"{\"x\":\"\\u12G4\"}".to_vec()
+}
+
+fn is_generated_case(case: &str) -> bool {
+    matches!(
+        case,
+        GENERATED_OVERSIZE_CASE
+            | GENERATED_AT_LIMIT_CASE
+            | GENERATED_NOT_UTF8_CASE
+            | GENERATED_MALFORMED_CASE
+            | GENERATED_DEPTH_64_CASE
+            | GENERATED_DEPTH_65_CASE
+            | GENERATED_ORDER_DEPTH_BEFORE_DUPLICATE_CASE
+            | GENERATED_KEYS_10000_CASE
+            | GENERATED_KEYS_10001_CASE
+            | GENERATED_LONE_SURROGATE_CASE
+            | GENERATED_BAD_ESCAPE_CASE
+    )
+}
+
+fn assert_expected_fixture_covers_all_json_vectors(expected: &BTreeMap<String, ExpectedCase>) {
+    assert_directory_inventory(expected, NORMATIVE_DIR);
+    assert_directory_inventory(expected, LOCAL_DIR);
+    for (case, expected_case) in expected {
+        if is_generated_case(case) {
+            assert_eq!(
+                expected_case.directory, LOCAL_DIR,
+                "{case} must be in {LOCAL_DIR}"
+            );
+            continue;
+        }
+        let path = fixture_subdir(&expected_case.directory).join(case);
+        assert!(
+            path.is_file(),
+            "expected entry {}/{} has no file",
+            expected_case.directory,
+            case
+        );
+    }
+}
+
+fn assert_directory_inventory(expected: &BTreeMap<String, ExpectedCase>, directory: &str) {
+    let files = fixture_json_names(&fixture_subdir(directory));
+    for file in files {
+        let entry = expected
+            .get(&file)
+            .unwrap_or_else(|| panic!("{directory}{file} is missing from expected fixture"));
+        assert_eq!(
+            entry.directory, directory,
+            "expected entry {file} must name {directory}"
+        );
+    }
+}
+
+fn fixture_json_names(directory: &Path) -> BTreeSet<String> {
+    let mut files = BTreeSet::new();
+    for entry in fs::read_dir(directory).expect("fixture directory readable") {
+        let entry = entry.expect("fixture entry readable");
+        if !entry
+            .file_type()
+            .expect("fixture entry metadata readable")
+            .is_file()
+        {
+            continue;
+        }
+        let path = entry.path();
+        if path.extension() == Some(OsStr::new("json")) {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name != EXPECTED_FIXTURE_NAME {
+                files.insert(name);
+            }
+        }
+    }
+    files
+}
+
+fn expected_to_actual(expected: ExpectedOutcome) -> ActualOutcome {
+    match expected {
+        ExpectedOutcome::Pass => ActualOutcome::Pass,
+        ExpectedOutcome::Refusal {
+            stage,
+            rule,
+            schema_ground,
+            admission_ground,
+        } => ActualOutcome::Refusal {
+            stage,
+            rule,
+            schema_ground,
+            admission_ground,
+        },
+    }
+}
+
+fn refusal_to_actual(err: &Cap1Refusal) -> ActualOutcome {
+    let stage = match err.stage() {
+        Cap1Stage::Admission => "admission",
+        Cap1Stage::Schema => "schema",
+        Cap1Stage::Rules => "rules",
+    }
+    .to_string();
+    let rule = err.rule().map(|r| r.as_str().to_string());
+    let schema_ground = match err {
+        Cap1Refusal::Schema { instance_path, .. } => Some(instance_path.clone()),
+        _ => None,
+    };
+    let admission_ground = match err {
+        Cap1Refusal::Oversized { .. } => Some("oversized".to_string()),
+        Cap1Refusal::Syntax(Cap1SyntaxFault::NotUtf8) => Some("not-utf8".to_string()),
+        Cap1Refusal::Syntax(Cap1SyntaxFault::DuplicateKey) => Some("duplicate-key".to_string()),
+        Cap1Refusal::Syntax(Cap1SyntaxFault::InvalidEscape) => Some("invalid-escape".to_string()),
+        Cap1Refusal::Syntax(Cap1SyntaxFault::NestingTooDeep) => {
+            Some("nesting-too-deep".to_string())
+        }
+        Cap1Refusal::Syntax(Cap1SyntaxFault::TooManyKeys) => Some("too-many-keys".to_string()),
+        Cap1Refusal::Syntax(Cap1SyntaxFault::StringTooLong) => Some("string-too-long".to_string()),
+        Cap1Refusal::Syntax(Cap1SyntaxFault::Malformed) => Some("malformed-json".to_string()),
+        _ => None,
+    };
+    ActualOutcome::Refusal {
+        stage,
+        rule,
+        schema_ground,
+        admission_ground,
     }
 }
 
@@ -124,6 +413,19 @@ fn silencing_a_rule_moves_the_first_failure_later() {
     ] {
         verify_cap1_rules_with(&typed(id), &[rule]).unwrap_or_else(|e| panic!("{id}: {e}"));
     }
+}
+
+#[test]
+fn local_r5_case_is_reachable_once_r1_is_silenced() {
+    use Cap1NormativeRule as R;
+
+    let bytes = fs::read(local_dir().join("LC-15.json")).expect("LC-15");
+    let err = verify(&bytes).expect_err("R1 shadows R5");
+    assert_eq!(rule_of(&err), R::R1NoSilentRemainder);
+
+    let doc: Cap1Document = serde_json::from_slice(&bytes).expect("typed local case parses");
+    let err = verify_cap1_rules_with(&doc, &[R::R1NoSilentRemainder]).expect_err("R5");
+    assert_eq!(rule_of(&err), R::R5CountsWellFormed);
 }
 
 /// Typed parse only, bypassing the verifier: for tests that need a document the verifier
