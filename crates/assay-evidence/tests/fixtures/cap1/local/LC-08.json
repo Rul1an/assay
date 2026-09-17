@@ -1,0 +1,16 @@
+{
+  "profile": "cap/1",
+  "subject": { "kind": "artefact", "ref": "s" },
+  "strata": [
+    {
+      "id": "a",
+      "population": "p",
+      "basis": { "kind": "declared" },
+      "eligible": 0,
+      "examined": 0,
+      "unexamined": []
+    }
+  ],
+  "integrity": { "complete": true, "statement": "s" },
+  "extra": true
+}

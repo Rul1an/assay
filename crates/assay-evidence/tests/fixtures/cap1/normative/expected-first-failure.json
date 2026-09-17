@@ -1,0 +1,221 @@
+{
+  "generated:at-limit": {
+    "directory": "local/",
+    "outcome": "pass"
+  },
+  "generated:depth-64": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": ""
+  },
+  "generated:depth-65": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "admission",
+    "admission_ground": "nesting-too-deep"
+  },
+  "generated:order-depth-before-duplicate": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "admission",
+    "admission_ground": "nesting-too-deep"
+  },
+  "generated:keys-10000": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": ""
+  },
+  "generated:keys-10001": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "admission",
+    "admission_ground": "too-many-keys"
+  },
+  "generated:lone-surrogate": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "admission",
+    "admission_ground": "invalid-escape"
+  },
+  "generated:bad-escape": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "admission",
+    "admission_ground": "invalid-escape"
+  },
+  "generated:malformed-json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "admission",
+    "admission_ground": "malformed-json"
+  },
+  "generated:not-utf8": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "admission",
+    "admission_ground": "not-utf8"
+  },
+  "generated:oversize": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "admission",
+    "admission_ground": "oversized"
+  },
+  "PV-01.json": { "directory": "normative/", "outcome": "pass" },
+  "PV-02.json": { "directory": "normative/", "outcome": "pass" },
+  "PV-03.json": { "directory": "normative/", "outcome": "pass" },
+  "PV-04.json": { "directory": "normative/", "outcome": "pass" },
+  "PV-05.json": { "directory": "normative/", "outcome": "pass" },
+  "NC-01.json": {
+    "directory": "normative/",
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R1-no-silent-remainder"
+  },
+  "NC-02.json": {
+    "directory": "normative/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/strata/0/unexamined/0/disposition"
+  },
+  "NC-03.json": {
+    "directory": "normative/",
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R3-withholding-digest-bound"
+  },
+  "NC-04.json": {
+    "directory": "normative/",
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R4-denominator-basis"
+  },
+  "NC-05.json": {
+    "directory": "normative/",
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R1-no-silent-remainder"
+  },
+  "NC-06.json": {
+    "directory": "normative/",
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R6-absence-is-scoped"
+  },
+  "NC-07.json": {
+    "directory": "normative/",
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R7-incomplete-not-clean"
+  },
+  "NC-08.json": {
+    "directory": "normative/",
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R8-supports-bounds-citation"
+  },
+  "NC-09.json": {
+    "directory": "normative/",
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R1-no-silent-remainder"
+  },
+  "NC-10.json": {
+    "directory": "normative/",
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R7-incomplete-not-clean"
+  },
+  "LC-01.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/strata/0/id"
+  },
+  "LC-02.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/profile"
+  },
+  "LC-03.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/strata"
+  },
+  "LC-04.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/strata/0/basis/kind"
+  },
+  "LC-05.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/subject/digest/value"
+  },
+  "LC-06.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/strata/0/basis/catalogue_digest"
+  },
+  "LC-07.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/strata/0/unexamined/0/withheld_digest"
+  },
+  "LC-08.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": ""
+  },
+  "LC-09.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/strata/0/eligible"
+  },
+  "LC-10.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "schema",
+    "schema_ground": "/strata/0/eligible"
+  },
+  "LC-11.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R0-shape"
+  },
+  "LC-12.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R2-closed-disposition"
+  },
+  "LC-13.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "admission",
+    "admission_ground": "duplicate-key"
+  },
+  "LC-14.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "admission",
+    "admission_ground": "duplicate-key"
+  },
+  "LC-15.json": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "rules",
+    "rule": "R1-no-silent-remainder"
+  }
+}
