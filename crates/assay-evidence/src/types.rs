@@ -342,6 +342,9 @@ pub enum Payload {
     /// version; it lands here with `#[non_exhaustive]` so that the next one does not.
     #[serde(rename = "assay.session.finding")]
     SessionFinding(PayloadSessionFinding),
+    /// Coverage statement for a session finding (ADR-049/ADR-050 sibling shape, Refs #2422).
+    #[serde(rename = "assay.session.coverage")]
+    SessionCoverage(PayloadSessionCoverage),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -491,6 +494,47 @@ impl PayloadSessionFinding {
         }
     }
 }
+
+/// Coverage statement for a session finding (Refs #2422).
+///
+/// Emitted as a sibling event (`assay.session.coverage`) to declare the coverage state
+/// and observing vantage for an evaluated session finding, referencing the finding
+/// event's `id` and `rule_id`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PayloadSessionCoverage {
+    /// CloudEvents `id` of the referenced session finding event.
+    pub finding_id: String,
+    /// Stable identity of the policy rule evaluated in the finding.
+    pub rule_id: String,
+    /// Coverage state for the evaluated call sequence.
+    pub coverage: crate::coding_agent::CodingAgentCoverageState,
+    /// Source class of the observer.
+    pub source_class: crate::coding_agent::CodingAgentSourceClass,
+}
+
+impl PayloadSessionCoverage {
+    /// The event type this payload travels as, so a producer does not spell it by hand.
+    pub const EVENT_TYPE: &'static str = "assay.session.coverage";
+
+    /// Build a session coverage record referencing a finding event.
+    pub fn new(
+        finding_id: impl Into<String>,
+        rule_id: impl Into<String>,
+        coverage: crate::coding_agent::CodingAgentCoverageState,
+        source_class: crate::coding_agent::CodingAgentSourceClass,
+    ) -> Self {
+        PayloadSessionCoverage {
+            finding_id: finding_id.into(),
+            rule_id: rule_id.into(),
+            coverage,
+            source_class,
+        }
+    }
+}
+
+/// Event type for session coverage records.
+pub const SESSION_COVERAGE_EVENT_TYPE: &str = PayloadSessionCoverage::EVENT_TYPE;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PayloadExecObserved {
