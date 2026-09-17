@@ -4,6 +4,8 @@
 
 #![allow(deprecated)]
 
+use assay_evidence::store::KeyBuilder;
+use assay_evidence::StoreSpec;
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
@@ -649,7 +651,6 @@ fn test_evidence_index_rebuild_exit_code_stale_refs_success() {
 
     // Push a valid bundle
     let bundle_path = create_test_bundle(dir.path());
-    let bundle_bytes = fs::read(&bundle_path).unwrap();
     Command::cargo_bin("assay")
         .unwrap()
         .args(["evidence", "push", "--store", &store_url])
@@ -657,17 +658,17 @@ fn test_evidence_index_rebuild_exit_code_stale_refs_success() {
         .assert()
         .success();
 
-    let pushed_obj = stored_object_with(&store_dir, &bundle_bytes);
-    let store_base = pushed_obj.parent().unwrap().parent().unwrap();
-
-    // Plant a stale reference under runs/stale_run/sha256:ghost_nonexistent.ref
-    let stale_ref_dir = store_base.join("runs").join("stale_run");
+    // Derive the stale reference path using the store's public naming helper on the owned TempDir
+    let spec = StoreSpec::parse(&store_url).unwrap();
+    let kb = KeyBuilder::new(&spec.prefix);
+    let stale_ref_dir = store_dir.join(kb.run_bundles_prefix("stale_run").unwrap().as_ref());
     fs::create_dir_all(&stale_ref_dir).unwrap();
-    fs::write(
-        stale_ref_dir.join("sha256:ghost_nonexistent.ref"),
-        b"sha256:ghost_nonexistent",
-    )
-    .unwrap();
+    let stale_ref_file = store_dir.join(
+        kb.run_bundle_ref_key("stale_run", "sha256:ghost_nonexistent")
+            .unwrap()
+            .as_ref(),
+    );
+    fs::write(&stale_ref_file, b"sha256:ghost_nonexistent").unwrap();
 
     // Rebuild index: stale refs found -> exits 0 with stale refs listed
     Command::cargo_bin("assay")
@@ -692,7 +693,6 @@ fn test_evidence_index_rebuild_exit_code_failed_bundle_failure() {
 
     // Push a valid bundle first
     let bundle_path = create_test_bundle(dir.path());
-    let bundle_bytes = fs::read(&bundle_path).unwrap();
     Command::cargo_bin("assay")
         .unwrap()
         .args(["evidence", "push", "--store", &store_url])
@@ -700,15 +700,17 @@ fn test_evidence_index_rebuild_exit_code_failed_bundle_failure() {
         .assert()
         .success();
 
-    let pushed_obj = stored_object_with(&store_dir, &bundle_bytes);
-    let bundles_dir = pushed_obj.parent().unwrap();
-
-    // Place a corrupted bundle file in bundles/
-    fs::write(
-        bundles_dir.join("sha256:corrupted_bundle_bytes.tar.gz"),
-        b"corrupted not tar gz data",
-    )
-    .unwrap();
+    // Derive the corrupt bundle path using the store's public naming helper on the owned TempDir
+    let spec = StoreSpec::parse(&store_url).unwrap();
+    let kb = KeyBuilder::new(&spec.prefix);
+    let bundles_dir = store_dir.join(kb.bundles_prefix().as_ref());
+    fs::create_dir_all(&bundles_dir).unwrap();
+    let corrupt_bundle_file = store_dir.join(
+        kb.bundle_key("sha256:corrupted_bundle_bytes")
+            .unwrap()
+            .as_ref(),
+    );
+    fs::write(&corrupt_bundle_file, b"corrupted not tar gz data").unwrap();
 
     // Rebuild index: verification failure -> exits 1 with failed bundle listed
     Command::cargo_bin("assay")
