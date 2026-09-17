@@ -33,7 +33,8 @@ This is the recommended way to run untrusted MCP servers in CI/CD or development
 |--------|-------------|
 | `--policy`, `-p` | Path to sandbox policy YAML (default: built-in minimal) |
 | `--fail-closed` | Exit if policy cannot be fully enforced (no degradation) |
-| `--enforce` | Require active Landlock filesystem enforcement |
+| `--enforce` | Require active Landlock filesystem enforcement; refuse (exit 2) when it cannot be applied. Implied fail-closed. |
+| `--allow-audit-fallback` | With `--enforce`, keep the old degrade-and-record behaviour instead of refusing. Conflicts with `--fail-closed`. |
 | `--enforce-net` | Enforce an explicit TCP destination-port allowlist; requires `--enforce` |
 | `--enforcement-health <path>` | Write `assay.enforcement_health.v1` (Landlock TCP-connect) to this path; requires `--enforce-net` |
 | `--dry-run` | Audit without active blocking; conflicts with `--enforce` |
@@ -203,31 +204,42 @@ fs:
 ### How Assay Handles This
 
 1. **Detects the conflict** before enforcement
-2. **Warns** and degrades to Audit mode (no containment)
-3. **With `--fail-closed`**: Exits immediately with code 2
+2. **Without `--enforce`**: warns and degrades to Audit mode (no containment)
+3. **With `--enforce` or `--fail-closed`**: exits immediately with code 2
+4. **With `--enforce --allow-audit-fallback`**: warns, records `assay.sandbox.degraded`, and continues in Audit mode
 
 ```bash
-# Default: warns and continues
+# Default (no --enforce): warns and continues
 assay sandbox --policy conflict.yaml -- ./cmd
 # WARN: Landlock cannot enforce deny inside allowed path
 # INFO: Degrading to Audit mode
+
+# --enforce refuses when the policy cannot be applied
+assay sandbox --enforce --policy conflict.yaml -- ./cmd
+# ERROR: Policy cannot be fully enforced
+# E_POLICY_CONFLICT_DENY_WINS_UNENFORCEABLE
+# exit 2
 
 # Strict: fails on unenforceable policy
 assay sandbox --fail-closed --policy conflict.yaml -- ./cmd
 # ERROR: Policy cannot be fully enforced
 # exit 2
+
+# Opt in to the old degrade-and-record path
+assay sandbox --enforce --allow-audit-fallback --policy conflict.yaml -- ./cmd
 ```
 
 When degraded execution continues and profiling is enabled, the evidence profile
 sidecar can carry a typed `assay.sandbox.degraded` signal for the supported
-fallback paths. Intentional audit/permissive runs and fail-closed aborts do not
-emit that signal.
+fallback paths. Intentional audit/permissive runs, fail-closed aborts, and
+`--enforce` refusals without `--allow-audit-fallback` do not emit that signal.
 
 `--enforcement-health` requires `--enforce-net`. If execution degrades to audit
-before Landlock is applied (unsupported backend, or a policy conflict that is
-not `--fail-closed`), the mechanism artifact is not written and Assay names the
+before Landlock is applied (unsupported backend, or a policy conflict, with
+`--allow-audit-fallback`), the mechanism artifact is not written and Assay names the
 requested path on stderr. That diagnostic is not an `assay.enforcement_health.v1`
-record.
+record. Without `--allow-audit-fallback`, `--enforce` refuses before the child
+runs and names every requested artifact as unwritten.
 
 ---
 
@@ -333,7 +345,7 @@ Backend: Landlock (Audit)
 |------|---------|
 | 0 | Command succeeded |
 | 1 | Command failed (pass-through exit code) |
-| 2 | Policy cannot be enforced: a named `--policy` that is missing or does not parse, or a conflict under `--fail-closed` |
+| 2 | Policy cannot be enforced: a named `--policy` that is missing or does not parse; no containment backend under `--enforce`; or a conflict under `--fail-closed` or `--enforce` without `--allow-audit-fallback` |
 
 Codes 3 and 4 were previously documented for a missing policy file and invalid policy
 syntax. No code path emitted them: `exit_codes.rs` reserves 3 for infrastructure failures
