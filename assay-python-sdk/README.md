@@ -15,7 +15,7 @@ It currently provides a small, bounded surface on top of Assay core:
 pip install assay-it
 ```
 
-CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
+CPython 3.12, 3.13, and 3.14 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
 
 Import path:
 

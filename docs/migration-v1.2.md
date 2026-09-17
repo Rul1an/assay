@@ -41,7 +41,7 @@ Install the SDK and pytest plugin:
 pip install assay-it
 ```
 
-CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
+CPython 3.12, 3.13, and 3.14 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
 
 `Requires-Python` changed from `>=3.9` to `==3.12.*`. This does not break
 any previously working 3.9–3.11 install: those wheels never existed. Only
