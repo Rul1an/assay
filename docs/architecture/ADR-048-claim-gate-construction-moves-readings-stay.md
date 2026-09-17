@@ -413,6 +413,14 @@ A seventh pass caught that decision 6 said "All four crates" without an antecede
 only the two public decision-enum paths. It now names all four public enum paths, including both
 claim-kind paths, so compatibility cannot be read as preserving only half of the moved surface.
 
+An eighth pass, on 2026-09-17, records the closure status of issue #2826 without rewriting the
+earlier dated measurements: the complete-coverage parity leg is now live (`claim_gate_parity.rs`
+builds a literal full descriptor and asserts `compared > 0`, so a reintroduced pre-loop return
+fails the leg). The deliberate divergence remains the same and stays open on purpose:
+`RunnerClaimGate::for_verdict` is not pinned against the evidence gate because their inputs do not
+correspond, while `claim_support_parity.rs` continues to pin fidelity only to
+`assay-runner-schema`'s own `claim_support` projection.
+
 ### Left open, deliberately
 
 The capture-basis design for `TraceRecord`, and the base-or-demote choice for the policy path's
