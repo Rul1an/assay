@@ -37,8 +37,10 @@ The sandbox uses Landlock when available:
 - default: containment is active when Landlock is present.
 - `--dry-run`: observe and log only, never block (exits 4 if an unauthorized action
   occurs). Best for the first run while you learn the agent's footprint.
-- `--enforce`: require active enforcement; combine with `--fail-closed` to make an
-  unenforceable policy fatal (exit 2) rather than degrading to audit.
+- `--enforce`: require active enforcement. If the host has no Landlock backend, or
+  the policy conflicts with Landlock's allow-only model, the run exits 2 and
+  executes nothing. Pass `--allow-audit-fallback` to keep the old degrade-and-record
+  behaviour. `--fail-closed` is unchanged and is implied by `--enforce`.
 
 Pass a policy with `--policy assay.yaml`; without one, a minimal default applies.
 Environment scrubbing is on by default (`--env-strict`, `--env-strip-exec`,
