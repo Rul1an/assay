@@ -617,27 +617,28 @@ def assert_job_scoped_setup_rust(
         raise SystemExit(f"{job_id}: setup step must not call dtolnay/Swatinem directly")
 
 
-# --- CI: clippy / rustdoc only (job-scoped; other jobs keep direct pins) ---
+# --- CI: clippy / rustdoc / generated-drift only (job-scoped; other jobs keep direct pins) ---
 ci_jobs = jobs_by_id(ci_text)
-for required in ("clippy", "rustdoc"):
+for required in ("clippy", "rustdoc", "generated-drift"):
     if required not in ci_jobs:
         raise SystemExit(f"ci.yml missing job {required}")
 
 assert_job_scoped_setup_rust("clippy", ci_jobs["clippy"], {"components": "clippy"})
 assert_job_scoped_setup_rust("rustdoc", ci_jobs["rustdoc"], {})
+assert_job_scoped_setup_rust("generated-drift", ci_jobs["generated-drift"], {})
 
-allowed_ci_setup = {"clippy", "rustdoc"}
+allowed_ci_setup = {"clippy", "rustdoc", "generated-drift"}
 for job_id, block in ci_jobs.items():
     if job_id in allowed_ci_setup:
         continue
     if "./.github/actions/setup-rust" in block:
         raise SystemExit(
-            f"ci.yml: setup-rust only allowed in clippy/rustdoc for this slice, found in {job_id}"
+            f"ci.yml: setup-rust only allowed in clippy/rustdoc/generated-drift for this slice, found in {job_id}"
         )
 
 print(
-    "ok   ci.yml: clippy with-map exact {components: clippy}; rustdoc empty with-map; "
-    "setup-rust only in clippy/rustdoc; job-scoped no direct pins"
+    "ok   ci.yml: clippy with-map exact {components: clippy}; rustdoc/generated-drift empty with-map; "
+    "setup-rust only in clippy/rustdoc/generated-drift; job-scoped no direct pins"
 )
 
 # --- Kernel Matrix: lint only (build-artifacts keeps direct eBPF toolchain/cache-on-failure) ---
