@@ -238,8 +238,9 @@ fs:
 ```
 
 **Assay detects this conflict** and:
-- **Default**: Warns and degrades to Audit mode (no containment)
-- **`--fail-closed`**: Exits with code 2
+- **Default** (no `--enforce`): Warns and degrades to Audit mode (no containment)
+- **`--enforce` or `--fail-closed`**: Exits with code 2
+- **`--enforce --allow-audit-fallback`**: Warns, records `assay.sandbox.degraded`, and continues in Audit mode
 
 ### Best Practice: Minimal Allow Paths
 
@@ -401,7 +402,7 @@ WARN: Landlock cannot enforce deny inside allowed path
 INFO: Degrading to Audit mode (containment disabled)
 ```
 
-**Fix**: Restructure policy to avoid denying inside allowed paths, or use `--fail-closed` to fail fast.
+**Fix**: Restructure policy to avoid denying inside allowed paths, or use `--fail-closed` or `--enforce` (without `--allow-audit-fallback`) to fail fast.
 
 ### "Environment variable X not found"
 

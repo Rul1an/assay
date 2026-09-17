@@ -23,7 +23,8 @@ policy and a human report.
 Document and support running a coding agent under `assay sandbox -- <agent command>`
 as a first-class governance path that produces an independent, deterministic record
 of the agent's observed effects, with optional inline enforcement (`--enforce`,
-`--fail-closed`) and an observe-only mode (`--dry-run`).
+`--fail-closed`; `--allow-audit-fallback` keeps the old degrade-and-record path)
+and an observe-only mode (`--dry-run`).
 
 Frame the evidence dimensions around the three controls that matter most for an
 autonomous agent: network egress, file writes, and configuration protection.

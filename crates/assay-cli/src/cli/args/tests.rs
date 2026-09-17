@@ -452,3 +452,47 @@ fn sandbox_enforcement_health_with_enforce_net_still_parses() {
         _ => panic!("expected sandbox command"),
     }
 }
+
+#[test]
+fn sandbox_allow_audit_fallback_conflicts_with_fail_closed() {
+    let err = match Cli::try_parse_from([
+        "assay",
+        "sandbox",
+        "--enforce",
+        "--fail-closed",
+        "--allow-audit-fallback",
+        "--",
+        "true",
+    ]) {
+        Ok(_) => panic!("--allow-audit-fallback must conflict with --fail-closed at clap"),
+        Err(err) => err,
+    };
+    assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("--allow-audit-fallback") && rendered.contains("--fail-closed"),
+        "clap must name both flags: {rendered}"
+    );
+}
+
+#[test]
+fn sandbox_allow_audit_fallback_parses_with_enforce() {
+    let ok = Cli::try_parse_from([
+        "assay",
+        "sandbox",
+        "--enforce",
+        "--allow-audit-fallback",
+        "--",
+        "true",
+    ])
+    .expect("--enforce --allow-audit-fallback must still parse");
+    match ok.cmd {
+        Command::Sandbox(args) => {
+            assert!(args.enforce);
+            assert!(args.allow_audit_fallback);
+            assert!(!args.fail_closed);
+            assert_eq!(args.command, ["true"]);
+        }
+        _ => panic!("expected sandbox command"),
+    }
+}

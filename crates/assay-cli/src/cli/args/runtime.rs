@@ -178,7 +178,7 @@ pub struct SandboxArgs {
     #[arg(long)]
     pub timeout: Option<u64>,
 
-    /// Active enforcement: hard-block unauthorized actions
+    /// Require active Landlock enforcement; refuse (exit 2) when it cannot be applied. Implied fail-closed.
     #[arg(long)]
     pub enforce: bool,
 
@@ -189,6 +189,10 @@ pub struct SandboxArgs {
     /// Fail if policy cannot be enforced (exit 2)
     #[arg(long)]
     pub fail_closed: bool,
+
+    /// With --enforce, degrade to audit and record instead of refusing. Conflicts with --fail-closed.
+    #[arg(long, conflicts_with = "fail_closed")]
+    pub allow_audit_fallback: bool,
 
     /// Enforce the network policy as a Landlock TCP-connect port allowlist (ABI >= 4). Allowlist-only:
     /// `net.allow` must be explicit TCP ports; any IP/CIDR, host, non-TCP protocol, range, deny rule,

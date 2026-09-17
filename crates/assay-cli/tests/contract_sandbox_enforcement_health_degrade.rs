@@ -1,7 +1,11 @@
-//! #2637: name a requested `--enforcement-health` artifact when execution
-//! degrades to audit before the v1 producer.
+//! #2637 + #3081: name a requested `--enforcement-health` artifact when
+//! execution degrades to audit before the v1 producer.
 //!
-//! Binary contract: child is `echo MARKER` on stdout.
+//! The #2637 exit-0 contract now requires `--allow-audit-fallback`. `--enforce`
+//! without that flag refuses (exit 2) and does not run the child.
+//!
+//! Binary contract: continuing-path child is `echo MARKER` on stdout.
+//! Refusal-path child writes a marker file under `--workdir`.
 //!
 //! Unsupported-backend (`--enforce`, no Landlock) compiles on non-Linux only.
 //! Policy-conflict (`actual_enforcement` plus deny-inside-allow) compiles on
@@ -90,6 +94,58 @@ fn assert_silent_health(run: &Run, path_warn: &str) {
     );
 }
 
+/// `--enforce` without a containment backend must refuse: exit 2, the child
+/// never starts, the reason line is printed, and requested artifacts are named
+/// as unwritten. The marker is a file under a dedicated workdir so a later
+/// Landlock allow of cwd cannot hide a child that ran.
+#[cfg(not(target_os = "linux"))]
+#[test]
+fn enforce_without_fallback_refuses() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let workdir = tmp.path().join("work");
+    std::fs::create_dir(&workdir).expect("workdir");
+    let marker = workdir.join("child-ran");
+    let health = tmp.path().join("health.json");
+    let profile = tmp.path().join("prof.yaml");
+    let data_home = tempfile::tempdir().expect("temp data home");
+    let mut cmd = Command::cargo_bin("assay").expect("binary");
+    cmd.env("XDG_DATA_HOME", data_home.path());
+    cmd.args([
+        "sandbox",
+        "--enforce",
+        "--enforce-net",
+        "--enforcement-health",
+        health.to_str().expect("health"),
+        "--profile",
+        profile.to_str().expect("profile"),
+        "--workdir",
+        workdir.to_str().expect("workdir"),
+        "--",
+        "touch",
+        marker.to_str().expect("marker"),
+    ]);
+    let out = cmd.assert().get_output().clone();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "must refuse when --enforce cannot enforce.\nstderr:\n{stderr}"
+    );
+    assert!(!marker.exists(), "child must not run.\nstderr:\n{stderr}");
+    assert!(
+        stderr.contains("E_BACKEND_UNAVAILABLE_UNENFORCEABLE"),
+        "missing reason line.\nstderr:\n{stderr}"
+    );
+    let health_note = format!(
+        "NOTE: --enforcement-health {} not written:",
+        health.display()
+    );
+    assert!(
+        stderr.contains(&health_note),
+        "missing unwritten-artifact note.\nstderr:\n{stderr}"
+    );
+}
+
 #[cfg(not(target_os = "linux"))]
 #[test]
 fn unsupported_backend_names_requested_enforcement_health_as_unwritten() {
@@ -101,6 +157,7 @@ fn unsupported_backend_names_requested_enforcement_health_as_unwritten() {
     let run = run_sandbox(
         &[
             "--enforce",
+            "--allow-audit-fallback",
             "--enforce-net",
             "--enforcement-health",
             hs.as_ref(),
@@ -124,7 +181,13 @@ fn no_enforcement_health_path_stays_silent_on_unsupported_backend_degrade() {
     let profile = tmp.path().join("prof.yaml");
     let ps = profile.to_string_lossy();
     let run = run_sandbox(
-        &["--enforce", "--enforce-net", "--profile", ps.as_ref()],
+        &[
+            "--enforce",
+            "--allow-audit-fallback",
+            "--enforce-net",
+            "--profile",
+            ps.as_ref(),
+        ],
         None,
     );
     assert_silent_health(&run, UNSUPPORTED_WARN);
@@ -154,7 +217,13 @@ fn run_conflict(with_health: bool) -> (Run, tempfile::TempDir, tempfile::NamedTe
     let policy = conflict_policy();
     let hs = health.to_string_lossy();
     let ps = profile.to_string_lossy();
-    let mut extra = vec!["--enforce", "--enforce-net", "--profile", ps.as_ref()];
+    let mut extra = vec![
+        "--enforce",
+        "--allow-audit-fallback",
+        "--enforce-net",
+        "--profile",
+        ps.as_ref(),
+    ];
     if with_health {
         extra.extend(["--enforcement-health", hs.as_ref()]);
     }
@@ -186,4 +255,63 @@ fn no_enforcement_health_path_stays_silent_on_policy_conflict_degrade() {
     let profile = tmp.path().join("prof.yaml");
     assert_silent_health(&run, CONFLICT_WARN);
     assert!(profile.exists(), "stderr:\n{}", run.stderr);
+}
+
+/// Linux twin of `enforce_without_fallback_refuses`: a Landlock policy conflict
+/// under `--enforce` without `--allow-audit-fallback` exits 2 and runs nothing.
+#[cfg(target_os = "linux")]
+#[test]
+fn enforce_without_fallback_refuses_on_policy_conflict() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let workdir = tmp.path().join("work");
+    std::fs::create_dir(&workdir).expect("workdir");
+    let marker = workdir.join("child-ran");
+    let health = tmp.path().join("health.json");
+    let profile = tmp.path().join("prof.yaml");
+    let policy = conflict_policy();
+    let data_home = tempfile::tempdir().expect("temp data home");
+    let mut cmd = Command::cargo_bin("assay").expect("binary");
+    cmd.env("XDG_DATA_HOME", data_home.path());
+    cmd.args([
+        "sandbox",
+        "--enforce",
+        "--enforce-net",
+        "--enforcement-health",
+        health.to_str().expect("health"),
+        "--profile",
+        profile.to_str().expect("profile"),
+        "--policy",
+        policy.path().to_str().expect("policy"),
+        "--workdir",
+        workdir.to_str().expect("workdir"),
+        "--",
+        "touch",
+        marker.to_str().expect("marker"),
+    ]);
+    let out = cmd.assert().get_output().clone();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if stderr.contains(UNSUPPORTED_WARN) {
+        panic!(
+            "policy-conflict callsite was not reached (no Landlock). \
+             This is not GREEN for that branch.\nstderr:\n{stderr}"
+        );
+    }
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "must refuse when --enforce cannot enforce a conflicting policy.\nstderr:\n{stderr}"
+    );
+    assert!(!marker.exists(), "child must not run.\nstderr:\n{stderr}");
+    assert!(
+        stderr.contains("E_POLICY_CONFLICT_DENY_WINS_UNENFORCEABLE"),
+        "missing reason line.\nstderr:\n{stderr}"
+    );
+    let health_note = format!(
+        "NOTE: --enforcement-health {} not written:",
+        health.display()
+    );
+    assert!(
+        stderr.contains(&health_note),
+        "missing unwritten-artifact note.\nstderr:\n{stderr}"
+    );
 }
