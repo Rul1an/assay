@@ -27,3 +27,14 @@ the upstream `PV-*` and `NC-*` series.
   exactly `Cap1AdmissionLimits::HARD_MAX_BYTES`.
 - `generated:not-utf8` is not committed. Tests build a three-byte invalid UTF-8 payload.
 - `generated:malformed-json` is not committed. Tests build a truncated JSON payload.
+- `generated:depth-64` is not committed. Tests build a JSON payload nested 64 levels deep;
+  admission accepts it and schema then refuses the non-CAP-1 shape.
+- `generated:depth-65` is not committed. Tests build a payload with 64 array levels around an
+  object carrying a duplicate key; admission refuses first on nesting depth (`>64`).
+- `generated:keys-10000` is not committed. Tests build one object with exactly 10,000 keys;
+  admission accepts it and schema then refuses the non-CAP-1 shape.
+- `generated:keys-10001` is not committed. Tests build one object with 10,001 keys; admission
+  refuses at the strict object-key ceiling.
+- `generated:lone-surrogate` is not committed. Tests build a JSON string containing `\uD800`
+  without a pairing low surrogate.
+- `generated:bad-escape` is not committed. Tests build a JSON string containing `\u12G4`.

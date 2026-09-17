@@ -97,6 +97,12 @@ const GENERATED_OVERSIZE_CASE: &str = "generated:oversize";
 const GENERATED_AT_LIMIT_CASE: &str = "generated:at-limit";
 const GENERATED_NOT_UTF8_CASE: &str = "generated:not-utf8";
 const GENERATED_MALFORMED_CASE: &str = "generated:malformed-json";
+const GENERATED_DEPTH_64_CASE: &str = "generated:depth-64";
+const GENERATED_DEPTH_65_CASE: &str = "generated:depth-65";
+const GENERATED_KEYS_10000_CASE: &str = "generated:keys-10000";
+const GENERATED_KEYS_10001_CASE: &str = "generated:keys-10001";
+const GENERATED_LONE_SURROGATE_CASE: &str = "generated:lone-surrogate";
+const GENERATED_BAD_ESCAPE_CASE: &str = "generated:bad-escape";
 const PINNED_HARD_MAX_BYTES: usize = 1_048_576;
 const EXPECTED_FIXTURE_NAME: &str = "expected-first-failure.json";
 
@@ -166,6 +172,12 @@ fn fixture_case_bytes(case: &str, directory: &str) -> Vec<u8> {
         GENERATED_AT_LIMIT_CASE => generated_at_limit_case(),
         GENERATED_NOT_UTF8_CASE => generated_not_utf8_case(),
         GENERATED_MALFORMED_CASE => generated_malformed_json_case(),
+        GENERATED_DEPTH_64_CASE => generated_depth_64_case(),
+        GENERATED_DEPTH_65_CASE => generated_depth_65_case(),
+        GENERATED_KEYS_10000_CASE => generated_keys_10000_case(),
+        GENERATED_KEYS_10001_CASE => generated_keys_10001_case(),
+        GENERATED_LONE_SURROGATE_CASE => generated_lone_surrogate_case(),
+        GENERATED_BAD_ESCAPE_CASE => generated_bad_escape_case(),
         _ => fs::read(fixture_subdir(directory).join(case)).expect("fixture case readable"),
     }
 }
@@ -190,6 +202,53 @@ fn generated_malformed_json_case() -> Vec<u8> {
     b"{\"profile\": ".to_vec()
 }
 
+fn generated_depth_64_case() -> Vec<u8> {
+    format!("{}0{}", "[".repeat(64), "]".repeat(64)).into_bytes()
+}
+
+fn generated_depth_65_case() -> Vec<u8> {
+    format!("{}{{\"k\":1,\"k\":2}}{}", "[".repeat(64), "]".repeat(64)).into_bytes()
+}
+
+fn generated_keys_10000_case() -> Vec<u8> {
+    generated_object_with_key_count(10_000)
+}
+
+fn generated_keys_10001_case() -> Vec<u8> {
+    generated_object_with_key_count(10_001)
+}
+
+fn generated_object_with_key_count(count: usize) -> Vec<u8> {
+    assert!(count >= 4, "count must include required CAP-1 root keys");
+
+    let mut json = String::with_capacity(count * 12 + 256);
+    json.push_str("{\"profile\":\"cap/1\",");
+    json.push_str("\"subject\":{\"kind\":\"artefact\",\"ref\":\"s\"},");
+    json.push_str("\"strata\":[{\"id\":\"a\",\"population\":\"p\",");
+    json.push_str(
+        "\"basis\":{\"kind\":\"declared\"},\"eligible\":0,\"examined\":0,\"unexamined\":[]}],",
+    );
+    json.push_str("\"integrity\":{\"complete\":true,\"statement\":\"s\"}");
+
+    for i in 0..(count - 4) {
+        json.push(',');
+        json.push('"');
+        json.push('k');
+        json.push_str(&i.to_string());
+        json.push_str("\":0");
+    }
+    json.push('}');
+    json.into_bytes()
+}
+
+fn generated_lone_surrogate_case() -> Vec<u8> {
+    b"{\"x\":\"\\uD800\"}".to_vec()
+}
+
+fn generated_bad_escape_case() -> Vec<u8> {
+    b"{\"x\":\"\\u12G4\"}".to_vec()
+}
+
 fn is_generated_case(case: &str) -> bool {
     matches!(
         case,
@@ -197,6 +256,12 @@ fn is_generated_case(case: &str) -> bool {
             | GENERATED_AT_LIMIT_CASE
             | GENERATED_NOT_UTF8_CASE
             | GENERATED_MALFORMED_CASE
+            | GENERATED_DEPTH_64_CASE
+            | GENERATED_DEPTH_65_CASE
+            | GENERATED_KEYS_10000_CASE
+            | GENERATED_KEYS_10001_CASE
+            | GENERATED_LONE_SURROGATE_CASE
+            | GENERATED_BAD_ESCAPE_CASE
     )
 }
 

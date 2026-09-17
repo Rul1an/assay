@@ -5,10 +5,10 @@
 //! `cap-1/src/CAP-1.schema.json`.
 //! No generic JSON Schema runtime is linked.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fmt;
+use std::str::CharIndices;
 
-use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -60,7 +60,26 @@ pub enum Cap1Stage {
 pub enum Cap1SyntaxFault {
     NotUtf8,
     DuplicateKey,
+    InvalidEscape,
+    NestingTooDeep,
+    TooManyKeys,
+    StringTooLong,
     Malformed,
+}
+
+impl From<&StrictJsonError> for Cap1SyntaxFault {
+    fn from(err: &StrictJsonError) -> Self {
+        match err {
+            StrictJsonError::DuplicateKey => Self::DuplicateKey,
+            StrictJsonError::InvalidUnicodeEscape | StrictJsonError::LoneSurrogate => {
+                Self::InvalidEscape
+            }
+            StrictJsonError::NestingTooDeep => Self::NestingTooDeep,
+            StrictJsonError::TooManyKeys => Self::TooManyKeys,
+            StrictJsonError::StringTooLong => Self::StringTooLong,
+            StrictJsonError::ParseError => Self::Malformed,
+        }
+    }
 }
 
 /// Why a document was refused at the first failing stage.
@@ -121,6 +140,10 @@ impl Cap1Refusal {
             Self::Oversized { .. } => Some("oversized"),
             Self::Syntax(Cap1SyntaxFault::NotUtf8) => Some("not-utf8"),
             Self::Syntax(Cap1SyntaxFault::DuplicateKey) => Some("duplicate-key"),
+            Self::Syntax(Cap1SyntaxFault::InvalidEscape) => Some("invalid-escape"),
+            Self::Syntax(Cap1SyntaxFault::NestingTooDeep) => Some("nesting-too-deep"),
+            Self::Syntax(Cap1SyntaxFault::TooManyKeys) => Some("too-many-keys"),
+            Self::Syntax(Cap1SyntaxFault::StringTooLong) => Some("string-too-long"),
             Self::Syntax(Cap1SyntaxFault::Malformed) => Some("malformed-json"),
             _ => None,
         }
@@ -151,98 +174,373 @@ impl fmt::Display for Cap1Refusal {
 
 impl std::error::Error for Cap1Refusal {}
 
-const DUPLICATE_KEY_MARKER: &str = "cap-1 duplicate object key: ";
+const MAX_NESTING_DEPTH: usize = 64;
+const MAX_KEYS_PER_OBJECT: usize = 10_000;
+const MAX_STRING_LENGTH: usize = 1_048_576;
 
-struct StrictValue(Value);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StrictJsonError {
+    DuplicateKey,
+    InvalidUnicodeEscape,
+    LoneSurrogate,
+    ParseError,
+    NestingTooDeep,
+    TooManyKeys,
+    StringTooLong,
+}
 
-impl<'de> Deserialize<'de> for StrictValue {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_any(StrictVisitor).map(Self)
+struct ObjectKeyTracker {
+    stack: Vec<HashSet<String>>,
+}
+
+impl ObjectKeyTracker {
+    fn new() -> Self {
+        Self { stack: Vec::new() }
+    }
+
+    fn enter_object(&mut self) {
+        self.stack.push(HashSet::new());
+    }
+
+    fn push_key(&mut self, key: String) -> Result<(), StrictJsonError> {
+        if let Some(keys) = self.stack.last_mut() {
+            if keys.len() >= MAX_KEYS_PER_OBJECT {
+                return Err(StrictJsonError::TooManyKeys);
+            }
+            if !keys.insert(key) {
+                return Err(StrictJsonError::DuplicateKey);
+            }
+        }
+        Ok(())
+    }
+
+    fn exit_object(&mut self) {
+        self.stack.pop();
     }
 }
 
-struct StrictVisitor;
+struct JsonValidator<'a> {
+    chars: std::iter::Peekable<CharIndices<'a>>,
+    key_tracker: ObjectKeyTracker,
+    depth: usize,
+}
 
-impl<'de> Visitor<'de> for StrictVisitor {
-    type Value = Value;
-
-    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("any valid JSON value with unique object keys")
-    }
-
-    fn visit_bool<E: de::Error>(self, value: bool) -> Result<Self::Value, E> {
-        Ok(Value::Bool(value))
-    }
-
-    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
-        Ok(Value::from(value))
-    }
-
-    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
-        Ok(Value::from(value))
-    }
-
-    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
-        Ok(Value::from(value))
-    }
-
-    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
-        Ok(Value::String(value.to_owned()))
-    }
-
-    fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
-        Ok(Value::String(value))
-    }
-
-    fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
-        Ok(Value::Null)
-    }
-
-    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
-        Ok(Value::Null)
-    }
-
-    fn visit_some<D: serde::Deserializer<'de>>(
-        self,
-        deserializer: D,
-    ) -> Result<Self::Value, D::Error> {
-        deserializer.deserialize_any(StrictVisitor)
-    }
-
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let mut out = Vec::new();
-        while let Some(StrictValue(value)) = seq.next_element()? {
-            out.push(value);
+impl<'a> JsonValidator<'a> {
+    fn new(input: &'a str) -> Self {
+        Self {
+            chars: input.char_indices().peekable(),
+            key_tracker: ObjectKeyTracker::new(),
+            depth: 0,
         }
-        Ok(Value::Array(out))
     }
 
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        let mut out = serde_json::Map::new();
-        while let Some(key) = map.next_key::<String>()? {
-            let StrictValue(value) = map.next_value()?;
-            if out.insert(key.clone(), value).is_some() {
-                return Err(de::Error::custom(format!("{DUPLICATE_KEY_MARKER}{key}")));
+    fn validate(&mut self) -> Result<(), StrictJsonError> {
+        self.skip_whitespace();
+        self.validate_value()
+    }
+
+    fn validate_value(&mut self) -> Result<(), StrictJsonError> {
+        self.skip_whitespace();
+        match self.peek_char() {
+            Some('{') => self.validate_object(),
+            Some('[') => self.validate_array(),
+            Some('"') => self.validate_string().map(|_| ()),
+            Some(c) if c == '-' || c.is_ascii_digit() => self.validate_number(),
+            Some('t') | Some('f') => self.validate_bool(),
+            Some('n') => self.validate_null(),
+            Some(_) => Err(StrictJsonError::ParseError),
+            None => Ok(()),
+        }
+    }
+
+    fn validate_object(&mut self) -> Result<(), StrictJsonError> {
+        self.expect_char('{')?;
+        self.skip_whitespace();
+
+        self.depth += 1;
+        if self.depth > MAX_NESTING_DEPTH {
+            return Err(StrictJsonError::NestingTooDeep);
+        }
+        self.key_tracker.enter_object();
+        if self.peek_char() == Some('}') {
+            self.next_char();
+            self.key_tracker.exit_object();
+            self.depth -= 1;
+            return Ok(());
+        }
+
+        loop {
+            self.skip_whitespace();
+            let key = self.validate_string()?;
+            self.key_tracker.push_key(key)?;
+
+            self.skip_whitespace();
+            self.expect_char(':')?;
+            self.validate_value()?;
+            self.skip_whitespace();
+
+            match self.peek_char() {
+                Some(',') => {
+                    self.next_char();
+                }
+                Some('}') => {
+                    self.next_char();
+                    self.key_tracker.exit_object();
+                    self.depth -= 1;
+                    return Ok(());
+                }
+                _ => return Err(StrictJsonError::ParseError),
             }
         }
-        Ok(Value::Object(out))
     }
+
+    fn validate_array(&mut self) -> Result<(), StrictJsonError> {
+        self.expect_char('[')?;
+        self.skip_whitespace();
+
+        self.depth += 1;
+        if self.depth > MAX_NESTING_DEPTH {
+            return Err(StrictJsonError::NestingTooDeep);
+        }
+
+        if self.peek_char() == Some(']') {
+            self.next_char();
+            self.depth -= 1;
+            return Ok(());
+        }
+
+        loop {
+            self.validate_value()?;
+            self.skip_whitespace();
+
+            match self.peek_char() {
+                Some(',') => {
+                    self.next_char();
+                    self.skip_whitespace();
+                }
+                Some(']') => {
+                    self.next_char();
+                    self.depth -= 1;
+                    return Ok(());
+                }
+                _ => return Err(StrictJsonError::ParseError),
+            }
+        }
+    }
+
+    fn validate_string(&mut self) -> Result<String, StrictJsonError> {
+        parse_json_string(&mut self.chars)
+    }
+
+    fn validate_number(&mut self) -> Result<(), StrictJsonError> {
+        if self.peek_char() == Some('-') {
+            self.next_char();
+        }
+
+        match self.peek_char() {
+            Some('0') => {
+                self.next_char();
+            }
+            Some(c) if c.is_ascii_digit() => {
+                while self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
+                    self.next_char();
+                }
+            }
+            _ => return Err(StrictJsonError::ParseError),
+        }
+
+        if self.peek_char() == Some('.') {
+            self.next_char();
+            if !self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
+                return Err(StrictJsonError::ParseError);
+            }
+            while self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
+                self.next_char();
+            }
+        }
+
+        if matches!(self.peek_char(), Some('e') | Some('E')) {
+            self.next_char();
+            if matches!(self.peek_char(), Some('+') | Some('-')) {
+                self.next_char();
+            }
+            if !self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
+                return Err(StrictJsonError::ParseError);
+            }
+            while self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
+                self.next_char();
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_bool(&mut self) -> Result<(), StrictJsonError> {
+        if self.consume_keyword("true") || self.consume_keyword("false") {
+            Ok(())
+        } else {
+            Err(StrictJsonError::ParseError)
+        }
+    }
+
+    fn validate_null(&mut self) -> Result<(), StrictJsonError> {
+        if self.consume_keyword("null") {
+            Ok(())
+        } else {
+            Err(StrictJsonError::ParseError)
+        }
+    }
+
+    fn consume_keyword(&mut self, keyword: &str) -> bool {
+        let mut temp_chars = self.chars.clone();
+        for expected in keyword.chars() {
+            match temp_chars.next() {
+                Some((_, c)) if c == expected => {}
+                _ => return false,
+            }
+        }
+        self.chars = temp_chars;
+        true
+    }
+
+    fn skip_whitespace(&mut self) {
+        while self.peek_char().is_some_and(|c| c.is_whitespace()) {
+            self.next_char();
+        }
+    }
+
+    fn peek_char(&mut self) -> Option<char> {
+        self.chars.peek().map(|(_, c)| *c)
+    }
+
+    fn next_char(&mut self) -> Option<(usize, char)> {
+        self.chars.next()
+    }
+
+    fn expect_char(&mut self, expected: char) -> Result<(), StrictJsonError> {
+        match self.next_char() {
+            Some((_, c)) if c == expected => Ok(()),
+            _ => Err(StrictJsonError::ParseError),
+        }
+    }
+}
+
+fn parse_json_string<'a>(
+    chars: &mut std::iter::Peekable<CharIndices<'a>>,
+) -> Result<String, StrictJsonError> {
+    match chars.next() {
+        Some((_, '"')) => {}
+        _ => return Err(StrictJsonError::ParseError),
+    }
+
+    let mut result = String::new();
+    let mut prev_high_surrogate: Option<u32> = None;
+    let mut char_count = 0usize;
+
+    fn push_with_limit(
+        result: &mut String,
+        c: char,
+        char_count: &mut usize,
+    ) -> Result<(), StrictJsonError> {
+        *char_count += 1;
+        if *char_count > MAX_STRING_LENGTH {
+            return Err(StrictJsonError::StringTooLong);
+        }
+        result.push(c);
+        Ok(())
+    }
+
+    loop {
+        match chars.next() {
+            Some((_, '"')) => {
+                if prev_high_surrogate.is_some() {
+                    return Err(StrictJsonError::LoneSurrogate);
+                }
+                return Ok(result);
+            }
+            Some((pos, '\\')) => match chars.next() {
+                Some((_, 'u')) => {
+                    let codepoint = parse_unicode_escape(chars, pos)?;
+                    if (0xD800..=0xDBFF).contains(&codepoint) {
+                        if prev_high_surrogate.is_some() {
+                            return Err(StrictJsonError::LoneSurrogate);
+                        }
+                        prev_high_surrogate = Some(codepoint);
+                    } else if (0xDC00..=0xDFFF).contains(&codepoint) {
+                        if let Some(high) = prev_high_surrogate {
+                            let combined = 0x10000 + ((high - 0xD800) << 10) + (codepoint - 0xDC00);
+                            if let Some(c) = char::from_u32(combined) {
+                                push_with_limit(&mut result, c, &mut char_count)?;
+                            } else {
+                                return Err(StrictJsonError::InvalidUnicodeEscape);
+                            }
+                            prev_high_surrogate = None;
+                        } else {
+                            return Err(StrictJsonError::LoneSurrogate);
+                        }
+                    } else {
+                        if prev_high_surrogate.is_some() {
+                            return Err(StrictJsonError::LoneSurrogate);
+                        }
+                        if let Some(c) = char::from_u32(codepoint) {
+                            push_with_limit(&mut result, c, &mut char_count)?;
+                        } else {
+                            return Err(StrictJsonError::InvalidUnicodeEscape);
+                        }
+                    }
+                }
+                Some((_, c)) => {
+                    if prev_high_surrogate.is_some() {
+                        return Err(StrictJsonError::LoneSurrogate);
+                    }
+                    let decoded = match c {
+                        'n' => '\n',
+                        'r' => '\r',
+                        't' => '\t',
+                        '\\' => '\\',
+                        '/' => '/',
+                        '"' => '"',
+                        'b' => '\x08',
+                        'f' => '\x0C',
+                        _ => return Err(StrictJsonError::ParseError),
+                    };
+                    push_with_limit(&mut result, decoded, &mut char_count)?;
+                }
+                None => return Err(StrictJsonError::ParseError),
+            },
+            Some((_, c)) => {
+                if prev_high_surrogate.is_some() {
+                    return Err(StrictJsonError::LoneSurrogate);
+                }
+                push_with_limit(&mut result, c, &mut char_count)?;
+            }
+            None => return Err(StrictJsonError::ParseError),
+        }
+    }
+}
+
+fn parse_unicode_escape<'a>(
+    chars: &mut std::iter::Peekable<CharIndices<'a>>,
+    _start_pos: usize,
+) -> Result<u32, StrictJsonError> {
+    let mut hex = String::with_capacity(4);
+    for _ in 0..4 {
+        match chars.next() {
+            Some((_, c)) if c.is_ascii_hexdigit() => hex.push(c),
+            _ => return Err(StrictJsonError::InvalidUnicodeEscape),
+        }
+    }
+    u32::from_str_radix(&hex, 16).map_err(|_| StrictJsonError::InvalidUnicodeEscape)
+}
+
+fn validate_json_strict(raw: &str) -> Result<(), StrictJsonError> {
+    let mut validator = JsonValidator::new(raw);
+    validator.validate()
 }
 
 fn parse_json_value_strict(raw: &str) -> Result<Value, Cap1Refusal> {
-    serde_json::from_str::<StrictValue>(raw)
-        .map(|strict| strict.0)
-        .map_err(classify_parse_error)
-}
-
-fn classify_parse_error(err: serde_json::Error) -> Cap1Refusal {
-    let msg = err.to_string();
-    let fault = if msg.starts_with(DUPLICATE_KEY_MARKER) {
-        Cap1SyntaxFault::DuplicateKey
-    } else {
-        Cap1SyntaxFault::Malformed
-    };
-    Cap1Refusal::Syntax(fault)
+    validate_json_strict(raw).map_err(|err| Cap1Refusal::Syntax((&err).into()))?;
+    serde_json::from_str(raw).map_err(|_| Cap1Refusal::Syntax(Cap1SyntaxFault::Malformed))
 }
 
 fn schema_refusal(path: impl Into<String>, ground: &'static str) -> Cap1Refusal {
