@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.5.0-rc.1] - 2026-09-17
+
 ### Added
 - `assay_evidence::PayloadSessionCoverage` and the `assay.session.coverage`
   sibling event define session-finding coverage as an additive evidence stream
