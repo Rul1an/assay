@@ -53,7 +53,9 @@ pub enum ClaimDecision {
 pub enum ClaimKind {
     /// "this effect happened" — seeing part of a run is enough to say what was seen.
     PositiveExistence,
-    /// "these are all of them" — needs coverage of the whole dimension.
+    /// "these are all of them" — needs coverage of the whole dimension. No shipped call path asks
+    /// for this kind; it stays because CAP-1's absence derivation gates on non-positive claims and
+    /// because the descriptor gate is the only shipped table that degrades this kind.
     ExhaustiveSet,
     /// "this did not happen" — the claim a blind spot silently destroys.
     BoundedNegative,
