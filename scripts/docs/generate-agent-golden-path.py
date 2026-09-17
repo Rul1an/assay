@@ -29,6 +29,14 @@ PORTABLE_PLUGIN_ROOT = ROOT / "packaging/agent-plugin"
 PORTABLE_SKILL_OUTPUT = (
     PORTABLE_PLUGIN_ROOT / "skills/assay-golden-path/SKILL.md"
 )
+PORTABLE_MCP_OUTPUT = PORTABLE_PLUGIN_ROOT / "mcp.json"
+# Command and args follow repo-root `.mcp.json` (identical in `.cursor/mcp.json`
+# and `packaging/claude-plugin/.mcp.json`). A bare PATH command stays portable:
+# Cursor does not expand `${PLUGIN_ROOT}` in mcp.json. `type: stdio` is required
+# by Agent Plugins 1.0.0 and is absent from those older host-local files.
+PORTABLE_MCP_COMMAND = "assay-mcp-server"
+PORTABLE_MCP_ARGS = ["--policy-root", "."]
+PORTABLE_MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
 PLUGIN_CONTRACT_OUTPUT = (
     ROOT
     / "packaging/claude-plugin/skills/assay-golden-path/references/agent-golden-path.json"
@@ -990,6 +998,26 @@ def rendered_outputs() -> list[tuple[Path, bytes]]:
                         "homepage": "https://getassay.dev",
                         "repository": "https://github.com/Rul1an/assay",
                         "license": "MIT",
+                    },
+                    indent=2,
+                    ensure_ascii=True,
+                )
+                + "\n"
+            ).encode("ascii"),
+        ),
+        (
+            PORTABLE_MCP_OUTPUT,
+            (
+                json.dumps(
+                    {
+                        "$schema": PORTABLE_MCP_SCHEMA,
+                        "mcpServers": {
+                            "assay": {
+                                "type": "stdio",
+                                "command": PORTABLE_MCP_COMMAND,
+                                "args": PORTABLE_MCP_ARGS,
+                            }
+                        },
                     },
                     indent=2,
                     ensure_ascii=True,
