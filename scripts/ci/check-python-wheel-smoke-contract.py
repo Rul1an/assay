@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import argparse
 import ast
+import importlib.util
 import json
 import re
 import sys
 from pathlib import Path
 
 MATRIX_REL = "assay-python-sdk/python-artifact-matrix.v0.json"
+PLANNER_REL = "scripts/ci/plan-python-artifact-matrix.py"
 RELEASE_REL = ".github/workflows/release.yml"
 SMOKE_REL = "scripts/ci/smoke-python-wheel.py"
 SMOKE_STEP = "Smoke the produced wheel"
@@ -25,6 +27,7 @@ EXPECTED_OS = {
 }
 INCLUDE_PAIR_RE = re.compile(r"(?m)^\s+-\s+os:\s+(\S+)\s*\n\s+target:\s+(\S+)\s*$")
 PYTHON_DOTTED_RE = re.compile(r"^\d+\.\d+$")
+SETUP_PYTHON_RE = re.compile(r"python-version:\s*\$\{\{\s*([^}]*)\s*\}\}")
 
 
 def fail(errors: list[str], msg: str) -> None:
@@ -44,6 +47,34 @@ def wheels_job(text: str) -> str:
 def step_index(job: str, name: str) -> int:
     marker = f"      - name: {name}"
     return job.find(marker)
+
+
+def load_planner(root: Path):
+    path = root / PLANNER_REL
+    spec = importlib.util.spec_from_file_location("plan_python_artifact_matrix", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {PLANNER_REL}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def check_setup_python(job: str, errors: list[str]) -> None:
+    match = SETUP_PYTHON_RE.search(job)
+    if match is None:
+        fail(errors, f"{RELEASE_REL}: wheels setup-python must set python-version from a matrix expression")
+        return
+    expr = match.group(1).strip()
+    if "\\" in expr:
+        fail(
+            errors,
+            f"{RELEASE_REL}: wheels setup-python python-version expression must not contain backslash escapes",
+        )
+    if expr != "matrix.smoke_python_lines":
+        fail(
+            errors,
+            f"{RELEASE_REL}: wheels setup-python must use matrix.smoke_python_lines (newline-joined planner value)",
+        )
 
 
 def check_workflow(root: Path, matrix: dict | None, errors: list[str]) -> str:
@@ -74,14 +105,17 @@ def check_workflow(root: Path, matrix: dict | None, errors: list[str]) -> str:
         fail(errors, f"{RELEASE_REL}: wheels job must not use a PyPI network index")
     if not re.search(r"--python\b|PYTHON_BIN", job):
         fail(errors, f"{RELEASE_REL}: smoke must pass --python or PYTHON_BIN explicitly")
+    check_setup_python(job, errors)
     smoke_pythons = []
     if isinstance(matrix, dict):
         raw = matrix.get("smoke_pythons")
         if isinstance(raw, list):
             smoke_pythons = [item for item in raw if isinstance(item, str)]
     if smoke_pythons:
-        if "join(matrix.smoke_pythons" not in job:
-            fail(errors, f"{RELEASE_REL}: wheels job must derive setup/smoke interpreters from matrix.smoke_pythons")
+        if "matrix.smoke_python_lines" not in job:
+            fail(errors, f"{RELEASE_REL}: setup-python must consume matrix.smoke_python_lines")
+        if "join(matrix.smoke_pythons, ' ')" not in job:
+            fail(errors, f"{RELEASE_REL}: smoke loop must derive interpreters from matrix.smoke_pythons")
         if "for py in" not in job:
             fail(errors, f"{RELEASE_REL}: smoke must loop over matrix.smoke_pythons")
         if 'python${py}' not in job:
@@ -126,6 +160,30 @@ def check_matrix(root: Path, errors: list[str]) -> dict | None:
     if matrix.get("abi") == "abi3" and smoke is None:
         fail(errors, f"{MATRIX_REL}: abi3 wheels require smoke_pythons")
     return matrix
+
+
+def check_planner(root: Path, matrix: dict, errors: list[str]) -> None:
+    smoke = matrix.get("smoke_pythons")
+    if not isinstance(smoke, list) or not smoke:
+        return
+    expected_lines = "\n".join(smoke)
+    try:
+        planner = load_planner(root)
+        plan = planner.build_plan(matrix)
+    except (RuntimeError, ValueError) as exc:
+        fail(errors, f"{PLANNER_REL}: {exc}")
+        return
+    for wheel in plan.get("wheels") or []:
+        lines = wheel.get("smoke_python_lines")
+        target = wheel.get("target", "<unknown>")
+        if lines != expected_lines:
+            fail(
+                errors,
+                f"{PLANNER_REL}: {target}: smoke_python_lines must equal newline-joined smoke_pythons",
+            )
+            continue
+        if "\\n" in lines:
+            fail(errors, f"{PLANNER_REL}: {target}: smoke_python_lines must contain real newlines, not literal \\n")
 
 
 def check_wheels_pairs(job: str, matrix: dict, errors: list[str]) -> None:
@@ -188,6 +246,8 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args.root).resolve()
     errors: list[str] = []
     matrix = check_matrix(root, errors)
+    if matrix is not None:
+        check_planner(root, matrix, errors)
     job = check_workflow(root, matrix, errors)
     if matrix is not None and job:
         check_wheels_pairs(job, matrix, errors)
