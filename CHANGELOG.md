@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - `assay-evidence` now resolves `file://` store URLs with platform-native path conversion, refuses unresolvable file URLs as invalid specs, and uses the host temp directory (`temp_dir()/assay-store`) for an empty file prefix instead of hardcoding `/tmp/assay-store` (#3093).
+- `assay-evidence` now detects and refuses legacy local file-store layout before any read or write when the upgraded layout is missing. Legacy stores (<= 6.5.0) could place bundles at `<store_dir>/<store_dir_without_leading_slash>/bundles/<bundle_id>.tar.gz`; the current layout is `<store_dir>/bundles/<bundle_id>.tar.gz`. On this mismatch, the store returns `LegacyFileLayoutDetected` naming both paths and telling operators to move the legacy directory, instead of silently reporting an empty store (#3093).
 
 ## [6.5.0] - 2026-09-17
 
