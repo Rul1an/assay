@@ -185,6 +185,15 @@ repos:
         pass_filenames: false
         files: ^(scripts/(ci/test-generate-product-capabilities|docs/generate-product-capabilities)\.py|docs/data/product-capabilities\.v0\.json|docs/(reference/product-support|generated/product-claim-proof)\.md)$
 
+      - id: crate-deps-generator-contract
+        name: Crate-deps generator pipefail membership contract
+        entry: bash scripts/ci/test-generate-crate-deps.sh
+        language: system
+        pass_filenames: false
+        # The drift gate round-trips a generator against its own output, so a SIGPIPE
+        # membership miss can still look green. This pins the check itself (#3084).
+        files: ^scripts/(docs/(generate-crate-deps|generate-module-map|update-architecture-docs)\.sh|docs/generate-.*\.py|ci/(check-docs-generated-drift|test-generate-crate-deps)\.sh)$
+
       - id: sep2828-fallback-classifier-self-test
         name: SEP-2828 fallback reproduction self-test
         entry: bash -c 'python3 scripts/ci/test_classify_sep2828_fallback.py && python3 scripts/ci/test_reproduce_sep2828_decision_pairing.py'
