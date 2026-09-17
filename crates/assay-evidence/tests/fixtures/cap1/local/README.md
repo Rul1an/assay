@@ -29,8 +29,10 @@ the upstream `PV-*` and `NC-*` series.
 - `generated:malformed-json` is not committed. Tests build a truncated JSON payload.
 - `generated:depth-64` is not committed. Tests build a JSON payload nested 64 levels deep;
   admission accepts it and schema then refuses the non-CAP-1 shape.
-- `generated:depth-65` is not committed. Tests build a payload with 64 array levels around an
-  object carrying a duplicate key; admission refuses first on nesting depth (`>64`).
+- `generated:depth-65` is not committed. Tests build the same shape as `generated:depth-64` one
+  level deeper (`[` * 65 + `0` + `]` * 65); admission refuses first on nesting depth (`>64`).
+- `generated:order-depth-before-duplicate` is not committed. Tests build 64 array levels around an
+  object carrying duplicate `k` keys; admission refuses first on nesting depth, pinning depth-before-duplicate order.
 - `generated:keys-10000` is not committed. Tests build one object with exactly 10,000 keys;
   admission accepts it and schema then refuses the non-CAP-1 shape.
 - `generated:keys-10001` is not committed. Tests build one object with 10,001 keys; admission

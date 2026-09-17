@@ -50,6 +50,7 @@ const GENERATED_NOT_UTF8_CASE: &str = "generated:not-utf8";
 const GENERATED_MALFORMED_CASE: &str = "generated:malformed-json";
 const GENERATED_DEPTH_64_CASE: &str = "generated:depth-64";
 const GENERATED_DEPTH_65_CASE: &str = "generated:depth-65";
+const GENERATED_ORDER_DEPTH_BEFORE_DUPLICATE_CASE: &str = "generated:order-depth-before-duplicate";
 const GENERATED_KEYS_10000_CASE: &str = "generated:keys-10000";
 const GENERATED_KEYS_10001_CASE: &str = "generated:keys-10001";
 const GENERATED_LONE_SURROGATE_CASE: &str = "generated:lone-surrogate";
@@ -167,6 +168,9 @@ fn fixture_case_bytes(case: &str, directory: &str) -> Vec<u8> {
         GENERATED_MALFORMED_CASE => generated_malformed_json_case(),
         GENERATED_DEPTH_64_CASE => generated_depth_64_case(),
         GENERATED_DEPTH_65_CASE => generated_depth_65_case(),
+        GENERATED_ORDER_DEPTH_BEFORE_DUPLICATE_CASE => {
+            generated_order_depth_before_duplicate_case()
+        }
         GENERATED_KEYS_10000_CASE => generated_keys_10000_case(),
         GENERATED_KEYS_10001_CASE => generated_keys_10001_case(),
         GENERATED_LONE_SURROGATE_CASE => generated_lone_surrogate_case(),
@@ -195,12 +199,29 @@ fn generated_malformed_json_case() -> Vec<u8> {
     b"{\"profile\": ".to_vec()
 }
 
+fn generated_nested_scalar_case(depth: usize) -> Vec<u8> {
+    format!("{}0{}", "[".repeat(depth), "]".repeat(depth)).into_bytes()
+}
+
+fn generated_nested_duplicate_key_case(depth: usize) -> Vec<u8> {
+    format!(
+        "{}{{\"k\":1,\"k\":2}}{}",
+        "[".repeat(depth),
+        "]".repeat(depth)
+    )
+    .into_bytes()
+}
+
 fn generated_depth_64_case() -> Vec<u8> {
-    format!("{}0{}", "[".repeat(64), "]".repeat(64)).into_bytes()
+    generated_nested_scalar_case(64)
 }
 
 fn generated_depth_65_case() -> Vec<u8> {
-    format!("{}{{\"k\":1,\"k\":2}}{}", "[".repeat(64), "]".repeat(64)).into_bytes()
+    generated_nested_scalar_case(65)
+}
+
+fn generated_order_depth_before_duplicate_case() -> Vec<u8> {
+    generated_nested_duplicate_key_case(64)
 }
 
 fn generated_keys_10000_case() -> Vec<u8> {
@@ -251,6 +272,7 @@ fn is_generated_case(case: &str) -> bool {
             | GENERATED_MALFORMED_CASE
             | GENERATED_DEPTH_64_CASE
             | GENERATED_DEPTH_65_CASE
+            | GENERATED_ORDER_DEPTH_BEFORE_DUPLICATE_CASE
             | GENERATED_KEYS_10000_CASE
             | GENERATED_KEYS_10001_CASE
             | GENERATED_LONE_SURROGATE_CASE

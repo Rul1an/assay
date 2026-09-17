@@ -15,6 +15,12 @@
     "stage": "admission",
     "admission_ground": "nesting-too-deep"
   },
+  "generated:order-depth-before-duplicate": {
+    "directory": "local/",
+    "outcome": "refusal",
+    "stage": "admission",
+    "admission_ground": "nesting-too-deep"
+  },
   "generated:keys-10000": {
     "directory": "local/",
     "outcome": "refusal",
