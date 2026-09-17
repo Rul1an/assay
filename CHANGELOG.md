@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.5.0-rc.2] - 2026-09-17
+
+Replacement candidate for the RC1 wheel matrix failure. RC1's binary release
+and GHCR image publication succeeded, and the RC1 tag remains unchanged. The
+stable installation pin remains v6.4.0; this entry does not assert successful
+RC2 publication.
+
+### Fixed
+- Pass `python-version` to the release planner one version per line and guard
+  against escaped newline sequences so wheel smoke receives real newline-split
+  matrix values instead of a literal `\\n` string (#3078).
+
 ## [6.5.0-rc.1] - 2026-09-17
 
 ### Added
