@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- `assay-evidence` now resolves `file://` store URLs with platform-native path conversion, refuses unresolvable file URLs as invalid specs, and uses the host temp directory (`temp_dir()/assay-store`) for an empty file prefix instead of hardcoding `/tmp/assay-store` (#3093).
+
 ## [6.5.0] - 2026-09-17
 
 Stable release consolidating the RC1 and RC2 candidates. RC2 (`v6.5.0-rc.2`)

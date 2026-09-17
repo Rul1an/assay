@@ -82,7 +82,19 @@ impl StoreSpec {
 
         let scheme = url.scheme().to_string();
         let bucket = url.host_str().map(|s| s.to_string());
-        let prefix = url.path().trim_start_matches('/').to_string();
+        let prefix = if scheme == "file" {
+            if url.path().is_empty() {
+                String::new()
+            } else {
+                let path = url.to_file_path().map_err(|_| StoreError::InvalidSpec {
+                    spec: url.to_string(),
+                    reason: "file URL is not a valid local filesystem path".to_string(),
+                })?;
+                path.display().to_string()
+            }
+        } else {
+            url.path().trim_start_matches('/').to_string()
+        };
 
         // Extract region from query params if present
         let region = url
@@ -195,31 +207,60 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_s3_spec() {
-        let spec = StoreSpec::parse("s3://my-bucket/assay/evidence").unwrap();
-        assert_eq!(spec.scheme, "s3");
-        assert_eq!(spec.bucket, Some("my-bucket".to_string()));
-        assert_eq!(spec.prefix, "assay/evidence");
-    }
+    fn test_parse_core_specs_regression() {
+        let file_url = "file:///tmp/assay-store";
+        let expected_file_prefix = url::Url::parse(file_url)
+            .unwrap()
+            .to_file_path()
+            .unwrap()
+            .display()
+            .to_string();
 
-    #[test]
-    fn test_parse_s3_with_region() {
-        let spec = StoreSpec::parse("s3://my-bucket/prefix?region=us-west-2").unwrap();
-        assert_eq!(spec.region, Some("us-west-2".to_string()));
-    }
+        let cases = [
+            (
+                "s3://my-bucket/assay/evidence",
+                StoreSpec {
+                    scheme: "s3".to_string(),
+                    bucket: Some("my-bucket".to_string()),
+                    prefix: "assay/evidence".to_string(),
+                    region: None,
+                },
+            ),
+            (
+                "s3://my-bucket/prefix?region=us-west-2",
+                StoreSpec {
+                    scheme: "s3".to_string(),
+                    bucket: Some("my-bucket".to_string()),
+                    prefix: "prefix".to_string(),
+                    region: Some("us-west-2".to_string()),
+                },
+            ),
+            (
+                file_url,
+                StoreSpec {
+                    scheme: "file".to_string(),
+                    bucket: None,
+                    prefix: expected_file_prefix,
+                    region: None,
+                },
+            ),
+            (
+                "memory://test",
+                StoreSpec {
+                    scheme: "memory".to_string(),
+                    bucket: Some("test".to_string()),
+                    prefix: String::new(),
+                    region: None,
+                },
+            ),
+        ];
 
-    #[test]
-    fn test_parse_file_spec() {
-        let spec = StoreSpec::parse("file:///tmp/assay-store").unwrap();
-        assert_eq!(spec.scheme, "file");
-        assert!(spec.bucket.is_none());
-        assert_eq!(spec.prefix, "tmp/assay-store");
-        assert!(spec.is_file());
-    }
-
-    #[test]
-    fn test_parse_memory_spec() {
-        let spec = StoreSpec::parse("memory://test").unwrap();
-        assert!(spec.is_memory());
+        for (url, expected) in cases {
+            let actual = StoreSpec::parse(url).unwrap();
+            assert_eq!(actual.scheme, expected.scheme, "scheme mismatch for {url}");
+            assert_eq!(actual.bucket, expected.bucket, "bucket mismatch for {url}");
+            assert_eq!(actual.prefix, expected.prefix, "prefix mismatch for {url}");
+            assert_eq!(actual.region, expected.region, "region mismatch for {url}");
+        }
     }
 }

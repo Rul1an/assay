@@ -2,6 +2,7 @@
 //!
 //! Supports S3, Azure Blob, GCS, and local filesystem via the `object_store` crate.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -39,26 +40,34 @@ impl ObjectStoreBundleStore {
     /// | `ASSAY_STORE_ALLOW_HTTP` | Allow HTTP (for MinIO dev), default: false |
     /// | `ASSAY_STORE_PATH_STYLE` | Use path-style URLs (for some S3-compat), default: false |
     pub async fn from_spec(spec: &StoreSpec) -> StoreResult<Self> {
-        let inner: Arc<dyn ObjectStore> = match spec.scheme.as_str() {
-            "memory" => Arc::new(object_store::memory::InMemory::new()),
+        let (inner, key_prefix): (Arc<dyn ObjectStore>, String) = match spec.scheme.as_str() {
+            "memory" => (
+                Arc::new(object_store::memory::InMemory::new()),
+                spec.prefix.clone(),
+            ),
             "file" => {
-                let path = if let Some(bucket) = &spec.bucket {
-                    format!("/{}/{}", bucket, spec.prefix)
-                } else if spec.prefix.is_empty() {
-                    "/tmp/assay-store".to_string()
+                let path = if spec.prefix.is_empty() {
+                    std::env::temp_dir().join("assay-store")
                 } else {
-                    format!("/{}", spec.prefix)
+                    PathBuf::from(&spec.prefix)
                 };
                 // Ensure directory exists
                 std::fs::create_dir_all(&path).map_err(|e| StoreError::Io {
-                    message: format!("failed to create store directory {}: {}", path, e),
+                    message: format!("failed to create store directory {}: {}", path.display(), e),
                 })?;
-                Arc::new(
-                    object_store::local::LocalFileSystem::new_with_prefix(&path).map_err(|e| {
-                        StoreError::Io {
-                            message: format!("failed to create local store at {}: {}", path, e),
-                        }
-                    })?,
+                (
+                    Arc::new(
+                        object_store::local::LocalFileSystem::new_with_prefix(&path).map_err(
+                            |e| StoreError::Io {
+                                message: format!(
+                                    "failed to create local store at {}: {}",
+                                    path.display(),
+                                    e
+                                ),
+                            },
+                        )?,
+                    ),
+                    String::new(),
                 )
             }
             "s3" => {
@@ -96,9 +105,12 @@ impl ObjectStoreBundleStore {
                     builder = builder.with_virtual_hosted_style_request(false);
                 }
 
-                Arc::new(builder.build().map_err(|e| StoreError::Io {
-                    message: format!("failed to create S3 client: {}", e),
-                })?)
+                (
+                    Arc::new(builder.build().map_err(|e| StoreError::Io {
+                        message: format!("failed to create S3 client: {}", e),
+                    })?),
+                    spec.prefix.clone(),
+                )
             }
             scheme => {
                 return Err(StoreError::InvalidSpec {
@@ -110,7 +122,7 @@ impl ObjectStoreBundleStore {
 
         Ok(Self {
             inner,
-            keys: KeyBuilder::new(&spec.prefix),
+            keys: KeyBuilder::new(&key_prefix),
         })
     }
 
@@ -451,6 +463,82 @@ impl BundleStore for ObjectStoreBundleStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn test_file_url_from_tempdir_resolves_exact_directory() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let store_url = url::Url::from_file_path(temp_dir.path())
+            .expect("tempdir should always convert to a file:// URL");
+
+        let store = ObjectStoreBundleStore::from_url(store_url.as_str())
+            .await
+            .expect("file:// URL from tempdir should initialize local store");
+
+        store
+            .put_bundle("bundle-id-1", Bytes::from_static(b"payload"))
+            .await
+            .expect("write through tempdir-backed store");
+
+        assert!(
+            temp_dir.path().join("bundles").exists(),
+            "expected store writes under the exact tempdir root"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_unresolvable_file_url_is_invalid_spec_not_io() {
+        let bad_url = "file://example.com";
+        let normalized_url = url::Url::parse(bad_url).unwrap().to_string();
+        let err = match ObjectStoreBundleStore::from_url(bad_url).await {
+            Ok(_) => panic!("unresolvable file URL must fail"),
+            Err(err) => err,
+        };
+
+        match err {
+            StoreError::InvalidSpec { spec, reason } => {
+                assert_eq!(spec, normalized_url);
+                assert!(
+                    !reason.contains("/example.com"),
+                    "error should not mention an invented filesystem path: {reason}"
+                );
+            }
+            other => panic!("expected InvalidSpec, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_empty_file_prefix_uses_platform_temp_dir_and_is_writable() {
+        let spec = StoreSpec {
+            scheme: "file".to_string(),
+            bucket: None,
+            prefix: String::new(),
+            region: None,
+        };
+
+        let expected_root = std::env::temp_dir().join("assay-store");
+        let store = ObjectStoreBundleStore::from_spec(&spec)
+            .await
+            .expect("empty file prefix should initialize local store");
+
+        let proof_path = expected_root.join(format!("writable-proof-{}", std::process::id()));
+        std::fs::write(&proof_path, b"proof").expect("expected writable default store location");
+        assert_eq!(std::fs::read(&proof_path).unwrap(), b"proof");
+        std::fs::remove_file(&proof_path).expect("cleanup writable proof");
+
+        let unique_bundle_id = format!(
+            "bundle-id-2-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock before unix epoch")
+                .as_nanos()
+        );
+        store
+            .put_bundle(&unique_bundle_id, Bytes::from_static(b"payload"))
+            .await
+            .expect("default temp store should accept writes");
+        assert!(expected_root.join("bundles").exists());
+    }
 
     #[tokio::test]
     async fn test_memory_store_roundtrip() {
