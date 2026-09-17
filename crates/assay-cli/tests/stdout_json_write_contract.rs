@@ -24,10 +24,26 @@ use process_wrap::std::JobObject;
 use process_wrap::std::ProcessGroup;
 use process_wrap::std::{ChildWrapper, CommandWrap};
 
-const LIMITS: ProcessLimits =
+// Measured across five recent successful windows-latest Build+Test jobs:
+// this test target completed in 22.43s..33.87s (median 25.93s), so Windows
+// keeps extra headroom while non-Windows budgets stay unchanged.
+const RUN_JSON_LIMITS_NON_WINDOWS: ProcessLimits =
     ProcessLimits::new(Duration::from_secs(15), 2 * 1024 * 1024, 64 * 1024);
-const LARGE_RUN_LIMITS: ProcessLimits =
+const RUN_JSON_LIMITS_WINDOWS: ProcessLimits =
+    ProcessLimits::new(Duration::from_secs(30), 2 * 1024 * 1024, 64 * 1024);
+#[cfg(windows)]
+const LIMITS: ProcessLimits = RUN_JSON_LIMITS_WINDOWS;
+#[cfg(not(windows))]
+const LIMITS: ProcessLimits = RUN_JSON_LIMITS_NON_WINDOWS;
+
+const RUN_JSON_LARGE_LIMITS_NON_WINDOWS: ProcessLimits =
     ProcessLimits::new(Duration::from_secs(45), 4 * 1024 * 1024, 64 * 1024);
+const RUN_JSON_LARGE_LIMITS_WINDOWS: ProcessLimits =
+    ProcessLimits::new(Duration::from_secs(75), 4 * 1024 * 1024, 64 * 1024);
+#[cfg(windows)]
+const LARGE_RUN_LIMITS: ProcessLimits = RUN_JSON_LARGE_LIMITS_WINDOWS;
+#[cfg(not(windows))]
+const LARGE_RUN_LIMITS: ProcessLimits = RUN_JSON_LARGE_LIMITS_NON_WINDOWS;
 const PIPE_CAPACITY: usize = 64 * 1024;
 const PARTIAL_READ: usize = 200;
 const REAP_GRACE: Duration = Duration::from_secs(1);
@@ -569,6 +585,46 @@ fn run_json_partial_read_then_close_is_exit_three() {
         !result.stdout_prefix.is_empty(),
         "partial-read case must deliver a nonempty truncated prefix"
     );
+}
+
+#[test]
+fn run_json_timeout_budgets_are_pinned_per_platform() {
+    assert_eq!(
+        RUN_JSON_LIMITS_NON_WINDOWS.timeout,
+        Duration::from_secs(15),
+        "non-Windows run_json budget regression"
+    );
+    assert_eq!(
+        RUN_JSON_LIMITS_WINDOWS.timeout,
+        Duration::from_secs(30),
+        "Windows run_json budget regression"
+    );
+    assert_eq!(
+        RUN_JSON_LARGE_LIMITS_NON_WINDOWS.timeout,
+        Duration::from_secs(45),
+        "non-Windows large run_json budget regression"
+    );
+    assert_eq!(
+        RUN_JSON_LARGE_LIMITS_WINDOWS.timeout,
+        Duration::from_secs(75),
+        "Windows large run_json budget regression"
+    );
+    #[cfg(windows)]
+    {
+        assert_eq!(LIMITS.timeout, RUN_JSON_LIMITS_WINDOWS.timeout);
+        assert_eq!(
+            LARGE_RUN_LIMITS.timeout,
+            RUN_JSON_LARGE_LIMITS_WINDOWS.timeout
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        assert_eq!(LIMITS.timeout, RUN_JSON_LIMITS_NON_WINDOWS.timeout);
+        assert_eq!(
+            LARGE_RUN_LIMITS.timeout,
+            RUN_JSON_LARGE_LIMITS_NON_WINDOWS.timeout
+        );
+    }
 }
 
 #[test]
