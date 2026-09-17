@@ -33,6 +33,15 @@ pub enum PolicyCommand {
 
     /// Dump the resolved policy this Assay version would load
     Resolve(PolicyResolveArgs),
+
+    /// Activate a validated policy into a policy root
+    Activate(PolicyActivateArgs),
+
+    /// Roll back an active policy to its previously activated version
+    Rollback(PolicyRollbackArgs),
+
+    /// Check active policy status and verify synchronization with activation history
+    Status(PolicyStatusArgs),
 }
 
 #[derive(Args, Clone, Debug)]
@@ -94,5 +103,76 @@ pub struct PolicyResolveArgs {
 
     /// Output format; only json emits a document
     #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
+    pub format: OutputFormat,
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct PolicyActivateArgs {
+    /// Source policy file path (YAML)
+    #[arg(value_name = "SRC")]
+    pub src: PathBuf,
+
+    /// Policy root directory
+    #[arg(
+        long,
+        visible_alias = "policy-root",
+        alias = "policy-root",
+        default_value = "."
+    )]
+    pub root: PathBuf,
+
+    /// Target policy file name within the policy root
+    #[arg(long = "as", visible_alias = "name")]
+    pub as_name: Option<String>,
+}
+
+impl PolicyActivateArgs {
+    pub fn target_name(&self) -> anyhow::Result<String> {
+        if let Some(ref name) = self.as_name {
+            Ok(name.clone())
+        } else if let Some(file_name) = self.src.file_name() {
+            Ok(file_name.to_string_lossy().to_string())
+        } else {
+            anyhow::bail!(
+                "cannot determine policy name from source path {}",
+                self.src.display()
+            )
+        }
+    }
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct PolicyRollbackArgs {
+    /// Policy file name within the policy root
+    #[arg(value_name = "NAME")]
+    pub name: String,
+
+    /// Policy root directory
+    #[arg(
+        long,
+        visible_alias = "policy-root",
+        alias = "policy-root",
+        default_value = "."
+    )]
+    pub root: PathBuf,
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct PolicyStatusArgs {
+    /// Policy file name within the policy root
+    #[arg(value_name = "NAME")]
+    pub name: String,
+
+    /// Policy root directory
+    #[arg(
+        long,
+        visible_alias = "policy-root",
+        alias = "policy-root",
+        default_value = "."
+    )]
+    pub root: PathBuf,
+
+    /// Output format
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
     pub format: OutputFormat,
 }
