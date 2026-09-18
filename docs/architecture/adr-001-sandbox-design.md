@@ -45,7 +45,7 @@ Merge priority is deterministic to prevent "open by accident" flaws:
 We prioritize deterministic, auditable security mechanisms over non-deterministic LLM-based semantic vetting:
 *   **Tool Identity & Provenance (MindGuard-aligned)**: Tools are identified by a tuple `(server_id, tool_name, schema_hash, description_hash)`. Metadata drift (e.g., description changes) is treated as a security event (Mitigating Tool Poisoning, MCPTox: 36.5%-72.8% success).
 *   **Prompt Injection Taint Analysis (OWASP-aligned)**: Untrusted data sources (tool outputs, web fetches) are labeled as `untrusted_content`. Lint rules prevent untrusted content from entering high-value instruction slots or system overrides.
-*   **Landlock ABI Matrix**: Sandboxing features (Net v4, ioctl v5, Scopes v6, Logging v7) are feature-gated based on detected kernel ABI. System degrades to audit or fails-closed based on feature criticality.
+*   **Landlock ABI Matrix**: Sandboxing features (Net v4, ioctl v5, Scopes v6, Logging v7) are feature-gated based on detected kernel ABI. `--enforce` refuses (exit 2) when a requested boundary cannot be applied; `--allow-audit-fallback` restores degrade-to-audit. `--fail-closed` is unchanged and is implied by `--enforce`. Without `--enforce`, the system still degrades to audit when a feature is unavailable.
 
 ### 6. CI-Friendly Human-in-the-Loop (HITL)
 High-risk tools (exec, write, secrets) require explicit approval:

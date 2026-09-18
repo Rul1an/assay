@@ -26,13 +26,19 @@ client.record_trace({
 
 ### Validate
 
+`validate(policy_path, traces)` takes a policy path and a list of traces
+(dicts). It returns `Coverage.analyze()` unchanged: a CoverageReport dict.
+
 ```python
+import json
 from assay import validate
 
-result = validate("policy.yaml", "traces.jsonl")
-if not result["passed"]:
-    for finding in result["findings"]:
-        print(f"{finding['level']}: {finding['message']}")
+with open("traces.jsonl") as f:
+    traces = [json.loads(line) for line in f]
+
+report = validate("policy.yaml", traces)
+if not report["meets_threshold"]:
+    print(report["policy_violations"])
 ```
 
 ### OpenAI Integration
@@ -83,14 +89,18 @@ pytest_plugins = ["assay.pytest_plugin"]
 ## Coverage Analysis
 
 ```python
+import json
 from assay import Coverage
 
-coverage = Coverage("policy.yaml", "traces.jsonl")
-report = coverage.analyze()
+with open("traces.jsonl") as f:
+    traces = [json.loads(line) for line in f]
 
-print(f"Coverage: {report['percent']}%")
-print(f"Covered tools: {report['covered']}")
-print(f"Missing: {report['uncovered']}")
+coverage = Coverage("policy.yaml")
+report = coverage.analyze(traces)
+
+print(f"Coverage: {report['overall_coverage_pct']}%")
+print(f"Meets threshold: {report['meets_threshold']}")
+print(f"Violations: {report['policy_violations']}")
 ```
 
 ## Evidence Export
@@ -114,17 +124,11 @@ bundle_path = export_evidence(
 | `flush()` | Write pending events to disk |
 | `close()` | Close the trace file |
 
-### `validate(policy, traces)`
+### `validate(policy_path, traces)`
 
-Returns:
-```python
-{
-    "passed": bool,
-    "findings": [
-        {"level": "error", "rule": "...", "message": "..."}
-    ]
-}
-```
+Returns `Coverage.analyze()` unchanged. The example above uses the serialised
+CoverageReport field names. There is no separate `passed` / `findings` result
+type.
 
 ### `TraceWriter`
 

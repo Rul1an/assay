@@ -106,6 +106,17 @@ impl KeyBuilder {
         }
     }
 
+    /// Probe key used by store-status write checks.
+    ///
+    /// Returns: `{base}/.assay_probe_write_test`
+    pub fn probe_key(&self) -> Path {
+        if self.base_prefix.is_empty() {
+            Path::from(".assay_probe_write_test")
+        } else {
+            Path::from(format!("{}/.assay_probe_write_test", self.base_prefix))
+        }
+    }
+
     /// Key for a run-to-bundle reference.
     ///
     /// Returns: `{base}/runs/{run_id}/{bundle_id}.ref`
@@ -410,5 +421,20 @@ mod tests {
 
         let empty_run = Path::from("runs//bundle.ref");
         assert_eq!(kb.parse_run_ref_parts(&empty_run), None);
+    }
+
+    #[test]
+    fn test_probe_key() {
+        let kb = KeyBuilder::new("assay/evidence");
+        assert_eq!(
+            kb.probe_key().as_ref(),
+            "assay/evidence/.assay_probe_write_test"
+        );
+    }
+
+    #[test]
+    fn test_probe_key_no_prefix() {
+        let kb = KeyBuilder::new("");
+        assert_eq!(kb.probe_key().as_ref(), ".assay_probe_write_test");
     }
 }

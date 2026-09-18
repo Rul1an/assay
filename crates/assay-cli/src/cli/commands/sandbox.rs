@@ -14,7 +14,9 @@ mod profile;
 mod tmp;
 
 use child::run_child;
-use degradation::{backend_unavailable_degradation, policy_conflict_degradation};
+use degradation::{
+    backend_unavailable_degradation, policy_conflict_degradation, refuses_when_unenforceable,
+};
 use env::build_env_filter;
 use profile::maybe_profile_begin;
 use tmp::create_scoped_tmp;
@@ -67,7 +69,8 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
 
     // PR8: Enforcement Contract logic
     // Default: use Landlock if available, unless --dry-run is set.
-    // If --enforce is explicitly set, we MUST use enforcement or fail (if fail_closed).
+    // If --enforce is set, refuse when the backend cannot enforce unless
+    // --allow-audit-fallback is also set. --fail-closed is implied by --enforce.
     let backend = probed_backend;
     let mut active_enforcement = matches!(backend, BackendType::Landlock) && !args.dry_run;
 
@@ -78,8 +81,10 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     }
 
     if args.enforce && !matches!(backend, BackendType::Landlock) {
-        if args.fail_closed {
+        if refuses_when_unenforceable(&args) {
             eprintln!("ERROR: Active enforcement requested (--enforce) but no containment backend available.");
+            eprintln!("E_BACKEND_UNAVAILABLE_UNENFORCEABLE");
+            metrics::increment("backend_unavailable_unenforceable");
             report_unwritten_artifacts(&args, "no containment backend, nothing was executed");
             return Ok(exit_codes::POLICY_UNENFORCEABLE);
         }
@@ -252,7 +257,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     let mut actual_enforcement = active_enforcement;
 
     if actual_enforcement && !compat.is_compatible() {
-        if args.fail_closed {
+        if refuses_when_unenforceable(&args) {
             if let Some(p) = &profiler {
                 p.record(ProfileEvent::EnforcementFailed {
                     reason: "landlock policy conflict (fail-closed)".to_string(),
@@ -326,6 +331,7 @@ mod tests {
             enforce: true,
             dry_run: false,
             fail_closed: false,
+            allow_audit_fallback: false,
             enforce_net: false,
             probe_enforcement: false,
             enforcement_health: None,
@@ -346,7 +352,8 @@ mod tests {
 
     #[test]
     fn backend_unavailable_emits_degradation_when_enforcement_requested_and_run_continues() {
-        let args = sandbox_args();
+        let mut args = sandbox_args();
+        args.allow_audit_fallback = true;
         let payload = backend_unavailable_degradation(&args, &BackendType::NoopAudit)
             .expect("expected degradation payload");
         assert_eq!(
@@ -371,8 +378,15 @@ mod tests {
     }
 
     #[test]
-    fn policy_conflict_emits_degradation_only_when_execution_continues() {
+    fn enforce_without_fallback_does_not_emit_backend_unavailable_degradation() {
         let args = sandbox_args();
+        assert!(backend_unavailable_degradation(&args, &BackendType::NoopAudit).is_none());
+    }
+
+    #[test]
+    fn policy_conflict_emits_degradation_only_when_execution_continues() {
+        let mut args = sandbox_args();
+        args.allow_audit_fallback = true;
         let compat = crate::landlock_check::LandlockCompatReport {
             allowed_roots: Vec::new(),
             conflicts: vec![(
@@ -386,6 +400,19 @@ mod tests {
             payload.reason_code,
             SandboxDegradationReasonCode::PolicyConflict
         );
+    }
+
+    #[test]
+    fn enforce_without_fallback_does_not_emit_policy_conflict_degradation() {
+        let args = sandbox_args();
+        let compat = crate::landlock_check::LandlockCompatReport {
+            allowed_roots: Vec::new(),
+            conflicts: vec![(
+                std::path::PathBuf::from("/allow"),
+                std::path::PathBuf::from("/allow/deny"),
+            )],
+        };
+        assert!(policy_conflict_degradation(&args, true, &compat).is_none());
     }
 
     #[test]

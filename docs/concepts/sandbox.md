@@ -170,8 +170,9 @@ deny:  /home/.ssh/**   # ← Ignored by Landlock!
 ```
 
 Assay detects this and either:
-- **Warns** and degrades to audit mode (default)
-- **Exits** with error (`--fail-closed`)
+- **Warns** and degrades to audit mode (default, no `--enforce`)
+- **Exits** with error (`--fail-closed`, or `--enforce` without `--allow-audit-fallback`)
+- **Warns**, records `assay.sandbox.degraded`, and continues (`--enforce --allow-audit-fallback`)
 
 ---
 
@@ -233,6 +234,10 @@ Exit immediately if full containment isn't possible:
 ```bash
 assay sandbox --fail-closed -- ./server
 # exit 2 if policy can't be enforced
+
+assay sandbox --enforce -- ./server
+# exit 2 if no Landlock backend, or the policy cannot be enforced
+# pass --allow-audit-fallback to degrade to audit and record instead
 ```
 
 ---

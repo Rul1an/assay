@@ -316,6 +316,8 @@ fn a_session_coverage_record_parses_as_a_typed_record_and_round_trips() {
         c.source_class,
         crate::coding_agent::CodingAgentSourceClass::BoundaryObserved
     );
+    assert_eq!(c.steps_total, None, "absent depth stays unset");
+    assert_eq!(c.retained_through, None, "absent depth stays unset");
     assert_eq!(serde_json::to_value(&c).unwrap(), payload, "round trip");
 
     // Also round trips through the Payload enum variant

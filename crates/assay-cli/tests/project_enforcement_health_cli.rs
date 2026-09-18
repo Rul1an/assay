@@ -410,6 +410,7 @@ fn sandbox_audit_fallback_bundle_reaches_the_same_projection() {
         .args([
             "sandbox",
             "--enforce",
+            "--allow-audit-fallback",
             "--enforce-net",
             "--profile",
             profile.to_str().unwrap(),

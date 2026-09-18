@@ -2,6 +2,7 @@
 //!
 //! Supports S3, Azure Blob, GCS, and local filesystem via the `object_store` crate.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -25,7 +26,55 @@ pub struct ObjectStoreBundleStore {
     pub(crate) keys: KeyBuilder,
 }
 
+fn legacy_layout_ignored_warning_message(
+    new_bundles_path: &std::path::Path,
+    legacy_bundles_path: &std::path::Path,
+) -> String {
+    format!(
+        "warning: both local file-store layouts exist; using new bundles path '{}' and ignoring legacy bundles path '{}'. The legacy tree is not being read.",
+        new_bundles_path.display(),
+        legacy_bundles_path.display()
+    )
+}
+
+fn emit_legacy_layout_ignored_warning(
+    new_bundles_path: &std::path::Path,
+    legacy_bundles_path: &std::path::Path,
+) {
+    let message = legacy_layout_ignored_warning_message(new_bundles_path, legacy_bundles_path);
+    #[cfg(test)]
+    CAPTURED_LAYOUT_WARNINGS.with(|warnings| warnings.borrow_mut().push(message.clone()));
+    eprintln!("{message}");
+}
+
+#[cfg(test)]
+thread_local! {
+    static CAPTURED_LAYOUT_WARNINGS: std::cell::RefCell<Vec<String>> = const {
+        std::cell::RefCell::new(Vec::new())
+    };
+}
+
+#[cfg(test)]
+fn drain_captured_layout_warnings() -> Vec<String> {
+    CAPTURED_LAYOUT_WARNINGS.with(|warnings| std::mem::take(&mut *warnings.borrow_mut()))
+}
+
 impl ObjectStoreBundleStore {
+    fn file_store_root(prefix: &str) -> PathBuf {
+        PathBuf::from(prefix)
+    }
+
+    fn legacy_file_bundles_dir(store_root: &std::path::Path, prefix: &str) -> PathBuf {
+        let legacy_prefix = KeyBuilder::new(prefix).bundles_prefix();
+        let mut legacy = store_root.to_path_buf();
+        for segment in legacy_prefix.as_ref().split('/') {
+            if !segment.is_empty() {
+                legacy.push(segment);
+            }
+        }
+        legacy
+    }
+
     /// Create a store from a parsed spec.
     ///
     /// # Environment Variables (S3)
@@ -39,26 +88,47 @@ impl ObjectStoreBundleStore {
     /// | `ASSAY_STORE_ALLOW_HTTP` | Allow HTTP (for MinIO dev), default: false |
     /// | `ASSAY_STORE_PATH_STYLE` | Use path-style URLs (for some S3-compat), default: false |
     pub async fn from_spec(spec: &StoreSpec) -> StoreResult<Self> {
-        let inner: Arc<dyn ObjectStore> = match spec.scheme.as_str() {
-            "memory" => Arc::new(object_store::memory::InMemory::new()),
+        let (inner, key_prefix): (Arc<dyn ObjectStore>, String) = match spec.scheme.as_str() {
+            "memory" => (
+                Arc::new(object_store::memory::InMemory::new()),
+                spec.prefix.clone(),
+            ),
             "file" => {
-                let path = if let Some(bucket) = &spec.bucket {
-                    format!("/{}/{}", bucket, spec.prefix)
-                } else if spec.prefix.is_empty() {
-                    "/tmp/assay-store".to_string()
-                } else {
-                    format!("/{}", spec.prefix)
-                };
+                let path = Self::file_store_root(&spec.prefix);
                 // Ensure directory exists
                 std::fs::create_dir_all(&path).map_err(|e| StoreError::Io {
-                    message: format!("failed to create store directory {}: {}", path, e),
+                    message: format!("failed to create store directory {}: {}", path.display(), e),
                 })?;
-                Arc::new(
-                    object_store::local::LocalFileSystem::new_with_prefix(&path).map_err(|e| {
-                        StoreError::Io {
-                            message: format!("failed to create local store at {}: {}", path, e),
-                        }
-                    })?,
+                let new_bundles_path = path.join("bundles");
+                let legacy_bundles_path = Self::legacy_file_bundles_dir(&path, &spec.prefix);
+                if legacy_bundles_path != new_bundles_path
+                    && !new_bundles_path.is_dir()
+                    && legacy_bundles_path.is_dir()
+                {
+                    return Err(StoreError::LegacyFileLayoutDetected {
+                        new_bundles_path: new_bundles_path.display().to_string(),
+                        legacy_bundles_path: legacy_bundles_path.display().to_string(),
+                    });
+                }
+                if legacy_bundles_path != new_bundles_path
+                    && new_bundles_path.is_dir()
+                    && legacy_bundles_path.is_dir()
+                {
+                    emit_legacy_layout_ignored_warning(&new_bundles_path, &legacy_bundles_path);
+                }
+                (
+                    Arc::new(
+                        object_store::local::LocalFileSystem::new_with_prefix(&path).map_err(
+                            |e| StoreError::Io {
+                                message: format!(
+                                    "failed to create local store at {}: {}",
+                                    path.display(),
+                                    e
+                                ),
+                            },
+                        )?,
+                    ),
+                    String::new(),
                 )
             }
             "s3" => {
@@ -96,9 +166,12 @@ impl ObjectStoreBundleStore {
                     builder = builder.with_virtual_hosted_style_request(false);
                 }
 
-                Arc::new(builder.build().map_err(|e| StoreError::Io {
-                    message: format!("failed to create S3 client: {}", e),
-                })?)
+                (
+                    Arc::new(builder.build().map_err(|e| StoreError::Io {
+                        message: format!("failed to create S3 client: {}", e),
+                    })?),
+                    spec.prefix.clone(),
+                )
             }
             scheme => {
                 return Err(StoreError::InvalidSpec {
@@ -110,7 +183,7 @@ impl ObjectStoreBundleStore {
 
         Ok(Self {
             inner,
-            keys: KeyBuilder::new(&spec.prefix),
+            keys: KeyBuilder::new(&key_prefix),
         })
     }
 
@@ -235,12 +308,7 @@ impl ObjectStoreBundleStore {
 
         // Probe: writable via put + delete of a probe key outside the bundles/ namespace
         let writable = if reachable {
-            let probe_path = if prefix.is_empty() {
-                ".assay_probe_write_test".to_string()
-            } else {
-                format!("{}/.assay_probe_write_test", prefix.trim_end_matches('/'))
-            };
-            let probe_key = object_store::path::Path::from(probe_path);
+            let probe_key = self.keys.probe_key();
             let probe_bytes = Bytes::from("probe");
             let put_ok = self
                 .inner
@@ -472,6 +540,318 @@ impl BundleStore for ObjectStoreBundleStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn test_file_url_from_tempdir_resolves_exact_directory() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let store_url = url::Url::from_file_path(temp_dir.path())
+            .expect("tempdir should always convert to a file:// URL");
+
+        let store = ObjectStoreBundleStore::from_url(store_url.as_str())
+            .await
+            .expect("file:// URL from tempdir should initialize local store");
+
+        store
+            .put_bundle("bundle-id-1", Bytes::from_static(b"payload"))
+            .await
+            .expect("write through tempdir-backed store");
+
+        assert!(
+            temp_dir.path().join("bundles").exists(),
+            "expected store writes under the exact tempdir root"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_unresolvable_file_url_is_invalid_spec_not_io() {
+        let bad_url = "file://example.com";
+        let normalized_url = url::Url::parse(bad_url).unwrap().to_string();
+        let err = match ObjectStoreBundleStore::from_url(bad_url).await {
+            Ok(_) => panic!("unresolvable file URL must fail"),
+            Err(err) => err,
+        };
+
+        match err {
+            StoreError::InvalidSpec { spec, reason } => {
+                assert_eq!(spec, normalized_url);
+                assert_eq!(
+                    reason,
+                    super::super::FILE_STORE_NON_LOCAL_HOST_REFUSAL_REASON
+                );
+            }
+            other => panic!("expected InvalidSpec, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_file_store_legacy_only_layout_refuses_and_names_paths() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let store_root = temp_dir.path().join("legacy-only-store");
+        std::fs::create_dir_all(&store_root).expect("store root");
+        let store_url = url::Url::from_file_path(&store_root)
+            .expect("store root should convert to a file:// URL")
+            .to_string();
+        let spec = StoreSpec::parse(&store_url).expect("parse file URL");
+
+        let expected_new_bundles = store_root.join("bundles");
+        let expected_legacy_bundles =
+            ObjectStoreBundleStore::legacy_file_bundles_dir(&store_root, &spec.prefix);
+        std::fs::create_dir_all(&expected_legacy_bundles).expect("legacy bundles dir");
+        let legacy_bundle = expected_legacy_bundles.join("existing-bundle.tar.gz");
+        std::fs::write(&legacy_bundle, b"legacy-bytes").expect("legacy bundle bytes");
+
+        let err = match ObjectStoreBundleStore::from_spec(&spec).await {
+            Ok(_) => panic!("legacy-only store layout must refuse to open"),
+            Err(err) => err,
+        };
+        match &err {
+            StoreError::LegacyFileLayoutDetected {
+                new_bundles_path,
+                legacy_bundles_path,
+            } => {
+                assert_eq!(
+                    new_bundles_path,
+                    &expected_new_bundles.display().to_string()
+                );
+                assert_eq!(
+                    legacy_bundles_path,
+                    &expected_legacy_bundles.display().to_string()
+                );
+            }
+            other => panic!("expected LegacyFileLayoutDetected, got {other:?}"),
+        }
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains(&expected_new_bundles.display().to_string()),
+            "refusal should name new bundles path: {rendered}"
+        );
+        assert!(
+            rendered.contains(&expected_legacy_bundles.display().to_string()),
+            "refusal should name legacy bundles path: {rendered}"
+        );
+        assert!(
+            !expected_new_bundles.exists(),
+            "legacy-only refusal must not create the new bundles directory"
+        );
+        assert!(
+            legacy_bundle.exists(),
+            "legacy-only refusal must not mutate existing legacy bundles"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_file_store_legacy_only_layout_refuses_write_path_without_splitting_layout() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let store_root = temp_dir.path().join("legacy-only-write-store");
+        std::fs::create_dir_all(&store_root).expect("store root");
+        let store_url = url::Url::from_file_path(&store_root)
+            .expect("store root should convert to a file:// URL")
+            .to_string();
+        let spec = StoreSpec::parse(&store_url).expect("parse file URL");
+
+        let expected_new_bundles = store_root.join("bundles");
+        let expected_legacy_bundles =
+            ObjectStoreBundleStore::legacy_file_bundles_dir(&store_root, &spec.prefix);
+        std::fs::create_dir_all(&expected_legacy_bundles).expect("legacy bundles dir");
+        let write_result = match ObjectStoreBundleStore::from_spec(&spec).await {
+            Ok(store) => {
+                store
+                    .put_bundle("bundle-write-attempt", Bytes::from_static(b"payload"))
+                    .await
+            }
+            Err(err) => Err(err),
+        };
+
+        match write_result {
+            Err(StoreError::LegacyFileLayoutDetected {
+                new_bundles_path,
+                legacy_bundles_path,
+            }) => {
+                assert_eq!(new_bundles_path, expected_new_bundles.display().to_string());
+                assert_eq!(
+                    legacy_bundles_path,
+                    expected_legacy_bundles.display().to_string()
+                );
+            }
+            other => panic!("expected LegacyFileLayoutDetected, got {other:?}"),
+        }
+        assert!(
+            !expected_new_bundles.exists(),
+            "write path refusal must not create new-layout directories"
+        );
+        assert!(
+            !store_root
+                .join("bundles/bundle-write-attempt.tar.gz")
+                .exists(),
+            "write path refusal must not split the store into both layouts"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_file_store_new_only_layout_opens_and_writes_to_new_bundles_dir() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let store_root = temp_dir.path().join("new-only-store");
+        std::fs::create_dir_all(store_root.join("bundles")).expect("new bundles dir");
+        let store_url = url::Url::from_file_path(&store_root)
+            .expect("store root should convert to a file:// URL")
+            .to_string();
+        let spec = StoreSpec::parse(&store_url).expect("parse file URL");
+
+        let legacy_bundles =
+            ObjectStoreBundleStore::legacy_file_bundles_dir(&store_root, &spec.prefix);
+        assert!(
+            !legacy_bundles.exists(),
+            "fixture must not include legacy layout"
+        );
+
+        let store = ObjectStoreBundleStore::from_spec(&spec)
+            .await
+            .expect("new-only layout must open");
+        store
+            .put_bundle("bundle-new-only", Bytes::from_static(b"payload"))
+            .await
+            .expect("new-only layout write must succeed");
+
+        assert!(
+            store_root.join("bundles/bundle-new-only.tar.gz").exists(),
+            "bundle should be stored under the new layout"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_file_store_with_new_and_legacy_layout_opens_without_refusal() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let store_root = temp_dir.path().join("both-layouts-store");
+        let new_bundles = store_root.join("bundles");
+        std::fs::create_dir_all(&new_bundles).expect("new bundles dir");
+        let store_url = url::Url::from_file_path(&store_root)
+            .expect("store root should convert to a file:// URL")
+            .to_string();
+        let spec = StoreSpec::parse(&store_url).expect("parse file URL");
+        let legacy_bundles =
+            ObjectStoreBundleStore::legacy_file_bundles_dir(&store_root, &spec.prefix);
+        std::fs::create_dir_all(&legacy_bundles).expect("legacy bundles dir");
+
+        let store = ObjectStoreBundleStore::from_spec(&spec)
+            .await
+            .expect("both-layout fixture should open because new layout is present");
+        store
+            .put_bundle("bundle-both-layouts", Bytes::from_static(b"payload"))
+            .await
+            .expect("write should still target new layout");
+
+        assert!(
+            store_root
+                .join("bundles/bundle-both-layouts.tar.gz")
+                .exists(),
+            "write should land in the new layout"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_file_store_with_new_and_legacy_layout_emits_ignored_legacy_warning() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let store_root = temp_dir.path().join("both-layouts-store-warning");
+        let new_bundles = store_root.join("bundles");
+        std::fs::create_dir_all(&new_bundles).expect("new bundles dir");
+        let store_url = url::Url::from_file_path(&store_root)
+            .expect("store root should convert to a file:// URL")
+            .to_string();
+        let spec = StoreSpec::parse(&store_url).expect("parse file URL");
+        let legacy_bundles =
+            ObjectStoreBundleStore::legacy_file_bundles_dir(&store_root, &spec.prefix);
+        std::fs::create_dir_all(&legacy_bundles).expect("legacy bundles dir");
+
+        let _ = drain_captured_layout_warnings();
+        let _store = ObjectStoreBundleStore::from_spec(&spec)
+            .await
+            .expect("both-layout fixture should still open");
+        let warnings = drain_captured_layout_warnings();
+        assert_eq!(warnings.len(), 1, "exactly one warning should be emitted");
+        let warning = &warnings[0];
+        assert!(
+            warning.contains(&new_bundles.display().to_string()),
+            "warning should name new bundles path: {warning}"
+        );
+        assert!(
+            warning.contains(&legacy_bundles.display().to_string()),
+            "warning should name legacy bundles path: {warning}"
+        );
+        assert!(
+            warning.contains("legacy tree is not being read"),
+            "warning should explain that the legacy tree is ignored: {warning}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_file_store_with_neither_layout_creates_new_layout_on_write() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let store_root = temp_dir.path().join("neither-layout-store");
+        std::fs::create_dir_all(&store_root).expect("store root");
+        let store_url = url::Url::from_file_path(&store_root)
+            .expect("store root should convert to a file:// URL")
+            .to_string();
+        let spec = StoreSpec::parse(&store_url).expect("parse file URL");
+
+        let legacy_bundles =
+            ObjectStoreBundleStore::legacy_file_bundles_dir(&store_root, &spec.prefix);
+        assert!(
+            !store_root.join("bundles").exists(),
+            "fixture starts without the new layout"
+        );
+        assert!(
+            !legacy_bundles.exists(),
+            "fixture starts without the legacy layout"
+        );
+
+        let store = ObjectStoreBundleStore::from_spec(&spec)
+            .await
+            .expect("fresh store should open");
+        store
+            .put_bundle("bundle-neither", Bytes::from_static(b"payload"))
+            .await
+            .expect("fresh store write should succeed");
+
+        assert!(
+            store_root.join("bundles/bundle-neither.tar.gz").exists(),
+            "fresh store write should land under <root>/bundles"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_store_status_probe_key_stays_in_store_keyspace_and_cleans_up() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let store_root = temp_dir.path().join("status-probe-store");
+        std::fs::create_dir_all(&store_root).expect("store root");
+        let store_url = url::Url::from_file_path(&store_root)
+            .expect("store root should convert to a file:// URL")
+            .to_string();
+        let spec = StoreSpec::parse(&store_url).expect("parse file URL");
+        let store = ObjectStoreBundleStore::from_spec(&spec)
+            .await
+            .expect("fresh store should open");
+
+        let status = store.store_status(&spec).await;
+        assert!(status.writable, "store-status must confirm writeability");
+
+        let first_store_root_segment = store_root
+            .components()
+            .find_map(|component| match component {
+                std::path::Component::Normal(segment) => {
+                    Some(segment.to_string_lossy().to_string())
+                }
+                _ => None,
+            })
+            .expect("store root should include at least one normal path segment");
+        assert!(
+            !store_root.join(first_store_root_segment).exists(),
+            "probe must not create duplicated-path skeleton under the store root"
+        );
+        assert!(
+            !store_root.join(".assay_probe_write_test").exists(),
+            "probe file should be deleted after writability check"
+        );
+    }
 
     #[tokio::test]
     async fn test_memory_store_roundtrip() {
