@@ -24,9 +24,12 @@ use process_wrap::std::JobObject;
 use process_wrap::std::ProcessGroup;
 use process_wrap::std::{ChildWrapper, CommandWrap};
 
-// Measured across five recent successful windows-latest Build+Test jobs:
-// this test target completed in 22.43s..33.87s (median 25.93s), so Windows
-// keeps extra headroom while non-Windows budgets stay unchanged.
+// Windows timeouts are headroom, not a measured per-probe p50. The
+// 22.43s..33.87s envelope is the whole target on healthy windows-latest
+// jobs, while these constants bound one child (`run_bounded`). That CI
+// step also uses `--test-threads=1`, so a 15s/45s expiry with 0 bytes or
+// a startup line then silence is a separate stall mode, not a slow draw
+// from the healthy distribution. #2246 stays open.
 const RUN_JSON_LIMITS_NON_WINDOWS: ProcessLimits =
     ProcessLimits::new(Duration::from_secs(15), 2 * 1024 * 1024, 64 * 1024);
 const RUN_JSON_LIMITS_WINDOWS: ProcessLimits =
