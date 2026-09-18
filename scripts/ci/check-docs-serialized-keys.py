@@ -25,6 +25,11 @@ does not carry that map. The listed pages document `validate()` /
 `Coverage.analyze()` against CoverageReport. Attribute access such as
 `coverage.score` is not extracted; that limit is tracked in #3105.
 
+The harness treats every `PAGES` entry as load-bearing: it plants a fabricated
+key on each listed page, then drops each entry in turn and requires that plant
+to go unobserved. That is not a second pinned list. A decorative entry that
+can be removed without turning the harness red is the defect.
+
 Usage: check-docs-serialized-keys.py [--root DIR]
 """
 
