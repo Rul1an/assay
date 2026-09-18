@@ -7,6 +7,7 @@ pub mod delegated_exec;
 pub mod denial_marker;
 pub mod diff;
 pub mod g3_authorization_context;
+pub mod incident_package;
 pub mod json_strict;
 pub mod lint;
 pub mod mandate;
@@ -25,12 +26,12 @@ pub use bundle::{
 };
 pub use coding_agent::{
     coding_agent_claim_ceiling, coding_agent_claim_decision, coding_agent_evidence_event,
-    coding_agent_weakest_ceiling, session_finding_claim_decision, CodingAgentClaimCeiling,
-    CodingAgentClaimDecision, CodingAgentClaimKind, CodingAgentCoverage, CodingAgentCoverageGap,
-    CodingAgentCoverageReport, CodingAgentCoverageState, CodingAgentDeclaredScope,
-    CodingAgentEvidencePayload, CodingAgentGateDecision, CodingAgentNetworkPolicy,
-    CodingAgentObservedEffects, CodingAgentSourceClass, CodingAgentWeakestCeiling,
-    CODING_AGENT_EVIDENCE_EVENT_TYPE, CODING_AGENT_EVIDENCE_SOURCE,
+    coding_agent_weakest_ceiling, session_coverage_declared_depth, session_finding_claim_decision,
+    CodingAgentClaimCeiling, CodingAgentClaimDecision, CodingAgentClaimKind, CodingAgentCoverage,
+    CodingAgentCoverageGap, CodingAgentCoverageReport, CodingAgentCoverageState,
+    CodingAgentDeclaredScope, CodingAgentEvidencePayload, CodingAgentGateDecision,
+    CodingAgentNetworkPolicy, CodingAgentObservedEffects, CodingAgentSourceClass,
+    CodingAgentWeakestCeiling, CODING_AGENT_EVIDENCE_EVENT_TYPE, CODING_AGENT_EVIDENCE_SOURCE,
 };
 pub use coverage_attestation::{
     cap1_claim_decision, cap1_claim_decision_with, verify_cap1_document, verify_cap1_rules,
@@ -45,6 +46,11 @@ pub use denial_marker::{
     bindable_denial_marker, classify_denial_marker, BindableDenialMarker, DenialMarkerVersion,
     DENIED_CALL_OBSERVATION_V0, DENIED_CALL_OBSERVATION_V1, PROXY_DENIED_V0, PROXY_DENIED_V1,
     PROXY_ORIGIN,
+};
+pub use incident_package::{
+    read_incident_container, ContainerMember, IncidentContainer, IncidentExpectation,
+    IncidentOutcome, IncidentReason, IncidentVerifyReport, INCIDENT_VERIFY_SCHEMA_V1,
+    NON_CLAIMS_DEFAULT,
 };
 pub use lint::packs::{load_pack, load_packs, LoadedPack, PackError, PackSource};
 pub use ndjson::{read_events, write_events, NdjsonEvents};

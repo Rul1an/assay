@@ -381,7 +381,7 @@ def validate(policy_file: str, traces: list) -> dict
 from assay import validate
 
 result = validate("policy.yaml", traces)
-assert result["passed"]
+assert result["meets_threshold"]
 ```
 
 ### Pytest Plugin (`pytest_plugin.py`)

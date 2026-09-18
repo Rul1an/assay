@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- `assay-evidence` now resolves `file://` store URLs with platform-native path conversion, refuses unresolvable file URLs as invalid specs, and refuses bare `file://`, `file:`, and `file:///` roots as invalid specs. Those bare spellings previously mapped to a temp-directory default; use an explicit local path such as `file:///tmp/assay-store` instead (#3093).
+- `assay-evidence` now detects and refuses legacy local file-store layout before any read or write when the upgraded layout is missing. Legacy stores (<= 6.5.0) could place bundles at `<store_dir>/<store_dir_without_leading_slash>/bundles/<bundle_id>.tar.gz`; the current layout is `<store_dir>/bundles/<bundle_id>.tar.gz`. On this mismatch, the store returns `LegacyFileLayoutDetected` naming both paths and telling operators to move the legacy directory, instead of silently reporting an empty store (#3093).
+
+### Internal
+- Incident package v1 read-only container reader and refusal report type in `assay-evidence` (internal, no user-visible CLI yet) (Refs #2493).
+
 ## [6.5.0] - 2026-09-17
 
 Stable release consolidating the RC1 and RC2 candidates. RC2 (`v6.5.0-rc.2`)
