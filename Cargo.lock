@@ -167,7 +167,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-a2a"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "assay-adapter-api",
  "assay-evidence",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-acp"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "assay-adapter-api",
  "assay-evidence",
@@ -195,7 +195,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-api"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "assay-evidence",
  "hex",
@@ -207,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-ucp"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "assay-adapter-api",
  "assay-evidence",
@@ -221,7 +221,7 @@ dependencies = [
 
 [[package]]
 name = "assay-canonical"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "hex",
  "serde",
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "assay-cli"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "anyhow",
  "assay-canonical",
@@ -295,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "assay-common"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "aya",
  "chrono",
@@ -308,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "assay-core"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "anyhow",
  "assay-adapter-api",
@@ -358,7 +358,7 @@ dependencies = [
 
 [[package]]
 name = "assay-ebpf"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "assay-common",
  "aya-ebpf",
@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "assay-evidence"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "anyhow",
  "assay-canonical",
@@ -404,7 +404,7 @@ dependencies = [
 
 [[package]]
 name = "assay-it"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "assay-core",
  "pyo3",
@@ -416,7 +416,7 @@ dependencies = [
 
 [[package]]
 name = "assay-mcp-server"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -446,7 +446,7 @@ dependencies = [
 
 [[package]]
 name = "assay-metrics"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -466,7 +466,7 @@ dependencies = [
 
 [[package]]
 name = "assay-monitor"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -481,7 +481,7 @@ dependencies = [
 
 [[package]]
 name = "assay-policy"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "anyhow",
  "ipnet",
@@ -493,7 +493,7 @@ dependencies = [
 
 [[package]]
 name = "assay-registry"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -530,7 +530,7 @@ dependencies = [
 
 [[package]]
 name = "assay-runner-core"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "assay-common",
  "assay-monitor",
@@ -548,7 +548,7 @@ dependencies = [
 
 [[package]]
 name = "assay-runner-linux"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "anyhow",
  "libc",
@@ -557,7 +557,7 @@ dependencies = [
 
 [[package]]
 name = "assay-runner-schema"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "assay-common",
  "serde",
@@ -567,7 +567,7 @@ dependencies = [
 
 [[package]]
 name = "assay-sim"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "anyhow",
  "assay-adapter-api",
@@ -588,7 +588,7 @@ dependencies = [
 
 [[package]]
 name = "assay-xtask"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2082,7 +2082,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-evidence-replay"
-version = "6.5.0"
+version = "6.6.0"
 dependencies = [
  "anyhow",
  "chrono",
