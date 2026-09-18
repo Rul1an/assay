@@ -158,7 +158,7 @@ See [RESEARCH-ci-cd-ai-agents-feb2026.md](architecture/RESEARCH-ci-cd-ai-agents-
 
 ## Current State: Evidence Contract v1 ✅ Complete
 
-The **Evidence Contract v1** is production-ready.
+The **Evidence Contract v1** is complete.
 
 | Component | Status | Notes |
 |-----------|--------|-------|
@@ -511,7 +511,7 @@ Enterprise identity for agentic workloads:
 
 ## Foundation (Completed 2025)
 
-The core execution and policy engine is stable and production-ready.
+The core execution and policy engine is stable.
 
 ### Core Engine
 - [x] Core Sandbox: CLI runner with Landlock isolation (v1-v4 ABI)
