@@ -123,6 +123,11 @@ This document outlines the canonical checklist for releasing new versions of Ass
     byte-compares the image binary with the release tarball, and runs both `gh attestation verify`
     checks.
   - Job: `publish-crates` (`Publish to crates.io`; uses `scripts/ci/publish_idempotent.sh`).
+  - Job: `published-release-golden-path` (`Verify the published release journey`; needs `[release-contract, release]`).
+    Downloads the public GitHub release assets by tag — not build artifacts from
+    the same run — and runs the Linux x86_64 post-publication journey (unchanged)
+    plus Windows x86_64 and macOS arm64 published-archive openings. A failure
+    turns the release workflow red but cannot unpublish assets.
 
 ### Published binary installability
 
@@ -164,6 +169,7 @@ it is not an installer failure.
 - [ ] **Provenance Asset Check**: Confirm the GitHub release includes `assay-${VERSION}-release-provenance.json` and `assay-${VERSION}-release-provenance.json.sha256`.
 - [ ] **Proof Kit Asset Check**: Confirm the GitHub release includes `assay-${VERSION}-release-proof-kit.tar.gz` and `assay-${VERSION}-release-proof-kit.tar.gz.sha256`.
 - [ ] **Release Asset Preflight Check**: Confirm `Check release asset preflight` passed before `Create GitHub Release`; this is the machine-readable asset contract for GitHub release publication.
+- [ ] **Published release journey**: Confirm `Verify the published release journey` downloaded the GitHub release assets by tag and ran the Linux x86_64 post-publication journey (unchanged) together with the Windows x86_64 and macOS arm64 published-archive openings (`assay version` against the tag, `assay doctor --format json`, `assay init --preset dev --hello-trace`). This job cannot be satisfied by a same-run build artifact.
 - [ ] **Workflow Evidence Check**: Confirm the workflow artifacts include `release-provenance-evidence` with the raw `gh attestation verify --format json` results for each release archive.
 - [ ] **Offline Verification Check**: Unpack the proof kit and run `verify-offline.sh --assets-dir /path/to/release-assets` against the downloaded release archives. See [Release Proof Kit](../security/RELEASE-PROOF-KIT.md).
 - [ ] **Operator Flow Check**: For the compact end-to-end story that connects transcript ingest, shipped `C2` pack evaluation, and proof-kit verification, see [Operator Proof Flow](../guides/operator-proof-flow.md).
