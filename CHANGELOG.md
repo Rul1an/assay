@@ -4,12 +4,35 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.6.0] - 2026-09-18
+
+Stable minor collecting the launch-blocking behaviour that landed after
+v6.5.0. This entry declares candidate source; crates.io, PyPI, and MCP
+Registry publication and the published installation journey are exercised
+by the stable release run and are not asserted here.
+
+### Added
+- `assay policy` now provides `activate`, `rollback`, and `status` over a `--policy-root` directory (#2491).
+- Optional `steps_total` and `retained_through` on `PayloadSessionCoverage`, remapped through `session_coverage_declared_depth` into `session_finding_claim_decision` (#2422).
+- `assay evidence index rebuild` and `ObjectStoreBundleStore::rebuild_index` reconstruct the run index from canonical bundles (#2492).
+- `StoreStatus::object_lock` uses a closed honest vocabulary; store identifiers refuse empty IDs, path traversal, slashes, and control characters (#2492).
+
 ### Changed
 - `assay-evidence` now resolves `file://` store URLs with platform-native path conversion, refuses unresolvable file URLs as invalid specs, and refuses bare `file://`, `file:`, and `file:///` roots as invalid specs. Those bare spellings previously mapped to a temp-directory default; use an explicit local path such as `file:///tmp/assay-store` instead (#3093).
 - `assay-evidence` now detects and refuses legacy local file-store layout before any read or write when the upgraded layout is missing. Legacy stores (<= 6.5.0) could place bundles at `<store_dir>/<store_dir_without_leading_slash>/bundles/<bundle_id>.tar.gz`; the current layout is `<store_dir>/bundles/<bundle_id>.tar.gz`. On this mismatch, the store returns `LegacyFileLayoutDetected` naming both paths and telling operators to move the legacy directory, instead of silently reporting an empty store (#3093).
+- Unprobed S3 `StoreStatus::object_lock` now reports `unobserved:not_probed` (#2492).
+
+### Migration
+Fail-closed correction (assay sandbox --enforce, migration-visible): --enforce now refuses when it cannot enforce. Without a Landlock backend (always on macOS, and on Linux kernels without Landlock), or when the policy conflicts with Landlock's allow-only model, the run exits 2 with E_BACKEND_UNAVAILABLE_UNENFORCEABLE or E_POLICY_CONFLICT_DENY_WINS_UNENFORCEABLE and executes nothing, where it previously warned, recorded assay.sandbox.degraded, ran the command in audit mode and exited 0. Pass --allow-audit-fallback to keep the old degrade-and-record behaviour. --fail-closed is unchanged and is now implied by --enforce. Runs without --enforce are unaffected.
+
+The shipped strings match this note. The reason codes are printed as those exact tokens. `--fail-closed` without `--enforce` is still the only way that combination refuses a policy conflict; `--fail-closed` without `--enforce` on a host with no backend still does not enter the no-backend guard (unchanged).
 
 ### Internal
 - Incident package v1 read-only container reader and refusal report type in `assay-evidence` (internal, no user-visible CLI yet) (Refs #2493).
+- CI/test-only: native Windows golden-path opening (#3104), bounded-probe stall diagnostics (#3107), and load-bearing documented-keys PAGES (#3110).
+
+### Documentation
+- First-run pages now describe the installed binary (#3102), support-bound sentences are aligned (#3106), the accepted launch definition is recorded (#3108), and the Python `Coverage.analyze()` example now defines the traces it loads (#3109).
 
 ## [6.5.0] - 2026-09-17
 
