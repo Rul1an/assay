@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Internal
+- Post-publication release verification now also downloads the published Windows x86_64 and macOS arm64 CLI archives by tag and runs the golden-path opening against those bytes (#3121).
+
 ## [6.6.0] - 2026-09-18
 
 Stable minor collecting the launch-blocking behaviour that landed after
