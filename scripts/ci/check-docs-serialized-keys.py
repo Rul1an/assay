@@ -19,10 +19,11 @@ mapping.
 
 Pages are listed explicitly. A docs-wide walk of every `report[` / `result[`
 subscript would need a map from documented keys onto the serialised type they
-belong to: `docs/use-cases/self-correction.md` writes `result["allowed"]` for
-a different API, and `docs/AIcontext/` still names `result["passed"]`. This
-check does not carry that map. `docs/python-sdk/index.md` is in the set
-because it documents `validate()` / `Coverage.analyze()` against CoverageReport.
+belong to: `docs/use-cases/self-correction.md` and `docs/mcp/self-correction.md`
+write `result["allowed"]` for `assay_check_args`, a different API. This check
+does not carry that map. The listed pages document `validate()` /
+`Coverage.analyze()` against CoverageReport. Attribute access such as
+`coverage.score` is not extracted; that limit is tracked in #3105.
 
 Usage: check-docs-serialized-keys.py [--root DIR]
 """
@@ -38,6 +39,8 @@ SOURCE = "crates/assay-core/src/coverage_next/types.rs"
 PAGES = (
     "docs/getting-started/python-quickstart.md",
     "docs/python-sdk/index.md",
+    "docs/AIcontext/entry-points.md",
+    "docs/AIcontext/quick-reference.md",
 )
 
 STRUCT_HEAD = re.compile(r"^pub struct CoverageReport \{", re.MULTILINE)

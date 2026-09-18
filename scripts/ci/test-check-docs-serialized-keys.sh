@@ -13,11 +13,21 @@ SOURCE=crates/assay-core/src/coverage_next/types.rs
 
 reset_tree() {
   rm -rf "$TMP/tree"
-  mkdir -p "$TMP/tree/$(dirname "$PAGE")" "$TMP/tree/$(dirname "$SDK_PAGE")" \
-    "$TMP/tree/$(dirname "$SOURCE")"
-  cp "$ROOT/$PAGE" "$TMP/tree/$PAGE"
-  cp "$ROOT/$SDK_PAGE" "$TMP/tree/$SDK_PAGE"
-  cp "$ROOT/$SOURCE" "$TMP/tree/$SOURCE"
+  python3 - "$CHECK" "$TMP/tree" "$ROOT" "$SOURCE" <<'PY'
+from pathlib import Path
+import importlib.util
+import shutil
+import sys
+
+check, dest, root, source = (Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4])
+spec = importlib.util.spec_from_file_location("check", check)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+for rel in (*mod.PAGES, source):
+    out = dest / rel
+    out.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(root / rel, out)
+PY
 }
 
 run_check() {

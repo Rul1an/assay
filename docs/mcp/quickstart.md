@@ -118,9 +118,10 @@ The same command, after an `exec` call:
 [assay] DENY exec (reason: Tool is explicitly denylisted by name)
 ```
 
-Without `--verbose`, those ALLOW/DENY lines are not printed and stderr stays
-empty. The wrap still returns a JSON-RPC deny on stdout; a reader who drops
-the flag sees silence and should not read silence as "nothing was denied".
+Without `--verbose`, those ALLOW/DENY lines are not printed. A no-flag run
+still prints the loading-policy and wrapping-command lines plus the child's
+banner; a denied call still returns a JSON-RPC deny on stdout. Missing
+decision lines are not a clean run.
 
 ## Step 2: Write a Policy
 
