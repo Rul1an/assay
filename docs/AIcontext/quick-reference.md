@@ -186,7 +186,7 @@ client.record_trace({"tool": "read_file", "args": {"path": "/tmp/x"}})
 
 # Validate
 result = validate("policy.yaml", traces)
-assert result["passed"]
+assert result["meets_threshold"]
 
 # Coverage analysis
 coverage = Coverage.analyze(traces, min_coverage=80.0)

@@ -213,6 +213,13 @@ jobs:
           python3 scripts/ci/check-evidence-vocabulary.py
           bash scripts/ci/test-cli-describe-contract.sh
 
+      - name: Documented coverage-report keys exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ci/test-check-docs-serialized-keys.sh
+          python3 scripts/ci/check-docs-serialized-keys.py
+
       - name: Codex host-proof Node contract
         shell: bash
         run: |
