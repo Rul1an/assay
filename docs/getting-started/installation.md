@@ -75,6 +75,21 @@ assay 6.6.0
 
 The generated [agent golden path](../guides/agent-golden-path.md) additionally uses `assay version`, whose release-pinned output is `6.6.0`.
 
+### Verify an evidence bundle offline
+
+To verify an evidence bundle offline without network access:
+
+```bash
+assay evidence verify-privileged-mcp-action <bundle> --format json
+```
+
+Both outcomes emit a JSON document adhering to the [`assay.privileged_mcp_action.verify.report.v0`](../profiles/privileged-mcp-action/v0.md) report schema:
+
+- **Valid** (exit code `0`): `bundle_integrity: pass` and `verdict: valid`.
+- **Integrity failure** (exit code `2`): `bundle_integrity: fail`, `verdict: null`, and `reason_code: E_EVIDENCE_INTEGRITY`.
+
+The report is experimental v0; verification recomputes the carried bytes only.
+
 ## Development build
 
 Behavior merged after `v6.6.0` is `Unreleased` and is not part of the release claim above.

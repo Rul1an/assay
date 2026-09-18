@@ -260,6 +260,16 @@ run_capture "verify-produced-bundle" 0 "$results/verify.json" "$results/verify.s
 "$JQ_BIN" -e '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "pass" and .verdict == "valid"' "$results/verify.json" >/dev/null \
   || fail "profile verification did not validate the produced bundle"
 
+# Prove unshare -rn denies network access before trusting offline verification.
+if unshare -rn curl -sS --max-time 5 https://github.com >/dev/null 2>&1; then
+  fail "unshare -rn network isolation control failed: network access succeeded inside unshared namespace"
+fi
+
+run_capture "verify-produced-bundle-offline" 0 "$results/verify-offline.json" "$results/verify-offline.stderr" \
+  unshare -rn assay evidence verify-privileged-mcp-action "$bundle" --profile-version v1 --format json
+cmp -s "$results/verify.json" "$results/verify-offline.json" \
+  || fail "offline unshared verification output differs from connected verification"
+
 run_published_release_extra_request_cases
 
 run_capture "export-sarif" 0 "$results/sarif.stdout" "$results/sarif.stderr" \
