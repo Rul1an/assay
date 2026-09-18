@@ -18,6 +18,7 @@ restate or weaken this contract.
   non-claims, and open findings in that programme's ledger. Work outside a programme — a standalone
   fix, a documentation change — has no ledger to record to, and inventing one or appending to a
   closed one is worse than the omission.
+- The accepted launch definition is recorded in [docs/LAUNCH.md](docs/LAUNCH.md).
 
 ## ADR-042/043 Scope
 
