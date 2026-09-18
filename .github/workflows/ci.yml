@@ -874,6 +874,64 @@ jobs:
               "$RUNNER_TEMP/stdout-json-write-windows.log"
           done
 
+      - name: Execute native Windows binary (golden path opening)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked -p assay-cli --bin assay
+          assay_bin="./target/debug/assay.exe"
+          if [[ ! -f "$assay_bin" ]]; then
+            assay_bin="./target/debug/assay"
+          fi
+
+          # Derive expected workspace version from Cargo.toml
+          expected_version="$(
+            python3 -c '
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, "scripts/ci/lib")
+          from workspace_version import read_workspace_version
+          print(read_workspace_version(Path("Cargo.toml")))
+          '
+          )"
+
+          # 1. Install check: assay version
+          version_out="$("$assay_bin" version)"
+          if [[ -z "$version_out" ]]; then
+            echo "::error::assay version produced empty stdout"
+            exit 1
+          fi
+          if [[ "$version_out" != "$expected_version" ]]; then
+            echo "::error::assay version mismatch: expected ${expected_version}, got ${version_out}"
+            exit 1
+          fi
+
+          # 2. Preflight: assay doctor --format json
+          doctor_out="$("$assay_bin" doctor --format json)"
+          if [[ -z "$doctor_out" ]]; then
+            echo "::error::assay doctor --format json produced empty stdout"
+            exit 1
+          fi
+          printf '%s\n' "$doctor_out" | python3 -c 'import json, sys; json.load(sys.stdin)'
+
+          # 3. Starter files: assay init --preset dev --hello-trace
+          init_scratch="$(mktemp -d)"
+          assay_bin_abs="$(cd "$(dirname "$assay_bin")" && pwd)/$(basename "$assay_bin")"
+          init_out="$(
+            cd "$init_scratch"
+            "$assay_bin_abs" init --preset dev --hello-trace
+          )"
+          if [[ -z "$init_out" ]]; then
+            echo "::error::assay init produced empty stdout"
+            exit 1
+          fi
+          if [[ ! -f "$init_scratch/eval.yaml" || ! -f "$init_scratch/traces/hello.jsonl" ]]; then
+            echo "::error::assay init did not scaffold expected files"
+            exit 1
+          fi
+          rm -rf "$init_scratch"
+
       # Non-Linux: Exclude OS-specific crates (assay-monitor, assay-cli)
       # Windows/macOS automatically use bundled sqlite via cfg() in Cargo.toml
       - name: Test Workspace (Cross-Platform)
