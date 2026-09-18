@@ -4,8 +4,6 @@
 
 #![allow(deprecated)]
 
-use assay_evidence::store::KeyBuilder;
-use assay_evidence::StoreSpec;
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
@@ -658,17 +656,18 @@ fn test_evidence_index_rebuild_exit_code_stale_refs_success() {
         .assert()
         .success();
 
-    // Derive the stale reference path using the store's public naming helper on the owned TempDir
-    let spec = StoreSpec::parse(&store_url).unwrap();
-    let kb = KeyBuilder::new(&spec.prefix);
-    let stale_ref_dir = store_dir.join(kb.run_bundles_prefix("stale_run").unwrap().as_ref());
-    fs::create_dir_all(&stale_ref_dir).unwrap();
-    let stale_ref_file = store_dir.join(
-        kb.run_bundle_ref_key("stale_run", "sha256:ghost_nonexistent")
-            .unwrap()
-            .as_ref(),
-    );
-    fs::write(&stale_ref_file, b"sha256:ghost_nonexistent").unwrap();
+    // Plant stale ref via the store's public API
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        use assay_evidence::store::BundleStore;
+        let store = assay_evidence::store::ObjectStoreBundleStore::from_url(&store_url)
+            .await
+            .unwrap();
+        store
+            .link_run_bundle("stale_run", "sha256:ghost_nonexistent")
+            .await
+            .unwrap();
+    });
 
     // Rebuild index: stale refs found -> exits 0 with stale refs listed
     Command::cargo_bin("assay")
@@ -700,17 +699,21 @@ fn test_evidence_index_rebuild_exit_code_failed_bundle_failure() {
         .assert()
         .success();
 
-    // Derive the corrupt bundle path using the store's public naming helper on the owned TempDir
-    let spec = StoreSpec::parse(&store_url).unwrap();
-    let kb = KeyBuilder::new(&spec.prefix);
-    let bundles_dir = store_dir.join(kb.bundles_prefix().as_ref());
-    fs::create_dir_all(&bundles_dir).unwrap();
-    let corrupt_bundle_file = store_dir.join(
-        kb.bundle_key("sha256:corrupted_bundle_bytes")
-            .unwrap()
-            .as_ref(),
-    );
-    fs::write(&corrupt_bundle_file, b"corrupted not tar gz data").unwrap();
+    // Plant corrupt bundle via the store's public API
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        use assay_evidence::store::BundleStore;
+        let store = assay_evidence::store::ObjectStoreBundleStore::from_url(&store_url)
+            .await
+            .unwrap();
+        store
+            .put_bundle(
+                "sha256:corrupted_bundle_bytes",
+                assay_evidence::store::Bytes::from_static(b"corrupted not tar gz data"),
+            )
+            .await
+            .unwrap();
+    });
 
     // Rebuild index: verification failure -> exits 1 with failed bundle listed
     Command::cargo_bin("assay")

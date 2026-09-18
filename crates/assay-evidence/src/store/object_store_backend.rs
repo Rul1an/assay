@@ -982,7 +982,10 @@ mod tests {
         assert_eq!(status.object_lock, "unobserved:unsupported_backend");
 
         let tmp = tempfile::tempdir().unwrap();
-        let file_spec = StoreSpec::parse(&format!("file://{}", tmp.path().display())).unwrap();
+        let store_url = url::Url::from_file_path(tmp.path())
+            .expect("valid file URL from tempdir")
+            .to_string();
+        let file_spec = StoreSpec::parse(&store_url).unwrap();
         let file_store = ObjectStoreBundleStore::from_spec(&file_spec).await.unwrap();
         let file_status = file_store.store_status(&file_spec).await;
         assert_ne!(file_status.object_lock, "unknown");

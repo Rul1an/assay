@@ -26,7 +26,7 @@ pub mod object_store_backend;
 pub mod rebuild;
 
 use async_trait::async_trait;
-use bytes::Bytes;
+pub use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 pub use bounded::{BoundedGetError, StreamCeiling};
