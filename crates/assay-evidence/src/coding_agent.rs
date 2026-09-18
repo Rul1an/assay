@@ -256,12 +256,29 @@ pub fn coding_agent_claim_decision(
     }
 }
 
+/// Map declared depth onto the coverage state the sibling already carries.
+///
+/// `retained_through < steps_total` reads as [`CodingAgentCoverageState::Partial`].
+/// Missing either field, or an equal pair, leaves `coverage` unchanged so a
+/// producer-reported total cannot mint [`CodingAgentCoverageState::Observed`].
+pub fn session_coverage_declared_depth(
+    sibling: &PayloadSessionCoverage,
+) -> CodingAgentCoverageState {
+    match (sibling.retained_through, sibling.steps_total) {
+        (Some(retained), Some(total)) if retained < total => CodingAgentCoverageState::Partial,
+        _ => sibling.coverage,
+    }
+}
+
 /// Return the claim decision for a session finding given an optional sibling coverage event.
 ///
 /// Delegating to [`coding_agent_claim_decision`]:
 /// - A finding with no sibling reads as the most restrictive coverage ([`CodingAgentCoverageState::Partial`]),
 ///   so absence claims stay blocked.
 /// - A sibling for a different `rule_id` does not apply and fails closed as no sibling.
+/// - Declared depth is applied through [`session_coverage_declared_depth`] before the
+///   producer-Observed collapse, so `retained_through < steps_total` reads as Partial
+///   and `retained_through == steps_total` keeps the sibling's coverage and source class.
 /// - `Observed` coverage counts only with a non-producer source class; otherwise it reads
 ///   as [`CodingAgentCoverageState::SelfReported`].
 pub fn session_finding_claim_decision(
@@ -278,7 +295,7 @@ pub fn session_finding_claim_decision(
             CodingAgentCoverageState::Partial,
         ),
         Some(s) => {
-            let coverage = match s.coverage {
+            let coverage = match session_coverage_declared_depth(s) {
                 // Observed counts only with a non-producer source class; otherwise it reads as self-reported.
                 CodingAgentCoverageState::Observed
                     if s.source_class == CodingAgentSourceClass::ProducerReported =>
