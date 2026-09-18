@@ -511,6 +511,12 @@ pub struct PayloadSessionCoverage {
     pub coverage: crate::coding_agent::CodingAgentCoverageState,
     /// Source class of the observer.
     pub source_class: crate::coding_agent::CodingAgentSourceClass,
+    /// Declared length of the evaluated step sequence, when the producer states one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steps_total: Option<u64>,
+    /// Highest retained step in that sequence, when the producer states one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retained_through: Option<u64>,
 }
 
 impl PayloadSessionCoverage {
@@ -518,6 +524,8 @@ impl PayloadSessionCoverage {
     pub const EVENT_TYPE: &'static str = "assay.session.coverage";
 
     /// Build a session coverage record referencing a finding event.
+    ///
+    /// Depth fields stay unset so existing callers keep the slice-1 wire shape.
     pub fn new(
         finding_id: impl Into<String>,
         rule_id: impl Into<String>,
@@ -529,7 +537,24 @@ impl PayloadSessionCoverage {
             rule_id: rule_id.into(),
             coverage,
             source_class,
+            steps_total: None,
+            retained_through: None,
         }
+    }
+
+    /// Attach a declared depth extent without changing `new`'s signature.
+    ///
+    /// A setter rather than a second constructor: depth is optional, the four
+    /// required fields already have a home, and every existing `new` call stays
+    /// source-compatible.
+    pub fn with_declared_depth(
+        mut self,
+        steps_total: Option<u64>,
+        retained_through: Option<u64>,
+    ) -> Self {
+        self.steps_total = steps_total;
+        self.retained_through = retained_through;
+        self
     }
 }
 
