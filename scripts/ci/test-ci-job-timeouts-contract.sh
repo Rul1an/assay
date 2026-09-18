@@ -30,6 +30,13 @@ abort "ci.yml jobs must be a mapping" unless jobs.is_a?(Hash)
 # Authoritative CI-5B mapping (#2244 clarification): short=10, hosted heavy=20,
 # eBPF smoke preserved at 15/60.
 #
+# `test` is the one hosted-heavy exception. Windows cold-cache full-code runs
+# now finish at 16-20 minutes and have been cancelled at the 20-minute ceiling
+# after every step succeeded (job 105592874848, 20:17 of work). Ubuntu and
+# macOS stay at 20. The pin is the exact matrix expression so a raise cannot
+# hide as a class-wide bump. GitHub evaluates job timeout-minutes against the
+# matrix context (docs: jobs.<job_id>.timeout-minutes allowed contexts).
+#
 # `semver` is a reusable-workflow caller job (`uses:`); GitHub does not allow
 # `timeout-minutes` on that job shape, so its timeout is pinned inside
 # semver-public.yml's own jobs.
@@ -49,7 +56,7 @@ expected_timeouts = {
   "evidenceref-live-resolve" => 10,
   "deps-security" => 20,
   "perf" => 20,
-  "test" => 20,
+  "test" => "${{ matrix.os == 'windows-latest' && 30 || 20 }}",
   "ebpf-smoke-ubuntu" => 15,
   "ebpf-smoke-self-hosted" => 60,
 }.freeze
@@ -72,14 +79,20 @@ expected_timeouts.each do |job_id, want|
     abort "#{job_id}: missing timeout-minutes (would inherit GitHub's 360-minute default)"
   end
   got = job["timeout-minutes"]
-  unless got.is_a?(Integer) && got.positive?
-    abort "#{job_id}: timeout-minutes must be a positive integer literal, got #{got.inspect}"
-  end
-  if got == 360
-    abort "#{job_id}: timeout-minutes must not be the 360-minute GitHub fallback"
-  end
-  unless got == want
-    abort "#{job_id}: timeout-minutes class mismatch: expected #{want}, got #{got}"
+  if want.is_a?(String)
+    unless got == want
+      abort "#{job_id}: timeout-minutes must stay the pinned matrix expression #{want.inspect}, got #{got.inspect}"
+    end
+  else
+    unless got.is_a?(Integer) && got.positive?
+      abort "#{job_id}: timeout-minutes must be a positive integer literal, got #{got.inspect}"
+    end
+    if got == 360
+      abort "#{job_id}: timeout-minutes must not be the 360-minute GitHub fallback"
+    end
+    unless got == want
+      abort "#{job_id}: timeout-minutes class mismatch: expected #{want}, got #{got}"
+    end
   end
 end
 
@@ -142,6 +155,8 @@ when "wrong-class-short-as-heavy"
   jobs.fetch("scope")["timeout-minutes"] = 20
 when "wrong-class-heavy-as-short"
   jobs.fetch("test")["timeout-minutes"] = 10
+when "windows-timeout-raised"
+  jobs.fetch("test")["timeout-minutes"] = "${{ matrix.os == 'windows-latest' && 40 || 20 }}"
 when "fallback-360"
   jobs.fetch("ci")["timeout-minutes"] = 360
 when "ebpf-ubuntu-changed"
@@ -172,6 +187,7 @@ RUBY
   run_mutation missing-timeout missing-timeout
   run_mutation wrong-class-short-as-heavy wrong-class-short-as-heavy
   run_mutation wrong-class-heavy-as-short wrong-class-heavy-as-short
+  run_mutation windows-timeout-raised windows-timeout-raised
   run_mutation fallback-360 fallback-360
   run_mutation ebpf-ubuntu-changed ebpf-ubuntu-changed
   run_mutation ebpf-self-hosted-changed ebpf-self-hosted-changed
