@@ -15,7 +15,7 @@
 //!
 //! ```text
 //! bundles/{bundle_id}/bundle.tar.gz     # The bundle itself
-//! runs/{run_id}/bundles/{bundle_id}.ref # Run-to-bundle index (for list --run-id)
+//! runs/{run_id}/{bundle_id}.ref         # Run-to-bundle index (for list --run-id)
 //! ```
 
 mod bounded;
@@ -23,15 +23,35 @@ pub mod config;
 pub mod error;
 pub mod naming;
 pub mod object_store_backend;
+pub mod rebuild;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub use bounded::{BoundedGetError, StreamCeiling};
 pub use error::{StoreError, StoreResult};
 pub use naming::KeyBuilder;
 pub use object_store_backend::ObjectStoreBundleStore;
+pub use rebuild::{FailedBundle, IndexRebuildReport, StaleRef};
+
+pub const OBJECT_LOCK_ENABLED: &str = "enabled";
+pub const OBJECT_LOCK_DISABLED: &str = "disabled";
+pub const OBJECT_LOCK_UNSUPPORTED: &str = "unobserved:unsupported_backend";
+pub const OBJECT_LOCK_NOT_PROBED: &str = "unobserved:not_probed";
+pub const OBJECT_LOCK_PERMISSION_DENIED: &str = "unobserved:permission_denied";
+pub const OBJECT_LOCK_ERROR: &str = "unobserved:error";
+
+/// Map storage backend scheme to its initial/observed Object Lock status.
+///
+/// File and memory stores return `"unobserved:unsupported_backend"`.
+/// S3 returns `"unobserved:not_probed"` in this slice.
+pub fn object_lock_status_for_backend(backend: &str) -> &'static str {
+    match backend {
+        "s3" => OBJECT_LOCK_NOT_PROBED,
+        _ => OBJECT_LOCK_UNSUPPORTED,
+    }
+}
 
 /// Diagnostic status of a connected evidence store.
 ///
@@ -47,7 +67,13 @@ pub struct StoreStatus {
     pub prefix: String,
     pub bundle_count: u64,
     pub total_size_bytes: u64,
-    /// Best-effort Object Lock detection: `"unknown"`, `"enabled"`, or `"disabled"`.
+    /// Observed Object Lock status. Closed vocabulary:
+    /// - `"enabled"`
+    /// - `"disabled"`
+    /// - `"unobserved:unsupported_backend"`
+    /// - `"unobserved:not_probed"`
+    /// - `"unobserved:permission_denied"`
+    /// - `"unobserved:error"`
     pub object_lock: String,
 }
 
@@ -173,7 +199,7 @@ pub struct BundleMeta {
 }
 
 /// Reference linking a run to a bundle.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunBundleRef {
     pub run_id: String,
     pub bundle_id: String,
@@ -212,7 +238,7 @@ pub trait BundleStore: Send + Sync {
 
     /// Link a bundle to a run ID (for `list --run-id`).
     ///
-    /// Creates a small reference object under `runs/{run_id}/bundles/`.
+    /// Creates a small reference object under `runs/{run_id}/`.
     /// Idempotent: linking the same bundle twice is a no-op.
     async fn link_run_bundle(&self, run_id: &str, bundle_id: &str) -> StoreResult<()>;
 

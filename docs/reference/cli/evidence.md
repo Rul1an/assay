@@ -727,3 +727,83 @@ is not a refusal. A conforming document is not a clean result.
 
 `--max-bytes` selects a budget and never raises the hard maximum. Nobody signs
 this document; it is a fresh local result.
+
+---
+
+## Evidence Store Commands (BYOS)
+
+Assay supports Bring Your Own Storage (BYOS) over S3, Azure Blob, Google Cloud Storage,
+and local filesystems.
+
+### Store Status
+
+Check store connectivity, read/write permissions, and Object Lock status:
+
+```bash
+assay evidence store-status [--store <URL>] [--store-config <PATH>] [--format table|json|plain]
+```
+
+`object_lock` reports an observed status from a closed vocabulary:
+
+| Status | Meaning |
+|--------|---------|
+| `enabled` | Object Lock is enabled on the bucket |
+| `disabled` | Object Lock is disabled on the bucket |
+| `unobserved:unsupported_backend` | Storage backend does not support Object Lock (e.g. `file://`, `memory://`) |
+| `unobserved:not_probed` | Backend supports Object Lock (e.g. S3), but live probing has not been run |
+| `unobserved:permission_denied` | Credentials lack permission to query Object Lock configuration |
+| `unobserved:error` | Probe error encountered while inspecting Object Lock configuration |
+
+### Push
+
+Upload an evidence bundle to the store:
+
+```bash
+assay evidence push <BUNDLE> [--store <URL>] [--run-id <RUN_ID>] [--allow-exists]
+```
+
+### Pull
+
+Download an evidence bundle from the store:
+
+```bash
+assay evidence pull --bundle-id <ID> [--store <URL>] [-o <PATH>] [--verify]
+assay evidence pull --run-id <RUN_ID> [--store <URL>] [-o <DIR>] [--verify]
+```
+
+With `--verify`, the downloaded bundle is verified before anything is written to disk,
+binding the served archive to the requested `bundle_id`.
+
+### List
+
+List evidence bundles in the store:
+
+```bash
+assay evidence list [--store <URL>] [--run-id <RUN_ID>] [--prefix <PREFIX>] [--limit <N>] [--format plain|json|table]
+```
+
+### Index Rebuild
+
+Reconstruct the non-canonical run index (`runs/{run_id}/{bundle_id}.ref`) from
+canonical bundles (`bundles/{bundle_id}.tar.gz`):
+
+```bash
+assay evidence index rebuild [--store <URL>] [--store-config <PATH>] [--format summary|json]
+```
+
+- Discovers canonical bundles from `bundles/`.
+- Verifies each bundle's full cryptographic integrity and manifest binding (`bundle_id == run_root`).
+- Skips and reports corrupted bundles without linking them.
+- (Re)creates missing run links under `runs/{run_id}/{bundle_id}.ref`.
+- Idempotent: existing links are preserved and repeated runs link 0 new refs.
+- Detects and reports stale references (refs pointing to bundles missing from the canonical store)
+  without deleting or trusting them.
+- In JSON mode, emits document schema `assay.evidence.index_rebuild.v0`.
+
+#### Exit Codes
+
+| Exit Code | Condition | Behavior |
+|-----------|-----------|----------|
+| `0` | Success | All discovered bundles verified and indexed successfully. If stale references are detected, they are listed and reported, but the command exits `0`. |
+| `1` | Verification failure / Store error | One or more canonical bundles failed cryptographic or schema verification, or a store I/O error occurred. |
+| `2` | Configuration error | Store URL resolution failed or the store specification URL is invalid. |
