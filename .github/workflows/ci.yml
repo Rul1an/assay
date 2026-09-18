@@ -339,6 +339,25 @@ jobs:
           cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml >/dev/null \
             || { echo "::error::locked fuzz metadata validation failed; inspect the Cargo error above"; exit 1; }
 
+  osv-cargo-lock:
+    # Full-scan reusable workflow, not osv-scanner-reusable-pr.yml. The PR-diff
+    # variant reports only vulnerabilities introduced by the PR relative to its
+    # base and would not have caught GHSA-3rjw-m598-pq24 on cmov 0.5.2, which sat
+    # unchanged on main. This job fails on any existing finding in the named
+    # lockfiles. cargo-deny and cargo-audit stay as they are; this is a second
+    # advisory source, not a replacement.
+    name: OSV Cargo.lock
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
+    permissions:
+      actions: read
+      contents: read
+      # Reusable workflow uploads SARIF to the Security tab.
+      security-events: write
+    with:
+      scan-args: |-
+        --lockfile=Cargo.lock
+        --lockfile=fuzz/Cargo.lock
+
   clippy:
     name: Clippy (deny warnings)
     needs: [scope]
@@ -1294,7 +1313,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: always()
-    needs: [scope, deps-security, clippy, rustdoc, public-msrv, distribution-boundary, publish-shape-cli, public-crate-policy, vendored-packs, release-asset-contract, mcp-registry-foundation, perf, test, ebpf-smoke-ubuntu, generated-drift, evidenceref-live-resolve, semver]
+    needs: [scope, deps-security, osv-cargo-lock, clippy, rustdoc, public-msrv, distribution-boundary, publish-shape-cli, public-crate-policy, vendored-packs, release-asset-contract, mcp-registry-foundation, perf, test, ebpf-smoke-ubuntu, generated-drift, evidenceref-live-resolve, semver]
     permissions:
       contents: read
     steps:
@@ -1329,6 +1348,7 @@ jobs:
           bash scripts/ci/test-classify-lightweight-changes.sh
           bash scripts/ci/test-deps-security-toolchain-contract.sh
           bash scripts/ci/test-fuzz-lock-required-gate.sh
+          bash scripts/ci/test-osv-cargo-lock-gate.sh
           bash scripts/ci/test-mcp-preflight-windows-contract.sh
           bash scripts/ci/test-reconcile-docs-auto-pr.sh
           bash scripts/ci/test-setup-rust-composite-contract.sh
@@ -1370,6 +1390,7 @@ jobs:
           SCOPE_RESULT: ${{ needs.scope.result }}
           LIGHTWEIGHT_ONLY: ${{ needs.scope.outputs.lightweight_only }}
           DEPS_SECURITY_RESULT: ${{ needs.deps-security.result }}
+          OSV_CARGO_LOCK_RESULT: ${{ needs.osv-cargo-lock.result }}
           CLIPPY_RESULT: ${{ needs.clippy.result }}
           RUSTDOC_RESULT: ${{ needs.rustdoc.result }}
           PUBLIC_MSRV_RESULT: ${{ needs.public-msrv.result }}
@@ -1480,6 +1501,7 @@ jobs:
           for triple in \
             "scope|${SCOPE_RESULT}|required" \
             "deps-security|${DEPS_SECURITY_RESULT}|${code_gated_expectation}" \
+            "osv-cargo-lock|${OSV_CARGO_LOCK_RESULT}|required" \
             "clippy|${CLIPPY_RESULT}|${code_gated_expectation}" \
             "rustdoc|${RUSTDOC_RESULT}|${code_gated_expectation}" \
             "public-msrv|${PUBLIC_MSRV_RESULT}|${code_gated_expectation}" \

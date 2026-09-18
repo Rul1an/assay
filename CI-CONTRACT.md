@@ -82,7 +82,9 @@ inside jobs with an explicit summary.
 Keep `CI` as the universal merge gate unless branch protection is intentionally
 changed. It should continue to cover:
 
-- dependency security through `cargo-deny` and `cargo-audit`;
+- dependency security through `cargo-deny` and `cargo-audit`, plus an OSV
+  full scan of `Cargo.lock` and `fuzz/Cargo.lock` (a second advisory source
+  for GHSA-only records those two tools cannot see; not a replacement);
 - clippy with warnings denied;
 - public/private boundary vocabulary guard;
 - publish-shape guardrails for public crates;
@@ -302,12 +304,14 @@ Keep or add:
   measure classic branch-protection or webhook settings unless a future
   read/admin token is intentionally added.
 - OSV-Scanner for non-Rust dependency surfaces with resolved manifests or
-  lockfiles. RustSec remains owned by `cargo-deny` and `cargo-audit`, including
-  any deliberately documented advisory ignores, so scheduled OSV must not
-  resurface `Cargo.lock` with a different verdict unless an `osv-scanner.toml`
-  mirrors the same Rust policy. The explicit non-Rust target list must fail
-  closed when a listed target is removed, or when a new tracked
-  `package-lock.json` or `requirements*.txt` appears outside the list.
+  lockfiles. Rust lockfiles are owned by the required PR `OSV Cargo.lock` job
+  (full scan, not the PR-diff reusable) together with `cargo-deny` and
+  `cargo-audit`. Scheduled OSV must not also scan `Cargo.lock` or
+  `fuzz/Cargo.lock`. Exceptions for the PR gate live in `osv-scanner.toml` as
+  `[[IgnoredVulns]]` entries with `id`, `reason`, and `ignoreUntil`. The
+  explicit non-Rust target list must fail closed when a listed target is
+  removed, or when a new tracked `package-lock.json` or `requirements*.txt`
+  appears outside the list.
 - CodeQL/default code scanning for Rust-adjacent glue where available, Python,
   JavaScript/TypeScript, shell, and workflow files;
 - ClusterFuzzLite only for small deterministic parsers/canonicalizers and
