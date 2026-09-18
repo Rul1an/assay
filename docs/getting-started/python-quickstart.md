@@ -45,9 +45,16 @@ def test_compliance():
 If you need deeper inspection (e.g., coverage percentages), use the `Coverage` class.
 
 ```python
+import json
 from assay import Coverage
 
 def test_coverage():
+    # Load the same JSONL the validate() example uses.
+    with open("traces.jsonl") as f:
+        traces = [json.loads(line) for line in f]
+    # analyze() needs a list of sessions; it does not wrap a flat list of events
+    my_traces = [traces]
+
     cov = Coverage("assay.yaml")
 
     # Analyze with a minimum coverage threshold of 90%

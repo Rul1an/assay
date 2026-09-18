@@ -154,6 +154,7 @@ jobs:
     name: Publish to PyPI
 YML
   bound='CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.'
+  printf 'The Python wheels cover %s\n' "$bound" > "$dest/README.md"
   for rel in \
     assay-python-sdk/README.md \
     docs/python-sdk/index.md \
@@ -529,6 +530,60 @@ PY
 expect_fail "dropped pre-commit selector path kernel-matrix.yml" --root "$GREEN"
 rm -f "$GREEN/.pre-commit-config.yaml"
 
+echo "=== mutation: drop getting-started/index.md from pre-commit files selector ==="
+cp "$ROOT/.pre-commit-config.yaml" "$GREEN/.pre-commit-config.yaml"
+python3 - "$GREEN/.pre-commit-config.yaml" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+pattern = re.compile(
+    r"^(\s+- id: python-artifact-truth[\s\S]*?^\s+files:\s+)(\S+)",
+    re.MULTILINE,
+)
+match = pattern.search(text)
+if not match:
+    raise SystemExit("python-artifact-truth files: selector missing")
+files = match.group(2)
+if "getting-started/(index|" not in files and "getting-started/(index)" not in files:
+    raise SystemExit("pre-commit files selector missing getting-started index.md")
+mutated = files.replace("index|", "")
+if mutated == files:
+    raise SystemExit("could not drop index from " + files)
+path.write_text(text[: match.start(2)] + mutated + text[match.end(2) :])
+PY
+expect_fail "dropped pre-commit selector path docs/getting-started/index.md" --root "$GREEN"
+rm -f "$GREEN/.pre-commit-config.yaml"
+
+echo "=== mutation: drop README.md from pre-commit files selector ==="
+cp "$ROOT/.pre-commit-config.yaml" "$GREEN/.pre-commit-config.yaml"
+python3 - "$GREEN/.pre-commit-config.yaml" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+pattern = re.compile(
+    r"^(\s+- id: python-artifact-truth[\s\S]*?^\s+files:\s+)(\S+)",
+    re.MULTILINE,
+)
+match = pattern.search(text)
+if not match:
+    raise SystemExit("python-artifact-truth files: selector missing")
+files = match.group(2)
+if "|README.md" not in files and "|README\\.md" not in files:
+    raise SystemExit("pre-commit files selector missing README.md")
+mutated = files.replace("|README\\.md", "")
+if mutated == files:
+    raise SystemExit("could not drop README.md from " + files)
+path.write_text(text[: match.start(2)] + mutated + text[match.end(2) :])
+PY
+expect_fail "dropped pre-commit selector path README.md" --root "$GREEN"
+rm -f "$GREEN/.pre-commit-config.yaml"
+
 echo "=== mutation: listed install-doc claims Python 3.12+ ==="
 cp "$GREEN/docs/python-sdk/index.md" "$TMP/docs.bak"
 python3 - "$GREEN/docs/python-sdk/index.md" <<'PY'
@@ -669,6 +724,9 @@ new_bound = matrix["support_bound"]
 for rel in matrix["install_docs"]:
     path = matrix_path.parent.parent / rel
     path.write_text(path.read_text().replace(old_bound, new_bound))
+readme_path = matrix_path.parent.parent / "README.md"
+if readme_path.is_file():
+    readme_path.write_text(readme_path.read_text().replace(old_bound, new_bound))
 PY
 
 expect_pass "abi3 positive control" --root "$ABI3"
@@ -840,6 +898,9 @@ matrix_path.write_text(json.dumps(data, indent=2) + "\n")
 for rel in data["install_docs"]:
     doc_path = root / rel
     doc_path.write_text(doc_path.read_text().replace(tree_bound, published_bound))
+readme_path = root / "README.md"
+if readme_path.is_file():
+    readme_path.write_text(readme_path.read_text().replace(tree_bound, published_bound))
 PY
 
 python3 - "$ABI3_PRE_RELEASE" "$PUBLISHED_BOUND" "$TREE_BOUND" <<'PY'
@@ -855,8 +916,38 @@ data = json.loads(matrix_path.read_text())
 for rel in data["install_docs"]:
     doc_path = root / rel
     doc_path.write_text(doc_path.read_text().replace(published_bound, tree_bound))
+readme_path = root / "README.md"
+if readme_path.is_file():
+    readme_path.write_text(readme_path.read_text().replace(published_bound, tree_bound))
 PY
 expect_fail "doc carries tree sentence (3.12, 3.13, and 3.14) instead of published sentence" --root "$ABI3_PRE_RELEASE"
+
+echo "=== mutation: README Python support bound drifts ==="
+cp "$GREEN/README.md" "$TMP/readme.bak"
+printf 'The Python wheels cover CPython 3.11 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.\n' > "$GREEN/README.md"
+expect_fail "README Python support bound drifts" --root "$GREEN"
+mv "$TMP/readme.bak" "$GREEN/README.md"
+
+echo "=== mutation: docs/getting-started/index.md interpreter bound drifts without pip install ==="
+cp "$GREEN/docs/getting-started/index.md" "$TMP/index.bak"
+cat > "$GREEN/docs/getting-started/index.md" <<'EOF'
+# Getting Started
+## Prerequisites
+- CPython 3.11 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
+EOF
+expect_fail "docs/getting-started/index.md without pip install has drifted bound" --root "$GREEN"
+mv "$TMP/index.bak" "$GREEN/docs/getting-started/index.md"
+
+echo "=== mutation: docs/getting-started/index.md has stale SDK prerequisite claim ==="
+cp "$GREEN/docs/getting-started/index.md" "$TMP/index.bak"
+cat > "$GREEN/docs/getting-started/index.md" <<'EOF'
+# Getting Started
+## Prerequisites
+- **Rust 1.96** for repository development, or CPython 3.12 for Python SDK use
+- CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
+EOF
+expect_fail "docs/getting-started/index.md has stale SDK prerequisite claim" --root "$GREEN"
+mv "$TMP/index.bak" "$GREEN/docs/getting-started/index.md"
 
 echo "=== no-op restore ==="
 expect_pass "restored green fixture" --root "$GREEN"

@@ -69,7 +69,7 @@ non_claim=forwarded_to_local_mock_only
 Released surfaces:
 
 - Static project manifests are shipped for Claude Code and Cursor; Codex uses the equivalent TOML entry documented in the [editor MCP recipe](docs/guides/editor-mcp-recipe.md). Manifest presence is not host-discovery proof. `assay mcp config-path` supports Claude and Cursor only.
-- Published v6.5.0 CLI archives cover Linux x86_64/arm64, macOS x86_64/arm64, and Windows x86_64. The Python wheels cover CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
+- Published v6.5.0 CLI archives cover Linux x86_64/arm64, macOS x86_64/arm64, and Windows x86_64. The Python wheels cover CPython 3.12, 3.13, and 3.14 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
 - Published `assay-mcp-server` archives cover Linux x86_64/arm64. MCPB and `server.json` package descriptors are also published; their presence is not host-discovery proof.
 - CI: [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-security). Core flows need no hosted backend or API key. New to the threat model? The [OWASP MCP Top 10 mapping](docs/security/OWASP-MCP-TOP10-MAPPING.md) states, per risk, what Assay covers and deliberately does not.
 
@@ -93,6 +93,7 @@ Released surfaces:
 ```
 
 Current release: [`v6.5.0`](https://github.com/Rul1an/assay/releases/tag/v6.5.0). [CHANGELOG.md](CHANGELOG.md) and release notes remain the authority for released behavior; merged changes after the tag are `Unreleased`, and crates.io publication is separate from merge state.
+Launch definition and support commitment: [docs/LAUNCH.md](docs/LAUNCH.md).
 
 ## Is this for me?
 
@@ -168,7 +169,7 @@ schemas:
 
 Trust claims use explicit epistemology, not a single safety score: `verified` (direct evidence or offline verification), `self_reported` (emitted without independent corroboration), `inferred` (bounded, documented rules), `absent` (no trustworthy evidence). Assay ships no aggregate trust score or `safe/unsafe` badge as the main output — see [ADR-033](docs/architecture/ADR-033-OTel-Trust-Compiler-Positioning.md).
 
-Tool-decision path latency on an M1 Pro fragmented-IPI harness: main protection `0.771ms` p50 / `1.913ms` p95; fast-path `0.345ms` p50 / `1.145ms` p95. These are tool-decision timings, not end-to-end model latency.
+Tool-decision path latency on a fragmented-IPI mitigation harness (measured 2026-03-02 at commit `289a43ecc144`, see [experiment results](docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-2026Q1-RESULTS.md)): `0.771ms` p50 / `1.913ms` p95. These are tool-decision timings, not end-to-end model latency.
 
 [Assay-Runner](docs/reference/runner/index.md) is an internal measured-run subsystem behind the delegated Linux/eBPF acceptance path — `publish = false`, not a standalone product, no release commitment.
 
