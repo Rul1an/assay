@@ -5,6 +5,7 @@
 #![allow(deprecated)]
 
 use assert_cmd::Command;
+use bytes::Bytes;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::tempdir;
@@ -709,7 +710,7 @@ fn test_evidence_index_rebuild_exit_code_failed_bundle_failure() {
         store
             .put_bundle(
                 "sha256:corrupted_bundle_bytes",
-                assay_evidence::store::Bytes::from_static(b"corrupted not tar gz data"),
+                Bytes::from_static(b"corrupted not tar gz data"),
             )
             .await
             .unwrap();
