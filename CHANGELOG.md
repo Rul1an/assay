@@ -32,7 +32,7 @@ The shipped strings match this note. The reason codes are printed as those exact
 - CI/test-only: native Windows golden-path opening (#3104), bounded-probe stall diagnostics (#3107), and load-bearing documented-keys PAGES (#3110).
 
 ### Documentation
-- First-run pages now describe the installed binary (#3102), support-bound sentences are aligned (#3106), the accepted launch definition is recorded (#3108), and the Python `validate()` example now defines the traces it loads (#3109).
+- First-run pages now describe the installed binary (#3102), support-bound sentences are aligned (#3106), the accepted launch definition is recorded (#3108), and the Python `Coverage.analyze()` example now defines the traces it loads (#3109).
 
 ## [6.5.0] - 2026-09-17
 
