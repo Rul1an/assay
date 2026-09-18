@@ -112,6 +112,24 @@ fn deadline_expiry(
     )
 }
 
+struct StreamCapture {
+    bytes: Vec<u8>,
+    last_byte_at: Option<Instant>,
+}
+
+impl StreamCapture {
+    fn progress(&self, name: &str, deadline: Instant) -> String {
+        match self.last_byte_at {
+            None => format!("{name}: no bytes received"),
+            Some(at) => format!(
+                "{name}: {} bytes, last byte {:?} before deadline",
+                self.bytes.len(),
+                deadline.saturating_duration_since(at)
+            ),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 enum CapturedStream {
     Stdout,
@@ -196,6 +214,7 @@ pub fn run_bounded(
 
     let deadline = Instant::now() + limits.timeout;
     let mut early_failure = None;
+    let mut deadline_expired = false;
     let mut observed_status = None;
     let ending = loop {
         if early_failure.is_none() {
@@ -249,6 +268,7 @@ pub fn run_bounded(
                     !stdout_reader.is_finished(),
                     !stderr_reader.is_finished(),
                 ));
+                deadline_expired = true;
             }
             break terminate_and_reap(
                 child.as_mut(),
@@ -267,16 +287,25 @@ pub fn run_bounded(
     let stderr = join_reader(stderr_reader, context, &command_display, "stderr")?;
 
     if let Some(failure) = early_failure {
+        let failure = if deadline_expired {
+            format!(
+                "{failure}; {}; {}",
+                stdout.progress("stdout", deadline),
+                stderr.progress("stderr", deadline),
+            )
+        } else {
+            failure
+        };
         return Err(failure_diagnostic(
             context,
             &command_display,
             &failure,
             &ending,
-            &stdout,
-            &stderr,
+            &stdout.bytes,
+            &stderr.bytes,
         ));
     }
-    if stdout.len() > limits.max_stdout_bytes {
+    if stdout.bytes.len() > limits.max_stdout_bytes {
         return Err(failure_diagnostic(
             context,
             &command_display,
@@ -285,11 +314,11 @@ pub fn run_bounded(
                 limits.max_stdout_bytes
             ),
             &ending,
-            &stdout,
-            &stderr,
+            &stdout.bytes,
+            &stderr.bytes,
         ));
     }
-    if stderr.len() > limits.max_stderr_bytes {
+    if stderr.bytes.len() > limits.max_stderr_bytes {
         return Err(failure_diagnostic(
             context,
             &command_display,
@@ -298,8 +327,8 @@ pub fn run_bounded(
                 limits.max_stderr_bytes
             ),
             &ending,
-            &stdout,
-            &stderr,
+            &stdout.bytes,
+            &stderr.bytes,
         ));
     }
     // Status and both output streams are already collected, so BrokenPipe here
@@ -313,15 +342,15 @@ pub fn run_bounded(
             &command_display,
             &format!("write stdin: {error}"),
             &ending,
-            &stdout,
-            &stderr,
+            &stdout.bytes,
+            &stderr.bytes,
         ))
     })?;
 
     Ok(Output {
         status: ending.status,
-        stdout,
-        stderr,
+        stdout: stdout.bytes,
+        stderr: stderr.bytes,
     })
 }
 
@@ -330,25 +359,39 @@ fn spawn_reader<R: Read + Send + 'static>(
     limit: usize,
     stream: CapturedStream,
     overflow: mpsc::Sender<CapturedStream>,
-) -> thread::JoinHandle<std::io::Result<Vec<u8>>> {
+) -> thread::JoinHandle<std::io::Result<StreamCapture>> {
     thread::spawn(move || {
         let mut bytes = Vec::with_capacity(limit.saturating_add(1));
-        reader
-            .take(limit.saturating_add(1) as u64)
-            .read_to_end(&mut bytes)?;
+        let mut last_byte_at = None;
+        let mut limited = reader.take(limit.saturating_add(1) as u64);
+        let mut buf = [0u8; 1024];
+        loop {
+            match limited.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    last_byte_at = Some(Instant::now());
+                    bytes.extend_from_slice(&buf[..n]);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error),
+            }
+        }
         if bytes.len() > limit {
             let _ = overflow.send(stream);
         }
-        Ok(bytes)
+        Ok(StreamCapture {
+            bytes,
+            last_byte_at,
+        })
     })
 }
 
 fn join_reader(
-    reader: thread::JoinHandle<std::io::Result<Vec<u8>>>,
+    reader: thread::JoinHandle<std::io::Result<StreamCapture>>,
     context: &str,
     command: &str,
     stream: &str,
-) -> Result<Vec<u8>, String> {
+) -> Result<StreamCapture, String> {
     reader
         .join()
         .map_err(|_| format!("{context}: {command}: {stream} reader panicked"))?
@@ -549,6 +592,118 @@ mod tests {
         let mut command = Command::new("cmd");
         command.args(["/C", "exit", "/B", "23"]);
         command
+    }
+
+    /// Distinctive payload so a last-byte diagnostic can name an exact stream.
+    const STREAM_PROBE_PAYLOAD: &str = "STREAM_PROBE_PAYLOAD";
+    const STREAM_PROBE_SLEEP: &str = "5";
+
+    #[cfg(unix)]
+    fn stdout_then_sleep_command() -> Command {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            &format!("printf '{STREAM_PROBE_PAYLOAD}'; exec sleep {STREAM_PROBE_SLEEP}"),
+        ]);
+        command
+    }
+
+    #[cfg(windows)]
+    fn stdout_then_sleep_command() -> Command {
+        let mut command = Command::new("cmd");
+        command.args([
+            "/C",
+            &format!(
+                "echo {STREAM_PROBE_PAYLOAD}& ping -n {STREAM_PROBE_SLEEP} 127.0.0.1 >nul 2>nul"
+            ),
+        ]);
+        command
+    }
+
+    #[cfg(unix)]
+    fn stderr_then_sleep_command() -> Command {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            &format!("printf '{STREAM_PROBE_PAYLOAD}' >&2; exec sleep {STREAM_PROBE_SLEEP}"),
+        ]);
+        command
+    }
+
+    #[cfg(windows)]
+    fn stderr_then_sleep_command() -> Command {
+        let mut command = Command::new("cmd");
+        command.args([
+            "/C",
+            &format!(
+                "echo {STREAM_PROBE_PAYLOAD} 1>&2& ping -n {STREAM_PROBE_SLEEP} 127.0.0.1 >nul 2>nul"
+            ),
+        ]);
+        command
+    }
+
+    #[cfg(unix)]
+    fn silent_sleep_command() -> Command {
+        let mut command = Command::new("sleep");
+        command.arg(STREAM_PROBE_SLEEP);
+        command
+    }
+
+    #[cfg(windows)]
+    fn silent_sleep_command() -> Command {
+        // hanging_command() is ping without redirect and writes to stdout.
+        let mut command = Command::new("cmd");
+        command.args([
+            "/C",
+            &format!("ping -n {STREAM_PROBE_SLEEP} 127.0.0.1 >nul 2>nul"),
+        ]);
+        command
+    }
+
+    fn assert_deadline_keeps_existing_fields(error: &str) {
+        assert!(error.contains("deadline of"), "{error}");
+        assert!(error.contains("outstanding=["), "{error}");
+        assert!(error.contains("status="), "{error}");
+        assert!(error.contains("stdout="), "{error}");
+        assert!(error.contains("stderr="), "{error}");
+    }
+
+    fn excerpt_byte_count(error: &str, stream: &str) -> usize {
+        let key = format!("{stream}=");
+        let after = error
+            .split_once(&key)
+            .unwrap_or_else(|| panic!("missing {key} in {error}"))
+            .1;
+        let end = after
+            .find(" bytes)")
+            .unwrap_or_else(|| panic!("missing byte suffix after {key} in {error}"));
+        let prefix = &after[..end];
+        let open = prefix
+            .rfind('(')
+            .unwrap_or_else(|| panic!("missing byte count paren after {key} in {error}"));
+        prefix[open + 1..]
+            .parse()
+            .unwrap_or_else(|_| panic!("unreadable byte count after {key} in {error}"))
+    }
+
+    fn assert_stream_last_byte(error: &str, stream: &str, expected_bytes: usize) {
+        let expected = format!("{stream}: {expected_bytes} bytes, last byte ");
+        let start = error.find(&expected).unwrap_or_else(|| {
+            panic!("missing last-byte diagnostic for {stream} ({expected_bytes} bytes): {error}")
+        });
+        let rest = &error[start + expected.len()..];
+        let field_end = rest.find("; ").unwrap_or(rest.len());
+        assert!(
+            rest[..field_end].contains("before deadline"),
+            "last-byte field for {stream} must name the gap to the deadline: {error}"
+        );
+    }
+
+    fn assert_stream_silent(error: &str, stream: &str) {
+        assert!(
+            error.contains(&format!("{stream}: no bytes received")),
+            "{error}"
+        );
     }
 
     /// Re-exec mode env; replaces the old environment-derived PID-file path.
@@ -859,6 +1014,90 @@ mod tests {
             .expect_err("hanging child must time out");
         assert!(error.contains("hanging mutation"));
         assert!(error.contains("deadline"));
+    }
+
+    #[test]
+    fn deadline_names_stdout_bytes_and_last_byte_time_after_a_partial_write() {
+        let limits = ProcessLimits::new(Duration::from_millis(400), 1024, 1024);
+        let error = run_bounded(
+            stdout_then_sleep_command(),
+            b"",
+            limits,
+            "stdout last-byte probe",
+        )
+        .expect_err("write-then-sleep child must expire the deadline");
+
+        assert_deadline_keeps_existing_fields(&error);
+        assert!(
+            error.contains(STREAM_PROBE_PAYLOAD),
+            "stdout excerpt must carry the payload: {error}"
+        );
+        let stdout_bytes = excerpt_byte_count(&error, "stdout");
+        assert!(
+            stdout_bytes >= STREAM_PROBE_PAYLOAD.len(),
+            "stdout must contain the full payload: {error}"
+        );
+        assert_eq!(excerpt_byte_count(&error, "stderr"), 0, "{error}");
+        assert_stream_last_byte(&error, "stdout", stdout_bytes);
+        assert_stream_silent(&error, "stderr");
+    }
+
+    #[test]
+    fn deadline_names_stderr_bytes_and_last_byte_time_after_a_partial_write() {
+        let limits = ProcessLimits::new(Duration::from_millis(400), 1024, 1024);
+        let error = run_bounded(
+            stderr_then_sleep_command(),
+            b"",
+            limits,
+            "stderr last-byte probe",
+        )
+        .expect_err("stderr write-then-sleep child must expire the deadline");
+
+        assert_deadline_keeps_existing_fields(&error);
+        assert!(
+            error.contains(STREAM_PROBE_PAYLOAD),
+            "stderr excerpt must carry the payload: {error}"
+        );
+        let stderr_bytes = excerpt_byte_count(&error, "stderr");
+        assert!(
+            stderr_bytes >= STREAM_PROBE_PAYLOAD.len(),
+            "stderr must contain the full payload: {error}"
+        );
+        assert_eq!(excerpt_byte_count(&error, "stdout"), 0, "{error}");
+        assert_stream_last_byte(&error, "stderr", stderr_bytes);
+        assert_stream_silent(&error, "stdout");
+    }
+
+    #[test]
+    fn deadline_says_no_bytes_received_when_the_child_is_silent() {
+        let limits = ProcessLimits::new(Duration::from_millis(200), 1024, 1024);
+        let error = run_bounded(
+            silent_sleep_command(),
+            b"",
+            limits,
+            "silent last-byte probe",
+        )
+        .expect_err("silent sleeper must expire the deadline");
+
+        assert_deadline_keeps_existing_fields(&error);
+        assert_eq!(excerpt_byte_count(&error, "stdout"), 0, "{error}");
+        assert_eq!(excerpt_byte_count(&error, "stderr"), 0, "{error}");
+        assert_stream_silent(&error, "stdout");
+        assert_stream_silent(&error, "stderr");
+        assert!(
+            !error.contains("last byte"),
+            "silence must not invent a last-byte time: {error}"
+        );
+    }
+
+    #[test]
+    fn timely_child_does_not_emit_deadline_stream_progress() {
+        let limits = ProcessLimits::new(Duration::from_secs(2), 1024, 1024);
+        let output = run_bounded(early_exit_command(), b"", limits, "timely control")
+            .expect("a child that finishes in time produces no diagnostic");
+        assert_eq!(output.status.code(), Some(23));
+        assert!(output.stdout.is_empty());
+        assert!(output.stderr.is_empty());
     }
 
     #[test]
