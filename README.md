@@ -168,7 +168,7 @@ schemas:
 
 Trust claims use explicit epistemology, not a single safety score: `verified` (direct evidence or offline verification), `self_reported` (emitted without independent corroboration), `inferred` (bounded, documented rules), `absent` (no trustworthy evidence). Assay ships no aggregate trust score or `safe/unsafe` badge as the main output — see [ADR-033](docs/architecture/ADR-033-OTel-Trust-Compiler-Positioning.md).
 
-Tool-decision path latency on an M1 Pro fragmented-IPI harness (measured 2026-03-02 at commit `289a43ecc144`, see [experiment results](docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-2026Q1-RESULTS.md)): main protection `0.771ms` p50 / `1.913ms` p95; fast-path `0.345ms` p50 / `1.145ms` p95. These are tool-decision timings, not end-to-end model latency.
+Tool-decision path latency on a fragmented-IPI mitigation harness (measured 2026-03-02 at commit `289a43ecc144`, see [experiment results](docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-2026Q1-RESULTS.md)): `0.771ms` p50 / `1.913ms` p95. These are tool-decision timings, not end-to-end model latency.
 
 [Assay-Runner](docs/reference/runner/index.md) is an internal measured-run subsystem behind the delegated Linux/eBPF acceptance path — `publish = false`, not a standalone product, no release commitment.
 

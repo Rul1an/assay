@@ -35,6 +35,8 @@ ARTIFACT_TRUTH_PR_PATHS = (
 )
 PRECOMMIT_REQUIRED_PATHS = (
     "docs/migration-v1.2.md",
+    "docs/getting-started/index.md",
+    "README.md",
     ".github/workflows/kernel-matrix.yml",
 )
 PIP_INSTALL_RE = re.compile(
@@ -338,7 +340,8 @@ def check_docs(root: Path, matrix: dict, errors: list[str]) -> None:
             continue
         try:
             text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError) as exc:
+            fail(errors, f"{rel}: cannot read markdown: {exc}")
             continue
 
         if INTERPRETER_CLAIM_RE.search(text):

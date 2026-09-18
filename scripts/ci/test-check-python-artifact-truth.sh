@@ -530,6 +530,60 @@ PY
 expect_fail "dropped pre-commit selector path kernel-matrix.yml" --root "$GREEN"
 rm -f "$GREEN/.pre-commit-config.yaml"
 
+echo "=== mutation: drop getting-started/index.md from pre-commit files selector ==="
+cp "$ROOT/.pre-commit-config.yaml" "$GREEN/.pre-commit-config.yaml"
+python3 - "$GREEN/.pre-commit-config.yaml" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+pattern = re.compile(
+    r"^(\s+- id: python-artifact-truth[\s\S]*?^\s+files:\s+)(\S+)",
+    re.MULTILINE,
+)
+match = pattern.search(text)
+if not match:
+    raise SystemExit("python-artifact-truth files: selector missing")
+files = match.group(2)
+if "getting-started/(index|" not in files and "getting-started/(index)" not in files:
+    raise SystemExit("pre-commit files selector missing getting-started index.md")
+mutated = files.replace("index|", "")
+if mutated == files:
+    raise SystemExit("could not drop index from " + files)
+path.write_text(text[: match.start(2)] + mutated + text[match.end(2) :])
+PY
+expect_fail "dropped pre-commit selector path docs/getting-started/index.md" --root "$GREEN"
+rm -f "$GREEN/.pre-commit-config.yaml"
+
+echo "=== mutation: drop README.md from pre-commit files selector ==="
+cp "$ROOT/.pre-commit-config.yaml" "$GREEN/.pre-commit-config.yaml"
+python3 - "$GREEN/.pre-commit-config.yaml" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+pattern = re.compile(
+    r"^(\s+- id: python-artifact-truth[\s\S]*?^\s+files:\s+)(\S+)",
+    re.MULTILINE,
+)
+match = pattern.search(text)
+if not match:
+    raise SystemExit("python-artifact-truth files: selector missing")
+files = match.group(2)
+if "|README.md" not in files and "|README\\.md" not in files:
+    raise SystemExit("pre-commit files selector missing README.md")
+mutated = files.replace("|README\\.md", "")
+if mutated == files:
+    raise SystemExit("could not drop README.md from " + files)
+path.write_text(text[: match.start(2)] + mutated + text[match.end(2) :])
+PY
+expect_fail "dropped pre-commit selector path README.md" --root "$GREEN"
+rm -f "$GREEN/.pre-commit-config.yaml"
+
 echo "=== mutation: listed install-doc claims Python 3.12+ ==="
 cp "$GREEN/docs/python-sdk/index.md" "$TMP/docs.bak"
 python3 - "$GREEN/docs/python-sdk/index.md" <<'PY'
