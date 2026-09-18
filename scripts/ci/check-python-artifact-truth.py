@@ -33,12 +33,22 @@ ARTIFACT_TRUTH_PR_PATHS = (
     "docs/guides/troubleshooting.md",
     "docs/AIcontext/user-flows.md",
 )
-PRECOMMIT_REQUIRED_PATHS = (
-    "docs/migration-v1.2.md",
-    "docs/getting-started/index.md",
+PRECOMMIT_EXTRA_PATHS = (
     "README.md",
-    ".github/workflows/kernel-matrix.yml",
+    KERNEL_MATRIX_REL,
 )
+
+
+def precommit_required_paths(matrix: dict) -> list[str]:
+    """Derive required pre-commit selector paths from matrix install_docs and workflow anchors."""
+    paths: list[str] = []
+    for rel in matrix.get("install_docs") or []:
+        if rel not in paths:
+            paths.append(rel)
+    for extra in PRECOMMIT_EXTRA_PATHS:
+        if extra not in paths:
+            paths.append(extra)
+    return paths
 PIP_INSTALL_RE = re.compile(
     r"""(?:python(?:3(?:\.\d+)?)?\s+-m\s+)?pip(?:3|x)?\s+install(?:\s+(?:-U|--upgrade|--user))*\s+["']?assay-it\b""",
     re.IGNORECASE,
@@ -553,7 +563,7 @@ def hook_files_regex(text: str, hook_id: str) -> str | None:
     return None
 
 
-def check_precommit_selector(root: Path, errors: list[str]) -> None:
+def check_precommit_selector(root: Path, matrix: dict, errors: list[str]) -> None:
     path = root / PRECOMMIT_REL
     if not path.is_file():
         return
@@ -566,7 +576,7 @@ def check_precommit_selector(root: Path, errors: list[str]) -> None:
     except re.error as exc:
         fail(errors, f"{PRECOMMIT_REL}: python-artifact-truth files: invalid regex: {exc}")
         return
-    for required in PRECOMMIT_REQUIRED_PATHS:
+    for required in precommit_required_paths(matrix):
         if compiled.search(required) is None:
             fail(
                 errors,
@@ -607,9 +617,22 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
     parser.add_argument("--published-files", help="path to a JSON list of published filenames")
+    parser.add_argument(
+        "--dump-precommit-paths",
+        action="store_true",
+        help="print pre-commit required paths derived from matrix and exit",
+    )
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()
     errors: list[str] = []
+    if args.dump_precommit_paths:
+        matrix = load_matrix(root, errors)
+        if matrix is None:
+            print("\n".join(errors), file=sys.stderr)
+            return 1
+        for p in precommit_required_paths(matrix):
+            print(p)
+        return 0
     try:
         planner = load_planner()
     except RuntimeError as exc:
@@ -635,7 +658,7 @@ def main(argv: list[str] | None = None) -> int:
     check_docs(root, matrix, errors)
     check_install_docs_inventory(root, matrix, errors)
     check_kernel_matrix_paths(root, errors)
-    check_precommit_selector(root, errors)
+    check_precommit_selector(root, matrix, errors)
     published = None
     if args.published_files:
         published = json.loads(Path(args.published_files).read_text(encoding="utf-8"))

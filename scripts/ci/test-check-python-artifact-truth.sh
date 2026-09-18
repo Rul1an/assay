@@ -20,6 +20,20 @@ expect_fail() {
   pass "$label RED"
 }
 
+expect_fail_match() {
+  local label="$1"
+  local diagnostic="$2"
+  shift 2
+  if python3 "$CHECK" "$@" >"$TMP/out" 2>"$TMP/err"; then
+    fail_test "$label: expected RED, got PASS"
+  fi
+  if ! grep -Fq "$diagnostic" "$TMP/err"; then
+    cat "$TMP/err" >&2
+    fail_test "$label: diagnostic missing: $diagnostic"
+  fi
+  pass "$label RED"
+}
+
 expect_pass() {
   local label="$1"
   shift
@@ -32,6 +46,7 @@ expect_pass() {
 
 write_green_fixture() {
   local dest="$1"
+  local src_root="${2:-$ROOT}"
   mkdir -p "$dest/assay-python-sdk" "$dest/.github/workflows" \
     "$dest/docs/python-sdk" "$dest/docs/getting-started" \
     "$dest/docs/guides" "$dest/docs/AIcontext"
@@ -39,12 +54,33 @@ write_green_fixture() {
 [workspace.package]
 version = "5.4.0"
 TOML
-  python3 - "$dest/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
+  python3 - "$dest/assay-python-sdk/python-artifact-matrix.v0.json" "$src_root/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
 from pathlib import Path
 import json
 import sys
 
-Path(sys.argv[1]).write_text(
+dest_path = Path(sys.argv[1])
+root_matrix_path = Path(sys.argv[2])
+install_docs = [
+    "assay-python-sdk/README.md",
+    "docs/python-sdk/index.md",
+    "docs/getting-started/python-quickstart.md",
+    "docs/getting-started/installation.md",
+    "docs/getting-started/index.md",
+    "docs/guides/troubleshooting.md",
+    "docs/AIcontext/user-flows.md",
+    "docs/migration-v1.2.md",
+    "llms.txt",
+]
+if root_matrix_path.is_file():
+    try:
+        root_data = json.loads(root_matrix_path.read_text(encoding="utf-8"))
+        if "install_docs" in root_data:
+            install_docs = list(root_data["install_docs"])
+    except Exception:
+        pass
+
+dest_path.write_text(
     json.dumps(
         {
             "schema": "assay.python_artifact_matrix.v0",
@@ -87,17 +123,7 @@ Path(sys.argv[1]).write_text(
                     "import_smoke": "native",
                 },
             ],
-            "install_docs": [
-                "assay-python-sdk/README.md",
-                "docs/python-sdk/index.md",
-                "docs/getting-started/python-quickstart.md",
-                "docs/getting-started/installation.md",
-                "docs/getting-started/index.md",
-                "docs/guides/troubleshooting.md",
-                "docs/AIcontext/user-flows.md",
-                "docs/migration-v1.2.md",
-                "llms.txt",
-            ],
+            "install_docs": install_docs,
         },
         indent=2,
     )
@@ -155,23 +181,23 @@ jobs:
 YML
   bound='CPython 3.12 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.'
   printf 'The Python wheels cover %s\n' "$bound" > "$dest/README.md"
-  for rel in \
-    assay-python-sdk/README.md \
-    docs/python-sdk/index.md \
-    docs/getting-started/python-quickstart.md \
-    docs/getting-started/installation.md \
-    docs/getting-started/index.md \
-    docs/guides/troubleshooting.md \
-    docs/AIcontext/user-flows.md \
-    docs/migration-v1.2.md \
-    llms.txt
-  do
-    printf 'pip install assay-it\n%s\n' "$bound" > "$dest/$rel"
-  done
+  python3 - "$dest" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+dest = Path(sys.argv[1])
+matrix = json.loads((dest / "assay-python-sdk/python-artifact-matrix.v0.json").read_text(encoding="utf-8"))
+bound = matrix["published_support_bound"]
+for rel in matrix.get("install_docs", []):
+    p = dest / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(f"pip install assay-it\n{bound}\n", encoding="utf-8")
+PY
 }
 
 GREEN="$TMP/green"
-write_green_fixture "$GREEN"
+write_green_fixture "$GREEN" "$ROOT"
 
 echo "=== live tree ==="
 if python3 "$CHECK" --root "$ROOT"; then
@@ -319,20 +345,39 @@ PY
 expect_fail "dropped kernel-matrix artifact-truth path" --root "$GREEN"
 rm -f "$GREEN/.github/workflows/kernel-matrix.yml"
 
-echo "=== mutation: drop migration-v1.2.md from install_docs ==="
-cp "$GREEN/assay-python-sdk/python-artifact-matrix.v0.json" "$TMP/matrix.bak"
-python3 - "$GREEN/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
-import json
+echo "=== mutations: drop each install-doc from install_docs ==="
+install_docs="$(python3 - "$GREEN/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
 from pathlib import Path
+import json
+import sys
+
+data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+for rel in data.get("install_docs", []):
+    print(rel)
+PY
+)"
+[ -n "$install_docs" ] || fail_test "could not load install_docs from $GREEN"
+
+while IFS= read -r doc; do
+  [ -n "$doc" ] || continue
+  echo "=== mutation: drop $doc from install_docs ==="
+  cp "$GREEN/assay-python-sdk/python-artifact-matrix.v0.json" "$TMP/matrix.bak"
+  python3 - "$GREEN/assay-python-sdk/python-artifact-matrix.v0.json" "$doc" <<'PY'
+from pathlib import Path
+import json
 import sys
 
 path = Path(sys.argv[1])
-data = json.loads(path.read_text())
-data["install_docs"] = [rel for rel in data["install_docs"] if rel != "docs/migration-v1.2.md"]
-path.write_text(json.dumps(data, indent=2) + "\n")
+drop = sys.argv[2]
+data = json.loads(path.read_text(encoding="utf-8"))
+data["install_docs"] = [rel for rel in data["install_docs"] if rel != drop]
+path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 PY
-expect_fail "drop migration-v1.2.md from install_docs" --root "$GREEN"
-mv "$TMP/matrix.bak" "$GREEN/assay-python-sdk/python-artifact-matrix.v0.json"
+  expect_fail_match "drop $doc from install_docs" \
+    "$doc: active pip install assay-it is omitted from install_docs" \
+    --root "$GREEN"
+  mv "$TMP/matrix.bak" "$GREEN/assay-python-sdk/python-artifact-matrix.v0.json"
+done <<< "$install_docs"
 
 echo "=== live install_docs includes migration-v1.2.md ==="
 python3 - "$ROOT/assay-python-sdk/python-artifact-matrix.v0.json" <<'PY'
@@ -473,72 +518,27 @@ PY
 expect_fail "dropped kernel-matrix path docs/AIcontext/user-flows.md" --root "$GREEN"
 rm -f "$GREEN/.github/workflows/kernel-matrix.yml"
 
-echo "=== mutation: drop migration-v1.2.md from pre-commit files selector ==="
+echo "=== pre-commit files selector positive control ==="
 cp "$ROOT/.pre-commit-config.yaml" "$GREEN/.pre-commit-config.yaml"
-python3 - "$GREEN/.pre-commit-config.yaml" <<'PY'
-from pathlib import Path
-import re
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text()
-pattern = re.compile(
-    r"(^      - id: python-artifact-truth\n(?:.*\n)*?        files: )(\S+)(\s*$)",
-    re.M,
-)
-match = pattern.search(text)
-if not match:
-    raise SystemExit("python-artifact-truth files: selector missing")
-files = match.group(2)
-if "migration-v1" not in files:
-    raise SystemExit("pre-commit files selector missing migration-v1.2.md")
-mutated = files.replace("|migration-v1\\.2\\.md", "")
-mutated = mutated.replace("migration-v1\\.2\\.md|", "")
-if mutated == files:
-    raise SystemExit("could not drop migration-v1.2.md from " + files)
-path.write_text(text[: match.start(2)] + mutated + text[match.end(2) :])
-PY
-expect_fail "dropped pre-commit selector path docs/migration-v1.2.md" --root "$GREEN"
+expect_pass "unmutated pre-commit files selector matches all required paths" --root "$GREEN"
 rm -f "$GREEN/.pre-commit-config.yaml"
 
-echo "=== mutation: drop kernel-matrix.yml from pre-commit files selector ==="
-cp "$ROOT/.pre-commit-config.yaml" "$GREEN/.pre-commit-config.yaml"
-python3 - "$GREEN/.pre-commit-config.yaml" <<'PY'
+echo "=== mutations: drop each derived path from pre-commit files selector ==="
+required_paths="$(python3 "$CHECK" --root "$GREEN" --dump-precommit-paths)"
+[ -n "$required_paths" ] || fail_test "could not derive pre-commit required paths from $GREEN"
+
+while IFS= read -r required_path; do
+  [ -n "$required_path" ] || continue
+  echo "=== mutation: drop $required_path from pre-commit files selector ==="
+  cp "$ROOT/.pre-commit-config.yaml" "$GREEN/.pre-commit-config.yaml"
+  python3 - "$GREEN/.pre-commit-config.yaml" "$required_path" <<'PY'
 from pathlib import Path
 import re
 import sys
 
 path = Path(sys.argv[1])
-text = path.read_text()
-pattern = re.compile(
-    r"(^      - id: python-artifact-truth\n(?:.*\n)*?        files: )(\S+)(\s*$)",
-    re.M,
-)
-match = pattern.search(text)
-if not match:
-    raise SystemExit("python-artifact-truth files: selector missing")
-files = match.group(2)
-if "kernel-matrix" not in files:
-    raise SystemExit("pre-commit files selector missing kernel-matrix.yml")
-mutated = files.replace("(release|kernel-matrix)", "release")
-mutated = mutated.replace("|kernel-matrix\\.yml", "")
-mutated = mutated.replace("kernel-matrix\\.yml|", "")
-if mutated == files:
-    raise SystemExit("could not drop kernel-matrix.yml from " + files)
-path.write_text(text[: match.start(2)] + mutated + text[match.end(2) :])
-PY
-expect_fail "dropped pre-commit selector path kernel-matrix.yml" --root "$GREEN"
-rm -f "$GREEN/.pre-commit-config.yaml"
-
-echo "=== mutation: drop getting-started/index.md from pre-commit files selector ==="
-cp "$ROOT/.pre-commit-config.yaml" "$GREEN/.pre-commit-config.yaml"
-python3 - "$GREEN/.pre-commit-config.yaml" <<'PY'
-from pathlib import Path
-import re
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text()
+drop = sys.argv[2]
+text = path.read_text(encoding="utf-8")
 pattern = re.compile(
     r"^(\s+- id: python-artifact-truth[\s\S]*?^\s+files:\s+)(\S+)",
     re.MULTILINE,
@@ -547,42 +547,14 @@ match = pattern.search(text)
 if not match:
     raise SystemExit("python-artifact-truth files: selector missing")
 files = match.group(2)
-if "getting-started/(index|" not in files and "getting-started/(index)" not in files:
-    raise SystemExit("pre-commit files selector missing getting-started index.md")
-mutated = files.replace("index|", "")
-if mutated == files:
-    raise SystemExit("could not drop index from " + files)
-path.write_text(text[: match.start(2)] + mutated + text[match.end(2) :])
+mutated = f"^(?!{re.escape(drop)}$)" + files.lstrip("^")
+path.write_text(text[: match.start(2)] + mutated + text[match.end(2) :], encoding="utf-8")
 PY
-expect_fail "dropped pre-commit selector path docs/getting-started/index.md" --root "$GREEN"
-rm -f "$GREEN/.pre-commit-config.yaml"
-
-echo "=== mutation: drop README.md from pre-commit files selector ==="
-cp "$ROOT/.pre-commit-config.yaml" "$GREEN/.pre-commit-config.yaml"
-python3 - "$GREEN/.pre-commit-config.yaml" <<'PY'
-from pathlib import Path
-import re
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text()
-pattern = re.compile(
-    r"^(\s+- id: python-artifact-truth[\s\S]*?^\s+files:\s+)(\S+)",
-    re.MULTILINE,
-)
-match = pattern.search(text)
-if not match:
-    raise SystemExit("python-artifact-truth files: selector missing")
-files = match.group(2)
-if "|README.md" not in files and "|README\\.md" not in files:
-    raise SystemExit("pre-commit files selector missing README.md")
-mutated = files.replace("|README\\.md", "")
-if mutated == files:
-    raise SystemExit("could not drop README.md from " + files)
-path.write_text(text[: match.start(2)] + mutated + text[match.end(2) :])
-PY
-expect_fail "dropped pre-commit selector path README.md" --root "$GREEN"
-rm -f "$GREEN/.pre-commit-config.yaml"
+  expect_fail_match "dropped pre-commit selector path $required_path" \
+    "python-artifact-truth files: must match '$required_path'" \
+    --root "$GREEN"
+  rm -f "$GREEN/.pre-commit-config.yaml"
+done <<< "$required_paths"
 
 echo "=== mutation: listed install-doc claims Python 3.12+ ==="
 cp "$GREEN/docs/python-sdk/index.md" "$TMP/docs.bak"
