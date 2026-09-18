@@ -680,7 +680,11 @@ jobs:
     needs: [scope]
     if: needs.scope.outputs.lightweight_only != 'true'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # Windows cold-cache full-code runs finish at 16-20m and have been cancelled
+    # at 20:17 after every step succeeded (job 105592874848). Ubuntu/macOS stay
+    # at 20. Do not lower this without a new duration table; speeding up the
+    # cold-cache path is a separate question.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 30 || 20 }}
     permissions:
       contents: read
     strategy:
