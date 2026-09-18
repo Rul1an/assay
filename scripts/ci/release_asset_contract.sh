@@ -45,12 +45,22 @@ release_plain_assets() {
   printf '%s\n' server.json
 }
 
+release_manifest_assets() {
+  local tag
+  tag="$(release_normalize_version "$1")" || return 1
+  printf '%s\n' \
+    checksums.txt \
+    checksums.txt.sigstore.json \
+    "assay-${tag}-build-provenance.sigstore.json"
+}
+
 release_expected_assets() {
   local asset
   while IFS= read -r asset; do
     printf '%s\n%s.sha256\n' "$asset" "$asset"
   done < <(release_checksum_targets "$1")
   release_plain_assets
+  release_manifest_assets "$1"
 }
 
 release_installability_markdown() {

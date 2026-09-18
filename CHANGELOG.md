@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Release jobs write a name-sorted `checksums.txt` over every published payload asset, keyless-sign it with Sigstore, and attach `checksums.txt.sigstore.json` plus the attest-action provenance bundle as release assets. `scripts/install.sh` verifies that signature when `cosign` is present and says so when it is not (#3119).
+
 ## [6.6.0] - 2026-09-18
 
 Stable minor collecting the launch-blocking behaviour that landed after

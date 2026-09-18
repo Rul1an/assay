@@ -185,6 +185,20 @@ case "$url" in
       sleep 2
     fi
     ;;
+  */checksums.txt)
+    printf '%s\n' "${max_filesize:-none}" >> "$CURL_LIMIT_LOG"
+    case "${CURL_MODE:-ok}" in
+      missing-manifest) exit 22 ;;
+      *) cp "$FIXTURE_DIR/checksums.txt" "$out" ;;
+    esac
+    ;;
+  */checksums.txt.sigstore.json)
+    printf '%s\n' "${max_filesize:-none}" >> "$CURL_LIMIT_LOG"
+    case "${CURL_MODE:-ok}" in
+      missing-bundle) exit 22 ;;
+      *) cp "$FIXTURE_DIR/checksums.txt.sigstore.json" "$out" ;;
+    esac
+    ;;
   *)
     echo "unexpected curl URL: $url" >&2
     exit 2
@@ -242,6 +256,30 @@ EOF
   chmod +x "$bin_dir/gh"
 }
 
+make_cosign_stub() {
+  local bin_dir="$1"
+  cat > "$bin_dir/cosign" <<'EOF'
+#!/bin/sh
+set -eu
+{
+  printf '%s\n' '--- invocation ---'
+  printf '%s\n' "$@"
+} >> "$COSIGN_LOG"
+
+if [ "$1" = verify-blob ]; then
+  if [ "${COSIGN_MODE:-ok}" = fail ]; then
+    echo 'simulated signature refusal' >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+echo "unexpected cosign invocation: $*" >&2
+exit 2
+EOF
+  chmod +x "$bin_dir/cosign"
+}
+
 make_chmod_stub() {
   local bin_dir="$1"
   cat > "$bin_dir/chmod" <<'EOF'
@@ -284,6 +322,8 @@ run_installer() {
     CURL_LOG="$case_dir/curl.log" \
     CURL_LIMIT_LOG="$case_dir/curl-limit.log" \
     GH_LOG="$case_dir/gh.log" \
+    COSIGN_LOG="$case_dir/cosign.log" \
+    ASSAY_COSIGN="${ASSAY_COSIGN:-$case_dir/absent/cosign}" \
     "$@" \
     sh "$INSTALLER"
 }
@@ -380,6 +420,10 @@ assert_default_success() {
   case_dir="$(new_case "default-success-$label")"
   run_installer "$case_dir" FAKE_OS="$os" > "$case_dir/stdout" 2> "$case_dir/stderr"
   grep -F 'checksum_verified' "$case_dir/stdout" >/dev/null || fail 'default install did not report checksum_verified'
+  grep -F 'cosign_not_installed' "$case_dir/stdout" >/dev/null || fail 'default install did not say signed-manifest verification was skipped because cosign is not installed'
+  if grep -F 'signed_manifest_verified' "$case_dir/stdout" >/dev/null; then
+    fail 'install without cosign claimed signed_manifest_verified'
+  fi
   grep -F 'provenance_not_requested' "$case_dir/stdout" >/dev/null || fail 'default install did not report provenance_not_requested'
   if grep -F 'provenance_verified' "$case_dir/stdout" >/dev/null; then
     fail 'checksum-only install claimed provenance_verified'
@@ -474,6 +518,7 @@ assert_signal_stops_before_next_network_step() {
     CURL_MODE="$curl_mode" \
     CHMOD_MODE="$chmod_mode" \
     SIGNAL_MARKER="$marker" \
+    ASSAY_COSIGN="$case_dir/absent/cosign" \
     TMPDIR="$tmpdir_value" \
     python3 - "$INSTALLER" "$marker" "$case_dir/stdout" "$case_dir/stderr" "$case_dir/rc" "$signal" "$case_dir" "$signal_stage" <<'PY'
 import os
@@ -604,6 +649,119 @@ assert_strict_failure_preserves_binary() {
   fi
 }
 
+write_signed_manifest_fixture() {
+  local root="$1"
+  local linux="assay-v5.5.2-x86_64-unknown-linux-gnu.tar.gz"
+  local darwin="assay-v5.5.2-x86_64-apple-darwin.tar.gz"
+  {
+    printf '%s  %s\n' "$(compute_sha256 "$root/$linux")" "$linux"
+    printf '%s  %s\n' "$(compute_sha256 "$root/$darwin")" "$darwin"
+  } | LC_ALL=C sort >"$root/checksums.txt"
+  printf 'sigstore-bundle-fixture\n' >"$root/checksums.txt.sigstore.json"
+}
+
+assert_signed_manifest_success() {
+  local case_dir
+  case_dir="$(new_case signed-manifest-success)"
+  make_cosign_stub "$case_dir/bin"
+  run_installer "$case_dir" ASSAY_COSIGN="$case_dir/bin/cosign" \
+    > "$case_dir/stdout" 2> "$case_dir/stderr"
+  grep -F 'signed_manifest_verified' "$case_dir/stdout" >/dev/null || \
+    fail 'cosign-present install did not report signed_manifest_verified'
+  grep -F 'checksum_verified' "$case_dir/stdout" >/dev/null || \
+    fail 'cosign-present install did not report checksum_verified'
+  grep -F 'assay 5.5.2 fixture' "$case_dir/install/assay" >/dev/null || \
+    fail 'cosign-present install did not activate fixture'
+  python3 - "$case_dir/cosign.log" <<'PY'
+import sys
+from pathlib import Path
+
+lines = Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+invocations = []
+current = None
+for line in lines:
+    if line == "--- invocation ---":
+        if current is not None:
+            invocations.append(current)
+        current = []
+    elif current is not None:
+        current.append(line)
+if current is not None:
+    invocations.append(current)
+if len(invocations) != 1:
+    raise SystemExit(f"expected one cosign invocation, found {invocations!r}")
+wanted = [
+    "verify-blob",
+    "--bundle",
+    None,
+    "--certificate-identity",
+    "https://github.com/Rul1an/assay/.github/workflows/release.yml@refs/tags/v5.5.2",
+    "--certificate-oidc-issuer",
+    "https://token.actions.githubusercontent.com",
+    None,
+]
+actual = invocations[0]
+if len(actual) != len(wanted):
+    raise SystemExit(f"cosign argv length {actual!r}")
+for observed, expected in zip(actual, wanted):
+    if expected is None:
+        continue
+    if observed != expected:
+        raise SystemExit(f"cosign argv {actual!r}")
+if Path(actual[2]).name != "checksums.txt.sigstore.json":
+    raise SystemExit(f"bundle path was {actual[2]!r}")
+if Path(actual[-1]).name != "checksums.txt":
+    raise SystemExit(f"manifest path was {actual[-1]!r}")
+PY
+}
+
+assert_signed_manifest_refusal_preserves_binary() {
+  local mode="$1"
+  local expected
+  case "$mode" in
+    fail) expected='signed checksum manifest verification failed' ;;
+    missing-bundle) expected='Download failed' ;;
+    *) fail "test bug: no expected error for signed-manifest mode $mode" ;;
+  esac
+  local case_dir
+  case_dir="$(new_case "signed-manifest-$mode")"
+  make_cosign_stub "$case_dir/bin"
+  if run_installer "$case_dir" ASSAY_COSIGN="$case_dir/bin/cosign" \
+    COSIGN_MODE="$mode" CURL_MODE="$mode" \
+    > "$case_dir/stdout" 2> "$case_dir/stderr"; then
+    fail "signed-manifest $mode unexpectedly installed"
+  fi
+  if ! grep -F "$expected" "$case_dir/stdout" "$case_dir/stderr" >/dev/null; then
+    cat "$case_dir/stdout" "$case_dir/stderr" >&2
+    fail "signed-manifest $mode failed for an unrelated reason"
+  fi
+  assert_old_binary "$case_dir"
+}
+
+assert_unavailable_manifest_continues() {
+  local case_dir
+  case_dir="$(new_case signed-manifest-unavailable)"
+  make_cosign_stub "$case_dir/bin"
+  run_installer "$case_dir" ASSAY_COSIGN="$case_dir/bin/cosign" \
+    CURL_MODE=missing-manifest > "$case_dir/stdout" 2> "$case_dir/stderr"
+  grep -F 'signed_manifest_unavailable' "$case_dir/stdout" >/dev/null || \
+    fail 'missing checksums.txt did not report signed_manifest_unavailable'
+  grep -F 'checksum_verified' "$case_dir/stdout" >/dev/null || \
+    fail 'missing checksums.txt did not continue with sidecar verification'
+  grep -F 'assay 5.5.2 fixture' "$case_dir/install/assay" >/dev/null || \
+    fail 'missing checksums.txt did not activate fixture'
+}
+
+assert_invalid_cosign_override_refuses_before_network() {
+  local case_dir
+  case_dir="$(new_case invalid-cosign-empty)"
+  if run_installer "$case_dir" ASSAY_COSIGN= > "$case_dir/stdout" 2> "$case_dir/stderr"; then
+    fail 'empty ASSAY_COSIGN unexpectedly installed'
+  fi
+  assert_old_binary "$case_dir"
+  test ! -s "$case_dir/curl.log" || fail 'empty ASSAY_COSIGN reached curl'
+}
+
 assert_invalid_tag_digest_refuses() {
   local case_dir
   case_dir="$(new_case strict-invalid-tag-digest)"
@@ -622,9 +780,15 @@ main() {
   assert_precommit_wiring
   make_fixture "$TEST_TMP" x86_64-unknown-linux-gnu
   make_fixture "$TEST_TMP" x86_64-apple-darwin
+  write_signed_manifest_fixture "$TEST_TMP"
 
   assert_default_success Linux linux
   assert_default_success Darwin macos
+  assert_signed_manifest_success
+  assert_signed_manifest_refusal_preserves_binary fail
+  assert_signed_manifest_refusal_preserves_binary missing-bundle
+  assert_unavailable_manifest_continues
+  assert_invalid_cosign_override_refuses_before_network
   for mode in mismatch missing-sidecar malformed-sidecar wrong-asset-sidecar trailing-garbage oversized-sidecar; do
     assert_checksum_failure_preserves_binary "$mode"
   done

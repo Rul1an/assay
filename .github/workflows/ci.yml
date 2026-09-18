@@ -582,6 +582,7 @@ jobs:
           set -euo pipefail
           bash scripts/ci/test-write-sha256-sidecar.sh
           bash scripts/ci/test-release-assets.sh
+          bash scripts/ci/test-release-checksum-manifest.sh
       - name: Verify release README renderer contract
         shell: bash
         run: bash scripts/ci/run-release-quickstart-contract.sh
