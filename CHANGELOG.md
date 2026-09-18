@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Internal
+- Incident package v1 read-only container reader and refusal report type in `assay-evidence` (internal, no user-visible CLI yet) (Refs #2493).
+
 ## [6.5.0] - 2026-09-17
 
 Stable release consolidating the RC1 and RC2 candidates. RC2 (`v6.5.0-rc.2`)
