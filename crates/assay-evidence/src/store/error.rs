@@ -26,6 +26,10 @@ pub enum StoreError {
     #[error("invalid store spec '{spec}': {reason}")]
     InvalidSpec { spec: String, reason: String },
 
+    /// Invalid identifier (empty, path traversal, slash, or control characters).
+    #[error("invalid identifier '{id}': {reason}")]
+    InvalidId { id: String, reason: String },
+
     /// Legacy file-store layout detected during file:// migration.
     #[error(
         "legacy local file-store layout detected: new bundles path '{new_bundles_path}', legacy bundles path '{legacy_bundles_path}'. Move the legacy bundles directory to the new bundles path and retry."

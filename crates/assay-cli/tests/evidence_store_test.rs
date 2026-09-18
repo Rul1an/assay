@@ -5,6 +5,7 @@
 #![allow(deprecated)]
 
 use assert_cmd::Command;
+use bytes::Bytes;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::tempdir;
@@ -519,4 +520,208 @@ fn push_of_identical_bytes_stays_idempotent_and_links_the_run() {
         .assert()
         .success()
         .stdout(predicate::str::contains(&id));
+}
+
+#[test]
+fn test_store_status_object_lock_honest_value() {
+    let dir = tempdir().unwrap();
+    let store_dir = dir.path().join("store");
+    fs::create_dir_all(&store_dir).unwrap();
+    let store_url = format!("file://{}", store_dir.display());
+
+    let out = Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "evidence",
+            "store-status",
+            "--store",
+            &store_url,
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_ne!(json["object_lock"], "unknown");
+    assert_eq!(json["object_lock"], "unobserved:unsupported_backend");
+}
+
+#[test]
+fn test_evidence_index_rebuild_cli() {
+    let dir = tempdir().unwrap();
+    let store_dir = dir.path().join("store");
+    fs::create_dir_all(&store_dir).unwrap();
+    let store_url = format!("file://{}", store_dir.display());
+
+    let b1 = create_bundle_observing(dir.path(), "rebuild1", "/tmp/b1.txt");
+    let b2 = create_bundle_observing(dir.path(), "rebuild2", "/tmp/b2.txt");
+
+    let id1 = push_and_read_id(&b1, &store_url);
+    let id2 = push_and_read_id(&b2, &store_url);
+    assert_ne!(id1, id2);
+
+    // Initial check: listing for run returns empty
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "evidence",
+            "list",
+            "--store",
+            &store_url,
+            "--run-id",
+            "rebuild1_run",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&id1).not());
+
+    // First rebuild: links both
+    let rebuild1 = Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "evidence", "index", "rebuild", "--store", &store_url, "--format", "json",
+        ])
+        .assert()
+        .success();
+
+    let stdout1 = String::from_utf8(rebuild1.get_output().stdout.clone()).unwrap();
+    let json1: serde_json::Value = serde_json::from_str(&stdout1).unwrap();
+    assert_eq!(json1["schema"], "assay.evidence.index_rebuild.v0");
+    assert_eq!(json1["discovered_bundles"], 2);
+    assert_eq!(json1["verified_bundles"], 2);
+    assert_eq!(json1["refs_linked"], 2);
+    assert_eq!(json1["refs_already_indexed"], 0);
+    assert_eq!(json1["stale_refs"].as_array().unwrap().len(), 0);
+
+    // Verify run list now sees the bundles
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "evidence",
+            "list",
+            "--store",
+            &store_url,
+            "--run-id",
+            "rebuild1_run",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&id1));
+
+    // Second rebuild: idempotent, 0 new refs
+    let rebuild2 = Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "evidence", "index", "rebuild", "--store", &store_url, "--format", "json",
+        ])
+        .assert()
+        .success();
+
+    let stdout2 = String::from_utf8(rebuild2.get_output().stdout.clone()).unwrap();
+    let json2: serde_json::Value = serde_json::from_str(&stdout2).unwrap();
+    assert_eq!(json2["discovered_bundles"], 2);
+    assert_eq!(json2["verified_bundles"], 2);
+    assert_eq!(json2["refs_linked"], 0);
+    assert_eq!(json2["refs_already_indexed"], 2);
+
+    // Test human summary output
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args(["evidence", "index", "rebuild", "--store", &store_url])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Evidence Index Rebuild"))
+        .stdout(predicate::str::contains("Refs linked:       0"))
+        .stdout(predicate::str::contains("Already indexed:   2"));
+}
+
+#[test]
+fn test_evidence_index_rebuild_exit_code_stale_refs_success() {
+    let dir = tempdir().unwrap();
+    let store_dir = dir.path().join("store");
+    fs::create_dir_all(&store_dir).unwrap();
+    let store_url = format!("file://{}", store_dir.display());
+
+    // Push a valid bundle
+    let bundle_path = create_test_bundle(dir.path());
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args(["evidence", "push", "--store", &store_url])
+        .arg(&bundle_path)
+        .assert()
+        .success();
+
+    // Plant stale ref via the store's public API
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        use assay_evidence::store::BundleStore;
+        let store = assay_evidence::store::ObjectStoreBundleStore::from_url(&store_url)
+            .await
+            .unwrap();
+        store
+            .link_run_bundle("stale_run", "sha256:ghost_nonexistent")
+            .await
+            .unwrap();
+    });
+
+    // Rebuild index: stale refs found -> exits 0 with stale refs listed
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args(["evidence", "index", "rebuild", "--store", &store_url])
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains(
+            "Stale references detected (not deleted):",
+        ))
+        .stdout(predicate::str::contains(
+            "run: stale_run, bundle: sha256:ghost_nonexistent",
+        ));
+}
+
+#[test]
+fn test_evidence_index_rebuild_exit_code_failed_bundle_failure() {
+    let dir = tempdir().unwrap();
+    let store_dir = dir.path().join("store");
+    fs::create_dir_all(&store_dir).unwrap();
+    let store_url = format!("file://{}", store_dir.display());
+
+    // Push a valid bundle first
+    let bundle_path = create_test_bundle(dir.path());
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args(["evidence", "push", "--store", &store_url])
+        .arg(&bundle_path)
+        .assert()
+        .success();
+
+    // Plant corrupt bundle via the store's public API
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        use assay_evidence::store::BundleStore;
+        let store = assay_evidence::store::ObjectStoreBundleStore::from_url(&store_url)
+            .await
+            .unwrap();
+        store
+            .put_bundle(
+                "sha256:corrupted_bundle_bytes",
+                Bytes::from_static(b"corrupted not tar gz data"),
+            )
+            .await
+            .unwrap();
+    });
+
+    // Rebuild index: verification failure -> exits 1 with failed bundle listed
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args(["evidence", "index", "rebuild", "--store", &store_url])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("Failed bundles (skipped):"))
+        .stdout(predicate::str::contains("sha256:corrupted_bundle_bytes"));
 }
