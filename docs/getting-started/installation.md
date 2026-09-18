@@ -32,12 +32,12 @@ Assay documents the container image below as a verified release channel. Homebre
 
 ## Container image (assay-mcp-server)
 
-The `v6.6.0` image index is `ghcr.io/rul1an/assay-mcp-server@sha256:824daa2fb9cc80d9d05ef494d5a7b4aac77893b96e117b8806da74447c0fd3be` (tags such as `v6.6.0`, `6.6`, and `latest` are convenience aliases; the digest is the pinned reference).
+The `v6.6.0` image index is `ghcr.io/rul1an/assay-mcp-server@sha256:65713e916d2004aeb54b7836a2f0bbccf0343dbf5590cf1a92ab16e080fb4a37` (tags such as `v6.6.0`, `6.6`, and `latest` are convenience aliases; the digest is the pinned reference).
 
 Pull and run the multi-arch `assay-mcp-server` image by index digest:
 
 ```bash
-docker run --rm ghcr.io/rul1an/assay-mcp-server@sha256:824daa2fb9cc80d9d05ef494d5a7b4aac77893b96e117b8806da74447c0fd3be --version
+docker run --rm ghcr.io/rul1an/assay-mcp-server@sha256:65713e916d2004aeb54b7836a2f0bbccf0343dbf5590cf1a92ab16e080fb4a37 --version
 ```
 
 The image runs as uid:gid 65532:65532 (non-root) on a minimal base, and the index contains both linux/amd64 and linux/arm64 images.
@@ -45,11 +45,11 @@ The image runs as uid:gid 65532:65532 (non-root) on a minimal base, and the inde
 Verify SLSA provenance and CycloneDX SBOM attestations:
 
 ```bash
-gh attestation verify oci://ghcr.io/rul1an/assay-mcp-server@sha256:824daa2fb9cc80d9d05ef494d5a7b4aac77893b96e117b8806da74447c0fd3be -R Rul1an/assay --predicate-type https://slsa.dev/provenance/v1
-gh attestation verify oci://ghcr.io/rul1an/assay-mcp-server@sha256:824daa2fb9cc80d9d05ef494d5a7b4aac77893b96e117b8806da74447c0fd3be -R Rul1an/assay --predicate-type https://cyclonedx.org/bom
+gh attestation verify oci://ghcr.io/rul1an/assay-mcp-server@sha256:65713e916d2004aeb54b7836a2f0bbccf0343dbf5590cf1a92ab16e080fb4a37 -R Rul1an/assay --predicate-type https://slsa.dev/provenance/v1
+gh attestation verify oci://ghcr.io/rul1an/assay-mcp-server@sha256:65713e916d2004aeb54b7836a2f0bbccf0343dbf5590cf1a92ab16e080fb4a37 -R Rul1an/assay --predicate-type https://cyclonedx.org/bom
 ```
 
-Verified status means [release run 35246197983](https://github.com/Rul1an/assay/actions/runs/35246197983) pulled the image by digest, verified attestations, and executed `--version` on both architectures.
+Verified status means [release run 35372454372](https://github.com/Rul1an/assay/actions/runs/35372454372) pulled the image by digest, verified attestations, and executed `--version` on both architectures.
 
 ## Python SDK and pytest plugin
 
