@@ -61,7 +61,7 @@ Evidence Store Status
   Reachable:    OK
   Readable:     OK
   Writable:     OK
-  Object Lock:  unknown
+  Object Lock:  unobserved:not_probed
 
   Bundles:      0
   Total size:   0 B

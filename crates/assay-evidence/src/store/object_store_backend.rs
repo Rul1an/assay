@@ -22,8 +22,8 @@ use super::{BundleMeta, BundleStore, KeyBuilder, StoreError, StoreResult, StoreS
 /// - Local filesystem
 /// - In-memory (for testing)
 pub struct ObjectStoreBundleStore {
-    inner: Arc<dyn ObjectStore>,
-    keys: KeyBuilder,
+    pub(crate) inner: Arc<dyn ObjectStore>,
+    pub(crate) keys: KeyBuilder,
 }
 
 fn legacy_layout_ignored_warning_message(
@@ -243,7 +243,7 @@ impl ObjectStoreBundleStore {
         bundle_id: &str,
         ceiling: StreamCeiling,
     ) -> Result<Bytes, BoundedGetError> {
-        let key = self.keys.bundle_key(bundle_id);
+        let key = self.keys.bundle_key(bundle_id)?;
 
         // The initial fetch is bounded too, by the same idle timeout the stream polls use.
         //
@@ -288,8 +288,9 @@ impl ObjectStoreBundleStore {
     /// Check store connectivity, access, and inventory.
     ///
     /// Probes the store for reachability, read/write access, bundle count,
-    /// and total size. Object Lock detection is best-effort (`"unknown"` for
-    /// most backends).
+    /// and total size. Object Lock status uses an honest, closed vocabulary:
+    /// `"enabled"`, `"disabled"`, `"unobserved:unsupported_backend"`,
+    /// `"unobserved:not_probed"`, `"unobserved:permission_denied"`, or `"unobserved:error"`.
     pub async fn store_status(&self, spec: &StoreSpec) -> StoreStatus {
         let backend = spec.scheme.clone();
         let bucket = spec.bucket.clone();
@@ -326,13 +327,33 @@ impl ObjectStoreBundleStore {
             reachable,
             readable,
             writable,
-            backend,
+            backend: backend.clone(),
             bucket,
             prefix,
             bundle_count,
             total_size_bytes,
-            object_lock: "unknown".to_string(),
+            object_lock: crate::store::object_lock_status_for_backend(&backend).to_string(),
         }
+    }
+
+    /// List all run-to-bundle reference objects currently in the store.
+    pub async fn list_all_run_refs(&self) -> StoreResult<Vec<super::RunBundleRef>> {
+        let prefix = self.keys.runs_prefix();
+        let list = self.inner.list(Some(&prefix));
+        let entries: Vec<_> = list.try_collect().await.map_err(|e| StoreError::Io {
+            message: format!("failed to list run refs: {}", e),
+        })?;
+
+        let refs = entries
+            .iter()
+            .filter_map(|entry| {
+                self.keys
+                    .parse_run_ref_parts(&entry.location)
+                    .map(|(run_id, bundle_id)| super::RunBundleRef { run_id, bundle_id })
+            })
+            .collect();
+
+        Ok(refs)
     }
 
     /// Attempt a conditional put (If-None-Match: "*").
@@ -409,7 +430,7 @@ impl ObjectStoreBundleStore {
 #[async_trait]
 impl BundleStore for ObjectStoreBundleStore {
     async fn put_bundle(&self, bundle_id: &str, bytes: Bytes) -> StoreResult<()> {
-        let key = self.keys.bundle_key(bundle_id);
+        let key = self.keys.bundle_key(bundle_id)?;
         self.put_if_not_exists(&key, bytes).await.map_err(|e| {
             if let StoreError::AlreadyExists { .. } = e {
                 StoreError::AlreadyExists {
@@ -422,7 +443,7 @@ impl BundleStore for ObjectStoreBundleStore {
     }
 
     async fn get_bundle(&self, bundle_id: &str) -> StoreResult<Bytes> {
-        let key = self.keys.bundle_key(bundle_id);
+        let key = self.keys.bundle_key(bundle_id)?;
 
         let result = self.inner.get(&key).await.map_err(|e| match e {
             object_store::Error::NotFound { .. } => StoreError::NotFound {
@@ -439,7 +460,7 @@ impl BundleStore for ObjectStoreBundleStore {
     }
 
     async fn bundle_exists(&self, bundle_id: &str) -> StoreResult<bool> {
-        let key = self.keys.bundle_key(bundle_id);
+        let key = self.keys.bundle_key(bundle_id)?;
         match self.inner.head(&key).await {
             Ok(_) => Ok(true),
             Err(object_store::Error::NotFound { .. }) => Ok(false),
@@ -450,7 +471,7 @@ impl BundleStore for ObjectStoreBundleStore {
     }
 
     async fn link_run_bundle(&self, run_id: &str, bundle_id: &str) -> StoreResult<()> {
-        let key = self.keys.run_bundle_ref_key(run_id, bundle_id);
+        let key = self.keys.run_bundle_ref_key(run_id, bundle_id)?;
 
         // Reference content is just the bundle_id (for verification)
         let content = Bytes::from(bundle_id.to_string());
@@ -464,7 +485,7 @@ impl BundleStore for ObjectStoreBundleStore {
     }
 
     async fn list_bundles_for_run(&self, run_id: &str) -> StoreResult<Vec<String>> {
-        let prefix = self.keys.run_bundles_prefix(run_id);
+        let prefix = self.keys.run_bundles_prefix(run_id)?;
 
         let list = self.inner.list(Some(&prefix));
         let entries: Vec<_> = list.try_collect().await.map_err(|e| StoreError::Io {
@@ -950,6 +971,29 @@ mod tests {
 
         store.put_bundle(bundle_id, content).await.unwrap();
         assert!(store.bundle_exists(bundle_id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn store_status_object_lock_is_never_unknown() {
+        let store = ObjectStoreBundleStore::memory();
+        let mem_spec = StoreSpec::parse("memory://test").unwrap();
+        let status = store.store_status(&mem_spec).await;
+        assert_ne!(status.object_lock, "unknown");
+        assert_eq!(status.object_lock, "unobserved:unsupported_backend");
+
+        let tmp = tempfile::tempdir().unwrap();
+        let store_url = url::Url::from_file_path(tmp.path())
+            .expect("valid file URL from tempdir")
+            .to_string();
+        let file_spec = StoreSpec::parse(&store_url).unwrap();
+        let file_store = ObjectStoreBundleStore::from_spec(&file_spec).await.unwrap();
+        let file_status = file_store.store_status(&file_spec).await;
+        assert_ne!(file_status.object_lock, "unknown");
+        assert_eq!(file_status.object_lock, "unobserved:unsupported_backend");
+
+        let s3_val = crate::store::object_lock_status_for_backend("s3");
+        assert_ne!(s3_val, "unknown");
+        assert_eq!(s3_val, "unobserved:not_probed");
     }
 }
 
@@ -1493,5 +1537,59 @@ mod bounded_download {
             .await
             .expect("ordinary download");
         assert_eq!(got.as_ref(), body.as_slice());
+    }
+
+    #[tokio::test]
+    async fn test_store_refuses_empty_and_hostile_ids() {
+        let store = ObjectStoreBundleStore::memory();
+
+        // Empty IDs refused
+        assert!(matches!(
+            store.link_run_bundle("", "sha256:123").await.unwrap_err(),
+            StoreError::InvalidId { .. }
+        ));
+        assert!(matches!(
+            store.link_run_bundle("run1", "").await.unwrap_err(),
+            StoreError::InvalidId { .. }
+        ));
+        assert!(matches!(
+            store.get_bundle("").await.unwrap_err(),
+            StoreError::InvalidId { .. }
+        ));
+        assert!(matches!(
+            store
+                .put_bundle("", Bytes::from_static(b"data"))
+                .await
+                .unwrap_err(),
+            StoreError::InvalidId { .. }
+        ));
+        assert!(matches!(
+            store.bundle_exists("").await.unwrap_err(),
+            StoreError::InvalidId { .. }
+        ));
+        assert!(matches!(
+            store.list_bundles_for_run("").await.unwrap_err(),
+            StoreError::InvalidId { .. }
+        ));
+
+        // Hostile IDs refused
+        assert!(matches!(
+            store
+                .link_run_bundle("run/slash", "bundle")
+                .await
+                .unwrap_err(),
+            StoreError::InvalidId { .. }
+        ));
+        assert!(matches!(
+            store.link_run_bundle("..", "bundle").await.unwrap_err(),
+            StoreError::InvalidId { .. }
+        ));
+        assert!(matches!(
+            store
+                .link_run_bundle("run\0null", "bundle")
+                .await
+                .unwrap_err(),
+            StoreError::InvalidId { .. }
+        ));
     }
 }
