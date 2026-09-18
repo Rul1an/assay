@@ -10,7 +10,7 @@ policy is denied by the policy, not by Unix path syntax.
 ## Install
 
 ```bash
-cargo install assay-cli --version 6.5.0 --locked
+cargo install assay-cli --version 6.6.0 --locked
 ```
 
 For exact stdout, exits, upgrade, and rollback behavior, use the [release-pinned agent golden path](../guides/agent-golden-path.md).
