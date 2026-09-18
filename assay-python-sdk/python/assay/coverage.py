@@ -41,10 +41,14 @@ class Coverage:
 
         Returns:
             dict: A detailed coverage report dictionary containing:
-                  - `passed` (bool): Whether coverage met the threshold.
-                  - `score` (float): The calculated coverage percentage (0-100).
-                  - `violations` (list): List of rule violations found.
-                  - `records` (list): Per-trace analysis details.
+                  - `tool_coverage` (dict): Tool coverage metrics.
+                  - `rule_coverage` (dict): Rule coverage metrics.
+                  - `high_risk_gaps` (list): Blocklisted tools never seen in traces.
+                  - `policy_violations` (list): Policy violations found during analysis.
+                  - `policy_warnings` (list): Policy warnings (for example unconstrained tools).
+                  - `overall_coverage_pct` (float): Overall coverage percentage.
+                  - `meets_threshold` (bool): Whether coverage met the threshold.
+                  - `threshold` (float): The threshold that was checked.
         """
         report_json = self.analyzer.analyze(traces, min_coverage)
         return json.loads(report_json)

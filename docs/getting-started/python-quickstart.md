@@ -27,15 +27,17 @@ def test_compliance():
         traces = [json.loads(line) for line in f]
 
     # 2. Validate against your policy
-    # Returns a rich report dict (passed, violations, score)
+    # Returns Coverage.analyze() unchanged: a CoverageReport dict
+    # (meets_threshold, policy_violations, overall_coverage_pct)
     report = validate(
         policy_path="assay.yaml",
         traces=traces
     )
 
-    # 3. Assert success
-    assert report["passed"], \
-        f"Compliance Failed! Found {len(report['violations'])} violations."
+    # 3. Assert coverage threshold and policy violations
+    assert report["meets_threshold"], \
+        f"Coverage is below threshold {report['threshold']}."
+    assert not report["policy_violations"]
 ```
 
 ### 2. Coverage Analysis
@@ -51,7 +53,8 @@ def test_coverage():
     # Analyze with a minimum coverage threshold of 90%
     report = cov.analyze(traces=my_traces, min_coverage=90.0)
 
-    assert report["score"] >= 90.0
+    # overall_coverage_pct is the coverage percentage; there is no score field
+    assert report["overall_coverage_pct"] >= 90.0
 ```
 
 ### 3. Pytest Fixture
