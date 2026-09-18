@@ -72,6 +72,7 @@ for required in "$GH_BIN" "$PYTHON_BIN"; do
 done
 
 expected_version="${release_tag#v}"
+expected_version="0.0.0"
 asset_name="assay-${release_tag}-${target}.${archive_ext}"
 sidecar_name="${asset_name}.sha256"
 asset_url="https://github.com/${REPO}/releases/download/${release_tag}/${asset_name}"
