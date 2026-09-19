@@ -37,6 +37,12 @@ grep -Fq 'done < <(release_plain_assets)' "$CHECK_SCRIPT" || {
   exit 1
 }
 
+# Crates that are not shipped as release assets must not claim to be shipped.
+if grep -Fiq "shipped via release artifacts" "${REPO_ROOT}/crates/gateway-evidence-replay/Cargo.toml"; then
+  echo "FAIL: gateway-evidence-replay/Cargo.toml falsely claims to be shipped via release artifacts" >&2
+  exit 1
+fi
+
 write_asset() {
   local assets_dir="$1"
   local name="$2"

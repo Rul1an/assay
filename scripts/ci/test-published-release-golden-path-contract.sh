@@ -251,6 +251,20 @@ expect_mutation_failure \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
+  "unshare-curl-positive-control-dropped" "driver.sh" \
+  'unshare -rn curl' \
+  'curl' \
+  "driver must verify that unshare -rn blocks network access before offline verification" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "unshare-verify-dropped" "driver.sh" \
+  'unshare -rn assay evidence verify-privileged-mcp-action "$bundle" --profile-version v1 --format json' \
+  'echo skip-unshare-verify >/dev/null' \
+  "driver must verify the produced bundle under unshare -rn with --profile-version v1 exactly once" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
   "verifier-commented" "driver.sh" \
   'bash "$harness_root/scripts/ci/release_attestation_enforce.sh"' \
   '# bash "$harness_root/scripts/ci/release_attestation_enforce.sh"' \
@@ -450,6 +464,13 @@ expect_mutation_failure \
   '"executable": true' \
   '"executable": false' \
   "harness executable surface drifted"
+
+expect_mutation_failure \
+  "extra-verify-without-profile-version" "driver.sh" \
+  'cmp -s "$results/verify.json" "$results/verify-offline.json"' \
+  $'cmp -s "$results/verify.json" "$results/verify-offline.json"\n  assay evidence verify-privileged-mcp-action "$bundle" --format json' \
+  "driver verifies a produced or tampered bundle without --profile-version v1" \
+  "scripts/ci/published-release-golden-path.sh"
 
 # Same reported bypass against the old (driver-only) guard and the new example pairing guard.
 # The mutant is the shipping denied-bundle verify line with PROFILE_VERSION_V1 removed — not a
