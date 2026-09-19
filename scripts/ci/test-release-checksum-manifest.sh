@@ -362,17 +362,34 @@ prepare_recipe_store() {
   printf 'sigstore-bundle-fixture\n' >"${store}/checksums.txt.sigstore.json"
 }
 
+# Execute the literal documented fence as a file.
+# Do not pass bash -e/-u/-o here: failure control must live in the recipe.
+# Shell stubs (curl/cosign/sha256sum) prove control flow only. They do not
+# prove real cryptographic signature verification.
 run_extracted_recipe() {
   local recipe_file="$1"
   local case_dir="$2"
   local store="$3"
+  local curl_mode="${4:-success}"
+  local cosign_mode="${5:-success}"
+  local hash_probe="${6:-0}"
   mkdir -p "${case_dir}/bin" "${case_dir}/run"
   : >"${case_dir}/curl.log"
   : >"${case_dir}/cosign.log"
+  if [[ "$curl_mode" == "refuse" ]]; then
+    # Leftover files after a failed download: later steps can still run
+    # unless the recipe stops on curl's non-zero status.
+    cp "${store}/${selected_name}" "${store}/checksums.txt" \
+      "${store}/checksums.txt.sigstore.json" "${case_dir}/run/"
+  fi
   cat >"${case_dir}/bin/curl" <<EOF
 #!/bin/sh
 set -eu
 printf '%s\\n' "\$*" >> "${case_dir}/curl.log"
+if [ "${curl_mode}" = refuse ]; then
+  echo DOWNLOAD_REFUSED
+  exit 22
+fi
 url=""
 out=""
 use_remote_name=0
@@ -418,66 +435,141 @@ EOF
 #!/bin/sh
 set -eu
 printf '%s\\n' "\$*" >> "${case_dir}/cosign.log"
+if [ "${cosign_mode}" = refuse ]; then
+  echo 'Error: verifying blob [checksums.txt]: SIGNATURE_REFUSED'
+  exit 1
+fi
 echo 'Verified OK'
 EOF
   chmod +x "${case_dir}/bin/cosign"
   sha256sum_dir="$(dirname "$(command -v sha256sum)")"
   [[ -n "$sha256sum_dir" && -x "${sha256sum_dir}/sha256sum" ]] \
     || fail "sha256sum is required to execute the documented recipe"
+  if [[ "$hash_probe" == "1" ]]; then
+    cat >"${case_dir}/bin/sha256sum" <<'EOF'
+#!/bin/sh
+echo HASH_STEP_REACHED
+exit 0
+EOF
+    chmod +x "${case_dir}/bin/sha256sum"
+  fi
+  [[ -x /bin/bash ]] || fail "/bin/bash is required to execute the documented bash fence"
   (
     cd "${case_dir}/run"
-    env PATH="${case_dir}/bin:${sha256sum_dir}:/usr/bin:/bin" /bin/sh "$recipe_file"
+    env PATH="${case_dir}/bin:${sha256sum_dir}:/usr/bin:/bin" /bin/bash "$recipe_file"
   )
 }
 
 store="${tmp_root}/doc-recipe-store"
 prepare_recipe_store "$store"
 
-# RED/GREEN: the literal installation recipe must succeed when only the
-# selected archive is present beside a full multi-payload manifest.
-happy_dir="${tmp_root}/doc-recipe-happy"
-mkdir -p "$happy_dir"
-if ! run_extracted_recipe "${recipe_doc_dir}/installation.sh" "$happy_dir" "$store" \
-  >"${happy_dir}/stdout" 2>"${happy_dir}/stderr"; then
-  cat "${happy_dir}/stdout" "${happy_dir}/stderr" >&2
-  fail "literal installation.md recipe failed in a one-archive directory"
+assert_good_signature_recipe() {
+  local recipe_file="$1"
+  local label="$2"
+  local case_dir="$3"
+  mkdir -p "$case_dir"
+  if ! run_extracted_recipe "$recipe_file" "$case_dir" "$store" \
+    >"${case_dir}/stdout" 2>"${case_dir}/stderr"; then
+    cat "${case_dir}/stdout" "${case_dir}/stderr" >&2
+    fail "literal ${label} recipe failed in a one-archive directory"
+  fi
+  grep -Fq 'Verified OK' "${case_dir}/stdout" \
+    || fail "${label} recipe did not print Verified OK before hashes"
+  grep -Fq "${selected_name}: OK" "${case_dir}/stdout" \
+    || fail "${label} recipe did not print OK for the selected archive"
+  if grep -Fq "$extra_name" "${case_dir}/curl.log"; then
+    fail "${label} recipe downloaded an unselected payload"
+  fi
+}
+
+assert_stops_before_hash() {
+  local recipe_file="$1"
+  local label="$2"
+  local case_dir="$3"
+  local curl_mode="$4"
+  local cosign_mode="$5"
+  local refuse_marker="$6"
+  mkdir -p "$case_dir"
+  local status=0
+  run_extracted_recipe "$recipe_file" "$case_dir" "$store" \
+    "$curl_mode" "$cosign_mode" 1 \
+    >"${case_dir}/stdout" 2>"${case_dir}/stderr" || status=$?
+  if grep -Fq HASH_STEP_REACHED "${case_dir}/stdout" "${case_dir}/stderr"; then
+    cat "${case_dir}/stdout" "${case_dir}/stderr" >&2
+    fail "${label} reached the hash check after ${refuse_marker}"
+  fi
+  if [[ "$status" -eq 0 ]]; then
+    fail "${label} unexpectedly succeeded"
+  fi
+  if ! grep -Fq "$refuse_marker" "${case_dir}/stdout" "${case_dir}/stderr"; then
+    cat "${case_dir}/stdout" "${case_dir}/stderr" >&2
+    fail "${label} did not print ${refuse_marker}"
+  fi
+}
+
+# RED/GREEN: each literal fence must succeed when only the selected archive
+# is present beside a full multi-payload manifest.
+if [[ "$install_recipe" != "$release_recipe" ]]; then
+  fail "installation.md and release.md signed-manifest recipes must match"
 fi
-grep -Fq 'Verified OK' "${happy_dir}/stdout" \
-  || fail "installation.md recipe did not print Verified OK before hashes"
-grep -Fq "${selected_name}: OK" "${happy_dir}/stdout" \
-  || fail "installation.md recipe did not print OK for the selected archive"
-if grep -Fq "$extra_name" "${happy_dir}/curl.log"; then
-  fail "installation.md recipe downloaded an unselected payload"
-fi
+assert_good_signature_recipe "${recipe_doc_dir}/installation.sh" \
+  "installation.md" "${tmp_root}/doc-recipe-happy"
+assert_good_signature_recipe "${recipe_doc_dir}/release.sh" \
+  "release.md" "${tmp_root}/doc-recipe-release-happy"
 if grep -Fq -- '--ignore-missing' "${recipe_doc_dir}/installation.sh" \
   "${recipe_doc_dir}/release.sh"; then
   fail "signed-manifest recipe uses --ignore-missing"
 fi
 
+# RED: a refusing cosign or curl must not reach the hash check. The runner
+# does not supply set -e; the documented fence must stop itself.
+assert_stops_before_hash "${recipe_doc_dir}/installation.sh" \
+  "installation.md bad-signature" "${tmp_root}/doc-recipe-bad-sig-install" \
+  success refuse SIGNATURE_REFUSED
+assert_stops_before_hash "${recipe_doc_dir}/release.sh" \
+  "release.md bad-signature" "${tmp_root}/doc-recipe-bad-sig-release" \
+  success refuse SIGNATURE_REFUSED
+assert_stops_before_hash "${recipe_doc_dir}/installation.sh" \
+  "installation.md failed-download" "${tmp_root}/doc-recipe-bad-dl-install" \
+  refuse success DOWNLOAD_REFUSED
+assert_stops_before_hash "${recipe_doc_dir}/release.sh" \
+  "release.md failed-download" "${tmp_root}/doc-recipe-bad-dl-release" \
+  refuse success DOWNLOAD_REFUSED
+
 python3 - "${recipe_doc_dir}/installation.sh" "${recipe_doc_dir}/release.sh" <<'PY'
 from pathlib import Path
+import re
 import sys
 
 for path in sys.argv[1:]:
     text = Path(path).read_text(encoding="utf-8")
     verify_at = text.find("cosign verify-blob")
     hash_at = text.find("sha256sum")
+    first_curl = text.find("curl ")
     if verify_at < 0 or hash_at < 0 or verify_at > hash_at:
         raise SystemExit(f"{path}: signature check must precede sha256sum")
     if "--ignore-missing" in text:
         raise SystemExit(f"{path}: --ignore-missing is forbidden")
+    set_e_at = -1
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("set -e"):
+            set_e_at = text.find(line)
+            break
+    has_explicit_cosign_stop = re.search(
+        r"cosign verify-blob[\s\S]*?\|\|\s*(exit|\{)", text
+    ) is not None
+    has_explicit_curl_stop = re.search(
+        r"curl [^\n]*\|\|\s*(exit|\{)", text
+    ) is not None
+    if set_e_at < 0 and not (has_explicit_cosign_stop and has_explicit_curl_stop):
+        raise SystemExit(
+            f"{path}: download/signature failure has no recipe-local stop"
+        )
+    if set_e_at >= 0 and (set_e_at > first_curl or set_e_at > verify_at):
+        raise SystemExit(f"{path}: set -e must precede curl and cosign")
 print("signed-manifest recipe order ok")
 PY
-
-# release.md must be the same selected-archive recipe, then the same run.
-if [[ "$install_recipe" != "$release_recipe" ]]; then
-  fail "installation.md and release.md signed-manifest recipes must match"
-fi
-release_happy="${tmp_root}/doc-recipe-release-happy"
-mkdir -p "$release_happy"
-run_extracted_recipe "${recipe_doc_dir}/release.sh" "$release_happy" "$store" \
-  >"${release_happy}/stdout" 2>"${release_happy}/stderr" \
-  || fail "literal release.md recipe failed in a one-archive directory"
 
 # Negative: missing selected archive must not pass.
 missing_store="${tmp_root}/doc-recipe-missing-store"

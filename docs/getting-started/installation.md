@@ -38,6 +38,7 @@ Releases cut after this page's `v6.6.1` pin also publish a signed `checksums.txt
 To verify a published archive yourself (replace `vX.Y.Z` with the tag you downloaded):
 
 ```bash
+set -euo pipefail
 VERSION=vX.Y.Z
 ARCHIVE=assay-${VERSION}-x86_64-unknown-linux-gnu.tar.gz
 curl -fsSLO "https://github.com/Rul1an/assay/releases/download/${VERSION}/${ARCHIVE}"

@@ -190,6 +190,7 @@ Releases cut by this repository's `release.yml` on a tag publish `checksums.txt`
 Use cosign v3.1.3 or later (v2.6.5 on the 2.x line) for `verify-blob`. Earlier versions are affected by GHSA-fx35-mq7g-6g98 (verification bypass via public key in a legacy bundle).
 
 ```bash
+set -euo pipefail
 VERSION=vX.Y.Z
 ARCHIVE=assay-${VERSION}-x86_64-unknown-linux-gnu.tar.gz
 curl -fsSLO "https://github.com/Rul1an/assay/releases/download/${VERSION}/${ARCHIVE}"
