@@ -219,9 +219,39 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "linux-asset-drift" "driver.sh" \
-  'cli_asset="assay-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"' \
+  'cli_asset="assay-${release_tag}-${target}.tar.gz"' \
   'cli_asset="assay-${release_tag}-aarch64-apple-darwin.tar.gz"' \
-  "Linux x86_64 product asset assignment drifted"
+  "Linux product asset assignment drifted"
+
+expect_mutation_failure \
+  "linux-asset-swapped-arch" "driver.sh" \
+  'mcp_asset="assay-mcp-server-${release_tag}-${target}.tar.gz"' \
+  'mcp_asset="assay-mcp-server-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"' \
+  "Linux product asset assignment drifted"
+
+expect_mutation_failure \
+  "host-arch-fallback-removed" "driver.sh" \
+  '*) fail "unsupported host architecture for published Linux journey: $(uname -m)" ;;' \
+  '*) printf "%s\\n" "x86_64-unknown-linux-gnu" ;;' \
+  "driver lost unknown host refuse"
+
+expect_mutation_failure \
+  "claim-hardcodes-x86" "driver.sh" \
+  'f"The attested release binaries completed the bounded {platform_claim} journey under the "' \
+  '"The attested release binaries completed the bounded Linux x86_64 journey under the "' \
+  "run-pin claim must not hardcode Linux x86_64 for every target"
+
+expect_mutation_failure \
+  "matrix-arm-row-removed" "workflow.yml" \
+  '            target: aarch64-unknown-linux-gnu' \
+  '            target: x86_64-pc-windows-msvc' \
+  "Linux journey matrix must include aarch64-unknown-linux-gnu"
+
+expect_mutation_failure \
+  "matrix-artifact-name-collision" "workflow.yml" \
+  '          name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}' \
+  '          name: published-release-golden-path-${{ inputs.release_tag }}-${{ github.sha }}' \
+  "Linux journey artifact names must include matrix.target"
 
 expect_mutation_failure \
   "same-bundle-command-commented" "driver.sh" \

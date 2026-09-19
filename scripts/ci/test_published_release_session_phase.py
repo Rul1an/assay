@@ -151,6 +151,8 @@ run_published_release_session_product
             folder.mkdir(exist_ok=True)
             for name in ("cli", "mcp"):
                 (folder / (name + suffix)).write_text("fixture")
+        (results / "journey-target.txt").write_text("x86_64-unknown-linux-gnu")
+        (results / "journey-platform-claim.txt").write_text("Linux x86_64")
         driver = DRIVER.read_text() if driver is None else driver
         start = driver.index('"$PYTHON_BIN" - "$release_tag" "$source_digest"')
         end = driver.index('echo "PASS: published release', start)

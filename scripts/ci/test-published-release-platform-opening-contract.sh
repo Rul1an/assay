@@ -66,10 +66,17 @@ expect_mutation_failure \
   "opening job must name the published Windows archive target"
 
 expect_mutation_failure \
-  "linux-job-changed" "workflow.yml" \
-  "Linux x86_64 post-publication journey" \
-  "Linux x86_64 post-publication journey (widened)" \
-  "Linux x86_64 post-publication job steps must stay unchanged"
+  "linux-arm-matrix-removed" "workflow.yml" \
+  "            target: aarch64-unknown-linux-gnu" \
+  "            target: x86_64-pc-windows-msvc" \
+  "Linux journey matrix must include aarch64-unknown-linux-gnu"
+
+expect_mutation_failure \
+  "linux-journey-artifact-collision" "workflow.yml" \
+  'published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}' \
+  'published-release-golden-path-${{ inputs.release_tag }}-${{ github.sha }}' \
+  "Linux journey artifacts must be named per matrix.target to avoid collision"
+
 
 expect_mutation_failure \
   "same-run-artifact" "workflow.yml" \

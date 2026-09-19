@@ -178,11 +178,13 @@ def validate_contract(
         "env:",
         "GH_TOKEN: ${{ github.token }}",
         "RELEASE_TAG: ${{ inputs.release_tag }}",
+        "RELEASE_TARGET: ${{ matrix.target }}",
         "RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path",
         "run: |",
         "set -euo pipefail",
         "bash scripts/ci/published-release-golden-path.sh \\",
         '--release-tag "$RELEASE_TAG" \\',
+        '--target "$RELEASE_TARGET" \\',
         '--harness-sha "$GITHUB_SHA" \\',
         '--workflow-run-id "$GITHUB_RUN_ID" \\',
         '--workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\',
@@ -190,6 +192,42 @@ def validate_contract(
     ]
     if named_step_lines(workflow_text, "Exercise the attested published release", problems) != expected_exercise_step:
         problems.append("workflow must execute only the exact reviewed driver invocation")
+
+    require(
+        workflow_text,
+        "published-linux-journey:",
+        "workflow must define the shared published-linux-journey matrix",
+        problems,
+    )
+    require(
+        workflow_text,
+        "x86_64-unknown-linux-gnu",
+        "Linux journey matrix must include x86_64-unknown-linux-gnu",
+        problems,
+    )
+    require(
+        workflow_text,
+        "aarch64-unknown-linux-gnu",
+        "Linux journey matrix must include aarch64-unknown-linux-gnu",
+        problems,
+    )
+    require(
+        workflow_text,
+        "ubuntu-24.04-arm",
+        "Linux arm64 journey must use ubuntu-24.04-arm",
+        problems,
+    )
+    require(
+        workflow_text,
+        "published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}",
+        "Linux journey artifact names must include matrix.target",
+        problems,
+    )
+    if "linux-x86_64:" in workflow_text:
+        problems.append("legacy linux-x86_64 job must be replaced by the shared matrix")
+    if workflow_text.count("bash scripts/ci/published-release-golden-path.sh") != 1:
+        problems.append("workflow must invoke the golden-path driver exactly once")
+
     require(workflow_text, "--harness-sha \"$GITHUB_SHA\"", "workflow must bind the harness head", problems)
     require(workflow_text, "--workflow-run-id \"$GITHUB_RUN_ID\"", "workflow must bind its run id", problems)
     require(
@@ -323,7 +361,7 @@ def validate_contract(
     if 'record_command "proxy-enforce"' in driver_text:
         problems.append("driver must not record proxy provenance separately from execution")
     expected_mcp_binary_surface = [
-        'mcp_asset="assay-mcp-server-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"',
+        'mcp_asset="assay-mcp-server-${release_tag}-${target}.tar.gz"',
         'mapfile -t mcp_candidates < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)',
         '[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "MCP archive must contain exactly one executable assay-mcp-server binary"',
         'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"',
@@ -480,12 +518,33 @@ def validate_contract(
             if boundary not in driver_lines or verifier > driver_lines.index(boundary):
                 problems.append(f"release attestations must precede product use: {boundary}")
     exact_assignments = [
-        'cli_asset="assay-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"',
-        'mcp_asset="assay-mcp-server-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"',
+        'cli_asset="assay-${release_tag}-${target}.tar.gz"',
+        'mcp_asset="assay-mcp-server-${release_tag}-${target}.tar.gz"',
     ]
     for assignment in exact_assignments:
         if driver_lines.count(assignment) != 1:
-            problems.append(f"Linux x86_64 product asset assignment drifted: {assignment}")
+            problems.append(f"Linux product asset assignment drifted: {assignment}")
+    target_requirements = {
+        "target flag parse": '--target)',
+        "host architecture resolve": "resolve_linux_target_from_host",
+        "unknown host refuse": "unsupported host architecture for published Linux journey",
+        "host/target mismatch refuse": "does not match host architecture",
+        "closed linux targets": "unsupported published Linux journey target",
+        "platform claim x86": 'x86_64-unknown-linux-gnu) platform_claim="Linux x86_64" ;;',
+        "platform claim arm": 'aarch64-unknown-linux-gnu) platform_claim="Linux arm64" ;;',
+        "run-pin target field": '"target": target,',
+        "claim uses platform_claim": "bounded {platform_claim} journey",
+        "persisted journey target": 'journey-target.txt',
+        "persisted platform claim": 'journey-platform-claim.txt',
+    }
+    for label, fragment in target_requirements.items():
+        require(driver_text, fragment, f"driver lost {label}", problems)
+    if 'bounded Linux x86_64 journey' in driver_text:
+        problems.append("run-pin claim must not hardcode Linux x86_64 for every target")
+    if driver_lines.count('cli_asset="assay-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"') != 0:
+        problems.append("driver must not hardcode the x86_64 CLI archive without ${target}")
+    if driver_lines.count('mcp_asset="assay-mcp-server-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"') != 0:
+        problems.append("driver must not hardcode the x86_64 MCP archive without ${target}")
     inspect_command = 'assay evidence show --format json -- "$bundle"'
     if driver_lines.count(inspect_command) != 1:
         problems.append("driver must inspect the same bundle it produced exactly once")
