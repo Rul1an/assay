@@ -4,8 +4,13 @@
 //! `docs/architecture/SPEC-Incident-Package-v1.md`.
 
 pub mod container;
+pub mod verify;
 
 pub use container::{read_incident_container, ContainerMember, IncidentContainer};
+pub use verify::{
+    verify_incident_package, ContextApplicability, ContextExpectation, ContextInput,
+    ContextInvocation, ContextLimits, ContextWindow, PackageRef,
+};
 
 use serde::{Deserialize, Serialize};
 
