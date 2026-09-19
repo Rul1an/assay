@@ -488,7 +488,7 @@ repos:
         entry: bash scripts/ci/test-osv-cargo-lock-gate.sh
         language: system
         pass_filenames: false
-        files: ^(\.github/workflows/ci\.yml|scripts/ci/(check|test)-osv-cargo-lock-gate\.(py|sh)|\.pre-commit-config\.yaml)$
+        files: ^(\.github/workflows/ci\.yml|osv-scanner\.toml|scripts/ci/(check|test)-osv-cargo-lock-gate\.(py|sh)|\.pre-commit-config\.yaml)$
 
       - id: codeql-upload-sarif-lockstep
         name: CodeQL upload-sarif workflow pin lockstep

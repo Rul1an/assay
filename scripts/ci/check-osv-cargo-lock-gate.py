@@ -12,9 +12,13 @@ from __future__ import annotations
 
 import re
 import sys
+import tomllib
+from datetime import date
 from pathlib import Path
 
 WORKFLOW = Path(".github/workflows/ci.yml")
+OSV_TOML = Path("osv-scanner.toml")
+IGNORED_VULN_KEYS = frozenset({"id", "reason", "ignoreUntil"})
 JOB_ID = "osv-cargo-lock"
 PIN_SHA = "a345acffa64b0eaede81a3d9aae6141214d9c8fc"
 PIN_TAG = "v2.6.0"
@@ -186,17 +190,62 @@ def check(text: str) -> list[str]:
     return errors
 
 
+def check_ignored_vulns(path: Path) -> list[str]:
+    """Fail closed on [[IgnoredVulns]] so a comment is not the expiry rule.
+
+    OSV treats a quoted ignoreUntil as RFC3339 and then ignores the whole file
+    (upstream manager.go). A typo like ignoreUtil would otherwise drop expiry.
+    """
+    if not path.is_file():
+        return [f"missing `{path}`"]
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        return [f"{path}: TOML parse error: {exc}"]
+
+    entries = data.get("IgnoredVulns", [])
+    if not isinstance(entries, list):
+        return [f"{path}: IgnoredVulns must be an array of tables"]
+
+    errors: list[str] = []
+    for index, entry in enumerate(entries):
+        prefix = f"{path} IgnoredVulns[{index}]"
+        if not isinstance(entry, dict):
+            errors.append(f"{prefix}: must be a table")
+            continue
+        for key in sorted(set(entry) - IGNORED_VULN_KEYS):
+            errors.append(f"{prefix}: unknown key `{key}`")
+        ident = entry.get("id")
+        if not isinstance(ident, str) or not ident.strip():
+            errors.append(f"{prefix}: missing or empty `id`")
+        if "reason" not in entry:
+            errors.append(f"{prefix}: missing `reason`")
+        elif not isinstance(entry["reason"], str) or not entry["reason"].strip():
+            errors.append(f"{prefix}: empty `reason`")
+        if "ignoreUntil" not in entry:
+            errors.append(f"{prefix}: missing `ignoreUntil`")
+        elif type(entry["ignoreUntil"]) is not date:
+            errors.append(
+                f"{prefix}: `ignoreUntil` must be an unquoted TOML date "
+                "(2026-12-31); a quoted string or datetime with a time part "
+                "is parsed differently and OSV ignores the whole file"
+            )
+    return errors
+
+
 def main() -> int:
     if not WORKFLOW.is_file():
         print(f"FAIL: workflow missing: {WORKFLOW}", file=sys.stderr)
         return 2
     errors = check(WORKFLOW.read_text(encoding="utf-8"))
+    errors.extend(check_ignored_vulns(OSV_TOML))
     if errors:
-        print(f"FAIL: {WORKFLOW}", file=sys.stderr)
+        print("FAIL: OSV Cargo.lock gate", file=sys.stderr)
         for err in errors:
             print(f"  {err}", file=sys.stderr)
         return 1
     print(f"ok    {WORKFLOW} {JOB_ID}")
+    print(f"ok    {OSV_TOML} IgnoredVulns")
     return 0
 
 

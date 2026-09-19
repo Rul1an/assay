@@ -3,15 +3,19 @@
 #
 # Control must be green on the live tree. Swapping to the PR-diff reusable,
 # floating the pin, widening scan-args, dropping security-events, or deleting
-# the cmov rationale must turn the checker red.
+# the cmov rationale must turn the checker red. So must a quoted ignoreUntil,
+# a missing or empty reason, a missing ignoreUntil, or a misspelled key in
+# osv-scanner.toml: those rules used to live only in a comment.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="scripts/ci/check-osv-cargo-lock-gate.py"
 WORKFLOW=".github/workflows/ci.yml"
+OSV_TOML="osv-scanner.toml"
 
 [[ -f "${ROOT}/${CHECKER}" ]] || { echo "FAIL: checker missing" >&2; exit 1; }
 [[ -f "${ROOT}/${WORKFLOW}" ]] || { echo "FAIL: workflow missing" >&2; exit 1; }
+[[ -f "${ROOT}/${OSV_TOML}" ]] || { echo "FAIL: osv-scanner.toml missing" >&2; exit 1; }
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
@@ -21,6 +25,7 @@ seed() {
   mkdir -p "$case_root/.github/workflows" "$case_root/scripts/ci"
   cp "${ROOT}/${CHECKER}" "$case_root/${CHECKER}"
   cp "${ROOT}/${WORKFLOW}" "$case_root/${WORKFLOW}"
+  cp "${ROOT}/${OSV_TOML}" "$case_root/${OSV_TOML}"
 }
 
 run_checker() {
@@ -145,4 +150,85 @@ if ! grep -F "GHSA-3rjw-m598-pq24" "$scratch/rationale-comment-dropped.log" >/de
   exit 1
 fi
 
-echo "PASS: osv-cargo-lock gate contract (control, pr-diff, sha-drift, recursive, permissions, fail-open, rationale)"
+c="$scratch/quoted-ignore-until"
+seed "$c"
+python3 - "$c/${OSV_TOML}" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+path.write_text(text.replace("ignoreUntil = 2026-12-31", 'ignoreUntil = "2026-12-31"', 1))
+PY
+run_checker "quoted-ignoreUntil" "$c" 1
+if ! grep -F "unquoted" "$scratch/quoted-ignoreUntil.log" >/dev/null; then
+  cat "$scratch/quoted-ignoreUntil.log" >&2
+  echo "FAIL: quoted ignoreUntil mutation did not say to write it unquoted" >&2
+  exit 1
+fi
+
+c="$scratch/missing-reason"
+seed "$c"
+python3 - "$c/${OSV_TOML}" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+lines = [line for line in path.read_text().splitlines(keepends=True) if not line.startswith("reason =")]
+path.write_text("".join(lines))
+PY
+run_checker "missing-reason" "$c" 1
+if ! grep -F "reason" "$scratch/missing-reason.log" >/dev/null; then
+  cat "$scratch/missing-reason.log" >&2
+  echo "FAIL: missing-reason mutation did not name reason" >&2
+  exit 1
+fi
+
+c="$scratch/empty-reason"
+seed "$c"
+python3 - "$c/${OSV_TOML}" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+# Keep the key so this is empty, not missing.
+path.write_text(text.replace('reason = "Informational', 'reason = ""\n# Informational', 1))
+PY
+run_checker "empty-reason" "$c" 1
+if ! grep -F "reason" "$scratch/empty-reason.log" >/dev/null; then
+  cat "$scratch/empty-reason.log" >&2
+  echo "FAIL: empty-reason mutation did not name reason" >&2
+  exit 1
+fi
+
+c="$scratch/missing-ignore-until"
+seed "$c"
+python3 - "$c/${OSV_TOML}" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+lines = [line for line in path.read_text().splitlines(keepends=True) if not line.startswith("ignoreUntil =")]
+path.write_text("".join(lines))
+PY
+run_checker "missing-ignoreUntil" "$c" 1
+if ! grep -F "ignoreUntil" "$scratch/missing-ignoreUntil.log" >/dev/null; then
+  cat "$scratch/missing-ignoreUntil.log" >&2
+  echo "FAIL: missing-ignoreUntil mutation did not name ignoreUntil" >&2
+  exit 1
+fi
+
+c="$scratch/misspelled-key"
+seed "$c"
+python3 - "$c/${OSV_TOML}" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+path.write_text(text.replace("ignoreUntil =", "ignoreUtil =", 1))
+PY
+run_checker "misspelled-key" "$c" 1
+if ! grep -F "ignoreUtil" "$scratch/misspelled-key.log" >/dev/null; then
+  cat "$scratch/misspelled-key.log" >&2
+  echo "FAIL: misspelled-key mutation did not name ignoreUtil" >&2
+  exit 1
+fi
+
+echo "PASS: osv-cargo-lock gate contract (control, pr-diff, sha-drift, recursive, permissions, fail-open, rationale, toml-ignore)"
