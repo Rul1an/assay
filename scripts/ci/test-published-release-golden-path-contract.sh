@@ -254,6 +254,45 @@ expect_mutation_failure \
   "Linux journey artifact names must include matrix.target"
 
 expect_mutation_failure \
+  "host-arch-arm-maps-to-x86" "driver.sh" \
+  '    aarch64|arm64) printf '\''%s\n'\'' "aarch64-unknown-linux-gnu" ;;' \
+  '    aarch64|arm64) printf '\''%s\n'\'' "x86_64-unknown-linux-gnu" ;;' \
+  "Linux arm64 host mapping drifted" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "post-resolution-target-override" "driver.sh" \
+  '  *) fail "unsupported published Linux journey target: ${target}" ;;
+esac' \
+  '  *) fail "unsupported published Linux journey target: ${target}" ;;
+esac
+target="x86_64-unknown-linux-gnu"
+platform_claim="Linux x86_64"' \
+  "resolved Linux journey target must persist without a later architecture override" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "matrix-arm-row-comment-only" "workflow.yml" \
+  $'          - os: ubuntu-24.04-arm\n            label: Linux arm64\n            target: aarch64-unknown-linux-gnu' \
+  $'          # - os: ubuntu-24.04-arm\n          #   label: Linux arm64\n          #   target: aarch64-unknown-linux-gnu' \
+  "Linux journey matrix must include aarch64-unknown-linux-gnu" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "host-mismatch-comment-only" "driver.sh" \
+  $'elif [[ "$target" != "$host_target" ]]; then\n  fail "requested target ${target} does not match host architecture (${host_target})"' \
+  $'# elif [[ "$target" != "$host_target" ]]; then\n  # fail "requested target ${target} does not match host architecture (${host_target})"' \
+  "driver lost host/target mismatch refuse" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "matrix-arm-runner-comment-only" "workflow.yml" \
+  "          - os: ubuntu-24.04-arm" \
+  $'          - os: ubuntu-latest\n          # ubuntu-24.04-arm' \
+  "Linux arm64 journey must use ubuntu-24.04-arm" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
   "same-bundle-command-commented" "driver.sh" \
   'assay evidence show --format json -- "$bundle"' \
   $'assay evidence show --format json -- conformance/privileged-mcp-action-v0/vectors/ok-001.bundle.tar.gz\n  # assay evidence show --format json -- "$bundle"' \

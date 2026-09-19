@@ -6,6 +6,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import shutil
+import stat
+import subprocess
+import tempfile
 from pathlib import Path, PurePosixPath
 
 
@@ -18,6 +23,23 @@ EXAMPLE_DENIED_VERIFY_PAIRED = (
 )
 EXAMPLE_MATRIX_FORWARDS_ARGS = (
     "example matrix() must forward extra args to verify-privileged-mcp-action"
+)
+
+LINUX_JOURNEY_MATRIX_ROWS = (
+    {"os": "ubuntu-24.04", "label": "Linux x86_64", "target": "x86_64-unknown-linux-gnu"},
+    {"os": "ubuntu-24.04-arm", "label": "Linux arm64", "target": "aarch64-unknown-linux-gnu"},
+)
+LINUX_JOURNEY_ARTIFACT_NAME = (
+    "name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}"
+)
+HOST_MAP_X86 = 'x86_64|amd64) printf \'%s\\n\' "x86_64-unknown-linux-gnu" ;;'
+HOST_MAP_ARM = 'aarch64|arm64) printf \'%s\\n\' "aarch64-unknown-linux-gnu" ;;'
+HOST_MAP_UNKNOWN = (
+    '*) fail "unsupported host architecture for published Linux journey: $(uname -m)" ;;'
+)
+HOST_MISMATCH_ELIF = 'elif [[ "$target" != "$host_target" ]]; then'
+HOST_MISMATCH_FAIL = (
+    'fail "requested target ${target} does not match host architecture (${host_target})"'
 )
 
 
@@ -74,6 +96,151 @@ def lines_between(text: str, start_marker: str, end_marker: str, problems: list[
     start = text.index(start_marker)
     end = text.index(end_marker, start)
     return active_lines(text[start:end])
+
+
+def linux_journey_include_rows(job_text: str) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+    in_include = False
+    for line in active_lines(job_text):
+        if line == "include:":
+            in_include = True
+            continue
+        if not in_include:
+            continue
+        if line.startswith("- name:") or line.startswith("steps:") or line.startswith("uses:"):
+            break
+        if line.startswith("- os:"):
+            if current:
+                rows.append(current)
+            current = {"os": line.split(":", 1)[1].strip()}
+            continue
+        if current is None:
+            continue
+        if line.startswith("label:"):
+            current["label"] = line.split(":", 1)[1].strip()
+        elif line.startswith("target:"):
+            current["target"] = line.split(":", 1)[1].strip()
+    if current:
+        rows.append(current)
+    return rows
+
+
+def validate_linux_journey_matrix(workflow_text: str, problems: list[str]) -> None:
+    job = mapping_block(workflow_text, "published-linux-journey", 2, problems)
+    if not job:
+        problems.append("workflow must define the shared published-linux-journey matrix")
+        return
+    rows = linux_journey_include_rows(job)
+    targets = [row.get("target") for row in rows]
+    runners = [row.get("os") for row in rows]
+    if "aarch64-unknown-linux-gnu" not in targets:
+        problems.append("Linux journey matrix must include aarch64-unknown-linux-gnu")
+    if "x86_64-unknown-linux-gnu" not in targets:
+        problems.append("Linux journey matrix must include x86_64-unknown-linux-gnu")
+    if "ubuntu-24.04-arm" not in runners:
+        problems.append("Linux arm64 journey must use ubuntu-24.04-arm")
+    if rows != [dict(row) for row in LINUX_JOURNEY_MATRIX_ROWS]:
+        if "Linux journey matrix must include aarch64-unknown-linux-gnu" not in problems and (
+            "Linux arm64 journey must use ubuntu-24.04-arm" not in problems
+        ):
+            problems.append("Linux journey matrix rows drifted")
+    if LINUX_JOURNEY_ARTIFACT_NAME not in active_lines(job):
+        problems.append("Linux journey artifact names must include matrix.target")
+    if "bash scripts/ci/published-release-golden-path.sh" not in job:
+        problems.append("Linux journey matrix must execute the reviewed golden-path driver")
+
+
+def persist_linux_journey_identity(
+    driver_text: str, host_machine: str, requested_target: str | None
+) -> tuple[int, str, str, str]:
+    scratch = Path(tempfile.mkdtemp(prefix="linux-journey-ident-"))
+    try:
+        driver_path = scratch / "scripts/ci/published-release-golden-path.sh"
+        driver_path.parent.mkdir(parents=True)
+        driver_path.write_text(driver_text, encoding="utf-8")
+        driver_path.chmod(driver_path.stat().st_mode | stat.S_IEXEC)
+        manifest = scratch / "scripts/ci/fixtures/published-release-golden-path/v1/harness-manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("{}\n", encoding="utf-8")
+        bindir = scratch / "bin"
+        bindir.mkdir()
+        uname = bindir / "uname"
+        uname.write_text(
+            "#!/bin/sh\n"
+            '[ "$1" = -m ] || exit 1\n'
+            f"printf '%s\\n' '{host_machine}'\n",
+            encoding="utf-8",
+        )
+        uname.chmod(0o755)
+        for name in ("gh", "jq", "sha256sum"):
+            stub = bindir / name
+            stub.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            stub.chmod(0o755)
+        run_root = scratch / "run"
+        command = [
+            "bash",
+            str(driver_path),
+            "--release-tag",
+            "v0.0.0",
+            "--harness-sha",
+            "a" * 40,
+            "--workflow-run-id",
+            "1",
+            "--workflow-run-attempt",
+            "1",
+            "--run-root",
+            str(run_root),
+        ]
+        if requested_target is not None:
+            command.extend(["--target", requested_target])
+        env = os.environ.copy()
+        env["PATH"] = f"{bindir}{os.pathsep}{env.get('PATH', '/usr/bin:/bin')}"
+        env["GH_BIN"] = str(bindir / "gh")
+        env["JQ_BIN"] = str(bindir / "jq")
+        proc = subprocess.run(command, capture_output=True, text=True, env=env, timeout=15, check=False)
+        target_path = run_root / "results" / "journey-target.txt"
+        claim_path = run_root / "results" / "journey-platform-claim.txt"
+        persisted = target_path.read_text(encoding="utf-8") if target_path.is_file() else ""
+        claim = claim_path.read_text(encoding="utf-8") if claim_path.is_file() else ""
+        return proc.returncode, persisted, claim, proc.stderr
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def validate_linux_journey_driver_identity(driver_text: str, problems: list[str]) -> None:
+    driver_lines = active_lines(driver_text)
+    exact_host_lines = {
+        HOST_MAP_X86: "Linux x86_64 host mapping drifted",
+        HOST_MAP_ARM: "Linux arm64 host mapping drifted",
+        HOST_MAP_UNKNOWN: "driver lost unknown host refuse",
+        HOST_MISMATCH_ELIF: "driver lost host/target mismatch refuse",
+        HOST_MISMATCH_FAIL: "driver lost host/target mismatch refuse",
+    }
+    for line, message in exact_host_lines.items():
+        if driver_lines.count(line) != 1:
+            problems.append(message)
+    for host_machine, target, claim in (
+        ("x86_64", "x86_64-unknown-linux-gnu", "Linux x86_64"),
+        ("aarch64", "aarch64-unknown-linux-gnu", "Linux arm64"),
+    ):
+        _code, persisted, persisted_claim, _stderr = persist_linux_journey_identity(
+            driver_text, host_machine, target
+        )
+        if persisted != target or persisted_claim != claim:
+            problems.append(
+                "resolved Linux journey target must persist without a later architecture override"
+            )
+    mismatch_code, mismatch_target, _claim, mismatch_err = persist_linux_journey_identity(
+        driver_text, "x86_64", "aarch64-unknown-linux-gnu"
+    )
+    if mismatch_code == 0 or "does not match host architecture" not in mismatch_err or mismatch_target:
+        problems.append("driver lost host/target mismatch refuse")
+    unknown_code, unknown_target, _claim, unknown_err = persist_linux_journey_identity(
+        driver_text, "riscv64", None
+    )
+    if unknown_code == 0 or "unsupported host architecture" not in unknown_err or unknown_target:
+        problems.append("driver lost unknown host refuse")
 
 
 def validate_manifest(
@@ -193,36 +360,7 @@ def validate_contract(
     if named_step_lines(workflow_text, "Exercise the attested published release", problems) != expected_exercise_step:
         problems.append("workflow must execute only the exact reviewed driver invocation")
 
-    require(
-        workflow_text,
-        "published-linux-journey:",
-        "workflow must define the shared published-linux-journey matrix",
-        problems,
-    )
-    require(
-        workflow_text,
-        "x86_64-unknown-linux-gnu",
-        "Linux journey matrix must include x86_64-unknown-linux-gnu",
-        problems,
-    )
-    require(
-        workflow_text,
-        "aarch64-unknown-linux-gnu",
-        "Linux journey matrix must include aarch64-unknown-linux-gnu",
-        problems,
-    )
-    require(
-        workflow_text,
-        "ubuntu-24.04-arm",
-        "Linux arm64 journey must use ubuntu-24.04-arm",
-        problems,
-    )
-    require(
-        workflow_text,
-        "published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}",
-        "Linux journey artifact names must include matrix.target",
-        problems,
-    )
+    validate_linux_journey_matrix(workflow_text, problems)
     if "linux-x86_64:" in workflow_text:
         problems.append("legacy linux-x86_64 job must be replaced by the shared matrix")
     if workflow_text.count("bash scripts/ci/published-release-golden-path.sh") != 1:
@@ -527,8 +665,6 @@ def validate_contract(
     target_requirements = {
         "target flag parse": '--target)',
         "host architecture resolve": "resolve_linux_target_from_host",
-        "unknown host refuse": "unsupported host architecture for published Linux journey",
-        "host/target mismatch refuse": "does not match host architecture",
         "closed linux targets": "unsupported published Linux journey target",
         "platform claim x86": 'x86_64-unknown-linux-gnu) platform_claim="Linux x86_64" ;;',
         "platform claim arm": 'aarch64-unknown-linux-gnu) platform_claim="Linux arm64" ;;',
@@ -539,6 +675,7 @@ def validate_contract(
     }
     for label, fragment in target_requirements.items():
         require(driver_text, fragment, f"driver lost {label}", problems)
+    validate_linux_journey_driver_identity(driver_text, problems)
     if 'bounded Linux x86_64 journey' in driver_text:
         problems.append("run-pin claim must not hardcode Linux x86_64 for every target")
     if driver_lines.count('cli_asset="assay-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"') != 0:

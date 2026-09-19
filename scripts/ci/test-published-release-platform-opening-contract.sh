@@ -75,7 +75,19 @@ expect_mutation_failure \
   "linux-journey-artifact-collision" "workflow.yml" \
   'published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}' \
   'published-release-golden-path-${{ inputs.release_tag }}-${{ github.sha }}' \
-  "Linux journey artifacts must be named per matrix.target to avoid collision"
+  "Linux journey artifact names must include matrix.target"
+
+expect_mutation_failure \
+  "linux-arm-row-comment-only" "workflow.yml" \
+  $'          - os: ubuntu-24.04-arm\n            label: Linux arm64\n            target: aarch64-unknown-linux-gnu' \
+  $'          # - os: ubuntu-24.04-arm\n          #   label: Linux arm64\n          #   target: aarch64-unknown-linux-gnu' \
+  "Linux journey matrix must include aarch64-unknown-linux-gnu"
+
+expect_mutation_failure \
+  "linux-arm-runner-comment-only" "workflow.yml" \
+  "          - os: ubuntu-24.04-arm" \
+  $'          - os: ubuntu-latest\n          # ubuntu-24.04-arm' \
+  "Linux arm64 journey must use ubuntu-24.04-arm"
 
 
 expect_mutation_failure \

@@ -9,6 +9,7 @@ and keeps opening legs downloading their own published archive by tag.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 from pathlib import Path
 
 
@@ -77,49 +78,20 @@ def named_step_lines(text: str, name: str, problems: list[str]) -> list[str]:
     return active_lines("\n".join(lines[start:end]))
 
 
+def _golden_path_contract():
+    path = Path(__file__).with_name("check-published-release-golden-path-contract.py")
+    spec = importlib.util.spec_from_file_location("published_release_golden_path_contract", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("unable to load published-release golden-path contract helper")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def validate_linux_journey_matrix(workflow_text: str, problems: list[str]) -> None:
-    require(
-        workflow_text,
-        "published-linux-journey:",
-        "workflow must define the shared published-linux-journey matrix job",
-        problems,
-    )
-    require(
-        workflow_text,
-        "bash scripts/ci/published-release-golden-path.sh",
-        "Linux journey matrix must execute the reviewed golden-path driver",
-        problems,
-    )
-    require(
-        workflow_text,
-        '--target "$RELEASE_TARGET"',
-        "Linux journey matrix must pass --target from the matrix",
-        problems,
-    )
-    require(
-        workflow_text,
-        "x86_64-unknown-linux-gnu",
-        "Linux journey matrix must include x86_64-unknown-linux-gnu",
-        problems,
-    )
-    require(
-        workflow_text,
-        "aarch64-unknown-linux-gnu",
-        "Linux journey matrix must include aarch64-unknown-linux-gnu",
-        problems,
-    )
-    require(
-        workflow_text,
-        "ubuntu-24.04-arm",
-        "Linux arm64 journey must use official ubuntu-24.04-arm runners",
-        problems,
-    )
-    require(
-        workflow_text,
-        "published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}",
-        "Linux journey artifacts must be named per matrix.target to avoid collision",
-        problems,
-    )
+    _golden_path_contract().validate_linux_journey_matrix(workflow_text, problems)
+    if '--target "$RELEASE_TARGET"' not in workflow_text:
+        problems.append("Linux journey matrix must pass --target from the matrix")
     if workflow_text.count("bash scripts/ci/published-release-golden-path.sh") != 1:
         problems.append("exactly one golden-path driver invocation must exist in the workflow")
 
