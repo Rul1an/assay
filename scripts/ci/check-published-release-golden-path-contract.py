@@ -505,11 +505,30 @@ def validate_contract(
         problems.append(
             "driver must verify the tampered denial-observation bundle with --profile-version v1 exactly once"
         )
+    unshare_verify = (
+        'unshare -rn assay evidence verify-privileged-mcp-action "$bundle" --profile-version v1 --format json'
+    )
+    if driver_lines.count(unshare_verify) != 1:
+        problems.append(
+            "driver must verify the produced bundle under unshare -rn with --profile-version v1 exactly once"
+        )
     if any(
         "verify-privileged-mcp-action" in line and "--profile-version v1" not in line
         for line in driver_lines
     ):
         problems.append("driver verifies a produced or tampered bundle without --profile-version v1")
+    require(
+        driver_text,
+        "unshare -rn curl",
+        "driver must verify that unshare -rn blocks network access before offline verification",
+        problems,
+    )
+    require(
+        driver_text,
+        'cmp -s "$results/verify.json" "$results/verify-offline.json"',
+        "driver must verify that offline verification output matches connected verification",
+        problems,
+    )
     required_artifacts = [
         "run-pin.json",
         "commands.ndjson",
