@@ -35,7 +35,7 @@ Download the asset for [`v6.6.2`](https://github.com/Rul1an/assay/releases/tag/v
 
 Releases `v6.6.2` and later publish a signed `checksums.txt`. When `cosign` is on `PATH` and reports v3.1.3 or later (v2.6.5 on the 2.x line), `scripts/install.sh` verifies that manifest against the release workflow identity at the tag before it trusts any per-file hash. When `cosign` is present but older or unparsable, the installer refuses that signature check and stops (GHSA-fx35-mq7g-6g98). When `cosign` is absent, the installer prints `verification=signed_manifest_skipped reason=cosign_not_installed` and continues with the per-file `.sha256` sidecar. It never skips that check silently.
 
-To verify a published archive yourself (replace `vX.Y.Z` with the tag you downloaded):
+To verify a published archive yourself over a **connected** network (replace `vX.Y.Z` with the tag you downloaded). This recipe uses `curl` and cosign's default trust material; it is **not** network-isolated. For TrustedRoot under network isolation, use the canonical recipe in [release.md — Network-isolated consumer (TrustedRoot)](../reference/release.md#network-isolated-consumer-trustedroot):
 
 ```bash
 set -euo pipefail
@@ -62,7 +62,7 @@ The signed manifest names every published payload. This recipe verifies the sele
 
 `v6.6.1` and earlier have per-file `.sha256` sidecars only. The same installer then reports `verification=signed_manifest_unavailable reason=checksums.txt_not_published` when `cosign` is present, and still verifies the sidecar.
 
-See [release.md](../reference/release.md#signed-checksum-manifest) for the operator checklist.
+See [release.md](../reference/release.md#signed-checksum-manifest) for the operator checklist and the [network-isolated consumer](../reference/release.md#network-isolated-consumer-trustedroot) recipe.
 
 Windows x86-64 uses:
 
