@@ -465,6 +465,13 @@ expect_mutation_failure \
   '"executable": false' \
   "harness executable surface drifted"
 
+expect_mutation_failure \
+  "extra-verify-without-profile-version" "driver.sh" \
+  'cmp -s "$results/verify.json" "$results/verify-offline.json"' \
+  $'cmp -s "$results/verify.json" "$results/verify-offline.json"\n  assay evidence verify-privileged-mcp-action "$bundle" --format json' \
+  "driver verifies a produced or tampered bundle without --profile-version v1" \
+  "scripts/ci/published-release-golden-path.sh"
+
 # Same reported bypass against the old (driver-only) guard and the new example pairing guard.
 # The mutant is the shipping denied-bundle verify line with PROFILE_VERSION_V1 removed — not a
 # copied command literal.

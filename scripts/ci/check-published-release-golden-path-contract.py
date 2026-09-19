@@ -512,6 +512,11 @@ def validate_contract(
         problems.append(
             "driver must verify the produced bundle under unshare -rn with --profile-version v1 exactly once"
         )
+    if any(
+        "verify-privileged-mcp-action" in line and "--profile-version v1" not in line
+        for line in driver_lines
+    ):
+        problems.append("driver verifies a produced or tampered bundle without --profile-version v1")
     require(
         driver_text,
         "unshare -rn curl",

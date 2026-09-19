@@ -86,7 +86,7 @@ assay evidence verify-privileged-mcp-action <bundle> --format json
 Both outcomes emit a JSON document adhering to the [`assay.privileged_mcp_action.verify.report.v0`](../profiles/privileged-mcp-action/v0.md) report schema:
 
 - **Valid** (exit code `0`): `bundle_integrity: pass` and `verdict: valid`.
-- **Integrity failure** (exit code `2`): `bundle_integrity: fail`, `verdict: null`, and `reason_code: E_EVIDENCE_INTEGRITY`.
+- **Integrity failure or invalid verdict** (exit code `2`): on integrity failure, `bundle_integrity: fail`, `reason_code: E_EVIDENCE_INTEGRITY`, and the `verdict` key is omitted; on an invalid verdict with integrity pass, `bundle_integrity: pass` and `verdict: invalid`.
 
 The report is experimental v0; verification recomputes the carried bytes only.
 
