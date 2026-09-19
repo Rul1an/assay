@@ -21,6 +21,31 @@ pub struct AssertionOutcome {
     pub not_exercised: Vec<cover::AssertionCover>,
 }
 
+/// True when the assertion carries its own unit-test input and does not read a stored episode.
+pub fn is_unit_test_assertion(a: &model::TraceAssertion) -> bool {
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "an assertion kind with no test-input field cannot be a unit test; a new kind that carries one must be named above or its unit-test form is not recognised"
+    )]
+    match a {
+        model::TraceAssertion::ArgsValid { test_args, .. } => test_args.is_some(),
+        model::TraceAssertion::SequenceValid {
+            test_trace,
+            test_trace_raw,
+            ..
+        } => test_trace.is_some() || test_trace_raw.is_some(),
+        model::TraceAssertion::ToolBlocklist {
+            test_tool_calls, ..
+        } => test_tool_calls.is_some(),
+        _ => false,
+    }
+}
+
+/// True when at least one assertion must read a stored episode.
+pub fn assertions_require_stored_episode(assertions: &[model::TraceAssertion]) -> bool {
+    !assertions.is_empty() && !assertions.iter().all(is_unit_test_assertion)
+}
+
 /// The failures alone, for callers with no response to hand.
 ///
 /// Delegates rather than duplicating: one evaluation, two entry points. `meta` is `Null`, so the
@@ -61,25 +86,7 @@ pub fn verify_assertions_with_meta(
         Err(e) => {
             // FALLBACK 1: Unit Test Mode (Policy Validation)
             // If assertions have explicit `test_args`, `test_trace`, etc., we don't need a real episode.
-            // Check if ALL assertions are unit tests.
-            #[expect(
-                clippy::wildcard_enum_match_arm,
-                reason = "an assertion kind with no test-input field cannot be a unit test; a new kind that carries one must be named above or its unit-test form is not recognised"
-            )]
-            let is_unit_test = assertions.iter().all(|a| match a {
-                model::TraceAssertion::ArgsValid { test_args, .. } => test_args.is_some(),
-                model::TraceAssertion::SequenceValid {
-                    test_trace,
-                    test_trace_raw,
-                    ..
-                } => test_trace.is_some() || test_trace_raw.is_some(),
-                model::TraceAssertion::ToolBlocklist {
-                    test_tool_calls, ..
-                } => test_tool_calls.is_some(),
-                _ => false,
-            });
-
-            if is_unit_test {
+            if assertions.iter().all(is_unit_test_assertion) {
                 // Construct dummy graph
                 let dummy = EpisodeGraph {
                     episode_id: "unit_test_mock".into(),
@@ -89,16 +96,21 @@ pub fn verify_assertions_with_meta(
                 return finish(&dummy);
             }
 
-            // FALLBACK 2 (PR-406): If no episode found for this run_id,
-            // try to find the LATEST episode for this test_id regardless of run_id.
-            // This supports the "Demo Flow": Record -> Ingest (Run A) -> Verify (Run B)
+            // Latest-per-test_id only when this invocation opted in; otherwise the
+            // missing primary lookup is the result.
             if e.to_string().contains("E_TRACE_EPISODE_MISSING") {
-                match store.get_latest_episode_graph_by_test_id(test_id) {
-                    Ok(latest_graph) => return finish(&latest_graph),
-                    Err(fallback_err) => {
-                        return Err(anyhow::anyhow!("E_TRACE_EPISODE_MISSING: Primary query failed ({}), Fallback failed: {}", e, fallback_err));
+                if store.latest_stored_episode_eval()? {
+                    match store.get_latest_episode_graph_by_test_id(test_id) {
+                        Ok(latest_graph) => {
+                            store.mark_latest_stored_episode_used(test_id)?;
+                            return finish(&latest_graph);
+                        }
+                        Err(fallback_err) => {
+                            return Err(anyhow::anyhow!("E_TRACE_EPISODE_MISSING: Primary query failed ({}), Fallback failed: {}", e, fallback_err));
+                        }
                     }
                 }
+                return Err(e);
             }
 
             // Check if error is ambiguous or missing

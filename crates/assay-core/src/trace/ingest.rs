@@ -1,7 +1,10 @@
 use anyhow::Context;
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufReader, Write};
 use std::path::Path;
+
+use super::schema::TraceEvent;
 
 pub struct IngestStats {
     pub event_count: usize,
@@ -54,10 +57,17 @@ pub fn ingest_into_store(
 
     // Ensure schema (idempotent) - caller usually does this but safe to repeat
     store.init_schema()?;
+    store.clear_assertion_eval_scope()?;
     let mut batch = Vec::with_capacity(1000);
+    let mut purged = HashSet::new();
 
     for event_result in upgrader {
         let observed = event_result.context("failed to process trace entry")?;
+        let episode_id = event_episode_id(observed.event()).to_string();
+        if purged.insert(episode_id.clone()) {
+            store.purge_episode(&episode_id)?;
+            store.record_assertion_eval_episode(&episode_id)?;
+        }
         batch.push(observed);
         count += 1;
 
@@ -71,4 +81,13 @@ pub fn ingest_into_store(
     }
 
     Ok(IngestStats { event_count: count })
+}
+
+fn event_episode_id(event: &TraceEvent) -> &str {
+    match event {
+        TraceEvent::EpisodeStart(e) => &e.episode_id,
+        TraceEvent::Step(e) => &e.episode_id,
+        TraceEvent::ToolCall(e) => &e.episode_id,
+        TraceEvent::EpisodeEnd(e) => &e.episode_id,
+    }
 }

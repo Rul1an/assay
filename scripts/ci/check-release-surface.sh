@@ -439,8 +439,15 @@ for file in \
     'unsupported Python package'
 done
 
-check_absent_regex docs/getting-started/installation.md \
-  'brew install .*assay' 'unsupported Homebrew channel'
+# Homebrew is supported only through the Rul1an/homebrew-tap formula, whose version and sha256
+# values check-assay-release-pin.sh --published holds to the latest published release. Any other
+# brew install or tap line names a channel nothing checks.
+check_contains_fixed docs/getting-started/installation.md 'brew install Rul1an/tap/assay' \
+  'missing Homebrew tap install command'
+if grep -Ei -- 'brew (install|reinstall|tap)( |$)' docs/getting-started/installation.md |
+  grep -Fvxq -- 'brew install Rul1an/tap/assay'; then
+  fail "docs/getting-started/installation.md: unsupported Homebrew channel"
+fi
 check_absent_regex docs/getting-started/installation.md \
   'scoop (bucket add|install) assay' 'unsupported Scoop channel'
 for file in docs/getting-started/ci-integration.md docs/use-cases/air-gapped.md; do

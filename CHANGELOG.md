@@ -7,6 +7,9 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Release jobs write a name-sorted `checksums.txt` over every published payload asset, keyless-sign it with Sigstore, and attach `checksums.txt.sigstore.json` plus the attest-action provenance bundle as release assets. The release job pins `cosign-release: v3.1.3`. `scripts/install.sh` verifies that signature when `cosign` is present and at least v3.1.3 (v2.6.5 on the 2.x line), refuses older or unparsable binaries (GHSA-fx35-mq7g-6g98), and says so when `cosign` is not installed (#3119).
 
+### Fixed
+- `assay run` and `assay ci` ingest `--trace-file` when assertions evaluate stored episodes, and evaluate the episodes this invocation ingested (Refs #3116).
+
 ## [6.6.1] - 2026-09-18
 
 Security patch for three shipped transitive dependency advisories. No API

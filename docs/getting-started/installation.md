@@ -10,6 +10,17 @@ The current release is Assay `6.6.1` (`v6.6.1`). Install the CLI from one of the
 curl -fsSL https://getassay.dev/install.sh | sh
 ```
 
+### Homebrew
+
+On macOS (arm64, x86_64) and Linux (arm64, x86_64):
+
+```bash
+brew install Rul1an/tap/assay
+assay --version
+```
+
+The formula in [`Rul1an/homebrew-tap`](https://github.com/Rul1an/homebrew-tap) installs the prebuilt release archive, pinned by the release's published sha256. `brew upgrade assay` picks up later releases.
+
 ### Cargo
 
 ```bash
@@ -54,7 +65,7 @@ Windows x86-64 uses:
 assay-v6.6.1-x86_64-pc-windows-msvc.zip
 ```
 
-Assay documents the container image below as a verified release channel. Homebrew and Scoop remain unsupported.
+Assay documents the container image below as a verified release channel. Scoop remains unsupported.
 
 ## Container image (assay-mcp-server)
 
