@@ -33,6 +33,8 @@ Repository state observed on 2026-06-11:
   - `.github/workflows/workflow-security.yml` (`Workflow Security (zizmor)`)
   - `.github/workflows/assay-runner-lane-check.yml`
     (`Assay-Runner Lane Check`)
+  - `.github/workflows/assay-runner-lane-check-refresh.yml`
+    (`Assay-Runner Lane Check Refresh`)
   - `.github/workflows/split-wave0-gates.yml` (`Split Wave 0 Gates`)
     This is the only hosted lane that runs `cargo nextest`; the required `CI` test job
     runs `cargo test`. `.config/nextest.toml` sets `flaky-result = "fail"`, so a test that
@@ -538,6 +540,7 @@ Expected target workflow set:
 - `.github/workflows/workflow-security.yml` kept.
 - `.github/workflows/kernel-matrix.yml` kept with internal skip summaries.
 - `.github/workflows/assay-runner-lane-check.yml` kept.
+- `.github/workflows/assay-runner-lane-check-refresh.yml` kept.
 - `.github/workflows/release.yml` kept with high-trust release boundaries.
 - `.github/workflows/sanitize-public-artifacts.yml` for public artifact
   sanitization, unless folded into `ci.yml`.

@@ -56,10 +56,11 @@ on:
       - "docs/AIcontext/user-flows.md"
       # S1b coverage-gate hook runs under Lint (pre-commit) in this workflow.
       - ".github/workflows/monitor-attach-smoke.yml"
-      # The lane self-test pins guards inside this workflow file; run the
-      # head-side pre-commit leg when it changes, because the lane workflow
-      # itself checks out the PR base and would validate the base copy.
+      # The lane self-test pins guards inside these workflow files; run the
+      # head-side pre-commit leg when they change, because the pull_request
+      # lane workflow checks out the PR base and would validate the base copy.
       - ".github/workflows/assay-runner-lane-check.yml"
+      - ".github/workflows/assay-runner-lane-check-refresh.yml"
       # setup-rust contract hook runs under Lint (pre-commit) in this workflow.
       - ".github/actions/setup-rust/**"
       - ".github/workflows/week8-sota-gates.yml"
