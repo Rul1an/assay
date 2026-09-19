@@ -77,6 +77,11 @@ resolve_linux_target_from_host() {
   esac
 }
 
+select_linux_journey_product_archives() {
+  cli_asset="assay-${1}-${2}.tar.gz"
+  mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"
+}
+
 host_target="$(resolve_linux_target_from_host)"
 if [[ -z "$target" ]]; then
   target="$host_target"
@@ -103,6 +108,9 @@ downloads="$results/release-assets"
 mkdir -p "$downloads" "$install_root/bin" "$harness_root" "$session_root" "$results/attestation-raw"
 printf '%s' "$target" >"$results/journey-target.txt"
 printf '%s' "$platform_claim" >"$results/journey-platform-claim.txt"
+select_linux_journey_product_archives "$release_tag" "$target"
+printf '%s' "$cli_asset" >"$results/journey-cli-asset.txt"
+printf '%s' "$mcp_asset" >"$results/journey-mcp-asset.txt"
 
 
 commands_file="$results/commands.ndjson"
@@ -153,8 +161,6 @@ release_api="$results/release-api.json"
 "$GH_BIN" api "repos/${REPO}/releases/tags/${release_tag}" >"$release_api"
 "$JQ_BIN" -e '.draft == false and .prerelease == false' "$release_api" >/dev/null \
   || fail "release tag is still draft or prerelease"
-cli_asset="assay-${release_tag}-${target}.tar.gz"
-mcp_asset="assay-mcp-server-${release_tag}-${target}.tar.gz"
 
 tag_ref="$results/tag-ref.json"
 "$GH_BIN" api "repos/${REPO}/git/ref/tags/${release_tag}" >"$tag_ref"
@@ -173,6 +179,7 @@ done
 
 download_release_asset() {
   local asset_name="$1" max_bytes="$2"
+  printf '%s\n' "$asset_name" >>"$results/journey-downloaded-assets.txt"
   local count api_size api_digest asset_url actual_size actual_digest
   count="$($JQ_BIN -er --arg name "$asset_name" '[.assets[] | select(.name == $name)] | length' "$release_api")"
   [[ "$count" -eq 1 ]] || fail "release must contain exactly one asset named $asset_name"

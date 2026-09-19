@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Fail-closed structural contract for the published-release golden path."""
+"""Fail-closed structural contract for the published-release golden path.
+
+Parse-only: this checker must not execute the driver under review. A pull
+request can point it at hostile driver bytes; inherited env/PATH is not a
+sandbox. Trusted-repo behavioral probes of selected-archive identity live in
+test-published-release-golden-path-contract.sh.
+"""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
-import os
-import shutil
-import stat
-import subprocess
-import tempfile
 from pathlib import Path, PurePosixPath
 
 
@@ -147,68 +148,14 @@ def validate_linux_journey_matrix(workflow_text: str, problems: list[str]) -> No
             problems.append("Linux journey matrix rows drifted")
     if LINUX_JOURNEY_ARTIFACT_NAME not in active_lines(job):
         problems.append("Linux journey artifact names must include matrix.target")
+    if active_lines(job).count("runs-on: ${{ matrix.os }}") != 1:
+        problems.append("Linux journey job must set runs-on: ${{ matrix.os }}")
     if "bash scripts/ci/published-release-golden-path.sh" not in job:
         problems.append("Linux journey matrix must execute the reviewed golden-path driver")
 
 
-def persist_linux_journey_identity(
-    driver_text: str, host_machine: str, requested_target: str | None
-) -> tuple[int, str, str, str]:
-    scratch = Path(tempfile.mkdtemp(prefix="linux-journey-ident-"))
-    try:
-        driver_path = scratch / "scripts/ci/published-release-golden-path.sh"
-        driver_path.parent.mkdir(parents=True)
-        driver_path.write_text(driver_text, encoding="utf-8")
-        driver_path.chmod(driver_path.stat().st_mode | stat.S_IEXEC)
-        manifest = scratch / "scripts/ci/fixtures/published-release-golden-path/v1/harness-manifest.json"
-        manifest.parent.mkdir(parents=True)
-        manifest.write_text("{}\n", encoding="utf-8")
-        bindir = scratch / "bin"
-        bindir.mkdir()
-        uname = bindir / "uname"
-        uname.write_text(
-            "#!/bin/sh\n"
-            '[ "$1" = -m ] || exit 1\n'
-            f"printf '%s\\n' '{host_machine}'\n",
-            encoding="utf-8",
-        )
-        uname.chmod(0o755)
-        for name in ("gh", "jq", "sha256sum"):
-            stub = bindir / name
-            stub.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
-            stub.chmod(0o755)
-        run_root = scratch / "run"
-        command = [
-            "bash",
-            str(driver_path),
-            "--release-tag",
-            "v0.0.0",
-            "--harness-sha",
-            "a" * 40,
-            "--workflow-run-id",
-            "1",
-            "--workflow-run-attempt",
-            "1",
-            "--run-root",
-            str(run_root),
-        ]
-        if requested_target is not None:
-            command.extend(["--target", requested_target])
-        env = os.environ.copy()
-        env["PATH"] = f"{bindir}{os.pathsep}{env.get('PATH', '/usr/bin:/bin')}"
-        env["GH_BIN"] = str(bindir / "gh")
-        env["JQ_BIN"] = str(bindir / "jq")
-        proc = subprocess.run(command, capture_output=True, text=True, env=env, timeout=15, check=False)
-        target_path = run_root / "results" / "journey-target.txt"
-        claim_path = run_root / "results" / "journey-platform-claim.txt"
-        persisted = target_path.read_text(encoding="utf-8") if target_path.is_file() else ""
-        claim = claim_path.read_text(encoding="utf-8") if claim_path.is_file() else ""
-        return proc.returncode, persisted, claim, proc.stderr
-    finally:
-        shutil.rmtree(scratch, ignore_errors=True)
-
-
 def validate_linux_journey_driver_identity(driver_text: str, problems: list[str]) -> None:
+    """Parse-only host-map and selected-archive pins. Do not execute driver_text."""
     driver_lines = active_lines(driver_text)
     exact_host_lines = {
         HOST_MAP_X86: "Linux x86_64 host mapping drifted",
@@ -220,27 +167,23 @@ def validate_linux_journey_driver_identity(driver_text: str, problems: list[str]
     for line, message in exact_host_lines.items():
         if driver_lines.count(line) != 1:
             problems.append(message)
-    for host_machine, target, claim in (
-        ("x86_64", "x86_64-unknown-linux-gnu", "Linux x86_64"),
-        ("aarch64", "aarch64-unknown-linux-gnu", "Linux arm64"),
-    ):
-        _code, persisted, persisted_claim, _stderr = persist_linux_journey_identity(
-            driver_text, host_machine, target
-        )
-        if persisted != target or persisted_claim != claim:
-            problems.append(
-                "resolved Linux journey target must persist without a later architecture override"
-            )
-    mismatch_code, mismatch_target, _claim, mismatch_err = persist_linux_journey_identity(
-        driver_text, "x86_64", "aarch64-unknown-linux-gnu"
-    )
-    if mismatch_code == 0 or "does not match host architecture" not in mismatch_err or mismatch_target:
-        problems.append("driver lost host/target mismatch refuse")
-    unknown_code, unknown_target, _claim, unknown_err = persist_linux_journey_identity(
-        driver_text, "riscv64", None
-    )
-    if unknown_code == 0 or "unsupported host architecture" not in unknown_err or unknown_target:
-        problems.append("driver lost unknown host refuse")
+    selected_archive_lines = {
+        "select_linux_journey_product_archives() {": "Linux product asset assignment drifted",
+        'cli_asset="assay-${1}-${2}.tar.gz"': "Linux product asset assignment drifted",
+        'mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"': "Linux product asset assignment drifted",
+        'select_linux_journey_product_archives "$release_tag" "$target"': (
+            "Linux journey must select archives from the live resolved target"
+        ),
+        'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"': (
+            "Linux journey must record the selected CLI archive"
+        ),
+        'printf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"': (
+            "Linux journey must record the selected MCP archive"
+        ),
+    }
+    for line, message in selected_archive_lines.items():
+        if driver_lines.count(line) != 1:
+            problems.append(message)
 
 
 def validate_manifest(
@@ -499,7 +442,7 @@ def validate_contract(
     if 'record_command "proxy-enforce"' in driver_text:
         problems.append("driver must not record proxy provenance separately from execution")
     expected_mcp_binary_surface = [
-        'mcp_asset="assay-mcp-server-${release_tag}-${target}.tar.gz"',
+        'mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"',
         'mapfile -t mcp_candidates < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)',
         '[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "MCP archive must contain exactly one executable assay-mcp-server binary"',
         'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"',
@@ -656,8 +599,9 @@ def validate_contract(
             if boundary not in driver_lines or verifier > driver_lines.index(boundary):
                 problems.append(f"release attestations must precede product use: {boundary}")
     exact_assignments = [
-        'cli_asset="assay-${release_tag}-${target}.tar.gz"',
-        'mcp_asset="assay-mcp-server-${release_tag}-${target}.tar.gz"',
+        'cli_asset="assay-${1}-${2}.tar.gz"',
+        'mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"',
+        'select_linux_journey_product_archives "$release_tag" "$target"',
     ]
     for assignment in exact_assignments:
         if driver_lines.count(assignment) != 1:
@@ -672,6 +616,9 @@ def validate_contract(
         "claim uses platform_claim": "bounded {platform_claim} journey",
         "persisted journey target": 'journey-target.txt',
         "persisted platform claim": 'journey-platform-claim.txt',
+        "selected product archives": 'select_linux_journey_product_archives "$release_tag" "$target"',
+        "recorded cli archive": "journey-cli-asset.txt",
+        "recorded mcp archive": "journey-mcp-asset.txt",
     }
     for label, fragment in target_requirements.items():
         require(driver_text, fragment, f"driver lost {label}", problems)

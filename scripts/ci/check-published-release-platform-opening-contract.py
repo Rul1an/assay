@@ -2,6 +2,8 @@
 """Fail-closed contract for the published-archive Windows/macOS opening.
 
 Linux full journeys share one matrixed driver invocation (x86_64 + arm64).
+This checker imports the golden-path matrix pin (rows, ubuntu-24.04-arm, and
+job-level runs-on: ${{ matrix.os }}) and does not execute the Linux driver.
 This checker requires both Linux matrix rows to call that driver with --target
 and keeps opening legs downloading their own published archive by tag.
 """

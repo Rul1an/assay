@@ -89,6 +89,12 @@ expect_mutation_failure \
   $'          - os: ubuntu-latest\n          # ubuntu-24.04-arm' \
   "Linux arm64 journey must use ubuntu-24.04-arm"
 
+expect_mutation_failure \
+  "linux-job-runs-on-not-matrix-os" "workflow.yml" \
+  $'  published-linux-journey:\n    name: ${{ matrix.label }} post-publication journey\n    runs-on: ${{ matrix.os }}' \
+  $'  published-linux-journey:\n    name: ${{ matrix.label }} post-publication journey\n    runs-on: ubuntu-latest' \
+  "Linux journey job must set runs-on: \${{ matrix.os }}"
+
 
 expect_mutation_failure \
   "same-run-artifact" "workflow.yml" \
