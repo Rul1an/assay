@@ -133,6 +133,49 @@ cosign_is_present() {
     command -v "$COSIGN" >/dev/null 2>&1 || [ -x "$COSIGN" ]
 }
 
+# GitVersion: vX.Y.Z from `cosign version`. Unparsable output is unsafe
+# (GHSA-fx35-mq7g-6g98). Accept 3.1.3+ and 2.6.5–2.x.
+cosign_version_is_fixed() {
+    _ver_line=$("$COSIGN" version 2>/dev/null | awk '
+        $1 == "GitVersion:" {
+            v = $2
+            sub(/^v/, "", v)
+            if (v ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) print v
+            exit
+        }
+    ') || return 1
+    [ -n "$_ver_line" ] || return 1
+    _major=${_ver_line%%.*}
+    _rest=${_ver_line#*.}
+    _minor=${_rest%%.*}
+    _patch=${_rest#*.}
+    case "$_major" in *[!0-9]*) return 1 ;; esac
+    case "$_minor" in *[!0-9]*) return 1 ;; esac
+    case "$_patch" in *[!0-9]*) return 1 ;; esac
+    if [ "$_major" -gt 3 ]; then
+        return 0
+    fi
+    if [ "$_major" -eq 3 ]; then
+        if [ "$_minor" -gt 1 ]; then
+            return 0
+        fi
+        if [ "$_minor" -eq 1 ] && [ "$_patch" -ge 3 ]; then
+            return 0
+        fi
+        return 1
+    fi
+    if [ "$_major" -eq 2 ]; then
+        if [ "$_minor" -gt 6 ]; then
+            return 0
+        fi
+        if [ "$_minor" -eq 6 ] && [ "$_patch" -ge 5 ]; then
+            return 0
+        fi
+        return 1
+    fi
+    return 1
+}
+
 download_optional() {
     _download_url="$1"
     _download_path="$2"
@@ -178,6 +221,9 @@ verify_signed_checksum_manifest() {
     if ! download_optional "$_manifest_url" "$_manifest_path" 65536; then
         log_warn "verification=signed_manifest_unavailable reason=checksums.txt_not_published"
         return 0
+    fi
+    if ! cosign_version_is_fixed; then
+        log_error "signed checksum verification refused: cosign is older than v3.1.3 (v2.6.5 on the 2.x line), or its version could not be parsed (GHSA-fx35-mq7g-6g98)."
     fi
     download_file "$_bundle_url" "$_bundle_path" 1048576
     _identity="https://github.com/$GITHUB_REPO/.github/workflows/release.yml@refs/tags/$VERSION"

@@ -185,7 +185,9 @@ Releases cut by this repository's `release.yml` on a tag publish `checksums.txt`
 - certificate identity: `https://github.com/Rul1an/assay/.github/workflows/release.yml@refs/tags/vX.Y.Z`
 - certificate OIDC issuer: `https://token.actions.githubusercontent.com`
 
-`v6.6.0` and earlier do not publish these assets. The first release cut from a tree that contains this signing step is the first one that can be verified this way.
+`v6.6.1` and earlier do not publish these assets. The first release cut from a tree that contains this signing step is the first one that can be verified this way.
+
+Use cosign v3.1.3 or later (v2.6.5 on the 2.x line) for `verify-blob`. Earlier versions are affected by GHSA-fx35-mq7g-6g98 (verification bypass via public key in a legacy bundle).
 
 ```bash
 VERSION=vX.Y.Z

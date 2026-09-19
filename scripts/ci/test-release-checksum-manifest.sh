@@ -127,6 +127,155 @@ else
   grep -qi 'cosign' "$sign_err" || fail "sign without cosign must name that cosign is missing"
 fi
 
+# Fake-cosign version gate for scripts/install.sh (GHSA-fx35-mq7g-6g98).
+# Old / unparsable binaries must refuse verify-blob. A fixed binary may verify.
+INSTALLER="${REPO_ROOT}/scripts/install.sh"
+[[ -f "$INSTALLER" ]] || fail "scripts/install.sh is missing"
+
+make_versioned_cosign() {
+  local path="$1"
+  local mode="$2"
+  local log="${path}.log"
+  : >"$log"
+  cat >"$path" <<EOF
+#!/bin/sh
+set -eu
+{
+  printf '%s\\n' '--- invocation ---'
+  printf '%s\\n' "\$@"
+} >> "$log"
+case "\$1" in
+  version)
+    case "$mode" in
+      old) printf '%s\\n' 'GitVersion:    v3.0.6' ;;
+      fixed) printf '%s\\n' 'GitVersion:    v3.1.3' ;;
+      unparsable) printf '%s\\n' 'cosign (devel)' ;;
+      *)
+        echo "test bug: unknown cosign mode $mode" >&2
+        exit 2
+        ;;
+    esac
+    exit 0
+    ;;
+  verify-blob)
+    echo 'Verified OK'
+    exit 0
+    ;;
+  *)
+    echo "unexpected cosign invocation: \$*" >&2
+    exit 2
+    ;;
+esac
+EOF
+  chmod +x "$path"
+}
+
+run_installer_with_cosign() {
+  local case_dir="$1"
+  local mode="$2"
+  local target="x86_64-unknown-linux-gnu"
+  local version="v5.5.2"
+  local archive_name="assay-${version}-${target}.tar.gz"
+  mkdir -p "$case_dir/bin" "$case_dir/home" "$case_dir/install" "$case_dir/tmp" \
+    "$case_dir/payload/assay-${version}-${target}"
+  printf '%s\n' 'assay 5.5.2 fixture' >"$case_dir/payload/assay-${version}-${target}/assay"
+  chmod +x "$case_dir/payload/assay-${version}-${target}/assay"
+  tar -C "$case_dir/payload" -czf "$case_dir/$archive_name" "assay-${version}-${target}"
+  printf '%s  %s\n' "$(compute_sha256 "$case_dir/$archive_name")" "$archive_name" \
+    >"$case_dir/${archive_name}.sha256"
+  printf '%s  %s\n' "$(compute_sha256 "$case_dir/$archive_name")" "$archive_name" \
+    >"$case_dir/checksums.txt"
+  printf 'sigstore-bundle-fixture\n' >"$case_dir/checksums.txt.sigstore.json"
+  cat >"$case_dir/bin/uname" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -s) printf '%s\n' Linux ;;
+  -m) printf '%s\n' x86_64 ;;
+  *) exit 2 ;;
+esac
+EOF
+  chmod +x "$case_dir/bin/uname"
+  cat >"$case_dir/bin/curl" <<EOF
+#!/bin/sh
+set -eu
+out=""
+wants_status=0
+url=""
+while [ "\$#" -gt 0 ]; do
+  case "\$1" in
+    -o) out="\$2"; shift 2 ;;
+    -w) wants_status=1; shift 2 ;;
+    --max-filesize) shift 2 ;;
+    -*) shift ;;
+    *) url="\$1"; shift ;;
+  esac
+done
+case "\$url" in
+  *.tar.gz.sha256) cp "$case_dir/${archive_name}.sha256" "\$out" ;;
+  *.tar.gz) cp "$case_dir/$archive_name" "\$out" ;;
+  */checksums.txt) cp "$case_dir/checksums.txt" "\$out" ;;
+  */checksums.txt.sigstore.json) cp "$case_dir/checksums.txt.sigstore.json" "\$out" ;;
+  *) echo "unexpected curl URL: \$url" >&2; exit 2 ;;
+esac
+if [ "\$wants_status" -eq 1 ]; then
+  printf '%s' 200
+fi
+EOF
+  chmod +x "$case_dir/bin/curl"
+  make_versioned_cosign "$case_dir/bin/cosign" "$mode"
+  env \
+    HOME="$case_dir/home" \
+    PATH="$case_dir/bin:/usr/bin:/bin" \
+    ASSAY_VERSION=5.5.2 \
+    ASSAY_INSTALL_DIR="$case_dir/install" \
+    TMPDIR="$case_dir/tmp" \
+    ASSAY_COSIGN="$case_dir/bin/cosign" \
+    sh "$INSTALLER"
+}
+
+assert_cosign_version_refused() {
+  local mode="$1"
+  local case_dir="${tmp_root}/cosign-${mode}"
+  mkdir -p "$case_dir"
+  if run_installer_with_cosign "$case_dir" "$mode" \
+    >"$case_dir/stdout" 2>"$case_dir/stderr"; then
+    fail "cosign ${mode} unexpectedly installed"
+  fi
+  if ! grep -Fq 'GHSA-fx35-mq7g-6g98' "$case_dir/stdout" "$case_dir/stderr"; then
+    cat "$case_dir/stdout" "$case_dir/stderr" >&2
+    fail "cosign ${mode} refusal must name GHSA-fx35-mq7g-6g98"
+  fi
+  if ! grep -Eq 'v3\.1\.3|2\.6\.5' "$case_dir/stdout" "$case_dir/stderr"; then
+    cat "$case_dir/stdout" "$case_dir/stderr" >&2
+    fail "cosign ${mode} refusal must name the fixed minimum versions"
+  fi
+  if grep -Fq 'verify-blob' "$case_dir/bin/cosign.log"; then
+    fail "cosign ${mode} must not reach verify-blob"
+  fi
+  if grep -Fq 'signed_manifest_verified' "$case_dir/stdout"; then
+    fail "cosign ${mode} claimed signed_manifest_verified"
+  fi
+}
+
+assert_cosign_version_verified() {
+  local case_dir="${tmp_root}/cosign-fixed"
+  mkdir -p "$case_dir"
+  run_installer_with_cosign "$case_dir" fixed \
+    >"$case_dir/stdout" 2>"$case_dir/stderr" \
+    || {
+      cat "$case_dir/stdout" "$case_dir/stderr" >&2
+      fail "fixed cosign unexpectedly refused install"
+    }
+  grep -Fq 'signed_manifest_verified' "$case_dir/stdout" \
+    || fail "fixed cosign did not report signed_manifest_verified"
+  grep -Fq 'verify-blob' "$case_dir/bin/cosign.log" \
+    || fail "fixed cosign did not run verify-blob"
+}
+
+assert_cosign_version_refused old
+assert_cosign_version_verified
+assert_cosign_version_refused unparsable
+
 # Release job wiring: one script, no inline hashing, sign failure is not ignored.
 python3 - "$RELEASE_WORKFLOW" <<'PY'
 import sys
@@ -154,6 +303,10 @@ if "|| true" in joined and "release_checksum_manifest.sh" in joined:
             raise SystemExit("checksum-manifest invocation is ignored with || true")
 if "sigstore/cosign-installer@" not in joined:
     raise SystemExit("release.yml must pin sigstore/cosign-installer by SHA")
+if "cosign-release: v3.1.3" not in joined:
+    raise SystemExit(
+        "release.yml must pin cosign-release to v3.1.3 (GHSA-fx35-mq7g-6g98)"
+    )
 if "attest-release" not in joined or "bundle-path" not in joined:
     raise SystemExit("release.yml must attach the attest-build-provenance bundle-path")
 print("release.yml checksum-manifest wiring ok")

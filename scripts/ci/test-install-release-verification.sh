@@ -266,6 +266,11 @@ set -eu
   printf '%s\n' "$@"
 } >> "$COSIGN_LOG"
 
+if [ "$1" = version ]; then
+  printf '%s\n' 'GitVersion:    v3.1.3'
+  exit 0
+fi
+
 if [ "$1" = verify-blob ]; then
   if [ "${COSIGN_MODE:-ok}" = fail ]; then
     echo 'simulated signature refusal' >&2
@@ -688,8 +693,10 @@ for line in lines:
         current.append(line)
 if current is not None:
     invocations.append(current)
-if len(invocations) != 1:
-    raise SystemExit(f"expected one cosign invocation, found {invocations!r}")
+if len(invocations) != 2:
+    raise SystemExit(f"expected version then verify-blob, found {invocations!r}")
+if invocations[0] != ["version"]:
+    raise SystemExit(f"expected a version probe first, found {invocations!r}")
 wanted = [
     "verify-blob",
     "--bundle",
@@ -700,7 +707,7 @@ wanted = [
     "https://token.actions.githubusercontent.com",
     None,
 ]
-actual = invocations[0]
+actual = invocations[1]
 if len(actual) != len(wanted):
     raise SystemExit(f"cosign argv length {actual!r}")
 for observed, expected in zip(actual, wanted):
