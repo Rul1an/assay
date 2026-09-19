@@ -112,6 +112,7 @@ This document outlines the canonical checklist for releasing new versions of Ass
   - Step: `Build release proof kit` (produces `release/assay-${VERSION}-release-proof-kit.tar.gz` plus `.sha256`).
   - Step: `Attach build-provenance bundle` (copies `steps.attest-release.outputs.bundle-path` to `release/assay-${VERSION}-build-provenance.sigstore.json`; fails if the attest action did not expose a readable file).
   - Step: `Write and sign checksums.txt` (writes a name-sorted sha256 manifest over every other file in `release/`, keyless-signs it with cosign, and fails the job if the signature does not verify as the release workflow at `refs/tags/${VERSION}`).
+  - Step: `Verify candidate release consumer route (network-isolated)` (runs `scripts/ci/verify_consumer_checksum_manifest.sh` against `release/` with the same tag identity, after signing and before `Create GitHub Release`).
   - Step: `Check release asset preflight` (fails before publication unless the `release/` directory exactly matches the expected asset contract, every `.sha256` verifies, `checksums.txt` names exactly the published payload assets, and `server.json` points at the generated MCPB checksum).
   - Step: `Create GitHub Release` (uploads only the preflighted files from `release/`).
   - Job: `publish-image` (`Publish GHCR image`; needs `[release-contract, release]`; environment `ghcr`).
@@ -233,6 +234,8 @@ sha256sum: WARNING: 1 computed checksum did NOT match
 ```
 
 This path talks to Sigstore (Fulcio/Rekor), not to the GitHub attestations API. It does not replace `gh attestation verify` or the [Release Proof Kit](../security/RELEASE-PROOF-KIT.md). The signing step is witnessed by the next real tag-triggered release; a failure there fails the `Create Release` job. `workflow_dispatch` from a branch cannot produce the tag identity and is refused before signing.
+
+CI executes the same tag identity through `scripts/ci/verify_consumer_checksum_manifest.sh`: once against the candidate `release/` directory after signing and before `Create GitHub Release`, and once as a published-assets replay in `published-release-golden-path.yml` (downloads `checksums.txt`, `checksums.txt.sigstore.json`, and the Linux x86_64 archive for `inputs.release_tag`). Both routes read the cosign image from `.github/cosign-image`. Verifying an already-signed tag does not request signing OIDC. Local contract tests stub Docker; they do not measure hosted cryptography. A next-tag candidate log cannot be retrofitted onto `v6.6.2`.
 
 #### Network-isolated consumer (TrustedRoot)
 
