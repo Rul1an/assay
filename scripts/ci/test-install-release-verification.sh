@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 INSTALLER="${INSTALLER:-$ROOT/scripts/install.sh}"
 HOOK_CHECKER="${HOOK_CHECKER:-$ROOT/scripts/ci/check-install-release-verification-hook.sh}"
+MODE="${1:-}"
 TEST_TMP=""
 
 fail() {
@@ -84,16 +85,16 @@ PY
 make_fixture() {
   local root="$1"
   local target="$2"
-  local version="v5.5.2"
+  local version="${3:-v5.5.2}"
   local archive_name="assay-${version}-${target}.tar.gz"
   local archive="$root/$archive_name"
-  local payload_root="$root/payload-$target"
+  local payload_root="$root/payload-${version}-${target}"
   local payload="$payload_root/assay-${version}-${target}"
 
   mkdir -p "$payload"
-  cat > "$payload/assay" <<'EOF'
+  cat > "$payload/assay" <<EOF
 #!/bin/sh
-echo 'assay 5.5.2 fixture'
+echo 'assay ${version#v} fixture'
 EOF
   chmod +x "$payload/assay"
   tar -C "$payload_root" -czf "$archive" "assay-${version}-${target}"
@@ -189,14 +190,30 @@ case "$url" in
     printf '%s\n' "${max_filesize:-none}" >> "$CURL_LIMIT_LOG"
     case "${CURL_MODE:-ok}" in
       missing-manifest) exit 22 ;;
-      *) cp "$FIXTURE_DIR/checksums.txt" "$out" ;;
+      network-failure) exit 7 ;;
+      *)
+        version="$(printf '%s\n' "$url" | awk -F/ '{print $(NF-1)}')"
+        if [ -f "$FIXTURE_DIR/manifests/$version/checksums.txt" ]; then
+          cp "$FIXTURE_DIR/manifests/$version/checksums.txt" "$out"
+        else
+          cp "$FIXTURE_DIR/checksums.txt" "$out"
+        fi
+        ;;
     esac
     ;;
   */checksums.txt.sigstore.json)
     printf '%s\n' "${max_filesize:-none}" >> "$CURL_LIMIT_LOG"
     case "${CURL_MODE:-ok}" in
       missing-bundle) exit 22 ;;
-      *) cp "$FIXTURE_DIR/checksums.txt.sigstore.json" "$out" ;;
+      network-failure) exit 7 ;;
+      *)
+        version="$(printf '%s\n' "$url" | awk -F/ '{print $(NF-1)}')"
+        if [ -f "$FIXTURE_DIR/manifests/$version/checksums.txt.sigstore.json" ]; then
+          cp "$FIXTURE_DIR/manifests/$version/checksums.txt.sigstore.json" "$out"
+        else
+          cp "$FIXTURE_DIR/checksums.txt.sigstore.json" "$out"
+        fi
+        ;;
     esac
     ;;
   *)
@@ -656,32 +673,46 @@ assert_strict_failure_preserves_binary() {
 
 write_signed_manifest_fixture() {
   local root="$1"
-  local linux="assay-v5.5.2-x86_64-unknown-linux-gnu.tar.gz"
-  local darwin="assay-v5.5.2-x86_64-apple-darwin.tar.gz"
+  local version="${2:-v5.5.2}"
+  local dest="$root/manifests/$version"
+  local linux="assay-${version}-x86_64-unknown-linux-gnu.tar.gz"
+  local darwin="assay-${version}-x86_64-apple-darwin.tar.gz"
+  mkdir -p "$dest"
   {
-    printf '%s  %s\n' "$(compute_sha256 "$root/$linux")" "$linux"
-    printf '%s  %s\n' "$(compute_sha256 "$root/$darwin")" "$darwin"
-  } | LC_ALL=C sort >"$root/checksums.txt"
-  printf 'sigstore-bundle-fixture\n' >"$root/checksums.txt.sigstore.json"
+    if [ -f "$root/$linux" ]; then
+      printf '%s  %s\n' "$(compute_sha256 "$root/$linux")" "$linux"
+    fi
+    if [ -f "$root/$darwin" ]; then
+      printf '%s  %s\n' "$(compute_sha256 "$root/$darwin")" "$darwin"
+    fi
+  } | LC_ALL=C sort >"$dest/checksums.txt"
+  printf 'sigstore-bundle-fixture\n' >"$dest/checksums.txt.sigstore.json"
+  if [ "$version" = "v5.5.2" ]; then
+    cp "$dest/checksums.txt" "$root/checksums.txt"
+    cp "$dest/checksums.txt.sigstore.json" "$root/checksums.txt.sigstore.json"
+  fi
 }
 
 assert_signed_manifest_success() {
+  local version="${1:-5.5.2}"
+  local tag="v${version#v}"
   local case_dir
-  case_dir="$(new_case signed-manifest-success)"
+  case_dir="$(new_case "signed-manifest-success-$tag")"
   make_cosign_stub "$case_dir/bin"
-  run_installer "$case_dir" ASSAY_COSIGN="$case_dir/bin/cosign" \
+  run_installer "$case_dir" ASSAY_VERSION="${tag#v}" ASSAY_COSIGN="$case_dir/bin/cosign" \
     > "$case_dir/stdout" 2> "$case_dir/stderr"
   grep -F 'signed_manifest_verified' "$case_dir/stdout" >/dev/null || \
-    fail 'cosign-present install did not report signed_manifest_verified'
+    fail "cosign-present $tag install did not report signed_manifest_verified"
   grep -F 'checksum_verified' "$case_dir/stdout" >/dev/null || \
-    fail 'cosign-present install did not report checksum_verified'
-  grep -F 'assay 5.5.2 fixture' "$case_dir/install/assay" >/dev/null || \
-    fail 'cosign-present install did not activate fixture'
-  python3 - "$case_dir/cosign.log" <<'PY'
+    fail "cosign-present $tag install did not report checksum_verified"
+  grep -F "assay ${tag#v} fixture" "$case_dir/install/assay" >/dev/null || \
+    fail "cosign-present $tag install did not activate fixture"
+  python3 - "$case_dir/cosign.log" "$tag" <<'PY'
 import sys
 from pathlib import Path
 
 lines = Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+tag = sys.argv[2]
 invocations = []
 current = None
 for line in lines:
@@ -702,7 +733,7 @@ wanted = [
     "--bundle",
     None,
     "--certificate-identity",
-    "https://github.com/Rul1an/assay/.github/workflows/release.yml@refs/tags/v5.5.2",
+    f"https://github.com/Rul1an/assay/.github/workflows/release.yml@refs/tags/{tag}",
     "--certificate-oidc-issuer",
     "https://token.actions.githubusercontent.com",
     None,
@@ -724,6 +755,8 @@ PY
 
 assert_signed_manifest_refusal_preserves_binary() {
   local mode="$1"
+  local version="${2:-5.5.2}"
+  local tag="v${version#v}"
   local expected
   case "$mode" in
     fail) expected='signed checksum manifest verification failed' ;;
@@ -731,32 +764,79 @@ assert_signed_manifest_refusal_preserves_binary() {
     *) fail "test bug: no expected error for signed-manifest mode $mode" ;;
   esac
   local case_dir
-  case_dir="$(new_case "signed-manifest-$mode")"
+  case_dir="$(new_case "signed-manifest-$mode-$tag")"
   make_cosign_stub "$case_dir/bin"
-  if run_installer "$case_dir" ASSAY_COSIGN="$case_dir/bin/cosign" \
+  if run_installer "$case_dir" ASSAY_VERSION="${tag#v}" ASSAY_COSIGN="$case_dir/bin/cosign" \
     COSIGN_MODE="$mode" CURL_MODE="$mode" \
     > "$case_dir/stdout" 2> "$case_dir/stderr"; then
-    fail "signed-manifest $mode unexpectedly installed"
+    fail "signed-manifest $mode $tag unexpectedly installed"
   fi
   if ! grep -F "$expected" "$case_dir/stdout" "$case_dir/stderr" >/dev/null; then
     cat "$case_dir/stdout" "$case_dir/stderr" >&2
-    fail "signed-manifest $mode failed for an unrelated reason"
+    fail "signed-manifest $mode $tag failed for an unrelated reason"
   fi
   assert_old_binary "$case_dir"
 }
 
 assert_unavailable_manifest_continues() {
+  local version="${1:-5.5.2}"
+  local tag="v${version#v}"
   local case_dir
-  case_dir="$(new_case signed-manifest-unavailable)"
+  case_dir="$(new_case "signed-manifest-unavailable-$tag")"
   make_cosign_stub "$case_dir/bin"
-  run_installer "$case_dir" ASSAY_COSIGN="$case_dir/bin/cosign" \
+  run_installer "$case_dir" ASSAY_VERSION="${tag#v}" ASSAY_COSIGN="$case_dir/bin/cosign" \
     CURL_MODE=missing-manifest > "$case_dir/stdout" 2> "$case_dir/stderr"
   grep -F 'signed_manifest_unavailable' "$case_dir/stdout" >/dev/null || \
-    fail 'missing checksums.txt did not report signed_manifest_unavailable'
+    fail "$tag missing checksums.txt did not report signed_manifest_unavailable"
+  grep -F 'checksums.txt_not_published' "$case_dir/stdout" >/dev/null || \
+    fail "$tag missing checksums.txt did not report checksums.txt_not_published"
   grep -F 'checksum_verified' "$case_dir/stdout" >/dev/null || \
-    fail 'missing checksums.txt did not continue with sidecar verification'
-  grep -F 'assay 5.5.2 fixture' "$case_dir/install/assay" >/dev/null || \
-    fail 'missing checksums.txt did not activate fixture'
+    fail "$tag missing checksums.txt did not continue with sidecar verification"
+  grep -F "assay ${tag#v} fixture" "$case_dir/install/assay" >/dev/null || \
+    fail "$tag missing checksums.txt did not activate fixture"
+}
+
+assert_required_manifest_fetch_refuses() {
+  local version="$1"
+  local mode="$2"
+  local tag="v${version#v}"
+  local case_dir
+  case_dir="$(new_case "required-manifest-$mode-$tag")"
+  make_cosign_stub "$case_dir/bin"
+  if run_installer "$case_dir" ASSAY_VERSION="${tag#v}" ASSAY_COSIGN="$case_dir/bin/cosign" \
+    CURL_MODE="$mode" > "$case_dir/stdout" 2> "$case_dir/stderr"; then
+    fail "$tag $mode unexpectedly installed without checksums.txt"
+  fi
+  if ! grep -F 'signed checksum verification refused' "$case_dir/stdout" "$case_dir/stderr" >/dev/null; then
+    cat "$case_dir/stdout" "$case_dir/stderr" >&2
+    fail "$tag $mode did not refuse signed checksum verification"
+  fi
+  if ! grep -F 'could not be fetched' "$case_dir/stdout" "$case_dir/stderr" >/dev/null; then
+    cat "$case_dir/stdout" "$case_dir/stderr" >&2
+    fail "$tag $mode did not say checksums.txt could not be fetched"
+  fi
+  if grep -F 'checksums.txt_not_published' "$case_dir/stdout" "$case_dir/stderr" >/dev/null; then
+    cat "$case_dir/stdout" "$case_dir/stderr" >&2
+    fail "$tag $mode labeled a required-release fetch failure as not published"
+  fi
+  if grep -F 'checksum_verified' "$case_dir/stdout" >/dev/null; then
+    fail "$tag $mode continued to sidecar verification"
+  fi
+  assert_old_binary "$case_dir"
+}
+
+assert_malformed_version_refuses_before_network() {
+  local value="$1"
+  local label="$2"
+  local case_dir
+  case_dir="$(new_case "malformed-version-$label")"
+  make_cosign_stub "$case_dir/bin"
+  if run_installer "$case_dir" ASSAY_VERSION="$value" ASSAY_COSIGN="$case_dir/bin/cosign" \
+    > "$case_dir/stdout" 2> "$case_dir/stderr"; then
+    fail "ASSAY_VERSION=$label unexpectedly installed"
+  fi
+  assert_old_binary "$case_dir"
+  test ! -s "$case_dir/curl.log" || fail "ASSAY_VERSION=$label reached curl"
 }
 
 assert_invalid_cosign_override_refuses_before_network() {
@@ -788,13 +868,32 @@ main() {
   make_fixture "$TEST_TMP" x86_64-unknown-linux-gnu
   make_fixture "$TEST_TMP" x86_64-apple-darwin
   write_signed_manifest_fixture "$TEST_TMP"
+  local extra_version
+  for extra_version in v6.6.0 v6.6.1 v6.6.2 v6.6.10 v6.7.0 v6.10.0 v7.0.0 v10.0.0; do
+    make_fixture "$TEST_TMP" x86_64-unknown-linux-gnu "$extra_version"
+    write_signed_manifest_fixture "$TEST_TMP" "$extra_version"
+  done
 
   assert_default_success Linux linux
   assert_default_success Darwin macos
   assert_signed_manifest_success
+  assert_signed_manifest_success 6.6.2
   assert_signed_manifest_refusal_preserves_binary fail
   assert_signed_manifest_refusal_preserves_binary missing-bundle
+  assert_signed_manifest_refusal_preserves_binary fail 6.6.2
   assert_unavailable_manifest_continues
+  assert_unavailable_manifest_continues 6.6.0
+  assert_unavailable_manifest_continues 6.6.1
+  assert_required_manifest_fetch_refuses 6.6.2 missing-manifest
+  assert_required_manifest_fetch_refuses 6.6.2 network-failure
+  assert_required_manifest_fetch_refuses 6.6.10 missing-manifest
+  assert_required_manifest_fetch_refuses 6.7.0 missing-manifest
+  assert_required_manifest_fetch_refuses 6.10.0 missing-manifest
+  assert_required_manifest_fetch_refuses 7.0.0 missing-manifest
+  assert_required_manifest_fetch_refuses 10.0.0 missing-manifest
+  assert_malformed_version_refuses_before_network '6.6.2-rc.1' prerelease
+  assert_malformed_version_refuses_before_network 'v6.6' two-part
+  assert_malformed_version_refuses_before_network 'not-a-version' garbage
   assert_invalid_cosign_override_refuses_before_network
   for mode in mismatch missing-sidecar malformed-sidecar wrong-asset-sidecar trailing-garbage oversized-sidecar; do
     assert_checksum_failure_preserves_binary "$mode"
@@ -821,4 +920,65 @@ main() {
   echo 'install release verification: PASS'
 }
 
-main "$@"
+assert_single_version_policy_function() {
+  grep -qE '^signed_checksum_manifest_is_required[[:space:]]*\(\)' "$INSTALLER" || \
+    fail 'install.sh does not define signed_checksum_manifest_is_required()'
+  local defs
+  defs="$(grep -cE '^signed_checksum_manifest_is_required[[:space:]]*\(\)' "$INSTALLER")"
+  test "$defs" -eq 1 || fail "expected exactly one version-policy function, found $defs"
+}
+
+apply_unconditional_fallback_mutation() {
+  local dest="$1"
+  python3 - "$INSTALLER" "$dest" <<'PY'
+import pathlib
+import sys
+
+src, dest = map(pathlib.Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+old = """    _manifest_required=0
+    if signed_checksum_manifest_is_required "$VERSION"; then
+        _manifest_required=1
+    fi
+
+    if ! download_optional "$_manifest_url" "$_manifest_path" 65536; then
+        if [ "$_manifest_required" -eq 1 ]; then
+            log_error "signed checksum verification refused: checksums.txt could not be fetched for $VERSION."
+        fi
+        log_warn "verification=signed_manifest_unavailable reason=checksums.txt_not_published"
+        return 0
+    fi
+"""
+new = """    if ! download_optional "$_manifest_url" "$_manifest_path" 65536; then
+        log_warn "verification=signed_manifest_unavailable reason=checksums.txt_not_published"
+        return 0
+    fi
+"""
+if text.count(old) != 1:
+    raise SystemExit(f"unconditional-fallback mutation anchor matched {text.count(old)} times")
+dest.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+}
+
+if [ "$MODE" = "--no-mutations" ]; then
+  main
+  exit 0
+fi
+
+main
+assert_single_version_policy_function
+
+MUTATION_DIR="$(mktemp -d)"
+trap 'rm -rf "$TEST_TMP" "$MUTATION_DIR"' EXIT
+MUTANT="$MUTATION_DIR/install-unconditional-fallback.sh"
+apply_unconditional_fallback_mutation "$MUTANT"
+if INSTALLER="$MUTANT" bash "$0" --no-mutations >/dev/null 2>"$MUTATION_DIR/mutant.err"; then
+  fail 'named mutation unconditional-fallback stayed green'
+fi
+if ! grep -F 'v6.6.2 missing-manifest unexpectedly installed without checksums.txt' \
+  "$MUTATION_DIR/mutant.err" >/dev/null; then
+  cat "$MUTATION_DIR/mutant.err" >&2
+  fail 'named mutation unconditional-fallback did not revive the v6.6.2 missing-manifest install'
+fi
+
+echo 'install release verification: PASS (unconditional-fallback mutation bites)'

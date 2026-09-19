@@ -104,6 +104,34 @@ normalize_install_version() {
     printf '%s\n' "$_candidate"
 }
 
+# Last stable tag that does not publish checksums.txt. Later tags require
+# that manifest when cosign is present. One function so refuse-versus-
+# continue cannot drift from this threshold. Unreadable tags fail closed.
+signed_checksum_manifest_is_required() {
+    _tag="$1"
+    if ! is_stable_release_tag "$_tag"; then
+        return 0
+    fi
+    _ver=${_tag#v}
+    _maj=${_ver%%.*}
+    _rest=${_ver#*.}
+    _min=${_rest%%.*}
+    _pat=${_rest#*.}
+    if [ "$_maj" -gt 6 ]; then
+        return 0
+    fi
+    if [ "$_maj" -lt 6 ]; then
+        return 1
+    fi
+    if [ "$_min" -gt 6 ]; then
+        return 0
+    fi
+    if [ "$_min" -lt 6 ]; then
+        return 1
+    fi
+    [ "$_pat" -gt 1 ]
+}
+
 compute_sha256() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum "$1" | awk '{print $1}'
@@ -218,7 +246,15 @@ verify_signed_checksum_manifest() {
     _manifest_path="$5"
     _bundle_path="$6"
 
+    _manifest_required=0
+    if signed_checksum_manifest_is_required "$VERSION"; then
+        _manifest_required=1
+    fi
+
     if ! download_optional "$_manifest_url" "$_manifest_path" 65536; then
+        if [ "$_manifest_required" -eq 1 ]; then
+            log_error "signed checksum verification refused: checksums.txt could not be fetched for $VERSION."
+        fi
         log_warn "verification=signed_manifest_unavailable reason=checksums.txt_not_published"
         return 0
     fi
