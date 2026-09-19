@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import unittest
 
@@ -19,6 +20,10 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 PREFLIGHT = ROOT / "scripts/ci/published-native-mcp-preflight.py"
 WORKFLOW = ROOT / ".github/workflows/published-native-mcp-preflight.yml"
+CI_WORKFLOW = ROOT / ".github/workflows/ci.yml"
+CI_SCOPE_STEP = "Published native MCP preflight contract"
+CI_SCOPE_COMMAND = "python3 scripts/ci/test-published-native-mcp-preflight.py"
+CI_SCOPE_ACTIVE = ("set -euo pipefail", CI_SCOPE_COMMAND)
 PINNED_ACTIONS = (
     "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
     "./.github/actions/setup-rust",
@@ -261,6 +266,11 @@ class PublishedNativeMcpPreflightTests(unittest.TestCase):
         with self.assertRaisesRegex(self.module.PreflightError, "child failed despite parseable stdout"):
             self.run_preflight()
 
+    def test_allow_child_failed_despite_parseable_stdout_fails(self) -> None:
+        self.world.allow_status = 1
+        with self.assertRaisesRegex(self.module.PreflightError, "child failed despite parseable stdout"):
+            self.run_preflight()
+
     def test_missing_denial_fails(self) -> None:
         self.world.deny_stdout = ALLOW_STDOUT
         with self.assertRaisesRegex(self.module.PreflightError, "denial"):
@@ -291,6 +301,100 @@ class WorkflowContractTests(unittest.TestCase):
         uses = [line.strip() for line in text.splitlines() if line.strip().startswith("uses:")]
         self.assertEqual(len(uses), 3)
         self.assertTrue(all(any(pin in line for pin in PINNED_ACTIONS) for line in uses))
+
+    def test_ci_scope_wires_lightweight_suite(self) -> None:
+        require_native_preflight_ci_wiring(CI_WORKFLOW.read_text(encoding="utf-8"))
+
+    def test_inert_ci_invocations_are_not_active_wiring(self) -> None:
+        live = CI_WORKFLOW.read_text(encoding="utf-8")
+        require_native_preflight_ci_wiring(live)
+        command_line = f"          {CI_SCOPE_COMMAND}\n"
+        heading = f"      - name: {CI_SCOPE_STEP}\n"
+        mutations = {
+            "deleted": live.replace(command_line, "", 1),
+            "comment-only": live.replace(command_line, f"          # {CI_SCOPE_COMMAND}\n", 1),
+            "if:false": live.replace(heading, heading + "        if: false\n", 1),
+        }
+        for label, mutated in mutations.items():
+            with self.subTest(label=label):
+                self.assertNotEqual(mutated, live, label)
+                with self.assertRaises(AssertionError):
+                    require_native_preflight_ci_wiring(mutated)
+        require_native_preflight_ci_wiring(live)
+
+
+def _job_block(text: str, job: str) -> str:
+    match = re.search(
+        rf"(?ms)^  {re.escape(job)}:\n.*?(?=^  [A-Za-z0-9_-]+:\s*$|\Z)",
+        text,
+    )
+    if match is None:
+        raise AssertionError(f"ci.yml has no {job} job")
+    return match.group(0)
+
+
+def _step_block(job: str, name: str) -> str:
+    matches = list(
+        re.finditer(
+            rf"(?ms)^      - name: {re.escape(name)}\s*$\n.*?(?=^      - (?:name:|uses:)|\Z)",
+            job,
+        )
+    )
+    if len(matches) != 1:
+        raise AssertionError(f"expected one {name!r} step, found {len(matches)}")
+    return matches[0].group(0)
+
+
+def _direct_step_keys(step: str) -> dict[str, str]:
+    keys: dict[str, str] = {}
+    for raw in step.splitlines():
+        if raw.startswith("      - name:"):
+            value = raw.split(":", 1)[1].strip()
+            if "name" in keys:
+                raise AssertionError("duplicate step key name")
+            keys["name"] = value
+            continue
+        if raw.startswith("        ") and not raw.startswith("          "):
+            stripped = raw.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            key, _, value = stripped.partition(":")
+            if key in keys:
+                raise AssertionError(f"duplicate step key {key}")
+            keys[key] = value.strip()
+    return keys
+
+
+def _active_run_lines(step: str) -> list[str]:
+    active: list[str] = []
+    in_run = False
+    for raw in step.splitlines():
+        if raw == "        run: |":
+            in_run = True
+            continue
+        if in_run:
+            if raw.strip() and not raw.startswith("          "):
+                break
+            stripped = raw.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            active.append(stripped)
+    return active
+
+
+def require_native_preflight_ci_wiring(text: str) -> None:
+    # Reads caller-supplied workflow text only. The suite file is not an oracle.
+    step = _step_block(_job_block(text, "scope"), CI_SCOPE_STEP)
+    keys = _direct_step_keys(step)
+    if set(keys) != {"name", "shell", "run"}:
+        raise AssertionError(f"step keys {sorted(keys)} are not the closed map")
+    if keys["shell"] != "bash" or keys["run"] != "|":
+        raise AssertionError("step must be an unconditional bash block")
+    active = tuple(_active_run_lines(step))
+    if active != CI_SCOPE_ACTIVE:
+        raise AssertionError(f"active run lines {active} are not the required command")
+    if not re.search(r"(?m)^    needs: \[scope,", _job_block(text, "ci")):
+        raise AssertionError("aggregator does not already wait on scope")
 
 
 if __name__ == "__main__":
