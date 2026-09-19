@@ -175,6 +175,17 @@ it is not an installer failure.
 - [ ] **Operator Flow Check**: For the compact end-to-end story that connects transcript ingest, shipped `C2` pack evaluation, and proof-kit verification, see [Operator Proof Flow](../guides/operator-proof-flow.md).
 - [ ] **Registry Publication Decision**: Treat `release/server.json` as publish-ready input, not proof of an existing live official registry listing.
 
+### 5. Post-publication
+- [ ] **Homebrew tap**: Once the release is published, bump `Formula/assay.rb` in
+  [`Rul1an/homebrew-tap`](https://github.com/Rul1an/homebrew-tap): the release tag in all four
+  `url` lines and the four `sha256` values, copied from the release's
+  `assay-vX.Y.Z-<target>.tar.gz.sha256` sidecars for `aarch64-apple-darwin`,
+  `x86_64-apple-darwin`, `aarch64-unknown-linux-gnu`, and `x86_64-unknown-linux-gnu`. Land it
+  before or alongside the pull request that advances `.github/assay-release-tag`.
+  `bash scripts/ci/check-assay-release-pin.sh --published` fails when the formula's version or any
+  of its four sha256 values differs from the latest published release, the same way it fails on a
+  stale install pin.
+
 ## Troubleshooting
 
 ### HTTP 403 Forbidden
