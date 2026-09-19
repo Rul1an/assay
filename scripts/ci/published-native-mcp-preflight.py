@@ -9,9 +9,11 @@ documented proxy-enforce denial plus allow control. Not a launch pass.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from typing import Callable
@@ -22,6 +24,7 @@ TARGET = "x86_64-pc-windows-msvc"
 CRATE = "assay-mcp-server"
 TOKEN_KEYS = ("GH_TOKEN", "GITHUB_TOKEN")
 FORWARD_OK = "forwarded-ok (mock; no real GitHub call)"
+API_CHECKSUM = re.compile(r"^[0-9a-f]{64}$")
 FIXTURE = Path("examples/privileged-action-gate")
 INIT_REQUEST = {
     "jsonrpc": "2.0",
@@ -112,13 +115,20 @@ def parse_json_lines(stdout: bytes) -> list[dict]:
     return records
 
 
+def require_call_reply(replies: list[dict]) -> dict:
+    reply = replies[-1] if replies else {}
+    if reply.get("jsonrpc") != CALL_REQUEST["jsonrpc"] or reply.get("id") != CALL_REQUEST["id"]:
+        raise PreflightError("proxy-enforce reply did not correlate with the sent call")
+    return reply
+
+
 def assert_proxy_denial(status: int, stdout: bytes) -> None:
     replies = parse_json_lines(stdout)
     if status != 0:
         if replies:
             raise PreflightError("proxy-enforce child failed despite parseable stdout")
         raise PreflightError(f"proxy-enforce child failed with status {status}")
-    error = replies[-1].get("error") if replies else None
+    error = require_call_reply(replies).get("error")
     data = error.get("data") if isinstance(error, dict) else None
     if not (
         isinstance(error, dict)
@@ -136,7 +146,7 @@ def assert_proxy_allow(status: int, stdout: bytes) -> None:
         if replies:
             raise PreflightError("proxy-enforce allow child failed despite parseable stdout")
         raise PreflightError(f"proxy-enforce allow child failed with status {status}")
-    result = replies[-1].get("result") if replies else None
+    result = require_call_reply(replies).get("result")
     if not (
         isinstance(result, dict)
         and result.get("isError") is False
@@ -207,7 +217,7 @@ def run_preflight(
         if release_tag is not None and release_tag != pin:
             raise PreflightError(f"mismatched release version: pin is {pin}, requested {release_tag}")
         version = pin[1:]
-        opening_root = run_root / "cli-opening"
+        opening_root = results / "cli-opening"
         opening = runner(
             [
                 "bash",
@@ -229,7 +239,7 @@ def run_preflight(
             results / "cli-provenance.json",
             {
                 "kind": "github_release_archive_attestation",
-                "opening_results": str(opening_root / "results"),
+                "opening_results": "cli-opening/results",
                 "release_tag": pin,
                 "target": TARGET,
             },
@@ -242,12 +252,12 @@ def run_preflight(
         if version_obj.get("yanked") is not False:
             raise PreflightError("crate version is yanked")
         checksum = version_obj.get("checksum")
-        if not isinstance(checksum, str) or len(checksum) != 64:
-            raise PreflightError("crate checksum missing")
+        if not isinstance(checksum, str) or API_CHECKSUM.fullmatch(checksum) is None:
+            raise PreflightError("crate checksum is not 64 lowercase hex")
         write_json(
             results / "crate-provenance.json",
             {
-                "kind": "crates_io_index_checksum",
+                "kind": "crates_io_api_declared_checksum",
                 "crate": CRATE,
                 "version": version,
                 "checksum": checksum,
@@ -268,6 +278,18 @@ def run_preflight(
         expected = f"{CRATE} {version}"
         if got != expected:
             raise PreflightError(f"wrong installed version: expected {expected}, got {got}")
+        payload = mcp_bin.read_bytes()
+        write_json(
+            results / "installed-mcp-identity.json",
+            {
+                "kind": "installed_mcp_binary",
+                "crate": CRATE,
+                "filename": mcp_bin.name,
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "bytes": len(payload),
+                "version": got,
+            },
+        )
         request = (json.dumps(INIT_REQUEST) + "\n" + json.dumps(CALL_REQUEST) + "\n").encode()
         fixture_root = repo_root / FIXTURE
         deny = runner(

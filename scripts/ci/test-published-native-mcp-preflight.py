@@ -7,6 +7,7 @@ install from crates.io, attest a release archive, or prove hosted Windows.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -33,6 +34,17 @@ ALLOW_STDOUT = (
     '{"jsonrpc":"2.0","id":9,"result":{"isError":false,"content":['
     '{"type":"text","text":"forwarded-ok (mock; no real GitHub call)"}]}}\n'
 )
+REQUIRED_RETAINED = {
+    "cli-opening/results/attestation-verify.log",
+    "cli-provenance.json",
+    "crate-provenance.json",
+    "installed-mcp-identity.json",
+    "status.json",
+}
+
+
+def retained_files(results: Path) -> set[str]:
+    return {str(path.relative_to(results)) for path in results.rglob("*") if path.is_file()}
 
 
 def load_preflight():
@@ -165,15 +177,66 @@ class PublishedNativeMcpPreflightTests(unittest.TestCase):
         self.assertIn("--release-tag", opening)
         self.assertEqual(opening[opening.index("--release-tag") + 1], "v6.6.2")
         self.assertEqual(opening[opening.index("--target") + 1], "x86_64-pc-windows-msvc")
-        crate = json.loads((self.run_root / "results" / "crate-provenance.json").read_text(encoding="utf-8"))
-        cli = json.loads((self.run_root / "results" / "cli-provenance.json").read_text(encoding="utf-8"))
-        self.assertEqual(crate["kind"], "crates_io_index_checksum")
+        results = self.run_root / "results"
+        retained = retained_files(results)
+        self.assertIn("cli-opening/results/attestation-verify.log", retained)
+        self.assertEqual(
+            (results / "cli-opening" / "results" / "attestation-verify.log").read_text(encoding="utf-8"),
+            "attested\n",
+        )
+        crate = json.loads((results / "crate-provenance.json").read_text(encoding="utf-8"))
+        cli = json.loads((results / "cli-provenance.json").read_text(encoding="utf-8"))
+        identity = json.loads((results / "installed-mcp-identity.json").read_text(encoding="utf-8"))
+        binary = self.run_root / "mcp-crate" / "bin" / "assay-mcp-server"
+        self.assertTrue(REQUIRED_RETAINED <= retained, retained)
+        self.assertEqual(cli["opening_results"], "cli-opening/results")
+        self.assertFalse(Path(cli["opening_results"]).is_absolute())
+        self.assertFalse((self.run_root / "cli-opening").exists())
+        self.assertEqual(crate["kind"], "crates_io_api_declared_checksum")
         self.assertEqual(crate["checksum"], "ab" * 32)
         self.assertEqual(cli["kind"], "github_release_archive_attestation")
         self.assertNotIn("checksum", cli)
         self.assertNotEqual(cli["kind"], crate["kind"])
+        self.assertEqual(identity["kind"], "installed_mcp_binary")
+        self.assertEqual(identity["version"], "assay-mcp-server 6.6.2")
+        self.assertEqual(identity["bytes"], binary.stat().st_size)
+        self.assertEqual(identity["sha256"], hashlib.sha256(binary.read_bytes()).hexdigest())
+        self.assertNotEqual(identity["kind"], crate["kind"])
+        self.assertNotIn("origin", identity)
         cargo_env = next(call["env"] for call in self.world.calls if call.get("argv", [""])[0] == "cargo")
         self.assertNotIn("GH_TOKEN", cargo_env)
+
+    def test_deny_wrong_id_fails(self) -> None:
+        self.world.deny_stdout = (
+            '{"jsonrpc":"2.0","id":1,"result":{}}\n'
+            '{"jsonrpc":"2.0","id":10,"error":{"code":-31999,'
+            '"data":{"origin":"assay-proxy","reason":"no_declared_allowance"}}}\n'
+        )
+        with self.assertRaisesRegex(self.module.PreflightError, "sent call"):
+            self.run_preflight()
+
+    def test_allow_wrong_id_fails(self) -> None:
+        self.world.allow_stdout = (
+            '{"jsonrpc":"2.0","id":1,"result":{}}\n'
+            '{"jsonrpc":"2.0","id":10,"result":{"isError":false,"content":['
+            '{"type":"text","text":"forwarded-ok (mock; no real GitHub call)"}]}}\n'
+        )
+        with self.assertRaisesRegex(self.module.PreflightError, "sent call"):
+            self.run_preflight()
+
+    def test_deny_missing_jsonrpc_fails(self) -> None:
+        self.world.deny_stdout = (
+            '{"jsonrpc":"2.0","id":1,"result":{}}\n'
+            '{"id":9,"error":{"code":-31999,'
+            '"data":{"origin":"assay-proxy","reason":"no_declared_allowance"}}}\n'
+        )
+        with self.assertRaisesRegex(self.module.PreflightError, "sent call"):
+            self.run_preflight()
+
+    def test_uppercase_api_checksum_fails(self) -> None:
+        self.world.crate_checksum = "AB" * 32
+        with self.assertRaisesRegex(self.module.PreflightError, "checksum"):
+            self.run_preflight()
 
     def test_wrong_installed_version_fails(self) -> None:
         self.world.mcp_version = "assay-mcp-server 6.6.1"
