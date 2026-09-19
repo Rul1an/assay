@@ -20,7 +20,7 @@ pub struct RunArgs {
     #[arg(long, default_value = "warn")]
     pub quarantine_mode: String,
 
-    /// Trace file to use as Source of Truth for replay (auto-ingested in strict mode)
+    /// Trace file to use as Source of Truth for replay (ingested into --db when assertions evaluate stored episodes)
     #[arg(long)]
     pub trace_file: Option<PathBuf>,
 
@@ -77,9 +77,13 @@ pub struct RunArgs {
     #[command(flatten)]
     pub judge: JudgeArgs,
 
-    /// strict replay mode: use trace-file as truth, forbid network, auto-ingest to DB
+    /// strict replay mode: use trace-file as truth, forbid network
     #[arg(long)]
     pub replay_strict: bool,
+
+    /// Evaluate assertions against the latest stored episode per test_id, not the episodes this invocation ingested. Reported when used.
+    #[arg(long)]
+    pub latest_stored_episode: bool,
 
     /// Fail if deprecated v1 policy format is detected
     #[arg(long)]
@@ -122,6 +126,7 @@ impl Default for RunArgs {
             explain_skip: false,
             judge: JudgeArgs::default(),
             replay_strict: false,
+            latest_stored_episode: false,
             deny_deprecations: false,
             allow_ineffective_assertions: false,
             exit_codes: crate::exit_codes::ExitCodeVersion::default(),
@@ -150,7 +155,7 @@ pub struct CiArgs {
     #[arg(long)]
     pub otel_jsonl: Option<PathBuf>,
 
-    /// Trace file to use as Source of Truth for replay (auto-ingested in strict mode)
+    /// Trace file to use as Source of Truth for replay (ingested into --db when assertions evaluate stored episodes)
     #[arg(long)]
     pub trace_file: Option<PathBuf>,
 
@@ -203,9 +208,13 @@ pub struct CiArgs {
     #[command(flatten)]
     pub judge: JudgeArgs,
 
-    /// strict replay mode: use trace-file as truth, forbid network, auto-ingest to DB
+    /// strict replay mode: use trace-file as truth, forbid network, ingest --trace-file into --db
     #[arg(long)]
     pub replay_strict: bool,
+
+    /// Evaluate assertions against the latest stored episode per test_id, not the episodes this invocation ingested. Reported when used.
+    #[arg(long)]
+    pub latest_stored_episode: bool,
 
     /// Fail if deprecated v1 policy format is detected
     #[arg(long)]

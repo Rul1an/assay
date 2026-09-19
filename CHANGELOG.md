@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- `assay run` and `assay ci` ingest `--trace-file` when assertions evaluate stored episodes, and evaluate the episodes this invocation ingested (Refs #3116).
+
 ## [6.6.1] - 2026-09-18
 
 Security patch for three shipped transitive dependency advisories. No API
