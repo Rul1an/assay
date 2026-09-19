@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Behavioral contract for the network-isolated consumer checksum helper (Refs #3119).
 # Stub Docker/cosign + recorded argv. Does not prove live cryptography.
+# Does not prove container filesystem access: the stub writes TUF state as this
+# host process into the bind source, so a missing --user still looks green here.
+# Hosted published replay 35469738379 failed at initialize with
+# "clearing cache directory: open /scratch: permission denied" after the
+# pinned image pulled. That seam is a host-uid bind, not argv isolation.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -273,6 +278,71 @@ print("docker isolation argv ok")
 PY
 }
 
+# Argv-only: both container phases must run as the invoking host uid/gid so
+# 0700 mktemp scratch and host-owned :ro assets are openable by the process
+# inside the pinned image. This reads the stub docker log. It does not start
+# Docker and does not prove the image USER or a real /scratch write.
+assert_host_uid_bind_on_both_phases() {
+  local log="$1"
+  local expected_user
+  expected_user="$(id -u):$(id -g)"
+  python3 - "$log" "$expected_user" <<'PY'
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+expected = sys.argv[2]
+blocks = [b for b in text.split("--- invocation ---\n") if b.strip()]
+if len(blocks) != 2:
+    raise SystemExit(f"expected 2 docker invocations, got {len(blocks)}")
+
+
+def args(block):
+    out = []
+    for line in block.splitlines():
+        if line.startswith("arg["):
+            out.append(line.split("=", 1)[1])
+    return out
+
+
+def user_values(argv):
+    values = []
+    prev = None
+    for arg in argv:
+        if prev == "--user":
+            values.append(arg)
+        prev = arg
+    return values
+
+
+init_args = args(blocks[0])
+verify_args = args(blocks[1])
+if "initialize" not in init_args:
+    raise SystemExit("first docker invocation is not initialize")
+if "verify-blob" not in verify_args:
+    raise SystemExit("second docker invocation is not verify-blob")
+
+for name, argv in (("initialize", init_args), ("verify-blob", verify_args)):
+    if "--privileged" in argv:
+        raise SystemExit(
+            f"{name} used --privileged; host-uid bind is the allowed repair"
+        )
+    if "--network=host" in argv:
+        raise SystemExit(f"{name} used --network=host; isolation must stay")
+    users = user_values(argv)
+    if len(users) != 1:
+        raise SystemExit(
+            f"{name} must pass exactly one --user <host-uid>:<host-gid>, got {users!r}. "
+            "Stub docker argv only; not pinned-image execution or /scratch access."
+        )
+    if users[0] != expected:
+        raise SystemExit(
+            f"{name} --user {users[0]!r} is not the invoking host {expected!r}"
+        )
+print("host uid bind argv ok (stub argv only; not container access)")
+PY
+}
+
 assert_host_bind_and_hash() {
   local log="$1"
   local stdout="$2"
@@ -430,6 +500,7 @@ grep -Fq 'Verified OK' "${happy}/stdout" || fail "positive helper did not print 
 grep -Fq "${ARCHIVE}: OK" "${happy}/stdout" || fail "positive helper did not print archive OK"
 grep -Fq HASH_STEP_REACHED "${happy}/stdout" || fail "positive helper did not reach the hash step"
 assert_verify_isolated "${happy}/docker.log"
+assert_host_uid_bind_on_both_phases "${happy}/docker.log"
 assert_host_bind_and_hash "${happy}/docker.log" "${happy}/stdout" "$expected_release"
 # Owned scratch must not leak after success.
 if find "$tmp_root" -type d -name 'tmp.*' -o -path '*/tuf-cache' | grep -q .; then
@@ -451,6 +522,7 @@ if ! run_helper "$abs_case" "${HELPER_ARGS[@]}" \
   fail "absolute assets-dir control failed"
 fi
 assert_verify_isolated "${abs_case}/docker.log"
+assert_host_uid_bind_on_both_phases "${abs_case}/docker.log"
 assert_host_bind_and_hash "${abs_case}/docker.log" "${abs_case}/stdout" "$expected_abs"
 
 # Relative directory names with spaces must still become a host bind.
@@ -465,6 +537,7 @@ if ! run_helper "$space_case" "${HELPER_ARGS[@]}" \
   fail "assets-dir with spaces failed"
 fi
 assert_verify_isolated "${space_case}/docker.log"
+assert_host_uid_bind_on_both_phases "${space_case}/docker.log"
 assert_host_bind_and_hash "${space_case}/docker.log" "${space_case}/stdout" "$expected_space"
 
 # Signature / identity / issuer failure must not reach the hash step.
@@ -681,6 +754,52 @@ assert_named_volume_mutation_red drop-physical-host-dir \
   'assets_dir="$(physical_host_dir "$assets_dir")"' \
   'assets_dir="$assets_dir"'
 
+# Guard-removal: restore the image-default USER (65532:65532) instead of
+# the invoking host. Isolation argv stays green because the stub still
+# writes TUF as this host process - the seam that let hosted
+# 35469738379 fail while this suite stayed green. The uid oracle must RED.
+# Empty DOCKER_USER_ARGS=() is not this mutant: bash 3.2 + set -u aborts
+# the helper before argv is recorded, which is a different failure.
+assert_host_uid_mutation_red() {
+  local name="$1"
+  local old="$2"
+  local new="$3"
+  local mutant="${tmp_root}/${name}.sh"
+  mutate_helper "$mutant" "$old" "$new"
+  chmod +x "$mutant"
+  local case_dir="${tmp_root}/${name}"
+  mkdir -p "${case_dir}/release" "${case_dir}/bin"
+  prepare_assets "${case_dir}/release"
+  write_stub_docker "${case_dir}/bin"
+  write_hash_probes "${case_dir}/bin"
+  : >"${case_dir}/docker.log"
+  local status=0
+  set_helper_args "release"
+  (
+    cd "$case_dir"
+    env PATH="${case_dir}/bin:/usr/bin:/bin" \
+      CONSUMER_DOCKER_LOG="${case_dir}/docker.log" \
+      CONSUMER_DOCKER_REQUIRE_IDENTITY="$GOOD_ID" \
+      CONSUMER_DOCKER_REQUIRE_ISSUER="$ISSUER" \
+      bash "$mutant" "${HELPER_ARGS[@]}"
+  ) >"${case_dir}/stdout" 2>"${case_dir}/stderr" || status=$?
+  if ! assert_verify_isolated "${case_dir}/docker.log" >/dev/null 2>&1; then
+    fail "mutation ${name} should keep isolation argv (stub boundary) while uid bind goes red"
+  fi
+  if [[ "$status" -eq 0 ]] \
+    && assert_host_uid_bind_on_both_phases "${case_dir}/docker.log" >/dev/null 2>&1; then
+    fail "mutation ${name} stayed green on host-uid bind"
+  fi
+  if assert_host_uid_bind_on_both_phases "${case_dir}/docker.log" >/dev/null 2>&1; then
+    fail "mutation ${name} still satisfied the host-uid argv oracle"
+  fi
+}
+
+# shellcheck disable=SC2016
+assert_host_uid_mutation_red drop-host-uid-bind \
+  'DOCKER_USER_ARGS=(--user "$(id -u):$(id -g)")' \
+  'DOCKER_USER_ARGS=(--user "65532:65532")'
+
 # No-op control: identical helper copy still binds the relative caller.
 noop_helper="${tmp_root}/noop-helper.sh"
 cp "$HELPER" "$noop_helper"
@@ -705,9 +824,11 @@ if ! (
   fail "no-op helper copy failed the relative release caller"
 fi
 assert_host_bind_and_hash "${noop_case}/docker.log" "${noop_case}/stdout" "$expected_noop"
+assert_host_uid_bind_on_both_phases "${noop_case}/docker.log"
 
 # Control: unmutated helper still matches the isolation oracle.
 assert_verify_isolated "${happy}/docker.log"
+assert_host_uid_bind_on_both_phases "${happy}/docker.log"
 
 # Workflow wiring: derive placement and invocation, not labels alone.
 wiring_check="${tmp_root}/check_consumer_wiring.py"
@@ -920,6 +1041,32 @@ if "docker " in text or "--network=none" in text or "--trusted-root" in text:
 if "sha256sum -c" not in text:
     raise SystemExit("connected recipe must keep sha256sum -c")
 print("connected docs recipe preserved")
+PY
+
+# Forbidden repairs: chmod-world, privileged, isolation drop, pin skip.
+# Host-uid bind is the allowed seam. This is source text, not Docker.
+python3 - "$HELPER" <<'PY'
+from pathlib import Path
+import sys
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+forbidden = (
+    "chmod 777",
+    "chmod -R 777",
+    "chmod a+rwx",
+    "chmod 0777",
+    "--privileged",
+    "--network=host",
+    "--userns=host",
+)
+for needle in forbidden:
+    if needle in text:
+        raise SystemExit(f"helper contains forbidden repair {needle!r}")
+if "DOCKER_USER_ARGS=(--user \"$(id -u):$(id -g)\")" not in text:
+    raise SystemExit("helper lost the single host-uid bind assignment")
+if text.count('"${DOCKER_USER_ARGS[@]}"') != 2:
+    raise SystemExit("both container phases must consume DOCKER_USER_ARGS")
+print("helper has no forbidden repair and binds host uid on both phases")
 PY
 
 echo "verify consumer checksum manifest tests passed"

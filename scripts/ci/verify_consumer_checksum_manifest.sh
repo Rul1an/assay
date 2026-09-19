@@ -177,7 +177,17 @@ trap cleanup EXIT
 
 mkdir -p "${scratch}/tuf-cache"
 
+# Bind both container phases to the invoking host uid/gid. Host mktemp
+# scratch is 0700; the pinned cosign image USER is a non-root account and
+# cannot open /scratch (hosted replay 35469738379:
+# "clearing cache directory: open /scratch: permission denied"). The later
+# :ro assets and trusted_root binds are also host-owned. Same uid as the
+# process that created those trees - not a privilege escape. Stub Docker
+# tests only see argv; they do not prove container access.
+DOCKER_USER_ARGS=(--user "$(id -u):$(id -g)")
+
 docker run --rm \
+  "${DOCKER_USER_ARGS[@]}" \
   -e TUF_ROOT=/scratch/tuf-cache \
   -v "${scratch}:/scratch" \
   "$cosign_image" \
@@ -187,6 +197,7 @@ trusted_root="${scratch}/${TRUSTED_ROOT_REL}"
 [[ -f "$trusted_root" ]] || reject "bootstrap did not produce a modern trusted_root.json"
 
 docker run --rm --network=none \
+  "${DOCKER_USER_ARGS[@]}" \
   -v "${assets_dir}:/assets:ro" \
   -v "${trusted_root}:/trusted_root.json:ro" \
   "$cosign_image" \
