@@ -3,7 +3,8 @@
 
 Parse-only: this checker must not execute the driver under review. A pull
 request can point it at hostile driver bytes; inherited env/PATH is not a
-sandbox. Trusted-repo behavioral probes of selected-archive identity live in
+sandbox. Trusted-repo behavioral probes of selected-archive identity and of
+the asset names download_release_asset actually receives live in
 test-published-release-golden-path-contract.sh.
 """
 
@@ -184,6 +185,10 @@ def validate_linux_journey_driver_identity(driver_text: str, problems: list[str]
     for line, message in selected_archive_lines.items():
         if driver_lines.count(line) != 1:
             problems.append(message)
+    if sum(1 for line in driver_lines if line.startswith("cli_asset=")) != 1:
+        problems.append("driver must assign cli_asset exactly once")
+    if sum(1 for line in driver_lines if line.startswith("mcp_asset=")) != 1:
+        problems.append("driver must assign mcp_asset exactly once")
 
 
 def validate_manifest(

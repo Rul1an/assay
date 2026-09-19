@@ -47,34 +47,119 @@ workflow_driver_call='          bash scripts/ci/published-release-golden-path.sh
 workflow_driver_decoy=$'          # bash scripts/ci/published-release-golden-path.sh\n          echo skipped-reviewed-driver '"\\"
 
 # Trusted-repo behavioral probe: execute an authored driver mutant with a
-# scrubbed env and record the archives select_linux_journey_product_archives
-# wrote. The default checker is parse-only and must not run this path.
+# scrubbed env and record both the archives select_linux_journey_product_archives
+# persisted and the asset names download_release_asset actually received.
+# The default checker is parse-only and must not run this path.
 run_selected_archive_probe() {
   local driver_file="$1" host_machine="$2" requested_target="$3" out_dir="$4"
-  local probe scratch bindir
+  local probe scratch bindir host_python host_jq host_sha256sum
+  host_python="$(command -v python3)"
+  host_jq="$(command -v jq)"
+  host_sha256sum="$(command -v sha256sum)"
+  [[ -n "$host_python" && -n "$host_jq" && -n "$host_sha256sum" ]] \
+    || fail "trusted probe needs host python3, jq, and sha256sum"
   probe="$(mktemp -d "${out_dir}/probe.XXXXXX")"
   scratch="$probe/tree"
-  mkdir -p "$scratch/scripts/ci/fixtures/published-release-golden-path/v1" "$scratch/bin" "$out_dir"
+  mkdir -p "$scratch/scripts/ci/lib" \
+    "$scratch/scripts/ci/fixtures/published-release-golden-path/v1" \
+    "$scratch/bin" "$out_dir"
   cp "$driver_file" "$scratch/scripts/ci/published-release-golden-path.sh"
   chmod +x "$scratch/scripts/ci/published-release-golden-path.sh"
-  printf '%s\n' '{}' >"$scratch/scripts/ci/fixtures/published-release-golden-path/v1/harness-manifest.json"
+  cp "$ROOT/scripts/ci/lib/published-release-capture.sh" \
+    "$scratch/scripts/ci/lib/published-release-capture.sh"
+  # Smallest valid download stub: write one fixture byte, no network.
+  cat >"$scratch/scripts/ci/bounded_download.py" <<'PY'
+def download(url, dest, max_bytes):
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(b"x")
+PY
+  "$host_python" - "$scratch" <<'PY'
+import hashlib, json, pathlib, sys
+
+root = pathlib.Path(sys.argv[1])
+files = []
+for relative in (
+    "scripts/ci/lib/published-release-capture.sh",
+    "scripts/ci/bounded_download.py",
+):
+    files.append({
+        "path": relative,
+        "sha256": hashlib.sha256((root / relative).read_bytes()).hexdigest(),
+    })
+manifest = {
+    "schema": "assay.published_release_golden_path.harness.v1",
+    "files": files,
+}
+path = root / "scripts/ci/fixtures/published-release-golden-path/v1/harness-manifest.json"
+path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
   cat >"$scratch/bin/uname" <<EOF
 #!/bin/sh
 [ "\$1" = -m ] || exit 1
 printf '%s\n' '${host_machine}'
 EOF
   chmod 755 "$scratch/bin/uname"
-  local name
-  for name in gh jq sha256sum python3 curl; do
-    printf '%s\n' '#!/bin/sh' 'exit 1' >"$scratch/bin/$name"
-    chmod 755 "$scratch/bin/$name"
-  done
+  cat >"$scratch/bin/gh" <<'EOF'
+#!/bin/sh
+[ "$1" = api ] || exit 1
+case "$2" in
+  */releases/tags/*)
+    printf '%s\n' '{"draft":false,"prerelease":false,"assets":[]}'
+    ;;
+  */git/ref/tags/*)
+    printf '%s\n' '{"object":{"type":"commit","sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+EOF
+  chmod 755 "$scratch/bin/gh"
+  "$host_python" - "$scratch/bin/jq" "$host_python" "$host_jq" <<'PY'
+import pathlib, sys
+
+path, host_python, host_jq = sys.argv[1:]
+path = pathlib.Path(path)
+path.write_text(
+    f"#!{host_python}\n"
+    "import os, sys\n"
+    "args = sys.argv[1:]\n"
+    "name = None\n"
+    "for index, arg in enumerate(args[:-1]):\n"
+    "    if arg == '--arg' and args[index + 1] == 'name' and index + 2 < len(args):\n"
+    "        name = args[index + 2]\n"
+    "        break\n"
+    f"host_jq = {host_jq!r}\n"
+    "if name is None:\n"
+    "    os.execv(host_jq, [host_jq, *args])\n"
+    "program = next((arg for arg in args if arg.startswith('.') or arg.startswith('[')), '')\n"
+    "if 'length' in program:\n"
+    "    print('1')\n"
+    "elif '.size' in program:\n"
+    "    print('1')\n"
+    "elif '.digest' in program:\n"
+    "    print('sha256:2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881')\n"
+    "elif 'browser_download_url' in program:\n"
+    "    print(f'https://github.com/Rul1an/assay/releases/download/v0.0.0/{name}')\n"
+    "else:\n"
+    "    os.execv(host_jq, [host_jq, *args])\n",
+    encoding="utf-8",
+)
+path.chmod(0o755)
+PY
+  cat >"$scratch/bin/sha256sum" <<EOF
+#!/bin/sh
+exec '${host_sha256sum}' "\$@"
+EOF
+  chmod 755 "$scratch/bin/sha256sum"
+  printf '%s\n' '#!/bin/sh' 'exit 1' >"$scratch/bin/curl"
+  chmod 755 "$scratch/bin/curl"
   bindir="$scratch/bin"
   env -i \
     PATH="$bindir:/usr/bin:/bin" \
     GH_BIN="$bindir/gh" \
     JQ_BIN="$bindir/jq" \
-    PYTHON_BIN="$bindir/python3" \
+    PYTHON_BIN="$host_python" \
     HOME="$probe/home" \
     /bin/bash "$scratch/scripts/ci/published-release-golden-path.sh" \
       --release-tag v0.0.0 \
@@ -89,6 +174,10 @@ EOF
   fi
   cp "$probe/run/results/journey-cli-asset.txt" "$out_dir/observed-cli-asset.txt"
   cp "$probe/run/results/journey-mcp-asset.txt" "$out_dir/observed-mcp-asset.txt"
+  cp "$probe/stderr" "$out_dir/probe-stderr.txt"
+  if [[ -f "$probe/run/results/journey-downloaded-assets.txt" ]]; then
+    cp "$probe/run/results/journey-downloaded-assets.txt" "$out_dir/observed-downloaded-assets.txt"
+  fi
 }
 
 expect_selected_archive_clean() {
@@ -128,6 +217,65 @@ PY
     fail "mutation stayed green: $name (cli=$cli mcp=$mcp)"
   fi
   echo "ok: selected-archive probe red $name"
+}
+
+read_download_consumer_args() {
+  local case_root="$1"
+  if [[ ! -f "$case_root/observed-downloaded-assets.txt" ]]; then
+    fail "download consumer was not reached (cli=$(cat "$case_root/observed-cli-asset.txt") mcp=$(cat "$case_root/observed-mcp-asset.txt") stderr=$(tr '\n' ' ' <"$case_root/probe-stderr.txt"))"
+  fi
+  down_cli="$(sed -n '1p' "$case_root/observed-downloaded-assets.txt")"
+  down_mcp="$(sed -n '2p' "$case_root/observed-downloaded-assets.txt")"
+}
+
+expect_download_consumer_clean() {
+  local case_root="$scratch/download-consumer-clean"
+  local cli mcp other
+  mkdir -p "$case_root"
+  cp "$DRIVER" "$case_root/driver.sh"
+  run_selected_archive_probe "$case_root/driver.sh" aarch64 aarch64-unknown-linux-gnu "$case_root"
+  cli="$(cat "$case_root/observed-cli-asset.txt")"
+  mcp="$(cat "$case_root/observed-mcp-asset.txt")"
+  read_download_consumer_args "$case_root"
+  if [[ -z "$down_cli" || -z "$down_mcp" ]]; then
+    fail "download consumer missed CLI or MCP argument: downloaded=$(tr '\n' ' ' <"$case_root/observed-downloaded-assets.txt")"
+  fi
+  if [[ "$down_cli" != "$cli" || "$down_mcp" != "$mcp" ]]; then
+    fail "download consumer args != selected names: down_cli=$down_cli cli=$cli down_mcp=$down_mcp mcp=$mcp"
+  fi
+  if [[ "$down_cli" != *aarch64-unknown-linux-gnu* || "$down_mcp" != *aarch64-unknown-linux-gnu* ]]; then
+    fail "download consumer args lost expected target: down_cli=$down_cli down_mcp=$down_mcp"
+  fi
+  other="x86_64-unknown-linux-gnu"
+  if [[ "$down_cli" == *"$other"* || "$down_mcp" == *"$other"* ]]; then
+    fail "download consumer args contained other-arch $other: down_cli=$down_cli down_mcp=$down_mcp"
+  fi
+  echo "ok: download-consumer probe clean down_cli=$down_cli down_mcp=$down_mcp"
+}
+
+expect_download_consumer_failure() {
+  local name="$1" old="$2" new="$3"
+  local case_root="$scratch/$name"
+  local cli mcp
+  mkdir -p "$case_root"
+  cp "$DRIVER" "$case_root/driver.sh"
+  python3 - "$case_root/driver.sh" "$old" "$new" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+old, new = sys.argv[2:]
+text = path.read_text(encoding="utf-8")
+if text.count(old) != 1:
+    raise SystemExit(f"download-consumer mutation anchor count for {old!r}: {text.count(old)}")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+  run_selected_archive_probe "$case_root/driver.sh" aarch64 aarch64-unknown-linux-gnu "$case_root"
+  cli="$(cat "$case_root/observed-cli-asset.txt")"
+  mcp="$(cat "$case_root/observed-mcp-asset.txt")"
+  read_download_consumer_args "$case_root"
+  if [[ "$down_cli" == "$cli" && "$down_mcp" == "$mcp" ]]; then
+    fail "mutation stayed green: $name (selected cli=$cli mcp=$mcp downloaded cli=$down_cli mcp=$down_mcp)"
+  fi
+  echo "ok: download-consumer probe red $name selected_cli=$cli selected_mcp=$mcp down_cli=$down_cli down_mcp=$down_mcp"
 }
 
 expect_mutation_failure() {
@@ -433,6 +581,32 @@ expect_selected_archive_failure \
   "post-persist-target-override" \
   $'printf \'%s\' "$target" >"$results/journey-target.txt"\nprintf \'%s\' "$platform_claim" >"$results/journey-platform-claim.txt"' \
   $'printf \'%s\' "$target" >"$results/journey-target.txt"\nprintf \'%s\' "$platform_claim" >"$results/journey-platform-claim.txt"\ntarget="x86_64-unknown-linux-gnu"\nplatform_claim="Linux x86_64"'
+
+expect_download_consumer_clean
+
+expect_download_consumer_failure \
+  "post-persist-cli-asset-override" \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"' \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"\ncli_asset="assay-${release_tag}-dummy.tar.gz"'
+
+expect_download_consumer_failure \
+  "post-persist-mcp-asset-override" \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"' \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"\nmcp_asset="assay-mcp-server-${release_tag}-dummy.tar.gz"'
+
+expect_mutation_failure \
+  "post-persist-cli-asset-second-assignment" "driver.sh" \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"' \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"\ncli_asset="assay-${release_tag}-dummy.tar.gz"' \
+  "driver must assign cli_asset exactly once" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "post-persist-mcp-asset-second-assignment" "driver.sh" \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"' \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"\nmcp_asset="assay-mcp-server-${release_tag}-dummy.tar.gz"' \
+  "driver must assign mcp_asset exactly once" \
+  "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "same-bundle-command-commented" "driver.sh" \
