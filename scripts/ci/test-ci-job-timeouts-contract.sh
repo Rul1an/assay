@@ -37,9 +37,9 @@ abort "ci.yml jobs must be a mapping" unless jobs.is_a?(Hash)
 # hide as a class-wide bump. GitHub evaluates job timeout-minutes against the
 # matrix context (docs: jobs.<job_id>.timeout-minutes allowed contexts).
 #
-# `semver` is a reusable-workflow caller job (`uses:`); GitHub does not allow
-# `timeout-minutes` on that job shape, so its timeout is pinned inside
-# semver-public.yml's own jobs.
+# `semver` and `osv-cargo-lock` are reusable-workflow caller jobs (`uses:`);
+# GitHub does not allow `timeout-minutes` on that job shape, so each timeout
+# is pinned inside the called workflow.
 expected_timeouts = {
   "scope" => 10,
   "clippy" => 10,
@@ -60,7 +60,8 @@ expected_timeouts = {
   "ebpf-smoke-ubuntu" => 15,
   "ebpf-smoke-self-hosted" => 60,
 }.freeze
-expected_ids = (expected_timeouts.keys + ["semver"]).sort
+reusable_callers = ["semver", "osv-cargo-lock"].freeze
+expected_ids = (expected_timeouts.keys + reusable_callers).sort
 
 actual_ids = jobs.keys.map(&:to_s).sort
 unless actual_ids == expected_ids
@@ -96,16 +97,19 @@ expected_timeouts.each do |job_id, want|
   end
 end
 
-semver = jobs.fetch("semver")
-abort "semver: job body must be a mapping" unless semver.is_a?(Hash)
-if semver.key?("timeout-minutes")
-  abort "semver: reusable-workflow caller job must not set timeout-minutes"
+reusable_callers.each do |job_id|
+  caller = jobs.fetch(job_id)
+  abort "#{job_id}: job body must be a mapping" unless caller.is_a?(Hash)
+  if caller.key?("timeout-minutes")
+    abort "#{job_id}: reusable-workflow caller job must not set timeout-minutes"
+  end
 end
 
 rollup = jobs.fetch("ci")
 expected_needs = %w[
   scope
   deps-security
+  osv-cargo-lock
   clippy
   rustdoc
   public-msrv
@@ -165,6 +169,8 @@ when "ebpf-self-hosted-changed"
   jobs.fetch("ebpf-smoke-self-hosted")["timeout-minutes"] = 90
 when "reusable-timeout-added"
   jobs.fetch("semver")["timeout-minutes"] = 20
+when "osv-reusable-timeout-added"
+  jobs.fetch("osv-cargo-lock")["timeout-minutes"] = 20
 when "unpinned-new-job"
   jobs["rogue-unpinned"] = {
     "name" => "Rogue",
@@ -192,6 +198,7 @@ RUBY
   run_mutation ebpf-ubuntu-changed ebpf-ubuntu-changed
   run_mutation ebpf-self-hosted-changed ebpf-self-hosted-changed
   run_mutation reusable-timeout-added reusable-timeout-added
+  run_mutation osv-reusable-timeout-added osv-reusable-timeout-added
   run_mutation unpinned-new-job unpinned-new-job
   echo "ci-job-timeouts contract self-test=passed"
 }

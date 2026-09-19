@@ -1,0 +1,11 @@
+# Exceptions for the PR OSV Cargo.lock gate in .github/workflows/ci.yml.
+# Each [[IgnoredVulns]] entry needs id, reason, and ignoreUntil. Write
+# ignoreUntil as an unquoted TOML date (2026-12-31), not a string: a
+# quoted value is parsed as RFC3339 and OSV ignores the whole file.
+# When ignoreUntil passes, the finding resurfaces; that is the expiry
+# signal.
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0370"
+ignoreUntil = 2026-12-31
+reason = "Informational RustSec unmaintained advisory for proc-macro-error 1.0.4, a compile-time helper pulled in by aya-ebpf-macros. No patched version exists. cargo-deny and cargo-audit already treat INFO unmaintained as non-gating; this ignore keeps the OSV gate on the same side of that line."
