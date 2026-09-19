@@ -132,6 +132,7 @@ write_hash_probes() {
   cat >"${bin_dir}/shasum" <<EOF
 #!/bin/sh
 echo HASH_STEP_REACHED
+echo "HASH_CWD=\$(pwd -P)"
 if [ -n "$real_shasum" ]; then
   exec "$real_shasum" "\$@"
 fi
@@ -142,6 +143,7 @@ EOF
     cat >"${bin_dir}/sha256sum" <<EOF
 #!/bin/sh
 echo HASH_STEP_REACHED
+echo "HASH_CWD=\$(pwd -P)"
 exec "$real_sha256" "\$@"
 EOF
     chmod +x "${bin_dir}/sha256sum"
@@ -243,12 +245,84 @@ print("docker isolation argv ok")
 PY
 }
 
-# Positive control.
-assets="${tmp_root}/happy-assets"
-prepare_assets "$assets"
+assert_host_bind_and_hash() {
+  local log="$1"
+  local stdout="$2"
+  local expected_host="$3"
+  python3 - "$log" "$stdout" "$expected_host" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+log_text = Path(sys.argv[1]).read_text(encoding="utf-8")
+stdout_text = Path(sys.argv[2]).read_text(encoding="utf-8")
+expected = os.path.realpath(sys.argv[3])
+blocks = [b for b in log_text.split("--- invocation ---\n") if b.strip()]
+if len(blocks) != 2:
+    raise SystemExit(f"expected 2 docker invocations, got {len(blocks)}")
+
+
+def args(block):
+    out = []
+    for line in block.splitlines():
+        if line.startswith("arg["):
+            out.append(line.split("=", 1)[1])
+    return out
+
+
+verify_args = args(blocks[1])
+if "verify-blob" not in verify_args:
+    raise SystemExit("second docker invocation is not verify-blob")
+
+sources = []
+prev = None
+for arg in verify_args:
+    if prev == "-v" and (arg.endswith(":/assets:ro") or arg.endswith(":/assets")):
+        src = arg[: -len(":/assets:ro")] if arg.endswith(":/assets:ro") else arg[: -len(":/assets")]
+        sources.append(src)
+    prev = arg
+if len(sources) != 1:
+    raise SystemExit(f"expected one /assets bind on verify-blob, got {sources!r}")
+source = sources[0]
+if "/" not in source and not source.startswith("."):
+    raise SystemExit(
+        f"verify-blob assets mount is a named volume, not a host bind: {source}"
+    )
+if not source.startswith("/"):
+    raise SystemExit(f"verify-blob assets bind source is not physical-absolute: {source}")
+resolved_source = os.path.realpath(source)
+if resolved_source != expected:
+    raise SystemExit(
+        f"verify-blob bind source {resolved_source} is not the host assets dir {expected}"
+    )
+
+hash_cwds = [
+    os.path.realpath(line.split("=", 1)[1])
+    for line in stdout_text.splitlines()
+    if line.startswith("HASH_CWD=")
+]
+if not hash_cwds:
+    raise SystemExit("hash step did not record HASH_CWD")
+if any(cwd != expected for cwd in hash_cwds):
+    raise SystemExit(
+        f"hash cwd {hash_cwds!r} is not the same host assets dir {expected}"
+    )
+if resolved_source != hash_cwds[0]:
+    raise SystemExit(
+        f"verify-blob bind {resolved_source} is not the hashing directory {hash_cwds[0]}"
+    )
+print("host bind and hash directory ok")
+PY
+}
+
+# Default positive fixture: the candidate workflow's actual argv
+# (`--assets-dir release` from a cwd that contains ./release).
+# Absolute-only stores miss Docker named-volume short-syntax.
 happy="${tmp_root}/happy"
-mkdir -p "$happy"
-set_helper_args "$assets"
+mkdir -p "${happy}/release"
+prepare_assets "${happy}/release"
+expected_release="$(cd -- "${happy}/release" && pwd -P)"
+set_helper_args "release"
 if ! run_helper "$happy" "${HELPER_ARGS[@]}" \
   >"${happy}/stdout" 2>"${happy}/stderr"; then
   cat "${happy}/stdout" "${happy}/stderr" >&2
@@ -258,12 +332,42 @@ grep -Fq 'Verified OK' "${happy}/stdout" || fail "positive helper did not print 
 grep -Fq "${ARCHIVE}: OK" "${happy}/stdout" || fail "positive helper did not print archive OK"
 grep -Fq HASH_STEP_REACHED "${happy}/stdout" || fail "positive helper did not reach the hash step"
 assert_verify_isolated "${happy}/docker.log"
+assert_host_bind_and_hash "${happy}/docker.log" "${happy}/stdout" "$expected_release"
 # Owned scratch must not leak after success.
 if find "$tmp_root" -type d -name 'tmp.*' -o -path '*/tuf-cache' | grep -q .; then
   # Helper scratch is under /tmp via mktemp, not case_dir; assert helper did not leave TUF in assets.
   :
 fi
-[[ ! -e "${assets}/tuf-cache" ]] || fail "helper must not write TUF state into assets-dir"
+[[ ! -e "${happy}/release/tuf-cache" ]] || fail "helper must not write TUF state into assets-dir"
+
+# Absolute assets-dir remains valid (published-replay class under RUNNER_TEMP).
+abs_assets="${tmp_root}/abs-assets"
+prepare_assets "$abs_assets"
+abs_case="${tmp_root}/abs-control"
+mkdir -p "$abs_case"
+expected_abs="$(cd -- "$abs_assets" && pwd -P)"
+set_helper_args "$abs_assets"
+if ! run_helper "$abs_case" "${HELPER_ARGS[@]}" \
+  >"${abs_case}/stdout" 2>"${abs_case}/stderr"; then
+  cat "${abs_case}/stdout" "${abs_case}/stderr" >&2
+  fail "absolute assets-dir control failed"
+fi
+assert_verify_isolated "${abs_case}/docker.log"
+assert_host_bind_and_hash "${abs_case}/docker.log" "${abs_case}/stdout" "$expected_abs"
+
+# Relative directory names with spaces must still become a host bind.
+space_case="${tmp_root}/space cwd"
+mkdir -p "${space_case}/my assets"
+prepare_assets "${space_case}/my assets"
+expected_space="$(cd -- "${space_case}/my assets" && pwd -P)"
+set_helper_args "my assets"
+if ! run_helper "$space_case" "${HELPER_ARGS[@]}" \
+  >"${space_case}/stdout" 2>"${space_case}/stderr"; then
+  cat "${space_case}/stdout" "${space_case}/stderr" >&2
+  fail "assets-dir with spaces failed"
+fi
+assert_verify_isolated "${space_case}/docker.log"
+assert_host_bind_and_hash "${space_case}/docker.log" "${space_case}/stdout" "$expected_space"
 
 # Signature / identity / issuer failure must not reach the hash step.
 assert_stops_before_hash() {
@@ -439,6 +543,70 @@ assert_mutation_red drop-network-none '--network=none' '--network=bridge'
 # shellcheck disable=SC2016
 assert_mutation_red drop-identity '--certificate-identity "$certificate_identity"' '--certificate-identity ignored'
 assert_mutation_red drop-trusted-root '--trusted-root /trusted_root.json' '--offline'
+
+# Meaningful mutation: remove shared host-dir normalization. Absolute
+# stores stay green; the candidate `--assets-dir release` caller must RED.
+assert_named_volume_mutation_red() {
+  local name="$1"
+  local old="$2"
+  local new="$3"
+  local mutant="${tmp_root}/${name}.sh"
+  mutate_helper "$mutant" "$old" "$new"
+  chmod +x "$mutant"
+  local case_dir="${tmp_root}/${name}"
+  mkdir -p "${case_dir}/release" "${case_dir}/bin"
+  prepare_assets "${case_dir}/release"
+  write_stub_docker "${case_dir}/bin"
+  write_hash_probes "${case_dir}/bin"
+  : >"${case_dir}/docker.log"
+  local expected
+  expected="$(cd -- "${case_dir}/release" && pwd -P)"
+  local status=0
+  set_helper_args "release"
+  (
+    cd "$case_dir"
+    env PATH="${case_dir}/bin:/usr/bin:/bin" \
+      CONSUMER_DOCKER_LOG="${case_dir}/docker.log" \
+      CONSUMER_DOCKER_REQUIRE_IDENTITY="$GOOD_ID" \
+      CONSUMER_DOCKER_REQUIRE_ISSUER="$ISSUER" \
+      bash "$mutant" "${HELPER_ARGS[@]}"
+  ) >"${case_dir}/stdout" 2>"${case_dir}/stderr" || status=$?
+  if [[ "$status" -eq 0 ]] \
+    && assert_host_bind_and_hash "${case_dir}/docker.log" "${case_dir}/stdout" "$expected" \
+      >/dev/null 2>&1; then
+    fail "mutation ${name} stayed green on --assets-dir release"
+  fi
+}
+
+# shellcheck disable=SC2016
+assert_named_volume_mutation_red drop-physical-host-dir \
+  'assets_dir="$(physical_host_dir "$assets_dir")"' \
+  'assets_dir="$assets_dir"'
+
+# No-op control: identical helper copy still binds the relative caller.
+noop_helper="${tmp_root}/noop-helper.sh"
+cp "$HELPER" "$noop_helper"
+chmod +x "$noop_helper"
+noop_case="${tmp_root}/noop-relative"
+mkdir -p "${noop_case}/release" "${noop_case}/bin"
+prepare_assets "${noop_case}/release"
+write_stub_docker "${noop_case}/bin"
+write_hash_probes "${noop_case}/bin"
+: >"${noop_case}/docker.log"
+expected_noop="$(cd -- "${noop_case}/release" && pwd -P)"
+set_helper_args "release"
+if ! (
+  cd "$noop_case"
+  env PATH="${noop_case}/bin:/usr/bin:/bin" \
+    CONSUMER_DOCKER_LOG="${noop_case}/docker.log" \
+    CONSUMER_DOCKER_REQUIRE_IDENTITY="$GOOD_ID" \
+    CONSUMER_DOCKER_REQUIRE_ISSUER="$ISSUER" \
+    bash "$noop_helper" "${HELPER_ARGS[@]}"
+) >"${noop_case}/stdout" 2>"${noop_case}/stderr"; then
+  cat "${noop_case}/stdout" "${noop_case}/stderr" >&2
+  fail "no-op helper copy failed the relative release caller"
+fi
+assert_host_bind_and_hash "${noop_case}/docker.log" "${noop_case}/stdout" "$expected_noop"
 
 # Control: unmutated helper still matches the isolation oracle.
 assert_verify_isolated "${happy}/docker.log"

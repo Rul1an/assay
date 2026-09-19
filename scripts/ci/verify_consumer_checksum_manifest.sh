@@ -89,6 +89,16 @@ has_unsafe_path_component() {
   return 1
 }
 
+# One resolution for docker -v and host hashing. A second copy would
+# silently disagree about which tree the signature covers.
+physical_host_dir() {
+  local dir="$1"
+  local resolved
+  resolved="$(cd -- "$dir" && pwd -P)" || return 1
+  [[ "$resolved" == /* ]] || return 1
+  printf '%s\n' "$resolved"
+}
+
 read_cosign_pin() {
   local pin_file="$1"
   [[ -f "$pin_file" ]] || reject "cosign image pin missing: $pin_file"
@@ -122,6 +132,7 @@ has_unsafe_path_component "$archive" && reject "archive must be a basename witho
 [[ "$archive" =~ ^[A-Za-z0-9._+-]+$ ]] || reject "archive contains characters that are not safe as a basename"
 
 [[ -d "$assets_dir" ]] || reject "assets directory not found: $assets_dir"
+assets_dir="$(physical_host_dir "$assets_dir")" || reject "assets directory could not be resolved to a host path"
 [[ -f "${assets_dir}/checksums.txt" ]] || reject "checksums.txt is missing"
 [[ -f "${assets_dir}/checksums.txt.sigstore.json" ]] || reject "checksums.txt.sigstore.json is missing"
 [[ -f "${assets_dir}/${archive}" ]] || reject "selected archive is missing: $archive"
