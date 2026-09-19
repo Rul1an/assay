@@ -1,6 +1,6 @@
 # Installation
 
-The current release is Assay `6.6.1` (`v6.6.1`). Install the CLI from one of the verified channels below.
+The current release is Assay `6.6.2` (`v6.6.2`). Install the CLI from one of the verified channels below.
 
 ## CLI
 
@@ -24,16 +24,16 @@ The formula in [`Rul1an/homebrew-tap`](https://github.com/Rul1an/homebrew-tap) i
 ### Cargo
 
 ```bash
-cargo install assay-cli --version 6.6.1 --locked
+cargo install assay-cli --version 6.6.2 --locked
 ```
 
 The crate is `assay-cli`; the installed binary is `assay`. Releases starting with 3.36.0 declare Rust 1.89 as their MSRV. Repository development currently uses Rust 1.96.
 
 ### GitHub release assets
 
-Download the asset for [`v6.6.1`](https://github.com/Rul1an/assay/releases/tag/v6.6.1), verify its published checksum, and place the binary on `PATH`.
+Download the asset for [`v6.6.2`](https://github.com/Rul1an/assay/releases/tag/v6.6.2), verify its published checksum, and place the binary on `PATH`.
 
-Releases cut after this page's `v6.6.1` pin also publish a signed `checksums.txt`. When `cosign` is on `PATH` and reports v3.1.3 or later (v2.6.5 on the 2.x line), `scripts/install.sh` verifies that manifest against the release workflow identity at the tag before it trusts any per-file hash. When `cosign` is present but older or unparsable, the installer refuses that signature check and stops (GHSA-fx35-mq7g-6g98). When `cosign` is absent, the installer prints `verification=signed_manifest_skipped reason=cosign_not_installed` and continues with the per-file `.sha256` sidecar. It never skips that check silently.
+Releases `v6.6.2` and later publish a signed `checksums.txt`. When `cosign` is on `PATH` and reports v3.1.3 or later (v2.6.5 on the 2.x line), `scripts/install.sh` verifies that manifest against the release workflow identity at the tag before it trusts any per-file hash. When `cosign` is present but older or unparsable, the installer refuses that signature check and stops (GHSA-fx35-mq7g-6g98). When `cosign` is absent, the installer prints `verification=signed_manifest_skipped reason=cosign_not_installed` and continues with the per-file `.sha256` sidecar. It never skips that check silently.
 
 To verify a published archive yourself (replace `vX.Y.Z` with the tag you downloaded):
 
@@ -67,19 +67,19 @@ See [release.md](../reference/release.md#signed-checksum-manifest) for the opera
 Windows x86-64 uses:
 
 ```text
-assay-v6.6.1-x86_64-pc-windows-msvc.zip
+assay-v6.6.2-x86_64-pc-windows-msvc.zip
 ```
 
 Assay documents the container image below as a verified release channel. Scoop remains unsupported.
 
 ## Container image (assay-mcp-server)
 
-The `v6.6.1` image index is `ghcr.io/rul1an/assay-mcp-server@sha256:8143b45ea06783d3c371919a5ce86b343ab7ad8565e15b07889b8fac554f58a2` (tags such as `v6.6.1`, `6.6`, and `latest` are convenience aliases; the digest is the pinned reference).
+The `v6.6.2` image index is `ghcr.io/rul1an/assay-mcp-server@sha256:b781ddd67c78c1577f2002b66c565b4cfa4c0380b9752a79d14c605a6e6a1d18` (tags such as `v6.6.2`, `6.6`, and `latest` are convenience aliases; the digest is the pinned reference).
 
 Pull and run the multi-arch `assay-mcp-server` image by index digest:
 
 ```bash
-docker run --rm ghcr.io/rul1an/assay-mcp-server@sha256:8143b45ea06783d3c371919a5ce86b343ab7ad8565e15b07889b8fac554f58a2 --version
+docker run --rm ghcr.io/rul1an/assay-mcp-server@sha256:b781ddd67c78c1577f2002b66c565b4cfa4c0380b9752a79d14c605a6e6a1d18 --version
 ```
 
 The image runs as uid:gid 65532:65532 (non-root) on a minimal base, and the index contains both linux/amd64 and linux/arm64 images.
@@ -87,11 +87,11 @@ The image runs as uid:gid 65532:65532 (non-root) on a minimal base, and the inde
 Verify SLSA provenance and CycloneDX SBOM attestations:
 
 ```bash
-gh attestation verify oci://ghcr.io/rul1an/assay-mcp-server@sha256:8143b45ea06783d3c371919a5ce86b343ab7ad8565e15b07889b8fac554f58a2 -R Rul1an/assay --predicate-type https://slsa.dev/provenance/v1
-gh attestation verify oci://ghcr.io/rul1an/assay-mcp-server@sha256:8143b45ea06783d3c371919a5ce86b343ab7ad8565e15b07889b8fac554f58a2 -R Rul1an/assay --predicate-type https://cyclonedx.org/bom
+gh attestation verify oci://ghcr.io/rul1an/assay-mcp-server@sha256:b781ddd67c78c1577f2002b66c565b4cfa4c0380b9752a79d14c605a6e6a1d18 -R Rul1an/assay --predicate-type https://slsa.dev/provenance/v1
+gh attestation verify oci://ghcr.io/rul1an/assay-mcp-server@sha256:b781ddd67c78c1577f2002b66c565b4cfa4c0380b9752a79d14c605a6e6a1d18 -R Rul1an/assay --predicate-type https://cyclonedx.org/bom
 ```
 
-Verified status means [release run 35395488916](https://github.com/Rul1an/assay/actions/runs/35395488916) pulled the image by digest, verified attestations, and executed `--version` on both architectures.
+Verified status means [release run 35444268063](https://github.com/Rul1an/assay/actions/runs/35444268063) pulled the image by digest, verified attestations, and executed `--version` on both architectures.
 
 ## Python SDK and pytest plugin
 
@@ -112,10 +112,10 @@ assay --version
 Expected output:
 
 ```text
-assay 6.6.1
+assay 6.6.2
 ```
 
-The generated [agent golden path](../guides/agent-golden-path.md) additionally uses `assay version`, whose release-pinned output is `6.6.1`.
+The generated [agent golden path](../guides/agent-golden-path.md) additionally uses `assay version`, whose release-pinned output is `6.6.2`.
 
 ### Verify an evidence bundle offline
 
@@ -134,7 +134,7 @@ The report is experimental v0; verification recomputes the carried bytes only.
 
 ## Development build
 
-Behavior merged after `v6.6.1` is `Unreleased` and is not part of the release claim above.
+Behavior merged after `v6.6.2` is `Unreleased` and is not part of the release claim above.
 
 ```bash
 git clone https://github.com/Rul1an/assay.git
@@ -149,7 +149,7 @@ For source installation in CI:
 
 ```yaml
 - name: Install Assay
-  run: cargo install assay-cli --version 6.6.1 --locked
+  run: cargo install assay-cli --version 6.6.2 --locked
 ```
 
 The GitHub Action is available as `Rul1an/assay-action@v3`; follow the [CI integration guide](ci-integration.md) for the repository's current permissions and pinning policy.
