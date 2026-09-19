@@ -198,13 +198,11 @@ pub(crate) async fn execute_pipeline(
             format!("Failed to reset assertion eval scope: {}", e),
         ));
     }
-    if input.latest_stored_episode {
-        if let Err(e) = store.set_latest_stored_episode_eval(true) {
-            return Err(PipelineError::cfg_parse(
-                input.db.display().to_string(),
-                format!("Failed to set latest-stored-episode eval: {}", e),
-            ));
-        }
+    if let Err(e) = store.set_latest_stored_episode_eval(input.latest_stored_episode) {
+        return Err(PipelineError::cfg_parse(
+            input.db.display().to_string(),
+            format!("Failed to set latest-stored-episode eval: {}", e),
+        ));
     }
 
     let needs_episode_ingest = cfg.tests.iter().any(|tc| {

@@ -184,6 +184,47 @@ fn reused_db_newer_benign_then_older_forbidden_ci() {
         .stderr(predicate::str::contains("E_TRACE_EPISODE_MISSING").not());
 }
 
+const LATEST_STORED_NOTE: &str =
+    "note: assertions used the latest stored episode per test_id (--latest-stored-episode)";
+
+/// Flagged invocation, then unflagged, same `--db`. The second process must
+/// evaluate only the episode it ingested (older forbidden trace) and must not
+/// print the latest-stored-episode note.
+fn reused_flagged_then_unflagged(sub: &str) {
+    let dir = TempDir::new().expect("tempdir");
+    write_suite(
+        dir.path(),
+        &episode("ep-benign", 5000, "list_files", "s-benign"),
+    );
+    let first = eval_args(sub, &["--latest-stored-episode"]);
+    let first_ref: Vec<&str> = first.iter().map(String::as_str).collect();
+    run_cmd(dir.path(), &first_ref).success();
+
+    fs::write(
+        dir.path().join("trace.jsonl"),
+        episode("ep-forbidden", 1000, "delete_repository", "s-forb"),
+    )
+    .expect("rewrite older forbidden trace");
+    let second = eval_args(sub, &[]);
+    let second_ref: Vec<&str> = second.iter().map(String::as_str).collect();
+    run_cmd(dir.path(), &second_ref)
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("assertions failed"))
+        .stderr(predicate::str::contains("E_TRACE_EPISODE_MISSING").not())
+        .stderr(predicate::str::contains(LATEST_STORED_NOTE).not());
+}
+
+#[test]
+fn reused_db_flagged_then_unflagged_does_not_keep_opt() {
+    reused_flagged_then_unflagged("run");
+}
+
+#[test]
+fn reused_db_flagged_then_unflagged_ci_does_not_keep_opt() {
+    reused_flagged_then_unflagged("ci");
+}
+
 #[test]
 fn reused_db_same_step_id_reuses_tool_call_slot() {
     let dir = TempDir::new().expect("tempdir");
