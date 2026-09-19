@@ -38,6 +38,34 @@ compute_sha256() {
 tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
 
+# One physical-directory key for bind-source and expected-host comparison.
+# Git-Bash /c/foo is C:\foo; Windows Python realpath of /c/foo is {cwd_drive}\c\foo.
+HOST_PATH_LIB="${tmp_root}/physical_host_path.py"
+cat >"$HOST_PATH_LIB" <<'PY'
+import ntpath
+import os
+import re
+
+_MSYS_DRIVE = re.compile(r"^/([A-Za-z])(/.*)?$")
+
+
+def windows_native_path(path: str) -> str:
+    match = _MSYS_DRIVE.fullmatch(path)
+    if match is None:
+        return path
+    rest = match.group(2) or ""
+    return match.group(1).upper() + ":" + rest.replace("/", "\\")
+
+
+def physical_dir_key(path: str) -> str:
+    native = windows_native_path(path)
+    if os.name == "nt":
+        return os.path.normcase(os.path.realpath(native))
+    if len(native) >= 2 and native[1] == ":":
+        return ntpath.normcase(ntpath.normpath(native))
+    return os.path.realpath(native)
+PY
+
 write_stub_docker() {
   local bin_dir="$1"
   mkdir -p "$bin_dir"
@@ -249,14 +277,19 @@ assert_host_bind_and_hash() {
   local log="$1"
   local stdout="$2"
   local expected_host="$3"
-  python3 - "$log" "$stdout" "$expected_host" <<'PY'
-import os
+  python3 - "$HOST_PATH_LIB" "$log" "$stdout" "$expected_host" <<'PY'
+import importlib.util
 import sys
 from pathlib import Path
 
-log_text = Path(sys.argv[1]).read_text(encoding="utf-8")
-stdout_text = Path(sys.argv[2]).read_text(encoding="utf-8")
-expected = os.path.realpath(sys.argv[3])
+spec = importlib.util.spec_from_file_location("physical_host_path", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+physical_dir_key = mod.physical_dir_key
+
+log_text = Path(sys.argv[2]).read_text(encoding="utf-8")
+stdout_text = Path(sys.argv[3]).read_text(encoding="utf-8")
+expected = physical_dir_key(sys.argv[4])
 blocks = [b for b in log_text.split("--- invocation ---\n") if b.strip()]
 if len(blocks) != 2:
     raise SystemExit(f"expected 2 docker invocations, got {len(blocks)}")
@@ -290,14 +323,14 @@ if "/" not in source and not source.startswith("."):
     )
 if not source.startswith("/"):
     raise SystemExit(f"verify-blob assets bind source is not physical-absolute: {source}")
-resolved_source = os.path.realpath(source)
+resolved_source = physical_dir_key(source)
 if resolved_source != expected:
     raise SystemExit(
         f"verify-blob bind source {resolved_source} is not the host assets dir {expected}"
     )
 
 hash_cwds = [
-    os.path.realpath(line.split("=", 1)[1])
+    physical_dir_key(line.split("=", 1)[1])
     for line in stdout_text.splitlines()
     if line.startswith("HASH_CWD=")
 ]
@@ -314,6 +347,71 @@ if resolved_source != hash_cwds[0]:
 print("host bind and hash directory ok")
 PY
 }
+
+# Portable regression for the exact hosted Windows seam (job 105962931434):
+# Git-Bash records /c/Users/...; Windows Python os.path.realpath treats that
+# as {cwd_drive}\c\Users\... (D:\c\... when the workspace is D:\a\assay\assay),
+# while MSYS argv conversion already turned the expected host dir into C:\Users\...
+# Linux/macOS fixtures never feed this pair, so they cannot catch it.
+assert_windows_msys_drive_conversion_seam() {
+  python3 - "$HOST_PATH_LIB" <<'PY'
+import importlib.util
+import ntpath
+import os
+import sys
+
+spec = importlib.util.spec_from_file_location("physical_host_path", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+physical_dir_key = mod.physical_dir_key
+windows_native_path = mod.windows_native_path
+
+posix_bind = "/c/Users/runneradmin/AppData/Local/Temp/tmp.M5m6xevUK6/happy/release"
+windows_expected = (
+    r"C:\Users\runneradmin\AppData\Local\Temp\tmp.M5m6xevUK6\happy\release"
+)
+other_drive = "/d/Users/runneradmin/AppData/Local/Temp/tmp.M5m6xevUK6/happy/release"
+posix_tmp = "/tmp/happy/release"
+
+nt_root_relative = ntpath.normpath(posix_bind)
+if nt_root_relative != (
+    r"\c\Users\runneradmin\AppData\Local\Temp\tmp.M5m6xevUK6\happy\release"
+):
+    raise SystemExit(f"ntpath.normpath(/c/...) drifted: {nt_root_relative!r}")
+hosted_broken = "D:" + nt_root_relative
+if hosted_broken != (
+    r"D:\c\Users\runneradmin\AppData\Local\Temp\tmp.M5m6xevUK6\happy\release"
+):
+    raise SystemExit(f"D: current-drive join drifted: {hosted_broken!r}")
+
+if windows_native_path(posix_bind) != windows_expected:
+    raise SystemExit(
+        f"MSYS /c/ bind became {windows_native_path(posix_bind)!r}, not {windows_expected!r}"
+    )
+if windows_native_path(posix_tmp) != posix_tmp:
+    raise SystemExit(
+        f"/tmp must not be treated as a drive mapping: {windows_native_path(posix_tmp)!r}"
+    )
+
+resolved_source = physical_dir_key(posix_bind)
+expected = physical_dir_key(windows_expected)
+if resolved_source != expected:
+    raise SystemExit(
+        f"verify-blob bind source {resolved_source} is not the host assets dir {expected}"
+    )
+if physical_dir_key(other_drive) == expected:
+    raise SystemExit(
+        "physical-dir equality collapsed /d/Users/... onto C:\\Users\\... (suffix match)"
+    )
+if os.name != "nt":
+    tmp_key = physical_dir_key(posix_tmp)
+    if tmp_key != os.path.realpath(posix_tmp):
+        raise SystemExit(f"/tmp physical key drifted: {tmp_key!r}")
+print("windows msys drive conversion ok")
+PY
+}
+
+assert_windows_msys_drive_conversion_seam
 
 # Default positive fixture: the candidate workflow's actual argv
 # (`--assets-dir release` from a cwd that contains ./release).
