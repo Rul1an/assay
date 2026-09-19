@@ -176,7 +176,7 @@ it is not an installer failure.
 - [ ] **Published release journey**: Confirm `Verify the published release journey` downloaded the GitHub release assets by tag and ran the Linux x86_64 post-publication journey (unchanged) together with the Windows x86_64 and macOS arm64 published-archive openings (`assay version` against the tag, `assay doctor --format json`, `assay init --preset dev --hello-trace`). This job cannot be satisfied by a same-run build artifact.
 - [ ] **Workflow Evidence Check**: Confirm the workflow artifacts include `release-provenance-evidence` with the raw `gh attestation verify --format json` results for each release archive.
 - [ ] **Offline Verification Check**: Unpack the proof kit and run `verify-offline.sh --assets-dir /path/to/release-assets` against the downloaded release archives. See [Release Proof Kit](../security/RELEASE-PROOF-KIT.md).
-- [ ] **Signed checksum verification**: Run the commands in [Signed checksum manifest](#signed-checksum-manifest). Success prints `Verified OK` from cosign, then `OK` for the selected archive. Failure prints a cosign `Error:`, `checksums.txt does not name`, or `FAILED` from `sha256sum`.
+- [ ] **Signed checksum verification**: Run the connected commands in [Signed checksum manifest](#signed-checksum-manifest), or the [network-isolated consumer](#network-isolated-consumer-trustedroot) recipe when air-gap is required. Success prints `Verified OK` from cosign, then `OK` for the selected archive. Failure prints a cosign `Error:`, `checksums.txt does not name`, or `FAILED` from `sha256sum`.
 
 ### Signed checksum manifest
 
@@ -188,6 +188,8 @@ Releases cut by this repository's `release.yml` on a tag publish `checksums.txt`
 `v6.6.1` and earlier do not publish these assets. The first release cut from a tree that contains this signing step is the first one that can be verified this way.
 
 Use cosign v3.1.3 or later (v2.6.5 on the 2.x line) for `verify-blob`. Earlier versions are affected by GHSA-fx35-mq7g-6g98 (verification bypass via public key in a legacy bundle).
+
+The following recipe is a **connected** verify: it downloads with `curl` and lets cosign use its default trust material (which may contact the Sigstore TUF CDN). It is **not** an air-gapped proof. For TrustedRoot under network isolation, use [Network-isolated consumer (TrustedRoot)](#network-isolated-consumer-trustedroot).
 
 ```bash
 set -euo pipefail
@@ -231,6 +233,57 @@ sha256sum: WARNING: 1 computed checksum did NOT match
 ```
 
 This path talks to Sigstore (Fulcio/Rekor), not to the GitHub attestations API. It does not replace `gh attestation verify` or the [Release Proof Kit](../security/RELEASE-PROOF-KIT.md). The signing step is witnessed by the next real tag-triggered release; a failure there fails the `Create Release` job. `workflow_dispatch` from a branch cannot produce the tag identity and is refused before signing.
+
+#### Network-isolated consumer (TrustedRoot)
+
+Use this section when the consumer must verify the signed `checksums.txt` without network access during verification. Keep it separate from the connected recipe above and from the proof-kit `verify-offline.sh` path (that wraps `gh attestation verify`).
+
+**Bootstrap (online, once).** Allocate a newly empty parent directory. Set `TUF_ROOT` to a **child** of that parent (for example `$PARENT/tuf-cache`). Do not mount the parent itself as `TUF_ROOT`, do not point at `~/.sigstore`, and do not delete an existing user trust directory for this procedure. Run `cosign initialize` with network allowed until a modern `trusted_root.json` appears under that child. Require that modern TrustedRoot file before continuing; do not treat a legacy fallback root as a pass, and do not treat a separately downloaded root-file hash as a substitute for this bootstrap trust step.
+
+**Verify (network-isolated).** Keep published originals read-only. Run `cosign verify-blob` with `--bundle`, `--trusted-root` (the modern file from bootstrap), and the exact release-workflow identity at the tag plus issuer, under host or container network isolation. Docker `--network=none` is the isolation shape measured for this documentation path. The deprecated cosign `--offline` flag alone is **not** isolation. Then check the selected archive line from `checksums.txt` with `sha256sum -c`.
+
+Measured cosign image for the v6.6.2 consumer witness: tag `ghcr.io/sigstore/cosign/cosign:v3.1.3`; linux/arm64 digest `sha256:153c941dce7e172f66b759a8f5098203902c5b941737c21c7a30cfbe56132f35` (multi-arch index digest `sha256:9e5c2f2edc34351160407ca3416c61855bdf9403c3c5936e0f0be7fc261611b8`). Those digests name the bytes used in that witness; they are not a claim that every architecture, or a native host cosign on Linux/macOS/Windows, was measured the same way.
+
+```bash
+set -euo pipefail
+VERSION=vX.Y.Z
+ARCHIVE=assay-${VERSION}-x86_64-unknown-linux-gnu.tar.gz
+# ASSETS holds already-fetched checksums.txt, checksums.txt.sigstore.json, and ARCHIVE (read-only originals).
+ASSETS=/path/to/release-assets
+PARENT=$(mktemp -d)
+mkdir -p "$PARENT/tuf-cache"
+
+# 1) Bootstrap (network allowed)
+docker run --rm \
+  -e TUF_ROOT=/scratch/tuf-cache \
+  -v "$PARENT:/scratch" \
+  ghcr.io/sigstore/cosign/cosign@sha256:153c941dce7e172f66b759a8f5098203902c5b941737c21c7a30cfbe56132f35 \
+  initialize
+test -f "$PARENT/tuf-cache/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json"
+
+# 2) Verify (isolated)
+docker run --rm --network=none \
+  -v "$ASSETS:/assets:ro" \
+  -v "$PARENT/tuf-cache/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json:/trusted_root.json:ro" \
+  ghcr.io/sigstore/cosign/cosign@sha256:153c941dce7e172f66b759a8f5098203902c5b941737c21c7a30cfbe56132f35 \
+  verify-blob \
+    --bundle /assets/checksums.txt.sigstore.json \
+    --trusted-root /trusted_root.json \
+    --certificate-identity "https://github.com/Rul1an/assay/.github/workflows/release.yml@refs/tags/${VERSION}" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    /assets/checksums.txt
+
+LINE=$(awk -v archive="$ARCHIVE" '$2 == archive { print; found=1 } END { exit !found }' "$ASSETS/checksums.txt") || {
+  echo "checksums.txt does not name ${ARCHIVE}" >&2
+  exit 1
+}
+printf '%s\n' "$LINE" | (cd "$ASSETS" && sha256sum -c -)
+```
+
+Success prints `Verified OK`, then one `OK` line for the selected archive. Failure shapes match the connected recipe (cosign `Error:`, `checksums.txt does not name`, or `FAILED` from `sha256sum`).
+
+A frozen TrustedRoot does not provide ongoing revocation freshness; re-run bootstrap when you need a fresher root. The published release assets and identity pins are the product contract; the container digest and `network=none` shape document one measured consumer path, not broad native-host coverage. Producer CI verifying the signature online is not this consumer observation. This path does not replace `gh attestation verify` or the [Release Proof Kit](../security/RELEASE-PROOF-KIT.md).
+
 - [ ] **Operator Flow Check**: For the compact end-to-end story that connects transcript ingest, shipped `C2` pack evaluation, and proof-kit verification, see [Operator Proof Flow](../guides/operator-proof-flow.md).
 - [ ] **Registry Publication Decision**: Treat `release/server.json` as publish-ready input, not proof of an existing live official registry listing.
 
