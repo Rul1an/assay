@@ -1,0 +1,75 @@
+name: Assay-Runner Lane Check Refresh
+
+# Privileged refresh after a dispatch-triggered delegated proof. Lives in a
+# sibling so this file can keep a workflow_run trigger without pairing it with
+# an event-valued actions/checkout ref: (Scorecard Dangerous-Workflow). The
+# lane-check logic stays in scripts/ci/assay_runner_lane_check.py; this file
+# only invokes it. pull_request and workflow_dispatch stay on
+# assay-runner-lane-check.yml so the required `lane-check` context name is
+# unchanged and docs-auto-update.yml can still dispatch that filename.
+
+on:
+  workflow_run:
+    workflows: ["Runner Spike Delegated"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  lane-check:
+    name: lane-check
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.event == 'workflow_dispatch'
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+      pull-requests: write
+      statuses: write
+    steps:
+      - name: Checkout trusted helper
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          # Default-branch checkout. workflow_run already executes the workflow
+          # file from the default branch and github.sha is that head. Do not
+          # set ref: to an event expression; Scorecard flags that pairing.
+
+      - name: Verify lane-check helper exists
+        shell: bash
+        run: test -f scripts/ci/assay_runner_lane_check.py
+
+      - name: Self-test lane classifier
+        shell: bash
+        run: python3 scripts/ci/assay_runner_lane_check.py --self-test
+
+      - name: Resolve PR number
+        id: pr
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assay_runner_lane_check.py --resolve-pr-from-event >> "$GITHUB_OUTPUT"
+
+      - name: Check PR delegated lane proof
+        if: steps.pr.outputs.pr_number != ''
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          DELEGATED_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          args=(--comment)
+          if python3 scripts/ci/assay_runner_lane_check.py --help | grep -q -- "--status"; then
+            args+=(--status)
+          fi
+          python3 scripts/ci/assay_runner_lane_check.py "${args[@]}"
+
+      - name: No associated PR for delegated run
+        if: steps.pr.outputs.pr_number == ''
+        shell: bash
+        run: echo "No associated pull request found for delegated workflow_run; nothing to refresh."

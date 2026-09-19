@@ -846,6 +846,7 @@ def classify_file(path: str) -> tuple[Gate, str | None]:
 
     if path in {
         ".github/workflows/assay-runner-lane-check.yml",
+        ".github/workflows/assay-runner-lane-check-refresh.yml",
         "scripts/ci/assay_runner_lane_check.py",
     }:
         # The proof consumer runs on GitHub-hosted Ubuntu, not on the delegated
@@ -2108,6 +2109,8 @@ def self_test() -> None:
         # acceptance path.
         (["crates/assay-runner-linux/src/lib.rs"], Gate.ALL),
         (["crates/assay-runner-linux/Cargo.toml"], Gate.ALL),
+        ([".github/workflows/assay-runner-lane-check.yml"], Gate.NONE),
+        ([".github/workflows/assay-runner-lane-check-refresh.yml"], Gate.NONE),
     ]
     for files, expected in cases:
         got = classify_files(files).gate
@@ -2178,6 +2181,7 @@ def self_test() -> None:
     _test_artifact_redirect_drops_authorization()
     _test_required_status_fail_closed()
     _test_lane_workflow_contract_pins()
+    _test_privileged_trigger_forbids_event_checkout_ref()
 
     # Phase 2D Slice 6B mechanical absence check: assert that assay-cli no
     # longer consumes the assay-runner-spike wrapper. The check is
@@ -3331,54 +3335,187 @@ def _test_required_status_fail_closed() -> None:
     assert silent.calls == []
 
 
+_PRIVILEGED_TRIGGER_LINE = re.compile(
+    r"^[ \t]*(workflow_run|pull_request_target):(?:\s|$)"
+)
+_CHECKOUT_USES_LINE = re.compile(r"^[ \t]*-?[ \t]*uses:[ \t]*actions/checkout@")
+_CHECKOUT_REF_LINE = re.compile(r"^[ \t]*ref:[ \t]*(.+)$")
+_EVENT_CHECKOUT_REF_NEEDLES = (
+    "github.event.pull_request",
+    "github.event.workflow_run",
+)
+
+
+def _uncommented_workflow_lines(text: str) -> list[str]:
+    return [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+
+
+def workflow_has_privileged_trigger(text: str) -> bool:
+    return any(_PRIVILEGED_TRIGGER_LINE.match(line) for line in _uncommented_workflow_lines(text))
+
+
+def checkout_ref_values(text: str) -> list[str]:
+    refs: list[str] = []
+    in_checkout = False
+    for line in _uncommented_workflow_lines(text):
+        stripped = line.lstrip()
+        if _CHECKOUT_USES_LINE.match(line):
+            in_checkout = True
+            continue
+        if in_checkout and stripped.startswith("- "):
+            in_checkout = False
+        if not in_checkout:
+            continue
+        match = _CHECKOUT_REF_LINE.match(line)
+        if match is not None:
+            refs.append(match.group(1))
+    return refs
+
+
+def privileged_event_checkout_ref_problems(text: str, *, path: str) -> list[str]:
+    """Scorecard Dangerous-Workflow shape: privileged trigger + event-valued checkout ref.
+
+    ossf/scorecard `checks/raw/dangerous_workflow.go` is a `strings.Contains` on
+    `ref:` and only fires when the same file also has `workflow_run` or
+    `pull_request_target`. This is that pairing, not an evaluation of whether
+    the expression is the trusted base.
+    """
+    if not workflow_has_privileged_trigger(text):
+        return []
+    problems: list[str] = []
+    for value in checkout_ref_values(text):
+        for needle in _EVENT_CHECKOUT_REF_NEEDLES:
+            if needle in value:
+                problems.append(
+                    f"{path}: actions/checkout ref contains {needle!r} in a "
+                    "workflow that also has a workflow_run or "
+                    "pull_request_target trigger"
+                )
+                break
+    return problems
+
+
+def scan_workflows_for_privileged_event_checkout_refs(workflows_dir: Path) -> list[str]:
+    problems: list[str] = []
+    for path in sorted(workflows_dir.glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        problems.extend(
+            privileged_event_checkout_ref_problems(
+                text,
+                path=str(path.relative_to(workflows_dir.parent.parent)),
+            )
+        )
+    return problems
+
+
+def _test_privileged_trigger_forbids_event_checkout_ref() -> None:
+    """Fail any workflow Scorecard would flag as Dangerous-Workflow for this shape."""
+    trigger_only = (
+        "on:\n  workflow_run:\n    types: [completed]\n"
+        "jobs:\n  x:\n    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "        with:\n          persist-credentials: false\n"
+    )
+    assert privileged_event_checkout_ref_problems(trigger_only, path="ok.yml") == []
+
+    ref_only = (
+        "on:\n  pull_request:\n"
+        "jobs:\n  x:\n    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "        with:\n          ref: ${{ github.event.pull_request.base.sha }}\n"
+    )
+    assert privileged_event_checkout_ref_problems(ref_only, path="ok.yml") == []
+
+    dirty = (
+        "on:\n  workflow_run:\n    types: [completed]\n"
+        "jobs:\n  x:\n    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "        with:\n          ref: ${{ github.event.pull_request.base.sha }}\n"
+    )
+    dirty_problems = privileged_event_checkout_ref_problems(dirty, path="bad.yml")
+    assert dirty_problems, "scanner missed the Scorecard-shaped pairing"
+    assert "github.event.pull_request" in dirty_problems[0]
+
+    workflows = (
+        Path(__file__).resolve().parent.parent.parent / ".github" / "workflows"
+    )
+    found = scan_workflows_for_privileged_event_checkout_refs(workflows)
+    assert found == [], (
+        "workflow file pairs a workflow_run or pull_request_target trigger "
+        "with an actions/checkout ref containing github.event.pull_request or "
+        "github.event.workflow_run:\n" + "\n".join(found)
+    )
+
+
 def _test_lane_workflow_contract_pins() -> None:
-    """Pin the exact-head and never-read-clean guards of the lane workflow.
+    """Pin the exact-head and never-read-clean guards of the lane workflows.
 
     Script and workflow are always read from the same checkout, so the pins
     are self-consistent — but which tree that is depends on the event: the
     lane workflow's pull_request run checks out the PR BASE (which still
     contains the guards when a PR removes them), a workflow_dispatch run
-    checks out main, and a workflow_run refresh the default-branch head. The
-    head-side tripwire for a PR editing these files is therefore pre-commit
-    (locally via the lane-check hook, and in CI via the kernel-matrix lint
-    leg, whose trigger paths include the lane workflow file for exactly this
-    reason).
+    checks out main, and the workflow_run sibling checks out the default-branch
+    head with no event-valued ref. The head-side tripwire for a PR editing
+    these files is therefore pre-commit (locally via the lane-check hook, and
+    in CI via the kernel-matrix lint leg, whose trigger paths include both
+    lane workflow files for exactly this reason).
     """
 
-    workflow = (
-        Path(__file__).resolve().parent.parent.parent
-        / ".github"
-        / "workflows"
-        / "assay-runner-lane-check.yml"
+    root = Path(__file__).resolve().parent.parent.parent
+    workflows = root / ".github" / "workflows"
+    text = (workflows / "assay-runner-lane-check.yml").read_text(encoding="utf-8")
+    refresh = (workflows / "assay-runner-lane-check-refresh.yml").read_text(
+        encoding="utf-8"
     )
-    text = workflow.read_text(encoding="utf-8")
+    kernel = (workflows / "kernel-matrix.yml").read_text(encoding="utf-8")
+    docs = (workflows / "docs-auto-update.yml").read_text(encoding="utf-8")
+
+    assert not workflow_has_privileged_trigger(text)
+    assert workflow_has_privileged_trigger(refresh)
+    assert privileged_event_checkout_ref_problems(refresh, path="refresh.yml") == []
 
     # Skipped or unassociated workflow_run events must never read clean:
-    # only completed dispatch-triggered delegated runs enter the job at all,
+    # only completed dispatch-triggered delegated runs enter the refresh job,
     # and a delegated run with no resolvable PR ends in an explicit no-op.
-    assert "github.event.workflow_run.event == 'workflow_dispatch'" in text
-    assert "No associated pull request found" in text
+    assert "github.event.workflow_run.event == 'workflow_dispatch'" in refresh
+    assert "No associated pull request found" in refresh
+    assert "DELEGATED_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}" in refresh
+    assert "--resolve-pr-from-event" in refresh
 
-    # Exact-head behavior for privileged refreshes: the dispatched run must
+    # Exact-head behavior for privileged dispatches: the dispatched run must
     # bind itself to the expected head and re-check that the PR still points
     # at it before any status is posted.
     assert 'if [[ "$GITHUB_SHA" != "$EXPECTED_HEAD_SHA" ]]' in text
     assert 'if [[ "$pr_head" != "$EXPECTED_HEAD_SHA" ]]' in text
 
-    # The workflow must actually request the required-context posting, and
+    # Both invocation files must request the required-context posting, and
     # the statuses: write grant must sit on the posting job itself, under a
     # workflow-level default deny.
-    assert "args+=(--status)" in text
-    assert "\npermissions: {}\n" in text
-    jobs_section = text.split("\njobs:\n", 1)[1]
-    lane_job = jobs_section.split("lane-check:\n", 1)[1]
-    assert "statuses: write" in lane_job
+    for body in (text, refresh):
+        assert "args+=(--status)" in body
+        assert "\npermissions: {}\n" in body
+        jobs_section = body.split("\njobs:\n", 1)[1]
+        lane_job = jobs_section.split("lane-check:\n", 1)[1]
+        assert "statuses: write" in lane_job
 
     # A privileged dispatch runs with statuses: write, so it must execute the
     # trusted helper from main — never code from the dispatched ref, which a
     # PR author controls. (The dispatched ref's own workflow file still runs;
     # dispatching on a ref carrying untrusted changes stays forbidden.)
-    assert "github.event_name == 'workflow_dispatch' && 'main'" in text
+    assert (
+        "github.event_name == 'pull_request' && github.event.pull_request.base.sha "
+        "|| 'main'"
+    ) in text
+
+    assert classify_file(".github/workflows/assay-runner-lane-check.yml")[0] is Gate.NONE
+    assert (
+        classify_file(".github/workflows/assay-runner-lane-check-refresh.yml")[0]
+        is Gate.NONE
+    )
+    assert ".github/workflows/assay-runner-lane-check.yml" in kernel
+    assert ".github/workflows/assay-runner-lane-check-refresh.yml" in kernel
+    assert "gh workflow run assay-runner-lane-check.yml" in docs
+    assert "gh workflow run assay-runner-lane-check-refresh.yml" not in docs
 
 
 def _test_connection_resilience() -> None:

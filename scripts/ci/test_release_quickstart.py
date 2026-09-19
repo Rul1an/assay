@@ -734,5 +734,52 @@ class ReleaseReadmeStdoutEncoding(unittest.TestCase):
                 self.assertNotIn("\ufffd", rendered)
 
 
+class OfflineVerifyFindableContract(unittest.TestCase):
+    def test_offline_verify_command_parity_with_golden_path_step_8(self):
+        contract_path = ROOT / "docs/generated/agent-golden-path.json"
+        self.assertTrue(contract_path.is_file(), "golden-path contract file missing")
+        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+        step_8 = next((s for s in contract.get("steps", []) if s.get("step") == 8), None)
+        self.assertIsNotNone(step_8, "golden path step 8 missing")
+        step_8_argv = step_8["outcomes"][0]["argv"]
+        step_8_cmd = f"{step_8['binary']} {' '.join(step_8_argv)}"
+        self.assertEqual(
+            step_8_cmd,
+            "assay evidence verify-privileged-mcp-action <bundle> --format json",
+        )
+        self.assertEqual(step_8_cmd, step_8["command"])
+
+        # Getting-started page (installation.md) must carry the exact command
+        installation_text = (ROOT / "docs/getting-started/installation.md").read_text(encoding="utf-8")
+        self.assertIn(
+            step_8_cmd,
+            installation_text,
+            "getting-started installation doc must carry golden-path step 8 command",
+        )
+
+        # Must describe both outcomes: valid (exit 0) and integrity failure (exit 2)
+        self.assertIn("bundle_integrity: pass", installation_text)
+        self.assertIn("verdict: valid", installation_text)
+        self.assertIn("bundle_integrity: fail", installation_text)
+        self.assertIn("E_EVIDENCE_INTEGRITY", installation_text)
+
+        # Must link to schema
+        self.assertIn("assay.privileged_mcp_action.verify.report.v0", installation_text)
+
+        # Exactly ONE non-claim sentence
+        self.assertIn(
+            "The report is experimental v0; verification recomputes the carried bytes only.",
+            installation_text,
+        )
+
+        # Release archive README template must carry the exact command
+        readme_template_text = (ROOT / "scripts/ci/release_readme.py").read_text(encoding="utf-8")
+        self.assertIn(
+            step_8_cmd,
+            readme_template_text,
+            "release archive README template must carry golden-path step 8 command",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
