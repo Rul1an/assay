@@ -20,7 +20,7 @@ pub(crate) fn apply_agent_assertions_impl(
                 &resp.meta,
             ) {
                 Ok(outcome) => {
-                    if let Ok(used) = runner.store.take_latest_stored_episode_used() {
+                    if let Ok(used) = runner.store.take_latest_stored_episode_used_for(&tc.id) {
                         if !used.is_empty() {
                             eprintln!(
                                 "note: assertions used the latest stored episode per test_id (--latest-stored-episode)"
