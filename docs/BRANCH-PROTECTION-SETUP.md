@@ -62,7 +62,7 @@ Ensure `.github/CODEOWNERS` exists and lists the right owners (see repo root).
 | Context | Workflow file |
 |---------|----------------|
 | `CI` | `.github/workflows/ci.yml` |
-| `lane-check/proof` | commit status posted by `scripts/ci/assay_runner_lane_check.py` (runs in `.github/workflows/assay-runner-lane-check.yml`) |
+| `lane-check/proof` | commit status posted by `scripts/ci/assay_runner_lane_check.py` (runs in `.github/workflows/assay-runner-lane-check.yml` on pull_request/workflow_dispatch, and in `.github/workflows/assay-runner-lane-check-refresh.yml` after a dispatch-triggered delegated run) |
 | `lane-check` | `.github/workflows/assay-runner-lane-check.yml` (informational since the #1869 migration) |
 | `host-capability-check` | `.github/workflows/host-capability-check.yml` |
 | `review-record-check` | `.github/workflows/review-record-check.yml` |

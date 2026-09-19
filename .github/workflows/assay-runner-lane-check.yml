@@ -1,11 +1,13 @@
 name: Assay-Runner Lane Check
 
+# pull_request and workflow_dispatch only. The workflow_run refresh after a
+# dispatch-triggered delegated proof lives in
+# assay-runner-lane-check-refresh.yml so this file can keep the pull_request
+# base-SHA checkout without pairing it with a privileged trigger.
+
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited, ready_for_review]
-  workflow_run:
-    workflows: ["Runner Spike Delegated"]
-    types: [completed]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -31,7 +33,6 @@ jobs:
   lane-check:
     name: lane-check
     runs-on: ubuntu-latest
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'workflow_dispatch'
     permissions:
       actions: read
       contents: read
@@ -47,9 +48,8 @@ jobs:
           #   gatekeeper. workflow_dispatch: main, because the privileged
           #   refresh holds statuses: write and must never execute helper code
           #   from the dispatched ref (which a PR author controls); the head
-          #   SHA is data, not code. workflow_run: github.sha is the default
-          #   branch head, already trusted.
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || (github.event_name == 'workflow_dispatch' && 'main' || github.sha) }}
+          #   SHA is data, not code.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || 'main' }}
 
       - name: Verify lane-check helper exists
         shell: bash
@@ -74,9 +74,6 @@ jobs:
             workflow_dispatch)
               echo "pr_number=${{ inputs.pr_number }}" >> "$GITHUB_OUTPUT"
               ;;
-            workflow_run)
-              python3 scripts/ci/assay_runner_lane_check.py --resolve-pr-from-event >> "$GITHUB_OUTPUT"
-              ;;
             *)
               echo "pr_number=" >> "$GITHUB_OUTPUT"
               ;;
@@ -94,7 +91,6 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
-          DELEGATED_WORKFLOW_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || '' }}
         run: |
           set -euo pipefail
           if [[ -n "$EXPECTED_HEAD_SHA" ]]; then
@@ -113,8 +109,3 @@ jobs:
             args+=(--status)
           fi
           python3 scripts/ci/assay_runner_lane_check.py "${args[@]}"
-
-      - name: No associated PR for delegated run
-        if: github.event_name == 'workflow_run' && steps.pr.outputs.pr_number == ''
-        shell: bash
-        run: echo "No associated pull request found for delegated workflow_run; nothing to refresh."
