@@ -328,6 +328,36 @@ replace_once "$SOURCE" 'pub struct CoverageReport {' \
   '#[serde(rename_all = "camelCase")]\npub struct CoverageReport {'
 expect_red serde-rename-all 'serde(rename_all)'
 
+# Named false-green: a column-0 } inside a block comment is not the
+# previous item. The attribute still applies to CoverageReport.
+replace_once "$SOURCE" 'pub struct CoverageReport {' \
+  '#[serde(rename_all = "camelCase")]\n/*\n}\n*/\npub struct CoverageReport {'
+expect_red serde-rename-all-comment-brace 'serde(rename_all)'
+
+# Nested comments: the inner */ must not end the outer comment early.
+replace_once "$SOURCE" 'pub struct CoverageReport {' \
+  '#[serde(rename_all = "camelCase")]\n/* outer\n/* inner */\n}\n*/\npub struct CoverageReport {'
+expect_red serde-rename-all-nested-comment-brace 'serde(rename_all)'
+
+# Column-0 } inside a string in an attribute on the same item.
+replace_once "$SOURCE" 'pub struct CoverageReport {' \
+  '#[serde(rename_all = "camelCase")]\n#[doc = "\n}\n"]\npub struct CoverageReport {'
+expect_red serde-rename-all-string-brace 'serde(rename_all)'
+
+replace_once "$SOURCE" 'pub struct CoverageReport {' \
+  '#[serde(rename_all = "camelCase")]\n#[doc = r#"\n}\n"#]\npub struct CoverageReport {'
+expect_red serde-rename-all-raw-string-brace 'serde(rename_all)'
+
+# Body close search: a comment } must not hide a later field serde(rename).
+# Truncation fails closed on missing fields; this requires serde(rename).
+replace_once "$SOURCE" '    pub meets_threshold: bool,' \
+  '    /*\n}\n    */\n    #[serde(rename = "passed")]\n    pub meets_threshold: bool,'
+expect_red serde-rename-after-body-comment-brace 'serde(rename)'
+
+replace_once "$SOURCE" '    pub meets_threshold: bool,' \
+  '    #[doc = "\n}\n"]\n    #[serde(rename = "passed")]\n    pub meets_threshold: bool,'
+expect_red serde-rename-after-body-string-brace 'serde(rename)'
+
 replace_once "$SOURCE" '    pub meets_threshold: bool,' \
   '    #[serde(skip)]\n    pub meets_threshold: bool,'
 expect_red serde-skip 'serde(skip)'
@@ -372,7 +402,7 @@ PY
 CHECK="$malformed" expect_red malformed-methods 'malformed'
 CHECK="${SERIALIZED_KEYS_CHECK:-$ROOT/scripts/ci/check-docs-serialized-keys.py}"
 
-expected_mutations=$((14 + expected_pages))
+expected_mutations=$((20 + expected_pages))
 if [ "$mutations" -ne "$expected_mutations" ]; then
   echo "FAIL: expected ${expected_mutations} observed mutations, got $mutations" >&2
   exit 1
@@ -443,6 +473,19 @@ expect_green list-omission
 replace_once "$SOURCE" '    pub meets_threshold: bool,' \
   '    #[serde(default)]\n    pub meets_threshold: bool,'
 expect_green extra-serde-default
+
+# A comment or string } with no serde directive is not a serialization change.
+replace_once "$SOURCE" 'pub struct CoverageReport {' \
+  '/*\n}\n*/\npub struct CoverageReport {'
+expect_green comment-brace-noop
+
+replace_once "$SOURCE" '    pub meets_threshold: bool,' \
+  '    /*\n}\n    */\n    pub meets_threshold: bool,'
+expect_green body-comment-brace-noop
+
+replace_once "$SOURCE" 'pub struct CoverageReport {' \
+  '#[doc = "\n}\n"]\npub struct CoverageReport {'
+expect_green string-brace-noop
 
 replace_once "$COVERAGE_PY" '        Returns:' '        :returns:'
 plant_analyze_bullet passed >/dev/null

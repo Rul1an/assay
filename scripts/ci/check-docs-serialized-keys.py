@@ -20,6 +20,13 @@ flatten, unrecognized serde directive, missing struct, missing configured
 method, unreadable page, or unreadable source is a failure, never a pass:
 this cannot guess a second mapping.
 
+Column-0 `}` boundaries are taken from one lexical code view that masks line
+comments, nested block comments, and string / raw-string contents while
+preserving indices and newlines. That view is not rustc or syn: it does not
+parse macros, attributes, or char literals as their own classes. An unclosed
+comment or string fails closed. Both the previous-item and body-close searches
+use that one view; they do not rescan raw source for braces.
+
 Pages are listed explicitly. A docs-wide walk of every `report[` / `result[`
 subscript would need a map from documented keys onto the serialised type they
 belong to: `docs/use-cases/self-correction.md` and `docs/mcp/self-correction.md`
@@ -182,11 +189,107 @@ def _serde_directives(text: str) -> list[str]:
     return names
 
 
-def _container_region(source: str, head_start: int) -> str:
+def _lexical_code_view(source: str) -> str:
+    """Mask comments and string contents; keep length and newlines.
+
+    Used only to find column-0 `}` item boundaries. Not a Rust parser.
+    """
+    out = list(source)
+    i = 0
+    n = len(source)
+
+    def mask(start: int, end: int) -> None:
+        for j in range(start, end):
+            if source[j] != "\n":
+                out[j] = " "
+
+    def ident_before(idx: int) -> bool:
+        return idx > 0 and (source[idx - 1].isalnum() or source[idx - 1] == "_")
+
+    while i < n:
+        if source.startswith("//", i):
+            end = source.find("\n", i)
+            mask(i, n if end < 0 else end)
+            i = n if end < 0 else end
+            continue
+        if source.startswith("/*", i):
+            depth = 1
+            j = i + 2
+            while j < n and depth:
+                if source.startswith("/*", j):
+                    depth += 1
+                    j += 2
+                elif source.startswith("*/", j):
+                    depth -= 1
+                    j += 2
+                else:
+                    j += 1
+            if depth:
+                raise CheckError(
+                    f"{SOURCE}: unclosed block comment; cannot locate CoverageReport braces"
+                )
+            mask(i, j)
+            i = j
+            continue
+        raw_start = i
+        raw_r = i
+        if i < n and source[i] in "bc":
+            raw_r = i + 1
+        if raw_r < n and source[raw_r] == "r" and not ident_before(raw_start):
+            j = raw_r + 1
+            hashes = 0
+            while j < n and source[j] == "#":
+                hashes += 1
+                j += 1
+            if j < n and source[j] == '"':
+                closer = '"' + "#" * hashes
+                k = source.find(closer, j + 1)
+                if k < 0:
+                    raise CheckError(
+                        f"{SOURCE}: unclosed raw string; cannot locate CoverageReport braces"
+                    )
+                mask(j, k + len(closer))
+                i = k + len(closer)
+                continue
+        quote = i
+        if i < n and source[i] in "bc" and i + 1 < n and source[i + 1] == '"':
+            quote = i + 1
+        if quote < n and source[quote] == '"':
+            j = quote + 1
+            while j < n:
+                if source[j] == "\\":
+                    j += 2
+                    continue
+                if source[j] == '"':
+                    mask(quote, j + 1)
+                    i = j + 1
+                    break
+                j += 1
+            else:
+                raise CheckError(
+                    f"{SOURCE}: unclosed string; cannot locate CoverageReport braces"
+                )
+            continue
+        i += 1
+    return "".join(out)
+
+
+def _last_column0_brace_end(view: str, end: int) -> int:
     prev = 0
-    for match in re.finditer(r"^\}", source[:head_start], re.MULTILINE):
+    for match in re.finditer(r"^\}", view[:end], re.MULTILINE):
         prev = match.end()
-    return source[prev:head_start]
+    return prev
+
+
+def _next_column0_brace_start(view: str, start: int) -> int | None:
+    close = re.search(r"^\}", view[start:], re.MULTILINE)
+    if close is None:
+        return None
+    return start + close.start()
+
+
+def _container_region(source: str, view: str, head_start: int) -> str:
+    return source[_last_column0_brace_end(view, head_start) : head_start]
 
 
 def coverage_report_fields(source: str) -> set[str]:
@@ -196,11 +299,12 @@ def coverage_report_fields(source: str) -> set[str]:
             f"{SOURCE}: expected exactly one `pub struct CoverageReport`, found {len(heads)}"
         )
     head = heads[0]
-    close = re.search(r"^\}", source[head.end() :], re.MULTILINE)
-    if close is None:
+    view = _lexical_code_view(source)
+    close_at = _next_column0_brace_start(view, head.end())
+    if close_at is None:
         raise CheckError(f"{SOURCE}: `CoverageReport` has no closing brace at column 0")
-    body = source[head.end() : head.end() + close.start()]
-    region = _container_region(source, head.start()) + body
+    body = source[head.end() : close_at]
+    region = _container_region(source, view, head.start()) + body
     for attr in _attribute_bodies(region):
         for name in _serde_directives(attr):
             if name not in ALLOWED_SERDE_DIRECTIVES:
