@@ -6,6 +6,8 @@ use rusqlite::{params, Connection};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+#[path = "store_eval_scope.rs"]
+mod store_eval_scope;
 #[path = "store_internal/mod.rs"]
 mod store_internal;
 #[path = "store_observations.rs"]

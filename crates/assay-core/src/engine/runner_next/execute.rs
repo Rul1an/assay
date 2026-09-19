@@ -31,6 +31,7 @@ pub(crate) async fn run_suite_impl(
     }
 
     let run_id = runner.store.create_run(cfg)?;
+    runner.store.bind_assertion_eval_scope(run_id)?;
 
     let parallel = cfg.settings.parallel.unwrap_or(4).max(1);
     let sem = Arc::new(Semaphore::new(parallel));

@@ -20,6 +20,17 @@ pub(crate) fn apply_agent_assertions_impl(
                 &resp.meta,
             ) {
                 Ok(outcome) => {
+                    if let Ok(used) = runner.store.take_latest_stored_episode_used() {
+                        if !used.is_empty() {
+                            eprintln!(
+                                "note: assertions used the latest stored episode per test_id (--latest-stored-episode)"
+                            );
+                            final_row.details["assertion_episode"] = serde_json::json!({
+                                "source": "latest_stored_episode",
+                                "test_ids": used,
+                            });
+                        }
+                    }
                     // Recorded before the pass/fail branch below, so a test that both failed one
                     // assertion and never exercised another reports both. The failure is the
                     // louder finding; it is not the only one.
