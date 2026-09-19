@@ -1,0 +1,26 @@
+graph LR
+  linkStyle default fill:#ffffff
+
+  subgraph diagram ["System Context View: Assay MCP Policy Stack"]
+    style diagram fill:#ffffff,stroke:#ffffff
+
+    1["<div style='font-weight: bold'>Agent / MCP Client</div><div style='font-size: 70%; margin-top: 0px'>[Person]</div><div style='font-size: 80%; margin-top:10px'>An agent or MCP client that<br />issues tool calls through<br />Assay-governed runtime paths.</div>"]
+    style 1 fill:#1168bd,stroke:#0b4884,color:#ffffff
+    2["<div style='font-weight: bold'>Transport Auth / Resource Server</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Owns transport authentication<br />and resource-server concerns<br />outside Assay.</div>"]
+    style 2 fill:#999999,stroke:#6b6b6b,color:#ffffff
+    3["<div style='font-weight: bold'>Approval Artifact Source</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Provides approval artifacts<br />and approval-state inputs to<br />the runtime path.</div>"]
+    style 3 fill:#999999,stroke:#6b6b6b,color:#ffffff
+    4["<div style='font-weight: bold'>Policy Bundle Source</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Provides typed policy bundles<br />and bounded obligation<br />declarations consumed by<br />Assay.</div>"]
+    style 4 fill:#999999,stroke:#6b6b6b,color:#ffffff
+    5["<div style='font-weight: bold'>Replay / Consumer Readers</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>CLI, replay, reporting, and<br />downstream readers that<br />consume decision and evidence<br />payloads.</div>"]
+    style 5 fill:#999999,stroke:#6b6b6b,color:#ffffff
+    6["<div style='font-weight: bold'>Assay MCP Policy Stack</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Runtime policy enforcement<br />and evidence layer for MCP<br />tool calls under ADR-032.</div>"]
+    style 6 fill:#0b7285,stroke:#074f5d,color:#ffffff
+
+    1-. "<div>Issues MCP tool calls through<br />governed runtime paths</div><div style='font-size: 70%'>[MCP]</div>" .->6
+    2-. "<div>Supplies transport-auth<br />summaries and runtime auth<br />context</div><div style='font-size: 70%'>[Context summary]</div>" .->6
+    3-. "<div>Supplies approval state and<br />artifact-bound inputs</div><div style='font-size: 70%'>[Approval state]</div>" .->6
+    4-. "<div>Supplies typed rules and<br />obligations</div><div style='font-size: 70%'>[Policy bundle]</div>" .->6
+    6-. "<div>Supplies replay and diff<br />payloads</div><div style='font-size: 70%'>[JSON evidence]</div>" .->5
+
+  end

@@ -1,0 +1,65 @@
+{
+  "manifest": {
+    "schema_version": 1,
+    "bundle_id": "sha256:77bc600b7993c73caea0862d72210e5f8bb1f5d20ac8857827ed3fc665990ba9",
+    "producer": {
+      "name": "assay-cli",
+      "version": "3.9.1"
+    },
+    "run_id": "cyclonedx_mlbom_candidate",
+    "event_count": 1,
+    "run_root": "sha256:77bc600b7993c73caea0862d72210e5f8bb1f5d20ac8857827ed3fc665990ba9",
+    "algorithms": {
+      "canon": "jcs-rfc8785",
+      "hash": "sha256",
+      "root": "sha256(concat(content_hash + \"\\n\"))"
+    },
+    "files": {
+      "events.ndjson": {
+        "path": "events.ndjson",
+        "sha256": "sha256:cce38a47aef4a876eb78bd1333cd10829adf28d47a68d1c0fc5abd2501181b0e",
+        "bytes": 1247
+      }
+    }
+  },
+  "events": [
+    {
+      "specversion": "1.0",
+      "type": "assay.receipt.cyclonedx.mlbom_model_component.v1",
+      "source": "urn:assay:external:cyclonedx:mlbom-model-component",
+      "id": "cyclonedx_mlbom_candidate:0",
+      "time": "2026-04-28T10:01:00Z",
+      "datacontenttype": "application/json",
+      "assayrunid": "cyclonedx_mlbom_candidate",
+      "assayseq": 0,
+      "assayproducer": "assay-cli",
+      "assayproducerversion": "3.9.1",
+      "assaygit": "unknown",
+      "assaypii": false,
+      "assaysecrets": false,
+      "assaycontenthash": "sha256:31c051fe7b7839cb2bb2380f05124b43311ea89446273d8be1eebd87f5fcea3e",
+      "data": {
+        "imported_at": "2026-04-28T10:01:00Z",
+        "model_component": {
+          "bom_ref": "pkg:huggingface/example/checkout-risk-model@def456",
+          "dataset_refs": [
+            "component-checkout-risk-training-data-v2"
+          ],
+          "model_card_refs": [
+            "model-card-checkout-risk-model-v1-1"
+          ],
+          "name": "checkout-risk-model",
+          "publisher": "Example Inc.",
+          "purl": "pkg:huggingface/example/checkout-risk-model@def456",
+          "version": "1.1.0"
+        },
+        "reducer_version": "assay-cyclonedx-mlbom-model-component@0.1.0",
+        "schema": "assay.receipt.cyclonedx.mlbom-model-component.v1",
+        "source_artifact_digest": "sha256:6b0618708f49e3da21bda99a5dc82ce5409cbaa2e39d152b42fc90bc70f694ac",
+        "source_artifact_ref": "candidate.cdx.json",
+        "source_surface": "bom.components[type=machine-learning-model]",
+        "source_system": "cyclonedx"
+      }
+    }
+  ]
+}
