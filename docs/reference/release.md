@@ -110,7 +110,9 @@ This document outlines the canonical checklist for releasing new versions of Ass
   - Step: `Generate CycloneDX SBOM bundle` (produces `release/assay-${VERSION}-sbom-cyclonedx.tar.gz` plus `.sha256`).
   - Step: `Enforce release attestation policy` (produces `release/assay-${VERSION}-release-provenance.json` plus `.sha256` and uploads raw attestation verification evidence as a workflow artifact).
   - Step: `Build release proof kit` (produces `release/assay-${VERSION}-release-proof-kit.tar.gz` plus `.sha256`).
-  - Step: `Check release asset preflight` (fails before publication unless the `release/` directory exactly matches the expected asset contract, every `.sha256` verifies, and `server.json` points at the generated MCPB checksum).
+  - Step: `Attach build-provenance bundle` (copies `steps.attest-release.outputs.bundle-path` to `release/assay-${VERSION}-build-provenance.sigstore.json`; fails if the attest action did not expose a readable file).
+  - Step: `Write and sign checksums.txt` (writes a name-sorted sha256 manifest over every other file in `release/`, keyless-signs it with cosign, and fails the job if the signature does not verify as the release workflow at `refs/tags/${VERSION}`).
+  - Step: `Check release asset preflight` (fails before publication unless the `release/` directory exactly matches the expected asset contract, every `.sha256` verifies, `checksums.txt` names exactly the published payload assets, and `server.json` points at the generated MCPB checksum).
   - Step: `Create GitHub Release` (uploads only the preflighted files from `release/`).
   - Job: `publish-image` (`Publish GHCR image`; needs `[release-contract, release]`; environment `ghcr`).
     Stages the sha256-verified `x86_64` / `aarch64-unknown-linux-gnu` `assay-mcp-server` binaries,
@@ -168,10 +170,67 @@ it is not an installer failure.
 - [ ] **Registry Metadata Check**: Confirm the GitHub release includes `server.json` generated from the MCPB asset and matching SHA-256.
 - [ ] **Provenance Asset Check**: Confirm the GitHub release includes `assay-${VERSION}-release-provenance.json` and `assay-${VERSION}-release-provenance.json.sha256`.
 - [ ] **Proof Kit Asset Check**: Confirm the GitHub release includes `assay-${VERSION}-release-proof-kit.tar.gz` and `assay-${VERSION}-release-proof-kit.tar.gz.sha256`.
+- [ ] **Signed checksum manifest Check**: Confirm the GitHub release includes `checksums.txt` and `checksums.txt.sigstore.json`, and that `checksums.txt` names every other published asset.
+- [ ] **Build-provenance bundle Check**: Confirm the GitHub release includes `assay-${VERSION}-build-provenance.sigstore.json` copied from the attest action `bundle-path`.
 - [ ] **Release Asset Preflight Check**: Confirm `Check release asset preflight` passed before `Create GitHub Release`; this is the machine-readable asset contract for GitHub release publication.
 - [ ] **Published release journey**: Confirm `Verify the published release journey` downloaded the GitHub release assets by tag and ran the Linux x86_64 post-publication journey (unchanged) together with the Windows x86_64 and macOS arm64 published-archive openings (`assay version` against the tag, `assay doctor --format json`, `assay init --preset dev --hello-trace`). This job cannot be satisfied by a same-run build artifact.
 - [ ] **Workflow Evidence Check**: Confirm the workflow artifacts include `release-provenance-evidence` with the raw `gh attestation verify --format json` results for each release archive.
 - [ ] **Offline Verification Check**: Unpack the proof kit and run `verify-offline.sh --assets-dir /path/to/release-assets` against the downloaded release archives. See [Release Proof Kit](../security/RELEASE-PROOF-KIT.md).
+- [ ] **Signed checksum verification**: Run the commands in [Signed checksum manifest](#signed-checksum-manifest). Success prints `Verified OK` from cosign, then `OK` for the selected archive. Failure prints a cosign `Error:`, `checksums.txt does not name`, or `FAILED` from `sha256sum`.
+
+### Signed checksum manifest
+
+Releases cut by this repository's `release.yml` on a tag publish `checksums.txt` (sha256, one name-sorted line per payload asset) and `checksums.txt.sigstore.json` (keyless Sigstore bundle). Verifiers must pin:
+
+- certificate identity: `https://github.com/Rul1an/assay/.github/workflows/release.yml@refs/tags/vX.Y.Z`
+- certificate OIDC issuer: `https://token.actions.githubusercontent.com`
+
+`v6.6.1` and earlier do not publish these assets. The first release cut from a tree that contains this signing step is the first one that can be verified this way.
+
+Use cosign v3.1.3 or later (v2.6.5 on the 2.x line) for `verify-blob`. Earlier versions are affected by GHSA-fx35-mq7g-6g98 (verification bypass via public key in a legacy bundle).
+
+```bash
+set -euo pipefail
+VERSION=vX.Y.Z
+ARCHIVE=assay-${VERSION}-x86_64-unknown-linux-gnu.tar.gz
+curl -fsSLO "https://github.com/Rul1an/assay/releases/download/${VERSION}/${ARCHIVE}"
+curl -fsSLO "https://github.com/Rul1an/assay/releases/download/${VERSION}/checksums.txt"
+curl -fsSLO "https://github.com/Rul1an/assay/releases/download/${VERSION}/checksums.txt.sigstore.json"
+cosign verify-blob \
+  --bundle checksums.txt.sigstore.json \
+  --certificate-identity "https://github.com/Rul1an/assay/.github/workflows/release.yml@refs/tags/${VERSION}" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  checksums.txt
+LINE=$(awk -v archive="$ARCHIVE" '$2 == archive { print; found=1 } END { exit !found }' checksums.txt) || {
+  echo "checksums.txt does not name ${ARCHIVE}" >&2
+  exit 1
+}
+printf '%s\n' "$LINE" | sha256sum -c -
+```
+
+The signed manifest names every published payload. This recipe verifies the selected archive after the signature check; it does not download the rest of the set. A `checksums.txt` that does not name the archive fails with `checksums.txt does not name` and that file.
+
+Success looks like:
+
+```text
+Verified OK
+assay-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz: OK
+```
+
+A bad signature or the wrong identity fails before any per-file hash is trusted:
+
+```text
+Error: verifying blob [...]: ...
+```
+
+A matching signature over a tampered file fails the hash check:
+
+```text
+assay-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz: FAILED
+sha256sum: WARNING: 1 computed checksum did NOT match
+```
+
+This path talks to Sigstore (Fulcio/Rekor), not to the GitHub attestations API. It does not replace `gh attestation verify` or the [Release Proof Kit](../security/RELEASE-PROOF-KIT.md). The signing step is witnessed by the next real tag-triggered release; a failure there fails the `Create Release` job. `workflow_dispatch` from a branch cannot produce the tag identity and is refused before signing.
 - [ ] **Operator Flow Check**: For the compact end-to-end story that connects transcript ingest, shipped `C2` pack evaluation, and proof-kit verification, see [Operator Proof Flow](../guides/operator-proof-flow.md).
 - [ ] **Registry Publication Decision**: Treat `release/server.json` as publish-ready input, not proof of an existing live official registry listing.
 

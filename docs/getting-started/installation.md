@@ -33,6 +33,37 @@ The crate is `assay-cli`; the installed binary is `assay`. Releases starting wit
 
 Download the asset for [`v6.6.1`](https://github.com/Rul1an/assay/releases/tag/v6.6.1), verify its published checksum, and place the binary on `PATH`.
 
+Releases cut after this page's `v6.6.1` pin also publish a signed `checksums.txt`. When `cosign` is on `PATH` and reports v3.1.3 or later (v2.6.5 on the 2.x line), `scripts/install.sh` verifies that manifest against the release workflow identity at the tag before it trusts any per-file hash. When `cosign` is present but older or unparsable, the installer refuses that signature check and stops (GHSA-fx35-mq7g-6g98). When `cosign` is absent, the installer prints `verification=signed_manifest_skipped reason=cosign_not_installed` and continues with the per-file `.sha256` sidecar. It never skips that check silently.
+
+To verify a published archive yourself (replace `vX.Y.Z` with the tag you downloaded):
+
+```bash
+set -euo pipefail
+VERSION=vX.Y.Z
+ARCHIVE=assay-${VERSION}-x86_64-unknown-linux-gnu.tar.gz
+curl -fsSLO "https://github.com/Rul1an/assay/releases/download/${VERSION}/${ARCHIVE}"
+curl -fsSLO "https://github.com/Rul1an/assay/releases/download/${VERSION}/checksums.txt"
+curl -fsSLO "https://github.com/Rul1an/assay/releases/download/${VERSION}/checksums.txt.sigstore.json"
+cosign verify-blob \
+  --bundle checksums.txt.sigstore.json \
+  --certificate-identity "https://github.com/Rul1an/assay/.github/workflows/release.yml@refs/tags/${VERSION}" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  checksums.txt
+LINE=$(awk -v archive="$ARCHIVE" '$2 == archive { print; found=1 } END { exit !found }' checksums.txt) || {
+  echo "checksums.txt does not name ${ARCHIVE}" >&2
+  exit 1
+}
+printf '%s\n' "$LINE" | sha256sum -c -
+```
+
+Use cosign v3.1.3 or later (v2.6.5 on the 2.x line). Earlier versions are affected by GHSA-fx35-mq7g-6g98 (verification bypass via public key in a legacy bundle).
+
+The signed manifest names every published payload. This recipe verifies the selected archive after the signature check; it does not download the rest of the set. Success prints `Verified OK`, then one `OK` line for that archive. A bad signature prints a cosign `Error:` and stops. A `checksums.txt` that does not name the archive fails with `checksums.txt does not name` and that file. A missing or tampered archive prints `FAILED` from `sha256sum`. Pin exactly that certificate identity and issuer; do not accept a signature bound to a branch ref.
+
+`v6.6.1` and earlier have per-file `.sha256` sidecars only. The same installer then reports `verification=signed_manifest_unavailable reason=checksums.txt_not_published` when `cosign` is present, and still verifies the sidecar.
+
+See [release.md](../reference/release.md#signed-checksum-manifest) for the operator checklist.
+
 Windows x86-64 uses:
 
 ```text

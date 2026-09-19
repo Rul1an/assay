@@ -4,8 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Release jobs write a name-sorted `checksums.txt` over every published payload asset, keyless-sign it with Sigstore, and attach `checksums.txt.sigstore.json` plus the attest-action provenance bundle as release assets. The release job pins `cosign-release: v3.1.3`. `scripts/install.sh` verifies that signature when `cosign` is present and at least v3.1.3 (v2.6.5 on the 2.x line), refuses older or unparsable binaries (GHSA-fx35-mq7g-6g98), and says so when `cosign` is not installed (#3119).
+
 ### Fixed
 - `assay run` and `assay ci` ingest `--trace-file` when assertions evaluate stored episodes, and evaluate the episodes this invocation ingested (Refs #3116).
+- The manual signed-manifest recipe verifies the selected archive after the signature check, instead of running `sha256sum -c` over every payload name in a one-archive directory (#3119).
+- The same recipe is self-contained: a failed download or signature check stops before `sha256sum` without a caller `set -e` (#3119).
 
 ## [6.6.1] - 2026-09-18
 

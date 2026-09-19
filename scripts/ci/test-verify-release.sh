@@ -158,10 +158,16 @@ expect_status 2 env FIXTURE_ROOT="$current_candidate" GH="$fixture_gh" \
   "$ref_mutant_dir/verify-release.sh" --pre-tag
 
 expected_assets="$("$ORACLE" --unit-expected-assets 5.3.0)"
-[[ "$(printf '%s\n' "$expected_assets" | wc -l | tr -d ' ')" -eq 23 ]] \
-  || fail "asset generator did not produce 23 names"
+[[ "$(printf '%s\n' "$expected_assets" | wc -l | tr -d ' ')" -eq 26 ]] \
+  || fail "asset generator did not produce 26 names"
 printf '%s\n' "$expected_assets" | grep -qxF 'assay-v5.3.0-release-proof-kit.tar.gz' \
   || fail "asset generator omitted proof kit"
+printf '%s\n' "$expected_assets" | grep -qxF 'checksums.txt' \
+  || fail "asset generator omitted checksums.txt"
+printf '%s\n' "$expected_assets" | grep -qxF 'checksums.txt.sigstore.json' \
+  || fail "asset generator omitted checksums.txt.sigstore.json"
+printf '%s\n' "$expected_assets" | grep -qxF 'assay-v5.3.0-build-provenance.sigstore.json' \
+  || fail "asset generator omitted the build-provenance bundle"
 if printf '%s\n' "$expected_assets" | grep -qxF 'latest.json'; then
   fail "asset generator must not accept latest.json"
 fi

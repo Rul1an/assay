@@ -6,6 +6,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CHECK_SCRIPT="${REPO_ROOT}/scripts/ci/check-release-assets.sh"
 ASSET_CONTRACT="${REPO_ROOT}/scripts/ci/release_asset_contract.sh"
 CHECKSUM_WRITER="${REPO_ROOT}/scripts/ci/write_sha256_sidecar.sh"
+MANIFEST_SCRIPT="${REPO_ROOT}/scripts/ci/release_checksum_manifest.sh"
 VERSION="v9.9.9"
 SEMVER="${VERSION#v}"
 
@@ -34,6 +35,14 @@ grep -Fq 'done < <(release_checksum_targets "$VERSION")' "$CHECK_SCRIPT" || {
 }
 grep -Fq 'done < <(release_plain_assets)' "$CHECK_SCRIPT" || {
   echo "release preflight does not consume shared plain assets" >&2
+  exit 1
+}
+grep -Fq 'release_checksum_manifest.sh' "$CHECK_SCRIPT" || {
+  echo "release preflight does not enforce the signed checksum-manifest contract" >&2
+  exit 1
+}
+grep -Fq 'release_manifest_assets' "$ASSET_CONTRACT" || {
+  echo "shared release asset contract does not name the signed checksum-manifest family" >&2
   exit 1
 }
 
@@ -98,6 +107,9 @@ build_valid_assets() {
     write_asset "$assets_dir" "$target"
   done
   write_server_json "$assets_dir" "$(compute_sha256 "${assets_dir}/assay-mcp-server-${VERSION}-linux.mcpb")"
+  printf 'build-provenance-bundle-fixture\n' >"${assets_dir}/assay-${VERSION}-build-provenance.sigstore.json"
+  bash "$MANIFEST_SCRIPT" write --dir "$assets_dir"
+  printf 'sigstore-bundle-fixture\n' >"${assets_dir}/checksums.txt.sigstore.json"
 }
 
 expect_pass() {
@@ -198,5 +210,16 @@ server_mismatch_dir="${tmp_root}/server-mismatch"
 cp -R "$valid_dir" "$server_mismatch_dir"
 write_server_json "$server_mismatch_dir" "0000000000000000000000000000000000000000000000000000000000000000"
 expect_fail "server.json sha mismatch" "$server_mismatch_dir"
+
+omitted_manifest_dir="${tmp_root}/omitted-manifest-asset"
+cp -R "$valid_dir" "$omitted_manifest_dir"
+grep -v ' server.json$' "${omitted_manifest_dir}/checksums.txt" >"${tmp_root}/checksums.omit"
+mv "${tmp_root}/checksums.omit" "${omitted_manifest_dir}/checksums.txt"
+expect_fail "checksums.txt omits a published asset" "$omitted_manifest_dir"
+
+tampered_manifest_dir="${tmp_root}/tampered-manifest-asset"
+cp -R "$valid_dir" "$tampered_manifest_dir"
+printf 'tampered\n' >>"${tampered_manifest_dir}/server.json"
+expect_fail "tampered asset fails checksums.txt verification" "$tampered_manifest_dir"
 
 echo "release asset preflight tests passed"

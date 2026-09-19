@@ -56,6 +56,11 @@ while IFS= read -r asset; do
   plain_assets+=("$asset")
 done < <(release_plain_assets)
 
+manifest_assets=()
+while IFS= read -r asset; do
+  manifest_assets+=("$asset")
+done < <(release_manifest_assets "$VERSION")
+
 scratch_dir="$(mktemp -d)"
 trap 'rm -rf "$scratch_dir"' EXIT
 expected_files="$scratch_dir/expected-files.txt"
@@ -67,6 +72,9 @@ for asset in "${checksum_targets[@]}"; do
   printf '%s.sha256\n' "$asset" >>"$expected_files"
 done
 for asset in "${plain_assets[@]}"; do
+  printf '%s\n' "$asset" >>"$expected_files"
+done
+for asset in "${manifest_assets[@]}"; do
   printf '%s\n' "$asset" >>"$expected_files"
 done
 sort -o "$expected_files" "$expected_files"
@@ -160,6 +168,16 @@ if ! "$JQ_BIN" -e \
   echo "release server.json does not match the generated MCPB asset contract" >&2
   exit 1
 fi
+
+for asset in "${manifest_assets[@]}"; do
+  if [[ ! -s "$ASSETS_DIR/$asset" ]]; then
+    echo "release asset is missing or empty: $asset" >&2
+    exit 1
+  fi
+done
+
+bash "$SCRIPT_DIR/release_checksum_manifest.sh" verify --dir "$ASSETS_DIR"
+bash "$SCRIPT_DIR/release_checksum_manifest.sh" check-contract --dir "$ASSETS_DIR"
 
 {
   echo "## Release Asset Preflight"
