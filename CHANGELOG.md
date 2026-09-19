@@ -7,6 +7,26 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Release jobs write a name-sorted `checksums.txt` over every published payload asset, keyless-sign it with Sigstore, and attach `checksums.txt.sigstore.json` plus the attest-action provenance bundle as release assets. `scripts/install.sh` verifies that signature when `cosign` is present and says so when it is not (#3119).
 
+## [6.6.1] - 2026-09-18
+
+Security patch for three shipped transitive dependency advisories. No API
+change and no behaviour change a user relies on. This entry declares
+candidate source; crates.io, PyPI, and MCP Registry publication and the
+published installation journey are exercised by the stable release run and
+are not asserted here.
+
+### Security
+- `cmov` 0.5.2 → 0.5.4 (GHSA-3rjw-m598-pq24): `CmovEq` on aarch64 can produce wrong results. The crate sits under `ed25519-dalek` on the signing path for two shipped targets (macOS and Linux arm64). No known exploit path in Assay (#3125).
+- `lru` 0.18.0 → 0.18.2 (RUSTSEC-2026-0253): unsoundness via `ratatui` in the default binary. No known exploit path in Assay (#3125).
+- `rand` 0.10.0 → 0.10.1 and `rand` 0.9.2 → 0.9.3 (RUSTSEC-2026-0097): unsoundness. No known exploit path in Assay (#3125).
+
+### Internal
+- Post-publication release verification now also downloads the published Windows x86_64 and macOS arm64 CLI archives by tag and runs the golden-path opening against those bytes (#3121).
+- CI-only: python-artifact-truth now derives its pre-commit selector from matrix `install_docs` and proves every entry load-bearing (#3114).
+
+### Documentation
+- Install pin, README, and getting-started surfaces now name published `v6.6.0` (#3122).
+
 ## [6.6.0] - 2026-09-18
 
 Stable minor collecting the launch-blocking behaviour that landed after

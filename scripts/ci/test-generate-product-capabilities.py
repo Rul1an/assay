@@ -281,13 +281,13 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
         self.assertEqual(
             capability["limitations"],
             [
-                "The retained post-publication proof currently covers only the published Linux x86_64 CLI and MCP archives."
+                "The retained full post-publication proof (CLI + MCP + evidence) covers Linux x86_64. Windows x86_64 and macOS arm64 run a published-archive opening (version, doctor, init) against the GitHub release assets."
             ],
         )
         self.assertEqual(
             capability["non_claims"],
             [
-                "The exact-head harness, fixture, mock, policy and baseline are not shipped, release-attested or part of the v5.3.0 product archives; this proof does not cover macOS, Windows, Linux aarch64, editor discovery, remote transports, external side effects, policy completeness or semantic safety."
+                "The exact-head harness, fixture, mock, policy and baseline are not shipped, release-attested or part of the v5.3.0 product archives; the retained full-journey artifact remains Linux x86_64. Windows and macOS opening evidence is a separate published-archive check, not this retained full-path artifact. This proof does not cover Linux aarch64, editor discovery, remote transports, external side effects, policy completeness or semantic safety."
             ],
         )
         self.assertEqual(claim["axis"], "outcome")
