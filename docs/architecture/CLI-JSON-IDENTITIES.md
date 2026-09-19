@@ -59,6 +59,7 @@ assay.evidence.schema.show.v1 | crates/assay-cli/src/cli/commands/evidence/schem
 assay.evidence.schema.validation.v1 | crates/assay-cli/src/cli/commands/evidence/schema/write.rs | crates/assay-cli/src/cli/commands/evidence/schema/reports.rs
 assay.experiment.runner_phase_timing.v0 | crates/assay-cli/src/cli/commands/runner_spike/phases.rs | -
 assay.init_report.v0 | crates/assay-cli/src/cli/commands/init_report.rs | -
+assay.incident.verify.v1 | crates/assay-cli/src/cli/commands/evidence/verify_incident_package.rs | crates/assay-evidence/src/incident_package/mod.rs
 assay.mcp.execution-record-pairing.report.v0 | crates/assay-cli/src/cli/commands/evidence/mcp_execution_records.rs | -
 assay.mcp.execution-record-supersession.report.v0 | crates/assay-cli/src/cli/commands/evidence/mcp_supersession.rs | -
 assay.mcp.tunnel-observed.report.v0 | crates/assay-cli/src/cli/commands/evidence/mcp_tunnel_observed.rs | -
@@ -108,7 +109,6 @@ revision, when this block was a bare list.
 assay.coding_agent.evidence_pack.v0 | declared in assay-evidence as a bundle pack schema; no CLI write opened
 assay.content_hash_scope.v1 | nested object inside `assay evidence show --format json`; reader content_hash recomputation contract, not a top-level CLI document
 assay.delegated_exec_observation.v0 | assay-evidence observation event inside a bundle; ignored by privileged-mcp-action/v0
-assay.incident.verify.v1 | declared in assay-evidence as an incident package verification result schema; no CLI write opened
 assay.mandate.v1 | mandate event carried in evidence, not written by a command
 assay.mcp_manifest_observed.v0 | assay-mcp-server observation event inside a bundle
 assay.mcp_manifest_projection.v0 | assay-mcp-server projection event inside a bundle
