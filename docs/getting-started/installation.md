@@ -48,12 +48,16 @@ cosign verify-blob \
   --certificate-identity "https://github.com/Rul1an/assay/.github/workflows/release.yml@refs/tags/${VERSION}" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   checksums.txt
-sha256sum -c checksums.txt
+LINE=$(awk -v archive="$ARCHIVE" '$2 == archive { print; found=1 } END { exit !found }' checksums.txt) || {
+  echo "checksums.txt does not name ${ARCHIVE}" >&2
+  exit 1
+}
+printf '%s\n' "$LINE" | sha256sum -c -
 ```
 
 Use cosign v3.1.3 or later (v2.6.5 on the 2.x line). Earlier versions are affected by GHSA-fx35-mq7g-6g98 (verification bypass via public key in a legacy bundle).
 
-Success prints `Verified OK`, then one `OK` line per asset. A bad signature prints a cosign `Error:` and stops. A tampered archive prints `FAILED` from `sha256sum`. Pin exactly that certificate identity and issuer; do not accept a signature bound to a branch ref.
+The signed manifest names every published payload. This recipe verifies the selected archive after the signature check; it does not download the rest of the set. Success prints `Verified OK`, then one `OK` line for that archive. A bad signature prints a cosign `Error:` and stops. A `checksums.txt` that does not name the archive fails with `checksums.txt does not name` and that file. A missing or tampered archive prints `FAILED` from `sha256sum`. Pin exactly that certificate identity and issuer; do not accept a signature bound to a branch ref.
 
 `v6.6.1` and earlier have per-file `.sha256` sidecars only. The same installer then reports `verification=signed_manifest_unavailable reason=checksums.txt_not_published` when `cosign` is present, and still verifies the sidecar.
 

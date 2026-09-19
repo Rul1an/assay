@@ -176,7 +176,7 @@ it is not an installer failure.
 - [ ] **Published release journey**: Confirm `Verify the published release journey` downloaded the GitHub release assets by tag and ran the Linux x86_64 post-publication journey (unchanged) together with the Windows x86_64 and macOS arm64 published-archive openings (`assay version` against the tag, `assay doctor --format json`, `assay init --preset dev --hello-trace`). This job cannot be satisfied by a same-run build artifact.
 - [ ] **Workflow Evidence Check**: Confirm the workflow artifacts include `release-provenance-evidence` with the raw `gh attestation verify --format json` results for each release archive.
 - [ ] **Offline Verification Check**: Unpack the proof kit and run `verify-offline.sh --assets-dir /path/to/release-assets` against the downloaded release archives. See [Release Proof Kit](../security/RELEASE-PROOF-KIT.md).
-- [ ] **Signed checksum verification**: Run the commands in [Signed checksum manifest](#signed-checksum-manifest). Success prints `Verified OK` from cosign, then `OK` for each `sha256sum -c` line. Failure prints a cosign `Error:` or `FAILED` from `sha256sum`.
+- [ ] **Signed checksum verification**: Run the commands in [Signed checksum manifest](#signed-checksum-manifest). Success prints `Verified OK` from cosign, then `OK` for the selected archive. Failure prints a cosign `Error:`, `checksums.txt does not name`, or `FAILED` from `sha256sum`.
 
 ### Signed checksum manifest
 
@@ -191,6 +191,8 @@ Use cosign v3.1.3 or later (v2.6.5 on the 2.x line) for `verify-blob`. Earlier v
 
 ```bash
 VERSION=vX.Y.Z
+ARCHIVE=assay-${VERSION}-x86_64-unknown-linux-gnu.tar.gz
+curl -fsSLO "https://github.com/Rul1an/assay/releases/download/${VERSION}/${ARCHIVE}"
 curl -fsSLO "https://github.com/Rul1an/assay/releases/download/${VERSION}/checksums.txt"
 curl -fsSLO "https://github.com/Rul1an/assay/releases/download/${VERSION}/checksums.txt.sigstore.json"
 cosign verify-blob \
@@ -198,8 +200,14 @@ cosign verify-blob \
   --certificate-identity "https://github.com/Rul1an/assay/.github/workflows/release.yml@refs/tags/${VERSION}" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   checksums.txt
-sha256sum -c checksums.txt
+LINE=$(awk -v archive="$ARCHIVE" '$2 == archive { print; found=1 } END { exit !found }' checksums.txt) || {
+  echo "checksums.txt does not name ${ARCHIVE}" >&2
+  exit 1
+}
+printf '%s\n' "$LINE" | sha256sum -c -
 ```
+
+The signed manifest names every published payload. This recipe verifies the selected archive after the signature check; it does not download the rest of the set. A `checksums.txt` that does not name the archive fails with `checksums.txt does not name` and that file.
 
 Success looks like:
 

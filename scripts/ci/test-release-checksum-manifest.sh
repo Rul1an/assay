@@ -312,4 +312,213 @@ if "attest-release" not in joined or "bundle-path" not in joined:
 print("release.yml checksum-manifest wiring ok")
 PY
 
+# User-facing signed-manifest recipe: one selected archive, inclusion enforced.
+# The producer lists every payload; a clean-directory user has downloaded one.
+extract_signed_manifest_recipe() {
+  python3 - "$1" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+fences = re.findall(r"```bash\n(.*?)```", text, re.S)
+chosen = [
+    fence
+    for fence in fences
+    if "cosign verify-blob" in fence and "checksums.txt" in fence
+]
+if len(chosen) != 1:
+    raise SystemExit(
+        f"{sys.argv[1]}: expected 1 signed-manifest bash fence, got {len(chosen)}"
+    )
+sys.stdout.write(chosen[0])
+PY
+}
+
+INSTALL_DOC="${REPO_ROOT}/docs/getting-started/installation.md"
+RELEASE_DOC="${REPO_ROOT}/docs/reference/release.md"
+install_recipe="$(extract_signed_manifest_recipe "$INSTALL_DOC")"
+release_recipe="$(extract_signed_manifest_recipe "$RELEASE_DOC")"
+[[ -n "$install_recipe" ]] || fail "installation.md signed-manifest fence was empty"
+[[ -n "$release_recipe" ]] || fail "release.md signed-manifest fence was empty"
+
+recipe_doc_dir="${tmp_root}/doc-recipes"
+mkdir -p "$recipe_doc_dir"
+printf '%s' "$install_recipe" >"${recipe_doc_dir}/installation.sh"
+printf '%s' "$release_recipe" >"${recipe_doc_dir}/release.sh"
+
+selected_name='assay-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz'
+extra_name='assay-vX.Y.Z-sbom-cyclonedx.tar.gz'
+
+prepare_recipe_store() {
+  local store="$1"
+  mkdir -p "$store"
+  printf 'selected-archive\n' >"${store}/${selected_name}"
+  printf 'other-payload\n' >"${store}/${extra_name}"
+  {
+    printf '%s  %s\n' "$(compute_sha256 "${store}/${selected_name}")" "$selected_name"
+    printf '%s  %s\n' "$(compute_sha256 "${store}/${extra_name}")" "$extra_name"
+  } | LC_ALL=C sort >"${store}/checksums.txt"
+  printf 'sigstore-bundle-fixture\n' >"${store}/checksums.txt.sigstore.json"
+}
+
+run_extracted_recipe() {
+  local recipe_file="$1"
+  local case_dir="$2"
+  local store="$3"
+  mkdir -p "${case_dir}/bin" "${case_dir}/run"
+  : >"${case_dir}/curl.log"
+  : >"${case_dir}/cosign.log"
+  cat >"${case_dir}/bin/curl" <<EOF
+#!/bin/sh
+set -eu
+printf '%s\\n' "\$*" >> "${case_dir}/curl.log"
+url=""
+out=""
+use_remote_name=0
+while [ "\$#" -gt 0 ]; do
+  case "\$1" in
+    -o)
+      out="\$2"
+      shift 2
+      ;;
+    -O)
+      use_remote_name=1
+      shift
+      ;;
+    -fsSLO|-fsSL|-sSLO|-sSL|-LO)
+      case "\$1" in
+        *O*) use_remote_name=1 ;;
+      esac
+      shift
+      ;;
+    -*)
+      shift
+      ;;
+    *)
+      url="\$1"
+      shift
+      ;;
+  esac
+done
+[ -n "\$url" ] || { echo "curl: missing URL" >&2; exit 2; }
+base=\$(basename "\$url")
+if [ -z "\$out" ] && [ "\$use_remote_name" -eq 1 ]; then
+  out="\$base"
+fi
+[ -n "\$out" ] || { echo "curl: missing output path" >&2; exit 2; }
+if [ ! -f "${store}/\$base" ]; then
+  echo "curl: fixture not found: \$base" >&2
+  exit 22
+fi
+cp "${store}/\$base" "\$out"
+EOF
+  chmod +x "${case_dir}/bin/curl"
+  cat >"${case_dir}/bin/cosign" <<EOF
+#!/bin/sh
+set -eu
+printf '%s\\n' "\$*" >> "${case_dir}/cosign.log"
+echo 'Verified OK'
+EOF
+  chmod +x "${case_dir}/bin/cosign"
+  sha256sum_dir="$(dirname "$(command -v sha256sum)")"
+  [[ -n "$sha256sum_dir" && -x "${sha256sum_dir}/sha256sum" ]] \
+    || fail "sha256sum is required to execute the documented recipe"
+  (
+    cd "${case_dir}/run"
+    env PATH="${case_dir}/bin:${sha256sum_dir}:/usr/bin:/bin" /bin/sh "$recipe_file"
+  )
+}
+
+store="${tmp_root}/doc-recipe-store"
+prepare_recipe_store "$store"
+
+# RED/GREEN: the literal installation recipe must succeed when only the
+# selected archive is present beside a full multi-payload manifest.
+happy_dir="${tmp_root}/doc-recipe-happy"
+mkdir -p "$happy_dir"
+if ! run_extracted_recipe "${recipe_doc_dir}/installation.sh" "$happy_dir" "$store" \
+  >"${happy_dir}/stdout" 2>"${happy_dir}/stderr"; then
+  cat "${happy_dir}/stdout" "${happy_dir}/stderr" >&2
+  fail "literal installation.md recipe failed in a one-archive directory"
+fi
+grep -Fq 'Verified OK' "${happy_dir}/stdout" \
+  || fail "installation.md recipe did not print Verified OK before hashes"
+grep -Fq "${selected_name}: OK" "${happy_dir}/stdout" \
+  || fail "installation.md recipe did not print OK for the selected archive"
+if grep -Fq "$extra_name" "${happy_dir}/curl.log"; then
+  fail "installation.md recipe downloaded an unselected payload"
+fi
+if grep -Fq -- '--ignore-missing' "${recipe_doc_dir}/installation.sh" \
+  "${recipe_doc_dir}/release.sh"; then
+  fail "signed-manifest recipe uses --ignore-missing"
+fi
+
+python3 - "${recipe_doc_dir}/installation.sh" "${recipe_doc_dir}/release.sh" <<'PY'
+from pathlib import Path
+import sys
+
+for path in sys.argv[1:]:
+    text = Path(path).read_text(encoding="utf-8")
+    verify_at = text.find("cosign verify-blob")
+    hash_at = text.find("sha256sum")
+    if verify_at < 0 or hash_at < 0 or verify_at > hash_at:
+        raise SystemExit(f"{path}: signature check must precede sha256sum")
+    if "--ignore-missing" in text:
+        raise SystemExit(f"{path}: --ignore-missing is forbidden")
+print("signed-manifest recipe order ok")
+PY
+
+# release.md must be the same selected-archive recipe, then the same run.
+if [[ "$install_recipe" != "$release_recipe" ]]; then
+  fail "installation.md and release.md signed-manifest recipes must match"
+fi
+release_happy="${tmp_root}/doc-recipe-release-happy"
+mkdir -p "$release_happy"
+run_extracted_recipe "${recipe_doc_dir}/release.sh" "$release_happy" "$store" \
+  >"${release_happy}/stdout" 2>"${release_happy}/stderr" \
+  || fail "literal release.md recipe failed in a one-archive directory"
+
+# Negative: missing selected archive must not pass.
+missing_store="${tmp_root}/doc-recipe-missing-store"
+prepare_recipe_store "$missing_store"
+rm -f "${missing_store}/${selected_name}"
+missing_dir="${tmp_root}/doc-recipe-missing"
+mkdir -p "$missing_dir"
+if run_extracted_recipe "${recipe_doc_dir}/installation.sh" "$missing_dir" \
+  "$missing_store" >"${missing_dir}/stdout" 2>"${missing_dir}/stderr"; then
+  fail "missing selected archive was accepted by the documented recipe"
+fi
+
+# Negative: selected archive absent from checksums.txt must not pass.
+omit_store="${tmp_root}/doc-recipe-omit-store"
+prepare_recipe_store "$omit_store"
+grep -Fv "$selected_name" "${omit_store}/checksums.txt" >"${omit_store}/checksums.omit"
+mv "${omit_store}/checksums.omit" "${omit_store}/checksums.txt"
+omit_dir="${tmp_root}/doc-recipe-omit"
+mkdir -p "$omit_dir"
+if run_extracted_recipe "${recipe_doc_dir}/installation.sh" "$omit_dir" \
+  "$omit_store" >"${omit_dir}/stdout" 2>"${omit_dir}/stderr"; then
+  fail "absent manifest entry was accepted by the documented recipe"
+fi
+if ! grep -Fq "$selected_name" "${omit_dir}/stdout" "${omit_dir}/stderr"; then
+  cat "${omit_dir}/stdout" "${omit_dir}/stderr" >&2
+  fail "absent manifest entry must name the selected archive"
+fi
+
+# Negative: tampered selected bytes must not pass.
+tamper_store="${tmp_root}/doc-recipe-tamper-store"
+prepare_recipe_store "$tamper_store"
+printf 'tampered-archive\n' >"${tamper_store}/${selected_name}"
+tamper_dir="${tmp_root}/doc-recipe-tamper"
+mkdir -p "$tamper_dir"
+if run_extracted_recipe "${recipe_doc_dir}/installation.sh" "$tamper_dir" \
+  "$tamper_store" >"${tamper_dir}/stdout" 2>"${tamper_dir}/stderr"; then
+  fail "tampered selected archive was accepted by the documented recipe"
+fi
+if ! grep -Eq 'FAILED|did NOT match' "${tamper_dir}/stdout" "${tamper_dir}/stderr"; then
+  cat "${tamper_dir}/stdout" "${tamper_dir}/stderr" >&2
+  fail "tampered archive must fail the hash check"
+fi
+
 echo "release checksum manifest tests passed"

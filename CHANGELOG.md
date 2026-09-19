@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - `assay run` and `assay ci` ingest `--trace-file` when assertions evaluate stored episodes, and evaluate the episodes this invocation ingested (Refs #3116).
+- The manual signed-manifest recipe verifies the selected archive after the signature check, instead of running `sha256sum -c` over every payload name in a one-archive directory (#3119).
 
 ## [6.6.1] - 2026-09-18
 
