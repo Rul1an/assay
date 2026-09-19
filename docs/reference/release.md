@@ -238,26 +238,30 @@ This path talks to Sigstore (Fulcio/Rekor), not to the GitHub attestations API. 
 
 Use this section when the consumer must verify the signed `checksums.txt` without network access during verification. Keep it separate from the connected recipe above and from the proof-kit `verify-offline.sh` path (that wraps `gh attestation verify`).
 
+**Measured route (only).** The v6.6.2 consumer witness ran on **macOS arm64** with Docker pulling the **linux/arm64** cosign image below, then checked the selected archive with host **`shasum -a 256 -c`** (macOS ships `shasum`; this path does not use `sha256sum`). Other hosts and archives are outside that measured route: adapt the archive name and checksum tool yourself if needed; this section does not add a `uname` shell guard and does not claim those adaptations were witnessed.
+
 **Bootstrap (online, once).** Allocate a newly empty parent directory. Set `TUF_ROOT` to a **child** of that parent (for example `$PARENT/tuf-cache`). Do not mount the parent itself as `TUF_ROOT`, do not point at `~/.sigstore`, and do not delete an existing user trust directory for this procedure. Run `cosign initialize` with network allowed until a modern `trusted_root.json` appears under that child. Require that modern TrustedRoot file before continuing; do not treat a legacy fallback root as a pass, and do not treat a separately downloaded root-file hash as a substitute for this bootstrap trust step.
 
-**Verify (network-isolated).** Keep published originals read-only. Run `cosign verify-blob` with `--bundle`, `--trusted-root` (the modern file from bootstrap), and the exact release-workflow identity at the tag plus issuer, under host or container network isolation. Docker `--network=none` is the isolation shape measured for this documentation path. The deprecated cosign `--offline` flag alone is **not** isolation. Then check the selected archive line from `checksums.txt` with `sha256sum -c`.
+**Verify (network-isolated).** Keep published originals read-only. Run `verify-blob` with `--bundle`, `--trusted-root` (the modern file from bootstrap), and the exact release-workflow identity at the tag plus issuer, under container network isolation. Docker `--network=none` is the isolation shape measured for this documentation path. The deprecated cosign `--offline` flag alone is **not** isolation. Then check the selected archive line from `checksums.txt` with `shasum -a 256 -c`.
 
-Measured cosign image for the v6.6.2 consumer witness: tag `ghcr.io/sigstore/cosign/cosign:v3.1.3`; linux/arm64 digest `sha256:153c941dce7e172f66b759a8f5098203902c5b941737c21c7a30cfbe56132f35` (multi-arch index digest `sha256:9e5c2f2edc34351160407ca3416c61855bdf9403c3c5936e0f0be7fc261611b8`). Those digests name the bytes used in that witness; they are not a claim that every architecture, or a native host cosign on Linux/macOS/Windows, was measured the same way.
+Measured cosign image for that witness: tag `ghcr.io/sigstore/cosign/cosign:v3.1.3`; linux/arm64 digest `sha256:153c941dce7e172f66b759a8f5098203902c5b941737c21c7a30cfbe56132f35` (multi-arch index digest `sha256:9e5c2f2edc34351160407ca3416c61855bdf9403c3c5936e0f0be7fc261611b8`). Pin the digest once in `COSIGN_IMAGE` below so both `docker` calls consume the same reference. Those digests name the bytes used in that witness; they are not a claim that every architecture, or a native host cosign on Linux/macOS/Windows, was measured the same way.
 
 ```bash
 set -euo pipefail
 VERSION=vX.Y.Z
-ARCHIVE=assay-${VERSION}-x86_64-unknown-linux-gnu.tar.gz
+ARCHIVE=assay-${VERSION}-aarch64-apple-darwin.tar.gz
 # ASSETS holds already-fetched checksums.txt, checksums.txt.sigstore.json, and ARCHIVE (read-only originals).
 ASSETS=/path/to/release-assets
 PARENT=$(mktemp -d)
 mkdir -p "$PARENT/tuf-cache"
+# One pin, two consumers (bootstrap + isolated verify).
+COSIGN_IMAGE=ghcr.io/sigstore/cosign/cosign@sha256:153c941dce7e172f66b759a8f5098203902c5b941737c21c7a30cfbe56132f35
 
 # 1) Bootstrap (network allowed)
 docker run --rm \
   -e TUF_ROOT=/scratch/tuf-cache \
   -v "$PARENT:/scratch" \
-  ghcr.io/sigstore/cosign/cosign@sha256:153c941dce7e172f66b759a8f5098203902c5b941737c21c7a30cfbe56132f35 \
+  "$COSIGN_IMAGE" \
   initialize
 test -f "$PARENT/tuf-cache/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json"
 
@@ -265,7 +269,7 @@ test -f "$PARENT/tuf-cache/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json"
 docker run --rm --network=none \
   -v "$ASSETS:/assets:ro" \
   -v "$PARENT/tuf-cache/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json:/trusted_root.json:ro" \
-  ghcr.io/sigstore/cosign/cosign@sha256:153c941dce7e172f66b759a8f5098203902c5b941737c21c7a30cfbe56132f35 \
+  "$COSIGN_IMAGE" \
   verify-blob \
     --bundle /assets/checksums.txt.sigstore.json \
     --trusted-root /trusted_root.json \
@@ -277,10 +281,10 @@ LINE=$(awk -v archive="$ARCHIVE" '$2 == archive { print; found=1 } END { exit !f
   echo "checksums.txt does not name ${ARCHIVE}" >&2
   exit 1
 }
-printf '%s\n' "$LINE" | (cd "$ASSETS" && sha256sum -c -)
+printf '%s\n' "$LINE" | (cd "$ASSETS" && shasum -a 256 -c -)
 ```
 
-Success prints `Verified OK`, then one `OK` line for the selected archive. Failure shapes match the connected recipe (cosign `Error:`, `checksums.txt does not name`, or `FAILED` from `sha256sum`).
+Success prints `Verified OK`, then one `OK` line for the selected archive. Failure shapes: cosign `Error:`, `checksums.txt does not name`, or `FAILED` from `shasum` (the connected recipe above still documents `sha256sum` failure text for its own path).
 
 A frozen TrustedRoot does not provide ongoing revocation freshness; re-run bootstrap when you need a fresher root. The published release assets and identity pins are the product contract; the container digest and `network=none` shape document one measured consumer path, not broad native-host coverage. Producer CI verifying the signature online is not this consumer observation. This path does not replace `gh attestation verify` or the [Release Proof Kit](../security/RELEASE-PROOF-KIT.md).
 
