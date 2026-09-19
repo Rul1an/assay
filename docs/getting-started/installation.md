@@ -62,7 +62,7 @@ The signed manifest names every published payload. This recipe verifies the sele
 
 `v6.6.1` and earlier have per-file `.sha256` sidecars only. The same installer then reports `verification=signed_manifest_unavailable reason=checksums.txt_not_published` when `cosign` is present, and still verifies the sidecar.
 
-See [release.md](../reference/release.md#signed-checksum-manifest) for the operator checklist and the [network-isolated consumer](../reference/release.md#network-isolated-consumer-trustedroot) recipe.
+See [release.md](../reference/release.md#signed-checksum-manifest) for the operator checklist and the [network-isolated consumer](../reference/release.md#network-isolated-consumer-trustedroot) recipe. CI runs that isolated helper against the release candidate and as a published-assets replay; the connected recipe above is unchanged.
 
 Windows x86-64 uses:
 

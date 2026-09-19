@@ -598,6 +598,19 @@ jobs:
             --certificate-identity "${CERTIFICATE_IDENTITY}"
           bash scripts/ci/release_checksum_manifest.sh check-contract --dir release
 
+      - name: Verify candidate release consumer route (network-isolated)
+        env:
+          VERSION: ${{ needs.release-contract.outputs.version }}
+          CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ needs.release-contract.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ci/verify_consumer_checksum_manifest.sh \
+            --assets-dir release \
+            --archive "assay-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            --certificate-identity "${CERTIFICATE_IDENTITY}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+
       - name: Check release asset preflight
         env:
           VERSION: ${{ needs.release-contract.outputs.version }}
