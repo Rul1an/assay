@@ -13,10 +13,14 @@ use super::{
     read_incident_container, IncidentExpectation, IncidentOutcome, IncidentReason,
     IncidentVerifyReport, INCIDENT_VERIFY_SCHEMA_V1, NON_CLAIMS_DEFAULT,
 };
+use crate::attestation::{verify_attestation_for_bundle_with_extent_and_limits, DsseEnvelope};
+use crate::bundle::VerifyLimits;
 use crate::coverage_attestation::{
     verify_cap1_document, Cap1AdmissionLimits, Cap1Stage, CAP1_SCHEMA_SHA256,
 };
 use crate::json_strict::validate_json_strict;
+use ed25519_dalek::pkcs8::DecodePublicKey;
+use ed25519_dalek::VerifyingKey;
 
 /// Exact 28 numeric resource limit keys defined in SPEC-Incident-Package-v1 §9.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -283,6 +287,27 @@ fn parse_utc_timestamp(s: &str) -> Option<DateTime<chrono::FixedOffset>> {
     if !s.ends_with('Z') {
         return None;
     }
+    let without_z = &s[..s.len() - 1];
+    let (_date_part, time_part) = without_z.split_once('T')?;
+    let (hms, fraction) = match time_part.split_once('.') {
+        Some((hms, frac)) => (hms, Some(frac)),
+        None => (time_part, None),
+    };
+    if let Some(frac) = fraction {
+        if frac.is_empty() || frac.len() > 9 || !frac.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+    }
+    let mut parts = hms.split(':');
+    let _hh = parts.next()?;
+    let _mm = parts.next()?;
+    let ss = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    if ss == "60" {
+        return None;
+    }
     DateTime::parse_from_rfc3339(s).ok()
 }
 
@@ -535,6 +560,47 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
         Err(_) => return IncidentVerifyReport::refusal(IncidentReason::InputShape),
     };
 
+    // Closed vocabulary and structural checks in Phase 2
+    const VALID_OBSERVATIONS: &[&str] = &["unknown", "limited", "adequate"];
+    for s in &assessment.surfaces {
+        if !VALID_SURFACES.contains(&s.name.as_str()) {
+            return IncidentVerifyReport::refusal(IncidentReason::InputShape);
+        }
+        if !VALID_OBSERVATIONS.contains(&s.observation.as_str()) {
+            return IncidentVerifyReport::refusal(IncidentReason::InputShape);
+        }
+        if let Some(w) = &s.window {
+            let (Some(t_start), Some(t_end)) =
+                (parse_utc_timestamp(&w.start), parse_utc_timestamp(&w.end))
+            else {
+                return IncidentVerifyReport::refusal(IncidentReason::InputShape);
+            };
+            if t_start > t_end {
+                return IncidentVerifyReport::refusal(IncidentReason::InputShape);
+            }
+        }
+    }
+
+    const VALID_DISPOSITIONS: &[&str] = &[
+        "examined",
+        "not_applicable",
+        "disabled_by_policy",
+        "unsupported_input",
+        "resource_exhausted",
+        "failed",
+        "unavailable",
+        "out_of_scope",
+        "withheld",
+    ];
+    for u in &assessment.units {
+        if !VALID_SURFACES.contains(&u.surface.as_str()) {
+            return IncidentVerifyReport::refusal(IncidentReason::InputShape);
+        }
+        if !VALID_DISPOSITIONS.contains(&u.disposition.as_str()) {
+            return IncidentVerifyReport::refusal(IncidentReason::InputShape);
+        }
+    }
+
     // Binding shape checks in Phase 2
     for input in &inventory.inputs {
         if input.format != "dsse-attestation" && input.format != "attestation-report" {
@@ -546,6 +612,13 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
                 return IncidentVerifyReport::refusal(IncidentReason::InputShape);
             };
             if b.attestation_input.is_some() {
+                return IncidentVerifyReport::refusal(IncidentReason::InputShape);
+            }
+        } else if input.format == "attestation-report" {
+            let Some(b) = &input.binding else {
+                return IncidentVerifyReport::refusal(IncidentReason::InputShape);
+            };
+            if b.attestation_input.is_none() {
                 return IncidentVerifyReport::refusal(IncidentReason::InputShape);
             }
         }
@@ -707,12 +780,18 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
     }
 
     // Phase 6: trust_input, input_shape, attestation_verification
+    let mut verified_attestations: Vec<serde_json::Value> = Vec::new();
+
     for input in &inventory.inputs {
         if input.format == "dsse-attestation" {
-            let binding = input.binding.as_ref().expect("checked present");
+            let binding = input.binding.as_ref().expect("checked present in phase 2");
+            let Some(bundle_input) = inputs_by_id.get(binding.bundle_input.as_str()) else {
+                return IncidentVerifyReport::refusal(IncidentReason::Locator);
+            };
             let Some(key_input) = inputs_by_id.get(binding.key_input.as_str()) else {
                 return IncidentVerifyReport::refusal(IncidentReason::Locator);
             };
+
             if !context.keys.contains(&key_input.sha256) {
                 let failing_row = serde_json::json!({
                     "input_id": input.id,
@@ -727,6 +806,184 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
                 let mut rep = IncidentVerifyReport::refusal(IncidentReason::TrustInput);
                 rep.attestations = vec![failing_row];
                 return rep;
+            }
+
+            if bundle_input.format != "assay-bundle-v1"
+                || key_input.format != "ed25519-public-key-pem"
+            {
+                let failing_row = serde_json::json!({
+                    "input_id": input.id,
+                    "key_sha256": key_input.sha256,
+                    "status": "refused",
+                    "signature_verified": false,
+                    "subject_matched": false,
+                    "artifact_sha256": null,
+                    "extent_stated": false,
+                    "extent": null,
+                });
+                let mut rep = IncidentVerifyReport::refusal(IncidentReason::InputShape);
+                rep.attestations = vec![failing_row];
+                return rep;
+            }
+
+            let att_path = format!("objects/{}", input.sha256);
+            let key_path = format!("objects/{}", key_input.sha256);
+            let bundle_path = format!("objects/{}", bundle_input.sha256);
+
+            let (Some(att_bytes), Some(key_bytes), Some(bundle_bytes)) = (
+                object_map.get(att_path.as_str()),
+                object_map.get(key_path.as_str()),
+                object_map.get(bundle_path.as_str()),
+            ) else {
+                let failing_row = serde_json::json!({
+                    "input_id": input.id,
+                    "key_sha256": key_input.sha256,
+                    "status": "unavailable",
+                    "signature_verified": false,
+                    "subject_matched": false,
+                    "artifact_sha256": null,
+                    "extent_stated": false,
+                    "extent": null,
+                });
+                let rep = IncidentVerifyReport {
+                    schema: INCIDENT_VERIFY_SCHEMA_V1.to_string(),
+                    outcome: IncidentOutcome::VerificationUnavailable,
+                    reason: Some(IncidentReason::IoUnavailable),
+                    artifact_sha256: None,
+                    inventory_sha256: None,
+                    assessment_sha256: None,
+                    expectation: IncidentExpectation::NotEvaluated,
+                    attestations: vec![failing_row],
+                    verification_context: None,
+                    verification_context_sha256: None,
+                    resolved_results: Vec::new(),
+                    counts: None,
+                    non_claims: NON_CLAIMS_DEFAULT.iter().map(|s| s.to_string()).collect(),
+                };
+                return rep;
+            };
+
+            let Ok(pem_str) = std::str::from_utf8(key_bytes) else {
+                let failing_row = serde_json::json!({
+                    "input_id": input.id,
+                    "key_sha256": key_input.sha256,
+                    "status": "refused",
+                    "signature_verified": false,
+                    "subject_matched": false,
+                    "artifact_sha256": null,
+                    "extent_stated": false,
+                    "extent": null,
+                });
+                let mut rep = IncidentVerifyReport::refusal(IncidentReason::InputShape);
+                rep.attestations = vec![failing_row];
+                return rep;
+            };
+
+            let Ok(verifying_key) = VerifyingKey::from_public_key_pem(pem_str) else {
+                let failing_row = serde_json::json!({
+                    "input_id": input.id,
+                    "key_sha256": key_input.sha256,
+                    "status": "refused",
+                    "signature_verified": false,
+                    "subject_matched": false,
+                    "artifact_sha256": null,
+                    "extent_stated": false,
+                    "extent": null,
+                });
+                let mut rep = IncidentVerifyReport::refusal(IncidentReason::InputShape);
+                rep.attestations = vec![failing_row];
+                return rep;
+            };
+
+            let Ok(envelope) = serde_json::from_slice::<DsseEnvelope>(att_bytes) else {
+                let failing_row = serde_json::json!({
+                    "input_id": input.id,
+                    "key_sha256": key_input.sha256,
+                    "status": "refused",
+                    "signature_verified": false,
+                    "subject_matched": false,
+                    "artifact_sha256": null,
+                    "extent_stated": false,
+                    "extent": null,
+                });
+                let mut rep = IncidentVerifyReport::refusal(IncidentReason::InputShape);
+                rep.attestations = vec![failing_row];
+                return rep;
+            };
+
+            let verify_limits = VerifyLimits {
+                max_bundle_bytes: context
+                    .limits
+                    .inner_compressed_bytes
+                    .min(ContextLimits::HARD.inner_compressed_bytes),
+                max_decode_bytes: context
+                    .limits
+                    .decoded_bytes_total
+                    .min(ContextLimits::HARD.decoded_bytes_total),
+                max_manifest_bytes: context
+                    .limits
+                    .inner_manifest_bytes
+                    .min(ContextLimits::HARD.inner_manifest_bytes),
+                max_events_bytes: context
+                    .limits
+                    .inner_events_bytes
+                    .min(ContextLimits::HARD.inner_events_bytes),
+                max_events: context.limits.records.min(ContextLimits::HARD.records) as usize,
+                max_line_bytes: context
+                    .limits
+                    .record_bytes
+                    .min(ContextLimits::HARD.record_bytes) as usize,
+                max_path_len: context
+                    .limits
+                    .inner_path_bytes
+                    .min(ContextLimits::HARD.inner_path_bytes)
+                    as usize,
+                max_json_depth: context
+                    .limits
+                    .json_depth
+                    .min(ContextLimits::HARD.json_depth) as usize,
+            };
+
+            match verify_attestation_for_bundle_with_extent_and_limits(
+                &envelope,
+                &verifying_key,
+                bundle_bytes,
+                verify_limits,
+            ) {
+                Ok(checked) => {
+                    let (verified, extent) = checked.into_parts();
+                    let extent_stated = extent.is_some();
+                    let extent_val = extent
+                        .map(|e| serde_json::to_value(e).expect("serializable"))
+                        .unwrap_or(serde_json::Value::Null);
+                    let row = serde_json::json!({
+                        "input_id": input.id,
+                        "key_sha256": key_input.sha256,
+                        "status": "verified",
+                        "signature_verified": true,
+                        "subject_matched": true,
+                        "artifact_sha256": verified.artifact_sha256,
+                        "extent_stated": extent_stated,
+                        "extent": extent_val,
+                    });
+                    verified_attestations.push(row);
+                }
+                Err(_) => {
+                    let failing_row = serde_json::json!({
+                        "input_id": input.id,
+                        "key_sha256": key_input.sha256,
+                        "status": "refused",
+                        "signature_verified": false,
+                        "subject_matched": false,
+                        "artifact_sha256": null,
+                        "extent_stated": false,
+                        "extent": null,
+                    });
+                    let mut rep =
+                        IncidentVerifyReport::refusal(IncidentReason::AttestationVerification);
+                    rep.attestations = vec![failing_row];
+                    return rep;
+                }
             }
         }
     }
@@ -1017,7 +1274,7 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
         } else {
             IncidentExpectation::Matched
         },
-        attestations: Vec::new(),
+        attestations: verified_attestations,
         verification_context: Some(serde_json::to_value(context).expect("serializable")),
         verification_context_sha256: Some(expected_ctx_sha),
         resolved_results: assessment
