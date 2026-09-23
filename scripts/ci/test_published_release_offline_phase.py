@@ -11,12 +11,16 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
+import signal
 import socket
 import stat
 import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
+import time
 import unittest
 
 
@@ -38,6 +42,49 @@ DENIAL_RECEIPT = (
 CONNECTED_RECEIPT = (
     '{"errno":"","result":"connected","schema":"assay.offline_probe.v1"}\n'
 )
+
+
+def configured_contract_hook_selector(config_text: str) -> tuple[str, str]:
+    """Return the live hook's files and exclude patterns.
+
+    The strings are the configured selector. Callers must not paste a second copy.
+    """
+    hook_id = "published-release-golden-path-contract"
+    lines = config_text.splitlines()
+    starts = [index for index, line in enumerate(lines) if line == f"      - id: {hook_id}"]
+    if len(starts) != 1:
+        raise AssertionError(f"expected one {hook_id} hook, found {len(starts)}")
+    block: list[str] = []
+    for line in lines[starts[0] + 1 :]:
+        if line.startswith("      - id:"):
+            break
+        block.append(line)
+    if not any(
+        line.strip() == "entry: bash scripts/ci/test-published-release-golden-path-contract.sh"
+        for line in block
+    ):
+        raise AssertionError("contract hook entry is not the golden-path contract script")
+    files = [line.strip() for line in block if line.strip().startswith("files:")]
+    excludes = [line.strip() for line in block if line.strip().startswith("exclude:")]
+    if len(files) != 1:
+        raise AssertionError(f"{hook_id} must have one files selector, found {len(files)}")
+    if len(excludes) > 1:
+        raise AssertionError(f"{hook_id} has multiple exclude selectors")
+    include = files[0].removeprefix("files:").strip()
+    if len(include) >= 2 and include[0] == include[-1] and include[0] in {"'", '"'}:
+        include = include[1:-1]
+    if not include or include[0] in {">", "|"}:
+        raise AssertionError(f"{hook_id} files selector is not a single-line pattern")
+    exclude = "^$"
+    if excludes:
+        exclude = excludes[0].removeprefix("exclude:").strip()
+    return include, exclude
+
+
+def contract_hook_selected(include: str, exclude: str, filenames: list[str]) -> bool:
+    """Same include/exclude predicate an incremental pre-commit run applies."""
+    include_re, exclude_re = re.compile(include), re.compile(exclude)
+    return any(include_re.search(name) and not exclude_re.search(name) for name in filenames)
 
 
 def load_helper():
@@ -305,6 +352,104 @@ class OfflinePhaseTests(unittest.TestCase):
         self.assertEqual(receipt["result"], "denied")
         self.assertEqual(receipt["errno"], "ECONNREFUSED")
 
+    def _script_pids(self, script: Path) -> list[int]:
+        token = str(script)
+        completed = subprocess.run(
+            ["ps", "-axww", "-o", "pid=,command="],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        found: list[int] = []
+        for line in completed.stdout.splitlines():
+            pid_text, _, command = line.strip().partition(" ")
+            if not pid_text.isdigit() or token not in command:
+                continue
+            pid = int(pid_text)
+            if pid not in {0, 1, os.getpid()}:
+                found.append(pid)
+        return found
+
+    def _kill_script_pids(self, script: Path) -> None:
+        for pid in self._script_pids(script):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+    def _pid_runs_script(self, pid: int, script: Path) -> bool:
+        return pid in self._script_pids(script)
+
+    def test_timeout_kills_same_group_grandchild(self) -> None:
+        """Timeout cleanup must reach a grandchild that stayed in the child group.
+
+        A setsid grandchild leaves that group. That escape is outside this
+        helper's bounded contract, and this test does not build one.
+        """
+        record = self.temporary / "grandchild.txt"
+        script = self.temporary / "same-group-grandchild.py"
+        script.write_text(
+            textwrap.dedent(
+                f"""\
+                #!/usr/bin/env python3
+                import os, signal, time
+                from pathlib import Path
+                signal.signal(signal.SIGHUP, signal.SIG_IGN)
+                record = Path({str(record)!r})
+                if os.fork() == 0:
+                    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+                    devnull = os.open(os.devnull, os.O_RDWR)
+                    for fd in (0, 1, 2):
+                        os.dup2(devnull, fd)
+                    if devnull > 2:
+                        os.close(devnull)
+                    record.write_text(f"{{os.getpid()}} {{os.getpgrp()}} {{os.getppid()}}\\n")
+                    while True:
+                        time.sleep(60)
+                for _ in range(200):
+                    if record.exists() and record.stat().st_size:
+                        break
+                    time.sleep(0.01)
+                else:
+                    raise SystemExit("grandchild did not record its process group")
+                time.sleep(60)
+                """
+            ),
+            encoding="utf-8",
+        )
+        script.chmod(0o755)
+        outcome: dict[str, object] = {}
+
+        def invoke() -> None:
+            try:
+                outcome["status"] = self._run(timeout=1, probe_executable=str(script))
+            except BaseException as exc:
+                outcome["error"] = exc
+
+        worker = threading.Thread(target=invoke, daemon=True)
+        worker.start()
+        worker.join(5)
+        try:
+            self.assertFalse(worker.is_alive(), "timeout cleanup did not return")
+            self.assertNotIn("error", outcome)
+            self.assertEqual(outcome["status"], 124)
+            self.assertEqual(self._operation("connected-probe")["classification"], "timeout")
+            self._assert_verifier_not_invoked()
+            self._assert_listener_closed()
+            text = record.read_text(encoding="utf-8").split()
+            self.assertEqual(len(text), 3, text)
+            pid, group, parent = (int(part) for part in text)
+            self.assertEqual(group, parent)
+            self.assertNotEqual(pid, group)
+            self.assertNotEqual(group, os.getpgrp())
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and self._pid_runs_script(pid, script):
+                time.sleep(0.05)
+            self.assertFalse(self._pid_runs_script(pid, script), f"grandchild {pid} survived timeout cleanup")
+        finally:
+            self._kill_script_pids(script)
+            worker.join(2)
+
     def test_probe_timeout_is_not_a_denial_receipt(self) -> None:
         held = socket.socket()
         held.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -333,6 +478,26 @@ class OfflinePhaseTests(unittest.TestCase):
         receipt = json.loads(completed.stdout)
         self.assertEqual(receipt["result"], "timeout")
         self.assertNotEqual(receipt["result"], "denied")
+
+
+class ContractHookSelectorTests(unittest.TestCase):
+    def test_helper_only_and_test_only_select_the_contract_hook(self) -> None:
+        include, exclude = configured_contract_hook_selector(
+            (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+        )
+        helper = "scripts/ci/published_release_offline_phase.py"
+        tests = "scripts/ci/test_published_release_offline_phase.py"
+        self.assertTrue(contract_hook_selected(include, exclude, [helper]), helper)
+        self.assertTrue(contract_hook_selected(include, exclude, [tests]), tests)
+        unrelated = (
+            "README.md",
+            "docs/LAUNCH.md",
+            "crates/assay-cli/src/main.rs",
+            "scripts/ci/published_release_offline_phase.py.bak",
+            "scripts/ci/test_published_release_offline_phase.py.bak",
+        )
+        for path in unrelated:
+            self.assertFalse(contract_hook_selected(include, exclude, [path]), path)
 
 
 if __name__ == "__main__":
