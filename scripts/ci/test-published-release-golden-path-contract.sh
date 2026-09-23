@@ -37,6 +37,7 @@ bash "$ROOT/scripts/ci/test-release-attestation-enforce.sh"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_safe_extract_release_archive.py"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_bounded_download.py"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_published_release_proxy_phase.py"
+python3 "$ROOT/scripts/ci/test_published_release_offline_phase.py"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_published_release_session_phase.py"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_published_release_request_cases.py"
 
@@ -342,6 +343,29 @@ PY
     || fail "mutation $name missed expected guard: $expected"
 }
 
+expect_offline_helper_behavior_failure() {
+  local name="$1" old="$2" new="$3"
+  local case_root="$scratch/$name"
+  mkdir -p "$case_root/scripts/ci"
+  cp "$ROOT/scripts/ci/published_release_offline_phase.py" \
+    "$case_root/scripts/ci/published_release_offline_phase.py"
+  cp "$ROOT/scripts/ci/test_published_release_offline_phase.py" \
+    "$case_root/scripts/ci/test_published_release_offline_phase.py"
+  python3 - "$case_root/scripts/ci/published_release_offline_phase.py" "$old" "$new" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+old, new = sys.argv[2:]
+text = path.read_text(encoding="utf-8")
+if text.count(old) != 1:
+    raise SystemExit(f"offline helper mutation anchor count for {old!r}: {text.count(old)}")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+  if python3 "$case_root/scripts/ci/test_published_release_offline_phase.py" \
+      >"$case_root/output" 2>&1; then
+    fail "offline helper mutation stayed green: $name"
+  fi
+}
+
 expect_proxy_helper_behavior_failure() {
   local name="$1" old="$2" new="$3"
   local case_root="$scratch/$name"
@@ -636,18 +660,28 @@ expect_mutation_failure \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
-  "unshare-curl-positive-control-dropped" "driver.sh" \
-  'unshare -rn curl' \
-  'curl' \
-  "driver must verify that unshare -rn blocks network access before offline verification" \
+  "offline-phase-caller-omitted" "driver.sh" \
+  $'"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_offline_phase.py" \\' \
+  'echo skipped-offline-phase >/dev/null' \
+  "driver must run the offline phase through its reviewed helper" \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "unshare-verify-dropped" "driver.sh" \
-  'unshare -rn assay evidence verify-privileged-mcp-action "$bundle" --profile-version v1 --format json' \
-  'echo skip-unshare-verify >/dev/null' \
-  "driver must verify the produced bundle under unshare -rn with --profile-version v1 exactly once" \
+  'assay evidence verify-privileged-mcp-action "$bundle" --profile-version v1 --format json' \
+  'assay evidence verify-privileged-mcp-action "$bundle" --format json' \
+  "driver verifies a produced or tampered bundle without --profile-version v1" \
   "scripts/ci/published-release-golden-path.sh"
+
+expect_offline_helper_behavior_failure \
+  "offline-isolation-omitted" \
+  'return ["unshare", "-rn", *command]' \
+  'return list(command)'
+
+expect_offline_helper_behavior_failure \
+  "offline-isolation-colon-bypass" \
+  'return ["unshare", "-rn", *command]' \
+  'return [":", *command]'
 
 expect_mutation_failure \
   "verifier-commented" "driver.sh" \

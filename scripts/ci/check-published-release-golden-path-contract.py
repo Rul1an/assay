@@ -243,6 +243,7 @@ def validate_manifest(
         "scripts/ci/published-release-golden-path.sh",
         "scripts/ci/lib/published-release-capture.sh",
         "scripts/ci/published_release_proxy_phase.py",
+        "scripts/ci/published_release_offline_phase.py",
         "scripts/ci/release_attestation_enforce.sh",
         "scripts/ci/release_archive_inventory.sh",
         "scripts/ci/safe_extract_release_archive.py",
@@ -653,24 +654,45 @@ def validate_contract(
         problems.append(
             "driver must verify the tampered denial-observation bundle with --profile-version v1 exactly once"
         )
-    unshare_verify = (
-        'unshare -rn assay evidence verify-privileged-mcp-action "$bundle" --profile-version v1 --format json'
+    if "unshare -rn curl" in driver_text:
+        problems.append("driver must not treat a curl exit as network denial")
+    expected_offline_block = [
+        "offline_status=0",
+        '(cd "$results" && \\',
+        '"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_offline_phase.py" \\',
+        "--timeout-seconds 30 \\",
+        "-- \\",
+        'assay evidence verify-privileged-mcp-action "$bundle" --profile-version v1 --format json) \\',
+        "|| offline_status=$?",
+        '[[ "$offline_status" -eq 0 ]] || fail "offline isolation phase exited $offline_status"',
+    ]
+    offline_block = lines_between(
+        driver_text,
+        "offline_status=0",
+        'cmp -s "$results/verify.json" "$results/verify-offline.json"',
+        problems,
     )
-    if driver_lines.count(unshare_verify) != 1:
-        problems.append(
-            "driver must verify the produced bundle under unshare -rn with --profile-version v1 exactly once"
-        )
+    if offline_block != expected_offline_block:
+        problems.append("driver must run the offline phase through its reviewed helper")
+    try:
+        offline_helper = (
+            source_root / "scripts/ci/published_release_offline_phase.py"
+        ).read_text(encoding="utf-8")
+    except OSError as error:
+        problems.append(f"offline phase helper is unreadable: {error}")
+        offline_helper = ""
+    if offline_helper:
+        if offline_helper.count('return ["unshare", "-rn", *command]') != 1:
+            problems.append("offline isolation constructor drifted")
+        if offline_helper.count("isolation_argv(command)") != 1 or offline_helper.count(
+            "isolation_argv(verifier)"
+        ) != 1:
+            problems.append("offline probe and verifier must share one isolation constructor")
     if any(
         "verify-privileged-mcp-action" in line and "--profile-version v1" not in line
         for line in driver_lines
     ):
         problems.append("driver verifies a produced or tampered bundle without --profile-version v1")
-    require(
-        driver_text,
-        "unshare -rn curl",
-        "driver must verify that unshare -rn blocks network access before offline verification",
-        problems,
-    )
     require(
         driver_text,
         'cmp -s "$results/verify.json" "$results/verify-offline.json"',
