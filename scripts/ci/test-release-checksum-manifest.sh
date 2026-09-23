@@ -613,4 +613,8 @@ if ! grep -Eq 'FAILED|did NOT match' "${tamper_dir}/stdout" "${tamper_dir}/stder
   fail "tampered archive must fail the hash check"
 fi
 
+# CI already runs this file; invoke the isolated-consumer contract here so
+# both producer and consumer checksum routes share one checksum-manifest job.
+bash "${SCRIPT_DIR}/test-verify-consumer-checksum-manifest.sh"
+
 echo "release checksum manifest tests passed"

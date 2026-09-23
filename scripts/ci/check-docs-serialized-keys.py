@@ -5,7 +5,8 @@
 `score` as the `validate()` return (#3095). `validate()` returns
 `Coverage.analyze()` unchanged, which `json.loads` of `serde_json::to_string`
 on `CoverageReport`. Those three names are not fields, and the struct carries
-no `serde(rename)`, so every subscript on that page is a KeyError.
+no serialization-changing serde directive, so every subscript on that page is a
+KeyError.
 
 This check is a coverage remap of documented report keys into the
 CoverageReport field table, not a second completeness proof of the pages.
@@ -13,9 +14,18 @@ It does not see an invented console table, a POSIX-only setup step, or a
 prose lie that never writes a subscript or `report dict (...)` list.
 
 The source is the only vocabulary. Field names are the serialised keys when
-the struct body has no `serde(rename)`. A rename, a missing struct, or an
-unreadable page is a failure, never a pass: this cannot guess a second
-mapping.
+CoverageReport has no serialization-changing serde directive on the container
+or its fields. `serde(default)` is accepted. A rename, rename_all, skip,
+flatten, unrecognized serde directive, missing struct, missing configured
+method, unreadable page, or unreadable source is a failure, never a pass:
+this cannot guess a second mapping.
+
+Column-0 `}` boundaries are taken from one lexical code view that masks line
+comments, nested block comments, and string / raw-string contents while
+preserving indices and newlines. That view is not rustc or syn: it does not
+parse macros, attributes, or char literals as their own classes. An unclosed
+comment or string fails closed. Both the previous-item and body-close searches
+use that one view; they do not rescan raw source for braces.
 
 Pages are listed explicitly. A docs-wide walk of every `report[` / `result[`
 subscript would need a map from documented keys onto the serialised type they
@@ -25,10 +35,17 @@ does not carry that map. The listed pages document `validate()` /
 `Coverage.analyze()` against CoverageReport. Attribute access such as
 `coverage.score` is not extracted; that limit is tracked in #3105.
 
+`METHODS` is a closed singleton for `Coverage.analyze`. Stdlib `ast` isolates
+that one method. Only backticked ident bullets under that method's own
+`Returns:` section are compared to `coverage_report_fields()`. An empty
+extract is not a completeness proof. Adding the Python file to `PAGES` is not
+this extract: `PAGES` reads subscripts, `.get(...)`, and `report dict (...)`.
+
 The harness treats every `PAGES` entry as load-bearing: it plants a fabricated
 key on each listed page, then drops each entry in turn and requires that plant
 to go unobserved. That is not a second pinned list. A decorative entry that
-can be removed without turning the harness red is the defect.
+can be removed without turning the harness red is the defect. The same invert
+applies to the `METHODS` singleton and to `coverage_report_fields()`.
 
 Usage: check-docs-serialized-keys.py [--root DIR]
 """
@@ -36,6 +53,7 @@ Usage: check-docs-serialized-keys.py [--root DIR]
 from __future__ import annotations
 
 import argparse
+import ast
 import re
 import sys
 from pathlib import Path
@@ -46,6 +64,11 @@ PAGES = (
     "docs/python-sdk/index.md",
     "docs/AIcontext/entry-points.md",
     "docs/AIcontext/quick-reference.md",
+)
+# Closed singleton: Coverage.analyze Returns bullets vs CoverageReport.
+# Adding a Python file to PAGES is not this extract; PAGES reads subscripts.
+METHODS = (
+    ("assay-python-sdk/python/assay/coverage.py", "Coverage", "analyze"),
 )
 
 STRUCT_HEAD = re.compile(r"^pub struct CoverageReport \{", re.MULTILINE)
@@ -59,10 +82,214 @@ GET = re.compile(
 # The historical lie was a parenthetical on the validate() return line.
 PROSE_LIST = re.compile(r"report dict\s*\(([^)]*)\)")
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+SERDE_CALL = re.compile(r"(?<![A-Za-z0-9_])serde\s*\(")
+RETURNS_HEADER = re.compile(r"^(\s*)Returns:\s*$")
+KEY_BULLET = re.compile(r"^(\s*)-\s+`([^`]+)`")
+SECTION = re.compile(r"^(\s*)([A-Za-z][A-Za-z0-9_ ]*):")
+SIMPLE_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+ALLOWED_SERDE_DIRECTIVES = frozenset({"default"})
 
 
 class CheckError(Exception):
     pass
+
+
+def _balanced(text: str, start: int, opener: str, closer: str) -> tuple[str, int]:
+    if start >= len(text) or text[start] != opener:
+        raise CheckError(f"{SOURCE}: unbalanced {opener}{closer} on CoverageReport")
+    depth = 0
+    i = start
+    quote = None
+    escape = False
+    while i < len(text):
+        ch = text[i]
+        if quote is not None:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == opener:
+            depth += 1
+        elif ch == closer:
+            depth -= 1
+            if depth == 0:
+                return text[start + 1 : i], i + 1
+        i += 1
+    raise CheckError(f"{SOURCE}: unbalanced {opener}{closer} on CoverageReport")
+
+
+def _top_level_parts(inner: str) -> list[str]:
+    parts: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    quote = None
+    escape = False
+    for ch in inner:
+        if quote is not None:
+            buf.append(ch)
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == quote:
+                quote = None
+            continue
+        if ch in "\"'":
+            quote = ch
+            buf.append(ch)
+            continue
+        if ch in "([{":
+            depth += 1
+            buf.append(ch)
+            continue
+        if ch in ")]}":
+            depth -= 1
+            buf.append(ch)
+            continue
+        if ch == "," and depth == 0:
+            part = "".join(buf).strip()
+            if part:
+                parts.append(part)
+            buf = []
+            continue
+        buf.append(ch)
+    tail = "".join(buf).strip()
+    if tail:
+        parts.append(tail)
+    return parts
+
+
+def _attribute_bodies(text: str) -> list[str]:
+    bodies: list[str] = []
+    cursor = 0
+    while True:
+        start = text.find("#[", cursor)
+        if start < 0:
+            return bodies
+        body, end = _balanced(text, start + 1, "[", "]")
+        bodies.append(body)
+        cursor = end
+
+
+def _serde_directives(text: str) -> list[str]:
+    names: list[str] = []
+    for match in SERDE_CALL.finditer(text):
+        inner, _ = _balanced(text, match.end() - 1, "(", ")")
+        for part in _top_level_parts(inner):
+            name = IDENT.match(part)
+            if name is None:
+                raise CheckError(
+                    f"{SOURCE}: `CoverageReport` carries unreadable serde({part!r})"
+                )
+            names.append(name.group(0))
+    return names
+
+
+def _lexical_code_view(source: str) -> str:
+    """Mask comments and string contents; keep length and newlines.
+
+    Used only to find column-0 `}` item boundaries. Not a Rust parser.
+    """
+    out = list(source)
+    i = 0
+    n = len(source)
+
+    def mask(start: int, end: int) -> None:
+        for j in range(start, end):
+            if source[j] != "\n":
+                out[j] = " "
+
+    def ident_before(idx: int) -> bool:
+        return idx > 0 and (source[idx - 1].isalnum() or source[idx - 1] == "_")
+
+    while i < n:
+        if source.startswith("//", i):
+            end = source.find("\n", i)
+            mask(i, n if end < 0 else end)
+            i = n if end < 0 else end
+            continue
+        if source.startswith("/*", i):
+            depth = 1
+            j = i + 2
+            while j < n and depth:
+                if source.startswith("/*", j):
+                    depth += 1
+                    j += 2
+                elif source.startswith("*/", j):
+                    depth -= 1
+                    j += 2
+                else:
+                    j += 1
+            if depth:
+                raise CheckError(
+                    f"{SOURCE}: unclosed block comment; cannot locate CoverageReport braces"
+                )
+            mask(i, j)
+            i = j
+            continue
+        raw_start = i
+        raw_r = i
+        if i < n and source[i] in "bc":
+            raw_r = i + 1
+        if raw_r < n and source[raw_r] == "r" and not ident_before(raw_start):
+            j = raw_r + 1
+            hashes = 0
+            while j < n and source[j] == "#":
+                hashes += 1
+                j += 1
+            if j < n and source[j] == '"':
+                closer = '"' + "#" * hashes
+                k = source.find(closer, j + 1)
+                if k < 0:
+                    raise CheckError(
+                        f"{SOURCE}: unclosed raw string; cannot locate CoverageReport braces"
+                    )
+                mask(j, k + len(closer))
+                i = k + len(closer)
+                continue
+        quote = i
+        if i < n and source[i] in "bc" and i + 1 < n and source[i + 1] == '"':
+            quote = i + 1
+        if quote < n and source[quote] == '"':
+            j = quote + 1
+            while j < n:
+                if source[j] == "\\":
+                    j += 2
+                    continue
+                if source[j] == '"':
+                    mask(quote, j + 1)
+                    i = j + 1
+                    break
+                j += 1
+            else:
+                raise CheckError(
+                    f"{SOURCE}: unclosed string; cannot locate CoverageReport braces"
+                )
+            continue
+        i += 1
+    return "".join(out)
+
+
+def _last_column0_brace_end(view: str, end: int) -> int:
+    prev = 0
+    for match in re.finditer(r"^\}", view[:end], re.MULTILINE):
+        prev = match.end()
+    return prev
+
+
+def _next_column0_brace_start(view: str, start: int) -> int | None:
+    close = re.search(r"^\}", view[start:], re.MULTILINE)
+    if close is None:
+        return None
+    return start + close.start()
+
+
+def _container_region(source: str, view: str, head_start: int) -> str:
+    return source[_last_column0_brace_end(view, head_start) : head_start]
 
 
 def coverage_report_fields(source: str) -> set[str]:
@@ -71,16 +298,21 @@ def coverage_report_fields(source: str) -> set[str]:
         raise CheckError(
             f"{SOURCE}: expected exactly one `pub struct CoverageReport`, found {len(heads)}"
         )
-    start = heads[0].end()
-    close = re.search(r"^\}", source[start:], re.MULTILINE)
-    if close is None:
+    head = heads[0]
+    view = _lexical_code_view(source)
+    close_at = _next_column0_brace_start(view, head.end())
+    if close_at is None:
         raise CheckError(f"{SOURCE}: `CoverageReport` has no closing brace at column 0")
-    body = source[start : start + close.start()]
-    if "serde(rename" in body:
-        raise CheckError(
-            f"{SOURCE}: `CoverageReport` carries serde(rename); this check reads "
-            "field names as serialised keys and cannot interpret a rename"
-        )
+    body = source[head.end() : close_at]
+    region = _container_region(source, view, head.start()) + body
+    for attr in _attribute_bodies(region):
+        for name in _serde_directives(attr):
+            if name not in ALLOWED_SERDE_DIRECTIVES:
+                raise CheckError(
+                    f"{SOURCE}: `CoverageReport` carries serde({name}); this check reads "
+                    "field names as serialised keys and cannot interpret a "
+                    "serialization-changing or unrecognized serde directive"
+                )
     fields = set(FIELD.findall(body))
     if not fields:
         raise CheckError(f"{SOURCE}: `CoverageReport` has no readable pub fields")
@@ -93,6 +325,66 @@ def documented_keys(page: str) -> set[str]:
     for match in PROSE_LIST.finditer(page):
         keys.update(IDENT.findall(match.group(1)))
     return keys
+
+
+def _method_def(
+    tree: ast.AST, class_name: str, method_name: str
+) -> ast.FunctionDef:
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and item.name == method_name:
+                    return item
+    raise CheckError(f"missing {class_name}.{method_name}")
+
+
+def documented_return_keys(
+    source: str, class_name: str, method_name: str
+) -> list[tuple[int, str]]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        raise CheckError(f"syntax error: {exc}") from exc
+    func = _method_def(tree, class_name, method_name)
+    if not func.body:
+        return []
+    first = func.body[0]
+    if not (
+        isinstance(first, ast.Expr)
+        and isinstance(first.value, ast.Constant)
+        and isinstance(first.value.value, str)
+    ):
+        return []
+    lines = source.splitlines()
+    end = first.end_lineno or first.lineno
+    in_returns = False
+    returns_indent: int | None = None
+    found: list[tuple[int, str]] = []
+    for lineno in range(first.lineno, end + 1):
+        line = lines[lineno - 1]
+        header = RETURNS_HEADER.match(line)
+        if header:
+            in_returns = True
+            returns_indent = len(header.group(1))
+            continue
+        if not in_returns:
+            continue
+        section = SECTION.match(line)
+        if (
+            section
+            and returns_indent is not None
+            and len(section.group(1)) <= returns_indent
+            and section.group(2) != "Returns"
+        ):
+            break
+        bullet = KEY_BULLET.match(line)
+        if bullet is None:
+            continue
+        key = bullet.group(2)
+        if SIMPLE_KEY.fullmatch(key) is None:
+            continue
+        found.append((lineno, key))
+    return found
 
 
 def problems(root: Path) -> list[str]:
@@ -115,6 +407,28 @@ def problems(root: Path) -> list[str]:
                 f"{rel}: documents {key!r}, which CoverageReport does not serialise "
                 f"(fields: {', '.join(sorted(fields))})"
             )
+
+    for item in METHODS:
+        if not isinstance(item, tuple) or len(item) != 3 or not all(item):
+            found.append("METHODS entry is malformed; expected (path, class, method)")
+            continue
+        rel, cls, meth = item
+        path = root / rel
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            found.append(f"{rel}: {exc}")
+            continue
+        try:
+            keys = documented_return_keys(text, cls, meth)
+        except CheckError as exc:
+            found.append(f"{rel}: {exc}")
+            continue
+        for lineno, key in keys:
+            if key not in fields:
+                found.append(
+                    f"{rel}:{lineno}: documents {key!r}, which CoverageReport does not serialise"
+                )
     return found
 
 
