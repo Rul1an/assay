@@ -613,6 +613,8 @@ required = (
     "bash scripts/ci/test-deps-security-toolchain-contract.sh",
     "bash scripts/ci/test-fuzz-lock-required-gate.sh",
     "bash scripts/ci/test-osv-cargo-lock-gate.sh",
+    "bash scripts/ci/test-osv-scanner-scheduled-contract.sh",
+    "bash scripts/ci/test-codeql-upload-sarif-lockstep.sh",
     "bash scripts/ci/test-mcp-preflight-windows-contract.sh",
     "bash scripts/ci/test-reconcile-docs-auto-pr.sh",
     "bash scripts/ci/test-setup-rust-composite-contract.sh",
