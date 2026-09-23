@@ -19,6 +19,10 @@ LIBRARY = ROOT / "scripts/ci/lib/published-release-capture.sh"
 DRIVER = ROOT / "scripts/ci/published-release-golden-path.sh"
 
 
+DOCTOR_CONFIG_NAME = "published-release-doctor-config.yaml"
+PROVENANCE = "harness-fixture-provenance: scripts/ci/lib/published-release-capture.sh"
+
+
 def doctor_report() -> dict:
     return {
         "schema": "assay.doctor_report.v0",
@@ -36,6 +40,60 @@ def doctor_report() -> dict:
     }
 
 
+def checked_doctor_report() -> dict:
+    report = doctor_report()
+    report["config_check"] = {"status": "checked"}
+    return report
+
+
+def fake_assay_main() -> int:
+    """Stand-in for the published binary at the process boundary.
+
+    No `--config` is the documented exit-0 skipped outcome. An explicit path
+    that exists yields the control document. A missing explicit path is exit 2
+    with `config_check.status == failed`.
+    """
+    root = Path(os.environ["TEST_ROOT"])
+    argv = sys.argv[1:]
+    config_arg = None
+    if "--config" in argv:
+        index = argv.index("--config")
+        if index + 1 < len(argv):
+            config_arg = argv[index + 1]
+    explicit_exists = bool(config_arg) and Path(config_arg).is_file()
+    with (root / "observed.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({
+            "argv": argv,
+            "cwd": str(Path.cwd()),
+            "config_exists": Path("eval.yaml").exists(),
+            "explicit_config": config_arg,
+            "explicit_config_exists": explicit_exists,
+        }) + "\n")
+    if argv == ["doctor", "--format", "json"]:
+        print(json.dumps(doctor_report()), end="")
+        return 0
+    if argv[:4] == ["doctor", "--format", "json", "--config"] and len(argv) == 5:
+        if not explicit_exists:
+            failed = doctor_report()
+            failed["config_check"] = {"status": "failed"}
+            print(json.dumps(failed), end="")
+            return 2
+        control = json.loads((root / "control.json").read_text(encoding="utf-8"))
+        print(control["output"], end="")
+        return int(control["exit"])
+    if argv == ["init", "--preset", "dev", "--hello-trace", "--format", "json"]:
+        Path("eval.yaml").write_text("created", encoding="utf-8")
+        print('{"schema":"assay.init_report.v0"}')
+        return 0
+    if argv == ["init", "--preset", "dev", "--hello-trace"]:
+        Path("eval.yaml").write_text("created", encoding="utf-8")
+        Path("traces").mkdir(exist_ok=True)
+        Path("traces/hello.jsonl").write_text("{}\n", encoding="utf-8")
+        print("Next: assay validate --config=eval.yaml --trace-file=traces/hello.jsonl --format json")
+        return 0
+    return 92
+
+
 class PublishedReleaseSessionTests(unittest.TestCase):
     def run_phase(self, *, report=None, output=None, doctor_exit=0, library=None):
         root = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="session phase ")))
@@ -47,26 +105,17 @@ class PublishedReleaseSessionTests(unittest.TestCase):
         bindir.mkdir()
         (root / "control.json").write_text(json.dumps({
             "output": output if output is not None else json.dumps(
-                doctor_report() if report is None else report),
+                checked_doctor_report() if report is None else report),
             "exit": doctor_exit,
         }))
         fake = bindir / "assay"
-        fake.write_text(f"#!{sys.executable}\n" + '''
-import json, os, pathlib, sys
-root = pathlib.Path(os.environ["TEST_ROOT"])
-with (root / "observed.jsonl").open("a") as handle:
-    handle.write(json.dumps({"argv": sys.argv[1:], "cwd": str(pathlib.Path.cwd()),
-                            "config_exists": pathlib.Path("eval.yaml").exists()}) + "\\n")
-if sys.argv[1:] == ["doctor", "--format", "json"]:
-    control = json.loads((root / "control.json").read_text())
-    print(control["output"], end="")
-    raise SystemExit(control["exit"])
-if sys.argv[1:] == ["init", "--preset", "dev", "--hello-trace", "--format", "json"]:
-    pathlib.Path("eval.yaml").write_text("created")
-    print('{"schema":"assay.init_report.v0"}')
-else:
-    raise SystemExit(92)
-''')
+        module = str(Path(__file__).resolve())
+        fake.write_text(
+            f"#!{sys.executable}\n"
+            "import os, runpy, sys\n"
+            "os.environ['PUBLISHED_RELEASE_ASSAY_FAKE'] = '1'\n"
+            f"raise SystemExit(runpy.run_path({module!r}, run_name='__main__'))\n"
+        )
         fake.chmod(0o755)
         source = root / "capture.sh"
         source.write_text(LIBRARY.read_text() if library is None else library)
@@ -98,14 +147,28 @@ run_published_release_session_product
         self.assertEqual([row["argv"][1:] for row in recorded], [row["argv"] for row in observed])
         self.assertTrue(all(row["cwd"] == str(session.resolve()) for row in observed))
         self.assertTrue(all(not row["config_exists"] for row in observed))
-        self.assertEqual(json.loads((results / "doctor.json").read_text()), doctor_report())
+        doctor_argv = observed[0]["argv"]
+        self.assertEqual(doctor_argv[:4], ["doctor", "--format", "json", "--config"])
+        config_path = Path(doctor_argv[4])
+        self.assertEqual(config_path.name, DOCTOR_CONFIG_NAME)
+        self.assertNotEqual(config_path, session / "eval.yaml")
+        self.assertTrue(observed[0]["explicit_config_exists"], config_path)
+        self.assertIn(PROVENANCE, config_path.read_text(encoding="utf-8"))
+        self.assertIn("not created by assay init", config_path.read_text(encoding="utf-8"))
+        self.assertEqual(recorded[0]["argv"][-1], str(config_path))
+        self.assertEqual(recorded[0]["exit_code"], 0)
+        report = json.loads((results / "doctor.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["schema"], "assay.doctor_report.v0")
+        self.assertEqual(report["config_check"]["status"], "checked")
+        self.assertEqual(report, checked_doctor_report())
+        self.assertTrue((session / "eval.yaml").is_file())
 
     def test_doctor_executes_before_init_and_preserves_observations(self):
         self.assert_session_contract(self.run_phase())
 
     def test_missing_reordered_and_comment_only_preflight_are_detected(self):
         library = LIBRARY.read_text()
-        start = library.index('  run_capture "doctor"')
+        start = library.index('  run_published_release_doctor ')
         end = library.index('  run_capture "init"', start)
         doctor = library[start:end]
         missing = library[:start] + library[end:]
@@ -113,7 +176,7 @@ run_published_release_session_product
         variants = {
             "missing": missing,
             "after-init": head + doctor + "}\n" + tail,
-            "comment-only": library[:start] + '  # assay doctor --format json\n' + library[end:],
+            "comment-only": library[:start] + '  # assay doctor --format json --config "$config_path"\n' + library[end:],
         }
         self.assert_session_contract(self.run_phase(library=library + "\n# unchanged control\n"))
         for name, changed in variants.items():
@@ -204,6 +267,64 @@ run_published_release_session_product
                       pin["claim_ceiling"])
         self.assertEqual([row["name"] for row in pin["commands"]], ["doctor", "init"])
 
+    def test_skipped_or_failed_explicit_report_stops_before_init(self):
+        for status in ("skipped", "failed"):
+            with self.subTest(status=status):
+                report = checked_doctor_report()
+                if status == "skipped":
+                    report["config_check"] = {"status": "skipped", "reason": "fresh project"}
+                else:
+                    report["config_check"] = {"status": "failed"}
+                result, observed, _, _, _ = self.run_phase(report=report)
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertEqual([row["argv"][0] for row in observed], ["doctor"])
+
+    def test_missing_explicit_config_stops_before_init(self):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="session phase ")))
+        results = root / "results"
+        results.mkdir()
+        bindir = root / "bin"
+        bindir.mkdir()
+        module = str(Path(__file__).resolve())
+        fake = bindir / "assay"
+        fake.write_text(
+            f"#!{sys.executable}\n"
+            "import os, runpy\n"
+            "os.environ['PUBLISHED_RELEASE_ASSAY_FAKE'] = '1'\n"
+            f"raise SystemExit(runpy.run_path({module!r}, run_name='__main__'))\n"
+        )
+        fake.chmod(0o755)
+        missing = root / "absent-doctor-config.yaml"
+        script = '''set -euo pipefail
+fail() { echo "FAIL: $*" >&2; exit 1; }
+PYTHON_BIN=''' + shlex.quote(sys.executable) + '''
+results="$TEST_ROOT/results"
+commands_file="$results/commands.ndjson"
+: > "$commands_file"
+source ''' + shlex.quote(str(LIBRARY)) + '''
+run_published_release_doctor assay ''' + shlex.quote(str(missing)) + '''
+'''
+        env = {**os.environ, "TEST_ROOT": str(root), "PATH": f"{bindir}:/usr/bin:/bin"}
+        result = subprocess.run(["bash", "-c", script], env=env, capture_output=True,
+                                text=True, timeout=15)
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("doctor config fixture is missing", result.stderr)
+        observed = (root / "observed.jsonl").read_text(encoding="utf-8") if (root / "observed.jsonl").exists() else ""
+        self.assertEqual(observed, "")
+
+    def test_no_config_argv_is_not_accepted_as_success(self):
+        library = LIBRARY.read_text(encoding="utf-8")
+        old = '"$assay_cmd" doctor --format json --config "$config_path"'
+        replacement = '"$assay_cmd" doctor --format json'
+        self.assertEqual(library.count(old), 1)
+        result, observed, _, results, _ = self.run_phase(library=library.replace(old, replacement, 1))
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([row["argv"][0] for row in observed], ["doctor"])
+        self.assertEqual(observed[0]["argv"], ["doctor", "--format", "json"])
+        report = json.loads((results / "doctor.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["schema"], "assay.doctor_report.v0")
+        self.assertEqual(report["config_check"]["status"], "skipped")
+
     def test_nonzero_doctor_with_valid_json_stops_before_init(self):
         result, observed, recorded, _, _ = self.run_phase(doctor_exit=2)
         self.assertNotEqual(result.returncode, 0)
@@ -222,6 +343,10 @@ run_published_release_session_product
                 result, observed, _, _, _ = self.run_phase(report=report)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual([row["argv"][0] for row in observed], ["doctor"])
+
+
+if os.environ.get("PUBLISHED_RELEASE_ASSAY_FAKE") == "1":
+    raise SystemExit(fake_assay_main())
 
 
 if __name__ == "__main__":

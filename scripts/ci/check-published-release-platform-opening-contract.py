@@ -9,7 +9,14 @@ legs to download the GitHub release asset for their own target by tag.
 from __future__ import annotations
 
 import argparse
+import importlib.util
+import json
+import os
 from pathlib import Path
+import shlex
+import subprocess
+import sys
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -169,8 +176,7 @@ def validate_opening_driver(driver_text: str, problems: list[str]) -> None:
         "version from tag": 'expected_version="${release_tag#v}"',
         "assay version": "assay version",
         "version mismatch": "assay version mismatch",
-        "doctor json": "doctor --format json",
-        "json parse": "json.load",
+        "shared doctor preflight": "run_published_release_doctor",
         "init hello-trace": "init --preset dev --hello-trace",
         "init files": "eval.yaml",
         "hello trace": "traces/hello.jsonl",
@@ -196,6 +202,10 @@ def validate_opening_driver(driver_text: str, problems: list[str]) -> None:
 
     if "|| true" in driver_text or "set +e" in driver_text:
         problems.append("opening driver suppresses a failure instead of recording its exact status")
+    if not any("run_published_release_doctor" in line for line in driver_lines):
+        problems.append("opening driver does not execute the shared doctor preflight")
+    if "jq" in driver_text:
+        problems.append("opening driver must not gain a jq dependency")
 
     url_line = 'asset_url="https://github.com/${REPO}/releases/download/${release_tag}/${asset_name}"'
     if driver_lines.count(url_line) != 1:
@@ -215,6 +225,105 @@ def validate_contract(workflow: Path, driver: Path) -> list[str]:
     return problems
 
 
+def probe_opening_doctor_invocation(opening: Path) -> list[str]:
+    """Run the opening product function against a fake binary.
+
+    Sourcing the shared helper alone does not count: the opening script's own
+    product function has to be the process that execs doctor.
+    """
+    session_test = ROOT / "scripts/ci/test_published_release_session_phase.py"
+    module = str(session_test.resolve())
+    problems: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="opening probe ") as temporary:
+        root = Path(temporary)
+        results = root / "results"
+        results.mkdir()
+        bindir = root / "bin"
+        bindir.mkdir()
+        decoy = root / "cwd"
+        decoy.mkdir()
+        (decoy / "eval.yaml").write_text("decoy: true\n", encoding="utf-8")
+        fake = bindir / "assay"
+        fake.write_text(
+            f"#!{sys.executable}\n"
+            "import os, runpy\n"
+            "os.environ['PUBLISHED_RELEASE_ASSAY_FAKE'] = '1'\n"
+            f"raise SystemExit(runpy.run_path({module!r}, run_name='__main__'))\n",
+            encoding="utf-8",
+        )
+        fake.chmod(0o755)
+        spec = importlib.util.spec_from_file_location("session_phase", session_test)
+        if spec is None or spec.loader is None:
+            return ["opening doctor probe could not load the shared assay fake"]
+        session_phase = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(session_phase)
+        report = session_phase.checked_doctor_report()
+        (root / "control.json").write_text(
+            json.dumps({"output": json.dumps(report), "exit": 0}),
+            encoding="utf-8",
+        )
+        script = f'''set -euo pipefail
+source {shlex.quote(str(opening.resolve()))}
+PYTHON_BIN={shlex.quote(sys.executable)}
+assay_bin={shlex.quote(str(fake))}
+results={shlex.quote(str(results))}
+run_root={shlex.quote(str(root))}
+expected_version=5.5.1
+cd {shlex.quote(str(decoy))}
+run_published_release_opening_product
+'''
+        env = {**os.environ, "TEST_ROOT": str(root), "PATH": f"{bindir}:/usr/bin:/bin"}
+        result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True, timeout=15)
+        if result.returncode != 0:
+            return [f"opening doctor invocation failed: {result.stderr.strip()}"]
+        observed_path = root / "observed.jsonl"
+        if not observed_path.is_file():
+            return ["opening doctor invocation recorded no process argv"]
+        observed = [json.loads(line) for line in observed_path.read_text(encoding="utf-8").splitlines()]
+        recorded_path = results / "commands.ndjson"
+        if not recorded_path.is_file():
+            return ["opening doctor invocation did not retain commands.ndjson"]
+        recorded = [json.loads(line) for line in recorded_path.read_text(encoding="utf-8").splitlines()]
+        if [row["argv"][0] for row in observed] != ["doctor", "init"]:
+            problems.append(f"opening caller order drifted: {observed}")
+        if not observed or observed[0]["argv"][:4] != ["doctor", "--format", "json", "--config"]:
+            problems.append(f"opening doctor argv is not the explicit-config command: {observed}")
+        else:
+            config_path = Path(observed[0]["argv"][4])
+            if config_path.name != "published-release-doctor-config.yaml":
+                problems.append(f"opening doctor config is not the harness fixture: {config_path}")
+            if not observed[0].get("explicit_config_exists"):
+                problems.append("opening doctor ran without an existing config file")
+            if not observed[0].get("config_exists"):
+                problems.append("opening probe cwd had no eval.yaml decoy, so an implicit config could not be distinguished")
+            if config_path == decoy / "eval.yaml":
+                problems.append("opening doctor used the cwd eval.yaml instead of the harness fixture")
+            text = config_path.read_text(encoding="utf-8") if config_path.is_file() else ""
+            if "harness-fixture-provenance: scripts/ci/lib/published-release-capture.sh" not in text:
+                problems.append("opening doctor config does not name its harness provenance")
+            if "not created by assay init" not in text:
+                problems.append("opening doctor config provenance is not explicit")
+            init_scratch = root / "init-scratch"
+            if config_path.is_relative_to(init_scratch):
+                problems.append("opening doctor config is inside the init scratch")
+            if not recorded or recorded[0].get("argv", [])[-1:] != [str(config_path)]:
+                problems.append(f"retained opening argv does not name the config: {recorded}")
+        doctor_json = results / "doctor.json"
+        try:
+            body = json.loads(doctor_json.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            problems.append(f"opening doctor.json is not one JSON report: {error}")
+        else:
+            if body.get("schema") != "assay.doctor_report.v0" or body.get("config_check", {}).get("status") != "checked":
+                problems.append(f"opening doctor report is not schema-checked success: {body}")
+        if observed[-1:] and observed[-1]["argv"] != ["init", "--preset", "dev", "--hello-trace"]:
+            problems.append(f"opening init argv drifted: {observed[-1:]}")
+        init_scratch = root / "init-scratch"
+        if not (init_scratch / "eval.yaml").is_file() or not (init_scratch / "traces/hello.jsonl").is_file():
+            problems.append("opening init did not leave a fresh eval.yaml and hello trace")
+    return problems
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -227,7 +336,16 @@ def main() -> int:
         type=Path,
         default=ROOT / "scripts/ci/published-release-platform-opening.sh",
     )
+    parser.add_argument("--probe-opening-doctor", action="store_true")
     args = parser.parse_args()
+    if args.probe_opening_doctor:
+        problems = probe_opening_doctor_invocation(args.driver)
+        if problems:
+            for problem in problems:
+                print(f"FAIL: {problem}")
+            return 1
+        print("ok: opening doctor invocation examined an explicit config")
+        return 0
     problems = validate_contract(args.workflow, args.driver)
     if problems:
         for problem in problems:
