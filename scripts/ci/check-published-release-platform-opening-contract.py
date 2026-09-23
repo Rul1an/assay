@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Fail-closed contract for the published-archive Windows/macOS opening.
 
-The Linux x86_64 post-publication journey stays a separate, already-reviewed
-job. This checker pins that Linux job byte-for-byte and requires the opening
-legs to download the GitHub release asset for their own target by tag.
+Linux full journeys share one matrixed driver invocation (x86_64 + arm64).
+This checker imports the golden-path matrix pin (rows, ubuntu-24.04-arm, and
+job-level runs-on: ${{ matrix.os }}) and does not execute the Linux driver.
+This checker requires both Linux matrix rows to call that driver with --target
+and keeps opening legs downloading their own published archive by tag.
 """
 
 from __future__ import annotations
@@ -21,40 +23,6 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 
-LINUX_JOB = """  linux-x86_64:
-    name: Linux x86_64 post-publication journey
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout the exact harness
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          persist-credentials: false
-
-      - name: Exercise the attested published release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path
-        run: |
-          set -euo pipefail
-          bash scripts/ci/published-release-golden-path.sh \\
-            --release-tag "$RELEASE_TAG" \\
-            --harness-sha "$GITHUB_SHA" \\
-            --workflow-run-id "$GITHUB_RUN_ID" \\
-            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\
-            --run-root "$RUN_ROOT"
-
-      - name: Retain the replayable journey evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: published-release-golden-path-${{ inputs.release_tag }}-${{ github.sha }}
-          path: ${{ runner.temp }}/assay-published-release-golden-path/results/
-          if-no-files-found: error
-          retention-days: 30
-"""
 
 EXPECTED_OPENING_STEP = [
     "- name: Exercise the published CLI opening",
@@ -118,13 +86,22 @@ def named_step_lines(text: str, name: str, problems: list[str]) -> list[str]:
     return active_lines("\n".join(lines[start:end]))
 
 
-def validate_linux_job_unchanged(workflow_text: str, problems: list[str]) -> None:
-    linux = mapping_block(workflow_text, "linux-x86_64", 2, problems)
-    if not linux:
-        return
-    expected = LINUX_JOB.rstrip("\n")
-    if linux.rstrip("\n") != expected:
-        problems.append("Linux x86_64 post-publication job steps must stay unchanged")
+def _golden_path_contract():
+    path = Path(__file__).with_name("check-published-release-golden-path-contract.py")
+    spec = importlib.util.spec_from_file_location("published_release_golden_path_contract", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("unable to load published-release golden-path contract helper")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def validate_linux_journey_matrix(workflow_text: str, problems: list[str]) -> None:
+    _golden_path_contract().validate_linux_journey_matrix(workflow_text, problems)
+    if '--target "$RELEASE_TARGET"' not in workflow_text:
+        problems.append("Linux journey matrix must pass --target from the matrix")
+    if workflow_text.count("bash scripts/ci/published-release-golden-path.sh") != 1:
+        problems.append("exactly one golden-path driver invocation must exist in the workflow")
 
 
 def validate_opening_workflow(workflow_text: str, problems: list[str]) -> None:
@@ -219,7 +196,7 @@ def validate_contract(workflow: Path, driver: Path) -> list[str]:
         driver_text = driver.read_text(encoding="utf-8")
     except OSError as error:
         return [f"contract input is missing: {error}"]
-    validate_linux_job_unchanged(workflow_text, problems)
+    validate_linux_journey_matrix(workflow_text, problems)
     validate_opening_workflow(workflow_text, problems)
     validate_opening_driver(driver_text, problems)
     return problems
