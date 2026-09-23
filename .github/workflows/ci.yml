@@ -199,6 +199,12 @@ jobs:
           bash scripts/ci/test-check-python-artifact-truth.sh
           python3 scripts/ci/check-python-artifact-truth.py
 
+      - name: Published native MCP preflight contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/test-published-native-mcp-preflight.py
+
       - name: Evidence vocabulary guard
         shell: bash
         run: |
